@@ -1,5 +1,5 @@
 import weakref
-from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
+from typing import Any, cast, Dict, Iterable, List, NoReturn, Optional, Set, Tuple
 
 import torch
 import torch.nn as nn
@@ -19,7 +19,12 @@ class _ReplicateState(_State):
         self._param_list: nn.ParameterList = nn.ParameterList()
         # TODO(@fegin): this variable is originally create for testing, we
         # should remove this if possible.
+        self._orig_module = self.module
         self._param_names: List[str] = []
+        self._no_sync: bool = False
+        self._init_args: Optional[Tuple[Any, ...]] = None
+        self._init_kwargs: Dict[str, Any] = {}
+        self._comm_hook_args: List[Any] = []
 
     def _collect_params(
         self,
@@ -53,26 +58,35 @@ class _ReplicateState(_State):
                 prefix=f"{recurse_prefix}{name}",
             )
 
+    def lazy_init(self) -> None:
+        @torch._disable_dynamo(recursive=True)
+        def _lazy_init():
+            assert self._init_args is not None
+            self.init(*self._init_args, **self._init_kwargs)
+            self.register_comm_hook()
+            self._init_args = tuple()
+            self._init_kwargs = {}
+
+        _lazy_init()
+
     def init(
         self,
         module: nn.Module,
         ignored_modules: Set[nn.Module],
         **kwargs,
     ) -> None:
-        if _is_fully_sharded(module):
-            raise RuntimeError(
-                "Cannot apply `replicate()` on a Module already managed by `fully_shard`"
-            )
-
         if self.has_initialized:
             return
 
         self.has_initialized = True
+
+        device_mesh = kwargs.get("device_mesh", None)
         self.module = module
         ignored_params = {p for m in ignored_modules for p in m.parameters()}
+        from torch.distributed.tensor.parallel.ddp import _localize_dtensor
+
+        _localize_dtensor(module)
         self._collect_params(module, ignored_modules, ignored_params)
-        module.register_forward_pre_hook(self.forward_pre_hook, with_kwargs=True)
-        module.register_forward_hook(self.forward_post_hook)  # type: ignore[arg-type]
 
         if "device_id" in kwargs:
             # replicate() supports a small usability enhancement where
@@ -96,9 +110,21 @@ class _ReplicateState(_State):
         # Weakref to the DDP instance is currently only used for testing.
         replicate.state(self.module)._ddp_weakref = weakref.ref(self._ddp)
 
+    def register_comm_hook(self) -> None:
+        for comm_args, comm_kwargs in self._comm_hook_args:
+            self._ddp.register_comm_hook(*comm_args, **comm_kwargs)
+        self._comm_hook_args.clear()
+
+    def record_init_args(self, *args, **kwargs) -> None:
+        self._init_args = args
+        self._init_kwargs = kwargs
+
     def forward_pre_hook(
         self, module: nn.Module, args: Tuple[Any, ...], kwargs: Dict[str, Any]
     ) -> Any:
+        if self._init_args or self._init_kwargs:
+            self.lazy_init()
+        self._ddp.require_backward_grad_sync = not self._no_sync
         return self._ddp._pre_forward(*args, **kwargs)
 
     def forward_post_hook(
@@ -108,6 +134,39 @@ class _ReplicateState(_State):
         output: torch.Tensor,
     ) -> torch.Tensor:
         return self._ddp._post_forward(output)
+
+
+def unimplemented_deepcopy(*args: Any, **kwargs: Any) -> NoReturn:
+    raise AssertionError(
+        "DDP does not support deepcopy. Please use state dict for serialization."
+    )
+
+
+# Follow the same pattern as FSDP/fully_shard
+class DDP:
+    def __new__(cls, *args, **kwargs):
+        """
+        Override ``__new__`` to remove the DDP class and directly construct
+        the original class for cases like indexing into a container module.
+        """
+        # Use index 2 since 0 is the dynamically constructed `DDP<...>` class
+        # and index 1 is the `DDP` class itself
+        orig_cls = cls.__mro__[2]
+        return orig_cls.__new__(orig_cls, *args, **kwargs)
+
+    def set_requires_gradient_sync(self, requires_gradient_sync: bool) -> None:
+        """
+        Sets if the module should sync gradients. This can be used to implement
+        gradient accumulation without communication.
+
+        Args:
+            requires_gradient_sync (bool): Whether to reduce gradients for the
+                module's parameters.
+        """
+        replicate.state(self)._no_sync = not requires_gradient_sync
+
+    def register_comm_hook(self, *args, **kwargs) -> None:
+        replicate.state(self)._comm_hook_args.append((args, kwargs))
 
 
 @contract(state_cls=_ReplicateState)
@@ -137,12 +196,46 @@ def replicate(
                 f"but got {type(kwargs['device_id'])}"
             )
 
+    if _is_fully_sharded(module):
+        raise RuntimeError(
+            "Cannot apply `replicate()` on a Module already managed by `fully_shard`"
+        )
+
     if ignored_modules is None:
         ignored_modules = {}
     else:
         ignored_modules = set(ignored_modules)
-    replicate.state(module).init(module, ignored_modules, **kwargs)
 
+    state = cast(_ReplicateState, replicate.state(module))
+    module.register_forward_pre_hook(state.forward_pre_hook, with_kwargs=True)
+    device_mesh = kwargs.get("device_mesh", None)
+    if device_mesh is not None:
+        from torch.distributed.device_mesh import _mesh_resources
+
+        if _mesh_resources.get_parent_mesh(device_mesh) is not None:
+            # TODO: This is a temporary work around to enable DDP + TP.
+            # We should do the logic in DDP so that the 2D implementation is
+            # sound and the state_dict works out of the box.
+            #
+            # This won't conflict with what is done in DDP class as the module
+            # replicate is going to pass is NOT the original module.
+            from torch.distributed.tensor.parallel.ddp import (
+                _localize_dtensor,
+                _reconstruct_dtensor,
+            )
+
+            module.register_forward_pre_hook(_reconstruct_dtensor)
+            module.register_forward_hook(_localize_dtensor)
+
+    module.register_forward_hook(state.forward_post_hook)  # type: ignore[arg-type]
+
+    state.record_init_args(module, ignored_modules, **kwargs)
+
+    # Place DDP leftmost for highest priority in the method resolution order
+    cls = module.__class__
+    dct = {"__deepcopy__": unimplemented_deepcopy}
+    new_cls = type(f"DDP{cls.__name__}", (DDP, cls), dct)
+    module.__class__ = new_cls
     return module
 
 

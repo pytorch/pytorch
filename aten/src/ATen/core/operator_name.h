@@ -23,7 +23,7 @@ struct OperatorName final {
   // Return the namespace of this OperatorName, if it exists.  The
   // returned string_view is only live as long as the OperatorName
   // exists and name is not mutated
-  c10::optional<c10::string_view> getNamespace() const {
+  std::optional<c10::string_view> getNamespace() const {
     auto pos = name.find("::");
     if (pos == std::string::npos) {
       return c10::nullopt;

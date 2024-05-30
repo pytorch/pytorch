@@ -417,7 +417,7 @@ class TORCH_API StaticModule {
 
  private:
   explicit StaticModule(
-      std::pair<std::shared_ptr<torch::jit::Graph>, c10::optional<Module>>
+      std::pair<std::shared_ptr<torch::jit::Graph>, std::optional<Module>>
           graph_and_module,
       const StaticModuleOptions& opts);
 
@@ -490,7 +490,7 @@ class TORCH_API StaticModule {
 
   C10_NODISCARD Node* findNodeWithKindForTesting(const std::string& kind) const;
 
-  const c10::optional<c10::FunctionSchema>& schema() const {
+  const std::optional<c10::FunctionSchema>& schema() const {
     return schema_;
   }
 
@@ -539,8 +539,8 @@ class TORCH_API StaticModule {
   // metadata that is stored in IR nodes as attribute
   at::intrusive_ptr<jit::StaticRuntimeMetadata> sr_metadata_;
   std::shared_ptr<torch::jit::Graph> graph_;
-  c10::optional<torch::jit::Module> module_;
-  c10::optional<c10::FunctionSchema> schema_;
+  std::optional<torch::jit::Module> module_;
+  std::optional<c10::FunctionSchema> schema_;
   std::unique_ptr<StaticRuntime> cached_runtime_;
 
   // Bookkeeping for creating new StaticRuntime instances
@@ -938,9 +938,9 @@ class TORCH_API ProcessedNode {
     return values_[outputs_offset_ + i];
   }
 
-  size_t num_outputs() const {
+  uint32_t num_outputs() const {
     DCHECK(fn_ != nullptr);
-    return fn_->num_outputs();
+    return static_cast<uint32_t>(fn_->num_outputs());
   }
 
   C10_NODISCARD c10::ArrayRef<const IValue> outputs() const {

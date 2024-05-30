@@ -12,7 +12,7 @@ from torch.testing._internal.common_utils import \
      load_tests, coalescedonoff, parametrize, subtest, skipIfTorchDynamo, skipIfRocm, IS_FBCODE, IS_REMOTE_GPU)
 from torch.testing._internal.common_device_type import \
     (ops, instantiate_device_type_tests, dtypes, OpDTypes, dtypesIfCUDA, onlyCPU, onlyCUDA, skipCUDAIfNoSparseGeneric,
-     precisionOverride, skipMeta, skipCUDAIf, skipCUDAIfRocm, skipCPUIfNoMklSparse, skipCUDAIfRocmVersionLessThan,
+     precisionOverride, skipMeta, skipCUDAIf, skipCPUIfNoMklSparse, skipCUDAIfRocmVersionLessThan,
      largeTensorTest)
 from torch.testing._internal.common_methods_invocations import \
     (op_db, sparse_csr_unary_ufuncs, ReductionOpInfo)
@@ -21,7 +21,7 @@ from torch.testing._internal.common_dtype import (
     floating_types, all_types_and_complex_and, floating_and_complex_types, floating_types_and,
     all_types_and_complex, floating_and_complex_types_and)
 from torch.testing._internal.opinfo.definitions.sparse import validate_sample_input_sparse
-from test_sparse import CUSPARSE_SPMM_COMPLEX128_SUPPORTED
+from test_sparse import CUSPARSE_SPMM_COMPLEX128_SUPPORTED, HIPSPARSE_SPMM_COMPLEX128_SUPPORTED
 import operator
 
 if TEST_SCIPY:
@@ -338,6 +338,46 @@ class TestSparseCompressed(TestCase):
 
     @skipMeta
     @all_sparse_compressed_layouts()
+    @dtypes(*all_types_and_complex_and(torch.bool, torch.bfloat16, torch.half))
+    def test_sparse_compressed_tensor_with_dims(self, layout, device, dtype):
+
+        def get_sparse_compressed_tensor_properties(s):
+            if layout in {torch.sparse_csr, torch.sparse_bsr}:
+                compressed_indices, plain_indices = s.crow_indices(), s.col_indices()
+            else:
+                compressed_indices, plain_indices = s.ccol_indices(), s.row_indices()
+            values = s.values()
+            return dict(shape=s.shape, dtype=s.dtype, device=s.device, nnz=s._nnz(), layout=s.layout,
+                        compressed_indices_shape=compressed_indices.shape,
+                        compressed_indices_dtype=compressed_indices.dtype,
+                        compressed_indices_device=compressed_indices.device,
+                        plain_indices_shape=plain_indices.shape,
+                        plain_indices_dtype=plain_indices.dtype,
+                        plain_indices_device=plain_indices.device,
+                        values_shape=values.shape,
+                        values_dtype=values.dtype,
+                        values_device=values.device)
+
+        for index_dtype in [torch.int32, torch.int64]:
+            for t in self.generate_simple_inputs(layout, device=device, dtype=dtype, index_dtype=index_dtype):
+                dense_dim = t.dense_dim()
+                sparse_dim = t.sparse_dim()
+                batch_dim = t.ndim - sparse_dim - dense_dim
+                nnz = t.values().shape[batch_dim]
+                if layout in {torch.sparse_bsr, torch.sparse_bsc}:
+                    blocksize = t.values().shape[batch_dim + 1: batch_dim + 1 + sparse_dim]
+                else:
+                    blocksize = ()
+
+                e = torch.ops.aten._sparse_compressed_tensor_with_dims(nnz, dense_dim, t.shape, blocksize, index_dtype,
+                                                                       dtype=dtype, layout=layout, device=device)
+
+                e_prop, t_prop = get_sparse_compressed_tensor_properties(e), get_sparse_compressed_tensor_properties(t)
+                for k, v in e_prop.items():
+                    self.assertEqual(v, t_prop[k], lambda msg: f'{msg} when comparing {k}, expected {t_prop[k]}, got {v}')
+
+    @skipMeta
+    @all_sparse_compressed_layouts()
     @dtypes(*all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16))
     def test_clone(self, layout, device, dtype):
         for sparse in self.generate_simple_inputs(
@@ -393,8 +433,7 @@ class TestSparseCompressed(TestCase):
                         basesize = size[batch_ndim:batch_ndim + base_ndim]
                         densesize = size[batch_ndim + base_ndim:]
                         assert len(densesize) == dense_ndim
-                        printed.append("########## {}/{}/size={}+{}+{} ##########".format(
-                            dtype, index_dtype, batchsize, basesize, densesize))
+                        printed.append(f"########## {dtype}/{index_dtype}/size={batchsize}+{basesize}+{densesize} ##########")
                         x = torch.sparse_compressed_tensor(compressed_indices,
                                                            plain_indices,
                                                            values, size, dtype=dtype, layout=layout, device=device)
@@ -2024,7 +2063,9 @@ class TestSparseCSR(TestCase):
     @dtypesIfCUDA(*floating_types_and(torch.complex64,
                                       *[torch.bfloat16] if SM80OrLater else [],
                                       *[torch.half] if SM53OrLater else [],
-                                      *[torch.complex128] if CUSPARSE_SPMM_COMPLEX128_SUPPORTED else []))
+                                      *[torch.complex128]
+                                      if CUSPARSE_SPMM_COMPLEX128_SUPPORTED or HIPSPARSE_SPMM_COMPLEX128_SUPPORTED
+                                      else []))
     @precisionOverride({torch.double: 1e-8, torch.float: 1e-4, torch.bfloat16: 0.6,
                         torch.half: 1e-1, torch.cfloat: 1e-4, torch.cdouble: 1e-8})
     def test_addmm_sizes_all_sparse_csr(self, device, dtype, m, n, k):
@@ -2467,9 +2508,9 @@ class TestSparseCSR(TestCase):
             self.assertEqual(a.grad, a1.grad)
             self.assertEqual(b.grad, b1.grad)
 
-    @skipCUDAIfRocm
     @onlyCUDA
-    @skipCUDAIf(True, "Causes CUDA memory exception, see https://github.com/pytorch/pytorch/issues/72177")
+    # It works on ROCm and CUDA issue is currently active
+    @skipCUDAIf(not TEST_WITH_ROCM, "Causes CUDA memory exception, see https://github.com/pytorch/pytorch/issues/72177")
     @skipCUDAIf(
         not _check_cusparse_sddmm_available(),
         "cuSparse Generic API SDDMM is not available"

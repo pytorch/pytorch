@@ -279,6 +279,7 @@ def core_aten_decompositions() -> Dict[torch._ops.OperatorBase, Callable]:
             aten.linalg_cross,
             aten.cudnn_batch_norm,
             aten.cudnn_batch_norm_backward,
+            aten.miopen_batch_norm_backward,
             aten.deg2rad,
             aten.deg2rad_,
             aten.detach,
@@ -390,6 +391,7 @@ def core_aten_decompositions() -> Dict[torch._ops.OperatorBase, Callable]:
             aten.renorm,
             aten.renorm_,
             aten.replication_pad2d,
+            aten.resize_as,
             aten.roll,
             aten.rot90,
             aten.rrelu_with_noise,
@@ -457,6 +459,7 @@ def core_aten_decompositions() -> Dict[torch._ops.OperatorBase, Callable]:
             aten.zero_,
             aten.zeros,
             aten.zeros_like,
+            aten._chunk_cat,
             aten._weight_norm_interface,
         ]
     )

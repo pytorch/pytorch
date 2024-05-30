@@ -762,7 +762,12 @@ function frameFilter({name, filename}) {
 
 function format_frames(frames) {
   if (frames.length === 0) {
-    return `<block was allocated before _record_history was enabled>`;
+    return (
+      `This block has no frames. Potential causes:\n` +
+      `1) This block was allocated before _record_memory_history was enabled.\n` +
+      `2) The context or stacks passed to _record_memory_history does not include this block. Consider changing context to 'state', 'alloc', or 'all', or changing stacks to 'all'.\n` +
+      `3) This event occurred during backward, which has no python frames, and memory history did not include C++ frames. Use stacks='all' to record both C++ and python frames.`
+    );
   }
   const frame_strings = frames
     .filter(frameFilter)

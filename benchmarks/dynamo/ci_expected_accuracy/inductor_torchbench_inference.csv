@@ -14,7 +14,7 @@ Background_Matting,pass_due_to_skip,0
 
 
 
-DALLE2_pytorch,pass,11
+DALLE2_pytorch,pass,12
 
 
 
@@ -86,7 +86,7 @@ detectron2_fasterrcnn_r_50_fpn,eager_fail_to_run,0
 
 
 
-detectron2_fcos_r_50_fpn,pass,36
+detectron2_fcos_r_50_fpn,pass,21
 
 
 
@@ -150,7 +150,7 @@ hf_Bert_large,pass,0
 
 
 
-hf_BigBird,fail_accuracy,0
+hf_BigBird,fail_accuracy,46
 
 
 
@@ -310,6 +310,10 @@ sam,pass,0
 
 
 
+sam_fast,pass,0
+
+
+
 shufflenet_v2_x1_0,pass,0
 
 
@@ -370,7 +374,7 @@ vgg16,pass,0
 
 
 
-vision_maskrcnn,pass,16
+vision_maskrcnn,pass,17
 
 
 

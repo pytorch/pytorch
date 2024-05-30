@@ -1545,6 +1545,8 @@ def hardtanh(input: Tensor, min_val: float = -1., max_val: float = 1., inplace: 
     """
     if has_torch_function_unary(input):
         return handle_torch_function(hardtanh, (input,), input, min_val=min_val, max_val=max_val, inplace=inplace)
+    if min_val > max_val:
+        raise ValueError("min_val cannot be greater than max_val")
     if inplace:
         result = torch._C._nn.hardtanh_(input, min_val, max_val)
     else:
@@ -1816,7 +1818,8 @@ See :class:`~torch.nn.Softplus` for more details.
 
 def _get_softmax_dim(name: str, ndim: int, stacklevel: int) -> int:
     warnings.warn(
-        f"Implicit dimension choice for {name} has been deprecated. Change the call to include dim=X as an argument.",
+        f"Implicit dimension choice for {name} has been deprecated. "
+        "Change the call to include dim=X as an argument.",
         stacklevel=stacklevel,
     )
     if ndim == 0 or ndim == 1 or ndim == 3:
@@ -2572,6 +2575,21 @@ def layer_norm(
         )
     return torch.layer_norm(input, normalized_shape, weight, bias, eps, torch.backends.cudnn.enabled)
 
+def rms_norm(
+    input: Tensor,
+    normalized_shape: List[int],
+    weight: Optional[Tensor] = None,
+    eps: Optional[float] = None,
+) -> Tensor:
+    r"""Apply Root Mean Square Layer Normalization.
+
+    See :class:`~torch.nn.RMSNorm` for details.
+    """
+    if has_torch_function_variadic(input, weight):
+        return handle_torch_function(
+            rms_norm, (input, weight), input, normalized_shape, weight=weight, eps=eps
+        )
+    return torch.rms_norm(input, normalized_shape, weight, eps)
 
 def group_norm(
     input: Tensor, num_groups: int, weight: Optional[Tensor] = None, bias: Optional[Tensor] = None, eps: float = 1e-5
@@ -3143,8 +3161,8 @@ def binary_cross_entropy(
         reduction_enum = _Reduction.get_enum(reduction)
     if target.size() != input.size():
         raise ValueError(
-            "Using a target size ({}) that is different to the input size ({}) is deprecated. "
-            "Please ensure they have the same size.".format(target.size(), input.size())
+            f"Using a target size ({target.size()}) that is different to the input size ({input.size()}) is deprecated. "
+            "Please ensure they have the same size."
         )
 
     if weight is not None:
@@ -3193,7 +3211,7 @@ def binary_cross_entropy_with_logits(
             operations. For a target of size [B, C, H, W] (where B is batch size) pos_weight of
             size [B, C, H, W] will apply different pos_weights to each element of the batch or
             [C, H, W] the same pos_weights across the batch. To apply the same positive weight
-            along all spacial dimensions for a 2D multi-class target [C, H, W] use: [C, 1, 1].
+            along all spatial dimensions for a 2D multi-class target [C, H, W] use: [C, 1, 1].
             Default: ``None``
 
     Examples::
@@ -3806,7 +3824,10 @@ def upsample(input, size=None, scale_factor=None, mode="nearest", align_corners=
         affects the outputs.
 
     """
-    warnings.warn("nn.functional.upsample is deprecated. Use nn.functional.interpolate instead.")
+    warnings.warn(
+        "`nn.functional.upsample` is deprecated. "
+        "Use `nn.functional.interpolate` instead.",
+    )
     return interpolate(input, size, scale_factor, mode, align_corners)
 
 
@@ -4126,7 +4147,10 @@ def upsample_nearest(input, size=None, scale_factor=None):  # noqa: F811
         {backward_reproducibility_note}
     """
     # DeprecationWarning is ignored by default
-    warnings.warn("nn.functional.upsample_nearest is deprecated. Use nn.functional.interpolate instead.")
+    warnings.warn(
+        "`nn.functional.upsample_nearest` is deprecated. "
+        "Use `nn.functional.interpolate` instead.",
+    )
     return interpolate(input, size, scale_factor, mode="nearest")
 
 
@@ -4182,7 +4206,10 @@ def upsample_bilinear(input, size=None, scale_factor=None):  # noqa: F811
         {backward_reproducibility_note}
     """
     # DeprecationWarning is ignored by default
-    warnings.warn("nn.functional.upsample_bilinear is deprecated. Use nn.functional.interpolate instead.")
+    warnings.warn(
+        "`nn.functional.upsample_bilinear` is deprecated. "
+        "Use `nn.functional.interpolate` instead.",
+    )
     return interpolate(input, size, scale_factor, mode="bilinear", align_corners=True)
 
 
@@ -4680,6 +4707,8 @@ def triplet_margin_loss(
         reduction_enum = _Reduction.legacy_get_enum(size_average, reduce)
     else:
         reduction_enum = _Reduction.get_enum(reduction)
+    if margin <= 0:
+        raise ValueError(f"margin must be greater than 0, got {margin}")
     return torch.triplet_margin_loss(anchor, positive, negative, margin, p, eps, swap, reduction_enum)
 
 
@@ -4719,6 +4748,10 @@ def triplet_margin_with_distance_loss(
     # Check validity of reduction mode
     if reduction not in ("mean", "sum", "none"):
         raise ValueError(f"{reduction} is not a valid value for reduction")
+
+    # Check validity of margin
+    if margin <= 0:
+        raise ValueError(f"margin must be greater than 0, got {margin}")
 
     # Check dimensions
     a_dim = anchor.ndim
@@ -4993,6 +5026,24 @@ greater than 0.0 is specified. The optional scale argument can only be specified
 
 .. warning:: This function is beta and subject to change.
 
+.. warning::
+
+    This function always applies dropout according to the specified ``dropout_p`` argument.
+    To disable dropout during evaluation, be sure to pass a value of ``0.0`` when the module
+    that makes the function call is not in training mode.
+
+    For example:
+
+    .. code-block:: python
+
+        class MyModel(nn.Module):
+            def __init__(self, p=0.5):
+                super().__init__()
+                self.p = p
+
+            def forward(self, ...):
+                return F.scaled_dot_product_attention(..., dropout_p=(self.p if self.training else 0.0))
+
 Note:
 
     There are currently three supported implementations of scaled dot product attention:
@@ -5037,8 +5088,10 @@ Args:
         A boolean mask where a value of True indicates that the element *should* take part in attention.
         A float mask of the same type as query, key, value that is added to the attention score.
     dropout_p (float): Dropout probability; if greater than 0.0, dropout is applied
-    is_causal (bool): If true, assumes upper left causal attention masking and errors if both attn_mask and is_causal
-        are set.
+    is_causal (bool): If set to true, the attention masking is a lower triangular matrix when the mask is a
+        square matrix. The attention masking has the form of the upper left causal bias due to the alignment
+        (see :class:`torch.nn.attention.bias.CausalBias`) when the mask is a non-square matrix.
+        An error is thrown if both attn_mask and is_causal are set.
     scale (optional float, keyword-only): Scaling factor applied prior to softmax. If None, the default value is set
         to :math:`\frac{1}{\sqrt{E}}`.
 
@@ -5403,7 +5456,7 @@ def multi_head_attention_forward(
         assert bias_v is None
 
     #
-    # reshape q, k, v for multihead attention and make em batch first
+    # reshape q, k, v for multihead attention and make them batch first
     #
     q = q.view(tgt_len, bsz * num_heads, head_dim).transpose(0, 1)
     if static_k is None:

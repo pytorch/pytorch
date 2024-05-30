@@ -7,14 +7,12 @@ import dis
 import enum
 import functools
 import gc
-import io
 import itertools
 import logging
 import math
 import operator
 import os
 import random
-import re
 import sys
 import tempfile
 import threading
@@ -27,17 +25,18 @@ import weakref
 from unittest.mock import patch
 
 import numpy as np
-import pytest
-import sympy
-import torch
 
-import torch._dynamo.test_case
+import torch
 import torch._dynamo.testing
+
+import torch._inductor.test_case
 import torch.onnx.operators
 
 import torch.utils._pytree as pytree
+import torch.utils.cpp_extension
+from torch import Tensor
 from torch._C import FileCheck
-from torch._dynamo import allow_in_graph, bytecode_analysis, bytecode_transformation
+from torch._dynamo import allow_in_graph
 from torch._dynamo.eval_frame import _debug_get_cache_entry_list
 from torch._dynamo.exc import Unsupported
 from torch._dynamo.source import ConstantSource, GetItemSource, LocalSource
@@ -48,6 +47,7 @@ from torch._dynamo.testing import (
     same,
     skipIfNotPy311,
     unsupported,
+    xfailIfPy312,
 )
 from torch._dynamo.utils import CompileProfiler, counters, ifdynstaticdefault
 from torch._inductor.utils import run_and_get_code
@@ -142,7 +142,23 @@ def closure_adder(val):
     return inner
 
 
-class MiscTests(torch._dynamo.test_case.TestCase):
+class UserDefineSetAttr:
+    setup = False
+
+    def __setattr__(self, key, value):
+        assert torch.compiler.is_dynamo_compiling() or UserDefineSetAttr.setup
+        super().__setattr__(f"pfx_{key}", value)
+
+    def __getattr__(self, key, c=1):
+        assert torch.compiler.is_dynamo_compiling() or UserDefineSetAttr.setup
+        # c is added to force a guard on __defaults__ and checks the source for __getattr__
+        if c:
+            return self.__dict__[f"pfx_{key}"]
+        else:
+            return None
+
+
+class MiscTests(torch._inductor.test_case.TestCase):
     def test_get_cache_entry(self):
         def f(x):
             return x + 1
@@ -207,6 +223,38 @@ class MiscTests(torch._dynamo.test_case.TestCase):
 
         with self.assertRaises(TypeError):
             fn(torch.randn(16))
+
+    def test_cpp_extension_recommends_custom_ops(self):
+        cpp_source = """
+        #include <torch/extension.h>
+        at::Tensor foobar(const at::Tensor& x) {
+            return x.clone();
+        }
+        """
+        module = torch.utils.cpp_extension.load_inline(
+            name="mylib",
+            cpp_sources=cpp_source,
+            functions="foobar",
+            verbose=True,
+        )
+
+        x = torch.ones(2, 2, requires_grad=True)
+        counters.clear()
+
+        @torch.compile(backend="eager")
+        def f(x):
+            return module.foobar(x)
+
+        with self.assertWarnsOnceRegex(
+            UserWarning, ".*https://pytorch.org/docs/main/notes/custom_operators.html.*"
+        ):
+            f(x)
+        self.assertEqual(len(counters["graph_break"]), 1)
+        first_graph_break = list(counters["graph_break"].keys())[0]
+        self.assertExpectedInline(
+            first_graph_break,
+            """Graph break due to unsupported builtin mylib.PyCapsule.foobar. This function is either a Python builtin (e.g. _warnings.warn) or a third-party C/C++ Python extension (perhaps created with pybind). If it is a Python builtin, please file an issue on GitHub so the PyTorch team can add support for it and see the next case for a workaround. If it is a third-party C/C++ Python extension, please either wrap it into a PyTorch-understood custom operator (see https://pytorch.org/docs/main/notes/custom_operators.html for more details) or, if it is traceable, use torch.compiler.allow_in_graph.""",
+        )
 
     def test_callpacked(self):
         def call_packed(args):
@@ -486,6 +534,34 @@ class MiscTests(torch._dynamo.test_case.TestCase):
 
         cleanup_op("mylib::foo")
         del lib
+
+    def test_user_defined_setattr1(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(obj):
+            obj.y = obj.x + 1
+
+        obj = UserDefineSetAttr()
+        with patch.object(UserDefineSetAttr, "setup", True):
+            obj.x = torch.randn(8)
+        fn(obj)
+        with patch.object(UserDefineSetAttr, "setup", True):
+            self.assertEqual(obj.y, obj.x + 1)
+        self.assertEqual(obj.__dict__.keys(), {"pfx_x", "pfx_y"})
+
+    def test_user_defined_setattr2(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(x):
+            obj = UserDefineSetAttr()
+            obj.x = x
+            obj.y = obj.x + 1
+            return obj
+
+        x = torch.randn(8)
+        obj = fn(x)
+        with patch.object(UserDefineSetAttr, "setup", True):
+            self.assertIs(obj.x, x)
+            self.assertEqual(obj.y, x + 1)
+        self.assertEqual(obj.__dict__.keys(), {"pfx_x", "pfx_y"})
 
     def test_closure_recompiles(self):
         cnt = CompileCounter()
@@ -775,7 +851,7 @@ def forward(self, arg0_1: "f32[3]", arg1_1: "f32[3]", arg2_1: "f32[3]", arg3_1: 
                     """\
 def forward(self, arg0_1: "f32[3]", arg1_1: "f32[3]", arg2_1: "f32[3]", arg3_1: "f32[3]"):
         # No stacktrace found for following nodes
-        foo_default = torch.ops.mylib.foo.default(None, [arg0_1, arg3_1], arg1_1, 2, arg2_1);  arg0_1 = arg3_1 = arg1_1 = arg2_1 = None
+        foo_default = torch.ops.mylib.foo.default(None, [arg2_1, arg3_1], arg0_1, 2, arg1_1);  arg2_1 = arg3_1 = arg0_1 = arg1_1 = None
         return ()""",
                 )
 
@@ -823,7 +899,7 @@ def forward(self, arg0_1: "f32[3]", arg1_1: "f32[3]", arg2_1: "f32[3]", arg3_1: 
             return x + y
 
         torch._dynamo.testing.standard_test(
-            self, fn, 1, expected_ops=1, expected_ops_dynamic=ifdynstaticdefault(1, 10)
+            self, fn, 1, expected_ops=1, expected_ops_dynamic=ifdynstaticdefault(1, 4)
         )
 
     def test_int_int_comparisons(self):
@@ -866,10 +942,8 @@ def forward(self, arg0_1: "f32[3]", arg1_1: "f32[3]", arg2_1: "f32[3]", arg3_1: 
                 out = 1
             return x + out
 
-        # expect for dynamic: size, index, 6 comparison ops, add
-        torch._dynamo.testing.standard_test(
-            self, fn, 1, expected_ops=1, expected_ops_dynamic=ifdynstaticdefault(1, 9)
-        )
+        # TODO: Test the guards maybe?
+        torch._dynamo.testing.standard_test(self, fn, 1, expected_ops=1)
 
     def test_int_shape_comparisons(self):
         def fn(x):
@@ -891,10 +965,8 @@ def forward(self, arg0_1: "f32[3]", arg1_1: "f32[3]", arg2_1: "f32[3]", arg3_1: 
                 out = 1
             return x + out
 
-        # expect for dynamic: size, index, 6 comparison ops, add
-        torch._dynamo.testing.standard_test(
-            self, fn, 1, expected_ops=1, expected_ops_dynamic=ifdynstaticdefault(1, 9)
-        )
+        # TODO: Test the guards maybe?
+        torch._dynamo.testing.standard_test(self, fn, 1, expected_ops=1)
 
     def test_param_shape_binops(self):
         class MyModule(torch.nn.Module):
@@ -1221,13 +1293,11 @@ utils_device.CURRENT_DEVICE == None""".split(
                 y.add_(1.0)
             return y
 
-        # expect extra size node for dynamic
         torch._dynamo.testing.standard_test(
             self,
             fn,
             1,
             expected_ops=20,
-            expected_ops_dynamic=ifdynstaticdefault(20, 21),
         )
 
     def test_empty_list(self):
@@ -1321,6 +1391,21 @@ utils_device.CURRENT_DEVICE == None""".split(
                 return torch.arange(0, y)
 
         self.assertRaises(torch._dynamo.exc.UserError, lambda: f(torch.tensor([3])))
+
+    def test_assert(self):
+        @torch.compile
+        def fn1(x):
+            assert x.shape != x.shape
+
+        with self.assertRaises(AssertionError):
+            a = torch.randn(10)
+            fn1(a)
+
+        def fn2(x):
+            assert x.shape == x.shape
+            return x.abs()
+
+        torch._dynamo.testing.standard_test(self, fn=fn2, nargs=1, expected_ops=1)
 
     def test_config_obj(self):
         class Cfg:
@@ -1617,7 +1702,7 @@ utils_device.CURRENT_DEVICE == None""".split(
         opt_fn = torch._dynamo.optimize(cnts)(fn)
         self.assertEqual(opt_fn(v1, v2), correct)
         self.assertEqual(cnts.frame_count, 1)
-        self.assertEqual(cnts.op_count, 3)
+        self.assertEqual(cnts.op_count, 4)
 
     @patch.object(torch._dynamo.config, "capture_scalar_outputs", False)
     def test_tensor_item_no_capture(self):
@@ -1697,13 +1782,11 @@ utils_device.CURRENT_DEVICE == None""".split(
                 a += 1
             return a
 
-        # expect 1 more op (size call) for dynamic
         return torch._dynamo.testing.standard_test(
             self,
             fn=fn,
             nargs=1,
             expected_ops=9,
-            expected_ops_dynamic=ifdynstaticdefault(9, 10),
         )
 
     def test_build_tuple_unpack(self):
@@ -2067,6 +2150,33 @@ utils_device.CURRENT_DEVICE == None""".split(
         self.assertEqual(result.b, x - 1)
         self.assertEqual(cnt.frame_count, 1)
         self.assertEqual(cnt.op_count, 2)
+
+    def test_catch_watchings1(self):
+        cnt = CompileCounter()
+
+        @torch.compile(backend=cnt, fullgraph=True)
+        def fn(x):
+            with warnings.catch_warnings(record=True):
+                return x.sin()
+
+        x = torch.randn(8)
+        self.assertEqual(fn(x), x.sin())
+        self.assertEqual(cnt.frame_count, 1)
+
+    def test_catch_watchings2(self):
+        cnt = CompileCounter()
+
+        @torch.compile(backend=cnt, fullgraph=True)
+        def fn(x):
+            return x.sin(), warnings.catch_warnings(record=True)
+
+        x = torch.randn(8)
+        _, a = fn(x)
+        _, b = fn(x)
+        self.assertEqual(cnt.frame_count, 1)
+        self.assertIsInstance(a, warnings.catch_warnings)
+        self.assertIsInstance(b, warnings.catch_warnings)
+        self.assertIsNot(a, b)
 
     def test_tensor_build_list_unpack(self):
         def fn(x):
@@ -2690,7 +2800,10 @@ utils_device.CURRENT_DEVICE == None""".split(
 
     def test_dict_order_keys(self):
         def fn(d):
-            return d["a"] - d["b"]
+            c = 0
+            for v in d.values():
+                c += v
+            return c
 
         args1 = {}
         args1["a"] = torch.rand(10)
@@ -2699,7 +2812,8 @@ utils_device.CURRENT_DEVICE == None""".split(
         opt_fn = torch._dynamo.optimize(cnts)(fn)
         self.assertEqual(fn(args1), opt_fn(args1))
         self.assertEqual(cnts.frame_count, 1)
-        self.assertEqual(cnts.op_count, 1)
+        self.assertEqual(cnts.op_count, 2)
+
         # A different order of keys recompiles
         args2 = {}
         args2["b"] = args1["b"]
@@ -2993,6 +3107,91 @@ utils_device.CURRENT_DEVICE == None""".split(
         self.assertTrue(same(obj1, obj2))
         self.assertEqual(cnts.frame_count, 1)
         self.assertEqual(cnts.op_count, 9)
+
+    def test_object_setattr(self):
+        @dataclasses.dataclass
+        class A:
+            x: torch.Tensor
+
+        def fn1(x) -> None:
+            a = A(x)
+            object.__setattr__(a, "x", x + 2)
+            return a
+
+        x1 = torch.randn(10)
+        obj11 = fn1(x1.clone())
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn1 = torch._dynamo.optimize(cnts, nopython=True)(fn1)
+        obj12 = opt_fn1(x1.clone())
+        self.assertTrue(same(obj11.x, x1 + 2))
+        self.assertTrue(same(obj12.x, x1 + 2))
+        self.assertTrue(same(obj11.x, obj12.x))
+        self.assertEqual(cnts.frame_count, 1)
+
+        @dataclasses.dataclass(frozen=True)
+        class B:
+            x: torch.Tensor
+
+        def fn2(x) -> None:
+            b = B(x)
+            return b
+
+        x2 = torch.randn(10)
+        obj21 = fn2(x2.clone())
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn2 = torch._dynamo.optimize(cnts, nopython=True)(fn2)
+        obj22 = opt_fn2(x2.clone())
+        self.assertTrue(same(obj21.x, x2))
+        self.assertTrue(same(obj22.x, x2))
+        self.assertTrue(same(obj21.x, obj22.x))
+        self.assertEqual(cnts.frame_count, 0)
+
+        @dataclasses.dataclass(frozen=True)
+        class C:
+            x: torch.Tensor
+
+        def fn3(x) -> None:
+            c = C(x)
+            object.__setattr__(c, "x", x + 2)
+            return c
+
+        x3 = torch.randn(10)
+        obj31 = fn3(x3.clone())
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn3 = torch._dynamo.optimize(cnts, nopython=True)(fn3)
+        obj32 = opt_fn3(x3.clone())
+        self.assertTrue(same(obj31.x, x3 + 2))
+        self.assertTrue(same(obj32.x, x3 + 2))
+        self.assertTrue(same(obj31.x, obj32.x))
+        self.assertEqual(cnts.frame_count, 1)
+
+        @dataclasses.dataclass(frozen=True)
+        class D:
+            x: torch.Tensor
+
+            def __post_init__(self):
+                object.__setattr__(self, "y", self.x + 2)
+
+        def fn4(x) -> None:
+            d = D(x)
+            return d
+
+        x4 = torch.randn(10)
+        obj41 = fn4(x4.clone())
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn4 = torch._dynamo.optimize(cnts, nopython=True)(fn4)
+        obj42 = opt_fn4(x4.clone())
+        self.assertTrue(same(obj41.x, x4))
+        self.assertTrue(same(obj42.x, x4))
+        self.assertTrue(same(obj41.x, obj42.x))
+        self.assertTrue(same(obj41.y, x4 + 2))
+        self.assertTrue(same(obj42.y, x4 + 2))
+        self.assertTrue(same(obj41.y, obj42.y))
+        self.assertEqual(cnts.frame_count, 1)
 
     def test_user_defined_class_name(self):
         class MyClassFoo:
@@ -3724,6 +3923,7 @@ utils_device.CURRENT_DEVICE == None""".split(
 
         self.assertTrue(same(ref, res))
 
+    @torch._dynamo.config.patch(guard_nn_modules=True)
     def test_source_non_input_grad_access(self):
         # This test creates a model, and accesses the grads
         # from its parameter. This means that within dynamo,
@@ -3795,96 +3995,24 @@ utils_device.CURRENT_DEVICE == None""".split(
         self.assertEqual(cnts.frame_count, 1)
         self.assertEqual(cnts.op_count, 2)
 
-    @skipIfNotPy311
-    def test_linetable_311_writer1(self):
-        def fn():
-            a = 10
-            b = 20
-            c = a + b
-            f = "linetable_writer"
-            return f"Test if {f} generates correct co_linetable: {c}"
-
-        keys = bytecode_transformation.get_code_keys()
-        code_options = {k: getattr(fn.__code__, k) for k in keys}
-        result = bytecode_transformation.clean_and_assemble_instructions(
-            bytecode_transformation.cleaned_instructions(fn.__code__),
-            keys,
-            code_options,
-        )
-        l1, l2 = list(fn.__code__.co_positions()), list(result[1].co_positions())
-        self.assertEqual(len(l1), len(l2))
-        for p1, p2 in zip(l1, l2):
-            self.assertEqual(p1, p2)
-        self.assertEqual(fn.__code__.co_lnotab, result[1].co_lnotab)
-
-    @skipIfNotPy311
-    def test_linetable_311_writer2(self):
-        """
-        test large ops (LOAD_METHOD) and EXTENDED_ARGS
-        fn_str is in the form:
-        def fn():
-            ...
-            x0 = 1
-            x1 = 1
-            ...
-            l = [x0, x1, ...]
-        """
-        fn_str = f"""\
-def fn():
-    foo.bar(1, 2, 3)
-{str(chr(10)).join(' ' * 4 + 'x' + str(i) + ' = 1' for i in range(1 << 9))}
-    l = [{' '.join('x' + str(i) + ',' for i in range(1 << 9))}]
-        """
-        locals = {}
-        exec(fn_str, {}, locals)
-        fn = locals["fn"]
-        orig_inst_str = "\n".join(list(map(str, dis.get_instructions(fn))))
-        self.assertIn("EXTENDED_ARG", orig_inst_str)
-        self.assertIn("LOAD_METHOD", orig_inst_str)
-        keys = bytecode_transformation.get_code_keys()
-        code_options = {k: getattr(fn.__code__, k) for k in keys}
-        result = bytecode_transformation.clean_and_assemble_instructions(
-            bytecode_transformation.cleaned_instructions(fn.__code__),
-            keys,
-            code_options,
-        )
-        new_inst_str = "\n".join(list(map(str, result[0])))
-        self.assertIn("EXTENDED_ARG", new_inst_str)
-        self.assertIn("LOAD_METHOD", new_inst_str)
-        l1, l2 = list(fn.__code__.co_positions()), list(result[1].co_positions())
-        self.assertEqual(len(l1), len(l2))
-        for p1, p2 in zip(l1, l2):
-            self.assertEqual(p1, p2)
-        self.assertEqual(fn.__code__.co_lnotab, result[1].co_lnotab)
-
-    @unittest.skipIf(
-        sys.version_info < (3, 10) or sys.version_info >= (3, 11),
-        "linetable test for Python 3.10",
-    )
-    def test_linetable_310_writer(self):
-        def fn():
-            a = 10
-            b = 20
-            c = a + b
-            f = "linetable_writer"
-            return f"Test if {f} generates correct co_linetable: {c}"
-
-        inst = dis.get_instructions(fn)
-        result = bytecode_transformation.assemble(inst, fn.__code__.co_firstlineno)
-        self.assertTrue(result[1] == fn.__code__.co_linetable)
-
-    @unittest.skipIf(sys.version_info >= (3, 10), "use lnotab when python < 3.10")
-    def test_lnotab_writer(self):
-        def fn():
-            a = 10
-            b = 20
-            c = a + b
-            f = "lnotab_writer"
-            return f"Test if {f} generates correct co_lnotab: {c}"
-
-        inst = dis.get_instructions(fn)
-        result = bytecode_transformation.assemble(inst, fn.__code__.co_firstlineno)
-        self.assertTrue(result[1] == fn.__code__.co_lnotab)
+    def test_clone_sparse_input(self):
+        for layout in [
+            torch.sparse_coo,
+            torch.sparse_csr,
+            torch.sparse_csc,
+            torch.sparse_bsr,
+            torch.sparse_bsc,
+        ]:
+            for sparse_input in self.generate_simple_inputs(
+                layout,
+                device="cpu",
+                dtype=torch.float64,
+                index_dtype=torch.int64,
+            ):
+                # Invoke the dynamo clone input method directly.
+                sparse_copy = torch._dynamo.utils.clone_input(sparse_input)
+                # Make sure sparse clone is successful.
+                self.assertEqual(sparse_input, sparse_copy)
 
     def test_tensor_is_contiguous(self):
         def fn(x):
@@ -4136,6 +4264,59 @@ def fn():
         opt_fn(x)
         self.assertEqual(cnts.frame_count, 2)
 
+    def test_id_guarded_object(self):
+        class UDO:
+            @torch.compile(backend="eager")
+            def call(self, x, ref_id):
+                self_id = id(self)
+                if self_id == ref_id:
+                    x = torch.mul(x, 1.0)
+                else:
+                    x = torch.mul(x, 0)
+                return x
+
+        # Make sure we do recompile when id(self) is executed on
+        # different self objects.
+        x = torch.ones(2)
+        obj1 = UDO()
+        obj1_id = id(obj1)
+        self.assertEqual(obj1.call(x, obj1_id), torch.ones(2))
+
+        obj2 = UDO()
+        # if we do not install ID_MATCH: ___check_obj_id(L['self'], xxx) this fails.
+        self.assertEqual(obj2.call(x, obj1_id), torch.zeros(2))
+
+    def test_id_guarded_module(self):
+        class M(torch.nn.Module):
+            def forward(self, x, ref_id):
+                self_id = id(self)
+                if self_id == ref_id:
+                    x = torch.mul(x, 1.0)
+                else:
+                    x = torch.mul(x, 0)
+                return x
+
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        # Make sure we do recompile when id(self) is executed on
+        # different self objects.
+        x = torch.ones(2)
+        m1 = M()
+        m1_id = id(m1)
+        opt_m1 = torch._dynamo.optimize(cnts, nopython=True)(m1)
+        self.assertEqual(opt_m1(x, m1_id), torch.ones(2))
+        self.assertEqual(opt_m1(x, m1_id), torch.ones(2))
+
+        self.assertEqual(cnts.frame_count, 1)
+        self.assertEqual(cnts.op_count, 1)
+
+        m2 = M()
+        opt_m2 = torch._dynamo.optimize(cnts, nopython=True)(m2)
+        # if we do not install ID_MATCH: ___check_obj_id(L['self'], xxx) this fails.
+        self.assertEqual(opt_m2(x, m1_id), torch.zeros(2))
+        self.assertEqual(cnts.frame_count, 2)
+        self.assertEqual(cnts.op_count, 2)
+
     def test_id_of_nn_module(self):
         class M(torch.nn.Module):
             def forward(self, x, ref_id):
@@ -4156,7 +4337,7 @@ def fn():
         if torch._dynamo.config.assume_static_by_default:
             self.assertExpectedInline(cnts.op_count, """2""")
         else:
-            self.assertExpectedInline(cnts.op_count, """3""")
+            self.assertExpectedInline(cnts.op_count, """2""")
 
         torch._dynamo.reset()
         cnts = torch._dynamo.testing.CompileCounter()
@@ -4166,7 +4347,7 @@ def fn():
         if torch._dynamo.config.assume_static_by_default:
             self.assertExpectedInline(cnts.op_count, """1""")
         else:
-            self.assertExpectedInline(cnts.op_count, """2""")
+            self.assertExpectedInline(cnts.op_count, """1""")
 
     def test_inline_func_jump_on_tensor_condition(self):
         def f1(input):
@@ -4466,6 +4647,19 @@ def fn():
         res2 = opt_fn(x)
         self.assertEqual(res, res2)
 
+    @patch.object(torch._dynamo.config, "capture_scalar_outputs", True)
+    def test_tensor_ctor_list_of_tensor(self):
+        def fn(x):
+            return torch.tensor([x], dtype=torch.int64)
+
+        x = torch.tensor(20)
+        res = fn(x)
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(cnts)(fn)
+        res2 = opt_fn(x)
+        self.assertEqual(res, res2)
+        self.assertEqual(cnts.frame_count, 1)
+
     def test_tensor_types(self):
         def fn(dtype, tensor_type):
             x = torch.empty(4, dtype=dtype)
@@ -4696,6 +4890,7 @@ def fn():
             self.assertEqual(k_a, k)
             self.assertTrue(torch.allclose(v_a, v))
 
+    @torch._dynamo.config.patch(guard_nn_modules=True)
     def test_module_complex_iter(self):
         n_embd = 768
         block_size = 128
@@ -4826,10 +5021,6 @@ def fn():
         opt_out = torch._dynamo.optimize(backend=cnt)(foo)(*args)
         self.assertEqual(exp_out, opt_out)
         self.assertEqual(cnt.frame_count, exp_frame_count)
-        self.assertEqual(
-            len(torch._dynamo.eval_frame.cached_backends),
-            exp_n_cached_backend,
-        )
 
     def test_backend_match_guard(self):
         x = torch.randn([3, 4])
@@ -4910,12 +5101,6 @@ def fn():
         # Wait for all threads to finish
         for thread in threads:
             thread.join()
-
-        # Threads are sharing the backend cache. We see two cnt backends and one None backend
-        self.assertEqual(
-            len(torch._dynamo.eval_frame.cached_backends),
-            3,
-        )
 
         self.assertEqual(len(thread_success), len(threads))
 
@@ -5203,9 +5388,14 @@ def fn():
                 return map(body, xs)
 
         mod = Module()
-        with self.assertRaisesRegex(
-            Unsupported, "Can't inplace modify module params/buffers"
-        ):
+
+        error_message = ""
+        if torch._dynamo.config.inline_inbuilt_nn_modules:
+            error_message = r"HigherOrderOperator: Mutating a variable not in the current scope \(SideEffects\)"
+        else:
+            error_message = "Can't inplace modify module params/buffers"
+
+        with self.assertRaisesRegex(Unsupported, error_message):
             opt_fn = torch._dynamo.optimize("eager", nopython=True)(mod)
             opt_fn(torch.randn(3, 2))
 
@@ -5568,6 +5758,7 @@ def fn():
         res = opt_fn(x, m)
         self.assertTrue(torch.allclose(ref, res))
 
+    @torch._dynamo.config.patch(guard_nn_modules=True)
     def test_repro_graph_breaks_in__get_item_by_idx(self):
         class Mod(torch.nn.Module):
             def __init__(self):
@@ -5582,6 +5773,7 @@ def fn():
         m = Mod()
         graph, _ = torch._dynamo.export(m)(torch.randn(3, 3))
 
+    @torch._dynamo.config.patch(guard_nn_modules=True)
     def test_nn_sequential_invocation(self):
         with freeze_rng_state():
 
@@ -5606,6 +5798,7 @@ def fn():
             dynamo_result = graph(x)
             self.assertTrue(same(real, dynamo_result))
 
+    @torch._dynamo.config.patch(guard_nn_modules=True)
     def test_nn_sequential_invocation_reposition_indices(self):
         with freeze_rng_state():
 
@@ -6395,6 +6588,11 @@ def fn():
         finally:
             builtins.isinstance = builtin_isinstance
 
+        # check recompilation because builtins is now unpatched
+        opt_fn = torch.compile(backend="eager", fullgraph=True)(fn)
+        res = opt_fn(x, y)
+        self.assertTrue(same(res, x + 1))
+
     # specifically test for tensor.attribute -> torch.something()
     def test_real_imag_tensor_attribute(self):
         def fn(x, y):
@@ -6591,313 +6789,6 @@ def fn():
         res = opt_fn(x)
         self.assertTrue(same(ref, res))
 
-    def test_if_tensor_is_none(self):
-        """
-        Python 3.11 adds new jump instructions that check if
-        TOS is None. We do not support these instructions.
-        """
-
-        def f(x, y):
-            z = 1
-            if x is None:
-                z *= 2
-            if y is not None:
-                z *= 3
-            return z
-
-        opt_f = torch._dynamo.optimize("eager", nopython=True)(f)
-        self.assertEqual(opt_f(None, torch.ones(2)), 6)
-
-        if sys.version_info >= (3, 11):
-            insts = bytecode_transformation.cleaned_instructions(f.__code__)
-            for inst in insts:
-                self.assertNotIn("_NONE", inst.opname)
-
-    @skipIfNotPy311
-    def test_py311_jump_offset(self):
-        new_inst = bytecode_transformation.create_instruction
-        load_global = bytecode_transformation.create_load_global
-        consts = (None, 1, 2, 3, 4)
-
-        def create_test_code(jump_opname, target_idx):
-            targets = [
-                new_inst("LOAD_CONST", argval=1),
-                new_inst("LOAD_CONST", argval=3),
-            ]
-            jump_to_target_inst = new_inst(jump_opname, target=targets[target_idx])
-            """
-            pseudocode of generated bytecode:
-            def test_py311_fn():
-                goto target1
-            target0:
-                return 1
-            target1:
-                goto [target0/target2] (via fwd or bwd jump)
-                return 2
-            target2:
-                return 3
-                return 4
-            """
-            # test with LOAD_GLOBAL since it has a different instruction size
-            insts = [
-                new_inst("RESUME", arg=0),
-                new_inst("JUMP_FORWARD", target=jump_to_target_inst),
-                targets[0],
-                load_global("print", False),
-                new_inst("POP_TOP"),
-                new_inst("RETURN_VALUE"),
-                jump_to_target_inst,
-                new_inst("LOAD_CONST", argval=2),
-                load_global("print", False),
-                new_inst("POP_TOP"),
-                new_inst("RETURN_VALUE"),
-                targets[1],
-                new_inst("RETURN_VALUE"),
-                new_inst("LOAD_CONST", argval=4),
-                new_inst("RETURN_VALUE"),
-            ]
-            code_options = collections.OrderedDict(
-                [
-                    ("co_argcount", 0),
-                    ("co_posonlyargcount", 0),
-                    ("co_kwonlyargcount", 0),
-                    ("co_nlocals", 0),
-                    ("co_stacksize", 2),
-                    ("co_flags", 3),
-                    ("co_code", b""),
-                    ("co_consts", consts),
-                    ("co_names", ("print",)),
-                    ("co_varnames", ()),
-                    ("co_filename", __file__),
-                    ("co_name", "test_py311_fn"),
-                    ("co_qualname", "test_py311_fn"),
-                    ("co_firstlineno", 1),
-                    ("co_linetable", b""),
-                    ("co_exceptiontable", b""),
-                    ("co_freevars", ()),
-                    ("co_cellvars", ()),
-                ]
-            )
-            return bytecode_transformation.clean_and_assemble_instructions(
-                insts,
-                list(code_options.keys()),
-                code_options,
-            )
-
-        # format: jump_opname, target_idx, expected forward jump, expected return value
-        test_args = (
-            ("JUMP_FORWARD", 0, False, 1),
-            ("JUMP_FORWARD", 1, True, 3),
-            ("JUMP_BACKWARD", 0, False, 1),
-            ("JUMP_BACKWARD", 1, True, 3),
-        )
-
-        for test in test_args:
-            insts, code = create_test_code(test[0], test[1])
-            # check if offset of latest jump instruction is forward/backward
-            for inst in reversed(insts):
-                if inst.opname.startswith("JUMP"):
-                    if test[2]:
-                        self.assertIn("FORWARD", inst.opname)
-                    else:
-                        self.assertIn("BACKWARD", inst.opname)
-                    break
-            # run the code and check result
-
-            def dummy_fn():
-                pass
-
-            dummy_fn.__code__ = code
-            self.assertEqual(dummy_fn(), test[3])
-
-            dummy_opt = torch._dynamo.optimize("eager")(dummy_fn)
-            self.assertEqual(dummy_opt(), test[3])
-
-    def test_exception_table_encode_varint(self):
-        # these numbers have no real meaning to them
-        nums = [
-            0b111_101010_000000,
-            0b1100_111000_010101_101010,
-        ]
-        b = bytecode_transformation.encode_exception_table_varint(
-            nums[0]
-        ) + bytecode_transformation.encode_exception_table_varint(nums[1])
-        nums_new = []
-        b_iter = iter(bytes(b))
-        while True:
-            try:
-                nums_new.append(
-                    bytecode_transformation.decode_exception_table_varint(b_iter)
-                )
-            except StopIteration:
-                break
-        self.assertEqual(nums, nums_new)
-
-    @skipIfNotPy311
-    def test_exception_table_parsing(self):
-        def fn():
-            try:
-                with a():
-                    b()
-                c()
-            except Exception:
-                d()
-            finally:
-                e()
-            f()
-
-        tab = bytecode_transformation.parse_exception_table(
-            fn.__code__.co_exceptiontable
-        )
-        b = bytecode_transformation.assemble_exception_table(tab)
-        self.assertEqual(b, fn.__code__.co_exceptiontable)
-
-    @skipIfNotPy311
-    def test_exception_table_e2e(self):
-        def fn():
-            try:
-                with a():
-                    b()
-                c()
-            except Exception:
-                d()
-            finally:
-                e()
-            f()
-
-        def nothing(*args):
-            pass
-
-        code = bytecode_transformation.transform_code_object(fn.__code__, nothing)
-        self.assertEqual(code.co_exceptiontable, fn.__code__.co_exceptiontable)
-
-    @skipIfNotPy311
-    def test_exception_table_e2e_2(self):
-        # last instructions of an exn_table entry is a large instruction
-        # i.e., LOAD_GLOBAL a
-        def fn():
-            try:
-                return a
-            except Exception:
-                pass
-
-        def nothing(*args):
-            pass
-
-        code = bytecode_transformation.transform_code_object(fn.__code__, nothing)
-        self.assertEqual(code.co_exceptiontable, fn.__code__.co_exceptiontable)
-
-    @skipIfNotPy311
-    def test_exception_table_entry_propagation(self):
-        insts = []
-        for _ in range(10):
-            insts.append(bytecode_transformation.create_instruction("NOP"))
-        insts[8].exn_tab_entry = bytecode_transformation.InstructionExnTabEntry(
-            insts[0], insts[9], insts[0], 0, True
-        )
-        insts[0].exn_tab_entry = bytecode_transformation.InstructionExnTabEntry(
-            insts[0], insts[0], insts[1], 0, True
-        )
-        insts[1].exn_tab_entry = bytecode_transformation.InstructionExnTabEntry(
-            insts[0], insts[2], insts[2], 0, True
-        )
-        insts[5].exn_tab_entry = bytecode_transformation.InstructionExnTabEntry(
-            insts[4], insts[6], insts[3], 0, True
-        )
-        insts[9].exn_tab_entry = bytecode_transformation.InstructionExnTabEntry(
-            insts[9], insts[9], insts[4], 0, True
-        )
-        insts[7].exn_tab_entry = bytecode_transformation.InstructionExnTabEntry(
-            insts[7], insts[9], insts[5], 0, True
-        )
-        bytecode_transformation.propagate_inst_exn_table_entries(insts)
-        expected = [1, 2, 2, 0, 3, 3, 3, 5, 5, 4]
-        for inst, exp in zip(insts, expected):
-            self.assertIsNotNone(inst.exn_tab_entry)
-            self.assertIs(inst.exn_tab_entry.target, insts[exp])
-
-    @skipIfNotPy311
-    def test_compute_exception_table_nested(self):
-        insts = []
-        for _ in range(20):
-            insts.append(bytecode_transformation.create_instruction("NOP"))
-        insts[10].exn_tab_entry = bytecode_transformation.InstructionExnTabEntry(
-            insts[1], insts[10], insts[0], 0, True
-        )
-        insts[0].exn_tab_entry = bytecode_transformation.InstructionExnTabEntry(
-            insts[1], insts[1], insts[1], 0, True
-        )
-        insts[1].exn_tab_entry = bytecode_transformation.InstructionExnTabEntry(
-            insts[1], insts[3], insts[2], 0, True
-        )
-        insts[5].exn_tab_entry = bytecode_transformation.InstructionExnTabEntry(
-            insts[5], insts[7], insts[3], 0, True
-        )
-        insts[9].exn_tab_entry = bytecode_transformation.InstructionExnTabEntry(
-            insts[10], insts[10], insts[4], 0, True
-        )
-        insts[7].exn_tab_entry = bytecode_transformation.InstructionExnTabEntry(
-            insts[8], insts[10], insts[5], 0, True
-        )
-        insts[14].exn_tab_entry = bytecode_transformation.InstructionExnTabEntry(
-            insts[13], insts[17], insts[6], 0, True
-        )
-        insts[16].exn_tab_entry = bytecode_transformation.InstructionExnTabEntry(
-            insts[15], insts[16], insts[7], 0, True
-        )
-        bytecode_transformation.update_offsets(insts)
-        tab = bytecode_transformation.compute_exception_table(insts)
-        expected = [
-            (1, 1, 1),
-            (2, 3, 2),
-            (4, 4, 0),
-            (5, 7, 3),
-            (8, 9, 5),
-            (10, 10, 4),
-            (13, 14, 6),
-            (15, 16, 7),
-            (17, 17, 6),
-        ]
-        self.assertEqual(len(tab), len(expected))
-        for entry, exp in zip(tab, expected):
-            self.assertEqual(entry.start, exp[0] * 2)
-            self.assertEqual(entry.end, exp[1] * 2)
-            self.assertEqual(entry.target, exp[2] * 2)
-
-    @skipIfNotPy311
-    def test_remove_dead_code_with_exn_table_entries(self):
-        create_instruction = bytecode_transformation.create_instruction
-        target1 = create_instruction("NOP")
-        target2 = create_instruction("NOP")
-        target3 = create_instruction("NOP")
-        exn_start = create_instruction("NOP")
-        exn_end = create_instruction("NOP")
-        insts = [
-            create_instruction("JUMP_FORWARD", target=target1),
-            exn_start,  # dead
-            target1,
-            create_instruction("JUMP_FORWARD", target=target3),
-            exn_end,  # dead
-            target2,
-            target3,
-        ]
-        exn_start.exn_tab_entry = bytecode_transformation.InstructionExnTabEntry(
-            exn_start, exn_end, target2, 0, True
-        )
-        bytecode_transformation.propagate_inst_exn_table_entries(insts)
-        insts = bytecode_analysis.remove_dead_code(insts)
-        self.assertEqual(len(insts), 5)
-        self.assertNotIn(exn_start, insts)
-        self.assertNotIn(exn_end, insts)
-        self.assertIn(target2, insts)
-        self.assertIn(target3, insts)
-        bytecode_transformation.update_offsets(insts)
-        tab = bytecode_transformation.compute_exception_table(insts)
-        self.assertEqual(len(tab), 1)
-        self.assertEqual(tab[0].start, 2)
-        self.assertEqual(tab[0].end, 4)
-        self.assertEqual(tab[0].target, 6)
-
     def test_unhandled_exception_in_dynamo(self):
         # traceback.format_exc() approximates an unhandled exception
         def f(a):
@@ -6911,7 +6802,6 @@ def fn():
         except RuntimeError as e:
             self.assertIn("smoge", traceback.format_exc())
 
-    @unittest.skip("Not clear why this test would trigger a segfault.")
     def test_unhandled_exception_in_dynamo2(self):
         # segfaults in python 3.11 if shadow frame is freed improperly
         from torch.testing import make_tensor
@@ -6943,7 +6833,7 @@ def fn():
 
     def test_variable_access_in_exception(self):
         def fn():
-            x = torch.ones(3, 3)
+            x = torch.ones(1)
             try:
                 raise RuntimeError("bad")
             except RuntimeError:
@@ -6951,7 +6841,87 @@ def fn():
             return x
 
         opt_fn = torch._dynamo.optimize("eager")(fn)
-        torch.allclose(opt_fn(), torch.tensor([3.0]))
+        self.assertEqual(opt_fn(), torch.tensor([2.0]))
+
+    def test_nested_sequential_with(self):
+        def fn(x):
+            with torch.set_grad_enabled(True):
+                with torch.set_grad_enabled(False):
+                    x = x + 1
+                with torch.set_grad_enabled(True):
+                    x = x + 1
+                return x
+
+        opt_fn = torch._dynamo.optimize("eager")(fn)
+        self.assertEqual(opt_fn(torch.ones(1)), torch.tensor([3.0]))
+
+    def test_nested_sequential_try(self):
+        def fn(x):
+            try:
+                try:
+                    x = x + 1
+                except:
+                    pass
+                try:
+                    try:
+                        x = x + 1
+                    except:
+                        pass
+                except:
+                    pass
+            except:
+                pass
+            return x
+
+        opt_fn = torch._dynamo.optimize("eager")(fn)
+        self.assertEqual(opt_fn(torch.ones(1)), torch.tensor([3.0]))
+
+    def test_nested_sequential_try_with(self):
+        def fn(x):
+            with torch.set_grad_enabled(True):
+                try:
+                    x = x + 1
+                except:
+                    pass
+                try:
+                    with torch.set_grad_enabled(False):
+                        x = x + 1
+                except:
+                    pass
+            return x
+
+        opt_fn = torch._dynamo.optimize("eager")(fn)
+        self.assertEqual(opt_fn(torch.ones(1)), torch.tensor([3.0]))
+
+    def test_nested_sequential_try_with_graph_break(self):
+        def fn(x, n):
+            with torch.set_grad_enabled(True):
+                with torch.set_grad_enabled(False):
+                    x = x + 1
+                    torch._dynamo.graph_break()
+                try:
+                    with torch.set_grad_enabled(False):
+                        x = x + 1
+                        if n == 0:
+                            torch._dynamo.graph_break()
+                except:
+                    pass
+                with torch.set_grad_enabled(False):
+                    x = x + 1
+                    torch._dynamo.graph_break()
+                x = x + 1
+            return x
+
+        counter = CompileCounter()
+        opt_fn = torch._dynamo.optimize(counter)(fn)
+        self.assertEqual(opt_fn(torch.ones(1), 0), torch.tensor([5.0]))
+        self.assertEqual(counter.frame_count, 1)
+
+        torch._dynamo.reset()
+        counter = CompileCounter()
+        opt_fn = torch._dynamo.optimize(counter)(fn)
+        self.assertEqual(opt_fn(torch.ones(1), 1), torch.tensor([5.0]))
+        self.assertEqual(counter.frame_count, 3)
 
     def test_ordered_dict_alias_reconstruct(self):
         od = collections.OrderedDict
@@ -6970,6 +6940,8 @@ def fn():
         dis.dis(fn)
         self.assertEqual(torch._dynamo.optimize("eager")(fn)(), 3)
 
+    # NOTE this test can be removed once multiline errors are in Python.
+    # See https://github.com/python/cpython/issues/106922
     @skipIfNotPy311
     def test_get_instruction_source_311(self):
         def f():
@@ -7020,7 +6992,11 @@ def fn():
 
         from torch._dynamo.utils import get_instruction_source_311
 
-        offsets = (3, 11, 15, 19, 23, 29, 35, 46, 58, 74)
+        if sys.version_info >= (3, 12):
+            # Offsets changed in 3.12, e.g. due to removal of PRECALL inst
+            offsets = (3, 11, 15, 19, 23, 29, 35, 44, 53, 65)
+        else:
+            offsets = (3, 11, 15, 19, 23, 29, 35, 46, 58, 74)
         insts = list(dis.get_instructions(f))
         # uncomment to determine offsets
         # print(*enumerate(insts), sep="\n")
@@ -7100,8 +7076,9 @@ def fn():
 """,
         )
         # test unicode (since assertExpectedInline doesn't support unicode)
+        op_offset = 74 if sys.version_info >= (3, 12) else 84
         self.assertEqual(
-            get_instruction_source_311(f.__code__, insts[84]),
+            get_instruction_source_311(f.__code__, insts[op_offset]),
             """\
             a = ("🔥🔥🔥" +
                 ~~~~~~~~
@@ -7119,6 +7096,20 @@ def fn():
             return x.cos()
 
         torch._dynamo.mark_dynamic(y, 0)
+        with self.assertRaises(ConstraintViolationError):
+            torch._dynamo.optimize("eager")(my_dyn_fn)(y)
+
+    # Translation validation changes the exception type, don't run with it
+    @torch.fx.experimental._config.patch(translation_validation=False)
+    def test_mark_dynamic_with_ranges(self):
+        y = torch.randn([8, 3, 3])
+
+        def my_dyn_fn(x):
+            if x.shape[0] == 3:
+                return x.sin()
+            return x.cos()
+
+        torch._dynamo.mark_dynamic(y, 0, min=2, max=5)
         with self.assertRaises(ConstraintViolationError):
             torch._dynamo.optimize("eager")(my_dyn_fn)(y)
 
@@ -8218,13 +8209,35 @@ def ___make_guard_fn():
         def f(lengths, values):
             sizes = lengths.tolist()
             for s in sizes:
-                torch._constrain_as_size(s, min=2, max=100)
+                torch._check_is_size(s)
+                torch._check(s >= 2)
+                torch._check(s <= 100)
             return torch.split(values, sizes)
 
         f(torch.tensor([2, 3, 4]), torch.randn(9))
 
-    # See https://github.com/pytorch/pytorch/issues/119689
-    @unittest.expectedFailure
+    @torch._dynamo.config.patch(
+        capture_scalar_outputs=True, capture_dynamic_output_shape_ops=True
+    )
+    def test_unbacked_auto_functionalize_op(self):
+        @torch.library.custom_op(
+            "mylib::mk_image", mutates_args=("decoder",), device_types=["cpu"]
+        )
+        def mk_image(decoder: Tensor) -> Tensor:
+            return torch.randn(2, 3, 4, 5)
+
+        @torch.library.register_fake("mylib::mk_image")
+        def _(decoder: Tensor) -> Tensor:
+            image_size = [torch.library.get_ctx().new_dynamic_size() for _ in range(4)]
+            return torch.empty(image_size)
+
+        @torch.compile(fullgraph=True)
+        def f(x):
+            return torch.ops.mylib.mk_image.default(x)
+
+        x = torch.zeros(100, dtype=torch.int64)
+        f(x)
+
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_runtime_assert_replacement(self):
         @torch.compile(backend="aot_eager")
@@ -8247,6 +8260,16 @@ def ___make_guard_fn():
         self.assertRaises(
             RuntimeError, lambda: fn(torch.randn(2, 3), torch.tensor([1]))
         )
+
+    @torch._dynamo.config.patch(
+        capture_scalar_outputs=True, capture_dynamic_output_shape_ops=True
+    )
+    def test_aot_autograd_propagate_unbacked_symints_shape(self):
+        @torch.compile(backend="aot_eager")
+        def f(x):
+            return torch.nonzero(x)
+
+        f(torch.tensor([1, 0, 3, 2, 0]))
 
     def test_simple_set_usage(self):
         def foo(x, y):
@@ -8645,12 +8668,30 @@ def ___make_guard_fn():
 
             return [t * k for t in yield_from_gen(t_list)]
 
-        t_list = [torch.randn([2, 3])] * 3
+        t_list = [torch.randn([2, 3]) for _ in range(3)]
         eager = yield_from_fn(t_list, 2)
         counter = CompileCounter()
         compiled = torch._dynamo.optimize(counter)(yield_from_fn)(t_list, 2)
         self.assertEqual(eager, compiled)
         self.assertEqual(counter.frame_count, 1)
+
+    def test_yield_from_in_a_loop(self):
+        def gen2():
+            yield 1
+
+        def gen1():
+            for value in range(5):
+                yield from gen2()
+
+        def fn(x):
+            c = 0
+            for i in gen1():
+                c = c + i
+            return x + c
+
+        opt_fn = torch.compile(fn, backend="eager")
+        x = torch.zeros(4)
+        self.assertEqual(fn(x), opt_fn(x))
 
     def test_yield_gen_and_from(self):
         def populate_and_multiply_sequence(n, multiplier):
@@ -8675,6 +8716,34 @@ def ___make_guard_fn():
         )
         self.assertEqual(eager, compiled)
         self.assertEqual(counter.frame_count, 1)
+
+    def test_yield_from_user_stop_iteration(self):
+        class MyIter:
+            def __init__(self, seq):
+                self.seq = seq
+                self.index = 0
+
+            def __iter__(self):
+                return self
+
+            def __next__(self):
+                self.index += 1
+                if self.index <= len(self.seq):
+                    return self.seq[self.index - 1]
+                raise StopIteration(self.index)
+
+        def yield_from_iter_fn(seq):
+            def gen(seq):
+                yield from MyIter(seq)
+
+            return [i for i in gen(seq)]
+
+        seq = [torch.randn([2, 3]) for _ in range(3)]
+        eager = yield_from_iter_fn(seq)
+        counter = CompileCounter()
+        compiled = torch._dynamo.optimize(counter)(yield_from_iter_fn)(seq)
+        self.assertEqual(eager, compiled)
+        self.assertEqual(counter.frame_count, 0)
 
     def test_yield_send_to_subgenerator_graph_break(self):
         def subgenerator(tensor):
@@ -8989,6 +9058,18 @@ def ___make_guard_fn():
             self.assertEqual(list(eager), list(compiled))
             self.assertEqual(len(counters["graph_break"]), 0)
 
+    def test_packaging_version_parse(self):
+        from packaging import version
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn():
+            x = torch.zeros(1)
+            if version.parse(torch.__version__) >= version.parse("2.0.0"):
+                return x + 1
+            return x
+
+        self.assertEqual(fn().item(), 1)
+
     def test_itertools_accumulate_tensors_user_defined(self):
         def udo_fn_0(a, b):
             return -1
@@ -9199,9 +9280,9 @@ def ___make_guard_fn():
             """\
 ShapeEnv not equal: field values don't match:
 
-==> allow_scalar_outputs: values don't match.
-  >  Left: False
-  > Right: True
+==> settings: values don't match.
+  >  Left: ShapeEnvSettings(allow_scalar_outputs=False, allow_dynamic_output_shape_ops=True, assume_static_by_default=False, specialize_zero_one=True, duck_shape=True, prefer_deferred_runtime_asserts_over_guards=False, _allow_complex_guards_as_runtime_asserts=False)
+  > Right: ShapeEnvSettings(allow_scalar_outputs=True, allow_dynamic_output_shape_ops=True, assume_static_by_default=False, specialize_zero_one=True, duck_shape=True, prefer_deferred_runtime_asserts_over_guards=False, _allow_complex_guards_as_runtime_asserts=False)
 """,
         )
         self._replay_and_check(main)
@@ -9253,7 +9334,7 @@ ShapeEnv not equal: field values don't match:
 ShapeEnv not equal: field values don't match:
 
 ==> name_to_node: values don't match.
-  >  Left: {f0, u0, u1}
+  >  Left: {u0, u1, zuf0}
   > Right: {}
 ==> unbacked_symfloat_counter: values don't match.
   >  Left: 1
@@ -9262,7 +9343,7 @@ ShapeEnv not equal: field values don't match:
   >  Left: 2
   > Right: 0
 ==> var_to_range: values don't match.
-  >  Left: {f0: ValueRanges(lower=-oo, upper=oo, is_bool=False), u0: ValueRanges(lower=-9223372036854775808, upper=9223372036854775807, is_bool=False), u1: ValueRanges(lower=0, upper=1, is_bool=False)}
+  >  Left: {u0: ValueRanges(lower=-9223372036854775808, upper=9223372036854775807, is_bool=False), u1: ValueRanges(lower=0, upper=1, is_bool=False), zuf0: ValueRanges(lower=-oo, upper=oo, is_bool=False)}
   > Right: {}
 """,
         )
@@ -9532,6 +9613,66 @@ ShapeEnv not equal: field values don't match:
             msg="Encountered an unexpected fallback to 'aten pow' in dynamo compiled code",
         )
 
+    def test_graph_break_compilation_metrics(self):
+        def fn(x):
+            x.cos()
+            torch._dynamo.graph_break()
+            x.sin()
+            torch._dynamo.graph_break()
+            return x.cos()
+
+        torch._dynamo.utils.clear_compilation_metrics()
+        x = torch.rand((4, 4))
+        f = torch.compile(fn, backend="eager")
+        f(x)
+        metrics = torch._dynamo.utils.get_compilation_metrics()
+        # Should only be one restart per event
+        (restart_reason,) = metrics[0].restart_reasons
+        self.assertTrue(
+            "skip function graph_break" in restart_reason,
+            "Should have logged graph break reason",
+        )
+        self.assertTrue(
+            metrics[0].dynamo_time_before_restart_s
+            <= metrics[0].entire_frame_compile_time_s
+        )
+
+        (restart_reason,) = metrics[1].restart_reasons
+        self.assertTrue(
+            "skip function graph_break" in restart_reason,
+            "Should have logged graph break reason",
+        )
+        self.assertTrue(
+            metrics[1].dynamo_time_before_restart_s
+            <= metrics[1].entire_frame_compile_time_s
+        )
+
+        # No restarts
+        self.assertTrue(
+            len(metrics[2].restart_reasons) == 0, "Last compile has no graph break"
+        )
+        self.assertTrue(metrics[2].dynamo_time_before_restart_s == 0)
+
+    def test_graph_break_compilation_metrics_on_failure(self):
+        def fn(x):
+            return x.sin()
+
+        def broken_backend(gm, example_inputs):
+            raise RuntimeError("broken backend")
+
+        x = torch.rand((4, 4))
+        f = torch.compile(fn, backend=broken_backend)
+        with unittest.mock.patch("torch._dynamo.config.suppress_errors", True):
+            torch._dynamo.utils.clear_compilation_metrics()
+            f(x)
+            metrics = torch._dynamo.utils.get_compilation_metrics()
+            for metric in metrics:
+                self.assertTrue(metric.dynamo_time_before_restart_s > 0)
+                self.assertTrue(
+                    "RuntimeError: broken backend" in metric.fail_reason,
+                    "Should have logged fail reason",
+                )
+
     def test_compilation_metrics_size_limit(self):
         def fn1(x):
             return x.relu()
@@ -9684,6 +9825,20 @@ fn
 
         self.assertEqual(fn(torch.tensor([0])), torch.zeros(0))
 
+    def test_guard_size_oblivious_backed(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def f(x):
+            y = x.size(0)
+            # This doesn't actually do anything
+            if guard_size_oblivious(y == 0):
+                return torch.randn(1)
+            else:
+                return torch.randn(2)
+
+        # Should not fail in either case
+        self.assertEqual(f(torch.randn(0)).shape, (1,))
+        self.assertEqual(f(torch.randn(2)).shape, (2,))
+
     def _test_compile_model_free(self, model_inp_ctr, weakref_watch):
         """
         Args:
@@ -9725,39 +9880,203 @@ fn
             lambda mod: mod.fc,
         )
 
-    def test_dynamo_cache_move_to_front(self):
-        class Mod(torch.nn.Module):
-            def __init__(self):
-                super(Mod, self).__init__()
-                self.fc = torch.nn.Linear(3, 3)
+    def test_sequential_module_free(self):
+        self._test_compile_model_free(
+            lambda: (
+                torch.nn.Sequential(
+                    torch.nn.Linear(100, 100),
+                    torch.nn.ReLU(),
+                ),
+                torch.randn(100, 100),
+            ),
+            lambda mod: mod[0],
+        )
 
-            def forward(self, out):
-                return self.fc(out)
+    def test_linear_module_free(self):
+        self._test_compile_model_free(
+            lambda: (torch.nn.Linear(100, 100), torch.randn(100, 100)),
+            lambda mod: mod,
+        )
 
-        def fn(x, mod):
+    # The following 2 tests fail due to https://github.com/python/cpython/issues/118013.
+    # Tracked by https://github.com/pytorch/pytorch/issues/124302.
+    # The xfails can be removed once Python 3.12 is updated on CI.
+    @xfailIfPy312
+    def test_outside_linear_module_free(self):
+        # Compared to test_linear_module_free, the linear
+        # layer is not the code object that is directly compiled.
+
+        # This test does not use _test_compile_model_free because of difficulty
+        # in handling variable fc.
+
+        cleared = False
+
+        def finalize():
+            nonlocal cleared
+            cleared = True
+
+        def run():
+            fc = torch.nn.Linear(100, 100)
+
+            class Mod(torch.nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    self.fc_ref = fc
+
+                def forward(self, x):
+                    return self.fc_ref(x)
+
+            mod = Mod()
+            inp = torch.randn(100, 100)
+            weakref.finalize(fc, finalize)
+            torch.compile(mod, backend="eager")(inp)
+
+        run()
+        # del fc  # This should delete all the references
+        gc.collect()
+        self.assertTrue(cleared)
+
+    @xfailIfPy312
+    def test_parameter_free(self):
+        def model_inp_ctr():
+            param = torch.nn.Parameter(torch.randn(100, 100))
+
+            class Mod(torch.nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    self.param = param
+
+                def forward(self, x):
+                    return self.param * x[0]
+
+            # return param to keep it alive in _test_compile_model_free
+            return Mod(), (torch.randn(100, 100), param)
+
+        self._test_compile_model_free(model_inp_ctr, lambda mod: mod.param)
+
+    def test_conditional_list_comp_in_context(self):
+        def fn(inp):
+            try:
+                return [torch.sin(x) for x in inp if x is not None]
+            except Exception:
+                pass
+
+        inp = [torch.randn(3, 3) for _ in range(3)] + [None]
+        opt_fn = torch.compile(fn, backend="eager")
+        opt_fn(inp)
+
+    def test_312_binary_slice_with_graph_break1(self):
+        l1 = torch.nn.Linear(5, 5)
+        l2 = torch.nn.Linear(5, 5)
+
+        def fn(x):
+            # causes a graph break with items in the stack
+            n = torch.nn.Sequential(l1, l2)
+            out = n[1:](x)
+            return out
+
+        opt_fn = torch.compile(fn, backend="eager")
+        opt_fn(torch.randn(5, 5))
+
+    def test_312_binary_slice_with_graph_break2(self):
+        class Foo:
+            def __setitem__(self, key, val):
+                pass
+
+            def __getitem__(self, key):
+                torch._dynamo.graph_break()
+                return 1
+
+        foo = Foo()
+
+        def fn(x):
+            # graph break in a STORE_SLICE instruction
+            foo[:] = x
+            # graph break in BINARY_SLICE with has_backedge check
+            x = x + foo[:]
+            if x is None:
+                x = x + 1
+            else:
+                x = x + 1
+            return x
+
+        opt_fn = torch.compile(fn, backend="eager")
+        opt_fn(torch.randn(5, 5))
+
+    def test_super_after_graph_break(self):
+        class Foo(torch.nn.Sequential):
+            def __init__(self, layers):
+                torch._dynamo.graph_break()
+                super().__init__(*layers)
+
+        def fn(x):
+            layers = [torch.nn.Linear(3, 3) for _ in range(3)]
+            mod = Foo(layers)
             return mod(x)
 
         opt_fn = torch.compile(fn, backend="eager")
+        opt_fn(torch.randn(3, 3))
 
-        m1 = Mod()
-        m2 = Mod()
-        m3 = Mod()
+    def test_load_fast_and_clear_graph_break(self):
+        # Can result in a segfault in 3.12+ if LOAD_FAST_AND_CLEAR
+        # is not handled properly in a graph break
+        def fn():
+            out = torch.cat([torch.randn(r, 5) for r in range(3)])
+            torch._dynamo.graph_break()
+            out = torch.cat([torch.randn(r, 5) for r in range(3)])
+            return out
+
+        self.assertEqual(torch._dynamo.optimize("eager")(fn)().shape, (3, 5))
+
+    def test_raises_importerror1(self):
+        @torch.compile(backend="eager")
+        def fn(x):
+            try:
+                import some_module_that_surely_does_not_exist
+
+                return
+            except ImportError:
+                pass
+            return x.sin()
+
+        x = torch.randn(8)
+        self.assertEqual(fn(x), x.sin())
+
+    def test_raises_importerror2(self):
+        @torch.compile(backend="eager")
+        def fn(x):
+            import some_module_that_surely_does_not_exist
+
+            return x + 1
+
+        x = torch.randn(8)
+        with self.assertRaises(ImportError):
+            fn(x)
+
+    def test_dynamo_cache_move_to_front(self):
+        def fn(x, const):
+            return x + const
+
+        # dynamic=False forces Dynamo to recompile
+        opt_fn = torch.compile(fn, backend="eager", dynamic=False)
+
         inp = torch.randn(3, 3)
 
         # NOTE: assumes that each cache entry is guarded
         # on unique Mod instance
-        opt_fn(inp, m1)
-        opt_fn(inp, m2)
-        opt_fn(inp, m3)
+        opt_fn(inp, 1)
+        opt_fn(inp, 2)
+        opt_fn(inp, 3)
 
         c1 = _debug_get_cache_entry_list(fn.__code__)
         self.assertEqual(len(c1), 3)
 
         # move cache entry to front
-        opt_fn(inp, m2)
+        opt_fn(inp, 2)
         c2 = _debug_get_cache_entry_list(fn.__code__)
         self.assertIs(c1[1], c2[0])
 
+    @torch._dynamo.config.patch(inline_inbuilt_nn_modules=False)
     def test_dynamo_cache_invalidate(self):
         class Mod(torch.nn.Module):
             def __init__(self):
@@ -9876,6 +10195,217 @@ fn
         self.assertEqual(expected.shape, actual.shape)
         self.assertEqual(expected.stride(), actual.stride())
         self.assertEqual(expected.storage_offset(), actual.storage_offset())
+
+    @torch._dynamo.config.patch(guard_nn_modules=True)
+    def test_hasattr_nn_module_guard(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.a = torch.nn.Linear(3, 3)
+
+            def forward(self, x):
+                if hasattr(self, "a"):
+                    return self.a(x)
+                else:
+                    return x
+
+        m = M()
+        x = torch.randn(3, 3)
+        ref = m(x)
+
+        opt_m = torch.compile(backend="eager")(m)
+        res = opt_m(x)
+        self.assertEqual(ref, res)
+
+    def test_ordered_dict_move_to_end(self):
+        d = {
+            "foo": 1,
+            "bar": 2,
+        }
+
+        d = collections.OrderedDict(d)
+        d.move_to_end("foo")
+
+        @torch.compile(backend="eager")
+        def fn(x, d):
+            return x * d["foo"] * d["bar"]
+
+        fn(torch.randn(4), d)
+        with unittest.mock.patch("torch._dynamo.config.error_on_recompile", True):
+            fn(torch.randn(4), d)
+
+    def test_defaultdict(self):
+        d = collections.defaultdict()
+        d["foo"] = 1
+        d["bar"] = 2
+
+        @torch.compile(backend="eager")
+        def fn(x, d):
+            return x * d["foo"] * d["bar"]
+
+        fn(torch.randn(4), d)
+        with unittest.mock.patch("torch._dynamo.config.error_on_recompile", True):
+            fn(torch.randn(4), d)
+
+    def test_custom_dict(self):
+        class MyDict(dict):
+            pass
+
+        d = {
+            "foo": 1,
+            "bar": 2,
+        }
+
+        d = MyDict(d)
+
+        @torch.compile(backend="eager")
+        def fn(x, d):
+            return x * d["foo"] * d["bar"]
+
+        fn(torch.randn(4), d)
+        with unittest.mock.patch("torch._dynamo.config.error_on_recompile", True):
+            fn(torch.randn(4), d)
+
+    @unittest.skipIf(not TEST_CUDA, "requires cuda")
+    @torch._dynamo.config.patch(
+        capture_scalar_outputs=True, capture_dynamic_output_shape_ops=True
+    )
+    @torch._functorch.config.patch(fake_tensor_propagate_real_tensors=True)
+    def test_interpolate_propagate_real_tensors(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def f(mask, box):
+            # u0, u1 = mask.tolist()
+            mask = torch.randn(1, 1, 30, 30, device="cuda")
+            h, w = box.tolist()
+            return torch.nn.functional.interpolate(
+                mask, (h, w), mode="bilinear", align_corners=False
+            )
+
+        f(torch.tensor([30, 30], device="cuda"), torch.tensor([68, 32], device="cuda"))
+
+    def test_custom_iter_dict(self):
+        class ReversedDict(dict):
+            def __iter__(self):
+                return reversed(list(self.keys()))
+
+        d = {
+            "foo": 1,
+            "bar": 2,
+        }
+
+        d = ReversedDict(d)
+
+        @torch.compile(backend="eager")
+        def fn(x, d):
+            return x * d["foo"] * d["bar"]
+
+        fn(torch.randn(4), d)
+        with unittest.mock.patch("torch._dynamo.config.error_on_recompile", True):
+            fn(torch.randn(4), d)
+
+    def test_custom_keys_iter_dict(self):
+        class ReversedDict(dict):
+            def keys(self):
+                return ["bar", "foo"]
+
+        d = {
+            "foo": 1,
+            "bar": 2,
+        }
+
+        d = ReversedDict(d)
+
+        @torch.compile(backend="eager")
+        def fn(x, d):
+            return x * d["foo"] * d["bar"]
+
+        fn(torch.randn(4), d)
+        with unittest.mock.patch("torch._dynamo.config.error_on_recompile", True):
+            fn(torch.randn(4), d)
+
+    def test_dict_guard_on_keys_order(self):
+        d = {
+            2: 4,
+            3: 5,
+        }
+
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        def fn(x, d):
+            for key, value in d.items():
+                x = x * key + value
+            return x
+
+        opt_fn = torch.compile(fn, backend=cnts)
+        opt_fn(torch.randn(4), d)
+        opt_fn(torch.randn(4), d)
+        # No recompilation
+        self.assertEqual(cnts.frame_count, 1)
+
+        # move 2 to the end
+        d[2] = d.pop(2)
+
+        x = torch.randn(4)
+        res = opt_fn(x, d)
+        # Check recompilation
+        self.assertEqual(cnts.frame_count, 2)
+        self.assertEqual(res, fn(x, d))
+
+    def test_dict_guard_on_keys_order2(self):
+        d = {
+            2: 4,
+            3: 5,
+        }
+
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        def fn(x, d):
+            for key in d:
+                value = d[key]
+                x = x * key + value
+            return x
+
+        opt_fn = torch.compile(fn, backend=cnts)
+        opt_fn(torch.randn(4), d)
+        opt_fn(torch.randn(4), d)
+        # No recompilation
+        self.assertEqual(cnts.frame_count, 1)
+
+        # move 2 to the end
+        d[2] = d.pop(2)
+
+        x = torch.randn(4)
+        res = opt_fn(x, d)
+        # Check recompilation
+        self.assertEqual(cnts.frame_count, 2)
+        self.assertEqual(res, fn(x, d))
+
+    def test_contains_dunder_dict(self):
+        class UserDefined:
+            def __init__(self):
+                self.a = 3
+                self.b = 5
+
+            def run(self, x):
+                if "a" in self.__dict__:
+                    x = x * self.a
+                if "b" in self.__dict__:
+                    x = x * self.b
+                self.c = 7
+                if "c" in self.__dict__:
+                    x = x * self.c
+                return x * self.__dict__.get("a") * self.__dict__.get("z", 2)
+
+        obj = UserDefined()
+
+        def fn(x):
+            return obj.run(x)
+
+        x = torch.randn(4)
+        ref = fn(x)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        res = opt_fn(x)
+        self.assertEqual(ref, res)
 
 
 class TestTracer(JitTestCase):

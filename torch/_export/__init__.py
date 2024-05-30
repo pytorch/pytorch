@@ -3,6 +3,7 @@ import dataclasses
 import functools
 import io
 import json
+import logging
 import os
 import re
 import sys
@@ -12,6 +13,7 @@ import weakref
 import zipfile
 from collections import OrderedDict
 from contextlib import contextmanager
+from functools import lru_cache
 
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 from unittest.mock import patch
@@ -27,6 +29,7 @@ from torch._decomp import core_aten_decompositions, get_decompositions
 from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo.exc import UserError, UserErrorType
 from torch._dynamo.source import ConstantSource
+from torch._export.non_strict_utils import make_constraints
 from torch._export.passes.collect_tracepoints_pass import CollectTracepointsPass
 from torch._functorch.aot_autograd import aot_export_module, GraphSignature
 from torch._functorch.eager_transforms import functionalize
@@ -38,13 +41,7 @@ from torch._subclasses.functional_tensor import FunctionalTensor
 from torch._utils_internal import log_export_usage
 from torch.export._tree_utils import reorder_kwargs
 from torch.export._unlift import _create_stateful_graph_module
-from torch.export.dynamic_shapes import (
-    _process_constraints,
-    _process_dynamic_shapes,
-    Constraint,
-    dims,
-    dynamic_dim,
-)
+from torch.export.dynamic_shapes import _combine_args, Constraint, dims, dynamic_dim
 from torch.export.exported_program import (
     _disable_prexisiting_fake_mode,
     ExportedProgram,
@@ -80,6 +77,7 @@ from .passes.add_runtime_assertions_for_constraints_pass import (
 )
 from .wrappers import _wrap_submodules
 
+log = logging.getLogger(__name__)
 
 @dataclasses.dataclass
 class ExportDynamoConfig:
@@ -87,6 +85,19 @@ class ExportDynamoConfig:
     Manage Export-specific configurations of Dynamo.
     """
     allow_rnn: bool = True
+
+
+# We only want to print this once to avoid flooding logs in workflows where capture_pre_autograd_graph
+# is called multiple times.
+@lru_cache
+def capture_pre_autograd_graph_warning():
+    log.warning("+============================+")
+    log.warning("|     !!!   WARNING   !!!    |")
+    log.warning("+============================+")
+    log.warning("capture_pre_autograd_graph() is deprecated and doesn't provide any function guarantee moving forward.")
+    log.warning("Please switch to use torch.export instead.")
+    if config.is_fbcode():
+        log.warning("Unless the unittest is in the blocklist, capture_pre_autograd_graph() will fallback to torch.export.")
 
 
 @compatibility(is_backward_compatible=False)
@@ -127,75 +138,89 @@ def capture_pre_autograd_graph(
         An nn.Module containing the traced method.
 
     """
-    from torch.export._trace import _convert_input_to_fake, DEFAULT_EXPORT_DYNAMO_CONFIG
-    from torch.export.dynamic_shapes import _process_dynamic_shapes
+    from torch.export._trace import _convert_input_to_fake, DEFAULT_EXPORT_DYNAMO_CONFIG, _ignore_backend_decomps
+    from torch._utils_internal import export_api_rollout_check
 
-    log_export_usage(event="export.private_api", flags={"capture_pre_autograd_graph"})
+    capture_pre_autograd_graph_warning()
 
     assert isinstance(f, torch.nn.Module), "Expected an nn.Module instance."
 
     if kwargs is None:
         kwargs = {}
 
-    constraints = _process_dynamic_shapes(f, args, kwargs, dynamic_shapes)
+    if export_api_rollout_check():
+        @lru_cache
+        def print_export_warning():
+            log.warning("Using torch.export._trace._export")
+        print_export_warning()
+        module = torch.export._trace._export(f, args, kwargs, dynamic_shapes=dynamic_shapes, pre_dispatch=True).module()
+    else:
+        log_export_usage(event="export.private_api", flags={"capture_pre_autograd_graph"})
 
-    # Do not decompose dropout for exported models, because in eval mode the dropout
-    # op disappears from the graph, which makes it difficult to switch to train mode.
-    # See https://github.com/pytorch/pytorch/pull/115258#issuecomment-1900755832.
-    decomp_table = {
-        op: op.decompose
-        for op in FunctionalTensor.maybe_aliasing_or_mutating_ops
-        if op != torch.ops.aten.dropout.default
-    }
-    with torch._dynamo.config.patch(dataclasses.asdict(DEFAULT_EXPORT_DYNAMO_CONFIG)):
-        m = torch._dynamo.export(
-            f,
-            constraints=constraints,
-            assume_static_by_default=True,
-            tracing_mode="symbolic",
-            decomposition_table=decomp_table,
-            pre_dispatch=True,
-            aten_graph=True,
-            _log_export_usage=False,
-        )(
-            *args,
-            **kwargs,
-        )[0]
-
-        _, _, _, fake_mode = _convert_input_to_fake(m, args, kwargs)
-
-        m.meta["inline_constraints"] = {
-            k: v
-            for k, v in fake_mode.shape_env.var_to_range.items()
-            if re.match(r"^[if]\d+$", str(k))
+        # Do not decompose dropout for exported models, because in eval mode the dropout
+        # op disappears from the graph, which makes it difficult to switch to train mode.
+        # See https://github.com/pytorch/pytorch/pull/115258#issuecomment-1900755832.
+        decomp_table = {
+            op: op.decompose
+            for op in FunctionalTensor.maybe_aliasing_or_mutating_ops
+            if op != torch.ops.aten.dropout.default
         }
+        with torch._dynamo.config.patch(dataclasses.asdict(DEFAULT_EXPORT_DYNAMO_CONFIG)), _ignore_backend_decomps():
+            m = torch._dynamo.export(
+                f,
+                dynamic_shapes=dynamic_shapes,
+                assume_static_by_default=True,
+                tracing_mode="symbolic",
+                decomposition_table=decomp_table,
+                pre_dispatch=True,
+                aten_graph=True,
+                _log_export_usage=False,
+            )(
+                *args,
+                **kwargs,
+            )[0]
 
-        if isinstance(f, torch.nn.Module):
-            from torch.export._trace import _restore_state_dict
-            _restore_state_dict(f, m)
+            _, _, _, fake_mode = _convert_input_to_fake(m, args, kwargs)
 
-        flat_args, _ = pytree.tree_flatten((args, kwargs or {}))
-        range_constraints = _process_constraints(fake_mode, m, 0, flat_args)
+            m.meta["inline_constraints"] = {
+                k: v
+                for k, v in fake_mode.shape_env.var_to_range.items()
+                if re.match(r"^[if]\d+$", str(k))
+            }
 
-        module = _create_stateful_graph_module(
-            m,
-            range_constraints=range_constraints,
-        )
+            if isinstance(f, torch.nn.Module):
+                from torch.export._trace import _restore_state_dict
+                _restore_state_dict(f, m)
 
-    error_message = \
-        """
-        Calling train() or eval() is not supported for exported models.
-        Alternatively, you may override these methods to do custom user behavior as follows:
+            flat_args, _ = pytree.tree_flatten((args, kwargs or {}))
+            combined_args = _combine_args(f, args, kwargs)
+            range_constraints = make_constraints(
+                fake_mode,
+                m,
+                combined_args,
+                dynamic_shapes,
+                0,
+            )
 
-            def _my_train(self, mode: bool = True):
-                ...
+            module = _create_stateful_graph_module(
+                m,
+                range_constraints=range_constraints,
+            )
 
-            def _my_eval(self):
-                ...
+        error_message = \
+            """
+            Calling train() or eval() is not supported for exported models.
+            Alternatively, you may override these methods to do custom user behavior as follows:
 
-            model.train = types.MethodType(_my_train, model)
-            model.eval = types.MethodType(_my_eval, model)
-        """
+                def _my_train(self, mode: bool = True):
+                    ...
+
+                def _my_eval(self):
+                    ...
+
+                model.train = types.MethodType(_my_train, model)
+                model.eval = types.MethodType(_my_eval, model)
+            """
 
     def _train(self, mode: bool = True):
         raise NotImplementedError(error_message)
@@ -226,11 +251,12 @@ def save(
         f = os.fspath(f)
 
     with zipfile.ZipFile(f, 'w') as zipf:
-        # Save every field the SerializedArtifact to a file
+        # Save every field in the SerializedArtifact to a file.
         assert isinstance(artifact.exported_program, bytes)
         zipf.writestr("serialized_exported_program.json", artifact.exported_program)
         zipf.writestr("serialized_state_dict.pt", artifact.state_dict)
         zipf.writestr("serialized_constants.pt", artifact.constants)
+        zipf.writestr("serialized_example_inputs.pt", artifact.example_inputs)
 
         zipf.writestr('version', ".".join(map(str, SCHEMA_VERSION)))
 
@@ -271,6 +297,7 @@ def load(
         serialized_exported_program: Optional[bytes] = None
         serialized_state_dict: Optional[bytes] = None
         serialized_constants: Optional[bytes] = None
+        serialized_example_inputs: Optional[bytes] = None
 
         for file_info in zipf.infolist():
             file_content = zipf.read(file_info.filename)
@@ -287,6 +314,8 @@ def load(
                 serialized_state_dict = file_content
             elif file_info.filename == "serialized_constants.pt":
                 serialized_constants = file_content
+            elif file_info.filename == "serialized_example_inputs.pt":
+                serialized_example_inputs = file_content
             elif file_info.filename.startswith("extra_files"):
                 filename = file_info.filename.split("/", 1)[1]
                 extra_files[filename] = file_content.decode('utf-8')
@@ -294,10 +323,12 @@ def load(
         assert serialized_exported_program is not None
         assert serialized_state_dict is not None
         assert serialized_constants is not None
+        assert serialized_example_inputs is not None
         artifact: SerializedArtifact = SerializedArtifact(
             serialized_exported_program,
             serialized_state_dict,
             serialized_constants,
+            serialized_example_inputs,
         )
 
         # Deserialize ExportedProgram
@@ -315,6 +346,7 @@ def aot_compile(
     options: Optional[Dict[str, Any]] = None,
     remove_runtime_assertions: bool = False,
     disable_constraint_solver: bool = False,
+    same_signature: bool = True,
 ) -> str:
     """
     Note: this function is not stable yet
@@ -354,10 +386,8 @@ def aot_compile(
     from torch.export._trace import _export_to_torch_ir
     from torch._inductor.decomposition import select_decomp_table
 
-    constraints = _process_dynamic_shapes(f, args, kwargs, dynamic_shapes)
-
     if config.is_predispatch:
-        gm = torch.export._trace._export(f, args, kwargs, constraints, pre_dispatch=True).module()
+        gm = torch.export._trace._export(f, args, kwargs, dynamic_shapes, pre_dispatch=True).module()
     else:
         # We want to export to Torch IR here to utilize the pre_grad passes in
         # inductor, which run on Torch IR.
@@ -365,16 +395,16 @@ def aot_compile(
             f,
             args,
             kwargs,
-            constraints,
+            dynamic_shapes,
             disable_constraint_solver=disable_constraint_solver,
+            same_signature=same_signature,
             # Disabling this flag, because instead we can rely on the mapping
             # dynamo_flat_name_to_original_fqn which is coming from Dynamo.
             restore_fqn=False,
         )
-    flat_example_inputs = pytree.arg_tree_leaves(*args, **(kwargs or {}))
 
     with torch.no_grad():
-        so_path = torch._inductor.aot_compile(gm, flat_example_inputs, options)  # type: ignore[arg-type]
+        so_path = torch._inductor.aot_compile(gm, args, kwargs, options=options)  # type: ignore[arg-type]
 
     return so_path
 

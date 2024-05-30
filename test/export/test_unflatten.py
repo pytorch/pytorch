@@ -1,26 +1,18 @@
 # Owner(s): ["oncall: export"]
 # flake8: noqa
+import copy
 import dataclasses
 import unittest
 from contextlib import contextmanager
 from dataclasses import dataclass
-from typing import List, Any
 from re import escape
+from typing import Any, List
 
 import torch
 import torch._dynamo as torchdynamo
+
 from functorch.experimental.control_flow import cond, map
 from torch import Tensor
-from torch.export import (
-    Constraint,
-    Dim,
-    dynamic_dim,
-    export,
-    unflatten,
-    FlatArgsAdapter,
-)
-from torch._higher_order_ops.torchbind import enable_torchbind_tracing
-from torch.export._trace import DEFAULT_EXPORT_DYNAMO_CONFIG
 from torch._export.utils import (
     get_buffer,
     get_param,
@@ -28,19 +20,30 @@ from torch._export.utils import (
     is_param,
     register_dataclass_as_pytree_node,
 )
-from torch.export import Constraint, Dim, export
+from torch._higher_order_ops.torchbind import enable_torchbind_tracing
+from torch.export import (
+    Constraint,
+    Dim,
+    dynamic_dim,
+    export,
+    FlatArgsAdapter,
+    unflatten,
+)
+from torch.export._trace import DEFAULT_EXPORT_DYNAMO_CONFIG
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing import FileCheck
 from torch.testing._internal.common_utils import (
-    run_tests,
-    TestCase,
+    find_library_location,
     IS_FBCODE,
     IS_MACOS,
     IS_SANDCASTLE,
     IS_WINDOWS,
-    find_library_location,
+    run_tests,
     skipIfTorchDynamo,
+    TestCase,
 )
+
+from torch.testing._internal.torchbind_impls import init_torchbind_implementations
 from torch.utils._pytree import (
     LeafSpec,
     tree_flatten,
@@ -252,7 +255,7 @@ class TestUnflatten(TestCase):
                 inps,
                 {},
                 preserve_module_call_signature=("foo.nested",),
-                strict=strict
+                strict=strict,
             )
             unflattened = unflatten(export_module)
             self.compare_outputs(export_module.module(), unflattened, inps)
@@ -305,7 +308,9 @@ class TestUnflatten(TestCase):
         export_module = torch.export.export(Mod(), (torch.randn((2, 3)),))
         unflattened = unflatten(export_module)
 
-        self.compare_outputs(export_module.module(), unflattened, (torch.randn((2, 3)),))
+        self.compare_outputs(
+            export_module.module(), unflattened, (torch.randn((2, 3)),)
+        )
 
     def test_unflatten_wrong_input(self):
         class Mod(torch.nn.Module):
@@ -327,11 +332,17 @@ class TestUnflatten(TestCase):
                 return a
 
         export_module = torch.export.export(Mod(), (torch.randn((2, 3)),))
-        with self.assertRaisesRegex(RuntimeError, escape("Expected input at *args[0].shape[0] to be equal to 2, but got 6")):
+        with self.assertRaisesRegex(
+            RuntimeError,
+            escape("Expected input at *args[0].shape[0] to be equal to 2, but got 6"),
+        ):
             export_module.module()(torch.randn(6, 6))
 
         unflattened = unflatten(export_module)
-        with self.assertRaisesRegex(RuntimeError, escape("Expected input at *args[0].shape[0] to be equal to 2, but got 6")):
+        with self.assertRaisesRegex(
+            RuntimeError,
+            escape("Expected input at *args[0].shape[0] to be equal to 2, but got 6"),
+        ):
             unflattened(torch.randn(6, 6))
 
     def test_unflatten_with_inplace_compile(self):
@@ -524,7 +535,9 @@ class TestUnflatten(TestCase):
                 for sub_node in transpose_module.graph.nodes:
                     if sub_node.op == "placeholder" or sub_node.op == "get_attr":
                         call_module_input_order.append(sub_node.op)
-        self.assertEqual(call_module_input_order, ["placeholder", "get_attr", "get_attr"])
+        self.assertEqual(
+            call_module_input_order, ["placeholder", "get_attr", "get_attr"]
+        )
 
     def test_unflatten_constant_tensor(self):
         class SubMod(torch.nn.Module):
@@ -546,22 +559,26 @@ class TestUnflatten(TestCase):
         export_module = torch.export.export(Mod(), (torch.randn((2, 3)),))
         unflattened = unflatten(export_module)
 
-        self.compare_outputs(export_module.module(), unflattened, (torch.randn((2, 3)),))
+        self.compare_outputs(
+            export_module.module(), unflattened, (torch.randn((2, 3)),)
+        )
 
     @skipIfTorchDynamo("custom objects not supported in dynamo yet")
     def test_unflatten_constant_obj(self):
-        if IS_MACOS:
-            raise unittest.SkipTest("non-portable load_library call used in test")
-        elif IS_SANDCASTLE or IS_FBCODE:
-            torch.ops.load_library(
-                "//caffe2/test/cpp/jit:test_custom_class_registrations"
-            )
-        elif IS_WINDOWS:
-            lib_file_path = find_library_location("torchbind_test.dll")
-            torch.ops.load_library(str(lib_file_path))
-        else:
-            lib_file_path = find_library_location("libtorchbind_test.so")
-            torch.ops.load_library(str(lib_file_path))
+        init_torchbind_implementations()
+
+        @torch._library.register_fake_class("_TorchScriptTesting::_Foo")
+        class FakeFoo:
+            def __init__(self, x: int, y: int):
+                self.x = x
+                self.y = y
+
+            @classmethod
+            def __obj_unflatten__(cls, flat_ctx):
+                return cls(**dict(flat_ctx))
+
+            def add_tensor(self, z):
+                return (self.x + self.y) * z
 
         class SubMod(torch.nn.Module):
             def __init__(self):
@@ -580,10 +597,14 @@ class TestUnflatten(TestCase):
                 return x + self.submod(x)
 
         with enable_torchbind_tracing():
-            export_module = torch.export.export(Mod(), (torch.randn((2, 3)),), strict=False)
+            export_module = torch.export.export(
+                Mod(), (torch.randn((2, 3)),), strict=False
+            )
         unflattened = unflatten(export_module)
 
-        self.compare_outputs(export_module.module(), unflattened, (torch.randn((2, 3)),))
+        self.compare_outputs(
+            export_module.module(), unflattened, (torch.randn((2, 3)),)
+        )
 
     def test_nested_leaf_non_strict(self):
         class Leaf(torch.nn.Module):
@@ -614,6 +635,117 @@ class TestUnflatten(TestCase):
         )
 
         torch.export.unflatten(ep)
+
+    def test_unflatten_submodule_ordering(self):
+        class Module2(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.register_buffer("buffer", torch.rand(3, 4))
+                self.register_parameter("param", torch.nn.Parameter(torch.rand(3, 4)))
+
+            def forward(self, x):
+                return x + self.buffer + self.param
+
+        class Module1(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.register_buffer("buffer", torch.rand(3, 4))
+                self.register_parameter("param", torch.nn.Parameter(torch.rand(3, 4)))
+
+            def forward(self, x):
+                return x + self.buffer + self.param
+
+        class Module(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.mod2 = Module2()
+                self.mod3 = self.mod2
+                self.mod1 = Module1()
+
+            def forward(self, x):
+                return self.mod3(self.mod2(self.mod1(x)))
+
+        mod = Module()
+
+        ep = torch.export.export(mod, (torch.randn(3, 4),))
+
+        unflattened = torch.export.unflatten(ep)
+        fqn_list = [x for x, _ in unflattened.named_modules(remove_duplicate=False)]
+        self.assertEqual(len(fqn_list), 4)
+        self.assertEqual(
+            [x for x, _ in mod.named_modules(remove_duplicate=False)],
+            fqn_list,
+        )
+
+    def test_duplicate_placeholder(self):
+        N, C, H, W = 1, 2, 2, 3
+
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                layer = torch.nn.LayerNorm([C, H, W])
+                self.norms = torch.nn.ModuleList(
+                    [
+                        layer,  # reuse layer norm
+                        layer,
+                        layer,
+                    ]
+                )
+
+            def forward(self, input_):
+                for i in range(len(self.norms)):
+                    output = self.norms[i](input_)
+                    input_ = output
+                return output
+
+        mod = MyModule()
+        input_ = torch.randn(N, C, H, W)
+
+        ep_strict = export(copy.deepcopy(mod), (input_,), strict=True)
+        umod = unflatten(ep_strict)
+        self.assertTrue(torch.allclose(umod(input_), mod(input_)))
+
+        ep_non_strict = export(copy.deepcopy(mod), (input_,), strict=False)
+        umod = unflatten(ep_non_strict)
+        self.assertTrue(torch.allclose(umod(input_), mod(input_)))
+
+    def test_simple_alias(self):
+        # handle weight sharing, check tensor ids after unflattening
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                # alias param
+                self.bias = torch.nn.Parameter(torch.randn(4))
+                self.m = torch.nn.Linear(4, 4)
+                self.m.bias = self.bias
+
+            def forward(self, x):
+                return self.m(x) + self.bias
+
+        m = Foo()
+        inps = (torch.randn(4, 4),)
+        ep = export(m, inps)
+        unep = unflatten(ep)
+        self.assertTrue(id(unep.m.bias) == id(unep.bias))
+
+        # handle aliasing where one alias is unused
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.bias = torch.nn.Parameter(torch.randn(4))
+                self.m = torch.nn.Linear(4, 4)
+                self.m.bias = (
+                    self.bias
+                )  # self.bias is unused, aliasing should be handled
+
+            def forward(self, x):
+                return self.m(x)
+
+        m = Foo()
+        inps = (torch.randn(4, 4),)
+        ep = export(m, inps)
+        unep = unflatten(ep)
+        self.assertTrue(torch.allclose(unep(*inps), m(*inps)))
 
 
 if __name__ == "__main__":

@@ -258,6 +258,61 @@ def dyn_shape(fake_mode, func, *args, **kwargs):
     raise DynamicOutputShapeException(func)
 
 
+@register_op_impl(aten._unique2.default)
+def unique2(
+    fake_mode, func, arg, sorted=True, return_inverse=False, return_counts=False
+):
+    if (
+        fake_mode.shape_env is None
+        or not fake_mode.shape_env.allow_dynamic_output_shape_ops
+    ):
+        # Without symints/symfloats, cannot handle this
+        raise DynamicOutputShapeException(func)
+
+    if (nnz := arg.unique_memo) is None:
+        # Avoid importing sympy at a module level
+        from torch.fx.experimental.symbolic_shapes import (
+            _constrain_range_for_size,
+            has_free_symbols,
+        )
+
+        if not has_free_symbols(arg.numel()) and arg.numel() == 0:
+            # If numel is zero, then the output size must be zero.
+            # In this case, we must not allocate an unbacked SymInt,
+            # because if we do, it will immediately get refined to
+            # zero, but this will be inconsistent with size oblivious
+            # tests (which will continue to claim that the unbacked
+            # symint cannot equal zero).  We could also unconditionally
+            # allocate an unbacked SymInt and not refine its range,
+            # but this seems more precise.
+            nnz = 0
+        else:
+            nnz = fake_mode.shape_env.create_unbacked_symint()
+
+            maxval = sys.maxsize - 1
+
+            if not has_free_symbols(arg.numel()):
+                maxval = int(arg.numel())
+
+            _constrain_range_for_size(nnz, max=maxval)
+
+        arg.unique_memo = nnz
+
+    ret = [arg.new_empty((nnz,))]
+
+    if return_inverse:
+        ret.append(torch.empty_like(arg))
+    else:
+        ret.append(arg.new_empty(0))
+
+    if return_counts:
+        ret.append(torch.empty_like(arg))
+    else:
+        ret.append(arg.new_empty(0))
+
+    return tuple(ret)
+
+
 @register_op_impl(aten.repeat_interleave.Tensor)
 def repeat_interleave_tensor(fake_mode, func, repeats, output_size=None):
     if output_size is None:
@@ -279,17 +334,24 @@ def repeat_interleave_tensor(fake_mode, func, repeats, output_size=None):
 
 @register_op_impl(torch.ops.aten._local_scalar_dense.default)
 def local_scalar_dense(fake_mode, func, arg):
-    if fake_mode.shape_env is None or not fake_mode.shape_env.allow_scalar_outputs:
+    if (r := arg.item_memo) is not None:
+        return r
+    if fake_mode.shape_env is None or (
+        not fake_mode.shape_env.allow_scalar_outputs
+        and not fake_mode.allow_scalar_outputs
+    ):
         # Without symints/symfloats, cannot handle this
         raise DataDependentOutputException(func)
     if is_float_dtype(arg.dtype):
-        return fake_mode.shape_env.create_unbacked_symfloat()
+        r = fake_mode.shape_env.create_unbacked_symfloat()
     elif is_integer_dtype(arg.dtype):
-        return fake_mode.shape_env.create_unbacked_symint()
+        r = fake_mode.shape_env.create_unbacked_symint()
     elif is_boolean_dtype(arg.dtype):
-        return fake_mode.shape_env.create_unbacked_symbool()
+        r = fake_mode.shape_env.create_unbacked_symbool()
     else:
         raise NotImplementedError(f"local_scalar_dense/item NYI for {arg.dtype}")
+    arg.item_memo = r
+    return r
 
 
 @register_op_impl(torch.ops.aten.nonzero.default)
@@ -301,39 +363,36 @@ def nonzero(fake_mode, func, arg):
         # Without symints/symfloats, cannot handle this
         raise DynamicOutputShapeException(func)
 
-    if arg.nonzero_memo is None:
-        nnz = fake_mode.shape_env.create_unbacked_symint()
-
-        # This is unsound, but it works well in practice
-        # See https://docs.google.com/document/d/1lFRYAJo5nrfxRhwIzGnfi2pbLpU6T4ytSRSuLJ5qebI/edit#
-        # TODO: Add a config knob to turn off this unsound behavior
-        #
-        # NB: If numel < 2, the bounds here might be COMPLETELY
-        # disjoint with what can actually occur.  But this is fine:
-        # remember, the hypothesis is that if your later code works
-        # with N >= 2, it will work with N = 1 and N = 0.
-        maxval = sys.maxsize - 1
-
+    if (nnz := arg.nonzero_memo) is None:
         # Avoid importing sympy at a module level
         from torch.fx.experimental.symbolic_shapes import (
             _constrain_range_for_size,
             has_free_symbols,
         )
 
-        if not has_free_symbols(arg.numel()):
-            # Don't upgrade the range if numel is less than two, since we then
-            # have an empty range which makes things go explodey.  We also
-            # don't allow for 2 because that would specialize the unbacked
-            # SymInt to 2, which is also likely to be buggy.
-            if arg.numel() > 2:
+        if not has_free_symbols(arg.numel()) and arg.numel() == 0:
+            # If numel is zero, then the output size must be zero.
+            # In this case, we must not allocate an unbacked SymInt,
+            # because if we do, it will immediately get refined to
+            # zero, but this will be inconsistent with size oblivious
+            # tests (which will continue to claim that the unbacked
+            # symint cannot equal zero).  We could also unconditionally
+            # allocate an unbacked SymInt and not refine its range,
+            # but this seems more precise.
+            nnz = 0
+        else:
+            nnz = fake_mode.shape_env.create_unbacked_symint()
+
+            maxval = sys.maxsize - 1
+
+            if not has_free_symbols(arg.numel()):
                 maxval = int(arg.numel())
 
-        _constrain_range_for_size(nnz, max=maxval)
+            _constrain_range_for_size(nnz, max=maxval)
 
-        arg._nonzero_memo = nnz
-        arg._nonzero_memo_vc = arg._version
+        arg.nonzero_memo = nnz
 
-    return arg.new_empty((arg.nonzero_memo, arg.dim()), dtype=torch.int64)
+    return arg.new_empty((nnz, arg.dim()), dtype=torch.int64)
 
 
 @register_op_impl(torch.ops.aten.masked_select.default)
@@ -516,6 +575,8 @@ def index_put_impl(fake_mode, func, *args, **kwargs):
 
 @register_op_impl(aten._nested_tensor_from_tensor_list.default)
 @register_op_impl(aten._nested_tensor_from_tensor_list.out)
+@register_op_impl(aten._nested_view_from_buffer.default)
+@register_op_impl(aten._nested_view_from_buffer_copy.default)
 def nested_tensors_unsupported(fake_mode, func, *args, **kwargs):
     raise UnsupportedOperatorException(
         "torch.compile does not support strided NestedTensor"
@@ -666,8 +727,8 @@ def meta__scaled_dot_product_flash(fake_mode, func, *args, **kwargs):
         None,
         max_seqlen_batch_q,
         max_seqlen_batch_k,
-        convert_tensor(torch.empty((), dtype=torch.long, device="meta"), "cpu"),
-        convert_tensor(torch.empty((), dtype=torch.long, device="meta"), "cpu"),
+        convert_tensor(torch.empty((), dtype=torch.long, device="meta"), query.device),
+        convert_tensor(torch.empty((), dtype=torch.long, device="meta"), query.device),
         debug_mask,
     )
 
@@ -716,8 +777,12 @@ def meta__scaled_dot_product_efficient(fake_mode, func, *args, **kwargs):
     res = res.transpose(1, 2)
 
     # See Note [Seed and Offset]:
-    seed = convert_tensor(torch.empty((), dtype=torch.long, device="meta"), "cpu")
-    offset = convert_tensor(torch.empty((), dtype=torch.long, device="meta"), "cpu")
+    seed = convert_tensor(
+        torch.empty((), dtype=torch.long, device="meta"), query.device
+    )
+    offset = convert_tensor(
+        torch.empty((), dtype=torch.long, device="meta"), query.device
+    )
 
     return res, logsum_exp, seed, offset
 
@@ -736,6 +801,7 @@ def meta__flash_attention_forward(fake_mode, func, *args, **kwargs):
     max_k = kwargs["max_k"]
     return_debug_mask = kwargs["return_debug_mask"]
     # unused: value, dropout_p, is_causal, scale
+    # unused: seqused_k, alibi_slopes, window_size_left, window_size_right
 
     def convert_tensor(t, device):
         return FakeTensor(fake_mode, t, device)
@@ -787,8 +853,8 @@ def meta__flash_attention_forward(fake_mode, func, *args, **kwargs):
     return (
         attention,
         logsumexp,
-        convert_tensor(torch.empty((), dtype=torch.long, device="meta"), "cpu"),
-        convert_tensor(torch.empty((), dtype=torch.long, device="meta"), "cpu"),
+        convert_tensor(torch.empty((), dtype=torch.long, device="meta"), query.device),
+        convert_tensor(torch.empty((), dtype=torch.long, device="meta"), query.device),
         debug_mask,
     )
 
@@ -842,10 +908,39 @@ def meta__efficient_attention_forward(fake_mode, func, *args, **kwargs):
     )
 
     # See Note [Seed and Offset]:
-    seed = convert_tensor(torch.empty((), dtype=torch.long, device="meta"), "cpu")
-    offset = convert_tensor(torch.empty((), dtype=torch.long, device="meta"), "cpu")
+    seed = convert_tensor(
+        torch.empty((), dtype=torch.long, device="meta"), query.device
+    )
+    offset = convert_tensor(
+        torch.empty((), dtype=torch.long, device="meta"), query.device
+    )
 
     return res, logsum_exp, seed, offset, actual_max_seqlen_q, actual_max_seqlen_k
+
+
+@register_op_impl(torch.ops.aten._pack_padded_sequence.default)
+def _pack_padded_sequence(fake_mode, func, inputs, lengths, batch_first):
+    if (
+        fake_mode.shape_env is None
+        or not fake_mode.shape_env.allow_dynamic_output_shape_ops
+    ):
+        # Without symints/symfloats, cannot handle this
+        raise DynamicOutputShapeException(func)
+
+    new_batch_size = fake_mode.shape_env.create_unbacked_symint()
+
+    from torch.fx.experimental.symbolic_shapes import _constrain_range_for_size
+
+    _constrain_range_for_size(new_batch_size)
+
+    if not batch_first:
+        # Inputs should have shape (batch_size, seq_len, *)
+        inputs = inputs.transpose(0, 1)
+
+    res_size = inputs.shape[1:]
+    packed_data = inputs.new_empty(res_size)
+    batch_size = inputs.new_empty((new_batch_size,))
+    return (packed_data, batch_size)
 
 
 FAST_OP_IMPLEMENTATIONS = {}
@@ -939,7 +1034,11 @@ def make_fast_binary_impl(slow_ref):
         # Do some extra safety checks to see if the output
         # stride is obvious
         for op in operands:
-            if isinstance(op, torch.Tensor) and op.shape == final_shape:
+            if (
+                isinstance(op, torch.Tensor)
+                and len(op.shape) == len(final_shape)
+                and op.shape == final_shape
+            ):
                 break
         else:
             return slow("both tensors nontrivially broadcast")

@@ -1,5 +1,4 @@
 import math
-import warnings
 
 import torch
 from torch import Tensor
@@ -13,6 +12,7 @@ from torch._torch_docs import reproducibility_notes
 
 from ..common_types import _size_1_t, _size_2_t, _size_3_t
 from typing import Optional, List, Tuple, Union
+from typing_extensions import deprecated
 
 __all__ = ['Conv1d', 'Conv2d', 'Conv3d', 'ConvTranspose1d', 'ConvTranspose2d', 'ConvTranspose3d',
            'LazyConv1d', 'LazyConv2d', 'LazyConv3d', 'LazyConvTranspose1d', 'LazyConvTranspose2d',
@@ -38,9 +38,6 @@ convolution_notes = \
         In other words, for an input of size :math:`(N, C_{in}, L_{in})`,
         a depthwise convolution with a depthwise multiplier `K` can be performed with the arguments
         :math:`(C_\text{in}=C_\text{in}, C_\text{out}=C_\text{in} \times \text{K}, ..., \text{groups}=C_\text{in})`."""}  # noqa: B950
-
-
-
 
 
 class _ConvNd(Module):
@@ -204,7 +201,7 @@ class Conv1d(_ConvNd):
       amount of implicit padding applied on both sides.
 
     * :attr:`dilation` controls the spacing between the kernel points; also
-      known as the à trous algorithm. It is harder to describe, but this `link`_
+      known as the \uue0 trous algorithm. It is harder to describe, but this `link`_
       has a nice visualization of what :attr:`dilation` does.
 
     {groups_note}
@@ -341,7 +338,7 @@ class Conv2d(_ConvNd):
       amount of implicit padding applied on both sides.
 
     * :attr:`dilation` controls the spacing between the kernel points; also
-      known as the à trous algorithm. It is harder to describe, but this `link`_
+      known as the \u00e0 trous algorithm. It is harder to describe, but this `link`_
       has a nice visualization of what :attr:`dilation` does.
 
     {groups_note}
@@ -483,7 +480,7 @@ class Conv3d(_ConvNd):
       can be either a string {{'valid', 'same'}} or a tuple of ints giving the
       amount of implicit padding applied on both sides.
 
-    * :attr:`dilation` controls the spacing between the kernel points; also known as the à trous algorithm.
+    * :attr:`dilation` controls the spacing between the kernel points; also known as the \u00e0 trous algorithm.
       It is harder to describe, but this `link`_ has a nice visualization of what :attr:`dilation` does.
 
     {groups_note}
@@ -610,7 +607,6 @@ class Conv3d(_ConvNd):
         return self._conv_forward(input, self.weight, self.bias)
 
 
-
 class _ConvTransposeNd(_ConvNd):
     def __init__(self, in_channels, out_channels, kernel_size, stride,
                  padding, dilation, transposed, output_padding,
@@ -638,9 +634,8 @@ class _ConvTransposeNd(_ConvNd):
                 output_size = output_size[num_non_spatial_dims:]
             if len(output_size) != num_spatial_dims:
                 raise ValueError(
-                    "ConvTranspose{}D: for {}D input, output_size must have {} or {} elements (got {})"
-                    .format(num_spatial_dims, input.dim(), num_spatial_dims,
-                            num_non_spatial_dims + num_spatial_dims, len(output_size)))
+                    f"ConvTranspose{num_spatial_dims}D: for {input.dim()}D input, output_size must have {num_spatial_dims} "
+                    f"or {num_non_spatial_dims + num_spatial_dims} elements (got {len(output_size)})")
 
             min_sizes = torch.jit.annotate(List[int], [])
             max_sizes = torch.jit.annotate(List[int], [])
@@ -691,7 +686,7 @@ class ConvTranspose1d(_ConvTransposeNd):
     * :attr:`output_padding` controls the additional size added to one side
       of the output shape. See note below for details.
 
-    * :attr:`dilation` controls the spacing between the kernel points; also known as the à trous algorithm.
+    * :attr:`dilation` controls the spacing between the kernel points; also known as the \u00e0 trous algorithm.
       It is harder to describe, but the link `here`_ has a nice visualization of what :attr:`dilation` does.
 
     {groups_note}
@@ -822,7 +817,7 @@ class ConvTranspose2d(_ConvTransposeNd):
     * :attr:`output_padding` controls the additional size added to one side
       of the output shape. See note below for details.
 
-    * :attr:`dilation` controls the spacing between the kernel points; also known as the à trous algorithm.
+    * :attr:`dilation` controls the spacing between the kernel points; also known as the \u00e0 trous algorithm.
       It is harder to describe, but the link `here`_ has a nice visualization of what :attr:`dilation` does.
 
     {groups_note}
@@ -979,7 +974,7 @@ class ConvTranspose3d(_ConvTransposeNd):
     * :attr:`output_padding` controls the additional size added to one side
       of the output shape. See note below for details.
 
-    * :attr:`dilation` controls the spacing between the kernel points; also known as the à trous algorithm.
+    * :attr:`dilation` controls the spacing between the kernel points; also known as the \u00e0 trous algorithm.
       It is harder to describe, but the link `here`_ has a nice visualization of what :attr:`dilation` does.
 
     {groups_note}
@@ -1122,10 +1117,13 @@ class ConvTranspose3d(_ConvTransposeNd):
 # `_ConvTransposeNd` is really not a mixin anymore (but multiple inheritance as
 # above would still work).
 class _ConvTransposeMixin(_ConvTransposeNd):
+
+    @deprecated(
+        "`_ConvTransposeMixin` is a deprecated internal class. "
+        "Please consider using public APIs.",
+        category=FutureWarning,
+    )
     def __init__(self, *args, **kwargs):
-        warnings.warn(
-            "_ConvTransposeMixin is a deprecated internal class. "
-            "Please consider using public APIs.")
         super().__init__(*args, **kwargs)
 
 
@@ -1152,7 +1150,7 @@ class _LazyConvXdMixin(LazyModuleMixin):
             super().reset_parameters()  # type: ignore[misc]
 
     # Signature of "initialize_parameters" is incompatible with the definition in supertype LazyModuleMixin
-    def initialize_parameters(self, input) -> None:  # type: ignore[override]
+    def initialize_parameters(self, input: Tensor, *args, **kwargs) -> None:  # type: ignore[override]
         # defined by parent class but using a protocol
         if self.has_uninitialized_params():  # type: ignore[misc]
             self.in_channels = self._get_in_channels(input)
@@ -1176,15 +1174,15 @@ class _LazyConvXdMixin(LazyModuleMixin):
         num_dims_no_batch = num_spatial_dims + 1  # +1 for channels dim
         num_dims_batch = num_dims_no_batch + 1
         if input.dim() not in (num_dims_no_batch, num_dims_batch):
-            raise RuntimeError("Expected {}D (unbatched) or {}D (batched) input to {}, but "
-                               "got input of size: {}".format(num_dims_no_batch, num_dims_batch,
-                                                              self.__class__.__name__, input.shape))
+            raise RuntimeError(f"Expected {num_dims_no_batch}D (unbatched) or {num_dims_batch}D (batched) input "
+                               f"to {self.__class__.__name__}, but "
+                               f"got input of size: {input.shape}")
         return input.shape[1] if input.dim() == num_dims_batch else input.shape[0]
 
     # Function to return the number of spatial dims expected for inputs to the module.
     # This is expected to be implemented by subclasses.
     def _get_num_spatial_dims(self) -> int:
-        raise NotImplementedError()
+        raise NotImplementedError
 
 
 # LazyConv1d defines weight as a Tensor but derived class defines it as UnitializeParameter

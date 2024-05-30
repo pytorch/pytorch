@@ -102,7 +102,7 @@ ALIAS_SPECIALIZATION(_feature_alpha_dropout, true,  true )
 } // anonymous namespace
 
 std::tuple<Tensor,Tensor>
-native_dropout_cpu(const Tensor& input, double p, c10::optional<bool> train) {
+native_dropout_cpu(const Tensor& input, double p, std::optional<bool> train) {
   if (input.numel() == 0) {
     return std::make_tuple(input, at::empty_like(input, input.options()));
   }

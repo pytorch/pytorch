@@ -1,6 +1,6 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 from abc import ABC, abstractmethod
-from typing import Optional, Union, Tuple
+from typing import Optional, Union, Tuple, Dict
 from functools import partial
 
 import torch
@@ -11,6 +11,7 @@ from torch.distributed._tensor import DeviceMesh, DTensor, Placement, Replicate,
 __all__ = [
     "ParallelStyle",
     "RowwiseParallel",
+    "SequenceParallel",
     "ColwiseParallel",
     "PrepareModuleInput",
     "PrepareModuleOutput",
@@ -94,7 +95,7 @@ class ColwiseParallel(ParallelStyle):
 
         # transform the input layouts to the desired layouts of ColwiseParallel
         if input_layouts != desired_input_layouts:
-            input_tensor = input_tensor.redistribute(placements=desired_input_layouts)
+            input_tensor = input_tensor.redistribute(placements=desired_input_layouts, async_op=True)
         return input_tensor
 
     def _partition_linear_fn(self, name, module, device_mesh):
@@ -118,7 +119,8 @@ class ColwiseParallel(ParallelStyle):
     @staticmethod
     def _prepare_output_fn(output_layouts, use_local_output, mod, outputs, device_mesh):
         # outputs is a shard on last dimension DTensor, i.e. Shard(-1)
-        outputs = outputs.redistribute(placements=output_layouts)
+        if outputs.placements != output_layouts:
+            outputs = outputs.redistribute(placements=output_layouts, async_op=True)
         # back to local tensor
         return outputs.to_local() if use_local_output else outputs
 
@@ -191,7 +193,7 @@ class RowwiseParallel(ParallelStyle):
             input_tensor = DTensor.from_local(input_tensor, device_mesh, input_layouts, run_check=False)
 
         if input_layouts != desired_input_layouts:
-            input_tensor = input_tensor.redistribute(placements=desired_input_layouts)
+            input_tensor = input_tensor.redistribute(placements=desired_input_layouts, async_op=True)
         return input_tensor
 
     def _partition_linear_fn(self, name, module, device_mesh):
@@ -219,7 +221,8 @@ class RowwiseParallel(ParallelStyle):
         # Rowwise sharding produces partial output, depending on output layouts:
         # 1. to replicate -> allreduce
         # 2. to shard -> reduce_scatter
-        outputs = outputs.redistribute(placements=output_layouts)
+        if outputs.placements != output_layouts:
+            outputs = outputs.redistribute(placements=output_layouts, async_op=True)
         # back to local tensor if use_local_output is True
         return outputs.to_local() if use_local_output else outputs
 
@@ -258,7 +261,7 @@ class SequenceParallel(ParallelStyle):
     Keyword Args:
         sequence_dim (int, optional):
             The sequence dimension of the input tensor for the ``nn.Module``, this is used to annotate the input tensor to
-            become a DTensor that is sharded on the sequence dimension.
+            become a DTensor that is sharded on the sequence dimension, default: 1.
         use_local_output (bool, optional):
             Whether to use local :class:`torch.Tensor` instead of :class:`DTensor` for the module output, default: False.
     Returns:
@@ -332,13 +335,19 @@ class PrepareModuleInput(ParallelStyle):
     ``input_layouts``, and perform layout redistribution according to the ``desired_input_layouts``.
 
     Keyword Args:
-        input_layouts (Union[Placement, Tuple[Placement]]):
+        input_layouts (Union[Placement, Tuple[Optional[Placement]]]):
             The DTensor layouts of input tensors for the nn.Module, this is used to convert the input tensors to
             DTensors. If some inputs are not torch.Tensor or no need to convert to DTensors, ``None`` need to be specified
-            as a placeholder.
-        desired_input_layouts (Union[Placement, Tuple[Placement]]):
+            as a placeholder. default: None.
+        desired_input_layouts (Union[Placement, Tuple[Optional[Placement]]]):
             The desired DTensor layout of input tensors for the nn.Module, this is used to ensure the inputs of the nn.Module
-            have the desired DTensor layouts. This argument needs to have the same length with ``input_layouts``.
+            have the desired DTensor layouts. This argument needs to have the same length with ``input_layouts``. default: None.
+        input_kwarg_layouts (Dict[str, Placement]):
+            The DTensor layouts of input kwargs for the nn.Module, this is used to convert the input kwarg tensors to DTensors.
+            default: None
+        desired_input_kwarg_layouts: (Dict[str, Placement]):
+            The desired DTensor layout of input kwargs for the nn.Module, this is used to ensure the inputs of the nn.Module
+            have the desired DTensor layouts. default: None.
         use_local_output (bool, optional):
             Whether to use local :class:`torch.Tensor` instead of :class:`DTensor` for the module inputs, default: False.
     Returns:
@@ -369,24 +378,37 @@ class PrepareModuleInput(ParallelStyle):
     def __init__(
         self,
         *,
-        input_layouts: Union[Placement, Tuple[Placement]],
-        desired_input_layouts: Union[Placement, Tuple[Placement]],
+        input_layouts: Optional[Union[Placement, Tuple[Optional[Placement]]]] = None,
+        desired_input_layouts: Optional[Union[Placement, Tuple[Optional[Placement]]]] = None,
+        input_kwarg_layouts: Optional[Dict[str, Placement]] = None,
+        desired_input_kwarg_layouts: Optional[Dict[str, Placement]] = None,
         use_local_output: bool = False
     ):
         self.input_layouts = (input_layouts,) if isinstance(input_layouts, Placement) else input_layouts
         self.desired_input_layouts = \
             (desired_input_layouts,) if isinstance(desired_input_layouts, Placement) else desired_input_layouts
         self.use_local_output = use_local_output
-        assert len(self.input_layouts) == len(self.desired_input_layouts), \
-            "input_layouts and desired_input_layouts should have same length!"
+        if self.input_layouts is not None:
+            assert self.desired_input_layouts is not None, "desired module inputs should not be None!"
+            assert len(self.input_layouts) == len(self.desired_input_layouts), \
+                "input_layouts and desired_input_layouts should have same length!"
+        self.with_kwargs = input_kwarg_layouts is not None
+        self.input_kwarg_layouts = input_kwarg_layouts or {}
+        self.desired_input_kwarg_layouts = desired_input_kwarg_layouts or {}
+        if self.with_kwargs:
+            assert len(self.input_kwarg_layouts) == len(self.desired_input_kwarg_layouts), \
+                "input_kwarg_layouts and desired_input_kwarg_layouts should have same length!"
 
     def _prepare_input_fn(self, inputs, device_mesh):
+        if self.input_layouts is None:
+            return inputs
         prepared_inputs = []
         if not isinstance(inputs, tuple):
             inputs = (inputs,)
         if len(inputs) != len(self.input_layouts):
             raise ValueError("module inputs and input_layouts should have same length!")
 
+        assert self.desired_input_layouts is not None, "desired module inputs should not be None!"
         for inp, input_layout, desired_layout in zip(inputs, self.input_layouts, self.desired_input_layouts):
             if input_layout is not None:
                 if isinstance(inp, DTensor):
@@ -395,15 +417,44 @@ class PrepareModuleInput(ParallelStyle):
                     dt_inp = inp
                 else:
                     dt_inp = DTensor.from_local(inp, device_mesh, (input_layout,), run_check=False)
-                if input_layout != desired_layout:
+
+                if desired_layout is not None and input_layout != desired_layout:
                     dt_inp = dt_inp.redistribute(placements=(desired_layout,))
                 prepared_inputs.append(dt_inp.to_local() if self.use_local_output else dt_inp)
             else:
                 prepared_inputs.append(inp)
         return tuple(prepared_inputs)
 
+    def _prepare_input_kwarg_fn(self, inputs, kwarg_inputs, device_mesh):
+        prepared_arg_inputs = self._prepare_input_fn(inputs, device_mesh)
+        prepared_kwarg_inputs = {}
+        for kwarg_key in kwarg_inputs.keys():
+            kwarg_val = kwarg_inputs[kwarg_key]
+            input_layout = None
+            if kwarg_key in self.input_kwarg_layouts:
+                input_layout = self.input_kwarg_layouts[kwarg_key]
+                assert isinstance(kwarg_val, torch.Tensor), f"input of key {kwarg_key} to the module should be a Tensor!"
+                kwarg_val = DTensor.from_local(kwarg_val, device_mesh, (input_layout,), run_check=False)
+
+                if kwarg_key in self.desired_input_kwarg_layouts:
+                    desired_layout = self.desired_input_kwarg_layouts[kwarg_key]
+                    if desired_layout != input_layout:
+                        kwarg_val = kwarg_val.redistribute(placements=(desired_layout,))
+
+                prepared_kwarg_inputs[kwarg_key] = kwarg_val.to_local() if self.use_local_output else kwarg_val
+            else:
+                prepared_kwarg_inputs[kwarg_key] = kwarg_val
+
+        return (prepared_arg_inputs, prepared_kwarg_inputs)
+
     def _apply(self, module: nn.Module, device_mesh: DeviceMesh) -> nn.Module:
-        module.register_forward_pre_hook(lambda _, inputs: self._prepare_input_fn(inputs, device_mesh))  # type: ignore[misc, call-arg]
+        if self.with_kwargs:
+            module.register_forward_pre_hook(
+                lambda _, inputs, kwargs: self._prepare_input_kwarg_fn(inputs, kwargs, device_mesh),
+                with_kwargs=True
+            )  # type: ignore[misc]
+        else:
+            module.register_forward_pre_hook(lambda _, inputs: self._prepare_input_fn(inputs, device_mesh))  # type: ignore[misc, call-arg]
         return module
 
 
@@ -421,7 +472,7 @@ class PrepareModuleOutput(ParallelStyle):
             The desired DTensor layouts of output tensors for the nn.Module, this is used to ensure the outputs of the nn.Module
             have the desired DTensor layouts.
         use_local_output (bool, optional):
-            Whether to use local :class:`torch.Tensor` instead of :class:`DTensor` for the module outputs, default: False.
+            Whether to use local :class:`torch.Tensor` instead of :class:`DTensor` for the module outputs, default: True.
     Returns:
         A ParallelStyle object that prepares the sharding layouts of the nn.Module's outputs.
 

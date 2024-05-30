@@ -63,7 +63,7 @@ inline int64_t get_tril_size(int64_t row, int64_t col, int64_t offset) {
 }
 
 inline void check_args(
-    int64_t row, int64_t col, c10::optional<Layout> layout_opt) {
+    int64_t row, int64_t col, std::optional<Layout> layout_opt) {
   TORCH_CHECK(row >= 0, "row must be non-negative, got", row);
   TORCH_CHECK(col >= 0, "col must be non-negative, got", col);
   if (layout_opt.has_value()) {

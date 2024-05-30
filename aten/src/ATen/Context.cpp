@@ -7,12 +7,16 @@
 #include <algorithm>
 #include <cctype>
 #include <string>
+#include <stdexcept>
 
 #include <ATen/cpu/FlushDenormal.h>
 
 #ifdef USE_FBGEMM
 #include <fbgemm/Fbgemm.h>
 #endif // USE_FBGEMM
+#if defined(__aarch64__) && !defined(C10_MOBILE)
+#include <cpuinfo.h>
+#endif
 
 namespace at {
 
@@ -174,7 +178,7 @@ void Context::alertCuBLASConfigNotDeterministic() const {
     "case, you must set an environment variable before running your PyTorch application: ",
     cublas_config_var_name, "=", cublas_deterministic_configs[0], " or ",
     cublas_config_var_name, "=", cublas_deterministic_configs[1], ". For more information, go to ",
-    "https://docs.nvidia.com/cuda/cublas/index.html#cublasApi_reproducibility"
+    "https://docs.nvidia.com/cuda/cublas/index.html#results-reproducibility"
   );
 
   if (deterministicAlgorithmsWarnOnly()) {
@@ -257,6 +261,30 @@ void Context::setLinalgPreferredBackend(at::LinalgBackend b) {
       "please file an issue on GitHub."
     );
   }
+}
+
+at::BlasBackend Context::blasPreferredBackend() const {
+  return blas_preferred_backend;
+}
+
+void Context::setBlasPreferredBackend(at::BlasBackend b) {
+#ifdef _MSC_VER
+  TORCH_WARN_ONCE(
+    "torch.backends.cuda.preferred_blas_library is an experimental feature. "
+    "It is not supported on Windows."
+  );
+#else
+  TORCH_CHECK((b != at::BlasBackend::Cublaslt) || hasCuBLASLt(),
+      "Cannot set preferred backend to cuBLASLt if PyTorch has not been compiled with cuBLASLt.");
+  if (b != at::BlasBackend::Cublas) {
+    TORCH_WARN_ONCE(
+      "torch.backends.cuda.preferred_blas_library is an experimental feature. "
+      "If you see any error or unexpected behavior when this flag is set "
+      "please file an issue on GitHub."
+    );
+  }
+  blas_preferred_backend = b;
+#endif
 }
 
 bool Context::allowFP16ReductionCuBLAS() const {
@@ -475,5 +503,22 @@ void Context::unsetDefaultMobileCPUAllocator() {
   // Setting the priority high to make sure no other allocator gets used instead of this.
   c10::SetCPUAllocator(prev_allocator_ptr_ , /*priority*/ 100);
   prev_allocator_ptr_ = nullptr;
+}
+
+bool Context::allowFP16ReductionCPU() const {
+  return allow_fp16_reduction_cpu;
+}
+
+void Context::setAllowFP16ReductionCPU(bool b) {
+  if ( b && !allow_fp16_reduction_cpu) {
+    // Check that CPU supports fp16 reductions
+#if defined(__aarch64__) && !defined(C10_MOBILE)
+    if (!cpuinfo_initialize() || !cpuinfo_has_arm_fp16_arith())
+#else
+    if (true)
+#endif
+      throw std::runtime_error("Float16 arithmetic is not supported by the CPU!");
+  }
+  allow_fp16_reduction_cpu = b;
 }
 } // namespace at

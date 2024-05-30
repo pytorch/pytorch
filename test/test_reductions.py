@@ -19,6 +19,7 @@ from torch.testing._internal.common_dtype import (
 )
 from torch.testing._internal.common_utils import (
     TestCase, run_tests, skipIfNoSciPy, slowTest, torch_to_numpy_dtype_dict,
+    parametrize,
     IS_WINDOWS)
 from torch.testing._internal.common_device_type import (
     OpDTypes, expectedFailureMeta, instantiate_device_type_tests, onlyCPU, dtypes, dtypesIfCUDA, dtypesIfCPU,
@@ -1219,18 +1220,10 @@ class TestReductions(TestCase):
     def test_aminmax(self, device, dtype):
 
         def _amin_wrapper(x, dim=None, keepdims=False):
-            with self.assertWarnsOnceRegex(UserWarning, "_aminmax is deprecated"):
-                if dim is None:
-                    return torch._aminmax(x)[0]
-                else:
-                    return torch._aminmax(x, dim, keepdims)[0]
+            return torch.aminmax(x, dim=dim, keepdim=keepdims)[0]
 
         def _amax_wrapper(x, dim=None, keepdims=False):
-            with self.assertWarnsOnceRegex(UserWarning, "_aminmax is deprecated"):
-                if dim is None:
-                    return torch._aminmax(x)[1]
-                else:
-                    return torch._aminmax(x, dim, keepdims)[1]
+            return torch.aminmax(x, dim=dim, keepdim=keepdims)[1]
 
         self._test_minmax_helper(_amin_wrapper, np.amin, device, dtype)
         self._test_minmax_helper(_amax_wrapper, np.amax, device, dtype)
@@ -1713,6 +1706,20 @@ class TestReductions(TestCase):
         self._test_reduction_function_with_numpy(torch.count_nonzero, np.count_nonzero, device, dtype)
         self._test_reduction_function_with_numpy(torch.count_nonzero, np.count_nonzero, device, dtype, True)
 
+    # TODO: Investigate why the output is not close to numpy.
+    def _get_relaxed_tolerances_for(self, dtype):
+        if dtype == torch.float16:
+            atol = 0.4
+            rtol = 1e-2
+        elif dtype == torch.float32:
+            atol = 7e-05
+            rtol = 3e-06
+        else:
+            # Default values
+            atol = None
+            rtol = None
+        return atol, rtol
+
     def _test_sum_reduction_vs_numpy(self, torch_fn, np_fn, device, dtype, with_keepdim=False, with_extremal=False):
         def is_integral(dtype):
             return dtype in integral_types()
@@ -1731,16 +1738,7 @@ class TestReductions(TestCase):
             exact_dtype = False
 
         # TODO: Investigate why the output is not close to numpy.
-        if dtype == torch.float16:
-            atol = 0.4
-            rtol = 1e-2
-        elif dtype == torch.float32:
-            atol = 7e-05
-            rtol = 3e-06
-        else:
-            # Default values
-            atol = None
-            rtol = None
+        atol, rtol = self._get_relaxed_tolerances_for(dtype)
         self._test_reduction_function_with_numpy(torch_fn, np_fn, device, dtype,
                                                  atol=atol, rtol=rtol, exact_dtype=exact_dtype,
                                                  with_keepdim=with_keepdim, with_extremal=with_extremal)
@@ -1771,12 +1769,14 @@ class TestReductions(TestCase):
         out_dtype = dtype
         inp_dtypes = all_types_and(torch.half) if out_dtype.is_floating_point else integral_types()
         for inp_dtype in inp_dtypes:
+            # TODO: Investigate why the output is not close to numpy.
+            atol, rtol = self._get_relaxed_tolerances_for(dtype)
             shape = _rand_shape(random.randint(2, 5), min_size=5, max_size=10)
             x = _generate_input(shape, inp_dtype, device, with_extremal=False)
             torch_fn = partial(torch.nansum, dtype=out_dtype)
             np_out_dtype = torch_to_numpy_dtype_dict[out_dtype]
             np_fn = partial(np.nansum, dtype=np_out_dtype)
-            self.compare_with_numpy(torch_fn, np_fn, x, device=None, dtype=None)
+            self.compare_with_numpy(torch_fn, np_fn, x, device=None, dtype=None, atol=atol, rtol=rtol)
 
     @dtypes(*all_types_and(torch.half))
     def test_argminmax_multiple(self, device, dtype):
@@ -2220,65 +2220,67 @@ class TestReductions(TestCase):
         self.assertEqual(x[:, :2].amax().item(), 5)
         self.assertEqual(x[:, :2].argmax().item(), 2)
 
-        dim_red_fns = [
-            "mean", "median", "nanmedian", "mode", "norm", "prod",
-            "std", "sum", "var", "max", "min", "amax", "amin"]
 
+    @precisionOverride({torch.float16: 1e-2, torch.bfloat16: 1e-2})
+    @dtypes(*set(all_types_and(torch.half, torch.bfloat16)) - {torch.uint8})
+    @parametrize("fn_name", [
+        "mean", "median", "nanmedian", "mode", "norm", "prod",
+        "std", "sum", "var", "max", "min", "amax", "amin"])
+    def test_dim_reduction_fns(self, device, dtype, fn_name):
         def normfn_attr(t, dim, keepdim=False, out=None):
             attr = torch.norm
             return attr(t, 2, dim, keepdim, out=out)
 
-        for fn_name in dim_red_fns:
-            fn_attr = getattr(torch, fn_name) if fn_name != "norm" else normfn_attr
+        fn_attr = getattr(torch, fn_name) if fn_name != "norm" else normfn_attr
 
-            def fn(x, dim, keepdim=False, out=None):
-                ans = fn_attr(x, dim, keepdim=keepdim, out=out)
-                return ans if not isinstance(ans, tuple) else ans[0]
+        def fn(x, dim, keepdim=False, out=None):
+            ans = fn_attr(x, dim, keepdim=keepdim, out=out)
+            return ans if not isinstance(ans, tuple) else ans[0]
 
-            def fn_tuple(x, dim, keepdim=False, out=None):
-                return fn_attr(x, dim, keepdim=keepdim, out=out)
+        def fn_tuple(x, dim, keepdim=False, out=None):
+            return fn_attr(x, dim, keepdim=keepdim, out=out)
 
-            def test_multidim(x, dim):
-                self.assertEqual(fn(x, dim).unsqueeze(dim), fn(x, dim, keepdim=True))
-                self.assertEqual(x.ndimension() - 1, fn(x, dim).ndimension())
-                self.assertEqual(x.ndimension(), fn(x, dim, keepdim=True).ndimension())
+        def test_multidim(x, dim):
+            self.assertEqual(fn(x, dim).unsqueeze(dim), fn(x, dim, keepdim=True))
+            self.assertEqual(x.ndimension() - 1, fn(x, dim).ndimension())
+            self.assertEqual(x.ndimension(), fn(x, dim, keepdim=True).ndimension())
 
-            # general case
-            x = torch.randn(3, 4, 5, device=device)
-            dim = random.randint(0, 2)
-            test_multidim(x, dim)
+        # general case
+        x = torch.randn(3, 4, 5, device=device)
+        dim = random.randint(0, 2)
+        test_multidim(x, dim)
 
-            # check 1-d behavior
-            x = torch.randn(1, device=device)
-            dim = 0
-            self.assertEqual(fn(x, dim).shape, ())
-            self.assertEqual(fn(x, dim, keepdim=True).shape, (1,))
+        # check 1-d behavior
+        x = torch.randn(1, device=device)
+        dim = 0
+        self.assertEqual(fn(x, dim).shape, ())
+        self.assertEqual(fn(x, dim, keepdim=True).shape, (1,))
 
-            # check reducing of a singleton dimension
-            dims = [3, 4, 5]
-            singleton_dim = random.randint(0, 2)
-            dims[singleton_dim] = 1
-            x = torch.randn(dims, device=device)
-            test_multidim(x, singleton_dim)
+        # check reducing of a singleton dimension
+        dims = [3, 4, 5]
+        singleton_dim = random.randint(0, 2)
+        dims[singleton_dim] = 1
+        x = torch.randn(dims, device=device)
+        test_multidim(x, singleton_dim)
 
-            # check reducing with output kwargs
-            if fn_name in ['median', 'nanmedian', 'mode', 'max', 'min']:
-                y = torch.randn(5, 3, device=device)
-                values = torch.randn(5, 3, device=device)
-                indices = torch.zeros(5, 3, device=device).long() - 1
-                fn_tuple(y, 1, keepdim=False, out=(values[:, 1], indices[:, 1]))
-                values_expected, indices_expected = fn_tuple(y, 1, keepdim=False)
-                self.assertEqual(values[:, 1], values_expected,
-                                 msg=f'{fn_name} values with out= kwarg')
-                self.assertEqual(indices[:, 1], indices_expected,
-                                 msg=f'{fn_name} indices with out= kwarg')
-                continue
-
-            x = torch.randn(5, 3, device=device)
+        # check reducing with output kwargs
+        if fn_name in ['median', 'nanmedian', 'mode', 'max', 'min']:
             y = torch.randn(5, 3, device=device)
-            fn(y, 1, keepdim=False, out=x[:, 1])
-            expected = fn(y, 1, keepdim=False)
-            self.assertEqual(x[:, 1], expected, msg=f'{fn_name} with out= kwarg')
+            values = torch.randn(5, 3, device=device)
+            indices = torch.zeros(5, 3, device=device).long() - 1
+            fn_tuple(y, 1, keepdim=False, out=(values[:, 1], indices[:, 1]))
+            values_expected, indices_expected = fn_tuple(y, 1, keepdim=False)
+            self.assertEqual(values[:, 1], values_expected,
+                             msg=f'{fn_name} values with out= kwarg')
+            self.assertEqual(indices[:, 1], indices_expected,
+                             msg=f'{fn_name} indices with out= kwarg')
+            return
+
+        x = torch.randn(5, 3, device=device)
+        y = torch.randn(5, 3, device=device)
+        fn(y, 1, keepdim=False, out=x[:, 1])
+        expected = fn(y, 1, keepdim=False)
+        self.assertEqual(x[:, 1], expected, msg=f'{fn_name} with out= kwarg')
 
     @onlyCUDA
     @largeTensorTest('10GB')

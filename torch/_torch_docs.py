@@ -2195,13 +2195,13 @@ Example::
 add_docstr(
     torch.can_cast,
     r"""
-can_cast(from, to) -> bool
+can_cast(from_, to) -> bool
 
 Determines if a type conversion is allowed under PyTorch casting rules
 described in the type promotion :ref:`documentation <type-promotion-doc>`.
 
 Args:
-    from (dtype): The original :class:`torch.dtype`.
+    from\_ (dtype): The original :class:`torch.dtype`.
     to (dtype): The target :class:`torch.dtype`.
 
 Example::
@@ -2305,8 +2305,8 @@ Keyword Args:
         times each observation should be repeated. Its numel must equal the number of columns of :attr:`input`.
         Must have integral dtype. Ignored if ``None``. Defaults to ``None``.
     aweights (tensor, optional): A Scalar or 1D array of observation vector weights.
-        These relative weights are typically large for observations considered “important” and smaller for
-        observations considered less “important”. Its numel must equal the number of columns of :attr:`input`.
+        These relative weights are typically large for observations considered "important" and smaller for
+        observations considered less "important". Its numel must equal the number of columns of :attr:`input`.
         Must have floating point dtype. Ignored if ``None``. Defaults to ``None``.
 
 Returns:
@@ -4021,7 +4021,7 @@ Alias for :func:`torch.div`.
 add_docstr(
     torch.dot,
     r"""
-dot(input, other, *, out=None) -> Tensor
+dot(input, tensor, *, out=None) -> Tensor
 
 Computes the dot product of two 1D tensors.
 
@@ -4032,7 +4032,7 @@ Computes the dot product of two 1D tensors.
 
 Args:
     input (Tensor): first tensor in the dot product, must be 1D.
-    other (Tensor): second tensor in the dot product, must be 1D.
+    tensor (Tensor): second tensor in the dot product, must be 1D.
 
 Keyword args:
     {out}
@@ -4041,6 +4041,10 @@ Example::
 
     >>> torch.dot(torch.tensor([2, 3]), torch.tensor([2, 1]))
     tensor(7)
+
+    >>> t1, t2 = torch.tensor([0, 1]), torch.tensor([2, 3])
+    >>> torch.dot(t1, t2)
+    tensor(3)
 """.format(
         **common_args
     ),
@@ -4773,7 +4777,7 @@ This is detailed in the "Keyword Arguments" section below.
 The gradient is estimated by estimating each partial derivative of :math:`g` independently. This estimation is
 accurate if :math:`g` is in :math:`C^3` (it has at least 3 continuous derivatives), and the estimation can be
 improved by providing closer samples. Mathematically, the value at each interior point of a partial derivative
-is estimated using `Taylor’s theorem with remainder <https://en.wikipedia.org/wiki/Taylor%27s_theorem>`_.
+is estimated using `Taylor's theorem with remainder <https://en.wikipedia.org/wiki/Taylor%27s_theorem>`_.
 Letting :math:`x` be an interior point with :math:`x-h_l` and :math:`x+h_r` be points neighboring
 it to the left and right respectively, :math:`f(x+h_r)` and :math:`f(x-h_l)` can be estimated using:
 
@@ -7587,7 +7591,7 @@ Supports strided and sparse 2-D tensors as inputs, autograd with
 respect to strided inputs.
 
 This operation has support for arguments with :ref:`sparse layouts<sparse-docs>`.
-If :attr:`out` is provided it's layout will be used. Otherwise, the result
+If :attr:`out` is provided its layout will be used. Otherwise, the result
 layout will be deduced from that of :attr:`input`.
 
 {sparse_beta_warning}
@@ -7873,9 +7877,8 @@ Example::
     >>> weights = torch.tensor([0, 10, 3, 0], dtype=torch.float) # create a tensor of weights
     >>> torch.multinomial(weights, 2)
     tensor([1, 2])
-    >>> torch.multinomial(weights, 4) # ERROR!
-    RuntimeError: invalid argument 2: invalid multinomial distribution (with replacement=False,
-    not enough non-negative category to sample) at ../aten/src/TH/generic/THTensorRandom.cpp:320
+    >>> torch.multinomial(weights, 5) # ERROR!
+    RuntimeError: cannot sample n_sample > prob_dist.size(-1) samples without replacement
     >>> torch.multinomial(weights, 4, replacement=True)
     tensor([ 2,  1,  1,  1])
 """.format(
@@ -13722,6 +13725,58 @@ Example::
 """,
 )
 
+add_docstr(
+    torch.Generator.graphsafe_set_state,
+    r"""
+Generator.graphsafe_set_state(state) -> None
+
+Sets the state of the generator to the specified state in a manner that is safe for use in graph capture.
+This method is crucial for ensuring that the generator's state can be captured in the CUDA graph.
+
+Arguments:
+    state (torch.Generator): A Generator point to the new state for the generator, typically obtained from `graphsafe_get_state`.
+
+Example:
+    >>> g_cuda = torch.Generator(device='cuda')
+    >>> g_cuda_other = torch.Generator(device='cuda')
+    >>> current_state = g_cuda_other.graphsafe_get_state()
+    >>> g_cuda.graphsafe_set_state(current_state)
+""",
+)
+
+add_docstr(
+    torch.Generator.graphsafe_get_state,
+    r"""
+Generator.graphsafe_get_state() -> torch.Generator
+
+Retrieves the current state of the generator in a manner that is safe for graph capture.
+This method is crucial for ensuring that the generator's state can be captured in the CUDA graph.
+
+Returns:
+    torch.Generator: A Generator point to the current state of the generator
+
+Example:
+    >>> g_cuda = torch.Generator(device='cuda')
+    >>> current_state = g_cuda.graphsafe_get_state()
+""",
+)
+
+add_docstr(
+    torch.Generator.clone_state,
+    r"""
+Generator.clone_state() -> torch.Generator
+
+Clones the current state of the generator and returns a new generator pointing to this cloned state.
+This method is beneficial for preserving a particular state of a generator to restore at a later point.
+
+Returns:
+    torch.Generator: A Generator pointing to the newly cloned state.
+
+Example:
+    >>> g_cuda = torch.Generator(device='cuda')
+    >>> cloned_state = g_cuda.clone_state()
+""",
+)
 
 add_docstr(
     torch.Generator.manual_seed,

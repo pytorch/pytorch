@@ -1,7 +1,7 @@
 #include <ATen/core/Dict.h>
 
-namespace c10 {
-namespace detail {
+
+namespace c10::detail {
 bool operator==(const DictImpl& lhs, const DictImpl& rhs) {
   bool isEqualFastChecks =
       *lhs.elementTypes.keyType == *rhs.elementTypes.keyType &&
@@ -25,5 +25,4 @@ bool operator==(const DictImpl& lhs, const DictImpl& rhs) {
 
   return true;
 }
-} // namespace detail
-} // namespace c10
+} // namespace c10::detail

@@ -4,6 +4,7 @@
 #include <ATen/core/ivalue.h>
 #include <ATen/record_function.h>
 #include <c10/core/thread_pool.h>
+#include <c10/macros/Macros.h>
 #include <c10/util/Exception.h>
 #include <c10/util/irange.h>
 #include <torch/csrc/autograd/edge.h>
@@ -180,7 +181,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
   void callFunction(
       Function& f,
       Stack& stack,
-      c10::optional<size_t> bailOut = c10::nullopt,
+      std::optional<size_t> bailOut = c10::nullopt,
       bool next = true) {
     bool newFrame = f.call(stack, bailOut, [&](const Code& code) {
       enterFrame(code, stack.size() - code.num_inputs());
@@ -239,6 +240,8 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
     std::size_t initialSize_{stack_.size()};
   };
 
+  struct C10_UNUSED DoNothing {};
+
 #if defined(__GNUC__) || defined(__clang__)
 #define JIT_USE_COMPUTED_GOTO
 #endif
@@ -265,7 +268,8 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
   inst = instFetch(1); \
   INST_DISPATCH
 
-  bool runImpl(Stack& stack) {
+  template <bool EnableProfiling>
+  bool runTemplate(Stack& stack) {
     // if we have never run before, then we might have to return the
     // stack when we suspend, record where it starts so we return the right
     // stack
@@ -301,8 +305,12 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
         };
 
         auto instGuard = [&] {
-          return profiling::InstructionSpan{
-              *frame.function->instructions_source()[frame.pc]};
+          if constexpr (!EnableProfiling) {
+            return DoNothing{};
+          } else {
+            return profiling::InstructionSpan{
+                *frame.function->instructions_source()[frame.pc]};
+          }
         };
 
         Instruction inst = instFetch(0);
@@ -874,7 +882,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
       // Janky af.  See https://github.com/pytorch/pytorch/issues/54612
       auto* not_implemented_error = dynamic_cast<c10::NotImplementedError*>(&e);
 
-      c10::optional<std::string> python_class_name;
+      std::optional<std::string> python_class_name;
       if (jit_exception) {
         python_class_name = jit_exception->getPythonClassName();
       }
@@ -889,6 +897,14 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
 #undef INST
 #undef JIT_USE_COMPUTED_GOTO
 
+  bool runImpl(Stack& stack) {
+    if (!profiling::isProfilingOngoing()) {
+      return runTemplate</*EnableProfiling*/ false>(stack);
+    } else {
+      return runTemplate</*EnableProfiling*/ true>(stack);
+    }
+  }
+
   void formatStackTrace(std::ostream& out) {
     format_stack_trace(out, callstack());
   }
@@ -897,7 +913,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
       const std::exception& e,
       bool is_jit_exception,
       c10::NotImplementedError* not_implemented_error,
-      c10::optional<std::string> python_class_name) {
+      std::optional<std::string> python_class_name) {
     ExceptionMessage msg(e);
     std::ostringstream ss;
     std::string class_name =

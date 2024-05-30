@@ -1,6 +1,7 @@
 """Script to generate baseline values from PyTorch initialization algorithms"""
 
 import sys
+
 import torch
 
 HEADER = """
@@ -19,13 +20,13 @@ INITIALIZERS = {
     "Xavier_Uniform": lambda w: torch.nn.init.xavier_uniform(w),
     "Xavier_Normal": lambda w: torch.nn.init.xavier_normal(w),
     "Kaiming_Normal": lambda w: torch.nn.init.kaiming_normal(w),
-    "Kaiming_Uniform": lambda w: torch.nn.init.kaiming_uniform(w)
+    "Kaiming_Uniform": lambda w: torch.nn.init.kaiming_uniform(w),
 }
 
 
 def emit(initializer_parameter_map):
     # Don't write generated with an @ in front, else this file is recognized as generated.
-    print("// @{} from {}".format('generated', __file__))
+    print("// @{} from {}".format("generated", __file__))
     print(HEADER)
     for initializer_name, weights in initializer_parameter_map.items():
         print(PARAMETERS.format(initializer_name))
@@ -63,10 +64,11 @@ def run(initializer):
 def main():
     initializer_parameter_map = {}
     for initializer in INITIALIZERS.keys():
-        sys.stderr.write(f'Evaluating {initializer} ...\n')
+        sys.stderr.write(f"Evaluating {initializer} ...\n")
         initializer_parameter_map[initializer] = run(initializer)
 
     emit(initializer_parameter_map)
+
 
 if __name__ == "__main__":
     main()

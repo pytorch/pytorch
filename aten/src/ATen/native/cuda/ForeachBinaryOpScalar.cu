@@ -239,7 +239,9 @@ std::vector<Tensor> foreach_tensor_sub_scalar_kernel_cuda(
       });
 }
 
-FOREACH_BINARY_OP_SCALAR(all_types_half_bfloat16, clamp_max, minimum, false);
-FOREACH_BINARY_OP_SCALAR(all_types_half_bfloat16, clamp_min, maximum, false);
+// NOTE(crcrpar): `all_types_half_bfloat16` does not cover bool, so temporarily
+// set `division_op` to true.
+FOREACH_BINARY_OP_SCALAR(all_types_half_bfloat16, clamp_max, minimum, true);
+FOREACH_BINARY_OP_SCALAR(all_types_half_bfloat16, clamp_min, maximum, true);
 
 } // namespace at::native

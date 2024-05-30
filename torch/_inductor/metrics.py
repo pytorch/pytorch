@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import csv
+import dataclasses
 import inspect
 import os
 import re
@@ -39,8 +40,11 @@ ir_nodes_pre_fusion = 0
 # counters for tracking to_dtype inserted
 cpp_to_dtype_count = 0
 
-# counters for tracking cpp_wrapper disabled
-disable_cpp_wrapper = 0
+# The length counts the number of outer loop fusions.
+# Each element counts the number of inner kernels in each outer loop fusion.
+cpp_outer_loop_fused_inner_counts: List[int] = []
+
+num_comprehensive_padding = 0
 
 
 # reset all counters
@@ -50,7 +54,8 @@ def reset():
     global num_bytes_accessed, nodes_num_elem
     global ir_nodes_pre_fusion
     global cpp_to_dtype_count
-    global disable_cpp_wrapper
+    global cpp_outer_loop_fused_inner_counts
+    global num_comprehensive_padding
 
     generated_kernel_count = 0
     generated_cpp_vec_kernel_count = 0
@@ -59,7 +64,51 @@ def reset():
     node_runtimes.clear()
     ir_nodes_pre_fusion = 0
     cpp_to_dtype_count = 0
-    disable_cpp_wrapper = 0
+    cpp_outer_loop_fused_inner_counts.clear()
+    num_comprehensive_padding = 0
+
+
+@dataclass
+class CachedMetricsDeltas:
+    """
+    The subset of metrics we want update across cache hits, e.g., the
+    FxGraphCache.
+    """
+
+    generated_kernel_count: int
+    generated_cpp_vec_kernel_count: int
+    ir_nodes_pre_fusion: int
+    cpp_to_dtype_count: int
+    num_bytes_accessed: int
+
+
+def get_metric_fields():
+    return [field.name for field in dataclasses.fields(CachedMetricsDeltas)]
+
+
+class CachedMetricsHelper:
+    """
+    A helper class to help calculate and apply counter deltas for those
+    metrics we want to save with cache entries (e.g., FxGraphCache) and
+    apply on a cache hit.
+    """
+
+    def __init__(self):
+        self.cached_metrics = {}
+        for metric in get_metric_fields():
+            self.cached_metrics[metric] = globals()[metric]
+
+    def get_deltas(self) -> CachedMetricsDeltas:
+        delta_metrics = {}
+        for metric in get_metric_fields():
+            delta_metrics[metric] = globals()[metric] - self.cached_metrics[metric]
+
+        return CachedMetricsDeltas(**delta_metrics)
+
+    @staticmethod
+    def apply_deltas(delta: CachedMetricsDeltas):
+        for metric in get_metric_fields():
+            globals()[metric] += getattr(delta, metric)
 
 
 REGISTERED_METRIC_TABLES: Dict[str, MetricTable] = {}
@@ -160,6 +209,21 @@ MetricTable.register_table(
         "size_hints",
         "reduction_hint",
         "speedup",
+    ],
+)
+
+# Log the fusion failures due to indexing mismatch
+MetricTable.register_table(
+    "fusion_failure_due_to_indexing_mismatch",
+    [
+        "pre_grad_graph_id",
+        "post_grad_graph_id",
+        "node1_name",
+        "node2_name",
+        "node1_debug_str",
+        "node2_debug_str",
+        "common_buffer_names",
+        "failure_reason",
     ],
 )
 

@@ -723,7 +723,7 @@ class TestPythonPytree(TestCase):
                 self.y = y
 
         with self.assertWarnsRegex(
-            UserWarning, "torch.utils._pytree._register_pytree_node"
+            FutureWarning, "torch.utils._pytree._register_pytree_node"
         ):
             py_pytree._register_pytree_node(
                 DummyType,
@@ -915,15 +915,44 @@ TreeSpec(tuple, None, [*,
         self.assertEqual(spec, py_pytree.treespec_loads(serialized_spec))
 
     def test_pytree_serialize_namedtuple(self):
-        Point = namedtuple("Point", ["x", "y"])
-        spec = py_pytree.TreeSpec(
-            namedtuple, Point, [py_pytree.LeafSpec(), py_pytree.LeafSpec()]
+        Point1 = namedtuple("Point1", ["x", "y"])
+        py_pytree._register_namedtuple(
+            Point1,
+            serialized_type_name="test_pytree.test_pytree_serialize_namedtuple.Point1",
         )
 
+        spec = py_pytree.TreeSpec(
+            namedtuple, Point1, [py_pytree.LeafSpec(), py_pytree.LeafSpec()]
+        )
         roundtrip_spec = py_pytree.treespec_loads(py_pytree.treespec_dumps(spec))
-        # The context in the namedtuple is different now because we recreated
-        # the namedtuple type.
-        self.assertEqual(spec.context._fields, roundtrip_spec.context._fields)
+        self.assertEqual(spec, roundtrip_spec)
+
+        class Point2(NamedTuple):
+            x: int
+            y: int
+
+        py_pytree._register_namedtuple(
+            Point2,
+            serialized_type_name="test_pytree.test_pytree_serialize_namedtuple.Point2",
+        )
+
+        spec = py_pytree.TreeSpec(
+            namedtuple, Point2, [py_pytree.LeafSpec(), py_pytree.LeafSpec()]
+        )
+        roundtrip_spec = py_pytree.treespec_loads(py_pytree.treespec_dumps(spec))
+        self.assertEqual(spec, roundtrip_spec)
+
+    def test_pytree_serialize_namedtuple_bad(self):
+        DummyType = namedtuple("DummyType", ["x", "y"])
+
+        spec = py_pytree.TreeSpec(
+            namedtuple, DummyType, [py_pytree.LeafSpec(), py_pytree.LeafSpec()]
+        )
+
+        with self.assertRaisesRegex(
+            NotImplementedError, "Please register using `_register_namedtuple`"
+        ):
+            py_pytree.treespec_dumps(spec)
 
     def test_pytree_custom_type_serialize_bad(self):
         class DummyType:
@@ -1014,6 +1043,10 @@ TreeSpec(tuple, None, [*,
         Point = namedtuple("Point", ["x", "y"])
         spec = py_pytree.TreeSpec(
             namedtuple, Point, [py_pytree.LeafSpec(), py_pytree.LeafSpec()]
+        )
+        py_pytree._register_namedtuple(
+            Point,
+            serialized_type_name="test_pytree.test_pytree_serialize_bad_protocol.Point",
         )
 
         with self.assertRaisesRegex(ValueError, "Unknown protocol"):
@@ -1296,12 +1329,20 @@ class TestCxxPytree(TestCase):
         self.assertEqual(spec, cxx_pytree.treespec_loads(serialized_spec))
 
     def test_pytree_serialize_namedtuple(self):
+        py_pytree._register_namedtuple(
+            GlobalPoint,
+            serialized_type_name="test_pytree.test_pytree_serialize_namedtuple.GlobalPoint",
+        )
         spec = cxx_pytree.tree_structure(GlobalPoint(0, 1))
 
         roundtrip_spec = cxx_pytree.treespec_loads(cxx_pytree.treespec_dumps(spec))
         self.assertEqual(roundtrip_spec.type._fields, spec.type._fields)
 
         LocalPoint = namedtuple("LocalPoint", ["x", "y"])
+        py_pytree._register_namedtuple(
+            LocalPoint,
+            serialized_type_name="test_pytree.test_pytree_serialize_namedtuple.LocalPoint",
+        )
         spec = cxx_pytree.tree_structure(LocalPoint(0, 1))
 
         roundtrip_spec = cxx_pytree.treespec_loads(cxx_pytree.treespec_dumps(spec))
