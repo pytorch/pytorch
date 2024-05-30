@@ -780,7 +780,7 @@ def flex_attention_backward(*args, **kwargs):
             BLOCK_M1=BLOCK_M,
             BLOCK_N1=BLOCK_N,
             BLOCK_M2=BLOCK_N,
-            BLOCK_N2=BLOCK_N,
+            BLOCK_N2=BLOCK_M,
             BLOCK_DMODEL=query.get_size()[-1],
             # For now, we always assume the "sound" option
             SCORE_MOD_IS_LINEAR=False,
