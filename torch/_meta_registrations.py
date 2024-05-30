@@ -3176,6 +3176,7 @@ def register_meta_foreach(ops):
         aten._foreach_log10,
         aten._foreach_log1p,
         aten._foreach_log2,
+        aten._foreach_max,
         aten._foreach_neg,
         aten._foreach_reciprocal,
         aten._foreach_round,
