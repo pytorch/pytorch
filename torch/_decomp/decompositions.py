@@ -4843,11 +4843,23 @@ def resize_as(self, other, memory_format=None):
         memory_format = suggest_memory_format(other)
     return aten.resize(self, other.shape, memory_format=memory_format)
 
+@register_decomposition(torch.ops.aten.bernoulli.p)
+def bernoulli_p_decomposition(input: Tensor, p: Tensor) -> Tensor:
+    print("Decomposition function called")
+    rand_like_result = torch.rand_like(input)
+    lt_result = rand_like_result < p
+    final_result = lt_result.to(input.dtype)
+    print(f"rand_like_result: {rand_like_result}")
+    print(f"lt_result: {lt_result}")
+    print(f"final_result: {final_result}")
+    return final_result
+
 
 register_inplace(aten.addbmm_, aten.addbmm)
 register_inplace(aten.addmm_, aten.addmm)
 register_inplace(aten.addmv_, aten.addmv)
 register_inplace(aten.baddbmm_, aten.baddbmm)
+register_inplace(aten.bernoulli_, aten.bernoulli)
 register_inplace(aten.fill_, aten.fill)
 register_inplace(aten.gelu_, aten.gelu)
 register_inplace(aten.hardswish_, aten.hardswish)
