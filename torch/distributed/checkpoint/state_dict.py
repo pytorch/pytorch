@@ -691,7 +691,7 @@ def _load_optim_state_dict(
 ) -> None:
     if not info.handle_optim:
         return
-
+    #torch.distributed.breakpoint()
     for optim in optimizers:
         _init_optim_state(optim)
         if state_dict:
@@ -702,6 +702,7 @@ def _load_optim_state_dict(
             # We need to specially handle FlatParameter FSDP as
             # FlatParameter FSDP converts the FQNs.
             for original_fqn, _ in model.named_parameters():
+                torch.distributed.breakpoint()
                 fqns = _get_fqns(model, original_fqn)
                 fqns_with_compiler = _get_fqns(
                     model, original_fqn, skip_compiler_prefix=False
@@ -727,7 +728,7 @@ def _load_optim_state_dict(
                 optim_state_dict = FSDP.optim_state_dict_to_load(
                     model, optim, optim_state_dict
                 )
-        elif info.broadcast_from_rank0:
+        else:
             info.full_state_dict = False
             local_state_dict = _get_optim_state_dict(model, (optim,), info)
             info.full_state_dict = True
@@ -746,9 +747,11 @@ def _load_optim_state_dict(
             assert device is not None
             flatten_osd, osd_mapping = _flatten_state_dict(optim_state_dict)
             flatten_local_osd, local_osd_mapping = _flatten_state_dict(local_state_dict)
+            #torch.distributed.breakpoint()
             _broadcast_state_dict(flatten_osd, flatten_local_osd, device=device)
             for optim_key in flatten_osd.keys():
                 if optim_key not in flatten_local_osd:
+                    assert optim_key in osd_mapping
                     flatten_local_osd[optim_key] = flatten_osd[optim_key]
                     local_osd_mapping[optim_key] = osd_mapping[optim_key]
             optim_state_dict = _unflatten_state_dict(
@@ -1033,7 +1036,10 @@ def set_optimizer_state_dict(
         info = _verify_options(model, optimizers, optim_only=True, options=options)
 
         _verify_state_dict({}, optim_state_dict, info)
+        print("point1: ", optimizers[0].param_groups)
+        #torch.distributed.breakpoint()
         _load_optim_state_dict(model, optimizers, optim_state_dict, info)
+        print("point2: ", optimizers[0].param_groups)
 
 
 def set_state_dict(
