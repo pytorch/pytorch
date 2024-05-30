@@ -65,6 +65,7 @@ from torch.testing._internal.common_utils import (
     TEST_SCIPY,
     TestCase,
     torch_to_numpy_dtype_dict,
+    xfailIfTorchDynamo,
 )
 
 if TEST_SCIPY:
@@ -1236,6 +1237,8 @@ class TestBinaryUfuncs(TestCase):
             expected_failure=expected_failure,
         )
 
+    # https://github.com/pytorch/pytorch/issues/126474
+    @xfailIfTorchDynamo
     @dtypes(torch.double)
     def test_binary_op_mem_overlap(self, device, dtype):
         ops = [
@@ -3691,6 +3694,8 @@ class TestBinaryUfuncs(TestCase):
             actual = op(x, y, alpha=alpha)
             self.assertTrue(not (actual.isnan() or actual.isinf()))
 
+    # https://github.com/pytorch/pytorch/issues/127003
+    @xfailIfTorchDynamo
     def test_sub_typing(self, device):
         m1 = torch.tensor(
             [True, False, False, True, False, False], dtype=torch.bool, device=device

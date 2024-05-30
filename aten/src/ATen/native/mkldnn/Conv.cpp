@@ -214,7 +214,7 @@ static inline at::MemoryFormat mkldnn_convolution_memory_format(int64_t dims, bo
    return memory_format;
 }
 
-static void _mkldnn_convolution_out (
+static void _mkldnn_convolution_out(
     const Tensor& input_t,
     const Tensor& weight_t,
     const Tensor& bias,
@@ -225,15 +225,12 @@ static void _mkldnn_convolution_out (
     IntArrayRef padding,
     int64_t groups,
     bool is_channels_last,
-    ideep::attr_t& op_attr) {
+    const ideep::attr_t& op_attr) {
   auto memory_format = mkldnn_convolution_memory_format(input_t.ndimension(), is_channels_last);
   auto input = input_t.is_mkldnn() ? input_t : input_t.contiguous(memory_format);
   auto weight = weight_t.is_mkldnn() ? weight_t : weight_t.contiguous(memory_format);
   const ideep::tensor x = itensor_from_tensor(input, /*from_const_data_ptr*/true);
   const ideep::tensor w = itensor_from_tensor(weight, /*from_const_data_ptr*/true);
-  if (mkldnn_conv_enabled_fpmath_mode_bf16() && input_t.scalar_type() ==at::kFloat){
-    op_attr.set_fpmath_mode(dnnl_fpmath_mode_bf16);
-  }
   if (bias.defined()) {
     const ideep::tensor b = itensor_from_tensor(bias, /*from_const_data_ptr*/true);
     ideep::convolution_forward::compute_v3(
@@ -307,6 +304,10 @@ static Tensor _mkldnn_convolution(
   if (use_channels_last) {
     output.resize_(output_sizes, memory_format);
     y = itensor_from_tensor(output);
+  }
+  if (mkldnn_conv_enabled_fpmath_mode_bf16() &&
+      input_t.scalar_type() == at::kFloat) {
+    op_attr.set_fpmath_mode(dnnl_fpmath_mode_bf16);
   }
   _mkldnn_convolution_out(
       input_t,
@@ -615,6 +616,10 @@ Tensor& mkldnn_convolution_pointwise_binary_(
       op_attr = ideep::attr_t::residual();
     } else {
       op_attr = ideep::attr_t::fuse_sum();
+    }
+    if (mkldnn_conv_enabled_fpmath_mode_bf16() &&
+        input_t.scalar_type() == at::kFloat) {
+      op_attr.set_fpmath_mode(dnnl_fpmath_mode_bf16);
     }
     _mkldnn_convolution_out(
         input_t,

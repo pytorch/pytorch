@@ -21,7 +21,7 @@ import torch.backends.mkldnn
 from torch.utils import mkldnn as mkldnn_utils
 from torch.testing._internal.common_utils import TestCase, \
     run_tests, TemporaryFileName, gradcheck, gradgradcheck, IS_WINDOWS, \
-    skipIfTorchDynamo, recover_orig_fp32_precision
+    skipIfTorchDynamo, xfailIfTorchDynamo, recover_orig_fp32_precision
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     dtypes,
@@ -816,6 +816,8 @@ class TestMkldnn(TestCase):
 
                 self.assertEqual(y1, y2.to_dense())
 
+    # https://github.com/pytorch/pytorch/issues/127111
+    @xfailIfTorchDynamo
     def test_max_pool_unsupported(self):
         # OneDNN not support dilation max_pooling, will be avilabled in v2.0.
         N = torch.randint(3, 10, (1,)).item()
@@ -1168,6 +1170,8 @@ class TestMkldnn(TestCase):
         out_mkldnn = mkldnn_utils.to_mkldnn(m)(x)
         self.assertEqual(out_eager, out_mkldnn)
 
+    # https://github.com/pytorch/pytorch/issues/127111
+    @xfailIfTorchDynamo
     def test_view(self):
         x = torch.randn(3, 4, 5, dtype=torch.float32).to_mkldnn()
         self.assertRaisesRegex(RuntimeError,
