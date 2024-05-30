@@ -1301,11 +1301,22 @@ class InstructionTranslatorBase(
                 raise exc.ObservedException
         else:
             if len(self.block_stack):
+                # base implementation - https://github.com/python/cpython/blob/3.10/Python/ceval.c#L4455
+
                 assert len(self.exn_vt_stack)
                 exception_var = self.exn_vt_stack[-1]
 
-                inst_to_jump = self.block_stack.pop()
+                block_stack_entry = self.block_stack.pop()
+
+                if block_stack_entry.inst.opname != "SETUP_FINALLY":
+                    unimplemented(
+                        "exception is raised when top of the block stack "
+                        "is not exception handler (e.g. try .. with .. except). "
+                        f"Current TOS is {block_stack_entry.inst}"
+                    )
+
                 # Push old exception
+                # TODO (anijain2305) - Add another block_stack entry for popping these
                 self.push(variables.ConstantVariable(None))
                 self.push(variables.ConstantVariable(None))
                 self.push(variables.ConstantVariable(None))
@@ -1316,7 +1327,7 @@ class InstructionTranslatorBase(
                 self.push(exception_var)
 
                 # Jump to target
-                self.jump(inst_to_jump)
+                self.jump(block_stack_entry)
             else:
                 # No handler found. Bubble the exception to the parent
                 # instruction translater. We use special exception for this.
@@ -2046,7 +2057,9 @@ class InstructionTranslatorBase(
 
         if target:
             if isinstance(self, InstructionTranslator):
-                self.block_stack.append(BlockStackEntry(inst, target, len(self.stack), ctx))
+                self.block_stack.append(
+                    BlockStackEntry(inst, target, len(self.stack), ctx)
+                )
             else:
                 self.block_stack.append(BlockStackEntry(inst, target))
 
