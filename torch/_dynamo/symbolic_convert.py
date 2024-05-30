@@ -1308,6 +1308,16 @@ class InstructionTranslatorBase(
 
                 block_stack_entry = self.block_stack.pop()
 
+                while block_stack_entry.inst.opname == "EXCEPT_HANDLER":
+                    # TODO(anijain2305) - This is not tested .. unable to create a testcase
+                    # https://github.com/python/cpython/blob/3.10/Python/ceval.c#L1456
+                    self.popn(3)
+                    if len(self.block_stack) == 0:
+                        unimplemented(
+                            "exception is raised when block stack " "is empty"
+                        )
+                    block_stack_entry = self.block_stack.pop()
+
                 if block_stack_entry.inst.opname != "SETUP_FINALLY":
                     unimplemented(
                         "exception is raised when top of the block stack "
@@ -1315,16 +1325,29 @@ class InstructionTranslatorBase(
                         f"Current TOS is {block_stack_entry.inst}"
                     )
 
+                # Push a block of EX
+                except_handler_inst = Instruction(1e6, "EXCEPT_HANDLER", None, 0)
+                self.block_stack.append(BlockStackEntry(except_handler_inst, None))
+
                 # Push old exception
                 # TODO (anijain2305) - Add another block_stack entry for popping these
-                self.push(variables.ConstantVariable(None))
-                self.push(variables.ConstantVariable(None))
-                self.push(variables.ConstantVariable(None))
+                if len(self.exn_vt_stack) >= 2:
+                    old_exception = self.exn_vt_stack[-2]
 
-                # Push new exception
+                    # Push the old exception on to stack - tb, value, type
+                    self.push(variables.UnknownVariable())
+                    self.push(old_exception)
+                    self.push(variables.BuiltinVariable(old_exception.exc_type))
+                else:
+                    # Push empty exception tb, value, type
+                    self.push(variables.ConstantVariable(None))
+                    self.push(variables.ConstantVariable(None))
+                    self.push(variables.ConstantVariable(None))
+
+                # Push new tb, val, type
+                self.push(variables.UnknownVariable())
                 self.push(exception_var)
-                self.push(exception_var)
-                self.push(exception_var)
+                self.push(variables.BuiltinVariable(exception_var.exc_type))
 
                 # Jump to target
                 self.jump(block_stack_entry)
@@ -1351,7 +1374,19 @@ class InstructionTranslatorBase(
             assert len(self.exn_vt_stack)
             self.exn_vt_stack.pop()
         else:
+            assert len(self.block_stack) > 0
+            if self.block_stack[-1].inst.opname != "EXCEPT_HANDLER":
+                raise AssertionError(
+                    "Bug in Dynamo tracing of exception handling."
+                    "Top of the block stack is not EXCEPT_HANDLER."
+                )
+            self.block_stack.pop()
+
             self.popn(3)
+
+            # This exception is handled and therefore we can clear the error indicator
+            assert len(self.exn_vt_stack)
+            self.exn_vt_stack.pop()
 
     def check_if_exc_matches(self):
         assert len(self.stack) >= 2
@@ -1367,10 +1402,11 @@ class InstructionTranslatorBase(
                 f"except has an unsupported types of objects {expected_exc_types}"
             )
 
-        if not isinstance(exc_instance, variables.ExceptionVariable):
-            unimplemented(
-                f"except expects to recieve an object of exception type but received {exc_instance}"
-            )
+        if sys.version_info >= (3, 11):
+            if not isinstance(exc_instance, variables.ExceptionVariable):
+                unimplemented(
+                    f"except expects to recieve an object of exception type but received {exc_instance}"
+                )
 
         if isinstance(expected_exc_types, TupleVariable):
             expected_types = expected_exc_types.items
@@ -1384,7 +1420,13 @@ class InstructionTranslatorBase(
                 unimplemented(
                     f"except has an unsupported types of object {expected_type}"
                 )
-            if issubclass(exc_instance.exc_type, expected_type.fn):
+            if isinstance(exc_instance, variables.ExceptionVariable) and issubclass(
+                exc_instance.exc_type, expected_type.fn
+            ):
+                return True
+            elif isinstance(exc_instance, variables.BuiltinVariable) and issubclass(
+                exc_instance.fn, expected_type.fn
+            ):
                 return True
 
         return False
