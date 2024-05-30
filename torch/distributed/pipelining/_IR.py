@@ -1,6 +1,5 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
-import copy
-import itertools
+import copyid_to_fqn
 import logging
 import operator
 from collections import defaultdict
@@ -8,12 +7,17 @@ from dataclasses import dataclass
 from enum import Enum
 from inspect import Parameter, signature, Signature
 from types import MethodType
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
 
 import torch
 import torch.fx as fx
 from torch.export import ExportedProgram
-from torch.export.unflatten import _assign_attr, _AttrKind, _sink_params, InterpreterModule
+from torch.export.unflatten import (
+    _assign_attr,
+    _AttrKind,
+    _sink_params,
+    InterpreterModule,
+)
 from torch.fx.node import map_aggregate
 from torch.fx.passes.split_module import split_module
 
@@ -861,7 +865,7 @@ class Pipe(torch.nn.Module):
         inputs_to_state: Dict[str, List[str]] = {}
         for attr in attr_nodes:
             _, tensor = _recursive_getattr_with_parent(mod, attr.target)
-            inputs_to_state[attr.name] = [fqn for fqn in id_to_fqns[id(tensor)]]
+            inputs_to_state[attr.name] = list(id_to_fqns[id(tensor)])
 
         # [aliasing] for each submodule split, assign attributes on FQNs that may be used.
         # We determine this based on whether or not the FQN attribute parent exists.
@@ -871,7 +875,9 @@ class Pipe(torch.nn.Module):
             for name, submod in split.named_children():
                 if isinstance(submod, fx.GraphModule):
                     parent, child = _recursive_getattr_with_parent(submod, fqn)
-                    if parent and child is None:  # parent exists, attribute doesn't -> assign
+                    if (
+                        parent and child is None
+                    ):  # parent exists, attribute doesn't -> assign
                         added_attributes[name].append(fqn)
                         setattr(parent, fqn.split(".")[-1], tensor)
 
@@ -898,7 +904,7 @@ class Pipe(torch.nn.Module):
             submod = getattr(split, name)
             unused_attributes = set(attributes)
             # track used attributes in the submodule, running DFS on subgraph hierarchy
-            stack = [('', submod)]  # (scope, submodule)
+            stack = [("", submod)]  # (scope, submodule)
             while stack:
                 scope, _mod = stack.pop()
                 if isinstance(_mod, (fx.GraphModule, InterpreterModule)):
