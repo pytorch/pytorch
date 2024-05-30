@@ -1181,16 +1181,15 @@ class _VersionWrapper:
 
 
 def _maybe_detach(x):
-    if isinstance(x, torch.Tensor):
-        # Ensure that the original tensor object is saved when x does not require grad
-        if x.requires_grad:
-            with torch._C._SetExcludeDispatchKeyGuard(torch._C.DispatchKey.ADInplaceOrView, False):
-                # Ensure that view performed beneath autograd properly propagates
-                # version counter. TODO: Use reentrant_dispatch instead of
-                # manually manipulating dispatch keys. Using reentrant_dispatch
-                # would respect inference_mode, though that is not relevant for
-                # this case.
-                x = x.detach()
+    if isinstance(x, torch.Tensor) and x.requires_grad:
+        # NB: Ensure the original tensor object is saved when x does not require grad
+        with torch._C._SetExcludeDispatchKeyGuard(torch._C.DispatchKey.ADInplaceOrView, False):
+            # Ensure that view performed beneath autograd properly propagates
+            # version counter. TODO: Use reentrant_dispatch instead of
+            # manually manipulating dispatch keys. Using reentrant_dispatch
+            # would respect inference_mode, though that is not relevant for
+            # this case.
+            x = x.detach()
     return x
 
 
