@@ -111,8 +111,7 @@ CURRENT_NODE_KEY = "current_node"
 
 
 def log_lru_cache_stats(wrapped_f):
-    pass
-    # log.debug("lru_cache_stats %s: %s", wrapped_f.__name__, wrapped_f.cumulative_cache_info())
+    log.debug("lru_cache_stats %s: %s", wrapped_f.__name__, wrapped_f.cumulative_cache_info())
 
 
 # Wrapper on lru_cache that reports statistics at process end

@@ -995,9 +995,6 @@ class InstructionTranslatorBase(
                 assert name in self.f_builtins
                 self.exec_recorder.builtins[name] = self.f_builtins[name]
 
-        # if inst.argval == "AssertionError":
-        #     unimplemented("assert with non-string message")
-
         if name in self.symbolic_globals:
             variable = self.output.side_effects[self.symbolic_globals[name]]
             self.push(self.output.side_effects.load_global(variable, name))
@@ -1134,20 +1131,23 @@ class InstructionTranslatorBase(
         self.DUP_TOP(inst)
         self._load_attr(inst)
 
-    def load_builtin(self, inst):
-        if inst.argval not in self.f_builtins:
-            raise NameError(f"name '{inst.argval}' is not defined")
-        val = self.f_builtins[inst.argval]
+    def load_builtin_from_argval(self, argval):
+        if argval not in self.f_builtins:
+            raise NameError(f"name '{argval}' is not defined")
+        val = self.f_builtins[argval]
 
         if callable(val):
             builtins_source = GlobalSource(
                 self.output.name_of_builtins_dict_key_in_fglobals
             )
-            var_source = GetItemSource(builtins_source, inst.argval)
+            var_source = GetItemSource(builtins_source, argval)
             self.push(VariableBuilder(self, var_source)(val))
         else:
             assert is_builtin_constant(val)
             self.push(ConstantVariable.create(value=val))
+
+    def load_builtin(self, inst):
+        self.load_builtin_from_argval(inst.argval)
 
     def jump(self, inst):
         self.instruction_pointer = self.indexof[inst.target]
@@ -1439,7 +1439,10 @@ class InstructionTranslatorBase(
             self.jump(inst)
 
     def COMPARE_OP(self, inst):
-        self.push(compare_op_handlers[inst.argval](self, self.popn(2), {}))
+        if inst.argval == "exception match":
+            self.CHECK_EXC_MATCH(inst)
+        else:
+            self.push(compare_op_handlers[inst.argval](self, self.popn(2), {}))
 
     def GET_ITER(self, inst):
         self.call_function(BuiltinVariable(iter), [self.pop()], {})
@@ -1963,7 +1966,7 @@ class InstructionTranslatorBase(
                 self.push(ConstantVariable.create(False))
 
     def LOAD_ASSERTION_ERROR(self, inst):
-        unimplemented("assert with non-string message")
+        self.load_builtin_from_argval("AssertionError")
 
     UNARY_POSITIVE = stack_op(operator.pos)
     UNARY_NEGATIVE = stack_op(operator.neg)
@@ -2959,8 +2962,6 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
                     self.PUSH_NULL(inst)
 
             name = inst.argval
-            if inst.argval == "AssertionError":
-                unimplemented("assert with non-string message")
 
             _, fglobals_vt, global_source = self.get_globals_source_and_value(name)
             if self.output.side_effects.has_pending_mutation_of_attr(fglobals_vt, name):

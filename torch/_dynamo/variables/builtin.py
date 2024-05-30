@@ -715,6 +715,13 @@ class BuiltinVariable(VariableTracker):
         if inspect.isclass(fn) and issubclass(fn, Exception):
 
             def create_exception_class_object(tx, args, kwargs):
+                if fn is AssertionError and not all(
+                    isinstance(x, variables.ConstantVariable)
+                    and isinstance(x.value, str)
+                    for x in args
+                ):
+                    unimplemented("assert with non-string message")
+
                 return variables.ExceptionVariable(fn, args, **kwargs)
 
             return create_exception_class_object
