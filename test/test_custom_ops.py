@@ -1,4 +1,4 @@
-# Owner(s): ["module: custom-operators"]
+# Owner(s): ["module: custom operators"]
 
 from torch.testing._internal.common_utils import *  # noqa: F403
 from torch.testing._internal.common_device_type import *  # noqa: F403
