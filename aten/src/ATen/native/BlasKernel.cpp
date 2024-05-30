@@ -344,6 +344,10 @@ static inline float32x4_t f32_fma_high_f16(float32x4_t a, float16x8_t b, float16
 #endif
 }
 
+static inline float32x4_t f32_fma_f16(float32x4_t a, float16x4_t b, float16x4_t c) {
+  return f32_fma_low_f16(a, vcombine_f16(b, vdup_n_f16(0)), vcombine_f16(c, vdup_n_f16(0)));
+}
+
 // The below reduce overload and fp16_dot_with_fp32_arith are adapted
 // from llama.cpp's ggml_vec_dot_f32 and surrounding utility
 // functions. See NOTE [ GGML Copyright Notice ] above for the
@@ -375,7 +379,7 @@ static inline double reduce(float32x4_t x[kF32RegistersPerIteration]) {
   return vaddvq_f32(x[0]);
 }
 
-static float fp16_dot_with_fp32_arith(const float16_t* x, const float16_t* a, int len) {
+float fp16_dot_with_fp32_arith(const float16_t* x, const float16_t* a, int64_t len) {
   float32x4_t sum[kF32RegistersPerIteration] = {vdupq_n_f32(0)};
   const auto len_aligned = len & ~(kF32ElementsPerIteration - 1);
   for (int j = 0; j < len_aligned ; j += kF32ElementsPerIteration) {
@@ -392,7 +396,21 @@ static float fp16_dot_with_fp32_arith(const float16_t* x, const float16_t* a, in
   }
   auto reducedSum = reduce(sum);
 
-  for (int j = len_aligned; j < len; ++j) {
+  // First-tier tail fixup: make sure we handle workloads that can
+  // benefit from vectorization, but don't fit into our fully unrolled
+  // loop above.
+  float32x4_t tailSum = vdupq_n_f32(0);
+  const auto len_aligned_4 = len & ~3;
+  for (int j = len_aligned; j < len_aligned_4; j += 4) {
+    const auto temp_x = vld1_f16(x + j);
+    const auto temp_a = vld1_f16(a + j);
+    tailSum = f32_fma_f16(tailSum, temp_x, temp_a);
+  }
+  auto reducedTail = vpaddq_f32(tailSum, tailSum);
+  reducedSum += vgetq_lane_f32(vpaddq_f32(reducedTail, reducedTail), 0);
+
+  // Second-tier tail fixup: handle all workloads.
+  for (int j = len_aligned_4; j < len; ++j) {
     reducedSum += x[j] * a[j];
   }
   return reducedSum;
