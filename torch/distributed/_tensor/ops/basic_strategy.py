@@ -3,10 +3,10 @@ from dataclasses import dataclass
 
 from typing import List, Set, Tuple
 
-from torch.distributed._tensor.op_schema import OpStrategy, PlacementStrategy
+from torch.distributed._tensor._op_schema import OpStrategy, PlacementStrategy
 from torch.distributed._tensor.placement_types import (
-    _Partial,
     DTensorSpec,
+    Partial,
     Placement,
     Replicate,
     Shard,
@@ -126,7 +126,7 @@ def gen_einsum_strategies(
 
         # split contracting dim
         for contracting_dim in edims.contracting_dims:
-            placement_list = [_Partial()]
+            placement_list = [Partial()]
             for input_dim in input_dims:
                 input_contracting_dim = input_dim.index(contracting_dim)
                 placement_list.append(Shard(input_contracting_dim))
@@ -157,9 +157,9 @@ def gen_einsum_strategies(
 
         # linearity strategy
         if linearity:
-            linearity_placement_list: List[Placement] = [_Partial()]
+            linearity_placement_list: List[Placement] = [Partial()]
             for input_dim in input_dims:
-                linearity_placement_list.append(_Partial())
+                linearity_placement_list.append(Partial())
             mesh_dim_strategies.append(linearity_placement_list)
 
         all_mesh_dim_strategies.append(mesh_dim_strategies)
