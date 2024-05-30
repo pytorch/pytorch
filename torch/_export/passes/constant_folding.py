@@ -1,9 +1,10 @@
 import collections
+from collections import defaultdict
 from typing import Any, Callable, Dict, Optional
 
 import torch
 import torch.utils._pytree as pytree
-from collections import defaultdict
+
 aten = torch.ops.aten
 
 # We would like to split modules into two subgraphs for runtime weight updates to work correctly.
