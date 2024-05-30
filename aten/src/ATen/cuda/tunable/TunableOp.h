@@ -132,6 +132,7 @@ class TunableOp {
 
       // need copies of params to reuse
       // make as many copies as will fill the requested rotating buffer size, if requested
+      // rotating_size guaranteed to be >= 0 even though GetRotatingBufferSize() returns int
       size_t rotating_size = ctx->GetRotatingBufferSize();
       bool use_buffer_rotation = (rotating_size > 0);
       size_t param_size = params->GetSize(use_buffer_rotation);
@@ -142,6 +143,7 @@ class TunableOp {
             "Needed Size: ", param_size/MB, " MiB. ",
             "Needed number of param copies: ", param_count);
       }
+      TORCH_CHECK(param_count > 0);
 
       std::vector<ParamsT*> reusable_params(param_count);
       for (size_t i = 0; i < param_count; i++) {

@@ -301,7 +301,7 @@ TuningContext::TuningContext() :
     max_warmup_duration_ms_{0},
     max_warmup_iterations_{0},
     icache_flush_{true},
-    rotating_buffer_size_{0},
+    rotating_buffer_size_{-1},
     filename_{},
     results_count_from_input_file_{0}
 {
@@ -448,10 +448,25 @@ void TuningContext::SetRotatingBufferSize(int size) {
 
 int TuningContext::GetRotatingBufferSize() const {
   static const char *env = std::getenv("PYTORCH_TUNABLEOP_ROTATING_BUFFER_SIZE");
+  // if env var is set, always use it
   if (env != nullptr) {
-    return atoi(env) * 1024 * 1024;  // in MiB
+    constexpr int MB = 1024 * 1024;
+    int val = atoi(env) * MB;  // env var is specified as MB, returned as bytes
+    if (val < 0) {
+       return 0;  // disable
+    }
+    return val;
   }
-  return rotating_buffer_size_;
+  else {
+    if (rotating_buffer_size_ < 0) {
+      // negative buffer size (default) means query for L2 cache size
+      int l2_cache_size = at::cuda::getCurrentDeviceProperties()->l2CacheSize;
+      return l2_cache_size;
+    }
+    else {
+      return rotating_buffer_size_;
+    }
+  }
 }
 
 TuningResultsManager& TuningContext::GetTuningResultsManager() {
