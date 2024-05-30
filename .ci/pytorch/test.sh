@@ -269,7 +269,7 @@ CUDA_VERSION=$(python -c "import torch; print(torch.version.cuda)")
 if [ "$CUDA_VERSION" == "12.4" ]; then
     ISCUDA124="cu124"
 else
-    ISCUDA124=""
+    ISCUDA124="."
 fi
 popd
 
