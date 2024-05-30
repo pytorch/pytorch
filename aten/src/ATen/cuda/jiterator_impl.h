@@ -117,7 +117,7 @@ struct OffsetCalculatorVariant {
   }
 
  private:
-  OffsetCalculatorTypes v;
+  OffsetCalculatorTypes v{};
 };
 
 struct ArrayVariant {
@@ -182,7 +182,7 @@ struct TrivialOffsetCalculatorVariant {
   }
 
 private:
-  TrivialOffsetCalculatorTypes v;
+  TrivialOffsetCalculatorTypes v{};
 };
 
 struct LoadWithCastVariant {
@@ -211,7 +211,7 @@ struct LoadWithCastVariant {
   }
 
 private:
-  LoadWithCastPtr v;
+  LoadWithCastPtr v{};
 };
 
 struct StoreWithCastVariant {
@@ -240,7 +240,7 @@ struct StoreWithCastVariant {
   }
 
 private:
-  StoreWithCastPtr v;
+  StoreWithCastPtr v{};
 };
 
 } // namespace at::native
