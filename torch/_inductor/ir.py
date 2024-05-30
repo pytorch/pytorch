@@ -4777,7 +4777,7 @@ class MutationOutput(ExternKernel):
 
     def __init__(self, layout, mutated_node, node_doing_mutating):
         # NB: Do not directly construct this - use `mark_node_as_mutating`
-        super().__init__(None, layout, [mutated_node], ())
+        super().__init__(None, layout, [mutated_node, node_doing_mutating], ())
         self.node_doing_mutating = node_doing_mutating
         self.name = V.graph.register_buffer(self)
 
