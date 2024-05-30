@@ -12,8 +12,8 @@ import torch
 from torch._dynamo import reset
 from torch._dynamo.utils import counters
 from torch._inductor import config, metrics
+from torch._inductor.async_compile import AsyncCompile
 from torch._inductor.codecache import (
-    AsyncCompile,
     cuda_compile_command,
     CUDACodeCache,
     FxGraphCachePickler,
@@ -197,7 +197,7 @@ class TestFxGraphCache(TestCase):
         cache_module = (
             "triton.runtime.fb_memcache.FbMemcacheRemoteFxGraphCacheBackend"
             if config.is_fbcode()
-            else "triton.runtime.cache.RedisRemoteCacheBackend"
+            else "torch._inductor.remote_cache.RedisRemoteCacheBackend"
         )
 
         with config.patch(
