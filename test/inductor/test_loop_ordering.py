@@ -36,13 +36,19 @@ class LoopOrderingTest(TestCase):
             """
             return (x.sum(dim=-1) + 1) @ y
 
+        A, B = 20, 30
         # Make the first 2 dimension not able to merge on purpose so that
         # ComputedBuffer.iter_reoredering_reindex will be updated.
-        x = rand_strided([20, 20, 30], [30, 900, 1], device="cuda")
-        y = torch.randn(20, 20)
+        x = rand_strided([A, A, B], [B, B * A + 300, 1], device="cuda")
+        y = torch.randn(A, A)
 
         self.do_acc_test(f, x, y)
         self.assertEqual(1, metrics.generated_kernel_count)
+        expected_num_bytes = 0
+        expected_num_bytes += A * A * B + A * A  # for the fused reduction
+        expected_num_bytes += A * A * 3  # for matmul
+        expected_num_bytes *= x.itemsize
+        self.assertEqual(expected_num_bytes, metrics.num_bytes_accessed)
 
 
 if __name__ == "__main__":
