@@ -68,6 +68,7 @@ set(TORCH_PYTHON_INCLUDE_DIRECTORIES
     ${TORCH_ROOT}/third_party/onnx
     ${TORCH_ROOT}/third_party/flatbuffers/include
     ${TORCH_ROOT}/third_party/kineto/libkineto/include
+    ${TORCH_ROOT}/third_party/cpp-httplib
 
     ${TORCH_SRC_DIR}/csrc
     ${TORCH_SRC_DIR}/csrc/api/include
@@ -80,6 +81,7 @@ set(TORCH_PYTHON_LINK_LIBRARIES
     python::python
     pybind::pybind11
     opentelemetry::api
+    httplib
     shm
     fmt::fmt-header-only
     ATEN_CPU_FILES_GEN_LIB)
@@ -300,7 +302,7 @@ add_dependencies(torch_python Caffe2_PROTO)
 add_dependencies(torch_python onnx_proto)
 # Avoid numpy for the DEPLOY build
 if(USE_NUMPY)
-  target_link_libraries(torch_python PRIVATE numpy::numpy)
+  target_link_libraries(torch_python PRIVATE Python::NumPy)
   target_compile_definitions(torch_python PRIVATE USE_NUMPY)
 endif()
 
