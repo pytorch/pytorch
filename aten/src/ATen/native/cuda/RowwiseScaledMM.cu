@@ -41,8 +41,6 @@ static CUresult CUDAAPI nvrtc_cuTensorMapEncodeTiled(
       oobFill);
 }
 
-// Rename the global function symbol
-#define cuTensorMapEncodeTiled nvrtc_cuTensorMapEncodeTiled
 
 #include <cutlass/core_io.h>
 #include <cutlass/cutlass.h>
@@ -52,7 +50,12 @@ static CUresult CUDAAPI nvrtc_cuTensorMapEncodeTiled(
 #include <cutlass/trace.h>
 #include <cutlass/util/host_tensor.h>
 
+// Rename the global function symbol
+#define cuTensorMapEncodeTiled nvrtc_cuTensorMapEncodeTiled
 #include <cute/tensor.hpp>
+#undef cuTensorMapEncodeTiled
+// Set everything back to normal
+
 #include <cutlass/gemm/collective/collective_builder.hpp>
 #include <cutlass/gemm/device/gemm_universal_adapter.h>
 #include <cutlass/epilogue/collective/collective_builder.hpp>
@@ -62,8 +65,6 @@ static CUresult CUDAAPI nvrtc_cuTensorMapEncodeTiled(
 #include <cutlass/gemm/kernel/gemm_universal.hpp>
 #include <cutlass/util/packed_stride.hpp>
 
-// Set everything back to normal
-#undef cuTensorMapEncodeTiled
 
 namespace {
 // Cutlass rowwise kernel
@@ -127,9 +128,6 @@ void f8f8bf16_rowwise_impl(
       cute::Int<TBS_K>>; // Shape of the
                          // threadblocks in a
                          // cluster
-  using StageCountType =
-      cutlass::gemm::collective::StageCountAuto; // Stage count maximized
-                                                 // based on the tile size
   using KernelSchedule = cutlass::gemm::collective::
       KernelScheduleAuto; // Kernel to launch based on the default setting in
                           // the Collective Builder
@@ -247,11 +245,11 @@ void f8f8bf16_rowwise_impl(
   using StrideOutput = typename Gemm::GemmKernel::StrideC;
 
   StrideInputA stride_a = cutlass::make_cute_packed_stride(
-      StrideInputA{}, cute::make_shape(M, K, cute::Int<1>{}));
+      StrideInputA{}, cute::make_shape(M, K, 1));
   StrideInputB stride_b = cutlass::make_cute_packed_stride(
-      StrideInputB{}, cute::make_shape(N, K, cute::Int<1>{}));
+      StrideInputB{}, cute::make_shape(N, K, 1));
   StrideOutput stride_output = cutlass::make_cute_packed_stride(
-      StrideOutput{}, cute::make_shape(M, N, cute::Int<1>{}));
+      StrideOutput{}, cute::make_shape(M, N, 1));
 
   typename Gemm::Arguments arguments{
       cutlass::gemm::GemmUniversalMode::kGemm,
@@ -434,6 +432,7 @@ void f8f8bf16_rowwise(
 
   // Templatize based on input dtype.
   bool use_e5m2 = XQ.dtype() == at::kFloat8_e5m2;
+  TORCH_CHECK(WQ.dtype() == at::kFloat8_e4m3fn, "For row-wise scaling the second input is required to be a float8_e4m3fn dtype.");
 
   if (use_bias) {
     if (bf16_bias) {

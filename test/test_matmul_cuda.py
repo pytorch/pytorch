@@ -618,6 +618,18 @@ class TestFP8MatmulCuda(TestCase):
                 out_dtype=torch.bfloat16,
             )
 
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "For row-wise scaling the second input is required to be a float8_e4m3fn dtype.",
+        ):
+            torch._scaled_mm(
+                x_fp8,
+                y_fp8.to(torch.float8_e5m2),
+                scale_a=torch.ones((M), device="cuda"),
+                scale_b=torch.ones((N), device="cuda"),
+                out_dtype=torch.bfloat16,
+            )
+
     @unittest.skipIf(not scaled_mm_supported_device(), f8_msg)
     @skipIfRocm()
     @parametrize("base_dtype", [torch.bfloat16])

@@ -844,10 +844,6 @@ ScalingType get_scaling_type(
       "Both scale_a and scale_b must be present or absent.");
 
   if (scale_a.has_value()) {
-    TORCH_CHECK(
-        scale_b.has_value(),
-        "Both scale_a and scale_b must be passed as arguments to _scale_mm.");
-
     // Both Per-Tensor and Row-wise scaling expect fp32 tensors
     TORCH_CHECK(
         scale_a->scalar_type() == kFloat && scale_b->scalar_type() == kFloat,
