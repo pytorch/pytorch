@@ -12,6 +12,7 @@ from unittest.mock import patch
 
 import numpy as np
 import sympy
+
 import torch
 from torch import nn
 from torch._C import FileCheck
@@ -3750,7 +3751,7 @@ class CPUReproTests(TestCase):
         _, code = run_and_get_cpp_code(opt_fn, x)
         FileCheck().check_count(
             "return at::vec::VectorizedN<int64_t,2>::loadu(tmpbuf.data(),",
-            2,
+            4,
             exactly=True,
         ).run(code)
 
