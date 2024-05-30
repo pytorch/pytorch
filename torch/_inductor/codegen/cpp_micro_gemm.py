@@ -664,7 +664,7 @@ def create_micro_gemm(
     matched_configs = []
     for cls, configs in micro_gemm_configs.items():
         for config in configs:
-            if not issubclass(config.vec_isa_cls, vec_isa.__class__):
+            if not issubclass(vec_isa.__class__, config.vec_isa_cls):
                 continue
             if (
                 config.input_dtype == input_dtype
