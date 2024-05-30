@@ -35,7 +35,6 @@ from torch.utils._pytree import tree_flatten, tree_unflatten, TreeSpec
 DEVICE_TYPE = (
     "cuda" if torch.cuda.is_available() and torch.cuda.device_count() > 1 else "cpu"
 )
-PG_BACKEND = "nccl" if DEVICE_TYPE == "cuda" else "gloo"
 
 NUM_DEVICES = 4
 
@@ -92,9 +91,9 @@ class MLPStacked(nn.Module):
 @dataclass
 class ModelArgs:
     n_layers: int = 2
-    vocab_size: int = 16
+    vocab_size: int = 8
     max_seq_len: int = 16
-    dim: int = 8
+    dim: int = 16
     n_heads: int = 4
     dropout_p: float = 0.1
     use_attn_mask: bool = True
@@ -236,9 +235,9 @@ class Transformer(nn.Module):
                 # shard the RMSNorms
                 layer_parallelize_plan["attention_norm"] = SequenceParallel()
                 layer_parallelize_plan["ffn_norm"] = SequenceParallel()
-            layer_parallelize_plan["attention.wq"] = ColwiseParallel()
-            layer_parallelize_plan["attention.wk"] = ColwiseParallel()
-            layer_parallelize_plan["attention.wv"] = ColwiseParallel()
+            layer_parallelize_plan["attention.wq"] = ColwiseParallel(use_local_output=False)
+            layer_parallelize_plan["attention.wk"] = ColwiseParallel(use_local_output=False)
+            layer_parallelize_plan["attention.wv"] = ColwiseParallel(use_local_output=False)
             layer_parallelize_plan["attention.wo"] = (
                 RowwiseParallel(output_layouts=Shard(1))
                 if use_seq_parallel
@@ -271,12 +270,6 @@ class Transformer(nn.Module):
         )
         parallelize_module(module_tp.output, device_mesh, output_parallelize_plan)
 
-        # Do manual setup on features that DTensor does not support yet.
-
-        # Manually adjust the number of heads after sharding the attention modules.
-        for layer in module_tp.layers:
-            layer.attention.n_heads = module_tp.model_args.n_heads // device_mesh.size()
-
         # Manually set output.weight so that parameters and gradients are shared.
         if module_tp.model_args.weight_tying:
             module_tp.output.weight = module_tp.tok_embeddings.weight
@@ -304,10 +297,11 @@ class DTensorTestBase(MultiProcessTestCase):
 
     @property
     def backend(self) -> str:
-        return PG_BACKEND
+        backend = "nccl" if self.device_type == "cuda" else "gloo"
+        return backend
 
     def build_device_mesh(self) -> DeviceMesh:
-        return DeviceMesh(DEVICE_TYPE, list(range(self.world_size)))
+        return DeviceMesh(self.device_type, list(range(self.world_size)))
 
     def init_pg(self) -> None:
         if "nccl" in self.backend and torch.cuda.device_count() < self.world_size:
@@ -365,11 +359,11 @@ def with_comms(func: TestFunc) -> TestFunc:
     def wrapper(
         self, *args: Tuple[object], **kwargs: Dict[str, Any]  # type: ignore[misc]
     ) -> None:
-        # if backend not specified, and cuda available, then use nccl, else gloo
-        if torch.cuda.is_available() and torch.cuda.device_count() >= self.world_size:
-            self.device_type = "cuda"
-        else:
+        # if enough GPU we can use GPU, otherwise we fallback to CPU
+        if not torch.cuda.is_available() or torch.cuda.device_count() < self.world_size:
             self.device_type = "cpu"
+        else:
+            self.device_type = DEVICE_TYPE
 
         self.init_pg()
         func(self, *args, **kwargs)  # type: ignore[misc]

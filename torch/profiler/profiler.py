@@ -7,9 +7,8 @@ from abc import ABC, abstractmethod
 from enum import Enum
 from functools import partial
 from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
-from warnings import warn
-
 from typing_extensions import Self
+from warnings import warn
 
 import torch
 import torch.autograd.profiler as prof
@@ -146,19 +145,19 @@ class _KinetoProfile:
         self.stop_trace()
 
     def prepare_trace(self):
-        self.profiler = prof.profile(
-            use_cuda=(ProfilerActivity.CUDA in self.activities),
-            use_cpu=(ProfilerActivity.CPU in self.activities),
-            use_mtia=(ProfilerActivity.MTIA in self.activities),
-            use_device=self.use_device,
-            record_shapes=self.record_shapes,
-            with_flops=self.with_flops,
-            profile_memory=self.profile_memory,
-            with_stack=self.with_stack,
-            with_modules=self.with_modules,
-            use_kineto=True,
-            experimental_config=self.experimental_config,
-        )
+        if self.profiler is None:
+            self.profiler = prof.profile(
+                use_cpu=(ProfilerActivity.CPU in self.activities),
+                use_mtia=(ProfilerActivity.MTIA in self.activities),
+                use_device=self.use_device,
+                record_shapes=self.record_shapes,
+                with_flops=self.with_flops,
+                profile_memory=self.profile_memory,
+                with_stack=self.with_stack,
+                with_modules=self.with_modules,
+                use_kineto=True,
+                experimental_config=self.experimental_config,
+            )
         self.profiler._prepare_trace()
 
     def start_trace(self):
@@ -207,7 +206,8 @@ class _KinetoProfile:
 
     def export_chrome_trace(self, path: str):
         """
-        Exports the collected trace in Chrome JSON format.
+        Exports the collected trace in Chrome JSON format. If kineto is enabled, only
+        last cycle in schedule is exported.
         """
         assert self.profiler
         if path.endswith(".gz"):
@@ -598,7 +598,10 @@ class profile(_KinetoProfile):
     ):
         activities_set = set(activities) if activities else supported_activities()
         if use_cuda is not None:
-            warn("use_cuda is deprecated, use activities argument instead")
+            warn(
+                "`use_cuda` is deprecated, use `activities` argument instead",
+                FutureWarning,
+            )
             if use_cuda:
                 activities_set.add(ProfilerActivity.CUDA)
             elif ProfilerActivity.CUDA in activities_set:
@@ -846,6 +849,7 @@ class ExecutionTraceObserver(_ITraceObserver):
         if self._registered and not self._execution_trace_running:
             _enable_execution_trace_observer()
             self._execution_trace_running = True
+            self._record_pg_config()
 
     def stop(self):
         """
@@ -871,4 +875,17 @@ class ExecutionTraceObserver(_ITraceObserver):
             raise RuntimeError(
                 "A callback to the ET profiler needs to be registered "
                 "first before getting the output file path"
+            )
+
+    def _record_pg_config(self) -> None:
+        # Records the PG config info to the trace as node:
+        #  ## process_group:init ##
+        if (
+            self.is_registered
+            and torch.distributed.is_available()
+            and torch.distributed.is_initialized()
+        ):
+            pg_config_info = torch.distributed.distributed_c10d._world.pg_config_info
+            torch.autograd._record_function_with_args_enter(
+                "## process_group:init ##", json.dumps(pg_config_info)
             )

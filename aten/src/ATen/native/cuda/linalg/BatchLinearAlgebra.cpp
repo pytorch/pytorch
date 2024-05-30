@@ -2210,7 +2210,7 @@ void svd_magma(const Tensor& A,
 void svd_kernel(const Tensor& A,
                 const bool full_matrices,
                 const bool compute_uv,
-                const c10::optional<c10::string_view>& driver,
+                const std::optional<c10::string_view>& driver,
                 const Tensor& U,
                 const Tensor& S,
                 const Tensor& Vh,
@@ -2665,8 +2665,8 @@ void linalg_lstsq_gels(const Tensor& A, const Tensor& B, const Tensor& /*infos*/
 
     // Step 3: solve R X = B
     triangular_solve_kernel(
-        const_cast<Tensor&>(A_broadcasted),
-        const_cast<Tensor&>(B),
+        A_broadcasted,
+        B,
         /*left=*/true,
         /*upper=*/true,
         /*transpose=*/TransposeType::NoTranspose,
@@ -2689,8 +2689,8 @@ void linalg_lstsq_gels(const Tensor& A, const Tensor& B, const Tensor& /*infos*/
     const auto trans = Ah_broadcasted.is_complex() ? TransposeType::ConjTranspose
                                                    : TransposeType::Transpose;
     triangular_solve_kernel(
-        const_cast<Tensor&>(Ah_broadcasted),
-        const_cast<Tensor&>(B),
+        Ah_broadcasted,
+        B,
         /*left=*/true,
         /*upper=*/true,
         /*transpose=*/trans,

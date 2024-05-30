@@ -51,6 +51,7 @@ class ReenterWith:
         finally:
             exit context
         """
+        # NOTE: we assume that TOS is a context manager CLASS!
         load_args = []
         if self.target_values:
             load_args = [
@@ -156,6 +157,7 @@ class ReenterWith:
         with ctx(args):
             (rest)
         """
+        # NOTE: we assume that TOS is a context manager CLASS!
         load_args = []
         if self.target_values:
             load_args = [
@@ -388,6 +390,7 @@ class ContinueExecutionCache:
             freevars = tuple(code_options["co_cellvars"] or []) + tuple(
                 code_options["co_freevars"] or []
             )
+            freevars = tuple(sorted(freevars))
             code_options[
                 "co_name"
             ] = f"{TORCH_DYNAMO_RESUME_IN_PREFIX}_{code_options['co_name']}_at_{lineno}"
@@ -455,8 +458,8 @@ class ContinueExecutionCache:
                         old_hook_target_remap[old_hook_target] = exn_target
                 real_i = i + null_idxes_i
                 if real_i in stack_ctx_vars_d:
-                    # current stack variable is a context var -
-                    # load args for context variable and construct it
+                    # NOTE: we assume that current stack var is a context manager CLASS!
+                    # Load args for context variable and construct it
                     prefix.extend(_load_tuple_and_call(stack_ctx_vars_d[real_i]))
 
             if is_py311_plus:
@@ -468,6 +471,7 @@ class ContinueExecutionCache:
 
             assert not hooks
 
+            # NOTE: we assume that local var is a context manager CLASS!
             # initialize inactive context vars in argnames
             for name, vals in argnames_ctx_vars:
                 prefix.append(create_instruction("LOAD_FAST", argval=name))

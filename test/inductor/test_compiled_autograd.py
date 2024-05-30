@@ -1,5 +1,6 @@
 # Owner(s): ["module: inductor"]
 import functools
+import logging
 import re
 import sys
 import unittest
@@ -10,7 +11,7 @@ from unittest import mock
 import torch
 import torch.nn as nn
 from torch import _inductor as inductor
-from torch._dynamo import compiled_autograd
+from torch._dynamo import compiled_autograd, config
 from torch._dynamo.utils import counters
 from torch._inductor.test_case import run_tests, TestCase
 from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
@@ -19,14 +20,22 @@ from torch.testing._internal.logging_utils import logs_to_string
 # note: these tests are not run on windows due to inductor_utils.HAS_CPU
 
 
-def compiler_fn(gm):
-    """Same as torch.compile() but counts number of compiles"""
+def make_compiler_fn(fullgraph=True, dynamic=True):
+    def _compiler_fn(gm):
+        """Same as torch.compile() but counts number of compiles"""
 
-    def inner_compiler(gm_, example_inputs_):
-        counters["compiled_autograd"]["compiles"] += 1
-        return inductor.compile(gm_, example_inputs_)
+        def _inner_compiler(gm_, example_inputs_):
+            counters["compiled_autograd"]["compiles"] += 1
+            return inductor.compile(gm_, example_inputs_)
 
-    return torch.compile(gm, backend=inner_compiler, fullgraph=True, dynamic=True)
+        return torch.compile(
+            gm, backend=_inner_compiler, fullgraph=fullgraph, dynamic=dynamic
+        )
+
+    return _compiler_fn
+
+
+compiler_fn = make_compiler_fn()
 
 
 # TODO(jansel): hooks as lambdas creates recompiles in dynamo, we should fix that
@@ -43,9 +52,25 @@ def hook3(gI, gO):
 
 
 class TestCompiledAutograd(TestCase):
+    def setUp(self) -> None:
+        super().setUp()
+        torch._logging.set_logs(compiled_autograd_verbose=False)
+        config.compiled_autograd = False
+        compiled_autograd.reset()
+
+    def tearDown(self) -> None:
+        super().tearDown()
+        torch._logging.set_logs(compiled_autograd_verbose=False)
+        config.compiled_autograd = False
+        compiled_autograd.reset()
+
     def check_output_and_recompiles(
         self, fn, count=1, compiler_fn=compiler_fn, compile_fn=False
     ):
+        if isinstance(count, list):
+            captures, compiles = count
+        else:
+            captures, compiles = count, count
         with torch.autograd.set_multithreading_enabled(False):
             torch._dynamo.reset()
             counters["compiled_autograd"].clear()
@@ -56,8 +81,8 @@ class TestCompiledAutograd(TestCase):
                 opt_fn = torch.compile(fn) if compile_fn else fn
                 actual = list(opt_fn())
             self.assertEqual(expected, actual)
-            self.assertEqual(counters["compiled_autograd"]["captures"], count)
-            self.assertEqual(counters["compiled_autograd"]["compiles"], count)
+            self.assertEqual(counters["compiled_autograd"]["captures"], captures)
+            self.assertEqual(counters["compiled_autograd"]["compiles"], compiles)
 
     def test_dynamo_flaky_segfault(self):
         import os
@@ -209,6 +234,170 @@ main()
 
         self.check_output_and_recompiles(fn)
 
+    def test_torch_compile_api_inductor(self):
+        def fn():
+            torch.manual_seed(123)
+            model = torch.nn.Sequential(
+                torch.nn.Linear(4, 4),
+                torch.nn.Sigmoid(),
+            )
+
+            res = []
+            for _ in range(3):
+                x = torch.randn([1, 4])
+
+                result = model(x).sum()
+                result.backward()
+                res.append(model[0].weight.grad)
+                res.append(model[0].bias.grad)
+                model.zero_grad()
+            return res
+
+        expected = fn()
+        with config.patch(compiled_autograd=True):
+            compiled_fn = torch.compile(fn)
+        actual = compiled_fn()
+        self.assertEqual(expected, actual)
+        self.assertEqual(counters["compiled_autograd"]["captures"], 1)
+
+    def test_torch_compile_api_aot_eager(self):
+        def fn():
+            torch.manual_seed(123)
+            model = torch.nn.Sequential(
+                torch.nn.Linear(4, 4),
+                torch.nn.Sigmoid(),
+            )
+
+            res = []
+            for _ in range(3):
+                x = torch.randn([1, 4])
+
+                result = model(x).sum()
+                result.backward()
+                res.append(model[0].weight.grad)
+                res.append(model[0].bias.grad)
+                model.zero_grad()
+            return res
+
+        expected = fn()
+        with config.patch(compiled_autograd=True):
+            compiled_fn = torch.compile(fn, backend="aot_eager")
+        actual = compiled_fn()
+        self.assertEqual(expected, actual)
+        self.assertEqual(counters["compiled_autograd"]["captures"], 1)
+
+    def test_torch_compile_api_eager(self):
+        def fn():
+            torch.manual_seed(123)
+            model = torch.nn.Sequential(
+                torch.nn.Linear(4, 4),
+                torch.nn.Sigmoid(),
+            )
+
+            res = []
+            for _ in range(3):
+                x = torch.randn([1, 4])
+
+                result = model(x).sum()
+                result.backward()
+                res.append(model[0].weight.grad)
+                res.append(model[0].bias.grad)
+                model.zero_grad()
+            return res
+
+        expected = fn()
+        with config.patch(compiled_autograd=True):
+            compiled_fn = torch.compile(fn, backend="eager")
+        actual = compiled_fn()
+        self.assertEqual(expected, actual)
+        self.assertEqual(counters["compiled_autograd"]["captures"], 1)
+
+    def test_multiple_torch_compile(self):
+        model = torch.nn.Sequential(
+            torch.nn.Linear(4, 4),
+            torch.nn.Sigmoid(),
+        )
+        x = torch.randn([1, 4])
+
+        def fn():
+            result = model(x).sum()
+            result.backward()
+
+        model2 = torch.nn.Linear(4, 4)
+        x2 = torch.randn([1, 4])
+
+        def fn2():
+            result = model2(x2).sum()
+            result.backward()
+
+        no_ca1 = torch.compile(fn)
+        no_ca1()
+        self.assertEqual(counters["compiled_autograd"]["captures"], 0)
+        counters.clear()
+
+        with config.patch(compiled_autograd=True):
+            with_ca = torch.compile(fn2)
+            with_ca()
+            self.assertEqual(counters["compiled_autograd"]["captures"], 1)
+            counters.clear()
+
+        no_ca2 = torch.compile(fn)
+        no_ca2()
+        self.assertEqual(counters["compiled_autograd"]["captures"], 0)
+
+    def test_torch_compile_graph_break(self):
+        model = torch.nn.Sequential(
+            torch.nn.Linear(4, 4),
+            torch.nn.Sigmoid(),
+        )
+        x = torch.randn([1, 4])
+
+        @torch._dynamo.disable()
+        def fn():
+            result = model(x).sum()
+            result.backward()
+
+        with config.patch(compiled_autograd=True):
+            opt_fn = torch.compile(fn)
+            opt_fn()
+
+        self.assertEqual(counters["compiled_autograd"]["captures"], 1)
+
+    def test_torch_compile_graph_break2(self):
+        model = torch.nn.Sequential(
+            torch.nn.Linear(4, 4),
+            torch.nn.Sigmoid(),
+        )
+        x = torch.randn([1, 4])
+
+        @torch._dynamo.disable()
+        def inner_fn(loss):
+            loss.backward()
+
+        def fn():
+            result = model(x).sum()
+            inner_fn(result)
+
+        with config.patch(compiled_autograd=True):
+            opt_fn = torch.compile(fn)
+            opt_fn()
+
+        self.assertEqual(counters["compiled_autograd"]["captures"], 1)
+
+    def test_torch_compile_only_backward_call(self):
+        model = torch.nn.Sequential(
+            torch.nn.Linear(4, 4),
+            torch.nn.Sigmoid(),
+        )
+        x = torch.randn([1, 4])
+
+        result = model(x).sum()
+        with config.patch(compiled_autograd=True):
+            opt_bwd = torch.compile(lambda: result.backward())
+            opt_bwd()
+
+        self.assertEqual(counters["compiled_autograd"]["captures"], 1)
+
     def test_dynamo_boxed(self):
         def get_placeholders(gm_):
             placeholders = []
@@ -310,6 +499,7 @@ main()
             handle.remove()
 
     def test_inputs_aliasing_bytecode_stack_restore(self):
+        logging.getLogger().setLevel(logging.WARNING)
         from torch.testing._internal.logging_tensor import LoggingTensor
 
         # Create a graph that allows inputs stealing
@@ -601,7 +791,7 @@ main()
                 loss.backward()
                 yield x.grad
 
-        self.check_output_and_recompiles(fn, 2)
+        self.check_output_and_recompiles(fn, count=2)
 
     def test_custom_fn_saved_multiple_tensors(self):
         def fn():
@@ -624,7 +814,7 @@ main()
                 loss.backward()
                 yield x.grad
 
-        self.check_output_and_recompiles(fn, 2)
+        self.check_output_and_recompiles(fn, count=2)
 
     def test_custom_fn_saved_multiple_tensors_dedup(self):
         def fn():
@@ -646,7 +836,7 @@ main()
                 loss.backward()
                 yield x.grad
 
-        self.check_output_and_recompiles(fn, 2)
+        self.check_output_and_recompiles(fn, count=2)
 
     def test_custom_fn_saved_shape_tensor(self):
         def fn():
@@ -668,7 +858,7 @@ main()
                 loss.backward()
                 yield x.grad
 
-        self.check_output_and_recompiles(fn, 2)
+        self.check_output_and_recompiles(fn, count=2)
 
     def test_custom_fn_saved_attr(self):
         def fn():
@@ -690,11 +880,9 @@ main()
                 loss.backward()
                 yield x.grad
 
-        with self.assertRaisesRegex(
-            torch._dynamo.exc.InternalTorchDynamoError,
-            "is not subscriptable",
-        ):
-            self.check_output_and_recompiles(fn, 2)
+        self.check_output_and_recompiles(
+            fn, count=2, compiler_fn=make_compiler_fn(fullgraph=False)
+        )
 
     def test_custom_fn_multiple_grads(self):
         def fn():
@@ -716,7 +904,7 @@ main()
                 yield x.grad
                 yield y.grad
 
-        self.check_output_and_recompiles(fn, 2)
+        self.check_output_and_recompiles(fn, count=2)
 
     def test_custom_fn_non_variable_input(self):
         def fn():
@@ -740,7 +928,53 @@ main()
                 yield y
                 yield z
 
-        self.check_output_and_recompiles(fn, 2)
+        self.check_output_and_recompiles(fn, count=2)
+
+    @unittest.skipIf(not HAS_CUDA, "requires cuda")
+    def test_logging_tensor_flaky(self) -> None:
+        # when you first run some test using triton and then run test_inputs_aliasing_bytecode_stack_restore
+        # resulting in:
+        #   - pytest: `TypeError: unsupported operand type(s) for +: 'Tensor' and 'LoggingTensor'`
+        #   - python: `TypeError: not all arguments converted during string formatting`
+
+        # 1. some triton involving test
+        def fn():
+            def _fn(x):
+                return x
+
+            x = torch.arange(
+                1, 10, requires_grad=True, dtype=torch.float16, device="cuda"
+            )
+            out = _fn(x)
+            loss = out.sum()
+            loss.backward()
+
+        with compiled_autograd.enable(compiler_fn):
+            fn()
+
+        logging.getLogger().setLevel(
+            logging.WARNING
+        )  # triton setup overwrote it to INFO
+        # 2. test_inputs_aliasing_bytecode_stack_restore
+        from torch.testing._internal.logging_tensor import LoggingTensor
+
+        def forward(inputs):
+            add = inputs[0] + 1
+            add_1 = add + inputs[1]
+            out = add_1.cpu()
+            return (out,)
+
+        gm = torch.fx.symbolic_trace(forward)
+        print(gm.print_readable())
+        torch._dynamo.utils.set_locals_to_steal(gm, ["inputs"])
+        compiled_fn = torch.compile(gm)
+
+        inputs = [
+            torch.ones(1000000, dtype=torch.float32),
+            LoggingTensor(torch.ones(1)),
+        ]
+
+        compiled_fn(inputs)
 
     @unittest.skipIf(not HAS_CUDA, "requires cuda")
     def test_custom_fn_output_metadata(self):
@@ -780,9 +1014,9 @@ main()
             yield x.device
             yield x.grad
 
-        self.check_output_and_recompiles(fn, 1, my_compiler_fn)
+        self.check_output_and_recompiles(fn, count=1)
 
-    def test_custom_fns_with_same_graph(self):
+    def test_custom_fn_with_same_graph(self):
         def fn():
             class MyFn1(torch.autograd.Function):
                 @staticmethod
@@ -812,10 +1046,10 @@ main()
                 yield x.grad
 
         self.check_output_and_recompiles(
-            fn, 2
+            fn, count=2
         )  # should compile once for MyFn1 and once for MyFn2
 
-    def test_dynamically_defined_class(self):
+    def test_custom_fn_dynamically_defined_class(self):
         def fn():
             def create_class(multiplier: int):
                 class DynamicFn(torch.autograd.Function):
@@ -836,7 +1070,88 @@ main()
                 loss.backward()
                 yield x.grad
 
-        self.check_output_and_recompiles(fn, 3)
+        self.check_output_and_recompiles(fn, count=3)
+
+    def test_custom_fn_bw_graph_break(self):
+        def fn():
+            class MySin(torch.autograd.Function):
+                @staticmethod
+                def forward(ctx, x):
+                    ctx.save_for_backward(x)
+                    return torch.sin(x)
+
+                @staticmethod
+                def backward(ctx, gO):
+                    print("graph break")
+                    (x,) = ctx.saved_tensors
+                    print("graph break")
+                    return gO * torch.cos(x)
+
+            for i in [10, 100, 10, 15, 20, 25]:
+                x = torch.arange(0.0, i, requires_grad=True)
+                out = MySin.apply(x)
+                loss = out.sum()
+                loss.backward()
+                yield x.grad
+
+        self.check_output_and_recompiles(
+            fn, count=[2, 6], compiler_fn=make_compiler_fn(fullgraph=False)
+        )
+
+    def test_custom_fn_compiled_fw_graph_break(self):
+        def fn():
+            class MySin(torch.autograd.Function):
+                @staticmethod
+                def forward(ctx, x):
+                    print("graph break")
+                    ctx.save_for_backward(x)
+                    return torch.sin(x)
+
+                @staticmethod
+                def backward(ctx, gO):
+                    (x,) = ctx.saved_tensors
+                    return gO * torch.cos(x)
+
+            opt_model = torch.compile(MySin.apply)
+            for i in [10, 100, 10, 15, 20, 25]:
+                x = torch.arange(0.0, i, requires_grad=True)
+                out = opt_model(x)
+                loss = out.sum()
+                loss.backward()
+                yield x.grad
+
+        self.check_output_and_recompiles(
+            fn, count=2, compiler_fn=make_compiler_fn(fullgraph=False)
+        )
+        self.assertEqual(counters["stats"]["unique_graphs"], 5)  # 3 fw, 2 bw
+
+    def test_custom_fn_compiled_fw_bw_graph_break(self):
+        def fn():
+            class MySin(torch.autograd.Function):
+                @staticmethod
+                def forward(ctx, x):
+                    print("graph break")
+                    ctx.save_for_backward(x)
+                    return torch.sin(x)
+
+                @staticmethod
+                def backward(ctx, gO):
+                    print("graph break")
+                    (x,) = ctx.saved_tensors
+                    return gO * torch.cos(x)
+
+            opt_model = torch.compile(MySin.apply)
+            for i in [10, 100, 10, 15, 20, 25]:
+                x = torch.arange(0.0, i, requires_grad=True)
+                out = opt_model(x)
+                loss = out.sum()
+                loss.backward()
+                yield x.grad
+
+        self.check_output_and_recompiles(
+            fn, count=[2, 6], compiler_fn=make_compiler_fn(fullgraph=False)
+        )
+        self.assertEqual(counters["stats"]["unique_graphs"], 9)  # 3 fw, 6 bw
 
     def test_mismatch_fake_tensor_mode(self, dynamic_shape=False):
         """
@@ -1386,64 +1701,62 @@ TORCH_LIBRARY(test_autograd_cpp_node_data_dependent, m) {
         )
 
     def test_verbose_logs_cpp(self):
-        script = """
-import torch
+        torch._logging.set_logs(compiled_autograd_verbose=True)
 
-def compiler_fn(gm):
-    return torch.compile(gm, backend="eager")
+        def fn():
+            model = torch.nn.Sequential(
+                torch.nn.Linear(4, 4),
+                torch.nn.ReLU(),
+                torch.nn.Linear(4, 4),
+                torch.nn.ReLU(),
+            )
+            for i in [10, 11, 12]:
+                model.zero_grad()
+                x = torch.randn([i, 4])
+                result = model(x).sum()
+                result.backward()
+                yield model[0].weight.grad
+                yield model[0].bias.grad
+                yield model[2].weight.grad
+                yield model[2].bias.grad
 
-def main():
-    torch._logging.set_logs(compiled_autograd_verbose=True)
-    model = torch.nn.Sequential(
-        torch.nn.Linear(4, 4),
-        torch.nn.ReLU(),
-        torch.nn.Linear(4, 4),
-        torch.nn.ReLU(),
-    )
+        logs, ctx = logs_to_string(
+            torch._dynamo.compiled_autograd.__name__, "compiled_autograd_verbose"
+        )
+        with ctx():
+            self.check_output_and_recompiles(fn, count=2)
 
-    for i in range(10, 100):
-        x = torch.randn([i, 4])
-        result = model(x).sum()
-        with torch._dynamo.compiled_autograd.enable(compiler_fn):
-            result.backward()
-
-main()
-"""
-        stdout, _ = self.run_process_no_exception(script)
-        stdout = stdout.decode("utf-8")
-
-        patterns = [
-            r"\[python_compiled_autograd.cpp\] Creating cache entry for SumBackward0, with key of size (\d+)\n",
-            r"\[python_compiled_autograd.cpp\] Creating cache entry for ReluBackward0, with key of size (\d+)\n",
-            r"\[python_compiled_autograd.cpp\] Creating cache entry for AddmmBackward0, with key of size (\d+)\n",
-            r"\[python_compiled_autograd.cpp\] Creating cache entry for TBackward0, with key of size (\d+)\n",
-            r"\[python_compiled_autograd.cpp\] Creating cache entry for torch::autograd::AccumulateGrad, with key of size (\d+)\n",
-            r"\[python_compiled_autograd.cpp\] Creating cache entry for ReluBackward0, with key of size (\d+)\n",
-            r"\[python_compiled_autograd.cpp\] Creating cache entry for AddmmBackward0, with key of size (\d+)\n",
-            r"\[python_compiled_autograd.cpp\] Creating cache entry for TBackward0, with key of size (\d+)\n",
-            r"\[python_compiled_autograd.cpp\] Creating cache entry for torch::autograd::AccumulateGrad, with key of size (\d+)\n",
-            r"\[python_compiled_autograd.cpp\] Creating cache entry for torch::autograd::AccumulateGrad, with key of size (\d+)\n",
-            r"\[python_compiled_autograd.cpp\] Creating cache entry for torch::autograd::AccumulateGrad, with key of size (\d+)\n",
-            r"\[python_compiled_autograd.cpp\] Creating cache entry for torch::autograd::AccumulateGrad, with key of size (\d+)\n",
-            r"\[python_compiled_autograd.cpp\] Creating cache entry for ReluBackward0, with key of size (\d+)\n",
-            r"\[python_compiled_autograd.cpp\] Creating cache entry for AddmmBackward0, with key of size (\d+)\n",
-            r"\[python_compiled_autograd.cpp\] Creating cache entry for TBackward0, with key of size (\d+)\n",
-            r"\[python_compiled_autograd.cpp\] Creating cache entry for torch::autograd::AccumulateGrad, with key of size (\d+)\n",
-            r"\[python_compiled_autograd.cpp\] Creating cache entry for torch::autograd::AccumulateGrad, with key of size (\d+)\n",
-            r"\[python_compiled_autograd.cpp\] Creating cache entry for torch::autograd::AccumulateGrad, with key of size (\d+)\n",
-            r"\[python_compiled_autograd.cpp\] cache miss: marking sizes\[(\d+)\] as dynamic\n",
-            r"\[python_compiled_autograd.cpp\] cache miss: marking sizes\[(\d+)\] as dynamic\n",
-            r"\[python_compiled_autograd.cpp\] cache miss: marking sizes\[(\d+)\] as dynamic\n",
-            r"\[python_compiled_autograd.cpp\] cache miss: marking sizes\[(\d+)\] as dynamic\n",
-            r"\[python_compiled_autograd.cpp\] cache miss: marking sizes\[(\d+)\] as dynamic\n",
-            r"\[python_compiled_autograd.cpp\] cache miss: marking sizes\[(\d+)\] as dynamic\n",
-            r"\[python_compiled_autograd.cpp\] cache miss: marking sizes\[(\d+)\] as dynamic\n",
+        patterns1 = [
+            r".*Cache miss due to new autograd node: torch::autograd::GraphRoot \(NodeCall 0\) with key size (\d+), "
+            r"previous key sizes=\[\]\n",
         ]
 
-        pattern = r"".join(patterns)
-        matches = re.findall(pattern, stdout)
-        self.assertEqual(len(matches), 1)
-        self.assertEqual(len(matches[0]), len(patterns))
+        # recompile
+        patterns2 = [
+            r".*Cache miss due to changed shapes: marking size idx (\d+) of torch::autograd::GraphRoot \(NodeCall 0\) as dynamic\n",
+            r".*Cache miss due to changed shapes: marking size idx (\d+) of SumBackward0 \(NodeCall 1\) as dynamic\n",
+            r".*Cache miss due to changed shapes: marking size idx (\d+) of SumBackward0 \(NodeCall 1\) as dynamic\n",
+            r".*Cache miss due to changed shapes: marking size idx (\d+) of ReluBackward0 \(NodeCall 2\) as dynamic\n",
+            r".*Cache miss due to changed shapes: marking size idx (\d+) of AddmmBackward0 \(NodeCall 3\) as dynamic\n",
+            r".*Cache miss due to changed shapes: marking size idx (\d+) of torch::autograd::AccumulateGrad "
+            r"\(NodeCall 5\) as dynamic\n",
+            r".*Cache miss due to changed shapes: marking size idx (\d+) of ReluBackward0 \(NodeCall 6\) as dynamic\n",
+        ]
+
+        all_logs = logs.getvalue()
+
+        pattern1 = r"".join(patterns1)
+        matches1 = re.findall(pattern1, all_logs)
+        self.assertEqual(len(matches1), 1)
+        assert isinstance(
+            matches1[0], str
+        )  # for a single match: matches1=['match'], for multiple matches: matches1=[('match1', 'match2')]...
+        self.assertEqual(len(matches1), len(patterns1))
+
+        pattern2 = r"".join(patterns2)
+        matches2 = re.findall(pattern2, all_logs)
+        self.assertEqual(len(matches2), 1)
+        self.assertEqual(len(matches2[0]), len(patterns2))
 
     def test_snapshot_verbose_logs_flag(self):
         def fn():
@@ -1495,12 +1808,14 @@ def load_test_module(name):
         ).load_module()
 
 
-def make_wrapped(fn):
+def make_wrapped(fn, fullgraph):
     @functools.wraps(fn)
     def wrapped(self):
         torch._dynamo.reset()
-        with compiled_autograd.enable(compiler_fn):
-            return fn(self)
+        with compiled_autograd.enable(make_compiler_fn(fullgraph=fullgraph)):
+            out = fn(self)
+
+        return out
 
     return wrapped
 
@@ -1514,14 +1829,19 @@ def wrap_test_class(orig_cls):
         elif known_failures_re.match(name) or name in known_failing_tests:
             dct[name] = unittest.expectedFailure
         elif name.startswith("test_"):
-            dct[name] = make_wrapped(fn)
+            fullgraph = name not in known_graph_breaks_tests
+            dct[name] = make_wrapped(fn, fullgraph)
 
-    return type(
+    cls = type(
         orig_cls.__name__ + "WithCompiledAutograd",
         orig_cls.__bases__,
         dct,
     )
+    cls.__file__ = __file__
+    return cls
 
+
+known_graph_breaks_tests = {}
 
 # These groups of tests aren't supported yet
 known_failures_re = re.compile(

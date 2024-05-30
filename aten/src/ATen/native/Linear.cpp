@@ -70,7 +70,7 @@ static inline Tensor _flatten_nd_linear(const Tensor& input, const Tensor& weigh
 }
 
 
-Tensor linear(const Tensor& input, const Tensor& weight, const c10::optional<Tensor>& bias_opt) {
+Tensor linear(const Tensor& input, const Tensor& weight, const std::optional<Tensor>& bias_opt) {
   // _matmul_impl checks this again later, but _flatten_nd_linear does not work on scalars inputs,
   // so let's try to catch this here already
   const auto input_dim = input.dim();
@@ -121,7 +121,7 @@ Tensor linear(const Tensor& input, const Tensor& weight, const c10::optional<Ten
   return output;
 }
 
-Tensor& linear_out(const Tensor& input, const Tensor& weight, const c10::optional<Tensor>& bias_opt, Tensor& output) {
+Tensor& linear_out(const Tensor& input, const Tensor& weight, const std::optional<Tensor>& bias_opt, Tensor& output) {
   TORCH_CHECK(!input.is_mkldnn(), "linear doesn't support out for MKLDNN tensors");
   // See [Note: hacky wrapper removal for optional tensor]
   auto bias = bias_opt.has_value()
@@ -707,7 +707,7 @@ Tensor _trilinear(const Tensor& i1_, const Tensor& i2_, const Tensor& i3_,
   return output;
 }
 
-Tensor bilinear(const Tensor& input1, const Tensor& input2, const Tensor& weight, const c10::optional<Tensor>& bias_opt) {
+Tensor bilinear(const Tensor& input1, const Tensor& input2, const Tensor& weight, const std::optional<Tensor>& bias_opt) {
   // See [Note: hacky wrapper removal for optional tensor]
   c10::MaybeOwned<Tensor> bias_maybe_owned = at::borrow_from_optional_tensor(bias_opt);
   const Tensor& bias = *bias_maybe_owned;

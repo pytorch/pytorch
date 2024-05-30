@@ -1334,8 +1334,8 @@ void LayerNormBackwardKernelImpl(
 std::tuple<Tensor, Tensor, Tensor> layer_norm_cuda(
     const Tensor& input,
     IntArrayRef normalized_shape,
-    const c10::optional<Tensor>& weight_opt /* optional */,
-    const c10::optional<Tensor>& bias_opt /* optional */,
+    const std::optional<Tensor>& weight_opt /* optional */,
+    const std::optional<Tensor>& bias_opt /* optional */,
     double eps) {
   // See [Note: hacky wrapper removal for optional tensor]
   c10::MaybeOwned<Tensor> weight_maybe_owned =
@@ -1390,8 +1390,8 @@ std::tuple<Tensor, Tensor, Tensor> layer_norm_backward_cuda(
     IntArrayRef normalized_shape,
     const Tensor& mean,
     const Tensor& rstd,
-    const c10::optional<Tensor>& weight_opt /* optional */,
-    const c10::optional<Tensor>& bias_opt /* optional */,
+    const std::optional<Tensor>& weight_opt /* optional */,
+    const std::optional<Tensor>& bias_opt /* optional */,
     std::array<bool, 3> grad_input_mask) {
   // See [Note: hacky wrapper removal for optional tensor]
   c10::MaybeOwned<Tensor> weight_maybe_owned =

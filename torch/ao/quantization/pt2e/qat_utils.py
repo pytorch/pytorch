@@ -710,7 +710,7 @@ def _copy_over_q_dq_args(original_node: Node, replacement_node: Node):
         # Args: input, scale, zp, [axis, qmin, qmax, dtype]
         start_copy_arg_index = 3
     else:
-        raise ValueError("Expected quantize/dequantize nodes, got '%s'" % original_node.target)
+        raise ValueError(f"Expected quantize/dequantize nodes, got '{original_node.target}'")
     replacement_node.args = (
         replacement_node.args[:start_copy_arg_index] + original_node.args[start_copy_arg_index:]
     )

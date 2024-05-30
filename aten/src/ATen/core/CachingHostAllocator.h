@@ -152,7 +152,7 @@ struct CachingHostAllocatorImpl {
     // do not need to look up the ctx in blocks_.
     auto* block = reinterpret_cast<B*>(ctx);
 
-    c10::optional<std::vector<E>> events;
+    std::optional<std::vector<E>> events;
     {
       std::lock_guard<std::mutex> g(block->mutex_);
       block->allocated_ = false;
@@ -263,7 +263,7 @@ struct CachingHostAllocatorImpl {
       // Avoid calling cudaEventDestroy while holding a mutex, so move
       // intermediate events out of the lock into this object.
       // process the last event
-      c10::optional<std::pair<E, B*>> processed;
+      std::optional<std::pair<E, B*>> processed;
       {
         std::lock_guard<std::mutex> g(events_mutex_);
         if (!events_.empty()) {
@@ -324,7 +324,7 @@ struct CachingHostAllocatorImpl {
   }
 
   // Record an event on stream and store event into events.
-  virtual void record_stream(c10::optional<std::vector<E>>& events, S stream) {
+  virtual void record_stream(std::optional<std::vector<E>>& events, S stream) {
     TORCH_CHECK_NOT_IMPLEMENTED(false, "Not implemented for record_stream");
   }
 

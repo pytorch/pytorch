@@ -9,6 +9,11 @@ from typing import Any, Callable, Dict, Optional, Set, Type, TYPE_CHECKING, Unio
 
 import torch
 
+
+def is_fbcode():
+    return not hasattr(torch.version, "git_version")
+
+
 # to configure logging for dynamo, aot, and inductor
 # use the following API in the torch._logging module
 # torch._logging.set_logs(dynamo=<level>, aot=<level>, inductor<level>)
@@ -49,6 +54,11 @@ accumulated_cache_size_limit = 256
 # to be dynamic, but accesses to ints should NOT get promoted into inputs.
 specialize_int = False
 
+# Whether or not to specialize on float inputs.  Dynamo will always promote
+# float inputs into Tensor inputs, but at the moment, backends inconsistently
+# support codegen on float (this is to be fixed).
+specialize_float = True
+
 # legacy config, does nothing now!
 dynamic_shapes = True
 
@@ -87,7 +97,7 @@ force_nn_module_property_static_shapes = True
 allow_ignore_mark_dynamic = False
 
 # Set this to False to assume nn.Modules() contents are immutable (similar assumption as freezing)
-guard_nn_modules = False
+guard_nn_modules = False if is_fbcode() else True
 
 # Uses CPython internal dictionary tags to detect mutation. There is some
 # overlap between guard_nn_modules_using_dict_tags and guard_nn_modules flag.
@@ -130,7 +140,7 @@ suppress_errors = bool(os.environ.get("TORCHDYNAMO_SUPPRESS_ERRORS", False))
 # Record and write an execution record of the current frame to a file
 # if an exception is encountered
 # @compile_ignored[debug]
-replay_record_enabled = os.environ.get("TORCH_COMPILE_DEBUG", "0") == "1"
+replay_record_enabled = os.environ.get("TORCH_COMPILE_REPLAY_RECORD", "0") == "1"
 
 # Rewrite assert statement in python with torch._assert
 rewrite_assert_with_torch_assert = True
@@ -211,7 +221,18 @@ capture_scalar_outputs = os.environ.get("TORCHDYNAMO_CAPTURE_SCALAR_OUTPUTS") ==
 # break instead of capturing.  This requires dynamic_shapes to be True.
 # If you set this to True, you probably also want capture_scalar_outputs
 # (these are separated for historical reasons).
-capture_dynamic_output_shape_ops = False
+capture_dynamic_output_shape_ops = (
+    os.environ.get("TORCHDYNAMO_CAPTURE_DYNAMIC_OUTPUT_SHAPE_OPS", "0") == "1"
+)
+
+# hybrid backed unbacked symints
+prefer_deferred_runtime_asserts_over_guards = False
+
+# For complex dynamic shapes guards that we're unable to specify with dynamo/export's
+# range constraints + dims + derived dims language, we raise constraint violation
+# errors or specialize by default. If set to True, this flag avoids crashing/specialization,
+# and allows complex guards as runtime assertions in the graph.
+_allow_complex_guards_as_runtime_asserts = False
 
 # By default, dynamo will treat all ints as backed SymInts, which means (1) it
 # will wait to see the int change over multiple runs before generalizing and
@@ -227,7 +248,7 @@ force_unspec_int_unbacked_size_like_on_torchrec_kjt = False
 # false_fn produces code with identical guards.
 enforce_cond_guards_match = True
 
-# Specify how to optimize a compiiled DDP module. The flag accepts a bollean
+# Specify how to optimize a compiled DDP module. The flag accepts a boolean
 # value or a string. There are 4 modes.
 # 1. "ddp_optimizer" (or True): with "ddp_ptimizer", Dynamo will automatically
 # split model graph into pieces to match DDP bucket sizes to allow DDP
@@ -349,10 +370,6 @@ inline_inbuilt_nn_modules = (
 )
 
 
-def is_fbcode():
-    return not hasattr(torch.version, "git_version")
-
-
 def default_debug_dir_root():
     # [@compile_ignored: debug]
     DEBUG_DIR_VAR_NAME = "TORCH_COMPILE_DEBUG_DIR"
@@ -443,6 +460,10 @@ fake_tensor_cache_crosscheck_enabled = (
 # support `context_fn` in torch.utils.checkpoint.checkpoint API under torch.compile().
 # WARNING: this is an experimental flag and is subject to change.
 _experimental_support_context_fn_in_torch_utils_checkpoint = False
+
+# Enables the Compiled Autograd engine to trace .backward() calls made under torch.compile().
+# Note: AOT Autograd will still trace joint graphs.
+compiled_autograd = False
 
 if TYPE_CHECKING:
     from torch.utils._config_typing import *  # noqa: F401, F403

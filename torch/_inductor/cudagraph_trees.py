@@ -60,6 +60,7 @@ from typing import (
     Optional,
     Set,
     Tuple,
+    TYPE_CHECKING,
     Union,
 )
 
@@ -84,9 +85,11 @@ from torch._inductor.cudagraph_utils import (
 )
 from torch.multiprocessing.reductions import StorageWeakRef
 from torch.storage import UntypedStorage
-from torch.types import _bool
 from torch.utils import _pytree as pytree
 from torch.utils.weak import TensorWeakRef
+
+if TYPE_CHECKING:
+    from torch.types import _bool
 
 StorageWeakRefPointer = int
 StorageDataPtr = int
@@ -1013,6 +1016,14 @@ class CUDAGraphNode:
 
             cached_t = self.cached_tensor_outputs[i]
             if cached_t is not None:
+                # this output represents a fresh allocated tensor.
+                # We return the same TensorImpl from run to run to avoid overhead.
+                # autograd.Function will reset the Autograd meta of output tensors
+                # as part of aot_autograd, but _backward_hooks are stored on tensors separately,
+                # so we need to manually reset hooks.
+                if cached_t._backward_hooks is not None:
+                    cached_t._backward_hooks = None
+
                 # No need to update weakrefs, already correctly initialized
                 outputs.append(cached_t)
                 continue

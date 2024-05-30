@@ -11,14 +11,13 @@ from collections import defaultdict, deque
 from contextlib import contextmanager
 from dataclasses import dataclass, fields, is_dataclass
 from enum import auto, Enum
-from typing import Any, Callable, List, Optional, Tuple, Type
+from typing import Any, Callable, List, Optional, Tuple, Type, TYPE_CHECKING
 
 import torch
 import torch.distributed as dist
 from torch.autograd import Function, Variable
 from torch.distributed.algorithms.join import Join, Joinable, JoinHook
 from torch.utils._pytree import tree_flatten, tree_unflatten
-from torch.utils.hooks import RemovableHandle
 
 RPC_AVAILABLE = False
 if dist.is_available():
@@ -43,6 +42,9 @@ from torch._utils import _get_device_index
 
 from ..modules import Module
 from .scatter_gather import gather, scatter_kwargs  # noqa: F401
+
+if TYPE_CHECKING:
+    from torch.utils.hooks import RemovableHandle
 
 __all__ = ["DistributedDataParallel"]
 
@@ -769,7 +771,8 @@ class DistributedDataParallel(Module, Joinable):
             # do not receive gradients.
             warnings.warn(
                 "The `check_reduction` argument in `DistributedDataParallel` "
-                "module is deprecated. Please avoid using it."
+                "module is deprecated. Please avoid using it.",
+                FutureWarning,
             )
 
         # Check that a module does not have Uninitialized parameters
@@ -1464,7 +1467,7 @@ class DistributedDataParallel(Module, Joinable):
 
     def _should_disable_cpp_reducer(self) -> bool:
         return self._use_python_reducer and (
-            torch._utils.is_compiling() or self._force_to_disable_cpp_reducer
+            torch.compiler.is_compiling() or self._force_to_disable_cpp_reducer
         )
 
     def _pre_forward(self, *inputs, **kwargs):
@@ -1477,7 +1480,7 @@ class DistributedDataParallel(Module, Joinable):
                 h.remove()
             self._accum_grad_hooks.clear()
 
-        if not self._lazy_init_ran and not torch._utils.is_compiling():
+        if not self._lazy_init_ran and not torch.compiler.is_compiling():
             self._lazy_init()
 
         if self._delay_all_reduce_all_params:

@@ -974,9 +974,16 @@ Tensor& huber_loss_backward_out_mps(const Tensor& grad_output,
 }
 
 // MSELoss
-TORCH_IMPL_FUNC(mse_loss_out_mps)(const Tensor& input, const Tensor& target, int64_t reduction, const Tensor& output) {
+TORCH_IMPL_FUNC(mse_loss_out_mps)(const Tensor& input, const Tensor& target, int64_t reduction, const Tensor& output_) {
   string op_name = __func__;
   using namespace mps;
+
+  bool contiguousOutput = output_.is_contiguous();
+  Tensor output = output_;
+  if (!contiguousOutput) {
+    output = output_.contiguous();
+  }
+
   TORCH_CHECK(target.is_same_size(input), op_name + ": target and input tensors must have identical shapes")
   TORCH_CHECK(output.is_mps());
 
@@ -1001,10 +1008,14 @@ TORCH_IMPL_FUNC(mse_loss_out_mps)(const Tensor& input, const Tensor& target, int
     });
     Placeholder inputPlaceholder = Placeholder(cachedGraph->inputTensor, input);
     Placeholder targetPlaceholder = Placeholder(cachedGraph->targetTensor, target);
-    Placeholder outputPlaceholder = Placeholder(cachedGraph->outputTensor, output);
+    Placeholder outputPlaceholder = Placeholder(cachedGraph->outputTensor, contiguousOutput ? output_ : output);
 
     auto feeds = dictionaryFromPlaceholders(inputPlaceholder, targetPlaceholder);
     runMPSGraph(getCurrentMPSStream(), cachedGraph->graph(), feeds, outputPlaceholder);
+  }
+
+  if (!contiguousOutput) {
+    output_.copy_(output);
   }
 }
 

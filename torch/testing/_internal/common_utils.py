@@ -96,12 +96,15 @@ from torch.testing._internal.common_dtype import get_all_dtypes
 from torch.utils._import_utils import _check_module_exists
 import torch.utils._pytree as pytree
 
-from .composite_compliance import no_dispatch
 try:
     import pytest
     has_pytest = True
 except ImportError:
     has_pytest = False
+
+
+def freeze_rng_state(*args, **kwargs):
+    return torch.testing._utils.freeze_rng_state(*args, **kwargs)
 
 
 # Class to keep track of test flags configurable by environment variables.
@@ -1295,8 +1298,9 @@ TEST_CUDA_GRAPH = TEST_CUDA and (not TEST_SKIP_CUDAGRAPH) and (  # noqa: F821
 
 if TEST_CUDA and 'NUM_PARALLEL_PROCS' in os.environ:
     num_procs = int(os.getenv("NUM_PARALLEL_PROCS", "2"))
-    # other libraries take up about 11% of space per process
-    torch.cuda.set_per_process_memory_fraction(round(1 / num_procs - .11, 2))
+    gb_available = torch.cuda.mem_get_info()[1] / 2 ** 30
+    # other libraries take up about a little under 1 GB of space per process
+    torch.cuda.set_per_process_memory_fraction(round((gb_available - num_procs * .85) / gb_available / num_procs, 2))
 
 requires_cuda = unittest.skipUnless(torch.cuda.is_available(), "Requires CUDA")
 
@@ -1847,15 +1851,7 @@ def skipIfNotRegistered(op_name, message):
         @skipIfNotRegistered('MyOp', 'MyOp is not linked!')
             This will check if 'MyOp' is in the caffe2.python.core
     """
-    if not BUILD_WITH_CAFFE2:
-        return unittest.skip("Pytorch is compiled without Caffe2")
-    try:
-        from caffe2.python import core
-        skipper = unittest.skipIf(op_name not in core._REGISTERED_OPERATORS,
-                                  message)
-    except ImportError:
-        skipper = unittest.skip("Cannot import `caffe2.python.core`")
-    return skipper
+    return unittest.skip("Pytorch is compiled without Caffe2")
 
 def _decide_skip_caffe2(expect_caffe2, reason):
     def skip_dec(func):
@@ -1970,35 +1966,6 @@ def set_rng_seed(seed):
     if TEST_NUMPY:
         np.random.seed(seed)
 
-
-disable_functorch = torch._C._DisableFuncTorch
-
-
-@contextlib.contextmanager
-def freeze_rng_state():
-    # no_dispatch needed for test_composite_compliance
-    # Some OpInfos use freeze_rng_state for rng determinism, but
-    # test_composite_compliance overrides dispatch for all torch functions
-    # which we need to disable to get and set rng state
-    with no_dispatch(), disable_functorch():
-        rng_state = torch.get_rng_state()
-        if torch.cuda.is_available():
-            cuda_rng_state = torch.cuda.get_rng_state()
-    try:
-        yield
-    finally:
-        # Modes are not happy with torch.cuda.set_rng_state
-        # because it clones the state (which could produce a Tensor Subclass)
-        # and then grabs the new tensor's data pointer in generator.set_state.
-        #
-        # In the long run torch.cuda.set_rng_state should probably be
-        # an operator.
-        #
-        # NB: Mode disable is to avoid running cross-ref tests on thes seeding
-        with no_dispatch(), disable_functorch():
-            if torch.cuda.is_available():
-                torch.cuda.set_rng_state(cuda_rng_state)
-            torch.set_rng_state(rng_state)
 
 @contextlib.contextmanager
 def set_default_dtype(dtype):
@@ -2681,10 +2648,14 @@ class TestCase(expecttest.TestCase):
                         # The path isn't strictly correct but it's arguably better than nothing.
                         return os.path.split(abs_test_path)[1]
 
-                    test_filename = _get_rel_test_path(inspect.getfile(type(self)))
+                    # NB: In Python 3.8, the getfile() call will return a path relative
+                    # to the working directory, so convert that to absolute.
+                    abs_test_path = os.path.abspath(inspect.getfile(type(self)))
+                    test_filename = _get_rel_test_path(abs_test_path)
+                    class_name = type(self).__name__
                     repro_str = f"""
 To execute this test, run the following from the base repo dir:
-    {env_var_prefix} python {test_filename} -k {method_name}
+    {env_var_prefix} python {test_filename} -k {class_name}.{method_name}
 
 This message can be suppressed by setting PYTORCH_PRINT_REPRO_ON_FAILURE=0"""
                     self.wrap_with_policy(
@@ -2819,7 +2790,9 @@ This message can be suppressed by setting PYTORCH_PRINT_REPRO_ON_FAILURE=0"""
                 super_run = torch._dynamo.optimize("aot_eager_decomp_partition")(super_run)
             elif TEST_WITH_TORCHDYNAMO:  # noqa: F821
                 # TorchDynamo optimize annotation
-                super_run = torch._dynamo.optimize("eager", nopython=nopython)(super_run)
+                # Assume eager-generated GraphModules will not error out.
+                # If we do, this is probably a Dynamo bug!
+                super_run = torch._dynamo.optimize("eager_noexcept", nopython=nopython)(super_run)
                 key = f"{self.__class__.__name__}.{self._testMethodName}"
                 from .dynamo_test_failures import dynamo_expected_failures, dynamo_skips
 
@@ -2906,6 +2879,9 @@ This message can be suppressed by setting PYTORCH_PRINT_REPRO_ON_FAILURE=0"""
         if self._default_dtype_check_enabled:
             assert torch.get_default_dtype() == torch.float
 
+        # attempt to reset some global state at the end of the test
+        self._prev_grad_state = torch.is_grad_enabled()
+
     def tearDown(self):
         # There exists test cases that override TestCase.setUp
         # definition, so we cannot assume that _check_invariants
@@ -2919,6 +2895,10 @@ This message can be suppressed by setting PYTORCH_PRINT_REPRO_ON_FAILURE=0"""
 
         if self._default_dtype_check_enabled:
             assert torch.get_default_dtype() == torch.float
+
+        # attribute may not be defined, per above
+        if hasattr(self, '_prev_grad_state'):
+            torch.set_grad_enabled(self._prev_grad_state)
 
     @staticmethod
     def _make_crow_indices(n_rows, n_cols, nnz,

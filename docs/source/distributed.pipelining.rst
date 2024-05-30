@@ -136,7 +136,11 @@ This covers the basic usage of the ``Pipe`` API. For more information, please se
 Using ``PipelineSchedule`` for Execution
 ========================================
 
-Given the above ``Pipe`` object, we can use one of the ``PipelineStage`` classes to execute our model in a pipelined fashion. First off, let us instantiate a ``PipelineStage`` instance:
+After transforming the model into a ``Pipe`` representation, we can run its stages in a distributed *runtime*. This can be done in two steps:
+* instantiate a ``PipelineStage`` from a stage module of ``Pipe``;
+* run the ``PipelineStage`` according to a ``PipelineSchedule``.
+
+First off, let us instantiate a ``PipelineStage`` instance:
 
 .. code-block:: python
 
@@ -176,3 +180,83 @@ Note that since we split our model into three stages, we must run this script wi
 .. code-block:: bash
 
   torchrun --nproc_per_node=3 example.py
+
+Pipeline Transformation APIs
+============================
+
+The following set of APIs transform your model into a pipeline representation.
+
+.. currentmodule:: torch.distributed.pipelining
+
+.. autoclass:: SplitPoint
+
+.. autofunction:: pipeline
+
+.. autoclass:: Pipe
+
+.. autofunction:: annotate_split_points
+
+.. autofunction:: pipe_split
+
+.. autoclass:: ArgsChunkSpec
+
+.. autoclass:: KwargsChunkSpec
+
+Microbatch Utilities
+====================
+
+.. automodule:: torch.distributed.pipelining.microbatch
+
+.. currentmodule:: torch.distributed.pipelining.microbatch
+
+.. autoclass:: TensorChunkSpec
+
+.. autofunction:: split_args_kwargs_into_chunks
+
+.. autofunction:: merge_chunks
+
+Pipeline Stages
+===============
+
+.. automodule:: torch.distributed.pipelining.PipelineStage
+
+.. currentmodule:: torch.distributed.pipelining.PipelineStage
+
+.. autoclass:: PipelineStage
+
+.. autoclass:: ManualPipelineStage
+
+Pipeline Schedules
+==================
+
+.. automodule:: torch.distributed.pipelining.PipelineSchedule
+
+.. currentmodule:: torch.distributed.pipelining.PipelineSchedule
+
+.. autoclass:: ScheduleGPipe
+
+.. autoclass:: Schedule1F1B
+
+.. autoclass:: ScheduleInterleaved1F1B
+
+.. autoclass:: ScheduleLoopedBFS
+
+Implementing Your Own Schedule
+==============================
+
+You can implement your own pipeline schedule by extending one of the following two class:
+
+* ``PipelineScheduleSingle``
+* ``PipelineScheduleMulti``
+
+``PipelineScheduleSingle`` is for schedules that assigns *only one* stage per rank.
+``PipelineScheduleMulti`` is for schedules that assigns multiple stages per rank.
+
+For example, ``ScheduleGPipe`` and ``Schedule1F1B`` are subclasses of ``PipelineScheduleSingle``.
+Whereas, ``ScheduleInterleaved1F1B`` and ``ScheduleLoopedBFS`` are subclasses of ``PipelineScheduleMulti``.
+
+.. currentmodule:: torch.distributed.pipelining.PipelineSchedule
+
+.. autoclass:: PipelineScheduleSingle
+
+.. autoclass:: PipelineScheduleMulti

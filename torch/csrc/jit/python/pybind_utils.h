@@ -62,7 +62,7 @@ void clear_registered_instances(void* ptr);
 TORCH_PYTHON_API IValue toIValue(
     py::handle obj,
     const TypePtr& type,
-    c10::optional<int32_t> N = c10::nullopt);
+    std::optional<int32_t> N = c10::nullopt);
 
 TORCH_PYTHON_API py::object toPyObject(IValue ivalue);
 
@@ -111,7 +111,7 @@ struct VISIBILITY_HIDDEN PythonFutureWrapper
 
   explicit PythonFutureWrapper(
       c10::intrusive_ptr<c10::ivalue::Future> fut,
-      c10::optional<UnwrapFunc> unwrap_func = c10::nullopt)
+      std::optional<UnwrapFunc> unwrap_func = c10::nullopt)
       : fut(std::move(fut)), unwrap_func(std::move(unwrap_func)) {}
 
   explicit PythonFutureWrapper(const PythonFutureWrapper&) = delete;
@@ -232,7 +232,7 @@ struct VISIBILITY_HIDDEN PythonFutureWrapper
   c10::intrusive_ptr<c10::ivalue::Future> fut;
   // unwrap_func works like a callback for the value returned by
   // PythonFutureWrapper::wait().
-  c10::optional<UnwrapFunc> unwrap_func;
+  std::optional<UnwrapFunc> unwrap_func;
 
  private:
   std::shared_ptr<PythonFutureWrapper> getPtr() {
@@ -348,7 +348,7 @@ inline TypedIValue toDictKeyIValue(py::handle key) {
   }
 }
 
-inline c10::optional<TypePtr> unifyOrInitializeType(
+inline std::optional<TypePtr> unifyOrInitializeType(
     const TypePtr& accum,
     const TypePtr& unify) {
   if (!accum) {
@@ -987,7 +987,7 @@ inline Stack createStackForSchema(
     const FunctionSchema& schema,
     const tuple_slice& args,
     const py::kwargs& kwargs,
-    c10::optional<IValue> self) {
+    std::optional<IValue> self) {
   size_t all_arguments = (self ? 1 : 0) + args.size() + kwargs.size();
   if (all_arguments > schema.arguments().size()) {
     throw schema_match_error(c10::str(
@@ -1102,7 +1102,7 @@ inline py::object runAndInsertCall(
     Function& callee,
     const tuple_slice& args,
     const py::kwargs& kwargs,
-    c10::optional<IValue> self,
+    std::optional<IValue> self,
     // Lambda that tells this function how to insert `callee` into the graph if
     // we're tracing.
     const std::function<Value*(Graph&, const MatchedSchema& match)>&
@@ -1158,7 +1158,7 @@ inline py::object runAndInsertCall(
   return toPyObject(std::move(stack.back()));
 }
 
-inline c10::optional<py::object> maybeTorchFunctionDispatch(
+inline std::optional<py::object> maybeTorchFunctionDispatch(
     const py::object& callee,
     const tuple_slice& args_no_self,
     const py::kwargs& kwargs,
@@ -1255,7 +1255,7 @@ TORCH_PYTHON_API py::object invokeOperatorFromPython(
     const std::vector<std::shared_ptr<Operator>>& operations,
     py::args args,
     const py::kwargs& kwargs,
-    c10::optional<c10::DispatchKey> dk = c10::nullopt);
+    std::optional<c10::DispatchKey> dk = c10::nullopt);
 
 TORCH_PYTHON_API py::tuple _maybe_handle_torch_function(
     const std::string& ns,
@@ -1276,6 +1276,6 @@ TORCH_PYTHON_API py::object _get_operation_for_overload_or_packet(
     py::args args,
     const py::kwargs& kwargs,
     bool is_overload,
-    c10::optional<c10::DispatchKey> dk = c10::nullopt);
+    std::optional<c10::DispatchKey> dk = c10::nullopt);
 
 } // namespace torch::jit

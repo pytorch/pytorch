@@ -279,9 +279,9 @@ ghstack==0.8.0
 #Pinned versions: 0.8.0
 #test that import:
 
-jinja2==3.1.3
+jinja2==3.1.4
 #Description: jinja2 template engine
-#Pinned versions: 3.1.3
+#Pinned versions: 3.1.4
 #test that import:
 
 pytest-cpp==2.3.0
@@ -310,3 +310,5 @@ lxml==5.0.0.
 #Description: This is a requirement of unittest-xml-reporting
 
 # Python-3.9 binaries
+
+PyGithub==2.3.0

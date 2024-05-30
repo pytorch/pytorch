@@ -11,8 +11,6 @@ from functools import partial
 from itertools import product
 from typing import Any, Callable, Iterable, List, Optional, Tuple, Union
 
-from torchgen.utils import dataclass_repr
-
 import torch
 from torch.testing import make_tensor
 from torch.testing._internal.common_device_type import (
@@ -25,6 +23,7 @@ from torch.testing._internal.common_dtype import (
     floating_and_complex_types,
     floating_and_complex_types_and,
     floating_types,
+    get_all_dtypes,
 )
 from torch.testing._internal.common_utils import (
     is_iterable_of_tensors,
@@ -34,6 +33,8 @@ from torch.testing._internal.common_utils import (
     TrackedInputIter,
 )
 from torch.testing._internal.opinfo import utils
+
+from torchgen.utils import dataclass_repr
 
 # Reasonable testing sizes for dimensions
 L = 20
@@ -2707,7 +2708,18 @@ def get_foreach_method_names(name):
 
 @dataclass
 class ForeachFuncInfo(OpInfo):
-    """Early version of a specialized OpInfo for foreach functions"""
+    """Early version of a specialized OpInfo for foreach functions
+
+    The main differences from the parent class are (a) `dtypes`, `dtypesIfCUDA`, and `dtypesIfROCM`
+    are set to `get_all_dtypes(include_qint=False)`, and (b) the following arguments.
+
+    ``supports_alpha_param=True`` means that the function supports a python scalar (``numbers.Number``)
+    as the last keyword argument such as `_foreach_add`.
+    ``supports_scalar_self_arg=True`` means that the function can take a python scalar as its first argument.
+    Currently only `_foreach_pow` supports this.
+    ``backward_requires_result=True``, which could sound self-explanatory, means that the function uses
+    the forward result for its backward computation.
+    """
 
     supports_alpha_param: bool = False
     supports_scalar_self_arg: bool = False
@@ -2730,6 +2742,8 @@ class ForeachFuncInfo(OpInfo):
             foreach_method = foreach_method_inplace
             torch_ref_method = torch_ref_inplace
 
+        self.dtypes = _dispatch_dtypes(get_all_dtypes(include_qint=False))
+
         self.op = foreach_method
         self.method_variant = foreach_method
         self.ref = torch_ref_method
@@ -2749,6 +2763,9 @@ class ForeachFuncInfo(OpInfo):
             # because maximum ref does not support inplace or scalar
             self.ref = torch.clamp_min
             self.ref_inplace = torch.Tensor.clamp_min_
+
+        # The following sets `dtypesIfCUDA` and `dtypesIfROCM` accordingly.
+        super().__post_init__()
 
     def sample_zero_size_inputs(self, device, dtype, requires_grad=False, **kwargs):
         if not hasattr(self.sample_inputs_func, "sample_zero_size_tensor_inputs"):
