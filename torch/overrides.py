@@ -350,6 +350,7 @@ def get_ignored_functions() -> Set[Callable]:
         Tensor._has_symbolic_sizes_strides.__get__,
         Tensor._conj,
         Tensor._conj_physical,
+        Tensor._apply_cow_,
         Tensor._lazy_clone,
         Tensor._simulate_lazy_clone,
         Tensor._neg_view,
@@ -358,6 +359,7 @@ def get_ignored_functions() -> Set[Callable]:
         Tensor._is_any_true,
         Tensor._addmm_activation,
         Tensor.to_padded_tensor,
+        Tensor._use_count,
     }
 
 

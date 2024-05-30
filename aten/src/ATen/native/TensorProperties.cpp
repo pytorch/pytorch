@@ -4,11 +4,13 @@
 #include <ATen/NamedTensorUtils.h>
 #include <ATen/detail/CUDAHooksInterface.h>
 #include <ATen/native/TensorProperties.h>
+#include <ATen/native/Resize.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #else
+#include <ATen/ops/_apply_cow_native.h>
 #include <ATen/ops/_nested_tensor_size_native.h>
 #include <ATen/ops/contiguous_native.h>
 #include <ATen/ops/cudnn_is_acceptable_native.h>
@@ -27,6 +29,15 @@
 #include <c10/util/irange.h>
 
 namespace at::native {
+
+Tensor& _apply_cow_(Tensor& self) {
+  TensorImpl* tensor_impl = self.unsafeGetTensorImpl();
+  StorageImpl* storage_impl = tensor_impl->storage().unsafeGetStorageImpl();
+  c10::Storage new_storage = c10::impl::cow::lazy_clone_storage(*storage_impl);
+  TORCH_INTERNAL_ASSERT(new_storage.nbytes() == storage_impl->nbytes());
+  tensor_impl->set_storage_keep_dtype(new_storage);
+  return self;
+}
 
 bool is_same_size(const Tensor& self, const Tensor& other) {
   return self.sym_sizes().equals(other.sym_sizes());

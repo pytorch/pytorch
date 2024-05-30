@@ -28,6 +28,7 @@
 #include <torch/csrc/distributed/c10d/ProcessGroupNCCL.hpp>
 #include <torch/csrc/distributed/c10d/TraceUtils.h>
 #include <torch/csrc/distributed/c10d/Utils.hpp>
+#include <torch/csrc/distributed/c10d/control_plane/Handlers.hpp>
 #include <torch/csrc/distributed/c10d/logger.hpp>
 #include <torch/torch.h>
 
@@ -355,6 +356,13 @@ std::string dump_nccl_trace() {
 }
 #endif
 
+// TODO(c-p-i-o): add a JSON endpoint.
+control_plane::RegisterHandler dumpHandler{
+    "dump_nccl_trace_pickle",
+    [](const control_plane::Request&, control_plane::Response& res) {
+      res.setContent(dump_nccl_trace(), "application/octet-stream");
+    }};
+
 std::optional<std::function<void(std::function<void(const std::string&)>)>>&
 get_cpp_trace_dumper() {
   static std::optional<
@@ -398,8 +406,7 @@ at::Device ProcessGroupNCCL::guessDeviceForRank() const {
   if (getBoundDeviceId()) {
     return *getBoundDeviceId();
   } else {
-    auto numGPUs = at::cuda::getNumGPUs();
-    int16_t deviceIdx = static_cast<int16_t>(rank_ % numGPUs);
+    int16_t deviceIdx = static_cast<int16_t>(rank_ % localDeviceCount_);
     return at::Device(at::DeviceType::CUDA, deviceIdx);
   }
 }
@@ -740,12 +747,14 @@ ProcessGroupNCCL::ProcessGroupNCCL(
       at::cuda::getNumGPUs() != 0,
       "ProcessGroupNCCL is only supported with GPUs, no GPUs found!");
   this->setGroupName(options_->group_name);
+  this->localDeviceCount_ = at::cuda::getNumGPUs();
   logPrefix_ = createLogPrefix();
   blockingWait_ = getCvarBool(TORCH_NCCL_BLOCKING_WAIT, false);
   asyncErrorHandling_ = static_cast<ErrorHandlingMode>(
       getCvarInt(TORCH_NCCL_ASYNC_ERROR_HANDLING, 3 /*SkipCleanUp*/));
   desyncDebug_ = getCvarBool(TORCH_NCCL_DESYNC_DEBUG, false) ||
       (dist_debug_level_ >= DebugLevel::Detail);
+  rethrowCUDAErrors_ = getCvarBool(TORCH_NCCL_RETHROW_CUDA_ERRORS, true);
   // TODO, we should either deprecate TORCH_NCCL_DUMP_ON_TIMEOUT
   // or change its name to reflect that dump happens on exception including
   // both timeout and other errors.
@@ -816,8 +825,16 @@ ProcessGroupNCCL::ProcessGroupNCCL(
   std::string torch_distributed_debug =
       getCvarString({"TORCH_DISTRIBUTED_DEBUG"}, OFF.c_str());
   LOG(INFO) << logPrefix() << "ProcessGroupNCCL initialization options: "
-            << "NCCL version: " << getNcclVersion() << ", size: " << size
-            << ", global rank: " << globalRank()
+            << "size: " << size << ", global rank: " << globalRank()
+            << ", TIMEOUT(ms): " << options_->timeout.count()
+            << ", USE_HIGH_PRIORITY_STREAM: "
+            << options_->is_high_priority_stream
+            << ", SPLIT_FROM: " << options_->split_from
+            << ", SPLIT_COLOR: " << options_->split_color
+            << ", PG Name: " << options_->group_name;
+
+  LOG(INFO) << logPrefix() << "ProcessGroupNCCL environments: "
+            << "NCCL version: " << getNcclVersion()
             << ", TORCH_NCCL_ASYNC_ERROR_HANDLING: " << asyncErrorHandling_
             << ", TORCH_NCCL_DUMP_ON_TIMEOUT: " << dumpOnException_
             << ", TORCH_NCCL_WAIT_TIMEOUT_DUMP_MILSEC: "
@@ -825,11 +842,6 @@ ProcessGroupNCCL::ProcessGroupNCCL(
             << ", TORCH_NCCL_DESYNC_DEBUG: " << desyncDebug_
             << ", TORCH_NCCL_ENABLE_TIMING: " << enableTiming_.load()
             << ", TORCH_NCCL_BLOCKING_WAIT: " << blockingWait_
-            << ", TIMEOUT(ms): " << options_->timeout.count()
-            << ", USE_HIGH_PRIORITY_STREAM: "
-            << options_->is_high_priority_stream
-            << ", SPLIT_FROM: " << options_->split_from
-            << ", SPLIT_COLOR: " << options_->split_color
             << ", TORCH_DISTRIBUTED_DEBUG: " << torch_distributed_debug
 #ifdef NCCL_HAS_COMM_REGISTER
             << ", TORCH_NCCL_USE_TENSOR_REGISTER_ALLOCATOR_HOOK: "
@@ -840,8 +852,7 @@ ProcessGroupNCCL::ProcessGroupNCCL(
             << ", TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC: " << heartbeatTimeoutInSec_
             << ", TORCH_NCCL_TRACE_BUFFER_SIZE: " << ncclTraceBufferSize_
             << ", TORCH_NCCL_COORD_CHECK_MILSEC: " << coordCheckIntervalMilSec_
-            << ", TORCH_NCCL_NAN_CHECK: " << enableNanCheck_
-            << ", PG Name: " << options_->group_name;
+            << ", TORCH_NCCL_NAN_CHECK: " << enableNanCheck_;
 
   if (options_->global_ranks_in_group.empty()) {
     this->globalRankStart = 0;
@@ -1119,13 +1130,15 @@ ProcessGroupNCCL::~ProcessGroupNCCL() {
   LOG(INFO) << logPrefix() << "ProcessGroupNCCL destructor entered.";
 
   if (!terminateProcessGroup_.load()) {
-    LOG(WARNING) << c10::str(
-        "WARNING: process group has NOT been destroyed before it is being destructed. ",
-        "On normal program exit, the application should call destroy_process_group to ",
-        "ensure that any pending NCCL data transfers have finished in this process. "
-        "In rare cases this process can exit before this point and block the progress of "
-        "another member of the process group. This constraint has always been present, "
-        " but this warning has only been added since PyTorch 2.4");
+    if (rank_ % localDeviceCount_ == 0) {
+      TORCH_WARN_ONCE(
+          "WARNING: process group has NOT been destroyed before we destruct ProcessGroupNCCL. ",
+          "On normal program exit, the application should call destroy_process_group to ",
+          "ensure that any pending NCCL operations have finished in this process. "
+          "In rare cases this process can exit before this point and block the progress of "
+          "another member of the process group. This constraint has always been present, "
+          " but this warning has only been added since PyTorch 2.4");
+    }
     // If user haven't explicitly destroy/shutdown process group, destructor
     // needs to do so
     shutdown();
@@ -1257,7 +1270,21 @@ void ProcessGroupNCCL::heartbeatMonitor() {
           computeDeltaMS(lastTimePollStore, currentTime) >=
               coordCheckIntervalMilSec_) {
         lastTimePollStore = currentTime;
-        if (globalStore_->check({std::string(EXCEPTION_DUMP)})) {
+        // Wrap globalStore_->check() in a try-catch block to avoid crashing if
+        // the store is not available.
+        bool checkExceptionDump = false;
+        try {
+          checkExceptionDump =
+              globalStore_->check({std::string(EXCEPTION_DUMP)});
+        } catch (const std::exception& e) {
+          LOG(ERROR)
+              << logPrefix()
+              << "Failed to get exception dump flag from the global store."
+              << e.what();
+          break;
+        }
+
+        if (checkExceptionDump) {
           int timeOutRank = -1;
           if (!shouldDump_.load()) {
             LOG(ERROR)
@@ -1273,8 +1300,9 @@ void ProcessGroupNCCL::heartbeatMonitor() {
                 "Invalid size for the timeout rank ID");
             std::memcpy(&timeOutRank, vec.data(), vec.size());
           } catch (const std::exception& e) {
-            LOG(ERROR)
-                << "Failed to get timeout rank ID from the global store.";
+            LOG(ERROR) << logPrefix()
+                       << "Failed to get timeout rank ID from the global store."
+                       << e.what();
           }
           errorMsg = c10::str(
               logPrefix(),
@@ -1451,11 +1479,14 @@ void ProcessGroupNCCL::ncclCommWatchdog() {
           "Process group watchdog thread terminated with exception: ",
           e.what());
       LOG(ERROR) << exitMsg;
-      // TODO(whc) clean up the rethrow - why is it stored in a class var and
-      // rethrown?
-      watchDogException_ =
-          std::make_exception_ptr(C10_BUILD_ERROR(DistBackendError, exitMsg));
-      std::rethrow_exception(watchDogException_);
+      if (C10_LIKELY(rethrowCUDAErrors_) ||
+          !(std::string(e.what()).find("CUDA Error"))) {
+        // TODO(whc) clean up the rethrow - why is it stored in a class var and
+        // rethrown?
+        watchDogException_ =
+            std::make_exception_ptr(C10_BUILD_ERROR(DistBackendError, exitMsg));
+        std::rethrow_exception(watchDogException_);
+      }
     }
   } catch (...) {
     const auto exitMsg = c10::str(
@@ -1500,9 +1531,8 @@ std::string ProcessGroupNCCL::getNCCLWatchdogDebugInfo() {
 std::string ProcessGroupNCCL::createLogPrefix() const {
   if (!pg_desc_.empty() && pg_desc_ != "undefined") {
     return c10::str("[PG ", pg_name_, " (", pg_desc_, ") Rank ", rank_, "] ");
-  } else {
-    return c10::str("[PG ", pg_name_, " Rank ", rank_, "] ");
   }
+  return c10::str("[PG ", pg_name_, " Rank ", rank_, "] ");
 }
 
 const std::string& ProcessGroupNCCL::logPrefix() const {

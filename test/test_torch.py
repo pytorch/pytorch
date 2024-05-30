@@ -41,7 +41,7 @@ from torch.testing._internal.common_utils import (  # type: ignore[attr-defined]
     skipIfRocm, skipIfNoSciPy, TemporaryFileName, TemporaryDirectoryName,
     wrapDeterministicFlagAPITest, DeterministicGuard, CudaSyncGuard, futureLazyCloneGuard,
     skipIfNotRegistered, bytes_to_scalar, parametrize, skipIfMps, noncontiguous_like,
-    AlwaysWarnTypedStorageRemoval, TEST_WITH_TORCHDYNAMO)
+    AlwaysWarnTypedStorageRemoval, TEST_WITH_TORCHDYNAMO, xfailIfTorchDynamo)
 from multiprocessing.reduction import ForkingPickler
 from torch.testing._internal.common_device_type import (
     expectedFailureMeta,
@@ -94,7 +94,6 @@ def torch_vital_set(value):
         else:
             del os.environ['TORCH_VITAL']
 
-
 @contextlib.contextmanager
 def assertNoWarning():
     with warnings.catch_warnings(record=True) as w:
@@ -103,17 +102,15 @@ def assertNoWarning():
         finally:
             assert len(w) == 0
 
-
-
 @contextlib.contextmanager
 def extraConditionalViewWarningsGuard(mode=False):
     with warnings.catch_warnings():
         try:
-            restore = torch._C._get_extra_conditional_view_warnings()
-            torch._C._set_extra_conditional_view_warnings(mode)
+            restore = torch.get_extra_conditional_view_warnings()
+            torch.set_extra_conditional_view_warnings(mode)
             yield
         finally:
-            torch._C._set_extra_conditional_view_warnings(restore)
+            torch.set_extra_conditional_view_warnings(restore)
 
 # Tests Vital Signs for Torch
 # FIXME: document or deprecate whatever this is
@@ -4397,6 +4394,9 @@ else:
                 getattr(x, op)(*args)
 
     # FIXME: move to an elementwise ternary test suite and make this an OpInfo test
+    # https://github.com/pytorch/pytorch/issues/126474
+    @xfailIfTorchDynamo
+    @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/126474")
     @dtypes(torch.double)
     def test_ternary_op_mem_overlap(self, device, dtype):
         if device == "cpu" and TEST_WITH_TORCHINDUCTOR:
@@ -5230,7 +5230,7 @@ else:
     @extraConditionalViewWarningsGuard()
     def test_simulate_lazy_clone_extra_warnings(self, device):
         for extra_warnings in [False, True]:
-            torch._C._set_extra_conditional_view_warnings(extra_warnings)
+            torch.set_extra_conditional_view_warnings(extra_warnings)
             a = torch.randn(10, device=device)
 
             if extra_warnings:
@@ -6276,7 +6276,7 @@ else:
     @onlyNativeDeviceTypes
     def test_grad_scaler_pass_itself(self, device):
         device = torch.device(device)
-        GradScaler = torch.cuda.amp.GradScaler if "cuda" == device.type else torch.cpu.amp.GradScaler
+        GradScaler = partial(torch.amp.GradScaler, device=device.type)
 
         class _PlaceHolderOptimizer(torch.optim.Optimizer):
             tester = self
@@ -6289,7 +6289,7 @@ else:
 
         class Optimizer1(_PlaceHolderOptimizer):
             def step(self, closure=None, *, grad_scaler=None):
-                self.tester.assertTrue(isinstance(grad_scaler, GradScaler))
+                self.tester.assertTrue(isinstance(grad_scaler, torch.amp.GradScaler))
                 self.tester.assertFalse(hasattr(self, "grad_scale"))
                 self.tester.assertFalse(hasattr(self, "found_inf"))
 
@@ -6312,6 +6312,17 @@ else:
             scaler.step(o1)
         scaler.step(o2)
         scaler.update()
+
+    @onlyNativeDeviceTypes
+    def test_grad_scaler_deprecated_warning(self, device):
+        device = torch.device(device)
+        GradScaler = torch.cuda.amp.GradScaler if "cuda" == device.type else torch.cpu.amp.GradScaler
+
+        with self.assertWarnsRegex(
+            FutureWarning,
+            rf"`torch.{device.type}.amp.GradScaler\(args...\)` is deprecated.",
+        ):
+            _ = GradScaler(init_scale=2.0)
 
     @dtypesIfCUDA(torch.float, torch.double, torch.half)
     @dtypesIfCPU(torch.float, torch.double, torch.bfloat16, torch.half)
@@ -10733,12 +10744,9 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
             if t1.is_floating_point():
                 t3 = t1.clone().detach().requires_grad_(True)
                 out = t3 * 2
-                with self.assertRaisesRegex(RuntimeError, "Expected single reference to a's"):
-                    torch.utils.swap_tensors(t3, t2)
-                del out
-                # Now succeeds
                 torch.utils.swap_tensors(t3, t2)
-                torch.utils.swap_tensors(t1, t2)
+                with self.assertRaisesRegex(RuntimeError, "AccumulateGrad node that was poisoned by swap_tensors"):
+                    out.sum().backward()
 
             wr = weakref.ref(t1)
             with self.assertRaisesRegex(RuntimeError, "has weakref"):

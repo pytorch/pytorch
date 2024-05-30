@@ -375,22 +375,14 @@ PyObject* THPModule_swap_tensor_impl(PyObject* _unused, PyObject* args) {
   THPVariable* a = reinterpret_cast<THPVariable*>(a_);
   THPVariable* b = reinterpret_cast<THPVariable*>(b_);
 
-  TORCH_CHECK(
-      a->cdata->use_count() == 1,
-      "Expected single reference to a's Tensor object but got ",
-      a->cdata->use_count());
-  TORCH_CHECK(
-      b->cdata->use_count() == 1,
-      "Expected single reference to b's Tensor object but got ",
-      b->cdata->use_count());
   // weak_use_count() adds 1 if use_count is non-zero
   TORCH_CHECK(
       a->cdata->weak_use_count() == 1,
-      "Expected no weakrefs to a's Tensor object but got  ",
+      "Expected no weakrefs to t1's Tensor object but got  ",
       a->cdata->weak_use_count() - 1);
   TORCH_CHECK(
       b->cdata->weak_use_count() == 1,
-      "Expected no weakrefs to b's Tensor object but got  ",
+      "Expected no weakrefs to t2's Tensor object but got  ",
       b->cdata->weak_use_count() - 1);
 
   // Swap the Tensor Impl
@@ -2243,18 +2235,14 @@ Call this whenever a new thread is created in order to propagate values from
       "Check if extra warnings related to deprecation of conditional views are enabled.");
 
   py_module.def(
-      "_set_future_copy_instead_of_conditional_view",
-      [](bool mode) {
-        c10::impl::cow::set_future_copy_instead_of_conditional_view(mode);
-      },
+      "_set_future_lazy_clone",
+      [](bool mode) { c10::impl::cow::set_future_lazy_clone(mode); },
       ("Enables future behavior to make operators always return a copy in "
        "cases where they currently conditionally return a view or a copy"));
 
   py_module.def(
-      "_get_future_copy_instead_of_conditional_view",
-      []() {
-        return c10::impl::cow::get_future_copy_instead_of_conditional_view();
-      },
+      "_get_future_lazy_clone",
+      []() { return c10::impl::cow::get_future_lazy_clone(); },
       "Check if future behavior to make operators always return a copy is enabled.");
 
   py_module.def(

@@ -28,6 +28,7 @@ aten::_amp_foreach_non_finite_check_and_unscale_
 aten::_amp_update_scale
 aten::_amp_update_scale.out
 aten::_amp_update_scale_
+aten::_apply_cow_
 aten::_assert_async
 aten::_assert_async.msg
 aten::_batch_norm_no_update.out
@@ -248,6 +249,8 @@ aten::_foreach_log2
 aten::_foreach_log2.out
 aten::_foreach_log2_
 aten::_foreach_log_
+aten::_foreach_max
+aten::_foreach_max.out
 aten::_foreach_maximum.List
 aten::_foreach_maximum.List_out
 aten::_foreach_maximum.Scalar

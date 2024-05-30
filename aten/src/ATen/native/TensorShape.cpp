@@ -8,6 +8,7 @@
 #include <ATen/Dispatch.h>
 #include <ATen/ExpandUtils.h>
 #include <ATen/InferSize.h>
+#include <ATen/LegacyBatchedTensorImpl.h>
 #include <ATen/MemoryOverlap.h>
 #include <ATen/NamedTensorUtils.h>
 #include <ATen/SparseCsrTensorUtils.h>
@@ -37,6 +38,7 @@
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #else
+#include <ATen/ops/_apply_cow.h>
 #include <ATen/ops/_chunk_cat_native.h>
 #include <ATen/ops/_conj_copy_native.h>
 #include <ATen/ops/_convert_indices_from_coo_to_csr.h>
@@ -44,6 +46,7 @@
 #include <ATen/ops/_foreach_copy.h>
 #include <ATen/ops/_fw_primal_copy_native.h>
 #include <ATen/ops/_indices_copy_native.h>
+#include <ATen/ops/_lazy_clone.h>
 #include <ATen/ops/_make_dual.h>
 #include <ATen/ops/_make_dual_copy_native.h>
 #include <ATen/ops/_mkldnn_reshape.h>
@@ -54,6 +57,7 @@
 #include <ATen/ops/_reshape_copy_native.h>
 #include <ATen/ops/_reshape_from_tensor_native.h>
 #include <ATen/ops/_shape_as_tensor_native.h>
+#include <ATen/ops/_simulate_lazy_clone.h>
 #include <ATen/ops/_sparse_broadcast_to.h>
 #include <ATen/ops/_sparse_broadcast_to_copy_native.h>
 #include <ATen/ops/_sparse_broadcast_to_native.h>
@@ -151,7 +155,6 @@
 #include <ATen/ops/select_native.h>
 #include <ATen/ops/select_scatter_native.h>
 #include <ATen/ops/set_native.h>
-#include <ATen/ops/_simulate_lazy_clone_native.h>
 #include <ATen/ops/slice.h>
 #include <ATen/ops/slice_backward_native.h>
 #include <ATen/ops/slice_copy_native.h>
@@ -1631,28 +1634,13 @@ Tensor alias_with_sizes_and_strides(
   return self_;
 }
 
-// TODO: Move this out so other files can use it
-static Tensor apply_cow_(const Tensor& self) {
-  StorageImpl* storage_impl = self.storage().unsafeGetStorageImpl();
-  c10::Storage new_storage;
-
-  if (c10::impl::cow::get_future_copy_instead_of_conditional_view()) {
-    new_storage = c10::impl::cow::lazy_clone_storage(*storage_impl);
-  } else {
-    new_storage = c10::impl::cow::simulate_lazy_clone_storage(*storage_impl);
-  }
-  self.unsafeGetTensorImpl()->set_storage_keep_dtype(new_storage);
-  return self;
-}
-
 Tensor reshape_symint(const Tensor& self, c10::SymIntArrayRef proposed_shape) {
   if (self.is_sparse()) {
     AT_ERROR("reshape is not implemented for sparse tensors");
   }
 
-  // TODO: Make the changes in this file less verbose
   if (self.is_contiguous() && !self.is_mkldnn()) {
-    return apply_cow_(self.view_symint(proposed_shape));
+    return self.view_symint(proposed_shape)._apply_cow_();
   }
 
   c10::SymDimVector shape = infer_size_dv(proposed_shape, self.sym_numel());
@@ -1683,9 +1671,9 @@ Tensor reshape_symint(const Tensor& self, c10::SymIntArrayRef proposed_shape) {
     // We need to do the checks here instead of in `native_functions.yaml`
     // to preserve backwards compatibility.
     if (!self.is_xla() && !self.is_lazy() && !self.is_ipu() && !at::isTensorSubclassLike(self)) {
-      return apply_cow_(self._reshape_alias_symint(shape, stride.value()));
+      return self._reshape_alias_symint(shape, stride.value())._apply_cow_();
     } else {
-      return apply_cow_(self.view_symint(shape));
+      return self.view_symint(shape)._apply_cow_();
     }
   }
   return at::_unsafe_view_symint(self.clone(at::MemoryFormat::Contiguous), shape);
@@ -1742,9 +1730,9 @@ Tensor reshape(const Tensor& self, IntArrayRef proposed_shape) {
     // We need to do the checks here instead of in `native_functions.yaml`
     // to preserve backwards compatibility.
     if (!self.is_xla() && !self.is_lazy() && !self.is_ipu()) {
-      return apply_cow_(self._reshape_alias(shape, stride.value()));
+      return self._reshape_alias(shape, stride.value())._apply_cow_();
     } else {
-      return apply_cow_(self.view(shape));
+      return self.view(shape)._apply_cow_();
     }
   }
   return at::_unsafe_view(self.clone(at::MemoryFormat::Contiguous), shape);
@@ -4032,7 +4020,7 @@ at::Tensor clone_preserve_strides(const at::Tensor& self) {
 }
 
 
-at::Tensor slice_scatter(const at::Tensor& self, const at::Tensor& src, int64_t dim, std::optional<int64_t> start, c10::optional<int64_t> end, int64_t step) {
+at::Tensor slice_scatter(const at::Tensor& self, const at::Tensor& src, int64_t dim, std::optional<int64_t> start, std::optional<int64_t> end, int64_t step) {
     // See Note [*_scatter ops preserve strides]
     auto output = clone_preserve_strides(self);
     auto slice = output.slice(dim, start, end, step);
@@ -4121,6 +4109,44 @@ int64_t sparse_dim_default(const Tensor& self) {
 int64_t dense_dim_default(const Tensor& self) {
   TORCH_CHECK(self.layout() == kStrided, "dense_dim expected sparse or strided tensor layout but got ", self.layout());
   return self.dim();
+}
+
+static Tensor _lazy_clone_impl(Tensor const& self) {
+  c10::StorageImpl* self_storage = self.storage().unsafeGetStorageImpl();
+  c10::intrusive_ptr<c10::StorageImpl> storage;
+  storage = c10::impl::cow::lazy_clone_storage(*self_storage);
+  TORCH_CHECK(storage != nullptr);
+  Tensor self_;
+
+  if (c10::impl::cow::get_future_lazy_clone()) {
+    self_ = at::detail::make_tensor<TensorImpl>(
+      c10::Storage(std::move(storage)),
+      self.key_set(),
+      self.dtype());
+
+    self_.unsafeGetTensorImpl()->set_sizes_and_strides(
+      self.sym_sizes(),
+      self.sym_strides(),
+      self.sym_storage_offset());
+  } else {
+    self_ = self.view_symint(self.sym_sizes());
+    self_.unsafeGetTensorImpl()->set_storage_keep_dtype(storage);
+  }
+  return self_;
+}
+
+Tensor _lazy_clone(Tensor const& self) {
+  TORCH_CHECK(
+      c10::impl::cow::get_future_lazy_clone(),
+      "Cannot lazy clone when future lazy clone behavior is disabled");
+  return _lazy_clone_impl(self);
+}
+
+Tensor _simulate_lazy_clone(Tensor const& self) {
+  TORCH_CHECK(
+      !c10::impl::cow::get_future_lazy_clone(),
+      "Cannot simulate lazy clone when future lazy clone behavior is enabled");
+  return _lazy_clone_impl(self);
 }
 
 } // namespace at::native

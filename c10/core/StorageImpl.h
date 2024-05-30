@@ -140,8 +140,8 @@ struct C10_API StorageImpl : public c10::intrusive_ptr_target {
         warnDeprecatedDataPtr();
       }
       maybe_materialize_cow();
+      maybe_check_cowsim_write();
     }
-    maybe_check_cowsim_write();
     return data_ptr_;
   }
 
@@ -178,9 +178,8 @@ struct C10_API StorageImpl : public c10::intrusive_ptr_target {
         warnDeprecatedDataPtr();
       }
       maybe_materialize_cow();
+      maybe_check_cowsim_write();
     }
-    // TODO: Move into the conditional block above
-    maybe_check_cowsim_write();
     return data_ptr_.mutable_get();
   }
 
@@ -283,8 +282,8 @@ struct C10_API StorageImpl : public c10::intrusive_ptr_target {
 
  private:
   void refresh_has_data_ptr_check() {
-    has_data_ptr_check_ = is_cow() || throw_on_mutable_data_ptr_ ||
-        warn_deprecated_on_mutable_data_ptr_;
+    has_data_ptr_check_ = is_cow() || is_cowsim() ||
+        throw_on_mutable_data_ptr_ || warn_deprecated_on_mutable_data_ptr_;
   }
 
   inline bool is_cow() const {

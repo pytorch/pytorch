@@ -439,6 +439,10 @@ std::tuple<Tensor,optional<int64_t>> view_copy_batch_rule(
   return std::make_tuple(at::view_copy_symint(self_, view_size), 0);
 }
 
+std::tuple<Tensor, optional<int64_t>> _apply_cow_batching_rule(
+    const Tensor &self, optional<int64_t> self_bdim) {
+  return std::make_tuple(self._apply_cow_(), 0);
+}
 
 template <typename F, F Func>
 std::tuple<Tensor, optional<int64_t>> expand_batch_rule(
@@ -584,6 +588,7 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   VMAP_SUPPORT(diag_embed, diag_embed_batch_rule);
   VMAP_SUPPORT(narrow_copy, narrow_copy_batch_rule);
   VMAP_SUPPORT2(unsafe_split, Tensor, unsafe_split_batch_rule);
+  VMAP_SUPPORT(_apply_cow_, _apply_cow_batching_rule);
 }
 
 } // namespace at::functorch

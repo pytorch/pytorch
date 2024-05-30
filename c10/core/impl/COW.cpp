@@ -52,23 +52,11 @@ bool is_cow_data_ptr(const c10::DataPtr& data_ptr) {
 }
 
 bool is_cowsim_data_ptr(const c10::DataPtr& data_ptr) {
-  return (void*)data_ptr.get_deleter() == (void*)&cow::cowsim_deleter;
+  return data_ptr.get_deleter() == &cow::cowsim_deleter;
 }
 
-c10::intrusive_ptr<StorageImpl> lazy_clone_storage_impl(
-    StorageImpl& storage,
-    bool simulate) {
-  if (get_future_copy_instead_of_conditional_view()) {
-    TORCH_CHECK(
-        !simulate,
-        "Cannot simulate lazy clone when future lazy clone behavior is enabled");
-
-  } else {
-    TORCH_CHECK(
-        simulate,
-        "Cannot lazy clone when future lazy clone behavior is disabled");
-  }
-
+c10::intrusive_ptr<StorageImpl> lazy_clone_storage(StorageImpl& storage) {
+  bool simulate = !get_future_lazy_clone();
   const at::DataPtr& data_ptr = storage.data_ptr();
 
   // There are three possible circumstances:
@@ -105,8 +93,8 @@ c10::intrusive_ptr<StorageImpl> lazy_clone_storage_impl(
     if (simulate && get_extra_conditional_view_warnings()) {
       TORCH_WARN(
           "This operation creates a conditional view. This behavior is ",
-          "deprecated, and in the future it will unconditionally create a copy ",
-          "instead");
+          "deprecated, and in the future it will unconditionally create a ",
+          "lazy clone (semantic copy) instead.");
     }
     std::unique_ptr<void, DeleterFnPtr> original_ctx =
         storage._mutable_data_ptr_no_checks().move_context();
@@ -147,15 +135,6 @@ c10::intrusive_ptr<StorageImpl> lazy_clone_storage_impl(
       storage.allocator(),
       storage.resizable(),
       storage.device_type());
-}
-
-c10::intrusive_ptr<StorageImpl> lazy_clone_storage(StorageImpl& storage) {
-  return lazy_clone_storage_impl(storage, /*simulate=*/false);
-}
-
-c10::intrusive_ptr<StorageImpl> simulate_lazy_clone_storage(
-    StorageImpl& storage) {
-  return lazy_clone_storage_impl(storage, /*simulate=*/true);
 }
 
 C10_API void materialize_cow_storage(StorageImpl& storage) {
@@ -213,14 +192,14 @@ C10_API void check_cowsim_read(const StorageImpl& storage) {
   ctx->check_read(reinterpret_cast<std::uintptr_t>(&storage));
 }
 
-static bool _future_copy_instead_of_conditional_view = false;
+static bool _future_lazy_clone = false;
 
-C10_API void set_future_copy_instead_of_conditional_view(bool mode) {
-  _future_copy_instead_of_conditional_view = mode;
+C10_API void set_future_lazy_clone(bool mode) {
+  _future_lazy_clone = mode;
 }
 
-C10_API bool get_future_copy_instead_of_conditional_view() {
-  return _future_copy_instead_of_conditional_view;
+C10_API bool get_future_lazy_clone() {
+  return _future_lazy_clone;
 }
 
 } // namespace c10::impl::cow

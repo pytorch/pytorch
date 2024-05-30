@@ -670,7 +670,7 @@ class SocketConnectOp {
 
   static const std::chrono::seconds delay_duration_;
 
-  enum class ConnectResult { Success, Error, Retry };
+  enum class ConnectResult : uint8_t { Success, Error, Retry };
 
  public:
   SocketConnectOp(
