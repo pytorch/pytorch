@@ -28,12 +28,13 @@ if not c10d.is_available() or not c10d.is_nccl_available():
 from typing import Dict, List
 
 import test_c10d_common
+from test_c10d_common import ConvNet, DoubleGpuNet, gpus_for_rank, ModuleForDdpCommHook
+
 import torch.distributed as dist
 import torch.distributed.algorithms.ddp_comm_hooks.default_hooks as default
 import torch.distributed.algorithms.ddp_comm_hooks.powerSGD_hook as powerSGD
 import torch.nn.functional as F
 import torch.testing._internal.common_utils as common
-from test_c10d_common import ConvNet, DoubleGpuNet, gpus_for_rank, ModuleForDdpCommHook
 from torch import nn
 from torch._C._distributed_c10d import OpType
 from torch.nn.parallel import DistributedDataParallel
