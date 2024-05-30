@@ -658,7 +658,7 @@ def proxy_args_kwargs(args, kwargs):
 
 
 @dataclasses.dataclass
-class FwdCompilationMetrics:
+class CompilationMetrics:
     compile_id: str
     frame_key: str
     co_name: str
@@ -703,17 +703,17 @@ DEFAULT_COMPILATION_METRICS_LIMIT = 64
 
 
 _compilation_metrics: Deque[
-    Union[FwdCompilationMetrics, BwdCompilationMetrics]
+    Union[CompilationMetrics, BwdCompilationMetrics]
 ] = collections.deque(maxlen=DEFAULT_COMPILATION_METRICS_LIMIT)
 
 
 def record_compilation_metrics(
-    compilation_metrics: Union[FwdCompilationMetrics, BwdCompilationMetrics]
+    compilation_metrics: Union[CompilationMetrics, BwdCompilationMetrics]
 ):
     global _compilation_metrics
     _compilation_metrics.append(compilation_metrics)
-    if isinstance(compilation_metrics, FwdCompilationMetrics):
-        name = "fwd_compilation_metrics"
+    if isinstance(compilation_metrics, CompilationMetrics):
+        name = "compilation_metrics"
     else:
         name = "bwd_compilation_metrics"
     torch._logging.trace_structured(
@@ -740,9 +740,7 @@ def clear_compilation_metrics() -> None:
     _compilation_metrics.clear()
 
 
-def get_compilation_metrics() -> (
-    List[Union[FwdCompilationMetrics, BwdCompilationMetrics]]
-):
+def get_compilation_metrics() -> List[Union[CompilationMetrics, BwdCompilationMetrics]]:
     return list(_compilation_metrics)
 
 
