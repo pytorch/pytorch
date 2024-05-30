@@ -2164,7 +2164,7 @@ if (custom_op_wrapper.get() == NULL) {
             elif isinstance(arg_type, torch.FloatType):
                 return f"PyFloat_FromDouble({raw_arg})"
             elif isinstance(arg_type, torch.BoolType):
-                return f"PyBool_FromLong({raw_arg})"
+                return f"PyBool_FromLong({1 if raw_arg else 0})"
             elif isinstance(arg_type, torch.StringType):
                 return f'PyUnicode_FromString("{raw_arg}")'
             else:
