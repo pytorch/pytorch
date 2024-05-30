@@ -922,7 +922,7 @@ def load(
             match the :attr:`pickle_module` used to serialize file)
         weights_only: Indicates whether unpickler should be restricted to
             loading only tensors, tensor subclasses, primitive types, dictionaries
-            and any types in :func:`torch.serialization.get_safe_globals`.
+            and any types added via :func:`torch.serialization.add_safe_globals`.
         mmap: Indicates whether the file should be mmaped rather than loading all the storages into memory.
             Typically, tensor storages in the file will first be moved from disk to CPU memory, after which they
             are moved to the location that they were tagged with when saving, or specified by ``map_location``. This
