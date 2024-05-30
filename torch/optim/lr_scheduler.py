@@ -69,7 +69,7 @@ def _format_param(name: str, optimizer: Optimizer, param):
     """Return correctly formatted lr/momentum for each param group."""
 
     def _copy(_param):
-        return _param.clone().detach() if isinstance(_param, Tensor) else _param
+        return _param.clone() if isinstance(_param, Tensor) else _param
 
     if isinstance(param, (list, tuple)):
         if len(param) != len(optimizer.param_groups):
@@ -97,7 +97,7 @@ class LRScheduler:
             for group in optimizer.param_groups:
                 initial_lr = group["lr"]
                 if isinstance(initial_lr, Tensor):
-                    initial_lr = initial_lr.clone().detach()
+                    initial_lr = initial_lr.clone()
                 group.setdefault("initial_lr", initial_lr)
         else:
             for i, group in enumerate(optimizer.param_groups):
