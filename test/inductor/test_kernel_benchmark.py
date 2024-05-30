@@ -6,6 +6,7 @@ import sys
 from unittest.mock import patch
 
 import torch
+import torch._inductor.async_compile
 from torch._dynamo.testing import rand_strided
 from torch._inductor import config
 from torch._inductor.codecache import PyCodeCache
