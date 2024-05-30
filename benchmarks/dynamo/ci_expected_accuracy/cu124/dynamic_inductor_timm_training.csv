@@ -38,7 +38,7 @@ crossvit_9_240,pass,7
 
 
 
-cspdarknet53,pass,7
+cspdarknet53,fail_accuracy,7
 
 
 
@@ -58,7 +58,7 @@ dpn107,pass,6
 
 
 
-eca_botnext26ts_256,pass,7
+eca_botnext26ts_256,fail_accuracy,7
 
 
 

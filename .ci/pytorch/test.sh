@@ -264,14 +264,17 @@ elif [[ $TEST_CONFIG == 'nogpu_AVX512' ]]; then
   export ATEN_CPU_CAPABILITY=avx2
 fi
 
-pushd test
-CUDA_VERSION=$(python -c "import torch; print(torch.version.cuda)")
-if [ "$CUDA_VERSION" == "12.4" ]; then
+# temp workarounds for https://github.com/pytorch/pytorch/issues/126692, remove when fixed
+if [[ "$BUILD_ENVIRONMENT" != *-bazel-* ]]; then
+  pushd test
+  CUDA_VERSION=$(python -c "import torch; print(torch.version.cuda)")
+  if [ "$CUDA_VERSION" == "12.4" ]; then
     ISCUDA124="cu124"
-else
+  else
     ISCUDA124=""
+  fi
+  popd
 fi
-popd
 
 test_python_legacy_jit() {
   time python test/run_test.py --include test_jit_legacy test_jit_fuser_legacy --verbose
