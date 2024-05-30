@@ -4,6 +4,7 @@ import itertools
 import warnings
 from collections import OrderedDict
 from typing import Any, List, Optional, Tuple
+from typing_extensions import deprecated
 
 import torch
 import torch._C as _C
@@ -179,12 +180,14 @@ class FunctionCtx:
         """
         self.dirty_tensors = args
 
+    @deprecated(
+        "`mark_shared_storage` is deprecated. "
+        "Tensors with shared storages are automatically tracked. "
+        "Note that calls to `set_()` are not tracked",
+        category=FutureWarning,
+    )
     def mark_shared_storage(self, *pairs):
-        warnings.warn(
-            "mark_shared_storage is deprecated. "
-            "Tensors with shared storages are automatically tracked. Note "
-            "that calls to `set_()` are not tracked"
-        )
+        pass
 
     def mark_non_differentiable(self, *args: torch.Tensor):
         r"""Mark outputs as non-differentiable.
@@ -491,9 +494,8 @@ class Function(_SingleLevelFunction):
     """
 
     def __init__(self, *args, **kwargs):
-        cls = self.__class__
         warnings.warn(
-            f"{cls} should not be instantiated. Methods on autograd functions"
+            f"{self.__class__} should not be instantiated. Methods on autograd functions"
             "are all static, so you should invoke them on the class itself. "
             "Instantiating an autograd function will raise an "
             "error in a future version of PyTorch.",
