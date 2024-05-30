@@ -1033,8 +1033,6 @@ def aot_export_module(
     params_buffers_flat = list(params_buffers_flat)
     params_buffers_len = len(params_buffers_flat)
 
-    kwargs = kwargs or {}
-
     functional_call = create_functional_call(
         mod, params_buffers_spec, params_buffers_len, store_orig_mod=True
     )
