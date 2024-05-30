@@ -2483,6 +2483,28 @@ class CPUReproTests(TestCase):
                 self.common(fn, (x,))
                 assert metrics.generated_cpp_vec_kernel_count == 0
 
+    @requires_vectorization
+    @patch("torch.cuda.is_available", lambda: False)
+    def test_groupnorm_cpu_only(self):
+        gn = torch.nn.GroupNorm(3, 90)
+
+        def fn(x):
+            return gn(x)
+
+        for dtype in vec_dtypes:
+            x = torch.randn((2, 90, 6, 6), dtype=dtype).to(
+                memory_format=torch.channels_last
+            )
+
+            with config.patch({"cpp.simdlen": None}):
+                torch._dynamo.reset()
+                metrics.reset()
+                self.common(fn, (x,))
+                if dtype == torch.float32:
+                    assert metrics.generated_cpp_vec_kernel_count == 3
+                else:
+                    assert metrics.generated_cpp_vec_kernel_count == 4
+
     def test_outer_loop_fusion(self):
         def fn(x):
             max = torch.amax(x, dim=-1, keepdim=True)
