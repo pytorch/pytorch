@@ -3415,17 +3415,9 @@ class ComputedBuffer(Buffer):
             *body.writes_name2expr.values(),
         ]
 
-        # the reordering_reindex in reads' simplify_reorder_and_tile
-        reordering_reindex = [same_reorder(range(len(index_vars)))] * len(memory_addrs)
-        for i, reads_buf in enumerate(reads_bufs):
-            if isinstance(reads_buf, ComputedBuffer) and hasattr(
-                reads_buf, "iter_reordering_reindex"
-            ):
-                reordering_reindex[i] = reads_buf.iter_reordering_reindex  # type: ignore[has-type]
-
-        def simplify_and_reorder(x_vars, support_vars, sizes, reordering_reindex=None):
+        def simplify_and_reorder(x_vars, support_vars, sizes):
             sizes, reindex0, reindex1 = self._apply_loop_reordering(
-                x_vars, support_vars, sizes, memory_addrs, reordering_reindex
+                x_vars, support_vars, sizes, memory_addrs
             )
             # for NHWC: reindex0([0,1,2,3]) = [0,2,3,1], reindex1([0,1,2,3]) = [0,3,2,1]
             x_vars = reindex0(x_vars)
@@ -3442,16 +3434,15 @@ class ComputedBuffer(Buffer):
             return sizes, reindex, reindex1
 
         support_vars = index_vars + reduce_vars
-        iter_ranges, iter_reindex, iter_reordering_reindex = simplify_and_reorder(
-            index_vars, support_vars, index_size, reordering_reindex
+        iter_ranges, iter_reindex, _ = simplify_and_reorder(
+            index_vars,
+            support_vars,
+            index_size,
         )
         reduce_ranges, reduce_reindex, _ = simplify_and_reorder(
             reduce_vars, support_vars, reduce_size
         )
 
-        # remember the reordering if not have loop collapse.
-        if len(iter_ranges) == len(index_vars):
-            self.iter_reordering_reindex = iter_reordering_reindex
         # retrace the loop body with simplification and reordering applied
         (iter_vars, reduce_vars), var_ranges = dependencies.index_vars_no_squeeze(
             iter_ranges, reduce_ranges, prefix="z"
@@ -3467,7 +3458,6 @@ class ComputedBuffer(Buffer):
         support_vars,
         sizes,
         memory_addrs,
-        reordering_reindex=None,
         priority_idx=None,
     ):
         """
@@ -3486,14 +3476,6 @@ class ComputedBuffer(Buffer):
             assert len(strides) == len(memory_addrs) and len(strides[0]) == len(
                 index_vars
             )
-            # consider both layout(strides) and reordering(reordering_reindex)
-            if reordering_reindex is not None:
-                for i in range(len(memory_addrs)):
-                    try:
-                        strides[i] = reordering_reindex[i](strides[i])
-                    # if len(order) != len(strides), do not reorder
-                    except AssertionError:
-                        pass
             order = list(reversed(pick_loop_order(strides, sizes, priority_idx)))
         except Exception:
             if config.debug:
