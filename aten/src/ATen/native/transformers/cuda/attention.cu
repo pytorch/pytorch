@@ -796,8 +796,8 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> _scaled_dot_product_cudnn_attention_c
     // TODO(eqy): should state be advanced per thread (local) amount or per call/launch (global) amount
     philox_state = gen->philox_cuda_state(batch_size * num_heads * max_seqlen_batch_q * max_seqlen_batch_k);
     unpack_cudnn<<<1, 1, 0, at::cuda::getCurrentCUDAStream()>>>(
-		                      philox_state, static_cast<int64_t*>(cudnn_seed.data_ptr()), static_cast<int64_t*>(cudnn_offset.data_ptr()));
-  } 
+                                      philox_state, static_cast<int64_t*>(cudnn_seed.data_ptr()), static_cast<int64_t*>(cudnn_offset.data_ptr()));
+  }
 
   const auto softmax_scale = sdp::calculate_scale(query, scale).as_float_unchecked();
   Tensor debugmask;
