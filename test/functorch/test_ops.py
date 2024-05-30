@@ -460,6 +460,11 @@ class TestOperators(TestCase):
                 device_type="cuda",
             ),
             tol1(
+                "svd_lowrank",
+                {torch.float32: tol(atol=5e-05, rtol=7e-06)},
+                device_type="mps",
+            ),
+            tol1(
                 "linalg.tensorsolve",
                 {torch.float32: tol(atol=3e-04, rtol=3e-04)},
                 device_type="cuda",
