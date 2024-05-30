@@ -515,7 +515,7 @@ class OptimizeContext(_TorchDynamoContext):
             assert rebuild_ctx is not None
 
             def call_compiled_autograd():
-                compiler_fn = rebuild_ctx()
+                compiler_fn = rebuild_ctx()  # type: ignore
                 ctx = torch._dynamo.compiled_autograd.enable(compiler_fn)
                 ctx.__enter__()
                 return functools.partial(ctx.__exit__, None, None, None)
