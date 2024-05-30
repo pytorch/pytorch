@@ -637,7 +637,7 @@ class SkipFunctionVariable(VariableTracker):
                 path = inspect.getfile(self.value)
                 msg = f"'skip function {self.value.__qualname__} in file {path}'"
             except TypeError:
-                known_python_builtin_modules = {"_abc"}
+                known_python_builtin_modules = {"_abc", "_warnings"}
                 if self.value.__module__ in known_python_builtin_modules:
                     msg = (
                         f"Graph break due to unsupported Python builtin {self.value.__module__}.{self.value.__qualname__}. "
@@ -647,7 +647,7 @@ class SkipFunctionVariable(VariableTracker):
                 else:
                     msg = (
                         f"Graph break due to unsupported builtin {self.value.__module__}.{self.value.__qualname__}. "
-                        f"This function is either a Python builtin (e.g. functools.partial) "
+                        f"This function is either a Python builtin (e.g. _warnings.warn) "
                         f"or a third-party C/C++ Python extension (perhaps created with pybind). "
                         f"If it is a Python builtin, please file an issue on GitHub "
                         f"so the PyTorch team can add support for it and see the next case for a workaround. "
