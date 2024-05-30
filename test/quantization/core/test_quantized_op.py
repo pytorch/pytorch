@@ -36,6 +36,8 @@ from torch.testing._internal.common_cuda import TEST_CUDNN, TEST_CUDNN_VERSION, 
 from torch.testing._internal.optests import opcheck
 import torch.backends.xnnpack
 
+from torch.utils.cpp_extension import ROCM_HOME
+
 from typing import Optional
 
 np_dtype = {
