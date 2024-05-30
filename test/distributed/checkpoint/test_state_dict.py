@@ -701,18 +701,22 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
 
     @with_comms
     @skip_if_lt_x_gpu(2)
-    def test_para_missing(self) -> None:
+    def test_optim_state_dict_para_matching(self) -> None:
         dist.init_process_group(backend="nccl")
         gpu_id = int(os.environ["LOCAL_RANK"])
         device = f"cuda:{gpu_id}"
         torch.cuda.set_device(device)
         torch.manual_seed(0)
-        model = nn.Sequential(*[nn.Linear(4, 4, device=device, bias=False) for _ in range(2)])
+        model = nn.Sequential(
+            *[nn.Linear(4, 4, device=device, bias=False) for _ in range(2)]
+            )
         for layer in model:
             fully_shard(layer)
         fully_shard(model)
         optim = torch.optim.Adam(model.parameters(), lr=1e-2)
-        torch.optim.lr_scheduler.LambdaLR(optim, lr_lambda=[lambda epoch: 0.95 ** epoch])
+        torch.optim.lr_scheduler.LambdaLR(
+            optim, lr_lambda=[lambda epoch: 0.95 ** epoch]
+            )
         opt_state_dict = ptd_state_dict.get_optimizer_state_dict(
             model,
             optim,
@@ -721,7 +725,7 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
             ),
         )
         if dist.get_rank() == 0:
-            assert 'initial_lr' in opt_state_dict['param_groups'][0]
+            assert "initial_lr" in opt_state_dict["param_groups"][0]
 
         optim = torch.optim.Adam(model.parameters(), lr=1e-2)
         ptd_state_dict.set_optimizer_state_dict(
@@ -732,7 +736,7 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
                 broadcast_from_rank0=True, full_state_dict=True
             ),
         )
-        assert 'initial_lr' in optim.param_groups[0]
+        assert "initial_lr" in optim.param_groups[0]
 
 
 if __name__ == "__main__":
