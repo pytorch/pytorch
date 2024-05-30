@@ -2781,7 +2781,8 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
                 tracer.run()
         except exc.ObservedException as e:
             msg = f"Observed exception DURING INLING {code} : {e}"
-            # TODO(anijain2305) - We should probably have a global data structure for exn_vt_stack
+            # TODO(anijain2305) - This works but we should probably have a
+            # global/central data structure for the exception stack.
             parent.exn_vt_stack.extend(tracer.exn_vt_stack)
             log.debug(msg)
             # bubble up the exception to the parent frame.
