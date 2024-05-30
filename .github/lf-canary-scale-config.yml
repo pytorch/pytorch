@@ -1,0 +1,8 @@
+runner_types:
+  lf.c.linux.2xlarge:
+    disk_size: 150
+    instance_type: c5.2xlarge
+    is_ephemeral: false
+    max_available: 3120
+    os: linux
+
