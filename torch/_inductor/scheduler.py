@@ -28,6 +28,7 @@ from typing import (
 import sympy
 
 import torch
+import torch._inductor.async_compile
 from torch._dynamo.utils import counters, dynamo_timed
 from torch._inductor.metrics import get_metric_table, is_metric_table_enabled
 from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols
