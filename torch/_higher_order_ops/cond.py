@@ -153,13 +153,11 @@ cond_op.__module__ = "torch.ops.higher_order"
 
 
 def create_fw_bw_graph_branches(true_fn, false_fn, *operands):
-    
     # See Note [HOP create fw_bw graph] in create_fw_bw_graph in utils.py
 
     with suspend_functionalization(), disable_functional_mode():
         with disable_proxy_modes_tracing():
             unwrapped_operands = pytree.tree_map(_from_fun, operands)
-            num_wrapped_operands = len(unwrapped_operands)
 
             example_flat_out = pytree.tree_map(_from_fun, true_fn(*unwrapped_operands))
             if any(
@@ -181,15 +179,15 @@ def create_fw_bw_graph_branches(true_fn, false_fn, *operands):
                     "Expect outputs of false_fn to only contains tensors or None. "
                     f"Got types {[type(out) for out in example_flat_out]}."
                 )
-                
+
             # TODO: There is a major issue that the create_fw_bw in the higher_order_op is invoked twice:
             # Once in the forward path (as it should) and once in the backward path, where it shouldn't be called
-            # If we can get rid of the second invokation, it would simplify this function 
+            # If we can get rid of the second invokation, it would simplify this function
             fw_true_graph, joint_true_graph = create_fw_bw_graph(
-                true_fn, False, num_wrapped_operands, *unwrapped_operands
+                true_fn, False, *unwrapped_operands
             )
             fw_false_graph, joint_false_graph = create_fw_bw_graph(
-                false_fn, False, num_wrapped_operands, *unwrapped_operands
+                false_fn, False, *unwrapped_operands
             )
 
         return fw_true_graph, fw_false_graph, joint_true_graph, joint_false_graph

@@ -260,6 +260,7 @@ def prepare_fw_with_masks(fn):
 
     return fw_with_masks
 
+
 # TODO: The parameter use_output_and_grad_bw is required because some operations
 # that utilize this function, such as the while_loop, may require (grad, fwd_outputs)
 def create_fw_bw_graph(fn, use_output_and_grad_bw, *operands):
@@ -306,11 +307,7 @@ def create_fw_bw_graph(fn, use_output_and_grad_bw, *operands):
         joint = create_joint(prepare_fw_with_masks(fn), aot_config=dummy_aot_config)
         _, grads = joint(
             list(inputs),
-            [
-                grad
-                for grad in grads
-                if grad is not None and grad.requires_grad
-            ],
+            [grad for grad in grads if grad is not None and grad.requires_grad],
         )
 
         # In order to keep map functional for backward graph,
@@ -321,12 +318,14 @@ def create_fw_bw_graph(fn, use_output_and_grad_bw, *operands):
 
     if use_output_and_grad_bw:
         example_xs_out = list(operands) + list(example_flat_out)
-        joint_operands_grads = (list(example_grad), list(example_xs_out))
+        # joint_operands_grads = (list(example_grad), list(example_xs_out))
+        joint_graph = make_fx(joint_fn)((list(example_grad), list(example_xs_out)))
     else:
         example_xs_out = list(operands)
-        joint_operands_grads = list(example_grad) + list(example_xs_out)
+        # joint_operands_grads = list(example_grad) + list(example_xs_out)
+        joint_graph = make_fx(joint_fn)(*(list(example_grad) + list(example_xs_out)))
 
-    joint_graph = make_fx(joint_fn)(*joint_operands_grads)
+    # joint_graph = make_fx(joint_fn)(*joint_operands_grads)
     return fw_graph, joint_graph
 
 
