@@ -36,9 +36,10 @@ from torch.testing._internal.common_utils import (
     make_fullrank_matrices_with_distinct_singular_values,
     TEST_WITH_ROCM, IS_WINDOWS, IS_MACOS, TEST_SCIPY,
     torch_to_numpy_dtype_dict, numpy_to_torch_dtype, TEST_WITH_ASAN,
-    GRADCHECK_NONDET_TOL, freeze_rng_state, slowTest, TEST_WITH_SLOW,
+    GRADCHECK_NONDET_TOL, slowTest, TEST_WITH_SLOW,
     TEST_WITH_TORCHINDUCTOR
 )
+from torch.testing._utils import wrapper_set_seed
 
 import torch._refs as refs  # noqa: F401
 import torch._refs.nn.functional
@@ -9165,6 +9166,7 @@ class foreach_inputs_sample_func:
         self._set_rightmost_arg_types(
             rightmost_supports_scalar, rightmost_supports_scalarlist, rightmost_supports_tensor,
         )
+        self._intersperse_empty = (True, False)
 
     def _set_rightmost_arg_types(
         self,
@@ -9329,7 +9331,7 @@ class foreach_inputs_sample_func:
 
         # add empty tensor interspersion to test fully fixing #100701
         for num_tensors, rightmost_arg_type, intersperse_empty_tensors in itertools.product(
-                num_input_tensors, self._rightmost_arg_types, (True, False)):
+                num_input_tensors, self._rightmost_arg_types, self._intersperse_empty):
             if intersperse_empty_tensors and (num_tensors != max(num_input_tensors) or str(device) == 'cpu'):
                 # generate interspersed empty tensors for only 1 N on non-cpu device to lessen redundancy
                 continue
@@ -9361,6 +9363,24 @@ class foreach_inputs_sample_func:
                     *args,
                     disable_fastpath=self._should_disable_fastpath(opinfo, None, None, dtype),
                 )
+
+
+class foreach_max_sample_func(foreach_inputs_sample_func):
+    def __init__(
+        self,
+        arity: int,
+        rightmost_supports_scalar: bool,
+        rightmost_supports_scalarlist: bool,
+        rightmost_supports_tensor: bool = False,
+    ) -> None:
+        super().__init__(arity, rightmost_supports_scalar, rightmost_supports_scalarlist, rightmost_supports_tensor)
+        self._intersperse_empty = (False,)
+
+    def sample_zero_size_tensor_inputs(self, opinfo, device, dtype, requires_grad, **kwargs):
+        return []
+
+    def _should_disable_fastpath(self, opinfo, rightmost_arg, rightmost_arg_type, dtype):
+        return False
 
 
 class foreach_norm_sample_func(foreach_inputs_sample_func):
@@ -11099,6 +11119,46 @@ foreach_pointwise_op_db: List[ForeachFuncInfo] = [
 
 foreach_reduce_op_db: List[ForeachFuncInfo] = [
     ForeachFuncInfo(
+        "max",
+        sample_inputs_func=foreach_max_sample_func(1, False, False),
+        supports_autograd=True,
+        supports_inplace_autograd=True,
+        supports_forward_ad=True,
+        decorators=(
+            # no complex support for ordering ops like max
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestForeach",
+                "test_autodiff",
+                dtypes=(torch.complex128, torch.complex64),
+            ),
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestForeach",
+                "test_foreach_reduce_large_input",
+                dtypes=(torch.complex128, torch.complex64),
+            ),
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestMeta",
+                "test_dispatch_symbolic_meta_outplace",
+                dtypes=(torch.complex128, torch.complex64),
+            ),
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestMeta",
+                "test_meta_outplace",
+                dtypes=(torch.complex128, torch.complex64),
+            ),
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestMeta",
+                "test_dispatch_meta_outplace",
+                dtypes=(torch.complex128, torch.complex64),
+            ),
+        ),
+    ),
+    ForeachFuncInfo(
         "norm",
         sample_inputs_func=foreach_norm_sample_func(1, False, False),
         supports_autograd=True,
@@ -11297,22 +11357,6 @@ def reference_mse_loss(input, target, reduction="mean"):
         return np.sum(se)
     else:  # reduction == "none"
         return se
-
-
-def wrapper_set_seed(op, *args, **kwargs):
-    """Wrapper to set seed manually for some functions like dropout
-    See: https://github.com/pytorch/pytorch/pull/62315#issuecomment-896143189 for more details.
-    """
-    with freeze_rng_state():
-        torch.manual_seed(42)
-        output = op(*args, **kwargs)
-
-        if isinstance(output, torch.Tensor) and output.device.type == "lazy":
-            # We need to call mark step inside freeze_rng_state so that numerics
-            # match eager execution
-            torch._lazy.mark_step()
-
-        return output
 
 
 def reference_layer_norm(inp: np.ndarray, normalized_shape: Tuple[int], weight=None, bias=None, eps=1e-5):
