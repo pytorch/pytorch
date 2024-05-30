@@ -294,10 +294,6 @@ class TritonPrinter(PythonPrinter):
     def _print_PythonMod(self, expr):
         return " % ".join(map(self.paren, map(self._print, expr.args)))
 
-    # Au contraire, this is correct!
-    def _print_CMod(self, expr):
-        return " % ".join(map(self.paren, map(self._print, expr.args)))
-
     # TODO: This is wrong, see
     # https://github.com/triton-lang/triton/issues/955
     # But for Sympy expressions, things will /mostly/ work out because we

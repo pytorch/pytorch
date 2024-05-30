@@ -444,9 +444,6 @@ class ExprPrinter(Printer):
     def _print_PythonMod(self, expr):
         raise NotImplementedError(f"_print_PythonMod not implemented for {type(self)}")
 
-    def _print_CMod(self, expr):
-        raise NotImplementedError(f"_print_CMod not implemented for {type(self)}")
-
     def _print_IntTrueDiv(self, expr):
         raise NotImplementedError(f"_print_IntTrueDiv not implemented for {type(self)}")
 
@@ -736,8 +733,20 @@ class OpOverrides:
         return ops.where(cond, ops.add(r, b), r)
 
     @staticmethod
-    def trunc_to_int(a):
-        return ops.to_dtype(ops.trunc(a), torch.int64)
+    def trunc_to_int(a, dtype):
+        return ops.to_dtype(ops.trunc(a), dtype)
+
+    @staticmethod
+    def floor_to_int(a, dtype):
+        return ops.to_dtype(ops.floor(a), dtype)
+
+    @staticmethod
+    def ceil_to_int(a, dtype):
+        return ops.to_dtype(ops.ceil(a), dtype)
+
+    @staticmethod
+    def round_to_int(a, dtype):
+        return ops.to_dtype(ops.round(a), dtype)
 
     @staticmethod
     def int_truediv(a, b):

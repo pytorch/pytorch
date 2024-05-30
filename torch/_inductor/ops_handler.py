@@ -138,26 +138,35 @@ class OpsHandler(Protocol[T]):
         """
         ...
 
-    def trunc_to_int(self, x: T) -> T:
+    def trunc_to_int(self, x: T, dtype: torch.dtype) -> T:
         """
-        Convert x to int64 with truncation semantics (similar to how the int
+        Convert x to dtype with truncation semantics (similar to how the int
         constructor works in Python).  In Inductor codegen, this just decays
         to trunc and then to_dtype, but this composite operation helps
         roundtrips for Sympy evaluation.
+
+        dtype is taken as an explicit parameter because the desired output
+        dtype is typically the index dtype, which may vary between int32 and
+        int64 depending on if we've shown that all the indexing operations can
+        be done in int32.
         """
         ...
 
-    def ceil_to_int(self, x: T) -> T:
+    def ceil_to_int(self, x: T, dtype: torch.dtype) -> T:
         """
-        Convert x to int64 with ceiling semantics.  This composite operation helps
-        roundtrips for Sympy evaluation.
+        Convert x to dtype with ceiling semantics.  See also trunc_to_int.
         """
         ...
 
-    def floor_to_int(self, x: T) -> T:
+    def floor_to_int(self, x: T, dtype: torch.dtype) -> T:
         """
-        Convert x to int64 with ceiling semantics.  This composite operation helps
-        roundtrips for Sympy evaluation.
+        Convert x to dtype with ceiling semantics.  See also trunc_to_int.
+        """
+        ...
+
+    def round_to_int(self, x: T, dtype: torch.dtype) -> T:
+        """
+        Convert x to dtype with round-to-even semantics.  See also trunc_to_int.
         """
         ...
 

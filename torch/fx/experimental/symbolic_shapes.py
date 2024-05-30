@@ -61,7 +61,7 @@ from torch._logging import trace_structured, structured
 from torch import SymBool, SymFloat, SymInt
 from torch._guards import ShapeGuard, Source, TracingContext
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
-from torch.utils._sympy.functions import FloorDiv, Mod, PythonMod, CMod, IsNonOverlappingAndDenseIndicator, CleanDiv
+from torch.utils._sympy.functions import FloorDiv, Mod, PythonMod, IsNonOverlappingAndDenseIndicator, CleanDiv
 from torch.utils._sympy.solve import try_solve
 from torch.utils._sympy.value_ranges import bound_sympy, SymPyValueRangeAnalysis, ValueRanges, ValueRangeError
 from torch.utils._sympy.singleton_int import SingletonInt
@@ -1623,8 +1623,6 @@ class DimConstraints:
         # arguments should be OK.
         if expr.has(PythonMod):
             expr = expr.replace(PythonMod, mod_handler)
-        if expr.has(CMod):
-            expr = expr.replace(CMod, mod_handler)
         if expr.has(FloorDiv):
             expr = expr.replace(FloorDiv, floor_div_handler)
         return expr
