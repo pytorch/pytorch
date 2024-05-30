@@ -32,6 +32,14 @@ def get_bw_flops(f):
     return mode.get_total_flops() / (512**3 * 2)
 
 
+def create_pair(B_I, O):
+    # results in B_I * O memory, requires B_I * B_I * O flops
+    # arithmetic intensity of B_I
+    x = torch.randn(B_I * 512, B_I * 512, requires_grad=True)
+    w = torch.randn(B_I * 512, O * 512, requires_grad=True)
+    return x, w
+
+
 def get_mem_and_flops(f, memory_budget=None):
     # Returns megabytes rounded to 1 decimal point and FLOPs
     # Note that each value of size (512, 512, torch.float32) is 1 MiB
@@ -179,10 +187,8 @@ class MemoryBudgetTest(TestCase):
             xs = [torch.mm(x, w).cos() for x, w in zip(xs, ws)]
             return sum([x.sum() for x in xs])
 
-        x1 = torch.randn(512, 512, requires_grad=True)
-        w1 = torch.randn(512, 2048, requires_grad=True)
-        x2 = torch.randn(1024, 1024, requires_grad=True)
-        w2 = torch.randn(1024, 1024, requires_grad=True)
+        x1, w1 = create_pair(1, 4)
+        x2, w2 = create_pair(2, 2)
 
         def call():
             return f([x1, x2], [w1, w2])
@@ -194,6 +200,80 @@ class MemoryBudgetTest(TestCase):
         self.assertEqual(comp_mem, 4)
         # We are recomputing x1 @ w1 here!
         self.assertEqual(comp_flops, eager_flops + 4)
+
+    def test_prioritize_cheaper_matmul2(self):
+        def f(xs, ws):
+            xs = [torch.mm(x, w).cos() for x, w in zip(xs, ws)]
+            return sum([x.sum() for x in xs])
+
+        data = [(4, 4), (6, 2), (2, 6)]
+        xs, ws = zip(*[create_pair(a, b) for a, b in data])
+
+        def call():
+            return f(xs, ws)
+
+        eager_mem, eager_flops = get_mem_and_flops(call)
+        self.assertEqual(eager_mem, 40)
+        self.assertEqual(eager_flops, 320)
+        mem, flops = get_mem_and_flops(call, memory_budget=28 / eager_mem)
+        # Save w1 and w2
+        self.assertEqual(mem, 28)
+        # We're recomputing w3 (the cheap one!)
+        self.assertEqual(flops - eager_flops, 2 * 2 * 6)
+        mem, flops = get_mem_and_flops(call, memory_budget=16 / eager_mem)
+        # Save w2. Note that even though saving w1 gets us closer to our memory
+        # limit, w2 is actually *more* FLOPs than w1!
+        self.assertEqual(mem, 12)
+        self.assertEqual(flops - eager_flops, 2 * 2 * 6 + 4 * 4 * 4)
+
+    def test_attention_vs_linear(self):
+        def f(x, w):
+            orig_shape = x.shape
+            x = x.reshape(1, 1, x.shape[0], x.shape[1])
+            # I know this isn't technically right lol
+            x = torch.nn.functional.scaled_dot_product_attention(
+                x, x, x, is_causal=False
+            ).reshape(*orig_shape)
+            x = torch.mm(x, w)
+            x = x.cos()
+            return x.sum()
+
+        def try_seq_length(S, D, expected_recompute):
+            x = torch.randn(S * 512, D * 512, requires_grad=True)
+            w = torch.randn(D * 512, D * 512, requires_grad=True)
+
+            def call():
+                return f(x, w)
+
+            with FlopCounterMode(display=False) as mode:
+                call()
+            mm_flops = mode.get_flop_counts()["Global"][torch.ops.aten.mm]
+            attn_flops = mode.get_total_flops() - mm_flops
+            mm_flops /= 512**3 * 2
+            attn_flops /= 512**3 * 2
+
+            eager_mem, eager_flops = get_mem_and_flops(call)
+            self.assertEqual(eager_mem, S * D * 2)
+
+            mem, flops = get_mem_and_flops(
+                call, memory_budget=0.8
+            )  # Force it to recompute one of mm or attn
+            self.assertEqual(mem, S * D)
+            if expected_recompute == "attn":
+                expected_flops = attn_flops
+            else:
+                expected_flops = mm_flops
+            self.assertEqual(flops - eager_flops, expected_flops)
+
+        # General behind this test is that if sequence length * 2 > D, then
+        # attention is more expensive than the linear.
+        try_seq_length(1, 1, "mm")
+        try_seq_length(1, 3, "attn")
+        try_seq_length(2, 2, "mm")
+        try_seq_length(2, 1, "mm")
+        try_seq_length(2, 5, "attn")
+        try_seq_length(4, 7, "mm")
+        try_seq_length(4, 9, "attn")
 
 
 if __name__ == "__main__":

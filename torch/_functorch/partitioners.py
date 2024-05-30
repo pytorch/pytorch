@@ -1378,22 +1378,22 @@ def dp_knapsack(
         )
 
     # Backtrack to find the items included in the knapsack
-    selected_items = []
-    unselected_items = []
+    saved_items = []
+    recomputable_items = []
     j: int = quantized_max_memory
     for i in range(n, 0, -1):
         if dp[i][j] != dp[i - 1][j]:
-            selected_items.append(i - 1)  # Include this item (indexing from 0)
+            saved_items.append(i - 1)  # Include this item (indexing from 0)
             j -= int(quantized_memory[i - 1].item())
         else:
-            unselected_items.append(i - 1)
+            recomputable_items.append(i - 1)
 
-    selected_items.reverse()  # To get items in the order they were added
+    saved_items.reverse()  # To get items in the order they were added
 
     # The maximum runtime that can be achieved within the max_memory constraint
     max_runtime = dp[n][quantized_max_memory].item()
 
-    return max_runtime, selected_items, unselected_items
+    return max_runtime, saved_items, recomputable_items
 
 
 def _optimize_runtime_with_given_memory(
@@ -1440,7 +1440,7 @@ def estimate_runtime(node):
             ms = do_bench(lambda: node.target(*args, **kwargs))
             return ms
 
-    if RUNTIME_MODE == "analytical":
+    if RUNTIME_MODE == "flops":
         # todo(chilli): Normalize this to also return ms
         from torch.utils.flop_counter import FlopCounterMode
 

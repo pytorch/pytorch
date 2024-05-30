@@ -89,7 +89,7 @@ ban_recompute_not_in_allowlist = True
 ban_recompute_reductions = True
 
 memory_budget = 1.0
-memory_budget_runtime_estimator = "analytical"
+memory_budget_runtime_estimator = "flops"
 memory_budget_solver = "dp"
 
 # Sets all of the ban_recompute heuristics to False except ban_recompute_reductions
