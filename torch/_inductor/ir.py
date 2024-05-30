@@ -1910,6 +1910,9 @@ class BaseView(IRNode):
     def is_extern(self):
         return self.data.is_extern()  # type: ignore[attr-defined]
 
+    def is_module_buffer(self):
+        return self.data.is_module_buffer()  # type: ignore[attr-defined]
+
     def get_reads(self):
         with patch.object(FlexibleLayout, "allow_indexing", True):
             return extract_read_writes(
@@ -1937,6 +1940,7 @@ class ExpandView(BaseView):
     @staticmethod
     def _normalize_size(x, new_size):
         """Replace `-1` with correct sizes"""
+        sizevars = V.graph.sizevars
         new_size = list(map(sympy.expand, new_size))
         old_size = x.get_size()
         old_size = [None] * (len(new_size) - len(old_size)) + list(old_size)
@@ -1948,12 +1952,14 @@ class ExpandView(BaseView):
             elif old_size[i] is None or old_size[i] == 1:
                 pass
             else:
-                # NB: new_size[i] == old_size[i] is known because the meta
-                # formula was expected to have taught us this equality.
-                # We can't conveniently check it right now because
-                # statically_known_equals doesn't know to consult preexisting
-                # guards
-                pass
+                # Sanity check: Expect broadcast compatibility
+                #
+                # NB: new_size[i] == old_size[i] is expected to already be
+                # guarded because the meta formula was expected to have taught
+                # us this equality.
+                assert (
+                    sizevars.size_hint(new_size[i] - old_size[i], fallback=0) == 0
+                ), "Broadcast failed in ExpandView({x.get_size()}, {new_size}) on dimension {i}"
         return new_size
 
     @classmethod
@@ -2744,7 +2750,8 @@ class FixedLayout(Layout):
         """A closure containing math to read a given element"""
 
         def indexer(index):
-            assert len(index) == len(self.stride) == len(self.size)
+            assert len(index) == len(self.stride)
+            assert len(index) == len(self.size)
             result = self.offset
             for idx, stride, sz in zip(index, self.stride, self.size):
                 if sz != 1:
@@ -3717,6 +3724,13 @@ class CUDATemplateBuffer(TemplateBuffer):
 
     def get_workspace_size(self):
         return self.workspace_size if self.workspace_size is not None else 0
+
+
+class CppTemplateBuffer(TemplateBuffer):
+    def __init__(self, layout, inputs, make_kernel_render, template, choice):
+        super().__init__(layout, inputs, make_kernel_render)
+        self.template = template
+        self.choice = choice
 
 
 @dataclasses.dataclass
@@ -6281,7 +6295,7 @@ class MKLPackedLinear(ExternKernelAlloc):
         )
 
     @classmethod
-    def create(cls, x, packed_w, orig_w, batch_size):
+    def create(cls, x, packed_w, orig_w, B, batch_size):
         x = cls.require_stride1(cls.realize_input(x))
         orig_w = cls.require_stride1(cls.realize_input(orig_w))
         *m, _ = x.get_size()
@@ -6289,7 +6303,11 @@ class MKLPackedLinear(ExternKernelAlloc):
         output_size = list(m) + [oc]
         output_stride = make_contiguous_strides_for(output_size)
         inputs = [x, packed_w, orig_w]
-        constant_args = [None, batch_size]
+        constant_args = [batch_size]
+        if B is not None:
+            inputs += [B]
+        else:
+            constant_args.insert(0, None)
 
         return MKLPackedLinear(
             layout=FixedLayout(
@@ -6336,7 +6354,7 @@ class LinearUnary(ExternKernelAlloc):
         )
 
     @classmethod
-    def create(cls, x, w, b, attr, scalars, algorithm):
+    def create(cls, x, w, B, attr, scalars, algorithm):
         x = cls.require_contiguous(cls.realize_input(x))
         w = cls.require_contiguous(cls.realize_input(w))
 
@@ -6344,9 +6362,9 @@ class LinearUnary(ExternKernelAlloc):
         oc, ic = w.get_size()
         inputs = [x, w]
         constant_args = [attr, scalars if scalars else [-1], algorithm]
-        if b is not None:
-            b = cls.require_contiguous(cls.realize_input(b))
-            inputs.append(b)
+        if B is not None:
+            B = cls.require_contiguous(cls.realize_input(B))
+            inputs.append(B)
         else:
             constant_args.insert(0, None)
 
@@ -8087,6 +8105,11 @@ class LoopBodyBlock:
                 index = add_index(index, "other")
                 return self._inner.index_expr(index, dtype)
 
+            def check_bounds(self, index, size, lower, upper):
+                index = add_index(index, "other")
+                size = add_index(size, "other")
+                return self._inner.check_bounds(index, size, lower, upper)
+
             def bucketize(
                 self,
                 values,
@@ -8181,7 +8204,7 @@ class LoopBodyBlock:
             CaptureIndexing(proxy_ops), self.body.var_ranges
         )
         if config.constant_and_index_propagation:
-            handler = IndexPropagation(handler)
+            handler = IndexPropagation(handler, self.body.var_ranges)
 
         with V.set_ops_handler(handler):
             # This indirection is just a cute way to get IndexPropagation to
