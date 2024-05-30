@@ -1060,7 +1060,7 @@ class TestSerialization(TestCase, SerializationMixin):
         _test_save_load_attr(t)
         _test_save_load_attr(torch.nn.Parameter(t))
 
-    def test_weights_only_unpickler(self):
+    def test_weights_only_unpickler_error_handling(self):
         # Check validation for too short files for unpickler
         data_too_short = b'\x80\x02\x8a\x0a\x6c\xfc\x9c\x46\xf9\x20\x6a\xa8\x50\x19\x2e\x80'
         buf = io.BytesIO(data_too_short)
