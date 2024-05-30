@@ -468,8 +468,8 @@ class Tensor(torch._C.TensorBase):
 
         The graph is differentiated using the chain rule. If the tensor is
         non-scalar (i.e. its data has more than one element) and requires
-        gradient, the function additionally requires specifying ``gradient``.
-        It should be a tensor of matching type and location, that contains
+        gradient, the function additionally requires specifying a ``gradient``.
+        It should be a tensor of matching type and shape, that represents
         the gradient of the differentiated function w.r.t. ``self``.
 
         This function accumulates gradients in the leaves - you might need to zero
@@ -491,12 +491,9 @@ class Tensor(torch._C.TensorBase):
             See https://github.com/pytorch/pytorch/pull/60521#issuecomment-867061780 for more details.
 
         Args:
-            gradient (Tensor or None): Gradient w.r.t. the
-                tensor. If it is a tensor, it will be automatically converted
-                to a Tensor that does not require grad unless ``create_graph`` is True.
-                None values can be specified for scalar Tensors or ones that
-                don't require grad. If a None value would be acceptable then
-                this argument is optional.
+            gradient (Tensor, optional): The gradient of the function
+                being differentiated w.r.t. ``self``.
+                This argument can be omitted if ``self`` is a scalar.
             retain_graph (bool, optional): If ``False``, the graph used to compute
                 the grads will be freed. Note that in nearly all cases setting
                 this option to True is not needed and often can be worked around
@@ -505,10 +502,10 @@ class Tensor(torch._C.TensorBase):
             create_graph (bool, optional): If ``True``, graph of the derivative will
                 be constructed, allowing to compute higher order derivative
                 products. Defaults to ``False``.
-            inputs (sequence of Tensor): Inputs w.r.t. which the gradient will be
-                accumulated into ``.grad``. All other Tensors will be ignored. If not
+            inputs (sequence of Tensor, optional): Inputs w.r.t. which the gradient will be
+                accumulated into ``.grad``. All other tensors will be ignored. If not
                 provided, the gradient is accumulated into all the leaf Tensors that were
-                used to compute the attr::tensors.
+                used to compute the :attr:`tensors`.
         """
         if has_torch_function_unary(self):
             return handle_torch_function(

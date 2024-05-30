@@ -65,7 +65,7 @@ namespace jit {
 
 struct ShapeArg
     : public std::
-          pair<std::optional<c10::ShapeSymbol>, c10::optional<int64_t>> {
+          pair<std::optional<c10::ShapeSymbol>, std::optional<int64_t>> {
   using pair::pair;
 
   static ShapeArg unknownInteger() {

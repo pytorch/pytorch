@@ -24,7 +24,6 @@ from torch.nested._internal.nested_tensor import (
     jagged_from_list,
     jagged_from_tensor_and_lengths,
     nested_view_from_values_offsets,
-    NestedTensor,
 )
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -1406,7 +1405,7 @@ class SubclassAOTTests(LoggingTestCase):
             munge_exc(gm),
             """\
 TRACED GRAPH
- ===== Forward graph 10 =====
+ ===== Forward graph N =====
  fx/_lazy_graph_module.py class <lambda>(torch.nn.Module):
     def forward(self, arg0_1: "f32[s0, s1]", arg1_1: "f32[s0, s1]", arg2_1: "Sym(s0)", arg3_1: "Sym(s1)", arg4_1: "Sym(s0)", arg5_1: "Sym(s1)"):
         # File: test_subclasses.py:N in f, code: return tt * tt.size()[0]
@@ -1433,7 +1432,7 @@ TRACED GRAPH
             munge_exc(gm),
             """\
 TRACED GRAPH
- ===== Forward graph 5 =====
+ ===== Forward graph N =====
  fx/_lazy_graph_module.py class <lambda>(torch.nn.Module):
     def forward(self, arg0_1: "f32[s0, s1]", arg1_1: "f32[s0, s1]", arg2_1: "Sym(s0)", arg3_1: "Sym(s1)", arg4_1: "Sym(s0)", arg5_1: "Sym(s1)"):
         # File: test_subclasses.py:N in f, code: y = tt.clone()
@@ -1465,7 +1464,7 @@ TRACED GRAPH
             munge_exc(gm),
             """\
 TRACED GRAPH
- ===== Forward graph 7 =====
+ ===== Forward graph N =====
  fx/_lazy_graph_module.py class <lambda>(torch.nn.Module):
     def forward(self, arg0_1: "Sym(s0)", arg1_1: "Sym(s1)", arg2_1: "f32[s0, s1]", arg3_1: "f32[s0, s1]", arg4_1: "f32[s0, s1]", arg5_1: "f32[s0, s1]", arg6_1: "Sym(s0)", arg7_1: "Sym(s1)"):
         # File: test_subclasses.py:N in f, code: return tt * s0 * s1 * s2 * s3
@@ -1498,7 +1497,7 @@ TRACED GRAPH
             munge_exc(gm),
             """\
 TRACED GRAPH
- ===== Forward graph 14 =====
+ ===== Forward graph N =====
  fx/_lazy_graph_module.py class <lambda>(torch.nn.Module):
     def forward(self, arg0_1: "f32[s0, s1]", arg1_1: "f32[s0, s1]", arg2_1: "Sym(s0)", arg3_1: "Sym(s1)", arg4_1: "Sym(s0)", arg5_1: "Sym(s1)"):
         # File: test_subclasses.py:N in f, code: y = tt.clone()
@@ -1529,7 +1528,7 @@ TRACED GRAPH
             munge_exc(gm),
             """\
 TRACED GRAPH
- ===== Forward graph 16 =====
+ ===== Forward graph N =====
  fx/_lazy_graph_module.py class <lambda>(torch.nn.Module):
     def forward(self, arg0_1: "f32[s0, s1]", arg1_1: "f32[s0, s1]", arg2_1: "Sym(s0)", arg3_1: "Sym(s1)", arg4_1: "Sym(s0)", arg5_1: "Sym(s1)"):
         # File: test_subclasses.py:N in f, code: y = tt.clone()
@@ -1745,13 +1744,31 @@ class TestNestedTensor(torch._dynamo.test_case.TestCase):
 
             # varies based on the type of view
             guard_str = "\n".join(guards)
-            if (
-                isinstance(nt_view._base, NestedTensor)
-                or nt_view_name == "subclass_dense"
-            ):
+            if nt_view_name == "subclass_dense":
                 self.assertExpectedInline(guard_str, """Eq(s3 - 1, s0)""")
+            elif nt_view_name == "dense_subclass_dense_subclass":
+                self.assertExpectedInline(
+                    guard_str,
+                    """\
+Eq(s5 - 1, s2)
+Eq(s11 - 1, s6)
+Eq(s10, s8)""",
+                )
+            elif nt_view_name.startswith("base_is_nt_True"):
+                self.assertExpectedInline(
+                    guard_str,
+                    """\
+Eq(s3 - 1, s0)
+Eq(zf1, zf4)""",
+                )
             else:
-                self.assertExpectedInline(guard_str, """""")
+                self.assertExpectedInline(
+                    guard_str,
+                    """\
+Eq(s4 - 1, s1)
+Eq(s10 - 1, s5)
+Eq(s9, s7)""",
+                )
             return gm
 
         torch._dynamo.reset()

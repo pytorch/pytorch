@@ -99,15 +99,14 @@ def unwrap_tensor_subclasses(
 
         # While tracing, unwrap_tensor_subclasses may add extra SymInts corresponding
         # to subclass tensor sizes (See PyTorch issue #124619 for the motivation).
-        # When the traced function is actually called with runtime values, aot_autograd
-        # need to make to append those extra arguments before calling the traced
-        # function
+        # When the traced function is executed with runtime values, aot_autograd
+        # needs to append those extra arguments with concrete values
         if is_runtime:
-            for x, subclass_meta in zip(xs, subclass_metas):
-                if isinstance(subclass_meta, SubclassCreationMeta):
-                    assert isinstance(subclass_meta, SubclassCreationMeta)
+            for x, meta in zip(xs, subclass_metas):
+                if isinstance(meta, SubclassCreationMeta):
+                    assert isinstance(meta, SubclassCreationMeta)
                     runtime_size = x.size()
-                    maybe_sym_size = subclass_meta.original_subclass.size()
+                    maybe_sym_size = meta.original_subclass.size()
                     assert len(runtime_size) == len(maybe_sym_size)
                     xs_inner += [
                         r
