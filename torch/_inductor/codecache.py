@@ -9,7 +9,6 @@ import importlib
 import io
 import json
 import logging
-import multiprocessing
 import os
 import pickle
 import pkgutil
@@ -17,7 +16,6 @@ import platform
 import re
 import shlex
 import shutil
-import signal
 import struct
 import subprocess
 import sys
@@ -27,13 +25,12 @@ import textwrap
 import threading
 import warnings
 from bisect import bisect_right
-from concurrent.futures import Future, ProcessPoolExecutor, ThreadPoolExecutor
+from concurrent.futures import Future
 from copy import copy
 from ctypes import c_void_p, cdll, CDLL
 from functools import partial
 from pathlib import Path
-from threading import Thread
-from time import sleep, time, time_ns
+from time import time, time_ns
 from types import ModuleType
 from typing import (
     Any,
@@ -51,7 +48,6 @@ from typing import (
 )
 
 import torch
-from torch._dynamo.device_interface import get_registered_device_interfaces
 from torch._dynamo.utils import counters, dynamo_timed
 from torch._inductor import config, exc, metrics
 from torch._inductor.codegen.cuda import cuda_env
@@ -59,8 +55,6 @@ from torch._inductor.runtime.compile_tasks import (
     _module_to_triton_kernel,
     _reload_python_module,
     _reload_python_module_in_subproc,
-    _set_triton_ptxas_path,
-    _worker_compile_triton,
 )
 from torch._inductor.runtime.hints import HalideMeta
 from torch._inductor.runtime.runtime_utils import cache_dir
@@ -78,7 +72,6 @@ if TYPE_CHECKING:
     from torch._inductor.graph import GraphLowering
     from torch._inductor.ir import ChoiceCaller
 
-from torch.hub import _Faketqdm, tqdm
 
 _HERE = os.path.abspath(__file__)
 _TORCH_PATH = os.path.dirname(os.path.dirname(_HERE))
@@ -110,30 +103,10 @@ else:
 
 
 output_code_log = torch._logging.getArtifactLogger(__name__, "output_code")
-kernel_code_log = torch._logging.getArtifactLogger(__name__, "kernel_code")
 
 LOCK_TIMEOUT = 600
 
 _IS_WINDOWS = sys.platform == "win32"
-
-# timing metrics for time spent in the compilation
-_cumulative_compile_time = 0.0
-_t0: Optional[float] = None
-
-
-def _compile_start() -> None:
-    global _t0
-    if _t0 is None:
-        _t0 = time()
-
-
-def _compile_end() -> None:
-    global _cumulative_compile_time, _t0
-    if _t0 is not None:
-        t1 = time()
-        _cumulative_compile_time += t1 - _t0
-        _t0 = None
-        # print("CUMULATIVE COMPILE TIME", _cumulative_compile_time)
 
 
 log = logging.getLogger(__name__)
@@ -1973,7 +1946,7 @@ class AotCodeCompiler:
                 run_command_and_check(cmd)
             log.debug("aot constant binary command: %s", cmd)
 
-            if graph.buffer_mutation:
+            if graph.mutated_buffers & set(graph.constants.keys()):
                 # .data section is between .text and .bss. When the size of .data is large,
                 # during the linking, the relocation of .text against .bss may overflow.
                 # Rename it to .ldata so that it won't be in between the .text and .bss section
@@ -2374,7 +2347,8 @@ class CppCodeCache:
                 if lib is None:
                     if future is not None:
                         future.result()
-                    worker_fn()
+                    result = worker_fn()
+                    assert result is None
                     lib = cls._load_library(output_path, key)
                     assert lib is not None
                 return lib
@@ -3200,12 +3174,6 @@ class CUDACodeCache:
         return (DLLWrapper(dst_file_path), hash_key, source_code_path)
 
 
-def caching_device_properties():
-    for _, device_interface in get_registered_device_interfaces():
-        if device_interface.is_available():
-            device_interface.Worker.get_device_properties()
-
-
 class CodeCacheFuture:
     def result(self):
         raise NotImplementedError
@@ -3226,7 +3194,8 @@ class TritonFuture(CodeCacheFuture):
     def result(self) -> ModuleType:
         if self.future is not None:
             # If the worker failed this will throw an exception.
-            self.future.result()
+            result = self.future.result()
+            assert result is None
             self.future = None
             self.kernel.precompile()
         return self.kernel
@@ -3238,217 +3207,3 @@ class LambdaFuture(CodeCacheFuture):
 
     def result(self):
         return self.result_fn()
-
-
-# If this process dies abnormally (e.g. segfault)
-# it will not shut down the workers. Instead
-# the workers will have their parent reassigned to the
-# init process. This launches a separate thread to
-# watch for the worker getting reassigned,
-# and cleans it up in this case.
-#
-# This function cannot be an inner function since otherwise mp_context="spawn" would
-# not work for ProcessPoolExecutor since inner functions cannot be pickled.
-def _async_compile_initializer(orig_ppid) -> None:
-    def run() -> None:
-        while True:
-            sleep(1)
-            if orig_ppid != os.getppid():
-                os.kill(os.getpid(), signal.SIGKILL)
-
-    global _watchdog_thread
-    _watchdog_thread = Thread(target=run, daemon=True)
-    _watchdog_thread.start()
-    # Ignore Ctrl-C (i.e. SIGINT) sent to pool workers to avoid meaningless log spam.
-    signal.signal(signal.SIGINT, signal.SIG_IGN)
-
-
-_watchdog_thread: Optional[Thread] = None
-
-# Used to keep track of all process pools invoked so far.
-_pool_set: Set[ProcessPoolExecutor] = set()
-
-
-def shutdown_compile_workers() -> None:
-    """Shut down all outstanding compile-worker pools."""
-    for pool in _pool_set:
-        pool.shutdown()
-    after_fork()
-
-
-def after_fork():
-    """Reset pools to initial state without shutting them down"""
-    _pool_set.clear()
-    AsyncCompile.process_pool.cache_clear()
-
-
-try:
-    os.register_at_fork(after_in_child=after_fork)
-except AttributeError:
-    pass  # register_at_fork does not exists on windows
-
-
-class AsyncCompile:
-    def __init__(self) -> None:
-        pass
-
-    @staticmethod
-    @functools.lru_cache(1)
-    def pool() -> ThreadPoolExecutor:
-        assert config.compile_threads > 1
-        return ThreadPoolExecutor(config.compile_threads)
-
-    @staticmethod
-    @functools.lru_cache(1)
-    def process_pool() -> ProcessPoolExecutor:
-        # ensure properties have been calculated before processes
-        # are forked
-        caching_device_properties()
-        assert config.compile_threads > 1
-        orig_ppid = os.getpid()
-
-        ctx = multiprocessing.get_context(config.worker_start_method)
-        pool = ProcessPoolExecutor(
-            config.compile_threads,
-            mp_context=ctx,
-            initializer=partial(_async_compile_initializer, orig_ppid),
-        )
-
-        global _pool_set
-        _pool_set.add(pool)
-
-        # when this pool is created in a subprocess object, the normal exit handler
-        # doesn't run, and we need to register our own handler.
-        # exitpriority has to be high, because another one of the finalizers will
-        # kill the worker thread that sends the shutdown message to the workers...
-        multiprocessing.util.Finalize(None, pool.shutdown, exitpriority=sys.maxsize)
-        return pool
-
-    @classmethod
-    def warm_pool(cls) -> None:
-        if config.compile_threads <= 1:
-            return
-        _compile_start()
-        pool = cls.process_pool()
-
-        # We have to fork processes for compiler workers, but the more memory and other resources that are loaded, the
-        # slower the os.fork time is, quite drastically. It also holds the GIL so we can't put it on another thread.
-
-        # Examples:
-        # A simple x + x + x script: 10ms seconds in the middle of the program, 2ms at startup
-        # tf_efficientnet_b0 benchmark: 50ms! in the middle of the program , 3ms at startup
-
-        # So we want to start the workers early when it is still cheap, and also to allow the workers to get
-        # ready before we have work for them.
-
-        # ProcessPoolExecutor also does not launch the workers until it finds a point when all the workers are idle.
-        # But if we waited until then fork time will be long and we will be waiting for the processes to initialize.
-
-        # We force them to start here with some YOLOing of the internal methods.
-        if hasattr(pool, "_start_queue_management_thread"):
-            pool._start_queue_management_thread()
-        else:
-            for _ in range(config.compile_threads):
-                pool._adjust_process_count()
-            if hasattr(pool, "_start_executor_manager_thread"):
-                pool._start_executor_manager_thread()
-        _compile_end()
-
-    @classmethod
-    def submit(cls, task: Callable[..., Any]) -> Any:
-        if config.compile_threads <= 1:
-            return task()
-        return cls.pool().submit(task)
-
-    def triton(self, kernel_name: str, source_code: str, device_str: str = "cuda"):
-        kernel_code_log.info("Triton Kernel:\n%s", source_code)
-        _compile_start()
-        _set_triton_ptxas_path()
-
-        kernel = TritonCodeCache.load(kernel_name, source_code)
-        if config.compile_threads > 1:
-            return TritonFuture(
-                kernel,
-                self.process_pool().submit(
-                    _worker_compile_triton,
-                    kernel._reload_in_subproc,
-                ),
-            )
-        else:
-            kernel.precompile()
-            return kernel
-
-    def multi_kernel(self, *args, **kwargs) -> Any:
-        from torch._inductor.codegen.multi_kernel import MultiKernelCall
-
-        # no need to call this in parallel since the sub-kernels are already parallel tasks
-        return MultiKernelCall(*args, **kwargs)
-
-    def cpp(self, source_code: str):
-        kernel_code_log.info("CPP Kernel:\n%s", source_code)
-        if config.compile_threads <= 1:
-            return CppCodeCache.load(source_code).kernel
-        else:
-            get_result = CppCodeCache.load_async(source_code, submit_fn=self.submit)
-            return LambdaFuture(lambda: get_result().kernel)
-
-    def cpp_pybinding(self, argtypes: List[str], source_code: str):
-        kernel_code_log.info("CPP+Bindings Kernel:\n%s", source_code)
-        if config.compile_threads <= 1:
-            return CppPythonBindingsCodeCache.load_pybinding(argtypes, source_code)
-        else:
-            get_result = CppPythonBindingsCodeCache.load_pybinding_async(
-                argtypes, source_code, submit_fn=self.submit
-            )
-            return LambdaFuture(get_result)
-
-    def cuda(self, source_code, dst_file_ext):
-        kernel_code_log.info("CUDA Kernel:\n%s", source_code)
-
-        def task():
-            return CUDACodeCache.load(source_code, dst_file_ext)[0]
-
-        return self.submit(task)
-
-    def halide(self, meta: HalideMeta, source_code: str):
-        kernel_code_log.info("Halide Kernel:\n%r\n%s", meta, source_code)
-        if config.compile_threads <= 1:
-            return HalideCodeCache.generate_halide(meta, source_code)
-        else:
-            get_result = HalideCodeCache.generate_halide_async(
-                meta, source_code, submit_fn=self.submit
-            )
-            return LambdaFuture(get_result)
-
-    def wait(self, scope: Dict[str, Any]) -> None:
-        num_kernels = len(
-            [
-                value
-                for key, value in scope.items()
-                if isinstance(value, (Future, CodeCacheFuture))
-            ]
-        )
-        pbar = tqdm(
-            total=num_kernels,
-            desc="Inductor Compilation",
-            disable=config.disable_progress,
-            delay=0,
-        )
-        if config.compile_threads > 1:
-            for key, result in scope.items():
-                if config.verbose_progress and not isinstance(pbar, _Faketqdm):
-                    pbar.set_postfix_str(key)
-                if isinstance(result, (Future, CodeCacheFuture)):
-                    scope[key] = result.result()
-                    pbar.update(1)
-
-        _compile_end()
-
-
-if (
-    os.environ.get("TORCH_TNT_IN_USE", "0") == "1"
-    or os.environ.get("TORCH_WARM_POOL", "1") != "1"
-):
-    pass
-else:
-    AsyncCompile.warm_pool()
