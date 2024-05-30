@@ -2119,11 +2119,12 @@ class Module:
             strict (bool, optional): whether to strictly enforce that the keys
                 in :attr:`state_dict` match the keys returned by this module's
                 :meth:`~torch.nn.Module.state_dict` function. Default: ``True``
-            assign (bool, optional): When ``False``, the properties of the tensors
-                in the current module are preserved while when ``True``, the
-                properties of the Tensors in the state dict are preserved. The only
-                exception is the ``requires_grad`` field of :class:`~torch.nn.Parameter`s
-                for which the value from the module is preserved.
+            assign (bool, optional): When ``False``, for a given parameter or persistent
+                buffer in ``self`` called ``key``, ``self.key.device`` and ``self.key.dtype``
+                are preserved by the ``load_state_dict`` call. When ``True``, ``self.key.device``
+                will be ``state_dict['key'].device`` and ``self.key.dtype`` will be
+                ``state_dict['key'].dtype``. If the module is on the meta device, you should
+                always pass ``assign=True``, unless the ``state_dict`` is also on the meta device.
                 Default: ``False``
 
         Returns:
