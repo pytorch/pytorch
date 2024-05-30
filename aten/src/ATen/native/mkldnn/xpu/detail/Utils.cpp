@@ -93,7 +93,7 @@ dnnl::memory::data_type get_onednn_dtype_include_double(
 }
 
 bool is_supported_onednn_dtype(const at::Tensor& tensor) {
-  return get_onednn_dtype(tensor, /*allow_undef*/ true) ==
+  return get_onednn_dtype_include_double(tensor) ==
           dnnl::memory::data_type::undef
       ? false
       : true;
@@ -116,7 +116,7 @@ dnnl::memory::dims get_onednn_strides(const at::Tensor& tensor) {
 dnnl::memory::desc get_onednn_md(const at::Tensor& tensor) {
   return {
       get_onednn_dims(tensor),
-      get_onednn_dtype(tensor),
+      get_onednn_dtype_include_double(tensor),
       get_onednn_strides(tensor)};
 }
 
@@ -125,7 +125,7 @@ bool onednn_strides_check(const at::Tensor& src) {
   int ndims = (int)adims.size();
   auto dims = adims.data();
   auto data_type = static_cast<dnnl_data_type_t>(
-      get_onednn_dtype(src, /*allow_undef*/ true));
+      get_onednn_dtype_include_double(src, /*allow_undef*/ true));
   auto strides_info = get_onednn_strides(src);
   auto strides = strides_info.empty() ? nullptr : &strides_info[0];
 
@@ -140,6 +140,14 @@ bool onednn_strides_check(const at::Tensor& src) {
   dnnl_memory_desc_query(md, dnnl_query_format_kind, &md_fmt_kind);
   dnnl_memory_desc_query(md, dnnl_query_ndims_s32, &md_ndims);
   dnnl_memory_desc_query(md, dnnl_query_padded_dims, &md_padded_dims);
+  auto block_size = 1;
+  // const auto& blk = md->format_desc.blocking;
+  dnnl_dims_t md_inner_blks;
+  dnnl_dims_t md_blk_inner_idxs;
+  dnnl_memory_desc_query(md, dnnl_query_inner_idxs, &md_blk_inner_idxs);
+  dnnl_memory_desc_query(md, dnnl_query_inner_blks, &md_inner_blks);
+
+  dnnl_memory_desc_destroy(md);
   if (strides == nullptr || md_ndims == 0 ||
       md_fmt_kind != dnnl_format_kind_t::dnnl_blocked)
     return true;
@@ -159,11 +167,6 @@ bool onednn_strides_check(const at::Tensor& src) {
     blocks[d] = 1;
   }
 
-  auto block_size = 1;
-  dnnl_dims_t md_inner_blks;
-  dnnl_dims_t md_blk_inner_idxs;
-  dnnl_memory_desc_query(md, dnnl_query_inner_idxs, &md_blk_inner_idxs);
-  dnnl_memory_desc_query(md, dnnl_query_inner_blks, &md_inner_blks);
   for (int iblk = 0; iblk < md_inner_nblks; ++iblk) {
     blocks[md_blk_inner_idxs[iblk]] *= md_inner_blks[iblk];
     block_size *= md_inner_blks[iblk];
