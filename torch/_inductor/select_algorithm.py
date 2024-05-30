@@ -158,7 +158,7 @@ class TritonTemplateKernel(TritonKernel):
 
     @contextlib.contextmanager
     def create_subgraph_body(self, body_name: str):
-        # assert body_name not in self.subgraph_bodies
+        assert body_name not in self.subgraph_bodies
         self.subgraph_bodies[body_name] = IndentedBuffer()
         with self.set_subgraph_body(body_name):
             yield
@@ -310,7 +310,10 @@ class TritonTemplateKernel(TritonKernel):
         Args:
             subgraph_number (int): The index of the subgraph in self.subgraphs
         """
-        with self.create_subgraph_body(f"modification_{subgraph_number}"):
+        num = 0
+        while f"mod_{subgraph_number}_{num}" in self.subgraph_bodies:
+            num += 1
+        with self.create_subgraph_body(f"mod_{subgraph_number}_{num}"):
             assert isinstance(subgraph_number, int)
             assert isinstance(self.subgraphs, list)
             assert (
