@@ -762,15 +762,16 @@ class ScheduleInterleaved1F1B(PipelineScheduleMulti):
             rank_ops.append(None)
 
         # These are used to calculate the number of slots to fill with no-ops, to account for the delay in warmup
-        # when we want to wait for the backward to trickle back up
+        # when we want to wait for the backward to trickle back up and start 1f1b to align all ranks.
         # Formula:
-        # warmup_ops + post_warmup_ops = earliest time step at which first backward is possible
-        # post_warmup_ops = [((num_local_stages - 1) * group_size) + 2 * group_size - rank] - warmup_ops
-        #   fill in warmup_ops from formula previously calculated above and cancel everything out
-        # post_warmup_ops = -3 * rank + 2
-        #   take the maximum as 0 since negative would mean that backward is already ready to be processed
-        # post_warmup_ops = max(0, -3 * rank + 2), so actually only rank 0 needs 2 extra warmup ops
-        post_warmup_ops = 2 if rank == 0 else 0
+        # pre-padding + warmup_ops + post_warmup_ops = earliest time step of first backward
+        # post_warmup_ops = [earliest time step of first backward] - (warmup_ops + pre-padding)
+        # earliest time step of first backward = [local_stages * group_size + 2 * (group_size - 1 - rank)]
+        # warmup_ops = calculated above
+        post_warmup_ops = (
+            self.n_local_stages * self.pp_group_size
+            + 2 * (self.pp_group_size - 1 - rank)
+        ) - (warmup_ops + rank)
 
         for op in range(total_ops):
             # Warmup phase
