@@ -18,11 +18,7 @@ requires_cuda = unittest.skipUnless(torch.cuda.is_available(), "requires cuda")
 class TestConverter(TestCase):
     def _check_equal_ts_ep_converter(self, mod, inp) -> ExportedProgram:
         ts_model = torch.jit.script(mod)
-        print(ts_model.graph)
         ep = TS2EPConverter(ts_model, inp).convert()
-        print(ep.graph)
-        print(ep.module()(*inp))
-        print(mod(*inp))
         ep_out, _ = pytree.tree_flatten(ep.module()(*inp))
         orig_out, _ = pytree.tree_flatten(mod(*inp))
         self.assertEqual(len(ep_out), len(orig_out))
@@ -329,21 +325,13 @@ class TestConverter(TestCase):
                     )
 
                 def forward(self, x):
-                    return torch.ops.mylib.foo(torch.nn.functional.linear(x, self.weight, bias=self.bias))
-                    # return torch.ops.mylib.foo(x)
+                    return torch.ops.mylib.foo(
+                        torch.nn.functional.linear(x, self.weight, bias=self.bias)
+                    )
 
             inp = (torch.randn(3, 3),)
-            mod = M(3, 3)
-
-            ts_model = torch.jit.script(mod)
-            print(ts_model.graph)
-            ep = TS2EPConverter(ts_model, inp).convert()
-            print(ep.graph)
-            print(ep.module()(*inp))
-            print(mod(*inp))
-            ep_out, _ = pytree.tree_flatten(ep.module()(*inp))
-
-            # self._check_equal_ts_ep_converter(m, inp)
+            m = M(3, 3)
+            self._check_equal_ts_ep_converter(m, inp)
 
 
 if __name__ == "__main__":

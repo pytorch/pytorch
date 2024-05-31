@@ -159,7 +159,7 @@ class TS2FXGraphConverter:
 
         return gm
 
-    def convert_graph_inputs(self) -> List[str]:
+    def convert_graph_inputs(self):
         for graph_input in self.ts_graph.inputs():
             name = graph_input.debugName()
             normalized_name = normalize_name(name)
@@ -266,11 +266,8 @@ class TS2FXGraphConverter:
             f"{root_attr_name}.{attr_name}" if root_attr_name else attr_name
         )
 
-    def convert_aten_op(self, node: torch._C.Node):
-        try:
-            target = get_op_overload(node)
-        except Exception as e:
-            raise RuntimeError(f"Unsupported node {node.kind()}") from e
+    def convert_call_function_op(self, node: torch._C.Node):
+        target = get_op_overload(node)
 
         if target is torch.ops.aten.size.int:
             target = torch.ops.aten.sym_size.int
@@ -531,8 +528,8 @@ class TS2FXGraphConverter:
         if node_kind.startswith("aten::"):
             self.convert_aten_op(node)
         else:
-            # For all other cases, we assume they are all custom ops.
-            self.convert_custom_op(node)
+            # For all other cases, we assume they are either aten:: ops or custom ops.
+            self.convert_call_function_op(node)
 
     def convert_graph_outputs(self):
         args = []
