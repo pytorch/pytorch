@@ -1,7 +1,5 @@
 syntax = "proto2";
 
-import "caffe2/proto/caffe2.proto";
-
 package torch;
 
 message RecordRef {
@@ -14,7 +12,6 @@ message TensorDef {
   repeated int64 strides = 3;
   // whether we compute the gradient for the parameter
   optional bool requires_grad = 4;
-  optional caffe2.TensorProto.DataType data_type = 5;
 
   optional RecordRef data = 6;
 
@@ -50,8 +47,6 @@ message ModuleDef {
   repeated ModuleDef submodules = 1;
 
   optional RecordRef torchscript_arena = 2;
-
-  repeated caffe2.NetDef caffe2_nets = 3;
 
   // because the old pickle modules may not be supported by torch_script,
   // have to stored as pickle_arena at this moment.
