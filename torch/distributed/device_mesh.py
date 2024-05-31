@@ -93,7 +93,6 @@ else:
 
             cur_rank = parent_mesh.get_rank()
             for mesh_nd in pg_ranks_by_dim:
-                # Every rank needs to participate in this DeviceMesh creation even if the cur_rank is not in mesh_nd
                 submesh = DeviceMesh(
                     parent_mesh.device_type,
                     mesh_nd,
