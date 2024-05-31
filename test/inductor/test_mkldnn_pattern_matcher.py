@@ -83,6 +83,36 @@ def get_default_quantizer(is_qat, is_dynamic):
     return quantizer
 
 
+def cal_conv_generated_kernel_number(mod, input, dtype):
+    # this function is to decide how many kernels are generated
+    # while testing conv2d/3d/deconv2d
+    # the assumption is:
+    #   (1) There will be a to_dtype kernel for input for lp
+    #   (2) inductor always use channe_last format, there will
+    #       be a to_channel_last format for input
+    #   (3) to_dtype and to_channel_last for input can be fused
+    #   (4) inductor always get channel last format from mkldnn_conv_pointwise(binary),
+    #       and force the output to have same stride with eager.
+    #       So there will be a to_contiguous for output if eager output is contiguouse
+    mod = copy.deepcopy(mod)
+    input = input.clone()
+    if dtype == torch.float32:
+        maybe_autocast = contextlib.nullcontext()
+    else:
+        maybe_autocast = torch.cpu.amp.autocast(dtype=dtype)
+    with torch.no_grad(), maybe_autocast:
+        output = mod(input)
+    input_kernel, output_kernel = 0, 0
+    if (
+        input.is_contiguous(memory_format=torch.contiguous_format)
+        or dtype != torch.float32
+    ):
+        input_kernel = 1
+    if output.is_contiguous(memory_format=torch.contiguous_format):
+        output_kernel = 1
+    return input_kernel + output_kernel
+
+
 @config.patch({"freezing": True})
 class TestPatternMatcherBase(TestCase):
     def _check_unary_is_decomposed(self, unary_fn):
@@ -285,17 +315,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
                 # Has extra dtype conversion nodes for autocast.
                 match_nodes += 2
             self._test_common(mod, (v,), 2, match_nodes, check_autocast=dtype)
-            generated_kernel_count = 0
-            if dtype != torch.float32:
-                # "to_dtype" for input
-                generated_kernel_count = 1
-            if memory_format == torch.contiguous_format:
-                # "to_dtype + to_channel_last" for input, "to_contiguous" for output
-                generated_kernel_count = 2
-            if memory_format == torch.channels_last_3d:
-                # for float conv3d, the output for eager is channel last, we will generate "to_contiguous" for output
-                # for lp conv3d, the output for eager is channel last too, we will only generate "to_dtype"
-                generated_kernel_count = 1
+            generated_kernel_count = cal_conv_generated_kernel_number(mod, v, dtype)
             self.assertEqual(metrics.generated_kernel_count, generated_kernel_count)
 
     def test_conv2d_unary_cpu(self):
@@ -418,13 +438,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
                 # Has extra dtype conversion nodes for autocast.
                 match_nodes += 2
             self._test_common(mod, (v,), 2, match_nodes, check_autocast=dtype)
-            generated_kernel_count = 0
-            if dtype != torch.float32:
-                # "to" for input
-                generated_kernel_count = 1
-            if memory_format == torch.contiguous_format:
-                # "to_dtype + to_channel_last" for input, "to_contiguous" for output
-                generated_kernel_count = 2
+            generated_kernel_count = cal_conv_generated_kernel_number(mod, v, dtype)
             self.assertEqual(metrics.generated_kernel_count, generated_kernel_count)
 
     def _test_conv_binary_base(self, dim=4):
@@ -495,15 +509,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
             self._test_common(
                 mod, (v,), match_count, match_nodes + 2, check_autocast=dtype
             )
-            generated_kernel_count = 0
-            if dtype != torch.float32:
-                # "to_dtype" for input
-                generated_kernel_count = 1
-            if memory_format == torch.contiguous_format:
-                # "to_dtype + to_channel_last" for input, "to_contiguous" for output
-                generated_kernel_count = 2
-            elif memory_format == torch.channels_last_3d:
-                generated_kernel_count = 1
+            generated_kernel_count = cal_conv_generated_kernel_number(mod, v, dtype)
             self.assertEqual(metrics.generated_kernel_count, generated_kernel_count)
 
     def test_conv2d_binary(self):
