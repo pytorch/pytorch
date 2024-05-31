@@ -42,6 +42,7 @@ from dataclasses import dataclass
 from enum import Enum
 from functools import partial, wraps
 from itertools import product, chain
+import pkgutil
 from pathlib import Path
 from statistics import mean
 from typing import (
@@ -102,6 +103,8 @@ try:
 except ImportError:
     has_pytest = False
 
+# @todo: consolidate definitions of LIBTORCH_PKG_NAME into a single file [bootcamp]
+LIBTORCH_PKG_NAME = "libtorchsplit"
 
 def freeze_rng_state(*args, **kwargs):
     return torch.testing._utils.freeze_rng_state(*args, **kwargs)
@@ -1179,6 +1182,7 @@ IS_MACOS = sys.platform == "darwin"
 IS_PPC = platform.machine() == "ppc64le"
 IS_X86 = platform.machine() in ('x86_64', 'i386')
 IS_ARM64 = platform.machine() in ('arm64', 'aarch64')
+IS_SPLIT_BUILD = pkgutil.find_loader(LIBTORCH_PKG_NAME) is not None
 
 def is_avx512_vnni_supported():
     if sys.platform != 'linux':

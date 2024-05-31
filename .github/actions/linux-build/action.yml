@@ -52,6 +52,13 @@ inputs:
     description: Hugging Face Hub token
     required: false
     default: ""
+  use_split_build:
+    description: |
+      [Experimental] Build a libtorch only wheel and build pytorch such that
+      are built from the libtorch wheel.
+    required: false
+    type: boolean
+    default: false
 outputs:
   docker-image:
     value: ${{ steps.calculate-docker-image.outputs.docker-image }}
@@ -183,9 +190,19 @@ runs:
 
     - name: Store PyTorch Build Artifacts on S3
       uses: seemethere/upload-artifact-s3@v5
-      if: inputs.build-generates-artifacts == 'true' && steps.build.outcome != 'skipped'
+      if: inputs.build-generates-artifacts == 'true' && steps.build.outcome != 'skipped' && inputs.use_split_build != 'true'
       with:
         name: ${{ inputs.build-environment }}
+        retention-days: 14
+        if-no-files-found: error
+        path: artifacts.zip
+        s3-bucket: ${{ inputs.s3-bucket }}
+
+    - name: Store PyTorch Build Artifacts on S3 for split build
+      uses: seemethere/upload-artifact-s3@v5
+      if: inputs.build-generates-artifacts == 'true' && steps.build.outcome != 'skipped' && inputs.use_split_build == 'true'
+      with:
+        name: ${{ inputs.build-environment }}-experimental-split-build
         retention-days: 14
         if-no-files-found: error
         path: artifacts.zip

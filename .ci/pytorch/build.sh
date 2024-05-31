@@ -287,14 +287,38 @@ else
         # Which should be backward compatible with Numpy-1.X
         python -mpip install --pre numpy==2.0.0rc1
       fi
-      WERROR=1 python setup.py bdist_wheel
+      if [[ "$USE_SPLIT_BUILD" == "true" ]]; then
+        WERROR=1 BUILD_LIBTORCH_WHL=1 BUILD_PYTHON_ONLY=0 python setup.py bdist_wheel
+        LIBTORCH_WHL=$(ls dist/*.whl)
+        pip_install_whl "$LIBTORCH_WHL"
+        cp "$LIBTORCH_WHL" /tmp/
+        python setup.py clean
+        WERROR=1 BUILD_LIBTORCH_WHL=0 BUILD_PYTHON_ONLY=1 python setup.py bdist_wheel
+      else
+        WERROR=1 python setup.py clean
+        WERROR=1 python setup.py bdist_wheel
+      fi
     else
       if [[ "$BUILD_ENVIRONMENT" == *xla* ]]; then
         source .ci/pytorch/install_cache_xla.sh
       fi
-      python setup.py bdist_wheel
+      if [[ "$USE_SPLIT_BUILD" == "true" ]]; then
+        BUILD_LIBTORCH_WHL=1 BUILD_PYTHON_ONLY=0 python setup.py bdist_wheel
+        LIBTORCH_WHL=$(ls dist/*.whl)
+        pip_install_whl "$LIBTORCH_WHL"
+        cp "$LIBTORCH_WHL" /tmp/
+        python setup.py clean
+        BUILD_PYTHON_ONLY=1 BUILD_LIBTORCH_WHL=0 python setup.py bdist_wheel
+      else
+        python setup.py clean
+        python setup.py bdist_wheel
+      fi
     fi
     pip_install_whl "$(echo dist/*.whl)"
+
+    if [[ "$USE_SPLIT_BUILD" == "true" ]]; then
+      mv "/tmp/$(basename "$LIBTORCH_WHL")" dist/
+    fi
 
     # TODO: I'm not sure why, but somehow we lose verbose commands
     set -x
@@ -331,9 +355,15 @@ else
     CUSTOM_OP_TEST="$PWD/test/custom_operator"
     python --version
     SITE_PACKAGES="$(python -c 'from distutils.sysconfig import get_python_lib; print(get_python_lib())')"
+
+    SPLIT_PKG_PREFIX=""
+    if [[ "$USE_SPLIT_BUILD" == "true" ]]; then
+      SPLIT_PKG_PREFIX="$SITE_PACKAGES/libtorchsplit;"
+    fi
+
     mkdir -p "$CUSTOM_OP_BUILD"
     pushd "$CUSTOM_OP_BUILD"
-    cmake "$CUSTOM_OP_TEST" -DCMAKE_PREFIX_PATH="$SITE_PACKAGES/torch" -DPython_EXECUTABLE="$(which python)" \
+    cmake "$CUSTOM_OP_TEST" -DCMAKE_PREFIX_PATH="$SITE_PACKAGES/torch,$SPLIT_PKG_PREFIX" -DPython_EXECUTABLE="$(which python)" \
           -DCMAKE_MODULE_PATH="$CUSTOM_TEST_MODULE_PATH" -DUSE_ROCM="$CUSTOM_TEST_USE_ROCM"
     make VERBOSE=1
     popd
@@ -346,7 +376,7 @@ else
     SITE_PACKAGES="$(python -c 'from distutils.sysconfig import get_python_lib; print(get_python_lib())')"
     mkdir -p "$JIT_HOOK_BUILD"
     pushd "$JIT_HOOK_BUILD"
-    cmake "$JIT_HOOK_TEST" -DCMAKE_PREFIX_PATH="$SITE_PACKAGES/torch" -DPython_EXECUTABLE="$(which python)" \
+    cmake "$JIT_HOOK_TEST" -DCMAKE_PREFIX_PATH="$SITE_PACKAGES/torch,$SPLIT_PKG_PREFIX" -DPython_EXECUTABLE="$(which python)" \
           -DCMAKE_MODULE_PATH="$CUSTOM_TEST_MODULE_PATH" -DUSE_ROCM="$CUSTOM_TEST_USE_ROCM"
     make VERBOSE=1
     popd
@@ -358,7 +388,7 @@ else
     python --version
     mkdir -p "$CUSTOM_BACKEND_BUILD"
     pushd "$CUSTOM_BACKEND_BUILD"
-    cmake "$CUSTOM_BACKEND_TEST" -DCMAKE_PREFIX_PATH="$SITE_PACKAGES/torch" -DPython_EXECUTABLE="$(which python)" \
+    cmake "$CUSTOM_BACKEND_TEST" -DCMAKE_PREFIX_PATH="$SITE_PACKAGES/torch,$SPLIT_PKG_PREFIX" -DPython_EXECUTABLE="$(which python)" \
           -DCMAKE_MODULE_PATH="$CUSTOM_TEST_MODULE_PATH" -DUSE_ROCM="$CUSTOM_TEST_USE_ROCM"
     make VERBOSE=1
     popd
