@@ -1,6 +1,6 @@
 #!/bin/bash
 
-if [[ ${CUDNN_VERSION} == 8 ]]; then
+if [[ -n "${CUDNN_VERSION}" ]]; then
     # cuDNN license: https://developer.nvidia.com/cudnn/license_agreement
     mkdir tmp_cudnn
     pushd tmp_cudnn
