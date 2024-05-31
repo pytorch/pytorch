@@ -199,7 +199,8 @@ class FSDPParam:
                     "FSDP requires the DP and TP mesh to have the same parent mesh but got: \n"
                     f"DP's global mesh: {dp_global_mesh}\nTP's global mesh: {tp_global_mesh}"
                 )
-            self._global_mesh = dp_global_mesh
+            submesh_names = dp_mesh.mesh_dim_names + tp_mesh.mesh_dim_names
+            self._global_mesh = dp_global_mesh[submesh_names]
             if len(self._tp_spec.placements) != 1:
                 raise NotImplementedError(
                     f"FSDP only supports 1D TP, not {self._tp_spec.placements}"
@@ -212,8 +213,8 @@ class FSDPParam:
             # for PP, DP, TP case, dp mesh dim would be 1, tp mesh dim would be 2
             # DP/TP would only live in the inner most 2-3 dims (HSDP + TP would be 3)
             dp_tp_mesh_ndim = dp_mesh.ndim + tp_mesh.ndim
-            outer_mesh_ndim = self._global_mesh.ndim - dp_tp_mesh_ndim
-            if self._global_mesh.ndim > dp_tp_mesh_ndim:
+            outer_mesh_ndim = dp_global_mesh.ndim - dp_tp_mesh_ndim
+            if dp_global_mesh.ndim > dp_tp_mesh_ndim:
                 global_dp_mesh_dim = global_dp_mesh_dim - outer_mesh_ndim
                 global_tp_mesh_dim = global_tp_mesh_dim - outer_mesh_ndim
 
