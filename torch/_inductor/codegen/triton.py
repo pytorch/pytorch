@@ -1291,14 +1291,7 @@ class TritonKernel(SIMDKernel):
                 ep = ", eviction_policy='evict_first'"
         else:
             ep = ""
-        # "other" below is a workaround for https://github.com/openai/triton/issues/737
-        # for bool, even though it's likely subject to the same bug, setting `other` leads
-        # to LLVM errors so we are skipping it for now
-        if (
-            (has_tmpmask or has_rindex)
-            and V.graph.get_dtype(name) != torch.bool
-            and indexing.has_mask()
-        ):
+        if (has_tmpmask or has_rindex) and indexing.has_mask():
             other = ", other=0.0"
         else:
             other = ""
