@@ -588,6 +588,13 @@ def _sfdp_extra_check(scale_factor_op=None, disable_cuda=False):
     return fn
 
 
+def _sfdp_disable_for_single_thread(scale_factor_op=None, disable_cuda=False):
+    if torch.get_num_threads() == 1:
+        return False
+    else:
+        return _sfdp_extra_check(scale_factor_op, disable_cuda)
+
+
 def partialize_and_update_signature(func, **kwargs):
     """
     Equivalent to functools.partial but also updates the signature on returned function
@@ -798,7 +805,8 @@ def _get_sfdp_patterns():
                 [g(), g(), g(), m_bool()],
                 d,
                 # CUDA AOT Inductor CI job's GPT2ForSequenceClassification accuracy test failed
-                _sfdp_extra_check(disable_cuda=True),
+                # Accuracy issue on CPU for BF16 dtype with single thread. GitHub issue 123503
+                _sfdp_disable_for_single_thread(disable_cuda=True),
             ),
             (
                 _sfdp_pattern_18,
@@ -806,7 +814,8 @@ def _get_sfdp_patterns():
                 [g_bs1(), g_bs1(), g_bs1(), m_bs1_bool()],
                 d,
                 # CUDA AOT Inductor CI job's GPT2ForSequenceClassification accuracy test failed
-                _sfdp_extra_check(disable_cuda=True),
+                # Accuracy issue on CPU for BF16 dtype with single thread. GitHub issue 123503
+                _sfdp_disable_for_single_thread(disable_cuda=True),
             ),
             (
                 _sfdp_pattern_19,
