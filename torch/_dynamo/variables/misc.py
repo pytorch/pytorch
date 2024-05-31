@@ -179,6 +179,18 @@ class SuperVariable(VariableTracker):
         unimplemented(f"non-function or method super: {inner_fn}")
 
 
+class ExceptionVariable(VariableTracker):
+    def __init__(self, exc_type, args, **kwargs):
+        super().__init__(**kwargs)
+        self.exc_type = exc_type
+        self.args = args
+
+    def reconstruct(self, codegen):
+        codegen.load_import_from("builtins", self.exc_type.__name__)
+        codegen.foreach(self.args)
+        codegen.call_function(len(self.args), True)
+
+
 class UnknownVariable(VariableTracker):
     """
     It could be anything!

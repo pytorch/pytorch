@@ -6840,7 +6840,7 @@ utils_device.CURRENT_DEVICE == None""".split(
                 x += 1
             return x
 
-        opt_fn = torch._dynamo.optimize("eager")(fn)
+        opt_fn = torch._dynamo.optimize("eager", nopython=True)(fn)
         self.assertEqual(opt_fn(), torch.tensor([2.0]))
 
     def test_nested_sequential_with(self):
