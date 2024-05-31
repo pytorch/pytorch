@@ -42,7 +42,6 @@ def normalize_name(name: str) -> str:
 
 
 def get_op_overload(node: torch._C.Node):
-    # breakpoint()
     schema_str = node.schema()
     schema = FunctionSchema.parse(schema_str)
     ns, op_name = str(schema.name.name).split("::")
@@ -115,7 +114,7 @@ class TS2EPConverter:
 
     def convert(self) -> ExportedProgram:
         self.convert_graph_inputs()
-        # breakpoint()
+
         for node in self.ts_graph.nodes():
             self.convert_node(node)
 
