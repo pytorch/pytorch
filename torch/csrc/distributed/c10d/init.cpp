@@ -3163,7 +3163,8 @@ such as `dist.all_reduce(tensor, async_op=True)`.
   module.def(
       "_dump_nccl_trace",
       [](std::optional<bool> includeTraceBuffer) {
-        return py::bytes(::c10d::dump_nccl_trace(includeTraceBuffer.value_or(true)));
+        return py::bytes(
+            ::c10d::dump_nccl_trace(includeTraceBuffer.value_or(true)));
       },
       py::arg("includeTraceBuffer") = std::nullopt,
       R"(
