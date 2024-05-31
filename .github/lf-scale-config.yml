@@ -1,4 +1,18 @@
-# Defines runner types provisioned by by LF Self-hosted runners for pytorch/pytorch and their labels.
+# Defines runner types that will be provisioned by by LF Self-hosted
+# runners for pytorch/pytorch and their labels.
+#
+# Runners listed here will be available as self hosted runners.
+# Configuration is directly pulled from the main branch.
+#
+# Default values:
+#
+# runner_types:
+#   runner_label: # label to specify in the Github Actions workflow
+#     instance_type: m4.large
+#     os: linux
+#     max_available: 20
+#     disk_size: 50
+#     is_ephemeral: true
 
 runner_types:
   lf.linux.12xlarge:
