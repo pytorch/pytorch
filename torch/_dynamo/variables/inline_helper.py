@@ -54,6 +54,7 @@ def should_decompose_torch_op(fn):
     not_supported_fn = [
         torch.nn.functional.gaussian_nll_loss,
         torch.nn.functional.ctc_loss,
+        torch.nn.functional.interpolate,
     ]
 
     # only decompoization torch ops for forward

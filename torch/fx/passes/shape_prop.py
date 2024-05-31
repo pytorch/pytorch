@@ -40,11 +40,11 @@ def _extract_tensor_metadata(result : torch.Tensor, include_contiguity=True) -> 
     memory_format = None
 
     if include_contiguity:
-        memory_formats = [
+        memory_formats = {
             torch.contiguous_format,
             torch.channels_last,
             torch.channels_last_3d,
-        ]
+        }
         for query_format in memory_formats:
             if result.is_contiguous(memory_format=query_format):
                 memory_format = query_format
