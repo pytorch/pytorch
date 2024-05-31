@@ -1738,7 +1738,7 @@ def grid(*numels):
         max_y_grid = get_max_y_grid()
         if znumel is None:
             div = ceildiv(y_grid, max_y_grid)
-            y_grid = y_grid // div
+            y_grid = ceildiv(y_grid, div)
             z_grid = div
         else:
             z_grid = get_grid_dim(znumel, meta.get("ZBLOCK", None))
