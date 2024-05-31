@@ -6,6 +6,7 @@
 #include <ATen/core/Tensor.h>
 #include <ATen/core/grad_mode.h>
 #include <ATen/cuda/CUDAContext.h>
+#include <ATen/cuda/CUDAConfig.h>
 #include <ATen/detail/CUDAHooksInterface.h>
 #include <ATen/native/DispatchStub.h>
 #include <ATen/native/transformers/cuda/sdp_utils.h>
@@ -516,7 +517,11 @@ bool check_cudnn_deterministic(const sdp_params& params, bool debug) {
 } // namespace
 
 bool can_use_cudnn_attention(const sdp_params& params, bool debug) {
-
+#if defined(USE_ROCM) || !AT_CUDNN_ENABLED() || \
+    (defined(CUDNN_VERSION) && CUDNN_VERSION < 8900)
+  TORCH_WARN_ONCE(!debug, "Torch was not compiled with cuDNN attention.");
+  return false;
+#endif
   // Define gate functions that determine if a flash kernel can be ran
   // Replace with std::to_array when we migrate to c++20
   constexpr auto general_constraints =
