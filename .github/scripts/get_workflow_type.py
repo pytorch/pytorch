@@ -7,7 +7,7 @@ from github.Issue import Issue
 
 
 WORKFLOW_LABEL_META = ""  # use meta runners
-WORKFLOW_LABEL_LF = "lf."  # use runners from the linux foundation
+WORKFLOW_LABEL_LF = "lf."  # use runners from the linux foundation 
 
 
 def parse_args() -> Any:
