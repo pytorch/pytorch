@@ -24,8 +24,8 @@ from torch.distributed._tensor.ops.utils import (
     register_op_strategy,
 )
 from torch.distributed._tensor.placement_types import (
-    _Partial,
     DTensorSpec,
+    Partial,
     Placement,
     Replicate,
     Shard,
@@ -51,7 +51,7 @@ ReductionOpType = Union[NormReduction, str]
 
 
 @dataclass(frozen=True)
-class _NormPartial(_Partial):
+class _NormPartial(Partial):
     """
     This placement is used for partial vector norm.
 
@@ -228,7 +228,7 @@ def map_placements_after_reduction(
     """
     new_placements: List[Placement] = []
     for placement in placements:
-        if isinstance(placement, (Replicate, _Partial)):
+        if isinstance(placement, (Replicate, Partial)):
             new_placements.append(placement)
         else:
             assert isinstance(placement, Shard)
@@ -246,7 +246,7 @@ def map_placements_after_reduction(
 def get_placement_from_reduction_op(reduction_op: ReductionOpType) -> Placement:
     if isinstance(reduction_op, NormReduction):
         return _NormPartial(norm_type=reduction_op.norm_type)
-    return _Partial(reduction_op)
+    return Partial(reduction_op)
 
 
 def common_reduction_strategy(
