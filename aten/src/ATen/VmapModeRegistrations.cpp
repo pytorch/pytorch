@@ -39,7 +39,7 @@ TORCH_LIBRARY_IMPL(aten, VmapMode, m) {
   // CppFunction::makeNamedNotSupported() to avoid listing out the types of everything.
   // However, registering e.g. CppFunction::makeNamedNotSupported() as an implementation
   // only works for operators that support boxing.
-#define TENSOROPTIONS std::optional<c10::ScalarType>, c10::optional<c10::Layout>, c10::optional<c10::Device>, c10::optional<bool>
+#define TENSOROPTIONS std::optional<c10::ScalarType>, std::optional<c10::Layout>, std::optional<c10::Device>, std::optional<bool>
 
   // random operations (out-of-place)
   m.impl("bernoulli", unsupportedRandomOp<const Tensor&, optional<Generator>>);
