@@ -2012,7 +2012,6 @@ class Argument:
 
     @staticmethod
     def parse(arg: str) -> "Argument":
-        print('reach here')
         name: str
         default: Optional[str]
         assert " " in arg, f"illegal argument '{arg}'"
@@ -2025,7 +2024,7 @@ class Argument:
         else:
             name = name_and_default
             default = None
-        breakpoint()
+
         # TODO: deduplicate annotation matching with Return
         match = re.match(r"Tensor\((.+)\)(.*)", type_and_annot)
         annotation: Optional[Annotation]

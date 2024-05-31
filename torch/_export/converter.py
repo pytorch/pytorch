@@ -1,3 +1,5 @@
+import operator
+
 from typing import Any, Dict, List, Optional, Set, Tuple, Union
 
 import torch
@@ -338,9 +340,18 @@ class TS2EPConverter:
 
         self.convert_aten_op(node)
 
+    def convert_aten___getitem__(self, node: torch._C.Node):
+        input_container, index = tuple(
+            self.get_fx_value(input) for input in node.inputs()
+        )
+        fx_node = self.fx_graph.call_function(
+            operator.getitem, (input_container, index)
+        )
+        output_name = node.output().debugName()
+        self.name_to_node[output_name] = fx_node
+
     def convert_node(self, node: torch._C.Node):
         node_kind = node.kind()
-        # breakpoint()
         if node_kind == "prim::CreateObject":
             self.convert_prim_CreateObject(node)
         elif node_kind == "prim::Constant":
@@ -358,6 +369,8 @@ class TS2EPConverter:
         #     convert_aten_Int(node)
         elif node_kind == "aten::_convolution":
             self.convert_aten__convolution(node)
+        elif node_kind == "aten::__getitem__":
+            self.convert_aten___getitem__(node)
         elif node_kind == "aten::div":
             self.convert_aten_div(node)
         elif node_kind.startswith("aten::"):

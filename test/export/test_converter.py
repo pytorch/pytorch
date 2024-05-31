@@ -7,8 +7,6 @@ import torch.utils._pytree as pytree
 from torch._dynamo.test_case import TestCase
 from torch._export.converter import TS2EPConverter
 
-import torch.utils._pytree as pytree
-
 from torch.testing._internal.common_utils import run_tests
 
 
@@ -84,13 +82,26 @@ class TestConverter(TestCase):
         inp = (torch.ones(2, 3),)
         self._check_equal_ts_ep_converter(Module(), inp)
 
-    def test_aten___getitem__(self):
+    def test_aten___getitem___list(self):
         class Module(torch.nn.Module):
             def forward(self, x):
                 y = torch.split(x, 2)
                 return y[0]
 
-        inp = (torch.rand((3,2)), )
+        inp = (torch.rand((3, 2)),)
+        self._check_equal_ts_ep_converter(Module(), inp)
+
+    def test_aten___getitem___dict(self):
+        class Module(torch.nn.Module):
+            def forward(self, x):
+                y = torch.split(x, 2)
+                d_int = {0: y[0], 1: y[1]}
+                d_str = {"0": y[0], "1": y[1]}
+                d_bool = {True: y[0], False: y[1]}
+                d_float = {0.1: y[0], 2.3: y[1]}
+                return d_int[0], d_str["0"], d_bool[True], d_float[0.1]
+
+        inp = (torch.rand((3, 2)),)
         self._check_equal_ts_ep_converter(Module(), inp)
 
 
