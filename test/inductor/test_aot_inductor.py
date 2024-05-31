@@ -1308,7 +1308,7 @@ class AOTInductorTestsTemplate:
             torch._export.aot_compile(fn, args=(a, b), kwargs={"alpha": 2.0})
 
         for simdlen in [0, None]:
-            with torch._inductor.config.patch("cpp.simdlen", simdlen):
+            with torch._inductor.config.patch({"cpp.simdlen": simdlen}):
                 so_path = torch._export.aot_compile(
                     torch.ops.aten.add,
                     args=(a, b),
