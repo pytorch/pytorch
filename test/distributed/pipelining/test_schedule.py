@@ -408,6 +408,7 @@ class TestSchedulePlan(unittest.TestCase):
                 if action is not None:
                     current_timestep_actions.append(action)
 
+            # TODO: enable this
             # if len(current_timestep_actions) == 0:
             #     error_msg.append(
             #         "All actions were None, there is an unnecessary gap in the schedule"
