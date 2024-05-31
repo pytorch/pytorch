@@ -40,9 +40,17 @@ ir_nodes_pre_fusion = 0
 # counters for tracking to_dtype inserted
 cpp_to_dtype_count = 0
 
+
+class CPPOuterLoopFusedCount:
+    def __init__(self, inner_kernel_number: int, local_buffer_number: int = 0):
+        # counts the number of inner kernels in each outer loop fusion
+        self.inner_kernel_number = inner_kernel_number
+        # counts the number of local buffers in each outer loop fusion
+        self.local_buffer_number = local_buffer_number
+
+
 # The length counts the number of outer loop fusions.
-# Each element counts the number of inner kernels in each outer loop fusion.
-cpp_outer_loop_fused_inner_counts: List[int] = []
+cpp_outer_loop_fused_inner_counts: List[CPPOuterLoopFusedCount] = []
 
 num_comprehensive_padding = 0
 

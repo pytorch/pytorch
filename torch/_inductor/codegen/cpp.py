@@ -435,8 +435,6 @@ class OuterLoopFusedSchedulerNode(FusedSchedulerNode):
         loop_nest_list: List[LoopNestWithSplit] = [
             kernel.loop_nest for kernel in cpp_kernel_proxy_list
         ]
-        metrics.cpp_outer_loop_fused_inner_counts.append(len(loop_nest_list))
-
         kernel_group = cpp_kernel_proxy_list[0].kernel_group
 
         def _merge_outer_fusion_loop_levels(
@@ -3886,6 +3884,12 @@ class CppScheduling(BaseScheduling):
                 cpp_kernel_proxy_list, node.outer_loop_fusion_depth
             ):
                 return False
+            metrics.cpp_outer_loop_fused_inner_counts.append(
+                metrics.CPPOuterLoopFusedCount(
+                    len(cpp_kernel_proxy_list),
+                    local_buffer_number=len(local_buffers),
+                )
+            )
             outer_fusion_cpp_kernel_proxy = node.merge_outer_fusion_kernels(
                 cpp_kernel_proxy_list,
             )
@@ -3931,6 +3935,11 @@ class CppScheduling(BaseScheduling):
                 if node.check_outer_fusion_loop_level_attr(
                     cpp_kernel_proxy_list, node.outer_loop_fusion_depth
                 ):
+                    metrics.cpp_outer_loop_fused_inner_counts.append(
+                        metrics.CPPOuterLoopFusedCount(
+                            len(cpp_kernel_proxy_list),
+                        )
+                    )
                     outer_fusion_cpp_kernel_proxy = node.merge_outer_fusion_kernels(
                         cpp_kernel_proxy_list,
                     )

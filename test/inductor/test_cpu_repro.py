@@ -2483,6 +2483,7 @@ class CPUReproTests(TestCase):
                 self.common(fn, (x,))
                 assert metrics.generated_cpp_vec_kernel_count == 0
 
+    @config.patch(fx_graph_cache=False)
     def test_outer_loop_fusion(self):
         def fn(x):
             max = torch.amax(x, dim=-1, keepdim=True)
@@ -2494,8 +2495,47 @@ class CPUReproTests(TestCase):
             torch._dynamo.reset()
             metrics.reset()
             self.common(fn, (x,))
-            assert len(metrics.cpp_outer_loop_fused_inner_counts) == 1
-            assert metrics.cpp_outer_loop_fused_inner_counts[0] == 2
+            self.assertEqual(
+                len(metrics.cpp_outer_loop_fused_inner_counts),
+                1,
+            )
+            self.assertEqual(
+                metrics.cpp_outer_loop_fused_inner_counts[0].inner_kernel_number,
+                2,
+            )
+
+    @config.patch(fx_graph_cache=False)
+    def test_local_buffer_in_outer_loop_fusion(self):
+        def fn(x):
+            max = torch.nn.functional.softmax(x, dim=-1)
+            return x - max
+
+        x = torch.randn(4, 12, 1023, 1022)
+
+        with config.patch({"cpp.simdlen": None}):
+            torch._dynamo.reset()
+            metrics.reset()
+            self.common(fn, (x,))
+            self.assertEqual(
+                len(metrics.cpp_outer_loop_fused_inner_counts),
+                1,
+            )
+            self.assertEqual(
+                metrics.cpp_outer_loop_fused_inner_counts[0].inner_kernel_number,
+                3,
+            )
+            self.assertEqual(
+                metrics.cpp_outer_loop_fused_inner_counts[0].local_buffer_number,
+                1,
+            )
+            # Check the number of global buffer allocation
+            torch._dynamo.reset()
+            metrics.reset()
+            _, code = run_and_get_cpp_code(
+                torch._dynamo.optimize("inductor")(fn),
+                x,
+            )
+            self.assertEqual(code.count("empty_strided_cpu("), 3)
 
     def test_argmin(self):
         def fn(x):
