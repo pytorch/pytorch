@@ -2537,6 +2537,40 @@ class CPUReproTests(TestCase):
             )
             self.assertEqual(code.count("empty_strided_cpu("), 3)
 
+    @config.patch(fx_graph_cache=False)
+    def test_two_local_buffer_in_outer_loop_fusion(self):
+        def fn(x):
+            max = torch.nn.functional.softmax(x, dim=-1)
+            max = torch.nn.functional.softmax(max, dim=-1)
+            return x - max
+
+        x = torch.randn(4, 12, 1023, 1022)
+
+        with config.patch({"cpp.simdlen": None}):
+            torch._dynamo.reset()
+            metrics.reset()
+            self.common(fn, (x,))
+            self.assertEqual(
+                len(metrics.cpp_outer_loop_fused_inner_counts),
+                1,
+            )
+            self.assertEqual(
+                metrics.cpp_outer_loop_fused_inner_counts[0].inner_kernel_number,
+                5,
+            )
+            self.assertEqual(
+                metrics.cpp_outer_loop_fused_inner_counts[0].local_buffer_number,
+                2,
+            )
+            # Check the number of global buffer allocation
+            torch._dynamo.reset()
+            metrics.reset()
+            _, code = run_and_get_cpp_code(
+                torch._dynamo.optimize("inductor")(fn),
+                x,
+            )
+            self.assertEqual(code.count("empty_strided_cpu("), 5)
+
     def test_argmin(self):
         def fn(x):
             return torch.argmin(x, -1)
