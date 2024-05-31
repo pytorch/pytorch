@@ -460,6 +460,12 @@ class TS2FXGraphConverter:
         output_name = node.output().debugName()
         self.name_to_node[output_name] = fx_node
 
+    def convert_aten___not__(self, node: torch._C.Node):
+        input = self.get_fx_value(node.input())
+        fx_node = self.fx_graph.call_function(operator.not_, (input,))
+        output_name = node.output().debugName()
+        self.name_to_node[output_name] = fx_node
+
     def convert_node(self, node: torch._C.Node):
         node_kind = node.kind()
         if node_kind == "prim::CreateObject":
@@ -495,6 +501,8 @@ class TS2FXGraphConverter:
             self.convert_aten___is__(node)
         elif node_kind == "aten::__isnot__":
             self.convert_aten___isnot__(node)
+        elif node_kind == "aten::__not__":
+            self.convert_aten___not__(node)
         elif node_kind == "profiler::_record_function_enter_new":
             self.convert_profiler__record_function_enter_new(node)
         elif node_kind == "profiler::_record_function_exit":

@@ -192,6 +192,15 @@ class TestConverter(TestCase):
         inp = (torch.randn(10, 10), torch.rand(10, 10))
         self._check_equal_ts_ep_converter(Module(), inp)
 
+    def test_aten___not__(self):
+        class Module(torch.nn.Module):
+            def forward(self, x: torch.Tensor, y: torch.Tensor) -> Tuple[bool, torch.Tensor]:
+                z = x + 1
+                return not (x is y), z
+
+        inp = (torch.randn(10, 10), torch.rand(10, 10))
+        self._check_equal_ts_ep_converter(Module(), inp)
+
 
 if __name__ == "__main__":
     run_tests()
