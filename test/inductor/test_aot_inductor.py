@@ -148,6 +148,23 @@ def check_model_with_multiple_inputs(
     self.assertTrue(same(list_actual, list_expected))
 
 
+def code_check_count(
+    self: TestCase,
+    model,
+    example_inputs,
+    target_str: str,
+    target_count: int,
+):
+    so_path = torch._export.aot_compile(model, example_inputs)
+    with open(os.path.splitext(so_path)[0] + ".cpp") as cpp:
+        src_code = cpp.read()
+        FileCheck().check_count(
+            target_str,
+            target_count,
+            exactly=True,
+        ).run(src_code)
+
+
 class AOTInductorTestsTemplate:
     def test_simple(self):
         class Model(torch.nn.Module):
@@ -1369,7 +1386,9 @@ class AOTInductorTestsTemplate:
             torch.randn(1, 6, 1, 48, device=self.device),
             torch.randn(1, 6, 1, 48, device=self.device),
         )
-        self.check_model(Model(self.device), example_inputs)
+        model = Model(self.device)
+        self.check_model(model, example_inputs)
+        self.code_check_count(model, example_inputs, "empty_strided", 2)
 
     @requires_multigpu()
     def test_replicate_on_devices(self):
@@ -1473,19 +1492,15 @@ class AOTInductorTestsTemplate:
             torch.randn(87, 87, device=self.device),
             torch.randn(87, 87, device=self.device),
         )
+        model = Model()
         self.check_model(
-            Model(), example_inputs, atol=1e-4, rtol=1e-4
+            model, example_inputs, atol=1e-4, rtol=1e-4
         )  # 1e-4 is the tol value used in pytorch/torch/_dynamo/utils.py
 
         if self.device == "cuda":
-            so_path = torch._export.aot_compile(Model(), example_inputs)
-            with open(os.path.splitext(so_path)[0] + ".cpp") as cpp:
-                src_code = cpp.read()
-                FileCheck().check_count(
-                    "triton_poi_fused_sin_0 = loadKernel(",
-                    1,
-                    exactly=True,
-                ).run(src_code)
+            self.code_check_count(
+                model, example_inputs, "triton_poi_fused_sin_0 = loadKernel(", 1
+            )
 
     def test_reuse_kernel_dynamic(self):
         class Model(torch.nn.Module):
@@ -2901,6 +2916,7 @@ class AOTInductorTestABICompatibleCpu(TestCase):
     abi_compatible = True
     check_model = check_model
     check_model_with_multiple_inputs = check_model_with_multiple_inputs
+    code_check_count = code_check_count
     allow_stack_allocation = False
     use_minimal_arrayref_interface = False
 
@@ -3150,6 +3166,7 @@ class AOTInductorTestABICompatibleCpuWithStackAllocation(TestCase):
     abi_compatible = True
     check_model = check_model
     check_model_with_multiple_inputs = check_model_with_multiple_inputs
+    code_check_count = code_check_count
     allow_stack_allocation = True
     use_minimal_arrayref_interface = False
 
@@ -3187,6 +3204,7 @@ class AOTInductorTestABICompatibleCuda(TestCase):
     abi_compatible = True
     check_model = check_model
     check_model_with_multiple_inputs = check_model_with_multiple_inputs
+    code_check_count = code_check_count
     allow_stack_allocation = False
     use_minimal_arrayref_interface = False
 
@@ -3208,6 +3226,7 @@ class AOTInductorTestNonABICompatibleCpu(TestCase):
     abi_compatible = False
     check_model = check_model
     check_model_with_multiple_inputs = check_model_with_multiple_inputs
+    code_check_count = code_check_count
     allow_stack_allocation = False
     use_minimal_arrayref_interface = False
 
@@ -3242,6 +3261,7 @@ class AOTInductorTestNonABICompatibleCuda(TestCase):
     abi_compatible = False
     check_model = check_model
     check_model_with_multiple_inputs = check_model_with_multiple_inputs
+    code_check_count = code_check_count
     allow_stack_allocation = False
     use_minimal_arrayref_interface = False
 
