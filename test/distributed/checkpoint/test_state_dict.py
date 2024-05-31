@@ -654,7 +654,6 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
 
     @with_comms
     @skip_if_lt_x_gpu(2)
-<<<<<<< HEAD
     def test_optim_state_dict_para_matching(self) -> None:
         # This test verifies parameters between optim and optim_state_dict
         # "initial_lr" is added to optim_state_dict, but not to the new optim
@@ -695,7 +694,6 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
         )
         if dist.get_rank() == 0:
             self.assertTrue("initial_lr" in optim.param_groups[0])
-=======
     def test_flattened_osd(self) -> None:
         device_mesh = init_device_mesh("cuda", (self.world_size,))
         model = CompositeParamModel(device=torch.device("cuda"))
@@ -747,7 +745,6 @@ class TestNoComm(MultiProcessTestCase):
         )
         set_optimizer_state_dict(model, optim, osd)
         set_optimizer_state_dict(model, optim, optim.state_dict())
->>>>>>> 6bfc6e08759cf1fd7cf89916124285bf131b7168
 
 
 if __name__ == "__main__":
