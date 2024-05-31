@@ -25,8 +25,8 @@ from torch.distributed._tensor.ops.utils import (
     register_prop_rule,
 )
 from torch.distributed._tensor.placement_types import (
-    _Partial,
     DTensorSpec,
+    Partial,
     Placement,
     Replicate,
     Shard,
@@ -102,7 +102,7 @@ def equal_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> StrategyType:
             output_spec = DTensorSpec(
                 mesh=arg_spec.mesh,
                 placements=tuple(
-                    Replicate() if isinstance(p, _Partial) else p
+                    Replicate() if isinstance(p, Partial) else p
                     for p in arg_spec.placements
                 ),
             )
@@ -153,7 +153,7 @@ def create_like_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> StrategyType:
             output_spec = DTensorSpec(
                 mesh=arg_spec.mesh,
                 placements=tuple(
-                    Replicate() if isinstance(p, _Partial) else p
+                    Replicate() if isinstance(p, Partial) else p
                     for p in arg_spec.placements
                 ),
             )
@@ -370,7 +370,11 @@ def scatter_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> StrategyType:
 
     # placement list stores placements of [output, input, index, src]
     # first we always have replicate all for inputs and output
-    all_replicate: List[Placement] = [Replicate()] * 4
+    if len(op_schema.args_strategy) < 3:
+        # scatter_.src/scatter.src with src be float number instead of tensor
+        all_replicate: List[Placement] = [Replicate()] * 3
+    else:
+        all_replicate: List[Placement] = [Replicate()] * 4
     single_mesh_dim_strategies.append(all_replicate)
 
     # TODO: see if we can support input sharding pattern
@@ -608,7 +612,7 @@ def prop_index(op_schema: OpSchema) -> OutputSharding:
     #   2. Other dimensions of values_spec can remain sharded if they are so.
     # For indices:
     #   Indices can be either sharded or replicated. All index tensors need to be sharded
-    #   in a compatible way, following the pointwise rule (including resolving _Partial
+    #   in a compatible way, following the pointwise rule (including resolving Partial
     #   into either sharded or replicated)
 
     values_spec, multi_indices_spec = op_schema.args_schema
@@ -678,7 +682,7 @@ def prop_index(op_schema: OpSchema) -> OutputSharding:
                 )
             if isinstance(ip, Shard):
                 return Shard(ip.dim + insert_dim)
-            # _Partial or Replicated
+            # Partial or Replicated
             return vp
 
         value_placements = tuple(
@@ -732,13 +736,13 @@ def split_rule(op_schema: OpSchema) -> OutputSharding:
     dim = cast(int, op_schema.args_schema[2]) if len(op_schema.args_schema) > 2 else 0
     dim = normalize_dim(dim, ndim)
 
-    # TODO: tensor to split cannot have _Partial
+    # TODO: tensor to split cannot have Partial
     # in its placements for now. Will need to
     # support in future.
     if input_spec.sums:
         raise NotImplementedError(
             f"splitting distributed tensor with "
-            f"_Partial placement is not implemented!\n"
+            f"Partial placement is not implemented!\n"
             f"DTensorSpec={input_spec}"
         )
 

@@ -6198,8 +6198,8 @@ else:
         GradScaler = torch.cuda.amp.GradScaler if "cuda" == device.type else torch.cpu.amp.GradScaler
 
         with self.assertWarnsRegex(
-            UserWarning,
-            rf"torch.{device.type}.amp.GradScaler\(args...\) is deprecated.",
+            FutureWarning,
+            rf"`torch.{device.type}.amp.GradScaler\(args...\)` is deprecated.",
         ):
             _ = GradScaler(init_scale=2.0)
 
@@ -10623,12 +10623,9 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
             if t1.is_floating_point():
                 t3 = t1.clone().detach().requires_grad_(True)
                 out = t3 * 2
-                with self.assertRaisesRegex(RuntimeError, "Expected single reference to a's"):
-                    torch.utils.swap_tensors(t3, t2)
-                del out
-                # Now succeeds
                 torch.utils.swap_tensors(t3, t2)
-                torch.utils.swap_tensors(t1, t2)
+                with self.assertRaisesRegex(RuntimeError, "AccumulateGrad node that was poisoned by swap_tensors"):
+                    out.sum().backward()
 
             wr = weakref.ref(t1)
             with self.assertRaisesRegex(RuntimeError, "has weakref"):
