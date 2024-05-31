@@ -45,8 +45,8 @@ def raise_comms(
     which is the beginning of the forwards pass. We'll have to either do a special pass for FSDP,
     or we'll want to redo this pass with memory considerations so we handle the FSDP case in a general way.
     """
-    new_order_reversed: List["scheduler.BaseSchedulerNode"] = []
-    cur_comms: List["scheduler.BaseSchedulerNode"] = []
+    new_order_reversed: List[scheduler.BaseSchedulerNode] = []
+    cur_comms: List[scheduler.BaseSchedulerNode] = []
     for snode in reversed(snodes):
         if is_collective(snode.node):
             cur_comms.append(snode)
