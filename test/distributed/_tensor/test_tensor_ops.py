@@ -4,7 +4,7 @@
 import torch
 from torch.distributed._tensor import DeviceMesh, distribute_tensor, DTensor
 from torch.distributed._tensor.debug import CommDebugMode
-from torch.distributed._tensor.placement_types import _Partial, Replicate, Shard
+from torch.distributed._tensor.placement_types import Partial, Replicate, Shard
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
@@ -92,7 +92,7 @@ class DistTensorOpsTest(DTensorTestBase):
         # test inplace op self and other dtensor with other specs
         # and make sure out spec not change
         shard_spec = [Shard(0)]
-        partial_spec = [_Partial()]
+        partial_spec = [Partial()]
         dt_to_inplace_add = distribute_tensor(input_tensor, mesh, shard_spec)
         partial_grad = DTensor.from_local(torch.randn(12, 3), mesh, partial_spec)
         res = dt_to_inplace_add.add_(partial_grad)
@@ -168,7 +168,7 @@ class DistTensorOpsTest(DTensorTestBase):
     @with_comms
     def test_ones_like_partial_sum(self):
         device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
-        shard_spec = [_Partial()]
+        shard_spec = [Partial()]
 
         input_tensor = torch.randn(4, 8, requires_grad=True)
         dist_tensor = DTensor.from_local(input_tensor, device_mesh, shard_spec)
@@ -181,7 +181,7 @@ class DistTensorOpsTest(DTensorTestBase):
     @with_comms
     def test_fill_inplace_partial_sum(self):
         device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
-        shard_spec = [_Partial()]
+        shard_spec = [Partial()]
 
         input_tensor = torch.randn(4, 8, requires_grad=True)
         dist_tensor = DTensor.from_local(input_tensor, device_mesh, shard_spec)
@@ -197,7 +197,7 @@ class DistTensorOpsTest(DTensorTestBase):
     @with_comms
     def test_zeros_like_partial_sum(self):
         device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
-        shard_spec = [_Partial()]
+        shard_spec = [Partial()]
 
         input_tensor = torch.randn(4, 8, requires_grad=True)
         dist_tensor = DTensor.from_local(input_tensor, device_mesh, shard_spec)
@@ -236,8 +236,8 @@ class DistTensorOpsTest(DTensorTestBase):
         mesh_2d = DeviceMesh(
             self.device_type, torch.arange(self.world_size).reshape(2, 2)
         )
-        partial_replicate_placement = [_Partial(), Replicate()]
-        partial_placement = [_Partial(), _Partial()]
+        partial_replicate_placement = [Partial(), Replicate()]
+        partial_placement = [Partial(), Partial()]
 
         partial_replicate_dt = DTensor.from_local(
             torch.randn(4, 8), mesh_2d, partial_replicate_placement

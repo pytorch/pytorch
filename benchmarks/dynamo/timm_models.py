@@ -7,7 +7,10 @@ import subprocess
 import sys
 import warnings
 
-from common import BenchmarkRunner, download_retry_decorator, main
+try:
+    from .common import BenchmarkRunner, download_retry_decorator, main
+except ImportError:
+    from common import BenchmarkRunner, download_retry_decorator, main
 
 import torch
 
