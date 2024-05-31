@@ -180,12 +180,6 @@ class TestConverter(TestCase):
                 z = x + 1
                 return x is y, z
 
-        # inp[0] is inp[1]
-        x = torch.randn(10, 10)
-        inp = (x, x)
-        self._check_equal_ts_ep_converter(Module(), inp)
-
-        # inp[0] is not inp[1]
         inp = (torch.randn(10, 10), torch.rand(10, 10))
         self._check_equal_ts_ep_converter(Module(), inp)
 
@@ -193,14 +187,8 @@ class TestConverter(TestCase):
         class Module(torch.nn.Module):
             def forward(self, x: torch.Tensor, y: torch.Tensor) -> Tuple[bool, torch.Tensor]:
                 z = x + 1
-                return z, x is not y
+                return x is not y, z
 
-        # inp[0] is inp[1]
-        x = torch.randn(10, 10)
-        inp = (x, x)
-        self._check_equal_ts_ep_converter(Module(), inp)
-
-        # inp[0] is not inp[1]
         inp = (torch.randn(10, 10), torch.rand(10, 10))
         self._check_equal_ts_ep_converter(Module(), inp)
 

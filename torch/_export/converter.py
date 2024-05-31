@@ -443,24 +443,20 @@ class TS2FXGraphConverter:
         self.fx_graph.call_function(target, args)
 
     def convert_aten___is__(self, node: torch._C.Node):
-        # aten::__is__ is currently hard-coded in export
-        breakpoint()
-        target = torch.ops.aten.__is__
-        _l, _r = tuple(input for input in node.inputs())
-
+        # export() currently specializes on the sample inputs for aten::__is__
         left, right = tuple(
             self.get_fx_value(input) for input in node.inputs()
         )
-        fx_node = self.fx_graph.call_function(target, (left, right))
+        fx_node = self.fx_graph.call_function(operator.is_, (left, right))
         output_name = node.output().debugName()
         self.name_to_node[output_name] = fx_node
 
     def convert_aten___isnot__(self, node: torch._C.Node):
-        target = torch.ops.aten.__isnot__
+        # export() currently specializes on the sample inputs for aten::__isnot__
         left, right = tuple(
             self.get_fx_value(input) for input in node.inputs()
         )
-        fx_node = self.fx_graph.call_function(target, (left, right))
+        fx_node = self.fx_graph.call_function(operator.is_not, (left, right))
         output_name = node.output().debugName()
         self.name_to_node[output_name] = fx_node
 
