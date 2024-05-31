@@ -103,7 +103,8 @@ class ConstExprMin(sympy.Min):
     While the sympy.Min maps to tl.minimum, this maps to an arithmetic macro.
     https://github.com/triton-lang/triton/issues/3815
     """
-    pass
+    def macro(self, a: str, b: str) -> str:
+        return f"({a} * ({a} <= {b}) + {b} * ({b} < {a}))"
 
 @dataclasses.dataclass
 class IndexingOptions:
@@ -138,7 +139,7 @@ class BlockPtrOptions:
     block_shape: List[str]
     order: List[int]
     offsets: List[str]
-    mask_vars: Set[sympy.Symbol]
+    mask_vars: Set[Union[str, sympy.Symbol]]
     reshape_suffix: List[str]
 
     @staticmethod
@@ -313,28 +314,27 @@ class TritonPrinter(PythonPrinter):
         q = self.doprint(expr.args[2])
         return f"tl.where({c}, {p}, {q})"
 
-    def _print_min_helper(self, expr: sympy.Expr, cls: Type[sympy.Min], macro: Callable[[sympy.Expr, sympy.Expr], str]) -> str:
+    def _print_Min(self, expr: sympy.Expr) -> str:
+        """
+        Prints subclasses of sympy.Min. This also handles ConstExprMin.
+        """
+
+        def tl_minimum_macro(a: str, b: str) -> str:
+            return f"tl.minimum({a}, {b})"
+
+        # Get the macro. This is overridden by ConstExprMin.
+        macro = getattr(expr, 'macro', tl_minimum_macro)
+        cls = type(expr)
+
         nargs = len(expr.args)
         if len(expr.args) == 1:
-            return self._print(expr.args[0]), None
+            return self._print(expr.args[0])
 
         mid = len(expr.args) // 2
         a = self._print(cls(*expr.args[:mid]))
         b = self._print(cls(*expr.args[mid:]))
 
         return macro(a, b)
-
-    def _print_ConstExprMin(self, expr):
-        def constexpr_min_macro(a: sympy.Expr, b: sympy.Expr) -> str:
-            return f"({a} * ({a} <= {b}) + {b} * ({b} < {a}))"
-
-        return self._print_min_helper(expr, ConstExprMin, constexpr_min_macro)
-
-    def _print_Min(self, expr):
-        def tl_minimum_macro(a: sympy.Expr, b: sympy.Expr) -> str:
-            return f"tl.minimum({a}, {b})"
-
-        return self._print_min_helper(expr, sympy.Min, tl_minimum_macro)
 
     def _print_Max(self, expr):
         nargs = len(expr.args)
@@ -1161,8 +1161,6 @@ class TritonKernel(SIMDKernel):
                 strides = [sympy.Wild(f"stride_{s}", exclude=symbols) for s in symbols]
                 offset = sympy.Wild("_offset", exclude=symbols)
                 m = index_relative_to_xyr_index.match(sympy_dot(symbols, strides) + offset)
-                # TODO(jansel): it is sometimes possible to do higher dimensional block_ptrs with
-                #               a tl.reshape the correct block.  We will miss these cases today.
                 if m:
                     self.filter_masks(mask_vars)
 
@@ -1183,12 +1181,11 @@ class TritonKernel(SIMDKernel):
                        + ...
                        + s(N-1) * ModularIndexing(xindex, d(N-2), d(N-1))
 
-                This iterates over a block of shape (d1, ..., dN) and stride (s1, ..., sN).
+                This iterates over a block of shape (dN, ..., d1) and stride (sN, ..., s1).
                 """
 
                 # Get info about iteration ranges
-                range_nodes = [node for node in self.range_tree_nodes.values()]
-                num_dims = len(range_nodes)
+                num_dims = len(self.range_tree_nodes)
                 if num_dims == 0:
                     return None
 
@@ -1197,33 +1194,32 @@ class TritonKernel(SIMDKernel):
                     return None
                 index_var = symbols[0]
 
+
+                # Get the dims in reverse numerical order. E.g. x(N-1), ..., x0.
+                # This matches the order of dims in torch tensors and triton blocks.
+                var_ranges = next(iter(self.range_tree_nodes.values())).var_ranges
+                dims = dict(reversed(var_ranges.items()))
+
                 # Pattern match to find the strides and offset.
-                """
-                def is_integer(x):
-                    return x.is_Integer
-                dims = [x for x in range_nodes[0].var_ranges.values()]
-                strides = [sympy.Wild(f"stride{idx}", properties=(is_integer,)) for idx in range(num_dims)]
-                offset = sympy.Wild("offset", properties=(is_integer,))
-                """
-                dims = [x for x in range_nodes[0].var_ranges.values()]
                 strides = [sympy.Wild(f"stride{idx}", exclude=symbols) for idx in range(num_dims)]
                 offset = sympy.Wild("offset", exclude=symbols)
 
-                # Compute the cumulative size of each dimension's slice
+                # Compute the cumulative size of each dimension's slice.
+                # This proceeds from the last dim up to the second.
                 slice_numels = [sympy.Integer(1)]
-                for dim in dims[:-1]:
-                    numel = dim * slice_numels[-1]
-                    slice_numels.append(numel)
+                dim_values = list(dims.values())
+                for dim in dim_values[:0:-1]:
+                    numel = dim * slice_numels[0]
+                    slice_numels.insert(0, numel)
 
                 # Division term
-                match_expr = strides[-1] * FloorDiv(index_var, slice_numels[-1])
+                match_expr = strides[0] * FloorDiv(index_var, slice_numels[0])
 
                 # Modulo terms
-                for expr_idx in range(1, num_dims):
-                    dim_idx = expr_idx - 1
-                    cur_dim = dims[dim_idx]
-                    prev_dim = dims[dim_idx - 1] if dim_idx > 0 else 1
-                    match_expr += strides[dim_idx] * ModularIndexing(index_var, prev_dim, cur_dim)
+                for dim_idx in range(1, num_dims):
+                    cur_dim = dim_values[dim_idx]
+                    next_dim = dim_values[dim_idx + 1] if dim_idx < num_dims - 1 else 1
+                    match_expr += strides[dim_idx] * ModularIndexing(index_var, next_dim, cur_dim)
 
                 # Offset term
                 match_expr += offset
@@ -1258,26 +1254,26 @@ class TritonKernel(SIMDKernel):
                 linear_block_size = sympy.Symbol(f"{prefix}BLOCK", integer=True, nonzero=True)
                 block_shape = [
                     ConstExprMin(CeilDiv(linear_block_size, slice_numel), dim)
-                    for slice_numel, dim in zip(slice_numels, dims)
+                    for slice_numel, dim in zip(slice_numels, dim_values)
                 ]
 
-                # Compute the block offsets from xoffset and the range tree
+                # Compute block offsets from xoffset and the range tree.
                 xoffset = sympy.Symbol("xoffset", integer=True)
                 block_offsets = [
-                    sympy_subs(node.expr, {index_var: xoffset})
-                    for node in self.range_tree_nodes.values()
+                    sympy_subs(self.range_tree_nodes[var_name].expr, {index_var: xoffset})
+                    for var_name in dims
                 ]
 
-                # Form the block pointer
-                matched_strides=[V.graph.sizevars.lookup_precomputed_size(match[stride]) for stride in reversed(strides)]
-                matched_offset=V.graph.sizevars.lookup_precomputed_size(match[offset])
+                # Form the block pointer.
+                matched_strides=[sizevars.lookup_precomputed_size(match[stride]) for stride in strides]
+                matched_offset=sizevars.lookup_precomputed_size(match[offset])
                 return BlockPtrOptions(
                     constant_offset=matched_offset,
-                    shape=list(reversed(dims)),
+                    shape=dim_values,
                     strides=matched_strides,
-                    block_shape=list(reversed(block_shape)),
+                    block_shape=block_shape,
                     order=list(range(num_dims)),
-                    offsets=list(reversed(block_offsets)),
+                    offsets=block_offsets,
                     mask_vars=mask_vars,
                     reshape_suffix = [str(linear_block_size)],
                 )
