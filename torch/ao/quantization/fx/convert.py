@@ -949,30 +949,24 @@ def convert(
     if convert_custom_config is None:
         convert_custom_config = ConvertCustomConfig()
 
-    if isinstance(convert_custom_config, dict):
+    if isinstance(convert_custom_config, Dict):
         warnings.warn(
             "Passing a convert_custom_config_dict to convert is deprecated and will not be supported "
-            "in a future version. Please pass in a ConvertCustomConfig instead.",
-            FutureWarning,
-        )
+            "in a future version. Please pass in a ConvertCustomConfig instead.")
         convert_custom_config = ConvertCustomConfig.from_dict(convert_custom_config)
 
-    if isinstance(qconfig_mapping, dict):
+    if isinstance(qconfig_mapping, Dict):
         warnings.warn(
             "Passing a QConfig dictionary to convert is deprecated and will not be supported "
-            "in a future version. Please pass in a QConfigMapping instead.",
-            FutureWarning,
-        )
+            "in a future version. Please pass in a QConfigMapping instead.")
         qconfig_mapping = QConfigMapping.from_dict(qconfig_mapping) if qconfig_mapping else None
     qconfig_mapping = copy.deepcopy(qconfig_mapping)
     assert qconfig_mapping is None or isinstance(qconfig_mapping, QConfigMapping)
 
-    if isinstance(backend_config, dict):
+    if isinstance(backend_config, Dict):
         warnings.warn(
             "Passing a backend_config_dict to prepare is deprecated and will not be supported "
-            "in a future version. Please pass in a BackendConfig instead.",
-            FutureWarning,
-        )
+            "in a future version. Please pass in a BackendConfig instead.")
         backend_config = BackendConfig.from_dict(backend_config)
 
     if backend_config is None:
