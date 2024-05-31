@@ -299,9 +299,9 @@ class TORCH_API CppFunction final {
   }
 
  private:
-  c10::optional<c10::DispatchKey> dispatch_key_;
+  std::optional<c10::DispatchKey> dispatch_key_;
   c10::KernelFunction func_;
-  c10::optional<c10::impl::CppSignature> cpp_signature_;
+  std::optional<c10::impl::CppSignature> cpp_signature_;
   std::unique_ptr<c10::FunctionSchema> schema_;
   std::string debug_;
 
@@ -316,7 +316,7 @@ class TORCH_API CppFunction final {
 
   CppFunction(
       c10::KernelFunction func,
-      c10::optional<c10::impl::CppSignature> cpp_signature,
+      std::optional<c10::impl::CppSignature> cpp_signature,
       std::unique_ptr<c10::FunctionSchema> schema);
 };
 
@@ -406,8 +406,8 @@ inline CppFunction dispatch(c10::DeviceType type, Func&& raw_f) {
 /// ```
 ///
 /// \ingroup torch-schema-overloads
-inline c10::FunctionSchema schema(const char* str, c10::AliasAnalysisKind k) {
-  c10::FunctionSchema s = torch::jit::parseSchema(str);
+inline c10::FunctionSchema schema(const char* str, c10::AliasAnalysisKind k, bool allow_typevars=false) {
+  c10::FunctionSchema s = torch::jit::parseSchema(str, /*allow_typevars*/allow_typevars);
   s.setAliasAnalysis(k);
   return s;
 }
@@ -415,8 +415,8 @@ inline c10::FunctionSchema schema(const char* str, c10::AliasAnalysisKind k) {
 /// Function schemas can be directly constructed from string literals.
 ///
 /// \ingroup torch-schema-overloads
-inline c10::FunctionSchema schema(const char* s) {
-  return schema(s, c10::AliasAnalysisKind::FROM_SCHEMA);
+inline c10::FunctionSchema schema(const char* s, bool allow_typevars=false) {
+  return schema(s, c10::AliasAnalysisKind::FROM_SCHEMA, allow_typevars);
 }
 
 /// \private
@@ -555,7 +555,7 @@ class TORCH_API Library final {
   Library(
       Kind kind,
       std::string ns,
-      c10::optional<c10::DispatchKey> k,
+      std::optional<c10::DispatchKey> k,
       const char* file,
       uint32_t line);
 
@@ -847,9 +847,9 @@ class TORCH_API Library final {
 
  private:
   Kind kind_;
-  c10::optional<std::string> ns_;
-  c10::optional<c10::DispatchKey> dispatch_key_;
-  c10::optional<std::pair<const char*, const char*>> python_module_;
+  std::optional<std::string> ns_;
+  std::optional<c10::DispatchKey> dispatch_key_;
+  std::optional<std::pair<const char*, const char*>> python_module_;
   const char* file_;
   uint32_t line_;
 
@@ -889,7 +889,7 @@ class TorchLibraryInit final {
       Library::Kind kind,
       InitFn* fn,
       const char* ns,
-      c10::optional<c10::DispatchKey> k,
+      std::optional<c10::DispatchKey> k,
       const char* file,
       uint32_t line)
       : lib_(kind, ns, k, file, line) {

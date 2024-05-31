@@ -94,7 +94,13 @@ static PyObject* THPStorage_copy_(
   TORCH_CHECK(
       !invalid, "Attempted to call copy_() on an invalid python storage.")
 
-  TORCH_CHECK(self_.nbytes() == src.nbytes(), "size does not match");
+  TORCH_CHECK(
+      self_.nbytes() == src.nbytes(),
+      "size does not match, self was ",
+      self_.nbytes(),
+      " bytes but src was ",
+      src.nbytes(),
+      " bytes");
 
   at::storage_copy(self_, src, non_blocking);
 

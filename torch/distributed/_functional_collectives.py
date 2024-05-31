@@ -590,8 +590,7 @@ class AsyncCollectiveTensor(torch.Tensor):
         return ["elem"], None
 
     def tolist(self):
-        self.trigger_wait()
-        return self.elem.tolist()
+        return self.trigger_wait().tolist()
 
     @staticmethod
     def __tensor_unflatten__(inner_tensors, meta, outer_size, outer_stride):
@@ -600,18 +599,18 @@ class AsyncCollectiveTensor(torch.Tensor):
         return AsyncCollectiveTensor(elem)
 
     def __repr__(self):
-        self.trigger_wait()
-        return f"AsyncCollectiveTensor({self.elem})"
+        return f"AsyncCollectiveTensor({self.trigger_wait()})"
 
     def trigger_wait(self):
         if not self.completed:
-            wait_tensor(self.elem)
+            out = wait_tensor(self.elem)
             self.completed = True
-        return self.elem
+            return out
+        else:
+            return self.elem
 
     def wait(self) -> torch.Tensor:
-        wait_tensor(self.elem)
-        return self.elem
+        return wait_tensor(self.elem)
 
     def _get_acs_underlying_tensor(self):
         """This method enables  _functional_collectives_impl to test if a tensor is an ACS"""
@@ -631,7 +630,7 @@ class AsyncCollectiveTensor(torch.Tensor):
         def unwrap(e: AsyncCollectiveTensor):
             # wait_tensor is idepotent and will do stream sync only once
             if not is_view_op:
-                e.trigger_wait()
+                return e.trigger_wait()
             return e.elem
 
         def wrap(e: torch.Tensor):
@@ -767,7 +766,8 @@ def _resolve_group_name(group: RANK_TYPES, tag: str = "") -> str:
             warnings.warn(
                 "The combination of ranks + tag as process group "
                 "identifier has been deprecated. Please switch to "
-                "using ProcessGroup, DeviceMesh, or group name instead."
+                "using ProcessGroup, DeviceMesh, or group name instead.",
+                FutureWarning,
             )
         return c10d._resolve_group_name_by_ranks_and_tag(cast(List[int], group), tag)
     else:
@@ -895,6 +895,12 @@ def _all_to_all_single_meta(
         return input.new_empty(out_size)
 
 
+def _all_gather_into_tensor_out_native_meta(input, group_size, group_name, *, out):
+    shape = list(input.size())
+    shape[0] *= group_size
+    return input.new_empty(shape)
+
+
 def _all_gather_into_tensor_native_meta(input, group_size, group_name):
     shape = list(input.size())
     shape[0] *= group_size
@@ -933,6 +939,9 @@ if not torch._running_with_deploy():
     lib_impl.impl("all_reduce_coalesced", _all_reduce_coalesced_meta, "Meta")
     lib_impl.impl("all_reduce_coalesced_", _all_reduce_coalesced__meta, "Meta")
     lib_impl.impl("wait_tensor", _wait_tensor_meta, "Meta")
+    lib_impl.impl(
+        "all_gather_into_tensor_out", _all_gather_into_tensor_out_native_meta, "Meta"
+    )
     lib_impl.impl("all_gather_into_tensor", _all_gather_into_tensor_native_meta, "Meta")
     lib_impl.impl(
         "all_gather_into_tensor_coalesced",

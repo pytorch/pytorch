@@ -151,7 +151,7 @@ size_t SourceRangeHasher::operator()(const torch::jit::SourceRange& key) const {
       std::hash<size_t>()(key.start()) ^ std::hash<size_t>()(key.end()));
 }
 
-c10::optional<SourceRange> Source::findSourceRangeThatGenerated(
+std::optional<SourceRange> Source::findSourceRangeThatGenerated(
     const SourceRange& range) {
   if (!gen_ranges_) {
     return c10::nullopt;

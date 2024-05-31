@@ -81,8 +81,8 @@ inline uint64_t make64BitsFrom32Bits(uint32_t hi, uint32_t lo) {
 CPUGeneratorImpl::CPUGeneratorImpl(uint64_t seed_in)
   : c10::GeneratorImpl{Device(DeviceType::CPU), DispatchKeySet(c10::DispatchKey::CPU)},
     engine_{seed_in},
-    next_float_normal_sample_{c10::optional<float>()},
-    next_double_normal_sample_{c10::optional<double>()} { }
+    next_float_normal_sample_{std::optional<float>()},
+    next_double_normal_sample_{std::optional<double>()} { }
 
 /**
  * Manually seeds the engine with the seed input
@@ -151,8 +151,8 @@ void CPUGeneratorImpl::set_state(const c10::TensorImpl& new_state) {
   detail::check_rng_state(new_state);
 
   at::mt19937 engine;
-  auto float_normal_sample = c10::optional<float>();
-  auto double_normal_sample = c10::optional<double>();
+  auto float_normal_sample = std::optional<float>();
+  auto double_normal_sample = std::optional<double>();
 
   // Construct the state of at::CPUGeneratorImpl based on input byte tensor size.
   CPUGeneratorImplStateLegacy* legacy_pod{nullptr};
@@ -160,7 +160,7 @@ void CPUGeneratorImpl::set_state(const c10::TensorImpl& new_state) {
   if (new_state_size == size_legacy) {
     legacy_pod = (CPUGeneratorImplStateLegacy*)new_state.data();
     // Note that in CPUGeneratorImplStateLegacy, we didn't have float version
-    // of normal sample and hence we leave the c10::optional<float> as is
+    // of normal sample and hence we leave the std::optional<float> as is
 
     // Update next_double_normal_sample.
     // Note that CPUGeneratorImplStateLegacy stores two uniform values (normal_x, normal_y)
@@ -171,14 +171,14 @@ void CPUGeneratorImpl::set_state(const c10::TensorImpl& new_state) {
       auto r = legacy_pod->normal_rho;
       auto theta = 2.0 * c10::pi<double> * legacy_pod->normal_x;
       // we return the sin version of the normal sample when in caching mode
-      double_normal_sample = c10::optional<double>(r * ::sin(theta));
+      double_normal_sample = std::optional<double>(r * ::sin(theta));
     }
   } else if (new_state_size == size_current) {
     auto rng_state = (CPUGeneratorImplState*)new_state.data();
     legacy_pod = &rng_state->legacy_pod;
     // update next_float_normal_sample
     if (rng_state->is_next_float_normal_sample_valid) {
-      float_normal_sample = c10::optional<float>(rng_state->next_float_normal_sample);
+      float_normal_sample = std::optional<float>(rng_state->next_float_normal_sample);
     }
 
     // Update next_double_normal_sample.
@@ -186,7 +186,7 @@ void CPUGeneratorImpl::set_state(const c10::TensorImpl& new_state) {
     // and if it's valid in normal_is_valid. The redundant normal_x and normal_rho
     // are squashed to 0.0.
     if (legacy_pod->normal_is_valid) {
-      double_normal_sample = c10::optional<double>(legacy_pod->normal_y);
+      double_normal_sample = std::optional<double>(legacy_pod->normal_y);
     }
   } else {
     AT_ERROR("Expected either a CPUGeneratorImplStateLegacy of size ", size_legacy,
@@ -283,14 +283,14 @@ uint64_t CPUGeneratorImpl::random64() {
 /**
  * Get the cached normal random in float
  */
-c10::optional<float> CPUGeneratorImpl::next_float_normal_sample() {
+std::optional<float> CPUGeneratorImpl::next_float_normal_sample() {
   return next_float_normal_sample_;
 }
 
 /**
  * Get the cached normal random in double
  */
-c10::optional<double> CPUGeneratorImpl::next_double_normal_sample() {
+std::optional<double> CPUGeneratorImpl::next_double_normal_sample() {
   return next_double_normal_sample_;
 }
 
@@ -299,7 +299,7 @@ c10::optional<double> CPUGeneratorImpl::next_double_normal_sample() {
  *
  * See Note [Acquire lock when using random generators]
  */
-void CPUGeneratorImpl::set_next_float_normal_sample(c10::optional<float> randn) {
+void CPUGeneratorImpl::set_next_float_normal_sample(std::optional<float> randn) {
   next_float_normal_sample_ = randn;
 }
 
@@ -308,7 +308,7 @@ void CPUGeneratorImpl::set_next_float_normal_sample(c10::optional<float> randn) 
  *
  * See Note [Acquire lock when using random generators]
  */
-void CPUGeneratorImpl::set_next_double_normal_sample(c10::optional<double> randn) {
+void CPUGeneratorImpl::set_next_double_normal_sample(std::optional<double> randn) {
   next_double_normal_sample_ = randn;
 }
 

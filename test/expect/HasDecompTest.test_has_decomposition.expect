@@ -248,6 +248,8 @@ aten::_foreach_log2
 aten::_foreach_log2.out
 aten::_foreach_log2_
 aten::_foreach_log_
+aten::_foreach_max
+aten::_foreach_max.out
 aten::_foreach_maximum.List
 aten::_foreach_maximum.List_out
 aten::_foreach_maximum.Scalar
@@ -339,6 +341,9 @@ aten::_functional_assert_async.msg
 aten::_functional_assert_scalar
 aten::_functional_sym_constrain_range
 aten::_functional_sym_constrain_range_for_size
+aten::_fused_adagrad
+aten::_fused_adagrad.out
+aten::_fused_adagrad_
 aten::_fused_adam
 aten::_fused_adam.out
 aten::_fused_adam.tensor_lr
@@ -935,8 +940,6 @@ aten::min.dim_min
 aten::min.unary_out
 aten::miopen_batch_norm
 aten::miopen_batch_norm.out
-aten::miopen_batch_norm_backward
-aten::miopen_batch_norm_backward.out
 aten::miopen_convolution
 aten::miopen_convolution.out
 aten::miopen_convolution_add_relu
@@ -1149,8 +1152,6 @@ aten::segment_reduce.out
 aten::select.int
 aten::select_copy.int
 aten::select_copy.int_out
-aten::select_scatter
-aten::select_scatter.out
 aten::set
 aten::set.out
 aten::set.source_Storage

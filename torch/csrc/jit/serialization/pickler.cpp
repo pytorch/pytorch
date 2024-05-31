@@ -601,7 +601,7 @@ void Pickler::startTypeTag() {
   }
 }
 namespace {
-c10::optional<std::string> type_printer(const c10::Type& type) {
+std::optional<std::string> type_printer(const c10::Type& type) {
   if (auto dyn = type.castRaw<c10::DynamicType>()) {
     return dyn->fallback()->annotation_str(type_printer);
   }
@@ -801,20 +801,6 @@ bool checkHasValidSetGetState(const std::shared_ptr<c10::ClassType>& cls) {
       ")");
 
   return true;
-}
-
-std::array<
-    c10::optional<std::pair<BackendMetaPtr, BackendMetaPtr>>,
-    at::COMPILE_TIME_MAX_DEVICE_TYPES>&
-GetBackendMetaSerialization() {
-  // The array to save function pointer for BackendMeta serialization.
-  // key is the DeviceType, value is std::pair obj.
-  // value.first represent get function and value.seconde represent set function
-  static std::array<
-      c10::optional<std::pair<BackendMetaPtr, BackendMetaPtr>>,
-      at::COMPILE_TIME_MAX_DEVICE_TYPES>
-      BackendMetaSerialization;
-  return BackendMetaSerialization;
 }
 
 } // namespace torch::jit

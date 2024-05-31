@@ -99,7 +99,7 @@ struct alignas(2) BFloat16 {
   }
 
   constexpr C10_HOST_DEVICE BFloat16(unsigned short bits, from_bits_t)
-      : x(bits){};
+      : x(bits) {}
   inline C10_HOST_DEVICE BFloat16(float value);
   inline C10_HOST_DEVICE operator float() const;
 

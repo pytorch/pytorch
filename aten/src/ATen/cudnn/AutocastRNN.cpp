@@ -22,9 +22,9 @@ std::tuple<Tensor,Tensor,Tensor,Tensor,Tensor>
 _cudnn_rnn_cast_reflatten(const Tensor & input,
                           TensorList weight,
                           int64_t weight_stride0,
-                          const c10::optional<Tensor>& weight_buf_opt,
+                          const std::optional<Tensor>& weight_buf_opt,
                           const Tensor& hx,
-                          const c10::optional<Tensor>& cx,
+                          const std::optional<Tensor>& cx,
                           int64_t mode,
                           int64_t hidden_size,
                           int64_t proj_size,
@@ -34,7 +34,7 @@ _cudnn_rnn_cast_reflatten(const Tensor & input,
                           bool train,
                           bool bidirectional,
                           IntArrayRef batch_sizes,
-                          const c10::optional<Tensor>& dropout_state) {
+                          const std::optional<Tensor>& dropout_state) {
 #if AT_CUDNN_ENABLED()
   c10::impl::ExcludeDispatchKeyGuard no_autocast(DispatchKey::Autocast);
 

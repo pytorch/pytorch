@@ -1,9 +1,10 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 # Owner(s): ["oncall: distributed"]
 
+from numpy.testing import assert_array_equal
+
 import torch
 import torch.nn.functional as F
-from numpy.testing import assert_array_equal
 from torch.distributed._functional_collectives import AsyncCollectiveTensor
 
 from torch.distributed._tensor import (
@@ -13,7 +14,7 @@ from torch.distributed._tensor import (
     init_device_mesh,
 )
 from torch.distributed._tensor.debug import CommDebugMode
-from torch.distributed._tensor.placement_types import _Partial, Replicate, Shard
+from torch.distributed._tensor.placement_types import Partial, Replicate, Shard
 from torch.distributed.tensor.parallel import (
     ColwiseParallel,
     parallelize_module,
@@ -173,7 +174,7 @@ class DTensorTest(DTensorTestBase):
         ddp_tensor = DTensor.from_local(local_tensor, device_mesh, replica_spec)
         self.assertEqual(ddp_tensor.size(), local_tensor.size())
 
-        partial_spec = [_Partial()]
+        partial_spec = [Partial()]
         partial_tensor = DTensor.from_local(local_tensor, device_mesh, partial_spec)
         self.assertEqual(partial_tensor.size(), local_tensor.size())
 
@@ -329,7 +330,7 @@ class DTensorTest(DTensorTestBase):
 
         with comm_mode:
             local_out = sharded_dtensor.redistribute(placements=[Replicate()]).to_local(
-                grad_placements=[_Partial()]
+                grad_placements=[Partial()]
             )
             local_out.backward(torch.ones_like(local_out))
 
@@ -361,7 +362,7 @@ class DTensorTest(DTensorTestBase):
         global_tensor = torch.ones(8, 3, requires_grad=True)
 
         sharded_dtensor = distribute_tensor(global_tensor, device_mesh, placements)
-        local_out = sharded_dtensor.full_tensor(grad_placements=[_Partial()])
+        local_out = sharded_dtensor.full_tensor(grad_placements=[Partial()])
         local_out.sum().backward()
 
         replica_grad = sharded_dtensor.grad.full_tensor()
@@ -763,6 +764,32 @@ class DTensorMeshTest(DTensorTestBase):
             self.assertEqual(local_shard.shape, (4, 3))
             self.assertEqual(local_shard, torch.ones(4, 3) + torch.ones(3))
 
+    @with_comms
+    def test_auto_implicit_replication(self):
+        mesh = init_device_mesh(self.device_type, (self.world_size,))
+
+        local_tensor = torch.ones(self.world_size, 3, device=self.device_type)
+        sharded_dtensor = DTensor.from_local(local_tensor, mesh, [Shard(0)])
+
+        # automatically turn tensor to DTensor replicate when ndim = 0 and numel = 1
+        ndim_0_tensor = torch.tensor(1, device=self.device_type)
+
+        def add_scalar_tensor_with_dtensor():
+            return sharded_dtensor + ndim_0_tensor
+
+        result = add_scalar_tensor_with_dtensor().to_local()
+        self.assertEqual(result, local_tensor + ndim_0_tensor)
+        self.assertNotWarn(
+            add_scalar_tensor_with_dtensor,
+            "Found a non-scalar tensor with numel=1 and ndim!=0",
+        )
+
+        # automatically turn tensor to DTensor replicate when ndim = 1 and numel = 1
+        numel_1_tensor = torch.tensor([1], device=self.device_type)
+        self.assertEqual(
+            (sharded_dtensor + numel_1_tensor).to_local(), local_tensor + numel_1_tensor
+        )
+
 
 class TestDTensorPlacementTypes(DTensorTestBase):
     @property
@@ -793,7 +820,7 @@ class TestDTensorPlacementTypes(DTensorTestBase):
             )
             if size == 0:
                 # when tensor size is 0, there is no padding needed for all the ranks.
-                expected_pad_sizes = [0] * self.world_size
+                expected_pad_sizes = []
                 assert_array_equal(expected_pad_sizes, pad_sizes)
 
                 is_tensor_empty = [

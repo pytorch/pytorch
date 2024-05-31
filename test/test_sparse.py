@@ -207,8 +207,9 @@ class TestSparse(TestSparseBase):
         """
         assert not x.is_coalesced()
         existing_indices = set()
+        indices = x._indices()
         for i in range(x._nnz()):
-            index = str(x._indices()[:, i])
+            index = str(indices[:, i])
             if index in existing_indices:
                 return True
             else:
@@ -4236,7 +4237,6 @@ class TestSparseMaskedReductions(TestCase):
 class TestSparseMeta(TestCase):
     exact_dtype = True
 
-    @skipIfTorchDynamo("changing sparse tensor dimensionality confuses dynamo")
     def _test_meta_sparse_coo(self, dtype):
         r = torch.empty(4, 4, layout=torch.sparse_coo, device='meta', dtype=dtype)
         self.assertTrue(r.is_meta)
@@ -4423,7 +4423,7 @@ class TestSparseMeta(TestCase):
         for t in self.generate_simple_inputs(layout, device=device, dtype=dtype, index_dtype=index_dtype):
             m = t.to(device="meta")
             self.assertEqual(m.device.type, "meta")
-            self.assertEqualMeta(m, t, t._nnz())
+            self.assertEqualMeta(m, t, 0)
 
     @all_sparse_layouts('layout', include_strided=False)
     @parametrize("dtype", [torch.float64])
@@ -4447,6 +4447,10 @@ class TestSparseMeta(TestCase):
             self.assertIsInstance(f, FakeTensor)
             self.assertEqualMeta(f, t, 0)
 
+            d = f.detach()
+            self.assertIsInstance(d, FakeTensor)
+            self.assertEqualMeta(d, t, 0)
+
     @all_sparse_layouts('layout', include_strided=False)
     @parametrize("dtype", [torch.float64])
     def test_zeros_like_fake(self, dtype, layout):
@@ -4461,6 +4465,7 @@ class TestSparseMeta(TestCase):
             with no_dispatch():
                 result = torch.zeros_like(f, device=f.fake_device)
             self.assertEqual(result, expected)
+            self.assertEqualMeta(result, expected, 0)
 
     @all_sparse_layouts('layout', include_strided=False)
     @parametrize("dtype", [torch.float64])
@@ -4470,9 +4475,9 @@ class TestSparseMeta(TestCase):
         for t in self.generate_simple_inputs(layout, device=device, dtype=dtype, index_dtype=index_dtype):
             m = t.to(device='meta')
             r = torch.sum(m)
-            self.assertEqual(r.layout, torch.strided)
+            expected = torch.sum(t).to(device="meta")
             self.assertTrue(r.is_meta)
-            self.assertEqual(r.shape, ())
+            self.assertEqualMeta(r, expected, 0)
 
     @all_sparse_layouts('layout', include_strided=False)
     @parametrize("dtype", [torch.float64])
@@ -4483,7 +4488,7 @@ class TestSparseMeta(TestCase):
             expected = torch.add(t, t).to(device='meta')
             m = t.to(device='meta')
             r = torch.add(m, m)
-            self.assertEqualMeta(r, expected, 0 if layout is torch.sparse_coo else expected._nnz())
+            self.assertEqualMeta(r, expected, 0)
 
 
 class _SparseDataset(torch.utils.data.Dataset):

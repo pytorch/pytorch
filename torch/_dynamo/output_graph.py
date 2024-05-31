@@ -10,7 +10,7 @@ import sys
 import traceback
 import weakref
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple, TYPE_CHECKING, Union
 
 import sympy
 
@@ -78,7 +78,6 @@ from .utils import (
     graph_break_reasons,
     increment_op_count,
     lazy_format_graph_code,
-    lazy_format_graph_tabular,
     LazyString,
     nn_module_proxy,
     same,
@@ -92,6 +91,7 @@ from .variables.builder import (
     VariableBuilder,
     wrap_fx_proxy,
 )
+from .variables.lists import BaseListVariable
 from .variables.misc import NullVariable
 from .variables.nn_module import NNModuleVariable
 from .variables.tensor import (
@@ -102,6 +102,9 @@ from .variables.tensor import (
 )
 
 from .variables.torch_function import TensorWithTFOverrideVariable
+
+if TYPE_CHECKING:
+    from torch._dynamo.symbolic_convert import InstructionTranslatorBase
 
 log = logging.getLogger(__name__)
 graph_tabular_log = torch._logging.getArtifactLogger(__name__, "graph")
@@ -289,6 +292,8 @@ class OutputGraph:
             tracked_fakes=self.tracked_fakes,
             allow_scalar_outputs=config.capture_scalar_outputs,
             allow_dynamic_output_shape_ops=config.capture_dynamic_output_shape_ops,
+            prefer_deferred_runtime_asserts_over_guards=config.prefer_deferred_runtime_asserts_over_guards,
+            _allow_complex_guards_as_runtime_asserts=config._allow_complex_guards_as_runtime_asserts,
             co_fields=self.co_fields,
         )
 
@@ -301,6 +306,7 @@ class OutputGraph:
                 shape_env=shape_env,
                 # TODO (tmanlaibaatar) Remove this once we always lift params and buffers
                 allow_non_fake_inputs=True if self.export else False,
+                export=self.export,
             )
         self.tracing_context: TracingContext = TracingContext(fake_mode)
         self.init_ambient_guards()
@@ -334,7 +340,6 @@ class OutputGraph:
         self.global_scope = global_scope
         self.local_scope = local_scope
         self.root_tx = root_tx
-        from torch._dynamo.symbolic_convert import InstructionTranslatorBase
 
         # Given a source, what are the user stacks of all locations that
         # accessed it?
@@ -598,28 +603,20 @@ class OutputGraph:
         )
         global_state["grad_enabled"] = (torch.set_grad_enabled, torch.is_grad_enabled())
 
-        def autocast_specific_backend(
-            device_type: str, func: Callable[[str, Any], None]
-        ):
-            def decorator(value):
-                return func(device_type, value)
-
-            return decorator
-
         global_state["autocast_enabled"] = (
-            autocast_specific_backend("cuda", torch.set_autocast_enabled),
+            functools.partial(torch.set_autocast_enabled, "cuda"),
             torch.is_autocast_enabled("cuda"),
         )
         global_state["autocast_cpu_enabled"] = (
-            autocast_specific_backend("cpu", torch.set_autocast_enabled),
+            functools.partial(torch.set_autocast_enabled, "cpu"),
             torch.is_autocast_enabled("cpu"),
         )
         global_state["autocast_gpu_dtype"] = (
-            autocast_specific_backend("cuda", torch.set_autocast_dtype),
+            functools.partial(torch.set_autocast_dtype, "cuda"),
             torch.get_autocast_dtype("cuda"),
         )
         global_state["autocast_cpu_dtype"] = (
-            autocast_specific_backend("cpu", torch.set_autocast_dtype),
+            functools.partial(torch.set_autocast_dtype, "cpu"),
             torch.get_autocast_dtype("cpu"),
         )
         global_state["autocast_cache_enabled"] = (
@@ -669,7 +666,7 @@ class OutputGraph:
             proxy.node.meta["grapharg"] = GraphArg(
                 prop,
                 s,
-                is_unspecialized=False,
+                pass_arg_as_tensor=False,
                 fake_tensor=None,
                 is_tensor=False,
             )
@@ -677,12 +674,22 @@ class OutputGraph:
         def handle_tensor(t, src):
             for i, s in enumerate(t.size()):
                 bind_symint(s, TensorPropertySource(src, TensorProperty.SIZE, i))
-            for i, s in enumerate(t.stride()):
-                bind_symint(s, TensorPropertySource(src, TensorProperty.STRIDE, i))
-            bind_symint(
-                t.storage_offset(),
-                TensorPropertySource(src, TensorProperty.STORAGE_OFFSET),
-            )
+            if t.layout is torch.strided:
+                for i, s in enumerate(t.stride()):
+                    bind_symint(s, TensorPropertySource(src, TensorProperty.STRIDE, i))
+                bind_symint(
+                    t.storage_offset(),
+                    TensorPropertySource(src, TensorProperty.STORAGE_OFFSET),
+                )
+            elif t.layout is torch.sparse_coo:
+                handle_tensor(t._indices(), src)
+                handle_tensor(t._values(), src)
+            elif t.layout in {torch.sparse_csr, torch.sparse_bsr}:
+                handle_tensor(t.crow_indices(), src)
+                handle_tensor(t.col_indices(), src)
+            elif t.layout in {torch.sparse_csc, torch.sparse_bsc}:
+                handle_tensor(t.ccol_indices(), src)
+                handle_tensor(t.row_indices(), src)
             if is_traceable_wrapper_subclass(t):
                 attrs, ctx = t.__tensor_flatten__()
                 for attr in attrs:
@@ -767,21 +774,31 @@ class OutputGraph:
                 # are registered as get_attr nodes in the root graph.
                 tracer = self.root_tracer
 
-            if get_static_address_type(target) == "guarded":
-                install_guard(source.make_guard(GuardBuilder.ID_MATCH))
-            elif not is_constant_source(source):
-                install_guard(source.make_guard(GuardBuilder.TENSOR_MATCH))
-
             def wrap_name(module_key):
                 assert self.param_name_to_source is not None
                 self.param_name_to_source[module_key] = source
 
-                return wrap_fx_proxy(
+                # Check if the attr has already been registered. This can happen
+                # when two different sources point to the same tensor.
+                if target in self.root_tx.output.side_effects:
+                    return self.root_tx.output.side_effects[target]
+
+                if get_static_address_type(target) == "guarded":
+                    install_guard(source.make_guard(GuardBuilder.ID_MATCH))
+                elif not is_constant_source(source):
+                    install_guard(source.make_guard(GuardBuilder.TENSOR_MATCH))
+
+                vt = wrap_fx_proxy(
                     self.root_tx,
                     tracer.create_proxy("get_attr", module_key, tuple(), {}),
                     example_value=target,
                     **options,
                 )
+
+                # Track the object so to avoid duplicate registration in case of
+                # different sources pointing to the same tensor object.
+                vt = self.root_tx.output.side_effects.track_object_existing(target, vt)
+                return vt
 
         elif isinstance(target, torch.nn.Module):
             assert isinstance(target, torch.nn.Module)
@@ -865,18 +882,29 @@ class OutputGraph:
 
     def handle_aliases_for_stolen_lists(self, tx):
         # If list inputs are stolen, but still needed after the function call, create aliases to keep them alive
-        alias_insts = []
+        maybe_gm = self.local_scope.get("self")
+        stolen_list_names = get_locals_to_steal(maybe_gm)
+        if not stolen_list_names:
+            return []
 
+        alias_insts = []
         needs_alias: Dict[
             str, List[Union[VariableTracker, AttributeMutationExisting]]
         ] = {}
-        maybe_gm = self.local_scope.get("self")
-        stolen_list_names = get_locals_to_steal(maybe_gm)
-        for x in [
+
+        queue = [
             *tx.stack,
             *tx.symbolic_locals.values(),
             *self.side_effects.store_attr_mutations.keys(),
-        ]:
+        ]
+
+        while queue:
+            x = queue.pop()
+            if isinstance(x, BaseListVariable):
+                assert isinstance(x.items, List)
+                queue += x.items
+                continue
+
             if not (
                 isinstance(x, (VariableTracker, AttributeMutationExisting))
                 and isinstance(x.source, GetItemSource)
@@ -890,7 +918,7 @@ class OutputGraph:
                 needs_alias[stolen_name] = []
             needs_alias[stolen_name].append(x)
 
-        visited = set()
+        visited = {}
         for arg in self.graphargs:
             if not (
                 isinstance(arg._example, list)
@@ -904,12 +932,12 @@ class OutputGraph:
             assert list_name in self.code_options["co_varnames"]
             for x in needs_alias[list_name]:
                 list_idx = x.source.index
-                alias_name = self.new_var(
-                    f"{list_name}_ref"
-                )  # self.new_var already adds unique id suffix
-
                 if list_idx not in visited:
-                    visited.add(list_idx)
+                    alias_name = self.new_var(
+                        f"{list_name}_ref"
+                    )  # self.new_var already adds unique id suffix
+
+                    visited[list_idx] = alias_name
                     # bytecode of `alias_name = list_name[list_idx]`
                     alias_insts.extend(
                         [
@@ -921,7 +949,7 @@ class OutputGraph:
                     )
 
                 # operate on alias, handled by suffix codegen
-                x.source = LocalSource(alias_name)
+                x.source = LocalSource(visited[list_idx])
 
         return alias_insts
 
@@ -1054,6 +1082,7 @@ class OutputGraph:
                         TensorWithTFOverrideVariable,
                     ),
                 )
+                and not (isinstance(v, SymNodeVariable) and v.python_type() is float)
                 for v in stack_values
             )
             and all(isinstance(x, TensorVariable) for x in stack_values)
@@ -1262,10 +1291,10 @@ class OutputGraph:
         torch._logging.trace_structured(
             "dynamo_output_graph",
             lambda: {"sizes": self.get_graph_sizes_structured()},
-            payload_fn=lambda: gm.print_readable(print_output=False),
+            payload_fn=lambda: gm.print_readable(
+                print_output=False, include_stride=True, include_device=True
+            ),
         )
-        graph_tabular_log.debug("%s", lazy_format_graph_tabular(name, gm))
-        graph_sizes_log.debug("%s", LazyString(lambda: self.get_graph_sizes(name)))
         self.call_cleanup_hooks()
         old_fake_mode = self.tracing_context.fake_mode
         if not self.export:
@@ -1397,13 +1426,103 @@ class OutputGraph:
         return result
 
     def remove_unused_graphargs(self) -> None:
+        # NB: It's always OK to drop GraphArg for symbols that ended up being
+        # specialized.  You don't even have to make a guard for it, because
+        # ShapeEnv produce_guards operates on tracked_fakes, which never gets
+        # pruned.  That being said, you'll get marginally better generated
+        # guard code if you promote the guard into a Dynamo guard (since that
+        # allows for the guard to be done using C++ guards.)  If we get
+        # ShapeEnv guards to go into C++ guards, this will stop being a thing
+        # though!
+
         assert self.should_exit
+
         # Miniature DCE pass, but only for obviously trivial operations
+        def is_static_true(b_node: fx.node.Argument):
+            if b_node is True:
+                return True
+            if not isinstance(b_node, fx.Node):
+                return False
+            b = b_node.meta.get("example_value")
+            if b is None:
+                return False
+            if b is True:
+                return True
+            if (
+                isinstance(b, torch.SymBool)
+                and (r := b.node.maybe_as_bool()) is not None
+            ):
+                return r
+            # TODO: We can also technically remove all cases when the input
+            # doesn't have unbacked inputs, since it's all in the ShapeEnv
+            return False
+
+        def is_symnode_arg(a: fx.node.Argument):
+            from torch.fx.experimental.sym_node import SymTypes
+
+            if isinstance(a, (int, float, bool)):
+                return True
+            if isinstance(a, fx.Node):
+                return isinstance(a.meta.get("example_value"), SymTypes)
+            return False
+
+        # NB: We assume that you cannot do mutations on int/float/bool,
+        # because they are immutable types, and therefore is always safe to
+        # DCE.
+        def is_symnode_compute_node(node):
+            from torch.fx.experimental.sym_node import SymTypes
+
+            if node.op != "call_function":
+                return False
+            # TODO: I don't think it's possible to have a bare int/float here?
+            if not isinstance(node.meta.get("example_value"), SymTypes):
+                return False
+            # TODO: This will bail here if you ever end up with a more complicated
+            # computation function, like sum(list_of_ints), even though it
+            # should be DCE'able
+            if not all(is_symnode_arg(a) for a in node.args):
+                return False
+            if not all(is_symnode_arg(a) for a in node.kwargs.values()):
+                return False
+            return True
+
+        # NB: You could try to expand this to cover more cases by simply
+        # detecting whenever you have an int output, but this is a bit
+        # dangerous in case someone adds a function that returns an int but is
+        # mutating.  So manually whitelist for now.
+        def is_accessor_node(node):
+            if (
+                node.op == "call_method"
+                and isinstance(node.args[0].meta.get("example_value"), torch.Tensor)
+                and node.target in ["size", "stride", "storage_offset", "item"]
+            ):
+                return True
+            if node.op == "call_function" and node.target in [
+                torch.ops.aten.sym_size,
+                torch.ops.aten.sym_size.default,
+                torch.ops.aten.sym_size.int,
+                torch.ops.aten.sym_stride,
+                torch.ops.aten.sym_stride.default,
+                torch.ops.aten.sym_stride.int,
+                torch.ops.aten.sym_storage_offset,
+                torch.ops.aten.sym_storage_offset.default,
+            ]:
+                return True
+            return False
+
         for node in reversed(list(self.graph.nodes)):
             if len(list(node.users)) == 0:
-                if node.op == "get_attr":
-                    self.remove_node(node)
-                elif node.op == "call_function" and node.target is operator.getitem:
+                if (
+                    node.op == "get_attr"
+                    or (node.op == "call_function" and node.target is operator.getitem)
+                    or (
+                        node.op == "call_function"
+                        and node.target is torch._check
+                        and is_static_true(node.args[0])
+                    )
+                    or is_symnode_compute_node(node)
+                    or is_accessor_node(node)
+                ):
                     self.remove_node(node)
 
         def placeholder_binds_symbol(node):
@@ -1423,7 +1542,11 @@ class OutputGraph:
             self.remove_node(node)
             self.real_value_cache.pop(node, None)
 
-        used_symbols = set()
+        used_symbols: Set[sympy.Symbol] = set()
+
+        def update_used_symbols(used_symbols, fake: Union[torch.SymInt, torch.Tensor]):
+            used_symbols |= free_symbols(fake)
+
         recheck_placeholders = []
         for node in self.placeholders:
             binds_symbol = placeholder_binds_symbol(node) is not None
@@ -1441,10 +1564,22 @@ class OutputGraph:
                     arg = node.meta["grapharg"]
                     if isinstance(arg, BackwardStateGraphArg):
                         continue
+                    if isinstance(node.meta["grapharg"].example, torch.ScriptObject):
+                        real_script_obj = node.meta["grapharg"].example
+                        fake_script_obj = node.meta["grapharg"].example_strong_ref
+                        flat_dict = dict(real_script_obj.__obj_flatten__())  # type: ignore[attr-defined]
+                        for attr in flat_dict.keys():
+                            fake_attr_val = getattr(fake_script_obj.wrapped_obj, attr)
+                            pytree.tree_map_only(
+                                (torch.SymInt, torch.Tensor),
+                                lambda t: update_used_symbols(used_symbols, t),
+                                fake_attr_val,
+                            )
+                        continue
                     fake = (
                         arg.fake_tensor if arg.fake_tensor is not None else arg.example
                     )
-                    used_symbols |= free_symbols(fake)
+                    update_used_symbols(used_symbols, fake)
 
         # After removing unused graphargs, prune unused binds_symbol
         for node in recheck_placeholders:
@@ -1541,7 +1676,7 @@ err_epilogue = (
     "(and fall back to eager-mode PyTorch) on all ops "
     "that have do not have the 'pt2_compliant_tag'. "
     "Please see the following doc for how to mark this op as PT2 compliant "
-    "https://docs.google.com/document/d/1W--T6wz8IY8fOI0Vm8BF44PdBgs283QvpelJZWieQWQ"
+    "https://pytorch.org/docs/main/notes/custom_operators.html"
 )
 
 

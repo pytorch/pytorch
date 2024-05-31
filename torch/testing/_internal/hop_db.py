@@ -11,7 +11,7 @@ from torch.testing._internal.opinfo.core import (
 )
 from torch.testing._internal.common_dtype import all_types_and, custom_types
 from torch.testing._internal.opinfo.core import DecorateInfo
-from torch.nn.attention._templated_attention import _templated_attention
+from torch.nn.attention._flex_attention import _flex_attention
 
 def sample_inputs_map(opinfo, device, dtype, requires_grad, **kwargs):
     make_arg = functools.partial(
@@ -58,6 +58,7 @@ hop_that_doesnt_have_opinfo_test_allowlist = [
     "with_effects",
     "strict_mode",
     "_export_tracepoint",
+    "call_torchbind",
 ]
 
 torch.library.define(
@@ -81,7 +82,7 @@ def foo_impl_cuda(x, z):
     return x, z, x + z
 
 
-@torch.library.impl_abstract("testlib::mutating_custom_op")
+@torch.library.register_fake("testlib::mutating_custom_op")
 def foo_impl_abstract(x, z):
     return x, z, x + z
 
@@ -108,7 +109,7 @@ def simple_auto_functionalize(x, z):
     return torch.ops.testlib.mutating_custom_op(x, z)
 
 
-def sample_inputs_templated_attention(opinfo, device, dtype, requires_grad, **kwargs):
+def sample_inputs_flex_attention(opinfo, device, dtype, requires_grad, **kwargs):
     make_arg = functools.partial(
         make_tensor, device=device, dtype=dtype, requires_grad=requires_grad
     )
@@ -117,9 +118,9 @@ def sample_inputs_templated_attention(opinfo, device, dtype, requires_grad, **kw
         return score + h
 
     yield SampleInput(
-        make_arg(2, 2, 64, 8, low=0.1, high=2),
-        make_arg(2, 2, 64, 8, low=0.1, high=2),
-        make_arg(2, 2, 64, 8, low=0.1, high=2),
+        make_arg(2, 2, 128, 8, low=0.1, high=2),
+        make_arg(2, 2, 128, 8, low=0.1, high=2),
+        make_arg(2, 2, 128, 8, low=0.1, high=2),
         score_mod,
     )
 
@@ -219,10 +220,10 @@ hop_db = [
         supports_autograd=False,
     ),
     OpInfo(
-        name="templated_attention",
+        name="flex_attention",
         variant_test_name="simple",
-        op=_templated_attention,
-        sample_inputs_func=sample_inputs_templated_attention,
+        op=_flex_attention,
+        sample_inputs_func=sample_inputs_flex_attention,
         dtypes=custom_types(torch.float16, torch.float32),
         supports_out=False,
         check_batched_grad=False,
@@ -237,10 +238,10 @@ hop_db = [
         )
     ),
     OpInfo(
-        name="templated_attention_backward",
+        name="flex_attention_backward",
         variant_test_name="simple",
-        op=_templated_attention,
-        sample_inputs_func=sample_inputs_templated_attention,
+        op=_flex_attention,
+        sample_inputs_func=sample_inputs_flex_attention,
         dtypes=custom_types(torch.float16, torch.float32),
         supports_out=False,
         check_batched_grad=False,

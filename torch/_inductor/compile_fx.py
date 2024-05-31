@@ -11,10 +11,12 @@ from itertools import count
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, Union
 from unittest import mock
 
-from functorch.compile import min_cut_rematerialization_partition
+import torch._inductor.async_compile  # noqa: F401 required to warm up AsyncCompile pools
 
 import torch.fx
 import torch.utils._pytree as pytree
+
+from functorch.compile import min_cut_rematerialization_partition
 from torch._dynamo import (
     compiled_autograd,
     config as dynamo_config,
@@ -39,6 +41,7 @@ from torch._inductor.debug import save_args_for_compile_fx_inner
 from torch._inductor.utils import (
     BoxedBool,
     count_tangents,
+    fresh_inductor_cache,
     should_assume_input_aligned,
     tensor_is_aligned,
 )
@@ -337,31 +340,6 @@ def maybe_disable_comprehensive_padding(example_inputs: List[torch.Tensor]):
         return contextlib.nullcontext()
 
 
-@DebugContext.wrap
-def count_bytes_inner(
-    gm: torch.fx.GraphModule,
-    example_inputs: List[torch.Tensor],
-    num_fixed: int = 0,
-    **kwargs,
-):
-    shape_env = _shape_env_from_inputs(example_inputs)
-    fake_mode = fake_tensor_prop(gm, example_inputs)
-
-    with V.set_fake_mode(fake_mode):
-        _recursive_post_grad_passes(gm, False)
-
-    graph = GraphLowering(gm, shape_env=shape_env, num_static_inputs=num_fixed)
-    with V.set_graph_handler(graph), V.set_real_inputs(
-        example_inputs
-    ), maybe_disable_comprehensive_padding(example_inputs):
-        graph.run(*example_inputs)
-        num_bytes, nodes_num_elem, node_runtimes = graph.count_bytes()
-        metrics.num_bytes_accessed += num_bytes
-        metrics.nodes_num_elem += nodes_num_elem
-        metrics.node_runtimes += node_runtimes
-    return make_boxed_func(gm.forward)
-
-
 def fake_tensor_prop(
     gm: torch.fx.GraphModule,
     example_inputs: List[torch.Tensor],
@@ -390,10 +368,37 @@ def fake_tensor_prop(
     return fake_mode
 
 
+def should_use_remote_fx_graph_cache():
+    if config.fx_graph_remote_cache:
+        return True
+    if not config.is_fbcode():
+        return False
+    if torch.version.hip is not None:
+        return False
+
+    try:
+        from triton.runtime.fb_memcache import MEMCACHE_VERSION
+    except ModuleNotFoundError:
+        return False
+
+    return MEMCACHE_VERSION >= torch._utils_internal.justknobs_getval_int(
+        "pytorch/remote_cache:fx_graph_memcache_version"
+    )
+
+
 # pass config dict back to user
 def get_patched_config_dict(config_patches=None) -> Dict[str, Any]:
     with config.patch(config_patches):
         return config.get_config_copy()
+
+
+@functools.wraps
+def with_fresh_cache_if_config(f):
+    if config.force_disable_caches:
+        with fresh_inductor_cache():
+            return f
+    else:
+        return f
 
 
 @DebugContext.wrap
@@ -404,6 +409,7 @@ def get_patched_config_dict(config_patches=None) -> Dict[str, Any]:
 # compile_fx return and we may want to use the _LazyGraphModule for compiling
 # the backward graph as well.
 @_use_lazy_graph_module(dynamo_config.use_lazy_graph_module)
+@with_fresh_cache_if_config
 @dynamo_utils.dynamo_timed(phase_name="inductor_compile")
 def compile_fx_inner(
     gm: torch.fx.GraphModule,
@@ -475,9 +481,19 @@ def compile_fx_inner(
 
     start = time.time()
 
-    if config.fx_graph_cache and not aot_mode:
+    fx_graph_remote_cache = should_use_remote_fx_graph_cache()
+    if (
+        not config.force_disable_caches
+        and (config.fx_graph_cache or fx_graph_remote_cache)
+        and not aot_mode
+    ):
         compiled_graph = FxGraphCache.load(
-            fx_codegen_and_compile, gm, example_inputs, graph_kwargs
+            fx_codegen_and_compile,
+            gm,
+            example_inputs,
+            graph_kwargs,
+            local=config.fx_graph_cache,
+            remote=fx_graph_remote_cache,
         )
     else:
         compiled_graph = fx_codegen_and_compile(
@@ -756,6 +772,7 @@ def fx_codegen_and_compile(
             const_code=const_code,
             const_module=const_graph,
         )
+        metrics_helper = metrics.CachedMetricsHelper()
         with V.set_graph_handler(graph):
             graph.run(*example_inputs)
             output_strides: List[Optional[Tuple[int, ...]]] = []
@@ -775,8 +792,11 @@ def fx_codegen_and_compile(
                     else:
                         output_strides.append(None)
 
-            metrics_helper = metrics.CachedMetricsHelper()
             compiled_fn = graph.compile_to_fn()
+            num_bytes, nodes_num_elem, node_runtimes = graph.count_bytes()
+            metrics.num_bytes_accessed += num_bytes
+            metrics.node_runtimes += node_runtimes
+            metrics.nodes_num_elem += nodes_num_elem
 
             if (
                 cudagraphs
@@ -1389,7 +1409,6 @@ def compile_fx(
 
     @compile_time_strobelight_meta(phase_name="bw_compiler")
     @dynamo_utils.dynamo_timed
-    @dynamo_utils.maybe_cprofile
     def bw_compiler(model: torch.fx.GraphModule, example_inputs: List[torch.Tensor]):
         user_visible_outputs = {}
 
