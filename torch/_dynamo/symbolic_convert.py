@@ -199,6 +199,8 @@ def _step_logger():
 
 @dataclasses.dataclass
 class BlockStackEntry:
+    # Current instruction that pushes something to block_stack
+    inst: Instruction
     target: Instruction
     stack_index: Optional[int] = None
     with_context: Optional[ContextWrappingVariable] = None
@@ -343,9 +345,11 @@ def generic_jump(truth_fn: typing.Callable[[object], bool], push: bool):
         ):
             error_msg: VariableTracker = self.pop()
             # Skip over things like `assert True`
-            if value.is_python_constant() and bool(value.as_python_constant()):
-                self.jump(inst)
-                return
+            if value.is_python_constant():
+                if bool(value.as_python_constant()):
+                    return self.jump(inst)
+                else:
+                    jump_graph_break(self, inst, value)
 
             # TODO maybe should respect DtoH sync intention of users later??
             # Manually insert torch._assert_async instead of python assert and jump over
@@ -1154,11 +1158,11 @@ class InstructionTranslatorBase(
 
     def SETUP_LOOP(self, inst):
         # only exists in python<=3.7
-        self.block_stack.append(BlockStackEntry(inst.target))
+        self.block_stack.append(BlockStackEntry(inst, inst.target))
 
     def SETUP_EXCEPT(self, inst):
         # only exists in python<=3.7
-        self.block_stack.append(BlockStackEntry(inst.target))
+        self.block_stack.append(BlockStackEntry(inst, inst.target))
 
     def POP_BLOCK(self, inst):
         self.block_stack.pop()
@@ -1167,7 +1171,7 @@ class InstructionTranslatorBase(
         self.setup_or_before_with(inst)
 
     def SETUP_FINALLY(self, inst):
-        self.block_stack.append(BlockStackEntry(inst.target))
+        self.block_stack.append(BlockStackEntry(inst, inst.target))
 
     def BEGIN_FINALLY(self, inst):
         self.push(None)
@@ -1903,9 +1907,11 @@ class InstructionTranslatorBase(
 
         if target:
             if isinstance(self, InstructionTranslator):
-                self.block_stack.append(BlockStackEntry(target, len(self.stack), ctx))
+                self.block_stack.append(
+                    BlockStackEntry(inst, target, len(self.stack), ctx)
+                )
             else:
-                self.block_stack.append(BlockStackEntry(target))
+                self.block_stack.append(BlockStackEntry(inst, target))
 
         self.push(exit)
         self.push(ctx.enter(self))
@@ -2378,6 +2384,8 @@ class InstructionTranslator(InstructionTranslatorBase):
             )
 
         if new_code.co_freevars:
+            # expose code object for debugging purposes
+            self.output.install_global_unsafe(name, new_code)
             cg.make_function_with_closure(name, new_code, True, stack_len)
         else:
             # This is safe: we pre-generate a unique name

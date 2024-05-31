@@ -9,11 +9,12 @@ from pprint import pprint
 from typing import List, Optional
 
 import numpy as np
+from prettytable import PrettyTable
+from tqdm import tqdm
+
 import torch
 import torch.utils.benchmark as benchmark
-from prettytable import PrettyTable
 from torch.backends.cuda import sdp_kernel
-from tqdm import tqdm
 
 warnings.filterwarnings("ignore")
 
