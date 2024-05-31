@@ -34,7 +34,7 @@ env:
 jobs:
   filter:
     if: github.repository_owner == 'pytorch'
-    runs-on: [self-hosted, linux.large]
+    runs-on: [self-hosted, lf.linux.large]
     outputs:
       test-matrix: ${{ steps.filter.outputs.test-matrix }}
       is-test-matrix-empty: ${{ steps.filter.outputs.is-test-matrix-empty }}

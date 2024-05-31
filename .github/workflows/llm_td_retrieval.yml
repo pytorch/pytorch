@@ -9,7 +9,7 @@ permissions:
 
 jobs:
   llm-retrieval:
-    runs-on: linux.4xlarge
+    runs-on: lf.linux.4xlarge
     continue-on-error: true
     steps:
       - name: Clone PyTorch
