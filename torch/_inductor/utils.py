@@ -153,10 +153,14 @@ def has_torchvision_roi_align() -> bool:
     try:
         from torchvision.ops import roi_align  # noqa: F401
 
+        torch._C._dispatch_has_kernel_for_dispatch_key("torchvision::nms", "Meta")
         return roi_align is not None and hasattr(
             getattr(torch.ops, "torchvision", None), "roi_align"
         )
     except ImportError:
+        return False
+    except RuntimeError as e:
+        assert "torchvision::nms does not exist" in str(e)
         return False
 
 
@@ -569,6 +573,10 @@ def sympy_index_symbol_with_prefix(prefix: SymT, idx: int) -> sympy.Symbol:
     # NOTE: shape symbols are positive (> 0), but index variables are only
     # non-negative (>= 0).
     return make_symbol(prefix, idx, integer=True, nonnegative=True)
+
+
+def generate_assert(check):
+    return (check or config.debug_index_asserts) and config.assert_indirect_indexing
 
 
 def sympy_index_symbol(name: str) -> sympy.Symbol:

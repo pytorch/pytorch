@@ -509,10 +509,14 @@ def create_aot_dispatcher_function(
                 # see note [Tensor Fakification and Symbol Caching]
                 symbolic_context = None
                 source = None
+                trace = True
                 if tracing_context := torch._guards.TracingContext.try_get():
                     if x in tracing_context.tensor_to_context:
                         symbolic_context = tracing_context.tensor_to_context[x]
                         source = symbolic_context.tensor_source
+                        # We already fakeified this tensor in Dynamo, don't
+                        # dump the trace for it again
+                        trace = False
                 if (
                     idx < aot_config.num_params_buffers
                     and config.static_weight_shapes
@@ -527,6 +531,7 @@ def create_aot_dispatcher_function(
                     static_shapes=False,
                     symbolic_context=symbolic_context,
                     source=source,
+                    trace=trace,
                 )
 
             return [convert(idx, x) for idx, x in enumerate(flat_args)]
