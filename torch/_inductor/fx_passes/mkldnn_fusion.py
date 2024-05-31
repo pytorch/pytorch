@@ -197,15 +197,9 @@ if torch._C._has_mkldnn:
     def _binary_fusion_v2(computation_call, binary_fn):
         return CallFunction(binary_fn, computation_call, KeywordArg("other"))
 
-    def _is_single_computation_op(computation_op, lowp_dtype=None):
+    def _is_single_computation_op(computation_op):
         def fn(match):
             computation_nodes = filter_nodes(match.nodes, computation_op)
-
-            if lowp_dtype:
-                output_node_meta = match.output_node().meta.get("val")
-                if output_node_meta.dtype != lowp_dtype:
-                    return False
-
             if len(computation_nodes) < 1:
                 return False
             if any(n.args[-3] != "none" for n in computation_nodes):
@@ -216,7 +210,7 @@ if torch._C._has_mkldnn:
 
     def _is_valid_computation_unary_fusion(computation_op, lowp_dtype=None):
         def fn(match):
-            matched = _is_single_computation_op(computation_op, lowp_dtype)(match)
+            matched = _is_single_computation_op(computation_op)(match)
             computation_node = filter_nodes(match.nodes, computation_op)[0]
             if lowp_dtype:
                 conversion_dtype_nodes = filter_nodes(
@@ -255,7 +249,7 @@ if torch._C._has_mkldnn:
 
     def _register_leaky_relu_fusion_lowering(pattern, computation_op, lowp_dtype=None):
         @register_lowering_pattern(
-            pattern, extra_check=_is_single_computation_op(computation_op, lowp_dtype)
+            pattern, extra_check=_is_single_computation_op(computation_op)
         )
         def fn(match, *args, **kwargs):
             negative_slope = kwargs.get("negative_slope")
@@ -297,7 +291,7 @@ if torch._C._has_mkldnn:
 
     def _register_hardtanh_fusion_lowering(pattern, computation_op, lowp_dtype=None):
         @register_lowering_pattern(
-            pattern, extra_check=_is_single_computation_op(computation_op, lowp_dtype)
+            pattern, extra_check=_is_single_computation_op(computation_op)
         )
         def fn(match, *args, **kwargs):
             min_value = kwargs.get("min_value")

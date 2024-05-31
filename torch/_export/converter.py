@@ -5,6 +5,7 @@ import torch.export._trace
 
 from torch.export.exported_program import ExportedProgram
 from torch.export.graph_signature import (
+    ConstantArgument,
     InputKind,
     InputSpec,
     OutputKind,
@@ -201,6 +202,20 @@ class TS2EPConverter:
 
         self.constant_map[name] = value
 
+    def convert_prim_device(self, node: torch._C.Node):
+        input_type = node.input().type()
+        if input_type.isSubtypeOf(torch._C.TensorType.get()):
+            device = input_type.device()  # type: ignore[attr-defined]
+            output_name = node.output().debugName()
+            self.constant_map[output_name] = device
+        else:
+            raise ValueError(f"Unsupported JitType ({input_type}) when get device")
+
+    def convert_prim_dtype(self, node: torch._C.Node):
+        dtype = node.input().type().dtype()
+        output_name = node.output().debugName()
+        self.constant_map[output_name] = dtype
+
     def convert_prim_GetAttr(self, node: torch._C.Node):
         def get_attr(name: str):
             if name in self.attribute_map:
@@ -350,6 +365,10 @@ class TS2EPConverter:
         elif node_kind in {"prim::ListConstruct", "prim::TupleConstruct"}:
             # Tuple is just a non-mutable List, so we can handle them together.
             self.convert_prim_ListConstruct(node)
+        elif node_kind == "prim::device":
+            self.convert_prim_device(node)
+        elif node_kind == "prim::dtype":
+            self.convert_prim_dtype(node)
         elif node_kind == "prim::DictConstruct":
             self.convert_prim_DictConstruct(node)
         # elif node_kind == "aten::Int":
@@ -369,16 +388,26 @@ class TS2EPConverter:
             output_name = graph_output.debugName()
             if output_name in self.name_to_node:
                 args.append(self.name_to_node[output_name])
+                self.output_specs.append(
+                    OutputSpec(
+                        OutputKind.USER_OUTPUT,
+                        arg=TensorArgument(name=output_name),
+                        target=output_name,
+                    )
+                )
+            elif output_name in self.constant_map:
+                args.append(self.constant_map[output_name])
+                self.output_specs.append(
+                    OutputSpec(
+                        OutputKind.USER_OUTPUT,
+                        arg=ConstantArgument(
+                            name=output_name, value=self.constant_map[output_name]
+                        ),
+                        target=output_name,
+                    )
+                )
             else:
                 raise ValueError(f"Output {output_name} not found")
-
-            self.output_specs.append(
-                OutputSpec(
-                    OutputKind.USER_OUTPUT,
-                    arg=TensorArgument(name=output_name),
-                    target=output_name,
-                )
-            )
 
         self.fx_graph.output(
             args[0]
