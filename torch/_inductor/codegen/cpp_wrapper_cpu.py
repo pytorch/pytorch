@@ -713,10 +713,6 @@ class CppWrapperCpu(WrapperCodeGen):
             """
         )
 
-        def align_data_size(data_size):
-            alignment = 64
-            return (data_size + alignment - 1) & -alignment
-
         with self.prefix.indent():
             for idx, (name, inp) in enumerate(V.graph.graph_inputs.items()):
                 assert not isinstance(
