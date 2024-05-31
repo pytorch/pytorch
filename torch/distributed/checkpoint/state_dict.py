@@ -928,32 +928,6 @@ def get_state_dict(
         return model_state_dict, optim_state_dict
 
 
-def _unflatten_model_state_dict(
-    model: nn.Module,
-    state_dict: Union[Dict[nn.Module, Dict[str, ValueType]], Dict[str, ValueType]],
-) -> Dict[str, ValueType]:
-    if not state_dict:
-        return {}
-
-    if isinstance(next(iter(state_dict.keys())), nn.Module):
-        cast_state_dict = cast(Dict[nn.Module, Dict[str, ValueType]], state_dict)
-        new_state_dict: Dict[str, ValueType] = {}
-        for submodule, sub_state_dict in cast_state_dict.items():
-            for name, m in model.named_modules():
-                if m != submodule:
-                    continue
-
-                fqns = _get_fqns(model, name)
-                assert len(fqns) == 1, "FQNs for a submodule should only have 1 element"
-                prefix = f"{next(iter(fqns))}."
-                new_state_dict.update(
-                    {prefix + subfqn: value for subfqn, value in sub_state_dict.items()}
-                )
-        return new_state_dict
-    else:
-        return cast(Dict[str, ValueType], state_dict)
-
-
 def set_model_state_dict(
     model: nn.Module,
     model_state_dict: Dict[str, ValueType],
@@ -967,11 +941,7 @@ def set_model_state_dict(
 
     Args:
         model (nn.Module): the nn.Module to the model.
-        model_state_dict: (Dict[str, ValueType]):
-           the model state_dict to load. If the key of the ``model_state_dict``
-           is nn.Module, the key is a submodule of ``model`` and the value should
-           be the state_dict of the submodule. When loading the state_dict,
-           the prefix of the submodule will be append to the state_dict.
+        model_state_dict: (Dict[str, ValueType]): the model state_dict to load.
         options (StateDictOptions): the options to control how
             model state_dict and optimizer state_dict should be loaded. See
             `StateDictOptions` for the details.
@@ -983,9 +953,6 @@ def set_model_state_dict(
 
     :type model_state_dict: typing.Dict[str, ValueType]
     """
-    model_state_dict: Dict[str, ValueType] = _unflatten_model_state_dict(
-        model, model_state_dict
-    )
     with gc_context():
         info = _verify_options(model, tuple(), optim_only=False, options=options)
 
@@ -1054,11 +1021,7 @@ def set_state_dict(
         model (nn.Module): the nn.Module to the model.
         optimizers (Union[Optimizer, Iterable[Optimizer]]):
             The optimizers that are used to optimize ``model``.
-        model_state_dict: (Union[Dict[nn.Module, Dict[str, ValueType]], Dict[str, ValueType]]):
-           the model state_dict to load. If the key of the ``model_state_dict``
-           is nn.Module, the key is a submodule of ``model`` and the value should
-           be the state_dict of the submodule. When loading the state_dict,
-           the prefix of the submodule will be append to the state_dict.
+        model_state_dict: (Dict[str, ValueType]]): the model state_dict to load.
         optim_state_dict: OptimizerStateType:
             the optimizer state_dict to load.
         options (StateDictOptions): the options to control how
@@ -1074,9 +1037,6 @@ def set_state_dict(
     :type optim_state_dict: typing.OptimizerStateType
     """
 
-    model_state_dict: Dict[str, ValueType] = _unflatten_model_state_dict(
-        model, model_state_dict
-    )
     with gc_context():
         optimizers = (
             (optimizers,)
