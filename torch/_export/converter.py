@@ -21,30 +21,6 @@ from torch.onnx.utils import _create_jit_graph
 from torchgen.model import FunctionSchema
 
 
-class _Register(dict):
-    def __call__(self, key: Union[str, List[str], Set[str]]) -> Callable:
-        def wrapper(func: Callable) -> Callable:
-            @wraps(func)
-            def inner(*args, **kwargs):
-                return func(*args, **kwargs)
-
-            if isinstance(key, str):
-                self[key] = inner
-            elif isinstance(key, (list, set)):
-                for k in key:
-                    self[k] = inner
-            else:
-                raise RuntimeError(f"{type(key)} is not supported in registry.")
-
-            return inner
-
-        return wrapper
-
-
-# Register functions for different type conversions here.
-_register = _Register()
-
-
 def inplace_optimize_sym_size_div(gm: torch.fx.GraphModule):
     def pattern(im, dim, scale):
         sym_size_int = torch.ops.aten.sym_size.int(im, dim)
@@ -201,7 +177,6 @@ class TS2FXGraphConverter:
                     )
                 )
 
-    @_register("prim::Constant")
     def convert_prim_Constant(self, node: torch._C.Node):
         name = node.output().debugName()
 
@@ -239,7 +214,6 @@ class TS2FXGraphConverter:
 
         self.constant_map[name] = value
 
-    @_register("prim::device")
     def convert_prim_device(self, node: torch._C.Node):
         input_type = node.input().type()
         if input_type.isSubtypeOf(torch._C.TensorType.get()):
@@ -249,13 +223,11 @@ class TS2FXGraphConverter:
         else:
             raise ValueError(f"Unsupported JitType ({input_type}) when get device")
 
-    @_register("prim::dtype")
     def convert_prim_dtype(self, node: torch._C.Node):
         dtype = node.input().type().dtype()
         output_name = node.output().debugName()
         self.constant_map[output_name] = dtype
 
-    @_register("prim::GetAttr")
     def convert_prim_GetAttr(self, node: torch._C.Node):
         def get_attr(name: str):
             if name in self.attribute_map:
@@ -292,8 +264,13 @@ class TS2FXGraphConverter:
         output_name = node.output().debugName()
         self.name_to_node[output_name] = fx_node
 
-    @_register({"prim::ListConstruct", "prim::TupleConstruct"})
+    def convert_prim_TupleConstruct(self, node: torch._C.Node):
+        self._convert_prim_iterator(node)
+
     def convert_prim_ListConstruct(self, node: torch._C.Node):
+        self._convert_prim_iterator(node)
+
+    def _convert_prim_iterator(self, node: torch._C.Node):
         output_list = []
         for inp in node.inputs():
             output_list.append(self.get_fx_value(inp))
@@ -301,7 +278,6 @@ class TS2FXGraphConverter:
         output_name = node.output().debugName()
         self.name_to_node[output_name] = output_list
 
-    @_register("prim::DictConstruct")
     def convert_prim_DictConstruct(self, node: torch._C.Node):
         output_dict = {}
         k, v = None, None
@@ -325,7 +301,6 @@ class TS2FXGraphConverter:
         output_name = node.output().debugName()
         self.name_to_node[output_name] = output_dict
 
-    @_register("prim::TupleIndex")
     def convert_prim_TupleIndex(self, node: torch._C.Node):
         args = tuple(self.get_fx_value(input) for input in node.inputs())
         getitem_node = self.fx_graph.call_function(operator.getitem, args)
@@ -349,7 +324,6 @@ class TS2FXGraphConverter:
         output_name = node.output().debugName()
         self.name_to_node[output_name] = fx_node
 
-    @_register("prim::NumToTensor")
     def convert_prim_NumToTensor(self, node: torch._C.Node):
         # converts prim::NumToTensor as aten.scalar_tensor
         target = torch.ops.aten.scalar_tensor
@@ -360,12 +334,10 @@ class TS2FXGraphConverter:
         output_name = node.output().debugName()
         self.name_to_node[output_name] = fx_node
 
-    @_register("prim::CreateObject")
     def convert_prim_CreateObject(self, node: torch._C.Node):
         output_name = node.output().debugName()
         self.attribute_map[output_name] = ""
 
-    @_register("aten::_convolution")
     def convert_aten__convolution(self, node: torch._C.Node):
         # converts aten::_convolution as aten.convolution, since aten::_convolution
         # doesn't have a meta function
@@ -377,7 +349,6 @@ class TS2FXGraphConverter:
         output_name = node.output().debugName()
         self.name_to_node[output_name] = fx_node
 
-    @_register("aten::div")
     def convert_aten_div(self, node: torch._C.Node):
         target = get_op_overload(node)
         schema = target._schema
@@ -419,7 +390,7 @@ class TS2FXGraphConverter:
         output_name = node.output().debugName()
         self.name_to_node[output_name] = fx_node
 
-    def convert_prim_if(self, node: torch._C.Node):
+    def convert_prim_If(self, node: torch._C.Node):
         inputs = list(node.inputs())
         assert len(inputs) == 1
         predicate = self.get_fx_value(inputs[0])
@@ -507,10 +478,14 @@ class TS2FXGraphConverter:
 
     def convert_node(self, node: torch._C.Node):
         node_kind = node.kind()
-        if node_kind in _register:
-            _register[node_kind](self, node)
-        else:
-            self.convert_default_node(node)
+        node_kind_split = node_kind.split("::")
+
+        # Get handler based on namespace and operator name.
+        # Provide a default node handler as well in case we don't find
+        # matching converter for that.
+        handler_name = "_".join(node_kind_split)
+        handler = getattr(self, f"convert_{handler_name}", self.convert_default_node)
+        handler(node)
 
     def convert_default_node(self, node: torch._C.Node):
         node_kind = node.kind()
