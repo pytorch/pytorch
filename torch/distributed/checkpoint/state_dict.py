@@ -123,16 +123,6 @@ class StateDictOptions:
       won't contain any frozen parameters -- the ``requires_grad`` is False.
       The default value is False.
 
-    - ``keep_submodule_prefixes``: when ``submodules`` is not None, this option
-      indicates whether to keep the submodule prefixes from the state_dict keys.
-      or example, if the submodule is ``module.pretrain`` and the full FQN of
-      the parameter is ``pretrain.layer1.weight`` of the param. When this option
-      is True, the parameter's key in the returned state_dict will be
-      ``pretrain.layer1.weight``. If the options is False, the key will be
-      ``layer1.weight``.
-      Note that if ``keep_submodule_prefixes`` is False, there may be conflicted
-      FQNs, hence there should be only one submodule in ``submodules``.
-
     - ``strict``: the ``strict`` option when ``set_state_dict`` calls
       model.load_state_dict().
 
@@ -147,7 +137,6 @@ class StateDictOptions:
     full_state_dict: bool = False
     cpu_offload: bool = False
     ignore_frozen_params: bool = False
-    keep_submodule_prefixes: bool = True
     strict: bool = True
     broadcast_from_rank0: bool = False
     flatten_optimizer_state_dict: bool = False
@@ -159,7 +148,6 @@ class _StateDictInfo(StateDictOptions):
         Union[str, torch.Tensor], Union[FQNS_T, torch.Tensor]
     ] = field(default_factory=dict)
     all_fqns: Set[str] = field(default_factory=set)
-    submodule_prefixes: Set[str] = field(default_factory=set)
     handle_model: bool = True
     handle_optim: bool = True
     fsdp_context: Callable = contextlib.nullcontext
@@ -269,7 +257,6 @@ def _verify_options(
     optims: Tuple[torch.optim.Optimizer, ...],
     optim_only: bool,
     *,
-    submodules: Optional[Set[nn.Module]] = None,
     options: Optional[StateDictOptions] = None,
 ) -> _StateDictInfo:
     """
@@ -294,16 +281,6 @@ def _verify_options(
             if not isinstance(param, _EXTRA_STATE):
                 fqn_param_mapping[fqn] = param
             all_fqns.add(fqn)
-
-    submodule_prefixes: Set[str] = set()
-    if submodules:
-        submodules = set(submodules)
-        for name, module in model.named_modules():
-            if module not in submodules:
-                continue
-            fqns = _get_fqns(model, name)
-            assert len(fqns) == 1, "Submodule FQN should only have 1 instance"
-            submodule_prefixes.update(f"{fqn}." for fqn in fqns)
 
     if options.broadcast_from_rank0 and not options.full_state_dict:
         raise ValueError(
@@ -347,7 +324,6 @@ def _verify_options(
         **asdict(options),
         fqn_param_mapping=fqn_param_mapping,
         all_fqns=all_fqns,
-        submodule_prefixes=submodule_prefixes,
         fsdp_context=fsdp_context,
         fsdp_modules=cast(List[nn.Module], fsdp_modules),
         handle_model=not optim_only,
@@ -369,7 +345,6 @@ def _verify_state_dict(
     if (
         info.handle_model
         and not model_state_dict
-        and not info.submodule_prefixes
         and not info.ignore_frozen_params
         and not (info.cpu_offload and info.full_state_dict)
         and info.strict
@@ -462,20 +437,6 @@ def _get_model_state_dict(
             if not verify(key, fqn):
                 raise RuntimeError(f"An unexpected key, {key}, exists. FQN is {fqn}")
             state_dict[fqn] = state_dict.pop(key)
-
-    if info.submodule_prefixes:
-        new_state_dict: Dict[str, ValueType] = {}
-        # TODO: make this faster.
-        for fqn in state_dict.keys():
-            for prefix in info.submodule_prefixes:
-                if not fqn.startswith(prefix):
-                    continue
-                if info.keep_submodule_prefixes:
-                    new_state_dict[fqn] = state_dict[fqn]
-                else:
-                    new_fqn = fqn[len(prefix) :]
-                    new_state_dict[new_fqn] = state_dict[fqn]
-        state_dict = new_state_dict
 
     if info.ignore_frozen_params:
         for key, param in model.named_parameters():
@@ -889,7 +850,6 @@ def _load_optim_state_dict(
 def get_model_state_dict(
     model: nn.Module,
     *,
-    submodules: Optional[Set[nn.Module]] = None,
     options: Optional[StateDictOptions] = None,
 ) -> Dict[str, ValueType]:
     """
@@ -899,8 +859,6 @@ def get_model_state_dict(
 
     Args:
         model (nn.Module): the nn.Module to the model.
-        submodules: Optional[Set[nn.Module]]: only return the model parameters
-            that belong to the submodules.
         options (StateDictOptions): the options to control how
             model state_dict and optimizer state_dict should be returned. See
             `StateDictOptions` for the details.
@@ -915,7 +873,6 @@ def get_model_state_dict(
             model,
             tuple(),
             optim_only=False,
-            submodules=submodules,
             options=options,
         )
         model_state_dict = _get_model_state_dict(model, info)
@@ -927,7 +884,6 @@ def get_optimizer_state_dict(
     model: nn.Module,
     optimizers: Union[torch.optim.Optimizer, Iterable[torch.optim.Optimizer]],
     *,
-    submodules: Optional[Set[nn.Module]] = None,
     options: Optional[StateDictOptions] = None,
 ) -> OptimizerStateType:
     """
@@ -939,8 +895,6 @@ def get_optimizer_state_dict(
         model (nn.Module): the nn.Module to the model.
         optimizers (Union[None, Optimizer, Iterable[Optimizer]]):
             The optimizers that are used to optimize ``model``.
-        submodules: Optional[Set[nn.Module]]: only return the model parameters
-            that belong to the submodules.
         options (StateDictOptions): the options to control how
             model state_dict and optimizer state_dict should be returned. See
             `StateDictOptions` for the details.
@@ -960,7 +914,6 @@ def get_optimizer_state_dict(
             model,
             optimizers,
             optim_only=True,
-            submodules=submodules,
             options=options,
         )
         optim_state_dict = _get_optim_state_dict(model, optimizers, info)
@@ -972,7 +925,6 @@ def get_state_dict(
     model: nn.Module,
     optimizers: Union[torch.optim.Optimizer, Iterable[torch.optim.Optimizer]],
     *,
-    submodules: Optional[Set[nn.Module]] = None,
     options: Optional[StateDictOptions] = None,
 ) -> Tuple[Dict[str, ValueType], OptimizerStateType]:
     """
@@ -1026,8 +978,6 @@ def get_state_dict(
         model (nn.Module): the nn.Module to the model.
         optimizers (Union[None, Optimizer, Iterable[Optimizer]]):
             The optimizers that are used to optimize ``model``.
-        submodules: Optional[Set[nn.Module]]: only return the model parameters
-            that belong to the submodules.
         options (StateDictOptions): the options to control how
             model state_dict and optimizer state_dict should be returned. See
             `StateDictOptions` for the details.
@@ -1048,7 +998,6 @@ def get_state_dict(
             model,
             optimizers,
             optim_only=False,
-            submodules=submodules,
             options=options,
         )
         model_state_dict = _get_model_state_dict(model, info)
