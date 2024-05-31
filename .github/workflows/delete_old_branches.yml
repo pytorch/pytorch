@@ -35,8 +35,6 @@ jobs:
           check-latest: false
 
       - name: Delete old branches
-        run: |
-          pip install requests==2.32.2
-          python .github/scripts/delete_old_branches.py
+        run: python .github/scripts/delete_old_branches.py
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
