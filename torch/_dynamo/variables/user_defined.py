@@ -34,7 +34,7 @@ import torch.nn
 from torch._guards import TracingContext
 
 from .. import variables
-from ..exc import unimplemented, UserAttributeErrorException
+from ..exc import ObservedException, unimplemented
 from ..guards import GuardBuilder, install_guard
 from ..source import AttrSource, GetItemSource, ODictGetItemSource, RandomValueSource
 from ..utils import (
@@ -1008,7 +1008,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 return variables.ConstantVariable.create(
                     not isinstance(result, variables.DeletedVariable)
                 )
-            except UserAttributeErrorException:
+            except ObservedException:
                 return variables.ConstantVariable.create(False)
 
         elif getattr_fn is not None:

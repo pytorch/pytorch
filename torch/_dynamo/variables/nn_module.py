@@ -257,7 +257,6 @@ class NNModuleVariable(VariableTracker):
                 object_member = False
             except AttributeError:
                 # see if we can fallback to __getattr__, which is not checked by getattr_static
-                print("-->", self, name)
                 result = self._custom_getattr_fallback(
                     base=base, tx=tx, name=name, options={"source": source}
                 )
