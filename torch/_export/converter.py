@@ -1,7 +1,6 @@
 import operator
 
-from functools import wraps
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
+from typing import Any, Dict, List, Optional, Set, Tuple, Union
 
 import torch
 import torch.export._trace
@@ -443,7 +442,10 @@ class TS2FXGraphConverter:
         output_name = node.output().debugName()
         self.name_to_node[output_name] = cond_node
 
-    def convert_as_noop(self, node: torch._C.Node):
+    def convert_aten_Bool(self, node: torch._C.Node):
+        self._convert_as_noop(node)
+
+    def _convert_as_noop(self, node: torch._C.Node):
         # Converts the node as a no-op by mapping its output node as arg[0]
 
         target = get_op_overload(node)
