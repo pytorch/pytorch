@@ -38,7 +38,7 @@ from torch.fx.node import _get_qualified_name
 from torch.utils._sympy.singleton_int import SingletonInt
 from torch.utils._sympy.symbol import symbol_is_type, SymT
 
-from .. import codecache, config, ir
+from .. import async_compile, config, ir
 from ..ir import ReinterpretView
 from ..runtime import triton_heuristics
 from ..runtime.hints import DeviceProperties
@@ -506,7 +506,7 @@ class WrapperCodeGen(CodeGen):
                 from torch._inductor.codegen.memory_planning import _align as align
 
                 from torch import device, empty_strided
-                from {codecache.__name__} import AsyncCompile
+                from {async_compile.__name__} import AsyncCompile
                 from torch._inductor.select_algorithm import extern_kernels
                 from torch._inductor.codegen.multi_kernel import MultiKernelCall
 
@@ -1410,9 +1410,6 @@ class WrapperCodeGen(CodeGen):
 
     def enter_context(self, ctx):
         self.lines.append(LineContext(ctx))
-
-    def val_to_cpp_arg_str(self, val, type_) -> str:
-        raise NotImplementedError
 
     def val_to_arg_str(self, s, type_=None):
         from torch.utils._triton import dtype_to_string, has_triton_package
