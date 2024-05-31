@@ -1925,6 +1925,126 @@ class MutationTests(torch._inductor.test_case.TestCase):
             ["O_ptr"],
         )
 
+    @make_mutation_test
+    def test_for_loop_arg_2():
+        @triton.jit
+        def fwd_kernel(
+            x_ptr,
+            o_ptr,
+            M,
+            N,
+            stride_m,
+            stride_n,
+            BLOCK_B: tl.constexpr,
+            BLOCK_M: tl.constexpr,
+            BLOCK_N: tl.constexpr,
+        ):
+            # Get program ids
+            pid_m = tl.program_id(0)
+            X_block_ptr = tl.make_block_ptr(
+                base=x_ptr,
+                shape=(M, N),
+                strides=(stride_m, stride_n),
+                offsets=(0, 0),
+                block_shape=(BLOCK_M, BLOCK_N),
+                order=(1, 0),
+            )
+            O_block_ptr = tl.make_block_ptr(
+                base=o_ptr,
+                shape=(M, N),
+                strides=(stride_m, stride_n),
+                offsets=(0, 0),
+                block_shape=(BLOCK_M, BLOCK_N),
+                order=(1, 0),
+            )
+
+            for _ in range(BLOCK_B):
+                x = tl.load(X_block_ptr)
+                tl.store(O_block_ptr, x)
+
+                X_block_ptr = tl.advance(X_block_ptr, (BLOCK_M, 0))
+                O_block_ptr = tl.advance(O_block_ptr, (BLOCK_M, 0))
+
+        t = torch.randn((32, 64, 128))
+        o = torch.empty_like(t)
+        B, M, N = t.shape
+        return (
+            fwd_kernel,
+            {
+                "x_ptr": t,
+                "o_ptr": o,
+                "M": M,
+                "N": N,
+                "stride_m": N,
+                "stride_n": 1,
+                "BLOCK_B": B,
+                "BLOCK_M": M,
+                "BLOCK_N": N,
+            },
+            ["o_ptr"],
+        )
+
+    @make_mutation_test
+    def test_while_loop():
+        @triton.jit
+        def fwd_kernel(
+            x_ptr,
+            o_ptr,
+            M,
+            N,
+            stride_m,
+            stride_n,
+            BLOCK_B: tl.constexpr,
+            BLOCK_M: tl.constexpr,
+            BLOCK_N: tl.constexpr,
+        ):
+            # Get program ids
+            pid_m = tl.program_id(0)
+            X_block_ptr = tl.make_block_ptr(
+                base=x_ptr,
+                shape=(M, N),
+                strides=(stride_m, stride_n),
+                offsets=(0, 0),
+                block_shape=(BLOCK_M, BLOCK_N),
+                order=(1, 0),
+            )
+            O_block_ptr = tl.make_block_ptr(
+                base=o_ptr,
+                shape=(M, N),
+                strides=(stride_m, stride_n),
+                offsets=(0, 0),
+                block_shape=(BLOCK_M, BLOCK_N),
+                order=(1, 0),
+            )
+
+            i = 0
+            while i < BLOCK_B:
+                x = tl.load(X_block_ptr)
+                tl.store(O_block_ptr, x)
+
+                X_block_ptr = tl.advance(X_block_ptr, (BLOCK_M, 0))
+                O_block_ptr = tl.advance(O_block_ptr, (BLOCK_M, 0))
+                i += 1
+
+        t = torch.randn((32, 64, 128))
+        o = torch.empty_like(t)
+        B, M, N = t.shape
+        return (
+            fwd_kernel,
+            {
+                "x_ptr": t,
+                "o_ptr": o,
+                "M": M,
+                "N": N,
+                "stride_m": N,
+                "stride_n": 1,
+                "BLOCK_B": B,
+                "BLOCK_M": M,
+                "BLOCK_N": N,
+            },
+            ["o_ptr"],
+        )
+
 
 if HAS_CUDA:
     t = torch.randn(4)

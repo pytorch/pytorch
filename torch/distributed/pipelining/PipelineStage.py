@@ -581,7 +581,9 @@ class _PipelineStageBase(ABC):
             # TODO why is there a separate recv_info for each pipeline chunk?
             expected_args = self.args_recv_info[self.fwd_chunk_id]
         else:
-            expected_args = tuple()
+            # We don't check inputs for non-0 stages assuming they don't accept
+            # user inputs in canonical pipeline scenarios
+            return
 
         if len(kwargs):
             # TODO- need a mapping of kwarg to position in self.args_recv_info
@@ -596,7 +598,9 @@ class _PipelineStageBase(ABC):
             e.meta if isinstance(e, _RootArgPlaceholder) else e.buffer
             for e in expected_args
         ]
-        validate_tensors_metadata("forward input args", expected_tensors_meta, args)
+        validate_tensors_metadata(
+            f"Stage {self.stage_index} forward inputs", expected_tensors_meta, args
+        )
 
     def _validate_fwd_outputs(self, outputs: Tuple[torch.Tensor, ...]):
         """Raises a RuntimeError if this stage produces an output of unexpected shape/dtype.
@@ -605,7 +609,9 @@ class _PipelineStageBase(ABC):
         mixed precision which changes output dtype.
         """
         expected_tensors_meta = self.get_outputs_meta()
-        validate_tensors_metadata("forward outputs", expected_tensors_meta, outputs)
+        validate_tensors_metadata(
+            f"Stage {self.stage_index} forward outputs", expected_tensors_meta, outputs
+        )
 
 
 class _PipelineStage(_PipelineStageBase):
