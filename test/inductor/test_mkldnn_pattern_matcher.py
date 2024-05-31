@@ -318,9 +318,15 @@ class TestPatternMatcher(TestPatternMatcherBase):
             generated_kernel_count = cal_conv_generated_kernel_number(mod, v, dtype)
             self.assertEqual(metrics.generated_kernel_count, generated_kernel_count)
 
+    @skipIfNoDynamoSupport
+    @skipIfNoONEDNN
+    @skipIfRocm
     def test_conv2d_unary_cpu(self):
         self._test_conv_unary_cpu_base(dim=4)
 
+    @skipIfNoDynamoSupport
+    @skipIfNoONEDNN
+    @skipIfRocm
     def test_conv3d_unary_cpu(self):
         self._test_conv_unary_cpu_base(dim=5)
 
@@ -390,6 +396,9 @@ class TestPatternMatcher(TestPatternMatcherBase):
             matcher_nodes = 1
             self._test_common(mod, (v,), matcher_count, matcher_nodes)
 
+    @skipIfNoDynamoSupport
+    @skipIfNoONEDNN
+    @skipIfRocm
     def test_conv_transpose2d_unary(self):
         class M(torch.nn.Module):
             def __init__(
@@ -512,9 +521,15 @@ class TestPatternMatcher(TestPatternMatcherBase):
             generated_kernel_count = cal_conv_generated_kernel_number(mod, v, dtype)
             self.assertEqual(metrics.generated_kernel_count, generated_kernel_count)
 
+    @skipIfNoDynamoSupport
+    @skipIfNoONEDNN
+    @skipIfRocm
     def test_conv2d_binary(self):
         self._test_conv_binary_base(dim=4)
 
+    @skipIfNoDynamoSupport
+    @skipIfNoONEDNN
+    @skipIfRocm
     def test_conv3d_binary(self):
         self._test_conv_binary_base(dim=5)
 
