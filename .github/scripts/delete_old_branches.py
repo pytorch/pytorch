@@ -285,7 +285,7 @@ def delete_old_ciflow_tags() -> None:
     def delete_tag(tag):
         print(f"Deleting tag {tag}")
         ESTIMATED_TOKENS[0] += 1
-        # delete_branch(git_repo, f"refs/tags/{tag}")
+        delete_branch(git_repo, f"refs/tags/{tag}")
 
     tags = git_repo._run_git("tag").splitlines()
     open_pr_numbers = [x['number'] for x in get_open_prs()]
@@ -311,5 +311,5 @@ def delete_old_ciflow_tags() -> None:
 
 
 if __name__ == "__main__":
-    # delete_branches()
+    delete_branches()
     delete_old_ciflow_tags()
