@@ -122,7 +122,7 @@ Tensor &mv_out(const Tensor &self, const Tensor &vec, Tensor& result) {
 }
 
 Tensor mv(const Tensor &self, const Tensor &vec) {
-  Tensor result = at::empty({self.size(0)}, vec.options());
+  Tensor result = at::zeros({self.size(0)}, vec.options());
   //inplace version is more efficient if we can use it
   return at::addmv_(result, self, vec, 0, 1);
 }
