@@ -16,7 +16,7 @@ namespace {
 
 Tensor clone(
     const Tensor& src,
-    c10::optional<c10::MemoryFormat> optional_memory_format) {
+    std::optional<c10::MemoryFormat> optional_memory_format) {
   auto memory_format = optional_memory_format.value_or(MemoryFormat::Preserve);
   TORCH_CHECK(
       (c10::MemoryFormat::Preserve == memory_format) ||

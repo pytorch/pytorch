@@ -24,6 +24,7 @@ from typing import (
 import torch
 import torch.utils._pytree as pytree
 from torch._C import ScriptObject  # type: ignore[attr-defined]
+from torch._library.fake_class_registry import FakeScriptObject
 
 from ._compatibility import compatibility
 from .graph import _PyTreeCodeGen, _PyTreeInfo, Graph
@@ -308,6 +309,34 @@ class Tracer(TracerBase):
         # Mapping of node name to module scope
         self.node_name_to_scope: Dict[str, Tuple[str, type]] = {}
 
+    _qualname_counter: Dict[str, int] = collections.defaultdict(int)
+
+    @compatibility(is_backward_compatible=True)
+    def get_fresh_qualname(self, prefix: str) -> str:
+        """
+        Gets a fresh name for a prefix and returns it. This function ensures
+        that it will not clash with an existing attribute on the graph.
+        """
+        # The idea here is that if the module doesn't have this prefix at all we
+        # should reset the counter to start from the beginning
+        # It's a ... little bit hacky (doesn't cover all cases) but the precise
+        # naming of the prefixes isn't a correctness issue, just a niceness
+        # issue
+        qualname = f"{prefix}0"
+        if not hasattr(self.root, qualname):
+            self._qualname_counter[prefix] = 0
+            return qualname
+
+        i = self._qualname_counter[prefix]
+        while True:
+            qualname = f"{prefix}{i}"
+            i += 1
+            if not hasattr(self.root, qualname):
+                break
+        self._qualname_counter[prefix] = i
+
+        return qualname
+
     @compatibility(is_backward_compatible=True)
     def create_arg(self, a: Any) -> "Argument":
         """
@@ -366,18 +395,15 @@ class Tracer(TracerBase):
         # a get_attr to retrieve that tensor. Otherwise, we'll store away the
         # tensor value into a special attribute on the Module s.t. we can
         # retrieve it with a get_attr.
-        if isinstance(a, (torch.Tensor, ScriptObject)):
+        if isinstance(a, (torch.Tensor, ScriptObject, FakeScriptObject)):
             qualname: Optional[str] = self.tensor_attrs.get(a)
 
             # Tensor was not found in the Module hierarchy, stow it away in a
             # special attribute and set the qualname to refer to that
             if not qualname:
-                i = 0
-                while True:
-                    qualname = f"_tensor_constant{i}"
-                    if not hasattr(self.root, qualname):
-                        break
-                    i += 1
+                base_name = "_tensor_constant" if isinstance(a, torch.Tensor) else "_torchbind_obj"
+                qualname = self.get_fresh_qualname(base_name)
+                assert isinstance(qualname, str)
                 self.tensor_attrs[a] = qualname
                 setattr(self.root, qualname, a)
 
@@ -388,12 +414,8 @@ class Tracer(TracerBase):
             # witness its construction. Intern this as a constant attribute
 
             # TODO: binary search
-            i = 0
-            while True:
-                qualname = f"_{a.__class__.__name__}_constant_{i}"
-                if not hasattr(self.root, qualname):
-                    break
-                i += 1
+            qualname = self.get_fresh_qualname(f"_{a.__class__.__name__}_constant_")
+            assert isinstance(qualname, str)
             setattr(self.root, qualname, a)
 
             return self.create_node("get_attr", qualname, (), {})
@@ -729,11 +751,17 @@ class Tracer(TracerBase):
             # is some other attribute on the model. Construct a dict mapping Tensor
             # values to the qualified name here for efficiency. This is used downstream
             # in create_arg
-            self.tensor_attrs: Dict[Union[torch.Tensor, ScriptObject], str] = {}
+            self.tensor_attrs: Dict[
+                Union[
+                    torch.Tensor,
+                    ScriptObject,
+                    FakeScriptObject
+                ], str
+            ] = {}
 
             def collect_tensor_attrs(m: torch.nn.Module, prefix_atoms: List[str]):
                 for k, v in m.__dict__.items():
-                    if isinstance(v, (torch.Tensor, ScriptObject)):
+                    if isinstance(v, (torch.Tensor, ScriptObject, FakeScriptObject)):
                         self.tensor_attrs[v] = ".".join(prefix_atoms + [k])
                 for k, v in m.named_children():
                     collect_tensor_attrs(v, prefix_atoms + [k])

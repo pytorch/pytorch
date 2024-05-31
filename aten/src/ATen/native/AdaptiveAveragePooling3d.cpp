@@ -310,13 +310,19 @@ Tensor adaptive_avg_pool3d_symint(Tensor const& input, SymIntArrayRef output_siz
   TORCH_CHECK(output_size.size() == 3, "adaptive_avg_pool3d: output_size must be 3");
   TORCH_CHECK(
         (output_size[0] >= 0 && output_size[1] >= 0 && output_size[2] >= 0),
-        "adaptive_avg_pool2d: elements of output_size must be greater than or equal to 0 ",
+        "adaptive_avg_pool3d: elements of output_size must be greater than or equal to 0 ",
         "but received {", output_size[0], ", ", output_size[1], ",", output_size[2], "}");
 
   if (output_size[0] == 1 && output_size[1] == 1 && output_size[2] == 1 && !input.is_xpu()) {
     // in this case, adaptive pooling is just computing mean over hw
     // dimensions, which can be done more efficiently
     Tensor out = input.mean({-1, -2, -3}, /* keepdim = */ true);
+    if (input.suggest_memory_format() == at::MemoryFormat::ChannelsLast3d) {
+      // assert ndim == 5, since ndim = 4 doesn't give channels_last
+      const auto n = input.sym_size(0);
+      const auto c = input.sym_size(1);
+      out.as_strided__symint({n, c, 1, 1, 1}, {c, 1, c, c, c});
+    }
     return out;
   } else {
     return _adaptive_avg_pool3d_symint(input, output_size);

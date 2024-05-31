@@ -98,7 +98,7 @@ hf_Bert_large,pass,6
 
 
 
-hf_BigBird,fail_to_run,3
+hf_BigBird,pass,52
 
 
 
@@ -194,7 +194,7 @@ pytorch_stargan,pass,6
 
 
 
-pytorch_unet,pass,7
+pytorch_unet,pass_due_to_skip,7
 
 
 
@@ -278,7 +278,7 @@ vgg16,pass,6
 
 
 
-vision_maskrcnn,pass,33
+vision_maskrcnn,pass,34
 
 
 

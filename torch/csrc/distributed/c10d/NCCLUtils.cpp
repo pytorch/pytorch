@@ -159,7 +159,7 @@ std::string ncclGetErrorWithVersion(ncclResult_t error) {
 // thrown in the NCCL codebase.
 std::string getNcclErrorDetailStr(
     ncclResult_t error,
-    c10::optional<std::string> processGroupFailureReason /* = c10::nullopt */
+    std::optional<std::string> processGroupFailureReason /* = c10::nullopt */
 ) {
   // Prioritize failure reason provided by PG NCCL first, as it can abort
   // communicators when it encounters collective timeouts, etc.

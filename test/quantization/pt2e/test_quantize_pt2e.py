@@ -49,7 +49,13 @@ from torch.testing._internal.common_quantization import (
     skipIfNoQNNPACK,
     TestHelperModules,
 )
-from torch.testing._internal.common_utils import TemporaryFileName
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    parametrize,
+    TemporaryFileName,
+    TEST_CUDA,
+    TEST_WITH_ROCM,
+)
 
 
 @skipIfNoQNNPACK
@@ -1175,14 +1181,15 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
         self.assertIsNot(observers[0], observers[2])
         self.assertIsNot(observers[1], observers[2])
 
-    def test_int16(self):
-        class Int16ActQuantizer(Quantizer):
+    @parametrize("dtype", (torch.int16, torch.float8_e5m2, torch.float8_e4m3fn))
+    def test_quantization_dtype(self, dtype):
+        class DtypeActQuantizer(Quantizer):
             def annotate(self, model: torch.fx.GraphModule) -> torch.fx.GraphModule:
-                # using int32 to simulate int16
-                int16_qspec = QuantizationSpec(
-                    dtype=torch.int16,
-                    quant_min=-(2**15),
-                    quant_max=2**15 - 1,
+                info_fun = torch.iinfo if dtype == torch.int16 else torch.finfo
+                activate_qspec = QuantizationSpec(
+                    dtype=dtype,
+                    quant_min=int(info_fun(dtype).min),
+                    quant_max=int(info_fun(dtype).max),
                     qscheme=torch.per_tensor_affine,
                     is_dynamic=False,
                     observer_or_fake_quant_ctr=observer.default_observer,
@@ -1196,10 +1203,10 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
                     observer_or_fake_quant_ctr=observer.default_weight_observer,
                 )
                 quantization_config = QuantizationConfig(
-                    input_activation=int16_qspec,
+                    input_activation=activate_qspec,
                     weight=int8_qspec,
                     bias=None,
-                    output_activation=int16_qspec,
+                    output_activation=activate_qspec,
                 )
                 OP_TO_ANNOTATOR["conv"](model, quantization_config)
 
@@ -1214,7 +1221,7 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
             def forward(self, x):
                 return self.conv(x)
 
-        quantizer = Int16ActQuantizer()
+        quantizer = DtypeActQuantizer()
         node_occurrence = {
             # one for input of the first conv, one for output for the first conv
             torch.ops.quantized_decomposed.quantize_per_tensor.default: 2,
@@ -1230,7 +1237,7 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
         self._test_quantizer(
             M().eval(),
             example_inputs,
-            Int16ActQuantizer(),
+            quantizer,
             node_occurrence,
             node_list,
         )
@@ -1821,6 +1828,23 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
     def test_move_exported_model_dropout_inplace(self):
         self._test_move_exported_model_dropout(inplace=True)
 
+    def _get_bn_train_eval_ops(self):
+        if TEST_WITH_ROCM:
+            return (
+                torch.ops.aten.miopen_batch_norm.default,
+                torch.ops.aten.miopen_batch_norm.default,
+            )
+        elif TEST_CUDA:
+            return (
+                torch.ops.aten.cudnn_batch_norm.default,
+                torch.ops.aten.cudnn_batch_norm.default,
+            )
+        else:
+            return (
+                torch.ops.aten._native_batch_norm_legit.default,
+                torch.ops.aten._native_batch_norm_legit_no_training.default,
+            )
+
     def test_move_exported_model_bn(self):
         """
         Test switching batch_norm behavior between train and eval modes using
@@ -1835,12 +1859,17 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
             def forward(self, x):
                 return self.bn(x)
 
-        example_inputs = (torch.randn(1, 3, 3, 3),)
-        m = M().train()
+        if TEST_CUDA:
+            m = M().train().cuda()
+            example_inputs = (torch.randn(1, 3, 3, 3).cuda(),)
+        else:
+            m = M().train()
+            example_inputs = (torch.randn(1, 3, 3, 3),)
+        bn_train_op, bn_eval_op = self._get_bn_train_eval_ops()
         m = capture_pre_autograd_graph(m, example_inputs)
 
         # Assert that batch norm op exists and is in train mode
-        bn_node = self._get_node(m, torch.ops.aten._native_batch_norm_legit.default)
+        bn_node = self._get_node(m, bn_train_op)
         self.assertTrue(bn_node is not None)
         self.assertTrue(bn_node.args[5])
 
@@ -1848,16 +1877,14 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
         torch.ao.quantization.move_exported_model_to_eval(m)
 
         # Assert that batch norm op is now in eval mode
-        bn_node = self._get_node(
-            m, torch.ops.aten._native_batch_norm_legit_no_training.default
-        )
+        bn_node = self._get_node(m, bn_eval_op)
         self.assertTrue(bn_node is not None)
 
         # Move to train
         torch.ao.quantization.move_exported_model_to_train(m)
 
         # Assert that batch norm op is now in train mode again
-        bn_node = self._get_node(m, torch.ops.aten._native_batch_norm_legit.default)
+        bn_node = self._get_node(m, bn_train_op)
         self.assertTrue(bn_node is not None)
         self.assertTrue(bn_node.args[5])
 
@@ -1903,22 +1930,24 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
                 x = self.dropout(x)
                 return x
 
-        example_inputs = (torch.randn(1, 3, 3, 3),)
-        m = M().train()
+        if TEST_CUDA:
+            m = M().train().cuda()
+            example_inputs = (torch.randn(1, 3, 3, 3).cuda(),)
+        else:
+            m = M().train()
+            example_inputs = (torch.randn(1, 3, 3, 3),)
+        bn_train_op, bn_eval_op = self._get_bn_train_eval_ops()
         m = capture_pre_autograd_graph(m, example_inputs)
 
         def _assert_ops_are_correct(m: torch.fx.GraphModule, train: bool):
             targets = [n.target for n in m.graph.nodes]
-            bn_train_target = torch.ops.aten._native_batch_norm_legit.default
-            bn_eval_target = torch.ops.aten._native_batch_norm_legit_no_training.default
-            if train:
-                self.assertTrue(bn_train_target in targets)
-                self.assertTrue(bn_eval_target not in targets)
-            else:
-                self.assertTrue(bn_eval_target in targets)
-                self.assertTrue(bn_train_target not in targets)
+            bn_op = bn_train_op if train else bn_eval_op
+            bn_node = self._get_node(m, bn_op)
+            self.assertTrue(bn_node is not None)
+            if TEST_CUDA:
+                self.assertEqual(bn_node.args[5], train)
             dropout_node = self._get_node(m, torch.ops.aten.dropout.default)
-            self.assertTrue(dropout_node.args[2] == train)
+            self.assertEqual(dropout_node.args[2], train)
 
         # Before wrapping: this is not OK
         with self.assertRaises(NotImplementedError):
@@ -2248,3 +2277,47 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
             node_occurrence,
             node_list,
         )
+
+    def test_multi_users_without_output_observer(self):
+        """
+        Test the case in which a node is used by multiple users,
+        and had its output observer removed.
+        """
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = torch.nn.Conv2d(3, 3, 3)
+
+            def forward(self, x):
+                x = self.conv(x)
+                return x, x + 1
+
+        example_inputs = (torch.randn(1, 3, 5, 5),)
+        m = M()
+        m = capture_pre_autograd_graph(m, example_inputs)
+        quantizer = XNNPACKQuantizer().set_global(
+            get_symmetric_quantization_config(),
+        )
+        m = prepare_pt2e(m, quantizer)
+        m(*example_inputs)
+
+        # Remove output observer
+        observer_to_remove = None
+        for n in m.graph.nodes:
+            if n.op == "output":
+                observer_to_remove = n.args[0][0]
+                assert observer_to_remove.op == "call_module"
+                assert observer_to_remove.target.startswith("activation_post_process_")
+                break
+        assert observer_to_remove is not None
+        observer_to_remove.replace_all_uses_with(observer_to_remove.args[0])
+        m.graph.erase_node(observer_to_remove)
+        m.recompile()
+
+        # Convert should succeed
+        m = convert_pt2e(m)
+        m(*example_inputs)
+
+
+instantiate_parametrized_tests(TestQuantizePT2E)

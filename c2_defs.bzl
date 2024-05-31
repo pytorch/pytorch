@@ -8,7 +8,6 @@ load("@fbsource//tools/build_defs:fb_xplat_cxx_library.bzl", "fb_xplat_cxx_libra
 load("@fbsource//tools/build_defs:fbsource_utils.bzl", "is_arvr_mode", "is_fbcode_mode_mac")
 load("@fbsource//tools/build_defs:platform_defs.bzl", "ANDROID", "APPLE", "CXX", "IOS", "MACOSX", "WINDOWS")
 load("@fbsource//tools/build_defs/apple:build_mode_defs.bzl", "is_production_build")
-load("@fbsource//tools/build_defs/apple:config_utils_defs.bzl", "STATIC_LIBRARY_IOS_CONFIG", "STATIC_LIBRARY_MAC_CONFIG", "fbobjc_configs")
 load("@fbsource//xplat/caffe2:buckbuild.bzl", "read_bool")
 load("@fbsource//xplat/pfh/Msgr/Mobile/ProductInfra:DEFS.bzl", "Msgr_Mobile_ProductInfra")
 
@@ -41,16 +40,6 @@ def get_c2_mpscnn_test():
     )
 
     return bool(int(c2_mpscnn_test))
-
-def get_c2_nomnigraph():
-    c2_nomnigraph = native.read_config("caffe2", "enable_nomnigraph", "1")
-
-    expect(
-        c2_nomnigraph in ("0", "1"),
-        c2_nomnigraph,
-    )
-
-    return bool(int(c2_nomnigraph))
 
 def get_c2_qpl():
     c2_qpl = native.read_config("caffe2", "enable_qpl", "1")
@@ -126,8 +115,6 @@ C2_XPLAT_HPTT_PREPROCESSOR_FLAGS = [
 
 def get_c2_xplat_preprocessor_flags():
     flags = get_c2_xplat_no_hptt_preprocessor_flags() + C2_XPLAT_HPTT_PREPROCESSOR_FLAGS
-    if get_c2_nomnigraph():
-        flags.append("-DCAFFE2_OPTIMIZER")
     return flags
 
 def get_c2_xplat_no_hptt_compiler_flags():
@@ -274,6 +261,9 @@ C2_FBOBJC_EXTRA_TARGET_CONFIG = {
     "MTL_LANGUAGE_REVISION": "Metal12",
 }
 
+def get_c2_torch_vulkan_compiler_flags():
+    return ["-Wno-missing-prototypes"]
+
 def get_c2_default_cxx_args():
     return dict(
         header_namespace = "",
@@ -292,10 +282,6 @@ def get_c2_default_cxx_args():
             (".*x86.*", C2_FBANDROID_X86_COMPILER_FLAGS),
         ],
         fbobjc_compiler_flags = get_c2_fbobjc_compiler_flags() + get_c2_fbobjc_xplat_compiler_flags(),
-        fbobjc_configs = fbobjc_configs(
-            STATIC_LIBRARY_IOS_CONFIG,
-            extra_target_config = C2_FBOBJC_EXTRA_TARGET_CONFIG,
-        ),
         fbobjc_exported_platform_preprocessor_flags = [
             (
                 "iphoneos",
@@ -307,9 +293,6 @@ def get_c2_default_cxx_args():
             ("iphoneos", C2_FBOBJC_IPHONE_COMPILER_FLAGS),
         ],
         macosx_compiler_flags = C2_FBOBJC_MACOSX_COMPILER_FLAGS,
-        fbobjc_macosx_configs_override = fbobjc_configs(
-            STATIC_LIBRARY_MAC_CONFIG,
-        ),
         macosx_frameworks_override = get_c2_fbobjc_frameworks(),
         preprocessor_flags = [
             # Use the internal pthreadpool impl for all Caffe2 targets on all
@@ -318,7 +301,6 @@ def get_c2_default_cxx_args():
         ],
         visibility = ["PUBLIC"],
         windows_preferred_linkage = "static" if is_arvr_mode() else None,
-        xcode_public_headers_symlinks = True,
     )
 
 def get_c2_aten_cpu_fbobjc_macosx_deps():

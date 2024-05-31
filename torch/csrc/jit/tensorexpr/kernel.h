@@ -274,10 +274,10 @@ class TORCH_API TensorExprKernel {
       const std::vector<BufPtr>& interm_bufs);
 
   struct UnpackedTensorOptions {
-    c10::optional<c10::ScalarType> dtype;
-    c10::optional<c10::Layout> layout;
-    c10::optional<c10::Device> device;
-    c10::optional<bool> pinned_memory;
+    std::optional<c10::ScalarType> dtype;
+    std::optional<c10::Layout> layout;
+    std::optional<c10::Device> device;
+    std::optional<bool> pinned_memory;
 
     UnpackedTensorOptions(const c10::TensorOptions& opts)
         : dtype(c10::optTypeMetaToScalarType(opts.dtype_opt())),
@@ -370,7 +370,7 @@ TORCH_API bool setFallbackAllowed(bool value);
 TORCH_API bool& getCatWoConditionals();
 TORCH_API bool& getOptConditionals();
 
-TORCH_API c10::optional<at::Device> pickDeviceType(
+TORCH_API std::optional<at::Device> pickDeviceType(
     const at::ArrayRef<torch::jit::Value*>& inputs);
 
 bool isContiguous(

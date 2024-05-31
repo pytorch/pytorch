@@ -51,7 +51,7 @@ if not (IS_WINDOWS or IS_MACOS or TEST_WITH_DEV_DBG_ASAN):
         def test_exception_propagation(self):
             with self.assertRaises(Exception, msg="foobar"):
                 with timer.expires(after=1):
-                    raise Exception("foobar")
+                    raise Exception("foobar")  # noqa: TRY002
 
         def test_no_client(self):
             # no timer client configured; exception expected

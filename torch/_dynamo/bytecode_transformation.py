@@ -244,6 +244,53 @@ def create_load_method(name) -> Instruction:
     return create_instruction("LOAD_METHOD", argval=name)
 
 
+def create_setup_with(target) -> Instruction:
+    opname = "BEFORE_WITH" if sys.version_info >= (3, 11) else "SETUP_WITH"
+    return create_instruction(opname, target=target)
+
+
+def create_swap(n) -> List[Instruction]:
+    if sys.version_info >= (3, 11):
+        return [create_instruction("SWAP", arg=n)]
+    # in Python < 3.11, SWAP is a macro that expands to multiple instructions
+    if n == 1:
+        return []
+    """
+    e.g. swap "a" and "b" in this stack:
+    0 a 1 2 3 b
+    0 a [1 2 3 b]
+    0 a [1 2 3 b] [1 2 3 b]
+    0 a [1 2 3 b] [1 2 3 b] -1
+    0 a [1 2 3 b] b
+    0 b a [1 2 3 b]
+    0 b a [1 2 3 b] [1 2 3 b]
+    0 b [1 2 3 b] a [1 2 3 b]
+    0 b [1 2 3 b] a [1 2 3 b] -1
+    0 b [1 2 3 a]
+    0 b [1 2 3 a] [1 2 3 a]
+    0 b [1 2 3 a] [1 2 3 a] reverse
+    0 b [a 3 2 1] None
+    0 b [a 3 2 1]
+    0 b 1 2 3 a
+    """
+    return [
+        create_instruction("BUILD_LIST", arg=n - 1),
+        create_instruction("DUP_TOP"),
+        create_instruction("LOAD_CONST", argval=-1),
+        create_instruction("BINARY_SUBSCR"),
+        create_instruction("ROT_THREE"),
+        create_instruction("DUP_TOP"),
+        create_instruction("ROT_THREE"),
+        create_instruction("LOAD_CONST", argval=-1),
+        create_instruction("STORE_SUBSCR"),
+        create_instruction("DUP_TOP"),
+        create_load_method("reverse"),
+        *create_call_method(0),
+        create_instruction("POP_TOP"),
+        create_instruction("UNPACK_SEQUENCE", arg=n - 1),
+    ]
+
+
 def lnotab_writer(
     lineno: int, byteno: int = 0
 ) -> Tuple[List[int], Callable[[int, int], None]]:
@@ -982,6 +1029,17 @@ def get_const_index(code_options, val) -> int:
 def fix_vars(instructions: List[Instruction], code_options, varname_from_oparg=None):
     # compute instruction arg from argval if arg is not provided
     names = {name: idx for idx, name in enumerate(code_options["co_names"])}
+
+    def get_name_index(name) -> int:
+        try:
+            idx = names[name]
+        except KeyError:
+            # Add a missing item to co_names
+            idx = names[name] = len(names)
+            code_options["co_names"] = (*code_options["co_names"], name)
+            assert len(code_options["co_names"]) == len(names)
+        return idx
+
     if sys.version_info < (3, 11):
         assert varname_from_oparg is None
         varnames = {name: idx for idx, name in enumerate(code_options["co_varnames"])}
@@ -1016,27 +1074,27 @@ def fix_vars(instructions: List[Instruction], code_options, varname_from_oparg=N
             assert instructions[i].arg is not None
             assert instructions[i].argval is not _NotProvided
             if sys.version_info >= (3, 11):
-                instructions[i].arg = (names[instructions[i].argval] << 1) + (
+                instructions[i].arg = (get_name_index(instructions[i].argval) << 1) + (
                     cast(int, instructions[i].arg) % 2
                 )
             else:
-                instructions[i].arg = names[instructions[i].argval]
+                instructions[i].arg = get_name_index(instructions[i].argval)
         elif instructions[i].opname == "LOAD_ATTR":
             # 3.12 LOAD_ATTR requires both arg and argval, like LOAD_GLOBAL
             assert instructions[i].arg is not None
             assert instructions[i].argval is not _NotProvided
             if sys.version_info >= (3, 12):
-                instructions[i].arg = (names[instructions[i].argval] << 1) + (
+                instructions[i].arg = (get_name_index(instructions[i].argval) << 1) + (
                     cast(int, instructions[i].arg) % 2
                 )
             else:
-                instructions[i].arg = names[instructions[i].argval]
+                instructions[i].arg = get_name_index(instructions[i].argval)
         elif instructions[i].opname == "LOAD_SUPER_ATTR":
             assert instructions[i].arg is not None
             assert instructions[i].argval is not _NotProvided
             # Copy low bit, force second bit on for explicit super (the "+ 2")
             instructions[i].arg = (
-                (names[instructions[i].argval] << 2)
+                (get_name_index(instructions[i].argval) << 2)
                 + (cast(int, instructions[i].arg) % 2)
                 + 2
             )
@@ -1045,14 +1103,7 @@ def fix_vars(instructions: List[Instruction], code_options, varname_from_oparg=N
                 instructions[i].arg = varnames[instructions[i].argval]
         elif instructions[i].opcode in HAS_NAME:
             if should_compute_arg():
-                name = instructions[i].argval
-                try:
-                    instructions[i].arg = names[name]
-                except KeyError:
-                    # Add a missing item to co_names
-                    instructions[i].arg = names[name] = len(names)
-                    code_options["co_names"] = (*code_options["co_names"], name)
-                    assert len(code_options["co_names"]) == len(names)
+                instructions[i].arg = get_name_index(instructions[i].argval)
         elif instructions[i].opcode in HAS_FREE:
             if should_compute_arg():
                 instructions[i].arg = freenames[instructions[i].argval]
@@ -1064,6 +1115,23 @@ def fix_vars(instructions: List[Instruction], code_options, varname_from_oparg=N
                 idx = get_const_index(code_options, instructions[i].argval)
                 assert idx >= 0
                 instructions[i].arg = idx
+
+
+def clear_instruction_args(instructions):
+    # Clear the instruction arg for instructions that have argvals.
+    # Useful for using dis'd bytecode within generated bytecode.
+    for inst in instructions:
+        if (
+            inst.argval is not _NotProvided
+            and (
+                inst.opcode in HAS_LOCAL
+                or inst.opcode in HAS_NAME
+                or inst.opcode in HAS_FREE
+                or inst.opcode in HAS_CONST
+            )
+            and inst.opname not in ("LOAD_GLOBAL", "LOAD_ATTR", "LOAD_SUPER_ATTR")
+        ):
+            inst.arg = None
 
 
 def get_code_keys() -> List[str]:
@@ -1196,3 +1264,100 @@ def unique_id(name) -> str:
 def is_generator(code: types.CodeType) -> bool:
     co_generator = 0x20
     return (code.co_flags & co_generator) > 0
+
+
+def bytecode_from_template(fn, varname_map=None, noreturn=True, noprefix=True):
+    """Generates bytecode from a template function `fn` for use in
+    dynamo bytecode generation.
+
+    For example, we can generate Python-version-independent bytecode
+    for looping through a dictionary and copying the values to a new dictionary.
+
+    def template(d1, d2):
+        for k, v in d1.items():
+            d2[k] = v
+
+
+    or a try block:
+
+    def template():
+        try:
+            dummy1
+        except:
+            dummy2
+            raise
+        dummy3
+
+    Args:
+        fn: a function template to generate bytecode from
+        varname_map: a mapping of `fn`'s varnames to new names. This
+            map will be applied to the generated bytecode's varnames.
+            For example, local variables in `fn` can be replaced with
+            new names that are generated by `OutputGraph.new_var`.
+        noreturn: remove all RETURN_* bytecodes and replace them with a jump
+            to the end of the bytecode.
+        noprefix: remove prefix bytecodes (all bytecode before the first RESUME, inclusive).
+    """
+    insts = cleaned_instructions(fn.__code__)
+    clear_instruction_args(insts)
+
+    if noprefix:
+        for i, inst in enumerate(insts):
+            if inst.opname == "RESUME":
+                insts = insts[i + 1 :]
+                break
+
+    for inst in insts:
+        # If we don't reset starts_line, then the generated
+        # bytecode's line number will be based on fn's.
+        inst.starts_line = None
+        if varname_map and inst.argval in varname_map:
+            inst.argval = varname_map[inst.argval]
+
+    if noreturn:
+        if sys.version_info >= (3, 12):
+            # replace RETURN_CONST with LOAD_CONST RETURN_VALUE
+            new_insts = []
+            for inst in insts:
+                if inst.opname == "RETURN_CONST":
+                    inst.opcode = dis.opmap["LOAD_CONST"]
+                    inst.opname = "LOAD_CONST"
+                    new_insts.append(inst)
+                    # no need to propagate target/exn table
+                    new_insts.append(create_instruction("RETURN_VALUE"))
+                else:
+                    new_insts.append(inst)
+            insts = new_insts
+
+        returns = []
+        for inst in insts:
+            if inst.opname == "RETURN_VALUE":
+                returns.append(inst)
+
+        if len(returns) == 1 and returns[0] is insts[-1]:
+            # only 1 return at the end - just pop it
+            insts.pop(-1)
+        elif len(returns) > 0:
+            # create jump target - if the last inst is a return,
+            # we can replace it with a NOP and make that the jump target.
+            if insts[-1] is returns[-1]:
+                insts[-1].opname = "NOP"
+                insts[-1].opcode = dis.opmap["NOP"]
+                insts[-1].arg = None
+                insts[-1].argval = _NotProvided
+                returns.pop(-1)
+            else:
+                insts.append(create_instruction("NOP"))
+
+            # replace returns with jumps
+            for inst in returns:
+                # don't replace inst with new instruction
+                # due to targetting/exn table/etc.
+                jump_inst = create_jump_absolute(insts[-1])
+                inst.opname = jump_inst.opname
+                inst.opcode = jump_inst.opcode
+                inst.arg = jump_inst.arg
+                inst.argval = jump_inst.argval
+                inst.target = jump_inst.target
+
+    return insts

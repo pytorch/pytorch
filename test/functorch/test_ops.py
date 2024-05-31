@@ -10,8 +10,6 @@ import functools
 import itertools
 import unittest
 
-import torch
-import torch.autograd.forward_ad as fwAD
 from common_utils import (
     check_vmap_fallback,
     decorate,
@@ -29,8 +27,12 @@ from common_utils import (
     tol2,
     xfail,
 )
-from functorch import grad, jacfwd, jacrev, vjp, vmap
 from functorch_additional_op_db import additional_op_db
+
+import torch
+import torch.autograd.forward_ad as fwAD
+
+from functorch import grad, jacfwd, jacrev, vjp, vmap
 from torch import Tensor
 from torch._functorch.eager_transforms import _as_tuple, jvp
 from torch.testing._internal.autograd_function_db import autograd_function_db
@@ -349,8 +351,6 @@ def is_inplace(op, variant):
 
 vjp_fail = {
     xfail("tensor_split"),  # data_ptr composite compliance
-    decorate("nn.functional.batch_norm", decorator=skipIfRocm),
-    decorate("nn.functional.instance_norm", decorator=skipIfRocm),
     # https://github.com/pytorch/pytorch/issues/96560
     decorate("nn.functional.scaled_dot_product_attention", decorator=skipIfRocm),
 }
@@ -569,11 +569,6 @@ class TestOperators(TestCase):
                 xfail(
                     "NumpyExpMarkDirtyAutogradFunction"
                 ),  # TODO: https://github.com/pytorch/pytorch/issues/91280
-                # https://github.com/pytorch/pytorch/issues/96560
-                # ROCm: NotImplementedError
-                decorate("nn.functional.batch_norm", decorator=skipIfRocm),
-                # ROCm: NotImplementedError
-                decorate("nn.functional.instance_norm", decorator=skipIfRocm),
                 # --- Non-Contiguous Failures! ---
                 # This is expected to fail as the operator
                 # expects last dim to have stride=1
@@ -613,6 +608,7 @@ class TestOperators(TestCase):
                 "nn.functional.batch_norm", {torch.float32: tol(atol=4e-05, rtol=5e-05)}
             ),
             tol1("nn.functional.conv2d", {torch.float32: tol(atol=4e-05, rtol=5e-05)}),
+            tol1("svd_lowrank", {torch.float32: tol(atol=5e-05, rtol=5e-05)}),
             tol1("pca_lowrank", {torch.float32: tol(atol=5e-05, rtol=5e-05)}),
             tol1(
                 "nn.functional.multi_head_attention_forward",
@@ -1282,9 +1278,6 @@ class TestOperators(TestCase):
         xfail("_native_batch_norm_legit"),
         # TODO: implement batching rule
         xfail("_batch_norm_with_update"),
-        # https://github.com/pytorch/pytorch/issues/96560
-        # ROCm: NotImplementedError
-        decorate("nn.functional.instance_norm", decorator=skipIfRocm),
         # ----------------------------------------------------------------------
     }
 
@@ -2374,6 +2367,8 @@ class TestOperators(TestCase):
                 "linalg.pinv", "hermitian", {torch.float32: tol(atol=5e-06, rtol=5e-06)}
             ),
             tol1("nn.functional.conv3d", {torch.float32: tol(atol=5e-04, rtol=9e-03)}),
+            tol1("svd_lowrank", {torch.float32: tol(atol=5e-05, rtol=5e-05)}),
+            tol1("pca_lowrank", {torch.float32: tol(atol=5e-05, rtol=5e-05)}),
         ),
     )
     def test_vmap_autograd_grad(self, device, dtype, op):

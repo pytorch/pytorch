@@ -118,7 +118,7 @@ struct InlineEvent final {
         " does not match other's device type ",
         DeviceTypeName(other.device_type()),
         ".");
-    return backend_.elapsedTime(event_, other.event_);
+    return backend_.elapsedTime(event_, other.event_, device_index_);
   }
 
   void synchronize() const {

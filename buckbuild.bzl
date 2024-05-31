@@ -261,7 +261,6 @@ def get_aten_preprocessor_flags():
         "-DPYTORCH_QNNPACK_RUNTIME_QUANTIZATION",
         "-DAT_PARALLEL_OPENMP_FBXPLAT=0",
         "-DAT_PARALLEL_NATIVE_FBXPLAT=1",
-        "-DAT_PARALLEL_NATIVE_TBB_FBXPLAT=0",
         "-DUSE_LAPACK_FBXPLAT=0",
         "-DAT_BLAS_F2C_FBXPLAT=0",
         "-DAT_BLAS_USE_CBLAS_DOT_FBXPLAT=0",
@@ -279,7 +278,6 @@ def get_pt_preprocessor_flags():
         "-D_THP_CORE",
         "-DUSE_SCALARS",
         "-DNO_CUDNN_DESTROY_HANDLE",
-        "-DBUILD_CAFFE2",
     ]
 
     if _is_build_mode_dev():
@@ -1113,9 +1111,6 @@ def define_buck_targets(
             "@AT_PARALLEL_NATIVE@",
             "AT_PARALLEL_NATIVE_FBXPLAT",
             "--replace",
-            "@AT_PARALLEL_NATIVE_TBB@",
-            "AT_PARALLEL_NATIVE_TBB_FBXPLAT",
-            "--replace",
             "@AT_BUILD_WITH_LAPACK@",
             "USE_LAPACK_FBXPLAT",
             "--replace",
@@ -1720,7 +1715,6 @@ def define_buck_targets(
         compiler_flags = get_pt_compiler_flags() + ["-Wno-error"],
         exported_preprocessor_flags = get_pt_preprocessor_flags() + [
             "-DUSE_KINETO",
-            "-DTMP_LIBKINETO_NANOSECOND",
             # Need this otherwise USE_KINETO is undefed
             # for mobile
             "-DEDGE_PROFILER_USE_KINETO",
@@ -1747,7 +1741,6 @@ def define_buck_targets(
         compiler_flags = get_pt_compiler_flags() + ["-Wno-error"],
         exported_preprocessor_flags = get_pt_preprocessor_flags() + [
             "-DUSE_KINETO",
-            "-DTMP_LIBKINETO_NANOSECOND",
             "-DEDGE_PROFILER_USE_KINETO",
         ],
         # @lint-ignore BUCKLINT link_whole
@@ -1834,7 +1827,6 @@ def define_buck_targets(
         compiler_flags = get_pt_compiler_flags() + ["-Wno-error"],
         exported_preprocessor_flags = get_pt_preprocessor_flags() + [
             "-DUSE_KINETO",
-            "-DTMP_LIBKINETO_NANOSECOND",
             # Need this otherwise USE_KINETO is undefed
             # for mobile
             "-DEDGE_PROFILER_USE_KINETO",

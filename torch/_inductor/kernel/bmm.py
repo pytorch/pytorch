@@ -1,17 +1,26 @@
+import logging
+
 import torch
 
-from .. import ir
-from ..lowering import register_lowering
+from .. import ir, lowering as L
 from ..select_algorithm import (
     autotune_select_algorithm,
     ExternKernelChoice,
     TritonTemplate,
 )
-from ..utils import ceildiv as cdiv, use_aten_gemm_kernels, use_triton_template
+from ..utils import (
+    ceildiv as cdiv,
+    use_aten_gemm_kernels,
+    use_cutlass_template,
+    use_triton_template,
+)
 from ..virtualized import V
+
+from .mm import _is_static_problem
 
 from .mm_common import addmm_epilogue, mm_args, mm_configs, mm_options
 
+log = logging.getLogger(__name__)
 aten = torch.ops.aten
 
 
@@ -50,8 +59,15 @@ bmm_template = TritonTemplate(
 
     rm = pid_m * BLOCK_M + tl.arange(0, BLOCK_M)
     rn = pid_n * BLOCK_N + tl.arange(0, BLOCK_N)
-    ram = tl.max_contiguous(tl.multiple_of(rm % M, BLOCK_M), BLOCK_M)
-    rbn = tl.max_contiguous(tl.multiple_of(rn % N, BLOCK_N), BLOCK_N)
+    if (stride_am == 1 and stride_ak == M) or (stride_am == K and stride_ak == 1):
+        ram = tl.max_contiguous(tl.multiple_of(rm % M, BLOCK_M), BLOCK_M)
+    else:
+        ram = rm % M
+    if (stride_bk == 1 and stride_bn == K) or (stride_bk == N and stride_bn == 1):
+        rbn = tl.max_contiguous(tl.multiple_of(rn % N, BLOCK_N), BLOCK_N)
+    else:
+        rbn = rn % N
+
     rk = tl.arange(0, BLOCK_K)
 
     idx_q = tl.program_id(1)  # batch dimension for BMM
@@ -87,9 +103,14 @@ aten_bmm = ExternKernelChoice(torch.bmm, "at::bmm_out")
 aten_baddbmm = ExternKernelChoice(torch.baddbmm, "at::baddbmm_out")
 
 
-@register_lowering(aten.bmm)
+@L.register_lowering(aten.bmm)
 def tuned_bmm(mat1, mat2, *, layout=None):
     if all(x.get_device().type == "cpu" for x in [mat1, mat2]):
+        # decompose to small ops when memory bound
+        if mat1.get_size()[1] == 1 or mat2.get_size()[2] == 1:
+            mat1 = L.unsqueeze(mat1, -1)
+            mat2 = L.unsqueeze(mat2, 1)
+            return L.sum_(L.mul(mat1, mat2), axis=2)
 
         def is_valid_to_require_contiguous(t):
             if not ir.is_storage_and_layout(t):
@@ -133,12 +154,21 @@ def tuned_bmm(mat1, mat2, *, layout=None):
                 layout=layout,
                 **mm_options(config, m, n, k, layout),
             )
+    static_shape, is_nonzero = _is_static_problem([mat1, mat2], layout)
+    if static_shape and is_nonzero and use_cutlass_template(layout, m, n, k):
+        from ..codegen.cuda.gemm_template import CUTLASSGemmTemplate
+
+        CUTLASSGemmTemplate.add_cutlass_gemm_choices(choices, layout, [mat1, mat2])
+
+    if len(choices) == 0:
+        log.warning("No choices for GEMM, using ATen backend as fallback")
+        choices.append(aten_bmm.bind((mat1, mat2), layout))
 
     return autotune_select_algorithm("bmm", choices, [mat1, mat2], layout)
 
 
 # Don't register this since it is slower than decomposing it
-# @register_lowering(aten.baddbmm)
+# @L.register_lowering(aten.baddbmm)
 def tuned_baddbmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
     m, n, k, layout, mat1, mat2, inp = mm_args(mat1, mat2, inp, layout=layout)
 

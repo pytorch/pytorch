@@ -68,7 +68,7 @@ class TORCH_API Unpickler {
       TypeResolver type_resolver,
       ObjLoader obj_loader,
       std::function<at::DataPtr(const std::string&)> read_record,
-      c10::optional<at::Device> device,
+      std::optional<at::Device> device,
       bool use_storage_device = false,
       TypeParserT type_parser = defaultTypeParser,
       std::shared_ptr<DeserializationStorageContext> storage_context = nullptr)
@@ -178,7 +178,7 @@ class TORCH_API Unpickler {
   IValue empty_tuple_;
 
   std::function<at::DataPtr(const std::string&)> read_record_;
-  c10::optional<at::Device> device_;
+  std::optional<at::Device> device_;
   // When set to true, Unpickler will ignore the pickled device and use the
   // device of the DataPtr returned by the read_record_ function. The default
   // value of this flag is false.

@@ -248,7 +248,7 @@ OwnerRRef::OwnerRRef(
     worker_id_t ownerId,
     const RRefId& rrefId,
     TypePtr type,
-    c10::optional<IValue> value,
+    std::optional<IValue> value,
     std::vector<c10::Device> devices)
     : RRef(ownerId, rrefId, type) {
   future_ = c10::make_intrusive<JitFuture>(type_, std::move(devices));

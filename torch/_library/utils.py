@@ -105,13 +105,19 @@ def is_functional_schema(schema: Any) -> bool:
     return is_functional(schema)
 
 
-def is_tensorlist_like_type(typ: torch.Type):
+# should be torch._C.JitType but that annotation is busted
+def is_tensorlist_like_type(typ: Any) -> bool:
     return (
         typ == _C.ListType(_C.TensorType.get())
         or typ == _C.ListType(_C.OptionalType(_C.TensorType.get()))
         or typ == _C.OptionalType(_C.ListType(_C.TensorType.get()))
         or typ == _C.OptionalType(_C.ListType(_C.OptionalType(_C.TensorType.get())))
     )
+
+
+# should be torch._C.JitType but that annotation is busted
+def is_tensor_like_type(typ: Any) -> bool:
+    return typ == _C.TensorType.get() or typ == _C.OptionalType(_C.TensorType.get())
 
 
 def mutates_and_returns_first_arg(op: torch._ops.OpOverload):
@@ -150,6 +156,24 @@ def mutates_and_returns_first_arg(op: torch._ops.OpOverload):
         if arg.alias_info is not None:
             return False
     return True
+
+
+def fill_defaults(schema, args, kwargs):
+    new_args = []
+    new_kwargs = {}
+    for i in range(len(schema.arguments)):
+        info = schema.arguments[i]
+        if info.kwarg_only:
+            if info.name in kwargs:
+                new_kwargs[info.name] = kwargs[info.name]
+            else:
+                new_kwargs[info.name] = info.default_value
+        else:
+            if i < len(args):
+                new_args.append(args[i])
+            else:
+                new_args.append(info.default_value)
+    return tuple(new_args), new_kwargs
 
 
 def zip_schema(
@@ -199,3 +223,35 @@ def requires_set_python_module() -> bool:
     the C++ op with a python module.
     """
     return getattr(_utils_internal, "REQUIRES_SET_PYTHON_MODULE", True)
+
+
+def handle_dispatch_mode(curr_mode, op_overload, *args, **kwargs):
+    assert isinstance(curr_mode, torch.utils._python_dispatch.TorchDispatchMode)
+    overload_types = []
+    args_flattened, _ = torch.utils._pytree.tree_flatten((args, kwargs.values()))
+    for a in args_flattened:
+        # TODO: need to double check the semantics of the "types" argument to torch_dispatch.
+        # It's generated in PyInterpreter.cpp, but seems to be generated in two places,
+        # where in one case we only include tensors with the python key, and in another
+        # we include **all** tensors.
+        if isinstance(a, torch.Tensor) and torch._C._dispatch_keys(a).has(
+            torch._C.DispatchKey.Python
+        ):
+            overload_types.append(type(a))
+    # TODO: check that I got these args correct (in C++, we pass in "0000"??)
+
+    return curr_mode.__torch_dispatch__(op_overload, overload_types, args, kwargs)
+
+
+def has_kwarg_only_args(schema: _C.FunctionSchema):
+    return any(a.kwarg_only for a in schema.arguments)
+
+
+def has_kwarg_only_tensors(schema: _C.FunctionSchema):
+    for a in schema.arguments:
+        if not (is_tensor_like_type(a.type) or is_tensorlist_like_type(a.type)):
+            continue
+        if not a.kwarg_only:
+            continue
+        return True
+    return False

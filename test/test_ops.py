@@ -819,8 +819,9 @@ class TestCommon(TestCase):
                 self.assertEqual(expected, out)
 
                 if compare_strides_and_data_ptrs:
-                    stride_msg = "Strides are not the same! Original strides were {} and strides are now {}".format(
-                        original_strides, final_strides
+                    stride_msg = (
+                        f"Strides are not the same! Original strides were {original_strides} "
+                        f"and strides are now {final_strides}"
                     )
                     self.assertEqual(original_strides, final_strides, msg=stride_msg)
                     self.assertEqual(original_ptrs, final_ptrs)
@@ -944,8 +945,9 @@ class TestCommon(TestCase):
                 self.assertEqual(expected, out)
 
                 if compare_strides_and_data_ptrs:
-                    stride_msg = "Strides are not the same! Original strides were {} and strides are now {}".format(
-                        original_strides, final_strides
+                    stride_msg = (
+                        "Strides are not the same! "
+                        f"Original strides were {original_strides} and strides are now {final_strides}"
                     )
                     self.assertEqual(original_strides, final_strides, msg=stride_msg)
                     self.assertEqual(original_ptrs, final_ptrs)
@@ -1516,16 +1518,12 @@ class TestCommon(TestCase):
             if len(partially_supported_forward) > 0:
                 msg = (
                     msg
-                    + "The following dtypes only worked on some samples during forward: {}.\n".format(
-                        partially_supported_forward
-                    )
+                    + f"The following dtypes only worked on some samples during forward: {partially_supported_forward}.\n"
                 )
             if len(partially_supported_backward) > 0:
                 msg = (
                     msg
-                    + "The following dtypes only worked on some samples during backward: {}.\n".format(
-                        partially_supported_backward
-                    )
+                    + f"The following dtypes only worked on some samples during backward: {partially_supported_backward}.\n"
                 )
             print(msg)
 
@@ -1550,30 +1548,26 @@ class TestCommon(TestCase):
         if len(supported_but_unclaimed_forward) > 0:
             msg = (
                 msg
-                + "The following dtypes worked in forward but are not listed by the OpInfo: {}.\n".format(
-                    supported_but_unclaimed_forward
-                )
+                + "The following dtypes worked in forward but are not listed by the OpInfo: "
+                + f"{supported_but_unclaimed_forward}.\n"
             )
         if len(supported_but_unclaimed_backward) > 0:
             msg = (
                 msg
-                + "The following dtypes worked in backward but are not listed by the OpInfo: {}.\n".format(
-                    supported_but_unclaimed_backward
-                )
+                + "The following dtypes worked in backward but are not listed by the OpInfo: "
+                + f"{supported_but_unclaimed_backward}.\n"
             )
         if len(claimed_but_unsupported_forward) > 0:
             msg = (
                 msg
-                + "The following dtypes did not work in forward but are listed by the OpInfo: {}.\n".format(
-                    claimed_but_unsupported_forward
-                )
+                + "The following dtypes did not work in forward but are listed by the OpInfo: "
+                + f"{claimed_but_unsupported_forward}.\n"
             )
         if len(claimed_but_unsupported_backward) > 0:
             msg = (
                 msg
-                + "The following dtypes did not work in backward but are listed by the OpInfo: {}.\n".format(
-                    claimed_but_unsupported_backward
-                )
+                + "The following dtypes did not work in backward "
+                + f"but are listed by the OpInfo: {claimed_but_unsupported_backward}.\n"
             )
 
         all_claimed_but_unsupported = set.union(
