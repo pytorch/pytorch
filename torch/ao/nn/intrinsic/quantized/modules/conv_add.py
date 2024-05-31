@@ -42,8 +42,8 @@ class ConvAdd2d(nnq.Conv2d):
         return 'QuantizedConvAdd2d'
 
     @classmethod
-    def from_float(cls, mod):
-        return super().from_float(mod)
+    def from_float(cls, mod, use_precomputed_fake_quant=False):
+        return super().from_float(mod, use_precomputed_fake_quant=use_precomputed_fake_quant)
 
     @classmethod
     def from_reference(cls, ref_qconv, output_scale, output_zero_point):
@@ -85,8 +85,8 @@ class ConvAddReLU2d(nnq.Conv2d):
         return 'QuantizedConvAddReLU2d'
 
     @classmethod
-    def from_float(cls, mod):
-        return super().from_float(mod)
+    def from_float(cls, mod, use_precomputed_fake_quant=False):
+        return super().from_float(mod, use_precomputed_fake_quant=use_precomputed_fake_quant)
 
     @classmethod
     def from_reference(cls, ref_qconv, output_scale, output_zero_point):
