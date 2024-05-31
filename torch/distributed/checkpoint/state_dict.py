@@ -1085,8 +1085,8 @@ def set_model_state_dict(
 def set_optimizer_state_dict(
     model: nn.Module,
     optimizers: Union[torch.optim.Optimizer, Iterable[torch.optim.Optimizer]],
-    *,
     optim_state_dict: OptimizerStateType,
+    *,
     options: Optional[StateDictOptions] = None,
 ) -> None:
     """Load the optimizers state_dict.
