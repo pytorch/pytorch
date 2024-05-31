@@ -1218,7 +1218,7 @@ elif [[ "${TEST_CONFIG}" == *xla* ]]; then
   install_torchvision
   build_xla
   test_xla
-elif [[ "${TEST_CONFIG}" == *executorch* ]]; then
+elif [[ "${TEST_CONFIG}" == *executorch* && "${TEST_CONFIG}" != *experimental-split-build*]]; then
   test_executorch
 elif [[ "$TEST_CONFIG" == 'jit_legacy' ]]; then
   test_python_legacy_jit
@@ -1238,15 +1238,15 @@ elif [[ "${TEST_CONFIG}" == *inductor_distributed* ]]; then
   test_inductor_distributed
 elif [[ "${TEST_CONFIG}" == *inductor-micro-benchmark* ]]; then
   test_inductor_micro_benchmark
-elif [[ "${TEST_CONFIG}" == *huggingface* ]]; then
+elif [[ "${TEST_CONFIG}" == *huggingface* && "${TEST_CONFIG}" != *experimental-split-build*]]; then
   install_torchvision
   id=$((SHARD_NUMBER-1))
   test_dynamo_benchmark huggingface "$id"
-elif [[ "${TEST_CONFIG}" == *timm* ]]; then
+elif [[ "${TEST_CONFIG}" == *timm* && "${TEST_CONFIG}" != *experimental-split-build*]]; then
   install_torchvision
   id=$((SHARD_NUMBER-1))
   test_dynamo_benchmark timm_models "$id"
-elif [[ "${TEST_CONFIG}" == *torchbench* ]]; then
+elif [[ "${TEST_CONFIG}" == *torchbench* && "${TEST_CONFIG}" != *experimental-split-build*]]; then
   if [[ "${TEST_CONFIG}" == *cpu_inductor* ]]; then
     install_torchaudio cpu
   else
@@ -1277,25 +1277,25 @@ elif [[ "${TEST_CONFIG}" == *torchbench* ]]; then
     fi
     PYTHONPATH=$(pwd)/torchbench test_dynamo_benchmark torchbench "$id"
   fi
-elif [[ "${TEST_CONFIG}" == *inductor_cpp_wrapper_abi_compatible* ]]; then
+elif [[ "${TEST_CONFIG}" == *inductor_cpp_wrapper_abi_compatible* && "${TEST_CONFIG}" != *experimental-split-build*]]; then
   install_torchvision
   test_inductor_cpp_wrapper_abi_compatible
-elif [[ "${TEST_CONFIG}" == *inductor* && "${SHARD_NUMBER}" == 1 ]]; then
+elif [[ "${TEST_CONFIG}" == *inductor* && "${SHARD_NUMBER}" == 1 && "${TEST_CONFIG}" != *experimental-split-build*]]; then
   install_torchvision
   test_inductor
   test_inductor_distributed
-elif [[ "${TEST_CONFIG}" == *dynamo* && "${SHARD_NUMBER}" == 1 && $NUM_TEST_SHARDS -gt 1 ]]; then
+elif [[ "${TEST_CONFIG}" == *dynamo* && "${SHARD_NUMBER}" == 1 && $NUM_TEST_SHARDS -gt 1 && "${TEST_CONFIG}" != *experimental-split-build*]]; then
   install_torchvision
   test_dynamo_shard 1
   test_aten
-elif [[ "${TEST_CONFIG}" == *dynamo* && $SHARD_NUMBER -gt 1 && $NUM_TEST_SHARDS -gt 1 ]]; then
+elif [[ "${TEST_CONFIG}" == *dynamo* && $SHARD_NUMBER -gt 1 && $NUM_TEST_SHARDS -gt 1 && "${TEST_CONFIG}" != *experimental-split-build*]]; then
   install_torchvision
   test_dynamo_shard "${SHARD_NUMBER}"
-elif [[ "${BUILD_ENVIRONMENT}" == *rocm* && -n "$TESTS_TO_INCLUDE" ]]; then
+elif [[ "${BUILD_ENVIRONMENT}" == *rocm* && -n "$TESTS_TO_INCLUDE" && "${TEST_CONFIG}" != *experimental-split-build*]]; then
   install_torchvision
   test_python_shard "$SHARD_NUMBER"
   test_aten
-elif [[ "${SHARD_NUMBER}" == 1 && $NUM_TEST_SHARDS -gt 1 ]]; then
+elif [[ "${SHARD_NUMBER}" == 1 && $NUM_TEST_SHARDS -gt 1 && "${TEST_CONFIG}" != *experimental-split-build*]]; then
   test_without_numpy
   install_torchvision
   test_python_shard 1
@@ -1304,7 +1304,7 @@ elif [[ "${SHARD_NUMBER}" == 1 && $NUM_TEST_SHARDS -gt 1 ]]; then
   if [[ "${BUILD_ENVIRONMENT}" == *xpu* ]]; then
     test_xpu_bin
   fi
-elif [[ "${SHARD_NUMBER}" == 2 && $NUM_TEST_SHARDS -gt 1 ]]; then
+elif [[ "${SHARD_NUMBER}" == 2 && $NUM_TEST_SHARDS -gt 1 && "${TEST_CONFIG}" != *experimental-split-build*]]; then
   install_torchvision
   test_python_shard 2
   test_libtorch 2
@@ -1312,7 +1312,7 @@ elif [[ "${SHARD_NUMBER}" == 2 && $NUM_TEST_SHARDS -gt 1 ]]; then
   test_custom_script_ops
   test_custom_backend
   test_torch_function_benchmark
-elif [[ "${SHARD_NUMBER}" -gt 2 ]]; then
+elif [[ "${SHARD_NUMBER}" -gt 2 && "${TEST_CONFIG}" != *experimental-split-build*]]; then
   # Handle arbitrary number of shards
   install_torchvision
   test_python_shard "$SHARD_NUMBER"
@@ -1324,13 +1324,17 @@ elif [[ "${BUILD_ENVIRONMENT}" == *-mobile-lightweight-dispatch* ]]; then
   test_libtorch
 elif [[ "${TEST_CONFIG}" = docs_test ]]; then
   test_docs_test
-elif [[ "${BUILD_ENVIRONMENT}" == *xpu* ]]; then
+elif [[ "${BUILD_ENVIRONMENT}" == *xpu* && "${TEST_CONFIG}" != *experimental-split-build*]]; then
   install_torchvision
   test_python
   test_aten
   test_xpu_bin
 else
-  install_torchvision
+
+  if [[ "${TEST_CONFIG}" != *experimental-split-build* ]]
+    install_torchvision
+  fi
+
   install_monkeytype
   test_python
   test_aten
