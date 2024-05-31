@@ -38,7 +38,7 @@ if _running_with_deploy():
 else:
     from .torch_version import __version__ as __version__
 
-from typing import Any, Callable, Dict, Optional, Set, Tuple, Type, TYPE_CHECKING, Union, List
+from typing import Any, Callable, Dict, Optional, Set, Tuple, Type, TYPE_CHECKING, List, Union
 import builtins
 
 __all__ = [
