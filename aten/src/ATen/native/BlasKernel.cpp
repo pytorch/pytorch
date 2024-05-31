@@ -1,13 +1,20 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/Context.h>
 #include <ATen/Config.h>
 #include <ATen/OpMathType.h>
+#include <ATen/Parallel.h>
 #include <c10/core/ScalarType.h>
 #include <c10/util/Exception.h>
+#include <c10/util/Unroll.h>
 #include <c10/util/complex.h>
 #include <c10/util/irange.h>
 #include <algorithm>
 #include <climits>
 #include <limits>
+
+#if defined(__aarch64__) && !defined(C10_MOBILE)
+#include <arm_neon.h>
+#endif
 
 namespace {
 
@@ -74,24 +81,53 @@ extern "C" void sgemv_(char *trans, int *m, int *n, float *alpha, float *a, int 
 namespace at::native {
 
 namespace blas_impl {
+#if defined(__aarch64__) && !defined(C10_MOBILE)
+void fp16_gemv_notrans(
+    const int m,
+    const int n,
+    const float alpha,
+    const float16_t* a,
+    const int lda,
+    const float16_t* x,
+    const int incx,
+    const float beta,
+    float16_t* y,
+    const int incy);
+
+void fp16_gemv_trans(
+    const int m,
+    const int n,
+    const float alpha,
+    const float16_t* a,
+    const int lda,
+    const float16_t* x,
+    const int incx,
+    const float beta,
+    float16_t* y,
+    const int incy);
+#endif
 
 template <typename scalar_t>
-bool scal_use_fast_path(int64_t n, int64_t incx) {
+bool scal_use_fast_path(C10_UNUSED int64_t n, C10_UNUSED int64_t incx) {
   return false;
 }
 
 template <typename scalar_t>
-bool gemv_use_fast_path(int64_t m, int64_t n, int64_t lda, int64_t incx, int64_t incy) {
+bool gemv_use_fast_path(C10_UNUSED int64_t m, C10_UNUSED int64_t n,
+                        C10_UNUSED int64_t lda, C10_UNUSED int64_t incx, C10_UNUSED int64_t incy) {
   return false;
 }
 
 template <typename scalar_t>
-void scal_fast_path(int *n, scalar_t *a, scalar_t *x, int *incx) {
+void scal_fast_path(C10_UNUSED int *n, C10_UNUSED scalar_t *a, C10_UNUSED scalar_t *x, C10_UNUSED int *incx) {
   TORCH_INTERNAL_ASSERT(false, "scal_fast_path shouldn't be called for this configuration");
 }
 
 template <typename scalar_t>
-void gemv_fast_path(const char *trans, const int *m, const int *n, const scalar_t *alpha, const scalar_t *a, const int *lda, const scalar_t *x, const int *incx, const scalar_t *beta, scalar_t *y, const int *incy) {
+void gemv_fast_path(C10_UNUSED const char *trans, C10_UNUSED const int *m, C10_UNUSED const int *n,
+                    C10_UNUSED  const scalar_t *alpha, C10_UNUSED const scalar_t *a, C10_UNUSED const int *lda,
+                    C10_UNUSED  const scalar_t *x, C10_UNUSED const int *incx, C10_UNUSED const scalar_t *beta,
+                    C10_UNUSED  scalar_t *y, C10_UNUSED const int *incy) {
   TORCH_INTERNAL_ASSERT(false, "gemv_fast_path shouldn't be called for this configuration");
 }
 
@@ -155,7 +191,366 @@ INSTANTIATE(int16_t);
 INSTANTIATE(int);
 INSTANTIATE(int64_t);
 INSTANTIATE(c10::BFloat16);
+#if defined(__aarch64__) && !defined(C10_MOBILE)
+template <>
+bool scal_use_fast_path<at::Half>(C10_UNUSED int64_t n, C10_UNUSED int64_t incx) {
+  return false;
+}
+
+template <>
+bool gemv_use_fast_path<at::Half>(
+    C10_UNUSED int64_t m,
+    C10_UNUSED int64_t n,
+    C10_UNUSED int64_t lda,
+    C10_UNUSED int64_t incx,
+    C10_UNUSED int64_t incy) {
+  return true;
+}
+
+#ifdef __ARM_FEATURE_FP16_SCALAR_ARITHMETIC
+static inline float16_t reduce(float16x4_t x) {
+        auto sum = vpadd_f16(x, x);
+        return vget_lane_f16(vpadd_f16(sum, sum), 0);
+}
+static inline float16_t reduce(float16x8_t x) {
+        return reduce(vadd_f16(vget_low_f16(x), vget_high_f16(x)));
+}
+
+/*
+ * NOTE [ GGML Copyright Notice ]
+ * The below reduce overload and
+ * fp16_gemv_trans_fp16_arith_by_dot_products function is adapted from
+ * llama.cpp's ggml_vec_dot_f16 and surrounding utility functions, so
+ * here is the required copyright notice:
+ *
+ * MIT License
+ *
+ * Copyright (c) 2023-2024 The ggml authors
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in all
+ * copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+ * SOFTWARE.
+ */
+// We need the shift for reduce(), hence the extra constants.
+static constexpr auto kF16ElementsPerIterationShift = 7;
+static constexpr auto kF16ElementsPerIteration = 1 << kF16ElementsPerIterationShift;
+static_assert(kF16ElementsPerIteration == 128);
+
+static constexpr auto kF16ElementsPerRegisterShift = 3;
+static constexpr auto kF16ElementsPerRegister = 1 << kF16ElementsPerRegisterShift;
+static_assert(kF16ElementsPerRegister == 8);
+
+static constexpr auto kF16RegistersPerIterationShift = kF16ElementsPerIterationShift - kF16ElementsPerRegisterShift;
+static constexpr auto kF16RegistersPerIteration = 1 << kF16RegistersPerIterationShift;
+static_assert(kF16RegistersPerIteration == kF16ElementsPerIteration / kF16ElementsPerRegister);
+
+static inline double reduce(float16x8_t x[kF16RegistersPerIteration]) {
+  int offset = kF16RegistersPerIteration;
+  c10::ForcedUnroll<kF16RegistersPerIterationShift>{}([&offset, &x](auto idx) {
+    offset /= 2;
+    for (int i = 0; i < offset; ++i) {
+      x[i] = vaddq_f16(x[i], x[offset + i]);
+    }
+  });
+  const float32x4_t t0 = vcvt_f32_f16(vget_low_f16(x[0]));
+  const float32x4_t t1 = vcvt_f32_f16(vget_high_f16(x[0]));
+  return (double)vaddvq_f32(vaddq_f32(t0, t1));
+}
+
+static inline float16x8_t f16_fma(float16x8_t a, float16x8_t b, float16x8_t c) {
+#ifdef __ARM_FEATURE_FMA
+  return vfmaq_f16(a, b, c);
+#else
+  return vaddq_f16(a, vmulq_f16(b, c));
+#endif
+}
+
+// Rather than unrolling to process multiple rows (transposed columns)
+// of matrix A at once as done in fp16_gemv_trans_fp16_arith, unroll
+// along an individual dot product.
+static void fp16_gemv_trans_fp16_arith_by_dot_products(const int m, const int n, const float16_t* a, const int lda, const float16_t *x, float16_t* y, int incy) {
+  parallel_for(0, n, 1, [&](int begin, int end) {
+  for (int i = begin; i < end; ++i) {
+      float16x8_t sum[kF16RegistersPerIteration] = {vdupq_n_f16(0)};
+
+      const auto m_aligned = m & ~(kF16ElementsPerIteration - 1);
+      for (int j = 0; j < m_aligned ; j += kF16ElementsPerIteration) {
+        for (int k = 0; k < kF16RegistersPerIteration; ++k) {
+          const auto temp_x = vld1q_f16(x + j + k * kF16ElementsPerRegister);
+          const auto temp_a = vld1q_f16(a + lda * i + j + k * kF16ElementsPerRegister);
+          sum[k] = f16_fma(sum[k], temp_x, temp_a);
+        }
+      }
+      auto reducedSum = reduce(sum);
+
+      for (int j = m_aligned; j < m; ++j) {
+        reducedSum += x[j] * a[lda * i + j];
+      }
+      y[i * incy] = reducedSum;
+  }
+  });
+}
+
+#endif
+
+static inline float reduce(float32x4_t x) {
+        auto sum = vpaddq_f32(x, x);
+        return vgetq_lane_f32(vpaddq_f32(sum, sum), 0);
+}
+
+static inline float32x4_t f32_fma(float32x4_t a, float32x4_t b, float32x4_t c) {
+#ifdef __ARM_FEATURE_FMA
+  return vfmaq_f32(a, b, c);
+#else
+  return vaddq_f32(a, vmulq_f32(b, c));
+#endif
+}
+
+static inline float32x4_t f32_fma_low_f16(float32x4_t a, float16x8_t b, float16x8_t c) {
+#ifdef __ARM_FEATURE_FP16_FML
+  // NOTE: this instruction is an optional instruction in ARM v8.2 and
+  // v8.3, but mandatory in v8.4 per
+  // https://developer.arm.com/documentation/ddi0596/2021-03/SIMD-FP-Instructions/FMLAL--FMLAL2--vector---Floating-point-fused-Multiply-Add-Long-to-accumulator--vector--?lang=en
+  // I'm not certain that I have the right feature test macro.
+  return vfmlalq_low_f16(a, b, c);
+#else
+  return f32_fma(a, vcvt_f32_f16(vget_low_f16(b)), vcvt_f32_f16(vget_low_f16(c)));
+#endif
+}
+
+static inline float32x4_t f32_fma_high_f16(float32x4_t a, float16x8_t b, float16x8_t c) {
+#ifdef __ARM_FEATURE_FP16_FML
+  // See above note about this instruction.
+  return vfmlalq_high_f16(a, b, c);
+#else
+  return f32_fma(a, vcvt_f32_f16(vget_high_f16(b)), vcvt_f32_f16(vget_high_f16(c)));
+#endif
+}
+
+// The below reduce overload and
+// fp16_gemv_trans_fp32_arith_by_dot_products are adapted from
+// llama.cpp's ggml_vec_dot_f32 and surrounding utility functions. See
+// NOTE [ GGML Copyright Notice ] above for the required notice.
+
+// We need the shift for reduce(), hence the extra constants.
+static constexpr auto kF32ElementsPerIterationShift = 5;
+static constexpr auto kF32ElementsPerIteration = 1 << kF32ElementsPerIterationShift;
+static_assert(kF32ElementsPerIteration == 32);
+
+static constexpr auto kF32ElementsPerRegisterShift = 2;
+static constexpr auto kF32ElementsPerRegister = 1 << kF32ElementsPerRegisterShift;
+static_assert(kF32ElementsPerRegister == 4);
+
+static constexpr auto kF32RegisterPairsPerIteration = 4;
+static constexpr auto kF32RegistersPerIteration = kF32RegisterPairsPerIteration * 2;
+static constexpr auto kF32RegistersPerIterationShift = 3;
+static_assert(kF32RegistersPerIteration == kF32ElementsPerIteration / kF32ElementsPerRegister);
+static_assert(kF32RegistersPerIteration == 1 << kF32RegistersPerIterationShift);
+
+static inline double reduce(float32x4_t x[kF32RegistersPerIteration]) {
+  int offset = kF32RegistersPerIteration;
+  c10::ForcedUnroll<kF32RegistersPerIterationShift>{}([&offset, &x](auto idx) {
+    offset /= 2;
+    for (int i = 0; i < offset; ++i) {
+      x[i] = vaddq_f32(x[i], x[offset + i]);
+    }
+  });
+  return vaddvq_f32(x[0]);
+}
+
+// On my Apple M1 Macbook (which is ARM v8.5 and thus has the
+// instructions f32_fma_{low,high}_f16 is targeting), this kernel has
+// equivalent performance to the fp16-native kernel.
+static void fp16_gemv_trans_fp32_arith_by_dot_products(const int m, const int n, const float16_t* a, const int lda, const float16_t *x, float16_t* y, int incy) {
+  parallel_for(0, n, 1, [&](int begin, int end) {
+  for (int i = begin; i < end; ++i) {
+      float32x4_t sum[kF32RegistersPerIteration] = {vdupq_n_f32(0)};
+
+      const auto m_aligned = m & ~(kF32ElementsPerIteration - 1);
+      for (int j = 0; j < m_aligned ; j += kF32ElementsPerIteration) {
+        c10::ForcedUnroll<kF32RegisterPairsPerIteration>{}([x, a, lda, i, j, &sum](auto k) {
+          // Load a pair of f32 registers at a time.
+          const auto temp_x = vld1q_f16(x + j + k * 2 * kF32ElementsPerRegister);
+          const auto temp_a = vld1q_f16(a + lda * i + j + k * 2 * kF32ElementsPerRegister);
+
+          sum[2 * k] = f32_fma_low_f16(sum[2 * k], temp_x, temp_a);
+          sum[2 * k + 1] = f32_fma_high_f16(sum[2 * k + 1], temp_x, temp_a);
+        });
+      }
+      auto reducedSum = reduce(sum);
+
+      for (int j = m_aligned; j < m; ++j) {
+        reducedSum += x[j] * a[lda * i + j];
+      }
+      y[i * incy] = reducedSum;
+  }
+  });
+}
+
+void fp16_gemv_trans(
+    const int m,
+    const int n,
+    const float alpha,
+    const float16_t* a,
+    const int lda,
+    const float16_t* x,
+    const int incx,
+    const float beta,
+    float16_t* y,
+    const int incy) {
+  if (incx == 1 && alpha == 1.0 && beta == 0.0) {
+#ifdef __ARM_FEATURE_FP16_SCALAR_ARITHMETIC
+    if (at::globalContext().allowFP16ReductionCPU()) {
+      return fp16_gemv_trans_fp16_arith_by_dot_products(m, n, a, lda, x, y, incy);
+    }
+#endif
+    return fp16_gemv_trans_fp32_arith_by_dot_products(m, n, a, lda, x, y, incy);
+  }
+  for (const auto i : c10::irange(n)) {
+    float sum = 0;
+    const auto row_ = a + lda * i;
+    for (const auto j : c10::irange(m)) {
+      sum += x[j * incx] * row_[j];
+    }
+    if (beta == 0.0) {
+      y[i * incy] = alpha * sum;
+    } else {
+      y[i * incy] = beta * y[i * incy] + alpha * sum;
+    }
+  }
+}
+
+
+#ifdef __ARM_FEATURE_FP16_SCALAR_ARITHMETIC
+static void fp16_gemv_notrans_fp16_arith(int m, int n, const float16_t* a, const int lda, const float16_t *x, float16_t *y) {
+  for (auto j = 0; j < n; j++) {
+    auto vecCol = vdup_n_f16(x[j]);
+    const auto* column = a + lda * j;
+    for (auto i = 0; i < m; i += 4) {
+      auto yf16 = y + i;
+      auto matRow = vld1_f16(column + i);
+      auto resVec = j != 0 ? vld1_f16(yf16) : vdup_n_f16(0);
+      resVec = vfma_lane_f16(resVec, matRow, vecCol, 0);
+      vst1_f16(yf16, resVec);
+    }
+  }
+}
+#endif
+
+static void fp16_gemv_notrans_fp32_arith(int m, int n, const float16_t* a, const int lda, const float16_t *x, float16_t *y) {
+  std::vector<float> sum(m);
+  for (auto j = 0; j < n; j++) {
+    auto vecCol = vdup_n_f32(x[j]);
+    const auto* column = a + lda * j;
+    for (auto i = 0; i < m; i += 4) {
+      auto sf32 = sum.data() + i;
+      auto matRow = vcvt_f32_f16(vld1_f16(column + i));
+      auto resVec = j != 0 ? vld1q_f32(sf32) : vdupq_n_f32(0);
+      resVec = vfmaq_lane_f32(resVec, matRow, vecCol, 0);
+      vst1q_f32(sf32, resVec);
+    }
+  }
+
+  for (auto i = 0; i < m; i+= 4) {
+    vst1_f16(y + i, vcvt_f16_f32(vld1q_f32(sum.data() + i)));
+  }
+}
+
+void fp16_gemv_notrans(
+    const int m,
+    const int n,
+    const float alpha,
+    const float16_t* a,
+    const int lda,
+    const float16_t* x,
+    const int incx,
+    const float beta,
+    float16_t* y,
+    const int incy) {
+  if (incx == 1 && alpha == 1.0 && beta == 0.0 && m % 4 == 0 && incy == 1) {
+#ifdef __ARM_FEATURE_FP16_SCALAR_ARITHMETIC
+    return at::globalContext().allowFP16ReductionCPU() ? fp16_gemv_notrans_fp16_arith(m, n, a, lda, x, y)
+                                                       : fp16_gemv_notrans_fp32_arith(m, n, a, lda, x, y);
+#else
+    return fp16_gemv_notrans_fp32_arith(m, n, a, lda, x, y);
+#endif
+  }
+  std::vector<float> sum(m);
+  for (const auto j : c10::irange(n)) {
+    const auto* column_ = a + lda * j;
+    auto z = alpha * x[j * incx];
+    for (const auto i : c10::irange(m)) {
+      sum[i] += z * column_[i];
+    }
+  }
+  if (beta == 0.0) {
+    for (const auto i : c10::irange(m)) {
+      y[i * incy] = sum[i];
+    }
+  } else {
+    for (const auto i : c10::irange(m)) {
+      y[i * incy] += sum[i];
+    }
+  }
+}
+
+template <>
+void gemv_fast_path<at::Half>(
+    const char* trans,
+    const int* m,
+    const int* n,
+    const at::Half* alpha,
+    const at::Half* a,
+    const int* lda,
+    const at::Half* x,
+    const int* incx,
+    const at::Half* beta,
+    at::Half* y,
+    const int* incy) {
+  using namespace c10::detail;
+  if ((trans[0] == 'T') || (trans[0] == 't')) {
+    fp16_gemv_trans(
+        *m,
+        *n,
+        fp16_from_bits(alpha->x),
+        reinterpret_cast<const float16_t*>(a),
+        *lda,
+        reinterpret_cast<const float16_t*>(x),
+        *incx,
+        fp16_from_bits(beta->x),
+        reinterpret_cast<float16_t*>(y),
+        *incy);
+  } else {
+    fp16_gemv_notrans(
+        *m,
+        *n,
+        fp16_from_bits(alpha->x),
+        reinterpret_cast<const float16_t*>(a),
+        *lda,
+        reinterpret_cast<const float16_t*>(x),
+        *incx,
+        fp16_from_bits(beta->x),
+        reinterpret_cast<float16_t*>(y),
+        *incy);
+  }
+}
+#else
 INSTANTIATE(c10::Half);
+#endif
 #undef INSTANTIATE
 
 } // namespace blas_impl
@@ -164,12 +559,14 @@ template <typename scalar_t>
 inline void scal(int64_t n, scalar_t a, scalar_t *x, int64_t incx)
 {
   if (n == 1) incx = 1;
+#if AT_BUILD_WITH_BLAS()
   if (blas_impl::scal_use_fast_path<scalar_t>(n, incx)) {
     int i_n = (int)n;
     int i_incx = (int)incx;
     blas_impl::scal_fast_path<scalar_t>(&i_n, &a, x, &i_incx);
     return;
   }
+#endif
   for (const auto i : c10::irange(n)) {
     if (a == scalar_t(0)) {
       x[i * incx] = 0;
@@ -183,6 +580,7 @@ template<typename scalar_t>
 void gemv(char trans, int64_t m, int64_t n, scalar_t alpha, const scalar_t *a, int64_t lda, const scalar_t *x, int64_t incx, scalar_t beta, scalar_t *y, int64_t incy) {
   if(n == 1) lda = m;
 
+#if AT_BUILD_WITH_BLAS()
   if (blas_impl::gemv_use_fast_path<scalar_t>(m, n, lda, incx, incy)) {
     TORCH_CHECK(lda >= std::max<int64_t>(1L, m), "lda should be at least max(1,", m, "), but have ", lda);
     int i_m = (int)m;
@@ -193,6 +591,7 @@ void gemv(char trans, int64_t m, int64_t n, scalar_t alpha, const scalar_t *a, i
     blas_impl::gemv_fast_path<scalar_t>(&trans, &i_m, &i_n, &alpha, a, &i_lda, x, &i_incx, &beta, y, &i_incy);
     return;
   }
+#endif
 
   using opmath_t = at::opmath_type<scalar_t>;
   if ((trans == 'T') || (trans == 't')) {

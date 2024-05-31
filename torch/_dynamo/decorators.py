@@ -1,3 +1,4 @@
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 import torch
@@ -6,7 +7,6 @@ from . import trace_rules, variables
 from .comptime import comptime
 from .eval_frame import DisableContext, innermost_fn, RunOnlyContext
 from .exc import IncorrectUsage
-from .external_utils import is_compiling
 
 if TYPE_CHECKING:
     from torch._C._dynamo.eval_frame import (  # noqa: F401
@@ -168,20 +168,33 @@ def forbid_in_graph(fn):
 # Helper function to flatten a tensor subclass and apply a function to
 # all inner tensors that match the outer dim. Used to reduce duplication
 # across the various marking APIs.
-def _apply_func_to_inner_tensors_of_same_dim(func, t, *args):
+def _apply_func_to_inner_tensors_of_same_dim(func, t, *args, **kwargs):
     assert is_traceable_wrapper_subclass(t)
 
     attrs, ctx = t.__tensor_flatten__()
     for attr in attrs:
         inner = getattr(t, attr)
         if inner.dim() == t.dim():
-            func(inner, *args)
+            func(inner, *args, **kwargs)
+
+
+@dataclass(frozen=True)
+class _DimRange:
+    """
+    This represents an dimension of a tensor and the corresponding
+    min and max values it can take.  Don't create this
+    class directly; instead, use :func:`mark_dynamic`.
+    """
+
+    dim: int
+    min: int
+    max: int
 
 
 @forbid_in_graph
-def mark_dynamic(t, index):
+def mark_dynamic(t, index, *, min=None, max=None):
     """
-    Mark a tensor as having a dynamic dim.
+    Mark a tensor as having a dynamic dim and set corresponding min and max range for the dim.
 
     [Note - on the state of mark_dynamic]
 
@@ -206,18 +219,22 @@ def mark_dynamic(t, index):
     if is_traceable_wrapper_subclass(t):
         # default behavior: mirror mark_dynamic() on all inner tensors with same dim as t
         # TODO: Make this configurable via a supported public API
-        _apply_func_to_inner_tensors_of_same_dim(mark_dynamic, t, index)
+        _apply_func_to_inner_tensors_of_same_dim(
+            mark_dynamic, t, index, min=min, max=max
+        )
 
     if isinstance(index, int):
         if not hasattr(t, "_dynamo_dynamic_indices"):
             t._dynamo_dynamic_indices = set()
+            t._dynamo_dynamic_range = set()
         # TODO(voz): Should we bounds check?
         t._dynamo_dynamic_indices.add(index)
+        t._dynamo_dynamic_range.add(_DimRange(index, min, max))
         return
 
     assert isinstance(index, (list, tuple))
     for i in index:
-        mark_dynamic(t, i)
+        mark_dynamic(t, i, min=min, max=max)
 
 
 @forbid_in_graph
@@ -255,7 +272,7 @@ def mark_static(t, index=None):
     Unlike mark_dynamic, this can be done inside a graph, in which case it
     induces specialization on the tensor.
     """
-    if is_compiling():
+    if torch.compiler.is_compiling():
         if index is None:
             for s in t.size():
                 comptime.force_static(s)

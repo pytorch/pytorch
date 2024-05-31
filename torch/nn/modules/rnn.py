@@ -3,6 +3,7 @@ import warnings
 import numbers
 import weakref
 from typing import List, Tuple, Optional, overload
+from typing_extensions import deprecated
 
 import torch
 from torch import Tensor
@@ -24,8 +25,11 @@ def _apply_permutation(tensor: Tensor, permutation: Tensor, dim: int = 1) -> Ten
     return tensor.index_select(dim, permutation)
 
 
+@deprecated(
+    "`apply_permutation` is deprecated, please use `tensor.index_select(dim, permutation)` instead",
+    category=FutureWarning,
+)
 def apply_permutation(tensor: Tensor, permutation: Tensor, dim: int = 1) -> Tensor:
-    warnings.warn("apply_permutation is deprecated, please use tensor.index_select(dim, permutation) instead")
     return _apply_permutation(tensor, permutation, dim)
 
 
@@ -183,9 +187,10 @@ class RNNBase(Module):
         first_fw = self._flat_weights[0]
         dtype = first_fw.dtype
         for fw in self._flat_weights:
-            if (not isinstance(fw.data, Tensor) or not (fw.data.dtype == dtype) or
-                    not fw.data.is_cuda or
-                    not torch.backends.cudnn.is_acceptable(fw.data)):
+            if (
+                not isinstance(fw, Tensor) or not (fw.dtype == dtype) or
+                not fw.is_cuda or not torch.backends.cudnn.is_acceptable(fw)
+            ):
                 return
 
         # If any parameters alias, we fall back to the slower, copying code path. This is
@@ -213,6 +218,7 @@ class RNNBase(Module):
                         self.batch_first, bool(self.bidirectional))
 
     def _apply(self, fn, recurse=True):
+        self._flat_weight_refs = []
         ret = super()._apply(fn, recurse)
 
         # Resets _flat_weights

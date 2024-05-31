@@ -1,16 +1,16 @@
 # Owner(s): ["oncall: jit"]
 
 import torch
-
-from torch.testing._internal.common_utils import TestCase
-from torch import float32, float16
 import torch._lazy
 import torch._lazy.ts_backend
+from torch import float16, float32
+
+from torch.testing._internal.common_utils import TestCase
 
 torch._lazy.ts_backend.init()
 
-class TestMetaKernel(TestCase):
 
+class TestMetaKernel(TestCase):
     def test_addmm_invalid_dtype(self):
         """Tests that the addmm meta kernel returns the correct output type"""
         input = torch.ones(2, 2, dtype=torch.float16).to("lazy")
@@ -35,5 +35,5 @@ class TestMetaKernel(TestCase):
         self.assertEqual(out_bias.dtype, torch.float16)
 
     def test_add_invalid_device(self):
-        with self.assertRaisesRegex(RuntimeError, '.*not a lazy tensor.*'):
+        with self.assertRaisesRegex(RuntimeError, ".*not a lazy tensor.*"):
             _ = torch.tensor([1], device="cpu") + torch.tensor([1], device="lazy")

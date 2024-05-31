@@ -151,39 +151,41 @@ class TestStaticQuantizedModule(QuantizationTestCase):
         model_dict = qlinear.state_dict()
         b = io.BytesIO()
         torch.save(model_dict, b)
-        b.seek(0)
-        loaded_dict = torch.load(b)
-        for key in model_dict:
-            if isinstance(model_dict[key], torch._C.ScriptObject):
-                assert isinstance(loaded_dict[key], torch._C.ScriptObject)
-                w_model, b_model = torch.ops.quantized.linear_unpack(model_dict[key])
-                w_loaded, b_loaded = torch.ops.quantized.linear_unpack(loaded_dict[key])
-                self.assertEqual(w_model, w_loaded)
-                self.assertEqual(b_model, b_loaded)
-            else:
-                self.assertEqual(model_dict[key], loaded_dict[key])
+        for weights_only in [True, False]:
+            b.seek(0)
+            loaded_dict = torch.load(b, weights_only=weights_only)
+            for key in model_dict:
+                if isinstance(model_dict[key], torch._C.ScriptObject):
+                    assert isinstance(loaded_dict[key], torch._C.ScriptObject)
+                    w_model, b_model = torch.ops.quantized.linear_unpack(model_dict[key])
+                    w_loaded, b_loaded = torch.ops.quantized.linear_unpack(loaded_dict[key])
+                    self.assertEqual(w_model, w_loaded)
+                    self.assertEqual(b_model, b_loaded)
+                else:
+                    self.assertEqual(model_dict[key], loaded_dict[key])
 
-        loaded_qlinear = qlinear_module(
-            in_features, out_features, **post_ops_kwargs)
-        loaded_qlinear.load_state_dict(loaded_dict)
-        linear_unpack = torch.ops.quantized.linear_unpack
-        self.assertEqual(linear_unpack(qlinear._packed_params._packed_params),
-                         linear_unpack(loaded_qlinear._packed_params._packed_params))
-        self.assertEqual(qlinear.scale, loaded_qlinear.scale)
-        self.assertEqual(qlinear.zero_point, loaded_qlinear.zero_point)
-        # scripting will add __overloads__ to __dict__, which is why we script a copy
-        # to be able to do the check in the next line
-        self.checkScriptable(copy.deepcopy(loaded_qlinear), [[X_q]], check_save_load=True)
-        self.assertTrue(dir(qlinear) == dir(loaded_qlinear))
-        self.assertEqual(qlinear._weight_bias(), loaded_qlinear._weight_bias())
-        self.assertEqual(qlinear._weight_bias(), torch.ops.quantized.linear_unpack(qlinear._packed_params._packed_params))
-        Z_q2 = loaded_qlinear(X_q)
-        self.assertEqual(Z_q, Z_q2)
+            loaded_qlinear = qlinear_module(
+                in_features, out_features, **post_ops_kwargs)
+            loaded_qlinear.load_state_dict(loaded_dict)
+            linear_unpack = torch.ops.quantized.linear_unpack
+            self.assertEqual(linear_unpack(qlinear._packed_params._packed_params),
+                             linear_unpack(loaded_qlinear._packed_params._packed_params))
+            self.assertEqual(qlinear.scale, loaded_qlinear.scale)
+            self.assertEqual(qlinear.zero_point, loaded_qlinear.zero_point)
+            # scripting will add __overloads__ to __dict__, which is why we script a copy
+            # to be able to do the check in the next line
+            self.checkScriptable(copy.deepcopy(loaded_qlinear), [[X_q]], check_save_load=True)
+            self.assertTrue(dir(qlinear) == dir(loaded_qlinear))
+            self.assertEqual(qlinear._weight_bias(), loaded_qlinear._weight_bias())
+            self.assertEqual(qlinear._weight_bias(), torch.ops.quantized.linear_unpack(qlinear._packed_params._packed_params))
+            Z_q2 = loaded_qlinear(X_q)
+            self.assertEqual(Z_q, Z_q2)
 
         # Test serialization
         b = io.BytesIO()
         torch.save(qlinear, b)
         b.seek(0)
+        # Don't test weights_only here as this is legacy code that saves the model
         loaded = torch.load(b)
         self.assertEqual(qlinear.weight(), loaded.weight())
         self.assertEqual(qlinear.scale, loaded.scale)
@@ -337,34 +339,36 @@ class TestStaticQuantizedModule(QuantizationTestCase):
             self.assertEqual(model_dict['bias'], b)
         bytes_io = io.BytesIO()
         torch.save(model_dict, bytes_io)
-        bytes_io.seek(0)
-        loaded_dict = torch.load(bytes_io)
-        for key in loaded_dict:
-            self.assertEqual(model_dict[key], loaded_dict[key])
-        loaded_qconv_module = type(qconv_module)(
-            in_channels, out_channels, kernel_size, stride, padding, dilation,
-            groups, use_bias, padding_mode=padding_mode)
-        loaded_qconv_module.load_state_dict(loaded_dict)
+        for weights_only in [True, False]:
+            bytes_io.seek(0)
+            loaded_dict = torch.load(bytes_io, weights_only=weights_only)
+            for key in loaded_dict:
+                self.assertEqual(model_dict[key], loaded_dict[key])
+            loaded_qconv_module = type(qconv_module)(
+                in_channels, out_channels, kernel_size, stride, padding, dilation,
+                groups, use_bias, padding_mode=padding_mode)
+            loaded_qconv_module.load_state_dict(loaded_dict)
 
-        self.assertTrue(dir(loaded_qconv_module) == dir(qconv_module))
-        self.assertTrue(module_name == loaded_qconv_module._get_name())
-        self.assertTrue(hasattr(loaded_qconv_module, '_packed_params'))
-        self.assertTrue(hasattr(loaded_qconv_module, '_weight_bias'))
+            self.assertTrue(dir(loaded_qconv_module) == dir(qconv_module))
+            self.assertTrue(module_name == loaded_qconv_module._get_name())
+            self.assertTrue(hasattr(loaded_qconv_module, '_packed_params'))
+            self.assertTrue(hasattr(loaded_qconv_module, '_weight_bias'))
 
-        self.assertEqual(qconv_module.weight(), loaded_qconv_module.weight())
-        if use_bias:
-            self.assertEqual(qconv_module.bias(), loaded_qconv_module.bias())
-        self.assertEqual(qconv_module.scale, loaded_qconv_module.scale)
-        self.assertEqual(qconv_module.zero_point,
-                         loaded_qconv_module.zero_point)
-        Y_loaded = loaded_qconv_module(*example_input_q)
-        np.testing.assert_array_almost_equal(
-            Y_exp.int_repr().numpy(), Y_loaded.int_repr().numpy(), decimal=0)
+            self.assertEqual(qconv_module.weight(), loaded_qconv_module.weight())
+            if use_bias:
+                self.assertEqual(qconv_module.bias(), loaded_qconv_module.bias())
+            self.assertEqual(qconv_module.scale, loaded_qconv_module.scale)
+            self.assertEqual(qconv_module.zero_point,
+                             loaded_qconv_module.zero_point)
+            Y_loaded = loaded_qconv_module(*example_input_q)
+            np.testing.assert_array_almost_equal(
+                Y_exp.int_repr().numpy(), Y_loaded.int_repr().numpy(), decimal=0)
 
         # Test serialization
         b = io.BytesIO()
         torch.save(qconv_module, b)
         b.seek(0)
+        # Don't test weights_only here as this is legacy code that saves the model
         loaded_conv = torch.load(b)
 
         self.assertEqual(loaded_conv.bias(), qconv_module.bias())
@@ -1449,34 +1453,36 @@ class TestDynamicQuantizedModule(QuantizationTestCase):
         self.assertEqual(model_dict['bias'], b)
         bytes_io = io.BytesIO()
         torch.save(model_dict, bytes_io)
-        bytes_io.seek(0)
-        loaded_dict = torch.load(bytes_io)
-        for key in loaded_dict:
-            self.assertEqual(model_dict[key], loaded_dict[key])
-        loaded_qconv_module = type(dynamic_module)(
-            in_channels, out_channels, kernel_size, stride=stride, padding=padding,
-            dilation=dilation, groups=groups, bias=bias, padding_mode=padding_mode)
-        loaded_qconv_module.load_state_dict(loaded_dict)
+        for weights_only in [True, False]:
+            bytes_io.seek(0)
+            loaded_dict = torch.load(bytes_io, weights_only=weights_only)
+            for key in loaded_dict:
+                self.assertEqual(model_dict[key], loaded_dict[key])
+            loaded_qconv_module = type(dynamic_module)(
+                in_channels, out_channels, kernel_size, stride=stride, padding=padding,
+                dilation=dilation, groups=groups, bias=bias, padding_mode=padding_mode)
+            loaded_qconv_module.load_state_dict(loaded_dict)
 
-        self.assertTrue(dir(loaded_qconv_module) == dir(dynamic_module))
-        self.assertTrue(dynamic_module._get_name() == loaded_qconv_module._get_name())
-        self.assertTrue(hasattr(loaded_qconv_module, '_packed_params'))
-        self.assertTrue(hasattr(loaded_qconv_module, '_weight_bias'))
+            self.assertTrue(dir(loaded_qconv_module) == dir(dynamic_module))
+            self.assertTrue(dynamic_module._get_name() == loaded_qconv_module._get_name())
+            self.assertTrue(hasattr(loaded_qconv_module, '_packed_params'))
+            self.assertTrue(hasattr(loaded_qconv_module, '_weight_bias'))
 
-        self.assertEqual(dynamic_module.weight(), loaded_qconv_module.weight())
-        if bias:
-            self.assertEqual(dynamic_module.bias(), loaded_qconv_module.bias())
-        self.assertEqual(dynamic_module.scale, loaded_qconv_module.scale)
-        self.assertEqual(dynamic_module.zero_point,
-                         loaded_qconv_module.zero_point)
-        Y_loaded = loaded_qconv_module(X_fp32, reduce_range)
-        np.testing.assert_array_almost_equal(
-            Y.numpy(), Y_loaded.numpy(), decimal=0)
+            self.assertEqual(dynamic_module.weight(), loaded_qconv_module.weight())
+            if bias:
+                self.assertEqual(dynamic_module.bias(), loaded_qconv_module.bias())
+            self.assertEqual(dynamic_module.scale, loaded_qconv_module.scale)
+            self.assertEqual(dynamic_module.zero_point,
+                             loaded_qconv_module.zero_point)
+            Y_loaded = loaded_qconv_module(X_fp32, reduce_range)
+            np.testing.assert_array_almost_equal(
+                Y.numpy(), Y_loaded.numpy(), decimal=0)
 
         # Test serialization
         b = io.BytesIO()
         torch.save(dynamic_module, b)
         b.seek(0)
+        # Don't test weights_only here as this is legacy code that saves the model
         loaded_conv = torch.load(b)
 
         self.assertEqual(loaded_conv.bias(), dynamic_module.bias())
@@ -1622,39 +1628,41 @@ class TestDynamicQuantizedModule(QuantizationTestCase):
         model_dict = qlinear.state_dict()
         b = io.BytesIO()
         torch.save(model_dict, b)
-        b.seek(0)
-        loaded_dict = torch.load(b)
-        for key in model_dict:
-            if isinstance(model_dict[key], torch._C.ScriptObject):
-                assert isinstance(loaded_dict[key], torch._C.ScriptObject)
-                w_model, b_model = torch.ops.quantized.linear_unpack(model_dict[key])
-                w_loaded, b_loaded = torch.ops.quantized.linear_unpack(loaded_dict[key])
-                self.assertEqual(w_model, w_loaded)
-                self.assertEqual(b_model, b_loaded)
-            else:
-                self.assertEqual(model_dict[key], loaded_dict[key])
-        loaded_qlinear = nnqd.Linear(in_features, out_features)
-        loaded_qlinear.load_state_dict(loaded_dict)
+        for weights_only in [True, False]:
+            b.seek(0)
+            loaded_dict = torch.load(b, weights_only=weights_only)
+            for key in model_dict:
+                if isinstance(model_dict[key], torch._C.ScriptObject):
+                    assert isinstance(loaded_dict[key], torch._C.ScriptObject)
+                    w_model, b_model = torch.ops.quantized.linear_unpack(model_dict[key])
+                    w_loaded, b_loaded = torch.ops.quantized.linear_unpack(loaded_dict[key])
+                    self.assertEqual(w_model, w_loaded)
+                    self.assertEqual(b_model, b_loaded)
+                else:
+                    self.assertEqual(model_dict[key], loaded_dict[key])
+            loaded_qlinear = nnqd.Linear(in_features, out_features)
+            loaded_qlinear.load_state_dict(loaded_dict)
 
-        linear_unpack = torch.ops.quantized.linear_unpack
-        self.assertEqual(linear_unpack(qlinear._packed_params._packed_params),
-                         linear_unpack(loaded_qlinear._packed_params._packed_params))
-        if use_bias:
-            self.assertEqual(qlinear.bias(), loaded_qlinear.bias())
-        self.assertTrue(dir(qlinear) == dir(loaded_qlinear))
-        self.assertTrue(hasattr(qlinear, '_packed_params'))
-        self.assertTrue(hasattr(loaded_qlinear, '_packed_params'))
-        self.assertTrue(hasattr(qlinear, '_weight_bias'))
-        self.assertTrue(hasattr(loaded_qlinear, '_weight_bias'))
+            linear_unpack = torch.ops.quantized.linear_unpack
+            self.assertEqual(linear_unpack(qlinear._packed_params._packed_params),
+                             linear_unpack(loaded_qlinear._packed_params._packed_params))
+            if use_bias:
+                self.assertEqual(qlinear.bias(), loaded_qlinear.bias())
+            self.assertTrue(dir(qlinear) == dir(loaded_qlinear))
+            self.assertTrue(hasattr(qlinear, '_packed_params'))
+            self.assertTrue(hasattr(loaded_qlinear, '_packed_params'))
+            self.assertTrue(hasattr(qlinear, '_weight_bias'))
+            self.assertTrue(hasattr(loaded_qlinear, '_weight_bias'))
 
-        self.assertEqual(qlinear._weight_bias(), loaded_qlinear._weight_bias())
-        self.assertEqual(qlinear._weight_bias(), torch.ops.quantized.linear_unpack(qlinear._packed_params._packed_params))
-        Z_dq2 = qlinear(X)
-        self.assertEqual(Z_dq, Z_dq2)
+            self.assertEqual(qlinear._weight_bias(), loaded_qlinear._weight_bias())
+            self.assertEqual(qlinear._weight_bias(), torch.ops.quantized.linear_unpack(qlinear._packed_params._packed_params))
+            Z_dq2 = qlinear(X)
+            self.assertEqual(Z_dq, Z_dq2)
 
         b = io.BytesIO()
         torch.save(qlinear, b)
         b.seek(0)
+        # Don't test weights_only here as this is legacy code that saves the model
         loaded = torch.load(b)
         self.assertEqual(qlinear.weight(), loaded.weight())
         self.assertEqual(qlinear.zero_point, loaded.zero_point)

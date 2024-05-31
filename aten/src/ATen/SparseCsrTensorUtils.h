@@ -243,22 +243,22 @@ inline std::string plainDimName(Layout layout) {
   }
 }
 
-inline int rowDimension(Layout layout, IntArrayRef size) {
+inline size_t rowDimension(Layout layout, IntArrayRef size) {
   return size.size() - (isCompressedRow(layout) ? 2 : 1);
 }
 
-inline int columnDimension(Layout layout, IntArrayRef size) {
+inline size_t columnDimension(Layout layout, IntArrayRef size) {
   return size.size() - (isCompressedColumn(layout) ? 2 : 1);
 }
 
-inline int compressedDimension(
+inline size_t compressedDimension(
     Layout layout,
     IntArrayRef size,
     size_t dense_ndim = 0) {
   return size.size() - dense_ndim - (isCompressedRow(layout) ? 2 : 1);
 }
 
-inline int plainDimension(
+inline size_t plainDimension(
     Layout layout,
     IntArrayRef size,
     size_t dense_ndim = 0) {
@@ -283,6 +283,21 @@ inline std::pair<Tensor, Tensor> getCompressedPlainIndices(Tensor const& self) {
       [&self] {
         return std::make_pair(self.ccol_indices(), self.row_indices());
       });
+}
+
+inline ScalarType getIndexDtype(Tensor const& self) {
+  switch (self.layout()) {
+    case kSparseCsr:
+    case kSparseBsr:
+      return self.crow_indices().scalar_type();
+    case kSparseCsc:
+    case kSparseBsc:
+      return self.ccol_indices().scalar_type();
+    case kSparse:
+      return self._indices().scalar_type();
+    default:
+      return ScalarType::Long;
+  }
 }
 
 inline Layout flip_compressed_layout(Layout layout) {

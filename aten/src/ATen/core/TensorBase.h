@@ -28,11 +28,11 @@ namespace c10 {
 class Scalar;
 }
 
-namespace torch { namespace autograd {
+namespace torch::autograd {
 
 struct Node;
 
-}} // namespace torch::autograd
+} // namespace torch::autograd
 
 namespace at {
 
@@ -147,7 +147,7 @@ class TORCH_API TensorBase {
   const TensorBase& fill_(const c10::Scalar& scalar) const;
   const TensorBase& zero_() const;
 
-  TensorBase to(at::TensorOptions options={}, bool non_blocking=false, bool copy=false, c10::optional<at::MemoryFormat> memory_format=c10::nullopt) const;
+  TensorBase to(at::TensorOptions options={}, bool non_blocking=false, bool copy=false, std::optional<at::MemoryFormat> memory_format=c10::nullopt) const;
 
   bool is_complex() const {
     return at::isComplexType(this->scalar_type());
@@ -249,7 +249,7 @@ class TORCH_API TensorBase {
     return impl_->strides();
   }
   // See impl::get_opt_names in ATen/NamedTensor.h for docs.
-  c10::optional<DimnameList> opt_names() const {
+  std::optional<DimnameList> opt_names() const {
     return impl::get_opt_names(unsafeGetTensorImpl());
   }
   // See impl::get_names in ATen/NamedTensor.h for docs.
@@ -507,10 +507,10 @@ class TORCH_API TensorBase {
     return impl_->is_mps();
   }
 
-  /// Returns if a `Tensor` is ort tensor.
-  bool is_ort() const {
+  /// Returns if a `Tensor` is maia tensor.
+  bool is_maia() const {
     // NB: this is not a native function to avoid dispatching overhead.
-    return impl_->is_ort();
+    return impl_->is_maia();
   }
 
   /// Returns if a `Tensor` is vulkan tensor.
@@ -594,10 +594,10 @@ class TORCH_API TensorBase {
     return mutable_data_ptr();
   }
 
-  template <typename T, std::enable_if_t<!std::is_const<T>::value, int> = 0>
+  template <typename T, std::enable_if_t<!std::is_const_v<T>, int> = 0>
   const T* const_data_ptr() const;
 
-  template <typename T, std::enable_if_t<std::is_const<T>::value, int> = 0>
+  template <typename T, std::enable_if_t<std::is_const_v<T>, int> = 0>
   const std::remove_const_t<T>* const_data_ptr() const;
 
   template <typename T>
@@ -712,7 +712,7 @@ class TORCH_API TensorBase {
   /// // f requires grad, has no operation creating it
   /// @endcode
 
-  /// \fn void backward(const Tensor & gradient={}, c10::optional<bool> retain_graph=c10::nullopt, bool create_graph=false, c10::optional<TensorList> inputs=c10::nullopt) const;
+  /// \fn void backward(const Tensor & gradient={}, std::optional<bool> retain_graph=c10::nullopt, bool create_graph=false, std::optional<TensorList> inputs=c10::nullopt) const;
   ///
   /// Computes the gradient of current tensor with respect to graph leaves.
   ///
@@ -831,9 +831,9 @@ class TORCH_API TensorBase {
   //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
   template <typename T>
-  using hook_return_void_t = std::enable_if_t<std::is_void<typename c10::invoke_result_t<T&, TensorBase>>::value, unsigned>;
+  using hook_return_void_t = std::enable_if_t<std::is_void_v<typename std::invoke_result_t<T&, TensorBase>>, unsigned>;
   template <typename T>
-  using hook_return_var_t = std::enable_if_t<std::is_same<typename c10::invoke_result_t<T&, TensorBase>, TensorBase>::value, unsigned>;
+  using hook_return_var_t = std::enable_if_t<std::is_same_v<typename std::invoke_result_t<T&, TensorBase>, TensorBase>, unsigned>;
 
   /// Registers a backward hook.
   ///
@@ -925,10 +925,11 @@ inline DeviceIndex get_device(const TensorBase& self) {
 }
 
 template <typename T>
+// NOLINTNEXTLINE(cppcoreguidelines-missing-std-forward)
 auto TensorBase::register_hook(T&& hook) const -> TensorBase::hook_return_void_t<T> {
   // Return the grad argument in case of a hook with void return type to have an
   // std::function with Tensor return type
-  static_assert(std::is_same<decltype(hook(TensorBase())), void>::value,
+  static_assert(std::is_same_v<decltype(hook(TensorBase())), void>,
                 "Expected hook to return void");
   return _register_hook([fn=std::forward<T>(hook)](const TensorBase& grad) {
     fn(grad);
@@ -1009,7 +1010,7 @@ struct ExclusivelyOwnedTraits<at::TensorBase> : public c10::ExclusivelyOwnedTens
 namespace at {
 
 inline c10::MaybeOwned<TensorBase> borrow_from_optional_tensor(
-    const c10::optional<TensorBase>& opt) {
+    const std::optional<TensorBase>& opt) {
   return opt.has_value()
     ? c10::MaybeOwned<TensorBase>::borrowed(*opt)
     : c10::MaybeOwned<TensorBase>::owned(std::in_place);
@@ -1026,9 +1027,9 @@ inline c10::MaybeOwned<TensorBase> TensorBase::expect_contiguous(MemoryFormat me
 namespace symint {
 
 template <typename T>
-using enable_if_symint = std::enable_if_t<std::is_same<T, c10::SymInt>::value>;
+using enable_if_symint = std::enable_if_t<std::is_same_v<T, c10::SymInt>>;
 template <typename T>
-using enable_if_int = std::enable_if_t<std::is_same<T, int64_t>::value>;
+using enable_if_int = std::enable_if_t<std::is_same_v<T, int64_t>>;
 
 template <typename T, typename = enable_if_symint<T>>
 c10::SymIntArrayRef sizes(const TensorBase& t) { return t.sym_sizes(); }

@@ -212,7 +212,7 @@ class TestModule(TestCase):
             str(m)
 
     @modules(module_db)
-    def test_pickle(self, device, dtype, module_info, training):
+    def test_save_load(self, device, dtype, module_info, training):
         # Test that module can be pickled and unpickled.
         module_cls = module_info.module_cls
         module_inputs = module_info.module_inputs_func(module_info, device=device, dtype=dtype,
@@ -229,18 +229,30 @@ class TestModule(TestCase):
                 m = module_cls(*args, **kwargs)
                 m.to(device).to(dtype)
                 m.train(training)
+                sd = m.state_dict()
 
                 # === Do forward pass. ===
                 args, kwargs = module_input.forward_input.args, module_input.forward_input.kwargs
                 output = m(*args, **kwargs)
 
-                # === Check unpickled module gives the same output. ===
+                # === Check saved/loaded module gives the same output. ===
                 with tempfile.TemporaryFile() as f:
                     torch.save(m, f)
                     f.seek(0)
                     m_copy = torch.load(f)
                     output_from_copy = m_copy(*args, **kwargs)
                     self.assertEqual(output, output_from_copy)
+
+                # === Check saved/loaded state_dict are the same (including weights_only load). ===
+                with tempfile.TemporaryFile() as f:
+                    torch.save(sd, f)
+                    f.seek(0)
+                    sd_copy = torch.load(f)
+                    self.assertEqual(sd_copy, sd)
+                    del sd_copy
+                    f.seek(0)
+                    sd_copy_wo = torch.load(f, weights_only=True)
+                    self.assertEqual(sd_copy_wo, sd)
 
     @skipMeta
     @modules([module_info for module_info in module_db
@@ -651,10 +663,10 @@ class TestModule(TestCase):
                 d = output.dim()
                 if (d == 4 and ((input_mem_format == torch.channels_last)
                                 or (module_mem_format == torch.channels_last and module_memformat_affects_out))):
-                    self.assertTrue(output.is_contiguous(memory_format=torch.channels_last))
+                    self.assertTrue(output.numel() == 0 or output.is_contiguous(memory_format=torch.channels_last))
                 elif (d == 5 and ((input_mem_format == torch.channels_last_3d)
                                   or (module_mem_format == torch.channels_last_3d and module_memformat_affects_out))):
-                    self.assertTrue(output.is_contiguous(memory_format=torch.channels_last_3d))
+                    self.assertTrue(output.numel() == 0 or output.is_contiguous(memory_format=torch.channels_last_3d))
                 else:
                     self.assertTrue(output.is_contiguous())
             return self._traverse_obj(output, inner_check_out_mem_format)
@@ -816,10 +828,8 @@ class TestModule(TestCase):
 
         for module_input, module_input_meta in zip(module_inputs, module_inputs_meta):
             c_args, c_kwargs = module_input.constructor_input.args, module_input.constructor_input.kwargs
-            fw_args, fw_kwargs = module_input.forward_input.args, module_input.forward_input.kwargs
 
             c_args_meta, c_kwargs_meta = module_input_meta.constructor_input.args, module_input_meta.constructor_input.kwargs
-            fw_args_meta, fw_kwargs_meta = module_input_meta.forward_input.args, module_input_meta.forward_input.kwargs
 
             m_cpu = module_cls(*c_args, **c_kwargs)
 
@@ -853,7 +863,8 @@ class TestModule(TestCase):
             else:
                 raise NotImplementedError(f"Unknown error type {error_input.error_on}")
 
-    @modules([module for module in module_db if not module.is_lazy])
+    # Only run this test for float32 because the test loops over all the dtypes
+    @modules([module for module in module_db if not module.is_lazy], allowed_dtypes=[torch.float32])
     @parametrize('swap', [True, False])
     @parametrize('set_grad', [True, False])
     @wrapSwapTensorsTest()
@@ -869,6 +880,7 @@ class TestModule(TestCase):
 
         for module_input in module_inputs:
             c_args, c_kwargs = module_input.constructor_input.args, module_input.constructor_input.kwargs
+            args, kwargs = module_input.forward_input.args, module_input.forward_input.kwargs
 
             m = module_cls(*c_args, **c_kwargs)
 
@@ -886,6 +898,17 @@ class TestModule(TestCase):
                     setattr(m, n, new_b)
             _to(m, set_grad=set_grad)
 
+            # Check .to() can be run after forward and backward with swap
+            has_params = len(list(m.parameters())) > 0
+            if swap and not set_grad and has_params:
+                out = m(*args, **kwargs)
+                if isinstance(out, tuple):
+                    out = out[0]
+                out.sum().backward()
+                m.to(dtype=torch.half)
+                # reset
+                m.to(dtype=torch.float32)
+
             prev_device, prev_dtype = device, dtype
             for device_, dtype_ in product(devices, dtypes):
                 # if device/dtype do not change, grad.to(device, dtype) is a no-op so
@@ -893,6 +916,7 @@ class TestModule(TestCase):
                 # parameters will be wrapped in an nn.Parameter before swapping
                 # which will cause the ._cdata to change
                 g_no_swap = device_ == prev_device and dtype_ == prev_dtype
+                prev_prev_device, prev_prev_dtype = prev_device, prev_dtype
                 prev_device, prev_dtype = device_, dtype_
 
                 p_ids_before = [id(p) for p in m.parameters()]
@@ -930,7 +954,6 @@ class TestModule(TestCase):
                         self.assertTrue(all(a == b for a, b in zip(g_cdatas_before, g_cdatas_after)))
                         self.assertTrue(all(a == b for a, b in zip(g_ids_before, g_ids_after)))
 
-
     @modules([module for module in module_db if not module.is_lazy], allowed_dtypes=[torch.float32])
     @parametrize('swap', [True, False])
     @wrapSwapTensorsTest()
@@ -960,16 +983,23 @@ class TestModule(TestCase):
             p_ids_after = [id(p) for p in m.parameters()]
             p_cdatas_after = [p._cdata for p in m.parameters()]
 
-            if swap:
-                # id same, ._cdata differs --> swapped cdata of THPVariable
-                self.assertTrue(all(a == b for a, b in zip(p_ids_before, p_ids_after)))
-                self.assertTrue(all(a != b for a, b in zip(p_cdatas_before, p_cdatas_after)))
-            else:
-                # id and ._cdata differ
-                # meta and device have different shallow copy types, so this will create a new
-                # parameter and assign it to the module
-                self.assertTrue(all(a != b for a, b in zip(p_ids_before, p_ids_after)))
-                self.assertTrue(all(a != b for a, b in zip(p_cdatas_before, p_cdatas_after)))
+            # id same, ._cdata differs --> swapped cdata of THPVariable
+            # Technically, meta and device have different shallow copy types, so when swap=False it will create a new
+            # parameter and assign it to the module BUT we opt into swap_tensors when either one is on meta.
+            self.assertTrue(all(a == b for a, b in zip(p_ids_before, p_ids_after)))
+            self.assertTrue(all(a != b for a, b in zip(p_cdatas_before, p_cdatas_after)))
+
+            # Test the opposite direction device --> meta
+            m = m.to(device="meta")
+
+            p_ids_after_meta = [id(p) for p in m.parameters()]
+            p_cdatas_after_meta = [p._cdata for p in m.parameters()]
+
+            # id same, ._cdata differs --> swapped cdata of THPVariable
+            # Technically, meta and device have different shallow copy types, so when swap=False it will create a new
+            # parameter and assign it to the module BUT we opt into swap_tensors when either one is on meta.
+            self.assertTrue(all(a == b for a, b in zip(p_ids_after, p_ids_after_meta)))
+            self.assertTrue(all(a != b for a, b in zip(p_cdatas_after, p_cdatas_after_meta)))
 
 
 instantiate_device_type_tests(TestModule, globals(), allow_mps=True)

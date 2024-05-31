@@ -60,7 +60,7 @@ def rebase_onto(
     repo._run_git("rebase", onto_branch, branch)
 
     if repo.rev_parse(branch) == repo.rev_parse(onto_branch):
-        raise Exception(SAME_SHA_ERROR)
+        raise Exception(SAME_SHA_ERROR)  # noqa: TRY002
 
     if dry_run:
         push_result = repo._run_git("push", "--dry-run", "-f", remote_url, refspec)
@@ -100,7 +100,7 @@ def rebase_ghstack_onto(
     repo._run_git("rebase", onto_branch, orig_ref)
 
     if repo.rev_parse(orig_ref) == repo.rev_parse(onto_branch):
-        raise Exception(SAME_SHA_ERROR)
+        raise Exception(SAME_SHA_ERROR)  # noqa: TRY002
 
     # steal the identity of the committer of the commit on the orig branch
     email = repo._run_git("log", orig_ref, "--pretty=format:%ae", "-1")
@@ -126,7 +126,7 @@ def rebase_ghstack_onto(
         print(push_result)
         if ghstack_result.returncode != 0:
             print(ghstack_result.stderr.decode("utf-8"))
-            raise Exception(f"\n```{push_result}```")
+            raise Exception(f"\n```{push_result}```")  # noqa: TRY002
         # The contents of a successful push result should look like:
         # Summary of changes (ghstack 0.6.0)
 

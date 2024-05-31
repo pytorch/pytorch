@@ -47,7 +47,7 @@ namespace torch::autograd {
 TORCH_API void backward(
     const variable_list& tensors,
     const variable_list& grad_tensors = {},
-    c10::optional<bool> retain_graph = c10::nullopt,
+    std::optional<bool> retain_graph = c10::nullopt,
     bool create_graph = false,
     const variable_list& inputs = {});
 
@@ -81,7 +81,7 @@ TORCH_API variable_list grad(
     const variable_list& outputs,
     const variable_list& inputs,
     const variable_list& grad_outputs = {},
-    c10::optional<bool> retain_graph = c10::nullopt,
+    std::optional<bool> retain_graph = c10::nullopt,
     bool create_graph = false,
     bool allow_unused = false);
 

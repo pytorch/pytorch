@@ -632,7 +632,7 @@ void spmm(
   auto algorithm = CUSPARSE_SPMM_CSR_ALG2;
 #endif
 
-  auto descB = at::cuda::sparse::CuSparseDnMatDescriptor(
+  auto descB = at::cuda::sparse::CuSparseConstDnMatDescriptor(
       transpose_B ? mat2_->mT() : *mat2_);
   auto descC = at::cuda::sparse::CuSparseDnMatDescriptor(*result_);
 
@@ -655,7 +655,7 @@ void spmm(
             opB,
             &alpha_,
             descA.descriptor(),
-            descB.descriptor(),
+            descB.unsafe_mutable_descriptor(),
             &beta_,
             descC.descriptor(),
             compute_type,
@@ -672,7 +672,7 @@ void spmm(
             opB,
             &alpha_,
             descA.descriptor(),
-            descB.descriptor(),
+            descB.unsafe_mutable_descriptor(),
             &beta_,
             descC.descriptor(),
             compute_type,
@@ -692,13 +692,6 @@ void spgemm(
     const Scalar& beta,
     const Scalar& alpha,
     const at::sparse_csr::SparseCsrTensor& C) {
-#if defined(USE_ROCM) && ROCM_VERSION < 50200
-  TORCH_CHECK(
-      false,
-      "Calling addmm with sparse GPU tensors requires compiling ",
-      "PyTorch with ROCm 5.2+. ",
-      "Please use PyTorch built with newer ROCm version.");
-#else
   // older versions of cusparse on Windows segfault for complex128 dtype
 #if defined(_WIN32) && defined(CUSPARSE_VERSION) && CUSPARSE_VERSION < 11400
   TORCH_CHECK(
@@ -834,7 +827,6 @@ void spgemm(
             CUSPARSE_SPGEMM_DEFAULT,
             spgemm_desc.descriptor()));
       });
-#endif
 }
 
 } // anonymous namespace
@@ -1454,8 +1446,8 @@ void sampled_addmm_out_sparse_csr(
         // ** On entry to cusparseSDDMM_bufferSize(): batched SDDMM is not supported
         // So we need to resort to the for loop
         for (const auto i : c10::irange(batchCount(A))) {
-          auto descA = at::cuda::sparse::CuSparseDnMatDescriptor(*A_, /*batch_offset=*/i);
-          auto descB = at::cuda::sparse::CuSparseDnMatDescriptor(*B_, /*batch_offset=*/i);
+          auto descA = at::cuda::sparse::CuSparseConstDnMatDescriptor(*A_, /*batch_offset=*/i);
+          auto descB = at::cuda::sparse::CuSparseConstDnMatDescriptor(*B_, /*batch_offset=*/i);
           auto descC = at::cuda::sparse::CuSparseSpMatCsrDescriptor(C, /*batch_offset=*/i);
 
           auto beta_ = beta.to<scalar_t>();
@@ -1468,8 +1460,8 @@ void sampled_addmm_out_sparse_csr(
               opA,
               opB,
               &alpha_,
-              descA.descriptor(),
-              descB.descriptor(),
+              descA.unsafe_mutable_descriptor(),
+              descB.unsafe_mutable_descriptor(),
               &beta_,
               descC.descriptor(),
               compute_type,
@@ -1485,8 +1477,8 @@ void sampled_addmm_out_sparse_csr(
               opA,
               opB,
               &alpha_,
-              descA.descriptor(),
-              descB.descriptor(),
+              descA.unsafe_mutable_descriptor(),
+              descB.unsafe_mutable_descriptor(),
               &beta_,
               descC.descriptor(),
               compute_type,
@@ -1498,8 +1490,8 @@ void sampled_addmm_out_sparse_csr(
               opA,
               opB,
               &alpha_,
-              descA.descriptor(),
-              descB.descriptor(),
+              descA.unsafe_mutable_descriptor(),
+              descB.unsafe_mutable_descriptor(),
               &beta_,
               descC.descriptor(),
               compute_type,

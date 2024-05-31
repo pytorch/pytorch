@@ -219,10 +219,16 @@ class Hardtanh(Module):
     ) -> None:
         super().__init__()
         if min_value is not None:
-            warnings.warn("keyword argument min_value is deprecated and rename to min_val")
+            warnings.warn(
+                "keyword argument `min_value` is deprecated and rename to `min_val`",
+                FutureWarning,
+            )
             min_val = min_value
         if max_value is not None:
-            warnings.warn("keyword argument max_value is deprecated and rename to max_val")
+            warnings.warn(
+                "keyword argument `max_value` is deprecated and rename to `max_val`",
+                FutureWarning,
+            )
             max_val = max_value
 
         self.min_val = min_val
@@ -1333,7 +1339,7 @@ class PReLU(Module):
     .. math::
         \text{PReLU}(x) =
         \begin{cases}
-        x, & \text{ if } x \geq 0 \\
+        x, & \text{ if } x \ge 0 \\
         ax, & \text{ otherwise }
         \end{cases}
 

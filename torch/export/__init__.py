@@ -58,15 +58,13 @@ __all__ = [
     "unflatten",
     "FlatArgsAdapter",
     "UnflattenedModule",
-    "WrapperModule",
 ]
 
 
-from .dynamic_shapes import Constraint, Dim, dims, dynamic_dim
+from .dynamic_shapes import Constraint, Dim, dims, dynamic_dim, ShapesCollection
 from .exported_program import ExportedProgram, ModuleCallEntry, ModuleCallSignature
 from .graph_signature import ExportBackwardSignature, ExportGraphSignature
 from .unflatten import FlatArgsAdapter, unflatten, UnflattenedModule
-from .wrapper import WrapperModule
 
 
 PassType = Callable[[torch.fx.GraphModule], Optional[PassResult]]
@@ -180,6 +178,7 @@ def export(
         dynamic_shapes,
         strict=strict,
         preserve_module_call_signature=preserve_module_call_signature,
+        pre_dispatch=True,
     )
 
 

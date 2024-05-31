@@ -8,9 +8,9 @@
 namespace torch {
 
 ParamCommsDebugInfo::ParamCommsDebugInfo(
-    int pgId,
+    std::tuple<std::string, std::string> pgName,
     int rank,
-    std::string&& colName,
+    std::string&& collName,
     int inNelems,
     int outNelems,
     at::ScalarType dType,
@@ -19,10 +19,10 @@ ParamCommsDebugInfo::ParamCommsDebugInfo(
     int globalRankStart,
     int globalRankStride,
     int worldSize)
-    : pgId_(pgId),
+    : pgName_(std::move(pgName)),
       rank_(rank),
       worldSize_(worldSize),
-      columnName_(colName),
+      collectiveName_(std::move(collName)),
       inMessageNelems_(inNelems),
       outMessageNelems_(outNelems),
       dType_(dType),

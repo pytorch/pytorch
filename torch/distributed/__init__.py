@@ -54,6 +54,8 @@ if is_available():
         set_debug_level,
         set_debug_level_from_env,
         _make_nccl_premul_sum,
+        _ControlCollectives,
+        _StoreCollectives,
     )
 
     class _DistributedPdb(pdb.Pdb):
@@ -86,7 +88,16 @@ if is_available():
                 f"Type 'up' to get to the frame that called dist.breakpoint(rank={rank})\n"
             )
             pdb.set_trace()
-        barrier()
+        # If Meta/Python keys are in the TLS, we want to make sure that we ignore them
+        # and hit the (default) CPU/CUDA implementation of barrier.
+        meta_in_tls = torch._C._meta_in_tls_dispatch_include()
+        guard = torch._C._DisableTorchDispatch()  # type: ignore[attr-defined]
+        torch._C._set_meta_in_tls_dispatch_include(False)
+        try:
+            barrier()
+        finally:
+            torch._C._set_meta_in_tls_dispatch_include(meta_in_tls)
+            del guard
 
     if sys.platform != "win32":
         from torch._C._distributed_c10d import (
@@ -108,6 +119,7 @@ if is_available():
         _coalescing_manager,
         _CoalescingManager,
         _get_process_group_name,
+        get_node_local_rank,
     )
 
     from .rendezvous import (
@@ -117,6 +129,7 @@ if is_available():
     )
 
     from .remote_device import _remote_device
+    from .device_mesh import init_device_mesh, DeviceMesh
 
     set_debug_level_from_env()
 

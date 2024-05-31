@@ -95,13 +95,10 @@ def _find_cuda_home() -> Optional[str]:
     cuda_home = os.environ.get('CUDA_HOME') or os.environ.get('CUDA_PATH')
     if cuda_home is None:
         # Guess #2
-        try:
-            which = 'where' if IS_WINDOWS else 'which'
-            with open(os.devnull, 'w') as devnull:
-                nvcc = subprocess.check_output([which, 'nvcc'],
-                                               stderr=devnull).decode(*SUBPROCESS_DECODE_ARGS).rstrip('\r\n')
-                cuda_home = os.path.dirname(os.path.dirname(nvcc))
-        except Exception:
+        nvcc_path = shutil.which("nvcc")
+        if nvcc_path is not None:
+            cuda_home = os.path.dirname(os.path.dirname(nvcc_path))
+        else:
             # Guess #3
             if IS_WINDOWS:
                 cuda_homes = glob.glob(
@@ -235,10 +232,8 @@ COMMON_HIP_FLAGS = [
     '-fPIC',
     '-D__HIP_PLATFORM_AMD__=1',
     '-DUSE_ROCM=1',
+    '-DHIPBLAS_V2',
 ]
-
-if ROCM_VERSION is not None and ROCM_VERSION >= (6, 0):
-    COMMON_HIP_FLAGS.append('-DHIPBLAS_V2')
 
 COMMON_HIPCC_FLAGS = [
     '-DCUDA_HAS_FP16=1',
@@ -1083,8 +1078,7 @@ def CUDAExtension(name, sources, *args, **kwargs):
     libraries.append('torch_cpu')
     libraries.append('torch_python')
     if IS_HIP_EXTENSION:
-        assert ROCM_VERSION is not None
-        libraries.append('amdhip64' if ROCM_VERSION >= (3, 5) else 'hip_hcc')
+        libraries.append('amdhip64')
         libraries.append('c10_hip')
         libraries.append('torch_hip')
     else:
@@ -1173,6 +1167,11 @@ def include_paths(cuda: bool = False) -> List[str]:
         # but gcc doesn't like having /usr/include passed explicitly
         if cuda_home_include != '/usr/include':
             paths.append(cuda_home_include)
+
+        # Support CUDA_INC_PATH env variable supported by CMake files
+        if (cuda_inc_path := os.environ.get("CUDA_INC_PATH", None)) and \
+                cuda_inc_path != '/usr/include':
+            paths.append(cuda_inc_path)
         if CUDNN_HOME is not None:
             paths.append(os.path.join(CUDNN_HOME, 'include'))
     return paths
@@ -1691,10 +1690,10 @@ def _jit_compile(name,
                   file=sys.stderr)
         name = f'{name}_v{version}'
 
-    if version != old_version:
-        baton = FileBaton(os.path.join(build_directory, 'lock'))
-        if baton.try_acquire():
-            try:
+    baton = FileBaton(os.path.join(build_directory, 'lock'))
+    if baton.try_acquire():
+        try:
+            if version != old_version:
                 with GeneratedFileCleaner(keep_intermediates=keep_intermediates) as clean_ctx:
                     if IS_HIP_EXTENSION and (with_cuda or with_cudnn):
                         hipify_result = hipify_python.hipify(
@@ -1727,14 +1726,13 @@ def _jit_compile(name,
                         verbose=verbose,
                         with_cuda=with_cuda,
                         is_standalone=is_standalone)
-            finally:
-                baton.release()
-        else:
-            baton.wait()
-    elif verbose:
-        print('No modifications detected for re-loaded extension '
-              f'module {name}, skipping build step...',
-              file=sys.stderr)
+            elif verbose:
+                print('No modifications detected for re-loaded extension '
+                      f'module {name}, skipping build step...', file=sys.stderr)
+        finally:
+            baton.release()
+    else:
+        baton.wait()
 
     if verbose:
         print(f'Loading extension module {name}...', file=sys.stderr)
@@ -1853,8 +1851,7 @@ def verify_ninja_availability():
 
 def _prepare_ldflags(extra_ldflags, with_cuda, verbose, is_standalone):
     if IS_WINDOWS:
-        python_path = os.path.dirname(sys.executable)
-        python_lib_path = os.path.join(python_path, 'libs')
+        python_lib_path = os.path.join(sys.base_exec_prefix, 'libs')
 
         extra_ldflags.append('c10.lib')
         if with_cuda:
@@ -1909,9 +1906,8 @@ def _prepare_ldflags(extra_ldflags, with_cuda, verbose, is_standalone):
             if CUDNN_HOME is not None:
                 extra_ldflags.append(f'-L{os.path.join(CUDNN_HOME, "lib64")}')
         elif IS_HIP_EXTENSION:
-            assert ROCM_VERSION is not None
             extra_ldflags.append(f'-L{_join_rocm_home("lib")}')
-            extra_ldflags.append('-lamdhip64' if ROCM_VERSION >= (3, 5) else '-lhip_hcc')
+            extra_ldflags.append('-lamdhip64')
     return extra_ldflags
 
 
@@ -2176,11 +2172,6 @@ def _write_ninja_file_to_build_library(path,
     if python_include_path is not None:
         system_includes.append(python_include_path)
 
-    # Windows does not understand `-isystem`.
-    if IS_WINDOWS:
-        user_includes += system_includes
-        system_includes.clear()
-
     common_cflags = []
     if not is_standalone:
         common_cflags.append(f'-DTORCH_EXTENSION_NAME={name}')
@@ -2188,8 +2179,12 @@ def _write_ninja_file_to_build_library(path,
 
     common_cflags += [f"{x}" for x in _get_pybind11_abi_build_flags()]
 
-    common_cflags += [f'-I{include}' for include in user_includes]
-    common_cflags += [f'-isystem {include}' for include in system_includes]
+    # Windows does not understand `-isystem` and quotes flags later.
+    if IS_WINDOWS:
+        common_cflags += [f'-I{include}' for include in user_includes + system_includes]
+    else:
+        common_cflags += [f'-I{shlex.quote(include)}' for include in user_includes]
+        common_cflags += [f'-isystem {shlex.quote(include)}' for include in system_includes]
 
     common_cflags += [f"{x}" for x in _get_glibcxx_abi_build_flags()]
 

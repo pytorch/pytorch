@@ -1,8 +1,8 @@
 # Owner(s): ["oncall: jit"]
 
+import inspect
 import os
 import sys
-import inspect
 import unittest
 from typing import Dict, List
 
@@ -14,10 +14,12 @@ pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.append(pytorch_test_dir)
 from torch.testing._internal.jit_utils import JitTestCase, RUN_CUDA
 
-if __name__ == '__main__':
-    raise RuntimeError("This test file is not meant to be run directly, use:\n\n"
-                       "\tpython test/test_jit.py TESTNAME\n\n"
-                       "instead.")
+if __name__ == "__main__":
+    raise RuntimeError(
+        "This test file is not meant to be run directly, use:\n\n"
+        "\tpython test/test_jit.py TESTNAME\n\n"
+        "instead."
+    )
 
 
 class TestBuiltins(JitTestCase):
@@ -86,24 +88,27 @@ class TestBuiltins(JitTestCase):
         self.checkScript(fn, ([1, 2, 3],))
 
         with self.assertRaisesRegexWithHighlight(RuntimeError, "undefined value", "a"):
+
             @torch.jit.script
             def fn(x):
-                a = x ** 2
+                a = x**2
                 del a
                 return a  # noqa: F821
 
         with self.assertRaisesRegexWithHighlight(RuntimeError, "undefined value", "a"):
+
             @torch.jit.script
             def fn(x):
-                a = x ** 2
+                a = x**2
                 if a:
                     del a
                 return a
 
         with self.assertRaisesRegexWithHighlight(RuntimeError, "undefined value", "b"):
+
             @torch.jit.script
             def fn(x):
-                a = x ** 2
+                a = x**2
                 del b  # noqa: F821
                 return a
 
@@ -124,7 +129,7 @@ class TestBuiltins(JitTestCase):
         self.assertEqual(py_out, jit_out)
 
         def del_dict_multiple_operands(x: Dict[str, int]) -> Dict[str, int]:
-            del x['hi'], x['there']
+            del x["hi"], x["there"]
             return x
 
         py_out = del_dict_multiple_operands({"hi": 5, "there": 6})
@@ -137,7 +142,7 @@ class TestTensorBuiltins(JitTestCase):
         def should_keep(tensor, name):
             if inspect.isroutine(getattr(tensor, name)):
                 return False
-            if name.startswith('_'):
+            if name.startswith("_"):
                 return False
             return True
 
@@ -145,8 +150,8 @@ class TestTensorBuiltins(JitTestCase):
         keys = dir(tensor)
 
         # real and imag are only implemented for complex tensors.
-        self.assertRaises(RuntimeError, lambda: should_keep(tensor, 'imag'))
-        keys.remove('imag')
+        self.assertRaises(RuntimeError, lambda: should_keep(tensor, "imag"))
+        keys.remove("imag")
 
         properties = [p for p in keys if should_keep(tensor, p)]
 
@@ -158,16 +163,16 @@ class TestTensorBuiltins(JitTestCase):
         EQUALITY_MISMATCH = {
             # TorchScript doesn't have real enums so they return an int instead
             # of the actual value
-            'dtype',
-            'layout',
+            "dtype",
+            "layout",
         }
         MISSING_PROPERTIES = {
-            'grad_fn',
+            "grad_fn",
             # This is an undocumented property so it's not included
             "output_nr",
             # This has a longer implementation, maybe not worth copying to
             # TorchScript if named tensors don't work there anyways
-            'names',
+            "names",
         }
 
         for p in properties:
@@ -232,7 +237,8 @@ class TestTensorBuiltins(JitTestCase):
         def func():
             c = 1
             return c.add(1)
-        with self.assertRaisesRegex(RuntimeError, 'object has no attribute or method'):
+
+        with self.assertRaisesRegex(RuntimeError, "object has no attribute or method"):
             torch.jit.script(func)
 
     # testing implicit conversion of tensors to scalars to match function arguments
@@ -265,10 +271,12 @@ class TestTensorBuiltins(JitTestCase):
 
         x = torch.zeros(10)
         # float tensor, float tensor with grad, int tensor (can't set grad on int tensor)
-        tensors = [torch.tensor(1.1),
-                   torch.tensor(1.1, requires_grad=True),
-                   torch.tensor(0),
-                   torch.tensor([2])]
+        tensors = [
+            torch.tensor(1.1),
+            torch.tensor(1.1, requires_grad=True),
+            torch.tensor(0),
+            torch.tensor([2]),
+        ]
 
         script_funs = [tensor_to_int_script, tensor_to_float_script]
         funs = [tensor_to_int, tensor_to_float]
@@ -286,4 +294,6 @@ class TestTensorBuiltins(JitTestCase):
         # assert result or exception equal for each (function, inputs)
         for tensor in tensors:
             for i in range(len(script_funs)):
-                self.assertEqual(test_func(script_funs[i], x, tensor), test_func(funs[i], x, tensor))
+                self.assertEqual(
+                    test_func(script_funs[i], x, tensor), test_func(funs[i], x, tensor)
+                )

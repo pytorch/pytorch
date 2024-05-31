@@ -492,7 +492,7 @@ static void isin_sorting(
   if (assume_unique) {
     out.copy_(mask.slice(0, 0, elements.numel()).view_as(out));
   } else {
-    out.copy_(at::index(mask, {c10::optional<Tensor>(unique_order)}));
+    out.copy_(at::index(mask, {std::optional<Tensor>(unique_order)}));
   }
 }
 
@@ -508,17 +508,13 @@ Device out_device(Args&... inps){
 
 
 Tensor& where_self_out(const Tensor& condition, const Tensor& self, const Tensor& other, Tensor& out) {
-  Tensor self_, other_, condition_;
-  if (self.dtype() != other.dtype()) {
-    auto result_type = at::native::result_type(self, other);
-    self_ = self.to(result_type);
-    other_ = other.to(result_type);
-  } else {
-    self_ = self;
-    other_ = other;
-  }
+  const auto result_type = at::native::result_type(self, other);
+  TORCH_CHECK(out.scalar_type() == result_type, "Expected out type to be ", result_type, " but got ", out.scalar_type());
+
+  auto self_ = self.scalar_type() != result_type ? self.to(result_type): self;
+  auto other_ = other.scalar_type() != result_type ? other.to(result_type): other;
+  auto condition_ = condition;
   auto device = out_device(condition, self_, other_);
-  condition_ = condition;
   if (device != at::kCPU) { // allow CPU scalars on non-cpu device
     if (condition.device() != device && condition.ndimension() == 0) {
       condition_ = condition.to(device);
@@ -530,12 +526,11 @@ Tensor& where_self_out(const Tensor& condition, const Tensor& self, const Tensor
         other_ = other_.to(device);
     }
   }
-  if (condition.scalar_type() == ScalarType::Byte) {
-  TORCH_WARN_ONCE("where received a uint8 condition tensor. This behavior is deprecated and will be removed in a future version of PyTorch. Use a boolean condition instead.");
-  } else {
-  TORCH_CHECK(condition.scalar_type() == ScalarType::Bool, "where expected condition to be a boolean tensor, but got a tensor with dtype ", condition.scalar_type());
+  if (condition_.scalar_type() == ScalarType::Byte) {
+    TORCH_WARN_ONCE("where received a uint8 condition tensor. This behavior is deprecated and will be removed in a future version of PyTorch. Use a boolean condition instead.");
+    condition_ = condition_.to(kBool);
   }
-  condition_ = condition_.scalar_type() == ScalarType::Byte ? condition_.to(ScalarType::Bool) : condition_;
+  TORCH_CHECK(condition_.scalar_type() == kBool, "where expected condition to be a boolean tensor, but got a tensor with dtype ", condition_.scalar_type());
   // if there's still a device mismatch, let tensoriterator error out with it
   auto iter = at::TensorIteratorConfig()
     .check_all_same_dtype(false)
@@ -759,27 +754,27 @@ TORCH_IMPL_FUNC(clamp_min_Tensor_out)
 }
 
 // Implements the "clip" alias for clamp
-Tensor& clip_out(const Tensor& self, const c10::optional<Scalar>& min, const c10::optional<Scalar>& max, Tensor& result) {
+Tensor& clip_out(const Tensor& self, const std::optional<Scalar>& min, const std::optional<Scalar>& max, Tensor& result) {
   return at::clamp_outf(self, min, max, result);
 }
 
-Tensor& clip_out(const Tensor& self, const c10::optional<Tensor>& min, const c10::optional<Tensor>& max, Tensor& result) {
+Tensor& clip_out(const Tensor& self, const std::optional<Tensor>& min, const std::optional<Tensor>& max, Tensor& result) {
   return at::clamp_outf(self, min, max, result);
 }
 
-Tensor clip(const Tensor& self, const c10::optional<Scalar>& min, const c10::optional<Scalar>& max) {
+Tensor clip(const Tensor& self, const std::optional<Scalar>& min, const std::optional<Scalar>& max) {
   return at::clamp(self, min, max);
 }
 
-Tensor clip(const Tensor& self, const c10::optional<Tensor>& min, const c10::optional<Tensor>& max) {
+Tensor clip(const Tensor& self, const std::optional<Tensor>& min, const std::optional<Tensor>& max) {
   return at::clamp(self, min, max);
 }
 
-Tensor& clip_(Tensor& self, const c10::optional<Scalar>& min, const c10::optional<Scalar>& max) {
+Tensor& clip_(Tensor& self, const std::optional<Scalar>& min, const std::optional<Scalar>& max) {
   return at::clamp_(self, min, max);
 }
 
-Tensor& clip_(Tensor& self, const c10::optional<Tensor>& min, const c10::optional<Tensor>& max) {
+Tensor& clip_(Tensor& self, const std::optional<Tensor>& min, const std::optional<Tensor>& max) {
   return at::clamp_(self, min, max);
 }
 

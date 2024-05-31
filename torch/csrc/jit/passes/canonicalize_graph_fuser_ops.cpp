@@ -12,7 +12,7 @@ struct ChunkOutput {
   size_t offset;
 };
 
-static c10::optional<std::vector<ChunkOutput>> getChunkOutputs(Node* chunk) {
+static std::optional<std::vector<ChunkOutput>> getChunkOutputs(Node* chunk) {
   std::vector<ChunkOutput> outputs;
   for (auto list_use : chunk->output()->uses()) {
     if (list_use.user->matches(

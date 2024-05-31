@@ -21,9 +21,13 @@ from torch.distributed.checkpoint.state_dict import (
 
 
 class VerifyStateDictMixin:
-    def _compare_tensor(self, orig_tensor, dist_tensor):
+    def _compare_tensor(self, orig_tensor, dist_tensor, offload_to_cpu=False):
         if isinstance(dist_tensor, (DTensor, ShardedTensor)):
             dist_tensor = _gather_state_dict({"mykey": dist_tensor}).pop("mykey")
+
+        if offload_to_cpu:
+            orig_tensor = orig_tensor.cpu()
+            dist_tensor = dist_tensor.cpu()
         self.assertTrue(isinstance(dist_tensor, torch.Tensor))
         self.assertTrue(torch.allclose(orig_tensor, dist_tensor))
 
@@ -32,6 +36,7 @@ class VerifyStateDictMixin:
         msd: Dict[str, Any],
         dist_msd: Dict[str, Any],
         options: StateDictOptions = StateDictOptions(),
+        offload_to_cpu=False,
     ) -> None:
         if not options.ignore_frozen_params:
             self.assertEqual(len(msd), len(dist_msd))
@@ -39,7 +44,7 @@ class VerifyStateDictMixin:
             dist_param = dist_msd.get(fqn, None)
             if not options.ignore_frozen_params:
                 self.assertIsNotNone(dist_param, f"{fqn=}")
-                self._compare_tensor(param, dist_param)
+                self._compare_tensor(param, dist_param, offload_to_cpu)
             elif dist_param is None:
                 self.assertFalse(param.requires_grad, f"{fqn=}")
 

@@ -1,4 +1,4 @@
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import torch.fx
 import torch.utils._pytree as pytree
@@ -30,7 +30,9 @@ def compile(
 
 def aot_compile(
     gm: torch.fx.GraphModule,
-    example_inputs: List[torch.Tensor],
+    args: Tuple[Any],
+    kwargs: Optional[Dict[str, Any]] = None,
+    *,
     options: Optional[Dict[str, Any]] = None,
 ) -> str:
     """
@@ -38,7 +40,8 @@ def aot_compile(
 
     Args:
         gm: The FX graph to compile.
-        example_inputs:  List of tensor inputs.
+        args:  Example arguments
+        kwargs: Example keyword arguments
         options:  Optional dict of config options.  See `torch._inductor.config`.
 
     Returns:
@@ -47,18 +50,43 @@ def aot_compile(
     from .compile_fx import compile_fx_aot
 
     # We will serialize the pytree info into the .so as constant strings
-    serialized_in_spec = ""
-    serialized_out_spec = ""
+    in_spec = None
+    out_spec = None
     if isinstance(gm.graph._codegen, torch.fx.graph._PyTreeCodeGen):
         codegen = gm.graph._codegen
         gm.graph._codegen = torch.fx.graph.CodeGen()
         gm.recompile()
 
         if codegen.pytree_info.in_spec is not None:
-            serialized_in_spec = pytree.treespec_dumps(codegen.pytree_info.in_spec)
-
+            in_spec = codegen.pytree_info.in_spec
         if codegen.pytree_info.out_spec is not None:
-            serialized_out_spec = pytree.treespec_dumps(codegen.pytree_info.out_spec)
+            out_spec = codegen.pytree_info.out_spec
+
+    else:
+        if hasattr(gm, "_in_spec"):
+            in_spec = gm._in_spec
+        if hasattr(gm, "_out_spec"):
+            out_spec = gm._out_spec
+
+    serialized_in_spec = pytree.treespec_dumps(in_spec) if in_spec is not None else ""
+    serialized_out_spec = (
+        pytree.treespec_dumps(out_spec) if out_spec is not None else ""
+    )
+
+    flat_args_with_path, received_spec = pytree.tree_flatten_with_path(
+        (args, kwargs or {})
+    )
+    flat_example_inputs = tuple(
+        x[1] for x in flat_args_with_path if isinstance(x[1], torch.Tensor)
+    )
+
+    if in_spec is not None and received_spec != in_spec:
+        raise ValueError(  # noqa: B904
+            "Trying to flatten user inputs with exported input tree spec: \n"
+            f"{in_spec}\n"
+            "but actually got inputs with tree spec of: \n"
+            f"{received_spec}"
+        )
 
     options = (
         {
@@ -75,7 +103,7 @@ def aot_compile(
 
     return compile_fx_aot(
         gm,
-        example_inputs,
+        list(flat_example_inputs),
         config_patches=options,
     )
 

@@ -31,6 +31,7 @@
 #include <c10/util/Optional.h>
 #include <c10/util/ThreadLocal.h>
 #include <c10/util/irange.h>
+#include <c10/util/thread_name.h>
 
 #include <atomic>
 #include <chrono>
@@ -347,6 +348,11 @@ void Engine::thread_init(
     int device,
     const std::shared_ptr<ReadyQueue>& ready_queue,
     bool should_increment) {
+  // pthread_setname_np restricts the name to 16 characters including
+  // the null byte.
+  std::string thread_name = "pt_autograd_" + std::to_string(device);
+  c10::setThreadName(thread_name);
+
   c10::set_terminate_handler();
   if (should_increment) {
     increment_non_reentrant_thread_count();
@@ -700,7 +706,7 @@ void GraphTask::mark_as_completed_and_run_post_processing() {
     // when the callbacks are called.
     lock.unlock();
     future_result_->markCompleted(vars);
-  } catch (std::exception& e) {
+  } catch (std::exception&) {
     future_result_->setErrorIfNeeded(std::current_exception());
   }
 }
@@ -1544,17 +1550,8 @@ void GraphTask::stash_current_streams() {
   caller_current_streams_.resize(num_devices);
   if (num_devices > 0) {
     for (c10::DeviceIndex idx = 0; idx < num_devices; idx++) {
-#if defined(USE_ROCM) && (ROCM_VERSION < 50000)
-      // If the build targets ROCM, stash streams for all visible devices
-      // unconditionally, to work around
-      // https://github.com/pytorch/pytorch/issues/59750.
-      // TODO: Remove ROCM-specific behavior when
-      // https://github.com/pytorch/pytorch/issues/59750 is fixed.
-      if (true) {
-#else
       if (at::globalContext().getAcceleratorHooksInterface().hasPrimaryContext(
               idx)) {
-#endif
         caller_current_streams_[idx] = guard.getStream({accelerator, idx});
       } else {
         caller_current_streams_[idx] = c10::nullopt;

@@ -205,6 +205,7 @@ class Context final {
 class UniformParamsBuffer final {
  private:
   Context* context_p_;
+  size_t nbytes_;
   VulkanBuffer vulkan_buffer_;
 
  public:
@@ -213,6 +214,7 @@ class UniformParamsBuffer final {
   template <typename Block>
   UniformParamsBuffer(Context* context_p, const Block& block)
       : context_p_(context_p),
+        nbytes_(sizeof(block)),
         vulkan_buffer_(
             context_p_->adapter_ptr()->vma().create_params_buffer(block)) {}
 
@@ -231,6 +233,21 @@ class UniformParamsBuffer final {
   VulkanBuffer& buffer() {
     return vulkan_buffer_;
   }
+
+  template <typename Block>
+  void update(const Block& block) {
+    if (sizeof(block) != nbytes_) {
+      VK_THROW(
+          "Attempted to update UniformParamsBuffer with data of different size");
+    }
+    // Fill the uniform buffer with data in block
+    {
+      MemoryMap mapping(vulkan_buffer_, MemoryAccessType::WRITE);
+      Block* data_ptr = mapping.template data<Block>();
+
+      *data_ptr = block;
+    }
+  }
 };
 
 class StorageBuffer final {
@@ -238,6 +255,7 @@ class StorageBuffer final {
   Context* context_p_;
   ScalarType dtype_;
   size_t numel_;
+  size_t nbytes_;
   VulkanBuffer vulkan_buffer_;
 
  public:
@@ -249,8 +267,9 @@ class StorageBuffer final {
       : context_p_(context_p),
         dtype_(dtype),
         numel_(numel),
+        nbytes_(element_size(dtype_) * numel_),
         vulkan_buffer_(context_p_->adapter_ptr()->vma().create_storage_buffer(
-            element_size(dtype_) * numel_,
+            nbytes_,
             gpuonly)) {}
 
   StorageBuffer(const StorageBuffer&) = delete;
@@ -269,6 +288,14 @@ class StorageBuffer final {
 
   inline VulkanBuffer& buffer() {
     return vulkan_buffer_;
+  }
+
+  inline size_t numel() {
+    return numel_;
+  }
+
+  inline size_t nbytes() {
+    return nbytes_;
   }
 };
 

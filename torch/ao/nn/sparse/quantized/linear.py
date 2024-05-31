@@ -99,9 +99,8 @@ class Linear(torch.nn.Module):
         return 'SparseQuantizedLinear'
 
     def extra_repr(self):
-        return 'in_features={}, out_features={}, scale={}, zero_point={}, qscheme={}'.format(
-            self.in_features, self.out_features, self.scale, self.zero_point, self.weight().qscheme()
-        )
+        return (f'in_features={self.in_features}, out_features={self.out_features}, scale={self.scale}, '
+                f'zero_point={self.zero_point}, qscheme={self.weight().qscheme()}')
 
     def __repr__(self):
         return _hide_packed_params_repr(self, LinearPackedParams)
@@ -147,7 +146,7 @@ class Linear(torch.nn.Module):
         self._packed_params.set_weight_bias(w, b, row_block_size, col_block_size)
 
     @classmethod
-    def from_float(cls, mod):
+    def from_float(cls, mod, use_precomputed_fake_quant=False):
         r"""Create a quantized sparse module from a float module.
 
         We only care about the convert at this stage, no need for observers just yet.

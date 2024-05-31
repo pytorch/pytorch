@@ -1,14 +1,12 @@
-# syntax = docker/dockerfile:experimental
+# syntax=docker/dockerfile:1
+
+# NOTE: Building this image require's docker version >= 23.0.
 #
-# NOTE: To build this you will need a docker version > 18.06 with
-#       experimental enabled and DOCKER_BUILDKIT=1
-#
-#       If you do not use buildkit you are not going to have a good time
-#
-#       For reference:
-#           https://docs.docker.com/develop/develop-images/build_enhancements/
-ARG BASE_IMAGE=ubuntu:20.04
-ARG PYTHON_VERSION=3.8
+# For reference:
+# - https://docs.docker.com/build/dockerfile/frontend/#stable-channel
+
+ARG BASE_IMAGE=ubuntu:22.04
+ARG PYTHON_VERSION=3.11
 
 FROM ${BASE_IMAGE} as dev-base
 RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
@@ -26,7 +24,7 @@ RUN mkdir /opt/ccache && ccache --set-config=cache_dir=/opt/ccache
 ENV PATH /opt/conda/bin:$PATH
 
 FROM dev-base as conda
-ARG PYTHON_VERSION=3.8
+ARG PYTHON_VERSION=3.11
 # Automatically set by buildx
 ARG TARGETPLATFORM
 # translating Docker's TARGETPLATFORM into miniconda arches
@@ -57,18 +55,19 @@ COPY --from=submodule-update /opt/pytorch /opt/pytorch
 RUN make triton
 RUN --mount=type=cache,target=/opt/ccache \
     export eval ${CMAKE_VARS} && \
-    TORCH_CUDA_ARCH_LIST="3.5 5.2 6.0 6.1 7.0+PTX 8.0" TORCH_NVCC_FLAGS="-Xfatbin -compress-all" \
+    TORCH_CUDA_ARCH_LIST="7.0 7.2 7.5 8.0 8.6 8.7 8.9 9.0 9.0a" TORCH_NVCC_FLAGS="-Xfatbin -compress-all" \
     CMAKE_PREFIX_PATH="$(dirname $(which conda))/../" \
     python setup.py install
 
 FROM conda as conda-installs
-ARG PYTHON_VERSION=3.8
+ARG PYTHON_VERSION=3.11
 ARG CUDA_VERSION=12.1
 ARG CUDA_CHANNEL=nvidia
 ARG INSTALL_CHANNEL=pytorch-nightly
 # Automatically set by buildx
-# Note conda needs to be pinned to 23.5.2 see: https://github.com/pytorch/pytorch/issues/106470
-RUN /opt/conda/bin/conda install -c "${INSTALL_CHANNEL}" -y python=${PYTHON_VERSION} conda=23.5.2
+RUN /opt/conda/bin/conda update -y -n base -c defaults conda
+RUN /opt/conda/bin/conda install -c "${INSTALL_CHANNEL}" -y python=${PYTHON_VERSION}
+
 ARG TARGETPLATFORM
 
 # On arm64 we can only install wheel packages.

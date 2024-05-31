@@ -22,6 +22,7 @@ class TORCH_API DeprecatedTypePropertiesRegistry {
   DeprecatedTypeProperties& getDeprecatedTypeProperties(Backend p, ScalarType s) const;
 
 private:
+  // NOLINTNEXTLINE(*c-array*)
   std::unique_ptr<DeprecatedTypeProperties> registry
     [static_cast<int>(Backend::NumOptions)]
     [static_cast<int>(ScalarType::NumOptions)];
