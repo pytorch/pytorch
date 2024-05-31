@@ -68,7 +68,6 @@ set(TORCH_PYTHON_INCLUDE_DIRECTORIES
     ${TORCH_ROOT}/third_party/onnx
     ${TORCH_ROOT}/third_party/flatbuffers/include
     ${TORCH_ROOT}/third_party/kineto/libkineto/include
-    ${TORCH_ROOT}/third_party/cpp-httplib
 
     ${TORCH_SRC_DIR}/csrc
     ${TORCH_SRC_DIR}/csrc/api/include
@@ -78,10 +77,9 @@ set(TORCH_PYTHON_INCLUDE_DIRECTORIES
 list(APPEND TORCH_PYTHON_INCLUDE_DIRECTORIES ${LIBSHM_SRCDIR})
 
 set(TORCH_PYTHON_LINK_LIBRARIES
-    python::python
+    Python::Module
     pybind::pybind11
     opentelemetry::api
-    httplib
     shm
     fmt::fmt-header-only
     ATEN_CPU_FILES_GEN_LIB)
