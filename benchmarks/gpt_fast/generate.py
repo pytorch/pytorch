@@ -221,7 +221,7 @@ def run_experiment(
 
 
 # token_per_sec and memory_bandwidth target numbers are for A100-40GB, which are different from the typical A100-80GB.
-def run_llama2_7b_fp16():
+def run_llama2_7b_bf16():
     from benchmark import Experiment
 
     model = GPTModelConfig(
@@ -235,13 +235,13 @@ def run_llama2_7b_fp16():
     token_per_sec, memory_bandwidth = run_experiment(model)
     return [
         Experiment(
-            "llama2_7b_fp16",
+            "llama2_7b_bf16",
             "token_per_sec",
             model.token_per_sec,
             f"{token_per_sec:.02f}",
         ),
         Experiment(
-            "llama2_7b_fp16",
+            "llama2_7b_bf16",
             "memory_bandwidth(GB/s)",
             model.memory_bandwidth,
             f"{memory_bandwidth:.02f}",

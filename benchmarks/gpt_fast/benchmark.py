@@ -4,7 +4,7 @@ import dataclasses
 import os
 import time
 
-from generate import run_llama2_7b_fp16, run_llama2_7b_int8, run_mixtral_8x7b_int8
+from generate import run_llama2_7b_bf16, run_llama2_7b_int8, run_mixtral_8x7b_int8
 
 import torch
 import torch.nn as nn
@@ -96,7 +96,7 @@ DEFAULT_OUTPUT_FILE = "gpt_fast_benchmark.csv"
 
 all_experiments = {
     # A list of GPT models: LlaMa, Mixtral, etc.
-    run_llama2_7b_fp16,
+    run_llama2_7b_bf16,
     run_llama2_7b_int8,
     run_mixtral_8x7b_int8,
     # A list of micro-benchmarks.
