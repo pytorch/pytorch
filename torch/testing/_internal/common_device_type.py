@@ -695,12 +695,12 @@ PYTORCH_TESTING_DEVICE_EXCEPT_FOR_KEY = 'PYTORCH_TESTING_DEVICE_EXCEPT_FOR'
 PYTORCH_TESTING_DEVICE_FOR_CUSTOM_KEY = 'PYTORCH_TESTING_DEVICE_FOR_CUSTOM'
 
 
-def get_desired_device_type_test_bases(except_for=None, only_for=None, include_lazy=False, allow_mps=False):
+def get_desired_device_type_test_bases(except_for=None, only_for=None, include_lazy=False, allow_mps=False, allow_xpu=False):
     # allow callers to specifically opt tests into being tested on MPS, similar to `include_lazy`
     test_bases = device_type_test_bases.copy()
     if allow_mps and TEST_MPS and MPSTestBase not in test_bases:
         test_bases.append(MPSTestBase)
-    if (only_for == 'xpu' or 'xpu' in os.getenv(PYTORCH_TESTING_DEVICE_ONLY_FOR_KEY)) and TEST_XPU and XPUTestBase not in test_bases:
+    if (allow_xpu or only_for == 'xpu') and TEST_XPU and XPUTestBase not in test_bases:
        test_bases.append(XPUTestBase)
     # Filter out the device types based on user inputs
     desired_device_type_test_bases = filter_desired_device_types(test_bases, except_for, only_for)
@@ -745,7 +745,7 @@ def get_desired_device_type_test_bases(except_for=None, only_for=None, include_l
 # device-specific tests (NB: this supports additional @parametrize usage).
 #
 # See note "Writing Test Templates"
-def instantiate_device_type_tests(generic_test_class, scope, except_for=None, only_for=None, include_lazy=False, allow_mps=False):
+def instantiate_device_type_tests(generic_test_class, scope, except_for=None, only_for=None, include_lazy=False, allow_mps=False, allow_xpu=False):
     # Removes the generic test class from its enclosing scope so its tests
     # are not discoverable.
     del scope[generic_test_class.__name__]
@@ -765,7 +765,7 @@ def instantiate_device_type_tests(generic_test_class, scope, except_for=None, on
     generic_tests = [x for x in generic_members if x.startswith('test')]
 
     # Creates device-specific test cases
-    for base in get_desired_device_type_test_bases(except_for, only_for, include_lazy, allow_mps):
+    for base in get_desired_device_type_test_bases(except_for, only_for, include_lazy, allow_mps, allow_xpu):
         class_name = generic_test_class.__name__ + base.device_type.upper()
 
         # type set to Any and suppressed due to unsupport runtime class:
@@ -1097,6 +1097,9 @@ def _has_sufficient_memory(device, size):
             device = 'cuda:0'
         return torch.cuda.memory.mem_get_info(device)[0] >= size
 
+    if device == 'xpu':
+        raise unittest.SkipTest('TODO: Memory availability checks for XPU?')
+    
     if device == 'xla':
         raise unittest.SkipTest('TODO: Memory availability checks for XLA?')
 

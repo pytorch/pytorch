@@ -34,7 +34,6 @@ from torch.testing._internal.common_utils import (
     torch_to_numpy_dtype_dict,
     TrackedInputIter,
     TEST_XPU,
-    enable_skipped_op_dict,
 )
 from torch.testing._internal.opinfo import utils
 
@@ -726,11 +725,11 @@ class OpInfo:
     # dtypes this function is expected to work with on CUDA
     dtypesIfCUDA: _dispatch_dtypes = None
 
-    # dtypes this function is expected to work with on XPU
-    dtypesIfXPU: _dispatch_dtypes = None
-
     # dtypes this function is expected to work with on ROCM
     dtypesIfROCM: _dispatch_dtypes = None
+
+    # dtypes this function is expected to work with on XPU
+    dtypesIfXPU: _dispatch_dtypes = None
 
     # backward dtypes this function is expected to work with
     backward_dtypes: _dispatch_dtypes = None
@@ -894,13 +893,7 @@ class OpInfo:
 
     is_factory_function: bool = False
 
-    def enable_skipped_device(self):
-        op_db_dict = enable_skipped_op_dict()
-        if TEST_XPU and (not op_db_dict or self.name not in op_db_dict['supported']):
-            if self.skips is not None:
-                self.skips = (*self.skips, DecorateInfo(unittest.skip, device_type='xpu', dtypes=None))
-            else:
-                self.skips = (DecorateInfo(unittest.skip, device_type='xpu', dtypes=None))
+    
 
 
     def __post_init__(self):
@@ -908,7 +901,12 @@ class OpInfo:
 
         assert self.dtypes is not None, f"OpInfo for {self.name} has no dtypes!"
 
-        dtypes_args = (self.dtypes, self.dtypesIfCUDA, self.dtypesIfROCM)
+        dtypes_args = (
+            self.dtypes,
+            self.dtypesIfCUDA,
+            self.dtypesIfROCM,
+            self.dtypesIfXPU,
+        )
 
         # Validates the dtypes are generated from the dispatch-related functions
         for dtype_list in dtypes_args:
@@ -972,7 +970,8 @@ class OpInfo:
                 if self.backward_dtypes is not None
                 else self.dtypesIfXPU
                 if self.dtypesIfXPU is not None
-                else self.dtypes
+                #else self.dtypes
+                else self.backward_dtypesIfCUDA
             )
         )
 
@@ -986,14 +985,14 @@ class OpInfo:
             set(self.dtypesIfCUDA) if self.dtypesIfCUDA is not None else self.dtypes
         )
 
-        self.dtypesIfXPU = (
-            set(self.dtypesIfXPU) if self.dtypesIfXPU is not None else self.dtypes
-        )
-
         self.dtypesIfROCM = (
             set(self.dtypesIfROCM)
             if self.dtypesIfROCM is not None
             else self.dtypesIfCUDA
+        )
+
+        self.dtypesIfXPU = (
+            set(self.dtypesIfXPU) if self.dtypesIfXPU is not None else self.dtypesIfCUDA
         )
 
         # NOTE: if the op is unspecified it is assumed to be under the torch namespace
@@ -1026,8 +1025,6 @@ class OpInfo:
                 )
             else:
                 self.inplace_operator_variant = None
-
-        self.enable_skipped_device()
 
         self.decorators = (*self.decorators, *self.skips)
 
@@ -2674,6 +2671,7 @@ class ShapeFuncInfo(OpInfo):
         dtypes=floating_types(),
         dtypesIfCUDA=None,
         dtypesIfROCM=None,
+        dtypesIfXPU=None,
         sample_inputs_func=None,
         **kwargs,
     ):
@@ -2682,6 +2680,7 @@ class ShapeFuncInfo(OpInfo):
             dtypes=dtypes,
             dtypesIfCUDA=dtypesIfCUDA,
             dtypesIfROCM=dtypesIfROCM,
+            dtypesIfXPU=dtypesIfXPU,
             sample_inputs_func=sample_inputs_func,
             **kwargs,
         )

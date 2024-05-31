@@ -37,7 +37,7 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_ROCM, IS_WINDOWS, IS_MACOS, TEST_SCIPY,
     torch_to_numpy_dtype_dict, numpy_to_torch_dtype, TEST_WITH_ASAN,
     GRADCHECK_NONDET_TOL, freeze_rng_state, slowTest, TEST_WITH_SLOW,
-    TEST_WITH_TORCHINDUCTOR, TEST_XPU
+    TEST_WITH_TORCHINDUCTOR, TEST_XPU, enable_skipped_op_dict,
 )
 
 import torch._refs as refs  # noqa: F401
@@ -9515,7 +9515,6 @@ foreach_unary_op_db: List[OpInfo] = [
         sample_inputs_func=foreach_inputs_sample_func(1, False, False),
         dtypes=floating_and_complex_types(),
         dtypesIfCUDA=floating_and_complex_types_and(torch.half,),
-        dtypesIfXPU=floating_and_complex_types_and(torch.half,),
         supports_autograd=True,
         supports_inplace_autograd=True,
         supports_forward_ad=True,
@@ -9534,7 +9533,6 @@ foreach_unary_op_db: List[OpInfo] = [
         sample_inputs_func=foreach_inputs_sample_func(1, False, False),
         dtypes=floating_and_complex_types(),
         dtypesIfCUDA=floating_and_complex_types_and(torch.half,),
-        dtypesIfXPU=floating_and_complex_types_and(torch.half,),
         supports_autograd=True,
         supports_inplace_autograd=True,
         supports_forward_ad=True,
@@ -9586,7 +9584,6 @@ foreach_unary_op_db: List[OpInfo] = [
         backward_requires_result=True,
         dtypes=floating_and_complex_types(),
         dtypesIfCUDA=floating_and_complex_types_and(torch.half,),
-        dtypesIfXPU=floating_and_complex_types_and(torch.half,),
         supports_autograd=True,
         supports_inplace_autograd=True,
         supports_forward_ad=True,
@@ -9606,7 +9603,6 @@ foreach_unary_op_db: List[OpInfo] = [
         sample_inputs_func=foreach_inputs_sample_func(1, False, False),
         dtypes=floating_and_complex_types(),
         dtypesIfCUDA=floating_and_complex_types_and(torch.half,),
-        dtypesIfXPU=floating_and_complex_types_and(torch.half,),
         supports_autograd=True,
         supports_inplace_autograd=True,
         supports_forward_ad=True,
@@ -9633,7 +9629,6 @@ foreach_unary_op_db: List[OpInfo] = [
         sample_inputs_func=foreach_inputs_sample_func(1, False, False),
         dtypes=floating_and_complex_types_and(torch.bfloat16),
         dtypesIfCUDA=floating_and_complex_types_and(torch.half),
-        dtypesIfXPU=floating_and_complex_types_and(torch.half),
         supports_autograd=True,
         supports_inplace_autograd=True,
         supports_forward_ad=True,
@@ -9717,7 +9712,6 @@ foreach_unary_op_db: List[OpInfo] = [
         sample_inputs_func=foreach_inputs_sample_func(1, False, False),
         dtypes=floating_types_and(torch.bfloat16),
         dtypesIfCUDA=floating_types_and(torch.half),
-        dtypesIfXPU=floating_types_and(torch.half),
         supports_autograd=True,
         supports_inplace_autograd=True,
         supports_forward_ad=True,
@@ -9747,7 +9741,6 @@ foreach_unary_op_db: List[OpInfo] = [
         sample_inputs_func=foreach_inputs_sample_func(1, False, False),
         dtypes=all_types_and_complex_and(torch.bfloat16, torch.half),
         dtypesIfCUDA=all_types_and_complex_and(torch.bfloat16, torch.half, torch.bool),
-        dtypesIfXPU=all_types_and_complex_and(torch.bfloat16, torch.half, torch.bool),
         supports_autograd=True,
         supports_inplace_autograd=True,
         supports_forward_ad=True,
@@ -9763,7 +9756,6 @@ foreach_unary_op_db: List[OpInfo] = [
         sample_inputs_func=foreach_inputs_sample_func(1, False, False),
         dtypes=all_types_and_complex_and(torch.bfloat16, torch.half),
         dtypesIfCUDA=all_types_and_complex_and(torch.bfloat16, torch.half),
-        dtypesIfXPU=all_types_and_complex_and(torch.bfloat16, torch.half),
         supports_autograd=True,
         supports_inplace_autograd=True,
         supports_forward_ad=True,
@@ -10429,7 +10421,6 @@ op_db: List[OpInfo] = [
                    ref=np.abs,
                    dtypes=all_types_and_complex_and(torch.half, torch.bfloat16, torch.chalf),
                    dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16, torch.chalf),
-                   dtypesIfXPU=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16, torch.chalf),
                    skips=(
                        DecorateInfo(unittest.skip("In-place abs not supported for complex tensors"), 'TestBwdGradients',
                                     'test_inplace_grad', dtypes=(torch.cdouble,)),
@@ -11785,7 +11776,6 @@ op_db: List[OpInfo] = [
                     variant_test_name='no_rounding_mode',
                     dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
                     dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16, torch.chalf),
-                    dtypesIfXPU=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16, torch.chalf),
                     # Runs very slowly on slow gradcheck - alternatively reduce input sizes
                     gradcheck_fast_mode=True,
                     supports_forward_ad=True,
@@ -11959,7 +11949,6 @@ op_db: List[OpInfo] = [
                     ref=np.fmod,
                     dtypes=all_types_and(torch.float16, torch.bfloat16),
                     dtypesIfCUDA=all_types_and(torch.float16, torch.bfloat16),
-                    dtypesIfXPU=all_types_and(torch.float16, torch.bfloat16),
                     # https://github.com/pytorch/pytorch/issues/80411
                     gradcheck_fast_mode=True,
                     supports_forward_ad=True,
@@ -11984,7 +11973,6 @@ op_db: List[OpInfo] = [
                     ref=np.remainder,
                     dtypes=all_types_and(torch.float16, torch.bfloat16),
                     dtypesIfCUDA=all_types_and(torch.float16, torch.bfloat16),
-                    dtypesIfXPU=all_types_and(torch.float16, torch.bfloat16),
                     # https://github.com/pytorch/pytorch/issues/80411
                     gradcheck_fast_mode=True,
                     supports_forward_ad=True,
@@ -14016,7 +14004,6 @@ op_db: List[OpInfo] = [
            aten_name='im2col',
            dtypes=floating_and_complex_types_and(torch.half, torch.bfloat16),
            dtypesIfCUDA=floating_and_complex_types_and(torch.half, torch.bfloat16),
-           dtypesIfXPU=floating_and_complex_types_and(torch.half, torch.bfloat16),
            sample_inputs_func=sample_inputs_nn_unfold,
            # Runs very slowly on slow gradcheck - alternatively reduce input sizes
            gradcheck_fast_mode=True,
@@ -15566,14 +15553,12 @@ op_db: List[OpInfo] = [
     BinaryUfuncInfo('pow',
                     dtypes=all_types_and_complex_and(torch.half, torch.bfloat16),
                     dtypesIfCUDA=all_types_and_complex_and(torch.half, torch.bfloat16, torch.chalf),
-                    dtypesIfXPU=all_types_and_complex_and(torch.half, torch.bfloat16, torch.chalf),
                     ref=np.power,
                     # Due to AVX2 currently not being fully supported for Float16, log_vml_cpu can't be enabled
                     # for Float16, causing this test to fail. pow's autograd for Float16 is thus currently
                     # unsupported on CPU.
                     backward_dtypes=floating_and_complex_types_and(torch.half, torch.bfloat16),
                     backward_dtypesIfCUDA=floating_and_complex_types_and(torch.bfloat16, torch.half, torch.chalf),
-                    backward_dtypesIfXPU=floating_and_complex_types_and(torch.bfloat16, torch.half, torch.chalf),
                     # https://github.com/pytorch/pytorch/issues/80411
                     gradcheck_fast_mode=True,
                     supports_inplace_autograd=False,
@@ -16375,7 +16360,6 @@ op_db: List[OpInfo] = [
                    domain=(0, None),
                    dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
                    dtypesIfCUDA=all_types_and_complex_and(torch.chalf, torch.bool, torch.half, torch.bfloat16),
-                   dtypesIfXPU=all_types_and_complex_and(torch.chalf, torch.bool, torch.half, torch.bfloat16),
                    decorators=(precisionOverride({torch.half: 5e-2}),),
                    assert_autodiffed=True,
                    supports_forward_ad=True,
@@ -16854,7 +16838,6 @@ op_db: List[OpInfo] = [
     OpInfo('gather',
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
            dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
-           dtypesIfXPU=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
            sample_inputs_func=sample_inputs_gather,
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
            supports_forward_ad=True,
@@ -16889,7 +16872,6 @@ op_db: List[OpInfo] = [
     OpInfo('index_select',
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16, torch.chalf),
            backward_dtypesIfCUDA=floating_and_complex_types_and(torch.float16, torch.bfloat16, torch.chalf),
-           backward_dtypesIfXPU=floating_and_complex_types_and(torch.float16, torch.bfloat16, torch.chalf),
            sample_inputs_func=sample_inputs_index,
            reference_inputs_func=partial(sample_inputs_index, reference=True),
            error_inputs_func=error_inputs_index_select,
@@ -17707,7 +17689,6 @@ op_db: List[OpInfo] = [
            inplace_variant=None,
            dtypes=floating_types_and(torch.bfloat16, torch.half),
            dtypesIfCUDA=floating_types_and(torch.bfloat16, torch.half),
-           dtypesIfXPU=floating_types_and(torch.bfloat16, torch.half),
            supports_out=True,
            sample_inputs_func=sample_inputs_normal_tensor_first,
            skips=(
@@ -17737,7 +17718,6 @@ op_db: List[OpInfo] = [
            inplace_variant=None,
            dtypes=floating_types_and(torch.bfloat16, torch.half),
            dtypesIfCUDA=floating_types_and(torch.bfloat16, torch.half),
-           dtypesIfXPU=floating_types_and(torch.bfloat16, torch.half),
            supports_out=True,
            sample_inputs_func=sample_inputs_normal_tensor_second,
            skips=(
@@ -18928,7 +18908,6 @@ op_db: List[OpInfo] = [
         aten_name="native_dropout_backward",
         dtypes=all_types_and(torch.float16, torch.bfloat16, torch.bool),
         dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
-        dtypesIfXPU=floating_types_and(torch.float16, torch.bfloat16),
         supports_out=False,
         sample_inputs_func=sample_inputs_dropout_backward,
         skips=(
@@ -19502,7 +19481,6 @@ op_db: List[OpInfo] = [
         promotes_int_to_int64=True,
         dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
         dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16, torch.chalf),
-        dtypesIfXPU=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16, torch.chalf),
         ref=reference_reduction_numpy(np.sum),
         error_inputs_sparse_func=error_inputs_sparse_reduction_sum,
         sample_inputs_sparse_coo_func=partial(sample_inputs_sparse_reduction_sum, layout=torch.sparse_coo),
@@ -22965,3 +22943,48 @@ def skipOps(test_case_name, base_test_name, to_skip):
     def wrapped(fn):
         return fn
     return wrapped
+
+def enable_skipped_device(op_db_list: List[OpInfo]):
+    if TEST_XPU:
+        # Get the supported op and dtypes from yaml file.
+        op_db_dict = enable_skipped_op_dict()
+        supported_op_list = [list(op_dict.keys())[0] if type(op_dict) is dict else op_dict for op_dict in op_db_dict['supported']]
+
+        for op in op_db_list:
+            # For refs ops get the name of the related torch_opinfo.
+            torch_opinfo = getattr(op, "torch_opinfo") if hasattr(op, "torch_opinfo") else None
+            name = torch_opinfo.name if torch_opinfo is not None else op.name
+
+            if name not in supported_op_list:
+                # If the op is not supported add unittest.skip decorators.
+                if op.skips is not None:
+                    op.skips = (*op.skips, DecorateInfo(unittest.skip, device_type='xpu', dtypes=None))
+                    op.decorators = (*op.decorators, DecorateInfo(unittest.skip, device_type='xpu', dtypes=None))
+                else:
+                    op.skips = (DecorateInfo(unittest.skip, device_type='xpu', dtypes=None))
+                    op.decorators = (DecorateInfo(unittest.skip, device_type='xpu', dtypes=None))
+            else:
+                ind = supported_op_list.index(name)
+
+                if type(op_db_dict['supported'][ind]) is dict and op_db_dict['supported'][ind][name] != None:
+                    # If the op is supported check whether the supported dtypes is different with cuda
+                    for _key in op_db_dict['supported'][ind][name]:
+                        # Get the dtypes with difference
+                        _dtypes = [getattr(torch, _dtype) if hasattr(torch, _dtype) else None for _dtype in op_db_dict['supported'][ind][name][_key]]
+                        match _key:
+                            case "unsupported":
+                                op.dtypesIfXPU = set(filter(lambda x: (x not in _dtypes), op.dtypesIfXPU)) \
+                                    if type(op.dtypesIfXPU) is set else _dispatch_dtypes(filter(lambda x: (x not in _dtypes), op.dtypesIfXPU))
+                            case "unsupported_backward":
+                                op.backward_dtypesIfXPU = set(filter(lambda x: (x not in _dtypes), op.backward_dtypesIfXPU)) \
+                                    if type(op.backward_dtypesIfXPU) is set else _dispatch_dtypes(filter(lambda x: (x not in _dtypes), op.backward_dtypesIfXPU))
+                            case "supported":
+                                if type(op.dtypesIfXPU) is set:
+                                    op.dtypesIfXPU.update(_dtypes)
+                                else:
+                                    op.dtypesIfXPU = _dispatch_dtypes((*op.dtypesIfXPU, *_dtypes))
+                            case "supported_backward":
+                                if type(op.backward_dtypesIfXPU) is set:
+                                    op.backward_dtypesIfXPU.update(_dtypes)
+                                else:
+                                    op.backward_dtypesIfXPU = _dispatch_dtypes((*op.backward_dtypesIfXPU, *_dtypes))

@@ -24,7 +24,11 @@ supported:
     - clamp_min
     - clone
     - copy
-    - cos
+    - cos:
+        supported:
+            - complex32
+        supported_backward:
+            - complex32
     - cumsum
     - empty
     - eq
@@ -39,7 +43,11 @@ supported:
     - index_select
     - isnan
     - le
-    - log
+    - log:
+        supported:
+            - complex32
+        supported_backward:
+            - complex32
     - lt
     - masked_fill
     - maximum
@@ -52,17 +60,41 @@ supported:
     - nn.functional.threshold
     - nonzero
     - normal
-    - pow
+    - pow:
+        supported:
+            - complex32
+        supported_backward:
+            - complex32
     - reciprocal
     - rsub
     - relu
     - remainder
     - reshape
-    - rsqrt
-    - sin
-    - sqrt
-    - sum
-    - tanh
+    - rsqrt:
+        supported:
+            - complex32
+        supported_backward:
+            - complex32
+    - sin:
+        supported:
+            - complex32
+        supported_backward:
+            - complex32
+    - sqrt:
+        supported:
+            - complex32
+        supported_backward:
+            - complex32
+    - sum:
+        supported:
+            - complex32
+        supported_backward:
+            - complex32
+    - tanh:
+        supported:
+            - complex32
+        supported_backward:
+            - complex32
     - unfold
     - uniform
     - view

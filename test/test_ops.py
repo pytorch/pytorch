@@ -56,6 +56,7 @@ from torch.testing._internal.common_methods_invocations import (
     SpectralFuncInfo,
     UnaryUfuncInfo,
     xfail,
+    enable_skipped_device,
 )
 
 from torch.testing._internal.common_utils import (
@@ -87,6 +88,10 @@ from torch.utils._pytree import tree_map
 
 assert torch.get_default_dtype() == torch.float32
 
+
+enable_skipped_device(op_db)
+enable_skipped_device(python_ref_db)
+
 # variant testing is only done with torch.float and torch.cfloat to avoid
 #   excessive test times and maximize signal to noise ratio
 _variant_ops = partial(
@@ -109,7 +114,7 @@ _ref_test_ops = tuple(
 )
 
 
-
+my_op_list = [op for op in python_ref_db if op.name in ['_refs.cos',]]
 
 def reduction_dtype_filter(op):
     if (
@@ -2677,12 +2682,13 @@ class TestFakeTensor(TestCase):
             self.assertEqual(strided_result.layout, torch.strided)
 
 
-instantiate_device_type_tests(TestCommon, globals())
-instantiate_device_type_tests(TestCompositeCompliance, globals())
-instantiate_device_type_tests(TestMathBits, globals())
+
+instantiate_device_type_tests(TestCommon, globals(), allow_xpu=True)
+instantiate_device_type_tests(TestCompositeCompliance, globals(), allow_xpu=True)
+instantiate_device_type_tests(TestMathBits, globals(), allow_xpu=True)
 instantiate_device_type_tests(TestRefsOpsInfo, globals(), only_for="cpu")
-instantiate_device_type_tests(TestFakeTensor, globals())
-instantiate_device_type_tests(TestTags, globals())
+instantiate_device_type_tests(TestFakeTensor, globals(), allow_xpu=True)
+instantiate_device_type_tests(TestTags, globals(), allow_xpu=True)
 
 if __name__ == "__main__":
     TestCase._default_dtype_check_enabled = True
