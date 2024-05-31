@@ -30,13 +30,15 @@ from torch.distributed.elastic.multiprocessing.redirects import (
     redirect_stderr,
     redirect_stdout,
 )
+
+from torch.distributed.elastic.multiprocessing.subprocess_handler import SubprocessHandler, get_subprocess_handler
 from torch.distributed.elastic.multiprocessing.tail_log import TailLog
 
 IS_WINDOWS = sys.platform == "win32"
 IS_MACOS = sys.platform == "darwin"
 
 
-log = logging.getLogger(__name__)
+logger = logging.getLogger(__name__)
 
 __all__ = [
     "DefaultLogsSpecs",
@@ -47,8 +49,9 @@ __all__ = [
     "PContext",
     "get_std_cm",
     "MultiprocessContext",
-    "SubprocessHandler",
     "SubprocessContext",
+    "LogsDest",
+    "LogsSpecs",
 ]
 
 class SignalException(Exception):
@@ -200,12 +203,12 @@ class LogsSpecs(ABC):
 
     def __init__(
         self,
-        log_dir: Optional[str] = os.devnull,
+        log_dir: Optional[str] = None,
         redirects: Union[Std, Dict[int, Std]] = Std.NONE,
         tee: Union[Std, Dict[int, Std]] = Std.NONE,
         local_ranks_filter: Optional[Set[int]] = None,
     ) -> None:
-        self._root_log_dir = log_dir or os.devnull
+        self._root_log_dir = log_dir
         self._redirects = redirects
         self._tee = tee
         self._local_ranks_filter = local_ranks_filter
@@ -229,42 +232,37 @@ class DefaultLogsSpecs(LogsSpecs):
     """
     Default LogsSpecs implementation:
 
-    - `log_dir` will be created if it doesn't exist and it is not set to `os.devnull`
+    - `log_dir` will be created if it doesn't exist
     - Generates nested folders for each attempt and rank.
     """
     def __init__(
         self,
-        log_dir: Optional[str] = os.devnull,
+        log_dir: Optional[str] = None,
         redirects: Union[Std, Dict[int, Std]] = Std.NONE,
         tee: Union[Std, Dict[int, Std]] = Std.NONE,
         local_ranks_filter: Optional[Set[int]] = None,
     ) -> None:
-
-        log_dir = log_dir or os.devnull
-
         if log_dir != os.devnull:
-            if not os.path.exists(log_dir):
-                os.makedirs(log_dir)
+            if not log_dir:
+                log_dir = tempfile.mkdtemp(prefix="torchelastic_")
+            elif not os.path.exists(log_dir):
+                os.makedirs(log_dir, exist_ok=True)
             else:
                 if os.path.isfile(log_dir):
                     raise NotADirectoryError(f"log_dir: {log_dir} is a file")
-                if os.listdir(log_dir):
-                    raise RuntimeError(
-                        f"log_dir: {log_dir} is not empty, please provide an empty log_dir"
-                    )
         super().__init__(log_dir, redirects, tee, local_ranks_filter)
         # initialized only once
         self._run_log_dir = None
 
     @property
     def root_log_dir(self) -> str:
-        return self._root_log_dir
+        return str(self._root_log_dir)
 
     def _make_log_dir(self, log_dir: Optional[str], rdzv_run_id: str):
         base_log_dir = log_dir or tempfile.mkdtemp(prefix="torchelastic_")
         os.makedirs(base_log_dir, exist_ok=True)
         dir = tempfile.mkdtemp(prefix=f"{rdzv_run_id}_", dir=base_log_dir)
-        log.info("log directory set to: %s", dir)
+        logger.info("log directory set to: %s", dir)
         return dir
 
     def reify(self, envs: Dict[int, Dict[str, str]],) -> LogsDest:
@@ -280,7 +278,7 @@ class DefaultLogsSpecs(LogsSpecs):
         if nprocs > 0:
             global_env = envs[0]
         else:
-            log.warning("Empty envs map provided when defining logging destinations.")
+            logger.warning("Empty envs map provided when defining logging destinations.")
         # Keys are always defined, but values can be missing in unit tests
         run_id = global_env.get("TORCHELASTIC_RUN_ID", "test_run_id")
         restart_count = global_env.get("TORCHELASTIC_RESTART_COUNT", "0")
@@ -359,7 +357,7 @@ class DefaultLogsSpecs(LogsSpecs):
 
                 error_file = os.path.join(clogdir, "error.json")
                 error_files[local_rank] = error_file
-                log.info("Setting worker%s reply file to: %s", local_rank, error_file)
+                logger.info("Setting worker%s reply file to: %s", local_rank, error_file)
                 envs[local_rank]["TORCHELASTIC_ERROR_FILE"] = error_file
 
         return LogsDest(stdouts, stderrs, tee_stdouts, tee_stderrs, error_files)
@@ -462,7 +460,7 @@ class PContext(abc.ABC):
     @abc.abstractmethod
     def _start(self) -> None:
         """Start processes using strategy defined in a particular context."""
-        raise NotImplementedError()
+        raise NotImplementedError
 
     @abc.abstractmethod
     def _poll(self) -> Optional[RunProcsResult]:
@@ -473,7 +471,7 @@ class PContext(abc.ABC):
         successfully or any process fails. Returns ``None`` if
         all processes are still running.
         """
-        raise NotImplementedError()
+        raise NotImplementedError
 
     def wait(self, timeout: float = -1, period: float = 1) -> Optional[RunProcsResult]:
         """
@@ -518,7 +516,7 @@ class PContext(abc.ABC):
     @abc.abstractmethod
     def pids(self) -> Dict[int, int]:
         """Return pids of processes mapped by their respective local_ranks."""
-        raise NotImplementedError()
+        raise NotImplementedError
 
     @abc.abstractmethod
     def _close(self, death_sig: signal.Signals, timeout: int = 30) -> None:
@@ -526,7 +524,7 @@ class PContext(abc.ABC):
         Terminates all processes managed by this context and cleans up any
         meta resources (e.g. redirect, error_file files).
         """
-        raise NotImplementedError()
+        raise NotImplementedError
 
     def close(
         self, death_sig: Optional[signal.Signals] = None, timeout: int = 30
@@ -674,9 +672,13 @@ class MultiprocessContext(PContext):
             if self._is_done():
                 # we should ALWAYS have ALL the return values when all the processes are done
                 self._worker_finished_event.set()
-                # Wait untill all processes are finished. At this point workers finished executing
-                # user function
-                self._pc.join()
+
+                # At this point workers finished running the user function
+                # But the child process might still have not exited. Wait for them.
+                # pc.join() blocks [forever] until "a" proc exits. Loop until all of them exits.
+                while not self._pc.join():
+                    logger.debug("entrypoint fn finished, waiting for all child procs to exit...")
+
                 _validate_full_rank(
                     self._return_values, self.nprocs, "return_value queue"
                 )
@@ -696,7 +698,7 @@ class MultiprocessContext(PContext):
             failed_proc = self._pc.processes[failed_local_rank]
             error_filepath = self.error_files[failed_local_rank]
 
-            log.exception(
+            logger.exception(
                 "failed (exitcode: %s)"
                 " local_rank: %s (pid: %s)"
                 " of fn: %s (start_method: %s)",
@@ -728,7 +730,7 @@ class MultiprocessContext(PContext):
             return
         for proc in self._pc.processes:
             if proc.is_alive():
-                log.warning("Closing process %s via signal %s", proc.pid, death_sig.name)
+                logger.warning("Closing process %s via signal %s", proc.pid, death_sig.name)
                 try:
                     os.kill(proc.pid, death_sig)
                 except ProcessLookupError:
@@ -743,7 +745,7 @@ class MultiprocessContext(PContext):
             proc.join(time_to_wait)
         for proc in self._pc.processes:
             if proc.is_alive():
-                log.warning(
+                logger.warning(
                     "Unable to shutdown process %s via %s, forcefully exiting via %s",
                     proc.pid, death_sig, _get_kill_signal()
                 )
@@ -754,58 +756,6 @@ class MultiprocessContext(PContext):
                     # `ProcessLookupError` will be raised, it is safe to ignore it.
                     pass
             proc.join()
-
-
-class SubprocessHandler:
-    """
-    Convenience wrapper around python's ``subprocess.Popen``. Keeps track of
-    meta-objects associated to the process (e.g. stdout and stderr redirect fds).
-    """
-
-    def __init__(
-        self,
-        entrypoint: str,
-        args: Tuple,
-        env: Dict[str, str],
-        stdout: str,
-        stderr: str,
-    ):
-        self._stdout = open(stdout, "w") if stdout else None
-        self._stderr = open(stderr, "w") if stderr else None
-        # inherit parent environment vars
-        env_vars = os.environ.copy()
-        env_vars.update(env)
-
-        args_str = (entrypoint, *[str(e) for e in args])
-        self.proc: subprocess.Popen = self._popen(args_str, env_vars)
-
-    def _popen(self, args: Tuple, env: Dict[str, str]) -> subprocess.Popen:
-        kwargs: Dict[str, Any] = {}
-        if not IS_WINDOWS:
-            kwargs['start_new_session'] = True
-        return subprocess.Popen(
-            # pyre-fixme[6]: Expected `Union[typing.Sequence[Union[_PathLike[bytes],
-            #  _PathLike[str], bytes, str]], bytes, str]` for 1st param but got
-            #  `Tuple[str, *Tuple[Any, ...]]`.
-            args=args,
-            env=env,
-            stdout=self._stdout,
-            stderr=self._stderr,
-            **kwargs
-        )
-
-    def close(self, death_sig: Optional[signal.Signals] = None) -> None:
-        if not death_sig:
-            death_sig = _get_default_signal()
-        if IS_WINDOWS:
-            self.proc.send_signal(death_sig)
-        else:
-            os.killpg(self.proc.pid, death_sig)
-        if self._stdout:
-            self._stdout.close()
-        if self._stderr:
-            self._stderr.close()
-
 
 class SubprocessContext(PContext):
     """``PContext`` holding worker processes invoked as a binary."""
@@ -840,12 +790,13 @@ class SubprocessContext(PContext):
                 "The subprocess handlers already initialized. Most likely the start method got called twice."
             )
         self.subprocess_handlers = {
-            local_rank: SubprocessHandler(
+            local_rank: get_subprocess_handler(
                 entrypoint=self.entrypoint,  # type: ignore[arg-type] # entrypoint is always a str
                 args=self.args[local_rank],
                 env=self.envs[local_rank],
                 stdout=self.stdouts[local_rank],
                 stderr=self.stderrs[local_rank],
+                local_rank_id=local_rank,
             )
             for local_rank in range(self.nprocs)
         }
@@ -878,7 +829,7 @@ class SubprocessContext(PContext):
             )
             if result.is_failed():
                 first_failure = min(result.failures.values(), key=lambda f: f.timestamp)
-                log.error(
+                logger.error(
                     "failed (exitcode: %s)"
                     " local_rank: %s (pid: %s)"
                     " of binary: %s",
@@ -903,7 +854,7 @@ class SubprocessContext(PContext):
             return
         for handler in self.subprocess_handlers.values():
             if handler.proc.poll() is None:
-                log.warning(
+                logger.warning(
                     "Sending process %s closing signal %s", handler.proc.pid, death_sig.name
                 )
                 handler.close(death_sig=death_sig)
@@ -920,7 +871,7 @@ class SubprocessContext(PContext):
                 pass
         for handler in self.subprocess_handlers.values():
             if handler.proc.poll() is None:
-                log.warning(
+                logger.warning(
                     "Unable to shutdown process %s via %s, forcefully exiting via %s",
                     handler.proc.pid, death_sig, _get_kill_signal()
                 )

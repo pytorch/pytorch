@@ -7,6 +7,7 @@ import contextlib
 import torch._logging
 import torch._logging._internal
 from torch._dynamo.utils import LazyString
+from torch._inductor import config as inductor_config
 import logging
 import io
 
@@ -74,6 +75,7 @@ def kwargs_to_settings(**kwargs):
 # that the logs are setup correctly and capturing the correct records.
 def make_logging_test(**kwargs):
     def wrapper(fn):
+        @inductor_config.patch({"fx_graph_cache": False})
         def test_fn(self):
 
             torch._dynamo.reset()
@@ -129,6 +131,9 @@ class LoggingTestCase(torch._dynamo.test_case.TestCase):
         cls._exit_stack.close()
         torch._logging._internal.log_state.clear()
         torch._logging._init_logs()
+
+    def hasRecord(self, records, m):
+        return any(m in r.getMessage() for r in records)
 
     def getRecord(self, records, m):
         record = None

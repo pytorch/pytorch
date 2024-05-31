@@ -1,16 +1,25 @@
 # Owner(s): ["module: unknown"]
 
-from functools import partial
 import platform
+from functools import partial
 from unittest import skipIf as skipif
-import torch
 
-from torch.testing._internal.common_utils import unMarkDynamoStrictTest
-from torch.testing._internal.common_utils import (
-    TestGradients, run_tests, skipIfTorchInductor, IS_MACOS, TestCase)
+import torch
+from torch.testing._internal.common_device_type import (
+    instantiate_device_type_tests,
+    OpDTypes,
+    ops,
+)
 from torch.testing._internal.common_methods_invocations import op_db
-from torch.testing._internal.common_device_type import \
-    (instantiate_device_type_tests, ops, OpDTypes)
+
+from torch.testing._internal.common_utils import (
+    IS_MACOS,
+    run_tests,
+    skipIfTorchInductor,
+    TestCase,
+    TestGradients,
+    unMarkDynamoStrictTest,
+)
 
 # TODO: mitigate flaky issue on macOS https://github.com/pytorch/pytorch/issues/66033
 # AFAIK, c10::ThreadPool looks correct in the way it uses condition_variable wait. The
@@ -19,8 +28,10 @@ if IS_MACOS:
     torch.set_num_threads(1)
 
 # gradcheck requires double precision
-_gradcheck_ops = partial(ops, dtypes=OpDTypes.supported,
-                         allowed_dtypes=[torch.double, torch.cdouble])
+_gradcheck_ops = partial(
+    ops, dtypes=OpDTypes.supported, allowed_dtypes=[torch.double, torch.cdouble]
+)
+
 
 @unMarkDynamoStrictTest
 class TestFwdGradients(TestGradients):
@@ -33,31 +44,46 @@ class TestFwdGradients(TestGradients):
             self._check_helper(device, dtype, op, op.get_op(), "fwgrad_bwgrad")
         else:
             err_msg = r"Trying to use forward AD with .* that does not support it"
-            hint_msg = ("Running forward-over-backward gradgrad for an OP that has does not support it did not "
-                        "raise any error. If your op supports forward AD, you should set supports_fwgrad_bwgrad=True.")
+            hint_msg = (
+                "Running forward-over-backward gradgrad for an OP that has does not support it did not "
+                "raise any error. If your op supports forward AD, you should set supports_fwgrad_bwgrad=True."
+            )
             with self.assertRaisesRegex(NotImplementedError, err_msg, msg=hint_msg):
                 self._check_helper(device, dtype, op, op.get_op(), "fwgrad_bwgrad")
-
 
     def _forward_grad_helper(self, device, dtype, op, variant, is_inplace):
         # TODO: clean up how attributes are passed to gradcheck from OpInfos
         def call_grad_test_helper():
-            check_batched_forward_grad = ((op.check_batched_forward_grad and not is_inplace) or
-                                          (op.check_inplace_batched_forward_grad and is_inplace))
-            self._grad_test_helper(device, dtype, op, variant, check_forward_ad=True, check_backward_ad=False,
-                                   check_batched_grad=False, check_batched_forward_grad=check_batched_forward_grad)
+            check_batched_forward_grad = (
+                op.check_batched_forward_grad and not is_inplace
+            ) or (op.check_inplace_batched_forward_grad and is_inplace)
+            self._grad_test_helper(
+                device,
+                dtype,
+                op,
+                variant,
+                check_forward_ad=True,
+                check_backward_ad=False,
+                check_batched_grad=False,
+                check_batched_forward_grad=check_batched_forward_grad,
+            )
+
         if op.supports_forward_ad:
             call_grad_test_helper()
         else:
             err_msg = r"Trying to use forward AD with .* that does not support it"
-            hint_msg = ("Running forward AD for an OP that has does not support it did not "
-                        "raise any error. If your op supports forward AD, you should set supports_forward_ad=True")
+            hint_msg = (
+                "Running forward AD for an OP that has does not support it did not "
+                "raise any error. If your op supports forward AD, you should set supports_forward_ad=True"
+            )
             with self.assertRaisesRegex(NotImplementedError, err_msg, msg=hint_msg):
                 call_grad_test_helper()
 
     @_gradcheck_ops(op_db)
-    @skipif(platform.machine() == "s390x",
-            reason="Different precision of openblas functions: https://github.com/OpenMathLib/OpenBLAS/issues/4194")
+    @skipif(
+        platform.machine() == "s390x",
+        reason="Different precision of openblas functions: https://github.com/OpenMathLib/OpenBLAS/issues/4194",
+    )
     def test_forward_mode_AD(self, device, dtype, op):
         self._skip_helper(op, device, dtype)
 
@@ -71,10 +97,13 @@ class TestFwdGradients(TestGradients):
         if not op.inplace_variant or not op.supports_inplace_autograd:
             self.skipTest("Skipped! Operation does not support inplace autograd.")
 
-        self._forward_grad_helper(device, dtype, op, self._get_safe_inplace(op.get_inplace()), is_inplace=True)
+        self._forward_grad_helper(
+            device, dtype, op, self._get_safe_inplace(op.get_inplace()), is_inplace=True
+        )
+
 
 instantiate_device_type_tests(TestFwdGradients, globals())
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     TestCase._default_dtype_check_enabled = True
     run_tests()

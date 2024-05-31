@@ -38,7 +38,7 @@ inline c10::Device indexToDevice(c10::DeviceIndex index) {
 
 class TensorpipeCpuConverter : public TensorpipeDeviceTypeConverter {
  public:
-  c10::optional<std::vector<char>> prepareTensorForSending(
+  std::optional<std::vector<char>> prepareTensorForSending(
       const c10::Storage& storage,
       const std::vector<c10::Stream>& /* streams */,
       tensorpipe::Message& message) const override {
@@ -152,8 +152,7 @@ std::tuple<tensorpipe::Message, TensorpipeWriteBuffers> tensorpipeSerialize(
   buffers.payload = std::move(rpcMessage->payload());
   // TensorPipe uses the same Message class for both reading and writing, thus
   // it uses non-const pointers even though it doesn't modify them when writing.
-  // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
-  char* payloadPtr = const_cast<char*>(buffers.payload.data());
+  char* payloadPtr = buffers.payload.data();
   // kTpMessagePayloadIdx = 2
   tpMessage.payloads.push_back(
       tensorpipe::Message::Payload{payloadPtr, buffers.payload.size()});
@@ -193,7 +192,7 @@ std::tuple<tensorpipe::Message, TensorpipeWriteBuffers> tensorpipeSerialize(
         tensor.device());
 
     TORCH_INTERNAL_ASSERT(tpMessage.tensors.size() == i);
-    c10::optional<std::vector<char>> maybeCopiedTensor =
+    std::optional<std::vector<char>> maybeCopiedTensor =
         converter->prepareTensorForSending(
             tensor.storage(), streams, tpMessage);
     TORCH_INTERNAL_ASSERT(tpMessage.tensors.size() == i + 1);

@@ -881,7 +881,10 @@ def _find_onnx_data_type(
     if isinstance(torch_input, (int, float, bool, str, complex)):
         return fx_type_utils.from_torch_dtype_to_onnx_dtype_str(type(torch_input))
     if isinstance(torch_input, (list, tuple)) and torch_input:  # [Tensor, Tensor]
-        set_dtype = _find_onnx_data_type(torch_input[0])
+        the_first_non_none_item = next(
+            (item for item in torch_input if item is not None), None
+        )
+        set_dtype = _find_onnx_data_type(the_first_non_none_item)
         if any(isinstance(input, fx_type_utils.TensorLike) for input in torch_input):
             # NOTE: Any Tensor involved in a list would make it a seq(tensor(onnx_type))
             return {f"seq({dtype})" for dtype in set_dtype}

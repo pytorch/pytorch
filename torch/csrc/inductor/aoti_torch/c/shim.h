@@ -40,7 +40,12 @@
 #define AOTI_TORCH_EXPORT __attribute__((__visibility__("default")))
 #else // !__GNUC__
 #ifdef _WIN32
-#define AOTI_TORCH_EXPORT __declspec(dllexport)
+// PyTorch2 doesn't currently work on Windows. Exporting these APIs can lead
+// to symbol clashes at link time if libtorch is included in a DLL and binary
+// that depends on the DLL. As a short term fix, we don't export the symbols.
+// In the long term, this will need to be addressed when Windows is supported.
+// #define AOTI_TORCH_EXPORT __declspec(dllexport)
+#define AOTI_TORCH_EXPORT
 #else // !_WIN32
 #define AOTI_TORCH_EXPORT
 #endif // _WIN32
@@ -66,6 +71,9 @@ extern "C" {
 // the ABI boundary.)
 struct AtenTensorOpaque;
 using AtenTensorHandle = AtenTensorOpaque*;
+
+struct AtenGeneratorOpaque;
+using AtenGeneratorHandle = AtenGeneratorOpaque*;
 
 struct AOTIProxyExecutorOpaque;
 using AOTIProxyExecutorHandle = AOTIProxyExecutorOpaque*;
@@ -103,6 +111,9 @@ AOTI_TORCH_EXPORT int32_t aoti_torch_dtype_bool();
 AOTI_TORCH_EXPORT int32_t aoti_torch_dtype_complex32();
 AOTI_TORCH_EXPORT int32_t aoti_torch_dtype_complex64();
 AOTI_TORCH_EXPORT int32_t aoti_torch_dtype_complex128();
+
+AOTI_TORCH_EXPORT int32_t aoti_torch_layout_strided();
+AOTI_TORCH_EXPORT int32_t aoti_torch_layout__mkldnn();
 
 // Functions for converting a single-element tensor to a scalar value
 AOTI_TORCH_EXPORT AOTITorchError
@@ -262,6 +273,20 @@ AOTI_TORCH_EXPORT AOTITorchError aoti_torch_create_tensor_from_blob(
     AtenTensorHandle* ret // returns new reference
 );
 
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch_create_tensor_from_blob_v2(
+    void* data,
+    int64_t ndim,
+    const int64_t* sizes_ptr,
+    const int64_t* strides_ptr,
+    int64_t storage_offset,
+    int32_t dtype,
+    int32_t device_type,
+    int32_t device_index,
+    AtenTensorHandle* ret, // returns new reference
+    int32_t layout,
+    const uint8_t* opaque_metadata,
+    int64_t opaque_metadata_size);
+
 AOTI_TORCH_EXPORT AOTITorchError aoti_torch__embedding_bag(
     AtenTensorHandle weight,
     AtenTensorHandle indices,
@@ -387,6 +412,13 @@ aoti_torch_tensor_copy_(AtenTensorHandle src, AtenTensorHandle dst);
 AOTI_TORCH_EXPORT AOTITorchError
 aoti_torch_assign_tensors(AtenTensorHandle src, AtenTensorHandle dst);
 
+// Make a shallow copy of the tensor referred to by src and assign
+// it to the handle in the ret_dst. This is similar to the above
+// aoti_torch_assign_tensors function, but creates and sets the
+// ret_dst from within.
+AOTI_TORCH_EXPORT AOTITorchError
+aoti_torch_assign_tensors_out(AtenTensorHandle src, AtenTensorHandle* ret_dst);
+
 // This function will create a new tensor object and its pointer is returned
 // through *ret. The caller is responsible for wrapping the tensor pointer
 // with RAIIAtenTensorHandle which will call aoti_torch_delete_tensor_object
@@ -416,6 +448,23 @@ AOTI_TORCH_EXPORT AOTITorchError aoti_torch_mm_out(
     AtenTensorHandle out,
     AtenTensorHandle self,
     AtenTensorHandle mat2);
+
+// This will soon be deprecated after ao_quantization is complete.
+// Please refrain from using this or increasing callsites.
+AOTI_TORCH_EXPORT AOTITorchError
+aoti_torch_cpu_wrapped_fbgemm_pack_gemm_matrix_fp16(
+    AtenTensorHandle weight,
+    AtenTensorHandle* out);
+
+// This will soon be deprecated after ao_quantization is complete.
+// Please refrain from using this or increasing callsites.
+AOTI_TORCH_EXPORT AOTITorchError
+aoti_torch_cpu_wrapped_fbgemm_linear_fp16_weight(
+    AtenTensorHandle input,
+    AtenTensorHandle weight,
+    AtenTensorHandle bias,
+    int64_t out_channel,
+    AtenTensorHandle* out);
 
 AOTI_TORCH_EXPORT AOTITorchError
 aoti_torch_nonzero(AtenTensorHandle self, AtenTensorHandle* out);
@@ -469,6 +518,20 @@ AOTI_TORCH_EXPORT void aoti_torch_print_tensor_handle(
 
 #ifdef USE_CUDA
 
+struct CUDAGuardOpaque;
+using CUDAGuardHandle = CUDAGuardOpaque*;
+
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch_create_cuda_guard(
+    int32_t device_index,
+    CUDAGuardHandle* ret_guard // returns new reference
+);
+
+AOTI_TORCH_EXPORT AOTITorchError
+aoti_torch_delete_cuda_guard(CUDAGuardHandle guard);
+
+AOTI_TORCH_EXPORT AOTITorchError
+aoti_torch_cuda_guard_set_index(CUDAGuardHandle guard, int32_t device_index);
+
 struct CUDAStreamGuardOpaque;
 using CUDAStreamGuardHandle = CUDAStreamGuardOpaque*;
 
@@ -480,6 +543,10 @@ AOTI_TORCH_EXPORT AOTITorchError aoti_torch_create_cuda_stream_guard(
 
 AOTI_TORCH_EXPORT AOTITorchError
 aoti_torch_delete_cuda_stream_guard(CUDAStreamGuardHandle guard);
+
+AOTI_TORCH_EXPORT AOTITorchError
+aoti_torch_get_current_cuda_stream(int32_t device_index, void** ret_stream);
+
 #endif
 
 // See `ProxyExecutor Design Note` in ir.py for more details
@@ -520,7 +587,7 @@ AOTI_TORCH_EXPORT void aoti_torch_check(
 } // extern "C"
 
 template <typename T>
-int32_t aoti_torch_dtype();
+int32_t aoti_torch_dtype() = delete;
 
 #define DEFINE_DTYPE_SPECIALIZATION(ctype, typename) \
   template <>                                        \
@@ -528,10 +595,13 @@ int32_t aoti_torch_dtype();
     return aoti_torch_dtype_##typename();            \
   }
 
-// REVIEW: bfloat16 and half don't seem to actually build? Do I have
-// the wrong types?
-//  DEFINE_DTYPE_SPECIALIZATION(__bfloat16, bfloat16)
-//  DEFINE_DTYPE_SPECIALIZATION(half, float16)
+namespace c10 {
+struct BFloat16;
+struct Half;
+} // namespace c10
+
+DEFINE_DTYPE_SPECIALIZATION(c10::BFloat16, bfloat16)
+DEFINE_DTYPE_SPECIALIZATION(c10::Half, float16)
 DEFINE_DTYPE_SPECIALIZATION(float, float32)
 DEFINE_DTYPE_SPECIALIZATION(double, float64)
 DEFINE_DTYPE_SPECIALIZATION(uint8_t, uint8)

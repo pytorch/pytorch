@@ -3,7 +3,7 @@
 import unittest
 from itertools import product
 from functools import partial
-from typing import Optional
+from typing import Optional, Tuple
 
 import torch
 
@@ -210,9 +210,16 @@ f8_msg = "FP8 is only supported on H100+ and sm_89 and MI300+ devices"
 if torch.version.hip:
     e4m3_type = torch.float8_e4m3fnuz
     e5m2_type = torch.float8_e5m2fnuz
+    E4M3_MAX_POS = torch.finfo(torch.float8_e4m3fnuz).max
+    E5M2_MAX_POS = torch.finfo(torch.float8_e5m2fnuz).max
 else:
     e4m3_type = torch.float8_e4m3fn
     e5m2_type = torch.float8_e5m2
+    E4M3_MAX_POS = torch.finfo(torch.float8_e4m3fn).max
+    E5M2_MAX_POS = torch.finfo(torch.float8_e5m2).max
+
+# avoid division by zero when calculating scale
+EPS = 1e-12
 
 def scaled_mm_supported_device():
     if torch.cuda.is_available():
@@ -222,6 +229,126 @@ def scaled_mm_supported_device():
             return torch.cuda.get_device_capability() >= (9, 0) or torch.cuda.get_device_capability() == (8, 9)
     return False
 
+
+def amax_to_scale(
+    amax: torch.Tensor, float8_dtype: torch.dtype, orig_dtype: torch.dtype
+):
+    """ Converts the amax value of a tensor to the fp8 scale.
+    Args:
+        amax: The amax value of the tensor.
+        float8_dtype: the float8 dtype.
+        orig_dtype: The original dtype of the tensor.
+    """
+    scale = torch.empty_like(amax, dtype=torch.float32)
+    if float8_dtype == e4m3_type:
+        res = E4M3_MAX_POS / torch.clamp(amax, min=EPS)
+    elif float8_dtype == e5m2_type:
+        res = E4M3_MAX_POS / torch.clamp(amax, min=EPS)
+    else:
+        raise ValueError(f"Unsupported float8_dtype: {float8_dtype}")
+
+    # Ensure the scale is representable in float16,
+    # this helps when amax is small. We are assuming that we don't need
+    # to care about this for float32/bfloat16
+    if orig_dtype is torch.float16:
+        res = torch.clamp(res, max=torch.finfo(torch.float16).max)
+
+    scale.copy_(res)
+    return scale
+
+def tensor_to_scale(x: torch.Tensor, float8_dtype: torch.dtype):
+    amax = torch.max(torch.abs(x))
+    return amax_to_scale(amax, float8_dtype, x.dtype)
+
+def mm_float8_emulated(x, x_scale, y, y_scale, out_dtype):
+    # naive implementation: dq -> op -> q
+    x_fp32 = x.to(torch.float) / x_scale
+    y_fp32 = y.to(torch.float) / y_scale
+    out_fp32 = torch.mm(x_fp32, y_fp32)
+
+    return out_fp32.to(out_dtype), torch.max(torch.abs(out_fp32))
+
+def addmm_float8_unwrapped(
+    a_data: torch.Tensor,
+    a_scale: torch.Tensor,
+    b_data: torch.Tensor,
+    b_scale: torch.tensor,
+    output_dtype: torch.dtype,
+    output_scale: Optional[torch.Tensor],
+    bias: Optional[torch.Tensor] = None,
+) -> Tuple[torch.Tensor, torch.Tensor]:
+    a_inverse_scale = a_scale.reciprocal()
+    b_inverse_scale = b_scale.reciprocal()
+    if output_dtype == torch.float32 and bias is not None:
+        # Bias is not supported by _scaled_mm when output is fp32
+        output, output_amax = torch._scaled_mm(
+            a_data,
+            b_data,
+            out_dtype=output_dtype,
+            scale_a=a_inverse_scale,
+            scale_b=b_inverse_scale,
+            scale_result=output_scale,
+        )
+        output += bias
+        return output, output_amax
+    output, output_amax = torch._scaled_mm(
+        a_data,
+        b_data,
+        bias=bias,
+        out_dtype=output_dtype,
+        scale_a=a_inverse_scale,
+        scale_b=b_inverse_scale,
+        scale_result=output_scale,
+    )
+    return output, output_amax
+
+def mm_float8(
+    a: torch.Tensor,
+    b: torch.Tensor,
+    a_scale: torch.Tensor,
+    b_scale: torch.Tensor,
+    output_dtype: torch.dtype,  # output dtype
+    output_scale: Optional[torch.Tensor] = None,  # output scale, precomputed
+) -> Tuple[torch.Tensor, torch.Tensor]:
+    return addmm_float8_unwrapped(
+        a, a_scale, b, b_scale, output_dtype, output_scale
+    )
+
+def to_fp8_saturated(
+    x: torch.Tensor,
+    x_scale: torch.tensor,
+    fp8_dtype: torch.dtype
+):
+    """
+    Converts a tensor to a saturated fp8 tensor.
+
+    Args:
+        a: Input Tensor.
+        b: Input Tensor.
+        a_scale: scale associated with `a`.
+        b_scale: scale associated with `b`.
+        output_dtype: dtype of result.
+        output_scale: the output tensor's scale, precomputed.
+
+    Returns:
+        (torch.Tensor, torch.Tensor): (result of the matrix multiplication, associated amax)
+    Note:
+        The default behavior in PyTorch for casting to `e4m3_type`
+        and `e5m2_type` is to not saturate. In this context, we should
+        saturate. A common case where we want to saturate is when the history
+        of a tensor has a maximum value of `amax1`, and the current amax value
+        is `amax2`, where `amax1 < amax2`.
+    """
+    x_scaled = x * x_scale
+
+    if fp8_dtype == e4m3_type:
+        x = x.clamp(min=-1 * E4M3_MAX_POS, max=E4M3_MAX_POS)
+    elif fp8_dtype == e5m2_type:
+        x = x.clamp(min=-1 * E5M2_MAX_POS, max=E5M2_MAX_POS)
+    else:
+        raise ValueError(f"to_fp8_saturated(): Unsupported fp8_dtype: {fp8_dtype}")
+
+    return x.to(fp8_dtype)
 
 @unittest.skipIf(not torch.cuda.is_available(), "CUDA not found")
 class TestFP8MatmulCuda(TestCase):
@@ -276,6 +403,59 @@ class TestFP8MatmulCuda(TestCase):
         self.assertEqual(out_fp8.to(torch.float), torch.full(size, 4., device=device))
         out_fp8_s, amax_fp8_s = torch._scaled_mm(x, y, scale_a=scale_a, scale_b=scale_b)
         self.assertEqual(out_fp8, out_fp8_s)
+
+    @unittest.skipIf(not scaled_mm_supported_device(), f8_msg)
+    @parametrize("base_dtype", [torch.float16, torch.bfloat16, torch.float32])
+    def test_scaled_mm_vs_emulated(self, base_dtype):
+        torch.manual_seed(42)
+        input_dtype = e4m3_type
+        output_dtype = base_dtype
+        compare_type = torch.float32
+
+        x = torch.randn(16, 16, device="cuda", dtype=base_dtype)
+        y = torch.randn(32, 16, device="cuda", dtype=base_dtype).t()
+
+        x_scale = tensor_to_scale(x, input_dtype).float()
+        y_scale = tensor_to_scale(y, input_dtype).float()
+
+        x_fp8 = to_fp8_saturated(x, x_scale, e4m3_type)
+        y_fp8 = to_fp8_saturated(y, y_scale, e4m3_type)
+
+        # Calculate actual F8 mm
+        out_scaled_mm, output_amax_scaled = mm_float8(
+            x_fp8,
+            y_fp8,
+            a_scale=x_scale,
+            b_scale=y_scale,
+            output_dtype=output_dtype
+        )
+
+        # Calculate emulated F8 mm
+        out_emulated, output_amax_emulated = mm_float8_emulated(
+            x_fp8,
+            x_scale,
+            y_fp8,
+            y_scale,
+            output_dtype
+        )
+
+        if output_dtype != base_dtype:
+            out_scaled_mm = out_scaled_mm.to(compare_type)
+            out_emulated = out_emulated.to(compare_type)
+
+            out_scaled_mm = out_scaled_mm / amax_to_scale(
+                output_amax_scaled, input_dtype
+            )
+            out_emulated = out_emulated / amax_to_scale(
+                output_amax_emulated, input_dtype
+            )
+
+        if base_dtype in {torch.bfloat16, torch.float16}:
+            atol, rtol = 7e-2, 7e-2
+        else:
+            atol, rtol = 2e-3, 2e-3
+
+        torch.testing.assert_close(out_scaled_mm, out_emulated, atol=atol, rtol=rtol)
 
     @unittest.skipIf(not scaled_mm_supported_device(), f8_msg)
     def test_float8_bias(self, device) -> None:

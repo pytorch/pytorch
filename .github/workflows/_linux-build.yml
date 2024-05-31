@@ -47,6 +47,23 @@ on:
           An option JSON description of what test configs to run later on. This
           is moved here from the Linux test workflow so that we can apply filter
           logic using test-config labels earlier and skip unnecessary builds
+      selected-test-configs:
+        description: |
+          A comma-separated list of test configurations from the test matrix to keep,
+          The empty list means we are going to keep every configurations by defaults
+        required: false
+        type: string
+        default: ""
+      s3-bucket:
+        description: S3 bucket to download artifact
+        required: false
+        type: string
+        default: "gha-artifacts"
+      aws-role-to-assume:
+        description: Role to assume for downloading artifacts
+        required: false
+        type: string
+        default: ""
     secrets:
       HUGGING_FACE_HUB_TOKEN:
         required: false
@@ -87,6 +104,14 @@ jobs:
       - name: Setup Linux
         uses: ./.github/actions/setup-linux
 
+      - name: configure aws credentials
+        uses: aws-actions/configure-aws-credentials@v3
+        if: ${{ inputs.aws-role-to-assume != '' }}
+        with:
+          role-to-assume: ${{ inputs.aws-role-to-assume }}
+          role-session-name: gha-linux-build
+          aws-region: us-east-1
+
       - name: Calculate docker image
         id: calculate-docker-image
         uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
@@ -125,6 +150,7 @@ jobs:
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           test-matrix: ${{ inputs.test-matrix }}
+          selected-test-configs: ${{ inputs.selected-test-configs }}
           job-name: ${{ steps.get-job-id.outputs.job-name }}
 
       - name: Download pytest cache
@@ -133,6 +159,7 @@ jobs:
         with:
           cache_dir: .pytest_cache
           job_identifier: ${{ github.workflow }}_${{ inputs.build-environment }}
+          s3_bucket: ${{ inputs.s3-bucket }}
 
       - name: Build
         if: steps.filter.outputs.is-test-matrix-empty == 'False' || inputs.test-matrix == ''
@@ -197,6 +224,7 @@ jobs:
           retention-days: 14
           if-no-files-found: error
           path: artifacts.zip
+          s3-bucket: ${{ inputs.s3-bucket }}
 
       - name: Upload sccache stats
         if: steps.build.outcome != 'skipped'
@@ -207,6 +235,7 @@ jobs:
           retention-days: 365
           if-no-files-found: warn
           path: sccache-stats-*.json
+          s3-bucket: ${{ inputs.s3-bucket }}
 
       - name: Teardown Linux
         uses: pytorch/test-infra/.github/actions/teardown-linux@main

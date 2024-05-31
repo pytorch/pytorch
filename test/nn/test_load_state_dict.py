@@ -1,16 +1,24 @@
 # Owner(s): ["module: nn"]
+import re
+import unittest
 from copy import deepcopy
 from itertools import product
-import re
 from tempfile import NamedTemporaryFile
-import unittest
 
 import torch
 import torch.nn as nn
 from torch.testing._internal.common_nn import NNTestCase
-from torch.testing._internal.common_utils import TestCase, \
-    TEST_NUMPY, IS_WINDOWS, skipIfTorchDynamo, instantiate_parametrized_tests, \
-    run_tests, skipIfCrossRef, swap
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    IS_WINDOWS,
+    parametrize,
+    run_tests,
+    skipIfCrossRef,
+    skipIfTorchDynamo,
+    swap,
+    TEST_NUMPY,
+    TestCase,
+)
 from torch.utils._pytree import tree_map
 
 if TEST_NUMPY:
@@ -26,25 +34,31 @@ class TestLoadStateDict(NNTestCase):
     def test_load_state_dict_invalid(self):
         m = torch.nn.Linear(2, 2, bias=False)
 
-        state_dict = {'weight': np.random.randn(2, 2)}
-        with self.assertRaisesRegex(RuntimeError,
-                                    "expected torch.Tensor or Tensor-like object from checkpoint but received"):
+        state_dict = {"weight": np.random.randn(2, 2)}
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "expected torch.Tensor or Tensor-like object from checkpoint but received",
+        ):
             m.load_state_dict(state_dict)
 
-        state_dict = {'weight': ((1., 1.), (2., 2.))}
-        with self.assertRaisesRegex(RuntimeError,
-                                    "expected torch.Tensor or Tensor-like object from checkpoint but received"):
+        state_dict = {"weight": ((1.0, 1.0), (2.0, 2.0))}
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "expected torch.Tensor or Tensor-like object from checkpoint but received",
+        ):
             m.load_state_dict(state_dict)
 
     @swap([True, False])
     def test_load_state_dict_type(self):
         m = nn.Module()
 
-        with self.assertRaisesRegex(TypeError,
-                                    "Expected state_dict to be dict-like, got"):
+        with self.assertRaisesRegex(
+            TypeError, "Expected state_dict to be dict-like, got"
+        ):
             m.load_state_dict("")
-        with self.assertRaisesRegex(TypeError,
-                                    "Expected state_dict to be dict-like, got"):
+        with self.assertRaisesRegex(
+            TypeError, "Expected state_dict to be dict-like, got"
+        ):
             m.load_state_dict(2)
 
     @swap([True, False])
@@ -59,86 +73,97 @@ class TestLoadStateDict(NNTestCase):
         net.linear2 = l
         net.bn = nn.BatchNorm2d(2)
         net.block = block
-        net.add_module('empty', None)
+        net.add_module("empty", None)
         conv1_bias_dtype = block.conv1.bias.dtype
 
         state_dict = net.state_dict()
-        state_dict.update({
-            'linear1.weight': torch.ones(5, 5),
-            'block.conv1.bias': torch.arange(1, 4, dtype=conv1_bias_dtype),
-            'bn.running_mean': torch.randn(2),
-        })
+        state_dict.update(
+            {
+                "linear1.weight": torch.ones(5, 5),
+                "block.conv1.bias": torch.arange(1, 4, dtype=conv1_bias_dtype),
+                "bn.running_mean": torch.randn(2),
+            }
+        )
         # Also test if a DDP state_dict can be loaded from a local model.
         ddp_state_dict = net.state_dict()
-        ddp_state_dict.update({
-            'module.linear1.weight': torch.ones(5, 5),
-            'module.block.conv1.bias': torch.arange(1, 4, dtype=conv1_bias_dtype),
-            'module.bn.running_mean': torch.randn(2),
-        })
-        torch.nn.modules.utils.consume_prefix_in_state_dict_if_present(ddp_state_dict, 'module.')
+        ddp_state_dict.update(
+            {
+                "module.linear1.weight": torch.ones(5, 5),
+                "module.block.conv1.bias": torch.arange(1, 4, dtype=conv1_bias_dtype),
+                "module.bn.running_mean": torch.randn(2),
+            }
+        )
+        torch.nn.modules.utils.consume_prefix_in_state_dict_if_present(
+            ddp_state_dict, "module."
+        )
         for sd in [state_dict, ddp_state_dict]:
             incompatible_keys = net.load_state_dict(sd)
             self.assertEqual(len(incompatible_keys.missing_keys), 0)
             self.assertEqual(len(incompatible_keys.unexpected_keys), 0)
-            self.assertNotIn('Incompatible', str(incompatible_keys))
-            self.assertEqual(net.linear1.weight, sd['linear1.weight'])
-            self.assertEqual(net.block.conv1.bias, sd['block.conv1.bias'])
-            self.assertEqual(net.bn.running_mean, sd['bn.running_mean'])
+            self.assertNotIn("Incompatible", str(incompatible_keys))
+            self.assertEqual(net.linear1.weight, sd["linear1.weight"])
+            self.assertEqual(net.block.conv1.bias, sd["block.conv1.bias"])
+            self.assertEqual(net.bn.running_mean, sd["bn.running_mean"])
 
         state_dict = net.state_dict()
-        state_dict.update({'extra': torch.ones(5)})
+        state_dict.update({"extra": torch.ones(5)})
         self.assertRaises(RuntimeError, lambda: net.load_state_dict(state_dict))
         incompatible_keys = net.load_state_dict(state_dict, strict=False)
         self.assertEqual(len(incompatible_keys.missing_keys), 0)
         self.assertEqual(len(incompatible_keys.unexpected_keys), 1)
-        self.assertIn('extra', incompatible_keys.unexpected_keys)
-        self.assertIn('Incompatible', str(incompatible_keys))
+        self.assertIn("extra", incompatible_keys.unexpected_keys)
+        self.assertIn("Incompatible", str(incompatible_keys))
 
         state_dict = net.state_dict()
-        state_dict.update({'extra.param': torch.ones(5)})
+        state_dict.update({"extra.param": torch.ones(5)})
         self.assertRaises(RuntimeError, lambda: net.load_state_dict(state_dict))
         incompatible_keys = net.load_state_dict(state_dict, strict=False)
         self.assertEqual(len(incompatible_keys.missing_keys), 0)
         self.assertEqual(len(incompatible_keys.unexpected_keys), 1)
-        self.assertIn('extra.param', incompatible_keys.unexpected_keys)
+        self.assertIn("extra.param", incompatible_keys.unexpected_keys)
 
         state_dict = net.state_dict()
-        del state_dict['linear1.weight']
+        del state_dict["linear1.weight"]
         self.assertRaises(RuntimeError, lambda: net.load_state_dict(state_dict))
         incompatible_keys = net.load_state_dict(state_dict, strict=False)
         self.assertEqual(len(incompatible_keys.missing_keys), 1)
         self.assertEqual(len(incompatible_keys.unexpected_keys), 0)
-        self.assertIn('linear1.weight', incompatible_keys.missing_keys)
-        state_dict.update({'extra.param': torch.ones(5)})
+        self.assertIn("linear1.weight", incompatible_keys.missing_keys)
+        state_dict.update({"extra.param": torch.ones(5)})
         self.assertRaises(RuntimeError, lambda: net.load_state_dict(state_dict))
         incompatible_keys = net.load_state_dict(state_dict, strict=False)
         self.assertEqual(len(incompatible_keys.missing_keys), 1)
         self.assertEqual(len(incompatible_keys.unexpected_keys), 1)
-        self.assertIn('linear1.weight', incompatible_keys.missing_keys)
-        self.assertIn('extra.param', incompatible_keys.unexpected_keys)
+        self.assertIn("linear1.weight", incompatible_keys.missing_keys)
+        self.assertIn("extra.param", incompatible_keys.unexpected_keys)
 
         state_dict = net.state_dict()
-        state_dict.update({'bn.running_mean': torch.rand(14, 4)})  # wrong size
+        state_dict.update({"bn.running_mean": torch.rand(14, 4)})  # wrong size
         self.assertRaises(RuntimeError, lambda: net.load_state_dict(state_dict))
-        self.assertRaises(RuntimeError, lambda: net.load_state_dict(state_dict, strict=False))
+        self.assertRaises(
+            RuntimeError, lambda: net.load_state_dict(state_dict, strict=False)
+        )
 
         state_dict = net.state_dict()
         old_state_dict = deepcopy(state_dict)
         state_dict = {
-            'linear1.weight': torch.ones(5, 5),
-            'block.conv1.bias': torch.arange(1, 4, dtype=conv1_bias_dtype),
-            'bn.running_mean': torch.randn(2),
-            'nonexistent_key': torch.rand(3)
+            "linear1.weight": torch.ones(5, 5),
+            "block.conv1.bias": torch.arange(1, 4, dtype=conv1_bias_dtype),
+            "bn.running_mean": torch.randn(2),
+            "nonexistent_key": torch.rand(3),
         }
         net.load_state_dict(state_dict, strict=False)
-        self.assertEqual(net.linear1.weight, state_dict['linear1.weight'])
-        self.assertEqual(net.block.conv1.bias, state_dict['block.conv1.bias'])
-        self.assertEqual(net.bn.running_mean, state_dict['bn.running_mean'])
+        self.assertEqual(net.linear1.weight, state_dict["linear1.weight"])
+        self.assertEqual(net.block.conv1.bias, state_dict["block.conv1.bias"])
+        self.assertEqual(net.bn.running_mean, state_dict["bn.running_mean"])
         new_state_dict = net.state_dict()
-        del old_state_dict['linear1.weight']
-        del old_state_dict['block.conv1.bias']
-        del old_state_dict['bn.running_mean']
-        for k, v, in old_state_dict.items():
+        del old_state_dict["linear1.weight"]
+        del old_state_dict["block.conv1.bias"]
+        del old_state_dict["bn.running_mean"]
+        for (
+            k,
+            v,
+        ) in old_state_dict.items():
             self.assertTrue(v.equal(new_state_dict[k]))
 
     @swap([True, False])
@@ -148,12 +173,12 @@ class TestLoadStateDict(NNTestCase):
         # earlier versions or no versions, it should provide default value of 0.
         bn = nn.BatchNorm2d(3)
         state_dict = bn.state_dict()
-        del state_dict['num_batches_tracked']
-        state_dict._metadata['']['version'] = 1  # version 1
+        del state_dict["num_batches_tracked"]
+        state_dict._metadata[""]["version"] = 1  # version 1
         bn.load_state_dict(state_dict)
         self.assertEqual(bn.num_batches_tracked.dtype, torch.long)
         self.assertEqual(bn.num_batches_tracked.item(), 0)
-        del state_dict._metadata['']['version']  # no version
+        del state_dict._metadata[""]["version"]  # no version
         bn.load_state_dict(state_dict)
         self.assertEqual(bn.num_batches_tracked.dtype, torch.long)
         self.assertEqual(bn.num_batches_tracked.item(), 0)
@@ -165,7 +190,16 @@ class TestLoadStateDict(NNTestCase):
         for _ in range(3):
             model = nn.Sequential(*[deepcopy(model) for _ in range(10)])
 
-        def hook_fn(module, state_dict, prefix, local_metadata, strict, missing_keys, unexpected_keys, error_msgs):
+        def hook_fn(
+            module,
+            state_dict,
+            prefix,
+            local_metadata,
+            strict,
+            missing_keys,
+            unexpected_keys,
+            error_msgs,
+        ):
             module_state_dict = module.state_dict()
             self.assertEqual(len(module_state_dict.keys()), len(state_dict.keys()))
 
@@ -182,8 +216,8 @@ class TestLoadStateDict(NNTestCase):
             called = True
 
         m = nn.Linear(1, 1)
-        self.assertTrue(hasattr(m, '_state_dict_pre_hooks'))
-        delattr(m, '_state_dict_pre_hooks')
+        self.assertTrue(hasattr(m, "_state_dict_pre_hooks"))
+        delattr(m, "_state_dict_pre_hooks")
         # Save and load, ensure we can still call state_dict
         # without running into issues.
         with NamedTemporaryFile() as f:
@@ -216,7 +250,6 @@ class TestLoadStateDict(NNTestCase):
 
     @swap([True, False])
     def test_load_state_dict_custom(self):
-
         class CustomState(nn.Module):
             def __init__(self):
                 super().__init__()
@@ -226,9 +259,16 @@ class TestLoadStateDict(NNTestCase):
             def _save_to_state_dict(self, destination, prefix, keep_vars):
                 destination[prefix + "serialized"] = self.param.data + 1
 
-            def _load_from_state_dict(self, state_dict, prefix, local_metadata,
-                                      strict, missing_keys, unexpected_keys,
-                                      error_msgs):
+            def _load_from_state_dict(
+                self,
+                state_dict,
+                prefix,
+                local_metadata,
+                strict,
+                missing_keys,
+                unexpected_keys,
+                error_msgs,
+            ):
                 # skip some of the error handling
                 self.param.data.copy_(state_dict[prefix + "serialized"] - 1)
 
@@ -249,29 +289,62 @@ class TestLoadStateDict(NNTestCase):
         self.assertEqual(mm[0].sub.weight[0, 0].item(), 555)
 
     @swap([True, False])
-    def test_load_state_dict_assign_meta(self):
+    @parametrize("keep_vars", [True, False])
+    def test_load_state_dict_assign_meta(self, keep_vars):
         class MyModule(torch.nn.Module):
             def __init__(self):
                 super().__init__()
                 self.fc1 = nn.Linear(3, 5)
                 self.bn = nn.BatchNorm1d(5)
+                self.x = nn.Parameter(torch.rand(5), requires_grad=False)
 
             def forward(self, input):
-                return self.bn(self.fc1(input))
+                return self.x + self.bn(self.fc1(input))
 
+        swap = torch.__future__.get_swap_module_params_on_conversion()
         net = MyModule()
-        state_dict = net.state_dict(keep_vars=True)
+        state_dict = net.state_dict(keep_vars=keep_vars)
+        for v in state_dict.values():
+            v.requires_grad_(False)
 
-        with torch.device('meta'):
+        with torch.device("meta"):
             net_meta = MyModule()
 
+        net_meta_state_dict_old = net_meta.state_dict(keep_vars=True)
         net_meta.load_state_dict(state_dict, assign=True)
 
         # Make sure parameters and persistent buffers were assigned
         net_meta_state_dict = net_meta.state_dict(keep_vars=True)
         for key in state_dict.keys():
-            if isinstance(state_dict[key], torch.nn.Parameter):
+            if key in net_meta._parameters:
+                if keep_vars and not swap:
+                    # state_dict[key] is an nn.Parameter
+                    self.assertTrue(state_dict[key] is net_meta_state_dict[key])
+                else:
+                    if swap:
+                        self.assertTrue(
+                            net_meta_state_dict[key] is net_meta_state_dict_old[key]
+                        )
+                    else:
+                        # state_dict[key] is not an nn.Parameter so it will be detached when wrapping with a Parameter
+                        self.assertTrue(
+                            net_meta_state_dict[key] is not net_meta_state_dict_old[key]
+                        )
+                        self.assertEqual(
+                            net_meta_state_dict_old[key].requires_grad,
+                            net_meta_state_dict[key].requires_grad,
+                        )
+                self.assertEqual(
+                    net_meta_state_dict_old[key].requires_grad,
+                    net_meta_state_dict[key].requires_grad,
+                )
+                self.assertEqual(state_dict[key], net_meta_state_dict[key])
+            elif (
+                key in net_meta._buffers
+                and key not in net_meta._non_persistent_buffers_set
+            ):
                 self.assertTrue(state_dict[key] is net_meta_state_dict[key])
+                self.assertEqual(state_dict[key], net_meta_state_dict[key])
 
         # Make sure that ordering of parameters and buffers is preserved
         net_named_parameters = net.named_parameters()
@@ -279,14 +352,10 @@ class TestLoadStateDict(NNTestCase):
         net_meta_named_parameters = net_meta.named_parameters()
         net_meta_named_buffers = net_meta.named_buffers()
 
-        for p1, p2 in zip(net_named_parameters, net_meta_named_parameters):
-            n1, _ = p1
-            n2, _ = p2
+        for (n1, _), (n2, _) in zip(net_named_parameters, net_meta_named_parameters):
             self.assertEqual(n1, n2)
 
-        for p1, p2 in zip(net_named_buffers, net_meta_named_buffers):
-            n1, _ = p1
-            n2, _ = p2
+        for (n1, _), (n2, _) in zip(net_named_buffers, net_meta_named_buffers):
             self.assertEqual(n1, n2)
 
         # Make sure outputs are the same
@@ -321,7 +390,7 @@ class TestLoadStateDict(NNTestCase):
         opt_state_dict = deepcopy(opt.state_dict())
         net_state_dict = deepcopy(net.state_dict())
 
-        with torch.device('meta'):
+        with torch.device("meta"):
             net_meta = MyModule()
 
         net_meta.load_state_dict(net_state_dict, assign=True)
@@ -360,40 +429,93 @@ class TestLoadStateDict(NNTestCase):
         net = MyModule()
         state_dict = net.state_dict()
         # loading should be ok if stride is different
-        state_dict['fc1.weight'] = torch.randn(3, 5).transpose(0, 1)
+        state_dict["fc1.weight"] = torch.randn(3, 5).transpose(0, 1)
         net2 = MyModule()
         net2.load_state_dict(state_dict, strict=False, assign=True)
 
-        state_dict['fc1.weight'] = torch.randn(2, 4)
-        with self.assertRaisesRegex(RuntimeError, "size mismatch for fc1.weight: copying a param with shape"):
+        state_dict["fc1.weight"] = torch.randn(2, 4)
+        with self.assertRaisesRegex(
+            RuntimeError, "size mismatch for fc1.weight: copying a param with shape"
+        ):
             net2.load_state_dict(state_dict, strict=False, assign=True)
 
     @swap([True, False])
     def test_load_state_dict_warn_assign(self):
-        with torch.device('meta'):
+        with torch.device("meta"):
             m = torch.nn.Linear(3, 5)
         state_dict = m.state_dict()
-        state_dict['weight'] = torch.empty_like(state_dict['weight'], device='cpu')
-        with self.assertWarnsRegex(UserWarning, "for weight: copying from a non-meta parameter in the checkpoint to a meta"):
+        state_dict["weight"] = torch.empty_like(state_dict["weight"], device="cpu")
+        with self.assertWarnsRegex(
+            UserWarning,
+            "for weight: copying from a non-meta parameter in the checkpoint to a meta",
+        ):
             m.load_state_dict(state_dict)
+
+    @swap([True, False])
+    def test_load_state_dict_with_unexpected_key(self):
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.fc1 = torch.nn.Linear(5, 10)
+
+        m = MyModule()
+
+        # Unexpected key & strict = True
+        with self.assertRaisesRegex(RuntimeError, "Unexpected key"):
+            state_dict = m.state_dict()
+            state_dict["fc1.bad_suffix"] = torch.randn(5, 10)
+            m.load_state_dict(state_dict)
+
+        # Unexpected key & strict = False
+        state_dict = m.load_state_dict(state_dict, strict=False)
+        self.assertIn("fc1.bad_suffix", state_dict.unexpected_keys)
+
+        # Unexpected key whose prefix matches a valid key & strict = True
+        with self.assertRaisesRegex(RuntimeError, "Unexpected key"):
+            state_dict = m.state_dict()
+            state_dict["fc1.weight.bad_suffix"] = torch.randn(5, 10)
+            m.load_state_dict(state_dict)
+
+        # Unexpected key whose prefix matches a valid key & strict = False
+        state_dict = m.load_state_dict(state_dict, strict=False)
+        self.assertIn("fc1.weight.bad_suffix", state_dict.unexpected_keys)
 
 
 def load_torch_function_handler(cls, func, types, args=(), kwargs=None):
     kwargs = {} if kwargs is None else kwargs
 
-    def module_load(dest, src):
-        # always convert src to cls
+    def module_load(dest, src, assign=False):
         if isinstance(dest, cls):
-            if type(src) is torch.Tensor:
-                return cls(src)
-            elif type(src) is cls:
+            if assign:
+                return src.detach()
+            else:
+                if type(src) is torch.Tensor:
+                    return cls(src)
+                elif type(src) is cls:
+                    return src.detach()
+                else:
+                    if isinstance(src, MyWrapperLoadTensor):
+                        return cls(src._data)
+                    return cls(src)
+        else:
+            assert isinstance(
+                src, cls
+            ), f"Expected isinstance(src, {cls}) but got {type(src)}"
+            assert (
+                type(dest) == torch.Tensor
+                or type(dest) == torch.nn.Parameter
+                or issubclass(cls, type(dest))
+            )
+            if assign:
                 return src.detach()
             else:
                 if isinstance(src, MyWrapperLoadTensor):
-                    return cls(src._data)
-                return cls(src)
-        else:
-            return src.detach()
+                    if type(dest) not in {torch.Tensor, torch.nn.Parameter}:
+                        return type(dest)(src._data)
+                    else:
+                        return src._data.detach()
+                else:
+                    return torch.Tensor(src)
 
     if func is torch.Tensor.module_load:
         return module_load(*args, **kwargs)
@@ -407,10 +529,12 @@ def load_torch_function_handler(cls, func, types, args=(), kwargs=None):
                 return ret
             return func(*args, **kwargs)
 
+
 class MyLoadTensor(torch.Tensor):
     @classmethod
     def __torch_function__(cls, func, types, args=(), kwargs=None):
         return load_torch_function_handler(cls, func, types, args, kwargs)
+
 
 # We use MyLoadTensor2 to test tensor subclass, wrapper tensor subclass
 # where neither inherits from each other
@@ -418,6 +542,7 @@ class MyLoadTensor2(torch.Tensor):
     @classmethod
     def __torch_function__(cls, func, types, args=(), kwargs=None):
         return load_torch_function_handler(cls, func, types, args, kwargs)
+
 
 class MyBrokenLoadTensor(torch.Tensor):
     @classmethod
@@ -434,14 +559,20 @@ class MyBrokenLoadTensor(torch.Tensor):
                     return cls(func(*args, **kwargs))
                 return func(*args, **kwargs)
 
+
 class MyWrapperLoadTensor(MyLoadTensor):
     @staticmethod
     def __new__(cls, data: torch.Tensor):
         t = torch.Tensor._make_wrapper_subclass(
-            cls, data.size(),
-            dtype=data.dtype, layout=data.layout,
-            device=data.device, requires_grad=data.requires_grad,
-            strides=data.stride(), storage_offset=data.storage_offset())
+            cls,
+            data.size(),
+            dtype=data.dtype,
+            layout=data.layout,
+            device=data.device,
+            requires_grad=data.requires_grad,
+            strides=data.stride(),
+            storage_offset=data.storage_offset(),
+        )
         return t
 
     def __init__(self, data: torch.Tensor):
@@ -452,7 +583,6 @@ class MyWrapperLoadTensor(MyLoadTensor):
 
     @classmethod
     def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
-
         def unwrap(t):
             return t._data if isinstance(t, MyWrapperLoadTensor) else t
 
@@ -468,11 +598,11 @@ class TestLoadStateDictSwap(TestCase):
     @skipIfCrossRef
     @skipIfTorchDynamo("Can't swap with dynamo as dynamo installs weakrefs")
     @swap([True])
-    def test_swap_subclass(self):
-
+    @parametrize("assign", [True, False])
+    def test_swap_subclass(self, assign):
         def _create_model(subclass=None):
             m = torch.nn.Linear(2, 3, bias=False)
-            m.register_buffer('buf', torch.randn(2, 3))
+            m.register_buffer("buf", torch.randn(2, 3))
             if subclass is not None:
                 m.weight = torch.nn.Parameter(subclass(m.weight))
                 m.buf = subclass(m.buf)
@@ -481,24 +611,20 @@ class TestLoadStateDictSwap(TestCase):
         def _test(m_subclass=None, sd_subclass=None):
             m = _create_model(m_subclass)
             sd = _create_model(sd_subclass).state_dict()
-            sd = sd
-            m.load_state_dict(sd)
-            self.assertEqual(m.weight, sd['weight'])
-            self.assertEqual(m.buf, sd['buf'])
+            m.load_state_dict(sd, assign=assign)
+            self.assertEqual(m.weight, sd["weight"])
+            self.assertEqual(m.buf, sd["buf"])
             self.assertTrue(isinstance(m.weight, torch.nn.Parameter))
             self.assertTrue(not isinstance(m.buf, torch.nn.Parameter))
 
             weight_type, buf_type = (torch.nn.Parameter, torch.Tensor)
-            if m_subclass is not None and sd_subclass is not None:
-                # handler of subclass takes precedence over superclass
-                if issubclass(sd_subclass, m_subclass):
+            if assign:
+                if sd_subclass is not None:
                     weight_type, buf_type = (sd_subclass, sd_subclass)
-                else:
+            else:
+                if m_subclass is not None:
                     weight_type, buf_type = (m_subclass, m_subclass)
-            elif m_subclass is not None:
-                weight_type, buf_type = (m_subclass, m_subclass)
-            elif sd_subclass is not None:
-                weight_type, buf_type = (sd_subclass, sd_subclass)
+
             self.assertTrue(type(m.weight) is weight_type)
             self.assertTrue(type(m.buf) is buf_type)
 
@@ -508,13 +634,15 @@ class TestLoadStateDictSwap(TestCase):
             _test(m_s, sd_s)
 
         # MyBrokenLoadTensor should error since its module_load doesn't call .detach()
-        with self.assertRaisesRegex(RuntimeError, re.escape("Error(s) in loading state_dict for Linear:")):
+        with self.assertRaisesRegex(
+            RuntimeError, re.escape("Error(s) in loading state_dict for Linear:")
+        ):
             _test(None, MyBrokenLoadTensor)
 
 
 instantiate_parametrized_tests(TestLoadStateDict)
 instantiate_parametrized_tests(TestLoadStateDictSwap)
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     TestCase._default_dtype_check_enabled = True
     run_tests()

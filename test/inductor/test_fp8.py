@@ -5,8 +5,8 @@ import unittest
 
 import torch
 from torch import Tensor
-from torch._dynamo.test_case import run_tests, TestCase
 from torch._inductor import utils
+from torch._inductor.test_case import run_tests, TestCase
 from torch.testing._internal.common_cuda import SM90OrLater
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -243,10 +243,12 @@ class TestFP8Types(TestCase):
     @unittest.skipIf(not SM90OrLater, "FP8 is only supported on H100+")
     @parametrize("float8_dtype", (torch.float8_e4m3fn, torch.float8_e5m2))
     @parametrize("shape", ("4,2048,4096",))
+    @parametrize("keepdim", (False, True))
     def test_layernorm_fp8_quant_benchmark(
         self,
         float8_dtype: torch.dtype,
         shape: str,
+        keepdim: bool,
     ):
         shape = [int(dim) for dim in shape.split(",")]
         batch_size, sequence_length, hidden_size = shape
@@ -269,7 +271,8 @@ class TestFP8Types(TestCase):
                 bias=None,
                 eps=1e-05,
             )
-            amax_buffer.fill_(torch.amax(torch.abs(x)))
+            amax = torch.amax(torch.abs(x), keepdim=keepdim)
+            amax_buffer.view_as(amax).copy_(amax)
             x_scaled = x * scale
             bits_fp8 = _to_fp8_saturated(x_scaled, float8_dtype)
             return bits_fp8
@@ -295,7 +298,7 @@ class TestFP8Types(TestCase):
         ln_latency = utils.do_bench_using_profiling(functools.partial(compiled_ln, x))
 
         print(
-            f"Config: {float8_dtype=}, {shape=}. "
+            f"Config: {float8_dtype=}, {shape=}, {keepdim=}. "
             f"Benchmark results: Inductor: {compiled_latency}ms, Eager: {eager_latency}ms, "
             f"LN only Inductor: {ln_latency}ms."
         )

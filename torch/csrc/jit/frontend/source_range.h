@@ -190,7 +190,7 @@ struct TORCH_API Source {
 
   explicit Source(
       c10::string_view text_view,
-      c10::optional<std::string> filename = c10::nullopt,
+      std::optional<std::string> filename = c10::nullopt,
       size_t starting_line_no = 0,
       std::shared_ptr<SourceRangeUnpickler> gen_ranges = nullptr,
       CopiesString copies_str = COPIES_STRING)
@@ -210,7 +210,7 @@ struct TORCH_API Source {
 
   explicit Source(
       StringCordView str,
-      c10::optional<std::string> filename = c10::nullopt,
+      std::optional<std::string> filename = c10::nullopt,
       size_t starting_line_no = 0,
       std::shared_ptr<SourceRangeUnpickler> gen_ranges = nullptr)
       : text_view_(std::move(str)),
@@ -266,7 +266,7 @@ struct TORCH_API Source {
     return text_view_.size();
   }
 
-  c10::optional<std::string>& filename() {
+  std::optional<std::string>& filename() {
     return filename_;
   }
 
@@ -274,7 +274,7 @@ struct TORCH_API Source {
     return starting_line_no_;
   }
 
-  c10::optional<SourceRange> findSourceRangeThatGenerated(
+  std::optional<SourceRange> findSourceRangeThatGenerated(
       const SourceRange& range);
 
   ~Source() = default;
@@ -291,7 +291,7 @@ struct TORCH_API Source {
 
   StringCordView text_view_;
 
-  c10::optional<std::string> filename_;
+  std::optional<std::string> filename_;
   // If filename_ is not present, starting_line_no_ is don't care
   size_t starting_line_no_;
   // Starting offsets for lines into the source. e.g. line 0 starts at
@@ -358,14 +358,14 @@ struct TORCH_API SourceRange {
     return ss.str();
   }
 
-  c10::optional<std::tuple<std::string, size_t, size_t>> file_line_col() const {
+  std::optional<std::tuple<std::string, size_t, size_t>> file_line_col() const {
     if (!source_view_ || !source()->filename()) {
       return c10::nullopt;
     }
 
     auto lineno = source_view_->lineno_for_offset(start_);
     auto col_offset = (int)start_ - (int)source_view_->offset_for_line(lineno);
-    // TODO: c10::optional<>::value returns an rvalue ref so can't use it here??
+    // TODO: std::optional<>::value returns an rvalue ref so can't use it here??
     return std::make_tuple<std::string, size_t, size_t>(
         source_view_->filename().value_or(""),
         source_view_->lineno_to_source_lineno(lineno),
@@ -381,7 +381,7 @@ struct TORCH_API SourceRange {
     return !(*this == rhs);
   }
 
-  c10::optional<SourceRange> findSourceRangeThatGenerated() const {
+  std::optional<SourceRange> findSourceRangeThatGenerated() const {
     if (!source_view_) {
       return c10::nullopt;
     }

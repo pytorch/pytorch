@@ -813,7 +813,7 @@ bool TensorIteratorBase::is_contiguous() const {
 }
 
 
-bool TensorIteratorBase::is_scalar(int arg) const {
+bool TensorIteratorBase::is_scalar(int64_t arg) const {
   const auto& stride = operands_[arg].stride_bytes;
   for (const auto i : c10::irange(ndim())) {
     if (stride[i] != 0 && shape_[i] != 1) {
@@ -823,7 +823,7 @@ bool TensorIteratorBase::is_scalar(int arg) const {
   return true;
 }
 
-bool TensorIteratorBase::is_cpu_scalar(int arg) const {
+bool TensorIteratorBase::is_cpu_scalar(int64_t arg) const {
   return is_scalar(arg) && device(arg).is_cpu();
 }
 
@@ -835,7 +835,7 @@ void TensorIteratorBase::cast_outputs() {
       // and tensor, this condition should no longer ever be true
       const auto &original_tensor = op.original_tensor();
       const auto &tensor = op.tensor();
-      if (original_tensor.sizes() != tensor.sizes()){
+      if (original_tensor.sizes() != tensor.sizes()) {
         original_tensor.resize_as_(tensor).as_strided_(tensor.sizes(), tensor.strides());
       }
       original_tensor.copy_(tensor);
@@ -844,15 +844,15 @@ void TensorIteratorBase::cast_outputs() {
   }
 }
 
-void* TensorIteratorBase::data_ptr(int arg) const {
+void* TensorIteratorBase::data_ptr(int64_t arg) const {
   return operands_[arg].data;
 }
 
-void TensorIteratorBase::remove_operand(int arg) {
+void TensorIteratorBase::remove_operand(int64_t arg) {
   operands_.erase(operands_.begin() + arg);
 }
 
-void TensorIteratorBase::unsafe_replace_operand(int arg, void* data) {
+void TensorIteratorBase::unsafe_replace_operand(int64_t arg, void* data) {
   operands_[arg].data = data;
 }
 
@@ -1196,6 +1196,9 @@ void TensorIteratorBase::mark_resize_outputs(const TensorIteratorConfig& config)
   }
   for (const auto i : c10::irange(num_outputs_)) {
     const auto& output = tensor(i);
+    if (!output.defined()) {
+      operands_[i].will_resize = true;
+    }
     if (output.defined() && !output.sizes().equals(shape_)) {
       if (config.resize_outputs_ && !operands_[i].is_read_write) {
         operands_[i].will_resize = true;
@@ -1307,7 +1310,7 @@ bool TensorIteratorBase::can_use_32bit_indexing() const {
 
 std::unique_ptr<TensorIterator> TensorIteratorBase::split(int dim) {
   TORCH_INTERNAL_ASSERT(dim >= 0 && dim < ndim() && shape()[dim] >= 2);
-  std::unique_ptr<TensorIterator> copy(new TensorIterator(*this));
+  auto copy = std::make_unique<TensorIterator>(*this);
 
   bool overlaps = is_dim_reduced(dim);
   auto copy_size = shape_[dim] / 2;
@@ -1527,13 +1530,13 @@ void TensorIteratorBase::build(TensorIteratorConfig& config) {
 
   // XLA and lazy tensors don't have storage, so they don't have an underlying data pointer.
   // Nothing beyond this point is important for meta functions, so it's fine to exit early here.
-  // Extend the condition to ORT tesnors as ORT tensors also don't have storage.
+  // Extend the condition to MAIA tesnors as MAIA tensors also don't have storage.
   if (privateuse1_without_storage  ||
       common_device_.type() == DeviceType::MTIA ||
       common_device_.type() == DeviceType::XLA  ||
       common_device_.type() == DeviceType::IPU  ||
       common_device_.type() == DeviceType::Lazy ||
-      common_device_.type() == DeviceType::ORT  ||
+      common_device_.type() == DeviceType::MAIA  ||
       common_device_.type() == DeviceType::HPU) return;
 
   for (auto& op : operands_) {
