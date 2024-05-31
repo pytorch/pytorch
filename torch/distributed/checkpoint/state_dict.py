@@ -407,6 +407,24 @@ def _state_dict_fn(obj: Union[nn.Module, torch.optim.Optimizer], api: str) -> Ca
     return call
 
 
+def _maybe_full_or_cpu_state_dict(
+    state_dict: Dict[str, Any], info: _StateDictInfo
+) -> Dict[str, Any]:
+    if info.full_state_dict:
+        ranks_only = (
+            tuple()
+            if (not info.cpu_offload or not torch.distributed.is_initialized())
+            else (0,)
+        )
+        return _gather_state_dict(
+            state_dict, cpu_offload=info.cpu_offload, ranks_only=ranks_only
+        )
+    elif info.cpu_offload:
+        return _offload_state_dict_to_cpu(state_dict)
+    else:
+        return state_dict
+
+
 def _get_model_state_dict(
     model: nn.Module, info: _StateDictInfo
 ) -> Dict[str, ValueType]:
@@ -471,15 +489,7 @@ def _get_model_state_dict(
         if torch.is_tensor(p) and p.is_meta:
             state_dict.pop(key)
 
-    if info.full_state_dict:
-        ranks_only = tuple() if not info.cpu_offload else (0,)
-        return _gather_state_dict(
-            state_dict, cpu_offload=info.cpu_offload, ranks_only=ranks_only
-        )
-    elif info.cpu_offload:
-        return _offload_state_dict_to_cpu(state_dict)
-    else:
-        return state_dict
+    return _maybe_full_or_cpu_state_dict(state_dict, info)
 
 
 def _load_model_state_dict(
@@ -733,15 +743,7 @@ def _get_optim_state_dict(
             OptimizerStateType, _flatten_optim_state_dict(optim_state_dict)
         )
 
-    if info.full_state_dict:
-        ranks_only = tuple() if not info.cpu_offload else (0,)
-        return _gather_state_dict(
-            optim_state_dict, cpu_offload=info.cpu_offload, ranks_only=ranks_only
-        )
-    elif info.cpu_offload:
-        return _offload_state_dict_to_cpu(optim_state_dict)
-    else:
-        return optim_state_dict
+    return _maybe_full_or_cpu_state_dict(optim_state_dict, info)
 
 
 def _split_optim_state_dict(
@@ -769,6 +771,11 @@ def _split_optim_state_dict(
     pg_state: ListDictValueType = []
     return_osd: OptimizerStateType = {STATE: state, PG: pg_state}
     pg_mapping: Dict[int, int] = {}
+
+    if all(
+        isinstance(k, int) for k in cast(DictValueType, optim_state_dict[STATE]).keys()
+    ):
+        return optim_state_dict
 
     for param_group in optim.param_groups:
         pg_state.append({PARAMS: []})

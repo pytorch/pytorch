@@ -42,6 +42,7 @@ from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_utils import run_tests, TEST_WITH_DEV_DBG_ASAN
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
+    MultiProcessTestCase,
     with_comms,
 )
 from torch.testing._internal.distributed.common_state_dict import VerifyStateDictMixin
@@ -676,6 +677,33 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
             fsdp_model, optimizers=fsdp_optim2, optim_state_dict=osd1
         )
         self.assertEqual(fsdp_optim.state_dict(), fsdp_optim2.state_dict())
+
+
+class TestNoComm(MultiProcessTestCase):
+    def setUp(self) -> None:
+        super().setUp()
+        self._spawn_processes()
+
+    @skip_if_lt_x_gpu(1)
+    def test_no_dist(self) -> None:
+        model = CompositeParamModel(device=torch.device("cuda"))
+        optim = torch.optim.AdamW(model.parameters(), lr=1e-3)
+
+        self.assertFalse(dist.is_initialized())
+        msd = get_model_state_dict(
+            model, options=StateDictOptions(full_state_dict=True, cpu_offload=True)
+        )
+        for v in msd.values():
+            self.assertFalse(v.is_cuda)
+        self.assertEqual(model.state_dict(), msd)
+        set_model_state_dict(model, model.state_dict())
+        osd = get_optimizer_state_dict(
+            model,
+            optim,
+            options=StateDictOptions(full_state_dict=True, cpu_offload=True),
+        )
+        set_optimizer_state_dict(model, optim, osd)
+        set_optimizer_state_dict(model, optim, optim.state_dict())
 
 
 if __name__ == "__main__":
