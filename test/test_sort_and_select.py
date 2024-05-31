@@ -4,6 +4,7 @@ import random
 from itertools import permutations, product
 
 import numpy as np
+
 import torch
 from torch import nan
 
