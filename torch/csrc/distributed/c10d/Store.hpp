@@ -13,7 +13,7 @@ namespace c10d {
 // callback function will be given arguments (optional<string> oldValue,
 // optional<string> newValue)
 using WatchKeyCallback =
-    std::function<void(std::optional<std::string>, c10::optional<std::string>)>;
+    std::function<void(std::optional<std::string>, std::optional<std::string>)>;
 
 class TORCH_API Store : public torch::CustomClassHolder {
  public:
@@ -106,8 +106,7 @@ class StoreTimeoutGuard {
   explicit StoreTimeoutGuard(
       Store& store,
       const std::chrono::milliseconds& timeout)
-      : store_(store) {
-    oldTimeout_ = store.getTimeout();
+      : store_(store), oldTimeout_(store.getTimeout()) {
     store.setTimeout(timeout);
   }
 
@@ -123,7 +122,7 @@ class StoreTimeoutGuard {
 
  private:
   Store& store_;
-  std::chrono::milliseconds oldTimeout_;
+  std::chrono::milliseconds oldTimeout_{};
 };
 
 } // namespace c10d

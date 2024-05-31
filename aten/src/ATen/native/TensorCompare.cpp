@@ -754,27 +754,27 @@ TORCH_IMPL_FUNC(clamp_min_Tensor_out)
 }
 
 // Implements the "clip" alias for clamp
-Tensor& clip_out(const Tensor& self, const std::optional<Scalar>& min, const c10::optional<Scalar>& max, Tensor& result) {
+Tensor& clip_out(const Tensor& self, const std::optional<Scalar>& min, const std::optional<Scalar>& max, Tensor& result) {
   return at::clamp_outf(self, min, max, result);
 }
 
-Tensor& clip_out(const Tensor& self, const std::optional<Tensor>& min, const c10::optional<Tensor>& max, Tensor& result) {
+Tensor& clip_out(const Tensor& self, const std::optional<Tensor>& min, const std::optional<Tensor>& max, Tensor& result) {
   return at::clamp_outf(self, min, max, result);
 }
 
-Tensor clip(const Tensor& self, const std::optional<Scalar>& min, const c10::optional<Scalar>& max) {
+Tensor clip(const Tensor& self, const std::optional<Scalar>& min, const std::optional<Scalar>& max) {
   return at::clamp(self, min, max);
 }
 
-Tensor clip(const Tensor& self, const std::optional<Tensor>& min, const c10::optional<Tensor>& max) {
+Tensor clip(const Tensor& self, const std::optional<Tensor>& min, const std::optional<Tensor>& max) {
   return at::clamp(self, min, max);
 }
 
-Tensor& clip_(Tensor& self, const std::optional<Scalar>& min, const c10::optional<Scalar>& max) {
+Tensor& clip_(Tensor& self, const std::optional<Scalar>& min, const std::optional<Scalar>& max) {
   return at::clamp_(self, min, max);
 }
 
-Tensor& clip_(Tensor& self, const std::optional<Tensor>& min, const c10::optional<Tensor>& max) {
+Tensor& clip_(Tensor& self, const std::optional<Tensor>& min, const std::optional<Tensor>& max) {
   return at::clamp_(self, min, max);
 }
 
