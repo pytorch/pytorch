@@ -320,7 +320,6 @@ void addmv_sparse_csr(
       }
     });
   }
-
   at::parallel_for(0, mat_rows, 0, [&](int64_t rstart, int64_t rend) {
     for(const auto row: c10::irange(rstart, rend)) {
       scalar_t acc(0);
