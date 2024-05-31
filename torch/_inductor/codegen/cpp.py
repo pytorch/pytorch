@@ -1236,8 +1236,8 @@ class CppVecOverrides(CppOverrides):
         return f"{x}.log2()"
 
     @staticmethod
-    def nextafter(x):
-        return f"{x}.nextafter()"
+    def nextafter(x, y):
+        return f"{x}.nextafter({y})"
 
     @staticmethod
     def copysign(a, b):
@@ -1700,6 +1700,39 @@ class CppKernel(Kernel):
         return itervar in index.free_symbols or self.index_indirect_depends_on(
             index, itervar
         )
+
+    def var_ranges(self):
+        return dict(zip(self.itervars, self.ranges))
+
+    def check_bounds(
+        self,
+        expr: sympy.Expr,
+        size: sympy.Expr,
+        lower: bool,
+        upper: bool,
+    ):
+        if not (lower or upper):
+            return
+
+        indirect = free_symbol_is_type(expr, SymT.TMP)
+        if indirect:
+            # indexing in compute
+            csevar = ops.index_expr(expr, torch.int32).value
+            buffer = V.kernel.compute
+        else:
+            # indexing in loads
+            prior_compute = V.kernel.compute
+            try:
+                V.kernel.compute = self.loads
+                csevar = ops.index_expr(expr, torch.int32).value
+            finally:
+                V.kernel.compute = prior_compute
+            buffer = self.loads
+
+        size_str = V.kernel.sexpr(self.rename_indexing(size)) if upper else None
+
+        line = self.indirect_assert(csevar, "0" if lower else None, size_str)
+        self.cse.generate(buffer, line, assignment=False)
 
     def load(self, name: str, index: sympy.Expr):
         var = self.args.input(name)
@@ -2807,6 +2840,11 @@ class CppVecKernelChecker(CppVecKernel):
             return tuple([self.simd_vec] * 3)
         return self.simd_vec
 
+    def check_bounds(
+        self, expr: sympy.Expr, size: sympy.Expr, lower: bool, upper: bool
+    ):
+        return self.simd_vec
+
     def store_reduction(self, name, index, value):
         return self.simd_vec
 
@@ -2854,6 +2892,12 @@ class CppVecKernelChecker(CppVecKernel):
             @staticmethod
             def store_reduction(name, index, value):
                 return self.store_reduction(name, index, value)
+
+            @staticmethod
+            def check_bounds(
+                expr: sympy.Expr, size: sympy.Expr, lower: bool, upper: bool
+            ):
+                return self.check_bounds(expr, size, lower, upper)
 
             @staticmethod
             def constant(val, dtype):
