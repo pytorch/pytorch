@@ -515,8 +515,6 @@ libtorch_distributed_base_sources = [
     "torch/csrc/distributed/c10d/sequence_num.cpp",
     "torch/csrc/distributed/c10d/socket.cpp",
     "torch/csrc/distributed/c10d/Work.cpp",
-    "torch/csrc/distributed/c10d/control_plane/Handlers.cpp",
-    "torch/csrc/distributed/c10d/control_plane/WorkerServer.cpp",
 ]
 
 # These files are only supported on Linux (and others) but not on Windows.
@@ -1001,7 +999,6 @@ aten_cpu_source_non_codegen_list = [
     "aten/src/ATen/NestedTensorImpl.cpp",
     "aten/src/ATen/ParallelCommon.cpp",
     "aten/src/ATen/ParallelNative.cpp",
-    "aten/src/ATen/ParallelNativeTBB.cpp",
     "aten/src/ATen/ParallelOpenMP.cpp",
     "aten/src/ATen/ParallelThreadPoolNative.cpp",
     "aten/src/ATen/PythonTorchFunctionTLS.cpp",
