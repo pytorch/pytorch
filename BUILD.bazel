@@ -125,10 +125,6 @@ filegroup(
     data = [":generate-code"],
 )
 
-exports_files(
-    srcs = ["aten/src/ATen/cpu/tbb/extra/version_string.ver.in"],
-)
-
 # ATen
 filegroup(
     name = "aten_base_cpp",
@@ -275,7 +271,6 @@ header_template_rule(
         "@AT_BUILD_WITH_LAPACK@": "1",
         "@AT_PARALLEL_OPENMP@": "0",
         "@AT_PARALLEL_NATIVE@": "1",
-        "@AT_PARALLEL_NATIVE_TBB@": "0",
         "@AT_BLAS_F2C@": "0",
         "@AT_BLAS_USE_CBLAS_DOT@": "1",
     },
@@ -359,6 +354,9 @@ cc_library(
         ":aten_src_ATen_config",
     ] + generated_cpu_cpp + aten_ufunc_generated_cpu_sources("aten/src/ATen/{}"),
     copts = ATEN_COPTS,
+    linkopts = [
+      "-ldl",
+    ],
     data = if_cuda(
         [":libcaffe2_nvrtc.so"],
         [],
@@ -772,6 +770,9 @@ cc_library(
         ],
     )) + torch_sources,
     copts = TORCH_COPTS,
+    linkopts = [
+      "-lrt",
+    ],
     defines = [
         "CAFFE2_NIGHTLY_VERSION=20200115",
     ],
@@ -780,7 +781,6 @@ cc_library(
         ":caffe2",
         ":torch_headers",
         "@kineto",
-        "@cpp-httplib",
     ] + if_cuda([
         "@cuda//:nvToolsExt",
         "@cutlass",
@@ -792,6 +792,9 @@ cc_library(
 cc_library(
     name = "shm",
     srcs = glob(["torch/lib/libshm/*.cpp"]),
+    linkopts = [
+      "-lrt",
+    ],
     deps = [
         ":torch",
     ],

@@ -976,16 +976,16 @@ class FxGraphCache:
             if remote:
                 cache_id = "fx-graph-v1"
                 try:
-                    import triton
-
                     if config.is_fbcode():
-                        remote_cache = triton.runtime.fb_memcache.FbMemcacheRemoteFxGraphCacheBackend(
-                            cache_id
+                        from triton.runtime.fb_memcache import (
+                            FbMemcacheRemoteFxGraphCacheBackend,
                         )
+
+                        remote_cache = FbMemcacheRemoteFxGraphCacheBackend(cache_id)
                     else:
-                        remote_cache = triton.runtime.cache.RedisRemoteCacheBackend(
-                            cache_id
-                        )
+                        from torch._inductor.remote_cache import RedisRemoteCacheBackend
+
+                        remote_cache = RedisRemoteCacheBackend(cache_id)
                 except Exception:
                     remote_cache = None
                     log.warning("Unable to create a remote cache", exc_info=True)
