@@ -66,7 +66,8 @@ runs:
         command: |
           set -eux
           # PyYAML 6.0 doesn't work with MacOS x86 anymore
-          python3 -m pip install requests==2.26.0 pyyaml==6.0.1
+          # This must run on Python-3.7 (AmazonLinux2) so can't use request=3.32.2
+          python3 -m pip install requests==2.27.1 pyyaml==6.0.1
 
     - name: Parse ref
       id: parse-ref

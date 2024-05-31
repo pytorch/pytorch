@@ -36,6 +36,7 @@ from torch.distributed.fsdp._common_utils import (
     _get_param_to_fqns,
     FSDP_PREFIX,
     FSDP_WRAPPED_MODULE,
+    HandleTrainingState,
     TrainingState,
 )
 from torch.distributed.fsdp._dynamo_utils import _annotate_modules_for_dynamo
@@ -63,6 +64,8 @@ from torch.distributed.fsdp._runtime_utils import (
     _pre_forward,
     _pre_forward_unshard,
     _root_pre_forward,
+    _unshard,
+    _wait_for_computation_stream,
 )
 from torch.distributed.fsdp._wrap_utils import _auto_wrap
 from torch.distributed.fsdp.api import (
@@ -82,7 +85,7 @@ from torch.distributed.fsdp.api import (
     StateDictType,
 )
 from torch.distributed.utils import _p_assert
-from ._flat_param import FlatParameter
+from ._flat_param import FlatParameter, FlatParamHandle
 
 from ._optim_utils import (
     _flatten_optim_state_dict,
@@ -395,6 +398,14 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
             ``ignored_modules`` soon. For backward compatibility, we keep both
             ``ignored_states`` and `ignored_modules``, but FSDP only allows one
             of them to be specified as not ``None``.
+        device_mesh (Optional[DeviceMesh]): DeviceMesh can be used as an altenative to
+            process_group. When device_mesh is passed, FSDP will use the underlying process
+            groups for all-gather and reduce-scatter collective communications. Therefore,
+            these two args need to be mutually exclusive. For hybrid sharding strategies such as
+            ``ShardingStrategy.HYBRID_SHARD``, users can pass in a 2D DeviceMesh instead
+            of a tuple of process groups. For 2D FSDP + TP, users are required to pass in
+            device_mesh instead of process_group. For more DeviceMesh info, please visit:
+            https://pytorch.org/tutorials/recipes/distributed_device_mesh.html
     """
 
     def __init__(
@@ -422,6 +433,12 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
     ):
         torch._C._log_api_usage_once("torch.distributed.fsdp")
         super().__init__()
+        if isinstance(module, (nn.ModuleList, nn.ModuleDict)):
+            warnings.warn(
+                "FSDP will not all-gather parameters for containers that do "
+                f"not implement forward: {module}",
+                stacklevel=2,
+            )
         _init_ignored_module_states(self, module, ignored_modules, ignored_states)
         _init_device_handle(self, module, self._ignored_params, device_id)
 
@@ -1184,8 +1201,9 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
     def _warn_optim_input(optim_input):
         if optim_input is not None:
             warnings.warn(
-                "The `optim_input` argument is deprecated and will be removed after PyTorch 1.13. You may remove it "
-                "from your code without changing its functionality."
+                "The `optim_input` argument is deprecated and will be removed after PyTorch 1.13. "
+                "You may remove it from your code without changing its functionality.",
+                FutureWarning,
             )
 
     @staticmethod
@@ -1204,7 +1222,8 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
         warnings.warn(
             f"``FullyShardedDataParallel.{curr}``is being deprecated and is "
             f"replaced by ``FullyShardedDataParallel.{new}``. "
-            f"``FullyShardedDataParallel.{curr}`` may be removed after PyTorch 2.2."
+            f"``FullyShardedDataParallel.{curr}`` may be removed after PyTorch 2.2.",
+            FutureWarning,
         )
 
     @staticmethod
@@ -1986,6 +2005,62 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
                 )
             fsdp_state._comm_hook = hook
             fsdp_state._comm_hook_state = state
+
+    def _unshard(self, async_op: bool = False):
+        class UnshardHandle:
+            def __init__(
+                self,
+                flat_param_handle: Optional[FlatParamHandle],
+                unshard_event: torch.cuda.Event,
+            ):
+                self._flat_param_handle = flat_param_handle
+                self._unshard_event = unshard_event
+
+            def wait(self):
+                if self._flat_param_handle is not None:
+                    current_stream = (
+                        self._flat_param_handle._device_handle.current_stream()
+                    )
+                    current_stream.wait_event(self._unshard_event)
+                    self._flat_param_handle = None
+
+        if self._handle:
+            with self._use_training_state(
+                TrainingState.FORWARD_BACKWARD, HandleTrainingState.FORWARD
+            ):
+                _unshard(
+                    self, self._handle, self._unshard_stream, self._pre_unshard_stream
+                )
+                self._unshard_event = self._unshard_stream.record_event()
+            self._handle._prefetched = True
+        unshard_handle = UnshardHandle(self._handle, self._unshard_stream)
+        if async_op:
+            return unshard_handle
+        unshard_handle.wait()
+        return None
+
+    def _wait_unshard_streams_on_current_stream(self):
+        _wait_for_computation_stream(
+            self._device_handle.current_stream(),
+            self._unshard_stream,
+            self._pre_unshard_stream,
+        )
+
+    @contextlib.contextmanager
+    def _use_training_state(
+        self, training_state: TrainingState, handle_training_state: HandleTrainingState
+    ):
+        prev_training_state = self.training_state
+        self.training_state = training_state
+        if self._handle:
+            prev_handle_training_state = self._handle._training_state
+            self._handle._training_state = handle_training_state
+        try:
+            yield
+        finally:
+            self.training_state = prev_training_state
+            if self._handle:
+                self._handle._training_state = prev_handle_training_state
 
 
 def _get_grad_norm(

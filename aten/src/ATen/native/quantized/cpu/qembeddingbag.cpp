@@ -38,8 +38,8 @@ at::Tensor& embedding_lookup_fallback_impl(
     const at::Tensor& weight,
     const at::Tensor& indices,
     const at::Tensor& offsets,
-    const c10::optional<at::Tensor>& per_sample_weights_,
-    const c10::optional<at::Tensor>& compressed_indices_mapping,
+    const std::optional<at::Tensor>& per_sample_weights_,
+    const std::optional<at::Tensor>& compressed_indices_mapping,
     at::Tensor& output,
     const int64_t block_size,
     const int64_t output_size,
@@ -227,8 +227,8 @@ at::Tensor& embedding_bag_nbit_impl(
     const at::Tensor& indices,
     const at::Tensor& offsets,
     bool pruned_weights,
-    const c10::optional<at::Tensor>& per_sample_weights_,
-    const c10::optional<at::Tensor>& compressed_indices_mapping,
+    const std::optional<at::Tensor>& per_sample_weights_,
+    const std::optional<at::Tensor>& compressed_indices_mapping,
     bool include_last_offset,
     bool is_embedding_op) {
   TORCH_CHECK(weight.dim() == 2);
@@ -399,8 +399,8 @@ at::Tensor& embedding_bag_byte_impl(
     const at::Tensor& indices,
     const at::Tensor& offsets,
     bool pruned_weights,
-    const c10::optional<at::Tensor>& per_sample_weights_,
-    const c10::optional<at::Tensor>& compressed_indices_mapping,
+    const std::optional<at::Tensor>& per_sample_weights_,
+    const std::optional<at::Tensor>& compressed_indices_mapping,
     bool include_last_offset,
     bool is_embedding_op) {
   TORCH_CHECK(weight.scalar_type() == at::kByte);
@@ -558,10 +558,10 @@ at::Tensor& embedding_bag_byte_helper(
     at::Tensor& output,
     const at::Tensor& weight,
     const at::Tensor& indices,
-    const c10::optional<at::Tensor>& offsets_in,
+    const std::optional<at::Tensor>& offsets_in,
     bool pruned_weights,
-    const c10::optional<at::Tensor>& per_sample_weights_,
-    const c10::optional<at::Tensor>& compressed_indices_mapping,
+    const std::optional<at::Tensor>& per_sample_weights_,
+    const std::optional<at::Tensor>& compressed_indices_mapping,
     bool include_last_offset,
     bool is_embedding_op) {
   c10::MaybeOwned<at::Tensor> offsets;
@@ -656,10 +656,10 @@ at::Tensor& _embedding_bag_nbit_helper(
     const at::Tensor& weight,
     const int bit_width,
     const at::Tensor& indices,
-    const c10::optional<at::Tensor>& offsets_in,
+    const std::optional<at::Tensor>& offsets_in,
     bool pruned_weights,
-    const c10::optional<at::Tensor>& per_sample_weights_,
-    const c10::optional<at::Tensor>& compressed_indices_mapping,
+    const std::optional<at::Tensor>& per_sample_weights_,
+    const std::optional<at::Tensor>& compressed_indices_mapping,
     bool include_last_offset,
     bool is_embedding_op) {
   c10::MaybeOwned<at::Tensor> offsets;
@@ -760,10 +760,10 @@ at::Tensor& _embedding_bag_nbit_helper(
 
 at::Tensor PackedEmbeddingBagWeight::embeddingbag_byte(
     const at::Tensor& indices,
-    const c10::optional<at::Tensor>& offsets_in,
+    const std::optional<at::Tensor>& offsets_in,
     bool pruned_weights,
-    const c10::optional<at::Tensor>& per_sample_weights_,
-    const c10::optional<at::Tensor>& compressed_indices_mapping,
+    const std::optional<at::Tensor>& per_sample_weights_,
+    const std::optional<at::Tensor>& compressed_indices_mapping,
     bool include_last_offset,
     bool is_embedding_op) {
   auto output = at::empty({0}, packed_w.options().dtype(at::kFloat));
@@ -781,10 +781,10 @@ at::Tensor PackedEmbeddingBagWeight::embeddingbag_byte(
 
 at::Tensor PackedEmbeddingBagWeight::embeddingbag_4bit(
     const at::Tensor& indices,
-    const c10::optional<at::Tensor>& offsets_in,
+    const std::optional<at::Tensor>& offsets_in,
     bool pruned_weights,
-    const c10::optional<at::Tensor>& per_sample_weights_,
-    const c10::optional<at::Tensor>& compressed_indices_mapping,
+    const std::optional<at::Tensor>& per_sample_weights_,
+    const std::optional<at::Tensor>& compressed_indices_mapping,
     bool include_last_offset,
     bool is_embedding_op) {
   if (per_sample_weights_.has_value()) {
@@ -819,12 +819,12 @@ Tensor& embedding_bag_byte_rowwise_offsets_out(
     Tensor& output,
     const Tensor& weight,
     const Tensor& indices,
-    const c10::optional<Tensor>& offsets_in,
+    const std::optional<Tensor>& offsets_in,
     const bool /* scale_grad_by_freq */,
     const int64_t /* mode */,
     bool pruned_weights,
-    const c10::optional<Tensor>& per_sample_weights_,
-    const c10::optional<Tensor>& compressed_indices_mapping,
+    const std::optional<Tensor>& per_sample_weights_,
+    const std::optional<Tensor>& compressed_indices_mapping,
     bool include_last_offset) {
   return embedding_bag_byte_helper(
       output,
@@ -842,12 +842,12 @@ Tensor& embedding_bag_4bit_rowwise_offsets_out(
     Tensor& output,
     const Tensor& weight,
     const Tensor& indices,
-    const c10::optional<Tensor>& offsets_in,
+    const std::optional<Tensor>& offsets_in,
     const bool /* scale_grad_by_freq */,
     const int64_t /* mode */,
     bool pruned_weights,
-    const c10::optional<Tensor>& per_sample_weights_,
-    const c10::optional<Tensor>& compressed_indices_mapping,
+    const std::optional<Tensor>& per_sample_weights_,
+    const std::optional<Tensor>& compressed_indices_mapping,
     bool include_last_offset) {
 
   if (per_sample_weights_.has_value()) {
@@ -877,12 +877,12 @@ static Tensor& embedding_bag_2bit_rowwise_offsets_out(
     Tensor& output,
     const Tensor& weight,
     const Tensor& indices,
-    const c10::optional<Tensor>& offsets_in,
+    const std::optional<Tensor>& offsets_in,
     const bool /* scale_grad_by_freq */,
     const int64_t /* mode */,
     bool pruned_weights,
-    const c10::optional<Tensor>& per_sample_weights_,
-    const c10::optional<Tensor>& compressed_indices_mapping,
+    const std::optional<Tensor>& per_sample_weights_,
+    const std::optional<Tensor>& compressed_indices_mapping,
     bool include_last_offset) {
 
   if (per_sample_weights_.has_value()) {
@@ -921,12 +921,12 @@ inline at::Tensor create_empty_from(
 Tensor embedding_bag_byte_rowwise_offsets(
     const Tensor& weight,
     const Tensor& indices,
-    const c10::optional<Tensor>& offsets_in,
+    const std::optional<Tensor>& offsets_in,
     const bool /* scale_grad_by_freq */,
     const int64_t /* mode */,
     bool pruned_weights,
-    const c10::optional<Tensor>& per_sample_weights_,
-    const c10::optional<Tensor>& compressed_indices_mapping,
+    const std::optional<Tensor>& per_sample_weights_,
+    const std::optional<Tensor>& compressed_indices_mapping,
     bool include_last_offset) {
   auto output = create_empty_from(weight, at::kFloat);
   embedding_bag_byte_rowwise_offsets_out(
@@ -946,12 +946,12 @@ Tensor embedding_bag_byte_rowwise_offsets(
 Tensor embedding_bag_4bit_rowwise_offsets(
     const Tensor& weight,
     const Tensor& indices,
-    const c10::optional<Tensor>& offsets_in,
+    const std::optional<Tensor>& offsets_in,
     const bool /* scale_grad_by_freq */,
     const int64_t /* mode */,
     bool pruned_weights,
-    const c10::optional<Tensor>& per_sample_weights_,
-    const c10::optional<Tensor>& compressed_indices_mapping,
+    const std::optional<Tensor>& per_sample_weights_,
+    const std::optional<Tensor>& compressed_indices_mapping,
     bool include_last_offset) {
   auto output = create_empty_from(weight, at::kFloat);
   embedding_bag_4bit_rowwise_offsets_out(
@@ -971,12 +971,12 @@ Tensor embedding_bag_4bit_rowwise_offsets(
 Tensor embedding_bag_2bit_rowwise_offsets(
     const Tensor& weight,
     const Tensor& indices,
-    const c10::optional<Tensor>& offsets_in,
+    const std::optional<Tensor>& offsets_in,
     const bool /* scale_grad_by_freq */,
     const int64_t /* mode */,
     bool pruned_weights,
-    const c10::optional<Tensor>& per_sample_weights_,
-    const c10::optional<Tensor>& compressed_indices_mapping,
+    const std::optional<Tensor>& per_sample_weights_,
+    const std::optional<Tensor>& compressed_indices_mapping,
     bool include_last_offset) {
   auto output = create_empty_from(weight, at::kFloat);
   embedding_bag_2bit_rowwise_offsets_out(
@@ -996,12 +996,12 @@ Tensor embedding_bag_2bit_rowwise_offsets(
 Tensor embedding_bag_byte_rowwise_offsets_meta(
     const Tensor& weight,
     const Tensor& indices,
-    const c10::optional<Tensor>& offsets_in,
+    const std::optional<Tensor>& offsets_in,
     const bool /* scale_grad_by_freq */,
     const int64_t /* mode */,
     bool /* pruned_weights */,
-    const c10::optional<Tensor>& /* per_sample_weights_ */,
-    const c10::optional<Tensor>& /* compressed_indices_mapping */,
+    const std::optional<Tensor>& /* per_sample_weights_ */,
+    const std::optional<Tensor>& /* compressed_indices_mapping */,
     bool include_last_offset) {
   TORCH_CHECK(
       indices.dim() == 1 || indices.dim() == 2,
@@ -1038,12 +1038,12 @@ class QEmbeddingBag final {
   static at::Tensor run(
       const c10::intrusive_ptr<EmbeddingPackedParamsBase>& packed_weight,
       const Tensor& indices,
-      const c10::optional<Tensor>& offsets,
+      const std::optional<Tensor>& offsets,
       const bool /* scale_grad_by_freq */,
       const int64_t /* mode */,
       bool pruned_weights,
-      const c10::optional<Tensor>& per_sample_weights_,
-      const c10::optional<Tensor>& compressed_indices_mapping,
+      const std::optional<Tensor>& per_sample_weights_,
+      const std::optional<Tensor>& compressed_indices_mapping,
       bool include_last_offset) {
     if (bit_rate == 8) {
       return packed_weight->embeddingbag_byte(

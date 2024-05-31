@@ -28,7 +28,7 @@ struct TORCH_API GridSampleFuncOptions {
   /// padding mode for outside grid values. Default: Zeros
   TORCH_ARG(padding_mode_t, padding_mode) = torch::kZeros;
   /// Specifies perspective to pixel as point. Default: false
-  TORCH_ARG(c10::optional<bool>, align_corners) = c10::nullopt;
+  TORCH_ARG(std::optional<bool>, align_corners) = c10::nullopt;
 };
 
 } // namespace functional

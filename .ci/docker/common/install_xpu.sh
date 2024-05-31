@@ -3,10 +3,7 @@ set -xe
 
 
 # Intel® software for general purpose GPU capabilities.
-# Refer to https://dgpu-docs.intel.com/releases/LTS_803.29_20240131.html
-
-# Intel® oneAPI Base Toolkit (version 2024.0.0) has been updated to include functional and security updates.
-# Refer to https://www.intel.com/content/www/us/en/developer/tools/oneapi/base-toolkit-download.html
+# Refer to https://www.intel.com/content/www/us/en/developer/articles/tool/pytorch-prerequisites-for-intel-gpus.html
 
 # Users should update to the latest version as it becomes available
 
@@ -17,14 +14,16 @@ function install_ubuntu() {
     # Set up the repository. To do this, download the key to the system keyring
     wget -qO - https://repositories.intel.com/gpu/intel-graphics.key \
         | gpg --dearmor --output /usr/share/keyrings/intel-graphics.gpg
-    wget -O- https://apt.repos.intel.com/intel-gpg-keys/GPG-PUB-KEY-INTEL-SW-PRODUCTS.PUB \
-        | gpg --dearmor | tee /usr/share/keyrings/oneapi-archive-keyring.gpg > /dev/null
+    wget -qO - https://apt.repos.intel.com/intel-gpg-keys/GPG-PUB-KEY-INTEL-SW-PRODUCTS.PUB \
+        | gpg --dearmor --output /usr/share/keyrings/intel-for-pytorch-gpu-dev-keyring.gpg
 
     # Add the signed entry to APT sources and configure the APT client to use the Intel repository
-    echo "deb [arch=amd64 signed-by=/usr/share/keyrings/intel-graphics.gpg] https://repositories.intel.com/gpu/ubuntu jammy/lts/2350 unified" \
+    echo "deb [arch=amd64 signed-by=/usr/share/keyrings/intel-graphics.gpg] \
+        https://repositories.intel.com/gpu/ubuntu jammy/lts/2350 unified" \
         | tee /etc/apt/sources.list.d/intel-gpu-jammy.list
-    echo "deb [signed-by=/usr/share/keyrings/oneapi-archive-keyring.gpg] https://apt.repos.intel.com/oneapi all main" \
-        | tee /etc/apt/sources.list.d/oneAPI.list
+    echo "deb [signed-by=/usr/share/keyrings/intel-for-pytorch-gpu-dev-keyring.gpg] \
+        https://apt.repos.intel.com/intel-for-pytorch-gpu-dev all main" \
+        | tee /etc/apt/sources.list.d/intel-for-pytorch-gpu-dev.list
 
     # Update the packages list and repository index
     apt-get update
@@ -40,11 +39,11 @@ function install_ubuntu() {
         mesa-vdpau-drivers mesa-vulkan-drivers va-driver-all vainfo hwinfo clinfo
     # Development Packages
     apt-get install -y libigc-dev intel-igc-cm libigdfcl-dev libigfxcmrt-dev level-zero-dev
-    # Install Intel® oneAPI Base Toolkit
-    if [ -n "$BASEKIT_VERSION" ]; then
-        apt-get install intel-basekit=$BASEKIT_VERSION -y
+    # Install Intel Support Packages
+    if [ -n "$XPU_VERSION" ]; then
+        apt-get install -y intel-for-pytorch-gpu-dev-${XPU_VERSION}
     else
-        apt-get install intel-basekit -y
+        apt-get install -y intel-for-pytorch-gpu-dev
     fi
 
     # Cleanup

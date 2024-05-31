@@ -375,7 +375,7 @@ namespace {
   // Code is mostly duplicated from
   // https://github.com/pytorch/pytorch/blob/fb0e27d38a8fdab4e1c14d6378c9e41cb30fd6a3
   // /aten/src/ATen/native/TensorAdvancedIndexing.cpp#L379-L405
-  VmapDimVector get_indexed_shape(Tensor self, const torch::List<c10::optional<at::Tensor>> &orig)
+  VmapDimVector get_indexed_shape(Tensor self, const torch::List<std::optional<at::Tensor>> &orig)
   {
     at::native::checkIndexTensorTypes(orig);
     // first expand BoolTensor (masks) or ByteTensor (masks) into 1 or more LongTensors
@@ -869,8 +869,8 @@ Tensor index_copy_decomp(
 // through a decomposition: slice_scatter's output needs to have the same
 // size, size, strides and storage_offset as the input.
 Tensor slice_scatter_decomp(const Tensor &self, const Tensor &src,
-                            int64_t dim, c10::optional<int64_t> start,
-                            c10::optional<int64_t> end, int64_t step)
+                            int64_t dim, std::optional<int64_t> start,
+                            std::optional<int64_t> end, int64_t step)
 {
   auto idx = at::arange(start.value_or(0), end.value_or(self.size(dim)), step, self.options().dtype(kLong));
   idx = get_expanded_index(idx, self.sizes(), dim);
@@ -889,8 +889,8 @@ Tensor select_scatter_decomp(
 }
 
 std::tuple<Tensor, optional<int64_t>> diagonal_scatter_batch_rule(
-    const Tensor &self, c10::optional<int64_t> self_bdim,
-    const Tensor &src, c10::optional<int64_t> src_bdim,
+    const Tensor &self, std::optional<int64_t> self_bdim,
+    const Tensor &src, std::optional<int64_t> src_bdim,
     int64_t offset, int64_t dim1, int64_t dim2)
 {
   auto self_ = moveBatchDimToFront(self, self_bdim);

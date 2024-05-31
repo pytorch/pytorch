@@ -39,9 +39,9 @@ TORCH_API extern const EllipsisIndexType Ellipsis;
 struct TORCH_API Slice final {
  public:
   Slice(
-      c10::optional<c10::SymInt> start_index = c10::nullopt,
-      c10::optional<c10::SymInt> stop_index = c10::nullopt,
-      c10::optional<c10::SymInt> step_index = c10::nullopt) {
+      std::optional<c10::SymInt> start_index = c10::nullopt,
+      std::optional<c10::SymInt> stop_index = c10::nullopt,
+      std::optional<c10::SymInt> step_index = c10::nullopt) {
     if (!step_index.has_value()) {
       step_ = c10::SymInt(1);
     } else {
@@ -205,7 +205,7 @@ static inline Tensor applySlice(
     c10::SymInt step,
     bool disable_slice_optimization,
     const at::Device& self_device,
-    const c10::optional<SymIntArrayRef>& self_sizes) {
+    const std::optional<SymIntArrayRef>& self_sizes) {
   // TODO: implement negative step
   TORCH_CHECK_VALUE(step > 0, "step must be greater than zero");
 
@@ -233,7 +233,7 @@ static inline Tensor applySelect(
     SymInt index,
     int64_t real_dim,
     const at::Device& /*self_device*/,
-    const c10::optional<SymIntArrayRef>& self_sizes) {
+    const std::optional<SymIntArrayRef>& self_sizes) {
   // See NOTE [nested tensor size for indexing]
   if (self_sizes.has_value()) {
     auto maybe_index = index.maybe_as_int();
@@ -431,7 +431,7 @@ static inline Tensor handleDimInMultiDimIndexing(
     std::vector<Tensor>& outIndices,
     bool disable_slice_optimization,
     const at::Device& original_tensor_device,
-    const c10::optional<SymIntArrayRef>& prev_dim_result_sizes) {
+    const std::optional<SymIntArrayRef>& prev_dim_result_sizes) {
   if (index.is_integer()) {
     return impl::applySelect(
         prev_dim_result,
@@ -515,7 +515,7 @@ static inline Tensor applySlicing(
     std::vector<Tensor>& outIndices,
     bool disable_slice_optimization,
     const at::Device& self_device,
-    const c10::optional<SymIntArrayRef>& self_sizes) {
+    const std::optional<SymIntArrayRef>& self_sizes) {
   int64_t dim = 0;
   int64_t specified_dims = impl::count_specified_dimensions(indices);
 
@@ -531,9 +531,9 @@ static inline Tensor applySlicing(
   for (const auto i : c10::irange(indices.size())) {
     auto& obj = indices[i];
     // See NOTE [nested tensor size for indexing]
-    c10::optional<SymIntArrayRef> result_sizes = result.is_nested()
-        ? c10::optional<SymIntArrayRef>(c10::nullopt)
-        : c10::optional<SymIntArrayRef>(result.sym_sizes());
+    std::optional<SymIntArrayRef> result_sizes = result.is_nested()
+        ? std::optional<SymIntArrayRef>(c10::nullopt)
+        : std::optional<SymIntArrayRef>(result.sym_sizes());
     result = handleDimInMultiDimIndexing(
         /*prev_dim_result=*/result,
         /*original_tensor=*/self,
@@ -607,9 +607,9 @@ static inline Tensor get_item(
   // nested tensor does not have a size (yet) so for now we represent its size
   // as null may need to be changed after we reach a better solution for nested
   // tensor size
-  c10::optional<SymIntArrayRef> self_sizes = self.is_nested()
-      ? c10::optional<SymIntArrayRef>(c10::nullopt)
-      : c10::optional<SymIntArrayRef>(self.sym_sizes());
+  std::optional<SymIntArrayRef> self_sizes = self.is_nested()
+      ? std::optional<SymIntArrayRef>(c10::nullopt)
+      : std::optional<SymIntArrayRef>(self.sym_sizes());
 
   // handle simple types: integers, slices, none, ellipsis, bool
   if (indices.size() == 1) {

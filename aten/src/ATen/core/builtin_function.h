@@ -63,7 +63,7 @@ struct BuiltinOpFunction : public Function {
 
   bool call(
       Stack& stack,
-      c10::optional<size_t>,
+      std::optional<size_t>,
       c10::function_ref<void(const Code&)>) override {
     run(stack);
     return false;

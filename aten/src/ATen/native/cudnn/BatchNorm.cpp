@@ -19,9 +19,9 @@ namespace native {
 std::tuple<Tensor, Tensor, Tensor, Tensor> cudnn_batch_norm(
     const Tensor& input,
     const Tensor& weight,
-    const c10::optional<Tensor>& bias_opt,
-    const c10::optional<Tensor>& running_mean_opt,
-    const c10::optional<Tensor>& running_var_opt,
+    const std::optional<Tensor>& bias_opt,
+    const std::optional<Tensor>& running_mean_opt,
+    const std::optional<Tensor>& running_var_opt,
     bool training,
     double exponential_average_factor,
     double epsilon) {
@@ -32,10 +32,10 @@ std::tuple<Tensor, Tensor, Tensor> cudnn_batch_norm_backward(
     const Tensor& input,
     const Tensor& grad_output,
     const Tensor& weight,
-    const c10::optional<Tensor>& running_mean_opt,
-    const c10::optional<Tensor>& running_var_opt,
-    const c10::optional<Tensor>& save_mean_opt,
-    const c10::optional<Tensor>& save_var_opt,
+    const std::optional<Tensor>& running_mean_opt,
+    const std::optional<Tensor>& running_var_opt,
+    const std::optional<Tensor>& save_mean_opt,
+    const std::optional<Tensor>& save_var_opt,
     double epsilon,
     const Tensor& reservedSpace) {
   AT_ERROR("cudnn_batch_norm_backward: ATen not compiled with cuDNN support");
@@ -121,9 +121,9 @@ size_t _get_cudnn_batch_norm_reserve_space_size(
 std::tuple<Tensor, Tensor, Tensor, Tensor> cudnn_batch_norm(
     const Tensor& input_t,
     const Tensor& weight_t,
-    const c10::optional<Tensor>& bias_t_opt,
-    const c10::optional<Tensor>& running_mean_t_opt,
-    const c10::optional<Tensor>& running_var_t_opt,
+    const std::optional<Tensor>& bias_t_opt,
+    const std::optional<Tensor>& running_mean_t_opt,
+    const std::optional<Tensor>& running_var_t_opt,
     bool training,
     double exponential_average_factor,
     double epsilon) {
@@ -274,10 +274,10 @@ std::tuple<Tensor, Tensor, Tensor> cudnn_batch_norm_backward(
     const Tensor& weight_t,
     // Unused: but we require them to be passed so that double backwards
     // has access
-    const c10::optional<Tensor>& running_mean_opt,
-    const c10::optional<Tensor>& running_var_opt,
-    const c10::optional<Tensor>& save_mean_t_opt,
-    const c10::optional<Tensor>& save_var_t_opt,
+    const std::optional<Tensor>& running_mean_opt,
+    const std::optional<Tensor>& running_var_opt,
+    const std::optional<Tensor>& save_mean_t_opt,
+    const std::optional<Tensor>& save_var_t_opt,
     double epsilon,
     const Tensor& reserveSpace) {
   // See [Note: hacky wrapper removal for optional tensor]
