@@ -273,7 +273,10 @@ def delete_branches() -> None:
 
 
 def delete_old_ciflow_tags() -> None:
-    # Deletes ciflow tags if they are associated with a closed PR or a specific commit
+    # Deletes ciflow tags if they are associated with a closed PR or a specific
+    # commit.  Lightweight tags don't have information about the date they were
+    # created, so we can't check how old they are.  The script just assumes that
+    # ciflow tags should be deleted.
     github_token = os.environ.get("GITHUB_TOKEN")
     headers = {
         "Authorization": f"token {github_token}",
@@ -286,6 +289,7 @@ def delete_old_ciflow_tags() -> None:
         #     f"https://api.github.com/repos/{REPO_OWNER}/{REPO_NAME}/git/refs/tags/{tag}",
         #     headers=headers
         # )
+        ESTIMATED_TOKENS[0] += 1
 
     git_repo = GitRepo(str(REPO_ROOT), "origin", debug=True)
     tags = git_repo._run_git("tag").splitlines()
@@ -293,8 +297,8 @@ def delete_old_ciflow_tags() -> None:
         try:
             if not tag.startswith("ciflow/"):
                 continue
-            re_match_pr = re.match(r"^ciflow/[^\d]+/(\d+){5,6}$", tag)
-            re_match_sha = re.match(r"^ciflow/[^\d]+/([0-9a-f]{40})$", tag)
+            re_match_pr = re.match(r"^ciflow\/.*\/(\d{5,6})$", tag)
+            re_match_sha = re.match(r"^ciflow\/.*\/([0-9a-f]{40})$", tag)
             if re_match_pr:
                 pr_number = int(re_match_pr.group(1))
                 state = requests.request(
