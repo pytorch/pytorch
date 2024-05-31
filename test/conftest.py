@@ -198,6 +198,9 @@ class LogXMLReruns(LogXML):
 
         return reporter
 
+    def pytest_runtest_logfinish(self, nodeid, location) -> None:
+        super().pytest_sessionfinish()
+
 
 # imitating summary_failures in pytest's terminal.py
 # both hookwrapper and tryfirst to make sure this runs before pytest's
