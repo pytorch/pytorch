@@ -79,7 +79,7 @@ class TestModuleTracker(TestCase):
     def test_user_hooks(self):
         class Bar(torch.nn.Module):
             def __init__(self):
-                super(__class__, self).__init__()
+                super().__init__()
                 self.foo = torch.nn.Linear(10, 10)
 
             def forward(self, x):
