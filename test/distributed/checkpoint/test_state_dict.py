@@ -694,6 +694,7 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
         )
         if dist.get_rank() == 0:
             self.assertTrue("initial_lr" in optim.param_groups[0])
+
     def test_flattened_osd(self) -> None:
         device_mesh = init_device_mesh("cuda", (self.world_size,))
         model = CompositeParamModel(device=torch.device("cuda"))
