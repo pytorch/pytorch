@@ -1991,7 +1991,7 @@ class AotCodeCompiler:
             from .codegen.memory_planning import ALIGN_BYTES
 
             # following the gAlignment of CPU in c10/core/alignment.h
-            assert ALIGN_BYTES == 64, "Expect ALIGN_BYTES to be 64"
+            assert ALIGN_BYTES == 64, "Expect ALIGN_BYTES to be 64 for CPU"
             cmd = (
                 f"{objcopy_command} --rename-section"
                 f"{rename_data}"
