@@ -7,7 +7,7 @@ from typing import cast, List, Optional, Sequence, Tuple, Union
 
 import torch
 
-from torch.distributed._tensor.op_schema import (
+from torch.distributed._tensor._op_schema import (
     OpSchema,
     OpStrategy,
     PlacementStrategy,
@@ -25,8 +25,8 @@ from torch.distributed._tensor.ops.utils import (
     register_op_strategy,
 )
 from torch.distributed._tensor.placement_types import (
-    _Partial,
     DTensorSpec,
+    Partial,
     Placement,
     Replicate,
     Shard,
@@ -52,7 +52,7 @@ ReductionOpType = Union[NormReduction, str]
 
 
 @dataclass(frozen=True)
-class _NormPartial(_Partial):
+class _NormPartial(Partial):
     """
     This placement is used for partial vector norm.
 
@@ -229,7 +229,7 @@ def map_placements_after_reduction(
     """
     new_placements: List[Placement] = []
     for placement in placements:
-        if isinstance(placement, (Replicate, _Partial)):
+        if isinstance(placement, (Replicate, Partial)):
             new_placements.append(placement)
         else:
             assert isinstance(placement, Shard)
@@ -247,7 +247,7 @@ def map_placements_after_reduction(
 def get_placement_from_reduction_op(reduction_op: ReductionOpType) -> Placement:
     if isinstance(reduction_op, NormReduction):
         return _NormPartial(norm_type=reduction_op.norm_type)
-    return _Partial(reduction_op)
+    return Partial(reduction_op)
 
 
 def common_reduction_strategy(
@@ -412,6 +412,33 @@ def foreach_norm_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> TupleStrateg
         )
         output_tuple_strategy_childs.append(output_strategy)
     return TupleStrategy(output_tuple_strategy_childs)
+
+
+@register_op_strategy([aten._linalg_svd.default], schema_info=RuntimeSchemaInfo(1))
+def linalg_svd_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> OpStrategy:
+    # Since we do not have a simple way to compute a sharded SVD, always fall
+    # back to replicate
+    args_schema = op_schema.args_schema
+    input_strategy = args_schema[0]
+    assert isinstance(input_strategy, OpStrategy), f"{input_strategy}"
+    output_strategies: List[PlacementStrategy] = []
+    for placement_strategy in input_strategy.strategies:
+        replicate_placements = tuple(Replicate() for _ in range(mesh.ndim))
+        replicate_spec = DTensorSpec(
+            mesh=mesh,
+            placements=replicate_placements,
+            tensor_meta=placement_strategy.output_spec.tensor_meta,
+        )
+        redistribute_cost = [
+            generate_redistribute_costs(input_strategy, replicate_spec)
+        ]
+        replicate_strategy = PlacementStrategy(
+            output_specs=replicate_spec,
+            input_specs=(replicate_spec,),
+            redistribute_cost=redistribute_cost,
+        )
+        output_strategies.append(replicate_strategy)
+    return OpStrategy(output_strategies)
 
 
 @register_op_strategy(
