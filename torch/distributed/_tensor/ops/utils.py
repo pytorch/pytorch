@@ -5,11 +5,11 @@ from typing import cast, Iterable, List, Sequence, Tuple, Union
 
 import torch
 from torch.distributed._tensor._collective_utils import redistribute_cost
+from torch.distributed._tensor._op_schema import OpStrategy, RuntimeSchemaInfo
 from torch.distributed._tensor.api import DTensor
-from torch.distributed._tensor.op_schema import OpStrategy, RuntimeSchemaInfo
 from torch.distributed._tensor.placement_types import (
-    _Partial,
     DTensorSpec,
+    Partial,
     Placement,
     Replicate,
     Shard,
@@ -193,7 +193,7 @@ def map_placements_after_broadcast(
     """Map each placement based on the output shape after broadcast."""
     new_placements: List[Placement] = []
     for placement in placements:
-        if isinstance(placement, (Replicate, _Partial)):
+        if isinstance(placement, (Replicate, Partial)):
             new_placements.append(placement)
         else:
             assert isinstance(placement, Shard)
