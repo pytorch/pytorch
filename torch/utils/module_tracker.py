@@ -92,7 +92,7 @@ class ModuleTracker:
     ):
         """
         Registers user-specified hooks to be called before/after the forward/backward pass for each
-        module tracked by the Module Tracker. One or more can be none.
+        module tracked by the Module Tracker. One or more can be ``None``.
         Args:
             pre_fw_hook (Callable, optional): A hook to be called before the forward pass for the
                 module. It should have the following signature:
@@ -111,7 +111,7 @@ class ModuleTracker:
         Note:
             If the module is not alive during the backward pass, the pre_bw_hook and post_bw_hook will
             will receive None as the module argument.
-            The module fqn will be present in the `parents` attribute when each of the hooks is called.
+            The module fqn will be present in the ``parents`` attribute when each of the hooks is called.
             Hooks are intended to be used as markers only not to modify the inputs/outputs.
         """
 
@@ -119,7 +119,7 @@ class ModuleTracker:
             if hook is not None and user_hook is not None:
                 raise AssertionError(
                     f"Only one {hook_name} can be registered at a time"
-                    f" Clear the existing hook by calling `clear_user_hooks` before registering a new one"
+                    f" Clear the existing hook by calling ``clear_user_hooks`` before registering a new one"
                 )
             return hook
 

@@ -76,6 +76,9 @@ class TestModuleTracker(TestCase):
             self.assertFalse(tracker.is_bw)
             self.assertEqual(tracker.parents, {"Global"})
 
+    def test_user_hooks(self):
+        
+
 
 if __name__ == "__main__":
     run_tests()
