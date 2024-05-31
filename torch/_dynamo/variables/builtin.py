@@ -1441,6 +1441,8 @@ class BuiltinVariable(VariableTracker):
     def call_hasattr(self, tx, obj, attr):
         if attr.is_python_constant():
             name = attr.as_python_constant()
+            if isinstance(obj, variables.BuiltinVariable):
+                return variables.ConstantVariable(hasattr(obj.fn, name))
             return obj.call_hasattr(tx, name)
 
     def call_map(self, tx, fn, seq):
