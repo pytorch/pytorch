@@ -53,6 +53,8 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
                 x = torch.sigmoid(x)
             except NotImplementedError:
                 x = torch.cos(x)
+            finally:
+                x = torch.cos(x)
 
             return x
 
@@ -75,6 +77,28 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
                     raise AssertionError
                 except AssertionError:
                     x = torch.cos(x)
+
+        x = torch.randn(4)
+        ref = fn(x)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        res = opt_fn(x)
+        self.assertEqual(ref, res)
+
+    def test_exception_else(self):
+        def gn(x):
+            return torch.cos(x)
+
+        def fn(x):
+            x = torch.cos(x)
+            try:
+                x = torch.sin(x)
+                x = gn(x)
+            except Exception:
+                x = torch.sigmoid(x)
+            else:
+                x = torch.cos(x)
+
+            return x
 
         x = torch.randn(4)
         ref = fn(x)
