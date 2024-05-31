@@ -1069,8 +1069,8 @@ class TestSerialization(TestCase, SerializationMixin):
 
         # Check execptions are handled for corrupted ops unpickling
         data_corrupted_ops = (b'\x80\x02\x8a\x0a\x6c\xfc\x9c\x46\xf9\x20\x6a\xa8\x50\x19\x2e\x80'
-                             b'\x02\x4d\xe9\x03\x2e\x80\x02\x75\x78\x0b\x00\x03\x50\x4b\x03\x04'
-                             b'\x0a\x00\x00\x40\x00\x00\x2a')
+                              b'\x02\x4d\xe9\x03\x2e\x80\x02\x75\x78\x0b\x00\x03\x50\x4b\x03\x04'
+                              b'\x0a\x00\x00\x40\x00\x00\x2a')
         buf = io.BytesIO(data_corrupted_ops)
         with self.assertRaisesRegex(pickle.UnpicklingError, "Unable to unpickle file due to error: pop from empty list"):
             torch.load(buf, weights_only=True)

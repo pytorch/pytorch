@@ -1535,7 +1535,7 @@ def _legacy_load(f, map_location, pickle_module, **pickle_load_args):
     # protocol version: 10 bytes for MAGIC_NUMBER, 2 bytes for
     # PROTOCOL_VERSION, 8 bytes for unpickling operators.
     if file_size < 20:
-        raise RuntimeError(f"{f.name} is too short: corrupt file?")
+        raise RuntimeError("file is too short: corrupt file?")
     f.seek(start)
 
     magic_number = pickle_module.load(f, **pickle_load_args)
