@@ -330,7 +330,7 @@ class CppWrapperCpu(WrapperCodeGen):
                     )
                 else:
                     assert isinstance(
-                        d, sympy.Symbol
+                        d, (sympy.Symbol, sympy.core.add.Add)
                     ), f"dimention at {dim_idx=} for tensor {name=} must be a sympy.Symbol"
                     sym_range = V.graph.sizevars.shape_env.var_to_range.get(d, None)
                     if sym_range is None:
