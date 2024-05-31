@@ -486,7 +486,9 @@ class TS2FXGraphConverter:
         # Provide a default node handler as well in case we don't find
         # matching converter for that.
         handler_name = "_".join(node_kind_split)
-        handler_func = getattr(self, f"convert_{handler_name}", self.convert_default_node)
+        handler_func = getattr(
+            self, f"convert_{handler_name}", self.convert_default_node
+        )
         handler_func(node)
 
     def convert_default_node(self, node: torch._C.Node):
