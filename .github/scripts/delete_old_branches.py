@@ -6,8 +6,6 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Set
 
-import requests
-
 from github_utils import gh_fetch_json_dict, gh_graphql
 from gitutils import GitRepo
 
