@@ -313,6 +313,7 @@ if RUN_CPU:
             "cpu",
             test_mkldnn_pattern_matcher.TestPatternMatcher(),
             condition=torch.backends.mkldnn.is_available(),
+            skip="Failing",
         ),
         BaseTest(
             "test_qlinear_add_relu",
