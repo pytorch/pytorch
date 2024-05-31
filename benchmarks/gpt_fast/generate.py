@@ -3,8 +3,6 @@ import itertools
 import time
 from typing import Optional, Tuple
 
-from benchmark import Experiment
-
 from mixtral_moe_model import Transformer as MixtralMoE
 from mixtral_moe_quantize import (
     WeightOnlyInt8QuantHandler as MixtralMoEWeightOnlyInt8QuantHandler,
@@ -224,6 +222,8 @@ def run_experiment(
 
 # token_per_sec and memory_bandwidth target numbers are for A100-40GB, which are different from the typical A100-80GB.
 def run_llama2_7b_fp16():
+    from benchmark import Experiment
+
     model = GPTModelConfig(
         "Llama-2-7b-chat-hf",
         LLaMA,
@@ -251,6 +251,8 @@ def run_llama2_7b_fp16():
 
 # token_per_sec and memory_bandwidth target numbers are for A100-40GB, which are different from the typical A100-80GB.
 def run_llama2_7b_int8():
+    from benchmark import Experiment
+
     model = GPTModelConfig(
         "Llama-2-7b-chat-hf",
         LLaMA,
@@ -278,6 +280,8 @@ def run_llama2_7b_int8():
 
 # token_per_sec and memory_bandwidth target numbers are for A100-40GB, which are different from the typical A100-80GB.
 def run_mixtral_8x7b_int8():
+    from benchmark import Experiment
+
     # We reduced the original number of layers from 32 to 16 to adapt CI memory limitation.
     model = GPTModelConfig(
         "Mixtral-8x7B-v0.1",
