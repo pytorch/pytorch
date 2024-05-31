@@ -35,7 +35,11 @@ namespace {
 // directly against incoming TensorImpl*s.
 using weakref_type = c10::weak_intrusive_ptr<TensorImpl, UndefinedTensorImpl>;
 using val_type = std::tuple<weakref_type, Tensor>;
-ska::flat_hash_map<TensorImpl*, val_type> cached_casts;
+
+static ska::flat_hash_map<TensorImpl*, val_type>& get_cached_casts() {
+  static ska::flat_hash_map<TensorImpl*, val_type> cached_casts;
+  return cached_casts;
+}
 std::mutex cached_casts_mutex;
 
 
@@ -82,7 +86,7 @@ thread_local bool cache_enabled = true;
 
 void clear_cache() {
   const std::lock_guard<std::mutex> lock(cached_casts_mutex);
-  cached_casts.clear();
+  get_cached_casts().clear();
 }
 
 int increment_nesting() {
@@ -124,12 +128,12 @@ Tensor cached_cast(at::ScalarType to_type, const Tensor& arg, DeviceType device_
 
     if (can_try_cache) {
       const std::lock_guard<std::mutex> lock(cached_casts_mutex);
-      auto it = cached_casts.find(arg.unsafeGetTensorImpl());
-      if (it != cached_casts.end()) {
+      auto it = get_cached_casts().find(arg.unsafeGetTensorImpl());
+      if (it != get_cached_casts().end()) {
         return std::get<1>(it->second);
       } else {
         auto casted_arg = arg.to(to_type);
-        cached_casts.emplace(arg.unsafeGetTensorImpl(), val_type{weakref_type(arg.getIntrusivePtr()), casted_arg});
+        get_cached_casts().emplace(arg.unsafeGetTensorImpl(), val_type{weakref_type(arg.getIntrusivePtr()), casted_arg});
         return casted_arg;
       }
     } else {
@@ -144,7 +148,7 @@ Tensor cached_cast(at::ScalarType to_type, const Tensor& arg, DeviceType device_
 Banned functions
 *******************************/
 
-static Tensor binary_cross_entropy_banned(const Tensor &, const Tensor &, const c10::optional<Tensor>&, int64_t) {
+static Tensor binary_cross_entropy_banned(const Tensor &, const Tensor &, const std::optional<Tensor>&, int64_t) {
   AT_ERROR("torch.nn.functional.binary_cross_entropy and torch.nn.BCELoss are unsafe to autocast.\n"
            "Many models use a sigmoid layer right before the binary cross entropy layer.\n"
            "In this case, combine the two layers using torch.nn.functional.binary_cross_entropy_with_logits\n"

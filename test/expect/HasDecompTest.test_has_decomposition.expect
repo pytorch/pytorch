@@ -18,6 +18,10 @@ aten::_add_relu.Tensor
 aten::_add_relu.out
 aten::_add_relu_.Scalar
 aten::_add_relu_.Tensor
+aten::_aminmax
+aten::_aminmax.dim
+aten::_aminmax.dim_out
+aten::_aminmax.out
 aten::_amp_foreach_non_finite_check_and_unscale
 aten::_amp_foreach_non_finite_check_and_unscale.out
 aten::_amp_foreach_non_finite_check_and_unscale_
@@ -244,6 +248,8 @@ aten::_foreach_log2
 aten::_foreach_log2.out
 aten::_foreach_log2_
 aten::_foreach_log_
+aten::_foreach_max
+aten::_foreach_max.out
 aten::_foreach_maximum.List
 aten::_foreach_maximum.List_out
 aten::_foreach_maximum.Scalar
@@ -934,8 +940,6 @@ aten::min.dim_min
 aten::min.unary_out
 aten::miopen_batch_norm
 aten::miopen_batch_norm.out
-aten::miopen_batch_norm_backward
-aten::miopen_batch_norm_backward.out
 aten::miopen_convolution
 aten::miopen_convolution.out
 aten::miopen_convolution_add_relu

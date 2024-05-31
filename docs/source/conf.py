@@ -2796,6 +2796,7 @@ coverage_ignore_classes = [
     "ConstraintViolationError",
     "DynamicDimConstraintPrinter",
     "GuardOnDataDependentSymNode",
+    "PendingUnbackedSymbolNotFound",
     "LoggingShapeGuardPrinter",
     "RelaxedUnspecConstraint",
     "RuntimeAssert",

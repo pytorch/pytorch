@@ -375,7 +375,7 @@ class TORCH_API Backend : public torch::CustomClassHolder {
   }
 
   // See similar functions in ProcessGroup.hpp for context.
-  c10::optional<at::Device> getBoundDeviceId() const {
+  std::optional<at::Device> getBoundDeviceId() const {
     return bound_device_id_;
   }
 
@@ -386,7 +386,7 @@ class TORCH_API Backend : public torch::CustomClassHolder {
     // backends may perform
   }
 
-  void setBoundDeviceId(c10::optional<at::Device> device) {
+  void setBoundDeviceId(std::optional<at::Device> device) {
     if (device) {
       TORCH_CHECK(device->has_index(), "setBoundDeviceId must have an index");
     }
@@ -410,7 +410,7 @@ class TORCH_API Backend : public torch::CustomClassHolder {
 
   std::function<void(std::shared_ptr<WorkInfo>)> onCompletionHook_;
 
-  c10::optional<at::Device> bound_device_id_;
+  std::optional<at::Device> bound_device_id_;
 };
 
 } // namespace c10d

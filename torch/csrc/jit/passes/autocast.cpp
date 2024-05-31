@@ -60,7 +60,7 @@ bool isAutocastNode(Value* value) {
 //  2. `prim::SetAttr` must follow `prim::CreateObject()` in the same block,
 //    but there might be other nodes in between
 //
-c10::optional<AutocastScope> parseAutocast(
+std::optional<AutocastScope> parseAutocast(
     Value* value,
     const AutocastContext& context) {
   if (!isAutocastNode(value)) {
@@ -71,7 +71,7 @@ c10::optional<AutocastScope> parseAutocast(
     AutocastScope scope;
     scope.instance = value;
     scope.context = context;
-    c10::optional<bool> enabled;
+    std::optional<bool> enabled;
     std::string device;
     c10::ScalarType dtype = c10::ScalarType::Undefined;
     for (Use use : value->uses()) {
@@ -269,7 +269,7 @@ void updateAutocastEnabledCheck(Node* node, bool is_jit_enabled) {
 void handleBlock(Block* block, AutocastContext initial_state) {
   std::stack<AutocastScope> autocast_stack;
 
-  c10::optional<bool> incompatible_amp = c10::nullopt;
+  std::optional<bool> incompatible_amp = c10::nullopt;
 
   // The current autocast enabled/disabled state
   auto current_state = [&] {

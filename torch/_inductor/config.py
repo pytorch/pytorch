@@ -33,6 +33,9 @@ autotune_local_cache = True
 # enable autotune remote cache
 autotune_remote_cache = os.environ.get("TORCHINDUCTOR_AUTOTUNE_REMOTE_CACHE") == "1"
 
+# Force disabled all inductor level caching -- This will override any other caching flag
+force_disable_caches = os.environ.get("TORCHINDUCTOR_FORCE_DISABLE_CACHES") == "1"
+
 # use cpp wrapper instead of python wrapper
 cpp_wrapper = os.environ.get("TORCHINDUCTOR_CPP_WRAPPER", "0") == "1"
 
@@ -229,6 +232,7 @@ max_autotune_gemm = os.environ.get("TORCHINDUCTOR_MAX_AUTOTUNE_GEMM") == "1"
 force_same_precision = (
     True if is_fbcode() else os.environ.get("TORCHINDUCTOR_FORCE_SAME_PRECISION") == "1"
 )
+
 # Specify candidate backends for gemm autotune.
 # Possible choices are combinations of: ATen, Triton, CUTLASS, CPP.
 # ATen: default Pytorch ATen kernels.
@@ -238,6 +242,18 @@ force_same_precision = (
 max_autotune_gemm_backends = os.environ.get(
     "TORCHINDUCTOR_MAX_AUTOTUNE_GEMM_BACKENDS", "ATEN,TRITON,CPP"
 ).upper()
+
+# Specify the size of the search space for GEMM autotuning.
+# DEFAULT     - balance between compile time overhead and performance
+# EXHAUSTIVE  - maximize performance
+max_autotune_gemm_search_space = os.environ.get(
+    "TORCHINDUCTOR_MAX_AUTOTUNE_GEMM_SEARCH_SPACE", "DEFAULT"
+).upper()
+
+# Whether we fall back to ATen or hard error when no matches are found during autotuning
+autotune_fallback_to_aten = (
+    os.environ.get("TORCHINDUCTOR_AUTOTUNE_FALLBACK_TO_ATEN", "1") == "1"
+)
 
 # the value used as a fallback for the unbacked SymInts
 # that can appear in the input shapes (e.g., in autotuning)
@@ -315,15 +331,13 @@ debug_fusion = os.environ.get("TORCHINDUCTOR_DEBUG_FUSION") == "1"
 benchmark_fusion = os.environ.get("TORCHINDUCTOR_BENCHMARK_FUSION") == "1"
 enabled_metric_tables = os.environ.get("TORCHINDUCTOR_ENABLED_METRIC_TABLES", "")
 
-benchmark_multi_templates = (
-    os.environ.get(
-        "TORCHINDUCTOR_BENCHMARK_MULTI_TEMPLATES", "0" if is_fbcode() else "1"
-    )
-    == "1"
+# For Triton Templates, select fastest of best template + epilogue vs best template + separate epilogue kernel
+benchmark_epilogue_fusion = (
+    os.environ.get("TORCHINDUCTOR_BENCHMARK_EPILOGUE_FUSION", "1") == "1"
 )
 
 # Take how many of the top triton kernels to benchmark epilogue
-max_epilogue_benchmarked_choices = 3
+max_epilogue_benchmarked_choices = 1
 
 # how many nodes to allow into a single fusion
 max_fusion_size = 64
@@ -369,10 +383,20 @@ debug_index_asserts = False
 is_nightly_or_source = "dev" in torch.__version__ or "git" in torch.__version__
 developer_warnings = is_fbcode() or is_nightly_or_source
 
+
 # The multiprocessing start method to use for inductor workers in the codecache.
-# TODO: fork is not safe in a multithreaded environment, we should evaluate changing
-# the default to spawn.
-worker_start_method = "fork"
+# "subprocess", "fork", or "spawn"
+def decide_worker_start_method():
+    start_method = os.environ.get("TORCHINDUCTOR_WORKER_START", "fork")
+    assert start_method in [
+        "subprocess",
+        "fork",
+        "spawn",
+    ], f"Invalid start method: {start_method}"
+    return start_method
+
+
+worker_start_method = decide_worker_start_method()
 
 # Flags to turn on all_reduce fusion. These 2 flags should be automaticaly turned
 # on by DDP and should not be set by the users.
@@ -456,6 +480,9 @@ pad_channels_last = False
 # For user visible outputs, inductor will make sure the stride matches with eager.
 bw_outputs_user_visible = True
 
+# Whether to always use shape padding if it is enabled and possible
+force_shape_pad: bool = False
+
 # Fx-based linear/matmul/bmm + permute/transpose vertical fusion
 permute_fusion = os.environ.get("TORCHINDUCTOR_PERMUTE_FUSION", "0") == "1"
 
@@ -497,7 +524,7 @@ freezing_discard_parameters: bool = False
 # Kill switch for allowing temporary tensors to be allocated as stack arrays. Tests
 # should be run with this flag both on and off to make sure we have coverage.
 allow_stack_allocation: bool = (
-    os.environ.get("TORCHINDUCTOR_STACK_ALLOCATION", "1") == "1"
+    os.environ.get("TORCHINDUCTOR_STACK_ALLOCATION", "1" if is_fbcode() else "0") == "1"
 )
 
 # Enables an alternate DSO interface (the "minimal ArrayRef interface") intended
@@ -716,6 +743,10 @@ class aot_inductor:
 
     debug_compile = os.environ.get("AOT_INDUCTOR_DEBUG_COMPILE", "0") == "1"
 
+    debug_dump_consts_bin: bool = (
+        os.environ.get("AOT_INDUCTOR_DEBUG_DUMP_CONSTS_BIN", "0") == "1"
+    )
+
     # Serialized tree spec for flattening inputs
     serialized_in_spec = ""
 
@@ -859,10 +890,19 @@ class trace:
     log_autotuning_results: bool = False
 
 
-_save_config_ignore = {
+_save_config_ignore = [
     # workaround: "Can't pickle <function ...>"
     "trace.upload_tar",
-}
+]
+
+_cache_config_ignore_prefix = [
+    # trace functions are not relevant to config caching
+    "trace",
+    # uses absolute path
+    "cuda.cutlass_dir",
+    # not relevant
+    "compile_threads",
+]
 
 if TYPE_CHECKING:
     from torch.utils._config_typing import *  # noqa: F401, F403

@@ -23,11 +23,11 @@ class Adagrad(Optimizer):
     def __init__(
         self,
         params: ParamsT,
-        lr=1e-2,
-        lr_decay=0,
-        weight_decay=0,
-        initial_accumulator_value=0,
-        eps=1e-10,
+        lr: float = 1e-2,
+        lr_decay: float = 0,
+        weight_decay: float = 0,
+        initial_accumulator_value: float = 0,
+        eps: float = 1e-10,
         foreach: Optional[bool] = None,
         *,
         maximize: bool = False,
@@ -315,8 +315,6 @@ def adagrad(
 
 def _make_sparse(grad, grad_indices, values):
     size = grad.size()
-    if grad_indices.numel() == 0 or values.numel() == 0:
-        return torch.empty_like(grad)
     return torch.sparse_coo_tensor(grad_indices, values, size)
 
 

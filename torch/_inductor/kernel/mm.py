@@ -65,8 +65,14 @@ mm_template = TritonTemplate(
 
     rm = pid_m * BLOCK_M + tl.arange(0, BLOCK_M)
     rn = pid_n * BLOCK_N + tl.arange(0, BLOCK_N)
-    ram = tl.max_contiguous(tl.multiple_of(rm % M, BLOCK_M), BLOCK_M)
-    rbn = tl.max_contiguous(tl.multiple_of(rn % N, BLOCK_N), BLOCK_N)
+    if (stride_am == 1 and stride_ak == M) or (stride_am == K and stride_ak == 1):
+        ram = tl.max_contiguous(tl.multiple_of(rm % M, BLOCK_M), BLOCK_M)
+    else:
+        ram = rm % M
+    if (stride_bk == 1 and stride_bn == K) or (stride_bk == N and stride_bn == 1):
+        rbn = tl.max_contiguous(tl.multiple_of(rn % N, BLOCK_N), BLOCK_N)
+    else:
+        rbn = rn % N
     rk = tl.arange(0, BLOCK_K)
     A = A + (ram[:, None] * stride_am + rk[None, :] * stride_ak)
     B = B + (rk[:, None] * stride_bk + rbn[None, :] * stride_bn)
@@ -159,12 +165,19 @@ def tuned_mm(mat1, mat2, *, layout=None):
             [mat1, mat2],
         )
 
-    if len(choices) == 0 and not use_aten_gemm_kernels():
+    if (
+        len(choices) == 0
+        and not use_aten_gemm_kernels()
+        and inductor_config.autotune_fallback_to_aten
+    ):
         log.warning("No choices for GEMM, using ATen backend as fallback")
-        choices.append(aten_mm.bind((mat1, mat2), aten_layout))
+        return aten_mm.bind((mat1, mat2), aten_layout).output_node()
+
     try:
         return autotune_select_algorithm("mm", choices, [mat1, mat2], layout)
     except NoValidChoicesError:
+        if not inductor_config.autotune_fallback_to_aten:
+            raise
         log.warning("All choices for GEMM were invalid, using ATen backend as fallback")
         return aten_mm.bind((mat1, mat2), aten_layout).output_node()
 
@@ -227,6 +240,8 @@ def tuned_int_mm(mat1, mat2, *, layout=None):
     try:
         return autotune_select_algorithm("int_mm", choices, [mat1, mat2], layout)
     except NoValidChoicesError:
+        if not inductor_config.autotune_fallback_to_aten:
+            raise
         log.warning("All choices for GEMM were invalid, using ATen backend as fallback")
         choices = [aten__int_mm.bind((mat1, mat2), layout)]
         return autotune_select_algorithm("int_mm", choices, [mat1, mat2], layout)
@@ -356,6 +371,8 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
             "addmm", choices, [inp_expanded, mat1, mat2], layout
         )
     except NoValidChoicesError:
+        if not inductor_config.autotune_fallback_to_aten:
+            raise
         log.warning("All choices for GEMM were invalid, using ATen backend as fallback")
         fallback_choice = aten_addmm.bind(
             (inp, mat1, mat2),

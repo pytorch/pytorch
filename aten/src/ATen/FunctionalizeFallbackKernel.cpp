@@ -125,7 +125,7 @@ namespace {
 // - when we resize to a larger size, it acts as a mutation
 // - when we resize to a smaller size, it acts as a view
 // See Note [resize_ in Functionalization] for more dtails
-static const at::Tensor & resize__functionalization(c10::DispatchKeySet dispatchKeySet, const at::Tensor & self, at::IntArrayRef size, c10::optional<at::MemoryFormat> memory_format) {
+static const at::Tensor & resize__functionalization(c10::DispatchKeySet dispatchKeySet, const at::Tensor & self, at::IntArrayRef size, std::optional<at::MemoryFormat> memory_format) {
   // First unwrap the tensor arguments
   at::Tensor self_;
   if (at::functionalization::impl::isFunctionalTensor(self)) {
@@ -216,7 +216,7 @@ static at::Tensor lift_fresh_functionalize_copy(const at::Tensor & self) {
     // in the local include TLS. As a result, when we redispatch here,
     // we will end up hitting PreDispatch stack first. So, we should
     // directly redispatch to the functionalize key manually.
-    static auto op = c10::Dispatcher::singleton().findSchemaOrThrow("aten::clone", "").typed<at::Tensor(const at::Tensor &, c10::optional<at::MemoryFormat>)>();
+    static auto op = c10::Dispatcher::singleton().findSchemaOrThrow("aten::clone", "").typed<at::Tensor(const at::Tensor &, std::optional<at::MemoryFormat>)>();
     return op.redispatch(c10::DispatchKeySet({c10::DispatchKey::Functionalize}), self, c10::nullopt);
   }
 
@@ -225,7 +225,7 @@ static at::Tensor lift_fresh_functionalize_copy(const at::Tensor & self) {
   return at::functionalization::impl::to_functional_tensor(out);
 }
 
-static bool device_opted_into_functionalization(c10::Device self_device, c10::optional<c10::Device> tgt_device) {
+static bool device_opted_into_functionalization(c10::Device self_device, std::optional<c10::Device> tgt_device) {
     // If the target device is empty, then the output tensor should be on the same device as the input
     auto real_tgt_device = tgt_device.has_value() ? tgt_device.value() : self_device;
     return real_tgt_device.type() == c10::DeviceType::XLA || real_tgt_device.type() == c10::DeviceType::Lazy;
@@ -235,12 +235,12 @@ static bool device_opted_into_functionalization(c10::Device self_device, c10::op
 // We should probably get rid of this though.
 static at::Tensor _to_copy_functionalize(
         const at::Tensor & self,
-        c10::optional<at::ScalarType> dtype,
-        c10::optional<at::Layout> layout,
-        c10::optional<at::Device> device,
-        c10::optional<bool> pin_memory,
+        std::optional<at::ScalarType> dtype,
+        std::optional<at::Layout> layout,
+        std::optional<at::Device> device,
+        std::optional<bool> pin_memory,
         bool non_blocking,
-        c10::optional<at::MemoryFormat> memory_format) {
+        std::optional<at::MemoryFormat> memory_format) {
   at::Tensor self_;
   if (at::functionalization::impl::isFunctionalTensor(self)) {
     // sync any pending updates

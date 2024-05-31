@@ -230,8 +230,7 @@ def trace_map(proxy_mode, func_overload, f, xs, pos_args):
     example_input = _unstack_pytree(xs)[0]
     body_graph = f
 
-    pre_dispatch = getattr(proxy_mode, "pre_dispatch", False)
-    body_graph = reenter_make_fx(body_graph, pre_dispatch)(*example_input, *pos_args)
+    body_graph = reenter_make_fx(body_graph)(*example_input, *pos_args)
 
     next_name = proxy_mode.tracer.get_fresh_qualname("body_graph_")
 

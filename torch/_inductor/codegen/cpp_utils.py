@@ -1,23 +1,28 @@
+import contextlib
 import math
 
 from collections import namedtuple
+from typing import Dict
+from unittest.mock import patch
 
 import torch
+from .. import ir
+from ..virtualized import V
 
-from .common import ExprPrinter
+from .common import ExprPrinter, Kernel
 
 DTYPE_TO_CPP = {
     torch.float32: "float",
     torch.float64: "double",
     torch.float16: "half",
     torch.int64: "int64_t",
-    torch.int32: "int",
-    torch.int16: "short",
-    torch.int8: "signed char",
+    torch.int32: "int32_t",
+    torch.int16: "int16_t",
+    torch.int8: "int8_t",
     torch.uint64: "uint64_t",
-    torch.uint32: "unsigned int",
-    torch.uint16: "unsigned short",
-    torch.uint8: "unsigned char",
+    torch.uint32: "uint32_t",
+    torch.uint16: "uint16_t",
+    torch.uint8: "uint8_t",
     torch.bool: "bool",
     torch.bfloat16: "bfloat16",
     torch.complex64: "complex64",
@@ -53,6 +58,11 @@ DTYPE_TO_ATEN = {
 DEVICE_TO_ATEN = {
     "cpu": "at::kCPU",
     "cuda": "at::kCUDA",
+}
+
+LAYOUT_TO_ATEN = {
+    torch.strided: "at::kStrided",
+    torch._mkldnn: "at::kMkldnn",  # type: ignore[attr-defined]
 }
 
 INDEX_TYPE = "long"
@@ -107,16 +117,19 @@ class CppPrinter(ExprPrinter):
 
         if exp == 0.5 or exp == -0.5:
             return f"std::sqrt({base})" if exp == 0.5 else f"1.0/std::sqrt({base})"
-        assert exp.is_integer
-        exp = int(exp)
-        if exp > 0:
-            r = "*".join([self.paren(base)] * exp)
-        elif exp < 0:
-            r = "1.0/" + self.paren("*".join([self.paren(base)] * abs(exp)))
-        else:  # exp == 0
-            r = "1.0"
+        if exp.is_integer:
+            exp = int(exp)
+            if exp > 0:
+                r = "*".join([self.paren(base)] * exp)
+            elif exp < 0:
+                r = "1.0/" + self.paren("*".join([self.paren(base)] * abs(exp)))
+            else:  # exp == 0
+                r = "1.0"
 
-        return f"static_cast<{INDEX_TYPE}>({r})" if expr.is_integer else r
+            return f"static_cast<{INDEX_TYPE}>({r})" if expr.is_integer else r
+        else:
+            # TODO: float vs double
+            return f"std::pow({base}, {float(exp)})"
 
     def _print_Rational(self, expr):
         # Uses float constants to perform FP div
@@ -233,3 +246,58 @@ def value_to_cpp(value, cpp_type):
         return f"std::numeric_limits<{cpp_type}>::quiet_NaN()"
     else:
         return f"static_cast<{cpp_type}>({repr(value)})"
+
+
+class LocalBufferScope:
+    """
+    This class creates a context that helps to generate code involving Inductor IR with
+    function local buffers. These buffers are constructed during the codegen process and
+    are used to store intermediate results such as local accumulators. We do not want to
+    add them to `V.graph` since they are not global and we do not want to add them as
+    function arguments either. So we patch the codegen processes under this scope to support
+    these buffers without exposure to the outside world.
+    """
+
+    def __init__(self, kernel: Kernel):
+        self.kernel = kernel
+        self.exit_stack = contextlib.ExitStack()
+        self.local_buffers: Dict[str, ir.Buffer] = {}
+
+    def __enter__(self):
+        self.exit_stack.__enter__()
+        original_get_dtype = V.graph.get_dtype
+
+        def get_dtype(name):
+            if name in self.local_buffers:
+                return self.local_buffers[name].get_dtype()
+            return original_get_dtype(name)
+
+        self.exit_stack.enter_context(patch.object(V.graph, "get_dtype", get_dtype))
+
+        original_input = self.kernel.args.input
+
+        def input(name):
+            if name in self.local_buffers:
+                return name
+            return original_input(name)
+
+        self.exit_stack.enter_context(patch.object(self.kernel.args, "input", input))
+
+        original_output = self.kernel.args.output
+
+        def output(name):
+            if name in self.local_buffers:
+                return name
+            return original_output(name)
+
+        self.exit_stack.enter_context(patch.object(self.kernel.args, "output", output))
+
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.local_buffers.clear()
+        self.exit_stack.__exit__(exc_type, exc_val, exc_tb)
+
+    def add_local_buffer(self, buffer: ir.Buffer):
+        assert buffer.get_name() not in self.local_buffers
+        self.local_buffers[buffer.get_name()] = buffer

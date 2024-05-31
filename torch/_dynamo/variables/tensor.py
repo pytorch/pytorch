@@ -125,6 +125,7 @@ class TensorVariable(VariableTracker):
         is_quantized,
         is_sparse,
         class_type,
+        has_grad_fn,
         size=None,
         stride=None,
         is_contiguous=None,
@@ -144,10 +145,15 @@ class TensorVariable(VariableTracker):
         self.is_contiguous = is_contiguous
         self.is_sparse = is_sparse
         self.class_type = class_type
+        self.has_grad_fn = has_grad_fn
         if _is_name_set is None:
             # no need to rename inputs
             _is_name_set = self.proxy.node.op == "placeholder"
         self._is_name_set: bool = _is_name_set
+
+    def debug_repr(self):
+        # TODO: strip off fake tensor from repr here
+        return repr(self.proxy.node.meta["example_value"])
 
     def as_proxy(self):
         return self.proxy
@@ -167,6 +173,13 @@ class TensorVariable(VariableTracker):
             "is_sparse": value.is_sparse,
             "class_type": type(value),
         }
+        try:
+            props["has_grad_fn"] = value.grad_fn is not None
+        except Exception:
+            # Workaround for issues with create_parameter_op in Dynamo. Reading
+            # grad_fn should never cause an issue.
+            props["has_grad_fn"] = False
+
         if is_sparse_any(value) and not has_free_symbols(value):
             props["size"] = tuple(
                 [int(s) if is_symbolic(s) else s for s in value.size()]
@@ -308,6 +321,12 @@ class TensorVariable(VariableTracker):
 
     def method_attr_data(self, tx):
         return self.call_method(tx, "detach", [], {})
+
+    def method_attr_grad_fn(self, tx):
+        if self.has_grad_fn:
+            unimplemented("TensorVariable has a grad_fn")
+        else:
+            return variables.ConstantVariable(None)
 
     def method_attr__version(self, tx):
         from ..tensor_version_op import _tensor_version
@@ -745,6 +764,12 @@ class TensorVariable(VariableTracker):
     def method_resize_as_(self, *args, **kwargs):
         unimplemented("Tensor.resize_as_")
 
+    def method_sparse_resize_(self, *args, **kwargs):
+        unimplemented("Tensor.sparse_resize_")
+
+    def method_sparse_resize_and_clear_(self, *args, **kwargs):
+        unimplemented("Tensor.sparse_resize_and_clear_")
+
     def method_set_(self, *args, **kwargs):
         if len(args) > 1:
             # torch.Tensor.set_() has several overloads.
@@ -958,7 +983,9 @@ class TensorVariable(VariableTracker):
 
 class SymNodeVariable(VariableTracker):
     """
-    Represents a symbolic size, e.g., as returned by tensor.size(0)
+    Represents a symbolic scalar, either int, float or bool.  This is most commonly used to
+    handle symbolic size computation, e.g., tensor.size(0), but it is also used to
+    handle logic like float_tensor.item() or unspecialized float inputs.
     """
 
     _nonvar_fields = {
@@ -966,6 +993,9 @@ class SymNodeVariable(VariableTracker):
         "sym_num",
         *VariableTracker._nonvar_fields,
     }
+
+    def debug_repr(self):
+        return repr(self.sym_num)
 
     @classmethod
     def create(cls, tx, proxy, sym_num=None, **options):
@@ -986,6 +1016,7 @@ class SymNodeVariable(VariableTracker):
         self.proxy = proxy
         # TODO: Should we allow non SymTypes here?  Today it is allowed
         self.sym_num = sym_num
+        self._tensor_var = None
 
     def python_type(self):
         if isinstance(self.sym_num, SymTypes):
@@ -996,11 +1027,20 @@ class SymNodeVariable(VariableTracker):
     def as_proxy(self):
         return self.proxy
 
+    def as_tensor(self, tx):
+        if self._tensor_var is None:
+            from .builder import SourcelessBuilder
+
+            self._tensor_var = SourcelessBuilder.create(
+                tx, torch.scalar_tensor
+            ).call_function(tx, [self], {})
+        return self._tensor_var
+
     def evaluate_expr(self, output_graph=None):
         try:
             return guard_scalar(self.sym_num)
         except GuardOnDataDependentSymNode as e:
-            raise UserError(  # noqa: TRY200
+            raise UserError(  # noqa: B904
                 UserErrorType.ANTI_PATTERN,
                 f"Consider annotating your code using torch._check*(). {str(e)}",
                 case_name="constrain_as_size_example",

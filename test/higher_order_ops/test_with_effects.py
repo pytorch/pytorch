@@ -97,8 +97,8 @@ def forward(self, arg1_1):
             str(gm.code).strip(),
             """\
 def forward(self, arg0_1, arg1_1):
-    _tensor_constant0 = self._tensor_constant0
-    with_effects = torch._higher_order_ops.effects.with_effects(arg0_1, torch.ops._TorchScriptTesting.takes_foo.default, _tensor_constant0, arg1_1);  arg0_1 = _tensor_constant0 = None
+    _torchbind_obj0 = self._torchbind_obj0
+    with_effects = torch._higher_order_ops.effects.with_effects(arg0_1, torch.ops._TorchScriptTesting.takes_foo.default, _torchbind_obj0, arg1_1);  arg0_1 = _torchbind_obj0 = None
     getitem = with_effects[0]
     getitem_1 = with_effects[1];  with_effects = None
     add = torch.ops.aten.add.Tensor(arg1_1, getitem_1);  arg1_1 = getitem_1 = None

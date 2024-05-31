@@ -60,7 +60,7 @@ inline vec_scalar_t<scalar_t> init_value() {
 }
 
 template <typename scalar_t, ReductionType reduce>
-inline vec_scalar_t<scalar_t> init_value(const c10::optional<Scalar>& initial) {
+inline vec_scalar_t<scalar_t> init_value(const std::optional<Scalar>& initial) {
   using acc_t = vec_scalar_t<scalar_t>;
   if (initial.has_value()) {
     return initial.value().to<acc_t>();
@@ -80,7 +80,7 @@ inline void init(scalar_t* out, int64_t size, const vec_scalar_t<scalar_t>& val)
 }
 
 template <typename scalar_t, ReductionType reduce>
-inline void init(scalar_t* out, int64_t size, const c10::optional<Scalar>& initial) {
+inline void init(scalar_t* out, int64_t size, const std::optional<Scalar>& initial) {
   using acc_t = vec_scalar_t<scalar_t>;
   acc_t val = init_value<scalar_t, reduce>(initial);
   init(out, size, val);

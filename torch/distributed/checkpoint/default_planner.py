@@ -258,7 +258,7 @@ class _EmptyStateDictLoadPlanner(DefaultLoadPlanner):
         for unflattened_key in planner_data:
             if unflattened_keys:
                 unflattened_keys.append(
-                    ".".join([unflattened_keys[-1], unflattened_key])
+                    ".".join([unflattened_keys[-1], str(unflattened_key)])
                 )
 
             else:

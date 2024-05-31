@@ -16,14 +16,11 @@ endif()
 # ATen parallelism settings
 #  OMP - OpenMP for intra-op, native thread pool for inter-op parallelism
 #  NATIVE - using native thread pool for intra- and inter-op parallelism
-#  TBB - using TBB for intra- and native thread pool for inter-op parallelism
 if(INTERN_BUILD_MOBILE)
   set(ATEN_THREADING "NATIVE" CACHE STRING "ATen parallel backend")
 else()
   if(USE_OPENMP)
     set(ATEN_THREADING "OMP" CACHE STRING "ATen parallel backend")
-  elseif(USE_TBB)
-    set(ATEN_THREADING "TBB" CACHE STRING "ATen parallel backend")
   else()
     set(ATEN_THREADING "NATIVE" CACHE STRING "ATen parallel backend")
   endif()
@@ -31,19 +28,12 @@ endif()
 
 set(AT_PARALLEL_OPENMP 0)
 set(AT_PARALLEL_NATIVE 0)
-set(AT_PARALLEL_NATIVE_TBB 0)
 
 message(STATUS "Using ATen parallel backend: ${ATEN_THREADING}")
 if("${ATEN_THREADING}" STREQUAL "OMP")
   set(AT_PARALLEL_OPENMP 1)
 elseif("${ATEN_THREADING}" STREQUAL "NATIVE")
   set(AT_PARALLEL_NATIVE 1)
-elseif("${ATEN_THREADING}" STREQUAL "TBB")
-  if(NOT USE_TBB)
-    message(FATAL_ERROR "Using TBB backend but USE_TBB is off")
-  endif()
-  message(WARNING "ATEN TBB Threading is deprectated.")
-  set(AT_PARALLEL_NATIVE_TBB 1)
 else()
   message(FATAL_ERROR "Unknown ATen parallel backend: ${ATEN_THREADING}")
 endif()
@@ -110,21 +100,11 @@ endif()
 add_subdirectory(core)
 add_subdirectory(serialize)
 add_subdirectory(utils)
-if(BUILD_CAFFE2 OR (NOT USE_FBGEMM))
+if(NOT USE_FBGEMM)
   add_subdirectory(perfkernels)
 endif()
 
-# Skip modules that are not used by libtorch mobile yet.
-if(BUILD_CAFFE2 AND NOT INTERN_BUILD_MOBILE)
-  add_subdirectory(core/nomnigraph)
-  if(USE_NVRTC)
-    add_subdirectory(cuda_rtc)
-  endif()
-  if(BUILD_CAFFE2_OPS)
-  endif()
-  add_subdirectory(proto)
-endif()
-if(NOT BUILD_CAFFE2 AND NOT INTERN_BUILD_MOBILE)
+if(NOT INTERN_BUILD_MOBILE)
   add_subdirectory(proto)
 endif()
 
@@ -408,7 +388,7 @@ add_custom_command(
   OUTPUT
   ${TORCH_GENERATED_CODE}
   COMMAND
-  "${PYTHON_EXECUTABLE}" tools/setup_helpers/generate_code.py
+  "${Python_EXECUTABLE}" tools/setup_helpers/generate_code.py
     --native-functions-path "aten/src/ATen/native/native_functions.yaml"
     --tags-path "aten/src/ATen/native/tags.yaml"
     $<$<BOOL:${INTERN_DISABLE_AUTOGRAD}>:--disable-autograd>
@@ -467,6 +447,9 @@ if(BUILD_LITE_INTERPRETER)
   append_filelist("libtorch_lite_cmake_sources" LIBTORCH_CMAKE_SRCS)
   list(APPEND LIBTORCH_CMAKE_SRCS ${LITE_EAGER_SYMOBLICATION_SRCS})
   list(APPEND LIBTORCH_CMAKE_SRCS ${LITE_PROFILER_SRCS})
+  if(USE_LITE_AOTI)
+    append_filelist("inductor_core_resources" LIBTORCH_CMAKE_SRCS)
+  endif()
   set(CMAKE_POSITION_INDEPENDENT_CODE TRUE)
 else()
   append_filelist("libtorch_cmake_sources" LIBTORCH_CMAKE_SRCS)
@@ -585,17 +568,6 @@ if(NOT INTERN_BUILD_MOBILE AND NOT BUILD_LITE_INTERPRETER)
     ${TORCH_SRC_DIR}/csrc/utils/byte_order.cpp
   )
 
-  # Disable legacy import of building without Caffe2 support
-  if(BUILD_CAFFE2)
-    list(APPEND TORCH_SRCS
-      ${TORCH_SRC_DIR}/csrc/jit/serialization/import_legacy.cpp
-    )
-  else()
-    set_source_files_properties(
-      ${TORCH_SRC_DIR}/csrc/jit/serialization/import.cpp
-      PROPERTIES COMPILE_FLAGS "-DC10_DISABLE_LEGACY_IMPORT"
-    )
-  endif()
   if(USE_DISTRIBUTED)
     append_filelist("libtorch_distributed_base_sources" TORCH_SRCS)
     if(NOT WIN32)
@@ -803,17 +775,38 @@ set(Caffe2_CPU_SRCS ${Caffe2_CPU_SRCS_NON_AVX} ${Caffe2_CPU_SRCS_AVX2} ${Caffe2_
 # END formerly-libtorch sources
 # ==========================================================
 
+if(BUILD_LIBTORCHLESS)
+  find_library(TORCH_LIB torch PATHS $ENV{LIBTORCH_LIB_PATH} NO_DEFAULT_PATH)
+  find_library(TORCH_CPU_LIB torch_cpu PATHS $ENV{LIBTORCH_LIB_PATH} NO_DEFAULT_PATH)
+
+  if(USE_CUDA)
+    find_library(TORCH_CUDA_LIB torch_cuda PATHS $ENV{LIBTORCH_LIB_PATH} NO_DEFAULT_PATH)
+  endif()
+
+  if(USE_ROCM)
+    find_library(TORCH_HIP_LIB torch_hip PATHS $ENV{LIBTORCH_LIB_PATH} NO_DEFAULT_PATH)
+  endif()
+
+  if(USE_XPU)
+    find_library(TORCH_XPU_LIB torch_xpu PATHS $ENV{LIBTORCH_LIB_PATH} NO_DEFAULT_PATH)
+  endif()
+  add_subdirectory(../torch torch)
+else()
+  set(TORCH_LIB torch)
+  set(TORCH_CPU_LIB torch_cpu)
+  set(TORCH_CUDA_LIB torch_cuda)
+  set(TORCH_HIP_LIB torch_hip)
+  set(TORCH_XPU_LIB torch_xpu)
+endif()
+
+
+if(NOT BUILD_LIBTORCHLESS)
 add_library(torch_cpu ${Caffe2_CPU_SRCS})
 if(HAVE_SOVERSION)
   set_target_properties(torch_cpu PROPERTIES
       VERSION ${TORCH_VERSION} SOVERSION ${TORCH_SOVERSION})
 endif()
 torch_compile_options(torch_cpu)  # see cmake/public/utils.cmake
-if(BUILD_CAFFE2 AND NOT MSVC)
-  # Caffe2 has too many signed-unsigned violation, but the framework is dead
-  # So no point in fixing those
-  target_compile_options(torch_cpu PRIVATE "-Wno-sign-compare")
-endif()
 
 # Ignore Wdeprecated-XXX errors from third-party libraries
 if(NOT MSVC)
@@ -1050,6 +1043,14 @@ elseif(USE_CUDA)
     target_precompile_headers(torch_cuda PRIVATE
         "$<$<COMPILE_LANGUAGE:CXX>:ATen/core/ATen_pch.h>")
   endif()
+
+  # Apply suggestion from comment https://github.com/pytorch/pytorch/issues/113053#issuecomment-2115375714
+  if(LINUX)
+    set_source_files_properties(${CMAKE_CURRENT_SOURCE_DIR}/../aten/src/ATen/cuda/CUDASparseDescriptors.cpp PROPERTIES COMPILE_FLAGS -Wno-deprecated-declarations)
+    set_source_files_properties(${CMAKE_CURRENT_SOURCE_DIR}/../aten/src/ATen/cuda/CUDASparseBlas.cpp PROPERTIES COMPILE_FLAGS -Wno-deprecated-declarations)
+    set_source_files_properties(${CMAKE_CURRENT_SOURCE_DIR}/../aten/src/ATen/native/sparse/cuda/SparseCUDABlas.cpp PROPERTIES COMPILE_FLAGS -Wno-deprecated-declarations)
+    set_source_files_properties(${CMAKE_CURRENT_SOURCE_DIR}/../aten/src/ATen/native/sparse/cuda/SparseBlasImpl.cpp PROPERTIES COMPILE_FLAGS -Wno-deprecated-declarations)
+  endif()
 endif()
 
 if(USE_XPU)
@@ -1143,7 +1144,7 @@ if(BUILD_LITE_INTERPRETER AND SELECTED_OP_LIST)
     add_custom_command(
       OUTPUT ${CMAKE_BINARY_DIR}/aten/src/ATen/selected_mobile_ops.h
       COMMAND
-        "${PYTHON_EXECUTABLE}"
+        "${Python_EXECUTABLE}"
         -m tools.code_analyzer.gen_oplist
         --model_file_list_path "${SELECTED_OP_LIST}"
         --output_dir "${CMAKE_BINARY_DIR}/aten/src/ATen"
@@ -1158,7 +1159,7 @@ if(BUILD_LITE_INTERPRETER AND SELECTED_OP_LIST)
     add_custom_command(
       OUTPUT ${CMAKE_BINARY_DIR}/aten/src/ATen/selected_mobile_ops.h
       COMMAND
-        "${PYTHON_EXECUTABLE}"
+        "${Python_EXECUTABLE}"
         -m tools.lite_interpreter.gen_selected_mobile_ops_header
         --yaml_file_path "${SELECTED_OP_LIST}"
         --output_file_path "${CMAKE_BINARY_DIR}/aten/src/ATen"
@@ -1210,11 +1211,6 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "Clang" OR CMAKE_CXX_COMPILER_ID STREQUAL "GNU"
   set_source_files_properties(${CMAKE_CURRENT_SOURCE_DIR}/../aten/src/ATen/native/RNN.cpp PROPERTIES COMPILE_FLAGS -Wno-deprecated-declarations)
   set_source_files_properties(${CMAKE_CURRENT_SOURCE_DIR}/../aten/src/ATen/native/quantized/cpu/qlinear_prepack.cpp PROPERTIES COMPILE_FLAGS -Wno-deprecated-declarations)
   set_source_files_properties(${CMAKE_CURRENT_SOURCE_DIR}/../aten/src/ATen/native/quantized/qlinear_unpack.cpp PROPERTIES COMPILE_FLAGS -Wno-deprecated-declarations)
-endif()
-
-if(USE_TBB)
-  list(APPEND ATen_CPU_INCLUDE ${TBB_INCLUDE_DIR})
-  target_link_libraries(torch_cpu PUBLIC TBB::tbb)
 endif()
 
 target_include_directories(torch_cpu PRIVATE ${ATen_CPU_INCLUDE})
@@ -1637,6 +1633,7 @@ endif()
 # ---[ XPU library.
 if(USE_XPU)
   target_link_libraries(torch_xpu INTERFACE torch::xpurt)
+
   target_link_libraries(torch_xpu PUBLIC c10_xpu)
 
   target_include_directories(
@@ -1693,10 +1690,6 @@ if(BUILD_SHARED_LIBS)
     target_link_libraries(torch_global_deps ${Caffe2_PUBLIC_CUDA_DEPENDENCY_LIBS})
     target_link_libraries(torch_global_deps torch::cudart torch::nvtoolsext)
   endif()
-  if(USE_TBB)
-    target_link_libraries(torch_global_deps TBB::tbb)
-  endif()
-
   install(TARGETS torch_global_deps DESTINATION "${TORCH_INSTALL_LIB_DIR}")
 endif()
 
@@ -1716,6 +1709,7 @@ if(USE_ROCM)
 
   # Since PyTorch files contain HIP headers, these flags are required for the necessary definitions to be added.
   target_compile_options(torch_hip PUBLIC ${HIP_CXX_FLAGS})  # experiment
+
   target_link_libraries(torch_hip PUBLIC c10_hip)
 
   if(NOT INTERN_BUILD_MOBILE)
@@ -1921,14 +1915,6 @@ if(BUILD_TEST)
       endif()
     endforeach()
   endif()
-
-  # For special tests that explicitly uses dependencies, we add them here
-  if(BUILD_CAFFE2 AND USE_MPI)
-    target_link_libraries(mpi_test MPI::MPI_CXX)
-    if(USE_CUDA)
-      target_link_libraries(mpi_gpu_test MPI::MPI_CXX)
-    endif()
-  endif()
 endif()
 
 if(MSVC)
@@ -1943,6 +1929,7 @@ if(MSVC)
     SET(tmp_path "../${tmp_path}")
     set_source_files_properties(${tmp_path} PROPERTIES COMPILE_FLAGS "-Xcompiler /Zc:lambda")
   endforeach()
+endif()
 endif()
 
 # Note: we only install the caffe2 python files if BUILD_CAFFE2_OPS is ON
@@ -1996,11 +1983,6 @@ if(BUILD_PYTHON)
     # Workaround for https://gcc.gnu.org/bugzilla/show_bug.cgi?id=80947 in EmbeddingBag.cpp
     set_source_files_properties(../aten/src/ATen/native/EmbeddingBag.cpp PROPERTIES COMPILE_FLAGS -Wno-attributes)
     set_source_files_properties(${TORCH_SRC_DIR}/../caffe2/operators/box_with_nms_limit_op.cc PROPERTIES COMPILE_FLAGS -Wno-attributes)
-  endif()
-
-  # ---[ Python.
-  if(BUILD_CAFFE2)
-  target_compile_definitions(torch PRIVATE BUILD_CAFFE2)
   endif()
 
   # generated pb files are copied from build/caffe2 to caffe2

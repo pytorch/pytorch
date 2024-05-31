@@ -4,10 +4,31 @@
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
 
+import socket
+
 from abc import ABC, abstractmethod
-from typing import Any, Callable, Dict, Optional, Tuple
+from dataclasses import dataclass
+from typing import Any, Callable, ClassVar, Dict, Optional
 
 from torch.distributed import Store
+from torch.distributed.elastic.utils.distributed import get_free_port as _get_free_port
+
+
+__all__ = [
+    "RendezvousClosedError",
+    "RendezvousConnectionError",
+    "RendezvousError",
+    "RendezvousGracefulExitError",
+    "RendezvousHandler",
+    "RendezvousHandlerCreator",
+    "RendezvousHandlerRegistry",
+    "RendezvousInfo",
+    "RendezvousParameters",
+    "RendezvousStateError",
+    "RendezvousStoreInfo",
+    "RendezvousTimeoutError",
+    "rendezvous_handler_registry",
+]
 
 
 class RendezvousError(Exception):
@@ -35,6 +56,61 @@ class RendezvousGracefulExitError(RendezvousError):
     Exception is a mechanism to exit the stack, however does not mean a failure.
     """
 
+@dataclass
+class RendezvousStoreInfo:
+    """Store address and port that can be used to bootstrap trainer distributed comms"""
+    MASTER_ADDR_KEY: ClassVar[str] = "MASTER_ADDR"
+    MASTER_PORT_KEY: ClassVar[str] = "MASTER_PORT"
+    master_addr: str
+    master_port: int
+
+    @staticmethod
+    def build(rank: int, store: Store) -> "RendezvousStoreInfo":
+        """Factory method, finds unused new port on rank0 host and addr/port info with all ranks.
+
+        If master_addr/master_port is knowns (useful when sharing existing tcp store server) use the constructor.
+        """
+        # TODO swap to collectives comms API
+        if rank == 0:
+            addr = socket.getfqdn()
+            port = _get_free_port()
+            store.set(RendezvousStoreInfo.MASTER_ADDR_KEY, addr.encode(encoding="UTF-8"))  # type: ignore[arg-type]
+            store.set(RendezvousStoreInfo.MASTER_PORT_KEY, str(port).encode(encoding="UTF-8"))  # type: ignore[arg-type]
+
+        addr = store.get(RendezvousStoreInfo.MASTER_ADDR_KEY).decode(encoding="UTF-8")
+        port = int(store.get(RendezvousStoreInfo.MASTER_PORT_KEY).decode(encoding="UTF-8"))
+        return RendezvousStoreInfo(master_addr=addr, master_port=port)
+
+
+class RendezvousInfo:
+    """Holds the information about the rendezvous."""
+    def __init__(self, store: Store, rank: int, world_size: int, bootstrap_store_info: RendezvousStoreInfo):
+        self._store = store
+        self._rank = rank
+        self._world_size = world_size
+        self._bootstrap_store_info = bootstrap_store_info
+
+    @property
+    def store(self) -> Store:
+        """Store used by torchelastic control plane"""
+        return self._store
+
+    @property
+    def rank(self) -> int:
+        """Rank within a group"""
+        return self._rank
+
+    @property
+    def world_size(self) -> int:
+        """Global group size"""
+        return self._world_size
+
+    @property
+    def bootstrap_store_info(self) -> Optional[RendezvousStoreInfo]:
+        """Store information that can used by trainer code to bootstrap distributed comms."""
+        return self._bootstrap_store_info
+
+
 class RendezvousHandler(ABC):
     """Main rendezvous interface.
 
@@ -48,10 +124,18 @@ class RendezvousHandler(ABC):
     def get_backend(self) -> str:
         """Return the name of the rendezvous backend."""
 
+    @property
+    def use_agent_store(self) -> bool:
+        """Indicates that store reference returned by :py:meth:`next_rendezvous` can be shared with user
+        applications and will be available during application lifecyle.
+
+        Rendezous handler impl will share store details as instance of :py:class:`RendezvousStoreInfo`.
+        Applications as a convention use `MASTER_ADDR`/`MASTER_PORT` env variables to lookup the store.
+        """
+        return False
+
     @abstractmethod
-    def next_rendezvous(
-        self,
-    ) -> Tuple[Store, int, int]:
+    def next_rendezvous(self) -> RendezvousInfo:
         """Main entry-point into the rendezvous barrier.
 
         Blocks until the rendezvous is complete and the current process is
@@ -59,8 +143,7 @@ class RendezvousHandler(ABC):
         rendezvous was marked closed.
 
         Returns:
-            A tuple of :py:class:`torch.distributed.Store`, ``rank``, and
-            ``world size``.
+            Instance of :py:class:`RendezvousInfo`.
 
         Raises:
             RendezvousClosedError:

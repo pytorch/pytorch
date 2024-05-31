@@ -177,6 +177,21 @@ def unpad_tensor(tensor: torch.Tensor, pad_dim: int, pad_size: int) -> torch.Ten
     )
 
 
+def fill_empty_tensor_to_shards(
+    shards: List[torch.Tensor], shard_dim: int, num_empty_tensors: int
+) -> List[torch.Tensor]:
+    if num_empty_tensors == 0:
+        return shards
+    tensor_size = list(shards[0].size())
+    tensor_size = [
+        size if idx != shard_dim else 0 for idx, size in enumerate(tensor_size)
+    ]
+    tensor = shards[0].new_zeros(tensor_size)
+    for _ in range(num_empty_tensors):
+        shards.append(tensor)
+    return shards
+
+
 def spec_to_bytes(spec: "placement_types.DTensorSpec") -> int:
     assert spec.tensor_meta is not None, "spec should have tensor meta defined!"
     return spec.tensor_meta.dtype.itemsize * math.prod(spec.shape)

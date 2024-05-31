@@ -23,14 +23,14 @@ namespace torch::jit {
 
 namespace {
 struct SchemaParser {
-  explicit SchemaParser(const std::string& str)
+  explicit SchemaParser(const std::string& str, bool allow_typevars)
       : L(std::make_shared<Source>(
             c10::string_view(str),
             c10::nullopt,
             0,
             nullptr,
             Source::DONT_COPY)),
-        type_parser(L, /*parse_complete_tensor_types*/ false) {}
+        type_parser(L, /*parse_complete_tensor_types*/ false, allow_typevars) {}
 
   std::variant<OperatorName, FunctionSchema> parseDeclaration() {
     OperatorName name = parseName();
@@ -149,9 +149,9 @@ struct SchemaParser {
     auto fake_type = std::move(std::get<0>(p));
     auto real_type = std::move(std::get<1>(p));
     auto alias_info = std::move(std::get<2>(p));
-    c10::optional<int32_t> N;
-    c10::optional<IValue> default_value;
-    c10::optional<std::string> alias_set;
+    std::optional<int32_t> N;
+    std::optional<IValue> default_value;
+    std::optional<std::string> alias_set;
     std::string name;
     if (L.nextIf('[')) {
       // note: an array with a size hint can only occur at the Argument level
@@ -162,7 +162,7 @@ struct SchemaParser {
       auto container = type_parser.parseAliasAnnotation();
       if (alias_info) {
         if (!container) {
-          container = c10::optional<at::AliasInfo>(at::AliasInfo());
+          container = std::optional<at::AliasInfo>(at::AliasInfo());
           container->setIsWrite(alias_info->isWrite());
         }
         container->addContainedType(std::move(*alias_info));
@@ -297,7 +297,7 @@ struct SchemaParser {
   IValue parseDefaultValue(
       const c10::Type& arg_type,
       TypeKind kind,
-      c10::optional<int32_t> arg_N) {
+      std::optional<int32_t> arg_N) {
     auto range = L.cur().range;
     switch (kind) {
       case TypeKind::TensorType:
@@ -361,16 +361,24 @@ struct SchemaParser {
   }
   Lexer L;
   SchemaTypeParser type_parser;
+  bool allow_typevars_;
 };
 } // namespace
 
 std::variant<OperatorName, FunctionSchema> parseSchemaOrName(
-    const std::string& schemaOrName) {
-  return SchemaParser(schemaOrName).parseExactlyOneDeclaration();
+    const std::string& schemaOrName,
+    bool allow_typevars) {
+  // We're ignoring aten and prim for BC reasons
+  if (schemaOrName.rfind("aten::", 0) == 0 ||
+      schemaOrName.rfind("prim::", 0) == 0) {
+    allow_typevars = true;
+  }
+  return SchemaParser(schemaOrName, allow_typevars)
+      .parseExactlyOneDeclaration();
 }
 
-FunctionSchema parseSchema(const std::string& schema) {
-  auto parsed = parseSchemaOrName(schema);
+FunctionSchema parseSchema(const std::string& schema, bool allow_typevars) {
+  auto parsed = parseSchemaOrName(schema, allow_typevars);
   TORCH_CHECK(
       std::holds_alternative<FunctionSchema>(parsed),
       "Tried to parse a function schema but only the operator name was given");

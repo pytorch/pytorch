@@ -27,7 +27,7 @@ struct DefaultArgs : torch::CustomClassHolder {
     x = scale * x + add;
     return x;
   }
-  int64_t divide(c10::optional<int64_t> factor) {
+  int64_t divide(std::optional<int64_t> factor) {
     if (factor) {
       // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
       x = x / *factor;
@@ -334,7 +334,7 @@ struct ElementwiseInterpreter : torch::CustomClassHolder {
   // collection types like vector, optional, and dict.
   using SerializationType = std::tuple<
       std::vector<std::string> /*input_names_*/,
-      c10::optional<std::string> /*output_name_*/,
+      std::optional<std::string> /*output_name_*/,
       c10::Dict<std::string, at::Tensor> /*constants_*/,
       std::vector<InstructionType> /*instructions_*/
       >;
@@ -360,7 +360,7 @@ struct ElementwiseInterpreter : torch::CustomClassHolder {
 
   // Class members
   std::vector<std::string> input_names_;
-  c10::optional<std::string> output_name_;
+  std::optional<std::string> output_name_;
   c10::Dict<std::string, at::Tensor> constants_;
   std::vector<InstructionType> instructions_;
 };

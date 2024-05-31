@@ -155,7 +155,18 @@ class LRScheduler:
         lr: float,
         epoch: Optional[int] = None,
     ):
-        """Display the current learning rate."""
+        """Display the current learning rate.
+
+        .. deprecated:: 2.4
+            ``print_lr()`` is deprecated. Please use ``get_last_lr()`` to access the
+            learning rate.
+        """
+        warnings.warn(
+            "`LRScheduler.print_lr()` is being deprecated. To fetch the learning rate, "
+            "please use `get_last_lr()` instead. For more details, "
+            "see https://github.com/pytorch/pytorch/issues/99270.",
+            UserWarning,
+        )
         if is_verbose:
             if epoch is None:
                 print(f"Adjusting learning rate of group {group} to {lr:.4e}.")

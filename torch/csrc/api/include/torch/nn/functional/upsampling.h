@@ -15,9 +15,9 @@ inline std::vector<int64_t> _interp_output_size(
     int64_t dim,
     std::tuple<
         Tensor,
-        c10::optional<std::vector<int64_t>>,
-        c10::optional<std::vector<double>>,
-        c10::optional<bool>> closed_over_args) {
+        std::optional<std::vector<int64_t>>,
+        std::optional<std::vector<double>>,
+        std::optional<bool>> closed_over_args) {
   auto [input, size, scale_factor, recompute_scale_factor] = closed_over_args;
   if (size == c10::nullopt && scale_factor == c10::nullopt) {
     TORCH_CHECK(false, "either size or scale_factor should be defined");
@@ -75,11 +75,11 @@ inline std::vector<int64_t> _interp_output_size(
 namespace detail {
 inline Tensor interpolate(
     const Tensor& input,
-    const c10::optional<std::vector<int64_t>>& size,
-    const c10::optional<std::vector<double>>& scale_factor,
+    const std::optional<std::vector<int64_t>>& size,
+    const std::optional<std::vector<double>>& scale_factor,
     InterpolateFuncOptions::mode_t mode,
-    c10::optional<bool> align_corners,
-    c10::optional<bool> recompute_scale_factor,
+    std::optional<bool> align_corners,
+    std::optional<bool> recompute_scale_factor,
     bool antialias) {
   if (std::holds_alternative<enumtype::kNearest>(mode) ||
       std::get_if<enumtype::kArea>(&mode)) {
@@ -113,7 +113,7 @@ inline Tensor interpolate(
       ")");
 
   auto scale_factor_len = input.dim() - 2;
-  std::vector<c10::optional<double>> scale_factor_list(
+  std::vector<std::optional<double>> scale_factor_list(
       scale_factor_len, c10::nullopt);
   if (scale_factor != c10::nullopt && !recompute_scale_factor.value_or(false)) {
     auto _scale_factor_repeated = *scale_factor;
