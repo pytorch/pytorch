@@ -234,12 +234,13 @@ force_same_precision = (
 )
 
 # Specify candidate backends for gemm autotune.
-# Possible choices are combinations of: ATen, Triton, CUTLASS.
+# Possible choices are combinations of: ATen, Triton, CUTLASS, CPP.
 # ATen: default Pytorch ATen kernels.
 # Triton: Triton templates defined in torch inductor.
 # CUTLASS: Cutlass templates and kernels.
+# CPP: CPP templates and kernels for CPU.
 max_autotune_gemm_backends = os.environ.get(
-    "TORCHINDUCTOR_MAX_AUTOTUNE_GEMM_BACKENDS", "ATEN,TRITON"
+    "TORCHINDUCTOR_MAX_AUTOTUNE_GEMM_BACKENDS", "ATEN,TRITON,CPP"
 ).upper()
 
 # Specify the size of the search space for GEMM autotuning.
@@ -382,10 +383,20 @@ debug_index_asserts = False
 is_nightly_or_source = "dev" in torch.__version__ or "git" in torch.__version__
 developer_warnings = is_fbcode() or is_nightly_or_source
 
+
 # The multiprocessing start method to use for inductor workers in the codecache.
-# TODO: fork is not safe in a multithreaded environment, we should evaluate changing
-# the default to spawn.
-worker_start_method = "fork"
+# "subprocess", "fork", or "spawn"
+def decide_worker_start_method():
+    start_method = os.environ.get("TORCHINDUCTOR_WORKER_START", "fork")
+    assert start_method in [
+        "subprocess",
+        "fork",
+        "spawn",
+    ], f"Invalid start method: {start_method}"
+    return start_method
+
+
+worker_start_method = decide_worker_start_method()
 
 # Flags to turn on all_reduce fusion. These 2 flags should be automaticaly turned
 # on by DDP and should not be set by the users.
