@@ -71,6 +71,13 @@ http_archive(
     ],
 )
 
+http_archive(
+    name = "com_github_opentelemetry-cpp",
+    urls = [
+        "https://github.com/open-telemetry/opentelemetry-cpp/archive/refs/tags/v1.14.2.tar.gz",
+    ],
+)
+
 new_local_repository(
     name = "gloo",
     build_file = "//third_party:gloo.BUILD",
@@ -155,14 +162,10 @@ new_local_repository(
     path = "third_party/kineto",
 )
 
-new_patched_local_repository(
-    name = "tbb",
-    build_file = "//third_party:tbb.BUILD",
-    patch_strip = 1,
-    patches = [
-        "@//third_party:tbb.patch",
-    ],
-    path = "third_party/tbb",
+new_local_repository(
+    name = "opentelemetry-cpp",
+    build_file = "//third_party::opentelemetry-cpp.BUILD",
+    path = "third_party/opentelemetry-cpp",
 )
 
 new_local_repository(
@@ -340,11 +343,6 @@ local_repository(
 local_repository(
     name = "unused_onnx_benchmark",
     path = "third_party/onnx/third_party/benchmark",
-)
-
-local_repository(
-    name = "unused_onnx_tensorrt_benchmark",
-    path = "third_party/onnx-tensorrt/third_party/onnx/third_party/benchmark",
 )
 
 ### Unused repos end

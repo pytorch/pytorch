@@ -164,6 +164,25 @@ class SymNode:
         else:
             return None
 
+    # NB: This does conversions, not sure if this is good or not
+    def maybe_as_float(self):
+        import sympy
+
+        if isinstance(self.expr, sympy.Float):
+            return float(self.expr)
+        else:
+            return None
+
+    def maybe_as_bool(self):
+        import sympy
+
+        if self.expr is sympy.true:
+            return True
+        elif self.expr is sympy.false:
+            return False
+        else:
+            return None
+
     def is_int(self):
         return self.pytype is int
 

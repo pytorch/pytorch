@@ -33,6 +33,41 @@ class CollectTracepointsPass(PassBase):
         for module in gm.modules():
             if not isinstance(module, torch.fx.GraphModule):
                 continue
+            nn_module_stack = None
+            for node in module.graph.nodes:
+                if node.op != "call_function":
+                    continue
+                if node.target == torch.ops.higher_order._export_tracepoint:
+                    kind = node.kwargs["kind"]
+                    if kind == "module_call_outputs":
+                        nn_module_stack = node.meta["nn_module_stack"]
+                    elif kind == "module_call_inputs":
+                        nn_module_stack = None
+                    else:
+                        raise AssertionError(f"Unknown tracepoint kind: {kind}")
+                elif node.meta["nn_module_stack"] == nn_module_stack:
+                    node.meta["nn_module_stack"].popitem()
+                else:
+                    nn_module_stack = None
+            nn_module_stack = None
+            for node in reversed(module.graph.nodes):
+                if node.op != "call_function":
+                    continue
+                if node.target == torch.ops.higher_order._export_tracepoint:
+                    kind = node.kwargs["kind"]
+                    if kind == "module_call_inputs":
+                        nn_module_stack = node.meta["nn_module_stack"]
+                    elif kind == "module_call_outputs":
+                        nn_module_stack = None
+                    else:
+                        raise AssertionError(f"Unknown tracepoint kind: {kind}")
+                elif node.meta["nn_module_stack"] == nn_module_stack:
+                    node.meta["nn_module_stack"].popitem()
+                else:
+                    nn_module_stack = None
+        for module in gm.modules():
+            if not isinstance(module, torch.fx.GraphModule):
+                continue
             for node in module.graph.nodes:
                 if node.op != "call_function":
                     continue

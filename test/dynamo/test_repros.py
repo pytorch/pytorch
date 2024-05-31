@@ -22,6 +22,7 @@ from typing import Any, Dict, Iterator, List, Tuple
 from unittest import mock
 
 import numpy as np
+
 import torch
 
 import torch._dynamo.test_case
@@ -33,6 +34,7 @@ import torch.library
 from torch import nn
 from torch._dynamo.debug_utils import same_two_models
 from torch._dynamo.testing import CompileCounter, rand_strided, same
+from torch._inductor.utils import fresh_inductor_cache
 from torch.nn import functional as F
 
 from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FLASH_ATTENTION
@@ -160,6 +162,32 @@ def shapes_to_tensor(x, device=None):
     return torch.as_tensor(x, device=device)
 
 
+fw_graph = [None]
+bw_graph = [None]
+
+
+def aot_graph_capture_backend(gm, args):
+    from functorch.compile import min_cut_rematerialization_partition
+    from torch._functorch.aot_autograd import aot_module_simplified
+
+    def fw_compiler(gm, _):
+        fw_graph[0] = gm
+        return gm
+
+    def bw_compiler(gm, _):
+        bw_graph[0] = gm
+        return gm
+
+    return aot_module_simplified(
+        gm,
+        args,
+        fw_compiler,
+        bw_compiler,
+        partition_fn=min_cut_rematerialization_partition,
+        keep_inference_input_mutations=True,
+    )
+
+
 class Boxes:
     # from detectron2 poolers.py
     def __init__(self, tensor: torch.Tensor):
@@ -235,6 +263,7 @@ class _ReversibleFunction(torch.autograd.Function):
                 all_hidden_states.append(hidden_states)
 
             attn_output = layer(attn_output)
+            all_buckets = all_buckets + (attn_output,)
 
         # Add last layer
         if output_hidden_states is True:
@@ -256,45 +285,8 @@ class _ReversibleFunction(torch.autograd.Function):
             grad_hidden_states, 2, dim=-1
         )
 
-        # retrieve params from ctx for backward
-        attn_output, hidden_states = ctx.saved_tensors
-
-        # create tuple
-        output = ReformerBackwardOutput(
-            attn_output=attn_output,
-            hidden_states=hidden_states,
-            grad_attn_output=grad_attn_output,
-            grad_hidden_states=grad_hidden_states,
-        )
-
         # free memory
-        del grad_attn_output, grad_hidden_states, attn_output, hidden_states
-
-        layers = ctx.layers
-        all_buckets = ctx.all_buckets
-        head_mask = ctx.head_mask
-        attention_mask = ctx.attention_mask
-
-        for idx, layer in enumerate(layers[::-1]):
-            # pop last buckets from stack
-            buckets = all_buckets[-1]
-            all_buckets = all_buckets[:-1]
-
-            # backprop
-            output = layer.backward_pass(
-                next_attn_output=output.attn_output,
-                hidden_states=output.hidden_states,
-                grad_attn_output=output.grad_attn_output,
-                grad_hidden_states=output.grad_hidden_states,
-                head_mask=head_mask[len(layers) - idx - 1],
-                attention_mask=attention_mask,
-                buckets=buckets,
-            )
-
-        assert all_buckets == (), "buckets have to be empty after backpropagation"
-        grad_hidden_states = torch.cat(
-            [output.grad_attn_output, output.grad_hidden_states], dim=-1
-        )
+        del grad_attn_output
 
         # num of return vars has to match num of forward() args
         # return gradient for hidden_states arg and None for other args
@@ -410,7 +402,7 @@ class ListConfig:
         try:
             return ListConfig.ListIterator(self, resolve)
         except Exception:
-            raise AssertionError
+            raise AssertionError from None
 
     def __init__(self):
         self._content = [
@@ -972,7 +964,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         )
         # (dynamic shapes, static shapes)
         self.assertIn(cnt.frame_count, (5, 7))
-        self.assertIn(cnt.op_count, (106, 127))
+        self.assertIn(cnt.op_count, (104, 106, 127))
 
     def test_convert_boxes_to_pooler_format(self):
         boxes1 = [
@@ -999,7 +991,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             self.assertExpectedInline(cnt.op_count, """10""")
         else:
             self.assertExpectedInline(cnt.frame_count, """4""")
-            self.assertExpectedInline(cnt.op_count, """16""")
+            self.assertExpectedInline(cnt.op_count, """14""")
 
     def test_boxes_len(self):
         def fn(boxes):
@@ -1160,11 +1152,11 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             cnt = self._reformer(nopython=False)
         # cant inline torch.autograd.Function means graph break
         if torch._dynamo.config.assume_static_by_default:
-            self.assertExpectedInline(cnt.frame_count, """3""")
-            self.assertExpectedInline(cnt.op_count, """10""")
+            self.assertExpectedInline(cnt.frame_count, """1""")
+            self.assertExpectedInline(cnt.op_count, """5""")
         else:
-            self.assertExpectedInline(cnt.frame_count, """3""")
-            self.assertExpectedInline(cnt.op_count, """10""")
+            self.assertExpectedInline(cnt.frame_count, """1""")
+            self.assertExpectedInline(cnt.op_count, """5""")
 
     @disable_translation_validation_if_dynamic_shapes
     def test_longformer_chunk(self):
@@ -1204,7 +1196,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             self.assertExpectedInline(cnt.op_count, """11""")
         else:
             self.assertExpectedInline(cnt.frame_count, """1""")
-            self.assertExpectedInline(cnt.op_count, """12""")
+            self.assertExpectedInline(cnt.op_count, """11""")
 
     def test_module_in_skipfiles(self):
         model = nn.Linear(10, 10)
@@ -1750,8 +1742,11 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         opt_mod = torch._dynamo.optimize("eager")(mod)
         opt_mod(x)
 
-        self.assertGreaterEqual(torch._dynamo.utils.counters["frames"]["ok"], 2)
-        self.assertGreaterEqual(torch._dynamo.utils.counters["frames"]["total"], 2)
+        # Not sure what this test is testing. It was earlier graph breaking on
+        # __dict__, so the counter >= 2. With __dict__ support, there is no
+        # graph break.
+        self.assertGreaterEqual(torch._dynamo.utils.counters["frames"]["ok"], 1)
+        self.assertGreaterEqual(torch._dynamo.utils.counters["frames"]["total"], 1)
 
     @torch._dynamo.config.patch("suppress_errors", True)
     def test_guard_fail_tensor_bool(self):
@@ -3336,6 +3331,28 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         obj1 = MyObj(x, x)
         self.assertRaises(AttributeError, lambda: fn(x, obj1))
 
+    def test_delsubscr(self):
+        @torch.compile(backend="eager")
+        def fn(x):
+            del x["a"]
+            y = x["b"] + 1
+            return y
+
+        x = {"a": torch.tensor([1]), "b": torch.tensor([1])}
+        result = fn(x)
+        self.assertFalse(hasattr(x, "a"))
+        self.assertEqual(result.item(), 2)
+
+    def test_delsubscr_raises(self):
+        @torch.compile(backend="eager")
+        def fn(x):
+            del x["a"]
+            y = x["a"] + 1  # should raise KeyError
+            return y
+
+        x = {"a": torch.tensor([1]), "b": torch.tensor([1])}
+        self.assertRaises(KeyError, lambda: fn(x))
+
     def test_attached_attribute_in_dir(self):
         class MyModule(torch.nn.Module):
             def __init__(self):
@@ -4428,8 +4445,8 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         try:
             from megablocks.layers import moe
             from megablocks.layers.arguments import Arguments
-        except ImportError:
-            raise unittest.SkipTest("requires megablocks")
+        except ImportError as e:
+            raise unittest.SkipTest("requires megablocks") from e
         bs, sl, hs, num_experts, top_k = (16, 1024, 512, 1, 1)
         args = Arguments(
             hidden_size=hs,
@@ -4528,29 +4545,10 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             """\
 def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
     l_x_ = L_x_
-    size = l_x_.size()
-    getitem = size[0];  size = None
-    gt = getitem > 3;  getitem = None
     getitem_2 = l_x_[0]
     sum_1 = getitem_2.sum();  getitem_2 = None
     gt_1 = sum_1 > 0;  sum_1 = None
     _assert_async = torch._assert_async(gt_1, 'assertion error');  gt_1 = None
-    size_1 = l_x_.size()
-    getitem_3 = size_1[0];  size_1 = None
-    floordiv = getitem_3 // 2;  getitem_3 = None
-    mod = 1 % floordiv;  floordiv = None
-    ne = mod != 0;  mod = None
-    size_2 = l_x_.size()
-    getitem_5 = size_2[0];  size_2 = None
-    floordiv_1 = getitem_5 // 2;  getitem_5 = None
-    pow_1 = floordiv_1 ** 2;  floordiv_1 = None
-    mul = 32 * pow_1;  pow_1 = None
-    size_3 = l_x_.size()
-    getitem_7 = size_3[0];  size_3 = None
-    floordiv_2 = getitem_7 // 2;  getitem_7 = None
-    mul_1 = 16 * floordiv_2;  floordiv_2 = None
-    sub = mul - mul_1;  mul = mul_1 = None
-    ne_1 = sub != 0;  sub = None
     cos = l_x_.cos();  l_x_ = None
     return (cos,)""",
         )
@@ -4657,6 +4655,69 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
         self.assertEqual(type(actual), type(expected))
         self.assertEqual(actual.__dict__, expected.__dict__)
 
+    def test_storage_resize_forward_full_graph(self):
+        class TestModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.param = torch.nn.Parameter(torch.randn(4, 4))
+
+            def forward(self, x):
+                self.param.untyped_storage().resize_(
+                    self.param.numel() * self.param.itemsize
+                )
+                with torch.no_grad():
+                    torch._foreach_copy_([self.param], [x])
+                out = torch.matmul(self.param, self.param)
+                self.param.untyped_storage().resize_(0)
+                return out
+
+        def post_accumulate_grad_hook(param):
+            param.untyped_storage().resize_(0)
+
+        # Beginning of backward, resize and put data into the param
+        def pre_backward_hook(module, grad) -> None:
+            module.param.untyped_storage().resize_(
+                self.param.numel() * self.param.itemsize
+            )
+            with torch.no_grad():
+                # simulates loading data into param from allgather
+                module.param.fill_(2)
+
+        def post_forward_hook(module, args, output):
+            output.register_hook(functools.partial(pre_backward_hook, module))
+
+        x = torch.randn(4, 4)
+
+        mod_ref = TestModule()
+        mod_test = deepcopy(mod_ref)
+
+        # Start the param off with zero storage size to mimic fsdp
+        mod_ref.param.untyped_storage().resize_(0)
+        mod_test.param.untyped_storage().resize_(0)
+
+        # Resize storage at beginning of backward
+        # Free storage at end of backward
+        mod_ref.register_forward_hook(post_forward_hook, prepend=False)
+        mod_ref.param.register_post_accumulate_grad_hook(post_accumulate_grad_hook)
+        mod_test.register_forward_hook(post_forward_hook, prepend=False)
+        mod_test.param.register_post_accumulate_grad_hook(post_accumulate_grad_hook)
+
+        mod_test = torch.compile(mod_test, backend=aot_graph_capture_backend)
+
+        out_ref = mod_ref(x)
+        out_test = mod_test(x)
+        self.assertExpectedInline(
+            str(fw_graph[0].code.strip()),
+            """\
+def forward(self, primals_1, primals_2):
+    _foreach_copy = torch.ops.aten._foreach_copy.default([primals_1], [primals_2]);  primals_1 = primals_2 = None
+    getitem = _foreach_copy[0];  _foreach_copy = None
+    mm = torch.ops.aten.mm.default(getitem, getitem)
+    t_1 = torch.ops.aten.t.default(getitem);  getitem = None
+    return [mm, t_1]""",
+        )
+        self.assertEqual(out_ref, out_test)
+
     def test_super_in_staticmethod(self):
         class A:
             @staticmethod
@@ -4679,6 +4740,17 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
         except Exception as e:
             compiled_str = str(e)
         self.assertEqual(orig_str, compiled_str)
+
+    def test_nn_module_callable(self):
+        class M(nn.Module):
+            def forward(self, x):
+                return x.sin()
+
+        def f(m):
+            return callable(m)
+
+        res = torch.compile(f, fullgraph=True)(M())
+        self.assertTrue(res)
 
     def test_stk_sdd_is_transposed(self):
         trigger_graph_break = False
@@ -4758,6 +4830,64 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
         self.assertEqual(v.data.shape, (10, 20))
         self.assertEqual(type(v), Matrix)
 
+    def test_nn_parametrize(self):
+        class Module(nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.param = torch.nn.Parameter(torch.randn(10, 10))
+
+            def forward(self, x):
+                return self.param @ x
+
+        class Parametrization(torch.nn.Module):
+            def forward(self, x):
+                return torch.sin(x)
+
+        m = Module()
+        torch.nn.utils.parametrize.register_parametrization(
+            m, "param", Parametrization()
+        )
+
+        sin_found = False
+
+        def backend(gm, _):
+            nonlocal sin_found
+            for node in gm.graph.nodes:
+                if node.target is torch.sin:
+                    sin_found = True
+            return gm
+
+        opt_m = torch.compile(m, backend=backend, fullgraph=True)
+        inp = torch.randn(10, 10)
+        self.assertEqual(m(inp), opt_m(inp))
+        self.assertTrue(sin_found)
+
+        torch.nn.utils.parametrize.remove_parametrizations(m, "param")
+        sin_found = False
+        self.assertEqual(m(inp), opt_m(inp))
+        self.assertFalse(sin_found)
+
+    def test_nn_module_property_closure(self):
+        x = torch.randn(10, 10)
+
+        class Mod(torch.nn.Module):
+            @property
+            def y(self):
+                return torch.ones(10, 10) + x
+
+            def forward(self, x):
+                return x @ self.y
+
+        mod = Mod()
+
+        def fn(x):
+            return mod(x)
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+
+        inp = torch.randn(10, 10)
+        self.assertEqual(fn(inp), opt_fn(inp))
+
     def test_global_fn_mutation(self):
         def foo(x, y):
             return global_fn(x) + y
@@ -4799,6 +4929,117 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
         data = torch.randn(3, 4)
         opt_ladder = torch.compile(ladder, fullgraph=True, backend="eager")
         self.assertEqual(opt_ladder(data), ladder(data))
+
+    @unittest.expectedFailure
+    def test_trace_functional_tensor_with_error(self):
+        from torch._subclasses.fake_tensor import FakeTensorMode
+        from torch._subclasses.functional_tensor import (
+            FunctionalTensor,
+            FunctionalTensorMode,
+        )
+
+        def f(a, tmp):
+            a_view = a.view(-1)
+            with torch.no_grad():
+                a.set_(tmp)
+                a_view.mul_(2)
+            return a + tmp
+
+        fake_mode = FakeTensorMode()
+        with FunctionalTensorMode():
+            inp = torch.ones(3, 3, requires_grad=True)
+            inp = fake_mode.from_tensor(inp, static_shapes=True)
+            inp = FunctionalTensor.to_functional(inp)
+
+            tmp = torch.ones(3, 3, requires_grad=True)
+            tmp = fake_mode.from_tensor(tmp, static_shapes=True)
+            tmp = FunctionalTensor.to_functional(tmp)
+
+            opt_f = torch.compile(f, backend="eager")
+            with self.assertRaisesRegex(
+                RuntimeError, "cannot mutate tensors with frozen storage"
+            ):
+                opt_f(inp, tmp)
+
+        # grad state may not be properly reset after the error
+        self.assertTrue(torch.is_grad_enabled())
+
+    def test_const_dict_keyerror(self):
+        d = {}
+
+        def fn(x):
+            try:
+                y = d[0]
+            except KeyError:
+                y = 1
+            return x + y
+
+        opt_fn = torch.compile(fn, backend="eager")
+        inp = torch.randn(3, 3)
+        self.assertEqual(fn(inp), opt_fn(inp))
+
+    def test_nonconst_issubclass(self):
+        def fn(x):
+            if issubclass(x.__class__, np.ndarray):
+                return 1
+            return 0
+
+        opt_fn = torch.compile(fn, backend="eager")
+        opt_fn(np.ones([3, 3]))
+
+    def test_issue126128(self):
+        def fn():
+            x = torch.randn(1, 10)
+            y = torch.randn(10, 1)
+            return torch.mm(x, y).sum()
+
+        def fn2():
+            x = torch.randn(10, 100)
+            y = torch.randn(100, 10)
+            return torch.mm(x, y).sum()
+
+        with fresh_inductor_cache():
+            torch.compile(fn)()
+
+        torch.compile(fn2)()
+
+    def test_enum(self):
+        class ExplicitEnum(str, Enum):
+            @classmethod
+            def _missing_(cls, value):
+                raise ValueError(
+                    f"{value} is not a valid {cls.__name__}, please select one of {list(cls._value2member_map_.keys())}"
+                )
+
+        class PaddingStrategy(ExplicitEnum):
+            LONGEST = "longest"
+            MAX_LENGTH = "max_length"
+            DO_NOT_PAD = "do_not_pad"
+
+        def fn(x):
+            a = PaddingStrategy("longest")
+            if a == PaddingStrategy.LONGEST:
+                return torch.sin(x)
+            return torch.cos(x)
+
+        x = torch.randn(3, 3)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(fn(x), opt_fn(x))
+
+    def test_hasattr_builtin(self):
+        class MyClass:
+            foo: int = 1
+
+        def func(x, m):
+            if getattr(type(m), "foo", 0):
+                return x + MyClass.foo
+            return x
+
+        opt_func = torch.compile(func, backend="eager", fullgraph=True)
+        m = MyClass()
+        x = torch.zeros(())
+        self.assertEqual(func(x, m), opt_func(x, m))
+        self.assertEqual(func(x, 0), opt_func(x, 0))
 
 
 instantiate_parametrized_tests(ReproTests)

@@ -66,8 +66,8 @@ const char* toString(DispatchKey t) {
       return "Dense";
     case DispatchKey::FPGA:
       return "FPGA";
-    case DispatchKey::ORT:
-      return "ORT";
+    case DispatchKey::MAIA:
+      return "MAIA";
     case DispatchKey::Vulkan:
       return "Vulkan";
     case DispatchKey::Metal:
@@ -263,7 +263,7 @@ c10::DispatchKey parseDispatchKey(const std::string& k) {
       {"Undefined", c10::DispatchKey::Undefined},
       {"Dense", c10::DispatchKey::Dense},
       {"FPGA", c10::DispatchKey::FPGA},
-      {"ORT", c10::DispatchKey::ORT},
+      {"MAIA", c10::DispatchKey::MAIA},
       {"MPS", c10::DispatchKey::MPS},
       {"Vulkan", c10::DispatchKey::Vulkan},
       {"Metal", c10::DispatchKey::Metal},

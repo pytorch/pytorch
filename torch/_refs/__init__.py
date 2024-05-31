@@ -17,6 +17,7 @@ import torch._prims as prims
 import torch._prims_common as utils
 from torch import sym_float, sym_int
 from torch._prims_common import (
+    BoolLike,
     DeviceLikeType,
     Dim,
     DimsSequenceType,
@@ -485,7 +486,7 @@ def _make_alias(fn, name):
     """
     This function defines an alias of another function and sets its __name__ argument.
     It also sets its __module__ argument to the module of the caller.
-    Note that when naïvely doing `alias = fn`, we have that `alias.__name__ == "fn"`, and
+    Note that when naively doing `alias = fn`, we have that `alias.__name__ == "fn"`, and
     `alias.__module__ == fn.__module__`.
     """
 
@@ -1146,9 +1147,7 @@ def copysign(
     if isinstance(b, Number) and isinstance(a, Tensor):
         b = scalar_tensor(b, dtype=a.dtype, device=a.device)
     elif isinstance(a, Tensor) and isinstance(b, Tensor) and a.device != b.device:
-        msg = "Expected divisor (b) to be on the same device ({}) as dividend (a), but it is found on {}!".format(
-            a.device, b.device
-        )
+        msg = f"Expected divisor (b) to be on the same device ({a.device}) as dividend (a), but it is found on {b.device}!"
         raise RuntimeError(msg)
     return where(signbit(b), neg(abs(a)), abs(a))
 
@@ -1288,9 +1287,7 @@ def floor_divide(
         a = scalar_tensor(a, dtype=b.dtype, device=b.device)
     elif isinstance(a, Tensor) and isinstance(b, Tensor) and a.device != b.device:
         if a.device == torch.device("cpu"):
-            msg = "Expected divisor (b) to be on the same device ({}) as dividend (a), but it is found on {}!".format(
-                a.device, b.device
-            )
+            msg = f"Expected divisor (b) to be on the same device ({a.device}) as dividend (a), but it is found on {b.device}!"
             raise RuntimeError(msg)
         else:
             b = prims.device_put(b, device=a.device)
@@ -1936,9 +1933,7 @@ def clone(
 
 def copy_to(a: Tensor, b: Tensor, *, allow_cross_device=True):
     if not allow_cross_device and a.device != b.device:
-        msg = "Attempting to copy from device {} to device {}, but cross-device copies are not allowed!".format(
-            b.device, a.device
-        )
+        msg = f"Attempting to copy from device {b.device} to device {a.device}, but cross-device copies are not allowed!"
         raise RuntimeError(msg)
 
     return prims.copy_to(a, b)
@@ -3603,7 +3598,7 @@ def repeat(a: Tensor, *repeat_shape) -> Tensor:
 
     # derive permute order by sorting urtensor strides
     enumerated_stride = list(enumerate(urtensor_stride))
-    enumerated_stride.sort(key=lambda item: item[1], reverse=True)
+    enumerated_stride.sort(key=operator.itemgetter(1), reverse=True)
     permute_order, sorted_stride = zip(*enumerated_stride)
 
     # add new and expand dimensions according to urtensor
@@ -3628,10 +3623,6 @@ def _reshape_view_helper(a: TensorLikeType, *shape, allow_copy: bool) -> TensorL
     # This indicates that the dimension's length should be inferred
     shape = utils.infer_size(shape, a.numel())
 
-    # Short-circuits if shape is the same
-    if guard_size_oblivious(sym_eq(tuple(a.shape), tuple(shape))):
-        return prims.view_of(a)
-
     # Special-cases tensors with no elements
     if guard_size_oblivious(a.numel() == 0):
         return as_strided(a, shape, utils.make_contiguous_strides_for(shape))
@@ -3642,7 +3633,10 @@ def _reshape_view_helper(a: TensorLikeType, *shape, allow_copy: bool) -> TensorL
         for length in shape:
             assert length == 1
             _a = unsqueeze(_a, -1)
-        return _a
+        if _a is a:
+            return prims.view_of(a)
+        else:
+            return _a
 
     # Special-cases reshaping to zero dim tensors
     if len(shape) == 0:
@@ -3650,7 +3644,10 @@ def _reshape_view_helper(a: TensorLikeType, *shape, allow_copy: bool) -> TensorL
         for length in a.shape:
             assert length == 1
             _a = squeeze(_a, -1)
-        return _a
+        if _a is a:
+            return prims.view_of(a)
+        else:
+            return _a
 
     # Handles general case: a 1+D tensor reshaped into a distinct 1+D shape
 
@@ -3708,9 +3705,7 @@ def _reshape_view_helper(a: TensorLikeType, *shape, allow_copy: bool) -> TensorL
                 if allow_copy:
                     return prims.reshape(a, shape)
 
-                msg = "Cannot view a tensor with shape {} and strides {} as a tensor with shape {}!".format(
-                    a.shape, a.stride(), shape
-                )
+                msg = f"Cannot view a tensor with shape {a.shape} and strides {a.stride()} as a tensor with shape {shape}!"
                 raise ValueError(msg)
 
             a_ = flatten(a_, idx, end)
@@ -3723,10 +3718,16 @@ def _reshape_view_helper(a: TensorLikeType, *shape, allow_copy: bool) -> TensorL
 
     # Squeezes tail
     while idx < a_.ndim:
-        assert a_.shape[idx] == 1
+        torch._check(
+            a_.shape[idx] == 1,
+            lambda: f"a.size({idx}) expected to be 1 but got {a_.shape[idx]}",
+        )
         a_ = squeeze(a_, idx)
 
-    return a_
+    if a_ is a:
+        return prims.view_of(a)
+    else:
+        return a_
 
 
 # CompositeImplicitAutograd - don't register decomp
@@ -3829,7 +3830,7 @@ def _check_stack_inputs(tensors: TensorSequenceType) -> None:
     entry_shape = tensors[0].shape
     for i in range(1, len(tensors)):
         assert tensors[i].shape == entry_shape, (
-            f"stack expects each tensor to be equal size, but got {entry_shape} at entry 0"
+            f"stack expects each tensor to be equal size, but got {entry_shape} at entry 0 "
             f"and {tensors[i].shape} at entry {i}"
         )
 
@@ -3898,12 +3899,14 @@ def unflatten(a: TensorLikeType, dim: int, sizes: ShapeType) -> TensorLikeType:
 
 @register_decomposition(aten.unbind)
 def unbind(t: TensorLikeType, dim: int = 0) -> TensorSequenceType:
+    from torch.fx.experimental.symbolic_shapes import guard_size_oblivious
+
     dim = utils.canonicalize_dim(t.ndim, dim)
     torch._check_index(
         len(t.shape) > 0,
         lambda: "Dimension specified as 0 but tensor has no dimensions",
     )
-    if t.shape[dim] == 0:
+    if guard_size_oblivious(t.shape[dim] == 0):
         return tuple()
     else:
         return tuple(
@@ -4070,8 +4073,9 @@ def tensor_split(
     # If indices_or_sections is a tensor, it must be a CPU Long tensor
     if isinstance(indices_or_sections, TensorLike):
         if not indices_or_sections.device.type == "cpu":
-            msg = "tensor_split: if indices_or_sections is a tensor it must be on the CPU, but received one on {}".format(
-                indices_or_sections.device
+            msg = (
+                f"tensor_split: if indices_or_sections is a tensor it must be on the CPU, "
+                f"but received one on {indices_or_sections.device}"
             )
             raise ValueError(msg)
         if indices_or_sections.dtype != torch.long:
@@ -5559,7 +5563,10 @@ def masked_fill(a: TensorLikeType, mask: TensorLikeType, value: TensorOrNumberLi
             lambda: f"only supports a 0-dimensional value tensor, but got tensor with {value_ndim} dimension",
         )
         # `masked_fill` allows cpu scalar to be moved to cuda and xpu but not otherwise.
-        is_cpu_scalar = a.device.type in ["cuda", "xpu"] and value.device.type == "cpu"
+        is_cpu_scalar = (
+            a.device.type in ["cuda", "xpu", torch._C._get_privateuse1_backend_name()]
+            and value.device.type == "cpu"
+        )
         torch._check(
             is_cpu_scalar or value.device == a.device,
             lambda: "Expected `value` to be on same device as `a`",
@@ -6157,6 +6164,19 @@ def vdot(self, other):
     return (self.conj_physical() * other).sum()
 
 
+@register_decomposition(aten.select_scatter)
+@out_wrapper()
+def select_scatter(x: TensorLikeType, src: TensorLikeType, dim: int, index: int):
+    dim = utils.canonicalize_dim(x.ndim, dim)
+    mask_shape = [1] * x.ndim
+    mask_shape[dim] = -1
+    if index < 0:
+        index = index + x.shape[dim]
+    mask = torch.arange(x.shape[dim], device=x.device).view(mask_shape) == index
+    src = torch.unsqueeze(src, dim).expand(x.shape)
+    return torch.where(mask, src, x)
+
+
 # inplace
 abs_ = _make_inplace(abs)
 acos_ = _make_inplace(acos)
@@ -6278,7 +6298,7 @@ def _compute_sizes(seq, scalar_type):
         try:
             handle = seq[0]
         except Exception:
-            raise ValueError(  # noqa: TRY200
+            raise ValueError(  # noqa: B904
                 f"could not determine the shape of object type '{type(seq).__name__}'"
             )
         seq = handle
@@ -6292,7 +6312,7 @@ def _infer_scalar_type(obj):
         return torch.get_default_dtype()
     if isinstance(obj, IntLike) and not isinstance(obj, bool):  # careful!
         return torch.int64
-    if isinstance(obj, bool):
+    if isinstance(obj, BoolLike):
         return torch.bool
     if isinstance(obj, complex):
         default_dtype = torch.get_default_dtype()
@@ -6338,13 +6358,24 @@ def _infer_scalar_type(obj):
 
 # Analogous to recursive_store
 # xref: recursive_store in torch/csrc/utils/tensor_new.cpp
-def _recursive_build(scalarType: torch.dtype, obj: TensorOrNumberLikeType):
-    if isinstance(obj, Tensor) and obj.ndim <= 1:
-        obj = obj.item()
-        # fall through into next case
-    if isinstance(obj, Number):
+def _recursive_build(
+    scalarType: torch.dtype, obj: Union[TensorOrNumberLikeType, TensorSequenceType]
+):
+    if isinstance(obj, Tensor) and obj.numel() == 1:
+        return obj.detach().to(dtype=scalarType, device="cpu", copy=True).view(())
+    elif isinstance(obj, Tensor):
+        # It is invalid to call ".tensor([...])" with a non-scalar tensor in eager mode
+        # >>> torch.tensor([torch.randn(2)])
+        # ValueError: only one element tensors can be converted to Python scalars
+        #
+        # But it is possible with a NumPy array
+        # >>> torch.tensor([np.random.uniform(size=(2,))]).shape
+        # torch.Size([1, 2])
+        return obj.detach().to(dtype=scalarType, device="cpu", copy=True)
+    elif isinstance(obj, Number):
         return torch.scalar_tensor(obj, dtype=scalarType)
 
+    # seq can be a list of tensors
     seq = obj
     return torch.stack([_recursive_build(scalarType, item) for item in seq])
 

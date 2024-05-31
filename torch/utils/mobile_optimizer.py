@@ -104,13 +104,15 @@ def generate_mobile_module_lints(script_module: torch.jit.ScriptModule):
     op_names = torch.jit.export_opnames(script_module)
     for op_name in op_names:
         if "dropout" in op_name:
-            lint_list.append({"name": LintCode.DROPOUT.name, "message": "Operator {} exists, remember to call eval() before "
+            lint_list.append({"name": LintCode.DROPOUT.name,
+                              "message": f"Operator {op_name} exists, remember to call eval() before "
                               "saving the module.and call torch.utils.mobile_optimizer.optimize_for_mobile to drop dropout "
-                              "operator.".format(op_name)})
+                              "operator."})
         if "batch_norm" in op_name:
-            lint_list.append({"name": LintCode.BATCHNORM.name, "message": "Operator {} exists, remember to call eval() before "
+            lint_list.append({"name": LintCode.BATCHNORM.name,
+                              "message": f"Operator {op_name} exists, remember to call eval() before "
                               "saving the module and call torch.utils.mobile_optimizer.optimize_for_mobile to drop batch_norm "
-                              "operator.".format(op_name)})
+                              "operator."})
 
     return lint_list
 

@@ -201,7 +201,7 @@ class SimulateBackwardError(Function):
     @once_differentiable
     def backward(ctx, input):
         if SimulateBackwardError._simulate_error:
-            raise Exception("Simulate error on backward pass")
+            raise Exception("Simulate error on backward pass")  # noqa: TRY002
         else:
             return input
 

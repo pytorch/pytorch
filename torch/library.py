@@ -1,5 +1,6 @@
 from ._ops import OpOverload
-from typing import Any, Optional, Set, List, Union, Callable
+from typing import Any, Optional, Set, List, Union, Callable, Tuple, Dict, Sequence
+from typing_extensions import deprecated
 import traceback
 import torch
 import weakref
@@ -8,8 +9,7 @@ import inspect
 import re
 import contextlib
 import sys
-import warnings
-from torch._library.custom_ops import custom_op, _maybe_get_opdef, device_types_t
+from torch._library.custom_ops import custom_op, _maybe_get_opdef, device_types_t, CustomOpDef
 import torch._library as _library
 
 
@@ -71,7 +71,7 @@ class Library:
         self.ns = ns
         self._op_defs: Set[str] = set()
         self._op_impls: Set[str] = set()
-        self._registration_handles: List["torch._library.utils.RegistrationHandle"] = []
+        self._registration_handles: List[torch._library.utils.RegistrationHandle] = []
         self.kind = kind
         self.dispatch_key = dispatch_key
         # Use a finalizer to setup the "destructor" instead of __del__.
@@ -138,6 +138,48 @@ class Library:
 
         handle = entry.abstract_impl.register(func_to_register, source)
         self._registration_handles.append(handle)
+
+    def _impl_with_aoti_compile(self, op_name, dispatch_key=''):
+        r'''Register the operator to use the AOTI-compiled implementation.
+
+        Args:
+            op_name: operator name (along with the overload) or OpOverload object.
+            dispatch_key: dispatch key that the input function should be registered for. By default, it uses
+                          the dispatch key that the library was created with.
+
+        Example::
+            >>> my_lib = Library("aten", "IMPL")
+            >>> my_lib._impl_with_aoti_compile("div.Tensor", "CPU")
+        '''
+        if dispatch_key == '':
+            dispatch_key = self.dispatch_key
+        assert torch.DispatchKeySet(dispatch_key).has(torch._C.DispatchKey.Dense)
+
+        if isinstance(op_name, str):
+            name = op_name
+        elif isinstance(op_name, OpOverload):
+            name = op_name._schema.name
+            overload_name = op_name._schema.overload_name
+            if overload_name != '':
+                name = name + '.' + overload_name
+        else:
+            raise RuntimeError("_impl_with_aoti_compile should be passed either a name or an OpOverload object "
+                               "as the first argument")
+
+        key = self.ns + "/" + name.split("::")[-1] + "/" + dispatch_key
+        if key in _impls:
+            # TODO: in future, add more info about where the existing function is registered (this info is
+            # today already returned by the C++ warning when _impl_with_aoti_compile is called but we error out before that)
+            raise RuntimeError("This is not allowed since there's already a kernel registered from python overriding {}"
+                               "'s behavior for {} dispatch key and {} namespace.".
+                               format(name.split("::")[-1], dispatch_key, self.ns))
+
+        assert self.m is not None
+        impl_fn: Callable = self.m.impl_with_aoti_compile
+        impl_fn(self.ns, name.split("::")[-1], dispatch_key)
+
+        _impls.add(key)
+        self._op_impls.add(key)
 
     def impl(self, op_name, fn, dispatch_key='', *, with_keyset=False):
         r'''Registers the function implementation for an operator defined in the library.
@@ -409,16 +451,18 @@ def _(lib: Library, name, dispatch_key=""):
     return wrap
 
 
+@deprecated(
+    "`torch.library.impl_abstract` was renamed to `torch.library.register_fake`. Please use that "
+    "instead; we will remove `torch.library.impl_abstract` in a future version of PyTorch.",
+    category=FutureWarning,
+)
 def impl_abstract(qualname, func=None, *, lib=None, _stacklevel=1):
     r"""This API was renamed to :func:`torch.library.register_fake` in PyTorch 2.4.
     Please use that instead.
     """
-    warnings.warn("torch.library.impl_abstract was renamed to "
-                  "torch.library.register_fake. Please use that instead; "
-                  "we will remove torch.library.impl_abstract in a future "
-                  "version of PyTorch.",
-                  DeprecationWarning, stacklevel=2)
-    return register_fake(qualname, func, lib=lib, _stacklevel=_stacklevel + 1)
+    if func is not None:
+        _stacklevel = _stacklevel + 1
+    return register_fake(qualname, func, lib=lib, _stacklevel=_stacklevel)
 
 
 _op_identifier = Union[str, "torch._ops.OpOverload", "torch._library.custom_ops.CustomOpDef"]
@@ -512,7 +556,7 @@ def register_fake(
     This API may be used as a decorator (see examples).
 
     For a detailed guide on custom ops, please see
-    https://docs.google.com/document/d/1W--T6wz8IY8fOI0Vm8BF44PdBgs283QvpelJZWieQWQ/edit
+    https://pytorch.org/docs/main/notes/custom_operators.html
 
     Examples:
         >>> import torch
@@ -592,7 +636,7 @@ def register_fake(
             _keep_alive.append(use_lib)
         else:
             use_lib = lib
-        use_lib._register_fake(op_name, func, _stacklevel=stacklevel)
+        use_lib._register_fake(op_name, func, _stacklevel=stacklevel + 1)
         return func
 
     if func is None:
@@ -602,7 +646,7 @@ def register_fake(
         return register(func)
 
 
-def register_autograd(op: _op_identifier, setup_context_fn: Optional[Callable], backward_fn: Callable, /, *, lib=None) -> None:
+def register_autograd(op: _op_identifier, backward: Callable, /, *, setup_context: Optional[Callable] = None, lib=None) -> None:
     r"""Register a backward formula for this custom op.
 
     In order for an operator to work with autograd, you need to register
@@ -612,17 +656,19 @@ def register_autograd(op: _op_identifier, setup_context_fn: Optional[Callable], 
     2. If you need any values from the forward to compute gradients, you can
     use `setup_context` to save values for backward.
 
-    ``backward_fn`` runs during the backward pass. It accepts ``(ctx, *grads)``:
+    ``backward`` runs during the backward pass. It accepts ``(ctx, *grads)``:
     - ``grads`` is one or more gradients. The number of gradients matches
     the number of outputs of the operator.
     The ``ctx`` object is `the same ctx object <context_method_mixins>`_ used by
     :class:`torch.autograd.Function`. The semantics of ``backward_fn`` are the
     same as :meth:`torch.autograd.Function.backward`.
 
-    ``setup_context_fn(ctx, inputs, output)`` runs during the forward pass.
+    ``setup_context(ctx, inputs, output)`` runs during the forward pass.
     Please save quantities needed for backward onto the ``ctx`` object via
     either :meth:`torch.autograd.function.FunctionCtx.save_for_backward`
-    or assigning them as attributes of ``ctx``.
+    or assigning them as attributes of ``ctx``. If your custom op has
+    kwarg-only arguments, we expect the signature of ``setup_context``
+    to be ``setup_context(ctx, inputs, keyword_only_inputs, output)``.
 
     Both ``setup_context_fn`` and ``backward_fn`` must be traceable. That is,
     they may not directly access :meth:`torch.Tensor.data_ptr` and they must
@@ -648,12 +694,32 @@ def register_autograd(op: _op_identifier, setup_context_fn: Optional[Callable], 
         >>>     x, = ctx.saved_tensors
         >>>     return grad * x.cos()
         >>>
-        >>> torch.library.register_autograd("mylib::numpy_sin", setup_context, backward)
+        >>> torch.library.register_autograd("mylib::numpy_sin", backward, setup_context=setup_context)
         >>>
         >>> x = torch.randn(3, requires_grad=True)
         >>> y = numpy_sin(x)
         >>> grad_x, = torch.autograd.grad(y, x, torch.ones_like(y))
         >>> assert torch.allclose(grad_x, x.cos())
+        >>>
+        >>> # Example with a keyword-only arg
+        >>> @torch.library.custom_op("mylib::numpy_mul", mutates_args=())
+        >>> def numpy_mul(x: Tensor, *, val: float) -> Tensor:
+        >>>     x_np = x.cpu().numpy()
+        >>>     y_np = x_np * val
+        >>>     return torch.from_numpy(y_np).to(device=x.device)
+        >>>
+        >>> def setup_context(ctx, inputs, keyword_only_inputs, output) -> Tensor:
+        >>>     ctx.val = keyword_only_inputs["val"]
+        >>>
+        >>> def backward(ctx, grad):
+        >>>     return grad * ctx.val
+        >>>
+        >>> torch.library.register_autograd("mylib::numpy_mul", backward, setup_context=setup_context)
+        >>>
+        >>> x = torch.randn(3, requires_grad=True)
+        >>> y = numpy_mul(x, val=3.14)
+        >>> grad_x, = torch.autograd.grad(y, x, torch.ones_like(y))
+        >>> assert torch.allclose(grad_x, torch.full_like(x, 3.14))
 
     """
     if not isinstance(op, (str, torch._ops.OpOverload, torch._library.custom_ops.CustomOpDef)):
@@ -662,7 +728,7 @@ def register_autograd(op: _op_identifier, setup_context_fn: Optional[Callable], 
         op = op._name
     opdef = _maybe_get_opdef(op)
     if opdef is not None:
-        opdef.register_autograd(setup_context_fn, backward_fn)
+        opdef.register_autograd(backward, setup_context=setup_context)
         return
 
     assert isinstance(op, str)
@@ -675,8 +741,13 @@ def register_autograd(op: _op_identifier, setup_context_fn: Optional[Callable], 
             f"{op} with schema {schema}. Please create "
             f"a functional operator and register an autograd formula for that."
         )
+    if _library.utils.has_kwarg_only_tensors(schema):
+        raise NotImplementedError(
+            f"register_autograd with kwarg-only Tensor args. In the original "
+            f"definition of the op, please make your tensors not kwarg-only. "
+            f"Got: {schema}")
 
-    info = _library.autograd.Info(setup_context_fn, backward_fn)
+    info = _library.autograd.Info(backward, setup_context)
     autograd_kernel = _library.autograd.make_autograd_impl(op, info)
     namespace, opname = torch._library.utils.parse_namespace(qualname)
     if lib is None:
@@ -743,3 +814,104 @@ def get_ctx() -> "torch._library.abstract_impl.AbstractImplCtx":
     (see :func:`torch.library.register_fake` for more usage details.
     """
     return torch._library.abstract_impl.global_ctx_getter()
+
+
+_OPCHECK_DEFAULT_UTILS = (
+    "test_schema",
+    "test_autograd_registration",
+    "test_faketensor",
+    "test_aot_dispatch_dynamic",
+)
+
+
+def opcheck(
+    op: Union[torch._ops.OpOverload, torch._ops.OpOverloadPacket, CustomOpDef],
+    args: Tuple[Any, ...],
+    kwargs: Optional[Dict[str, Any]] = None,
+    *,
+    test_utils: Union[str, Sequence[str]] = _OPCHECK_DEFAULT_UTILS,
+    raise_exception: bool = True,
+) -> Dict[str, str]:
+    """Given an operator and some sample arguments, tests if the operator is
+    registered correctly.
+
+    That is, when you use the torch.library/TORCH_LIBRARY APIs to create a
+    custom op, you specified metadata (e.g. mutability info) about the custom op
+    and these APIs require that the functions you pass them satisfy certain
+    properties (e.g. no data pointer access in the fake/meta/abstract kernel)
+    ``opcheck`` tests these metadata and properties.
+
+    Concretely, we test the following:
+    - test_schema: if the operator's schema is correct.
+    - test_autograd_registration: if autograd was registered correctly.
+    - test_faketensor: If the operator has a FakeTensor kernel
+    (and if it is correct). The FakeTensor kernel is necessary (
+    but not sufficient) for the operator to work with PyTorch compilation
+    APIs (torch.compile/export/FX).
+    - test_aot_dispatch_dynamic: If the operator has correct behavior
+    with PyTorch compilation APIs (torch.compile/export/FX).
+    This checks that the outputs (and gradients, if applicable) are the
+    same under eager-mode PyTorch and torch.compile.
+    This test is a superset of ``test_faketensor``.
+
+    For best results, please call ``opcheck`` multiple times with a
+    representative set of inputs. If your operator supports
+    autograd, please use ``opcheck`` with inputs with ``requires_grad = True``;
+    if your operator supports multiple devices (e.g. CPU and CUDA), please
+    use ``opcheck`` with inputs on all supported devices.
+
+    Args:
+        op: The operator. Must either be a function decorated with
+            :func:`torch.library.custom_op` or an OpOverload/OpOverloadPacket
+            found in torch.ops.* (e.g. torch.ops.aten.sin, torch.ops.mylib.foo)
+        args: The args to the operator
+        kwargs: The kwargs to the operator
+        test_utils: Tests that we should run. Default: all of them.
+            Example: ("test_schema", "test_faketensor")
+        raise_exception: If we should raise an exception on the first
+            error. If False, we will return a dict with information
+            on if each test passed or not.
+
+    .. warning::
+
+        opcheck and :func:`torch.autograd.gradcheck` test different things;
+        opcheck tests if your usage of torch.library APIs is correct while
+        :func:`torch.autograd.gradcheck` tests if your autograd formula is
+        mathematically correct. Use both to test custom ops that support
+        gradient computation.
+
+    Example:
+
+        >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_CUDA)
+        >>> @torch.library.custom_op("mylib::numpy_mul", mutates_args=())
+        >>> def numpy_add(x: Tensor, y: float) -> Tensor:
+        >>>     x_np = x.numpy(force=True)
+        >>>     z_np = x_np + y
+        >>>     return torch.from_numpy(z_np).to(x.device)
+        >>>
+        >>> @numpy_sin.register_fake
+        >>> def _(x, y):
+        >>>     return torch.empty_like(x)
+        >>>
+        >>> def setup_context(ctx, inputs, output):
+        >>>     y, = inputs
+        >>>     ctx.y = y
+        >>>
+        >>> def backward(ctx, grad):
+        >>>     return grad * ctx.y, None
+        >>>
+        >>> numpy_sin.register_autograd(backward, setup_context=setup_context)
+        >>>
+        >>> sample_inputs = [
+        >>>     (torch.randn(3), 3.14),
+        >>>     (torch.randn(2, 3, device='cuda'), 2.718),
+        >>>     (torch.randn(1, 10, requires_grad=True), 1.234),
+        >>>     (torch.randn(64, 64, device='cuda', requires_grad=True), 90.18),
+        >>> ]
+        >>>
+        >>> for args in sample_inputs:
+        >>>     torch.library.opcheck(foo, args)
+
+    """
+    import torch.testing._internal.optests as optests
+    return optests.opcheck(op, args, kwargs, test_utils=test_utils, raise_exception=raise_exception)

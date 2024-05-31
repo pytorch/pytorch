@@ -153,7 +153,7 @@ bool containsTensorType(const TypePtr& t) {
 // for each node in the schema with type Tensor, extract the T type
 // returns c10::nullopt if any Tensor in the schema does not have a known
 // shape ignores non-tensor in the list of inputs
-c10::optional<std::vector<TensorTypePtr>> gatherTensorTypes(
+std::optional<std::vector<TensorTypePtr>> gatherTensorTypes(
     Node* node,
     bool complete = false) {
   std::vector<TensorTypePtr> tensor_types;
@@ -209,7 +209,7 @@ c10::ScalarType unionScalarTypes(
 // new type promotion logic. See tensor_attributes.rst for details.
 // This doesn't handle the case of arithmetic ops with Scalar arguments (when
 // `Tensor.getUnsafeTensorImpl()->is_wrapped_number()` would return true)
-c10::optional<c10::ScalarType> getPromotedTypeForArithmeticOp(Node* node) {
+std::optional<c10::ScalarType> getPromotedTypeForArithmeticOp(Node* node) {
   c10::ScalarType dimmed = c10::ScalarType::Undefined;
   c10::ScalarType zerodim = c10::ScalarType::Undefined;
   // binary arithmetic ops, more than 2 args is alpha.
@@ -741,7 +741,7 @@ class ShapePropagator : public PropertyPropBase {
     return setUnshapedType(node);
   }
 
-  static c10::optional<size_t> determineListSize(Value* list) {
+  static std::optional<size_t> determineListSize(Value* list) {
     AT_ASSERT(list->type()->cast<ListType>());
     if (auto shape = constant_as<c10::List<int64_t>>(list)) {
       return shape->size();
@@ -769,7 +769,7 @@ class ShapePropagator : public PropertyPropBase {
   bool PropagateTensorShapeOnNode(Node* node, bool insert_expands) {
     static const auto broadcast =
         [](std::vector<TensorTypePtr>& tensor_types,
-           c10::optional<at::ScalarType> t) -> TensorTypePtr {
+           std::optional<at::ScalarType> t) -> TensorTypePtr {
       if (tensor_types.size() == 1) {
         return tensor_types[0]->dimensionedOnly()->withScalarType(t);
       }
@@ -1244,7 +1244,7 @@ class ShapePropagator : public PropertyPropBase {
     static const auto reduce_op_handler = [](Node* node,
                                              int64_t num_reduced_dim = 0,
                                              bool upcast_integer = false,
-                                             c10::optional<IValue> opt_dtype =
+                                             std::optional<IValue> opt_dtype =
                                                  c10::nullopt) -> type_vec_t {
       if (auto type = node->input(0)->type()->cast<TensorType>()) {
         if (!type->scalarType() || !type->dim()) {

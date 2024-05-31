@@ -132,7 +132,7 @@ class ComputeFunction:
 
         # only valid remaining case is only function is in f.variants
         elif not (Variant.function in f.variants and Variant.method not in f.variants):
-            raise Exception(
+            raise Exception(  # noqa: TRY002
                 f"Can't handle native function {f.func} with the following variant specification {f.variants}."
             )
 
@@ -228,7 +228,7 @@ class ComputeCodegenUnboxedKernels:
 
         if len(f.func.returns) == 0:
             if len(f.func.arguments.out) == 0:
-                raise Exception(
+                raise Exception(  # noqa: TRY002
                     f"Can't handle native function {f.func} with no returns and no out yet."
                 )
             out = f.func.arguments.out[0]

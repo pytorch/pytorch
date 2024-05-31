@@ -586,6 +586,7 @@ def forward(self, x_1, output_1):
         self.assertEqual(int_result, resulti)
 
     @requires_cuda
+    @skipIfRocm
     def test_triton_kernel_constants(self):
         @triton.jit
         def mulC_kernel(
@@ -786,6 +787,42 @@ def forward(self, x_1, output_1):
         out = x_cloned.sin()
         f(x_cloned)
         out.sum().backward()
+
+    @requires_cuda
+    @patch.object(torch._inductor.config, "allow_buffer_reuse", True)
+    def test_triton_kernel_inputs_buffer_reuse(self):
+        def _mul2(x):
+            y = torch.empty_like(x)
+            mul2_kernel[(10,)](
+                in_ptr0=x,
+                out_ptr=y,
+                n_elements=x.numel(),
+                BLOCK_SIZE=1,
+            )
+            return y
+
+        @torch.compile
+        def f(x):
+            for _ in range(4):
+                # The output of one kernel is the input to the next kernel, but
+                # at some point we should re-use buffers not allocate new ones.
+                x = _mul2(x)
+            return x + 1
+
+        x = torch.randn(10, device="cuda", dtype=torch.float32)
+        eager_out = f(x)
+        compiled_out, (code,) = run_and_get_code(torch.compile(f), x)
+        self.assertEqual(compiled_out, eager_out)
+
+        # Check that we're allocating the minimal # of buffers.
+        num_bufs_allocated = code.count(
+            "empty_strided_cuda((10, ), (1, ), torch.float32)"
+        )
+        self.assertEqual(num_bufs_allocated, 2)
+
+        # Check we're re-using buffers if not allocating.
+        num_bufs_reused = code.count("# reuse")
+        self.assertEqual(num_bufs_reused, 3)
 
     @requires_cuda
     def test_triton_kernel_matmul_tracking(self):
@@ -1279,6 +1316,23 @@ def forward(self, x_1, output_1):
 
         x = torch.randn(4, device="cuda")
         f(x, x)
+
+    @requires_cuda
+    @skipIfRocm
+    @common_utils.parametrize("backend", ["eager", "aot_eager", "inductor"])
+    def test_triton_kernel_num_ctas(self, backend):
+        @triton.jit
+        def kernel(X):
+            return
+
+        @torch.compile(backend=backend)
+        def f(x):
+            kernel[(1,)](x, num_ctas=1)
+            kernel.run(x, num_ctas=1, grid=(1,), warmup=False)
+            return x
+
+        x = torch.randn(4, device="cuda")
+        f(x)
 
     @requires_cuda
     @skipIfRocm
@@ -1870,6 +1924,126 @@ class MutationTests(torch._inductor.test_case.TestCase):
                 "BLOCK_SIZE_C2": 64,
             },
             ["O_ptr"],
+        )
+
+    @make_mutation_test
+    def test_for_loop_arg_2():
+        @triton.jit
+        def fwd_kernel(
+            x_ptr,
+            o_ptr,
+            M,
+            N,
+            stride_m,
+            stride_n,
+            BLOCK_B: tl.constexpr,
+            BLOCK_M: tl.constexpr,
+            BLOCK_N: tl.constexpr,
+        ):
+            # Get program ids
+            pid_m = tl.program_id(0)
+            X_block_ptr = tl.make_block_ptr(
+                base=x_ptr,
+                shape=(M, N),
+                strides=(stride_m, stride_n),
+                offsets=(0, 0),
+                block_shape=(BLOCK_M, BLOCK_N),
+                order=(1, 0),
+            )
+            O_block_ptr = tl.make_block_ptr(
+                base=o_ptr,
+                shape=(M, N),
+                strides=(stride_m, stride_n),
+                offsets=(0, 0),
+                block_shape=(BLOCK_M, BLOCK_N),
+                order=(1, 0),
+            )
+
+            for _ in range(BLOCK_B):
+                x = tl.load(X_block_ptr)
+                tl.store(O_block_ptr, x)
+
+                X_block_ptr = tl.advance(X_block_ptr, (BLOCK_M, 0))
+                O_block_ptr = tl.advance(O_block_ptr, (BLOCK_M, 0))
+
+        t = torch.randn((32, 64, 128))
+        o = torch.empty_like(t)
+        B, M, N = t.shape
+        return (
+            fwd_kernel,
+            {
+                "x_ptr": t,
+                "o_ptr": o,
+                "M": M,
+                "N": N,
+                "stride_m": N,
+                "stride_n": 1,
+                "BLOCK_B": B,
+                "BLOCK_M": M,
+                "BLOCK_N": N,
+            },
+            ["o_ptr"],
+        )
+
+    @make_mutation_test
+    def test_while_loop():
+        @triton.jit
+        def fwd_kernel(
+            x_ptr,
+            o_ptr,
+            M,
+            N,
+            stride_m,
+            stride_n,
+            BLOCK_B: tl.constexpr,
+            BLOCK_M: tl.constexpr,
+            BLOCK_N: tl.constexpr,
+        ):
+            # Get program ids
+            pid_m = tl.program_id(0)
+            X_block_ptr = tl.make_block_ptr(
+                base=x_ptr,
+                shape=(M, N),
+                strides=(stride_m, stride_n),
+                offsets=(0, 0),
+                block_shape=(BLOCK_M, BLOCK_N),
+                order=(1, 0),
+            )
+            O_block_ptr = tl.make_block_ptr(
+                base=o_ptr,
+                shape=(M, N),
+                strides=(stride_m, stride_n),
+                offsets=(0, 0),
+                block_shape=(BLOCK_M, BLOCK_N),
+                order=(1, 0),
+            )
+
+            i = 0
+            while i < BLOCK_B:
+                x = tl.load(X_block_ptr)
+                tl.store(O_block_ptr, x)
+
+                X_block_ptr = tl.advance(X_block_ptr, (BLOCK_M, 0))
+                O_block_ptr = tl.advance(O_block_ptr, (BLOCK_M, 0))
+                i += 1
+
+        t = torch.randn((32, 64, 128))
+        o = torch.empty_like(t)
+        B, M, N = t.shape
+        return (
+            fwd_kernel,
+            {
+                "x_ptr": t,
+                "o_ptr": o,
+                "M": M,
+                "N": N,
+                "stride_m": N,
+                "stride_n": 1,
+                "BLOCK_B": B,
+                "BLOCK_M": M,
+                "BLOCK_N": N,
+            },
+            ["o_ptr"],
         )
 
 

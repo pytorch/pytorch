@@ -16,6 +16,7 @@ from typing import (
 from torch.utils._exposed_in import exposed_in
 
 from .. import _C, _library, _ops, autograd, library, Tensor
+from . import utils
 
 
 device_types_t = Optional[Union[str, Sequence[str]]]
@@ -24,6 +25,7 @@ device_types_t = Optional[Union[str, Sequence[str]]]
 @exposed_in("torch.library")
 def custom_op(
     name: str,
+    fn: Optional[Callable] = None,
     /,
     *,
     mutates_args: Iterable[str],
@@ -134,7 +136,9 @@ def custom_op(
         result.register_kernel(device_types)(fn)
         return result
 
-    return inner
+    if fn is None:
+        return inner
+    return inner(fn)
 
 
 class CustomOpDef:
@@ -223,9 +227,10 @@ class CustomOpDef:
                     def backend_impl(*args, **kwargs):
                         # Checks the assumption that outputs cannot alias
                         # inputs or other outputs.
-                        storages = set()
-                        for tensor in iter_tensors(args, kwargs):
-                            storages.add(id(tensor.untyped_storage()))
+                        storages = {
+                            id(tensor.untyped_storage())
+                            for tensor in iter_tensors(args, kwargs)
+                        }
 
                         result = self._backend_fns[device_type](*args, **kwargs)
 
@@ -341,7 +346,11 @@ class CustomOpDef:
         return fn
 
     def register_autograd(
-        self, setup_context_fn: Optional[Callable], backward_fn: Callable, /
+        self,
+        backward: Callable,
+        /,
+        *,
+        setup_context: Optional[Callable] = None,
     ) -> None:
         r"""Register a backward formula for this custom op.
 
@@ -359,10 +368,12 @@ class CustomOpDef:
         :class:`torch.autograd.Function`. The semantics of ``backward_fn`` are the
         same as :meth:`torch.autograd.Function.backward`.
 
-        ``setup_context_fn(ctx, inputs, output)`` runs during the forward pass.
+        ``setup_context(ctx, inputs, output)`` runs during the forward pass.
         Please save quantities needed for backward onto the ``ctx`` object via
         either :meth:`torch.autograd.function.FunctionCtx.save_for_backward`
-        or assigning them as attributes of ``ctx``.
+        or assigning them as attributes of ``ctx``. If your custom op has
+        kwarg-only arguments, we expect the signature of ``setup_context``
+        to be ``setup_context(ctx, inputs, keyword_only_inputs, output)``.
 
         Both ``setup_context_fn`` and ``backward_fn`` must be traceable. That is,
         they may not directly access :meth:`torch.Tensor.data_ptr` and they must
@@ -388,12 +399,32 @@ class CustomOpDef:
             >>>     x, = ctx.saved_tensors
             >>>     return grad * x.cos()
             >>>
-            >>> numpy_sin.register_autograd(setup_context, backward)
+            >>> numpy_sin.register_autograd(backward, setup_context=setup_context)
             >>>
             >>> x = torch.randn(3, requires_grad=True)
             >>> y = numpy_sin(x)
             >>> grad_x, = torch.autograd.grad(y, x, torch.ones_like(y))
             >>> assert torch.allclose(grad_x, x.cos())
+            >>>
+            >>> # Example with a keyword-only arg
+            >>> @torch.library.custom_op("mylib::numpy_mul", mutates_args=())
+            >>> def numpy_mul(x: Tensor, *, val: float) -> Tensor:
+            >>>     x_np = x.cpu().numpy()
+            >>>     y_np = x_np * val
+            >>>     return torch.from_numpy(y_np).to(device=x.device)
+            >>>
+            >>> def setup_context(ctx, inputs, keyword_only_inputs, output) -> Tensor:
+            >>>     ctx.val = keyword_only_inputs["val"]
+            >>>
+            >>> def backward(ctx, grad):
+            >>>     return grad * ctx.val
+            >>>
+            >>> numpy_mul.register_autograd(backward, setup_context=setup_context)
+            >>>
+            >>> x = torch.randn(3, requires_grad=True)
+            >>> y = numpy_mul(x, val=3.14)
+            >>> grad_x, = torch.autograd.grad(y, x, torch.ones_like(y))
+            >>> assert torch.allclose(grad_x, torch.full_like(x, 3.14))
 
         """
         schema = self._opoverload._schema
@@ -404,12 +435,26 @@ class CustomOpDef:
                 f"a functional operator and register an autograd formula for that."
             )
 
-        self._backward_fn = backward_fn
-        self._setup_context_fn = setup_context_fn
+        self._backward_fn = backward
+        self._setup_context_fn = setup_context
 
     def _register_to_dispatcher(self) -> None:
         lib = self._lib
-        lib.define(f"{self._name}{self._schema}")
+        schema_str = self._name + self._schema
+        cpp_schema = _C.parse_schema(schema_str)
+        if utils.has_kwarg_only_tensors(cpp_schema):
+            # If you want to support this, the progression is:
+            # - supporting kwarg-only Tensors that are non-differentiable
+            # - supporting kwarg-only Tensors (regardless of differentiability)
+            raise NotImplementedError(
+                f"custom_op with kwarg-only Tensor args. Please make your "
+                f"tensors not kwarg-only. Got: {schema_str}"
+            )
+
+        lib.define(
+            schema_str,
+            tags=[_C.Tag.pt2_compliant_tag],
+        )
         self._opoverload = _library.utils.lookup_op(self._qualname)
 
         def fake_impl(*args, **kwargs):
@@ -424,7 +469,7 @@ class CustomOpDef:
                 )
             return self._abstract_fn(*args, **kwargs)
 
-        lib._register_fake(self._name, fake_impl)
+        lib._register_fake(self._name, fake_impl, _stacklevel=4)
 
         autograd_impl = _library.autograd.make_autograd_impl(self._opoverload, self)
         lib.impl(self._name, autograd_impl, "Autograd", with_keyset=True)

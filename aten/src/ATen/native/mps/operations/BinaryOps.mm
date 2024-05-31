@@ -97,7 +97,7 @@ static void binaryOpTensor(const Tensor& self,
   Tensor output = output_;
   bool needsCopyToOutput = false;
 
-  if (!output_.is_contiguous() || (output_.is_view() && (self.is_alias_of(output_) || other.is_alias_of(output_)))) {
+  if (needsGather(output_) || (output_.is_view() && (self.is_alias_of(output_) || other.is_alias_of(output_)))) {
     output = at::empty(output_.sizes(), output_.scalar_type(), c10::nullopt, kMPS, c10::nullopt, c10::nullopt);
     needsCopyToOutput = true;
   }

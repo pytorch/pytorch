@@ -47,10 +47,10 @@ from .apis import vmap
 from .vmap import doesnt_support_saved_tensors_hooks, get_chunk_sizes
 
 
-def lazy_dynamo_disable(func):
+def lazy_dynamo_disallow(func):
     import torch._dynamo
 
-    return torch._dynamo.disable(func)
+    return torch._dynamo.disallow_in_graph(func)
 
 
 @contextlib.contextmanager
@@ -88,6 +88,17 @@ def _jvp_treespec_compare(primals, tangents):
             f"structure. For example, if primals is a tuple of 3 tensors, "
             f"tangents also must be. Got primals with structure {primals_spec} "
             f"and tangents with structure {tangents_spec}"
+        )
+
+
+def _linearize_treespec_compare(primals, tangents):
+    # Revert this once #116264 gets fixed
+    _, primals_argspec = tree_flatten(primals)
+    _, tangent_argspec = tree_flatten(tangents)
+    if tangent_argspec != primals_argspec:
+        raise RuntimeError(
+            f"Expected the tangents {tangent_argspec} to have "
+            f"the same argspec as the primals {primals_argspec}"
         )
 
 
@@ -754,7 +765,7 @@ def jacrev(
     # Dynamo does not support HOP composition if their inner function is
     # annotated with @functools.wraps(...). We circumvent this issue by applying
     # wraps only if we're not tracing with dynamo.
-    if not torch._dynamo.is_compiling():
+    if not torch.compiler.is_compiling():
         wrapper_fn = wraps(func)(wrapper_fn)
 
     return wrapper_fn
@@ -1335,7 +1346,7 @@ def jacfwd(
     # Dynamo does not support HOP composition if their inner function is
     # annotated with @functools.wraps(...). We circumvent this issue by applying
     # wraps only if we're not tracing with dynamo.
-    if not torch._dynamo.is_compiling():
+    if not torch.compiler.is_compiling():
         wrapper_fn = wraps(func)(wrapper_fn)
 
     return wrapper_fn
@@ -1778,8 +1789,10 @@ def linearize(func: Callable, *primals) -> Tuple[Any, Callable]:
 
         return tangents
 
-    jvp_graph = make_fx(trace_fn)(flat_tangents)
-    const_folded_jvp_graph = const_fold.split_const_subgraphs(jvp_graph)
+    jvp_graph = lazy_dynamo_disallow(make_fx)(trace_fn)(flat_tangents)
+    const_folded_jvp_graph = lazy_dynamo_disallow(const_fold.split_const_subgraphs)(
+        jvp_graph
+    )
 
     # Hold only the meta-data regarding the primals.
     flat_primals_shape = tuple(p.shape for p in flat_primals)
@@ -1817,11 +1830,7 @@ def linearize(func: Callable, *primals) -> Tuple[Any, Callable]:
     #   calling the folded fx graph and unflattening fx graph output
     def jvp_fn(*tangents):
         flat_tangents, tangent_argspec = tree_flatten(tangents)
-        if tangent_argspec != primals_argspec:
-            raise RuntimeError(
-                f"Expected the tangents {tangent_argspec} to have "
-                f"the same argspec as the primals {primals_argspec}"
-            )
+        _linearize_treespec_compare(primals, tangents)
 
         forward_ad_checks(flat_tangents)
 
