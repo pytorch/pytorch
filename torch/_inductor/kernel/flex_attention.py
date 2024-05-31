@@ -625,21 +625,19 @@ flex_attention_backward_template = TritonTemplate(
             lse = tl.load(LSE + offs_m1)
             qkT = tl.dot(k, qT)
             # ~~~~~~~~~~~~~~~~~~~ Apply score modification  ~~~~~~~~~~~~~~~~~~~
-            m = offs_m1[:, None]
-            n = offs_n1[None, :]
-            qk = tl.trans(qkT)
-            pre_mod_scores = qk
+            m = offs_m1[None, :]
+            n = offs_n1[:, None]
+            pre_mod_scores = qkT
             {{ modification(
                 subgraph_number=0,
                 output_name="post_mod_scores",
-                score="qk",
+                score="qkT",
                 b="off_z",
                 h="off_h",
                 m="m",
                 n="n",
-                out="qk"
+                out="qkT"
             ) | indent_except_first(3) }}
-            post_mod_scores = tl.trans(post_mod_scores)
             # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
             if not SCORE_MOD_IS_LINEAR:
                 post_mod_scores *= 1.44269504
@@ -652,9 +650,9 @@ flex_attention_backward_template = TritonTemplate(
             # Compute dP and dS.
             dpT = tl.dot(v, tl.trans(do))
             dsT = pT * (dpT - Di[None, :])
-
-            ds = tl.trans(dsT)
             # ~~~~~~~~~~~~~~~~~~~ Apply joint modification  ~~~~~~~~~~~~~~~~~~~
+            m = offs_m1[None, :]
+            n = offs_n1[:, None]
             {{ modification(
                 subgraph_number=1,
                 output_name = "grad_scores",
@@ -663,9 +661,9 @@ flex_attention_backward_template = TritonTemplate(
                 h="off_h",
                 m="m",
                 n="n",
-                grad_score_mod="ds"
+                grad_score_mod="dsT"
             ) | indent_except_first(3) }}
-            dsT = tl.trans(grad_scores)
+            dsT = grad_scores
             # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
             dk += tl.dot(dsT.to(MATMUL_PRECISION), tl.trans(qT))
             # Increment pointers.
