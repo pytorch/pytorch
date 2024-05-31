@@ -7,9 +7,8 @@ from abc import ABC, abstractmethod
 from enum import Enum
 from functools import partial
 from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
-from warnings import warn
-
 from typing_extensions import Self
+from warnings import warn
 
 import torch
 import torch.autograd.profiler as prof
@@ -847,6 +846,7 @@ class ExecutionTraceObserver(_ITraceObserver):
         if self._registered and not self._execution_trace_running:
             _enable_execution_trace_observer()
             self._execution_trace_running = True
+            self._record_pg_config()
 
     def stop(self):
         """
@@ -872,4 +872,17 @@ class ExecutionTraceObserver(_ITraceObserver):
             raise RuntimeError(
                 "A callback to the ET profiler needs to be registered "
                 "first before getting the output file path"
+            )
+
+    def _record_pg_config(self) -> None:
+        # Records the PG config info to the trace as node:
+        #  ## process_group:init ##
+        if (
+            self.is_registered
+            and torch.distributed.is_available()
+            and torch.distributed.is_initialized()
+        ):
+            pg_config_info = torch.distributed.distributed_c10d._world.pg_config_info
+            torch.autograd._record_function_with_args_enter(
+                "## process_group:init ##", json.dumps(pg_config_info)
             )

@@ -5,11 +5,11 @@ import sys
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Dict, Iterable, List, Literal, Set
+from typing_extensions import TypedDict  # Python 3.11+
 
 import generate_binary_build_matrix  # type: ignore[import]
 
 import jinja2
-from typing_extensions import TypedDict  # Python 3.11+
 
 Arch = Literal["windows", "linux", "macos"]
 

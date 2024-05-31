@@ -17,7 +17,8 @@ from torch.testing._internal.common_utils import (
     TestCase, run_tests, do_test_empty_full, TEST_WITH_ROCM, suppress_warnings,
     torch_to_numpy_dtype_dict, numpy_to_torch_dtype_dict, slowTest,
     set_default_dtype, set_default_tensor_type,
-    TEST_SCIPY, IS_MACOS, IS_PPC, IS_JETSON, IS_WINDOWS, parametrize, skipIfTorchDynamo)
+    TEST_SCIPY, IS_MACOS, IS_PPC, IS_JETSON, IS_WINDOWS, parametrize, skipIfTorchDynamo,
+    xfailIfTorchDynamo)
 from torch.testing._internal.common_device_type import (
     expectedFailureMeta, instantiate_device_type_tests, deviceCountAtLeast, onlyNativeDeviceTypes,
     onlyCPU, largeTensorTest, precisionOverride, dtypes,
@@ -1582,6 +1583,8 @@ class TestTensorCreation(TestCase):
         self.assertEqual(t.max(), True)
         self.assertTrue(0.4 < (t.eq(True)).to(torch.int).sum().item() / size < 0.6)
 
+    # https://github.com/pytorch/pytorch/issues/126834
+    @xfailIfTorchDynamo
     def test_random_from_to_bool(self, device):
         size = 2000
 
@@ -1661,7 +1664,9 @@ class TestTensorCreation(TestCase):
 
     # NB: uint64 is broken because its max value is not representable in
     # int64_t, but this is what random expects
-    @dtypes(*all_types_and(torch.bfloat16, torch.half, torch.uint16, torch.uint32))
+    # https://github.com/pytorch/pytorch/issues/126834
+    @xfailIfTorchDynamo
+    @dtypes(*all_types_and(torch.bfloat16, torch.half, torch .uint16, torch.uint32))
     def test_random_from_to(self, device, dtype):
         size = 2000
         alpha = 0.1
@@ -1750,6 +1755,8 @@ class TestTensorCreation(TestCase):
                         lambda: t.random_(from_, to_)
                     )
 
+    # https://github.com/pytorch/pytorch/issues/126834
+    @xfailIfTorchDynamo
     @dtypes(*all_types_and(torch.bfloat16, torch.half, torch.uint16, torch.uint32))
     def test_random_to(self, device, dtype):
         size = 2000
@@ -3350,6 +3357,8 @@ class TestRandomTensorCreation(TestCase):
             with self.assertRaisesRegex(RuntimeError, r'normal expects all elements of std >= 0.0'):
                 torch.normal(input, std)
 
+    # https://github.com/pytorch/pytorch/issues/126834
+    @xfailIfTorchDynamo
     @dtypes(torch.float, torch.double, torch.half)
     @dtypesIfCUDA(torch.float, torch.double, torch.half, torch.bfloat16)
     def test_uniform_from_to(self, device, dtype):
