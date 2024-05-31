@@ -198,7 +198,17 @@ inline std::string getKeyFromDevice(at::Device& device) {
 }
 
 inline at::DeviceIndex getIndexFromDeviceKey(const std::string& deviceKey) {
-  return static_cast<at::DeviceIndex>(std::stoi(deviceKey));
+  // initialize the device index to -1, which is an invalid value.
+  int index = -1;
+  try {
+    index = std::stoi(deviceKey);
+  } catch (const std::invalid_argument& e) {
+    LOG(WARNING) << c10::str(
+        "Invalid deviceKey: ", deviceKey, ",", e.what(), ".");
+  } catch (const std::out_of_range& e) {
+    LOG(ERROR) << "Out of range: " << e.what();
+  }
+  return static_cast<at::DeviceIndex>(index);
 }
 
 std::string getKeySendRecv(int myRank, int peer) {
@@ -1054,8 +1064,10 @@ void ProcessGroupNCCL::abortCommsFromMap(
     auto& devName = it.first;
     auto& ncclComm = it.second;
     at::cuda::OptionalCUDAGuard gpuGuard;
-    gpuGuard.set_index(getIndexFromDeviceKey(devName));
-
+    at::DeviceIndex deviceIndex = getIndexFromDeviceKey(devName);
+    if (deviceIndex >= 0) {
+      gpuGuard.set_index(deviceIndex);
+    }
     LOG(INFO) << logPrefix() << "ProcessGroupNCCL destroying ncclComm_ "
               << ncclComm->ncclComm_ << " on CUDA device: " << devName;
     ncclComm->ncclCommAbort(abortReason);
