@@ -414,7 +414,19 @@ def _config_checker(method: Callable) -> Callable:
 
 
 @dataclass
-class _QuantizationMode:
+class _CurrentQuantizationMode:
+    r"""Configuration defining the current quantization mode for the quantizer.
+
+    All possible current quantization modes are listed below:
+    ----------------------------------------------------------------------------------------------------------
+                |                                       is_dynamic
+        is_qat  |---------------------------------------------------------------------------------------------
+                |                           None                              |    True       |  False
+    ----------------------------------------------------------------------------------------------------------
+        None    | quantizer does not receive a non-None `quantization_config` | \             | \
+        False   | quantizer will not do QAT                                   | dynamic       | static
+        True    | quantizer will do QAT                                       | QAT + dynamic | QAT + static
+    """
     is_qat: Optional[bool]
     is_dynamic: Optional[bool]
 
@@ -453,7 +465,7 @@ class X86InductorQuantizer(Quantizer):
                 return ops
         return []
 
-    def _get_current_quantization_mode(self) -> _QuantizationMode:
+    def _get_current_quantization_mode(self) -> _CurrentQuantizationMode:
         """Retrieves the current quantization mode based on all configurations."""
         is_qat = None
         is_dynamic = None
@@ -468,7 +480,7 @@ class X86InductorQuantizer(Quantizer):
                 input_activation_spec = qconfig.input_activation
                 if input_activation_spec is not None:
                     is_dynamic = input_activation_spec.is_dynamic
-        return _QuantizationMode(is_qat=is_qat, is_dynamic=is_dynamic)
+        return _CurrentQuantizationMode(is_qat=is_qat, is_dynamic=is_dynamic)
 
     def _need_skip_config(
         self, quantization_config: Optional[QuantizationConfig]
@@ -476,7 +488,8 @@ class X86InductorQuantizer(Quantizer):
         """Check if the provided quantization config is valid for X86InductorQuantizer.
 
         Mixed static/dynamic configurations or mixed QAT/non-QAT configurations are not supported.
-        If such a mix is detected, the configuration will be marked for skipping..
+        To avoid such a mix, we compare the incoming configuration with current configuration status.
+        Refer the `_CurrentQuantizationMode` definition for all possible modes.
         """
         if quantization_config is None:
             return False
