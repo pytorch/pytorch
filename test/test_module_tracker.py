@@ -88,17 +88,17 @@ class TestModuleTracker(TestCase):
         mt = ModuleTracker()
         test_op = []
 
-        def hook(mod, mt, hook_name):
+        def hook(mod, hook_name):
             mfqn = mt.get_known_fqn(mod) if mod is not None else None
             test_op.append((hook_name, mfqn, mfqn in mt.parents, mt.is_bw))
 
         mod = Bar()
 
         mt.register_user_hooks(
-            lambda m, inp: hook(m, mt, "pre_fw"),
-            lambda m, inp, op: hook(m, mt, "post_fw"),
-            lambda m, gop: hook(m, mt, "pre_bw"),
-            lambda m, ginp: hook(m, mt, "post_bw"),
+            lambda m, inp: hook(m, "pre_fw"),
+            lambda m, inp, op: hook(m, "post_fw"),
+            lambda m, gop: hook(m, "pre_bw"),
+            lambda m, ginp: hook(m, "post_bw"),
         )
         with mt:
             mod(torch.rand(10, 10, requires_grad=True)).sum().backward()
