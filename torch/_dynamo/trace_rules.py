@@ -2292,7 +2292,6 @@ torch_non_c_binding_in_graph_functions = dict.fromkeys(
         "torch._linalg_utils._symeig",
         "torch._linalg_utils.basis",
         "torch._linalg_utils.bform",
-        "torch._linalg_utils.conjugate",
         "torch._linalg_utils.eig",
         "torch._linalg_utils.get_floating_dtype",
         "torch._linalg_utils.is_sparse",
@@ -2302,8 +2301,6 @@ torch_non_c_binding_in_graph_functions = dict.fromkeys(
         "torch._linalg_utils.qform",
         "torch._linalg_utils.solve",
         "torch._linalg_utils.symeig",
-        "torch._linalg_utils.transjugate",
-        "torch._linalg_utils.transpose",
         "torch._load_global_deps",
         "torch._lowrank._svd_lowrank",
         "torch._lowrank.get_approximate_basis",
@@ -3556,6 +3553,25 @@ def lookup_inner(
             if reasons is not None:
                 reasons.add("func name is __torch_function__")
             return UserFunctionVariable
+
+    if not is_direct_call:
+        if name == "__getattr__":
+            # is_direct_call = False indicates that this is the top-level frame
+            # being traced (i.e., it is not inlined and not called from
+            # InliningInstructionTranslator).  Tracing __getattr__ at the top
+            # level is unlikely because we inline it for
+            # UserDefinedObjectVariable. This scenario occurs only for
+            # UnspecializedNNModuleVariable, where Dynamo directly calls
+            # __getattr__ during trace time, generating LOAD_ATTR bytecode
+            # without going through the underlying __getattr__ data structures.
+            # When this optimized bytecode is executed, Dynamo is triggered
+            # again on the __getattr__ call. Therefore, we skip Dynamo tracing
+            # in this case.
+            if reasons is not None:
+                reasons.add(
+                    "Tracing __getattr__ as the top level frame, unsuitable for tracing."
+                )
+            return SkipFunctionVariable
 
     # Step 3: lookup obj's tracing rule by filename.
     if filename is None:
