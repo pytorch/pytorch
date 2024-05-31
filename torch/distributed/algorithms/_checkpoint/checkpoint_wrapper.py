@@ -233,7 +233,6 @@ def checkpoint_wrapper(
             f"Please specify {CheckpointImpl.NO_REENTRANT} as "
             f"{CheckpointImpl.REENTRANT} will soon be removed as "
             "the default and eventually deprecated.",
-            FutureWarning,
             stacklevel=1,
         )
     return CheckpointWrapper(

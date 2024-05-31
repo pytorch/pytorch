@@ -43,6 +43,7 @@ from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_utils import run_tests, TEST_WITH_DEV_DBG_ASAN
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
+    MultiProcessTestCase,
     with_comms,
 )
 from torch.testing._internal.distributed.common_state_dict import VerifyStateDictMixin
@@ -425,52 +426,6 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
         with self.assertRaisesRegex(RuntimeError, "Missing key"):
             set_model_state_dict(model, model_state_dict=model_state_dict)
 
-    @with_comms
-    @skip_if_lt_x_gpu(1)
-    def test_partial(self) -> None:
-        model = CompositeParamModel(device=torch.device("cuda"))
-
-        model_state_dict1 = get_model_state_dict(model)
-        model_state_dict1 = copy.deepcopy(model_state_dict1)
-        model_state_dict2 = get_model_state_dict(model, submodules={model.l})
-        model_state_dict2 = copy.deepcopy(model_state_dict2)
-        model_state_dict3 = get_model_state_dict(
-            model,
-            submodules={model.l},
-            options=StateDictOptions(keep_submodule_prefixes=False),
-        )
-        model_state_dict3 = copy.deepcopy(model_state_dict3)
-        self.assertEqual(len(model_state_dict2), 2)
-        self.assertEqual(len(model_state_dict3), 2)
-        for key in model_state_dict3.keys():
-            full_fqn = f"l.{key}"
-            value1 = model_state_dict1[full_fqn]
-            value2 = model_state_dict2[full_fqn]
-            value3 = model_state_dict3[key]
-            self.assertEqual(value1, value2)
-            self.assertEqual(value2, value3)
-
-        zeros_state_dict = {
-            k: torch.zeros_like(v) for k, v in model_state_dict1.items()
-        }
-        model.load_state_dict(zeros_state_dict)
-        set_model_state_dict(
-            model,
-            model_state_dict=model_state_dict2,
-            options=StateDictOptions(strict=False),
-        )
-        self.assertEqual(model.l.weight, model_state_dict1["l.weight"])
-        self.assertEqual(model.l.bias, model_state_dict1["l.bias"])
-
-        model.load_state_dict(zeros_state_dict)
-        set_model_state_dict(
-            model,
-            model_state_dict={model.l: model_state_dict3},
-            options=StateDictOptions(strict=False),
-        )
-        self.assertEqual(model.l.weight, model_state_dict1["l.weight"])
-        self.assertEqual(model.l.bias, model_state_dict1["l.bias"])
-
     def _test_cpu_offload_full_state_dict(
         self, optimizer_class: Type[Optimizer]
     ) -> None:
@@ -699,6 +654,7 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
 
     @with_comms
     @skip_if_lt_x_gpu(2)
+<<<<<<< HEAD
     def test_optim_state_dict_para_matching(self) -> None:
         # This test verifies parameters between optim and optim_state_dict
         # "initial_lr" is added to optim_state_dict, but not to the new optim
@@ -739,6 +695,59 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
         )
         if dist.get_rank() == 0:
             self.assertTrue("initial_lr" in optim.param_groups[0])
+=======
+    def test_flattened_osd(self) -> None:
+        device_mesh = init_device_mesh("cuda", (self.world_size,))
+        model = CompositeParamModel(device=torch.device("cuda"))
+        fsdp_model = FSDP2(copy.deepcopy(model), mesh=device_mesh)
+        fsdp_optim = torch.optim.AdamW(fsdp_model.parameters())
+        batch = torch.rand(8, 100, device="cuda")
+        fsdp_model(batch).sum().backward()
+        fsdp_optim.step()
+        fsdp_optim.zero_grad()
+        osd1 = get_optimizer_state_dict(fsdp_model, fsdp_optim)
+        osd2 = get_optimizer_state_dict(
+            fsdp_model,
+            fsdp_optim,
+            options=StateDictOptions(flatten_optimizer_state_dict=True),
+        )
+        fsdp_optim2 = torch.optim.AdamW(fsdp_model.parameters())
+        set_optimizer_state_dict(
+            fsdp_model, optimizers=fsdp_optim2, optim_state_dict=osd2
+        )
+        self.assertEqual(fsdp_optim.state_dict(), fsdp_optim2.state_dict())
+        set_optimizer_state_dict(
+            fsdp_model, optimizers=fsdp_optim2, optim_state_dict=osd1
+        )
+        self.assertEqual(fsdp_optim.state_dict(), fsdp_optim2.state_dict())
+
+
+class TestNoComm(MultiProcessTestCase):
+    def setUp(self) -> None:
+        super().setUp()
+        self._spawn_processes()
+
+    @skip_if_lt_x_gpu(1)
+    def test_no_dist(self) -> None:
+        model = CompositeParamModel(device=torch.device("cuda"))
+        optim = torch.optim.AdamW(model.parameters(), lr=1e-3)
+
+        self.assertFalse(dist.is_initialized())
+        msd = get_model_state_dict(
+            model, options=StateDictOptions(full_state_dict=True, cpu_offload=True)
+        )
+        for v in msd.values():
+            self.assertFalse(v.is_cuda)
+        self.assertEqual(model.state_dict(), msd)
+        set_model_state_dict(model, model.state_dict())
+        osd = get_optimizer_state_dict(
+            model,
+            optim,
+            options=StateDictOptions(full_state_dict=True, cpu_offload=True),
+        )
+        set_optimizer_state_dict(model, optim, osd)
+        set_optimizer_state_dict(model, optim, optim.state_dict())
+>>>>>>> 6bfc6e08759cf1fd7cf89916124285bf131b7168
 
 
 if __name__ == "__main__":

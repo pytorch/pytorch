@@ -14,7 +14,6 @@ from typing import (
     TypeVar,
     Union,
 )
-from typing_extensions import deprecated
 
 # No 'default_generator' in torch/__init__.pyi
 from torch import default_generator, randperm
@@ -349,11 +348,12 @@ class ConcatDataset(Dataset[T_co]):
         return self.datasets[dataset_idx][sample_idx]
 
     @property
-    @deprecated(
-        "`cummulative_sizes` attribute is renamed to `cumulative_sizes`",
-        category=FutureWarning,
-    )
     def cummulative_sizes(self):
+        warnings.warn(
+            "cummulative_sizes attribute is renamed to " "cumulative_sizes",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         return self.cumulative_sizes
 
 
