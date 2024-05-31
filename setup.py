@@ -1448,18 +1448,13 @@ def main():
                 modified_packages.append(DEFAULT_PACKAGE_NAME + package[len("torch") :])
         packages = modified_packages
         package_dir = {LIBTORCH_PKG_NAME: "torch"}
-        torch_package_dir_name = LIBTORCH_PKG_NAME
         package_data = {LIBTORCH_PKG_NAME: torch_package_data}
         extensions = []
     else:
-        torch_package_dir_name = "torch"
         package_dir = {}
         package_data = {
             "torch": torch_package_data,
             "torchgen": torchgen_package_data,
-            "caffe2": [
-                "python/serialized_test/data/operator_test/*.zip",
-            ],
         }
 
     setup(
