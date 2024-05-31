@@ -330,8 +330,8 @@ def rrelu_with_noise(
 def rrelu_with_noise_(
     self: Tensor,
     noise: Tensor,
-    lower: float,
-    upper: float,
+    lower: float = 0.125,
+    upper: float = 0.3333333333333333,
     training: bool = False,
     generator: Optional[torch.Generator] = None,
 ) -> Tensor:
@@ -2317,6 +2317,32 @@ def native_batch_norm_backward_out(
             _safe_copy_out(copy_from=r, copy_to=grad_input[i], exact_dtype=True)
 
     return grad_input
+
+
+@register_decomposition(aten.miopen_batch_norm_backward)
+@out_wrapper("out0", "out1", "out2")
+def miopen_batch_norm_backward(
+    input: Tensor,
+    grad_output: Tensor,
+    weight: Tensor,
+    running_mean: Optional[Tensor],
+    running_var: Optional[Tensor],
+    save_mean: Optional[Tensor],
+    save_var: Optional[Tensor],
+    epsilon: float,
+):
+    return aten.native_batch_norm_backward(
+        grad_output,
+        input,
+        weight,
+        running_mean,
+        running_var,
+        save_mean,
+        save_var,
+        True,
+        epsilon,
+        [True, True, True],
+    )
 
 
 @register_decomposition(aten.cudnn_batch_norm_backward)

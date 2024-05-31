@@ -2,7 +2,7 @@ import operator
 import traceback
 import typing
 from contextlib import nullcontext
-from typing import Any, Callable, Dict, List, NoReturn, Optional, Set, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
 
 import torch
 from functorch.experimental.control_flow import _unstack_pytree
@@ -54,6 +54,7 @@ class _ExportPassBaseDeprecatedDoNotUse(PassBase):
     def _create_dummy_node_metadata():
         return NodeMetadata({"stack_trace": "".join(traceback.format_stack(limit=1))})
 
+
     class ExportTracer(PythonKeyTracer):
         def __init__(self, callback: "_ExportPassBaseDeprecatedDoNotUse", codegen: CodeGen) -> None:
             super().__init__()
@@ -65,7 +66,7 @@ class _ExportPassBaseDeprecatedDoNotUse(PassBase):
             self.fake_tensor_mode: Optional[FakeTensorMode] = None
             self.submodules: Dict[torch.nn.Module, str] = {}
 
-        def trace(self) -> NoReturn:  # type: ignore[override]
+        def trace(self) -> None:
             raise ExportPassBaseError("ExportTracer doesn't support trace().")
 
         def create_arg(self, a: Argument) -> torch.fx.Node:
@@ -157,7 +158,7 @@ class _ExportPassBaseDeprecatedDoNotUse(PassBase):
 
         def placeholder(
             self,
-            target: str,  # type: ignore[override]
+            target: str,
             args: Tuple[Argument, ...],
             kwargs: Dict[str, Argument],
         ) -> ProxyValue:
@@ -215,10 +216,7 @@ class _ExportPassBaseDeprecatedDoNotUse(PassBase):
                 raise ExportPassBaseError(f"Unsupported target type: {target}")
 
         def get_attr(
-            self,
-            target: str,  # type: ignore[override]
-            args: Tuple[Argument, ...],
-            kwargs: Dict[str, Argument],
+            self, target: str, args: Tuple[Argument, ...], kwargs: Dict[str, Argument]
         ) -> Argument:
             return super().get_attr(target, args, kwargs)
 
@@ -231,10 +229,7 @@ class _ExportPassBaseDeprecatedDoNotUse(PassBase):
             raise ExportPassBaseError("call_module is not supported.")
 
         def call_method(
-            self,
-            target: str,  # type: ignore[override,misc]
-            args: Tuple[Argument, ...],
-            kwargs: Dict[str, Argument],
+            self, target: str, args: Tuple[Argument, ...], kwargs: Dict[str, Argument]
         ) -> None:
             raise ExportPassBaseError("call_method is not supported.")
 
@@ -244,7 +239,7 @@ class _ExportPassBaseDeprecatedDoNotUse(PassBase):
             return super().run_node(n)
 
     def __init__(self) -> None:
-        self.interpreter: torch.fx.Interpreter = PropagateUnbackedSymInts(
+        self.interpreter = PropagateUnbackedSymInts(
             torch.fx.GraphModule(torch.nn.Module(), torch.fx.Graph())
         )
         self.tracer = self.ExportTracer(self, CodeGen())

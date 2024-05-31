@@ -197,8 +197,8 @@ std::tuple<Tensor, Tensor, Tensor> layer_norm_backward_nested(
     IntArrayRef normalized_shape,
     const Tensor& mean,
     const Tensor& rstd,
-    const c10::optional<Tensor>& weight_opt /* optional */,
-    const c10::optional<Tensor>& bias_opt /*{ optional */,
+    const std::optional<Tensor>& weight_opt /* optional */,
+    const std::optional<Tensor>& bias_opt /*{ optional */,
     std::array<bool, 3> grad_input_mask) {
   // For NestedTensors weight and bias are non nested.
   auto* nt_impl_grad = get_nested_tensor_impl(grad);

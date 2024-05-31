@@ -19,6 +19,7 @@ from torch._prims_common import (
     corresponding_real_dtype,
     elementwise_dtypes,
     ELEMENTWISE_TYPE_PROMOTION_KIND,
+    FloatLike,
     IntLike,
     make_contiguous_strides_for,
     Number,
@@ -3175,8 +3176,8 @@ def register_meta_foreach(ops):
         aten._foreach_log10,
         aten._foreach_log1p,
         aten._foreach_log2,
+        aten._foreach_max,
         aten._foreach_neg,
-        aten._foreach_norm,
         aten._foreach_reciprocal,
         aten._foreach_round,
         aten._foreach_sigmoid,
@@ -3286,6 +3287,15 @@ def _meta_foreach_inplace(*args, _scalar_op=None, **kwargs):
     return
 
 
+@register_meta([aten._foreach_pow_.Scalar])
+def meta__foreach_pow__scalar(self, exponent):
+    torch._check(
+        isinstance(exponent, FloatLike),
+        lambda: f"exponent must be a float but got {type(exponent)}",
+    )
+    return
+
+
 @register_meta([aten._foreach_pow.ScalarAndTensor])
 def meta__foreach_pow_scalar_and_tensor(self, exponent):
     # Only foreach_pow has a ScalarAndTensor method and needs special
@@ -3295,6 +3305,30 @@ def meta__foreach_pow_scalar_and_tensor(self, exponent):
         lambda: f"exponent must be a tensor list but got {type(exponent)}",
     )
     return [torch.empty_like(e) for e in exponent]
+
+
+@register_meta([aten._foreach_norm])
+def meta__foreach_norm(self, ord=2, dtype=None):
+    torch._check(
+        isinstance(self, list),
+        lambda: f"self must be a tensor list but got {type(self)}",
+    )
+    torch._check(
+        isinstance(ord, Number),
+        lambda: f"ord must be an integer but got {type(ord)}",
+    )
+    torch._check(
+        dtype is None or isinstance(dtype, torch.dtype),
+        lambda: f"dtype must be either None or torch.dtype but got {type(dtype)}",
+    )
+    return [
+        torch.empty(
+            (),
+            device=t.device,
+            dtype=t.dtype.to_real() if dtype is None else dtype.to_real(),
+        )
+        for t in self
+    ]
 
 
 def _check_foreach_binop_tensor_lists(self, other):
@@ -5485,6 +5519,8 @@ def meta__flash_attention_backward(
     philox_seed: Tensor,
     philox_offset: Tensor,
     scale: Optional[float] = None,
+    window_size_left: Optional[int] = None,
+    window_size_right: Optional[int] = None,
 ):
     grad_query = torch.empty_like(query)
     grad_key = torch.empty_like(key)
@@ -5506,8 +5542,8 @@ def meta__efficient_attention_backward(
     bias: Optional[Tensor],
     cu_seqlens_q: Optional[Tensor],
     cu_seqlens_k: Optional[Tensor],
-    max_seqlen_q: int,
-    max_seqlen_k: int,
+    max_seqlen_q: torch.SymInt,
+    max_seqlen_k: torch.SymInt,
     logsumexp: Tensor,
     dropout_p: float,
     philox_seed: Tensor,
@@ -6221,6 +6257,49 @@ def _check_for_unsupported_isin_dtype(dtype):
     )
 
 
+@register_meta(aten._embedding_bag_dense_backward)
+def meta_embedding_bag_dense_backward(
+    grad,
+    indices,
+    offset2bag,
+    bag_size,
+    maximum_indices,
+    num_weights,
+    scale_grad_by_freq,
+    mode,
+    per_sample_weights,
+    padding_idx=-1,
+):
+    torch._check(
+        grad.dtype in [torch.float16, torch.bfloat16, torch.float32, torch.float64],
+        lambda: f"Unsupported input type encountered: {grad.dtype}",
+    )
+    MODE_SUM, MODE_MEAN, MODE_MAX = range(3)
+    if mode == MODE_MAX:
+        torch._check(maximum_indices is not None)
+    index_grad_weight = grad.new_empty((num_weights, grad.size(1)))
+    return index_grad_weight
+
+
+@register_meta(aten._embedding_bag_per_sample_weights_backward)
+def meta_embedding_bag_per_sample_weights_backward(
+    grad, weight, indices, offsets, offset2bag, mode, padding_idx=-1
+):
+    MODE_SUM, MODE_MEAN, MODE_MAX = range(3)
+    embedding_features = grad.size(1)
+    torch._check(
+        mode == MODE_SUM,
+        "embedding_bag_backward: per_sample_weights only supported for mode='sum'",
+    )
+    torch._check(grad.dim() == 2)
+    torch._check(indices.dim() == 1)
+    num_samples = indices.size(0)
+    torch._check(weight.dim() == 2)
+    torch._check(weight.size(1) == embedding_features)
+    output = grad.new_empty((num_samples,))
+    return output
+
+
 @register_meta(aten.isin)
 @out_wrapper()
 def meta_isin(elements, test_elements, *, assume_unique=False, invert=False):
@@ -6264,6 +6343,11 @@ def meta_channel_shuffle(input, groups):
         layout=input.layout,
         device=input.device,
     )
+
+
+@register_meta(aten._local_scalar_dense)
+def meta_local_scalar_dense(self: Tensor):
+    raise RuntimeError("Tensor.item() cannot be called on meta tensors")
 
 
 def _create_unary_float_meta_func(func):

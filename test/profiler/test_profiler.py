@@ -16,9 +16,12 @@ except ImportError:
 import collections
 import gc
 import json
+import mmap
 import os
 import pickle
+import random
 import re
+import struct
 import subprocess
 import sys
 import threading
@@ -29,6 +32,7 @@ from typing import List, Optional
 from unittest.mock import patch
 
 import expecttest
+
 import torch
 import torch.nn as nn
 import torch.optim
@@ -64,7 +68,9 @@ from torch.testing._internal.common_cuda import TEST_MULTIGPU
 from torch.testing._internal.common_device_type import skipCUDAVersionIn
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
+    IS_ARM64,
     IS_JETSON,
+    IS_LINUX,
     IS_WINDOWS,
     parametrize,
     run_tests,
@@ -1216,6 +1222,26 @@ class TestProfiler(TestCase):
                         f"Failed finding record funciont for op = {e}",
                     )
 
+    def test_profiler_strides(self):
+        torch._C._profiler._set_record_concrete_inputs_enabled_val(True)
+        base_tensor = torch.randn(1024, dtype=torch.float32)
+        a = base_tensor.as_strided((16, 16), (17, 1), 0)
+        b = base_tensor.as_strided((16, 16), (25, 2), 272)
+        with _profile(record_shapes=True) as prof:
+            c = torch.add(a, b)
+
+        with TemporaryFileName(mode="w+") as fname:
+            prof.export_chrome_trace(fname)
+            with open(fname) as f:
+                j = json.load(f)
+                op_events = [
+                    e for e in j["traceEvents"] if e.get("cat", "") == "cpu_op"
+                ]
+                for e in op_events:
+                    args = e["args"]
+                    if e["name"] == "aten::add":
+                        self.assertEqual(args["Input Strides"], [[17, 1], [25, 2], []])
+
     def test_profiler_fwd_bwd_link(self):
         with _profile(use_kineto=True) as prof:
             t1, t2 = torch.ones(1, requires_grad=True), torch.ones(
@@ -1770,6 +1796,29 @@ assert KinetoStepTracker.current_step() == initial_step + 2 * niters
                         WAIT_TIME + MARGIN_ERROR,
                         "profiling out of range",
                     )
+
+    def _schedule_helper(self, warmup, active, repeat):
+        with profile(
+            schedule=torch.profiler.schedule(
+                skip_first=0, wait=0, warmup=warmup, active=active, repeat=repeat
+            )
+        ) as prof:
+            for i in range(100):
+                torch.add(1, 2)
+                prof.step()
+        for ev in prof.key_averages():
+            if ev.key == "aten::add":
+                return ev.count
+        return 0
+
+    @skipIfTorchDynamo("profiler gets ignored if dynamo activated")
+    def test_schedule_function_count(self):
+        self.assertEqual(self._schedule_helper(warmup=0, active=1, repeat=1), 1)
+        self.assertEqual(self._schedule_helper(warmup=0, active=5, repeat=0), 100)
+        self.assertEqual(self._schedule_helper(warmup=0, active=5, repeat=10), 50)
+        self.assertEqual(self._schedule_helper(warmup=1, active=5, repeat=0), 83)
+        self.assertEqual(self._schedule_helper(warmup=10, active=10, repeat=4), 40)
+        self.assertEqual(self._schedule_helper(warmup=50, active=1, repeat=0), 1)
 
 
 class SimpleNet(nn.Module):
@@ -2392,6 +2441,70 @@ aten::mm""",
                 self.assertEqual(expected_fields, actual_fields)
         finally:
             os.remove("torchtidy_report.json")
+
+    @unittest.skipIf(IS_ARM64 or not IS_LINUX, "x86 linux only cpp unwinding")
+    def test_fuzz_symbolize(self):
+        # generate some random addresses in the text section and make sure the
+        # symbolizers do not throw exceptions/crash
+        def get_text_sections():
+            text_sections = []
+            seen = set()
+            for filename in os.listdir("/proc/self/map_files"):
+                library = os.readlink("/proc/self/map_files/" + filename)
+                if ".so" not in library or library in seen:
+                    continue
+                seen.add(library)
+                with open(os.path.join("/proc/self/map_files", library), "rb") as f:
+                    mm = mmap.mmap(f.fileno(), 0, prot=mmap.PROT_READ)
+
+                    def unpack(fmt, offset):
+                        return struct.unpack(
+                            fmt, mm[offset : offset + struct.calcsize(fmt)]
+                        )
+
+                    if mm[:4] != b"\x7fELF":
+                        continue
+                    (section_headers_start,) = unpack("Q", 40)
+                    (section_header_size,) = unpack("H", 58)
+                    (num_section_headers,) = unpack("H", 60)
+                    (shstrndx,) = unpack("H", 62)
+                    (shstrtab_offset,) = unpack(
+                        "Q", section_headers_start + shstrndx * section_header_size + 24
+                    )
+                    for i in range(num_section_headers):
+                        (section_name_offset,) = unpack(
+                            "I", section_headers_start + i * section_header_size
+                        )
+                        name_start = shstrtab_offset + section_name_offset
+                        section_name = mm[name_start : name_start + 6]
+                        if section_name != b".text\0":
+                            continue
+                        (section_offset,) = unpack(
+                            "Q", section_headers_start + i * section_header_size + 24
+                        )
+                        (section_size,) = unpack(
+                            "Q", section_headers_start + i * section_header_size + 32
+                        )
+                        start = int(filename.split("-")[0], 16) + section_offset
+                        text_sections.append((start, section_size))
+                        break
+                    mm.close()
+            return text_sections
+
+        r = random.Random()
+        r.seed(1)
+        text_sections = get_text_sections()
+        addrs = []
+        for i in range(200):
+            s = r.randrange(0, len(text_sections))
+            start, size = text_sections[s]
+            addr = r.randrange(start, start + size)
+            addrs.append(addr)
+        fast = torch._C._profiler.symbolize_addresses(addrs, "fast")
+        dladdr = torch._C._profiler.symbolize_addresses(addrs, "dladdr")
+        addr2line = torch._C._profiler.symbolize_addresses(addrs, "addr2line")
+        self.assertEqual(len(fast), len(addrs))
+        self.assertEqual(len(addr2line), len(fast))
 
 
 if __name__ == "__main__":

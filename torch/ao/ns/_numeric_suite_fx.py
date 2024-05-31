@@ -816,7 +816,7 @@ def prepare_n_shadows_model(
         tracer = custom_tracer
     mt = torch.fx.GraphModule(model, tracer.trace(model))
     # this is necessary to ensure logger FQNs get populated
-    mt._node_name_to_scope = tracer.node_name_to_scope  # type: ignore[assignment]
+    mt._node_name_to_scope = tracer.node_name_to_scope
 
     # run example input propagation, we need this to call prepare_fx on
     # individual subgraphs
@@ -906,7 +906,7 @@ def _prepare_n_shadows_add_loggers_model(
     tracer = quantize_fx.QuantizationTracer([], [])
     mt = torch.fx.GraphModule(model, tracer.trace(model))
     # this is necessary to ensure logger FQNs get populated
-    mt._node_name_to_scope = tracer.node_name_to_scope  # type: ignore[assignment]
+    mt._node_name_to_scope = tracer.node_name_to_scope
 
     # run example input propagation, we need this to call prepare_fx on
     # individual subgraphs

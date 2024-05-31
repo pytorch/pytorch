@@ -1,5 +1,5 @@
 import inspect
-from typing import Any, Callable, Dict, List, Optional, Set, TYPE_CHECKING
+from typing import Any, Callable, Dict, List, Optional, Set
 from collections import OrderedDict
 import logging
 
@@ -8,8 +8,6 @@ from torch.fx._compatibility import compatibility
 from torch.fx.graph_module import GraphModule
 from torch.fx.node import Node
 
-if TYPE_CHECKING:
-    import sympy  # noqa: F401
 
 __all__ = ["Partition", "split_module"]
 _LOGGER = logging.getLogger(__name__)
@@ -155,16 +153,14 @@ def split_module(
             )
             if keep_original_node_name:
                 args = () if default_value is inspect.Signature.empty else (default_value,)
-                base_mod_env[node.name] = base_mod_graph.create_node(
-                    'placeholder', node.name, args=args, type_expr=node.type  # type: ignore[arg-type]
-                )
+                base_mod_env[node.name] = base_mod_graph.create_node('placeholder', node.name, args=args, type_expr=node.type)
             else:
                 base_mod_env[node.name] = base_mod_graph.placeholder(
-                    node.target, type_expr=node.type, default_value=default_value  # type: ignore[arg-type]
+                    node.target, type_expr=node.type, default_value=default_value
                 )
             base_mod_env[node.name].meta = node.meta.copy()
         elif node.op == "get_attr":
-            base_mod_env[node.name] = base_mod_graph.get_attr(node.target)  # type: ignore[arg-type]
+            base_mod_env[node.name] = base_mod_graph.get_attr(node.target)
             base_mod_env[node.name].meta = node.meta.copy()
             attr_val = m
             for atom in node.target.split("."):  # type: ignore[union-attr]
@@ -174,9 +170,11 @@ def split_module(
             base_mod_attrs[node.target] = attr_val  # type: ignore[index]
         return base_mod_env, base_mod_attrs
 
+    import sympy
+
     partitions: Dict[str, Partition] = {}
     orig_nodes: Dict[str, Node] = {}
-    symbol_to_node: Dict["sympy.Symbol", Node] = {}
+    symbol_to_node: Dict[sympy.Symbol, Node] = {}
 
     def record_cross_partition_use(
         def_node: Node, use_node: Optional[Node]
@@ -238,8 +236,6 @@ def split_module(
 
     active_grad = None
     active_autocasts = set()
-
-    import sympy  # noqa: F811
 
     for node in m.graph.nodes:
         if node.op in ["placeholder", "get_attr", "output"]:
@@ -459,6 +455,11 @@ def split_module(
     )
 
     already_constructed_attr_nodes = set()
+
+    # We actually need to insert the placeholder nodes in the original order
+    # otherwise graph signature will be wrong.
+    original_order = [node for node in m.graph.nodes if node.op == "placeholder"]
+
     for partition_name in construct_order_partitions:
         partition = partitions[partition_name]
 
@@ -477,8 +478,17 @@ def split_module(
         if keep_original_order:
             # first get the attr nodes required by this partition
             orig_mod_attr_nodes: List[Node] = [
-                orig_mod_env[key] for key in partition.inputs
+                orig_mod_env[key] for key in partition.inputs if key not in original_order
             ]
+
+            for node in original_order:
+                if node in already_constructed_attr_nodes:
+                    continue  # already added this attr to the base graph
+                base_mod_env, based_mod_attrs = construct_graph(
+                    node, base_mod_env, base_mod_attrs
+                )
+                already_constructed_attr_nodes.add(node)
+
             # Construct GraphModule for this partition
             for node in orig_mod_attr_nodes:  # type: ignore[attr-defined]
                 if node in already_constructed_attr_nodes:

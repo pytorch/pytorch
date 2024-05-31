@@ -1,27 +1,48 @@
 # Owner(s): ["module: typing"]
 
-from torch.testing._internal.common_utils import TestCase, run_tests, TEST_NUMPY, load_tests, set_default_dtype
+from torch.testing._internal.common_utils import (
+    load_tests,
+    run_tests,
+    set_default_dtype,
+    TEST_NUMPY,
+    TestCase,
+)
 
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
 load_tests = load_tests
 
 import sys
-import torch
 import unittest
+
+import torch
 
 if TEST_NUMPY:
     import numpy as np
 
 
 class TestDTypeInfo(TestCase):
-
     def test_invalid_input(self):
-        for dtype in [torch.float16, torch.float32, torch.float64, torch.bfloat16, torch.complex64, torch.complex128, torch.bool]:
+        for dtype in [
+            torch.float16,
+            torch.float32,
+            torch.float64,
+            torch.bfloat16,
+            torch.complex64,
+            torch.complex128,
+            torch.bool,
+        ]:
             with self.assertRaises(TypeError):
                 _ = torch.iinfo(dtype)
 
-        for dtype in [torch.int64, torch.int32, torch.int16, torch.int8, torch.uint8, torch.bool]:
+        for dtype in [
+            torch.int64,
+            torch.int32,
+            torch.int16,
+            torch.int8,
+            torch.uint8,
+            torch.bool,
+        ]:
             with self.assertRaises(TypeError):
                 _ = torch.finfo(dtype)
             with self.assertRaises(RuntimeError):
@@ -41,7 +62,13 @@ class TestDTypeInfo(TestCase):
 
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     def test_finfo(self):
-        for dtype in [torch.float16, torch.float32, torch.float64, torch.complex64, torch.complex128]:
+        for dtype in [
+            torch.float16,
+            torch.float32,
+            torch.float64,
+            torch.complex64,
+            torch.complex128,
+        ]:
             x = torch.zeros((2, 2), dtype=dtype)
             xinfo = torch.finfo(x.dtype)
             xn = x.cpu().numpy()
@@ -61,8 +88,8 @@ class TestDTypeInfo(TestCase):
         x = torch.zeros((2, 2), dtype=torch.bfloat16)
         xinfo = torch.finfo(x.dtype)
         self.assertEqual(xinfo.bits, 16)
-        self.assertEqual(xinfo.max, 3.38953e+38)
-        self.assertEqual(xinfo.min, -3.38953e+38)
+        self.assertEqual(xinfo.max, 3.38953e38)
+        self.assertEqual(xinfo.min, -3.38953e38)
         self.assertEqual(xinfo.eps, 0.0078125)
         self.assertEqual(xinfo.tiny, 1.17549e-38)
         self.assertEqual(xinfo.tiny, xinfo.smallest_normal)
@@ -76,7 +103,7 @@ class TestDTypeInfo(TestCase):
         self.assertEqual(xinfo.bits, 8)
         self.assertEqual(xinfo.max, 57344.0)
         self.assertEqual(xinfo.min, -57344.0)
-        self.assertEqual(xinfo.eps, .25)
+        self.assertEqual(xinfo.eps, 0.25)
         self.assertEqual(xinfo.tiny, 6.10352e-05)
         self.assertEqual(xinfo.resolution, 1.0)
         self.assertEqual(xinfo.dtype, "float8_e5m2")
@@ -86,7 +113,7 @@ class TestDTypeInfo(TestCase):
         self.assertEqual(xinfo.bits, 8)
         self.assertEqual(xinfo.max, 448.0)
         self.assertEqual(xinfo.min, -448.0)
-        self.assertEqual(xinfo.eps, .125)
+        self.assertEqual(xinfo.eps, 0.125)
         self.assertEqual(xinfo.tiny, 0.015625)
         self.assertEqual(xinfo.resolution, 1.0)
         self.assertEqual(xinfo.dtype, "float8_e4m3fn")
@@ -111,6 +138,7 @@ class TestDTypeInfo(TestCase):
         self.assertEqual(torch.complex64.to_real(), torch.float32)
         self.assertEqual(torch.complex32.to_real(), torch.float16)
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     TestCase._default_dtype_check_enabled = True
     run_tests()

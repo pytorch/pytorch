@@ -30,7 +30,6 @@ from typing import (
     TypeVar,
     Union,
 )
-
 from typing_extensions import Self
 
 import torch
@@ -814,7 +813,7 @@ class ONNXProgram:
             ...         )  # Mutate buffer through in-place addition
             ...         return output
             >>> inputs = (torch.rand((64, 1, 28, 28), dtype=torch.float32), torch.randn(3))
-            >>> exported_program = torch.export.export(CustomModule(), args=inputs)
+            >>> exported_program = torch.export.export(CustomModule(), args=inputs).run_decompositions({})
             >>> onnx_program = torch.onnx.dynamo_export(exported_program, *inputs)
             >>> pprint.pprint(onnx_program.model_signature)
             ExportGraphSignature(input_specs=[InputSpec(kind=<InputKind.PARAMETER: 2>,
@@ -1276,6 +1275,12 @@ class Exporter:
                 warnings.warn(
                     "ONNXScript optimizer is not available. Skipping optimization. "
                     "Please `pip install onnxscript -U` to enable post-export optimization."
+                )
+            except Exception as e:
+                warnings.warn(
+                    "ONNXScript optimizer failed. Skipping optimization. "
+                    "\n\nPLEASE REPORT A BUG AT https://github.com/microsoft/onnxscript/issues "
+                    f"\n\nDetail:\n{e}"
                 )
 
             return torch.onnx.ONNXProgram(

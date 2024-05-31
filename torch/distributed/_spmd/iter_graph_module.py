@@ -365,16 +365,14 @@ class IterGraph(fx.Graph):
             actual_target_node = self._lookup_node(target_node, graph)
             assert actual_target_node is not None
             for actual_node in actual_nodes:
-                assert actual_node is not None
                 actual_target_node.prepend(actual_node)
 
     def move_after(self, nodes: List[fx.Node], target_node: fx.Node) -> None:
         for graph in self._all_graphs:
             actual_nodes = [self._lookup_node(node, graph) for node in nodes]
             actual_target_node = self._lookup_node(target_node, graph)
-            assert actual_target_node is not None
             for actual_node in actual_nodes:
-                assert actual_node is not None
+                assert actual_target_node is not None
                 actual_target_node.append(actual_node)
                 actual_target_node = actual_node
 
@@ -433,7 +431,7 @@ class IterGraph(fx.Graph):
         self.setup_graph.erase_node(setup_node)
         super().erase_node(to_erase)
         cleanup_node = self._lookup_node(to_erase, self.cleanup_graph)
-        self.cleanup_graph.erase_node(cleanup_node)  # type: ignore[arg-type]
+        self.cleanup_graph.erase_node(cleanup_node)
 
     def placeholder(
         self,
@@ -558,7 +556,6 @@ class IterGraph(fx.Graph):
             actual_node = self._lookup_node(node, graph)
             actual_replace_with = self._lookup_node(replace_with, graph)
             assert actual_node is not None
-            assert actual_replace_with is not None
             ret = actual_node.replace_all_uses_with(
                 actual_replace_with,
                 delete_user_cb,

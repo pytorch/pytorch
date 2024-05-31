@@ -178,7 +178,7 @@ static inline Variable applySlicing(
     variable_list& outIndices,
     bool is_tracing,
     const at::Device& self_device,
-    const c10::optional<int64_t>& self_ndim,
+    const std::optional<int64_t>& self_ndim,
     int64_t specified_dims) {
   int64_t size =
       PyTuple_GET_SIZE(index); // NOLINT(cppcoreguidelines-pro-type-cstyle-cast)
@@ -200,9 +200,9 @@ static inline Variable applySlicing(
     // nested tensor does not have a size (yet) so for now we represent its size
     // as null may need to be changed after we reach a better solution for
     // nested tensor size
-    c10::optional<SymIntArrayRef> result_sizes = result.is_nested()
-        ? c10::optional<SymIntArrayRef>(c10::nullopt)
-        : c10::optional<SymIntArrayRef>(result.sym_sizes());
+    std::optional<SymIntArrayRef> result_sizes = result.is_nested()
+        ? std::optional<SymIntArrayRef>(c10::nullopt)
+        : std::optional<SymIntArrayRef>(result.sym_sizes());
     result = at::indexing::handleDimInMultiDimIndexing(
         /*prev_dim_result=*/result,
         /*original_tensor=*/self,

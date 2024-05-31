@@ -2,6 +2,8 @@
 
 import sys
 
+import unittest
+
 from torch.testing._internal.common_utils import IS_CI, IS_WINDOWS, skipIfRocm
 from torch.testing._internal.inductor_utils import HAS_CUDA
 
@@ -13,14 +15,12 @@ if IS_WINDOWS and IS_CI:
         sys.exit(0)
     raise unittest.SkipTest("requires sympy/functorch/filelock")  # noqa: F821
 
-import unittest
-
 import torch
-from test_torchinductor import run_and_get_cpp_code
 from torch._C import FileCheck
 from torch._dynamo.utils import same
 from torch._inductor import config
 from torch._inductor.test_case import run_tests, TestCase
+from torch._inductor.utils import run_and_get_cpp_code
 from torch.export import Dim
 from torch.utils._triton import has_triton
 

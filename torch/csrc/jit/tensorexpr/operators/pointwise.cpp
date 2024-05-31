@@ -10,7 +10,7 @@ using namespace torch::jit::tensorexpr;
 Tensor computeSign(
     const std::vector<ArgValue>& inputValues,
     const std::vector<ExprHandle>& outputShape,
-    c10::optional<std::vector<ExprHandle>> outputStrides) {
+    std::optional<std::vector<ExprHandle>> outputStrides) {
   return Compute(
       "aten_sign", outputShape, outputStrides, [&](ParameterList& axes) {
         std::vector<ExprHandle> indices(axes.begin(), axes.end());
@@ -28,7 +28,7 @@ Tensor computeOneOperand(
     const std::vector<ArgValue>& inputValues,
     const std::vector<ExprHandle>& outputShape,
     const std::vector<ExprHandle>& outputStrides,
-    const c10::optional<ScalarType>& outputType,
+    const std::optional<ScalarType>& outputType,
     const std::function<ExprHandle(const ExprHandle&)>& innerExpr,
     const int checkParamTypes) {
   return Compute(
@@ -51,7 +51,7 @@ Tensor computeTwoOperand(
     const std::vector<ArgValue>& inputValues,
     const std::vector<ExprHandle>& outputShape,
     const std::vector<ExprHandle>& outputStrides,
-    const c10::optional<ScalarType>& outputType,
+    const std::optional<ScalarType>& outputType,
     const std::function<ExprHandle(const ExprHandle&, const ExprHandle&)>&
         innerExpr) {
   return Compute(
@@ -76,7 +76,7 @@ Tensor computeTwoOperandWithAlpha(
     const std::vector<ArgValue>& inputValues,
     const std::vector<ExprHandle>& outputShape,
     const std::vector<ExprHandle>& outputStrides,
-    const c10::optional<ScalarType>& outputType,
+    const std::optional<ScalarType>& outputType,
     const std::function<ExprHandle(const ExprHandle&, const ExprHandle&)>&
         innerExpr) {
   return Compute(
@@ -102,7 +102,7 @@ Tensor computeConditionWithTwoOperand(
     const std::vector<ArgValue>& inputValues,
     const std::vector<ExprHandle>& outputShape,
     const std::vector<ExprHandle>& outputStrides,
-    const c10::optional<ScalarType>& outputType,
+    const std::optional<ScalarType>& outputType,
     const std::function<
         ExprHandle(const ExprHandle&, const ExprHandle&, const ExprHandle&)>&
         innerExpr) {
@@ -131,7 +131,7 @@ Tensor computeThreeOperand(
     const std::vector<ArgValue>& inputValues,
     const std::vector<ExprHandle>& outputShape,
     const std::vector<ExprHandle>& outputStrides,
-    const c10::optional<ScalarType>& outputType,
+    const std::optional<ScalarType>& outputType,
     const std::function<
         ExprHandle(const ExprHandle&, const ExprHandle&, const ExprHandle&)>&
         innerExpr,
@@ -161,7 +161,7 @@ Tensor computeFourOperand(
     const std::vector<ArgValue>& inputValues,
     const std::vector<ExprHandle>& outputShape,
     const std::vector<ExprHandle>& outputStrides,
-    const c10::optional<ScalarType>& outputType,
+    const std::optional<ScalarType>& outputType,
     const std::function<ExprHandle(
         const ExprHandle&,
         const ExprHandle&,
@@ -191,7 +191,7 @@ Tensor computeNoop(
     const std::vector<ArgValue>& inputValues,
     const std::vector<ExprHandle>& outputShape,
     const std::vector<ExprHandle>& outputStrides,
-    const c10::optional<ScalarType>& outputType,
+    const std::optional<ScalarType>& outputType,
     at::Device device) {
   return computeOneOperand(
       "copy",
@@ -207,7 +207,7 @@ Tensor computeScalar(
     const std::vector<ArgValue>& inputValues,
     const std::vector<ExprHandle>& outputShape,
     const std::vector<ExprHandle>& outputStrides,
-    const c10::optional<ScalarType>& outputType,
+    const std::optional<ScalarType>& outputType,
     const std::function<ExprHandle(const ExprHandle&, const ExprHandle&)>&
         innerExpr) {
   auto dt = Dtype(*outputType);

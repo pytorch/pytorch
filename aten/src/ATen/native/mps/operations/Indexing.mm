@@ -299,7 +299,7 @@ Tensor& nonzero_out_mps(const Tensor& self, Tensor& out_) {
     return out_;
   }
 
-  bool contiguous_output = out_.is_contiguous();
+  bool contiguous_output = !needsGather(out_);
   Tensor out = out_;
   if (!contiguous_output) {
     out = at::empty(out_.sizes(), out_.scalar_type(), c10::nullopt, kMPS, c10::nullopt, c10::nullopt);

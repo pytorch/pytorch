@@ -19,7 +19,7 @@ namespace onnx_constant_fold {
 
 at::Tensor IntToTensor(int64_t value);
 
-c10::optional<at::Tensor> runTorchBackendForOnnx(
+std::optional<at::Tensor> runTorchBackendForOnnx(
     const Node* node,
     std::vector<at::Tensor>& inputTensorValues,
     int opset_version);

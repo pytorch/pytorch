@@ -1,20 +1,33 @@
 import contextlib
+from typing import Optional
 
 import torch
 
 
 _TORCHBIND_IMPLS_INITIALIZED = False
 
+_TENSOR_QUEUE_GLOBAL_TEST: Optional[torch.ScriptObject] = None
+
 
 def init_torchbind_implementations():
     global _TORCHBIND_IMPLS_INITIALIZED
+    global _TENSOR_QUEUE_GLOBAL_TEST
     if _TORCHBIND_IMPLS_INITIALIZED:
         return
 
     load_torchbind_test_lib()
     register_fake_operators()
     register_fake_classes()
+    _TENSOR_QUEUE_GLOBAL_TEST = _empty_tensor_queue()
     _TORCHBIND_IMPLS_INITIALIZED = True
+
+
+def _empty_tensor_queue() -> torch.ScriptObject:
+    return torch.classes._TorchScriptTesting._TensorQueue(
+        torch.empty(
+            0,
+        ).fill_(-1)
+    )
 
 
 # put these under a function because the corresponding library might not be loaded yet.
@@ -67,25 +80,23 @@ def register_fake_classes():
             self.y = y
 
         @classmethod
-        def from_real(cls, foo):
-            (x, y), _ = foo.__getstate__()
-            return cls(x, y)
+        def __obj_unflatten__(cls, flattend_foo):
+            return cls(**dict(flattend_foo))
 
         def add_tensor(self, z):
             return (self.x + self.y) * z
 
     @torch._library.register_fake_class("_TorchScriptTesting::_ContainsTensor")
     class FakeContainsTensor:
-        def __init__(self, x: torch.Tensor):
-            self.x = x
+        def __init__(self, t: torch.Tensor):
+            self.t = t
 
         @classmethod
-        def from_real(cls, foo):
-            ctx = torch.library.get_ctx()
-            return cls(ctx.to_fake_tensor(foo.get()))
+        def __obj_unflatten__(cls, flattend_foo):
+            return cls(**dict(flattend_foo))
 
         def get(self):
-            return self.x
+            return self.t
 
 
 def load_torchbind_test_lib():

@@ -26,6 +26,7 @@ ENDIF(LAPACK_FIND_QUIETLY OR NOT LAPACK_FIND_REQUIRED)
 
 # Old search lapack script
 include(CheckFortranFunctionExists)
+include(CheckFunctionExists)
 
 macro(Check_Lapack_Libraries LIBRARIES _prefix _name _flags _list _blas)
   # This macro checks for the existence of the combination of fortran libraries

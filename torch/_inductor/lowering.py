@@ -15,7 +15,6 @@ import torch
 import torch.ao.quantization.fx._decomposed
 import torch.fx
 import torch.utils._pytree as pytree
-from torch._dynamo.create_parameter_op import _bind_nn_parameter
 from torch._higher_order_ops.associative_scan import associative_scan_op
 from torch._higher_order_ops.triton_kernel_wrap import (
     triton_kernel_wrapper_functional,
@@ -893,7 +892,7 @@ def repeat(x, repeats):
     if zero_tensor:
         return empty(new_size, dtype=x.get_dtype(), device=x.get_device())
     if all((a == 1 or b == 1) for a, b in zip(repeats, old_size)):
-        return expand(x, new_size)
+        return clone(expand(x, new_size))
 
     x_loader: Callable[[Any], Any]
 
@@ -1144,6 +1143,170 @@ def quantized_decomposed_dequantize_per_channel(
     )
 
 
+@register_lowering(
+    quantized_decomposed.quantize_per_tensor.default, type_promotion_kind=None
+)
+def quantized_decomposed_quantize_per_tensor_default(
+    input: TensorBox,
+    scale: float,
+    zero_point: int,
+    quant_min: int,
+    quant_max: int,
+    dtype: torch.dtype,
+) -> TensorBox:
+    if input.get_dtype() == torch.bfloat16:
+        input = to_dtype(input, torch.float32)
+    assert (
+        input.get_dtype() == torch.float32
+    ), f"Expecting input to have dtype torch.float32, but got dtype: {input.get_dtype()}"
+
+    input_loader = input.make_loader()
+
+    def inner_fn(idx, scale, zero_point):
+        input = input_loader(idx)
+        inv_scale, zero_point = _create_constants(
+            1.0 / scale, zero_point, dtype=torch.float32
+        )
+        val = ops.round(input * inv_scale) + zero_point
+        qmin, qmax = _create_constants(quant_min, quant_max, dtype=torch.float32)
+        clamped = ops.minimum(ops.maximum(val, qmin), qmax)
+        return ops.to_dtype(clamped, dtype)
+
+    return Pointwise.create(
+        device=input.get_device(),
+        dtype=dtype,
+        inner_fn=functools.partial(
+            inner_fn, scale=float(scale), zero_point=int(zero_point)
+        ),
+        ranges=input.get_size(),
+    )
+
+
+@register_lowering(
+    quantized_decomposed.dequantize_per_tensor.default, type_promotion_kind=None
+)
+def quantized_decomposed_dequantize_per_tensor_default(
+    input: TensorBox,
+    scale: float,
+    zero_point: int,
+    quant_min: int,
+    quant_max: int,
+    dtype: torch.dtype,
+) -> TensorBox:
+    assert (
+        input.get_dtype() == dtype
+    ), f"Expecting input to have dtype {dtype}, but got dtype: {input.get_dtype()}"
+
+    input_loader = input.make_loader()
+
+    def inner_fn(idx, scale, zero_point):
+        input = input_loader(idx)
+        scale, zero_point = _create_constants(scale, zero_point, dtype=torch.float32)
+        val = ops.sub(ops.to_dtype(input, torch.float32), zero_point) * scale
+        return val
+
+    return Pointwise.create(
+        device=input.get_device(),
+        dtype=torch.float32,
+        inner_fn=functools.partial(
+            inner_fn, scale=float(scale), zero_point=int(zero_point)
+        ),
+        ranges=input.get_size(),
+    )
+
+
+@register_lowering(
+    quantized_decomposed.quantize_per_tensor.tensor, type_promotion_kind=None
+)
+def quantized_decomposed_quantize_per_tensor_tensor(
+    input: TensorBox,
+    scale: TensorBox,
+    zero_point: TensorBox,
+    quant_min: int,
+    quant_max: int,
+    dtype: torch.dtype,
+) -> TensorBox:
+    if input.get_dtype() == torch.bfloat16:
+        input = to_dtype(input, torch.float32)
+    assert (
+        input.get_dtype() == torch.float32
+    ), f"Expecting input to have dtype torch.float32, but got dtype: {input.get_dtype()}"
+    assert len(scale.get_size()) == 0 or (
+        len(scale.get_size()) == 1 and scale.get_size()[0] == 1
+    ), "expect scale as scalar tensor"
+    assert len(zero_point.get_size()) == 0 or (
+        len(zero_point.get_size()) == 1 and zero_point.get_size()[0] == 1
+    ), "expect zero_point as scalar tensor"
+
+    input_loader = input.make_loader()
+    scale_loader = scale.make_loader()
+    zero_point_loader = zero_point.make_loader()
+
+    def inner_fn(idx):
+        input = input_loader(idx)
+        _scale = scale_loader((0,) if len(scale.get_size()) == 1 else ())
+        _zero_point = zero_point_loader((0,) if len(scale.get_size()) == 1 else ())
+        if scale.dtype != torch.float32:
+            _scale = ops.to_dtype(_scale, torch.float32)
+        if zero_point.dtype != torch.float32:
+            _zero_point = ops.to_dtype(_zero_point, torch.float32)
+        val = ops.round(input * ops.reciprocal(_scale)) + _zero_point
+        qmin, qmax = _create_constants(quant_min, quant_max, dtype=torch.float32)
+        clamped = ops.minimum(ops.maximum(val, qmin), qmax)
+        return ops.to_dtype(clamped, dtype)
+
+    return Pointwise.create(
+        device=input.get_device(),
+        dtype=dtype,
+        inner_fn=inner_fn,
+        ranges=input.get_size(),
+    )
+
+
+@register_lowering(
+    quantized_decomposed.dequantize_per_tensor.tensor, type_promotion_kind=None
+)
+def quantized_decomposed_dequantize_per_tensor_tensor(
+    input: TensorBox,
+    scale: TensorBox,
+    zero_point: TensorBox,
+    quant_min: int,
+    quant_max: int,
+    dtype: torch.dtype,
+) -> TensorBox:
+    assert len(scale.get_size()) == 0 or (
+        len(scale.get_size()) == 1 and scale.get_size()[0] == 1
+    ), "expect scale as scalar tensor"
+    assert len(zero_point.get_size()) == 0 or (
+        len(zero_point.get_size()) == 1 and zero_point.get_size()[0] == 1
+    ), "expect zero_point as scalar tensor"
+    assert (
+        input.get_dtype() == dtype
+    ), f"Expecting input to have dtype {dtype}, but got dtype: {input.get_dtype()}"
+
+    input_loader = input.make_loader()
+    scale_loader = scale.make_loader()
+    zero_point_loader = zero_point.make_loader()
+
+    def inner_fn(idx):
+        input = input_loader(idx)
+        _scale = scale_loader((0,) if len(scale.get_size()) == 1 else ())
+        _zero_point = zero_point_loader((0,) if len(scale.get_size()) == 1 else ())
+        if scale.dtype != torch.float32:
+            _scale = ops.to_dtype(_scale, torch.float32)
+        if zero_point.dtype != torch.float32:
+            _zero_point = ops.to_dtype(_zero_point, torch.float32)
+        val = ops.sub(ops.to_dtype(input, torch.float32), _zero_point) * _scale
+        return val
+
+    return Pointwise.create(
+        device=input.get_device(),
+        dtype=torch.float32,
+        inner_fn=inner_fn,
+        ranges=input.get_size(),
+    )
+
+
 @register_lowering(aten.cat)
 def cat(inputs, dim=0):
     cpu_device = inputs[0].get_device().type == "cpu"
@@ -1179,21 +1342,6 @@ def cat(inputs, dim=0):
 
         return x
 
-    def should_lower_cat_input(x) -> bool:
-        # Unrealized inputs will not be storage and layouts, and we dont want to realize
-        # them in case we want to fuse
-        if ir.is_storage_and_layout(x):
-            storage, _ = ir.as_storage_and_layout(x, freeze=False)
-            return not ir.ConcatKernel.can_realize_into_without_copy(storage)
-
-        if isinstance(x, (TensorBox, ir.StorageBox)):
-            return should_lower_cat_input(unwrap_tensor(x))
-
-        if isinstance(x, ir.Pointwise):
-            return True
-
-        return False
-
     def is_reduction(t):
         return isinstance(t, ir.ComputedBuffer) and isinstance(t.data, ir.Reduction)
 
@@ -1212,9 +1360,24 @@ def cat(inputs, dim=0):
     # fusing reducutions into computed concat buffer can cause regressions.
     fusable_reduction = any(can_fuse_reduction(t) for t in inputs)
 
+    def should_lower_cat_input(x) -> bool:
+        # Unrealized inputs will not be storage and layouts, and we dont want to realize
+        # them in case we want to fuse
+        if ir.is_storage_and_layout(x):
+            storage, _ = ir.as_storage_and_layout(x, freeze=False)
+            return not ir.ConcatKernel.can_realize_into_without_copy(storage)
+
+        if isinstance(x, (TensorBox, ir.StorageBox)):
+            return should_lower_cat_input(unwrap_tensor(x))
+
+        if isinstance(x, ir.Pointwise):
+            return True
+
+        return False
+
     # TODO: We observed negative performance impact of pointwise_cat optimization on CPU so disabled it.
     #             We will revisit this later after enabling vectorization on index_expr.
-    if cpu_device or fusable_reduction:
+    if cpu_device:
         return TensorBox(ir.ConcatKernel.create(inputs, dim))
 
     def op_count(x):
@@ -1243,10 +1406,18 @@ def cat(inputs, dim=0):
         and all(op_count(t) <= MAX_SIMPLE_OP_COUNT for t in inputs)
     ):
         pointwise_uses = all(is_pointwise_use(use) for use in V.current_node.users)
-        all_pointwise_inputs = all(should_lower_cat_input(inp) for inp in inputs)
-        any_pointwise_inputs = any(should_lower_cat_input(inp) for inp in inputs)
+        # fuse in case we will be used in a pointwise node, and there are any inputs we
+        # we can prevent materialization of.
+        fuse_pointwise_use = (
+            any(should_lower_cat_input(inp) for inp in inputs) and pointwise_uses
+        )
 
-        if all_pointwise_inputs or (any_pointwise_inputs and pointwise_uses):
+        # horizontal fuse in case all inputs will require a copy kernel anyway.
+        # only horizontally fuse pointwise kernels
+        horizontal_fuse_cat = all(
+            should_lower_cat_input(inp) for inp in inputs
+        ) and not any(can_fuse_reduction(t) for t in inputs)
+        if fuse_pointwise_use or (horizontal_fuse_cat and not fusable_reduction):
             return pointwise_cat(inputs, dim)
 
     return TensorBox(ir.ConcatKernel.create(inputs, dim))
@@ -1617,7 +1788,12 @@ def bernoulli_(x, *args):
         "cpu"
     ), "this should be handled in decomps unless config.fallback_random or the device is CPU"
     x.realize()
-    ir.InplaceBernoulliFallback(x, *args)
+    op_overload = (
+        aten.bernoulli_.float
+        if len(args) == 0 or isinstance(args[0], float)
+        else aten.bernoulli_.Tensor
+    )
+    ir.InplaceBernoulliFallback(op_overload, x, *args)
     return x
 
 
@@ -3032,7 +3208,6 @@ def scatter_fallback(
 @register_lowering(aten.scatter_, type_promotion_kind=None)
 def scatter_(self, dim: int, index, src, *, reduce: Optional[str] = None):
     assert reduce in {None, "add", "multiply"}
-
     if reduce is None:
         op_overload = getattr(aten.scatter_, V.graph.current_node.target._overloadname)  # type: ignore[union-attr]
         fallback_result = scatter_fallback(
@@ -3066,7 +3241,6 @@ def scatter_reduce(x, dim: int, index, src, reduction_type, **kwargs):
 @register_lowering(aten.scatter_reduce_, type_promotion_kind=None)
 def scatter_reduce_(self, dim: int, index, src, reduce, *, include_self: bool = True):
     assert reduce in {None, "sum", "prod", "mean", "amax", "amin"}
-
     assert (
         len(aten.scatter_reduce_.overloads()) == 1
         and "two" in aten.scatter_reduce_.overloads()
@@ -3511,15 +3685,14 @@ def pooling_size(x, i, kernel_size, stride, padding, ceil_mode):
     return x_out, ceil_mode
 
 
-fallback_max_pool2d_with_indices = fallback_handler(
-    aten.max_pool2d_with_indices.default,
-    add_to_fallback_set=False,
-)
+def should_fallback_max_pool2d_with_indices(kernel_size, dilation):
+    kernel_size = pad_listlike(kernel_size, 2)
+    window_size = kernel_size[0] * kernel_size[1]
+    return (window_size > 25) or any(d > 1 for d in dilation)
 
 
-@register_lowering(aten.max_pool2d_with_indices, type_promotion_kind=None)
-def max_pool2d_with_indices(
-    x, kernel_size, stride=None, padding=0, dilation=1, ceil_mode=False
+def max_pool2d_checks(
+    x, kernel_size, stride, padding, dilation, *, assert_fallback=None
 ):
     if padding == 0:
         padding = [0, 0]
@@ -3527,6 +3700,7 @@ def max_pool2d_with_indices(
         dilation = [1, 1]
     if not stride:
         stride = kernel_size
+
     kernel_size = pad_listlike(kernel_size, 2)
     stride = pad_listlike(stride, 2)
     padding = pad_listlike(padding, 2)
@@ -3539,36 +3713,51 @@ def max_pool2d_with_indices(
     assert len(dilation) == 2
     assert len(x.get_size()) in (3, 4)
 
+    use_fallback = should_fallback_max_pool2d_with_indices(kernel_size, dilation)
+    if assert_fallback is not None:
+        assert use_fallback == assert_fallback
+
+    return kernel_size, stride, padding, dilation, use_fallback
+
+
+@register_lowering(prims._low_memory_max_pool2d_with_offsets, type_promotion_kind=None)
+def _low_memory_max_pool2d_with_offsets(
+    x,
+    kernel_size,
+    stride,
+    padding,
+    dilation,
+    ceil_mode=False,
+):
+    # assert we are not on a fallback path, the inductor decomp should have guaranteed this
+    kernel_size, stride, padding, dilation, _ = max_pool2d_checks(
+        x, kernel_size, stride, padding, dilation, assert_fallback=False
+    )
+
     x.realize_hint()
     *batch, h, w = x.get_size()
 
     h_out, ceil_mode1 = pooling_size(h, 0, kernel_size, stride, padding, ceil_mode)
     w_out, ceil_mode2 = pooling_size(w, 1, kernel_size, stride, padding, ceil_mode)
 
+    new_size = list(batch) + [h_out, w_out]
     if padding[0] or padding[1] or ceil_mode1 or ceil_mode2:
         x_loader = constant_boundary_condition(x, float("-inf"), dim=2)
     else:
         x_loader = x.make_loader()
 
-    new_size = list(batch) + [h_out, w_out]
-    window_size = kernel_size[0] * kernel_size[1]
-
-    if window_size > 25 or any(d != 1 for d in dilation):
-        # Kernel size too big. Results in hard-to-optimize Triton code. Use fallback.
-        return fallback_max_pool2d_with_indices(
-            x, kernel_size, stride, padding, dilation, ceil_mode
-        )
-
     def fn(idx, return_index):
         *prefix, bh, bw = idx
         maxval = None
         maxindex = None
-        for ih, iw in itertools.product(range(kernel_size[0]), range(kernel_size[1])):
-            ih = bh * stride[0] + ih - padding[0]
-            iw = bw * stride[1] + iw - padding[1]
+        for h_inc, w_inc in itertools.product(
+            range(kernel_size[0]), range(kernel_size[1])
+        ):
+            ih = bh * stride[0] + h_inc - padding[0]
+            iw = bw * stride[1] + w_inc - padding[1]
             val = x_loader([*prefix, ih, iw])
             if return_index:
-                index = ops.index_expr(ih * w + iw, torch.int64)
+                index = ops.index_expr(h_inc * kernel_size[1] + w_inc, torch.int8)
                 if maxindex is None:
                     maxindex = index
                 else:
@@ -3582,20 +3771,58 @@ def max_pool2d_with_indices(
         else:
             return maxval
 
-    r1 = Pointwise.create(
+    out = Pointwise.create(
         device=x.get_device(),
         dtype=x.get_dtype(),
         inner_fn=functools.partial(fn, return_index=False),
         ranges=new_size,
     )
-    r2 = Pointwise.create(
+    offsets = Pointwise.create(
         device=x.get_device(),
-        dtype=torch.int64,
+        dtype=torch.int8,
         inner_fn=functools.partial(fn, return_index=True),
         ranges=new_size,
     )
-    # TODO(jansel): should we force these to be realized?
-    return r1, r2
+    return out, offsets
+
+
+@register_lowering(
+    prims._low_memory_max_pool2d_offsets_to_indices, type_promotion_kind=None
+)
+def _low_memory_max_pool2d_offsets_to_indices(
+    offsets, kernel_width, input_width, stride, padding
+):
+    # TODO: Generalize to other max pooling flavors, and arbitrary dim
+
+    offsets_loader = offsets.make_loader()
+
+    def increments_to_index(h_inc, w_inc, bh, bw):
+        w_in = ops.index_expr(input_width, torch.int64)
+        hbase = ops.index_expr(bh * stride[0] - padding[0], torch.int64)
+        wbase = ops.index_expr(bw * stride[1] - padding[1], torch.int64)
+        ih = hbase + h_inc
+        iw = wbase + w_inc
+        return ih * w_in + iw
+
+    def offsets_to_indices(idx):
+        *prefix, bh, bw = idx
+        offset = offsets_loader([*prefix, bh, bw])
+        kw_const = ops.constant(kernel_width, torch.int32)
+        h_inc = offset // kw_const
+        w_inc = offset - (h_inc * kw_const)
+        return increments_to_index(h_inc, w_inc, bh, bw)
+
+    indices = Pointwise.create(
+        device=offsets.get_device(),
+        dtype=torch.int64,
+        inner_fn=offsets_to_indices,
+        ranges=offsets.get_size(),
+    )
+    return indices
+
+
+# Fallback selected when we do not decompose to the low-memory path.
+make_fallback(aten.max_pool2d_with_indices)
 
 
 fallback_max_pool2d_with_indices_backward = fallback_handler(
@@ -3657,8 +3884,6 @@ def max_pool2d_with_indices_backward(
         return fallback_max_pool2d_with_indices_backward(
             grad_output, x, kernel_size, stride, padding, dilation, ceil_mode, indices
         )
-
-    indices.realize_hint()
 
     *batch, height, width = x.get_size()
     *_, pooled_height, pooled_width = grad_output.get_size()
@@ -3970,7 +4195,21 @@ def adaptive_max_pool2d(x, output_size):
         )
     if h_in % h_out == 0 and w_in % w_out == 0:
         kernel_size = [h_in // h_out, w_in // w_out]
-        return max_pool2d_with_indices(x, kernel_size)
+        if should_fallback_max_pool2d_with_indices(kernel_size, dilation=[1, 1]):
+            return max_pool2d_with_indices(x, kernel_size)  # type: ignore[name-defined]   # noqa: F821
+        else:
+            v, offsets = _low_memory_max_pool2d_with_offsets(
+                x,
+                kernel_size,
+                stride=kernel_size,
+                padding=[0, 0],
+                dilation=[1, 1],
+                ceil_mode=False,
+            )
+            indices = _low_memory_max_pool2d_offsets_to_indices(
+                offsets, kernel_size[1], w_in, kernel_size, padding=[0, 0]
+            )
+            return v, indices
 
     h_kernel_max = ceildiv((h_in + h_out - 1), h_out)
     w_kernel_max = ceildiv((w_in + w_out - 1), w_out)
@@ -4318,7 +4557,7 @@ def _avg_poolnd(
                 factor = ops.index_expr(hend - hstart, torch.int32)
                 divide_factors.append(factor)
             divide_factor = functools.reduce(ops.mul, divide_factors)
-            return ops.div(fn_sum(idx, x_loader), divide_factor)
+            return ops.truediv(fn_sum(idx, x_loader), divide_factor)
 
     rv = Pointwise.create(
         device=x.get_device(),
@@ -5082,7 +5321,7 @@ def logcumsumexp(x, dim):
 def cummax(x, axis=None):
     if len(x.get_size()) == 0:
         assert axis in [0, -1]
-        return clone(x), torch.empty_like(x, dtype=torch.int64)
+        return clone(x), empty_like(x, dtype=torch.int64)
 
     dtype = x.get_dtype()
     combine_fn = ir.get_reduction_combine_fn(
@@ -5112,7 +5351,7 @@ def cummax(x, axis=None):
 def cummin(x, axis=None):
     if len(x.get_size()) == 0:
         assert axis in [0, -1]
-        return clone(x), torch.empty_like(x, dtype=torch.int64)
+        return clone(x), empty_like(x, dtype=torch.int64)
 
     dtype = x.get_dtype()
     combine_fn = ir.get_reduction_combine_fn(
@@ -5456,11 +5695,7 @@ register_inplace(aten.__ixor__, aten.__xor__)
 
 @register_lowering(aten.sym_constrain_range)
 def sym_constrain_range(a, min=None, max=None):
-    tracing_context = torch._guards.TracingContext.try_get()
-    assert (
-        tracing_context is None or a in tracing_context.fake_mode.shape_env.var_to_range
-    )
-    return a
+    return None
 
 
 @register_lowering(aten.sym_size.int)
@@ -5515,10 +5750,11 @@ def resize_storage_bytes_(variable, new_size):
     return variable
 
 
-@register_lowering(_bind_nn_parameter)
-def create_nn_parameter(self, placeholder):
+@register_lowering(torch.ops.aten.set_.source_Tensor)
+def set__source_tensor(self, source_tensor):
     self.realize()
-    return TensorBox.create(ir.BindNNParameter(self, placeholder))
+    source_tensor.realize()
+    return TensorBox.create(ir.SetSourceTensorKernel(self, source_tensor))
 
 
 @register_lowering(torch.ops.aten.resize)
@@ -5666,23 +5902,24 @@ def associative_scan(combine_fn: ir.Subgraph, input, dim: int):
     from .subgraph_lowering import InputDescriptor, lower_pointwise_subgraph
 
     subgraph_inputs = [
-        InputDescriptor(dtype=input.get_dtype(), device=input.get_device())
-        for _ in range(2)
+        InputDescriptor(dtype=x.get_dtype(), device=x.get_device())
+        for x in itertools.chain(input, input)
     ]
     lowered_combine_fn = lower_pointwise_subgraph(combine_fn, subgraph_inputs)
 
     def wrapped_combine_fn(lhs, rhs):
-        res = lowered_combine_fn(
+        return lowered_combine_fn(
             *pytree.tree_leaves(lhs),
             *pytree.tree_leaves(rhs),
         )
-        return (res,)
 
-    kwargs = _make_scan_inner(input, axis=dim, dtype=None)
+    kwargs = _make_scan_inner(input[0], axis=dim, dtype=None)
+    kwargs["dtypes"] = tuple(x.get_dtype() for x in input)
+    kwargs["inner_fns"] = tuple(x.make_loader() for x in input)
     result = ir.Scan.create(**kwargs, combine_fn=wrapped_combine_fn)
-    if result is None:
+    if result[0] is None:
         raise RuntimeError("Unable to generate code for associative_scan op")
-    return result[0]
+    return result
 
 
 @register_lowering(torch.ops.prims._sink_tokens.default)

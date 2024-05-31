@@ -263,8 +263,8 @@ class LocalElasticAgent(SimpleElasticAgent):
     # pyre-fixme[56]: Pyre was not able to infer the type of the decorator
     #  `torch.distributed.elastic.metrics.prof`.
     @prof
-    def _stop_workers(self, worker_group: WorkerGroup) -> None:
-        self._shutdown()
+    def _stop_workers(self, worker_group: WorkerGroup, is_restart: bool = False) -> None:
+        self._shutdown(is_restart=is_restart)
 
     # pyre-fixme[56]: Pyre was not able to infer the type of the decorator
     #  `torch.distributed.elastic.metrics.prof`.
@@ -273,10 +273,9 @@ class LocalElasticAgent(SimpleElasticAgent):
         spec = worker_group.spec
         store = worker_group.store
         assert store is not None
-        master_addr, master_port = super()._get_master_addr_port(store)
         restart_count = spec.max_restarts - self._remaining_restarts
 
-        use_agent_store = spec.rdzv_handler.get_backend() == "static"
+        use_agent_store: bool = spec.rdzv_handler.use_agent_store
 
         args: Dict[int, Tuple] = {}
         envs: Dict[int, Dict[str, str]] = {}
@@ -293,8 +292,8 @@ class LocalElasticAgent(SimpleElasticAgent):
                 "WORLD_SIZE": str(worker.world_size),
                 "GROUP_WORLD_SIZE": str(worker_group.group_world_size),
                 "ROLE_WORLD_SIZE": str(worker.role_world_size),
-                "MASTER_ADDR": master_addr,
-                "MASTER_PORT": str(master_port),
+                "MASTER_ADDR": worker_group.master_addr,
+                "MASTER_PORT": str(worker_group.master_port),
                 "TORCHELASTIC_RESTART_COUNT": str(restart_count),
                 "TORCHELASTIC_MAX_RESTARTS": str(spec.max_restarts),
                 "TORCHELASTIC_RUN_ID": spec.rdzv_handler.get_run_id(),
@@ -336,7 +335,7 @@ class LocalElasticAgent(SimpleElasticAgent):
 
         return self._pcontext.pids()
 
-    def _shutdown(self, death_sig: signal.Signals = signal.SIGTERM) -> None:
+    def _shutdown(self, death_sig: signal.Signals = signal.SIGTERM, is_restart: bool = False) -> None:
         if self._worker_watchdog is not None:
             self._worker_watchdog.stop()
             self._worker_watchdog = None
@@ -345,7 +344,7 @@ class LocalElasticAgent(SimpleElasticAgent):
             self._health_check_server = None
         if self._pcontext:
             self._pcontext.close(death_sig)
-        if self._rdzv_handler:
+        if not is_restart and self._rdzv_handler:
             self._rdzv_handler.shutdown()
 
     # pyre-fixme[56]: Pyre was not able to infer the type of the decorator

@@ -984,6 +984,10 @@ class Graph:
         name = self._graph_namespace.create_name(candidate, None)
         n = Node(self, name, op, target, args, kwargs, type_expr)
 
+        if self.owning_module is not None and getattr(self.owning_module, "_create_node_hooks", None) is not None:
+            for f in self.owning_module._create_node_hooks:
+                f(n)
+
         self._graph_namespace.associate_name_with_obj(name, n)
 
         self._insert(n)
@@ -1021,6 +1025,10 @@ class Graph:
         if to_erase._erased:
             warnings.warn(f"erase_node({to_erase}) on an already erased node")
             return
+
+        if self.owning_module is not None and getattr(self.owning_module, "_erase_node_hooks", None) is not None:
+            for f in self.owning_module._erase_node_hooks:
+                f(to_erase)
 
         self._find_nodes_lookup_table.remove(to_erase)
         to_erase._remove_from_list()

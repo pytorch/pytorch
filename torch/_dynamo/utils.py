@@ -2,7 +2,6 @@ import atexit
 import collections
 import contextlib
 import copy
-import cProfile
 import dataclasses
 import datetime
 import dis
@@ -16,9 +15,7 @@ import logging
 import math
 import operator
 import os
-import pstats
 import re
-import subprocess
 import sys
 import textwrap
 import threading
@@ -28,7 +25,6 @@ import typing
 import weakref
 from contextlib import contextmanager
 from functools import lru_cache, wraps
-from pathlib import Path
 from types import MethodWrapperType
 from typing import (
     Any,
@@ -49,8 +45,6 @@ from typing import (
     Union,
     ValuesView,
 )
-
-from torch._utils_internal import maybe_upload_prof_stats_to_manifold
 
 from ..utils.hooks import RemovableHandle
 
@@ -135,63 +129,6 @@ def tabulate(rows, headers):
         )
 
 
-def maybe_cprofile(func):
-    if config.cprofile:
-        return cprofile_wrapper(func)
-    return func
-
-
-def cprofile_wrapper(func):
-    @wraps(func)
-    def profile_wrapper(*args, **kwargs):
-        global timer_counter
-        profile_cnt = next(timer_counter)
-        profile_path = Path("/tmp/" + func.__name__ + f"{profile_cnt}.profile")
-        prof = cProfile.Profile()
-        prof.enable()
-        start_ts = time.time()
-        retval = prof.runcall(func, *args, **kwargs)
-        profile_latency = time.time() - start_ts
-        prof.disable()
-        print(
-            f"### Cprofile for {func.__name__} iter {profile_cnt} took {profile_latency:.3f} seconds ###"
-        )
-        ps = pstats.Stats(prof)
-        prof.dump_stats(profile_path)
-        svg_path = profile_path.with_suffix(".svg")
-        try:
-            gprof2dot_process = subprocess.Popen(
-                [
-                    "gprof2dot",
-                    "-f",
-                    "pstats",
-                    "--node-label=total-time-percentage",
-                    "--node-label=self-time-percentage",
-                    "--node-label=total-time",
-                    str(profile_path),
-                ],
-                stdout=subprocess.PIPE,
-            )
-            subprocess.check_call(
-                ["dot", "-Tsvg", "-o", str(svg_path)],
-                stdin=gprof2dot_process.stdout,
-            )
-            print(f"Generated SVG from profile at {str(svg_path)}")
-        except FileNotFoundError:
-            print(
-                "Failed to generate SVG from profile -- dumping stats instead."
-                "Try installing gprof2dot and dot for a better visualization"
-            )
-            ps.sort_stats(pstats.SortKey.TIME).print_stats(20)
-            ps.sort_stats(pstats.SortKey.CUMULATIVE).print_stats(20)
-
-        maybe_upload_prof_stats_to_manifold(str(profile_path))  # fb-only
-
-        return retval
-
-    return profile_wrapper
-
-
 curr_frame = 0
 
 
@@ -217,12 +154,9 @@ def increment_op_count(cnt):
     op_count += cnt
 
 
-# Print a report of time spent so far
-# Ex:
-# TIMING:
-# entire_frame_compile:8.574629999999999
-# backend_compile:5.26806
-def print_time_report():
+# Calculate total time spent so far for each phase
+# For example, {'entire_frame_compile':8.574629999999999, 'backend_compile':5.26806}
+def calculate_time_spent():
     total = 0.0
     total_by_key = {}
     for timings in frame_phase_timing.values():
@@ -232,6 +166,17 @@ def print_time_report():
                 total_by_key[key] = timing
             else:
                 total_by_key[key] += timing
+
+    return total_by_key
+
+
+# Print a report of time spent so far
+# Ex:
+# TIMING:
+# entire_frame_compile:8.574629999999999
+# backend_compile:5.26806
+def print_time_report():
+    total_by_key = calculate_time_spent()
 
     out = "TIMING:"
     for key, value in total_by_key.items():
@@ -1814,7 +1759,7 @@ def get_fake_value(node, tx, allow_non_graph_fake=False):
         elif isinstance(
             cause, torch.fx.experimental.symbolic_shapes.GuardOnDataDependentSymNode
         ):
-            raise UserError(  # noqa: TRY200
+            raise UserError(  # noqa: B904
                 UserErrorType.CONSTRAINT_VIOLATION,
                 "Tried to use data-dependent value in the subsequent computation. "
                 "This can happen when we encounter unbounded dynamic value that is unknown during tracing time.  "
@@ -1914,7 +1859,7 @@ def get_real_value(node, tracer):
         return cache[node]
 
     op = node.op
-    args, kwargs = torch.fx.node.map_arg(  # type: ignore[misc]
+    args, kwargs = torch.fx.node.map_arg(
         (node.args, node.kwargs),
         lambda n: get_real_value(n, tracer),
     )
@@ -2225,8 +2170,8 @@ class numpy_operator_wrapper:
 def defake(x):
     if not isinstance(x, FakeTensor):
         return x
-    size: "torch._prims_common.ShapeType"
-    stride: "torch._prims_common.StrideType"
+    size: torch._prims_common.ShapeType
+    stride: torch._prims_common.StrideType
     if x._has_symbolic_sizes_strides:
         size = []
         for s in x.size():
@@ -2267,7 +2212,7 @@ def build_checkpoint_variable(**options):
 
     # TODO - This is a temporary situation where we have two versions of
     # checkpointing implementation. We will converge on one and remove the other.
-    activation_checkpoint_op: "torch._ops.HigherOrderOperator" = (
+    activation_checkpoint_op: torch._ops.HigherOrderOperator = (
         higher_order_ops.tag_activation_checkpoint
     )
     if torch._functorch.config.functionalize_rng_ops:
@@ -2705,3 +2650,11 @@ def get_locals_to_steal(maybe_gm):
 
 def set_locals_to_steal(gm, locals_to_steal):
     gm.meta["locals_to_steal"] = locals_to_steal
+
+
+class Lit:
+    def __init__(self, s):
+        self.s = s
+
+    def __repr__(self):
+        return self.s

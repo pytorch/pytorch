@@ -1,9 +1,9 @@
 import abc
 import os
 from dataclasses import dataclass
-from typing import Any, List, Union
+from typing import Any, List, Optional, Union
 
-from torch.distributed.checkpoint.metadata import Metadata, MetadataIndex
+from torch.distributed.checkpoint.metadata import Metadata, MetadataIndex, StorageMeta
 from torch.distributed.checkpoint.planner import (
     LoadPlan,
     LoadPlanner,
@@ -156,6 +156,16 @@ class StorageWriter(abc.ABC):
         us to enable automatic storage selection.
         """
         ...
+
+    def storage_meta(self) -> Optional[StorageMeta]:
+        """
+        Return the storage-specific metadata. This is used to store additional information
+        in a checkpoint that can be useful for providing request-level observability. StorageMeta
+        is passed to the ``SavePlanner`` during save calls. Returns None by default.
+
+        TODO: provide an example
+        """
+        return None
 
 
 class StorageReader(abc.ABC):

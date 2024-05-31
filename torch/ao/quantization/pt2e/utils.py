@@ -21,7 +21,6 @@ from torch.ao.quantization.quantizer import QuantizationAnnotation
 
 __all__ = [
     "fold_bn_weights_into_conv_node",
-    "_get_aten_graph_module_for_pattern",
     "remove_tensor_overload_for_qdq_ops",
 ]
 
@@ -99,7 +98,7 @@ def _find_q_dq_node_for_user(
         return (None, None)
 
     q_node = None
-    if dq_node.args[0].op == "call_function" and dq_node.args[0].target in _QUANTIZE_OPS:  # type: ignore[union-attr]
+    if dq_node.args[0].op == "call_function" and dq_node.args[0].target in _QUANTIZE_OPS:
         q_node = dq_node.args[0]
     return (q_node, dq_node)
 
@@ -315,7 +314,7 @@ def _get_aten_graph_module_for_pattern(
     if is_cuda:
         example_inputs = tuple([x.cuda() if isinstance(x, torch.Tensor) else x for x in example_inputs])
     aten_pattern = capture_pre_autograd_graph(
-        pattern,  # type: ignore[arg-type]
+        pattern,
         example_inputs,
         kwargs,
     )
@@ -331,7 +330,7 @@ def _get_aten_graph_module_for_pattern(
     aten_pattern.graph.eliminate_dead_code()
     aten_pattern.recompile()
 
-    return aten_pattern  # type: ignore[return-value]
+    return aten_pattern
 
 def remove_tensor_overload_for_qdq_ops(match_pattern: GraphModule) -> None:
     """ Remove .tensor overload for quantize/dequantize ops so that we can

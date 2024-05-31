@@ -483,7 +483,7 @@ at::Tensor& PackedLinearWeightFp16::apply_dynamic_relu_out(
   return apply_dynamic_impl<true>(input, output);
 }
 
-void PackedLinearWeightFp16::set_bias(c10::optional<at::Tensor> bias) {
+void PackedLinearWeightFp16::set_bias(std::optional<at::Tensor> bias) {
   bias_ = std::move(bias);
 }
 

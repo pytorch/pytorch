@@ -1,7 +1,9 @@
+import inspect
 import os
 import warnings
 from concurrent.futures import Future, ThreadPoolExecutor
 from typing import cast, Optional, Union
+from typing_extensions import deprecated
 
 import torch
 import torch.distributed as dist
@@ -23,6 +25,11 @@ from .utils import _api_bc_check, _DistWrapper, _profile
 __all__ = ["save_state_dict", "save", "async_save"]
 
 
+@deprecated(
+    "`save_state_dict` is deprecated and will be removed in future versions."
+    "Please use `save` instead.",
+    category=FutureWarning,
+)
 def save_state_dict(
     state_dict: STATE_DICT_TYPE,
     storage_writer: StorageWriter,
@@ -32,11 +39,6 @@ def save_state_dict(
     planner: Optional[SavePlanner] = None,
 ) -> Metadata:
     """This method is deprecated. Please switch to 'save'."""
-    warnings.warn(
-        "'save_state_dict' is deprecated and will be removed in future versions."
-        "Please use 'save' instead."
-    )
-
     storage_writer.reset()
 
     # TODO: test returning `save` here instead.
@@ -281,8 +283,22 @@ def _save_state_dict(
     @_dcp_method_logger(**ckpt_kwargs)
     def local_step():
         assert planner is not None
-        planner.set_up_planner(state_dict, distW.is_coordinator)
+        storage_meta = storage_writer.storage_meta()
+        if "storage_meta" not in inspect.signature(planner.set_up_planner).parameters:
+            warnings.warn(
+                "The function definition for SavePlanner.set_up_planner has been updated"
+                " to include the storage_meta argument. Please update your implementation"
+                " to include this parameter."
+            )
+            planner.set_up_planner(state_dict, distW.is_coordinator)  # type: ignore[call-arg, arg-type]
+        else:
+            planner.set_up_planner(
+                state_dict=state_dict,
+                storage_meta=storage_meta,
+                is_coordinator=distW.is_coordinator,
+            )
         storage_writer.set_up_storage_writer(distW.is_coordinator)
+
         local_plan = planner.create_local_plan()
         local_plan = storage_writer.prepare_local_plan(local_plan)
         return local_plan
