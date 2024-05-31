@@ -1010,14 +1010,35 @@ def _sink_params(
     scope: tracks where we are in the module hierarchy, so that we can emit the
         right `getattr(self, "foo.bar")` calls, etc.
     """
+    # This dict records inputs removed by child modules. The key is child
+    # module's name, the value is list of inputs removed by that child module.
+    inputs_removed_by_children: Dict[str, List[str]] = {}
+
     # We need to use _modules here instead of named_children(), because we
     # explicitly want duplicate modules to show up in the traversal.
     for name, submodule in module._modules.items():
-        _sink_params(cast(torch.nn.Module, submodule), inputs_to_state, scope + [name])
+        inputs_removed_by_child = _sink_params(
+            cast(torch.nn.Module, submodule), inputs_to_state, scope + [name]
+        )
+        inputs_removed_by_children.update(inputs_removed_by_child)
+
+    module_name = scope[-1] if len(scope) > 0 else ""
 
     if not hasattr(module, "graph"):
         # Not all modules have graphs defined, if they are empty modules with no operations (like ParameterList)
-        return
+        # We thus return here. But we prefix the keys in
+        # `inputs_removed_by_children` with "my" module name, when passing it up
+        # to "my" parent module.
+        # For example, a key (submod name) may be "0", and my module name is
+        # "layers", then I return to my parent with key "layers.0". My parent
+        # module should have a `call_module` node with corresponding target, e.g.:
+        # %layers_0 : [num_users=1] = call_module[target=layers.0](args = ...)
+        # Hence my parent module should be able to take care of the arg removal from this
+        # grandchild modules. (See code at "Also remove from call_module nodes")
+        inputs_removed_by_grandchildren = {
+            ".".join([module_name, k]): v for k, v in inputs_removed_by_children.items()
+        }
+        return inputs_removed_by_grandchildren
 
     graph = module.graph
     inputs = list(filter(lambda n: n.op == "placeholder", graph.nodes))
@@ -1026,32 +1047,44 @@ def _sink_params(
     # Also remove from call_module nodes
     call_module_nodes = filter(lambda n: n.op == "call_module", graph.nodes)
     for node in call_module_nodes:
-        node.args = tuple(filter(lambda n: n.name not in inputs_to_state, node.args))
+        if node.target in inputs_removed_by_children:
+            inputs_removed_by_target = inputs_removed_by_children[node.target]
+            node.args = tuple(
+                filter(lambda n: n.name not in inputs_removed_by_target, node.args)
+            )
 
+    # Filter out inputs_to_state corresponding to current scope.
+    inputs_to_state_of_scope: Dict[torch.fx.Node, list[str]] = {}
     for node in inputs:
         if node.name not in inputs_to_state:
             continue
 
+        state_name = None
+        for sn in inputs_to_state[node.name]:
+            sn_split = sn.split(".")
+            if sn_split[: len(scope)] == scope:
+                state_name = sn_split
+                break
+
+        # If there's a mismatch beteewn scope name and state name, then
+        # there must be multuple scopes pointing to the same state name,
+        # meaning some modules are shared. In such case, we can simply skip
+        # updating the current node because another later iteration will
+        # take care of this input node when the unique match between scope
+        # and state name occurs.  To make sure this always happen, we should
+        # enforce the invariant that no placeholder node in the unflattened
+        # graph appears in inputs_to_state dict, which means all the extra
+        # input nodes have been handled.
+        if state_name is None:
+            continue
+
+        inputs_to_state_of_scope[node] = state_name
+
+    # Record name of remove inputs for return purpose.
+    inputs_removed: List[str] = []
+
+    for node, state_name in inputs_to_state_of_scope.items():
         if len(node.users) > 0:
-            state_name = None
-            for sn in inputs_to_state[node.name]:
-                sn_split = sn.split(".")
-                if sn_split[: len(scope)] == scope:
-                    state_name = sn_split
-                    break
-
-            # If there's a mismatch beteewn scope name and state name, then
-            # there must be multuple scopes pointing to the same state name,
-            # meaning some modules are shared. In such case, we can simply skip
-            # updating the current node because another later iteration will
-            # take care of this input node when the unique match between scope
-            # and state name occurs.  To make sure this always happen, we should
-            # enforce the invariant that no placeholder node in the unflattened
-            # graph appears in inputs_to_state dict, which means all the extra
-            # input nodes have been handled.
-            if state_name is None:
-                continue
-
             attr_path = state_name[len(scope) :]
             state_attr = _recursive_getattr(module, attr_path)
             assert isinstance(state_attr, (torch.Tensor, torch.ScriptObject))
@@ -1061,9 +1094,16 @@ def _sink_params(
                 new_node = graph.create_node("get_attr", ".".join(attr_path))
 
             node.replace_all_uses_with(new_node, propagate_meta=True)
+
         graph.erase_node(node)
+        inputs_removed.append(node.name)
+
     if isinstance(module, InterpreterModule):
         module.finalize()
+
+    # Return my module name and inputs removed, so that my parent module can
+    # remove corresponding args when calling me.
+    return {module_name: inputs_removed}
 
 
 def _recursive_getattr(obj, attr_path):
