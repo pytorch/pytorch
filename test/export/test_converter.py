@@ -107,6 +107,7 @@ class TestConverter(TestCase):
 
         inp = (torch.rand((3, 2)),)
         self._check_equal_ts_ep_converter(Module(), inp)
+
     def test_prim_device(self):
         class Module(torch.nn.Module):
             def forward(self, x):
