@@ -881,12 +881,6 @@ if(BUILD_PYTHON)
   endif()
 
   if(Python_Interpreter_FOUND)
-    add_library(python::python INTERFACE IMPORTED)
-    target_include_directories(python::python SYSTEM INTERFACE ${Python_INCLUDE_DIRS})
-    if(WIN32)
-      target_link_libraries(python::python INTERFACE ${Python_LIBRARIES})
-    endif()
-
     if(USE_NUMPY)
       if(NOT Python_NumPy_FOUND)
         message(WARNING "NumPy could not be found. Not building with NumPy. Suppress this warning with -DUSE_NUMPY=OFF")

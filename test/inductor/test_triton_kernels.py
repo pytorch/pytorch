@@ -16,7 +16,7 @@ from torch._higher_order_ops.triton_kernel_wrap import (
 from torch._inductor import metrics
 from torch._inductor.utils import run_and_get_code
 from torch.testing._internal import common_utils
-from torch.testing._internal.common_utils import skipIfRocm, TEST_WITH_ROCM
+from torch.testing._internal.common_utils import skipIfRocm, skipIfXpu, TEST_WITH_ROCM
 
 # Defines all the kernels for tests
 from torch.testing._internal.triton_utils import *  # noqa: F403
@@ -594,6 +594,7 @@ def forward(self, x_1, output_1):
 
     @requires_gpu
     @skipIfRocm
+    @skipIfXpu
     def test_triton_kernel_constants(self):
         @triton.jit
         def mulC_kernel(
