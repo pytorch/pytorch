@@ -19,7 +19,7 @@ from torch._inductor.runtime.hints import AutotuneHint, DeviceProperties
 from torch._prims_common import is_integer_dtype
 from torch.utils._sympy.functions import CeilDiv, FloorDiv, ModularIndexing
 from torch.utils._triton import has_triton_package
-from ...utils._sympy.symbol import free_symbol_is_type, symbol_is_type, SymT
+from ...utils._sympy.symbol import symbol_is_type, SymT
 from ...utils._sympy.value_ranges import ValueRanges
 
 from .. import config, ir
@@ -103,7 +103,8 @@ class ConstExprMin(sympy.Min):
     While the sympy.Min maps to tl.minimum, this maps to an arithmetic macro.
     https://github.com/triton-lang/triton/issues/3815
     """
-    pass
+    def macro(self, a: str, b: str) -> str:
+        return f"({a} * ({a} <= {b}) + {b} * ({b} < {a}))"
 
 @dataclasses.dataclass
 class IndexingOptions:
@@ -138,7 +139,7 @@ class BlockPtrOptions:
     block_shape: List[str]
     order: List[int]
     offsets: List[str]
-    mask_vars: Set[sympy.Symbol]
+    mask_vars: Set[Union[str, sympy.Symbol]]
     reshape_suffix: List[str]
 
     @staticmethod
@@ -313,28 +314,27 @@ class TritonPrinter(PythonPrinter):
         q = self.doprint(expr.args[2])
         return f"tl.where({c}, {p}, {q})"
 
-    def _print_min_helper(self, expr: sympy.Expr, cls: Type[sympy.Min], macro: Callable[[sympy.Expr, sympy.Expr], str]) -> str:
+    def _print_Min(self, expr: sympy.Expr) -> str:
+        """
+        Prints subclasses of sympy.Min. This also handles ConstExprMin.
+        """
+
+        def tl_minimum_macro(a: str, b: str) -> str:
+            return f"tl.minimum({a}, {b})"
+
+        # Get the macro. This is overridden by ConstExprMin.
+        macro = getattr(expr, 'macro', tl_minimum_macro)
+        cls = type(expr)
+
         nargs = len(expr.args)
         if len(expr.args) == 1:
-            return self._print(expr.args[0]), None
+            return self._print(expr.args[0])
 
         mid = len(expr.args) // 2
         a = self._print(cls(*expr.args[:mid]))
         b = self._print(cls(*expr.args[mid:]))
 
         return macro(a, b)
-
-    def _print_ConstExprMin(self, expr):
-        def constexpr_min_macro(a: sympy.Expr, b: sympy.Expr) -> str:
-            return f"({a} * ({a} <= {b}) + {b} * ({b} < {a}))"
-
-        return self._print_min_helper(expr, ConstExprMin, constexpr_min_macro)
-
-    def _print_Min(self, expr):
-        def tl_minimum_macro(a: sympy.Expr, b: sympy.Expr) -> str:
-            return f"tl.minimum({a}, {b})"
-
-        return self._print_min_helper(expr, sympy.Min, tl_minimum_macro)
 
     def _print_Max(self, expr):
         nargs = len(expr.args)
