@@ -2712,6 +2712,7 @@ def _do_validate_cpp_commands(
     test_cuda = torch.cuda.is_available() and cuda
     input_path = "/temp/dummy_input.cpp"
     output_path = "/temp/dummy_output.so"
+    extra_flags = ["-D TEST_EXTRA_FLAGS"]
     if compile_only:
         output_path = "/temp/dummy_output.o"
     picked_isa = pick_vec_isa()
@@ -2726,6 +2727,7 @@ def _do_validate_cpp_commands(
         compile_only=compile_only,
         use_absolute_path=False,
         use_mmap_weights=mmap_weights,
+        extra_flags=extra_flags,
     ).split(" ")
 
     from torch._inductor.cpp_builder import CppBuilder, CppTorchCudaOptions
@@ -2736,6 +2738,7 @@ def _do_validate_cpp_commands(
         cuda=test_cuda,
         compile_only=compile_only,
         use_mmap_weights=mmap_weights,
+        extra_flags=extra_flags,
     )
 
     dummy_builder = CppBuilder(

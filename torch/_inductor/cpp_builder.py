@@ -738,7 +738,9 @@ class CppTorchOptions(CppOptions):
         shared: bool = True,
         extra_flags: Sequence[str] = (),
     ) -> None:
-        super().__init__(compile_only=compile_only, warning_all=warning_all)
+        super().__init__(
+            compile_only=compile_only, warning_all=warning_all, extra_flags=extra_flags
+        )
 
         self._aot_mode = aot_mode
 
