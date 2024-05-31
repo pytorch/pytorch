@@ -732,7 +732,8 @@ class CppWrapperCpu(WrapperCodeGen):
                 )
 
                 # For data_size, we always align it to 64.
-                # When loading the constants, the valid data will depends on the size not the data_size so there won't be correctness issue.
+                # When loading the constants, the valid data will depends on the size
+                # not the data_size so there won't be correctness issue.
                 from .memory_planning import _align
 
                 if tensor.is_mkldnn:
