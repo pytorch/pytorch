@@ -2024,7 +2024,6 @@ class Argument:
         else:
             name = name_and_default
             default = None
-
         # TODO: deduplicate annotation matching with Return
         match = re.match(r"Tensor\((.+)\)(.*)", type_and_annot)
         annotation: Optional[Annotation]
