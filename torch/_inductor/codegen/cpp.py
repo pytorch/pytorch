@@ -1236,8 +1236,8 @@ class CppVecOverrides(CppOverrides):
         return f"{x}.log2()"
 
     @staticmethod
-    def nextafter(x):
-        return f"{x}.nextafter()"
+    def nextafter(x, y):
+        return f"{x}.nextafter({y})"
 
     @staticmethod
     def copysign(a, b):
