@@ -1,0 +1,58 @@
+name: Check whether the workflow owner can use ARC runners
+
+on:
+  workflow_call:
+    inputs:
+      user_name:
+        required: true
+        type: string
+        description: The name of the workflow owner.
+      curr_branch:
+        required: true
+        type: string
+        description: Current branch.
+      issue_number:
+        required: false
+        type: string
+        default: "5132"
+
+    outputs:
+      workflow-type:
+        description: Type of runners to use
+        value: ${{ jobs.runner-determinator.outputs.workflow-type }}
+
+jobs:
+  runner-determinator:
+    runs-on: linux.4xlarge
+    outputs:
+      workflow-type: ${{ steps.set-condition.outputs.workflow-type }}
+    env:
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      ISSUE_NUMBER: ${{ inputs.issue_number }}
+      USERNAME: ${{ inputs.user_name }}
+    steps:
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
+        with:
+          fetch-depth: 1
+          submodules: true
+
+      - name: Install dependencies
+        run: python3 -m pip install urllib3==1.26.18 PyGithub==2.3.0
+
+      - name: Get the workflow type for the current user
+        id: set-condition
+        run: |
+          curr_branch="${{ inputs.curr_branch }}"
+          echo "Current branch is '$curr_branch'"
+
+          output="$(python3 .github/scripts/get_workflow_type.py \
+            --github-token "$GITHUB_TOKEN" \
+            --github-issue "$ISSUE_NUMBER" \
+            --github-branch "$curr_branch" \
+            --github-user "$USERNAME")"
+
+          echo "Output: '${output}'"
+
+          WORKFLOW_TYPE=$(echo "${output}" | jq -r '.workflow_type')
+          echo "workflow-type=$WORKFLOW_TYPE" >> "$GITHUB_OUTPUT"
