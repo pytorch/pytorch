@@ -1987,10 +1987,15 @@ class AotCodeCompiler:
                 # as read-only (i.e. .lrodata) which could accomodate larger size of data
                 # to be linked.
                 rename_data = " .data=.lrodata,alloc,load,readonly,data,contents"
+
+            from .codegen.memory_planning import ALIGN_BYTES
+
+            # following the gAlignment of CPU in c10/core/alignment.h
+            assert ALIGN_BYTES == 64, "Expect ALIGN_BYTES to be 64"
             cmd = (
                 f"{objcopy_command} --rename-section"
                 f"{rename_data}"
-                " --set-section-alignment .data=64"  # following the gAlignment of CPU in c10/core/alignment.h
+                f" --set-section-alignment .data={ALIGN_BYTES}"
                 f" {consts_o} {consts_o}"
             )
             log.debug("aot constant rename section command: %s", cmd)
@@ -2115,6 +2120,15 @@ class AotCodeCompiler:
                 run_command_and_check(compile_cmd)
 
             def _to_bytes(t: torch.Tensor) -> bytes:
+                def _pad_to_alignment(raw_bytes):
+                    from .codegen.memory_planning import ALIGN_BYTES
+
+                    padded_bytes = raw_bytes.ljust(
+                        (len(raw_bytes) + ALIGN_BYTES - 1) // ALIGN_BYTES * ALIGN_BYTES,
+                        b"\x00",
+                    )
+                    return padded_bytes
+
                 # This serializes the tensor's untyped_storage to bytes by accessing
                 # the raw data of the underlying structure.
                 import ctypes
@@ -2127,7 +2141,7 @@ class AotCodeCompiler:
                         torch.ops.mkldnn.data_ptr(t),
                         ctypes.POINTER(ctypes.c_ubyte * torch.ops.mkldnn._nbytes(t)),
                     )
-                    return bytes(raw_array.contents)
+                    return _pad_to_alignment(bytes(raw_array.contents))
 
                 t_cpu = t.untyped_storage().cpu()
                 raw_array = ctypes.cast(
@@ -2135,7 +2149,7 @@ class AotCodeCompiler:
                     ctypes.POINTER(ctypes.c_ubyte * t_cpu.nbytes()),
                 )
 
-                return bytes(raw_array.contents)
+                return _pad_to_alignment(bytes(raw_array.contents))
 
             serialized_weights = b"".join(
                 _to_bytes(graph.get_original_value_of_constant(name))

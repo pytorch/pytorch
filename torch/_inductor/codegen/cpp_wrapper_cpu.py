@@ -713,6 +713,10 @@ class CppWrapperCpu(WrapperCodeGen):
             """
         )
 
+        def align_data_size(data_size):
+            alignment = 64
+            return (data_size + alignment - 1) & -alignment
+
         with self.prefix.indent():
             for idx, (name, inp) in enumerate(V.graph.graph_inputs.items()):
                 assert not isinstance(
@@ -730,13 +734,18 @@ class CppWrapperCpu(WrapperCodeGen):
                 self.prefix.writeline(
                     f"constants_info_[{idx}].offset = {tensor.storage_offset()};"
                 )
+
+                # For data_size, we always align it to 64.
+                # When loading the constants, the valid data will depends on the size not the data_size so there won't be correctness issue.
+                from .memory_planning import _align
+
                 if tensor.is_mkldnn:
                     self.prefix.writeline(
-                        f"constants_info_[{idx}].data_size = {torch.ops.mkldnn._nbytes(tensor)};"
+                        f"constants_info_[{idx}].data_size = {_align(torch.ops.mkldnn._nbytes(tensor))};"
                     )
                 else:
                     self.prefix.writeline(
-                        f"constants_info_[{idx}].data_size = {tensor.untyped_storage().nbytes()};"
+                        f"constants_info_[{idx}].data_size = {_align(tensor.untyped_storage().nbytes())};"
                     )
                 from_folded = "true" if name in V.graph.folded_constants else "false"
                 self.prefix.writeline(
