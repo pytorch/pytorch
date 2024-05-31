@@ -1,7 +1,7 @@
 import os
 
 # when loading this package, set this environment variable to true
-os.environ['IS_CUSTOM_DEVICE_BACKEND_IMPORTED'] = 'true'
+os.environ["IS_CUSTOM_DEVICE_BACKEND_IMPORTED"] = "true"
 
 
 def autoload():
