@@ -7,9 +7,9 @@ import io
 import pickle
 import tokenize
 import unittest
-import warnings
 from types import FunctionType, ModuleType
 from typing import Any, Dict, Optional, Set, Union
+from typing_extensions import deprecated
 from unittest import mock
 
 # Types saved/loaded in configs
@@ -156,6 +156,19 @@ class ConfigModule(ModuleType):
             config.pop(key)
         return pickle.dumps(config, protocol=2)
 
+    def save_config_portable(self) -> Dict[str, Any]:
+        """Convert config to portable format"""
+        config: Dict[str, Any] = {}
+        for key in sorted(self._config):
+            if key.startswith("_"):
+                continue
+            if any(
+                key.startswith(e) for e in self._config["_cache_config_ignore_prefix"]
+            ):
+                continue
+            config[key] = self._config[key]
+        return config
+
     def codegen_config(self) -> str:
         """Convert config to Python statements that replicate current config.
         This does NOT include config settings that are at default values.
@@ -183,12 +196,12 @@ class ConfigModule(ModuleType):
             self._is_dirty = False
         return self._hash_digest
 
+    @deprecated(
+        "`config.to_dict()` has been deprecated. It may no longer change the underlying config."
+        " use `config.shallow_copy_dict()` or `config.get_config_copy()` instead",
+        category=FutureWarning,
+    )
     def to_dict(self) -> Dict[str, Any]:
-        warnings.warn(
-            "config.to_dict() has been deprecated. It may no longer change the underlying config."
-            " use config.shallow_copy_dict() or config.get_config_copy() instead",
-            DeprecationWarning,
-        )
         return self.shallow_copy_dict()
 
     def shallow_copy_dict(self) -> Dict[str, Any]:

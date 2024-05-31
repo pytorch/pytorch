@@ -193,6 +193,7 @@ include_patterns = [
     'aten/src/ATen/*.cpp',
     'aten/src/ATen/core/*.h',
     'aten/src/ATen/core/*.cpp',
+    'aten/src/ATen/detail/*',
     'aten/src/ATen/functorch/*.h',
     'aten/src/ATen/functorch/*.cpp',
     'c10/**/*.cpp',
@@ -234,7 +235,6 @@ exclude_patterns = [
     'torch/csrc/jit/serialization/import_legacy.cpp',
     'torch/csrc/jit/serialization/export.cpp',
     'torch/csrc/lazy/**/*',
-    'torch/csrc/onnx/init.cpp',
     'torch/csrc/mps/**/*',
 ]
 init_command = [
@@ -1064,7 +1064,6 @@ exclude_patterns = [
     'test/test_fx_experimental.py',
     'test/test_fx_passes.py',
     'test/test_fx_reinplace_pass.py',
-    'test/test_hub.py',
     'test/test_import_stats.py',
     'test/test_itt.py',
     'test/test_jit.py',
@@ -1103,13 +1102,6 @@ exclude_patterns = [
     'test/test_native_mha.py',
     'test/test_nestedtensor.py',
     'test/test_nn.py',
-    'test/test_nnapi.py',
-    'test/test_numba_integration.py',
-    'test/test_numpy_interop.py',
-    'test/test_nvfuser_dynamo.py',
-    'test/test_nvfuser_frontend.py',
-    'test/test_openmp.py',
-    'test/test_optim.py',
     'test/test_out_dtype_op.py',
     'test/test_overrides.py',
     'test/test_prims.py',
@@ -2128,7 +2120,7 @@ init_command = [
     'python3',
     'tools/linter/adapters/pip_init.py',
     '--dry-run={{DRYRUN}}',
-    'ruff==0.4.4',
+    'ruff==0.4.5',
 ]
 is_formatter = true
 
