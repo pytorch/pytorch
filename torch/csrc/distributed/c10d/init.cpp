@@ -3160,9 +3160,19 @@ such as `dist.all_reduce(tensor, async_op=True)`.
         Arguments:
           tensors(List[torch.Tensor]): List of tensors we want to hash.
       )");
-  module.def("_dump_nccl_trace", []() {
-    return py::bytes(::c10d::dump_nccl_trace());
-  });
+  module.def(
+      "_dump_nccl_trace",
+      [](std::optional<bool> includeTraceBuffer) {
+        return py::bytes(::c10d::dump_nccl_trace(includeTraceBuffer.value_or(true)));
+      },
+      py::arg("includeTraceBuffer") = std::nullopt,
+      R"(
+        Arguments:
+        includeTraceBuffer (bool, optional): Whether to NCCL Trace buffer in dump. Default is True.
+        Returns:
+        A stringified pickle NCCL work traces.
+        If includeTraceBuffer is selected, the trace will also show information about the calling stack.
+      )");
 #endif
   Py_RETURN_TRUE;
 }
