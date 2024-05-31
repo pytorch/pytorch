@@ -924,7 +924,7 @@ class LOBPCG:
                 S_,
                 mm(
                     Z[:, n - nc :],
-                    _utils.basis(_utils.transpose(Z[: n - nc, n - nc :])),
+                    _utils.basis(Z[: n - nc, n - nc :].mT),
                 ),
             )
             np = P.shape[-1]
@@ -1045,7 +1045,7 @@ class LOBPCG:
 
         # The original algorithm 4 from [DuerschPhD2015].
         d_col = (d**-0.5).reshape(d.shape[0], 1)
-        DUBUD = (UBU * d_col) * _utils.transpose(d_col)
+        DUBUD = (UBU * d_col) * d_col.mT
         E, Z = _utils.symeig(DUBUD)
         t = tau * abs(E).max()
         if drop:
@@ -1057,7 +1057,7 @@ class LOBPCG:
         else:
             E[(torch.where(E < t))[0]] = t
 
-        return torch.matmul(U * _utils.transpose(d_col), Z * E**-0.5)
+        return torch.matmul(U * d_col.mT, Z * E**-0.5)
 
     def _get_ortho(self, U, V):
         """Return B-orthonormal U with columns are B-orthogonal to V.
@@ -1105,7 +1105,7 @@ class LOBPCG:
 
         BV_norm = torch.norm(mm_B(self.B, V))
         BU = mm_B(self.B, U)
-        VBU = mm(_utils.transpose(V), BU)
+        VBU = mm(V.mT, BU)
         i = j = 0
         stats = ""
         for i in range(i_max):
@@ -1125,7 +1125,7 @@ class LOBPCG:
                     self.ivars["ortho_j"] = j
                     return U
                 BU = mm_B(self.B, U)
-                UBU = mm(_utils.transpose(U), BU)
+                UBU = mm(U.mT, BU)
                 U_norm = torch.norm(U)
                 BU_norm = torch.norm(BU)
                 R = UBU - torch.eye(UBU.shape[-1], device=UBU.device, dtype=UBU.dtype)
@@ -1136,7 +1136,7 @@ class LOBPCG:
                 self.fvars[vkey] = rerr
                 if rerr < tau_ortho:
                     break
-            VBU = mm(_utils.transpose(V), BU)
+            VBU = mm(V.mT, BU)
             VBU_norm = torch.norm(VBU)
             U_norm = torch.norm(U)
             rerr = float(VBU_norm) * float(BV_norm * U_norm) ** -1

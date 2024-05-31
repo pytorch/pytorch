@@ -719,9 +719,6 @@ class SIMDKernel(Kernel):
         finally:
             self._load_mask = prior
 
-    def load_mask(self, var):
-        return self._load_mask
-
     def get_strides_of_load(self, index: sympy.Expr):
         """
         This gets the stride of the index for each of the tiling variables
