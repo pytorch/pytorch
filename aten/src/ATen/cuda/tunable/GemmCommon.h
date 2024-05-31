@@ -144,6 +144,50 @@ private:
 };
 
 template <typename T>
+struct GemmAndBiasParams : OpParams {
+  std::string Signature() const override {
+    return c10::str(transa, transb, "_", m, "_", n, "_", k);
+  }
+
+  GemmAndBiasParams* DeepCopy() const {
+    GemmAndBiasParams* copy = new GemmAndBiasParams;
+    *copy = *this;
+    c10::DeviceIndex device = 0;
+    AT_CUDA_CHECK(c10::cuda::GetDevice(&device));
+    size_t c_size = m * n * sizeof(T);
+    copy->c = static_cast<T*>(c10::cuda::CUDACachingAllocator::raw_alloc(c_size));
+    AT_CUDA_CHECK(c10::cuda::CUDACachingAllocator::memcpyAsync(
+        copy->c, device, c, device, c_size, getCurrentCUDAStream(device), true));
+    return copy;
+  }
+
+  // only call on object returned by DeepCopy
+  void Delete() {
+    c10::cuda::CUDACachingAllocator::raw_delete(c);
+  }
+
+  TuningStatus NumericalCheck(GemmAndBiasParams<T> *other) {
+    auto c_dtype = c10::CppTypeToScalarType<T>::value;
+    return detail::NumericalCheck(c_dtype, c, other->c, m*n) ? OK : FAIL;
+  }
+
+  char transa;
+  char transb;
+  int64_t m;
+  int64_t n;
+  int64_t k;
+  at::opmath_type<T> alpha;
+  const T* a;
+  int64_t lda;
+  const T* b;
+  int64_t ldb;
+  T* c;
+  int64_t ldc;
+  const T* bias;
+  at::cuda::blas::GEMMAndBiasActivationEpilogue activation;
+};
+
+template <typename T>
 struct GemmStridedBatchedParams : OpParams {
   GemmStridedBatchedParams() {
     duplicate_inputs_ = false;

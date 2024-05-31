@@ -175,12 +175,6 @@ cuda::blas::GEMMAndBiasActivationEpilogue activation_to_gemm_and_blas_arg(Activa
 static bool getDisableAddmmCudaLt() {
     static const char* env_value = std::getenv("DISABLE_ADDMM_CUDA_LT");
 #ifdef USE_ROCM
-    // if we enable tunable op, it'll take priority over just hipblaslt (heuristics)
-    // note the current tunable op is not the hipblaslt path (gemm_and_bias)
-    auto tuning_ctx = at::cuda::tunable::getTuningContext();
-    if (tuning_ctx->IsTunableOpEnabled()) {
-      return true;
-    }
     // allow both CUDA and HIP env var names for ROCm builds
     // also, current default for ROCm builds is disable by default
     if (env_value == nullptr) {
@@ -341,6 +335,44 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
         scalar_type,
         "addmm_cuda_lt",
         [&] {
+        auto tuning_ctx = at::cuda::tunable::getTuningContext();
+        if (tuning_ctx->IsTunableOpEnabled()) {
+          bool transa_ = ((args.transa != 'n') && (args.transa != 'N'));
+          bool transb_ = ((args.transb != 'n') && (args.transb != 'N'));
+          at::cuda::tunable::GemmAndBiasParams<scalar_t> params;
+          params.transa = args.transa;
+          params.transb = args.transb;
+          params.m = args.m;
+          params.n = args.n;
+          params.k = args.k;
+          params.a = args.mata->const_data_ptr<scalar_t>();
+          params.lda = args.lda;
+          params.b = args.matb->const_data_ptr<scalar_t>();
+          params.ldb = args.ldb;
+          params.bias = (&result != &self) ? self.const_data_ptr<scalar_t>() : nullptr,
+          params.c = args.result->data_ptr<scalar_t>();
+          params.ldc = args.result_ld;
+          if (transa_ && transb_) {
+            static at::cuda::tunable::GemmAndBiasTunableOp<scalar_t, at::cuda::tunable::BlasOp::T, at::cuda::tunable::BlasOp::T> gemm{};
+            gemm(&params);
+          }
+          else if (transa_ && !transb_) {
+            static at::cuda::tunable::GemmAndBiasTunableOp<scalar_t, at::cuda::tunable::BlasOp::T, at::cuda::tunable::BlasOp::N> gemm{};
+            gemm(&params);
+          }
+          else if (!transa_ && transb_) {
+            static at::cuda::tunable::GemmAndBiasTunableOp<scalar_t, at::cuda::tunable::BlasOp::N, at::cuda::tunable::BlasOp::T> gemm{};
+            gemm(&params);
+          }
+          else if (!transa_ && !transb_) {
+            static at::cuda::tunable::GemmAndBiasTunableOp<scalar_t, at::cuda::tunable::BlasOp::N, at::cuda::tunable::BlasOp::N> gemm{};
+            gemm(&params);
+          }
+          else {
+            TORCH_CHECK(false, "unreachable");
+          }
+        }
+        else {
           at::cuda::blas::gemm_and_bias<scalar_t>(
               args.transa == 't',
               args.transb == 't',
@@ -359,7 +391,7 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
               args.result_ld,
               activation_to_gemm_and_blas_arg(activation)
           );
-        });
+        }});
 #else
     auto activation_epilogue = activation_to_gemm_and_blas_arg(activation);
 #if (defined(CUDA_VERSION) && (CUDA_VERSION < 11080))
@@ -377,6 +409,44 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
         scalar_type,
         "addmm_cuda_lt",
         [&] {
+        auto tuning_ctx = at::cuda::tunable::getTuningContext();
+        if (tuning_ctx->IsTunableOpEnabled()) {
+          bool transa_ = ((args.transa != 'n') && (args.transa != 'N'));
+          bool transb_ = ((args.transb != 'n') && (args.transb != 'N'));
+          at::cuda::tunable::GemmAndBiasParams<scalar_t> params;
+          params.transa = args.transa;
+          params.transb = args.transb;
+          params.m = args.m;
+          params.n = args.n;
+          params.k = args.k;
+          params.a = args.mata->const_data_ptr<scalar_t>();
+          params.lda = args.lda;
+          params.b = args.matb->const_data_ptr<scalar_t>();
+          params.ldb = args.ldb;
+          params.bias = self.cosnt_data_ptr<scalar_t>();
+          params.c = args.result->data_ptr<scalar_t>();
+          params.ldc = args.result_ld;
+          if (transa_ && transb_) {
+            static at::cuda::tunable::GemmAndBiasTunableOp<scalar_t, at::cuda::tunable::BlasOp::T, at::cuda::tunable::BlasOp::T> gemm{};
+            gemm(&params);
+          }
+          else if (transa_ && !transb_) {
+            static at::cuda::tunable::GemmAndBiasTunableOp<scalar_t, at::cuda::tunable::BlasOp::T, at::cuda::tunable::BlasOp::N> gemm{};
+            gemm(&params);
+          }
+          else if (!transa_ && transb_) {
+            static at::cuda::tunable::GemmAndBiasTunableOp<scalar_t, at::cuda::tunable::BlasOp::N, at::cuda::tunable::BlasOp::T> gemm{};
+            gemm(&params);
+          }
+          else if (!transa_ && !transb_) {
+            static at::cuda::tunable::GemmAndBiasTunableOp<scalar_t, at::cuda::tunable::BlasOp::N, at::cuda::tunable::BlasOp::N> gemm{};
+            gemm(&params);
+          }
+          else {
+            TORCH_CHECK(false, "unreachable");
+          }
+        }
+        else {
           at::cuda::blas::gemm_and_bias<scalar_t>(
               args.transa == 't',
               args.transb == 't',
@@ -393,7 +463,7 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
               args.result_ld,
               activation_epilogue
           );
-        });
+        }});
 #endif
   } else
   {
