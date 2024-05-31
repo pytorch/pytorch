@@ -5878,7 +5878,6 @@ class GraphModule(torch.nn.Module):
         def g(x):
             return torch.func.vmap(f)(x)
 
-    @unittest.expectedFailure
     def test_vmap_side_effects_append_input(self):
         counters.clear()
         x = torch.ones(2, 3)
