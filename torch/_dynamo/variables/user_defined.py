@@ -34,7 +34,7 @@ import torch.nn
 from torch._guards import TracingContext
 
 from .. import variables
-from ..exc import unimplemented
+from ..exc import ObservedException, unimplemented
 from ..guards import GuardBuilder, install_guard
 from ..source import AttrSource, GetItemSource, ODictGetItemSource, RandomValueSource
 from ..utils import (
@@ -57,10 +57,7 @@ from .dicts import DefaultDictVariable
 
 
 def is_standard_setattr(val):
-    return val in (
-        object.__setattr__,
-        torch.nn.Module.__setattr__,
-    )
+    return val in (object.__setattr__,)
 
 
 class UserDefinedVariable(VariableTracker):
@@ -792,7 +789,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
 
     def _getattr_static(self, name):
         if (
-            isinstance(self.value, (torch.nn.Module, PyTreeSpec))
+            isinstance(self.value, PyTreeSpec)
             or "__slots__" in self.value.__class__.__dict__
             or type(self.value) == threading.local
         ):
@@ -805,7 +802,6 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                     return cls_var
             except AttributeError:
                 pass  # __slots__
-            # this might call torch.nn.Module.__getattr__
             subobj = getattr(self.value, name)
         else:
             subobj = inspect.getattr_static(self.value, name)
@@ -994,20 +990,32 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             install_guard(
                 AttrSource(self.source, name).make_guard(GuardBuilder.HASATTR)
             )
-        if self._check_for_getattribute() or self._check_for_getattr():
-            unimplemented("hasattr with custom __getattr__")
+        if self._check_for_getattribute():
+            unimplemented("hasattr with custom __getattribute__")
 
-        try:
-            self._getattr_static(name)
-            if isinstance(self, variables.UnspecializedNNModuleVariable):
-                result = tx.inline_user_function_return(
-                    variables.UserFunctionVariable(self.value.__getattr__.__func__),
-                    [self, variables.ConstantVariable.create(name)],
-                    {},
-                )
+        getattr_fn = self._check_for_getattr()
+        if isinstance(getattr_fn, types.FunctionType):
+            # Dynamo is going to trace the __getattr__ function with
+            # args=name. Set the source accordingly.
+            new_source = None
+            if self.source:
+                new_source = AttrSource(self.source, "__getattr__")
+            try:
+                result = variables.UserMethodVariable(
+                    getattr_fn, self, source=new_source
+                ).call_function(tx, [variables.ConstantVariable.create(name)], {})
+
                 return variables.ConstantVariable.create(
                     not isinstance(result, variables.DeletedVariable)
                 )
+            except ObservedException:
+                return variables.ConstantVariable.create(False)
+
+        elif getattr_fn is not None:
+            unimplemented("UserDefined with non-function __getattr__")
+
+        try:
+            self._getattr_static(name)
             return variables.ConstantVariable.create(True)
         except AttributeError:
             return variables.ConstantVariable.create(False)
@@ -1077,6 +1085,12 @@ class KeyedJaggedTensorVariable(UserDefinedObjectVariable):
         return super().var_getattr(tx, name)
 
 
+class RemovableHandleClass:
+    # Dummy class to pass to python_type of RemovableHandleVariable
+    # Useful for isinstance check on hooks
+    pass
+
+
 class RemovableHandleVariable(VariableTracker):
     REMOVED = -1
 
@@ -1107,3 +1121,6 @@ class RemovableHandleVariable(VariableTracker):
             return
         # unreachable due to codegen.add_cache() when the hook is installed
         super().reconstruct(codegen)
+
+    def python_type(self):
+        return RemovableHandleClass
