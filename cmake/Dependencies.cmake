@@ -834,53 +834,42 @@ else()
 endif()
 include_directories(SYSTEM ${EIGEN3_INCLUDE_DIR})
 
+
+# ---[ Python Interpreter
+# If not given a Python installation, then use the current active Python
+if(NOT Python_EXECUTABLE)
+  execute_process(
+    COMMAND "which" "python3" RESULT_VARIABLE _exitcode OUTPUT_VARIABLE _py_exe)
+  if(${_exitcode} EQUAL 0)
+    if(NOT MSVC)
+      string(STRIP ${_py_exe} Python_EXECUTABLE)
+    endif()
+    message(STATUS "Setting Python to ${Python_EXECUTABLE}")
+  endif()
+endif()
+
+if(BUILD_PYTHON)
+  set(PYTHON_COMPONENTS Development)
+  if(USE_NUMPY)
+    list(APPEND PYTHON_COMPONENTS NumPy)
+  endif()
+  find_package(Python COMPONENTS Interpreter OPTIONAL_COMPONENTS ${PYTHON_COMPONENTS})
+else()
+  find_package(Python COMPONENTS Interpreter)
+endif()
+
+if(NOT Python_Interpreter_FOUND)
+  message(FATAL_ERROR "Python3 could not be found.")
+endif()
+
+if(${Python_VERSION} VERSION_LESS 3.8)
+  message(FATAL_ERROR
+    "Found Python libraries version ${Python_VERSION}. Python < 3.8 is no longer supported by PyTorch.")
+endif()
+
 # ---[ Python + Numpy
 if(BUILD_PYTHON)
-  # If not given a Python installation, then use the current active Python
-  if(NOT Python_EXECUTABLE)
-    execute_process(
-      COMMAND "which" "python3" RESULT_VARIABLE _exitcode OUTPUT_VARIABLE _py_exe)
-    if(${_exitcode} EQUAL 0)
-      if(NOT MSVC)
-        string(STRIP ${_py_exe} Python_EXECUTABLE)
-      endif()
-      message(STATUS "Setting Python to ${Python_EXECUTABLE}")
-    endif()
-  endif()
-
-  # Check that Python works
-  set(PYTHON_VERSION)
-  if(DEFINED Python_EXECUTABLE)
-    execute_process(
-        COMMAND "${Python_EXECUTABLE}" "--version"
-        RESULT_VARIABLE _exitcode OUTPUT_VARIABLE PYTHON_VERSION)
-    if(NOT _exitcode EQUAL 0)
-      message(FATAL_ERROR "The Python executable ${Python_EXECUTABLE} cannot be run. Make sure that it is an absolute path.")
-    endif()
-    if(PYTHON_VERSION)
-      string(REGEX MATCH "([0-9]+)\\.([0-9]+)" PYTHON_VERSION ${PYTHON_VERSION})
-    endif()
-  endif()
-
-  # These should fill in the rest of the variables, like versions, but resepct
-  # the variables we set above
-  if(USE_NUMPY)
-    find_package(Python COMPONENTS Interpreter Development NumPy)
-  else()
-    find_package(Python COMPONENTS Interpreter Development)
-  endif()
-
-  if(NOT Python_Development_FOUND)
-    message(FATAL_ERROR
-      "Python development libraries could not be found.")
-  endif()
-
-  if(${Python_VERSION} VERSION_LESS 3.8)
-    message(FATAL_ERROR
-      "Found Python libraries version ${Python_VERSION}. Python < 3.8 is no longer supported by PyTorch.")
-  endif()
-
-  if(Python_Interpreter_FOUND)
+  if(Python_Development_FOUND)
     if(USE_NUMPY)
       if(NOT Python_NumPy_FOUND)
         message(WARNING "NumPy could not be found. Not building with NumPy. Suppress this warning with -DUSE_NUMPY=OFF")
