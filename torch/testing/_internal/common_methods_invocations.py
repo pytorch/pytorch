@@ -37,7 +37,7 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_ROCM, IS_WINDOWS, IS_MACOS, TEST_SCIPY,
     torch_to_numpy_dtype_dict, numpy_to_torch_dtype, TEST_WITH_ASAN,
     GRADCHECK_NONDET_TOL, slowTest, TEST_WITH_SLOW,
-    TEST_WITH_TORCHINDUCTOR, TEST_XPU, enable_skipped_op_dict,
+    TEST_WITH_TORCHINDUCTOR, TEST_XPU, get_backend_op_dict,
 )
 from torch.testing._utils import wrapper_set_seed
 
@@ -14406,7 +14406,6 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.expectedFailure, 'TestMeta', 'test_dispatch_meta_inplace'),
                DecorateInfo(unittest.expectedFailure, 'TestMeta', 'test_dispatch_symbolic_meta_inplace'),
                DecorateInfo(unittest.expectedFailure, 'TestMeta', 'test_dispatch_symbolic_meta_inplace_all_strides'),
-               DecorateInfo(unittest.skip("No XPU backend support in this operation"), 'TestCompositeCompliance', 'test_operator', device_type='xpu', dtypes=None),
            )),
     OpInfo('as_strided_scatter',
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16, torch.chalf),
@@ -24116,11 +24115,11 @@ def skipOps(test_case_name, base_test_name, to_skip):
         return fn
     return wrapped
 
-def enable_skipped_device(op_db_list: List[OpInfo]):
+def enable_backend_test(op_db_list: List[OpInfo]):
     if TEST_XPU:
         # Get the supported op and dtypes from yaml file.
-        op_db_dict = enable_skipped_op_dict()
-        supported_op_list = [list(op_dict.keys())[0] if type(op_dict) is dict else op_dict for op_dict in op_db_dict['supported']]
+        backend_op_dict = get_backend_op_dict()
+        supported_op_list = [list(op_dict.keys())[0] if type(op_dict) is dict else op_dict for op_dict in backend_op_dict['supported']]
 
         for op in op_db_list:
             # For refs ops get the name of the related torch_opinfo.
@@ -24138,11 +24137,11 @@ def enable_skipped_device(op_db_list: List[OpInfo]):
             else:
                 ind = supported_op_list.index(name)
 
-                if type(op_db_dict['supported'][ind]) is dict and op_db_dict['supported'][ind][name] != None:
+                if type(backend_op_dict['supported'][ind]) is dict and backend_op_dict['supported'][ind][name] != None:
                     # If the op is supported check whether the supported dtypes is different with cuda
-                    for _key in op_db_dict['supported'][ind][name]:
+                    for _key in backend_op_dict['supported'][ind][name]:
                         # Get the dtypes with difference
-                        _dtypes = [getattr(torch, _dtype) if hasattr(torch, _dtype) else None for _dtype in op_db_dict['supported'][ind][name][_key]]
+                        _dtypes = [getattr(torch, _dtype) if hasattr(torch, _dtype) else None for _dtype in backend_op_dict['supported'][ind][name][_key]]
                         match _key:
                             case "unsupported":
                                 op.dtypesIfXPU = set(filter(lambda x: (x not in _dtypes), op.dtypesIfXPU)) \

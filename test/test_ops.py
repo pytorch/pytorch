@@ -56,7 +56,7 @@ from torch.testing._internal.common_methods_invocations import (
     SpectralFuncInfo,
     UnaryUfuncInfo,
     xfail,
-    enable_skipped_device,
+    enable_backend_test,
 )
 
 from torch.testing._internal.common_utils import (
@@ -89,8 +89,8 @@ from torch.utils._pytree import tree_map
 assert torch.get_default_dtype() == torch.float32
 
 
-enable_skipped_device(op_db)
-enable_skipped_device(python_ref_db)
+enable_backend_test(op_db)
+enable_backend_test(python_ref_db)
 
 # variant testing is only done with torch.float and torch.cfloat to avoid
 #   excessive test times and maximize signal to noise ratio
@@ -113,8 +113,6 @@ _ref_test_ops = tuple(
     )
 )
 
-
-my_op_list = [op for op in python_ref_db if op.name in ['_refs.cos',]]
 
 def reduction_dtype_filter(op):
     if (

@@ -437,7 +437,6 @@ class DeviceTypeTestBase(TestCase):
                 return result
 
             assert not hasattr(cls, name), f"Redefinition of test {name}"
-
             setattr(cls, name, instantiated_test)
 
         def default_parametrize_fn(test, generic_cls, device_cls):
@@ -449,7 +448,6 @@ class DeviceTypeTestBase(TestCase):
 
         # If one of the @dtypes* decorators is present, also parametrize over the dtypes set by it.
         dtypes = cls._get_dtypes(test)
-        
         if dtypes is not None:
 
             def dtype_parametrize_fn(test, generic_cls, device_cls, dtypes=dtypes):

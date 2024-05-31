@@ -5,8 +5,7 @@ import collections.abc
 import math
 import operator
 import unittest
-from dataclasses import InitVar, asdict, dataclass
-from typing import Dict, Optional
+from dataclasses import asdict, dataclass
 from enum import Enum
 from functools import partial
 from itertools import product
@@ -893,9 +892,6 @@ class OpInfo:
     supports_expanded_weight: bool = False
 
     is_factory_function: bool = False
-
-    
-
 
     def __post_init__(self):
         self._original_opinfo_args = asdict(self).copy()
@@ -2503,7 +2499,6 @@ class UnaryUfuncInfo(OpInfo):
             reference_inputs_func=reference_inputs_func,
             **kwargs,
         )
-        
         self.domain = domain
         self.handles_complex_extremal_values = handles_complex_extremal_values
         self.handles_large_floats = handles_large_floats
