@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 import click
 import numpy as np
-import torch
 from operator_inp_utils import OperatorInputsLoader
+
+import torch
 
 from torch._dynamo.backends.cudagraphs import cudagraphs_inner
 from torch._dynamo.testing import same

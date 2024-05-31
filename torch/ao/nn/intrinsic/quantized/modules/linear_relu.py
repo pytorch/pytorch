@@ -40,8 +40,8 @@ class LinearReLU(nnq.Linear):
         return 'QuantizedLinearReLU'
 
     @classmethod
-    def from_float(cls, mod):
-        return super().from_float(mod)
+    def from_float(cls, mod, use_precomputed_fake_quant=False):
+        return super().from_float(mod, use_precomputed_fake_quant)
 
     @classmethod
     def from_reference(cls, ref_linear_relu, output_scale, output_zero_point):
@@ -77,7 +77,7 @@ class LinearLeakyReLU(nnq.Linear):
         return 'QuantizedLinearLeakyReLU'
 
     @classmethod
-    def from_float(cls, mod):
+    def from_float(cls, mod, use_precomputed_fake_quant=False):
         assert type(mod) == nni.LinearLeakyReLU, 'Input float module should be LinearLeakyReLU'
         assert hasattr(mod, 'qconfig'), 'Input float module must have qconfig defined'
         activation_post_process = mod.activation_post_process
@@ -144,7 +144,7 @@ class LinearTanh(nnq.Linear):
         return 'QuantizedLinearTanh'
 
     @classmethod
-    def from_float(cls, mod):
+    def from_float(cls, mod, use_precomputed_fake_quant=False):
         assert type(mod) == nni.LinearTanh, 'Input float module should be LinearTanh'
         assert hasattr(mod, 'qconfig'), 'Input float module must have qconfig defined'
         activation_post_process = mod.activation_post_process
