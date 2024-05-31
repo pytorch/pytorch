@@ -1375,12 +1375,13 @@ class AOTDispatchAutograd:
 
     # See Note [Tangents must be contiguous, Part 2]
     @staticmethod
-    def coerce_runtime_tangent(x, expected_tangent_metadata):
+    def coerce_runtime_tangent(x, metadata):
         if not isinstance(x, torch.Tensor):
             return x
         if not is_traceable_wrapper_subclass(x):
             return x
-        assert expected_tangent_metadata is not None
+        assert metadata is not None
+        (_, expected_tangent_metadata) = metadata
         _, runtime_tangent_metadata = x.__tensor_flatten__()  # type: ignore[attr-defined]
         if runtime_tangent_metadata == expected_tangent_metadata:
             return x

@@ -460,15 +460,15 @@ class ViewAndMutationMeta:
         assert not self.cache_safe
         traced_tangent_metadata = []
 
-        def extract_tangent_metadata(t):
+        def extract_metadata(t):
             if isinstance(t, torch.Tensor) and is_traceable_wrapper_subclass(t):
-                _, expected_tangent_metadata = t.__tensor_flatten__()  # type: ignore[attr-defined]
-                return expected_tangent_metadata
+                (inner_tensors, flatten_spec) = t.__tensor_flatten__()  # type: ignore[attr-defined]
+                return (inner_tensors, flatten_spec)
             else:
                 return None
 
         self.traced_tangents = [
-            extract_tangent_metadata(t) for t in self.traced_tangents
+            extract_metadata(t) for t in self.traced_tangents
         ]
         self.cache_safe = True
 
