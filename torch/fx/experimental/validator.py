@@ -378,6 +378,10 @@ try:
         def floordiv(self, numerator: z3.ArithRef, denominator: z3.ArithRef) -> z3.ArithRef:
             return self._ops.floordiv(numerator, denominator)
 
+        def truncdiv(self, numerator: z3.ArithRef, denominator: z3.ArithRef) -> z3.ArithRef:
+            # TODO: This is wrong
+            return self._ops.floordiv(numerator, denominator)
+
         def div(self, numerator: z3.ArithRef, denominator: z3.ArithRef) -> z3.ArithRef:
             return self._ops.floordiv(numerator, denominator)
 

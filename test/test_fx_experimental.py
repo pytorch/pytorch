@@ -1708,7 +1708,7 @@ if TEST_Z3:
     import torch._dynamo.config
 
     from torch.fx.experimental.validator import SympyToZ3, TranslationValidator, ValidationException, z3str
-    from torch.utils._sympy.functions import FloorDiv, Mod
+    from torch.utils._sympy.functions import NaturalDiv, Mod
 
     class TestTranslationValidation(TestCase):
         def _prepare_for_translation_validation(self):
@@ -1771,7 +1771,7 @@ if TEST_Z3:
                     s0 / s1,
                     z3.ToReal(z0) * (z1**-1),
                 ),
-                (FloorDiv(s0, s1), z3.ToInt(z3.ToReal(z0) / z3.ToReal(z1))),
+                (NaturalDiv(s0, s1), z3.ToInt(z3.ToReal(z0) / z3.ToReal(z1))),
                 (Mod(s0, s1), z0 - z3.ToInt(z3.ToReal(z0) / z3.ToReal(z1)) * z1),
                 (
                     Mod(s2, (s0 / s1)),

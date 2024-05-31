@@ -131,6 +131,10 @@ class NaturalDiv(sympy.Function):
         #
         # Counterexample for floor division when arguments are not positive: a=11, b=-3, c=-4
         #
+        # Found using:
+        #   (define-fun floor_div ((x Int) (y Int)) Int
+        #     (to_int (/ (to_real x) (to_real y))))
+        #
         #   >>> (11 // -3) // -4
         #   1
         #   >>> 11 // (-3 * -4)
@@ -407,62 +411,6 @@ class PythonMod(sympy.Function):
 
     def _eval_is_nonpositive(self):
         return True if self.args[1].is_negative else None  # type: ignore[attr-defined]
-
-
-# C-style modulus: take sign from LHS
-class CMod(sympy.Function):
-    nargs = (2,)
-
-    is_integer = True
-
-    @classmethod
-    def eval(cls, p, q):
-        assert p.is_integer, p
-        assert q.is_integer, q
-
-        if q.is_zero:
-            raise ZeroDivisionError("Modulo by zero")
-
-        # Three cases:
-        #   1. p == 0
-        #   2. p is either q or -q
-        #   3. p is integer and q == 1
-        if p is S.Zero or p in (q, -q) or q == 1:
-            return S.Zero
-
-        # Evaluate if they are both literals.
-        if q.is_Number and p.is_Number:
-            r = p % q
-            # C modulus behavior!
-            if p < 0:
-                r *= -1
-            return r
-
-        # If q == 2, it's a matter of whether p is odd or even.
-        if q.is_Number and q == 2:
-            if p.is_even:
-                return S.Zero
-            if p.is_odd:
-                return S.One
-
-        # If p is a multiple of q.
-        r = p / q
-        if r.is_integer:
-            return S.Zero
-
-        # If p < q and its ratio is positive, then:
-        #   - floor(p / q) = 0
-        #   - p % q = p - floor(p / q) * q = p
-        less = p < q
-        if less.is_Boolean and bool(less) and r.is_positive:
-            return p
-
-    # NB: args[0] for cmod
-    def _eval_is_nonnegative(self):
-        return True if self.args[0].is_positive else None  # type: ignore[attr-defined]
-
-    def _eval_is_nonpositive(self):
-        return True if self.args[0].is_negative else None  # type: ignore[attr-defined]
 
 
 # Generic modulus: only defined on non-negative arguments

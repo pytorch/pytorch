@@ -13,7 +13,7 @@ from torch.testing._internal.common_utils import (
     run_tests,
     TestCase,
 )
-from torch.utils._sympy.functions import FloorDiv
+from torch.utils._sympy.functions import NaturalDiv
 from torch.utils._sympy.solve import INEQUALITY_TYPES, mirror_rel_op, try_solve
 from torch.utils._sympy.value_ranges import ValueRangeAnalysis, ValueRanges
 from torch.utils._sympy.reference import ReferenceAnalysis, PythonReferenceAnalysis
@@ -38,7 +38,7 @@ UNARY_OPS = [
 ]
 BINARY_OPS = [
     "truediv", "floordiv",
-    # "truncdiv",  # TODO
+    "truncdiv",
     # NB: pow is float_pow
     "add", "mul", "sub", "pow", "pow_by_natural", "minimum", "maximum", "mod"
 ]
@@ -103,7 +103,7 @@ def valid_binary(fn, a, b):
         return False
     elif fn == "mod" and (a < 0 or b <= 0):
         return False
-    elif (fn in ["div", "truediv", "floordiv"]) and b == 0:
+    elif (fn in ["div", "truediv", "truncdiv", "floordiv"]) and b == 0:
         return False
     return True
 
@@ -147,7 +147,7 @@ class TestValueRanges(TestCase):
     def test_binary_ref(self, fn, dtype):
         to_dtype = {"int": sympy.Integer, "float": sympy.Float}
         # Don't test float on int only methods
-        if dtype == "float" and fn in ["pow_by_natural", "mod"]:
+        if dtype == "float" and fn in ["pow_by_natural", "mod", "floordiv", "truncdiv"]:
             return
         dtype = to_dtype[dtype]
         for a, b in itertools.product(CONSTANTS, repeat=2):
@@ -377,9 +377,9 @@ class TestSympySolve(TestCase):
             # 'a' doesn't appear on neither side.
             Eq(b, c + 1),
             # Result is a 'sympy.And'.
-            Eq(FloorDiv(a, b), c),
+            Eq(NaturalDiv(a, b), c),
             # Result is a 'sympy.Or'.
-            Ne(FloorDiv(a, b), c),
+            Ne(NaturalDiv(a, b), c),
         ]
 
         for case in cases:
@@ -495,29 +495,29 @@ class TestSympySolve(TestCase):
         pos = sympy.Symbol("pos", positive=True)
         integer = sympy.Symbol("integer", integer=True)
 
-        # (Eq(FloorDiv(a, pos), integer), And(Ge(a, integer * pos), Lt(a, (integer + 1) * pos))),
-        # (Eq(FloorDiv(a + 5, pos), integer), And(Ge(a, integer * pos), Lt(a, (integer + 1) * pos))),
-        # (Ne(FloorDiv(a, pos), integer), Or(Lt(a, integer * pos), Ge(a, (integer + 1) * pos))),
+        # (Eq(NaturalDiv(a, pos), integer), And(Ge(a, integer * pos), Lt(a, (integer + 1) * pos))),
+        # (Eq(NaturalDiv(a + 5, pos), integer), And(Ge(a, integer * pos), Lt(a, (integer + 1) * pos))),
+        # (Ne(NaturalDiv(a, pos), integer), Or(Lt(a, integer * pos), Ge(a, (integer + 1) * pos))),
 
         special_case = {
-            # 'FloorDiv' turns into 'And', which can't be simplified any further.
-            Eq: (Eq(FloorDiv(a, pos), integer), None),
-            # 'FloorDiv' turns into 'Or', which can't be simplified any further.
-            Ne: (Ne(FloorDiv(a, pos), integer), None),
-            Gt: (Gt(FloorDiv(a, pos), integer), (integer + 1) * pos),
-            Ge: (Ge(FloorDiv(a, pos), integer), integer * pos),
-            Lt: (Lt(FloorDiv(a, pos), integer), integer * pos),
-            Le: (Le(FloorDiv(a, pos), integer), (integer + 1) * pos),
+            # 'NaturalDiv' turns into 'And', which can't be simplified any further.
+            Eq: (Eq(NaturalDiv(a, pos), integer), None),
+            # 'NaturalDiv' turns into 'Or', which can't be simplified any further.
+            Ne: (Ne(NaturalDiv(a, pos), integer), None),
+            Gt: (Gt(NaturalDiv(a, pos), integer), (integer + 1) * pos),
+            Ge: (Ge(NaturalDiv(a, pos), integer), integer * pos),
+            Lt: (Lt(NaturalDiv(a, pos), integer), integer * pos),
+            Le: (Le(NaturalDiv(a, pos), integer), (integer + 1) * pos),
         }[op]
 
         cases: List[Tuple[sympy.Basic, sympy.Basic]] = [
             # 'b' is not strictly positive
-            (op(FloorDiv(a, b), integer), None),
+            (op(NaturalDiv(a, b), integer), None),
             # 'c' is not strictly positive
-            (op(FloorDiv(a, pos), c), None),
+            (op(NaturalDiv(a, pos), c), None),
         ]
 
-        # The result might change after 'FloorDiv' transformation.
+        # The result might change after 'NaturalDiv' transformation.
         # Specifically:
         #   - [Ge, Gt] => Ge
         #   - [Le, Lt] => Lt
@@ -546,13 +546,13 @@ class TestSympySolve(TestCase):
         # =====================================
         # 3 * 3 <= a + 10         (always true)
         #          a + 10 < 4 * 3 (not sure)
-        check(Eq(FloorDiv(a + 10, 3), 3), Lt(a, (3 + 1) * 3 - 10))
+        check(Eq(NaturalDiv(a + 10, 3), 3), Lt(a, (3 + 1) * 3 - 10))
 
         # (a + 10) // 2 == 4
         # =====================================
         # 4 * 2 <= 10 - a         (not sure)
         #          10 - a < 5 * 2 (always true)
-        check(Eq(FloorDiv(10 - a, 2), 4), Le(a, -(4 * 2 - 10)))
+        check(Eq(NaturalDiv(10 - a, 2), 4), Le(a, -(4 * 2 - 10)))
 
     @skipIf(not TEST_Z3, "Z3 not installed")
     def test_z3_proof_floordiv_eq_simplify(self):
@@ -571,7 +571,7 @@ class TestSympySolve(TestCase):
         # Add assertions for 'a_'.
         solver.add(a_ > 0)
 
-        expr = Eq(FloorDiv(a + 10, 3), 3)
+        expr = Eq(NaturalDiv(a + 10, 3), 3)
         r_expr, _ = try_solve(expr, a)
 
         # Check 'try_solve' really returns the 'expected' below.

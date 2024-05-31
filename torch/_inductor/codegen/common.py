@@ -452,9 +452,6 @@ class ExprPrinter(Printer):
     def _print_PythonMod(self, expr):
         raise NotImplementedError(f"_print_PythonMod not implemented for {type(self)}")
 
-    def _print_CMod(self, expr):
-        raise NotImplementedError(f"_print_CMod not implemented for {type(self)}")
-
     def _print_IntTrueDiv(self, expr):
         raise NotImplementedError(f"_print_IntTrueDiv not implemented for {type(self)}")
 

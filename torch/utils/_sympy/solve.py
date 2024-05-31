@@ -4,7 +4,7 @@ from typing import Dict, Optional, Tuple, Type
 
 import sympy
 
-from torch.utils._sympy.functions import FloorDiv
+from torch.utils._sympy.functions import NaturalDiv
 
 log = logging.getLogger(__name__)
 
@@ -36,7 +36,7 @@ def mirror_rel_op(type: Type) -> Optional[Type[sympy.Rel]]:
 # 'trials': number of times 'try_solve' will try to isolate 'thing' to the
 # left-hand side.
 #
-# 'floordiv_inequality': flag to enable conversion of 'FloorDiv' into
+# 'floordiv_inequality': flag to enable conversion of 'NaturalDiv' into
 # inequalities.
 def try_solve(
     expr: sympy.Basic,
@@ -130,7 +130,7 @@ def _try_isolate_lhs(
             e = op(lhs, rhs)
 
     ################################################################################
-    # left-hand side is FloorDiv
+    # left-hand side is NaturalDiv
     ################################################################################
     #
     # Given the expression: a // b op c
@@ -140,8 +140,14 @@ def _try_isolate_lhs(
     if (
         floordiv_inequality
         and isinstance(e, sympy.Rel)
-        and isinstance(e.lhs, FloorDiv)
-        and e.lhs.divisor.is_positive
+        and (
+            isinstance(e.lhs, NaturalDiv)
+            # NB: works even when a is negative.
+            # Counterexample when b is negative: a=3, b=-2, c=-2, then 3 >= -2 * -2 is FALSE
+            or (isinstance(e.lhs, PythonFloorDiv) and e.lhs.divisor.is_positive)
+            # NB: counterexample for truncdiv: a=-3, b=2, c=-1, then -3 >= 2 * -1 is FALSE
+        )
+        # a=-1, b=2
         and e.rhs.is_integer
     ):
         # a // b == expr

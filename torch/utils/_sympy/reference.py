@@ -9,7 +9,6 @@ from torch.utils._sympy.functions import (
     _keep_float,
     FloatPow,
     FloatTrueDiv,
-    FloorDiv,
     IntTrueDiv,
     Mod,
     OpaqueUnaryFn_exp,
@@ -20,6 +19,7 @@ from torch.utils._sympy.functions import (
     RoundToInt,
     ToFloat,
     TruncToInt,
+    PythonFloorDiv,
 )
 
 
@@ -129,7 +129,7 @@ class ReferenceAnalysis:
 
     @staticmethod
     def floordiv(a, b):
-        return FloorDiv(a, b)
+        return PythonFloorDiv(a, b)
 
     @staticmethod
     def truncdiv(a, b):

@@ -16,7 +16,6 @@ from sympy.logic.boolalg import Boolean as SympyBoolean, BooleanAtom
 import torch
 from .functions import (
     CleanDiv,
-    CMod,
     FloatPow,
     FloatTrueDiv,
     IntTrueDiv,
@@ -82,10 +81,6 @@ def handlers():
         sympy.Pow: "pow_by_natural",
         Mod: "mod",
         PythonMod: "mod",  # TODO: this is wrong
-        # This is fine for all backends, but a dedicated cmod would be better
-        # in case we ever add a backend to a language with Python mod-style
-        # semantics
-        CMod: "mod",
         # TODO: You shouldn't ever hit this one
         sympy.Mod: "mod",
         sympy.Abs: "abs",

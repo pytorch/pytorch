@@ -28,7 +28,8 @@ from torch._prims_common import dtype_to_type
 from .functions import (
     _keep_float,
     FloatTrueDiv,
-    FloorDiv,
+    PythonFloorDiv,
+    NaturalDiv,
     IntTrueDiv,
     OpaqueUnaryFn_exp,
     OpaqueUnaryFn_log,
@@ -537,7 +538,7 @@ class SymPyValueRangeAnalysis:
         ):
             return ValueRanges.unknown()
         else:
-            return ValueRanges.coordinatewise_monotone_map(a, b, FloorDiv)
+            return ValueRanges.coordinatewise_monotone_map(a, b, PythonFloorDiv)
 
     @classmethod
     def mod(cls, x, y):
