@@ -1,16 +1,17 @@
 """
-These are the runtime wrappers that are associated with JIT-compiling.
-
-This includes the forward-only and joint JIT runtime wrappers.
-
-This module depends heavily on the runtime wrapper building blocks defined
-in `runtime_wrappers`.
+Functions in this module do most of the "work" of AOTAutograd.
+An aot_dispatch_* function:
+- Takes in the input flat_fn, flat_args, and some metadata
+- Runs a set of pre compile wrappers (e.g. argument deduping)
+- Runs the actual compiler
+- Wraps the returned callable in a set of post compile wrappers
+- Returns the wrapped callable and metadata.
 """
 
 import logging
 from contextlib import nullcontext
 
-from typing import Any, List, Sequence
+from typing import Any, Callable, List, Optional, Sequence, Tuple
 
 import torch
 import torch.utils.dlpack
@@ -29,12 +30,17 @@ from .dispatch_and_compile_graph import (
 from .logging_utils import track_graph_compiling
 
 from .runtime_wrappers import (
+    AOTDedupeWrapper,
     AOTDispatchAutograd,
     AOTDispatchSubclassWrapper,
+    AOTSyntheticBaseWrapper,
     AutogradLazyBackwardCompileInfo,
+    CompilerWrapper,
     DebugAssertWrapper,
     FakifiedOutWrapper,
     FunctionalizedRngRuntimeWrapper,
+    post_compile,
+    pre_compile,
     RuntimeWrapper,
 )
 from .schemas import AOTConfig, MutationType, ViewAndMutationMeta
@@ -50,14 +56,75 @@ aot_graphs_log = getArtifactLogger(__name__, "aot_graphs")
 
 aten = torch.ops.aten
 
+# Returns a Callable and a ViewAndMutationMeta.
+# Currently, only export needs the ViewAndMutationMeta after this function.
+DispatchReturn = Tuple[Callable, ViewAndMutationMeta]
 
-def aot_dispatch_base(
-    flat_fn,
-    flat_args: List[Tensor],
+
+def _create_wrappers_for_dispatch(needs_autograd: bool) -> List[CompilerWrapper]:
+    """
+    Wrappers that run on every dispatch function
+    """
+    return [AOTDedupeWrapper(), AOTSyntheticBaseWrapper(trace_joint=needs_autograd)]
+
+
+# Export's dispatching logic is unique in a few ways: it only needs the "graph"
+# bits of aot_autograd, and doesn't need to do any specific wrapping.
+def aot_dispatch_export(
+    flat_fn: Callable,
+    flat_args: List[Any],
     aot_config: AOTConfig,
     *,
     fw_metadata: ViewAndMutationMeta,
-):
+    needs_autograd: bool,
+) -> DispatchReturn:
+    wrappers = _create_wrappers_for_dispatch(needs_autograd)
+    flat_fn, flat_args, fw_metadata = pre_compile(
+        wrappers,
+        flat_fn,
+        flat_args,
+        aot_config,
+        fw_metadata=fw_metadata,
+    )
+    if needs_autograd and not aot_config.pre_dispatch:
+        graph, _, _ = aot_dispatch_autograd_graph(
+            flat_fn, flat_args, aot_config, fw_metadata=fw_metadata
+        )
+    else:
+        graph, _, _ = aot_dispatch_base_graph(
+            flat_fn, flat_args, aot_config, fw_metadata=fw_metadata
+        )
+
+    # NB: the wrappers that run in pre_compile for export are
+    # either a no-op, because they're not needed, or will raise a runtime error,
+    # since they don't support export.
+    # We still run these wrappers to make sure that they're not needed pre compile,
+    # but we technically don't need to run them post compile at all here.
+    compiled_fn, fw_metadata = post_compile(
+        wrappers, graph, aot_config, runtime_metadata=fw_metadata
+    )
+
+    # Therefore, since no wrapperes run, we don't get back a callable - we get back the raw fx graph
+    # (either a joint or an inference-only graph)
+    assert isinstance(compiled_fn, torch.fx.GraphModule)
+    return compiled_fn, fw_metadata
+
+
+def aot_dispatch_base(
+    flat_fn,
+    flat_args: List[Any],
+    aot_config: AOTConfig,
+    *,
+    fw_metadata: ViewAndMutationMeta,
+) -> DispatchReturn:
+    """
+    Handles functions that don't need autograd. Runs wrappers and compiles with fw_compiler.
+    """
+    wrappers = _create_wrappers_for_dispatch(needs_autograd=False)
+    flat_fn, flat_args, fw_metadata = pre_compile(
+        wrappers, flat_fn, flat_args, aot_config, fw_metadata=fw_metadata
+    )
+
     fw_module, updated_flat_args, maybe_subclass_meta = aot_dispatch_base_graph(  # type: ignore[misc]
         flat_fn, flat_args, aot_config, fw_metadata=fw_metadata
     )
@@ -144,13 +211,10 @@ def aot_dispatch_base(
         runtime_metadata=fw_metadata,
     )
 
+    compiled_fn = post_compile(
+        wrappers, compiled_fn, aot_config, runtime_metadata=fw_metadata
+    )
     return compiled_fn
-
-
-def _output_node(gm: torch.fx.GraphModule) -> torch.fx.Node:
-    """Return the output node of a graph"""
-    # reversed() since we expect output at end of graph
-    return next(reversed(gm.graph.find_nodes(op="output")))
 
 
 def aot_dispatch_autograd(
@@ -159,9 +223,22 @@ def aot_dispatch_autograd(
     aot_config: AOTConfig,
     *,
     fw_metadata: ViewAndMutationMeta,
-):
+) -> DispatchReturn:
+    """
+    Autograd logic. Generates a joint graph, partitions it, manipulates the input with various wrappers,
+    and returns a wrapped torch.autograd.Function with a forward and backward.
+    """
+    wrappers = _create_wrappers_for_dispatch(needs_autograd=True)
+    flat_fn, flat_args, fw_metadata = pre_compile(
+        wrappers,
+        flat_fn,
+        flat_args,
+        aot_config,
+        fw_metadata=fw_metadata,
+    )
+
     fw_metadata.deterministic = torch.are_deterministic_algorithms_enabled()
-    fx_g, joint_inputs, maybe_subclass_meta = aot_dispatch_autograd_graph(  # type: ignore[misc]
+    fx_g, joint_inputs, maybe_subclass_meta = aot_dispatch_autograd_graph(
         flat_fn, flat_args, aot_config, fw_metadata=fw_metadata
     )
 
@@ -174,7 +251,7 @@ def aot_dispatch_autograd(
         )
         trace_structured(
             "aot_joint_graph",
-            payload_fn=lambda: fx_g.print_readable(print_output=False),  # type: ignore[union-attr]
+            payload_fn=lambda: fx_g.print_readable(print_output=False),
         )
 
     with torch.no_grad():
@@ -276,7 +353,10 @@ def aot_dispatch_autograd(
         # If we later backprop through the second output, this will also require backprop'ing through x.
         # Meaning we'll need to use `retain_graph=True` to be able to backprop through x the second time.
         _indices_of_inps_to_detach: List[int] = []
-        bw_outs: Sequence[torch.fx.Node] = _output_node(bw_module).args[0]  # type: ignore[assignment]
+
+        # reversed() since we expect output at end of graph
+        bw_output = next(reversed(bw_module.graph.find_nodes(op="output")))
+        bw_outs: Sequence[torch.fx.Node] = bw_output.args[0]  # type: ignore[assignment]
 
         # TODO: we should apply the below "detach inputs if their gradients are statically known to be None"
         # optimization even if we have subclass inputs/outputs (we do not handle this today).
@@ -480,7 +560,7 @@ def aot_dispatch_autograd(
         saved_compile_context,
     )
 
-    compiled_function = AOTDispatchAutograd.post_compile(
+    compiled_fn = AOTDispatchAutograd.post_compile(
         compiled_fw_func,
         compiled_bw_func,
         maybe_subclass_meta,
@@ -494,11 +574,17 @@ def aot_dispatch_autograd(
     )
 
     if config.debug_assert:
-        flat_requires_grad = [
+        flat_requires_grad: List[Optional[bool]] = [
             a.requires_grad if isinstance(a, Tensor) else None for a in flat_args
         ]
-        compiled_function = DebugAssertWrapper(
+        compiled_fn = DebugAssertWrapper(
             flat_requires_grad=flat_requires_grad
-        ).post_compile(compiled_function, aot_config, runtime_metadata=fw_metadata)
+        ).post_compile(compiled_fn, aot_config, runtime_metadata=fw_metadata)
 
-    return compiled_function
+    compiled_fn = post_compile(
+        wrappers,
+        compiled_fn,
+        aot_config,
+        runtime_metadata=fw_metadata,
+    )
+    return compiled_fn

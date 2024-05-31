@@ -15,9 +15,8 @@ from torch.testing._internal.common_device_type import (
 from torch.testing._internal.common_modules import module_db, modules, ModuleErrorEnum, TrainEvalMode
 from torch.testing._internal.common_utils import (
     TestCase, run_tests, freeze_rng_state, mock_wrapper, get_tensors_from, gradcheck,
-    gradgradcheck, parametrize, wrapSwapTensorsTest, TEST_WITH_TORCHINDUCTOR)
+    gradgradcheck, parametrize, wrapSwapTensorsTest)
 from unittest.mock import patch, call
-import unittest
 
 
 class TestModule(TestCase):
@@ -540,16 +539,6 @@ class TestModule(TestCase):
 
         # Test cpu and gpu results are the same
         module_cls = module_info.module_cls
-
-        if module_cls in [
-            torch.nn.modules.loss.CTCLoss,
-        ] and TEST_WITH_TORCHINDUCTOR:
-            raise unittest.SkipTest(
-                "PR https://github.com/pytorch/pytorch/pull/126586 clears dynamo"
-                " cache before each test and expose these test failures. Skip"
-                " for now"
-            )
-
         module_inputs_cpu = module_info.module_inputs_func(module_info, device="cpu", dtype=dtype,
                                                            requires_grad=True, training=training)
 
@@ -874,7 +863,8 @@ class TestModule(TestCase):
             else:
                 raise NotImplementedError(f"Unknown error type {error_input.error_on}")
 
-    @modules([module for module in module_db if not module.is_lazy])
+    # Only run this test for float32 because the test loops over all the dtypes
+    @modules([module for module in module_db if not module.is_lazy], allowed_dtypes=[torch.float32])
     @parametrize('swap', [True, False])
     @parametrize('set_grad', [True, False])
     @wrapSwapTensorsTest()
@@ -890,6 +880,7 @@ class TestModule(TestCase):
 
         for module_input in module_inputs:
             c_args, c_kwargs = module_input.constructor_input.args, module_input.constructor_input.kwargs
+            args, kwargs = module_input.forward_input.args, module_input.forward_input.kwargs
 
             m = module_cls(*c_args, **c_kwargs)
 
@@ -907,6 +898,17 @@ class TestModule(TestCase):
                     setattr(m, n, new_b)
             _to(m, set_grad=set_grad)
 
+            # Check .to() can be run after forward and backward with swap
+            has_params = len(list(m.parameters())) > 0
+            if swap and not set_grad and has_params:
+                out = m(*args, **kwargs)
+                if isinstance(out, tuple):
+                    out = out[0]
+                out.sum().backward()
+                m.to(dtype=torch.half)
+                # reset
+                m.to(dtype=torch.float32)
+
             prev_device, prev_dtype = device, dtype
             for device_, dtype_ in product(devices, dtypes):
                 # if device/dtype do not change, grad.to(device, dtype) is a no-op so
@@ -914,6 +916,7 @@ class TestModule(TestCase):
                 # parameters will be wrapped in an nn.Parameter before swapping
                 # which will cause the ._cdata to change
                 g_no_swap = device_ == prev_device and dtype_ == prev_dtype
+                prev_prev_device, prev_prev_dtype = prev_device, prev_dtype
                 prev_device, prev_dtype = device_, dtype_
 
                 p_ids_before = [id(p) for p in m.parameters()]
@@ -951,7 +954,6 @@ class TestModule(TestCase):
                         self.assertTrue(all(a == b for a, b in zip(g_cdatas_before, g_cdatas_after)))
                         self.assertTrue(all(a == b for a, b in zip(g_ids_before, g_ids_after)))
 
-
     @modules([module for module in module_db if not module.is_lazy], allowed_dtypes=[torch.float32])
     @parametrize('swap', [True, False])
     @wrapSwapTensorsTest()
@@ -981,16 +983,23 @@ class TestModule(TestCase):
             p_ids_after = [id(p) for p in m.parameters()]
             p_cdatas_after = [p._cdata for p in m.parameters()]
 
-            if swap:
-                # id same, ._cdata differs --> swapped cdata of THPVariable
-                self.assertTrue(all(a == b for a, b in zip(p_ids_before, p_ids_after)))
-                self.assertTrue(all(a != b for a, b in zip(p_cdatas_before, p_cdatas_after)))
-            else:
-                # id and ._cdata differ
-                # meta and device have different shallow copy types, so this will create a new
-                # parameter and assign it to the module
-                self.assertTrue(all(a != b for a, b in zip(p_ids_before, p_ids_after)))
-                self.assertTrue(all(a != b for a, b in zip(p_cdatas_before, p_cdatas_after)))
+            # id same, ._cdata differs --> swapped cdata of THPVariable
+            # Technically, meta and device have different shallow copy types, so when swap=False it will create a new
+            # parameter and assign it to the module BUT we opt into swap_tensors when either one is on meta.
+            self.assertTrue(all(a == b for a, b in zip(p_ids_before, p_ids_after)))
+            self.assertTrue(all(a != b for a, b in zip(p_cdatas_before, p_cdatas_after)))
+
+            # Test the opposite direction device --> meta
+            m = m.to(device="meta")
+
+            p_ids_after_meta = [id(p) for p in m.parameters()]
+            p_cdatas_after_meta = [p._cdata for p in m.parameters()]
+
+            # id same, ._cdata differs --> swapped cdata of THPVariable
+            # Technically, meta and device have different shallow copy types, so when swap=False it will create a new
+            # parameter and assign it to the module BUT we opt into swap_tensors when either one is on meta.
+            self.assertTrue(all(a == b for a, b in zip(p_ids_after, p_ids_after_meta)))
+            self.assertTrue(all(a != b for a, b in zip(p_cdatas_after, p_cdatas_after_meta)))
 
 
 instantiate_device_type_tests(TestModule, globals(), allow_mps=True)
