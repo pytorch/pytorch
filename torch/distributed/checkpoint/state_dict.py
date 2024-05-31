@@ -727,7 +727,7 @@ def _load_optim_state_dict(
                 optim_state_dict = FSDP.optim_state_dict_to_load(
                     model, optim, optim_state_dict
                 )
-        elif info.broadcast_from_rank0:
+        else:
             info.full_state_dict = False
             local_state_dict = _get_optim_state_dict(model, (optim,), info)
             info.full_state_dict = True
@@ -746,7 +746,8 @@ def _load_optim_state_dict(
             assert device is not None
             flatten_osd, osd_mapping = _flatten_state_dict(optim_state_dict)
             flatten_local_osd, local_osd_mapping = _flatten_state_dict(local_state_dict)
-            _broadcast_state_dict(flatten_osd, flatten_local_osd, device=device)
+            if info.broadcast_from_rank0:
+                _broadcast_state_dict(flatten_osd, flatten_local_osd, device=device)
             for optim_key in flatten_osd.keys():
                 if optim_key not in flatten_local_osd:
                     assert optim_key in osd_mapping
