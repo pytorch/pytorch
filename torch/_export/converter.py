@@ -1,3 +1,5 @@
+import operator
+
 from functools import wraps
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
 
@@ -237,6 +239,7 @@ class TS2FXGraphConverter:
 
         self.constant_map[name] = value
 
+    @_register("prim::device")
     def convert_prim_device(self, node: torch._C.Node):
         input_type = node.input().type()
         if input_type.isSubtypeOf(torch._C.TensorType.get()):
@@ -246,6 +249,7 @@ class TS2FXGraphConverter:
         else:
             raise ValueError(f"Unsupported JitType ({input_type}) when get device")
 
+    @_register("prim::dtype")
     def convert_prim_dtype(self, node: torch._C.Node):
         dtype = node.input().type().dtype()
         output_name = node.output().debugName()
@@ -288,7 +292,7 @@ class TS2FXGraphConverter:
         output_name = node.output().debugName()
         self.name_to_node[output_name] = fx_node
 
-    @_register("prim::ListConstruct")
+    @_register({"prim::ListConstruct", "prim::TupleConstruct"})
     def convert_prim_ListConstruct(self, node: torch._C.Node):
         output_list = []
         for inp in node.inputs():
@@ -297,6 +301,7 @@ class TS2FXGraphConverter:
         output_name = node.output().debugName()
         self.name_to_node[output_name] = output_list
 
+    @_register("prim::DictConstruct")
     def convert_prim_DictConstruct(self, node: torch._C.Node):
         output_dict = {}
         k, v = None, None
@@ -320,6 +325,7 @@ class TS2FXGraphConverter:
         output_name = node.output().debugName()
         self.name_to_node[output_name] = output_dict
 
+    @_register("prim::TupleIndex")
     def convert_prim_TupleIndex(self, node: torch._C.Node):
         args = tuple(self.get_fx_value(input) for input in node.inputs())
         getitem_node = self.fx_graph.call_function(operator.getitem, args)
