@@ -1,7 +1,6 @@
 # Owner(s): ["oncall: export"]
 
 import unittest
-
 import torch
 
 import torch.utils._pytree as pytree
@@ -9,8 +8,8 @@ import torch.utils._pytree as pytree
 from torch._dynamo.test_case import TestCase
 from torch._export.converter import TS2EPConverter
 from torch.export import ExportedProgram
-
 from torch.testing._internal.common_utils import run_tests
+from typing import Tuple
 
 requires_cuda = unittest.skipUnless(torch.cuda.is_available(), "requires cuda")
 
@@ -173,6 +172,37 @@ class TestConverter(TestCase):
 
         x = torch.randn(10, 10)
         self._check_equal_ts_ep_converter(Module(), (x,))
+
+
+    def test_aten___is__(self):
+        class Module(torch.nn.Module):
+            def forward(self, x: torch.Tensor, y: torch.Tensor) -> Tuple[bool, torch.Tensor]:
+                z = x + 1
+                return x is y, z
+
+        # inp[0] is inp[1]
+        x = torch.randn(10, 10)
+        inp = (x, x)
+        self._check_equal_ts_ep_converter(Module(), inp)
+
+        # inp[0] is not inp[1]
+        inp = (torch.randn(10, 10), torch.rand(10, 10))
+        self._check_equal_ts_ep_converter(Module(), inp)
+
+    def test_aten___isnot__(self):
+        class Module(torch.nn.Module):
+            def forward(self, x: torch.Tensor, y: torch.Tensor) -> Tuple[bool, torch.Tensor]:
+                z = x + 1
+                return z, x is not y
+
+        # inp[0] is inp[1]
+        x = torch.randn(10, 10)
+        inp = (x, x)
+        self._check_equal_ts_ep_converter(Module(), inp)
+
+        # inp[0] is not inp[1]
+        inp = (torch.randn(10, 10), torch.rand(10, 10))
+        self._check_equal_ts_ep_converter(Module(), inp)
 
 
 if __name__ == "__main__":

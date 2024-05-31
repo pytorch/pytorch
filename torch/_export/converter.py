@@ -442,6 +442,28 @@ class TS2FXGraphConverter:
         args = tuple(self.get_fx_value(input) for input in node.inputs())
         self.fx_graph.call_function(target, args)
 
+    def convert_aten___is__(self, node: torch._C.Node):
+        # aten::__is__ is currently hard-coded in export
+        breakpoint()
+        target = torch.ops.aten.__is__
+        _l, _r = tuple(input for input in node.inputs())
+
+        left, right = tuple(
+            self.get_fx_value(input) for input in node.inputs()
+        )
+        fx_node = self.fx_graph.call_function(target, (left, right))
+        output_name = node.output().debugName()
+        self.name_to_node[output_name] = fx_node
+
+    def convert_aten___isnot__(self, node: torch._C.Node):
+        target = torch.ops.aten.__isnot__
+        left, right = tuple(
+            self.get_fx_value(input) for input in node.inputs()
+        )
+        fx_node = self.fx_graph.call_function(target, (left, right))
+        output_name = node.output().debugName()
+        self.name_to_node[output_name] = fx_node
+
     def convert_node(self, node: torch._C.Node):
         node_kind = node.kind()
         if node_kind == "prim::CreateObject":
@@ -473,6 +495,10 @@ class TS2FXGraphConverter:
             self.convert_prim_if(node)
         elif node_kind == "aten::Bool":
             self.convert_as_noop(node)
+        elif node_kind == "aten::__is__":
+            self.convert_aten___is__(node)
+        elif node_kind == "aten::__isnot__":
+            self.convert_aten___isnot__(node)
         elif node_kind == "profiler::_record_function_enter_new":
             self.convert_profiler__record_function_enter_new(node)
         elif node_kind == "profiler::_record_function_exit":
