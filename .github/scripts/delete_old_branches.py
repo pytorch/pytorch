@@ -1,8 +1,8 @@
 # Delete old branches
-from functools import lru_cache
 import os
 import re
 from datetime import datetime
+from functools import lru_cache
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Set
 
@@ -208,9 +208,7 @@ def get_branches_with_magic_label_or_open_pr() -> Set[str]:
         lambda res: res["data"]["repository"]["label"]["pullRequests"]["pageInfo"],
     )
 
-    pr_infos.extend(
-        get_open_prs()
-    )
+    pr_infos.extend(get_open_prs())
 
     # Get the most recent PR for each branch base (group gh together)
     branch_bases = set()
@@ -282,13 +280,14 @@ def delete_old_ciflow_tags() -> None:
     # created, so we can't check how old they are.  The script just assumes that
     # ciflow tags should be deleted regardless of creation date.
     git_repo = GitRepo(str(REPO_ROOT), "origin", debug=True)
-    def delete_tag(tag):
+
+    def delete_tag(tag: str) -> None:
         print(f"Deleting tag {tag}")
         ESTIMATED_TOKENS[0] += 1
         delete_branch(git_repo, f"refs/tags/{tag}")
 
     tags = git_repo._run_git("tag").splitlines()
-    open_pr_numbers = [x['number'] for x in get_open_prs()]
+    open_pr_numbers = [x["number"] for x in get_open_prs()]
 
     for tag in tags:
         try:
