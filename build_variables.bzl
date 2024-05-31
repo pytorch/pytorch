@@ -515,6 +515,8 @@ libtorch_distributed_base_sources = [
     "torch/csrc/distributed/c10d/sequence_num.cpp",
     "torch/csrc/distributed/c10d/socket.cpp",
     "torch/csrc/distributed/c10d/Work.cpp",
+    "torch/csrc/distributed/c10d/control_plane/Handlers.cpp",
+    "torch/csrc/distributed/c10d/control_plane/WorkerServer.cpp",
 ]
 
 # These files are only supported on Linux (and others) but not on Windows.
