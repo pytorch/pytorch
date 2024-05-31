@@ -461,7 +461,7 @@ class ViewAndMutationMeta:
         traced_tangent_metadata = []
 
         def extract_tangent_metadata(t):
-            if isinstance(t, FakeTensor) and is_traceable_wrapper_subclass(t):
+            if isinstance(t, torch.Tensor) and is_traceable_wrapper_subclass(t):
                 _, expected_tangent_metadata = t.__tensor_flatten__()  # type: ignore[attr-defined]
                 return expected_tangent_metadata
             else:
