@@ -1993,26 +1993,30 @@ class CppKernel(Kernel):
                 ):
                     # Allocate local buffer
                     local_buffers = V.local_buffer_scope.local_buffers
-                    assert len(local_buffers.items()) == 1
-                    local_buffer = next(iter(local_buffers.items()))[1]
+                    # assert len(local_buffers.items()) == 1
+                    # local_buffer = next(iter(local_buffers.items()))[1]
 
-                    # Checked in try_outer_loop_fusion_with_local_buf by assuming last dim size and contiguous
-                    assert len(local_buffer.get_layout().size) == 1
-                    # For dynamic size, rename s to ks
-                    local_buf_size = self.rename_indexing(
-                        local_buffer.get_layout().size[-1]
-                    )
-                    local_buf_dtype = DTYPE_TO_CPP[local_buffer.get_layout().dtype]
-                    allocate = (
-                        f"std::make_unique<{local_buf_dtype} []>({local_buf_size})"
-                    )
-                    code.splice(
-                        f"std::unique_ptr<{local_buf_dtype} []> local_buffer = {allocate};"
-                    )
-                    local_buffer_name = local_buffer.get_name()
-                    code.splice(
-                        f"{local_buf_dtype}* {local_buffer_name} = local_buffer.get();"
-                    )
+                    for index in range(len(list(local_buffers.items()))):
+
+                        local_buffer = list(local_buffers.items())[index][1]
+
+                        # Checked in try_outer_loop_fusion_with_local_buf by assuming last dim size and contiguous
+                        assert len(local_buffer.get_layout().size) == 1
+                        # For dynamic size, rename s to ks
+                        local_buf_size = self.rename_indexing(
+                            local_buffer.get_layout().size[-1]
+                        )
+                        local_buf_dtype = DTYPE_TO_CPP[local_buffer.get_layout().dtype]
+                        allocate = (
+                            f"std::make_unique<{local_buf_dtype} []>({local_buf_size})"
+                        )
+                        code.splice(
+                            f"std::unique_ptr<{local_buf_dtype} []> local_buffer_{index} = {allocate};"
+                        )
+                        local_buffer_name = local_buffer.get_name()
+                        code.splice(
+                            f"{local_buf_dtype}* {local_buffer_name} = local_buffer_{index}.get();"
+                        )
                 gen_loops(loop_nest.root)
             else:
                 gen_kernel(loop_nest.kernel)
@@ -3459,7 +3463,18 @@ class CppKernelProxy(CppKernel):
                 def localize_fn(self, name, index):
                     scheduler_nodes = V.graph.scheduler.name_to_node.get(name).get_nodes()  # type: ignore[union-attr]
                     # Rename buffer name to Local Buffer
-                    name = self.local_buf.get_name()
+                    global_buf = None
+                    local_buf = None                    
+                    for loca_buf_pair in self.local_buf_pairs:
+                        if name == loca_buf_pair.global_buf.get_name():
+                            global_buf = loca_buf_pair.global_buf
+                            local_buf = loca_buf_pair.local_buf
+                            break
+                    
+                    assert local_buf is not None
+                    assert global_buf is not None
+                    name = local_buf.get_name()
+
                     # Use the last dim
                     _, (group, reduction_group) = max(
                         scheduler_nodes, key=lambda x: int(x.is_reduction())
@@ -3474,16 +3489,22 @@ class CppKernelProxy(CppKernel):
                             replacements[x] = sympy.core.numbers.Zero()
                     index = sympy_subs(index, replacements)  # type: ignore[arg-type]
                     return name, index
+                
+                from .cpp_utils import LocalBufferPair
+
+                local_buf_pairs = []
+                for index in range(len(V.local_buffer_scope.local_nodes.items())):
+                    local_buf_pairs.append(
+                        LocalBufferPair(
+                            list(V.local_buffer_scope.local_nodes.items())[index][1].node,
+                            list(V.local_buffer_scope.local_buffers.items())[index][1],
+                        )
+                    )
 
                 ctx = V.set_ops_handler(
                     LocalizeBufferHandler(
                         V.get_ops_handler(),
-                        global_buf=next(iter(V.local_buffer_scope.local_nodes.items()))[
-                            1
-                        ].node,
-                        local_buf=next(
-                            iter(V.local_buffer_scope.local_buffers.items())
-                        )[1],
+                        local_buf_pairs=local_buf_pairs,
                         localize_fn=localize_fn,
                     )
                 )
@@ -3853,29 +3874,31 @@ class CppScheduling(BaseScheduling):
                         global_buffer_layout.size[-1:],
                         global_buffer_layout.stride[-1:],
                     )
+                    prefix = "local_buffer_data"
                     local_buffers.append(
                         LocalBuffer(
                             local_buf=ir.Buffer(
-                                "local_buffer_data", local_buffer_layout
+                                f"{prefix}_{len(local_buffers)}", local_buffer_layout
                             ),
                             global_snode=scheduler_node,
                         )
                     )
-                    # At most 1 node with local buf for each OuterLoopFusedSchedulerNode
-                    break
+                    # # At most 1 node with local buf for each OuterLoopFusedSchedulerNode
+                    # break
             if len(local_buffers) == 0:
                 # No local buffer found
                 return False
-            assert len(local_buffers) == 1
+            # assert len(local_buffers) == 1
             for _node in node.get_outer_nodes():
                 assert isinstance(_node, (FusedSchedulerNode, SchedulerNode))
                 cpp_kernel_proxy = CppKernelProxy(kernel_group)
 
                 with LocalBufferScope(cpp_kernel_proxy) as scope:
-                    assert len(local_buffers) == 1
-                    scope.add_local_buffer(
-                        local_buffers[0].local_buf, local_buffers[0].global_snode
-                    )
+                    # assert len(local_buffers) == 1
+                    for local_buffer in local_buffers:
+                        scope.add_local_buffer(
+                            local_buffer.local_buf, local_buffer.global_snode
+                        )
                     cpp_kernel_proxy.codegen_nodes(_node.get_nodes())  # type: ignore[arg-type]
                 cpp_kernel_proxy_list.append(cpp_kernel_proxy)
                 nodes_list.append(_node.get_nodes())  # type: ignore[arg-type]
@@ -3898,10 +3921,10 @@ class CppScheduling(BaseScheduling):
                 # Also need the local buffer inform in codegen loop
                 # which is used to allocate the local buffer.
                 if local_buffers:
-                    assert len(local_buffers) == 1
-                    scope.add_local_buffer(
-                        local_buffers[0].local_buf, local_buffers[0].global_snode
-                    )
+                    for local_buffer in local_buffers:
+                        scope.add_local_buffer(
+                            local_buffer.local_buf, local_buffer.global_snode
+                        )
                 kernel_group.finalize_kernel(
                     outer_fusion_cpp_kernel_proxy,
                     [_node for _nodes in nodes_list for _node in _nodes],
