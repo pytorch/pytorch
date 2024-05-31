@@ -269,7 +269,7 @@ class TestMaxAutotune(TestCase):
         cache_module = (
             "triton.runtime.fb_memcache.FbMemcacheRemoteAutotuneCacheBackend"
             if config.is_fbcode()
-            else "triton.runtime.cache.RedisRemoteCacheBackend"
+            else "torch._inductor.remote_cache.RedisRemoteCacheBackend"
         )
 
         with config.patch(
