@@ -1019,13 +1019,14 @@ def _rocm_native_device_arch_name(device):
 @functools.lru_cache(None)
 def try_import_ck_lib():
     try:
+        import ck4inductor
         from ck4inductor.universal_gemm.gen_instances import (
             gen_ops_library,
             gen_ops_preselected,
         )
         from ck4inductor.universal_gemm.op import CKGemmOperation
 
-        package_exists = True
+        package_dirname = os.path.dirname(ck4inductor.__file__)
     except ImportError:
 
         def gen_ops_library():
@@ -1037,8 +1038,8 @@ def try_import_ck_lib():
         class CKGemmOperation:
             pass
 
-        package_exists = False
-    return package_exists, gen_ops_library, gen_ops_preselected, CKGemmOperation
+        package_dirname = None
+    return package_dirname, gen_ops_library, gen_ops_preselected, CKGemmOperation
 
 
 def use_ck_template(layout, m, n, k):
@@ -1077,9 +1078,21 @@ def use_ck_template(layout, m, n, k):
         return False
     # TBD: investigate if backend needs to be disabled for small gemms similar to CUTLASS
 
-    ck_package_exists, _, _, _ = try_import_ck_lib()
+    ck_package_dirname, _, _, _ = try_import_ck_lib()
 
-    return ck_package_exists
+    if not ck_package_dirname:
+        log.warning("Please pip install Composable Kernel package")
+        return False
+
+    if not config.rocm.ck_dir:
+        log.warning("Please set TORCHINDUCTOR_CK_DIR env variable")
+        return False
+
+    if ck_package_dirname != config.rocm.ck_dir:
+        log.warning("Invalid path to CK library")
+        return False
+
+    return True
 
 
 def _use_template_for_cpu(layout):
