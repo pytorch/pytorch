@@ -89,10 +89,6 @@ else()
     append_torchlib_if_found(pytorch_qnnpack)
   endif()
 
-  if(@USE_QNNPACK@)
-    append_torchlib_if_found(qnnpack)
-  endif()
-
   if(@USE_XNNPACK@)
     append_torchlib_if_found(XNNPACK)
   endif()

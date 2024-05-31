@@ -10,10 +10,6 @@ from typing import Callable
 import onnx
 import parameterized
 import pytorch_test_common
-
-import torch
-import torch.onnx
-import torch.utils.cpp_extension
 import torchvision
 from autograd_helper import CustomFunction as CustomFunction2
 from pytorch_test_common import (
@@ -21,12 +17,16 @@ from pytorch_test_common import (
     skipIfUnsupportedMaxOpsetVersion,
     skipIfUnsupportedMinOpsetVersion,
 )
+from verify import verify
+
+import torch
+import torch.onnx
+import torch.utils.cpp_extension
 from torch.onnx import _constants, OperatorExportTypes, TrainingMode, utils
 from torch.onnx._globals import GLOBALS
 from torch.onnx.symbolic_helper import _unpack_list, parse_args
 from torch.testing._internal import common_utils
 from torch.testing._internal.common_utils import skipIfNoCaffe2, skipIfNoLapack
-from verify import verify
 
 
 def _remove_test_environment_prefix_from_scope_name(scope_name: str) -> str:
