@@ -8,7 +8,6 @@
 #include <torch/csrc/distributed/c10d/Utils.hpp>
 #include <torch/csrc/distributed/c10d/control_collectives/ControlCollectives.hpp>
 #include <torch/csrc/distributed/c10d/control_collectives/StoreCollectives.hpp>
-#include <torch/csrc/distributed/c10d/control_plane/WorkerServer.hpp>
 #include <vector>
 #ifndef _WIN32
 #include <torch/csrc/distributed/c10d/HashStore.hpp>
@@ -2032,7 +2031,7 @@ communication mechanism.
                 self->registerOnCompletionHook(
                     [hookWrapper = ::c10d::PythonOnCompletionHook(std::move(
                          hook))](std::shared_ptr<::c10d::WorkInfo> workInfo) {
-                      hookWrapper(std::move(workInfo));
+                      hookWrapper(workInfo);
                     });
               },
               py::arg("hook"),
@@ -3165,17 +3164,6 @@ such as `dist.all_reduce(tensor, async_op=True)`.
     return py::bytes(::c10d::dump_nccl_trace());
   });
 #endif
-
-  intrusive_ptr_class_<::c10d::control_plane::WorkerServer>(
-      module, "_WorkerServer", R"(
-)")
-      .def(
-          py::init([](const std::string& socketPath) {
-            return c10::make_intrusive<::c10d::control_plane::WorkerServer>(
-                socketPath);
-          }),
-          py::arg("socket_path"))
-      .def("shutdown", &::c10d::control_plane::WorkerServer::shutdown);
   Py_RETURN_TRUE;
 }
 
