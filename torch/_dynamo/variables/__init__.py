@@ -59,7 +59,6 @@ from .lists import (
     TupleVariable,
 )
 from .misc import (
-    AttributeErrorExceptionVariable,
     AutogradFunctionContextVariable,
     AutogradFunctionVariable,
     ClosureVariable,
