@@ -3530,7 +3530,7 @@ class NCCLTraceTest(NCCLTraceTestBase):
 
         # gah ok so now the duration_ms is populated best-effort since it can only happen outside "dump()" api
         time.sleep(1)
-        if (detailed):
+        if detailed:
             t = pickle.loads(torch._C._distributed_c10d._dump_nccl_trace())
         else:
             t = pickle.loads(torch._C._distributed_c10d._dump_nccl_trace(False))
@@ -3544,7 +3544,7 @@ class NCCLTraceTest(NCCLTraceTestBase):
         self.assertIn("ranks", default_pg_info)
         global_ranks = pg_config["0"]["ranks"]
         self.assertEqual(len(json.loads(global_ranks)), self.world_size)
-        if (detailed):
+        if detailed:
             self.assertEqual(len(t["entries"]), 2)
             t = t["entries"]
             self.assertEqual(len(t), 2)
