@@ -425,6 +425,7 @@ class FunctionalTensorMode(TorchDispatchMode):
                     # FunctionalTensorMode. If we call func() directly, we would need to exclude PreDispatch
                     # from the TLS in order to avoid infinite looping, but this would prevent us from coming
                     # back to PreDispatch later
+                    breakpoint()
                     outs_unwrapped = func._op_dk(
                         torch._C.DispatchKey.Functionalize,
                         *args_unwrapped,

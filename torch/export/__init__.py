@@ -78,6 +78,7 @@ def export(
     dynamic_shapes: Optional[Union[Dict[str, Any], Tuple[Any], List[Any]]] = None,
     strict: bool = True,
     preserve_module_call_signature: Tuple[str, ...] = (),
+    _is_torch_jit_trace: bool = False,
 ) -> ExportedProgram:
     """
     :func:`export` takes an arbitrary Python callable (an nn.Module, a function or
@@ -178,6 +179,7 @@ def export(
         dynamic_shapes,
         strict=strict,
         preserve_module_call_signature=preserve_module_call_signature,
+        _is_torch_jit_trace=_is_torch_jit_trace,
     )
 
 

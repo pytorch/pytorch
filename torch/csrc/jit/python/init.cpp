@@ -68,6 +68,7 @@
 #include <torch/csrc/jit/passes/remove_inplace_ops.h>
 #include <torch/csrc/jit/passes/remove_mutation.h>
 #include <torch/csrc/jit/passes/replacement_of_old_operators.h>
+#include <torch/csrc/jit/passes/replacement_of_size_with_sym_size.h>
 #include <torch/csrc/jit/passes/restore_mutation.h>
 #include <torch/csrc/jit/passes/shape_analysis.h>
 #include <torch/csrc/jit/passes/specialize_autogradzero.h>
@@ -285,6 +286,11 @@ void initJITBindings(PyObject* module) {
           "_jit_pass_replace_old_ops_with_upgraders",
           [](std::shared_ptr<Graph>& g) {
             return ReplaceOldOperatorsWithUpgraders(g);
+          })
+      .def(
+          "_jit_pass_replace_size_with_sym_size",
+          [](std::shared_ptr<Graph>& g) {
+            return ReplaceSizeWithSymSize(g);
           })
       .def(
           "_jit_pass_dce",

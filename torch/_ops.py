@@ -683,6 +683,7 @@ class OpOverload(OperatorBase):
     def _get_dispatch(self, key):
         # This is only called upon a cache miss
         assert key not in self._dispatch_cache, f"{self} {key}"
+        print(f"caching: {self} {key}")
 
         if key == torch._C.DispatchKey.Python:
             if (
@@ -692,7 +693,7 @@ class OpOverload(OperatorBase):
                 self._dispatch_cache[key] = key
                 add_cached_op(self)
                 return key
-
+            
             def handler(*args, **kwargs):
                 from torch.utils._python_dispatch import _get_current_dispatch_mode
 

@@ -277,6 +277,7 @@ core_sources_full_mobile_no_backend_interface_xplat = [
     "torch/csrc/jit/passes/shape_analysis.cpp",
     "torch/csrc/jit/passes/integer_value_refinement.cpp",
     "torch/csrc/jit/passes/replacement_of_old_operators.cpp",
+    "torch/csrc/jit/passes/replacement_of_size_with_sym_size.cpp",
     "torch/csrc/jit/passes/symbolic_shape_analysis.cpp",
     "torch/csrc/jit/passes/symbolic_shape_cache.cpp",
     "torch/csrc/jit/passes/symbolic_shape_runtime_fusion.cpp",

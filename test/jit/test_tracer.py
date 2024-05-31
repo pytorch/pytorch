@@ -1135,6 +1135,7 @@ class TestTracer(JitTestCase):
         ]
 
         ge1 = torch.jit.trace(func, recording_inputs)
+        # torch.export.export(ge1, recording_inputs)
         ge2 = self.getExportImportCopy(ge1)
 
         outputs_ge1 = ge1(*recording_inputs)

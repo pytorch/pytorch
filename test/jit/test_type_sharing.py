@@ -5,6 +5,7 @@ import os
 import sys
 
 import torch
+import unittest
 
 # Make the helper files in test/ importable
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
