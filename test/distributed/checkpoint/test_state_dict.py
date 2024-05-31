@@ -2,7 +2,6 @@
 
 import copy
 import functools
-import os
 import sys
 from itertools import chain
 from typing import Callable, Tuple, Type, Union
@@ -698,7 +697,6 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
         get_model_state_dict(fsdp_model)
         get_optimizer_state_dict(fsdp_model, fsdp_optim)
 
-
     @with_comms
     @skip_if_lt_x_gpu(2)
     def test_optim_state_dict_para_matching(self) -> None:
@@ -706,18 +704,18 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
         # "initial_lr" is added to optim_state_dict, but not to the new optim
         # We test whether "initial_lr" appear in optim after
         # set_optimizer_state_dict.
-        device = f"cuda"
+        device = "cuda"
         torch.manual_seed(0)
         model = nn.Sequential(
             *[nn.Linear(4, 4, device=device, bias=False) for _ in range(2)]
-            )
+        )
         for layer in model:
             fully_shard(layer)
         fully_shard(model)
         optim = torch.optim.Adam(model.parameters(), lr=1e-2)
         torch.optim.lr_scheduler.LambdaLR(
-            optim, lr_lambda=[lambda epoch: 0.95 ** epoch]
-            )
+            optim, lr_lambda=[lambda epoch: 0.95**epoch]
+        )
         opt_state_dict = ptd_state_dict.get_optimizer_state_dict(
             model,
             optim,
