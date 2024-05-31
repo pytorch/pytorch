@@ -65,8 +65,10 @@ def _flatten_vts(vts):
     while vts:
         vt = vts.pop()
         LazyVariableTracker.realize_all(vt)
-        if isinstance(vt, (ListVariable, ConstDictVariable)):
+        if isinstance(vt, ListVariable):
             vts.extend(vt.items)
+        elif isinstance(vt, ConstDictVariable):
+            vts.extend(vt.items.values())
         else:
             output.append(vt)
 
