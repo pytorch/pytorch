@@ -88,18 +88,18 @@ class TunableOp {
     }
 
   private:
-    static void WarmUp(Callable<ParamsT> *op, std::vector<ParamsT*> param, size_t num_iter) {
+    static void WarmUp(Callable<ParamsT> *op, std::vector<ParamsT*> param, size_t num_iter, size_t &offset) {
       TuningContext* ctx = getTuningContext();
       bool do_flush = ctx->IsICacheFlushEnabled();
       for (size_t i = 0; i < num_iter; i++) {
         if (do_flush) {
           at::cuda::flush_icache();
         }
-        TORCH_CHECK(op->Call(param[i%param.size()]) == OK);
+        TORCH_CHECK(op->Call(param[(i+offset++)%param.size()]) == OK);
       }
     }
 
-    static double Profile(Callable<ParamsT> *op, std::vector<ParamsT*> param, size_t num_iter) {
+    static double Profile(Callable<ParamsT> *op, std::vector<ParamsT*> param, size_t num_iter, size_t &offset) {
       TuningContext* ctx = getTuningContext();
       bool do_flush = ctx->IsICacheFlushEnabled();
       TimerT timer{};
@@ -108,7 +108,7 @@ class TunableOp {
         if (do_flush) {
           at::cuda::flush_icache();
         }
-        TORCH_CHECK(op->Call(param[i%param.size()]) == OK);
+        TORCH_CHECK(op->Call(param[(i+offset++)%param.size()]) == OK);
       }
       timer.End();
       return timer.Duration() / num_iter;
@@ -150,6 +150,9 @@ class TunableOp {
         reusable_params[i] = params->DeepCopy(use_buffer_rotation);
       }
 
+      // for rotating buffer
+      size_t offset = 0;
+
       for (size_t i = 0; i < op_names_.size(); i++) {
         auto* candidate = ops_[op_names_[i]].get(); // borrow pointer
 
@@ -177,7 +180,7 @@ class TunableOp {
 
         // collect a small profile
         constexpr const int approx_num_iter = 3;
-        auto approx_duration = Profile(candidate, reusable_params, approx_num_iter);
+        auto approx_duration = Profile(candidate, reusable_params, approx_num_iter, offset);
         // bail if too slow
         if (approx_duration > 2 * min_duration_ms) {
           TUNABLE_LOG3("├──skip slow instance id=", i, ", ", op_sig, '(', params_sig, ") ", op_names_[i]);
@@ -220,8 +223,6 @@ class TunableOp {
         }
         // tuning must run at least 1 iteration
         tuning_iter = std::max(1, tuning_iter);
-        // tuning must run at least as many times as we have rotating buffers, if requested
-        tuning_iter = std::max(static_cast<int>(reusable_params.size()), tuning_iter);
 
         // do the full warmup followed by tuning
         double warmup_ms = warmup_iter * approx_duration;
@@ -230,8 +231,9 @@ class TunableOp {
             "warmup iters ", warmup_iter, " [", warmup_ms, " ms] "
             "and tuning iters ", tuning_iter, " [", tuning_ms, " ms] ",
             "instance id=", i, ", ", op_sig, "(", params_sig, ") ", op_names_[i]);
-        WarmUp(candidate, reusable_params, warmup_iter);
-        auto duration_ms = Profile(candidate, reusable_params, tuning_iter);
+        TUNABLE_LOG3("├──offset at ", offset);
+        WarmUp(candidate, reusable_params, warmup_iter, offset);
+        auto duration_ms = Profile(candidate, reusable_params, tuning_iter, offset);
         if (duration_ms < min_duration_ms) {
           TUNABLE_LOG3("├──found better instance id=", i, ". " , duration_ms, "ms. ", op_names_[i]);
           min_duration_ms = duration_ms;

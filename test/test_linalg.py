@@ -4483,6 +4483,9 @@ class TestLinalg(TestCase):
     @onlyCUDA
     @dtypes(*floating_types_and(torch.half))
     def test_matmul_small_brute_force_tunableop(self, device, dtype):
+        # disable tunableop buffer rotation for all tests everywhere, it can be slow
+        import os
+        os.environ["PYTORCH_TUNABLEOP_ROTATING_BUFFER_SIZE"] = "0"
         assert torch.cuda.tunable.is_enabled() is False, "TunableOp should be off by default"
         assert torch.cuda.tunable.tuning_is_enabled(), "TunableOp's tuning should be enabled by default"
         torch.cuda.tunable.tuning_enable(False)
