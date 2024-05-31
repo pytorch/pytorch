@@ -859,7 +859,7 @@ class WrapperCodeGen(CodeGen):
             return f"{name}_stride"
 
         # Assign all symbolic shapes needed to local variables
-        bound_vars = set()
+        bound_vars: Set[sympy.Symbol] = set()
 
         def is_expr(x):
             return isinstance(x[1], sympy.Expr)
