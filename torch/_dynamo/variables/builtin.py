@@ -1129,6 +1129,14 @@ class BuiltinVariable(VariableTracker):
         )
         return pos_method.call_function(tx, [], {})
 
+    def call_index(self, tx, arg: "VariableTracker"):
+        if isinstance(arg, variables.TensorVariable):
+            unimplemented("unsupported index(tensor)")
+
+        arg = guard_if_dyn(arg)
+        constant_value = operator.index(arg)
+        return variables.ConstantVariable.create(constant_value)
+
     def call_round(self, tx, arg, *args, **kwargs):
         # Call arg.__round__()
         round_method = BuiltinVariable(getattr).call_function(
@@ -1813,6 +1821,12 @@ class BuiltinVariable(VariableTracker):
             nn_mod_variable = args[0]
             mod = tx.output.get_submodule(nn_mod_variable.module_key)
             return variables.ConstantVariable.create(id(mod))
+        elif len(args) == 1 and isinstance(
+            args[0], variables.UserDefinedObjectVariable
+        ):
+            install_guard(args[0].source.make_guard(GuardBuilder.ID_MATCH))
+            constant_result = id(args[0].value)
+            return variables.ConstantVariable.create(constant_result)
         else:
             unimplemented(f"call_id with args {args}")
 
