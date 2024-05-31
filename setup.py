@@ -282,12 +282,10 @@ RUN_BUILD_DEPS = True
 # see if the user passed a quiet flag to setup.py arguments and respect
 # that in our parts of the build
 EMIT_BUILD_WARNING = False
-RERUN_CMAKE = False
 CMAKE_ONLY = False
 filtered_args = []
 for i, arg in enumerate(sys.argv):
     if arg == "--cmake":
-        RERUN_CMAKE = True
         continue
     if arg == "--cmake-only":
         # Stop once cmake terminates. Leave users a chance to adjust build
@@ -477,7 +475,7 @@ def build_deps():
         version=version,
         cmake_python_library=cmake_python_library,
         build_python=build_python,
-        rerun_cmake=RERUN_CMAKE,
+        rerun_cmake=False,
         cmake_only=CMAKE_ONLY,
         cmake=cmake,
     )
@@ -1113,7 +1111,7 @@ build_update_message = """
 
 def print_box(msg):
     lines = msg.split("\n")
-    size = max(len(l) + 1 for l in lines)
+    size = max(len(line) + 1 for line in lines)
     print("-" * (size + 2))
     for l in lines:
         print("|{}{}|".format(l, " " * (size - len(l))))
