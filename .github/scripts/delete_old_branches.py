@@ -1,4 +1,5 @@
 # Delete old branches
+from functools import lru_cache
 import os
 import re
 from datetime import datetime
@@ -189,6 +190,17 @@ def get_recent_prs() -> Dict[str, Any]:
     return prs_by_branch_base
 
 
+@lru_cache(maxsize=1)
+def get_open_prs() -> List[Dict[str, Any]]:
+    return paginate_graphql(
+        GRAPHQL_OPEN_PRS,
+        {"owner": "pytorch", "repo": "pytorch"},
+        lambda data: False,
+        lambda res: res["data"]["repository"]["pullRequests"]["nodes"],
+        lambda res: res["data"]["repository"]["pullRequests"]["pageInfo"],
+    )
+
+
 def get_branches_with_magic_label_or_open_pr() -> Set[str]:
     pr_infos: List[Dict[str, Any]] = paginate_graphql(
         GRAPHQL_NO_DELETE_BRANCH_LABEL,
@@ -199,13 +211,7 @@ def get_branches_with_magic_label_or_open_pr() -> Set[str]:
     )
 
     pr_infos.extend(
-        paginate_graphql(
-            GRAPHQL_OPEN_PRS,
-            {"owner": "pytorch", "repo": "pytorch"},
-            lambda data: False,
-            lambda res: res["data"]["repository"]["pullRequests"]["nodes"],
-            lambda res: res["data"]["repository"]["pullRequests"]["pageInfo"],
-        )
+        get_open_prs()
     )
 
     # Get the most recent PR for each branch base (group gh together)
@@ -276,39 +282,30 @@ def delete_old_ciflow_tags() -> None:
     # Deletes ciflow tags if they are associated with a closed PR or a specific
     # commit.  Lightweight tags don't have information about the date they were
     # created, so we can't check how old they are.  The script just assumes that
-    # ciflow tags should be deleted.
-    github_token = os.environ.get("GITHUB_TOKEN")
-    headers = {
-        "Authorization": f"token {github_token}",
-        "Accept": "application/vnd.github.v3+json",
-    }
+    # ciflow tags should be deleted regardless of creation date.
+    git_repo = GitRepo(str(REPO_ROOT), "origin", debug=True)
     def delete_tag(tag):
         print(f"Deleting tag {tag}")
-        # requests.request(
-        #     "DELETE",
-        #     f"https://api.github.com/repos/{REPO_OWNER}/{REPO_NAME}/git/refs/tags/{tag}",
-        #     headers=headers
-        # )
         ESTIMATED_TOKENS[0] += 1
+        # delete_branch(git_repo, f"refs/tags/{tag}")
 
-    git_repo = GitRepo(str(REPO_ROOT), "origin", debug=True)
     tags = git_repo._run_git("tag").splitlines()
+    open_pr_numbers = [x['number'] for x in get_open_prs()]
+
     for tag in tags:
         try:
+            if ESTIMATED_TOKENS[0] > 400:
+                print("Estimated tokens exceeded, exiting")
+                break
             if not tag.startswith("ciflow/"):
                 continue
             re_match_pr = re.match(r"^ciflow\/.*\/(\d{5,6})$", tag)
             re_match_sha = re.match(r"^ciflow\/.*\/([0-9a-f]{40})$", tag)
             if re_match_pr:
                 pr_number = int(re_match_pr.group(1))
-                state = requests.request(
-                    "GET",
-                    f"https://api.github.com/repos/{REPO_OWNER}/{REPO_NAME}/pulls/{pr_number}",
-                    headers=headers
-                ).json()["state"]
-                ESTIMATED_TOKENS[0] += 1
-                if state == "closed":
-                    delete_tag(tag)
+                if pr_number in open_pr_numbers:
+                    continue
+                delete_tag(tag)
             elif re_match_sha:
                 delete_tag(tag)
         except Exception as e:
