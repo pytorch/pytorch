@@ -77,11 +77,11 @@ def allow_in_graph(fn):
     results in undefined behavior:
 
     - The inputs to ``fn`` must be Proxy-able types in the FX graph. Valid types include:
-      Tensor/int/bool/float/None/List[Tensor?]/List[int?]/List[float?]/
+      Tensor/int/bool/float/None/List[Tensor?]/List[int?]/List[float?]
       Tuple[Tensor?, ...]/Tuple[int?, ...]/Tuple[float?, ...]/torch.dtype/torch.device
     - The outputs to ``fn`` must be Proxy-able types in the FX graph (see previous bullet)
     - all Tensors used inside of ``fn`` must be passed directly as inputs to ``fn``
-    (as opposed to being captured variables).
+      (as opposed to being captured variables).
 
     Args:
         fn: A callable representing the function to be included in the graph.
