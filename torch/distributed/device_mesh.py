@@ -69,7 +69,7 @@ else:
             return self.mesh_stack[-1]
 
         def create_child_mesh(
-            self, parent_mesh: "DeviceMesh", submesh_dim_names: Tuple[str]
+            self, parent_mesh: "DeviceMesh", submesh_dim_names: Tuple[str, ...]
         ) -> "DeviceMesh":
             # submesh_dims are the mesh dimension of the submesh in the parent mesh.
             submesh_dims = [
@@ -93,7 +93,6 @@ else:
 
             cur_rank = parent_mesh.get_rank()
             for mesh_nd in pg_ranks_by_dim:
-                # Every rank needs to participate in this DeviceMesh creation even if the cur_rank is not in mesh_nd
                 submesh = DeviceMesh(
                     parent_mesh.device_type,
                     mesh_nd,
@@ -103,9 +102,9 @@ else:
                 if cur_rank in mesh_nd:
                     res_submesh = submesh
 
-            res_submesh._parent_mesh = parent_mesh
+            res_submesh._parent_mesh = parent_mesh  # type: ignore[possibly-undefined]
             res_submesh._dim_group_infos = [
-                parent_mesh._dim_group_infos[mesh_dim] for mesh_dim in submesh_dims
+                parent_mesh._dim_group_infos[mesh_dim] for mesh_dim in submesh_dims  # type: ignore[possibly-undefined]
             ]
             self.child_to_parent_mapping[res_submesh] = parent_mesh
 
@@ -383,7 +382,9 @@ else:
                     and self._thread_id == other._thread_id
                 )
 
-        def __getitem__(self, mesh_dim_names: Union[str, Tuple[str]]) -> "DeviceMesh":
+        def __getitem__(
+            self, mesh_dim_names: Union[str, Tuple[str, ...]]
+        ) -> "DeviceMesh":
             """
             Slice the current DeviceMesh based on the mesh_dim_name given to create a child
             DeviceMesh.

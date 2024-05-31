@@ -199,8 +199,11 @@ class FSDPParam:
                     "FSDP requires the DP and TP mesh to have the same parent mesh but got: \n"
                     f"DP's global mesh: {dp_global_mesh}\nTP's global mesh: {tp_global_mesh}"
                 )
+            assert dp_mesh.mesh_dim_names is not None and tp_mesh.mesh_dim_names is not None, (
+                "Please name your devicemesh dims, required for named slicing"
+            )
             submesh_names = dp_mesh.mesh_dim_names + tp_mesh.mesh_dim_names
-            self._global_mesh = dp_global_mesh[submesh_names]
+            self._spmd_mesh = dp_global_mesh[submesh_names]
             if len(self._tp_spec.placements) != 1:
                 raise NotImplementedError(
                     f"FSDP only supports 1D TP, not {self._tp_spec.placements}"
@@ -226,7 +229,7 @@ class FSDPParam:
             self._global_stride = param.stride()
             param_data = cast(DTensor, param)._local_tensor
         else:
-            self._global_mesh = self.mesh_info.mesh
+            self._spmd_mesh = self.mesh_info.mesh
             if isinstance(self.mesh_info, HSDPMeshInfo):
                 self._global_placements = (Replicate(), Shard(0))
             else:
@@ -444,7 +447,7 @@ class FSDPParam:
             )
         return _from_local_no_grad(
             tensor,
-            self._global_mesh,
+            self._spmd_mesh,
             self._global_placements,
             self._global_size,
             self._global_stride,
