@@ -17,7 +17,7 @@ from torch._streambase import _StreamBase
 from ..._guards import TracingContext
 from .. import config, polyfill, variables
 from ..codegen import PyCodegen
-from ..create_parameter_op import new_parameter_placeholder, tracable_create_parameter
+from ..create_parameter_op import new_parameter_placeholder, tracable_create_parameter  # , new_parameter_placeholder_dtensor
 from ..device_interface import get_registered_device_interfaces
 from ..exc import unimplemented
 from ..guards import GuardBuilder, install_guard
@@ -47,6 +47,7 @@ except ModuleNotFoundError:
     np = None  # type: ignore[assignment]
 
 log = logging.getLogger(__name__)
+torch_log = logging.getLogger("torch")
 
 supported_ctx_manager_classes = dict.fromkeys(
     [
@@ -822,8 +823,29 @@ Either create the tensor outside the compiled region, or do not set the tensor t
                     name = tx.find_symbolic_locals_name(kwargs["out"])
                     if name in tx.symbolic_locals:
                         tx.symbolic_locals[name] = tensor_variable
+                elif isinstance(tensor_variable, ConstantVariable) and tensor_variable.value is None:
+                    # Handle out-variant custom ops that return None.
+                    if isinstance(kwargs["out"], TensorVariable):
+                        assert "example_value" in kwargs["out"].proxy.node.meta
+                        fake_out = kwargs["out"].proxy.node.meta["example_value"]
+                        if not torch._prims_common.is_contiguous(fake_out):
+                            # It's difficult to handle strides correctly in functionalization
+                            # when calling an out= op with a non-contiguous out argument
+                            unimplemented(
+                                "out= op was called where output tensor was non-contiguous"
+                            )
+                    elif isinstance(kwargs["out"], ListVariable):
+                        for idx, x in enumerate(kwargs["out"].items):
+                            assert "example_value" in x.proxy.node.meta
+                            fake_out = x.proxy.node.meta["example_value"]
+                            if not torch._prims_common.is_contiguous(fake_out):
+                                # It's difficult to handle strides correctly in functionalization
+                                # when calling an out= op with a non-contiguous out argument
+                                unimplemented(
+                                    "out= op was called where output tensor was non-contiguous"
+                                )
                 else:
-                    unimplemented(f"out variant of {type(kwargs['out'])}")
+                    unimplemented(f"out variant of {type(kwargs['out'])}, tensor_variable: {tensor_variable}")
 
             return tensor_variable
 
@@ -877,6 +899,42 @@ Either create the tensor outside the compiled region, or do not set the tensor t
         except NotImplementedError as e:
             unimplemented(f"Parameter not python_constant: {e}")
 
+        from torch.distributed._tensor import DTensor
+        # torch_log.warning(f"data: {data}")
+        # torch_log.warning(f"data.as_proxy(): {data.as_proxy()}")
+        # torch_log.warning(f'data.proxy.node.meta["example_value"]: {data.proxy.node.meta["example_value"]}')
+        example_value = data.proxy.node.meta["example_value"]
+        # placements_info = []
+        # for placement in example_value.placements:
+        #     if placement.is_shard():
+        #         placement_info = (
+        #             "shard",
+        #             placement.dim,
+        #         )
+        #     elif placement.is_replicate():
+        #         placement_info = (
+        #             "replicate",
+        #         )
+        #     elif placement.is_partial():
+        #         placement_info = (
+        #             "partial",
+        #             placement.reduce_op,
+        #         )
+        #     else:
+        #         raise RuntimeError(f"Unsupported placement: {placement}")
+        #     placements_info.append(placement_info)
+
+        # # TODO(yf225): how to merge these 2 branches and make them subclass-agnostic?
+        # # Do we really need to write out codegen rules for DeviceMesh / Placements?
+        # if isinstance(example_value, DTensor):
+        #     placeholder = tx.output.synthetic_graph_input(
+        #         new_parameter_placeholder_dtensor, [
+        #             shape, dtype, device, requires_grad,
+        #             # example_value.device_mesh.device_type, example_value.device_mesh.mesh.tolist(), example_value.device_mesh.mesh_dim_names,
+        #             # placements_info,
+        #         ]
+        #     )
+        # else:
         placeholder = tx.output.synthetic_graph_input(
             new_parameter_placeholder, [shape, dtype, device, requires_grad]
         )
@@ -895,6 +953,7 @@ Either create the tensor outside the compiled region, or do not set the tensor t
             ),
         )
         assert isinstance(result, variables.TensorVariable)
+        result.requires_grad = requires_grad
         result.class_type = torch.nn.Parameter
         # In reconstruct() should use the original parameter.  The one returned by the graph will be an alias.
         result.source = placeholder.source

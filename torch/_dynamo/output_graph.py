@@ -83,7 +83,7 @@ from .utils import (
     same,
     set_example_value,
 )
-from .variables.base import VariableTracker
+from .variables.base import MutableLocal, VariableTracker
 from .variables.builder import (
     BackwardStateGraphArg,
     GraphArg,
@@ -112,6 +112,7 @@ graph_code_log = torch._logging.getArtifactLogger(__name__, "graph_code")
 graph_sizes_log = torch._logging.getArtifactLogger(__name__, "graph_sizes")
 trace_call_log = torch._logging.getArtifactLogger(__name__, "trace_call")
 
+torch_log = logging.getLogger("torch")
 
 @dataclass(frozen=True)
 class VariableTrackerCacheKey:
@@ -405,6 +406,11 @@ class OutputGraph:
 
         self.guard_on_key_order: Set[str] = set()
 
+        # Track compiled autograd final callbacks that must be called at the end of this graph.
+        # Only applicable if this graph is created from Dynamo tracing in Compiled Autograd.
+        self.ca_final_callbacks: List[Callable] = []
+        self.ca_final_callbacks_var = None
+
     def install_builtins_dict_in_fglobals(self):
         # f_globals["__builtins__"] can be a dict or a module. This is an
         # implemenation detail -
@@ -442,6 +448,13 @@ class OutputGraph:
             self.backward_state_var = self.new_var()
         return self.backward_state_proxy
 
+    def get_ca_final_callbacks_var(self):
+        if self.ca_final_callbacks_var is None:
+            self.ca_final_callbacks_var = variables.ListVariable(
+                self.ca_final_callbacks, mutable_local=MutableLocal()
+            )
+        return self.ca_final_callbacks_var
+
     # This gets its own helper function so guards DEBUG logs are more informative
     def init_ambient_guards(self):
         # Register a SHAPE_ENV guard to make sure we setup shape guards
@@ -471,16 +484,33 @@ class OutputGraph:
         call fn(*args) before the graph runs and turn the result into a fake input.
         """
         example_value = fn(*args)
+        # torch_log.warning(f"type(example_value): {type(example_value)}")
+        # torch_log.warning(f"example_value: {example_value}")
         varname = self.new_var()
         cg = PyCodegen(self.root_tx)
         cg.load_import_from(
             fn.__module__,
             fn.__name__,
         )
-        cg.foreach(map(variables.ConstantVariable.create, args))
+
+        def create_var(value):
+            from .variables.distributed import DeviceMeshVariable, PlacementVariable
+            # if PlacementVariable.is_placement(value):
+            #     return PlacementVariable(value)
+            # elif DeviceMeshVariable.is_device_mesh(value):
+            #     return DeviceMeshVariable(value)
+            # if isinstance(value, torch.Tensor):
+            #     return variables.TensorVariable(value)
+            # else:
+            return variables.ConstantVariable.create(value)
+
+        cg.foreach(map(create_var, args))
         cg.call_function(len(args), True)
         cg.store(varname)
-        self.pregraph_bytecode.extend(cg.get_instructions())
+        insts = cg.get_instructions()
+        # for inst in insts:
+        #     torch_log.warning(f"inst: {inst}")
+        self.pregraph_bytecode.extend(insts)
         source = SyntheticLocalSource(varname)
         result = VariableBuilder(self.root_tx, source)(example_value)
         TracingContext.get().guards_context.dynamo_guards.remove_guards_with_source(
@@ -748,12 +778,38 @@ class OutputGraph:
         *names,
         **options,
     ):
-        if is_dynamic_nn_module(target, self.root_tx.export):
+        # Dynamic modules should be routed via UnspecializedNNModuleVariable - however,
+        # FSDP modules have their own path where they inherit from UnspecializedNNModuleVariable
+        # but route here for registration of children.
+
+        # Dynamic Path 1 - module is dynamic, and NOT fsdp, the common case
+        if is_dynamic_nn_module(target, self.root_tx.export) and not getattr(
+            target, "_is_fsdp_managed_module", False
+        ):
             return variables.UnspecializedNNModuleVariable(target, **options)
 
         options = dict(options)
         assert "source" in options
         source = options["source"]
+
+        # Dynamic Path 2 - module is dynamic, and is fsdp
+        if is_dynamic_nn_module(target, self.root_tx.export) and getattr(
+            target, "_is_fsdp_managed_module", False
+        ):
+            name = "_".join(map(str, names))
+            base = name
+            for i in itertools.count():
+                if name not in self.nn_modules:
+                    self.nn_modules[name] = target
+                    break
+                name = f"{base}_{i}"
+            vt = variables.nn_module.FSDPManagedNNModuleVariable(
+                target,
+                name,
+                **options,
+            )
+            return self.side_effects.track_object_existing(target, vt)
+
         assert not isinstance(source, ParamBufferSource)
 
         if isinstance(target, torch.Tensor):

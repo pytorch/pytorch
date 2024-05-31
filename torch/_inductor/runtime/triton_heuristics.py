@@ -700,13 +700,9 @@ class CachingAutotuner(KernelInterface):
         if log.isEnabledFor(logging.DEBUG):
             log.debug("Benchmark all input configs for %s, get:", self.fn.__name__)
             for k, v in timings.items():
+                # NOTE(yf225): `k.shared` can be None, we need to gate it properly
                 log.debug(
-                    "%s: %f, nreg %d, nspill %d, #shared-mem %s",
-                    k.config,
-                    v,
-                    k.n_regs,
-                    k.n_spills,
-                    k.shared,
+                    f"{k.config}: {v}, nreg {k.n_regs}, nspill {k.n_spills}, #shared-mem {k.shared}",
                 )
 
         return timings
