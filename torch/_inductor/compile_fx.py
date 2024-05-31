@@ -12,7 +12,6 @@ from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, Union
 from unittest import mock
 
 import torch._inductor.async_compile  # noqa: F401 required to warm up AsyncCompile pools
-
 import torch.fx
 import torch.utils._pytree as pytree
 
@@ -49,6 +48,9 @@ from torch._logging import trace_structured
 from torch._ops import OpOverload
 from torch._subclasses.fake_tensor import FakeTensor
 from torch._utils_internal import compile_time_strobelight_meta
+from torch.export._trace import _make_argument_spec
+
+from torch.export.graph_signature import _sig_to_specs, OutputKind
 from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols
 from torch.fx.passes.fake_tensor_prop import FakeTensorProp
 
@@ -186,56 +188,40 @@ def _unlift_graph(mod, gm, graph_signature):
 
     from torch.export._unlift import _unlift
 
-    outputs = list(gm.graph.nodes)[-1].args[0]
-    mutated_outputs = []
-    for out in outputs:
-        if out.name in graph_signature.buffers_to_mutate:
-            mutated_outputs.append(graph_signature.buffers_to_mutate[out.name])
-        else:
-            mutated_outputs.append(None)
+    _, output_specs = _sig_to_specs(
+        user_inputs=set(graph_signature.user_inputs),
+        inputs_to_parameters=graph_signature.inputs_to_parameters,  # type: ignore[arg-type]
+        inputs_to_buffers=graph_signature.inputs_to_buffers,  # type: ignore[arg-type]
+        user_outputs=set(graph_signature.user_outputs),  # type: ignore[arg-type]
+        buffer_mutations=graph_signature.buffers_to_mutate,  # type: ignore[arg-type]
+        user_input_mutations=graph_signature.user_inputs_to_mutate,  # type: ignore[arg-type]
+        grad_params={},  # type: ignore[arg-type, union-attr]
+        grad_user_inputs={},  # type: ignore[arg-type, union-attr]
+        loss_output=None,  # type: ignore[arg-type, union-attr]
+        inputs=[
+            _make_argument_spec(i, node, graph_signature.input_tokens)
+            for i, node in enumerate(gm.graph.nodes)
+            if node.op == "placeholder"
+        ],
+        outputs=[
+            _make_argument_spec(i, node, graph_signature.input_tokens)
+            for i, node in enumerate(
+                pytree.tree_leaves(next(iter(reversed(gm.graph.nodes))).args)
+            )
+        ],
+        input_tokens=graph_signature.input_tokens,
+        output_tokens=graph_signature.output_tokens,
+    )
 
-    mutated_out_inputs = {}
-    # Take clamp.out as an example:
-    #   aten::clamp.out(Tensor self, Scalar? min=None, Scalar? max=None, *, Tensor(a!) out) -> Tensor(a!)
-    # The produced graph will be as follows w/ current implementation, while arg0_1 is self and arg1_1 is out:
-    #   opcode         name       target                  args                       kwargs
-    #   -------------  ---------  ----------------------  -------------------------  --------
-    #   placeholder    arg0_1     arg0_1                  ()                         {}
-    #   placeholder    arg1_1     arg1_1                  ()                         {}
-    #   call_function  clamp_min  aten.clamp_min.default  (arg0_1, 0.05)             {}
-    #   call_function  clamp_max  aten.clamp_max.default  (clamp_min, 0.05)          {}
-    #   output         output     output                  ((clamp_max, clamp_max),)  {}
-    #
-    # But the graph above does not align with the semantics of aten::clamp.out as it is an inplace operation.
-    # The correct graph should be:
-    #   opcode         name       target                  args                       kwargs
-    #   -------------  ---------  ----------------------  -------------------------  --------
-    #   placeholder    arg0_1     arg0_1                  ()                         {}
-    #   placeholder    arg1_1     arg1_1                  ()                         {}
-    #   call_function  clamp_min  aten.clamp_min.default  (arg0_1, 0.05)             {}
-    #   call_function  clamp_max  aten.clamp_max.default  (clamp_min, 0.05)          {}
-    #   call_function  copy_      aten.copy_.default      (arg1_1, clamp_max)        {}
-    #   output         output     output                  (copy_,)                   {}
-    #
-    # To get the expected graph, we need to find the output node and the corresponding input node,
-    # and replace the output node with a copy_ node. By now, the check is only for single output case.
-    # The multiple output case is not supported yet.
-    inputs_to_mutate = {
-        key: val
-        for key, val in graph_signature.user_inputs_to_mutate.items()
-        if val not in graph_signature.inputs_to_parameters
-    }
-    if len(inputs_to_mutate) > 0:
-        assert all(
-            key in graph_signature.user_outputs for key, _ in inputs_to_mutate.items()
+    mutated_outputs: List[Optional[str]] = [
+        (
+            out_spec.target
+            if out_spec.kind
+            in (OutputKind.BUFFER_MUTATION, OutputKind.USER_INPUT_MUTATION)
+            else None
         )
-    for out_node in outputs:
-        if out_node.name in graph_signature.user_inputs_to_mutate:
-            input_node = graph_signature.user_inputs_to_mutate[out_node.name]
-            assert input_node in placeholder_node_list
-            mutated_out_inputs[out_node] = placeholder_node_list[input_node]
-        else:
-            mutated_out_inputs[out_node] = None
+        for out_spec in output_specs
+    ]
 
     unlifted_gm = _unlift(
         gm,
@@ -245,7 +231,6 @@ def _unlift_graph(mod, gm, graph_signature):
         None,
         state_dict,
         {},
-        mutated_inputs=mutated_out_inputs,
     )
 
     return unlifted_gm
