@@ -679,7 +679,7 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
         self.assertEqual(fsdp_optim.state_dict(), fsdp_optim2.state_dict())
 
 
-class TestNOComm(MultiProcessTestCase):
+class TestNoComm(MultiProcessTestCase):
     def setUp(self) -> None:
         super().setUp()
         self._spawn_processes()
@@ -690,9 +690,19 @@ class TestNOComm(MultiProcessTestCase):
         optim = torch.optim.AdamW(model.parameters(), lr=1e-3)
 
         self.assertFalse(dist.is_initialized())
-        self.assertEqual(model.state_dict(), get_model_state_dict(model))
+        msd = get_model_state_dict(
+            model, options=StateDictOptions(full_state_dict=True, cpu_offload=True)
+        )
+        for v in msd.values():
+            self.assertFalse(v.is_cuda)
+        self.assertEqual(model.state_dict(), msd)
         set_model_state_dict(model, model.state_dict())
-        osd = get_optimizer_state_dict(model, optim)
+        osd = get_optimizer_state_dict(
+            model,
+            optim,
+            options=StateDictOptions(full_state_dict=True, cpu_offload=True),
+        )
+        set_optimizer_state_dict(model, optim, osd)
         set_optimizer_state_dict(model, optim, optim.state_dict())
 
 
