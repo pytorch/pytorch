@@ -444,7 +444,7 @@ class WrapperCodeGen(CodeGen):
         self.stride = "stride()"
         self.last_seen_device_guard_index: Optional[int] = None
         self.supports_intermediate_hooks = True
-        self.expr_printer = pexpr
+        self.expr_printer: Callable[[Any], Any] = pexpr
         self.user_defined_kernel_cache: Dict[Tuple[Any, ...], Tuple[str, Any]] = {}
         self.unbacked_symbol_decls: Set[str] = set()  # str of sympy.Symbol
         self.allow_stack_allocation: Optional[bool] = None

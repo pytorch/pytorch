@@ -519,7 +519,8 @@ class PythonPrinter(ExprPrinter):
         return f"round({self._print(number)}, {ndigits})"
 
     def doprint(self, expr, *, simplify: bool = True):
-        if simplify:
+        # TODO: why are people passing strings to the printer here :think:
+        if simplify and isinstance(expr, sympy.Expr) and hasattr(V.graph, "sizevars"):
             expr = V.graph.sizevars.simplify(expr)
         return super().doprint(expr)
 
