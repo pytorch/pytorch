@@ -718,18 +718,13 @@ class ScheduleInterleaved1F1B(PipelineScheduleMulti):
             return min(warmup_ops, self._n_microbatches * self.n_local_stages)
 
         warmup_ops = get_rank_warmup_ops(rank)
+        microbatch_ops = self.n_local_stages * self._n_microbatches
         # fwd_bwd_ops should encompass the remaining forwards
-        fwd_bwd_ops = (self.n_local_stages * self._n_microbatches) - warmup_ops
+        fwd_bwd_ops = microbatch_ops - warmup_ops
         # cooldown_ops should encompass the remaining backwards
-        cooldown_ops = (self.n_local_stages * self._n_microbatches) - fwd_bwd_ops
-
-        # Assert that each stage will go through the entire pipeline of micrbatches
-        # twice, once for forward and once for backward
-        assert (
-            warmup_ops + fwd_bwd_ops * 2 + cooldown_ops
-            == self.n_local_stages * self._n_microbatches * 2
-        )
-        total_ops = warmup_ops + fwd_bwd_ops + cooldown_ops
+        cooldown_ops = microbatch_ops - fwd_bwd_ops
+        # total ops encompass both forward and backward ops
+        total_ops = 2 * microbatch_ops
 
         logger.debug(
             "rank %s, warmup_ops %s, 1f1b %s, cooldown_ops %s",
