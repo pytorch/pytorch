@@ -153,10 +153,14 @@ def has_torchvision_roi_align() -> bool:
     try:
         from torchvision.ops import roi_align  # noqa: F401
 
+        torch._C._dispatch_has_kernel_for_dispatch_key("torchvision::nms", "Meta")
         return roi_align is not None and hasattr(
             getattr(torch.ops, "torchvision", None), "roi_align"
         )
     except ImportError:
+        return False
+    except RuntimeError as e:
+        assert "torchvision::nms does not exist" in str(e)
         return False
 
 
@@ -569,6 +573,10 @@ def sympy_index_symbol_with_prefix(prefix: SymT, idx: int) -> sympy.Symbol:
     # NOTE: shape symbols are positive (> 0), but index variables are only
     # non-negative (>= 0).
     return make_symbol(prefix, idx, integer=True, nonnegative=True)
+
+
+def generate_assert(check):
+    return (check or config.debug_index_asserts) and config.assert_indirect_indexing
 
 
 def sympy_index_symbol(name: str) -> sympy.Symbol:
@@ -1000,6 +1008,48 @@ def use_cutlass_template(layout, m, n, k):
             )
             return False
     return res
+
+
+def _use_template_for_cpu(layout):
+    return use_max_autotune() and layout.device.type == "cpu"
+
+
+def use_cpp_packed_gemm_template(layout, mat1, mat2):
+    from . import ir
+    from .codegen.cpp_micro_gemm import create_micro_gemm
+    from .kernel.mm_common import mm_args
+
+    if not _use_template_for_cpu(layout) or not _use_autotune_backend("CPP"):
+        return False
+
+    if not config.cpp.weight_prepack:
+        return False
+
+    layout_dtypes = [torch.float32, torch.bfloat16, torch.half]
+    m, n, k, layout, mat1, mat2 = mm_args(mat1, mat2)
+    # TODO(jgong5): support dynamic shapes for n or k
+    if has_free_symbols((n, k)):
+        return False
+    if isinstance(mat2, ir.BaseView):
+        mat2 = mat2.unwrap_view()
+    micro_gemm = create_micro_gemm(
+        "micro_gemm",
+        m,
+        n,
+        k,
+        input_dtype=layout.dtype,
+        output_dtype=torch.float,
+        num_threads=parallel_num_threads(),
+    )
+    # TODO(jgong5): support n % n_block_size != 0
+    return (
+        layout.dtype in layout_dtypes
+        and micro_gemm is not None
+        and n % micro_gemm.register_blocking[1] == 0
+        and mat1.get_stride()[-1] == 1  # TODO(jgong5): support transposed input
+        and isinstance(mat2, ir.StorageBox)
+        and mat2.is_module_buffer()
+    )
 
 
 def use_aten_gemm_kernels():

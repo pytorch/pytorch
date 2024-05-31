@@ -2292,7 +2292,6 @@ torch_non_c_binding_in_graph_functions = dict.fromkeys(
         "torch._linalg_utils._symeig",
         "torch._linalg_utils.basis",
         "torch._linalg_utils.bform",
-        "torch._linalg_utils.conjugate",
         "torch._linalg_utils.eig",
         "torch._linalg_utils.get_floating_dtype",
         "torch._linalg_utils.is_sparse",
@@ -2302,8 +2301,6 @@ torch_non_c_binding_in_graph_functions = dict.fromkeys(
         "torch._linalg_utils.qform",
         "torch._linalg_utils.solve",
         "torch._linalg_utils.symeig",
-        "torch._linalg_utils.transjugate",
-        "torch._linalg_utils.transpose",
         "torch._load_global_deps",
         "torch._lowrank._svd_lowrank",
         "torch._lowrank.get_approximate_basis",
@@ -3092,6 +3089,18 @@ def is_numpy(obj) -> bool:
     if np is None:
         return False
     return isinstance(obj, (np.ndarray, np.generic)) or id(obj) in _numpy_function_ids
+
+
+def is_numpy_dtype(obj) -> bool:
+    if np is None:
+        return False
+    return isinstance(obj, np.dtype)
+
+
+def is_numpy_type_info(obj) -> bool:
+    if np is None:
+        return False
+    return isinstance(obj, (np.finfo, np.iinfo))
 
 
 BUILTIN_SKIPLIST = (
