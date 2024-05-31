@@ -10336,6 +10336,7 @@ class CommonTemplate:
         actual = compiled_fn(torch.ones(s0, s1))
         self.assertTrue((actual == 1).all())
 
+
 @dataclasses.dataclass
 class TestFailure:
     suffixes: Tuple[str]

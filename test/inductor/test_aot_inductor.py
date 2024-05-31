@@ -976,12 +976,11 @@ class AOTInductorTestsTemplate:
                     permute, memory_format=torch.contiguous_format
                 )
                 return clone
+
         # let y_grid = 65537
         s0 = 16777472
         s1 = 8
-        example_inputs = (
-            torch.rand(s0, s1, device=self.device),
-        )
+        example_inputs = (torch.rand(s0, s1, device=self.device),)
         self.check_model(Model(), example_inputs)
 
     def test_cond_simple(self):
