@@ -945,6 +945,7 @@ class TestQuantizedOps(TestCase):
     """Tests the correctness of the cudnn add and add_relu op for nhwc format"""
     @unittest.skipIf(not TEST_CUDNN, "cudnn is not enabled.")
     @unittest.skipIf(not SM80OrLater, "requires sm80 or later.")
+    @unittest.skipIf(TEST_ROCM, "not supported on rocm.")
     def test_qadd_relu_cudnn_nhwc(self):
         dtype = torch.qint8
         add_relu = torch.ops.quantized.add_relu
