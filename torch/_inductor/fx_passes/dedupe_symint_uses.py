@@ -1,25 +1,5 @@
-from dataclasses import dataclass
-from typing import Union
-
 import torch
-from torch.fx.experimental.proxy_tensor import py_sym_types, SymBool, SymFloat, SymInt
-
-
-@dataclass
-class _SymExprHash:
-    """
-    Hash for a py_sym_types that will use the underlying sympy expression
-    """
-
-    sym_obj: Union[SymInt, SymFloat, SymBool]
-
-    def __hash__(self) -> int:
-        return hash((type(self.sym_obj), self.sym_obj.node.expr))
-
-    def __eq__(self, value) -> bool:
-        if not isinstance(value, _SymExprHash):
-            return False
-        return self.sym_obj.node.expr == value.sym_obj.node.expr
+from torch.fx.experimental.proxy_tensor import py_sym_types
 
 
 class _SymHashingDict:
@@ -47,7 +27,7 @@ class _SymHashingDict:
         return self.sym_hash_dict.get(self._wrap_to_sym_expr_hash(key), default)
 
     def _wrap_to_sym_expr_hash(self, key):
-        return _SymExprHash(key) if isinstance(key, py_sym_types) else key
+        return torch._SymExprHash(key) if isinstance(key, py_sym_types) else key
 
 
 def dedupe_symints(graph: torch.fx.Graph):

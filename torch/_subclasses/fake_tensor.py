@@ -813,7 +813,7 @@ class TensorMetadata:
     """
 
     dtype: torch.dtype
-    shape: torch.Size
+    shape: Union[torch.Size, Tuple[int, ...]]
     stride: Tuple[Any, ...]
     device: torch.device
     layout: torch.layout
@@ -829,6 +829,7 @@ class TensorMetadata:
     is_coalesced: Optional[bool]
     dense_dim: Optional[int]
     sparse_dim: Optional[int]
+    has_symbolic_sizes_strides: bool
 
 
 def extract_tensor_metadata(t: torch.Tensor) -> "TensorMetadata":
@@ -839,16 +840,29 @@ def extract_tensor_metadata(t: torch.Tensor) -> "TensorMetadata":
     if is_sparse_any(t) or not t.is_contiguous(memory_format=memory_format):
         memory_format = None
 
+    shape: Union[torch.Size, Tuple[int, ...]] = t.shape
+    storage_bytes = t.untyped_storage().nbytes() if not t.is_sparse else None
+    if t._has_symbolic_sizes_strides:
+
+        def convert_sym(x):
+            if isinstance(x, torch.SymInt):
+                x = torch._SymExprHash(x)
+            return x
+
+        shape = tuple(convert_sym(x) for x in shape)  # tree_map(convert_sym, shape)
+    if isinstance(storage_bytes, torch.SymInt):
+        storage_bytes = torch._SymExprHash(storage_bytes)
+
     return TensorMetadata(
         dtype=t.dtype,
-        shape=t.shape,
+        shape=shape,
         stride=t.stride() if t.layout == torch.strided else (),
         device=t.device,
         layout=t.layout,
         memory_format=memory_format,
         storage_offset=t.storage_offset(),
         # Only set storage_bytes for tensors that have storage (not sparse)
-        storage_bytes=t.untyped_storage().nbytes() if not t.is_sparse else None,
+        storage_bytes=storage_bytes,
         requires_grad=t.requires_grad,
         is_quantized=t.is_quantized,
         is_conj=t.is_conj(),
@@ -858,6 +872,7 @@ def extract_tensor_metadata(t: torch.Tensor) -> "TensorMetadata":
         is_coalesced=t.is_coalesced() if t.is_sparse else None,
         dense_dim=t.dense_dim() if t.is_sparse else None,
         sparse_dim=t.sparse_dim() if t.is_sparse else None,
+        has_symbolic_sizes_strides=t._has_symbolic_sizes_strides,
     )
 
 
@@ -1239,8 +1254,8 @@ class FakeTensorMode(TorchDispatchMode):
             if isinstance(arg, FakeTensor):
                 if not self.is_our_fake(arg):
                     raise _BypassDispatchCache("not our fake")
-                if arg._has_symbolic_sizes_strides:
-                    raise _BypassDispatchCache("symbolic shape")
+                # if arg._has_symbolic_sizes_strides:
+                #     raise _BypassDispatchCache("symbolic shape 0")
                 if arg.constant is not None:
                     raise _BypassDispatchCache("constant attribute")
                 if arg.is_sparse:
@@ -1254,14 +1269,16 @@ class FakeTensorMode(TorchDispatchMode):
                     # Does this subsume arg.is_sparse?
                     raise _BypassDispatchCache("sparse tensor layout")
                 # sparse tensors don't have storage, so check is after
-                if isinstance(arg.untyped_storage().nbytes(), torch.SymInt):
-                    raise _BypassDispatchCache("symbolic nbytes")
+                # if isinstance(arg.untyped_storage().nbytes(), torch.SymInt):
+                #     raise _BypassDispatchCache("symbolic nbytes")
                 if is_sparse_compressed(arg):
                     raise _BypassDispatchCache("sparse compressed tensor")
                 result.append(extract_tensor_metadata(arg))
             elif isinstance(arg, torch.Tensor):
                 raise _BypassDispatchCache("non-fake tensor")
-            elif isinstance(arg, (torch.SymBool, torch.SymInt, torch.SymFloat)):
+            elif isinstance(arg, torch.SymInt):
+                result.append(torch._SymExprHash(arg))
+            elif isinstance(arg, (torch.SymBool, torch.SymFloat)):
                 raise _BypassDispatchCache("symbolic shape")
             elif isinstance(arg, (list, tuple, dict)):
                 result.extend(self._prep_args_for_hash(arg))
@@ -1358,8 +1375,20 @@ class FakeTensorMode(TorchDispatchMode):
         metadata = entry.metadata
         assert metadata and not metadata.is_sparse
 
+        shape = metadata.shape
+        if metadata.has_symbolic_sizes_strides:
+
+            def convert_sym(x):
+                if isinstance(x, torch._SymExprHash):
+                    x = x.sym_obj
+                return x
+
+            shape = torch.Size(
+                convert_sym(x) for x in shape
+            )  # tree_map(convert_sym, shape)
+
         empty = torch.empty_strided(
-            metadata.shape,
+            shape,
             metadata.stride,
             dtype=metadata.dtype,
             layout=metadata.layout,
@@ -1380,15 +1409,11 @@ class FakeTensorMode(TorchDispatchMode):
             # For view ops, the storage should be the same as the tensor input.
             storage = args[cast(int, entry.view_idx)].untyped_storage()
             with in_kernel_invocation_manager(self), maybe_suppress():
-                empty.set_(
-                    storage, metadata.storage_offset, metadata.shape, metadata.stride
-                )
+                empty.set_(storage, metadata.storage_offset, shape, metadata.stride)
         elif metadata.storage_offset != 0:
             storage = empty.untyped_storage()
             with in_kernel_invocation_manager(self), maybe_suppress():
-                empty.set_(
-                    storage, metadata.storage_offset, metadata.shape, metadata.stride
-                )
+                empty.set_(storage, metadata.storage_offset, shape, metadata.stride)
         if metadata.storage_bytes == 0:
             empty.untyped_storage().resize_(0)
 
