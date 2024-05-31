@@ -2114,13 +2114,25 @@ from . import _logging
 _logging._init_logs()
 
 
-# load device extensions
-from importlib.metadata import entry_points
-discovered_plugins = entry_points(group='device_extension')
-for plugin in discovered_plugins:
-    try:
-        # just loads the plugin without calling
-        plugin.load()
-    except Exception:
-        # keep quiet
-        pass
+def import_device_backends():
+    if sys.version_info < (3, 10):
+        from importlib_metadata import entry_points
+    else:
+        from importlib.metadata import entry_points
+
+    for backend in entry_points(group='torch.backends'):
+        try:
+            # just load the plugin without calling
+            backend.load()
+        except Exception:
+            # keep quiet
+            pass
+
+
+def is_device_backend_autoload_enabled() -> bool:
+    var = os.getenv("TORCH_DISABLE_DEVICE_BACKEND_AUTOLOAD")
+    return var is None or not var.upper() in ('1', 'TRUE', 'YES')
+
+
+if is_device_backend_autoload_enabled():
+    import_device_backends()

@@ -1,0 +1,2 @@
+[torch.backends]
+device_backend = backend_pkg:autoload
