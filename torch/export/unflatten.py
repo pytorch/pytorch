@@ -337,16 +337,29 @@ class UnflattenedModule(torch.nn.Module):
                 inputs_to_state[n] = targets
 
         _sink_params(self, inputs_to_state, [])
-        # Check all input nodes has been processed.
-        for name, module in self.named_modules():
-            if not hasattr(module, "graph"):
-                continue
-            for node in module.graph.nodes:
-                if node.op != "placeholder":
-                    continue
-                assert (
-                    node.name not in inputs_to_state
-                ), f"{node.name} was not sunk into the module {name} which has the graph: {module.graph}"
+
+        # Helper function to check input nodes of `module` has been processed.
+        def check_module_inputs(module, scope):
+            if hasattr(module, "graph"):
+                for node in module.graph.nodes:
+                    if (
+                        node.op == "placeholder"
+                        and node.name in inputs_to_state
+                        and any(
+                            fqn.split(".")[: len(scope)] == scope
+                            for fqn in inputs_to_state[node.name]
+                        )  # matching scope to avoid wrong assert
+                    ):
+                        raise AssertionError(
+                            f"{node.name} was not sunk into the module {scope} which has the graph: {module.graph}"
+                        )
+            # Recursively check the submodules.
+            for name, submod in module.named_children():
+                scope.append(name)
+                check_module_inputs(submod, scope)
+
+        # Recurively check all input nodes have been processed.
+        check_module_inputs(self, [])
 
         # Cache so we don't have to compute this every time.
         # NOTE: this needs to be kept in sync with the placeholders in
