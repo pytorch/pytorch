@@ -331,7 +331,7 @@ def _copy_state_dict(
     state_dict: Dict[str, Any],
     copy_state_dict: Dict[str, Any],
     non_blocking: bool = False,
-    type_check: bool = True
+    type_check: bool = True,
 ) -> Dict[str, Any]:
     """
     Copies all tensors in a given state dict into a different state_dict with the
