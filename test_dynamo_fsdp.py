@@ -277,7 +277,7 @@ def checkpoint_wrapper(module, config):
         )
 
 
-test_case = "simple_mlp"  # "simple_mlp" / "simple_seq_module" / "nested_fully_shard" / "toy_transformer"
+test_case = "toy_transformer"  # "simple_mlp" / "simple_seq_module" / "nested_fully_shard" / "toy_transformer"
 balanced = True
 mixed_precision = False  # TODO(yf225): when True, fails accuracy test, needs debugging
 apply_fsdp = True
@@ -294,10 +294,13 @@ def create_input(hidden_dim):
 
 def init(activation_checkpoint):
     from torch.testing._internal.common_fsdp import MLP
-    # simple_mlp + balanced -> works
-    # simple_mlp + unbalanced -> works
-    # nested_fully_shard + balanced -> works
-    # nested_fully_shard + unbalanced -> works
+    """
+    inductor:
+    - simple_mlp -> works
+    - nested_fully_shard -> works
+    - ToyTransformer -> gradient diverged
+    - Transformer -> gradient diverged
+    """
     if balanced:
         hidden_dim = 512
     else:
@@ -313,16 +316,15 @@ def init(activation_checkpoint):
         ac_config = ACConfigClass()  # use default in this class
         torch._dynamo.config._experimental_support_context_fn_in_torch_utils_checkpoint = True
     if apply_fsdp:
-        torch._dynamo.config.trace_distributed = True
         torch._functorch.config.aggressive_recomputation = False
-        torch._inductor.config.reorder_for_compute_comm_overlap = True
-        torch._inductor.config.reorder_for_compute_comm_overlap_passes = [
-            "sink_waits",
-            "raise_comms",
-        ]
-        torch._inductor.config.allow_buffer_reuse = True
-        torch._inductor.config.inplace_buffers = True
-        torch._inductor.config.raise_last_usage = True
+        # torch._inductor.config.reorder_for_compute_comm_overlap = True
+        # torch._inductor.config.reorder_for_compute_comm_overlap_passes = [
+        #     "sink_waits",
+        #     "raise_comms",
+        # ]
+        # torch._inductor.config.allow_buffer_reuse = True
+        # torch._inductor.config.inplace_buffers = True
+        # torch._inductor.config.raise_last_usage = True
         torch._dynamo.config.error_on_recompile = True
     mesh = init_device_mesh("cuda", (world_size,))
 
@@ -363,7 +365,6 @@ def init(activation_checkpoint):
 
             def forward(self, x):
                 ret = torch.matmul(x, self.param)
-                ret = torch.matmul(ret, self.param)
                 return ret
 
         class TestModule(nn.Module):
@@ -378,7 +379,7 @@ def init(activation_checkpoint):
                     x = layer(x)
                 return x
 
-        model = TestModule(n_layers=1)
+        model = TestModule(n_layers=3)
         assert apply_fsdp
         assert mesh is not None
         for layer_id, mod in enumerate(model.layers):
@@ -604,7 +605,7 @@ def execute_and_profile(callable, profiler_trace_path, memory_snapshot_file_pref
 
 
 if __name__ == "__main__":
-    n_iter = 3
+    n_iter = 10
     assert device_type == "cuda"
     device = f"{device_type}:{local_rank}"
     if device_type == "cuda":
