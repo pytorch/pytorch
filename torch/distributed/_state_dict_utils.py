@@ -509,7 +509,11 @@ def _broadcast_tensors(
 
     if pg is None:
         pg = dist.distributed_c10d._get_default_group()
-    dist._broadcast_coalesced(pg, tensors, 500, 0)
+
+    if len(tensors) > 1:
+        dist._broadcast_coalesced(pg, tensors, 500, 0)
+    else:
+        dist.broadcast(tensors[0], src=0, group=pg)
 
     for key in keys:
         _local_state = local_state_dict.get(key, None)
@@ -528,9 +532,11 @@ def _broadcast_state_dict(
     local_state_dict: Dict[str, Any],
     device: torch.device,
     pg: Optional[dist.ProcessGroup] = None,
+    strict: bool = False,
 ) -> None:
-    # Gather the full state dict keys, non tensor values, scalar tensor values,
-    # and tensor information.
+    # Broadcast from rank0's `full_state_dict` to all ranks' `local_state_dict`.
+    # If strict is True, any keys in `local_state_dict` but not in `full_state_dict`
+    # will be removed from `local_state_dict`.
     ret = {}
     if dist.get_rank() == 0:
         for key, value in full_state_dict.items():
@@ -547,7 +553,10 @@ def _broadcast_state_dict(
 
     # Gather values
     keys = []
+    local_state_dict_keys = set(local_state_dict.keys())
+    global_keys = set()
     for key, value in ret.items():
+        global_keys.add(key)
         if not isinstance(value, _TensorInfo):
             if key in local_state_dict:
                 local_state_dict[key] = value
@@ -557,10 +566,15 @@ def _broadcast_state_dict(
             ret[key] = full_state_dict[key]
 
         keys.append(key)
-        # Broadcast every 10 tensors, just hardcode the number for now
-        if len(keys) >= 10:
+        # Broadcast every tensor to avoid OOM for now.
+        if len(keys) >= 1:
             _broadcast_tensors(ret, local_state_dict, keys, device, pg)
             keys.clear()
+
+    if strict:
+        if missing_keys := (local_state_dict_keys - global_keys):
+            for key in missing_keys:
+                local_state_dict.pop(key)
 
     if keys:
         _broadcast_tensors(ret, local_state_dict, keys, device, pg)
