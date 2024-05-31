@@ -303,9 +303,9 @@ def _unique(
     if dim is None:
         ret = [arg.new_empty((nnz,))]
     else:
-        ret = [arg.new_empty(*arg.shape[:dim], nnz, *arg.shape[dim + 1:])]
+        ret = [arg.new_empty(*arg.shape[:dim], nnz, *arg.shape[dim + 1 :])]
 
-    return_if_dim_and_cpu = dim is not None and arg.fake_device == torch.device('cpu')
+    return_if_dim_and_cpu = dim is not None and arg.fake_device == torch.device("cpu")
     if return_inverse or return_if_dim_and_cpu:
         inverse = arg.new_empty(arg.shape if dim is None else (arg.shape[dim],))
     else:
@@ -325,15 +325,7 @@ def _unique(
 def unique2(
     fake_mode, func, arg, sorted=True, return_inverse=False, return_counts=False
 ):
-    return _unique(
-        fake_mode,
-        func,
-        arg,
-        None,
-        sorted,
-        return_inverse,
-        return_counts
-    )
+    return _unique(fake_mode, func, arg, None, sorted, return_inverse, return_counts)
 
 
 @register_op_impl(aten.unique_dim.default)
@@ -348,7 +340,7 @@ def unique_dim(
         dim if dim >= 0 else dim % max(arg.ndim, 1),
         sorted,
         return_inverse,
-        return_counts
+        return_counts,
     )
 
 
