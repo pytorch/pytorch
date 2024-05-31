@@ -724,14 +724,16 @@ class ScheduleInterleaved1F1B(PipelineScheduleMulti):
         # cooldown_ops should encompass the remaining backwards
         cooldown_ops = microbatch_ops - fwd_bwd_ops
         # total ops encompass both forward and backward ops
-        total_ops = 2 * microbatch_ops
+        total_ops = warmup_ops + fwd_bwd_ops + cooldown_ops
+        assert warmup_ops + fwd_bwd_ops * 2 + cooldown_ops == microbatch_ops * 2
 
         logger.debug(
-            "rank %s, warmup_ops %s, 1f1b %s, cooldown_ops %s",
+            "rank %s, warmup_ops %s, 1f1b %s, cooldown_ops %s total_ops %s",
             rank,
             warmup_ops,
             fwd_bwd_ops,
             cooldown_ops,
+            total_ops
         )
 
         # Calculates the stage index based on step and pp_group_size
