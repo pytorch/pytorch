@@ -1306,6 +1306,15 @@ class CommonTemplate:
         expect = reflection_pad_left(x, 3)
         self.assertEqual(expect, actual)
 
+    def test_index_propagation_device_assert_masked(self):
+        def fn(a):
+            idx = torch.arange(a.size(0), device=a.device)
+            padded_idx = torch.constant_pad_nd(idx, (1050, 0))
+            padded_idx = torch.where(padded_idx >= 0, padded_idx, padded_idx)
+            return a[padded_idx]
+
+        self.common(fn, (torch.randn(1024),))
+
     @skipIfRocm
     @config.patch(debug_index_asserts=False)
     def test_neg_index(self):
@@ -4282,6 +4291,19 @@ class CommonTemplate:
             fn,
             (torch.randn([1, 2, 4, 8]),),
         )
+
+    def test_repeat_as_strided(self):
+        # Reproducer for #127474
+
+        def fn(x):
+            view_size = (3, 2)
+            full = x.repeat((3, 2))
+            view = torch.as_strided(full, view_size, full.stride())
+            result = view + view
+
+            return result
+
+        self.common(fn, (torch.randn(1, 1),))
 
     def test_repeat_interleave(self):
         def fn(x):
@@ -10318,6 +10340,23 @@ class CommonTemplate:
         """
         t = rand_strided((2, 3), (3, 1), device=self.device, dtype=torch.float8_e4m3fn)
         self.assertTrue(t.dtype is torch.float8_e4m3fn)
+
+    def test_large_grid(self):
+        # https://github.com/pytorch/pytorch/issues/123210
+        def fn(primals_5):
+            view = torch.ops.aten.reshape.default(primals_5, [-1, 2, 4])
+            primals_5 = None
+            permute = torch.ops.aten.permute.default(view, [0, 2, 1])
+            clone = torch.ops.aten.clone.default(
+                permute, memory_format=torch.contiguous_format
+            )
+            return clone
+
+        s0 = 16777472
+        s1 = 8
+        compiled_fn = torch._dynamo.optimize()(fn)
+        actual = compiled_fn(torch.ones(s0, s1))
+        self.assertTrue((actual == 1).all())
 
 
 @dataclasses.dataclass
