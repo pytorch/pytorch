@@ -58,7 +58,7 @@ dpn107,pass,6
 
 
 
-eca_botnext26ts_256,fail_accuracy,7
+eca_botnext26ts_256,pass,7
 
 
 
@@ -86,7 +86,7 @@ ghostnet_100,pass,6
 
 
 
-gluon_inception_v3,pass,7
+gluon_inception_v3,fail_accuracy,7
 
 
 
