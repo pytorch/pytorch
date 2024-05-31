@@ -13,6 +13,7 @@ from model_registry import ModelWithKwargs, MultiMLP
 import torch
 import torch.distributed as dist
 from torch.distributed.pipelining import (
+    _PipelineStageBase,
     ManualPipelineStage,
     pipeline,
     PipelineStage,
@@ -20,9 +21,8 @@ from torch.distributed.pipelining import (
     ScheduleGPipe,
     ScheduleInterleaved1F1B,
     ScheduleLoopedBFS,
-    _PipelineStageBase
 )
-from torch.distributed.pipelining.PipelineSchedule import _ComputationType, _Action
+from torch.distributed.pipelining.PipelineSchedule import _Action, _ComputationType
 from torch.testing._internal.common_cuda import TEST_MULTIGPU
 from torch.testing._internal.common_distributed import (
     MultiProcContinousTest,
@@ -41,16 +41,18 @@ batch_size = 256
 
 torch.manual_seed(0)
 
+
 class MockPipelineStage(_PipelineStageBase):
     def __init__(self, *args, **kwargs):
         # Mock the necessary attributes
-        self.num_stages = kwargs.get('num_stages', 1)
-        self.group_size = kwargs.get('group_size', 1)
-        self.group_rank = kwargs.get('group_rank', 0)
-        self.group = kwargs.get('group', None)
+        self.num_stages = kwargs.get("num_stages", 1)
+        self.group_size = kwargs.get("group_size", 1)
+        self.group_rank = kwargs.get("group_rank", 0)
+        self.group = kwargs.get("group", None)
 
     def _create_grad_recv_info(self, *args, **kwargs):
         return None
+
 
 class ScheduleTest(MultiProcContinousTest):
     @classmethod
@@ -360,8 +362,10 @@ class ScheduleTest(MultiProcContinousTest):
 
 instantiate_parametrized_tests(ScheduleTest)
 
+
 def format_pipeline_order(pipeline_order: Dict[int, List[Optional[_Action]]]):
     import itertools
+
     column_labels = ["Step " + str(i) for i in range(len(pipeline_order[0]))]
     # Sorting the dictionary by keys and retrieving values in that order
     rank_actions = [pipeline_order[key] for key in sorted(pipeline_order)]
@@ -369,22 +373,26 @@ def format_pipeline_order(pipeline_order: Dict[int, List[Optional[_Action]]]):
     # Calculate the maximum length of each column
     max_lengths = [
         max(len(str(item)) if item is not None else 0 for item in col)
-        for col in itertools.zip_longest(*pipeline_order_with_labels, fillvalue='')
+        for col in itertools.zip_longest(*pipeline_order_with_labels, fillvalue="")
     ]
     # Format each row
     formatted_rows = [
-        ' '.join(f"{str(item):<{max_lengths[i]}}" for i, item in enumerate(row))
+        " ".join(f"{str(item):<{max_lengths[i]}}" for i, item in enumerate(row))
         for row in pipeline_order_with_labels
     ]
     # Join the rows into a single string
-    formatted_table = '\n'.join(formatted_rows)
+    formatted_table = (
+        "=========== ALL_RANK_ACTIONS ===========\n" + "\n".join(formatted_rows) + "\n"
+    )
     return formatted_table
+
 
 class TestSchedulePlan(unittest.TestCase):
     def _validate_pipeline_order(
         self,
         pipeline_order: Dict[int, List[Optional[_Action]]],
         num_microbatches: int,
+        num_stages: int,
     ):
         """
         pipeline_order[rank] = [(computation_type, microbatch_index, stage_index), ...]
@@ -404,7 +412,11 @@ class TestSchedulePlan(unittest.TestCase):
             error_msg = []
             current_timestep_actions = []
             for rank in range(len(pipeline_order)):
-                action = pipeline_order[rank][timestep] if timestep < len(pipeline_order[rank]) else None
+                action = (
+                    pipeline_order[rank][timestep]
+                    if timestep < len(pipeline_order[rank])
+                    else None
+                )
                 if action is not None:
                     current_timestep_actions.append(action)
 
@@ -426,6 +438,10 @@ class TestSchedulePlan(unittest.TestCase):
             # Add additional checks for other rules here...
             for action in current_timestep_actions:
                 computation_type, mb_index, stage_index = action
+
+                if mb_index >= num_microbatches:
+                    error_msg.append(f"Microbatch index {mb_index} out of range")
+
                 # first microbatch
                 if mb_index not in microbatch_process_info:
                     if computation_type != _ComputationType.FORWARD or stage_index != 0:
@@ -435,8 +451,8 @@ class TestSchedulePlan(unittest.TestCase):
                     # if the microbatch is included, check that the current stage is right after prev
                     prev_computation, prev_stage = microbatch_process_info[mb_index]
                     if prev_computation == _ComputationType.FORWARD:
-                        if prev_stage == num_microbatches - 1:
-                            expected_stage = num_microbatches - 1
+                        if prev_stage == num_stages - 1:
+                            expected_stage = num_stages - 1
                             expected_computation = _ComputationType.BACKWARD
                         else:
                             expected_stage = prev_stage + 1
@@ -467,32 +483,44 @@ class TestSchedulePlan(unittest.TestCase):
                             f"[{mb_index=}] {expected_stage=} VS. actual {stage_index=}"
                         )
 
-                    microbatch_process_info[mb_index] = (expected_computation, expected_stage)
+                    microbatch_process_info[mb_index] = (
+                        expected_computation,
+                        expected_stage,
+                    )
 
             if len(error_msg) != 0:
-                logger.error(format_pipeline_order(pipeline_order))
                 self.fail(f"Error at timestep {timestep}: " + ",".join(error_msg))
 
     def test_pipeline_order(self):
-        # always assume rank 0
-        rank = 0
-
-        # happy paths
-        num_stages = 2
-        num_microbatches = 8
-        group_size = 4
-        stages = [
-            MockPipelineStage(group_size=group_size, group_rank=rank)
-            for i in range(num_stages)
+        # Define a list of test cases with varying num_local_stages, num_microbatches, and group_size
+        # These should succeed since num_microbatches % group_size == 0
+        test_cases = [
+            (2, 4, 4),
+            (2, 8, 4),
+            (2, 8, 8),
+            (4, 4, 4),
+            (4, 8, 4),
+            (4, 8, 8),
+            (4, 16, 16),
         ]
+        for num_local_stages, num_microbatches, group_size in test_cases:
+            with self.subTest(
+                num_local_stages=num_local_stages,
+                num_microbatches=num_microbatches,
+                group_size=group_size,
+            ):
+                print(f"{num_local_stages=} {num_microbatches=} {group_size=}")
+                num_stages = num_local_stages * group_size
+                stages = [
+                    MockPipelineStage(group_size=group_size, num_stages=num_stages)
+                    for i in range(num_local_stages)
+                ]
 
-        schedule = ScheduleInterleaved1F1B(stages, num_microbatches)
-        self._validate_pipeline_order(schedule.pipeline_order, num_microbatches)
-
-        # sad paths (should fail)
-
-        print("finished test_pipeline_order")
-        pass
+                schedule = ScheduleInterleaved1F1B(stages, num_microbatches)
+                logger.debug(format_pipeline_order(schedule.pipeline_order))
+                self._validate_pipeline_order(
+                    schedule.pipeline_order, num_microbatches, num_stages
+                )
 
 
 if __name__ == "__main__":
