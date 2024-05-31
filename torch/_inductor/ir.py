@@ -7190,6 +7190,7 @@ class QLinearPointwiseBinaryPT2E(ExternKernelAlloc):
               fp32_output, binary_attr, aplha, unary_attr, unary_scalars, unary_algorithm]
         """
         self.has_bias = has_bias
+        self.idx_for_inplace_sum = -1
         self.x_scale_zp_are_tensors = x_scale_zp_are_tensors
         super().__init__(
             layout,
@@ -7306,6 +7307,12 @@ class QLinearPointwiseBinaryPT2E(ExternKernelAlloc):
         )
         if isinstance(self.layout, Layout):
             self.codegen_size_asserts(wrapper)
+
+    def get_mutation_names(self):
+        return [self.inputs[self.idx_for_inplace_sum].get_name()]
+
+    def get_unbacked_symbol_defs(self) -> Set[sympy.Symbol]:
+        return set()
 
     @classmethod
     def create(
