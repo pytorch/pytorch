@@ -719,9 +719,6 @@ class SIMDKernel(Kernel):
         finally:
             self._load_mask = prior
 
-    def load_mask(self, var):
-        return self._load_mask
-
     def get_strides_of_load(self, index: sympy.Expr):
         """
         This gets the stride of the index for each of the tiling variables
@@ -1403,8 +1400,9 @@ class SIMDScheduling(BaseScheduling):
                 for node in [template_node, *epilogue_nodes]:
                     node.mark_run()
             partial_code = render()
-            for node in epilogue_nodes:
-                node.codegen(kernel.split_and_set_ranges(node.get_ranges()))
+            with kernel.set_subgraph_body("<STORE_OUTPUT>"):
+                for node in epilogue_nodes:
+                    node.codegen(kernel.split_and_set_ranges(node.get_ranges()))
 
         if not isinstance(partial_code, str):
             partial_code.finalize_hook("<DEF_KERNEL>")
