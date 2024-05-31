@@ -427,6 +427,21 @@ class TS2FXGraphConverter:
         output_name = node.output().debugName()
         self.name_to_node[output_name] = args[0]
 
+    def convert_profiler__record_function_enter_new(self, node: torch._C.Node):
+        target = torch.ops.profiler._record_function_enter_new
+        args = tuple(self.get_fx_value(input) for input in node.inputs())
+        fx_node = self.fx_graph.call_function(target, args)
+        output_name = node.output().debugName()
+        self.name_to_node[output_name] = fx_node
+
+    def convert_profiler__record_function_exit(self, node: torch._C.Node):
+        # _record_function_exit has side effect so we keep it in fx.graph
+        # currently, _record_function_enter_new and _record_function_exit are
+        # discarded during `retrace_as_exported_program`.
+        target = torch.ops.profiler._record_function_exit
+        args = tuple(self.get_fx_value(input) for input in node.inputs())
+        self.fx_graph.call_function(target, args)
+
     def convert_node(self, node: torch._C.Node):
         node_kind = node.kind()
         if node_kind == "prim::CreateObject":
@@ -458,6 +473,10 @@ class TS2FXGraphConverter:
             self.convert_prim_if(node)
         elif node_kind == "aten::Bool":
             self.convert_as_noop(node)
+        elif node_kind == "profiler::_record_function_enter_new":
+            self.convert_profiler__record_function_enter_new(node)
+        elif node_kind == "profiler::_record_function_exit":
+            self.convert_profiler__record_function_exit(node)
         elif node_kind.startswith("aten::"):
             self.convert_aten_op(node)
         else:
