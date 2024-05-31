@@ -65,43 +65,6 @@ def _unlift_inputs_as_getattr(
     return unlifted_name_to_node, input_name_to_node
 
 
-def _insert_copy_for_input_mutations(
-    gm: torch.fx.GraphModule,
-    out_inputs: Optional[Dict[torch.fx.Node, torch.fx.Node]],
-) -> None:
-    # No need to insert copy if all out inputs are None
-    if out_inputs is None or all(val is None for _, val in out_inputs.items()):
-        return
-
-    output_nodes = gm.graph.find_nodes(op="output")
-    assert output_nodes is not None
-    assert len(output_nodes) == 1
-    return_node = output_nodes[0]
-    outputs = pytree.tree_flatten(return_node.args)[0]
-
-    # Only supports single out parameter now
-    assert len(out_inputs) == 1
-
-    # Update output
-    output_args = list(out_inputs.keys())
-    for output_node, out_input_node in out_inputs.items():
-        # The output node is the alias of the out input node.
-        assert output_node in outputs
-        with gm.graph.inserting_before(return_node):
-            copy_res = gm.graph.call_function(
-                torch.ops.aten.copy_.default, args=(out_input_node, output_node)
-            )
-
-            # Replace the input nodes of the output node with the copy result
-            output_args = [
-                copy_res if item == output_node else item for item in output_args
-            ]
-
-    new_output_node = gm.graph.output(tuple(output_args))
-    return_node.replace_all_uses_with(new_output_node)
-    gm.graph.erase_node(return_node)
-
-
 def _insert_copy_for_mutations(
     gm: torch.fx.GraphModule,
     mutated_outputs: List[Optional[str]],
@@ -122,6 +85,7 @@ def _insert_copy_for_mutations(
     assert len(outputs) == len(mutated_outputs)
 
     user_output_nodes = []
+    return_nodes_to_copy = {}
     for return_node, mutated_node_name in zip(outputs, mutated_outputs):
         if mutated_node_name is None:
             user_output_nodes.append(return_node)
@@ -137,13 +101,18 @@ def _insert_copy_for_mutations(
             )
 
         with gm.graph.inserting_before(output_node):
-            _ = gm.graph.call_function(
+            copy_node = gm.graph.call_function(
                 torch.ops.aten.copy_.default, (mutated_node, return_node)
             )
+            return_nodes_to_copy[return_node] = copy_node
 
+    output_args = [
+        return_nodes_to_copy[node] if node in return_nodes_to_copy else node
+        for node in user_output_nodes
+    ]
     with gm.graph.inserting_before(output_node):
         # Only return user outputs
-        new_output = gm.graph.output(tuple(user_output_nodes))
+        new_output = gm.graph.output(tuple(output_args))
         output_node.replace_all_uses_with(new_output)
         gm.graph.erase_node(output_node)
 
@@ -190,7 +159,6 @@ def _unlift(
     state_dict: Dict[str, Any],
     constants: Dict[str, Any],
     forward_arg_names: Optional[List[str]] = None,
-    mutated_inputs: Optional[Dict[torch.fx.Node, torch.fx.Node]] = None,
 ):
     """
     Args:
@@ -212,10 +180,6 @@ def _unlift(
     )
     _insert_copy_for_mutations(
         gm, mutated_outputs, unlifted_name_to_node, input_name_to_node
-    )
-    _insert_copy_for_input_mutations(
-        gm,
-        mutated_inputs,
     )
     gm.graph._codegen = _get_codegen(in_spec, out_spec, forward_arg_names)
     gm.graph.lint()
