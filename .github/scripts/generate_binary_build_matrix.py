@@ -19,7 +19,7 @@ CUDA_ARCHES = ["11.8", "12.1", "12.4"]
 CUDA_ARCHES_FULL_VERSION = {"11.8": "11.8.0", "12.1": "12.1.1", "12.4": "12.4.0"}
 
 
-CUDA_ARCHES_CUDNN_VERSION = {"11.8": "8", "12.1": "8", "12.4": "8"}
+CUDA_ARCHES_CUDNN_VERSION = {"11.8": "9", "12.1": "9", "12.4": "9"}
 
 
 ROCM_ARCHES = ["6.0", "6.1"]
