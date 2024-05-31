@@ -1,7 +1,7 @@
 import contextlib
-import warnings
 
 from typing import Union
+from typing_extensions import deprecated
 
 import torch
 
@@ -377,6 +377,15 @@ def enable_cudnn_sdp(enabled: bool):
 
 
 @contextlib.contextmanager
+@deprecated(
+    (
+        "`torch.backends.cuda.sdp_kernel()` is deprecated. "
+        "In the future, this context manager will be removed. "
+        "Please see `torch.nn.attention.sdpa_kernel()` for the new context manager, "
+        "with updated signature."
+    ),
+    category=FutureWarning,
+)
 def sdp_kernel(
     enable_flash: bool = True,
     enable_math: bool = True,
@@ -389,15 +398,6 @@ def sdp_kernel(
     This context manager can be used to temporarily enable or disable any of the three backends for scaled dot product attention.
     Upon exiting the context manager, the previous state of the flags will be restored.
     """
-    warnings.warn(
-        (
-            "torch.backends.cuda.sdp_kernel() "
-            "is deprecated. In the future, this context manager will be removed. "
-            "Please see, torch.nn.attention.sdpa_kernel() for the new context manager, with updated "
-            "signature."
-        ),
-        FutureWarning,
-    )
     from torch.nn.attention import sdpa_kernel
 
     backend_list = []
