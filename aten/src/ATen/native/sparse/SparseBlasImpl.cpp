@@ -313,6 +313,14 @@ void addmv_sparse_csr(
     const scalar_t beta,
     scalar_t* result,
     const size_t result_stride) {
+  if(Scalar(beta).toComplexDouble() == 0.) {
+    at::parallel_for(0, mat_rows, 0, [&](int64_t rstart, int64_t rend) {
+      for(const auto row: c10::irange(rstart, rend)) {
+        result[row * result_stride] = 0.0;
+      }
+    });
+  }
+
   at::parallel_for(0, mat_rows, 0, [&](int64_t rstart, int64_t rend) {
     for(const auto row: c10::irange(rstart, rend)) {
       scalar_t acc(0);
@@ -338,6 +346,13 @@ void addmv_sparse_bsr(
     const scalar_t beta,
     scalar_t* result,
     const size_t result_stride) {
+  if(Scalar(beta).toComplexDouble() == 0.) {
+    at::parallel_for(0, mat_rows, 0, [&](int64_t rstart, int64_t rend) {
+      for(const auto row: c10::irange(rstart, rend)) {
+        result[row * result_stride] = 0.0;
+      }
+    });
+  }
   at::parallel_for(0, mat_rows, 0, [&](int64_t rstart, int64_t rend) {
     for(const auto row: c10::irange(rstart, rend)) {
       const auto block_row = row / blocksize_rows;
