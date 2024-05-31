@@ -1,69 +1,56 @@
-import itertools
-from copy import deepcopy
+from typing import Dict, List
 
 import torch
-import torch.distributed as dist
-import torch.nn.functional as F
-
-from torch.distributed._tensor import (
-    DeviceMesh,
-    distribute_tensor,
-    DTensor,
-    Replicate,
-    Shard,
-)
 from torch.distributed._tensor.debug import CommDebugMode
-from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
-    checkpoint_wrapper,
-    CheckpointImpl,
-)
-from torch.distributed.tensor.parallel import (
-    ColwiseParallel,
-    loss_parallel,
-    parallelize_module,
-    RowwiseParallel,
-)
-from torch.distributed.tensor.parallel.input_reshard import input_reshard
-from torch.testing._internal.common_utils import (
-    instantiate_parametrized_tests,
-    parametrize,
-    run_tests,
-)
-from torch.testing._internal.distributed._tensor.common_dtensor import (
-    DTensorTestBase,
-    MLPModule,
-    ModelArgs,
-    NUM_DEVICES,
-    skip_unless_torch_gpu,
-    Transformer,
-    with_comms,
-)
 
-class DisplayShardingExampleTest():
-    def single_function(self, is_seq_parallel=False, recompute_activation=False):
-            inp_size = [8, 10]
-            # Ensure all tp ranks have same input.
-            rng_seed = self.rank if is_seq_parallel else 0
-            torch.manual_seed(rng_seed)
-            inp = torch.rand(*inp_size, device=self.device_type)
-            model = MLPModule(self.device_type)
-
-            LR = 0.25
-
-            optim = torch.optim.SGD(model.parameters(), lr=LR)
-
-            comm_mode = CommDebugMode()
-            with comm_mode:
-                output = model(inp)
-                output.sum().backward()
+from torch.testing._internal.distributed._tensor.common_dtensor import MLPModule
+from torch.utils.module_tracker import ModuleTracker
 
 
-            optim.step()
+class DisplayShardingExampleTest:
+    def test_mlp_training_e2e(self):
+        inp_size = [8, 10]
 
-            inp = torch.rand(*inp_size, device=self.device_type)
+        rng_seed = 0
+        torch.manual_seed(rng_seed)
+        inp = torch.rand(*inp_size, device=None)
+        model = MLPModule(None)
+
+        LR = 0.25
+
+        optim = torch.optim.SGD(model.parameters(), lr=LR)
+        comm_mode = CommDebugMode()
+        module_tracker = ModuleTracker()
+
+        with comm_mode, module_tracker:
             output = model(inp)
+            output.sum().backward()
+
+        # gets all parameters in all modules in the model
+        module_parameters: Dict[str, List[str]] = {}
+
+        for name, module in model.named_modules():
+            if module._parameters:
+                module_parameters[name] = []
+                for param_name, param in module.named_parameters():
+                    module_parameters[name].append(param_name)
+
+        # gets all modules that were actually seen during operation
+        seen_module_parameters: Dict[str, List[str]] = {}
+        keys = list(module_tracker._known_modules.keys())[1:]
+        for key in keys:
+            last_period_index = module_tracker._known_modules[key].rfind(".")
+            result = (
+                module_tracker._known_modules[key][last_period_index + 1 :]
+                if last_period_index != -1
+                else module_tracker._known_modules[key]
+            )
+            if result in module_parameters:
+                seen_module_parameters[result] = module_parameters[result]
+
+        print(seen_module_parameters)
 
 
 if __name__ == "__main__":
-    single_test_instance = DisplayShardingExampleTest()
-    single_test_instance.single_function()
+    instantiated_test = DisplayShardingExampleTest()
+    instantiated_test.test_mlp_training_e2e()
