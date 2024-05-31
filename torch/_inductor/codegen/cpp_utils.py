@@ -272,7 +272,7 @@ class LocalizeBufferHandler(V.WrapperHandler):  # type: ignore[name-defined]
         self.localize_fn = localize_fn
 
     def localize(self, name: str, index: sympy.Expr):
-        if self.local_buf_pair and name in [
+        if self.local_buf_pairs and name in [
             loca_buf_pair.global_buf.get_name()
             for loca_buf_pair in self.local_buf_pairs
         ]:
