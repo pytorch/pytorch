@@ -624,6 +624,9 @@ class triton:
     # Enable cudagraph support for mutated inputs from prior cudagraph pool
     cudagraph_support_input_mutation = False
 
+    # Treats nn.Parameters found in graph inputs as static, as if they were registered on a compiled nn.Module
+    cudagraph_static_input_params = False
+
     # synchronize after cudagraph invocation
     force_cudagraph_sync = False
 
