@@ -149,7 +149,8 @@ DEFAULT_TAG = os.getenv("RELEASE_VERSION_TAG", "main")
 
 WHEEL_CONTAINER_IMAGES = {
     **{
-        gpu_arch: f"pytorch/manylinux-builder:cuda{gpu_arch}-{DEFAULT_TAG}"
+        # NOTE!!!!! Recover me before merging to main branch!!!
+        gpu_arch: f"pytorch/manylinux-builder:cuda{gpu_arch}-7e4bdab63653ad6af8d92fdfa69d7e96780ce258"
         for gpu_arch in CUDA_ARCHES
     },
     **{
@@ -165,7 +166,8 @@ WHEEL_CONTAINER_IMAGES = {
 
 CONDA_CONTAINER_IMAGES = {
     **{
-        gpu_arch: f"pytorch/conda-builder:cuda{gpu_arch}-{DEFAULT_TAG}"
+        # Note: revert me before merging
+        gpu_arch: f"pytorch/conda-builder:cuda{gpu_arch}-7e4bdab63653ad6af8d92fdfa69d7e96780ce258"
         for gpu_arch in CUDA_ARCHES
     },
     "cpu": f"pytorch/conda-builder:cpu-{DEFAULT_TAG}",
@@ -181,7 +183,7 @@ LIBTORCH_CONTAINER_IMAGES: Dict[Tuple[str, str], str] = {
         (
             gpu_arch,
             PRE_CXX11_ABI,
-        ): f"pytorch/manylinux-builder:cuda{gpu_arch}-{DEFAULT_TAG}"
+        ): f"pytorch/manylinux-builder:cuda{gpu_arch}-7e4bdab63653ad6af8d92fdfa69d7e96780ce258"  # revert me before merging!
         for gpu_arch in CUDA_ARCHES
     },
     **{
