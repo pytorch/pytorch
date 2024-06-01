@@ -25,7 +25,6 @@ from typing import (
 )
 
 import torch
-import torch._inductor.async_compile
 from torch import multiprocessing
 from torch._dynamo.testing import rand_strided
 
