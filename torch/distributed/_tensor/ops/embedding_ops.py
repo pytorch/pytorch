@@ -12,7 +12,6 @@ from torch.distributed._tensor.ops.utils import (
 )
 
 from torch.distributed._tensor.placement_types import (
-    DTensorSpec,
     Partial,
     Placement,
     Replicate,
