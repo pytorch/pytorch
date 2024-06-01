@@ -57,7 +57,10 @@ class profile:
         self.with_modules = with_modules
 
         if self.use_cuda and not torch.cuda.is_available():
-            warnings.warn("CUDA is not available, disabling CUDA profiling", stacklevel=2)
+            warnings.warn(
+                "CUDA is not available, disabling CUDA profiling",
+                stacklevel=2,
+            )
             self.use_cuda = False
 
         if self.use_cuda:
@@ -252,7 +255,9 @@ def _parse_legacy_records(thread_records):
                     end_us=start_record.cpu_elapsed_us(record),
                     fwd_thread=start.fwd_thread_id(),
                     input_shapes=start.shapes(),
-                    stack=[entry for entry in start.stack() if _filter_stack_entry(entry)],
+                    stack=[
+                        entry for entry in start.stack() if _filter_stack_entry(entry)
+                    ],
                     scope=start.scope(),
                     use_device="cuda" if start.has_cuda() else None,
                     cpu_memory_usage=cpu_memory_usage,
