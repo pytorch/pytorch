@@ -505,7 +505,6 @@ cc_library(
     name = "caffe2_for_aten_headers",
     hdrs = [
         "caffe2/core/common.h",
-        "caffe2/core/logging.h",
         "caffe2/perfkernels/common.h",
         "caffe2/perfkernels/embedding_lookup.h",
         "caffe2/perfkernels/embedding_lookup_idx.h",

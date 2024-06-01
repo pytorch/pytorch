@@ -2,6 +2,7 @@
 
 #include "caffe2/perfkernels/common.h"
 
+#include <c10/util/Logging.h>
 #include <c10/util/irange.h>
 
 namespace caffe2 {
