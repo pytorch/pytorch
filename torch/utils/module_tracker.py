@@ -79,7 +79,7 @@ class ModuleTracker:
 
     def get_known_fqn(self, mod):
         """
-        Return the fqn for the given module if it is known to the Module Tracker, otherwise None.
+        Return the fqn for the given module if it is known to the ``ModuleTracker``, otherwise ``None``.
         """
         return self._known_modules.get(mod, None)
 
@@ -212,7 +212,9 @@ class ModuleTracker:
 
     def __enter__(self):
         self._fw_pre_handle = register_module_forward_pre_hook(self._fw_pre_hook)
-        self._fw_post_handle = register_module_forward_hook(self._fw_post_hook)
+        self._fw_post_handle = register_module_forward_hook(
+            self._fw_post_hook, always_call=True
+        )
         return self
 
     def __exit__(self, *args):

@@ -76,6 +76,7 @@ class TestModuleTracker(TestCase):
             self.assertFalse(tracker.is_bw)
             self.assertEqual(tracker.parents, {"Global"})
 
+    @xfailIfTorchDynamo
     def test_user_hooks(self):
         class Bar(torch.nn.Module):
             def __init__(self):
