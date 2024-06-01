@@ -1994,17 +1994,17 @@
   device_check: NoCheck
   device_guard: False
 
-- func: cumsum(Tensor self, int dim, *, ScalarType? dtype=None) -> Tensor
+- func: cumsum(Tensor self, int dim, *, ScalarType? dtype=None, bool full=False) -> Tensor
   structured_delegate: cumsum.out
   device_check: NoCheck   # TensorIterator
   variants: function, method
   tags: core
 
-- func: cumsum_(Tensor(a!) self, int dim, *, ScalarType? dtype=None) -> Tensor(a!)
+- func: cumsum_(Tensor(a!) self, int dim, *, ScalarType? dtype=None, bool full=False) -> Tensor(a!)
   structured_delegate: cumsum.out
   variants: method
 
-- func: cumsum.out(Tensor self, int dim, *, ScalarType? dtype=None, Tensor(a!) out) -> Tensor(a!)
+- func: cumsum.out(Tensor self, int dim, *, ScalarType? dtype=None, bool full=False, Tensor(a!) out) -> Tensor(a!)
   structured: True
   device_check: NoCheck   # TensorIterator
   dispatch:

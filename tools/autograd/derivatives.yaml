@@ -517,8 +517,8 @@
   self: cumprod_backward(grad.to(self.scalar_type()), self, dim, result)
   result: "cumprod_jvp(self_t, self_p, result, dim).to(dtype.has_value() ? *dtype : self_p.scalar_type())"
 
-- name: cumsum(Tensor self, int dim, *, ScalarType? dtype=None) -> Tensor
-  self: cumsum_backward(grad.to(self.scalar_type()), dim)
+- name: cumsum(Tensor self, int dim, *, ScalarType? dtype=None, bool full=False) -> Tensor
+  self: cumsum_backward(grad.to(self.scalar_type()), dim, full)
   result: auto_linear
 
 - name: cummax(Tensor self, int dim) -> (Tensor values, Tensor indices)

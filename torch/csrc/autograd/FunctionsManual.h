@@ -217,7 +217,7 @@ at::Tensor solve_backward_A(
     const at::Tensor& self,
     const at::Tensor& A,
     const at::Tensor& solution);
-at::Tensor cumsum_backward(const at::Tensor& grad, int64_t dim);
+at::Tensor cumsum_backward(const at::Tensor& grad, int64_t dim, bool full);
 at::Tensor logsumexp_backward(
     at::Tensor grad,
     const at::Tensor& self,

@@ -88,7 +88,10 @@ Tensor _logcumsumexp_cuda(const Tensor& self, int64_t dim) {
   return _logcumsumexp_out_cuda(self, dim, result);
 }
 
-void cumsum_cuda_kernel(const Tensor& result, const Tensor& self, int64_t dim) {
+void cumsum_cuda_kernel(const Tensor& result, const Tensor& self, int64_t dim, bool full) {
+  if (full) {
+    TORCH_INTERNAL_ASSERT(false, "TODO implement full=True");
+  }
   if (self.is_floating_point() || self.is_complex()) {
     // See Note [Writing Nondeterministic Operations]
     // Issue reporting nondeterministic behavior: https://github.com/pytorch/pytorch/issues/75240
@@ -101,7 +104,10 @@ void cumsum_cuda_kernel(const Tensor& result, const Tensor& self, int64_t dim) {
   }
 }
 
-void cumprod_cuda_kernel(const Tensor& result, const Tensor& self, int64_t dim) {
+void cumprod_cuda_kernel(const Tensor& result, const Tensor& self, int64_t dim, bool full) {
+  if (full) {
+    TORCH_INTERNAL_ASSERT(false, "TODO implement full=True");
+  }
   auto result_ = contiguous_out_arg(result);
   launch_cumprod_cuda_kernel(*result_, self, dim);
   if (!result.is_same(*result_)) {

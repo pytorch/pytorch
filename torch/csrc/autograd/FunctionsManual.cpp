@@ -878,8 +878,11 @@ static Tensor generic_solve_jvp(
   return solve(A, dB, dA_contrib);
 }
 
-Tensor cumsum_backward(const Tensor& grad, int64_t dim) {
+Tensor cumsum_backward(const Tensor& grad, int64_t dim, bool full) {
   // Trivial case
+  if (full) {
+    TORCH_INTERNAL_ASSERT(false, "TODO: implement support for full");
+  }
   if (grad.sym_numel() <= 1 || grad.sym_size(dim) == 1) {
     return grad;
   }

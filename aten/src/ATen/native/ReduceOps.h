@@ -39,7 +39,7 @@ DECLARE_DISPATCH(reduce_norm_fn, norm_kernel);
 using reduce_fn_flag = void(*)(TensorIterator &, const c10::Scalar&);
 DECLARE_DISPATCH(reduce_fn_flag, norm_stub);
 
-using structured_cum_fn = void (*)(const Tensor&, const Tensor&, int64_t);
+using structured_cum_fn = void (*)(const Tensor&, const Tensor&, int64_t, bool);
 using cum_fn = void (*)(Tensor&, const Tensor&, int64_t);
 DECLARE_DISPATCH(structured_cum_fn, cumsum_stub);
 DECLARE_DISPATCH(structured_cum_fn, cumprod_stub);

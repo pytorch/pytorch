@@ -77,7 +77,10 @@ static inline void cpu_cum_base_kernel(const Tensor& result,
   iter.for_each(loop, grain_size);
 }
 
-static void cumsum_cpu_kernel(const Tensor& result, const Tensor& self, int64_t dim) {
+static void cumsum_cpu_kernel(const Tensor& result, const Tensor& self, int64_t dim, bool full) {
+  if (full) {
+    TORCH_INTERNAL_ASSERT(false, "TODO implement support for full=True");
+  }
   auto wrap_dim = maybe_wrap_dim(dim, self.dim());
   int64_t self_dim_size = ensure_nonempty_size(self, wrap_dim);
 
@@ -96,7 +99,10 @@ static void cumsum_cpu_kernel(const Tensor& result, const Tensor& self, int64_t 
   });
 }
 
-static void cumprod_cpu_kernel(const Tensor& result, const Tensor& self, int64_t dim) {
+static void cumprod_cpu_kernel(const Tensor& result, const Tensor& self, int64_t dim, bool full) {
+  if (full) {
+    TORCH_INTERNAL_ASSERT(false, "TODO implement support for full=True");
+  }
   auto wrap_dim = maybe_wrap_dim(dim, self.dim());
   int64_t self_dim_size = ensure_nonempty_size(self, wrap_dim);
 
