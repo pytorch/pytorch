@@ -22,6 +22,7 @@ from torch._dynamo import (
     utils as dynamo_utils,
 )
 from torch._dynamo.utils import (
+    counters,
     detect_fake_mode,
     flatten_graph_inputs,
     lazy_format_graph_code,
@@ -506,6 +507,8 @@ def compile_fx_inner(
             log_cudagraph_skip_and_bump_counter(
                 f"skipping cudagraphs due to {compiled_graph.disabled_cudagraphs_reason}"
             )
+        else:
+            counters["inductor"]["cudagraph_skips"] += 1
         BoxedBool.disable(cudagraphs)
 
     # Return the output strides to the caller via TracingContext
