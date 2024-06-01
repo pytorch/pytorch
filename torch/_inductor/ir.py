@@ -2750,7 +2750,8 @@ class FixedLayout(Layout):
         """A closure containing math to read a given element"""
 
         def indexer(index):
-            assert len(index) == len(self.stride) == len(self.size)
+            assert len(index) == len(self.stride)
+            assert len(index) == len(self.size)
             result = self.offset
             for idx, stride, sz in zip(index, self.stride, self.size):
                 if sz != 1:
