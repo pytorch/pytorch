@@ -19,7 +19,7 @@ from torch._inductor.runtime.hints import AutotuneHint, DeviceProperties
 from torch._prims_common import is_integer_dtype
 from torch.utils._sympy.functions import CeilDiv, FloorDiv, ModularIndexing
 from torch.utils._triton import has_triton_package
-from ...utils._sympy.symbol import free_symbol_is_type, symbol_is_type, SymT
+from ...utils._sympy.symbol import symbol_is_type, SymT
 from ...utils._sympy.value_ranges import ValueRanges
 
 from .. import config, ir
