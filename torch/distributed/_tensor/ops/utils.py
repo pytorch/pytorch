@@ -237,7 +237,9 @@ def expand_to_full_mesh_op_strategy(
     mesh: DeviceMesh,
     op_schema: OpSchema,
     single_mesh_dim_strategies: List[List[Placement]],
+    *,
     input_index: int = 1,
+    inplace_op: bool = False,
 ) -> OpStrategy:
     # Expand the single_mesh_dim_strategies to full mesh dim strategies.
     all_mesh_dim_strategies = [single_mesh_dim_strategies] * mesh.ndim
@@ -253,6 +255,12 @@ def expand_to_full_mesh_op_strategy(
         input_specs = spec_list[input_index:]
         input_args_strategy = op_schema.args_strategy
         assert len(input_specs) == len(input_args_strategy)
+        self_spec = input_args_strategy[0].strategies[0].output_spec
+        if inplace_op and self_spec.placements != input_specs[0].placements:
+            # if it's inplace op, we would only allow the placement strategy to be added when the
+            # input_spec matches the first argument's runtime sharding, otherwise we skip
+            continue
+
         # check inputs shardable
         inputs_shardable = all(
             is_tensor_shardable(inp.shape, s)

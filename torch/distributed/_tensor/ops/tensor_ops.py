@@ -4,6 +4,7 @@ from typing import cast, List, Optional, Sequence, Tuple
 import torch
 
 from torch.distributed._tensor._op_schema import (
+    _is_inplace_op,
     OpSchema,
     OpStrategy,
     OutputSharding,
@@ -357,6 +358,32 @@ def replica_only_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> StrategyType
     """Only allow replication on the input/output."""
     replicate_spec = DTensorSpec(mesh, tuple([Replicate()] * mesh.ndim))
     return OpStrategy([PlacementStrategy(replicate_spec)])
+
+
+@register_op_strategy(
+    [aten.scatter_.value, aten.scatter.value, aten.scatter_.src, aten.scatter.src],
+    schema_info=RuntimeSchemaInfo(1),
+)
+def scatter_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> StrategyType:
+    input_strategy = cast(OpStrategy, op_schema.args_schema[0])
+    single_mesh_dim_strategies = []
+
+    # placement list stores placements of [output, input, index, src]
+    # first we always have replicate all for inputs and output
+    if len(op_schema.args_strategy) < 3:
+        # scatter_.src/scatter.src with src be float number instead of tensor
+        all_replicate: List[Placement] = [Replicate()] * 3
+    else:
+        all_replicate = [Replicate()] * 4
+    single_mesh_dim_strategies.append(all_replicate)
+
+    # TODO: see if we can support input sharding pattern
+    inplace_op = _is_inplace_op(op_schema.op)
+
+    op_strategy = expand_to_full_mesh_op_strategy(
+        mesh, op_schema, single_mesh_dim_strategies, inplace_op=inplace_op
+    )
+    return op_strategy
 
 
 @register_op_strategy(aten.gather.default)
