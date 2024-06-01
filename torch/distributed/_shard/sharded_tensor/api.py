@@ -397,7 +397,11 @@ class ShardedTensor(ShardedTensorBase):
             return reduce(operator.mul, shard_md.shard_sizes)  # type: ignore[attr-defined]
 
         if enforce_dtype:
+            warnings.warn(
+                "`enforce_dtype` is deprecated. Please use `dtype` instead.",
                 FutureWarning,
+                stacklevel=2,
+            )
 
         rank = dist.get_rank(self._process_group)
         full_size = self.metadata().size
