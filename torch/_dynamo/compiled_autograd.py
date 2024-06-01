@@ -1,6 +1,6 @@
 import contextlib
 import functools
-from typing import List, Optional, TYPE_CHECKING
+from typing import Dict, List, Optional, TYPE_CHECKING
 
 import torch
 from torch._dynamo.external_utils import call_backward, call_hook
@@ -217,7 +217,8 @@ class AutogradCompilerInstance:
     #      e.g. aten.div inherits type from numerator, not denominator
     #   2. cpu tensor inputs are used in ops that accept cuda tensors too
     def move_graph_nodes_to_cuda(self, graph) -> List[int]:
-        inputs_on_cpu = []
+        cpu_scalar_inputs: Dict[int, torch.fx.Node] = {}
+        has_cuda_inputs = False
         nodes = list(graph.nodes)
         assert nodes[0].target == "inputs"
         inputs = nodes[0]
@@ -229,15 +230,25 @@ class AutogradCompilerInstance:
         last_getitem_idx = first_getitem_idx + len(inputs_users) - 1
         assert nodes[last_getitem_idx] == inputs_users[-1]
         for i, node in enumerate(inputs_users):
+            if not has_cuda_inputs and node.meta["val"].device.type == "cuda":
+                has_cuda_inputs = True
+                continue
+
             is_cpu = node.meta["val"].device.type == "cpu"
             is_scalar = len(node.meta["val"].size()) == 0
             if is_cpu and is_scalar:
-                # move cpu scalars to cuda in the graph
-                node.meta["val"] = node.meta["val"].cuda()
-                inputs_on_cpu.append(i)
+                cpu_scalar_inputs[i] = node
 
-        # return runtime indices we need to move to cuda
-        return inputs_on_cpu
+        # only move cpu scalars to cuda if there were cuda activations in this graph,
+        # this is to handle the case where cudagraphs is enabled on a cpu-only graph
+        if has_cuda_inputs:
+            for node in cpu_scalar_inputs.values():
+                node.meta["val"] = node.meta["val"].cuda()
+
+            # return runtime indices we need to move to cuda
+            return list(cpu_scalar_inputs.keys())
+
+        return []
 
     def end_capture(self, outputs):
         self.stack.close()
@@ -260,7 +271,10 @@ class AutogradCompilerInstance:
             "%s", lazy_format_graph_code("Compiled autograd graph", graph)
         )
         verbose_log.debug(
-            "%s", lazy_format_graph_code("Compiled autograd graph", graph)
+            "%s",
+            lazy_format_graph_code(
+                "Compiled autograd graph", graph, include_device=True
+            ),
         )
         trace_structured(
             "compiled_autograd_graph",
