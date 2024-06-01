@@ -39,7 +39,6 @@ from torch.testing._internal.common_device_type import tol, toleranceOverride
 from torch.testing._internal.common_methods_invocations import DecorateInfo
 from torch.testing._internal.common_utils import (
     _TestParametrizer,
-    set_single_threaded_if_parallel_tbb,
     skipIfMps,
     skipIfTorchDynamo,
     TEST_WITH_TORCHDYNAMO,
@@ -161,7 +160,7 @@ class OptimizerInfo:
         self.supports_fused_on = supports_fused_on
 
     def get_decorators(self, test_class, test_name, device, dtype, param_kwargs):
-        result = [set_single_threaded_if_parallel_tbb]
+        result = []
         for decorator in self.decorators:
             if isinstance(decorator, DecorateInfo):
                 if decorator.is_active(
@@ -642,7 +641,6 @@ def optim_error_inputs_func_lbfgs(device, dtype):
     return error_inputs
 
 
-# Weird story bro, NAdam and RAdam do not have maximize.
 def optim_inputs_func_nadam(device, dtype=None):
     cuda_supported_configs = [
         OptimizerInput(params=None, kwargs={"capturable": True}, desc="capturable"),
@@ -694,6 +692,11 @@ def optim_inputs_func_nadam(device, dtype=None):
                 "decoupled_weight_decay": True,
             },
             desc="decoupled_weight_decay",
+        ),
+        OptimizerInput(
+            params=None,
+            kwargs={"weight_decay": 0.1, "maximize": True},
+            desc="maximize",
         ),
     ] + (cuda_supported_configs if "cuda" in str(device) else [])
 
@@ -1254,6 +1257,17 @@ optim_db: List[OptimizerInfo] = [
                 "TestOptimRenewed",
                 "test_fused_matches_forloop",
             ),
+            DecorateInfo(
+                # Note on tolerances:
+                # Tracking through #127000
+                toleranceOverride(
+                    {
+                        torch.float32: tol(atol=3e-5, rtol=1.3e-06),
+                    }
+                ),
+                "TestCudaOptims",
+                "test_grad_scaling_autocast_fused_optimizers",
+            ),
         ),
         skips=(
             DecorateInfo(
@@ -1369,6 +1383,20 @@ optim_db: List[OptimizerInfo] = [
                 ),
                 "TestOptimRenewed",
                 "test_fused_matches_forloop",
+            ),
+            # Note on tolerances:
+            # Tracking through #127000
+            DecorateInfo(
+                toleranceOverride(
+                    {
+                        torch.float32: tol(
+                            atol=3e-5,
+                            rtol=1.3e-06,
+                        )
+                    }
+                ),
+                "TestCudaOptims",
+                "test_grad_scaling_autocast_fused_optimizers",
             ),
         ),
         skips=(

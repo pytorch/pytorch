@@ -77,7 +77,7 @@ set(TORCH_PYTHON_INCLUDE_DIRECTORIES
 list(APPEND TORCH_PYTHON_INCLUDE_DIRECTORIES ${LIBSHM_SRCDIR})
 
 set(TORCH_PYTHON_LINK_LIBRARIES
-    python::python
+    Python::Module
     pybind::pybind11
     opentelemetry::api
     shm
@@ -216,7 +216,7 @@ add_custom_command(
     "${TORCH_SRC_DIR}/_C/_VariableFunctions.pyi"
     "${TORCH_SRC_DIR}/nn/functional.pyi"
     COMMAND
-    "${PYTHON_EXECUTABLE}" -mtools.pyi.gen_pyi
+    "${Python_EXECUTABLE}" -mtools.pyi.gen_pyi
       --native-functions-path "aten/src/ATen/native/native_functions.yaml"
       --tags-path "aten/src/ATen/native/tags.yaml"
       --deprecated-functions-path "tools/autograd/deprecated.yaml"
@@ -238,7 +238,7 @@ add_custom_command(
     OUTPUT
     "${TORCH_SRC_DIR}/utils/data/datapipes/datapipe.pyi"
     COMMAND
-    "${PYTHON_EXECUTABLE}" ${TORCH_SRC_DIR}/utils/data/datapipes/gen_pyi.py
+    "${Python_EXECUTABLE}" ${TORCH_SRC_DIR}/utils/data/datapipes/gen_pyi.py
     DEPENDS
     "${TORCH_SRC_DIR}/utils/data/datapipes/datapipe.pyi.in"
     ${datapipe_files}
@@ -300,7 +300,7 @@ add_dependencies(torch_python Caffe2_PROTO)
 add_dependencies(torch_python onnx_proto)
 # Avoid numpy for the DEPLOY build
 if(USE_NUMPY)
-  target_link_libraries(torch_python PRIVATE numpy::numpy)
+  target_link_libraries(torch_python PRIVATE Python::NumPy)
   target_compile_definitions(torch_python PRIVATE USE_NUMPY)
 endif()
 
@@ -383,7 +383,7 @@ add_custom_command(
   OUTPUT ${TORCH_SRC_DIR}/version.py
   COMMAND "${CMAKE_COMMAND}" -E touch "${TOOLS_PATH}/generate_torch_version.py"
   COMMAND
-    "${PYTHON_EXECUTABLE}" "${TOOLS_PATH}/generate_torch_version.py"
+    "${Python_EXECUTABLE}" "${TOOLS_PATH}/generate_torch_version.py"
       --is-debug=${TORCH_VERSION_DEBUG}
       --cuda-version=${CUDA_VERSION}
       --hip-version=${HIP_VERSION}

@@ -179,13 +179,6 @@
 #     possible values:
 #       OMP - use OpenMP for intra-op and native backend for inter-op tasks
 #       NATIVE - use native thread pool for both intra- and inter-op tasks
-#       TBB - using TBB for intra- and native thread pool for inter-op parallelism
-#
-#   USE_TBB
-#      enable TBB support
-#
-#   USE_SYSTEM_TBB
-#      Use system-provided Intel TBB.
 #
 #   USE_SYSTEM_LIBS (work in progress)
 #      Use system-provided libraries to satisfy the build dependencies.
@@ -233,18 +226,6 @@ def _get_package_path(package_name):
 BUILD_LIBTORCH_WHL = os.getenv("BUILD_LIBTORCH_WHL", "0") == "1"
 BUILD_PYTHON_ONLY = os.getenv("BUILD_PYTHON_ONLY", "0") == "1"
 
-
-# set up appropriate env variables
-if BUILD_LIBTORCH_WHL:
-    # Set up environment variables for ONLY building libtorch.so and not libtorch_python.so
-    # functorch is not supported without python
-    os.environ["BUILD_FUNCTORCH"] = "OFF"
-
-
-if BUILD_PYTHON_ONLY:
-    os.environ["BUILD_LIBTORCHLESS"] = "ON"
-    os.environ["LIBTORCH_LIB_PATH"] = f"{_get_package_path('libtorch')}/lib"
-
 python_min_version = (3, 8, 0)
 python_min_version_str = ".".join(map(str, python_min_version))
 if sys.version_info < python_min_version:
@@ -272,8 +253,25 @@ from setuptools.dist import Distribution
 from tools.build_pytorch_libs import build_caffe2
 from tools.generate_torch_version import get_torch_version
 from tools.setup_helpers.cmake import CMake
-from tools.setup_helpers.env import build_type, IS_DARWIN, IS_LINUX, IS_WINDOWS
+from tools.setup_helpers.env import (
+    build_type,
+    IS_DARWIN,
+    IS_LINUX,
+    IS_WINDOWS,
+    LIBTORCH_PKG_NAME,
+)
 from tools.setup_helpers.generate_linker_script import gen_linker_script
+
+# set up appropriate env variables
+if BUILD_LIBTORCH_WHL:
+    # Set up environment variables for ONLY building libtorch.so and not libtorch_python.so
+    # functorch is not supported without python
+    os.environ["BUILD_FUNCTORCH"] = "OFF"
+
+
+if BUILD_PYTHON_ONLY:
+    os.environ["BUILD_LIBTORCHLESS"] = "ON"
+    os.environ["LIBTORCH_LIB_PATH"] = f"{_get_package_path(LIBTORCH_PKG_NAME)}/lib"
 
 ################################################################################
 # Parameters parsed from environment
@@ -349,7 +347,7 @@ cmake_python_include_dir = sysconfig.get_path("include")
 # Version, create_version_file, and package_name
 ################################################################################
 
-DEFAULT_PACKAGE_NAME = "libtorch" if BUILD_LIBTORCH_WHL else "torch"
+DEFAULT_PACKAGE_NAME = LIBTORCH_PKG_NAME if BUILD_LIBTORCH_WHL else "torch"
 
 package_name = os.getenv("TORCH_PACKAGE_NAME", DEFAULT_PACKAGE_NAME)
 package_type = os.getenv("PACKAGE_TYPE", "wheel")
@@ -366,7 +364,6 @@ def get_submodule_folders():
         for name in [
             "gloo",
             "cpuinfo",
-            "tbb",
             "onnx",
             "foxi",
             "QNNPACK",
@@ -1141,7 +1138,7 @@ def main():
     ]
 
     if BUILD_PYTHON_ONLY:
-        install_requires.append("libtorch")
+        install_requires.append(LIBTORCH_PKG_NAME)
 
     use_prioritized_text = str(os.getenv("USE_PRIORITIZED_TEXT_FOR_LD", ""))
     if (
@@ -1450,9 +1447,9 @@ def main():
             if parts[0] == "torch":
                 modified_packages.append(DEFAULT_PACKAGE_NAME + package[len("torch") :])
         packages = modified_packages
-        package_dir = {"libtorch": "torch"}
-        torch_package_dir_name = "libtorch"
-        package_data = {"libtorch": torch_package_data}
+        package_dir = {LIBTORCH_PKG_NAME: "torch"}
+        torch_package_dir_name = LIBTORCH_PKG_NAME
+        package_data = {LIBTORCH_PKG_NAME: torch_package_data}
         extensions = []
     else:
         torch_package_dir_name = "torch"
