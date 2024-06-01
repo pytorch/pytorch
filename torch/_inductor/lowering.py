@@ -892,7 +892,7 @@ def repeat(x, repeats):
     if zero_tensor:
         return empty(new_size, dtype=x.get_dtype(), device=x.get_device())
     if all((a == 1 or b == 1) for a, b in zip(repeats, old_size)):
-        return expand(x, new_size)
+        return clone(expand(x, new_size))
 
     x_loader: Callable[[Any], Any]
 
