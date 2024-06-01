@@ -53,10 +53,7 @@ def pre_fork_setup():
     # are forked
     caching_device_properties()
 
-    # TODO(masneral): There's some strange behavior among the hash
-    # performed in this fuction, fork, and at least one version of
-    # Python (3.11). Computing the hash before fork removes a slowdown
-    # in parallel compile, but we should investiage the root case.
+    # Computing the triton key can be slow. Call before fork to cache.
     try:
         from triton.compiler.compiler import triton_key
 
