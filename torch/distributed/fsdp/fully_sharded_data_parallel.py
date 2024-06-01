@@ -1198,12 +1198,13 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
         return total_norm.to(total_norm_dtype)
 
     @staticmethod
-    def _warn_optim_input(optim_input):
+    def _warn_optim_input(optim_input, *, stacklevel: int = 1):
         if optim_input is not None:
             warnings.warn(
                 "The `optim_input` argument is deprecated and will be removed after PyTorch 1.13. "
                 "You may remove it from your code without changing its functionality.",
                 FutureWarning,
+                stacklevel=stacklevel + 1,
             )
 
     @staticmethod
@@ -1218,12 +1219,13 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
         return False
 
     @staticmethod
-    def _warn_legacy_optim_state_dict(curr: str, new: str):
+    def _warn_legacy_optim_state_dict(curr: str, new: str, *, stacklevel: int = 1):
         warnings.warn(
             f"``FullyShardedDataParallel.{curr}``is being deprecated and is "
             f"replaced by ``FullyShardedDataParallel.{new}``. "
             f"``FullyShardedDataParallel.{curr}`` may be removed after PyTorch 2.2.",
             FutureWarning,
+            stacklevel=stacklevel + 1,
         )
 
     @staticmethod
@@ -1241,6 +1243,8 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
         full_state_dict: bool = True,
         group: Optional[dist.ProcessGroup] = None,
         cpu_offload: bool = True,
+        *,
+        _stacklevel: int = 1,
     ) -> Dict[str, Any]:
         """Transform the state-dict of an optimizer corresponding to a sharded model.
 
@@ -1249,7 +1253,7 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
         FSDP internal information and internal sharding from the optim_state_dict.
         """
         if full_state_dict:
-            FullyShardedDataParallel._warn_optim_input(optim_input)
+            FullyShardedDataParallel._warn_optim_input(optim_input, stacklevel=_stacklevel + 1)
             using_optim_input = FullyShardedDataParallel._is_using_optim_input(
                 optim_input,
                 optim,
@@ -1400,7 +1404,9 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
             then nonzero ranks return an empty :class:`dict`.
         """
         FullyShardedDataParallel._warn_legacy_optim_state_dict(
-            "full_optim_state_dict", "optim_state_dict"
+            "full_optim_state_dict",
+            "optim_state_dict",
+            stacklevel=2,
         )
         return FullyShardedDataParallel._optim_state_dict_impl(
             model=model,
@@ -1410,6 +1416,7 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
             rank0_only=rank0_only,
             group=group,
             full_state_dict=True,
+            _stacklevel=2,
         )
 
     @staticmethod
@@ -1431,7 +1438,9 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
             cannot be directly used by the regular ``optim.load_state_dict``.
         """
         FullyShardedDataParallel._warn_legacy_optim_state_dict(
-            "sharded_optim_state_dict", "optim_state_dict"
+            "sharded_optim_state_dict",
+            "optim_state_dict",
+            stacklevel=2,
         )
         return FullyShardedDataParallel._optim_state_dict_impl(
             model=model,
@@ -1441,6 +1450,7 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
             rank0_only=False,
             full_state_dict=False,
             group=group,
+            _stacklevel=2,
         )
 
     @staticmethod
@@ -1509,7 +1519,9 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
             restricted to only include this rank's part of the optimizer state.
         """
         FullyShardedDataParallel._warn_legacy_optim_state_dict(
-            "shard_full_optim_state_dict", "optim_state_dict_to_load"
+            "shard_full_optim_state_dict",
+            "optim_state_dict_to_load",
+            stacklevel=2,
         )
         return FullyShardedDataParallel._optim_state_dict_to_load_impl(
             optim_state_dict=full_optim_state_dict,
@@ -1546,7 +1558,9 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
             Refer to :meth:`shard_full_optim_state_dict`.
         """
         FullyShardedDataParallel._warn_legacy_optim_state_dict(
-            "flatten_sharded_optim_state_dict", "optim_state_dict_to_load"
+            "flatten_sharded_optim_state_dict",
+            "optim_state_dict_to_load",
+            stacklevel=2,
         )
         return FullyShardedDataParallel._optim_state_dict_to_load_impl(
             optim_state_dict=sharded_optim_state_dict,
@@ -1626,7 +1640,9 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
             restricted to only include this rank's part of the optimizer state.
         """
         FullyShardedDataParallel._warn_legacy_optim_state_dict(
-            "scatter_full_optim_state_dict", "optim_state_dict_to_load"
+            "scatter_full_optim_state_dict",
+            "optim_state_dict_to_load",
+            stacklevel=2,
         )
         return FullyShardedDataParallel._optim_state_dict_to_load_impl(
             optim_state_dict=full_optim_state_dict,
@@ -1857,6 +1873,7 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
             cpu_offload=getattr(
                 state_dict_settings.optim_state_dict_config, "offload_to_cpu", True
             ),
+            _stacklevel=2,
         )
 
     @staticmethod
