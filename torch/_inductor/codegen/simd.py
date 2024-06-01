@@ -341,7 +341,8 @@ class SIMDKernel(Kernel):
             index = V.graph.sizevars.simplify_with_ranges(index, self.var_ranges())
             for tree in self.range_trees:
                 index = self.combine_contiguous_dims(index, tree)
-            return index
+
+            return self.combine_modular_indexing_pairs(index)
 
         self.simplify_indexing = simplify_indexing
         self.initialize_range_tree(pid_cache)
@@ -425,7 +426,131 @@ class SIMDKernel(Kernel):
         sizes = self.dense_size_list()
         return f"[{', '.join(sizes)}]"
 
+    def _expand_floor_div(self, index):
+        """
+        Expand the FloorDiv to the entire expression so that the expression may
+        be simplfied.
+
+        E.g., for a 2D contiguous tensor with shape [a, 2 * b], and index variables
+        x1, x2, index express 'x1 * 2b + x2' can be easily combined.
+        But index expression 'x1 * b + x2 // 2' can not.
+        By expanding the FloorDiv to the entire expression, we get
+        '(x1 * 2b + x2) // 2'. This transformation allows us to merge loops
+        for the numerator!
+        """
+        if not isinstance(index, sympy.Add):
+            return False
+        terms = index.args
+
+        if len(terms) < 2:
+            return False
+        floor_div_index = -1
+        varlist = []
+        factorlist = []
+        for idx, term in enumerate(terms):
+            if isinstance(term, sympy.Mul):
+                factor, var = term.args
+                varlist.append(var)
+                factorlist.append(factor)
+                if not isinstance(factor, sympy.Integer) or not isinstance(
+                    var, sympy.Symbol
+                ):
+                    return False
+                # It's easier to reason about the correceness of the transformation
+                # for non-negative integers.
+                if not V.graph.sizevars.statically_known_geq(var, 0):
+                    return False
+            elif isinstance(term, FloorDiv):
+                var, factor = term.args
+                if not isinstance(factor, sympy.Integer) or not isinstance(
+                    var, sympy.Symbol
+                ):
+                    return False
+                if not V.graph.sizevars.statically_known_geq(var, 0):
+                    return False
+                if floor_div_index >= 0:
+                    # can not handle multi FloorDiv yet
+                    return False
+
+                floor_div_index = idx
+                varlist.append(var)
+                # this factor is denominator
+                factorlist.append(factor)
+            else:
+                return False
+
+        if floor_div_index < 0:
+            return False
+
+        # Construct the new expression and remember the denominator
+        denominator = factorlist[floor_div_index]
+        new_index = 0
+
+        for var, factor, idx in zip(varlist, factorlist, itertools.count()):
+            if idx == floor_div_index:
+                new_index += var
+            else:
+                new_index += (factor * denominator) * var
+
+        return new_index, denominator
+
+    def combine_modular_indexing_pairs(self, index):
+        """
+        A pair of special ModularIndexing can be combined.
+
+        E.g. ModularIndexing(ModularIndexing(x, 1, a), 1, b)
+        We can simplify this to ModuleIndexing(x, 1, b), if
+        1. x is non negative integer
+        2. a and b are positive integers
+        3. a is a multiple of b.
+        """
+
+        def _check_args(x, div, mod):
+            if not isinstance(div, sympy.Integer) or not isinstance(mod, sympy.Integer):
+                return False
+            if div != 1:
+                return False
+            if mod <= 0:
+                return False
+            if not isinstance(
+                x, sympy.Symbol
+            ) or not V.graph.sizevars.statically_known_geq(x, 0):
+                return False
+            return True
+
+        if isinstance(index, ModularIndexing):
+            x, div, mod = index.args
+
+            if not _check_args(x, div, mod):
+                return index
+
+            if (tree_node := self.range_tree_nodes.get(x)) is None:
+                return index
+            xexpr = tree_node.expr
+
+            if not isinstance(xexpr, ModularIndexing):
+                return index
+
+            x2, div2, mod2 = xexpr.args
+
+            if not _check_args(x2, div2, mod2):
+                return index
+
+            if mod2 % mod != 0:
+                return index
+
+            return ModularIndexing(x2, 1, mod)
+
+        return index
+
     def combine_contiguous_dims(self, index: sympy.Expr, tree: IterationRangesRoot):
+        if expand_res := self._expand_floor_div(index):
+            new_index, denominator = expand_res
+            return FloorDiv(self._combine_contiguous_dims(new_index, tree), denominator)
+        else:
+            return self._combine_contiguous_dims(index, tree)
+
+    def _combine_contiguous_dims(self, index: sympy.Expr, tree: IterationRangesRoot):
         """
         More aggressive simplification to merge contiguous dims
         """
