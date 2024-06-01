@@ -40,6 +40,15 @@ def normalize_name(name: str) -> str:
     return name.replace(".", "_")
 
 
+# Given a node: torch._C.Node, map from node.kind() to a standard operator
+kind_to_standard_operators = {
+    "prim::TupleIndex": operator.getitem,
+    "aten::__is__": operator.is_,
+    "aten::__isnot__": operator.is_not,
+    "aten::__not__": operator.not_,
+}
+
+
 def get_op_overload(node: torch._C.Node):
     schema_str = node.schema()
     schema = FunctionSchema.parse(schema_str)
@@ -284,13 +293,6 @@ class TS2FXGraphConverter:
         output_name = node.output().debugName()
         self.name_to_node[output_name] = output_dict
 
-    def convert_prim_TupleIndex(self, node: torch._C.Node):
-        args = tuple(self.get_fx_value(input) for input in node.inputs())
-        getitem_node = self.fx_graph.call_function(operator.getitem, args)
-
-        output_name = node.output().debugName()
-        self.name_to_node[output_name] = getitem_node
-
     def convert_aten_Int(self, node: torch._C.Node):
         # converts aten::Int as aten._to_copy + aten::_local_scalar_dense
         target = torch.ops.aten._to_copy.default
@@ -442,23 +444,10 @@ class TS2FXGraphConverter:
         args = tuple(self.get_fx_value(input) for input in node.inputs())
         self.fx_graph.call_function(target, args)
 
-    def convert_aten___is__(self, node: torch._C.Node):
-        # export() currently specializes on the sample inputs for aten::__is__
-        left, right = tuple(self.get_fx_value(input) for input in node.inputs())
-        fx_node = self.fx_graph.call_function(operator.is_, (left, right))
-        output_name = node.output().debugName()
-        self.name_to_node[output_name] = fx_node
-
-    def convert_aten___isnot__(self, node: torch._C.Node):
-        # export() currently specializes on the sample inputs for aten::__isnot__
-        left, right = tuple(self.get_fx_value(input) for input in node.inputs())
-        fx_node = self.fx_graph.call_function(operator.is_not, (left, right))
-        output_name = node.output().debugName()
-        self.name_to_node[output_name] = fx_node
-
-    def convert_aten___not__(self, node: torch._C.Node):
-        input = self.get_fx_value(node.input())
-        fx_node = self.fx_graph.call_function(operator.not_, (input,))
+    def convert_standard_operators(self, node: torch._C.Node):
+        target = kind_to_standard_operators[node.kind()]
+        args = tuple(self.get_fx_value(input) for input in node.inputs())
+        fx_node = self.fx_graph.call_function(target, args)
         output_name = node.output().debugName()
         self.name_to_node[output_name] = fx_node
 
@@ -481,8 +470,6 @@ class TS2FXGraphConverter:
             self.convert_prim_dtype(node)
         elif node_kind == "prim::DictConstruct":
             self.convert_prim_DictConstruct(node)
-        elif node_kind == "prim::TupleIndex":
-            self.convert_prim_TupleIndex(node)
         # elif node_kind == "aten::Int":
         #     convert_aten_Int(node)
         elif node_kind == "aten::_convolution":
@@ -493,17 +480,14 @@ class TS2FXGraphConverter:
             self.convert_prim_if(node)
         elif node_kind == "aten::Bool":
             self.convert_as_noop(node)
-        elif node_kind == "aten::__is__":
-            self.convert_aten___is__(node)
-        elif node_kind == "aten::__isnot__":
-            self.convert_aten___isnot__(node)
-        elif node_kind == "aten::__not__":
-            self.convert_aten___not__(node)
         elif node_kind == "profiler::_record_function_enter_new":
             self.convert_profiler__record_function_enter_new(node)
         elif node_kind == "profiler::_record_function_exit":
             self.convert_profiler__record_function_exit(node)
+        elif node_kind in kind_to_standard_operators:
+            self.convert_standard_operators(node)
         elif node_kind.startswith("aten::"):
+            # order matters! this should be handled after kind_to_standard_operators
             self.convert_aten_op(node)
         else:
             raise ValueError(f"Unsupported node kind: {node_kind}")
