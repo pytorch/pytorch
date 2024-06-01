@@ -418,6 +418,7 @@ def tuned_mixed_mm(mat1, mat2, mat2_dtype):
         b_prologue_cast_type = f"tl.{mat2_dtype}".replace("torch.", "")
         for config in mixed_mm_configs(m, n, k):
             # skipping this config because triton crashes on it
+            # See: https://github.com/triton-lang/triton/issues/2156#issuecomment-1695897424
             if (
                 config.kwargs["BLOCK_M"] == 16
                 and config.kwargs["BLOCK_K"] == 16
