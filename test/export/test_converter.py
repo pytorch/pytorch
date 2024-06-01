@@ -8,6 +8,7 @@ import torch.utils._pytree as pytree
 
 from torch._dynamo.test_case import TestCase
 from torch._export.converter import TS2EPConverter
+from torch.export import ExportedProgram
 
 from torch.testing._internal.common_utils import run_tests
 
@@ -15,7 +16,7 @@ requires_cuda = unittest.skipUnless(torch.cuda.is_available(), "requires cuda")
 
 
 class TestConverter(TestCase):
-    def _check_equal_ts_ep_converter(self, mod, inp):
+    def _check_equal_ts_ep_converter(self, mod, inp) -> ExportedProgram:
         ts_model = torch.jit.script(mod)
         ep = TS2EPConverter(ts_model, inp).convert()
         ep_out, _ = pytree.tree_flatten(ep.module()(*inp))
@@ -24,6 +25,7 @@ class TestConverter(TestCase):
         for ep_t, orig_t in zip(ep_out, orig_out):
             self.assertEqual(ep_t.shape, orig_t.shape)
             self.assertTrue(torch.allclose(ep_t, orig_t))
+        return ep
 
     def test_ts2ep_converter_basic(self):
         class MSingle(torch.nn.Module):
@@ -107,6 +109,48 @@ class TestConverter(TestCase):
         ]:
             inp = (torch.randint(high=128, size=(3, 4), dtype=dtype),)
             self._check_equal_ts_ep_converter(Module(), inp)
+
+    def test_convert_if_basic(self):
+        class M(torch.nn.Module):
+            def forward(self, x: torch.Tensor, y: torch.Tensor):
+                if x:
+                    return y * y
+                else:
+                    return y + y
+
+        inp = (torch.tensor(True), torch.tensor(4))
+        ep = self._check_equal_ts_ep_converter(M(), inp)
+
+        torch.testing.assert_close(
+            ep.module()(torch.tensor(False), torch.tensor(4)),
+            M()(torch.tensor(False), torch.tensor(4)),
+        )
+
+    def test_convert_if_multiple_out(self):
+        class M(torch.nn.Module):
+            def true_fn(self, y, z):
+                return (z * z, z + z)
+
+            def false_fn(self, y, z):
+                return (y * y * y, y + y)
+
+            def forward(self, x: torch.Tensor, y: torch.Tensor):
+                z = y * y
+
+                if x:
+                    res = self.true_fn(y, z)
+                else:
+                    res = self.false_fn(y, z)
+
+                return res[0] + res[1]
+
+        inp = (torch.tensor(True), torch.tensor(4))
+        ep = self._check_equal_ts_ep_converter(M(), inp)
+
+        torch.testing.assert_close(
+            ep.module()(torch.tensor(False), torch.tensor(4)),
+            M()(torch.tensor(False), torch.tensor(4)),
+        )
 
 
 if __name__ == "__main__":

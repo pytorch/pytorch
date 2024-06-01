@@ -1,3 +1,4 @@
+import operator
 from typing import Any, Dict, List, Optional, Set, Tuple, Union
 
 import torch
@@ -54,22 +55,16 @@ def get_op_overload(node: torch._C.Node):
     return op_overload
 
 
-class TS2EPConverter:
-    # TorchScript model to ExportedProgram converter
+class TS2FXGraphConverter:
     def __init__(
         self,
-        ts_model,
-        sample_args: Tuple[Any, ...],
-        sample_kwargs: Optional[Dict[str, Any]] = None,
+        ts_graph: Union[torch._C.Graph, torch._C.Block],
+        param_names: Set[str],
+        buffer_names: Set[str],
     ):
-        self.ts_model = ts_model
-        self.ts_graph, self.params, _, _ = _create_jit_graph(ts_model, sample_args)
-
-        self.sample_args = sample_args
-        self.sample_kwargs = sample_kwargs
-
-        self.param_names: Set[str] = {name for name, _ in ts_model.named_parameters()}
-        self.buffer_names: Set[str] = {name for name, _ in ts_model.named_buffers()}
+        self.ts_graph = ts_graph
+        self.param_names = param_names
+        self.buffer_names = buffer_names
 
         self.fx_graph: torch.fx.Graph = torch.fx.Graph()
         self.input_specs: List[InputSpec] = []
@@ -81,6 +76,13 @@ class TS2EPConverter:
         self.constant_map: Dict[str, Any] = {}
         self.attribute_map: Dict[str, Any] = {}
         self.tensor_constants: Dict[str, torch.Tensor] = {}
+
+        self.subgraphs: Dict[str, torch.fx.GraphModule] = {}
+
+    def add_subgraph(self, subgraph) -> str:
+        name = f"subgraph_{len(self.subgraphs)}"
+        self.subgraphs[name] = subgraph
+        return name
 
     def get_args_kwargs(self, node: torch._C.Node, schema):
         args = []
@@ -110,7 +112,7 @@ class TS2EPConverter:
         else:
             raise ValueError(f"Input {value_name} not found")
 
-    def convert(self) -> ExportedProgram:
+    def convert(self) -> torch.fx.GraphModule:
         self.convert_graph_inputs()
 
         for node in self.ts_graph.nodes():
@@ -118,14 +120,13 @@ class TS2EPConverter:
 
         self.convert_graph_outputs()
 
-        gm = torch.fx.GraphModule({}, self.fx_graph)
+        gm = torch.fx.GraphModule(self.subgraphs, self.fx_graph)
 
         inplace_optimize_sym_size_div(gm)
 
         gm.graph.lint()
 
-        ep = self.retrace_as_exported_program(gm)
-        return ep
+        return gm
 
     def convert_graph_inputs(self):
         for graph_input in self.ts_graph.inputs():
@@ -234,7 +235,10 @@ class TS2EPConverter:
         )
 
     def convert_aten_op(self, node: torch._C.Node):
-        target = get_op_overload(node)
+        try:
+            target = get_op_overload(node)
+        except Exception as e:
+            raise RuntimeError(f"Unsupported node {node.kind()}") from e
 
         if target is torch.ops.aten.size.int:
             target = torch.ops.aten.sym_size.int
@@ -279,6 +283,13 @@ class TS2EPConverter:
 
         output_name = node.output().debugName()
         self.name_to_node[output_name] = output_dict
+
+    def convert_prim_TupleIndex(self, node: torch._C.Node):
+        args = tuple(self.get_fx_value(input) for input in node.inputs())
+        getitem_node = self.fx_graph.call_function(operator.getitem, args)
+
+        output_name = node.output().debugName()
+        self.name_to_node[output_name] = getitem_node
 
     def convert_aten_Int(self, node: torch._C.Node):
         # converts aten::Int as aten._to_copy + aten::_local_scalar_dense
@@ -352,6 +363,70 @@ class TS2EPConverter:
 
         self.convert_aten_op(node)
 
+    def convert_prim_if(self, node: torch._C.Node):
+        inputs = list(node.inputs())
+        assert len(inputs) == 1
+        predicate = self.get_fx_value(inputs[0])
+
+        # Get union of inputs to blocks
+        arguments = set()
+        for block in node.blocks():
+            block_args = set()
+
+            # TODO: block.inputs(), not sure what theyre used for
+
+            for block_node in block.nodes():
+                for block_node_in in block_node.inputs():
+                    if block_node_in.debugName() in self.name_to_node:
+                        block_args.add(block_node_in.debugName())
+
+            arguments.update(block_args)
+
+        arguments = list(arguments)
+
+        # Convert blocks to subgraphs
+        subgraph_nodes = []
+        for block in node.blocks():
+            subgraph_converter = TS2FXGraphConverter(block, set(), set())
+            subgraph_converter.constant_map = self.constant_map
+
+            for block_arg in arguments:
+                normalized_block_arg_name = normalize_name(block_arg)
+                placeholder_node = subgraph_converter.fx_graph.placeholder(
+                    normalized_block_arg_name
+                )
+                subgraph_converter.name_to_node[block_arg] = placeholder_node
+
+            subgraph = subgraph_converter.convert()
+            subgraph_name = self.add_subgraph(subgraph)
+            subgraph_nodes.append(self.fx_graph.get_attr(subgraph_name))
+
+        assert len(subgraph_nodes) == 2
+
+        fx_block_args = [self.name_to_node[arg_name] for arg_name in arguments]
+        args = (
+            predicate,
+            subgraph_nodes[0],
+            subgraph_nodes[1],
+            tuple(fx_block_args),
+        )
+
+        cond_node = self.fx_graph.call_function(torch.cond, args, {})
+
+        output_name = node.output().debugName()
+        self.name_to_node[output_name] = cond_node
+
+    def convert_as_noop(self, node: torch._C.Node):
+        # Converts the node as a no-op by mapping its output node as arg[0]
+
+        target = get_op_overload(node)
+        schema = target._schema
+
+        args, kwargs = self.get_args_kwargs(node, schema)
+
+        output_name = node.output().debugName()
+        self.name_to_node[output_name] = args[0]
+
     def convert_node(self, node: torch._C.Node):
         node_kind = node.kind()
         if node_kind == "prim::CreateObject":
@@ -371,12 +446,18 @@ class TS2EPConverter:
             self.convert_prim_dtype(node)
         elif node_kind == "prim::DictConstruct":
             self.convert_prim_DictConstruct(node)
+        elif node_kind == "prim::TupleIndex":
+            self.convert_prim_TupleIndex(node)
         # elif node_kind == "aten::Int":
         #     convert_aten_Int(node)
         elif node_kind == "aten::_convolution":
             self.convert_aten__convolution(node)
         elif node_kind == "aten::div":
             self.convert_aten_div(node)
+        elif node_kind == "prim::If":
+            self.convert_prim_if(node)
+        elif node_kind == "aten::Bool":
+            self.convert_as_noop(node)
         elif node_kind.startswith("aten::"):
             self.convert_aten_op(node)
         else:
@@ -413,9 +494,35 @@ class TS2EPConverter:
             args[0]
         )  # Get rid of an extra list wrapped around final output.
 
-    def retrace_as_exported_program(self, gm: torch.fx.GraphModule):
+
+class TS2EPConverter:
+    # TorchScript model to ExportedProgram converter
+    def __init__(
+        self,
+        ts_model,
+        sample_args: Tuple[Any, ...],
+        sample_kwargs: Optional[Dict[str, Any]] = None,
+    ):
+        self.ts_model = ts_model
+        self.ts_graph, self.params, _, _ = _create_jit_graph(ts_model, sample_args)
+
+        self.sample_args = sample_args
+        self.sample_kwargs = sample_kwargs
+
+        self.param_names: Set[str] = {name for name, _ in ts_model.named_parameters()}
+        self.buffer_names: Set[str] = {name for name, _ in ts_model.named_buffers()}
+
+    def convert(self) -> ExportedProgram:
+        graph_converter = TS2FXGraphConverter(
+            self.ts_graph, self.param_names, self.buffer_names
+        )
+        gm = graph_converter.convert()
+        ep = self.retrace_as_exported_program(gm, graph_converter.tensor_constants)
+        return ep
+
+    def retrace_as_exported_program(self, gm: torch.fx.GraphModule, tensor_constants):
         # TODO: adjust input orders to match GraphSignature convention
-        inputs = [*self.sample_args, *self.params, *self.tensor_constants.values()]
+        inputs = [*self.sample_args, *self.params, *tensor_constants.values()]
 
         ep = torch.export._trace._export(
             gm,
