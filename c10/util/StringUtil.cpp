@@ -43,8 +43,8 @@ std::ostream& _strFromWide(std::ostream& ss, const std::wstring& wString);
 
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wdeprecated-declarations"
-// TODO (huydhn) https://en.cppreference.com/w/cpp/header/codecvt has been deprecated
-// in C++17 but there is no alternative yet, so I just ack it
+// TODO (huydhn) https://en.cppreference.com/w/cpp/header/codecvt has been
+// deprecated in C++17 but there is no alternative yet, so I just ack it
 std::ostream& _strFromWide(std::ostream& ss, const std::wstring& wString) {
   std::wstring_convert<std::codecvt_utf8_utf16<wchar_t>> converter;
   return _str(ss, converter.to_bytes(wString));
