@@ -835,7 +835,7 @@ class cuda:
 
 
 # Backend to use for CPU codegen either "cpp" or "halide" (experimental)
-cpu_backend = "cpp"
+cpu_backend = "halide"
 
 # Backend to use for CUDA codegen either "triton" or "halide" (experimental)
 cuda_backend = "halide"

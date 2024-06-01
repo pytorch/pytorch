@@ -38,7 +38,7 @@ from torch.fx.node import _get_qualified_name
 from torch.utils._sympy.singleton_int import SingletonInt
 from torch.utils._sympy.symbol import symbol_is_type, SymT
 
-from .. import codecache, config, ir
+from .. import async_compile, config, ir
 from ..ir import ReinterpretView
 from ..runtime import triton_heuristics
 from ..runtime.hints import DeviceProperties
@@ -506,7 +506,7 @@ class WrapperCodeGen(CodeGen):
                 from torch._inductor.codegen.memory_planning import _align as align
 
                 from torch import device, empty_strided
-                from {codecache.__name__} import AsyncCompile
+                from {async_compile.__name__} import AsyncCompile
                 from torch._inductor.select_algorithm import extern_kernels
                 from torch._inductor.codegen.multi_kernel import MultiKernelCall
 
@@ -526,15 +526,17 @@ class WrapperCodeGen(CodeGen):
     @cache_on_self
     def write_triton_header_once(self) -> None:
         self.header.splice(
-            """
+            f"""
             import triton
             import triton.language as tl
-            from {} import grid, split_scan_grid, start_graph, end_graph
-            {}
-            """.format(
-                triton_heuristics.__name__,
-                V.graph.device_ops.import_get_raw_stream_as("get_raw_stream"),
-            )
+            from {triton_heuristics.__name__} import grid, split_scan_grid, start_graph, end_graph
+            """
+        )
+
+    @cache_on_self
+    def write_get_raw_stream_header_once(self) -> None:
+        self.header.writeline(
+            V.graph.device_ops.import_get_raw_stream_as("get_raw_stream")
         )
 
     def add_meta_once(self, meta: TritonMetaParams) -> str:
@@ -605,7 +607,7 @@ class WrapperCodeGen(CodeGen):
     # that stream caching happens per graph instance. this
     # is important for nested subgraph codegening.
     def write_get_raw_stream(self, device_idx: int, graph=None) -> str:
-        self.write_triton_header_once()
+        self.write_get_raw_stream_header_once()
         name = f"stream{device_idx}"
         self.writeline(f"{name} = get_raw_stream({device_idx})")
         return name
@@ -1410,9 +1412,6 @@ class WrapperCodeGen(CodeGen):
 
     def enter_context(self, ctx):
         self.lines.append(LineContext(ctx))
-
-    def val_to_cpp_arg_str(self, val, type_) -> str:
-        raise NotImplementedError
 
     def val_to_arg_str(self, s, type_=None):
         from torch.utils._triton import dtype_to_string, has_triton_package

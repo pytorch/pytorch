@@ -9,7 +9,6 @@ import importlib
 import io
 import json
 import logging
-import multiprocessing
 import os
 import pickle
 import pkgutil
@@ -26,7 +25,7 @@ import textwrap
 import threading
 import warnings
 from bisect import bisect_right
-from concurrent.futures import Future, ProcessPoolExecutor, ThreadPoolExecutor
+from concurrent.futures import Future
 from copy import copy
 from ctypes import c_void_p, cdll, CDLL
 from functools import partial
@@ -49,24 +48,15 @@ from typing import (
 )
 
 import torch
-from torch._dynamo.device_interface import get_registered_device_interfaces
 from torch._dynamo.utils import counters, dynamo_timed
 from torch._inductor import config, exc, metrics
 from torch._inductor.codegen.cuda import cuda_env
-from torch._inductor.compile_worker.subproc_pool import (
-    _warm_process_pool,
-    AnyPool,
-    SubprocPool,
-)
-from torch._inductor.compile_worker.watchdog import _async_compile_initializer
 from torch._inductor.runtime.compile_tasks import (
     _module_to_triton_kernel,
     _reload_python_module,
     _reload_python_module_in_subproc,
-    _set_triton_ptxas_path,
-    _worker_compile_triton,
 )
-from torch._inductor.runtime.hints import HalideMeta
+from torch._inductor.runtime.hints import HalideInputSpec, HalideMeta
 from torch._inductor.runtime.runtime_utils import cache_dir
 from torch._inductor.utils import clear_on_fresh_inductor_cache, is_linux
 
@@ -82,7 +72,6 @@ if TYPE_CHECKING:
     from torch._inductor.graph import GraphLowering
     from torch._inductor.ir import ChoiceCaller
 
-from torch.hub import _Faketqdm, tqdm
 
 _HERE = os.path.abspath(__file__)
 _TORCH_PATH = os.path.dirname(os.path.dirname(_HERE))
@@ -114,30 +103,10 @@ else:
 
 
 output_code_log = torch._logging.getArtifactLogger(__name__, "output_code")
-kernel_code_log = torch._logging.getArtifactLogger(__name__, "kernel_code")
 
 LOCK_TIMEOUT = 600
 
 _IS_WINDOWS = sys.platform == "win32"
-
-# timing metrics for time spent in the compilation
-_cumulative_compile_time = 0.0
-_t0: Optional[float] = None
-
-
-def _compile_start() -> None:
-    global _t0
-    if _t0 is None:
-        _t0 = time()
-
-
-def _compile_end() -> None:
-    global _cumulative_compile_time, _t0
-    if _t0 is not None:
-        t1 = time()
-        _cumulative_compile_time += t1 - _t0
-        _t0 = None
-        # print("CUMULATIVE COMPILE TIME", _cumulative_compile_time)
 
 
 log = logging.getLogger(__name__)
@@ -1007,16 +976,16 @@ class FxGraphCache:
             if remote:
                 cache_id = "fx-graph-v1"
                 try:
-                    import triton
-
                     if config.is_fbcode():
-                        remote_cache = triton.runtime.fb_memcache.FbMemcacheRemoteFxGraphCacheBackend(
-                            cache_id
+                        from triton.runtime.fb_memcache import (
+                            FbMemcacheRemoteFxGraphCacheBackend,
                         )
+
+                        remote_cache = FbMemcacheRemoteFxGraphCacheBackend(cache_id)
                     else:
-                        remote_cache = triton.runtime.cache.RedisRemoteCacheBackend(
-                            cache_id
-                        )
+                        from torch._inductor.remote_cache import RedisRemoteCacheBackend
+
+                        remote_cache = RedisRemoteCacheBackend(cache_id)
                 except Exception:
                     remote_cache = None
                     log.warning("Unable to create a remote cache", exc_info=True)
@@ -2450,6 +2419,12 @@ class CppPythonBindingsCodeCache(CppCodeCache):
                 [[unlikely]] throw std::runtime_error("expected int arg");
             return result;
         }
+        template <> inline uintptr_t parse_arg<uintptr_t>(PyObject* args, size_t n) {
+            auto result = PyLong_AsVoidPtr(PyTuple_GET_ITEM(args, n));
+            if(result == reinterpret_cast<void*>(-1) && PyErr_Occurred())
+                [[unlikely]] throw std::runtime_error("expected int arg");
+            return reinterpret_cast<uintptr_t>(result);
+        }
 
         %s
 
@@ -2631,59 +2606,95 @@ class CppWrapperCodeCache(CppPythonBindingsCodeCache):
 class HalideCodeCache(CppPythonBindingsCodeCache):
     cache: Dict[str, Callable[[], Union[ModuleType, CDLL]]] = {}
     cache_clear = staticmethod(cache.clear)
-    glue_template = textwrap.dedent(
+    glue_template_cpp = textwrap.dedent(
         """
-        #include "{halidebuffer_h}"
         #include "{headerfile}"
         #include <stdexcept>
         #include <cmath>
+
         void kernel({argdefs}) {{
-            int err = 0;
             {buffers}
-            err = halide_kernel({buffer_names});
-            if(err != 0) {{
-                throw std::runtime_error("halide_kernel failed");
-            }}
+            int err = halide_kernel({buffer_names});
+            if(err != 0) throw std::runtime_error("halide_kernel failed");
+        }}
+        """
+    )
+    glue_template_cuda = textwrap.dedent(
+        """
+        #include "{headerfile}"
+        #include <stdexcept>
+        #include <cmath>
+        #include <cuda.h>
+        struct UserContext {{ int device_id; CUcontext *cuda_context; CUstream *stream; }};
+
+        void kernel({argdefs}, uintptr_t stream) {{
+            const halide_device_interface_t* cuda_interface = halide_cuda_device_interface();
+            CUcontext _ctx = 0;
+            if(cuCtxGetCurrent(&_ctx) != 0) throw std::runtime_error("Could not acquire CUDA context");
+            CUstream _stream = reinterpret_cast<CUstream>(stream);
+            UserContext user_context = {{{cuda_device}, &_ctx, &_stream}};
+            {buffers}
+            int err = halide_kernel(&user_context, {buffer_names});
+            if(err != 0) throw std::runtime_error("halide_kernel failed");
         }}
         """
     )
 
     @classmethod
-    def _codegen_glue(cls, argtypes, headerfile, cuda):
+    def _codegen_buffer(cls, name: str, arg: HalideInputSpec, cuda: bool):
+        if cuda:
+            device = f"reinterpret_cast<uint64_t>({arg.name})"
+            device_interface = "cuda_interface"
+            host = "nullptr"
+            flags = "halide_buffer_flag_device_dirty"
+        else:
+            device = "0"
+            device_interface = "nullptr"
+            host = f"reinterpret_cast<uint8_t*>({arg.name})"
+            flags = "0"
+
+        numel = "1"
+        dims = []
+        assert arg.shape
+        for s in arg.shape:
+            dims.append(f"halide_dimension_t(0, {s}, {numel})")
+            numel = f"{numel}*({s})"  # column major (opposite of pytorch)
+
+        return [
+            f"halide_buffer_t {name};",
+            f"halide_dimension_t {name}_dims[] = {{{', '.join(dims)}}};",
+            f"{name}.device = {device};",
+            f"{name}.device_interface = {device_interface};",
+            f"{name}.host = {host};",
+            f"{name}.flags = {flags};",
+            f"{name}.type = {arg.halide_type()};",
+            f"{name}.dimensions = {len(dims)};",
+            f"{name}.dim = {name}_dims;",
+            f"{name}.padding = nullptr;",
+        ]
+
+    @classmethod
+    def _codegen_glue(cls, meta, headerfile):
+        is_cuda = meta.is_cuda()
+        assert not is_cuda or "user_context" in meta.target
         buffers = []
         buffer_names = []
-        if cuda:
-            buffers.append(
-                "const halide_device_interface_t* cuda_interface = halide_cuda_device_interface();"
-            )
-        for i, arg in enumerate(argtypes):
-            if arg.numel:
-                buffer_names.append(f"hl_buf_{i}")
-                buffers.append(
-                    f"Halide::Runtime::Buffer {buffer_names[-1]}({arg.halide_type()}, {arg.name}, {arg.numel});"
-                )
-                if cuda:
-                    buffers.extend(
-                        [
-                            f"err |= {buffer_names[-1]}.device_wrap_native(cuda_interface, (uint64_t){arg.name});",
-                            f"{buffer_names[-1]}.set_device_dirty();",
-                        ]
-                    )
+        for i, arg in enumerate(meta.argtypes):
+            if arg.is_buffer():
+                buffer_names.append(f"&hl_buf_{i}")
+                buffers.extend(cls._codegen_buffer(f"hl_buf_{i}", arg, is_cuda))
             else:
                 assert "*" not in arg.ctype
                 buffer_names.append(arg.name)
-        if cuda:
-            buffers.append(
-                'if(err != 0) throw std::runtime_error("error in Halide::Runtime::Buffer::device_wrap_native");'
-            )
         buffers = "\n".join([f"    {line}" for line in buffers]).lstrip()
 
-        glue_code = cls.glue_template.format(
-            halidebuffer_h=cls.find_header("HalideBuffer.h"),
+        glue_template = cls.glue_template_cuda if is_cuda else cls.glue_template_cpp
+        glue_code = glue_template.format(
             headerfile=headerfile,
-            argdefs=", ".join(f"{a.bindings_type()} {a.name}" for a in argtypes),
+            argdefs=", ".join(f"{a.bindings_type()} {a.name}" for a in meta.argtypes),
             buffers=buffers,
             buffer_names=", ".join(buffer_names),
+            cuda_device=meta.cuda_device,
         )
         return glue_code
 
@@ -2693,7 +2704,8 @@ class HalideCodeCache(CppPythonBindingsCodeCache):
         return sha256_hash(
             "\n".join(
                 [
-                    cls.glue_template,
+                    cls.glue_template_cpp,
+                    cls.glue_template_cuda,
                     f"{cls.cpu_cache_size()}",
                     cpp_compile_command("I", "O"),
                 ]
@@ -2751,24 +2763,6 @@ class HalideCodeCache(CppPythonBindingsCodeCache):
         )
         return HalideCodeCache._search_for_file(sofile, errmsg)
 
-    @staticmethod
-    @functools.lru_cache(None)
-    def find_header(name):
-        if "HALIDE_INCLUDE" in os.environ:
-            path = os.path.join(os.environ["HALIDE_INCLUDE"], name)
-            if os.path.exists(path):
-                return path
-        if "HALIDE_LIB" in os.environ:
-            path = os.path.abspath(
-                os.path.join(os.environ["HALIDE_LIB"], f"../include/{name}")
-            )
-            if os.path.exists(path):
-                return path
-        errmsg = (
-            f"Can't find {name}, set env HALIDE_INCLUDE to the directory containing it"
-        )
-        return HalideCodeCache._search_for_file(f"../include/{name}", errmsg)
-
     @classmethod
     def generate_halide_async(cls, meta: HalideMeta, source_code: str, submit_fn=None):
         dirpath = Path(
@@ -2812,11 +2806,15 @@ class HalideCodeCache(CppPythonBindingsCodeCache):
                 )
             )
 
+        binding_types = [arg.bindings_type() for arg in meta.argtypes]
+        if meta.is_cuda():
+            binding_types.append("uintptr_t")  # stream
         bindings_future = cls.load_pybinding_async(
-            [arg.bindings_type() for arg in meta.argtypes],
-            cls._codegen_glue(meta.argtypes, headerfile, meta.cuda_device is not None),
+            binding_types,
+            cls._codegen_glue(meta, headerfile),
             extra_flags=(libfile,),
             submit_fn=jobs.append if need_compile else None,
+            cuda=meta.is_cuda(),
         )
 
         if need_compile:
@@ -2848,26 +2846,32 @@ def _worker_task_halide(lockfile, jobs):
                 job()
     except subprocess.SubprocessError as e:
         if os.environ.get("HALIDE_REPRO") == "1":
-            python, script, *cmd = e.cmd
+            python, script, *cmd = getattr(e, "cmd", ("", "", ""))
             if os.path.basename(python).startswith("python"):
                 code = open(script).read()
                 main = "    hl.main()"
                 assert code.count(main) == 1
+
                 class Out:
                     def __repr__(self):
                         return "out"
 
-                cmd[cmd.index("-o") + 1] = Out()
-                repl = textwrap.indent(textwrap.dedent(f"""\
-                    import sys, tempfile
-                    with tempfile.TemporaryDirectory() as out:
-                        sys.argv = {["repro.py", *cmd]!r}
-                        hl.main()
-                """), "    ")
+                cmd[cmd.index("-o") + 1] = Out()  # type: ignore[call-overload]
+                repl = textwrap.indent(
+                    textwrap.dedent(
+                        f"""\
+                        import sys, tempfile
+                        with tempfile.TemporaryDirectory() as out:
+                            sys.argv = {["repro.py", *cmd]!r}
+                            hl.main()
+                        """
+                    ),
+                    "    ",
+                )
                 code = code.replace(main, repl)
                 with open("repro.py", "w") as fd:
                     fd.write(code.lstrip())
-                raise RuntimeError(f"wrote repro.py: {e}")
+                raise RuntimeError(f"wrote repro.py: {e}") from e
         raise
 
 
@@ -3246,12 +3250,6 @@ class CUDACodeCache:
         return (DLLWrapper(dst_file_path), hash_key, source_code_path)
 
 
-def caching_device_properties():
-    for _, device_interface in get_registered_device_interfaces():
-        if device_interface.is_available():
-            device_interface.Worker.get_device_properties()
-
-
 class CodeCacheFuture:
     def result(self):
         raise NotImplementedError
@@ -3285,171 +3283,3 @@ class LambdaFuture(CodeCacheFuture):
 
     def result(self):
         return self.result_fn()
-
-
-# Used to keep track of all process pools invoked so far.
-_pool_set: Set[AnyPool] = set()
-
-
-def shutdown_compile_workers() -> None:
-    """Shut down all outstanding compile-worker pools."""
-    for pool in _pool_set:
-        pool.shutdown()
-    after_fork()
-
-
-def after_fork():
-    """Reset pools to initial state without shutting them down"""
-    _pool_set.clear()
-    AsyncCompile.process_pool.cache_clear()
-
-
-try:
-    os.register_at_fork(after_in_child=after_fork)
-except AttributeError:
-    pass  # register_at_fork does not exists on windows
-
-
-class AsyncCompile:
-    def __init__(self) -> None:
-        pass
-
-    @staticmethod
-    @functools.lru_cache(1)
-    def pool() -> ThreadPoolExecutor:
-        assert config.compile_threads > 1
-        return ThreadPoolExecutor(config.compile_threads)
-
-    @staticmethod
-    @functools.lru_cache(1)
-    def process_pool() -> AnyPool:
-        assert config.compile_threads > 1
-        pool: AnyPool
-        if config.worker_start_method == "subprocess":
-            # Wrapper around ProcessPoolExecutor forks in a new process we control
-            pool = SubprocPool(config.compile_threads)
-        else:
-            # ensure properties have been calculated before processes
-            # are forked
-            caching_device_properties()
-            ctx = multiprocessing.get_context(config.worker_start_method)
-            pool = ProcessPoolExecutor(
-                config.compile_threads,
-                mp_context=ctx,
-                initializer=partial(_async_compile_initializer, os.getpid()),
-            )
-            # when this pool is created in a subprocess object, the normal exit handler
-            # doesn't run, and we need to register our own handler.
-            # exitpriority has to be high, because another one of the finalizers will
-            # kill the worker thread that sends the shutdown message to the workers...
-            multiprocessing.util.Finalize(None, pool.shutdown, exitpriority=sys.maxsize)
-
-        _pool_set.add(pool)
-        return pool
-
-    @classmethod
-    def warm_pool(cls) -> None:
-        if config.compile_threads <= 1:
-            return
-        _compile_start()
-        _warm_process_pool(cls.process_pool(), config.compile_threads)
-        _compile_end()
-
-    @classmethod
-    def submit(cls, task: Callable[..., Any]) -> Any:
-        if config.compile_threads <= 1:
-            return task()
-        return cls.pool().submit(task)
-
-    def triton(self, kernel_name: str, source_code: str, device_str: str = "cuda"):
-        kernel_code_log.info("Triton Kernel:\n%s", source_code)
-        _compile_start()
-        _set_triton_ptxas_path()
-
-        kernel = TritonCodeCache.load(kernel_name, source_code)
-        if config.compile_threads > 1:
-            return TritonFuture(
-                kernel,
-                self.process_pool().submit(
-                    _worker_compile_triton,
-                    kernel._reload_in_subproc,
-                ),
-            )
-        else:
-            kernel.precompile()
-            return kernel
-
-    def multi_kernel(self, *args, **kwargs) -> Any:
-        from torch._inductor.codegen.multi_kernel import MultiKernelCall
-
-        # no need to call this in parallel since the sub-kernels are already parallel tasks
-        return MultiKernelCall(*args, **kwargs)
-
-    def cpp(self, source_code: str):
-        kernel_code_log.info("CPP Kernel:\n%s", source_code)
-        if config.compile_threads <= 1:
-            return CppCodeCache.load(source_code).kernel
-        else:
-            get_result = CppCodeCache.load_async(source_code, submit_fn=self.submit)
-            return LambdaFuture(lambda: get_result().kernel)
-
-    def cpp_pybinding(self, argtypes: List[str], source_code: str):
-        kernel_code_log.info("CPP+Bindings Kernel:\n%s", source_code)
-        if config.compile_threads <= 1:
-            return CppPythonBindingsCodeCache.load_pybinding(argtypes, source_code)
-        else:
-            get_result = CppPythonBindingsCodeCache.load_pybinding_async(
-                argtypes, source_code, submit_fn=self.submit
-            )
-            return LambdaFuture(get_result)
-
-    def cuda(self, source_code, dst_file_ext):
-        kernel_code_log.info("CUDA Kernel:\n%s", source_code)
-
-        def task():
-            return CUDACodeCache.load(source_code, dst_file_ext)[0]
-
-        return self.submit(task)
-
-    def halide(self, meta: HalideMeta, source_code: str):
-        kernel_code_log.info("Halide Kernel:\n%r\n%s", meta, source_code)
-        if config.compile_threads <= 1:
-            return HalideCodeCache.generate_halide(meta, source_code)
-        else:
-            get_result = HalideCodeCache.generate_halide_async(
-                meta, source_code, submit_fn=self.submit
-            )
-            return LambdaFuture(get_result)
-
-    def wait(self, scope: Dict[str, Any]) -> None:
-        num_kernels = len(
-            [
-                value
-                for key, value in scope.items()
-                if isinstance(value, (Future, CodeCacheFuture))
-            ]
-        )
-        pbar = tqdm(
-            total=num_kernels,
-            desc="Inductor Compilation",
-            disable=config.disable_progress,
-            delay=0,
-        )
-        if config.compile_threads > 1:
-            for key, result in scope.items():
-                if config.verbose_progress and not isinstance(pbar, _Faketqdm):
-                    pbar.set_postfix_str(key)
-                if isinstance(result, (Future, CodeCacheFuture)):
-                    scope[key] = result.result()
-                    pbar.update(1)
-
-        _compile_end()
-
-
-if (
-    os.environ.get("TORCH_TNT_IN_USE", "0") == "1"
-    or os.environ.get("TORCH_WARM_POOL", "1") != "1"
-):
-    pass
-else:
-    AsyncCompile.warm_pool()

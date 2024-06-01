@@ -890,24 +890,26 @@ class HalideKernel(SIMDKernel):
         argtypes = []
         for _, arg in self.halide_argdefs():
             if isinstance(arg, SizeArg):
-                numel = None
+                shape = None
                 dtype = "long"
             else:
                 if arg.buffer in self.store_buffer_dimensions and "out" in arg.name:
-                    numel = ", ".join(
+                    shape = [
                         cexpr(self.rename_indexing(x))
                         for x in self.store_buffer_dimensions[arg.buffer]
-                    )
+                    ]
                 else:
-                    numel = cexpr(
-                        self.rename_indexing(self.halide_buffer_numel(arg.buffer))
-                    )
+                    shape = [
+                        cexpr(
+                            self.rename_indexing(self.halide_buffer_numel(arg.buffer))
+                        )
+                    ]
                 dtype = f"{DTYPE_TO_CPP[arg.dtype]}*"
             argtypes.append(
                 HalideInputSpec(
                     dtype,
                     arg.name,
-                    numel,
+                    shape,
                 )
             )
 
@@ -932,7 +934,7 @@ class HalideKernel(SIMDKernel):
                     if capability.major >= major and capability.minor >= minor:
                         target.append(f"cuda_capability_{major}{minor}")
                         break
-            # capability.append("user_context")  # may be needed for non-default device
+            target.append("user_context")
             scheduler_flags = {
                 "parallelism": capability.multi_processor_count,
                 # TODO(jansel): explore other flags, see:
@@ -1053,6 +1055,8 @@ class HalideKernel(SIMDKernel):
                     hints = V.graph.sizevars.size_hints(
                         [V.graph.get_numel(arg.buffer)], fallback=1
                     )
+                if hints == [1] and config.halide.scheduler == "Anderson2021":
+                    hints = [2]  # workaround https://github.com/halide/Halide/issues/8246
                 range_hints = [f"hl.Range(0, {hint})" for hint in hints]
                 code.writeline(f"{arg.name}.set_estimates([{', '.join(range_hints)}])")
 
@@ -1070,8 +1074,9 @@ class HalideKernel(SIMDKernel):
         wrapper = V.graph.wrapper_code
         call_args = [f"{n}" for n, _ in self.halide_argdefs()]
         current_device = V.graph.scheduler.get_current_device_or_throw()
-        assert current_device.index == 0, "need to handle multiple devices"
-        # stream_name = wrapper.write_get_raw_stream(current_device.index, V.graph)
+        if current_device.type == "cuda":
+            stream_name = wrapper.write_get_raw_stream(current_device.index, V.graph)
+            call_args.append(stream_name)
         wrapper.generate_kernel_call(
             name,
             call_args,
