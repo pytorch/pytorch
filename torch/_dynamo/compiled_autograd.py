@@ -282,10 +282,15 @@ class AutogradCompilerInstance:
         )
 
         def runtime_wrapper(compiled_fn, inputs, sizes, hooks):
-            for i in runtime_inputs_to_move:
-                inputs[i] = inputs[i].cuda()
+            prior = torch._inductor.config.triton.cudagraph_static_input_params
+            torch._inductor.config.triton.cudagraph_static_input_params = True
+            try:
+                for i in runtime_inputs_to_move:
+                    inputs[i] = inputs[i].cuda()
 
-            return compiled_fn(inputs, sizes, hooks)
+                return compiled_fn(inputs, sizes, hooks)
+            finally:
+                torch._inductor.config.triton.cudagraph_static_input_params = prior
 
         return runtime_wrapper, self.compiler_fn(graph)
 
