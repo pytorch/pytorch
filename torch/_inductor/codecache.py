@@ -2538,7 +2538,7 @@ class CppWrapperCodeCache(CppPythonBindingsCodeCache):
     cache: Dict[str, Callable[[], Union[CDLL, ModuleType]]] = {}
     cache_clear = staticmethod(cache.clear)
     cpp_compile_command_flags = {
-        "include_pytorch": not config.abi_compatible,
+        "include_pytorch": True,
         "shared": True,
     }
     entry_function = "inductor_entry_cpp"
