@@ -336,6 +336,7 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
             [inp_expanded, mat1, mat2],
             alpha=alpha,
             beta=beta,
+            has_bias=True,
         )
 
     add_aten_fallback = False
