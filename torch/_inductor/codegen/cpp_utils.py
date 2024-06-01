@@ -11,6 +11,7 @@ import sympy
 import torch
 from torch.utils._sympy.symbol import symbol_is_type, SymT
 from .. import ir
+from ..utils import sympy_index_symbol_with_prefix
 from ..virtualized import V
 
 from .common import ExprPrinter, Kernel
@@ -329,14 +330,13 @@ class LocalBufferScope:
             def localize(self, name: str, index: sympy.Expr):
                 if name == global_buf.get_name():
                     name = local_buf.get_name()
-                    index_vars = sorted(
-                        [
-                            s
-                            for s in index.free_symbols
-                            if symbol_is_type(s, SymT.INDEX)
-                        ],
-                        key=str,
-                    )
+                    used_vars = {
+                        s for s in index.free_symbols if symbol_is_type(s, SymT.INDEX)
+                    }
+                    index_vars = []
+                    for i in range(len(local_buf.get_size())):
+                        var = sympy_index_symbol_with_prefix(SymT.INDEX, i)
+                        index_vars.append(var if var in used_vars else 0)
                     index = local_buf.layout.make_indexer()(index_vars)
                 return name, index
 
