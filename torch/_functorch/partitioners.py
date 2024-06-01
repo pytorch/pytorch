@@ -450,12 +450,12 @@ def _size_of(node: fx.Node) -> int:
         # layering violation)
         elif isinstance(val, (list, tuple)):
             return sum(
-                _tensor_nbytes(hint_int(n.numel(), fallback=4098), n.dtype)
+                _tensor_nbytes(hint_int(n.numel(), fallback=4096), n.dtype)
                 for n in val
                 if isinstance(n, torch.Tensor)
             )
         elif isinstance(val, torch.Tensor):
-            return _tensor_nbytes(hint_int(val.numel(), fallback=4098), val.dtype)
+            return _tensor_nbytes(hint_int(val.numel(), fallback=4096), val.dtype)
 
         raise RuntimeError(f"Unknown metadata type {type(val)}")
     if node.op == "get_attr":
@@ -1362,9 +1362,12 @@ def dp_knapsack(
         dp[i, :] = dp[i - 1, :]
 
         # Update dp[i, j] for all j >= current_memory
-        dp[i, current_memory:] = torch.maximum(
-            dp[i - 1, current_memory:], dp[i - 1, :-current_memory] + current_runtime
-        )
+        if current_memory == 0:
+            dp[i, :] = dp[i - 1, :] + current_runtime
+        else:
+            dp[i, current_memory:] = torch.maximum(
+                dp[i - 1, current_memory:], dp[i - 1, :-current_memory] + current_runtime
+            )
 
     # Backtrack to find the items included in the knapsack
     saved_items = []
@@ -1412,7 +1415,7 @@ def estimate_runtime(node):
             shape = list(x.meta["val"].shape)
 
             def realize_symbol(d):
-                return d if isinstance(d, int) else d.node.int
+                return hint_int(d, fallback=4096)
 
             shape = [realize_symbol(s) for s in shape]
             return x.meta["val"].new_zeros(shape)
