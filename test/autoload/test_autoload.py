@@ -20,7 +20,7 @@ class TestAutoload(TestCase):
 
         super().setUp()
 
-    def test_load_plugins(self):
+    def test_autoload(self):
         # after importing the extension, the value of this environment variable should be true
         torch.import_device_backends()
         value = os.getenv("IS_CUSTOM_DEVICE_BACKEND_IMPORTED", "false")

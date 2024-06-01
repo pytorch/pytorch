@@ -1,6 +1,6 @@
 import os
 
-# when loading this package, set this environment variable to true
+# when importing this package, set this environment variable to true
 os.environ["IS_CUSTOM_DEVICE_BACKEND_IMPORTED"] = "true"
 
 
