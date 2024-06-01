@@ -840,18 +840,18 @@ def extract_tensor_metadata(t: torch.Tensor) -> "TensorMetadata":
     if is_sparse_any(t) or not t.is_contiguous(memory_format=memory_format):
         memory_format = None
 
+    def convert_sym(x):
+        if isinstance(x, torch.SymInt):
+            x = torch._SymExprHash(x)
+        return x
+
     shape: Union[torch.Size, Tuple[int, ...]] = t.shape
     storage_bytes = t.untyped_storage().nbytes() if not t.is_sparse else None
     if t._has_symbolic_sizes_strides:
-
-        def convert_sym(x):
-            if isinstance(x, torch.SymInt):
-                x = torch._SymExprHash(x)
-            return x
-
         shape = tuple(convert_sym(x) for x in shape)  # tree_map(convert_sym, shape)
-    if isinstance(storage_bytes, torch.SymInt):
-        storage_bytes = torch._SymExprHash(storage_bytes)
+        storage_bytes = None
+
+    storage_bytes = convert_sym(storage_bytes)
 
     return TensorMetadata(
         dtype=t.dtype,
@@ -1375,17 +1375,18 @@ class FakeTensorMode(TorchDispatchMode):
         metadata = entry.metadata
         assert metadata and not metadata.is_sparse
 
+        def convert_sym(x):
+            if isinstance(x, torch._SymExprHash):
+                x = x.sym_obj
+            return x
+
         shape = metadata.shape
         if metadata.has_symbolic_sizes_strides:
-
-            def convert_sym(x):
-                if isinstance(x, torch._SymExprHash):
-                    x = x.sym_obj
-                return x
-
             shape = torch.Size(
                 convert_sym(x) for x in shape
             )  # tree_map(convert_sym, shape)
+
+        storage_bytes = convert_sym(metadata.storage_bytes)
 
         empty = torch.empty_strided(
             shape,
@@ -1407,14 +1408,16 @@ class FakeTensorMode(TorchDispatchMode):
 
         if func.is_view:
             # For view ops, the storage should be the same as the tensor input.
-            storage = args[cast(int, entry.view_idx)].untyped_storage()
-            with in_kernel_invocation_manager(self), maybe_suppress():
-                empty.set_(storage, metadata.storage_offset, shape, metadata.stride)
+            t = args[cast(int, entry.view_idx)]
+            if not t._has_symbolic_sizes_strides:
+                storage = t.untyped_storage()
+                with in_kernel_invocation_manager(self), maybe_suppress():
+                    empty.set_(storage, metadata.storage_offset, shape, metadata.stride)
         elif metadata.storage_offset != 0:
             storage = empty.untyped_storage()
             with in_kernel_invocation_manager(self), maybe_suppress():
                 empty.set_(storage, metadata.storage_offset, shape, metadata.stride)
-        if metadata.storage_bytes == 0:
+        if storage_bytes == 0:
             empty.untyped_storage().resize_(0)
 
         return FakeTensor(self, empty, metadata.device)
