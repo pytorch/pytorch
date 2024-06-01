@@ -8,7 +8,7 @@ from collections import OrderedDict
 
 if TYPE_CHECKING:
     import torch.jit
-    import torch.jit._state
+    import torch.jit._state  # noqa: TCH004
 
 __all__ = ['replicate']
 
