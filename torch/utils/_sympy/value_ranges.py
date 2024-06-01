@@ -25,6 +25,7 @@ from sympy.logic.boolalg import Boolean as SympyBoolean, BooleanAtom
 import torch
 
 from torch._prims_common import dtype_to_type
+from .numbers import int_oo
 from .functions import (
     _keep_float,
     FloatTrueDiv,
@@ -397,7 +398,7 @@ class SymPyValueRangeAnalysis:
             elif dtype.is_floating_point:
                 return ValueRanges.unknown()
             else:
-                return ValueRanges(-sys.maxsize - 1, sys.maxsize)
+                return ValueRanges(-int_oo, int_oo)
 
         if is_python:
             type_ = dtype_to_type(dtype)
@@ -607,7 +608,7 @@ class SymPyValueRangeAnalysis:
             # to replacements, so don't assert it, but DO clamp it to prevent
             # degenerate problems
             return ValueRanges.coordinatewise_increasing_map(
-                a, b & ValueRanges(0, sys.maxsize - 1), PowByNatural
+                a, b & ValueRanges(0, int_oo), PowByNatural
             )
         elif b.is_singleton():
             if b.lower % 2 == 0:

@@ -63,6 +63,7 @@ from torch._guards import ShapeGuard, Source, TracingContext
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 from torch.utils._sympy.functions import FloorDiv, Mod, PythonMod, IsNonOverlappingAndDenseIndicator, CleanDiv
 from torch.utils._sympy.solve import try_solve
+from torch.utils._sympy.numbers import int_oo
 from torch.utils._sympy.value_ranges import bound_sympy, SymPyValueRangeAnalysis, ValueRanges, ValueRangeError
 from torch.utils._sympy.singleton_int import SingletonInt
 from torch.utils._traceback import format_frame, CapturedTraceback
@@ -869,9 +870,9 @@ def constrain_range(a, *, min: Optional[int], max: Optional[int] = None):
     for N=1.
     """
     if min is None:
-        min = -sys.maxsize - 1
+        min = -int_oo
     if max is None:
-        max = sys.maxsize - 1
+        max = int_oo
 
     if max < min:
         raise ValueError(
@@ -1977,7 +1978,7 @@ class DimConstraints:
                 self._is_dim(dim)
                 and ("min" in c or "max" in c)
                 and (dim.min < 2 or dim.min == c.get("min", 2))  # let pass if min < 2
-                and dim.max == c.get("max", sys.maxsize - 1)
+                and dim.max == c.get("max", int_oo)
             )
 
         # 1) newly introduced roots
@@ -2000,7 +2001,7 @@ class DimConstraints:
                     modulus, remainder = sympy.polys.polytools.div(c["eq"], root)
                     c_min = c.get("min", 2)
                     min_ = math.ceil((c_min - remainder) / modulus)
-                    c_max = c.get("max", sys.maxsize - 1)
+                    c_max = c.get("max", int_oo)
                     max_ = math.floor((c_max - remainder) / modulus)
                     # create result & dim
                     results[str(root)] = {"min": min_, "max": max_}
@@ -2746,7 +2747,7 @@ class ShapeEnv:
         if min is None:
             min = 0
         if max is None:
-            max = sys.maxsize - 1
+            max = int_oo
 
         if max < min:
             raise ValueError(
@@ -4088,7 +4089,8 @@ class ShapeEnv:
             # Note that you can be off by a pretty large constant and it
             # won't matter because sizes in practice will be no where near
             # the 64-bit limit.
-            if r.upper != sympy.oo and r.upper < sys.maxsize - 1:
+            # TODO: update this
+            if r.upper != sympy.oo and r.upper is not int_oo:
                 if any(is_dim(source) for source in sources):
                     self.dim_constraints.add(sympy.Le(symbol, r.upper))
                 # nontrivial upper bound is always interesting
@@ -4286,7 +4288,7 @@ class ShapeEnv:
             # Clamp values of size-like variables
             for x in self.size_like & var_to_range.keys():
                 if var_to_range[x] is not None:
-                    var_to_range[x] = ValueRanges(2, sys.maxsize - 1)
+                    var_to_range[x] = ValueRanges(2, int_oo)
                     assert var_to_range[x].is_int
         return bound_sympy(expr, var_to_range)
 
@@ -4411,7 +4413,7 @@ class ShapeEnv:
             # Also don't do anything if we asked only to simplify unbacked
             # SymInt
             if (
-                lower < (-sys.maxsize - 1) // 2 or
+                lower is -int_oo or
                 (unbacked_only and k in self.var_to_val) or
                 not vr.is_int
             ):
@@ -4665,7 +4667,7 @@ class ShapeEnv:
             # to do this truncation automaticaly (to avoid doing
             # bigint compute in range analysis), but right now it doesn't
             # so we need to get rid of some unnecessary precision.
-            int_range = ValueRanges(-sys.maxsize - 1, sys.maxsize - 1)
+            int_range = ValueRanges(-int_oo, int_oo)
 
             def issubset(x, y):
                 if x.is_int and y.is_int:
@@ -4822,6 +4824,7 @@ class ShapeEnv:
             has_only_ephemeral_sources = (
                 x in self.var_to_sources and all(s.is_ephemeral() for s in self.var_to_sources[x])
             )
+            # NB: size_hint is int, not sympy.Expr, do not use int_oo here
             size = self.size_hint(x, allow_none=True) or sys.maxsize
             name = x.name
             # 1 puts ephemeral sourced symbols first when sorting in reverse
@@ -4923,10 +4926,10 @@ class ShapeEnv:
     # anywhere near the max 64-bit integer anyway.
     def _default_value_range(self) -> ValueRanges:
         lower = 2 if self.specialize_zero_one else 0
-        return ValueRanges(lower, sys.maxsize - 1)
+        return ValueRanges(lower, int_oo)
 
     def _default_unspecified_value_range(self) -> ValueRanges:
-        return ValueRanges(-sys.maxsize - 1, sys.maxsize)
+        return ValueRanges(-int_oo, int_oo)
 
     @_lru_cache
     def _simplify_floor_div(self, expr):

@@ -5,6 +5,8 @@ import sys
 import sympy
 from sympy import S
 
+from .numbers import int_oo
+
 __all__ = [
     "FloorDiv",
     "ModularIndexing",
@@ -399,6 +401,7 @@ def safe_pow(base, exp):
     return sign * _safe_pow(base, exp)
 
 
+# Prevent people from overflowing pow
 def _safe_pow(base, exponent):
     if exponent < 0:
         raise ValueError("Exponent must be non-negative.")
@@ -407,17 +410,20 @@ def _safe_pow(base, exponent):
         return 1
 
     half_exp = safe_pow(base, exponent // 2)
-    if half_exp > sys.maxsize - 1:
-        return sys.maxsize - 1
+    if half_exp is int_oo:
+        return int_oo
+
+    # TODO: microoptimization is to avoid overflowing into arbitrary precision
+    # and detect overflow prior to doing operations
 
     result = half_exp * half_exp
-    if result > sys.maxsize - 1:
-        return sys.maxsize - 1
+    if result > sys.maxsize:
+        return int_oo
 
     if exponent % 2 == 1:
         result *= base
-        if result > sys.maxsize - 1:
-            return sys.maxsize - 1
+        if result > sys.maxsize:
+            return int_oo
 
     return result
 
@@ -555,9 +561,9 @@ class TruncToInt(sympy.Function):
     def eval(cls, number):
         # assert number.is_integer is not True, number
         if number == sympy.oo:
-            return sympy.Integer(sys.maxsize - 1)
+            return int_oo
         if number == -sympy.oo:
-            return sympy.Integer(-sys.maxsize - 1)
+            return -int_oo
         if isinstance(number, sympy.Number):
             return sympy.Integer(math.trunc(float(number)))
 
