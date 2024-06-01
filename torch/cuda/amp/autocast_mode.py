@@ -49,6 +49,11 @@ class autocast(torch.amp.autocast_mode.autocast):
         return super().__call__(func)
 
 
+# Preserved only for BC reasons
+def _cast(value, dtype):
+    return torch.amp.autocast_mode._cast(value, "cuda", dtype)
+
+
 def custom_fwd(fwd=None, *, cast_inputs=None):
     """
     ``torch.cuda.amp.custom_fwd(args...)`` is deprecated. Please use
