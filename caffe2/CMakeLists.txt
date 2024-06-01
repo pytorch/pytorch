@@ -1891,10 +1891,6 @@ if(BUILD_PYTHON)
   set(PYTHON_LIB_REL_PATH "${Python_SITELIB}" CACHE STRING "Python installation path (relative to CMake installation prefix)")
   message(STATUS "Using ${PYTHON_LIB_REL_PATH} as python relative installation path")
 
-  if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
-    # Workaround for https://gcc.gnu.org/bugzilla/show_bug.cgi?id=80947 in EmbeddingBag.cpp
-    set_source_files_properties(../aten/src/ATen/native/EmbeddingBag.cpp PROPERTIES COMPILE_FLAGS -Wno-attributes)
-  endif()
 
   set(build_files)
   foreach(python_src ${PYTHON_SRCS})
