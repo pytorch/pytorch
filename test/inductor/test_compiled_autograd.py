@@ -1512,6 +1512,23 @@ TORCH_LIBRARY(test_autograd_cpp_node_data_dependent, m) {
 
         self.assertFalse("skipping cudagraphs" in stderr_msgs.getvalue())
 
+    def test_cudagraphs_cpu_graph(self):
+        from torch._dynamo.testing import reduce_to_scalar_loss
+
+        model = torch.nn.Linear(10, 10, dtype=torch.float16)
+        inputs = torch.randn(10, 10, dtype=torch.float16)
+        out = model(inputs)
+        loss = reduce_to_scalar_loss(out)
+
+        # stderr_msgs = io.StringIO()
+        with compiled_autograd.enable(compiler_fn):
+            torch._inductor.config.triton.cudagraphs = True
+            loss.backward()
+            torch._inductor.config.triton.cudagraphs = False
+
+        # self.assertTrue("skipping cudagraphs" in stderr_msgs.getvalue())
+        self.assertEqual(counters["inductor"]["cudagraph_skips"], 1)
+
     def test_verbose_logs_graph(self):
         torch._logging.set_logs(compiled_autograd_verbose=True)
 
