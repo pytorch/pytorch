@@ -1253,7 +1253,9 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
         FSDP internal information and internal sharding from the optim_state_dict.
         """
         if full_state_dict:
-            FullyShardedDataParallel._warn_optim_input(optim_input, stacklevel=_stacklevel + 1)
+            FullyShardedDataParallel._warn_optim_input(
+                optim_input, stacklevel=_stacklevel + 1
+            )
             using_optim_input = FullyShardedDataParallel._is_using_optim_input(
                 optim_input,
                 optim,
