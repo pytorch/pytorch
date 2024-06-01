@@ -10,6 +10,8 @@ from torch.testing._internal.common_utils import run_tests, TestCase
 
 class TestAutoload(TestCase):
     def setUp(self):
+        super().setUp()
+
         self.device_backend_path = os.path.abspath(
             os.path.join(os.path.dirname(__file__), "device_backend")
         )
@@ -18,8 +20,6 @@ class TestAutoload(TestCase):
         if self.device_backend_path not in sys.path:
             sys.path.insert(0, self.device_backend_path)
 
-        super().setUp()
-
     def test_autoload(self):
         # after importing the extension, the value of this environment variable should be true
         torch.import_device_backends()
@@ -27,6 +27,8 @@ class TestAutoload(TestCase):
         self.assertEqual(value, "true")
 
     def tearDown(self):
+        super().tearDown()
+
         # remove the extension from the system path
         if self.device_backend_path in sys.path:
             sys.path.remove(self.device_backend_path)
