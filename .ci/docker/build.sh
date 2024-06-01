@@ -374,7 +374,7 @@ case "$image" in
     EXECUTORCH=yes
     ;;
   pytorch-linux-jammy-py3.12-halide)
-    CUDA_VERSION=12.4.0
+    CUDA_VERSION=12.4
     ANACONDA_PYTHON_VERSION=3.12
     GCC_VERSION=11
     CONDA_CMAKE=yes
