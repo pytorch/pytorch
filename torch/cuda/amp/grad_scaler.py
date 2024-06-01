@@ -1,4 +1,4 @@
-from typing_extensions import deprecated
+import warnings
 
 import torch
 
@@ -11,11 +11,6 @@ class GradScaler(torch.amp.GradScaler):
     ``torch.cuda.amp.GradScaler(args...)`` is deprecated. Please use ``torch.amp.GradScaler("cuda", args...)`` instead.
     """
 
-    @deprecated(
-        "`torch.cuda.amp.GradScaler(args...)` is deprecated. "
-        "Please use `torch.amp.GradScaler('cuda', args...)` instead.",
-        category=FutureWarning,
-    )
     def __init__(
         self,
         init_scale: float = 2.0**16,
@@ -24,6 +19,9 @@ class GradScaler(torch.amp.GradScaler):
         growth_interval: int = 2000,
         enabled: bool = True,
     ) -> None:
+        warnings.warn(
+            "torch.cuda.amp.GradScaler(args...) is deprecated. Please use torch.amp.GradScaler('cuda', args...) instead."
+        )
         super().__init__(
             "cuda",
             init_scale=init_scale,
