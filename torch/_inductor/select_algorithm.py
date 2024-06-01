@@ -610,9 +610,13 @@ class TritonTemplate(KernelTemplate):
 
         if call_sizes is None:
             call_sizes = layout.size
-            numel = sympy_product(call_sizes)
-        else:
+
+        from .kernel.flex_attention import flex_attention_backward_grid
+
+        if self.grid is flex_attention_backward_grid:
             numel = sympy_product(call_sizes[:-1])
+        else:
+            numel = sympy_product(call_sizes)
         buffers = itertools.chain(input_nodes, (fake_out,))
         if not TritonScheduling.can_use_32bit_indexing(numel, buffers):
             raise NotImplementedError(
