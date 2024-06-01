@@ -301,7 +301,6 @@ def register_onednn_fusion_ops():
                 x = view(x, [-1, x_size[-1]])
             if b is not None:
                 b = ir.ExternKernel.realize_input(b)
-            inputs = [x, w] if b is None else [x, w, b]
             choices: List[ChoiceCaller] = []
             if len(choices) == 0 or use_aten_gemm_kernels():
                 kwargs = dict(attr=attr, scalars=scalars, algorithm=algorithm)
@@ -309,7 +308,7 @@ def register_onednn_fusion_ops():
                     kwargs["B"] = None
                 choices.append(
                     aten_mkldnn_linear_unary.bind(
-                        inputs,
+                        [x, w] if b is None else [x, w, b],
                         layout,
                         **kwargs,
                     )
@@ -334,7 +333,7 @@ def register_onednn_fusion_ops():
                     CppPackedGemmTemplate.add_choices(
                         choices,
                         layout,
-                        inputs,
+                        [x, w] if b is None else [x, w, b],
                         **kwargs,
                     )
             assert w.get_name() in V.graph.constants
@@ -344,7 +343,7 @@ def register_onednn_fusion_ops():
             result = autotune_select_algorithm(
                 "linear_unary",
                 choices,
-                inputs,
+                [x, w] if b is None else [x, w, b],
                 layout,
                 input_gen_fns=input_gen_fns,
             )
@@ -365,7 +364,6 @@ def register_onednn_fusion_ops():
                 y = view(y, [-1, y_size[-1]])
             if b is not None:
                 b = ir.ExternKernel.realize_input(b)
-            inputs = [x, y, w] if b is None else [x, y, w, b]
             choices: List[ChoiceCaller] = []
             if len(choices) == 0 or use_aten_gemm_kernels():
                 kwargs = dict(attr=attr)
@@ -373,7 +371,7 @@ def register_onednn_fusion_ops():
                     kwargs["B"] = None
                 choices.append(
                     aten_mkldnn_linear_binary.bind(
-                        inputs,
+                        [x, y, w] if b is None else [x, y, w, b],
                         layout,
                         **kwargs,
                     )
@@ -397,7 +395,7 @@ def register_onednn_fusion_ops():
                     CppPackedGemmTemplate.add_choices(
                         choices,
                         layout,
-                        inputs,
+                        [x, y, w] if b is None else [x, y, w, b],
                         **kwargs,
                     )
             assert w.get_name() in V.graph.constants
@@ -407,7 +405,7 @@ def register_onednn_fusion_ops():
             result = autotune_select_algorithm(
                 "linear_binary",
                 choices,
-                inputs,
+                [x, y, w] if b is None else [x, y, w, b],
                 layout,
                 input_gen_fns=input_gen_fns,
             )
