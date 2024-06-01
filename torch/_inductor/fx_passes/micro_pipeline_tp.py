@@ -289,11 +289,26 @@ def fuse_all_gather_matmul(match, shard, gather_dim, group_name):
     return
 
 
-def fuse_matmul_reduce_scatter_zero_dim(match, rs_input, reduce_op, group_name):
-    fuse_matmul_reduce_scatter(match, rs_input, reduce_op, 0, group_name)
+def _parse_reduce_scatter(rs_input):
+    if rs_input.target != aten.reshape.default:
+        return rs_input, 0
+
+    clone_node = rs_input.args[0]
+    if clone_node.target != aten.clone.default:
+        return rs_input, 0
+
+    permute_node = clone_node.args[0]
+    if permute_node.target != aten.permute.default:
+        return rs_input, 0
+
+    reshape_node = permute_node.args[0]
+    if reshape_node.target != aten.reshape.default:
+        return rs_input, 0
+
+    return reshape_node.args[0], reshape_node.args[1].index(-1)
 
 
-def fuse_matmul_reduce_scatter(match, rs_input, reduce_op, scatter_dim, group_name):
+def fuse_matmul_reduce_scatter(match, rs_input, reduce_op, group_name):
     """
     Fused the pattern
 
@@ -305,6 +320,7 @@ def fuse_matmul_reduce_scatter(match, rs_input, reduce_op, scatter_dim, group_na
             A, B, scatter_dim, group_name,
         )
     """
+    rs_input, scatter_dim = _parse_reduce_scatter(rs_input)
     try:
         c10d = torch.ops._c10d_functional
         from torch.distributed._cuda_p2p import (
@@ -431,8 +447,8 @@ def _register_passes():
         pass_dict=patterns,
     )(fuse_all_gather_matmul)
 
-    # Matches funcol.reduce_scatter_tensor with scatter_dim == 0
-    ZeroDimReduceScatter = CallFunction(
+    # Matches funcol.reduce_scatter_tensor
+    ReduceScatter = CallFunction(
         c10d.wait_tensor.default,
         CallFunction(
             c10d.reduce_scatter_tensor.default,
@@ -443,42 +459,8 @@ def _register_passes():
         ),
     )
 
-    # Matches funcol.reduce_scatter_tensor with scatter_dim > 0
-    # NOTE: this pattern may need to be updated if funcol.reduce_scatter_tensor
-    # changes
-    NonZeroDimReduceScatter = CallFunction(
-        c10d.wait_tensor.default,
-        CallFunction(
-            c10d.reduce_scatter_tensor.default,
-            CallFunction(
-                aten.cat.default,
-                ListOf(
-                    CallFunction(
-                        operator.getitem,
-                        CallFunction(
-                            aten.split.Tensor,
-                            KeywordArg("rs_input"),
-                            Ignored(),
-                            KeywordArg("scatter_dim"),
-                            _users=MULTIPLE,
-                        ),
-                        Ignored(),
-                    )
-                ),
-            ),
-            KeywordArg("reduce_op"),
-            Ignored(),
-            KeywordArg("group_name"),
-        ),
-    )
-
     register_graph_pattern(
-        ZeroDimReduceScatter,
-        pass_dict=patterns,
-    )(fuse_matmul_reduce_scatter_zero_dim)
-
-    register_graph_pattern(
-        NonZeroDimReduceScatter,
+        ReduceScatter,
         pass_dict=patterns,
     )(fuse_matmul_reduce_scatter)
 
