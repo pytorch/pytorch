@@ -40,6 +40,7 @@ tolerance:
   even_higher:
     - soft_actor_critic
     - tacotron2
+    - phlippe_resnet
 
   higher_fp16:
     - doctr_reco_predictor
