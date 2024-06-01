@@ -163,9 +163,6 @@ int8_mm_kernel_configs = [
 ]
 
 # Mixed precision kernel configs for small sizes of m for mm's like (16, 8192) x (8192, 8192).
-# According to https://github.com/openai/triton/issues/2156#issuecomment-1695897424
-# it's safer to use at least [32, 32] block size for int8/uint8
-# tensors
 mixed_mm_kernel_configs_small_m = [
     {"config": (16, 128, 256, 3, 4), "cond": True},
     {"config": (16, 128, 256, 5, 8), "cond": True},
