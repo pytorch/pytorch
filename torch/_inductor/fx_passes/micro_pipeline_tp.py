@@ -15,7 +15,6 @@ from ..pattern_matcher import (
 )
 
 aten = torch.ops.aten
-c10d = torch.ops._c10d_functional
 patterns = PatternMatcherPass()
 
 
@@ -168,47 +167,6 @@ def _find_consumer_matmuls(node: torch.fx.Node) -> List[Union[_2DMatmul, _NDMatm
     return matmuls
 
 
-# Matches funcol.all_gather_tensor with gather_dim == 0
-ZeroDimAllGather = CallFunction(
-    c10d.wait_tensor.default,
-    CallFunction(
-        c10d.all_gather_into_tensor.default,
-        KeywordArg("shard"),
-        Ignored(),
-        KeywordArg("group_name"),
-    ),
-)
-
-
-# Matches funcol.all_gather_tensor with gather_dim > 0
-# NOTE: this pattern may need to be updated if funcol.all_gather_tensor changes
-NonZeroDimAllGather = CallFunction(
-    aten.cat.default,
-    ListOf(
-        CallFunction(
-            operator.getitem,
-            CallFunction(
-                aten.split.Tensor,
-                CallFunction(
-                    c10d.wait_tensor.default,
-                    CallFunction(
-                        c10d.all_gather_into_tensor.default,
-                        KeywordArg("shard"),
-                        Ignored(),
-                        KeywordArg("group_name"),
-                    ),
-                ),
-                Ignored(),
-                _users=MULTIPLE,
-            ),
-            Ignored(),
-        ),
-    ),
-    KeywordArg("gather_dim"),
-    _users=MULTIPLE,
-)
-
-
 def _find_all_gather_node_from_match(match) -> Tuple[torch.fx.Node, torch.fx.Node]:
     """
     Processes match for ZeroDimAllGather and NonZeroDimAllGather. Returns the
@@ -223,7 +181,7 @@ def _find_all_gather_node_from_match(match) -> Tuple[torch.fx.Node, torch.fx.Nod
     # gather_dim == 1
     ag_node = _filter_nodes_by_target(
         match.nodes,
-        c10d.all_gather_into_tensor.default,
+        torch.ops._c10d_functional.all_gather_into_tensor.default,
     )[0]
     ag_res_node = _filter_nodes_by_target(
         match.nodes,
@@ -233,18 +191,10 @@ def _find_all_gather_node_from_match(match) -> Tuple[torch.fx.Node, torch.fx.Nod
     return ag_node, ag_res_node
 
 
-@register_graph_pattern(
-    ZeroDimAllGather,
-    pass_dict=patterns,
-)
 def fuse_all_gather_matmul_zero_dim(match, shard, group_name):
     fuse_all_gather_matmul(match, shard, 0, group_name)
 
 
-@register_graph_pattern(
-    NonZeroDimAllGather,
-    pass_dict=patterns,
-)
 def fuse_all_gather_matmul(match, shard, gather_dim, group_name):
     """
     Fused the pattern
@@ -265,8 +215,12 @@ def fuse_all_gather_matmul(match, shard, gather_dim, group_name):
         # Decomposing the matmul on the K dimension is not supported
         return
 
-    from torch.distributed._cuda_p2p import is_cuda_p2p_group
-    from torch.distributed.distributed_c10d import _resolve_process_group
+    try:
+        c10d = torch.ops._c10d_functional
+        from torch.distributed._cuda_p2p import is_cuda_p2p_group
+        from torch.distributed.distributed_c10d import _resolve_process_group
+    except (AttributeError, ImportError):
+        return
 
     if not is_cuda_p2p_group(_resolve_process_group(group_name)):
         return
@@ -321,60 +275,10 @@ def fuse_all_gather_matmul(match, shard, gather_dim, group_name):
     return
 
 
-# Matches funcol.reduce_scatter_tensor with scatter_dim == 0
-ZeroDimReduceScatter = CallFunction(
-    c10d.wait_tensor.default,
-    CallFunction(
-        c10d.reduce_scatter_tensor.default,
-        KeywordArg("rs_input"),
-        KeywordArg("reduce_op"),
-        Ignored(),
-        KeywordArg("group_name"),
-    ),
-)
-
-# Matches funcol.reduce_scatter_tensor with scatter_dim > 0
-# NOTE: this pattern may need to be updated if funcol.reduce_scatter_tensor
-# changes
-NonZeroDimReduceScatter = CallFunction(
-    c10d.wait_tensor.default,
-    CallFunction(
-        c10d.reduce_scatter_tensor.default,
-        CallFunction(
-            aten.cat.default,
-            ListOf(
-                CallFunction(
-                    operator.getitem,
-                    CallFunction(
-                        aten.split.Tensor,
-                        KeywordArg("rs_input"),
-                        Ignored(),
-                        KeywordArg("scatter_dim"),
-                        _users=MULTIPLE,
-                    ),
-                    Ignored(),
-                )
-            ),
-        ),
-        KeywordArg("reduce_op"),
-        Ignored(),
-        KeywordArg("group_name"),
-    ),
-)
-
-
-@register_graph_pattern(
-    ZeroDimReduceScatter,
-    pass_dict=patterns,
-)
 def fuse_matmul_reduce_scatter_zero_dim(match, rs_input, reduce_op, group_name):
     fuse_matmul_reduce_scatter(match, rs_input, reduce_op, 0, group_name)
 
 
-@register_graph_pattern(
-    NonZeroDimReduceScatter,
-    pass_dict=patterns,
-)
 def fuse_matmul_reduce_scatter(match, rs_input, reduce_op, scatter_dim, group_name):
     """
     Fused the pattern
@@ -387,8 +291,12 @@ def fuse_matmul_reduce_scatter(match, rs_input, reduce_op, scatter_dim, group_na
             A, B, scatter_dim, group_name,
         )
     """
-    from torch.distributed._cuda_p2p import is_cuda_p2p_group
-    from torch.distributed.distributed_c10d import _resolve_process_group
+    try:
+        c10d = torch.ops._c10d_functional
+        from torch.distributed._cuda_p2p import is_cuda_p2p_group
+        from torch.distributed.distributed_c10d import _resolve_process_group
+    except (AttributeError, ImportError):
+        return
 
     if not is_cuda_p2p_group(_resolve_process_group(group_name)):
         return
@@ -439,3 +347,113 @@ def fuse_matmul_reduce_scatter(match, rs_input, reduce_op, scatter_dim, group_na
             fused_node.prepend(node)
 
     graph.eliminate_dead_code()
+
+
+def _register_passes():
+    try:
+        c10d = torch.ops._c10d_functional
+    except AttributeError:
+        return
+
+    # Matches funcol.all_gather_tensor with gather_dim == 0
+    ZeroDimAllGather = CallFunction(
+        c10d.wait_tensor.default,
+        CallFunction(
+            c10d.all_gather_into_tensor.default,
+            KeywordArg("shard"),
+            Ignored(),
+            KeywordArg("group_name"),
+        ),
+    )
+
+    # Matches funcol.all_gather_tensor with gather_dim > 0
+    # NOTE: this pattern may need to be updated if funcol.all_gather_tensor changes
+    NonZeroDimAllGather = CallFunction(
+        aten.cat.default,
+        ListOf(
+            CallFunction(
+                operator.getitem,
+                CallFunction(
+                    aten.split.Tensor,
+                    CallFunction(
+                        c10d.wait_tensor.default,
+                        CallFunction(
+                            c10d.all_gather_into_tensor.default,
+                            KeywordArg("shard"),
+                            Ignored(),
+                            KeywordArg("group_name"),
+                        ),
+                    ),
+                    Ignored(),
+                    _users=MULTIPLE,
+                ),
+                Ignored(),
+            ),
+        ),
+        KeywordArg("gather_dim"),
+        _users=MULTIPLE,
+    )
+
+    register_graph_pattern(
+        ZeroDimAllGather,
+        pass_dict=patterns,
+    )(fuse_all_gather_matmul_zero_dim)
+
+    register_graph_pattern(
+        NonZeroDimAllGather,
+        pass_dict=patterns,
+    )(fuse_all_gather_matmul)
+
+    # Matches funcol.reduce_scatter_tensor with scatter_dim == 0
+    ZeroDimReduceScatter = CallFunction(
+        c10d.wait_tensor.default,
+        CallFunction(
+            c10d.reduce_scatter_tensor.default,
+            KeywordArg("rs_input"),
+            KeywordArg("reduce_op"),
+            Ignored(),
+            KeywordArg("group_name"),
+        ),
+    )
+
+    # Matches funcol.reduce_scatter_tensor with scatter_dim > 0
+    # NOTE: this pattern may need to be updated if funcol.reduce_scatter_tensor
+    # changes
+    NonZeroDimReduceScatter = CallFunction(
+        c10d.wait_tensor.default,
+        CallFunction(
+            c10d.reduce_scatter_tensor.default,
+            CallFunction(
+                aten.cat.default,
+                ListOf(
+                    CallFunction(
+                        operator.getitem,
+                        CallFunction(
+                            aten.split.Tensor,
+                            KeywordArg("rs_input"),
+                            Ignored(),
+                            KeywordArg("scatter_dim"),
+                            _users=MULTIPLE,
+                        ),
+                        Ignored(),
+                    )
+                ),
+            ),
+            KeywordArg("reduce_op"),
+            Ignored(),
+            KeywordArg("group_name"),
+        ),
+    )
+
+    register_graph_pattern(
+        ZeroDimReduceScatter,
+        pass_dict=patterns,
+    )(fuse_matmul_reduce_scatter_zero_dim)
+
+    register_graph_pattern(
+        NonZeroDimReduceScatter,
+        pass_dict=patterns,
+    )(fuse_matmul_reduce_scatter)
+
+
+_register_passes()
