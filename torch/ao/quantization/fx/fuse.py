@@ -52,20 +52,16 @@ def fuse(
     if fuse_custom_config is None:
         fuse_custom_config = FuseCustomConfig()
 
-    if isinstance(fuse_custom_config, dict):
+    if isinstance(fuse_custom_config, Dict):
         warnings.warn(
             "Passing a fuse_custom_config_dict to fuse is deprecated and will not be supported "
-            "in a future version. Please pass in a FuseCustomConfig instead.",
-            FutureWarning,
-        )
+            "in a future version. Please pass in a FuseCustomConfig instead.")
         fuse_custom_config = FuseCustomConfig.from_dict(fuse_custom_config)
 
-    if isinstance(backend_config, dict):
+    if isinstance(backend_config, Dict):
         warnings.warn(
             "Passing a backend_config_dict to prepare is deprecated and will not be supported "
-            "in a future version. Please pass in a BackendConfig instead.",
-            FutureWarning,
-        )
+            "in a future version. Please pass in a BackendConfig instead.")
         backend_config = BackendConfig.from_dict(backend_config)
 
     named_modules = dict(model.named_modules())
