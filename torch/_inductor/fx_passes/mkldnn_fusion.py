@@ -18,7 +18,7 @@ from ..pattern_matcher import (
     KeywordArg,
     MULTIPLE,
 )
-from ..virtualized import ops
+from ..virtualized import ops, V
 from .freezing_patterns import register_freezing_graph_pattern
 from .post_grad import register_lowering_pattern
 from .quantization import (
@@ -197,9 +197,15 @@ if torch._C._has_mkldnn:
     def _binary_fusion_v2(computation_call, binary_fn):
         return CallFunction(binary_fn, computation_call, KeywordArg("other"))
 
-    def _is_single_computation_op(computation_op):
+    def _is_single_computation_op(computation_op, lowp_dtype=None):
         def fn(match):
             computation_nodes = filter_nodes(match.nodes, computation_op)
+
+            if lowp_dtype:
+                output_node_meta = match.output_node().meta.get("val")
+                if output_node_meta.dtype != lowp_dtype:
+                    return False
+
             if len(computation_nodes) < 1:
                 return False
             if any(n.args[-3] != "none" for n in computation_nodes):
@@ -210,7 +216,7 @@ if torch._C._has_mkldnn:
 
     def _is_valid_computation_unary_fusion(computation_op, lowp_dtype=None):
         def fn(match):
-            matched = _is_single_computation_op(computation_op)(match)
+            matched = _is_single_computation_op(computation_op, lowp_dtype)(match)
             computation_node = filter_nodes(match.nodes, computation_op)[0]
             if lowp_dtype:
                 conversion_dtype_nodes = filter_nodes(
@@ -249,7 +255,7 @@ if torch._C._has_mkldnn:
 
     def _register_leaky_relu_fusion_lowering(pattern, computation_op, lowp_dtype=None):
         @register_lowering_pattern(
-            pattern, extra_check=_is_single_computation_op(computation_op)
+            pattern, extra_check=_is_single_computation_op(computation_op, lowp_dtype)
         )
         def fn(match, *args, **kwargs):
             negative_slope = kwargs.get("negative_slope")
@@ -291,7 +297,7 @@ if torch._C._has_mkldnn:
 
     def _register_hardtanh_fusion_lowering(pattern, computation_op, lowp_dtype=None):
         @register_lowering_pattern(
-            pattern, extra_check=_is_single_computation_op(computation_op)
+            pattern, extra_check=_is_single_computation_op(computation_op, lowp_dtype)
         )
         def fn(match, *args, **kwargs):
             min_value = kwargs.get("min_value")
@@ -496,10 +502,7 @@ if torch._C._has_mkldnn:
         else:
             return not (
                 isinstance(_other.data, ir.ReinterpretView)
-                or isinstance(
-                    _other.get_layout(),
-                    (ir.MutationLayoutSHOULDREMOVE, ir.NonOwningLayout),
-                )
+                or len(_other.get_inputs_that_alias_output()) > 0
             )
 
     def _register_binary_unary_maybe_inplace_fusion_lowering(
@@ -872,7 +875,7 @@ if torch._C._has_mkldnn:
             if (
                 meta_value is None
                 or meta_value.device.type != "cpu"
-                or meta_value.dim() != 4
+                or (meta_value.dim() != 4 and meta_value.dim() != 5)
             ):
                 return False
         if (
@@ -1149,9 +1152,18 @@ if torch._C._has_mkldnn:
                     if has_free_symbols(batch_size)
                     else batch_size,
                 )
+                # MKL packed matrix can't be copied to a different address because the internal implementation
+                # depends on the alignment of internally-stored metadata.
+                # In aot mode, we need to firstly save the packed weight, when loading it,
+                # it will be in a different address which doesn't work.
+                # Disable MKL prepack linear in AOT mode
                 packed_weight_op = (
                     mkldnn._reorder_linear_weight
-                    if (is_lp_weight or mkldnn._is_mkldnn_acl_supported())
+                    if (
+                        is_lp_weight
+                        or mkldnn._is_mkldnn_acl_supported()
+                        or V.aot_compilation is True
+                    )
                     else torch.ops.mkl._mkl_reorder_linear_weight
                 )
                 packed_weight_node = graph.create_node(
@@ -1159,7 +1171,11 @@ if torch._C._has_mkldnn:
                 )
 
                 packed_linear_inputs: Tuple[Any, ...] = (input, packed_weight_node)
-                if is_lp_weight or mkldnn._is_mkldnn_acl_supported():
+                if (
+                    is_lp_weight
+                    or mkldnn._is_mkldnn_acl_supported()
+                    or V.aot_compilation is True
+                ):
                     packed_linear_inputs += (bias, "none", [], "")
                     packed_linear_op = mkldnn._linear_pointwise.default
                 else:
@@ -1191,6 +1207,7 @@ if torch._C._has_mkldnn:
 
         packed_weight_ops = [
             torch._C._nn.mkldnn_reorder_conv2d_weight,
+            torch._C._nn.mkldnn_reorder_conv3d_weight,
             mkldnn._reorder_convolution_transpose_weight,
             mkldnn._reorder_linear_weight,
             mkldnn._reorder_mkldnn_rnn_layer_weight,

@@ -123,6 +123,7 @@ fragment PRCheckSuites on CheckSuiteConnection {
         workflow {
           name
         }
+        databaseId
         url
       }
       checkRuns(first: 50) {
@@ -1618,28 +1619,59 @@ def remove_job_name_suffix(name: str, replacement: str = ")") -> str:
 
 
 def is_broken_trunk(
-    name: str,
+    check: JobCheckState,
     drci_classifications: Any,
 ) -> bool:
-    if not name or not drci_classifications:
+    if not check or not drci_classifications:
         return False
+
+    name = check.name
+    job_id = check.job_id
 
     # Consult the list of broken trunk failures from Dr.CI
     return any(
-        name == broken_trunk["name"]
+        (name == broken_trunk["name"]) or (job_id and job_id == broken_trunk["id"])
         for broken_trunk in drci_classifications.get("BROKEN_TRUNK", [])
     )
 
 
-def is_flaky(
-    name: str,
+def is_unstable(
+    check: JobCheckState,
     drci_classifications: Any,
 ) -> bool:
-    if not name or not drci_classifications:
+    if not check or not drci_classifications:
         return False
 
+    name = check.name
+    job_id = check.job_id
+
+    # The job name has the unstable keyword. This is the original way to mark a job
+    # as unstable on HUD, Dr.CI, and trymerge
+    if "unstable" in name:
+        return True
+
+    # Consult the list of unstable failures from Dr.CI
+    return any(
+        (name == unstable["name"] or (job_id and job_id == unstable["id"]))
+        for unstable in drci_classifications.get("UNSTABLE", [])
+    )
+
+
+def is_flaky(
+    check: JobCheckState,
+    drci_classifications: Any,
+) -> bool:
+    if not check or not drci_classifications:
+        return False
+
+    name = check.name
+    job_id = check.job_id
+
     # Consult the list of flaky failures from Dr.CI
-    return any(name == flaky["name"] for flaky in drci_classifications.get("FLAKY", []))
+    return any(
+        (name == flaky["name"] or (job_id and job_id == flaky["id"]))
+        for flaky in drci_classifications.get("FLAKY", [])
+    )
 
 
 def is_invalid_cancel(
@@ -1712,7 +1744,7 @@ def get_classifications(
         if check.status == "SUCCESS" or check.status == "NEUTRAL":
             continue
 
-        if "unstable" in name:
+        if is_unstable(check, drci_classifications):
             checks_with_classifications[name] = JobCheckState(
                 check.name,
                 check.url,
@@ -1726,7 +1758,7 @@ def get_classifications(
 
         # NB: It's important to note that when it comes to ghstack and broken trunk classification,
         # Dr.CI uses the base of the whole stack
-        if is_broken_trunk(name, drci_classifications):
+        if is_broken_trunk(check, drci_classifications):
             checks_with_classifications[name] = JobCheckState(
                 check.name,
                 check.url,
@@ -1738,7 +1770,7 @@ def get_classifications(
             )
             continue
 
-        elif is_flaky(name, drci_classifications):
+        elif is_flaky(check, drci_classifications):
             checks_with_classifications[name] = JobCheckState(
                 check.name,
                 check.url,

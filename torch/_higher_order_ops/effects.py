@@ -22,6 +22,16 @@ SIDE_EFFECTS: Dict[torch._ops.OpOverload, _EffectType] = {
 }
 
 
+def _register_effectful_op(op: torch._ops.OpOverload, effect: _EffectType):
+    assert isinstance(op, torch._ops.OpOverload) and not has_aliasing(op)
+    if op in SIDE_EFFECTS and SIDE_EFFECTS[op] != effect:
+        raise RuntimeError(
+            f"Already registered effect type {SIDE_EFFECTS[op]} to op {op}, "
+            f"trying to register a different effect type {effect}."
+        )
+    SIDE_EFFECTS[op] = effect
+
+
 class WithEffects(HigherOrderOperator):
     """
     with_effects(token, op, args, kwargs) -> (new_token, op_results)
@@ -85,6 +95,9 @@ def get_effect_key(op, args, kwargs) -> Optional[_EffectType]:
 
     for arg in args:
         if isinstance(arg, torch.ScriptObject):
+            # Add it to the table so that next time we see the same op we don't
+            # have to parse through the args again
+            SIDE_EFFECTS[op] = _EffectType.ORDERED
             return _EffectType.ORDERED
 
     return None

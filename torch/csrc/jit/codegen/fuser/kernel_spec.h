@@ -117,7 +117,7 @@ struct TORCH_API KernelSpec {
   }
 
   // Cache functions
-  c10::optional<std::shared_ptr<FusedKernel>> findKernel(
+  std::optional<std::shared_ptr<FusedKernel>> findKernel(
       const ArgSpec& arg_spec) const {
     std::lock_guard<std::mutex> guard{mutex_};
     const auto it = kernels_.find(arg_spec);

@@ -159,7 +159,7 @@ std::string ncclGetErrorWithVersion(ncclResult_t error) {
 // thrown in the NCCL codebase.
 std::string getNcclErrorDetailStr(
     ncclResult_t error,
-    c10::optional<std::string> processGroupFailureReason /* = c10::nullopt */
+    std::optional<std::string> processGroupFailureReason /* = c10::nullopt */
 ) {
   // Prioritize failure reason provided by PG NCCL first, as it can abort
   // communicators when it encounters collective timeouts, etc.
@@ -169,7 +169,12 @@ std::string getNcclErrorDetailStr(
   std::string interpret;
   std::string err;
 #ifdef ENABLE_NCCL_GET_LAST_ERROR
-  err = "\nLast error:\n" + std::string(ncclGetLastError(NULL));
+  auto ret = ncclGetLastError(NULL);
+  if (ret) {
+    err = "\nLast error:\n" + std::string(ret);
+  } else {
+    err = "\nLast error: Unknown NCCL Error\n";
+  }
 #endif
   switch (error) {
     case ncclUnhandledCudaError:

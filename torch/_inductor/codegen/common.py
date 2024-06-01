@@ -3,6 +3,7 @@ import dataclasses
 import functools
 import itertools
 import logging
+import math
 import operator
 import re
 from itertools import chain
@@ -26,15 +27,15 @@ import torch
 import torch.fx
 from torch._prims_common import ELEMENTWISE_TYPE_PROMOTION_KIND
 from torch.utils import _pytree as pytree
-from torch.utils._sympy.value_ranges import ValueRanges
+from torch.utils._sympy.symbol import free_symbol_is_type, symbol_is_type, SymT
+from torch.utils._sympy.value_ranges import bound_sympy, ValueRangeAnalysis, ValueRanges
 
 from .. import config, metrics
 from ..utils import (
     DeferredLineBase,
-    free_symbol_startswith,
+    generate_assert,
     IndentedBuffer,
     sympy_dot,
-    sympy_index_symbol,
     sympy_subs,
     unique,
 )
@@ -77,8 +78,9 @@ class SizeArg:
 
 @dataclasses.dataclass
 class DeviceCodegen:
-    scheduling: type
+    scheduling: Any
     wrapper_codegen: type
+    cpp_wrapper_codegen: type = type(None)
 
 
 KernelArgType = Union[WorkspaceArg, TensorArg, SizeArg]
@@ -88,16 +90,16 @@ device_codegens: Dict[str, DeviceCodegen] = {}
 
 class DeviceOpOverrides:
     def import_get_raw_stream_as(self, name):
-        raise NotImplementedError()
+        raise NotImplementedError
 
     def set_device(self, device_idx):
-        raise NotImplementedError()
+        raise NotImplementedError
 
     def synchronize(self):
-        raise NotImplementedError()
+        raise NotImplementedError
 
     def device_guard(self, device_idx):
-        raise NotImplementedError()
+        raise NotImplementedError
 
 
 device_op_overrides_dict: Dict[str, DeviceOpOverrides] = {}
@@ -125,19 +127,30 @@ device_op_overrides_dict: Dict[str, DeviceOpOverrides] = {}
 # This backend can be used as a reference:
 # https://github.com/intel/intel-extension-for-pytorch/blob/5dcc9d57e5422cf295e1a1ee97896d6b6a554a85/intel_extension_for_pytorch/_inductor/__init__.py#L9
 def register_backend_for_device(
-    device: str, device_scheduling: type, device_wrapper_codegen: type
+    device: str,
+    device_scheduling: Any,
+    device_wrapper_codegen: type,
+    device_cpp_wrapper_codegen: type = type(None),
 ):
-    device_codegens[device] = DeviceCodegen(device_scheduling, device_wrapper_codegen)
+    device_codegens[device] = DeviceCodegen(
+        device_scheduling, device_wrapper_codegen, device_cpp_wrapper_codegen
+    )
 
 
 def get_scheduling_for_device(device: str):
     return device_codegens[device].scheduling if device in device_codegens else None
 
 
-def get_wrapper_codegen_for_device(device: str):
-    return (
-        device_codegens[device].wrapper_codegen if device in device_codegens else None
-    )
+def get_wrapper_codegen_for_device(device: str, cpp_wrapper: bool = False):
+    if device in device_codegens:
+        wrapper_codegen_obj: DeviceCodegen = device_codegens[device]
+        return (
+            wrapper_codegen_obj.cpp_wrapper_codegen
+            if cpp_wrapper
+            else wrapper_codegen_obj.wrapper_codegen
+        )
+    else:
+        return None
 
 
 def index_prevent_reordering(index: List[sympy.Expr], index_vars, sizes):
@@ -156,11 +169,10 @@ def get_device_op_overrides(device: str):
 
     if not device_op_overrides_dict.keys():
         from .cuda import device_op_overrides  # noqa: F401
+        from .xpu import device_op_overrides as xpu_op_overrides  # noqa: F401
 
     if device in device_op_overrides_dict.keys():
         return device_op_overrides_dict[device]
-
-    return DeviceOpOverrides()
 
 
 @functools.lru_cache(None)
@@ -219,12 +231,12 @@ class DataTypePropagation:
         if len(input_nodes) == 0:
             return None
 
-        all_input_nodes_propogated = all(
+        all_input_nodes_propagated = all(
             OptimizationContext.key in n.meta
             and n.meta[OptimizationContext.key].dtype is not None
             for n in input_nodes
         )
-        if not all_input_nodes_propogated:
+        if not all_input_nodes_propagated:
             return None
 
         return functools.reduce(
@@ -265,6 +277,7 @@ class DataTypePropagation:
         if node.target in (
             "get_index",
             "index_expr",
+            "randint64",
         ):
             return torch.int64
 
@@ -410,6 +423,9 @@ class PythonPrinter(ExprPrinter):
     def _helper_sqrt(self, expr):
         return f"math.sqrt({self._print(expr)})"
 
+    def _print_OpaqueUnaryFn_sqrt(self, expr):
+        return self._helper_sqrt(expr.args[0])
+
     def _print_Pow(self, expr):
         # Pow() confuses triton
         base, exp = expr.args
@@ -436,6 +452,10 @@ class PythonPrinter(ExprPrinter):
         assert len(expr.args) == 1
         return f"math.floor({self._print(expr.args[0])})"
 
+    def _print_Trunc(self, expr):
+        assert len(expr.args) == 1
+        return f"math.trunc({self._print(expr.args[0])})"
+
     def _print_ceiling(self, expr):
         assert len(expr.args) == 1
         return f"math.ceil({self._print(expr.args[0])})"
@@ -452,39 +472,39 @@ class PythonPrinter(ExprPrinter):
         assert len(expr.args) >= 2
         return f"min({', '.join(map(self._print, expr.args))})"
 
-    def _print_cos(self, expr):
+    def _print_OpaqueUnaryFn_cos(self, expr):
         assert len(expr.args) == 1
         return f"math.cos({self._print(expr.args[0])})"
 
-    def _print_cosh(self, expr):
+    def _print_OpaqueUnaryFn_cosh(self, expr):
         assert len(expr.args) == 1
         return f"math.cosh({self._print(expr.args[0])})"
 
-    def _print_acos(self, expr):
+    def _print_OpaqueUnaryFn_acos(self, expr):
         assert len(expr.args) == 1
         return f"math.acos({self._print(expr.args[0])})"
 
-    def _print_sin(self, expr):
+    def _print_OpaqueUnaryFn_sin(self, expr):
         assert len(expr.args) == 1
         return f"math.sin({self._print(expr.args[0])})"
 
-    def _print_sinh(self, expr):
+    def _print_OpaqueUnaryFn_sinh(self, expr):
         assert len(expr.args) == 1
         return f"math.sinh({self._print(expr.args[0])})"
 
-    def _print_asin(self, expr):
+    def _print_OpaqueUnaryFn_asin(self, expr):
         assert len(expr.args) == 1
         return f"math.asin({self._print(expr.args[0])})"
 
-    def _print_tan(self, expr):
+    def _print_OpaqueUnaryFn_tan(self, expr):
         assert len(expr.args) == 1
         return f"math.tan({self._print(expr.args[0])})"
 
-    def _print_tanh(self, expr):
+    def _print_OpaqueUnaryFn_tanh(self, expr):
         assert len(expr.args) == 1
         return f"math.tanh({self._print(expr.args[0])})"
 
-    def _print_atan(self, expr):
+    def _print_OpaqueUnaryFn_atan(self, expr):
         assert len(expr.args) == 1
         return f"math.atan({self._print(expr.args[0])})"
 
@@ -518,11 +538,77 @@ class OpOverrides:
 
     @staticmethod
     def reciprocal(x):
-        return ops.truediv("1", x)
+        return ops.truediv(ops.constant(1, torch.int32), x)
 
     @staticmethod
     def square(x):
         return ops.mul(x, x)
+
+    @staticmethod
+    def erfc(x):
+        return ops.sub(ops.constant(1, torch.float32), ops.erf(x))
+
+    @staticmethod
+    def erfcx(x):
+        return ops.mul(ops.exp(ops.square(x)), ops.erfc(x))
+
+    @staticmethod
+    def expm1(x):
+        return ops.sub(ops.exp(x), ops.constant(1, torch.float32))
+
+    @staticmethod
+    def log10(x):
+        return ops.mul(ops.log(x), ops.constant(1 / math.log(10), torch.float32))
+
+    @staticmethod
+    def log2(x):
+        return ops.mul(ops.log(x), ops.constant(1 / math.log(2), torch.float32))
+
+    @staticmethod
+    def exp2(x):
+        return ops.exp(ops.mul(x, ops.constant(math.log(2), torch.float32)))
+
+    @staticmethod
+    def log1p(x):
+        return ops.log(ops.add(x, ops.constant(1, torch.int32)))
+
+    @staticmethod
+    def sigmoid(x):
+        one = ops.constant(1, torch.int32)
+        return ops.truediv(one, ops.add(one, ops.exp(ops.neg(x))))
+
+    @staticmethod
+    def libdevice_sigmoid(x):
+        one = ops.constant(1, torch.int32)
+        return ops.truediv(one, ops.add(one, ops.libdevice_exp(ops.neg(x))))
+
+    @staticmethod
+    def relu(x):
+        return ops.maximum(x, ops.constant(0, torch.int32))
+
+    @staticmethod
+    def libdevice_abs(x):
+        return ops.abs(x)
+
+    @staticmethod
+    def libdevice_sqrt(x):
+        return ops.sqrt(x)
+
+    @staticmethod
+    def libdevice_cos(x):
+        return ops.cos(x)
+
+    @staticmethod
+    def libdevice_sin(x):
+        return ops.sin(x)
+
+    @staticmethod
+    def libdevice_log(x):
+        return ops.log(x)
+
+    @staticmethod
+    def libdevice_exp(x):
+        return ops.exp(x)
 
     @staticmethod
     def bitwise_not(x):
@@ -555,7 +641,11 @@ class OpOverrides:
     @staticmethod
     def remainder(a, b):
         r = ops.mod(a, b)
-        return ops.where(f"(({r} != 0) & (({r} < 0) != ({b} < 0)))", ops.add(r, b), r)
+        cond = ops.and_(
+            ops.ne(r, ops.constant(0, torch.int32)),
+            ops.ne(ops.signbit(r), ops.signbit(b)),
+        )
+        return ops.where(cond, ops.add(r, b), r)
 
     @staticmethod
     def load_seed(name, offset):
@@ -565,254 +655,249 @@ class OpOverrides:
     def _initialize_pointwise_overrides(cls, target):
         assert target in {"triton", "cpp", "cppvec"}, target
 
-        def pointwise_factory_1(impl):
-            def func(x):
-                return impl.format(x=x)
-
-            return func
-
-        def pointwise_factory_2(impl):
-            def func(x, y):
-                return impl.format(x=x, y=y)
-
-            return func
-
         for funcname, data in pointwise_overrides_data.items():
             impl = getattr(data, target)
-            if isinstance(impl, str):
-                nof_args = 2 if "{y}" in impl else 1
-                # extend the following dictionary with factory
-                # functions for a specific number of arguments as
-                # needed:
-                factory = {1: pointwise_factory_1, 2: pointwise_factory_2}[nof_args]
-                setattr(cls, funcname, staticmethod(factory(impl)))
+            if impl is None:
+                continue
+            setattr(cls, funcname, staticmethod(impl))
 
 
 @dataclasses.dataclass
 class OverridesData:
     name: str
-    cpp: str
-    triton: Optional[str] = None  # None when not impl in libdevice/triton
-    cppvec: Optional[str] = None  # None when not impl in aten/.../vec
+    cpp: Callable[..., str]
+    # None when not impl in libdevice/triton
+    triton: Optional[Callable[..., str]] = None
+    # None when not impl in aten/.../vec
+    cppvec: Optional[Callable[..., str]] = None
     type_promotion_kind: ELEMENTWISE_TYPE_PROMOTION_KIND = (
         ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
     )
 
 
+# NB: if you add a new special function, don't forget to update
+# torch._inductor.ops_handler too
 pointwise_overrides_data: Dict[str, OverridesData] = dict(
     airy_ai=OverridesData(
         type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
-        cpp="airy_ai_forward({x})",
+        cpp=lambda x: f"airy_ai_forward({x})",
         name="special_airy_ai",
     ),
     bessel_j0=OverridesData(
         type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
-        cpp="bessel_j0_forward({x})",
-        triton="libdevice.j0({x})",
+        cpp=lambda x: f"bessel_j0_forward({x})",
+        triton=lambda x: f"libdevice.j0({x})",
         name="special_bessel_j0",
     ),
     bessel_j1=OverridesData(
         type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
-        cpp="bessel_j1_forward({x})",
-        triton="libdevice.j1({x})",
+        cpp=lambda x: f"bessel_j1_forward({x})",
+        triton=lambda x: f"libdevice.j1({x})",
         name="special_bessel_j1",
     ),
     bessel_y0=OverridesData(
         type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
-        cpp="bessel_y0_forward({x})",
-        triton="libdevice.y0({x})",
+        cpp=lambda x: f"bessel_y0_forward({x})",
+        triton=lambda x: f"libdevice.y0({x})",
         name="special_bessel_y0",
     ),
     bessel_y1=OverridesData(
         type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
-        cpp="bessel_y1_forward({x})",
-        triton="libdevice.y1({x})",
+        cpp=lambda x: f"bessel_y1_forward({x})",
+        triton=lambda x: f"libdevice.y1({x})",
         name="special_bessel_y1",
     ),
     digamma=OverridesData(
         type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
-        cpp="calc_digamma({x})",
-        cppvec="{x}.digamma()",
+        cpp=lambda x: f"calc_digamma({x})",
+        cppvec=lambda x: f"{x}.digamma()",
         name="digamma",
     ),
     # no cpp nor triton implementation for entr, it is defined as decomposition
     # erf, erfc
     erfcx=OverridesData(
         type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
-        cpp="calc_erfcx({x})",
-        triton="libdevice.erfcx({x})",
+        cpp=lambda x: f"calc_erfcx({x})",
+        triton=lambda x: f"libdevice.erfcx({x})",
         name="special_erfcx",
+    ),
+    fma=OverridesData(
+        type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
+        cpp=lambda x, y, z: f"std::fma({x}, {y}, {z})",
+        cppvec=lambda x, y, z: f"fmadd({x}, {y}, {z})",
+        triton=lambda x, y, z: f"libdevice.fma({x}, {y}, {z})",
+        name="fma",
     ),
     # erfinv, exp2, expit, gammaln
     igamma=OverridesData(
         type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
-        cpp="calc_igamma({x}, {y})",
+        cpp=lambda x, y: f"calc_igamma({x}, {y})",
         name="igamma",
     ),
     igammac=OverridesData(
         type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
-        cpp="calc_igammac({x}, {y})",
+        cpp=lambda x, y: f"calc_igammac({x}, {y})",
         name="igammac",
     ),
     gammainc=OverridesData(
         type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
-        cpp="calc_igamma({x}, {y})",
+        cpp=lambda x, y: f"calc_igamma({x}, {y})",
         name="special_gammainc",
     ),
     gammaincc=OverridesData(
         type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
-        cpp="calc_igammac({x}, {y})",
+        cpp=lambda x, y: f"calc_igammac({x}, {y})",
         name="special_gammaincc",
     ),
     i0=OverridesData(
         type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
-        cpp="calc_i0({x})",
-        triton="libdevice.cyl_bessel_i0({x})",
-        cppvec="{x}.i0()",
+        cpp=lambda x: f"calc_i0({x})",
+        triton=lambda x: f"libdevice.cyl_bessel_i0({x})",
+        cppvec=lambda x: f"{x}.i0()",
         name="i0",
     ),
     i0e=OverridesData(
         type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
-        cpp="calc_i0e({x})",
-        cppvec="{x}.i0e()",
+        cpp=lambda x: f"calc_i0e({x})",
+        cppvec=lambda x: f"{x}.i0e()",
         name="special_i0e",
     ),
     i1=OverridesData(
         type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
-        cpp="calc_i1({x})",
-        triton="libdevice.cyl_bessel_i1({x})",
+        cpp=lambda x: f"calc_i1({x})",
+        triton=lambda x: f"libdevice.cyl_bessel_i1({x})",
         name="special_i1",
     ),
     i1e=OverridesData(
         type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
-        cpp="calc_i1e({x})",
+        cpp=lambda x: f"calc_i1e({x})",
         name="special_i1e",
     ),
     log_ndtr=OverridesData(
         type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
-        cpp="calc_log_ndtr({x})",
+        cpp=lambda x: f"calc_log_ndtr({x})",
         name="special_log_ndtr",
     ),
     # logit
     modified_bessel_i0=OverridesData(
         type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
-        cpp="modified_bessel_i0_forward({x})",
-        triton="libdevice.cyl_bessel_i0({x})",
+        cpp=lambda x: f"modified_bessel_i0_forward({x})",
+        triton=lambda x: f"libdevice.cyl_bessel_i0({x})",
         name="special_modified_bessel_i0",
     ),
     modified_bessel_i1=OverridesData(
         type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
-        cpp="modified_bessel_i1_forward({x})",
-        triton="libdevice.cyl_bessel_i1({x})",
+        cpp=lambda x: f"modified_bessel_i1_forward({x})",
+        triton=lambda x: f"libdevice.cyl_bessel_i1({x})",
         name="special_modified_bessel_i1",
     ),
     modified_bessel_k0=OverridesData(
         type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
-        cpp="modified_bessel_k0_forward({x})",
+        cpp=lambda x: f"modified_bessel_k0_forward({x})",
         name="special_modified_bessel_k0",
     ),
     modified_bessel_k1=OverridesData(
         type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
-        cpp="modified_bessel_k1_forward({x})",
+        cpp=lambda x: f"modified_bessel_k1_forward({x})",
         name="special_modified_bessel_k1",
     ),
     # multigamma
     ndtr=OverridesData(
         type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
-        cpp="calc_ndtr({x})",
+        cpp=lambda x: f"calc_ndtr({x})",
         name="special_ndtr",
     ),
     ndtri=OverridesData(
         type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
-        cpp="calc_ndtri({x})",
+        cpp=lambda x: f"calc_ndtri({x})",
         name="special_ndtri",
     ),
     polygamma=OverridesData(
         type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
-        cpp="calc_polygamma({y}, {x})",
+        cpp=lambda x, y: f"calc_polygamma({y}, {x})",
         name="polygamma",
     ),
     # psi - alias to digamma
     # round
     scaled_modified_bessel_k0=OverridesData(
         type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
-        cpp="scaled_modified_bessel_k0_forward({x})",
+        cpp=lambda x: f"scaled_modified_bessel_k0_forward({x})",
         name="special_scaled_modified_bessel_k0",
     ),
     scaled_modified_bessel_k1=OverridesData(
         type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
-        cpp="scaled_modified_bessel_k1_forward({x})",
+        cpp=lambda x: f"scaled_modified_bessel_k1_forward({x})",
         name="special_scaled_modified_bessel_k1",
     ),
     # sinc
     spherical_bessel_j0=OverridesData(
         type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
-        cpp="spherical_bessel_j0_forward({x})",
+        cpp=lambda x: f"spherical_bessel_j0_forward({x})",
         name="special_spherical_bessel_j0",
     ),
     zeta=OverridesData(
         type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
-        cpp="zeta({x}, {y})",
+        cpp=lambda x, y: f"zeta({x}, {y})",
         name="special_zeta",
     ),
     chebyshev_polynomial_t=OverridesData(
         type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
-        cpp="chebyshev_polynomial_t_forward({x}, {y})",
+        cpp=lambda x, y: f"chebyshev_polynomial_t_forward({x}, {y})",
         name="special_chebyshev_polynomial_t",
     ),
     chebyshev_polynomial_u=OverridesData(
         type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
-        cpp="chebyshev_polynomial_u_forward({x}, {y})",
+        cpp=lambda x, y: f"chebyshev_polynomial_u_forward({x}, {y})",
         name="special_chebyshev_polynomial_u",
     ),
     chebyshev_polynomial_v=OverridesData(
         type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
-        cpp="chebyshev_polynomial_v_forward({x}, {y})",
+        cpp=lambda x, y: f"chebyshev_polynomial_v_forward({x}, {y})",
         name="special_chebyshev_polynomial_v",
     ),
     chebyshev_polynomial_w=OverridesData(
         type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
-        cpp="chebyshev_polynomial_w_forward({x}, {y})",
+        cpp=lambda x, y: f"chebyshev_polynomial_w_forward({x}, {y})",
         name="special_chebyshev_polynomial_w",
     ),
     legendre_polynomial_p=OverridesData(
         type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
-        cpp="legendre_polynomial_p_forward({x}, {y})",
+        cpp=lambda x, y: f"legendre_polynomial_p_forward({x}, {y})",
         name="special_legendre_polynomial_p",
     ),
     shifted_chebyshev_polynomial_t=OverridesData(
         type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
-        cpp="shifted_chebyshev_polynomial_t_forward({x}, {y})",
+        cpp=lambda x, y: f"shifted_chebyshev_polynomial_t_forward({x}, {y})",
         name="special_shifted_chebyshev_polynomial_t",
     ),
     shifted_chebyshev_polynomial_u=OverridesData(
         type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
-        cpp="shifted_chebyshev_polynomial_u_forward({x}, {y})",
+        cpp=lambda x, y: f"shifted_chebyshev_polynomial_u_forward({x}, {y})",
         name="special_shifted_chebyshev_polynomial_u",
     ),
     shifted_chebyshev_polynomial_v=OverridesData(
         type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
-        cpp="shifted_chebyshev_polynomial_v_forward({x}, {y})",
+        cpp=lambda x, y: f"shifted_chebyshev_polynomial_v_forward({x}, {y})",
         name="special_shifted_chebyshev_polynomial_v",
     ),
     shifted_chebyshev_polynomial_w=OverridesData(
         type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
-        cpp="shifted_chebyshev_polynomial_w_forward({x}, {y})",
+        cpp=lambda x, y: f"shifted_chebyshev_polynomial_w_forward({x}, {y})",
         name="special_shifted_chebyshev_polynomial_w",
     ),
     hermite_polynomial_h=OverridesData(
         type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
-        cpp="hermite_polynomial_h_forward({x}, {y})",
+        cpp=lambda x, y: f"hermite_polynomial_h_forward({x}, {y})",
         name="special_hermite_polynomial_h",
     ),
     hermite_polynomial_he=OverridesData(
         type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
-        cpp="hermite_polynomial_he_forward({x}, {y})",
+        cpp=lambda x, y: f"hermite_polynomial_he_forward({x}, {y})",
         name="special_hermite_polynomial_he",
     ),
     laguerre_polynomial_l=OverridesData(
         type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
-        cpp="laguerre_polynomial_l_forward({x}, {y})",
+        cpp=lambda x, y: f"laguerre_polynomial_l_forward({x}, {y})",
         name="special_laguerre_polynomial_l",
     ),
 )
@@ -979,7 +1064,7 @@ class KernelArgs:
         return str(size)
 
     def cpp_argdefs(self):
-        from .cpp import DTYPE_TO_CPP, INDEX_TYPE
+        from .cpp_utils import DTYPE_TO_CPP, INDEX_TYPE
 
         call_args = []
         arg_defs = []
@@ -1022,12 +1107,14 @@ class KernelArgs:
     def python_argdefs(self):
         arg_defs = []
         call_args = []
+        arg_types = []
         precompile_args: List[Union[TensorArg, SizeArg, WorkspaceArg]] = []
         for inplaced in unique(self.inplace_buffers.values()):
             if self._buffer_is_marked_removed(inplaced):
                 continue
             arg_defs.append(inplaced.inner_name)
             call_args.append(inplaced.other_names[-1])
+            arg_types.append(V.graph.get_dtype(inplaced.other_names[-1]))
             precompile_args.append(
                 TensorArg(
                     name=inplaced.inner_name,
@@ -1042,6 +1129,7 @@ class KernelArgs:
                 continue
             arg_defs.append(inner)
             call_args.append(outer)
+            arg_types.append(V.graph.get_dtype(outer))
             precompile_args.append(
                 TensorArg(
                     name=inner,
@@ -1052,6 +1140,7 @@ class KernelArgs:
         for outer, inner in self.sizevars.items():
             arg_defs.append(inner)
             call_args.append(outer)
+            arg_types.append(type(outer))
             precompile_args.append(SizeArg(inner, outer))
             if V.graph.wrapper_code:
                 V.graph.wrapper_code.ensure_size_computed(outer)
@@ -1060,7 +1149,7 @@ class KernelArgs:
             call_args.append("workspace")
             precompile_args.append(self.workspace_arg)
 
-        return arg_defs, call_args, precompile_args
+        return arg_defs, call_args, precompile_args, arg_types
 
     def aliases(self):
         for inplaced in unique(self.inplace_buffers.values()):
@@ -1112,6 +1201,7 @@ class CSEVariable:
         assert isinstance(bounds, ValueRanges)
         self.name = name
         self.bounds = bounds
+        self.use_count = 1  # track how many tims this expression is used
 
     def __str__(self):
         return self.name
@@ -1125,10 +1215,13 @@ class CSEVariable:
     def update_on_args(self, name, args, kwargs):
         pass
 
+    def __repr__(self):
+        return f"{self.__class__.__name__}({self.name!r})"
+
 
 class CppWrapperKernelArgs(KernelArgs):
     def wrap_ptr_arg(self, buf, dtype):
-        from .cpp import DTYPE_TO_CPP
+        from .cpp_utils import DTYPE_TO_CPP
 
         if config.abi_compatible:
             # In the abi_compatible model, we just return the buf here.
@@ -1201,11 +1294,12 @@ class CSE:
             # assert expr.bounds == bounds, but sometimes the expression is created
             # with the loose ValueRanges.unknown(), so we need to tighten the bounds
             expr.bounds = expr.bounds.tighten(bounds)
+            expr.use_count += 1
             return expr
         cache_key = expr.getvalue() if isinstance(expr, IndentedBuffer) else expr
         var = self.cache.get(cache_key, None)
         if not var:
-            var = self.newvar(bounds) if assignment else None
+            var = self.newvar(bounds)
             self.cache[cache_key] = var
             if write:
                 if V.kernel.current_node:
@@ -1225,6 +1319,7 @@ class CSE:
                     buffer.writeline(line)
         else:
             var.bounds = var.bounds.tighten(bounds)
+            var.use_count += 1
 
         return var
 
@@ -1233,49 +1328,6 @@ class CSE:
         var = V.kernel.create_cse_var(var_name, bounds)
         self.varname_map[var_name] = var
         return var
-
-
-class IndirectAssertLine(DeferredLineBase):
-    def __init__(self, line, assert_fn, var, mask, size_map):
-        self.var = var
-        self.mask = mask
-        self.line = line
-        self.assert_fn = assert_fn
-        self.size_map = size_map
-
-    def __call__(self):
-        size, size_str = self.size_map[(self.var, self.mask)]
-
-        # We assert if we've not been able to prove the bound
-        assert_min = (self.var.bounds.lower >= 0) != sympy.true
-        assert_max = (self.var.bounds.upper < size) != sympy.true
-
-        # FooBar interview question
-        if not (assert_min or assert_max):
-            return None
-        elif assert_min and assert_max:
-            # The conditions need to be in parens because of Python's operator precedence.
-            # It'd be less error-prone to use and/or/not, which is suported by triton
-            cond = f"(0 <= {self.var}) & ({self.var} < {size_str})"
-            cond_print = f"0 <= {self.var} < {size_str}"
-        elif assert_min:
-            cond = f"0 <= {self.var}"
-            cond_print = cond
-        else:
-            assert assert_max
-            cond = f"{self.var} < {size_str}"
-            cond_print = cond
-
-        if self.mask:
-            cond = f"({cond}) | ~{self.mask}"
-        return self.line.format(
-            assert_fn=self.assert_fn, cond=cond, cond_print=cond_print
-        )
-
-    def _new_line(self, line):
-        return IndirectAssertLine(
-            line, self.assert_fn, self.var, self.mask, self.size_map
-        )
 
 
 class CodeGen:
@@ -1289,6 +1341,28 @@ class CodeGen:
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         self.exit_stack.__exit__(exc_type, exc_val, exc_tb)
+
+
+class ScopedDict:
+    def __init__(self, original_dict):
+        self.original_dict = original_dict
+        self.new_items = {}
+
+    def __getitem__(self, key):
+        if key in self.new_items:
+            return self.new_items[key]
+        return self.original_dict[key]
+
+    def __setitem__(self, key, value):
+        self.new_items[key] = value
+
+    def __contains__(self, key):
+        return key in self.new_items or key in self.original_dict
+
+    def get(self, key, default=None):
+        if key in self.new_items:
+            return self.new_items[key]
+        return self.original_dict.get(key, default)
 
 
 class Kernel(CodeGen):
@@ -1307,6 +1381,10 @@ class Kernel(CodeGen):
         self.loads = IndentedBuffer()
         self.compute = IndentedBuffer()
         self.stores = IndentedBuffer()
+
+        self.num_load = 0
+        self.num_reduction = 0
+
         self.cse: CSE = CSE(self.newvar_prefix, self.suffix)
         self.must_keep_buffers = set()
         self.store_buffer_names = set()
@@ -1314,12 +1392,6 @@ class Kernel(CodeGen):
         # set in set_current_node
         self.current_node = None
         self.node_to_bounds: Optional[Dict[torch.fx.Node, ValueRanges[Any]]] = None
-        # Upper bounds for indirect_indexing and their str representation
-        # NB: None, None is never stored in map, but it is the assumed
-        # "not set" value for the dict
-        self.indirect_max_sizes: Dict[
-            Tuple[CSEVariable, str], Union[Tuple[sympy.Expr, str], Tuple[None, None]]
-        ] = {}
 
         self.removed_buffers = set()
         self.inplaced_to_remove = set()
@@ -1344,6 +1416,13 @@ class Kernel(CodeGen):
 
     @contextlib.contextmanager
     def swap_buffers(self, lb, cb=None, sb=None):
+        def scope_cse(cse):
+            new_cse = cse.clone()
+            new_cse.cache = ScopedDict(cse.cache)
+            new_cse.reduction_cache = ScopedDict(cse.reduction_cache)
+            new_cse.store_cache = ScopedDict(cse.store_cache)
+            return new_cse
+
         if cb is None:
             cb = lb
         loads = self.loads
@@ -1353,7 +1432,7 @@ class Kernel(CodeGen):
         self.loads = lb
         self.compute = cb
         self.stores = sb
-        self.cse = cse.clone()
+        self.cse = scope_cse(cse)
         try:
             yield
         finally:
@@ -1363,7 +1442,7 @@ class Kernel(CodeGen):
             self.cse = cse
 
     def load(self, name: str, index: sympy.Expr) -> CSEVariable:
-        raise NotImplementedError()
+        raise NotImplementedError
 
     def indirect_load(self, name: str, index: sympy.Expr):
         """A load the depends on an index we have read"""
@@ -1376,12 +1455,12 @@ class Kernel(CodeGen):
             self.loads = prior
 
     def store_reduction(self, name: str, index: sympy.Expr, value: CSEVariable):
-        raise NotImplementedError()
+        raise NotImplementedError
 
     def store(
         self, name: str, index: sympy.Expr, value: CSEVariable, mode: StoreMode = None
     ) -> None:
-        raise NotImplementedError()
+        raise NotImplementedError
 
     def reduction(
         self,
@@ -1390,7 +1469,7 @@ class Kernel(CodeGen):
         reduction_type: ReductionType,
         value: Union[CSEVariable, Tuple[CSEVariable, ...]],
     ) -> Union[CSEVariable, Tuple[CSEVariable, ...]]:
-        raise NotImplementedError()
+        raise NotImplementedError
 
     def scan(
         self,
@@ -1399,9 +1478,11 @@ class Kernel(CodeGen):
             [Tuple[CSEVariable, ...], Tuple[CSEVariable, ...]], Tuple[CSEVariable, ...]
         ],
         values: Tuple[CSEVariable, ...],
-        inits: Tuple[int, ...],
     ) -> Tuple[CSEVariable, ...]:
-        raise NotImplementedError()
+        raise NotImplementedError
+
+    def var_ranges(self):
+        raise NotImplementedError
 
     def bucketize(
         self,
@@ -1414,36 +1495,65 @@ class Kernel(CodeGen):
         """
         See [Note: Inductor bucketize op]
         """
-        raise NotImplementedError()
+        raise NotImplementedError
 
     @property
     def assert_function(self) -> str:
-        raise NotImplementedError()
+        raise NotImplementedError
+
+    def indirect_assert(
+        self,
+        var: Union[CSEVariable, str],
+        lower: Optional[str],
+        upper: Optional[str],
+        mask: Optional[str] = None,
+    ) -> str:
+        if isinstance(var, CSEVariable):
+            var = str(var)
+        assert isinstance(var, str)
+        assert lower is None or isinstance(lower, str)
+        assert upper is None or isinstance(upper, str)
+        if lower and upper:
+            # The conditions need to be in parens because of Python's operator precedence.
+            # It'd be less error-prone to use and/or/not, which is suported by triton
+            cond = f"({lower} <= {var}) & ({var} < {upper})"
+            cond_print = f"{lower} <= {var} < {upper}"
+        elif lower:
+            cond = f"{lower} <= {var}"
+            cond_print = cond
+        else:
+            assert upper
+            cond = f"{var} < {upper}"
+            cond_print = cond
+
+        if mask:
+            cond = f"({cond}) | ~({mask})"
+
+        return f'{self.assert_function}({cond}, "index out of bounds: {cond_print}")'
+
+    def check_bounds(
+        self, expr: sympy.Expr, size: sympy.Expr, lower: bool, upper: bool
+    ):
+        raise NotImplementedError
 
     def index_to_str(self, index: sympy.Expr) -> str:
-        raise NotImplementedError()
+        raise NotImplementedError
 
     def __enter__(self):
         # TODO: hoist this to top level
         class CSEProxy:
             self.name = "CSEProxy"
+            vr_analysis = ValueRangeAnalysis()
 
             @staticmethod
             def __getattr__(name: str) -> Callable[..., CSEVariable]:  # type: ignore[misc]
                 def inner(*args, **kwargs):
-                    # TritonTemplateKernel has no current_node
-                    buf_bounds = ValueRanges.unknown()
-                    if hasattr(V.interpreter, "current_node"):
-                        fx_node = V.interpreter.current_node
-                        assert isinstance(self.node_to_bounds, dict)
-                        buf_bounds = self.node_to_bounds.get(
-                            fx_node, ValueRanges.unknown()
-                        )
+                    bounds = CSEProxy._bound_variable(name, *args, **kwargs)
 
                     value = getattr(parent_handler, name)(*args, **kwargs)  # type: ignore[has-type]
 
                     def do_cse(v):
-                        csevar = self.cse.generate(self.compute, v, bounds=buf_bounds)
+                        csevar = self.cse.generate(self.compute, v, bounds=bounds)
                         csevar.update_on_args(name, args, kwargs)
                         return csevar
 
@@ -1452,12 +1562,65 @@ class Kernel(CodeGen):
                 return inner
 
             @staticmethod
+            def _bound_variable(name, *args, **kwargs):
+                """
+                If the variable comes from an FX node, we forward the bound we have already computed
+                Else, if the variable when codegen'ing another op, we try to compute its bounds
+                """
+                from ..select_algorithm import TritonTemplateKernel
+
+                if isinstance(V.kernel, TritonTemplateKernel):
+                    return ValueRanges.unknown()
+
+                fx_node = V.interpreter.current_node
+                if fx_node.target == name and self.node_to_bounds is not None:
+                    assert isinstance(self.node_to_bounds, dict)
+                    return self.node_to_bounds.get(fx_node, ValueRanges.unknown())
+                elif config.compute_all_bounds and hasattr(ValueRangeAnalysis, name):
+                    # These create lots of inner strings. We would need to compute the bounds at the ops
+                    # We will also likely not get much from computing VRs on these nodes
+                    if any(
+                        s in fx_node.target
+                        for s in ("set_indirect", "reduction", "scan")
+                    ):
+                        return ValueRanges.unknown()
+
+                    # We assume that the inputs come from `ops.` and are not strings. If you want to generate
+                    # intermediary strings, wrap them in CSE variables with properly initialised bounds.
+
+                    # If there is no FX bound but we know how to compute one we do so
+                    assert not kwargs
+
+                    def arg_to_bound(x):
+                        if isinstance(x, CSEVariable):
+                            return x.bounds
+                        elif isinstance(x, sympy.Expr):
+                            return bound_sympy(x)
+                        else:
+                            return x
+
+                    arg_bounds = list(map(arg_to_bound, args))
+                    return getattr(CSEProxy.vr_analysis, name)(*arg_bounds)
+                else:
+                    return ValueRanges.unknown()
+
+            @staticmethod
             def indirect_indexing(
-                var: CSEVariable, size: sympy.Expr, check: bool = True
+                var: CSEVariable, size: Union[sympy.Expr, int], check: bool = True
             ):
+                if isinstance(size, int):
+                    size = sympy.Integer(size)
+                assert isinstance(size, sympy.Expr), size
                 # Skip CSE since this doesn't return an expression
 
                 if var.bounds.lower < 0:  # type: ignore[operator]
+                    stm = ops.add(var, ops.index_expr(size, torch.long))
+                    # Mixed negative and non-negative
+                    if var.bounds.upper >= 0:  # type: ignore[operator]
+                        lt = ops.lt(var, 0)
+                        stm = ops.where(lt, stm, var)
+
+                    # Propagate bounds as we know how to compute them properly
                     new_bounds = ValueRanges.unknown()
                     if var.bounds != ValueRanges.unknown() and isinstance(
                         size, sympy.Number
@@ -1465,50 +1628,32 @@ class Kernel(CodeGen):
                         # Take the negative part of the bound and add size to it
                         # Then take union of that and the positive part
                         # This is a tighter bound than that of a generic ops.where, as we have info on the cond
-                        neg = var.bounds & ValueRanges(-sympy.oo, -1)
-                        new_bounds = ValueRanges(neg.lower + size, neg.upper + size)
+                        neg_bounds = var.bounds & ValueRanges(-sympy.oo, -1)
+                        new_bounds = ValueRanges(
+                            neg_bounds.lower + size, neg_bounds.upper + size
+                        )
                         # We don't have a good way of representing the empty range
                         if var.bounds.upper >= 0:  # type: ignore[operator]
                             pos = var.bounds & ValueRanges(0, sympy.oo)
                             new_bounds = new_bounds | pos
 
-                    stm = ops.add(var, self.rename_indexing(size))
-                    # Mixed negative and non-negative
-                    if var.bounds.upper >= 0:  # type: ignore[operator]
-                        lt = ops.lt(var, "0")
-                        stm = ops.where(lt, stm, var)
-                    new_var = self.cse.generate(self.compute, stm, bounds=new_bounds)
+                    var = self.cse.generate(self.compute, stm, bounds=new_bounds)
 
-                    new_var.update_on_args("index_wrap", (var,), {})
-                    var = new_var
-
-                if self.generate_assert(check):
-                    mask = self.load_mask(var)
-
-                    # An assertion line may have been written already, if so just
-                    # update the max size.
-                    map_key = (var, mask)
-                    existing_size, _ = self.indirect_max_sizes.get(
-                        map_key, (None, None)
+                sympy_var = parent_handler.indirect_indexing(var, size, check)
+                if generate_assert(check):
+                    assert_lower = not (var.bounds.lower >= 0)
+                    # value ranges cannot x < s when x and s are symbols
+                    assert_upper = not isinstance(size, sympy.Number) or not (
+                        var.bounds.upper < size
                     )
-                    if existing_size is not None:
-                        size = sympy.Min(size, existing_size)
-                    else:
-                        line = (
-                            '{assert_fn}({cond}, "index out of bounds: {cond_print}")'
-                        )
-                        self.compute.writeline(
-                            IndirectAssertLine(
-                                line,
-                                self.assert_function,
-                                var,
-                                mask,
-                                self.indirect_max_sizes,
-                            )
-                        )
+                    self.check_bounds(sympy_var, size, assert_lower, assert_upper)
+                return sympy_var
 
-                    self.indirect_max_sizes[map_key] = (size, self.index_to_str(size))
-                return sympy_index_symbol(str(var))
+            @staticmethod
+            def check_bounds(
+                expr: sympy.Expr, size: sympy.Expr, lower: bool, upper: bool
+            ):
+                return self.check_bounds(expr, size, lower, upper)
 
             @staticmethod
             def load(name: str, index: sympy.Expr) -> CSEVariable:
@@ -1516,12 +1661,17 @@ class Kernel(CodeGen):
                     # A load from an invalidated store requires us to
                     # keep the actual buffer around
                     V.kernel.must_keep_buffers.add(name)
-                if free_symbol_startswith(index, "tmp"):
+                if free_symbol_is_type(index, SymT.TMP):
                     return self.indirect_load(name, index)
                 store_cache = self.cse.store_cache
                 if name in store_cache:
                     return store_cache[name]
-                return self.load(name, index)
+                out = self.load(name, index)
+                # count load that is not in the store_cache, and also not in the
+                # cse cache.
+                if out.use_count == 1:
+                    self.num_load += 1
+                return out
 
             @staticmethod
             def store(
@@ -1556,6 +1706,7 @@ class Kernel(CodeGen):
                 reduction_type: ReductionType,
                 value: Union[CSEVariable, Tuple[CSEVariable, ...]],
             ) -> Union[CSEVariable, Tuple[CSEVariable, ...]]:
+                self.num_reduction += 1
                 return self.reduction(dtype, src_dtype, reduction_type, value)
 
             @staticmethod
@@ -1566,9 +1717,8 @@ class Kernel(CodeGen):
                     Tuple[CSEVariable, ...],
                 ],
                 values: Tuple[CSEVariable, ...],
-                inits: Tuple[int, ...],
             ) -> Tuple[CSEVariable, ...]:
-                return self.scan(dtypes, combine_fn, values, inits)
+                return self.scan(dtypes, combine_fn, values)
 
             @staticmethod
             def bucketize(
@@ -1616,13 +1766,6 @@ class Kernel(CodeGen):
             V.graph.scheduler.remove_kernel_local_buffers()
         super().__exit__(exc_type, exc_val, exc_tb)
 
-    def generate_assert(self, check):
-        return (check or config.debug_index_asserts) and config.assert_indirect_indexing
-
-    def load_mask(self, var) -> str:
-        # only the triton kernel requires mask
-        return ""
-
     def rename_indexing(self, index) -> sympy.Expr:
         # adds the necessary kernel args for index expressions
         # and renames variables in index expressions to kernel arg names
@@ -1633,8 +1776,14 @@ class Kernel(CodeGen):
         replacements = {
             x: self.args.size(x)
             for x in sorted_symbols
-            if x.name.startswith(("s", "u", "ps"))
-            or (x.name.startswith("i") and not x.name.startswith("idx"))
+            if symbol_is_type(
+                x,
+                (
+                    SymT.UNBACKED_INT,
+                    SymT.SIZE,
+                    SymT.PRECOMPUTED_SIZE,
+                ),
+            )
         }
         return sympy_subs(index, replacements)
 
@@ -1646,14 +1795,8 @@ class Kernel(CodeGen):
 class OptimizationContext:
     key: ClassVar[str] = "opt_ctx"
 
-    # Load value as mask
-    is_load_as_mask: bool = False
-
     dtype: Optional[torch.dtype] = None
     ops_name: str = ""
-
-    # Load uint8/int8 value as float32
-    is_load_int8_as_float: bool = False
 
 
 @functools.lru_cache(None)
@@ -1676,9 +1819,19 @@ class KernelTemplate:
     """
 
     @staticmethod
+    def indent_except_first(source: str, num_indents: int, indents_spacing=4):
+        lines = source.splitlines(True)
+        if len(lines) > 1:
+            lines[1:] = [
+                (" " * indents_spacing * num_indents) + line for line in lines[1:]
+            ]
+        return "".join(lines)
+
+    @staticmethod
     def _template_from_string(source):
         env = jinja2_env()
         if env is not None:
+            env.filters["indent_except_first"] = KernelTemplate.indent_except_first
             return env.from_string(source)
         return None
 
@@ -1714,4 +1867,4 @@ class KernelTemplate:
         Generates a ChoiceCaller instance from the given arguments.
         """
 
-        raise NotImplementedError()
+        raise NotImplementedError

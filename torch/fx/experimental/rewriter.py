@@ -21,6 +21,11 @@ class AST_Rewriter(ast.NodeTransformer):
     https://docs.python.org/3/library/ast.html#ast.NodeTransformer
     """
 
+    # This function checks for new keys added in the globals dict. TorchDynamo
+    # can insert new keys in the global dict and upset the check. Therefore, put
+    # a disable here. This function is an optimization pass and not really
+    # suitable for dynamo tracing anyways.
+    @torch._dynamo.disable
     def rewrite(self, fn: FunctionType):
 
         # Normalize the source lines

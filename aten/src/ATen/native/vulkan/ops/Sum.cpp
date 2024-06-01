@@ -132,7 +132,7 @@ Tensor sum_dim_IntList(
   return self;
 }
 
-Tensor sum(const Tensor& self, const c10::optional<ScalarType> dtype) {
+Tensor sum(const Tensor& self, const std::optional<ScalarType> dtype) {
   std::vector<int64_t> dims;
   for (int64_t d = 0; d < self.dim(); d++) {
     // If any dimension has zero elements, we will shortcut to a zero-dim.

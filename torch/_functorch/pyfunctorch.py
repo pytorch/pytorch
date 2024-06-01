@@ -1,18 +1,19 @@
-from abc import ABC, abstractmethod
 import contextlib
+from abc import ABC, abstractmethod
 from typing import Any, List, Tuple
+
 import torch
 import torch.utils._pytree as pytree
 from torch._C._functorch import (
-    TransformType,
-    RandomnessType,
-    CInterpreter,
-    CGradInterpreterPtr,
     CFunctionalizeInterpreterPtr,
-    CVmapInterpreterPtr,
+    CGradInterpreterPtr,
+    CInterpreter,
     CJvpInterpreterPtr,
+    CVmapInterpreterPtr,
     pop_dynamic_layer_stack,
     push_dynamic_layer_stack,
+    RandomnessType,
+    TransformType,
 )
 from torch.autograd.forward_ad import _set_fwd_grad_enabled
 
@@ -71,7 +72,7 @@ class FuncTorchInterpreter(ABC):
         return self._cptr.key()
 
     def get_state(self):
-        raise NotImplementedError()
+        raise NotImplementedError
 
     def check_state(self, state):
         return state == self.get_state()
@@ -84,6 +85,33 @@ def temporarily_pop_interpreter_stack():
         yield
     finally:
         push_dynamic_layer_stack(saved)
+
+
+@contextlib.contextmanager
+def temporarily_clear_interpreter_stack():
+    stack = []
+    try:
+        while torch._C._functorch.peek_interpreter_stack() is not None:
+            stack.append(pop_dynamic_layer_stack())
+        yield list(stack)
+    finally:
+        while stack:
+            push_dynamic_layer_stack(stack.pop())
+
+
+@contextlib.contextmanager
+def temporarily_restore_interpreter_stack(stack):
+    pushed = []
+    try:
+        for s in reversed(stack):
+            push_dynamic_layer_stack(s)
+            pushed.append(s)
+        yield
+    finally:
+        for s in reversed(pushed):
+            # TODO: would be nice to assert that the layers are the same, but
+            # Python object identity is not preserved
+            pop_dynamic_layer_stack()
 
 
 class VmapInterpreter(FuncTorchInterpreter):
@@ -132,7 +160,9 @@ class GradInterpreter(FuncTorchInterpreter):
         self._cptr = CGradInterpreterPtr(cdata)
 
     def lift(self, args, kwargs):
-        args, kwargs = pytree.tree_map_only(torch.Tensor, self._cptr.lift, [args, kwargs])
+        args, kwargs = pytree.tree_map_only(
+            torch.Tensor, self._cptr.lift, [args, kwargs]
+        )
         return args, kwargs
 
     def process(self, op, args, kwargs):
@@ -164,7 +194,9 @@ class JvpInterpreter(FuncTorchInterpreter):
         self._cptr = CJvpInterpreterPtr(cdata)
 
     def lift(self, args, kwargs):
-        args, kwargs = pytree.tree_map_only(torch.Tensor, self._cptr.lift, [args, kwargs])
+        args, kwargs = pytree.tree_map_only(
+            torch.Tensor, self._cptr.lift, [args, kwargs]
+        )
         return args, kwargs
 
     def process(self, op, args, kwargs):
@@ -200,6 +232,9 @@ class FunctionalizeInterpreter(FuncTorchInterpreter):
 
     def functionalize_add_back_views(self):
         return self._cptr.functionalizeAddBackViews()
+
+    def get_state(self):
+        return (self.key().name, self.level())
 
 
 def coerce_cinterpreter(cinterpreter: CInterpreter) -> FuncTorchInterpreter:
@@ -239,8 +274,9 @@ def compare_functorch_state(states: List[Tuple[Any, ...]]) -> bool:
         return False
 
     cis = retrieve_all_functorch_interpreters()
-    return len(cis) == len(states) and \
-        all(ci.check_state(state) for ci, state in zip(cis, states))
+    return len(cis) == len(states) and all(
+        ci.check_state(state) for ci, state in zip(cis, states)
+    )
 
 
 def dispatch_functorch(op, args, kwargs):
@@ -251,5 +287,6 @@ def dispatch_functorch(op, args, kwargs):
     # transforms, so we manually unwrap the dead tensors here.
     # This logic won't need to exist when we have mode-only functorch.
     args, kwargs = pytree.tree_map_only(
-        torch.Tensor, torch._C._functorch.unwrap_if_dead, (args, kwargs))
+        torch.Tensor, torch._C._functorch.unwrap_if_dead, (args, kwargs)
+    )
     return interpreter.process(op, args, kwargs)

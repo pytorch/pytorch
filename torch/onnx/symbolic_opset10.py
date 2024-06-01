@@ -785,7 +785,7 @@ def nan_to_num(g: jit_utils.GraphContext, input, nan, posinf, neginf):
     )
 
     # For None values of posinf, neginf we use the greatest/lowest finite
-    # value representable by input’s dtype.
+    # value representable by input's dtype.
     finfo = torch.finfo(input_dtype)
     if posinf is None:
         posinf = finfo.max

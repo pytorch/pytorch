@@ -479,10 +479,10 @@ std::tuple<Tensor, Tensor> native_multi_head_attention_cuda(
     const Tensor& qkv_bias,
     const Tensor& proj_weight,
     const Tensor& proj_bias,
-    const c10::optional<Tensor>& mask,
+    const std::optional<Tensor>& mask,
     bool need_weights,
     bool average_attn_weights,
-    const c10::optional<int64_t> mask_type) {
+    const std::optional<int64_t> mask_type) {
   // query shape: [B, T, D]
   // qkv_weight shape: [3 * D, D]
 
@@ -681,7 +681,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt, Tensor, Ten
     double dropout_p,
     bool is_causal,
     bool return_debug_mask,
-    c10::optional<double> scale) {
+    std::optional<double> scale) {
   // Used for tracking usage statistics
   C10_LOG_API_USAGE_ONCE("torch.sdpa.flash_attention");
   // Query (Batch x Num_heads x Q_seq_len  x Dim_per_head)
@@ -719,21 +719,23 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt, Tensor, Ten
               dropout_p,
               is_causal,
               return_debug_mask,
-              scale);
+              scale,
+              c10::nullopt,
+              c10::nullopt);
   // Reshape output to convert nnz to batch_size and seq_len
   Tensor attention = output.transpose(1,2);
 
   return std::make_tuple(attention, logsumexp, Tensor(), Tensor(), max_seqlen_batch_q, max_seqlen_batch_k, philox_seed, philox_offset, debug_attn_mask);
 }
 
-std::tuple<Tensor, Tensor, Tensor, Tensor> _scaled_dot_product_cudnn_attention_cuda(
+std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt, Tensor, Tensor, Tensor> _scaled_dot_product_cudnn_attention_cuda(
     const Tensor& query,
     const Tensor& key,
     const Tensor& value,
     double dropout_p,
     bool is_causal,
     bool training,
-    c10::optional<double> scale) {
+    std::optional<double> scale) {
   // Used for tracking usage statistics
   C10_LOG_API_USAGE_ONCE("torch.sdpa.flash_attention_cudnn");
   // Query (Batch x Num_heads x Q_seq_len  x Dim_per_head)
@@ -773,18 +775,18 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> _scaled_dot_product_cudnn_attention_c
                       cudnn_seed/*Tensor dropoutseed*/,
                       cudnn_offset/*Tensor dropoutoffset*/);
 
-  return std::make_tuple(attention, log_sumexp, cudnn_seed, cudnn_offset);
+  return std::make_tuple(attention, log_sumexp, Tensor(), Tensor(), max_seqlen_batch_q, max_seqlen_batch_k, cudnn_seed, cudnn_offset, Tensor());
 }
 
 std::tuple<Tensor, Tensor, Tensor, Tensor> _scaled_dot_product_efficient_attention_cuda(
     const Tensor& query,
     const Tensor& key,
     const Tensor& value,
-    const c10::optional<at::Tensor>& attn_bias,
+    const std::optional<at::Tensor>& attn_bias,
     bool compute_log_sumexp,
     double dropout_p,
     bool is_causal,
-    c10::optional<double> scale) {
+    std::optional<double> scale) {
   // Used for tracking usage statistics
   C10_LOG_API_USAGE_ONCE("torch.sdpa.mem_efficient_attention");
   // Query -> Query(Batch x Q_seq_len x Num_heads x Dim_per_head)
@@ -817,7 +819,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> _scaled_dot_product_efficient_attenti
 }
 
 int64_t _fused_sdp_choice_cuda(const Tensor& query_, const Tensor& key, const Tensor& value,
-        const c10::optional<Tensor>& attn_mask_, double dropout_p, bool is_causal, c10::optional<double> scale){
+        const std::optional<Tensor>& attn_mask_, double dropout_p, bool is_causal, std::optional<double> scale){
   sdp::sdp_params kernel_params{query_, key, value, attn_mask_, dropout_p, is_causal};
   auto backend = select_sdp_backend(kernel_params);
   if (backend == sdp::SDPBackend::error) {
@@ -834,23 +836,29 @@ _flash_attention_forward(
     const Tensor& query,
     const Tensor& key,
     const Tensor& value,
-    const c10::optional<Tensor>& cumulative_sequence_length_q,
-    const c10::optional<Tensor>& cumulative_sequence_length_k,
+    const std::optional<Tensor>& cumulative_sequence_length_q,
+    const std::optional<Tensor>& cumulative_sequence_length_k,
     int64_t max_seqlen_batch_q,
     int64_t max_seqlen_batch_k,
     double dropout_p,
     bool is_causal,
     bool return_debug_mask,
-    c10::optional<double> scale) {
+    std::optional<double> scale,
+    std::optional<int64_t> window_size_left,
+    std::optional<int64_t> window_size_right,
+    const std::optional<Tensor>& _seqused_k,
+    const std::optional<Tensor>& _alibi_slopes
+    ) {
 #if defined(USE_FLASH_ATTENTION)
   const auto softmax_scale =
       sdp::calculate_scale(query, scale).as_float_unchecked();
-  c10::optional<Tensor> out = c10::nullopt;
-  // This can be used when your sequence length k is not the full extent
-  // of the tensor. This is useful for kv cache scenarios but for now
-  // we will not support in this PR.
-  c10::optional<Tensor> seqused_k = c10::nullopt;
-  c10::optional<Tensor> alibi_slopes = c10::nullopt;
+  std::optional<Tensor> out = c10::nullopt;
+
+  std::optional<Tensor> seqused_k = _seqused_k;
+  std::optional<Tensor> alibi_slopes = _alibi_slopes;
+
+  const int non_null_window_left = window_size_left.has_value() ? window_size_left.value() : -1;
+  const int non_null_window_right = window_size_right.has_value() ? window_size_right.value() : -1;
 
   // We are going to have two paths:
   // 1. The standard MHA path for dense tensors
@@ -886,8 +894,8 @@ _flash_attention_forward(
             softmax_scale,
             false /*zero_tensors*/,
             is_causal,
-            -1, /*window_size_left*/
-            -1, /*window_size_right*/
+            non_null_window_left,
+            non_null_window_right,
             return_debug_mask,
             c10::nullopt /*gen_*/);
   } else {
@@ -909,8 +917,8 @@ _flash_attention_forward(
             dropout_p,
             softmax_scale,
             is_causal,
-            -1, /*window_size_left*/
-            -1, /*window_size_right*/
+            non_null_window_left,
+            non_null_window_right,
             return_debug_mask, /*return_softmax (this is used for testing)*/
             c10::nullopt);
   }
@@ -937,22 +945,23 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt> _efficient_
     const at::Tensor& query, // [b, seqlen, num_heads, K]
     const at::Tensor& key, // [b, seqlen, num_heads, K]
     const at::Tensor& value, // [b, seqlen, num_heads, Kv]
-    const c10::optional<at::Tensor>& bias, // [b, num_heads, seqlen, seqlen]
+    const std::optional<at::Tensor>& bias, // [b, num_heads, seqlen, seqlen]
     // (Mode 1MHK only) [b+1]: cu_seqlens_q[b] contains the
     // position of the first query token for batch $b
-    const c10::optional<at::Tensor>& seqstart_q,
+    const std::optional<at::Tensor>& seqstart_q,
     // (Mode 1MHK only) [b+1]: cu_seqlen_k[b] contains the
     // position of the first key token for batch $b
-    const c10::optional<at::Tensor>& seqstart_k,
+    const std::optional<at::Tensor>& seqstart_k,
     // (Mode 1MHK only) Maximum sequence length across batches
-    const c10::optional<int64_t> max_seqlen_q_,
-    const c10::optional<int64_t> max_seqlen_k_,
+    const std::optional<int64_t> max_seqlen_q_,
+    const std::optional<int64_t> max_seqlen_k_,
     double dropout_p, // attention matrix dropout probability
     int64_t custom_mask_type,
     bool compute_logsumexp,
-    c10::optional<double> scale,
-    const c10::optional<at::Tensor>& causal_diagonal,
-    const c10::optional<at::Tensor>& seqlen_k) {
+    std::optional<double> scale,
+    const std::optional<at::Tensor>& causal_diagonal,
+    const std::optional<at::Tensor>& seqlen_k,
+    const std::optional<int64_t> window_size) {
 #if defined(USE_MEM_EFF_ATTENTION)
 // TODO In theory it is possible to compile with _CUDA_ARCH < 5.0 and run on a
 // machine that is >= 5.0. In practice, this is not a problem but since
@@ -1106,9 +1115,9 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt> _efficient_
          compute_logsumexp ? ceil_div(max_seqlen_q, kAlignLSE) * kAlignLSE : 0},
         query.options().dtype(at::ScalarType::Float));
     typename Kernel::Params p;
-    p.query_ptr = (scalar_t*)query.data_ptr();
-    p.key_ptr = (scalar_t*)key.data_ptr();
-    p.value_ptr = (scalar_t*)value.data_ptr();
+    p.query_ptr = (const scalar_t*)query.const_data_ptr();
+    p.key_ptr = (const scalar_t*)key.const_data_ptr();
+    p.value_ptr = (const scalar_t*)value.const_data_ptr();
     p.logsumexp_ptr = compute_logsumexp
         ? (typename Kernel::lse_scalar_t*)logsumexp.data_ptr()
         : nullptr;
@@ -1127,8 +1136,8 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt> _efficient_
     p.output_ptr = (typename Kernel::output_t*)res.data_ptr();
 
     if (seqstart_q.has_value()) {
-      p.seqstart_q_ptr = (int32_t*)seqstart_q->data_ptr();
-      p.seqstart_k_ptr = (int32_t*)seqstart_k->data_ptr();
+      p.seqstart_q_ptr = (const int32_t*)seqstart_q->const_data_ptr();
+      p.seqstart_k_ptr = (const int32_t*)seqstart_k->const_data_ptr();
     }
 
     p.num_heads = num_heads;
@@ -1142,14 +1151,17 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt> _efficient_
     if (causal_diagonal.has_value()) {
       CHECK_NOSPARSE_LASTCONTIGUOUS_CUDA(causal_diagonal.value());
       TORCH_CHECK(causal_diagonal->scalar_type() == at::ScalarType::Int);
-      p.causal_diagonal_ptr = (int32_t*)causal_diagonal->data_ptr();
+      p.causal_diagonal_ptr = (const int32_t*)causal_diagonal->const_data_ptr();
     }
 
     p.seqlen_k_ptr = nullptr;
     if (seqlen_k.has_value()) {
       CHECK_NOSPARSE_LASTCONTIGUOUS_CUDA(seqlen_k.value());
       TORCH_CHECK(seqlen_k->scalar_type() == at::ScalarType::Int);
-      p.seqlen_k_ptr = (int32_t*)seqlen_k->data_ptr();
+      p.seqlen_k_ptr = (const int32_t*)seqlen_k->const_data_ptr();
+    }
+    if (window_size.has_value()) {
+      p.window_size = *window_size;
     }
     p.scale = sdp::calculate_scale(query, scale).as_float_unchecked();
 
@@ -1169,7 +1181,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt> _efficient_
       TORCH_CHECK(
           bias->scalar_type() == CutlassToAtenDtype<scalar_t>::atScalarType(),
           "invalid dtype for bias - should match query's dtype");
-      p.attn_bias_ptr = (scalar_t*)bias->data_ptr();
+      p.attn_bias_ptr = (const scalar_t*)bias->const_data_ptr();
 
       TORCH_CHECK(bias->dim() == 4, "Bias expected in BMHK format");
       TORCH_CHECK(

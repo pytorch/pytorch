@@ -75,7 +75,7 @@ class LaunchConfig:
     rdzv_configs: Dict[str, Any] = field(default_factory=dict)
     rdzv_timeout: int = -1
     max_restarts: int = 3
-    monitor_interval: float = 30
+    monitor_interval: float = 0.1
     start_method: str = "spawn"
     log_line_prefix_template: Optional[str] = None
     metrics_cfg: Dict[str, str] = field(default_factory=dict)

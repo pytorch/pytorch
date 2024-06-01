@@ -67,6 +67,12 @@ def parse_args() -> Any:
         "--test-matrix", type=str, required=True, help="the original test matrix"
     )
     parser.add_argument(
+        "--selected-test-configs",
+        type=str,
+        default="",
+        help="a comma-separated list of test configurations from the test matrix to keep",
+    )
+    parser.add_argument(
         "--workflow", type=str, help="the name of the current workflow, i.e. pull"
     )
     parser.add_argument(
@@ -175,6 +181,28 @@ def filter(test_matrix: Dict[str, List[Any]], labels: Set[str]) -> Dict[str, Lis
         # When the filter test matrix contain matches or if a valid test config label
         # is found in the PR, return the filtered test matrix
         return filtered_test_matrix
+
+
+def filter_selected_test_configs(
+    test_matrix: Dict[str, List[Any]], selected_test_configs: Set[str]
+) -> Dict[str, List[Any]]:
+    """
+    Keep only the selected configs if the list if not empty. Otherwise, keep all test configs.
+    This filter is used when the workflow is dispatched manually.
+    """
+    if not selected_test_configs:
+        return test_matrix
+
+    filtered_test_matrix: Dict[str, List[Any]] = {"include": []}
+    for entry in test_matrix.get("include", []):
+        config_name = entry.get("config", "")
+        if not config_name:
+            continue
+
+        if config_name in selected_test_configs:
+            filtered_test_matrix["include"].append(entry)
+
+    return filtered_test_matrix
 
 
 def set_periodic_modes(
@@ -449,7 +477,7 @@ def parse_reenabled_issues(s: Optional[str]) -> List[str]:
 
 
 def get_reenabled_issues(pr_body: str = "") -> List[str]:
-    default_branch = os.getenv("GIT_DEFAULT_BRANCH", "main")
+    default_branch = f"origin/{os.environ.get('GIT_DEFAULT_BRANCH', 'main')}"
     try:
         commit_messages = subprocess.check_output(
             f"git cherry -v {default_branch}".split(" ")
@@ -480,6 +508,11 @@ def perform_misc_tasks(
         "ci-no-test-timeout", check_for_setting(labels, pr_body, "ci-no-test-timeout")
     )
     set_output("ci-no-td", check_for_setting(labels, pr_body, "ci-no-td"))
+    # Only relevant for the one linux distributed cuda job, delete this when TD
+    # is rolled out completely
+    set_output(
+        "ci-td-distributed", check_for_setting(labels, pr_body, "ci-td-distributed")
+    )
 
     # Obviously, if the job name includes unstable, then this is an unstable job
     is_unstable = job_name and IssueType.UNSTABLE.value in job_name
@@ -552,6 +585,16 @@ def main() -> None:
     else:
         # No PR number, no tag, we can just return the test matrix as it is
         filtered_test_matrix = test_matrix
+
+    if args.selected_test_configs:
+        selected_test_configs = {
+            v.strip().lower()
+            for v in args.selected_test_configs.split(",")
+            if v.strip()
+        }
+        filtered_test_matrix = filter_selected_test_configs(
+            filtered_test_matrix, selected_test_configs
+        )
 
     if args.event_name == "schedule" and args.schedule == "29 8 * * *":
         # we don't want to run the mem leak check or disabled tests on normal

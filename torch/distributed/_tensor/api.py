@@ -5,14 +5,18 @@ from typing import Any, Callable, cast, Optional, Sequence, Tuple
 
 import torch
 
-import torch.distributed._tensor.dispatch as op_dispatch
+import torch.distributed._tensor._dispatch as op_dispatch
 import torch.distributed._tensor.random as random
 import torch.nn as nn
 from torch.distributed._tensor._collective_utils import mesh_broadcast
+from torch.distributed._tensor._redistribute import (
+    Redistribute,
+    redistribute_local_tensor,
+)
 from torch.distributed._tensor._utils import compute_global_tensor_info
 from torch.distributed._tensor.placement_types import (
-    _Partial,
     DTensorSpec,
+    Partial,
     Placement,
     Replicate,
     Shard,
@@ -21,10 +25,6 @@ from torch.distributed._tensor.placement_types import (
 from torch.distributed._tensor.random import (
     is_rng_supported_mesh,
     OffsetBasedRNGTracker,
-)
-from torch.distributed._tensor.redistribute import (
-    Redistribute,
-    redistribute_local_tensor,
 )
 from torch.distributed.device_mesh import _mesh_resources, DeviceMesh
 
@@ -198,6 +198,7 @@ class DTensor(torch.Tensor):  # pyre-ignore[13]: pyre is bad at __new__
     _op_dispatcher: op_dispatch.OpDispatcher = op_dispatch.OpDispatcher()
 
     @staticmethod
+    @torch._disable_dynamo
     def __new__(
         cls,
         local_tensor: torch.Tensor,
@@ -274,10 +275,10 @@ class DTensor(torch.Tensor):  # pyre-ignore[13]: pyre is bad at __new__
         )
 
     def __coerce_tangent_metadata__(self):
-        if not any(isinstance(p, _Partial) for p in self.placements):
+        if not any(isinstance(p, Partial) for p in self.placements):
             return self
         placements = [
-            Replicate() if isinstance(p, _Partial) else p for p in self.placements
+            Replicate() if isinstance(p, Partial) else p for p in self.placements
         ]
         return self.redistribute(device_mesh=self.device_mesh, placements=placements)
 
@@ -288,6 +289,7 @@ class DTensor(torch.Tensor):  # pyre-ignore[13]: pyre is bad at __new__
         )
 
     @classmethod
+    @torch._disable_dynamo
     # pyre-fixme[3]: Return type must be annotated.
     # pyre-fixme[2]: Parameter must be annotated.
     def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
@@ -454,7 +456,7 @@ class DTensor(torch.Tensor):  # pyre-ignore[13]: pyre is bad at __new__
         for i, placement in enumerate(placements):
             if placement.is_partial():
                 raise RuntimeError(
-                    "Can not redistribute to _Partial, _Partial is for internal use only!"
+                    "Can not redistribute to Partial, redistributing to Partial is for internal use only!"
                 )
             elif isinstance(placement, Shard) and placement.dim < 0:
                 # normalize shard dim to be positive
@@ -521,13 +523,15 @@ def distribute_tensor(
     placements: Optional[Sequence[Placement]] = None,
 ) -> DTensor:
     """
-    Distribute a torch.Tensor to the `device_mesh` according to the `placements`
-    specified. The rank of `device_mesh` and `placements` must be the same.
+    Distribute a leaf torch.Tensor (i.e. nn.Parameter) to the ``device_mesh`` according
+    to the ``placements`` specified. The rank of ``device_mesh`` and ``placements`` must be
+    the same. If you want to construct a DTensor in the middle of the Autograd computation,
+    please use ``DTensor.from_local`` instead.
 
     Args:
         tensor (torch.Tensor): torch.Tensor to be distributed. Note that if you
             want to shard a tensor on a dimension that is not evenly divisible by
-            the number of devices in that mesh dimension, we use `torch.chunk`
+            the number of devices in that mesh dimension, we use ``torch.chunk``
             semantic to shard the tensor and scatter the shards.
         device_mesh (:class:`DeviceMesh`, optional): DeviceMesh to distribute the
             tensor, if not specified, must be called under a DeviceMesh context
@@ -571,7 +575,7 @@ def distribute_tensor(
     # OffsetBasedRNGTracker to perform random operators.
     # TODO: the value assignment to global variable is not the ideal solution
     # we can replace it in future.
-    if is_rng_supported_mesh(device_mesh) and not random._rng_tracker:
+    if not random._rng_tracker and is_rng_supported_mesh(device_mesh):
         random._rng_tracker = OffsetBasedRNGTracker(device_type)
 
     if not tensor.is_leaf:
@@ -593,8 +597,10 @@ def distribute_tensor(
             f"Found placements length: {len(placements)}, and device_mesh.ndim: {device_mesh.ndim}."
         )
     if isinstance(tensor, DTensor):
-        # if the tensor is already a DTensor, we just need to check if the
-        # device mesh and placements are the same
+        # if the tensor is already a DTensor, we need to check:
+        # 1. if the we can further shard this DTensor if the two device mesh belong to
+        #   the same parenet mesh and further sharding is possible.
+        # 2. check if device mesh and placements are the same
         if tensor.device_mesh != device_mesh:
             raise ValueError(
                 f"Cannot distribute a DTensor with device mesh {tensor.device_mesh} "
@@ -608,7 +614,7 @@ def distribute_tensor(
             )
         return tensor
 
-    local_tensor = tensor
+    local_tensor = tensor.detach()
 
     # distribute the tensor according to the placements.
     placements = list(placements)
@@ -633,7 +639,7 @@ def distribute_tensor(
     # detach the local tensor passed to DTensor since after the construction
     # of DTensor, autograd would work on top of DTensor instead of local tensor
     return DTensor(
-        local_tensor.detach().requires_grad_(tensor.requires_grad),
+        local_tensor.requires_grad_(tensor.requires_grad),
         device_mesh,
         placements,
         shape=tensor.size(),
@@ -651,10 +657,14 @@ def distribute_module(
     output_fn: Optional[Callable[[nn.Module, Any, DeviceMesh], None]] = None,
 ) -> nn.Module:
     """
-    This function converts all module parameters to :class:`DTensor` parameters
-    according to the `partition_fn` specified. It could also control the input or
-    output of the module by specifying the `input_fn` and `output_fn`. (i.e. convert
-    the input to :class:`DTensor`, convert the output back to torch.Tensor)
+    This function expose three functions to control the Tensors inside the module:
+    1. To perform sharding on the module before runtime execution by specifying the
+        ``partition_fn`` (i.e. allow user to convert Module parameters to :class:`DTensor`
+        parameters according to the `partition_fn` specified).
+    2. To control the inputs or outputs of the module during runtime execution by
+        specifying the ``input_fn`` and ``output_fn``. (i.e. convert the input to
+        :class:`DTensor`, convert the output back to torch.Tensor)
+
     Args:
         module (:class:`nn.Module`): user module to be partitioned.
         device_mesh (:class:`DeviceMesh`): the device mesh to place the module.

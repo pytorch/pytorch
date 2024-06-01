@@ -633,6 +633,7 @@ def get_device_type_test_bases():
         test_bases.append(CPUTestBase)
         if torch.cuda.is_available():
             test_bases.append(CUDATestBase)
+
         device_type = torch._C._get_privateuse1_backend_name()
         device_mod = getattr(torch, device_type, None)
         if hasattr(device_mod, "is_available") and device_mod.is_available():
@@ -690,6 +691,7 @@ PYTORCH_CUDA_MEMCHECK = os.getenv('PYTORCH_CUDA_MEMCHECK', '0') == '1'
 
 PYTORCH_TESTING_DEVICE_ONLY_FOR_KEY = 'PYTORCH_TESTING_DEVICE_ONLY_FOR'
 PYTORCH_TESTING_DEVICE_EXCEPT_FOR_KEY = 'PYTORCH_TESTING_DEVICE_EXCEPT_FOR'
+PYTORCH_TESTING_DEVICE_FOR_CUSTOM_KEY = 'PYTORCH_TESTING_DEVICE_FOR_CUSTOM'
 
 
 def get_desired_device_type_test_bases(except_for=None, only_for=None, include_lazy=False, allow_mps=False):
@@ -715,6 +717,14 @@ def get_desired_device_type_test_bases(except_for=None, only_for=None, include_l
 
     def split_if_not_empty(x: str):
         return x.split(",") if x else []
+
+    # run some cuda testcases on other devices if available
+    # Usage:
+    # export PYTORCH_TESTING_DEVICE_FOR_CUSTOM=privateuse1
+    env_custom_only_for = split_if_not_empty(os.getenv(PYTORCH_TESTING_DEVICE_FOR_CUSTOM_KEY, ''))
+    if env_custom_only_for:
+        desired_device_type_test_bases += filter(lambda x: x.device_type in env_custom_only_for, test_bases)
+        desired_device_type_test_bases = list(set(desired_device_type_test_bases))
 
     # Filter out the device types based on environment variables if available
     # Usage:
@@ -912,7 +922,7 @@ class ops(_TestParametrizer):
             elif self.opinfo_dtypes == OpDTypes.unsupported:
                 dtypes = set(get_all_dtypes()).difference(op.supported_dtypes(device_cls.device_type))
             elif self.opinfo_dtypes == OpDTypes.supported:
-                dtypes = op.supported_dtypes(device_cls.device_type)
+                dtypes = set(op.supported_dtypes(device_cls.device_type))
             elif self.opinfo_dtypes == OpDTypes.any_one:
                 # Tries to pick a dtype that supports both forward or backward
                 supported = op.supported_dtypes(device_cls.device_type)
@@ -927,7 +937,7 @@ class ops(_TestParametrizer):
                     dtypes = {}
             elif self.opinfo_dtypes == OpDTypes.any_common_cpu_cuda_one:
                 # Tries to pick a dtype that supports both CPU and CUDA
-                supported = op.dtypes.intersection(op.dtypesIfCUDA)
+                supported = set(op.dtypes).intersection(op.dtypesIfCUDA)
                 if supported:
                     dtypes = {next(dtype for dtype in ANY_DTYPE_ORDER if dtype in supported)}
                 else:
@@ -964,7 +974,7 @@ class ops(_TestParametrizer):
                         except Exception as e:
                             tracked_input = get_tracked_input()
                             if PRINT_REPRO_ON_FAILURE and tracked_input is not None:
-                                raise Exception(
+                                raise Exception(  # noqa: TRY002
                                     f"Caused by {tracked_input.type_desc} "
                                     f"at index {tracked_input.index}: "
                                     f"{_serialize_sample(tracked_input.val)}") from e
@@ -1129,7 +1139,12 @@ class expectedFailure:
 
         @wraps(fn)
         def efail_fn(slf, *args, **kwargs):
-            if self.device_type is None or self.device_type == slf.device_type:
+            if not hasattr(slf, "device_type") and hasattr(slf, "device") and isinstance(slf.device, str):
+                target_device_type = slf.device
+            else:
+                target_device_type = slf.device_type
+
+            if self.device_type is None or self.device_type == target_device_type:
                 try:
                     fn(slf, *args, **kwargs)
                 except Exception:
@@ -1376,6 +1391,9 @@ def expectedFailureCPU(fn):
 
 def expectedFailureCUDA(fn):
     return expectedFailure('cuda')(fn)
+
+def expectedFailureXPU(fn):
+    return expectedFailure('xpu')(fn)
 
 def expectedFailureMeta(fn):
     return skipIfTorchDynamo()(expectedFailure('meta')(fn))

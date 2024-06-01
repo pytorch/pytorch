@@ -40,7 +40,7 @@ class FakeObject:
             printer._format(obj.state, stream, indent, allowance + 1, context, level + 1)
             stream.write(")")
             return
-        raise Exception("Need to implement")
+        raise Exception("Need to implement")  # noqa: TRY002
 
 
 class FakeClass:
@@ -84,7 +84,7 @@ class DumpUnpickler(pickle._Unpickler):  # type: ignore[name-defined]
     def load_binunicode(self):
         strlen, = struct.unpack("<I", self.read(4))  # type: ignore[attr-defined]
         if strlen > sys.maxsize:
-            raise Exception("String too long.")
+            raise Exception("String too long.")  # noqa: TRY002
         str_bytes = self.read(strlen)  # type: ignore[attr-defined]
         obj: Any
         try:
@@ -107,7 +107,7 @@ def main(argv, output_stream=None):
     if len(argv) != 2:
         # Don't spam stderr if not using stdout.
         if output_stream is not None:
-            raise Exception("Pass argv of length 2.")
+            raise Exception("Pass argv of length 2.")  # noqa: TRY002
         sys.stderr.write("usage: show_pickle PICKLE_FILE\n")
         sys.stderr.write("  PICKLE_FILE can be any of:\n")
         sys.stderr.write("    path to a pickle file\n")
@@ -137,7 +137,7 @@ def main(argv, output_stream=None):
                         found = True
                         break
                 if not found:
-                    raise Exception(f"Could not find member matching {mname} in {zfname}")
+                    raise Exception(f"Could not find member matching {mname} in {zfname}")  # noqa: TRY002
 
 
 if __name__ == "__main__":

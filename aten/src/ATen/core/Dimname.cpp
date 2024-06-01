@@ -20,7 +20,7 @@ bool Dimname::isValidName(const std::string& name) {
   // letters A through Z, the underscore _ and, except for the first
   // character, the digits 0 through 9" (at least length 1)
   // https://docs.python.org/3/reference/lexical_analysis.html#identifiers
-  if (name.length() == 0) {
+  if (name.empty()) {
     return false;
   }
   for (auto it = name.begin(); it != name.end(); ++it) {
