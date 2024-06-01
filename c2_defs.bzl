@@ -41,16 +41,6 @@ def get_c2_mpscnn_test():
 
     return bool(int(c2_mpscnn_test))
 
-def get_c2_nomnigraph():
-    c2_nomnigraph = native.read_config("caffe2", "enable_nomnigraph", "1")
-
-    expect(
-        c2_nomnigraph in ("0", "1"),
-        c2_nomnigraph,
-    )
-
-    return bool(int(c2_nomnigraph))
-
 def get_c2_qpl():
     c2_qpl = native.read_config("caffe2", "enable_qpl", "1")
 
@@ -125,8 +115,6 @@ C2_XPLAT_HPTT_PREPROCESSOR_FLAGS = [
 
 def get_c2_xplat_preprocessor_flags():
     flags = get_c2_xplat_no_hptt_preprocessor_flags() + C2_XPLAT_HPTT_PREPROCESSOR_FLAGS
-    if get_c2_nomnigraph():
-        flags.append("-DCAFFE2_OPTIMIZER")
     return flags
 
 def get_c2_xplat_no_hptt_compiler_flags():
