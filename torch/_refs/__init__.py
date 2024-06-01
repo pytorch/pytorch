@@ -255,6 +255,7 @@ __all__ = [
     "dsplit",
     "dstack",
     "expand",
+    "expand_copy",
     "expand_as",
     "flatten",
     "flip",
@@ -289,6 +290,7 @@ __all__ = [
     "unsqueeze",
     "view",
     "view_as",
+    "view_copy",
     "vsplit",
     "vstack",
     "view_as_complex",
@@ -2952,6 +2954,11 @@ def expand_as(a: Tensor, b: Tensor) -> Tensor:
     return a.expand(b.shape)
 
 
+@register_decomposition(aten.expand_copy)
+def expand_copy(self: Tensor, size, *, implicit=False):
+    return expand(self, size).clone()
+
+
 def chunk(a: TensorLikeType, chunks: int, dim: int = 0) -> Tuple[TensorLikeType, ...]:
     if chunks <= 0:
         msg = f"Expected at least one chunk, but got {chunks}!"
@@ -4554,6 +4561,11 @@ def view(a: TensorLikeType, *shape: ShapeType) -> TensorLikeType:
 # CompositeImplicitAutograd - don't register decomp
 def view_as(self: TensorLikeType, other: TensorLikeType) -> TensorLikeType:
     return self.view(other.size())
+
+
+@register_decomposition(aten.view_copy.default)
+def view_copy(a: TensorLikeType, *shape: ShapeType) -> TensorLikeType:
+    return view(a, *shape).clone()
 
 
 # CompositeImplicitAutograd - don't register decomp

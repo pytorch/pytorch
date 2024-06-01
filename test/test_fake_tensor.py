@@ -895,6 +895,38 @@ class FakeTensorTest(TestCase):
 
         self.assertEqual(t.shape[0], torch.ops.aten.unsqueeze_copy(t, 1).shape[0])
 
+    def test_expand_copy(self):
+        from torch._subclasses.fake_tensor import FakeTensorMode
+        from torch.fx.experimental.symbolic_shapes import ShapeEnv, StatelessSymbolicContext, DimDynamic
+
+        shape_env = ShapeEnv()
+        t1 = torch.ones(2, 3, 10)
+        with FakeTensorMode(shape_env=shape_env) as fake_mode:
+            t = fake_mode.from_tensor(
+                t1,
+                symbolic_context=StatelessSymbolicContext(
+                    dynamic_sizes=[DimDynamic.DYNAMIC, DimDynamic.DYNAMIC, DimDynamic.DYNAMIC],
+                )
+            )
+
+        self.assertEqual(torch.ops.aten.expand(t, t.shape).shape, torch.ops.aten.expand_copy(t, t.shape).shape)
+
+    def test_view_copy(self):
+        from torch._subclasses.fake_tensor import FakeTensorMode
+        from torch.fx.experimental.symbolic_shapes import ShapeEnv, StatelessSymbolicContext, DimDynamic
+
+        shape_env = ShapeEnv()
+        t1 = torch.ones(2, 3, 10)
+        with FakeTensorMode(shape_env=shape_env) as fake_mode:
+            t = fake_mode.from_tensor(
+                t1,
+                symbolic_context=StatelessSymbolicContext(
+                    dynamic_sizes=[DimDynamic.DYNAMIC, DimDynamic.DYNAMIC, DimDynamic.DYNAMIC],
+                )
+            )
+
+        self.assertEqual(torch.ops.aten.view(t, t.shape).shape, torch.ops.aten.view_copy(t, t.shape).shape)
+
     def test_alias_call(self):
         fwAD = torch.autograd.forward_ad
 
