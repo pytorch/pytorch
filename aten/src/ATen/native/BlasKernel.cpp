@@ -402,7 +402,7 @@ static C10_ALWAYS_INLINE void fp16_dot_with_fp32_arith_vectorized_tail_inner_loo
   *tailSum = f32_fma_f16(*tailSum, temp_vec1, temp_vec2);
 }
 
-float fp16_dot_with_fp32_arith(const float16_t* vec1, const float16_t* vec2, int64_t len) {
+static float fp16_dot_with_fp32_arith(const float16_t* vec1, const float16_t* vec2, int64_t len) {
   float32x4_t sum[kF32RegistersPerIteration] = {vdupq_n_f32(0)};
   const auto len_aligned = len & ~(kF32ElementsPerIteration - 1);
   for (int j = 0; j < len_aligned ; j += kF32ElementsPerIteration) {
