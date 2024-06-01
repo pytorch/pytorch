@@ -264,6 +264,18 @@ elif [[ $TEST_CONFIG == 'nogpu_AVX512' ]]; then
   export ATEN_CPU_CAPABILITY=avx2
 fi
 
+# temp workarounds for https://github.com/pytorch/pytorch/issues/126692, remove when fixed
+if [[ "$BUILD_ENVIRONMENT" != *-bazel-* ]]; then
+  pushd test
+  CUDA_VERSION=$(python -c "import torch; print(torch.version.cuda)")
+  if [ "$CUDA_VERSION" == "12.4" ]; then
+    ISCUDA124="cu124"
+  else
+    ISCUDA124=""
+  fi
+  popd
+fi
+
 test_python_legacy_jit() {
   time python test/run_test.py --include test_jit_legacy test_jit_fuser_legacy --verbose
   assert_git_not_dirty
@@ -364,7 +376,7 @@ test_inductor_cpp_wrapper_abi_compatible() {
     --output "$TEST_REPORTS_DIR/inductor_cpp_wrapper_training.csv"
   python benchmarks/dynamo/check_accuracy.py \
     --actual "$TEST_REPORTS_DIR/inductor_cpp_wrapper_training.csv" \
-    --expected "benchmarks/dynamo/ci_expected_accuracy/inductor_timm_training.csv"
+    --expected "benchmarks/dynamo/ci_expected_accuracy/${ISCUDA124}/inductor_timm_training.csv"
 }
 
 # "Global" flags for inductor benchmarking controlled by TEST_CONFIG
@@ -483,89 +495,6 @@ test_perf_for_dashboard() {
   done
 }
 
-test_torchao_perf_for_dashboard() {
-  TEST_REPORTS_DIR=$(pwd)/test/test-reports
-  mkdir -p "$TEST_REPORTS_DIR"
-
-  local suite="$1"
-  shift
-
-  local backend=torchao
-  local modes=()
-  if [[ "$DASHBOARD_TAG" == *training-true* ]]; then
-    modes+=(training)
-  fi
-  if [[ "$DASHBOARD_TAG" == *inference-true* ]]; then
-    modes+=(inference)
-  fi
-  # TODO: All the accuracy tests can be skipped once the CI accuracy checking is stable enough
-  local targets=(accuracy performance)
-  local torchao_backends=(noquant int8dynamic int8weightonly int4weightonly  autoquant)
-
-  for mode in "${modes[@]}"; do
-    if [[ "$mode" == "inference" ]]; then
-      dtype=bfloat16
-    elif [[ "$mode" == "training" ]]; then
-      dtype=amp
-    fi
-    for target in "${targets[@]}"; do
-      local target_flag=("--${target}")
-      if [[ "$target" == "performance" ]]; then
-        target_flag+=( --cold-start-latency)
-      elif [[ "$target" == "accuracy" ]]; then
-        target_flag+=( --no-translation-validation)
-      fi
-
-      for torchao_backend in "${torchao_backends[@]}"; do
-        if [[ "$DASHBOARD_TAG" == *${torchao_backend}-true* ]]; then
-          python "benchmarks/dynamo/$suite.py" \
-              "${target_flag[@]}" --"$mode" --"$dtype" --quantization "${torchao_backend}" "$@" \
-              --output "$TEST_REPORTS_DIR/${backend}_${torchao_backend}_${suite}_${dtype}_${mode}_cuda_${target}.csv"
-        fi
-      done
-    done
-  done
-}
-
-test_single_torchao_benchmark() {
-  # Usage: test_single_torchao_benchmark <inference|training> huggingface 0 --args-for-script
-
-  # Use test-reports directory under test folder will allow the CI to automatically pick up
-  # the test reports and upload them to S3. Need to use full path here otherwise the script
-  # will bark about file not found later on
-  TEST_REPORTS_DIR=$(pwd)/test/test-reports
-  mkdir -p "$TEST_REPORTS_DIR"
-
-  local name="$1"
-  shift
-  local suite="$1"
-  shift
-  # shard id is mandatory, even if it is not passed
-  local shard_id="$1"
-  shift
-
-  local partition_flags=()
-  if [[ -n "$NUM_TEST_SHARDS" && -n "$shard_id" ]]; then
-    partition_flags=( --total-partitions "$NUM_TEST_SHARDS" --partition-id "$shard_id" )
-  fi
-
-  test_torchao_perf_for_dashboard "$suite" \
-    "${TORCHAO_BENCHMARK_FLAGS[@]}" "$@" "${partition_flags[@]}"
-
-}
-
-test_torchao_benchmark() {
-  # Usage: test_torchao_benchmark huggingface 0
-  TEST_REPORTS_DIR=$(pwd)/test/test-reports
-
-  local suite="$1"
-  shift
-  local shard_id="$1"
-  shift
-
-  test_single_torchao_benchmark "inference" "$suite" "$shard_id" --inference --bfloat16 "$@"
-}
-
 test_single_dynamo_benchmark() {
   # Usage: test_single_dynamo_benchmark inductor_inference huggingface 0 --args-for-script
 
@@ -609,10 +538,10 @@ test_single_dynamo_benchmark() {
       --output "$TEST_REPORTS_DIR/${name}_${suite}.csv"
     python benchmarks/dynamo/check_accuracy.py \
       --actual "$TEST_REPORTS_DIR/${name}_$suite.csv" \
-      --expected "benchmarks/dynamo/ci_expected_accuracy/${TEST_CONFIG}_${name}.csv"
+      --expected "benchmarks/dynamo/ci_expected_accuracy/${ISCUDA124}/${TEST_CONFIG}_${name}.csv"
     python benchmarks/dynamo/check_graph_breaks.py \
       --actual "$TEST_REPORTS_DIR/${name}_$suite.csv" \
-      --expected "benchmarks/dynamo/ci_expected_accuracy/${TEST_CONFIG}_${name}.csv"
+      --expected "benchmarks/dynamo/ci_expected_accuracy/${ISCUDA124}/${TEST_CONFIG}_${name}.csv"
   fi
 }
 
@@ -660,9 +589,11 @@ test_inductor_torchbench_smoketest_perf() {
     --bfloat16 --inference --inductor --only hf_T5 --output "$TEST_REPORTS_DIR/inductor_cpp_wrapper_inference.csv"
   TORCHINDUCTOR_ABI_COMPATIBLE=1 TORCHINDUCTOR_CPP_WRAPPER=1 python benchmarks/dynamo/torchbench.py --device cuda --accuracy \
     --bfloat16 --inference --inductor --only llama --output "$TEST_REPORTS_DIR/inductor_cpp_wrapper_inference.csv"
+  TORCHINDUCTOR_ABI_COMPATIBLE=1 TORCHINDUCTOR_CPP_WRAPPER=1 python benchmarks/dynamo/torchbench.py --device cuda --accuracy \
+    --bfloat16 --inference --inductor --only moco --output "$TEST_REPORTS_DIR/inductor_cpp_wrapper_inference.csv"
   python benchmarks/dynamo/check_accuracy.py \
     --actual "$TEST_REPORTS_DIR/inductor_cpp_wrapper_inference.csv" \
-    --expected "benchmarks/dynamo/ci_expected_accuracy/inductor_torchbench_inference.csv"
+    --expected "benchmarks/dynamo/ci_expected_accuracy/${ISCUDA124}/inductor_torchbench_inference.csv"
 
   python benchmarks/dynamo/torchbench.py --device cuda --performance --backend inductor --float16 --training \
     --batch-size-file "$(realpath benchmarks/dynamo/torchbench_models_list.txt)" --only hf_Bert \
@@ -677,7 +608,13 @@ test_inductor_torchbench_smoketest_perf() {
   # https://github.com/pytorch/pytorch/actions/runs/7158691360/job/19491437314,
   # and thus we lower its threshold to reduce flakiness. If this continues to be a problem,
   # we switch to use some other model.
-  python benchmarks/dynamo/check_perf_csv.py -f "$TEST_REPORTS_DIR/inductor_inference_smoketest.csv" -t 4.9
+  # Use 4.7 for cuda 12.4, change back to 4.9 after fixing https://github.com/pytorch/pytorch/issues/126692
+  if [ "$CUDA_VERSION" == "12.4" ]; then
+    THRESHOLD=4.7
+  else
+    THRESHOLD=4.9
+  fi
+  python benchmarks/dynamo/check_perf_csv.py -f "$TEST_REPORTS_DIR/inductor_inference_smoketest.csv" -t $THRESHOLD
 
   # Check memory compression ratio for a few models
   for test in hf_Albert timm_vision_transformer; do
@@ -696,7 +633,7 @@ test_inductor_torchbench_smoketest_perf() {
       --only $test --output "$TEST_REPORTS_DIR/inductor_warm_start_smoketest_$test.csv"
     python benchmarks/dynamo/check_accuracy.py \
       --actual "$TEST_REPORTS_DIR/inductor_warm_start_smoketest_$test.csv" \
-      --expected "benchmarks/dynamo/ci_expected_accuracy/inductor_huggingface_training.csv"
+      --expected "benchmarks/dynamo/ci_expected_accuracy/${ISCUDA124}/inductor_huggingface_training.csv"
   done
 }
 
@@ -1310,15 +1247,15 @@ elif [[ "${TEST_CONFIG}" == *inductor-halide* ]]; then
   test_inductor_halide
 elif [[ "${TEST_CONFIG}" == *inductor-micro-benchmark* ]]; then
   test_inductor_micro_benchmark
-elif [[ "${TEST_CONFIG}" == *inductor_huggingface* ]]; then
+elif [[ "${TEST_CONFIG}" == *huggingface* ]]; then
   install_torchvision
   id=$((SHARD_NUMBER-1))
   test_dynamo_benchmark huggingface "$id"
-elif [[ "${TEST_CONFIG}" == *inductor_timm* ]]; then
+elif [[ "${TEST_CONFIG}" == *timm* ]]; then
   install_torchvision
   id=$((SHARD_NUMBER-1))
   test_dynamo_benchmark timm_models "$id"
-elif [[ "${TEST_CONFIG}" == *inductor_torchbench* ]]; then
+elif [[ "${TEST_CONFIG}" == *torchbench* ]]; then
   if [[ "${TEST_CONFIG}" == *cpu_inductor* ]]; then
     install_torchaudio cpu
   else
@@ -1349,23 +1286,6 @@ elif [[ "${TEST_CONFIG}" == *inductor_torchbench* ]]; then
     fi
     PYTHONPATH=$(pwd)/torchbench test_dynamo_benchmark torchbench "$id"
   fi
-elif [[ "${TEST_CONFIG}" == *torchao_huggingface* ]]; then
-  install_torchao
-  install_torchvision
-  id=$((SHARD_NUMBER-1))
-  test_torchao_benchmark huggingface "$id"
-elif [[ "${TEST_CONFIG}" == *torchao_timm* ]]; then
-  install_torchao
-  install_torchvision
-  id=$((SHARD_NUMBER-1))
-  test_torchao_benchmark timm_models "$id"
-elif [[ "${TEST_CONFIG}" == *torchao_torchbench* ]]; then
-  install_torchao
-  install_torchaudio cuda
-  install_torchvision
-  id=$((SHARD_NUMBER-1))
-  checkout_install_torchbench
-  PYTHONPATH=$(pwd)/torchbench test_torchao_benchmark torchbench "$id"
 elif [[ "${TEST_CONFIG}" == *inductor_cpp_wrapper_abi_compatible* ]]; then
   install_torchvision
   test_inductor_cpp_wrapper_abi_compatible

@@ -6345,6 +6345,11 @@ def meta_channel_shuffle(input, groups):
     )
 
 
+@register_meta(aten._local_scalar_dense)
+def meta_local_scalar_dense(self: Tensor):
+    raise RuntimeError("Tensor.item() cannot be called on meta tensors")
+
+
 def _create_unary_float_meta_func(func):
     @register_meta(func)
     @out_wrapper()
