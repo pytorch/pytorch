@@ -1,8 +1,8 @@
 #include "caffe2/perfkernels/embedding_lookup.h"
 
-#include "caffe2/core/types.h"
 #include "caffe2/perfkernels/common.h"
 
+#include <c10/util/Half.h>
 #include <c10/util/irange.h>
 
 namespace caffe2 {

@@ -1,8 +1,6 @@
 #include "caffe2/perfkernels/fused_8bit_rowwise_embedding_lookup.h"
 
-#include "caffe2/core/types.h"
 #include "caffe2/perfkernels/common.h"
-#include "caffe2/utils/cpuid.h"
 
 #include <c10/util/irange.h>
 
