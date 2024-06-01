@@ -495,53 +495,13 @@ class SIMDKernel(Kernel):
         return new_index, denominator
 
     def combine_modular_indexing_pairs(self, index):
-        """
-        A pair of special ModularIndexing can be combined.
-
-        E.g. ModularIndexing(ModularIndexing(x, 1, a), 1, b)
-        We can simplify this to ModuleIndexing(x, 1, b), if
-        1. x is non negative integer
-        2. a and b are positive integers
-        3. a is a multiple of b.
-        """
-
-        def _check_args(x, div, mod):
-            if not isinstance(div, sympy.Integer) or not isinstance(mod, sympy.Integer):
-                return False
-            if div != 1:
-                return False
-            if mod <= 0:
-                return False
-            if not isinstance(
-                x, sympy.Symbol
-            ) or not V.graph.sizevars.statically_known_geq(x, 0):
-                return False
-            return True
-
-        if isinstance(index, ModularIndexing):
-            x, div, mod = index.args
-
-            if not _check_args(x, div, mod):
-                return index
-
-            if (tree_node := self.range_tree_nodes.get(x)) is None:
-                return index
-            xexpr = tree_node.expr
-
-            if not isinstance(xexpr, ModularIndexing):
-                return index
-
-            x2, div2, mod2 = xexpr.args
-
-            if not _check_args(x2, div2, mod2):
-                return index
-
-            if mod2 % mod != 0:
-                return index
-
-            return ModularIndexing(x2, 1, mod)
-
-        return index
+        if not isinstance(index, ModularIndexing):
+            return index
+        x = index.args[0]
+        if (tree_node := self.range_tree_nodes.get(x)) is None:
+            return index
+        new_index = sympy_subs(index, {x: tree_node.expr})
+        return V.graph.sizevars.combine_modular_indexing_pairs(new_index)
 
     def combine_contiguous_dims(self, index: sympy.Expr, tree: IterationRangesRoot):
         if expand_res := self._expand_floor_div(index):

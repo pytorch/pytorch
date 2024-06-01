@@ -581,6 +581,56 @@ class SizeVarAllocator:
     def free_symbols(self) -> Set[sympy.Symbol]:
         return set(self.var_to_val.keys()) - set(self.replacements.keys())
 
+    def combine_modular_indexing_pairs(self, index: sympy.Expr) -> sympy.Expr:
+        """
+        A pair of special ModularIndexing can be combined.
+
+        E.g. ModularIndexing(ModularIndexing(x, 1, a), 1, b)
+        We can simplify this to ModuleIndexing(x, 1, b), if
+        1. x is non negative integer
+        2. a and b are positive integers
+        3. a is a multiple of b.
+        """
+
+        def _check_args(x, div, mod, is_first):
+            if not isinstance(div, sympy.Integer) or not isinstance(mod, sympy.Integer):
+                return False
+            if div != 1:
+                return False
+            if mod <= 0:
+                return False
+
+            if is_first:
+                # first ModularIndexing should conatins a nested ModularIndex
+                if not isinstance(x, ModularIndexing):
+                    return False
+            else:
+                # second ModularIndexing should constains a non-negative
+                # symbol
+                if not isinstance(x, sympy.Symbol) or not self.statically_known_geq(
+                    x, 0
+                ):
+                    return False
+            return True
+
+        if isinstance(index, ModularIndexing):
+            x, div, mod = index.args
+
+            if not _check_args(x, div, mod, True):
+                return index
+
+            x2, div2, mod2 = x.args
+
+            if not _check_args(x2, div2, mod2, False):
+                return index
+
+            if mod2 % mod != 0:
+                return index
+
+            return ModularIndexing(x2, 1, mod)
+
+        return index
+
 
 def join_dimensions(expr: Expr) -> Expr:
     if not isinstance(expr, sympy.Add) or not expr.has(ModularIndexing):

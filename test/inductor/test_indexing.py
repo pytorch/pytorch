@@ -169,6 +169,31 @@ class TestIndexingSimplification(InductorTestCase):
         self.assertEqual(simplified, FloorDiv(i0, 3))
         self.assertEqual(expr6.subs({i0: 39485}), simplified.subs({i0: 39485}))
 
+    def test_modular_indexing_pairs_merged(self):
+        sizevars = SizeVarAllocator()
+        x = sympy.Symbol("x", integer=True, positive=True)
+        a = 1024
+        b = 32
+        expr1 = ModularIndexing(x, 1, a)
+        expr2 = ModularIndexing(expr1, 1, b)
+        expected = ModularIndexing(x, 1, b)
+
+        actual = sizevars.combine_modular_indexing_pairs(expr2)
+        self.assertEqual(expected, actual)
+        self.assertNotEqual(expr2, actual)
+
+    def test_modular_indexing_pairs_not_merged(self):
+        sizevars = SizeVarAllocator()
+        x = sympy.Symbol("x", integer=True, positive=True)
+        a = 1024
+        b = 3  # pick a 'b' that we can not merge
+        expr1 = ModularIndexing(x, 1, a)
+        expr2 = ModularIndexing(expr1, 1, b)
+
+        actual = sizevars.combine_modular_indexing_pairs(expr2)
+        self.assertEqual(expr2, actual)
+        self.assertNotEqual(ModularIndexing(x, 1, b), actual)
+
     @unittest.skipUnless(HAS_CUDA, "Need GPU for this test")
     def test_int8_unpack(self):
         @torch.compile
