@@ -25,6 +25,7 @@ def _deprecate_warnings(func_name: str, extra_msg: str) -> None:
         warnings.warn(
             f"{func_name} is deprecated and will be removed soon. {extra_msg}",
             FutureWarning,
+            stacklevel=3,
         )
 
 

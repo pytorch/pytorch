@@ -22,7 +22,6 @@ import sympy
 from filelock import FileLock
 
 import torch
-import torch._inductor.async_compile  # noqa: F401 required to warm up AsyncCompile pools
 from torch._dynamo.testing import rand_strided
 from torch._dynamo.utils import counters, identity, preserve_rng_state
 
@@ -773,7 +772,7 @@ class ExternKernelChoice:
     def call_name(self):
         return f"extern_kernels.{self.name}"
 
-    @functools.lru_cache(None)
+    @functools.lru_cache(None)  # noqa: B019
     def hash_key(self):
         fn = self.to_callable()
         parts = [
