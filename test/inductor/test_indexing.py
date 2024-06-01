@@ -194,6 +194,27 @@ class TestIndexingSimplification(InductorTestCase):
         self.assertEqual(expr2, actual)
         self.assertNotEqual(ModularIndexing(x, 1, b), actual)
 
+    def test_expand_floor_div_skipped(self):
+        sizevars = SizeVarAllocator()
+        x = sympy.Symbol("x", integer=True, positive=True)
+        y = sympy.Symbol("y", integer=True, positive=True)
+
+        expr = FloorDiv(x, 2) + FloorDiv(y, 3)
+        # The expression can not be simplified since there are multiple
+        # FloorDiv. We return False in that case
+        self.assertFalse(sizevars.expand_floor_div(expr))
+
+    def test_expand_floor_div_applied(self):
+        sizevars = SizeVarAllocator()
+        x = sympy.Symbol("x", integer=True, positive=True)
+        y = sympy.Symbol("y", integer=True, positive=True)
+
+        expr = x * 5 + FloorDiv(y, 3)
+        actual, denominator = sizevars.expand_floor_div(expr)
+        self.assertNotEqual(expr, actual)
+        expected = FloorDiv(x * 15 + y, 3)
+        self.assertEqual(expected, FloorDiv(actual, denominator))
+
     @unittest.skipUnless(HAS_CUDA, "Need GPU for this test")
     def test_int8_unpack(self):
         @torch.compile
