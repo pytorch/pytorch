@@ -2120,18 +2120,18 @@ def import_device_backends():
     else:
         from importlib.metadata import entry_points
 
-    for backend in entry_points(group='torch.backends'):
+    for backend_extension in entry_points(group='torch.backends'):
         try:
-            # just load the plugin without calling
-            backend.load()
-        except Exception:
-            # keep quiet
-            pass
+            # just load the extension without calling
+            backend_extension.load()
+        except Exception as err:
+            print(f"Failed to load the backend extension: {backend_extension.name}")
 
 
 def is_device_backend_autoload_enabled() -> bool:
-    var = os.getenv("TORCH_DISABLE_DEVICE_BACKEND_AUTOLOAD")
-    return var is None or not var.upper() in ('1', 'TRUE', 'YES')
+    # enabled by default
+    is_enable = os.getenv("TORCH_DEVICE_BACKEND_AUTOLOAD", "1")
+    return is_enable.strip().lower() in ("1", "true", "yes", "on", "y")
 
 
 if is_device_backend_autoload_enabled():
