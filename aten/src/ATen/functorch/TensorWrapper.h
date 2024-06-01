@@ -97,6 +97,7 @@ struct TORCH_API TensorWrapper : public c10::TensorImpl {
 TORCH_API Tensor makeTensorWrapper(const Tensor& tensor, int64_t level, bool is_immutable=false);
 TORCH_API Tensor makeTensorWrapper(const Tensor& tensor, const Interpreter& interpreter, bool is_immutable=false);
 TORCH_API TensorWrapper* maybeGetTensorWrapper(const Tensor& tensor);
+TORCH_API Tensor getBaseWrappedTensor(const Tensor& tensor);
 TORCH_API void dumpTensor(std::ostream & ss, const Tensor& tensor);
 TORCH_API void dumpTensorCout(const Tensor& tensor);
 

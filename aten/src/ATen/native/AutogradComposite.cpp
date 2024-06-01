@@ -1,15 +1,18 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/core/Tensor.h>
 #include <c10/util/SmallBuffer.h>
+#include <c10/core/impl/COW.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #else
+#include <ATen/ops/_apply_cow.h>
 #include <ATen/ops/_has_same_storage_numel_native.h>
 #include <ATen/ops/_make_dual_native.h>
 #include <ATen/ops/_new_zeros_with_same_feature_meta_native.h>
 #include <ATen/ops/_unpack_dual_native.h>
+#include <ATen/ops/_lazy_clone_native.h>
 #include <ATen/ops/alias.h>
 #include <ATen/ops/zeros.h>
 #endif
@@ -87,6 +90,10 @@ Tensor _new_zeros_with_same_feature_meta(
 
 bool _has_same_storage_numel(const at::Tensor& base, const at::Tensor& other) {
   return base.storage().sym_nbytes() / base.itemsize() == other.storage().sym_nbytes() / other.itemsize();
+}
+
+Tensor _lazy_clone(Tensor const& self) {
+  return self.view_symint(self.sym_sizes())._apply_cow_();
 }
 
 } // namespace at::native

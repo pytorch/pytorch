@@ -171,6 +171,16 @@ TensorWrapper* maybeGetTensorWrapper(const Tensor& tensor) {
   return (TensorWrapper*)(tensor.unsafeGetTensorImpl());
 }
 
+Tensor getBaseWrappedTensor(const Tensor& tensor) {
+  Tensor tensor_ = tensor;
+  TensorWrapper* wrapped = maybeGetTensorWrapper(tensor_);
+  while (wrapped) {
+    tensor_ = wrapped->value();
+    wrapped = maybeGetTensorWrapper(tensor_);
+  }
+  return tensor_;
+}
+
 static void dead_tensor_wrapper_fallback(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
   auto args_size = op.schema().arguments().size();
   int64_t unwrapped_count = 0;
