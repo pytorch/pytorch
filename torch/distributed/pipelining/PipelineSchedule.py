@@ -414,6 +414,7 @@ class Schedule1F1B(PipelineScheduleSingle):
 
         # Warmup phase
         send_work = None
+        fwd_sends = []
         for _ in range(warmup_chunks):
             # Receive activations
             fwd_recvs = self._stage.get_fwd_recv_ops()
