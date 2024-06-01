@@ -374,7 +374,7 @@ def scatter_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> StrategyType:
         # scatter_.src/scatter.src with src be float number instead of tensor
         all_replicate: List[Placement] = [Replicate()] * 3
     else:
-        all_replicate: List[Placement] = [Replicate()] * 4
+        all_replicate = [Replicate()] * 4
     single_mesh_dim_strategies.append(all_replicate)
 
     # TODO: see if we can support input sharding pattern
