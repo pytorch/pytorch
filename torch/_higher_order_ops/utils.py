@@ -294,6 +294,7 @@ def create_fw_bw_graph(fn, use_output_and_grad_bw, *operands):
     example_flat_out = pytree.tree_map(_from_fun, fn(*operands))
     example_grad = [_from_fun(out) for out in example_flat_out]
     num_grads = len(example_grad)
+    # fw_graph = make_fx(fn, record_module_stack=True, _error_on_data_dependent_ops=True)(*operands)
     fw_graph = make_fx(fn)(*operands)
 
     def joint_fn(*joint_operands_grads):
@@ -318,14 +319,11 @@ def create_fw_bw_graph(fn, use_output_and_grad_bw, *operands):
 
     if use_output_and_grad_bw:
         example_xs_out = list(operands) + list(example_flat_out)
-        # joint_operands_grads = (list(example_grad), list(example_xs_out))
         joint_graph = make_fx(joint_fn)((list(example_grad), list(example_xs_out)))
     else:
         example_xs_out = list(operands)
-        # joint_operands_grads = list(example_grad) + list(example_xs_out)
         joint_graph = make_fx(joint_fn)(*(list(example_grad) + list(example_xs_out)))
 
-    # joint_graph = make_fx(joint_fn)(*joint_operands_grads)
     return fw_graph, joint_graph
 
 
