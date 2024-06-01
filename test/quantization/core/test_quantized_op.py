@@ -6245,6 +6245,7 @@ class TestQuantizedConv(TestCase):
     @skipIfNoFBGEMM
     @unittest.skipIf(not TEST_CUDNN, "cudnn is not enabled.")
     @unittest.skipIf(not SM80OrLater, "requires sm80 or later.")
+    @unittest.skipIf(TEST_ROCM, "not supported on rocm.")
     def test_qconv1d_cudnn(
         self,
         batch_size,
