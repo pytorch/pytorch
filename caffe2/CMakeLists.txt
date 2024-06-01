@@ -1887,45 +1887,9 @@ endif()
 # only rerun when needed.
 
 if(BUILD_PYTHON)
-  # Python site-packages
-  # Get canonical directory for python site packages (relative to install
-  # location).  It varies from system to system.
-  # We should pin the path separator to the forward slash on Windows.
-  # More details can be seen at
-  # https://github.com/pytorch/pytorch/tree/main/tools/build_pytorch_libs.bat#note-backslash-munging-on-windows
-  pycmd(PYTHON_SITE_PACKAGES "
-      import os
-      import sysconfig
-      relative_site_packages = sysconfig.get_path('purelib').replace(sysconfig.get_path('data'), '').lstrip(os.path.sep)
-      print(relative_site_packages)
-  ")
-  file(TO_CMAKE_PATH ${PYTHON_SITE_PACKAGES} PYTHON_SITE_PACKAGES)
-  set(PYTHON_SITE_PACKAGES ${PYTHON_SITE_PACKAGES} PARENT_SCOPE) # for Summary
   # ---[ Options.
-  set(PYTHON_LIB_REL_PATH "${PYTHON_SITE_PACKAGES}" CACHE STRING "Python installation path (relative to CMake installation prefix)")
+  set(PYTHON_LIB_REL_PATH "${Python_SITELIB}" CACHE STRING "Python installation path (relative to CMake installation prefix)")
   message(STATUS "Using ${PYTHON_LIB_REL_PATH} as python relative installation path")
-  # Python extension suffix
-  # Try to get from python through sysconfig.get_env_var('EXT_SUFFIX') first,
-  # fallback to ".pyd" if windows and ".so" for all others.
-  pycmd(PY_EXT_SUFFIX "
-      def get_ext_suffix():
-          import sys
-          import sysconfig
-          return sysconfig.get_config_var('EXT_SUFFIX')
-
-      suffix = get_ext_suffix()
-      if suffix is not None:
-          print(suffix)
-      else:
-          print()
-  ")
-  if("${PY_EXT_SUFFIX}" STREQUAL "")
-    if(MSVC)
-      set(PY_EXT_SUFFIX ".pyd")
-    else()
-      set(PY_EXT_SUFFIX ".so")
-    endif()
-  endif()
 
   if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
     # Workaround for https://gcc.gnu.org/bugzilla/show_bug.cgi?id=80947 in EmbeddingBag.cpp
