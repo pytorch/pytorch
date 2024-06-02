@@ -12,6 +12,7 @@ from .optimizer import (
     _get_capturable_supported_devices,
     _get_scalar_dtype,
     _get_value,
+    _maximize_doc,
     _stack_if_compiling,
     _use_grad_for_differentiable,
     _view_as_real,
@@ -34,6 +35,7 @@ class NAdam(Optimizer):
         decoupled_weight_decay: bool = False,
         *,
         foreach: Optional[bool] = None,
+        maximize: bool = False,
         capturable: bool = False,
         differentiable: bool = False,
     ):
@@ -56,6 +58,7 @@ class NAdam(Optimizer):
             weight_decay=weight_decay,
             momentum_decay=momentum_decay,
             decoupled_weight_decay=decoupled_weight_decay,
+            maximize=maximize,
             foreach=foreach,
             capturable=capturable,
             differentiable=differentiable,
@@ -65,6 +68,7 @@ class NAdam(Optimizer):
     def __setstate__(self, state):
         super().__setstate__(state)
         for group in self.param_groups:
+            group.setdefault("maximize", False)
             group.setdefault("foreach", None)
             group.setdefault("capturable", False)
             group.setdefault("differentiable", False)
@@ -188,6 +192,7 @@ class NAdam(Optimizer):
                 weight_decay=group["weight_decay"],
                 momentum_decay=group["momentum_decay"],
                 eps=group["eps"],
+                maximize=group["maximize"],
                 decoupled_weight_decay=group["decoupled_weight_decay"],
                 foreach=group["foreach"],
                 capturable=group["capturable"],
@@ -207,12 +212,15 @@ NAdam.__doc__ = (
             &\textbf{input}      : \gamma_t \text{ (lr)}, \: \beta_1,\beta_2 \text{ (betas)},
                 \: \theta_0 \text{ (params)}, \: f(\theta) \text{ (objective)}                   \\
             &\hspace{13mm} \: \lambda \text{ (weight decay)}, \:\psi \text{ (momentum decay)}    \\
-            &\hspace{13mm} \: \textit{decoupled\_weight\_decay}                                  \\
+            &\hspace{13mm} \: \textit{decoupled\_weight\_decay}, \:\textit{maximize}             \\
             &\textbf{initialize} :  m_0 \leftarrow 0 \text{ ( first moment)},
                 v_0 \leftarrow 0 \text{ ( second moment)}                                 \\[-1.ex]
             &\rule{110mm}{0.4pt}                                                                 \\
             &\textbf{for} \: t=1 \: \textbf{to} \: \ldots \: \textbf{do}                         \\
-            &\hspace{5mm}g_t           \leftarrow   \nabla_{\theta} f_t (\theta_{t-1})           \\
+            &\hspace{5mm}\textbf{if} \: \textit{maximize}:                                       \\
+            &\hspace{10mm}g_t           \leftarrow   -\nabla_{\theta} f_t (\theta_{t-1})         \\
+            &\hspace{5mm}\textbf{else}                                                           \\
+            &\hspace{10mm}g_t           \leftarrow   \nabla_{\theta} f_t (\theta_{t-1})          \\
             &\hspace{5mm} \theta_t \leftarrow \theta_{t-1}                                       \\
             &\hspace{5mm} \textbf{if} \: \lambda \neq 0                                          \\
             &\hspace{10mm}\textbf{if} \: \textit{decoupled\_weight\_decay}                       \\
@@ -249,6 +257,7 @@ NAdam.__doc__ = (
         decoupled_weight_decay (bool, optional): whether to use decoupled weight
             decay as in AdamW to obtain NAdamW (default: False)
         {_foreach_doc}
+        {_maximize_doc}
         {_capturable_doc}
         {_differentiable_doc}
 
@@ -276,12 +285,13 @@ def _single_tensor_nadam(
     momentum_decay: float,
     eps: float,
     decoupled_weight_decay: bool,
+    maximize: bool,
     capturable: bool,
     differentiable: bool,
     has_complex: bool,
 ):
     for i, param in enumerate(params):
-        grad = grads[i]
+        grad = grads[i] if not maximize else -grads[i]
         exp_avg = exp_avgs[i]
         exp_avg_sq = exp_avg_sqs[i]
         mu_product = mu_products[i]
@@ -369,6 +379,7 @@ def _multi_tensor_nadam(
     momentum_decay: float,
     eps: float,
     decoupled_weight_decay: bool,
+    maximize: bool,
     capturable: bool,
     differentiable: bool,
     has_complex: bool,
@@ -406,6 +417,9 @@ def _multi_tensor_nadam(
                 grouped_params, grouped_grads, grouped_exp_avgs, grouped_exp_avg_sqs
             )
 
+        if maximize:
+            grouped_grads = torch._foreach_neg(grouped_grads)  # type: ignore[assignment]
+
         # Update steps
         # If steps are on CPU, foreach will fall back to the slow path, which is a for-loop calling t.add(1) over
         # and over. 1 will then be wrapped into a Tensor over and over again, which is slower than if we just
@@ -422,9 +436,15 @@ def _multi_tensor_nadam(
                 # Perform stepweight decay
                 torch._foreach_mul_(grouped_params, 1 - lr * weight_decay)
             else:
-                grouped_grads = torch._foreach_add(  # type: ignore[assignment]
-                    grouped_grads, grouped_params, alpha=weight_decay
-                )
+                # Re-use the intermediate memory (grouped_grads) already allocated for maximize
+                if maximize:
+                    torch._foreach_add_(
+                        grouped_grads, grouped_params, alpha=weight_decay
+                    )
+                else:
+                    grouped_grads = torch._foreach_add(  # type: ignore[assignment]
+                        grouped_grads, grouped_params, alpha=weight_decay
+                    )
 
         # Decay the first and second moment running average coefficient
         torch._foreach_lerp_(grouped_exp_avgs, grouped_grads, 1 - beta1)
@@ -560,6 +580,7 @@ def nadam(
     capturable: bool = False,
     differentiable: bool = False,
     has_complex: bool = False,
+    maximize: bool = False,
     *,
     beta1: float,
     beta2: float,
@@ -608,6 +629,7 @@ def nadam(
         lr=lr,
         weight_decay=weight_decay,
         momentum_decay=momentum_decay,
+        maximize=maximize,
         decoupled_weight_decay=decoupled_weight_decay,
         eps=eps,
         capturable=capturable,
