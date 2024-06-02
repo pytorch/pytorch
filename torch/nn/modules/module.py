@@ -766,7 +766,7 @@ class Module:
         atoms: List[str] = target.split(".")
         name = atoms.pop(-1)
         mod: torch.nn.Module = self
-        
+
         for item in atoms:
 
             if not hasattr(mod, item):
