@@ -340,13 +340,26 @@ class LocalBufferScope:
                     index = local_buf.layout.make_indexer()(index_vars)
                 return name, index
 
+            def may_convert_dtype(self, name: str, var):
+                if (
+                    name == global_buf.get_name()
+                    and global_buf.get_dtype() != local_buf.get_dtype()
+                ):
+                    from ..virtualized import ops
+
+                    return ops.to_dtype(var, global_buf.get_dtype()).value
+                return var
+
             def load(self, name: str, index: sympy.Expr):
-                return self._inner.load(*self.localize(name, index))
+                var = self._inner.load(*self.localize(name, index))
+                return self.may_convert_dtype(name, var)
 
             def store(self, name, index, value, mode=None):
+                value = self.may_convert_dtype(name, value)
                 return self._inner.store(*self.localize(name, index), value, mode)
 
             def store_reduction(self, name, index, value):
+                value = self.may_convert_dtype(name, value)
                 return self._inner.store_reduction(*self.localize(name, index), value)
 
         def wrap_inner_fn_for_node(node: ir.IRNode, inner_fn_wrapper):
