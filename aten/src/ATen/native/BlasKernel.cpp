@@ -107,6 +107,8 @@ void fp16_gemv_trans(
     const int incy);
 #endif
 
+float fp16_dot_with_fp32_arith(const float16_t* vec1, const float16_t* vec2, int64_t len);
+
 template <typename scalar_t>
 bool scal_use_fast_path(C10_UNUSED int64_t n, C10_UNUSED int64_t incx) {
   return false;
