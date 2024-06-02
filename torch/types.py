@@ -1,18 +1,23 @@
 import builtins
-from typing import Any, List, Optional, Sequence, Tuple, Union
+from typing import Any, List, Optional, Sequence, Tuple, TYPE_CHECKING, Union
 
 import torch
+from torch import Tensor
+
+
+if TYPE_CHECKING:
+    from torch.autograd.graph import GradientEdge
 
 
 # Convenience aliases for common composite types that we need
 # to talk about in PyTorch
 
-_TensorOrTensors = Union["torch.Tensor", Sequence["torch.Tensor"]]
+_TensorOrTensors = Union[Tensor, Sequence[Tensor]]
 _TensorOrTensorsOrGradEdge = Union[
-    "torch.Tensor",
-    Sequence["torch.Tensor"],
-    "torch.autograd.graph.GradientEdge",
-    Sequence["torch.autograd.graph.GradientEdge"],
+    Tensor,
+    Sequence[Tensor],
+    "GradientEdge",
+    Sequence["GradientEdge"],
 ]
 
 # In some cases, these basic types are shadowed by corresponding
@@ -60,35 +65,35 @@ class Storage:
         f: Any,
         is_real_file: _bool,
         save_size: _bool,
-        element_size: int,
+        element_size: _int,
     ) -> None:
         raise NotImplementedError
 
-    def element_size(self) -> int:
+    def element_size(self) -> _int:
         raise NotImplementedError
 
-    def is_shared(self) -> bool:
+    def is_shared(self) -> _bool:
         raise NotImplementedError
 
     def share_memory_(self) -> "Storage":
         raise NotImplementedError
 
-    def nbytes(self) -> int:
+    def nbytes(self) -> _int:
         raise NotImplementedError
 
     def cpu(self) -> "Storage":
         raise NotImplementedError
 
-    def data_ptr(self) -> int:
+    def data_ptr(self) -> _int:
         raise NotImplementedError
 
     def from_file(
         self,
         filename: str,
-        shared: bool = False,
-        nbytes: int = 0,
+        shared: _bool = False,
+        nbytes: _int = 0,
     ) -> "Storage":
         raise NotImplementedError
 
-    def _new_with_file(self, f: Any, element_size: int) -> "Storage":
+    def _new_with_file(self, f: Any, element_size: _int) -> "Storage":
         raise NotImplementedError
