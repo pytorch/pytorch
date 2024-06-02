@@ -1,4 +1,3 @@
-
 r"""
 The torch package contains data structures for multi-dimensional
 tensors and defines mathematical operations over these tensors.
@@ -9,17 +8,20 @@ It has a CUDA counterpart, that enables you to run your tensor computations
 on an NVIDIA GPU with compute capability >= 3.0.
 """
 
-import math
-import os
-import sys
-import platform
-import textwrap
+import builtins
 import ctypes
-import inspect
-import threading
-import pdb
+import glob
 import importlib
 import importlib.util
+import inspect
+import math
+import os
+import platform
+import sys
+import textwrap
+import threading
+from typing import Any, Callable, Dict, Optional, Set, Tuple, Type, TYPE_CHECKING, Union
+
 
 # multipy/deploy is setting this import before importing torch, this is the most
 # reliable way we have to detect if we're running within deploy.
@@ -27,19 +29,25 @@ import importlib.util
 def _running_with_deploy():
     return sys.modules.get("torch._meta_registrations", None) is object
 
-from ._utils import _import_dotted_name, classproperty
-from ._utils import _functionalize_sync as _sync
-from ._utils_internal import get_file_path, prepare_multiprocessing_environment, \
-    USE_RTLD_GLOBAL_WITH_LIBTORCH, USE_GLOBAL_DEPS
+
+from torch._utils import (
+    _functionalize_sync as _sync,
+    _import_dotted_name,
+    classproperty,
+)
+from torch._utils_internal import (
+    get_file_path,
+    prepare_multiprocessing_environment,
+    USE_GLOBAL_DEPS,
+    USE_RTLD_GLOBAL_WITH_LIBTORCH,
+)
 
 # TODO(torch_deploy) figure out how to freeze version.py in fbcode build
 if _running_with_deploy():
     __version__ = "torch-deploy-1.8"
 else:
-    from .torch_version import __version__ as __version__
+    from torch.torch_version import __version__ as __version__
 
-from typing import Any, Callable, Dict, Optional, Set, Tuple, Type, TYPE_CHECKING, Union, List
-import builtins
 
 __all__ = [
     'typename', 'is_tensor', 'is_storage',
@@ -92,8 +100,8 @@ if sys.platform == 'win32':
     else:
         nvtoolsext_dll_path = ''
 
-    from .version import cuda as cuda_version
-    import glob
+    from torch.version import cuda as cuda_version
+
     if cuda_version and all(not glob.glob(os.path.join(p, 'cudart64*.dll')) for p in dll_paths):
         cuda_version_1 = cuda_version.replace('.', '_')
         cuda_path_var = 'CUDA_PATH_V' + cuda_version_1
@@ -153,7 +161,7 @@ def _preload_cuda_deps(lib_folder, lib_name):
     """Preloads cuda deps if they could not be found otherwise."""
     # Should only be called on Linux if default path resolution have failed
     assert platform.system() == 'Linux', 'Should only be called on Linux'
-    import glob
+
     lib_path = None
     for path in sys.path:
         nvidia_path = os.path.join(path, 'nvidia')
@@ -287,7 +295,7 @@ else:
 # Appease the type checker; ordinarily this binding is inserted by the
 # torch._C module initialization code in C
 if TYPE_CHECKING:
-    from . import _C as _C
+    from torch import _C as _C
 
 class SymInt:
     """
@@ -476,10 +484,9 @@ def sym_not(a):
         a (SymBool or bool): Object to negate
     """
     import sympy
-    from .overrides import has_torch_function_unary, handle_torch_function
 
-    if has_torch_function_unary(a):
-        return handle_torch_function(sym_not, (a,), a)
+    if overrides.has_torch_function_unary(a):
+        return overrides.handle_torch_function(sym_not, (a,), a)
     if hasattr(a, '__sym_not__'):
         return a.__sym_not__()
     if isinstance(a, sympy.Basic):
@@ -492,10 +499,8 @@ def sym_float(a):
     Args:
         a (SymInt, SymFloat, or object): Object to cast
     """
-    from .overrides import has_torch_function_unary, handle_torch_function
-
-    if has_torch_function_unary(a):
-        return handle_torch_function(sym_float, (a,), a)
+    if overrides.has_torch_function_unary(a):
+        return overrides.handle_torch_function(sym_float, (a,), a)
     if isinstance(a, SymFloat):
         return a
     elif hasattr(a, '__sym_float__'):
@@ -509,10 +514,8 @@ def sym_int(a):
     Args:
         a (SymInt, SymFloat, or object): Object to cast
     """
-    from .overrides import has_torch_function_unary, handle_torch_function
-
-    if has_torch_function_unary(a):
-        return handle_torch_function(sym_int, (a,), a)
+    if overrides.has_torch_function_unary(a):
+        return overrides.handle_torch_function(sym_int, (a,), a)
     if isinstance(a, SymInt):
         return a
     elif isinstance(a, SymFloat):
@@ -521,10 +524,8 @@ def sym_int(a):
 
 def sym_max(a, b):
     """ SymInt-aware utility for max()."""
-    from .overrides import has_torch_function, handle_torch_function
-
-    if has_torch_function((a, b)):
-        return handle_torch_function(sym_max, (a, b), a, b)
+    if overrides.has_torch_function((a, b)):
+        return overrides.handle_torch_function(sym_max, (a, b), a, b)
     if isinstance(a, (SymInt, SymFloat)):
         return a.__sym_max__(b)
     elif isinstance(b, (SymInt, SymFloat)):
@@ -536,10 +537,8 @@ def sym_max(a, b):
 
 def sym_min(a, b):
     """ SymInt-aware utility for max()."""
-    from .overrides import has_torch_function, handle_torch_function
-
-    if has_torch_function((a, b)):
-        return handle_torch_function(sym_min, (a, b), a, b)
+    if overrides.has_torch_function((a, b)):
+        return overrides.handle_torch_function(sym_min, (a, b), a, b)
     if isinstance(a, (SymInt, SymFloat)):
         return a.__sym_min__(b)
     elif isinstance(b, (SymInt, SymFloat)):
@@ -551,10 +550,8 @@ current_module = sys.modules[__name__]
 
 def _get_sym_math_fn(name):
     def fn(a):
-        from .overrides import has_torch_function_unary, handle_torch_function
-
-        if has_torch_function_unary(a):
-            return handle_torch_function(fn, (a,), a)
+        if overrides.has_torch_function_unary(a):
+            return overrides.handle_torch_function(fn, (a,), a)
         if hasattr(a, f"__sym_{name}__"):
             return getattr(a, f"__sym_{name}__")()
         return getattr(math, name)(a)
@@ -575,10 +572,8 @@ del fn, name, sym_name, current_module  # type: ignore[possibly-undefined]
 
 
 def sym_ite(b, t, f):
-    from .overrides import has_torch_function, handle_torch_function
-
-    if has_torch_function((b, t, f)):
-        return handle_torch_function(sym_ite, (b, t, f), b, t, f)
+    if overrides.has_torch_function((b, t, f)):
+        return overrides.handle_torch_function(sym_ite, (b, t, f), b, t, f)
     assert isinstance(b, (SymBool, builtins.bool)) and type(t) == type(f)
     if isinstance(b, SymBool):
         return b.__sym_ite__(t, f)
@@ -1313,7 +1308,7 @@ def _check_tensor_all(cond, message=None):  # noqa: F811
 
 # For Python Array API (https://data-apis.org/array-api/latest/API_specification/constants.html) and
 # NumPy consistency (https://numpy.org/devdocs/reference/constants.html)
-from math import e, nan , inf , pi
+from math import e, inf, nan, pi
 newaxis: None = None
 __all__.extend(['e', 'pi', 'nan', 'inf', 'newaxis'])
 
@@ -1321,8 +1316,15 @@ __all__.extend(['e', 'pi', 'nan', 'inf', 'newaxis'])
 # Define Storage and Tensor classes
 ################################################################################
 
-from ._tensor import Tensor
-from .storage import _StorageBase, TypedStorage, _LegacyStorage, UntypedStorage, _warn_typed_storage_removal
+from torch import storage as storage
+from torch._tensor import Tensor
+from torch.storage import (
+    _LegacyStorage,
+    _StorageBase,
+    _warn_typed_storage_removal,
+    TypedStorage,
+    UntypedStorage,
+)
 
 # NOTE: New <type>Storage classes should never be added. When adding a new
 # dtype, use torch.storage.TypedStorage directly.
@@ -1509,9 +1511,10 @@ _storage_classes = {
 _tensor_classes: Set[Type] = set()
 
 # If you edit these imports, please update torch/__init__.py.in as well
-from .random import set_rng_state, get_rng_state, manual_seed, initial_seed, seed
-from .serialization import save, load
-from ._tensor_str import set_printoptions
+from torch import random as random, serialization as serialization
+from torch._tensor_str import set_printoptions
+from torch.random import get_rng_state, initial_seed, manual_seed, seed, set_rng_state
+from torch.serialization import load, save
 
 ################################################################################
 # Initialize extension
@@ -1526,6 +1529,7 @@ def manager_path():
         raise RuntimeError("Unable to find torch_shm_manager at " + path)
     return path.encode('utf-8')
 
+from torch import amp as amp
 from torch.amp import autocast, GradScaler
 
 # Initializing the extension shadows the built-in python float / int classes;
@@ -1570,6 +1574,7 @@ for name in dir(_C._VariableFunctions):
     if not name.startswith("_"):
         __all__.append(name)
 
+del name
 
 ################################################################################
 # Add torch.dtype instances to the public API
@@ -1577,24 +1582,26 @@ for name in dir(_C._VariableFunctions):
 
 import torch
 
-for attribute in dir(torch):
-    if isinstance(getattr(torch, attribute), torch.dtype):
-        __all__.append(attribute)
+for name in dir(torch):
+    if isinstance(getattr(torch, name), torch.dtype):
+        __all__.append(name)
+
+del name
 
 ################################################################################
 # Import TorchDynamo's lazy APIs to avoid circular dependenices
 ################################################################################
 
-# needs to be before from .functional import * to avoid circular dependencies
-from ._compile import _disable_dynamo
+# needs to be before from torch.functional import * to avoid circular dependencies
+from torch._compile import _disable_dynamo  # usort: skip
 
 ################################################################################
 # Import interface functions defined in Python
 ################################################################################
 
 # needs to be after the above ATen bindings so we can overwrite from Python side
-from .functional import *  # noqa: F403
-
+from torch import functional as functional  # usort: skip
+from torch.functional import *  # usort: skip # noqa: F403
 
 ################################################################################
 # Remove unnecessary members
@@ -1611,10 +1618,8 @@ del _LegacyStorage
 def _assert(condition, message):
     r"""A wrapper around Python's assert which is symbolically traceable.
     """
-    from .overrides import has_torch_function, handle_torch_function
-
-    if type(condition) is not torch.Tensor and has_torch_function((condition,)):
-        return handle_torch_function(_assert, (condition,), condition, message)
+    if type(condition) is not torch.Tensor and overrides.has_torch_function((condition,)):
+        return overrides.handle_torch_function(_assert, (condition,), condition, message)
     assert condition, message
 
 ################################################################################
@@ -1624,55 +1629,60 @@ def _assert(condition, message):
 # Use the redundant form so that type checkers know that these are a part of
 # the public API. The "regular" import lines are there solely for the runtime
 # side effect of adding to the imported module's members for other users.
-from torch import cuda as cuda
-from torch import cpu as cpu
-from torch import mps as mps
-from torch import xpu as xpu
-from torch import mtia as mtia
-from torch import autograd as autograd
-from torch.autograd import (
-    no_grad as no_grad,
+
+# needs to be before import torch.nn as nn to avoid circular dependencies
+from torch.autograd import (  # usort: skip
     enable_grad as enable_grad,
-    set_grad_enabled as set_grad_enabled,
     inference_mode as inference_mode,
+    no_grad as no_grad,
+    set_grad_enabled as set_grad_enabled,
 )
-from torch import fft as fft
-from torch import futures as futures
-from torch import _awaits as _awaits
-from torch import nested as nested
-from torch import nn as nn
+
+from torch import (
+    __config__ as __config__,
+    __future__ as __future__,
+    _awaits as _awaits,
+    autograd as autograd,
+    backends as backends,
+    cpu as cpu,
+    cuda as cuda,
+    distributions as distributions,
+    fft as fft,
+    futures as futures,
+    hub as hub,
+    jit as jit,
+    linalg as linalg,
+    mps as mps,
+    mtia as mtia,
+    multiprocessing as multiprocessing,
+    nested as nested,
+    nn as nn,
+    optim as optim,
+    overrides as overrides,
+    profiler as profiler,
+    sparse as sparse,
+    special as special,
+    testing as testing,
+    types as types,
+    utils as utils,
+    xpu as xpu,
+)
 from torch.signal import windows as windows
-from torch import optim as optim
-import torch.optim._multi_tensor
-from torch import multiprocessing as multiprocessing
-from torch import sparse as sparse
-from torch import special as special
-import torch.utils.backcompat
-from torch import jit as jit
-from torch import linalg as linalg
-from torch import hub as hub
-from torch import random as random
-from torch import distributions as distributions
-from torch import testing as testing
-from torch import backends as backends
-import torch.utils.data
-from torch import __config__ as __config__
-from torch import __future__ as __future__
-from torch import profiler as profiler
 
 # Quantized, sparse, AO, etc. should be last to get imported, as nothing
 # is expected to depend on them.
-from torch import ao as ao
+from torch import ao as ao  # usort: skip
+
 # nn.quant* depends on ao -- so should be after those.
+import torch.nn.intrinsic
+import torch.nn.qat
 import torch.nn.quantizable
 import torch.nn.quantized
-import torch.nn.qat
-import torch.nn.intrinsic
 
 _C._init_names(list(torch._storage_classes))
 
 # attach docstrings to torch and tensor functions
-from . import _torch_docs, _tensor_docs, _storage_docs, _size_docs
+from torch import _size_docs, _storage_docs, _tensor_docs, _torch_docs
 del _torch_docs, _tensor_docs, _storage_docs, _size_docs
 
 
@@ -1681,17 +1691,18 @@ def compiled_with_cxx11_abi() -> builtins.bool:
     return _C._GLIBCXX_USE_CXX11_ABI
 
 
-# Import the ops "namespace"
-from torch._ops import ops
-from torch._classes import classes
 import torch._library
 
-# quantization depends on torch.fx
+# Import the ops "namespace"
+from torch._classes import classes as classes
+from torch._ops import ops as ops  # usort: skip
+
+# quantization depends on torch.fx and torch.ops
 # Import quantization
-from torch import quantization as quantization
+from torch import quantization as quantization  # usort: skip
 
 # Import the quasi random sampler
-from torch import quasirandom as quasirandom
+from torch import quasirandom as quasirandom  # usort: skip
 
 # If you are seeing this, it means that this call site was not checked if
 # the memory format could be preserved, and it was switched to old default
@@ -1705,29 +1716,30 @@ del register_after_fork
 
 # Import tools that require fully imported torch (for applying
 # torch.jit.script as a decorator, for instance):
-from ._lobpcg import lobpcg as lobpcg
+from torch._lobpcg import lobpcg as lobpcg
 
 # These were previously defined in native_functions.yaml and appeared on the
 # `torch` namespace, but we moved them to c10 dispatch to facilitate custom
 # class usage. We add these lines here to preserve backward compatibility.
-quantized_lstm = torch.ops.aten.quantized_lstm
-quantized_gru = torch.ops.aten.quantized_gru
-
-from torch.utils.dlpack import from_dlpack, to_dlpack
+quantized_lstm = ops.aten.quantized_lstm
+quantized_gru = ops.aten.quantized_gru
 
 # Import experimental masked operations support. See
 # [RFC-0016](https://github.com/pytorch/rfcs/pull/27) for more
 # information.
-from . import masked
+from torch import masked as masked
 
 # Import removed ops with error message about removal
-from ._linalg_utils import (  # type: ignore[misc]
-    matrix_rank,
+from torch._linalg_utils import (  # type: ignore[misc]
+    _symeig as symeig,
     eig,
-    solve,
     lstsq,
+    matrix_rank,
+    solve,
 )
-from ._linalg_utils import _symeig as symeig  # type: ignore[misc]
+
+from torch.utils.dlpack import from_dlpack, to_dlpack
+
 
 class _TorchCompileInductorWrapper:
     compiler_name = "inductor"
@@ -1958,7 +1970,8 @@ def compile(model: Optional[Callable] = None, *,
 
 from torch import export as export
 
-from torch._higher_order_ops import cond
+from torch._higher_order_ops import cond as cond
+
 
 def _register_device_module(device_type, module):
     r"""Register an external runtime module of the specific :attr:`device_type`
@@ -1978,10 +1991,10 @@ def _register_device_module(device_type, module):
     sys.modules[torch_module_name] = module
 
 # expose return_types
-from . import return_types
-from . import library
+from torch import library as library, return_types as return_types
+
 if not TYPE_CHECKING:
-    from . import _meta_registrations
+    from torch import _meta_registrations
 
 # Enable CUDA Sanitizer
 if 'TORCH_CUDA_SANITIZER' in os.environ:
@@ -1993,7 +2006,7 @@ if 'TORCH_CUDA_SANITIZER' in os.environ:
 import torch.fx.experimental.sym_node
 
 from torch import func as func
-from torch.func import vmap
+from torch.func import vmap as vmap
 
 
 # Register MPS specific decomps
@@ -2028,9 +2041,7 @@ if TYPE_CHECKING:
     # Import the following modules during type checking to enable code intelligence features,
     # such as auto-completion in tools like pylance, even when these modules are not explicitly
     # imported in user code.
-    from torch import _dynamo as _dynamo
-    from torch import _inductor as _inductor
-    from torch import onnx as onnx
+    from torch import _dynamo as _dynamo, _inductor as _inductor, onnx as onnx
 
 else:
     _lazy_modules = {
@@ -2100,5 +2111,5 @@ def _constrain_as_size(symbol, min: Optional[builtins.int] = None, max: Optional
     torch.sym_constrain_range_for_size(symbol, min=min, max=max)
 
 
-from . import _logging
+from torch import _logging
 _logging._init_logs()
