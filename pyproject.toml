@@ -48,7 +48,6 @@ ignore = [
     # these ignores are from flake8-bugbear; please fix!
     "B007", "B008", "B017",
     "B018", # Useless expression
-    "B019",
     "B023",
     "B028", # No explicit `stacklevel` keyword argument found
     "E402",
@@ -149,6 +148,9 @@ select = [
     "F821",
 ]
 "test/torch_np/numpy_tests/**" = [
+    "F821",
+]
+"test/dynamo/test_bytecode_utils.py" = [
     "F821",
 ]
 "test/dynamo/test_debug_utils.py" = [
