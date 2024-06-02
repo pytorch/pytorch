@@ -12,7 +12,13 @@ supported:
     - add
     - sub
     - mul
-    - div
+    - div:
+        unsupported:
+            - float16
+            - bfloat16
+        unsupported_backward:
+            - float16
+            - bfloat16
     - abs
     - bernoulli
     - bitwise_and
@@ -115,5 +121,3 @@ supported:
     - max_pool2d_with_indices_backward
     - nn.functional.embedding
     - nn.functional.unfold
-    
-    

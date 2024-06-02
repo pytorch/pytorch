@@ -24089,8 +24089,9 @@ def skip(op_name, variant_name='', *, device_type=None, dtypes=None):
     return (op_name, variant_name, device_type, dtypes, False)
 
 
-def skipOps(test_case_name, base_test_name, to_skip):
-    all_opinfos = op_db
+def skipOps(test_case_name, base_test_name, to_skip, all_opinfos=op_db):
+    import pdb
+    pdb.set_trace()
     for xfail in to_skip:
         op_name, variant_name, device_type, dtypes, expected_failure = xfail
         matching_opinfos = [o for o in all_opinfos
@@ -24142,19 +24143,18 @@ def enable_backend_test(op_db_list: List[OpInfo]):
                     for _key in backend_op_dict['supported'][ind][name]:
                         # Get the dtypes with difference
                         _dtypes = [getattr(torch, _dtype) if hasattr(torch, _dtype) else None for _dtype in backend_op_dict['supported'][ind][name][_key]]
-                        match _key:
-                            case "unsupported":
+                        if _key == "unsupported":
                                 op.dtypesIfXPU = set(filter(lambda x: (x not in _dtypes), op.dtypesIfXPU)) \
                                     if type(op.dtypesIfXPU) is set else _dispatch_dtypes(filter(lambda x: (x not in _dtypes), op.dtypesIfXPU))
-                            case "unsupported_backward":
+                        if _key ==  "unsupported_backward":
                                 op.backward_dtypesIfXPU = set(filter(lambda x: (x not in _dtypes), op.backward_dtypesIfXPU)) \
                                     if type(op.backward_dtypesIfXPU) is set else _dispatch_dtypes(filter(lambda x: (x not in _dtypes), op.backward_dtypesIfXPU))
-                            case "supported":
+                        if _key ==  "supported":
                                 if type(op.dtypesIfXPU) is set:
                                     op.dtypesIfXPU.update(_dtypes)
                                 else:
                                     op.dtypesIfXPU = _dispatch_dtypes((*op.dtypesIfXPU, *_dtypes))
-                            case "supported_backward":
+                        if _key == "supported_backward":
                                 if type(op.backward_dtypesIfXPU) is set:
                                     op.backward_dtypesIfXPU.update(_dtypes)
                                 else:

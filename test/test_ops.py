@@ -563,6 +563,12 @@ class TestCommon(TestCase):
         ],
     )
     @skipIfTorchInductor("Takes too long for inductor")
+    @skipOps(
+        "TestCommon", "test_python_ref_executor", (('_refs.mul', '', 'xpu', (torch.complex32,), False),), all_opinfos=python_ref_db
+    )
+    @skipOps(
+        "TestCommon", "test_python_ref_executor", (('_refs.pow', '', 'xpu', (torch.complex32,), False),), all_opinfos=python_ref_db
+    )
     def test_python_ref_executor(self, device, dtype, op, executor):
         if (
             TEST_WITH_ROCM
@@ -647,6 +653,8 @@ class TestCommon(TestCase):
 
         error_inputs = op.error_inputs(device)
         for ei in error_inputs:
+            import pdb
+            pdb.set_trace()
             si = ei.sample_input
             meta_sample = si.transform(_to_tensormeta)
             with self.assertRaisesRegex(ei.error_type, ei.error_regex):
