@@ -9,6 +9,7 @@ import importlib
 import io
 import json
 import logging
+import multiprocessing
 import os
 import pickle
 import pkgutil
@@ -25,7 +26,7 @@ import textwrap
 import threading
 import warnings
 from bisect import bisect_right
-from concurrent.futures import Future
+from concurrent.futures import Future, ProcessPoolExecutor, ThreadPoolExecutor
 from copy import copy
 from ctypes import c_void_p, cdll, CDLL
 from functools import partial
@@ -48,13 +49,22 @@ from typing import (
 )
 
 import torch
+from torch._dynamo.device_interface import get_registered_device_interfaces
 from torch._dynamo.utils import counters, dynamo_timed
 from torch._inductor import config, exc, metrics
 from torch._inductor.codegen.cuda import cuda_env
+from torch._inductor.compile_worker.subproc_pool import (
+    _warm_process_pool,
+    AnyPool,
+    SubprocPool,
+)
+from torch._inductor.compile_worker.watchdog import _async_compile_initializer
 from torch._inductor.runtime.compile_tasks import (
     _module_to_triton_kernel,
     _reload_python_module,
     _reload_python_module_in_subproc,
+    _set_triton_ptxas_path,
+    _worker_compile_triton,
 )
 from torch._inductor.runtime.hints import HalideMeta
 from torch._inductor.runtime.runtime_utils import cache_dir
@@ -72,6 +82,7 @@ if TYPE_CHECKING:
     from torch._inductor.graph import GraphLowering
     from torch._inductor.ir import ChoiceCaller
 
+from torch.hub import _Faketqdm, tqdm
 
 _HERE = os.path.abspath(__file__)
 _TORCH_PATH = os.path.dirname(os.path.dirname(_HERE))
@@ -103,10 +114,30 @@ else:
 
 
 output_code_log = torch._logging.getArtifactLogger(__name__, "output_code")
+kernel_code_log = torch._logging.getArtifactLogger(__name__, "kernel_code")
 
 LOCK_TIMEOUT = 600
 
 _IS_WINDOWS = sys.platform == "win32"
+
+# timing metrics for time spent in the compilation
+_cumulative_compile_time = 0.0
+_t0: Optional[float] = None
+
+
+def _compile_start() -> None:
+    global _t0
+    if _t0 is None:
+        _t0 = time()
+
+
+def _compile_end() -> None:
+    global _cumulative_compile_time, _t0
+    if _t0 is not None:
+        t1 = time()
+        _cumulative_compile_time += t1 - _t0
+        _t0 = None
+        # print("CUMULATIVE COMPILE TIME", _cumulative_compile_time)
 
 
 log = logging.getLogger(__name__)
@@ -227,7 +258,7 @@ class LocalCache(CacheBase):
 
 
 class PersistentCache(CacheBase):
-    @functools.lru_cache(None)
+    @functools.lru_cache(None)  # noqa: B019
     def get_global_cache(self):
         global_cache_path = self.get_global_cache_path()
         if global_cache_path is None or not global_cache_path.is_file():
@@ -415,11 +446,22 @@ def _ident(x: Any) -> Any:
     return x
 
 
+def extract_tensor_metadata_for_cache_key(t):
+    """
+    Extracts the tensor metadata and removes fields of the TensorMetadata
+    that are not needed for caching
+    """
+    meta = extract_tensor_metadata(t)
+    if not hasattr(t, "_is_inductor_static"):
+        meta = dataclasses.replace(meta, storage_offset=0, storage_bytes=None)
+    return meta
+
+
 def _reduce_fake_tensor(t):
     """
     See FxGraphCachePickler. Custom reducer to pickle FakeTensors.
     """
-    metadata = extract_tensor_metadata(t)
+    metadata = extract_tensor_metadata_for_cache_key(t)
     return (_ident, (metadata,))
 
 
@@ -450,7 +492,7 @@ def _reduce_tensor(t):
             f"FX graph cache handling of a large constant took {elapsed:.1}s. Please file an issue."
         )
 
-    metadata = extract_tensor_metadata(t)
+    metadata = extract_tensor_metadata_for_cache_key(t)
     return (_ident, (TensorMetadataAndValues(metadata, values),))
 
 
@@ -523,7 +565,7 @@ class FxGraphCachePickler(pickle.Pickler):
 
         def get_str(obj) -> str:
             if isinstance(obj, torch.Tensor):
-                return str(extract_tensor_metadata(obj))
+                return str(extract_tensor_metadata_for_cache_key(obj))
             elif isinstance(obj, bytes):
                 return "<bytes>"
             else:
@@ -608,6 +650,7 @@ class FxGraphHashDetails:
         gm: torch.fx.GraphModule,
         example_inputs: List[torch.Tensor],
         fx_kwargs: Dict[str, Any],
+        inputs_to_check: Sequence[int],
     ):
         self.gm = gm
         self.example_inputs = example_inputs
@@ -622,6 +665,9 @@ class FxGraphHashDetails:
                     self.fx_kwargs[k] = OrderedSetHolder(sorted(fx_kwargs[k]))
                 else:
                     self.fx_kwargs[k] = fx_kwargs[k]
+
+        # Alignment checks
+        self.inputs_to_check = inputs_to_check
 
         # 'Deterministic algorithms' can affect codegen via lowering to cuda kernels.
         self.deterministic_algorithms_settings = (
@@ -655,11 +701,12 @@ def compiled_fx_graph_hash(
     gm: torch.fx.GraphModule,
     example_inputs: List[torch.Tensor],
     fx_kwargs: Dict[str, Any],
+    inputs_to_check: Sequence[int],
 ) -> str:
     """
     Generate a unique hash of the FX graph for caching.
     """
-    details = FxGraphHashDetails(gm, example_inputs, fx_kwargs)
+    details = FxGraphHashDetails(gm, example_inputs, fx_kwargs, inputs_to_check)
     # The prefix distinguishes among the other kinds of objects we
     # cache in this module.
     key = "f" + FxGraphCachePickler.get_hash(details)
@@ -959,6 +1006,7 @@ class FxGraphCache:
         gm: torch.fx.GraphModule,
         example_inputs: List[torch.Tensor],
         fx_kwargs: Dict[str, Any],
+        inputs_to_check: Sequence[int],
         local: bool,
         remote: bool,
     ):
@@ -970,7 +1018,7 @@ class FxGraphCache:
         compiled_graph = None
         try:
             FxGraphCache._check_can_cache(gm)
-            key = compiled_fx_graph_hash(gm, example_inputs, fx_kwargs)
+            key = compiled_fx_graph_hash(gm, example_inputs, fx_kwargs, inputs_to_check)
 
             remote_cache = None
             if remote:
@@ -1261,7 +1309,7 @@ cdll.LoadLibrary("__lib_path__")
     def __hash__(self) -> int:
         return hash(str(self))
 
-    @functools.lru_cache(None)
+    @functools.lru_cache(None)  # noqa: B019
     def __bool__(self) -> bool:
         if config.cpp.vec_isa_ok is not None:
             return config.cpp.vec_isa_ok
@@ -3179,6 +3227,12 @@ class CUDACodeCache:
         return (DLLWrapper(dst_file_path), hash_key, source_code_path)
 
 
+def caching_device_properties():
+    for _, device_interface in get_registered_device_interfaces():
+        if device_interface.is_available():
+            device_interface.Worker.get_device_properties()
+
+
 class CodeCacheFuture:
     def result(self):
         raise NotImplementedError
@@ -3212,3 +3266,171 @@ class LambdaFuture(CodeCacheFuture):
 
     def result(self):
         return self.result_fn()
+
+
+# Used to keep track of all process pools invoked so far.
+_pool_set: Set[AnyPool] = set()
+
+
+def shutdown_compile_workers() -> None:
+    """Shut down all outstanding compile-worker pools."""
+    for pool in _pool_set:
+        pool.shutdown()
+    after_fork()
+
+
+def after_fork():
+    """Reset pools to initial state without shutting them down"""
+    _pool_set.clear()
+    AsyncCompile.process_pool.cache_clear()
+
+
+try:
+    os.register_at_fork(after_in_child=after_fork)
+except AttributeError:
+    pass  # register_at_fork does not exists on windows
+
+
+class AsyncCompile:
+    def __init__(self) -> None:
+        pass
+
+    @staticmethod
+    @functools.lru_cache(1)
+    def pool() -> ThreadPoolExecutor:
+        assert config.compile_threads > 1
+        return ThreadPoolExecutor(config.compile_threads)
+
+    @staticmethod
+    @functools.lru_cache(1)
+    def process_pool() -> AnyPool:
+        assert config.compile_threads > 1
+        pool: AnyPool
+        if config.worker_start_method == "subprocess":
+            # Wrapper around ProcessPoolExecutor forks in a new process we control
+            pool = SubprocPool(config.compile_threads)
+        else:
+            # ensure properties have been calculated before processes
+            # are forked
+            caching_device_properties()
+            ctx = multiprocessing.get_context(config.worker_start_method)
+            pool = ProcessPoolExecutor(
+                config.compile_threads,
+                mp_context=ctx,
+                initializer=partial(_async_compile_initializer, os.getpid()),
+            )
+            # when this pool is created in a subprocess object, the normal exit handler
+            # doesn't run, and we need to register our own handler.
+            # exitpriority has to be high, because another one of the finalizers will
+            # kill the worker thread that sends the shutdown message to the workers...
+            multiprocessing.util.Finalize(None, pool.shutdown, exitpriority=sys.maxsize)
+
+        _pool_set.add(pool)
+        return pool
+
+    @classmethod
+    def warm_pool(cls) -> None:
+        if config.compile_threads <= 1:
+            return
+        _compile_start()
+        _warm_process_pool(cls.process_pool(), config.compile_threads)
+        _compile_end()
+
+    @classmethod
+    def submit(cls, task: Callable[..., Any]) -> Any:
+        if config.compile_threads <= 1:
+            return task()
+        return cls.pool().submit(task)
+
+    def triton(self, kernel_name: str, source_code: str, device_str: str = "cuda"):
+        kernel_code_log.info("Triton Kernel:\n%s", source_code)
+        _compile_start()
+        _set_triton_ptxas_path()
+
+        kernel = TritonCodeCache.load(kernel_name, source_code)
+        if config.compile_threads > 1:
+            return TritonFuture(
+                kernel,
+                self.process_pool().submit(
+                    _worker_compile_triton,
+                    kernel._reload_in_subproc,
+                ),
+            )
+        else:
+            kernel.precompile()
+            return kernel
+
+    def multi_kernel(self, *args, **kwargs) -> Any:
+        from torch._inductor.codegen.multi_kernel import MultiKernelCall
+
+        # no need to call this in parallel since the sub-kernels are already parallel tasks
+        return MultiKernelCall(*args, **kwargs)
+
+    def cpp(self, source_code: str):
+        kernel_code_log.info("CPP Kernel:\n%s", source_code)
+        if config.compile_threads <= 1:
+            return CppCodeCache.load(source_code).kernel
+        else:
+            get_result = CppCodeCache.load_async(source_code, submit_fn=self.submit)
+            return LambdaFuture(lambda: get_result().kernel)
+
+    def cpp_pybinding(self, argtypes: List[str], source_code: str):
+        kernel_code_log.info("CPP+Bindings Kernel:\n%s", source_code)
+        if config.compile_threads <= 1:
+            return CppPythonBindingsCodeCache.load_pybinding(argtypes, source_code)
+        else:
+            get_result = CppPythonBindingsCodeCache.load_pybinding_async(
+                argtypes, source_code, submit_fn=self.submit
+            )
+            return LambdaFuture(get_result)
+
+    def cuda(self, source_code, dst_file_ext):
+        kernel_code_log.info("CUDA Kernel:\n%s", source_code)
+
+        def task():
+            return CUDACodeCache.load(source_code, dst_file_ext)[0]
+
+        return self.submit(task)
+
+    def halide(self, meta: HalideMeta, source_code: str):
+        kernel_code_log.info("Halide Kernel:\n%r\n%s", meta, source_code)
+        if config.compile_threads <= 1:
+            return HalideCodeCache.generate_halide(meta, source_code)
+        else:
+            get_result = HalideCodeCache.generate_halide_async(
+                meta, source_code, submit_fn=self.submit
+            )
+            return LambdaFuture(get_result)
+
+    def wait(self, scope: Dict[str, Any]) -> None:
+        num_kernels = len(
+            [
+                value
+                for key, value in scope.items()
+                if isinstance(value, (Future, CodeCacheFuture))
+            ]
+        )
+        pbar = tqdm(
+            total=num_kernels,
+            desc="Inductor Compilation",
+            disable=config.disable_progress,
+            delay=0,
+        )
+        if config.compile_threads > 1:
+            for key, result in scope.items():
+                if config.verbose_progress and not isinstance(pbar, _Faketqdm):
+                    pbar.set_postfix_str(key)
+                if isinstance(result, (Future, CodeCacheFuture)):
+                    scope[key] = result.result()
+                    pbar.update(1)
+
+        _compile_end()
+
+
+if (
+    os.environ.get("TORCH_TNT_IN_USE", "0") == "1"
+    or os.environ.get("TORCH_WARM_POOL", "1") != "1"
+):
+    pass
+else:
+    AsyncCompile.warm_pool()
