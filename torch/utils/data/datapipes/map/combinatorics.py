@@ -1,10 +1,11 @@
 import random
+from typing import Iterator, List, Optional, TypeVar
 
 import torch
 from torch.utils.data.datapipes.datapipe import IterDataPipe, MapDataPipe
-from typing import Iterator, List, Optional, TypeVar
 
-__all__ = ["ShufflerIterDataPipe", ]
+
+__all__ = ["ShufflerIterDataPipe"]
 
 
 T_co = TypeVar('T_co', covariant=True)

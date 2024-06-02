@@ -1,6 +1,17 @@
+from typing import (
+    Generic,
+    Iterable,
+    Iterator,
+    List,
+    Optional,
+    Sequence,
+    Sized,
+    TypeVar,
+    Union,
+)
+
 import torch
 
-from typing import Iterator, Iterable, Optional, Sequence, List, TypeVar, Generic, Sized, Union
 
 __all__ = [
     "BatchSampler",

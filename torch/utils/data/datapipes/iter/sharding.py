@@ -1,12 +1,9 @@
-from typing import (
-    Dict,
-    Sized,
-    Tuple,
-)
+from enum import IntEnum
+from typing import Dict, Sized, Tuple
 
 from torch.utils.data.datapipes._decorator import functional_datapipe
 from torch.utils.data.datapipes.datapipe import IterDataPipe
-from enum import IntEnum
+
 
 __all__ = [
     "SHARDING_PRIORITIES",

@@ -1,8 +1,10 @@
-from torch.utils.data.datapipes._decorator import functional_datapipe
-from torch.utils.data.datapipes.datapipe import MapDataPipe, DataChunk
 from typing import List, Sized, TypeVar
 
-__all__ = ["BatcherMapDataPipe", ]
+from torch.utils.data.datapipes._decorator import functional_datapipe
+from torch.utils.data.datapipes.datapipe import DataChunk, MapDataPipe
+
+
+__all__ = ["BatcherMapDataPipe"]
 
 T = TypeVar('T')
 

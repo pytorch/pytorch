@@ -1,11 +1,13 @@
 import math
-from typing import TypeVar, Optional, Iterator
+from typing import Iterator, Optional, TypeVar
 
 import torch
-from . import Sampler, Dataset
 import torch.distributed as dist
+from torch.utils.data.dataset import Dataset
+from torch.utils.data.sampler import Sampler
 
-__all__ = ["DistributedSampler", ]
+
+__all__ = ["DistributedSampler"]
 
 T_co = TypeVar('T_co', covariant=True)
 
