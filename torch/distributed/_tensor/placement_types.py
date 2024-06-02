@@ -32,12 +32,27 @@ class Placement:
         return isinstance(self, Replicate)
 
     def is_partial(self) -> bool:
-        return isinstance(self, _Partial)
+        return isinstance(self, Partial)
 
 
 @dataclass(frozen=True)
 class Shard(Placement):
-    # shard placement, shard on a dim
+    """
+    The ``Shard(dim)`` placement describes the DTensor sharding on tensor dimension
+    ``dim`` over a corresponding ``DeviceMesh`` dimension, where each rank on the
+    DeviceMesh dimension only holds a shard/piece of the global Tensor. The
+    ``Shard(dim)`` placement follows the ``torch.chunk(dim)`` semantic, where the
+    last few shards on the DeviceMesh dimension might be empty. The ``Shard``
+    placement can be used by all DTensor APIs (i.e. distribute_tensor, from_local, etc.)
+
+    Args:
+        dim (int): The tensor dimension that describes the DTensor is sharded over its
+            corresponding DeviceMesh dimension.
+
+    ::note:: sharding on a tensor dimension that is not evenly
+        divisible on a DeviceMesh dimension is currently experimental.
+    """
+
     dim: int
 
     def _split_tensor(
@@ -327,7 +342,13 @@ class Shard(Placement):
 
 @dataclass(frozen=True)
 class Replicate(Placement):
-    # replicate placement
+    """
+    The ``Replicate()`` placement describes the DTensor replicating on a corresponding
+    ``DeviceMesh`` dimension, where each rank on the DeviceMesh dimension holds a
+    replica of the global Tensor. The ``Replicate`` placement can be used by all
+    DTensor APIs (i.e. distribute_tensor, from_local, etc.)
+    """
+
     def __eq__(self, other: object) -> bool:
         if not isinstance(other, Replicate):
             return False
@@ -367,19 +388,32 @@ class Replicate(Placement):
 
 
 @dataclass(frozen=True)
-class _Partial(Placement):
-    # This is a default _Partial placement with element-wise reduce op
-    # _Partial define three contracts:
-    # 1. _reduce_value: reduce the value of the tensor on the mesh dimension
-    # 2. _reduce_shard_value: reduce_scatter the value of the tensor on the mesh dimension
-    # 3. _partition_value: partition the value of a replicated tensor on the mesh dimension
-    # We can implement custom reductions as needed by subclassing this
-    # class and override those contracts.
+class Partial(Placement):
+    """
+    The ``Partial(reduce_op)`` placement describes the DTensor that is pending
+    reduction on a specified ``DeviceMesh`` dimension, where each rank on the
+    DeviceMesh dimension holds the partial value of the global Tensor. User can
+    redistribute the ``Partial`` DTensor to a ``Replicate`` or ``Shard(dim)``
+    placement on the specified ``DeviceMesh`` dimension using ``redistribute``,
+    which would trigger necessary communication operations under the hood (i.e.
+    ``allreduce``, ``reduce_scatter``).
+
+    Args:
+        reduce_op (str, optional): The reduction op to be used for the partial DTensor
+        to produce Replicated/Sharded DTensor. Only element-wise reduction operations
+        are supportd, including: "sum", "avg", "prod", "max", "min", default: "sum".
+
+    ::note:: The ``Partial`` placement can be generated as a result of the DTensor operators,
+        and can only be used by the ``DTensor.from_local`` API.
+    """
+
     reduce_op: str = "sum"
 
     def _reduce_value(
         self, tensor: torch.Tensor, mesh: DeviceMesh, mesh_dim: int
     ) -> torch.Tensor:
+        # Partial placement contract #1:
+        # _reduce_value: reduce the value of the tensor on the mesh dimension
         return funcol.all_reduce(
             tensor, reduceOp=self.reduce_op, group=(mesh, mesh_dim)
         )
@@ -391,13 +425,17 @@ class _Partial(Placement):
         mesh_dim: int,
         shard_spec: Placement,
     ) -> torch.Tensor:
-        # by default call reduce_shard_tensor of the shard_spec.
+        # Partial placement contract #2:
+        # _reduce_shard_value: reduce_scatter the value of the tensor over the mesh dimension
         shard_spec = cast(Shard, shard_spec)
         return shard_spec._reduce_shard_tensor(tensor, mesh, self.reduce_op, mesh_dim)
 
     def _partition_value(
         self, tensor: torch.Tensor, mesh: DeviceMesh, mesh_dim: int
     ) -> torch.Tensor:
+        # Partial placement contract #3:
+        # _partition_value: partition the value of a replicated tensor on the mesh dimension
+
         # _partition_value is the conjugate operation of _reduce_value
         # - i.e. _partition_value on a sum reduce op is just a divison operation
         # - the _reduce_value on a sum reduce op would just be a sum(allreduce) operation
@@ -408,7 +446,7 @@ class _Partial(Placement):
         return tensor / num_chunks
 
     def __eq__(self, other: object) -> bool:
-        if not isinstance(other, _Partial):
+        if not isinstance(other, Partial):
             return False
         return self.reduce_op == other.reduce_op
 
@@ -419,13 +457,17 @@ class _Partial(Placement):
         """
         machine readable representation of the Partial placement
         """
-        return f"_Partial({self.reduce_op})"
+        return f"Partial({self.reduce_op})"
 
     def __str__(self) -> str:
         """
         human readable representation of the Partial placement
         """
         return "P"
+
+
+# We keep the old _Partial name for a while for BC reason
+_Partial = Partial
 
 
 class TensorMeta(NamedTuple):
@@ -626,7 +668,7 @@ class DTensorSpec:
 
         # find all mesh dims that need pending reductions
         for s in sums:
-            placements[s] = _Partial()
+            placements[s] = Partial()
 
         for i, m in enumerate(dim_map):
             if m >= 0:

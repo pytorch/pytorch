@@ -175,6 +175,7 @@ def load(
             elem = state_dict[key]
             if isinstance(elem, Stateful):
                 elem.load_state_dict(statetful_sd[key])
+            state_dict[key] = statetful_sd[key]
 
 
 def _load_state_dict(

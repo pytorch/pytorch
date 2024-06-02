@@ -1664,17 +1664,19 @@ def _new_process_group_helper(
 
         pg._register_backend(torch.device(device), backend_type, backend_class)
 
+    # set group_name and group_dsec to backend
+    assert group_name is not None
+    assert group_desc is not None
+    pg._set_group_name(group_name)
+    pg._set_group_desc(group_desc)
+
     if device_id and pg._get_backend(device_id).supports_splitting:
         eager_backend = pg._get_backend(device_id)
         eager_backend.eager_connect_single_device(device_id)
 
     # update global state
-    assert group_name is not None
-    assert group_desc is not None
     _world.pg_map[pg] = (backend, prefix_store)
     _world.pg_names[pg] = group_name
-    pg._set_group_name(group_name)
-    pg._set_group_desc(group_desc)
     _register_process_group(group_name, pg)
 
     _world.pg_backend_config[pg] = str(backend_config)
@@ -4098,7 +4100,8 @@ def new_group(ranks=None, timeout=None, backend=None, pg_options=None, use_local
         group_desc (str, optional): a string to describe the process group.
 
     Returns:
-        A handle of distributed group that can be given to collective calls or None if the rank is not part of ``ranks``.
+        A handle of distributed group that can be given to collective calls or
+        GroupMember.NON_GROUP_MEMBER if the rank is not part of ``ranks``.
 
     N.B. use_local_synchronization doesn't work with MPI.
 
