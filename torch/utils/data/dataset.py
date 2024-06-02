@@ -16,10 +16,8 @@ from typing import (
 )
 from typing_extensions import deprecated
 
-# No 'default_generator' in torch/__init__.pyi
-from torch import default_generator, randperm
+import torch
 
-from ... import Generator, Tensor
 
 __all__ = [
     "Dataset",
@@ -189,7 +187,7 @@ class IterableDataset(Dataset[T_co], Iterable[T_co]):
     # See NOTE [ Lack of Default `__len__` in Python Abstract Base Classes ]
 
 
-class TensorDataset(Dataset[Tuple[Tensor, ...]]):
+class TensorDataset(Dataset[Tuple[torch.Tensor, ...]]):
     r"""Dataset wrapping tensors.
 
     Each sample will be retrieved by indexing tensors along the first dimension.
@@ -198,9 +196,9 @@ class TensorDataset(Dataset[Tuple[Tensor, ...]]):
         *tensors (Tensor): tensors that have the same size of the first dimension.
     """
 
-    tensors: Tuple[Tensor, ...]
+    tensors: Tuple[torch.Tensor, ...]
 
-    def __init__(self, *tensors: Tensor) -> None:
+    def __init__(self, *tensors: torch.Tensor) -> None:
         assert all(
             tensors[0].size(0) == tensor.size(0) for tensor in tensors
         ), "Size mismatch between tensors"
@@ -425,7 +423,7 @@ class Subset(Dataset[T_co]):
 def random_split(
     dataset: Dataset[T],
     lengths: Sequence[Union[int, float]],
-    generator: Optional[Generator] = default_generator,
+    generator: Optional[torch.Generator] = torch.default_generator,  # no 'default_generator' in torch/__init__.pyi
 ) -> List[Subset[T]]:
     r"""
     Randomly split a dataset into non-overlapping new datasets of given lengths.
@@ -480,7 +478,7 @@ def random_split(
             "Sum of input lengths does not equal the length of the input dataset!"
         )
 
-    indices = randperm(sum(lengths), generator=generator).tolist()  # type: ignore[arg-type, call-overload]
+    indices = torch.randperm(sum(lengths), generator=generator).tolist()  # type: ignore[arg-type, call-overload]
     lengths = cast(Sequence[int], lengths)
     return [
         Subset(dataset, indices[offset - length : offset])

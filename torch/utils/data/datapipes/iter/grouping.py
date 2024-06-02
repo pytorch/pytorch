@@ -3,10 +3,10 @@ from collections import defaultdict
 from typing import Any, Callable, DefaultDict, Iterator, List, Optional, Sized, TypeVar
 
 import torch.utils.data.datapipes.iter.sharding
-
 from torch.utils.data.datapipes._decorator import functional_datapipe
 from torch.utils.data.datapipes.datapipe import DataChunk, IterDataPipe
 from torch.utils.data.datapipes.utils.common import _check_unpickable_fn
+
 
 __all__ = [
     "BatcherIterDataPipe",

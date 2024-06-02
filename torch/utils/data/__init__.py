@@ -1,37 +1,10 @@
-# TODO(VitalyFedyunin): Rearranging this imports leads to crash,
-# need to cleanup dependencies and fix it
-from torch.utils.data.sampler import (
-    BatchSampler,
-    RandomSampler,
-    Sampler,
-    SequentialSampler,
-    SubsetRandomSampler,
-    WeightedRandomSampler,
-)
-from torch.utils.data.dataset import (
-    ChainDataset,
-    ConcatDataset,
-    Dataset,
-    IterableDataset,
-    StackDataset,
-    Subset,
-    TensorDataset,
-    random_split,
-)
-from torch.utils.data.datapipes.datapipe import (
-    DFIterDataPipe,
-    DataChunk,
-    IterDataPipe,
-    MapDataPipe,
-)
 from torch.utils.data.dataloader import (
-    DataLoader,
     _DatasetKind,
-    get_worker_info,
+    DataLoader,
     default_collate,
     default_convert,
+    get_worker_info,
 )
-from torch.utils.data.distributed import DistributedSampler
 from torch.utils.data.datapipes._decorator import (
     argument_validation,
     functional_datapipe,
@@ -40,6 +13,32 @@ from torch.utils.data.datapipes._decorator import (
     runtime_validation,
     runtime_validation_disabled,
 )
+from torch.utils.data.datapipes.datapipe import (
+    DataChunk,
+    DFIterDataPipe,
+    IterDataPipe,
+    MapDataPipe,
+)
+from torch.utils.data.dataset import (
+    ChainDataset,
+    ConcatDataset,
+    Dataset,
+    IterableDataset,
+    random_split,
+    StackDataset,
+    Subset,
+    TensorDataset,
+)
+from torch.utils.data.distributed import DistributedSampler
+from torch.utils.data.sampler import (
+    BatchSampler,
+    RandomSampler,
+    Sampler,
+    SequentialSampler,
+    SubsetRandomSampler,
+    WeightedRandomSampler,
+)
+
 
 __all__ = ['BatchSampler',
            'ChainDataset',

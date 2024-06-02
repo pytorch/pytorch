@@ -3,12 +3,11 @@ import functools
 import inspect
 import os
 import warnings
-
 from io import IOBase
-
-from functools import partial
 from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple, Union
+
 from torch.utils._import_utils import dill_available
+
 
 __all__ = [
     "validate_input_col",
@@ -136,7 +135,7 @@ def _check_unpickable_fn(fn: Callable):
 
     # Extract function from partial object
     # Nested partial function is automatically expanded as a single partial object
-    if isinstance(fn, partial):
+    if isinstance(fn, functools.partial):
         fn = fn.func
 
     # Local function

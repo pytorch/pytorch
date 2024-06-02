@@ -1,9 +1,9 @@
 import random
 
 from torch.utils.data.datapipes._decorator import functional_datapipe
+from torch.utils.data.datapipes.dataframe import dataframe_wrapper as df_wrapper
 from torch.utils.data.datapipes.datapipe import DFIterDataPipe, IterDataPipe
 
-from torch.utils.data.datapipes.dataframe import dataframe_wrapper as df_wrapper
 
 __all__ = [
     "ConcatDataFramesPipe",

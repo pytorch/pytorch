@@ -11,9 +11,10 @@ import collections
 import contextlib
 import copy
 import re
+from typing import Callable, Dict, Optional, Tuple, Type, Union
+
 import torch
 
-from typing import Callable, Dict, Optional, Tuple, Type, Union
 
 np_str_obj_array_pattern = re.compile(r'[SaUO]')
 
