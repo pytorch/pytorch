@@ -7,7 +7,10 @@ import subprocess
 import sys
 import warnings
 
-from common import BenchmarkRunner, download_retry_decorator, main
+try:
+    from .common import BenchmarkRunner, download_retry_decorator, main
+except ImportError:
+    from common import BenchmarkRunner, download_retry_decorator, main
 
 import torch
 
@@ -71,6 +74,7 @@ REQUIRE_HIGHER_TOLERANCE = {
     "hrnet_w18",
     "inception_v3",
     "mixer_b16_224",
+    "mobilenetv3_large_100",
     "sebotnet33ts_256",
     "selecsls42b",
 }
