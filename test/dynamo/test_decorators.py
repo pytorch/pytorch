@@ -465,6 +465,28 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
 
         self.assertEqual(cnt.frame_count, 1)
 
+    def test_assume_constant_result_on_user_defined_fn(self):
+        @torch._dynamo.assume_constant_result
+        def const_fn(n, s):
+            return torch.full([n], s)
+
+        def fn(B):
+            B = const_fn(B.size(0), 13)
+            X = B * 2
+            return X.tolist()
+
+        B_list = [8] * 32
+
+        B = torch.tensor(B_list, dtype=torch.int32)
+        torch._dynamo.decorators.mark_static(B, 0)
+
+        torch._dynamo.config.capture_scalar_outputs = True
+        torch._dynamo.config.capture_dynamic_output_shape_ops = True
+
+        self.assertEqual(
+            fn(B), torch.compile(fn, backend="eager", fullgraph=True, dynamic=True)(B)
+        )
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
