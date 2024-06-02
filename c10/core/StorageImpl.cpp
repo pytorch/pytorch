@@ -18,7 +18,7 @@ void throwNullDataPtrError() {
       "If you're using torch.compile/export/fx, it is likely that we are erroneously "
       "tracing into a custom kernel. To fix this, please wrap the custom kernel into "
       "an opaque custom op. Please see the following for details: "
-      "https://docs.google.com/document/d/1W--T6wz8IY8fOI0Vm8BF44PdBgs283QvpelJZWieQWQ");
+      "https://pytorch.org/docs/main/notes/custom_operators.html");
 }
 
 // NOTE: [FakeTensor.data_ptr deprecation]
