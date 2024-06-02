@@ -9,6 +9,7 @@
 #undef _XOPEN_SOURCE
 #undef _POSIX_C_SOURCE
 
+#define PY_SSIZE_T_CLEAN
 #include <Python.h>
 #include <frameobject.h>
 #include <structseq.h>
