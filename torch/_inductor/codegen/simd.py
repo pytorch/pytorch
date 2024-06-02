@@ -1296,17 +1296,9 @@ class SIMDScheduling(BaseScheduling):
         )
         kernel.buf_accesses = buf_accesses
 
-        self.codegen_node_schedule_with_kernel(node_schedule, kernel)
+        use_multi_kernel = kernel.persistent_reduction and config.triton.multi_kernel
 
-        with V.set_kernel_handler(kernel):
-            src_code = kernel.codegen_kernel()
-
-        kernel_name = self.define_kernel(src_code, node_schedule, kernel)
-        log.debug("Generating kernel code with kernel_name: %s", kernel_name)
-        kernel.kernel_name = kernel_name
-        kernel.code_hash = code_hash(src_code)
-
-        if kernel.persistent_reduction and config.triton.multi_kernel:
+        if use_multi_kernel:
             kernel2 = self.kernel_type(
                 *kernel_args,
                 **kernel_kwargs,
@@ -1319,6 +1311,21 @@ class SIMDScheduling(BaseScheduling):
             kernel2.kernel_name = kernel_name2
             kernel2.code_hash = code_hash(src_code2)
 
+            # Keep buffers needed by the non-persistent reduction so both
+            # kernels have the same arguments
+            kernel.must_keep_buffers = set(kernel2.must_keep_buffers)
+
+        self.codegen_node_schedule_with_kernel(node_schedule, kernel)
+
+        with V.set_kernel_handler(kernel):
+            src_code = kernel.codegen_kernel()
+
+        kernel_name = self.define_kernel(src_code, node_schedule, kernel)
+        log.debug("Generating kernel code with kernel_name: %s", kernel_name)
+        kernel.kernel_name = kernel_name
+        kernel.code_hash = code_hash(src_code)
+
+        if use_multi_kernel:
             final_kernel = MultiKernel([kernel, kernel2])
         else:
             final_kernel = kernel  # type: ignore[assignment]
