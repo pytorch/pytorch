@@ -14,6 +14,7 @@ import torch._numpy as tnp
 import torch.utils._pytree as pytree
 from .. import config, variables
 from ..bytecode_transformation import create_call_function, create_instruction
+from ..create_parameter_op import do_not_convert_to_tracable_parameter
 from ..exc import unimplemented
 from ..guards import GuardBuilder, install_guard
 from ..mutation_guard import unpatched_nn_module_init
@@ -122,7 +123,6 @@ class SuperVariable(VariableTracker):
         kwargs: "Dict[str, VariableTracker]",
     ) -> "VariableTracker":
         inner_fn, source = self._resolved_getattr_and_source(self, name)
-
         if inner_fn is object.__init__:
             return LambdaVariable(identity)
         elif inner_fn is torch.nn.Module.__init__:
@@ -134,9 +134,10 @@ class SuperVariable(VariableTracker):
                 and isinstance(objvar.mutable_local, AttributeMutationNew)
                 and not (args or kwargs)
             ):
-                return variables.UserFunctionVariable(
-                    unpatched_nn_module_init, source=source
-                ).call_function(tx, [self.objvar] + args, kwargs)
+                with do_not_convert_to_tracable_parameter():
+                    return variables.UserFunctionVariable(
+                        unpatched_nn_module_init, source=source
+                    ).call_function(tx, [self.objvar] + args, kwargs)
             else:
                 unimplemented("super() nn.Module.__init__")
         elif isinstance(inner_fn, types.FunctionType):

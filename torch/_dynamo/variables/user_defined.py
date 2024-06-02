@@ -34,6 +34,7 @@ import torch.nn
 from torch._guards import TracingContext
 
 from .. import variables
+from ..create_parameter_op import do_not_convert_to_tracable_parameter
 from ..exc import ObservedException, unimplemented
 from ..guards import GuardBuilder, install_guard
 from ..source import AttrSource, GetItemSource, ODictGetItemSource, RandomValueSource
@@ -375,8 +376,9 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 else UserDefinedObjectVariable,
                 {},
             )
-            var.call_method(tx, "__init__", args, kwargs)
-            return var
+            with do_not_convert_to_tracable_parameter():
+                var.call_method(tx, "__init__", args, kwargs)
+                return var
         elif variables.CustomizedDictVariable.is_matching_cls(self.value):
             options = {"mutable_local": MutableLocal()}
             return variables.CustomizedDictVariable.create(
