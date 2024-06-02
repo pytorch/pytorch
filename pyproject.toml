@@ -68,7 +68,6 @@ ignore = [
     "PERF401",
     "PERF403",
     # these ignores are from PYI; please fix!
-    "PYI019",
     "PYI024",
     "PYI036",
     "PYI041",
