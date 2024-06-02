@@ -242,7 +242,7 @@ class WeightedRandomSampler(Sampler[int]):
         [0, 1, 4, 3, 2]
     """
 
-    weights: "torch.Tensor"
+    weights: torch.Tensor
     num_samples: int
     replacement: bool
 
