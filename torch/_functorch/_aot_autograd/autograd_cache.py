@@ -118,7 +118,7 @@ class AOTAutogradCacheDetails(FxGraphHashDetails):
         self.code_hash = get_autograd_code_hash()
         self.autograd_config = config.save_config()
         try:
-            super().__init__(gm, example_inputs, {})
+            super().__init__(gm, example_inputs, {}, [])
         except BypassFxGraphCache as e:
             # Sometimes inductor configs are unpickleable and can fail
             raise BypassAOTAutogradCache from e
