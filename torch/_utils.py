@@ -7,7 +7,7 @@ import traceback
 import warnings
 from collections import defaultdict
 from typing import Any, Callable, DefaultDict, Generic, List, Optional
-from typing_extensions import deprecated, ParamSpec
+from typing_extensions import ParamSpec
 
 import torch
 
@@ -852,10 +852,6 @@ def classproperty(func):
     return _ClassPropertyDescriptor(func)
 
 
-@deprecated(
-    "`is_compiling` is deprecated. Use `torch.compiler.is_compiling()` instead.",
-    category=FutureWarning,
-)
 def is_compiling() -> bool:
     """
     Indicates whether we are tracing/compiling with torch.compile() or torch.export().
