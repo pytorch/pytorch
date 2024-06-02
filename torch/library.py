@@ -4,7 +4,6 @@ import inspect
 import re
 import sys
 import traceback
-import warnings
 import weakref
 from typing import Any, Callable, Dict, List, Optional, Sequence, Set, Tuple, Union
 from typing_extensions import deprecated
