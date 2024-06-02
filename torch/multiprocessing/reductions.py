@@ -6,7 +6,6 @@ from multiprocessing.util import register_after_fork
 from typing import Union
 
 import torch
-import torch.utils.hooks
 from torch._namedtensor_internals import check_serializing_named_tensor
 
 try:
@@ -591,4 +590,7 @@ def init_reductions():
 
     # TODO: Maybe this should be in tensor_classes? :)
     ForkingPickler.register(torch.Tensor, reduce_tensor)
-    ForkingPickler.register(torch.nn.parameter.Parameter, reduce_tensor)
+
+    from torch.nn.parameter import Parameter
+
+    ForkingPickler.register(Parameter, reduce_tensor)
