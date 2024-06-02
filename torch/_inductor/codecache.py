@@ -1393,6 +1393,9 @@ class VecAMX(VecAVX512):
     __hash__: Callable[[VecISA], Any] = VecISA.__hash__
 
     _amx_code = """
+#include <cstdint>
+#include <immintrin.h>
+
 struct amx_tilecfg {
   uint8_t palette_id;
   uint8_t start_row;
