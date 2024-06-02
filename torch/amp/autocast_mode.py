@@ -11,7 +11,8 @@ try:
     import numpy as np
 
     HAS_NUMPY = True
-except ModuleNotFoundError:
+except ImportError:
+    HAS_NUMPY = False
     np = None  # type: ignore[assignment]
 
 __all__ = [

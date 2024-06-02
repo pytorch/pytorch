@@ -5,7 +5,7 @@ import io
 import threading
 import warnings
 from functools import lru_cache
-from typing import Any, cast, Dict, Optional, Type, TypeVar, Union
+from typing import Any, cast, Dict as _Dict, Optional as _Optional, Type, TypeVar, Union
 
 import torch
 from torch._utils import _to, _type
@@ -15,11 +15,13 @@ try:
     import numpy as np
 
     HAS_NUMPY = True
-except ModuleNotFoundError:
+except ImportError:
+    HAS_NUMPY = False
     np = None  # type: ignore[assignment]
 
+
 _share_memory_lock = threading.Lock()
-_share_memory_map: Dict[int, threading.RLock] = {}
+_share_memory_map: _Dict[int, threading.RLock] = {}
 
 T = TypeVar("T", bound="Union[_StorageBase, TypedStorage]")
 
@@ -42,7 +44,7 @@ class _StorageBase:
     def __setitem__(self, *args, **kwargs):
         raise NotImplementedError
 
-    def copy_(self, source: T, non_blocking: Optional[_bool] = None) -> T:
+    def copy_(self, source: T, non_blocking: _Optional[_bool] = None) -> T:
         raise NotImplementedError
 
     def new(self) -> T:  # type: ignore[type-var]
@@ -54,7 +56,7 @@ class _StorageBase:
     def size(self) -> _int:
         return self.nbytes()
 
-    def type(self, dtype: Optional[str] = None, non_blocking: _bool = False) -> T:  # type: ignore[type-var]
+    def type(self, dtype: _Optional[str] = None, non_blocking: _bool = False) -> T:  # type: ignore[type-var]
         return _type(self, dtype, non_blocking)
 
     def cuda(self, device=None, non_blocking=False) -> T:  # type: ignore[type-var]
@@ -192,7 +194,7 @@ class _StorageBase:
     def _byteswap(self, *args, **kwargs):
         raise NotImplementedError
 
-    def _get_filename(self, *args, **kwargs) -> Optional[str]:
+    def _get_filename(self, *args, **kwargs) -> _Optional[str]:
         raise NotImplementedError
 
     def __repr__(self):
@@ -446,7 +448,7 @@ class UntypedStorage(torch._C.StorageBase, _StorageBase):
         return self.device.type == "hpu"
 
     @property
-    def filename(self) -> Optional[str]:
+    def filename(self) -> _Optional[str]:
         """Returns the file name associated with this storage if the storage was memory mapped from a file.
         or ``None`` if the storage was not created by memory mapping a file."""
         return self._get_filename()
@@ -638,7 +640,7 @@ class TypedStorage:
         return self.dtype
 
     @property
-    def filename(self) -> Optional[str]:
+    def filename(self) -> _Optional[str]:
         """Returns the file name associated with this storage if the storage was memory mapped from a file.
         or ``None`` if the storage was not created by memory mapping a file."""
         return self._untyped_storage.filename
@@ -973,7 +975,7 @@ class TypedStorage:
             ).set_(self)
             return tmp_tensor[idx_wrapped].item()
 
-    def copy_(self, source: T, non_blocking: Optional[bool] = None):
+    def copy_(self, source: T, non_blocking: _Optional[bool] = None):
         _warn_typed_storage_removal()
         if isinstance(source, TypedStorage):
             self._untyped_storage.copy_(source._untyped_storage, non_blocking)  # type: ignore[arg-type]
@@ -991,7 +993,7 @@ class TypedStorage:
 
     def type(
         self,
-        dtype: Optional[str] = None,
+        dtype: _Optional[str] = None,
         non_blocking: bool = False,
     ) -> Union[T, str]:
         _warn_typed_storage_removal()
