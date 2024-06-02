@@ -123,7 +123,9 @@ class MultiKernelTest(TestCase):
         with unittest.mock.patch.object(
             MultiKernelCall, "run", mock_run
         ), unittest.mock.patch.object(
-            MultiKernelCall, "benchmark_sub_kernels", lambda *args, **kwargs: mock_latency
+            MultiKernelCall,
+            "benchmark_sub_kernels",
+            lambda *args, **kwargs: mock_latency,
         ):
             torch.compile(f)(x)
         self.assertEqual(picked_kernel, force_kernel)
