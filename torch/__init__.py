@@ -1468,8 +1468,10 @@ __all__.extend(["e", "pi", "nan", "inf", "newaxis"])
 # Define Storage and Tensor classes
 ################################################################################
 
-from torch import storage as storage
-from torch._tensor import Tensor
+from torch._tensor import Tensor  # usort: skip
+
+# needs to be after torch.Tensor is defined to avoid circular dependencies
+from torch import storage as storage  # usort: skip
 from torch.storage import (
     _LegacyStorage,
     _StorageBase,
