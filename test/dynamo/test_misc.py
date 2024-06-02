@@ -6840,7 +6840,7 @@ utils_device.CURRENT_DEVICE == None""".split(
                 x += 1
             return x
 
-        opt_fn = torch._dynamo.optimize("eager")(fn)
+        opt_fn = torch._dynamo.optimize("eager", nopython=True)(fn)
         self.assertEqual(opt_fn(), torch.tensor([2.0]))
 
     def test_nested_sequential_with(self):
@@ -10406,6 +10406,24 @@ fn
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         res = opt_fn(x)
         self.assertEqual(ref, res)
+
+    def test_module_dunder_dict(self):
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.foo = 1
+                self.bar = 2
+                self.baz = 3
+
+            def forward(self, x):
+                if "foo" in self.__dict__:
+                    return x * self.bar
+                return x * self.baz
+
+        mod = MyModule()
+        x = torch.randn(10)
+        opt_mod = torch.compile(mod, backend="eager", fullgraph=True)
+        self.assertEqual(mod(x), opt_mod(x))
 
 
 class TestTracer(JitTestCase):
