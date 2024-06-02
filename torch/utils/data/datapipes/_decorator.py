@@ -108,7 +108,7 @@ class non_deterministic:
 
         # Decorate with a functional argument
         if not (
-            isinstance(args[0], Type)
+            isinstance(args[0], type)
             and issubclass(args[0], IterDataPipe)  # type: ignore[arg-type]
         ):
             raise TypeError(
