@@ -1435,6 +1435,18 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             self.assertRaisesRegex(TypeError, 'module name should be a string. Got NoneType',
                                    lambda: getattr(net, fn)(None, l))
 
+    def test_set_submodule(self):
+        net = nn.Module()
+        module = nn.Linear(10, 20)
+        target = "t.t"
+        net.set_submodule(target, module)
+        self.assertEqual(net.get_submodule(target), module)
+        replace_module = nn.Linear(20, 10)
+        net.set_submodule(target, replace_module)
+        self.assertEqual(replace_module, net.get_submodule(target))
+        net.set_submodule("", module)
+        self.assertRaises(ValueError, "Cannot set the submodule without a target name!")
+
     def test_module_to_argparse(self):
         net = nn.Sequential(nn.Linear(3, 3))
         cpu = torch.device('cpu')

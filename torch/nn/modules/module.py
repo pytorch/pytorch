@@ -723,8 +723,8 @@ class Module:
                 raise AttributeError("`" + item + "` is not " "an nn.Module")
 
         return mod
-    
-     def set_submodule(self, target: str, module: torch.nn.Module) -> None:
+
+    def set_submodule(self, target: str, module: torch.nn.Module) -> None:
         """
         Set the submodule given by ``target`` if it exists, otherwise throw an error.
 
