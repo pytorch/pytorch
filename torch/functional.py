@@ -1195,29 +1195,48 @@ if TYPE_CHECKING:
 else:
 
     @overload
-    def tensordot(a, b, dims: int = 2, out: Optional[torch.Tensor] = None):
-        pass
-
-    @overload  # noqa: F811
     def tensordot(
-        a, b, dims: Tuple[List[int], List[int]], out: Optional[torch.Tensor] = None
-    ):  # noqa: F811
+        a,
+        b,
+        dims: int = 2,
+        out: Optional[torch.Tensor] = None,
+    ):
         pass
 
-    @overload  # noqa: F811
-    def tensordot(
-        a, b, dims: List[List[int]], out: Optional[torch.Tensor] = None
-    ):  # noqa: F811
+    @overload
+    def tensordot(  # noqa: F811
+        a,
+        b,
+        dims: Tuple[List[int], List[int]],
+        out: Optional[torch.Tensor] = None,
+    ):
         pass
 
-    @overload  # noqa: F811
-    def tensordot(
-        a, b, dims: torch.Tensor, out: Optional[torch.Tensor] = None
-    ):  # noqa: F811
+    @overload
+    def tensordot(  # noqa: F811
+        a,
+        b,
+        dims: List[List[int]],
+        out: Optional[torch.Tensor] = None,
+    ):
+        pass
+
+    @overload
+    def tensordot(  # noqa: F811
+        a,
+        b,
+        dims: torch.Tensor,
+        out: Optional[torch.Tensor] = None,
+    ):
         pass
 
 
-def tensordot(a, b, dims=2, out: Optional[torch.Tensor] = None):  # noqa: F811
+def tensordot(  # noqa: F811
+    a,
+    b,
+    dims=2,
+    out: Optional[torch.Tensor] = None,
+):
     r"""Returns a contraction of a and b over multiple dimensions.
 
     :attr:`tensordot` implements a generalized matrix product.
@@ -1577,40 +1596,62 @@ else:
     # TODO: type dim as BroadcastingList when
     # https://github.com/pytorch/pytorch/issues/33782 is fixed
     @overload
-    def norm(input, p="fro", dim=None, keepdim=False, out=None, dtype=None):
+    def norm(
+        input,
+        p="fro",
+        dim=None,
+        keepdim=False,
+        out=None,
+        dtype=None,
+    ):
         # type: (Tensor, str, Optional[List[int]], bool, Optional[Tensor], Optional[int]) -> Tensor
         pass
 
-    @overload  # noqa: F811
-    def norm(
-        input, p="fro", dim=None, keepdim=False, out=None, dtype=None
-    ):  # noqa: F811
+    @overload
+    def norm(  # noqa: F811
+        input,
+        p="fro",
+        dim=None,
+        keepdim=False,
+        out=None,
+        dtype=None,
+    ):
         # type: (Tensor, Optional[number], Optional[List[int]], bool, Optional[Tensor], Optional[int]) -> Tensor
         pass
 
-    @overload  # noqa: F811
-    def norm(
-        input, p="fro", dim=None, keepdim=False, out=None, dtype=None
-    ):  # noqa: F811
+    @overload
+    def norm(  # noqa: F811
+        input,
+        p="fro",
+        dim=None,
+        keepdim=False,
+        out=None,
+        dtype=None,
+    ):
         # type: (Tensor, Optional[number], Optional[int], bool, Optional[Tensor], Optional[int]) -> Tensor
         pass
 
-    @overload  # noqa: F811
-    def norm(
-        input, p="fro", dim=None, keepdim=False, out=None, dtype=None
-    ):  # noqa: F811
+    @overload
+    def norm(  # noqa: F811
+        input,
+        p="fro",
+        dim=None,
+        keepdim=False,
+        out=None,
+        dtype=None,
+    ):
         # type: (Tensor, str, Optional[int], bool, Optional[Tensor], Optional[int]) -> Tensor
         pass
 
 
-def norm(
+def norm(  # noqa: F811
     input,
     p: Optional[Union[float, str]] = "fro",
     dim=None,
     keepdim=False,
     out=None,
     dtype=None,
-):  # noqa: F811
+):
     r"""Returns the matrix norm or vector norm of a given tensor.
 
     .. warning::
