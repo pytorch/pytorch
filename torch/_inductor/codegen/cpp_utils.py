@@ -1,5 +1,7 @@
 import math
 
+from collections import namedtuple
+
 import torch
 
 from .common import ExprPrinter
@@ -59,6 +61,8 @@ LAYOUT_TO_ATEN = {
 }
 
 INDEX_TYPE = "long"
+
+GemmBlocking = namedtuple("GemmBlocking", ["block_m", "block_n", "block_k"])
 
 
 class CppPrinter(ExprPrinter):
