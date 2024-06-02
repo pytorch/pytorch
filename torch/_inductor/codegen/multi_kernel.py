@@ -1,7 +1,7 @@
 import logging
 import os
 import pathlib
-from typing import Any, List, Optional
+from typing import Any, List
 
 from torch._inductor.metrics import get_metric_table, is_metric_table_enabled
 
@@ -127,7 +127,9 @@ class MultiKernelState:
         kernel_name_list = ",\n    ".join(kernel_names)
 
         buf = IndentedBuffer()
-        buf.writeline(f"{multi_kernel_name} = async_compile.multi_kernel({multi_kernel_name!r}, [")
+        buf.writeline(
+            f"{multi_kernel_name} = async_compile.multi_kernel({multi_kernel_name!r}, ["
+        )
         with buf.indent():
             for name in kernel_names:
                 buf.writeline(f"{name},")
@@ -305,8 +307,8 @@ class MultiKernelCall:
         Unit test may mock this method to force a specific kernel to
         be picked.
         """
-        def wrap_fn(kernel):
 
+        def wrap_fn(kernel):
             def inner():
                 args_clone, kwargs_clone = kernel.clone_args(*args, **kwargs)
                 return kernel.run(*args, **kwargs)
