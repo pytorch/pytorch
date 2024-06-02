@@ -1768,9 +1768,7 @@ def norm(
             if p == "fro":
                 return _VF.frobenius_norm(input, dim=(), keepdim=keepdim)
         if not isinstance(p, str):
-            _dim = [
-                i for i in range(ndim)
-            ]  # noqa: C416 TODO: rewrite as list(range(m))
+            _dim = list(range(ndim))
             return _VF.norm(input, p, dim=_dim, keepdim=keepdim)  # type: ignore[attr-defined]
 
     # TODO: when https://github.com/pytorch/pytorch/issues/33782 is fixed

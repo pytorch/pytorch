@@ -56,14 +56,14 @@ class ShardingFilterIterDataPipe(_ShardingIterDataPipe):
             )
         if sharding_group == SHARDING_PRIORITIES.DEFAULT:
             if len(self.groups) and SHARDING_PRIORITIES.DEFAULT not in self.groups:
-                raise Exception(
+                raise RuntimeError(
                     "ShardingFilter cannot mix DEFAULT and non DEFAULT groups"
-                )  # noqa: TRY002
+                )
         else:
             if SHARDING_PRIORITIES.DEFAULT in self.groups:
-                raise Exception(
+                raise RuntimeError(
                     "ShardingFilter cannot mix DEFAULT and non DEFAULT groups"
-                )  # noqa: TRY002
+                )
         self.groups[sharding_group] = (num_of_instances, instance_id)
         self._update_num_of_instances()
 
