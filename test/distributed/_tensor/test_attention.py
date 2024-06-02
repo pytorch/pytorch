@@ -17,7 +17,11 @@ from torch.distributed._tensor.experimental.attention import (
 )
 from torch.distributed.tensor.parallel import parallelize_module
 from torch.nn.attention import sdpa_kernel, SDPBackend
-from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FLASH_ATTENTION
+from torch.testing._internal.common_cuda import (
+    PLATFORM_SUPPORTS_FUSED_ATTENTION,
+    PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
+    PLATFORM_SUPPORTS_FLASH_ATTENTION,
+)
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -299,18 +303,20 @@ class RingAttentionTest(DTensorTestBase):
 
     @skip_if_lt_x_gpu(2)
     @unittest.skipIf(
-        not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Does not support flash attention"
+        not PLATFORM_SUPPORTS_FUSED_ATTENTION, "Does not support flash nor efficient attention"
     )
     @with_comms
     @parametrize(
         "attention_fn",
         [
-            _scaled_dot_product_ring_flash_attention,
-            _scaled_dot_product_ring_efficient_attention,
+            _scaled_dot_product_ring_flash_attention if PLATFORM_SUPPORTS_FLASH_ATTENTION else None,
+            _scaled_dot_product_ring_efficient_attention if PLATFORM_SUPPORTS_MEM_EFF_ATTENTION else None,
             # _scaled_dot_product_ring_cudnn_attention, # TODO: not built by default
         ],
     )
     def test_ring_attention_compile(self, attention_fn: object) -> None:
+        if attention_fn is None:
+            self.skipTest("Unsupported on current platform")
         device_mesh = DeviceMesh(
             self.device_type,
             torch.arange(0, self.world_size),
