@@ -4405,7 +4405,7 @@ def foo(xyz):
         loaded = self.getExportImportCopy(ft)
         _, lineno = inspect.getsourcelines(FooTest)
 
-        with self.assertRaisesRegex(RuntimeError, f'test_jit.py\", line {lineno + 3}'):
+        with self.assertRaisesRegex(RuntimeError, f'test_jit.py", line {lineno + 3}'):
             loaded(torch.rand(3, 4), torch.rand(30, 40))
 
     def test_serialized_source_ranges_graph(self):
@@ -4431,7 +4431,7 @@ def foo(xyz):
 
         _, lineno = inspect.getsourcelines(FooTest2)
 
-        with self.assertRaisesRegex(torch.jit.Error, f'test_jit.py\", line {lineno + 3}'):
+        with self.assertRaisesRegex(torch.jit.Error, f'test_jit.py", line {lineno + 3}'):
             ft = FooTest2()
             loaded = self.getExportImportCopy(ft)
             loaded()
@@ -10260,7 +10260,7 @@ dedent """
         n = next(graph.inputs())
         self.assertTrue(n.type() == torch._C.TensorType.getInferred())
 
-        with self.assertRaisesRegex(RuntimeError, "Inferred \'x\' to be of type \'Tensor"):
+        with self.assertRaisesRegex(RuntimeError, "Inferred 'x' to be of type 'Tensor"):
             fn("1")
 
     def test_script_define_order(self):
@@ -14743,7 +14743,7 @@ dedent """
                 return self.hello("hi"), self.hello(.5)
 
         w = CompileOverloadError()
-        with self.assertRaisesRegex(Exception, "but instead found type \'str\'"):
+        with self.assertRaisesRegex(Exception, "but instead found type 'str'"):
             torch.jit.script(w)
 
         # testing overload declared first, then non-overload
