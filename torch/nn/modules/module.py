@@ -761,7 +761,7 @@ class Module:
                 ``nn.Module``
         """
         if target == "":
-            raise AttributeError("Cannot set the submodule without a target name!")
+            raise ValueError("Cannot set the submodule without a target name!")
 
         atoms: List[str] = target.split(".")
         name = atoms.pop(-1)
