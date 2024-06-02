@@ -113,7 +113,9 @@ log = logging.getLogger(__name__)
 compilation_time_metrics: Dict[str, List[float]] = {}
 
 # profiling compilation time by frame phase
-frame_phase_timing: Dict[str, Dict[str, float]] = {}
+frame_phase_timing: Dict[str, Dict[str, float]] = collections.defaultdict(
+    lambda: collections.defaultdict(float)
+)
 
 timer_counter = itertools.count()
 
@@ -186,11 +188,7 @@ def print_time_report():
 
 
 def _add_time_spent(key, phase_name, time_spent):
-    frame_phase_timing.setdefault(key, {})
-    if phase_name not in frame_phase_timing[key]:
-        frame_phase_timing[key][phase_name] = time_spent
-    else:
-        frame_phase_timing[key][phase_name] += time_spent
+    frame_phase_timing[key][phase_name] += time_spent
 
 
 # dynamo_timed API works as a function decorator
@@ -239,6 +237,7 @@ def dynamo_timed(original_function=None, phase_name=None, fwd_only=True):
                 fail_reason = str(e)
                 raise
             finally:
+                # Only record backward compilation metrics if phase_name is not None!
                 if phase_name:
                     frame_key = str(curr_frame)
                     # fwd only compilation stages: entire_frame_compile, backend_compile.
@@ -716,15 +715,18 @@ def record_compilation_metrics(
         name = "compilation_metrics"
     else:
         name = "bwd_compilation_metrics"
-    torch._logging.trace_structured(
-        name,
-        lambda: {
-            k: list(v) if isinstance(v, set) else v
-            for k, v in dataclasses.asdict(compilation_metrics).items()
-        },
-    )
-    if config.log_compilation_metrics:
-        log_compilation_event(compilation_metrics)
+    # Currently only record fwd compilation metrics, will add bwd compilation metrics
+    # after the internal Scuba logging changes finish.
+    if isinstance(compilation_metrics, CompilationMetrics):
+        torch._logging.trace_structured(
+            name,
+            lambda: {
+                k: list(v) if isinstance(v, set) else v
+                for k, v in dataclasses.asdict(compilation_metrics).items()
+            },
+        )
+        if config.log_compilation_metrics:
+            log_compilation_event(compilation_metrics)
 
 
 def set_compilation_metrics_limit(new_size: int) -> None:
