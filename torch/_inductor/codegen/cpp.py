@@ -3147,7 +3147,9 @@ class CppKernelProxy(CppKernel):
                             value,
                         )
                 elif _node.target == "to_dtype" and _node.args[-1] in DTYPE_LOWP_FP:
-                    (ops, x, _) = _node.args
+                    if all(user.target == "store" for user in _node.users):
+                        continue
+                    (ops, _, _) = _node.args
                     # The legalization always loads the BF16/FP16 tensor as FP32 for computation
                     # and converts back to BF16/FP16 after the computation.
                     # Hence, there should be no computation w/ BF16/FP16.
@@ -3159,7 +3161,9 @@ class CppKernelProxy(CppKernel):
                             "to_dtype", (ops, _node, torch.float)
                         )
                         to_type_node_args = to_type_node.args
-                        _node.replace_all_uses_with(to_type_node)
+                        _node.replace_all_uses_with(
+                            to_type_node, lambda user: user.target != "store"
+                        )
                         to_type_node.args = to_type_node_args
                         to_lowp_fp_legalized_nodes.append(to_type_node)
                 else:
