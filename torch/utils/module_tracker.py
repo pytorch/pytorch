@@ -160,7 +160,7 @@ class ModuleTracker:
         def fn(*args):
             if is_bw:
                 self._maybe_set_engine_callback()
-            if name in self.parents:
+            if name in self.parents and not is_bw:
                 print(
                     "The module hierarchy tracking seems to be messed up."
                     "Please file a bug to PyTorch."
