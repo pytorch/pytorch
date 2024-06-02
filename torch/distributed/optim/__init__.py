@@ -5,8 +5,6 @@ optimizer locally on the workers where the parameters live.  The distributed
 optimizer can use any of the local optimizer :ref:`optimizer-algorithms` to
 apply the gradients on each worker.
 """
-import warnings
-
 import torch
 from torch import optim
 
@@ -26,15 +24,9 @@ from .functional_sgd import _FunctionalSGD
 from .named_optimizer import _NamedOptimizer
 from .utils import as_functional_optim
 
-with warnings.catch_warnings():
-    warnings.simplefilter("always")
-    warnings.warn(
-        "`TorchScript` support for functional optimizers is deprecated "
-        "and will be removed in a future PyTorch release. "
-        "Consider using the `torch.compile` optimizer instead.",
-        DeprecationWarning,
-        stacklevel=2,
-    )
+from warnings import warn
+warn("TorchScript support for functional optimizers is"
+     "deprecated and will be removed in a future PyTorch release. Consider using the torch.compile optimizer instead.")
 
 # DistributedOptimizer imports torch.distributed.rpc names, so gate availability
 # based on RPC being available.
