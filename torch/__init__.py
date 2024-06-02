@@ -379,37 +379,37 @@ class SymInt:
     # Magic methods installed by torch.fx.experimental.sym_node
 
     def __eq__(self, other: object) -> builtins.bool:
-        raise TypeError("type stub not overridden")
+        raise NotImplementedError("type stub not overridden")
 
     def __lt__(self, other) -> builtins.bool:
-        raise TypeError("type stub not overridden")
+        raise NotImplementedError("type stub not overridden")
 
     def __gt__(self, other) -> builtins.bool:
-        raise TypeError("type stub not overridden")
+        raise NotImplementedError("type stub not overridden")
 
     def __le__(self, other) -> builtins.bool:
-        raise TypeError("type stub not overridden")
+        raise NotImplementedError("type stub not overridden")
 
     def __ge__(self, other) -> builtins.bool:
-        raise TypeError("type stub not overridden")
+        raise NotImplementedError("type stub not overridden")
 
     def __add__(self, other) -> "SymInt":
-        raise TypeError("type stub not overridden")
+        raise NotImplementedError("type stub not overridden")
 
     def __mul__(self, other) -> "SymInt":
-        raise TypeError("type stub not overridden")
+        raise NotImplementedError("type stub not overridden")
 
     def __sym_max__(self, other):
-        raise TypeError("type stub not overridden")
+        raise NotImplementedError("type stub not overridden")
 
     def __sym_min__(self, other):
-        raise TypeError("type stub not overridden")
+        raise NotImplementedError("type stub not overridden")
 
     def __sym_float__(self):
-        raise TypeError("type stub not overridden")
+        raise NotImplementedError("type stub not overridden")
 
     def __neg__(self):
-        raise TypeError("type stub not overridden")
+        raise NotImplementedError("type stub not overridden")
 
     def __repr__(self):
         return str(self.node)
@@ -439,35 +439,35 @@ class SymFloat:
     # Magic methods installed by torch.fx.experimental.sym_node
 
     def __eq__(self, other: object) -> builtins.bool:
-        raise TypeError("type stub not overridden")
+        raise NotImplementedError("type stub not overridden")
 
     def __lt__(self, other) -> builtins.bool:
-        raise TypeError("type stub not overridden")
+        raise NotImplementedError("type stub not overridden")
 
     def __gt__(self, other) -> builtins.bool:
-        raise TypeError("type stub not overridden")
+        raise NotImplementedError("type stub not overridden")
 
     def __le__(self, other) -> builtins.bool:
-        raise TypeError("type stub not overridden")
+        raise NotImplementedError("type stub not overridden")
 
     def __ge__(self, other) -> builtins.bool:
-        raise TypeError("type stub not overridden")
+        raise NotImplementedError("type stub not overridden")
 
     def __trunc__(self):
-        raise TypeError("type stub not overridden")
+        raise NotImplementedError("type stub not overridden")
 
     def __sym_max__(self, other):
-        raise TypeError("type stub not overridden")
+        raise NotImplementedError("type stub not overridden")
 
     def __sym_min__(self, other):
-        raise TypeError("type stub not overridden")
+        raise NotImplementedError("type stub not overridden")
 
     def __sym_int__(self):
-        raise TypeError("type stub not overridden")
+        raise NotImplementedError("type stub not overridden")
 
     def is_integer(self):
         """Return True if the float is an integer."""
-        raise TypeError("type stub not overridden")
+        raise NotImplementedError("type stub not overridden")
 
     def __repr__(self):
         return self.node.str()
@@ -495,10 +495,10 @@ class SymBool:
 
     # Magic methods installed by torch.fx.experimental.sym_node
     def __and__(self, other) -> "SymBool":
-        raise TypeError("type stub not overridden")
+        raise NotImplementedError("type stub not overridden")
 
     def __or__(self, other) -> "SymBool":
-        raise TypeError("type stub not overridden")
+        raise NotImplementedError("type stub not overridden")
 
     # We very carefully define __sym_not__, and not a number of other
     # plausible alternatives:
@@ -518,13 +518,13 @@ class SymBool:
     #     so we reuse the conventional operators there for readability.
     #
     def __sym_not__(self) -> "SymBool":
-        raise TypeError("type stub not overridden")
+        raise NotImplementedError("type stub not overridden")
 
     def __sym_ite__(self, then_val, else_val):
-        raise TypeError("type stub not overridden")
+        raise NotImplementedError("type stub not overridden")
 
     def __eq__(self, other) -> builtins.bool:
-        raise TypeError("type stub not overridden")
+        raise NotImplementedError("type stub not overridden")
 
     def __repr__(self):
         return str(self.node)
