@@ -70,6 +70,46 @@ class TestConverter(TestCase):
         self._check_equal_ts_ep_converter(MOutputTuple(), inp)
         self._check_equal_ts_ep_converter(MOutputDict(), inp)
 
+    def test_aten_dim(self):
+        class Module(torch.nn.Module):
+            def forward(self, x):
+                num_dim = x.dim()
+                return torch.ones(num_dim)
+
+        inp = (torch.ones(1, 3),)
+        self._check_equal_ts_ep_converter(Module(), inp)
+
+    def test_aten_len(self):
+        class Module(torch.nn.Module):
+            def forward(self, x):
+                length = len(x)
+                return torch.ones(length)
+
+        inp = (torch.ones(2, 3),)
+        self._check_equal_ts_ep_converter(Module(), inp)
+
+    def test_aten___getitem___list(self):
+        class Module(torch.nn.Module):
+            def forward(self, x):
+                y = torch.split(x, 2)
+                return y[0]
+
+        inp = (torch.rand((3, 2)),)
+        self._check_equal_ts_ep_converter(Module(), inp)
+
+    def test_aten___getitem___dict(self):
+        class Module(torch.nn.Module):
+            def forward(self, x):
+                y = torch.split(x, 2)
+                d_int = {0: y[0], 1: y[1]}
+                d_str = {"0": y[0], "1": y[1]}
+                d_bool = {True: y[0], False: y[1]}
+                d_float = {0.1: y[0], 2.3: y[1]}
+                return d_int[0], d_str["0"], d_bool[True], d_float[0.1]
+
+        inp = (torch.rand((3, 2)),)
+        self._check_equal_ts_ep_converter(Module(), inp)
+
     def test_prim_device(self):
         class Module(torch.nn.Module):
             def forward(self, x):

@@ -22,7 +22,11 @@ def _deprecate_warnings(func_name: str, extra_msg: str) -> None:
     """
     # TODO: Will follow up with dynamo POC to make warnings.warn working with dynamo.
     if not is_torchdynamo_compiling():
-        warnings.warn(f"{func_name} is deprecated and will be removed soon. {extra_msg}")
+        warnings.warn(
+            f"{func_name} is deprecated and will be removed soon. {extra_msg}",
+            FutureWarning,
+            stacklevel=3,
+        )
 
 
 def _validate_tp_mesh_dim(
