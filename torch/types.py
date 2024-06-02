@@ -2,8 +2,6 @@ import builtins
 from typing import Any, List, Optional, Sequence, Tuple, TYPE_CHECKING, Union
 
 import torch
-from torch import Tensor
-
 
 if TYPE_CHECKING:
     from torch.autograd.graph import GradientEdge
@@ -12,10 +10,10 @@ if TYPE_CHECKING:
 # Convenience aliases for common composite types that we need
 # to talk about in PyTorch
 
-_TensorOrTensors = Union[Tensor, Sequence[Tensor]]
+_TensorOrTensors = Union[torch.Tensor, Sequence[torch.Tensor]]
 _TensorOrTensorsOrGradEdge = Union[
-    Tensor,
-    Sequence[Tensor],
+    torch.Tensor,
+    Sequence[torch.Tensor],
     "GradientEdge",
     Sequence["GradientEdge"],
 ]
