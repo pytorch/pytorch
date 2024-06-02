@@ -638,9 +638,6 @@ def sym_min(a, b):
 
 
 # Drop in replacement for math.sqrt, math.sin, math.cos etc
-current_module = sys.modules[__name__]
-
-
 def _get_sym_math_fn(name):
     def fn(a):
         if overrides.has_torch_function_unary(a):
@@ -667,13 +664,13 @@ for name in (
     sym_name = f"_sym_{name}"
     fn = _get_sym_math_fn(name)
     fn.__qualname__ = fn.__name__ = sym_name
-    setattr(current_module, sym_name, fn)
+    globals()[sym_name] = fn
+
+del fn, name, sym_name, _get_sym_math_fn  # type: ignore[possibly-undefined]
 
 # Adding temporary shortcut
-sym_sqrt = current_module._sym_sqrt
+sym_sqrt = globals()["_sym_sqrt"]
 __all__.append("sym_sqrt")
-
-del fn, name, sym_name, current_module  # type: ignore[possibly-undefined]
 
 
 def sym_ite(b, t, f):
@@ -713,6 +710,7 @@ except ImportError:
         ) from None
     raise  # If __file__ is not None the cause is unknown, so just re-raise.
 
+obj = None
 for name in dir(_C):
     if name[0] != "_" and not name.endswith("Base"):
         __all__.append(name)
@@ -730,17 +728,22 @@ for name in dir(_C):
         # issue 109438 / pr 109940. Prevent TensorBase from being copied into torch.
         delattr(sys.modules[__name__], name)
 
+del name, obj
+
 if not TYPE_CHECKING:
     # issue 38137 and python issue 43367. Submodules of a C extension are
     # non-standard, and attributes of those submodules cannot be pickled since
     # pickle expect to be able to import them as "from _C.sub import attr"
     # which fails with "_C is not a package
-    for attr in dir(_C):
-        candidate = getattr(_C, attr)
+    candidate = None
+    for name in dir(_C):
+        candidate = getattr(_C, name)
         if type(candidate) is type(_C):
             # submodule
-            if f"torch._C.{attr}" not in sys.modules:
-                sys.modules[f"torch._C.{attr}"] = candidate
+            if f"torch._C.{name}" not in sys.modules:
+                sys.modules[f"torch._C.{name}"] = candidate
+
+    del name, candidate
 
 
 ################################################################################
@@ -1697,17 +1700,23 @@ _storage_classes = {
 _tensor_classes: Set[Type] = set()
 
 # If you edit these imports, please update torch/__init__.py.in as well
-from torch import random as random, serialization as serialization
+from torch import amp as amp, random as random, serialization as serialization
 from torch._tensor_str import set_printoptions
+from torch.amp import autocast, GradScaler
 from torch.random import get_rng_state, initial_seed, manual_seed, seed, set_rng_state
 from torch.serialization import load, save
+
+# Initializing the extension shadows the built-in python float / int classes;
+# store them for later use by SymInt / SymFloat.
+py_float = float
+py_int = int
 
 ################################################################################
 # Initialize extension
 ################################################################################
 
-
-def manager_path():
+# Shared memory manager needs to know the exact location of manager executable
+def _manager_path():
     if _running_with_deploy() or platform.system() == "Windows":
         return b""
     path = get_file_path("torch", "bin", "torch_shm_manager")
@@ -1717,17 +1726,9 @@ def manager_path():
     return path.encode("utf-8")
 
 
-from torch import amp as amp
-from torch.amp import autocast, GradScaler
+_C._initExtension(_manager_path())
 
-# Initializing the extension shadows the built-in python float / int classes;
-# store them for later use by SymInt / SymFloat.
-py_float = float
-py_int = int
-
-# Shared memory manager needs to know the exact location of manager executable
-_C._initExtension(manager_path())
-del manager_path
+del _manager_path
 
 # Appease the type checker: it can't deal with direct setting of globals().
 # Note that we will see "too many" functions when reexporting this way; there
@@ -1747,6 +1748,7 @@ if TYPE_CHECKING:
 # mostly helper ops.
 PRIVATE_OPS = ("unique_dim",)
 
+obj = None
 for name in dir(_C._VariableFunctions):
     if name.startswith("__") or name in PRIVATE_OPS:
         continue
@@ -1761,7 +1763,7 @@ for name in dir(_C._VariableFunctions):
     if not name.startswith("_"):
         __all__.append(name)
 
-del name
+del name, obj
 
 ################################################################################
 # Add torch.dtype instances to the public API
