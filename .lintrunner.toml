@@ -1821,7 +1821,6 @@ exclude_patterns = [
     'torch/sparse/_triton_ops.py',
     'torch/sparse/semi_structured.py',
     'torch/special/__init__.py',
-    'torch/storage.py',
     'torch/testing/_internal/__init__.py',
     'torch/testing/_internal/autocast_test_lists.py',
     'torch/testing/_internal/autograd_function_db.py',
