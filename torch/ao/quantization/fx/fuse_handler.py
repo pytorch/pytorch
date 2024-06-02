@@ -44,7 +44,7 @@ class DefaultFuseHandler(FuseHandler):
     def __init__(
             self,
             node: Node):
-        super().__init__(node)
+        super().__init__(node)  # type:ignore[safe-super]
 
     def fuse(self,
              load_arg: Callable,
