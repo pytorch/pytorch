@@ -9,7 +9,7 @@ from typing import Any, cast, Dict, Optional, Type, TypeVar, Union
 
 import torch
 from torch._utils import _to, _type
-from torch.types import Storage
+from torch.types import _bool, _int, Storage
 
 try:
     import numpy as np
@@ -26,14 +26,14 @@ T = TypeVar("T", bound="Union[_StorageBase, TypedStorage]")
 
 class _StorageBase:
     _cdata: Any
-    is_sparse: bool = False
-    is_sparse_csr: bool = False
+    is_sparse: _bool = False
+    is_sparse_csr: _bool = False
     device: torch.device
 
     def __init__(self, *args, **kwargs):
         raise NotImplementedError
 
-    def __len__(self) -> int:
+    def __len__(self) -> _int:
         raise NotImplementedError
 
     def __getitem__(self, idx):
@@ -42,19 +42,19 @@ class _StorageBase:
     def __setitem__(self, *args, **kwargs):
         raise NotImplementedError
 
-    def copy_(self, source: T, non_blocking: Optional[bool] = None) -> T:
+    def copy_(self, source: T, non_blocking: Optional[_bool] = None) -> T:
         raise NotImplementedError
 
     def new(self) -> T:  # type: ignore[type-var]
         raise NotImplementedError
 
-    def nbytes(self) -> int:
+    def nbytes(self) -> _int:
         raise NotImplementedError
 
-    def size(self) -> int:
+    def size(self) -> _int:
         return self.nbytes()
 
-    def type(self, dtype: Optional[str] = None, non_blocking: bool = False) -> T:  # type: ignore[type-var]
+    def type(self, dtype: Optional[str] = None, non_blocking: _bool = False) -> T:  # type: ignore[type-var]
         return _type(self, dtype, non_blocking)
 
     def cuda(self, device=None, non_blocking=False) -> T:  # type: ignore[type-var]
@@ -87,16 +87,16 @@ class _StorageBase:
         device2 = torch.device("hpu", device) if device else torch.device("hpu")
         return self.to(device=device2, non_blocking=non_blocking)
 
-    def element_size(self) -> int:
+    def element_size(self) -> _int:
         raise NotImplementedError
 
-    def get_device(self) -> int:
+    def get_device(self) -> _int:
         return self.device.index
 
-    def data_ptr(self) -> int:
+    def data_ptr(self) -> _int:
         raise NotImplementedError
 
-    def resizable(self) -> bool:
+    def resizable(self) -> _bool:
         raise NotImplementedError
 
     # Defined in torch/csrc/generic/StorageSharing.cpp
@@ -107,11 +107,11 @@ class _StorageBase:
         raise NotImplementedError
 
     @classmethod
-    def _new_using_filename_cpu(cls: Type[T], size: int) -> T:
+    def _new_using_filename_cpu(cls: Type[T], size: _int) -> T:
         raise NotImplementedError
 
     @classmethod
-    def _new_using_fd_cpu(cls: Type[T], size: int) -> T:
+    def _new_using_fd_cpu(cls: Type[T], size: _int) -> T:
         raise NotImplementedError
 
     @classmethod
@@ -144,7 +144,7 @@ class _StorageBase:
     def _write_file(self, *args, **kwargs):
         raise NotImplementedError
 
-    def resize_(self, size: int):
+    def resize_(self, size: _int):
         raise NotImplementedError
 
     def _weak_ref(self, *args, **kwargs) -> T:  # type: ignore[type-var]
@@ -159,7 +159,7 @@ class _StorageBase:
     def _share_cuda_(self, *args, **kwargs):
         raise NotImplementedError
 
-    def is_shared(self) -> bool:
+    def is_shared(self) -> _bool:
         raise NotImplementedError
 
     @classmethod
@@ -257,7 +257,7 @@ class _StorageBase:
             storage = storage.clone()
         return storage
 
-    def to(self, *, device: torch.device, non_blocking: bool = False) -> T:  # type: ignore[type-var]
+    def to(self, *, device: torch.device, non_blocking: _bool = False) -> T:  # type: ignore[type-var]
         return _to(self, device, non_blocking)
 
     def double(self):
@@ -629,7 +629,7 @@ def _get_device_from_module(module: str):
 
 
 class TypedStorage:
-    is_sparse = False
+    is_sparse: _bool = False
 
     dtype: torch.dtype
 
@@ -977,7 +977,9 @@ class TypedStorage:
         return self._untyped_storage.nbytes()
 
     def type(
-        self, dtype: Optional[str] = None, non_blocking: bool = False
+        self,
+        dtype: Optional[str] = None,
+        non_blocking: bool = False,
     ) -> Union[T, str]:
         _warn_typed_storage_removal()
         if dtype is None:
@@ -1046,7 +1048,7 @@ class TypedStorage:
     def _element_size(self):
         return torch._utils._element_size(self.dtype)
 
-    def get_device(self) -> int:
+    def get_device(self) -> _int:
         _warn_typed_storage_removal()
         return self._untyped_storage.get_device()
 
