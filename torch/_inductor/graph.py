@@ -1697,7 +1697,6 @@ class GraphLowering(torch.fx.Interpreter):
             trace_structured(
                 "inductor_output_code",
                 # Just omit the filename, I still want the code though!
-                lambda: {},
                 payload_fn=lambda: code,
             )
             raise
