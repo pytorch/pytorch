@@ -999,7 +999,6 @@ command = [
 ]
 exclude_patterns = [
     'tools/gen_vulkan_spv.py',
-    'torch/__init__.py',  # Skip this file to format because it's part of the public API
     # We don't care too much about files in this directory, don't enforce
     # formatting on them
     'caffe2/**/*.py',
