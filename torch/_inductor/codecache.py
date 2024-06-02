@@ -446,11 +446,22 @@ def _ident(x: Any) -> Any:
     return x
 
 
+def extract_tensor_metadata_for_cache_key(t):
+    """
+    Extracts the tensor metadata and removes fields of the TensorMetadata
+    that are not needed for caching
+    """
+    meta = extract_tensor_metadata(t)
+    if not hasattr(t, "_is_inductor_static"):
+        meta = dataclasses.replace(meta, storage_offset=0, storage_bytes=None)
+    return meta
+
+
 def _reduce_fake_tensor(t):
     """
     See FxGraphCachePickler. Custom reducer to pickle FakeTensors.
     """
-    metadata = extract_tensor_metadata(t)
+    metadata = extract_tensor_metadata_for_cache_key(t)
     return (_ident, (metadata,))
 
 
@@ -481,7 +492,7 @@ def _reduce_tensor(t):
             f"FX graph cache handling of a large constant took {elapsed:.1}s. Please file an issue."
         )
 
-    metadata = extract_tensor_metadata(t)
+    metadata = extract_tensor_metadata_for_cache_key(t)
     return (_ident, (TensorMetadataAndValues(metadata, values),))
 
 
@@ -554,7 +565,7 @@ class FxGraphCachePickler(pickle.Pickler):
 
         def get_str(obj) -> str:
             if isinstance(obj, torch.Tensor):
-                return str(extract_tensor_metadata(obj))
+                return str(extract_tensor_metadata_for_cache_key(obj))
             elif isinstance(obj, bytes):
                 return "<bytes>"
             else:
@@ -639,6 +650,7 @@ class FxGraphHashDetails:
         gm: torch.fx.GraphModule,
         example_inputs: List[torch.Tensor],
         fx_kwargs: Dict[str, Any],
+        inputs_to_check: Sequence[int],
     ):
         self.gm = gm
         self.example_inputs = example_inputs
@@ -653,6 +665,9 @@ class FxGraphHashDetails:
                     self.fx_kwargs[k] = OrderedSetHolder(sorted(fx_kwargs[k]))
                 else:
                     self.fx_kwargs[k] = fx_kwargs[k]
+
+        # Alignment checks
+        self.inputs_to_check = inputs_to_check
 
         # 'Deterministic algorithms' can affect codegen via lowering to cuda kernels.
         self.deterministic_algorithms_settings = (
@@ -686,11 +701,12 @@ def compiled_fx_graph_hash(
     gm: torch.fx.GraphModule,
     example_inputs: List[torch.Tensor],
     fx_kwargs: Dict[str, Any],
+    inputs_to_check: Sequence[int],
 ) -> str:
     """
     Generate a unique hash of the FX graph for caching.
     """
-    details = FxGraphHashDetails(gm, example_inputs, fx_kwargs)
+    details = FxGraphHashDetails(gm, example_inputs, fx_kwargs, inputs_to_check)
     # The prefix distinguishes among the other kinds of objects we
     # cache in this module.
     key = "f" + FxGraphCachePickler.get_hash(details)
@@ -990,6 +1006,7 @@ class FxGraphCache:
         gm: torch.fx.GraphModule,
         example_inputs: List[torch.Tensor],
         fx_kwargs: Dict[str, Any],
+        inputs_to_check: Sequence[int],
         local: bool,
         remote: bool,
     ):
@@ -1001,7 +1018,7 @@ class FxGraphCache:
         compiled_graph = None
         try:
             FxGraphCache._check_can_cache(gm)
-            key = compiled_fx_graph_hash(gm, example_inputs, fx_kwargs)
+            key = compiled_fx_graph_hash(gm, example_inputs, fx_kwargs, inputs_to_check)
 
             remote_cache = None
             if remote:
