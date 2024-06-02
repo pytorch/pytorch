@@ -88,11 +88,13 @@ extern "C"
             const int64_t m_start = mc * M0;
             const int64_t m_end = std::min((mc + Mc_blocks) * M0, M);
             const int64_t m_size = m_end - m_start;
+            {%- if use_local_acc %}
+            {{ kernel.define_buffer(acc_buf_name, ["m_end - m_start", "N0"]) }}
+            {%- endif %}
             for (int64_t nc = n_block_start; nc < n_block_end; ++nc) {
                 const int64_t n_start = nc * N0;
                 const int64_t n_size = N0;
                 {%- if use_local_acc %}
-                {{ kernel.define_buffer(acc_buf_name, ["m_end - m_start", "N0"]) }}
                 {%- set acc = kernel.local_buffers[acc_buf_name] %}
                 {%- else %}
                 {%- set acc = kernel.slice_nd(GemmOut, [("m_start", "m_end"), ("n_start", "n_start + N0")]) %}
