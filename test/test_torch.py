@@ -6198,8 +6198,8 @@ else:
         GradScaler = torch.cuda.amp.GradScaler if "cuda" == device.type else torch.cpu.amp.GradScaler
 
         with self.assertWarnsRegex(
-            UserWarning,
-            rf"torch.{device.type}.amp.GradScaler\(args...\) is deprecated.",
+            FutureWarning,
+            rf"`torch.{device.type}.amp.GradScaler\(args...\)` is deprecated.",
         ):
             _ = GradScaler(init_scale=2.0)
 
