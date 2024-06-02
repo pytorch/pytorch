@@ -10,6 +10,8 @@ import math
 
 import numpy as np
 import torch
+import torch._dynamo
+import torch._dynamo.testing
 import torch.nn
 import torch.nn.functional as F
 from torch.testing._internal.common_cuda import (
@@ -4007,6 +4009,70 @@ class TestNestedTensorSubclass(TestCase):
 
         nt1_t, nt2_t, nt3_t, nt4_t = (x.transpose(1, 2) for x in (nt1, nt2, nt3, nt4))
         check_size(nt1_t, nt2_t, nt3_t, nt4_t)
+
+    @skipIfTorchDynamo("compiles internally")
+    @unittest.skipIf(IS_WINDOWS, reason="Windows not yet supported for torch.compile")
+    @skipCUDAIf(not SM70OrLater, "GPU capability is < SM70")
+    def test_specialize_dynamic_shape(self, device):
+        values = torch.randn((18, 16), device=device)
+        offsets = torch.tensor([0, 2, 3, 6, 15, 18], device=device)
+        like_values = torch.randn_like(values)
+
+        # this marks values as dynamic
+        nt = torch.nested.nested_tensor_from_jagged(values, offsets)
+
+        def fn(values, same_size):
+            # here, the dynamic shape is specialized by same_size's shape
+            # https://github.com/pytorch/pytorch/issues/127097
+            # make sure this doesn't error out in torch.compile
+            return values + same_size
+
+        self.assertEqual(
+            fn(values, like_values),
+            torch.compile(fn)(values, like_values),
+        )
+
+    @skipIfTorchDynamo("compiles internally")
+    @unittest.skipIf(IS_WINDOWS, reason="Windows not yet supported for torch.compile")
+    @skipCUDAIf(not SM70OrLater, "GPU capability is < SM70")
+    def test_specialize_dynamic_shape_recompile(self, device):
+        def generate_inp(total_len):
+            values = torch.randn((total_len, 16), device=device)
+            offsets = torch.tensor([0, 2, 3, 6, 15, total_len], device=device)
+            like_values = torch.randn_like(values)
+            return values, offsets, like_values
+
+        def check_results(ref_fn, res_fn, args):
+            values, offsets, like_values = args
+            # this may add dynamic shape markings
+            # goal of this test is to make sure that whatever markings are there,
+            # we eventually stop recompiling as shape changes.
+            nt = torch.nested.nested_tensor_from_jagged(values, offsets)
+
+            self.assertEqual(
+                ref_fn(values, like_values),
+                res_fn(values, like_values),
+            )
+
+
+        def fn(values, same_size):
+            return values + same_size
+
+        compile_counter = torch._dynamo.testing.CompileCounter()
+
+        compiled_fn = torch._dynamo.optimize(compile_counter, nopython=True)(fn)
+        check_results(fn, compiled_fn, generate_inp(18))
+        self.assertEqual(compile_counter.frame_count, 1)
+
+        check_results(fn, compiled_fn, generate_inp(19))
+        # we'll probably recompile here with dynamic shapes - it's okay if not though.
+        frame_count_2 = compile_counter.frame_count
+        self.assertIn(frame_count_2, [1, 2])
+
+        # make sure that by now we've already compiled with dynamic shapes, so additional
+        # shapes should not trigger additional recompiles.
+        check_results(fn, compiled_fn, generate_inp(20))
+        self.assertEqual(compile_counter.frame_count, frame_count_2)
 
     # Doesn't work until we have real views
     @xfailIfTorchDynamo
