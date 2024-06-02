@@ -546,6 +546,10 @@ class HalideKernel(SIMDKernel):
         reduction_hint=ReductionHint.DEFAULT,
         disable_persistent_reduction=False,
     ):
+        if not config.fallback_random or config.inplace_buffers:
+            raise NotImplementedError(
+                "Halide backend requires: fallback_random=True and inplace_buffers=False"
+            )
         super().__init__(
             *groups,
             index_dtype=index_dtype,
@@ -630,7 +634,7 @@ class HalideKernel(SIMDKernel):
         var = self.args.input(name)
         index = self.prepare_indexing(index)
         index_str = self.index_to_str(index)
-        if self.is_indirect_indexing(index):
+        if self.is_indirect_indexing(index) or self._load_mask:
             # Halide doesn't have a great way to do masked loads
             var = f"hl.BoundaryConditions.constant_exterior({var}, 0)"
         line = f"{var}[{index_str}]"
@@ -773,7 +777,7 @@ class HalideKernel(SIMDKernel):
         if self.is_indirect_indexing(index):
             # Workaround "Buffer out_ptr0 may be accessed in an unbounded way"
             # TODO(jansel): we should error here rather than writing to the first/last element
-            index_str = f"hl.clamp({index_str}, 0, {self.kexpr(self.halide_buffer_numel(name))})"
+            index_str = f"hl.clamp({index_str}, 0, {self.kexpr(self.halide_buffer_numel(name) - 1)})"
 
         if mode is None:
             line = f"{var}[{index_str}] = hl.cast({var}.type(), {value_str})"
@@ -916,10 +920,11 @@ class HalideKernel(SIMDKernel):
         current_device = V.graph.scheduler.get_current_device_or_throw()
         if current_device.type == "cpu":
             target = [config.halide.cpu_target]
+            schduler = config.halide.scheduler_cpu
             scheduler_flags = {
                 "parallelism": parallel_num_threads(),
             }
-            if config.halide.scheduler == "Mullapudi2016":
+            if config.halide.scheduler_cpu == "Mullapudi2016":
                 scheduler_flags[
                     "last_level_cache_size"
                 ] = HalideCodeCache.cpu_cache_size()
@@ -928,6 +933,7 @@ class HalideKernel(SIMDKernel):
             assert current_device.type == "cuda", "only cpu/cuda supported"
             assert current_device.index <= 0, "only default device supported"
             target = [config.halide.gpu_target]
+            schduler = config.halide.scheduler_cuda
             capability = torch.cuda.get_device_properties(current_device)
             if "cuda_capability" not in target[0]:
                 for major, minor in [(8, 6), (8, 0), (7, 5), (7, 0), (6, 1)]:
@@ -942,12 +948,10 @@ class HalideKernel(SIMDKernel):
             }
             cuda_device = max(0, current_device.index)
 
-        # TODO(jansel): for cuda want target="host-cuda-cuda_capability_86-user_context"
-
         # strict_float is requires for correctness
         target.append("strict_float")
 
-        if config.halide.no_asserts:
+        if not config.halide.asserts:
             target.append("no_asserts")
 
         if "64" in self.index_dtype:
@@ -957,7 +961,7 @@ class HalideKernel(SIMDKernel):
         return HalideMeta(
             argtypes,
             target="-".join(target),
-            scheduler=config.halide.scheduler,
+            scheduler=schduler,
             scheduler_flags=scheduler_flags,
             cuda_device=cuda_device,
         )
@@ -1055,8 +1059,11 @@ class HalideKernel(SIMDKernel):
                     hints = V.graph.sizevars.size_hints(
                         [V.graph.get_numel(arg.buffer)], fallback=1
                     )
-                if hints == [1] and config.halide.scheduler == "Anderson2021":
-                    hints = [2]  # workaround https://github.com/halide/Halide/issues/8246
+                if (
+                    config.halide.scheduler_cuda == "Anderson2021"
+                    and V.graph.scheduler.get_current_device_or_throw().type == "cuda"
+                ):
+                    hints = tuple(map(self._anderson2021_autoscheduler_workarounds, hints))
                 range_hints = [f"hl.Range(0, {hint})" for hint in hints]
                 code.writeline(f"{arg.name}.set_estimates([{', '.join(range_hints)}])")
 
@@ -1068,6 +1075,14 @@ class HalideKernel(SIMDKernel):
             """
         )
         return code.getvalue()
+
+    @staticmethod
+    def _anderson2021_autoscheduler_workarounds(n):
+        # workaround https://github.com/halide/Halide/issues/8246
+        n = max(2, n)
+        # workaround https://github.com/halide/Halide/issues/8252
+        n = min(128000, n)
+        return n
 
     def call_kernel(self, name: str, node=None):
         """Codegen a call to this kernel"""
@@ -1085,6 +1100,11 @@ class HalideKernel(SIMDKernel):
 
     def generate_assert(self, check):
         return False  # TODO(jansel): support asserts
+
+    def check_bounds(
+        self, expr: sympy.Expr, size: sympy.Expr, lower: bool, upper: bool
+    ):
+        pass  # TODO(jansel): support asserts
 
 
 class HalideScheduling(SIMDScheduling):

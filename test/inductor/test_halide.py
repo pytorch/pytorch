@@ -3,7 +3,6 @@ import textwrap
 import unittest
 
 import torch
-import torch._inductor.async_compile  # noqa: F401 required to warm up AsyncCompile pools
 from torch._inductor import config
 from torch._inductor.codecache import HalideCodeCache
 from torch._inductor.runtime.hints import HalideInputSpec, HalideMeta
@@ -41,12 +40,12 @@ class HalideTests(TestCase):
         fn = HalideCodeCache.generate_halide(
             HalideMeta(
                 argtypes=[
-                    HalideInputSpec(ctype="float*", name="in_ptr0", numel="1024L"),
-                    HalideInputSpec(ctype="float*", name="in_ptr1", numel="1024L"),
+                    HalideInputSpec(ctype="float*", name="in_ptr0", shape=["1024L"]),
+                    HalideInputSpec(ctype="float*", name="in_ptr1", shape=["1024L"]),
                     HalideInputSpec(
                         ctype="float*",
                         name="out_ptr0",
-                        numel="1024L",
+                        shape=["1024L"],
                     ),
                 ],
                 target="host",

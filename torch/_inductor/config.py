@@ -849,12 +849,12 @@ class halide:
     gpu_target = "host-cuda"
 
     # Halide autoscheduler to use, choices are:
-    # "Anderson2021", "Li2018", "Adams2019" (cpu-only), or "Mullapudi2016" (cpu-only)
-    scheduler = "Li2018"
+    # "Anderson2021" (gpu-only), "Li2018", "Adams2019" (cpu-only), or "Mullapudi2016" (cpu-only)
+    scheduler_cuda = "Li2018"
+    scheduler_cpu = "Adams2019"
 
-    # Add `-no_asserts` to halide `target=`
-    # TODO(jansel): halide asserts seem to false alarm e.g. test_AllenaiLongformerBase_repro_cpu
-    no_asserts = True
+    # Controls `no_asserts` flag passed to Halide target (warning: can false positive)
+    asserts = False
 
 
 # create a directory containing lots of debug information

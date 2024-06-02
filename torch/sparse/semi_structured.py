@@ -359,12 +359,9 @@ def to_sparse_semi_structured(
                 [-4370, -4370, -4370,  ..., -4370, -4370, -4370]], device='cuda:0', dtype=torch.int16))
     """
     if transposed:
-        warnings.warn(
-            "Setting transpose from `to_sparse_semi_structured` is deprecated "
-            "and will be removed in a future release. "
-            "`SparseSemiStructuredTensor` only support contiguous input tensors.",
-            FutureWarning,
-            stacklevel=2,
+        raise DeprecationWarning(
+            "Setting transpose from to_sparse_semi_structured is deprecated and will be removed in a future release."
+            "SparseSemiStructuredTensor only support contiguous input tensors. "
         )
 
     # set from _FORCE_CUTLASS flag

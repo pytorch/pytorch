@@ -117,12 +117,10 @@ forward graph of the parent module,
     if _equalization_config is None:
         _equalization_config = QConfigMapping()
 
-    if isinstance(prepare_custom_config, dict):
+    if isinstance(prepare_custom_config, Dict):
         warnings.warn(
             "Passing a prepare_custom_config_dict to prepare is deprecated and will not be supported "
-            "in a future version. Please pass in a PrepareCustomConfig instead.",
-            FutureWarning,
-        )
+            "in a future version. Please pass in a PrepareCustomConfig instead.")
         prepare_custom_config = PrepareCustomConfig.from_dict(prepare_custom_config)
 
     # swap FloatFunctional with FXFloatFunctional
@@ -224,12 +222,10 @@ def fuse_fx(
     if fuse_custom_config is None:
         fuse_custom_config = FuseCustomConfig()
 
-    if isinstance(fuse_custom_config, dict):
+    if isinstance(fuse_custom_config, Dict):
         warnings.warn(
             "Passing a fuse_custom_config_dict to fuse is deprecated and will not be supported "
-            "in a future version. Please pass in a FuseCustomConfig instead.",
-            FutureWarning,
-        )
+            "in a future version. Please pass in a FuseCustomConfig instead.")
         fuse_custom_config = FuseCustomConfig.from_dict(fuse_custom_config)
 
     torch._C._log_api_usage_once("quantization_api.quantize_fx.fuse_fx")
@@ -515,12 +511,10 @@ def _convert_fx(
     if convert_custom_config is None:
         convert_custom_config = ConvertCustomConfig()
 
-    if isinstance(convert_custom_config, dict):
+    if isinstance(convert_custom_config, Dict):
         warnings.warn(
             "Passing a convert_custom_config_dict to convert is deprecated and will not be supported "
-            "in a future version. Please pass in a ConvertCustomConfig instead.",
-            FutureWarning,
-        )
+            "in a future version. Please pass in a ConvertCustomConfig instead.")
         convert_custom_config = ConvertCustomConfig.from_dict(convert_custom_config)
 
     _check_is_graph_module(graph_module)

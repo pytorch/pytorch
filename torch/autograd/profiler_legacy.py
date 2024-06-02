@@ -1,6 +1,5 @@
 import itertools
-import warnings
-from typing_extensions import deprecated
+from warnings import warn
 
 import torch
 import torch.cuda
@@ -24,11 +23,6 @@ from torch.autograd.profiler_util import (
 __all__ = ["profile"]
 
 
-@deprecated(
-    "`torch.autograd.profiler_legacy.profile` is deprecated and will be removed in a future release. "
-    "Please use `torch.profiler` instead.",
-    category=None,  # TODO: change to `FutureWarning`
-)
 class profile:
     """DEPRECATED: use torch.profiler instead."""
 
@@ -57,7 +51,7 @@ class profile:
         self.with_modules = with_modules
 
         if self.use_cuda and not torch.cuda.is_available():
-            warnings.warn("CUDA is not available, disabling CUDA profiling")
+            warn("CUDA is not available, disabling CUDA profiling")
             self.use_cuda = False
 
         if self.use_cuda:
