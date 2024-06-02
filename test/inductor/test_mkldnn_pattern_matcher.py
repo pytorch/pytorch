@@ -424,7 +424,9 @@ class TestPatternMatcher(TestPatternMatcherBase):
             if self._check_unary_is_decomposed(unary_fn):
                 # Has extra dtype conversion nodes for autocast.
                 matcher_nodes += 2
-            self._test_common(mod, (v,), matcher_count, matcher_nodes, check_autocast=dtype)
+            self._test_common(
+                mod, (v,), matcher_count, matcher_nodes, check_autocast=dtype
+            )
             self.assertEqual(metrics.generated_kernel_count, 1)
 
     @skipIfNoDynamoSupport
