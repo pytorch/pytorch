@@ -35,17 +35,17 @@ class FileListerIterDataPipe(IterDataPipe[str]):
 
     def __init__(
         self,
-        root: Union[str, Sequence[str], IterDataPipe] = '.',
-        masks: Union[str, List[str]] = '',
+        root: Union[str, Sequence[str], IterDataPipe] = ".",
+        masks: Union[str, List[str]] = "",
         *,
         recursive: bool = False,
         abspath: bool = False,
         non_deterministic: bool = False,
-        length: int = -1
+        length: int = -1,
     ) -> None:
         super().__init__()
         if isinstance(root, str):
-            root = [root, ]
+            root = [root]
         if not isinstance(root, IterDataPipe):
             root = IterableWrapperIterDataPipe(root)
         self.datapipe: IterDataPipe = root
@@ -55,9 +55,11 @@ class FileListerIterDataPipe(IterDataPipe[str]):
         self.non_deterministic: bool = non_deterministic
         self.length: int = length
 
-    def __iter__(self) -> Iterator[str] :
+    def __iter__(self) -> Iterator[str]:
         for path in self.datapipe:
-            yield from get_file_pathnames_from_root(path, self.masks, self.recursive, self.abspath, self.non_deterministic)
+            yield from get_file_pathnames_from_root(
+                path, self.masks, self.recursive, self.abspath, self.non_deterministic
+            )
 
     def __len__(self):
         if self.length == -1:

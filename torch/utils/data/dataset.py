@@ -423,7 +423,8 @@ class Subset(Dataset[T_co]):
 def random_split(
     dataset: Dataset[T],
     lengths: Sequence[Union[int, float]],
-    generator: Optional[torch.Generator] = torch.default_generator,  # no 'default_generator' in torch/__init__.pyi
+    # no 'default_generator' in torch/__init__.pyi
+    generator: Optional[torch.Generator] = torch.default_generator,
 ) -> List[Subset[T]]:
     r"""
     Randomly split a dataset into non-overlapping new datasets of given lengths.

@@ -6,10 +6,10 @@ from torch.utils.data.datapipes.datapipe import DataChunk, MapDataPipe
 
 __all__ = ["BatcherMapDataPipe"]
 
-T = TypeVar('T')
+T = TypeVar("T")
 
 
-@functional_datapipe('batch')
+@functional_datapipe("batch")
 class BatcherMapDataPipe(MapDataPipe[DataChunk]):
     r"""
     Create mini-batches of data (functional name: ``batch``).
@@ -35,12 +35,13 @@ class BatcherMapDataPipe(MapDataPipe[DataChunk]):
     batch_size: int
     drop_last: bool
 
-    def __init__(self,
-                 datapipe: MapDataPipe[T],
-                 batch_size: int,
-                 drop_last: bool = False,
-                 wrapper_class=DataChunk,
-                 ) -> None:
+    def __init__(
+        self,
+        datapipe: MapDataPipe[T],
+        batch_size: int,
+        drop_last: bool = False,
+        wrapper_class=DataChunk,
+    ) -> None:
         assert batch_size > 0, "Batch size is required to be larger than 0!"
         super().__init__()
         self.datapipe = datapipe

@@ -76,7 +76,7 @@ def issubtype(left, right, recursive=True):
         return True
 
     if isinstance(right, _GenericAlias):
-        if getattr(right, '__origin__', None) is Generic:
+        if getattr(right, "__origin__", None) is Generic:
             return True
 
     if right == type(None):
@@ -98,7 +98,10 @@ def issubtype(left, right, recursive=True):
     if len(variants) == 0:
         return False
 
-    return all(_issubtype_with_constraints(variant, constraints, recursive) for variant in variants)
+    return all(
+        _issubtype_with_constraints(variant, constraints, recursive)
+        for variant in variants
+    )
 
 
 def _decompose_type(t, to_list=True):
@@ -108,7 +111,7 @@ def _decompose_type(t, to_list=True):
         else:
             # For T_co, __constraints__ is ()
             ts = list(t.__constraints__)
-    elif hasattr(t, '__origin__') and t.__origin__ == Union:
+    elif hasattr(t, "__origin__") and t.__origin__ == Union:
         ts = t.__args__
     else:
         if not to_list:
@@ -149,7 +152,7 @@ def _issubtype_with_constraints(variant, constraints, recursive=True):
         return all(_issubtype_with_constraints(v, constraints, recursive) for v in vs)
 
     # Variant is not TypeVar or Union
-    if hasattr(variant, '__origin__') and variant.__origin__ is not None:
+    if hasattr(variant, "__origin__") and variant.__origin__ is not None:
         v_origin = variant.__origin__
         # In Python-3.9 typing library untyped generics do not have args
         v_args = getattr(variant, "__args__", None)
@@ -168,7 +171,7 @@ def _issubtype_with_constraints(variant, constraints, recursive=True):
         # Constraint is not TypeVar or Union
         else:
             # __origin__ can be None for plain list, tuple, ... in Python 3.6
-            if hasattr(constraint, '__origin__') and constraint.__origin__ is not None:
+            if hasattr(constraint, "__origin__") and constraint.__origin__ is not None:
                 c_origin = constraint.__origin__
                 if v_origin == c_origin:
                     if not recursive:
@@ -177,8 +180,14 @@ def _issubtype_with_constraints(variant, constraints, recursive=True):
                     c_args = getattr(constraint, "__args__", None)
                     if c_args is None or len(c_args) == 0:
                         return True
-                    if v_args is not None and len(v_args) == len(c_args) and \
-                            all(issubtype(v_arg, c_arg) for v_arg, c_arg in zip(v_args, c_args)):
+                    if (
+                        v_args is not None
+                        and len(v_args) == len(c_args)
+                        and all(
+                            issubtype(v_arg, c_arg)
+                            for v_arg, c_arg in zip(v_args, c_args)
+                        )
+                    ):
                         return True
             # Tuple[int] -> Tuple
             else:
@@ -209,7 +218,9 @@ def issubinstance(data, data_type):
         if dt_args is None or len(dt_args) == 0:
             return True
         kt, vt = dt_args
-        return all(issubinstance(k, kt) and issubinstance(v, vt) for k, v in data.items())
+        return all(
+            issubinstance(k, kt) and issubinstance(v, vt) for k, v in data.items()
+        )
 
     return True
 
@@ -241,7 +252,7 @@ class _DataPipeType:
 
     def issubtype(self, other):
         if isinstance(other.param, _GenericAlias):
-            if getattr(other.param, '__origin__', None) is Generic:
+            if getattr(other.param, "__origin__", None) is Generic:
                 return True
         if isinstance(other, _DataPipeType):
             return issubtype(self.param, other.param)
@@ -254,7 +265,7 @@ class _DataPipeType:
 
 
 # Default type for DataPipe without annotation
-T_co = TypeVar('T_co', covariant=True)
+T_co = TypeVar("T_co", covariant=True)
 _DEFAULT_TYPE = _DataPipeType(Generic[T_co])
 
 
@@ -274,17 +285,18 @@ class _DataPipeMeta(GenericMeta):
 
         # TODO: the statements below are not reachable by design as there is a bug and typing is low priority for now.
         cls.__origin__ = None
-        if 'type' in namespace:
+        if "type" in namespace:
             return super().__new__(cls, name, bases, namespace, **kwargs)  # type: ignore[call-overload]
 
-        namespace['__type_class__'] = False
+        namespace["__type_class__"] = False
         #  For plain derived class without annotation
         for base in bases:
             if isinstance(base, _DataPipeMeta):
                 return super().__new__(cls, name, bases, namespace, **kwargs)  # type: ignore[call-overload]
 
-        namespace.update({'type': _DEFAULT_TYPE,
-                          '__init_subclass__': _dp_init_subclass})
+        namespace.update(
+            {"type": _DEFAULT_TYPE, "__init_subclass__": _dp_init_subclass}
+        )
         return super().__new__(cls, name, bases, namespace, **kwargs)  # type: ignore[call-overload]
 
     def __init__(self, name, bases, namespace, **kwargs):
@@ -294,48 +306,58 @@ class _DataPipeMeta(GenericMeta):
     @_tp_cache
     def _getitem_(self, params):
         if params is None:
-            raise TypeError(f'{self.__name__}[t]: t can not be None')
+            raise TypeError(f"{self.__name__}[t]: t can not be None")
         if isinstance(params, str):
             params = ForwardRef(params)
         if not isinstance(params, tuple):
-            params = (params, )
+            params = (params,)
 
         msg = f"{self.__name__}[t]: t must be a type"
         params = tuple(_type_check(p, msg) for p in params)
 
         if isinstance(self.type.param, _GenericAlias):
-            orig = getattr(self.type.param, '__origin__', None)
+            orig = getattr(self.type.param, "__origin__", None)
             if isinstance(orig, type) and orig is not Generic:
                 p = self.type.param[params]  # type: ignore[index]
                 t = _DataPipeType(p)
                 l = len(str(self.type)) + 2
                 name = self.__name__[:-l]
-                name = name + '[' + str(t) + ']'
+                name = name + "[" + str(t) + "]"
                 bases = (self,) + self.__bases__
-                return self.__class__(name, bases,
-                                      {'__init_subclass__': _dp_init_subclass,
-                                       'type': t,
-                                       '__type_class__': True})
+                return self.__class__(
+                    name,
+                    bases,
+                    {
+                        "__init_subclass__": _dp_init_subclass,
+                        "type": t,
+                        "__type_class__": True,
+                    },
+                )
 
         if len(params) > 1:
-            raise TypeError(f'Too many parameters for {self} actual {len(params)}, expected 1')
+            raise TypeError(
+                f"Too many parameters for {self} actual {len(params)}, expected 1"
+            )
 
         t = _DataPipeType(params[0])
 
         if not t.issubtype(self.type):
-            raise TypeError(f'Can not subclass a DataPipe[{t}] from DataPipe[{self.type}]')
+            raise TypeError(
+                f"Can not subclass a DataPipe[{t}] from DataPipe[{self.type}]"
+            )
 
         # Types are equal, fast path for inheritance
         if self.type == t:
             return self
 
-        name = self.__name__ + '[' + str(t) + ']'
+        name = self.__name__ + "[" + str(t) + "]"
         bases = (self,) + self.__bases__
 
-        return self.__class__(name, bases,
-                              {'__init_subclass__': _dp_init_subclass,
-                               '__type_class__': True,
-                               'type': t})
+        return self.__class__(
+            name,
+            bases,
+            {"__init_subclass__": _dp_init_subclass, "__type_class__": True, "type": t},
+        )
 
     # TODO: Fix isinstance bug
     def _eq_(self, other):
@@ -343,8 +365,10 @@ class _DataPipeMeta(GenericMeta):
             return NotImplemented
         if self.__origin__ is None or other.__origin__ is None:  # type: ignore[has-type]
             return self is other
-        return (self.__origin__ == other.__origin__  # type: ignore[has-type]
-                and self.type == other.type)
+        return (
+            self.__origin__ == other.__origin__  # type: ignore[has-type]
+            and self.type == other.type
+        )
 
     # TODO: Fix isinstance bug
     def _hash_(self):
@@ -359,9 +383,8 @@ class _IterDataPipeMeta(_DataPipeMeta):
     """
 
     def __new__(cls, name, bases, namespace, **kwargs):
-
-        if 'reset' in namespace:
-            reset_func = namespace['reset']
+        if "reset" in namespace:
+            reset_func = namespace["reset"]
 
             @functools.wraps(reset_func)
             def conditional_reset(*args, **kwargs):
@@ -371,7 +394,10 @@ class _IterDataPipeMeta(_DataPipeMeta):
                 This allows recently restored DataPipe to preserve its restored state during the initial `__iter__` call.
                 """
                 datapipe = args[0]
-                if datapipe._snapshot_state in (_SnapshotState.Iterating, _SnapshotState.NotStarted):
+                if datapipe._snapshot_state in (
+                    _SnapshotState.Iterating,
+                    _SnapshotState.NotStarted,
+                ):
                     # Reset `NotStarted` is necessary because the `source_datapipe` of a DataPipe might have
                     # already begun iterating.
                     datapipe._number_of_samples_yielded = 0
@@ -379,9 +405,9 @@ class _IterDataPipeMeta(_DataPipeMeta):
                     reset_func(*args, **kwargs)
                 datapipe._snapshot_state = _SnapshotState.Iterating
 
-            namespace['reset'] = conditional_reset
+            namespace["reset"] = conditional_reset
 
-        if '__iter__' in namespace:
+        if "__iter__" in namespace:
             hook_iterator(namespace)
         return super().__new__(cls, name, bases, namespace, **kwargs)  # type: ignore[call-overload]
 
@@ -394,7 +420,7 @@ def _dp_init_subclass(sub_cls, *args, **kwargs):
     # - add global switch for type checking at compile-time
 
     # Ignore internal type class
-    if getattr(sub_cls, '__type_class__', False):
+    if getattr(sub_cls, "__type_class__", False):
         return
 
     # Check if the string type is valid
@@ -404,25 +430,37 @@ def _dp_init_subclass(sub_cls, *args, **kwargs):
             param = _eval_type(sub_cls.type.param, base_globals, locals())
             sub_cls.type.param = param
         except TypeError as e:
-            raise TypeError(f"{sub_cls.type.param.__forward_arg__} is not supported by Python typing") from e
+            raise TypeError(
+                f"{sub_cls.type.param.__forward_arg__} is not supported by Python typing"
+            ) from e
 
-    if '__iter__' in sub_cls.__dict__:
-        iter_fn = sub_cls.__dict__['__iter__']
+    if "__iter__" in sub_cls.__dict__:
+        iter_fn = sub_cls.__dict__["__iter__"]
         hints = get_type_hints(iter_fn)
-        if 'return' in hints:
-            return_hint = hints['return']
+        if "return" in hints:
+            return_hint = hints["return"]
             # Plain Return Hint for Python 3.6
             if return_hint == Iterator:
                 return
-            if not (hasattr(return_hint, '__origin__') and
-                    (return_hint.__origin__ == Iterator or
-                     return_hint.__origin__ == collections.abc.Iterator)):
-                raise TypeError("Expected 'Iterator' as the return annotation for `__iter__` of {}"
-                                ", but found {}".format(sub_cls.__name__, _type_repr(hints['return'])))
+            if not (
+                hasattr(return_hint, "__origin__")
+                and (
+                    return_hint.__origin__ == Iterator
+                    or return_hint.__origin__ == collections.abc.Iterator
+                )
+            ):
+                raise TypeError(
+                    "Expected 'Iterator' as the return annotation for `__iter__` of {}"
+                    ", but found {}".format(
+                        sub_cls.__name__, _type_repr(hints["return"])
+                    )
+                )
             data_type = return_hint.__args__[0]
             if not issubtype(data_type, sub_cls.type.param):
-                raise TypeError(f"Expected return type of '__iter__' as a subtype of {sub_cls.type},"
-                                f" but found {_type_repr(data_type)} for {sub_cls.__name__}")
+                raise TypeError(
+                    f"Expected return type of '__iter__' as a subtype of {sub_cls.type},"
+                    f" but found {_type_repr(data_type)} for {sub_cls.__name__}"
+                )
 
 
 def reinforce_type(self, expected_type):
@@ -437,7 +475,9 @@ def reinforce_type(self, expected_type):
     _type_check(expected_type, msg="'expected_type' must be a type")
 
     if not issubtype(expected_type, self.type.param):
-        raise TypeError(f"Expected 'expected_type' as subtype of {self.type}, but found {_type_repr(expected_type)}")
+        raise TypeError(
+            f"Expected 'expected_type' as subtype of {self.type}, but found {_type_repr(expected_type)}"
+        )
 
     self.type = _DataPipeType(expected_type)
     return self

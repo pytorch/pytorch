@@ -13,7 +13,7 @@ from torch.utils.data.datapipes.map.utils import (
 )
 
 
-__all__ = ['Batcher', 'Concater', 'Mapper', 'SequenceWrapper', 'Shuffler', 'Zipper']
+__all__ = ["Batcher", "Concater", "Mapper", "SequenceWrapper", "Shuffler", "Zipper"]
 
 # Please keep this list sorted
 assert __all__ == sorted(__all__)

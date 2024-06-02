@@ -19,11 +19,16 @@ def _stub_unpickler():
 
 
 # TODO(VitalyFedyunin): Make sure it works without dill module installed
-def _list_connected_datapipes(scan_obj: DataPipe, only_datapipe: bool, cache: Set[int]) -> List[DataPipe]:
+def _list_connected_datapipes(
+    scan_obj: DataPipe, only_datapipe: bool, cache: Set[int]
+) -> List[DataPipe]:
     f = io.BytesIO()
-    p = pickle.Pickler(f)  # Not going to work for lambdas, but dill infinite loops on typing and can't be used as is
+    p = pickle.Pickler(
+        f
+    )  # Not going to work for lambdas, but dill infinite loops on typing and can't be used as is
     if dill_available():
         from dill import Pickler as dill_Pickler
+
         d = dill_Pickler(f)
     else:
         d = None
@@ -76,6 +81,7 @@ def _list_connected_datapipes(scan_obj: DataPipe, only_datapipe: bool, cache: Se
                 cls.set_getstate_hook(None)
         if dill_available():
             from dill import extend as dill_extend
+
             dill_extend(False)  # Undo change to dispatch table
     return captured_connections
 
@@ -118,8 +124,10 @@ def traverse(datapipe: DataPipe, only_datapipe: Optional[bool] = None) -> DataPi
         A graph represented as a nested dictionary, where keys are ids of DataPipe instances
         and values are tuples of DataPipe instance and the sub-graph
     """
-    msg = "`traverse` function and will be removed after 1.13. " \
-          "Please use `traverse_dps` instead."
+    msg = (
+        "`traverse` function and will be removed after 1.13. "
+        "Please use `traverse_dps` instead."
+    )
     if not only_datapipe:
         msg += " And, the behavior will be changed to the equivalent of `only_datapipe=True`."
     warnings.warn(msg, FutureWarning)
@@ -130,9 +138,13 @@ def traverse(datapipe: DataPipe, only_datapipe: Optional[bool] = None) -> DataPi
 
 
 # Add cache here to prevent infinite recursion on DataPipe
-def _traverse_helper(datapipe: DataPipe, only_datapipe: bool, cache: Set[int]) -> DataPipeGraph:
+def _traverse_helper(
+    datapipe: DataPipe, only_datapipe: bool, cache: Set[int]
+) -> DataPipeGraph:
     if not isinstance(datapipe, (IterDataPipe, MapDataPipe)):
-        raise RuntimeError(f"Expected `IterDataPipe` or `MapDataPipe`, but {type(datapipe)} is found")
+        raise RuntimeError(
+            f"Expected `IterDataPipe` or `MapDataPipe`, but {type(datapipe)} is found"
+        )
 
     dp_id = id(datapipe)
     if dp_id in cache:

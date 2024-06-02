@@ -36,6 +36,7 @@ https://github.com/python/cpython/blob/d4d60134b29290049e28df54f23493de4f1824b6/
 
 try:
     import numpy
+
     HAS_NUMPY = True
 except ModuleNotFoundError:
     HAS_NUMPY = False
@@ -44,6 +45,7 @@ except ModuleNotFoundError:
 def _set_python_exit_flag():
     global python_exit_status
     python_exit_status = True
+
 
 atexit.register(_set_python_exit_flag)
 
