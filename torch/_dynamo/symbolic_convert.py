@@ -199,6 +199,8 @@ def _step_logger():
 
 @dataclasses.dataclass
 class BlockStackEntry:
+    # Current instruction that pushes something to block_stack
+    inst: Instruction
     target: Instruction
     stack_index: Optional[int] = None
     with_context: Optional[ContextWrappingVariable] = None
@@ -1181,11 +1183,11 @@ class InstructionTranslatorBase(
 
     def SETUP_LOOP(self, inst):
         # only exists in python<=3.7
-        self.block_stack.append(BlockStackEntry(inst.target))
+        self.block_stack.append(BlockStackEntry(inst, inst.target))
 
     def SETUP_EXCEPT(self, inst):
         # only exists in python<=3.7
-        self.block_stack.append(BlockStackEntry(inst.target))
+        self.block_stack.append(BlockStackEntry(inst, inst.target))
 
     def POP_BLOCK(self, inst):
         self.block_stack.pop()
@@ -1194,7 +1196,7 @@ class InstructionTranslatorBase(
         self.setup_or_before_with(inst)
 
     def SETUP_FINALLY(self, inst):
-        self.block_stack.append(BlockStackEntry(inst.target))
+        self.block_stack.append(BlockStackEntry(inst, inst.target))
 
     def BEGIN_FINALLY(self, inst):
         self.push(None)
@@ -1930,9 +1932,11 @@ class InstructionTranslatorBase(
 
         if target:
             if isinstance(self, InstructionTranslator):
-                self.block_stack.append(BlockStackEntry(target, len(self.stack), ctx))
+                self.block_stack.append(
+                    BlockStackEntry(inst, target, len(self.stack), ctx)
+                )
             else:
-                self.block_stack.append(BlockStackEntry(target))
+                self.block_stack.append(BlockStackEntry(inst, target))
 
         self.push(exit)
         self.push(ctx.enter(self))
