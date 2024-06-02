@@ -148,6 +148,23 @@ def check_model_with_multiple_inputs(
     self.assertTrue(same(list_actual, list_expected))
 
 
+def code_check_count(
+    self: TestCase,
+    model,
+    example_inputs,
+    target_str: str,
+    target_count: int,
+):
+    so_path = torch._export.aot_compile(model, example_inputs)
+    with open(os.path.splitext(so_path)[0] + ".cpp") as cpp:
+        src_code = cpp.read()
+        FileCheck().check_count(
+            target_str,
+            target_count,
+            exactly=True,
+        ).run(src_code)
+
+
 class AOTInductorTestsTemplate:
     def test_simple(self):
         class Model(torch.nn.Module):
@@ -951,29 +968,19 @@ class AOTInductorTestsTemplate:
             def __init__(self):
                 super().__init__()
 
-            def forward(self, primals_1, primals_2, primals_5):
-                view = torch.ops.aten.reshape.default(primals_5, [-1, 4, 128])
+            def forward(self, primals_5):
+                view = torch.ops.aten.reshape.default(primals_5, [-1, 2, 4])
                 primals_5 = None
                 permute = torch.ops.aten.permute.default(view, [0, 2, 1])
                 clone = torch.ops.aten.clone.default(
                     permute, memory_format=torch.contiguous_format
                 )
-                permute = None
-                view_1 = torch.ops.aten.reshape.default(clone, [-1, 4])
-                clone = None
-                permute_1 = torch.ops.aten.permute.default(primals_1, [1, 0])
-                primals_1 = None
-                addmm = torch.ops.aten.addmm.default(primals_2, view_1, permute_1)
-                primals_2 = None
-                return addmm
+                return clone
 
-        s0 = 727828
-        s1 = 512
-        example_inputs = (
-            torch.rand(2, 4, device=self.device),
-            torch.rand(2, device=self.device),
-            torch.rand(s0, s1, device=self.device),
-        )
+        # let y_grid = 65537
+        s0 = 16777472
+        s1 = 8
+        example_inputs = (torch.rand(s0, s1, device=self.device),)
         self.check_model(Model(), example_inputs)
 
     def test_cond_simple(self):
@@ -1368,7 +1375,9 @@ class AOTInductorTestsTemplate:
             torch.randn(1, 6, 1, 48, device=self.device),
             torch.randn(1, 6, 1, 48, device=self.device),
         )
-        self.check_model(Model(self.device), example_inputs)
+        model = Model(self.device)
+        self.check_model(model, example_inputs)
+        self.code_check_count(model, example_inputs, "empty_strided", 2)
 
     @requires_multigpu()
     def test_replicate_on_devices(self):
@@ -1472,19 +1481,15 @@ class AOTInductorTestsTemplate:
             torch.randn(87, 87, device=self.device),
             torch.randn(87, 87, device=self.device),
         )
+        model = Model()
         self.check_model(
-            Model(), example_inputs, atol=1e-4, rtol=1e-4
+            model, example_inputs, atol=1e-4, rtol=1e-4
         )  # 1e-4 is the tol value used in pytorch/torch/_dynamo/utils.py
 
         if self.device == "cuda":
-            so_path = torch._export.aot_compile(Model(), example_inputs)
-            with open(os.path.splitext(so_path)[0] + ".cpp") as cpp:
-                src_code = cpp.read()
-                FileCheck().check_count(
-                    "triton_poi_fused_sin_0 = loadKernel(",
-                    1,
-                    exactly=True,
-                ).run(src_code)
+            self.code_check_count(
+                model, example_inputs, "triton_poi_fused_sin_0 = loadKernel(", 1
+            )
 
     def test_reuse_kernel_dynamic(self):
         class Model(torch.nn.Module):
@@ -2900,6 +2905,7 @@ class AOTInductorTestABICompatibleCpu(TestCase):
     abi_compatible = True
     check_model = check_model
     check_model_with_multiple_inputs = check_model_with_multiple_inputs
+    code_check_count = code_check_count
     allow_stack_allocation = False
     use_minimal_arrayref_interface = False
 
@@ -3049,7 +3055,6 @@ CPU_TEST_FAILURES = {
 
 CUDA_TEST_FAILURES = {
     # test_failures, xfail by default, set is_skip=True to skip
-    "test_large_grid": fail_cuda(),
     "test_normal_functional": fail_abi_compatible_cuda(is_skip=True),
     # no runtime checks for non_abi_compatible mode
     "test_runtime_checks": fail_non_abi_compatible_cuda(is_skip=True),
@@ -3149,6 +3154,7 @@ class AOTInductorTestABICompatibleCpuWithStackAllocation(TestCase):
     abi_compatible = True
     check_model = check_model
     check_model_with_multiple_inputs = check_model_with_multiple_inputs
+    code_check_count = code_check_count
     allow_stack_allocation = True
     use_minimal_arrayref_interface = False
 
@@ -3186,6 +3192,7 @@ class AOTInductorTestABICompatibleCuda(TestCase):
     abi_compatible = True
     check_model = check_model
     check_model_with_multiple_inputs = check_model_with_multiple_inputs
+    code_check_count = code_check_count
     allow_stack_allocation = False
     use_minimal_arrayref_interface = False
 
@@ -3207,6 +3214,7 @@ class AOTInductorTestNonABICompatibleCpu(TestCase):
     abi_compatible = False
     check_model = check_model
     check_model_with_multiple_inputs = check_model_with_multiple_inputs
+    code_check_count = code_check_count
     allow_stack_allocation = False
     use_minimal_arrayref_interface = False
 
@@ -3241,6 +3249,7 @@ class AOTInductorTestNonABICompatibleCuda(TestCase):
     abi_compatible = False
     check_model = check_model
     check_model_with_multiple_inputs = check_model_with_multiple_inputs
+    code_check_count = code_check_count
     allow_stack_allocation = False
     use_minimal_arrayref_interface = False
 
