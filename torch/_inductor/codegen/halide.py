@@ -546,6 +546,10 @@ class HalideKernel(SIMDKernel):
         reduction_hint=ReductionHint.DEFAULT,
         disable_persistent_reduction=False,
     ):
+        if not config.fallback_random or config.inplace_buffers:
+            raise NotImplementedError(
+                "Halide backend requires: fallback_random=True and inplace_buffers=False"
+            )
         super().__init__(
             *groups,
             index_dtype=index_dtype,
@@ -630,7 +634,7 @@ class HalideKernel(SIMDKernel):
         var = self.args.input(name)
         index = self.prepare_indexing(index)
         index_str = self.index_to_str(index)
-        if self.is_indirect_indexing(index):
+        if self.is_indirect_indexing(index) or self._load_mask:
             # Halide doesn't have a great way to do masked loads
             var = f"hl.BoundaryConditions.constant_exterior({var}, 0)"
         line = f"{var}[{index_str}]"
@@ -773,7 +777,7 @@ class HalideKernel(SIMDKernel):
         if self.is_indirect_indexing(index):
             # Workaround "Buffer out_ptr0 may be accessed in an unbounded way"
             # TODO(jansel): we should error here rather than writing to the first/last element
-            index_str = f"hl.clamp({index_str}, 0, {self.kexpr(self.halide_buffer_numel(name))})"
+            index_str = f"hl.clamp({index_str}, 0, {self.kexpr(self.halide_buffer_numel(name) - 1)})"
 
         if mode is None:
             line = f"{var}[{index_str}] = hl.cast({var}.type(), {value_str})"
@@ -912,7 +916,7 @@ class HalideKernel(SIMDKernel):
             )
         target = ["host", "strict_float"]
         # TODO(jansel): for cuda want target="host-cuda-cuda_capability_86-user_context"
-        if config.halide.no_asserts:
+        if not config.halide.asserts:
             target.append("no_asserts")
         if "64" in self.index_dtype:
             # TODO(jansel): it is unclear if this does anything, since input sizes are still int32
@@ -1025,8 +1029,12 @@ class HalideKernel(SIMDKernel):
                 code.writeline(f"{arg.name}.set_estimates([{', '.join(range_hints)}])")
 
         code.do_unindent(2)
-        code.writeline("")
-        code.writeline("__name__ == '__main__' and hl.main()")
+        code.splice(
+            """
+            if __name__ == "__main__":
+                hl.main()
+            """
+        )
         return code.getvalue()
 
     def call_kernel(self, name: str, node=None):
@@ -1039,11 +1047,16 @@ class HalideKernel(SIMDKernel):
         wrapper.generate_kernel_call(
             name,
             call_args,
-            cuda=False,
+            cuda=False,  # grid/stream is handled internally in halide
         )
 
     def generate_assert(self, check):
         return False  # TODO(jansel): support asserts
+
+    def check_bounds(
+        self, expr: sympy.Expr, size: sympy.Expr, lower: bool, upper: bool
+    ):
+        pass  # TODO(jansel): support asserts
 
 
 class HalideScheduling(SIMDScheduling):

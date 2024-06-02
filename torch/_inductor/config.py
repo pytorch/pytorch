@@ -839,9 +839,8 @@ cpu_backend = "cpp"
 
 
 class halide:
-    # add `-no_asserts` to halide `target=`
-    # TODO(jansel): halide asserts seem to false alarm e.g. test_AllenaiLongformerBase_repro_cpu
-    no_asserts = True
+    # Controls `no_asserts` flag passed to Halide target (warning: can false positive)
+    asserts = False
 
 
 # create a directory containing lots of debug information
