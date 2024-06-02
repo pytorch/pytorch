@@ -1309,9 +1309,16 @@ cdll.LoadLibrary("__lib_path__")
     def __hash__(self) -> int:
         return hash(str(self))
 
-    def check_build(self, code) -> bool:
+    @functools.lru_cache(None)  # noqa: B019
+    def __bool__(self) -> bool:
+        if config.cpp.vec_isa_ok is not None:
+            return config.cpp.vec_isa_ok
+
+        if config.is_fbcode():
+            return True
+
         key, input_path = write(
-            code,
+            VecISA._avx_code,
             "cpp",
             extra=_get_isa_dry_compile_fingerprint(self._arch_flags),
         )
@@ -1346,16 +1353,6 @@ cdll.LoadLibrary("__lib_path__")
 
             return True
 
-    @functools.lru_cache(None)  # noqa: B019
-    def __bool__(self) -> bool:
-        if config.cpp.vec_isa_ok is not None:
-            return config.cpp.vec_isa_ok
-
-        if config.is_fbcode():
-            return True
-
-        return self.check_build(VecISA._avx_code)
-
 
 @dataclasses.dataclass
 class VecNEON(VecISA):
@@ -1381,43 +1378,6 @@ class VecAVX512(VecISA):
         return "avx512"
 
     __hash__: Callable[[VecISA], Any] = VecISA.__hash__
-
-
-@dataclasses.dataclass
-class VecAMX(VecAVX512):
-    _arch_flags = VecAVX512._arch_flags + " -mamx-tile -mamx-bf16 -mamx-int8"
-
-    def __str__(self) -> str:
-        return super().__str__() + " amx_tile"
-
-    __hash__: Callable[[VecISA], Any] = VecISA.__hash__
-
-    _amx_code = """
-struct amx_tilecfg {
-  uint8_t palette_id;
-  uint8_t start_row;
-  uint8_t reserved_0[14];
-  uint16_t colsb[16];
-  uint8_t rows[16];
-};
-
-extern "C" void __amx_chk_kernel() {
-  amx_tilecfg cfg = {0};
-  _tile_loadconfig(&cfg);
-  _tile_zero(0);
-  _tile_dpbf16ps(0, 1, 2);
-  _tile_dpbusd(0, 1, 2);
-}
-"""
-
-    @functools.lru_cache(None)  # noqa: B019
-    def __bool__(self) -> bool:
-        if super().__bool__():
-            if config.is_fbcode():
-                return False
-            if self.check_build(VecAMX._amx_code) and torch._C._cpu._init_amx():
-                return True
-        return False
 
 
 @dataclasses.dataclass
@@ -1462,7 +1422,7 @@ class InvalidVecISA(VecISA):
 
 
 invalid_vec_isa = InvalidVecISA()
-supported_vec_isa_list = [VecAMX(), VecAVX512(), VecAVX2(), VecNEON()]
+supported_vec_isa_list = [VecAVX512(), VecAVX2(), VecNEON()]
 
 
 # Cache the cpuinfo to avoid I/O overhead. Meanwhile, the cpuinfo content
@@ -1494,7 +1454,7 @@ def valid_vec_isa_list() -> List[VecISA]:
     with open("/proc/cpuinfo") as _cpu_info:
         _cpu_info_content = _cpu_info.read()
         for isa in supported_vec_isa_list:
-            if all(flag in _cpu_info_content for flag in str(isa).split()) and isa:
+            if str(isa) in _cpu_info_content and isa:
                 isa_list.append(isa)
         return isa_list
 
