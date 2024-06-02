@@ -11,8 +11,6 @@ from itertools import count
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, Union
 from unittest import mock
 
-import torch._inductor.async_compile  # noqa: F401 required to warm up AsyncCompile pools
-
 import torch.fx
 import torch.utils._pytree as pytree
 
