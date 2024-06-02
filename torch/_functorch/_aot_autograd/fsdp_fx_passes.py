@@ -517,6 +517,10 @@ def _collect_view_to_as_strided_users(node_list):
     return view_to_as_strided_users
 
 
+def _propagate_meta(from_node, to_node):
+    for k, v in from_node.meta.items():
+        to_node.meta[k] = v
+
 
 def reinplace_primal_set_from_allgather_output(mod):
     """
@@ -563,8 +567,10 @@ def reinplace_primal_set_from_allgather_output(mod):
                 assert other_as_strided_node.args == as_strided_node.args
         with mod.graph.inserting_after(view_node):
             new_as_strided_node = mod.graph.call_function(as_strided_node.target, as_strided_node.args, as_strided_node.kwargs)
+            _propagate_meta(as_strided_node, new_as_strided_node)
         with mod.graph.inserting_after(new_as_strided_node):
             new_set_node = mod.graph.call_function(set_node.target, (primal_node, new_as_strided_node), set_node.kwargs)
+            _propagate_meta(set_node, new_set_node)
         mod.graph.erase_node(set_node)
         mod.graph.erase_node(as_strided_node)
         for other_as_strided_node in view_to_as_strided_users[view_node]:
@@ -625,5 +631,6 @@ def move_primal_set_to_end_of_fwd_graph(mod):
         )
         with mod.graph.inserting_before(return_op):
             new_set_node = mod.graph.call_function(set_node.target, (primal_node, as_strided_node), set_node.kwargs)
+        _propagate_meta(set_node, new_set_node)
     mod.graph.lint()
     mod.recompile()

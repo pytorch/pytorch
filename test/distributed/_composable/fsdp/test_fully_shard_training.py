@@ -71,6 +71,7 @@ from torch.testing._internal.logging_utils import logs_to_string
 from torch._functorch._aot_autograd.fsdp_fx_passes import must_not_appear_ops_after_fsdp_fx_passes
 
 c10d_ops = torch.ops.c10d
+funcol = torch.ops.c10d_functional
 
 
 torch_log = logging.getLogger("torch")
@@ -1151,7 +1152,10 @@ class TestFullyShard2DTraining(FSDPTest):
 
         model_for_eager, optim_for_eager = create_model_copy(model)
         model_for_eager.parallelize(
-            tp_mesh, dp_mesh, use_activation_checkpointing, reshard_after_forward
+            tp_mesh,
+            dp_mesh,
+            use_activation_checkpointing,
+            reshard_after_forward=reshard_after_forward,
         )
 
         if full_graph_compile:
@@ -1170,7 +1174,10 @@ class TestFullyShard2DTraining(FSDPTest):
             torch._dynamo.config.error_on_recompile = True
             model_to_be_compiled, optim_for_compile = create_model_copy(model)
             model_to_be_compiled.parallelize(
-                tp_mesh, dp_mesh, use_activation_checkpointing, reshard_after_forward
+                tp_mesh,
+                dp_mesh,
+                use_activation_checkpointing,
+                reshard_after_forward=reshard_after_forward,
             )
 
         compiled_model = None
@@ -1205,6 +1212,62 @@ class TestFullyShard2DTraining(FSDPTest):
                 _optim.step()
             losses_tensors = [torch.tensor(x) for x in losses]
             self.assertTrue(all(torch.allclose(x, losses_tensors[0]) for x in losses_tensors), msg=f"iter_idx: {iter_idx}, losses_tensors: {losses_tensors}, losses: {losses}")
+
+    @skip_if_lt_x_gpu(2)
+    @skipIfRocm
+    def test_tp_with_fsdp_offloading(self):
+        global_mesh = init_device_mesh(
+            "cuda", (1, self.world_size), mesh_dim_names=("dp", "tp")
+        )
+        dp_mesh, tp_mesh = global_mesh["dp"], global_mesh["tp"]
+        torch.manual_seed(42)
+        mlp_dim = 16
+        model = MLPStack(mlp_dim)
+        ref_model = copy.deepcopy(model).cuda()
+        ref_optim = torch.optim.Adam(ref_model.parameters(), lr=1e-2, foreach=False)
+        # Parallelize with N-way TP and 1-way FSDP
+        model.parallelize(
+            tp_mesh,
+            dp_mesh,
+            use_activation_checkpointing=False,
+            reshard_after_forward=True,
+            offload_policy=CPUOffloadPolicy(),
+        )
+        for param in model.parameters():
+            self.assertEqual(param.device.type, "cpu")
+        num_mlps = sum(isinstance(module, MLP) for module in model.modules())
+        optim = torch.optim.Adam(model.parameters(), lr=1e-2, foreach=False)
+
+        # NOTE: We still see the FSDP all-gather/reduce-scatter c10d ops
+        # called, but they will just be no-ops without issuing any kernels.
+        # We prefer to keep the no-op check at the c10d level, not in FSDP.
+        inp = torch.randn((4, mlp_dim), device="cuda")  # same on all ranks
+        for iter_idx in range(10):
+            ref_optim.zero_grad()
+            optim.zero_grad()
+
+            with CommDebugMode() as fwd_comm_mode:
+                loss = model(inp).sum()
+
+            fwd_comm_counts = fwd_comm_mode.get_comm_counts()
+            self.assertEqual(len(fwd_comm_counts), 2)
+            self.assertEqual(fwd_comm_counts[funcol.all_reduce], num_mlps)
+            self.assertEqual(fwd_comm_counts[c10d_ops._allgather_base_], num_mlps)
+            ref_loss = ref_model(inp).sum()
+            self.assertEqual(loss, ref_loss)
+
+            with CommDebugMode() as bwd_comm_mode:
+                loss.backward()
+            bwd_comm_counts = bwd_comm_mode.get_comm_counts()
+            self.assertEqual(len(bwd_comm_counts), 3)
+            # First MLP's input gradient does not need to be all-reduced
+            self.assertEqual(bwd_comm_counts[funcol.all_reduce], num_mlps - 1)
+            self.assertEqual(bwd_comm_counts[c10d_ops._allgather_base_], num_mlps)
+            self.assertEqual(bwd_comm_counts[c10d_ops._reduce_scatter_base_], num_mlps)
+            ref_loss.backward()
+
+            optim.step()
+            ref_optim.step()
 
     @skip_if_lt_x_gpu(2)
     @with_temp_dir
@@ -1366,7 +1429,10 @@ class TestFullyShardNDTraining(FSDPTest):
         replicate(ref_model, device_ids=[self.rank], process_group=dp_pg)
         ref_optim = torch.optim.Adam(ref_model.parameters(), lr=1e-2, foreach=foreach)
         model.parallelize(
-            tp_mesh, dp_mesh, use_activation_checkpointing, reshard_after_forward
+            tp_mesh,
+            dp_mesh,
+            use_activation_checkpointing,
+            reshard_after_forward=reshard_after_forward,
         )
         optim = torch.optim.Adam(model.parameters(), lr=1e-2, foreach=foreach)
 

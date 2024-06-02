@@ -40,9 +40,8 @@ def all_gather_copy_in(all_gather_input_numel, world_size, rank, dtype, device, 
     )
     return all_gather_input, all_gather_output
 
-def all_gather_copy_in_impl(
-    all_gather_input_numel, world_size, rank, dtype, device, inp_split_sizes, all_gather_inputs
-):
+@torch.library.impl(lib, "all_gather_copy_in", "CUDA")
+def all_gather_copy_in(all_gather_input_numel, world_size, rank, dtype, device, inp_split_sizes, all_gather_inputs):
     all_gather_output = torch.empty(
         (all_gather_input_numel * world_size,), dtype=dtype, device=device
     )
@@ -54,10 +53,6 @@ def all_gather_copy_in_impl(
         torch._foreach_copy_(foreach_copy_dsts, all_gather_inputs)
     return all_gather_input, all_gather_output
 
-@torch.library.impl(lib, "all_gather_copy_in", "CUDA")
-def all_gather_copy_in(all_gather_input_numel, world_size, rank, dtype, device, inp_split_sizes, all_gather_inputs):
-    return all_gather_copy_in_impl(all_gather_input_numel, world_size, rank, dtype, device, inp_split_sizes, all_gather_inputs)
-
 
 lib.define("split_with_sizes_copy(Tensor all_gather_output, SymInt[] all_gather_input_split_sizes, int dim=0, *, Tensor(a!)[] out) -> ()")
 
@@ -67,14 +62,11 @@ def split_with_sizes_copy(all_gather_output, all_gather_input_split_sizes, dim, 
         all_gather_output, all_gather_input_split_sizes, dim=dim, out=out
     )
 
-def split_with_sizes_copy_impl(all_gather_output, all_gather_input_split_sizes, dim, out):
+@torch.library.impl(lib, "split_with_sizes_copy", "CUDA")
+def split_with_sizes_copy(all_gather_output, all_gather_input_split_sizes, dim, out):
     torch.split_with_sizes_copy(
         all_gather_output, all_gather_input_split_sizes, dim=dim, out=out
     )
-
-@torch.library.impl(lib, "split_with_sizes_copy", "CUDA")
-def split_with_sizes_copy(all_gather_output, all_gather_input_split_sizes, dim, out):
-    split_with_sizes_copy_impl(all_gather_output, all_gather_input_split_sizes, dim, out)
 
 
 lib.define("chunk_cat(Tensor[] tensors, int dim, int num_chunks, *, Tensor(a!) out) -> ()")
@@ -322,7 +314,9 @@ def foreach_reduce_scatter_copy_in(
     world_size: int,
 ) -> None:
     reduce_scatter_input = reduce_scatter_input.view(world_size, -1)
+    # torch._chunk_cat(unsharded_grads, dim=0, num_chunks=world_size, out=reduce_scatter_input)
     torch.ops.fsdp.chunk_cat(unsharded_grads, dim=0, num_chunks=world_size, out=reduce_scatter_input)
+    
 
 def _get_all_gather_input_metadatas(
     param_all_gather_inputs: List[List[torch.Tensor]],

@@ -150,7 +150,11 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
     # fsdp_fx_passes.raise_all_gather_to_overlap_with_prev_layer_compute(gm)
     # fsdp_fx_passes.sink_prev_reduce_scatter_wait_to_before_next_reduce_scatter(gm)
     # torch_log.warning(lazy_format_graph_code("before decompose_all_gather_copy_in: ", gm))
-    fsdp_fx_passes.reinplace_all_gather(gm)
+
+
+    # fsdp_fx_passes.reinplace_all_gather(gm)
+
+
     # fsdp_fx_passes.raise_primal_resize_zero_if_primal_is_unused(gm)
     # fsdp_fx_passes.remove_storage_resize_and_copy(gm)
 
@@ -380,8 +384,7 @@ def pointless_cumsum_replacement(match: Match, shape, fill_value, device, dtype,
 
     # only replace the output node, not all nodes
     match.nodes = [match.output_node()]
-    with V.fake_mode:
-        match.replace_by_example(repl, list(shape))
+    match.replace_by_example(repl, list(shape))
 
 
 def shape_of_mm(a, b):
@@ -741,8 +744,7 @@ def decompose_auto_functionalized(graph):
             args, kwargs = pytree.tree_unflatten(flat_args, spec)
             return auto_functionalized_dense(*args, only_clone_these_tensors, **kwargs)
 
-        with V.fake_mode:
-            match.replace_by_example(decomp, flat_args, run_dce=False)
+        match.replace_by_example(decomp, flat_args, run_dce=False)
 
     graph_pass.apply(graph)
     for node in graph.find_nodes(
@@ -858,8 +860,7 @@ def unfuse_bias_add_to_pointwise(match: Match, mat1, mat2, *, inp):
     def repl(inp, x1, x2):
         return x1 @ x2 + inp
 
-    with V.fake_mode:
-        match.replace_by_example(repl, [inp, mat1, mat2])
+    match.replace_by_example(repl, [inp, mat1, mat2])
 
 
 def is_valid_addmm_fusion(match):
@@ -902,8 +903,7 @@ def addmm(match, mat1, mat2, *, inp):
     def repl(inp, mat1, mat2):
         return aten.addmm(inp, mat1, mat2)
 
-    with V.fake_mode:
-        match.replace_by_example(repl, [inp, mat1, mat2])
+    match.replace_by_example(repl, [inp, mat1, mat2])
 
 
 def check_shape_cuda_and_fused_int_mm_mul_enabled(match):
