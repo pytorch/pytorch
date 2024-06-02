@@ -31,7 +31,7 @@ class _StorageBase:
     device: torch.device
 
     def __init__(self, *args, **kwargs):
-        raise NotImplementedError
+        pass
 
     def __len__(self) -> _int:
         raise NotImplementedError
@@ -649,7 +649,12 @@ class TypedStorage:
         return self
 
     def __new__(
-        cls, *args, wrap_storage=None, dtype=None, device=None, _internal=False
+        cls,
+        *args,
+        wrap_storage=None,
+        dtype=None,
+        device=None,
+        _internal=False,
     ):
         if not _internal:
             _warn_typed_storage_removal()
@@ -729,11 +734,19 @@ class TypedStorage:
                     )
 
                 return TypedStorage(
-                    *args, wrap_storage=wrap_storage, dtype=cls.dtype, _internal=True
+                    *args,
+                    wrap_storage=wrap_storage,
+                    dtype=cls.dtype,
+                    _internal=True,
                 )
 
     def __init__(
-        self, *args, device=None, dtype=None, wrap_storage=None, _internal=False
+        self,
+        *args,
+        device=None,
+        dtype=None,
+        wrap_storage=None,
+        _internal=False,
     ):
         if not _internal:
             _warn_typed_storage_removal()
