@@ -9,6 +9,8 @@ import os
 import select
 import sys
 
+from typing import BinaryIO
+
 parser = argparse.ArgumentParser(
     prog=sys.argv[0],
     description="add prefix each line of stderr/stdout while running a command",
@@ -22,14 +24,14 @@ if args.p is not None:
 
 
 class Stream:
-    def __init__(self, prefix, stream):
+    def __init__(self, prefix: str, stream: BinaryIO):
         self.stream = stream
         self.prefix = prefix.encode()
         if prefix:
             self.nprefix = f"\n{prefix}".encode()
         self.linestart = True
 
-    def write(self, fd):
+    def write(self, fd: int) -> bool:
         # read at most 64k at once
         msg = os.read(fd, 64 * 1024)
         if len(msg) == 0:

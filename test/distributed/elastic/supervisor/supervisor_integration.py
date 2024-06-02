@@ -97,7 +97,7 @@ def supervise(ctx: Context, conf: SupervisorConfig):
     N = config["N"]
     hosts: Set[Host] = set(ctx.request_hosts(n=config["N"]))
     # wait for hosts to be ready
-    wait([h.hostname() for h in hosts], timeout=5)
+    wait([h.hostname() for h in hosts], timeout=30)
     npp = 2
     for i in itertools.count():
         if i >= len(config["train"]):

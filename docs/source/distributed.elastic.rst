@@ -25,6 +25,7 @@ Documentation
    elastic/multiprocessing
    elastic/errors
    elastic/rendezvous
+   elastic/supervisor
    elastic/timer
    elastic/metrics
    elastic/events

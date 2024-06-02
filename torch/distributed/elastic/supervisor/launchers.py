@@ -4,6 +4,7 @@
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
 
+import importlib.metadata as metadata
 import io
 import os
 import signal
@@ -13,7 +14,7 @@ import sys
 import traceback
 
 from pathlib import Path
-from typing import Callable, Dict, List, Optional, Sequence, Tuple
+from typing import Callable, Dict, List, Optional, Sequence, Tuple, Union
 
 import torch.distributed.elastic.supervisor.hostmanager as hostmanager
 
@@ -21,11 +22,6 @@ from torch.distributed.elastic.utils.distributed import get_free_port
 from torch.distributed.elastic.utils.logging import get_logger
 
 from . import as_completed, Context, Future, Host, Process, wait_on
-
-try:
-    import importlib.metadata as metadata
-except ImportError:  # Python < 3.10 (backport)
-    import importlib_metadata as metadata  # type: ignore[import-not-found,no-redef]
 
 
 PORT = 55555
@@ -123,7 +119,7 @@ class ProcessFailure(Exception):
         self.blamed = blamed
 
 
-def _allocate_hosts(ctx: Context, conf: SupervisorConfig):
+def _allocate_hosts(ctx: Context, conf: SupervisorConfig) -> List[Host]:
     hosts = ctx.request_hosts(conf.job.max_nodes)
     hosts_with_hostname: Sequence[Tuple[Host, Future[str]]] = wait_on(
         hosts, lambda host: host.hostname(), conf.job.timeouts.join_timeout
@@ -133,7 +129,7 @@ def _allocate_hosts(ctx: Context, conf: SupervisorConfig):
 
 
 # TODO: extract Context interface as a public API
-def torchrun_policy(ctx: Context, conf: SupervisorConfig):
+def _torchrun_policy(ctx: Context, conf: SupervisorConfig) -> None:
     """Policy that supervises the training process that intents to match
     torchrun/torchelastic behavior.
 
@@ -233,7 +229,7 @@ def torchrun_policy(ctx: Context, conf: SupervisorConfig):
         logger.info("torchrun policy completed")
 
 
-def default_launcher(
+def _default_launcher(
     supervise: Callable[[Context, SupervisorConfig], None], conf: SupervisorConfig
 ) -> None:
     """Default launcher inteds to match torchrun's behavior"""
@@ -284,13 +280,12 @@ def default_launcher(
     logger.info("Running supervor using torchrun policy")
 
 
-def _test_launcher(supervise: Policy, conf: SupervisorConfig):
+def _test_launcher(supervise: Policy, conf: SupervisorConfig) -> None:
     # basic launcher used for testing purposes, requires:
     # - `HOSTNAMES`` env variable, where the first one is the supervisor root node address
     # - `TORCH_ELASTIC_SUPERVISOR` env variable to indicate if this node is root node
-    port = 55555
     host = os.environ["HOSTNAMES"].split(",")[0]
-    addr = f"tcp://{host}:{port}"
+    addr = f"tcp://{host}:{PORT}"
     if os.environ["TORCH_ELASTIC_SUPERVISOR"].lower() == "true":
         popen = subprocess.Popen(
             [
@@ -300,7 +295,7 @@ def _test_launcher(supervise: Policy, conf: SupervisorConfig):
                 f"{addr}",
             ]
         )
-        ctx = Context(port=port)
+        ctx = Context(port=PORT)
         try:
             supervise(ctx, conf)
         finally:
@@ -311,12 +306,19 @@ def _test_launcher(supervise: Policy, conf: SupervisorConfig):
         hostmanager.main(addr)
 
 
-launcher_registry: Dict[str, Launcher] = {"default": default_launcher}
-policy_registry: Dict[str, Policy] = {"default": torchrun_policy}
+launcher_registry: Dict[str, Launcher] = {"default": _default_launcher}
+policy_registry: Dict[str, Policy] = {"default": _torchrun_policy}
 
 
-def _update_registry(group, registry):
-    entrypoints = metadata.entry_points().select(group=group)
+def _update_registry(
+    group: str, registry: Union[Dict[str, Launcher], Dict[str, Policy]]
+) -> None:
+    all_entrypoints = metadata.entry_points()
+    # >= python 3.8 and < 3.10
+    if type(all_entrypoints) == dict:
+        entrypoints = all_entrypoints.get(group, [])  # type: ignore[var-annotated]
+    else:
+        entrypoints = metadata.entry_points().select(group=group)  # type: ignore[var-annotated]
     for ep in entrypoints:
         logger.debug("Adding %s to %s registry", ep.name, group)
         registry[ep.name] = ep.load()
@@ -324,3 +326,16 @@ def _update_registry(group, registry):
 
 _update_registry(REGISTRY_LAUNCHERS_METADATA_GROUP_KEY, launcher_registry)
 _update_registry(REGISTRY_POLICES_METADATA_GROUP_KEY, policy_registry)
+
+
+__all__ = [
+    "REGISTRY_LAUNCHERS_METADATA_GROUP_KEY",
+    "REGISTRY_POLICES_METADATA_GROUP_KEY",
+    "launcher_registry",
+    "policy_registry",
+    "SupervisorConfig",
+    "ProcessConfig",
+    "TimeoutConfig",
+    "JobConfig",
+    "ProcessFailure",
+]

@@ -774,6 +774,7 @@ def _get_logs_specs_class(logs_specs_name: Optional[str]) -> Type[LogsSpecs]:
 
     return logs_specs_cls
 
+
 def _update_omp_num_threads(nproc_per_node: int):
     if "OMP_NUM_THREADS" not in os.environ and nproc_per_node > 1:
         omp_num_threads = 1
@@ -788,6 +789,7 @@ def _update_omp_num_threads(nproc_per_node: int):
         )
         # This env variable will be passed down to the subprocesses
         os.environ["OMP_NUM_THREADS"] = str(omp_num_threads)
+
 
 def config_from_args(args) -> Tuple[LaunchConfig, Union[Callable, str], List[str]]:
     # If ``args`` not passed, defaults to ``sys.argv[:1]``
@@ -895,7 +897,7 @@ def run_script_path(training_script: str, *training_script_args: str):
 
 def _is_supervisor_root(args, host, max_nodes) -> bool:
     rdzv_configs = _parse_rendezvous_config(args.rdzv_conf)
-    if val := rdzv_configs.get('root'):
+    if val := rdzv_configs.get("root"):
         return val.lower() == "true"
 
     if host is None and max_nodes == 1:
@@ -903,16 +905,17 @@ def _is_supervisor_root(args, host, max_nodes) -> bool:
 
     return host == socket.getfqdn()
 
+
 def _supervisor_launch(args):
     nproc_per_node = determine_local_world_size(args.nproc_per_node)
     min_nodes, max_nodes = parse_min_max_nnodes(args.nnodes)
     rdzv_configs = _parse_rendezvous_config(args.rdzv_conf)
-    launcher_name = rdzv_configs.get('launcher', 'default')
-    policy_name = rdzv_configs.get('policy', 'default')
+    launcher_name = rdzv_configs.get("launcher", "default")
+    policy_name = rdzv_configs.get("policy", "default")
 
     _update_omp_num_threads(nproc_per_node)
     # TODO move this to launcher checks (via conf values)
-    if not args.rdzv_endpoint and max_nodes != 1 and launcher_name == 'default':
+    if not args.rdzv_endpoint and max_nodes != 1 and launcher_name == "default":
         raise ValueError("Specify '--rdzv-endpoint' for a multi-node execution")
 
     host = None
@@ -920,7 +923,9 @@ def _supervisor_launch(args):
     if args.rdzv_endpoint:
         parts = args.rdzv_endpoint.split(":")
         if len(parts) != 2:
-            raise ValueError(f"Invalid rdzv endpoint: {args.rdzv_endpoint}. Use 'host:port' format")
+            raise ValueError(
+                f"Invalid rdzv endpoint: {args.rdzv_endpoint}. Use 'host:port' format"
+            )
         host = parts[0]
         port = int(parts[1])
 
@@ -949,7 +954,7 @@ def _supervisor_launch(args):
             ),
             training_script=args.training_script,
             training_script_args=args.training_script_args,
-        )
+        ),
     )
 
     launcher = launchers.launcher_registry[launcher_name]
@@ -957,13 +962,14 @@ def _supervisor_launch(args):
     try:
         launcher(policy, config)
     except Exception as e:
-        logger.error(e)
+        logger.exception()
         raise e
+
 
 def run(args):
     torch.multiprocessing._set_thread_name("pt_elastic")
 
-    if args.standalone and not args.rdzv_backend == 'supervisor':
+    if args.standalone and not args.rdzv_backend == "supervisor":
         args.rdzv_backend = "c10d"
         args.rdzv_endpoint = "localhost:0"
         args.rdzv_id = str(uuid.uuid4())
@@ -986,10 +992,12 @@ def run(args):
         "--rdzv-endpoint=%s "
         "--rdzv-id=%s\n"
         "**************************************\n",
-        args.rdzv_backend, args.rdzv_endpoint, args.rdzv_id
+        args.rdzv_backend,
+        args.rdzv_endpoint,
+        args.rdzv_id,
     )
 
-    if args.rdzv_backend == 'supervisor':
+    if args.rdzv_backend == "supervisor":
         _supervisor_launch(args)
     else:
         config, cmd, cmd_args = config_from_args(args)

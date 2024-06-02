@@ -26,7 +26,7 @@ def path(script):
 class LaunchersTest(testing_common.TestCase):
     def test_supervisor_registry(self):
         self.assertEqual(
-            launchers.launcher_registry["default"], launchers.default_launcher
+            launchers.launcher_registry["default"], launchers._default_launcher
         )
 
 

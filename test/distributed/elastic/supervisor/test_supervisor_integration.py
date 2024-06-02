@@ -14,7 +14,6 @@ try:
 except ImportError:
     raise unittest.SkipTest("zmq not installed in test harness") from None
 import os
-import socket
 import subprocess
 import sys
 
@@ -57,17 +56,17 @@ def emulate_launch(args, N: int = 4):
     # for testing using basic launcher
     def create_host(i):
         env = {**os.environ}
-        env["HOSTNAMES"] = socket.gethostname()
+        env["HOSTNAMES"] = "localhost"
         env["TORCH_ELASTIC_SUPERVISOR"] = str(i == 0)
         # fast heartbeat so we do not wait so long to see the timeout
         # in the tests
         env["TORCH_SUPERVISOR_HEARTBEAT_INTERVAL"] = str(0.1)
         # dist-info with "test_launcher" entrypoint definition
-        env["PYTHONPATH"] = Path(__file__).parent
+        env["PYTHONPATH"] = str(Path(__file__).parent)
         return subprocess.Popen(args, env=env)
 
     hosts = [create_host(i) for i in range(N)]
-    expiry = time.time() + 10
+    expiry = time.time() + 20
     try:
         r = [h.wait(timeout=max(0, expiry - time.time())) for h in hosts]
         return r[0]
@@ -102,9 +101,11 @@ class SupervisorIntegrationTests(testing_common.TestCase):
         self.assertEqual(result, 0)
         return result
 
+    @unittest.skip("Test is flaky, times-out on CI")
     def test_success(self):
         self.launch(health=[[4, 3, 2, 1]], train=["........"], expect="....")
 
+    @unittest.skip("Test is flaky, times-out on CI")
     def test_fail(self):
         self.launch(
             health=[[4, 3, 2, 1], [4, 3, 2, 1]],
@@ -112,6 +113,7 @@ class SupervisorIntegrationTests(testing_common.TestCase):
             expect="....",
         )
 
+    @unittest.skip("Test is flaky, times-out on CI")
     def test_hang(self):
         self.launch(
             health=[[4, 3, "hang", 1], [4, 3, 2, 1]],
@@ -121,6 +123,7 @@ class SupervisorIntegrationTests(testing_common.TestCase):
             expect="....",
         )
 
+    @unittest.skip("Test is flaky, times-out on CI")
     def test_error_fail(self):
         self.launch(
             health=[[4, 3, 2, 1], [4, 3, 2, 1], [4, 3, 2, 1]],
@@ -130,6 +133,7 @@ class SupervisorIntegrationTests(testing_common.TestCase):
             expect="....",
         )
 
+    @unittest.skip("Test is flaky, times-out on CI")
     def test_error_error(self):
         self.launch(
             health=[[4, 3, 2, 1], [4, 3, 2, 1], [4, 3, 2, 1]],

@@ -20,7 +20,7 @@ from pathlib import Path
 from random import random
 from typing import Callable, Dict, List, Mapping, Optional
 
-import zmq
+import zmq  # type: ignore[import-not-found]
 
 from torch.distributed.elastic.supervisor import (
     HEARTBEAT_INTERVAL,
@@ -37,7 +37,7 @@ libc = ctypes.CDLL(None)
 
 
 # older libc do not have this syscall
-def pidfd_open(pid: int) -> int:
+def _pidfd_open(pid: int) -> int:
     return libc.syscall(__NR_pidfd_open, pid, 0)
 
 
@@ -74,9 +74,7 @@ class _Process:
             # pyre-ignore
             environ.update(popen["env"])  # type: ignore[call-overload]
         environ["RANK"] = str(rank)
-        environ["GROUP_RANK"] = (
-            "DUMMY"  # TODO: introduce group ranking, requires host indexing
-        )
+        environ["GROUP_RANK"] = "DUMMY"  # TODO: introduce group ranking
         environ["ROLE_RANK"] = str(rank)  # TODO: add support for multi-role job
         environ["ROLE_NAME"] = "trainer"
         environ["ROLE_WORLD_SIZE"] = str(world_size)
@@ -114,6 +112,7 @@ class _Process:
 
     def _send(self, _msg: object) -> None:
         msg = pickle.dumps(_msg)
+
         if self.deferred_sends is not None:
             self.deferred_sends.append(msg)
         else:
@@ -207,7 +206,7 @@ class _Hostmanager:
             reply = str(e)  # type: ignore[assignment]
         self.supervisor_comm.send(pickle.dumps(("_cmd_started", proc_id, reply)))
 
-    def process_exit(self, process):
+    def process_exit(self, process: _Process) -> None:
         logger.debug("%s exited", process)
         self.process_table.pop(process.proc_id_bytes)
         # we do not allow descendents to outlive the parent
@@ -222,7 +221,7 @@ class _Hostmanager:
     def on_subprocess_exit(
         self, subprocess: subprocess.Popen, on_exit: Callable[[], None]
     ) -> None:
-        fd: int = pidfd_open(subprocess.pid)
+        fd: int = _pidfd_open(subprocess.pid)
         self.fd_to_on_exit[fd] = on_exit
         self.poller.register(fd, zmq.POLLIN)
 
@@ -350,3 +349,6 @@ if __name__ == "__main__":
     logger.info("starting hostnamager")
     (addr,) = sys.argv[1:]
     main(addr)
+
+
+__all__ = ["main"]
