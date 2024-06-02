@@ -12,6 +12,12 @@ configure_file(
     ${CMAKE_CURRENT_LIST_DIR}/impl/cuda_cmake_macros.h.in
     ${CMAKE_BINARY_DIR}/c10/cuda/impl/cuda_cmake_macros.h)
 
+if(BUILD_LIBTORCHLESS)
+  find_library(C10_CUDA_LIB c10_cuda PATHS $ENV{LIBTORCH_LIB_PATH} NO_DEFAULT_PATH)
+else()
+  set(C10_CUDA_LIB c10_cuda)
+endif()
+
 # Note: if you want to add ANY dependency to the c10 library, make sure you
 # check with the core PyTorch developers as the dependency will be
 # transitively passed on to all libraries dependent on PyTorch.
@@ -47,36 +53,41 @@ set(C10_CUDA_HEADERS
     impl/CUDATest.h
 )
 set(CUDA_LINK_LIBRARIES_KEYWORD PRIVATE)
-torch_cuda_based_add_library(c10_cuda ${C10_CUDA_SRCS} ${C10_CUDA_HEADERS})
-set(CUDA_LINK_LIBRARIES_KEYWORD)
-# If building shared library, set dllimport/dllexport proper.
-target_compile_options(c10_cuda PRIVATE "-DC10_CUDA_BUILD_MAIN_LIB")
-# Enable hidden visibility if compiler supports it.
-if(${COMPILER_SUPPORTS_HIDDEN_VISIBILITY})
-  target_compile_options(c10_cuda PRIVATE "-fvisibility=hidden")
-endif()
 
-# ---[ Dependency of c10_cuda
-target_link_libraries(c10_cuda PUBLIC c10 torch::cudart)
+if(NOT BUILD_LIBTORCHLESS)
+  torch_cuda_based_add_library(c10_cuda ${C10_CUDA_SRCS} ${C10_CUDA_HEADERS})
+  set(CUDA_LINK_LIBRARIES_KEYWORD)
+  # If building shared library, set dllimport/dllexport proper.
+  target_compile_options(c10_cuda PRIVATE "-DC10_CUDA_BUILD_MAIN_LIB")
+  # Enable hidden visibility if compiler supports it.
+  if(${COMPILER_SUPPORTS_HIDDEN_VISIBILITY})
+    target_compile_options(c10_cuda PRIVATE "-fvisibility=hidden")
+  endif()
 
-if(NOT WIN32)
-target_link_libraries(c10_cuda PRIVATE dl)
-target_compile_options(c10_cuda PRIVATE "-DPYTORCH_C10_DRIVER_API_SUPPORTED")
-endif()
+  # ---[ Dependency of c10_cuda
+  target_link_libraries(c10_cuda PUBLIC ${C10_LIB} torch::cudart)
 
-target_include_directories(
-    c10_cuda PUBLIC
-    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../..>
-    $<BUILD_INTERFACE:${CMAKE_BINARY_DIR}>
-    $<INSTALL_INTERFACE:include>)
+  if(NOT WIN32)
+  target_link_libraries(c10_cuda PRIVATE dl)
+  target_compile_options(c10_cuda PRIVATE "-DPYTORCH_C10_DRIVER_API_SUPPORTED")
+  endif()
 
-add_subdirectory(test)
+  target_include_directories(
+      c10_cuda PUBLIC
+      $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../..>
+      $<BUILD_INTERFACE:${CMAKE_BINARY_DIR}>
+      $<INSTALL_INTERFACE:include>)
 
 # ---[ Installation
 # Note: for now, we will put all export path into one single Caffe2Targets group
 # to deal with the cmake deployment need. Inside the Caffe2Targets set, the
 # individual libraries like libc10.so and libcaffe2.so are still self-contained.
 install(TARGETS c10_cuda EXPORT Caffe2Targets DESTINATION lib)
+
+endif()
+
+add_subdirectory(test)
+
 foreach(file ${C10_CUDA_HEADERS})
   get_filename_component( dir ${file} DIRECTORY )
   install( FILES ${file} DESTINATION include/c10/cuda/${dir} )
