@@ -2750,8 +2750,7 @@ class FixedLayout(Layout):
         """A closure containing math to read a given element"""
 
         def indexer(index):
-            assert len(index) == len(self.stride)
-            assert len(index) == len(self.size)
+            assert len(index) == len(self.stride) == len(self.size)
             result = self.offset
             for idx, stride, sz in zip(index, self.stride, self.size):
                 if sz != 1:
@@ -3992,13 +3991,6 @@ class ExternKernel(InputsKernel):
     def collect_arg_kwarg_properties(self):
         # if self.op_overload is torch._ops.OpOverload, we can use its schema to collect additional
         # information for args and kwargs, e.g. type and default value, to help with the cpp wrapper codegen
-        if (
-            isinstance(self.op_overload, torch._ops.OpOverload)
-            and not self.ordered_kwargs_for_cpp_kernel
-        ):
-            self.ordered_kwargs_for_cpp_kernel = [
-                x.name for x in self.op_overload._schema.arguments if x.kwarg_only
-            ]
         self.arg_properties = (
             [
                 {
@@ -4012,15 +4004,23 @@ class ExternKernel(InputsKernel):
             if isinstance(self.op_overload, torch._ops.OpOverload)
             else [{} for i in range(len(self.inputs))]
         )
-        self.kwarg_properties = (
+        self.allarg_properties = (
             {
                 x.name: {"type": x.real_type, "default_value": x.default_value}
                 for x in self.op_overload._schema.arguments
-                if x.kwarg_only
             }
             if isinstance(self.op_overload, torch._ops.OpOverload)
             else {}
         )
+        # FIXME: self.kwargs does not always match kwargs defined in schema, so sometimes
+        # ordered_kwargs_for_cpp_kernel is explicilty passed in.
+        if (
+            isinstance(self.op_overload, torch._ops.OpOverload)
+            and not self.ordered_kwargs_for_cpp_kernel
+        ):
+            self.ordered_kwargs_for_cpp_kernel = [
+                x.name for x in self.op_overload._schema.arguments if x.kwarg_only
+            ]
 
     def fill_non_provided_args(self, args, kwargs, convert_val_to_str=False):
         # Previously, we want to maintain forward-compatibility by skipping
@@ -4382,7 +4382,21 @@ class ExternKernel(InputsKernel):
         pass
 
     def codegen_const_args(self):
-        return map(V.graph.wrapper_code.val_to_arg_str, self.constant_args)
+        if V.graph.cpp_wrapper:
+            result = []
+            for i, x in enumerate(self.constant_args):
+                idx = len(self.inputs) + i
+                type_ = (
+                    self.arg_properties[i].get("type")
+                    if self.arg_properties and idx < len(self.arg_properties)
+                    else None
+                )
+                result.append(
+                    V.graph.wrapper_code.val_to_arg_str(x, type_)  # type: ignore[arg-type]
+                )
+            return result
+        else:
+            return map(V.graph.wrapper_code.val_to_arg_str, self.constant_args)
 
     def codegen_args(self):
         args = []
@@ -4395,10 +4409,10 @@ class ExternKernel(InputsKernel):
                 if V.graph.cpp_wrapper:
                     assert self.arg_properties and i < len(
                         self.arg_properties
-                    ), "Invalid arg_properties accessing"
+                    ), "Invalid access to ExternKernel.arg_properties"
                     type_ = self.arg_properties[i].get("type")
                     args.append(
-                        V.graph.wrapper_code.val_to_cpp_arg_str(  # type: ignore[arg-type]
+                        V.graph.wrapper_code.val_to_arg_str(  # type: ignore[arg-type]
                             x, type_
                         )
                     )
@@ -4410,10 +4424,10 @@ class ExternKernel(InputsKernel):
     def get_kwargs_value(self, arg_name):
         if arg_name in self.kwargs:
             return self.kwargs.get(arg_name)
-        if self.kwarg_properties and self.kwarg_properties.get(arg_name):
-            return self.kwarg_properties.get(arg_name).get("default_value")  # type: ignore[union-attr]
+        if self.allarg_properties and self.allarg_properties.get(arg_name):
+            return self.allarg_properties.get(arg_name).get("default_value")  # type: ignore[union-attr]
         else:
-            raise AssertionError(f"{arg_name} not in self.kwarg_properties")
+            raise AssertionError(f"{arg_name} not in self.allarg_properties")
 
     def codegen_kwargs(self, skip_out=False):
         if V.graph.cpp_wrapper:
@@ -4428,12 +4442,12 @@ class ExternKernel(InputsKernel):
                     kwargs.append(v)
                 else:
                     type_ = (
-                        self.kwarg_properties.get(arg_name).get("type")  # type: ignore[union-attr]
-                        if self.kwarg_properties and arg_name in self.kwarg_properties
+                        self.allarg_properties.get(arg_name).get("type")  # type: ignore[union-attr]
+                        if self.allarg_properties and arg_name in self.allarg_properties
                         else None
                     )
                     kwargs.append(
-                        V.graph.wrapper_code.val_to_cpp_arg_str(  # type: ignore[arg-type]
+                        V.graph.wrapper_code.val_to_arg_str(  # type: ignore[arg-type]
                             v, type_
                         )
                     )
@@ -5416,7 +5430,7 @@ class FallbackKernel(ExternKernelAlloc):
         if V.graph.cpp_wrapper and isinstance(self.op_overload, torch._ops.OpOverload):
             args = self.fill_non_provided_args(args, kwargs)
             args = [
-                V.graph.wrapper_code.val_to_cpp_arg_str(x, param.real_type)
+                V.graph.wrapper_code.val_to_arg_str(x, param.real_type)
                 for param, x in zip(self.op_overload._schema.arguments, args)
             ]
         else:
@@ -5470,6 +5484,9 @@ class FallbackKernel(ExternKernelAlloc):
         ordered_kwargs = [
             kwargs.get(key, None) for key in self.ordered_kwargs_for_cpp_kernel
         ]
+        if not V.graph.aot_mode:
+            # No need to serialize in the cpp wrapper JIT mode
+            return [*args, *ordered_kwargs]
 
         serializer = GraphModuleSerializer(None, None)  # type: ignore[arg-type]
         named_arguments = serializer.serialize_inputs(self.op_overload, args, kwargs)  # type: ignore[arg-type]
@@ -6318,7 +6335,7 @@ class LinearUnary(ExternKernelAlloc):
         )
 
     @classmethod
-    def create(cls, x, w, B, attr, scalars, algorithm):
+    def create(cls, x, w, b, attr, scalars, algorithm):
         x = cls.require_contiguous(cls.realize_input(x))
         w = cls.require_contiguous(cls.realize_input(w))
 
@@ -6326,9 +6343,9 @@ class LinearUnary(ExternKernelAlloc):
         oc, ic = w.get_size()
         inputs = [x, w]
         constant_args = [attr, scalars if scalars else [-1], algorithm]
-        if B is not None:
-            B = cls.require_contiguous(cls.realize_input(B))
-            inputs.append(B)
+        if b is not None:
+            b = cls.require_contiguous(cls.realize_input(b))
+            inputs.append(b)
         else:
             constant_args.insert(0, None)
 
