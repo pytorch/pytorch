@@ -1621,8 +1621,9 @@ class Scheduler:
         # generate a dependency because if we do, Inductor will start trying
         # to free the unbacked int but that's pointless
         for name, val in V.graph.graph_inputs.items():
-            if isinstance(val, sympy.Symbol):
-                unbacked_symbol_to_origin_node[val] = None
+            if isinstance(val, sympy.Expr):
+                for fs in val.free_symbols:
+                    unbacked_symbol_to_origin_node[val] = None
 
         for node in self.nodes:
             log.debug("scheduling %s", node.node)
