@@ -625,7 +625,7 @@ for __name in ("sqrt", "cos", "cosh", "sin", "sinh", "tan", "tanh", "asin", "aco
     __fn.__qualname__ = __fn.__name__ = __sym_name
     globals()[__sym_name] = __fn
 
-del __fn, __name, __sym_name, _get_sym_math_fn  # type: ignore[possibly-undefined]
+del __fn, __name, __sym_name, _get_sym_math_fn
 
 # Adding temporary shortcut
 sym_sqrt = globals()["_sym_sqrt"]
@@ -1641,12 +1641,12 @@ for __name in dir(_C._VariableFunctions):
     __obj = getattr(_C._VariableFunctions, __name)
     __obj.__module__ = 'torch'
     # Hide some APIs that should not be public
-    if __name == 'segment_reduce':
+    if __name == "segment_reduce":
         # TODO: Once the undocumented FC window is passed, remove the line bellow
         globals()[__name] = __obj
         __name = "_" + __name
     globals()[__name] = __obj
-    if not __name.startswith('_'):
+    if not __name.startswith("_"):
         __all__.append(__name)
 
 del __name, __obj
