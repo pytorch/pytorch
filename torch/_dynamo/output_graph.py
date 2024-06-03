@@ -481,37 +481,38 @@ class OutputGraph:
                 GlobalStateSource().make_guard(GuardBuilder.FUNCTORCH_STACK_MATCH)
             )
 
-    def synthetic_graph_input(self, fn, args):
+    # def synthetic_graph_input(self, fn, args):
+    # def synthetic_graph_input(self, fn):
+    def synthetic_graph_input(self, callable_var_name, example_value):
         """
         call fn(*args) before the graph runs and turn the result into a fake input.
         """
-        example_value = fn(*args)
+        # example_value = fn(*args)
         # torch_log.warning(f"type(example_value): {type(example_value)}")
         # torch_log.warning(f"example_value: {example_value}")
         varname = self.new_var()
         cg = PyCodegen(self.root_tx)
-        cg.load_import_from(
-            fn.__module__,
-            fn.__name__,
+        # cg.load_import_from(
+        #     fn.__module__,
+        #     fn.__name__,
+        # )
+        cg.append_output(cg.create_load_global(callable_var_name, push_null=False, add=True))
+
+        """
+        prefix = f"_stream_{self.device}"
+        name = codegen.tx.output.install_global_by_id(prefix, self.value)
+        codegen.append_output(
+            codegen.create_load_global(name, push_null=False, add=True)
         )
+        """
 
-        def create_var(value):
-            from .variables.distributed import DeviceMeshVariable, PlacementVariable
-            # if PlacementVariable.is_placement(value):
-            #     return PlacementVariable(value)
-            # elif DeviceMeshVariable.is_device_mesh(value):
-            #     return DeviceMeshVariable(value)
-            # if isinstance(value, torch.Tensor):
-            #     return variables.TensorVariable(value)
-            # else:
-            return variables.ConstantVariable.create(value)
-
-        cg.foreach(map(create_var, args))
-        cg.call_function(len(args), True)
+        # cg.foreach(map(variables.ConstantVariable.create, args))
+        # cg.call_function(len(args), True)
+        cg.call_function(0, True)
         cg.store(varname)
         insts = cg.get_instructions()
-        # for inst in insts:
-        #     torch_log.warning(f"inst: {inst}")
+        for inst in insts:
+            torch_log.warning(f"inst: {inst}")
         self.pregraph_bytecode.extend(insts)
         source = SyntheticLocalSource(varname)
         result = VariableBuilder(self.root_tx, source)(example_value)

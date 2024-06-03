@@ -21,8 +21,12 @@ class TracableCreateParameter(torch.autograd.Function):
         # torch_log.warning(f"before: placeholder: {placeholder}")
         # torch_log.warning(f"before: tensor: {tensor}")
         if isinstance(tensor, torch.distributed._tensor.api.DTensor):
-            placeholder._local_tensor = tensor._local_tensor
-            placeholder._spec = tensor._spec
+            with torch.no_grad():
+                placeholder.copy_(tensor)
+            # torch_log.warning(f"before: placeholder._local_tensor: {placeholder._local_tensor}")
+            # torch_log.warning(f"before: tensor._local_tensor: {tensor._local_tensor}")
+            # placeholder._local_tensor.set_(tensor._local_tensor)
+            # placeholder._spec = tensor._spec
         else:
             placeholder.set_(tensor)
         # torch_log.warning(f"after: placeholder: {placeholder}")
@@ -52,18 +56,18 @@ def new_parameter_placeholder(size, dtype, device, requires_grad):
     return result
 
 
-# def new_parameter_placeholder_dtensor(size, dtype, device, requires_grad):  # , device_type, mesh, mesh_dim_names, placements_info):
-#     """Create a placeholder to be passed to the above functions"""
-#     data_tensor = torch.empty(size, dtype=dtype, device=device)
-#     data_tensor.untyped_storage().resize_(0)
-#     # NOTE(yf225): allocate a placeholder nn.Parameter(DTensor), whose content will get swapped out in TracableCreateParameter.forward
-#     data_tensor = torch.distributed._tensor.api.DTensor.from_local(
-#         data_tensor,
-#         device_mesh=torch.distributed.device_mesh.DeviceMesh(device_type=str(device), mesh=[0]),
-#         placements=[torch.distributed._tensor.Replicate()],
-#     )
-#     result = torch.nn.Parameter(
-#         data_tensor, requires_grad=requires_grad
-#     )
-#     torch_log.warning(f"new_parameter_placeholder_dtensor: result: {result}")
-#     return result
+def new_parameter_placeholder_dtensor(local_tensor_size, local_tensor_dtype, local_tensor_device, requires_grad, device_mesh, placements):
+    """Create a placeholder to be passed to the above functions"""
+    data_tensor = torch.empty(local_tensor_size, dtype=local_tensor_dtype, device=local_tensor_device)
+    # data_tensor.untyped_storage().resize_(0)
+    # NOTE(yf225): allocate a placeholder nn.Parameter(DTensor), whose content will get swapped out in TracableCreateParameter.forward
+    data_tensor = torch.distributed._tensor.api.DTensor.from_local(
+        data_tensor,
+        device_mesh=device_mesh,
+        placements=placements,
+    )
+    result = torch.nn.Parameter(
+        data_tensor, requires_grad=requires_grad
+    )
+    # torch_log.warning(f"new_parameter_placeholder_dtensor: result: {result}")
+    return result

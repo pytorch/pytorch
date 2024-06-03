@@ -17,7 +17,7 @@ from torch._streambase import _StreamBase
 from ..._guards import TracingContext
 from .. import config, polyfill, variables
 from ..codegen import PyCodegen
-from ..create_parameter_op import new_parameter_placeholder, tracable_create_parameter  # , new_parameter_placeholder_dtensor
+from ..create_parameter_op import new_parameter_placeholder, tracable_create_parameter, new_parameter_placeholder_dtensor
 from ..device_interface import get_registered_device_interfaces
 from ..exc import unimplemented
 from ..guards import GuardBuilder, install_guard
@@ -935,9 +935,23 @@ Either create the tensor outside the compiled region, or do not set the tensor t
         #         ]
         #     )
         # else:
-        placeholder = tx.output.synthetic_graph_input(
-            new_parameter_placeholder, [shape, dtype, device, requires_grad]
-        )
+
+        # placeholder = tx.output.synthetic_graph_input(
+        #     new_parameter_placeholder, [shape, dtype, device, requires_grad]
+        # )
+        if isinstance(example_value, DTensor):
+            callable = lambda: new_parameter_placeholder_dtensor(
+                example_value._local_tensor.shape,
+                example_value._local_tensor.dtype,
+                example_value._local_tensor.device,
+                requires_grad,
+                example_value.device_mesh,
+                example_value.placements
+            )
+        else:
+            callable = lambda: new_parameter_placeholder(shape, dtype, device, requires_grad)
+        callable_var_name = tx.output.install_global_by_id(f"_nn_param_callable", callable)
+        placeholder = tx.output.synthetic_graph_input(callable_var_name, callable())
         if data.requires_grad:
             data = data.call_method(tx, "detach", [], {})
 
