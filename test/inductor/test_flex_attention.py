@@ -155,23 +155,33 @@ class TestFlexAttention(InductorTestCase):
         self,
         score_mod: Callable,
         dtype: torch.dtype = torch.float16,
-        B: int = B,
-        H: int = H,
-        S: int = S,
-        D: int = D,
+        Q_B: int = B,
+        Q_H: int = H,
+        Q_S: int = S,
+        Q_D: int = D,
+        KV_B: int = B,
+        KV_H: int = H,
+        KV_S: int = S,
+        KV_D: int = D,
     ):
         sdpa_partial = create_attention(score_mod)
         compiled_sdpa = torch.compile(sdpa_partial)
-        q = torch.randn((B, H, S, D), dtype=dtype, device="cuda", requires_grad=True)
-        k = torch.randn((B, H, S, D), dtype=dtype, device="cuda", requires_grad=True)
-        v = torch.randn((B, H, S, D), dtype=dtype, device="cuda", requires_grad=True)
+        q = torch.randn(
+            (Q_B, Q_H, Q_S, Q_D), dtype=dtype, device="cuda", requires_grad=True
+        )
+        k = torch.randn(
+            (KV_B, KV_H, KV_S, KV_D), dtype=dtype, device="cuda", requires_grad=True
+        )
+        v = torch.randn(
+            (KV_B, KV_H, KV_S, KV_D), dtype=dtype, device="cuda", requires_grad=True
+        )
         q_ref, k_ref, v_ref = query_key_value_clones(q, k, v)
         q_gold, k_gold, v_gold = query_key_value_clones(q, k, v, torch.float64)
         golden_out = sdpa_partial(q_gold, k_gold, v_gold)
         ref_out = sdpa_partial(q_ref, k_ref, v_ref)
         compiled_out = compiled_sdpa(q, k, v)
 
-        backward_grad = torch.randn((B, H, S, D), dtype=dtype, device="cuda")
+        backward_grad = torch.randn((Q_B, Q_H, Q_S, Q_D), dtype=dtype, device="cuda")
 
         golden_out.backward(backward_grad.to(torch.float64))
         ref_out.backward(backward_grad)
@@ -344,6 +354,25 @@ class TestFlexAttention(InductorTestCase):
         self, dtype: torch.dtype, score_mod: Callable
     ):
         self.run_automatic_dynamic_test(score_mod, dtype)
+
+    @supported_platform
+    @common_utils.parametrize("dtype", test_dtypes_fast)
+    @common_utils.parametrize("score_mod", test_score_mods)
+    def test_builtin_score_mods_different_seqlen(
+        self, dtype: torch.dtype, score_mod: Callable
+    ):
+        self.run_test(
+            score_mod,
+            dtype,
+            B,
+            H,
+            S // 2,  # Seqlen of Q is different from seqlen of K/V
+            D,
+            B,
+            H,
+            S,
+            D,
+        )
 
     @supported_platform
     @common_utils.parametrize("dtype", test_dtypes)
@@ -719,14 +748,6 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         with self.assertRaisesRegex(
             ValueError, "Expected query, key, and value to have the same dtype"
         ):
-            _flex_attention(query, key, value, _identity)
-
-    @supported_platform
-    def test_different_sequence_length_fails(self):
-        query = torch.randn((1, 1, 2048, 64), dtype=torch.float32, device="cuda")
-        key = torch.randn((1, 1, 1024, 64), dtype=torch.float32, device="cuda")
-        value = torch.randn((1, 1, 1024, 64), dtype=torch.float32, device="cuda")
-        with self.assertRaisesRegex(ValueError, "NYI: The target sequence length"):
             _flex_attention(query, key, value, _identity)
 
     @supported_platform
