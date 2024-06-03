@@ -488,10 +488,7 @@ filegroup(
 filegroup(
     name = "caffe2_utils_srcs",
     srcs = [
-        "caffe2/utils/bench_utils.cc",
         "caffe2/utils/cpuid.cc",
-        "caffe2/utils/murmur_hash3.cc",
-        "caffe2/utils/proto_utils.cc",
         "caffe2/utils/proto_wrap.cc",
         "caffe2/utils/string_utils.cc",
         "caffe2/utils/threadpool/ThreadPool.cc",
@@ -544,7 +541,6 @@ cc_library(
         ],
     ) + if_cuda(glob([
         "caffe2/**/*.cuh",
-        "caffe2/image/*.h",
     ])),
     copts = CAFFE2_COPTS,
     visibility = ["//visibility:public"],
