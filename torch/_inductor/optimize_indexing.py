@@ -116,3 +116,17 @@ def indexing_dtype_strength_reduction(loop_body: LoopBody):
             loop_body.indexing_exprs,
             bv.replacement_vals,
         )
+
+
+def all_indexing_expressable_in_32_bits(loop_body: LoopBody) -> bool:
+    """
+    Are all get_index and index_expr nodes values expressable in 32 bits
+    """
+    bv = loop_body.bounds().get_bounds()
+    for node in loop_body.get_nodes():
+        if node.target in ("get_index", "index_expr"):
+            if vr := bv.get(node, None):
+                if not range_expressable_in_32_bits(vr):
+                    return False
+
+    return True
