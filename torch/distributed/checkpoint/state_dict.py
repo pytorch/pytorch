@@ -879,13 +879,11 @@ def _load_optim_state_dict(
             # dissimilar parameters in comparison to optim_state_dict. This is achieved by
             # incorporating differential parameters within local, which may result in optim
             # having additional parameters ultimately.
-            '''
             for optim_key in flatten_osd.keys():
                 if optim_key not in flatten_local_osd:
                     assert optim_key in osd_mapping
                     flatten_local_osd[optim_key] = flatten_osd[optim_key]
                     local_osd_mapping[optim_key] = osd_mapping[optim_key]
-            '''
             optim_state_dict = _unflatten_state_dict(
                 flatten_local_osd, local_osd_mapping
             )

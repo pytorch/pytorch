@@ -652,7 +652,7 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
         get_model_state_dict(fsdp_model)
         get_optimizer_state_dict(fsdp_model, fsdp_optim)
 
-    '''
+
     @with_comms
     @skip_if_lt_x_gpu(2)
     def test_optim_state_dict_para_matching(self) -> None:
@@ -695,8 +695,9 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
         )
         if dist.get_rank() == 0:
             self.assertTrue("initial_lr" in optim.param_groups[0])
-    '''
 
+    @with_comms
+    @skip_if_lt_x_gpu(2)
     def test_flattened_osd(self) -> None:
         device_mesh = init_device_mesh("cuda", (self.world_size,))
         model = CompositeParamModel(device=torch.device("cuda"))
