@@ -71,6 +71,9 @@ def _make_grads(
             # TODO: We can remove this conditional once we uniformly use
             # singleton int to represent jagged dimension, so that size() call
             # on nested tensor works
+            if isinstance(out, graph.GradientEdge):
+                new_grads.append(grad)
+                continue
             if out.is_nested or first_grad.is_nested:
                 shape_matches = torch.is_same_size(out, first_grad)
             else:

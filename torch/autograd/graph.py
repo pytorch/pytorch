@@ -156,6 +156,8 @@ class Node(abc.ABC):
 
 
 def _get_grad_fn_or_grad_acc(t):
+    if isinstance(t, GradientEdge):
+        return t.node
     if t.requires_grad and t.grad_fn is None:
         return t.view_as(t).grad_fn.next_functions[0][0]
     else:
