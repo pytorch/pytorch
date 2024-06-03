@@ -1414,7 +1414,7 @@ class FSDPTest(MultiProcessTestCase):
             )
 
 
-def test_compiled_fsdp(compile_compute_on_module: Optional[type] = None):
+def test_graph_break_fsdp(compile_compute_on_module: Optional[type] = None):
     def fully_shard_with_compiled_compute(*args, **kwargs):
         # compile ``module._call_impl``
         # to showcase how to include user-registered hooks
