@@ -403,7 +403,6 @@ dtensor_fails = {
     xfail("rsub"),
     xfail("scalar_tensor"),
     xfail("scatter_add"),
-    xfail("scatter"),
     xfail("scatter_reduce", "amax"),
     xfail("scatter_reduce", "amin"),
     xfail("scatter_reduce", "mean"),
