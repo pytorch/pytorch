@@ -869,6 +869,7 @@ def _load_optim_state_dict(
                     nonlocal device
                     if device is None:
                         device = t.device
+                    elif device != t.device:
                         raise ValueError("Device mismatch")
                 return t
 
