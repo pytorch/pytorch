@@ -580,7 +580,6 @@ class TritonTemplate(KernelTemplate):
         epilogue_fn=identity,
         subgraphs=None,
         mutated_inputs=None,
-        call_sizes=None,
         **kwargs,
     ):
         """This function generates a TritonTemplateCaller
@@ -615,9 +614,6 @@ class TritonTemplate(KernelTemplate):
                 "64-bit indexing is not yet implemented for triton templates"
             )
 
-        if call_sizes is None:
-            call_sizes = layout.size
-
         kernel_options = dict(
             input_nodes=input_nodes,
             defines=defines,
@@ -625,14 +621,13 @@ class TritonTemplate(KernelTemplate):
             num_warps=num_warps,
             grid_fn=self.grid,
             meta=kwargs,
-            call_sizes=call_sizes,
+            call_sizes=layout.size,
             prefix_args=prefix_args,
             suffix_args=suffix_args,
             epilogue_fn=epilogue_fn,
             index_dtype="tl.int32",
             subgraphs=subgraphs,
         )
-
         with patch.object(
             V.graph, "get_dtype", self._fake_get_dtype(fake_out)
         ), TritonTemplateKernel(
@@ -706,7 +701,7 @@ class TritonTemplate(KernelTemplate):
         assert mod.__file__ is not None
         grid = self.grid(
             *V.graph.sizevars.size_hints(
-                call_sizes,
+                layout.size,
                 fallback=config.unbacked_symint_fallback,
             ),
             kwargs,
