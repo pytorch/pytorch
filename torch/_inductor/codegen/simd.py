@@ -1178,7 +1178,6 @@ class SIMDScheduling(BaseScheduling):
         V.graph.sizevars.guard_leq(numel, int_max)  # type: ignore[arg-type]
         for size in buf_sizes:
             V.graph.sizevars.guard_leq(size, int_max)  # type: ignore[arg-type]
-
         return True
 
     @classmethod
