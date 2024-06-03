@@ -24090,8 +24090,6 @@ def skip(op_name, variant_name='', *, device_type=None, dtypes=None):
 
 
 def skipOps(test_case_name, base_test_name, to_skip, all_opinfos=op_db):
-    import pdb
-    pdb.set_trace()
     for xfail in to_skip:
         op_name, variant_name, device_type, dtypes, expected_failure = xfail
         matching_opinfos = [o for o in all_opinfos
@@ -24126,7 +24124,6 @@ def enable_backend_test(op_db_list: List[OpInfo]):
             # For refs ops get the name of the related torch_opinfo.
             torch_opinfo = getattr(op, "torch_opinfo") if hasattr(op, "torch_opinfo") else None
             name = torch_opinfo.name if torch_opinfo is not None else op.name
-
             if name not in supported_op_list:
                 # If the op is not supported add unittest.skip decorators.
                 if op.skips is not None:

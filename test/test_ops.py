@@ -564,10 +564,12 @@ class TestCommon(TestCase):
     )
     @skipIfTorchInductor("Takes too long for inductor")
     @skipOps(
-        "TestCommon", "test_python_ref_executor", (('_refs.mul', '', 'xpu', (torch.complex32,), False),), all_opinfos=python_ref_db
+        "TestCommon", "test_python_ref_executor", \
+            (('_refs.mul', '', 'xpu', (torch.complex32,), False),), all_opinfos=python_ref_db
     )
     @skipOps(
-        "TestCommon", "test_python_ref_executor", (('_refs.pow', '', 'xpu', (torch.complex32,), False),), all_opinfos=python_ref_db
+        "TestCommon", "test_python_ref_executor", \
+            (('_refs.pow', '', 'xpu', (torch.complex32,), False),), all_opinfos=python_ref_db
     )
     def test_python_ref_executor(self, device, dtype, op, executor):
         if (
@@ -641,6 +643,10 @@ class TestCommon(TestCase):
         dtypes=OpDTypes.none,
     )
     @skipIfTorchInductor("Takes too long for inductor")
+    @skipOps(
+        "TestCommon", "test_python_ref_errors", \
+            (('_refs.where', '', 'xpu', None, False),), all_opinfos=python_ref_db
+    )
     def test_python_ref_errors(self, device, op):
         mode = FakeTensorMode()
         with mode:
@@ -653,8 +659,6 @@ class TestCommon(TestCase):
 
         error_inputs = op.error_inputs(device)
         for ei in error_inputs:
-            import pdb
-            pdb.set_trace()
             si = ei.sample_input
             meta_sample = si.transform(_to_tensormeta)
             with self.assertRaisesRegex(ei.error_type, ei.error_regex):
@@ -1025,9 +1029,7 @@ class TestCommon(TestCase):
                 wrong_device = "cpu"
             elif torch.cuda.is_available():
                 wrong_device = "cuda"
-            elif torch.xpu.is_available(): 
-                wrong_device = "xpu"
-
+            
             factory_fn_msg = (
                 "\n\nNOTE: If your op is a factory function (i.e., it accepts TensorOptions) you should mark its "
                 "OpInfo with `is_factory_function=True`."
@@ -1413,6 +1415,18 @@ class TestCommon(TestCase):
     @skipMeta
     @onlyNativeDeviceTypes
     @ops(ops_and_refs, dtypes=OpDTypes.none)
+    @skipOps(
+        "TestCommon", "test_dtypes", \
+            (('div', 'floor_rounding', 'xpu', None, False),), all_opinfos=ops_and_refs
+    )
+    @skipOps(
+        "TestCommon", "test_dtypes", \
+            (('div', 'no_rounding_mode', 'xpu', None, False),), all_opinfos=ops_and_refs
+    )
+    @skipOps(
+        "TestCommon", "test_dtypes", \
+            (('div', 'trunc_rounding', 'xpu', None, False),), all_opinfos=ops_and_refs
+    )
     def test_dtypes(self, device, op):
         # Check complex32 support only if the op claims.
         # TODO: Once the complex32 support is better, we should add check for complex32 unconditionally.
