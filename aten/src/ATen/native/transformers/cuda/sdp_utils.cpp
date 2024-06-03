@@ -230,6 +230,22 @@ bool check_mem_efficient_hardware_support(sdp_params const& params, bool debug) 
   return true;
 }
 
+bool check_mem_efficient_hardware_support_with_bias(sdp_params const& params, bool debug) {
+  auto dprops = at::cuda::getCurrentDeviceProperties();
+  if (dprops->major < 6 && params.attn_mask.has_value()) {
+    if (debug) {
+      TORCH_WARN(
+          "Mem Efficient Attention with tensor bias requires sm 6.0 or above. Attempting to run on a sm ",
+          dprops->major,
+          ".",
+          dprops->minor,
+          " gpu.");
+    }
+    return false;
+  }
+  return true;
+}
+
 bool check_requires_grad_and_head_dim_gt192_constraints_on_sm86_89(
     sdp_params const& params,
     bool debug) {
@@ -603,6 +619,7 @@ bool can_use_mem_efficient_attention(sdp_params const& params, bool debug) {
       check_runtime_disabled_mem_efficient,
       check_all_tensors_on_device,
       check_mem_efficient_hardware_support,
+      check_mem_efficient_hardware_support_with_bias,
       check_tensor_shapes,
       check_head_dim_size_mem_efficient);
   for (auto& constraint : general_constraints) {

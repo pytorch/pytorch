@@ -42,6 +42,7 @@ from torch.testing._internal.common_methods_invocations import wrapper_set_seed
 from torch.testing._internal.common_cuda import (
     IS_JETSON, SM80OrLater, PLATFORM_SUPPORTS_FLASH_ATTENTION,
     PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
+    PLATFORM_SUPPORTS_MEM_EFF_ATTENTION_WITH_BIAS,
     PLATFORM_SUPPORTS_FUSED_ATTENTION,
     PLATFORM_SUPPORTS_CUDNN_ATTENTION
 )
@@ -2140,7 +2141,7 @@ class TestSDPACudaOnly(NNTestCase):
         S_converted = F.pad(S_converted, (0, seqlen_k_og - seqlen_k_rounded))
         return S_converted[:, :, :seqlen_q, :seqlen_k]
 
-    @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Fused SDPA was not built for this system")
+    @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION_WITH_BIAS, "Fused SDPA was not built for this system")
     @parametrize("mask_dim", [1, 2, 3, 4])
     def test_mem_efficient_attetntion_mask_variants(self, device, mask_dim: List[int]):
         dtype = torch.float16
@@ -2163,7 +2164,7 @@ class TestSDPACudaOnly(NNTestCase):
             out = F.scaled_dot_product_attention(query, key, value, mask)
         out.sum().backward()
 
-    @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Fused SDPA was not built for this system")
+    @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION_WITH_BIAS, "Fused SDPA was not built for this system")
     @parametrize("dtype", [torch.float, torch.float16])
     def test_mem_eff_attention_pad_mask(self, device, dtype):
         make_tensor = partial(torch.rand, device=device, dtype=dtype, requires_grad=True)
@@ -2177,7 +2178,7 @@ class TestSDPACudaOnly(NNTestCase):
             out = F.scaled_dot_product_attention(query, key, value, mask)
         out.sum().backward()
 
-    @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Fused SDPA was not built for this system")
+    @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION_WITH_BIAS, "Fused SDPA was not built for this system")
     @parametrize("dtype", [torch.float, torch.float16])
     def test_mem_eff_attention_non_contiguous_mask(self, device, dtype):
         make_tensor = partial(torch.rand, device=device, dtype=dtype, requires_grad=True)
@@ -2192,7 +2193,7 @@ class TestSDPACudaOnly(NNTestCase):
             out = F.scaled_dot_product_attention(query, key, value, mask)
         out.sum().backward()
 
-    @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Fused SDPA was not built for this system")
+    @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION_WITH_BIAS, "Fused SDPA was not built for this system")
     @parametrize("dtype", [torch.float, torch.float16])
     def test_mem_eff_attention_long_sequence_mask(self, device, dtype):
         if torch.cuda.get_device_properties('cuda').total_memory < 80 * 2**30:
@@ -2209,7 +2210,7 @@ class TestSDPACudaOnly(NNTestCase):
             out = F.scaled_dot_product_attention(query, key, value, mask)
         out.sum().backward()
 
-    @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Fused SDPA was not built for this system")
+    @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION_WITH_BIAS, "Fused SDPA was not built for this system")
     def test_mem_eff_attention_non_contig_mask_bug(self, device):
         # Without the fix this produces `AssertionError: assert 0.07352933287620544 < 1e-07`
         # Shapes taken from repro
@@ -2671,7 +2672,7 @@ class TestSDPACudaOnly(NNTestCase):
                          atol=grad_v_ref_atol, rtol=grad_v_ref_rtol)
 
 
-    @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Does not support SDPA")
+    @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION_WITH_BIAS, "Does not support SDPA")
     @unittest.skipIf(IS_JETSON, "causing sigkill on Jetson")
     @parametrize("batch_size", [1, 8])
     @parametrize("seq_len_q", [4, 8, 64, 128, 256, 312, 512, 1024, 2048] if SM80OrLater else [4, 8, 64, 128, 152, 256, 512])

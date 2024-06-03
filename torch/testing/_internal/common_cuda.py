@@ -52,6 +52,7 @@ def evaluate_platform_supports_flash_attention():
 
 PLATFORM_SUPPORTS_FLASH_ATTENTION: bool = LazyVal(lambda: evaluate_platform_supports_flash_attention())
 PLATFORM_SUPPORTS_MEM_EFF_ATTENTION: bool = LazyVal(lambda: TEST_CUDA and not TEST_WITH_ROCM)
+PLATFORM_SUPPORTS_MEM_EFF_ATTENTION_WITH_BIAS: bool = SM60OrLater
 # TODO(eqy): gate this against a cuDNN version
 PLATFORM_SUPPORTS_CUDNN_ATTENTION: bool = LazyVal(lambda: TEST_CUDA and not TEST_WITH_ROCM and
                                                   torch.backends.cuda.cudnn_sdp_enabled())
