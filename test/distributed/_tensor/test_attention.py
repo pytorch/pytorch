@@ -27,6 +27,7 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
+    skipIfRocm,
 )
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
@@ -45,6 +46,7 @@ class RingAttentionTest(DTensorTestBase):
         return 2
 
     @skip_if_lt_x_gpu(2)
+    @skipIfRocm  # Missing _c10d_functional_autograd::all_to_all_single
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Does not support flash attention"
     )
