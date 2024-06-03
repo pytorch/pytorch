@@ -2182,6 +2182,7 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch.xlogy",
         "torch.zero_",
         "torch.zeros",
+        "torch.zeros_like",
         "torch._fused_sgd_",
         "torch.slice_inverse",
         "torch._assert_scalar",
