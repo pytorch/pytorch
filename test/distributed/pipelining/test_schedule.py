@@ -491,13 +491,15 @@ class TestSchedulePlan(unittest.TestCase):
             if len(error_msg) != 0:
                 self.fail(f"Error at timestep {timestep}: " + ",".join(error_msg))
 
-    def test_pipeline_order(self):
+    @parametrize("ScheduleClass", [ScheduleInterleaved1F1B, ScheduleLoopedBFS])
+    def test_pipeline_order(self, ScheduleClass):
         # Define a list of test cases with varying num_local_stages, num_microbatches, and group_size
         # These should succeed since num_microbatches % group_size == 0
         test_cases = [
             # small number of stages
             (2, 2, 2),
             (2, 4, 4),
+            (2, 8, 2),
             (2, 8, 4),
             (2, 8, 8),
             (4, 4, 4),
@@ -532,12 +534,14 @@ class TestSchedulePlan(unittest.TestCase):
                     for i in range(num_local_stages)
                 ]
 
-                schedule = ScheduleInterleaved1F1B(stages, num_microbatches)
+                schedule = ScheduleClass(stages, num_microbatches)
                 # print(format_pipeline_order(schedule.pipeline_order))
                 self._validate_pipeline_order(
                     schedule.pipeline_order, num_microbatches, num_stages
                 )
 
+
+instantiate_parametrized_tests(TestSchedulePlan)
 
 if __name__ == "__main__":
     # Run only the TestSchedulePlan tests (single process)

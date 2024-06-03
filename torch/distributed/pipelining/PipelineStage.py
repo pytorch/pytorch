@@ -544,15 +544,18 @@ class _PipelineStageBase(ABC):
     def backward_one_chunk(
         self,
         loss=None,
+        bwd_chunk_id=None,
     ):
         """
         Perform backward pass on the module.
         This should only be called once per microbatch.
         """
+        if bwd_chunk_id is None:
+            bwd_chunk_id = self.bwd_chunk_id
         (
             stage_output,
             input_values,
-        ) = self.fwd_cache.pop(self.bwd_chunk_id)
+        ) = self.fwd_cache.pop(bwd_chunk_id)
 
         # Compute backward
         if self.is_last:
@@ -575,12 +578,8 @@ class _PipelineStageBase(ABC):
                 "input_values": input_values,
             }
 
-        self.grads_input = self.backward_maybe_with_nosync(
-            bwd_kwargs, self.bwd_chunk_id
-        )
-        logger.debug(
-            f"{self.log_prefix} Backwarded chunk {self.bwd_chunk_id}"  # noqa: G004
-        )
+        self.grads_input = self.backward_maybe_with_nosync(bwd_kwargs, bwd_chunk_id)
+        logger.debug(f"{self.log_prefix} Backwarded chunk {bwd_chunk_id}")  # noqa: G004
         self.bwd_chunk_id += 1
 
     def _validate_fwd_input(self, args, kwargs):
