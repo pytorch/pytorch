@@ -1,11 +1,10 @@
 import functools
 
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, TYPE_CHECKING
 
 import torch
 import torch.nn as nn
 from torch.autograd import Variable
-from torch.autograd.graph import Node, register_multi_grad_hook
 from torch.distributed._composable_state import (
     _get_module_state,
     _insert_module_state,
@@ -13,11 +12,12 @@ from torch.distributed._composable_state import (
 )
 from torch.distributed.utils import _to_kwargs
 from torch.utils._pytree import tree_flatten, tree_map
-from torch.utils.hooks import RemovableHandle
 from ._fsdp_api import MixedPrecisionPolicy
 from ._fsdp_common import _cast_fp_tensor, TrainingState
-from ._fsdp_param import FSDPParam
 from ._fsdp_param_group import FSDPCommContext, FSDPParamGroup
+
+if TYPE_CHECKING:
+    from ._fsdp_param import FSDPParam
 
 
 class FSDPStateContext:
@@ -55,7 +55,6 @@ class FSDPState(_State):
         self._state_ctx = FSDPStateContext()
         self._comm_ctx = FSDPCommContext()
         self._training_state: TrainingState = TrainingState.IDLE
-        self._pre_backward_hook_handles: List[RemovableHandle] = []
 
     # Define a separate init since `__init__` is called in the contract
     def init(
@@ -201,11 +200,12 @@ class FSDPState(_State):
                 )
         return output
 
-    def _pre_backward(self, forward_grad_fns: Tuple[Node, ...], *unused: Any) -> None:
+    def _pre_backward(self, grad: torch.Tensor) -> torch.Tensor:
         self._training_state = TrainingState.PRE_BACKWARD
         self._register_root_post_backward_final_callback()
         if self._fsdp_param_group:
-            self._fsdp_param_group.pre_backward(forward_grad_fns, *unused)
+            self._fsdp_param_group.pre_backward()
+        return grad
 
     def _root_post_backward_final_callback(self) -> None:
         with torch.profiler.record_function("FSDP::root_post_backward_callback"):
@@ -224,25 +224,19 @@ class FSDPState(_State):
             self._state_ctx.post_backward_final_callback_queued = False
 
     def _finalize_backward(self) -> None:
-        for handle in self._pre_backward_hook_handles:
-            handle.remove()
-        self._pre_backward_hook_handles.clear()
         if self._fsdp_param_group:
             self._fsdp_param_group.finalize_backward()
 
     def _register_pre_backward_hook(self, output: Any) -> Any:
         if not torch.is_grad_enabled():
             return output
-
         flat_outputs, _ = tree_flatten(output)
-        tensors = tuple(t for t in flat_outputs if t.requires_grad)
+        tensors = tuple(
+            t for t in flat_outputs if (torch.is_tensor(t) and t.requires_grad)
+        )
         if tensors:
-            grad_fns = tuple(t.grad_fn for t in tensors if t.grad_fn is not None)
-            pre_backward = functools.partial(self._pre_backward, grad_fns)
-            handle = register_multi_grad_hook(tensors, pre_backward, mode="any")
-            self._pre_backward_hook_handles.append(handle)
-            if self._fsdp_param_group:
-                self._fsdp_param_group.all_forward_output_grad_fns.add(grad_fns)
+            for tensor in tensors:
+                tensor.register_hook(self._pre_backward)
         return output
 
     def _register_root_post_backward_final_callback(self):

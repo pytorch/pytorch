@@ -1,6 +1,7 @@
 # This module contains functions that *will be allowed* by dynamo
 
 import functools
+from typing import List
 
 import torch
 import torch.utils._pytree as pytree
@@ -66,15 +67,24 @@ def wrap_numpy(f):
     return wrap
 
 
-class FakeContext:
-    def __init__(self, saved_tensors):
-        # this will cache the results of saved_tensors
-        # and will no longer call into c++ binding
+class FakeBackwardCFunction:
+    def __init__(
+        self,
+        real: torch.autograd.function.BackwardCFunction,
+        saved_tensors: List[torch.Tensor],
+    ):
+        self.real = real
         self.saved_tensors = saved_tensors
 
+    def __getattr__(self, name):
+        # route any attribute that isn't defined on this obj
+        return getattr(self.real, name)
 
-def call_backward(backward_fn, saved_tensors, *args):
-    grads = backward_fn(FakeContext(saved_tensors), *args)
+
+# This function corresponds to the "eager" implementation of a lifted autograd.Function.backward
+def call_backward(backward_c_function, saved_tensors, *args):
+    fake = FakeBackwardCFunction(backward_c_function, saved_tensors)
+    grads = fake._forward_cls.backward(fake, *args)  # type: ignore[attr-defined]
 
     # in eager, we wrap in a tuple when there's only one grad output
     if type(grads) is not tuple:

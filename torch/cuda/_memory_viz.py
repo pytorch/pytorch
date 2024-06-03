@@ -9,6 +9,7 @@ from typing import Any
 from itertools import groupby
 import base64
 import warnings
+import operator
 
 cache = lru_cache(None)
 
@@ -144,8 +145,8 @@ def compare(before, after, format_flamegraph=format_flamegraph):
     before_segs = {_seg_key(seg) for seg in before}
     after_segs = {_seg_key(seg) for seg in after}
 
-    print(f'only_before = {[a for a,_ in (before_segs - after_segs)]}')
-    print(f'only_after = {[a for a,_ in (after_segs - before_segs)]}')
+    print(f'only_before = {[a for a, _ in (before_segs - after_segs)]}')
+    print(f'only_after = {[a for a, _ in (after_segs - before_segs)]}')
 
     for seg in before:
         if _seg_key(seg) not in after_segs:
@@ -354,7 +355,7 @@ def trace(data):
             elif e['action'] == 'oom':
                 size = e['size']
                 free = e['device_free']
-                out.write(f'raise OutOfMemoryError() # {Bytes(size)} requested, {Bytes(free)} free in CUDA\n')
+                out.write(f'raise OutOfMemoryError # {Bytes(size)} requested, {Bytes(free)} free in CUDA\n')
             else:
                 out.write(f'{e}\n')
         out.write(f"TOTAL MEM: {Bytes(count)}")
@@ -381,7 +382,11 @@ add_local_files(local_files, $VIZ_KIND)
 
 def _format_viz(data, viz_kind, device):
     if device is not None:
-        warnings.warn('device argument is deprecated, plots now contain all device')
+        warnings.warn(
+            'device argument is deprecated, plots now contain all device',
+            FutureWarning,
+            stacklevel=3,
+        )
     buffer = pickle.dumps(data)
     buffer += b'\x00' * (3 - len(buffer) % 3)
     # Encode the buffer with base64
@@ -492,7 +497,7 @@ def _profile_to_snapshot(profile):
     # create the final snapshot state
     blocks_at_end = [(to_device(tensor_key.device), event['addr'], event['size'], event['frames'])
                      for (tensor_key, version), event in kv_to_elem.items()]
-    for device, blocks in groupby(sorted(blocks_at_end), key=lambda x: x[0]):
+    for device, blocks in groupby(sorted(blocks_at_end), key=operator.itemgetter(0)):
         seg = snapshot['segments'][device]  # type: ignore[index]
         last_addr = seg['address']
         for _, addr, size, frames in blocks:

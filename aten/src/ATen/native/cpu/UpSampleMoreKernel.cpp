@@ -12,7 +12,7 @@
 namespace at::native {
 namespace {
 
-using scale_t = std::vector<c10::optional<double>>;
+using scale_t = std::vector<std::optional<double>>;
 
 template <typename acc_t, typename scalar_t,
           typename scalar_nonconst_t = std::remove_const_t<scalar_t>,
@@ -337,7 +337,7 @@ void cpu_upsample_nearest_backward_channels_last(
 void upsample_nearest1d_backward_kernel_impl(
     const Tensor& grad_input,
     const Tensor& grad_output,
-    c10::optional<double> scales_w) {
+    std::optional<double> scales_w) {
   AT_DISPATCH_FLOATING_TYPES_AND2(kBFloat16, kHalf, grad_output.scalar_type(), "upsample_nearest1d_backward", [&] {
     cpu_upsample_nearest_backward<scalar_t, scale_t, nearest_idx>(grad_input, grad_output, {scales_w});
   });
@@ -346,7 +346,7 @@ void upsample_nearest1d_backward_kernel_impl(
 void _upsample_nearest_exact1d_backward_kernel_impl(
     const Tensor& grad_input,
     const Tensor& grad_output,
-    c10::optional<double> scales_w) {
+    std::optional<double> scales_w) {
   AT_DISPATCH_FLOATING_TYPES_AND2(kBFloat16, kHalf, grad_output.scalar_type(), "_upsample_nearest_exact1d_backward", [&] {
     cpu_upsample_nearest_backward<scalar_t, scale_t, nearest_exact_idx>(grad_input, grad_output, {scales_w});
   });
@@ -355,8 +355,8 @@ void _upsample_nearest_exact1d_backward_kernel_impl(
 void upsample_nearest2d_backward_kernel_impl(
     const Tensor& grad_input,
     const Tensor& grad_output,
-    c10::optional<double> scales_h,
-    c10::optional<double> scales_w) {
+    std::optional<double> scales_h,
+    std::optional<double> scales_w) {
   if (grad_output.is_contiguous(at::MemoryFormat::ChannelsLast)) {
     AT_DISPATCH_FLOATING_TYPES_AND2(kBFloat16, kHalf, grad_output.scalar_type(), "upsample_nearest2d_backward_cl", [&] {
       cpu_upsample_nearest_backward_channels_last<scalar_t, scale_t, nearest_idx>(grad_input, grad_output, {scales_h, scales_w});
@@ -371,8 +371,8 @@ void upsample_nearest2d_backward_kernel_impl(
 void _upsample_nearest_exact2d_backward_kernel_impl(
     const Tensor& grad_input,
     const Tensor& grad_output,
-    c10::optional<double> scales_h,
-    c10::optional<double> scales_w) {
+    std::optional<double> scales_h,
+    std::optional<double> scales_w) {
   if (grad_output.is_contiguous(at::MemoryFormat::ChannelsLast)) {
     AT_DISPATCH_FLOATING_TYPES_AND2(kBFloat16, kHalf, grad_output.scalar_type(), "_upsample_nearest_exact2d_backward_cl", [&] {
       cpu_upsample_nearest_backward_channels_last<scalar_t, scale_t, nearest_exact_idx>(grad_input, grad_output, {scales_h, scales_w});
@@ -387,9 +387,9 @@ void _upsample_nearest_exact2d_backward_kernel_impl(
 void upsample_nearest3d_backward_kernel_impl(
     const Tensor& grad_input,
     const Tensor& grad_output,
-    c10::optional<double> scales_d,
-    c10::optional<double> scales_h,
-    c10::optional<double> scales_w) {
+    std::optional<double> scales_d,
+    std::optional<double> scales_h,
+    std::optional<double> scales_w) {
   if (grad_output.is_contiguous(at::MemoryFormat::ChannelsLast3d)) {
     AT_DISPATCH_FLOATING_TYPES_AND2(kBFloat16, kHalf, grad_output.scalar_type(), "_upsample_nearest3d_backward_cl", [&] {
       cpu_upsample_nearest_backward_channels_last<scalar_t, scale_t, nearest_idx>(grad_input, grad_output, {scales_d, scales_h, scales_w});
@@ -404,9 +404,9 @@ void upsample_nearest3d_backward_kernel_impl(
 void _upsample_nearest_exact3d_backward_kernel_impl(
     const Tensor& grad_input,
     const Tensor& grad_output,
-    c10::optional<double> scales_d,
-    c10::optional<double> scales_h,
-    c10::optional<double> scales_w) {
+    std::optional<double> scales_d,
+    std::optional<double> scales_h,
+    std::optional<double> scales_w) {
   if (grad_output.is_contiguous(at::MemoryFormat::ChannelsLast3d)) {
     AT_DISPATCH_FLOATING_TYPES_AND2(kBFloat16, kHalf, grad_output.scalar_type(), "_upsample_nearest_exact3d_backward_cl", [&] {
       cpu_upsample_nearest_backward_channels_last<scalar_t, scale_t, nearest_exact_idx>(grad_input, grad_output, {scales_d, scales_h, scales_w});
@@ -745,7 +745,7 @@ void upsample_linear1d_backward_kernel_impl(
     const Tensor& grad_input,
     const Tensor& grad_output,
     bool align_corners,
-    c10::optional<double> scales_w) {
+    std::optional<double> scales_w) {
   AT_DISPATCH_FLOATING_TYPES_AND2(kBFloat16, kHalf, grad_output.scalar_type(), "upsample_linear1d_backward", [&] {
     cpu_upsample_linear_backward<scalar_t, scale_t>(grad_input, grad_output, align_corners, {scales_w});
   });
@@ -755,8 +755,8 @@ void upsample_bilinear2d_backward_kernel_impl(
     const Tensor& grad_input,
     const Tensor& grad_output,
     bool align_corners,
-    c10::optional<double> scales_h,
-    c10::optional<double> scales_w) {
+    std::optional<double> scales_h,
+    std::optional<double> scales_w) {
   if (grad_output.is_contiguous(at::MemoryFormat::ChannelsLast)) {
     AT_DISPATCH_FLOATING_TYPES_AND2(kBFloat16, kHalf, grad_output.scalar_type(), "upsample_bilinear2d_backward_channels_last", [&] {
       cpu_upsample_linear_backward_channels_last<scalar_t, scale_t>(grad_input, grad_output, align_corners, {scales_h, scales_w});
@@ -772,9 +772,9 @@ void upsample_trilinear3d_backward_kernel_impl(
     const Tensor& grad_input,
     const Tensor& grad_output,
     bool align_corners,
-    c10::optional<double> scales_d,
-    c10::optional<double> scales_h,
-    c10::optional<double> scales_w) {
+    std::optional<double> scales_d,
+    std::optional<double> scales_h,
+    std::optional<double> scales_w) {
   if (grad_output.is_contiguous(at::MemoryFormat::ChannelsLast3d)) {
     AT_DISPATCH_FLOATING_TYPES_AND2(kBFloat16, kHalf, grad_output.scalar_type(), "upsample_trilinear3d_backward_channels_last", [&] {
       cpu_upsample_linear_backward_channels_last<scalar_t, scale_t>(grad_input, grad_output, align_corners, {scales_d, scales_h, scales_w});

@@ -30,6 +30,7 @@ namespace jit {
 using RawDataExportMap = std::unordered_map<std::string, at::Tensor>;
 
 using SymbolDimMap = std::map<c10::ShapeSymbol, std::string>;
+using DimSymbolMap = std::map<std::string, c10::ShapeSymbol>;
 
 using NodeNameMap = std::unordered_map<const Node*, std::string>;
 

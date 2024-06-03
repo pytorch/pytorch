@@ -819,7 +819,7 @@ void slow_conv_transpose3d_acc_grad_parameters_cpu(
 
 Tensor& slow_conv_transpose3d_out_cpu(const Tensor& input,
     const Tensor& weight,
-    IntArrayRef kernel_size, const c10::optional<Tensor>& bias_opt,
+    IntArrayRef kernel_size, const std::optional<Tensor>& bias_opt,
     IntArrayRef stride,
     IntArrayRef padding,
     IntArrayRef output_padding,
@@ -846,7 +846,7 @@ Tensor& slow_conv_transpose3d_out_cpu(const Tensor& input,
 Tensor slow_conv_transpose3d_cpu(
     const Tensor& input,
     const Tensor& weight,
-    IntArrayRef kernel_size, const c10::optional<Tensor>& bias_opt,
+    IntArrayRef kernel_size, const std::optional<Tensor>& bias_opt,
     IntArrayRef stride,
     IntArrayRef padding,
     IntArrayRef output_padding,

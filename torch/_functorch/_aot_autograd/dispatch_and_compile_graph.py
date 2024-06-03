@@ -4,16 +4,19 @@ pathways, taking into account the AOTConfig and the collected ViewAndMutationMet
 """
 
 import dataclasses
-from typing import Any, Callable, List, Optional, Tuple, Union
+from typing import Any, List, Optional, Tuple
 
 import torch
+import torch.utils._pytree as pytree
 import torch.utils.dlpack
 from torch import Tensor
 from torch._dispatch.python import enable_python_dispatcher
+
 from torch._dynamo.utils import lazy_format_graph_code
 from torch._logging import getArtifactLogger, trace_structured
 from torch._subclasses.functional_tensor import FunctionalTensorMode
 from torch.fx.experimental.proxy_tensor import make_fx
+from torch.utils._python_dispatch import _detect_infra_mode
 
 from .. import config
 from .functional_utils import (
@@ -55,7 +58,7 @@ def aot_dispatch_base_graph(
     aot_config: AOTConfig,
     *,
     fw_metadata: ViewAndMutationMeta,
-) -> Union[Callable, Tuple[Callable, List[Any], Optional[SubclassMeta]]]:
+) -> Tuple[torch.fx.GraphModule, List[Any], Optional[SubclassMeta]]:
     # aot_dispatch_base requires functionalization, but doesn't need to handle as many cases as the autograd case.
     # The cases that aot_dispatch_base doesn't need to handle include:
     # - outputs that are aliases of graph intermediates
@@ -77,6 +80,9 @@ def aot_dispatch_base_graph(
         trace_joint=False,
     )
 
+    # TODO: replace with AOTDispatchSubclassWrapper once we refactor
+    # fn_input_mutations_to_outputs and create_functionalized_fn
+    # into CompilerWrappers.
     (
         fn_to_trace,
         updated_flat_args_subclasses_desugared,
@@ -112,9 +118,7 @@ def aot_dispatch_base_graph(
                 )
                 fake = buffer.from_functional()
                 # The fake tensor in turn is associated with a proxy node.
-                proxy_mode = torch._C._get_dispatch_mode(
-                    torch._C._TorchDispatchModeKey.PROXY
-                )
+                proxy_mode = _detect_infra_mode(torch._C._TorchDispatchModeKey.PROXY)
                 assert proxy_mode is not None
                 proxy = torch.fx.experimental.proxy_tensor.get_proxy_slot(
                     fake, proxy_mode.tracer
@@ -127,6 +131,9 @@ def aot_dispatch_base_graph(
             _map_assigned_buffer_to_proxy
         )
 
+    saved_updated_flat_args_subclasses_desugared = pytree.tree_map_only(
+        torch.Tensor, lambda t: t.detach(), updated_flat_args_subclasses_desugared
+    )
     fw_module = _create_graph(
         fn_to_trace,
         updated_flat_args_subclasses_desugared,
@@ -171,9 +178,9 @@ def aot_dispatch_base_graph(
     num_tokens = len(fw_metadata.tokens)
     if num_tokens != 0 and config.unlift_effect_tokens:
         unlift_tokens(fw_module, fw_metadata)
-        updated_flat_args_subclasses_desugared = updated_flat_args_subclasses_desugared[
-            num_tokens:
-        ]
+        saved_updated_flat_args_subclasses_desugared = (
+            saved_updated_flat_args_subclasses_desugared[num_tokens:]
+        )
 
     assert copy_count == copy_count2
 
@@ -191,8 +198,7 @@ def aot_dispatch_base_graph(
         assert (
             maybe_subclass_meta is None
         ), "aot_export_module does not support tensor subclass inputs for now."
-        return fw_module
-    return fw_module, list(updated_flat_args_subclasses_desugared), maybe_subclass_meta
+    return fw_module, saved_updated_flat_args_subclasses_desugared, maybe_subclass_meta
 
 
 # Has the precondition that there
@@ -205,7 +211,7 @@ def aot_dispatch_autograd_graph(
     aot_config: AOTConfig,
     *,
     fw_metadata: ViewAndMutationMeta,
-) -> Union[Callable, Tuple[Callable, List[Any], Optional[SubclassMeta]]]:
+) -> Tuple[torch.fx.GraphModule, Tuple[List[Any], List[Any]], Optional[SubclassMeta]]:
     # traced_tangents corresponds to the set of outputs in the traced forward that should get grad_outputs in the traced backward.
     # It includes outputs of the original forward, *and* any updated inputs due to input mutations.
     # However, it does *not* include any outputs that are aliases of inputs or intermediates, or any metadata-only input mutations.
@@ -225,6 +231,9 @@ def aot_dispatch_autograd_graph(
         trace_joint=True,
     )
 
+    # TODO: replace with AOTDispatchSubclassWrapper once we refactor
+    # fn_input_mutations_to_outputs and create_functionalized_fn
+    # into CompilerWrappers.
     subclass_tracing_info = aot_dispatch_subclass(
         joint_fn_to_trace,
         updated_joint_inputs,
@@ -235,8 +244,19 @@ def aot_dispatch_autograd_graph(
 
     joint_fn_to_trace = subclass_tracing_info.plain_tensor_trace_fn
     updated_joint_inputs = subclass_tracing_info.plain_tensor_args
+    # When we call _create_graph, this may mutate the metadata of joint
+    # inputs.  But callers are expecting to get the original joint inputs.  So
+    # we make aliases of all the inputs to make sure we have a copy that
+    # doesn't get modified.
+    #
+    # This destroys requires_grad/grad_fn information.  However, backends
+    # beneath AOTAutograd are indifferent to this information, so it doesn't
+    # matter.
+    saved_updated_joint_inputs = pytree.tree_map_only(
+        torch.Tensor, lambda t: t.detach(), updated_joint_inputs
+    )
     maybe_subclass_meta = subclass_tracing_info.maybe_subclass_meta
-    aot_graphs_log.debug(
+    aot_graphs_log.info(
         "aot_config id: %s, fw_metadata=%s,subclass_metadata=%s",
         str(aot_config.aot_id),
         str(fw_metadata),
@@ -261,5 +281,4 @@ def aot_dispatch_autograd_graph(
         assert (
             maybe_subclass_meta is None
         ), "aot_export_module does not support tensor subclass inputs for now."
-        return fx_g
-    return fx_g, updated_joint_inputs, maybe_subclass_meta
+    return fx_g, saved_updated_joint_inputs, maybe_subclass_meta

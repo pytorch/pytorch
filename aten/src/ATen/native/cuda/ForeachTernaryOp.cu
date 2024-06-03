@@ -27,7 +27,7 @@ std::vector<at::Tensor> foreach_tensor_lerp_ternary_cuda(
     TensorList tensors2,
     TensorList tensors3) {
   check_foreach_api_restrictions(tensors1, tensors2, tensors3);
-  if (!can_use_fast_route({tensors1, tensors2, tensors3})) {
+  if (!can_use_fast_route({tensors1, tensors2, tensors3}, {}, true)) {
     return foreach_tensor_ternary_lerp_slow(tensors1, tensors2, tensors3);
   }
 
@@ -64,7 +64,7 @@ void foreach_tensor_lerp_ternary_cuda_(
     TensorList tensors2,
     TensorList tensors3) {
   check_foreach_api_restrictions(tensors1, tensors2, tensors3);
-  if (!can_use_fast_route({tensors1, tensors2, tensors3})) {
+  if (!can_use_fast_route({tensors1, tensors2, tensors3}, {}, true)) {
     return foreach_tensor_ternary_lerp_slow_(tensors1, tensors2, tensors3);
   }
 
@@ -94,7 +94,7 @@ std::vector<at::Tensor> foreach_tensor_lerp_list_cuda(
     TensorList tensors2,
     const Scalar& weight) {
   check_foreach_api_restrictions(tensors1, tensors2);
-  if (!can_use_fast_route({tensors1, tensors2})) {
+  if (!can_use_fast_route({tensors1, tensors2}, {}, true)) {
     return foreach_tensor_lerp_list_kernel_slow(tensors1, tensors2, weight);
   }
 
@@ -132,7 +132,7 @@ void foreach_tensor_lerp_list_cuda_(
     TensorList tensors2,
     const Scalar& weight) {
   check_foreach_api_restrictions(tensors1, tensors2);
-  if (!can_use_fast_route({tensors1, tensors2})) {
+  if (!can_use_fast_route({tensors1, tensors2}, {}, true)) {
     return foreach_tensor_lerp_list_kernel_slow_(tensors1, tensors2, weight);
   }
 

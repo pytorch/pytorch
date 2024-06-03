@@ -579,6 +579,7 @@ coverage_ignore_functions = [
     "barrier",
     "get_all",
     "synchronize",
+    "store_timeout",
     # torch.distributed.fsdp.wrap
     "always_wrap_policy",
     "enable_wrap",
@@ -2795,6 +2796,7 @@ coverage_ignore_classes = [
     "ConstraintViolationError",
     "DynamicDimConstraintPrinter",
     "GuardOnDataDependentSymNode",
+    "PendingUnbackedSymbolNotFound",
     "LoggingShapeGuardPrinter",
     "RelaxedUnspecConstraint",
     "RuntimeAssert",

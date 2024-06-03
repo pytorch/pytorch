@@ -13,6 +13,7 @@ self-hosted-runner:
     - linux.8xlarge.nvidia.gpu
     - linux.16xlarge.nvidia.gpu
     - linux.g5.4xlarge.nvidia.gpu
+    - linux.s390x
     - windows.4xlarge.nonephemeral
     - windows.8xlarge.nvidia.gpu
     - windows.8xlarge.nvidia.gpu.nonephemeral
@@ -21,8 +22,7 @@ self-hosted-runner:
     - linux.rocm.gpu
     - macos-m1-stable
     - macos-m1-13
-    - macos-12-xl
-    - macos-12
-    - macos12.3-m1
+    - macos-m1-14
     - macos-latest-xlarge
     - macos-13-xlarge
+    - macos-14-xlarge

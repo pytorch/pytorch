@@ -5,13 +5,9 @@
 #include <torch/csrc/distributed/c10d/logging.h>
 
 #include <fcntl.h>
-#include <algorithm>
-#include <array>
 #include <chrono>
 #include <fstream>
 #include <random>
-#include <streambuf>
-#include <system_error>
 #include <thread>
 #include <unordered_map>
 #include <utility>
@@ -272,7 +268,7 @@ using detail::Socket;
 TCPStore::TCPStore(
     const std::string& masterAddr,
     std::uint16_t masterPort,
-    c10::optional<int> numWorkers,
+    std::optional<int> numWorkers,
     bool isServer,
     const std::chrono::milliseconds& timeout,
     bool waitWorkers)
@@ -281,7 +277,7 @@ TCPStore::TCPStore(
           TCPStoreOptions{
               masterPort,
               isServer,
-              numWorkers ? c10::optional<std::size_t>(*numWorkers)
+              numWorkers ? std::optional<std::size_t>(*numWorkers)
                          : c10::nullopt,
               waitWorkers,
               timeout}} {}

@@ -36,7 +36,7 @@ class Stream(torch._C._CudaStreamBase, _StreamBase):
             with torch.cuda.device(device):
                 return super().__new__(cls, priority=priority, **kwargs)
 
-    def wait_event(self, event):
+    def wait_event(self, event) -> None:
         r"""Make all future work submitted to the stream wait for an event.
 
         Args:
@@ -53,7 +53,7 @@ class Stream(torch._C._CudaStreamBase, _StreamBase):
         """
         event.wait(self)
 
-    def wait_stream(self, stream):
+    def wait_stream(self, stream) -> None:
         r"""Synchronize with another stream.
 
         All future work submitted to this stream will wait until all kernels
@@ -82,7 +82,7 @@ class Stream(torch._C._CudaStreamBase, _StreamBase):
         event.record(self)
         return event
 
-    def query(self):
+    def query(self) -> bool:
         r"""Check if all the work submitted has been completed.
 
         Returns:
@@ -90,7 +90,7 @@ class Stream(torch._C._CudaStreamBase, _StreamBase):
         """
         return super().query()
 
-    def synchronize(self):
+    def synchronize(self) -> None:
         r"""Wait for all the kernels in this stream to complete.
 
         .. note:: This is a wrapper around ``cudaStreamSynchronize()``: see
@@ -102,7 +102,7 @@ class Stream(torch._C._CudaStreamBase, _StreamBase):
     def _as_parameter_(self):
         return ctypes.c_void_p(self.cuda_stream)
 
-    def __eq__(self, o):
+    def __eq__(self, o) -> bool:
         if isinstance(o, Stream):
             return super().__eq__(o)
         return False
@@ -128,7 +128,7 @@ class ExternalStream(Stream):
         stream_ptr(int): Integer representation of the `cudaStream_t` value.
             allocated externally.
         device(torch.device or int, optional): the device where the stream
-            was originally allocated. if device is specified incorrectly,
+            was originally allocated. If device is specified incorrectly,
             subsequent launches using this stream may fail.
     """
 
@@ -183,7 +183,7 @@ class Event(torch._C._CudaEventBase, _EventBase):
             stream = torch.cuda.current_stream()
         super().record(stream)
 
-    def wait(self, stream=None):
+    def wait(self, stream=None) -> None:
         r"""Make all future work submitted to the given stream wait for this event.
 
         Use ``torch.cuda.current_stream()`` if no stream is specified.
@@ -212,7 +212,7 @@ class Event(torch._C._CudaEventBase, _EventBase):
         """
         return super().elapsed_time(end_event)
 
-    def synchronize(self):
+    def synchronize(self) -> None:
         r"""Wait for the event to complete.
 
         Waits until the completion of all work currently captured in this event.
@@ -234,7 +234,7 @@ class Event(torch._C._CudaEventBase, _EventBase):
     def _as_parameter_(self):
         return ctypes.c_void_p(self.cuda_event)
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         if self.cuda_event:
             return f"<torch.cuda.Event {self._as_parameter_.value:#x}>"
         else:

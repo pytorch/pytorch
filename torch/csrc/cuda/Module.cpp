@@ -956,8 +956,8 @@ static void registerCudaDeviceProperties(PyObject* module) {
   m.def(
       "_cuda_record_memory_history",
       static_cast<void (*)(
-          c10::optional<std::string>,
-          c10::optional<std::string>,
+          std::optional<std::string>,
+          std::optional<std::string>,
           const std::string&,
           size_t)>(torch::cuda::_record_memory_history));
 

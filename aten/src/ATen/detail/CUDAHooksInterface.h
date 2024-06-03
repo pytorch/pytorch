@@ -62,7 +62,7 @@ constexpr const char* CUDA_HELP =
 struct TORCH_API CUDAHooksInterface : AcceleratorHooksInterface {
   // This should never actually be implemented, but it is used to
   // squelch -Werror=non-virtual-dtor
-  virtual ~CUDAHooksInterface() override = default;
+  ~CUDAHooksInterface() override = default;
 
   // Initialize THCState and, transitively, the CUDA state
   virtual void initCUDA() const {
@@ -101,6 +101,10 @@ struct TORCH_API CUDAHooksInterface : AcceleratorHooksInterface {
     return false;
   }
 
+  virtual bool hasCuBLASLt() const {
+    return false;
+  }
+
   virtual bool hasROCM() const {
     return false;
   }
@@ -109,7 +113,7 @@ struct TORCH_API CUDAHooksInterface : AcceleratorHooksInterface {
     TORCH_CHECK(false, "NVRTC requires CUDA. ", CUDA_HELP);
   }
 
-  virtual bool hasPrimaryContext(DeviceIndex device_index) const override {
+  bool hasPrimaryContext(DeviceIndex device_index) const override {
     TORCH_CHECK(false, "Cannot call hasPrimaryContext(", device_index, ") without ATen_cuda library. ", CUDA_HELP);
   }
 

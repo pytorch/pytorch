@@ -10,18 +10,31 @@ from contextlib import nullcontext
 from copy import deepcopy
 from enum import auto, Enum
 from functools import partial, wraps
-from typing import Any, Callable, Dict, no_type_check, Optional, Tuple, Type, Union
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    List,
+    no_type_check,
+    Optional,
+    Tuple,
+    Type,
+    Union,
+)
 from unittest import mock
 
 import torch
 import torch.distributed as dist
 import torch.nn as nn
 import torch.nn.functional as F
+from torch.distributed._composable import checkpoint
+from torch.distributed._composable.fsdp import fully_shard
 from torch.distributed._composable.fsdp._fsdp_param_group import (
     FSDPParamGroup,
     RegisterPostBackwardFunction,
 )
 from torch.distributed._tensor import distribute_tensor, DTensor, Shard
+from torch.distributed.device_mesh import DeviceMesh
 from torch.distributed.fsdp import CPUOffload, FullyShardedDataParallel as FSDP
 from torch.distributed.fsdp._common_utils import TrainingState
 from torch.distributed.fsdp._init_utils import NO_RESHARD_AFTER_FORWARD_STRATEGIES
@@ -32,6 +45,12 @@ from torch.distributed.fsdp.fully_sharded_data_parallel import (
 )
 from torch.distributed.fsdp.sharded_grad_scaler import ShardedGradScaler
 from torch.distributed.fsdp.wrap import always_wrap_policy, ModuleWrapPolicy, wrap
+from torch.distributed.tensor.parallel import (
+    ColwiseParallel,
+    parallelize_module,
+    RowwiseParallel,
+    SequenceParallel,
+)
 from torch.nn import TransformerDecoderLayer, TransformerEncoderLayer
 from torch.nn.parallel.distributed import DistributedDataParallel as DDP
 from torch.testing._internal.common_distributed import (
@@ -829,12 +848,14 @@ class MLP(nn.Module):
         self,
         dim: int,
         device: Optional[torch.device] = None,
+        *,
+        bias: bool = True,
         with_buffer: bool = False,
         dim_multiplier: int = 4,
     ):
         super().__init__()
-        self.in_proj = nn.Linear(dim, dim_multiplier * dim, device=device)
-        self.out_proj = nn.Linear(dim_multiplier * dim, dim, device=device)
+        self.in_proj = nn.Linear(dim, dim_multiplier * dim, device=device, bias=bias)
+        self.out_proj = nn.Linear(dim_multiplier * dim, dim, device=device, bias=bias)
         if with_buffer:
             self.register_buffer("buffer", torch.randn((dim,), device=device))
         else:
@@ -852,6 +873,51 @@ class MLP(nn.Module):
     def reset_parameters(self):
         if self.buffer is not None:
             torch.nn.init.normal_(self.buffer)
+
+
+class MLPStack(nn.Sequential):
+    def __init__(self, mlp_dim: int, *, with_seq_parallel: bool = False):
+        modules: List[nn.Module] = [
+            # Use multiplier of 3 to exercise uneven case
+            MLP(mlp_dim, dim_multiplier=3),
+            MLP(mlp_dim),
+            MLP(mlp_dim, dim_multiplier=3),
+        ]
+        if with_seq_parallel:
+            modules.append(nn.LayerNorm(mlp_dim, bias=False))
+        super().__init__(*modules)
+        self.with_seq_parallel = with_seq_parallel
+
+    def parallelize(
+        self,
+        tp_mesh: DeviceMesh,
+        dp_mesh: DeviceMesh,
+        use_activation_checkpointing: bool,
+        **fsdp_kwargs,
+    ) -> "MLPStack":
+        parallelize_plan = {
+            # Pass `use_local_output=False` to keep as DTensor to preserve
+            # uneven activation dims
+            "0.in_proj": ColwiseParallel(use_local_output=False),
+            "0.out_proj": RowwiseParallel(use_local_output=False),
+            "1.in_proj": ColwiseParallel(use_local_output=False),
+            "1.out_proj": RowwiseParallel(use_local_output=False),
+            "2.in_proj": ColwiseParallel(use_local_output=False),
+            "2.out_proj": RowwiseParallel(output_layouts=Shard(1))
+            if self.with_seq_parallel
+            else RowwiseParallel(),
+        }
+        if self.with_seq_parallel:
+            parallelize_plan["3"] = SequenceParallel(sequence_dim=1)
+        parallelize_module(self, device_mesh=tp_mesh, parallelize_plan=parallelize_plan)
+        for module in self:
+            if isinstance(module, nn.LayerNorm):
+                continue
+            if use_activation_checkpointing:
+                checkpoint(module)
+            fully_shard(module, mesh=dp_mesh, **fsdp_kwargs)
+        fully_shard(self, mesh=dp_mesh, **fsdp_kwargs)
+        return self
 
 
 class DoubleLinear(nn.Module):
@@ -903,6 +969,18 @@ def patch_reduce_scatter(new_reduce_scatter_tensor: Callable):
     finally:
         dist.barrier()
         dist.reduce_scatter_tensor = orig_reduce_scatter
+
+
+@contextlib.contextmanager
+def patch_all_reduce(new_all_reduce: Callable):
+    orig_all_reduce = dist.all_reduce
+    dist.barrier()
+    dist.all_reduce = new_all_reduce
+    try:
+        yield
+    finally:
+        dist.barrier()
+        dist.all_reduce = orig_all_reduce
 
 
 @no_type_check

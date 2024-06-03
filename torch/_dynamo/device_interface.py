@@ -39,7 +39,7 @@ class DeviceInterface(metaclass=DeviceInterfaceMeta):
 
     class device:
         def __new__(cls, device: _device_t):
-            raise NotImplementedError()
+            raise NotImplementedError
 
     class Worker:
         """
@@ -51,71 +51,71 @@ class DeviceInterface(metaclass=DeviceInterfaceMeta):
 
         @staticmethod
         def set_device(device: int):
-            raise NotImplementedError()
+            raise NotImplementedError
 
         @staticmethod
         def current_device() -> int:
-            raise NotImplementedError()
+            raise NotImplementedError
 
         @staticmethod
         def get_device_properties(device: _device_t = None):
-            raise NotImplementedError()
+            raise NotImplementedError
 
     @staticmethod
     def current_device():
-        raise NotImplementedError()
+        raise NotImplementedError
 
     @staticmethod
     def set_device(device: _device_t):
-        raise NotImplementedError()
+        raise NotImplementedError
 
     @staticmethod
     def maybe_exchange_device(device: int) -> int:
-        raise NotImplementedError()
+        raise NotImplementedError
 
     @staticmethod
     def exchange_device(device: int) -> int:
-        raise NotImplementedError()
+        raise NotImplementedError
 
     @staticmethod
     def device_count():
-        raise NotImplementedError()
+        raise NotImplementedError
 
     @staticmethod
     def is_available() -> bool:
-        raise NotImplementedError()
+        raise NotImplementedError
 
     @staticmethod
     def stream(stream: torch.Stream):
-        raise NotImplementedError()
+        raise NotImplementedError
 
     @staticmethod
     def current_stream():
-        raise NotImplementedError()
+        raise NotImplementedError
 
     @staticmethod
     def set_stream(stream: torch.Stream):
-        raise NotImplementedError()
+        raise NotImplementedError
 
     @staticmethod
     def _set_stream_by_id(stream_id: int, device_index: int, device_type: int):
-        raise NotImplementedError()
+        raise NotImplementedError
 
     @staticmethod
     def get_raw_stream():
-        raise NotImplementedError()
+        raise NotImplementedError
 
     @staticmethod
     def synchronize(device: _device_t = None):
-        raise NotImplementedError()
+        raise NotImplementedError
 
     @staticmethod
     def get_device_properties(device: _device_t = None):
-        raise NotImplementedError()
+        raise NotImplementedError
 
     @staticmethod
     def get_compute_capability(device: _device_t = None):
-        raise NotImplementedError()
+        raise NotImplementedError
 
 
 class DeviceGuard:
@@ -202,8 +202,11 @@ class CudaInterface(DeviceInterface):
 
     @staticmethod
     def get_compute_capability(device: _device_t = None):
-        major, min = torch.cuda.get_device_capability(device)
-        return major * 10 + min
+        if torch.version.hip is None:
+            major, min = torch.cuda.get_device_capability(device)
+            return major * 10 + min
+        else:
+            return torch.cuda.get_device_properties(device).gcnArchName.split(":", 1)[0]
 
 
 get_xpu_stream: Optional[Callable[[int], int]]

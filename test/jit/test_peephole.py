@@ -274,7 +274,7 @@ class TestPeephole(JitTestCase):
         @torch.jit.script
         def foo(x: List[int], y: List[int]):
             if len(x) != 4 or len(y) != 5:
-                raise Exception("")
+                raise Exception("")  # noqa: TRY002
 
             return len(x) + len(y)
 
@@ -288,7 +288,7 @@ class TestPeephole(JitTestCase):
             if len(x) == 4 and len(y) == 5:
                 pass
             else:
-                raise Exception("hi")
+                raise Exception("hi")  # noqa: TRY002
 
             return len(x) + len(y)
 
@@ -300,15 +300,15 @@ class TestPeephole(JitTestCase):
         @torch.jit.script
         def foo(x: List[int], y: List[int], z: List[int]):
             if len(x) != 4:
-                raise Exception("..")
+                raise Exception("..")  # noqa: TRY002
             else:
                 if len(y) != 8:
-                    raise Exception("...")
+                    raise Exception("...")  # noqa: TRY002
                 else:
                     if len(z) == 3:
                         pass
                     else:
-                        raise Exception("...")
+                        raise Exception("...")  # noqa: TRY002
 
             return len(x) + len(y) * len(z)
 
@@ -458,7 +458,7 @@ class TestPeephole(JitTestCase):
         @torch.jit.script
         def foo(x: int, y: int):
             if x != 4 or y != 5:
-                raise Exception("")
+                raise Exception("")  # noqa: TRY002
 
             return x + y
 
@@ -477,7 +477,7 @@ class TestPeephole(JitTestCase):
             if x == 4 and y == 5:
                 pass
             else:
-                raise Exception("hi")
+                raise Exception("hi")  # noqa: TRY002
 
             return x + y
 
@@ -489,15 +489,15 @@ class TestPeephole(JitTestCase):
         @torch.jit.script
         def foo(x: int, y: int, z: int):
             if x != 4:
-                raise Exception("..")
+                raise Exception("..")  # noqa: TRY002
             else:
                 if y != 8:
-                    raise Exception("...")
+                    raise Exception("...")  # noqa: TRY002
                 else:
                     if z == 3:
                         pass
                     else:
-                        raise Exception("...")
+                        raise Exception("...")  # noqa: TRY002
 
             return x + y * z
 

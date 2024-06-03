@@ -180,7 +180,7 @@ void serialize(serialize::InputArchive& archive, Optimizer& optimizer) {
   detail::serialize<DerivedOptimizerParamOptions>(
       param_groups_archive, saved_param_groups);
 
-  // update state
+  // update state and optimizer options
   TORCH_CHECK(
       saved_param_groups.size() == optimizer.param_groups().size(),
       "loaded state dict has a different number of parameter groups");
@@ -199,6 +199,12 @@ void serialize(serialize::InputArchive& archive, Optimizer& optimizer) {
             std::move(saved_state[param_group_old_key]);
       }
     }
+
+    auto& saved_options = reinterpret_cast<DerivedOptimizerParamOptions&>(
+        *saved_param_groups[i].second);
+    auto& current_options = reinterpret_cast<DerivedOptimizerParamOptions&>(
+        optimizer.param_groups()[i].options());
+    current_options = saved_options;
   }
 }
 

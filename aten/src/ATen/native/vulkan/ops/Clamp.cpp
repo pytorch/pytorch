@@ -11,8 +11,8 @@ using namespace api::utils;
 
 Tensor _clamp(
     const Tensor& self_arg,
-    const c10::optional<Scalar>& min,
-    const c10::optional<Scalar>& max,
+    const std::optional<Scalar>& min,
+    const std::optional<Scalar>& max,
     const api::ShaderInfo& shader_descriptor) {
   TORCH_CHECK(min || max, "At least one of 'min' or 'max' must not be None");
 
@@ -96,15 +96,15 @@ Tensor _clamp(
 
 Tensor clamp(
     const Tensor& self_arg,
-    const c10::optional<Scalar>& min,
-    const c10::optional<Scalar>& max) {
+    const std::optional<Scalar>& min,
+    const std::optional<Scalar>& max) {
   return _clamp(self_arg, min, max, VK_KERNEL(clamp));
 }
 
 Tensor& _clamp_(
     Tensor& self_arg,
-    const c10::optional<Scalar>& min,
-    const c10::optional<Scalar>& max,
+    const std::optional<Scalar>& min,
+    const std::optional<Scalar>& max,
     const api::ShaderInfo& shader_descriptor) {
   TORCH_CHECK(min || max, "At least one of 'min' or 'max' must not be None");
 
@@ -186,8 +186,8 @@ Tensor threshold(
 
 Tensor& clamp_(
     Tensor& self,
-    const c10::optional<Scalar>& min,
-    const c10::optional<Scalar>& max) {
+    const std::optional<Scalar>& min,
+    const std::optional<Scalar>& max) {
   return _clamp_(self, min, max, VK_KERNEL(clamp_));
 }
 

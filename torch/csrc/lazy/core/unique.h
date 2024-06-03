@@ -49,7 +49,7 @@ class Unique {
   }
 
  private:
-  c10::optional<T> value_;
+  std::optional<T> value_;
 };
 
 } // namespace lazy
