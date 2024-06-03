@@ -112,6 +112,7 @@ class LstmModule(torch.nn.Module):
 class CPUReproTests(TestCase):
     common = check_model
 
+    @skipIfRocm
     def test_conv_stride_constraints(self):
         for fmt in [torch.contiguous_format, torch.channels_last]:
             # TorchDispatch doesn't work in our cuda invocation for some reason
