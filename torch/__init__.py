@@ -672,7 +672,7 @@ for __name in (
     __fn.__qualname__ = __fn.__name__ = __sym_name
     globals()[__sym_name] = __fn
 
-del __fn, __name, __sym_name, _get_sym_math_fn  # type: ignore[possibly-undefined]
+del __fn, __name, __sym_name, _get_sym_math_fn
 
 # Adding temporary shortcut
 sym_sqrt = globals()["_sym_sqrt"]
