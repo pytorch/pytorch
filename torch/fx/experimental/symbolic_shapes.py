@@ -2199,7 +2199,7 @@ class DimConstraints:
 
                 buf += (
                     f"Specializations unexpectedly required ({', '.join(sorted(debug_names))})! "
-                    "For more information, run with TORCH_LOGS=\"+dynamic\".\n"
+                    'For more information, run with TORCH_LOGS="+dynamic".\n'
                 )
                 for s, val in forced_specializations.items():
                     buf += f"  - {s} must be specialized to {val} because the guards generated for it are too complex.\n"
@@ -3539,7 +3539,7 @@ class ShapeEnv:
             if not is_debug:
                 maybe_more_info = (
                     ", for more info run with "
-                    f"TORCHDYNAMO_EXTENDED_DEBUG_CREATE_SYMBOL=\"{sympy_expr}\""
+                    f'TORCHDYNAMO_EXTENDED_DEBUG_CREATE_SYMBOL="{sympy_expr}"'
                 )
             fsummary, maybe_user_loc, maybe_extra_debug = self._get_stack_summary(is_debug)
             self.log.info(
@@ -4156,7 +4156,7 @@ class ShapeEnv:
                 err = '\n'.join(error_msgs)
                 raise ConstraintViolationError(
                     f"Constraints violated ({debug_names})! "
-                    "For more information, run with TORCH_LOGS=\"+dynamic\".\n"
+                    'For more information, run with TORCH_LOGS="+dynamic".\n'
                     f"{err}"
                 )
             elif len(warn_msgs) > 0:
@@ -4609,7 +4609,7 @@ class ShapeEnv:
             f"{size_oblivious_result_msg}"
             "Potential framework code culprit (scroll up for full backtrace):\n"
             f"{''.join(traceback.StackSummary.from_list([fsummary]).format())}\n"
-            "For more information, run with TORCH_LOGS=\"dynamic\"\n"
+            'For more information, run with TORCH_LOGS="dynamic"\n'
             "For extended logs when we create symbols, also add "
             f"TORCHDYNAMO_EXTENDED_DEBUG_CREATE_SYMBOL=\"{','.join(map(str, expr.free_symbols))}\"\n"
             "If you suspect the guard was triggered from C++, add TORCHDYNAMO_EXTENDED_DEBUG_CPP=1\n"
@@ -5010,7 +5010,7 @@ class ShapeEnv:
             if not is_debug:
                 maybe_more_info = (
                     ", for more info run with "
-                    f"TORCHDYNAMO_EXTENDED_DEBUG_GUARD_ADDED=\"{str_g}\""
+                    f'TORCHDYNAMO_EXTENDED_DEBUG_GUARD_ADDED="{str_g}"'
                 )
             self.log.info(
                 "%s %s [guard added]%s (%s)%s%s",
