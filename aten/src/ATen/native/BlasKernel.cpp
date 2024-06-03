@@ -119,7 +119,9 @@ bool scal_use_fast_path(C10_UNUSED int64_t n, C10_UNUSED int64_t incx) {
 
 template <typename scalar_t>
 bool gemv_use_fast_path(C10_UNUSED int64_t m, C10_UNUSED int64_t n,
-                        C10_UNUSED int64_t lda, C10_UNUSED int64_t incx, C10_UNUSED int64_t incy) {
+                        C10_UNUSED scalar_t alpha, C10_UNUSED int64_t lda,
+                        C10_UNUSED int64_t incx, C10_UNUSED scalar_t beta,
+                        C10_UNUSED int64_t incy) {
   return false;
 }
 
@@ -138,7 +140,7 @@ void gemv_fast_path(C10_UNUSED const char *trans, C10_UNUSED const int *m, C10_U
 
 #define INSTANTIATE(scalar_t)                                                                                                                                                     \
 template bool scal_use_fast_path<scalar_t>(int64_t n, int64_t incx);                                                                                                              \
-template bool gemv_use_fast_path<scalar_t>(int64_t m, int64_t n, int64_t lda, int64_t incx, int64_t incy);                                                                        \
+template bool gemv_use_fast_path<scalar_t>(int64_t m, int64_t n, scalar_t alpha, int64_t lda, int64_t incx, scalar_t beta, int64_t incy); \
 template void gemv_fast_path<scalar_t>(const char *trans, const int *m, const int *n, const scalar_t *alpha, const scalar_t *a, const int *lda, const scalar_t *x, const int *incx, const scalar_t *beta, scalar_t *y, const int *incy);      \
 template void scal_fast_path<scalar_t>(int *n, scalar_t *a, scalar_t *x, int *incx);
 
@@ -165,15 +167,15 @@ void scal_fast_path<float>(int *n, float *a, float *x, int *incx) {
 }
 
 template <>
-bool gemv_use_fast_path<float>(int64_t m, int64_t n, int64_t lda, int64_t incx, int64_t incy) {
+bool gemv_use_fast_path<float>(int64_t m, int64_t n, C10_UNUSED float alpha, int64_t lda, int64_t incx, C10_UNUSED float beta, int64_t incy) {
   auto intmax = std::numeric_limits<int>::max();
   return (m <= intmax) && (n <= intmax) && (lda <= intmax) &&
          (incx > 0) && (incx <= intmax) && (incy > 0) && (incy <= intmax);
 }
 
 template <>
-bool gemv_use_fast_path<double>(int64_t m, int64_t n, int64_t lda, int64_t incx, int64_t incy) {
-  return gemv_use_fast_path<float>(m, n, lda, incx, incy);
+bool gemv_use_fast_path<double>(int64_t m, int64_t n, C10_UNUSED double alpha, int64_t lda, int64_t incx, C10_UNUSED double beta, int64_t incy) {
+  return gemv_use_fast_path<float>(m, n, (float)alpha, lda, incx, (float)beta, incy);
 }
 
 template <>
@@ -206,10 +208,13 @@ template <>
 bool gemv_use_fast_path<at::Half>(
     C10_UNUSED int64_t m,
     C10_UNUSED int64_t n,
+    at::Half alpha,
     C10_UNUSED int64_t lda,
     C10_UNUSED int64_t incx,
+    at::Half beta,
     C10_UNUSED int64_t incy) {
-  return true;
+  return incx == 1 && c10::detail::fp16_from_bits(alpha.x) == 1.0f &&
+    c10::detail::fp16_from_bits(beta.x) == 0.0f;
 }
 
 #ifdef __ARM_FEATURE_FP16_SCALAR_ARITHMETIC
@@ -501,26 +506,13 @@ void fp16_gemv_trans(
     const float beta,
     float16_t* y,
     const int incy) {
-  if (incx == 1 && alpha == 1.0 && beta == 0.0) {
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(incx == 1 && alpha == 1.0 && beta == 0.0);
 #ifdef __ARM_FEATURE_FP16_SCALAR_ARITHMETIC
-    if (at::globalContext().allowFP16ReductionCPU()) {
-      return fp16_gemv_trans_fp16_arith_by_dot_products(m, n, a, lda, x, y, incy);
-    }
+  if (at::globalContext().allowFP16ReductionCPU()) {
+    return fp16_gemv_trans_fp16_arith_by_dot_products(m, n, a, lda, x, y, incy);
+  }
 #endif
-    return fp16_gemv_trans_fp32_arith_by_dot_products(m, n, a, lda, x, y, incy);
-  }
-  for (const auto i : c10::irange(n)) {
-    float sum = 0;
-    const auto row_ = a + lda * i;
-    for (const auto j : c10::irange(m)) {
-      sum += x[j * incx] * row_[j];
-    }
-    if (beta == 0.0) {
-      y[i * incy] = alpha * sum;
-    } else {
-      y[i * incy] = beta * y[i * incy] + alpha * sum;
-    }
-  }
+  return fp16_gemv_trans_fp32_arith_by_dot_products(m, n, a, lda, x, y, incy);
 }
 
 
@@ -670,7 +662,7 @@ void gemv(char trans, int64_t m, int64_t n, scalar_t alpha, const scalar_t *a, i
   if(n == 1) lda = m;
 
 #if AT_BUILD_WITH_BLAS()
-  if (blas_impl::gemv_use_fast_path<scalar_t>(m, n, lda, incx, incy)) {
+  if (blas_impl::gemv_use_fast_path<scalar_t>(m, n, alpha, lda, incx, beta, incy)) {
     TORCH_CHECK(lda >= std::max<int64_t>(1L, m), "lda should be at least max(1,", m, "), but have ", lda);
     int i_m = (int)m;
     int i_n = (int)n;
