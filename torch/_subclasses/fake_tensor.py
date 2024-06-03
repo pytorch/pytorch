@@ -311,9 +311,12 @@ class FakeTensorConverter:
         if isinstance(t, torch._subclasses.functional_tensor.FunctionalTensor):
             t_func = t.elem
             assert torch._is_functional_tensor(t_func)
+            reapply_views = torch._C._functionalization_reapply_views_tls()
+            unwrapped = torch._C._functorch._unwrap_functional_tensor(t_func, reapply_views)
+
             out = self.from_real_tensor(
                 fake_mode,
-                torch._from_functional_tensor(t_func),
+                unwrapped,
                 make_constant=make_constant,
                 shape_env=shape_env,
                 source=source,
