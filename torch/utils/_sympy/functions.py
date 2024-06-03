@@ -356,9 +356,10 @@ class CeilDiv(sympy.Function):
     is_integer = True
 
     def __new__(cls, base, divisor):
-        # int base/divisor grandfathered in
-        assert isinstance(base, int) or base.is_integer, base
-        assert isinstance(divisor, int) or divisor.is_integer, divisor
+        base = sympy.sympify(base)
+        divisor = sympy.sympify(divisor)
+        assert base.is_integer, base
+        assert divisor.is_integer, divisor
         if sympy.gcd(base, divisor) == divisor:
             return CleanDiv(base, divisor)
         else:
