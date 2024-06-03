@@ -1,6 +1,5 @@
 from ._ops import OpOverload
 from typing import Any, Optional, Set, List, Union, Callable, Tuple, Dict, Sequence
-from typing_extensions import deprecated
 import traceback
 import torch
 import weakref
@@ -9,6 +8,7 @@ import inspect
 import re
 import contextlib
 import sys
+import warnings
 from torch._library.custom_ops import custom_op, _maybe_get_opdef, device_types_t, CustomOpDef
 import torch._library as _library
 
@@ -109,22 +109,8 @@ class Library:
         assert self.m is not None
         if isinstance(tags, torch.Tag):
             tags = (tags,)
-
-        name = schema.split("(")[0]
-        packet_name = name.split(".")[0] if "." in name else name
-        has_preexisting_packet = hasattr(torch.ops, self.ns) and hasattr(getattr(torch.ops, self.ns), packet_name)
-
         result = self.m.define(schema, alias_analysis, tuple(tags))
-        name = schema.split("(")[0]
-        qualname = self.ns + "::" + name
-
-        # If the OpOverloadPacket exists already, then this means we're adding a
-        # new OpOverload for it. Refresh the packet to include the new OpOverload.
-        if has_preexisting_packet:
-            ns = getattr(torch.ops, self.ns)
-            packet = getattr(ns, packet_name)
-            torch._ops._refresh_packet(packet)
-
+        qualname = self.ns + "::" + schema.split("(")[0]
         self._op_defs.add(qualname)
         _defs.add(qualname)
         return result
@@ -465,15 +451,15 @@ def _(lib: Library, name, dispatch_key=""):
     return wrap
 
 
-@deprecated(
-    "`torch.library.impl_abstract` was renamed to `torch.library.register_fake`. Please use that "
-    "instead; we will remove `torch.library.impl_abstract` in a future version of PyTorch.",
-    category=FutureWarning,
-)
 def impl_abstract(qualname, func=None, *, lib=None, _stacklevel=1):
     r"""This API was renamed to :func:`torch.library.register_fake` in PyTorch 2.4.
     Please use that instead.
     """
+    warnings.warn("torch.library.impl_abstract was renamed to "
+                  "torch.library.register_fake. Please use that instead; "
+                  "we will remove torch.library.impl_abstract in a future "
+                  "version of PyTorch.",
+                  DeprecationWarning, stacklevel=2)
     if func is not None:
         _stacklevel = _stacklevel + 1
     return register_fake(qualname, func, lib=lib, _stacklevel=_stacklevel)
@@ -570,7 +556,7 @@ def register_fake(
     This API may be used as a decorator (see examples).
 
     For a detailed guide on custom ops, please see
-    https://docs.google.com/document/d/1W--T6wz8IY8fOI0Vm8BF44PdBgs283QvpelJZWieQWQ/edit
+    https://pytorch.org/docs/main/notes/custom_operators.html
 
     Examples:
         >>> import torch
