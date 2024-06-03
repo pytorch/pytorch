@@ -1,4 +1,4 @@
-name: inductor-A100-perf-nightly
+name: inductor-CPU-perf-nightly
 
 on:
   schedule:
@@ -9,50 +9,20 @@ on:
   workflow_dispatch:
     inputs:
       training:
-        description: Run training (on by default)?
+        description: Run training (off by default)?
         required: false
         type: boolean
-        default: true
+        default: false
       inference:
-        description: Run inference (off by default)?
-        required: false
-        type: boolean
-        default: false
-      default:
-        description: Run inductor_default?
-        required: false
-        type: boolean
-        default: false
-      dynamic:
-        description: Run inductor_dynamic_shapes?
-        required: false
-        type: boolean
-        default: false
-      cudagraphs:
-        description: Run inductor_cudagraphs?
+        description: Run inference (on by default)?
         required: false
         type: boolean
         default: true
-      freezing_cudagraphs:
-        description: Run inductor_cudagraphs with freezing for inference?
+      inductor_cpu:
+        description: Run inductor_cpu?
         required: false
         type: boolean
-        default: false
-      freeze_autotune_cudagraphs:
-        description: Run inductor_cudagraphs with freezing and max autotune for inference?
-        required: false
-        type: boolean
-        default: false
-      aotinductor:
-        description: Run aot_inductor for inference?
-        required: false
-        type: boolean
-        default: false
-      maxautotune:
-        description: Run inductor_max_autotune?
-        required: false
-        type: boolean
-        default: false
+        default: true
       benchmark_configs:
         description: The list of configs used the benchmark
         required: false
@@ -66,72 +36,71 @@ concurrency:
 permissions: read-all
 
 jobs:
-  linux-focal-cuda12_1-py3_10-gcc9-inductor-build:
-    name: cuda12.1-py3.10-gcc9-sm80
+  linux-focal-cpu-py3_10-gcc9-inductor-build:
+    name: cpu-py3.10-gcc9
     uses: ./.github/workflows/_linux-build.yml
     with:
-      build-environment: linux-focal-cuda12.1-py3.10-gcc9-sm80
-      docker-image-name: pytorch-linux-focal-cuda12.1-cudnn8-py3-gcc9-inductor-benchmarks
-      cuda-arch-list: '8.0'
+      build-environment: linux-focal-cpu-py3.10-gcc9
+      docker-image-name: pytorch-linux-focal-py3.8-gcc9
       test-matrix: |
         { include: [
-          { config: "inductor_huggingface_perf", shard: 1, num_shards: 3, runner: "linux.gcp.a100.large" },
-          { config: "inductor_huggingface_perf", shard: 2, num_shards: 3, runner: "linux.gcp.a100.large" },
-          { config: "inductor_huggingface_perf", shard: 3, num_shards: 3, runner: "linux.gcp.a100.large" },
-          { config: "inductor_timm_perf", shard: 1, num_shards: 5, runner: "linux.gcp.a100.large" },
-          { config: "inductor_timm_perf", shard: 2, num_shards: 5, runner: "linux.gcp.a100.large" },
-          { config: "inductor_timm_perf", shard: 3, num_shards: 5, runner: "linux.gcp.a100.large" },
-          { config: "inductor_timm_perf", shard: 4, num_shards: 5, runner: "linux.gcp.a100.large" },
-          { config: "inductor_timm_perf", shard: 5, num_shards: 5, runner: "linux.gcp.a100.large" },
-          { config: "inductor_torchbench_perf", shard: 1, num_shards: 4, runner: "linux.gcp.a100.large" },
-          { config: "inductor_torchbench_perf", shard: 2, num_shards: 4, runner: "linux.gcp.a100.large" },
-          { config: "inductor_torchbench_perf", shard: 3, num_shards: 4, runner: "linux.gcp.a100.large" },
-          { config: "inductor_torchbench_perf", shard: 4, num_shards: 4, runner: "linux.gcp.a100.large" },
+          { config: "inductor_huggingface_perf", shard: 1, num_shards: 3, runner: "linux.24xl.spr-metal" },
+          { config: "inductor_huggingface_perf", shard: 2, num_shards: 3, runner: "linux.24xl.spr-metal" },
+          { config: "inductor_huggingface_perf", shard: 3, num_shards: 3, runner: "linux.24xl.spr-metal" },
+          { config: "inductor_timm_perf", shard: 1, num_shards: 5, runner: "linux.24xl.spr-metal" },
+          { config: "inductor_timm_perf", shard: 2, num_shards: 5, runner: "linux.24xl.spr-metal" },
+          { config: "inductor_timm_perf", shard: 3, num_shards: 5, runner: "linux.24xl.spr-metal" },
+          { config: "inductor_timm_perf", shard: 4, num_shards: 5, runner: "linux.24xl.spr-metal" },
+          { config: "inductor_timm_perf", shard: 5, num_shards: 5, runner: "linux.24xl.spr-metal" },
+          { config: "inductor_torchbench_perf", shard: 1, num_shards: 4, runner: "linux.24xl.spr-metal" },
+          { config: "inductor_torchbench_perf", shard: 2, num_shards: 4, runner: "linux.24xl.spr-metal" },
+          { config: "inductor_torchbench_perf", shard: 3, num_shards: 4, runner: "linux.24xl.spr-metal" },
+          { config: "inductor_torchbench_perf", shard: 4, num_shards: 4, runner: "linux.24xl.spr-metal" },
         ]}
       selected-test-configs: ${{ inputs.benchmark_configs }}
     secrets:
       HUGGING_FACE_HUB_TOKEN: ${{ secrets.HUGGING_FACE_HUB_TOKEN }}
 
   linux-focal-cuda12_1-py3_10-gcc9-inductor-test-nightly:
-    name: cuda12.1-py3.10-gcc9-sm80
+    name: cpu-py3.10-gcc9
     uses: ./.github/workflows/_linux-test.yml
-    needs: linux-focal-cuda12_1-py3_10-gcc9-inductor-build
+    needs: linux-focal-cpu-py3_10-gcc9-inductor-build
     if: github.event.schedule == '0 7 * * 1-6'
     with:
-      build-environment: linux-focal-cuda12.1-py3.10-gcc9-sm80
-      dashboard-tag: training-true-inference-true-default-true-dynamic-true-cudagraphs-true-aotinductor-true-freezing_cudagraphs-true-cudagraphs_low_precision-true
-      docker-image: ${{ needs.linux-focal-cuda12_1-py3_10-gcc9-inductor-build.outputs.docker-image }}
-      test-matrix: ${{ needs.linux-focal-cuda12_1-py3_10-gcc9-inductor-build.outputs.test-matrix }}
+      build-environment: linux-focal-cpu-py3.10-gcc9
+      dashboard-tag: training-true-inference-true-inductor_cpu-true
+      docker-image: ${{ needs.linux-focal-cpu-py3_10-gcc9-inductor-build.outputs.docker-image }}
+      test-matrix: ${{ needs.linux-focal-cpu-py3_10-gcc9-inductor-build.outputs.test-matrix }}
       use-gha: anything-non-empty-to-use-gha
       timeout-minutes: 720
     secrets:
       HUGGING_FACE_HUB_TOKEN: ${{ secrets.HUGGING_FACE_HUB_TOKEN }}
 
   linux-focal-cuda12_1-py3_10-gcc9-inductor-test-weekly:
-    name: cuda12.1-py3.10-gcc9-sm80
+    name: cpu-py3.10-gcc9
     uses: ./.github/workflows/_linux-test.yml
-    needs: linux-focal-cuda12_1-py3_10-gcc9-inductor-build
+    needs: linux-focal-cpu-py3_10-gcc9-inductor-build
     if: github.event.schedule == '0 7 * * 0'
     with:
-      build-environment: linux-focal-cuda12.1-py3.10-gcc9-sm80
-      dashboard-tag: training-true-inference-true-default-true-dynamic-true-cudagraphs-true-aotinductor-true-freezing_cudagraphs-true-maxautotune-true-freeze_autotune_cudagraphs-true-cudagraphs_low_precision-true
-      docker-image: ${{ needs.linux-focal-cuda12_1-py3_10-gcc9-inductor-build.outputs.docker-image }}
-      test-matrix: ${{ needs.linux-focal-cuda12_1-py3_10-gcc9-inductor-build.outputs.test-matrix }}
+      build-environment: linux-focal-cpu-py3.10-gcc9
+      dashboard-tag: training-true-inference-true-inductor_cpu-true
+      docker-image: ${{ needs.linux-focal-cpu-py3_10-gcc9-inductor-build.outputs.docker-image }}
+      test-matrix: ${{ needs.linux-focal-cpu-py3_10-gcc9-inductor-build.outputs.test-matrix }}
       use-gha: anything-non-empty-to-use-gha
       timeout-minutes: 1440
     secrets:
       HUGGING_FACE_HUB_TOKEN: ${{ secrets.HUGGING_FACE_HUB_TOKEN }}
 
   linux-focal-cuda12_1-py3_10-gcc9-inductor-test:
-    name: cuda12.1-py3.10-gcc9-sm80
+    name: cpu-py3.10-gcc9
     uses: ./.github/workflows/_linux-test.yml
-    needs: linux-focal-cuda12_1-py3_10-gcc9-inductor-build
+    needs: linux-focal-cpu-py3_10-gcc9-inductor-build
     if: github.event_name == 'workflow_dispatch'
     with:
-      build-environment: linux-focal-cuda12.1-py3.10-gcc9-sm80
-      dashboard-tag: training-${{ inputs.training }}-inference-${{ inputs.inference }}-default-${{ inputs.default }}-dynamic-${{ inputs.dynamic }}-cudagraphs-${{ inputs.cudagraphs }}-cppwrapper-false-aotinductor-${{ inputs.aotinductor }}-maxautotune-${{ inputs.maxautotune }}-freezing_cudagraphs-${{ inputs.freezing_cudagraphs }}-cudagraphs_low_precision-${{ inputs.cudagraphs }}
-      docker-image: ${{ needs.linux-focal-cuda12_1-py3_10-gcc9-inductor-build.outputs.docker-image }}
-      test-matrix: ${{ needs.linux-focal-cuda12_1-py3_10-gcc9-inductor-build.outputs.test-matrix }}
+      build-environment: linux-focal-cpu-py3.10-gcc9
+      dashboard-tag: training-${{ inputs.training }}-inference-${{ inputs.inference }}-inductor_cpu-${{ inputs.inductor_cpu }}
+      docker-image: ${{ needs.linux-focal-cpu-py3_10-gcc9-inductor-build.outputs.docker-image }}
+      test-matrix: ${{ needs.linux-focal-cpu-py3_10-gcc9-inductor-build.outputs.test-matrix }}
       use-gha: anything-non-empty-to-use-gha
       timeout-minutes: 720
     secrets:
