@@ -1267,7 +1267,7 @@ def _legacy_load(f, map_location, pickle_module, **pickle_load_args):
     if not hasattr(f, 'readinto') and (3, 8, 0) <= sys.version_info < (3, 8, 2):
         raise RuntimeError(
             "torch.load does not work with file-like objects that do not implement readinto on Python 3.8.0 and 3.8.1. "
-            f"Received object of type \"{type(f)}\". Please update to Python 3.8.2 or newer to restore this "
+            f'Received object of type "{type(f)}". Please update to Python 3.8.2 or newer to restore this '
             "functionality.")
 
     magic_number = pickle_module.load(f, **pickle_load_args)

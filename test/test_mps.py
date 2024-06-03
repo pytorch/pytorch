@@ -144,6 +144,10 @@ def mps_ops_grad_modifier(ops):
 
         # round not working properly for float16
         'round': [torch.float16],
+
+        # atomic operation in backward pass
+        '_unsafe_masked_index': [torch.float16],
+        '_unsafe_masked_index_put_accumulate': [torch.float16],
     }
 
     MACOS_12_3_XFAILLIST_GRAD = {
@@ -351,6 +355,7 @@ def mps_ops_modifier(ops):
         '__rdiv__',
         '__rmatmul__',
         '_chunk_cat',
+        '_unsafe_masked_index',
         'acos',
         'acosh',
         'all',
@@ -905,6 +910,9 @@ def mps_ops_modifier(ops):
 
         # round not working properly for float16
         'round': [torch.float16],
+
+        # atomic operations not supported
+        '_unsafe_masked_index_put_accumulate': [torch.bool, torch.int8, torch.uint8, torch.float16, torch.int16, torch.int64],
     }
 
     if product_version < 14.0:
