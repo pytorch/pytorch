@@ -557,7 +557,7 @@ class TestPasses(TestCase):
             ep.graph, torch.ops.aten._assert_scalar.default
         )
 
-        self.assertEqual(num_assert, 2)
+        self.assertEqual(num_assert, 3)
 
         with self.assertRaisesRegex(
             RuntimeError,

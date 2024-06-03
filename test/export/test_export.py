@@ -152,6 +152,7 @@ RETRACEABILITY_SUFFIX = "_retraceability"
 SERDES_SUFFIX = "_serdes"
 PREDISPATCH_SUFFIX = "_pre_dispatch"
 
+
 def is_non_strict_test(test_name):
     return test_name.endswith(NON_STRICT_SUFFIX)
 
@@ -3456,7 +3457,9 @@ def forward(self, x):
             "torch.ops.aten.sym_constrain_range.default", 1, exactly=True
         ).run(ep.graph_module.code)
         num_occurrences = 1
-        if is_non_strict_test(self._testMethodName) or is_serdes_test(self._testMethodName):
+        if is_non_strict_test(self._testMethodName) or is_serdes_test(
+            self._testMethodName
+        ):
             num_occurrences = 2
         FileCheck().check_count(
             "torch.ops.aten._assert_scalar.default", num_occurrences, exactly=True
