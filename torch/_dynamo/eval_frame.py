@@ -800,6 +800,7 @@ def explain(f, *extra_args, **extra_kwargs):
             "If you don't migrate, we may break your explain call in the future if your user defined kwargs "
             "conflict with future kwargs added to explain(f).",
             FutureWarning,
+            stacklevel=2,
         )
         return inner(*extra_args, **extra_kwargs)
     else:
@@ -1479,6 +1480,7 @@ def export(
             "If you don't migrate, we may break your export call in the future if your user defined kwargs "
             "conflict with future kwargs added to export(f).",
             FutureWarning,
+            stacklevel=2,
         )
         return inner(*extra_args, **extra_kwargs)
     else:
