@@ -491,6 +491,11 @@ test_perf_for_dashboard() {
         cp "$TEST_REPORTS_DIR/${backend}_with_cudagraphs_${suite}_${dtype}_${mode}_cuda_${target}.csv" \
           "$TEST_REPORTS_DIR/${backend}_cudagraphs_low_precision_${suite}_quant_${mode}_cuda_${target}.csv"
       fi
+      if [[ "$DASHBOARD_TAG" == *inductor_cpu-true* ]]; then
+        python "benchmarks/dynamo/$suite.py" \
+            "${target_flag[@]}" --"$mode" --"$dtype" --backend "$backend" -dcpu "$@" --freezing \
+            --output "$TEST_REPORTS_DIR/${backend}_cpu_${suite}_${dtype}_${mode}_${target}.csv"
+      fi
     done
   done
 }
