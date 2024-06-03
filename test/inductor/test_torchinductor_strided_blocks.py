@@ -1,3 +1,4 @@
+import contextlib
 import functools
 import importlib
 import torch
@@ -17,7 +18,7 @@ from torch.testing._internal.common_utils import (
     subtest,
 )
 from torch._inductor.utils import run_and_get_code
-from typing import Any, Callable, Tuple, Type, Union
+from typing import Any, Callable, Iterable, Optional, Tuple, Type
 import unittest
 
 
@@ -28,10 +29,20 @@ skip_windows_ci(__name__, __file__)
 importlib.import_module("filelock")
 
 
+@requires_gpu()
+@config.patch("triton.use_block_ptr", True)
 @instantiate_parametrized_tests
 class TritonBlockPointerTest(InductorTestCase):
 
-    def run_and_compare(self, func: Callable[..., Any], *args, compile_kwargs: dict = None):
+    def count_block_pointers(self, code: Iterable[str]) -> int:
+        return sum(prog.count("tl.make_block_ptr") for prog in code)
+
+    def run_and_compare(self,
+                        func: Callable[..., Any],
+                        *args,
+                        compile_kwargs: Optional[dict] = None,
+                        expected_num_block_pointers: Optional[int] = None,
+                        expected_num_programs: int = 1):
         """
         Runs the module through Inductor, comparing to eager reference.
         """
@@ -48,13 +59,43 @@ class TritonBlockPointerTest(InductorTestCase):
         result, code = run_and_get_code(compiled, *args)
         actual_tensors = flatten_tensors(result)
 
+        # Check numerical accuracy
         for ref, actual in zip(ref_tensors, actual_tensors):
             self.assertTrue(torch.allclose(ref, actual))
 
+        # Check the code
+        self.assertEqual(len(code), expected_num_programs)
+        num_block_pointers = sum(prog.count("tl.make_block_ptr") for prog in code)
+        if expected_num_block_pointers is not None:
+            self.assertEqual(num_block_pointers, expected_num_block_pointers)
+
         return result, code
 
-    @requires_gpu()
-    @config.patch("triton.use_block_ptr", True)
+    @parametrize(
+        "expected_num_block_pointers,raises",
+        [
+            (3, False), # This should pass
+            (9, True), # This should fail
+        ]
+    )
+    def test_expected_num_block_pointers(self, expected_num_block_pointers: int, raises: bool):
+        """
+        Checks that the test harness verifies the number of block pointers correctly.
+        """
+        def foo(x, y):
+            return x + y
+
+        device = torch.device(GPU_TYPE)
+        inputs = [torch.randn(8).to(device) for arg_idx in range(2)]
+
+        # Allow failure for bad inputs
+        with (self.assertRaises(AssertionError) if raises
+              else contextlib.nullcontext()):
+            # Expect 3 block pointers: 2 inputs 1 output
+            self.run_and_compare(foo, *inputs,
+                expected_num_block_pointers = expected_num_block_pointers
+            )
+
     @parametrize(
         "full_size,view_size,stride,offset,require_block_ptr",
         [
@@ -72,8 +113,8 @@ class TritonBlockPointerTest(InductorTestCase):
     def test_strided_block_ptr(self,
                                full_size: Tuple[int],
                                view_size: Tuple[int],
-                               stride: Union[Tuple[int], None],
-                               offset: Union[int, None],
+                               stride: Optional[Tuple[int]],
+                               offset: Optional[int],
                                require_block_ptr: bool):
         """
         Test generating strided ND block pointers.
@@ -85,11 +126,8 @@ class TritonBlockPointerTest(InductorTestCase):
         """
         def view(full: torch.Tensor):
             # Use the original tensor's stride by default
-            nonlocal stride
-            if stride is None:
-                stride = full.stride()
-
-            return torch.as_strided(full, view_size, stride, storage_offset=offset)
+            view_stride = full.stride() if stride is None else stride
+            return torch.as_strided(full, view_size, view_stride, storage_offset=offset)
 
         def foo(x, y):
             x, y = tuple(view(tensor) for tensor in (x, y))
@@ -98,15 +136,11 @@ class TritonBlockPointerTest(InductorTestCase):
         device = torch.device(GPU_TYPE)
         args = [torch.randn(full_size).to(device) for arg_idx in range(2)]
 
-        result, (code,) = self.run_and_compare(foo, *args)
+        # Expect 3 block pointers: 2 inputs 1 output
+        self.run_and_compare(foo, *args,
+            expected_num_block_pointers = 3 if require_block_ptr else None
+        )
 
-        # Optionally check for block pointers
-        if require_block_ptr:
-            num_block_ptrs = code.count("tl.make_block_ptr")
-            self.assertEqual(num_block_ptrs, 3)
-
-    @requires_gpu()
-    @config.patch("triton.use_block_ptr", True)
     def test_different_sized_blocks(self):
         """
         Test that we can generate strided block pointers when inputs have different
@@ -125,14 +159,9 @@ class TritonBlockPointerTest(InductorTestCase):
         # Check that input sizes are not the same
         self.assertNotEqual(x_size, y_size)
 
-        result, (code,) = self.run_and_compare(foo, x, y)
-
         # Expect 4 block pointers: 2 inputs and 2 outputs
-        num_block_ptrs = code.count("tl.make_block_ptr")
-        self.assertEqual(num_block_ptrs, 4)
+        self.run_and_compare(foo, x, y, expected_num_block_pointers=4)
 
-    @requires_gpu()
-    @config.patch("triton.use_block_ptr", True)
     def test_partial_block_pointer(self):
         """
         Test mixing block pointers with non-structured pointers.
@@ -146,14 +175,9 @@ class TritonBlockPointerTest(InductorTestCase):
         full = torch.randn(full_size).to(device)
         view = torch.as_strided(full, view_size, full.stride())
 
-        result, (code,) = self.run_and_compare(foo, full, view)
-
         # Expect 1 block pointer: view
-        num_block_ptrs = code.count("tl.make_block_ptr")
-        self.assertEqual(num_block_ptrs, 1)
+        self.run_and_compare(foo, full, view, expected_num_block_pointers=1)
 
-    @requires_gpu()
-    @config.patch("triton.use_block_ptr", True)
     def test_multiple_max_block_non_power_of_2(self):
         """
         Check that we support dims of size n * MAX_BLOCK, where n is any positive integer, not
@@ -177,14 +201,9 @@ class TritonBlockPointerTest(InductorTestCase):
         nontrivial_dims = [dim for dim in view_size if dim > 1]
         self.assertTrue(len(nontrivial_dims) > 1)
 
-        result, (code,) = self.run_and_compare(foo, view)
-
         # Expect 2 block pointers: input and output
-        num_block_ptrs = code.count("tl.make_block_ptr")
-        self.assertEqual(num_block_ptrs, 2)
+        self.run_and_compare(foo, view, expected_num_block_pointers=2)
 
-    @requires_gpu()
-    @config.patch("triton.use_block_ptr", True)
     def test_dynamic_shapes_generic(self):
         """
         Test a generic strided block with dynamic shapes. Block pointers are not
@@ -199,11 +218,9 @@ class TritonBlockPointerTest(InductorTestCase):
         full = torch.randn(full_size).to(device)
         view = torch.as_strided(full, view_size, full.stride())
 
-        result, (code,) = self.run_and_compare(foo, view, view, compile_kwargs={'dynamic': True})
+        self.run_and_compare(foo, view, view, compile_kwargs={'dynamic': True})
 
     @unittest.skip(reason="Dynamo tracing error")
-    @requires_gpu()
-    @config.patch("triton.use_block_ptr", True)
     def test_dynamic_shapes_multiple_max_block(self):
         """
         Test dynamic shapes, where we know the shape is a multiple of the max block
@@ -224,11 +241,9 @@ class TritonBlockPointerTest(InductorTestCase):
         x_size = (1, 1)
         x = torch.randn(x_size).to(device)
 
-        result, (code,) = self.run_and_compare(x, compile_kwargs={'dynamic': True})
-
         # Expect 3 block pointers: 2 inputs and output
-        num_block_ptrs = code.count("tl.make_block_ptr")
-        self.assertEqual(num_block_ptrs, 3)
+        self.run_and_compare(x, compile_kwargs={'dynamic': True},
+                                               expected_num_block_pointers=3)
 
 
 if __name__ == "__main__":
