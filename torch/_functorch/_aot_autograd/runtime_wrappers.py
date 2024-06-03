@@ -7,7 +7,6 @@ This module defines runtime wrappers, which, based on previous analysis attempts
 """
 import collections
 import pprint
-import time
 from contextlib import nullcontext
 from dataclasses import dataclass, field
 from functools import wraps
@@ -24,7 +23,6 @@ from torch._guards import (
     tracing,
     TracingContext,
 )
-from torch._logging import trace_structured
 
 from torch._prims_common import CUDARngStateHelper
 from torch._subclasses import FakeTensor
@@ -1801,41 +1799,9 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                         with tracing(saved_context), compile_context(
                             saved_compile_context
                         ), context(), track_graph_compiling(aot_config, "backward"):
-                            fail_type: Optional[str] = None
-                            fail_reason: Optional[str] = None
-                            start_time = time.time()
-                            try:
-                                CompiledFunction.compiled_bw = aot_config.bw_compiler(
-                                    bw_module, placeholder_list
-                                )
-                            except Exception as e:
-                                fail_type = str(type(e))
-                                fail_reason = str(e)
-                                if saved_compile_context is not None:
-                                    e.compile_id = saved_compile_context.compile_id  # type: ignore[attr-defined]
-                                raise
-                            finally:
-                                # TODO: Similar to CompilationMetrics, we would
-                                # like to report inductor_compile_time, but we
-                                # cannot conveniently do so because these are
-                                # keyed on utils.frame, and frame key is not
-                                # incremented on backwards compilations.  Maybe
-                                # should just bump the frame key here too?
-                                end_time = time.time()
-                                # TODO: Put this in scuba?  But CompilationMetrics
-                                # is kind of not a great match, because there's no
-                                # interaction with Dynamo, so a lot of Dynamo only
-                                # events don't exist anymore.  So we need a new
-                                # scuba table. Lazy lazy...
-                                trace_structured(
-                                    "aot_autograd_backward_compilation_metrics",
-                                    lambda: {
-                                        "start_time": start_time,
-                                        "elapsed_time": time.time() - start_time,
-                                        "fail_type": fail_type,
-                                        "fail_reason": fail_reason,
-                                    },
-                                )
+                            CompiledFunction.compiled_bw = aot_config.bw_compiler(
+                                bw_module, placeholder_list
+                            )
 
                     out = call_func_at_runtime_with_args(
                         CompiledFunction.compiled_bw,
