@@ -435,8 +435,8 @@ class TestXpuAutocast(TestCase):
         mat0_fp32 = torch.randn((10, 10), dtype=torch.float32, device="xpu")
         mat1_fp32 = torch.randn((10, 10), dtype=torch.float32, device="xpu")
         with torch.amp.autocast("xpu"):
-            mm = torch.mm(mat0_fp32, mat1_fp32)
-            self.assertEqual(mm.dtype, torch.float16)
+            result = torch.mm(mat0_fp32, mat1_fp32)
+            self.assertEqual(result.dtype, torch.float16)
 
 
 class TestXpuTrace(TestCase):
