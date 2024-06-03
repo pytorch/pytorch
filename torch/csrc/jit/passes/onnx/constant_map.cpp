@@ -44,7 +44,7 @@ void ConstantValueMap::SetAllGraphInputsStatic(bool all_static) {
       c10::make_optional(all_static);
 }
 
-c10::optional<bool> ConstantValueMap::GetAllGraphInputsStatic() {
+std::optional<bool> ConstantValueMap::GetAllGraphInputsStatic() {
   return ConstantValueMap::getInstance().allGraphInputsStatic;
 }
 
