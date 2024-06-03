@@ -37,6 +37,8 @@ successful match or a `FailedMatch` object for a failure to match.
 
 from __future__ import annotations
 
+import contextlib
+
 import dataclasses
 import functools
 import importlib
@@ -224,17 +226,22 @@ class Match:
         trace_fn: Optional[TraceFn] = None,
         run_dce: bool = True,
     ) -> None:
-        if trace_fn is None:
-            trace_fn = functools.partial(fwd_only, run_dce=run_dce)
-        replacement = trace_fn(
-            replacement_fn, torch.fx.map_arg(args, lambda arg: arg.meta["val"])
-        )
-        ReplacementPatternEntry.replace_with_graph(
-            self,
-            self.ctx.graph,
-            replacement,
-            args,
-        )
+        from torch._inductor.virtualized import V
+
+        context = V.fake_mode if V.fake_mode is not None else contextlib.nullcontext
+
+        with context:
+            if trace_fn is None:
+                trace_fn = functools.partial(fwd_only, run_dce=run_dce)
+            replacement = trace_fn(
+                replacement_fn, torch.fx.map_arg(args, lambda arg: arg.meta["val"])
+            )
+            ReplacementPatternEntry.replace_with_graph(
+                self,
+                self.ctx.graph,
+                replacement,
+                args,
+            )
 
 
 class FailedMatch(RuntimeError):
@@ -787,6 +794,7 @@ class MultiOutputPattern(PatternExpr):
 
     @property
     def fns(self) -> Union[Callable[..., Any], str, Sequence[Any]]:
+        # This cast is checked above in __init__()
         output = typing.cast(_TargetExpr, self.outputs[0])
         return output.fns
 
