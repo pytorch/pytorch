@@ -58,7 +58,7 @@ from torch._inductor.runtime.compile_tasks import (
 )
 from torch._inductor.runtime.hints import HalideMeta
 from torch._inductor.runtime.runtime_utils import cache_dir
-from torch._inductor.utils import clear_on_fresh_inductor_cache, is_linux
+from torch._inductor.utils import ALIGN_BYTES, clear_on_fresh_inductor_cache, is_linux
 
 from torch._logging import trace_structured
 from torch._subclasses.fake_tensor import (
@@ -1961,14 +1961,10 @@ class AotCodeCompiler:
                 # to be linked.
                 rename_data = " .data=.lrodata,alloc,load,readonly,data,contents"
 
-            from .codegen.memory_planning import ALIGN_BYTES
-
-            # following the gAlignment of CPU in c10/core/alignment.h
-            assert ALIGN_BYTES == 64, "Expect ALIGN_BYTES to be 64 for CPU"
             cmd = (
                 f"{objcopy_command} --rename-section"
                 f"{rename_data}"
-                f" --set-section-alignment .data={ALIGN_BYTES}"
+                f" --set-section-alignment .data={ALIGN_BYTES}"  # following the gAlignment of CPU in c10/core/alignment.h
                 f" {consts_o} {consts_o}"
             )
             log.debug("aot constant rename section command: %s", cmd)
@@ -2094,8 +2090,6 @@ class AotCodeCompiler:
 
             def _to_bytes(t: torch.Tensor) -> bytes:
                 def _pad_to_alignment(raw_bytes):
-                    from .codegen.memory_planning import ALIGN_BYTES
-
                     padded_bytes = raw_bytes.ljust(
                         (len(raw_bytes) + ALIGN_BYTES - 1) // ALIGN_BYTES * ALIGN_BYTES,
                         b"\x00",

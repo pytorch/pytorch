@@ -15,7 +15,7 @@ import torch._ops
 from torch.fx.experimental.symbolic_shapes import ConvertIntKey, DivideByKey
 from .. import config, ir
 from ..codecache import CudaKernelParamCache
-from ..utils import cache_on_self, sympy_product
+from ..utils import ALIGN_BYTES, cache_on_self, sympy_product
 from ..virtualized import V
 from .aoti_hipify_utils import maybe_hipify_code_wrapper
 from .common import IndentedBuffer
@@ -238,8 +238,6 @@ class CppWrapperCpu(WrapperCodeGen):
                 };
                 """
             )
-
-        from .memory_planning import ALIGN_BYTES
 
         # Round up to the nearest multiple of ALIGN_BYTES
         # ALIGN_BYTES must be a power of 2
