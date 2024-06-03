@@ -1,6 +1,4 @@
-import io
-import multiprocessing.queues
-import pickle
+import io, multiprocessing.queues, pickle
 from multiprocessing.reduction import ForkingPickler
 
 
