@@ -73,7 +73,9 @@ def handlers():
         sympy.Pow: "pow_by_natural",
         Mod: "mod",
         PythonMod: "mod",  # TODO: this is wrong
-        # TODO: You shouldn't ever hit this one
+        # TODO: Inductor can generate these, but it's ill-specified which
+        # semantics were intended here.  Needs to be cleaned up along with
+        # FloorDiv in a bigger cleanup
         sympy.Mod: "mod",
         sympy.Abs: "abs",
         sympy.log: "log",

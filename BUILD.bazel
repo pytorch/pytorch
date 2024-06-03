@@ -488,10 +488,7 @@ filegroup(
 filegroup(
     name = "caffe2_utils_srcs",
     srcs = [
-        "caffe2/utils/bench_utils.cc",
         "caffe2/utils/cpuid.cc",
-        "caffe2/utils/murmur_hash3.cc",
-        "caffe2/utils/proto_utils.cc",
         "caffe2/utils/proto_wrap.cc",
         "caffe2/utils/string_utils.cc",
         "caffe2/utils/threadpool/ThreadPool.cc",
@@ -544,7 +541,6 @@ cc_library(
         ],
     ) + if_cuda(glob([
         "caffe2/**/*.cuh",
-        "caffe2/image/*.h",
     ])),
     copts = CAFFE2_COPTS,
     visibility = ["//visibility:public"],
@@ -552,7 +548,6 @@ cc_library(
         ":caffe2_core_macros",
         ":caffe2_for_aten_headers",
         "//caffe2/proto:caffe2_pb",
-        "//caffe2/proto:cc_proto",
     ],
 )
 
@@ -574,7 +569,6 @@ cc_library(
         ":caffe2_perfkernels_avx2",
         ":caffe2_perfkernels_avx512",
         "//caffe2/proto:caffe2_pb",
-        "//caffe2/proto:cc_proto",
         "//third_party/miniz-2.1.0:miniz",
         "@com_google_protobuf//:protobuf",
         "@eigen",
@@ -782,7 +776,6 @@ cc_library(
     deps = [
         ":caffe2",
         ":torch_headers",
-        "//caffe2/proto:torch_cc_proto",
         "@kineto",
     ] + if_cuda([
         "@cuda//:nvToolsExt",
