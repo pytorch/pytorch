@@ -135,6 +135,7 @@ test_failures = {
     "test_zeros_dynamic_shapes": TestFailure(("cpu",)),
     "test_uint_dynamic_shapes": TestFailure(("cpu",)),
     "test_issue102546_dynamic_shapes": TestFailure(("cpu",)),
+    "test_repeat_as_strided_dynamic_shapes": TestFailure(("cpu",)),
     #
     # Failed to find for loop/triton kernel:
     #

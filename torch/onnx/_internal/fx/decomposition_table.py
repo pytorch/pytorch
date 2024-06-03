@@ -111,4 +111,12 @@ def create_onnx_friendly_decomposition_table(
         ):
             continue
         decomposition_table[op_overload] = decomp_fn
+
+    # NOTE: There are ops in core ATen and under torch._refs,
+    # that are not decomposed to prim::ops. We need to pick them
+    # back
+    for op_overload, decomp_fn in torch._decomp.core_aten_decompositions().items():
+        if op_overload in _ONNX_SUPPORT_OP_OVERLOADS:
+            continue
+        decomposition_table[op_overload] = decomp_fn
     return decomposition_table
