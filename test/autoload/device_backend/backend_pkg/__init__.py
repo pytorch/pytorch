@@ -4,6 +4,11 @@ import os
 os.environ["IS_CUSTOM_DEVICE_BACKEND_IMPORTED"] = "true"
 
 
-def autoload():
-    # do nothing in this entry point
+def apply_patch():
+    # Do something here
+    return "success"
+
+
+def _autoload():
+    # Do nothing in this entry point
     pass

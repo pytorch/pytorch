@@ -2114,7 +2114,11 @@ from . import _logging
 _logging._init_logs()
 
 
-def import_device_backends():
+def _import_device_backends():
+    """
+    Leverage the Python plugin mechanism to load out-of-the-tree device extensions.
+    See this RFC: https://github.com/pytorch/pytorch/issues/122468
+    """
     if sys.version_info < (3, 10):
         from importlib_metadata import entry_points
     else:
@@ -2122,17 +2126,29 @@ def import_device_backends():
 
     for backend_extension in entry_points(group='torch.backends'):
         try:
-            # just load the extension without calling
+            # Just load the extension without calling
             backend_extension.load()
         except Exception as err:
             print(f"Failed to load the backend extension: {backend_extension.name}")
 
 
-def is_device_backend_autoload_enabled() -> bool:
+def _is_device_backend_autoload_enabled() -> bool:
+    """
+    Whether to enbale autoloading out-of-the-tree device extensions.
+    The switch depends on the value of the environment variable
+    `TORCH_DEVICE_BACKEND_AUTOLOAD`.
+
+    Returns:
+        bool: Whether to enable autoloading the extensions. Enabled by default.
+
+    Examples:
+        >>> torch._is_device_backend_autoload_enabled()
+        Ture
+    """
     # enabled by default
     is_enable = os.getenv("TORCH_DEVICE_BACKEND_AUTOLOAD", "1")
     return is_enable.strip().lower() in ("1", "true", "yes", "on", "y")
 
 
-if is_device_backend_autoload_enabled():
-    import_device_backends()
+if _is_device_backend_autoload_enabled():
+    _import_device_backends()

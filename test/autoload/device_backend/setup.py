@@ -6,7 +6,7 @@ setup(
     packages=find_packages(),
     entry_points={
         "torch.backends": [
-            "device_backend = backend_pkg:autoload",
+            "device_backend = backend_pkg:_autoload",
         ],
     },
 )
