@@ -1582,7 +1582,6 @@ exclude_patterns = [
     'torch/distributed/tensor/parallel/input_reshard.py',
     'torch/distributed/tensor/parallel/multihead_attention_tp.py',
     'torch/distributed/tensor/parallel/style.py',
-    'torch/distributed/utils.py',
     'torch/fft/__init__.py',
     'torch/func/__init__.py',
     'torch/functional.py',
