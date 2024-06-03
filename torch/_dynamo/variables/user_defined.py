@@ -396,9 +396,6 @@ class UserDefinedClassVariable(UserDefinedVariable):
             return variables.CustomizedDictVariable.create(
                 self.value, args, kwargs, options
             )
-        elif variables.DataClassVariable.is_matching_cls(self.value):
-            options = {"mutable_local": MutableLocal()}
-            return variables.DataClassVariable.create(self.value, args, kwargs, options)
         elif (
             variables.RestrictedListSubclassVariable.is_matching_cls(self.value)
             and self.source

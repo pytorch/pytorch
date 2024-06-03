@@ -6,6 +6,7 @@ import torch.nn
 
 from . import utils, variables
 from .bytecode_transformation import (
+    bytecode_from_template,
     create_call_function,
     create_call_method,
     create_instruction,
@@ -56,6 +57,11 @@ class AttributeMutationNew(AttributeMutation):
     def __init__(self, source: Optional[Source], cls_source: Optional[Source]):
         super().__init__(MutableLocalSource.Local, source)
         self.cls_source = cls_source
+
+
+def _manual_update_dict(dict_from, dict_to):
+    for k, v in dict_from.items():
+        dict_to[k] = v
 
 
 class SideEffects:
@@ -459,6 +465,39 @@ class SideEffects:
                     ]
                 )
                 suffixes.append([create_instruction("STORE_SUBSCR")])
+            elif isinstance(var, variables.CustomizedDictVariable):
+                # need to update the dict manually since update method may be invalid
+                varname_map = {}
+                for name in _manual_update_dict.__code__.co_varnames:
+                    varname_map[name] = cg.tx.output.new_var()
+
+                cg(var.mutable_local.source)  # type: ignore[attr-defined]
+                cg.extend_output(
+                    [create_instruction("STORE_FAST", argval=varname_map["dict_to"])]
+                )
+
+                cg(var, allow_cache=False)
+                cg.extend_output(
+                    [create_instruction("STORE_FAST", argval=varname_map["dict_from"])]
+                )
+
+                cg(var.mutable_local.source)  # type: ignore[attr-defined]
+                cg.extend_output([create_load_method("clear")])
+
+                # unfortunately can't just use DICT_MERGE due to possible custom behaviors
+                dict_update_insts = bytecode_from_template(
+                    _manual_update_dict, varname_map=varname_map
+                )
+
+                suffixes.append(
+                    [
+                        *create_call_method(0),  # clear
+                        create_instruction("POP_TOP"),
+                        *dict_update_insts,
+                        create_instruction("POP_TOP"),
+                    ]
+                )
+
             elif isinstance(var, variables.ConstDictVariable):
                 cg.tx.output.update_co_names("clear")
                 cg.tx.output.update_co_names("update")

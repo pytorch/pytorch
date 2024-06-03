@@ -111,7 +111,7 @@ from .ctx_manager import (
 )
 from .dicts import (
     ConstDictVariable,
-    DataClassVariable,
+    CustomizedDictVariable,
     DefaultDictVariable,
     HFPretrainedConfigVariable,
     PythonSysModulesVariable,
@@ -493,6 +493,10 @@ class VariableBuilder:
         elif value is sys.modules:
             self.install_guards(GuardBuilder.FUNCTION_MATCH)
             return PythonSysModulesVariable(source=self.source)
+        elif CustomizedDictVariable.is_matching_cls_hf(type(value)):
+            self.install_guards(GuardBuilder.TYPE_MATCH)
+            result = CustomizedDictVariable.wrap(self, value)
+            return self.set_source_and_track_mutable(value, result)
         elif istype(value, (dict, collections.defaultdict, collections.OrderedDict)):
             if not value and self.get_source().is_nn_module():
                 # It is faster to guard on 'false' property than to guard
@@ -711,9 +715,6 @@ class VariableBuilder:
             )
         elif np and isinstance(value, np.number):
             return self.wrap_unspecialized_primitive(value)
-        elif DataClassVariable.is_matching_object(value):
-            self.install_guards(GuardBuilder.TYPE_MATCH)
-            return DataClassVariable.wrap(self, value)
         elif HFPretrainedConfigVariable.is_matching_object(value):
             self.install_guards(GuardBuilder.TYPE_MATCH)
             return HFPretrainedConfigVariable(value)
@@ -1684,7 +1685,7 @@ class VariableBuilder:
 def _dataclasses_fields_lambda(obj):
     if isinstance(obj, UserDefinedObjectVariable):
         value = obj.value
-    elif isinstance(obj, DataClassVariable):
+    elif isinstance(obj, CustomizedDictVariable):
         value = obj.user_cls
     else:
         unimplemented(f"Dataclass fields handling fails for type {obj}")
