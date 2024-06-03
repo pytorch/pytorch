@@ -311,7 +311,7 @@ class MultiKernelCall:
         def wrap_fn(kernel):
             def inner():
                 args_clone, kwargs_clone = kernel.clone_args(*args, **kwargs)
-                return kernel.run(*args, **kwargs)
+                return kernel.run(*args_clone, **kwargs_clone)
 
             return inner
 
