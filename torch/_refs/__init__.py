@@ -3613,11 +3613,13 @@ def repeat(a: Tensor, *repeat_shape) -> Tensor:
     # reshape to get contiguous tensor with correct target shape
     return permuted_result.reshape(target_shape)
 
+
 def _nd_to_1d(a: Tensor) -> Tensor:
     torch._check(a.numel() > 0)
     torch._check(a.ndim > 0)
     torch._check(a.is_contiguous())
     return torch.as_strided(a, [a.numel()], [1])
+
 
 def _1d_to_2d(a: Tensor, dim0, dim1) -> Tensor:
     torch._check(a.numel() > 0)
@@ -3627,6 +3629,7 @@ def _1d_to_2d(a: Tensor, dim0, dim1) -> Tensor:
     torch._check_is_size(dim1)
     torch._check(a.numel() == dim0 * dim1)
     return torch.as_strided(a, [dim0, dim1], [dim1, 1])
+
 
 def _reshape_view_helper(a: TensorLikeType, *shape, allow_copy: bool) -> TensorLikeType:
     from torch.fx.experimental.symbolic_shapes import guard_size_oblivious, sym_eq
