@@ -89,10 +89,8 @@ def reduce(
             )
         else:
             warnings.warn(
-                "`nccl.reduce` with an output tensor list is deprecated. "
-                "Please specify a single output tensor with argument 'output' instead instead.",
-                FutureWarning,
-                stacklevel=2,
+                "nccl.reduce with an output tensor list is deprecated. "
+                "Please specify a single output tensor with argument 'output' instead instead."
             )
             _output = outputs[root]
     elif not isinstance(output, torch.Tensor) and isinstance(
@@ -101,9 +99,7 @@ def reduce(
         # User called old API with positional arguments of list of output tensors.
         warnings.warn(
             "nccl.reduce with an output tensor list is deprecated. "
-            "Please specify a single output tensor.",
-            FutureWarning,
-            stacklevel=2,
+            "Please specify a single output tensor."
         )
         _output = output[root]
     else:

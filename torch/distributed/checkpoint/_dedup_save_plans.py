@@ -11,10 +11,7 @@ if TYPE_CHECKING:
 __all__ = ["dedup_save_plans"]
 
 
-def dedup_save_plans(
-    all_plans: List[SavePlan],
-    save_to_lowest_rank: bool = False,
-) -> List[SavePlan]:
+def dedup_save_plans(all_plans: List[SavePlan]) -> List[SavePlan]:
     """
     Removes duplicate entries from appearing on multiple SavePlans. For each duplicate across
     a set of SavePlans, only the smallest SavePlan in terms of planned storage keeps the entry.
@@ -32,12 +29,7 @@ def dedup_save_plans(
     to_remove: List[Set] = [set() for _ in range(len(all_plans))]
     plan_to_size = [0] * len(all_plans)
     for write_item_idx, plan_indices in write_item_to_plan_indices.items():
-        if save_to_lowest_rank:
-            select_plan_idx = min(plan_indices)
-        else:
-            select_plan_idx = min(
-                plan_indices, key=lambda plan_idx: plan_to_size[plan_idx]
-            )
+        select_plan_idx = min(plan_indices, key=lambda plan_idx: plan_to_size[plan_idx])
 
         write_item = write_item_idx_to_write_item[write_item_idx]
         # essentially ignores the storage size of anything that is not a tensor, since
