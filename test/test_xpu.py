@@ -408,7 +408,7 @@ class TestXPUAutocast(TestCase):
             skip_test = False
             op, args = op_with_args[0], op_with_args[1]
             if len(op_with_args) == 3:
-                skip_test = True # skip cudnn op
+                skip_test = True  # skip cudnn op
             if not skip_test:
                 self._run_autocast_outofplace(op, args, torch.float16)
 
@@ -417,7 +417,7 @@ class TestXPUAutocast(TestCase):
             skip_test = False
             op, args = op_with_args[0], op_with_args[1]
             if len(op_with_args) == 3:
-                skip_test = True # skip cudnn op
+                skip_test = True  # skip cudnn op
             if not skip_test:
                 self._run_autocast_outofplace(op, args, torch.bfloat16)
 
