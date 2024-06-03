@@ -10,7 +10,7 @@ from torch.testing._internal.common_utils import run_tests, TestCase
 
 # simple example of user code that takes the base class ControlCollectives
 # and executes multiple different collectives
-def simple_user_func(collectives: dist._ControlCollectives, rank: int) -> None:
+def simple_user_func(collectives: dist._ControlCollectives, rank: int) -> int:
     timeout = timedelta(seconds=10)
     # first a barrier
     collectives.barrier("1", timeout, True)
