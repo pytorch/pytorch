@@ -39,6 +39,9 @@ __all__ = [
     "set_checkpoint_early_stop",
     "DefaultDeviceType",
     "set_checkpoint_debug_enabled",
+    "CheckpointPolicy",
+    "SelectiveCheckpointContext",
+    "gen_selective_checkpoint_context_fn",
 ]
 
 _DEFAULT_DETERMINISM_MODE = "default"
@@ -1273,27 +1276,6 @@ class _CachedTorchDispatchMode(TorchDispatchMode):
             out = func(*args, **kwargs)
         return out
 
-
-def do_not_recompute_matmuls_context_fn():
-    """
-    Utility to avoid recomputing matmuls during activation checkpointing.
-
-    If this function is passed to `torch.utils.checkpoint.checkpoint`'s `context_fn`
-    argument, activation checkpoint will cache matmul ops during forward
-    and not recompute them when forward is run again during backward.
-
-    .. warning::
-        The exact ops included in the policy specified by this function is
-        subject to change. For more control, consider using
-        :func:`gen_selective_checkpoint_context_fn` directly.
-    """
-    # What kind of bc-guarnantees should this function have? We are allowed
-    # to add (or remove?) to/from this list?
-    return gen_selective_checkpoint_context_fn([
-        torch.ops.aten.mm.default,
-        torch.ops.aten.addmm.default,
-        # Any other matmul-like ops?
-    ])
 
 def gen_selective_checkpoint_context_fn(policy_fn_or_list, allow_cache_entry_mutation=False):
     """
