@@ -29,7 +29,7 @@ datatype of ``torch.bfloat16`` only uses :class:`torch.autocast`.
     ``torch.cuda.amp.autocast(args...)`` and ``torch.cpu.amp.autocast(args...)`` will be deprecated. Please use ``torch.autocast("cuda", args...)`` or ``torch.autocast("cpu", args...)`` instead.
     ``torch.cuda.amp.GradScaler(args...)`` and ``torch.cpu.amp.GradScaler(args...)`` will be deprecated. Please use ``torch.GradScaler("cuda", args...)`` or ``torch.GradScaler("cpu", args...)`` instead.
 
-:class:`torch.autocast` are new in version `1.10`. :class:`torch.cpu.amp.autocast` and :class:`torch.cuda.amp.autocast` will be deprecated. 
+:class:`torch.autocast` and :class:`torch.cpu.amp.autocast` are new in version `1.10`.
 
 .. contents:: :local:
 
@@ -269,11 +269,11 @@ Ops not listed below do not go through autocasting.  They run in the type
 defined by their inputs.  However, autocasting may still change the type
 in which unlisted ops run if they're downstream from autocasted ops.
 
-If an op is unlisted, we assume it's numerically stable in ``bfloat16``.
-If you believe an unlisted op is numerically unstable in ``bfloat16``,
+If an op is unlisted, we assume it's numerically stable in ``float16``.
+If you believe an unlisted op is numerically unstable in ``float16``,
 please file an issue.
 
-XPU Ops that can autocast to ``bfloat16``
+XPU Ops that can autocast to ``float16``
 """"""""""""""""""""""""""""""""""""""""
 
 ``__matmul__``,
@@ -307,20 +307,14 @@ XPU Ops that can autocast to ``float32``
 ``__rdiv__``,
 ``__rpow__``,
 ``__rtruediv__``,
-``acos``,
-``asin``,
 ``binary_cross_entropy_with_logits``,
-``cosh``,
 ``cosine_embedding_loss``,
 ``cdist``,
 ``cosine_similarity``,
 ``cross_entropy``,
-``cumprod``,
 ``cumsum``,
 ``dist``,
-``erfinv``,
 ``exp``,
-``expm1``,
 ``group_norm``,
 ``hinge_embedding_loss``,
 ``kl_div``,
@@ -328,68 +322,39 @@ XPU Ops that can autocast to ``float32``
 ``layer_norm``,
 ``log``,
 ``log_softmax``,
-``log10``,
-``log1p``,
-``log2``,
 ``margin_ranking_loss``,
-``mse_loss``,
 ``multilabel_margin_loss``,
-``multi_margin_loss``,
 ``nll_loss``,
-``norm``,
 ``normalize``,
 ``pdist``,
 ``poisson_nll_loss``,
 ``pow``,
-``prod``,
 ``reciprocal``,
 ``rsqrt``,
-``sinh``,
-``smooth_l1_loss``,
 ``soft_margin_loss``,
 ``softmax``,
 ``softmin``,
-``softplus``,
 ``sum``,
-``renorm``,
-``tan``,
 ``triplet_margin_loss``
 
 XPU Ops that promote to the widest input type
 """""""""""""""""""""""""""""""""""""""""""""
 These ops don't require a particular dtype for stability, but take multiple inputs
 and require that the inputs' dtypes match.  If all of the inputs are
-``bfloat16``, the op runs in ``bfloat16``.  If any of the inputs is ``float32``,
+``float16``, the op runs in ``float16``.  If any of the inputs is ``float32``,
 autocast casts all inputs to ``float32`` and runs the op in ``float32``.
 
-``addcdiv``,
-``addcmul``,
-``atan2``,
 ``bilinear``,
 ``cross``,
-``dot``,
 ``grid_sample``,
 ``index_put``,
 ``scatter_add``,
 ``tensordot``
 
 Some ops not listed here (e.g., binary ops like ``add``) natively promote
-inputs without autocasting's intervention.  If inputs are a mixture of ``bfloat16``
+inputs without autocasting's intervention.  If inputs are a mixture of ``float16``
 and ``float32``, these ops run in ``float32`` and produce ``float32`` output,
 regardless of whether autocast is enabled.
-
-Prefer ``binary_cross_entropy_with_logits`` over ``binary_cross_entropy``
-"""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
-The backward passes of :func:`torch.nn.functional.binary_cross_entropy` (and :mod:`torch.nn.BCELoss`, which wraps it)
-can produce gradients that aren't representable in ``bfloat16``.  In autocast-enabled regions, the forward input
-may be ``bfloat16``, which means the backward gradient must be representable in ``bfloat16`` (autocasting ``bfloat16``
-forward inputs to ``float32`` doesn't help, because that cast must be reversed in backward).
-Therefore, ``binary_cross_entropy`` and ``BCELoss`` raise an error in autocast-enabled regions.
-
-Many models use a sigmoid layer right before the binary cross entropy layer.
-In this case, combine the two layers using :func:`torch.nn.functional.binary_cross_entropy_with_logits`
-or :mod:`torch.nn.BCEWithLogitsLoss`.  ``binary_cross_entropy_with_logits`` and ``BCEWithLogits``
-are safe to autocast.
 
 .. _autocast-cpu-op-reference:
 
