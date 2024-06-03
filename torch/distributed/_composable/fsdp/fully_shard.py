@@ -1,7 +1,6 @@
 import functools
-from typing import Any, cast, Optional, Union
 
-import typing_extensions
+from typing import Any, cast, NoReturn, Optional, Union
 
 import torch
 import torch.nn as nn
@@ -142,7 +141,7 @@ def fully_shard(
     return module
 
 
-def unimplemented_deepcopy(*args: Any, **kwargs: Any) -> typing_extensions.Never:
+def unimplemented_deepcopy(*args: Any, **kwargs: Any) -> NoReturn:
     raise AssertionError(
         "FSDP does not support deepcopy. Please use state dict for serialization."
     )
@@ -343,4 +342,8 @@ def register_fsdp_forward_method(module: nn.Module, method_name: str) -> None:
         return fsdp_state._post_forward(self, args, out)
 
     # Use `__get__` to make `wrapped_method` an instance method
-    setattr(module, method_name, wrapped_method.__get__(module, type(module)))
+    setattr(
+        module,
+        method_name,
+        wrapped_method.__get__(module, type(module)),  # type:ignore[attr-defined]
+    )

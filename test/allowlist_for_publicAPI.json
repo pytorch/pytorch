@@ -2027,6 +2027,7 @@
     "uninteresting_files",
     "CallMethodKey",
     "DivideByKey",
+    "InnerTensorKey",
     "PropagateUnbackedSymInts",
     "ShapeEnvSettings",
     "log_lru_cache_stats",

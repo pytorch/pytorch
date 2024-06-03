@@ -1,7 +1,7 @@
 # Owner(s): ["module: inductor"]
+# flake8: noqa: B950
 
 import functools
-import unittest
 from collections import namedtuple
 from typing import Callable, Optional
 
@@ -12,6 +12,7 @@ import torch
 
 from torch._dynamo.testing import CompileCounterWithBackend, normalize_gm
 from torch._higher_order_ops.flex_attention import flex_attention as flex_attention_hop
+from torch._inductor import metrics
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import run_and_get_code
 from torch.nn.attention._flex_attention import (
@@ -143,6 +144,8 @@ class TestFlexAttention(InductorTestCase):
     ):
         compiled_error = (golden_out - compiled_out).abs().mean()
         ref_error = (golden_out - ref_out).abs().mean()
+        if torch.isnan(compiled_error).any() and not torch.isnan(ref_error).any():
+            self.assertTrue(False, "Output/Grad with NaN")
         if compiled_error > ref_error * fudge_factor:
             name = tensor_name if tensor_name is not None else ""
             msg = f"{name} Compiled error {compiled_error} is greater than ref error {ref_error} by more than {fudge_factor}X."
@@ -194,7 +197,7 @@ class TestFlexAttention(InductorTestCase):
             self._check_equal(
                 k_gold.grad, k_ref.grad, k.grad, k_fudge_factor, "Grad_Key"
             )
-            v_fudge_factor = 8 * fudge_factor
+            v_fudge_factor = 4 * fudge_factor
             self._check_equal(
                 v_gold.grad, v_ref.grad, v.grad, v_fudge_factor, "Grad_Value"
             )
@@ -499,9 +502,8 @@ class TestFlexAttention(InductorTestCase):
         )
         query, key, value = make_tensor(), make_tensor(), make_tensor()
         # floor_div is not decomposed in decompostion_table is empty
-        gm = make_fx(_flex_attention, decomposition_table={})(
-            query, key, value, score_mod_func
-        )
+        flex_attention = functools.partial(_flex_attention, score_mod=score_mod_func)
+        gm = make_fx(flex_attention, decomposition_table={})(query, key, value)
         self.assertExpectedInline(
             gm.sdpa_score0.code.strip(),
             """\
@@ -513,8 +515,8 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         )
 
         # floor_div is decomposed for core_aten_decompositions
-        gm = make_fx(_flex_attention, decomposition_table=core_aten_decompositions())(
-            query, key, value, score_mod_func
+        gm = make_fx(flex_attention, decomposition_table=core_aten_decompositions())(
+            query, key, value
         )
         self.assertExpectedInline(
             gm.sdpa_score0.code.strip(),
@@ -528,7 +530,6 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
 
     @supported_platform
     @common_utils.parametrize("dtype", test_dtypes_fast)
-    @unittest.skip("Silu decomp failing for full in backwards")
     def test_silu_on_score(self, dtype):
         def silu_score(score, b, h, q, kv):
             return torch.nn.functional.silu(score)
@@ -644,6 +645,48 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         out = f(query, *keys, *values)
         out2 = torch.compile(f)(query, *keys, *values)
         self.assertTrue((out - out2).abs().mean() < 1e-2)
+
+    @supported_platform
+    def test_inputs_are_realized(self):
+        def f(q, k, v):
+            x = torch.randn(1024, device="cuda")
+            x = x * 2
+
+            def func(qk, b, h, q, kv):
+                return qk + x[q]
+
+            return _flex_attention(q.sin(), k, v, score_mod=func).cos()
+
+        q, k, v = (
+            torch.randn(1, 8, 1024, 64, device="cuda", requires_grad=True)
+            for _ in range(3)
+        )
+        ref = f(q, k, v)
+        out = torch.compile(f)(q, k, v)
+        self.assertTrue((ref - out).abs().mean() < 1e-2)
+        gradOut = torch.randn_like(q)
+
+        ref_grads = torch.autograd.grad(ref, (q, k, v), gradOut)
+        out_grads = torch.autograd.grad(out, (q, k, v), gradOut)
+        for ref, out in zip(ref_grads, out_grads):
+            self.assertTrue((ref - out).abs().mean() < 1e-2)
+
+    @supported_platform
+    def test_epilogue_fused(self):
+        @torch.compile
+        def f(q, k, v):
+            out = _flex_attention(q, k, v)
+            return out.cos()
+
+        q, k, v = (torch.randn(1, 8, 1024, 64, device="cuda") for _ in range(3))
+        metrics.reset()
+        f(q, k, v)
+        accessed_bytes = 1 * 8 * 1024 * 64 * torch.float32.itemsize
+        logsumexp_bytes = 1 * 8 * 1024 * torch.float32.itemsize
+        num_accesses = 4  # q, k, v reads, one output.
+        self.assertEqual(
+            metrics.num_bytes_accessed, accessed_bytes * num_accesses + logsumexp_bytes
+        )
 
     @supported_platform
     @skip("Triton bug ")  # https://github.com/pytorch/pytorch/issues/124571
