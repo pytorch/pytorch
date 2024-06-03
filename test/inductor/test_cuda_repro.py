@@ -1206,8 +1206,8 @@ class CudaReproTests(TestCase):
 
     def test_reflection_pad_loop_order(self):
         def fn(x, y):
-            a = torch.nn.functional.pad(x, (5, 5), mode="reflect")
-            b = torch.nn.functional.pad(y, (5, 5), mode="reflect")
+            a = torch.nn.functional.pad(x, (5, 5, 5, 5), mode="reflect")
+            b = torch.nn.functional.pad(y, (5, 5, 5, 5), mode="reflect")
             return a + b
 
         cfn = torch.compile(fn)
@@ -1218,23 +1218,24 @@ class CudaReproTests(TestCase):
         self.assertEqual(expect, actual)
 
         # Expect the code iterates in contiguous order, and is not tiled
-        kernel_code = "\n".join(code[0].split("\n")[50:63])
+        kernel_code = "\n".join(code[0].split("\n")[50:64])
         self.assertExpectedInline(
             kernel_code,
             """\
 @triton.jit
 def triton_(in_ptr0, in_ptr1, out_ptr0, xnumel, XBLOCK : tl.constexpr):
-    xnumel = 2000
+    xnumel = 4000
     xoffset = tl.program_id(0) * XBLOCK
     xindex = xoffset + tl.arange(0, XBLOCK)[:]
     xmask = xindex < xnumel
     x0 = xindex % 20
-    x1 = (xindex // 20)
-    x2 = xindex
-    tmp0 = tl.load(in_ptr0 + (9 + ((-1)*(tl_math.abs((-9) + (tl_math.abs((-5) + x0))))) + (10*x1)), xmask, eviction_policy='evict_last')
-    tmp1 = tl.load(in_ptr1 + (9 + ((-1)*(tl_math.abs((-9) + (tl_math.abs((-5) + x0))))) + (10*x1)), xmask, eviction_policy='evict_last')
+    x1 = (xindex // 20) % 20
+    x2 = (xindex // 400)
+    x3 = xindex
+    tmp0 = tl.load(in_ptr0 + (99 + ((-1)*(tl_math.abs((-9) + (tl_math.abs((-5) + x0))))) + ((-10)*(tl_math.abs((-9) + (tl_math.abs((-5) + x1))))) + (100*x2)), xmask, eviction_policy='evict_last')
+    tmp1 = tl.load(in_ptr1 + (99 + ((-1)*(tl_math.abs((-9) + (tl_math.abs((-5) + x0))))) + ((-10)*(tl_math.abs((-9) + (tl_math.abs((-5) + x1))))) + (100*x2)), xmask, eviction_policy='evict_last')
     tmp2 = tmp0 + tmp1
-    tl.store(out_ptr0 + (x2), tmp2, xmask)""",  # noqa: B950
+    tl.store(out_ptr0 + (x3), tmp2, xmask)""",  # noqa: B950
         )
 
 
