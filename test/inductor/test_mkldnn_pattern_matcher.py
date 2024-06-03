@@ -249,7 +249,9 @@ class TestPatternMatcherBase(TestCase):
             if num_include_ops is not None:
                 assert len(include_ops) == len(num_include_ops)
                 for i in range(len(include_ops)):
-                    self.assertEqual(source_code.count(include_ops[i]), num_include_ops[i])
+                    self.assertEqual(
+                        source_code.count(include_ops[i]), num_include_ops[i]
+                    )
             for op in exclude_ops:
                 self.assertNotIn(op, source_code)
             if check_dynamic is not None:
@@ -1783,7 +1785,10 @@ class TestPatternMatcher(TestPatternMatcherBase):
                 self._test_code_common(
                     mod,
                     (v,),
-                    ["torch.ops.onednn.qlinear_pointwise.default", "torch.ops.onednn.qlinear_pointwise.binary"],
+                    [
+                        "torch.ops.onednn.qlinear_pointwise.default",
+                        "torch.ops.onednn.qlinear_pointwise.binary",
+                    ],
                     [],
                     check_quantization=True,
                     num_include_ops=[2, 2],
