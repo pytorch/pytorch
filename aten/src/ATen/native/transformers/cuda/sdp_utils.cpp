@@ -18,8 +18,6 @@
 
 #include <c10/core/SymInt.h>
 #include <c10/util/string_view.h>
-#include <cmath>
-#include <functional>
 
 #if USE_ROCM
 #include <aotriton/flash.h>
