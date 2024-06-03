@@ -144,14 +144,14 @@ endif()
 # ---[ BLAS
 
 set(AT_MKLDNN_ACL_ENABLED 0)
+set(AT_MKLDNN_ENABLED 0)
+set(AT_MKL_ENABLED 0)
 # setting default preferred BLAS options if not already present.
 if(NOT DEFINED BLAS)
   if(NOT INTERN_BUILD_MOBILE)
     set(BLAS "MKL" CACHE STRING "Selected BLAS library")
   else()
     set(BLAS "Eigen" CACHE STRING "Selected BLAS library")
-    set(AT_MKLDNN_ENABLED 0)
-    set(AT_MKL_ENABLED 0)
   endif()
 elseif(NOT BLAS STREQUAL "MKL")
     if(USE_MKLDNN)
@@ -245,7 +245,6 @@ else()
 endif()
 
 if(NOT INTERN_BUILD_MOBILE)
-  set(AT_MKL_ENABLED 0)
   set(AT_MKL_SEQUENTIAL 0)
   set(USE_BLAS 1)
   if(NOT (ATLAS_FOUND OR BLIS_FOUND OR GENERIC_BLAS_FOUND OR MKL_FOUND OR OpenBLAS_FOUND OR VECLIB_FOUND OR FlexiBLAS_FOUND OR NVPL_BLAS_FOUND))
@@ -1473,8 +1472,6 @@ if(NOT INTERN_BUILD_MOBILE)
     set(AT_ROCM_ENABLED 1)
   endif()
 
-  set(AT_MKLDNN_ENABLED 0)
-  set(AT_MKLDNN_ACL_ENABLED 0)
   if(USE_MKLDNN)
     if(NOT CMAKE_SIZEOF_VOID_P EQUAL 8)
       message(WARNING

@@ -96,7 +96,8 @@ from torch.testing._comparison import not_close_error_metas
 from torch.testing._internal.common_dtype import get_all_dtypes
 from torch.utils._import_utils import _check_module_exists
 import torch.utils._pytree as pytree
-
+import importlib
+import importlib.util
 try:
     import pytest
     has_pytest = True
@@ -2288,7 +2289,7 @@ def check_if_enable(test: unittest.TestCase):
 
                     print(f"Test {disabled_test} is disabled for some unrecognized ",
                           f"platforms: [{invalid_plats_str}]. Please edit issue {issue_url} to fix the platforms ",
-                          "assigned to this flaky test, changing \"Platforms: ...\" to a comma separated ",
+                          'assigned to this flaky test, changing "Platforms: ..." to a comma separated ',
                           f"subset of the following (or leave it blank to match all platforms): {valid_plats}")
 
                     # Sanitize the platforms list so that we continue to disable the test for any valid platforms given
@@ -4405,8 +4406,8 @@ def check_test_defined_in_running_script(test_case):
     if running_script_path is None:
         return
     test_case_class_file = os.path.abspath(os.path.realpath(inspect.getfile(test_case.__class__)))
-    assert test_case_class_file == running_script_path, f"Class of loaded TestCase \"{test_case.id()}\" " \
-        f"is not defined in the running script \"{running_script_path}\", but in \"{test_case_class_file}\". Did you " \
+    assert test_case_class_file == running_script_path, f'Class of loaded TestCase "{test_case.id()}" ' \
+        f'is not defined in the running script "{running_script_path}", but in "{test_case_class_file}". Did you ' \
         "accidentally import a unittest.TestCase from another file?"
 
 def load_tests(loader, tests, pattern):
@@ -4551,16 +4552,32 @@ def disable_gc():
     else:
         yield
 
+# todo: function is copied over from __init__.py. We should move it to a common
+# place.
+def find_package_path(package_name):
+    spec = importlib.util.find_spec(package_name)
+    if spec:
+        # The package might be a namespace package, so get_data may fail
+        try:
+            loader = spec.loader
+            if loader is not None:
+                file_path = loader.get_filename()  # type: ignore[attr-defined]
+                return Path(os.path.dirname(file_path))
+        except AttributeError:
+            pass
+    return None
 
 def find_library_location(lib_name: str) -> Path:
     # return the shared library file in the installed folder if exist,
     # else the file in the build folder
-    torch_root = Path(torch.__file__).resolve().parent
-    path = torch_root / 'lib' / lib_name
+    lib_root = find_package_path(LIBTORCH_PKG_NAME)
+    if lib_root is None:
+        lib_root = Path(torch.__file__).resolve().parent
+    path = f"{lib_root}/lib/{lib_name}"
     if os.path.exists(path):
         return path
-    torch_root = Path(__file__).resolve().parent.parent.parent
-    return torch_root / 'build' / 'lib' / lib_name
+    lib_root = Path(__file__).resolve().parent.parent.parent
+    return f"{lib_root}/build/lib/{lib_name}"
 
 def skip_but_pass_in_sandcastle(reason):
     """
