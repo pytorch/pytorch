@@ -9,6 +9,7 @@
 import weakref
 
 import pytest
+
 import torch
 
 from torch.distributed.pipeline.sync.dependency import Fork, fork, Join, join
