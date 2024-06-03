@@ -403,6 +403,12 @@ class ExprPrinter(Printer):
         assert len(expr.args) == 1
         return f"align({self._print(expr.args[0])})"
 
+    def doprint(self, expr, *, simplify: bool = True):
+        # TODO: why are people passing strings to the printer here :think:
+        if simplify and isinstance(expr, sympy.Expr) and hasattr(V.graph, "sizevars"):
+            expr = V.graph.sizevars.simplify(expr)
+        return super().doprint(expr)
+
 
 class PythonPrinter(ExprPrinter):
     def _print_ModularIndexing(self, expr):
@@ -517,12 +523,6 @@ class PythonPrinter(ExprPrinter):
         number, ndigits = expr.args
         assert isinstance(ndigits, sympy.Integer)
         return f"round({self._print(number)}, {ndigits})"
-
-    def doprint(self, expr, *, simplify: bool = True):
-        # TODO: why are people passing strings to the printer here :think:
-        if simplify and isinstance(expr, sympy.Expr) and hasattr(V.graph, "sizevars"):
-            expr = V.graph.sizevars.simplify(expr)
-        return super().doprint(expr)
 
 
 class OpOverrides:
