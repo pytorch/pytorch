@@ -1444,6 +1444,8 @@ def min_cut_rematerialization_partition(
         num_fwd_outputs=num_fwd_outputs,
     )
     fsdp_fx_passes.replace_noop_consecutive_permutes_with_original_input_if_first_permute_out_has_no_other_use(fw_module)
+    fsdp_fx_passes.replace_noop_consecutive_transpose_with_original_input_if_first_transpose_out_has_no_other_use(fw_module)
+    fsdp_fx_passes.remove_unnecessary_views(fw_module)
     fsdp_fx_passes.move_primal_set_to_end_of_fwd_graph(fw_module)
 
     if graph_has_recomputable_ops:

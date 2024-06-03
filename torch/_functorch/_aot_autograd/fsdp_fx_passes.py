@@ -82,8 +82,56 @@ def replace_noop_consecutive_permutes_with_original_input_if_first_permute_out_h
                 second_permute_node.replace_all_uses_with(first_permute_node.args[0])
                 mod.graph.erase_node(second_permute_node)
                 mod.graph.erase_node(first_permute_node)
-                mod.graph.lint()
-                mod.recompile()
+    mod.graph.lint()
+    mod.recompile()
+
+
+def replace_noop_consecutive_transpose_with_original_input_if_first_transpose_out_has_no_other_use(mod):
+    """
+    t_13: "f32[512, 1024]" = torch.ops.aten.t.default(view_73);  view_73 = None
+    t_14: "f32[1024, 512]" = torch.ops.aten.t.default(t_13);  t_13 = None
+
+    ->
+
+    view_73
+    """
+    node_list = list(mod.graph.nodes)
+    for i, n in enumerate(node_list):
+        if n.target is torch.ops.aten.t.default:
+            first_transpose_node = n
+            second_transpose_node = None
+            first_transpose_output_has_other_use = False
+            # First check that the first transpose output has no other use
+            for j, node in enumerate(node_list[i+1:]):
+                if first_transpose_node in _flatten_arg_list(node.args):
+                    if node.target is not torch.ops.aten.t.default:
+                        first_transpose_output_has_other_use = True
+                    else:
+                        if node.args[0] == first_transpose_node:
+                            second_transpose_node = node
+                        else:
+                            first_transpose_output_has_other_use = True
+            if second_transpose_node is not None and not first_transpose_output_has_other_use:
+                second_transpose_node.replace_all_uses_with(first_transpose_node.args[0])
+                mod.graph.erase_node(second_transpose_node)
+                mod.graph.erase_node(first_transpose_node)
+    mod.graph.lint()
+    mod.recompile()
+
+
+def remove_unnecessary_views(mod):
+    node_list = list(mod.graph.nodes)
+    for i, n in enumerate(node_list):
+        if n.target is torch.ops.aten.view.default:
+            view_node = n
+            view_input = view_node.args[0]
+            torch_log.warning(f'list(view_input.meta.get("tensor_meta").shape): {list(view_input.meta.get("tensor_meta").shape)}')
+            torch_log.warning(f'view_node.args[1]: {view_node.args[1]}')
+            if list(view_input.meta.get("tensor_meta").shape) == view_node.args[1]:
+                view_node.replace_all_uses_with(view_input)
+                mod.graph.erase_node(view_node)
+    mod.graph.lint()
+    mod.recompile()
 
 
 # TODO(yf225): dedup with `is_alias_of_primal_input` in partitioners.py
