@@ -29,7 +29,7 @@ from torch.distributed.checkpoint.state_dict import (
     set_optimizer_state_dict,
     StateDictOptions,
 )
-from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
+from torch.distributed.fsdp import FullyShardedDataParallel as FSDP, StateDictType
 from torch.distributed.fsdp.wrap import ModuleWrapPolicy
 from torch.distributed.optim import _apply_optimizer_in_backward
 from torch.nn.parallel import DistributedDataParallel as DDP
@@ -748,6 +748,26 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
             )
         self.assertEqual(model.l.weight, model_state_dict1["l.weight"])
         self.assertEqual(model.l.bias, model_state_dict1["l.bias"])
+
+    @with_comms
+    @skip_if_lt_x_gpu(1)
+    def test_deprecate_fsdp_api(self) -> None:
+        device_mesh = init_device_mesh("cuda", (self.world_size,))
+        model = CompositeParamModel(device=torch.device("cuda"))
+        fsdp_model = FSDP(copy.deepcopy(model), device_mesh=device_mesh)
+        with self.assertWarnsRegex(
+            FutureWarning,
+            r"FSDP.state_dict_type\(\) and FSDP.set_state_dict_type\(\) are being deprecated",
+        ):
+            with FSDP.state_dict_type(fsdp_model, StateDictType.FULL_STATE_DICT):
+                fsdp_model.state_dict()
+
+        with self.assertRaisesRegex(AssertionError, "FutureWarning not triggered"):
+            with self.assertWarnsRegex(
+                FutureWarning,
+                r"FSDP.state_dict_type\(\) and FSDP.set_state_dict_type\(\) are being deprecated",
+            ):
+                get_model_state_dict(model)
 
 
 class TestNoComm(MultiProcessTestCase):
