@@ -1,6 +1,5 @@
 # Owner(s): ["module: fx"]
 
-import functools
 import math
 import numbers
 import operator
@@ -52,7 +51,6 @@ from torch.testing._internal.common_methods_invocations import op_db
 from torch.testing._internal.common_nn import module_tests, new_module_tests
 from torch.testing._internal.common_utils import TEST_Z3, run_tests, TestCase
 from torch.testing._internal.jit_utils import JitTestCase
-import torch.utils._pytree as pytree
 
 try:
     import torchvision.models
@@ -1625,40 +1623,21 @@ class TestNormalizeOperators(JitTestCase):
             param_names = []
             param_values = []
             fx_args = []
-
-            idx = 0
-
-            def process_arg(arg, name):
-                if isinstance(arg, torch.Tensor):
-                    param_names.append(name)
-                    param_values.append(arg)
-                    return name
+            for idx, v in enumerate(arg_values):
+                if isinstance(v, torch.Tensor):
+                    param_names.append(f"arg_{idx}")
+                    param_values.append(v)
+                    fx_args.append(param_names[-1])
                 else:
-                    return f"{repr(arg)}"
-
-            def process_arg_with_idx(arg):
-                nonlocal idx
-                res = process_arg(arg, f"arg_{idx}")
-                idx = idx + 1
-                return res
-
-            def str_arg(arg):
-                if isinstance(arg, tuple):
-                    args = [f"{str_arg(v)}, " for v in arg]
-                    return f"({' '.join(args)})"
-                elif isinstance(arg, list):
-                    args = [f"{str_arg(v)}" for v in arg]
-                    return f"[{', '.join(args)}]"
-                else:
-                    return arg
-
-            for v in arg_values:
-                arg = pytree.tree_map(process_arg_with_idx, v)
-                fx_args.append(str_arg(arg))
+                    fx_args.append(f"{repr(v)}")
 
             for k, v in kwarg_values.items():
-                arg = pytree.tree_map(functools.partial(process_arg, name=k), v)
-                fx_args.append(f"{k} = {str_arg(arg)}")
+                if isinstance(v, torch.Tensor):
+                    param_names.append(k)
+                    param_values.append(v)
+                    fx_args.append(f"{k} = {k}")
+                else:
+                    fx_args.append(f"{k} = {repr(v)}")
 
             code = f"""
 class TestModule(torch.nn.Module):

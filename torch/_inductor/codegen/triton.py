@@ -871,11 +871,6 @@ class TritonKernelOverrides(TritonOverrides):
 
     @staticmethod
     def masked(mask, body, other):
-        if mask is not None and torch.version.hip is not None:
-            mask = V.kernel.cse.generate(
-                V.kernel.compute,
-                f"{mask}.to(tl.int1)",
-            )
         with V.kernel.mask_loads(mask) as new_mask:
             result = body()
 
