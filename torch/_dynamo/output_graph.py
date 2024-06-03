@@ -292,6 +292,8 @@ class OutputGraph:
             tracked_fakes=self.tracked_fakes,
             allow_scalar_outputs=config.capture_scalar_outputs,
             allow_dynamic_output_shape_ops=config.capture_dynamic_output_shape_ops,
+            prefer_deferred_runtime_asserts_over_guards=config.prefer_deferred_runtime_asserts_over_guards,
+            _allow_complex_guards_as_runtime_asserts=config._allow_complex_guards_as_runtime_asserts,
             co_fields=self.co_fields,
         )
 
@@ -304,6 +306,7 @@ class OutputGraph:
                 shape_env=shape_env,
                 # TODO (tmanlaibaatar) Remove this once we always lift params and buffers
                 allow_non_fake_inputs=True if self.export else False,
+                export=self.export,
             )
         self.tracing_context: TracingContext = TracingContext(fake_mode)
         self.init_ambient_guards()
@@ -671,12 +674,22 @@ class OutputGraph:
         def handle_tensor(t, src):
             for i, s in enumerate(t.size()):
                 bind_symint(s, TensorPropertySource(src, TensorProperty.SIZE, i))
-            for i, s in enumerate(t.stride()):
-                bind_symint(s, TensorPropertySource(src, TensorProperty.STRIDE, i))
-            bind_symint(
-                t.storage_offset(),
-                TensorPropertySource(src, TensorProperty.STORAGE_OFFSET),
-            )
+            if t.layout is torch.strided:
+                for i, s in enumerate(t.stride()):
+                    bind_symint(s, TensorPropertySource(src, TensorProperty.STRIDE, i))
+                bind_symint(
+                    t.storage_offset(),
+                    TensorPropertySource(src, TensorProperty.STORAGE_OFFSET),
+                )
+            elif t.layout is torch.sparse_coo:
+                handle_tensor(t._indices(), src)
+                handle_tensor(t._values(), src)
+            elif t.layout in {torch.sparse_csr, torch.sparse_bsr}:
+                handle_tensor(t.crow_indices(), src)
+                handle_tensor(t.col_indices(), src)
+            elif t.layout in {torch.sparse_csc, torch.sparse_bsc}:
+                handle_tensor(t.ccol_indices(), src)
+                handle_tensor(t.row_indices(), src)
             if is_traceable_wrapper_subclass(t):
                 attrs, ctx = t.__tensor_flatten__()
                 for attr in attrs:
@@ -1663,7 +1676,7 @@ err_epilogue = (
     "(and fall back to eager-mode PyTorch) on all ops "
     "that have do not have the 'pt2_compliant_tag'. "
     "Please see the following doc for how to mark this op as PT2 compliant "
-    "https://docs.google.com/document/d/1W--T6wz8IY8fOI0Vm8BF44PdBgs283QvpelJZWieQWQ"
+    "https://pytorch.org/docs/main/notes/custom_operators.html"
 )
 
 

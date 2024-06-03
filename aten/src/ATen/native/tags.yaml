@@ -46,6 +46,16 @@
   desc: |
           This tag indicates that the operator should be passed Tensors following
           the same stride permutation as observed in eager when compiled in inductor.
+          The default for custom ops (i.e. not torch._library.utils.is_builtin)
+          is that they do need a fixed stride order; add `does_not_need_fixed_stride_order`
+          to change the behavior.
+          The default for builtin ops is that they do not need a fixed stride order;
+          add `needs_fixed_stride_order` to change the behavior.
+- tag: does_not_need_fixed_stride_order
+  desc: |
+          This tag indicates that the operator doesn't need to be passed Tensors following
+          the same stride permutation as observed in eager when compiled in inductor.
+          See `needs_fixed_stride_order` for more details.
 
 # NOTE [Core ATen Ops]
 - tag: core
