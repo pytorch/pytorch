@@ -609,7 +609,7 @@ class cpp:
 
     # Use funsafe-math-optimizations when compiling
     enable_unsafe_math_opt_flag = (
-        os.environ.get("TORCHINDUCTOR_CPP_ENABLE_UNSAFE_MATH_OPT_FLAG", "0") == "1"
+        os.environ.get("TORCHINDUCTOR_CPP_ENABLE_UNSAFE_MATH_OPT_FLAG", "1") == "1"
     )
 
     # Use ffp-contract when compiling

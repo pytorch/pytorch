@@ -421,72 +421,71 @@ public:
   }
 
 #if defined(__ARM_NEON__) || defined(__ARM_NEON)
-  // Copy from https://github.com/ARM-software/optimized-routines/blob/master/math/aarch64/v_expf.c with minor changes:
-  // 1. Assume WANT_SIMD_EXCEPT in the original code is 0
-  // 2. Use vector registers to hold the const values
-  static float32x4_t __attribute__((noinline)) neon_exp_special_case(
+  // Copy from
+  // https://github.com/ARM-software/optimized-routines/blob/master/math/aarch64/v_expf_1u.c
+  // maxerr: 0.36565 +0.5 ulp
+
+  /* true if any elements of a v_cond result is non-zero.  */
+  static inline int __attribute__((always_inline)) v_any_u32(uint32x4_t x) {
+    /* assume elements in x are either 0 or -1u.  */
+    return vpaddd_u64(vreinterpretq_u64_u32(x)) != 0;
+  }
+
+  static inline float32x4_t __attribute__((always_inline)) neon_exp_1u_specialcase(
       float32x4_t poly,
       float32x4_t n,
       uint32x4_t e,
-      uint32x4_t cmp1,
-      float32x4_t scale) {
-    const uint32x4_t SpecialOffset = vdupq_n_u32(0x82000000);
-    const uint32x4_t SpecialBias = vdupq_n_u32(0x7f000000);
-    const float32x4_t scale_thresh = vdupq_n_f32(192.0f);
+      float32x4_t absn) {
     /* 2^n may overflow, break it up into s1*s2.  */
-    uint32x4_t b = vandq_u32(vclezq_f32(n), SpecialOffset);
-    float32x4_t s1 = vreinterpretq_f32_u32(vaddq_u32(b, SpecialBias));
-    float32x4_t s2 = vreinterpretq_f32_u32(vsubq_u32(e, b));
-    uint32x4_t cmp2 = vcagtq_f32(n, scale_thresh);
-    float32x4_t r2 = vmulq_f32(s1, s1);
-    float32x4_t r1 = vmulq_f32(vfmaq_f32(s2, poly, s2), s1);
-    /* Similar to r1 but avoids double rounding in the subnormal range.  */
-    float32x4_t r0 = vfmaq_f32(scale, poly, scale);
-    float32x4_t r = vbslq_f32(cmp1, r1, r0);
-    return vbslq_f32(cmp2, r2, r);
+    uint32x4_t b = (n <= vdupq_n_f32(0.0f)) & vdupq_n_u32(0x83000000);
+    float32x4_t s1 = vreinterpretq_f32_u32(vdupq_n_u32(0x7f000000) + b);
+    float32x4_t s2 = vreinterpretq_f32_u32(e - b);
+    uint32x4_t cmp = absn > vdupq_n_f32(192.0f);
+    float32x4_t r1 = s1 * s1;
+    float32x4_t r0 = poly * s1 * s2;
+    return vreinterpretq_f32_u32(
+        (cmp & vreinterpretq_u32_f32(r1)) | (~cmp & vreinterpretq_u32_f32(r0)));
   }
 
-  static float32x4_t neon_exp(float32x4_t x) {
-    const float32x4_t poly_0 = vdupq_n_f32(0x1.0e4020p-7f);
-    const float32x4_t poly_1 = vdupq_n_f32(0x1.573e2ep-5f);
-    const float32x4_t poly_2 = vdupq_n_f32(0x1.555e66p-3f);
-    const float32x4_t poly_3 = vdupq_n_f32(0x1.fffdb6p-2f);
-    const float32x4_t poly_4 = vdupq_n_f32(0x1.ffffecp-1f);
-    const float32x4_t shift = vdupq_n_f32(0x1.8p23f);
-    const float32x4_t inv_ln2 = vdupq_n_f32(0x1.715476p+0f);
-    const float32x4_t ln2_hi = vdupq_n_f32(0x1.62e4p-1f);
-    const float32x4_t ln2_lo = vdupq_n_f32(0x1.7f7d1cp-20f);
-    const uint32x4_t exponent_bias = vdupq_n_u32(0x3f800000);
-    const float32x4_t special_bound = vdupq_n_f32(126.0f);
-    float32x4_t n, r, r2, scale, p, q, poly, z;
+  static float32x4_t neon_exp_1u(float32x4_t x) {
+    const float32x4_t C0 = vdupq_n_f32(0x1.6a6000p-10f);
+    const float32x4_t C1 = vdupq_n_f32(0x1.12718ep-7f);
+    const float32x4_t C2 = vdupq_n_f32(0x1.555af0p-5f);
+    const float32x4_t C3 = vdupq_n_f32(0x1.555430p-3f);
+    const float32x4_t C4 = vdupq_n_f32(0x1.fffff4p-2f);
+    const float32x4_t Shift = vdupq_n_f32(0x1.8p23f);
+    const float32x4_t InvLn2 = vdupq_n_f32(0x1.715476p+0f);
+    const float32x4_t Ln2hi = vdupq_n_f32(0x1.62e4p-1f);
+    const float32x4_t Ln2lo = vdupq_n_f32(0x1.7f7d1cp-20f);
+
+    float32x4_t n, r, scale, poly, absn, z;
     uint32x4_t cmp, e;
 
-    /* exp(x) = 2^n (1 + poly(r)), with 1 + poly(r) in [1/sqrt(2),sqrt(2)]
-       x = ln2*n + r, with r in [-ln2/2, ln2/2].  */
-    z = vfmaq_f32(shift, x, inv_ln2);
-    n = vsubq_f32(z, shift);
-    r = vfmsq_f32(x, n, ln2_hi);
-    r = vfmsq_f32(r, n, ln2_lo);
-    e = vshlq_n_u32(vreinterpretq_u32_f32(z), 23);
-    scale = vreinterpretq_f32_u32(vaddq_u32(e, exponent_bias));
-    cmp = vcagtq_f32(n, special_bound);
-    r2 = vmulq_f32(r, r);
-    p = vfmaq_f32(poly_1, poly_0, r);
-    q = vfmaq_f32(poly_3, poly_2, r);
-    q = vfmaq_f32(q, p, r2);
-    p = vmulq_f32(poly_4, r);
-    poly = vfmaq_f32(p, q, r2);
-
-    if (vpaddd_u64(vreinterpretq_u64_u32(cmp)) != 0)
-      return neon_exp_special_case(poly, n, e, cmp, scale);
-
-    return vfmaq_f32(scale, poly, scale);
+    /* exp(x) = 2^n * poly(r), with poly(r) in [1/sqrt(2),sqrt(2)]
+      x = ln2*n + r, with r in [-ln2/2, ln2/2].  */
+    z = vfmaq_f32(Shift, x, InvLn2);
+    n = z - Shift;
+    r = vfmaq_f32(x, n, -Ln2hi);
+    r = vfmaq_f32(r, n, -Ln2lo);
+    e = vreinterpretq_u32_f32(z) << 23;
+    scale = vreinterpretq_f32_u32(e + vdupq_n_u32(0x3f800000));
+    absn = vabsq_f32(n);
+    cmp = absn > vdupq_n_f32(126.0f);
+    poly = vfmaq_f32(C1, C0, r);
+    poly = vfmaq_f32(C2, poly, r);
+    poly = vfmaq_f32(C3, poly, r);
+    poly = vfmaq_f32(C4, poly, r);
+    poly = vfmaq_f32(vdupq_n_f32(1.0f), poly, r);
+    poly = vfmaq_f32(vdupq_n_f32(1.0f), poly, r);
+    if ((v_any_u32(cmp)))
+      return neon_exp_1u_specialcase(poly, n, e, absn);
+    return scale * poly;
   }
 #endif // defined(__ARM_NEON__) || defined(__ARM_NEON)
 
   Vectorized<float> exp() const {
 #if defined(__ARM_NEON__) || defined(__ARM_NEON)
-    return Vectorized<float>(neon_exp(values.val[0]), neon_exp(values.val[1]));
+    return Vectorized<float>(neon_exp_1u(values.val[0]), neon_exp_1u(values.val[1]));
 #else
     return USE_SLEEF(
       Vectorized<float>(Sleef_expf4_u10(values.val[0]), Sleef_expf4_u10(values.val[1])),
