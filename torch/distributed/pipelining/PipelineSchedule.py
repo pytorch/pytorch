@@ -638,6 +638,9 @@ class PipelineScheduleMulti(_PipelineSchedule):
                 elif computation_type == _ComputationType.BACKWARD:
                     # perform backward computation
                     stage = stage_index_to_stage[stage_index]
+                    stage._configure_data_parallel_mode(
+                        last_backward=(mb_index == self._n_microbatches - 1)
+                    )
                     loss = self._maybe_get_loss(stage, mb_index)
                     stage.backward_one_chunk(loss=loss, bwd_chunk_id=mb_index)
                     ops.extend(stage.get_bwd_send_ops())
@@ -686,7 +689,7 @@ class PipelineScheduleMulti(_PipelineSchedule):
 
             # do the communication
             if ops:
-                dist.batch_isend_irecv(ops).pop().wait()
+                _batch_p2p(ops).wait()
         # Return losses if there is a container passed in
         self._update_losses(self._stages, losses)
 
