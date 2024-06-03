@@ -189,13 +189,12 @@ def local_map(
             flat_out, out_spec = pytree.tree_flatten(out)
 
             flat_dist_out = []
-            for idx, out in enumerate(flat_out):
-                spec = (
-                    out_placements[idx]
-                    if isinstance(out_placements, tuple)
-                    else out_placements
-                )
-
+            out_placements_tuple = (
+                out_placements
+                if isinstance(out_placements, tuple)
+                else (out_placements,)
+            )
+            for out, spec in zip(flat_out, out_placements_tuple):
                 if isinstance(out, torch.Tensor):
                     assert not isinstance(
                         out, DTensor
