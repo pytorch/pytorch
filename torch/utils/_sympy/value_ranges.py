@@ -990,12 +990,15 @@ def bound_sympy(
     expr: sympy.Expr, ranges: Optional[Dict[sympy.Symbol, ValueRanges]] = None
 ) -> ValueRanges:
     log.debug(
-        "bound_sympy(%s)\n%s",
+        "bound_sympy(%s)%s",
         expr,
         LazyString(
-            lambda: "\n".join(
+            lambda: "\n"
+            + "\n".join(
                 f"  {k}: {r}" for k, r in ranges.items() if k in expr.free_symbols
             )
+            if ranges
+            else ""
         ),
     )
     if isinstance(expr, sympy.Number):

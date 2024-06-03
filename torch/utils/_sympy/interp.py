@@ -163,6 +163,6 @@ def sympy_interp(
             return acc
         else:
             return handler(*args)
-    except:
+    except Exception:
         log.warning("failed while executing %s(%s)", handler_name, args)
         raise
