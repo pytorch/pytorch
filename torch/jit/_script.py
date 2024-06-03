@@ -1094,7 +1094,10 @@ def _script_impl(
 
     if optimize is not None:
         warnings.warn(
-            "`optimize` is deprecated and has no effect. Use `with torch.jit.optimized_execution() instead"
+            "`optimize` is deprecated and has no effect. "
+            "Use `with torch.jit.optimized_execution()` instead",
+            FutureWarning,
+            stacklevel=3,
         )
 
     # No-op for modules, functions, class instances that are already scripted
