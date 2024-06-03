@@ -167,6 +167,10 @@ class TestNumbers(TestCase):
         self.assertTrue(int_oo >= 2)
         self.assertTrue(int_oo >= -int_oo)
 
+    def test_relation(self):
+        self.assertIs(sympy.Add(2, int_oo), int_oo)
+        self.assertFalse(-int_oo > 2)
+
 
 class TestValueRanges(TestCase):
     @parametrize("fn", UNARY_OPS)

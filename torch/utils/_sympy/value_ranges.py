@@ -25,7 +25,7 @@ from sympy.logic.boolalg import Boolean as SympyBoolean, BooleanAtom
 import torch
 
 from torch._prims_common import dtype_to_type
-from .numbers import int_oo
+from .numbers import int_oo, NegativeIntInfinity, IntInfinity
 from .functions import (
     _keep_float,
     FloatTrueDiv,
@@ -165,7 +165,10 @@ class ValueRanges(Generic[_T]):
             self,
             "is_int",
             not self.is_bool
-            and (isinstance(lower, sympy.Integer) or isinstance(upper, sympy.Integer)),
+            and (
+                isinstance(lower, (sympy.Integer, NegativeIntInfinity)) or
+                isinstance(upper, (sympy.Integer, IntInfinity))
+            ),
         )
         """
         # This assert is just impossible right now, too many sympy bugs

@@ -30,6 +30,9 @@ class IntInfinity(Number, metaclass=Singleton):
     is_extended_positive = True
     is_prime = False
 
+    # Ensure we get dispatched to before plain numbers
+    _op_priority = 100.0
+
     __slots__ = ()
 
     def __new__(cls):
@@ -162,6 +165,9 @@ class NegativeIntInfinity(Number, metaclass=Singleton):
 
     IntInfinity
     """
+
+    # Ensure we get dispatched to before plain numbers
+    _op_priority = 100.0
 
     is_integer = True
     is_extended_real = True
