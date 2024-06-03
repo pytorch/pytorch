@@ -349,16 +349,6 @@ endif()
 
 list(APPEND ATen_CPU_INCLUDE ${CMAKE_CURRENT_SOURCE_DIR}/..)
 
-if(USE_TBB)
-  if(USE_SYSTEM_TBB)
-    message("ATen is compiled with system-provided Intel TBB.")
-  else()
-    message("ATen is compiled with Intel TBB (${TBB_ROOT_DIR}).")
-  endif()
-  list(APPEND ATen_CPU_INCLUDE ${TBB_INCLUDE_DIR})
-  list(APPEND ATen_CPU_DEPENDENCY_LIBS TBB::tbb)
-endif()
-
 if(BLAS_FOUND)
   if($ENV{TH_BINARY_BUILD})
     message(STATUS "TH_BINARY_BUILD detected. Enabling special linkage.")
@@ -482,6 +472,7 @@ endif()
 
 if(USE_CUDA AND NOT USE_ROCM)
   list(APPEND ATen_CUDA_INCLUDE ${CMAKE_CURRENT_SOURCE_DIR}/../../../third_party/cutlass/include)
+  list(APPEND ATen_CUDA_INCLUDE ${CMAKE_CURRENT_SOURCE_DIR}/../../../third_party/cutlass/tools/util/include)
   if($ENV{ATEN_STATIC_CUDA})
     list(APPEND ATen_CUDA_DEPENDENCY_LIBS
       ${CUDA_LIBRARIES}

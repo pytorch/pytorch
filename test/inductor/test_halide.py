@@ -3,7 +3,6 @@ import textwrap
 import unittest
 
 import torch
-import torch._inductor.async_compile
 from torch._inductor.codecache import HalideCodeCache
 from torch._inductor.runtime.hints import HalideInputSpec, HalideMeta
 from torch._inductor.test_case import run_tests, TestCase
