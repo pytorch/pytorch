@@ -25,7 +25,7 @@ from typing import (
 )
 
 import torch
-import torch._inductor.async_compile
+import torch._inductor.async_compile  # noqa: F401 required to warm up AsyncCompile pools
 from torch import multiprocessing
 from torch._dynamo.testing import rand_strided
 
