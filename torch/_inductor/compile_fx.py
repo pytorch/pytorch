@@ -11,6 +11,8 @@ from itertools import count
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, Union
 from unittest import mock
 
+import torch._inductor.async_compile  # noqa: F401 required to warm up AsyncCompile pools
+
 import torch.fx
 import torch.utils._pytree as pytree
 
@@ -408,7 +410,7 @@ def with_fresh_cache_if_config(f):
 # the backward graph as well.
 @_use_lazy_graph_module(dynamo_config.use_lazy_graph_module)
 @with_fresh_cache_if_config
-@dynamo_utils.dynamo_timed(phase_name="inductor_compile")
+@dynamo_utils.dynamo_timed(phase_name="inductor_compile", fwd_only=False)
 def compile_fx_inner(
     gm: torch.fx.GraphModule,
     example_inputs: List[torch.Tensor],
@@ -480,16 +482,26 @@ def compile_fx_inner(
     start = time.time()
 
     fx_graph_remote_cache = should_use_remote_fx_graph_cache()
+    inputs_to_check = get_input_idxs_to_check(example_inputs, range(num_fixed))
     if (
         not config.force_disable_caches
         and (config.fx_graph_cache or fx_graph_remote_cache)
         and not aot_mode
     ):
+        for i, input in enumerate(example_inputs):
+            if (
+                isinstance(input, torch.Tensor)
+                and input.device.type == "cuda"
+                and i < num_fixed
+            ):
+                input._is_inductor_static = True  # type: ignore[attr-defined]
+
         compiled_graph = FxGraphCache.load(
             fx_codegen_and_compile,
             gm,
             example_inputs,
             graph_kwargs,
+            inputs_to_check,
             local=config.fx_graph_cache,
             remote=fx_graph_remote_cache,
         )
@@ -625,8 +637,8 @@ def compile_fx_inner(
 
     # cudagraphs does its own aligning of inputs
     if not cudagraphs:
-        new_callable = align_inputs(
-            compiled_graph.current_callable, example_inputs, range(num_fixed)
+        new_callable = align_inputs_from_check_idxs(
+            compiled_graph.current_callable, inputs_to_check
         )
         if new_callable is not compiled_graph.current_callable:
             compiled_graph.current_callable = new_callable
@@ -906,15 +918,6 @@ def align_inputs_from_check_idxs(
         return model(new_inputs)
 
     return run
-
-
-def align_inputs(
-    model: Callable[[List[torch.Tensor]], Any],
-    inputs: List[torch.Tensor],
-    static_input_idxs: Sequence[int] = (),
-):
-    inputs_to_check = get_input_idxs_to_check(inputs, static_input_idxs)
-    return align_inputs_from_check_idxs(model, inputs_to_check)
 
 
 @dynamo_utils.dynamo_timed
