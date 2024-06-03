@@ -1430,6 +1430,33 @@ class CommonTemplate:
         actual = _run_and_assert_no_indirect_indexing(self, flip_opt, x)
         self.assertEqual(expect, actual)
 
+    def test__unsafe_masked_index(self):
+        def fn(a, mask, idx):
+            return aten._unsafe_masked_index(a, mask, idx, 1)
+
+        self.common(
+            fn,
+            (
+                torch.randn(8, device=self.device),
+                torch.tensor([True, False, True], device=self.device),
+                [torch.tensor([3, 9, -2], device=self.device)],
+            ),
+        )
+
+    def test__unsafe_masked_index_put_accumulate(self):
+        def fn(a, mask, idx, values):
+            return aten._unsafe_masked_index_put_accumulate(a, mask, idx, values)
+
+        self.common(
+            fn,
+            (
+                torch.randn(8, device=self.device),
+                torch.tensor([True, False, True], device=self.device),
+                [torch.tensor([3, 9, -2], device=self.device)],
+                torch.randn(3, device=self.device),
+            ),
+        )
+
     def test_sum1(self):
         def fn(a, b):
             return ((a + b).sum(-1),)
@@ -10940,7 +10967,10 @@ if HAS_GPU and not TEST_WITH_ASAN:
             fn_opt = torch.compile(fn)
             code = run_and_get_triton_code(fn_opt, x, 8)
             # load should be masked
-            self.assertTrue("tl.load(in_ptr0 + (tmp0), xmask" in code)
+            self.assertTrue(
+                "tl.load(in_ptr0 + (tmp0), xmask" in code
+                or "tl.load(in_ptr0 + (tmp0), (xmask).to(tl.int1)" in code
+            )
             self.assertEqual(fn(x, 8), fn_opt(x, 8))
 
         def test_kernel_names_descriptive(self):

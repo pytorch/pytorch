@@ -390,7 +390,7 @@ P = ParamSpec("P")
 RV = TypeVar("RV", covariant=True)
 
 
-class CachedMethod(Generic[P, RV], Protocol):
+class CachedMethod(Protocol, Generic[P, RV]):
     @staticmethod
     def clear_cache(self) -> None:
         ...
@@ -647,6 +647,7 @@ def get_first_incompatible_cudagraph_node(gm):
         forbidden_set.update(
             {
                 "aten._unsafe_index_put.default",
+                "aten._unsafe_masked_index_put_accumulate.default",
                 "aten.index_put.default",
                 "aten.index_put_.default",
                 "aten.scatter.src",
