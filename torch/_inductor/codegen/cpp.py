@@ -3493,7 +3493,12 @@ class CppScheduling(BaseScheduling):
     # We set a conservative threshold here.
     MAX_FUSED_KERNEL_ARGS_NUM = 500
 
+    @classmethod
+    def get_backend_features(cls, device: torch.device):
+        return ()
+
     def __init__(self, scheduler):
+        super().__init__()
         self.scheduler = scheduler
         self.reset_kernel_group()
         self._ready_to_flush = False

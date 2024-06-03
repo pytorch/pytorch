@@ -61,7 +61,7 @@ from torch.utils._sympy.functions import CleanDiv, FloorDiv, ModularIndexing
 from torch.utils._sympy.symbol import SymT
 
 from . import config, dependencies
-from .codegen.common import index_prevent_reordering
+from .codegen.common import BackendFeature, index_prevent_reordering
 from .dependencies import (
     extract_free_unbacked_symbols,
     extract_input_node_reduction_ranges,
@@ -1662,12 +1662,12 @@ class Scan(Loops):
         pointwise_ranges = [*size[:axis], *size[axis + 1 :]]
         scan_ranges = [size[axis]]
 
-        if not is_gpu(device.type):
-            # TODO: CPU support
+        if V.graph.has_feature(device, BackendFeature.SCAN):
             return [None] * len(dtypes)
 
-        if torch.version.hip is not None and len(dtypes) > 1:
-            # TODO: Remove this when ROCm triton adds support for multiple inputs
+        if len(dtypes) > 1 and not V.graph.has_feature(
+            device, BackendFeature.TUPLE_REDUCTION
+        ):
             return [None] * len(dtypes)
 
         sizevars = V.graph.sizevars
@@ -2750,7 +2750,8 @@ class FixedLayout(Layout):
         """A closure containing math to read a given element"""
 
         def indexer(index):
-            assert len(index) == len(self.stride) == len(self.size)
+            assert len(index) == len(self.stride)
+            assert len(index) == len(self.size)
             result = self.offset
             for idx, stride, sz in zip(index, self.stride, self.size):
                 if sz != 1:

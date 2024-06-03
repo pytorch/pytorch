@@ -390,7 +390,7 @@ P = ParamSpec("P")
 RV = TypeVar("RV", covariant=True)
 
 
-class CachedMethod(Generic[P, RV], Protocol):
+class CachedMethod(Protocol, Generic[P, RV]):
     @staticmethod
     def clear_cache(self) -> None:
         ...
@@ -1465,6 +1465,7 @@ def get_cloned_parameter_buffer_name(name: str):
 
 
 def is_gpu(device: str):
+    assert isinstance(device, str)
     return device in ["cuda", "xpu"]
 
 

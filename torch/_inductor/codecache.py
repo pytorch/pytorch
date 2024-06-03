@@ -67,7 +67,7 @@ from torch._inductor.runtime.compile_tasks import (
     _worker_compile_triton,
 )
 from torch._inductor.runtime.hints import HalideInputSpec, HalideMeta
-from torch._inductor.runtime.runtime_utils import cache_dir
+from torch._inductor.runtime.runtime_utils import cache_dir, default_cache_dir
 from torch._inductor.utils import clear_on_fresh_inductor_cache, is_linux
 
 from torch._logging import trace_structured
@@ -2659,8 +2659,10 @@ class CppWrapperCodeCache(CppPythonBindingsCodeCache):
 class HalideCodeCache(CppPythonBindingsCodeCache):
     cache: Dict[str, Callable[[], Union[ModuleType, CDLL]]] = {}
     cache_clear = staticmethod(cache.clear)
+    _standalone_runtime_path: Optional[str] = None
     glue_template_cpp = textwrap.dedent(
         """
+        #include "{halideruntime_h}"
         #include "{headerfile}"
         #include <stdexcept>
         #include <cmath>
@@ -2674,6 +2676,7 @@ class HalideCodeCache(CppPythonBindingsCodeCache):
     )
     glue_template_cuda = textwrap.dedent(
         """
+        #include "{halideruntime_h}"
         #include "{headerfile}"
         #include <stdexcept>
         #include <cmath>
@@ -2729,7 +2732,8 @@ class HalideCodeCache(CppPythonBindingsCodeCache):
     @classmethod
     def _codegen_glue(cls, meta, headerfile):
         is_cuda = meta.is_cuda()
-        assert not is_cuda or "user_context" in meta.target
+        assert is_cuda is ("user_context" in meta.target)
+        assert "no_runtime" in meta.target
         buffers = []
         buffer_names = []
         for i, arg in enumerate(meta.argtypes):
@@ -2743,6 +2747,9 @@ class HalideCodeCache(CppPythonBindingsCodeCache):
 
         glue_template = cls.glue_template_cuda if is_cuda else cls.glue_template_cpp
         glue_code = glue_template.format(
+            halideruntime_h=cls.find_header(
+                "HalideRuntimeCuda.h" if is_cuda else "HalideRuntime.h"
+            ),
             headerfile=headerfile,
             argdefs=", ".join(f"{a.bindings_type()} {a.name}" for a in meta.argtypes),
             buffers=buffers,
@@ -2816,6 +2823,24 @@ class HalideCodeCache(CppPythonBindingsCodeCache):
         )
         return HalideCodeCache._search_for_file(sofile, errmsg)
 
+    @staticmethod
+    @functools.lru_cache(None)
+    def find_header(name):
+        if "HALIDE_INCLUDE" in os.environ:
+            path = os.path.join(os.environ["HALIDE_INCLUDE"], name)
+            if os.path.exists(path):
+                return path
+        if "HALIDE_LIB" in os.environ:
+            path = os.path.abspath(
+                os.path.join(os.environ["HALIDE_LIB"], f"../include/{name}")
+            )
+            if os.path.exists(path):
+                return path
+        errmsg = (
+            f"Can't find {name}, set env HALIDE_INCLUDE to the directory containing it"
+        )
+        return HalideCodeCache._search_for_file(f"../include/{name}", errmsg)
+
     @classmethod
     def generate_halide_async(cls, meta: HalideMeta, source_code: str, submit_fn=None):
         dirpath = Path(
@@ -2851,7 +2876,7 @@ class HalideCodeCache(CppPythonBindingsCodeCache):
                         "-f",
                         "halide_kernel",
                         "-e",
-                        "static_library,h,schedule",  # pytorch_wrapper
+                        "static_library,h,schedule",
                         "-p",
                         cls.find_libautoschedule(meta.scheduler),
                         *meta.args(),
@@ -2865,7 +2890,7 @@ class HalideCodeCache(CppPythonBindingsCodeCache):
         bindings_future = cls.load_pybinding_async(
             binding_types,
             cls._codegen_glue(meta, headerfile),
-            extra_flags=(libfile,),
+            extra_flags=(libfile, cls.build_standalone_runtime()),
             submit_fn=jobs.append if need_compile else None,
             cuda=meta.is_cuda(),
         )
@@ -2888,6 +2913,45 @@ class HalideCodeCache(CppPythonBindingsCodeCache):
     @classmethod
     def generate_halide(cls, *args, **kwargs):
         return cls.generate_halide_async(*args, **kwargs)()
+
+    @classmethod
+    def build_standalone_runtime(cls):
+        if cls._standalone_runtime_path and os.path.exists(
+            cls._standalone_runtime_path
+        ):
+            return cls._standalone_runtime_path
+        is_cuda = torch.cuda.is_available()
+        libname = "libStandaloneHalideRuntime.so"
+        target = "host-cuda" if is_cuda else "host"
+        if cls._standalone_runtime_path:
+            assert not os.path.exists(cls._standalone_runtime_path)
+            # We hit this case in unittests when we run with fresh_inductor_cache()
+            # Generating a fresh runtime over and over causes errors because we initialize
+            # cuda hundreds of times in the same process and run out of file descriptors.
+            # Workaround by jail breaking the current fresh_inductor_cache().
+            base = default_cache_dir()
+        else:
+            base = cache_dir()
+        dirpath = Path(base) / f"halide-runtime-{target}"
+        os.makedirs(dirpath, exist_ok=True)
+        donefile = str(dirpath / "done")
+        lockfile = str(dirpath / "lock")
+        afile = str(dirpath / "standalone_halide_runtime.a")
+        sofile = str(dirpath / libname)
+        if not os.path.exists(donefile):
+            import filelock
+            import halide as hl  # type: ignore[import-untyped]
+
+            with filelock.FileLock(lockfile, LOCK_TIMEOUT):
+                if not os.path.exists(donefile):
+                    hl.compile_standalone_runtime(afile, hl.Target(target))
+                    subprocess.check_call(
+                        shlex.split(cpp_compile_command(afile, sofile, cuda=is_cuda))
+                    )
+                    touch(donefile)
+        assert os.path.exists(sofile)
+        cls._standalone_runtime_path = sofile
+        return sofile
 
 
 def _worker_task_halide(lockfile, jobs):

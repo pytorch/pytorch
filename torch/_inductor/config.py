@@ -850,11 +850,14 @@ class halide:
 
     # Halide autoscheduler to use, choices are:
     # "Anderson2021" (gpu-only), "Li2018", "Adams2019" (cpu-only), or "Mullapudi2016" (cpu-only)
-    scheduler_cuda = "Li2018"
+    scheduler_cuda = "Anderson2021"
     scheduler_cpu = "Adams2019"
 
     # Controls `no_asserts` flag passed to Halide target (warning: can false positive)
     asserts = False
+
+    # Controls `debug` flag passed to Halide target
+    debug = False
 
 
 # create a directory containing lots of debug information
@@ -902,6 +905,12 @@ class trace:
     # INDUCTOR_DOT_GRAPH_SHAPE_SVG = "none" would let us generate HTML-like lables
     # to workaround the above failure.
     dot_graph_shape = os.environ.get("INDUCTOR_DOT_GRAPH_SHAPE_SVG", None)
+
+    # If not None, this is the URL that saves the SVG files of the input/output
+    # graph of each pass that changed the graph
+    # The nodes that are being transformed in each pass will be colored in yellow
+    # URL only supports local directory for now
+    log_url_for_graph_xform = os.environ.get("INDUCTOR_LOG_URL_FOR_GRAPH_XFORM", None)
 
     # Store cProfile (see snakeviz to view)
     compile_profile = False

@@ -6,6 +6,7 @@ import logging
 import math
 import operator
 import re
+from enum import auto, Enum
 from itertools import chain
 from typing import (
     Any,
@@ -137,6 +138,29 @@ def register_backend_for_device(
     )
 
 
+class BackendFeature(Enum):
+    SCAN = auto()
+    TUPLE_REDUCTION = auto()
+    BUCKETIZE = auto()
+    MASKED_SCATTER_WITH_INDEX = auto()
+
+def get_backend_features(device: Union[torch.device, str]):
+    init_backend_registration()
+    if isinstance(device, torch.device):
+        device_type = device.type
+    else:
+        assert isinstance(device, str)
+        device_type = device
+        device = torch.device(device_type)
+    scheduling = get_scheduling_for_device(device_type)
+    return scheduling(None).get_backend_features(device)
+
+def has_backend_feature(device, feature):
+    """See also V.graph.has_feature"""
+    assert isinstance(feature, BackendFeature)
+    return feature in get_backend_features(device)
+
+
 def get_scheduling_for_device(device: str):
     return device_codegens[device].scheduling if device in device_codegens else None
 
@@ -151,6 +175,45 @@ def get_wrapper_codegen_for_device(device: str, cpp_wrapper: bool = False):
         )
     else:
         return None
+
+
+
+@functools.lru_cache(None)
+def init_backend_registration():
+    from .cpp import CppScheduling
+    from .cpp_wrapper_cpu import CppWrapperCpu
+    from .cpp_wrapper_cuda import CppWrapperCuda
+    from .cuda_combined_scheduling import CUDACombinedScheduling
+    from .halide import HalideScheduling
+    from .triton import TritonScheduling
+    from .wrapper import WrapperCodeGen
+
+    if get_scheduling_for_device("cpu") is None:
+        cpu_backends = {"cpp": CppScheduling, "halide": HalideScheduling}
+
+        register_backend_for_device(
+            "cpu",
+            lambda *args, **kwargs: cpu_backends[config.cpu_backend](*args, **kwargs),
+            WrapperCodeGen,
+            CppWrapperCpu,
+        )
+
+    if get_scheduling_for_device("cuda") is None:
+        cuda_backends = {
+            "triton": CUDACombinedScheduling,
+            "halide": HalideScheduling,
+        }
+
+        # CUDACombinedScheduling combines Triton and CUDA C++ scheduling for CUDA devices via delegation
+        register_backend_for_device(
+            "cuda",
+            lambda *args, **kwargs: cuda_backends[config.cuda_backend](*args, **kwargs),
+            WrapperCodeGen,
+            CppWrapperCuda,
+        )
+
+    if get_scheduling_for_device("xpu") is None:
+        register_backend_for_device("xpu", TritonScheduling, WrapperCodeGen)
 
 
 def index_prevent_reordering(index: List[sympy.Expr], index_vars, sizes):

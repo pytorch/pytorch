@@ -1,4 +1,6 @@
 # mypy: disallow-untyped-defs
+from __future__ import annotations
+
 import collections
 import dataclasses
 import functools
@@ -36,7 +38,7 @@ from torch.utils._triton import has_triton
 
 from . import comms, config, dependencies, ir, metrics
 from .codecache import write_text
-from .codegen.common import get_scheduling_for_device, Kernel
+from .codegen.common import BackendFeature, get_scheduling_for_device, Kernel
 from .comm_analysis import estimate_nccl_collective_runtime
 from .dependencies import Dep, MemoryDep, StarDep, WeakDep
 from .ir import ComputedBuffer, MultiOutput, MultiOutputLayout
@@ -69,7 +71,7 @@ class WhyNoFuse:
     reason: str
     args: Tuple[Any, ...]
 
-    def __init__(self, node1: "BaseSchedulerNode", node2: "BaseSchedulerNode"):
+    def __init__(self, node1: BaseSchedulerNode, node2: BaseSchedulerNode):
         self.node1 = node1
         self.node2 = node2
 
@@ -112,7 +114,7 @@ class OutputNode:
 
 
 def _prune_redundant_deps(
-    node: "BaseSchedulerNode", name_to_fused_node: Dict[str, "BaseSchedulerNode"]
+    node: BaseSchedulerNode, name_to_fused_node: Dict[str, BaseSchedulerNode]
 ) -> None:
     """
     Prunes weakdeps intended for mutation ordering
@@ -162,7 +164,7 @@ class BaseSchedulerNode:
     read_writes: dependencies.ReadWrites
     unmet_dependencies: Set[Dep]
 
-    def __init__(self, scheduler: "Scheduler", node: ir.Buffer) -> None:
+    def __init__(self, scheduler: Scheduler, node: ir.Buffer) -> None:
         self.scheduler: Scheduler = scheduler
         self.node: Optional[ir.Buffer] = node
         self.users: List[NodeUser] = []
@@ -216,7 +218,7 @@ class BaseSchedulerNode:
     def add_fake_dep(self, dep: Dep) -> None:
         self.set_read_writes(self.read_writes.with_read(dep))
 
-    def set_users(self, users: List["NodeUser"]) -> None:
+    def set_users(self, users: List[NodeUser]) -> None:
         # deduplicate
         result: Dict[int, NodeUser] = {}
         for use in users:
@@ -290,7 +292,7 @@ class BaseSchedulerNode:
         self.set_read_writes(self.read_writes.remove_reads(to_remove))
 
     def prune_redundant_deps(
-        self, name_to_fused_node: Dict[str, "BaseSchedulerNode"]
+        self, name_to_fused_node: Dict[str, BaseSchedulerNode]
     ) -> None:
         _prune_redundant_deps(self, name_to_fused_node)
 
@@ -304,7 +306,7 @@ class BaseSchedulerNode:
     def get_names(self) -> Set[str]:
         return {self.get_name()}
 
-    def get_nodes(self) -> Sequence["BaseSchedulerNode"]:
+    def get_nodes(self) -> Sequence[BaseSchedulerNode]:
         return [self]
 
     def get_device(self) -> torch.device:
@@ -720,7 +722,7 @@ class NopKernelSchedulerNode(BaseSchedulerNode):
     pass
 
 
-def debug_triton_code(node: Union["SchedulerNode", "FusedSchedulerNode"]) -> List[str]:
+def debug_triton_code(node: Union[SchedulerNode, FusedSchedulerNode]) -> List[str]:
     lines = []
     multi_template = node.get_template_node()
     assert multi_template is None or isinstance(multi_template, ir.MultiTemplateBuffer)
@@ -730,12 +732,12 @@ def debug_triton_code(node: Union["SchedulerNode", "FusedSchedulerNode"]) -> Lis
         from torch._inductor.codegen.cuda_combined_scheduling import (
             CUDACombinedScheduling,
         )
-        from torch._inductor.codegen.triton import TritonScheduling
+        from .codegen.simd import SIMDScheduling
 
         snodes = (node,) if isinstance(node, SchedulerNode) else node.snodes
         device = snodes[0].get_device()
         backend = node.scheduler.get_backend(device)
-        assert isinstance(backend, (TritonScheduling, CUDACombinedScheduling))
+        assert isinstance(backend, (SIMDScheduling, CUDACombinedScheduling))
         V.graph.scheduler.current_device = device
 
         # Don't increment kernel count when generating debug string.
@@ -753,7 +755,7 @@ def debug_triton_code(node: Union["SchedulerNode", "FusedSchedulerNode"]) -> Lis
 class SchedulerNode(BaseSchedulerNode):
     def __init__(
         self,
-        scheduler: "Scheduler",
+        scheduler: Scheduler,
         node: Union[ir.ComputedBuffer, ir.TemplateBuffer],
     ) -> None:
         super().__init__(scheduler, node)
@@ -918,7 +920,7 @@ class FusedSchedulerNode(BaseSchedulerNode):
     @classmethod
     def fuse(
         cls, node1: BaseSchedulerNode, node2: BaseSchedulerNode
-    ) -> "FusedSchedulerNode":
+    ) -> FusedSchedulerNode:
         assert node1.scheduler is node2.scheduler
         assert isinstance(node1, (SchedulerNode, FusedSchedulerNode))
         assert isinstance(node2, (SchedulerNode, FusedSchedulerNode))
@@ -926,7 +928,7 @@ class FusedSchedulerNode(BaseSchedulerNode):
         return cls(node1.scheduler, nodes)
 
     def __init__(
-        self, scheduler: "Scheduler", snodes: Sequence[BaseSchedulerNode]
+        self, scheduler: Scheduler, snodes: Sequence[BaseSchedulerNode]
     ) -> None:
         # NB: No need to call super().__init__() because we don't need to re-use any of its logic.
         self.snodes = snodes
@@ -1044,7 +1046,7 @@ class FusedSchedulerNode(BaseSchedulerNode):
     def add_fake_dep(self, name: Dep) -> None:
         raise NotImplementedError
 
-    def set_users(self, users: List["NodeUser"]) -> None:
+    def set_users(self, users: List[NodeUser]) -> None:
         raise NotImplementedError
 
     def get_aliases(self) -> Sequence[str]:
@@ -1154,7 +1156,7 @@ class ForeachKernelSchedulerNode(FusedSchedulerNode):
     @classmethod
     def fuse(
         cls, producer: BaseSchedulerNode, consumer: BaseSchedulerNode
-    ) -> "ForeachKernelSchedulerNode":
+    ) -> ForeachKernelSchedulerNode:
         assert producer.is_foreach() or consumer.is_foreach()
         prev_node_1 = None
         prev_node_2 = None
@@ -1199,7 +1201,7 @@ class ForeachKernelSchedulerNode(FusedSchedulerNode):
 
     def __init__(
         self,
-        scheduler: "Scheduler",
+        scheduler: Scheduler,
         nodes: Sequence[BaseSchedulerNode],
         prev_node_1: Optional[BaseSchedulerNode] = None,
         prev_node_2: Optional[BaseSchedulerNode] = None,
@@ -1359,7 +1361,7 @@ class NodeUser:
     def get_name(self) -> str:
         return self.node.get_name()
 
-    def merge(self, other: "NodeUser") -> "NodeUser":
+    def merge(self, other: NodeUser) -> NodeUser:
         assert self.node is other.node
         return NodeUser(
             self.node,
@@ -1554,7 +1556,7 @@ class Scheduler:
                 self.items.append(node_user)
                 self.membership.add(node_user)
 
-            def __add__(self, other: "DedupList[T]") -> "DedupList[T]":
+            def __add__(self, other: DedupList[T]) -> DedupList[T]:
                 new_membership = set.union(self.membership, other.membership)
                 new_items = self.items + [
                     x for x in other.items if x not in self.membership
@@ -2659,7 +2661,7 @@ class Scheduler:
         node.codegen(V.graph.wrapper_code)
         self.free_buffers()
 
-    def create_backend(self, device: torch.device) -> "BaseScheduling":
+    def create_backend(self, device: torch.device) -> BaseScheduling:
         assert (
             not is_gpu(device.type) or device.index is not None
         ), f"{device} should have been normalized in lowering"
@@ -2684,7 +2686,7 @@ class Scheduler:
 
         return device_scheduling(self)
 
-    def get_backend(self, device: torch.device) -> "BaseScheduling":
+    def get_backend(self, device: torch.device) -> BaseScheduling:
         if device not in self.backends:
             self.backends[device] = self.create_backend(device)
         return self.backends[device]
@@ -2796,6 +2798,11 @@ class Scheduler:
 
 
 class BaseScheduling:
+    @classmethod
+    def get_backend_features(cls, device: torch.device) -> Sequence[BackendFeature]:
+        """Return a set of .codegen.common.BackendFeature()"""
+        raise NotImplementedError
+
     def can_fuse_vertical(
         self, node1: BaseSchedulerNode, node2: BaseSchedulerNode
     ) -> bool:
