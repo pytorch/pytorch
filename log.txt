@@ -1,0 +1,43 @@
+============================= test session starts ==============================
+platform linux -- Python 3.10.14, pytest-7.3.2, pluggy-1.5.0
+rootdir: /data/users/jiashenc/pytorch
+configfile: pytest.ini
+plugins: xdoctest-1.1.0, hypothesis-5.35.1, xdist-3.3.1, rerunfailures-14.0, flakefinder-1.1.0, cpp-2.3.0
+collected 19 items / 17 deselected / 2 selected
+Running 2 items in this shard
+
+test/jit/test_models.py [W603 11:44:15.860124266 NNPACK.cpp:61] Could not initialize NNPACK! Reason: Unsupported hardware.
+tensor([0.4127, 0.3731, 0.3712, 0.4163, 0.5097], grad_fn=<SqueezeBackward1>)
+Retracing succeed
+Conversion failed: Trying to flatten user inputs with exported input tree spec: 
+TreeSpec(tuple, None, [TreeSpec(tuple, None, [*,
+    *,
+    *,
+    *,
+    *,
+    *,
+    *,
+    *,
+    *,
+    *,
+    *,
+    *,
+    *,
+    *,
+    *,
+    *,
+    *,
+    *,
+    *,
+    *,
+    *,
+    *,
+    *,
+    *]),
+  TreeSpec(dict, [], [])])
+but actually got inputs with tree spec of: 
+TreeSpec(tuple, None, [TreeSpec(tuple, None, [*]),
+  TreeSpec(dict, [], [])])
+.s
+
+================= 1 passed, 1 skipped, 17 deselected in 2.38s ==================

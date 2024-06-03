@@ -12185,6 +12185,21 @@ dedent """
         # graph
         FileCheck().check("aten::neg").run(str(traced_fn.graph))
 
+        # Test with EP tracing and conversion.
+        from torch.testing._internal.ep_utils import test_ep_conversion, test_ep_retracing
+        try:
+            inp = (torch.randn(3, 4),)
+            mod = torch.jit.trace(traced_fn, inp)
+            test_ep_retracing(mod, inp)
+        except Exception as e:
+            print(f"Retracing failed: {e}")
+        try:
+            inp = (torch.randn(3, 4),)
+            mod = torch.jit.script(traced_fn, inp)
+            test_ep_conversion(mod, (torch.randn(3, 4),))
+        except Exception as e:
+            print(f"Conversion failed: {e}")
+
     def test_call_python_mod_from_tracing_fn(self):
         class PythonMod(torch.nn.Module):
             def __init__(self):
@@ -12246,6 +12261,21 @@ dedent """
             return script_fn(x) + 1
 
         FileCheck().check("prim::CallFunction").check("aten::add").run(str(traced_fn.graph))
+
+        # Test with EP tracing and conversion.
+        from torch.testing._internal.ep_utils import test_ep_conversion, test_ep_retracing
+        try:
+            inp = (torch.randn(3, 4),)
+            mod = torch.jit.trace(traced_fn, inp)
+            test_ep_retracing(mod, inp)
+        except Exception as e:
+            print(f"Retracing failed: {e}")
+        try:
+            inp = (torch.randn(3, 4),)
+            mod = torch.jit.script(traced_fn, inp)
+            test_ep_conversion(mod, (torch.randn(3, 4),))
+        except Exception as e:
+            print(f"Conversion failed: {e}")
 
     @unittest.skip("error in first class mode")
     def test_call_script_mod_from_tracing_fn(self):

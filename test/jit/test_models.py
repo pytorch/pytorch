@@ -131,6 +131,27 @@ class TestModels(JitTestCase):
             export_import=check_export_import,
         )
 
+        # Test with EP tracing and conversion.
+        from torch.testing._internal.ep_utils import test_ep_conversion, test_ep_retracing
+        try:
+            # inp = torch.rand(bs, nz, 1, 1, device=device)
+            # mod = DCGANGenerator(nz, ngf, nc).to(device)
+            inp = example_input
+            mod = DCGANDiscriminator(nc, ndf).to(device)
+            test_ep_retracing(mod, (inp,))
+            print(f"Retracing succeed")
+        except Exception as e:
+            print(f"Retracing failed: {e}")
+        try:
+            # inp = torch.rand(bs, nz, 1, 1, device=device)
+            # mod = DCGANGenerator(nz, ngf, nc).to(device)
+            inp = example_input
+            mod = DCGANDiscriminator(nc, ndf).to(device)
+            test_ep_conversion(mod, (inp,))
+            print(f"Retracing succeed")
+        except Exception as e:
+            print(f"Conversion failed: {e}")
+
     def test_dcgan_models(self):
         # Note: Can sometimes fail with low precision if run with float dtype
         with set_default_dtype(torch.double):

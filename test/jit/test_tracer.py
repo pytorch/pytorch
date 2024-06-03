@@ -1184,6 +1184,25 @@ class TestTracer(JitTestCase):
         fn(x)
         fn(y)
 
+        # Test with EP tracing and conversion.
+        from torch.testing._internal.ep_utils import test_ep_conversion, test_ep_retracing
+        try:
+            # inp = torch.tensor([1.0, 2.0, 3.0])
+            inp = torch.randn(2, 2, requires_grad=True)
+            mod = torch.jit.trace(fn, inp)
+            test_ep_retracing(mod, (inp,))
+            print(f"Retracing succeed")
+        except Exception as e:
+            print(f"Retracing failed: {e}")
+        try:
+            # inp = torch.tensor([1.0, 2.0, 3.0])
+            inp = torch.randn(2, 2, requires_grad=True)
+            mod = torch.jit.script(fn, inp)
+            test_ep_conversion(mod, (inp,))
+            print(f"Retracing succeed")
+        except Exception as e:
+            print(f"Conversion failed: {e}")
+
     def test_trace_detach(self):
         def foo(x, w):
             return torch.matmul(x, w).detach()

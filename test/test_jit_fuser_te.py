@@ -1679,6 +1679,23 @@ class TestTEFuser(JitTestCase):
                     f"Failed: {dtype} {op.__name__} {device} {scalar}"
                 ) from e
 
+            # Test with EP tracing and conversion.
+            from torch.testing._internal.ep_utils import test_ep_conversion, test_ep_retracing
+            try:
+                inp = self.data_for(dtype, device)
+                mod = torch.jit.trace(fn, inp)
+                test_ep_retracing(mod, (inp,))
+                print(f"Retracing succeed")
+            except Exception as e:
+                print(f"Retracing failed: {e}")
+            try:
+                inp = self.data_for(dtype, device)
+                mod = torch.jit.script(fn, inp)
+                test_ep_conversion(mod, (inp,))
+                print(f"Retracing succeed")
+            except Exception as e:
+                print(f"Conversion failed: {e}")
+
     def test_binary_pow(self):
         def apply_with_scalar(fn, scalar):
             return lambda x: fn(x, scalar)
