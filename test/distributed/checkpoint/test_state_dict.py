@@ -605,9 +605,11 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
             # Drop the states to simulate loading from rank0
             if dist.get_rank() > 0:
                 load_states = {}
+                load_states2 = {}
                 load_optim_states = {}
             else:
                 load_states = copy.deepcopy(states)
+                load_states2 = copy.deepcopy(states)
                 load_optim_states = copy.deepcopy(optim_states)
 
             set_model_state_dict(
@@ -625,7 +627,21 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
                     broadcast_from_rank0=True, full_state_dict=True
                 ),
             )
+
             check(equal=True)
+            # Verify the `strict` flag.
+            load_states = load_states2
+            if load_states:
+                key = next(iter(load_states.keys()))
+                load_states.pop(key)
+            with self.assertRaisesRegex(RuntimeError, "Missing key"):
+                set_model_state_dict(
+                    fsdp_model,
+                    model_state_dict=load_states,
+                    options=StateDictOptions(
+                        broadcast_from_rank0=True, full_state_dict=True
+                    ),
+                )
 
         device_mesh = init_device_mesh("cuda", (self.world_size,))
         self.run_subtests(
