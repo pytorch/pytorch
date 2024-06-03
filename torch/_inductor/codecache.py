@@ -17,7 +17,6 @@ import platform
 import re
 import shlex
 import shutil
-import signal
 import struct
 import subprocess
 import sys
@@ -32,8 +31,7 @@ from copy import copy
 from ctypes import c_void_p, cdll, CDLL
 from functools import partial
 from pathlib import Path
-from threading import Thread
-from time import sleep, time, time_ns
+from time import time, time_ns
 from types import ModuleType
 from typing import (
     Any,
@@ -55,6 +53,12 @@ from torch._dynamo.device_interface import get_registered_device_interfaces
 from torch._dynamo.utils import counters, dynamo_timed
 from torch._inductor import config, exc, metrics
 from torch._inductor.codegen.cuda import cuda_env
+from torch._inductor.compile_worker.subproc_pool import (
+    _warm_process_pool,
+    AnyPool,
+    SubprocPool,
+)
+from torch._inductor.compile_worker.watchdog import _async_compile_initializer
 from torch._inductor.runtime.compile_tasks import (
     _module_to_triton_kernel,
     _reload_python_module,
@@ -254,7 +258,7 @@ class LocalCache(CacheBase):
 
 
 class PersistentCache(CacheBase):
-    @functools.lru_cache(None)
+    @functools.lru_cache(None)  # noqa: B019
     def get_global_cache(self):
         global_cache_path = self.get_global_cache_path()
         if global_cache_path is None or not global_cache_path.is_file():
@@ -442,11 +446,22 @@ def _ident(x: Any) -> Any:
     return x
 
 
+def extract_tensor_metadata_for_cache_key(t):
+    """
+    Extracts the tensor metadata and removes fields of the TensorMetadata
+    that are not needed for caching
+    """
+    meta = extract_tensor_metadata(t)
+    if not hasattr(t, "_is_inductor_static"):
+        meta = dataclasses.replace(meta, storage_offset=0, storage_bytes=None)
+    return meta
+
+
 def _reduce_fake_tensor(t):
     """
     See FxGraphCachePickler. Custom reducer to pickle FakeTensors.
     """
-    metadata = extract_tensor_metadata(t)
+    metadata = extract_tensor_metadata_for_cache_key(t)
     return (_ident, (metadata,))
 
 
@@ -477,7 +492,7 @@ def _reduce_tensor(t):
             f"FX graph cache handling of a large constant took {elapsed:.1}s. Please file an issue."
         )
 
-    metadata = extract_tensor_metadata(t)
+    metadata = extract_tensor_metadata_for_cache_key(t)
     return (_ident, (TensorMetadataAndValues(metadata, values),))
 
 
@@ -550,7 +565,7 @@ class FxGraphCachePickler(pickle.Pickler):
 
         def get_str(obj) -> str:
             if isinstance(obj, torch.Tensor):
-                return str(extract_tensor_metadata(obj))
+                return str(extract_tensor_metadata_for_cache_key(obj))
             elif isinstance(obj, bytes):
                 return "<bytes>"
             else:
@@ -635,6 +650,7 @@ class FxGraphHashDetails:
         gm: torch.fx.GraphModule,
         example_inputs: List[torch.Tensor],
         fx_kwargs: Dict[str, Any],
+        inputs_to_check: Sequence[int],
     ):
         self.gm = gm
         self.example_inputs = example_inputs
@@ -649,6 +665,9 @@ class FxGraphHashDetails:
                     self.fx_kwargs[k] = OrderedSetHolder(sorted(fx_kwargs[k]))
                 else:
                     self.fx_kwargs[k] = fx_kwargs[k]
+
+        # Alignment checks
+        self.inputs_to_check = inputs_to_check
 
         # 'Deterministic algorithms' can affect codegen via lowering to cuda kernels.
         self.deterministic_algorithms_settings = (
@@ -682,11 +701,12 @@ def compiled_fx_graph_hash(
     gm: torch.fx.GraphModule,
     example_inputs: List[torch.Tensor],
     fx_kwargs: Dict[str, Any],
+    inputs_to_check: Sequence[int],
 ) -> str:
     """
     Generate a unique hash of the FX graph for caching.
     """
-    details = FxGraphHashDetails(gm, example_inputs, fx_kwargs)
+    details = FxGraphHashDetails(gm, example_inputs, fx_kwargs, inputs_to_check)
     # The prefix distinguishes among the other kinds of objects we
     # cache in this module.
     key = "f" + FxGraphCachePickler.get_hash(details)
@@ -986,6 +1006,7 @@ class FxGraphCache:
         gm: torch.fx.GraphModule,
         example_inputs: List[torch.Tensor],
         fx_kwargs: Dict[str, Any],
+        inputs_to_check: Sequence[int],
         local: bool,
         remote: bool,
     ):
@@ -997,22 +1018,22 @@ class FxGraphCache:
         compiled_graph = None
         try:
             FxGraphCache._check_can_cache(gm)
-            key = compiled_fx_graph_hash(gm, example_inputs, fx_kwargs)
+            key = compiled_fx_graph_hash(gm, example_inputs, fx_kwargs, inputs_to_check)
 
             remote_cache = None
             if remote:
                 cache_id = "fx-graph-v1"
                 try:
-                    import triton
-
                     if config.is_fbcode():
-                        remote_cache = triton.runtime.fb_memcache.FbMemcacheRemoteFxGraphCacheBackend(
-                            cache_id
+                        from triton.runtime.fb_memcache import (
+                            FbMemcacheRemoteFxGraphCacheBackend,
                         )
+
+                        remote_cache = FbMemcacheRemoteFxGraphCacheBackend(cache_id)
                     else:
-                        remote_cache = triton.runtime.cache.RedisRemoteCacheBackend(
-                            cache_id
-                        )
+                        from torch._inductor.remote_cache import RedisRemoteCacheBackend
+
+                        remote_cache = RedisRemoteCacheBackend(cache_id)
                 except Exception:
                     remote_cache = None
                     log.warning("Unable to create a remote cache", exc_info=True)
@@ -1288,7 +1309,7 @@ cdll.LoadLibrary("__lib_path__")
     def __hash__(self) -> int:
         return hash(str(self))
 
-    @functools.lru_cache(None)
+    @functools.lru_cache(None)  # noqa: B019
     def __bool__(self) -> bool:
         if config.cpp.vec_isa_ok is not None:
             return config.cpp.vec_isa_ok
@@ -1744,6 +1765,11 @@ def get_include_and_linking_paths(
         else:
             libs = ["omp"] if config.is_fbcode() else ["gomp"]
 
+        # For AOT mode, the produced library relies on torch cpu to set grad mode
+        # like aoti_torch_grad_mode_set_enabled
+        if aot_mode and sys.platform == "linux" and not config.is_fbcode():
+            libs += ["torch", "torch_cpu"]
+
     # Unconditionally import c10 for non-abi-compatible mode to use TORCH_CHECK - See PyTorch #108690
     if not config.abi_compatible:
         libs += ["c10"]
@@ -1973,7 +1999,7 @@ class AotCodeCompiler:
                 run_command_and_check(cmd)
             log.debug("aot constant binary command: %s", cmd)
 
-            if graph.buffer_mutation:
+            if graph.mutated_buffers & set(graph.constants.keys()):
                 # .data section is between .text and .bss. When the size of .data is large,
                 # during the linking, the relocation of .text against .bss may overflow.
                 # Rename it to .ldata so that it won't be in between the .text and .bss section
@@ -2374,7 +2400,8 @@ class CppCodeCache:
                 if lib is None:
                     if future is not None:
                         future.result()
-                    worker_fn()
+                    result = worker_fn()
+                    assert result is None
                     lib = cls._load_library(output_path, key)
                     assert lib is not None
                 return lib
@@ -2564,7 +2591,7 @@ class CppWrapperCodeCache(CppPythonBindingsCodeCache):
     cache: Dict[str, Callable[[], Union[CDLL, ModuleType]]] = {}
     cache_clear = staticmethod(cache.clear)
     cpp_compile_command_flags = {
-        "include_pytorch": not config.abi_compatible,
+        "include_pytorch": True,
         "shared": True,
     }
     entry_function = "inductor_entry_cpp"
@@ -3226,7 +3253,8 @@ class TritonFuture(CodeCacheFuture):
     def result(self) -> ModuleType:
         if self.future is not None:
             # If the worker failed this will throw an exception.
-            self.future.result()
+            result = self.future.result()
+            assert result is None
             self.future = None
             self.kernel.precompile()
         return self.kernel
@@ -3240,33 +3268,8 @@ class LambdaFuture(CodeCacheFuture):
         return self.result_fn()
 
 
-# If this process dies abnormally (e.g. segfault)
-# it will not shut down the workers. Instead
-# the workers will have their parent reassigned to the
-# init process. This launches a separate thread to
-# watch for the worker getting reassigned,
-# and cleans it up in this case.
-#
-# This function cannot be an inner function since otherwise mp_context="spawn" would
-# not work for ProcessPoolExecutor since inner functions cannot be pickled.
-def _async_compile_initializer(orig_ppid) -> None:
-    def run() -> None:
-        while True:
-            sleep(1)
-            if orig_ppid != os.getppid():
-                os.kill(os.getpid(), signal.SIGKILL)
-
-    global _watchdog_thread
-    _watchdog_thread = Thread(target=run, daemon=True)
-    _watchdog_thread.start()
-    # Ignore Ctrl-C (i.e. SIGINT) sent to pool workers to avoid meaningless log spam.
-    signal.signal(signal.SIGINT, signal.SIG_IGN)
-
-
-_watchdog_thread: Optional[Thread] = None
-
 # Used to keep track of all process pools invoked so far.
-_pool_set: Set[ProcessPoolExecutor] = set()
+_pool_set: Set[AnyPool] = set()
 
 
 def shutdown_compile_workers() -> None:
@@ -3300,28 +3303,29 @@ class AsyncCompile:
 
     @staticmethod
     @functools.lru_cache(1)
-    def process_pool() -> ProcessPoolExecutor:
-        # ensure properties have been calculated before processes
-        # are forked
-        caching_device_properties()
+    def process_pool() -> AnyPool:
         assert config.compile_threads > 1
-        orig_ppid = os.getpid()
+        pool: AnyPool
+        if config.worker_start_method == "subprocess":
+            # Wrapper around ProcessPoolExecutor forks in a new process we control
+            pool = SubprocPool(config.compile_threads)
+        else:
+            # ensure properties have been calculated before processes
+            # are forked
+            caching_device_properties()
+            ctx = multiprocessing.get_context(config.worker_start_method)
+            pool = ProcessPoolExecutor(
+                config.compile_threads,
+                mp_context=ctx,
+                initializer=partial(_async_compile_initializer, os.getpid()),
+            )
+            # when this pool is created in a subprocess object, the normal exit handler
+            # doesn't run, and we need to register our own handler.
+            # exitpriority has to be high, because another one of the finalizers will
+            # kill the worker thread that sends the shutdown message to the workers...
+            multiprocessing.util.Finalize(None, pool.shutdown, exitpriority=sys.maxsize)
 
-        ctx = multiprocessing.get_context(config.worker_start_method)
-        pool = ProcessPoolExecutor(
-            config.compile_threads,
-            mp_context=ctx,
-            initializer=partial(_async_compile_initializer, orig_ppid),
-        )
-
-        global _pool_set
         _pool_set.add(pool)
-
-        # when this pool is created in a subprocess object, the normal exit handler
-        # doesn't run, and we need to register our own handler.
-        # exitpriority has to be high, because another one of the finalizers will
-        # kill the worker thread that sends the shutdown message to the workers...
-        multiprocessing.util.Finalize(None, pool.shutdown, exitpriority=sys.maxsize)
         return pool
 
     @classmethod
@@ -3329,29 +3333,7 @@ class AsyncCompile:
         if config.compile_threads <= 1:
             return
         _compile_start()
-        pool = cls.process_pool()
-
-        # We have to fork processes for compiler workers, but the more memory and other resources that are loaded, the
-        # slower the os.fork time is, quite drastically. It also holds the GIL so we can't put it on another thread.
-
-        # Examples:
-        # A simple x + x + x script: 10ms seconds in the middle of the program, 2ms at startup
-        # tf_efficientnet_b0 benchmark: 50ms! in the middle of the program , 3ms at startup
-
-        # So we want to start the workers early when it is still cheap, and also to allow the workers to get
-        # ready before we have work for them.
-
-        # ProcessPoolExecutor also does not launch the workers until it finds a point when all the workers are idle.
-        # But if we waited until then fork time will be long and we will be waiting for the processes to initialize.
-
-        # We force them to start here with some YOLOing of the internal methods.
-        if hasattr(pool, "_start_queue_management_thread"):
-            pool._start_queue_management_thread()
-        else:
-            for _ in range(config.compile_threads):
-                pool._adjust_process_count()
-            if hasattr(pool, "_start_executor_manager_thread"):
-                pool._start_executor_manager_thread()
+        _warm_process_pool(cls.process_pool(), config.compile_threads)
         _compile_end()
 
     @classmethod
