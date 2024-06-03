@@ -2,6 +2,7 @@
 
 import collections
 import contextlib
+import functools
 import gc
 import io
 import math
@@ -24,8 +25,6 @@ from functools import partial, reduce
 from itertools import product
 from operator import mul
 from typing import List, Tuple
-import numpy as np
-import functools
 
 import torch
 import torch.autograd._functions
@@ -81,7 +80,12 @@ from torch.testing._internal.common_utils import (
 )
 from torch.utils._mode_utils import no_dispatch
 from torch.utils._python_dispatch import TorchDispatchMode
-from torch.utils.checkpoint import checkpoint, checkpoint_sequential, gen_selective_checkpoint_context_fn, CheckpointPolicy
+from torch.utils.checkpoint import (
+    checkpoint,
+    checkpoint_sequential,
+    CheckpointPolicy,
+    gen_selective_checkpoint_context_fn,
+)
 from torch.utils.cpp_extension import load_inline
 from torch.utils.hooks import RemovableHandle
 
@@ -13164,6 +13168,7 @@ class TestNestedCheckpoint(TestCase):
         out.backward()
         self.assertEqual(counter[0], 1)
 
+
 class TestSelectiveActivationCheckpoint(TestCase):
     # Dynamo fails for various reasons:
     # - some tests using custom op that does not implement Fake
@@ -13204,9 +13209,11 @@ class TestSelectiveActivationCheckpoint(TestCase):
 
             op_list = [torch.ops.mylib.sin_with_counter.default]
 
-            for policy_fn in (policy_fn, op_list):
+            for policy_fn_or_op_list in (policy_fn, op_list):
                 counter = [0]
-                context_fn = functools.partial(gen_selective_checkpoint_context_fn, policy_fn)
+                context_fn = functools.partial(
+                    gen_selective_checkpoint_context_fn, policy_fn_or_op_list
+                )
                 out = checkpoint(fn, x, use_reentrant=False, context_fn=context_fn)
                 out.sum().backward()
                 self.assertEqual(counter[0], 1)
@@ -13224,12 +13231,16 @@ class TestSelectiveActivationCheckpoint(TestCase):
     def test_bad_inputs(self):
         bad_op_list1 = [2]
 
-        with self.assertRaisesRegex(ValueError, "Expected op in `op_list` to be an OpOverload"):
+        with self.assertRaisesRegex(
+            ValueError, "Expected op in `op_list` to be an OpOverload"
+        ):
             gen_selective_checkpoint_context_fn(bad_op_list1)
 
         bad_op_list2 = [torch.ops.aten.sin]
 
-        with self.assertRaisesRegex(ValueError, "update the OpOverloadPacket to a specific OpOverload"):
+        with self.assertRaisesRegex(
+            ValueError, "update the OpOverloadPacket to a specific OpOverload"
+        ):
             gen_selective_checkpoint_context_fn(bad_op_list2)
 
         with self.assertRaisesRegex(TypeError, "either a function or a list of ops."):
@@ -13258,7 +13269,11 @@ class TestSelectiveActivationCheckpoint(TestCase):
             return x.sin().sin().sin()
 
         x = torch.randn(3, requires_grad=True)
-        context_fn = functools.partial(gen_selective_checkpoint_context_fn, Policy(), allow_cache_entry_mutation=True)
+        context_fn = functools.partial(
+            gen_selective_checkpoint_context_fn,
+            Policy(),
+            allow_cache_entry_mutation=True,
+        )
         out = checkpoint(fn, x, use_reentrant=False, context_fn=context_fn)
         out.sum().backward()
         # 1. counter properly reset to 0 for the recompute
@@ -13321,7 +13336,11 @@ class TestSelectiveActivationCheckpoint(TestCase):
             out.sum().backward()
 
         x = torch.randn(3, requires_grad=True)
-        context_fn = functools.partial(gen_selective_checkpoint_context_fn, policy_fn, allow_cache_entry_mutation=True)
+        context_fn = functools.partial(
+            gen_selective_checkpoint_context_fn,
+            policy_fn,
+            allow_cache_entry_mutation=True,
+        )
         out = checkpoint(fn, x, use_reentrant=False, context_fn=context_fn)
 
         # 2) No longer should be an error because of allow_cache_entry_mutation
@@ -13338,6 +13357,7 @@ class TestSelectiveActivationCheckpoint(TestCase):
                 return CheckpointPolicy.MUST_SAVE
             else:
                 return CheckpointPolicy.PREFER_RECOMPUTE
+
         # var_mean has two outputs
         def fn(x):
             a, b = torch.var_mean(x)
@@ -13382,7 +13402,9 @@ class TestSelectiveActivationCheckpoint(TestCase):
             ops_list = [torch.ops.mylib.sin_with_extra.default]
 
             x = torch.randn(3, requires_grad=True)
-            context_fn = functools.partial(gen_selective_checkpoint_context_fn, ops_list)
+            context_fn = functools.partial(
+                gen_selective_checkpoint_context_fn, ops_list
+            )
             out = checkpoint(fn, x, use_reentrant=False, context_fn=context_fn)
             x_grad = torch.autograd.grad(out.sum(), (x,))
             self.assertEqual(counter[0], 1)

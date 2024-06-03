@@ -4,25 +4,14 @@ import uuid
 import warnings
 import weakref
 from collections import defaultdict
-from itertools import count
-from typing import (
-    Any,
-    Callable,
-    ContextManager,
-    DefaultDict,
-    Dict,
-    Iterable,
-    List,
-    Optional,
-    Tuple,
-)
+from typing import *  # noqa: F403
 import enum
 from weakref import ReferenceType
 
 import torch
 import torch.fx.traceback as fx_traceback
 from torch._functorch._aot_autograd.functional_utils import is_fun
-from torch.utils._pytree import tree_map, tree_map_only
+from torch.utils._pytree import tree_map
 from torch.testing._internal.logging_tensor import capture_logs, LoggingTensorMode
 from torch.utils._python_dispatch import TorchDispatchMode
 
@@ -1159,7 +1148,7 @@ def _is_compiling(func, args, kwargs):
 class _VersionWrapper:
     # Check that cached tensors are not mutated.
     def __init__(self, val):
-        self.val: Union[Tensor, Any] = val
+        self.val: Union[torch.Tensor, Any] = val
         self.version: Optional[int] = val._version if isinstance(val, torch.Tensor) else None
 
     def get_val(self, allow_cache_entry_mutation):

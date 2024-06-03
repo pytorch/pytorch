@@ -19,7 +19,11 @@ from torch._higher_order_ops.wrap import tag_activation_checkpoint
 from torch.testing._internal.common_utils import IS_WINDOWS, skipIfRocm
 from torch.testing._internal.inductor_utils import HAS_CUDA
 from torch.testing._internal.two_tensor import TwoTensor
-from torch.utils.checkpoint import gen_selective_checkpoint_context_fn, checkpoint, CheckpointPolicy
+from torch.utils.checkpoint import (
+    checkpoint,
+    CheckpointPolicy,
+    gen_selective_checkpoint_context_fn,
+)
 
 requires_cuda = unittest.skipUnless(HAS_CUDA, "requires cuda")
 requires_distributed = functools.partial(
