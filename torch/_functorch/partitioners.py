@@ -27,6 +27,7 @@ from torch.fx.experimental.symbolic_shapes import (
 )
 from torch.fx.passes import graph_drawer
 from . import config
+from ._aot_autograd.logging_utils import get_aot_graph_name
 from .compile_utils import fx_graph_cse, get_aten_target
 
 
@@ -878,7 +879,6 @@ def get_saved_values(
             return False
         if node in dont_ban:
             return False
-        # breakpoint()
         # This bans recomputation of the node unless we've been forced not to by
         # user annotation
         # NB: "recompute" > 0 means that user annotation has asked us to
@@ -1366,7 +1366,8 @@ def dp_knapsack(
             dp[i, :] = dp[i - 1, :] + current_runtime
         else:
             dp[i, current_memory:] = torch.maximum(
-                dp[i - 1, current_memory:], dp[i - 1, :-current_memory] + current_runtime
+                dp[i - 1, current_memory:],
+                dp[i - 1, :-current_memory] + current_runtime,
             )
 
     # Backtrack to find the items included in the knapsack
@@ -1443,8 +1444,6 @@ def estimate_runtime(node):
         return max(counted_flops, 1)
     else:
         raise RuntimeError(f"Not aware of runtime estimator: {RUNTIME_MODE}")
-        raise RuntimeError
-    return 1
 
 
 def choose_saved_values_set(
@@ -1526,16 +1525,18 @@ def choose_saved_values_set(
 
     input_storages = {get_node_storage(node) for node in node_info.inputs}
 
-    def get_recomputable_banned_nodes(banned_nodes, saved_values):
+    def get_recomputable_banned_nodes(banned_nodes: List[fx.Node]) -> List[fx.Node]:
         return [
             i
             for i in banned_nodes
-            if (i.dist_from_bw < int(1e9) and get_node_storage(i) not in input_storages)
+            if (
+                # Only allow recomputing nodes that are actually required for BW
+                i.dist_from_bw < int(1e9)  # type: ignore[attr-defined]
+                and get_node_storage(i) not in input_storages
+            )
         ]
 
-    recomputable_banned_nodes = get_recomputable_banned_nodes(
-        banned_nodes, aggressive_recomputation_saved_values
-    )
+    recomputable_banned_nodes = get_recomputable_banned_nodes(banned_nodes)
 
     # default: runtime_optimized_saved_values
     # more aggressive: more_aggressive_saved_values
@@ -1546,9 +1547,12 @@ def choose_saved_values_set(
     )
     if len(all_recomputable_banned_nodes) == 0:
         return node_info.inputs
-    memories = [get_normalized_size(_size_of(i)) for i in all_recomputable_banned_nodes]
-    runtimes = [estimate_runtime(node) for node in all_recomputable_banned_nodes]
-    cur_memory_budget = memory_budget
+    memories_banned_nodes = [
+        get_normalized_size(_size_of(i)) for i in all_recomputable_banned_nodes
+    ]
+    runtimes_banned_nodes = [
+        estimate_runtime(node) for node in all_recomputable_banned_nodes
+    ]
     from torch.utils._mode_utils import no_dispatch
 
     def get_saved_values_knapsack(memory_budget):
@@ -1558,12 +1562,12 @@ def choose_saved_values_set(
                 saved_node_idxs,
                 recomputable_node_idxs,
             ) = _optimize_runtime_with_given_memory(
-                memories, runtimes, max(memory_budget, 0)
+                memories_banned_nodes, runtimes_banned_nodes, max(memory_budget, 0)
             )
         dont_ban = set()
         for idx in recomputable_node_idxs:
             dont_ban.add(all_recomputable_banned_nodes[idx])
-        predicted_saved_nodes = set(all_recomputable_banned_nodes) - dont_ban
+        assert dont_ban.issubset(all_recomputable_banned_nodes)
 
         saved_values, _ = get_saved_values(
             joint_graph,
@@ -1582,7 +1586,7 @@ def choose_saved_values_set(
             options.append(
                 (
                     sweep_memory_budget,
-                    sum(runtimes) - expected_runtime,
+                    sum(runtimes_banned_nodes) - expected_runtime,
                     get_mem_ratio(saved_values),
                 )
             )
@@ -1612,7 +1616,10 @@ def choose_saved_values_set(
         plt.grid(True)
         fig = plt.gcf()
         plt.show()
-        fig.savefig("memory_budget_pareto.png")
+        fig_name = f"memory_budget_pareto_{get_aot_graph_name()}.png"
+        fig.savefig(fig_name)
+        log.warning("Generated Pareto frontier curve at %s", fig_name)
+
     # todo(chilli): Estimated doesn't align exactly with actual - actual is
     # usually less memory than estimated. i'm guessing (actually quite
     # unsure about this) that's because estimated is just only including
