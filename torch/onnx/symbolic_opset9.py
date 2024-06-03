@@ -789,7 +789,7 @@ def _reduce_with_dtype(onnx_op: str, name: str, allow_multi_dim_support: bool = 
 @_onnx_symbolic("aten::cumsum")
 @symbolic_helper.parse_args("v", "i", "none", "b")
 @_beartype.beartype
-def cumsum(g: jit_utils.GraphContext, input, dim, dtype, full):
+def cumsum(g: jit_utils.GraphContext, input, dim, dtype, full=False):
     if symbolic_helper.is_caffe2_aten_fallback():
         if dtype.node().kind() != "prim::Constant":
             return symbolic_helper._unimplemented("cumsum", "dtype", dtype)
