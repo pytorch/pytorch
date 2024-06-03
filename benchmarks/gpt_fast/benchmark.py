@@ -5,6 +5,7 @@ import os
 import time
 
 from generate import run_llama2_7b_bf16, run_llama2_7b_int8, run_mixtral_8x7b_int8
+from triton.testing import do_bench
 
 import torch
 import torch.nn as nn
@@ -71,6 +72,36 @@ def run_multi_layer_norm():
     ]
 
 
+def run_gather_gemv():
+    E = 8
+    dtype = torch.int8
+    memory_bandwidth = 0
+    input_shapes = [4096]
+    for D in input_shapes:
+        def cuda_indexing(W, score_idxs, x):
+            return W[score_idxs].to(x.dtype) @ x
+
+        W = torch.randn(E, D, D).to(dtype=dtype)
+        x = torch.randn(D, dtype=torch.bfloat16)
+        score_idxs = torch.tensor([3, 5])
+
+        compiled_cuda = torch.compile(cuda_indexing, dynamic=False)
+
+        for _ in range(5):
+            compiled_cuda(W, score_idxs, x)
+
+        us_per_iter = do_bench(lambda: compiled_cuda(W, score_idxs, x))*1000
+        breakpoint()
+        memory_bandwidth += (1e6/us_per_iter) * 2 * D * D * dtype.itemsize / 1e9
+
+    memory_bandwidth = memory_bandwidth / len(input_shapes)
+    return [
+        Experiment(
+            "gather_gemv", "memory_bandwidth(GB/s)", 92, f"{memory_bandwidth:.02f}"
+        )
+    ]
+
+
 def output_csv(output_file, headers, row):
     if os.path.exists(output_file):
         with open(output_file) as fd:
@@ -96,11 +127,12 @@ DEFAULT_OUTPUT_FILE = "gpt_fast_benchmark.csv"
 
 all_experiments = {
     # A list of GPT models: LlaMa, Mixtral, etc.
-    run_llama2_7b_bf16,
-    run_llama2_7b_int8,
-    run_mixtral_8x7b_int8,
+    # run_llama2_7b_bf16,
+    # run_llama2_7b_int8,
+    # run_mixtral_8x7b_int8,
     # A list of micro-benchmarks.
     run_multi_layer_norm,
+    run_gather_gemv,
 }
 
 
