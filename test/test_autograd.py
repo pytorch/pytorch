@@ -13188,7 +13188,7 @@ class TestSelectiveActivationCheckpoint(TestCase):
                 return grad * x.cos()
 
             torch.library.register_autograd(
-                "mylib::sin_with_counter", setup_context, backward
+                "mylib::sin_with_counter", backward, setup_context=setup_context
             )
 
             x = torch.randn(3, requires_grad=True)
@@ -13371,7 +13371,7 @@ class TestSelectiveActivationCheckpoint(TestCase):
                 return grad * x.cos()
 
             torch.library.register_autograd(
-                "mylib::sin_with_extra", setup_context, backward
+                "mylib::sin_with_extra", backward, setup_context=setup_context
             )
 
             x = torch.randn(3, requires_grad=True)
