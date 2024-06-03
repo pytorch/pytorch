@@ -212,6 +212,37 @@ Tensor class reference
      (see :ref:`tensor-creation-ops`).
    - To create a tensor with similar type but different size as another tensor,
      use ``tensor.new_*`` creation ops.
+   - There is a legacy constructor ``torch.Tensor`` whose use is discouraged.
+     Use :func:`torch.tensor` instead.
+
+.. method:: Tensor.__init__(self, data)
+
+   This constructor is deprecated, we recommend using :func:`torch.tensor` instead.
+   What this constructor does depends on the type of ``data``.
+
+   * If ``data`` is a Tensor, returns an alias to the original Tensor.  Unlike
+     :func:`torch.tensor`, this tracks autograd and will propagate gradients to
+     the original Tensor.  ``device`` kwarg is not supported for this ``data`` type.
+
+   * If ``data`` is a sequence or nested sequence, create a tensor of the default
+     dtype (typically ``torch.float32``) whose data is the values in the
+     sequences, performing coercions if necessary.  Notably, this differs from
+     :func:`torch.tensor` in that this constructor will always construct a float
+     tensor, even if the inputs are all integers.
+
+   * If ``data`` is a :class:`torch.Size`, returns an empty tensor of that size.
+
+   This constructor does not support explicitly specifying ``dtype`` or ``device`` of
+   the returned tensor.  We recommend using :func:`torch.tensor` which provides this
+   functionality.
+
+   Args:
+       data (array_like): The tensor to construct from.
+
+   Keyword args:
+       device (:class:`torch.device`, optional): the desired device of returned tensor.
+           Default: if None, same :class:`torch.device` as this tensor.
+
 
 .. autoattribute:: Tensor.T
 .. autoattribute:: Tensor.H
