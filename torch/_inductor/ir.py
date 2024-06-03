@@ -319,6 +319,10 @@ class IRNode:
     def get_size(self):
         raise NotImplementedError(f"get_size() is not implemented by {type(self)}!")
 
+    @property
+    def shape(self):
+        return self.get_size()
+
     def get_numel(self):
         return sympy_product(self.get_size())
 
