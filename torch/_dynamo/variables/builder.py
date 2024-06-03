@@ -1791,6 +1791,8 @@ def wrap_fx_proxy_cls(
 
         return value
 
+    is_parameter = None
+
     # with preserve_rng_state():
     if example_value is None:
         # only allow_non_graph_fake in this instance because we handle the non-fake
@@ -1817,6 +1819,10 @@ def wrap_fx_proxy_cls(
         }
         assert "source" in options and options["source"] is not None
         kwargs["source"] = options["source"]
+
+        # TODO - wrap_to_fake_tensor_and_record sometime does not retain the
+        # type of tensor class. So save the type before calling it.
+        is_parameter = isinstance(example_value, torch.nn.Parameter)
         example_value = wrap_to_fake_tensor_and_record(example_value, tx=tx, **kwargs)
     if isinstance(example_value, torch.Tensor) and (
         maybe_get_fake_mode(example_value) is not tx.fake_mode
@@ -1827,7 +1833,8 @@ def wrap_fx_proxy_cls(
         )
 
     if isinstance(example_value, torch.Tensor):
-        is_parameter = isinstance(example_value, torch.nn.Parameter)
+        if is_parameter is None:
+            is_parameter = isinstance(example_value, torch.nn.Parameter)
 
         # NB: In most (all?) cases, this does not actually do a clone.
         # (WARNING: this means that if we mutate metadata on the fake
