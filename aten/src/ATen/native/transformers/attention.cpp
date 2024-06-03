@@ -673,10 +673,6 @@ Tensor scaled_dot_product_attention(
         auto out_lse_softmax = at::_scaled_dot_product_flash_attention(
             query_padded, key_padded, value_padded, dropout_p, is_causal, false /*return_debug_mask*/, og_scale.as_float_unchecked());
         return post_process_flash_output(std::get<0>(out_lse_softmax), og_size);
-      } else if (query_.device().type() == DeviceType::PrivateUse1) {
-        auto out_lse_softmax = at::_scaled_dot_product_fused_attention_overrideable(
-            query_, key, value, dropout_p, is_causal, false /*return_debug_mask*/, scale);
-        return std::get<0>(out_lse_softmax);
       } else {
       // For the CPU case we do not need to pad the last dim
       return std::get<0>(at::_scaled_dot_product_flash_attention_for_cpu(
@@ -691,6 +687,11 @@ Tensor scaled_dot_product_attention(
       auto out_and_lse = at::_scaled_dot_product_efficient_attention(
           query_, key, value, attn_mask, compute_logsumexp, dropout_p, is_causal, scale);
       return std::get<0>(out_and_lse);
+    }
+    case sdp::SDPBackend::overrideable: {
+      auto out_lse_softmax = at::_scaled_dot_product_fused_attention_overrideable(
+          query_, key, value, attn_mask, dropout_p, is_causal, false /*return_debug_mask*/, scale);
+      return std::get<0>(out_lse_softmax);
     }
     case sdp::SDPBackend::math:
       return std::get<0>(at::_scaled_dot_product_attention_math(
@@ -852,6 +853,7 @@ _scaled_dot_product_fused_attention_overrideable(
     const at::Tensor & query,
     const at::Tensor & key,
     const at::Tensor & value,
+    const c10::optional<at::Tensor> & attn_bias, 
     double dropout_p,
     bool is_causal,
     bool return_debug_mask,
@@ -859,12 +861,14 @@ _scaled_dot_product_fused_attention_overrideable(
   TORCH_CHECK_NOT_IMPLEMENTED(false, "_scaled_dot_product_fused_attention_overrideable not implemented. This is an operator for privateuse1 backends, please use TORCH_LIBRARY_IMPL to override this function ");
 }
 
-std::tuple<at::Tensor,at::Tensor,at::Tensor>
+std::tuple<at::Tensor, at::Tensor, at::Tensor, at::Tensor>
 _scaled_dot_product_fused_attention_overrideable_backward(
     const at::Tensor & grad_out,
     const at::Tensor & query,
     const at::Tensor & key,
     const at::Tensor & value,
+    const at::Tensor & attn_bias,
+    std::array<bool,4> grad_input_mask,
     const at::Tensor & out,
     const at::Tensor & logsumexp,
     const at::Tensor & cum_seq_q,
@@ -877,10 +881,11 @@ _scaled_dot_product_fused_attention_overrideable_backward(
     const at::Tensor & philox_offset,
     std::optional<double> scale) {
   TORCH_CHECK_NOT_IMPLEMENTED(false, "_scaled_dot_product_fused_attention_overrideable_backward not implemented: This is an operator for privateuse1 backends, please use TORCH_LIBRARY_IMPL to override this function ");
-  return std::tuple<Tensor, Tensor, Tensor>(
+  return std::tuple<Tensor, Tensor, Tensor, Tensor>(
           at::empty_like(query),
           at::empty_like(key),
-          at::empty_like(value));
+          at::empty_like(value),
+          at::empty_like(attn_bias));
 }
 
 Tensor triton_multi_head_attention(
