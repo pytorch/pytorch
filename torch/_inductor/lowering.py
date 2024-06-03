@@ -3284,6 +3284,9 @@ def scatter_reduce_(self, dim: int, index, src, reduce, *, include_self: bool = 
     if isinstance(index, TensorBox) and len(index.get_size()) == 0:
         index = view(index, [1])
 
+    if index.get_numel() == 0:
+        return clone(self)
+
     dim = _validate_dim(self, dim)
 
     self.realize()
