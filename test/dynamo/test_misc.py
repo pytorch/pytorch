@@ -33,6 +33,7 @@ import torch._inductor.test_case
 import torch.onnx.operators
 
 import torch.utils._pytree as pytree
+import torch.utils.cpp_extension
 from torch import Tensor
 from torch._C import FileCheck
 from torch._dynamo import allow_in_graph
@@ -222,6 +223,38 @@ class MiscTests(torch._inductor.test_case.TestCase):
 
         with self.assertRaises(TypeError):
             fn(torch.randn(16))
+
+    def test_cpp_extension_recommends_custom_ops(self):
+        cpp_source = """
+        #include <torch/extension.h>
+        at::Tensor foobar(const at::Tensor& x) {
+            return x.clone();
+        }
+        """
+        module = torch.utils.cpp_extension.load_inline(
+            name="mylib",
+            cpp_sources=cpp_source,
+            functions="foobar",
+            verbose=True,
+        )
+
+        x = torch.ones(2, 2, requires_grad=True)
+        counters.clear()
+
+        @torch.compile(backend="eager")
+        def f(x):
+            return module.foobar(x)
+
+        with self.assertWarnsOnceRegex(
+            UserWarning, ".*https://pytorch.org/docs/main/notes/custom_operators.html.*"
+        ):
+            f(x)
+        self.assertEqual(len(counters["graph_break"]), 1)
+        first_graph_break = list(counters["graph_break"].keys())[0]
+        self.assertExpectedInline(
+            first_graph_break,
+            """Graph break due to unsupported builtin mylib.PyCapsule.foobar. This function is either a Python builtin (e.g. _warnings.warn) or a third-party C/C++ Python extension (perhaps created with pybind). If it is a Python builtin, please file an issue on GitHub so the PyTorch team can add support for it and see the next case for a workaround. If it is a third-party C/C++ Python extension, please either wrap it into a PyTorch-understood custom operator (see https://pytorch.org/docs/main/notes/custom_operators.html for more details) or, if it is traceable, use torch.compiler.allow_in_graph.""",
+        )
 
     def test_callpacked(self):
         def call_packed(args):
@@ -667,7 +700,7 @@ class MiscTests(torch._inductor.test_case.TestCase):
                     """\
 def forward(self, arg0_1: "f32[3]", arg1_1: "f32[3]", arg2_1: "f32[3]", arg3_1: "f32[3]", arg4_1: "f32[3]"):
         # No stacktrace found for following nodes
-        foo_default = torch.ops.mylib.foo.default(arg0_1, [arg3_1, arg4_1], arg1_1, 2, arg2_1);  arg0_1 = arg3_1 = arg4_1 = arg1_1 = arg2_1 = None
+        foo_default = torch.ops.mylib.foo.default(arg4_1, [arg2_1, arg3_1], arg1_1, 2, arg0_1);  arg4_1 = arg2_1 = arg3_1 = arg1_1 = arg0_1 = None
         return ()""",
                 )
 
@@ -726,7 +759,7 @@ def forward(self, arg0_1: "f32[3]", arg1_1: "f32[3]", arg2_1: "f32[3]", arg3_1: 
                     """\
 def forward(self, arg0_1: "f32[3]", arg1_1: "f32[3]", arg2_1: "f32[3]", arg3_1: "f32[3]", arg4_1: "f32[3]"):
         # No stacktrace found for following nodes
-        foo_default = torch.ops.mylib.foo.default(arg0_1, [arg3_1, arg4_1], arg1_1, 2, arg2_1);  arg0_1 = arg3_1 = arg4_1 = arg1_1 = arg2_1 = None
+        foo_default = torch.ops.mylib.foo.default(arg4_1, [arg2_1, arg3_1], arg1_1, 2, arg0_1);  arg4_1 = arg2_1 = arg3_1 = arg1_1 = arg0_1 = None
         getitem_4: "f32[3]" = foo_default[0]
         getitem_5: "f32[3]" = foo_default[1];  foo_default = None
         return (getitem_4, getitem_5)""",
@@ -818,7 +851,7 @@ def forward(self, arg0_1: "f32[3]", arg1_1: "f32[3]", arg2_1: "f32[3]", arg3_1: 
                     """\
 def forward(self, arg0_1: "f32[3]", arg1_1: "f32[3]", arg2_1: "f32[3]", arg3_1: "f32[3]"):
         # No stacktrace found for following nodes
-        foo_default = torch.ops.mylib.foo.default(None, [arg2_1, arg3_1], arg0_1, 2, arg1_1);  arg2_1 = arg3_1 = arg0_1 = arg1_1 = None
+        foo_default = torch.ops.mylib.foo.default(None, [arg2_1, arg3_1], arg1_1, 2, arg0_1);  arg2_1 = arg3_1 = arg1_1 = arg0_1 = None
         return ()""",
                 )
 
@@ -4231,6 +4264,59 @@ utils_device.CURRENT_DEVICE == None""".split(
         opt_fn(x)
         self.assertEqual(cnts.frame_count, 2)
 
+    def test_id_guarded_object(self):
+        class UDO:
+            @torch.compile(backend="eager")
+            def call(self, x, ref_id):
+                self_id = id(self)
+                if self_id == ref_id:
+                    x = torch.mul(x, 1.0)
+                else:
+                    x = torch.mul(x, 0)
+                return x
+
+        # Make sure we do recompile when id(self) is executed on
+        # different self objects.
+        x = torch.ones(2)
+        obj1 = UDO()
+        obj1_id = id(obj1)
+        self.assertEqual(obj1.call(x, obj1_id), torch.ones(2))
+
+        obj2 = UDO()
+        # if we do not install ID_MATCH: ___check_obj_id(L['self'], xxx) this fails.
+        self.assertEqual(obj2.call(x, obj1_id), torch.zeros(2))
+
+    def test_id_guarded_module(self):
+        class M(torch.nn.Module):
+            def forward(self, x, ref_id):
+                self_id = id(self)
+                if self_id == ref_id:
+                    x = torch.mul(x, 1.0)
+                else:
+                    x = torch.mul(x, 0)
+                return x
+
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        # Make sure we do recompile when id(self) is executed on
+        # different self objects.
+        x = torch.ones(2)
+        m1 = M()
+        m1_id = id(m1)
+        opt_m1 = torch._dynamo.optimize(cnts, nopython=True)(m1)
+        self.assertEqual(opt_m1(x, m1_id), torch.ones(2))
+        self.assertEqual(opt_m1(x, m1_id), torch.ones(2))
+
+        self.assertEqual(cnts.frame_count, 1)
+        self.assertEqual(cnts.op_count, 1)
+
+        m2 = M()
+        opt_m2 = torch._dynamo.optimize(cnts, nopython=True)(m2)
+        # if we do not install ID_MATCH: ___check_obj_id(L['self'], xxx) this fails.
+        self.assertEqual(opt_m2(x, m1_id), torch.zeros(2))
+        self.assertEqual(cnts.frame_count, 2)
+        self.assertEqual(cnts.op_count, 2)
+
     def test_id_of_nn_module(self):
         class M(torch.nn.Module):
             def forward(self, x, ref_id):
@@ -6754,7 +6840,7 @@ utils_device.CURRENT_DEVICE == None""".split(
                 x += 1
             return x
 
-        opt_fn = torch._dynamo.optimize("eager")(fn)
+        opt_fn = torch._dynamo.optimize("eager", nopython=True)(fn)
         self.assertEqual(opt_fn(), torch.tensor([2.0]))
 
     def test_nested_sequential_with(self):
@@ -9195,8 +9281,8 @@ def ___make_guard_fn():
 ShapeEnv not equal: field values don't match:
 
 ==> settings: values don't match.
-  >  Left: ShapeEnvSettings(allow_scalar_outputs=False, allow_dynamic_output_shape_ops=True, assume_static_by_default=False, specialize_zero_one=True, duck_shape=True, prefer_deferred_runtime_asserts_over_guards=False)
-  > Right: ShapeEnvSettings(allow_scalar_outputs=True, allow_dynamic_output_shape_ops=True, assume_static_by_default=False, specialize_zero_one=True, duck_shape=True, prefer_deferred_runtime_asserts_over_guards=False)
+  >  Left: ShapeEnvSettings(allow_scalar_outputs=False, allow_dynamic_output_shape_ops=True, assume_static_by_default=False, specialize_zero_one=True, duck_shape=True, prefer_deferred_runtime_asserts_over_guards=False, _allow_complex_guards_as_runtime_asserts=False)
+  > Right: ShapeEnvSettings(allow_scalar_outputs=True, allow_dynamic_output_shape_ops=True, assume_static_by_default=False, specialize_zero_one=True, duck_shape=True, prefer_deferred_runtime_asserts_over_guards=False, _allow_complex_guards_as_runtime_asserts=False)
 """,
         )
         self._replay_and_check(main)
@@ -10320,6 +10406,24 @@ fn
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         res = opt_fn(x)
         self.assertEqual(ref, res)
+
+    def test_module_dunder_dict(self):
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.foo = 1
+                self.bar = 2
+                self.baz = 3
+
+            def forward(self, x):
+                if "foo" in self.__dict__:
+                    return x * self.bar
+                return x * self.baz
+
+        mod = MyModule()
+        x = torch.randn(10)
+        opt_mod = torch.compile(mod, backend="eager", fullgraph=True)
+        self.assertEqual(mod(x), opt_mod(x))
 
 
 class TestTracer(JitTestCase):

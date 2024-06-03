@@ -1195,8 +1195,11 @@ class SIMDScheduling(BaseScheduling):
             buffer_names.update(node.get_names())
             buffer_names.update(node.used_buffer_names())
 
-            if can_expr_in_32 and not torch._inductor.optimize_indexing.all_indexing_expressable_in_32_bits(
-                node._body
+            if (
+                can_expr_in_32
+                and not torch._inductor.optimize_indexing.all_indexing_expressable_in_32_bits(
+                    node._body  # type: ignore[attr-defined]
+                )
             ):
                 can_expr_in_32 = False
 
@@ -1214,7 +1217,9 @@ class SIMDScheduling(BaseScheduling):
         # conservative here.
         total_numel = numel * reduction_numel
 
-        if can_expr_in_32 and SIMDScheduling.can_use_32bit_indexing(total_numel, buffers):
+        if can_expr_in_32 and SIMDScheduling.can_use_32bit_indexing(
+            total_numel, buffers
+        ):
             return cls.int32_type
         return cls.int64_type
 
@@ -1408,8 +1413,9 @@ class SIMDScheduling(BaseScheduling):
                 for node in [template_node, *epilogue_nodes]:
                     node.mark_run()
             partial_code = render()
-            for node in epilogue_nodes:
-                node.codegen(kernel.split_and_set_ranges(node.get_ranges()))
+            with kernel.set_subgraph_body("<STORE_OUTPUT>"):
+                for node in epilogue_nodes:
+                    node.codegen(kernel.split_and_set_ranges(node.get_ranges()))
 
         if not isinstance(partial_code, str):
             partial_code.finalize_hook("<DEF_KERNEL>")

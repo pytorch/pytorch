@@ -819,6 +819,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         return subobj
 
     def has_key_in_generic_dict(self, tx, key):
+        self._check_for_getattribute()
         if tx.output.side_effects.has_pending_mutation_of_attr(self, key):
             mutated_attr = tx.output.side_effects.load_attr(self, key, deleted_ok=True)
             return not isinstance(mutated_attr, variables.DeletedVariable)

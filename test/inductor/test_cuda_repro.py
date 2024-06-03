@@ -417,8 +417,8 @@ class CudaReproTests(TestCase):
             block_start = pid * XBLOCK
             offsets = block_start + tl.arange(0, XBLOCK)
             mask = offsets < xnumel
-            x = tl.load(in_out_ptr0 + offsets, mask=mask)
-            y = tl.load(in_ptr0 + offsets, mask=mask)
+            x = tl.load(in_out_ptr0 + offsets, mask=mask, other=0.0)
+            y = tl.load(in_ptr0 + offsets, mask=mask, other=0.0)
             output = x + y
             tl.store(in_out_ptr0 + offsets, output, mask=mask)
 
@@ -1181,10 +1181,34 @@ class CudaReproTests(TestCase):
         self.assertEqual(outer_reduce(a), out)
         self.assertTrue("for roffset" not in code)
 
+    def test_epilogue_fusion_with_view(self):
+        class ToyModel(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = torch.nn.Conv2d(3, 64, kernel_size=3, stride=1, padding=1)
+                self.linear = torch.nn.Linear(262144, 100)
+                self.relu = torch.nn.ReLU()
+
+            def forward(self, x):
+                x = self.conv(x)
+                x = x.view(x.size(0), -1)
+                return self.relu(self.linear(x))
+
+        m = ToyModel().to(device="cuda:0")
+        input_tensor = torch.randn(32, 3, 64, 64).to(device="cuda:0")
+        from torch._inductor.utils import fresh_inductor_cache
+
+        with fresh_inductor_cache():
+            cm = torch.compile(m, mode="max-autotune")
+            out = cm(input_tensor)
+            out2 = m(input_tensor)
+            self.assertEqual(out, out2, atol=1e-3, rtol=1e-3)
+
     def test_int64_index_intermediate(self):
         def foo(split_1):
-            view_23 = torch.ops.aten.view.default(inp, [-1, 8192, 8192]);#  mm_3 = None
-            split_1 = torch.ops.aten.split.Tensor(view_23, 1024, 1);  view_23 = None
+            view_23 = torch.ops.aten.view.default(inp, [-1, 8192, 8192])
+            split_1 = torch.ops.aten.split.Tensor(view_23, 1024, 1)
+            view_23 = None
             getitem_17 = split_1[0]
             getitem_18 = split_1[1]
             getitem_19 = split_1[2]
@@ -1192,8 +1216,25 @@ class CudaReproTests(TestCase):
             getitem_21 = split_1[4]
             getitem_22 = split_1[5]
             getitem_23 = split_1[6]
-            getitem_24 = split_1[7];  split_1 = None
-            cat_1 = torch.ops.aten.cat.default([getitem_17, getitem_18, getitem_19, getitem_20, getitem_21, getitem_22, getitem_23, getitem_24]);  getitem_17 = getitem_18 = getitem_19 = getitem_20 = getitem_21 = getitem_22 = getitem_23 = getitem_24 = None
+            getitem_24 = split_1[7]
+            split_1 = None
+            cat_1 = torch.ops.aten.cat.default(
+                [
+                    getitem_17,
+                    getitem_18,
+                    getitem_19,
+                    getitem_20,
+                    getitem_21,
+                    getitem_22,
+                    getitem_23,
+                    getitem_24,
+                ]
+            )
+            getitem_17 = (
+                getitem_18
+            ) = (
+                getitem_19
+            ) = getitem_20 = getitem_21 = getitem_22 = getitem_23 = getitem_24 = None
             return cat_1
 
         for mark_dynamic in [False, True]:
@@ -1202,7 +1243,6 @@ class CudaReproTests(TestCase):
                 torch._dynamo.mark_dynamic(inp, 0)
             foo_c = torch.compile(foo)
             torch.testing.assert_allclose(foo(inp), foo_c(inp))
-
 
 
 if __name__ == "__main__":
