@@ -7,7 +7,7 @@ from typing import Any, Callable, Iterable, List, Literal, Optional, Tuple, Unio
 import torch
 from torch import Tensor
 from torch.nn import Module
-from torch.optim.lr_scheduler import LRScheduler
+from torch.optim.lr_scheduler import _format_param, LRScheduler
 from torch.utils._foreach_utils import _get_foreach_kernels_supported_devices
 from .optimizer import Optimizer
 
@@ -390,7 +390,7 @@ class SWALR(LRScheduler):
         anneal_strategy: Literal["cos", "linear"] = "cos",
         last_epoch=-1,
     ):
-        swa_lrs = self._format_param(optimizer, swa_lr)
+        swa_lrs = _format_param("swa_lr", optimizer, swa_lr)
         for swa_lr, group in zip(swa_lrs, optimizer.param_groups):
             group["swa_lr"] = swa_lr
         if anneal_strategy not in ["cos", "linear"]:
@@ -408,22 +408,6 @@ class SWALR(LRScheduler):
             )
         self.anneal_epochs = anneal_epochs
         super().__init__(optimizer, last_epoch)
-
-    @staticmethod
-    def _format_param(
-        optimizer: Optimizer,
-        swa_lrs: Union[float, List[float], Tuple[float, ...]],
-    ) -> Union[List[float], Tuple[float, ...]]:
-        if isinstance(swa_lrs, (list, tuple)):
-            if len(swa_lrs) != len(optimizer.param_groups):
-                raise ValueError(
-                    "swa_lr must have the same length as "
-                    f"optimizer.param_groups: swa_lr has {len(swa_lrs)}, "
-                    f"optimizer.param_groups has {len(optimizer.param_groups)}"
-                )
-            return swa_lrs
-        else:
-            return [swa_lrs] * len(optimizer.param_groups)
 
     @staticmethod
     def _linear_anneal(t):
