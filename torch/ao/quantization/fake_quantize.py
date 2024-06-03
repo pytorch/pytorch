@@ -194,6 +194,9 @@ class FakeQuantize(FakeQuantizeBase):
         return self.activation_post_process.calculate_qparams()
 
     def forward(self, X):
+        # Change the device of scale and zero_point to match X.device
+        self.scale = self.scale.to(X.device)
+        self.zero_point = self.zero_point.to(X.device)
         if self.observer_enabled[0] == 1:
             self.activation_post_process(X.detach())
             _scale, _zero_point = self.calculate_qparams()
