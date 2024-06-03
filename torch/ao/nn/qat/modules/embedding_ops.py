@@ -42,7 +42,7 @@ class Embedding(nn.Embedding):
                            self.sparse)
 
     @classmethod
-    def from_float(cls, mod):
+    def from_float(cls, mod, use_precomputed_fake_quant=False):
         r"""Create a qat module from a float module
 
             Args: `mod` a float module, either produced by torch.ao.quantization utilities
@@ -112,7 +112,7 @@ class EmbeddingBag(nn.EmbeddingBag):
                                self.padding_idx)
 
     @classmethod
-    def from_float(cls, mod):
+    def from_float(cls, mod, use_precomputed_fake_quant=False):
         r"""Create a qat module from a float module
 
             Args: `mod` a float module, either produced by torch.ao.quantization utilities
