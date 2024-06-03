@@ -305,9 +305,6 @@ def _register_group_forward_hooks(
 
     @functools.wraps(pre_hook)
     def wrapped_pre_hook(*args: Any, **kwargs: Any):
-        in_backward = torch._C._current_graph_task_id() != -1
-        if in_backward:
-            return
         if len(modules_to_run) == 0:  # first to run
             modules_to_run.update(modules_set)
             return pre_hook(*args, **kwargs)
@@ -315,9 +312,6 @@ def _register_group_forward_hooks(
     def get_wrapped_post_hook(module: nn.Module):
         @functools.wraps(post_hook)
         def wrapped_post_hook(*args: Any, **kwargs: Any):
-            in_backward = torch._C._current_graph_task_id() != -1
-            if in_backward:
-                return
             modules_to_run.discard(module)
             if len(modules_to_run) == 0:
                 return post_hook(*args, **kwargs)
@@ -332,7 +326,7 @@ def _register_group_forward_hooks(
     ]
     post_handles = [
         module.register_forward_hook(
-            get_wrapped_post_hook(module), prepend=False, with_kwargs=False
+            get_wrapped_post_hook(module), prepend=False, always_call=True
         )
         for module in modules
     ]
