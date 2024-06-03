@@ -31,6 +31,7 @@ from torch._higher_order_ops.torchbind import call_torchbind
 from torch._ops import HigherOrderOperator
 from torch._streambase import _EventBase, _StreamBase
 from torch._subclasses.fake_tensor import FakeTensor, is_fake, maybe_get_fake_mode
+from torch._subclasses.functional_tensor import FunctionalTensor
 from torch._subclasses.meta_utils import is_sparse_any
 from torch.fx.experimental._backward_state import BackwardState
 from torch.fx.experimental.symbolic_shapes import (
@@ -52,6 +53,7 @@ from ..guards import GuardBuilder, install_guard, make_dupe_guard
 from ..side_effects import SideEffects
 from ..source import (
     AttrSource,
+    CallMethodItemSource,
     ConstantSource,
     ConstDictKeySource,
     ConvertIntSource,
@@ -69,7 +71,12 @@ from ..source import (
     Source,
     TupleIteratorGetItemSource,
 )
-from ..trace_rules import is_callable_allowed, is_numpy
+from ..trace_rules import (
+    is_callable_allowed,
+    is_numpy,
+    is_numpy_dtype,
+    is_numpy_type_info,
+)
 from ..utils import (
     build_checkpoint_variable,
     clone_input,
@@ -83,6 +90,7 @@ from ..utils import (
     is_utils_checkpoint,
     istype,
     odict_values,
+    proxy_args_kwargs,
     set_example_value,
     tensor_always_has_static_shape,
     tuple_iterator,
@@ -149,6 +157,8 @@ from .misc import (
     LambdaVariable,
     LoggingLoggerVariable,
     MethodWrapperVariable,
+    NumpyDTypeVariable,
+    NumpyTypeInfoVariable,
     NumpyVariable,
     PythonModuleVariable,
     RegexPatternVariable,
@@ -623,6 +633,17 @@ class VariableBuilder:
                 else GuardBuilder.TYPE_MATCH
             )
             return NumpyVariable(value, source=self.source)
+        elif is_numpy_dtype(value):
+            self.install_guards(GuardBuilder.ID_MATCH)
+            return NumpyDTypeVariable(value, source=self.source)
+        elif is_numpy_type_info(value):
+            if isinstance(value, np.iinfo):
+                self.install_guards(GuardBuilder.TYPE_MATCH)
+                dt_source = AttrSource(self.source, "dtype")
+                install_guard(dt_source.make_guard(GuardBuilder.ID_MATCH))
+            else:
+                self.install_guards(GuardBuilder.ID_MATCH)
+            return NumpyTypeInfoVariable(value, source=self.source)
         # NB: These can't be put in type_dispatch, they have to run later
         elif CollectiveFunctionRewriteVariable.can_rewrite(value):
             self.install_guards(GuardBuilder.FUNCTION_MATCH)
@@ -1162,10 +1183,6 @@ class VariableBuilder:
                 value in self._common_constants()
                 # Assume integers from global variables want to be specialized
                 or not self.source.guard_source().is_local()
-                # Assume that integers that came from NN modules want to be
-                # specialized (as we don't expect users to be changing the
-                # NN modules on the fly)
-                or self.source.guard_source().is_nn_module()
                 or is_from_defaults(self.source)
                 or is_cell_contents(self.source)
             ):
@@ -1277,7 +1294,9 @@ class VariableBuilder:
         ):
             unimplemented("torch.compile does not support strided NestedTensor")
 
-        if is_sparse_any(value):
+        # Reject sparse, but not coo.
+        # TODO: remove this altogether when non-coo sparsity propagation is ready
+        if is_sparse_any(value) and not value.is_sparse:
             unimplemented(
                 f"torch.compile does not support sparse Tensor with {value.layout} layout"
             )
@@ -1529,7 +1548,7 @@ class VariableBuilder:
         # ints, this won't make codegen perf worse.  Modest cost to compile
         # time.
 
-        wrapped_value = torch.tensor(value)
+        wrapped_value = torch.tensor(value, dtype=torch.float64)
         # TODO: Switch RandomValueSource over to use this, this is more
         # accurate
         assert not isinstance(self.get_source(), RandomValueSource)
@@ -1595,47 +1614,18 @@ class VariableBuilder:
             example_strong_ref=wrapped_value,
         )
 
-        # OK, now the crazy sauce.  We want to generate a SymNodeVariable to
-        # do the rest of our tracing, doing the equivalent of an item() call.
-        # But we don't /actually/ want to do an item() call, because that will
-        # give us an unbacked SymFloat, but this is really a backed SymFloat.
-
-        item_proxy = self.tx.output.create_proxy(
-            "call_method",
-            "item",
-            (proxy,),
-            {},
+        # Directly do item to bypass capture_scalar_outputs
+        r = wrap_fx_proxy(
+            self.tx,
+            self.tx.output.create_proxy(
+                "call_method",
+                "item",
+                *proxy_args_kwargs([unspec_var], {}),
+            ),
         )
-        # Do NOT do conventional fake tensor prop
+        self.tx.output.tracked_fakes.append(TrackedFake(r.sym_num, self.source, None))
 
-        shape_env = self.tx.output.shape_env
-        item_symbol = shape_env.create_unspecified_symbol(
-            value,
-            # Interesting!  Normally if you do compute on a Variable (the
-            # compute in this case being an item() call), you end up with a
-            # new variable that doesn't have source, but in this case, we can
-            # still put a source on it.
-            source=self.source,
-            # If we put in a Tensor input, definitely dynamic (if you wanted
-            # it to be static, gotta bail out earlier)
-            dynamic_dim=DimDynamic.DYNAMIC,
-        )
-        item_example_value = shape_env.create_symfloatnode(
-            item_symbol, hint=value, source=self.source
-        )
-        set_example_value(item_proxy.node, item_example_value)
-
-        self.tx.output.tracked_fakes.append(
-            TrackedFake(item_example_value, self.source, None)
-        )
-
-        item_unspec_var = SymNodeVariable(
-            item_proxy,
-            item_example_value,
-            source=self.get_source(),  # Interesting as above!
-        )
-
-        return item_unspec_var
+        return r
 
     def wrap_unspecialized_primitive(self, value):
         if self.name in self.tx.output.unspec_variable_map:
@@ -1783,23 +1773,17 @@ def wrap_fx_proxy_cls(
 
     assert "example_value" not in proxy.node.meta, f"{proxy.node.meta['example_value']}"
 
-    initial_example_value = example_value
-
     def _clone_input(value):
         if isinstance(value, torch.Tensor):
             # tensor subclasses will not be converted to FakeTensors and need to be cloned
-            print(value)
-            print(torch._is_functional_tensor(value))
-            # breakpoint()
             if not (
-                isinstance(value, FakeTensor)
+                isinstance(value, (FakeTensor, FunctionalTensor))
                 or (
                     # Is functional tensor fakeified by this instance of Dynamo
                     torch._is_functional_tensor(value)
                     and maybe_get_fake_mode(value) is tx.fake_mode
                 )
                 or value.is_nested
-                or isinstance(value, torch._subclasses.functional_tensor.FunctionalTensor)
             ):
                 # NB: ensure strides are preserved
                 value = clone_input(value)
@@ -1817,9 +1801,6 @@ def wrap_fx_proxy_cls(
         pass
 
     elif isinstance(example_value, torch.Tensor):
-        # if isinstance(example_value, torch._subclasses.functional_tensor.FunctionalTensor):
-        #     example_value = example_value.elem
-
         if tx.export:
             # The legacy behavior for real value cache with subclasses was
             # to perform a clone WITHOUT preserving the subclass.  It's
@@ -1978,7 +1959,6 @@ def wrap_fx_proxy_cls(
         getattr(torch.distributed, "get_world_size", _missing),
         # This always wants to be in the graph, even if the constraint
         # results in a constant int
-        torch._constrain_as_value,
         torch._constrain_as_size,
     ]:
         set_example_value(proxy.node, example_value)
@@ -2291,7 +2271,6 @@ def wrap_to_fake_tensor_and_record(
             symbolic_context,
             type(e),
         )
-        # breakpoint()
         fake_e = wrap_fake_exception(
             lambda: tx.fake_mode.from_tensor(
                 e,
@@ -2299,6 +2278,14 @@ def wrap_to_fake_tensor_and_record(
                 symbolic_context=symbolic_context,
             )
         )
+        if (
+            source is not None
+            and isinstance(fake_e, FakeTensor)
+            and (sym_val := fake_e.item_memo) is not None
+        ):
+            tx.output.tracked_fakes.append(
+                TrackedFake(sym_val, CallMethodItemSource(source), symbolic_context)
+            )
 
         if is_traceable_wrapper_subclass(fake_e):
             attrs, _ = fake_e.__tensor_flatten__()
@@ -2315,10 +2302,23 @@ def wrap_to_fake_tensor_and_record(
                 )
 
         tx.output.tracing_context.tensor_to_context[e] = symbolic_context
-        tx.output.input_source_to_sizes_strides[source] = {
-            "size": fake_e.size(),
-            "stride": fake_e.stride(),
-        }
+        if is_sparse_any(fake_e):
+            # TODO: for TensorGuards, this eventually may need more
+            #       fields for the size/stride of any other constituents
+            values = fake_e._values() if fake_e.is_sparse else fake_e.values()
+            tx.output.input_source_to_sizes_strides[source] = {
+                "size": fake_e.size(),
+                # TODO: revise this, but for now this stride instead of ()
+                #       avoids SegFault with PYTORCH_TEST_WITH_DYNAMO=1
+                "stride": (1,) * fake_e.ndim,
+                "values_size": values.size(),
+                "values_stride": values.stride(),
+            }
+        else:
+            tx.output.input_source_to_sizes_strides[source] = {
+                "size": fake_e.size(),
+                "stride": fake_e.stride(),
+            }
 
         if (
             is_tensor

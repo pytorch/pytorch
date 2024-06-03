@@ -64,7 +64,7 @@ the following:
       xindex = xoffset + tl.arange(0, XBLOCK)[:]
       xmask = xindex < xnumel
       x0 = xindex
-      tmp0 = tl.load(in_ptr0 + (x0), xmask)
+      tmp0 = tl.load(in_ptr0 + (x0), xmask, other=0.0)
       tmp1 = tl.cos(tmp0)
       tmp2 = tl.sin(tmp1)
       tl.store(out_ptr0 + (x0 + tl.zeros([XBLOCK], tl.int32)), tmp2, xmask)

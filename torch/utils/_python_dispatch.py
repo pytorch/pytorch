@@ -198,7 +198,7 @@ def _pop_mode_temporarily(k: Optional[DispatchKey] = None):
 
 
 @contextlib.contextmanager
-def _disable_current_modes():
+def _disable_current_modes(preserve_functional_modes=False):
     from torch._ops import (
         _len_torch_dispatch_stack_pre_dispatch,
         _pop_mode_from_pre_dispatch,
@@ -222,7 +222,8 @@ def _disable_current_modes():
             has_proxy_mode_in_pre_dispatch = True
         if isinstance(i, FunctionalTensorMode):
             has_functional_mode_in_pre_dispatch = True
-            functional_modes.append(i)
+            if preserve_functional_modes:
+                functional_modes.append(i)
         if isinstance(i, SchemaCheckMode):
             has_schema_check_mode_in_pre_dispatch = True
 
@@ -233,7 +234,8 @@ def _disable_current_modes():
         if (
             isinstance(old, FunctionalTensorMode)
         ):
-            functional_modes.append(old)
+            if preserve_functional_modes:
+                functional_modes.append(old)
             if has_functional_mode_in_pre_dispatch:
                 raise AssertionError(
                     "Can't have FunctionalMode available both in PreDispatch and Python Key"
@@ -249,6 +251,8 @@ def _disable_current_modes():
             raise AssertionError(
                 "Can't have SchemaCheckMode available both in PreDispatch and Python Key"
             )
+
+    # breakpoint()
 
     # Manually disable proxy and fake modes, if any are active
     try:
