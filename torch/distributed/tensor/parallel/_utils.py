@@ -25,6 +25,7 @@ def _deprecate_warnings(func_name: str, extra_msg: str) -> None:
         warnings.warn(
             f"{func_name} is deprecated and will be removed soon. {extra_msg}",
             FutureWarning,
+            stacklevel=3,
         )
 
 
@@ -45,7 +46,7 @@ def _validate_tp_mesh_dim(
     """
     if device_mesh.ndim > 1:
         raise ValueError(f"Tensor Parallel only accepts a 1D DeviceMesh, but found {device_mesh.ndim}D!"
-                         "If you have a 2-D or N-D device_mesh, consider passing in device_mesh[\"tp\"]")
+                         'If you have a 2-D or N-D device_mesh, consider passing in device_mesh["tp"]')
 
     parent_mesh = _mesh_resources.get_parent_mesh(device_mesh)
     if parent_mesh:
