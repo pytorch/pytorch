@@ -3658,9 +3658,6 @@ def _reshape_view_helper(a: TensorLikeType, *shape, allow_copy: bool) -> TensorL
         if len(shape) == 2 and a.ndim == 1:
             dim0 = shape[0]
             dim1 = shape[1]
-            torch._check_is_size(dim0)
-            torch._check_is_size(dim1)
-            torch._check(a.numel() == dim0 * dim1)
             return torch.as_strided(a, [dim0, dim1], [dim1, 1])
 
     # Handles general case: a 1+D tensor reshaped into a distinct 1+D shape
