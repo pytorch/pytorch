@@ -407,12 +407,30 @@ def _fused_all_gather_matmul(
     return unflatten(ag_out), [unflatten(output) for output in outputs]
 
 
-def get_optimal_A_shard_stride_order_for_fused_all_gather_matmul(
-    shape: torch.Size,
+def make_contiguous_for_perm(
+    t: torch.Tensor,
+    perm: List[int],
+) -> torch.Tensor:
+    """
+    Restride `t` such that `t.permute(perm)` is contiguous.
+    """
+    inv_perm = [0] * len(perm)
+    for i, p in enumerate(perm):
+        inv_perm[p] = i
+    return t.permute(perm).contiguous().permute(inv_perm)
+
+
+def restride_A_shard_for_fused_all_gather_matmul(
+    t: torch.Tensor,
     scatter_dim: int,
-) -> Tuple[int, ...]:
-    t = torch.empty(shape, device="meta")
-    return t.movedim(scatter_dim, 0).contiguous().movedim(0, scatter_dim).stride()
+) -> torch.Tensor:
+    """
+    Restride the `A_shard` arg of `fused_all_gather_matmul` for optimal perf.
+    See doc for `fused_all_gather_matmul` for detail.
+    """
+    perm = list(range(len(t.shape)))
+    perm.insert(0, perm.pop(scatter_dim))
+    return make_contiguous_for_perm(t, perm)
 
 
 @torch.library.impl(lib, "fused_matmul_reduce_scatter", "Meta")
@@ -503,9 +521,14 @@ def _fused_matmul_reduce_scatter(
     )
 
 
-def get_optimal_A_stride_order_for_fused_matmul_reduce_scatter(
-    shape: torch.Size,
-    scatter_dim: int,
-) -> Tuple[int, ...]:
-    t = torch.empty(shape, device="meta")
-    return t.movedim(scatter_dim, 0).contiguous().movedim(0, scatter_dim).stride()
+def restride_A_for_fused_matmul_reduce_scatter(
+    t: torch.Tensor,
+    gather_dim: int,
+) -> torch.Tensor:
+    """
+    Restride the `A_shard` arg of `fused_matmul_reduce_scatter` for optimal
+    perf. See doc for `fused_matmul_reduce_scatter` for detail.
+    """
+    perm = list(range(len(t.shape)))
+    perm.insert(0, perm.pop(gather_dim))
+    return make_contiguous_for_perm(t, perm)
