@@ -4,8 +4,6 @@ on:
   schedule:
     - cron: 0 7 * * 1-6
     - cron: 0 7 * * 0
-  # NB: GitHub has an upper limit of 10 inputs here, so before we can sort it
-  # out, let try to run torchao cudagraphs_low_precision as part of cudagraphs
   workflow_dispatch:
     inputs:
       training:
@@ -36,11 +34,11 @@ concurrency:
 permissions: read-all
 
 jobs:
-  linux-focal-cpu-py3_10-gcc9-inductor-build:
-    name: cpu-py3.10-gcc9
+  linux-focal-cpu-py3_8-gcc9-inductor-build:
+    name: cpu-py3.8-gcc9
     uses: ./.github/workflows/_linux-build.yml
     with:
-      build-environment: linux-focal-cpu-py3.10-gcc9
+      build-environment: linux-focal-cpu-py3.8-gcc9
       docker-image-name: pytorch-linux-focal-py3.8-gcc9
       test-matrix: |
         { include: [
@@ -61,46 +59,46 @@ jobs:
     secrets:
       HUGGING_FACE_HUB_TOKEN: ${{ secrets.HUGGING_FACE_HUB_TOKEN }}
 
-  linux-focal-cuda12_1-py3_10-gcc9-inductor-test-nightly:
-    name: cpu-py3.10-gcc9
+  linux-focal-cpu-py3_8-gcc9-inductor-test-nightly:
+    name: cpu-py3.8-gcc9
     uses: ./.github/workflows/_linux-test.yml
-    needs: linux-focal-cpu-py3_10-gcc9-inductor-build
+    needs: linux-focal-cpu-py3_8-gcc9-inductor-build
     if: github.event.schedule == '0 7 * * 1-6'
     with:
-      build-environment: linux-focal-cpu-py3.10-gcc9
+      build-environment: linux-focal-cpu-py3.8-gcc9
       dashboard-tag: training-true-inference-true-inductor_cpu-true
-      docker-image: ${{ needs.linux-focal-cpu-py3_10-gcc9-inductor-build.outputs.docker-image }}
-      test-matrix: ${{ needs.linux-focal-cpu-py3_10-gcc9-inductor-build.outputs.test-matrix }}
+      docker-image: ${{ needs.linux-focal-cpu-py3_8-gcc9-inductor-build.outputs.docker-image }}
+      test-matrix: ${{ needs.linux-focal-cpu-py3_8-gcc9-inductor-build.outputs.test-matrix }}
       use-gha: anything-non-empty-to-use-gha
       timeout-minutes: 720
     secrets:
       HUGGING_FACE_HUB_TOKEN: ${{ secrets.HUGGING_FACE_HUB_TOKEN }}
 
-  linux-focal-cuda12_1-py3_10-gcc9-inductor-test-weekly:
-    name: cpu-py3.10-gcc9
+  linux-focal-cpu-py3_8-gcc9-inductor-test-weekly:
+    name: cpu-py3.8-gcc9
     uses: ./.github/workflows/_linux-test.yml
-    needs: linux-focal-cpu-py3_10-gcc9-inductor-build
+    needs: linux-focal-cpu-py3_8-gcc9-inductor-build
     if: github.event.schedule == '0 7 * * 0'
     with:
-      build-environment: linux-focal-cpu-py3.10-gcc9
+      build-environment: linux-focal-cpu-py3.8-gcc9
       dashboard-tag: training-true-inference-true-inductor_cpu-true
-      docker-image: ${{ needs.linux-focal-cpu-py3_10-gcc9-inductor-build.outputs.docker-image }}
-      test-matrix: ${{ needs.linux-focal-cpu-py3_10-gcc9-inductor-build.outputs.test-matrix }}
+      docker-image: ${{ needs.linux-focal-cpu-py3_8-gcc9-inductor-build.outputs.docker-image }}
+      test-matrix: ${{ needs.linux-focal-cpu-py3_8-gcc9-inductor-build.outputs.test-matrix }}
       use-gha: anything-non-empty-to-use-gha
       timeout-minutes: 1440
     secrets:
       HUGGING_FACE_HUB_TOKEN: ${{ secrets.HUGGING_FACE_HUB_TOKEN }}
 
-  linux-focal-cuda12_1-py3_10-gcc9-inductor-test:
-    name: cpu-py3.10-gcc9
+  linux-focal-cpu-py3_8-gcc9-inductor-test:
+    name: cpu-py3.8-gcc9
     uses: ./.github/workflows/_linux-test.yml
-    needs: linux-focal-cpu-py3_10-gcc9-inductor-build
+    needs: linux-focal-cpu-py3_8-gcc9-inductor-build
     if: github.event_name == 'workflow_dispatch'
     with:
-      build-environment: linux-focal-cpu-py3.10-gcc9
+      build-environment: linux-focal-cpu-py3.8-gcc9
       dashboard-tag: training-${{ inputs.training }}-inference-${{ inputs.inference }}-inductor_cpu-${{ inputs.inductor_cpu }}
-      docker-image: ${{ needs.linux-focal-cpu-py3_10-gcc9-inductor-build.outputs.docker-image }}
-      test-matrix: ${{ needs.linux-focal-cpu-py3_10-gcc9-inductor-build.outputs.test-matrix }}
+      docker-image: ${{ needs.linux-focal-cpu-py3_8-gcc9-inductor-build.outputs.docker-image }}
+      test-matrix: ${{ needs.linux-focal-cpu-py3_8-gcc9-inductor-build.outputs.test-matrix }}
       use-gha: anything-non-empty-to-use-gha
       timeout-minutes: 720
     secrets:
