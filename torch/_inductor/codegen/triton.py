@@ -136,9 +136,9 @@ class BlockPtrOptions:
     constant_offset: sympy.Expr
     shape: List[sympy.Expr]
     strides: List[sympy.Expr]
-    block_shape: List[str]
+    block_shape: List[Union[str, sympy.Symbol]]
     order: List[int]
-    offsets: List[str]
+    offsets: List[Union[str, sympy.Symbol]]
     mask_vars: Set[Union[str, sympy.Symbol]]
     reshape_suffix: List[str]
 
@@ -1154,9 +1154,9 @@ class TritonKernel(SIMDKernel):
             def match_strided_block() -> Union[BlockPtrOptions, None]:
                 """
                 Matches expressions of the form:
-                    idx = s0 * x0 + ... + sN * xN + offset
+                    idx = s1 * x1 + ... + sN * xN + offset
 
-                This implies strides (s0, ..., SN).
+                This implies strides (s1, ..., SN).
                 """
                 strides = [sympy.Wild(f"stride_{s}", exclude=symbols) for s in symbols]
                 offset = sympy.Wild("_offset", exclude=symbols)
@@ -1180,25 +1180,28 @@ class TritonKernel(SIMDKernel):
                        + s1 * ModularIndexing(xindex, 1, d1)
                        + ...
                        + s(N-1) * ModularIndexing(xindex, d(N-2), d(N-1))
+                       + offset
 
                 This iterates over a block of shape (dN, ..., d1) and stride (sN, ..., s1).
                 """
 
                 # Get info about iteration ranges
-                num_dims = len(self.range_tree_nodes)
-                if num_dims == 0:
-                    return None
-
                 # Check the index variable. We expect a linear index.
                 if len(symbols) != 1:
                     return None
                 index_var = symbols[0]
 
-
                 # Get the dims in reverse numerical order. E.g. x(N-1), ..., x0.
                 # This matches the order of dims in torch tensors and triton blocks.
+                sizevars = V.graph.sizevars
                 var_ranges = next(iter(self.range_tree_nodes.values())).var_ranges
-                dims = dict(reversed(var_ranges.items()))
+                dims = dict(reversed([
+                    (var, sizevars.lookup_precomputed_size(size))
+                    for (var, size) in var_ranges.items()
+                ]))
+                num_dims = len(dims)
+                if num_dims == 0:
+                    return None
 
                 # Pattern match to find the strides and offset.
                 strides = [sympy.Wild(f"stride{idx}", exclude=symbols) for idx in range(num_dims)]
@@ -1241,8 +1244,6 @@ class TritonKernel(SIMDKernel):
                     return None
                 prefix = range_trees[0].prefix.upper()
                 max_block = TRITON_MAX_BLOCK[prefix]
-
-                sizevars = V.graph.sizevars
                 if any(not sizevars.statically_known_multiple_of(numel, max_block) and
                        not sizevars.statically_known_power_of_2(numel)
                        for numel in slice_numels

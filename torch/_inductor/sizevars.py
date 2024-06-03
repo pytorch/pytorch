@@ -346,14 +346,11 @@ class SizeVarAllocator:
         return self.is_expr_static_and_true(expr)  # type: ignore[arg-type]
 
     # See Note - [On Statically Known]
-    def statically_known_power_of_2(self, x: Expr) -> bool:
+    def statically_known_power_of_2(self, expr: Expr) -> bool:
         """
         Returns a bool indicating if x is known to be a power of 2.
         """
-        if not x.is_Integer:
-            return False
-
-        return is_power_of_2(int(x))
+        return expr.is_Integer and is_power_of_2(int(expr))
 
     # The guard functions require you to ALREADY KNOW that a particular
     # condition holds.  If you don't know (you want to guard on an expression
