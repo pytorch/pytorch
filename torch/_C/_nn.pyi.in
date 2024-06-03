@@ -1,0 +1,67 @@
+# mypy: disable-error-code="type-arg"
+from typing import List, Optional, overload, Sequence, Tuple, Union
+
+from torch import memory_format, Tensor
+from torch.types import _bool, _device, _dtype, _int, _size
+
+# Defined in tools/autograd/templates/python_nn_functions.cpp
+
+${c_nn_function_hints}
+
+# Defined in aten/src/ATen/native/mkldnn/Linear.cpp
+def mkldnn_linear(input: Tensor, weight: Tensor, bias: Optional[Tensor]) -> Tensor: ...
+
+# Defined at aten/src/ATen/native/mkldnn/MKLDNNConversions.cpp
+def mkldnn_reorder_conv2d_weight(
+    self: Tensor,
+    padding: List,
+    stride: List,
+    dilatation: List,
+    groups: int,
+) -> Tensor: ...
+def mkldnn_reorder_conv3d_weight(
+    self: Tensor,
+    padding: List,
+    stride: List,
+    dilatation: List,
+    groups: int,
+) -> Tensor: ...
+
+# Defined in aten/src/ATen/native/mkldnn/Prelu.cpp
+def mkldnn_prelu(input: Tensor, weight: Tensor) -> Tensor: ...
+
+# Defined at tools/autograd/templates/python_nn_functions.cpp
+@overload
+def _parse_to(
+    device: _device,
+    dtype: _dtype,
+    non_blocking: _bool,
+    copy: _bool,
+    *,
+    memory_format: memory_format,
+) -> Tuple[_device, _dtype, _bool, memory_format]: ...
+@overload
+def _parse_to(
+    dtype: _dtype,
+    non_blocking: _bool,
+    copy: _bool,
+    *,
+    memory_format: memory_format,
+) -> Tuple[_device, _dtype, _bool, memory_format]: ...
+@overload
+def _parse_to(
+    tensor: Tensor,
+    non_blocking: _bool,
+    copy: _bool,
+    *,
+    memory_format: memory_format,
+) -> Tuple[_device, _dtype, _bool, memory_format]: ...
+
+# Defined in aten/src/ATen/native/PadSequence.cpp
+def pad_sequence(
+    sequences: List[Tensor],
+    batch_first: bool = False,
+    padding_value: float = ...,
+) -> Tensor: ...
+def flatten_dense_tensors(tensors: List[Tensor]) -> Tensor: ...
+def unflatten_dense_tensors(flat: Tensor, tensors: List[Tensor]) -> List[Tensor]: ...
