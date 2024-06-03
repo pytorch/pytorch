@@ -211,15 +211,18 @@ def fuse_all_gather_matmul(match, shard, gather_dim, group_name):
             A_shard, [B_0, B_1, B_2, ...], gather_dim, group_name,
         )
     """
-    if gather_dim >= len(shard.meta["val"].shape) - 1:
-        # Decomposing the matmul on the K dimension is not supported
+    if (
+        not torch.distributed.is_available()
+        or not torch.distributed.is_nccl_available()
+    ):
         return
 
-    try:
-        c10d = torch.ops._c10d_functional
-        from torch.distributed._cuda_p2p import is_cuda_p2p_group
-        from torch.distributed.distributed_c10d import _resolve_process_group
-    except (AttributeError, ImportError):
+    c10d = torch.ops._c10d_functional
+    from torch.distributed._cuda_p2p import is_cuda_p2p_group
+    from torch.distributed.distributed_c10d import _resolve_process_group
+
+    if gather_dim >= len(shard.meta["val"].shape) - 1:
+        # Decomposing the matmul on the K dimension is not supported
         return
 
     if not is_cuda_p2p_group(_resolve_process_group(group_name)):
@@ -291,12 +294,15 @@ def fuse_matmul_reduce_scatter(match, rs_input, reduce_op, scatter_dim, group_na
             A, B, scatter_dim, group_name,
         )
     """
-    try:
-        c10d = torch.ops._c10d_functional
-        from torch.distributed._cuda_p2p import is_cuda_p2p_group
-        from torch.distributed.distributed_c10d import _resolve_process_group
-    except (AttributeError, ImportError):
+    if (
+        not torch.distributed.is_available()
+        or not torch.distributed.is_nccl_available()
+    ):
         return
+
+    c10d = torch.ops._c10d_functional
+    from torch.distributed._cuda_p2p import is_cuda_p2p_group
+    from torch.distributed.distributed_c10d import _resolve_process_group
 
     if not is_cuda_p2p_group(_resolve_process_group(group_name)):
         return
@@ -350,10 +356,13 @@ def fuse_matmul_reduce_scatter(match, rs_input, reduce_op, scatter_dim, group_na
 
 
 def _register_passes():
-    try:
-        c10d = torch.ops._c10d_functional
-    except AttributeError:
+    if (
+        not torch.distributed.is_available()
+        or not torch.distributed.is_nccl_available()
+    ):
         return
+
+    c10d = torch.ops._c10d_functional
 
     # Matches funcol.all_gather_tensor with gather_dim == 0
     ZeroDimAllGather = CallFunction(
