@@ -1023,35 +1023,23 @@ def _sink_params(
     scope: tracks where we are in the module hierarchy, so that we can emit the
         right `getattr(self, "foo.bar")` calls, etc.
     """
-    # This dict records inputs removed by child modules. The key is child
-    # module's name, the value is list of inputs removed by that child module.
-    inputs_removed_by_children: Dict[str, List[str]] = {}
+    # This dict records inputs removed by child modules. 
+    # Maps the module object id to the list of placeholder node names
+    # in the child module that were removed.
+    module_id_to_inputs_removed: Dict[int, List[str]] = defaultdict(list)
 
     # We need to use _modules here instead of named_children(), because we
     # explicitly want duplicate modules to show up in the traversal.
     for name, submodule in module._modules.items():
-        inputs_removed_by_child = _sink_params(
+        inputs_removed = _sink_params(
             cast(torch.nn.Module, submodule), inputs_to_state, scope + [name]
         )
-        inputs_removed_by_children.update(inputs_removed_by_child)
-
-    module_name = scope[-1] if len(scope) > 0 else ""
+        for k, v in inputs_removed.items():
+            module_id_to_inputs_removed[k].extend(v)
 
     if not hasattr(module, "graph"):
         # Not all modules have graphs defined, if they are empty modules with no operations (like ParameterList)
-        # We thus return here. But we prefix the keys in
-        # `inputs_removed_by_children` with "my" module name, when passing it up
-        # to "my" parent module.
-        # For example, a key (submod name) may be "0", and my module name is
-        # "layers", then I return to my parent with key "layers.0". My parent
-        # module should have a `call_module` node with corresponding target, e.g.:
-        # %layers_0 : [num_users=1] = call_module[target=layers.0](args = ...)
-        # Hence my parent module should be able to take care of the arg removal from this
-        # grandchild modules. (See code at "Also remove from call_module nodes")
-        inputs_removed_by_grandchildren = {
-            ".".join([module_name, k]): v for k, v in inputs_removed_by_children.items()
-        }
-        return inputs_removed_by_grandchildren
+        return module_id_to_inputs_removed
 
     graph = module.graph
     inputs = list(filter(lambda n: n.op == "placeholder", graph.nodes))
@@ -1060,10 +1048,10 @@ def _sink_params(
     # Also remove from call_module nodes
     call_module_nodes = filter(lambda n: n.op == "call_module", graph.nodes)
     for node in call_module_nodes:
-        if node.target in inputs_removed_by_children:
-            inputs_removed_by_target = inputs_removed_by_children[node.target]
+        submodule = _recursive_getattr(module, node.target.split("."))
+        if submodule is not None and id(submodule) in module_id_to_inputs_removed:
             node.args = tuple(
-                filter(lambda n: n.name not in inputs_removed_by_target, node.args)
+                filter(lambda n: n.name not in module_id_to_inputs_removed[id(submodule)], node.args)
             )
 
     # Filter out inputs_to_state corresponding to current scope.
@@ -1114,13 +1102,13 @@ def _sink_params(
     if isinstance(module, InterpreterModule):
         module.finalize()
 
-    # Return my module name and inputs removed, so that my parent module can
-    # remove corresponding args when calling me.
-    return {module_name: inputs_removed}
+    return {id(module): inputs_removed}
 
 
 def _recursive_getattr(obj, attr_path):
     for attr in attr_path:
+        if not hasattr(obj, attr):
+            return None
         obj = getattr(obj, attr)
 
     return obj
