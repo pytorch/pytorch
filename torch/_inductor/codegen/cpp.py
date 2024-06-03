@@ -1994,7 +1994,6 @@ class CppKernel(Kernel):
                     local_buffers = V.local_buffer_scope.local_buffers
                     assert len(local_buffers.items()) == 1
                     local_buffer = next(iter(local_buffers.items()))[1]
-
                     # For dynamic size, rename s to ks
                     local_buf_size = sympy_product(
                         [
@@ -2002,7 +2001,6 @@ class CppKernel(Kernel):
                             for size_val in local_buffer.get_layout().size
                         ]
                     )
-
                     local_buf_dtype = DTYPE_TO_CPP[local_buffer.get_layout().dtype]
                     allocate = (
                         f"std::make_unique<{local_buf_dtype} []>({local_buf_size})"
