@@ -150,9 +150,7 @@ jobs:
         uses: pytorch/test-infra/.github/actions/teardown-linux@main
         if: always()
 
-  # Final Step validate the builds
   validate:
-    runs-on: [self-hosted, linux.large]
     needs: build
     uses: pytorch/builder/.github/workflows/validate_docker_images.yml@main
     with:
