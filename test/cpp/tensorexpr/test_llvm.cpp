@@ -1474,7 +1474,6 @@ TEST(LLVM, RFactorReduction) {
 TEST(LLVM, RFactorVectorizedReduction) {
   int M = 128;
   int N = 64;
-  const int kTotalSize = M * N;
 
   BufHandle a("a", {1, M, N}, kFloat);
 

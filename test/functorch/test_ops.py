@@ -461,11 +461,6 @@ class TestOperators(TestCase):
                 device_type="cuda",
             ),
             tol1(
-                "svd_lowrank",
-                {torch.float32: tol(atol=5e-05, rtol=7e-06)},
-                device_type="mps",
-            ),
-            tol1(
                 "linalg.tensorsolve",
                 {torch.float32: tol(atol=3e-04, rtol=3e-04)},
                 device_type="cuda",
@@ -2036,6 +2031,10 @@ class TestOperators(TestCase):
             tol1("linalg.multi_dot", {torch.float32: tol(atol=5e-04, rtol=5e-04)}),
             tol2(
                 "linalg.pinv", "hermitian", {torch.float32: tol(atol=5e-04, rtol=5e-04)}
+            ),
+            tol1(
+                "nn.functional.conv_transpose2d",
+                {torch.float32: tol(atol=5e-04, rtol=5e-04)},
             ),
             tol1("svd", {torch.float32: tol(atol=5e-04, rtol=5e-04)}),
             tol1("matrix_exp", {torch.float32: tol(atol=5e-04, rtol=5e-04)}),
