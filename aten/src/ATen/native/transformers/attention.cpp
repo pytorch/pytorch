@@ -673,11 +673,10 @@ Tensor scaled_dot_product_attention(
         auto out_lse_softmax = at::_scaled_dot_product_flash_attention(
             query_padded, key_padded, value_padded, dropout_p, is_causal, false /*return_debug_mask*/, og_scale.as_float_unchecked());
         return post_process_flash_output(std::get<0>(out_lse_softmax), og_size);
-      } else {
+      }
       // For the CPU case we do not need to pad the last dim
       return std::get<0>(at::_scaled_dot_product_flash_attention_for_cpu(
           query_, key, value, dropout_p, is_causal, attn_mask, scale));
-      }
     }
     case sdp::SDPBackend::efficient_attention: {
       bool compute_logsumexp = should_compute_logsumexp(query_, key, value);
