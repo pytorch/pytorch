@@ -1191,6 +1191,19 @@ def _assert_symbol_context(symbolic_context):
     assert isinstance(symbolic_context, SymbolicContext), "Invalid symbolic_context object"
     assert type(symbolic_context) is not SymbolicContext, "Illegal usage of symbolic_context ABC"
 
+def _is_supported_equivalence(expr):
+    # Currently supported Dim ops are linear expressions with integer coefficients.
+    # So check that expr only contains +, *, ints, and a single occurrence of a symbol.
+    # (See also documentation of dynamic_shapes._DerivedDim.)
+    if isinstance(expr, (sympy.Add, sympy.Mul)):
+        if len(expr.args) > 2:
+            return False
+        lhs, rhs = expr.args
+        return (
+            (_is_supported_equivalence(lhs) and isinstance(rhs, sympy.Integer)) or
+            (isinstance(lhs, sympy.Integer) and _is_supported_equivalence(rhs))
+        )
+    return isinstance(expr, sympy.Symbol)
 
 @dataclass(frozen=True)
 class SymbolicContext:
@@ -1526,7 +1539,14 @@ class DimConstraints:
     Solutions are "static" values or simplified "dynamic" constraints.
     """
 
-    def __init__(self, symbol_to_source, var_to_val, marked_dynamic, source_name_to_debug_name):
+    def __init__(
+        self,
+        symbol_to_source,
+        var_to_val,
+        marked_dynamic,
+        source_name_to_debug_name,
+        _allow_complex_guards_as_runtime_asserts=False,
+    ):
         # We try to solve systems of inequalities with 1 free variable.
         self._univariate_inequalities: Dict[sympy.Symbol, Set[sympy.Expr]] = defaultdict(set)
         # Among them, we prioritize solving for a free variable that has equalities.
@@ -1567,6 +1587,9 @@ class DimConstraints:
 
         # symbols that are marked dynamic
         self._marked_dynamic = marked_dynamic
+
+        # for constraints we can't express with the dynamic shapes language, defer as runtime asserts in export
+        self._allow_complex_guards_as_runtime_asserts = _allow_complex_guards_as_runtime_asserts
 
     def rewrite_with_congruences(self, s, expr):
         """
@@ -1831,7 +1854,7 @@ class DimConstraints:
         symbolic_equivalences = self._symbolic_equivalences
         self._symbolic_equivalences = []
         for source, expr in symbolic_equivalences:
-            if not _disable_forced_specializations and not self._is_supported_equivalence(expr):
+            if not _disable_forced_specializations and not _is_supported_equivalence(expr):
                 for s in expr.free_symbols:
                     self._force_specialization(s)
                     sexpr = self._dcp._print_Symbol(s)
@@ -1841,19 +1864,6 @@ class DimConstraints:
         # remaining symbolic equivalences become dynamic equality constraints
         for source, expr in self._symbolic_equivalences:
             self._dynamic_results.add(f"{self._dcp.print_source(source)} == {self._dcp.doprint(expr)}")
-
-    @classmethod
-    def _is_supported_equivalence(cls, expr):
-        # Currently supported Dim ops are linear expressions with integer coefficients.
-        # So check that expr only contains +, *, ints, and a single occurrence of a symbol.
-        # (See also documentation of dynamic_shapes._DerivedDim.)
-        if isinstance(expr, (sympy.Add, sympy.Mul)):
-            lhs, rhs = expr.args
-            return (
-                (cls._is_supported_equivalence(lhs) and isinstance(rhs, sympy.Integer)) or
-                (isinstance(lhs, sympy.Integer) and cls._is_supported_equivalence(rhs))
-            )
-        return isinstance(expr, sympy.Symbol)
 
     @classmethod
     def _is_supported_congruence(cls, congruence):
@@ -2189,7 +2199,7 @@ class DimConstraints:
 
                 buf += (
                     f"Specializations unexpectedly required ({', '.join(sorted(debug_names))})! "
-                    "For more information, run with TORCH_LOGS=\"+dynamic\".\n"
+                    'For more information, run with TORCH_LOGS="+dynamic".\n'
                 )
                 for s, val in forced_specializations.items():
                     buf += f"  - {s} must be specialized to {val} because the guards generated for it are too complex.\n"
@@ -2211,7 +2221,7 @@ class DimConstraints:
                     other = c["eq"]
                     if isinstance(other, int):
                         others.append(f"{k} = {other}")
-                    elif self._is_supported_equivalence(other):
+                    elif _is_supported_equivalence(other):
                         others.append(f"{k} = {other}")
                 else:
                     min_ = c.get("min", None)
@@ -2339,6 +2349,7 @@ class ShapeEnvSettings:
     specialize_zero_one: bool
     duck_shape: bool
     prefer_deferred_runtime_asserts_over_guards: bool
+    _allow_complex_guards_as_runtime_asserts: bool
 
 
 class ShapeEnv:
@@ -2432,6 +2443,10 @@ class ShapeEnv:
         # in guards is helpful, since these guards in some sense are overly
         # pedantic.  See also https://github.com/pytorch/pytorch/issues/121749
         prefer_deferred_runtime_asserts_over_guards=False,
+        # When True, does not emit or raise constraint violation errors on
+        # implicit guards generated by ops, and defers to runtime assertions
+        # in the graph instead. For export.
+        _allow_complex_guards_as_runtime_asserts=False,
         # XXX Add any new settings that could affect FakeTensor evaluation
         # to: torch._subclasses.fake_tensor._ShapeEnvSettings
     ):
@@ -2444,6 +2459,7 @@ class ShapeEnv:
             specialize_zero_one=specialize_zero_one,
             duck_shape=duck_shape,
             prefer_deferred_runtime_asserts_over_guards=prefer_deferred_runtime_asserts_over_guards,
+            _allow_complex_guards_as_runtime_asserts=_allow_complex_guards_as_runtime_asserts,
         )
 
         self.guards: List[ShapeGuard] = []
@@ -2628,6 +2644,10 @@ class ShapeEnv:
     @property
     def prefer_deferred_runtime_asserts_over_guards(self):
         return self.settings.prefer_deferred_runtime_asserts_over_guards
+
+    @property
+    def _allow_complex_guards_as_runtime_asserts(self):
+        return self.settings._allow_complex_guards_as_runtime_asserts
 
     def check_equal(self, other: "ShapeEnv") -> None:
         """Compare another ShapeEnv for equivalence
@@ -3519,7 +3539,7 @@ class ShapeEnv:
             if not is_debug:
                 maybe_more_info = (
                     ", for more info run with "
-                    f"TORCHDYNAMO_EXTENDED_DEBUG_CREATE_SYMBOL=\"{sympy_expr}\""
+                    f'TORCHDYNAMO_EXTENDED_DEBUG_CREATE_SYMBOL="{sympy_expr}"'
                 )
             fsummary, maybe_user_loc, maybe_extra_debug = self._get_stack_summary(is_debug)
             self.log.info(
@@ -3932,6 +3952,7 @@ class ShapeEnv:
             self.var_to_val,
             set(symbol_to_constraints.keys()),
             self.source_name_to_debug_name,
+            self._allow_complex_guards_as_runtime_asserts,
         )
 
         if not _simplified:
@@ -4135,7 +4156,7 @@ class ShapeEnv:
                 err = '\n'.join(error_msgs)
                 raise ConstraintViolationError(
                     f"Constraints violated ({debug_names})! "
-                    "For more information, run with TORCH_LOGS=\"+dynamic\".\n"
+                    'For more information, run with TORCH_LOGS="+dynamic".\n'
                     f"{err}"
                 )
             elif len(warn_msgs) > 0:
@@ -4390,7 +4411,11 @@ class ShapeEnv:
                 # Skip var_ranges logic for SingletonInt which is only used
                 # for jagged layout NestedTensors today
                 continue
-            vr = var_ranges[k]
+            try:
+                vr = var_ranges[k]
+            except KeyError:
+                log.warning("%s is not in var_ranges, defaulting to unknown range.", k)
+                vr = self._default_unspecified_value_range()
             if size_oblivious and k in self.size_like:
                 lower = max(2, vr.lower)
             else:
@@ -4584,7 +4609,7 @@ class ShapeEnv:
             f"{size_oblivious_result_msg}"
             "Potential framework code culprit (scroll up for full backtrace):\n"
             f"{''.join(traceback.StackSummary.from_list([fsummary]).format())}\n"
-            "For more information, run with TORCH_LOGS=\"dynamic\"\n"
+            'For more information, run with TORCH_LOGS="dynamic"\n'
             "For extended logs when we create symbols, also add "
             f"TORCHDYNAMO_EXTENDED_DEBUG_CREATE_SYMBOL=\"{','.join(map(str, expr.free_symbols))}\"\n"
             "If you suspect the guard was triggered from C++, add TORCHDYNAMO_EXTENDED_DEBUG_CPP=1\n"
@@ -4625,6 +4650,9 @@ class ShapeEnv:
 
         # Precondition: a == tgt
         assert isinstance(a, sympy.Symbol)
+
+        if self._allow_complex_guards_as_runtime_asserts and not _is_supported_equivalence(tgt):
+            return  # continuing leads to placeholder shapes having complex expressions that we can't resolve
 
         # Handles nested tensor symbolic variables which don't have
         # var_to_range bounds
@@ -4982,7 +5010,7 @@ class ShapeEnv:
             if not is_debug:
                 maybe_more_info = (
                     ", for more info run with "
-                    f"TORCHDYNAMO_EXTENDED_DEBUG_GUARD_ADDED=\"{str_g}\""
+                    f'TORCHDYNAMO_EXTENDED_DEBUG_GUARD_ADDED="{str_g}"'
                 )
             self.log.info(
                 "%s %s [guard added]%s (%s)%s%s",
@@ -5153,34 +5181,43 @@ class ShapeEnv:
                     # is no longer necessary)
                     self._maybe_guard_rel(g)
 
-                stack = CapturedTraceback.extract(skip=1)
-                guard = ShapeGuard(g, stack)
-                self.guards.append(guard)
+                if not self._allow_complex_guards_as_runtime_asserts:
+                    # at this point, we've evaluated the concrete expr value, and have
+                    # flipped/negated the guard if necessary. Now we know what to guard
+                    # or defer to runtime assert on.
+                    stack = CapturedTraceback.extract(skip=1)
+                    guard = ShapeGuard(g, stack)
+                    self.guards.append(guard)
+                else:
+                    # it's fine to defer simple guards here without checking,
+                    # the _maybe_guard_rel() call above will set replacements if possible,
+                    # and so the result here will be statically known
+                    self.defer_runtime_assert(g, f"evaluate_expr: {orig_expr}")
+
         except Exception:
             if fresh:
                 self._remove_fx_node(node)
             raise
         else:
             if not self._suppress_guards_tls():
-                assert guard is not None
+                if guard is not None:  # we might have deferred this to runtime assert
+                    self._log_guard("eval", g, forcing_spec=forcing_spec)
 
-                self._log_guard("eval", g, forcing_spec=forcing_spec)
-
-                for s in g.free_symbols:
-                    self.symbol_guard_counter[s] += 1
-                    # Forcing_spec to avoid infinite recursion
-                    if (
-                        not forcing_spec and
-                        config.symbol_guard_limit_before_specialize is not None and
-                        self.symbol_guard_counter[s] > config.symbol_guard_limit_before_specialize
-                    ):
-                        # Force specialization
-                        self.log.info(
-                            "symbol_guard_limit_before_specialize=%s exceeded on %s",
-                            config.symbol_guard_limit_before_specialize,
-                            s
-                        )
-                        self.evaluate_expr(s, forcing_spec=True)
+                    for s in g.free_symbols:
+                        self.symbol_guard_counter[s] += 1
+                        # Forcing_spec to avoid infinite recursion
+                        if (
+                            not forcing_spec and
+                            config.symbol_guard_limit_before_specialize is not None and
+                            self.symbol_guard_counter[s] > config.symbol_guard_limit_before_specialize
+                        ):
+                            # Force specialization
+                            self.log.info(
+                                "symbol_guard_limit_before_specialize=%s exceeded on %s",
+                                config.symbol_guard_limit_before_specialize,
+                                s
+                            )
+                            self.evaluate_expr(s, forcing_spec=True)
             else:
                 self._log_guard("eval [guard suppressed]", g, forcing_spec=forcing_spec)
 
