@@ -106,6 +106,9 @@ class TestOptimizations(torch._dynamo.test_case.TestCase):
     def test_eager(self):
         self._check_backend_works("eager")
 
+    def test_eager_noexcept(self):
+        self._check_backend_works("eager_noexcept")
+
     @_force_skip_lazy_graph_module()
     def test_torchscript(self):
         self._check_backend_works("ts")
@@ -240,9 +243,8 @@ class TestCustomBackendAPI(torch._dynamo.test_case.TestCase):
         self.assertTrue(backend_run)
 
     def test_aot_autograd_api(self):
-        from torch._dynamo.backends.common import aot_autograd
-
         from functorch.compile import make_boxed_func
+        from torch._dynamo.backends.common import aot_autograd
 
         backend_run = False
 
