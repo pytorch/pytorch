@@ -1,9 +1,5 @@
 import torch
 
-import logging
-
-torch_log = logging.getLogger("torch")
-
 doc = """
 This is used when dynamo traces torch.nn.Parameter, which normally would not trace properly
 with AOTAutograd.  We instead create a placeholder torch.nn.Parameter before the graph, which
@@ -41,7 +37,6 @@ class TracableCreateParameter(torch.autograd.Function):
 def tracable_create_parameter(tensor, placeholder):
     with torch.set_grad_enabled(placeholder.requires_grad):
         out = TracableCreateParameter.apply(tensor, placeholder)
-        # out = out.clone()
     return out
 
 
@@ -59,7 +54,7 @@ def new_parameter_placeholder(size, dtype, device, requires_grad):
 def new_parameter_placeholder_dtensor(local_tensor_size, local_tensor_dtype, local_tensor_device, requires_grad, device_mesh, placements):
     """Create a placeholder to be passed to the above functions"""
     data_tensor = torch.empty(local_tensor_size, dtype=local_tensor_dtype, device=local_tensor_device)
-    # data_tensor.untyped_storage().resize_(0)
+    # data_tensor.untyped_storage().resize_(0)  # this causes segfault, need to figure out why
     # NOTE(yf225): allocate a placeholder nn.Parameter(DTensor), whose content will get swapped out in TracableCreateParameter.forward
     data_tensor = torch.distributed._tensor.api.DTensor.from_local(
         data_tensor,
