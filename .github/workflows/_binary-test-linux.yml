@@ -171,9 +171,9 @@ jobs:
       - name: Checkout pytorch/builder to builder dir
         uses: malfet/checkout@silent-checkout
         with:
-          ref: cpu_arm_openblas
+          ref: main
           submodules: recursive
-          repository: tinglvv/builder
+          repository: pytorch/builder
           path: builder
 
       - name: Clean pytorch/builder checkout
