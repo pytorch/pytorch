@@ -817,6 +817,16 @@ def _get_device_from_device_id(
             "index as the `device_id` argument."
         )
         device = torch.device("cuda", torch.cuda.current_device())
+    if device == torch.device("hpu"):
+        warnings.warn(
+            f"FSDP got the argument `device_id` {device_id} on rank "
+            f"{rank}, which does not have an explicit index. "
+            f"FSDP will use the current device {torch.hpu.current_device()}. "
+            "If this is incorrect, please explicitly call `torch.hpu.set_device()` "
+            "before FSDP initialization or pass in the explicit device "
+            "index as the `device_id` argument."
+        )
+        device = torch.device("hpu", torch.hpu.current_device())
     return device
 
 
