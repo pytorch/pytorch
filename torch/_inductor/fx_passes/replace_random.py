@@ -2,8 +2,10 @@ import collections
 import logging
 
 import torch
+from torch.fx.passes.graph_transform_observer import GraphTransformObserver
 
 from torch.fx.passes.shape_prop import _extract_tensor_metadata
+
 from .. import config, inductor_prims
 from ..pattern_matcher import (
     CallFunctionVarArgs,
@@ -24,7 +26,10 @@ def replace_random_passes(gm: torch.fx.GraphModule):
         return 0
 
     count = patterns.apply(gm)
-    count += fuse_seed_creation_pass(gm.graph)
+    with GraphTransformObserver(
+        gm, "fuse_seed_creation_pass", config.trace.log_url_for_graph_xform
+    ):
+        count += fuse_seed_creation_pass(gm.graph)
 
     return count
 
