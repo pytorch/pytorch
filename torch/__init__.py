@@ -1572,22 +1572,22 @@ PRIVATE_OPS = (
     'unique_dim',
 )
 
-__name, obj = '', None
+__name, __obj = '', None
 for __name in dir(_C._VariableFunctions):
     if __name.startswith('__') or __name in PRIVATE_OPS:
         continue
-    obj = getattr(_C._VariableFunctions, __name)
-    obj.__module__ = 'torch'
+    __obj = getattr(_C._VariableFunctions, __name)
+    __obj.__module__ = 'torch'
     # Hide some APIs that should not be public
-    if __name == "segment_reduce":
+    if __name == 'segment_reduce':
         # TODO: Once the undocumented FC window is passed, remove the line bellow
-        globals()[__name] = obj
+        globals()[__name] = __obj
         __name = "_" + __name
-    globals()[__name] = obj
-    if not __name.startswith("_"):
+    globals()[__name] = __obj
+    if not __name.startswith('_'):
         __all__.append(__name)
 
-del __name
+del __name, __obj
 
 ################################################################################
 # Add torch.dtype instances to the public API
