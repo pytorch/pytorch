@@ -245,15 +245,7 @@ if sys.version_info < python_min_version:
     )
     sys.exit(-1)
 
-import filecmp
-import glob
-import importlib
-import json
-import os
-import shutil
-import subprocess
-import sysconfig
-import time
+import filecmp, glob, importlib, json, os, shutil, subprocess, sysconfig, time
 from collections import defaultdict
 
 import setuptools.command.build_ext
@@ -272,13 +264,10 @@ from tools.setup_helpers.generate_linker_script import gen_linker_script
 # Parameters parsed from environment
 ################################################################################
 
-VERBOSE_SCRIPT = True
-RUN_BUILD_DEPS = True
+VERBOSE_SCRIPT, RUN_BUILD_DEPS = True, True
 # see if the user passed a quiet flag to setup.py arguments and respect
 # that in our parts of the build
-EMIT_BUILD_WARNING = False
-RERUN_CMAKE = False
-CMAKE_ONLY = False
+EMIT_BUILD_WARNING, RERUN_CMAKE, CMAKE_ONLY = False, False, False
 filtered_args = []
 for i, arg in enumerate(sys.argv):
     if arg == "--cmake":
@@ -875,8 +864,7 @@ class clean(setuptools.Command):
         pass
 
     def run(self):
-        import glob
-        import re
+        import glob, re
 
         with open(".gitignore") as f:
             ignores = f.read()
@@ -926,8 +914,7 @@ def configure_extension_build():
     # Configure compile flags
     ################################################################################
 
-    library_dirs = []
-    extra_install_requires = []
+    library_dirs, extra_install_requires = [], []
 
     if IS_WINDOWS:
         # /NODEFAULTLIB makes sure we only link to DLL runtime
@@ -954,10 +941,7 @@ def configure_extension_build():
 
     library_dirs.append(lib_path)
 
-    main_compile_args = []
-    main_libraries = ["torch_python"]
-    main_link_args = []
-    main_sources = ["torch/csrc/stub.c"]
+    main_compile_args, main_libraries, main_link_args, main_sources = [], ["torch_python"], [], ["torch/csrc/stub.c"]
 
     if cmake_cache_vars["USE_CUDA"]:
         library_dirs.append(os.path.dirname(cmake_cache_vars["CUDA_CUDA_LIB"]))
