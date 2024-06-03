@@ -6,9 +6,9 @@ import torch
 import torch.nn.functional as F
 from torch import _VF, Tensor
 from torch._C import _add_docstr
-from ._jit_internal import _overload as overload, boolean_dispatch
-from ._lowrank import pca_lowrank, svd_lowrank
-from .overrides import (
+from torch._jit_internal import _overload as overload, boolean_dispatch
+from torch._lowrank import pca_lowrank, svd_lowrank
+from torch.overrides import (
     handle_torch_function,
     has_torch_function,
     has_torch_function_unary,
