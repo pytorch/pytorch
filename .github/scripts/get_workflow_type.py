@@ -71,6 +71,7 @@ def main() -> None:
     else:
         try:
             gh = get_gh_client(args.github_token)
+            # The default issue we use - https://github.com/pytorch/test-infra/issues/5132
             issue = get_issue(gh, args.github_repo, args.github_issue)
 
             output = {"label_type": get_workflow_type(issue, args.github_user)}
