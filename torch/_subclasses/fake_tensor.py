@@ -434,7 +434,6 @@ class FakeTensorConverter:
         if make_constant:
             self.add_constant_storage_mapping(out)
         # NB: meta_converter set the memo
-        # print("result", out)
         return out
 
     # If you specify the device, it MUST be a meta tensor.

@@ -252,8 +252,6 @@ def _disable_current_modes(preserve_functional_modes=False):
                 "Can't have SchemaCheckMode available both in PreDispatch and Python Key"
             )
 
-    # breakpoint()
-
     # Manually disable proxy and fake modes, if any are active
     try:
         for mode in reversed(functional_modes):

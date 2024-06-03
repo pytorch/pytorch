@@ -216,10 +216,6 @@ class MetaTensorDescriber:
         is_legacy_batchedtensor_v = is_legacy_batchedtensor(t)
         is_gradtrackingtensor_v = is_gradtrackingtensor(t)
         is_functorch_batched_or_grad = is_batchedtensor_v or is_gradtrackingtensor_v
-        # if isinstance(t, torch._subclasses.functional_tensor.FunctionalTensor):
-        #     t = t.elem
-        # breakpoint()
-        # print("input", t)
         is_functional = torch._is_functional_tensor(t)
 
         storage = None
@@ -667,7 +663,6 @@ class MetaConverter:
         source: Optional[Source] = None,
         symbolic_context: Optional[SymbolicContext] = None,
     ):
-        # breakpoint()
         if source is None:
             from torch._dynamo.source import ConstantSource
 
@@ -1540,7 +1535,6 @@ class MetaConverter:
             # Need to reflect this in the generated FakeTensor.
             if t.storage is not None and t.storage.size == 0:
                 r.untyped_storage().resize_(0)
-            # breakpoint()
             self.set_tensor_memo(t, r)
 
         return self.get_tensor_memo(t)
