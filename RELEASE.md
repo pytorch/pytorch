@@ -37,6 +37,7 @@
     - [TL;DR](#tldr)
   - [Accelerator Software](#accelerator-software)
     - [Special support cases](#special-support-cases)
+  - [Operating Systems](#operating-systems) 
 - [Submitting Tutorials](#submitting-tutorials)
 - [Special Topics](#special-topics)
   - [Updating submodules for a release](#updating-submodules-for-a-release)
@@ -425,6 +426,14 @@ the size restrictions for publishing on PyPI so the default version that is publ
 
 These special support cases will be handled on a case by case basis and support may be continued if current PyTorch maintainers feel as though there may still be a
 need to support these particular versions of software.
+
+## Operating Systems
+
+PyTorch Linux x86_64 wheels are manylinux2014 compatible, i.e. they should be runnable on any Linux system with glibc-2.17 or above.
+
+Starting from PyTorch-2.3 MacOS binaries are built only for Apple Silicon, and therefore taget MacOS 11 (Big Sur) or newer, but are actively tested against MacOS 14 (Sonoma).
+
+Windows binaries are supported on Windows-10 or newer.
 
 # Submitting Tutorials
 
