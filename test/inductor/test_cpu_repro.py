@@ -12,6 +12,7 @@ from unittest.mock import patch
 
 import numpy as np
 import sympy
+
 import torch
 from torch import nn
 from torch._C import FileCheck
@@ -1872,6 +1873,24 @@ class CPUReproTests(TestCase):
         self.assertEqual(input_grad[1, 2, 3, 4], torch.tensor(0.0))
         # For forward and backward kernel
         check_metrics_vec_kernel_count(2)
+
+    @requires_vectorization
+    def test_ops_masked_with_bool_input(self):
+        x = torch.zeros(129, dtype=torch.bool)
+        size = [2, 3]
+        res_aten_eager = torch.constant_pad_nd(x, size)
+        cfn = torch.compile(torch.constant_pad_nd)
+        res = cfn(x, size)
+        self.assertEqual(res_aten_eager, res)
+        check_metrics_vec_kernel_count(1)
+
+    def test_bitwise_right_shift(self):
+        x = torch.randint(-1, 0, (1, 1, 1), device="cpu", dtype=torch.int64)
+        bit_num = 31
+        res_aten_eager = torch.bitwise_right_shift(x, bit_num)
+        cfn = torch.compile(torch.bitwise_right_shift)
+        res = cfn(x, bit_num)
+        self.assertEqual(res_aten_eager, res)
 
     @patch("torch.cuda.is_available", lambda: False)
     def test_scatter_using_atomic_add(self):
@@ -3740,7 +3759,7 @@ class CPUReproTests(TestCase):
         _, code = run_and_get_cpp_code(opt_fn, x)
         FileCheck().check_count(
             "return at::vec::VectorizedN<int64_t,2>::loadu(tmpbuf.data(),",
-            2,
+            4,
             exactly=True,
         ).run(code)
 
