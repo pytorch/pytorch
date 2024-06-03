@@ -63,7 +63,6 @@ def aot_autograd_check(
         c_args, c_kwargs = pytree.tree_unflatten(reconstructed_flat_args, args_spec)
         return func(*c_args, **c_kwargs)
 
-    from torch._inductor.decomposition import decompositions
     compiled_f = compiled_function(
         func_no_tensors, nop, nop, dynamic=dynamic, partition_fn=min_cut_rematerialization_partition)
 
