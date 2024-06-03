@@ -1015,8 +1015,9 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                     )
                 except ObservedException:
                     return variables.ConstantVariable.create(False)
-
-            elif getattr_fn is not None:
+            elif getattr_fn is None:
+                return variables.ConstantVariable.create(False)
+            else:
                 unimplemented("UserDefined with non-function __getattr__")
 
     def odict_getitem(self, tx, key):
