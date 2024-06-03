@@ -57,6 +57,8 @@ post_grad_pass_names = [
     "normalization_aten_pass",
     "decompose_mm_pass",
     "unbind_stack_aten_pass",
+    "replace_with_addmm_aten_pass",
+    "remove_clone_aten_pass",
 ]
 
 for pass_name in pre_grad_pass_names:
@@ -1716,3 +1718,57 @@ def merge_unbind_stack_aten(match: Match, *args, **kwargs):
         if len(select_node.users) == 0:
             graph.erase_node(select_node)
     counters["inductor"]["unbind_stack_aten_pass"] += 1
+
+
+def is_contiguous_format(node: torch.fx.Node):
+    if not hasattr(node, "meta") or not is_node_meta_valid(node):
+        return False
+    return node.meta["val"].memory_format is torch.contiguous_format
+
+
+@register_graph_pattern(
+    CallFunction(
+        torch.ops.aten.add.Tensor,
+        CallFunctionVarArgs(torch.ops.aten.mm.default),
+        _users=MULTIPLE,
+    ),
+    pass_dict=construct_pattern_matcher_pass("replace_with_addmm_aten_pass"),
+)
+def replace_mm_with_addmm(match: Match, *args, **kwargs):
+    node = match.nodes[-1]
+    graph = match.graph
+    # check the inputs of mm_node has only one user
+    if node.args[0].target == torch.ops.aten.mm.default:  # type: ignore[union-attr]
+        mm_node = node.args[0]
+        other = node.args[1]
+    else:
+        other = node.args[0]
+        mm_node = node.args[1]
+    mat1, mat2 = mm_node.args  # type: ignore[union-attr]
+    if len(mat1.users.keys()) != 1 or len(mat2.users.keys()) != 1:
+        return
+    # check mm_node only has one user
+    if len(mm_node.users.keys()) != 1:  # type: ignore[union-attr]
+        return
+    # replace with addmm
+    with graph.inserting_after(mm_node):
+        new_addmm_node = graph.call_function(
+            torch.ops.aten.addmm.default,
+            args=(other, mat1, mat2),
+            kwargs=node.kwargs,
+        )
+    node.replace_all_uses_with(new_addmm_node)
+    new_addmm_node.meta.update(node.meta)
+    graph.erase_node(node)
+    graph.erase_node(mm_node)
+    counters["inductor"]["replace_with_addmm_aten_pass"] += 1
+
+
+@register_graph_pattern(
+    CallFunctionVarArgs(torch.ops.aten.clone.default),
+    pass_dict=construct_pattern_matcher_pass("remove_clone_aten_pass"),
+)
+def remove_clone(match: Match, *args, **kwargs):
+    node = match.nodes[-1]
+    graph = match.graph
+    # check the input of the clone node has contiguous format
