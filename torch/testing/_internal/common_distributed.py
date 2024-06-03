@@ -545,7 +545,7 @@ class MultiProcessTestCase(TestCase):
     # assume the role of the main process and join its subprocesses,
     # or run the underlying test function.
     def __init__(self, method_name: str = "runTest", methodName: str = "runTest") -> None:
-        # methodName is the correct naming in unittest and testslide uses keyword argumets.
+        # methodName is the correct naming in unittest and testslide uses keyword arguments.
         # So we need to use both to 1) not break BC and, 2) support testslide.
         if methodName != "runTest":
             method_name = methodName
