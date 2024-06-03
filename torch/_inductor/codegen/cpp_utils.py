@@ -261,19 +261,20 @@ class LocalizeBufferHandler(V.WrapperHandler):  # type: ignore[name-defined]
         inner,
         global_buf=None,
         local_buf=None,
-        localize_fn: Optional[
-            Callable[["LocalizeBufferHandler", str, sympy.Expr], Any]
+        rewrite_index: Optional[
+            Callable[["LocalizeBufferHandler", sympy.Expr], sympy.Expr]
         ] = None,
     ):
         super().__init__(inner)
         self.global_buf = global_buf
         self.local_buf = local_buf
-        self.localize_fn = localize_fn
+        self.rewrite_index = rewrite_index
 
     def localize(self, name: str, index: sympy.Expr):
         if self.global_buf and name == self.global_buf.get_name():
-            assert self.localize_fn is not None
-            name, index = self.localize_fn(self, name, index)
+            assert self.rewrite_index is not None
+            name = self.local_buf.get_name()
+            index = self.rewrite_index(self, index)
         return name, index
 
     def load(self, name: str, index: sympy.Expr):
@@ -378,7 +379,7 @@ class LocalBufferScope:
     def localize_buffer_for_function(
         self,
         fn: Callable[..., Any],
-        localize_fn: Callable[..., Any],
+        rewrite_index: Callable[["LocalizeBufferHandler", sympy.Expr], sympy.Expr],
         global_buf: Optional[ir.Buffer] = None,
         local_buf: Optional[ir.Buffer] = None,
     ):
@@ -396,7 +397,7 @@ class LocalBufferScope:
                         if local_buf
                         else next(iter(self.local_buffers.items()))[1]
                     ),
-                    localize_fn=localize_fn,
+                    rewrite_index=rewrite_index,
                 )
             ):
                 return fn(node, *index_vars)
@@ -419,14 +420,13 @@ class LocalBufferScope:
         assert len(global_buf.get_size()) == len(local_buf.get_size())
         assert len(nodes) > 0
 
-        def localize_fn(self, name, index):
-            name = self.local_buf.get_name()
+        def rewrite_index(self, index):
             index_vars = sorted(
                 [s for s in index.free_symbols if symbol_is_type(s, SymT.INDEX)],
                 key=str,
             )
             index = self.local_buf.layout.make_indexer()(index_vars)
-            return name, index
+            return index
 
         def wrap_inner_fn_for_node(node: ir.IRNode):
             loops = node.data if isinstance(node, ir.ComputedBuffer) else node
@@ -441,7 +441,7 @@ class LocalBufferScope:
 
             new_loops.inner_fn = self.localize_buffer_for_function(
                 new_loops.inner_fn,
-                localize_fn,
+                rewrite_index,
                 global_buf,
                 local_buf,
             )

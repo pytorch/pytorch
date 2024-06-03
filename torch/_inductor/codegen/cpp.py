@@ -3464,11 +3464,11 @@ class CppKernelProxy(CppKernel):
             and V.local_buffer_scope.local_buffers
         ):
 
-            def localize_fn(self, name, index):
-                scheduler_nodes = V.graph.scheduler.name_to_node.get(name).get_nodes()  # type: ignore[union-attr]
-                # Rename buffer name to Local Buffer
-                name = self.local_buf.get_name()
+            def rewrite_index(self, index):
                 # Local buffer at the inner dimensions
+                scheduler_nodes = V.graph.scheduler.name_to_node.get(  # type: ignore[union-attr]
+                    self.global_buf.get_name()
+                ).get_nodes()
                 _, (group, reduction_group) = max(
                     scheduler_nodes, key=lambda x: int(x.is_reduction())
                 ).group
@@ -3484,10 +3484,10 @@ class CppKernelProxy(CppKernel):
                         # Only keep index used by local buffer
                         replacements[x] = sympy.core.numbers.Zero()
                 index = sympy_subs(index, replacements)  # type: ignore[arg-type]
-                return name, index
+                return index
 
             fn_list = [
-                V.local_buffer_scope.localize_buffer_for_function(fn, localize_fn)
+                V.local_buffer_scope.localize_buffer_for_function(fn, rewrite_index)
                 for fn in fn_list
             ]
 
@@ -3885,7 +3885,7 @@ class CppScheduling(BaseScheduling):
             ):
                 return False
             metrics.cpp_outer_loop_fused_inner_counts.append(
-                metrics.CPPOuterLoopFusedCount(
+                metrics.CppOuterLoopFusedCount(
                     len(cpp_kernel_proxy_list),
                     local_buffer_number=len(local_buffers),
                 )
@@ -3936,7 +3936,7 @@ class CppScheduling(BaseScheduling):
                     cpp_kernel_proxy_list, node.outer_loop_fusion_depth
                 ):
                     metrics.cpp_outer_loop_fused_inner_counts.append(
-                        metrics.CPPOuterLoopFusedCount(
+                        metrics.CppOuterLoopFusedCount(
                             len(cpp_kernel_proxy_list),
                         )
                     )
