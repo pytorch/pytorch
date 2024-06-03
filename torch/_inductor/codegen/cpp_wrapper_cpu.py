@@ -15,7 +15,7 @@ import torch._ops
 from torch.fx.experimental.symbolic_shapes import ConvertIntKey, DivideByKey
 from .. import config, ir
 from ..codecache import CudaKernelParamCache
-from ..utils import ALIGN_BYTES, cache_on_self, sympy_product
+from ..utils import _align, ALIGN_BYTES, cache_on_self, sympy_product
 from ..virtualized import V
 from .aoti_hipify_utils import maybe_hipify_code_wrapper
 from .common import IndentedBuffer
@@ -733,16 +733,15 @@ class CppWrapperCpu(WrapperCodeGen):
                 # For data_size, we always align it to 64.
                 # When loading the constants, the valid data will depends on the size
                 # not the data_size so there won't be correctness issue.
-                from .memory_planning import _align
+                data_size = (
+                    torch.ops.mkldnn._nbytes(tensor)
+                    if tensor.is_mkldnn
+                    else tensor.untyped_storage().nbytes()
+                )
+                self.prefix.writeline(
+                    f"constants_info_[{idx}].data_size = {_align(data_size)};"
+                )
 
-                if tensor.is_mkldnn:
-                    self.prefix.writeline(
-                        f"constants_info_[{idx}].data_size = {_align(torch.ops.mkldnn._nbytes(tensor))};"
-                    )
-                else:
-                    self.prefix.writeline(
-                        f"constants_info_[{idx}].data_size = {_align(tensor.untyped_storage().nbytes())};"
-                    )
                 from_folded = "true" if name in V.graph.folded_constants else "false"
                 self.prefix.writeline(
                     f"constants_info_[{idx}].from_folded = {from_folded};"

@@ -2104,18 +2104,17 @@ class AotCodeCompiler:
                     return b""
 
                 if t.is_mkldnn:
-                    raw_array = ctypes.cast(
-                        torch.ops.mkldnn.data_ptr(t),
-                        ctypes.POINTER(ctypes.c_ubyte * torch.ops.mkldnn._nbytes(t)),
-                    )
-                    return _pad_to_alignment(bytes(raw_array.contents))
+                    data_ptr = torch.ops.mkldnn.data_ptr(t)
+                    nbytes = torch.ops.mkldnn._nbytes(t)
+                else:
+                    t_cpu = t.untyped_storage().cpu()
+                    data_ptr = t_cpu.data_ptr()
+                    nbytes = t_cpu.nbytes()
 
-                t_cpu = t.untyped_storage().cpu()
                 raw_array = ctypes.cast(
-                    t_cpu.data_ptr(),
-                    ctypes.POINTER(ctypes.c_ubyte * t_cpu.nbytes()),
+                    data_ptr,
+                    ctypes.POINTER(ctypes.c_ubyte * nbytes),
                 )
-
                 return _pad_to_alignment(bytes(raw_array.contents))
 
             serialized_weights = b"".join(
