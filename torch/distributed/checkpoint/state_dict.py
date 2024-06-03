@@ -523,7 +523,9 @@ def _load_model_state_dict(
                 else:
                     assert device == value.device
         assert device is not None
-        _broadcast_state_dict(state_dict, local_state_dict, device=device)
+        _broadcast_state_dict(
+            state_dict, local_state_dict, device=device, strict=info.strict
+        )
         for fqn, local_state in local_state_dict.items():
             state_dict[fqn] = local_state
 
