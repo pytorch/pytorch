@@ -1043,7 +1043,7 @@ def _get_amdsmi_temperature(device: Optional[Union[Device, int]] = None) -> int:
 
 def _get_amdsmi_power_draw(device: Optional[Union[Device, int]] = None) -> int:
     handle = _get_amdsmi_handler(device)
-    return amdsmi.amdsmi_get_power_info(handle)["average_socket_power"]
+    return amdsmi.amdsmi_get_power_info(handle)["current_socket_power"]
 
 
 def _get_amdsmi_clock_rate(device: Optional[Union[Device, int]] = None) -> int:
