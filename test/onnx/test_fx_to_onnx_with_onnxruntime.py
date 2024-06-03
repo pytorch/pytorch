@@ -645,7 +645,9 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         )
 
     @pytorch_test_common.xfail_if_model_type_is_exportedprogram(
-        error_message="Unsupported FX nodes: {'call_function': ['aten.sym_constrain_range_for_size.default', 'aten.sym_constrain_range.default', 'aten._assert_scalar.default', 'aten._assert_async.msg']}",
+        error_message="Unsupported FX nodes: {'call_function': "
+        "['aten.sym_constrain_range_for_size.default', 'aten.sym_constrain_range.default', "
+        "'aten._assert_scalar.default', 'aten._assert_async.msg']}",
         reason="https://github.com/pytorch/pytorch/issues/112622",
     )
     def test_operator_with_dynamic_output_shape(self):
