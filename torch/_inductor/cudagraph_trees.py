@@ -80,6 +80,7 @@ from torch._inductor.compile_fx import (
 from torch._inductor.cudagraph_utils import (
     check_for_mutation,
     FunctionID,
+    get_placeholder_stack_trace,
     log_cudagraph_skip_and_bump_counter,
     WrappedFunction,
 )
@@ -960,11 +961,17 @@ class CUDAGraphNode:
                 self.static_input_data_ptrs[i]
                 for i in self.non_managed_static_input_idxs
             ]
-            for t, data_ptr in zip(static_tensors, data_ptrs):
-                torch._check(
-                    t.data_ptr() == data_ptr,
-                    lambda: f"static input data pointer changed from {data_ptr} to {t.data_ptr()}",
-                )
+            error_msg = "static input data pointer changed.\n"
+            for i, (t, data_ptr) in enumerate(zip(static_tensors, data_ptrs)):
+                index = self.non_managed_static_input_idxs[i]
+                if t.data_ptr() != data_ptr:
+                    placeholder = self.wrapped_function.placeholders[index]
+                    error_msg = (
+                        f"{error_msg}input name: {placeholder.name}. "
+                        f"data pointer changed from {data_ptr} to {t.data_ptr()}. "
+                        f"input stack trace: {get_placeholder_stack_trace(placeholder)}\n"
+                    )
+            torch._check(False, lambda: error_msg)
 
     def run_first_inputs(self, new_inputs):
         if config.triton.fast_path_cudagraph_asserts:
