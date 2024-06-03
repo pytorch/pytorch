@@ -1184,9 +1184,9 @@ class TestFullyShardNDTraining(FSDPTest):
 
         for n, p in model.named_parameters():
             self.assertIsInstance(p, DTensor)
-            self.assertEqual(p._spec.mesh.ndim, 2)
+            self.assertEqual(p.device_mesh.ndim, 2)
             self.assertEqual(len(p.placements), 2)
-            self.assertEqual(p._spec.mesh.mesh_dim_names, ("dp", "tp"))
+            self.assertEqual(p.device_mesh.mesh_dim_names, ("dp", "tp"))
 
 
 class TestFullyShardHSDPTraining(FSDPTest):

@@ -200,9 +200,7 @@ class FSDPParam:
                     f"DP's global mesh: {dp_global_mesh}\nTP's global mesh: {tp_global_mesh}"
                 )
 
-            name_dims_error = (
-                "Please name your devicemesh dims, required for named slicing"
-            )
+            name_dims_error = "FSDP requires named DeviceMesh dims for ND parallelism"
             assert dp_mesh.mesh_dim_names is not None, name_dims_error
             assert tp_mesh.mesh_dim_names is not None, name_dims_error
 
