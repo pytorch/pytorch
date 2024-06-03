@@ -46,6 +46,10 @@ class TORCH_API IntraNodeComm : public c10::intrusive_ptr_target {
    */
   bool rendezvous();
 
+  Topology getTopology() {
+    return topology_;
+  }
+
   size_t getBufferSize() {
     return bufferSize_;
   }
@@ -63,17 +67,11 @@ class TORCH_API IntraNodeComm : public c10::intrusive_ptr_target {
    */
   void barrier(std::optional<std::vector<int64_t>> ranks = c10::nullopt);
 
-  /**
-   * Puts the given tensor into the p2p buffer of the current rank at the
-   * specified offset.
-   */
-  void put(const at::Tensor& tensor, int64_t offset = 0);
-
-  /**
-   * Fills the given tensor with the data from the specified rank's p2p buffer
-   * at the specified offset.
-   */
-  void get(size_t rank, at::Tensor tensor, int64_t offset = 0);
+  at::Tensor getBuffer(
+      size_t rank,
+      const std::vector<int64_t>& sizes,
+      c10::ScalarType dtype,
+      int64_t storageOffset);
 
  private:
   at::Tensor oneShotAllReduce(
@@ -92,6 +90,7 @@ class TORCH_API IntraNodeComm : public c10::intrusive_ptr_target {
   size_t rank_;
   size_t worldSize_;
   size_t bufferSize_;
+  at::cuda::CUDAEvent barrierReady_;
 
   /**
    * Members initialized after rendezvous

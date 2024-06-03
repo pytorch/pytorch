@@ -16,7 +16,6 @@ from typing import (
     Tuple,
     Union,
 )
-
 from typing_extensions import TypeAlias
 
 import torch

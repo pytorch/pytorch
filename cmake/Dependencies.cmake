@@ -134,35 +134,6 @@ else()
       "Cannot find threading library. PyTorch requires Threads to compile.")
 endif()
 
-if(USE_TBB)
-  if(USE_SYSTEM_TBB)
-    find_package(TBB 2018.0 REQUIRED CONFIG COMPONENTS tbb)
-
-    get_target_property(TBB_INCLUDE_DIR TBB::tbb INTERFACE_INCLUDE_DIRECTORIES)
-  else()
-    message(STATUS "Compiling TBB from source")
-    # Unset our restrictive C++ flags here and reset them later.
-    # Remove this once we use proper target_compile_options.
-    set(OLD_CMAKE_CXX_FLAGS ${CMAKE_CXX_FLAGS})
-    set(CMAKE_CXX_FLAGS)
-
-    set(TBB_ROOT_DIR "${PROJECT_SOURCE_DIR}/third_party/tbb")
-    set(TBB_BUILD_STATIC OFF CACHE BOOL " " FORCE)
-    set(TBB_BUILD_SHARED ON CACHE BOOL " " FORCE)
-    set(TBB_BUILD_TBBMALLOC OFF CACHE BOOL " " FORCE)
-    set(TBB_BUILD_TBBMALLOC_PROXY OFF CACHE BOOL " " FORCE)
-    set(TBB_BUILD_TESTS OFF CACHE BOOL " " FORCE)
-    add_subdirectory(${PROJECT_SOURCE_DIR}/aten/src/ATen/cpu/tbb)
-    set_property(TARGET tbb tbb_def_files PROPERTY FOLDER "dependencies")
-
-    set(CMAKE_CXX_FLAGS ${OLD_CMAKE_CXX_FLAGS})
-
-    set(TBB_INCLUDE_DIR "${TBB_ROOT_DIR}/include")
-
-    add_library(TBB::tbb ALIAS tbb)
-  endif()
-endif()
-
 # ---[ protobuf
 if(CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO)
   if(USE_LITE_PROTO)
@@ -173,14 +144,24 @@ endif()
 # ---[ BLAS
 
 set(AT_MKLDNN_ACL_ENABLED 0)
+set(AT_MKLDNN_ENABLED 0)
+set(AT_MKL_ENABLED 0)
 # setting default preferred BLAS options if not already present.
-if(NOT INTERN_BUILD_MOBILE)
-  set(BLAS "MKL" CACHE STRING "Selected BLAS library")
-else()
-  set(BLAS "Eigen" CACHE STRING "Selected BLAS library")
-  set(AT_MKLDNN_ENABLED 0)
-  set(AT_MKL_ENABLED 0)
+if(NOT DEFINED BLAS)
+  if(NOT INTERN_BUILD_MOBILE)
+    set(BLAS "MKL" CACHE STRING "Selected BLAS library")
+  else()
+    set(BLAS "Eigen" CACHE STRING "Selected BLAS library")
+  endif()
+elseif(NOT BLAS STREQUAL "MKL")
+    if(USE_MKLDNN)
+      message(WARNING
+        "You explicitly chose with BLAS to not use MKL, so disabling USE_MKLDNN. Suppress this warning with "
+        "-DUSE_MKLDNN=OFF.")
+      set(USE_MKLDNN OFF)
+    endif()
 endif()
+
 set_property(CACHE BLAS PROPERTY STRINGS "ATLAS;BLIS;Eigen;FLAME;Generic;MKL;OpenBLAS;vecLib")
 message(STATUS "Trying to find preferred BLAS backend of choice: " ${BLAS})
 
@@ -264,7 +245,6 @@ else()
 endif()
 
 if(NOT INTERN_BUILD_MOBILE)
-  set(AT_MKL_ENABLED 0)
   set(AT_MKL_SEQUENTIAL 0)
   set(USE_BLAS 1)
   if(NOT (ATLAS_FOUND OR BLIS_FOUND OR GENERIC_BLAS_FOUND OR MKL_FOUND OR OpenBLAS_FOUND OR VECLIB_FOUND OR FlexiBLAS_FOUND OR NVPL_BLAS_FOUND))
@@ -309,7 +289,7 @@ endif()
 # mismatch between these shared dependencies, explicitly declare our intent to these
 # libraries that we are interested in using the exact same source dependencies for all.
 
-if(USE_NNPACK OR USE_QNNPACK OR USE_PYTORCH_QNNPACK OR USE_XNNPACK)
+if(USE_NNPACK OR USE_PYTORCH_QNNPACK OR USE_XNNPACK)
   set(DISABLE_NNPACK_AND_FAMILY OFF)
 
   # Sanity checks - Can we actually build NNPACK and family given the configuration provided?
@@ -350,14 +330,12 @@ if(USE_NNPACK OR USE_QNNPACK OR USE_PYTORCH_QNNPACK OR USE_XNNPACK)
 
   if(DISABLE_NNPACK_AND_FAMILY)
     caffe2_update_option(USE_NNPACK OFF)
-    caffe2_update_option(USE_QNNPACK OFF)
     caffe2_update_option(USE_PYTORCH_QNNPACK OFF)
     caffe2_update_option(USE_XNNPACK OFF)
   else()
     # Disable unsupported NNPack combinations with MSVC
     if(MSVC)
       caffe2_update_option(USE_NNPACK OFF)
-      caffe2_update_option(USE_QNNPACK OFF)
       caffe2_update_option(USE_PYTORCH_QNNPACK OFF)
     endif()
 
@@ -381,13 +359,6 @@ if(USE_NNPACK OR USE_QNNPACK OR USE_PYTORCH_QNNPACK OR USE_XNNPACK)
   endif()
 else()
   set(DISABLE_NNPACK_AND_FAMILY ON)
-endif()
-
-if(USE_QNNPACK AND CMAKE_SYSTEM_PROCESSOR STREQUAL "arm64" AND CMAKE_SYSTEM_NAME STREQUAL "Darwin")
-  message(WARNING
-    "QNNPACK does not compile for Apple Silicon. "
-    "Turn this warning off by explicit USE_QNNPACK=OFF.")
-  caffe2_update_option(USE_QNNPACK OFF)
 endif()
 
 set(CONFU_DEPENDENCIES_SOURCE_DIR ${PROJECT_BINARY_DIR}/confu-srcs
@@ -479,14 +450,9 @@ if(NOT CMAKE_SYSTEM_PROCESSOR MATCHES "^(s390x|ppc64le)$")
   list(APPEND Caffe2_DEPENDENCY_LIBS cpuinfo)
 endif()
 
-# ---[ Caffe2 Int8 operators (enabled by USE_QNNPACK) depend on gemmlowp and neon2sse headers
-if(USE_QNNPACK)
-  set(CAFFE2_THIRD_PARTY_ROOT "${PROJECT_SOURCE_DIR}/third_party")
-  include_directories(SYSTEM "${CAFFE2_THIRD_PARTY_ROOT}/gemmlowp")
-  include_directories(SYSTEM "${CAFFE2_THIRD_PARTY_ROOT}/neon2sse")
-endif()
 
 # ---[ PYTORCH_QNNPACK
+set(CAFFE2_THIRD_PARTY_ROOT "${PROJECT_SOURCE_DIR}/third_party")
 if(USE_PYTORCH_QNNPACK)
     if(NOT DEFINED PYTORCH_QNNPACK_SOURCE_DIR)
       set(PYTORCH_QNNPACK_SOURCE_DIR "${PROJECT_SOURCE_DIR}/aten/src/ATen/native/quantized/cpu/qnnpack" CACHE STRING "QNNPACK source directory")
@@ -507,6 +473,8 @@ if(USE_PYTORCH_QNNPACK)
       # them into a shared library for Caffe2, so they need PIC.
       set_property(TARGET pytorch_qnnpack PROPERTY POSITION_INDEPENDENT_CODE ON)
       set_property(TARGET cpuinfo PROPERTY POSITION_INDEPENDENT_CODE ON)
+      # QNNPACK depends on gemmlowp headers
+      target_include_directories(pytorch_qnnpack PRIVATE "${CAFFE2_THIRD_PARTY_ROOT}/gemmlowp")
 
       if(PYTORCH_QNNPACK_CUSTOM_THREADPOOL)
         target_compile_definitions(
@@ -875,104 +843,49 @@ else()
 endif()
 include_directories(SYSTEM ${EIGEN3_INCLUDE_DIR})
 
+
+# ---[ Python Interpreter
+# If not given a Python installation, then use the current active Python
+if(NOT Python_EXECUTABLE)
+  execute_process(
+    COMMAND "which" "python3" RESULT_VARIABLE _exitcode OUTPUT_VARIABLE _py_exe)
+  if(${_exitcode} EQUAL 0)
+    if(NOT MSVC)
+      string(STRIP ${_py_exe} Python_EXECUTABLE)
+    endif()
+    message(STATUS "Setting Python to ${Python_EXECUTABLE}")
+  endif()
+endif()
+
+if(BUILD_PYTHON)
+  set(PYTHON_COMPONENTS Development)
+  if(USE_NUMPY)
+    list(APPEND PYTHON_COMPONENTS NumPy)
+  endif()
+  find_package(Python COMPONENTS Interpreter OPTIONAL_COMPONENTS ${PYTHON_COMPONENTS})
+else()
+  find_package(Python COMPONENTS Interpreter)
+endif()
+
+if(NOT Python_Interpreter_FOUND)
+  message(FATAL_ERROR "Python3 could not be found.")
+endif()
+
+if(${Python_VERSION} VERSION_LESS 3.8)
+  message(FATAL_ERROR
+    "Found Python libraries version ${Python_VERSION}. Python < 3.8 is no longer supported by PyTorch.")
+endif()
+
 # ---[ Python + Numpy
 if(BUILD_PYTHON)
-  # If not given a Python installation, then use the current active Python
-  if(NOT PYTHON_EXECUTABLE)
-    execute_process(
-      COMMAND "which" "python" RESULT_VARIABLE _exitcode OUTPUT_VARIABLE _py_exe)
-    if(${_exitcode} EQUAL 0)
-      if(NOT MSVC)
-        string(STRIP ${_py_exe} PYTHON_EXECUTABLE)
+  if(Python_Development_FOUND)
+    if(USE_NUMPY)
+      if(NOT Python_NumPy_FOUND)
+        message(WARNING "NumPy could not be found. Not building with NumPy. Suppress this warning with -DUSE_NUMPY=OFF")
+        caffe2_update_option(USE_NUMPY OFF)
+      else()
+        caffe2_update_option(USE_NUMPY ON)
       endif()
-      message(STATUS "Setting Python to ${PYTHON_EXECUTABLE}")
-    endif()
-  endif()
-
-  # Check that Python works
-  set(PYTHON_VERSION)
-  if(DEFINED PYTHON_EXECUTABLE)
-    execute_process(
-        COMMAND "${PYTHON_EXECUTABLE}" "--version"
-        RESULT_VARIABLE _exitcode OUTPUT_VARIABLE PYTHON_VERSION)
-    if(NOT _exitcode EQUAL 0)
-      message(FATAL_ERROR "The Python executable ${PYTHON_EXECUTABLE} cannot be run. Make sure that it is an absolute path.")
-    endif()
-    if(PYTHON_VERSION)
-      string(REGEX MATCH "([0-9]+)\\.([0-9]+)" PYTHON_VERSION ${PYTHON_VERSION})
-    endif()
-  endif()
-
-  # Seed PYTHON_INCLUDE_DIR and PYTHON_LIBRARY to be consistent with the
-  # executable that we already found (if we didn't actually find an executable
-  # then these will just use "python", but at least they'll be consistent with
-  # each other).
-  if(NOT PYTHON_INCLUDE_DIR)
-    # TODO: Verify that sysconfig isn't inaccurate
-    pycmd_no_exit(_py_inc _exitcode "import sysconfig; print(sysconfig.get_path('include'))")
-    if("${_exitcode}" EQUAL 0 AND IS_DIRECTORY "${_py_inc}")
-      set(PYTHON_INCLUDE_DIR "${_py_inc}")
-      message(STATUS "Setting Python's include dir to ${_py_inc} from sysconfig")
-    else()
-      message(WARNING "Could not set Python's include dir to ${_py_inc} from sysconfig")
-    endif()
-  endif(NOT PYTHON_INCLUDE_DIR)
-
-  if(NOT PYTHON_LIBRARY)
-    pycmd_no_exit(_py_lib _exitcode "import sysconfig; print(sysconfig.get_path('stdlib'))")
-    if("${_exitcode}" EQUAL 0 AND EXISTS "${_py_lib}" AND EXISTS "${_py_lib}")
-      set(PYTHON_LIBRARY "${_py_lib}")
-      if(MSVC)
-        string(REPLACE "Lib" "libs" _py_static_lib ${_py_lib})
-        link_directories(${_py_static_lib})
-      endif()
-      message(STATUS "Setting Python's library to ${PYTHON_LIBRARY}")
-    endif()
-  endif(NOT PYTHON_LIBRARY)
-
-  # These should fill in the rest of the variables, like versions, but resepct
-  # the variables we set above
-  set(Python_ADDITIONAL_VERSIONS ${PYTHON_VERSION} 3.8)
-  find_package(PythonInterp 3.0)
-  find_package(PythonLibs 3.0)
-
-  if(NOT PYTHONLIBS_VERSION_STRING)
-    message(FATAL_ERROR
-      "Python development libraries could not be found.")
-  endif()
-
-  if(${PYTHONLIBS_VERSION_STRING} VERSION_LESS 3)
-    message(FATAL_ERROR
-      "Found Python libraries version ${PYTHONLIBS_VERSION_STRING}. Python 2 has reached end-of-life and is no longer supported by PyTorch.")
-  endif()
-  if(${PYTHONLIBS_VERSION_STRING} VERSION_LESS 3.8)
-    message(FATAL_ERROR
-      "Found Python libraries version ${PYTHONLIBS_VERSION_STRING}. Python < 3.8 is no longer supported by PyTorch.")
-  endif()
-
-  # When building pytorch, we pass this in directly from setup.py, and
-  # don't want to overwrite it because we trust python more than cmake
-  if(NUMPY_INCLUDE_DIR)
-    set(NUMPY_FOUND ON)
-  elseif(USE_NUMPY)
-    find_package(NumPy)
-    if(NOT NUMPY_FOUND)
-      message(WARNING "NumPy could not be found. Not building with NumPy. Suppress this warning with -DUSE_NUMPY=OFF")
-    endif()
-  endif()
-
-  if(PYTHONINTERP_FOUND AND PYTHONLIBS_FOUND)
-    add_library(python::python INTERFACE IMPORTED)
-    target_include_directories(python::python SYSTEM INTERFACE ${PYTHON_INCLUDE_DIRS})
-    if(WIN32)
-      target_link_libraries(python::python INTERFACE ${PYTHON_LIBRARIES})
-    endif()
-
-    caffe2_update_option(USE_NUMPY OFF)
-    if(NUMPY_FOUND)
-      caffe2_update_option(USE_NUMPY ON)
-      add_library(numpy::numpy INTERFACE IMPORTED)
-      target_include_directories(numpy::numpy SYSTEM INTERFACE ${NUMPY_INCLUDE_DIR})
     endif()
     # Observers are required in the python build
     caffe2_update_option(USE_OBSERVERS ON)
@@ -1001,10 +914,7 @@ endif()
 message(STATUS "pybind11 include dirs: " "${pybind11_INCLUDE_DIRS}")
 add_library(pybind::pybind11 INTERFACE IMPORTED)
 target_include_directories(pybind::pybind11 SYSTEM INTERFACE ${pybind11_INCLUDE_DIRS})
-target_link_libraries(pybind::pybind11 INTERFACE python::python)
-if(APPLE)
-  target_link_options(pybind::pybind11 INTERFACE -undefined dynamic_lookup)
-endif()
+target_link_libraries(pybind::pybind11 INTERFACE Python::Module)
 
 # ---[ OpenTelemetry API headers
 find_package(OpenTelemetryApi)
@@ -1562,8 +1472,6 @@ if(NOT INTERN_BUILD_MOBILE)
     set(AT_ROCM_ENABLED 1)
   endif()
 
-  set(AT_MKLDNN_ENABLED 0)
-  set(AT_MKLDNN_ACL_ENABLED 0)
   if(USE_MKLDNN)
     if(NOT CMAKE_SIZEOF_VOID_P EQUAL 8)
       message(WARNING
