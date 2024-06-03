@@ -1437,15 +1437,20 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
 
     def test_set_submodule(self):
         net = nn.Module()
-        module = nn.Linear(10, 20)
-        target = "t.t"
-        net.set_submodule(target, module)
-        self.assertEqual(net.get_submodule(target), module)
-        replace_module = nn.Linear(20, 10)
-        net.set_submodule(target, replace_module)
-        self.assertEqual(replace_module, net.get_submodule(target))
-        net.set_submodule("", module)
+        net.t = nn.Module()
+        l = nn.Linear(1, 2)
+        target = "t.l"
+        net.set_submodule(target, l)
+        self.assertEqual(net.get_submodule(target), l)
+        l2 = nn.Linear(2, 1)
+        net.set_submodule(target, l2)
+        self.assertEqual(net.get_submodule(target), l2)
+        net.set_submodule("", l)
         self.assertRaises(ValueError, "Cannot set the submodule without a target name!")
+        net.set_submodule("a.l", l)
+        self.assertRaises(AttributeError, "Module has no attribute `a`")
+        net.set_submodule("t.l.l2", l2)
+        self.assertRaises(AttributeError, "`l` is not an nn.Module")
 
     def test_module_to_argparse(self):
         net = nn.Sequential(nn.Linear(3, 3))
