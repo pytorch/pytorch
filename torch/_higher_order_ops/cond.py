@@ -157,37 +157,37 @@ def create_fw_bw_graph_branches(true_fn, false_fn, *operands):
 
     with suspend_functionalization(), disable_functional_mode():
         with disable_proxy_modes_tracing():
-            unwrapped_operands = pytree.tree_map(_from_fun, operands)
+            fw_inputs = pytree.tree_map(_from_fun, operands)
 
-            example_flat_out = pytree.tree_map(_from_fun, true_fn(*unwrapped_operands))
+            fw_outputs_true = pytree.tree_map(_from_fun, true_fn(*fw_inputs))
             if any(
                 not isinstance(out, torch.Tensor)
-                for out in example_flat_out
+                for out in fw_outputs_true
                 if out is not None
             ):
                 raise RuntimeError(
                     "Expect outputs of true_fn to only contains tensors or None. "
-                    f"Got types {[type(out) for out in example_flat_out]}."
+                    f"Got types {[type(out) for out in fw_outputs_true]}."
                 )
-            example_flat_out = pytree.tree_map(_from_fun, false_fn(*unwrapped_operands))
+            fw_outputs_false = pytree.tree_map(_from_fun, false_fn(*fw_inputs))
             if any(
                 not isinstance(out, torch.Tensor)
-                for out in example_flat_out
+                for out in fw_outputs_false
                 if out is not None
             ):
                 raise RuntimeError(
                     "Expect outputs of false_fn to only contains tensors or None. "
-                    f"Got types {[type(out) for out in example_flat_out]}."
+                    f"Got types {[type(out) for out in fw_outputs_false]}."
                 )
 
             # TODO: There is a major issue that the create_fw_bw in the higher_order_op is invoked twice:
             # Once in the forward path (as it should) and once in the backward path, where it shouldn't be called
             # If we can get rid of the second invokation, it would simplify this function
             fw_true_graph, joint_true_graph = create_fw_bw_graph(
-                true_fn, False, *unwrapped_operands
+                true_fn, False, fw_inputs, fw_outputs_true
             )
             fw_false_graph, joint_false_graph = create_fw_bw_graph(
-                false_fn, False, *unwrapped_operands
+                false_fn, False, fw_inputs, fw_outputs_false
             )
 
         return fw_true_graph, fw_false_graph, joint_true_graph, joint_false_graph
@@ -231,7 +231,11 @@ def trace_cond(proxy_mode, func_overload, pred, true_fn, false_fn, operands):
         # TODO: If inside the dictionary, inside the list, the first element
         # is composed of the multiplication, then the requires_grad attribute is
         # set to False and thus the tracing of the cond errors out.
+
         if (
+            (true_out is None and false_out is not None)
+            or (true_out is not None and false_out is None)
+        ) or (
             true_out is not None
             and false_out is not None
             and true_out.meta["tensor_meta"] != false_out.meta["tensor_meta"]

@@ -263,7 +263,7 @@ def prepare_fw_with_masks(fn):
 
 # TODO: The parameter use_output_and_grad_bw is required because some operations
 # that utilize this function, such as the while_loop, may require (grad, fwd_outputs)
-def create_fw_bw_graph(fn, use_output_and_grad_bw, *operands):
+def create_fw_bw_graph(fn, use_output_and_grad_bw, fw_inputs, fw_outputs):
     from torch._functorch.aot_autograd import AOTConfig, create_joint
 
     # Note:[HOP create fw_bw graph] We create "clean" environments for make_fx by suspending all dispatch keys
@@ -291,11 +291,9 @@ def create_fw_bw_graph(fn, use_output_and_grad_bw, *operands):
         keep_inference_input_mutations=False,
     )
 
-    example_flat_out = pytree.tree_map(_from_fun, fn(*operands))
-    example_grad = [_from_fun(out) for out in example_flat_out]
+    example_grad = [_from_fun(out) for out in fw_outputs]
     num_grads = len(example_grad)
-    # fw_graph = make_fx(fn, record_module_stack=True, _error_on_data_dependent_ops=True)(*operands)
-    fw_graph = make_fx(fn)(*operands)
+    fw_graph = make_fx(fn)(*fw_inputs)
 
     def joint_fn(*joint_operands_grads):
         if use_output_and_grad_bw:
@@ -318,10 +316,10 @@ def create_fw_bw_graph(fn, use_output_and_grad_bw, *operands):
         return pytree.tree_map(maybe_clone, grads)
 
     if use_output_and_grad_bw:
-        example_xs_out = list(operands) + list(example_flat_out)
+        example_xs_out = list(fw_inputs) + list(fw_outputs)
         joint_graph = make_fx(joint_fn)((list(example_grad), list(example_xs_out)))
     else:
-        example_xs_out = list(operands)
+        example_xs_out = list(fw_inputs)
         joint_graph = make_fx(joint_fn)(*(list(example_grad) + list(example_xs_out)))
 
     return fw_graph, joint_graph

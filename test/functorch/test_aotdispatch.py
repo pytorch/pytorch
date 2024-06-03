@@ -4517,7 +4517,7 @@ def forward(self, arg0_1, arg1_1, arg2_1):
 def forward(self, arg0_1):
     true_graph_0 = self.true_graph_0
     false_graph_0 = self.false_graph_0
-    conditional = torch.ops.higher_order.cond(False, true_graph_0, false_graph_0, [arg0_1]);  true_graph_0 = false_graph_0 = arg0_1 = None
+    conditional = torch.ops.higher_order.cond(False, true_graph_0, false_graph_0, (arg0_1,));  true_graph_0 = false_graph_0 = arg0_1 = None
     getitem = conditional[0];  conditional = None
     add = torch.ops.aten.add.Tensor(getitem, 3)
     add_1 = torch.ops.aten.add.Tensor(getitem, 4);  getitem = None
