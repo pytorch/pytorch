@@ -15,6 +15,7 @@ import torch
 
 import torch._prims as prims
 import torch._prims_common as utils
+import torch.utils._pytree as pytree
 from torch import sym_float, sym_int
 from torch._prims_common import (
     BoolLike,
@@ -232,10 +233,12 @@ __all__ = [
     # View & Shape Ops
     #
     "alias",
+    "alias_copy",
     "atleast_1d",
     "atleast_2d",
     "atleast_3d",
     "as_strided",
+    "as_strided_copy",
     "as_strided_scatter",
     "block_diag",
     "broadcast_shapes",
@@ -256,6 +259,7 @@ __all__ = [
     "dstack",
     "expand",
     "expand_as",
+    "expand_copy",
     "flatten",
     "flip",
     "fliplr",
@@ -269,6 +273,7 @@ __all__ = [
     "native_group_norm",
     "native_layer_norm",
     "permute",
+    "permute_copy",
     "ravel",
     "repeat",
     "reshape",
@@ -279,21 +284,27 @@ __all__ = [
     "stack",
     "swap_axes",  # alias for transpose
     "squeeze",
+    "squeeze_copy",
     "t",
+    "t_copy",
     "T",
     "take_along_dim",
     "tensor_split",
     "transpose",
+    "transpose_copy",
     "unfold",
     "unfold_copy",
     "unsqueeze",
+    "unsqueeze_copy",
     "view",
     "view_as",
+    "view_copy",
     "vsplit",
     "vstack",
     "view_as_complex",
     "unflatten",
     "unbind",
+    "unbind_copy",
     "triu",
     "tril",
     "triu_indices",
@@ -2189,17 +2200,21 @@ def _make_copy_from_view(fn):
     Given a view function (e.g. torch.diagonal) generates its copy variant (e.g. torch.diagonal_copy)
     """
     name = fn.__name__
-    fn = out_wrapper()(fn)
-
-    def _fn(*args, out=None, **kwargs):
-        result = fn(*args, out=out, **kwargs)
-        if out is None:
-            return result.clone(memory_format=torch.contiguous_format)
-        return result
-
     copy_name = f"{name}_copy"
+    op_copy = getattr(aten, copy_name)
+
+    @wraps(fn)
+    def _fn(*args, **kwargs):
+        return pytree.tree_map(
+            lambda x: x.clone(memory_format=torch.contiguous_format),
+            fn(*args, **kwargs),
+        )
+
+    if "out" in op_copy.overloads():
+        _fn = out_wrapper()(_fn)
+
     _fn.__name__ = copy_name
-    _fn = register_decomposition(getattr(aten, copy_name))(_fn)
+    _fn = register_decomposition(op_copy)(_fn)
     return _fn
 
 
@@ -4293,9 +4308,6 @@ def diagonal(
     return result
 
 
-diagonal_copy = _make_copy_from_view(diagonal)
-
-
 @register_decomposition(aten.diag_embed)
 @out_wrapper()
 def diag_embed(
@@ -4476,14 +4488,6 @@ def unfold(
         self.shape, self.stride(), dimension, size, step
     )
     return self.as_strided(shape, strides)
-
-
-@register_decomposition(aten.unfold_copy)
-@out_wrapper()
-def unfold_copy(self: TensorLikeType, dimension: int, size: int, step: int):
-    return self.unfold(dimension, size, step).clone(
-        memory_format=torch.contiguous_format
-    )
 
 
 def _cumsumprod_common(
@@ -6273,6 +6277,20 @@ exponential_ = _make_inplace(exponential)
 geometric_ = _make_inplace(geometric)
 log_normal_ = _make_inplace(log_normal)
 zero_ = _make_inplace(zero)
+
+# make copy variants of ops that returns views
+alias_copy = _make_copy_from_view(alias)
+as_strided_copy = _make_copy_from_view(as_strided)
+diagonal_copy = _make_copy_from_view(diagonal)
+expand_copy = _make_copy_from_view(expand)
+permute_copy = _make_copy_from_view(permute)
+squeeze_copy = _make_copy_from_view(squeeze)
+t_copy = _make_copy_from_view(t)
+transpose_copy = _make_copy_from_view(transpose)
+unbind_copy = _make_copy_from_view(unbind)
+unfold_copy = _make_copy_from_view(unfold)
+unsqueeze_copy = _make_copy_from_view(unsqueeze)
+view_copy = _make_copy_from_view(view)
 
 
 # xref: isStorage in torch/csrc/DynamicTypes.cpp
