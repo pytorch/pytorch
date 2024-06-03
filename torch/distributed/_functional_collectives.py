@@ -275,10 +275,12 @@ def reduce_scatter_tensor(
         self.size(scatter_dim) % group_size == 0
     ), f"input dimension 0 ({self.size(0)} must be a multiple of group_size {group_size}"
     if scatter_dim != 0:
-        view_shape = list(self.shape)
-        view_shape[scatter_dim] //= group_size
-        view_shape.insert(scatter_dim, -1)
-        self = self.view(view_shape).movedim(scatter_dim, 0).contiguous().flatten(0, 1)
+        self = (
+            self.unflatten(scatter_dim, (group_size, -1))
+            .movedim(scatter_dim, 0)
+            .contiguous()
+            .flatten(0, 1)
+        )
 
     tensor = torch.ops._c10d_functional.reduce_scatter_tensor(
         self,
@@ -770,6 +772,7 @@ def _resolve_group_name(group: RANK_TYPES, tag: str = "") -> str:
                 "identifier has been deprecated. Please switch to "
                 "using ProcessGroup, DeviceMesh, or group name instead.",
                 FutureWarning,
+                stacklevel=3,
             )
         return c10d._resolve_group_name_by_ranks_and_tag(cast(List[int], group), tag)
     else:

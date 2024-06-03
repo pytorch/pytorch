@@ -305,7 +305,7 @@ def _parse_reduce_scatter(rs_input):
     if reshape_node.target != aten.reshape.default:
         return rs_input, 0
 
-    return reshape_node.args[0], reshape_node.args[1].index(-1)
+    return reshape_node.args[0], permute_node.args[1][0]
 
 
 def fuse_matmul_reduce_scatter(match, rs_input, reduce_op, group_name):
