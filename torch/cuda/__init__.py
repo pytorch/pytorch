@@ -1462,7 +1462,7 @@ def _register_triton_kernels():
 _lazy_call(_register_triton_kernels)
 
 
-from . import amp, jiterator, nvtx, profiler, sparse
+from . import amp, jiterator, nvtx, profiler, sparse, tunable
 
 __all__ = [
     # Typed storage and tensors
@@ -1575,5 +1575,6 @@ __all__ = [
     "stream",
     "streams",
     "synchronize",
+    "tunable",
     "utilization",
 ]
