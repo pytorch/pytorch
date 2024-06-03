@@ -1,6 +1,6 @@
 import functools
 
-from typing import Any, cast, NoReturn, Optional, Sequence, Union
+from typing import Any, cast, List, NoReturn, Optional, Union
 
 import torch
 import torch.nn as nn
@@ -26,7 +26,7 @@ from ._fsdp_state import _get_module_fsdp_state, FSDPState
 # `fully_shard.state(module)`. The state object and module are 1:1.
 @contract(state_cls=FSDPState)
 def fully_shard(
-    module: Union[nn.Module, Sequence[nn.Module]],
+    module: Union[nn.Module, List[nn.Module]],
     *,
     mesh: Optional[DeviceMesh] = None,
     reshard_after_forward: Union[bool, int] = True,

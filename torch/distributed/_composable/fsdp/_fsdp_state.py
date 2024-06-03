@@ -183,6 +183,9 @@ class FSDPState(_State):
                 if module_fqn is None:
                     module_to_fsdp_param_group[module]._module_fqn = module_name
                 else:
+                    assert isinstance(
+                        module_to_fsdp_param_group[module]._module_fqn, str
+                    )
                     module_to_fsdp_param_group[module]._module_fqn += f", {module_name}"
 
     @disable_if_config_true
