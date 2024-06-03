@@ -1,6 +1,7 @@
 import contextlib
 import functools
 from typing import List, Optional, TYPE_CHECKING
+import threading
 
 import torch
 from torch._dynamo.external_utils import call_backward, call_hook, CompiledAutogradEngine
@@ -336,3 +337,22 @@ def reset() -> None:
     assert compiled_autograd_enabled_count == 0
     torch._C._dynamo.compiled_autograd.set_autograd_compiler(None)
     torch._C._dynamo.compiled_autograd.set_verbose_logger(None)
+
+
+compiler_fn_tls = threading.local()
+def compiler_fn(**compile_options):
+    def _fn(gm):
+        # if dist.get_rank() == 0:
+        #     # HACK: delay rank 0 by X seconds, so that rank 1 will always fail first.
+        #     import time
+        #     time.sleep(600)
+        import logging
+        torch_log = logging.getLogger("torch")
+        torch_log.warning("Compiling autograd?")
+        initialized = getattr(compiler_fn_tls, 'initialized', False)
+        if not initialized:
+            compiler_fn_tls.initialized = True
+            return torch.compile(gm, backend="eager", fullgraph=False)
+        else:
+            return torch.compile(gm, **compile_options)
+    return _fn

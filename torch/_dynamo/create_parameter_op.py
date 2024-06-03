@@ -31,6 +31,7 @@ class TracableCreateParameter(torch.autograd.Function):
 
     @staticmethod
     def backward(ctx, grad):
+        # torch_log.warning(f"grad: {grad}")
         return None, grad  # grad flows to placeholder
 
 

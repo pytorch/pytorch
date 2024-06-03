@@ -341,7 +341,7 @@ class TestFullyShard1DTrainingCore(FSDPTest):
                 torch._dynamo.config.trace_distributed = True
                 torch._inductor.config.triton.unique_kernel_names = True
                 model_to_be_compiled = copy.deepcopy(model).cuda()
-                fully_shard(model_to_be_compiled, reshard_after_forward=True, _reshard_after_forward_root=True)
+                fully_shard(model_to_be_compiled, reshard_after_forward=True)
                 optim_for_compile = torch.optim.Adam(model_to_be_compiled.parameters(), lr=1e-2)
 
             compiled_model = None
@@ -495,8 +495,8 @@ class TestFullyShard1DTrainingCore(FSDPTest):
             torch._inductor.config.triton.unique_kernel_names = True
             model_to_be_compiled = copy.deepcopy(model).cuda()
             for mlp in model_to_be_compiled:
-                fully_shard(mlp, mesh=mesh, reshard_after_forward=True, _reshard_after_forward_root=True)
-            fully_shard(model_to_be_compiled, mesh=mesh, reshard_after_forward=True, _reshard_after_forward_root=True)
+                fully_shard(mlp, mesh=mesh, reshard_after_forward=True)
+            fully_shard(model_to_be_compiled, mesh=mesh, reshard_after_forward=True)
             optim_for_compile = torch.optim.Adam(model_to_be_compiled.parameters(), lr=1e-2)
 
         compiled_model = None
@@ -670,8 +670,8 @@ class TestFullyShard1DTrainingCore(FSDPTest):
                 torch._dynamo.config.trace_distributed = True
                 torch._inductor.config.triton.unique_kernel_names = True
                 model_to_be_compiled = copy.deepcopy(model).cuda()
-                fully_shard(model_to_be_compiled.inner, reshard_after_forward=True, _reshard_after_forward_root=True)
-                fully_shard(model_to_be_compiled, reshard_after_forward=True, _reshard_after_forward_root=True)
+                fully_shard(model_to_be_compiled.inner, reshard_after_forward=True)
+                fully_shard(model_to_be_compiled, reshard_after_forward=True)
                 optim_for_compile = torch.optim.Adam(model_to_be_compiled.parameters(), lr=1e-2)
 
             compiled_model = None

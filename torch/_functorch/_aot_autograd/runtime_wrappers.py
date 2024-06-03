@@ -953,7 +953,7 @@ class AOTSyntheticBaseWrapper(CompilerWrapper):
             fw_metadata.input_info,
             is_inference=is_inference,
         )
-        torch_log.warning("here71")
+        # torch_log.warning("here71")
 
         # Happy path: we don't need synthetic bases
         if synthetic_base_info is None:
@@ -961,7 +961,7 @@ class AOTSyntheticBaseWrapper(CompilerWrapper):
             return flat_fn, flat_args, fw_metadata
 
         # export path: ban synthetic bases for now, add later if requested.
-        torch_log.warning("here8")
+        # torch_log.warning("here8")
         if requires_subclass_dispatch(flat_args, fw_metadata):
             raise RuntimeError(
                 """\
@@ -1204,7 +1204,7 @@ def merge_view_inputs(
     assert len(fwd_inputs) == len(mutated_input_info)
     if not [info for info in mutated_input_info if info.mutates_data]:
         # Return early when there are no mutations.
-        torch_log.warning("merge_view_inputs return here1")
+        # torch_log.warning("merge_view_inputs return here1")
         return fwd_inputs, None
 
     storage_ref_to_idx: Dict[StorageWeakRef, List[int]] = collections.defaultdict(list)
@@ -1216,11 +1216,11 @@ def merge_view_inputs(
             storage_ref_to_idx[storage_ref].append(i)
         else:
             other_args.append(inpt)
-    for i, (sref, idxs) in enumerate(storage_ref_to_idx.items()):
-        torch_log.warning(f"i: {i}, idxs: {idxs}")
-        for idx in idxs:
-            t = fwd_inputs[idx]
-            torch_log.warning(f"t: {t}, id(t): {id(t)}, t.shape: {t.shape}, t.stride(): {t.stride()}, t.storage_offset(): {t.storage_offset()}, t.requires_grad: {t.requires_grad}, id(t.untyped_storage()): {id(t.untyped_storage())}")
+    # for i, (sref, idxs) in enumerate(storage_ref_to_idx.items()):
+    #     # torch_log.warning(f"i: {i}, idxs: {idxs}")
+    #     # for idx in idxs:
+    #     #     t = fwd_inputs[idx]
+    #     #     torch_log.warning(f"t: {t}, id(t): {id(t)}, t.shape: {t.shape}, t.stride(): {t.stride()}, t.storage_offset(): {t.storage_offset()}, t.requires_grad: {t.requires_grad}, id(t.untyped_storage()): {id(t.untyped_storage())}")
     # Note [Synthetic Base Info Metadata]
     # This list contains metadata that tells you what the i'th argument in the inner calling convention should be.
     # It's either:

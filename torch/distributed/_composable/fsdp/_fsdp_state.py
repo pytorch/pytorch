@@ -116,9 +116,8 @@ class FSDPState(_State):
                     )
                 state._is_root = False
             self._state_ctx.all_states.append(state)
-        if self._fsdp_param_group and not self._reshard_after_forward_root:
-            # For the root, if `self._reshard_after_forward_root` is not set,
-            # do not reshard after forward since for training,
+        if self._fsdp_param_group:
+            # For the root, do not reshard after forward since for training,
             # the parameters would be freed and all-gathered immediately
             self._fsdp_param_group.post_forward_mesh_info = None
         self._init_fqns()
