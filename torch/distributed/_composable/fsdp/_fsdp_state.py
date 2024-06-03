@@ -1,10 +1,21 @@
 import functools
 
-from typing import Any, Dict, List, Optional, Tuple, TYPE_CHECKING
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    List,
+    Optional,
+    Sequence,
+    Set,
+    Tuple,
+    TYPE_CHECKING,
+)
 
 import torch
 import torch.nn as nn
 from torch.autograd import Variable
+from torch.autograd.graph import _MultiHandle
 from torch.distributed._composable_state import (
     _get_module_state,
     _insert_module_state,
@@ -58,18 +69,29 @@ class FSDPState(_State):
 
     # Define a separate init since `__init__` is called in the contract
     def init(
-        self, module: nn.Module, device: torch.device, mp_policy: MixedPrecisionPolicy
+        self,
+        modules: Tuple[nn.Module, ...],
+        device: torch.device,
+        mp_policy: MixedPrecisionPolicy,
     ) -> None:
-        _insert_module_state(module, self)
-        self._module = module
+        for module in modules:
+            _insert_module_state(module, self)
+        self._modules = modules
         self._device = device
         self._mp_policy = mp_policy
-        self._pre_forward_hook_handle = module.register_forward_pre_hook(
-            self._pre_forward, prepend=True, with_kwargs=True
-        )
-        self._post_forward_hook_handle = module.register_forward_hook(
-            self._post_forward, prepend=False
-        )
+        if len(modules) == 1:
+            self._pre_forward_hook_handle = modules[0].register_forward_pre_hook(
+                self._pre_forward, prepend=True, with_kwargs=True
+            )
+            self._post_forward_hook_handle = modules[0].register_forward_hook(
+                self._post_forward, prepend=False
+            )
+        else:
+            hook_handle = _register_group_forward_hooks(
+                modules, self._pre_forward, self._post_forward
+            )
+            self._pre_forward_hook_handle = hook_handle
+            self._post_forward_hook_handle = hook_handle
 
     def _root_pre_forward(
         self, module: nn.Module, args: Tuple[Any, ...], kwargs: Dict[str, Any]
@@ -101,12 +123,17 @@ class FSDPState(_State):
         if self._is_root is not None:
             return  # no-op: already initialized
         self._is_root = True
-        root_module = self._module
+        if len(self._modules) > 1:
+            raise RuntimeError(
+                f"FSDP requires a single root module but got {self._modules}"
+            )
+        root_module = self._modules[0]
+        visited_states: Set[FSDPState] = set()
         for module_name, module in root_module.named_modules():
             if (state := _get_module_fsdp_state(module)) is None:
                 continue
             if module is not root_module:
-                if state._is_root is not None:
+                if state not in visited_states and state._is_root is not None:
                     raise RuntimeError(
                         "FSDP state has already been lazily initialized for "
                         f"{module_name}\nFSDP requires running forward through "
@@ -114,6 +141,7 @@ class FSDPState(_State):
                     )
                 state._is_root = False
             self._state_ctx.all_states.append(state)
+            visited_states.add(state)
         if self._fsdp_param_group:
             # For the root, do not reshard after forward since for training,
             # the parameters would be freed and all-gathered immediately
@@ -137,20 +165,25 @@ class FSDPState(_State):
     def _init_fqns(self) -> None:
         """Sets module and parameter FQN attributes for debugging."""
         assert self._is_root
-        root_module = self._module
+        root_module = self._modules[0]
         param_to_fsdp_param: Dict[nn.Parameter, FSDPParam] = {}
         module_to_fsdp_param_group: Dict[nn.Module, FSDPParamGroup] = {}
         for state in self._state_ctx.all_states:
             if fsdp_param_group := state._fsdp_param_group:
                 for fsdp_param in fsdp_param_group.fsdp_params:
                     param_to_fsdp_param[fsdp_param.sharded_param] = fsdp_param
-                module_to_fsdp_param_group[fsdp_param_group.module] = fsdp_param_group
+                for module in fsdp_param_group.modules:
+                    module_to_fsdp_param_group[module] = fsdp_param_group
         for param_name, param in root_module.named_parameters():
             if param in param_to_fsdp_param:
                 param_to_fsdp_param[param]._param_fqn = param_name
         for module_name, module in root_module.named_modules():
             if module in module_to_fsdp_param_group:
-                module_to_fsdp_param_group[module]._module_fqn = module_name
+                module_fqn = module_to_fsdp_param_group[module]._module_fqn
+                if module_fqn is None:
+                    module_to_fsdp_param_group[module]._module_fqn = module_name
+                else:
+                    module_to_fsdp_param_group[module]._module_fqn += f", {module_name}"
 
     @disable_if_config_true
     def _pre_forward(
@@ -253,3 +286,52 @@ def _get_module_fsdp_state(module: nn.Module) -> Optional[FSDPState]:
     if isinstance(state, FSDPState):
         return state
     return None
+
+
+def _register_group_forward_hooks(
+    modules: Sequence[nn.Module],
+    pre_hook: Callable,
+    post_hook: Callable,
+):
+    """
+    Registers group forward pre and post-hooks. The pre-hook runs upon the
+    first module pre-forward, and the post-hook runs upon the last. If at least
+    one module does not run forward, then the post-hook does not run.
+    """
+    modules_set = set(modules)
+    modules_to_run: Set[nn.Module] = set()
+
+    @functools.wraps(pre_hook)
+    def wrapped_pre_hook(*args: Any, **kwargs: Any):
+        in_backward = torch._C._current_graph_task_id() != -1
+        if in_backward:
+            return
+        if len(modules_to_run) == 0:  # first to run
+            modules_to_run.update(modules_set)
+            return pre_hook(*args, **kwargs)
+
+    def get_wrapped_post_hook(module: nn.Module):
+        @functools.wraps(post_hook)
+        def wrapped_post_hook(*args: Any, **kwargs: Any):
+            in_backward = torch._C._current_graph_task_id() != -1
+            if in_backward:
+                return
+            modules_to_run.discard(module)
+            if len(modules_to_run) == 0:
+                return post_hook(*args, **kwargs)
+
+        return wrapped_post_hook
+
+    pre_handles = [
+        module.register_forward_pre_hook(
+            wrapped_pre_hook, prepend=True, with_kwargs=True
+        )
+        for module in modules
+    ]
+    post_handles = [
+        module.register_forward_hook(
+            get_wrapped_post_hook(module), prepend=False, with_kwargs=False
+        )
+        for module in modules
+    ]
+    return _MultiHandle(tuple(pre_handles + post_handles))
