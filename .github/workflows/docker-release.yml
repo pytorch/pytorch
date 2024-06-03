@@ -153,8 +153,6 @@ jobs:
   validate:
     runs-on: [self-hosted, linux.large]
     needs: build
-    steps:
-      - name: Validate Docker image
-        uses: pytorch/builder/.github/workflows/validate_docker_images.yml@main
-        with:
-          channel: nightly
+    uses: pytorch/builder/.github/workflows/validate_docker_images.yml@main
+    with:
+      channel: nightly
