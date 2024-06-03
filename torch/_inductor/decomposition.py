@@ -19,6 +19,7 @@ from torch._decomp.decompositions import (
     pw_cast_for_opmath,
 )
 from torch._decomp.decompositions_for_rng import extra_random_decomps
+from torch._dynamo.utils import counters
 from torch._higher_order_ops.out_dtype import out_dtype
 from torch._inductor.utils import pad_listlike
 from torch._prims_common import (
@@ -86,6 +87,8 @@ decompositions = {**core_aten_decompositions(), **inductor_decompositions}
 # the Inductor decomp table.
 decomps_to_exclude = [
     aten._unsafe_index,
+    aten._unsafe_masked_index,
+    aten._unsafe_masked_index_put_accumulate,
     aten._scaled_dot_product_flash_attention_for_cpu.default,  # See comments in torch/_decomp/decompositions.py
     aten._softmax_backward_data,
     aten.clamp_max,
@@ -205,6 +208,7 @@ def bmm(self, batch2):
             return out
     if self.device.type == "cpu":
         if self.size(1) == 1 and batch2.size(-1) == 1:
+            counters["inductor"]["decompose_bmm"] += 1
             return torch.sum(
                 self.squeeze(1) * batch2.squeeze(-1), dim=1, keepdim=True
             ).unsqueeze(1)
@@ -216,11 +220,13 @@ def bmm(self, batch2):
 def addmm(self, mat1, mat2, beta=1, alpha=1):
     if self.device.type == "cpu":
         if mat1.size(0) == 1 and mat2.size(-1) == 1:
+            counters["inductor"]["decompose_addmm"] += 1
             out = torch.sum(
                 mat1.squeeze(0) * mat2.squeeze(-1), dim=0, keepdim=True
             ).unsqueeze(0)
             return alpha * out + beta * self
         if mat1.size(0) == 1 and mat2.size(0) <= 16 and mat2.size(1) <= 16:
+            counters["inductor"]["decompose_addmm"] += 1
             out = (mat1.T * mat2).sum(dim=0, keepdim=True)
             return alpha * out + beta * self
     return NotImplemented
@@ -247,10 +253,12 @@ def mm(self, input2):
             and (self.dtype == input2.dtype)
             and definitely_true((torch.numel(self) + torch.numel(input2)) <= 32)
         ):
+            counters["inductor"]["decompose_mm"] += 1
             return torch.cat([self[i, :] * input2 for i in range(self.size(0))])
         if guard_size_oblivious(self.size(0) == 1) and guard_size_oblivious(
             input2.size(-1) == 1
         ):
+            counters["inductor"]["decompose_mm"] += 1
             return torch.sum(
                 self.squeeze(0) * input2.squeeze(-1), dim=0, keepdim=True
             ).unsqueeze(0)

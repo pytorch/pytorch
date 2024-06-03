@@ -17,10 +17,10 @@ from torch.distributed._tensor import (
     DeviceMesh,
     DTensor,
     init_device_mesh,
+    Partial,
     Replicate,
     Shard,
 )
-from torch.distributed._tensor.placement_types import _Partial
 from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
     checkpoint_wrapper,
     CheckpointImpl,
@@ -70,9 +70,8 @@ bw_graph_cell = [None]
 fw_compiler = functools.partial(extract_graph, graph_cell=fw_graph_cell)
 bw_compiler = functools.partial(extract_graph, graph_cell=bw_graph_cell)
 
-from torch._dynamo.backends.common import aot_autograd
-
 from functorch.compile import min_cut_rematerialization_partition
+from torch._dynamo.backends.common import aot_autograd
 
 aot_eager_graph = aot_autograd(
     fw_compiler=fw_compiler,
@@ -122,7 +121,7 @@ class TestDTensorCompile(torch._dynamo.test_case.TestCase):
 
         compiled_fn = torch.compile(backend="aot_eager", fullgraph=True)(fn)
 
-        for x in [Shard(0), Replicate(), _Partial()]:
+        for x in [Shard(0), Replicate(), Partial()]:
             opt_fn = fn(x)
             compiled_out = compiled_fn(x)
             self.assertEqual(opt_fn, compiled_out)
@@ -314,7 +313,7 @@ class TestDTensorCompile(torch._dynamo.test_case.TestCase):
         x_dt = DTensor.from_local(
             x,
             mesh,
-            [_Partial()],
+            [Partial()],
             run_check=False,
             shape=(10, 257, 160),
             stride=(41120, 160, 1),
@@ -355,7 +354,7 @@ class TestDTensorCompile(torch._dynamo.test_case.TestCase):
         x_dt = DTensor.from_local(
             x,
             mesh,
-            [_Partial()],
+            [Partial()],
             run_check=False,
             shape=(10, 257, 160),
             stride=(41120, 160, 1),
@@ -516,7 +515,7 @@ def forward(self, primals_1):
             return x + x
 
         x = torch.randn(4, 4, requires_grad=True)
-        x_dt = DTensor.from_local(x, mesh, [_Partial()], run_check=False)
+        x_dt = DTensor.from_local(x, mesh, [Partial()], run_check=False)
 
         y = torch.randn(4, 4, requires_grad=True)
         y_dt = DTensor.from_local(y, mesh, [Replicate()], run_check=False)

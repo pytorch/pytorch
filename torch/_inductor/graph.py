@@ -350,7 +350,6 @@ class GraphLowering(torch.fx.Interpreter):
         self.device_idxs: Set[int] = const_module.device_idxs if const_module else set()
         self.cuda = False
         self.buffers: List[ir.Buffer] = []
-        self.buffer_mutation: bool = False
         self.const_output_index: Dict[str, int] = (
             const_output_index if const_output_index else {}
         )
@@ -803,46 +802,46 @@ class GraphLowering(torch.fx.Interpreter):
             else self.constants[name]
         )
 
+    def allocate_non_dup_const_name(self, name, data):
+        orig_name = name
+        if not config.aot_inductor.use_runtime_constant_folding:
+            for constant_name, value in self.constants.items():
+                if (
+                    not data.is_mkldnn
+                    and data.size() == value.size()
+                    and data.stride() == value.stride()
+                    and data.dtype == value.dtype
+                    and data.device == value.device
+                    and data.untyped_storage().data_ptr()
+                    == value.untyped_storage().data_ptr()
+                    and data.storage_offset() == value.storage_offset()
+                ):
+                    return constant_name
+
+        if name is None:
+            name = f"constant{len(self.constants)}"
+        if name[0].isdigit():
+            name = f"constant_{name}"
+        name = self.qualify_name(name)
+        # We may generate a var name for each constant in the codegen.
+        # Let's only keep sane characters.
+        prefix = re.sub(r"[^a-zA-Z0-9_]", "_", name)
+        name = prefix
+        cnt = 0
+        while name in self.constants:
+            name = f"{prefix}_{cnt}"
+            cnt += 1
+        self.constants[name] = data
+        self.constant_reprs[name] = (
+            f"{data.device!r} {data.dtype!r} "
+            f"{tuple(data.size())!r} {tuple(data.stride())!r} "
+            f"{hash(data):x}"
+        )
+        self.allocated_constant_name[name] = orig_name
+        return name
+
     def add_tensor_constant(self, data, name=None):
-        def allocate(name):
-            if not config.aot_inductor.use_runtime_constant_folding:
-                for constant_name, value in self.constants.items():
-                    if (
-                        not data.is_mkldnn
-                        and data.size() == value.size()
-                        and data.stride() == value.stride()
-                        and data.dtype == value.dtype
-                        and data.device == value.device
-                        and data.untyped_storage().data_ptr()
-                        == value.untyped_storage().data_ptr()
-                        and data.storage_offset() == value.storage_offset()
-                    ):
-                        return constant_name
-
-            if name is None:
-                name = f"constant{len(self.constants)}"
-            if name[0].isdigit():
-                name = f"constant_{name}"
-            name = self.qualify_name(name)
-            # We may generate a var name for each constant in the codegen.
-            # Let's only keep sane characters.
-            prefix = re.sub(r"[^a-zA-Z0-9_]", "_", name)
-            name = prefix
-            cnt = 0
-            while name in self.constants:
-                name = f"{prefix}_{cnt}"
-                cnt += 1
-            self.constants[name] = data
-            self.constant_reprs[name] = (
-                f"{data.device!r} {data.dtype!r} "
-                f"{tuple(data.size())!r} {tuple(data.stride())!r} "
-                f"{hash(data):x}"
-            )
-            return name
-
-        new_name = allocate(name)
-        self.allocated_constant_name[new_name] = name
-
+        new_name = self.allocate_non_dup_const_name(name, data)
         return TensorBox.create(
             ir.ConstantBuffer(
                 new_name,
@@ -858,10 +857,10 @@ class GraphLowering(torch.fx.Interpreter):
         """
         if self.constants[name].device == device_override or device_override is None:
             return name
-        alt_name = f"{name}_{device_override.type}{device_override.index or 0}"
-        if alt_name not in self.constants:
-            self.constants[alt_name] = self.constants[name].to(device_override)
-        return alt_name
+        return self.allocate_non_dup_const_name(
+            f"{name}_{device_override.type}{device_override.index or 0}",
+            self.constants[name].to(device_override),
+        )
 
     def placeholder(self, target: str, args, kwargs):
         example = super().placeholder(target, args, kwargs)
@@ -1682,15 +1681,32 @@ class GraphLowering(torch.fx.Interpreter):
             node_runtimes.append((node, node.get_estimated_runtime()))
         return total_bytes, node_counts, node_runtimes
 
-    @dynamo_timed(phase_name="code_gen")
+    @dynamo_timed(phase_name="code_gen", fwd_only=False)
     def compile_to_module(self):
         from .codecache import PyCodeCache
 
         code, linemap = (
             self.codegen_with_cpp_wrapper() if self.cpp_wrapper else self.codegen()
         )
-        linemap = [(line_no, node.stack_trace) for line_no, node in linemap]
-        key, path = PyCodeCache.write(code)
+
+        output_code_log.debug("Output code: \n%s", code)
+        try:
+            linemap = [(line_no, node.stack_trace) for line_no, node in linemap]
+            key, path = PyCodeCache.write(code)
+        except Exception:
+            trace_structured(
+                "inductor_output_code",
+                # Just omit the filename, I still want the code though!
+                payload_fn=lambda: code,
+            )
+            raise
+        else:
+            trace_structured(
+                "inductor_output_code",
+                lambda: {"filename": path},
+                payload_fn=lambda: code,
+            )
+
         mod = PyCodeCache.load_by_key_path(
             key,
             path,
@@ -1707,12 +1723,6 @@ class GraphLowering(torch.fx.Interpreter):
 
         log_module_code(mod.__file__)
         log.debug("Output code written to: %s", mod.__file__)
-        output_code_log.debug("Output code: \n%s", code)
-        trace_structured(
-            "inductor_output_code",
-            lambda: {"filename": mod.__file__},
-            payload_fn=lambda: code,
-        )
         output_code_log.info("Output code written to: %s", mod.__file__)
         if config.benchmark_kernel:
             print(f"Compiled module path: {mod.__file__}", file=sys.stderr)
