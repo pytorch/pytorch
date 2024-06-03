@@ -1087,6 +1087,10 @@ def trace(
             _ExportType.SOURCE_TO_SOURCE,
         )
 
+    # Replace the returned modules.
+    from torch.export._trace import _convert_ts_to_export_experimental
+    traced_func = _convert_ts_to_export_experimental(traced_func, example_inputs)
+
     return traced_func
 
 
