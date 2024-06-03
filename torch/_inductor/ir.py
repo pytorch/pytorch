@@ -3194,7 +3194,11 @@ class NoneAsConstantBuffer(IRNode):
 class ShapeAsConstantBuffer(IRNode):
     def __init__(self, shape):
         super().__init__()
-        self.shape = shape
+        self._shape = shape
+
+    @property
+    def shape(self):
+        return self._shape
 
     def get_unbacked_symbol_uses(self) -> Set[sympy.Symbol]:
         return free_unbacked_symbols(self.shape)
