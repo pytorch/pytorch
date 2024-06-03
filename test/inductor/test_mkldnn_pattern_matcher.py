@@ -229,11 +229,11 @@ class TestPatternMatcherBase(TestCase):
         inputs,
         include_ops,
         exclude_ops,
-        num_include_ops=None,
         atol=1e-5,
         rtol=1.3e-6,
         check_quantization=False,
         check_dynamic=None,
+        num_include_ops=None,
     ):
         with torch.no_grad():
             clone_inputs = self._clone_inputs(inputs)
@@ -1785,8 +1785,8 @@ class TestPatternMatcher(TestPatternMatcherBase):
                     (v,),
                     ["torch.ops.onednn.qlinear_pointwise.default", "torch.ops.onednn.qlinear_pointwise.binary"],
                     [],
-                    num_include_ops=[2, 2],
                     check_quantization=True,
+                    num_include_ops=[2, 2],
                 )
 
     @skipIfNoDynamoSupport
