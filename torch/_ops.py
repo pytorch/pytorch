@@ -717,8 +717,18 @@ class OpOverload(OperatorBase):
 
     # This implements the pre-computation logic for the Python dispatcher.
     def _get_dispatch(self, key):
+        if "linear.default" in str(self):
+            print("HELLO", self, key)
         # This is only called upon a cache miss
         assert key not in self._dispatch_cache, f"{self} {key}"
+
+        if "linear.default" in str(self):
+            def func(*args, **kwargs):
+                with torch._C._AutoDispatchBelowAutograd():
+                    print("EXECUTING THIS")
+                    return self._op(*args, **kwargs)
+            if not torch._C.DispatchKey.AutogradCPU in self.py_kernels:
+                self.py_impl(torch._C.DispatchKey.AutogradCPU)(func)
 
         if key == torch._C.DispatchKey.Python:
             if (
@@ -807,6 +817,8 @@ class OpOverload(OperatorBase):
                 return handler
 
         r = self.py_kernels.get(final_key, final_key)
+        if "linear.default" in str(self):  
+            print("Resolved", final_key, r)
         if cache_result:
             self._dispatch_cache[key] = r
             add_cached_op(self)

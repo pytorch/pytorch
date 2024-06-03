@@ -316,6 +316,9 @@ class FunctionalTensorMode(TorchDispatchMode):
         if kwargs is None:
             kwargs = {}
 
+        if "linear" in str(func):
+            breakpoint()
+
         unrecognized_types = [
             t
             for t in types
@@ -365,7 +368,7 @@ class FunctionalTensorMode(TorchDispatchMode):
                             f" to be one such op."
                         )
                 return should_decompose
-            return True
+            return False
 
         if (
             func not in FunctionalTensor.metadata_fns
@@ -464,6 +467,7 @@ class FunctionalTensorMode(TorchDispatchMode):
                     # FunctionalTensorMode. If we call func() directly, we would need to exclude PreDispatch
                     # from the TLS in order to avoid infinite looping, but this would prevent us from coming
                     # back to PreDispatch later
+                    print("WHAT OP", func)
                     outs_unwrapped = func._op_dk(
                         torch._C.DispatchKey.Functionalize,
                         *args_unwrapped,

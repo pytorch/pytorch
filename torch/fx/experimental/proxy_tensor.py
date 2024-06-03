@@ -335,6 +335,7 @@ def proxy_call(proxy_mode, func, pre_dispatch, args, kwargs):
         torch.ops.aten.size.default,
         torch.ops.aten.stride.default,
         torch.ops.aten.storage_offset.default,
+        torch.ops.aten.linear.default,
     ]:
         with proxy_mode:
             r = func.decompose(*args, **kwargs)

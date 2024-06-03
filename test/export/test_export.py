@@ -64,7 +64,7 @@ try:
     from torchrec.sparse.jagged_tensor import KeyedJaggedTensor
 
     HAS_TORCHREC = True
-except ImportError:
+except (ImportError, AttributeError):
     HAS_TORCHREC = False
 
 try:
@@ -4937,6 +4937,18 @@ def forward(self, x):
             node.name for node in ep.graph.nodes if node.op == "get_attr"
         ]
         self.assertEqual(expected_getattr_names, real_getattr_names)
+
+    def test_if_can_preserve_comp_impl(self):
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(3, 3)
+            def forward(self, x):
+                return self.linear(x)
+
+        gm = torch.export._trace._export(Foo(), (torch.ones(3, 3),), pre_dispatch=False).graph_module
+        print(gm)
+        print(torch._C._dispatch_dump("aten::absolute"))
 
     def test_constant_input_naming(self):
         class Foo(torch.nn.Module):
