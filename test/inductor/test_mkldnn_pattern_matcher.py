@@ -199,6 +199,7 @@ class TestPatternMatcherBase(TestCase):
         inputs,
         include_ops,
         exclude_ops,
+        num_include_ops=None,
         atol=1e-5,
         rtol=1.3e-6,
         check_quantization=False,
@@ -215,6 +216,10 @@ class TestPatternMatcherBase(TestCase):
             )
             for op in include_ops:
                 self.assertIn(op, source_code)
+            if num_include_ops is not None:
+                assert len(include_ops) == len(num_include_ops)
+                for i in range(len(include_ops)):
+                    self.assertEqual(source_code.count(include_ops[i]), num_include_ops[i])
             for op in exclude_ops:
                 self.assertNotIn(op, source_code)
             if check_dynamic is not None:
@@ -1699,6 +1704,14 @@ class TestPatternMatcher(TestPatternMatcherBase):
                     check_autocast=torch.bfloat16 if int8_mixed_bf16 else torch.float,
                     matcher_check_fn=matcher_check_fn,
                     is_qat=is_qat,
+                )
+                self._test_code_common(
+                    mod,
+                    (v,),
+                    ["torch.ops.onednn.qlinear_pointwise.default", "torch.ops.onednn.qlinear_pointwise.binary"],
+                    [],
+                    num_include_ops=[2, 2],
+                    check_quantization=True,
                 )
 
     @skipIfNoDynamoSupport
