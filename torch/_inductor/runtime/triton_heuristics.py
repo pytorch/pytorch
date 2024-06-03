@@ -713,9 +713,9 @@ class CachingAutotuner(KernelInterface):
     def autotune_to_one_config(self, *args, **kwargs):
         """Do the actual autotuning"""
         start_time = time.time_ns()
-        # timings = self.benchmark_all_configs(*args, **kwargs)
+        timings = self.benchmark_all_configs(*args, **kwargs)
         time_taken_ns = time.time_ns() - start_time
-        self.launchers = [self.launchers[0]]
+        self.launchers = [builtins.min(timings, key=timings.get)]
         if self.save_cache_hook:
             self.save_cache_hook(self.launchers[0].config, time_taken_ns)
 
@@ -1022,7 +1022,6 @@ def load_cached_autotuning(
 
 
 def should_use_remote_autotune_cache(inductor_meta):
-    return False
     if inductor_meta.get("autotune_remote_cache"):
         return True
     if not inductor_meta.get("is_fbcode"):
