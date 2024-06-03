@@ -1623,7 +1623,7 @@ class Scheduler:
         for name, val in V.graph.graph_inputs.items():
             if isinstance(val, sympy.Expr):
                 for fs in val.free_symbols:
-                    unbacked_symbol_to_origin_node[val] = None
+                    unbacked_symbol_to_origin_node[fs] = None
 
         for node in self.nodes:
             log.debug("scheduling %s", node.node)
