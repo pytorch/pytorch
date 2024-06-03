@@ -993,32 +993,31 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         if self._check_for_getattribute():
             unimplemented("hasattr with custom __getattribute__")
 
-        getattr_fn = self._check_for_getattr()
-        if isinstance(getattr_fn, types.FunctionType):
-            # Dynamo is going to trace the __getattr__ function with
-            # args=name. Set the source accordingly.
-            new_source = None
-            if self.source:
-                new_source = AttrSource(self.source, "__getattr__")
-            try:
-                result = variables.UserMethodVariable(
-                    getattr_fn, self, source=new_source
-                ).call_function(tx, [variables.ConstantVariable.create(name)], {})
-
-                return variables.ConstantVariable.create(
-                    not isinstance(result, variables.DeletedVariable)
-                )
-            except ObservedException:
-                return variables.ConstantVariable.create(False)
-
-        elif getattr_fn is not None:
-            unimplemented("UserDefined with non-function __getattr__")
-
         try:
             self._getattr_static(name)
             return variables.ConstantVariable.create(True)
         except AttributeError:
-            return variables.ConstantVariable.create(False)
+            # Now check in __getattr__ function
+            getattr_fn = self._check_for_getattr()
+            if isinstance(getattr_fn, types.FunctionType):
+                # Dynamo is going to trace the __getattr__ function with
+                # args=name. Set the source accordingly.
+                new_source = None
+                if self.source:
+                    new_source = AttrSource(self.source, "__getattr__")
+                try:
+                    result = variables.UserMethodVariable(
+                        getattr_fn, self, source=new_source
+                    ).call_function(tx, [variables.ConstantVariable.create(name)], {})
+
+                    return variables.ConstantVariable.create(
+                        not isinstance(result, variables.DeletedVariable)
+                    )
+                except ObservedException:
+                    return variables.ConstantVariable.create(False)
+
+            elif getattr_fn is not None:
+                unimplemented("UserDefined with non-function __getattr__")
 
     def odict_getitem(self, tx, key):
         from .builder import VariableBuilder
