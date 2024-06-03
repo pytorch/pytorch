@@ -10,10 +10,10 @@ import unittest
 from typing import Tuple
 
 import onnxruntime
+from parameterized import parameterized
 
 import torch
 import torch._dynamo.backends.registry
-from parameterized import parameterized
 from torch import nn
 from torch.onnx import (
     _OrtBackend as OrtBackend,
@@ -24,7 +24,6 @@ from torch.onnx import (
 from torch.testing._internal import common_utils
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
 import onnx_test_common
 
 
@@ -472,7 +471,7 @@ class TestDynamoWithONNXRuntime(onnx_test_common._TestONNXRuntime):
 
         if test_local_backend:
             assert local_ort is not None
-            number_of_captured_graphs = 2 if test_backward else 1
+            number_of_captured_graphs = 3 if test_backward else 2
             execution_count = len(example_args_collection) * number_of_captured_graphs
             self._assert_counting_information(
                 local_ort,
@@ -565,7 +564,7 @@ class TestDynamoWithONNXRuntime(onnx_test_common._TestONNXRuntime):
 
         if test_local_backend:
             assert local_ort is not None
-            number_of_captured_graphs = 2 if test_backward else 1
+            number_of_captured_graphs = 3 if test_backward else 2
             execution_count = len(example_args_collection) * number_of_captured_graphs
             self._assert_counting_information(
                 local_ort,
@@ -650,7 +649,7 @@ class TestDynamoWithONNXRuntime(onnx_test_common._TestONNXRuntime):
 
         if test_local_backend:
             assert local_ort is not None
-            number_of_captured_graphs = 2 if test_backward else 1
+            number_of_captured_graphs = 3 if test_backward else 2
             execution_count = len(example_args_collection) * number_of_captured_graphs
             self._assert_counting_information(
                 local_ort,
@@ -782,8 +781,9 @@ class TestDynamoWithONNXRuntime(onnx_test_common._TestONNXRuntime):
         result = compiled_model()
 
         self.assertEqual(len(recorded_models), 1)
+        # NOTE: Constant folded by optimizer
         self.assertTrue(
-            "aten_add" in [node.op_type for node in recorded_models[0].graph.node]
+            "Constant" in [node.op_type for node in recorded_models[0].graph.node]
         )
 
         self.assertEqual(result, torch.ones(4, 8))
@@ -822,11 +822,11 @@ class TestDynamoWithONNXRuntime(onnx_test_common._TestONNXRuntime):
 
         # Part 2: Change the ONNX model seen by the transform so that
         # ORT receives a different model.
+        # NOTE: the function is optimized away by optimizer
         def replace_relu_with_sigmoid(onnx_model):
-            for function in onnx_model.functions:
-                for node in function.node:
-                    if node.op_type == "Relu":
-                        node.op_type = "Sigmoid"
+            for node in onnx_model.graph.node:
+                if node.op_type == "Relu":
+                    node.op_type = "Sigmoid"
 
         def another_example_model(x: torch.Tensor):
             y = torch.relu(x)
