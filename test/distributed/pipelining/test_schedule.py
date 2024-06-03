@@ -495,13 +495,29 @@ class TestSchedulePlan(unittest.TestCase):
         # Define a list of test cases with varying num_local_stages, num_microbatches, and group_size
         # These should succeed since num_microbatches % group_size == 0
         test_cases = [
+            # small number of stages
+            (2, 2, 2),
             (2, 4, 4),
             (2, 8, 4),
             (2, 8, 8),
             (4, 4, 4),
             (4, 8, 4),
             (4, 8, 8),
+            # large microbatches
+            (4, 16, 4),
+            (4, 32, 4),
+            (4, 64, 4),
+            # large groups
             (4, 16, 16),
+            (4, 32, 32),
+            (4, 128, 64),
+            # odd num pipeline stages
+            (3, 2, 2),
+            (3, 8, 2),
+            (3, 12, 4),
+            # odd group_sizes
+            (4, 6, 3),
+            (4, 10, 5),
         ]
         for num_local_stages, num_microbatches, group_size in test_cases:
             with self.subTest(
@@ -517,7 +533,7 @@ class TestSchedulePlan(unittest.TestCase):
                 ]
 
                 schedule = ScheduleInterleaved1F1B(stages, num_microbatches)
-                logger.debug(format_pipeline_order(schedule.pipeline_order))
+                # print(format_pipeline_order(schedule.pipeline_order))
                 self._validate_pipeline_order(
                     schedule.pipeline_order, num_microbatches, num_stages
                 )
@@ -557,6 +573,3 @@ if __name__ == "__main__":
             nprocs=world_size,
             args=(world_size, rdvz_file),
         )
-
-    # test the non multiprocessing tests
-    # unittest.main()
