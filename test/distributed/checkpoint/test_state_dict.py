@@ -655,7 +655,7 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
 
     @with_comms
     @skip_if_lt_x_gpu(2)
-    def test_optim_state_dict_para_matching(self) -> None:
+    def test_optim_state_dict_param_matching(self) -> None:
         # This test verifies parameters between optim and optim_state_dict
         # "initial_lr" is added to optim_state_dict, but not to the new optim
         # We test whether "initial_lr" appear in optim after
