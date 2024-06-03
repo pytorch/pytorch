@@ -88,7 +88,7 @@ class TunableOp {
     }
 
   private:
-    static void WarmUp(Callable<ParamsT> *op, std::vector<ParamsT*> param, size_t num_iter, size_t &offset) {
+    static void WarmUp(Callable<ParamsT> *op, const std::vector<ParamsT*> &param, size_t num_iter, size_t &offset) {
       TuningContext* ctx = getTuningContext();
       bool do_flush = ctx->IsICacheFlushEnabled();
       for (size_t i = 0; i < num_iter; i++) {
@@ -99,7 +99,7 @@ class TunableOp {
       }
     }
 
-    static double Profile(Callable<ParamsT> *op, std::vector<ParamsT*> param, size_t num_iter, size_t &offset) {
+    static double Profile(Callable<ParamsT> *op, const std::vector<ParamsT*> &param, size_t num_iter, size_t &offset) {
       TuningContext* ctx = getTuningContext();
       bool do_flush = ctx->IsICacheFlushEnabled();
       TimerT timer{};
