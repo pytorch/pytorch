@@ -1960,6 +1960,10 @@ class AotCodeCompiler:
                 # as read-only (i.e. .lrodata) which could accomodate larger size of data
                 # to be linked.
                 rename_data = " .data=.lrodata,alloc,load,readonly,data,contents"
+
+            assert (
+                ALIGN_BYTES & (ALIGN_BYTES - 1)
+            ) == 0 and ALIGN_BYTES >= 64, "must be power of 2 and >= 64"
             cmd = (
                 f"{objcopy_command} --rename-section"
                 f"{rename_data}"
