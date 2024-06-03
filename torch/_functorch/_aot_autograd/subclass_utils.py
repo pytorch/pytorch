@@ -41,16 +41,31 @@ def create_subclass_meta(
 ) -> List[Union[int, SubclassCreationMeta]]:
     idx = 0
     infos: List[Union[int, SubclassCreationMeta]] = []
+    # Each tensor subclass adds K extra arguments in "unwrap_tensor_subclasses".
+    all_sizes_count = sum(
+        [
+            len(a.size())
+            for a in curr_args
+            if isinstance(a, Tensor) and is_traceable_wrapper_subclass(a)
+        ]
+    )
+    curr_sizes_pos = len(curr_args) - all_sizes_count
+
     for a in curr_args:
         if isinstance(a, Tensor) and is_traceable_wrapper_subclass(a):
             attrs, meta = a.__tensor_flatten__()  # type: ignore[attr-defined]
             start_idx = idx
             cnt = len(attrs)
             curr_cnt = cnt
+            # "curr_args" contains not just the wrapper subclass but its sizes (K extra values)
+            # Store a pointer to the first element
+            curr_sizes_pos = all_sizes_count
+            all_sizes_count -= len(a.shape)
             infos.append(
                 SubclassCreationMeta(
                     flat_tensor_start_idx=start_idx,
                     arg_count=curr_cnt,
+                    flat_tensor_sizes_idx=curr_sizes_pos,
                     original_subclass=a,
                     meta=meta,
                     inner_keys=attrs,
@@ -118,7 +133,7 @@ def unwrap_tensor_subclasses(
                 if (
                     isinstance(x, Tensor)
                     and is_traceable_wrapper_subclass(x)
-                    and has_symint
+                    # and has_symint
                 ):
                     # x.size() can have both ints ans SymInts: `Size([3, sz1, 5])`
                     xs_inner += [sz for sz in x.size() if isinstance(sz, SymInt)]

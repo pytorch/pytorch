@@ -1750,7 +1750,10 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                         for i, t in enumerate(all_args)
                     ]
                     all_args = unwrap_tensor_subclasses(
-                        all_args, subclass_metas=None, is_joint_structure=False, is_runtime=False
+                        all_args,
+                        subclass_metas=None,
+                        is_joint_structure=False,
+                        is_runtime=False,
                     )
                     tangents_start_idx = len(all_args) - len_tangents - len(rng_args)
                     tangents_end_idx = tangents_start_idx + len_tangents
