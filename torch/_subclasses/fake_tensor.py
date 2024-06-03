@@ -307,6 +307,25 @@ class FakeTensorConverter:
         maybe_memo = self._get_memo(t)
         if maybe_memo is not None:
             return maybe_memo
+
+        if isinstance(t, torch._subclasses.functional_tensor.FunctionalTensor):
+            t_func = t.elem
+            assert torch._is_functional_tensor(t_func)
+            out = self.from_real_tensor(
+                fake_mode,
+                torch._from_functional_tensor(t_func),
+                make_constant=make_constant,
+                shape_env=shape_env,
+                source=source,
+                symbolic_context=symbolic_context,
+                trace=trace,
+            )
+            out = torch._subclasses.functional_tensor.FunctionalTensor(
+                torch._to_functional_tensor(out)
+            )
+            torch._copy_functional_tensor_frozen(t.elem, out.elem)
+            return out
+
         existing_device = t.device
         # not yet supported in metatensors
         if t.is_quantized:
@@ -411,13 +430,6 @@ class FakeTensorConverter:
                     hint=value,
                     source=item_source,
                 )
-
-        if isinstance(t, torch._subclasses.functional_tensor.FunctionalTensor):
-            # breakpoint()
-            out = torch._subclasses.functional_tensor.FunctionalTensor(
-                torch._to_functional_tensor(out)
-            )
-            torch._copy_functional_tensor_frozen(t.elem, out.elem)
 
         if make_constant:
             self.add_constant_storage_mapping(out)
