@@ -1278,7 +1278,7 @@ inline bool jagged_dense_dense_elementwise_jagged_output_matches_opt(
             -> scalar_t { return f(x, y); });                                  \
   }
 
-inline int calc_user_shared_bytes(const int device) {
+inline int calc_used_shared_bytes(const int device) {
     int max_shared_bytes;
 #ifndef USE_ROCM
     C10_CUDA_CHECK(cudaDeviceGetAttribute(
@@ -1299,12 +1299,17 @@ inline int calc_user_shared_bytes(const int device) {
     int used_shared_kb = shared_kb;
 #endif
     int used_shared_bytes = used_shared_kb << 10;
-    return user_shared_bytes;
+    return used_shared_bytes;
 }
 
-inline void set_cuda_attr(const void* func, cudaFuncAttribute attr, int value) {
+template <typename index_t>
+inline void set_max_dynamic_shared_mem_size_for_opt_search_kernel(const int used_shared_bytes) {
 #ifndef USE_ROCM
-    C10_CUDA_CHECK(cudaFuncSetAttribute(func, attr, value));
+    C10_CUDA_CHECK(cudaFuncSetAttribute(
+        jagged_dense_dense_elementwise_jagged_output_opt_search_kernel_<
+            index_t>,
+        cudaFuncAttributeMaxDynamicSharedMemorySize,
+        used_shared_bytes)); // V100: 64 KB; A100: 96 KB; H100: 144 KB
 #endif
 }
 
@@ -1361,12 +1366,8 @@ void jagged_dense_elementwise_jagged_output_opt_(
           auto cur_max_shared_bytes =
               at::cuda::getCurrentDeviceProperties()->sharedMemPerBlock;
           if (dynamic_smem_size > cur_max_shared_bytes) {
-            int user_shared_bytes = calc_user_shared_bytes(y_reshaped.device());
-            set_cuda_attr(
-                jagged_dense_dense_elementwise_jagged_output_opt_search_kernel_<
-                    index_t>,
-                cudaFuncAttributeMaxDynamicSharedMemorySize,
-                used_shared_bytes); // V100: 64 KB; A100: 96 KB; H100: 144 KB
+            int used_shared_bytes = calc_used_shared_bytes(y_reshaped.get_device());
+            set_max_dynamic_shared_mem_size_for_opt_search_kernel<index_t>(used_shared_bytes);
             C10_CUDA_KERNEL_LAUNCH_CHECK();
             TORCH_CHECK(dynamic_smem_size <= used_shared_bytes);
           }
