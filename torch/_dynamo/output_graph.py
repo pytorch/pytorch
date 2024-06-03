@@ -511,8 +511,8 @@ class OutputGraph:
         cg.call_function(0, True)
         cg.store(varname)
         insts = cg.get_instructions()
-        for inst in insts:
-            torch_log.warning(f"inst: {inst}")
+        # for inst in insts:
+        #     torch_log.warning(f"inst: {inst}")
         self.pregraph_bytecode.extend(insts)
         source = SyntheticLocalSource(varname)
         result = VariableBuilder(self.root_tx, source)(example_value)

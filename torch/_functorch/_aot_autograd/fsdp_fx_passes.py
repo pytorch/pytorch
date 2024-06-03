@@ -125,8 +125,8 @@ def remove_unnecessary_views(mod):
         if n.target is torch.ops.aten.view.default:
             view_node = n
             view_input = view_node.args[0]
-            torch_log.warning(f'list(view_input.meta.get("tensor_meta").shape): {list(view_input.meta.get("tensor_meta").shape)}')
-            torch_log.warning(f'view_node.args[1]: {view_node.args[1]}')
+            # torch_log.warning(f'list(view_input.meta.get("tensor_meta").shape): {list(view_input.meta.get("tensor_meta").shape)}')
+            # torch_log.warning(f'view_node.args[1]: {view_node.args[1]}')
             if list(view_input.meta.get("tensor_meta").shape) == view_node.args[1]:
                 view_node.replace_all_uses_with(view_input)
                 mod.graph.erase_node(view_node)

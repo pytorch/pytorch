@@ -340,7 +340,7 @@ def init(activation_checkpoint):
         if activation_checkpoint:
             model = checkpoint_wrapper(model, ac_config)
         if apply_fsdp:
-            fully_shard(model, reshard_after_forward=True, _reshard_after_forward_root=True, **fsdp_config)
+            fully_shard(model, reshard_after_forward=True, **fsdp_config)
     elif test_case == "simple_seq_module":  # this causes `len(splits) == 1` which is an interesting case for `replace_foreach_all_gather_copy_out_pattern` FX pass.
         class SimpleModule(nn.Module):
             def __init__(self, device: torch.device):
@@ -355,8 +355,8 @@ def init(activation_checkpoint):
             model = checkpoint_wrapper(model, ac_config)
         if apply_fsdp:
             for mod in model:
-                fully_shard(mod, mesh=mesh, reshard_after_forward=True, _reshard_after_forward_root=True, **fsdp_config)
-            fully_shard(model, mesh=mesh, reshard_after_forward=True, _reshard_after_forward_root=True, **fsdp_config)
+                fully_shard(mod, mesh=mesh, reshard_after_forward=True, **fsdp_config)
+            fully_shard(model, mesh=mesh, reshard_after_forward=True, **fsdp_config)
     elif test_case == "nested_fully_shard":
         class TestSubmodule(nn.Module):
             def __init__(self, hidden_dim):
@@ -385,13 +385,13 @@ def init(activation_checkpoint):
         for layer_id, mod in enumerate(model.layers):
             if activation_checkpoint:
                 mod = checkpoint_wrapper(mod, ac_config)
-            fully_shard(mod, mesh=mesh, reshard_after_forward=True, _reshard_after_forward_root=True, **fsdp_config)
+            fully_shard(mod, mesh=mesh, reshard_after_forward=True, **fsdp_config)
             model.layers[layer_id] = mod
-        model = fully_shard(model, mesh=mesh, reshard_after_forward=True, _reshard_after_forward_root=True, **fsdp_config)
+        model = fully_shard(model, mesh=mesh, reshard_after_forward=True, **fsdp_config)
         # if apply_fsdp:
         #     for mod in model:
-        #         fully_shard(mod, mesh=mesh, reshard_after_forward=True, _reshard_after_forward_root=True, **fsdp_config)
-        #     fully_shard(model, mesh=mesh, reshard_after_forward=True, _reshard_after_forward_root=True, **fsdp_config)
+        #         fully_shard(mod, mesh=mesh, reshard_after_forward=True, **fsdp_config)
+        #     fully_shard(model, mesh=mesh, reshard_after_forward=True, **fsdp_config)
     elif test_case == "toy_transformer":
         model_args = ModelArgs(
             dim=hidden_dim,
@@ -408,10 +408,10 @@ def init(activation_checkpoint):
             if activation_checkpoint:
                 mod = checkpoint_wrapper(mod, ac_config)
             if apply_fsdp:
-                fully_shard(mod, mesh=mesh, reshard_after_forward=True, _reshard_after_forward_root=True, **fsdp_config)
+                fully_shard(mod, mesh=mesh, reshard_after_forward=True, **fsdp_config)
             model.layers[layer_id] = mod
         if apply_fsdp:
-            model = fully_shard(model, mesh=mesh, reshard_after_forward=True, _reshard_after_forward_root=True, **fsdp_config)
+            model = fully_shard(model, mesh=mesh, reshard_after_forward=True, **fsdp_config)
         else:
             model = model.cuda()
     # elif test_case == "test_tags_function":
@@ -432,7 +432,7 @@ def init(activation_checkpoint):
     #         ac_config.mode = "full"
     #         model = checkpoint_wrapper(model, ac_config)
     #     if apply_fsdp:
-    #         fully_shard(model, mesh=mesh, reshard_after_forward=True, _reshard_after_forward_root=True, **fsdp_config)
+    #         fully_shard(model, mesh=mesh, reshard_after_forward=True, **fsdp_config)
 
     #     # graph_count = 0
     #     # def count_ops_pass(graph):
@@ -478,15 +478,18 @@ local_rank = int(os.environ["LOCAL_RANK"])
 world_size = int(os.environ["WORLD_SIZE"])
 
 
-def compiler_fn(backend, fullgraph):
-    def _fn(gm):
-        # if dist.get_rank() == 0:
-        #     # HACK: delay rank 0 by X seconds, so that rank 1 will always fail first.
-        #     import time
-        #     time.sleep(600)
-        torch_log.warning("Compiling autograd?")
-        return torch.compile(gm, backend=backend, fullgraph=fullgraph)
-    return _fn
+# def compiler_fn(iter, backend, fullgraph):
+#     def _fn(gm):
+#         # if dist.get_rank() == 0:
+#         #     # HACK: delay rank 0 by X seconds, so that rank 1 will always fail first.
+#         #     import time
+#         #     time.sleep(600)
+#         torch_log.warning("Compiling autograd?")
+#         if iter == 0:
+#             return torch.compile(gm, backend="eager", fullgraph=False)
+#         else:
+#             return torch.compile(gm, backend=backend, fullgraph=fullgraph)
+#     return _fn
 
 
 def run(model, optim, n_iter, hidden_dim, use_compiled_autograd=False):
@@ -503,7 +506,7 @@ def run(model, optim, n_iter, hidden_dim, use_compiled_autograd=False):
         optim.zero_grad(set_to_none=True)
         inp = create_input(hidden_dim)
         if use_compiled_autograd:
-            compiled_autograd_ctx = compiled_autograd.enable(compiler_fn("aot_eager", True))
+            compiled_autograd_ctx = compiled_autograd.enable(torch._dynamo.compiled_autograd.compiler_fn(backend="aot_eager", fullgraph=True))
         else:
             compiled_autograd_ctx = contextlib.nullcontext()
         with compiled_autograd_ctx:
