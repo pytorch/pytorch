@@ -300,8 +300,11 @@ class GemmAndBiasTunableOp : public TunableOp<GemmAndBiasParams<T>, StreamTimer>
     auto validators = getTuningContext()->GetTuningResultsValidator().GetAllValidators();
 
 #if defined(USE_ROCM)
-    static const char *env = std::getenv("PYTORCH_TUNABLEOP_HIPBLASLT_ENABLED");
-    if (env == nullptr || strcmp(env, "1") == 0) {
+    bool rocm_validators = false;
+
+    static const char *env_hipblaslt = std::getenv("PYTORCH_TUNABLEOP_HIPBLASLT_ENABLED");
+    if (env_hipblaslt == nullptr || strcmp(env_hipblaslt, "1") == 0) {
+      rocm_validators = true;
       // disallow tuning of hipblaslt with c10::complex
       if constexpr (
           !std::is_same_v<T, c10::complex<float>> &&
@@ -310,18 +313,11 @@ class GemmAndBiasTunableOp : public TunableOp<GemmAndBiasParams<T>, StreamTimer>
           this->RegisterOp(std::move(name), std::move(op));
         }
       }
+      AddHipblasltValidator();
+    }
 
-      if (validators.find("HIPBLASLT_VERSION") == validators.end()) {
-        std::string hipblaslt_version = c10::str(
-            XSTRINGIFY(HIPBLASLT_VERSION_MAJOR), ".",
-            XSTRINGIFY(HIPBLASLT_VERSION_MINOR), ".",
-            XSTRINGIFY(HIPBLASLT_VERSION_PATCH), "-",
-            XSTRINGIFY(HIPBLASLT_VERSION_TWEAK));
-        getTuningContext()->GetTuningResultsValidator().RegisterValidator(
-            "HIPBLASLT_VERSION",
-            [hipblaslt_version]() { return hipblaslt_version; },
-            [hipblaslt_version](auto&& k) { return hipblaslt_version == k ? OK : FAIL; });
-      }
+    if (rocm_validators) {
+      AddRocmValidator();
     }
 #endif
   }
