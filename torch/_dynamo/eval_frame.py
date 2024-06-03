@@ -533,7 +533,6 @@ class OptimizeContext(_TorchDynamoContext):
 
             self.enter_exit_hooks.append(call_compiled_autograd)
 
-
     def __reduce__(self):
         return (
             self.__class__,

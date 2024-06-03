@@ -129,6 +129,7 @@ class WrapBackendDebug:
 
         return compiled_gm
 
+
 def wrap_backend_debug(unconfigured_compiler_fn, compiler_name: str):
     """
     A minifier decorator that wraps the TorchDynamo produced Fx graph modules.

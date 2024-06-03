@@ -377,10 +377,18 @@ class ConvertFrameAssert:
 
     @property
     def _clone_with_backend(self):
-        return lambda backend : convert_frame_assert(backend, self._one_graph, self._export, self._export_constraints)
+        return lambda backend: convert_frame_assert(
+            backend, self._one_graph, self._export, self._export_constraints
+        )
 
     def __call__(
-        self, frame: types.FrameType, cache_entry, hooks: Hooks, frame_state, *, skip: int = 0
+        self,
+        frame: types.FrameType,
+        cache_entry,
+        hooks: Hooks,
+        frame_state,
+        *,
+        skip: int = 0,
     ):
         increment_frame()
 
@@ -479,6 +487,7 @@ class ConvertFrameAssert:
             compile_id=compile_id,
             skip=skip + 1,
         )
+
 
 def convert_frame_assert(
     compiler_fn: CompilerFn,
@@ -925,10 +934,15 @@ class ConvertFrame:
 
     @property
     def _clone_with_backend(self):
-        return lambda backend : convert_frame(backend, self._hooks)
+        return lambda backend: convert_frame(backend, self._hooks)
 
     def __call__(
-        self, frame: types.FrameType, cache_entry, hooks: Hooks, frame_state, skip: int = 0
+        self,
+        frame: types.FrameType,
+        cache_entry,
+        hooks: Hooks,
+        frame_state,
+        skip: int = 0,
     ):
         counters["frames"]["total"] += 1
         try:
@@ -995,6 +1009,7 @@ class ConvertFrame:
             else:
                 log.warning(error_msg, exc_info=True)
         return None
+
 
 def convert_frame(compiler_fn: CompilerFn, hooks: Hooks):
     """Try to convert a frame into an FX graph, if error leave frame unmodified"""
@@ -1088,14 +1103,21 @@ class CatchErrorsWrapper:
                     assert hasattr(
                         self._torchdynamo_orig_callable, "_clone_with_backend"
                     ), "DDPOptimizer only supports callback fns that know how to clone themselves."
-                    hijacked_callback = self._torchdynamo_orig_callable._clone_with_backend(
-                        ddp_optimizer.compile_fn,
+                    hijacked_callback = (
+                        self._torchdynamo_orig_callable._clone_with_backend(
+                            ddp_optimizer.compile_fn,
+                        )
                     )
-                    return hijacked_callback(frame, cache_entry, self.hooks, frame_state)
+                    return hijacked_callback(
+                        frame, cache_entry, self.hooks, frame_state
+                    )
 
         with compile_lock, _disable_current_modes():
             # skip=1: skip this frame
-            return self._torchdynamo_orig_callable(frame, cache_entry, self.hooks, frame_state, skip=1)
+            return self._torchdynamo_orig_callable(
+                frame, cache_entry, self.hooks, frame_state, skip=1
+            )
+
 
 def catch_errors_wrapper(callback, hooks: Hooks):
     return CatchErrorsWrapper(callback, hooks)
