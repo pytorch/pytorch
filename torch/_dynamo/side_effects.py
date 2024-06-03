@@ -13,7 +13,7 @@ from .bytecode_transformation import (
 )
 from .codegen import PyCodegen
 from .exc import unimplemented
-from .source import LocalSource, Source
+from .source import GlobalSource, LocalSource, Source
 from .utils import nn_module_new, object_new
 from .variables.base import (
     is_side_effect_safe,
@@ -485,6 +485,7 @@ class SideEffects:
                     if isinstance(var, variables.NewGlobalVariable):
                         cg.tx.output.update_co_names(name)
                         cg(value)
+                        assert isinstance(var.mutable_local.source, GlobalSource)  # type: ignore[attr-defined]
                         suffixes.append(
                             [create_instruction("STORE_GLOBAL", argval=name)]
                         )

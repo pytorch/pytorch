@@ -39,45 +39,7 @@ static const std::string& getMetalType(const Tensor& t) {
   return getMetalType(t.scalar_type());
 }
 
-static id<MTLLibrary> compileUnaryOpsLibrary(id<MTLDevice> device, const std::string& t1, const std::string& t2) {
-  auto key = t1 + t2;
-  static std::unordered_map<std::string, id<MTLLibrary>> libMap;
-  auto it = libMap.find(key);
-  if (it != libMap.end()) {
-    return it->second;
-  }
-  NSError* error = nil;
-  MTLCompileOptions* options = [[MTLCompileOptions new] autorelease];
-  [options setLanguageVersion:MTLLanguageVersion2_3];
-  auto rc =
-      [device newLibraryWithSource:[NSString stringWithUTF8String:fmt::format(UNARY_KERNEL_TEMPLATE, t1, t2).c_str()]
-                           options:options
-                             error:&error];
-  TORCH_CHECK(rc != nil && error == nil, "Failed to compile library: ", [[error localizedDescription] UTF8String]);
-  libMap[key] = rc;
-  return rc;
-}
-
-static id<MTLComputePipelineState> getCPLState(id<MTLDevice> device,
-                                               const std::string& t1,
-                                               const std::string& t2,
-                                               const std::string& fname) {
-  auto key = t1 + t2 + fname;
-  static std::unordered_map<std::string, id<MTLComputePipelineState>> cplMap;
-  auto it = cplMap.find(key);
-  if (it != cplMap.end()) {
-    return it->second;
-  }
-  NSError* error = nil;
-  auto library = compileUnaryOpsLibrary(device, t1, t2);
-  id<MTLFunction> func = [library newFunctionWithName:[NSString stringWithUTF8String:fname.c_str()]];
-  TORCH_CHECK(func != nil, "Can't get function ", fname);
-  auto rc = [device newComputePipelineStateWithFunction:func error:&error];
-  TORCH_CHECK(
-      rc != nil && error == nil, "Failed to construct pipeline state: ", [[error localizedDescription] UTF8String]);
-  cplMap[key] = rc;
-  return rc;
-}
+static mps::MetalShaderLibrary lib(UNARY_KERNEL_TEMPLATE, 2);
 
 TORCH_IMPL_FUNC(erfinv_out_mps)(const Tensor& self, const Tensor& output_) {
   // handle erfinv ops using metal kernel
@@ -95,9 +57,7 @@ TORCH_IMPL_FUNC(erfinv_out_mps)(const Tensor& self, const Tensor& output_) {
   }
   using namespace mps;
   @autoreleasepool {
-    id<MTLDevice> device = MPSDevice::getInstance()->device();
-    id<MTLComputePipelineState> cplState =
-        getCPLState(device, getMetalType(outputTensor), getMetalType(self), "erfinv_mps_kernel");
+    auto cplState = lib.getPipelineStateForFunc("erfinv_mps_kernel", {getMetalType(outputTensor), getMetalType(self)});
 
     if (!self.is_contiguous()) {
       inputTensor = inputTensor.contiguous();

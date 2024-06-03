@@ -54,8 +54,19 @@ mm_plus_mm_template = TritonTemplate(
 
     rm = pid_m * BLOCK_M + tl.arange(0, BLOCK_M)
     rn = pid_n * BLOCK_N + tl.arange(0, BLOCK_N)
-    ram = tl.max_contiguous(tl.multiple_of(rm % M, BLOCK_M), BLOCK_M)
-    rbn = tl.max_contiguous(tl.multiple_of(rn % N, BLOCK_N), BLOCK_N)
+
+    if (((stride_am == 1 and stride_ak == M) or (stride_am == K1 and stride_ak == 1))
+        and ((stride_cm == 1 and stride_ck == M) or (stride_cm == K1 and stride_ck == 1))):
+        ram = tl.max_contiguous(tl.multiple_of(rm % M, BLOCK_M), BLOCK_M)
+    else:
+        ram = rm % M
+
+    if (((stride_bk == 1 and stride_bn == K1) or (stride_bk == N and stride_bn == 1))
+        and ((stride_dk == 1 and stride_dn == K1) or (stride_dk == N and stride_dn == 1))):
+        rbn = tl.max_contiguous(tl.multiple_of(rn % N, BLOCK_N), BLOCK_N)
+    else:
+        rbn = rn % N
+
     rk = tl.arange(0, BLOCK_K)
     A = A + (ram[:, None] * stride_am + rk[None, :] * stride_ak)
     B = B + (rk[:, None] * stride_bk + rbn[None, :] * stride_bn)

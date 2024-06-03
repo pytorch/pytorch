@@ -360,7 +360,7 @@ bool RemoveListMutation(const std::shared_ptr<Graph>& graph) {
 
 bool RemoveTensorMutation(
     const std::shared_ptr<Graph>& graph,
-    c10::optional<std::function<bool(Node*)>> mutation_filter) {
+    std::optional<std::function<bool(Node*)>> mutation_filter) {
   MutationRemover mr(graph, std::move(mutation_filter));
   return mr.removeTensorMutation();
 }

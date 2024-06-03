@@ -1,11 +1,15 @@
 # Owner(s): ["module: inductor"]
+import base64
 import functools
+import json
+import os
 import pickle
 import unittest
 from typing import List
 from unittest import mock
 
 import torch
+from torch._dynamo import reset
 from torch._dynamo.utils import counters
 from torch._inductor import config, metrics
 from torch._inductor.codecache import (
@@ -14,10 +18,13 @@ from torch._inductor.codecache import (
     CUDACodeCache,
     FxGraphCachePickler,
     FxGraphHashDetails,
+    PyCodeCache,
     TensorMetadata,
     TensorMetadataAndValues,
 )
+from torch._inductor.runtime.runtime_utils import cache_dir
 from torch._inductor.test_case import run_tests, TestCase
+from torch._inductor.utils import clear_inductor_caches, fresh_inductor_cache
 from torch.testing._internal.common_cuda import SM80OrLater
 from torch.testing._internal.common_device_type import largeTensorTest
 from torch.testing._internal.common_utils import (
@@ -34,6 +41,11 @@ from torch.testing._internal.inductor_utils import (
 from torch.utils._triton import has_triton
 
 HAS_TRITON = has_triton()
+
+if HAS_TRITON:
+    import triton
+
+    from torch.testing._internal.triton_utils import add_kernel
 
 requires_gpu = functools.partial(unittest.skipIf, not HAS_GPU, "requires gpu")
 requires_triton = functools.partial(unittest.skipIf, not HAS_TRITON, "requires triton")
@@ -92,6 +104,10 @@ class TestFxGraphCache(TestCase):
         super().setUp()
         counters.clear()
 
+    def reset(self):
+        torch._dynamo.reset()
+        clear_inductor_caches()
+
     @requires_triton()
     @config.patch({"fx_graph_cache": True})
     @parametrize("device", (GPU_TYPE, "cpu"))
@@ -118,13 +134,86 @@ class TestFxGraphCache(TestCase):
         self.assertEqual(fn(a, b), compiled_fn(a, b))
         self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 1)
         self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 0)
+        self.assertEqual(counters["inductor"]["fxgraph_lookup_write_file"], 0)
 
         # A second call should hit. (First reset so in-memory guards
         # don't prevent compilation).
-        torch._dynamo.reset()
+        for m in torch._inductor.codecache.PyCodeCache.cache.values():
+            os.remove(m.__file__)
+        self.reset()
         self.assertEqual(fn(a, b), compiled_fn(a, b))
         self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 1)
         self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
+        self.assertEqual(counters["inductor"]["fxgraph_lookup_write_file"], 1)
+
+    @requires_triton()
+    @parametrize("device", (GPU_TYPE, "cpu"))
+    @parametrize("dtype", (torch.float32, torch.bfloat16))
+    @parametrize("dynamic", (False, True))
+    def test_remote_cache_load_function(self, device, dtype, dynamic):
+        from unittest.mock import patch
+
+        if device == GPU_TYPE and not HAS_GPU:
+            raise unittest.SkipTest(f"requires {GPU_TYPE}")
+        if device == "cuda" and dtype == torch.bfloat16 and not SM80OrLater:
+            raise unittest.SkipTest("requires SM80 or later")
+
+        def fn(x, y):
+            return (x * 2, y @ y)
+
+        a = torch.rand(25, dtype=dtype, device=device)
+        b = torch.rand(5, 5, dtype=dtype, device=device)
+
+        cache = {}
+        num_get = 0
+        num_put = 0
+
+        class MyCache:
+            def __init__(self, key, is_autotune=False):
+                pass
+
+            def get(self, filename):
+                nonlocal cache
+                nonlocal num_get
+                if filename not in cache:
+                    return None
+                ret = json.loads(cache[filename])
+                num_get += 1
+                if config.is_fbcode():
+                    return base64.b64decode(ret["data"]) if ret is not None else ret
+                else:
+                    return base64.b64decode(ret) if ret is not None else ret
+
+            def put(self, filename, data):
+                nonlocal cache
+                nonlocal num_put
+                if config.is_fbcode():
+                    data["data"] = base64.b64encode(data["data"]).decode("ascii")
+                else:
+                    data = base64.b64encode(data).decode("ascii")
+                cache[filename] = json.dumps(data)
+                num_put += 1
+
+        cache_module = (
+            "triton.runtime.fb_memcache.FbMemcacheRemoteFxGraphCacheBackend"
+            if config.is_fbcode()
+            else "torch._inductor.remote_cache.RedisRemoteCacheBackend"
+        )
+
+        with config.patch(
+            {
+                "fx_graph_cache": False,
+                "fx_graph_remote_cache": True,
+            }
+        ), patch.dict(os.environ), patch(cache_module, MyCache, create=True):
+            os.environ.pop("TRITON_CACHE_MANAGER", None)
+            for _ in range(4):
+                with fresh_inductor_cache():
+                    compiled_fn = torch.compile(fn, dynamic=dynamic)
+                    self.assertEqual(fn(a, b), compiled_fn(a, b))
+                reset()
+            self.assertEqual(num_get, 3)
+            self.assertEqual(num_put, 1)
 
     @requires_triton()
     @config.patch({"fx_graph_cache": True})
@@ -157,7 +246,7 @@ class TestFxGraphCache(TestCase):
         # The second should see all hits. (First reset so in-memory guards
         # don't prevent compilation).
         counters.clear()
-        torch._dynamo.reset()
+        self.reset()
         grads2 = compiled_fn(mod, inp)
         self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 0)
         self.assertGreater(counters["inductor"]["fxgraph_cache_hit"], 0)
@@ -207,7 +296,7 @@ class TestFxGraphCache(TestCase):
 
             # A second call should hit. (Reset here to force compilation).
             counters.clear()
-            torch._dynamo.reset()
+            self.reset()
             res2 = compiled_fn(a, b)
             self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 0)
             self.assertGreater(counters["inductor"]["fxgraph_cache_hit"], 0)
@@ -250,7 +339,7 @@ class TestFxGraphCache(TestCase):
 
             # A second call should hit.
             counters.clear()
-            torch._dynamo.reset()
+            self.reset()
             res2 = compiled_fn(x)
             self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 0)
             self.assertGreater(counters["inductor"]["fxgraph_cache_hit"], 0)
@@ -287,6 +376,33 @@ class TestFxGraphCache(TestCase):
         self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 2)
         self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 0)
 
+    @requires_gpu()
+    @requires_triton()
+    @config.patch({"fx_graph_cache": True})
+    def test_higher_order_op_bypass(self):
+        """
+        Verify that we bypass the cache when we have higher order ops.
+        """
+
+        def fn(x, y):
+            output = torch.zeros_like(x)
+            n_elements = output.numel()
+            grid = lambda meta: (  # noqa: E731
+                triton.cdiv(n_elements, meta["BLOCK_SIZE"]),
+            )
+            add_kernel[grid](x, y, output, n_elements, BLOCK_SIZE=4)
+            return output
+
+        compiled_fn = torch.compile(fn, fullgraph=True)
+
+        x = torch.randn(4, device=GPU_TYPE)
+        y = torch.randn(4, device=GPU_TYPE)
+        compiled_fn(x, y)
+
+        self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 0)
+        self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 0)
+        self.assertGreater(counters["inductor"]["fxgraph_cache_bypass"], 0)
+
     @config.patch({"fx_graph_cache": True})
     def test_generated_kernel_count(self):
         """
@@ -310,7 +426,7 @@ class TestFxGraphCache(TestCase):
         self.assertEqual(metrics.generated_kernel_count, 1)
 
         # Verify the "hit" case
-        torch._dynamo.reset()
+        self.reset()
         self.assertEqual(fn(a, b), compiled_fn(a, b))
         self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
         self.assertEqual(metrics.generated_kernel_count, 2)
@@ -336,14 +452,14 @@ class TestFxGraphCache(TestCase):
 
         # A second call should hit.
         counters.clear()
-        torch._dynamo.reset()
+        self.reset()
         self.assertEqual(fn(a, b), compiled_fn(a, b))
         self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 0)
         self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
 
         # Clear the cache; now we should miss.
         counters.clear()
-        torch._dynamo.reset()
+        self.reset()
         torch._inductor.codecache.FxGraphCache.clear()
         self.assertEqual(fn(a, b), compiled_fn(a, b))
         self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 1)
@@ -411,7 +527,7 @@ class TestFxGraphCacheHashing(TestCase):
                 FxGraphCachePickler.dumps(torch.randn(3)[1:]),
                 FxGraphCachePickler.dumps(torch.randn(3)[1:]),
             )
-            self.assertNotEqual(
+            self.assertEqual(
                 FxGraphCachePickler.dumps(torch.randn(3)[1:]),
                 FxGraphCachePickler.dumps(torch.randn(2)),
             )
@@ -470,16 +586,16 @@ class TestFxGraphCacheHashing(TestCase):
         ordering of the kwargs dict and any set arguments.
         """
         # Dict order of the kwargs should not affect hashes.
-        details1 = FxGraphHashDetails(None, [], {"a": 0, "z": 1})
-        details2 = FxGraphHashDetails(None, [], {"z": 1, "a": 0})
+        details1 = FxGraphHashDetails(None, [], {"a": 0, "z": 1}, [])
+        details2 = FxGraphHashDetails(None, [], {"z": 1, "a": 0}, [])
         self.assertEqual(
             FxGraphCachePickler.dumps(details1),
             FxGraphCachePickler.dumps(details2),
         )
 
         # Different kwarg values should affect hashes.
-        details1 = FxGraphHashDetails(None, [], {"a": 0})
-        details2 = FxGraphHashDetails(None, [], {"a": 1})
+        details1 = FxGraphHashDetails(None, [], {"a": 0}, [])
+        details2 = FxGraphHashDetails(None, [], {"a": 1}, [])
         self.assertNotEqual(
             FxGraphCachePickler.dumps(details1),
             FxGraphCachePickler.dumps(details2),
@@ -489,16 +605,16 @@ class TestFxGraphCacheHashing(TestCase):
         # sorting and creating a new set seems to change the order.
         set1 = {"a", "b", "c", "d", "e", "f", "g"}
         set2 = set(sorted(set1))  # noqa: C414
-        details1 = FxGraphHashDetails(None, [], {"a": set1})
-        details2 = FxGraphHashDetails(None, [], {"a": set2})
+        details1 = FxGraphHashDetails(None, [], {"a": set1}, [])
+        details2 = FxGraphHashDetails(None, [], {"a": set2}, [])
         self.assertEqual(
             FxGraphCachePickler.dumps(details1),
             FxGraphCachePickler.dumps(details2),
         )
 
         # But different set contents should affect hashes.
-        details1 = FxGraphHashDetails(None, [], {"a": {1, 2, 3}})
-        details2 = FxGraphHashDetails(None, [], {"a": {1, 2}})
+        details1 = FxGraphHashDetails(None, [], {"a": {1, 2, 3}}, [])
+        details2 = FxGraphHashDetails(None, [], {"a": {1, 2}}, [])
         self.assertNotEqual(
             FxGraphCachePickler.dumps(details1),
             FxGraphCachePickler.dumps(details2),
@@ -509,11 +625,11 @@ class TestFxGraphCacheHashing(TestCase):
         Test that different config settings affect hashes.
         """
         with config.patch({"max_autotune": False}):
-            details1 = FxGraphHashDetails(None, [], {})
-            details2 = FxGraphHashDetails(None, [], {})
+            details1 = FxGraphHashDetails(None, [], {}, [])
+            details2 = FxGraphHashDetails(None, [], {}, [])
 
         with config.patch({"max_autotune": True}):
-            details3 = FxGraphHashDetails(None, [], {})
+            details3 = FxGraphHashDetails(None, [], {}, [])
 
         self.assertEqual(
             FxGraphCachePickler.dumps(details1),
@@ -551,6 +667,29 @@ class TestFxGraphCacheHashing(TestCase):
             assert cmd_parts[0] == "nvcc", cmd_parts
             assert "-Wsomething" in cmd_parts, cmd_parts
             assert "-DNDEBUG" in cmd_parts, cmd_parts
+
+
+class TestUtils(TestCase):
+    def test_fresh_inductor_cache(self):
+        def fn(x, y):
+            return x + y
+
+        a = torch.rand(10)
+        b = torch.rand(10)
+
+        with fresh_inductor_cache():
+            self.assertEqual(len(PyCodeCache.cache.keys()), 0)
+            res1 = torch.compile(fn)(a, b)
+            cache_dir1 = cache_dir()
+
+        torch._dynamo.reset()
+        with fresh_inductor_cache():
+            self.assertEqual(len(PyCodeCache.cache.keys()), 0)
+            res2 = torch.compile(fn)(a, b)
+            cache_dir2 = cache_dir()
+
+        self.assertEqual(res1, res2)
+        self.assertNotEqual(cache_dir1, cache_dir2)
 
 
 if __name__ == "__main__":

@@ -8,8 +8,7 @@
 
 #include <torch/csrc/distributed/c10d/debug.h>
 
-namespace c10d {
-namespace detail {
+namespace c10d::detail {
 
 bool isLogLevelEnabled(LogLevel level) noexcept {
   // c10 logger does not support debug and trace levels. In order to map higher
@@ -35,5 +34,4 @@ bool isLogLevelEnabled(LogLevel level) noexcept {
   return false;
 }
 
-} // namespace detail
-} // namespace c10d
+} // namespace c10d::detail

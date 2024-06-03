@@ -1,6 +1,6 @@
 import collections.abc
 import copy
-from typing import Optional, List, Sequence
+from typing import Optional, List, Sequence, TYPE_CHECKING
 
 import torch
 from torch.distributed import distributed_c10d as c10d
@@ -10,9 +10,11 @@ from torch.distributed._shard.sharding_spec._internals import (
     validate_non_overlapping_shards_metadata,
 )
 
-from torch.distributed._shard.metadata import ShardMetadata
 from .metadata import TensorProperties, ShardedTensorMetadata
 from .shard import Shard
+
+if TYPE_CHECKING:
+    from torch.distributed._shard.metadata import ShardMetadata
 
 def _parse_and_validate_remote_device(pg, remote_device):
     if remote_device is None:
@@ -23,7 +25,7 @@ def _parse_and_validate_remote_device(pg, remote_device):
     device = remote_device.device()
 
     # Validate rank, skip validation if rank is not part of process group.
-    if not c10d._rank_not_in_group(pg):
+    if rank is not None and not c10d._rank_not_in_group(pg):
         pg_global_ranks = c10d.get_process_group_ranks(pg)
         if rank not in pg_global_ranks:
             raise ValueError(

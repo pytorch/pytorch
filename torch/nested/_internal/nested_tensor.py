@@ -45,7 +45,7 @@ class NestedTensor(torch.Tensor):
     # For example, a jagged tensor with shape [B, x, D] can be strided in two
     # ways: [xD, D, 1] and [x, 1, sum(x)], where xD represents x multiplied by D
     _size: Tuple[int, ...]
-    _stride: Tuple[int, ...]
+    _strides: Tuple[int, ...]
     # Indicates that the nth dimension is ragged
     _ragged_idx: int
     _metadata_cache: Dict[str, Any]
@@ -61,10 +61,32 @@ class NestedTensor(torch.Tensor):
     ):
         ks = DispatchKeySet(DispatchKey.NestedTensor)
         ks = ks.add(DispatchKey.AutogradNestedTensor)
+
+        # Only support jagged for now.
+        assert offsets is not None
+        assert offsets.ndim == 1
+        assert not isinstance(values, NestedTensor)
+        assert values.device == offsets.device
+
+        # Query cache for the symint associated with offsets or lengths
+        # (create a new one if needed).
+        ragged_source = offsets if lengths is None else lengths
+        ragged_size = get_tensor_symint(ragged_source, coeff=1)
+        _ragged_idx = kwargs.get("_ragged_idx", 1)
+        B = offsets.shape[0] - 1
+        if lengths is not None:
+            assert B == lengths.shape[0]
+
+        # subtract 1 to convert to values dim space
+        r = _ragged_idx - 1
+        _size = (B, *values.shape[:r], ragged_size, *values.shape[r + 1 :])
+        stride = values.stride()
+        _strides = (ragged_size * stride[r], *stride)
+
         r = torch.Tensor._make_wrapper_subclass(  # type: ignore[attr-defined]
             cls,
-            (0,),
-            (0,),
+            _size,
+            _strides,
             0,
             torch.contiguous_format,
             values.dtype,
@@ -76,31 +98,17 @@ class NestedTensor(torch.Tensor):
             False,
             True,  # dispatch_layout
             ks,
+            # don't try to calculate storage based on non-zero size
+            storage_size=values.untyped_storage().size(),
         )
+        r._ragged_idx = _ragged_idx
+        r._size = _size
+        r._strides = _strides
+
         return r
 
     def __init__(self, values, offsets, *, lengths=None, **kwargs):
         super().__init__()
-        # Only support jagged for now.
-        assert offsets is not None
-        assert offsets.ndim == 1
-        assert not isinstance(values, NestedTensor)
-        assert values.device == offsets.device
-
-        # Query cache for the symint associated with offsets or lengths
-        # (create a new one if needed).
-        ragged_source = offsets if lengths is None else lengths
-        ragged_size = get_tensor_symint(ragged_source, coeff=1)
-        self._ragged_idx = kwargs.get("_ragged_idx", 1)
-        B = offsets.shape[0] - 1
-        if lengths is not None:
-            assert B == lengths.shape[0]
-
-        # subtract 1 to convert to values dim space
-        r = self._ragged_idx - 1
-        self._size = (B, *values.shape[:r], ragged_size, *values.shape[r + 1 :])
-        stride = values.stride()
-        self._strides = (ragged_size * stride[r], *stride)
 
         self._values = values
         self._offsets = offsets
@@ -110,8 +118,8 @@ class NestedTensor(torch.Tensor):
         self._metadata_cache = kwargs.get("_metadata_cache") or {}
 
         # collapsed ragged dim must always be dynamic
-        torch._dynamo.mark_dynamic(self, self._ragged_idx)
-        torch._dynamo.mark_dynamic(self._values, self._ragged_idx - 1)
+        torch._dynamo.maybe_mark_dynamic(self, self._ragged_idx)
+        torch._dynamo.maybe_mark_dynamic(self._values, self._ragged_idx - 1)
 
     def values(self):
         # dispatch to get proper view relationship

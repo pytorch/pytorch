@@ -33,8 +33,10 @@ class TestTraverse(TestCase):
         self.assertIn(("key1",), data)
         self.assertEqual(data[("key1",)], [1, 2])
 
-        self.assertIn(("key2",), data)
-        self.assertEqual(data[("key2",)], {1: 2, 2: 3})
+        self.assertIn(("key2", "1"), data)
+        self.assertEqual(data[("key2", "1")], 2)
+        self.assertIn(("key2", "2"), data)
+        self.assertEqual(data[("key2", "2")], 3)
 
         self.assertIn(("key3",), data)
         self.assertEqual(data[("key3",)], torch.tensor([1]))

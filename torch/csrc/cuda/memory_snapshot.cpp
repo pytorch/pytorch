@@ -130,8 +130,8 @@ static void checkOptionIn(
 }
 
 void _record_memory_history(
-    c10::optional<std::string> enabled,
-    c10::optional<std::string> context,
+    std::optional<std::string> enabled,
+    std::optional<std::string> context,
     const std::string& stacks,
     size_t max_entries) {
   if (enabled) {

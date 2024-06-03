@@ -76,8 +76,8 @@ C10_EXPORT Dispatcher& Dispatcher::realSingleton() {
   return _singleton;
 }
 
-c10::optional<OperatorHandle> Dispatcher::findOp(const OperatorName& overload_name) {
-  return operatorLookupTable_.read([&] (const ska::flat_hash_map<OperatorName, OperatorHandle>& operatorLookupTable) -> c10::optional<OperatorHandle> {
+std::optional<OperatorHandle> Dispatcher::findOp(const OperatorName& overload_name) {
+  return operatorLookupTable_.read([&] (const ska::flat_hash_map<OperatorName, OperatorHandle>& operatorLookupTable) -> std::optional<OperatorHandle> {
     auto found = operatorLookupTable.find(overload_name);
     if (found == operatorLookupTable.end()) {
       return c10::nullopt;
@@ -103,7 +103,7 @@ void Dispatcher::waitForDef(const FunctionSchema& schema) {
     "the same dependencies.");
 }
 
-void Dispatcher::waitForImpl(const OperatorName& op_name, c10::optional<c10::DispatchKey> maybe_dk) {
+void Dispatcher::waitForImpl(const OperatorName& op_name, std::optional<c10::DispatchKey> maybe_dk) {
   using namespace std::chrono_literals;
   std::unique_lock<std::mutex> lock(guard_->mutex);
   auto dk = maybe_dk.value_or(DispatchKey::CompositeImplicitAutograd);
@@ -121,7 +121,7 @@ void Dispatcher::waitForImpl(const OperatorName& op_name, c10::optional<c10::Dis
     "the same dependencies.");
 }
 
-c10::optional<OperatorHandle> Dispatcher::findSchema(const OperatorName& overload_name) {
+std::optional<OperatorHandle> Dispatcher::findSchema(const OperatorName& overload_name) {
   auto it = findOp(overload_name);
   if (it.has_value()) {
     if (it->hasSchema()) {
@@ -266,24 +266,25 @@ void Dispatcher::deregisterDef_(
 
 namespace {
 
-using AbstractImplPyStubsType = std::unordered_map<at::OperatorName, std::pair<const char*, const char*>>;
-AbstractImplPyStubsType& abstractImplPyStubsSingleton() {
-  static AbstractImplPyStubsType _data;
+// Maps OperatorName to (python module name, description) tuple.
+using PythonModuleMapType = std::unordered_map<at::OperatorName, std::pair<const char*, const char*>>;
+PythonModuleMapType& pythonModulesSingleton() {
+  static PythonModuleMapType _data;
   return _data;
 }
 
 }
 
-c10::optional<std::pair<const char*, const char*>> Dispatcher::getAbstractImplPyStub(OperatorName op_name) {
+std::optional<std::pair<const char*, const char*>> Dispatcher::getPyStub(OperatorName op_name) {
   std::lock_guard<std::mutex> lock(guard_->mutex);
-  auto found = abstractImplPyStubsSingleton().find(op_name);
-  if (found == abstractImplPyStubsSingleton().end()) {
+  auto found = pythonModulesSingleton().find(op_name);
+  if (found == pythonModulesSingleton().end()) {
     return c10::nullopt;
   }
   return found->second;
 }
 
-RegistrationHandleRAII Dispatcher::registerAbstractImplPyStub(
+RegistrationHandleRAII Dispatcher::registerPythonModule(
   const OperatorName& op_name,
   const char* pymodule,
   const char* context
@@ -292,28 +293,28 @@ RegistrationHandleRAII Dispatcher::registerAbstractImplPyStub(
   // If there are duplicates, we just let it through and warn about it.
   // Throwing an error during static initialization causes a crash that
   // doesn't give any sign of what happened.
-  auto found = abstractImplPyStubsSingleton().find(op_name);
-  if (found != abstractImplPyStubsSingleton().end()) {
+  auto found = pythonModulesSingleton().find(op_name);
+  if (found != pythonModulesSingleton().end()) {
     TORCH_WARN(
-        "Tried to register an abstract impl pystub for ", op_name, " ",
+        "Tried to register an python registration stub (pystub) for ", op_name, " ",
         "that specifies the Python module ", pymodule, " "
         "but there already was a pystub that specifies the Python module ",
         found->second.first, ". We will override the existing pystub.");
   }
-  abstractImplPyStubsSingleton()[op_name] = std::make_pair(pymodule, context);
+  pythonModulesSingleton()[op_name] = std::make_pair(pymodule, context);
   return RegistrationHandleRAII([guard = this->guard_, op_name] {
     std::lock_guard<std::mutex> lock(guard->mutex);
     if (!guard->alive.load()) {
       return;
     }
-    abstractImplPyStubsSingleton().erase(op_name);
+    pythonModulesSingleton().erase(op_name);
   });
 }
 
-void Dispatcher::throwIfHasAbstractImplPyStub(OperatorName op_name) {
+void Dispatcher::throwIfHasPythonModule(OperatorName op_name) {
   std::lock_guard<std::mutex> lock(guard_->mutex);
-  auto elt = abstractImplPyStubsSingleton().find(op_name);
-  if (elt == abstractImplPyStubsSingleton().end()) {
+  auto elt = pythonModulesSingleton().find(op_name);
+  if (elt == pythonModulesSingleton().end()) {
     return;
   }
   const char* pymodule = elt->second.first;
@@ -331,9 +332,9 @@ void Dispatcher::throwIfHasAbstractImplPyStub(OperatorName op_name) {
 
 RegistrationHandleRAII Dispatcher::registerImpl(
   OperatorName op_name,
-  c10::optional<DispatchKey> dispatch_key,
+  std::optional<DispatchKey> dispatch_key,
   KernelFunction kernel,
-  c10::optional<impl::CppSignature> cpp_signature,
+  std::optional<impl::CppSignature> cpp_signature,
   std::unique_ptr<FunctionSchema> inferred_function_schema,
   std::string debug
 ) {
@@ -363,7 +364,7 @@ RegistrationHandleRAII Dispatcher::registerImpl(
   });
 }
 
-void Dispatcher::deregisterImpl_(const OperatorHandle& op, const OperatorName& op_name, c10::optional<DispatchKey> dispatch_key, impl::OperatorEntry::AnnotatedKernelContainerIterator handle) {
+void Dispatcher::deregisterImpl_(const OperatorHandle& op, const OperatorName& op_name, std::optional<DispatchKey> dispatch_key, impl::OperatorEntry::AnnotatedKernelContainerIterator handle) {
   op.operatorDef_->op.deregisterKernel_(*this, dispatch_key, handle);
 
   TORCH_INTERNAL_ASSERT(op.operator_name() == op_name);
@@ -485,7 +486,7 @@ std::vector<OperatorHandle> Dispatcher::findDanglingImpls() const {
   });
 }
 
-std::vector<OperatorName> Dispatcher::getRegistrationsForDispatchKey(c10::optional<DispatchKey> k) const {
+std::vector<OperatorName> Dispatcher::getRegistrationsForDispatchKey(std::optional<DispatchKey> k) const {
   return operatorLookupTable_.read([&] (const ska::flat_hash_map<OperatorName, OperatorHandle>& operatorLookupTable) -> std::vector<OperatorName> {
     std::vector<OperatorName> op_names;
     for (const auto& op : operatorLookupTable) {

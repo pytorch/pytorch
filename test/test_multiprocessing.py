@@ -14,6 +14,7 @@ import torch.cuda
 import torch.multiprocessing as mp
 import torch.utils.hooks
 from torch.nn import Parameter
+from torch.testing._internal.common_cuda import IS_JETSON
 from torch.testing._internal.common_utils import (
     IS_MACOS,
     IS_WINDOWS,
@@ -36,12 +37,15 @@ load_tests = load_tests
 TEST_REPEATS = 30
 HAS_SHM_FILES = os.path.isdir("/dev/shm")
 MAX_WAITING_TIME_IN_SECONDS = 30
+
 TEST_CUDA_IPC = (
     torch.cuda.is_available()
     and sys.platform != "darwin"
     and sys.platform != "win32"
+    and not IS_JETSON
     and not TEST_WITH_ROCM
 )  # https://github.com/pytorch/pytorch/issues/90940
+
 TEST_MULTIGPU = TEST_CUDA_IPC and torch.cuda.device_count() > 1
 
 if TEST_CUDA_IPC:

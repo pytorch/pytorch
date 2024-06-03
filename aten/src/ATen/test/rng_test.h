@@ -68,14 +68,14 @@ void test_random_from_to(const at::Device& device) {
   constexpr auto uint64_max_val = std::numeric_limits<uint64_t>::max();
 
   std::vector<int64_t> froms;
-  std::vector<c10::optional<int64_t>> tos;
+  std::vector<::std::optional<int64_t>> tos;
   if constexpr (::std::is_same_v<T, bool>) {
     froms = {
       0L
     };
     tos = {
       1L,
-      static_cast<c10::optional<int64_t>>(c10::nullopt)
+      static_cast<::std::optional<int64_t>>(c10::nullopt)
     };
   } else if constexpr (::std::is_signed_v<T>) {
     constexpr int64_t min_from = _min_from<T>();
@@ -86,11 +86,11 @@ void test_random_from_to(const at::Device& device) {
       42L
     };
     tos = {
-      c10::optional<int64_t>(-42L),
-      c10::optional<int64_t>(0L),
-      c10::optional<int64_t>(42L),
-      c10::optional<int64_t>(max_to),
-      static_cast<c10::optional<int64_t>>(c10::nullopt)
+      ::std::optional<int64_t>(-42L),
+      ::std::optional<int64_t>(0L),
+      ::std::optional<int64_t>(42L),
+      ::std::optional<int64_t>(max_to),
+      static_cast<::std::optional<int64_t>>(c10::nullopt)
     };
   } else {
     froms = {
@@ -98,9 +98,9 @@ void test_random_from_to(const at::Device& device) {
       42L
     };
     tos = {
-      c10::optional<int64_t>(42L),
-      c10::optional<int64_t>(max_to),
-      static_cast<c10::optional<int64_t>>(c10::nullopt)
+      ::std::optional<int64_t>(42L),
+      ::std::optional<int64_t>(max_to),
+      static_cast<::std::optional<int64_t>>(c10::nullopt)
     };
   }
 
@@ -116,7 +116,7 @@ void test_random_from_to(const at::Device& device) {
   bool from_to_case_covered = false;
   bool from_case_covered = false;
   for (const int64_t from : froms) {
-    for (const c10::optional<int64_t> to : tos) {
+    for (const ::std::optional<int64_t> to : tos) {
       if (!to.has_value() || from < *to) {
         for (const uint64_t val : vals) {
           auto gen = at::make_generator<RNG>(val);

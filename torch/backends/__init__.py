@@ -41,9 +41,8 @@ class ContextProp:
             self.setter(val)
         else:
             raise RuntimeError(
-                "not allowed to set %s flags "
+                f"not allowed to set {obj.__name__} flags "
                 "after disable_global_flags; please use flags() context manager instead"
-                % obj.__name__
             )
 
 

@@ -33,7 +33,7 @@ static inline void maybe_initialize_device(at::Device& device) {
   }
 }
 
-static inline void maybe_initialize_device(c10::optional<at::Device>& device) {
+static inline void maybe_initialize_device(std::optional<at::Device>& device) {
   if (!device.has_value()) {
     return;
   }
@@ -44,5 +44,7 @@ static inline void maybe_initialize_device(const at::TensorOptions& options) {
   auto device = options.device();
   maybe_initialize_device(device);
 }
+
+bool is_device_initialized(at::DeviceType device_type);
 
 } // namespace torch::utils
