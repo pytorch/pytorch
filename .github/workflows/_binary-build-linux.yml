@@ -195,8 +195,7 @@ jobs:
       - name: Checkout pytorch/builder to builder dir
         uses: malfet/checkout@silent-checkout
         with:
-          # todo: remove this before merging the PR
-          ref: cudnn9_test
+          ref: main 
           submodules: recursive
           repository: pytorch/builder
           path: builder
