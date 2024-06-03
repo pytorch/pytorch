@@ -284,7 +284,6 @@ manual_torch_name_rule_map = {
     "torch._functorch.deprecated.vjp": UserFunctionVariable,
     #
     "torch._constrain_as_size": UserFunctionVariable,
-    "torch._constrain_as_value": UserFunctionVariable,
     "torch._tensor._convert": UserFunctionVariable,
     "torch.jit._unwrap_optional": UserFunctionVariable,
     "torch.backends.mha.get_fastpath_enabled": UserFunctionVariable,
@@ -1280,6 +1279,7 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch._C._wrap_tensor_impl",
         "torch._C.fork",
         "torch._C.get_autocast_cpu_dtype",
+        "torch._C.get_autocast_dtype",
         "torch._C.get_autocast_gpu_dtype",
         "torch._C.get_autocast_ipu_dtype",
         "torch._C.get_autocast_xla_dtype",
@@ -2293,7 +2293,6 @@ torch_non_c_binding_in_graph_functions = dict.fromkeys(
         "torch._linalg_utils._symeig",
         "torch._linalg_utils.basis",
         "torch._linalg_utils.bform",
-        "torch._linalg_utils.conjugate",
         "torch._linalg_utils.eig",
         "torch._linalg_utils.get_floating_dtype",
         "torch._linalg_utils.is_sparse",
@@ -2303,8 +2302,6 @@ torch_non_c_binding_in_graph_functions = dict.fromkeys(
         "torch._linalg_utils.qform",
         "torch._linalg_utils.solve",
         "torch._linalg_utils.symeig",
-        "torch._linalg_utils.transjugate",
-        "torch._linalg_utils.transpose",
         "torch._load_global_deps",
         "torch._lowrank._svd_lowrank",
         "torch._lowrank.get_approximate_basis",
@@ -2329,6 +2326,8 @@ torch_non_c_binding_in_graph_functions = dict.fromkeys(
         "torch.amp.autocast_mode._enter_autocast",
         "torch.amp.autocast_mode._exit_autocast",
         "torch.amp.autocast_mode.autocast_decorator",
+        "torch.amp.autocast_mode.custom_bwd",
+        "torch.amp.autocast_mode.custom_fwd",
         "torch.are_deterministic_algorithms_enabled",
         "torch.atleast_1d",
         "torch.atleast_2d",
@@ -3093,6 +3092,18 @@ def is_numpy(obj) -> bool:
     return isinstance(obj, (np.ndarray, np.generic)) or id(obj) in _numpy_function_ids
 
 
+def is_numpy_dtype(obj) -> bool:
+    if np is None:
+        return False
+    return isinstance(obj, np.dtype)
+
+
+def is_numpy_type_info(obj) -> bool:
+    if np is None:
+        return False
+    return isinstance(obj, (np.finfo, np.iinfo))
+
+
 BUILTIN_SKIPLIST = (
     abc,
     collections,
@@ -3268,6 +3279,7 @@ SKIP_DIRS = [
     "<frozen importlib",
     "<__array_function__ internals>",
     _config_module.__file__,
+    "triton/backends",
 ]
 SKIP_DIRS.extend(filter(None, (_module_dir(m) for m in BUILTIN_SKIPLIST)))
 
@@ -3308,7 +3320,7 @@ FORCE_SKIP_FILES = {f"{_module_dir(torch)}optim/lr_scheduler.py"}
 
 def _recompile_re():
     global SKIP_DIRS_RE
-    SKIP_DIRS_RE = re.compile(f"^({'|'.join(map(re.escape, SKIP_DIRS))})")
+    SKIP_DIRS_RE = re.compile(rf"^[^\s<]*({'|'.join(map(re.escape, SKIP_DIRS))})")
 
 
 def add(import_name: str):
@@ -3323,7 +3335,6 @@ def add(import_name: str):
     origin = module_spec.origin
     if origin is None:
         return
-    global SKIP_DIRS_RE
     SKIP_DIRS.append(_strip_init_py(origin))
     _recompile_re()
 
@@ -3543,6 +3554,25 @@ def lookup_inner(
             if reasons is not None:
                 reasons.add("func name is __torch_function__")
             return UserFunctionVariable
+
+    if not is_direct_call:
+        if name == "__getattr__":
+            # is_direct_call = False indicates that this is the top-level frame
+            # being traced (i.e., it is not inlined and not called from
+            # InliningInstructionTranslator).  Tracing __getattr__ at the top
+            # level is unlikely because we inline it for
+            # UserDefinedObjectVariable. This scenario occurs only for
+            # UnspecializedNNModuleVariable, where Dynamo directly calls
+            # __getattr__ during trace time, generating LOAD_ATTR bytecode
+            # without going through the underlying __getattr__ data structures.
+            # When this optimized bytecode is executed, Dynamo is triggered
+            # again on the __getattr__ call. Therefore, we skip Dynamo tracing
+            # in this case.
+            if reasons is not None:
+                reasons.add(
+                    "Tracing __getattr__ as the top level frame, unsuitable for tracing."
+                )
+            return SkipFunctionVariable
 
     # Step 3: lookup obj's tracing rule by filename.
     if filename is None:

@@ -128,8 +128,8 @@ class NestedTensor(torch.Tensor):
         self._metadata_cache = kwargs.get("_metadata_cache") or {}
 
         # collapsed ragged dim must always be dynamic
-        torch._dynamo.mark_dynamic(self, self._ragged_idx)
-        torch._dynamo.mark_dynamic(self._values, self._ragged_idx - 1)
+        torch._dynamo.maybe_mark_dynamic(self, self._ragged_idx)
+        torch._dynamo.maybe_mark_dynamic(self._values, self._ragged_idx - 1)
 
         # min / max sequence length should be dynamic if present
         max_seqlen_tensor = self._metadata_cache.get("max_seqlen", None)
