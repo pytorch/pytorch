@@ -476,6 +476,12 @@ class ExprPrinter(Printer):
             f"_print_TruncToFloat not implemented for {type(self)}"
         )
 
+    def doprint(self, expr, *, simplify: bool = True):
+        # TODO: why are people passing strings to the printer here :think:
+        if simplify and isinstance(expr, sympy.Expr) and hasattr(V.graph, "sizevars"):
+            expr = V.graph.sizevars.simplify(expr)
+        return super().doprint(expr)
+
 
 class PythonPrinter(ExprPrinter):
     def _print_ToFloat(self, expr):
