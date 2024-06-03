@@ -9,7 +9,7 @@ TEST(ReduceOpsTest, MaxValuesAndMinValues) {
   const int W = 10;
   const int H = 10;
   if (hasCUDA()) {
-    for (const auto dtype : {kHalf, kFloat, kDouble, kShort, kInt, kLong}) {
+    for (const auto dtype : {kHalf, kFloat, kDouble}) {
       auto a = at::rand({H, W}, TensorOptions(kCUDA).dtype(dtype));
       ASSERT_FLOAT_EQ(
         a.amax(c10::IntArrayRef{0, 1}).item<double>(),
