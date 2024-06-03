@@ -7,7 +7,7 @@ import logging
 import os
 import textwrap
 from functools import lru_cache
-from typing import Any, Callable, cast, Dict, Iterable, List, Optional, Set, Tuple, Type, Union
+from typing import Any, Callable, cast, Dict, List, Optional, Set, Tuple, Union
 
 import sympy
 
@@ -58,6 +58,8 @@ perf_hint_log = torch._logging.getArtifactLogger(__name__, "perf_hints")
 schedule_log = torch._logging.getArtifactLogger(__name__, "schedule")
 fusion_log = torch._logging.getArtifactLogger(__name__, "fusion")
 
+StrOrExpr = Union[str, sympy.Expr]
+
 
 @lru_cache(None)
 def gen_attr_descriptor_import():
@@ -97,19 +99,22 @@ def gen_common_triton_imports():
     )
     return imports.getvalue()
 
+
 class ConstExprMin(sympy.Min):
     """
     Variant of sympy.Min that propagates triton constexprs.
     While the sympy.Min maps to tl.minimum, this maps to an arithmetic macro.
     https://github.com/triton-lang/triton/issues/3815
     """
+
     def macro(self, a: str, b: str) -> str:
         return f"({a} * ({a} <= {b}) + {b} * ({b} < {a}))"
+
 
 @dataclasses.dataclass
 class IndexingOptions:
     index_str: str
-    mask_vars: Set[sympy.Symbol]
+    mask_vars: Set[str]
     mask_str: str
     expand_str: Optional[str]
     _has_rindex: bool
@@ -136,10 +141,10 @@ class BlockPtrOptions:
     constant_offset: sympy.Expr
     shape: List[sympy.Expr]
     strides: List[sympy.Expr]
-    block_shape: List[Union[str, sympy.Symbol]]
+    block_shape: List[StrOrExpr]
     order: List[int]
-    offsets: List[Union[str, sympy.Symbol]]
-    mask_vars: Set[Union[str, sympy.Symbol]]
+    offsets: List[StrOrExpr]
+    mask_vars: Set[str]
     reshape_suffix: List[str]
 
     @staticmethod
@@ -147,7 +152,7 @@ class BlockPtrOptions:
         strides: List[sympy.Expr],
         constant_offset: sympy.Expr,
         range_trees: List[IterationRangesEntry],
-        mask_vars: Set[sympy.Symbol],
+        mask_vars: Set[str],
     ) -> BlockPtrOptions:
         """Helper to create a  BlockPtrOptions instance"""
         block_shape = [f"{t.prefix.upper()}BLOCK" for t in range_trees]
@@ -226,20 +231,21 @@ class BlockPtrOptions:
         """List of indices to pass to tl.load(boundary_check=...)"""
         check = []
         for i in range(len(self.shape)):
-            # Look up the block prefix. For a string like "XBLOCK", this is "X".
+            # Look up the relevant block size.
             # If the shape is a sympy expression, skip this check.
-            try:
-                block_prefix = self.block_shape[i][0]  # type: ignore[arg-type]
-            except TypeError:
-                block_prefix = None
-
+            block_dim = self.block_shape[i]
+            block_prefix = block_dim[0] if isinstance(block_dim, str) else ""
+            block_size = TRITON_MAX_BLOCK.get(block_prefix)
             if (
                 self.block_shape[i] != "1"
                 and not V.graph.sizevars.statically_known_equals(self.strides[i], 0)  # type: ignore[arg-type]
-                and (block_prefix is None or not V.graph.sizevars.statically_known_multiple_of(
-                    self.shape[i],
-                    TRITON_MAX_BLOCK[block_prefix],  # type: ignore[arg-type]
-                ))
+                and (
+                    block_size is None
+                    or not V.graph.sizevars.statically_known_multiple_of(
+                        self.shape[i],
+                        block_size,  # type: ignore[arg-type]
+                    )
+                )
                 and not (V.kernel.no_x_dim and self.block_shape[i] == "XBLOCK")
             ):
                 check.append(i)
@@ -323,7 +329,7 @@ class TritonPrinter(PythonPrinter):
             return f"tl.minimum({a}, {b})"
 
         # Get the macro. This is overridden by ConstExprMin.
-        macro = getattr(expr, 'macro', tl_minimum_macro)
+        macro = getattr(expr, "macro", tl_minimum_macro)
         cls = type(expr)
 
         nargs = len(expr.args)
@@ -1160,16 +1166,20 @@ class TritonKernel(SIMDKernel):
                 """
                 strides = [sympy.Wild(f"stride_{s}", exclude=symbols) for s in symbols]
                 offset = sympy.Wild("_offset", exclude=symbols)
-                m = index_relative_to_xyr_index.match(sympy_dot(symbols, strides) + offset)
-                if m:
-                    self.filter_masks(mask_vars)
+                m = index_relative_to_xyr_index.match(
+                    sympy_dot(symbols, strides) + offset
+                )
+                if m is None:
+                    return None
 
-                    return BlockPtrOptions.create(
-                        [m[s] for s in strides],
-                        m[offset],
-                        range_trees,
-                        mask_vars,  # type: ignore[arg-type]
-                    )
+                self.filter_masks(mask_vars)
+
+                return BlockPtrOptions.create(
+                    [m[s] for s in strides],
+                    m[offset],
+                    range_trees,
+                    mask_vars,  # type: ignore[arg-type]
+                )
 
             def match_mod_div_block() -> Union[BlockPtrOptions, None]:
                 """
@@ -1195,16 +1205,23 @@ class TritonKernel(SIMDKernel):
                 # This matches the order of dims in torch tensors and triton blocks.
                 sizevars = V.graph.sizevars
                 var_ranges = next(iter(self.range_tree_nodes.values())).var_ranges
-                dims = dict(reversed([
-                    (var, sizevars.lookup_precomputed_size(size))
-                    for (var, size) in var_ranges.items()
-                ]))
+                dims = dict(
+                    reversed(
+                        [
+                            (var, sizevars.lookup_precomputed_size(size))
+                            for (var, size) in var_ranges.items()
+                        ]
+                    )
+                )
                 num_dims = len(dims)
                 if num_dims == 0:
                     return None
 
                 # Pattern match to find the strides and offset.
-                strides = [sympy.Wild(f"stride{idx}", exclude=symbols) for idx in range(num_dims)]
+                strides = [
+                    sympy.Wild(f"stride{idx}", exclude=symbols)
+                    for idx in range(num_dims)
+                ]
                 offset = sympy.Wild("offset", exclude=symbols)
 
                 # Compute the cumulative size of each dimension's slice.
@@ -1222,7 +1239,9 @@ class TritonKernel(SIMDKernel):
                 for dim_idx in range(1, num_dims):
                     cur_dim = dim_values[dim_idx]
                     next_dim = dim_values[dim_idx + 1] if dim_idx < num_dims - 1 else 1
-                    match_expr += strides[dim_idx] * ModularIndexing(index_var, next_dim, cur_dim)
+                    match_expr += strides[dim_idx] * ModularIndexing(
+                        index_var, next_dim, cur_dim
+                    )
 
                 # Offset term
                 match_expr += offset
@@ -1244,30 +1263,38 @@ class TritonKernel(SIMDKernel):
                     return None
                 prefix = range_trees[0].prefix.upper()
                 max_block = TRITON_MAX_BLOCK[prefix]
-                if any(not sizevars.statically_known_multiple_of(numel, max_block) and
-                       not sizevars.statically_known_power_of_2(numel)
-                       for numel in slice_numels
-                   ):
-                   return None
+                if any(
+                    not sizevars.statically_known_multiple_of(numel, max_block)
+                    and not sizevars.statically_known_power_of_2(numel)
+                    for numel in slice_numels
+                ):
+                    return None
 
                 # Compute the ND block shape from the linear block size.
                 # Use CielDiv to round leading dimensions up to 1.
-                linear_block_size = sympy.Symbol(f"{prefix}BLOCK", integer=True, nonzero=True)
-                block_shape = [
+                linear_block_size = sympy.Symbol(
+                    f"{prefix}BLOCK", integer=True, nonzero=True
+                )
+                block_shape: List[StrOrExpr] = [
                     ConstExprMin(CeilDiv(linear_block_size, slice_numel), dim)
                     for slice_numel, dim in zip(slice_numels, dim_values)
                 ]
 
                 # Compute block offsets from xoffset and the range tree.
                 xoffset = sympy.Symbol("xoffset", integer=True)
-                block_offsets = [
-                    sympy_subs(self.range_tree_nodes[var_name].expr, {index_var: xoffset})
+                block_offsets: List[StrOrExpr] = [
+                    sympy_subs(
+                        self.range_tree_nodes[var_name].expr, {index_var: xoffset}
+                    )
                     for var_name in dims
                 ]
 
                 # Form the block pointer.
-                matched_strides=[sizevars.lookup_precomputed_size(match[stride]) for stride in strides]
-                matched_offset=sizevars.lookup_precomputed_size(match[offset])
+                matched_strides = [
+                    sizevars.lookup_precomputed_size(match[stride])
+                    for stride in strides
+                ]
+                matched_offset = sizevars.lookup_precomputed_size(match[offset])
                 return BlockPtrOptions(
                     constant_offset=matched_offset,
                     shape=dim_values,
@@ -1276,7 +1303,7 @@ class TritonKernel(SIMDKernel):
                     order=list(range(num_dims)),
                     offsets=block_offsets,
                     mask_vars=mask_vars,
-                    reshape_suffix = [str(linear_block_size)],
+                    reshape_suffix=[str(linear_block_size)],
                 )
 
             # Try various pattern matches for block pointers
@@ -1287,8 +1314,6 @@ class TritonKernel(SIMDKernel):
                 options = match_func()
                 if options:
                     return options
-
-
 
         expand_str = None
         index_str = self.index_to_str(index)
@@ -1459,9 +1484,8 @@ class TritonKernel(SIMDKernel):
                 )
                 line = f"tl.load({block_ptr}{other}{ep})"
                 # add needed size=1 dimensions
-                line = triton_reshape(
-                    line, indexing.block_shape, indexing.reshape_suffix
-                )
+                block_shape = [str(dim) for dim in indexing.block_shape]
+                line = triton_reshape(line, block_shape, indexing.reshape_suffix)
             elif isinstance(original_index, sympy.Integer):
                 line = f"tl.load({var} + ({original_index}))"
                 append_broadcast = indexing.expand_str
