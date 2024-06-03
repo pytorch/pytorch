@@ -668,7 +668,6 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
         get_model_state_dict(fsdp_model)
         get_optimizer_state_dict(fsdp_model, fsdp_optim)
 
-
     @with_comms
     @skip_if_lt_x_gpu(2)
     def test_optim_state_dict_param_matching(self) -> None:
