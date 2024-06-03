@@ -2927,6 +2927,17 @@ def index_output_size_and_inner_fn(
 
 
 def index_impl(x, indices, check):
+    output_size, inner_fn = index_impl_helper(x, indices, check)
+
+    return Pointwise.create(
+        device=x.get_device(),
+        dtype=x.get_dtype(),
+        inner_fn=inner_fn,
+        ranges=output_size,
+    )
+
+
+def index_impl_helper(x, indices, check):
     assert isinstance(indices, (list, tuple))
     x_loader = x.make_loader()
     indices, tensor_indices = check_and_broadcast_indices(indices, x.get_device())
@@ -2941,11 +2952,11 @@ def index_impl(x, indices, check):
     x_size = x.get_size()
 
     indexed_size = [x_size[i] for i in range(len(indices)) if indices[i] is not None]
-    if 0 in indexed_size and 0 not in tensor_size:
+    if check and 0 in indexed_size and 0 not in tensor_size:
         raise IndexError("index is out of bounds for dimension with size 0")
 
     indexed_size = [x_size[i] for i in range(len(indices))]
-    output_size, inner_fn = index_output_size_and_inner_fn(
+    return index_output_size_and_inner_fn(
         x_size,
         indices,
         tensor_indices,
@@ -2954,13 +2965,6 @@ def index_impl(x, indices, check):
         indexed_size,
         x_loader,
         check=check,
-    )
-
-    return Pointwise.create(
-        device=x.get_device(),
-        dtype=x.get_dtype(),
-        inner_fn=inner_fn,
-        ranges=output_size,
     )
 
 
@@ -3157,6 +3161,54 @@ def masked_scatter_with_index(self, mask, source_idx, source):
         ranges=self_flat.get_size(),
     )
     return view(result_flat, self.get_size())
+
+
+fallback__unsafe_masked_index = fallback_handler(
+    aten._unsafe_masked_index.default, add_to_fallback_set=False
+)
+
+fallback__unsafe_masked_index_put_accumulate = fallback_handler(
+    aten._unsafe_masked_index_put_accumulate.default, add_to_fallback_set=False
+)
+
+
+@register_lowering(aten._unsafe_masked_index, type_promotion_kind=None)
+def _unsafe_masked_index(self, mask, indices, fill):
+    ranges, _unsafe_index_fn = index_impl_helper(self, indices, check=False)
+    mask_loader = mask.make_loader()
+
+    def inner_fn(idx):
+        mask_val = ops.to_dtype(mask_loader(idx), torch.bool)
+        return ops.masked(mask_val, lambda: _unsafe_index_fn(idx), fill)
+
+    return Pointwise.create(
+        device=self.get_device(),
+        dtype=self.get_dtype(),
+        inner_fn=inner_fn,
+        ranges=ranges,
+    )
+
+
+@register_lowering(aten._unsafe_masked_index_put_accumulate, type_promotion_kind=None)
+def _unsafe_masked_index_put_accumulate(x, mask, indices, values):
+    if torch.version.hip is not None:
+        # Avoid a triton compiler failure
+        return fallback__unsafe_masked_index_put_accumulate(x, mask, indices, values)
+
+    masked_value = where(mask, values, 0)
+    shape = x.get_size()
+    clamped_indices = [
+        clamp(indices[i], -shape[i], shape[i] - 1) if indices[i] else None
+        for i in range(len(indices))
+    ]
+    # TODO: use a masked store for this. currently only triton
+    # supports masked stores and cpp backend does not.
+    return _unsafe_index_put(x, clamped_indices, masked_value, accumulate=True)
+
+
+@make_pointwise
+def clamp(a, min, max):
+    return ops.maximum(min, ops.minimum(max, a))
 
 
 @register_lowering(aten.as_strided_scatter, type_promotion_kind=None)
