@@ -1472,6 +1472,18 @@ at::Tensor _fbgemm_jagged_to_padded_dense_forward(
   return padded_values;
 }
 
+#define DISPATCH_DENSE_TO_JAGGED_CASE(TYPE)                          \
+  AT_DISPATCH_CASE(TYPE, [&] {                                       \
+    jagged_dense_elementwise_jagged_output_opt_<scalar_t>(           \
+        values,                                                      \
+        offsets.vec(),                                               \
+        dense,                                                       \
+        output,                                                      \
+        [] __device__(scalar_t /*unused*/, scalar_t y) -> scalar_t { \
+          return y;                                                  \
+        });                                                          \
+  })
+
 Tensor _fbgemm_dense_to_jagged_forward_symint(
     const Tensor& dense,
     TensorList offsets,
@@ -1491,18 +1503,6 @@ Tensor _fbgemm_dense_to_jagged_forward_symint(
 
   at::cuda::OptionalCUDAGuard device_guard;
   device_guard.set_index(dense.get_device());
-
-#define DISPATCH_DENSE_TO_JAGGED_CASE(TYPE)                          \
-  AT_DISPATCH_CASE(TYPE, [&] {                                       \
-    jagged_dense_elementwise_jagged_output_opt_<scalar_t>(           \
-        values,                                                      \
-        offsets.vec(),                                               \
-        dense,                                                       \
-        output,                                                      \
-        [] __device__(scalar_t /*unused*/, scalar_t y) -> scalar_t { \
-          return y;                                                  \
-        });                                                          \
-  })
 
   // clang-format off
   AT_DISPATCH_SWITCH(
