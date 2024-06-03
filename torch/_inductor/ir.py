@@ -7329,7 +7329,11 @@ class QLinearPointwiseBinaryPT2E(ExternKernelAlloc):
             self.codegen_size_asserts(wrapper)
 
     def get_mutation_names(self):
-        return [self.inputs[self.idx_for_inplace_sum].get_name()] if self.has_mutation else []
+        return (
+            [self.inputs[self.idx_for_inplace_sum].get_name()]
+            if self.has_mutation
+            else []
+        )
 
     def get_unbacked_symbol_defs(self) -> Set[sympy.Symbol]:
         return set()
