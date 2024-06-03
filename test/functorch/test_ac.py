@@ -256,7 +256,7 @@ class MemoryBudgetTest(TestCase):
             self.assertEqual(eager_mem, S * D * 2)
 
             mem, flops = get_mem_and_flops(
-                call, memory_budget=0.8
+                call, memory_budget=0.6
             )  # Force it to recompute one of mm or attn
             self.assertEqual(mem, S * D)
             if expected_recompute == "attn":
