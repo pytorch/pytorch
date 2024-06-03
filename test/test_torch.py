@@ -6198,8 +6198,8 @@ else:
         GradScaler = torch.cuda.amp.GradScaler if "cuda" == device.type else torch.cpu.amp.GradScaler
 
         with self.assertWarnsRegex(
-            FutureWarning,
-            rf"`torch.{device.type}.amp.GradScaler\(args...\)` is deprecated.",
+            UserWarning,
+            rf"torch.{device.type}.amp.GradScaler\(args...\) is deprecated.",
         ):
             _ = GradScaler(init_scale=2.0)
 
@@ -8397,7 +8397,7 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
     def test_iter(self) -> None:
         x = torch.randn(5, 5)
         for i, sub in enumerate(x):
-            self.assertEqual(sub, x[i])  # noqa: PLR1736
+            self.assertEqual(sub, x[i])
 
         x = torch.tensor([])
         self.assertEqual(list(x), [])
