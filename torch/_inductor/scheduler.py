@@ -1492,8 +1492,8 @@ class Scheduler:
         # self.nodes = memory_passes.raise_primal_resize_zero_if_primal_is_unused(self.name_to_fused_node, V.graph.graph_inputs, self.nodes)
         self.compute_last_usage()
 
-        # for snode in self.nodes:
-        #     torch_log.warning(f"snode: {snode}, snode.node: {snode.node}, snode.debug_str(): {snode.debug_str()}")
+        for snode in self.nodes:
+            torch_log.warning(f"snode: {snode}, \nsnode.node: {snode.node}, \nsnode.debug_str(): {snode.debug_str()}")
 
         V.debug.ir_post_fusion(self.nodes)
         V.debug.graph_diagram(self.nodes)

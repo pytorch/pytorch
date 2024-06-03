@@ -18,13 +18,13 @@ class TracableCreateParameter(torch.autograd.Function):
     @staticmethod
     def forward(ctx, tensor, placeholder):
         assert not tensor.requires_grad
-        # torch_log.warning(f"before: placeholder: {placeholder}")
-        # torch_log.warning(f"before: tensor: {tensor}")
+        torch_log.warning(f"before: placeholder: {placeholder}")
+        torch_log.warning(f"before: tensor: {tensor}")
         if isinstance(tensor, torch.distributed._tensor.api.DTensor):
             with torch.no_grad():
                 placeholder.copy_(tensor)
-            # torch_log.warning(f"before: placeholder._local_tensor: {placeholder._local_tensor}")
-            # torch_log.warning(f"before: tensor._local_tensor: {tensor._local_tensor}")
+            torch_log.warning(f"before: placeholder._local_tensor: {placeholder._local_tensor}")
+            torch_log.warning(f"before: tensor._local_tensor: {tensor._local_tensor}")
             # placeholder._local_tensor.set_(tensor._local_tensor)
             # placeholder._spec = tensor._spec
         else:
@@ -35,6 +35,7 @@ class TracableCreateParameter(torch.autograd.Function):
 
     @staticmethod
     def backward(ctx, grad):
+        torch_log.warning(f"grad: {grad}")
         return None, grad  # grad flows to placeholder
 
 
@@ -59,7 +60,7 @@ def new_parameter_placeholder(size, dtype, device, requires_grad):
 def new_parameter_placeholder_dtensor(local_tensor_size, local_tensor_dtype, local_tensor_device, requires_grad, device_mesh, placements):
     """Create a placeholder to be passed to the above functions"""
     data_tensor = torch.empty(local_tensor_size, dtype=local_tensor_dtype, device=local_tensor_device)
-    # data_tensor.untyped_storage().resize_(0)
+    # data_tensor.untyped_storage().resize_(0)  # this causes segfault, need to figure out why
     # NOTE(yf225): allocate a placeholder nn.Parameter(DTensor), whose content will get swapped out in TracableCreateParameter.forward
     data_tensor = torch.distributed._tensor.api.DTensor.from_local(
         data_tensor,

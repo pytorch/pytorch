@@ -54,6 +54,21 @@ if not dist.is_available():
     sys.exit(0)
 
 
+lib = torch.library.Library("fsdp_test", "DEF")
+
+lib.define("chunk_cat(Tensor[] tensors, int dim, int num_chunks, *, Tensor(a!) out) -> ()")
+
+@torch.library.impl(lib, "chunk_cat", "Meta")
+def chunk_cat(tensors, dim, num_chunks, out):
+    torch._chunk_cat(
+        tensors, dim, num_chunks, out=out
+    )
+
+@torch.library.impl(lib, "chunk_cat", "CUDA")
+def chunk_cat(tensors, dim, num_chunks, out):
+    torch._chunk_cat(tensors, dim, num_chunks, out=out)
+
+
 @requires_nccl()
 class TestWithNCCL(MultiProcessTestCase):
     def setUp(self) -> None:
@@ -156,6 +171,27 @@ class TestWithNCCL(MultiProcessTestCase):
             assert not output.completed
             assert output.eq(sum(self.ranks) / self.world_size * i).all()
             assert output.completed
+
+    @skip_if_lt_x_gpu(2)
+    def test_custom_op_out_variant_lowering_bug(self):
+        self._init_process_group()
+        def f(x, y, z):
+            full_default_3: "f32[2, 524544]" = torch.ops.aten.full.default([2, 524544], 1.0, dtype = torch.float32, layout = torch.strided, device = self.device, pin_memory = False)
+            chunk_cat_default_1 = torch.ops.fsdp_test.chunk_cat.default([x, y, z], 0, 2, out = full_default_3)
+            # view_63: "f32[1049088]" = torch.ops.aten.reshape.default(full_default_3, [1049088])
+            ar_out: "f32[524544]" = torch.ops._c10d_functional.all_reduce(full_default_3, "avg", "default")
+            sum_out = ar_out.sum()
+            # mm_out = torch.mul(view_63, view_63)
+            # sum_out = mm_out.sum()
+            return sum_out
+
+        x = torch.randn([1024, 512], device=self.device)
+        y = torch.randn([512], device=self.device)
+        z = torch.randn([1024, 512], device=self.device)
+        compiled_f = torch.compile(f, backend="inductor")
+        eager_out = f(x, y, z)
+        compiled_out = compiled_f(x, y, z)
+        assert torch.allclose(eager_out, compiled_out), f"eager_out: {eager_out}, compiled_out: {compiled_out}"
 
     @skip_if_lt_x_gpu(2)
     def test_all_reduce_coalesced_(self) -> None:

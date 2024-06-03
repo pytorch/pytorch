@@ -158,9 +158,11 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
     # fsdp_fx_passes.raise_primal_resize_zero_if_primal_is_unused(gm)
     # fsdp_fx_passes.remove_storage_resize_and_copy(gm)
 
+    torch_log.warning(lazy_format_graph_code("after FSDP FX passes before decompose_auto_functionalized: ", gm))
+
     decompose_auto_functionalized(gm.graph)
 
-    torch_log.warning(lazy_format_graph_code("after FSDP FX passes: ", gm))
+    torch_log.warning(lazy_format_graph_code("after FSDP FX passes after decompose_auto_functionalized: ", gm))
     gm.recompile()
     optimus_scuba_log["after_recompile_post_grad"] = upload_graph(gm.graph)
     gm.graph.lint()

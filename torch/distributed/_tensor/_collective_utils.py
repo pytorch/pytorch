@@ -150,7 +150,7 @@ def mesh_broadcast(
     # (to register a meta kernel for the collective op)
     # so that it would avoid the communication. Need to
     # remove the check below once that is done.
-    torch_log.warning(f"tensor: {tensor}, is_meta: {tensor.is_meta}")
+    # torch_log.warning(f"tensor: {tensor}, is_meta: {tensor.is_meta}")
     from torch._subclasses.fake_tensor import is_fake
     from torch._functorch._aot_autograd.functional_utils import is_fun
     if tensor.is_meta or is_fake(tensor) or is_fun(tensor):

@@ -352,6 +352,7 @@ class OpDispatcher:
                     mesh = arg.device_mesh
             elif isinstance(arg, torch.Tensor):
                 mesh = mesh or try_find_mesh_from_args(op_call, args_list)
+                torch_log.warning(f"arg: {arg}, mesh: {mesh}")
                 args_schema.append(try_get_replicate_spec(arg, mesh))
                 local_args.append(arg)
             else:
