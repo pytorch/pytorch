@@ -199,9 +199,13 @@ class FSDPParam:
                     "FSDP requires the DP and TP mesh to have the same parent mesh but got: \n"
                     f"DP's global mesh: {dp_global_mesh}\nTP's global mesh: {tp_global_mesh}"
                 )
-            assert dp_mesh.mesh_dim_names is not None and tp_mesh.mesh_dim_names is not None, (
+
+            name_dims_error = (
                 "Please name your devicemesh dims, required for named slicing"
             )
+            assert dp_mesh.mesh_dim_names is not None, name_dims_error
+            assert tp_mesh.mesh_dim_names is not None, name_dims_error
+
             submesh_names = dp_mesh.mesh_dim_names + tp_mesh.mesh_dim_names
             self._spmd_mesh = dp_global_mesh[submesh_names]
             if len(self._tp_spec.placements) != 1:
