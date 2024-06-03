@@ -746,8 +746,9 @@ class Module:
         submodule ``net_b``, which itself has two submodules ``net_c``
         and ``linear``. ``net_c`` then has a submodule ``conv``.)
 
-        To overide the ``Conv2d`` with a new submodule ``Linear``, you can use the following syntax:
-             ``set_submodule("net_b.net_c.conv", nn.Linear(33, 16))``
+        To overide the ``Conv2d`` with a new submodule ``Linear``, you
+        would call
+        ``set_submodule("net_b.net_c.conv", nn.Linear(33, 16))``.
 
         Args:
             target: The fully-qualified string name of the submodule
@@ -756,6 +757,7 @@ class Module:
             module: The module to set the submodule to.
 
         Raises:
+            ValueError: If the target string is empty
             AttributeError: If the target string references an invalid
                 path or resolves to something that is not an
                 ``nn.Module``
