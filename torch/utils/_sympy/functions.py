@@ -109,6 +109,20 @@ class FloorDiv(sympy.Function):
             return base
         if base.is_integer and divisor == -1:
             return sympy.Mul(base, -1)
+        if (
+            isinstance(base, sympy.Number)
+            and isinstance(divisor, sympy.Number)
+            and (base in (int_oo, -int_oo) or divisor in (int_oo, -int_oo))
+        ):
+            r = float(base) / float(divisor)
+            if r == math.inf:
+                return int_oo
+            elif r == -math.inf:
+                return -int_oo
+            elif math.isnan(r):
+                return sympy.nan
+            else:
+                return sympy.Integer(math.floor(r))
         if isinstance(base, sympy.Integer) and isinstance(divisor, sympy.Integer):
             return sympy.Integer(int(base) // int(divisor))
         if isinstance(base, FloorDiv):
@@ -437,14 +451,23 @@ class PowByNatural(sympy.Function):
         # have concluded this externally from Sympy assumptions, so we can't
         # assert the nonnegative
         assert exp.is_integer, exp
-        if isinstance(base, sympy.Number) and isinstance(exp, sympy.Number):
-            return sympy.Integer(safe_pow(base, exp))
+        if isinstance(base, sympy.Integer) and isinstance(exp, sympy.Integer):
+            r = safe_pow(base, exp)
+            if r in (-int_oo, int_oo):
+                return r
+            return sympy.Integer(r)
         if isinstance(exp, sympy.Integer):
             # Translate power into iterated multiplication
+            # (Rely on this for base is int_oo case too.)
             r = sympy.Integer(1)
             for _ in range(int(exp)):
                 r *= base
             return r
+        if exp is int_oo:
+            if base.is_nonnegative:
+                return int_oo
+            elif base.is_negative:
+                return sympy.zoo  # this is apparently what (-2)**sympy.oo does
         # NB: do NOT translate into sympy.Pow, we will lose knowledge that exp
         # is a natural number if we do
 
@@ -457,6 +480,11 @@ class FloatPow(sympy.Function):
 
     @classmethod
     def eval(cls, base, exp):
+        # NB: These test sympy.Number, not sympy.Float, because:
+        #   - Sometimes we may have sympy.oo or int_oo, and that's not a Float
+        #     (but coerces to math.Inf)
+        #   - Sometimes Float(0.0) will unpredictably decay to Integer(0),
+        #     but we should still accept it in floatey contexts
         if isinstance(base, sympy.Number) and isinstance(exp, sympy.Number):
             return sympy.Float(float(base) ** float(exp))
         # NB: do not do any nontrivial reasoning
@@ -503,7 +531,15 @@ class IntTrueDiv(sympy.Function):
         if divisor.is_zero:
             raise ZeroDivisionError("division by zero")
 
-        if isinstance(base, sympy.Number) and isinstance(divisor, sympy.Number):
+        if (
+            isinstance(base, sympy.Number)
+            and isinstance(divisor, sympy.Number)
+            and (base in (int_oo, -int_oo) or divisor in (int_oo, -int_oo))
+        ):
+            # Don't have to worry about precision here, you're getting zero or
+            # inf from the division
+            return sympy.Float(float(base) / float(divisor))
+        if isinstance(base, sympy.Integer) and isinstance(divisor, sympy.Integer):
             return sympy.Float(int(base) / int(divisor))
 
 
@@ -560,9 +596,9 @@ class TruncToInt(sympy.Function):
     @classmethod
     def eval(cls, number):
         # assert number.is_integer is not True, number
-        if number == sympy.oo:
+        if number in (sympy.oo, int_oo):
             return int_oo
-        if number == -sympy.oo:
+        if number in (-sympy.oo, -int_oo):
             return -int_oo
         if isinstance(number, sympy.Number):
             return sympy.Integer(math.trunc(float(number)))
@@ -620,6 +656,10 @@ class ToFloat(sympy.Function):
 
         if isinstance(number, sympy.Integer):
             return sympy.Float(int(number))
+        if number is int_oo:
+            return sympy.oo
+        if number is -int_oo:
+            return -sympy.oo
 
 
 def make_opaque_unary_fn(name):
@@ -650,7 +690,11 @@ def make_opaque_unary_fn(name):
                 # weird objects but ask silly questions, get silly answers
                 except OverflowError:
                     return getattr(sympy, name)(a)
-            elif a in [sympy.oo, -sympy.oo, sympy.zoo, -sympy.zoo]:
+            elif a in [sympy.oo, -sympy.oo, sympy.zoo, -sympy.zoo, int_oo, -int_oo]:
+                if a is int_oo:
+                    a = sympy.oo
+                if a is -int_oo:
+                    a = -sympy.oo
                 return getattr(sympy, name)(a)
             return None
 

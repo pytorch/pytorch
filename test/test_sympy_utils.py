@@ -1,6 +1,7 @@
 # Owner(s): ["oncall: pt2"]
 
 import itertools
+import math
 import sys
 
 import sympy
@@ -148,7 +149,7 @@ class TestNumbers(TestCase):
         self.assertIs(-int_oo * 2, -int_oo)
         self.assertIs(-1 * -int_oo, int_oo)
         self.assertIs(int_oo / 2, sympy.oo)
-        self.assertIs(-(-int_oo), int_oo)
+        self.assertIs(-(-int_oo), int_oo)  # noqa: B002
         self.assertIs(abs(int_oo), int_oo)
         self.assertIs(abs(-int_oo), int_oo)
         self.assertIs(int_oo ** 2, int_oo)
@@ -170,6 +171,25 @@ class TestNumbers(TestCase):
     def test_relation(self):
         self.assertIs(sympy.Add(2, int_oo), int_oo)
         self.assertFalse(-int_oo > 2)
+
+    def test_lt_self(self):
+        self.assertFalse(int_oo < int_oo)
+        self.assertIs(min(-int_oo, -4), -int_oo)
+        self.assertIs(min(-int_oo, -int_oo), -int_oo)
+
+    def test_float_cast(self):
+        self.assertEqual(float(int_oo), math.inf)
+        self.assertEqual(float(-int_oo), -math.inf)
+
+    def test_mixed_oo_int_oo(self):
+        # Arbitrary choice
+        self.assertTrue(int_oo < sympy.oo)
+        self.assertFalse(int_oo > sympy.oo)
+        self.assertTrue(sympy.oo > int_oo)
+        self.assertFalse(sympy.oo < int_oo)
+        self.assertIs(max(int_oo, sympy.oo), sympy.oo)
+        self.assertTrue(-int_oo > -sympy.oo)
+        self.assertIs(min(-int_oo, -sympy.oo), -sympy.oo)
 
 
 class TestValueRanges(TestCase):
