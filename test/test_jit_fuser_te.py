@@ -1442,8 +1442,14 @@ class TestTEFuser(JitTestCase):
             except Exception as e:
                 raise RuntimeError(
                     " ".join(
-                        ["Failed:", str(self_dtype), op.__name__, device, str(size)]
-                    )  # noqa: F821
+                        [
+                            "Failed:",
+                            str(self_dtype),
+                            op.__name__,
+                            device,
+                            str(size),
+                        ]  # noqa: F821
+                    )
                 ) from e
 
     def test_isnan(self):
