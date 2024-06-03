@@ -15,7 +15,6 @@ import numpy as np
 import onnx
 import onnx_test_common
 import parameterized
-import torch
 import torchvision
 from model_defs import (
     lstm_flattening_result,
@@ -37,6 +36,8 @@ from pytorch_test_common import (
     skipShapeChecking,
     skipTraceTest,
 )
+
+import torch
 
 from torch import Tensor
 from torch.nn.utils import rnn as rnn_utils
@@ -2584,6 +2585,9 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         update = torch.randn(4, 1, 3, 2)
         self.run_test(IndexPutModel2(), (x, update))
 
+    @unittest.skip(
+        "regression in 1.18: https://github.com/microsoft/onnxruntime/issues/20855"
+    )
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_index_put_loop(self):
         @torch.jit.script
@@ -3720,6 +3724,20 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
 
         input = torch.arange(24, dtype=torch.int64).reshape(3, 4, 2)
         self.run_test(BitshiftModel(), input)
+
+    @skipIfUnsupportedMinOpsetVersion(18)
+    def test_bitwise_and(self):
+        class BitwiseAndModel(torch.nn.Module):
+            def forward(self, input, other):
+                return (
+                    input & 20,
+                    torch.bitwise_and(input, other),
+                    other & torch.tensor([1, 2], dtype=torch.int32),
+                )
+
+        input = torch.randint(0, 255, (3, 4, 2), dtype=torch.uint8)
+        other = torch.randint(-128, 127, (3, 4, 2), dtype=torch.int8)
+        self.run_test(BitwiseAndModel(), (input, other))
 
     # uint8 not implemented in ORT for Mul used in
     # exporting bitshift for opset_version < 10

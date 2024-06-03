@@ -554,7 +554,7 @@ Using this decorator, we can also differentiate through NumPy code!
    @torch.compile(fullgraph=True)
    @torch.compiler.wrap_numpy
    def numpy_fn(X, Y):
-       return np.sum(X[:, :, None] * Y[:, None, :], axis=(-2, -1))
+       return np.mean(np.sum(X[:, :, None] * Y[:, None, :], axis=(-2, -1)))
 
    X = torch.randn(1024, 64, device="cuda", requires_grad=True)
    Y = torch.randn(1024, 64, device="cuda")
