@@ -212,18 +212,21 @@ def fuse_all_gather_matmul(match, shard, gather_dim, group_name):
             A_shard, [B_0, B_1, B_2, ...], gather_dim, group_name,
         )
     """
-    if gather_dim >= len(shard.meta["val"].shape) - 1:
-        # Decomposing the matmul on the K dimension is not supported
+    if (
+        not torch.distributed.is_available()
+        or not torch.distributed.is_nccl_available()
+    ):
         return
 
-    try:
-        c10d = torch.ops._c10d_functional
-        from torch.distributed._cuda_p2p import (
-            get_optimal_A_shard_stride_order_for_fused_all_gather_matmul,
-            is_cuda_p2p_group,
-        )
-        from torch.distributed.distributed_c10d import _resolve_process_group
-    except (AttributeError, ImportError):
+    c10d = torch.ops._c10d_functional
+    from torch.distributed._cuda_p2p import (
+        is_cuda_p2p_group,
+        restride_A_shard_for_fused_all_gather_matmul,
+    )
+    from torch.distributed.distributed_c10d import _resolve_process_group
+
+    if gather_dim >= len(shard.meta["val"].shape) - 1:
+        # Decomposing the matmul on the K dimension is not supported
         return
 
     if not is_cuda_p2p_group(_resolve_process_group(group_name)):
@@ -244,13 +247,13 @@ def fuse_all_gather_matmul(match, shard, gather_dim, group_name):
     graph = ag_node.graph
     with graph.inserting_before(ag_node):
         if "val" in shard_node.meta:
-            stride_order = get_optimal_A_shard_stride_order_for_fused_all_gather_matmul(
-                shard_node.meta["val"].shape,
+            restrided = restride_A_shard_for_fused_all_gather_matmul(
+                shard_node.meta["val"],
                 gather_dim,
             )
             shard_node = graph.call_function(
                 inductor_prims.force_stride_order,
-                args=(shard_node, stride_order),
+                args=(shard_node, restrided.stride()),
             )
 
         fused_node = graph.call_function(
@@ -320,19 +323,23 @@ def fuse_matmul_reduce_scatter(match, rs_input, reduce_op, group_name):
             A, B, scatter_dim, group_name,
         )
     """
-    rs_input, scatter_dim = _parse_reduce_scatter(rs_input)
-    try:
-        c10d = torch.ops._c10d_functional
-        from torch.distributed._cuda_p2p import (
-            get_optimal_A_stride_order_for_fused_matmul_reduce_scatter,
-            is_cuda_p2p_group,
-        )
-        from torch.distributed.distributed_c10d import _resolve_process_group
-    except (AttributeError, ImportError):
+    if (
+        not torch.distributed.is_available()
+        or not torch.distributed.is_nccl_available()
+    ):
         return
+
+    c10d = torch.ops._c10d_functional
+    from torch.distributed._cuda_p2p import (
+        is_cuda_p2p_group,
+        restride_A_for_fused_matmul_reduce_scatter,
+    )
+    from torch.distributed.distributed_c10d import _resolve_process_group
 
     if not is_cuda_p2p_group(_resolve_process_group(group_name)):
         return
+
+    rs_input, scatter_dim = _parse_reduce_scatter(rs_input)
 
     # Currently fused_matmul_reduce_scatter doesn't return the matmul result,
     # so we can't apply the fusion if the matmul result is used by multiple
@@ -365,13 +372,14 @@ def fuse_matmul_reduce_scatter(match, rs_input, reduce_op, group_name):
     graph = rs_res_node.graph
     with graph.inserting_before(rs_res_node):
         if "val" in A_node.meta:
-            stride_order = get_optimal_A_stride_order_for_fused_matmul_reduce_scatter(
-                A_node.meta["val"].shape,
+            val = A_node.meta["val"]
+            restrided = restride_A_for_fused_matmul_reduce_scatter(
+                A_node.meta["val"],
                 scatter_dim,
             )
             A_node = graph.call_function(
                 inductor_prims.force_stride_order,
-                args=(A_node, stride_order),
+                args=(A_node, restrided.stride()),
             )
 
         fused_node = graph.call_function(
@@ -393,10 +401,13 @@ def fuse_matmul_reduce_scatter(match, rs_input, reduce_op, group_name):
 
 
 def _register_passes():
-    try:
-        c10d = torch.ops._c10d_functional
-    except AttributeError:
+    if (
+        not torch.distributed.is_available()
+        or not torch.distributed.is_nccl_available()
+    ):
         return
+
+    c10d = torch.ops._c10d_functional
 
     # Matches funcol.all_gather_tensor with gather_dim == 0
     ZeroDimAllGather = CallFunction(
