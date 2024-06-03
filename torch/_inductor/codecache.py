@@ -231,7 +231,7 @@ class LocalCache(CacheBase):
 
 
 class PersistentCache(CacheBase):
-    @functools.lru_cache(None)
+    @functools.lru_cache(None)  # noqa: B019
     def get_global_cache(self):
         global_cache_path = self.get_global_cache_path()
         if global_cache_path is None or not global_cache_path.is_file():
@@ -419,11 +419,22 @@ def _ident(x: Any) -> Any:
     return x
 
 
+def extract_tensor_metadata_for_cache_key(t):
+    """
+    Extracts the tensor metadata and removes fields of the TensorMetadata
+    that are not needed for caching
+    """
+    meta = extract_tensor_metadata(t)
+    if not hasattr(t, "_is_inductor_static"):
+        meta = dataclasses.replace(meta, storage_offset=0, storage_bytes=None)
+    return meta
+
+
 def _reduce_fake_tensor(t):
     """
     See FxGraphCachePickler. Custom reducer to pickle FakeTensors.
     """
-    metadata = extract_tensor_metadata(t)
+    metadata = extract_tensor_metadata_for_cache_key(t)
     return (_ident, (metadata,))
 
 
@@ -454,7 +465,7 @@ def _reduce_tensor(t):
             f"FX graph cache handling of a large constant took {elapsed:.1}s. Please file an issue."
         )
 
-    metadata = extract_tensor_metadata(t)
+    metadata = extract_tensor_metadata_for_cache_key(t)
     return (_ident, (TensorMetadataAndValues(metadata, values),))
 
 
@@ -527,7 +538,7 @@ class FxGraphCachePickler(pickle.Pickler):
 
         def get_str(obj) -> str:
             if isinstance(obj, torch.Tensor):
-                return str(extract_tensor_metadata(obj))
+                return str(extract_tensor_metadata_for_cache_key(obj))
             elif isinstance(obj, bytes):
                 return "<bytes>"
             else:
@@ -612,6 +623,7 @@ class FxGraphHashDetails:
         gm: torch.fx.GraphModule,
         example_inputs: List[torch.Tensor],
         fx_kwargs: Dict[str, Any],
+        inputs_to_check: Sequence[int],
     ):
         self.gm = gm
         self.example_inputs = example_inputs
@@ -626,6 +638,9 @@ class FxGraphHashDetails:
                     self.fx_kwargs[k] = OrderedSetHolder(sorted(fx_kwargs[k]))
                 else:
                     self.fx_kwargs[k] = fx_kwargs[k]
+
+        # Alignment checks
+        self.inputs_to_check = inputs_to_check
 
         # 'Deterministic algorithms' can affect codegen via lowering to cuda kernels.
         self.deterministic_algorithms_settings = (
@@ -659,11 +674,12 @@ def compiled_fx_graph_hash(
     gm: torch.fx.GraphModule,
     example_inputs: List[torch.Tensor],
     fx_kwargs: Dict[str, Any],
+    inputs_to_check: Sequence[int],
 ) -> str:
     """
     Generate a unique hash of the FX graph for caching.
     """
-    details = FxGraphHashDetails(gm, example_inputs, fx_kwargs)
+    details = FxGraphHashDetails(gm, example_inputs, fx_kwargs, inputs_to_check)
     # The prefix distinguishes among the other kinds of objects we
     # cache in this module.
     key = "f" + FxGraphCachePickler.get_hash(details)
@@ -963,6 +979,7 @@ class FxGraphCache:
         gm: torch.fx.GraphModule,
         example_inputs: List[torch.Tensor],
         fx_kwargs: Dict[str, Any],
+        inputs_to_check: Sequence[int],
         local: bool,
         remote: bool,
     ):
@@ -974,7 +991,7 @@ class FxGraphCache:
         compiled_graph = None
         try:
             FxGraphCache._check_can_cache(gm)
-            key = compiled_fx_graph_hash(gm, example_inputs, fx_kwargs)
+            key = compiled_fx_graph_hash(gm, example_inputs, fx_kwargs, inputs_to_check)
 
             remote_cache = None
             if remote:
@@ -1265,7 +1282,7 @@ cdll.LoadLibrary("__lib_path__")
     def __hash__(self) -> int:
         return hash(str(self))
 
-    @functools.lru_cache(None)
+    @functools.lru_cache(None)  # noqa: B019
     def __bool__(self) -> bool:
         if config.cpp.vec_isa_ok is not None:
             return config.cpp.vec_isa_ok
@@ -1720,6 +1737,11 @@ def get_include_and_linking_paths(
             # and raise error together with instructions at compilation error later
         else:
             libs = ["omp"] if config.is_fbcode() else ["gomp"]
+
+        # For AOT mode, the produced library relies on torch cpu to set grad mode
+        # like aoti_torch_grad_mode_set_enabled
+        if aot_mode and sys.platform == "linux" and not config.is_fbcode():
+            libs += ["torch", "torch_cpu"]
 
     # Unconditionally import c10 for non-abi-compatible mode to use TORCH_CHECK - See PyTorch #108690
     if not config.abi_compatible:
@@ -2542,7 +2564,7 @@ class CppWrapperCodeCache(CppPythonBindingsCodeCache):
     cache: Dict[str, Callable[[], Union[CDLL, ModuleType]]] = {}
     cache_clear = staticmethod(cache.clear)
     cpp_compile_command_flags = {
-        "include_pytorch": not config.abi_compatible,
+        "include_pytorch": True,
         "shared": True,
     }
     entry_function = "inductor_entry_cpp"
