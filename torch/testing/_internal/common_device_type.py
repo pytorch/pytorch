@@ -1612,3 +1612,9 @@ def skipPRIVATEUSE1(fn):
 #  This should probably enumerate all available device type test base classes.
 def get_all_device_types() -> List[str]:
     return ['cpu'] if not torch.cuda.is_available() else ['cpu', 'cuda']
+
+def any_common_cpu_device_one():
+    return OpDTypes.any_common_cpu_xpu_one if TEST_XPU else OpDTypes.any_common_cpu_cuda_one
+
+def has_gpu_device(devices: List[str]):
+    return "cuda" in devices or "xpu" in devices

@@ -24114,8 +24114,8 @@ def skipOps(test_case_name, base_test_name, to_skip, all_opinfos=op_db):
         return fn
     return wrapped
 
-def enable_backend_test(op_db_list: List[OpInfo]):
-    if TEST_XPU:
+def apply_op_db_for(op_db_list: List[OpInfo], device='xpu'):
+    if TEST_XPU and device == 'xpu':
         # Get the supported op and dtypes from yaml file.
         backend_op_dict = get_backend_op_dict()
         supported_op_list = [list(op_dict.keys())[0] if type(op_dict) is dict else op_dict for op_dict in backend_op_dict['supported']]
