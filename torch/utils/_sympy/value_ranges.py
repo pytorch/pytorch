@@ -762,8 +762,8 @@ class SymPyValueRangeAnalysis:
 
     @classmethod
     def round_decimal(cls, number, ndigits):
-        # TODO: this needs to work even when ndigits is not singleton
-        assert ndigits.is_singleton()
+        if not ndigits.is_singleton():
+            return ValueRanges.unknown()
 
         ndigits = ndigits.lower
         # We can't use functools.partial here since sympy doesn't support keyword arguments, but we have to bind
@@ -944,6 +944,8 @@ class ValueRangeAnalysis(SymPyValueRangeAnalysis):
             if dtype.is_floating_point:
                 return sympy.Float(x)
             else:
+                if x in (int_oo, -int_oo):
+                    return x
                 try:
                     return sympy.Integer(x)
                 except TypeError:
@@ -968,7 +970,9 @@ class ValueRangeAnalysis(SymPyValueRangeAnalysis):
     def neg(x):
         return ValueRanges.decreasing_map(x, operator.neg)
 
-    # TODO: this is wrong, do something better
+    # TODO: this is slightly inaccurate because truncdiv operates at integer
+    # precision, but we're going through float truediv which means we can
+    # potentially lose precision on the bounds
     @classmethod
     def truncdiv(cls, a, b):
         x = cls.truediv(a, b)

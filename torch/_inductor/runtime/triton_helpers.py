@@ -16,15 +16,21 @@ except ImportError:
 
 # In the latest triton, math functions were shuffled around into different modules:
 # https://github.com/openai/triton/pull/3172
-if hasattr(tl.extra, "cuda") and hasattr(tl.extra.cuda, "libdevice"):
-    libdevice = tl.extra.cuda.libdevice
+try:
+    from triton.language.extra import libdevice
+
+    libdevice = tl.extra.libdevice  # noqa: F811
     math = tl.math
-elif hasattr(tl.extra, "intel") and hasattr(tl.extra.intel, "libdevice"):
-    libdevice = tl.extra.intel.libdevice
-    math = tl.math
-else:
-    libdevice = tl.math
-    math = tl
+except ImportError:
+    if hasattr(tl.extra, "cuda") and hasattr(tl.extra.cuda, "libdevice"):
+        libdevice = tl.extra.cuda.libdevice
+        math = tl.math
+    elif hasattr(tl.extra, "intel") and hasattr(tl.extra.intel, "libdevice"):
+        libdevice = tl.extra.intel.libdevice
+        math = tl.math
+    else:
+        libdevice = tl.math
+        math = tl
 
 
 @triton.jit
@@ -195,7 +201,7 @@ def bucketize_binary_search(
     while full_range > 1:
         mid = (high + low) // 2
         mask = mid < OFFSETS_SIZE
-        bucket_upper_bound = tl.load(offsets_ptr + mid, mask=mask)
+        bucket_upper_bound = tl.load(offsets_ptr + mid, mask=mask, other=0.0)
         if right:
             is_above = values >= bucket_upper_bound
         else:

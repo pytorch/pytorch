@@ -208,6 +208,10 @@ class PythonReferenceAnalysis(ReferenceAnalysis):
         return a // b
 
     @staticmethod
+    def mod(x, y):
+        return x % y
+
+    @staticmethod
     def truncdiv(a, b):
         return a / b
 
