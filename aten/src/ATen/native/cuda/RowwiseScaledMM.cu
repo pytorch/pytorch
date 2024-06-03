@@ -5,7 +5,8 @@
 #include <ATen/cuda/nvrtc_stub/ATenNVRTC.h>
 
 // Determine if the architecture supports rowwise scaled mm
-#if !defined(USE_ROCM) && defined(CUDA_VERSION) && CUDA_VERSION >= 12000
+// Currenlty failing on windows with: https://github.com/NVIDIA/cutlass/issues/1571
+#if !defined(USE_ROCM) && !defined(_WIN32) && defined(CUDA_VERSION) && CUDA_VERSION >= 12000
 
 #define BUILD_ROWWISE_FP8_KERNEL
 #endif
