@@ -117,10 +117,13 @@ forward graph of the parent module,
     if _equalization_config is None:
         _equalization_config = QConfigMapping()
 
-    if isinstance(prepare_custom_config, Dict):
+    if isinstance(prepare_custom_config, dict):
         warnings.warn(
             "Passing a prepare_custom_config_dict to prepare is deprecated and will not be supported "
-            "in a future version. Please pass in a PrepareCustomConfig instead.")
+            "in a future version. Please pass in a PrepareCustomConfig instead.",
+            FutureWarning,
+            stacklevel=3,
+        )
         prepare_custom_config = PrepareCustomConfig.from_dict(prepare_custom_config)
 
     # swap FloatFunctional with FXFloatFunctional
@@ -222,10 +225,13 @@ def fuse_fx(
     if fuse_custom_config is None:
         fuse_custom_config = FuseCustomConfig()
 
-    if isinstance(fuse_custom_config, Dict):
+    if isinstance(fuse_custom_config, dict):
         warnings.warn(
             "Passing a fuse_custom_config_dict to fuse is deprecated and will not be supported "
-            "in a future version. Please pass in a FuseCustomConfig instead.")
+            "in a future version. Please pass in a FuseCustomConfig instead.",
+            FutureWarning,
+            stacklevel=2,
+        )
         fuse_custom_config = FuseCustomConfig.from_dict(fuse_custom_config)
 
     torch._C._log_api_usage_once("quantization_api.quantize_fx.fuse_fx")
@@ -511,10 +517,13 @@ def _convert_fx(
     if convert_custom_config is None:
         convert_custom_config = ConvertCustomConfig()
 
-    if isinstance(convert_custom_config, Dict):
+    if isinstance(convert_custom_config, dict):
         warnings.warn(
             "Passing a convert_custom_config_dict to convert is deprecated and will not be supported "
-            "in a future version. Please pass in a ConvertCustomConfig instead.")
+            "in a future version. Please pass in a ConvertCustomConfig instead.",
+            FutureWarning,
+            stacklevel=3,
+        )
         convert_custom_config = ConvertCustomConfig.from_dict(convert_custom_config)
 
     _check_is_graph_module(graph_module)
