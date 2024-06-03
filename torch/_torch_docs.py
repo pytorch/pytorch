@@ -3432,13 +3432,16 @@ Example::
 add_docstr(
     torch.cumsum,
     r"""
-cumsum(input, dim, *, dtype=None, out=None) -> Tensor
+cumsum(input, dim, *, dtype=None, full=False, out=None) -> Tensor
 
 Returns the cumulative sum of elements of :attr:`input` in the dimension
 :attr:`dim`.
 
 For example, if :attr:`input` is a vector of size N, the result will also be
 a vector of size N, with elements.
+
+If :attr:`full` is true, then the output will be a vector of size N+1, with a
+0 padded at the beginning.
 
 .. math::
     y_i = x_1 + x_2 + x_3 + \dots + x_i
@@ -3449,6 +3452,7 @@ Args:
 
 Keyword args:
     {dtype}
+    {full}
     {out}
 
 Example::
@@ -3458,6 +3462,8 @@ Example::
     tensor([13,  7,  3, 10, 13,  3, 15, 10,  9, 10])
     >>> torch.cumsum(a, dim=0)
     tensor([13, 20, 23, 33, 46, 49, 64, 74, 83, 93])
+    >>> torch.cumsum(a, dim=0, full=True)
+    tensor([0, 13, 20, 23, 33, 46, 49, 64, 74, 83, 93])
 """.format(
         **reduceops_common_args
     ),

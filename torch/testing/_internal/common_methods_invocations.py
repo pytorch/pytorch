@@ -6810,7 +6810,7 @@ def make_mvlgamma_opinfo(variant_test_name, domain, skips, sample_kwargs):
                           sample_kwargs=sample_kwargs)
 
 
-def sample_inputs_cumulative_ops(op_info, device, dtype, requires_grad, supports_dtype_kwargs=True, **kwargs):
+def sample_inputs_cumulative_ops(op_info, device, dtype, requires_grad, supports_dtype_kwargs=True, supports_full=False, **kwargs):
     def _make_tensor_helper(shape, low=None, high=None):
         return make_tensor(shape, dtype=dtype, device=device, low=low, high=high, requires_grad=requires_grad)
 
@@ -6822,6 +6822,9 @@ def sample_inputs_cumulative_ops(op_info, device, dtype, requires_grad, supports
         # NOTE: if `dtype` is not same as input, then inplace variants fail with
         # `provided dtype must match the dtype of self tensor in cumsum`
         yield SampleInput(_make_tensor_helper((S, S, S)), 1, dtype=dtype)
+
+    if supports_full:
+        yield SampleInput(_make_tensor_helper((S, S, S), 1, full=True))
 
 
 def sample_inputs_unfold(op_info, device, dtype, requires_grad, **kwargs):
@@ -12886,7 +12889,7 @@ op_db: List[OpInfo] = [
                # cumsum does not handle correctly out= dtypes
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out'),
            ),
-           sample_inputs_func=sample_inputs_cumulative_ops),
+           sample_inputs_func=partial(sample_inputs_cumulative_ops, supports_full=True)),
     OpInfo('cumprod',
            dtypes=all_types_and_complex_and(torch.float16, torch.bfloat16),
            supports_forward_ad=True,
