@@ -1,8 +1,10 @@
 import torch.library
 from torch import Tensor
 from torch.autograd import Function
+# Test rerun tes_ops
 
 if not torch._running_with_deploy():
+    _no_op = 1
     _test_lib_def = torch.library.Library("_inductor_test", "DEF")
     _test_lib_def.define(
         "realize(Tensor self) -> Tensor", tags=torch.Tag.pt2_compliant_tag
