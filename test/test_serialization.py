@@ -4225,7 +4225,7 @@ class TestSubclassSerialization(TestCase):
                 with self.assertRaisesRegex(pickle.UnpicklingError,
                                             "Unsupported global: GLOBAL torch.testing._internal.two_tensor.TwoTensor"):
                     torch.load(f, weights_only=True)
-            except:
+            finally:
                 torch.serialization.clear_safe_globals()
 
     @unittest.skipIf(not torch.cuda.is_available(), "map_location loads to cuda")
