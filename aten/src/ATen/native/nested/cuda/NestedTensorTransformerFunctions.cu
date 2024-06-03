@@ -1278,6 +1278,36 @@ inline bool jagged_dense_dense_elementwise_jagged_output_matches_opt(
             -> scalar_t { return f(x, y); });                                  \
   }
 
+inline int calc_user_shared_bytes(const int device) {
+    int max_shared_bytes;
+#ifndef USE_ROCM
+    C10_CUDA_CHECK(cudaDeviceGetAttribute(
+        &max_shared_bytes,
+        cudaDevAttrMaxSharedMemoryPerBlockOptin,
+        device));
+#else
+    // MI100 has 64 KB local memory (shared memory) per workgroup
+    max_shared_bytes = 64 << 10;
+#endif
+    int shared_kb = max_shared_bytes >> 10;
+#ifndef USE_ROCM
+    // Use 2/3 of the available GPU shared mem; leave rooms for L1$.
+    int used_shared_kb = round_down(shared_kb * 2 / 3, 16);
+    TORCH_CHECK(used_shared_kb > 0);
+#else
+    // MI100 has independent shared mem and L1
+    int used_shared_kb = shared_kb;
+#endif
+    int used_shared_bytes = used_shared_kb << 10;
+    return user_shared_bytes;
+}
+
+inline void set_cuda_attr(const void* func, cudaFuncAttribute attr, int value) {
+#ifndef USE_ROCM
+    C10_CUDA_CHECK(cudaFuncSetAttribute(func, attr, value));
+#endif
+}
+
 ///@addtogroup jagged-tensor-ops-cuda
 template <typename scalar_t, typename F>
 void jagged_dense_elementwise_jagged_output_opt_(
@@ -1331,33 +1361,12 @@ void jagged_dense_elementwise_jagged_output_opt_(
           auto cur_max_shared_bytes =
               at::cuda::getCurrentDeviceProperties()->sharedMemPerBlock;
           if (dynamic_smem_size > cur_max_shared_bytes) {
-            int max_shared_bytes;
-#ifndef USE_ROCM
-            C10_CUDA_CHECK(cudaDeviceGetAttribute(
-                &max_shared_bytes,
-                cudaDevAttrMaxSharedMemoryPerBlockOptin,
-                y_reshaped.get_device()));
-#else
-            // MI100 has 64 KB local memory (shared memory) per workgroup
-            max_shared_bytes = 64 << 10;
-#endif
-            int shared_kb = max_shared_bytes >> 10;
-#ifndef USE_ROCM
-            // Use 2/3 of the available GPU shared mem; leave rooms for L1$.
-            int used_shared_kb = round_down(shared_kb * 2 / 3, 16);
-            TORCH_CHECK(used_shared_kb > 0);
-#else
-            // MI100 has independent shared mem and L1
-            int used_shared_kb = shared_kb;
-#endif
-            int used_shared_bytes = used_shared_kb << 10;
-#ifndef USE_ROCM
-            C10_CUDA_CHECK(cudaFuncSetAttribute(
+            int user_shared_bytes = calc_user_shared_bytes(y_reshaped.device());
+            set_cuda_attr(
                 jagged_dense_dense_elementwise_jagged_output_opt_search_kernel_<
                     index_t>,
                 cudaFuncAttributeMaxDynamicSharedMemorySize,
-                used_shared_bytes)); // V100: 64 KB; A100: 96 KB; H100: 144 KB
-#endif
+                used_shared_bytes); // V100: 64 KB; A100: 96 KB; H100: 144 KB
             C10_CUDA_KERNEL_LAUNCH_CHECK();
             TORCH_CHECK(dynamic_smem_size <= used_shared_bytes);
           }
