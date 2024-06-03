@@ -5,20 +5,20 @@ from typing import Any, cast, Dict, List, Optional, Sequence, Tuple
 import torch
 from torch._subclasses.fake_tensor import FakeTensor
 from torch.distributed._tensor import DeviceMesh, distribute_tensor, DTensor
-from torch.distributed._tensor.op_schema import (
+from torch.distributed._tensor._op_schema import (
     DTensorSpec,
     OpSchema,
     OutputSharding,
     OutputSpecType,
     PlacementStrategy,
 )
+from torch.distributed._tensor._redistribute import redistribute_local_tensor
 from torch.distributed._tensor.placement_types import (
     Placement,
     Replicate,
     Shard,
     TensorMeta,
 )
-from torch.distributed._tensor.redistribute import redistribute_local_tensor
 from torch.distributed.tensor.parallel.style import ColwiseParallel, ParallelStyle
 from torch.export import ExportedProgram
 from torch.export.exported_program import ExportGraphSignature
@@ -346,7 +346,6 @@ def _generate_default_output_sharding(
             FakeTensor, create_output_spec, node.meta["val"]
         ),
         redistribute_schema=new_op_schema,
-        failed_reason=f"{node.op} does not have sharding strategy registered",
         needs_redistribute=True,
     )
 

@@ -155,10 +155,12 @@ class ForeachKernel(Kernel):
     def jit_lines(self):
         can_use_32bit = all(k.index_dtype == "tl.int32" for k in self.sub_kernels)
         size_dtype = "tl.int32" if can_use_32bit else "tl.int64"
-        _, _, signature = self.args.python_argdefs()
+        _, _, signature, _ = self.args.python_argdefs()
         triton_meta = {
             "signature": signature_to_meta(signature, size_dtype=size_dtype),
-            "device": DeviceProperties.create(V.graph.scheduler.current_device),
+            "device": DeviceProperties.create(
+                V.graph.scheduler.get_current_device_or_throw()
+            ),
             "constants": {},
         }
         triton_meta["configs"] = [config_of(signature)]
@@ -188,7 +190,7 @@ class ForeachKernel(Kernel):
         code = IndentedBuffer()
 
         code.splice(gen_common_triton_imports())
-        argdefs, _, _ = self.args.python_argdefs()
+        argdefs, _, _, _ = self.args.python_argdefs()
         code.splice(self.jit_lines())
         code.writeline(
             f"def {name or str(Placeholder.KERNEL_NAME)}({', '.join(argdefs)}):"
@@ -225,24 +227,24 @@ class ForeachKernel(Kernel):
         return code.getvalue()
 
     def call_kernel(self, code, name: str):
-        _, call_args, _ = self.args.python_argdefs()
+        _, call_args, _, arg_types = self.args.python_argdefs()
         # dynamo wraps unspec variable as 0d CPU tensor, need convert to scalar
         for i in range(len(call_args)):
             if V.graph.is_unspec_arg(call_args[i]):
                 call_args[i] = call_args[i] + ".item()"
+        current_device = V.graph.scheduler.get_current_device_or_throw()
         if V.graph.cpp_wrapper:
             V.graph.wrapper_code.generate_kernel_call(
                 name,
                 call_args,
-                device_index=V.graph.scheduler.current_device.index,
+                device_index=current_device.index,
                 grid=self.grid(),
+                arg_types=arg_types,
             )
         else:
             # TODO: refactor generate_kernel_call
             call_args_str = ", ".join(call_args)
-            stream_name = code.write_get_raw_stream(
-                V.graph.scheduler.current_device.index
-            )
+            stream_name = code.write_get_raw_stream(current_device.index)
             code.writeline(
                 f"{name}.run({call_args_str}, grid=({self.grid()}), stream={stream_name})"
             )
