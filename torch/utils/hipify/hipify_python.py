@@ -973,7 +973,7 @@ def preprocessor(
             hipify_result.current_state = CurrentState.DONE
             return hipify_result
         except PermissionError as e:
-            print(f"{bcolors.WARNING}Failed to save {fout_path} with \"{e.strerror}\", leaving {fin_path} unchanged.{bcolors.ENDC}",
+            print(f'{bcolors.WARNING}Failed to save {fout_path} with "{e.strerror}", leaving {fin_path} unchanged.{bcolors.ENDC}',
                   file=sys.stderr)
             hipify_result.hipified_path = fin_path
             hipify_result.status = "[skipped, no permissions]"
