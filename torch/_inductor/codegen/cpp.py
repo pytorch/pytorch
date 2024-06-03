@@ -69,7 +69,6 @@ from .cpp_utils import (
     DTYPE_TO_CPP,
     INDEX_TYPE,
     LocalBufferScope,
-    LocalizeBufferHandler,
     unify_mask_base_type,
     value_to_cpp,
 )
@@ -1996,12 +1995,14 @@ class CppKernel(Kernel):
                     assert len(local_buffers.items()) == 1
                     local_buffer = next(iter(local_buffers.items()))[1]
 
-                    # Checked in try_outer_loop_fusion_with_local_buf by assuming last dim size and contiguous
-                    assert len(local_buffer.get_layout().size) == 1
                     # For dynamic size, rename s to ks
-                    local_buf_size = self.rename_indexing(
-                        local_buffer.get_layout().size[-1]
+                    local_buf_size = sympy_product(
+                        [
+                            self.rename_indexing(size_val)
+                            for size_val in local_buffer.get_layout().size
+                        ]
                     )
+
                     local_buf_dtype = DTYPE_TO_CPP[local_buffer.get_layout().dtype]
                     allocate = (
                         f"std::make_unique<{local_buf_dtype} []>({local_buf_size})"
@@ -3449,53 +3450,47 @@ class CppKernelProxy(CppKernel):
         )
 
         def fn(node, *index_vars):
-            ctx = contextlib.nullcontext()
-            if (
-                isinstance(V.local_buffer_scope, LocalBufferScope)
-                and V.local_buffer_scope.local_buffers
-            ):
-                assert len(V.local_buffer_scope.local_buffers.items()) == 1
-
-                def localize_fn(self, name, index):
-                    scheduler_nodes = V.graph.scheduler.name_to_node.get(name).get_nodes()  # type: ignore[union-attr]
-                    # Rename buffer name to Local Buffer
-                    name = self.local_buf.get_name()
-                    # Use the last dim
-                    _, (group, reduction_group) = max(
-                        scheduler_nodes, key=lambda x: int(x.is_reduction())
-                    ).group
-                    call_ranges = tuple(group) + tuple(reduction_group)
-                    index_id_to_keep = len(call_ranges) - 1
-                    sorted_symbols = sorted(index.free_symbols, key=lambda s: s.name)  # type: ignore[attr-defined]
-                    replacements = {}
-                    for x in sorted_symbols:
-                        if x.name.startswith("x") and x.name != f"x{index_id_to_keep}":  # type: ignore[attr-defined]
-                            # Only keep index used by local buffer
-                            replacements[x] = sympy.core.numbers.Zero()
-                    index = sympy_subs(index, replacements)  # type: ignore[arg-type]
-                    return name, index
-
-                ctx = V.set_ops_handler(
-                    LocalizeBufferHandler(
-                        V.get_ops_handler(),
-                        global_buf=next(iter(V.local_buffer_scope.local_nodes.items()))[
-                            1
-                        ].node,
-                        local_buf=next(
-                            iter(V.local_buffer_scope.local_buffers.items())
-                        )[1],
-                        localize_fn=localize_fn,
-                    )
-                )
-            with ctx:
-                node.decide_inplace_update()
-                node.mark_run()
-                if isinstance(V.kernel, NullKernelHandler):
-                    return node._body(*index_vars)
-                else:
-                    return node.codegen(index_vars)
+            node.decide_inplace_update()
+            node.mark_run()
+            if isinstance(V.kernel, NullKernelHandler):
+                return node._body(*index_vars)
+            else:
+                return node.codegen(index_vars)
 
         fn_list = [functools.partial(fn, node) for node in nodes]
+
+        if (
+            isinstance(V.local_buffer_scope, LocalBufferScope)
+            and V.local_buffer_scope.local_buffers
+        ):
+
+            def localize_fn(self, name, index):
+                scheduler_nodes = V.graph.scheduler.name_to_node.get(name).get_nodes()  # type: ignore[union-attr]
+                # Rename buffer name to Local Buffer
+                name = self.local_buf.get_name()
+                # Local buffer at the inner dimensions
+                _, (group, reduction_group) = max(
+                    scheduler_nodes, key=lambda x: int(x.is_reduction())
+                ).group
+                call_ranges = tuple(group) + tuple(reduction_group)
+                indices_to_keep = [
+                    f"x{len(call_ranges) - (idx + 1)}"
+                    for idx in range(len(self.local_buf.get_layout().size))
+                ]
+                sorted_symbols = sorted(index.free_symbols, key=lambda s: s.name)  # type: ignore[attr-defined]
+                replacements = {}
+                for x in sorted_symbols:
+                    if x.name.startswith("x") and x.name not in indices_to_keep:
+                        # Only keep index used by local buffer
+                        replacements[x] = sympy.core.numbers.Zero()
+                index = sympy_subs(index, replacements)  # type: ignore[arg-type]
+                return name, index
+
+            fn_list = [
+                V.local_buffer_scope.localize_buffer_for_function(fn, localize_fn)
+                for fn in fn_list
+            ]
+
         var_sizes_list = [node.group[1] for node in nodes]
         self.codegen_functions(fn_list, var_sizes_list, vec_dtype)
 
@@ -3846,12 +3841,17 @@ class CppScheduling(BaseScheduling):
                     global_buffer = scheduler_node.node
                     assert isinstance(global_buffer, ir.ComputedBuffer)
                     global_buffer_layout = global_buffer.get_layout()
-                    # Previous check ensure that local buffer is with size of last dim and contiguous.
+                    if not global_buffer_layout.is_contiguous():
+                        continue
+                    # Local Buffer is a view of global buffer
+                    size_offset = node.outer_loop_fusion_depth - len(
+                        get_call_ranges(scheduler_node)
+                    )
                     local_buffer_layout = ir.FixedLayout(
                         global_buffer_layout.device,
                         global_buffer_layout.dtype,
-                        global_buffer_layout.size[-1:],
-                        global_buffer_layout.stride[-1:],
+                        global_buffer_layout.size[size_offset:],
+                        global_buffer_layout.stride[size_offset:],
                     )
                     local_buffers.append(
                         LocalBuffer(

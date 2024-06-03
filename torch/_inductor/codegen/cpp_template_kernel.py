@@ -281,7 +281,7 @@ class CppTemplateKernel(Kernel):
                 assert orig_src is not None
                 if orig_src.get_name() != src.get_name():
                     scope.add_local_buffer(src)
-                    epilogue_nodes = scope.localize_buffer(
+                    epilogue_nodes = scope.localize_buffer_for_nodes(
                         orig_src, src, epilogue_nodes
                     )
                 return self.store_pointwise_nodes(

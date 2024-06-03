@@ -375,7 +375,35 @@ class LocalBufferScope:
                 patch.object(node.node, "should_allocate", should_allocate)
             )
 
-    def localize_buffer(
+    def localize_buffer_for_function(
+        self,
+        fn: Callable[..., Any],
+        localize_fn: Callable[..., Any],
+        global_buf: Optional[ir.Buffer] = None,
+        local_buf: Optional[ir.Buffer] = None,
+    ):
+        def inner(node, *index_vars):
+            with V.set_ops_handler(
+                LocalizeBufferHandler(
+                    V.get_ops_handler(),
+                    global_buf=(
+                        global_buf
+                        if global_buf
+                        else next(iter(self.local_nodes.items()))[1].node
+                    ),
+                    local_buf=(
+                        local_buf
+                        if local_buf
+                        else next(iter(self.local_buffers.items()))[1]
+                    ),
+                    localize_fn=localize_fn,
+                )
+            ):
+                return fn(node, *index_vars)
+
+        return inner
+
+    def localize_buffer_for_nodes(
         self, global_buf: ir.Buffer, local_buf: ir.Buffer, nodes: List[ir.IRNode]
     ) -> List[ir.IRNode]:
         """
@@ -391,7 +419,16 @@ class LocalBufferScope:
         assert len(global_buf.get_size()) == len(local_buf.get_size())
         assert len(nodes) > 0
 
-        def wrap_inner_fn_for_node(node: ir.IRNode, inner_fn_wrapper):
+        def localize_fn(self, name, index):
+            name = self.local_buf.get_name()
+            index_vars = sorted(
+                [s for s in index.free_symbols if symbol_is_type(s, SymT.INDEX)],
+                key=str,
+            )
+            index = self.local_buf.layout.make_indexer()(index_vars)
+            return name, index
+
+        def wrap_inner_fn_for_node(node: ir.IRNode):
             loops = node.data if isinstance(node, ir.ComputedBuffer) else node
             assert isinstance(loops, ir.Loops)
             new_loops = copy.copy(loops)
@@ -402,37 +439,15 @@ class LocalBufferScope:
             else:
                 new_node = new_loops  # type: ignore[assignment]
 
-            new_loops.inner_fn = inner_fn_wrapper(new_loops.inner_fn)
+            new_loops.inner_fn = self.localize_buffer_for_function(
+                new_loops.inner_fn,
+                localize_fn,
+                global_buf,
+                local_buf,
+            )
             return new_node
 
-        def inner_fn_wrapper(inner_fn):
-            def inner(index):
-                def localize_fn(self, name, index):
-                    name = self.local_buf.get_name()
-                    index_vars = sorted(
-                        [
-                            s
-                            for s in index.free_symbols
-                            if symbol_is_type(s, SymT.INDEX)
-                        ],
-                        key=str,
-                    )
-                    index = self.local_buf.layout.make_indexer()(index_vars)
-                    return name, index
-
-                with V.set_ops_handler(
-                    LocalizeBufferHandler(
-                        V.get_ops_handler(),
-                        global_buf,
-                        local_buf,
-                        localize_fn=localize_fn,
-                    )
-                ):
-                    return inner_fn(index)
-
-            return inner
-
-        return [wrap_inner_fn_for_node(node, inner_fn_wrapper) for node in nodes]
+        return [wrap_inner_fn_for_node(node) for node in nodes]
 
 
 def unify_mask_base_type(
