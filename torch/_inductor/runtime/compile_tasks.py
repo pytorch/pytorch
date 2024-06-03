@@ -33,7 +33,7 @@ def _reload_python_module_in_subproc(key, path):
 def _reload_python_module(key, path):
     with open(path) as f:
         try:
-            code = compile(f.read(), path, "exec")
+            code = compile(f.read(), path, "exec", dont_inherit=True)
         except Exception as e:
             raise RuntimeError(
                 f"Failed to import {path}\n{type(e).__name__}: {e}"

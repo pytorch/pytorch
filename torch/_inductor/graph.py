@@ -393,7 +393,7 @@ class GraphLowering(torch.fx.Interpreter):
         self.aot_mode = aot_mode
         self.graph_id = graph_id
         self.post_grad_graph_id = next(_post_grad_graph_counter)
-        self.scheduler: "torch._inductor.scheduler.Scheduler" = None  # type: ignore[assignment]
+        self.scheduler: torch._inductor.scheduler.Scheduler = None  # type: ignore[assignment]
         self.nodes_prefer_channels_last = (
             self.find_nodes_prefer_channels_last() if self.layout_opt else set()
         )
@@ -802,46 +802,46 @@ class GraphLowering(torch.fx.Interpreter):
             else self.constants[name]
         )
 
+    def allocate_non_dup_const_name(self, name, data):
+        orig_name = name
+        if not config.aot_inductor.use_runtime_constant_folding:
+            for constant_name, value in self.constants.items():
+                if (
+                    not data.is_mkldnn
+                    and data.size() == value.size()
+                    and data.stride() == value.stride()
+                    and data.dtype == value.dtype
+                    and data.device == value.device
+                    and data.untyped_storage().data_ptr()
+                    == value.untyped_storage().data_ptr()
+                    and data.storage_offset() == value.storage_offset()
+                ):
+                    return constant_name
+
+        if name is None:
+            name = f"constant{len(self.constants)}"
+        if name[0].isdigit():
+            name = f"constant_{name}"
+        name = self.qualify_name(name)
+        # We may generate a var name for each constant in the codegen.
+        # Let's only keep sane characters.
+        prefix = re.sub(r"[^a-zA-Z0-9_]", "_", name)
+        name = prefix
+        cnt = 0
+        while name in self.constants:
+            name = f"{prefix}_{cnt}"
+            cnt += 1
+        self.constants[name] = data
+        self.constant_reprs[name] = (
+            f"{data.device!r} {data.dtype!r} "
+            f"{tuple(data.size())!r} {tuple(data.stride())!r} "
+            f"{hash(data):x}"
+        )
+        self.allocated_constant_name[name] = orig_name
+        return name
+
     def add_tensor_constant(self, data, name=None):
-        def allocate(name):
-            if not config.aot_inductor.use_runtime_constant_folding:
-                for constant_name, value in self.constants.items():
-                    if (
-                        not data.is_mkldnn
-                        and data.size() == value.size()
-                        and data.stride() == value.stride()
-                        and data.dtype == value.dtype
-                        and data.device == value.device
-                        and data.untyped_storage().data_ptr()
-                        == value.untyped_storage().data_ptr()
-                        and data.storage_offset() == value.storage_offset()
-                    ):
-                        return constant_name
-
-            if name is None:
-                name = f"constant{len(self.constants)}"
-            if name[0].isdigit():
-                name = f"constant_{name}"
-            name = self.qualify_name(name)
-            # We may generate a var name for each constant in the codegen.
-            # Let's only keep sane characters.
-            prefix = re.sub(r"[^a-zA-Z0-9_]", "_", name)
-            name = prefix
-            cnt = 0
-            while name in self.constants:
-                name = f"{prefix}_{cnt}"
-                cnt += 1
-            self.constants[name] = data
-            self.constant_reprs[name] = (
-                f"{data.device!r} {data.dtype!r} "
-                f"{tuple(data.size())!r} {tuple(data.stride())!r} "
-                f"{hash(data):x}"
-            )
-            return name
-
-        new_name = allocate(name)
-        self.allocated_constant_name[new_name] = name
-
+        new_name = self.allocate_non_dup_const_name(name, data)
         return TensorBox.create(
             ir.ConstantBuffer(
                 new_name,
@@ -857,10 +857,10 @@ class GraphLowering(torch.fx.Interpreter):
         """
         if self.constants[name].device == device_override or device_override is None:
             return name
-        alt_name = f"{name}_{device_override.type}{device_override.index or 0}"
-        if alt_name not in self.constants:
-            self.constants[alt_name] = self.constants[name].to(device_override)
-        return alt_name
+        return self.allocate_non_dup_const_name(
+            f"{name}_{device_override.type}{device_override.index or 0}",
+            self.constants[name].to(device_override),
+        )
 
     def placeholder(self, target: str, args, kwargs):
         example = super().placeholder(target, args, kwargs)
@@ -929,7 +929,22 @@ class GraphLowering(torch.fx.Interpreter):
             # which run through implicit fallback must constrain their
             # arguments' fx strides
             layout_constraint = None
-            if torch._C.Tag.needs_fixed_stride_order in target.tags:
+
+            def needs_fixed_stride_order(target):
+                if (
+                    torch._C.Tag.needs_fixed_stride_order in target.tags
+                    and torch._C.Tag.does_not_need_fixed_stride_order in target.tags
+                ):
+                    # If both tags were specified, pessimistically assume that we do need it.
+                    return True
+                if torch._library.utils.is_builtin(target):
+                    return torch._C.Tag.needs_fixed_stride_order in target.tags
+                else:
+                    return (
+                        torch._C.Tag.does_not_need_fixed_stride_order not in target.tags
+                    )
+
+            if needs_fixed_stride_order(target):
                 # We have to set the current args because call_function will immediately
                 # evaluate this lowering after creating the fallback, without evaluating
                 # the layout constraint
@@ -1666,7 +1681,7 @@ class GraphLowering(torch.fx.Interpreter):
             node_runtimes.append((node, node.get_estimated_runtime()))
         return total_bytes, node_counts, node_runtimes
 
-    @dynamo_timed(phase_name="code_gen")
+    @dynamo_timed(phase_name="code_gen", fwd_only=False)
     def compile_to_module(self):
         from .codecache import PyCodeCache
 
