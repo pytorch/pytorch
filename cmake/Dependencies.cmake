@@ -147,21 +147,13 @@ set(AT_MKLDNN_ACL_ENABLED 0)
 set(AT_MKLDNN_ENABLED 0)
 set(AT_MKL_ENABLED 0)
 # setting default preferred BLAS options if not already present.
-if(NOT DEFINED BLAS)
-  if(NOT INTERN_BUILD_MOBILE)
-    set(BLAS "MKL" CACHE STRING "Selected BLAS library")
-  else()
-    set(BLAS "Eigen" CACHE STRING "Selected BLAS library")
-  endif()
-elseif(NOT BLAS STREQUAL "MKL")
-    if(USE_MKLDNN)
-      message(WARNING
-        "You explicitly chose with BLAS to not use MKL, so disabling USE_MKLDNN. Suppress this warning with "
-        "-DUSE_MKLDNN=OFF.")
-      set(USE_MKLDNN OFF)
-    endif()
+if(NOT INTERN_BUILD_MOBILE)
+  set(BLAS "MKL" CACHE STRING "Selected BLAS library")
+else()
+  set(BLAS "Eigen" CACHE STRING "Selected BLAS library")
+  set(AT_MKLDNN_ENABLED 0)
+  set(AT_MKL_ENABLED 0)
 endif()
-
 set_property(CACHE BLAS PROPERTY STRINGS "ATLAS;BLIS;Eigen;FLAME;Generic;MKL;OpenBLAS;vecLib")
 message(STATUS "Trying to find preferred BLAS backend of choice: " ${BLAS})
 
