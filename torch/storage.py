@@ -59,7 +59,7 @@ class _StorageBase:
     def type(self, dtype: _Optional[str] = None, non_blocking: _bool = False) -> T:  # type: ignore[type-var]
         return _type(self, dtype, non_blocking)
 
-    def cuda(self, device=None, non_blocking=False) -> T:  # type: ignore[type-var]
+    def cuda(self, device=None, non_blocking=False) -> T:  # type: ignore[type-var, misc] # noqa: E704
         """Returns a copy of this object in CUDA memory.
 
         If this object is already in CUDA memory and on the correct device, then
@@ -74,7 +74,7 @@ class _StorageBase:
         device2 = torch.device("cuda", device) if device else torch.device("cuda")
         return self.to(device=device2, non_blocking=non_blocking)
 
-    def hpu(self, device=None, non_blocking=False) -> T:  # type: ignore[type-var]
+    def hpu(self, device=None, non_blocking=False) -> T:  # type: ignore[type-var, misc] # noqa: E704
         """Returns a copy of this object in HPU memory.
 
         If this object is already in HPU memory and on the correct device, then
@@ -259,7 +259,7 @@ class _StorageBase:
             storage = storage.clone()
         return storage
 
-    def to(self, *, device: torch.device, non_blocking: _bool = False) -> T:  # type: ignore[type-var]
+    def to(self, *, device: torch.device, non_blocking: _bool = False) -> T:  # type: ignore[type-var, misc] # noqa: E704
         return _to(self, device, non_blocking)
 
     def double(self):
@@ -1038,7 +1038,7 @@ class TypedStorage:
         )
         return self._new_wrapped_storage(hpu_storage)
 
-    def to(self, *, device: torch.device, non_blocking: bool = False) -> T:  # type: ignore[type-var]
+    def to(self, *, device: torch.device, non_blocking: bool = False) -> T:  # type: ignore[type-var, misc]
         _warn_typed_storage_removal()
         if self.dtype in [
             torch.quint8,
