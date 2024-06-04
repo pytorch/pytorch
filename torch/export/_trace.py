@@ -999,17 +999,17 @@ def _temp_disable_texpr_fuser():
         torch._C._jit_set_texpr_fuser_enabled(original_state)
 
 
+class _WrapperModule(torch.nn.Module):
+    def __init__(self, f):
+        super().__init__()
+        self.f = f
+
+    def forward(self, *args, **kwargs):
+        return self.f(*args, **kwargs)
+
+
 def _convert_ts_to_export_experimental(traced_callable, args, kwargs=None):
     with _temp_disable_texpr_fuser():
-
-        class _WrapperModule(torch.nn.Module):
-            def __init__(self, f):
-                super().__init__()
-                self.f = f
-
-            def forward(self, *args, **kwargs):
-                return self.f(*args, **kwargs)
-
         from torch.jit._trace import TopLevelTracedModule
 
         export_args, export_kwargs = _process_jit_trace_inputs_for_export(args, kwargs)
@@ -1034,6 +1034,7 @@ def _convert_ts_to_export_experimental(traced_callable, args, kwargs=None):
                     strict=False,
                     _is_torch_jit_trace=True,
                 ).module()
+
         else:
             return _export(
                 _WrapperModule(traced_callable),
