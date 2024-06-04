@@ -436,18 +436,32 @@ static C10_ALWAYS_INLINE float32x4_t f32_fma_bf16(float32x4_t a, uint16x4_t b, u
   return f32_fma(a, to_bfloat16(b), to_bfloat16(c));
 }
 
+static C10_ALWAYS_INLINE float32x4_t f32_dot_bf16(float32x4_t a, bfloat16x8_t b, bfloat16x8_t c) {
+#ifdef __ARM_FEATURE_BF16
+  return vbfdotq_f32(a, b, c);
+#else
+  TORCH_CHECK(false, "unsupported operation used!");
+#endif
+}
+
 static C10_ALWAYS_INLINE void dot_with_fp32_arith_main_inner_loop(
   const at::BFloat16* vec1,
   const at::BFloat16* vec2,
   float32x4_t sum[kF32RegistersPerIteration],
   int registerPairIndex) {
-  // TODO: detect intrinsic availability, use them if they're available. __ARM_FEATURE_BF16
+#ifdef __ARM_FEATURE_BF16
+  const bfloat16x8_t temp_vec1 = vld1q_bf16(&vec1[registerPairIndex * 2 * kF32ElementsPerRegister]);
+  const bfloat16x8_t temp_vec2 = vld1q_bf16(&vec2[registerPairIndex * 2 * kF32ElementsPerRegister]);
+  // TODO: we leave half of sum unused. Does this cause suboptimal code generation?
+  sum[registerPairIndex] = f32_dot_bf16(sum[registerPairIndex], temp_vec1, temp_vec2);
+#else
   // Load a pair of f32 registers at a time.
   const uint16x8_t temp_vec1 = vld1q_u16(reinterpret_cast<const uint16_t*>(&vec1[registerPairIndex * 2 * kF32ElementsPerRegister]));
   const uint16x8_t temp_vec2 = vld1q_u16(reinterpret_cast<const uint16_t*>(&vec2[registerPairIndex * 2 * kF32ElementsPerRegister]));
 
   sum[2 * registerPairIndex] = f32_fma_bf16(sum[2 * registerPairIndex], vget_low_u16(temp_vec1), vget_low_u16(temp_vec2));
   sum[2 * registerPairIndex + 1] = f32_fma_bf16(sum[2 * registerPairIndex + 1], vget_high_u16(temp_vec1), vget_high_u16(temp_vec2));
+#endif
 }
 
 static C10_ALWAYS_INLINE void dot_with_fp32_arith_vectorized_tail_inner_loop(
