@@ -2129,7 +2129,7 @@ def _import_device_backends():
             # Just load the extension without calling
             backend_extension.load()
         except Exception as err:
-            print(f"Failed to load the backend extension: {backend_extension.name}")
+            raise RuntimeError(f"Failed to load the backend extension: {backend_extension.name}. You can disable extension auto-loading with TORCH_DEVICE_BACKEND_AUTOLOAD=0.") from err
 
 
 def _is_device_backend_autoload_enabled() -> bool:
