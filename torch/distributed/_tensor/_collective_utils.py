@@ -1,7 +1,4 @@
 import logging
-
-torch_log = logging.getLogger("torch")
-
 import math
 from dataclasses import dataclass
 from functools import lru_cache
@@ -150,10 +147,7 @@ def mesh_broadcast(
     # (to register a meta kernel for the collective op)
     # so that it would avoid the communication. Need to
     # remove the check below once that is done.
-    torch_log.warning(f"tensor: {tensor}, is_meta: {tensor.is_meta}")
-    from torch._subclasses.fake_tensor import is_fake
-    from torch._functorch._aot_autograd.functional_utils import is_fun
-    if tensor.is_meta or is_fake(tensor) or is_fun(tensor):
+    if tensor.is_meta:
         return None
     dim_group = mesh.get_group(mesh_dim)
     assert isinstance(dim_group, ProcessGroup)
@@ -162,7 +156,6 @@ def mesh_broadcast(
     if dim_group is not GroupMember.WORLD:
         src_for_dim = get_global_rank(dim_group, 0)
 
-    # TODO(yf225): ok we should change this to _c10d_functional??
     return broadcast(tensor, src=src_for_dim, group=dim_group, async_op=async_op)
 
 

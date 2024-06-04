@@ -5,8 +5,6 @@ from typing import Any, Dict, List, Optional, Tuple, TYPE_CHECKING
 import torch
 import torch.nn as nn
 from torch.autograd import Variable
-from torch.autograd.variable import queue_callback
-from torch.autograd.graph import register_multi_grad_hook
 from torch.distributed._composable_state import (
     _get_module_state,
     _insert_module_state,
