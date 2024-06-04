@@ -593,7 +593,6 @@ def forward(self, x_1, output_1):
         self.assertEqual(int_result, resulti)
 
     @requires_gpu
-    @skipIfRocm
     @skipIfXpu
     def test_triton_kernel_constants(self):
         @triton.jit
