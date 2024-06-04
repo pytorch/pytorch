@@ -27,6 +27,7 @@ import torch._logging
 import torch.fx
 from torch._decomp import get_decompositions
 from torch._dynamo.utils import defake, dynamo_timed
+from torch.utils._sympy.numbers import int_oo
 from torch._logging import LazyString, trace_structured
 from torch._prims_common import make_channels_last_strides_for
 from torch._subclasses.fake_tensor import FakeTensor
@@ -1441,18 +1442,21 @@ class GraphLowering(torch.fx.Interpreter):
                 vr = shape_env.var_to_range[i0]
                 if not shape_env._default_unspecified_value_range().issubset(vr):
 
-                    def convert(s):
+                    def is_convertible(s):
+                        if s in (int_oo, -int_oo):
+                            return False
                         try:
-                            return int(s)
+                            int(s)
+                            return True
                         except TypeError:
-                            return None
+                            return False
 
-                    if (lower := convert(vr.lower)) is not None:
+                    if is_convertible(vr.lower):
                         self.register_buffer(
                             ir.AssertScalar(i0 >= vr.lower, f"{i0} >= {vr.lower}"),
                             set_name=True,
                         )
-                    if (upper := convert(vr.upper)) is not None:
+                    if is_convertible(vr.upper):
                         self.register_buffer(
                             ir.AssertScalar(i0 <= vr.upper, f"{i0} <= {vr.upper}"),
                             set_name=True,

@@ -65,7 +65,7 @@ def insert_deferred_runtime_asserts(
         ):
             assert len(node.args) == 1
             nodes_that_already_have_sym_constraint_range.add(
-                (node.args[0], node.kwargs["min"], node.kwargs["max"])
+                (node.args[0], node.kwargs.get("min"), node.kwargs.get("max"))
             )
         if (
             node.op == "call_function"

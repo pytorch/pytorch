@@ -613,6 +613,10 @@ class RoundToInt(sympy.Function):
     def eval(cls, number):
         # assert number.is_integer is not True, number
 
+        if number is sympy.oo:
+            return int_oo
+        if number is -sympy.oo:
+            return -int_oo
         if isinstance(number, sympy.Float):
             return sympy.Integer(round(float(number), 0))
 
