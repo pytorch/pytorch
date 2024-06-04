@@ -272,11 +272,12 @@ def cuda_and_enabled_mixed_mm_and_not_int8(match):
                                 KeywordArg("mat2"),
                                 0xF,
                             ),
-                            CallFunction(
-                                aten.__rshift__.Scalar,
-                                KeywordArg("mat2"),
-                                4,
-                            ),
+                            # CallFunction(
+                            #    aten.__rshift__.Scalar,
+                            #    KeywordArg("mat2"),
+                            #    4,
+                            # ),
+                            True,
                         ),
                         1,
                     ),
