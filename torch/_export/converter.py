@@ -661,7 +661,7 @@ class TS2FXGraphConverter:
                 for block_node_in in block_node.inputs():
                     if block_node_in.debugName() in self.name_to_node:
                         block_args.add(block_node_in.debugName())
-
+            
             arguments.update(block_args)
 
         # Lift parameters as inputs.
@@ -928,11 +928,11 @@ DEBUG: (TORCH_LOGS="+export" <cmd>), additionaly
         self.lift_tensor_constants_to_buffer()
 
         # Populate nn module parameters and buffers.
-        self.mod_param_and_buffer_map: Dict[str, Any]= dict()
+        self.mod_param_and_buffer_map: Dict[str, Any] = dict()
         for name, param in ts_model.named_parameters():
             self.mod_param_and_buffer_map[normalize_name(name)] = param
         for name, buffer in ts_model.named_buffers():
-            self.mod_param_and_buffer_map[normalize_name(name)] = buffer 
+            self.mod_param_and_buffer_map[normalize_name(name)] = buffer
 
     def convert(self) -> ExportedProgram:
         blocks_to_lifted_attrs = get_block_to_lifted_attrs(self.ts_graph)
