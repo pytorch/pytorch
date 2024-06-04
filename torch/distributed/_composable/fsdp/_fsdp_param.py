@@ -340,7 +340,6 @@ class FSDPParam:
             return
         inner_tensor = self._sharded_local_tensor
         if (
-            # NOTE: compile doesn't support `hasattr(inner_tensor, "fsdp_post_all_gather")` yet
             not torch._dynamo.compiled_autograd.compiled_autograd_enabled
             and hasattr(inner_tensor, "fsdp_post_all_gather")
         ):
