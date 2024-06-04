@@ -8397,7 +8397,7 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
     def test_iter(self) -> None:
         x = torch.randn(5, 5)
         for i, sub in enumerate(x):
-            self.assertEqual(sub, x[i])
+            self.assertEqual(sub, x[i])  # noqa: PLR1736
 
         x = torch.tensor([])
         self.assertEqual(list(x), [])
@@ -10623,12 +10623,9 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
             if t1.is_floating_point():
                 t3 = t1.clone().detach().requires_grad_(True)
                 out = t3 * 2
-                with self.assertRaisesRegex(RuntimeError, "Expected single reference to a's"):
-                    torch.utils.swap_tensors(t3, t2)
-                del out
-                # Now succeeds
                 torch.utils.swap_tensors(t3, t2)
-                torch.utils.swap_tensors(t1, t2)
+                with self.assertRaisesRegex(RuntimeError, "AccumulateGrad node that was poisoned by swap_tensors"):
+                    out.sum().backward()
 
             wr = weakref.ref(t1)
             with self.assertRaisesRegex(RuntimeError, "has weakref"):
