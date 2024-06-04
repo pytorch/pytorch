@@ -104,7 +104,7 @@ class TestFullyShardCollectiveOps(FSDPTestMultiThread):
         )
         fsdp_param_group = FSDPParamGroup(
             list(module.parameters()),
-            module,
+            (module,),
             mesh_info,
             post_forward_mesh_info,
             self.device,
@@ -176,7 +176,7 @@ class TestFullyShardCollectiveOps(FSDPTestMultiThread):
             orig_params, reshard_after_forward
         )
         fsdp_params = fsdp_param_group.fsdp_params
-        module = fsdp_param_group.module
+        module = fsdp_param_group.modules[0]
 
         # Sanity check that the parameter sharding is as expected
         for orig_param, param in zip(orig_params, module.parameters()):
