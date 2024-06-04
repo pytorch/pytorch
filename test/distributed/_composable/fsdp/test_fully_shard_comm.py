@@ -3,7 +3,7 @@
 import functools
 import itertools
 import unittest
-from typing import Callable, List, Optional, Tuple, Union
+from typing import Callable, Dict, List, Optional, Tuple, Union
 
 import torch
 import torch.distributed as dist
@@ -43,6 +43,7 @@ from torch.testing._internal.common_fsdp import (
     FSDPTestMultiThread,
     MLP,
     patch_post_backward,
+    patch_reshard,
     patch_unshard,
 )
 from torch.testing._internal.common_utils import run_tests
@@ -372,7 +373,7 @@ class TestFullyShardCommunication(FSDPTest):
         )
 
 
-class TestFullyShardBackwardPrefetch(FSDPTest):
+class TestFullyShardPrefetch(FSDPTest):
     @property
     def world_size(self) -> int:
         return min(4, torch.cuda.device_count())
@@ -655,6 +656,128 @@ class TestFullyShardBackwardPrefetch(FSDPTest):
                 optim.step()
                 optim.zero_grad()
 
+    @skip_if_lt_x_gpu(2)
+    def test_fully_shard_with_forward_prefetch(self):
+        n_layers = 3
+        reshard_after_forward = True
+        checkpoint_impl = "utils"
+        model, optim, inp = self._init_transformer(
+            n_layers, reshard_after_forward, checkpoint_impl
+        )
+
+        # Show a lightweight implementation of forward prefetching relying on
+        # two data structures and a bool tracking the first iteration
+        pre_forward_order: List[FSDPModule] = []
+        module_to_pre_forward_index: Dict[FSDPModule, int] = {}
+        is_first_iter = True
+
+        def forward_pre_hook(module: nn.Module, args):
+            if is_first_iter and module not in module_to_pre_forward_index:
+                module_to_pre_forward_index[module] = len(pre_forward_order)
+                pre_forward_order.append(module)
+            elif not is_first_iter:
+                pre_forward_index = module_to_pre_forward_index.get(module, -1)
+                if pre_forward_index < 0:
+                    return
+                target_pre_forward_index = pre_forward_index + 1
+                if target_pre_forward_index >= len(pre_forward_order):
+                    return
+                target_module = pre_forward_order[target_pre_forward_index]
+                assert isinstance(target_module, FSDPModule), f"{target_module}"
+                # TODO: We need to access the training state to avoid
+                # prefetching in backward when composing with AC
+                if fully_shard.state(target_module)._training_state in (
+                    TrainingState.IDLE,
+                    TrainingState.FORWARD,
+                ):
+                    target_module.unshard(async_op=True)
+
+        for module in model.modules():
+            if isinstance(module, FSDPModule):
+                module.register_forward_pre_hook(forward_pre_hook, prepend=True)
+
+        events: List[EventType] = []
+        unshard_with_record = self._get_unshard_with_record(
+            FSDPParamGroup.unshard, events
+        )
+        reshard_with_record = self._get_reshard_with_record(
+            FSDPParamGroup.reshard, events
+        )
+        post_backward_with_record = self._get_post_backward_with_record(
+            FSDPParamGroup.post_backward, events
+        )
+        with patch_unshard(unshard_with_record), patch_reshard(
+            reshard_with_record
+        ), patch_post_backward(post_backward_with_record):
+            # Expect normal behavior on the first iteration
+            loss = model(inp)
+            expected_events = [
+                ("unshard", "", TrainingState.FORWARD),
+                ("unshard", "layers.0", TrainingState.FORWARD),
+                ("reshard", "layers.0", TrainingState.FORWARD),
+                ("unshard", "layers.1", TrainingState.FORWARD),
+                ("reshard", "layers.1", TrainingState.FORWARD),
+                ("unshard", "layers.2", TrainingState.FORWARD),
+                ("reshard", "layers.2", TrainingState.FORWARD),
+            ]
+            self.assertEqual(events, expected_events)
+            events.clear()
+            loss.sum().backward()
+            expected_events = [
+                ("unshard", "layers.2", TrainingState.PRE_BACKWARD),
+                ("unshard", "layers.1", TrainingState.PRE_BACKWARD),
+                ("reshard", "layers.2", TrainingState.POST_BACKWARD),
+                ("post_backward", "layers.2", TrainingState.POST_BACKWARD),
+                ("unshard", "layers.0", TrainingState.PRE_BACKWARD),
+                ("reshard", "layers.1", TrainingState.POST_BACKWARD),
+                ("post_backward", "layers.1", TrainingState.POST_BACKWARD),
+                ("reshard", "layers.0", TrainingState.POST_BACKWARD),
+                ("post_backward", "layers.0", TrainingState.POST_BACKWARD),
+                ("reshard", "", TrainingState.POST_BACKWARD),
+                ("post_backward", "", TrainingState.POST_BACKWARD),
+            ]
+            self.assertEqual(events, expected_events)
+            events.clear()
+            optim.step()
+            optim.zero_grad
+            is_first_iter = False
+
+            for iter_idx in range(3):
+                loss = model(inp)
+                expected_events = [
+                    # After the 1st iteration, forward prefetching takes effect
+                    # where the root prefetches `layers.0` and then `layers.i`
+                    # prefetches `layers.i+1`
+                    ("unshard", "layers.0", TrainingState.IDLE),
+                    ("unshard", "", TrainingState.FORWARD),
+                    ("unshard", "layers.1", TrainingState.IDLE),
+                    ("reshard", "layers.0", TrainingState.FORWARD),
+                    ("unshard", "layers.2", TrainingState.IDLE),
+                    ("reshard", "layers.1", TrainingState.FORWARD),
+                    ("reshard", "layers.2", TrainingState.FORWARD),
+                ]
+                self.assertEqual(events, expected_events)
+                events.clear()
+                loss.sum().backward()
+                # Expect the same backward events as without forward prefetch
+                expected_events = [
+                    ("unshard", "layers.2", TrainingState.PRE_BACKWARD),
+                    ("unshard", "layers.1", TrainingState.PRE_BACKWARD),
+                    ("reshard", "layers.2", TrainingState.POST_BACKWARD),
+                    ("post_backward", "layers.2", TrainingState.POST_BACKWARD),
+                    ("unshard", "layers.0", TrainingState.PRE_BACKWARD),
+                    ("reshard", "layers.1", TrainingState.POST_BACKWARD),
+                    ("post_backward", "layers.1", TrainingState.POST_BACKWARD),
+                    ("reshard", "layers.0", TrainingState.POST_BACKWARD),
+                    ("post_backward", "layers.0", TrainingState.POST_BACKWARD),
+                    ("reshard", "", TrainingState.POST_BACKWARD),
+                    ("post_backward", "", TrainingState.POST_BACKWARD),
+                ]
+                self.assertEqual(events, expected_events)
+                events.clear()
+                optim.step()
+                optim.zero_grad()
+
     def _init_transformer(
         self,
         n_layers: int,
@@ -690,6 +813,21 @@ class TestFullyShardBackwardPrefetch(FSDPTest):
             return orig_unshard(self, *args, **kwargs)
 
         return unshard_with_record
+
+    def _get_reshard_with_record(
+        self, orig_reshard: Callable, events: List[EventType]
+    ) -> Callable:
+        def reshard_with_record(self, *args, **kwargs):
+            nonlocal events
+            if (
+                self._training_state == TrainingState.FORWARD
+                and not self._reshard_after_forward
+            ):  # skip no-ops
+                return
+            events.append(("reshard", self._module_fqn, self._training_state))
+            return orig_reshard(self, *args, **kwargs)
+
+        return reshard_with_record
 
     def _get_post_backward_with_record(
         self, orig_post_backward: Callable, events: List[EventType]
