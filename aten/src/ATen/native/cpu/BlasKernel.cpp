@@ -38,6 +38,11 @@ float fp16_dot_with_fp32_arith(
   const float16_t* x,
   const float16_t* a,
   int64_t len);
+
+float bf16_dot_with_fp32_arith(
+  const at::BFloat16* x,
+  const at::BFloat16* a,
+  int64_t len);
 }
 #endif
 
@@ -326,20 +331,8 @@ static float compute_dot(const at::Half* a, const at::Half* b, int64_t len) {
     len);
 }
 
-static float compute_dot(const at::BFloat16* a, const at::BFloat16* b, int64_t l) {
-    if ((l&3) != 0) {
-      return sum(l, [&](int64_t i) -> float {
-        return float(a[i]) * float(b[i]);
-      });
-    }
-    float32x4_t rcv = vdupq_n_f32(0);
-    for (int64_t idx = 0; idx < l; idx += 4) {
-      float32x4_t aVec = load_as_float32x4(a + idx);
-      float32x4_t bVec = load_as_float32x4(b + idx);
-      rcv = vaddq_f32(rcv, vmulq_f32(aVec, bVec));
-    }
-    auto sum = vpaddq_f32(rcv, rcv);
-    return vgetq_lane_f32(vpaddq_f32(sum, sum), 0);
+static float compute_dot(const at::BFloat16* a, const at::BFloat16* b, int64_t len) {
+  return at::native::blas_impl::bf16_dot_with_fp32_arith(a, b, len);
 }
 
 template <>
