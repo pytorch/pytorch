@@ -80,7 +80,7 @@ class ScheduleTest(MultiProcContinousTest):
         )
 
         # Attach to a schedule
-        schedule = ScheduleClass(stage, chunks, loss_fn=loss_fn)
+        schedule = ScheduleClass(stage, loss_fn=loss_fn)
 
         # Run
         for _ in range(20):
@@ -119,7 +119,7 @@ class ScheduleTest(MultiProcContinousTest):
         )
 
         # Attach to a schedule
-        schedule = ScheduleClass(stage, chunks, loss_fn=loss_fn)
+        schedule = ScheduleClass(stage, loss_fn=loss_fn)
 
         # Run
         if self.rank == 0:
@@ -181,7 +181,7 @@ class ScheduleTest(MultiProcContinousTest):
         )
 
         # Attach to a schedule
-        schedule = ScheduleClass(stage, chunks, loss_fn=loss_fn)
+        schedule = ScheduleClass(stage, loss_fn=loss_fn)
 
         # Run
         stage_module = pipe.get_stage_module(self.rank)
@@ -255,7 +255,7 @@ class ScheduleTest(MultiProcContinousTest):
         )
 
         # Attach to a schedule
-        schedule = ScheduleClass(stage, chunks, loss_fn=loss_fn)
+        schedule = ScheduleClass(stage, loss_fn=loss_fn)
 
         # Run
         for _ in range(2):

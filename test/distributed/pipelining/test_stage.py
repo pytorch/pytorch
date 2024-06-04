@@ -98,7 +98,7 @@ class StageTest(MultiProcContinousTest):
         )
 
         # Attach to a schedule
-        schedule = ScheduleGPipe(stage, chunks)
+        schedule = ScheduleGPipe(stage)
 
         # Run
         def _run_step(x):
@@ -164,7 +164,7 @@ class StageTest(MultiProcContinousTest):
         )
 
         # Attach to a schedule
-        schedule = ScheduleGPipe(stage, chunks)
+        schedule = ScheduleGPipe(stage)
 
         # Run
         def _run_step(x):
@@ -221,7 +221,7 @@ class StageTest(MultiProcContinousTest):
         )
 
         # Attach to a schedule
-        schedule = ScheduleGPipe(stage, chunks)
+        schedule = ScheduleGPipe(stage)
 
         # Run
         def _run_step(x):

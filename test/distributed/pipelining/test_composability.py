@@ -145,7 +145,6 @@ class ComposabilityTest(MultiProcContinousTest):
             offsets = [offset]
             pipeline_schedule = ScheduleClass(
                 pipeline_stage,
-                n_microbatches=num_microbatches,
                 loss_fn=loss_fn,
             )
         else:

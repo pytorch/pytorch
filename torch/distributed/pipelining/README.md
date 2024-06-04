@@ -158,7 +158,7 @@ We can now run the pipeline by attaching the `PipelineStage` to a pipeline sched
 
 ```python
 from torch.distributed.pipelining import ScheduleGPipe
-schedule = ScheduleGPipe(stage, chunks)
+schedule = ScheduleGPipe(stage)
 
 # Input data
 x = torch.randn(batch_size, in_dim, device=device)

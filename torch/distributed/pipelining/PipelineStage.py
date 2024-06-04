@@ -165,6 +165,13 @@ class _PipelineStageBase(ABC):
         self.grad_send_info: Optional[List] = None
 
     @property
+    def num_microbatches(self) -> int:
+        """
+        Returns the number of microbatches that will be operated over one step for this stage.
+        """
+        return self.chunks
+
+    @property
     def has_backward(self) -> bool:
         """
         Returns true if this stage has a backward pass.
