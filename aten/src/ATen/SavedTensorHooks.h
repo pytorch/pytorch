@@ -31,7 +31,7 @@ struct TORCH_API SavedTensorDefaultHooksTLS {
 
 struct TORCH_API SavedTensorDefaultHooks {
   static void push_hooks(PyObject* pack_hook, PyObject* unpack_hook);
-  static void pop_hooks();
+  static std::pair<PyObject*, PyObject*> pop_hooks();
   static std::pair<PyObject*, PyObject*> get_hooks();
   static void lazy_initialize();
 

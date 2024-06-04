@@ -65,10 +65,12 @@ void SavedTensorDefaultHooks::push_hooks(PyObject* pack_hook, PyObject* unpack_h
   tls.stack.emplace(pack_hook, unpack_hook);
 }
 
-void SavedTensorDefaultHooks::pop_hooks() {
+std::pair<PyObject*, PyObject*> SavedTensorDefaultHooks::pop_hooks() {
   // Reference counting is handled by the caller of `pop_hooks`
   TORCH_INTERNAL_ASSERT(is_initialized && !tls.stack.empty());
+  std::pair<PyObject*, PyObject*> hooks = tls.stack.top();
   tls.stack.pop();
+  return hooks;
 }
 
 std::pair<PyObject*, PyObject*> SavedTensorDefaultHooks::get_hooks() {
