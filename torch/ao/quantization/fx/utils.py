@@ -837,7 +837,7 @@ def _qconfig_satisfies_dtype_config_constraints(
             suggestion_str = (
                 "Please use torch.ao.quantization.get_default_qconfig_mapping or "
                 "torch.ao.quantization.get_default_qat_qconfig_mapping. Example:\n"
-                "    qconfig_mapping = get_default_qconfig_mapping(\"fbgemm\")\n"
+                '    qconfig_mapping = get_default_qconfig_mapping("fbgemm")\n'
                 "    model = prepare_fx(model, qconfig_mapping, example_inputs)"
             )
             if not isinstance(activation_post_process, FixedQParamsObserver) and \
