@@ -444,16 +444,23 @@ def _use_custom_generated_macros() -> List[str]:
 def _use_fb_internal_macros() -> List[str]:
     if not _IS_WINDOWS:
         if config.is_fbcode():
+            fb_internal_macros = [
+                "C10_USE_GLOG",
+                "C10_USE_MINIMAL_GLOG",
+                "C10_DISABLE_TENSORIMPL_EXTENSIBILITY",
+            ]
+            # TODO: this is to avoid FC breakage for fbcode. When using newly
+            # generated model.so on an older verion of PyTorch, need to use
+            # the v1 version for aoti_torch_create_tensor_from_blob
+            create_tensor_from_blob_v1 = "-D AOTI_USE_CREATE_TENSOR_FROM_BLOB_V1"
+
+            fb_internal_macros.append(create_tensor_from_blob_v1)
+
+            # TODO: remove comments later:
+            # Moved to _get_openmp_args
             # openmp_lib = build_paths.openmp_lib()
-            preprocessor_flags = " ".join(
-                (
-                    "-D C10_USE_GLOG",
-                    "-D C10_USE_MINIMAL_GLOG",
-                    "-D C10_DISABLE_TENSORIMPL_EXTENSIBILITY",
-                )
-            )
             # return [f"-Wp,-fopenmp {openmp_lib} {preprocessor_flags}"]
-            return [f"{preprocessor_flags}"]
+            return fb_internal_macros
         else:
             return []
     else:
@@ -564,6 +571,7 @@ def _get_openmp_args(cpp_compiler):
     include_dir_paths: List[str] = []
     lib_dir_paths: List[str] = []
     libs: List[str] = []
+    passthough_args: List[str] = []
     if _IS_MACOS:
         from torch._inductor.codecache import (
             homebrew_libomp,
@@ -620,8 +628,10 @@ def _get_openmp_args(cpp_compiler):
         libs = []
     else:
         if config.is_fbcode():
-            libs.append("omp")
-            include_dir_paths.append(build_paths.openmp())
+            openmp_lib = build_paths.openmp_lib()
+            fb_openmp_extra_flags = f"-Wp,-fopenmp {openmp_lib}"
+
+            passthough_args.append(fb_openmp_extra_flags)
         else:
             if _is_clang(cpp_compiler):
                 # TODO: fix issue, can't find omp.h
@@ -631,7 +641,7 @@ def _get_openmp_args(cpp_compiler):
                 cflags.append("fopenmp")
                 libs.append("gomp")
 
-    return cflags, ldflags, include_dir_paths, lib_dir_paths, libs
+    return cflags, ldflags, include_dir_paths, lib_dir_paths, libs, passthough_args
 
 
 def get_mmap_self_macro(use_mmap_weights: bool) -> List[str]:
@@ -678,6 +688,7 @@ def get_cpp_torch_options(
         omp_include_dir_paths,
         omp_lib_dir_paths,
         omp_lib,
+        omp_passthough_args,
     ) = _get_openmp_args(cpp_compiler)
 
     cxx_abi_passthough_args = _get_glibcxx_abi_build_flags()
@@ -702,7 +713,9 @@ def get_cpp_torch_options(
     ldflags = omp_ldflags
     libraries_dirs = python_libraries_dirs + torch_libraries_dirs + omp_lib_dir_paths
     libraries = torch_libraries + omp_lib
-    passthough_args = isa_ps_args_build_flags + cxx_abi_passthough_args
+    passthough_args = (
+        isa_ps_args_build_flags + cxx_abi_passthough_args + omp_passthough_args
+    )
 
     return (
         definations,
