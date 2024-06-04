@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import torch.library
 from torch import Tensor
 from torch.autograd import Function

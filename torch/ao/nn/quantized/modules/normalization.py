@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import torch
 
 __all__ = ['LayerNorm', 'GroupNorm', 'InstanceNorm1d', 'InstanceNorm2d', 'InstanceNorm3d']
