@@ -42,7 +42,7 @@ def normalize_name(name: str) -> str:
 
 
 # Those operators will be automatically populated to a instance method
-# of TS2FXGraphConverter with name convert_namespace_opname().
+# of TS2FXGraphConverter with name convert_<namespace>_<opname>().
 # Please check __init__ for method population implementations.
 kind_to_standard_operators = {
     "prim::TupleIndex": operator.getitem,
@@ -96,7 +96,7 @@ class TS2FXGraphConverter:
             k_list = k.split("::")
             func_name = "convert_" + "_".join(k_list)
             # Create an indirect function call:
-            # convert_namespace_opcode --> lambda node: convert_standard_operator(node)
+            # convert_<namespace>_<opname> --> lambda node: _convert_standard_operator(node)
             setattr(
                 self, func_name, lambda node: self._convert_standard_operators(node)
             )
