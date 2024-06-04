@@ -3,24 +3,23 @@
 #include <chrono>
 #include <string_view>
 
-
 namespace torch {
 namespace monitor {
 
 WaitCounterUs::WaitCounterUs(std::string_view key) : key_(key) {
-    // implement
+  // implement
 }
 
 WaitCounterUs::~WaitCounterUs() {
-    // implement
+  // implement
 }
 
 void WaitCounterUs::start(std::chrono::steady_clock::time_point now) {
-    // implement
+  // implement
 }
 
 void WaitCounterUs::stop(std::chrono::steady_clock::time_point now) {
-    // implement
+  // implement
 }
 
 } // namespace monitor

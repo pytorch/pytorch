@@ -28,7 +28,9 @@
 #include <torch/csrc/distributed/c10d/ProcessGroupNCCL.hpp>
 #include <torch/csrc/distributed/c10d/TraceUtils.h>
 #include <torch/csrc/distributed/c10d/Utils.hpp>
+#include <torch/csrc/distributed/c10d/control_plane/Handlers.hpp>
 #include <torch/csrc/distributed/c10d/logger.hpp>
+#include <torch/csrc/monitor/instrumentation.h>
 #include <torch/torch.h>
 
 namespace c10d {
@@ -369,6 +371,13 @@ std::string dump_nccl_trace() {
 }
 #endif
 
+// TODO(c-p-i-o): add a JSON endpoint.
+control_plane::RegisterHandler dumpHandler{
+    "dump_nccl_trace_pickle",
+    [](const control_plane::Request&, control_plane::Response& res) {
+      res.setContent(dump_nccl_trace(), "application/octet-stream");
+    }};
+
 std::optional<std::function<void(std::function<void(const std::string&)>)>>&
 get_cpp_trace_dumper() {
   static std::optional<
@@ -563,6 +572,12 @@ bool ProcessGroupNCCL::WorkNCCL::finishedGPUExecutionInternal() const {
 
 bool ProcessGroupNCCL::WorkNCCL::checkTimeout(
     std::optional<std::chrono::milliseconds> timeout) {
+  static folly::Indestructible<WaitCounterUs> checkTimeoutWaitCounter{
+      "pytorch.logging.wait_counter.ProcessGroupNCCL::WorkNCCL::checkTimeout"};
+  checkTimeoutWaitCounter->start();
+  SCOPE_EXIT {
+    checkTimeoutWaitCounter->stop();
+  };
   auto currentTimepoint = std::chrono::steady_clock::now();
   auto timeElapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
       currentTimepoint - workStartTime_);
