@@ -269,18 +269,24 @@ static inline float16_t reduce(float16x8_t x) {
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
  * SOFTWARE.
  */
+
+static constexpr int to_shift(int x) {
+  int result = 0;
+  while (x >>= 1) {
+    result++;
+  }
+  return result;
+}
+
 // We need the shift for reduce(), hence the extra constants.
-static constexpr auto kF16ElementsPerIterationShift = 7;
-static constexpr auto kF16ElementsPerIteration = 1 << kF16ElementsPerIterationShift;
-static_assert(kF16ElementsPerIteration == 128);
+static constexpr auto kF16ElementsPerIteration = 128;
+static constexpr auto kF16ElementsPerIterationShift = to_shift(kF16ElementsPerIteration);
 
-static constexpr auto kF16ElementsPerRegisterShift = 3;
-static constexpr auto kF16ElementsPerRegister = 1 << kF16ElementsPerRegisterShift;
-static_assert(kF16ElementsPerRegister == 8);
+static constexpr auto kF16ElementsPerRegister = 8;
+static constexpr auto kF16ElementsPerRegisterShift = to_shift(kF16ElementsPerRegister);
 
-static constexpr auto kF16RegistersPerIterationShift = kF16ElementsPerIterationShift - kF16ElementsPerRegisterShift;
-static constexpr auto kF16RegistersPerIteration = 1 << kF16RegistersPerIterationShift;
-static_assert(kF16RegistersPerIteration == kF16ElementsPerIteration / kF16ElementsPerRegister);
+static constexpr auto kF16RegistersPerIteration = kF16ElementsPerIteration / kF16ElementsPerRegister;
+static constexpr auto kF16RegistersPerIterationShift = to_shift(kF16RegistersPerIteration);
 
 static inline double reduce(float16x8_t x[kF16RegistersPerIteration]) {
   int offset = kF16RegistersPerIteration;
@@ -379,19 +385,15 @@ static inline float32x4_t f32_fma_f16(float32x4_t a, float16x4_t b, float16x4_t 
 // required notice.
 
 // We need the shift for reduce(), hence the extra constants.
-static constexpr auto kF32ElementsPerIterationShift = 5;
-static constexpr auto kF32ElementsPerIteration = 1 << kF32ElementsPerIterationShift;
-static_assert(kF32ElementsPerIteration == 32);
+static constexpr auto kF32ElementsPerIteration = 32;
+static constexpr auto kF32ElementsPerIterationShift = to_shift(kF32ElementsPerIteration);
 
-static constexpr auto kF32ElementsPerRegisterShift = 2;
-static constexpr auto kF32ElementsPerRegister = 1 << kF32ElementsPerRegisterShift;
-static_assert(kF32ElementsPerRegister == 4);
+static constexpr auto kF32ElementsPerRegister = 4;
+static constexpr auto kF32ElementsPerRegisterShift = to_shift(kF32ElementsPerRegister);
 
-static constexpr auto kF32RegisterPairsPerIteration = 4;
-static constexpr auto kF32RegistersPerIteration = kF32RegisterPairsPerIteration * 2;
-static constexpr auto kF32RegistersPerIterationShift = 3;
-static_assert(kF32RegistersPerIteration == kF32ElementsPerIteration / kF32ElementsPerRegister);
-static_assert(kF32RegistersPerIteration == 1 << kF32RegistersPerIterationShift);
+static constexpr auto kF32RegistersPerIteration = kF32ElementsPerIteration / kF32ElementsPerRegister;
+static constexpr auto kF32RegisterPairsPerIteration = kF32RegistersPerIteration / 2;
+static constexpr auto kF32RegistersPerIterationShift = to_shift(kF32RegistersPerIteration);
 
 static inline double reduce(float32x4_t x[kF32RegistersPerIteration]) {
   int offset = kF32RegistersPerIteration;
