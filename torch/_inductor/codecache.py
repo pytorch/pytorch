@@ -1425,7 +1425,9 @@ invalid_vec_isa = InvalidVecISA()
 supported_vec_isa_list = [VecAVX512(), VecAVX2(), VecNEON()]
 
 
-def get_isa_from_cpu_capability(capability: str, vec_isa_list: List[VecISA], invalid_vec_isa: InvalidVecISA):
+def get_isa_from_cpu_capability(
+    capability: str | None, vec_isa_list: List[VecISA], invalid_vec_isa: InvalidVecISA
+):
 
     # VSX is not supported in inductor
     capability_to_isa_str = {
@@ -1443,9 +1445,9 @@ def get_isa_from_cpu_capability(capability: str, vec_isa_list: List[VecISA], inv
             if isa_str == str(vec_isa):
                 return vec_isa
 
-    warnings.warn(
-            f"ignoring invalid value for ATEN_CPU_CAPABILITY {capability}"
-        )
+    if capability:
+        warnings.warn(f"ignoring invalid value for ATEN_CPU_CAPABILITY {capability}")
+
     return vec_isa_list[0]
 
 
@@ -1493,17 +1495,11 @@ def pick_vec_isa() -> VecISA:
 
     # If the simdlen is None, set simdlen based on the environment ATEN_CPU_CAPABILITY
     # to control CPU vec ISA
-    if config.cpp.simdlen is None and os.getenv("ATEN_CPU_CAPABILITY"):
-        return get_isa_from_cpu_capability(
-            os.getenv("ATEN_CPU_CAPABILITY"),
-            _valid_vec_isa_list,
-            invalid_vec_isa
-        )
 
-    # If the simdlen is None and ATEN_CPU_CAPABILITY is not set,
-    # it indicates determine the vectorization length automatically
     if config.cpp.simdlen is None:
-        return _valid_vec_isa_list[0]
+        return get_isa_from_cpu_capability(
+            os.getenv("ATEN_CPU_CAPABILITY"), _valid_vec_isa_list, invalid_vec_isa
+        )
 
     for isa in _valid_vec_isa_list:
         if config.cpp.simdlen == isa.bit_width():

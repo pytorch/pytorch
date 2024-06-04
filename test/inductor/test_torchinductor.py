@@ -751,9 +751,6 @@ class CommonTemplate:
             ),
         )
 
-    # Fails when testing the scalar version
-    # See https://github.com/pytorch/pytorch/issues/126763.
-    @expectedFailureScalar
     @skipCUDAIf(not SM80OrLater, "Requires sm80")
     def test_eager_aoti_cache_hit(self):
         ns = "aten"
@@ -850,9 +847,6 @@ class CommonTemplate:
 
         self.assertTrue(kernel_lib_path in kernel_libs_abs_path)
 
-    # Fails when testing the scalar version
-    # See https://github.com/pytorch/pytorch/issues/126763.
-    @expectedFailureScalar
     @skipCUDAIf(not SM80OrLater, "Requires sm80")
     def test_eager_aoti_with_scalar(self):
         namespace_name = "aten"
@@ -933,9 +927,6 @@ class CommonTemplate:
             self.assertEqual(len(ref_values), len(res_values))
             self.assertEqual(ref_values, res_values)
 
-    # Fails when testing the scalar version
-    # See https://github.com/pytorch/pytorch/issues/126763.
-    @expectedFailureScalar
     @skipCUDAIf(not SM80OrLater, "Requires sm80")
     def test_torch_compile_override_registration(self):
         dynamic = False
