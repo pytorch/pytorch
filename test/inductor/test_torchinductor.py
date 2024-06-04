@@ -1605,14 +1605,19 @@ class CommonTemplate:
         def fn(a):
             return torch.var(a)
 
+        atol = None
+        rtol = None
+        if os.getenv("ATEN_CPU_CAPABILITY") == "default":
+            atol = 1e-4
+            rtol = 1e-4
         self.common(
             fn,
             ((torch.rand((10, 3, 352, 352), dtype=torch.float32),)),
-            rtol=1e-4,
-            atol=1e-4,
+            rtol=rtol,
+            atol=atol,
         )
         self.common(
-            fn, ((torch.rand((14923), dtype=torch.float32),)), rtol=1e-4, atol=1e-4
+            fn, ((torch.rand((14923), dtype=torch.float32),)), rtol=rtol, atol=atol
         )
 
     @skipCPUIf(IS_MACOS, "fails on macos")
@@ -1620,14 +1625,19 @@ class CommonTemplate:
         def fn(a):
             return torch.var(a)
 
+        atol = None
+        rtol = None
+        if os.getenv("ATEN_CPU_CAPABILITY") == "default":
+            atol = 1e-3
+            rtol = 1e-3
         self.common(
             fn,
             (torch.rand((16, 16, 352, 352), dtype=torch.float16),),
-            rtol=1e-3,
-            atol=1e-3,
+            rtol=rtol,
+            atol=atol,
         )
         self.common(
-            fn, (torch.rand((14923), dtype=torch.float16),), rtol=1e-4, atol=1e-4
+            fn, (torch.rand((14923), dtype=torch.float16),), rtol=rtol, atol=atol
         )
 
     def test_split_cumsum(self):
