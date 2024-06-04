@@ -35,14 +35,10 @@ void SavedTensorDefaultHooks::enable() {
   tls.disabled_error_message = c10::nullopt;
 }
 
-/* static */ void SavedTensorDefaultHooks::disable_during_tracing() {
-  TORCH_CHECK(!tls.is_tracing, "Nested context managers not supported")
-  tls.is_tracing = true;
-}
-
-/* static */ void SavedTensorDefaultHooks::enable_after_tracing() {
-  TORCH_CHECK(tls.is_tracing, "Tracing mode should be set")
-  tls.is_tracing = false;
+/* static */ bool SavedTensorDefaultHooks::set_tracing(bool is_tracing) {
+  bool prior  = tls.is_tracing;
+  tls.is_tracing = is_tracing;
+  return prior;
 }
 
 const std::optional<std::string>& SavedTensorDefaultHooks::get_disabled_error_message() {

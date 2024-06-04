@@ -54,8 +54,7 @@ struct TORCH_API SavedTensorDefaultHooks {
   // variable, Dynamo/AOTAutograd need to defer hook firing until runtime. To do
   // so, we disable these hooks during tracing. See
   // https://github.com/pytorch/pytorch/issues/113263.
-  static void disable_during_tracing();
-  static void enable_after_tracing();
+  static bool set_tracing(bool is_tracing);
 };
 
 } // namespace at
