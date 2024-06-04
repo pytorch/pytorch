@@ -600,12 +600,17 @@ class PreGradBatchLinearFusion(BatchFusion):
             input = get_arg_value(node, 0, "input")
             weight = get_arg_value(node, 1, "weight")
             bias = get_arg_value(node, 2, "bias")
+            if self.graph_search_options.get("fuse_nodes_with_same_users", False):
+                users = [user.target for user in node.users.keys()]
+            else:
+                users = ""  # type: ignore[assignment]
             group_key = (
                 "batch_linear",
                 self._getitem_args(input),
                 str(input.meta["example_value"].shape),
                 str(weight.meta["example_value"].shape),
                 bias is None,
+                str(users),
             )
         else:
             group_key = None
@@ -683,6 +688,10 @@ class BatchLayernormFusion(BatchFusion):
             input = get_arg_value(node, 0, "input")
             weight = get_arg_value(node, 2, "weight")
             bias = get_arg_value(node, 3, "bias")
+            if self.graph_search_options.get("fuse_nodes_with_same_users", False):
+                users = [user.target for user in node.users.keys()]
+            else:
+                users = ""  # type: ignore[assignment]
             group_key = (
                 (
                     "batch_layernorm",
@@ -693,6 +702,7 @@ class BatchLayernormFusion(BatchFusion):
                     str(bias.meta["example_value"].shape) if bias is not None else "",
                     str(get_arg_value(node, 1, "normalized_shape")),
                     str(get_arg_value(node, 4, "eps")),
+                    str(users),
                 )
                 if "example_value" in input.meta
                 and is_node_meta_valid(weight)
@@ -848,11 +858,18 @@ class BatchPointwiseOpsPreGradFusion(BatchPointwiseOpsFusionFactory):
     def match(self, node: torch.fx.Node):
         input = get_arg_value(node, 0, "input")
         if CallFunctionVarArgs(self.op).match(node) and is_node_meta_valid(node):
+            if self.graph_search_options.get("fuse_nodes_with_same_parent", False):
+                # pyre-fixme[16]
+                parent = node.args[0]
+                parent = parent.target if parent is not None else ""  # type: ignore[union-attr]
+            else:
+                parent = ""
             # for relu op, we also use the inplace to construct the key
             group_key = (
                 "batch_" + self.op.__name__.lower().split(".")[0],
                 str(input.meta["example_value"].shape),
                 str(node.kwargs.get("inplace", False)),
+                str(parent),
             )
         else:
             group_key = None
