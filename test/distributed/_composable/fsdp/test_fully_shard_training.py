@@ -301,7 +301,7 @@ class TestFullyShard1DTrainingCore(FSDPTest):
     def _test_train_parity_multi_group(
         self,
         reshard_after_forward: Union[bool, int],
-        offload_policy: Union[OffloadPolicy, None],
+        offload_policy: OffloadPolicy,
         device_type: str,
         delay_after_forward: bool,
         delay_before_all_gather: bool,
