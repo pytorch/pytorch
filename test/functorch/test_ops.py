@@ -351,8 +351,6 @@ def is_inplace(op, variant):
 
 vjp_fail = {
     xfail("tensor_split"),  # data_ptr composite compliance
-    # https://github.com/pytorch/pytorch/issues/96560
-    decorate("nn.functional.scaled_dot_product_attention", decorator=skipIfRocm),
 }
 
 aliasing_ops = {
@@ -434,7 +432,10 @@ class TestOperators(TestCase):
                 xfail("view_as_complex"),
                 # query: last dimension must be contiguous
                 # Fused attention kernels require last dim to be contiguous
-                xfail("nn.functional.scaled_dot_product_attention"),
+                decorate(
+                    "nn.functional.scaled_dot_product_attention",
+                    decorator=expectedFailureIf(not TEST_WITH_ROCM),
+                ), # Works on ROCm
                 xfail("torch.ops.aten._flash_attention_forward"),
                 xfail("torch.ops.aten._efficient_attention_forward"),
                 # RuntimeError: Expected contiguous tensor, but got
@@ -732,7 +733,10 @@ class TestOperators(TestCase):
                 xfail("view_as_complex"),
                 # RuntimeError: query: last dimension must be contiguous
                 # The fused attention kernels require the last dim to be contiguous
-                xfail("nn.functional.scaled_dot_product_attention"),
+                decorate(
+                    "nn.functional.scaled_dot_product_attention",
+                    decorator=expectedFailureIf(not TEST_WITH_ROCM),
+                ), # Works on ROCm
                 xfail("torch.ops.aten._flash_attention_forward"),
                 xfail("torch.ops.aten._efficient_attention_forward"),
                 # BUG
@@ -990,8 +994,6 @@ class TestOperators(TestCase):
                 xfail("normal"),  # calls random op
                 xfail("normal", "number_mean"),  # calls random op
                 xfail("pca_lowrank"),  # calls random op
-                # https://github.com/pytorch/pytorch/issues/96560
-                decorate("linalg.pinv", "hermitian", decorator=skipIfRocm),
                 xfail(
                     "quantile", device_type="cpu"
                 ),  # Batching rule not implemented for `at::equal`
