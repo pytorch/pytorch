@@ -15,6 +15,7 @@ from torch.fx._compatibility import compatibility
 from torch.fx._utils import lazy_format_graph_code
 from torch.fx.experimental.sym_node import SymNode
 from torch.fx.graph_module import GraphModule
+from torch.utils._sympy.numbers import int_oo
 
 log = logging.getLogger(__name__)
 graph_code_log = torch._logging.getArtifactLogger(__name__, "graph_code")
@@ -366,6 +367,8 @@ def insert_deferred_runtime_asserts(
                     # (refinement should not be necessary once runtime
                     # asserts cause refinement, but that's NYI)
                     def convert(s):
+                        if s in (int_oo, -int_oo):
+                            return None
                         try:
                             return int(s)
                         except TypeError:

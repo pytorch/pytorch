@@ -9458,8 +9458,8 @@ ShapeEnv not equal: field values don't match:
   >  Left: {_assert, ge, x_size_0_, x_size_1_, x_storage_offset, x_stride_0_, x_stride_1_}
   > Right: {x_size_0_, x_size_1_, x_storage_offset, x_stride_0_, x_stride_1_}
 ==> var_to_range: values don't match.
-  >  Left: {s0: ValueRanges(lower=3, upper=9223372036854775806, is_bool=False, is_int=True, is_float=False), s1: ValueRanges(lower=2, upper=9223372036854775806, is_bool=False, is_int=True, is_float=False)}
-  > Right: {s0: ValueRanges(lower=2, upper=9223372036854775806, is_bool=False, is_int=True, is_float=False), s1: ValueRanges(lower=2, upper=9223372036854775806, is_bool=False, is_int=True, is_float=False)}
+  >  Left: {s0: ValueRanges(lower=3, upper=IntInfinity(), is_bool=False, is_int=True, is_float=False), s1: ValueRanges(lower=2, upper=IntInfinity(), is_bool=False, is_int=True, is_float=False)}
+  > Right: {s0: ValueRanges(lower=2, upper=IntInfinity(), is_bool=False, is_int=True, is_float=False), s1: ValueRanges(lower=2, upper=IntInfinity(), is_bool=False, is_int=True, is_float=False)}
 """,
         )
         self._replay_and_check(main)
