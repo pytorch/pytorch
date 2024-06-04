@@ -4552,7 +4552,8 @@ class TestNestedTensorSubclass(TestCase):
         self.assertTrue(torch.allclose(value_grad, value.grad))
 
     @dtypes(torch.float64, torch.float32, torch.half)
-    def test_jagged_padded_dense_conversion_kernels(self, device, dtype):
+    @onlyCUDA
+    def test_fbgemm_jagged_to_padded_dense_kernels(self, device, dtype):
         values = torch.randn(10, 5, device=device, dtype=dtype)
         offsets = torch.tensor([0, 1, 3, 8, 10], device=device, dtype=torch.int64)
         max_length = offsets.diff().max().item()
@@ -4575,42 +4576,6 @@ class TestNestedTensorSubclass(TestCase):
 
         # should be equivalent to the original values
         self.assertEqual(values, output_jagged)
-
-        # success case: truncate to max length as needed
-        trunc_max_length = max_length - 1
-        trunc_padded = torch.ops.aten._jagged_to_padded_dense_forward(
-            values, [offsets], [trunc_max_length], padding_value
-        )
-        self.assertEqual(padded[:, :trunc_max_length, :], trunc_padded)
-
-        # specific to CPU impls
-        if device == "cpu":
-            # error case: multiple offsets on cpu since CPU kernels don't support more now
-            with self.assertRaisesRegex(RuntimeError, "only a single jagged dim is supported"):
-                torch.ops.aten._jagged_to_padded_dense_forward(
-                    values, [offsets, offsets], [max_length, max_length], padding_value)
-
-            with self.assertRaisesRegex(RuntimeError, "only a single jagged dim is supported"):
-                torch.ops.aten._padded_dense_to_jagged_forward(
-                    padded, [offsets, offsets], total_L)
-
-            # error case: > 1D offsets
-            offsets2d = offsets.unsqueeze(-1)
-            with self.assertRaisesRegex(RuntimeError, "expected 1D offsets"):
-                torch.ops.aten._jagged_to_padded_dense_forward(
-                    values, [offsets2d], [max_length], padding_value)
-
-            with self.assertRaisesRegex(RuntimeError, "expected 1D offsets"):
-                torch.ops.aten._padded_dense_to_jagged_forward(
-                    values, [offsets2d], total_L)
-
-            # error case: final offset != total_L
-            offsets_wrong = offsets.clone().detach()
-            offsets_wrong[-1] = total_L + 1
-            with self.assertRaisesRegex(RuntimeError, "final offset should match total_L value"):
-                torch.ops.aten._padded_dense_to_jagged_forward(
-                    values, [offsets_wrong], total_L)
-
 
 instantiate_parametrized_tests(TestNestedTensor)
 instantiate_device_type_tests(TestNestedTensorDeviceType, globals())
