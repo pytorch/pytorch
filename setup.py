@@ -1442,16 +1442,17 @@ def main():
     package_data = {
         "torch": torch_package_data,
     }
+
     exclude_package_data = {}
     if not BUILD_LIBTORCH_WHL:
         package_data["torchgen"] = torchgen_package_data
         package_data["caffe2"] = [
             "python/serialized_test/data/operator_test/*.zip",
         ]
-    if BUILD_PYTHON_ONLY:
-        exclude_package_data = {
-            "": ["build/*"],
-        }
+    else:
+        # no extensions in BUILD_LIBTORCH_WHL mode
+        extensions = []
+
     setup(
         name=package_name,
         version=version,
@@ -1463,9 +1464,6 @@ def main():
         long_description_content_type="text/markdown",
         ext_modules=extensions,
         cmdclass=cmdclass,
-        exclude_package_data={
-            "torch": ['build/*'],
-        },
         packages=packages,
         entry_points=entry_points,
         install_requires=install_requires,
