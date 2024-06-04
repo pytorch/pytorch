@@ -34,7 +34,6 @@ def main():
     # redirect output of workers to stderr
     os.dup2(sys.stderr.fileno(), sys.stdout.fileno())
 
-    # before starting the fork-based process pool:
     pre_fork_setup()
 
     _async_compile_initializer(args.parent)

@@ -53,7 +53,8 @@ def pre_fork_setup():
     # are forked
     caching_device_properties()
 
-    # Computing the triton key can be slow. Call before fork to cache.
+    # Computing the triton key can be slow. If we call it before fork,
+    # it will be cached for the forked subprocesses.
     try:
         from triton.compiler.compiler import triton_key
 
