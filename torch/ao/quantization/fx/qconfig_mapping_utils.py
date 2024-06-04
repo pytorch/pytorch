@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import torch
 import re
 from collections import defaultdict, OrderedDict

@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import inspect
 from collections import defaultdict
 from functools import wraps

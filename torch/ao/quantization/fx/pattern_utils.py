@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 from collections import OrderedDict
 from typing import Dict, Any
 from torch.ao.quantization.utils import Pattern

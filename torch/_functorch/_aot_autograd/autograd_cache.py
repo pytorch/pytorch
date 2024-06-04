@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 """
 Utils for caching the outputs of AOTAutograd
 """

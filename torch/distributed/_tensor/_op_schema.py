@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 from dataclasses import dataclass
 from functools import cached_property
 from typing import Any, Dict, List, Optional, Sequence, Tuple, Union

@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import torch
 from torch import nn
 from torch.nn.utils.parametrize import is_parametrized

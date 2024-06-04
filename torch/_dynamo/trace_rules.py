@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import _collections_abc
 import _weakrefset
 import abc

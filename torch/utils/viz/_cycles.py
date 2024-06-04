@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import gc
 import sys
 from typing import Any, Dict, List, NamedTuple, Optional, Tuple

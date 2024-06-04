@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import contextlib
 import warnings
 from abc import ABC, abstractmethod

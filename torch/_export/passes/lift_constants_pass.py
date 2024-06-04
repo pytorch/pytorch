@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import collections
 from typing import Any, Dict, List, Union
 

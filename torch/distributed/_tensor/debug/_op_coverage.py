@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 from operator import itemgetter
 from typing import List
 

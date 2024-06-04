@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import torch
 from torch._subclasses import FakeTensor
 from torch.ao.quantization.fx.prepare import (

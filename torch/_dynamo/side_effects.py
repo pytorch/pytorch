@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import inspect
 import warnings
 from typing import Any, Dict, List, Optional, Union

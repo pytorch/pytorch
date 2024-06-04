@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import torch
 import numpy as np
 

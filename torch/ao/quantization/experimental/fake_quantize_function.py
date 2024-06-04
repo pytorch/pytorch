@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import torch
 from torch import Tensor
 from torch.ao.quantization.experimental.quantizer import quantize_APoT, dequantize_APoT

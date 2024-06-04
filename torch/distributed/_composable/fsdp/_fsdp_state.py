@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import functools
 
 from typing import Any, Dict, List, Optional, Tuple, TYPE_CHECKING

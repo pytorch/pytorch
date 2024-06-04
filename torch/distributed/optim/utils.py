@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 from typing import Type
 
 from torch import optim

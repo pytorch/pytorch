@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import torch
 from torch import Tensor
 import torch.nn as nn

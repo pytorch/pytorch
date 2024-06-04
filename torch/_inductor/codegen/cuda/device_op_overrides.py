@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 from ..common import DeviceOpOverrides, register_device_op_overrides
 
 
