@@ -36,7 +36,7 @@ from .. import config, ir, scheduler
 from ..codecache import code_hash
 
 from ..dependencies import Dep, MemoryDep, StarDep, WeakDep
-from ..ir import TritonTemplateBuffer
+from ..ir import IRNode, TritonTemplateBuffer
 from ..optimize_indexing import indexing_dtype_strength_reduction
 from ..runtime.hints import ReductionHint, TRITON_MAX_BLOCK
 from ..runtime.runtime_utils import green_text, yellow_text
@@ -704,6 +704,12 @@ class SIMDKernel(Kernel):
                 self.range_tree_nodes[sym].codegen()  # type: ignore[index]
         return expr
 
+    def codegen_nan_check(self) -> None:
+        raise NotImplementedError("NYI: codegen_nan_check")
+
+    def call_kernel(self, name: str, node: Optional[IRNode] = None) -> None:
+        raise NotImplementedError("NYI: call_kernel")
+
     @contextlib.contextmanager
     def mask_loads(self, mask):
         """Context manager to add an additional mask to tl.load/store"""
@@ -1325,8 +1331,9 @@ class SIMDScheduling(BaseScheduling):
         kernel.kernel_name = kernel_name
         kernel.code_hash = code_hash(src_code)
 
+        final_kernel: Union[MultiKernel, SIMDKernel]
         if use_multi_kernel:
-            final_kernel = MultiKernel([kernel, kernel2])
+            final_kernel = MultiKernel([kernel, kernel2])  # type: ignore[possibly-undefined]
         else:
             final_kernel = kernel  # type: ignore[assignment]
 
@@ -1336,7 +1343,9 @@ class SIMDScheduling(BaseScheduling):
                     node.mark_run()
 
         self.codegen_comment(node_schedule)
-        final_kernel.call_kernel(final_kernel.kernel_name)
+        kernel_name = final_kernel.kernel_name
+        assert kernel_name is not None
+        final_kernel.call_kernel(kernel_name)
         if config.nan_asserts:
             final_kernel.codegen_nan_check()
         if config.warn_mix_layout:
