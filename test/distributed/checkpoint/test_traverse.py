@@ -5,8 +5,11 @@ from collections import OrderedDict
 import torch
 
 import torch.distributed.checkpoint._traverse as _traverse
-from torch.distributed.checkpoint.metadata import STATE_DICT_TYPE  # noqa: TCH001
 from torch.testing._internal.common_utils import run_tests, TestCase
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from torch.distributed.checkpoint.metadata import STATE_DICT_TYPE
 
 
 # TODO: add comments for TestTraverse
