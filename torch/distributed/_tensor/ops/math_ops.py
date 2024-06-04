@@ -6,7 +6,7 @@ from typing import cast, List, Optional, Sequence, Tuple, Union
 
 import torch
 
-from torch.distributed._tensor.op_schema import (
+from torch.distributed._tensor._op_schema import (
     OpSchema,
     OpStrategy,
     PlacementStrategy,
@@ -15,6 +15,7 @@ from torch.distributed._tensor.op_schema import (
 )
 from torch.distributed._tensor.ops.utils import (
     as_list,
+    expand_to_full_mesh_op_strategy,
     generate_redistribute_costs,
     is_tensor_evenly_shardable,
     normalize_dim,
@@ -23,8 +24,8 @@ from torch.distributed._tensor.ops.utils import (
     register_op_strategy,
 )
 from torch.distributed._tensor.placement_types import (
-    _Partial,
     DTensorSpec,
+    Partial,
     Placement,
     Replicate,
     Shard,
@@ -50,7 +51,7 @@ ReductionOpType = Union[NormReduction, str]
 
 
 @dataclass(frozen=True)
-class _NormPartial(_Partial):
+class _NormPartial(Partial):
     """
     This placement is used for partial vector norm.
 
@@ -174,6 +175,31 @@ def _infer_reduce_dims_map(
     return reduction_dims_map
 
 
+def _replicate_dims_start_at(
+    placements: Sequence[Placement], start_dim: int = 0
+) -> Tuple[Placement, ...]:
+    new_placements: List[Placement] = []
+    for p in placements:
+        if p.is_partial() or (isinstance(p, Shard) and p.dim >= start_dim):
+            new_placements.append(Replicate())  # make it replicate
+        else:
+            new_placements.append(p)  # keep the placement
+    return tuple(new_placements)
+
+
+# return new_placements which align with placements but skip the skipped_dim
+def _skip_dim(
+    placements: Tuple[Placement, ...], skipped_dim: int
+) -> Tuple[Placement, ...]:
+    new_placements: List[Placement] = []
+    for p in placements:
+        if isinstance(p, Shard) and p.dim >= skipped_dim:
+            new_placements.append(Shard(p.dim - 1))
+        else:
+            new_placements.append(p)
+    return tuple(new_placements)
+
+
 def replicate_reduction_dims(
     placements: Tuple[Placement, ...], reduction_dims: List[int]
 ) -> Tuple[Placement, ...]:
@@ -202,7 +228,7 @@ def map_placements_after_reduction(
     """
     new_placements: List[Placement] = []
     for placement in placements:
-        if isinstance(placement, (Replicate, _Partial)):
+        if isinstance(placement, (Replicate, Partial)):
             new_placements.append(placement)
         else:
             assert isinstance(placement, Shard)
@@ -220,7 +246,7 @@ def map_placements_after_reduction(
 def get_placement_from_reduction_op(reduction_op: ReductionOpType) -> Placement:
     if isinstance(reduction_op, NormReduction):
         return _NormPartial(norm_type=reduction_op.norm_type)
-    return _Partial(reduction_op)
+    return Partial(reduction_op)
 
 
 def common_reduction_strategy(
@@ -385,6 +411,33 @@ def foreach_norm_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> TupleStrateg
         )
         output_tuple_strategy_childs.append(output_strategy)
     return TupleStrategy(output_tuple_strategy_childs)
+
+
+@register_op_strategy([aten._linalg_svd.default], schema_info=RuntimeSchemaInfo(1))
+def linalg_svd_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> OpStrategy:
+    # Since we do not have a simple way to compute a sharded SVD, always fall
+    # back to replicate
+    args_schema = op_schema.args_schema
+    input_strategy = args_schema[0]
+    assert isinstance(input_strategy, OpStrategy), f"{input_strategy}"
+    output_strategies: List[PlacementStrategy] = []
+    for placement_strategy in input_strategy.strategies:
+        replicate_placements = tuple(Replicate() for _ in range(mesh.ndim))
+        replicate_spec = DTensorSpec(
+            mesh=mesh,
+            placements=replicate_placements,
+            tensor_meta=placement_strategy.output_spec.tensor_meta,
+        )
+        redistribute_cost = [
+            generate_redistribute_costs(input_strategy, replicate_spec)
+        ]
+        replicate_strategy = PlacementStrategy(
+            output_specs=replicate_spec,
+            input_specs=(replicate_spec,),
+            redistribute_cost=redistribute_cost,
+        )
+        output_strategies.append(replicate_strategy)
+    return OpStrategy(output_strategies)
 
 
 @register_op_strategy(
@@ -954,26 +1007,33 @@ def layer_norm_bwd_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> OpStrategy
     return out_tuple_strategy
 
 
-def _replicate_dims_start_at(
-    placements: Sequence[Placement], start_dim: int = 0
-) -> Tuple[Placement, ...]:
-    new_placements: List[Placement] = []
-    for p in placements:
-        if p.is_partial() or (isinstance(p, Shard) and p.dim >= start_dim):
-            new_placements.append(Replicate())  # make it replicate
-        else:
-            new_placements.append(p)  # keep the placement
-    return tuple(new_placements)
+@register_op_strategy(
+    [aten.topk.default],
+    schema_info=RuntimeSchemaInfo(2),
+)
+def topk_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> OpStrategy:
+    input_strategy = cast(OpStrategy, op_schema.args_schema[0])
+    k = cast(int, op_schema.args_schema[1])
+    input_shape = input_strategy.shape
+    topk_dim = (
+        cast(int, op_schema.args_schema[2]) if len(op_schema.args_schema) > 2 else -1
+    )
+    topk_dim = normalize_dim(topk_dim, input_strategy.ndim)
 
+    single_mesh_dim_strategies = []
 
-# return new_placements which align with placements but skip the skipped_dim
-def _skip_dim(
-    placements: Tuple[Placement, ...], skipped_dim: int
-) -> Tuple[Placement, ...]:
-    new_placements: List[Placement] = []
-    for p in placements:
-        if isinstance(p, Shard) and p.dim >= skipped_dim:
-            new_placements.append(Shard(p.dim - 1))
-        else:
-            new_placements.append(p)
-    return tuple(new_placements)
+    # two outputs (values, indices), 1 input
+    # replicate always works
+    all_replicate: List[Placement] = [Replicate()] * 3
+    single_mesh_dim_strategies.append(all_replicate)
+
+    # every dim except topk dim should work
+    for dim in range(input_strategy.ndim):
+        if dim != topk_dim:
+            dim_shardings: List[Placement] = [Shard(dim)] * 3
+            single_mesh_dim_strategies.append(dim_shardings)
+    # TODO: topk on sharded dim requries non-trival reduction, address it later
+
+    return expand_to_full_mesh_op_strategy(
+        mesh, op_schema, single_mesh_dim_strategies, input_index=2
+    )

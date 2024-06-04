@@ -15,7 +15,7 @@ struct UnpackedSlice {
 };
 
 // This mirrors Cpython's PySlice_Unpack method
-static inline UnpackedSlice __PySlice_Unpack(PyObject* _r) {
+inline UnpackedSlice __PySlice_Unpack(PyObject* _r) {
   PySliceObject* r = (PySliceObject*)_r;
   /* this is harder to get right than you might think */
 
