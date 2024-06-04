@@ -9,7 +9,7 @@ from torch._inductor.test_case import TestCase as InductorTestCase
 from torch.testing._internal.common_device_type import (
     get_desired_device_type_test_bases,
 )
-from torch.testing._internal.common_utils import IS_MACOS, slowTest, TEST_WITH_ROCM
+from torch.testing._internal.common_utils import IS_MACOS, slowTest
 from torch.testing._internal.inductor_utils import HAS_CPU
 
 
@@ -68,17 +68,7 @@ test_failures_cpp_wrapper = {
         ("cpp_wrapper",), is_skip=True
     ),
 }
-if TEST_WITH_ROCM:
-    test_failures_cpp_wrapper.update(
-        {
-            "test_linear_packed": test_torchinductor.TestFailure(
-                ("cpp_wrapper"), is_skip=True
-            ),
-            "test_linear_packed_dynamic_shapes": test_torchinductor.TestFailure(
-                ("cpp_wrapper"), is_skip=True
-            ),
-        }
-    )
+
 if config.abi_compatible:
     xfail_list = [
         "test_conv2d_binary_inplace_fusion_failed_cpu",
@@ -94,6 +84,7 @@ if config.abi_compatible:
         "test_qconv2d_maxpool2d_linear_dynamic_cpu",
         "test_qconv2d_relu_cpu",
         "test_qlinear_cpu",
+        "test_qlinear_add_cpu",
         "test_qlinear_dequant_promotion_cpu",
         "test_qlinear_relu_cpu",
     ]
