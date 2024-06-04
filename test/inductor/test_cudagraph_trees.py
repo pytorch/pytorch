@@ -1778,6 +1778,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
 
         @torch._inductor.config.patch("triton.cudagraphs", True)
         @torch._dynamo.config.patch("error_on_recompile", True)
+        @torch._dynamo.config.patch("inline_inbuilt_nn_modules", True)
         def test_multi_dispatch_single_compile_param_inputs(self):
             # Verify that we can record multiple cudagraphs for a single
             # compiled function with param inputs
@@ -1798,6 +1799,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
 
         @torch._inductor.config.patch("triton.cudagraphs", True)
         @torch._dynamo.config.patch("error_on_recompile", True)
+        @torch._dynamo.config.patch("inline_inbuilt_nn_modules", True)
         def test_multi_dispatch_custom_module(self):
             # Test that we can correctly dispatch multiple graphs
             # if params of a custom module change
@@ -1815,6 +1817,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
 
         @torch._inductor.config.patch("triton.cudagraphs", True)
         @torch._dynamo.config.patch("error_on_recompile", True)
+        @torch._dynamo.config.patch("inline_inbuilt_nn_modules", True)
         def test_multi_dispatch_child_node(self):
             # Test that we can correctly dispatch multiple graphs if a child node
             # in the tree has stable input pointers change
@@ -1834,6 +1837,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
 
         @torch._inductor.config.patch("triton.cudagraphs", True)
         @torch._dynamo.config.patch("error_on_recompile", True)
+        @torch._dynamo.config.patch("inline_inbuilt_nn_modules", True)
         def test_multi_dispatch_parent_node(self):
             def fn(x, p):
                 # Graph 1

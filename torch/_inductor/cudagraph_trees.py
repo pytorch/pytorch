@@ -752,6 +752,8 @@ class CUDAGraphNode:
         self.device = device_index
         self.stack_traces = stack_traces
         self.stream = stream
+        # Used to only check this once
+        self.static_inputs_stable = False
 
         # if this is a root parent will be None. use weakref to prevent reference cycle
         self._parent = weakref.ref(parent) if parent is not None else None
@@ -951,8 +953,13 @@ class CUDAGraphNode:
 
     def check_static_inputs_are_stable(self, new_inputs):
         # avoid checking managed tensor static points since we already checked those in check_invariants
-        if not torch._C._tensors_data_ptrs_at_indices_equal(
-            new_inputs, self.static_input_data_ptrs, self.non_managed_static_input_idxs
+        if (
+            not self.static_inputs_stable
+            and not torch._C._tensors_data_ptrs_at_indices_equal(
+                new_inputs,
+                self.static_input_data_ptrs,
+                self.non_managed_static_input_idxs,
+            )
         ):
             # this should error
             static_tensors = [new_inputs[i] for i in self.non_managed_static_input_idxs]
@@ -992,6 +999,9 @@ class CUDAGraphNode:
 
         if config.triton.force_cudagraph_sync:
             torch.cuda.synchronize()
+
+        # Reset this to run the check in the future
+        self.static_inputs_stable = False
 
         return outputs
 
@@ -1559,10 +1569,14 @@ class CUDAGraphNode:
             return False
 
         # static input data pointers remain stable
-        if not torch._C._tensors_data_ptrs_at_indices_equal(
-            inputs, self.static_input_data_ptrs, self.static_input_idxs
-        ):
-            return False
+        # if we are inlining builtin nn modules
+        if torch._dynamo.config.inline_inbuilt_nn_modules:
+            if not torch._C._tensors_data_ptrs_at_indices_equal(
+                inputs, self.static_input_data_ptrs, self.static_input_idxs
+            ):
+                return False
+            else:
+                self.static_inputs_stable = True
 
         if not self._check_liveness(
             self.expected_dead_indices_before_graph, self.path_weakrefs
