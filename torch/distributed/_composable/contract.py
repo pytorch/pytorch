@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import uuid
 from collections import OrderedDict
 from functools import wraps

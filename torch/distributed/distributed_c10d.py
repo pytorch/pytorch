@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 """Distributed Collective Communication (c10d)."""
 
 import itertools

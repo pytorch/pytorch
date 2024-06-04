@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import traceback as tb
 from typing import Any, Dict, Tuple
 

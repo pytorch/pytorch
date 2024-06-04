@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 # Copyright 2022 Cruise LLC
 import logging
 import warnings

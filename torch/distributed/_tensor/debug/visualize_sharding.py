@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 from typing import List, Sequence, Tuple
 
 import numpy as np

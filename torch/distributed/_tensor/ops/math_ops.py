@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 # Copyright (c) Meta Platforms, Inc. and affiliates
 import math
 from dataclasses import dataclass
