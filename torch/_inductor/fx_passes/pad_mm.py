@@ -1,6 +1,7 @@
 import functools
 import itertools
 import operator
+import typing
 from typing import List, Optional, Union
 
 import torch
@@ -11,7 +12,14 @@ from torch._subclasses.fake_tensor import FakeTensor
 from torch.utils._mode_utils import no_dispatch
 from ...utils._triton import has_triton
 
-from ..pattern_matcher import fwd_only, gen_register_replacement, joint_fwd_bwd, Match
+from ..pattern_matcher import (
+    fwd_only,
+    gen_register_replacement,
+    joint_fwd_bwd,
+    Match,
+    ReplaceFn,
+    SearchFn,
+)
 
 aten = torch.ops.aten
 
@@ -636,22 +644,22 @@ def _pad_mm_init():
 
     for pattern, replacement, args, workaround, extra_check in [
         (
-            mm_pattern,
-            mm_replace,
+            typing.cast(SearchFn, mm_pattern),
+            typing.cast(ReplaceFn, mm_replace),
             [dim2a(), dim2b()],
             {},
             should_pad_mm,
         ),
         (
-            bmm_pattern,
-            bmm_replace,
+            typing.cast(SearchFn, bmm_pattern),
+            typing.cast(ReplaceFn, bmm_replace),
             [dim3a(), dim3b()],
             {},
             should_pad_bmm,
         ),
         (
-            addmm_pattern,
-            addmm_replace,
+            typing.cast(SearchFn, addmm_pattern),
+            typing.cast(ReplaceFn, addmm_replace),
             [dim1a(), dim2a(), dim2b()],
             rep,
             should_pad_addmm,
