@@ -1,4 +1,3 @@
-import contextlib
 from typing import List, NamedTuple, Optional, Tuple, Union
 
 import torch
@@ -10,7 +9,6 @@ from ._fsdp_common import (
     _to_dtype_if_needed,
 )
 from ._fsdp_param import FSDPParam
-
 
 lib = torch.library.Library("fsdp", "DEF")
 
@@ -162,17 +160,20 @@ def foreach_all_gather_copy_out(
         param_all_gather_input_numels, param_all_gather_input_dtypes, fsdp_params
     ):
         if torch._dynamo.compiled_autograd.compiled_autograd_enabled:
-            # NOTE: under compile, always make sure AGO creation is part of the graph.
             fsdp_param.init_all_gather_outputs(
-                all_gather_input_numels, all_gather_input_dtypes, world_size, device, force_recreate=True,
+                all_gather_input_numels,
+                all_gather_input_dtypes,
+                world_size,
+                device,
+                # NOTE: Under compile, make sure we always recreate all_gather_outputs
+                # per AllGather. See [Note: Invariants for torch.compile Traceable FSDP2].
+                force_recreate=True,
             )
         else:
-            if fsdp_param.all_gather_outputs:
-                fsdp_param.alloc_all_gather_outputs()
-            else:
-                fsdp_param.init_all_gather_outputs(
-                    all_gather_input_numels, all_gather_input_dtypes, world_size, device
-                )
+            fsdp_param.init_all_gather_outputs(
+                all_gather_input_numels, all_gather_input_dtypes, world_size, device
+            )  # no-op after 1st call
+            fsdp_param.alloc_all_gather_outputs()
     all_gather_output = all_gather_output.view(world_size, -1)
     gen = (t for fsdp_param in fsdp_params for t in fsdp_param.all_gather_outputs)
     if all_gather_output.dtype == torch.uint8:
