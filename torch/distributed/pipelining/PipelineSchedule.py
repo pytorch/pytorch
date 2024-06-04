@@ -361,9 +361,9 @@ class ScheduleGPipe(PipelineScheduleSingle):
                     work.wait()
 
                 loss = self._maybe_get_loss(self._stage, i)
-                self._stage.backward_one_chunk(loss=loss)
+                self._stage.backward_one_chunk(i, loss=loss)
 
-                ops = self._stage.get_bwd_send_ops()
+                ops = self._stage.get_bwd_send_ops(i)
                 works = _sorted_batch_p2p(ops, desc="bwd_send")
                 bwd_sends_to_wait.extend(works.values())
 
@@ -456,10 +456,10 @@ class Schedule1F1B(PipelineScheduleSingle):
 
             # Backward one chunk
             loss = self._maybe_get_loss(self._stage, bwd_mb_index)
-            self._stage.backward_one_chunk(loss=loss)
+            self._stage.backward_one_chunk(bwd_mb_index, loss=loss)
 
             # Get the bwd send ops, but don't fire, to be fused with the 1F below
-            bwd_sends = self._stage.get_bwd_send_ops()
+            bwd_sends = self._stage.get_bwd_send_ops(bwd_mb_index)
             bwd_mb_index += 1
 
             if fwd_mb_index == self._n_microbatches:
@@ -495,14 +495,14 @@ class Schedule1F1B(PipelineScheduleSingle):
 
             # Backward one chunk
             loss = self._maybe_get_loss(self._stage, bwd_mb_index)
-            self._stage.backward_one_chunk(loss=loss)
+            self._stage.backward_one_chunk(bwd_mb_index, loss=loss)
 
             # Clear previous chunk's backward sends (hopefully they have well finished)
             if send_work:
                 send_work.wait()
 
             # Get the bwd send ops, fire it
-            bwd_sends = self._stage.get_bwd_send_ops()
+            bwd_sends = self._stage.get_bwd_send_ops(bwd_mb_index)
             send_work = _batch_p2p(bwd_sends, desc="bwd_send")
             bwd_mb_index += 1
 
@@ -637,9 +637,9 @@ class ScheduleLoopedBFS(PipelineScheduleMulti):
                         _batch_p2p(ops, desc="bwd_recv").wait()
 
                     loss = self._maybe_get_loss(stage, i)
-                    stage.backward_one_chunk(loss=loss)
+                    stage.backward_one_chunk(i, loss=loss)
 
-                    ops = stage.get_bwd_send_ops()
+                    ops = stage.get_bwd_send_ops(i)
                     if ops:
                         _batch_p2p(ops, desc="bwd_send")
 
@@ -808,8 +808,8 @@ class ScheduleInterleaved1F1B(PipelineScheduleMulti):
 
                 # Backward
                 loss = self._maybe_get_loss(bwd_stage, bwd_mb_index)
-                bwd_stage.backward_one_chunk(loss=loss)
-                ops.extend(bwd_stage.get_bwd_send_ops())
+                bwd_stage.backward_one_chunk(bwd_mb_index, loss=loss)
+                ops.extend(bwd_stage.get_bwd_send_ops(bwd_mb_index))
 
         # Cooldown Phase (backward only)
         for step in range(warmup_steps + fwd_bwd_steps, total_steps):
@@ -833,9 +833,9 @@ class ScheduleInterleaved1F1B(PipelineScheduleMulti):
                     ops.clear()
 
                 loss = self._maybe_get_loss(bwd_stage, bwd_mb_index)
-                bwd_stage.backward_one_chunk(loss=loss)
+                bwd_stage.backward_one_chunk(bwd_mb_index, loss=loss)
 
-                ops.extend(bwd_stage.get_bwd_send_ops())
+                ops.extend(bwd_stage.get_bwd_send_ops(bwd_mb_index))
                 if ops:
                     work = _batch_p2p(ops, desc=desc + " post_bwd")
                     sends_to_wait.append(work)
