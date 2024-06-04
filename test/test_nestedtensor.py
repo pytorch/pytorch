@@ -4615,14 +4615,27 @@ class TestNestedTensorSubclass(TestCase):
 
             with self.assertRaisesRegex(RuntimeError, "expected 1D offsets"):
                 torch.ops.aten._padded_dense_to_jagged_forward(
-                    values, [offsets2d], total_L)
+                    padded, [offsets2d], total_L)
 
             # error case: final offset != total_L
             offsets_wrong = offsets.clone().detach()
             offsets_wrong[-1] = total_L + 1
             with self.assertRaisesRegex(RuntimeError, "final offset should match total_L value"):
                 torch.ops.aten._padded_dense_to_jagged_forward(
-                    values, [offsets_wrong], total_L)
+                    padded, [offsets_wrong], total_L)
+
+            # error case: 1D padded input
+            padded_wrong = padded.flatten().clone().detach()
+            with self.assertRaisesRegex(RuntimeError, "expected padded dim >= 2"):
+                torch.ops.aten._padded_dense_to_jagged_forward(
+                    padded_wrong, [offsets], total_L)
+
+            # error case: batch item has length > max length
+            # max_length is 5 above; 7 here
+            offsets_wrong = torch.tensor([0, 1, 8, 9, 10], device=device, dtype=torch.int64)
+            with self.assertRaisesRegex(RuntimeError, "found batch item of length"):
+                torch.ops.aten._padded_dense_to_jagged_forward(
+                    padded, [offsets_wrong], total_L)
 
     @dtypes(torch.float32)
     @skipIfTorchDynamo("Test compiles internally")

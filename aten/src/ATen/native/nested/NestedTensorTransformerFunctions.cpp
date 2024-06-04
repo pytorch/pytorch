@@ -310,8 +310,13 @@ Tensor _padded_dense_to_jagged_forward_cpu(
     // error if the offsets try to index past the end of the packed dimension
     TORCH_CHECK(
         final_offset == total_L_val,
-        "_padded_dense_to_jagged_forward(): final offset should match total_L value")
+        "_padded_dense_to_jagged_forward(): final offset should match total_L value");
   }
+
+  TORCH_CHECK(
+      padded.dim() >= 2,
+      "_padded_dense_to_jagged_forward(): expected padded dim >= 2, but padded.dim() == ",
+      padded.dim());
 
   std::vector<int64_t> values_shape;
   values_shape.reserve(padded.dim() - 1);
@@ -326,6 +331,12 @@ Tensor _padded_dense_to_jagged_forward_cpu(
     auto start_offset = offsets[i].item<int64_t>();
     auto end_offset = offsets[i + 1].item<int64_t>();
     auto length = end_offset - start_offset;
+
+    TORCH_CHECK(
+        length <= padded_shape[1],
+        "_padded_dense_to_jagged_forward(): found batch item of length ", length,
+        " when max length specified by padded input is ", padded_shape[1]);
+
     auto dst = values.slice(0, start_offset, end_offset);
     auto source = padded.select(0, i).slice(0, 0, length);
     dst.copy_(source);
