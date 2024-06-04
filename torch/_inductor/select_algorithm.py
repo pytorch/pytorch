@@ -310,7 +310,10 @@ class TritonTemplateKernel(TritonKernel):
         Args:
             subgraph_number (int): The index of the subgraph in self.subgraphs
         """
-        with self.create_subgraph_body(f"modification_{subgraph_number}"):
+        num = 0
+        while f"mod_{subgraph_number}_{num}" in self.subgraph_bodies:
+            num += 1
+        with self.create_subgraph_body(f"mod_{subgraph_number}_{num}"):
             assert isinstance(subgraph_number, int)
             assert isinstance(self.subgraphs, list)
             assert (
