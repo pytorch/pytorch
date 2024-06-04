@@ -751,7 +751,9 @@ PyObject* THPModule_setSDPUseOverrideable(PyObject* _unused, PyObject* arg) {
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
-PyObject* THPModule_userEnabledOverrideableSDP(PyObject* _unused, PyObject* noargs) {
+PyObject* THPModule_userEnabledOverrideableSDP(
+    PyObject* _unused,
+    PyObject* noargs) {
   if (at::globalContext().userEnabledOverrideableSDP())
     Py_RETURN_TRUE;
   else
@@ -1366,7 +1368,10 @@ static PyMethodDef TorchMethods[] = { // NOLINT
      THPModule_userEnabledOverrideableSDP,
      METH_NOARGS,
      nullptr},
-    {"_set_sdp_use_overrideable", THPModule_setSDPUseOverrideable, METH_O, nullptr},
+    {"_set_sdp_use_overrideable",
+     THPModule_setSDPUseOverrideable,
+     METH_O,
+     nullptr},
     {"_get_cudnn_sdp_enabled",
      THPModule_userEnabledCuDNNSDP,
      METH_NOARGS,
@@ -1950,10 +1955,10 @@ Call this whenever a new thread is created in order to propagate values from
       "See :func: torch.nn.attention.sdpa_kernel for more details.")
       .value("ERROR", sdp::SDPBackend::error)
       .value("MATH", sdp::SDPBackend::math)
-      .value("OVERRIDEABLE", sdp::SDPBackend::overrideable)
       .value("FLASH_ATTENTION", sdp::SDPBackend::flash_attention)
       .value("EFFICIENT_ATTENTION", sdp::SDPBackend::efficient_attention)
-      .value("CUDNN_ATTENTION", sdp::SDPBackend::cudnn_attention);
+      .value("CUDNN_ATTENTION", sdp::SDPBackend::cudnn_attention)
+      .value("OVERRIDEABLE", sdp::SDPBackend::overrideable);
 
   py_module.def(
       "_can_use_flash_attention",

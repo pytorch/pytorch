@@ -26,10 +26,10 @@ constexpr int32_t num_backends = 5;
 enum class SDPBackend {
   error = -1,
   math = 0,
-  overrideable = 1,
-  flash_attention = 2,
-  efficient_attention = 3,
-  cudnn_attention = 4
+  flash_attention = 1,
+  efficient_attention = 2,
+  cudnn_attention = 3,
+  overrideable = 4
 };
 
 // Note that if this changed make sure to update
