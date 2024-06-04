@@ -171,44 +171,6 @@ def _preload_cuda_deps(lib_folder, lib_name):
 # See Note [Global dependencies]
 def _load_global_deps() -> None:
 
-    LIBTORCH_PKG_NAME = "libtorchsplit"
-
-    def find_package_path(package_name):
-        spec = importlib.util.find_spec(package_name)
-        if spec:
-            # The package might be a namespace package, so get_data may fail
-            try:
-                loader = spec.loader
-                if loader is not None:
-                    file_path = loader.get_filename()  # type: ignore[attr-defined]
-                    return os.path.dirname(file_path)
-            except AttributeError:
-                pass
-        return None
-
-    def load_shared_libraries(library_path):
-        lib_dir = os.path.join(library_path, 'lib')
-        if not os.path.exists(lib_dir):
-            return
-
-        # Determine the file extension based on the platform
-        if platform.system() == 'Darwin':
-            lib_ext = '.dylib'
-        else:
-            lib_ext = '.so'
-
-        # Find all shared library files with the appropriate extension
-        library_files = [f for f in os.listdir(lib_dir) if f.endswith(lib_ext)]
-        if not library_files:
-            return
-
-        for lib_file in library_files:
-            lib_path = os.path.join(lib_dir, lib_file)
-            try:
-                ctypes.CDLL(lib_path, mode=ctypes.RTLD_GLOBAL)
-            except OSError as err:
-                print(f"Failed to load {lib_path}: {err}")
-
     if _running_with_deploy() or platform.system() == 'Windows':
         return
 
@@ -216,11 +178,6 @@ def _load_global_deps() -> None:
     here = os.path.abspath(__file__)
     global_deps_lib_path = os.path.join(os.path.dirname(here), 'lib', lib_name)
 
-    split_build_lib_name = LIBTORCH_PKG_NAME
-    library_path = find_package_path(split_build_lib_name)
-
-    if library_path:
-        global_deps_lib_path = os.path.join(library_path, 'lib', lib_name)
     try:
         ctypes.CDLL(global_deps_lib_path, mode=ctypes.RTLD_GLOBAL)
     except OSError as err:
@@ -245,10 +202,6 @@ def _load_global_deps() -> None:
         for lib_folder, lib_name in cuda_libs.items():
             _preload_cuda_deps(lib_folder, lib_name)
         ctypes.CDLL(global_deps_lib_path, mode=ctypes.RTLD_GLOBAL)
-
-    if library_path:
-        # loading libtorch_global_deps first due its special logic
-        load_shared_libraries(library_path)
 
 if (USE_RTLD_GLOBAL_WITH_LIBTORCH or os.getenv('TORCH_USE_RTLD_GLOBAL')) and \
         (_running_with_deploy() or platform.system() != 'Windows'):
@@ -316,6 +269,75 @@ class SymInt:
 
     # Magic methods installed by torch.fx.experimental.sym_node
 
+    def __round__(self, ndigits=None):
+        return self
+
+    def __truediv__(self, other):
+        if isinstance(other, (builtins.float, SymFloat)):
+            return sym_float(self).__float_truediv__(other)
+        if not isinstance(other, (builtins.int, SymInt)):
+            return NotImplemented
+        return self.__int_truediv__(other)
+
+    def __rtruediv__(self, other):
+        if isinstance(other, (builtins.float, SymFloat)):
+            return sym_float(self).__rfloat_truediv__(other)
+        if not isinstance(other, (builtins.int, SymInt)):
+            return NotImplemented
+        return self.__rint_truediv__(other)
+
+    def __floordiv__(self, other):
+        if isinstance(other, (builtins.float, SymFloat)):
+            return torch.sym_float(math.floor(sym_float(self) / other))
+        if not isinstance(other, (builtins.int, SymInt)):
+            return NotImplemented
+        return self.__int_floordiv__(other)
+
+    def __rfloordiv__(self, other):
+        if isinstance(other, (builtins.float, SymFloat)):
+            return torch.sym_float(math.floor(other / sym_float(self)))
+        if not isinstance(other, (builtins.int, SymInt)):
+            return NotImplemented
+        return self.__rint_floordiv__(other)
+
+    # nb: complex is impossible to handle correctly lol, with
+    # negative base and integral float need to diverge semantics and
+    # just always return complex.  Neener neener pretend this problem
+    # doesn't exist
+    def __pow__(self, other):
+        if isinstance(other, (builtins.float, SymFloat)):
+            return sym_float(self).__pow__(other)
+        if not isinstance(other, (builtins.int, SymInt)):
+            return NotImplemented
+        # Guards!  This guard is necessary because we need to know it to
+        # determine the output type of this operation
+        if other >= 0:
+            return self.__pow_by_natural__(other)
+        else:
+            # Mercifully, when the exponent is negative, Python just promotes
+            # to doubles and does a float pow:
+            #
+            #   if (Py_SIZE(b) < 0 && c == NULL) {
+            #       /* if exponent is negative and there's no modulus:
+            #              return a float.  This works because we know
+            #              that this calls float_pow() which converts its
+            #              arguments to double. */
+            #       Py_DECREF(a);
+            #       Py_DECREF(b);
+            #       return PyFloat_Type.tp_as_number->nb_power(v, w, x);
+            #   }
+            return sym_float(self).__pow__(sym_float(other))
+
+    def __rpow__(self, other):
+        if isinstance(other, (builtins.float, SymFloat)):
+            return sym_float(self).__rpow__(other)
+        if not isinstance(other, (builtins.int, SymInt)):
+            return NotImplemented
+        if self >= 0:  # self is exponent
+            return self.__rpow_by_natural__(other)
+        else:
+            return sym_float(self).__rpow__(sym_float(other))
+
     def __eq__(self, other: object) -> builtins.bool:
         raise AssertionError("type stub not overridden")
 
@@ -335,6 +357,24 @@ class SymInt:
         raise AssertionError("type stub not overridden")
 
     def __mul__(self, other) -> "SymInt":
+        raise AssertionError("type stub not overridden")
+
+    def __pow_by_natural__(self, other) -> "SymInt":
+        raise AssertionError("type stub not overridden")
+
+    def __rpow_by_natural__(self, other) -> "SymInt":
+        raise AssertionError("type stub not overridden")
+
+    def __int_truediv__(self, other) -> "SymFloat":
+        raise AssertionError("type stub not overridden")
+
+    def __rint_truediv__(self, other) -> "SymFloat":
+        raise AssertionError("type stub not overridden")
+
+    def __int_floordiv__(self, other) -> "SymFloat":
+        raise AssertionError("type stub not overridden")
+
+    def __rint_floordiv__(self, other) -> "SymFloat":
         raise AssertionError("type stub not overridden")
 
     def __sym_max__(self, other):
@@ -371,8 +411,42 @@ class SymFloat:
         # class has a field named node that stores SymNode
         self.node = node
 
+    def __truediv__(self, other):
+        if not isinstance(other, (builtins.int, builtins.float, SymInt, SymFloat)):
+            return NotImplemented
+        return self.__float_truediv__(sym_float(other))
+
+    def __rtruediv__(self, other):
+        if not isinstance(other, (builtins.int, builtins.float, SymInt, SymFloat)):
+            return NotImplemented
+        return self.__rfloat_truediv__(sym_float(other))
+
+    def __floordiv__(self, other):
+        if not isinstance(other, (builtins.int, builtins.float, SymInt, SymFloat)):
+            return NotImplemented
+        return torch.sym_float(math.floor(self / sym_float(other)))
+
+    def __rfloordiv__(self, other):
+        if not isinstance(other, (builtins.int, builtins.float, SymInt, SymFloat)):
+            return NotImplemented
+        return torch.sym_float(math.floor(sym_float(other) / self))
+
     def __bool__(self):
         return self.node.bool_()
+
+    # Symbolic power does NOT work with negative base, this is to avoid
+    # potential complex outputs
+    def __pow__(self, other):
+        if not isinstance(other, (builtins.int, builtins.float, SymInt, SymFloat)):
+            return NotImplemented
+        torch._check(self >= 0)
+        return self.__float_pow__(other)
+
+    def __rpow__(self, other):
+        if not isinstance(other, (builtins.int, builtins.float, SymInt, SymFloat)):
+            return NotImplemented
+        torch._check(other >= 0)
+        return self.__rfloat_pow__(other)
 
     # Magic methods installed by torch.fx.experimental.sym_node
 
@@ -389,6 +463,18 @@ class SymFloat:
         raise AssertionError("type stub not overridden")
 
     def __ge__(self, other) -> builtins.bool:
+        raise AssertionError("type stub not overridden")
+
+    def __float_pow__(self, other) -> "SymFloat":
+        raise AssertionError("type stub not overridden")
+
+    def __rfloat_pow__(self, other) -> "SymFloat":
+        raise AssertionError("type stub not overridden")
+
+    def __float_truediv__(self, other) -> "SymFloat":
+        raise AssertionError("type stub not overridden")
+
+    def __rfloat_truediv__(self, other) -> "SymFloat":
         raise AssertionError("type stub not overridden")
 
     def __trunc__(self):
@@ -524,7 +610,12 @@ def sym_int(a):
     return py_int(a)  # type: ignore[operator]
 
 def sym_max(a, b):
-    """ SymInt-aware utility for max()."""
+    """
+    SymInt-aware utility for max which avoids branching on a < b.
+    Unlike builtins.max(), this only works for int/float, and it always
+    promotes to float if any argument is float (unlike builtins.max, which
+    will faithfully preserve the type of the input argument).
+    """
     from .overrides import has_torch_function, handle_torch_function
 
     if has_torch_function((a, b)):
@@ -532,14 +623,19 @@ def sym_max(a, b):
     if isinstance(a, (SymInt, SymFloat)):
         return a.__sym_max__(b)
     elif isinstance(b, (SymInt, SymFloat)):
-        # NB: If you actually care about preserving output type exactly
-        # if you do something like max(0, 0.0), it is NOT sound to treat
-        # min/max as commutative
+        # Due to promotion semantics, this is operator is commutative:
+        # max(1, 1.0) === max(1.0, 1) === 1.0
         return b.__sym_max__(a)
-    return builtins.max(a, b)  # type: ignore[operator]
+    # TODO: Probably can make bool work too, just lazy
+    assert isinstance(a, (builtins.int, builtins.float)), type(a)
+    assert isinstance(b, (builtins.int, builtins.float)), type(b)
+    if isinstance(a, builtins.float) or isinstance(b, builtins.float):
+        return builtins.float(builtins.max(a, b))
+    else:
+        return builtins.max(a, b)
 
 def sym_min(a, b):
-    """ SymInt-aware utility for max()."""
+    """ SymInt-aware utility for min()."""
     from .overrides import has_torch_function, handle_torch_function
 
     if has_torch_function((a, b)):
@@ -548,7 +644,12 @@ def sym_min(a, b):
         return a.__sym_min__(b)
     elif isinstance(b, (SymInt, SymFloat)):
         return b.__sym_min__(a)
-    return builtins.min(a, b)  # type: ignore[operator]
+    assert isinstance(a, (builtins.int, builtins.float)), type(a)
+    assert isinstance(b, (builtins.int, builtins.float)), type(b)
+    if isinstance(a, builtins.float) or isinstance(b, builtins.float):
+        return builtins.float(builtins.min(a, b))
+    else:
+        return builtins.min(a, b)
 
 # Drop in replacement for math.sqrt, math.sin, math.cos etc
 current_module = sys.modules[__name__]
