@@ -467,11 +467,12 @@ def _use_fb_internal_macros() -> List[str]:
         return []
 
 
-def _use_standard_sys_dir_headers():
+def _setup_standard_sys_libs(cpp_compiler):
     cflags: List[str] = []
     include_dirs: List[str] = []
+    passthough_args: List[str] = []
     if _IS_WINDOWS:
-        return cflags, include_dirs
+        return cflags, include_dirs, passthough_args
 
     if config.is_fbcode():
         cflags.append("nostdinc")
@@ -484,7 +485,13 @@ def _use_standard_sys_dir_headers():
         include_dirs.append(build_paths.linux_kernel())
         include_dirs.append("include")
 
-    return cflags, include_dirs
+        if _is_clang(cpp_compiler):
+            passthough_args.append(" --rtlib=compiler-rt")
+            passthough_args.append(" -fuse-ld=lld")
+            passthough_args.append(" -B" + build_paths.glibc_lib())
+            passthough_args.append(" -L" + build_paths.glibc_lib())
+
+    return cflags, include_dirs, passthough_args
 
 
 @functools.lru_cache
@@ -670,7 +677,11 @@ def get_cpp_torch_options(
     torch_cpp_wrapper_definations = _get_torch_cpp_wrapper_defination()
     use_custom_generated_macros_definations = _use_custom_generated_macros()
 
-    sys_dir_header_cflags, sys_dir_header_include_dirs = _use_standard_sys_dir_headers()
+    (
+        sys_libs_cflags,
+        sys_libs_include_dirs,
+        sys_libs_passthough_args,
+    ) = _setup_standard_sys_libs(cpp_compiler)
 
     isa_macros, isa_ps_args_build_flags = _get_build_args_of_chosen_isa(vec_isa)
 
@@ -704,17 +715,20 @@ def get_cpp_torch_options(
         + mmap_self_macros
     )
     include_dirs = (
-        sys_dir_header_include_dirs
+        sys_libs_include_dirs
         + python_include_dirs
         + torch_include_dirs
         + omp_include_dir_paths
     )
-    cflags = sys_dir_header_cflags + omp_cflags
+    cflags = sys_libs_cflags + omp_cflags
     ldflags = omp_ldflags
     libraries_dirs = python_libraries_dirs + torch_libraries_dirs + omp_lib_dir_paths
     libraries = torch_libraries + omp_lib
     passthough_args = (
-        isa_ps_args_build_flags + cxx_abi_passthough_args + omp_passthough_args
+        sys_libs_passthough_args
+        + isa_ps_args_build_flags
+        + cxx_abi_passthough_args
+        + omp_passthough_args
     )
 
     return (
@@ -1020,12 +1034,6 @@ class CppBuilder:
                 inp_name = [os.path.basename(i) for i in sources]
 
             self._sources_args = " ".join(inp_name)
-
-            if _is_clang(self._compiler):
-                self._passthough_parameters_args += " --rtlib=compiler-rt"
-                self._passthough_parameters_args += " -fuse-ld=lld"
-                self._passthough_parameters_args += " -B" + build_paths.glibc_lib()
-                self._passthough_parameters_args += " -L" + build_paths.glibc_lib()
         else:
             self._sources_args = " ".join(sources)
 
