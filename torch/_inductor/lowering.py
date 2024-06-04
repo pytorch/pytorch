@@ -3190,10 +3190,6 @@ def _unsafe_masked_index(self, mask, indices, fill):
 
 @register_lowering(aten._unsafe_masked_index_put_accumulate, type_promotion_kind=None)
 def _unsafe_masked_index_put_accumulate(x, mask, indices, values):
-    if torch.version.hip is not None:
-        # Avoid a triton compiler failure
-        return fallback__unsafe_masked_index_put_accumulate(x, mask, indices, values)
-
     masked_value = where(mask, values, 0)
     shape = x.get_size()
     clamped_indices = [
