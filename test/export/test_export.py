@@ -3444,11 +3444,8 @@ def forward(self, x):
         FileCheck().check_count(
             "torch.ops.aten.sym_constrain_range.default", 1, exactly=True
         ).run(ep.graph_module.code)
-        num_occurrences = 1
-        if is_non_strict_test(self._testMethodName):
-            num_occurrences = 2
         FileCheck().check_count(
-            "torch.ops.aten._assert_scalar.default", num_occurrences, exactly=True
+            "torch.ops.aten._assert_scalar.default", 1, exactly=True
         ).run(ep.graph_module.code)
 
         ep = ep.run_decompositions()
@@ -3456,13 +3453,8 @@ def forward(self, x):
         FileCheck().check_count(
             "torch.ops.aten.sym_constrain_range.default", 1, exactly=True
         ).run(ep.graph_module.code)
-        num_occurrences = 1
-        if is_non_strict_test(self._testMethodName) or is_serdes_test(
-            self._testMethodName
-        ):
-            num_occurrences = 2
         FileCheck().check_count(
-            "torch.ops.aten._assert_scalar.default", num_occurrences, exactly=True
+            "torch.ops.aten._assert_scalar.default", 1, exactly=True
         ).run(ep.graph_module.code)
 
     def test_non_arg_name_dynamic_shapes_api(self):
