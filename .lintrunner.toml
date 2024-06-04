@@ -1072,7 +1072,6 @@ exclude_patterns = [
     'test/test_jit_disabled.py',
     'test/test_jit_fuser.py',
     'test/test_jit_fuser_legacy.py',
-    'test/test_jit_fuser_te.py',
     'test/test_jit_legacy.py',
     'test/test_jit_llga_fuser.py',
     'test/test_jit_profiling.py',
