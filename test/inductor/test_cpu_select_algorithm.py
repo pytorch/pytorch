@@ -377,6 +377,56 @@ class TestSelectAlgorithm(TestCase):
         with patch.object(select_algorithm, "VERIFY", dict(atol=atol, rtol=rtol)):
             self.common(ref_quantized_mod, (a,), atol=atol, rtol=rtol)
 
+    @inductor_config.patch({"freezing": True})
+    @patches
+    @torch.no_grad
+    @unittest.skipIf(not TEST_MKL, "Test requires MKL")
+    @parametrize("batch_size", (32,))
+    @parametrize("in_features", (128,))
+    @parametrize("out_features", (64,))
+    @parametrize("bias", (False, True))
+    @parametrize("input_3d", (False,))
+    @dtypes(
+        torch.float32,
+    )
+    @parametrize(
+        "epilogue",
+        (
+            "relu",
+            "gelu",
+        ),
+    )
+    def test_int8_linear_unary_static_shapes(
+        self, batch_size, in_features, out_features, bias, input_3d, dtype, epilogue
+    ):
+        from torch._dynamo.testing import rand_strided
+
+        a = rand_strided(
+            (batch_size, in_features),
+            (in_features, 1),
+            device="cpu",
+            dtype=torch.float32,
+        )
+
+        class M(torch.nn.Module):
+            def __init__(self, bias):
+                super().__init__()
+                self.linear = torch.nn.Linear(in_features, out_features, bias)
+                self.epilogue = _get_epilogue(epilogue)
+
+            def forward(self, x):
+                return self.epilogue(self.linear(x))
+
+        counters.clear()
+        ref_quantized_mod = _generate_qdq_quantized_model(
+            M(bias=bias).to(dtype=dtype).eval(),
+            (a,),
+        )
+
+        atol, rtol = 1e-3, 1e-3
+        with patch.object(select_algorithm, "VERIFY", dict(atol=atol, rtol=rtol)):
+            self.common(ref_quantized_mod, (a,), atol=atol, rtol=rtol)
+
 
 @dynamo_config.patch({"dynamic_shapes": True, "assume_static_by_default": False})
 class _DynamicShapesTestBase(TestCase):

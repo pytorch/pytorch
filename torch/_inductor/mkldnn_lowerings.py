@@ -676,9 +676,7 @@ def register_onednn_fusion_ops():
                     x, packed_weight, layout=layout, out_dtype=output_dtype
                 )
                 if (
-                    use_cpp_packed_gemm_template(layout, x, packed_weight)
-                    and attr == "none"
-                    and output_dtype == torch.float32  # Only support u8s8f32 for now
+                    output_dtype == torch.float32  # Only support u8s8f32 for now
                     and len(x_zp.get_layout().size) == 0  # Per tensor quant of act
                     and isinstance(
                         ir.InputsKernel.unwrap_storage_for_input(w_zp),
@@ -688,6 +686,7 @@ def register_onednn_fusion_ops():
                         torch.zeros_like(V.graph.constants[w_zp.get_name()]),
                         V.graph.constants[w_zp.get_name()],
                     )  # We only composentate MatrixB and assume B_zp is 0 to avoid the composantation of MatrixA
+                    and use_cpp_packed_gemm_template(layout, x, packed_weight)
                 ):
                     W_tensor = V.graph.constants[packed_weight.get_name()]
                     W_tensor = W_tensor.to_dense()
@@ -720,6 +719,7 @@ def register_onednn_fusion_ops():
                             _x_zp = x_zp_loader(())
                             _w_scale = w_scale_loader(weight_compo_index)
                             _weight_compo = weight_compo_loader(weight_compo_index)
+                            # Step 1: Doing compensation to cvt fp32
                             temp = ops.mul(
                                 ops.mul(
                                     input,
@@ -740,17 +740,26 @@ def register_onednn_fusion_ops():
                                     _weight_compo,
                                 ),
                             )
+                            # Step 2: add Bias if applicable
                             if bias is not None:
                                 _bias = bias_loader(weight_compo_index)
                                 temp = ops.add(temp, _bias)
                             return temp
 
-                        return ir.Pointwise(
+                        fp32_buf = ir.Pointwise(
                             device=input_buffer.get_device(),
                             dtype=torch.float32,  # Hardcode to FP32 for u8s8f32
                             inner_fn=inner_fn,
                             ranges=input_buffer.get_size(),
                         )
+
+                        # Step 3: Doing the post op fusion
+                        if attr != "none":
+                            fp32_buf = create_epilogue_with_attr(
+                                fp32_buf, attr, scalars=scalars, algorithm=algorithm
+                            )
+
+                        return fp32_buf
 
                     if bias is None:
                         assert x.get_dtype() == torch.uint8
