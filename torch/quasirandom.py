@@ -69,7 +69,7 @@ class SobolEngine:
         self.num_generated = 0
 
     def draw(self, n: int = 1, out: Optional[torch.Tensor] = None,
-             dtype: torch.dtype = torch.float32) -> torch.Tensor:
+             dtype: Optional[torch.dtype] = None) -> torch.Tensor:
         r"""
         Function to draw a sequence of :attr:`n` points from a Sobol sequence.
         Note that the samples are dependent on the previous samples. The size
@@ -81,8 +81,11 @@ class SobolEngine:
             out (Tensor, optional): The output tensor
             dtype (:class:`torch.dtype`, optional): the desired data type of the
                                                     returned tensor.
-                                                    Default: ``torch.float32``
+                                                    Default: ``None``
         """
+        if dtype is None:
+            dtype = torch.get_default_dtype()
+
         if self.num_generated == 0:
             if n == 1:
                 result = self._first_point.to(dtype)
@@ -90,7 +93,7 @@ class SobolEngine:
                 result, self.quasi = torch._sobol_engine_draw(
                     self.quasi, n - 1, self.sobolstate, self.dimension, self.num_generated, dtype=dtype,
                 )
-                result = torch.cat((self._first_point, result), dim=-2)
+                result = torch.cat((self._first_point.to(dtype), result), dim=-2)
         else:
             result, self.quasi = torch._sobol_engine_draw(
                 self.quasi, n, self.sobolstate, self.dimension, self.num_generated - 1, dtype=dtype,
@@ -105,7 +108,7 @@ class SobolEngine:
         return result
 
     def draw_base2(self, m: int, out: Optional[torch.Tensor] = None,
-                   dtype: torch.dtype = torch.float32) -> torch.Tensor:
+                   dtype: Optional[torch.dtype] = None) -> torch.Tensor:
         r"""
         Function to draw a sequence of :attr:`2**m` points from a Sobol sequence.
         Note that the samples are dependent on the previous samples. The size
@@ -116,7 +119,7 @@ class SobolEngine:
             out (Tensor, optional): The output tensor
             dtype (:class:`torch.dtype`, optional): the desired data type of the
                                                     returned tensor.
-                                                    Default: ``torch.float32``
+                                                    Default: ``None``
         """
         n = 2 ** m
         total_n = self.num_generated + n
