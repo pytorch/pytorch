@@ -1,13 +1,15 @@
 from __future__ import annotations
 
 import contextlib
+
+import dataclasses
 import warnings
 import weakref
-
 from dataclasses import dataclass
 from typing import (
     Any,
     Callable,
+    ClassVar,
     ContextManager,
     Dict,
     List,
@@ -20,6 +22,7 @@ from typing import (
 from typing_extensions import TypeAlias
 
 import torch
+from torch._C._autograd import CreationMeta
 from torch._C._functorch import (
     _add_batch_dim,
     _unwrap_functional_tensor,
@@ -33,13 +36,13 @@ from torch._C._functorch import (
     maybe_get_level,
     peek_interpreter_stack,
 )
+from torch._logging import trace_structured
 from torch.utils._mode_utils import no_dispatch
 
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 from torch.utils.weak import WeakIdKeyDictionary
 
 if TYPE_CHECKING:
-    from torch._C._autograd import CreationMeta
     from torch._C._functorch import CInterpreter
     from torch._guards import Source
 
@@ -142,6 +145,9 @@ MetaStorageId: TypeAlias = int
 MetaTensorId: TypeAlias = int
 
 
+DESCRIBER_NEXT_ID = 0
+
+
 class MetaTensorDescriber:
     """
     Given a Tensor/Storage, generate a MetaTensorDesc/MetaStorageDesc
@@ -154,6 +160,9 @@ class MetaTensorDescriber:
     """
 
     def __init__(self, *, copy_data=False):
+        global DESCRIBER_NEXT_ID
+        self.id = DESCRIBER_NEXT_ID
+        DESCRIBER_NEXT_ID += 1
         self.next_tensor_id: MetaTensorId = 0
         self.next_storage_id: MetaStorageId = 0
         # Tensor -> int
@@ -161,6 +170,8 @@ class MetaTensorDescriber:
         # Storage -> int
         self.lookup_storage = WeakIdKeyDictionary()
         self.copy_data = copy_data
+        self.traced_tensors = set()
+        self.traced_storages = set()
 
     def get_tensor_id(self, t: torch.Tensor):
         if t not in self.lookup_tensor:
@@ -174,19 +185,25 @@ class MetaTensorDescriber:
             self.next_storage_id += 1
         return self.lookup_storage[s]
 
-    # NB: the describe functions NOT maintain a cache and will happily regen the
-    # description
-
-    def describe_storage(self, s: torch.UntypedStorage):
-        return MetaStorageDesc(
+    def describe_storage(self, s: torch.UntypedStorage, *, trace: bool = False):
+        r = MetaStorageDesc(
             id=self.get_storage_id(s),
             size=s.size(),
             # NB: We don't do the copy yet; copy happens when we start
             # creating the new storages
             data=s if self.copy_data else None,
         )
+        if trace and r.id not in self.traced_storages:
+            trace_structured(
+                "describe_storage",
+                metadata_fn=lambda: r.as_json(self.id),
+            )
+            self.traced_storages.add(r.id)
+        return r
 
-    def describe_tensor(self, t: torch.Tensor, recurse: bool = True):
+    def describe_tensor(
+        self, t: torch.Tensor, *, recurse: bool = True, trace: bool = False
+    ):
         is_leaf = safe_is_leaf(t)
         is_view = t._is_view()
         is_sparse = t.is_sparse
@@ -218,7 +235,7 @@ class MetaTensorDescriber:
         ):
             # NB: We actually don't use storage to do views, but might as well
             # put it in for accuracy
-            storage = self.describe_storage(t.untyped_storage())
+            storage = self.describe_storage(t.untyped_storage(), trace=trace)
             storage_offset = t.storage_offset()
 
         stride = None
@@ -239,7 +256,7 @@ class MetaTensorDescriber:
         autograd_meta_from = None
         current_level = None
         if is_batchedtensor_v or is_gradtrackingtensor_v:
-            unwrapped = self.describe_tensor(get_unwrapped(t))
+            unwrapped = self.describe_tensor(get_unwrapped(t), trace=trace)
         # xla and lazy tensors present as functional tensors, but we want them
         # to be handled specially
         elif is_functional and t.device.type not in ("xla", "lazy"):
@@ -249,13 +266,15 @@ class MetaTensorDescriber:
                 )
             if not is_functorch_wrapped:
                 torch._sync(t)
-                unwrapped = self.describe_tensor(torch._from_functional_tensor(t))
+                unwrapped = self.describe_tensor(
+                    torch._from_functional_tensor(t), trace=trace
+                )
                 autograd_meta_from = t
             else:
                 reapply_views = torch._C._functionalization_reapply_views_tls()
                 # NB: has side effects!
                 unwrapped = self.describe_tensor(
-                    _unwrap_functional_tensor(t, reapply_views)
+                    _unwrap_functional_tensor(t, reapply_views), trace=trace
                 )
                 # TODO: It's pretty suspicious that functional tensors don't have
                 # valid level and thus we just grab whatever the current level
@@ -273,12 +292,15 @@ class MetaTensorDescriber:
         if is_traceable_wrapper_subclass_v:
             assert hasattr(t, "__tensor_flatten__")
             raw_attrs, ctx = t.__tensor_flatten__()
-            attrs = {attr: self.describe_tensor(getattr(t, attr)) for attr in raw_attrs}
+            attrs = {
+                attr: self.describe_tensor(getattr(t, attr), trace=trace)
+                for attr in raw_attrs
+            }
             type_v = type(t)
 
         # TODO: Is it important to enable torch.inference_mode before querying
         # these values?
-        return MetaTensorDesc(
+        r = MetaTensorDesc(
             id=self.get_tensor_id(t),
             storage=storage,
             is_inference=t.is_inference(),
@@ -318,22 +340,30 @@ class MetaTensorDescriber:
             # TODO: I actually think recursing here is correct, but we have at
             # least an infinite cycle from base -> values -> base
             # https://github.com/pytorch/pytorch/issues/122089
-            crow_indices=self.describe_tensor(t.crow_indices(), recurse=False)
+            crow_indices=self.describe_tensor(
+                t.crow_indices(), recurse=False, trace=trace
+            )
             if recurse and t.layout in {torch.sparse_csr, torch.sparse_bsr}
             else None,
-            col_indices=self.describe_tensor(t.col_indices(), recurse=False)
+            col_indices=self.describe_tensor(
+                t.col_indices(), recurse=False, trace=trace
+            )
             if recurse and t.layout in {torch.sparse_csr, torch.sparse_bsr}
             else None,
-            ccol_indices=self.describe_tensor(t.ccol_indices(), recurse=False)
+            ccol_indices=self.describe_tensor(
+                t.ccol_indices(), recurse=False, trace=trace
+            )
             if recurse and t.layout in {torch.sparse_csc, torch.sparse_bsc}
             else None,
-            row_indices=self.describe_tensor(t.row_indices(), recurse=False)
+            row_indices=self.describe_tensor(
+                t.row_indices(), recurse=False, trace=trace
+            )
             if recurse and t.layout in {torch.sparse_csc, torch.sparse_bsc}
             else None,
-            values=self.describe_tensor(t.values(), recurse=False)
+            values=self.describe_tensor(t.values(), recurse=False, trace=trace)
             if recurse and is_sparse_compressed(t)
             else None,
-            grad=self.describe_tensor(safe_grad(t))
+            grad=self.describe_tensor(safe_grad(t), trace=trace)
             if safe_grad(t) is not None
             else None,
             creation_meta=torch._C._autograd._get_creation_meta(t)
@@ -344,7 +374,7 @@ class MetaTensorDescriber:
             if is_batchedtensor_v or is_gradtrackingtensor_v
             else None,
             bdim=maybe_get_bdim(t) if is_batchedtensor_v else None,
-            base=self.describe_tensor(t._base)
+            base=self.describe_tensor(t._base, trace=trace)
             if recurse and t._is_view() and t._base is not None
             else None,
             fake_mode=torch._subclasses.fake_tensor.maybe_get_fake_mode(t),
@@ -360,6 +390,13 @@ class MetaTensorDescriber:
             current_level=current_level,
             data=t if self.copy_data else None,
         )
+        if trace and r.id not in self.traced_tensors:
+            trace_structured(
+                "describe_tensor",
+                metadata_fn=lambda: r.as_json(self.id),
+            )
+            self.traced_tensors.add(r.id)
+        return r
 
 
 @dataclass(frozen=True)
@@ -370,43 +407,58 @@ class MetaStorageDesc:
     # serializable in JSON, you want to do something special here anyway
     data: Optional[torch.UntypedStorage]
 
+    def as_json(self, describer_id):
+        return {
+            "id": self.id,
+            "describer_id": describer_id,
+            "size": self.size if isinstance(self.size, int) else repr(self.size),
+        }
+
 
 @dataclass(frozen=True)
 class MetaTensorDesc:
     id: MetaTensorId
-    is_inference: bool
-    is_leaf: bool
-    requires_grad: bool
     ndim: int
     dtype: torch.dtype
-    is_sparse: bool
-    is_mkldnn: bool
-    is_functorch_wrapped: bool
-    is_batchedtensor: bool
-    is_legacy_batchedtensor: bool
-    is_gradtrackingtensor: bool
-    is_view: bool
-    is_nested: bool
-    is_traceable_wrapper_subclass: bool
-    is_functional: bool
-    is_conj: bool
-    is_neg: bool
     device: torch.device
-    layout: torch.layout
+
     # NB: Sometimes, size, stride and storage_offset contain SymInt, in which
     # case this is NOT serializable.  That only happens when you're
     # re-fakeifying a fake tensor with an existing ShapeEnv... maybe we
     # can get rid of this use case entirely.  Notably, even if we are
     # fakeifying a real tensor into a fake tensor with symbolic shapes, the
     # size here is NOT dynamic
+    # NB: These also contain SymInt because wrap_meta_outputs_with_default_device_logic
+    # goes through this codepath.  But it really should not LOL.
     # NB: size could potentially be None as you can override it and make it
     # throw an error, but we don't currently have any subclasses that do this
     # except C++ nested tensor but we're going to have nested int to make this
     # defined on NJT
     size: Tuple[int, ...]
     dynamo_dynamic_indices: List[int]
+
+    layout: torch.layout = torch.strided
+    is_inference: bool = False
+    is_leaf: bool = False
+    requires_grad: bool = False
+    is_sparse: bool = False
+    is_mkldnn: bool = False
+    is_functorch_wrapped: bool = False
+    is_batchedtensor: bool = False
+    is_legacy_batchedtensor: bool = False
+    is_gradtrackingtensor: bool = False
+    is_view: bool = False
+    is_nested: bool = False
+    is_traceable_wrapper_subclass: bool = False
+    is_functional: bool = False
+    is_conj: bool = False
+    is_neg: bool = False
     stride: Optional[Tuple[int, ...]] = None
     storage_offset: int = 0
+    # NB: We have a choice whether or not to store the id or a direct pointer
+    # to the data structure.  For ease of use, we store the data structure,
+    # but this means that when we serialize, we have to swizzle these pointers
+    # back into ids (so we have accurate aliasing relationships)
     storage: Optional[MetaStorageDesc] = None
     sparse_dim: Optional[int] = None  # is_sparse, is_sparse_compressed
     dense_dim: Optional[int] = None  # is_sparse, is_sparse_compressed
@@ -424,6 +476,19 @@ class MetaTensorDesc:
     grad: Optional[MetaTensorDesc] = None
 
     # Everything below is NOT serializable, need some more work
+
+    _UNSERIALIZABLE: ClassVar[List[str]] = [
+        "ctx",
+        "type",
+        "fake_mode",
+        "view_func",
+        "level",
+        "current_level",
+        "functorch_stack",
+        "autograd_meta_from",
+        "data",
+    ]
+
     ctx: Optional[object] = None  # is_traceable_wrapper_subclass
     type: Optional[Type] = None  # is_traceable_wrapper_subclass
     fake_mode: Optional[FakeTensorMode] = None
@@ -458,6 +523,44 @@ class MetaTensorDesc:
     # However, this use of functorch is very "non-lexical" so it's not
     # entirely clear how to make it all lexical again, so we haven't done
     # it for now.
+
+    # NB: This will reference numeric IDs, and it is assumed that you've
+    # already serialized everything this recursively references
+    def as_json(self, describer_id):
+        def json(k, v):
+            # Some best-effort debugging serialization for unserializable
+            # fields (feel free to add other special cases as appropriate)
+            if k in ["data", "autograd_meta_from"]:
+                return None  # never repr these
+            if k in set(MetaTensorDesc._UNSERIALIZABLE):
+                return repr(v)
+            if isinstance(v, (torch.device, torch.dtype, torch.layout)):
+                return repr(v)
+            if isinstance(v, torch.SymInt):
+                return repr(v)
+            if isinstance(v, (tuple, list)):
+                return [json(k, v1) for v1 in v]
+            if isinstance(v, (MetaStorageDesc, MetaTensorDesc)):
+                return v.id
+            if isinstance(v, CreationMeta):
+                return str(v)
+            if k == "attrs" and isinstance(v, dict):
+                return {k1: v1.id for k1, v1 in v.items()}
+            return v
+
+        r = {
+            field.name: json(field.name, getattr(self, field.name))
+            for field in dataclasses.fields(self)
+            if not (
+                getattr(self, field.name) is field.default
+                or (
+                    field.name == "dynamo_dynamic_indices"
+                    and not getattr(self, field.name)
+                )
+            )
+        }
+        r.update({"describer_id": describer_id})
+        return r
 
     @property
     def shape(self):
@@ -887,9 +990,10 @@ class MetaConverter:
 
             def tensor_visitor_fn(
                 visited_t: torch.Tensor,
+                # These arguments are never passed, we just use them to close
+                # over these relevant values
                 shape_env=shape_env,
                 callback=callback,
-                source=source,
             ):
                 # It's possible to close over an undefined tensor (e.g. NJT's lengths).
                 if visited_t is None:
@@ -1443,6 +1547,10 @@ class MetaConverter:
         callback=lambda t: t(),
         source=None,
         symbolic_context=None,
+        # Controls whether or not we should dump the tensor metadata to structured logs
+        # when source is not None.  Because we refakify after Dynamo is done,
+        # we don't want to dump info again from AOTAutograd, it is redundant.
+        trace=True,
     ):
         # TODO: zero tensors?  We appear to have eliminated them by
         # excluding complex for now
@@ -1475,9 +1583,22 @@ class MetaConverter:
             # non-Tensor types don't count as hit or miss
             return t
 
+        if source is None:
+            trace = False
+
         # Describe the tensor.  NB: do NOT disable ambient modes, we may need
         # to query them when figuring out what to put in here
-        t_desc = self.describer.describe_tensor(t)
+        t_desc = self.describer.describe_tensor(t, trace=trace)
+
+        if trace:
+            trace_structured(
+                "describe_source",
+                metadata_fn=lambda: {
+                    "describer_id": self.describer.id,
+                    "id": t_desc.id,
+                    "source": source.name(),
+                },
+            )
 
         # Do the meta-fication.  Here, we disable all the ambient modes, to
         # better simulate what would be like to re-fakeify from a fresh
