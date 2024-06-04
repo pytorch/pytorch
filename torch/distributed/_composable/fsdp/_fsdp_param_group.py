@@ -339,6 +339,7 @@ class FSDPParamGroup:
             if fsdp_param.grad_offload_event is not None:
                 fsdp_param.grad_offload_event.synchronize()
                 fsdp_param.grad_offload_event = None
+            fsdp_param._unsharded_param = None
         self._post_forward_indices.clear()
 
     def _prefetch_unshard(self):
@@ -355,8 +356,15 @@ class FSDPParamGroup:
             target_fsdp_param_group = self.comm_ctx.post_forward_order[target_index]
             with torch.profiler.record_function(
                 "FSDP::backward_prefetch"
-            ), target_fsdp_param_group.use_training_state(TrainingState.PRE_BACKWARD):
-                target_fsdp_param_group.unshard()
+            ):
+                # NOTE(yf225): Dynamo doesn't support custom context manager at the moment,
+                # so can't use `with use_training_state(X)` :(
+                old_training_state = target_fsdp_param_group._training_state
+                self._training_state = TrainingState.PRE_BACKWARD
+                try:
+                    target_fsdp_param_group.unshard()
+                finally:
+                    target_fsdp_param_group._training_state = old_training_state
 
     # Utilities #
     def _to_sharded(self):
