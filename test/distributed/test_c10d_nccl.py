@@ -3513,9 +3513,59 @@ class NCCLTraceTestBase(MultiProcessTestCase):
 class NCCLTraceTest(NCCLTraceTestBase):
     @requires_nccl()
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
+    @parametrize("only_active", [True, False])
+    @parametrize("include_stacktraces", [True, False])
+    def test_get_collectives(self, only_active, include_stacktraces):
+        if self.rank == self.MAIN_PROCESS_RANK:
+            return
+        pg = self._create_process_group_nccl()
+        device = self.local_device
+        a = torch.full((3, 4), float(self.rank), device=device)
+        for i in range(2):
+            f = pg.allreduce(a)
+        f.wait()
+        torch.cuda.synchronize(device=device)
+
+        time.sleep(1)
+        t = pickle.loads(torch._C._distributed_c10d._get_collective_trace(onlyActive=only_active, includeStackTraces=include_stacktraces))
+        if only_active:
+            self.assertEqual(len(t["entries"]), 0)
+        else:
+            self.assertEqual(len(t["entries"]), 2)
+            t = t["entries"]
+            last = t[-1]
+            print(last)
+            self.assertEqual(last["process_group"], ("0", "default_pg"))
+            self.assertEqual(last["state"], "completed")
+            s = last["time_discovered_started_ns"]
+            f = last["time_discovered_completed_ns"]
+            self.assertIsNone(s)
+            self.assertEqual(last["record_id"], 1)
+            self.assertIsNotNone(f)
+            self.assertEqual(last["input_sizes"], ((3, 4),))
+            self.assertEqual(last["input_dtypes"], ["Float"])
+            self.assertEqual(last["output_sizes"], ((3, 4),))
+            self.assertEqual(last["output_dtypes"], ["Float"])
+            self.assertEqual(last["collective_seq_id"], 2)
+            self.assertEqual(last["is_p2p"], False)
+            now = datetime.now()
+            event_created_time = datetime.fromtimestamp(
+                last["time_created_ns"] / 1000000000
+            )
+            before_test = now - timedelta(minutes=1)
+            self.assertTrue(before_test < event_created_time < now)
+            self.assertTrue("duration_ms" not in last)
+            if include_stacktraces:
+                self.assertIn("test_c10d_nccl.py", str(last["frames"]))
+            else:
+                self.assertNotIn("frames", last)
+
+
+    @requires_nccl()
+    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
     @parametrize("timing_enabled", [True, False])
-    @parametrize("detailed", [True, False])
-    def test_short(self, timing_enabled, detailed):
+    @parametrize("include_collectives", [True, False])
+    def test_short(self, timing_enabled, include_collectives):
         if self.rank == self.MAIN_PROCESS_RANK:
             return
         pg = self._create_process_group_nccl()
@@ -3530,10 +3580,10 @@ class NCCLTraceTest(NCCLTraceTestBase):
 
         # gah ok so now the duration_ms is populated best-effort since it can only happen outside "dump()" api
         time.sleep(1)
-        if detailed:
+        if include_collectives:
             t = pickle.loads(torch._C._distributed_c10d._dump_nccl_trace())
         else:
-            t = pickle.loads(torch._C._distributed_c10d._dump_nccl_trace(False))
+            t = pickle.loads(torch._C._distributed_c10d._dump_nccl_trace(includeCollectives=False, includeStackTraces=None, onlyActive=None))
         ver = t["version"]
         self.assertEqual(ver, "2.1")
         pg_config = t["pg_config"]
@@ -3544,7 +3594,7 @@ class NCCLTraceTest(NCCLTraceTestBase):
         self.assertIn("ranks", default_pg_info)
         global_ranks = pg_config["0"]["ranks"]
         self.assertEqual(len(json.loads(global_ranks)), self.world_size)
-        if detailed:
+        if include_collectives:
             self.assertEqual(len(t["entries"]), 2)
             t = t["entries"]
             self.assertEqual(len(t), 2)

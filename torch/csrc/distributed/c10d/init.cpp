@@ -1,3 +1,4 @@
+#include <pybind11/pytypes.h>
 #include <torch/csrc/python_headers.h>
 
 #include <c10/util/intrusive_ptr.h>
@@ -8,6 +9,7 @@
 #include <torch/csrc/distributed/c10d/Utils.hpp>
 #include <torch/csrc/distributed/c10d/control_collectives/ControlCollectives.hpp>
 #include <torch/csrc/distributed/c10d/control_collectives/StoreCollectives.hpp>
+#include <torch/csrc/distributed/c10d/control_plane/WorkerServer.hpp>
 #include <vector>
 #ifndef _WIN32
 #include <torch/csrc/distributed/c10d/HashStore.hpp>
@@ -40,6 +42,7 @@
 #include <fmt/format.h>
 #include <pybind11/chrono.h>
 #include <torch/csrc/distributed/c10d/PrefixStore.hpp>
+#include <torch/csrc/utils/pybind.h>
 
 #include <torch/csrc/distributed/c10d/comm.hpp>
 #include <torch/csrc/distributed/c10d/debug.h>
@@ -3148,6 +3151,23 @@ such as `dist.all_reduce(tensor, async_op=True)`.
             - abort() raises.
             The provided Future object result must be a Tensor or a list of Tensors.
            )");
+  module.def(
+      "_get_collective_trace",
+      [](std::optional<bool> includeStackTraces,
+         std::optional<bool> onlyActive) {
+        return py::bytes(::c10d::get_collective_trace(
+            includeStackTraces.value_or(true), onlyActive.value_or(false)));
+      },
+      py::arg("includeStackTraces") = std::optional<bool>(),
+      py::arg("onlyActive") = std::optional<bool>(),
+      R"(
+        Arguments:
+            includeStackTraces(bool, optional): Whether to include stacktraces in the collective work traces. Default is True.
+            onlyActive (bool, optional): Whether to only include active collective work traces. Default is False.
+        Returns:
+            Stringified pickle collective work traces.
+            Default settings return everything.
+      )");
 
 #ifdef USE_C10D_NCCL
   module.def(
@@ -3161,20 +3181,46 @@ such as `dist.all_reduce(tensor, async_op=True)`.
           tensors(List[torch.Tensor]): List of tensors we want to hash.
       )");
   module.def(
+      "_get_nccl_comm_trace",
+      []() { return py::bytes(::c10d::get_nccl_comm_trace()); },
+      R"(
+        Returns:
+            Stringified pickle NCCL comm traces.
+      )");
+  module.def(
       "_dump_nccl_trace",
-      [](std::optional<bool> includeTraceBuffer) {
-        return py::bytes(
-            ::c10d::dump_nccl_trace(includeTraceBuffer.value_or(true)));
+      [](std::optional<bool> includeCollectives,
+         std::optional<bool> includeStackTraces,
+         std::optional<bool> onlyActive) {
+        return py::bytes(::c10d::dump_nccl_trace(
+            includeCollectives.value_or(true),
+            includeStackTraces.value_or(true),
+            onlyActive.value_or(false)));
       },
-      py::arg("includeTraceBuffer") = std::nullopt,
+      py::arg("includeCollectives") = std::optional<bool>(),
+      py::arg("includeStackTraces") = std::optional<bool>(),
+      py::arg("onlyActive") = std::optional<bool>(),
       R"(
         Arguments:
-        includeTraceBuffer (bool, optional): Whether to NCCL Trace buffer in dump. Default is True.
+            includeCollectives(bool, optional): Whether to include collective work traces. Default is True.
+            includeStackTraces(bool, optional): Whether to include stacktraces in the collective work traces. Default is True.
+            onlyActive (bool, optional): Whether to only include active collective work traces. Default is False.
         Returns:
-        A stringified pickle NCCL work traces.
-        If includeTraceBuffer is selected, the trace will also show information about the calling stack.
+            Stringified pickle work traces.
+            Default settings return everything - i.e. contains NCCL comm dumps and collective traces.
       )");
 #endif
+
+  intrusive_ptr_class_<::c10d::control_plane::WorkerServer>(
+      module, "_WorkerServer", R"(
+)")
+      .def(
+          py::init([](const std::string& socketPath) {
+            return c10::make_intrusive<::c10d::control_plane::WorkerServer>(
+                socketPath);
+          }),
+          py::arg("socket_path"))
+      .def("shutdown", &::c10d::control_plane::WorkerServer::shutdown);
   Py_RETURN_TRUE;
 }
 
