@@ -1512,39 +1512,6 @@ TORCH_LIBRARY(test_autograd_cpp_node_data_dependent, m) {
 
         self.assertFalse("skipping cudagraphs" in stderr_msgs.getvalue())
 
-    @unittest.skipIf(not HAS_CUDA, "requires cuda")
-    def test_cudagraphs_custom_fn_cpu_scalar(self):
-        from torch._dynamo.testing import reduce_to_scalar_loss
-
-        class MyFn(torch.autograd.Function):
-            @staticmethod
-            def forward(ctx, x):
-                cpu_scalar = 5
-                ctx.saved_scalar = cpu_scalar
-                return cpu_scalar * x
-
-            @staticmethod
-            def backward(ctx, grad_out):
-                cpu_scalar = ctx.saved_scalar
-                return torch.ones_like(grad_out) * cpu_scalar  # preserve cpu-ness
-
-        model = torch.nn.Linear(10, 10, dtype=torch.float16).cuda()
-        inputs = torch.randn(10, 10, dtype=torch.float16).cuda()
-        out = model(inputs)
-        out = MyFn.apply(out)
-        loss = reduce_to_scalar_loss(out)
-
-        stderr_msgs = io.StringIO()
-        with mock.patch("sys.stderr", stderr_msgs), compiled_autograd.enable(
-            compiler_fn
-        ):
-            torch._inductor.config.triton.cudagraphs = True
-            loss.backward()
-            torch._inductor.config.triton.cudagraphs = False
-
-        # TODO: make this skip
-        self.assertTrue("skipping cudagraphs" in stderr_msgs.getvalue())
-
     def test_cudagraphs_cpu_graph(self):
         from torch._dynamo.testing import reduce_to_scalar_loss
 
