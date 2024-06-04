@@ -2,16 +2,22 @@
 import copy
 import logging
 import operator
+from collections import defaultdict
 from dataclasses import dataclass
 from enum import Enum
 from inspect import Parameter, signature, Signature
 from types import MethodType
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
 
 import torch
 import torch.fx as fx
 from torch.export import ExportedProgram
-from torch.export.unflatten import _assign_attr, _AttrKind, _sink_params
+from torch.export.unflatten import (
+    _assign_attr,
+    _AttrKind,
+    _sink_params,
+    InterpreterModule,
+)
 from torch.fx.node import map_aggregate
 from torch.fx.passes.split_module import split_module
 
@@ -323,13 +329,13 @@ def pipe_split():
     no-op if your annotated module is run eagerly.
 
     Example:
-    >>> # xdoctest: +SKIP
-    >>> def forward(self, x):
-    >>>     x = torch.mm(x, self.mm_param)
-    >>>     x = torch.relu(x)
-    >>>     pipe_split()
-    >>>     x = self.lin(x)
-    >>>     return x
+        >>> # xdoctest: +SKIP
+        >>> def forward(self, x):
+        >>>     x = torch.mm(x, self.mm_param)
+        >>>     x = torch.relu(x)
+        >>>     pipe_split()
+        >>>     x = self.lin(x)
+        >>>     return x
 
     The above example will be split into two stages.
     """
@@ -751,6 +757,18 @@ class Pipe(torch.nn.Module):
         # To be accumulated in `move_param_to_callee`.
         to_delete = list()
 
+        def _recursive_getattr_with_parent(mod, fqn):
+            # Returns getattr call given a nested FQN, and the last parent
+            atoms = fqn.split(".")
+            for atom in atoms[:-1]:
+                if not hasattr(mod, atom):
+                    return None, None
+                mod = getattr(mod, atom)
+            if not hasattr(mod, atoms[-1]):
+                return mod, None
+            attr = getattr(mod, atoms[-1])
+            return mod, attr
+
         def move_param_to_callee(
             root,
             callee_name,
@@ -766,12 +784,7 @@ class Pipe(torch.nn.Module):
             # `atoms` is a list of strings representing the path to the
             # parameter in the original model
             atoms = param_fqn.split(".")
-            # Recursively find the parent of the parameter
-            mod_itr = split
-            for atom in atoms[:-1]:
-                mod_itr = getattr(mod_itr, atom)
-            # Get the parameter (it is still under the root module)
-            param_val = getattr(mod_itr, atoms[-1])
+            mod_itr, param_val = _recursive_getattr_with_parent(split, param_fqn)
             # Check whether the parameter is a buffer or a parameter
             is_buffer = atoms[-1] in mod_itr._buffers
 
@@ -837,6 +850,37 @@ class Pipe(torch.nn.Module):
                     node.target,
                 )
 
+        # [aliasing] store tensor id -> list of FQNs, built from state dict
+        # Also assign non-persistent buffers
+        id_to_fqns: Dict[int, Set[str]] = defaultdict(set)
+        for fqn, tensor in mod.state_dict(keep_vars=True).items():
+            id_to_fqns[id(tensor)].add(fqn)
+        for fqn, tensor in mod.named_buffers():
+            id_to_fqns[id(tensor)].add(fqn)
+
+        # After moving the params to their corresponding hierarchies, we also
+        # need to move the `get_attr` nodes from the root of the graph to those
+        # hierarchies.
+        # [aliasing] use id -> fqn mapping to list out all valid FQNs
+        inputs_to_state: Dict[str, List[str]] = {}
+        for attr in attr_nodes:
+            _, tensor = _recursive_getattr_with_parent(mod, attr.target)
+            inputs_to_state[attr.name] = list(id_to_fqns[id(tensor)])
+
+        # [aliasing] for each submodule split, assign attributes on FQNs that may be used.
+        # We determine this based on whether or not the FQN attribute parent exists.
+        # i.e. if the last submodule exists, assign the attribute.
+        added_attributes: Dict[str, List[str]] = defaultdict(list)
+        for fqn, tensor in mod.state_dict(keep_vars=True).items():
+            for name, submod in split.named_children():
+                if isinstance(submod, fx.GraphModule):
+                    parent, child = _recursive_getattr_with_parent(submod, fqn)
+                    if (
+                        parent and child is None
+                    ):  # parent exists, attribute doesn't -> assign
+                        added_attributes[name].append(fqn)
+                        setattr(parent, fqn.split(".")[-1], tensor)
+
         # Deferral deletion: Remove the original attributes (to params) from the
         # root GraphModule
         for mod_itr, last_atom in to_delete:
@@ -846,18 +890,38 @@ class Pipe(torch.nn.Module):
                 # This is expected if the parameter is used in multiple stages
                 pass
 
-        # After moving the params to their corresponding hierarchies, we also
-        # need to move the `get_attr` nodes from the root of the graph to those
-        # hierarchies.
-        inputs_to_state: Dict[str, List[str]] = {
-            attr.name: [attr.target] for attr in attr_nodes
-        }
         # This is done by (1) `_sink_params` at each submodule;
         for name, submod in split.named_children():
             if isinstance(submod, fx.GraphModule):
                 _sink_params(submod, inputs_to_state, [])
                 submod.graph.lint()
                 submod.recompile()
+
+        # [aliasing] This step is not super necessary, but helps reduce parameter usage/memory.
+        # After _sink_params() routine has run, clean up unused attributes that we previously added.
+        # Determine this based on the get_attr nodes - if not used, remove it.
+        for name, attributes in added_attributes.items():
+            submod = getattr(split, name)
+            unused_attributes = set(attributes)
+            # track used attributes in the submodule, running DFS on subgraph hierarchy
+            stack = [("", submod)]  # (scope, submodule)
+            while stack:
+                scope, _mod = stack.pop()
+                if isinstance(_mod, (fx.GraphModule, InterpreterModule)):
+                    for node in _mod.graph.nodes:
+                        if node.op == "get_attr":
+                            # get_attr might get access deeper level attribute
+                            fqn = scope + "." + node.target if scope else node.target
+                            if fqn in unused_attributes:  # used, remove it
+                                unused_attributes.remove(fqn)
+                for _name, _submod in _mod.named_children():
+                    stack.append((scope + "." + _name if scope else _name, _submod))
+            # delete unused attributes
+            for attr in unused_attributes:
+                mod_itr, atoms = submod, attr.split(".")
+                for atom in atoms[:-1]:
+                    mod_itr = getattr(mod_itr, atom)
+                delattr(mod_itr, atoms[-1])
 
         for node in attr_nodes:
             # And (2): remove `get_attr` node from submod's arg list
@@ -1129,15 +1193,16 @@ def pipeline(
         )
 
 
-# Context manager for setting `args_chunk_spec` during creation of Pipe
 class ArgsChunkSpec:
     """
+    Context manager for setting `args_chunk_spec` during creation of Pipe
+
     Example:
-    >>> # xdoctest: +SKIP
-    >>> # There are three positional arguments to the model, and
-    >>> # we are chunking them along dimension 0, 0 and 1, respectively
-    >>> with ArgsChunkSpec((0, 0, 1)):
-    >>>     pipe = pipeline(model, num_chunks, example_args)
+        >>> # xdoctest: +SKIP
+        >>> # There are three positional arguments to the model, and
+        >>> # we are chunking them along dimension 0, 0 and 1, respectively
+        >>> with ArgsChunkSpec((0, 0, 1)):
+        >>>     pipe = pipeline(model, num_chunks, example_args)
     """
 
     def __init__(
@@ -1159,14 +1224,15 @@ class ArgsChunkSpec:
         Pipe.args_chunk_spec = None
 
 
-# Context manager for setting `kwargs_chunk_spec` during creation of Pipe
 class KwargsChunkSpec:
     """
+    Context manager for setting `kwargs_chunk_spec` during creation of Pipe
+
     Example:
-    >>> # xdoctest: +SKIP
-    >>> # Chunk dimension 0 for the "id" argument, 1 for the "mask" argument
-    >>> with KwargsChunkSpec({"id": 0, "mask": 1}):
-    >>>     pipe = pipeline(model, num_chunks, (), example_kwargs)
+        >>> # xdoctest: +SKIP
+        >>> # Chunk dimension 0 for the "id" argument, 1 for the "mask" argument
+        >>> with KwargsChunkSpec({"id": 0, "mask": 1}):
+        >>>     pipe = pipeline(model, num_chunks, (), example_kwargs)
     """
 
     def __init__(
