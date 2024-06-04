@@ -342,6 +342,12 @@ class UnflattenedModule(torch.nn.Module):
         def check_module_inputs(module, scope):
             if hasattr(module, "graph"):
                 for node in module.graph.nodes:
+                    # sink_params() should turn placeholders into get_attr nodes
+                    # for attributes that are within scope of the current
+                    # module. We allow attributes to remain as placeholders if
+                    # they are inputs in the original module signature, meaning
+                    # they are a parent module's attribute, and therefore out of
+                    # scope of the current module.
                     if (
                         node.op == "placeholder"
                         and node.name in inputs_to_state
@@ -1049,6 +1055,8 @@ def _sink_params(
     call_module_nodes = filter(lambda n: n.op == "call_module", graph.nodes)
     for node in call_module_nodes:
         submodule = _recursive_getattr(module, node.target.split("."))
+        # remove placeholder from call_module node arguments, only if we've
+        # erased the placeholder node in the corresponding _sink_params() call
         if submodule is not None and id(submodule) in module_id_to_inputs_removed:
             node.args = tuple(
                 filter(
