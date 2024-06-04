@@ -57,7 +57,10 @@ class profile:
         self.with_modules = with_modules
 
         if self.use_cuda and not torch.cuda.is_available():
-            warnings.warn("CUDA is not available, disabling CUDA profiling")
+            warnings.warn(
+                "CUDA is not available, disabling CUDA profiling",
+                stacklevel=2,
+            )
             self.use_cuda = False
 
         if self.use_cuda:

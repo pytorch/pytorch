@@ -134,35 +134,6 @@ else()
       "Cannot find threading library. PyTorch requires Threads to compile.")
 endif()
 
-if(USE_TBB)
-  if(USE_SYSTEM_TBB)
-    find_package(TBB 2018.0 REQUIRED CONFIG COMPONENTS tbb)
-
-    get_target_property(TBB_INCLUDE_DIR TBB::tbb INTERFACE_INCLUDE_DIRECTORIES)
-  else()
-    message(STATUS "Compiling TBB from source")
-    # Unset our restrictive C++ flags here and reset them later.
-    # Remove this once we use proper target_compile_options.
-    set(OLD_CMAKE_CXX_FLAGS ${CMAKE_CXX_FLAGS})
-    set(CMAKE_CXX_FLAGS)
-
-    set(TBB_ROOT_DIR "${PROJECT_SOURCE_DIR}/third_party/tbb")
-    set(TBB_BUILD_STATIC OFF CACHE BOOL " " FORCE)
-    set(TBB_BUILD_SHARED ON CACHE BOOL " " FORCE)
-    set(TBB_BUILD_TBBMALLOC OFF CACHE BOOL " " FORCE)
-    set(TBB_BUILD_TBBMALLOC_PROXY OFF CACHE BOOL " " FORCE)
-    set(TBB_BUILD_TESTS OFF CACHE BOOL " " FORCE)
-    add_subdirectory(${PROJECT_SOURCE_DIR}/aten/src/ATen/cpu/tbb)
-    set_property(TARGET tbb tbb_def_files PROPERTY FOLDER "dependencies")
-
-    set(CMAKE_CXX_FLAGS ${OLD_CMAKE_CXX_FLAGS})
-
-    set(TBB_INCLUDE_DIR "${TBB_ROOT_DIR}/include")
-
-    add_library(TBB::tbb ALIAS tbb)
-  endif()
-endif()
-
 # ---[ protobuf
 if(CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO)
   if(USE_LITE_PROTO)
@@ -173,6 +144,8 @@ endif()
 # ---[ BLAS
 
 set(AT_MKLDNN_ACL_ENABLED 0)
+set(AT_MKLDNN_ENABLED 0)
+set(AT_MKL_ENABLED 0)
 # setting default preferred BLAS options if not already present.
 if(NOT INTERN_BUILD_MOBILE)
   set(BLAS "MKL" CACHE STRING "Selected BLAS library")
@@ -264,7 +237,6 @@ else()
 endif()
 
 if(NOT INTERN_BUILD_MOBILE)
-  set(AT_MKL_ENABLED 0)
   set(AT_MKL_SEQUENTIAL 0)
   set(USE_BLAS 1)
   if(NOT (ATLAS_FOUND OR BLIS_FOUND OR GENERIC_BLAS_FOUND OR MKL_FOUND OR OpenBLAS_FOUND OR VECLIB_FOUND OR FlexiBLAS_FOUND OR NVPL_BLAS_FOUND))
@@ -863,59 +835,42 @@ else()
 endif()
 include_directories(SYSTEM ${EIGEN3_INCLUDE_DIR})
 
+
+# ---[ Python Interpreter
+# If not given a Python installation, then use the current active Python
+if(NOT Python_EXECUTABLE)
+  execute_process(
+    COMMAND "which" "python3" RESULT_VARIABLE _exitcode OUTPUT_VARIABLE _py_exe)
+  if(${_exitcode} EQUAL 0)
+    if(NOT MSVC)
+      string(STRIP ${_py_exe} Python_EXECUTABLE)
+    endif()
+    message(STATUS "Setting Python to ${Python_EXECUTABLE}")
+  endif()
+endif()
+
+if(BUILD_PYTHON)
+  set(PYTHON_COMPONENTS Development)
+  if(USE_NUMPY)
+    list(APPEND PYTHON_COMPONENTS NumPy)
+  endif()
+  find_package(Python COMPONENTS Interpreter OPTIONAL_COMPONENTS ${PYTHON_COMPONENTS})
+else()
+  find_package(Python COMPONENTS Interpreter)
+endif()
+
+if(NOT Python_Interpreter_FOUND)
+  message(FATAL_ERROR "Python3 could not be found.")
+endif()
+
+if(${Python_VERSION} VERSION_LESS 3.8)
+  message(FATAL_ERROR
+    "Found Python libraries version ${Python_VERSION}. Python < 3.8 is no longer supported by PyTorch.")
+endif()
+
 # ---[ Python + Numpy
 if(BUILD_PYTHON)
-  # If not given a Python installation, then use the current active Python
-  if(NOT Python_EXECUTABLE)
-    execute_process(
-      COMMAND "which" "python3" RESULT_VARIABLE _exitcode OUTPUT_VARIABLE _py_exe)
-    if(${_exitcode} EQUAL 0)
-      if(NOT MSVC)
-        string(STRIP ${_py_exe} Python_EXECUTABLE)
-      endif()
-      message(STATUS "Setting Python to ${Python_EXECUTABLE}")
-    endif()
-  endif()
-
-  # Check that Python works
-  set(PYTHON_VERSION)
-  if(DEFINED Python_EXECUTABLE)
-    execute_process(
-        COMMAND "${Python_EXECUTABLE}" "--version"
-        RESULT_VARIABLE _exitcode OUTPUT_VARIABLE PYTHON_VERSION)
-    if(NOT _exitcode EQUAL 0)
-      message(FATAL_ERROR "The Python executable ${Python_EXECUTABLE} cannot be run. Make sure that it is an absolute path.")
-    endif()
-    if(PYTHON_VERSION)
-      string(REGEX MATCH "([0-9]+)\\.([0-9]+)" PYTHON_VERSION ${PYTHON_VERSION})
-    endif()
-  endif()
-
-  # These should fill in the rest of the variables, like versions, but resepct
-  # the variables we set above
-  if(USE_NUMPY)
-    find_package(Python COMPONENTS Interpreter Development NumPy)
-  else()
-    find_package(Python COMPONENTS Interpreter Development)
-  endif()
-
-  if(NOT Python_Development_FOUND)
-    message(FATAL_ERROR
-      "Python development libraries could not be found.")
-  endif()
-
-  if(${Python_VERSION} VERSION_LESS 3.8)
-    message(FATAL_ERROR
-      "Found Python libraries version ${Python_VERSION}. Python < 3.8 is no longer supported by PyTorch.")
-  endif()
-
-  if(Python_Interpreter_FOUND)
-    add_library(python::python INTERFACE IMPORTED)
-    target_include_directories(python::python SYSTEM INTERFACE ${Python_INCLUDE_DIRS})
-    if(WIN32)
-      target_link_libraries(python::python INTERFACE ${Python_LIBRARIES})
-    endif()
-
+  if(Python_Development_FOUND)
     if(USE_NUMPY)
       if(NOT Python_NumPy_FOUND)
         message(WARNING "NumPy could not be found. Not building with NumPy. Suppress this warning with -DUSE_NUMPY=OFF")
@@ -1509,8 +1464,6 @@ if(NOT INTERN_BUILD_MOBILE)
     set(AT_ROCM_ENABLED 1)
   endif()
 
-  set(AT_MKLDNN_ENABLED 0)
-  set(AT_MKLDNN_ACL_ENABLED 0)
   if(USE_MKLDNN)
     if(NOT CMAKE_SIZEOF_VOID_P EQUAL 8)
       message(WARNING
@@ -1728,7 +1681,3 @@ endif()
 
 # Include google/FlatBuffers
 include(${CMAKE_CURRENT_LIST_DIR}/FlatBuffers.cmake)
-
-# Include cpp-httplib
-add_library(httplib INTERFACE IMPORTED)
-target_include_directories(httplib SYSTEM INTERFACE ${PROJECT_SOURCE_DIR}/third_party/cpp-httplib)
