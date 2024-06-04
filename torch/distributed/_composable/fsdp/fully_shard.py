@@ -78,6 +78,9 @@ def fully_shard(
             may be the intra-node size (e.g. ``torch.cuda.device_count()``).
             This allows the all-gather in backward to be over a smaller world
             size at the cost of higher memory usage than setting to ``True``.
+            - The root FSDP state has its value specially set to ``False`` as a
+            heuristic since its parameters would typically be immediately
+            all-gathered for backward.
             - After forward, the parameters registered to the module depend on
             to this: The registered parameters are the sharded parameters if
             ``True``; unsharded parameters if ``False``; and the paramters
