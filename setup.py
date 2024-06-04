@@ -258,10 +258,10 @@ from tools.setup_helpers.env import (
     IS_DARWIN,
     IS_LINUX,
     IS_WINDOWS,
-    LIBTORCH_PKG_NAME,
+    # LIBTORCH_PKG_NAME,
 )
 from tools.setup_helpers.generate_linker_script import gen_linker_script
-
+LIBTORCH_PKG_NAME = "torch"
 # set up appropriate env variables
 if BUILD_LIBTORCH_WHL:
     # Set up environment variables for ONLY building libtorch.so and not libtorch_python.so
