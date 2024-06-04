@@ -208,6 +208,49 @@ static bool isSupportedHipLtROCmArch(int index) {
 }
 #endif
 
+template <typename scalar_t>
+static void launchTunableGemmAndBias(cublasCommonArgs &args, Tensor& result, const Tensor& self, bool is_rocm) {
+  bool transa_ = ((args.transa != 'n') && (args.transa != 'N'));
+  bool transb_ = ((args.transb != 'n') && (args.transb != 'N'));
+  at::cuda::tunable::GemmAndBiasParams<scalar_t> params;
+  params.transa = args.transa;
+  params.transb = args.transb;
+  params.m = args.m;
+  params.n = args.n;
+  params.k = args.k;
+  params.a = args.mata->const_data_ptr<scalar_t>();
+  params.lda = args.lda;
+  params.b = args.matb->const_data_ptr<scalar_t>();
+  params.ldb = args.ldb;
+  if (is_rocm) {
+    params.bias = (&result != &self) ? self.const_data_ptr<scalar_t>() : nullptr;
+  }
+  else {
+    params.bias = self.const_data_ptr<scalar_t>();
+  }
+  params.c = args.result->data_ptr<scalar_t>();
+  params.ldc = args.result_ld;
+  if (transa_ && transb_) {
+    static at::cuda::tunable::GemmAndBiasTunableOp<scalar_t, at::cuda::tunable::BlasOp::T, at::cuda::tunable::BlasOp::T> gemm{};
+    gemm(&params);
+  }
+  else if (transa_ && !transb_) {
+    static at::cuda::tunable::GemmAndBiasTunableOp<scalar_t, at::cuda::tunable::BlasOp::T, at::cuda::tunable::BlasOp::N> gemm{};
+    gemm(&params);
+  }
+  else if (!transa_ && transb_) {
+    static at::cuda::tunable::GemmAndBiasTunableOp<scalar_t, at::cuda::tunable::BlasOp::N, at::cuda::tunable::BlasOp::T> gemm{};
+    gemm(&params);
+  }
+  else if (!transa_ && !transb_) {
+    static at::cuda::tunable::GemmAndBiasTunableOp<scalar_t, at::cuda::tunable::BlasOp::N, at::cuda::tunable::BlasOp::N> gemm{};
+    gemm(&params);
+  }
+  else {
+    TORCH_CHECK(false, "unreachable");
+  }
+}
+
 Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& mat1, const Tensor& mat2, const Scalar& beta, const Scalar& alpha, Activation activation=Activation::None) {
   // Make sure to keep addmm_cuda below in sync with this code; it
   // preflights a check to try to avoid actually needing to call
@@ -337,40 +380,7 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
         [&] {
         auto tuning_ctx = at::cuda::tunable::getTuningContext();
         if (tuning_ctx->IsTunableOpEnabled()) {
-          bool transa_ = ((args.transa != 'n') && (args.transa != 'N'));
-          bool transb_ = ((args.transb != 'n') && (args.transb != 'N'));
-          at::cuda::tunable::GemmAndBiasParams<scalar_t> params;
-          params.transa = args.transa;
-          params.transb = args.transb;
-          params.m = args.m;
-          params.n = args.n;
-          params.k = args.k;
-          params.a = args.mata->const_data_ptr<scalar_t>();
-          params.lda = args.lda;
-          params.b = args.matb->const_data_ptr<scalar_t>();
-          params.ldb = args.ldb;
-          params.bias = (&result != &self) ? self.const_data_ptr<scalar_t>() : nullptr,
-          params.c = args.result->data_ptr<scalar_t>();
-          params.ldc = args.result_ld;
-          if (transa_ && transb_) {
-            static at::cuda::tunable::GemmAndBiasTunableOp<scalar_t, at::cuda::tunable::BlasOp::T, at::cuda::tunable::BlasOp::T> gemm{};
-            gemm(&params);
-          }
-          else if (transa_ && !transb_) {
-            static at::cuda::tunable::GemmAndBiasTunableOp<scalar_t, at::cuda::tunable::BlasOp::T, at::cuda::tunable::BlasOp::N> gemm{};
-            gemm(&params);
-          }
-          else if (!transa_ && transb_) {
-            static at::cuda::tunable::GemmAndBiasTunableOp<scalar_t, at::cuda::tunable::BlasOp::N, at::cuda::tunable::BlasOp::T> gemm{};
-            gemm(&params);
-          }
-          else if (!transa_ && !transb_) {
-            static at::cuda::tunable::GemmAndBiasTunableOp<scalar_t, at::cuda::tunable::BlasOp::N, at::cuda::tunable::BlasOp::N> gemm{};
-            gemm(&params);
-          }
-          else {
-            TORCH_CHECK(false, "unreachable");
-          }
+          launchTunableGemmAndBias<scalar_t>(args, result, self, true);
         }
         else {
           at::cuda::blas::gemm_and_bias<scalar_t>(
@@ -411,40 +421,7 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
         [&] {
         auto tuning_ctx = at::cuda::tunable::getTuningContext();
         if (tuning_ctx->IsTunableOpEnabled()) {
-          bool transa_ = ((args.transa != 'n') && (args.transa != 'N'));
-          bool transb_ = ((args.transb != 'n') && (args.transb != 'N'));
-          at::cuda::tunable::GemmAndBiasParams<scalar_t> params;
-          params.transa = args.transa;
-          params.transb = args.transb;
-          params.m = args.m;
-          params.n = args.n;
-          params.k = args.k;
-          params.a = args.mata->const_data_ptr<scalar_t>();
-          params.lda = args.lda;
-          params.b = args.matb->const_data_ptr<scalar_t>();
-          params.ldb = args.ldb;
-          params.bias = self.cosnt_data_ptr<scalar_t>();
-          params.c = args.result->data_ptr<scalar_t>();
-          params.ldc = args.result_ld;
-          if (transa_ && transb_) {
-            static at::cuda::tunable::GemmAndBiasTunableOp<scalar_t, at::cuda::tunable::BlasOp::T, at::cuda::tunable::BlasOp::T> gemm{};
-            gemm(&params);
-          }
-          else if (transa_ && !transb_) {
-            static at::cuda::tunable::GemmAndBiasTunableOp<scalar_t, at::cuda::tunable::BlasOp::T, at::cuda::tunable::BlasOp::N> gemm{};
-            gemm(&params);
-          }
-          else if (!transa_ && transb_) {
-            static at::cuda::tunable::GemmAndBiasTunableOp<scalar_t, at::cuda::tunable::BlasOp::N, at::cuda::tunable::BlasOp::T> gemm{};
-            gemm(&params);
-          }
-          else if (!transa_ && !transb_) {
-            static at::cuda::tunable::GemmAndBiasTunableOp<scalar_t, at::cuda::tunable::BlasOp::N, at::cuda::tunable::BlasOp::N> gemm{};
-            gemm(&params);
-          }
-          else {
-            TORCH_CHECK(false, "unreachable");
-          }
+          launchTunableGemmAndBias<scalar_t>(args, result, self, false);
         }
         else {
           at::cuda::blas::gemm_and_bias<scalar_t>(
