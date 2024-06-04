@@ -23,10 +23,11 @@ self-hosted-runner:
     - windows.8xlarge.nvidia.gpu
     - windows.8xlarge.nvidia.gpu.nonephemeral
     - windows.g5.4xlarge.nvidia.gpu
-    # Repo-specific AMD hosted MI300 runners
+    # Organization-wide AMD hosted MI300 runners
     - linux.rocm.gpu
-    # Repo-specific Apple hosted M2 runners
-    - macos-m2-metal
+    # Repo-specific Apple hosted  runners
+    - macos-m1-ultra
+    - macos-m2-14
     # Org wise AWS `mac2.metal` runners (2020 Mac mini hardware powered by Apple silicon M1 processors)
     - macos-m1-stable
     - macos-m1-13
