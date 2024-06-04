@@ -178,7 +178,7 @@ class AOTAutogradCacheDetails(FxGraphHashDetails):
                 for t in example_inputs
                 if isinstance(t, torch.Tensor)
             ]
-            super().__init__(gm, [], {})
+            super().__init__(gm, [], {}, [])
         except BypassFxGraphCache as e:
             # Sometimes inductor configs are unpickleable and can fail
             raise BypassAOTAutogradCache from e
