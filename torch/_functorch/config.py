@@ -136,6 +136,7 @@ unlift_effect_tokens = False
 # of tensors in question.
 fake_tensor_propagate_real_tensors = False
 
+# If True, enables distributed-specific FX passes in the partitioner.
 trace_distributed = False
 
 # Controls the default graph output format used by draw_graph
