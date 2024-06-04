@@ -31,7 +31,10 @@ from torch.utils._triton import has_triton
 
 # Skip tests if Triton is not available
 supported_platform = skipUnless(
-    torch.cuda.is_available() and has_triton() and torch.version.hip is None,
+    torch.cuda.is_available()
+    and has_triton()
+    and torch.version.hip is None
+    and torch.cuda.get_device_capability() >= (8, 0),
     "Requires CUDA and Triton",
 )
 
