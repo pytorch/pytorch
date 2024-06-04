@@ -2134,7 +2134,7 @@ def _import_device_backends():
 
 def _is_device_backend_autoload_enabled() -> bool:
     """
-    Whether to enbale autoloading out-of-the-tree device extensions.
+    Whether autoloading out-of-the-tree device extensions is enabled.
     The switch depends on the value of the environment variable
     `TORCH_DEVICE_BACKEND_AUTOLOAD`.
 
