@@ -25,6 +25,18 @@ def make_autograd_impl(op: _ops.OpOverload, info: InfoProtocol) -> Callable:
     saved_keyword_only_args = None
     has_kwarg_only_args = utils.has_kwarg_only_args(op._schema)
 
+    def forward_no_grad(*args):
+        with _C._AutoDispatchBelowAutograd():
+            nonlocal saved_keyset, saved_keyword_only_args
+            keyset = saved_keyset
+            assert keyset is not None, "Should have been set by autograd_impl"
+            saved_keyset = None
+            kwargs = saved_keyword_only_args
+            assert kwargs is not None, "Should have been set by autograd_impl"
+            saved_keyword_only_args = None
+            result = op.redispatch(keyset & _C._after_autograd_keyset, *args, **kwargs)
+            return result
+
     def forward(ctx, *args):
         with _C._AutoDispatchBelowAutograd():
             nonlocal saved_keyset, saved_keyword_only_args
@@ -93,7 +105,10 @@ def make_autograd_impl(op: _ops.OpOverload, info: InfoProtocol) -> Callable:
         saved_keyset = keyset
         assert saved_keyword_only_args is None
         saved_keyword_only_args = keyword_only_args
-        result = Generated.apply(*args)  # type: ignore[attr-defined]
+        if _C.is_grad_enabled():
+            result = Generated.apply(*args)  # type: ignore[attr-defined]
+        else:
+            result = forward_no_grad(*args)
         return result
 
     return autograd_impl
