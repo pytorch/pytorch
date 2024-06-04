@@ -1291,14 +1291,7 @@ class TritonKernel(SIMDKernel):
                 ep = ", eviction_policy='evict_first'"
         else:
             ep = ""
-        # "other" below is a workaround for https://github.com/openai/triton/issues/737
-        # for bool, even though it's likely subject to the same bug, setting `other` leads
-        # to LLVM errors so we are skipping it for now
-        if (
-            (has_tmpmask or has_rindex)
-            and V.graph.get_dtype(name) != torch.bool
-            and indexing.has_mask()
-        ):
+        if (has_tmpmask or has_rindex) and indexing.has_mask():
             other = ", other=0.0"
         else:
             other = ""
@@ -2348,7 +2341,10 @@ class TritonKernel(SIMDKernel):
             and not entry.has_zdim
             and not (isinstance(entry.numel, int) and entry.numel <= get_max_y_grid())
         ):
-            key = f"{key} * (tl.program_id({entry.grid_dim + 1}) + 1)"
+            # For ynumel larger than max_ygrid, we need to use zdim.
+            # For each z dimension, there are tl.num_programs(1) yblocks which is passed by grad(x,y,z).
+            # So, we need to add tl.program_id(z) * tl.num_programs(y) *YBLOCK to get the correct yoffset.
+            key = f"({key} + tl.program_id({entry.grid_dim + 1}) * tl.num_programs({entry.grid_dim}))"
         pid = entry.pid_cache.get(key, key)
         if self.index_dtype != "tl.int32":
             return f"{pid}.to({self.index_dtype})"
