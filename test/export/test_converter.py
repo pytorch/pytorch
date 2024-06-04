@@ -1,6 +1,7 @@
 # Owner(s): ["oncall: export"]
 
 import unittest
+from typing import Tuple
 
 import torch
 
@@ -9,7 +10,6 @@ import torch.utils._pytree as pytree
 from torch._dynamo.test_case import TestCase
 from torch._export.converter import TS2EPConverter
 from torch.export import ExportedProgram
-
 from torch.testing._internal.common_utils import run_tests
 
 requires_cuda = unittest.skipUnless(torch.cuda.is_available(), "requires cuda")
@@ -23,8 +23,11 @@ class TestConverter(TestCase):
         orig_out, _ = pytree.tree_flatten(mod(*inp))
         self.assertEqual(len(ep_out), len(orig_out))
         for ep_t, orig_t in zip(ep_out, orig_out):
-            self.assertEqual(ep_t.shape, orig_t.shape)
-            self.assertTrue(torch.allclose(ep_t, orig_t))
+            if isinstance(ep_t, torch.Tensor):
+                self.assertEqual(ep_t.shape, orig_t.shape)
+                self.assertTrue(torch.allclose(ep_t, orig_t))
+            else:
+                self.assertEqual(ep_t, orig_t)
         return ep
 
     def test_ts2ep_converter_basic(self):
@@ -191,6 +194,58 @@ class TestConverter(TestCase):
             ep.module()(torch.tensor(False), torch.tensor(4)),
             M()(torch.tensor(False), torch.tensor(4)),
         )
+
+    def test_profiler__record_function(self):
+        class Module(torch.nn.Module):
+            def forward(self, x: torch.Tensor) -> torch.Tensor:
+                handle = torch.ops.profiler._record_function_enter_new("foo", None)
+                y = x * 2 + 4
+                torch.ops.profiler._record_function_exit(handle)
+                return y
+
+        x = torch.randn(10, 10)
+        self._check_equal_ts_ep_converter(Module(), (x,))
+
+    def test_aten_floordiv(self):
+        class Module(torch.nn.Module):
+            def forward(self, x: torch.Tensor) -> torch.Tensor:
+                return x // 2
+
+        x = torch.randn(10, 10)
+        self._check_equal_ts_ep_converter(Module(), (x,))
+
+    def test_aten___is__(self):
+        class Module(torch.nn.Module):
+            def forward(
+                self, x: torch.Tensor, y: torch.Tensor
+            ) -> Tuple[bool, torch.Tensor]:
+                z = x + 1
+                return x is y, z
+
+        inp = (torch.randn(10, 10), torch.rand(10, 10))
+        self._check_equal_ts_ep_converter(Module(), inp)
+
+    def test_aten___isnot__(self):
+        class Module(torch.nn.Module):
+            def forward(
+                self, x: torch.Tensor, y: torch.Tensor
+            ) -> Tuple[bool, torch.Tensor]:
+                z = x + 1
+                return x is not y, z
+
+        inp = (torch.randn(10, 10), torch.rand(10, 10))
+        self._check_equal_ts_ep_converter(Module(), inp)
+
+    def test_aten___not__(self):
+        class Module(torch.nn.Module):
+            def forward(
+                self, x: torch.Tensor, y: torch.Tensor
+            ) -> Tuple[bool, torch.Tensor]:
+                z = x + 1
+                return not (x is not y), z
+
+        inp = (torch.randn(10, 10), torch.rand(10, 10))
+        self._check_equal_ts_ep_converter(Module(), inp)
 
 
 if __name__ == "__main__":
