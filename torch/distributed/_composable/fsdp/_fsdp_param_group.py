@@ -357,8 +357,8 @@ class FSDPParamGroup:
             with torch.profiler.record_function(
                 "FSDP::backward_prefetch"
             ):
-                # NOTE(yf225): Dynamo doesn't support custom context manager at the moment,
-                # so can't use `with use_training_state(X)` :(
+                # NOTE: Dynamo doesn't support custom context manager at the moment,
+                # so we can't use `with use_training_state(X)`.
                 old_training_state = target_fsdp_param_group._training_state
                 self._training_state = TrainingState.PRE_BACKWARD
                 try:
