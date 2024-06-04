@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import sys
 import torch
 from torch.fx.graph import (
