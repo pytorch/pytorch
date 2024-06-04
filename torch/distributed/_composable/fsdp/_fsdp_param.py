@@ -127,7 +127,7 @@ class FSDPParam:
     _sharded_post_forward_param: Optional[nn.Parameter]  # ND
     _unsharded_param: nn.Parameter  # ND
     unsharded_accumulated_grad: Optional[torch.Tensor]  # ND
-    _global_placements: Tuple[Placement, ...]
+    _spmd_placements: Tuple[Placement, ...]
     _global_size: torch.Size
     _global_stride: Tuple[int, ...]
     all_gather_outputs: List[torch.Tensor]  # 1D
@@ -199,37 +199,33 @@ class FSDPParam:
                     "FSDP requires the DP and TP mesh to have the same parent mesh but got: \n"
                     f"DP's global mesh: {dp_global_mesh}\nTP's global mesh: {tp_global_mesh}"
                 )
-            self._global_mesh = dp_global_mesh
+
+            name_dims_error = "FSDP requires named DeviceMesh dims for ND parallelism"
+            assert dp_mesh.mesh_dim_names is not None, name_dims_error
+            assert tp_mesh.mesh_dim_names is not None, name_dims_error
+
+            submesh_names = dp_mesh.mesh_dim_names + tp_mesh.mesh_dim_names
+            self._spmd_mesh = dp_global_mesh[submesh_names]
             if len(self._tp_spec.placements) != 1:
                 raise NotImplementedError(
                     f"FSDP only supports 1D TP, not {self._tp_spec.placements}"
                 )
-            global_placements: List[Placement] = [Replicate(), Replicate()]
-            global_dp_mesh_dim = _mesh_resources.get_parent_mesh_dim(dp_mesh)
-            global_tp_mesh_dim = _mesh_resources.get_parent_mesh_dim(tp_mesh)
-            assert global_dp_mesh_dim is not None  # mypy
-            assert global_tp_mesh_dim is not None  # mypy
-            # for PP, DP, TP case, dp mesh dim would be 1, tp mesh dim would be 2
-            # DP/TP would only live in the inner most 2-3 dims (HSDP + TP would be 3)
-            dp_tp_mesh_ndim = dp_mesh.ndim + tp_mesh.ndim
-            outer_mesh_ndim = self._global_mesh.ndim - dp_tp_mesh_ndim
-            if self._global_mesh.ndim > dp_tp_mesh_ndim:
-                global_dp_mesh_dim = global_dp_mesh_dim - outer_mesh_ndim
-                global_tp_mesh_dim = global_tp_mesh_dim - outer_mesh_ndim
 
             # TODO: Hard code FSDP + TP; need to support HSDP + TP
-            global_placements[global_dp_mesh_dim] = Shard(0)
-            global_placements[global_tp_mesh_dim] = self._tp_spec.placements[0]
-            self._global_placements = tuple(global_placements)
+            self._spmd_placements = (
+                Shard(0),
+                self._tp_spec.placements[0],
+            )
+
             self._global_size = param.size()
             self._global_stride = param.stride()
             param_data = cast(DTensor, param)._local_tensor
         else:
-            self._global_mesh = self.mesh_info.mesh
+            self._spmd_mesh = self.mesh_info.mesh
             if isinstance(self.mesh_info, HSDPMeshInfo):
-                self._global_placements = (Replicate(), Shard(0))
+                self._spmd_placements = (Replicate(), Shard(0))
             else:
-                self._global_placements = (Shard(0),)
+                self._spmd_placements = (Shard(0),)
             self._global_size = param.size()
             self._global_stride = param.stride()
             param_data = param
@@ -443,8 +439,8 @@ class FSDPParam:
             )
         return _from_local_no_grad(
             tensor,
-            self._global_mesh,
-            self._global_placements,
+            self._spmd_mesh,
+            self._spmd_placements,
             self._global_size,
             self._global_stride,
         )
