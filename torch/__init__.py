@@ -1802,7 +1802,9 @@ del __name, __obj
 
 import torch
 
-__all__.extend(name for name in dir(torch) if isinstance(getattr(torch, name), torch.dtype))
+__all__.extend(
+    name for name in dir(torch) if isinstance(getattr(torch, name), torch.dtype)
+)
 
 ################################################################################
 # Import TorchDynamo's lazy APIs to avoid circular dependenices
