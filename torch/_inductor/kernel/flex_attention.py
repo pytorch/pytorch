@@ -306,6 +306,13 @@ flex_attention_template = TritonTemplate(
  """,
 )
 
+def _use_flex_decoding(query):
+    # Decide which kernel to use, return true if use flex decoding kernel. 
+    if query.get_size()[-2] <= 32:
+        return True
+    else: 
+        return False
+
 
 _h100_default_config = {
     (torch.float32, 64): (128, 32, 4, 3),
@@ -376,6 +383,7 @@ def _get_default_config_bwd(query) -> Tuple[int, int, int, int]:
         return (16, 16, 4, 1)
 
 
+from torch._inductor.kernel.flex_decoding import create_flex_decoding_kernel
 # TODO: We probably also need a layout constraint?
 @register_lowering(torch.ops.higher_order.flex_attention, type_promotion_kind=None)
 def flex_attention(*args, **kwargs):

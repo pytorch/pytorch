@@ -5,7 +5,7 @@ torch.manual_seed(0)
 
 # Lets create some input tensors
 # The input tensor has shape (batch_size, num_heads, seq_len, head_dim)
-query = torch.randn(8, 8, 2048, 64, device="cuda", dtype=torch.float32)
+query = torch.randn(8, 8, 16, 64, device="cuda", dtype=torch.float32)
 key = torch.randn(8, 8, 2048, 64, device="cuda", dtype=torch.float32)
 value = torch.randn(8, 8, 2048, 64, device="cuda", dtype=torch.float32)
 
@@ -68,4 +68,4 @@ manual_out = eager_flash_attention(query, key, value, score_mod=checkerboard)
 
 
 
-torch.testing.assert_close(output, manual_out, atol=2e-2, rtol=2e-2)
+torch.testing.assert_close(output, out_compiled, atol=2e-2, rtol=2e-2)

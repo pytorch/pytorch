@@ -247,7 +247,7 @@ def sdpa_decoding_grid(batch_size, num_heads, n_keys, d_model, meta):
 
 def call(args):
     arg0_1, arg1_1, arg2_1 = args
-    buf0 = torch.zeros(2, 8, 64, device='cuda', dtype=torch.float32) #LSE
+    buf0 = torch.zeros(2, 8, 2, device='cuda', dtype=torch.float32) #LSE
 
     with torch.cuda._DeviceGuard(0):
         torch.cuda.set_device(0)
@@ -259,7 +259,7 @@ def call(args):
         del arg0_1
         del arg1_1
         del arg2_1
-    return (buf1, )
+    return (buf1, buf0)
 
 
 from torch.nn.attention._flex_attention import _flex_attention as flex_attention
@@ -278,9 +278,12 @@ def run_module(times=10, repeat=10):
     fn = lambda: call([arg0_1, arg1_1, arg2_1])
 
 
-    gold_results = flex_attention(arg0_1, arg1_1, arg2_1, checkerboard)
-    (triton_results,) = fn()
+    gold_results, gold_logsumexp = flex_attention(arg0_1, arg1_1, arg2_1, checkerboard)
+    (triton_results,triton_logsumexp) = fn()
+    print("gold_logsumexp", gold_logsumexp)
+    print("triton_logsumexp", triton_logsumexp)
     torch.testing.assert_close(triton_results, gold_results, atol=2e-2, rtol=2e-2)
+    torch.testing.assert_close(triton_logsumexp, gold_logsumexp, atol=2e-2, rtol=2e-2)
 
 
 if __name__ == "__main__":

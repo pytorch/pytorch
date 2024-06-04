@@ -1,6 +1,5 @@
 import torch
 from torch.nn.attention._flex_attention import _flex_attention as flex_attention
-from torch.nn.attention._flex_decoder import _flex_decoder as flex_decoder
 
 
 torch.manual_seed(0)
@@ -9,7 +8,7 @@ torch.manual_seed(0)
 # Lets create some input tensors
 # The input tensor has shape (batch_size, num_heads, seq_len, head_dim)
 # Assume a batch size of 2 for inference.
-query = torch.randn(2, 8, 4, 64, device="cuda", dtype=torch.float32)
+query = torch.randn(2, 8, 2, 64, device="cuda", dtype=torch.float32)
 key = torch.randn(2, 8, 4096, 64, device="cuda", dtype=torch.float32)
 value = torch.randn(2, 8, 4096, 64, device="cuda", dtype=torch.float32)
 
@@ -26,7 +25,10 @@ def checkerboard(score, batch, head, token_q, token_kv):
 
 
 # Lets call flex_attention with this new score modification (eager)
-flex_decoder_output = flex_decoder(query, key, value, score_mod=checkerboard) # Output shape [B, H, N, d] = [1, 8, 4096, 64]
+eager_output = flex_attention(query, key, value, score_mod=checkerboard) # Output shape [B, H, N, d] = [1, 8, 4096, 64]
+compiled_flex_attention = torch.compile(flex_attention)
+compiled_output= compiled_flex_attention(query, key, value, score_mod=checkerboard)
+print(compiled_output, "Compiled Flex Decoding output")
 
 
 def eager_flash_decoder(query, key, value, score_mod, Bc=None) -> torch.Tensor:
@@ -94,5 +96,5 @@ def eager_flash_decoder(query, key, value, score_mod, Bc=None) -> torch.Tensor:
 
 
 
-decoder_output = eager_flash_decoder(query, key, value, score_mod=checkerboard, Bc=128)[0]
-torch.testing.assert_close(flex_decoder_output, decoder_output, atol=2e-2, rtol=2e-2)
+# decoder_output = eager_flash_decoder(query, key, value, score_mod=checkerboard, Bc=128)[0]
+torch.testing.assert_close(eager_output, compiled_output, atol=2e-2, rtol=2e-2)
