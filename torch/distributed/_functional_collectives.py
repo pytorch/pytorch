@@ -766,7 +766,9 @@ def _resolve_group_name(group: RANK_TYPES, tag: str = "") -> str:
             warnings.warn(
                 "The combination of ranks + tag as process group "
                 "identifier has been deprecated. Please switch to "
-                "using ProcessGroup, DeviceMesh, or group name instead."
+                "using ProcessGroup, DeviceMesh, or group name instead.",
+                FutureWarning,
+                stacklevel=3,
             )
         return c10d._resolve_group_name_by_ranks_and_tag(cast(List[int], group), tag)
     else:
