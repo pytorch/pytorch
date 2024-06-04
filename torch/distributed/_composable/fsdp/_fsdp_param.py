@@ -2,7 +2,6 @@ import itertools
 from dataclasses import dataclass, field
 from enum import auto, Enum
 from typing import Any, cast, List, Optional, Sequence, Tuple
-import contextlib
 
 import torch
 import torch.nn as nn
@@ -318,9 +317,17 @@ class FSDPParam:
         ]
 
     def init_unsharded_param(self):
+        """
+        [Note: Invariants for torch.compile Traceable FSDP2]
+        1. Under compile, we always re-populate the content of `self._unsharded_param`
+           per AllGather using the slow path.
+        2. Under compile, we always recreate `self.all_gather_outputs` per AllGather.
+           This is to ensure the buffer creation is internal to the graph and
+           avoid `self.all_gather_outputs` being captured as a graph input.
+        3. Under compile, after populating `self._unsharded_param`, we always clean up
+           `self.all_gather_outputs`, to avoid it being captured as a graph output.
+        """
         if (
-            # NOTE: under compile, we always skip this branch and re-init unsharded param
-            # using the slow path.
             not torch._dynamo.compiled_autograd.compiled_autograd_enabled
             and self._unsharded_param is not None  # after the 1st all-gather
         ):
@@ -380,8 +387,6 @@ class FSDPParam:
         else:
             self._unsharded_param = nn.Parameter(unsharded_param, requires_grad=self.sharded_param.requires_grad)
         if torch._dynamo.compiled_autograd.compiled_autograd_enabled:
-            # NOTE: under compile, after self._unsharded_param creation, we always clean up self.all_gather_outputs.
-            # This way, self.all_gather_outputs is never a graph output.
             self.all_gather_outputs = []
 
     def _unflatten_all_gather_outputs(self) -> Tuple[torch.Tensor, ...]:
