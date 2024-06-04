@@ -1338,10 +1338,10 @@ def forward(self, x_1, output_1):
             kernel.run(x, num_ctas=1, grid=(1,), warmup=False)
             return x
 
-        x = torch.randn(4, device="cuda")
+        x = torch.randn(4, device=GPU_TYPE)
         f(x)
 
-    @requires_cuda
+    @requires_gpu
     @skipIfRocm
     @common_utils.parametrize("backend", ["eager", "aot_eager", "inductor"])
     def test_triton_kernel_special_kwargs_without_autotune(self, backend):
