@@ -67,6 +67,9 @@ jobs:
       runs_on: linux.24xlarge
       {%- endif %}
       build_name: !{{ config["build_name"] }}
+      {%- if config.use_split_build is defined %}
+      use_split_build: !{{ config["use_split_build"] }}
+      {%- endif %}
       build_environment: !{{ build_environment }}
       {%- if config.pytorch_extra_install_requirements is defined and config.pytorch_extra_install_requirements|d('')|length > 0  %}
       PYTORCH_EXTRA_INSTALL_REQUIREMENTS: !{{ config.pytorch_extra_install_requirements }}

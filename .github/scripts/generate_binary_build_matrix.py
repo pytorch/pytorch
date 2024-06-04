@@ -356,36 +356,40 @@ def generate_wheels_matrix(
                 or arch_version == "cuda-aarch64"
                 else arch_version
             )
-
             # 12.1 linux wheels require PYTORCH_EXTRA_INSTALL_REQUIREMENTS to install
             if (
                 arch_version in ["12.4", "12.1", "11.8"]
                 and os == "linux"
-                or arch_version == "cuda-aarch64"
+                and arch_version == "cuda-aarch64"
             ):
-                ret.append(
-                    {
-                        "python_version": python_version,
-                        "gpu_arch_type": gpu_arch_type,
-                        "gpu_arch_version": gpu_arch_version,
-                        "desired_cuda": translate_desired_cuda(
-                            gpu_arch_type, gpu_arch_version
-                        ),
-                        "devtoolset": (
-                            "cxx11-abi" if arch_version == "cuda-aarch64" else ""
-                        ),
-                        "container_image": WHEEL_CONTAINER_IMAGES[arch_version],
-                        "package_type": package_type,
-                        "pytorch_extra_install_requirements": (
-                            PYTORCH_EXTRA_INSTALL_REQUIREMENTS[arch_version]  # fmt: skip
-                            if os != "linux-aarch64"
-                            else ""
-                        ),
-                        "build_name": f"{package_type}-py{python_version}-{gpu_arch_type}{gpu_arch_version}".replace(  # noqa: B950
-                            ".", "_"
-                        ),
-                    }
-                )
+                for use_split_build in ["true", "false"]:
+                    build_name = f"manywheel-py{python_version}-{gpu_arch_type}{gpu_arch_version}".replace(
+                        ".", "_"
+                    )
+                    if use_split_build == "true":
+                        build_name += "-experimental-split-build"
+                    ret.append(
+                        {
+                            "python_version": python_version,
+                            "gpu_arch_type": gpu_arch_type,
+                            "gpu_arch_version": gpu_arch_version,
+                            "desired_cuda": translate_desired_cuda(
+                                gpu_arch_type, gpu_arch_version
+                            ),
+                            "devtoolset": (
+                                "cxx11-abi" if arch_version == "cuda-aarch64" else ""
+                            ),
+                            "container_image": WHEEL_CONTAINER_IMAGES[arch_version],
+                            "package_type": package_type,
+                            "pytorch_extra_install_requirements": (
+                                PYTORCH_EXTRA_INSTALL_REQUIREMENTS[arch_version]  # fmt: skip
+                                if os != "linux-aarch64"
+                                else ""
+                            ),
+                            "build_name": build_name,
+                            "use_split_build": use_split_build,
+                        }
+                    )
             else:
                 ret.append(
                     {
