@@ -2147,7 +2147,7 @@ def _is_device_backend_autoload_enabled() -> bool:
     """
     # enabled by default
     is_enable = os.getenv("TORCH_DEVICE_BACKEND_AUTOLOAD", "1")
-    return is_enable.strip().lower() in ("1", "true", "yes", "on", "y")
+    return is_enable.strip().lower() in {"1", "true", "yes", "on", "y"}
 
 
 if _is_device_backend_autoload_enabled():
