@@ -1995,7 +1995,6 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch.not_equal",
         "torch.nuclear_norm",
         "torch.numel",
-        "torch.obj",
         "torch.ones_like",
         "torch.ones",
         "torch.orgqr",
