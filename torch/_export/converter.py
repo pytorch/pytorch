@@ -65,12 +65,19 @@ def get_op_overload(node: torch._C.Node):
     ns, op_name = str(schema.name.name).split("::")
     override = schema.name.overload_name
 
-    op_overload_mod = getattr(torch.ops, ns)
-    op_overload_packet = getattr(op_overload_mod, op_name)
-    if override:
-        op_overload = getattr(op_overload_packet, override)
-    else:
-        op_overload = op_overload_packet.default
+    try:
+        op_overload_mod = getattr(torch.ops, ns)
+        op_overload_packet = getattr(op_overload_mod, op_name)
+        if override:
+            op_overload = getattr(op_overload_packet, override)
+        else:
+            op_overload = op_overload_packet.default
+    except Exception as e:
+        msg = f"Finding operator overload for {node.kind()}"
+        if override:
+            msg += f" with override {override}"
+        msg += f" fail due to: {e}"
+        raise RuntimeError(msg)
 
     return op_overload
 
