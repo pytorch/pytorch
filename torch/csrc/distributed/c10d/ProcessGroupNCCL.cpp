@@ -28,6 +28,7 @@
 #include <torch/csrc/distributed/c10d/ProcessGroupNCCL.hpp>
 #include <torch/csrc/distributed/c10d/TraceUtils.h>
 #include <torch/csrc/distributed/c10d/Utils.hpp>
+#include <torch/csrc/distributed/c10d/control_plane/Handlers.hpp>
 #include <torch/csrc/distributed/c10d/logger.hpp>
 #include <torch/torch.h>
 
@@ -197,6 +198,20 @@ inline std::string getKeyFromDevice(at::Device& device) {
   return std::to_string(device.index());
 }
 
+inline at::DeviceIndex getIndexFromDeviceKey(const std::string& deviceKey) {
+  // initialize the device index to -1, which is an invalid value.
+  int index = -1;
+  try {
+    index = std::stoi(deviceKey);
+  } catch (const std::invalid_argument& e) {
+    LOG(WARNING) << c10::str(
+        "Invalid deviceKey: ", deviceKey, ",", e.what(), ".");
+  } catch (const std::out_of_range& e) {
+    LOG(ERROR) << "Out of range: " << e.what();
+  }
+  return static_cast<at::DeviceIndex>(index);
+}
+
 std::string getKeySendRecv(int myRank, int peer) {
   int lowRank = myRank < peer ? myRank : peer;
   int highRank = myRank < peer ? peer : myRank;
@@ -354,6 +369,13 @@ std::string dump_nccl_trace() {
   return NCCLTraceBuffer::get()->dump(c10::nullopt);
 }
 #endif
+
+// TODO(c-p-i-o): add a JSON endpoint.
+control_plane::RegisterHandler dumpHandler{
+    "dump_nccl_trace_pickle",
+    [](const control_plane::Request&, control_plane::Response& res) {
+      res.setContent(dump_nccl_trace(), "application/octet-stream");
+    }};
 
 std::optional<std::function<void(std::function<void(const std::string&)>)>>&
 get_cpp_trace_dumper() {
@@ -1050,7 +1072,11 @@ void ProcessGroupNCCL::abortCommsFromMap(
   for (auto& it : ncclCommsMap) {
     auto& devName = it.first;
     auto& ncclComm = it.second;
-
+    at::cuda::OptionalCUDAGuard gpuGuard;
+    at::DeviceIndex deviceIndex = getIndexFromDeviceKey(devName);
+    if (deviceIndex >= 0) {
+      gpuGuard.set_index(deviceIndex);
+    }
     LOG(INFO) << logPrefix() << "ProcessGroupNCCL destroying ncclComm_ "
               << ncclComm->ncclComm_ << " on CUDA device: " << devName;
     ncclComm->ncclCommAbort(abortReason);
