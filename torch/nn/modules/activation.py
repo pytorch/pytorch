@@ -222,12 +222,14 @@ class Hardtanh(Module):
             warnings.warn(
                 "keyword argument `min_value` is deprecated and rename to `min_val`",
                 FutureWarning,
+                stacklevel=2,
             )
             min_val = min_value
         if max_value is not None:
             warnings.warn(
                 "keyword argument `max_value` is deprecated and rename to `max_val`",
                 FutureWarning,
+                stacklevel=2,
             )
             max_val = max_value
 
