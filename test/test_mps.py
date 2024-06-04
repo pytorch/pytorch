@@ -3304,6 +3304,8 @@ class TestMPS(TestCaseMPS):
 
         helper((2, 3), 1.0)
         helper((2, 3), 0.2)
+        helper((100, 300), 1.0)
+        helper((100, 300), 0.2)
 
     def test_buffer_size_match(self):
         # this test shouldn't cause any crash
