@@ -1795,10 +1795,8 @@ def wrap_fx_proxy_cls(
     def nop_hook(x):
         return x
 
-    with torch.autograd.graph.saved_tensors_hooks(
-        nop_hook, nop_hook
-    ):
-    # with preserve_rng_state():
+    with torch.autograd.graph.saved_tensors_hooks(nop_hook, nop_hook):
+        # with preserve_rng_state():
         if example_value is None:
             # only allow_non_graph_fake in this instance because we handle the non-fake
             # cases properly below.
@@ -1814,17 +1812,22 @@ def wrap_fx_proxy_cls(
                 # to perform a clone WITHOUT preserving the subclass.  It's
                 # not entirely clear this is what you actually want though.
                 with torch._C.DisableTorchFunctionSubclass():
-                    proxy.tracer.real_value_cache[proxy.node] = _clone_input(example_value)
+                    proxy.tracer.real_value_cache[proxy.node] = _clone_input(
+                        example_value
+                    )
             # NB: If we're ignoring subclass, then the expectation is you will
             # take the returned TensorVariable and wrap it into a more
             # accurate TensorVariable that is able to track subclass-ness;
             # otherwise this is wrong!
             kwargs = {
-                "is_tensor": target_cls in (TensorVariable, TensorWithTFOverrideVariable),
+                "is_tensor": target_cls
+                in (TensorVariable, TensorWithTFOverrideVariable),
             }
             assert "source" in options and options["source"] is not None
             kwargs["source"] = options["source"]
-            example_value = wrap_to_fake_tensor_and_record(example_value, tx=tx, **kwargs)
+            example_value = wrap_to_fake_tensor_and_record(
+                example_value, tx=tx, **kwargs
+            )
         if isinstance(example_value, torch.Tensor) and (
             maybe_get_fake_mode(example_value) is not tx.fake_mode
         ):

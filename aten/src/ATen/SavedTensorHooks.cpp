@@ -72,12 +72,4 @@ std::pair<PyObject*, PyObject*> SavedTensorDefaultHooks::get_hooks() {
   return tls.stack.top();
 }
 
-std::stack<std::pair<PyObject*, PyObject*>> SavedTensorDefaultHooks::get_stack() {
-  return tls.stack;
-}
-
-void SavedTensorDefaultHooks::set_stack(std::stack<std::pair<PyObject*, PyObject*>> stack_) {
-  tls.stack = std::move(stack_);
-}
-
 }

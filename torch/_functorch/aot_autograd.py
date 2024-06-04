@@ -486,8 +486,13 @@ def create_aot_dispatcher_function(
 
     with torch.autograd.set_multithreading_enabled(
         False
-    ), preserve_rng_state(), fake_mode, python_dispatcher_mode, PhiloxStateTracker(), \
-            torch.autograd.graph.saved_tensors_hooks(nop_hook, nop_hook):
+    ), preserve_rng_state(), (
+        fake_mode
+    ), (
+        python_dispatcher_mode
+    ), PhiloxStateTracker(), torch.autograd.graph.saved_tensors_hooks(
+        nop_hook, nop_hook
+    ):
 
         def process_inputs(flat_args):
             def convert(idx, x):
