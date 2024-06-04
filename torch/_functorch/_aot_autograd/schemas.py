@@ -221,6 +221,7 @@ class SubclassCreationMeta:
             ]
         else:
             outer_size = self.outer_size
+        # print('all_args', all_args)
         out = type(self.original_subclass).__tensor_unflatten__(  # type: ignore[attr-defined]
             dict(zip(self.inner_keys, curr_args)),
             self.meta,

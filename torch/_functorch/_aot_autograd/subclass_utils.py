@@ -97,11 +97,12 @@ def unwrap_tensor_subclasses(
     subclass_metas: Optional[List[Union[int, SubclassCreationMeta]]],
     is_joint_structure: bool,
     is_runtime: bool,
+    append_extra: bool,
 ):
     if is_runtime:
         assert subclass_metas is not None
 
-    def concat_inner_tensors_from_subclasses(xs):
+    def concat_inner_tensors_from_subclasses(xs, is_forward: bool):
         xs_inner = []
         has_symint = any(isinstance(x, SymInt) for x in xs)
 
@@ -116,6 +117,10 @@ def unwrap_tensor_subclasses(
         # to subclass tensor sizes (See PyTorch issue #124619 for the motivation).
         # When the traced function is executed with runtime values, aot_autograd
         # needs to append those extra arguments with concrete values
+
+        if not append_extra:
+            return xs_inner
+
         if is_runtime:
             for x, meta in zip(xs, subclass_metas):
                 if isinstance(meta, SubclassCreationMeta):
@@ -129,10 +134,13 @@ def unwrap_tensor_subclasses(
                         if isinstance(s, SymInt)
                     ]
         else:
+            # print("has_symint", has_symint)
+            # print("is_forward", is_forward)
             for x in xs:
                 if (
                     isinstance(x, Tensor)
                     and is_traceable_wrapper_subclass(x)
+                    and is_forward
                     # and has_symint
                 ):
                     # x.size() can have both ints ans SymInts: `Size([3, sz1, 5])`
@@ -145,13 +153,24 @@ def unwrap_tensor_subclasses(
         assert isinstance(wrapped_args[0], (tuple, list)) and isinstance(
             wrapped_args[1], (tuple, list)
         )
-        unwrapped_args_fw = concat_inner_tensors_from_subclasses(wrapped_args[0])
-        unwrapped_args_tangents = concat_inner_tensors_from_subclasses(wrapped_args[1])
+        unwrapped_args_fw = concat_inner_tensors_from_subclasses(
+            wrapped_args[0], is_forward=True
+        )
+        unwrapped_args_tangents = concat_inner_tensors_from_subclasses(
+            wrapped_args[1], is_forward=False
+        )
+        # print(len(unwrapped_args_fw), len(unwrapped_args_tangents))
         unwrapped_args = (unwrapped_args_fw, unwrapped_args_tangents)
     else:
         assert isinstance(wrapped_args, (list, tuple))
-        unwrapped_args_fw = concat_inner_tensors_from_subclasses(wrapped_args)
+        unwrapped_args_fw = concat_inner_tensors_from_subclasses(
+            wrapped_args, is_forward=True
+        )
         unwrapped_args = unwrapped_args_fw
+        # print(len(unwrapped_args))
+    # print(unwrapped_args)
+    # print(wrapped_args)
+    # print("---")
     return unwrapped_args
 
 
