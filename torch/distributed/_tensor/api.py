@@ -748,6 +748,7 @@ def distribute_module(
                 "Deprecating input_fn that takes two arguments (inputs, device_mesh), "
                 "please use input_fn that takes in (module, inputs, device_mesh) instead!",
                 FutureWarning,
+                stacklevel=2,
             )
             module.register_forward_pre_hook(lambda _, inputs: input_fn(inputs, device_mesh))  # type: ignore[call-arg]
         elif num_args == 3:
@@ -768,6 +769,7 @@ def distribute_module(
                 "Deprecating output_fn that takes two arguments (inputs, device_mesh), "
                 "please use output_fn that takes in (module, inputs, device_mesh) instead!",
                 FutureWarning,
+                stacklevel=2,
             )
             module.register_forward_hook(
                 lambda mod, inputs, outputs: output_fn(outputs, device_mesh)  # type: ignore[call-arg]
