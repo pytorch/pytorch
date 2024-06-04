@@ -326,9 +326,6 @@ class TS2FXGraphConverter:
         self.convert_graph_inputs()
 
         for node in self.ts_graph.nodes():
-            # if node.kind() == "prim::GetAttr":
-            #     breakpoint()
-            #     pass
             self.convert_node(node)
 
         self.convert_graph_outputs()
@@ -689,7 +686,6 @@ class TS2FXGraphConverter:
                 )
                 subgraph_converter.name_to_node[block_arg] = placeholder_node
 
-            breakpoint()
             subgraph = subgraph_converter.convert()
             subgraph_name = self.add_subgraph(subgraph)
             subgraph_nodes.append(self.fx_graph.get_attr(subgraph_name))
@@ -931,9 +927,12 @@ DEBUG: (TORCH_LOGS="+export" <cmd>), additionaly
 
         self.lift_tensor_constants_to_buffer()
 
-        self.mod_attribute_map = {
-            name: param for name, param in ts_model.named_parameters()
-        }
+        # Populate nn module parameters and buffers.
+        self.mod_param_and_buffer_map: Dict[str, Any]= dict()
+        for name, param in ts_model.named_parameters():
+            self.mod_param_and_buffer_map[normalize_name(name)] = param
+        for name, buffer in ts_model.named_buffers():
+            self.mod_param_and_buffer_map[normalize_name(name)] = buffer 
 
     def convert(self) -> ExportedProgram:
         blocks_to_lifted_attrs = get_block_to_lifted_attrs(self.ts_graph)
