@@ -1428,7 +1428,6 @@ supported_vec_isa_list = [VecAVX512(), VecAVX2(), VecNEON()]
 def get_isa_from_cpu_capability(
     capability: str | None, vec_isa_list: List[VecISA], invalid_vec_isa: InvalidVecISA
 ):
-
     # VSX is not supported in inductor
     capability_to_isa_str = {
         "default": "INVALID_VEC_ISA",
