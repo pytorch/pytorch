@@ -1791,10 +1791,7 @@ def wrap_fx_proxy_cls(
 
         return value
 
-    # See Note [nop saved tensor hooks during tracing]
-    def nop_hook(x):
-        return x
-
+    # See NOTE: [Deferring tensor pack/unpack hooks until runtime]
     with torch._dynamo.utils._disable_saved_tensors_hooks_during_tracing():
         # with preserve_rng_state():
         if example_value is None:

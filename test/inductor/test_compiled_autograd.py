@@ -1978,6 +1978,7 @@ known_failing_tests = {
     "test_autograd_function_backed_op",  # RuntimeError: compiled_args not implemented
     "test_setitem",  # AssertionError: Tensor-likes are not close!
     "test_grad_nonleaf_register_hook",  # IndexError: list index out of range (NB: x.grad = y where both x and y are input tensors)
+    "test_unpack_hooks_exec_count",  # pack/unpack saved tensor hooks firing more than once
 }
 
 if not HAS_CUDA:

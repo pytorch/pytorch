@@ -36,6 +36,7 @@ void SavedTensorDefaultHooks::enable() {
 }
 
 /* static */ void SavedTensorDefaultHooks::disable_during_tracing() {
+  TORCH_CHECK(!tls.is_tracing, "Nested context managers not supported")
   tls.is_tracing = true;
 }
 
