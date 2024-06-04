@@ -1445,10 +1445,10 @@ class TestTEFuser(JitTestCase):
                         [
                             "Failed:",
                             str(self_dtype),
-                            op.__name__,
+                            op.__name__,  # noqa: F821
                             device,
                             str(size),
-                        ]  # noqa: F821
+                        ]
                     )
                 ) from e
 
