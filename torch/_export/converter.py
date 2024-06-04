@@ -41,6 +41,15 @@ def normalize_name(name: str) -> str:
     return name.replace(".", "_")
 
 
+# Given a node: torch._C.Node, map from node.kind() to a standard operator
+kind_to_standard_operators = {
+    "prim::TupleIndex": operator.getitem,
+    "aten::__is__": operator.is_,
+    "aten::__isnot__": operator.is_not,
+    "aten::__not__": operator.not_,
+}
+
+
 def get_op_overload(node: torch._C.Node):
     schema_str = node.schema()
     schema = FunctionSchema.parse(schema_str)
@@ -285,13 +294,6 @@ class TS2FXGraphConverter:
         output_name = node.output().debugName()
         self.name_to_node[output_name] = output_dict
 
-    def convert_prim_TupleIndex(self, node: torch._C.Node):
-        args = tuple(self.get_fx_value(input) for input in node.inputs())
-        getitem_node = self.fx_graph.call_function(operator.getitem, args)
-
-        output_name = node.output().debugName()
-        self.name_to_node[output_name] = getitem_node
-
     def convert_aten_Int(self, node: torch._C.Node):
         # converts aten::Int as aten._to_copy + aten::_local_scalar_dense
         target = torch.ops.aten._to_copy.default
@@ -438,6 +440,28 @@ class TS2FXGraphConverter:
         output_name = node.output().debugName()
         self.name_to_node[output_name] = args[0]
 
+    def convert_profiler__record_function_enter_new(self, node: torch._C.Node):
+        target = torch.ops.profiler._record_function_enter_new
+        args = tuple(self.get_fx_value(input) for input in node.inputs())
+        fx_node = self.fx_graph.call_function(target, args)
+        output_name = node.output().debugName()
+        self.name_to_node[output_name] = fx_node
+
+    def convert_profiler__record_function_exit(self, node: torch._C.Node):
+        # _record_function_exit has side effect so we keep it in fx.graph
+        # currently, _record_function_enter_new and _record_function_exit are
+        # discarded during `retrace_as_exported_program`.
+        target = torch.ops.profiler._record_function_exit
+        args = tuple(self.get_fx_value(input) for input in node.inputs())
+        self.fx_graph.call_function(target, args)
+
+    def convert_standard_operators(self, node: torch._C.Node):
+        target = kind_to_standard_operators[node.kind()]
+        args = tuple(self.get_fx_value(input) for input in node.inputs())
+        fx_node = self.fx_graph.call_function(target, args)
+        output_name = node.output().debugName()
+        self.name_to_node[output_name] = fx_node
+
     def convert_node(self, node: torch._C.Node):
         node_kind = node.kind()
         if node_kind == "prim::CreateObject":
@@ -457,8 +481,6 @@ class TS2FXGraphConverter:
             self.convert_prim_dtype(node)
         elif node_kind == "prim::DictConstruct":
             self.convert_prim_DictConstruct(node)
-        elif node_kind == "prim::TupleIndex":
-            self.convert_prim_TupleIndex(node)
         # elif node_kind == "aten::Int":
         #     convert_aten_Int(node)
         elif node_kind == "aten::_convolution":
@@ -471,7 +493,14 @@ class TS2FXGraphConverter:
             self.convert_prim_if(node)
         elif node_kind == "aten::Bool":
             self.convert_as_noop(node)
+        elif node_kind == "profiler::_record_function_enter_new":
+            self.convert_profiler__record_function_enter_new(node)
+        elif node_kind == "profiler::_record_function_exit":
+            self.convert_profiler__record_function_exit(node)
+        elif node_kind in kind_to_standard_operators:
+            self.convert_standard_operators(node)
         elif node_kind.startswith("aten::"):
+            # order matters! this should be handled after kind_to_standard_operators
             self.convert_aten_op(node)
         else:
             raise ValueError(f"Unsupported node kind: {node_kind}")
