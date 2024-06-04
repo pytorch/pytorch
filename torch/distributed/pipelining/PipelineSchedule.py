@@ -325,9 +325,9 @@ class ScheduleGPipe(PipelineScheduleSingle):
                 for work in works.values():
                     work.wait()
 
-                output = self._stage.forward_one_chunk(arg_mbs[i], kwarg_mbs[i])  # type: ignore[index]
+                output = self._stage.forward_one_chunk(i, arg_mbs[i], kwarg_mbs[i])  # type: ignore[index]
 
-                ops = self._stage.get_fwd_send_ops()
+                ops = self._stage.get_fwd_send_ops(i)
                 works = _sorted_batch_p2p(ops, desc="fwd_send")
                 fwd_sends_to_wait.extend(works.values())
 
@@ -419,7 +419,7 @@ class Schedule1F1B(PipelineScheduleSingle):
                 recv_work.wait()
 
             # Compute
-            output = self._stage.forward_one_chunk(arg_mbs[fwd_mb_index], kwarg_mbs[fwd_mb_index])  # type: ignore[index]
+            output = self._stage.forward_one_chunk(fwd_mb_index, arg_mbs[fwd_mb_index], kwarg_mbs[fwd_mb_index])  # type: ignore[index]
 
             # Clear previous chunk's forward sends (hopefully they have well
             # finished, otherwise, we are heavily communication bound, in which
@@ -429,7 +429,7 @@ class Schedule1F1B(PipelineScheduleSingle):
                 send_work.wait()
 
             # Send activations
-            fwd_sends = self._stage.get_fwd_send_ops()
+            fwd_sends = self._stage.get_fwd_send_ops(fwd_mb_index)
             if fwd_mb_index != warmup_chunks - 1:
                 # Safe to fire
                 send_work = _batch_p2p(fwd_sends, desc="fwd_send")
@@ -471,13 +471,13 @@ class Schedule1F1B(PipelineScheduleSingle):
                 fuse_work.wait()
 
             # Now do the fwd
-            output = self._stage.forward_one_chunk(arg_mbs[fwd_mb_index], kwarg_mbs[fwd_mb_index])  # type: ignore[index]
+            output = self._stage.forward_one_chunk(fwd_mb_index, arg_mbs[fwd_mb_index], kwarg_mbs[fwd_mb_index])  # type: ignore[index]
 
             # Compute loss
             self._maybe_compute_loss(self._stage, output, target_mbs, fwd_mb_index)
 
             # Get the fwd send ops, but don't fire, leave it for the next iter (wrap-around)
-            fwd_sends = self._stage.get_fwd_send_ops()
+            fwd_sends = self._stage.get_fwd_send_ops(fwd_mb_index)
             fwd_mb_index += 1
 
         # Remember we still have some bwd_sends left over after the break? Now it is time to fire it
@@ -618,10 +618,10 @@ class ScheduleLoopedBFS(PipelineScheduleMulti):
                     if ops:
                         _batch_p2p(ops, desc="fwd_recv").wait()
 
-                    output = stage.forward_one_chunk(arg_mbs[i], kwarg_mbs[i])
+                    output = stage.forward_one_chunk(i, arg_mbs[i], kwarg_mbs[i])
                     self._maybe_compute_loss(stage, output, target_mbs, i)
 
-                    ops = stage.get_fwd_send_ops()
+                    ops = stage.get_fwd_send_ops(i)
                     if ops:
                         _batch_p2p(ops, desc="fwd_send")
 
@@ -756,9 +756,9 @@ class ScheduleInterleaved1F1B(PipelineScheduleMulti):
                     work.wait()
                     ops.clear()
 
-                output = fwd_stage.forward_one_chunk(arg_mbs[mb_index], kwarg_mbs[mb_index])  # type: ignore[index]
+                output = fwd_stage.forward_one_chunk(mb_index, arg_mbs[mb_index], kwarg_mbs[mb_index])  # type: ignore[index]
 
-                ops.extend(fwd_stage.get_fwd_send_ops())
+                ops.extend(fwd_stage.get_fwd_send_ops(mb_index))
                 # If we are right before the fwd-bwd step, then we need to delay the send to the next step,
                 # This is because fwd-bwd send/recvs among ranks need to be aligned to prevent a hang.
                 # In the edge cases where there are no fwd_bwds and cooldown is immediate, then no delay is needed
@@ -795,8 +795,8 @@ class ScheduleInterleaved1F1B(PipelineScheduleMulti):
                     ops.clear()
 
                 # Forward
-                output = fwd_stage.forward_one_chunk(arg_mbs[fwd_mb_index], kwarg_mbs[fwd_mb_index])  # type: ignore[index]
-                ops.extend(fwd_stage.get_fwd_send_ops())
+                output = fwd_stage.forward_one_chunk(fwd_mb_index, arg_mbs[fwd_mb_index], kwarg_mbs[fwd_mb_index])  # type: ignore[index]
+                ops.extend(fwd_stage.get_fwd_send_ops(fwd_mb_index))
                 self._maybe_compute_loss(fwd_stage, output, target_mbs, fwd_mb_index)
 
                 # Backward
