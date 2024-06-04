@@ -2,6 +2,7 @@ import itertools
 from dataclasses import dataclass, field
 from enum import auto, Enum
 from typing import Any, cast, List, Optional, Sequence, Tuple
+import contextlib
 
 import torch
 import torch.nn as nn
@@ -307,19 +308,10 @@ class FSDPParam:
         all_gather_input_dtypes: List[torch.dtype],
         world_size: int,
         device: torch.device,
+        force_recreate: bool = False,
     ):
-        if self.all_gather_outputs:
+        if not force_recreate and len(self.all_gather_outputs) > 0:
             return  # already initialized
-        self.all_gather_input_numels = all_gather_input_numels
-        self.all_gather_input_dtypes = all_gather_input_dtypes
-        self.world_size = world_size
-        self.realloc_all_gather_outputs()
-
-    def realloc_all_gather_outputs(self):
-        all_gather_input_numels = self.all_gather_input_numels
-        all_gather_input_dtypes = self.all_gather_input_dtypes
-        world_size = self.world_size
-        device = self.device
         self.all_gather_outputs = [
             torch.empty(torch.Size([numel * world_size]), dtype=dtype, device=device)
             for numel, dtype in zip(all_gather_input_numels, all_gather_input_dtypes)
@@ -386,9 +378,14 @@ class FSDPParam:
             if not torch._dynamo.compiled_autograd.compiled_autograd_enabled:
                 ctx = torch.autograd._unsafe_preserve_version_counter(self._unsharded_param)
             with torch.no_grad(), ctx:
+                alloc_storage(self._unsharded_param)
                 self._unsharded_param.copy_(unsharded_param)
         else:
             self._unsharded_param = nn.Parameter(unsharded_param, requires_grad=self.sharded_param.requires_grad)
+        if torch._dynamo.compiled_autograd.compiled_autograd_enabled:
+            # NOTE: under compile, after self._unsharded_param creation, we always clean up self.all_gather_outputs.
+            # This way, self.all_gather_outputs is never a graph output.
+            self.all_gather_outputs = []
 
     def _unflatten_all_gather_outputs(self) -> Tuple[torch.Tensor, ...]:
         return tuple(
