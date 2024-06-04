@@ -2926,7 +2926,7 @@ def index_output_size_and_inner_fn(
 
 
 def index_impl(x, indices, check):
-    output_size, inner_fn = index_impl_helper(x, indices, check)
+    output_size, inner_fn, _ = index_impl_helper(x, indices, check)
 
     return Pointwise.create(
         device=x.get_device(),
@@ -2955,16 +2955,21 @@ def index_impl_helper(x, indices, check):
         raise IndexError("index is out of bounds for dimension with size 0")
 
     indexed_size = [x_size[i] for i in range(len(indices))]
-    return index_output_size_and_inner_fn(
+    output_size, index_inner_fn = index_output_size_and_inner_fn(
         x_size,
         indices,
         tensor_indices,
         tensor_size,
         indices_loaders,
         indexed_size,
-        x_loader,
+        None,
         check=check,
     )
+
+    def inner_fn(idx):
+        return x_loader(index_inner_fn(idx))
+
+    return output_size, inner_fn, index_inner_fn
 
 
 @register_lowering(aten.index, type_promotion_kind=None)
@@ -3173,12 +3178,16 @@ fallback__unsafe_masked_index_put_accumulate = fallback_handler(
 
 @register_lowering(aten._unsafe_masked_index, type_promotion_kind=None)
 def _unsafe_masked_index(self, mask, indices, fill):
-    ranges, _unsafe_index_fn = index_impl_helper(self, indices, check=False)
+    ranges, _, _unsafe_index_fn = index_impl_helper(self, indices, check=False)
     mask_loader = mask.make_loader()
+    self_loader = self.make_loader()
 
     def inner_fn(idx):
-        mask_val = ops.to_dtype(mask_loader(idx), torch.bool)
-        return ops.masked(mask_val, lambda: _unsafe_index_fn(idx), fill)
+        if mask.dtype != torch.bool:
+            mask_val = ops.to_dtype(mask_loader(idx), torch.bool)
+        else:
+            mask_val = mask_loader(idx)
+        return ops.masked(mask_val, lambda: self_loader(_unsafe_index_fn(idx)), fill)
 
     return Pointwise.create(
         device=self.get_device(),
