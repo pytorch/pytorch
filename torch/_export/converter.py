@@ -161,7 +161,9 @@ class TS2FXGraphConverter:
         self.convert_graph_outputs()
 
         # Pass parameter and buffer to the root for lookup.
-        gm = torch.fx.GraphModule({**self.subgraphs, **self.mod_param_and_buffer_map}, self.fx_graph)
+        gm = torch.fx.GraphModule(
+            {**self.subgraphs, **self.mod_param_and_buffer_map}, self.fx_graph
+        )
 
         inplace_optimize_sym_size_div(gm)
 
@@ -182,7 +184,9 @@ class TS2FXGraphConverter:
                         target=name,
                     )
                 )
-                fx_node = get_node_for_param_and_buffer(self.fx_graph, normalized_name, self.is_top_level_graph)
+                fx_node = get_node_for_param_and_buffer(
+                    self.fx_graph, normalized_name, self.is_top_level_graph
+                )
             elif name in self.buffer_names:
                 self.input_specs.append(
                     InputSpec(
@@ -192,7 +196,9 @@ class TS2FXGraphConverter:
                         persistent=True,
                     )
                 )
-                fx_node = get_node_for_param_and_buffer(self.fx_graph, normalized_name, self.is_top_level_graph)
+                fx_node = get_node_for_param_and_buffer(
+                    self.fx_graph, normalized_name, self.is_top_level_graph
+                )
             else:
                 self.input_specs.append(
                     InputSpec(
@@ -441,11 +447,13 @@ class TS2FXGraphConverter:
                 for block_node_in in block_node.inputs():
                     if block_node_in.debugName() in self.name_to_node:
                         block_args.add(block_node_in.debugName())
-
+            
             arguments.update(block_args)
 
         # We lift parameters and buffers as inputs for the subgraphs.
+        # TODO: only pass down necessary parameters and buffers.
         arguments = list(arguments) + list(self.param_names) + list(self.buffer_names)
+        print(arguments)
 
         # Convert blocks to subgraphs
         subgraph_nodes = []
@@ -569,6 +577,7 @@ class TS2EPConverter:
     ):
         self.ts_model = ts_model
         self.ts_graph, self.params, _, _ = _create_jit_graph(ts_model, sample_args)
+        print(self.ts_graph)
 
         self.sample_args = sample_args
         self.sample_kwargs = sample_kwargs
@@ -577,15 +586,19 @@ class TS2EPConverter:
         self.buffer_names: Set[str] = {name for name, _ in ts_model.named_buffers()}
 
         # Populate nn module parameters and buffers.
-        self.mod_param_and_buffer_map: Dict[str, Any]= dict()
+        self.mod_param_and_buffer_map: Dict[str, Any] = dict()
         for name, param in ts_model.named_parameters():
             self.mod_param_and_buffer_map[normalize_name(name)] = param
         for name, buffer in ts_model.named_buffers():
-            self.mod_param_and_buffer_map[normalize_name(name)] = buffer 
+            self.mod_param_and_buffer_map[normalize_name(name)] = buffer
 
     def convert(self) -> ExportedProgram:
         graph_converter = TS2FXGraphConverter(
-            self.ts_graph, self.param_names, self.buffer_names, self.mod_param_and_buffer_map, True 
+            self.ts_graph,
+            self.param_names,
+            self.buffer_names,
+            self.mod_param_and_buffer_map,
+            True,
         )
         gm = graph_converter.convert()
         ep = self.retrace_as_exported_program(gm, graph_converter.tensor_constants)

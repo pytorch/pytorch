@@ -18,7 +18,6 @@ requires_cuda = unittest.skipUnless(torch.cuda.is_available(), "requires cuda")
 class TestConverter(TestCase):
     def _check_equal_ts_ep_converter(self, mod, inp) -> ExportedProgram:
         ts_model = torch.jit.script(mod)
-        # print(ts_model.graph)
         ep = TS2EPConverter(ts_model, inp).convert()
         ep_out, _ = pytree.tree_flatten(ep.module()(*inp))
         orig_out, _ = pytree.tree_flatten(mod(*inp))
