@@ -487,7 +487,6 @@ filegroup(
 filegroup(
     name = "caffe2_utils_srcs",
     srcs = [
-        "caffe2/utils/proto_wrap.cc",
         "caffe2/utils/string_utils.cc",
         "caffe2/utils/threadpool/ThreadPool.cc",
         "caffe2/utils/threadpool/pthreadpool.cc",
