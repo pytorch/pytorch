@@ -3715,7 +3715,11 @@ class TestTake(TestCase):
 
     @parametrize(
         "shape",
-        [subtest((1, 2)), subtest((1,)), subtest((), decorators=[xfailIfTorchDynamo])],
+        [
+            subtest((1, 2)),
+            subtest((1,)),
+            subtest((), decorators=[skip("Sensitive to np version")]),
+        ],
     )
     def test_ret_is_out(self, shape):
         # 0d arrays should not be an exception to this rule
