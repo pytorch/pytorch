@@ -351,9 +351,6 @@ class ScheduleGPipe(PipelineScheduleSingle):
         # Delay send waits
         bwd_sends_to_wait: List[dist.Work] = []
         for i in range(self._n_microbatches):
-            # set library-specific data-parallel config flags to ensure gradient accumulation across microbatches
-            self._stage._configure_data_parallel_mode(i == self._n_microbatches - 1)
-
             with record_function(f"Backward {i}"):
                 ops = self._stage.get_bwd_recv_ops()
                 works = _sorted_batch_p2p(ops, desc="bwd_recv")
@@ -630,7 +627,6 @@ class ScheduleLoopedBFS(PipelineScheduleMulti):
 
         for stage in reversed(self._stages):
             for i in range(self._n_microbatches):
-                stage._configure_data_parallel_mode(i == self._n_microbatches - 1)
                 with record_function(f"Stage {stage.stage_index} Backward"):
                     ops = stage.get_bwd_recv_ops()
                     if ops:
@@ -785,9 +781,6 @@ class ScheduleInterleaved1F1B(PipelineScheduleMulti):
                 bwd_mb_index := bwd_stage_mb_index[bwd_stage]
             ) + 1
 
-            bwd_stage._configure_data_parallel_mode(
-                bwd_mb_index == self._n_microbatches - 1
-            )
             logger.debug(
                 f"Rank {self.rank}: {step=}, {fwd_stage.stage_index=}, "  # noqa: G004
                 f"{bwd_stage.stage_index=}, {fwd_mb_index=}, {bwd_mb_index=}"
@@ -817,9 +810,6 @@ class ScheduleInterleaved1F1B(PipelineScheduleMulti):
             bwd_stage_mb_index[bwd_stage] = (
                 bwd_mb_index := bwd_stage_mb_index[bwd_stage]
             ) + 1
-            bwd_stage._configure_data_parallel_mode(
-                bwd_mb_index == self._n_microbatches - 1
-            )
 
             logger.debug(
                 f"Rank {self.rank}: {step=}, {bwd_stage.stage_index=}, {bwd_mb_index=}"  # noqa: G004

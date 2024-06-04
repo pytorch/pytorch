@@ -442,17 +442,6 @@ class _PipelineStageBase(ABC):
         grads = self._map_tensor_from_recv_info(recv_infos)
         return grads
 
-    def _configure_data_parallel_mode(self, last_backward: bool):
-        """
-        Whether using PP with FSDP or DDP, there are some runtime differences between the last backward step and the
-        other steps.  Namely, we need to accumulate gradients on previous steps and reduce them on the last step, but
-        there are additional state-variables and performance considerations depending on the data parallelism used.
-        This helper should adapt any pipeline parallel schedule to work with common/supported data parallel libraries.
-        """
-        if isinstance(self.submod, FSDPModule):
-            self.submod.set_is_last_backward(last_backward)
-            self.submod.set_requires_gradient_sync(last_backward)
-
     def forward_maybe_with_nosync(self, *args, **kwargs):
         # If submod is wrapped with DDP, we use the `no_sync` context manager to
         # avoid gradient all-reduce per microbatch
@@ -464,8 +453,17 @@ class _PipelineStageBase(ABC):
         return out_val
 
     def backward_maybe_with_nosync(self, bwd_kwargs: Dict, bwd_chunk_id: int):
+        """
+        Whether using PP with FSDP or DDP, there are some runtime differences between the last backward step and the
+        other steps.  Namely, we need to accumulate gradients on previous steps and reduce them on the last step, but
+        there are additional state-variables and performance considerations depending on the data parallelism used.
+        This helper should adapt any pipeline parallel schedule to work with common/supported data parallel libraries.
+        """
+        last_backward = bwd_chunk_id == self.chunks - 1
+
+        # If submod is wrapped by DDP
         if isinstance(self.submod, DistributedDataParallel):
-            if bwd_chunk_id == self.chunks - 1:
+            if last_backward:
                 # Last chunk, prepare for gradient reduction
                 # HACK: reaching into DDP implementation details here. Is there a better way?
                 self.submod.reducer.prepare_for_backward(  # type: ignore[union-attr, operator]
@@ -479,8 +477,13 @@ class _PipelineStageBase(ABC):
             else:
                 with self.submod.no_sync():  # type: ignore[operator]
                     grads_input = stage_backward(**bwd_kwargs)
+        # If submod is a FSDP module
+        elif isinstance(self.submod, FSDPModule):
+            self.submod.set_is_last_backward(last_backward)
+            self.submod.set_requires_gradient_sync(last_backward)
+            grads_input = stage_backward(**bwd_kwargs)
         else:
-            # Non-DDP submodule, regular backward
+            # Non-DP submodule, regular backward
             grads_input = stage_backward(**bwd_kwargs)
 
         return grads_input
