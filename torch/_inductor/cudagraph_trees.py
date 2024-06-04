@@ -785,21 +785,14 @@ class CUDAGraphNode:
         self.tensor_weakrefs: OutputList[Optional[TensorWeakRef]] = []
 
         # tensors which are outputs of previous graphs in the tree
-        self.cudagraph_managed_idxs: List[int] = []
-        self.static_input_param_idxs: List[int] = []
-        for idx, t in enumerate(inputs):
-            if isinstance(t, torch.Tensor) and self._is_cuda_graph_recorded_tensor(t):
-                self.cudagraph_managed_idxs.append(idx)
-
-            if config.triton.cudagraph_static_input_params and isinstance(
-                t, torch.nn.Parameter
-            ):
-                self.static_input_param_idxs.append(idx)
+        self.cudagraph_managed_idxs: List[int] = [
+            idx
+            for idx, t in enumerate(inputs)
+            if isinstance(t, torch.Tensor) and self._is_cuda_graph_recorded_tensor(t)
+        ]
 
         self.static_input_idxs: List[int] = list(
-            set(wrapped_function.static_input_idxs)
-            | set(self.cudagraph_managed_idxs)
-            | set(self.static_input_param_idxs)
+            set(wrapped_function.static_input_idxs) | set(self.cudagraph_managed_idxs)
         )
 
         self.non_static_input_idx: LevelList[int] = [
@@ -2037,6 +2030,12 @@ class CUDAGraphTreeManager:
         placeholders,
         mutated_input_idxs,
     ) -> Tuple[Callable[..., Any], List[Optional[Tensor]]]:
+        if torch._inductor.config.triton.cudagraph_static_input_params:
+            all_static_input_idxs = set(static_input_idxs)
+            for i,inp in enumerate(inputs):
+                if isinstance(inp, torch.nn.Parameter):
+                    all_static_input_idxs.add(i)
+            static_input_idxs = all_static_input_idxs
         id = self.new_func_id()
         self.ids_to_stack_traces[id] = stack_traces
         self.ids_to_funcs[id] = WrappedFunction(
