@@ -41,7 +41,9 @@ def normalize_name(name: str) -> str:
     return name.replace(".", "_")
 
 
-# Given a node: torch._C.Node, map from node.kind() to a standard operator
+# Those operators will be automatically populated to a instance method
+# of TS2FXGraphConverter with name convert_namespace_opname().
+# Please check __init__ for method population implementations.
 kind_to_standard_operators = {
     "prim::TupleIndex": operator.getitem,
     "aten::__is__": operator.is_,
@@ -88,6 +90,16 @@ class TS2FXGraphConverter:
         self.tensor_constants: Dict[str, torch.Tensor] = {}
 
         self.subgraphs: Dict[str, torch.fx.GraphModule] = {}
+
+        # Populate methods for the stanford operators.
+        for k in kind_to_standard_operators.keys():
+            k_list = k.split("::")
+            func_name = "convert_" + "_".join(k_list)
+            # Create an indirect function call:
+            # convert_namespace_opcode --> lambda node: convert_standard_operator(node)
+            setattr(
+                self, func_name, lambda node: self._convert_standard_operators(node)
+            )
 
     def add_subgraph(self, subgraph) -> str:
         name = f"subgraph_{len(self.subgraphs)}"
@@ -300,13 +312,6 @@ class TS2FXGraphConverter:
         output_name = node.output().debugName()
         self.name_to_node[output_name] = output_dict
 
-    def convert_prim_TupleIndex(self, node: torch._C.Node):
-        args = tuple(self.get_fx_value(input) for input in node.inputs())
-        getitem_node = self.fx_graph.call_function(operator.getitem, args)
-
-        output_name = node.output().debugName()
-        self.name_to_node[output_name] = getitem_node
-
     def convert_aten_Int(self, node: torch._C.Node):
         # converts aten::Int as aten._to_copy + aten::_local_scalar_dense
         target = torch.ops.aten._to_copy.default
@@ -471,7 +476,7 @@ class TS2FXGraphConverter:
         args = tuple(self.get_fx_value(input) for input in node.inputs())
         self.fx_graph.call_function(target, args)
 
-    def convert_standard_operators(self, node: torch._C.Node):
+    def _convert_standard_operators(self, node: torch._C.Node):
         target = kind_to_standard_operators[node.kind()]
         args = tuple(self.get_fx_value(input) for input in node.inputs())
         fx_node = self.fx_graph.call_function(target, args)
