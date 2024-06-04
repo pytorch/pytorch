@@ -46,7 +46,6 @@ import sympy
 
 import torch
 import torch._export
-import torch.utils._pytree as pytree
 from torch._dynamo.device_interface import get_interface_for_device
 from torch._dynamo.utils import detect_fake_mode
 from torch.autograd import DeviceType
@@ -1641,7 +1640,7 @@ def aoti_compile_with_persistent_cache(
     assert not dynamic, "Only support static shape for now"
     type_to_torch_dtype = {int: torch.int32, float: torch.float, bool: torch.bool}
     supported_scalar_types = tuple(type_to_torch_dtype.keys())
-    flattened_inputs = pytree.arg_tree_leaves(*args, **kwargs)
+    flattened_inputs = list(args) + list(kwargs.values())
     if not all(
         isinstance(input, (supported_scalar_types, torch.Tensor, list))
         for input in flattened_inputs
