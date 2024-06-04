@@ -2,6 +2,7 @@
 
 #include <c10/core/SymInt.h>
 #include <c10/core/SymNodeImpl.h>
+#include <c10/macros/Macros.h>
 
 using namespace c10;
 #ifndef C10_MOBILE
@@ -22,6 +23,8 @@ TEST(SymIntTest, CheckRange) {
   EXPECT_FALSE(SymInt::check_range(INT64_MIN));
 }
 
+#if !C10_UBSAN_ENABLED
+// This test fails signed-integer-overflow UBSAN check
 TEST(SymIntTest, Overflows) {
   const auto x = SymInt(INT64_MAX);
   EXPECT_NE(-(x + 1), 0);
@@ -30,5 +33,6 @@ TEST(SymIntTest, Overflows) {
   EXPECT_NE(-y, 0);
   EXPECT_NE(0 - y, 0);
 }
+#endif
 
 #endif
