@@ -32,7 +32,7 @@ from .traced_function_transforms import (
     fn_prepped_for_autograd,
 )
 from .utils import root_module_when_exporting_non_strict, unlift_tokens
-from . import dist_fx_passes
+from .passes import dist_fx_passes
 
 aot_graphs_log = getArtifactLogger(__name__, "aot_graphs")
 
@@ -275,8 +275,11 @@ def aot_dispatch_autograd_graph(
     torch._dynamo.utils.assert_no_fake_params_or_buffers(fx_g)
     fx_g.graph.eliminate_dead_code()
 
-    if config.trace_distributed:
-        dist_fx_passes.reinplace_primal_set_from_allgather_output(fx_g)
+    if torch._dynamo.config.trace_distributed:
+        # NOTE: This pass temporarily violates the invariant that "all mutations happen at end of graph"
+        # by moving the primal.set_() ops to the middle of the graph.
+        # We do this so that 
+        dist_fx_passes.use_primal_as_fsdp_allgather_copyout_buffer(fx_g)
 
     fx_g.recompile()
     # TODO: in AOTAutograd, we create metadata like _indices_of_inps_to_detach to detect
