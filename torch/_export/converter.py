@@ -40,6 +40,7 @@ def inplace_optimize_sym_size_div(gm: torch.fx.GraphModule):
 def normalize_name(name: str) -> str:
     return name.replace(".", "_")
 
+
 def ir_name_to_func_name(name: str) -> str:
     """prim::If -> convert_prim_If"""
     name_list = name.split("::")
@@ -102,7 +103,9 @@ class TS2FXGraphConverter:
             # Create an indirect function call:
             # convert_<namespace>_<opname> --> lambda node: _convert_standard_operator(node)
             setattr(
-                self, handler_func_name, lambda node: self._convert_standard_operators(node)
+                self,
+                handler_func_name,
+                lambda node: self._convert_standard_operators(node),
             )
 
     def add_subgraph(self, subgraph) -> str:
@@ -495,9 +498,7 @@ class TS2FXGraphConverter:
         # Provide a default node handler as well in case we don't find
         # matching converter for that.
         handler_func_name = ir_name_to_func_name(node_kind)
-        handler_func = getattr(
-            self, handler_func_name, self.convert_default_node
-        )
+        handler_func = getattr(self, handler_func_name, self.convert_default_node)
         handler_func(node)
 
     def convert_default_node(self, node: torch._C.Node):
