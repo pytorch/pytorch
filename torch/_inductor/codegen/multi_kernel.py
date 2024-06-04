@@ -388,5 +388,5 @@ class MultiKernelCall:
         if not self._recorded:
             self._recorded = True
             self.record_choice(self.multi_kernel_name, self.picked_kernel)
-        self.run = self.kernels[self.picked_kernel].run
+        self.run = self.kernels[self.picked_kernel].run  # type: ignore[method-assign]
         self.run(*args, **kwargs)
