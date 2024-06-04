@@ -55,6 +55,10 @@ class TestCppExtensionAOT(common.TestCase):
         y = torch.randn(4, 4)
         z = cpp_extension.sigmoid_add(x, y)
         self.assertEqual(z, x.sigmoid() + y.sigmoid())
+        # test pybind support torch.dtype cast.
+        self.assertEqual(
+            str(torch.float32), str(cpp_extension.get_math_type(torch.half))
+        )
 
     def test_extension_module(self):
         mm = cpp_extension.MatrixMultiplier(4, 8)
