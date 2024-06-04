@@ -1426,8 +1426,8 @@ def min_cut_rematerialization_partition(
     )
     fx_passes.remove_noop_consecutive_transposes(fw_module)
     fx_passes.remove_noop_views(fw_module)    
-    if config.trace_distributed:
-        dist_fx_passes.move_primal_set_to_end_of_fwd_graph(fw_module)
+    if torch._dynamo.config.trace_distributed:
+        dist_fx_passes.move_primal_set_to_end_of_graph(fw_module)
 
     if graph_has_recomputable_ops:
         if graph_has_recomputable_rng_ops:
