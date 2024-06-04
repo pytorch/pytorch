@@ -10,7 +10,7 @@ from ._fsdp_common import (
     _to_dtype_if_needed,
 )
 from ._fsdp_param import FSDPParam
-from torch._inductor import config as inductor_config
+
 
 lib = torch.library.Library("fsdp", "DEF")
 
