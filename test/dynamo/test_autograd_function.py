@@ -15,6 +15,7 @@ from torch.testing._internal.triton_utils import HAS_CUDA, requires_cuda
 
 if HAS_CUDA:
     import triton
+
     from torch.testing._internal.triton_utils import add_kernel
 
 
@@ -446,13 +447,13 @@ class AutogradFunctionTests(torch._dynamo.test_case.TestCase):
 
         class MyMM(torch.autograd.Function):
             @staticmethod
-            @torch.cuda.amp.custom_fwd
+            @torch.amp.custom_fwd(device_type="cuda")
             def forward(ctx, a, b):
                 ctx.save_for_backward(a, b)
                 return a.mm(b)
 
             @staticmethod
-            @torch.cuda.amp.custom_bwd
+            @torch.amp.custom_bwd(device_type="cuda")
             def backward(ctx, grad):
                 a, b = ctx.saved_tensors
                 return grad.mm(b.t()), a.t().mm(grad)

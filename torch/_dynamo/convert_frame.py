@@ -1,4 +1,3 @@
-import base64
 import collections
 import cProfile
 import dis
@@ -312,7 +311,7 @@ def cprofile_wrapper(func):
         retval = prof.runcall(func, *args, **kwargs)
         profile_latency = time.time() - start_ts
         prof.disable()
-        log.info(
+        log.warning(
             "### Cprofile for %s trace id [%s] took %.3f seconds ###",
             func.__name__,
             trace_id,
@@ -322,7 +321,7 @@ def cprofile_wrapper(func):
         try:
             prof.dump_stats(profile_path)
         except PermissionError:
-            log.info("Cannot write to %s", str(profile_path))
+            log.warning("Cannot write to %s", str(profile_path))
         svg_path = profile_path.with_suffix(".svg")
         try:
             gprof2dot_process = subprocess.Popen(
@@ -341,29 +340,22 @@ def cprofile_wrapper(func):
                 ["dot", "-Tsvg", "-o", str(svg_path)],
                 stdin=gprof2dot_process.stdout,
             )
-            log.info("Generated SVG from profile at %s", str(svg_path))
+            log.warning("Generated SVG from profile at %s", str(svg_path))
         except FileNotFoundError:
-            log.info(
+            log.warning(
                 "Failed to generate SVG from profile -- dumping stats instead."
                 "Try installing gprof2dot and dot for a better visualization"
             )
             ps.sort_stats(pstats.SortKey.TIME).print_stats(20)
             ps.sort_stats(pstats.SortKey.CUMULATIVE).print_stats(20)
 
-        maybe_upload_prof_stats_to_manifold(str(profile_path))  # fb-only
-
-        torch._logging.trace_structured(
-            "artifact",
-            lambda: {
-                "name": "dynamo_cprofile_prof",
-                "type": "prof",
-                "encoding": "base64",
-            },
-            payload_fn=lambda: base64.encodebytes(
-                open(profile_path, "rb").read()
-            ).decode("ascii"),
-        )
-
+        if manifold_link := maybe_upload_prof_stats_to_manifold(
+            str(profile_path)
+        ):  # fb-only
+            torch._logging.trace_structured(
+                "link",
+                lambda: {"name": "cprofile_manifold_url", "url": manifold_link},
+            )
         return retval
 
     return profile_wrapper
@@ -773,6 +765,22 @@ def _compile(
             "".join(CapturedTraceback.extract(skip=2 + skip).format()),
         )
         # -4: -2 as above, plus trace_structured frames
+        #
+        # NB: the frame looks like this:
+        #
+        # # handled by skip argument
+        # torch/_dynamo/convert_frame.py:1069 in catch_errors
+        # torch/_dynamo/convert_frame.py:910 in _convert_frame
+        # torch/_dynamo/convert_frame.py:464 in _convert_frame_assert
+        # torch/_utils_internal.py:70 in wrapper_function
+        #
+        # # 2 current frame and context lib
+        # env/lib/python3.10/contextlib.py:79 in inner
+        # torch/_dynamo/convert_frame.py:776 in _compile
+        #
+        # # 2 extra here
+        # torch/_logging/_internal.py:1064 in trace_structured
+        # torch/_dynamo/convert_frame.py:780 in <lambda>
         torch._logging.trace_structured(
             "dynamo_start",
             lambda: {

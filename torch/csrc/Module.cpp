@@ -375,22 +375,14 @@ PyObject* THPModule_swap_tensor_impl(PyObject* _unused, PyObject* args) {
   THPVariable* a = reinterpret_cast<THPVariable*>(a_);
   THPVariable* b = reinterpret_cast<THPVariable*>(b_);
 
-  TORCH_CHECK(
-      a->cdata->use_count() == 1,
-      "Expected single reference to a's Tensor object but got ",
-      a->cdata->use_count());
-  TORCH_CHECK(
-      b->cdata->use_count() == 1,
-      "Expected single reference to b's Tensor object but got ",
-      b->cdata->use_count());
   // weak_use_count() adds 1 if use_count is non-zero
   TORCH_CHECK(
       a->cdata->weak_use_count() == 1,
-      "Expected no weakrefs to a's Tensor object but got  ",
+      "Expected no weakrefs to t1's Tensor object but got  ",
       a->cdata->weak_use_count() - 1);
   TORCH_CHECK(
       b->cdata->weak_use_count() == 1,
-      "Expected no weakrefs to b's Tensor object but got  ",
+      "Expected no weakrefs to t2's Tensor object but got  ",
       b->cdata->weak_use_count() - 1);
 
   // Swap the Tensor Impl
@@ -419,6 +411,19 @@ PyObject* THPModule_swap_tensor_impl(PyObject* _unused, PyObject* args) {
       getPyInterpreter(), b_, c10::impl::PyInterpreterStatus::TAGGED_BY_US);
 
   Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
+PyObject* THPModule_check_tp_alloc_is_default(
+    PyObject* _unused,
+    PyObject* cls) {
+  HANDLE_TH_ERRORS
+  TORCH_CHECK_TYPE(
+      PyType_Check(cls),
+      "cls must be a type (got ",
+      Py_TYPE(cls)->tp_name,
+      ")");
+  return PyBool_FromLong(Py_TYPE(cls)->tp_alloc == PyType_GenericAlloc);
   END_HANDLE_TH_ERRORS
 }
 
@@ -1268,6 +1273,10 @@ static PyMethodDef TorchMethods[] = { // NOLINT
     {"_autograd_init", THPAutograd_initExtension, METH_NOARGS, nullptr},
     {"_add_docstr", THPModule_addDocStr, METH_VARARGS, nullptr},
     {"_swap_tensor_impl", THPModule_swap_tensor_impl, METH_VARARGS, nullptr},
+    {"_check_tp_alloc_is_default",
+     THPModule_check_tp_alloc_is_default,
+     METH_O,
+     nullptr},
     {"_init_names", THPModule_initNames, METH_O, nullptr},
     {"_has_distributed", THPModule_hasDistributed, METH_NOARGS, nullptr},
     {"_set_default_tensor_type",

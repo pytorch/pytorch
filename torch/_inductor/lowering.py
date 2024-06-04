@@ -1788,7 +1788,12 @@ def bernoulli_(x, *args):
         "cpu"
     ), "this should be handled in decomps unless config.fallback_random or the device is CPU"
     x.realize()
-    ir.InplaceBernoulliFallback(x, *args)
+    op_overload = (
+        aten.bernoulli_.float
+        if len(args) == 0 or isinstance(args[0], float)
+        else aten.bernoulli_.Tensor
+    )
+    ir.InplaceBernoulliFallback(op_overload, x, *args)
     return x
 
 
@@ -3203,7 +3208,6 @@ def scatter_fallback(
 @register_lowering(aten.scatter_, type_promotion_kind=None)
 def scatter_(self, dim: int, index, src, *, reduce: Optional[str] = None):
     assert reduce in {None, "add", "multiply"}
-
     if reduce is None:
         op_overload = getattr(aten.scatter_, V.graph.current_node.target._overloadname)  # type: ignore[union-attr]
         fallback_result = scatter_fallback(
@@ -3237,7 +3241,6 @@ def scatter_reduce(x, dim: int, index, src, reduction_type, **kwargs):
 @register_lowering(aten.scatter_reduce_, type_promotion_kind=None)
 def scatter_reduce_(self, dim: int, index, src, reduce, *, include_self: bool = True):
     assert reduce in {None, "sum", "prod", "mean", "amax", "amin"}
-
     assert (
         len(aten.scatter_reduce_.overloads()) == 1
         and "two" in aten.scatter_reduce_.overloads()
@@ -4554,7 +4557,7 @@ def _avg_poolnd(
                 factor = ops.index_expr(hend - hstart, torch.int32)
                 divide_factors.append(factor)
             divide_factor = functools.reduce(ops.mul, divide_factors)
-            return ops.div(fn_sum(idx, x_loader), divide_factor)
+            return ops.truediv(fn_sum(idx, x_loader), divide_factor)
 
     rv = Pointwise.create(
         device=x.get_device(),
@@ -5318,7 +5321,7 @@ def logcumsumexp(x, dim):
 def cummax(x, axis=None):
     if len(x.get_size()) == 0:
         assert axis in [0, -1]
-        return clone(x), torch.empty_like(x, dtype=torch.int64)
+        return clone(x), empty_like(x, dtype=torch.int64)
 
     dtype = x.get_dtype()
     combine_fn = ir.get_reduction_combine_fn(
@@ -5348,7 +5351,7 @@ def cummax(x, axis=None):
 def cummin(x, axis=None):
     if len(x.get_size()) == 0:
         assert axis in [0, -1]
-        return clone(x), torch.empty_like(x, dtype=torch.int64)
+        return clone(x), empty_like(x, dtype=torch.int64)
 
     dtype = x.get_dtype()
     combine_fn = ir.get_reduction_combine_fn(
@@ -5914,7 +5917,7 @@ def associative_scan(combine_fn: ir.Subgraph, input, dim: int):
     kwargs["dtypes"] = tuple(x.get_dtype() for x in input)
     kwargs["inner_fns"] = tuple(x.make_loader() for x in input)
     result = ir.Scan.create(**kwargs, combine_fn=wrapped_combine_fn)
-    if result is None:
+    if result[0] is None:
         raise RuntimeError("Unable to generate code for associative_scan op")
     return result
 

@@ -179,6 +179,12 @@ new_patched_local_repository(
 )
 
 new_local_repository(
+    name = "cpp-httplib",
+    build_file = "//third_party:cpp-httplib.BUILD",
+    path = "third_party/cpp-httplib",
+)
+
+new_local_repository(
     name = "tensorpipe",
     build_file = "//third_party:tensorpipe.BUILD",
     path = "third_party/tensorpipe",
@@ -353,11 +359,6 @@ local_repository(
 local_repository(
     name = "unused_onnx_benchmark",
     path = "third_party/onnx/third_party/benchmark",
-)
-
-local_repository(
-    name = "unused_onnx_tensorrt_benchmark",
-    path = "third_party/onnx-tensorrt/third_party/onnx/third_party/benchmark",
 )
 
 ### Unused repos end

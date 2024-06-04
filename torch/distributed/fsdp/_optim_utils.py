@@ -1511,7 +1511,7 @@ def _allgather_orig_param_states(
     """
     fsdp_state = fsdp_param_info.state
     if fsdp_state.rank == 0 and dist.get_debug_level() == dist.DebugLevel.DETAIL:
-        logger.warning(
+        logger.info(
             "Memory Summary before calling to _allgather_orig_param_states %s",
             fsdp_state._device_handle.memory_summary(),
         )

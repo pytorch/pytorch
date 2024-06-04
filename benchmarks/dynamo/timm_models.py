@@ -7,11 +7,19 @@ import subprocess
 import sys
 import warnings
 
+try:
+    from .common import BenchmarkRunner, download_retry_decorator, main
+except ImportError:
+    from common import BenchmarkRunner, download_retry_decorator, main
+
 import torch
-from common import BenchmarkRunner, download_retry_decorator, main
 
 from torch._dynamo.testing import collect_results, reduce_to_scalar_loss
 from torch._dynamo.utils import clone_inputs
+
+# Enable FX graph caching
+if "TORCHINDUCTOR_FX_GRAPH_CACHE" not in os.environ:
+    torch._inductor.config.fx_graph_cache = True
 
 
 def pip_install(package):

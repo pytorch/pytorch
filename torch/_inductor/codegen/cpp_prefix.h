@@ -46,7 +46,7 @@ template <typename T>
 struct Welford {
   T mean = T(0);
   T m2 = T(0);
-  T weight = T(0);
+  int64_t index = 0;
 };
 
 
@@ -59,41 +59,57 @@ struct IsVecType<at::vec::Vectorized<T>>: std::true_type {};
 #endif
 
 template <typename T>
+struct WeightRecp {
+  using scalar_t = typename T::value_type;
+  int64_t N;
+  std::vector<scalar_t> weight_recps;
+  WeightRecp(int64_t N) : N(N) {
+    weight_recps.reserve(N);
+    for (const auto i : c10::irange(N)) {
+      weight_recps.push_back(
+          scalar_t(static_cast<double>(1) / static_cast<double>(i + 1)));
+    }
+  }
+};
+
+template <typename T>
 Welford<T> welford_combine(const Welford<T> &a, const Welford<T> &b) {
-  if constexpr (!IsVecType<T>::value) {
-    if (a.weight == 0) {
-      return b;
-    }
-    if (b.weight == 0) {
-      return a;
-    }
+  if (a.index == 0) {
+    return b;
+  }
+  if (b.index == 0) {
+    return a;
   }
   auto delta = b.mean - a.mean;
-  auto new_weight = a.weight + b.weight;
-  auto wb_over_w = b.weight / new_weight;
-  if constexpr (IsVecType<T>::value) {
-    // Guard against division by zero
-    wb_over_w = T::blendv(wb_over_w, T(0), new_weight == T(0));
-  }
+  auto new_index = a.index + b.index;
+  auto wb_over_w = T(b.index) / T(new_index);
   auto result = Welford<T>{
     a.mean + delta * wb_over_w,
-    a.m2 + b.m2 + delta * delta * a.weight * wb_over_w,
-    new_weight
+    a.m2 + b.m2 + delta * delta * T(a.index) * wb_over_w,
+    new_index,
   };
   return result;
 }
 
 template <typename T>
-Welford<T> welford_combine(const Welford<T> &acc, T data) {
+Welford<T> welford_combine(const Welford<T> &acc, T data, const WeightRecp<T>* w=nullptr) {
   // Add a single data point
+  int64_t index = acc.index + 1;
   auto delta = data - acc.mean;
-  auto new_weight = acc.weight + T(1);
-  auto new_mean = acc.mean + delta / new_weight;
+  T new_mean;
+  if constexpr (!IsVecType<T>::value) {
+    new_mean = acc.mean + delta / T(index);
+  } else {
+    new_mean = acc.mean +
+      ((w == nullptr || acc.index >= w->weight_recps.size())
+            ? delta / T(index)
+            : delta * T(w->weight_recps[acc.index]));
+  }
   auto new_delta = data - new_mean;
   auto result = Welford<T>{
     new_mean,
     acc.m2 + delta * new_delta,
-    new_weight
+    index
   };
   return result;
 }
@@ -178,10 +194,11 @@ template <typename scalar_t>
 Welford<scalar_t> welford_vec_reduce_all(Welford<at::vec::Vectorized<scalar_t>> acc) {
   using Vec = at::vec::Vectorized<scalar_t>;
   for (size_t n = 1; n < Vec::size(); n *= 2) {
+    auto index = acc.index;
     auto shuffled = Welford<Vec>{
       vec_shuffle_down(acc.mean, n),
       vec_shuffle_down(acc.m2, n),
-      vec_shuffle_down(acc.weight, n)
+      index,
     };
     acc = welford_combine(acc, shuffled);
   }
@@ -194,8 +211,7 @@ Welford<scalar_t> welford_vec_reduce_all(Welford<at::vec::Vectorized<scalar_t>> 
   acc.m2.store(array);
   result.m2 = array[0];
 
-  acc.weight.store(array);
-  result.weight = array[0];
+  result.index = acc.index;
 
   return result;
 }
@@ -295,14 +311,17 @@ atomic_add(volatile T *addr, T offset) {
   atomic_addr->fetch_add(offset, std::memory_order_relaxed);
 }
 
-std::tuple<int64_t, int64_t, int64_t> mm_get_thread_blocking(
+void mm_get_thread_blocking(
+    int num_threads,
     int64_t M,
     int64_t N,
     int64_t K,
     int64_t M0,
     int64_t N0,
     int64_t K0,
-    int num_threads) {
+    int64_t& Mt,
+    int64_t& Nt,
+    int64_t& Kt) {
   auto get_factors = [](int64_t number) {
     int count = 0;
     for (int64_t i = std::sqrt(number); i > 0; --i) {
@@ -343,27 +362,30 @@ std::tuple<int64_t, int64_t, int64_t> mm_get_thread_blocking(
     int64_t factor = factors[i];
     if (n_blocks % factor == 0 &&
         m_blocks % (num_threads / factor) == 0) {
-      return get_blocking(
+      std::tie(Mt, Nt, Kt) = get_blocking(
           num_threads, factor, m_blocks, n_blocks, k_blocks);
+      return;
     }
   }
 
   for (int i = 0; i < count; ++i) {
     int64_t factor = factors[i];
     if (n_blocks % factor == 0) {
-      return get_blocking(
+      std::tie(Mt, Nt, Kt) = get_blocking(
           num_threads, factor, m_blocks, n_blocks, k_blocks);
+      return;
     }
     int64_t cofactor = num_threads / factor;
     if (m_blocks % cofactor == 0) {
-      return get_blocking(
+      std::tie(Mt, Nt, Kt) = get_blocking(
           num_threads, factor, m_blocks, n_blocks, k_blocks);
+      return;
     }
   }
 
   assert(false && "Should not reach here.");
   // Dummy return to avoid compiler warning
-  return std::make_tuple(0, 0, 0);
+  return;
 }
 
 inline void mm_get_thread_blocks(
