@@ -4062,6 +4062,7 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail("nn.functional.alpha_dropout", ""),  # randomness
         xfail("nn.functional.feature_alpha_dropout", "with_train"),  # randomness
         xfail("as_strided"),  # Our test runner can't handle this; manual test exists
+        xfail("as_strided_copy"),
         xfail(
             "as_strided_scatter"
         ),  # no batching rule implemented, default doesnt work
@@ -4301,6 +4302,7 @@ class TestVmapOperatorsOpInfo(TestCase):
                 xfail("nn.functional.gaussian_nll_loss"),
                 xfail("histc"),
                 xfail("as_strided"),
+                xfail("as_strided_copy"),
                 xfail("istft"),
                 xfail("nonzero"),
                 xfail("nn.functional.fractional_max_pool2d"),

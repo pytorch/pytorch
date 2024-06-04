@@ -3633,7 +3633,6 @@ This message can be suppressed by setting PYTORCH_PRINT_REPRO_ON_FAILURE=0"""
         )
 
         if error_metas:
-            print('XXXXXX', x, '\n', y)
             # See [ErrorMeta Cycles]
             error_metas = [error_metas]
             # TODO: compose all metas into one AssertionError

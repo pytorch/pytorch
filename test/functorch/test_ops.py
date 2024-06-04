@@ -397,6 +397,7 @@ aliasing_ops_list_return = {
 
 skip_noncontig = {
     "_batch_norm_with_update",
+    "as_strided_copy",
 }
 
 
@@ -912,6 +913,7 @@ class TestOperators(TestCase):
                 skip("ormqr"),  # Takes too long
                 xfail("as_strided"),  # incorrect output
                 xfail("as_strided", "partial_views"),  # incorrect output
+                xfail("as_strided_copy"),  # incorrect output
                 xfail("as_strided_scatter"),  # incorrect output
                 skip("bernoulli"),  # calls random op
                 xfail("bfloat16"),  # rank 4 tensor for channels_last
@@ -1146,6 +1148,7 @@ class TestOperators(TestCase):
             xfail("nn.functional.max_unpool2d", "grad"),
             xfail("sparse.sampled_addmm", ""),
             xfail("sparse.mm", "reduce"),
+            xfail("as_strided_copy", ""),  # calls as_strided
             xfail("as_strided_scatter", ""),  # calls as_strided
             xfail("index_reduce", "prod"),  # .item() call
             # ---------------------------------------------------------------------
@@ -1184,6 +1187,7 @@ class TestOperators(TestCase):
         vmapvjp_fail.union(
             {
                 xfail("as_strided"),
+                xfail("as_strided_copy"),
                 xfail("as_strided", "partial_views"),
             }
         ),
@@ -1249,6 +1253,7 @@ class TestOperators(TestCase):
         xfail("quantile"),  # at::equal batching rule (cpu), also, in-place vmap (cuda)
         skip("as_strided"),  # Test runner cannot handle this
         # requires special handling, and does not yet have a batching rule. Feel free to file a github issue!
+        xfail("as_strided_copy"),
         xfail("as_strided_scatter"),
         xfail(
             "nn.functional.gaussian_nll_loss"
