@@ -28,6 +28,7 @@ from torch.fx.experimental.symbolic_shapes import (
 from torch.fx.passes import graph_drawer
 from . import config
 from .compile_utils import fx_graph_cse, get_aten_target
+from ._aot_autograd import fsdp_fx_passes
 
 
 AOT_PARTITIONER_DEBUG = config.debug_partitioner
@@ -458,7 +459,7 @@ def _size_of(node: fx.Node) -> int:
             return _tensor_nbytes(hint_int(val.numel(), fallback=4098), val.dtype)
 
         raise RuntimeError(f"Unknown metadata type {type(val)}")
-    raise RuntimeError("We should always have `val` metadata on the nodes")
+    raise RuntimeError(f"We should always have `val` metadata on the nodes. Offending node: {node}")
 
 
 # Used for some investigative purposes
@@ -1423,6 +1424,10 @@ def min_cut_rematerialization_partition(
         saved_sym_nodes=saved_sym_nodes,
         num_fwd_outputs=num_fwd_outputs,
     )
+    fsdp_fx_passes.replace_noop_consecutive_permutes_with_original_input_if_first_permute_out_has_no_other_use(fw_module)
+    fsdp_fx_passes.replace_noop_consecutive_transpose_with_original_input_if_first_transpose_out_has_no_other_use(fw_module)
+    fsdp_fx_passes.remove_unnecessary_views(fw_module)
+    fsdp_fx_passes.move_primal_set_to_end_of_fwd_graph(fw_module)
 
     if graph_has_recomputable_ops:
         if graph_has_recomputable_rng_ops:
