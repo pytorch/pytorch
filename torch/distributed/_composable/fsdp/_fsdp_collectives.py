@@ -14,8 +14,6 @@ from torch._inductor import config as inductor_config
 
 lib = torch.library.Library("fsdp", "DEF")
 
-lib = torch.library.Library("fsdp", "DEF")
-
 
 class AllGatherResult(NamedTuple):
     all_gather_output: torch.Tensor
