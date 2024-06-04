@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import functools
 import os
 from itertools import chain, count

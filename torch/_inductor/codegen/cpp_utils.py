@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import math
 
 from collections import namedtuple
