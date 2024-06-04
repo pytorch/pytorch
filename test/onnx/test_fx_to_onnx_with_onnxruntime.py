@@ -1363,16 +1363,8 @@ class TestFxToOnnxFakeTensorWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         )
 
     @pytorch_test_common.xfail(
-        error_message="Failed to export the model to ONNX",
+        error_message="aten::cumsum",
         reason="https://github.com/pytorch/pytorch/pull/127675",
-    )
-    @pytorch_test_common.skip_dynamic_fx_test(
-        reason="Dynamic shape check is not expected for exported program in this test suite.",
-        model_type=pytorch_test_common.TorchModelType.TORCH_EXPORT_EXPORTEDPROGRAM,
-    )
-    @pytorch_test_common.xfail_dynamic_fx_test(
-        error_message="SymIntArrayRef expected to contain only concrete integers",
-        model_type=pytorch_test_common.TorchModelType.TORCH_NN_MODULE,
     )
     def test_fake_tensor_mode_huggingface_bigscience_bloom_560m(self):
         config = transformers.BloomConfig()
