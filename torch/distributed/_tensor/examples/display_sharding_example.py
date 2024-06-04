@@ -1,69 +1,98 @@
-import itertools
-from copy import deepcopy
+from typing import Any, Dict
 
 import torch
-import torch.distributed as dist
-import torch.nn.functional as F
 
-from torch.distributed._tensor import (
-    DeviceMesh,
-    distribute_tensor,
-    DTensor,
-    Replicate,
-    Shard,
-)
 from torch.distributed._tensor.debug import CommDebugMode
-from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
-    checkpoint_wrapper,
-    CheckpointImpl,
+
+from torch.distributed._tensor.examples.advanced_module_tracker import (
+    AdvancedModuleTracker,
 )
-from torch.distributed.tensor.parallel import (
-    ColwiseParallel,
-    loss_parallel,
-    parallelize_module,
-    RowwiseParallel,
-)
-from torch.distributed.tensor.parallel.input_reshard import input_reshard
-from torch.testing._internal.common_utils import (
-    instantiate_parametrized_tests,
-    parametrize,
-    run_tests,
-)
+
 from torch.testing._internal.distributed._tensor.common_dtensor import (
-    DTensorTestBase,
     MLPModule,
-    ModelArgs,
-    NUM_DEVICES,
-    skip_unless_torch_gpu,
-    Transformer,
-    with_comms,
+    MLPStacked,
 )
 
-class DisplayShardingExampleTest():
-    def single_function(self, is_seq_parallel=False, recompute_activation=False):
-            inp_size = [8, 10]
-            # Ensure all tp ranks have same input.
-            rng_seed = self.rank if is_seq_parallel else 0
-            torch.manual_seed(rng_seed)
-            inp = torch.rand(*inp_size, device=self.device_type)
-            model = MLPModule(self.device_type)
 
-            LR = 0.25
+class DisplayShardingExampleTest:
+    """
+    Checks if the set of keys in ground truth dictionary and the set produced in advanced_module_tracker are in the same order
+    """
 
-            optim = torch.optim.SGD(model.parameters(), lr=LR)
+    def same_set_of_keys(self, dict1, dict2):
+        dict1_keys = []
+        dict2_keys = []
 
-            comm_mode = CommDebugMode()
-            with comm_mode:
-                output = model(inp)
-                output.sum().backward()
+        for key in dict1:
+            for nested_key in dict1[key]:
+                dict1_keys.append((key, nested_key))
 
+        for key in dict2:
+            for nested_key in dict2[key]:
+                dict2_keys.append((key, nested_key))
 
-            optim.step()
+        if len(dict1_keys) != len(dict2_keys):
+            return False
 
-            inp = torch.rand(*inp_size, device=self.device_type)
+        for i in range(len(dict1_keys)):
+            if dict1_keys[i] != dict2_keys[i]:
+                return False
+
+        return True
+
+    def ground_truth(self, model):
+        module_parameters_dict: Dict[str, Any] = {}
+
+        for name, parameters in model.named_parameters():
+            module_name = model.__class__.__name__ + "." + name.rsplit(".", 1)[0]
+            parameter_name = name.rsplit(".", 1)[1]
+
+            if module_name not in module_parameters_dict:
+                module_parameters_dict[module_name] = {}
+
+            module_parameters_dict[module_name][parameter_name] = parameters.data
+
+        return module_parameters_dict
+
+    def test_mlp_training_e2e(self):
+        """
+        Example of using obtaining all module's FQN and parameters for a given model
+        """
+
+        inp_size = [8, 10]
+
+        rng_seed = 0
+        torch.manual_seed(rng_seed)
+        inp = torch.rand(*inp_size, device=None)
+        model = MLPModule(None)
+
+        LR = 0.25
+
+        optim = torch.optim.SGD(model.parameters(), lr=LR)
+        comm_mode = CommDebugMode()
+        module_tracker = AdvancedModuleTracker()
+
+        with comm_mode, module_tracker:
             output = model(inp)
+            output.sum().backward()
+
+        print(
+            self.same_set_of_keys(
+                self.ground_truth(model), module_tracker.module_parameters_dict
+            )
+        )
+
+        model2 = MLPStacked(None)
+        with comm_mode, module_tracker:
+            output = model2(inp)
+
+        print(
+            self.same_set_of_keys(
+                self.ground_truth(model2), module_tracker.module_parameters_dict
+            )
+        )
 
 
 if __name__ == "__main__":
-    single_test_instance = DisplayShardingExampleTest()
-    single_test_instance.single_function()
+    instantiated_test = DisplayShardingExampleTest()
+    instantiated_test.test_mlp_training_e2e()

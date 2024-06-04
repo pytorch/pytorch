@@ -22,6 +22,7 @@ import sympy
 from filelock import FileLock
 
 import torch
+import torch._inductor.async_compile  # noqa: F401 required to warm up AsyncCompile pools
 from torch._dynamo.testing import rand_strided
 from torch._dynamo.utils import counters, identity, preserve_rng_state
 
@@ -150,7 +151,7 @@ class TritonTemplateKernel(TritonKernel):
     @contextlib.contextmanager
     def set_subgraph_body(self, body_name: str):
         old_body = self.body
-        assert body_name in self.subgraph_bodies
+        assert body_name in self.subgraph_bodies, body_name
         self.body = self.subgraph_bodies[body_name]
         yield
         self.body = old_body
@@ -452,7 +453,7 @@ class TritonTemplateKernel(TritonKernel):
         index = " + ".join(
             f"{texpr(self.rename_indexing(s))} * {i}" for s, i in zip(stride, indices)
         )
-        return f"tl.load({name} + ({index}), {mask})"
+        return f"tl.load({name} + ({index}), {mask}, other=0.0)"
 
     def template_env(self):
         """
@@ -769,7 +770,7 @@ class ExternKernelChoice:
     def call_name(self):
         return f"extern_kernels.{self.name}"
 
-    @functools.lru_cache(None)
+    @functools.lru_cache(None)  # noqa: B019
     def hash_key(self):
         fn = self.to_callable()
         parts = [
