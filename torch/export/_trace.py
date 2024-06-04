@@ -74,6 +74,7 @@ from .graph_signature import (
     ConstantArgument,
     CustomObjArgument,
     ExportGraphSignature,
+    SymFloatArgument,
     SymIntArgument,
     TensorArgument,
     TokenArgument,
@@ -490,6 +491,8 @@ def _make_argument_spec(i, node, input_tokens) -> ArgumentSpec:
         return TensorArgument(name=node.name)
     elif isinstance(val, torch.SymInt):
         return SymIntArgument(name=node.name)
+    elif isinstance(val, torch.SymFloat):
+        return SymFloatArgument(name=node.name)
     elif isinstance(val, torch.ScriptObject):
         return CustomObjArgument(name=node.name, class_fqn=val._type().qualified_name())  # type: ignore[attr-defined]
     elif isinstance(val, FakeScriptObject):

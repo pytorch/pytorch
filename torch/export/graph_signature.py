@@ -33,6 +33,11 @@ class SymIntArgument:
 
 
 @dataclasses.dataclass
+class SymFloatArgument:
+    name: str
+
+
+@dataclasses.dataclass
 class CustomObjArgument:
     name: str
     class_fqn: str
@@ -47,6 +52,7 @@ class ConstantArgument:
 ArgumentSpec = Union[
     TensorArgument,
     SymIntArgument,
+    SymFloatArgument,
     ConstantArgument,
     CustomObjArgument,
     TokenArgument,
@@ -104,7 +110,14 @@ class OutputSpec:
 
     def __post_init__(self):
         assert isinstance(
-            self.arg, (TensorArgument, SymIntArgument, ConstantArgument, TokenArgument)
+            self.arg,
+            (
+                TensorArgument,
+                SymIntArgument,
+                SymFloatArgument,
+                ConstantArgument,
+                TokenArgument,
+            ),
         )
 
 
