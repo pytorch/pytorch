@@ -62,14 +62,7 @@ from .common import (
     OptimizationContext,
 )
 
-from .cpp_utils import (
-    cexpr,
-    cexpr_index,
-    DTYPE_TO_CPP,
-    INDEX_TYPE,
-    unify_mask_base_type,
-    value_to_cpp,
-)
+from .cpp_utils import cexpr, cexpr_index, DTYPE_TO_CPP, INDEX_TYPE, value_to_cpp
 
 schedule_log = torch._logging.getArtifactLogger(__name__, "schedule")
 
@@ -1112,13 +1105,8 @@ class CppVecOverrides(CppOverrides):
     def ne(x, y):
         assert isinstance(V.kernel, CppVecKernel)
         assert isinstance(x, CppCSEVariable)
-        if x.dtype == torch.bool:
-            assert y.dtype == torch.bool
-            x_cast, y_cast = unify_mask_base_type(V.kernel.compute, (x, y))
-            return f"{x_cast} != {y_cast}"
-        else:
-            assert x.dtype is not None
-            return f"{V.kernel._get_mask_type(x.dtype)}({x} != {y})"
+        assert x.dtype is not None
+        return f"{V.kernel._get_mask_type(x.dtype)}({x} != {y})"
 
     @staticmethod
     def lt(x, y):
@@ -1248,8 +1236,8 @@ class CppVecOverrides(CppOverrides):
         return f"{x}.log2()"
 
     @staticmethod
-    def nextafter(x):
-        return f"{x}.nextafter()"
+    def nextafter(x, y):
+        return f"{x}.nextafter({y})"
 
     @staticmethod
     def copysign(a, b):
@@ -1321,21 +1309,11 @@ class CppVecOverrides(CppOverrides):
 
     @staticmethod
     def minimum(a, b):
-        if a.dtype == torch.bool:
-            assert b.dtype == torch.bool
-            a_cast, b_cast = unify_mask_base_type(V.kernel.compute, (a, b))
-            return f"{a_cast} & {b_cast}"
-        else:
-            return f"at::vec::minimum({a}, {b})"
+        return f"at::vec::minimum({a}, {b})"
 
     @staticmethod
     def maximum(a, b):
-        if a.dtype == torch.bool:
-            assert b.dtype == torch.bool
-            a_cast, b_cast = unify_mask_base_type(V.kernel.compute, (a, b))
-            return f"{a_cast} | {b_cast}"
-        else:
-            return f"at::vec::maximum({a}, {b})"
+        return f"at::vec::maximum({a}, {b})"
 
     @staticmethod
     def square(a):
@@ -1346,10 +1324,10 @@ class CppVecOverrides(CppOverrides):
         assert isinstance(V.kernel, CppVecKernel)
         if b.dtype == torch.bool:
             assert c.dtype == torch.bool
-            blendv_a, blendv_b, blendv_c = unify_mask_base_type(
-                V.kernel.compute, (a, b, c)
-            )
-            return f"decltype({blendv_b})::blendv({blendv_c}, {blendv_b}, {blendv_a})"
+            blendv_a = f"{V.kernel._get_mask_cast(a, torch.float)}"
+            blendv_b = f"{V.kernel._get_mask_cast(b, torch.float)}"
+            blendv_c = f"{V.kernel._get_mask_cast(c, torch.float)}"
+            return f"decltype({b})::blendv({blendv_c}, {blendv_b}, {blendv_a})"
         else:
             return f"decltype({b})::blendv({c}, {b}, {V.kernel._get_mask_cast(a, b.dtype)})"
 
@@ -1722,6 +1700,39 @@ class CppKernel(Kernel):
         return itervar in index.free_symbols or self.index_indirect_depends_on(
             index, itervar
         )
+
+    def var_ranges(self):
+        return dict(zip(self.itervars, self.ranges))
+
+    def check_bounds(
+        self,
+        expr: sympy.Expr,
+        size: sympy.Expr,
+        lower: bool,
+        upper: bool,
+    ):
+        if not (lower or upper):
+            return
+
+        indirect = free_symbol_is_type(expr, SymT.TMP)
+        if indirect:
+            # indexing in compute
+            csevar = ops.index_expr(expr, torch.int32).value
+            buffer = V.kernel.compute
+        else:
+            # indexing in loads
+            prior_compute = V.kernel.compute
+            try:
+                V.kernel.compute = self.loads
+                csevar = ops.index_expr(expr, torch.int32).value
+            finally:
+                V.kernel.compute = prior_compute
+            buffer = self.loads
+
+        size_str = V.kernel.sexpr(self.rename_indexing(size)) if upper else None
+
+        line = self.indirect_assert(csevar, "0" if lower else None, size_str)
+        self.cse.generate(buffer, line, assignment=False)
 
     def load(self, name: str, index: sympy.Expr):
         var = self.args.input(name)
@@ -2829,12 +2840,18 @@ class CppVecKernelChecker(CppVecKernel):
             return tuple([self.simd_vec] * 3)
         return self.simd_vec
 
+    def check_bounds(
+        self, expr: sympy.Expr, size: sympy.Expr, lower: bool, upper: bool
+    ):
+        return self.simd_vec
+
     def store_reduction(self, name, index, value):
         return self.simd_vec
 
     def __exit__(self, exc_type, exc_val, exc_tb):
+        assert self._orig_wrapper_code is not None
         # Restore the wrapper_code
-        V.graph.wrapper_code = self._orig_wrapper_code  # type: ignore[assignment]
+        V.graph.wrapper_code = self._orig_wrapper_code
         self.exit_stack.__exit__(exc_type, exc_val, exc_tb)
 
     def __enter__(self):
@@ -2876,6 +2893,12 @@ class CppVecKernelChecker(CppVecKernel):
             @staticmethod
             def store_reduction(name, index, value):
                 return self.store_reduction(name, index, value)
+
+            @staticmethod
+            def check_bounds(
+                expr: sympy.Expr, size: sympy.Expr, lower: bool, upper: bool
+            ):
+                return self.check_bounds(expr, size, lower, upper)
 
             @staticmethod
             def constant(val, dtype):
@@ -3051,7 +3074,7 @@ class CppKernelProxy(CppKernel):
         scheduler_node._lowp_fp_type = _lowp_fp_type  # type: ignore[attr-defined]
         return True
 
-    def legalize_lowp_fp_dtype_loopbody(self, loop_body: ir.LoopBody):
+    def legalize_lowp_fp_dtype(self, nodes):
         def add_to_dtype(sub_graph: torch.fx.Graph):
             def is_lowp_fp_load(node: torch.fx.Node):
                 if node.target not in ["load"]:
@@ -3189,11 +3212,11 @@ class CppKernelProxy(CppKernel):
 
             eliminate_to_dtype(sub_graph)
 
-        sub_blocks = [loop_body.root_block] + list(loop_body.subblocks.values())
-        for sub_block in sub_blocks:
-            add_to_dtype(sub_block.graph)
+        def _legalize_lowp_fp(loop_body: ir.LoopBody):
+            sub_blocks = [loop_body.root_block] + list(loop_body.subblocks.values())
+            for sub_block in sub_blocks:
+                add_to_dtype(sub_block.graph)
 
-    def legalize_lowp_fp_dtype(self, nodes):
         if all(
             isinstance(_node, SchedulerNode) and self.is_lowp_fp_scheduler(_node)
             for _node in nodes
@@ -3230,7 +3253,7 @@ class CppKernelProxy(CppKernel):
             should_legalize = not is_memory_copy_scheduler_node(node)
             if should_legalize:
                 body: ir.LoopBody = node._body
-                self.legalize_lowp_fp_dtype_loopbody(body)
+                _legalize_lowp_fp(body)
 
     def codegen_functions(self, fn_list, var_sizes_list, vec_dtype=torch.float):
         # TODO(jgong5): remove vec_dtype arg with alternative tiling factors for various dtypes
@@ -3395,8 +3418,8 @@ class CppKernelProxy(CppKernel):
                 inner_tail_loop.set_kernel(vec_kernel)
 
     def codegen_loop_bodies(self, loop_bodies, var_sizes_list):
+        # TODO(jgong5): support lowp legalization
         for body in loop_bodies:
-            self.legalize_lowp_fp_dtype_loopbody(body)
             DataTypePropagation.propagate_loopbody(body)
         self.codegen_functions(loop_bodies, var_sizes_list)
 
@@ -3801,6 +3824,7 @@ class CppScheduling(BaseScheduling):
         kernel, render = ctb.make_kernel_render(ctb, epilogue_nodes=epilogue_ir_nodes)
         with kernel:
             for node in [template_node, *epilogue_nodes]:
+                node.decide_inplace_update()
                 node.mark_run()  # type: ignore[attr-defined]
             src_code = render()
 
