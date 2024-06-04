@@ -101,8 +101,13 @@ def _flex_attention(
 
     # Some basic input validation
     _validate_sdpa_input(query, key, value)
-    if query.size(-2) % 128 != 0:
-        raise ValueError("NYI: S and L must be a multiple of 128")
+    if query.size(-2) >= 32: # use Attention Kernel
+        if query.size(-2) < 128 & query.size(-2) not int [32, 64]:
+            raise ValueError("NYI: S must be <32, 32, 64 or a multiple of 128")
+        if query.size(-2) % 128 != 0: 
+            raise ValueError("NYI: S must be <32, 32, 64 or a multiple of 128")
+    if key.size(-2) % 128 != 0: 
+            raise ValueError("NYI: L must be <32, 32, 64 or a multiple of 128")
 
     if not torch._dynamo.is_dynamo_supported():
         raise RuntimeError("flex_attention requires dynamo support.")

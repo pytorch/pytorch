@@ -72,8 +72,9 @@ def triton_(arg_Q, arg_K, arg_V, arg_LSE, out_ptr0):
     # OUTPUT_LOGSUMEXP: We only need to store the logsumexp if we require grad
 
     # Define Q Strides
-    stride_qz = 1048576
-    stride_qh = 131072
+    # (524288, 65536, 64, 1)
+    stride_qz = 524288
+    stride_qh = 65536
     stride_qm = 64
     stride_qk = 1
     # Define K Strides
@@ -89,6 +90,7 @@ def triton_(arg_Q, arg_K, arg_V, arg_LSE, out_ptr0):
 
     Z = 8
     H = 8
+    Q_CTX = 1024
     N_CTX = 2048
 
     qk_scale = 1.0
@@ -97,17 +99,18 @@ def triton_(arg_Q, arg_K, arg_V, arg_LSE, out_ptr0):
     start_m = tl.program_id(0)
     off_hz = tl.program_id(1)
 
-    qkv_offset = off_hz * stride_qh
+    q_offset = off_hz * stride_qh
     Q_block_ptr = tl.make_block_ptr(
-        base=Q + qkv_offset,
-        shape=(N_CTX, BLOCK_DMODEL),
+        base=Q + q_offset,
+        shape=(Q_CTX, BLOCK_DMODEL),
         strides=(stride_qm, stride_qk),
         offsets=(start_m * BLOCK_M, 0),
         block_shape=(BLOCK_M, BLOCK_DMODEL),
         order=(1, 0)
     )
+    kv_offset = off_hz * stride_kh
     K_block_ptr = tl.make_block_ptr(
-        base=K + qkv_offset,
+        base=K + kv_offset,
         shape=(BLOCK_DMODEL, N_CTX),
         strides=(stride_kk, stride_kn),
         offsets=(0, 0),
@@ -115,7 +118,7 @@ def triton_(arg_Q, arg_K, arg_V, arg_LSE, out_ptr0):
         order=(0, 1)
     )
     V_block_ptr = tl.make_block_ptr(
-        base=V + qkv_offset,
+        base=V + kv_offset,
         shape=(N_CTX, BLOCK_DMODEL),
         strides=(stride_vk, stride_vn),
         offsets=(0, 0),
@@ -199,12 +202,12 @@ def triton_(arg_Q, arg_K, arg_V, arg_LSE, out_ptr0):
 
     # TODO generalize and add proper mask support
     mask = (idx_m != -1) & (idx_d != -1)
-    xindex = idx_d + (64*idx_m) + (131072*idx_h) + (1048576*idx_z)
+    xindex = idx_d + (stride_qm*idx_m) + (stride_qh*idx_h) + (stride_qz*idx_z)
     tl.store(out_ptr0 + (xindex), acc, None)
 
     # TODO dont want to write this if we dont require grad
     if OUTPUT_LOGSUMEXP:
-        l_ptrs = LSE + off_hz * N_CTX + offs_m
+        l_ptrs = LSE + off_hz * Q_CTX + offs_m
         lse = m_i + tl.math.log2(l_i)
         tl.store(l_ptrs, lse)
 ''', device_str='cuda')
@@ -223,29 +226,42 @@ del async_compile
 def call(args):
     arg0_1, arg1_1, arg2_1 = args
     args.clear()
-    assert_size_stride(arg0_1, (8, 8, 2048, 64), (1048576, 131072, 64, 1))
+    assert_size_stride(arg0_1, (8, 8, 1024, 64), (524288, 65536, 64, 1))
     assert_size_stride(arg1_1, (8, 8, 2048, 64), (1048576, 131072, 64, 1))
     assert_size_stride(arg2_1, (8, 8, 2048, 64), (1048576, 131072, 64, 1))
-    buf0 = empty_strided_cuda((8, 8, 2048), (16384, 2048, 1), torch.float32)
+    buf0 = empty_strided_cuda((8, 8, 1024), (8192, 1024, 1), torch.float32)
     with torch.cuda._DeviceGuard(0):
         torch.cuda.set_device(0)
-        buf1 = empty_strided_cuda((8, 8, 2048, 64), (1048576, 131072, 64, 1), torch.float32)
+        buf1 = empty_strided_cuda((8, 8, 1024, 64), (524288, 65536, 64, 1), torch.float32)
         # Source Nodes: [flex_attention], Original ATen: []
         stream0 = get_raw_stream(0)
-        triton_tem_fused_0.run(arg0_1, arg1_1, arg2_1, buf0, buf1, grid=torch._inductor.kernel.flex_attention.sdpa_grid(8, 8, 2048, 64, meta0), stream=stream0)
+        triton_tem_fused_0.run(arg0_1, arg1_1, arg2_1, buf0, buf1, grid=torch._inductor.kernel.flex_attention.sdpa_grid(8, 8, 1024, 64, meta0), stream=stream0)
         del arg0_1
         del arg1_1
         del arg2_1
     return (buf1, )
 
 
+from torch.nn.attention._flex_attention import _flex_attention as flex_attention
+
+
+def checkerboard(score, batch, head, token_q, token_kv):
+    score = torch.where(torch.abs(token_kv - token_q) == 1, score * 0.5, score)
+    score = torch.where(torch.abs(token_kv - token_q) == 2, score * 2.0, score)
+    return score
+
 def benchmark_compiled_module(times=10, repeat=10):
     from torch._dynamo.testing import rand_strided
     from torch._inductor.utils import print_performance
-    arg0_1 = rand_strided((8, 8, 2048, 64), (1048576, 131072, 64, 1), device='cuda:0', dtype=torch.float32)
+    arg0_1 = rand_strided((8, 8, 1024, 64), (524288, 65536, 64, 1), device='cuda:0', dtype=torch.float32)
     arg1_1 = rand_strided((8, 8, 2048, 64), (1048576, 131072, 64, 1), device='cuda:0', dtype=torch.float32)
     arg2_1 = rand_strided((8, 8, 2048, 64), (1048576, 131072, 64, 1), device='cuda:0', dtype=torch.float32)
     fn = lambda: call([arg0_1, arg1_1, arg2_1])
+
+    gold_results = flex_attention(arg0_1, arg1_1, arg2_1, checkerboard)
+    (triton_results,) = fn()
+    torch.testing.assert_close(triton_results, gold_results, atol=2e-2, rtol=2e-2)
+
     return print_performance(fn, times=times, repeat=repeat)
 
 
