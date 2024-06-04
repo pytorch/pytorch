@@ -708,6 +708,7 @@ void SourceImporterImpl::importNamedTuple(
              "only attribute annotations are currently supported.");
     }
     const auto assign = Assign(statement);
+    TORCH_INTERNAL_ASSERT(assign.type().present());
 
     auto name = Var(Assign(statement).lhs()).name().name();
     std::optional<IValue> default_val;
