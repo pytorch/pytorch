@@ -73,7 +73,9 @@ def get_op_overload(node: torch._C.Node):
         else:
             op_overload = op_overload_packet.default
     except Exception as e:
-        raise RuntimeError(f"Unable to find operator {node.kind()} with schema {node.schema}")
+        raise RuntimeError(
+            f"Unable to find operator {node.kind()} with schema {node.schema}"
+        )
 
     return op_overload
 
