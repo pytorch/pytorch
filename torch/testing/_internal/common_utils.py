@@ -42,7 +42,6 @@ from dataclasses import dataclass
 from enum import Enum
 from functools import partial, wraps
 from itertools import product, chain
-import pkgutil
 from pathlib import Path
 from statistics import mean
 from typing import (
@@ -96,16 +95,13 @@ from torch.testing._comparison import not_close_error_metas
 from torch.testing._internal.common_dtype import get_all_dtypes
 from torch.utils._import_utils import _check_module_exists
 import torch.utils._pytree as pytree
-import importlib
-import importlib.util
+
 try:
     import pytest
     has_pytest = True
 except ImportError:
     has_pytest = False
 
-# @todo: consolidate definitions of LIBTORCH_PKG_NAME into a single file [bootcamp]
-LIBTORCH_PKG_NAME = "libtorchsplit"
 
 def freeze_rng_state(*args, **kwargs):
     return torch.testing._utils.freeze_rng_state(*args, **kwargs)
@@ -1183,7 +1179,6 @@ IS_MACOS = sys.platform == "darwin"
 IS_PPC = platform.machine() == "ppc64le"
 IS_X86 = platform.machine() in ('x86_64', 'i386')
 IS_ARM64 = platform.machine() in ('arm64', 'aarch64')
-IS_SPLIT_BUILD = pkgutil.find_loader(LIBTORCH_PKG_NAME) is not None
 
 def is_avx512_vnni_supported():
     if sys.platform != 'linux':
@@ -4552,32 +4547,16 @@ def disable_gc():
     else:
         yield
 
-# todo: function is copied over from __init__.py. We should move it to a common
-# place.
-def find_package_path(package_name):
-    spec = importlib.util.find_spec(package_name)
-    if spec:
-        # The package might be a namespace package, so get_data may fail
-        try:
-            loader = spec.loader
-            if loader is not None:
-                file_path = loader.get_filename()  # type: ignore[attr-defined]
-                return Path(os.path.dirname(file_path))
-        except AttributeError:
-            pass
-    return None
 
 def find_library_location(lib_name: str) -> Path:
     # return the shared library file in the installed folder if exist,
     # else the file in the build folder
-    lib_root = find_package_path(LIBTORCH_PKG_NAME)
-    if lib_root is None:
-        lib_root = Path(torch.__file__).resolve().parent
-    path = f"{lib_root}/lib/{lib_name}"
+    torch_root = Path(torch.__file__).resolve().parent
+    path = torch_root / 'lib' / lib_name
     if os.path.exists(path):
         return path
-    lib_root = Path(__file__).resolve().parent.parent.parent
-    return f"{lib_root}/build/lib/{lib_name}"
+    torch_root = Path(__file__).resolve().parent.parent.parent
+    return torch_root / 'build' / 'lib' / lib_name
 
 def skip_but_pass_in_sandcastle(reason):
     """
