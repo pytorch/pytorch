@@ -1,6 +1,5 @@
 # Owner(s): ["module: inductor"]
 import contextlib
-import functools
 import importlib
 import unittest
 from typing import Any, Callable, Iterable, Optional, Tuple
@@ -16,10 +15,13 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
 )
-from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU, skip_windows_ci
+from torch.testing._internal.inductor_utils import (
+    GPU_TYPE,
+    HAS_GPU,
+    requires_gpu,
+    skip_windows_ci,
+)
 
-
-requires_gpu = functools.partial(unittest.skipIf, not HAS_GPU, "requires gpu")
 
 skip_windows_ci(__name__, __file__)
 

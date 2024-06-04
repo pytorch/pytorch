@@ -95,6 +95,7 @@ def skip_windows_ci(name: str, file: str) -> None:
             sys.exit(0)
         raise unittest.SkipTest("requires sympy/functorch/filelock")
 
+requires_gpu = functools.partial(unittest.skipIf, not HAS_GPU, "requires gpu")
 
 skipCUDAIf = functools.partial(skipDeviceIf, device="cuda")
 skipXPUIf = functools.partial(skipDeviceIf, device="xpu")
