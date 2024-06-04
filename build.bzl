@@ -40,8 +40,6 @@ def define_targets(rules):
         copts = ["-fexceptions"],
         tags = [
             "-fbcode",
-            "supermodule:android/default/pytorch",
-            "supermodule:ios/default/public.pytorch",
             "xplat",
         ],
         visibility = ["//visibility:public"],

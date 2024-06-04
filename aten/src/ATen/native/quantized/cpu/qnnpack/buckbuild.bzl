@@ -300,10 +300,6 @@ def define_qnnpack(third_party, labels = []):
             "-DQNNP_PRIVATE=",
             "-DQNNP_INTERNAL=",
         ],
-        labels = [
-            "supermodule:android/default/pytorch",
-            "supermodule:ios/default/public.pytorch",
-        ],
         platform_compiler_flags = [
             (
                 "armv7",
