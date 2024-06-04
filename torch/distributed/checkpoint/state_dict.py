@@ -523,7 +523,9 @@ def _load_model_state_dict(
                 else:
                     assert device == value.device
         assert device is not None
-        _broadcast_state_dict(state_dict, local_state_dict, device=device)
+        _broadcast_state_dict(
+            state_dict, local_state_dict, device=device, strict=info.strict
+        )
         for fqn, local_state in local_state_dict.items():
             state_dict[fqn] = local_state
 
@@ -876,6 +878,15 @@ def _load_optim_state_dict(
             flatten_osd, osd_mapping = _flatten_state_dict(optim_state_dict)
             flatten_local_osd, local_osd_mapping = _flatten_state_dict(local_state_dict)
             _broadcast_state_dict(flatten_osd, flatten_local_osd, device=device)
+            # The modifications listed seek to address the problem where optim might possess
+            # dissimilar parameters in comparison to optim_state_dict. This is achieved by
+            # incorporating differential parameters within local, which may result in optim
+            # having additional parameters ultimately.
+            for optim_key in flatten_osd.keys():
+                if optim_key not in flatten_local_osd:
+                    assert optim_key in osd_mapping
+                    flatten_local_osd[optim_key] = flatten_osd[optim_key]
+                    local_osd_mapping[optim_key] = osd_mapping[optim_key]
             optim_state_dict = _unflatten_state_dict(
                 flatten_local_osd, local_osd_mapping
             )
