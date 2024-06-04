@@ -13,7 +13,6 @@ from torch.fx.experimental.optimization import (
 )
 from torch.fx.passes.graph_transform_observer import GraphTransformObserver
 from torch.fx.passes.shape_prop import ShapeProp
-
 from torch.nn import functional as F
 from torch.nn.utils.fusion import fuse_conv_bn_eval, fuse_conv_bn_weights
 
