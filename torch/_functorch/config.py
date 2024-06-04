@@ -88,10 +88,34 @@ ban_recompute_not_in_allowlist = True
 # a fusion can be expensive.
 ban_recompute_reductions = True
 
-memory_budget = 1.0
-memory_budget_runtime_estimator = "flops"
-memory_budget_solver = "dp"
+# By default, the partitioner is purely trying to optimize for runtime (although
+# it should always use less memory than eager)
+# This knob controls the partitioner to make that tradeoff for you, choosing the
+# fastest option that saves less activations than the memory budget.
+# Specifically, 0.0 corresponds to the activation memory from applying
+# activation checkpointing to the full compiled region, and 1.0 corresponds to
+# the activation memory from the default runtime-optimized strategy.  So, 0.4
+# would result in a strategy that saves 40% of the activations compared to the
+# default strategy.
+# It solves a 0-1 knapsack to find the minimum recompute necessary to stay below
+# the activation memory budget.
+# NOTE: This *cannot* be treated as
+activation_memory_budget = 1.0
 
+# This controls how we estimate the runtime when deciding what the cheapest
+# operators to recompute are. The 3 options are
+# "flops": Bases it off of the flop count provided by torch.utils.flop_counter
+# "profile": Benchmarks each operator to come up with a runtime
+# "testing": Returns 1 for everything
+activation_memory_budget_runtime_estimator = "flops"
+
+# This controls the solver used for the 0-1 knapsack. By default we use a
+# quantized DP solution ("dp"). The other approaches are a "greedy" and a "ilp"
+# (which has a scipy dependency).
+activation_memory_budget_solver = "dp"
+
+# This dumps out a png visualization of the expected runtime vs. activation
+# memory tradeoffs for all memory budget values from 0 to 1 in increments of 0.5
 visualize_memory_budget_pareto = (
     os.environ.get("PARTITIONER_MEMORY_BUDGET_PARETO", "0") == "1"
 )
