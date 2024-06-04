@@ -1,5 +1,6 @@
 # ${generated_comment}
 # mypy: disable-error-code="type-arg"
+# mypy: allow-untyped-defs
 
 import builtins
 from enum import Enum, IntEnum

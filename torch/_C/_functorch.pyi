@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 from enum import Enum
 from typing import Optional, Tuple
 

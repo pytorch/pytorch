@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 # Owner(s): ["module: tests"]
 
 import torch
