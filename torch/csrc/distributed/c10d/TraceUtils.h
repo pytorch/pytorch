@@ -8,6 +8,8 @@
 #include <torch/csrc/distributed/c10d/Utils.hpp>
 #include <torch/csrc/jit/serialization/pickler.h>
 #include <torch/csrc/profiler/combined_traceback.h>
+#include <iostream>
+#include <memory>
 
 #ifdef USE_C10D_NCCL
 #include <ATen/cuda/CUDAEvent.h>
@@ -655,21 +657,19 @@ struct NCCLTraceBuffer {
     entry->start_ = entry->end_ = nullptr;
   }
 
-  std::string dump(
-      const std::optional<std::unordered_map<
-          std::string,
-          std::unordered_map<std::string, std::string>>>& ncclDumpMap,
-      bool includeTraceBuffer) {
+  const c10::List<c10::IValue> getCollectiveTrace(
+      bool includeStacktraces,
+      bool onlyActive) {
     auto entries = new_list();
-    if (includeTraceBuffer) {
-      auto result = dump_entries();
-
-      std::vector<torch::CapturedTraceback*> tracebacks;
+    auto result = dump_entries();
+    std::vector<torch::CapturedTraceback*> tracebacks;
+    torch::SymbolizedTracebacks stracebacks;
+    std::vector<c10::IValue> all_frames;
+    if (includeStacktraces) {
       for (auto& e : result) {
         tracebacks.push_back(e.traceback_.get());
       }
-      torch::SymbolizedTracebacks stracebacks = torch::symbolize(tracebacks);
-      std::vector<c10::IValue> all_frames;
+      stracebacks = torch::symbolize(tracebacks);
       for (const auto& f : stracebacks.all_frames) {
         auto d = new_dict();
         d.insert(name_key, f.funcname);
@@ -677,80 +677,92 @@ struct NCCLTraceBuffer {
         d.insert(line_key, int64_t(f.lineno));
         all_frames.emplace_back(std::move(d));
       }
+    }
+    for (auto i : c10::irange(result.size())) {
+      auto dict = new_dict();
+      auto& e = result.at(i);
+      // Skip completed events
+      if (onlyActive && e.time_discovered_completed_.has_value()) {
+        continue;
+      }
 
-      for (auto i : c10::irange(result.size())) {
-        auto& e = result.at(i);
+      if (includeStacktraces) {
         auto& tb = stracebacks.tracebacks.at(i);
-        auto dict = new_dict();
-        dict.insert(record_id_key, int64_t(e.id_));
-        dict.insert(pg_id_key, int64_t(e.pg_id_));
-        dict.insert(pg_name_key, e.pg_name_);
-        dict.insert(collective_seq_id_key, int64_t(e.collective_seq_id_));
-        dict.insert(p2p_seq_id_key, int64_t(e.p2p_seq_id_));
-        dict.insert(op_id_key, int64_t(e.op_id_));
-        dict.insert(profiling_name_key, e.profiling_name_);
-        dict.insert(time_created_key, int64_t(e.time_created_));
-        if (e.duration_) {
-          dict.insert(duration_key, *e.duration_);
-        }
-
-        auto it = e.sizes_.begin();
-        auto read_sizes = [&](const c10::SmallVector<int, 4>& dims) {
-          auto sizes = new_list();
-          for (auto dim : dims) {
-            auto arg_sizes = new_list();
-            for (auto i : c10::irange(dim)) {
-              (void)i;
-              arg_sizes.push_back(*it++);
-            }
-            sizes.push_back(arg_sizes);
-          }
-          return sizes;
-        };
-
-        dict.insert(input_sizes_key, read_sizes(e.input_dims_));
-        std::vector<std::string> input_dtypes_strs;
-        input_dtypes_strs.reserve(e.input_dtypes_.size());
-        for (const auto& input_dtype : e.input_dtypes_) {
-          input_dtypes_strs.push_back(c10::toString(input_dtype));
-        }
-        dict.insert(input_dtypes_key, input_dtypes_strs);
-        dict.insert(output_sizes_key, read_sizes(e.output_dims_));
-        std::vector<std::string> output_dtypes_strs;
-        output_dtypes_strs.reserve(e.output_dtypes_.size());
-        for (const auto& output_dtype : e.output_dtypes_) {
-          output_dtypes_strs.push_back(c10::toString(output_dtype));
-        }
-        dict.insert(output_dtypes_key, output_dtypes_strs);
-        if (e.time_discovered_completed_.has_value()) {
-          dict.insert(state_key, "completed");
-        } else if (e.time_discovered_started_.has_value()) {
-          dict.insert(state_key, "started");
-        } else {
-          dict.insert(state_key, "scheduled");
-        }
-
-        dict.insert(
-            time_discovered_started_key,
-            e.time_discovered_started_.has_value()
-                ? int64_t(*e.time_discovered_started_)
-                : c10::IValue());
-        dict.insert(
-            time_discovered_completed_key,
-            e.time_discovered_completed_.has_value()
-                ? int64_t(*e.time_discovered_completed_)
-                : c10::IValue());
-        dict.insert(retired_key, e.retired_);
-        dict.insert(is_p2p_key, e.isP2P_);
-
         auto frames = new_list();
         for (int64_t frame : tb) {
           frames.push_back(all_frames.at(frame));
         }
         dict.insert(frames_key, frames);
-        entries.push_back(dict);
       }
+
+      dict.insert(record_id_key, int64_t(e.id_));
+      dict.insert(pg_id_key, int64_t(e.pg_id_));
+      dict.insert(pg_name_key, e.pg_name_);
+      dict.insert(collective_seq_id_key, int64_t(e.collective_seq_id_));
+      dict.insert(p2p_seq_id_key, int64_t(e.p2p_seq_id_));
+      dict.insert(op_id_key, int64_t(e.op_id_));
+      dict.insert(profiling_name_key, e.profiling_name_);
+      dict.insert(time_created_key, int64_t(e.time_created_));
+      if (e.duration_) {
+        dict.insert(duration_key, *e.duration_);
+      }
+
+      auto it = e.sizes_.begin();
+      auto read_sizes = [&](const c10::SmallVector<int, 4>& dims) {
+        auto sizes = new_list();
+        for (auto dim : dims) {
+          auto arg_sizes = new_list();
+          for (auto i : c10::irange(dim)) {
+            (void)i;
+            arg_sizes.push_back(*it++);
+          }
+          sizes.push_back(arg_sizes);
+        }
+        return sizes;
+      };
+
+      dict.insert(input_sizes_key, read_sizes(e.input_dims_));
+      std::vector<std::string> input_dtypes_strs;
+      input_dtypes_strs.reserve(e.input_dtypes_.size());
+      for (const auto& input_dtype : e.input_dtypes_) {
+        input_dtypes_strs.push_back(c10::toString(input_dtype));
+      }
+      dict.insert(input_dtypes_key, input_dtypes_strs);
+      dict.insert(output_sizes_key, read_sizes(e.output_dims_));
+      std::vector<std::string> output_dtypes_strs;
+      output_dtypes_strs.reserve(e.output_dtypes_.size());
+      for (const auto& output_dtype : e.output_dtypes_) {
+        output_dtypes_strs.push_back(c10::toString(output_dtype));
+      }
+      dict.insert(output_dtypes_key, output_dtypes_strs);
+      if (e.time_discovered_completed_.has_value()) {
+        dict.insert(state_key, "completed");
+      } else if (e.time_discovered_started_.has_value()) {
+        dict.insert(state_key, "started");
+      } else {
+        dict.insert(state_key, "scheduled");
+      }
+
+      dict.insert(
+          time_discovered_started_key,
+          e.time_discovered_started_.has_value()
+              ? int64_t(*e.time_discovered_started_)
+              : c10::IValue());
+      dict.insert(
+          time_discovered_completed_key,
+          e.time_discovered_completed_.has_value()
+              ? int64_t(*e.time_discovered_completed_)
+              : c10::IValue());
+      dict.insert(retired_key, e.retired_);
+      dict.insert(is_p2p_key, e.isP2P_);
+
+      entries.push_back(dict);
     }
+    return entries;
+  }
+
+  // dump pg_entries
+  const c10::Dict<c10::IValue, c10::IValue> getPgConfig() {
     auto pg_config = new_dict();
     for (const auto& [pg_name, ranks] : pg_name_to_ranks_) {
       auto pg_info = new_dict();
@@ -758,6 +770,27 @@ struct NCCLTraceBuffer {
       pg_info.insert("desc", std::get<1>(pg_name));
       pg_info.insert("ranks", ranks_str(ranks));
       pg_config.insert(std::get<0>(pg_name), pg_info);
+    }
+    return pg_config;
+  }
+
+  // dump all collectives + ncclDumpMap
+  std::string dump(
+      const std::optional<std::unordered_map<
+          std::string,
+          std::unordered_map<std::string, std::string>>>& ncclDumpMap,
+      bool includeCollectives,
+      bool includeStackTraces,
+      bool onlyActive) {
+    auto result = new_dict();
+    // common values
+    result.insert(version_key, version_val);
+    result.insert(pg_config_key, getPgConfig());
+
+    // collective trace
+    if (includeCollectives) {
+      result.insert(
+          entries_key, getCollectiveTrace(includeStackTraces, onlyActive));
     }
 
     // convert ncclDumpMap into a dictionary
@@ -771,18 +804,10 @@ struct NCCLTraceBuffer {
         per_comm_dict.insert(ncclId, inner_dict);
       }
     }
-
-    auto dict = new_dict();
-    if (includeTraceBuffer) {
-      dict.insert(entries_key, entries);
-    }
-    dict.insert(version_key, version_val);
     if (per_comm_dict.size() > 0) {
-      dict.insert(nccl_comm_key, per_comm_dict);
+      result.insert(nccl_comm_key, per_comm_dict);
     }
-    dict.insert(pg_config_key, pg_config);
-
-    return pickle_str(dict);
+    return pickle_str(result);
   }
 };
 
