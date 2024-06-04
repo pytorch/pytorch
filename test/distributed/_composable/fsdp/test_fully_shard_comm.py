@@ -1,5 +1,6 @@
 # Owner(s): ["oncall: distributed"]
 
+import copy
 import functools
 import itertools
 import unittest
@@ -736,6 +737,7 @@ class TestFullyShardPrefetch(FSDPTest):
                 ("reshard", "", TrainingState.POST_BACKWARD),
                 ("post_backward", "", TrainingState.POST_BACKWARD),
             ]
+            expected_backward_events = copy.deepcopy(expected_events)
             self.assertEqual(events, expected_events)
             events.clear()
             optim.step()
@@ -760,20 +762,7 @@ class TestFullyShardPrefetch(FSDPTest):
                 events.clear()
                 loss.sum().backward()
                 # Expect the same backward events as without forward prefetch
-                expected_events = [
-                    ("unshard", "layers.2", TrainingState.PRE_BACKWARD),
-                    ("unshard", "layers.1", TrainingState.PRE_BACKWARD),
-                    ("reshard", "layers.2", TrainingState.POST_BACKWARD),
-                    ("post_backward", "layers.2", TrainingState.POST_BACKWARD),
-                    ("unshard", "layers.0", TrainingState.PRE_BACKWARD),
-                    ("reshard", "layers.1", TrainingState.POST_BACKWARD),
-                    ("post_backward", "layers.1", TrainingState.POST_BACKWARD),
-                    ("reshard", "layers.0", TrainingState.POST_BACKWARD),
-                    ("post_backward", "layers.0", TrainingState.POST_BACKWARD),
-                    ("reshard", "", TrainingState.POST_BACKWARD),
-                    ("post_backward", "", TrainingState.POST_BACKWARD),
-                ]
-                self.assertEqual(events, expected_events)
+                self.assertEqual(events, expected_backward_events)
                 events.clear()
                 optim.step()
                 optim.zero_grad()
