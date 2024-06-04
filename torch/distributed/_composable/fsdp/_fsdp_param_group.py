@@ -410,8 +410,6 @@ class FSDPParamGroup:
     def _register_post_backward_hook(
         self, args: Tuple[Any, ...], kwargs: Dict[str, Any]
     ) -> Tuple[Tuple[Any, ...], Dict[str, Any]]:
-        if torch._dynamo.compiled_autograd.compiled_autograd_enabled:
-            return args, kwargs
         if not torch.is_grad_enabled():
             return args, kwargs
         args_list, args_spec = tree_flatten(args)
