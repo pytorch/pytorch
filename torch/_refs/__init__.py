@@ -3650,7 +3650,7 @@ def _reshape_view_helper(a: TensorLikeType, *shape, allow_copy: bool) -> TensorL
             return _a
 
     if a.is_contiguous():
-        torch._check(a.numel() > 0)
+        torch._check(a.numel() != 0)
         # Special-cases for nd_to_1d
         if len(shape) == 1:
             return torch.as_strided(a, [a.numel()], [1])
