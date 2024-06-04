@@ -185,16 +185,16 @@ class UvTcpServer : public UvTcpSocket {
     try {
       int uv_res = uv_tcp_open((uv_tcp_t*)res->unsafeGetStream(), socket);
       TORCH_CHECK(
-        uv_res == 0,
-        "Failed to open existing socket. ",
-        "socket: ",
-        socket,
-        ", code: ",
-        uv_res,
-        ", name: ",
-        uv_err_name(uv_res),
-        ", message: ",
-        uv_strerror(uv_res));
+          uv_res == 0,
+          "Failed to open existing socket. ",
+          "socket: ",
+          socket,
+          ", code: ",
+          uv_res,
+          ", name: ",
+          uv_err_name(uv_res),
+          ", message: ",
+          uv_strerror(uv_res));
 
       res->cacheSocketPort();
     } catch (std::exception& ex) {
@@ -223,7 +223,6 @@ class UvTcpServer : public UvTcpSocket {
       } else {
         uv_res = uv_ip4_addr("0.0.0.0", port, (struct sockaddr_in*)&addr);
       }
-
       TORCH_CHECK(
           uv_res == 0,
           "UV Store addr parsing failure. ",
