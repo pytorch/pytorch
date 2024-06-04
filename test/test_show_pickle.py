@@ -1,15 +1,16 @@
 # Owner(s): ["oncall: mobile"]
 
-import unittest
 import io
 import tempfile
+import unittest
+
 import torch
 import torch.utils.show_pickle
 
-from torch.testing._internal.common_utils import TestCase, run_tests, IS_WINDOWS
+from torch.testing._internal.common_utils import IS_WINDOWS, run_tests, TestCase
+
 
 class TestShowPickle(TestCase):
-
     @unittest.skipIf(IS_WINDOWS, "Can't re-open temp file on Windows")
     def test_scripted_model(self):
         class MyCoolModule(torch.nn.Module):
@@ -26,11 +27,13 @@ class TestShowPickle(TestCase):
             torch.jit.save(m, tmp)
             tmp.flush()
             buf = io.StringIO()
-            torch.utils.show_pickle.main(["", tmp.name + "@*/data.pkl"], output_stream=buf)
+            torch.utils.show_pickle.main(
+                ["", tmp.name + "@*/data.pkl"], output_stream=buf
+            )
             output = buf.getvalue()
             self.assertRegex(output, "MyCoolModule")
             self.assertRegex(output, "weight")
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     run_tests()

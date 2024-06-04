@@ -56,6 +56,7 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
 from torch.testing._internal.distributed.checkpoint_utils import with_temp_dir
 
 c10d_ops = torch.ops.c10d
+funcol = torch.ops.c10d_functional
 
 
 class TestFullyShardForwardInputs(FSDPTestMultiThread):
@@ -672,6 +673,12 @@ class TestFullyShardGradientAccumulation(FSDPTest):
                 "mode": ["all", "root_only", "some_mlps"],
                 "reshard_after_backward": [False, True],
                 "offload_policy": [OffloadPolicy(), CPUOffloadPolicy()],
+                # For HSDP only:
+                # `True`: reduce-scatter only (no all-reduce) each microbatch
+                # until the last microbatch
+                # `False`: neither reduce-scatter nor all-reduce each
+                # microbatch until the last microbatch
+                "reduce_scatter_only": [False, True],
             },
             self._test_gradient_accumulation,
         )
@@ -683,15 +690,20 @@ class TestFullyShardGradientAccumulation(FSDPTest):
         mode: str,
         reshard_after_backward: bool,
         offload_policy: OffloadPolicy,
+        reduce_scatter_only: bool,  # for HSDP
     ):
         if (
-            not reshard_after_backward
-            and (reshard_after_forward is not False or mode == "some_mlps")
-        ) or (
-            isinstance(offload_policy, CPUOffloadPolicy)
-            and reshard_after_forward is not True
+            (
+                not reshard_after_backward
+                and (reshard_after_forward is not False or mode == "some_mlps")
+            )
+            or (
+                isinstance(offload_policy, CPUOffloadPolicy)
+                and reshard_after_forward is not True
+            )
+            or (mesh.ndim != 2 and reduce_scatter_only)
         ):
-            return  # skip since not common
+            return  # skip since not common or applicable
 
         torch.manual_seed(42)
         batch_size, lin_dim, num_mlps, num_microbatches = (2, 32, 3, 3)
@@ -713,29 +725,35 @@ class TestFullyShardGradientAccumulation(FSDPTest):
         ref_optim = torch.optim.Adam(ref_model.parameters(), lr=1e-2)
         optim = torch.optim.Adam(model.parameters(), lr=1e-2)
 
+        def set_grad_sync_flag(
+            module: nn.Module, is_last_microbatch: bool, recurse: bool = True
+        ):
+            if reduce_scatter_only:
+                module.set_requires_all_reduce(is_last_microbatch, recurse=recurse)
+            else:
+                module.set_requires_gradient_sync(is_last_microbatch, recurse=recurse)
+
+        def set_backward_flags(_model: nn.Module, is_last_microbatch: bool):
+            if mode == "all":
+                set_grad_sync_flag(_model, is_last_microbatch)
+                if not reshard_after_backward:
+                    _model.set_reshard_after_backward(is_last_microbatch)
+            elif mode == "some_mlps":
+                for mlp in model[1 : 1 + num_mlps_to_disable_reduce_scatter]:
+                    set_grad_sync_flag(mlp, is_last_microbatch)
+                    if not reshard_after_backward:
+                        mlp.set_reshard_after_backward(is_last_microbatch)
+            elif mode == "root_only":
+                set_grad_sync_flag(model, is_last_microbatch, recurse=False)
+                if not reshard_after_backward:
+                    model.set_reshard_after_backward(is_last_microbatch, recurse=False)
+
         torch.manual_seed(42 + self.rank + 1)
         for iter_idx in range(5):
             with CommDebugMode() as comm_mode:
                 for microbatch_idx in range(num_microbatches):
                     is_last_microbatch = microbatch_idx == num_microbatches - 1
-                    if mode == "all":
-                        model.set_requires_gradient_sync(is_last_microbatch)
-                        if not reshard_after_backward:
-                            model.set_reshard_after_backward(is_last_microbatch)
-                    elif mode == "some_mlps":
-                        for mlp in model[1 : 1 + num_mlps_to_disable_reduce_scatter]:
-                            mlp.set_requires_gradient_sync(is_last_microbatch)
-                            if not reshard_after_backward:
-                                mlp.set_reshard_after_backward(is_last_microbatch)
-                    elif mode == "root_only":
-                        model.set_requires_gradient_sync(
-                            is_last_microbatch, recurse=False
-                        )
-                        if not reshard_after_backward:
-                            model.set_reshard_after_backward(
-                                is_last_microbatch, recurse=False
-                            )
-
+                    set_backward_flags(model, is_last_microbatch)
                     inp = torch.randn(batch_size, lin_dim, device="cuda")
                     losses: List[torch.Tensor] = []
                     for _model in (ref_model, model):
@@ -760,10 +778,15 @@ class TestFullyShardGradientAccumulation(FSDPTest):
             elif mode == "root_only":
                 # Expect additional reduce-scatters for all MLPs
                 expected_reduce_scatter_count += (num_mlps) * (num_microbatches - 1)
-            self.assertEqual(reduce_scatter_count, expected_reduce_scatter_count)
             expected_all_reduce_count = (
                 expected_reduce_scatter_count if mesh.ndim == 2 else 0
             )
+            if reduce_scatter_only:
+                # Specially for HSDP if only reduce-scattering but not
+                # all-reducing until the last microbatch, expect one
+                # reduce-scatter per MLP plus for the root per microbatch
+                expected_reduce_scatter_count = (num_mlps + 1) * num_microbatches
+            self.assertEqual(reduce_scatter_count, expected_reduce_scatter_count)
             self.assertEqual(all_reduce_count, expected_all_reduce_count)
 
             # Expect one all-gather per MLP plus one for the root's linear in
@@ -905,7 +928,10 @@ class TestFullyShard2DTraining(FSDPTest):
         replicate(ref_model, device_ids=[self.rank], process_group=dp_pg)
         ref_optim = torch.optim.Adam(ref_model.parameters(), lr=1e-2, foreach=False)
         model.parallelize(
-            tp_mesh, dp_mesh, use_activation_checkpointing, reshard_after_forward
+            tp_mesh,
+            dp_mesh,
+            use_activation_checkpointing,
+            reshard_after_forward=reshard_after_forward,
         )
         optim = torch.optim.Adam(model.parameters(), lr=1e-2, foreach=False)
 
@@ -920,6 +946,62 @@ class TestFullyShard2DTraining(FSDPTest):
                 losses[-1].backward()
                 _optim.step()
             self.assertEqual(losses[0], losses[1])
+
+    @skip_if_lt_x_gpu(2)
+    @skipIfRocm
+    def test_tp_with_fsdp_offloading(self):
+        global_mesh = init_device_mesh(
+            "cuda", (1, self.world_size), mesh_dim_names=("dp", "tp")
+        )
+        dp_mesh, tp_mesh = global_mesh["dp"], global_mesh["tp"]
+        torch.manual_seed(42)
+        mlp_dim = 16
+        model = MLPStack(mlp_dim)
+        ref_model = copy.deepcopy(model).cuda()
+        ref_optim = torch.optim.Adam(ref_model.parameters(), lr=1e-2, foreach=False)
+        # Parallelize with N-way TP and 1-way FSDP
+        model.parallelize(
+            tp_mesh,
+            dp_mesh,
+            use_activation_checkpointing=False,
+            reshard_after_forward=True,
+            offload_policy=CPUOffloadPolicy(),
+        )
+        for param in model.parameters():
+            self.assertEqual(param.device.type, "cpu")
+        num_mlps = sum(isinstance(module, MLP) for module in model.modules())
+        optim = torch.optim.Adam(model.parameters(), lr=1e-2, foreach=False)
+
+        # NOTE: We still see the FSDP all-gather/reduce-scatter c10d ops
+        # called, but they will just be no-ops without issuing any kernels.
+        # We prefer to keep the no-op check at the c10d level, not in FSDP.
+        inp = torch.randn((4, mlp_dim), device="cuda")  # same on all ranks
+        for iter_idx in range(10):
+            ref_optim.zero_grad()
+            optim.zero_grad()
+
+            with CommDebugMode() as fwd_comm_mode:
+                loss = model(inp).sum()
+
+            fwd_comm_counts = fwd_comm_mode.get_comm_counts()
+            self.assertEqual(len(fwd_comm_counts), 2)
+            self.assertEqual(fwd_comm_counts[funcol.all_reduce], num_mlps)
+            self.assertEqual(fwd_comm_counts[c10d_ops._allgather_base_], num_mlps)
+            ref_loss = ref_model(inp).sum()
+            self.assertEqual(loss, ref_loss)
+
+            with CommDebugMode() as bwd_comm_mode:
+                loss.backward()
+            bwd_comm_counts = bwd_comm_mode.get_comm_counts()
+            self.assertEqual(len(bwd_comm_counts), 3)
+            # First MLP's input gradient does not need to be all-reduced
+            self.assertEqual(bwd_comm_counts[funcol.all_reduce], num_mlps - 1)
+            self.assertEqual(bwd_comm_counts[c10d_ops._allgather_base_], num_mlps)
+            self.assertEqual(bwd_comm_counts[c10d_ops._reduce_scatter_base_], num_mlps)
+            ref_loss.backward()
+
+            optim.step()
+            ref_optim.step()
 
     @skip_if_lt_x_gpu(2)
     @with_temp_dir
@@ -1081,7 +1163,10 @@ class TestFullyShardNDTraining(FSDPTest):
         replicate(ref_model, device_ids=[self.rank], process_group=dp_pg)
         ref_optim = torch.optim.Adam(ref_model.parameters(), lr=1e-2, foreach=foreach)
         model.parallelize(
-            tp_mesh, dp_mesh, use_activation_checkpointing, reshard_after_forward
+            tp_mesh,
+            dp_mesh,
+            use_activation_checkpointing,
+            reshard_after_forward=reshard_after_forward,
         )
         optim = torch.optim.Adam(model.parameters(), lr=1e-2, foreach=foreach)
 

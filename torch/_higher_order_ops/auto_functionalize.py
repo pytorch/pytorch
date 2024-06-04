@@ -251,6 +251,7 @@ def do_auto_functionalize(
         # Can be None if input was `Tensor(a!)?`
         if unwrapped_out is None:
             continue
+
         # We only handle Tensor or List[Tensor] here for now.
         def sync_update(o, orig_arg):
             ctx.replace(orig_arg, o)
