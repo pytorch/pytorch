@@ -1915,6 +1915,7 @@ class _CudaDeviceProperties:
     is_multi_gpu_board: _int
     max_threads_per_multi_processor: _int
     gcnArchName: str
+    l2CacheSize: str
 
 # Functions related to SDPA
 class _SDPAParams:
