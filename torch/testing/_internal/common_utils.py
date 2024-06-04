@@ -5001,13 +5001,10 @@ def munge_exc(e, *, suppress_suffix=True, suppress_prefix=True, file=None, skip=
 def get_backend_op_dict(device='xpu'):
     backend_op_dict = {}
     if TEST_XPU and device == 'xpu':
-        device = 'xpu'
-        xpu_op_db = os.getcwd() + "/xpu/xpu_op_db.yaml" if os.path.exists(os.getcwd() + "/xpu/xpu_op_db.yaml") \
-            else os.getcwd() + "../xpu/xpu_op_db.yaml"
-        if os.path.exists(xpu_op_db):
+        xpu_op_db = CI_TEST_PREFIX + "/" + device + "/op_db.yaml"
+        try:
             with open(xpu_op_db) as stream:
-                try:
-                    backend_op_dict = yaml.safe_load(stream)
-                except yaml.YAMLError:
-                    print("Error in loading xpu_op_db.yaml.")
+                backend_op_dict = yaml.safe_load(stream)
+        except yaml.YAMLError or FileExistsError:
+            print("Error in loading op_db.yaml.")
     return backend_op_dict
