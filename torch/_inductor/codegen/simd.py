@@ -1184,7 +1184,6 @@ class SIMDScheduling(BaseScheduling):
     def select_index_dtype(cls, node_schedule, numel, reduction_numel):
         # Gather all used buffer names
         buffer_names = set()
-
         for node in node_schedule:
             if not isinstance(node, scheduler.BaseSchedulerNode):
                 continue
@@ -1193,6 +1192,7 @@ class SIMDScheduling(BaseScheduling):
             buffer_names.update(node.used_buffer_names())
 
         # Get buffers objects
+
         def _get_buffer(name: str) -> Union[ir.Buffer, ir.TensorBox]:
             buf = V.graph.get_buffer(name)
             if buf is None:
@@ -1206,9 +1206,7 @@ class SIMDScheduling(BaseScheduling):
         # conservative here.
         total_numel = numel * reduction_numel
 
-        if SIMDScheduling.can_use_32bit_indexing(
-            total_numel, buffers
-        ):
+        if SIMDScheduling.can_use_32bit_indexing(total_numel, buffers):
             return cls.int32_type
         return cls.int64_type
 

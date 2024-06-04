@@ -1015,7 +1015,7 @@ def pointwise_cat(inputs, dim=0):
 
             # if we're concatting [4], [2]
             # when we index the second tensor for 5 we want to index 5 - 4
-            # Use Identity to prevent expansion of index * stride to keep expression 
+            # Use Identity to prevent expansion of index * stride to keep expression
             # in same int bitwidth as shape
             idx_load[dim] = Identity(idx_load[dim] - inputs_ranges[i][0])
 

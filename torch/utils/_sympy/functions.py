@@ -397,8 +397,9 @@ class RoundDecimal(sympy.Function):
 
 class Identity(sympy.Function):
     """
-    Prevents expansion and other optimization of expression
+    Prevents expansion and other optimizations
     """
+
     def __repr__(self):
         return f"Identity({self.args[0]})"
 
@@ -441,7 +442,6 @@ def make_opaque_unary_fn(name):
 
 
 # Keep in sync with math_op_names in torch/fx/experimental/sym_node.py
-OpaqueUnaryFn_sqrt = make_opaque_unary_fn("sqrt")
 OpaqueUnaryFn_sqrt = make_opaque_unary_fn("sqrt")
 OpaqueUnaryFn_cos = make_opaque_unary_fn("cos")
 OpaqueUnaryFn_cosh = make_opaque_unary_fn("cosh")
