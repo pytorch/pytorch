@@ -127,6 +127,48 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
             inductor_out = compiled_matmul_cat_col(*inputs)
             self.assertTrue(same(eager_out, inductor_out, tol=0.001))
 
+    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
+    @skip_if_lt_x_gpu(2)
+    # TODO: somehow inductor bg compile threads are causing hangs at exit with distributed work dtor
+    @patch.object(torch._inductor.config, "compile_threads", 1)
+    def test_allreduce_inductor_cudagraph_trees(self):
+        """
+        Tests whether cudagraph trees support all_reduce from nccl
+        """
+        import torch.distributed as dist
+
+        # dist.all_reduce is an inplace op in eager mode but a functionanlized op in compiled mode.
+        # so we define eager_func and func separately for the same semantic.
+        def eager_func(x):
+            y = x * x
+            dist.all_reduce(y, op=dist.ReduceOp.SUM)
+            x = torch.nn.functional.silu(x)
+            return x * y
+
+        def func(x):
+            y = x * x
+            y = dist.all_reduce(y, op=dist.ReduceOp.SUM)
+            x = torch.nn.functional.silu(x)
+            return x * y
+
+        options = {
+            "triton.cudagraphs": True,
+            "triton.cudagraph_trees": True,
+        }
+
+        with _dynamo_dist_per_rank_init(self.rank, self.world_size):
+            compiled_func = torch.compile(
+                func, backend="inductor", fullgraph=True, options=options, dynamic=None
+            )
+
+            for nelem in [1024, 2048, 4096]:
+                x = torch.randn(nelem, device="cuda", dtype=torch.bfloat16)
+                golden_out = eager_func(x)
+
+                for _ in range(3):
+                    compiled_out = compiled_func(x)
+                    self.assertEqual(golden_out, compiled_out)
+
     def test_c10d_functional_tagged_pt2_compliant(self):
         op = torch.ops._c10d_functional.all_reduce.default
         self.assertIn(torch.Tag.pt2_compliant_tag, op.tags)
