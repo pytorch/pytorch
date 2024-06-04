@@ -503,16 +503,6 @@ class TS2FXGraphConverter:
         output_name = node.output().debugName()
         self.name_to_node[output_name] = fx_node
 
-    def convert_custom_op(self, node: torch._C.Node):
-        target = get_op_overload(node)
-
-        args, kwargs = self.get_args_kwargs(node, target._schema)
-
-        fx_node = self.fx_graph.call_function(target, args, kwargs)
-
-        output_name = node.output().debugName()
-        self.name_to_node[output_name] = fx_node
-
     def convert_node(self, node: torch._C.Node):
         node_kind = node.kind()
 
