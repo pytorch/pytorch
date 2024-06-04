@@ -136,6 +136,8 @@ unlift_effect_tokens = False
 # of tensors in question.
 fake_tensor_propagate_real_tensors = False
 
+trace_distributed = False
+
 # Controls the default graph output format used by draw_graph
 # Supported formats are defined here https://graphviz.org/docs/outputs/
 torch_compile_graph_format = os.environ.get("TORCH_COMPILE_GRAPH_FORMAT", "svg")
