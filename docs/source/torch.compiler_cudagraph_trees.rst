@@ -211,7 +211,7 @@ to re-record CUDAGraphs. However, if input tensor shapes change on every invocat
 we suggest to pad input tensors to a few fixed shapes to still enjoy benefits from CUDAGraph.
 
 
-NCCL support
+NCCL Support
 ------------
 
 CUDAGraph Trees support functions with nccl operators. While CUDAGraph Trees perform per-device record for CUDAGraph, NCCL support allows cross-device
