@@ -13,7 +13,7 @@ class TestAutoload(TestCase):
         super().setUp()
 
         self.device_backend_path = os.path.abspath(
-            os.path.join(os.path.dirname(__file__), "device_backend")
+            os.path.join(os.path.dirname(__file__), "../cpp_extensions")
         )
 
         # Add the extension to the system path
@@ -30,10 +30,10 @@ class TestAutoload(TestCase):
         value = os.getenv("IS_CUSTOM_DEVICE_BACKEND_IMPORTED", "false")
         self.assertEqual(value, "true")
 
-        # Test the function defined in backend_pkg/__init__.py
-        import backend_pkg
-        self.assertTrue(hasattr(backend_pkg, "apply_patch"))
-        self.assertEqual(backend_pkg.apply_patch(), "success")
+        # Test the function defined in test/cpp_extensions/autoload_extension/__init__.py
+        import autoload_extension
+        self.assertTrue(hasattr(autoload_extension, "apply_patch"))
+        self.assertEqual(autoload_extension.apply_patch(), "success")
 
     def tearDown(self):
         super().tearDown()
