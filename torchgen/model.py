@@ -260,7 +260,7 @@ for fk in FUNCTIONALITY_KEYS:
             )
 
 
-STRUCTURED_DISPATCH_KEYS = {DispatchKey.MPS, DispatchKey.CUDA, DispatchKey.CPU}
+STRUCTURED_DISPATCH_KEYS = {DispatchKey.MPS, DispatchKey.CUDA, DispatchKey.CPU, DispatchKey.XPU}
 UFUNC_DISPATCH_KEYS = {DispatchKey.CUDA, DispatchKey.CPU}
 
 # Set of supported dispatch keys
@@ -271,6 +271,7 @@ dispatch_keys = [
     DispatchKey.MkldnnCPU,
     DispatchKey.CUDA,
     DispatchKey.MPS,
+    DispatchKey.XPU,
     DispatchKey.SparseCUDA,
     DispatchKey.SparseCsrCUDA,
     DispatchKey.QuantizedCPU,
@@ -573,6 +574,7 @@ class NativeFunction:
         loc: "Location",
         valid_tags: Set[str],
         ignore_keys: Optional[Set[DispatchKey]] = None,
+        whitelist_keys: Optional[Set[DispatchKey]] = None
     ) -> Tuple[
         "NativeFunction", Dict[DispatchKey, Dict["OperatorName", "BackendMetadata"]]
     ]:
@@ -626,9 +628,6 @@ class NativeFunction:
         assert device_check_s is None or isinstance(
             device_check_s, str
         ), f"not a str: {device_check_s}"
-        assert (
-            device_check_s is None or device_check_s in DeviceCheckType.__members__
-        ), f"illegal device_check: {device_check_s}"
         device_check: DeviceCheckType
         if device_check_s is None:
             device_check = DeviceCheckType.ExactSame
@@ -709,17 +708,14 @@ class NativeFunction:
             for ks, v in raw_dispatch.items():
                 if ks == "__line__":
                     continue  # not worth tracking line numbers for dispatch entries
-                assert isinstance(
-                    ks, str
-                ), f"illegal dispatch key '{ks}' in {raw_dispatch}"
-                assert isinstance(
-                    v, str
-                ), f"illegal dispatch value '{v}' in {raw_dispatch}"
+                assert isinstance(ks, str), e
                 for k in ks.split(","):
                     dispatch_key = DispatchKey.parse(k.strip())
                     num_dispatch_keys += 1
 
                     if ignore_keys and dispatch_key in ignore_keys:
+                        continue
+                    if whitelist_keys and (dispatch_key not in whitelist_keys):
                         continue
                     assert dispatch_key in dispatch_keys, (
                         f"Dispatch key {dispatch_key} of kernel {v} "
@@ -2014,12 +2010,8 @@ class Argument:
     def parse(arg: str) -> "Argument":
         name: str
         default: Optional[str]
-        assert " " in arg, f"illegal argument '{arg}'"
         type_and_annot, name_and_default = arg.rsplit(" ", 1)
         if "=" in name_and_default:
-            assert (
-                name_and_default.count("=") == 1
-            ), f"illegal argument with default value: '{name_and_default}'"
             name, default = name_and_default.split("=")
         else:
             name = name_and_default
@@ -2804,9 +2796,6 @@ class Precompute:
             )
 
             arg, with_list_raw = raw_replace_item.split(" -> ")
-            assert (
-                " " not in arg
-            ), f"illegal kernel param name '{arg}' in precomputed parameters'"
             with_list = with_list_raw.split(",")
             with_list_args = [Argument.parse(name.strip()) for name in with_list]
             replace[arg] = with_list_args

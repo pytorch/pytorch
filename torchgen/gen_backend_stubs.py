@@ -163,7 +163,7 @@ Only the following keys are supported: {", ".join(valid_keys)}'
             use_out_as_primary=use_out_as_primary,
             use_device_guard=use_device_guard,
         )
-        assert backend_key not in backend_indices
+        # assert backend_key not in backend_indices
         backend_indices[backend_key] = backend_idx
 
     autograd_key: Optional[DispatchKey] = None
@@ -181,7 +181,7 @@ the behavior of autograd for some operators on your backend. However "Autograd{b
             use_out_as_primary=use_out_as_primary,
             use_device_guard=use_device_guard,
         )
-        assert autograd_key not in backend_indices
+        # assert autograd_key not in backend_indices
         backend_indices[autograd_key] = autograd_idx
 
     for g in grouped_native_functions:

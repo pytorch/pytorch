@@ -43,7 +43,15 @@ def gen_registration_headers(
     backend_index: BackendIndex,
     per_operator_headers: bool,
     rocm: bool,
+    backend_only: bool = False,
 ) -> List[str]:
+    if backend_only and backend_index.dispatch_key == DispatchKey.XPU:
+        return [
+                "#include <ATen/ops/empty.h>",
+                "#include <ATen/ops/empty_strided.h>",
+                "#include <ATen/ops/_copy_from_and_resize.h>",
+                "#include <ATen/ops/_copy_from.h>"
+            ]
     if per_operator_headers:
         headers = ["#include <ATen/ops/as_strided_native.h>"]
     else:
@@ -90,6 +98,7 @@ def gen_empty_impl_names(
         DispatchKey.CompositeExplicitAutogradNonFunctional,
         DispatchKey.QuantizedCPU,
         DispatchKey.QuantizedCUDA,
+        DispatchKey.XPU,
     ):
         empty_impl = "at::empty"
         empty_strided_impl = "at::empty_strided"
@@ -107,8 +116,21 @@ def gen_create_out_helper(backend_index: BackendIndex) -> List[str]:
     if empty_impl is None:
         return []
 
-    return [
-        f"""
+    if(backend_index.dispatch_key is DispatchKey.XPU):
+        return [
+            f"""
+Tensor create_out(IntArrayRef sizes, IntArrayRef strides, const TensorOptions &options) {{
+    if (strides.empty()) {{
+        return at::empty(sizes, {empty_options});
+    }} else {{
+        return at::empty_strided(sizes, strides, {empty_options});
+    }}
+}}
+"""
+        ]
+    else:
+        return [
+            f"""
 Tensor create_out(IntArrayRef sizes, IntArrayRef strides, const TensorOptions &options) {{
   if (strides.empty()) {{
       return {empty_impl}(sizes, {empty_options});
@@ -117,7 +139,7 @@ Tensor create_out(IntArrayRef sizes, IntArrayRef strides, const TensorOptions &o
   }}
 }}
 """
-    ]
+        ]
 
 
 def gen_maybe_create_proxy_helper(backend_index: BackendIndex) -> List[str]:
@@ -632,6 +654,7 @@ if (C10_UNLIKELY(maybe_proxy.has_value())) {
                 DispatchKey.CPU,
                 DispatchKey.CUDA,
                 DispatchKey.MPS,
+                DispatchKey.XPU,
                 DispatchKey.CompositeExplicitAutogradNonFunctional,
             )
             return f"""{maybe_set_guard_line}
