@@ -286,7 +286,7 @@ else
       fi
       if [[ "$USE_SPLIT_BUILD" == "true" ]]; then
         WERROR=1 BUILD_LIBTORCH_WHL=1 BUILD_PYTHON_ONLY=0 python setup.py bdist_wheel
-        WERROR=1 BUILD_LIBTORCH_WHL=0 BUILD_PYTHON_ONLY=1 python setup.py bdist_wheel
+        WERROR=1 BUILD_LIBTORCH_WHL=0 BUILD_PYTHON_ONLY=1 python setup.py bdist_wheel --cmake
       else
         WERROR=1 python setup.py clean
         WERROR=1 python setup.py bdist_wheel
@@ -297,7 +297,7 @@ else
       fi
       if [[ "$USE_SPLIT_BUILD" == "true" ]]; then
         BUILD_LIBTORCH_WHL=1 BUILD_PYTHON_ONLY=0 python setup.py bdist_wheel
-        BUILD_PYTHON_ONLY=1 BUILD_LIBTORCH_WHL=0 python setup.py bdist_wheel
+        BUILD_PYTHON_ONLY=1 BUILD_LIBTORCH_WHL=0 python setup.py bdist_wheel --cmake
       else
         python setup.py clean
         python setup.py bdist_wheel
