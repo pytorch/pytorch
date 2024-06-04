@@ -329,6 +329,7 @@ _a100_default_config = {
 def _get_default_config_fwd(query) -> Tuple[int, int, int, int]:
     dtype = query.get_dtype()
     head_dim = query.get_size()[-1]
+    query_len = query.get_size()[-2]
     default_config = None
 
     if head_dim <= 256 and torch.cuda.get_device_capability() >= (9, 0):  # H100
@@ -348,6 +349,15 @@ def _get_default_config_fwd(query) -> Tuple[int, int, int, int]:
             default_config = (32, 16, 4, 3)
         else:
             default_config = (64, 32, 4, 3)
+
+    # For short query, chose a config with BLOCK_M <= query_len
+    assert query_len >= 16, "Query length must be at least 32 to use FlexAttention kernel. Use FlexDecoding for shorter queries. "
+    if (query_len <= 16) and default_config[0] > 16:
+        default_config = (16, int(default_config[0]*default_config[1]/32), default_config[2], default_config[3])
+    elif (query_len <= 32) and default_config[0] > 32:
+        default_config = (32, int(default_config[0]*default_config[1]/32), default_config[2], default_config[3])
+    elif (query_len <= 64) and default_config[0] > 64:
+        default_config = (64, int(default_config[0]*default_config[1]/64), default_config[2], default_config[3])
 
     return default_config
 
