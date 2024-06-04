@@ -1,7 +1,7 @@
 import copy
 import itertools
 import warnings
-
+import inspect
 import torch
 import torch.nn as nn
 import torch.ao.nn.quantized as nnq
@@ -636,7 +636,11 @@ def swap_module(mod, mapping, custom_module_class_mapping, use_precomputed_fake_
                 weight_qparams = get_qparam_dict(weight_post_process)
                 new_mod = qmod.from_float(mod, weight_qparams)
             else:
-                new_mod = qmod.from_float(mod, use_precomputed_fake_quant=use_precomputed_fake_quant)
+                sig = inspect.signature(qmod.from_float)
+                if 'use_precomputed_fake_quant' in sig.parameters:
+                    new_mod = qmod.from_float(mod, use_precomputed_fake_quant=use_precomputed_fake_quant)
+                else:
+                    new_mod = qmod.from_float(mod)
             swapped = True
 
         if swapped:
