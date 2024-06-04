@@ -11,7 +11,7 @@ def _collect_view_to_as_strided_users(node_list):
     return view_to_as_strided_users
 
 
-def _collect_primal_inputs_used_by_set(node_list):
+def _collect_primal_inputs_used_by_set_op(node_list):
     primal_inputs_tensor_only = [x for x in list(filter(torch._functorch.partitioners._is_primal, node_list)) if isinstance(x.meta.get('val', None), torch.Tensor)]
     primal_inputs_used = set()
     primal_set_info_dict = {}
@@ -51,7 +51,7 @@ def reinplace_primal_set_from_allgather_output(mod):
     """
 
     node_list = list(mod.graph.nodes)
-    primal_inputs_used, primal_set_info_dict = _collect_primal_inputs_used_by_set(node_list)
+    primal_inputs_used, primal_set_info_dict = _collect_primal_inputs_used_by_set_op(node_list)
     view_to_as_strided_users = _collect_view_to_as_strided_users(node_list)
 
     as_strided_to_primal = {}
@@ -119,7 +119,7 @@ def move_primal_set_to_end_of_fwd_graph(mod):
         if node.target == "output":
             return_op = node
             break
-    _, primal_set_info_dict = _collect_primal_inputs_used_by_set(node_list)
+    _, primal_set_info_dict = _collect_primal_inputs_used_by_set_op(node_list)
     for primal_node in primal_set_info_dict:
         set_node = primal_set_info_dict[primal_node]
         as_strided_node = set_node.args[1]
