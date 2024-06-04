@@ -4,6 +4,7 @@
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/native/Resize.h>
 #include <ATen/native/TensorShape.h>
+#include <c10/cuda/CUDAGraphsC10Utils.h>
 #include <c10/util/TypeCast.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -186,7 +187,7 @@ static inline std::vector<int64_t> get_split_base_addrs(
     const at::Tensor& tensor,
     at::IntArrayRef split_sizes,
     int64_t dim) {
-  const auto* data_ptr = static_cast<char*>(tensor.data_ptr());
+  const auto* data_ptr = static_cast<const char*>(tensor.const_data_ptr());
   const auto strides = tensor.strides();
   const auto element_sz = tensor.element_size();
   int64_t off = 0;
@@ -703,12 +704,15 @@ void split_with_sizes_copy_out_cuda(
     IntArrayRef split_sizes,
     int64_t dim,
     TensorList out) {
+  const bool is_capturing = at::cuda::currentStreamCaptureStatusMayInitCtx() !=
+      at::cuda::CaptureStatus::None;
   bool contiguous_no_cast = self.is_non_overlapping_and_dense();
   for (const auto& t : out) {
     contiguous_no_cast &= t.is_non_overlapping_and_dense();
     contiguous_no_cast &= (t.dtype() == self.dtype());
   }
-  if (contiguous_no_cast) {
+  // TODO(yifu): make the fast path work for CUDA graph
+  if (!is_capturing && contiguous_no_cast) {
     // Perform equivalent checks performed by the composite impl
     if (dim < 0) {
       dim = at::maybe_wrap_dim(dim, self.dim());

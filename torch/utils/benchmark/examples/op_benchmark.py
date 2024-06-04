@@ -9,6 +9,7 @@ import torch
 from torch.utils.benchmark import Timer
 from torch.utils.benchmark.op_fuzzers.binary import BinaryOpFuzzer
 from torch.utils.benchmark.op_fuzzers.unary import UnaryOpFuzzer
+import operator
 
 
 _MEASURE_TIME = 1.0
@@ -75,7 +76,7 @@ def run(n, stmt, fuzzer_cls):
             order_len = max(order_len, len(order))
             steps_len = max(steps_len, len(steps))
 
-    parsed_results.sort(key=lambda x: x[2])
+    parsed_results.sort(key=operator.itemgetter(2))
 
     print(f"stmt: {stmt}")
     print(f" diff    faster{'':>17}{' ' * name_len} ", end="")

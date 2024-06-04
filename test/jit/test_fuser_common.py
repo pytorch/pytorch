@@ -3,9 +3,11 @@
 import torch
 from torch.testing._internal.jit_utils import JitTestCase
 
+
 class TestFuserCommon(JitTestCase):
     def test_autodiff_fallback(self):
         for rq in [True, False]:
+
             @torch.jit.script
             def fn(x):
                 return torch.max(x**2.0, x**3.0)

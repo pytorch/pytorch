@@ -1,6 +1,5 @@
 # Owner(s): ["oncall: quantization"]
 import copy
-import sys
 
 import unittest
 from typing import List
@@ -8,7 +7,7 @@ from typing import List
 import torch
 import torch._export
 from torch.ao.quantization.quantize_pt2e import convert_pt2e, prepare_pt2e
-from torch.ao.quantization.quantizer import Quantizer
+from torch.ao.quantization.quantizer import QuantizationAnnotation, Quantizer
 from torch.ao.quantization.quantizer.xnnpack_quantizer import (
     get_symmetric_quantization_config,
 )
@@ -61,9 +60,6 @@ _QUANT_OPS = {
 
 # TODO: rename to TestPortMetadataPass to align with the util name?
 @unittest.skipIf(IS_WINDOWS, "Windows not yet supported for torch.compile")
-@unittest.skipIf(
-    sys.version_info >= (3, 12), "torch.compile is not supported on python 3.12+"
-)
 class TestMetaDataPorting(QuantizationTestCase):
     def _test_quant_tag_preservation_through_decomp(
         self, model, example_inputs, from_node_to_tags
@@ -459,4 +455,68 @@ class TestMetaDataPorting(QuantizationTestCase):
         from_node_to_tags = {}
         self._test_quant_tag_preservation_through_decomp(
             m, example_inputs, from_node_to_tags
+        )
+
+    def test_no_metadata_porting_through_unknown_ops(self):
+        """
+        Model under test
+        matmul -> add -> relu
+        matmul has get_attr as first input, but the quantization_tag should not be
+        propagated to add even if it's part of a chain that ends at get_attr
+        """
+
+        class MatmulWithConstInput(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.register_parameter("w", torch.nn.Parameter(torch.rand(8, 16)))
+
+            def forward(self, x, y):
+                x = torch.matmul(self.w, x)
+                z = x + y
+                return torch.nn.functional.relu(z)
+
+        class BackendAQuantizer(Quantizer):
+            def annotate(self, gm: torch.fx.GraphModule) -> torch.fx.GraphModule:
+                backend_string = "BackendA"
+                qconfig = get_symmetric_quantization_config()
+                for n in gm.graph.nodes:
+                    if n.op != "call_function":
+                        continue
+
+                    n.meta["quantization_annotation"] = QuantizationAnnotation(
+                        input_qspec_map={n.args[0]: qconfig.input_activation},
+                        output_qspec=qconfig.output_activation,
+                    )
+
+                    tag = str(n.target)
+                    n.meta["quantization_tag"] = tag
+                    for arg in n.args:
+                        if arg.op == "get_attr":
+                            arg.meta["quantization_tag"] = tag
+
+            def validate(self, model: torch.fx.GraphModule) -> None:
+                pass
+
+        example_inputs = (torch.randn(16, 24), torch.randn(8, 24))
+        get_attr_tags = {"aten.matmul.default"}
+        quantize_per_tensor_tensor_tags = {
+            "aten.matmul.default",
+            "aten.add.Tensor",
+            "aten.relu.default",
+        }
+        dequantize_per_tensor_tensor_tags = {
+            "aten.matmul.default",
+            "aten.add.Tensor",
+            "aten.relu.default",
+        }
+        node_tags = {
+            "get_attr": get_attr_tags,
+            torch.ops.quantized_decomposed.quantize_per_tensor.default: quantize_per_tensor_tensor_tags,
+            torch.ops.quantized_decomposed.dequantize_per_tensor.default: dequantize_per_tensor_tensor_tags,
+        }
+        m = self._test_metadata_porting(
+            MatmulWithConstInput(),
+            example_inputs,
+            BackendAQuantizer(),
+            node_tags,
         )

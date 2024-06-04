@@ -7,18 +7,25 @@
 # This source code is licensed under the BSD license found in the
 # LICENSE file in the root directory of this source tree.
 import pytest
+
 import torch
 from torch import nn
 
 from torch.distributed.pipeline.sync import Pipe
 from torch.distributed.pipeline.sync.skip import pop, skippable, stash
-from torch.distributed.pipeline.sync.skip.portal import PortalBlue, PortalCopy, PortalOrange
+from torch.distributed.pipeline.sync.skip.portal import (
+    PortalBlue,
+    PortalCopy,
+    PortalOrange,
+)
 from torch.distributed.pipeline.sync.utils import partition_model
 from torch.testing._internal.common_utils import run_tests
 
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="cuda required")
-@pytest.mark.parametrize("balance", [[3], [1, 2], [2, 1], [1, 1, 1]], ids=["3", "1:2", "2:1", "1:1:1"])
+@pytest.mark.parametrize(
+    "balance", [[3], [1, 2], [2, 1], [1, 1, 1]], ids=["3", "1:2", "2:1", "1:1:1"]
+)
 @pytest.mark.parametrize("checkpoint", ["never", "always", "except_last"])
 def test_1to3(balance, checkpoint, setup_rpc):
     if torch.cuda.device_count() < len(balance):
@@ -67,8 +74,12 @@ def test_1to3(balance, checkpoint, setup_rpc):
     loss = output.local_value().mean()
     loss.backward()
 
-    assert torch.allclose(output.local_value().norm(), torch.tensor(1039.0, device=out_device), atol=6e-1)
-    assert torch.allclose(input.grad.norm(), torch.tensor(0.0004533053, device=in_device))
+    assert torch.allclose(
+        output.local_value().norm(), torch.tensor(1039.0, device=out_device), atol=6e-1
+    )
+    assert torch.allclose(
+        input.grad.norm(), torch.tensor(0.0004533053, device=in_device)
+    )
 
 
 def test_none_skip(setup_rpc):

@@ -1,5 +1,6 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/Dispatch.h>
+#include <ATen/cuda/CUDAContext.h>
 #include <ATen/native/ForeachUtils.h>
 #include <ATen/native/cuda/ForeachFunctors.cuh>
 #include <ATen/native/cuda/ForeachMinMaxFunctors.cuh>
@@ -231,16 +232,18 @@ FOREACH_BINARY_OP_LIST(
     div,
     std::divides,
     /*division_op*/ true);
+// NOTE(crcrpar): `all_types_half_bfloat16` does not cover bool, so temporarily
+// set `division_op` to true.
 FOREACH_BINARY_OP_LIST(
     all_types_half_bfloat16,
     clamp_max,
     minimum,
-    /*division_op*/ false);
+    /*division_op*/ true);
 FOREACH_BINARY_OP_LIST(
     all_types_half_bfloat16,
     clamp_min,
     maximum,
-    /*division_op*/ false);
+    /*division_op*/ true);
 // NOTE(crcrpar): [Why is foreach_pow's division_op=true?]
 // To push integer inputs to slow path. This is because with integer type inputs
 // the fast path behaves differently from the slow one. Need to investigate
@@ -282,42 +285,44 @@ struct Copy<dst_t, c10::complex<float>> {
   }
 };
 
-#define AT_DISPATCH_SOURCE_TYPES(TYPE, NAME, ...)                              \
-  AT_DISPATCH_SWITCH(                                                          \
-      TYPE,                                                                    \
-      NAME,                                                                    \
-      AT_PRIVATE_CASE_TYPE_USING_HINT(                                         \
-          at::ScalarType::Byte, src_t, __VA_ARGS__)                            \
-          AT_PRIVATE_CASE_TYPE_USING_HINT(                                     \
-              at::ScalarType::Char, src_t, __VA_ARGS__)                        \
-              AT_PRIVATE_CASE_TYPE_USING_HINT(                                 \
-                  at::ScalarType::Long, src_t, __VA_ARGS__)                    \
-                  AT_PRIVATE_CASE_TYPE_USING_HINT(                             \
-                      at::ScalarType::Short, src_t, __VA_ARGS__)               \
-                      AT_PRIVATE_CASE_TYPE_USING_HINT(                         \
-                          at::ScalarType::Double, src_t, __VA_ARGS__)          \
-                          AT_PRIVATE_CASE_TYPE_USING_HINT(                     \
-                              at::ScalarType::Float, src_t, __VA_ARGS__)       \
-                              AT_PRIVATE_CASE_TYPE_USING_HINT(                 \
-                                  at::ScalarType::ComplexDouble,               \
-                                  src_t,                                       \
-                                  __VA_ARGS__)                                 \
-                                  AT_PRIVATE_CASE_TYPE_USING_HINT(             \
-                                      at::ScalarType::ComplexFloat,            \
-                                      src_t,                                   \
-                                      __VA_ARGS__)                             \
-                                      AT_PRIVATE_CASE_TYPE_USING_HINT(         \
-                                          at::ScalarType::Half,                \
-                                          src_t,                               \
-                                          __VA_ARGS__)                         \
-                                          AT_PRIVATE_CASE_TYPE_USING_HINT(     \
-                                              at::ScalarType::BFloat16,        \
-                                              src_t,                           \
-                                              __VA_ARGS__)                     \
-                                              AT_PRIVATE_CASE_TYPE_USING_HINT( \
-                                                  at::ScalarType::Bool,        \
-                                                  src_t,                       \
-                                                  __VA_ARGS__))
+#define AT_DISPATCH_SOURCE_TYPES(TYPE, NAME, ...)                                  \
+  AT_DISPATCH_SWITCH(                                                              \
+      TYPE,                                                                        \
+      NAME,                                                                        \
+      AT_PRIVATE_CASE_TYPE_USING_HINT(                                             \
+          at::ScalarType::Byte, src_t, __VA_ARGS__)                                \
+          AT_PRIVATE_CASE_TYPE_USING_HINT(                                         \
+              at::ScalarType::Char, src_t, __VA_ARGS__)                            \
+              AT_PRIVATE_CASE_TYPE_USING_HINT(                                     \
+                  at::ScalarType::Long, src_t, __VA_ARGS__)                        \
+                  AT_PRIVATE_CASE_TYPE_USING_HINT(                                 \
+                      at::ScalarType::Short, src_t, __VA_ARGS__)                   \
+                      AT_PRIVATE_CASE_TYPE_USING_HINT(                             \
+                          at::ScalarType::Int, src_t, __VA_ARGS__)                 \
+                          AT_PRIVATE_CASE_TYPE_USING_HINT(                         \
+                              at::ScalarType::Double, src_t, __VA_ARGS__)          \
+                              AT_PRIVATE_CASE_TYPE_USING_HINT(                     \
+                                  at::ScalarType::Float, src_t, __VA_ARGS__)       \
+                                  AT_PRIVATE_CASE_TYPE_USING_HINT(                 \
+                                      at::ScalarType::ComplexDouble,               \
+                                      src_t,                                       \
+                                      __VA_ARGS__)                                 \
+                                      AT_PRIVATE_CASE_TYPE_USING_HINT(             \
+                                          at::ScalarType::ComplexFloat,            \
+                                          src_t,                                   \
+                                          __VA_ARGS__)                             \
+                                          AT_PRIVATE_CASE_TYPE_USING_HINT(         \
+                                              at::ScalarType::Half,                \
+                                              src_t,                               \
+                                              __VA_ARGS__)                         \
+                                              AT_PRIVATE_CASE_TYPE_USING_HINT(     \
+                                                  at::ScalarType::BFloat16,        \
+                                                  src_t,                           \
+                                                  __VA_ARGS__)                     \
+                                                  AT_PRIVATE_CASE_TYPE_USING_HINT( \
+                                                      at::ScalarType::Bool,        \
+                                                      src_t,                       \
+                                                      __VA_ARGS__))
 
 namespace {
 
@@ -369,7 +374,9 @@ struct CopyFunctor {
 #pragma unroll
         for (int ii = 0; ii < kILP; ii++) {
           const auto i = i_start + threadIdx.x + ii * blockDim.x;
-          src_args[ii] = src_ptr[i];
+          if (i < n && i < chunk_size) {
+            src_args[ii] = src_ptr[i];
+          }
         }
 #pragma unroll
         for (int ii = 0; ii < kILP; ii++) {

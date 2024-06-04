@@ -83,9 +83,11 @@ constant_fold_functions = [
     torch._assert,
     torch._utils._get_device_index,
     torch._C._get_cublas_allow_tf32,
+    torch._C._is_any_autocast_enabled,
     torch.cuda.get_device_properties,
     torch.cuda.is_available,
     torch.distributed.is_available,
+    torch.get_autocast_dtype,
     torch.get_autocast_gpu_dtype,
     torch.get_default_dtype,
     torch.is_autocast_cache_enabled,
@@ -181,7 +183,14 @@ class TorchCtxManagerClassVariable(BaseTorchVariable):
         # We can't do isinstance(value, type) check because some ctx managers
         # are implemented as a function decorated by contextlib.contextmanager,
         # E.g., torch._functorch.vmap.vmap_increment_nesting.
-        return hashable(value) and value in supported_ctx_manager_classes
+        return (
+            # Context manager type or function with @contextmanager is callable
+            callable(value)
+            and (
+                hashable(value)  # accesses value.__hash__()
+                and value in supported_ctx_manager_classes
+            )
+        )
 
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
@@ -647,6 +656,8 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                         expr.sym_num
                     )
                 )
+            elif isinstance(expr, ConstantVariable):
+                return expr
 
         @register(torch._C._autograd._unsafe_set_version_counter)
         def handle_unsafe_set_version_counter(self, tx, *args, **kwargs):

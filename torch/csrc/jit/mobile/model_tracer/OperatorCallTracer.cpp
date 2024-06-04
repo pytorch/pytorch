@@ -10,7 +10,7 @@ OperatorCallTracer::OperatorCallTracer() {
 
   auto recorder_cb =
       [](const at::RecordFunction& fn) -> std::unique_ptr<at::ObserverContext> {
-    c10::optional<c10::OperatorName> op_name = fn.operator_name();
+    std::optional<c10::OperatorName> op_name = fn.operator_name();
     if (op_name.has_value()) {
       getCalledOperators().withLock(
           [op_name](std::set<std::string>& called_operators) {

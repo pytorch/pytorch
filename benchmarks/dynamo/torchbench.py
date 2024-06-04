@@ -10,8 +10,9 @@ import warnings
 from collections import namedtuple
 from os.path import abspath, exists
 
-import torch
 import yaml
+
+import torch
 
 try:
     from .common import BenchmarkRunner, main
@@ -23,6 +24,20 @@ from torch._dynamo.utils import clone_inputs
 
 # We are primarily interested in tf32 datatype
 torch.backends.cuda.matmul.allow_tf32 = True
+
+
+def _reassign_parameters(model):
+    # torch_geometric models register parameter as tensors due to
+    # https://github.com/pyg-team/pytorch_geometric/blob/master/torch_geometric/nn/dense/linear.py#L158-L168
+    # Since it is unusual thing to do, we just reassign them to parameters
+    def state_dict_hook(module, destination, prefix, local_metadata):
+        for name, param in module.named_parameters():
+            if isinstance(destination[name], torch.Tensor) and not isinstance(
+                destination[name], torch.nn.Parameter
+            ):
+                destination[name] = torch.nn.Parameter(destination[name])
+
+    model._register_state_dict_hook(state_dict_hook)
 
 
 def setup_torchbench_cwd():
@@ -72,6 +87,30 @@ def load_yaml_file():
         return obj
 
     return maybe_list_to_set(data)
+
+
+def process_hf_reformer_output(out):
+    assert isinstance(out, list)
+    # second output is unstable
+    return [elem for i, elem in enumerate(out) if i != 1]
+
+
+def process_hf_whisper_output(out):
+    out_ret = []
+    for i, elem in enumerate(out):
+        if i == 0:
+            assert isinstance(elem, dict)
+            out_ret.append({k: v for k, v in elem.items() if k != "logits"})
+        elif i != 1:
+            out_ret.append(elem)
+
+    return out_ret
+
+
+process_train_model_output = {
+    "hf_Reformer": process_hf_reformer_output,
+    "hf_Whisper": process_hf_whisper_output,
+}
 
 
 class TorchBenchmarkRunner(BenchmarkRunner):
@@ -129,6 +168,10 @@ class TorchBenchmarkRunner(BenchmarkRunner):
         return self._config["non_deterministic"]
 
     @property
+    def get_output_amp_train_process_func(self):
+        return process_train_model_output
+
+    @property
     def skip_not_suitable_for_training_models(self):
         return self._skip["test"]["training"]
 
@@ -163,6 +206,12 @@ class TorchBenchmarkRunner(BenchmarkRunner):
     @property
     def skip_models_due_to_control_flow(self):
         return self._skip["control_flow"]
+
+    @property
+    def guard_on_nn_module_models(self):
+        return {
+            "vision_maskrcnn",
+        }
 
     def load_model(
         self,
@@ -265,6 +314,14 @@ class TorchBenchmarkRunner(BenchmarkRunner):
                 extra_args=extra_args,
             )
         model, example_inputs = benchmark.get_module()
+        if model_name in [
+            "basic_gnn_edgecnn",
+            "basic_gnn_gcn",
+            "basic_gnn_sage",
+            "basic_gnn_gin",
+        ]:
+            _reassign_parameters(model)
+
         # Models that must be in train mode while training
         if is_training and (
             not use_eval_mode or model_name in self._config["only_training"]
@@ -352,7 +409,7 @@ class TorchBenchmarkRunner(BenchmarkRunner):
             if name in self._tolerance["higher_bf16"]:
                 return 1e-2, cosine
 
-        if is_training and current_device == "cuda":
+        if is_training and (current_device == "cuda" or current_device == "xpu"):
             tolerance = 1e-3
             if name in self._tolerance["cosine"]:
                 cosine = True
@@ -367,13 +424,19 @@ class TorchBenchmarkRunner(BenchmarkRunner):
 
     def forward_pass(self, mod, inputs, collect_outputs=True):
         with self.autocast(**self.autocast_arg):
-            return mod(*inputs)
+            if isinstance(inputs, dict):
+                return mod(**inputs)
+            else:
+                return mod(*inputs)
 
     def forward_and_backward_pass(self, mod, inputs, collect_outputs=True):
         cloned_inputs = clone_inputs(inputs)
         self.optimizer_zero_grad(mod)
         with self.autocast(**self.autocast_arg):
-            pred = mod(*cloned_inputs)
+            if isinstance(cloned_inputs, dict):
+                pred = mod(**cloned_inputs)
+            else:
+                pred = mod(*cloned_inputs)
             loss = self.compute_loss(pred)
         self.grad_scaler.scale(loss).backward()
         self.optimizer_step()

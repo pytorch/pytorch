@@ -225,16 +225,16 @@ static void fractional_max_pool2d_out_frame(
 template <typename scalar_t>
 static void fractional_max_pool2d_backward_out_single_batch_frame(
   scalar_t* gradInput,
-  scalar_t* gradOutput,
-  int64_t* indices,
+  const scalar_t* gradOutput,
+  const int64_t* indices,
   int numPlanes,
   int inputW, int inputH,
   int outputW, int outputH) {
   at::parallel_for(0, numPlanes, 0, [&](int64_t start, int64_t end) {
     for (const auto plane : c10::irange(start, end)) {
       scalar_t* gradInputForPlane = gradInput + plane * inputW * inputH;
-      scalar_t* gradOutputForPlane = gradOutput + plane * outputW * outputH;
-      int64_t* indicesForPlane = indices + plane * outputW * outputH;
+      const scalar_t* gradOutputForPlane = gradOutput + plane * outputW * outputH;
+      const int64_t* indicesForPlane = indices + plane * outputW * outputH;
 
       // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
       int h, w;
@@ -254,8 +254,8 @@ static void fractional_max_pool2d_backward_out_single_batch_frame(
 template <typename scalar_t>
 static void fractional_max_pool2d_backward_out_frame(
   scalar_t* gradInput,
-  scalar_t* gradOutput,
-  int64_t* indices,
+  const scalar_t* gradOutput,
+  const int64_t* indices,
   int numBatch, int numPlanes,
   int inputW, int inputH,
   int outputW, int outputH) {
@@ -383,8 +383,8 @@ TORCH_IMPL_FUNC(fractional_max_pool2d_backward_cpu) (
     kHalf,
     input.scalar_type(), "fractional_max_pool2d_backward_out_frame", [&] {
       auto gradInput_data = gradInput.data_ptr<scalar_t>();
-      auto gradOutput_data = gradOutput.data_ptr<scalar_t>();
-      auto indices_data = indices.data_ptr<int64_t>();
+      auto gradOutput_data = gradOutput.const_data_ptr<scalar_t>();
+      auto indices_data = indices.const_data_ptr<int64_t>();
       fractional_max_pool2d_backward_out_frame<scalar_t>(
         gradInput_data,
         gradOutput_data,

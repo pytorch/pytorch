@@ -118,8 +118,8 @@ inline std::tuple<Tensor&, Tensor&, Tensor&> lu_out(
 inline std::tuple<Tensor, Tensor, Tensor, Tensor> lstsq(
     const Tensor& self,
     const Tensor& b,
-    c10::optional<double> cond,
-    c10::optional<c10::string_view> driver) {
+    std::optional<double> cond,
+    std::optional<c10::string_view> driver) {
   return torch::linalg_lstsq(self, b, cond, driver);
 }
 
@@ -245,16 +245,16 @@ inline Tensor matrix_rank(
 
 inline Tensor matrix_rank(
     const Tensor& input,
-    c10::optional<double> atol,
-    c10::optional<double> rtol,
+    std::optional<double> atol,
+    std::optional<double> rtol,
     bool hermitian) {
   return torch::linalg_matrix_rank(input, atol, rtol, hermitian);
 }
 
 inline Tensor matrix_rank(
     const Tensor& input,
-    const c10::optional<Tensor>& atol,
-    const c10::optional<Tensor>& rtol,
+    const std::optional<Tensor>& atol,
+    const std::optional<Tensor>& rtol,
     bool hermitian) {
   return torch::linalg_matrix_rank(input, atol, rtol, hermitian);
 }
@@ -278,8 +278,8 @@ inline Tensor& matrix_rank_out(
 inline Tensor& matrix_rank_out(
     Tensor& result,
     const Tensor& input,
-    c10::optional<double> atol,
-    c10::optional<double> rtol,
+    std::optional<double> atol,
+    std::optional<double> rtol,
     bool hermitian) {
   return torch::linalg_matrix_rank_out(result, input, atol, rtol, hermitian);
 }
@@ -287,8 +287,8 @@ inline Tensor& matrix_rank_out(
 inline Tensor& matrix_rank_out(
     Tensor& result,
     const Tensor& input,
-    const c10::optional<Tensor>& atol,
-    const c10::optional<Tensor>& rtol,
+    const std::optional<Tensor>& atol,
+    const std::optional<Tensor>& rtol,
     bool hermitian) {
   return torch::linalg_matrix_rank_out(result, input, atol, rtol, hermitian);
 }
@@ -382,7 +382,7 @@ inline Tensor& solve_triangular_out(
 inline std::tuple<Tensor, Tensor, Tensor> svd(
     const Tensor& input,
     bool full_matrices,
-    c10::optional<c10::string_view> driver) {
+    std::optional<c10::string_view> driver) {
   return torch::linalg_svd(input, full_matrices, driver);
 }
 
@@ -392,20 +392,20 @@ inline std::tuple<Tensor&, Tensor&, Tensor&> svd_out(
     Tensor& Vh,
     const Tensor& input,
     bool full_matrices,
-    c10::optional<c10::string_view> driver) {
+    std::optional<c10::string_view> driver) {
   return torch::linalg_svd_out(U, S, Vh, input, full_matrices, driver);
 }
 
 inline Tensor svdvals(
     const Tensor& input,
-    c10::optional<c10::string_view> driver) {
+    std::optional<c10::string_view> driver) {
   return torch::linalg_svdvals(input, driver);
 }
 
 inline Tensor& svdvals_out(
     Tensor& result,
     const Tensor& input,
-    c10::optional<c10::string_view> driver) {
+    std::optional<c10::string_view> driver) {
   return torch::linalg_svdvals_out(result, input, driver);
 }
 
@@ -561,8 +561,8 @@ inline Tensor& householder_product_out(
 inline std::tuple<Tensor, Tensor, Tensor, Tensor> lstsq(
     const Tensor& self,
     const Tensor& b,
-    c10::optional<double> cond,
-    c10::optional<c10::string_view> driver) {
+    std::optional<double> cond,
+    std::optional<c10::string_view> driver) {
   return detail::lstsq(self, b, cond, driver);
 }
 
@@ -773,16 +773,16 @@ inline Tensor matrix_rank(
 
 inline Tensor matrix_rank(
     const Tensor& input,
-    c10::optional<double> atol,
-    c10::optional<double> rtol,
+    std::optional<double> atol,
+    std::optional<double> rtol,
     bool hermitian) {
   return detail::matrix_rank(input, atol, rtol, hermitian);
 }
 
 inline Tensor matrix_rank(
     const Tensor& input,
-    const c10::optional<Tensor>& atol,
-    const c10::optional<Tensor>& rtol,
+    const std::optional<Tensor>& atol,
+    const std::optional<Tensor>& rtol,
     bool hermitian) {
   return detail::matrix_rank(input, atol, rtol, hermitian);
 }
@@ -806,8 +806,8 @@ inline Tensor& matrix_rank_out(
 inline Tensor& matrix_rank_out(
     Tensor& result,
     const Tensor& input,
-    c10::optional<double> atol,
-    c10::optional<double> rtol,
+    std::optional<double> atol,
+    std::optional<double> rtol,
     bool hermitian) {
   return detail::matrix_rank_out(result, input, atol, rtol, hermitian);
 }
@@ -815,8 +815,8 @@ inline Tensor& matrix_rank_out(
 inline Tensor& matrix_rank_out(
     Tensor& result,
     const Tensor& input,
-    const c10::optional<Tensor>& atol,
-    const c10::optional<Tensor>& rtol,
+    const std::optional<Tensor>& atol,
+    const std::optional<Tensor>& rtol,
     bool hermitian) {
   return detail::matrix_rank_out(result, input, atol, rtol, hermitian);
 }
@@ -976,7 +976,7 @@ inline Tensor& solve_triangular_out(
 inline std::tuple<Tensor, Tensor, Tensor> svd(
     const Tensor& input,
     bool full_matrices,
-    c10::optional<c10::string_view> driver) {
+    std::optional<c10::string_view> driver) {
   return detail::svd(input, full_matrices, driver);
 }
 
@@ -986,7 +986,7 @@ inline std::tuple<Tensor&, Tensor&, Tensor&> svd_out(
     Tensor& Vh,
     const Tensor& input,
     bool full_matrices,
-    c10::optional<c10::string_view> driver) {
+    std::optional<c10::string_view> driver) {
   return detail::svd_out(U, S, Vh, input, full_matrices, driver);
 }
 
@@ -995,14 +995,14 @@ inline std::tuple<Tensor&, Tensor&, Tensor&> svd_out(
 /// See https://pytorch.org/docs/main/linalg.html#torch.linalg.svdvals
 inline Tensor svdvals(
     const Tensor& input,
-    c10::optional<c10::string_view> driver) {
+    std::optional<c10::string_view> driver) {
   return detail::svdvals(input, driver);
 }
 
 inline Tensor& svdvals_out(
     Tensor& result,
     const Tensor& input,
-    c10::optional<c10::string_view> driver) {
+    std::optional<c10::string_view> driver) {
   return detail::svdvals_out(result, input, driver);
 }
 

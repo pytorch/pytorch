@@ -54,7 +54,7 @@ void cpu_max_unpool(
   int64_t input_image_size = numel / channels;
   int64_t output_image_size = output.numel() / channels;
 
-  c10::optional<int64_t> optional_error_index;
+  std::optional<int64_t> optional_error_index;
 
   // parallel on dim N, C, D, H, W: [channels, input_image_size]
   at::parallel_for(0, numel, 0, [&](int64_t begin, int64_t end) {
@@ -118,7 +118,7 @@ void cpu_max_unpool_channels_last(
   int64_t input_image_size = input_height * input_width;
   int64_t output_image_size = output_height * output_width;
 
-  c10::optional<int64_t> optional_error_index;
+  std::optional<int64_t> optional_error_index;
 
   // parallel on dim N, H, W
   at::parallel_for(0, nbatch * input_image_size, 0, [&](int64_t begin, int64_t end) {
@@ -191,7 +191,7 @@ void cpu_max_unpool_backward(
   int64_t input_image_size = numel / channels;
   int64_t output_image_size = grad_output.numel() / channels;
 
-  c10::optional<int64_t> optional_error_index;
+  std::optional<int64_t> optional_error_index;
 
   // parallel on dim N, C, D, H, W
   at::parallel_for(0, numel, 0, [&](int64_t begin, int64_t end) {
