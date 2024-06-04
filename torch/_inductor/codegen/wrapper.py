@@ -28,17 +28,12 @@ import torch._ops
 from torch._dynamo.utils import counters, dynamo_timed
 
 from torch._inductor.codegen.multi_kernel import MultiKernelState
-from torch.fx.experimental.symbolic_shapes import (
-    ConvertIntKey,
-    DivideByKey,
-    free_unbacked_symbols,
-    SymTypes,
-)
+from torch.fx.experimental.symbolic_shapes import ConvertIntKey, DivideByKey, SymTypes
 from torch.fx.node import _get_qualified_name
 from torch.utils._sympy.singleton_int import SingletonInt
 from torch.utils._sympy.symbol import symbol_is_type, SymT
 
-from .. import codecache, config, ir
+from .. import async_compile, config, ir
 from ..ir import ReinterpretView
 from ..runtime import triton_heuristics
 from ..runtime.hints import DeviceProperties
@@ -444,7 +439,7 @@ class WrapperCodeGen(CodeGen):
         self.stride = "stride()"
         self.last_seen_device_guard_index: Optional[int] = None
         self.supports_intermediate_hooks = True
-        self.expr_printer = pexpr
+        self.expr_printer: Callable[[Any], str] = pexpr
         self.user_defined_kernel_cache: Dict[Tuple[Any, ...], Tuple[str, Any]] = {}
         self.unbacked_symbol_decls: Set[str] = set()  # str of sympy.Symbol
         self.allow_stack_allocation: Optional[bool] = None
@@ -506,7 +501,7 @@ class WrapperCodeGen(CodeGen):
                 from torch._inductor.codegen.memory_planning import _align as align
 
                 from torch import device, empty_strided
-                from {codecache.__name__} import AsyncCompile
+                from {async_compile.__name__} import AsyncCompile
                 from torch._inductor.select_algorithm import extern_kernels
                 from torch._inductor.codegen.multi_kernel import MultiKernelCall
 
@@ -864,7 +859,7 @@ class WrapperCodeGen(CodeGen):
             return f"{name}_stride"
 
         # Assign all symbolic shapes needed to local variables
-        needed = V.graph.sizevars.free_symbols()
+        bound_vars: Set[sympy.Symbol] = set()
 
         def is_expr(x):
             return isinstance(x[1], sympy.Expr)
@@ -874,37 +869,28 @@ class WrapperCodeGen(CodeGen):
             filter(lambda x: not is_expr(x), graph_inputs.items())
         )
 
-        def is_unbacked_symbol(s):
-            return isinstance(s, sympy.Symbol) and free_unbacked_symbols(s)
-
         for name, shape in graph_inputs_expr:
-            shape = V.graph.sizevars.simplify(shape)  # type: ignore[arg-type]
-            if (b := shape in needed) or is_unbacked_symbol(shape):
-                if b:
-                    needed.remove(shape)  # type: ignore[arg-type]
+            if isinstance(shape, sympy.Symbol) and shape not in bound_vars:
                 code.writeline(f"{self.declare}{shape} = {name}{self.ending}")
+                bound_vars.add(shape)
 
         for name, value in graph_inputs_tensors:
             shapes = value.get_size()
             for dim, shape in enumerate(shapes):
-                shape = V.graph.sizevars.simplify(shape)  # type: ignore[arg-type]
-                if (b := shape in needed) or is_unbacked_symbol(shape):
-                    if b:
-                        needed.remove(shape)  # type: ignore[arg-type]
+                if isinstance(shape, sympy.Symbol) and shape not in bound_vars:
                     code.writeline(
                         f"{self.declare}{shape} = {sizeof(name)}[{dim}]{self.ending}"
                     )
+                    bound_vars.add(shape)
 
         for name, value in graph_inputs_tensors:
             shapes = value.get_stride()
             for dim, shape in enumerate(shapes):
-                shape = V.graph.sizevars.simplify(shape)  # type: ignore[arg-type]
-                if (b := shape in needed) or is_unbacked_symbol(shape):
-                    if b:
-                        needed.remove(shape)  # type: ignore[arg-type]
+                if isinstance(shape, sympy.Symbol) and shape not in bound_vars:
                     code.writeline(
                         f"{self.declare}{shape} = {strideof(name)}[{dim}]{self.ending}"
                     )
+                    bound_vars.add(shape)
 
     def ensure_size_computed(self, sym: sympy.Symbol):
         if isinstance(sym, sympy.Symbol) and symbol_is_type(sym, SymT.PRECOMPUTED_SIZE):
@@ -920,10 +906,7 @@ class WrapperCodeGen(CodeGen):
         pass
 
     def codegen_python_sizevar(self, x: Expr, *, simplify: bool = True) -> str:
-        if simplify:
-            return pexpr(V.graph.sizevars.simplify(x))
-        else:
-            return pexpr(x)
+        return pexpr(x, simplify=simplify)
 
     def codegen_sizevar(self, x: Expr) -> str:
         return self.codegen_python_sizevar(x)
@@ -1410,9 +1393,6 @@ class WrapperCodeGen(CodeGen):
 
     def enter_context(self, ctx):
         self.lines.append(LineContext(ctx))
-
-    def val_to_cpp_arg_str(self, val, type_) -> str:
-        raise NotImplementedError
 
     def val_to_arg_str(self, s, type_=None):
         from torch.utils._triton import dtype_to_string, has_triton_package
