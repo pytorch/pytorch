@@ -211,17 +211,18 @@ def _load_global_deps() -> None:
 
     if _running_with_deploy() or platform.system() == 'Windows':
         return
-    split_build_lib_name = LIBTORCH_PKG_NAME
-    library_path = find_package_path(split_build_lib_name)
-    if library_path:
-        load_shared_libraries(library_path)
 
     lib_name = 'libtorch_global_deps' + ('.dylib' if platform.system() == 'Darwin' else '.so')
     here = os.path.abspath(__file__)
-    lib_path = os.path.join(os.path.dirname(here), 'lib', lib_name)
+    global_deps_lib_path = os.path.join(os.path.dirname(here), 'lib', lib_name)
 
+    split_build_lib_name = LIBTORCH_PKG_NAME
+    library_path = find_package_path(split_build_lib_name)
+
+    if library_path:
+        global_deps_lib_path = os.path.join(library_path, 'lib', lib_name)
     try:
-        ctypes.CDLL(lib_path, mode=ctypes.RTLD_GLOBAL)
+        ctypes.CDLL(global_deps_lib_path, mode=ctypes.RTLD_GLOBAL)
     except OSError as err:
         # Can only happen for wheel with cuda libs as PYPI deps
         # As PyTorch is not purelib, but nvidia-*-cu12 is
@@ -243,8 +244,11 @@ def _load_global_deps() -> None:
             raise err
         for lib_folder, lib_name in cuda_libs.items():
             _preload_cuda_deps(lib_folder, lib_name)
-        ctypes.CDLL(lib_path, mode=ctypes.RTLD_GLOBAL)
+        ctypes.CDLL(global_deps_lib_path, mode=ctypes.RTLD_GLOBAL)
 
+    if library_path:
+        # loading libtorch_global_deps first due its special logic
+        load_shared_libraries(library_path)
 
 if (USE_RTLD_GLOBAL_WITH_LIBTORCH or os.getenv('TORCH_USE_RTLD_GLOBAL')) and \
         (_running_with_deploy() or platform.system() != 'Windows'):
