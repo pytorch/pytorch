@@ -375,8 +375,7 @@ class FSDPParam:
             )
         if self._unsharded_param is not None:
             assert torch._dynamo.compiled_autograd.compiled_autograd_enabled
-            ctx = torch.autograd._unsafe_preserve_version_counter(self._unsharded_param)
-            with torch.no_grad(), ctx:
+            with torch.no_grad():
                 alloc_storage(self._unsharded_param)
                 self._unsharded_param.copy_(unsharded_param)
         else:
