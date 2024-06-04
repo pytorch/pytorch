@@ -608,7 +608,6 @@ class TestExport(TestCase):
             ("linear_1", "builtin_function_or_method.linear"),
             ("linear_1", "builtin_function_or_method.linear"),
             ("linear_2", "builtin_function_or_method.linear"),
-            ("linear_2", "builtin_function_or_method.linear"),
             ("relu_1", "function.relu"),
             ("add_1", "method_descriptor.add"),
         ]
@@ -4779,9 +4778,8 @@ def forward(self, x):
             str(ep.graph_module.code.strip()),
             """\
 def forward(self, x):
-    cos = torch.ops.aten.cos.default(x)
-    cos_1 = torch.ops.aten.cos.default(x);  x = None
-    auto_functionalized = torch._higher_order_ops.auto_functionalize.auto_functionalized(torch.ops.testlib.foo.default, x = cos, z = cos_1);  cos = cos_1 = None
+    cos = torch.ops.aten.cos.default(x);  x = None
+    auto_functionalized = torch._higher_order_ops.auto_functionalize.auto_functionalized(torch.ops.testlib.foo.default, x = cos, z = cos);  cos = None
     getitem_3 = auto_functionalized[3];  auto_functionalized = None
     cos_2 = torch.ops.aten.cos.default(getitem_3);  getitem_3 = None
     return (cos_2,)""",
@@ -5004,10 +5002,9 @@ def forward(self, x, y):
     sym_constrain_range_for_size = torch.ops.aten.sym_constrain_range_for_size.default(_local_scalar_dense)
     sym_constrain_range = torch.ops.aten.sym_constrain_range.default(_local_scalar_dense, min = 3, max = 5)
     mul = -1 * _local_scalar_dense
-    le = mul <= 0;  mul = None
+    le = mul <= 0
     _assert_scalar = torch.ops.aten._assert_scalar.default(le, "Runtime assertion failed for expression -u1 <= 0 on node 'le'");  le = None
-    mul_1 = -1 * _local_scalar_dense
-    lt = mul_1 < -2;  mul_1 = None
+    lt = mul < -2;  mul = None
     _assert_scalar_1 = torch.ops.aten._assert_scalar.default(lt, "Runtime assertion failed for expression -u1 < -2 on node 'lt'");  lt = None
     lt_1 = _local_scalar_dense < 6;  _local_scalar_dense = None
     _assert_scalar_2 = torch.ops.aten._assert_scalar.default(lt_1, "Runtime assertion failed for expression u1 < 6 on node 'lt_1'");  lt_1 = None
@@ -5277,6 +5274,65 @@ def forward(self, x, y):
         ):
             ep.module()(torch.randn(400, 20, 16))
         ep.module()(torch.randn(42, 20, 16))
+
+    def test_cse_pass(self):
+        class Foo(torch.nn.Module):
+            def forward(self, x, y):
+                if (
+                    x.shape[0] ** 2 != 9
+                    and x.shape[0] ** 2 - y.shape[0] * 3 > 1
+                    and x.shape[0] ** 2 - y.shape[0] * 3 - x.shape[1] > 2
+                    and x.shape[0] ** 2 - y.shape[0] * 3 - x.shape[1] > 3
+                ):
+                    return x / 2.0
+
+        # check number of nodes: 1 pow, 3 sym_size_int
+        # check that 4 _assert_scalar.default nodes appear
+        # for now we don't do deduplication on logical redudancy, only computation
+        for _strict in [True, False]:
+            inputs = (torch.randn(8, 4), torch.randn(4))
+            dynamic_shapes = {
+                "x": (Dim("dx0"), Dim("dx1")),
+                "y": (Dim("dy"),)
+            }
+            ep = torch.export._trace._export(
+                Foo(),
+                inputs,
+                strict=_strict,
+                dynamic_shapes=dynamic_shapes,
+                _allow_complex_guards_as_runtime_asserts=True,
+            )
+            ep_retrace = torch.export._trace._export(
+                ep.module(),
+                inputs,
+                strict=_strict,
+                dynamic_shapes=dynamic_shapes,
+                _allow_complex_guards_as_runtime_asserts=True,
+            )
+
+            # check both export & retracing
+            for _ep in [ep, ep_retrace]:
+                self.assertEqual(
+                    [
+                        node.target == torch.ops.aten.sym_size.int
+                        for node in _ep.graph.nodes
+                    ].count(True),
+                    3,
+                )
+                self.assertEqual(
+                    [
+                        node.name.startswith("pow")
+                        for node in _ep.graph.nodes
+                    ].count(True),
+                    1,
+                )
+                self.assertEqual(
+                    [
+                        node.target == torch.ops.aten._assert_scalar.default
+                        for node in _ep.graph.nodes
+                    ].count(True),
+                    4,
+                )
 
     def test_allow_explicit_guards_as_runtime_asserts(self):
         # check that explicit guards are treated as runtime assertions

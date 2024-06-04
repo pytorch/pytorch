@@ -36,7 +36,6 @@ from torch.fx._compatibility import compatibility
 
 from torch.fx._utils import first_call_function_nn_module_stack
 from torch.fx.experimental.proxy_tensor import maybe_disable_fake_tensor_mode
-
 from torch.fx.passes.infra.pass_base import PassResult
 from torch.fx.passes.infra.pass_manager import PassManager
 from torch.fx.passes.runtime_assert import insert_deferred_runtime_asserts
@@ -667,6 +666,7 @@ class ExportedProgram:
             _node_metadata_hook,
             _set_node_metadata_hook,
         )
+        from torch._export.utils import cse_pass
 
         stack_trace = (
             'File "torch/fx/passes/runtime_assert.py", line 24, '
@@ -683,6 +683,9 @@ class ExportedProgram:
                     f"exported program: {first_call_function_nn_module_stack(gm.graph)}",
                     export=True,
                 )
+
+            # run CSE pass to remove redundant nodes
+            gm = cse_pass(gm)
 
         exported_program = ExportedProgram(
             root=gm,

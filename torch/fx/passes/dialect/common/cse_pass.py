@@ -1,4 +1,4 @@
-from typing import Dict, Tuple, Any
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import torch
 from torch.fx.passes.infra.pass_base import PassBase, PassResult
@@ -24,11 +24,21 @@ def get_CSE_banned_ops():
 @torch.fx._compatibility.compatibility(is_backward_compatible=False)
 class CSEPass(PassBase):
 
-    def __init__(self, banned_ops=None):
+    def __init__(
+        self,
+        banned_ops=None,
+        force_copy_name=False,
+        args_hash_fn: Optional[Callable[[Node, List[Any]], int]] = None,
+    ):
         """
         This version of CSE Pass aims to be dialect agnostic, and it's implemented purely based on the connectivity between fx.Node.
 
         For functional dialects, user would only need to specify the random ops in ban list.
+
+        force_copy_name will overwrite copied nodes with the original name if set to True
+
+        args_hash_fn is an optional callable to be applied on (node, node.args),
+        to determine if a node should be duplicated or not.
 
         Warning: CSE Pass cannot be safely applied on a FX graph in non-functional dialects.
         If your dialect contains stateful operators, please customized the banned_ops.
@@ -37,6 +47,8 @@ class CSEPass(PassBase):
         if banned_ops is None:
             banned_ops = set()
         self.banned_ops = banned_ops
+        self.force_copy_name = force_copy_name
+        self.args_hash_fn = args_hash_fn
         super().__init__()
 
     def call(self, graph_module: GraphModule) -> PassResult:
@@ -57,6 +69,7 @@ class CSEPass(PassBase):
         result = p(traced_graph)
         print(result.graph_module)
         """
+
         def get_aten_target(node):
             if hasattr(node.target, 'overloadpacket'):
                 return node.target.overloadpacket
@@ -72,6 +85,8 @@ class CSEPass(PassBase):
             # do not CSE away random operations
             if n.op == 'placeholder' or n.op == 'output' or n.op == 'get_attr' or get_aten_target(n) in self.banned_ops:
                 new_node = new_graph.node_copy(n, lambda x: env[x])
+                if self.force_copy_name:
+                    new_node.name = n.name
                 env[n] = new_node
             else:  # n.op == 'call_function', should never see n.op == 'call_module' or 'call_method'
                 # substitute args and kwargs members to their mapping in env if exists
@@ -83,7 +98,10 @@ class CSEPass(PassBase):
                         if isinstance(v, Node) and v in env:
                             arg_list[i] = env[v]
                     return tuple(arg_list), spec
-                args, args_spec = substitute(n.args)
+                    
+                args, args_spec = substitute(
+                    n.args if self.args_hash_fn is None else self.args_hash_fn(n, n.args)
+                )
                 kwargs, kwargs_spec = substitute(n.kwargs)
 
                 # each token corresponds to a unique node
@@ -91,9 +109,8 @@ class CSEPass(PassBase):
                 token = {"target": n.target, "args": args, "args_spec": args_spec,
                          "kwargs": kwargs, "kwargs_spec": kwargs_spec}
 
-                # hash substituted args to a number, do not hash specs because specs are not hashable
-                hash_arg = hash((args, kwargs))
-                hash_val = (n.target, hash_arg)
+                # node representation
+                hash_val = (n.target, args, kwargs)
 
                 # check if a node has a substitute and can be eliminated
                 hash_val_in_hash_env = hash_val in hash_env
@@ -103,6 +120,8 @@ class CSEPass(PassBase):
                     continue
 
                 new_node = new_graph.node_copy(n, lambda x: env[x])
+                if self.force_copy_name:
+                    new_node.name = n.name
                 env[n] = new_node
                 if not hash_val_in_hash_env:
                     hash_env[hash_val] = new_node

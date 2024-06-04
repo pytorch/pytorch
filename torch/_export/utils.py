@@ -17,6 +17,7 @@ from torch.export.exported_program import (
     _rename_without_collisions,
 )
 from torch.export.graph_signature import InputKind, OutputKind
+from torch.fx.passes.dialect.common.cse_pass import CSEPass, get_CSE_banned_ops
 from torch.utils._pytree import (
     _register_pytree_node,
     Context,
@@ -608,3 +609,20 @@ def placeholder_naming_pass(
             ):
                 constants[new_name] = constant
                 del constants[name]
+
+
+def cse_pass(gm: torch.fx.GraphModule) -> torch.fx.GraphModule:
+    # run CSE pass
+    result = CSEPass(
+        banned_ops=get_CSE_banned_ops(),
+        force_copy_name=True,
+        args_hash_fn=lambda n, n_args: (
+            (n.args[0],)
+            if n.target == torch.ops.aten._assert_scalar.default
+            else n.args
+        ),
+    )(gm)
+    new_gm = result.graph_module  # type: ignore[attr-defined]
+    new_gm.meta = gm.meta
+    new_gm.recompile()
+    return new_gm

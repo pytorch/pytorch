@@ -36,7 +36,7 @@ from torch._export.passes.lift_constants_pass import (
     lift_constants_pass,
     rewrite_script_object_meta,
 )
-from torch._export.utils import placeholder_naming_pass, placeholder_prefixes
+from torch._export.utils import cse_pass, placeholder_naming_pass, placeholder_prefixes
 from torch._export.verifier import SpecViolationError
 from torch._export.wrappers import _wrap_submodules
 from torch._functorch.aot_autograd import aot_export_module
@@ -708,6 +708,9 @@ def _export_to_aten_ir(
 
     constants = rewrite_script_object_meta(gm)
     constants.update(lift_constants_pass(gm, export_graph_signature, constant_attrs))
+
+    # run CSE pass to remove redundant nodes
+    gm = cse_pass(gm)
 
     # Prettify names for placeholder nodes.
     placeholder_naming_pass(
