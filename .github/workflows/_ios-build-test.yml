@@ -263,7 +263,7 @@ jobs:
           zip -r "${IOS_ARCH}.zip" install src version.txt LICENSE ./*.podspec
           popd
 
-      - uses: actions/upload-artifact@v3
+      - uses: actions/upload-artifact@v4
         if: matrix.ios_platform == 'OS'
         with:
           name: pytorch-ios-build-artifacts-${{ matrix.ios_arch }}
@@ -292,7 +292,7 @@ jobs:
           bundler-cache: true
 
       - name: Download arm64 artifacts
-        uses: actions/download-artifact@v3
+        uses: actions/download-artifact@v4
         with:
           name: pytorch-ios-build-artifacts-arm64
 
@@ -401,13 +401,13 @@ jobs:
             echo "SPEC_NAME=${SPEC_NAME}"
           } >> "$GITHUB_ENV"
 
-      - uses: actions/upload-artifact@v3
+      - uses: actions/upload-artifact@v4
         with:
           name: pytorch-ios-artifacts
           if-no-files-found: error
           path: ${{ env.DEST_DIR }}/${{ env.ARTIFACT_NAME }}
 
-      - uses: actions/upload-artifact@v3
+      - uses: actions/upload-artifact@v4
         with:
           name: pytorch-ios-podspec
           if-no-files-found: error
