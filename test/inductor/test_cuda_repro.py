@@ -1205,7 +1205,7 @@ class CudaReproTests(TestCase):
             self.assertEqual(out, out2, atol=1e-3, rtol=1e-3)
 
     def test_int64_index_intermediate(self):
-        def foo(split_1):
+        def foo(inp):
             view_23 = torch.ops.aten.view.default(inp, [-1, 8192, 8192])
             split_1 = torch.ops.aten.split.Tensor(view_23, 1024, 1)
             view_23 = None
