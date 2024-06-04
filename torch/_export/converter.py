@@ -86,6 +86,7 @@ class TS2FXGraphConverter:
         ts_graph: Union[torch._C.Graph, torch._C.Block],
         param_names: Set[str],
         buffer_names: Set[str],
+        mod_attribute_map: Dict[str, Any],
     ):
         self.ts_graph = ts_graph
         self.param_names = param_names
@@ -104,16 +105,8 @@ class TS2FXGraphConverter:
 
         self.subgraphs: Dict[str, torch.fx.GraphModule] = {}
 
-        # Populate methods for the standard operators.
-        for k in kind_to_standard_operators.keys():
-            handler_func_name = ir_name_to_func_name(k)
-            # Create an indirect function call:
-            # convert_<namespace>_<opname> --> lambda node: _convert_standard_operator(node)
-            setattr(
-                self,
-                handler_func_name,
-                lambda node: self._convert_standard_operators(node),
-            )
+        # Parameter name: parameter
+        self.mod_attribute_map = mod_attribute_map
 
     def add_subgraph(self, subgraph) -> str:
         name = f"subgraph_{len(self.subgraphs)}"
@@ -152,11 +145,14 @@ class TS2FXGraphConverter:
         self.convert_graph_inputs()
 
         for node in self.ts_graph.nodes():
+            # if node.kind() == "prim::GetAttr":
+            #     breakpoint()
+            #     pass
             self.convert_node(node)
 
         self.convert_graph_outputs()
 
-        gm = torch.fx.GraphModule(self.subgraphs, self.fx_graph)
+        gm = torch.fx.GraphModule({**self.subgraphs, **self.mod_attribute_map}, self.fx_graph)
 
         inplace_optimize_sym_size_div(gm)
 
@@ -169,13 +165,6 @@ class TS2FXGraphConverter:
             name = graph_input.debugName()
             normalized_name = normalize_name(name)
 
-            fx_node = self.fx_graph.placeholder(normalized_name)
-
-            # fx_node.meta["val"] = FakeTensor()
-            # TODO: set fx_node.meta["val"]
-
-            self.name_to_node[name] = fx_node
-
             if name in self.param_names:
                 self.input_specs.append(
                     InputSpec(
@@ -184,6 +173,7 @@ class TS2FXGraphConverter:
                         target=name,
                     )
                 )
+                fx_node = self.fx_graph.placeholder(normalized_name)
             elif name in self.buffer_names:
                 self.input_specs.append(
                     InputSpec(
@@ -193,6 +183,7 @@ class TS2FXGraphConverter:
                         persistent=True,
                     )
                 )
+                fx_node = self.fx_graph.getattr(normalized_name)
             else:
                 self.input_specs.append(
                     InputSpec(
@@ -201,6 +192,12 @@ class TS2FXGraphConverter:
                         target=name,
                     )
                 )
+                fx_node = self.fx_graph.placeholder(normalized_name)
+
+            # fx_node.meta["val"] = FakeTensor()
+            # TODO: set fx_node.meta["val"]
+
+            self.name_to_node[name] = fx_node
 
     def convert_prim_Constant(self, node: torch._C.Node):
         name = node.output().debugName()
@@ -443,8 +440,9 @@ class TS2FXGraphConverter:
         # Convert blocks to subgraphs
         subgraph_nodes = []
         for block in node.blocks():
-            subgraph_converter = TS2FXGraphConverter(block, set(), set())
+            subgraph_converter = TS2FXGraphConverter(block, set(), set(), self.mod_attribute_map)
             subgraph_converter.constant_map = self.constant_map
+            subgraph_converter.attribute_map = self.attribute_map
 
             for block_arg in arguments:
                 normalized_block_arg_name = normalize_name(block_arg)
@@ -453,6 +451,7 @@ class TS2FXGraphConverter:
                 )
                 subgraph_converter.name_to_node[block_arg] = placeholder_node
 
+            breakpoint()
             subgraph = subgraph_converter.convert()
             subgraph_name = self.add_subgraph(subgraph)
             subgraph_nodes.append(self.fx_graph.get_attr(subgraph_name))
@@ -560,6 +559,8 @@ class TS2EPConverter:
     ):
         self.ts_model = ts_model
         self.ts_graph, self.params, _, _ = _create_jit_graph(ts_model, sample_args)
+        print(self.ts_graph)
+        breakpoint()
 
         self.sample_args = sample_args
         self.sample_kwargs = sample_kwargs
@@ -567,9 +568,13 @@ class TS2EPConverter:
         self.param_names: Set[str] = {name for name, _ in ts_model.named_parameters()}
         self.buffer_names: Set[str] = {name for name, _ in ts_model.named_buffers()}
 
+        self.mod_attribute_map = {
+            name: param for name, param in ts_model.named_parameters()
+        }
+
     def convert(self) -> ExportedProgram:
         graph_converter = TS2FXGraphConverter(
-            self.ts_graph, self.param_names, self.buffer_names
+            self.ts_graph, self.param_names, self.buffer_names, self.mod_attribute_map
         )
         gm = graph_converter.convert()
         ep = self.retrace_as_exported_program(gm, graph_converter.tensor_constants)
