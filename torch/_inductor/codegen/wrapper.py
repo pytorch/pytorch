@@ -33,7 +33,7 @@ from torch.fx.node import _get_qualified_name
 from torch.utils._sympy.singleton_int import SingletonInt
 from torch.utils._sympy.symbol import symbol_is_type, SymT
 
-from .. import codecache, config, ir
+from .. import async_compile, config, ir
 from ..ir import ReinterpretView
 from ..runtime import triton_heuristics
 from ..runtime.hints import DeviceProperties
@@ -439,7 +439,7 @@ class WrapperCodeGen(CodeGen):
         self.stride = "stride()"
         self.last_seen_device_guard_index: Optional[int] = None
         self.supports_intermediate_hooks = True
-        self.expr_printer = pexpr
+        self.expr_printer: Callable[[Any], str] = pexpr
         self.user_defined_kernel_cache: Dict[Tuple[Any, ...], Tuple[str, Any]] = {}
         self.unbacked_symbol_decls: Set[str] = set()  # str of sympy.Symbol
         self.allow_stack_allocation: Optional[bool] = None
@@ -501,7 +501,7 @@ class WrapperCodeGen(CodeGen):
                 from torch._inductor.codegen.memory_planning import _align as align
 
                 from torch import device, empty_strided
-                from {codecache.__name__} import AsyncCompile
+                from {async_compile.__name__} import AsyncCompile
                 from torch._inductor.select_algorithm import extern_kernels
                 from torch._inductor.codegen.multi_kernel import MultiKernelCall
 
@@ -906,10 +906,7 @@ class WrapperCodeGen(CodeGen):
         pass
 
     def codegen_python_sizevar(self, x: Expr, *, simplify: bool = True) -> str:
-        if simplify:
-            return pexpr(V.graph.sizevars.simplify(x))
-        else:
-            return pexpr(x)
+        return pexpr(x, simplify=simplify)
 
     def codegen_sizevar(self, x: Expr) -> str:
         return self.codegen_python_sizevar(x)
