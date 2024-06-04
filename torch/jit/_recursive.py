@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import collections
 import functools
 import inspect
