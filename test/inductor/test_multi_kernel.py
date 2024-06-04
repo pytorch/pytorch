@@ -111,19 +111,21 @@ class MultiKernelTest(TestCase):
         def f(x):
             return torch.softmax(x, -1) + force_kernel
 
-        orig_run = MultiKernelCall.run_with_argless_kernels
+        orig_run = MultiKernelCall.run
         picked_kernel = None
 
-        def mock_run(self, kernel_calls):
-            out = orig_run(self, kernel_calls)
+        def mock_run(self, *args, **kwargs):
+            out = orig_run(self, *args, **kwargs)
             nonlocal picked_kernel
             picked_kernel = self.picked_kernel
             return out
 
         with unittest.mock.patch.object(
-            MultiKernelCall, "run_with_argless_kernels", mock_run
+            MultiKernelCall, "run", mock_run
         ), unittest.mock.patch.object(
-            MultiKernelCall, "benchmark_sub_kernels", lambda *args: mock_latency
+            MultiKernelCall,
+            "benchmark_sub_kernels",
+            lambda *args, **kwargs: mock_latency,
         ):
             torch.compile(f)(x)
         self.assertEqual(picked_kernel, force_kernel)
