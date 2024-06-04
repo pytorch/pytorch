@@ -28,6 +28,7 @@
 #include <torch/csrc/distributed/c10d/ProcessGroupNCCL.hpp>
 #include <torch/csrc/distributed/c10d/TraceUtils.h>
 #include <torch/csrc/distributed/c10d/Utils.hpp>
+#include <torch/csrc/distributed/c10d/control_plane/Handlers.hpp>
 #include <torch/csrc/distributed/c10d/logger.hpp>
 #include <torch/torch.h>
 
@@ -197,6 +198,20 @@ inline std::string getKeyFromDevice(at::Device& device) {
   return std::to_string(device.index());
 }
 
+inline at::DeviceIndex getIndexFromDeviceKey(const std::string& deviceKey) {
+  // initialize the device index to -1, which is an invalid value.
+  int index = -1;
+  try {
+    index = std::stoi(deviceKey);
+  } catch (const std::invalid_argument& e) {
+    LOG(WARNING) << c10::str(
+        "Invalid deviceKey: ", deviceKey, ",", e.what(), ".");
+  } catch (const std::out_of_range& e) {
+    LOG(ERROR) << "Out of range: " << e.what();
+  }
+  return static_cast<at::DeviceIndex>(index);
+}
+
 std::string getKeySendRecv(int myRank, int peer) {
   int lowRank = myRank < peer ? myRank : peer;
   int highRank = myRank < peer ? peer : myRank;
@@ -326,10 +341,16 @@ void cacheAllocatorDeregisterHook(
   }
 }
 
+std::string get_collective_trace(bool includeStackTraces, bool onlyActive) {
+  return NCCLTraceBuffer::get()->dump(
+      c10::nullopt, true, includeStackTraces, onlyActive);
+}
+
 #if defined(IS_NCCLX) && defined(NCCL_COMM_DUMP)
-std::string dump_nccl_trace(bool includeTraceBuffer) {
+std::unordered_map<std::string, std::unordered_map<std::string, std::string>>
+get_nccl_dump_map() {
   std::unordered_map<
-      std::string /* ncclUniqueID */,
+      std::string,
       std::unordered_map<std::string, std::string> /* dump from this comm */>
       ncclDumpMap;
   // dump_nccl_trace is only called from the default PG (uid_=0), but we want to
@@ -347,13 +368,46 @@ std::string dump_nccl_trace(bool includeTraceBuffer) {
     std::string ncclUniqueIDStr = buildNcclUniqueIdStr(ncclComm->getNcclId());
     ncclDumpMap[ncclUniqueIDStr] = ncclComm->ncclCommDump();
   }
-  return NCCLTraceBuffer::get()->dump(ncclDumpMap, includeTraceBuffer);
+
+  return ncclDumpMap;
+}
+
+std::string dump_nccl_trace(
+    bool includeCollectives,
+    bool includeStackTraces,
+    bool onlyActive) {
+  std::unordered_map<
+      std::string /* ncclUniqueID */,
+      std::unordered_map<std::string, std::string> /* dump from this comm */>
+      ncclDumpMap = get_nccl_dump_map();
+  return NCCLTraceBuffer::get()->dump(
+      ncclDumpMap, includeCollectives, includeStackTraces, onlyActive);
+}
+
+std::string get_nccl_comm_trace() {
+  ncclDumpMap = get_nccl_dump_map();
+  return NCCLTraceBuffer::get()->dump(ncclDumpMap, false, false, false);
 }
 #else
-std::string dump_nccl_trace(bool includeTraceBuffer) {
-  return NCCLTraceBuffer::get()->dump(c10::nullopt, includeTraceBuffer);
+std::string dump_nccl_trace(
+    bool includeCollectives,
+    bool includeStackTraces,
+    bool onlyActive) {
+  return NCCLTraceBuffer::get()->dump(
+      c10::nullopt, includeCollectives, includeStackTraces, onlyActive);
+}
+
+std::string get_nccl_comm_trace() {
+  return NCCLTraceBuffer::get()->dump(c10::nullopt, false, false, false);
 }
 #endif
+
+// TODO(c-p-i-o): add a JSON endpoint.
+control_plane::RegisterHandler dumpHandler{
+    "dump_nccl_trace_pickle",
+    [](const control_plane::Request&, control_plane::Response& res) {
+      res.setContent(dump_nccl_trace(), "application/octet-stream");
+    }};
 
 std::optional<std::function<void(std::function<void(const std::string&)>)>>&
 get_cpp_trace_dumper() {
@@ -1050,7 +1104,11 @@ void ProcessGroupNCCL::abortCommsFromMap(
   for (auto& it : ncclCommsMap) {
     auto& devName = it.first;
     auto& ncclComm = it.second;
-
+    at::cuda::OptionalCUDAGuard gpuGuard;
+    at::DeviceIndex deviceIndex = getIndexFromDeviceKey(devName);
+    if (deviceIndex >= 0) {
+      gpuGuard.set_index(deviceIndex);
+    }
     LOG(INFO) << logPrefix() << "ProcessGroupNCCL destroying ncclComm_ "
               << ncclComm->ncclComm_ << " on CUDA device: " << devName;
     ncclComm->ncclCommAbort(abortReason);
@@ -1166,7 +1224,7 @@ bool ProcessGroupNCCL::dumpDebuggingInfo() {
     // We dump nccl trace into local disk by default and users can register
     // their customized writer by inheriting `DebugInfoWriter` via
     // `registerDebugInfoWriter`.
-    auto ncclTrace = dump_nccl_trace();
+    auto ncclTrace = dump_nccl_trace(true, true, false);
     DebugInfoWriter& writer = DebugInfoWriter::getWriter(globalRank());
     LOG(INFO) << logPrefix() << "ProcessGroupNCCL dumping nccl trace to "
               << writer.getWriterTarget();

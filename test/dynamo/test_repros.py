@@ -3051,7 +3051,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         with self.assertRaisesRegex(AssertionError, "torch.Size"):
             opt_f(args)
         self.assertEqual(
-            torch._dynamo.utils.counters["unimplemented"][
+            torch._dynamo.utils.counters["graph_break"][
                 "assert with non-string message"
             ],
             1,
@@ -5040,6 +5040,16 @@ def forward(self, primals_1, primals_2):
         x = torch.zeros(())
         self.assertEqual(func(x, m), opt_func(x, m))
         self.assertEqual(func(x, 0), opt_func(x, 0))
+
+    def test_grad(self):
+        def fn(x, y):
+            x._grad = y
+            return x.grad.data
+
+        x = torch.randn(4, requires_grad=True)
+        y = torch.randn(4)
+        opt_fn = torch.compile(fn, backend="eager")
+        self.assertEqual(fn(x, y), opt_fn(x, y))
 
 
 instantiate_parametrized_tests(ReproTests)

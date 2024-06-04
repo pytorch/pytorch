@@ -908,6 +908,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // communication, the key will be "1:2" on both processes. Note: this is for
   // the scenario where there is only 1 GPU per process. When it comes to
   // multiple GPUs per process, this part may need to redesigned.
+  // TODO: we probably need a separte map for P2P comms
   std::unordered_map<std::string, std::shared_ptr<NCCLComm>> devNCCLCommMap_;
 
   // The NCCL communicators currently in process of being initialized.
@@ -1114,8 +1115,18 @@ class TORCH_API ProcessGroupNCCL : public Backend {
 };
 
 // Dumps the NCCL comm traces and additional information about the Process
-// Group. If includeTraceBuffer is true, also includes the trace buffer.
-TORCH_API std::string dump_nccl_trace(bool includeTraceBuffer = true);
+// Group.
+TORCH_API std::string dump_nccl_trace(
+    bool includeCollectives,
+    bool includeStackTraces,
+    bool onlyActive);
+
+// Dumps the collective traces.
+TORCH_API std::string get_collective_trace(
+    bool includeStackTraces,
+    bool onlyActive);
+
+TORCH_API std::string get_nccl_comm_trace();
 
 // Gets a mutable reference to a global optional function.  Heartbeat Monitor
 // will use this function to dump traces, if available. Inside fbcode, we store
