@@ -250,6 +250,8 @@ class AttentionWithGraphBreak(nn.Module):
         xk = keys.transpose(1, 2)  # (bs, n_local_heads, cache_len + seqlen, head_dim)
         xv = values.transpose(1, 2)  # (bs, n_local_heads, cache_len + seqlen, head_dim)
 
+        print(xv)
+
         # we use casual mask for training
         output = F.scaled_dot_product_attention(xq, xk, xv, is_causal=True)
         output = output.transpose(
@@ -258,7 +260,6 @@ class AttentionWithGraphBreak(nn.Module):
         # output stay folded with batch and sequence dimension
         output = output.view(bsz * seqlen, -1)
         ret = self.wo(output)
-        print(ret)
         return ret
 
 
