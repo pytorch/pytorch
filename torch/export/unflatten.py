@@ -1023,7 +1023,7 @@ def _sink_params(
     scope: tracks where we are in the module hierarchy, so that we can emit the
         right `getattr(self, "foo.bar")` calls, etc.
     """
-    # This dict records inputs removed by child modules. 
+    # This dict records inputs removed by child modules.
     # Maps the module object id to the list of placeholder node names
     # in the child module that were removed.
     module_id_to_inputs_removed: Dict[int, List[str]] = defaultdict(list)
@@ -1031,10 +1031,10 @@ def _sink_params(
     # We need to use _modules here instead of named_children(), because we
     # explicitly want duplicate modules to show up in the traversal.
     for name, submodule in module._modules.items():
-        inputs_removed = _sink_params(
+        submod_id_to_inputs_removed = _sink_params(
             cast(torch.nn.Module, submodule), inputs_to_state, scope + [name]
         )
-        for k, v in inputs_removed.items():
+        for k, v in submod_id_to_inputs_removed.items():
             module_id_to_inputs_removed[k].extend(v)
 
     if not hasattr(module, "graph"):
@@ -1051,7 +1051,10 @@ def _sink_params(
         submodule = _recursive_getattr(module, node.target.split("."))
         if submodule is not None and id(submodule) in module_id_to_inputs_removed:
             node.args = tuple(
-                filter(lambda n: n.name not in module_id_to_inputs_removed[id(submodule)], node.args)
+                filter(
+                    lambda n: n.name not in module_id_to_inputs_removed[id(submodule)],
+                    node.args,
+                )
             )
 
     # Filter out inputs_to_state corresponding to current scope.
