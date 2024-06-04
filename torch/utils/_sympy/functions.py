@@ -396,6 +396,9 @@ class RoundDecimal(sympy.Function):
 
 
 class Identity(sympy.Function):
+    """
+    Prevents expansion and other optimization of expression
+    """
     def __repr__(self):
         return f"Identity({self.args[0]})"
 
