@@ -679,6 +679,7 @@ def _get_pg_default_device(group: Optional[ProcessGroup] = None) -> torch.device
             "This usage is deprecated since PyTorch 2.0. Please use a public API "
             "of PyTorch Distributed instead.",
             FutureWarning,
+            stacklevel=3,
         )
         # Most users create Gloo with private API for object collectives
         _world.pg_default_device[group] = torch.device("cpu")
