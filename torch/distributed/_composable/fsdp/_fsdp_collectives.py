@@ -14,6 +14,8 @@ from torch._inductor import config as inductor_config
 
 lib = torch.library.Library("fsdp", "DEF")
 
+lib = torch.library.Library("fsdp", "DEF")
+
 
 class AllGatherResult(NamedTuple):
     all_gather_output: torch.Tensor
@@ -179,9 +181,6 @@ def foreach_all_gather_copy_out(
         out = [t.view(world_size, -1).view(torch.uint8) for t in gen]
     else:
         out = [t.view(world_size, -1) for t in gen]
-    # torch.split_with_sizes_copy(
-    #     all_gather_output, all_gather_input_split_sizes, dim=1, out=out
-    # )
     torch.ops.fsdp.split_with_sizes_copy(
         all_gather_output, all_gather_input_split_sizes, dim=1, out=out
     )
@@ -314,9 +313,8 @@ def foreach_reduce_scatter_copy_in(
     world_size: int,
 ) -> None:
     reduce_scatter_input = reduce_scatter_input.view(world_size, -1)
-    # torch._chunk_cat(unsharded_grads, dim=0, num_chunks=world_size, out=reduce_scatter_input)
     torch.ops.fsdp.chunk_cat(unsharded_grads, dim=0, num_chunks=world_size, out=reduce_scatter_input)
-    
+
 
 def _get_all_gather_input_metadatas(
     param_all_gather_inputs: List[List[torch.Tensor]],
