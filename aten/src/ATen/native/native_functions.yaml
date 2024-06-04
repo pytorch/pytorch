@@ -14644,6 +14644,16 @@
     NestedTensorCUDA: NestedTensor_to_padded_tensor_cuda
   autogen: to_padded_tensor.out
 
+- func: _jagged_to_padded_dense_forward(Tensor values, Tensor[] offsets, SymInt[] max_lengths, float padding_value=0.0) -> Tensor
+  variants: function
+  dispatch:
+    CUDA: _fbgemm_jagged_to_padded_dense_forward
+
+- func: _padded_dense_to_jagged_forward(Tensor dense, Tensor[] offsets, SymInt? total_L=None) -> Tensor
+  variants: function
+  dispatch:
+    CUDA: _fbgemm_dense_to_jagged_forward_symint
+
 - func: _nested_tensor_softmax_with_shape(Tensor self, Tensor query) -> Tensor
   dispatch:
     NestedTensorCPU: NestedTensor_softmax_dropout
