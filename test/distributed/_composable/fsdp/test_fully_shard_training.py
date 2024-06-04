@@ -286,7 +286,7 @@ class TestFullyShard1DTrainingCore(FSDPTest):
                 "reshard_after_forward": [True, False, 2],
                 "device_type": ["cuda"],
                 "offload_policy": [
-                    None,
+                    OffloadPolicy(),
                     CPUOffloadPolicy(pin_memory=True),
                     CPUOffloadPolicy(pin_memory=False),
                 ],
