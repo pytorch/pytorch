@@ -2706,7 +2706,11 @@ def _temp_validate_new_and_old_command(new_cmd: List[str], old_cmd: List[str]):
 
 
 def _do_validate_cpp_commands(
-    include_pytorch: bool, cuda: bool, compile_only: bool, mmap_weights: bool
+    include_pytorch: bool,
+    cuda: bool,
+    compile_only: bool,
+    mmap_weights: bool,
+    use_absolute_path: bool,
 ):
     # PreCI will failed if test machine can't run cuda.
     test_cuda = torch.cuda.is_available() and cuda
@@ -2725,7 +2729,7 @@ def _do_validate_cpp_commands(
         cuda=test_cuda,
         aot_mode=False,
         compile_only=compile_only,
-        use_absolute_path=False,
+        use_absolute_path=use_absolute_path,
         use_mmap_weights=mmap_weights,
         extra_flags=extra_flags,
     ).split(" ")
@@ -2737,6 +2741,7 @@ def _do_validate_cpp_commands(
         include_pytorch=include_pytorch,
         cuda=test_cuda,
         compile_only=compile_only,
+        use_absolute_path=use_absolute_path,
         use_mmap_weights=mmap_weights,
         extra_flags=extra_flags,
     )
@@ -2761,17 +2766,23 @@ def validate_new_cpp_commands():
     use_mmap_weights = [True, False]
     compile_only = [True, False]
     include_pytorch = [True, False]
+    use_absolute_path = [True, False]
 
     for x in cuda:
         for y in use_mmap_weights:
             for z in compile_only:
                 for m in include_pytorch:
-                    print(
-                        f"!!! cuda:{x}, use_mmap_weights:{y}, compile_only:{z}, include_pytorch:{m}"
-                    )
-                    _do_validate_cpp_commands(
-                        include_pytorch=m, cuda=x, mmap_weights=y, compile_only=z
-                    )
+                    for n in use_absolute_path:
+                        print(
+                            f"!!! cuda:{x}, use_mmap_weights:{y}, compile_only:{z}, include_pytorch:{m}， use_absolute_path{n}"
+                        )
+                        _do_validate_cpp_commands(
+                            include_pytorch=m,
+                            cuda=x,
+                            mmap_weights=y,
+                            compile_only=z,
+                            use_absolute_path=n,
+                        )
 
 
 @clear_on_fresh_inductor_cache

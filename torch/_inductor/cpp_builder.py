@@ -20,6 +20,7 @@ from typing import List, Sequence, Tuple, Union
 import torch
 from torch._inductor import config, exc
 from torch._inductor.codecache import (
+    _LINKER_SCRIPT,
     _transform_cuda_paths,
     get_lock_dir,
     invalid_vec_isa,
@@ -467,7 +468,11 @@ def _use_fb_internal_macros() -> List[str]:
         return []
 
 
-def _setup_standard_sys_libs(cpp_compiler):
+def _setup_standard_sys_libs(
+    cpp_compiler,
+    aot_mode: bool,
+    use_absolute_path: bool,
+):
     cflags: List[str] = []
     include_dirs: List[str] = []
     passthough_args: List[str] = []
@@ -485,9 +490,15 @@ def _setup_standard_sys_libs(cpp_compiler):
         include_dirs.append(build_paths.linux_kernel())
         include_dirs.append("include")
 
+        if aot_mode and not use_absolute_path:
+            linker_script = _LINKER_SCRIPT
+        else:
+            linker_script = os.path.basename(_LINKER_SCRIPT)
+
         if _is_clang(cpp_compiler):
             passthough_args.append(" --rtlib=compiler-rt")
             passthough_args.append(" -fuse-ld=lld")
+            passthough_args.append(f" -Wl,--script={linker_script}")
             passthough_args.append(" -B" + build_paths.glibc_lib())
             passthough_args.append(" -L" + build_paths.glibc_lib())
 
@@ -664,6 +675,7 @@ def get_cpp_torch_options(
     include_pytorch: bool,
     aot_mode: bool,
     compile_only: bool,
+    use_absolute_path: bool,
     use_mmap_weights: bool,
 ):
     definations: List[str] = []
@@ -681,7 +693,7 @@ def get_cpp_torch_options(
         sys_libs_cflags,
         sys_libs_include_dirs,
         sys_libs_passthough_args,
-    ) = _setup_standard_sys_libs(cpp_compiler)
+    ) = _setup_standard_sys_libs(cpp_compiler, aot_mode, use_absolute_path)
 
     isa_macros, isa_ps_args_build_flags = _get_build_args_of_chosen_isa(vec_isa)
 
@@ -761,6 +773,7 @@ class CppTorchOptions(CppOptions):
         warning_all: bool = True,
         aot_mode: bool = False,
         compile_only: bool = False,
+        use_absolute_path: bool = False,
         use_mmap_weights: bool = False,
         shared: bool = True,
         extra_flags: Sequence[str] = (),
@@ -785,6 +798,7 @@ class CppTorchOptions(CppOptions):
             include_pytorch=include_pytorch,
             aot_mode=aot_mode,
             compile_only=compile_only,
+            use_absolute_path=use_absolute_path,
             use_mmap_weights=use_mmap_weights,
         )
 
@@ -914,6 +928,7 @@ class CppTorchCudaOptions(CppTorchOptions):
         cuda: bool = True,
         aot_mode: bool = False,
         compile_only: bool = False,
+        use_absolute_path: bool = False,
         use_mmap_weights: bool = False,
         shared: bool = True,
         extra_flags: Sequence[str] = (),
@@ -925,6 +940,7 @@ class CppTorchCudaOptions(CppTorchOptions):
             include_pytorch=include_pytorch,
             aot_mode=aot_mode,
             compile_only=compile_only,
+            use_absolute_path=use_absolute_path,
             use_mmap_weights=use_mmap_weights,
             extra_flags=extra_flags,
         )
