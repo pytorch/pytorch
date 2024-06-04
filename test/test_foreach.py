@@ -597,7 +597,7 @@ class TestForeach(TestCase):
         # Empty lists
         for fop in ops_to_test:
             with self.assertRaisesRegex(
-                RuntimeError, "There were no tensor arguments to this function"
+                RuntimeError, "Tensor list must have at least one tensor."
             ):
                 fop(tensors1, tensors2)
 
