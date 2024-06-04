@@ -4194,8 +4194,6 @@ class TestSubclassSerialization(TestCase):
         '''
         Tests import semantic for tensor subclass and the {add/get/clear}_safe_globals APIs
         '''
-        # Needed to prevent UnboundLocalError: local variable 'TwoTensor' referenced before assignment
-        global TwoTensor
         t = TwoTensor(torch.randn(2, 3), torch.randn(2, 3))
         p = torch.nn.Parameter(t)
         sd = OrderedDict([('t', t), ('p', p)])
@@ -4227,6 +4225,29 @@ class TestSubclassSerialization(TestCase):
                     torch.load(f, weights_only=True)
             finally:
                 torch.serialization.clear_safe_globals()
+
+    def test_safe_globals_context_manager_weights_only(self):
+        '''
+        Tests torch.serialization.SafeGlobals context manager
+        '''
+        t = TwoTensor(torch.randn(2, 3), torch.randn(2, 3))
+        p = torch.nn.Parameter(t)
+        sd = OrderedDict([('t', t), ('p', p)])
+
+        try:
+            torch.serialization.add_safe_globals([TestEmptySubclass])
+            with tempfile.NamedTemporaryFile() as f:
+                torch.save(sd, f)
+                with torch.serialization.SafeGlobals([TwoTensor]):
+                    f.seek(0)
+                    torch.load(f, weights_only=True)
+                self.assertTrue(torch.serialization.get_safe_globals() == [TestEmptySubclass])
+                f.seek(0)
+                with self.assertRaisesRegex(pickle.UnpicklingError,
+                                            "Unsupported global: GLOBAL torch.testing._internal.two_tensor.TwoTensor"):
+                    torch.load(f, weights_only=True)
+        finally:
+            torch.serialization.clear_safe_globals()
 
     @unittest.skipIf(not torch.cuda.is_available(), "map_location loads to cuda")
     def test_tensor_subclass_map_location(self):
