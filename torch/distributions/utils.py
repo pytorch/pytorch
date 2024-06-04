@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 from functools import update_wrapper
 from numbers import Number
 from typing import Any, Dict

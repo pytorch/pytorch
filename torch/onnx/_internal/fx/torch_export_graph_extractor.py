@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 # NOTE: This file is referenced by name at
 #       /opt/pytorch/torch/_dynamo/eval_frame.py::DONT_WRAP_FILES.
 #       introduced by https://github.com/pytorch/pytorch/pull/98894.

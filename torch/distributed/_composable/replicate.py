@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import weakref
 from typing import Any, cast, Dict, Iterable, List, NoReturn, Optional, Set, Tuple
 

@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import warnings
 from collections import namedtuple
 from typing import Any, Optional, Tuple, List, Callable, Dict

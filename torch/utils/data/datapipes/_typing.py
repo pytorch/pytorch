@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 # Taking reference from official Python typing
 # https://github.com/python/cpython/blob/master/Lib/typing.py
 

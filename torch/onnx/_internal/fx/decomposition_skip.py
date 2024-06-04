@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 """A context manager that disables the decomposition of certain ops during dynamo tracing.
 
 The approach is to temporarily hijack the operator callable with PT2 custom operator.

@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import torch
 from dlrm_s_pytorch import DLRM_Net  # type: ignore[import]
 import numpy as np  # type: ignore[import]

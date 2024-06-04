@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import itertools
 from collections import defaultdict
 from dataclasses import dataclass

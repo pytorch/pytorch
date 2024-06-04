@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import copy
 import inspect
 import logging

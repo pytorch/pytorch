@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 r"""Quantized convolution modules."""
 
 from typing import Optional, List, TypeVar

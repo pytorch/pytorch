@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 r"""
 This package enables an interface for accessing MPS (Metal Performance Shaders) backend in Python.
 Metal is Apple's API for programming metal GPU (graphics processor unit). Using MPS means that increased

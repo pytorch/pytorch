@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 # Copyright 2019 Kakao Brain
 #
 # Copyright (c) Facebook, Inc. and its affiliates. All rights reserved.

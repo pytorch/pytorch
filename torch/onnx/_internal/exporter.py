@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 from __future__ import (  # for onnx.ModelProto (ONNXProgram) and onnxruntime (ONNXRuntimeOptions)
     annotations,
 )

@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 from typing import List, Union, Mapping, Dict, Any
 
 import torch.optim as optim
