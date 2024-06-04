@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import dataclasses
 import traceback
 from typing import Any, Callable, Container, Dict, List, Optional, OrderedDict, Tuple, TypeVar, overload
