@@ -285,6 +285,9 @@ class TS2FXGraphConverter:
         self.convert_graph_inputs()
 
         for node in self.ts_graph.nodes():
+            # if node.kind() == "prim::GetAttr":
+            #     breakpoint()
+            #     pass
             self.convert_node(node)
 
         self.convert_graph_outputs()
@@ -604,6 +607,7 @@ class TS2FXGraphConverter:
                 )
                 subgraph_converter.name_to_node[block_arg] = placeholder_node
 
+            breakpoint()
             subgraph = subgraph_converter.convert()
             subgraph_name = self.add_subgraph(subgraph)
             subgraph_nodes.append(self.fx_graph.get_attr(subgraph_name))
@@ -720,6 +724,8 @@ class TS2EPConverter:
     ):
         self.ts_model = ts_model
         self.ts_graph, self.params, _, _ = _create_jit_graph(ts_model, sample_args)
+        print(self.ts_graph)
+        breakpoint()
 
         self.sample_args = sample_args
         self.sample_kwargs = sample_kwargs
@@ -734,6 +740,10 @@ class TS2EPConverter:
             if isinstance(ts_model, torch.jit.ScriptModule)
             else dict()
         )
+
+        self.mod_attribute_map = {
+            name: param for name, param in ts_model.named_parameters()
+        }
 
     def convert(self) -> ExportedProgram:
         blocks_to_lifted_attrs = get_block_to_lifted_attrs(self.ts_graph)
