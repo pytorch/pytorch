@@ -258,9 +258,8 @@ def dyn_shape(fake_mode, func, *args, **kwargs):
     raise DynamicOutputShapeException(func)
 
 
-@register_op_impl(aten._unique2.default)
-def unique2(
-    fake_mode, func, arg, sorted=True, return_inverse=False, return_counts=False
+def _unique(
+    fake_mode, func, arg, dim, sorted=True, return_inverse=False, return_counts=False
 ):
     if (
         fake_mode.shape_env is None
@@ -269,7 +268,8 @@ def unique2(
         # Without symints/symfloats, cannot handle this
         raise DynamicOutputShapeException(func)
 
-    if (nnz := arg.unique_memo) is None:
+    # Do not use a memo for unique_dim
+    if dim is not None or (nnz := arg.unique_memo) is None:
         # Avoid importing sympy at a module level
         from torch.fx.experimental.symbolic_shapes import (
             _constrain_range_for_size,
@@ -291,26 +291,57 @@ def unique2(
 
             maxval = sys.maxsize - 1
 
-            if not has_free_symbols(arg.numel()):
-                maxval = int(arg.numel())
+            numel = arg.numel() if dim is None else arg.size(dim)
+            if not has_free_symbols(numel):
+                maxval = int(numel)
 
             _constrain_range_for_size(nnz, max=maxval)
 
-        arg.unique_memo = nnz
+        if dim is None:
+            arg.unique_memo = nnz
 
-    ret = [arg.new_empty((nnz,))]
-
-    if return_inverse:
-        ret.append(torch.empty_like(arg))
+    if dim is None:
+        ret = [arg.new_empty((nnz,))]
     else:
-        ret.append(arg.new_empty(0))
+        ret = [arg.new_empty(*arg.shape[:dim], nnz, *arg.shape[dim + 1 :])]
 
-    if return_counts:
-        ret.append(torch.empty_like(arg))
+    return_if_dim_and_cpu = dim is not None and arg.fake_device == torch.device("cpu")
+    if return_inverse or return_if_dim_and_cpu:
+        inverse = arg.new_empty(arg.shape if dim is None else (arg.shape[dim],))
     else:
-        ret.append(arg.new_empty(0))
+        inverse = arg.new_empty(0)
+    ret.append(inverse)
+
+    if return_counts or return_if_dim_and_cpu:
+        counts = arg.new_empty(ret[0].shape if dim is None else (ret[0].shape[dim],))
+    else:
+        counts = arg.new_empty(0)
+    ret.append(counts)
 
     return tuple(ret)
+
+
+@register_op_impl(aten._unique2.default)
+def unique2(
+    fake_mode, func, arg, sorted=True, return_inverse=False, return_counts=False
+):
+    return _unique(fake_mode, func, arg, None, sorted, return_inverse, return_counts)
+
+
+@register_op_impl(aten.unique_dim.default)
+def unique_dim(
+    fake_mode, func, arg, dim, sorted=True, return_inverse=False, return_counts=False
+):
+    return _unique(
+        fake_mode,
+        func,
+        arg,
+        # normalize dim to be non-negative
+        dim if dim >= 0 else dim % max(arg.ndim, 1),
+        sorted,
+        return_inverse,
+        return_counts,
+    )
 
 
 @register_op_impl(aten.repeat_interleave.Tensor)
@@ -801,6 +832,7 @@ def meta__flash_attention_forward(fake_mode, func, *args, **kwargs):
     max_k = kwargs["max_k"]
     return_debug_mask = kwargs["return_debug_mask"]
     # unused: value, dropout_p, is_causal, scale
+    # unused: seqused_k, alibi_slopes, window_size_left, window_size_right
 
     def convert_tensor(t, device):
         return FakeTensor(fake_mode, t, device)

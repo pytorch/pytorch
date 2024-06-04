@@ -111,7 +111,12 @@ def make_fake_params_buffers(
 
 
 def make_fake_inputs(
-    nn_module, args, kwargs, dynamic_shapes, _is_torch_jit_trace=False
+    nn_module,
+    args,
+    kwargs,
+    dynamic_shapes,
+    _is_torch_jit_trace=False,
+    _allow_complex_guards_as_runtime_asserts=False,
 ):
     """
     Given an nn module, example inputs, and constraints, return a new fake mode,
@@ -156,13 +161,22 @@ def make_fake_inputs(
             "co_firstlineno": code.co_firstlineno,
         }
         fake_mode = FakeTensorMode(
-            shape_env=ShapeEnv(tracked_fakes=[], co_fields=co_fields),
+            shape_env=ShapeEnv(
+                tracked_fakes=[],
+                co_fields=co_fields,
+                prefer_deferred_runtime_asserts_over_guards=_allow_complex_guards_as_runtime_asserts,
+                _allow_complex_guards_as_runtime_asserts=_allow_complex_guards_as_runtime_asserts,
+            ),
             allow_non_fake_inputs=True,
             export=True,
         )
     else:
         fake_mode = FakeTensorMode(
-            shape_env=ShapeEnv(tracked_fakes=[]),
+            shape_env=ShapeEnv(
+                tracked_fakes=[],
+                prefer_deferred_runtime_asserts_over_guards=_allow_complex_guards_as_runtime_asserts,
+                _allow_complex_guards_as_runtime_asserts=_allow_complex_guards_as_runtime_asserts,
+            ),
             allow_non_fake_inputs=True,
         )
     if fake_mode.shape_env is None or fake_mode.shape_env.tracked_fakes is None:
@@ -223,6 +237,7 @@ def _flatten_dynamic_shapes(
 def produce_guards_and_solve_constraints(
     fake_mode: FakeTensorMode,
     gm: torch.fx.GraphModule,
+    dynamic_shapes: Union[Dict[str, Any], Tuple[Any], List[Any], None],
     equalities_inputs: EqualityConstraint,
     original_signature: inspect.Signature,
     _disable_forced_specializations: Optional[bool] = False,
@@ -273,7 +288,10 @@ def produce_guards_and_solve_constraints(
     forced_specializations = dim_constraints.forced_specializations()
     if not _is_torch_jit_trace:
         msg = dim_constraints.prettify_results(
-            original_signature, constraint_violation_error, forced_specializations
+            original_signature,
+            dynamic_shapes,
+            constraint_violation_error,
+            forced_specializations,
         )
     else:
         # FIXME(ycao): This is a hack to get around missing signature from ScriptMethod
@@ -426,8 +444,6 @@ def _fakify_script_objects(
     fake_to_real = {}
 
     def _maybe_fakify_obj(obj):
-        if not torch._library.fake_class_registry.has_fake_class(obj._type().qualified_name()):  # type: ignore[attr-defined]
-            return obj
         fake_obj = torch._library.fake_class_registry.to_fake_obj(fake_mode, obj)
         fake_to_real[fake_obj] = obj
         return fake_obj

@@ -1910,6 +1910,9 @@ class BaseView(IRNode):
     def is_extern(self):
         return self.data.is_extern()  # type: ignore[attr-defined]
 
+    def is_module_buffer(self):
+        return self.data.is_module_buffer()  # type: ignore[attr-defined]
+
     def get_reads(self):
         with patch.object(FlexibleLayout, "allow_indexing", True):
             return extract_read_writes(
@@ -1937,6 +1940,7 @@ class ExpandView(BaseView):
     @staticmethod
     def _normalize_size(x, new_size):
         """Replace `-1` with correct sizes"""
+        sizevars = V.graph.sizevars
         new_size = list(map(sympy.expand, new_size))
         old_size = x.get_size()
         old_size = [None] * (len(new_size) - len(old_size)) + list(old_size)
@@ -1948,12 +1952,14 @@ class ExpandView(BaseView):
             elif old_size[i] is None or old_size[i] == 1:
                 pass
             else:
-                # NB: new_size[i] == old_size[i] is known because the meta
-                # formula was expected to have taught us this equality.
-                # We can't conveniently check it right now because
-                # statically_known_equals doesn't know to consult preexisting
-                # guards
-                pass
+                # Sanity check: Expect broadcast compatibility
+                #
+                # NB: new_size[i] == old_size[i] is expected to already be
+                # guarded because the meta formula was expected to have taught
+                # us this equality.
+                assert (
+                    sizevars.size_hint(new_size[i] - old_size[i], fallback=0) == 0
+                ), "Broadcast failed in ExpandView({x.get_size()}, {new_size}) on dimension {i}"
         return new_size
 
     @classmethod
@@ -2744,7 +2750,8 @@ class FixedLayout(Layout):
         """A closure containing math to read a given element"""
 
         def indexer(index):
-            assert len(index) == len(self.stride) == len(self.size)
+            assert len(index) == len(self.stride)
+            assert len(index) == len(self.size)
             result = self.offset
             for idx, stride, sz in zip(index, self.stride, self.size):
                 if sz != 1:
@@ -3408,17 +3415,9 @@ class ComputedBuffer(Buffer):
             *body.writes_name2expr.values(),
         ]
 
-        # the reordering_reindex in reads' simplify_reorder_and_tile
-        reordering_reindex = [same_reorder(range(len(index_vars)))] * len(memory_addrs)
-        for i, reads_buf in enumerate(reads_bufs):
-            if isinstance(reads_buf, ComputedBuffer) and hasattr(
-                reads_buf, "iter_reordering_reindex"
-            ):
-                reordering_reindex[i] = reads_buf.iter_reordering_reindex  # type: ignore[has-type]
-
-        def simplify_and_reorder(x_vars, support_vars, sizes, reordering_reindex=None):
+        def simplify_and_reorder(x_vars, support_vars, sizes):
             sizes, reindex0, reindex1 = self._apply_loop_reordering(
-                x_vars, support_vars, sizes, memory_addrs, reordering_reindex
+                x_vars, support_vars, sizes, memory_addrs
             )
             # for NHWC: reindex0([0,1,2,3]) = [0,2,3,1], reindex1([0,1,2,3]) = [0,3,2,1]
             x_vars = reindex0(x_vars)
@@ -3435,16 +3434,15 @@ class ComputedBuffer(Buffer):
             return sizes, reindex, reindex1
 
         support_vars = index_vars + reduce_vars
-        iter_ranges, iter_reindex, iter_reordering_reindex = simplify_and_reorder(
-            index_vars, support_vars, index_size, reordering_reindex
+        iter_ranges, iter_reindex, _ = simplify_and_reorder(
+            index_vars,
+            support_vars,
+            index_size,
         )
         reduce_ranges, reduce_reindex, _ = simplify_and_reorder(
             reduce_vars, support_vars, reduce_size
         )
 
-        # remember the reordering if not have loop collapse.
-        if len(iter_ranges) == len(index_vars):
-            self.iter_reordering_reindex = iter_reordering_reindex
         # retrace the loop body with simplification and reordering applied
         (iter_vars, reduce_vars), var_ranges = dependencies.index_vars_no_squeeze(
             iter_ranges, reduce_ranges, prefix="z"
@@ -3460,7 +3458,6 @@ class ComputedBuffer(Buffer):
         support_vars,
         sizes,
         memory_addrs,
-        reordering_reindex=None,
         priority_idx=None,
     ):
         """
@@ -3479,14 +3476,6 @@ class ComputedBuffer(Buffer):
             assert len(strides) == len(memory_addrs) and len(strides[0]) == len(
                 index_vars
             )
-            # consider both layout(strides) and reordering(reordering_reindex)
-            if reordering_reindex is not None:
-                for i in range(len(memory_addrs)):
-                    try:
-                        strides[i] = reordering_reindex[i](strides[i])
-                    # if len(order) != len(strides), do not reorder
-                    except AssertionError:
-                        pass
             order = list(reversed(pick_loop_order(strides, sizes, priority_idx)))
         except Exception:
             if config.debug:
@@ -3717,6 +3706,13 @@ class CUDATemplateBuffer(TemplateBuffer):
 
     def get_workspace_size(self):
         return self.workspace_size if self.workspace_size is not None else 0
+
+
+class CppTemplateBuffer(TemplateBuffer):
+    def __init__(self, layout, inputs, make_kernel_render, template, choice):
+        super().__init__(layout, inputs, make_kernel_render)
+        self.template = template
+        self.choice = choice
 
 
 @dataclasses.dataclass
@@ -3996,13 +3992,6 @@ class ExternKernel(InputsKernel):
     def collect_arg_kwarg_properties(self):
         # if self.op_overload is torch._ops.OpOverload, we can use its schema to collect additional
         # information for args and kwargs, e.g. type and default value, to help with the cpp wrapper codegen
-        if (
-            isinstance(self.op_overload, torch._ops.OpOverload)
-            and not self.ordered_kwargs_for_cpp_kernel
-        ):
-            self.ordered_kwargs_for_cpp_kernel = [
-                x.name for x in self.op_overload._schema.arguments if x.kwarg_only
-            ]
         self.arg_properties = (
             [
                 {
@@ -4016,15 +4005,23 @@ class ExternKernel(InputsKernel):
             if isinstance(self.op_overload, torch._ops.OpOverload)
             else [{} for i in range(len(self.inputs))]
         )
-        self.kwarg_properties = (
+        self.allarg_properties = (
             {
                 x.name: {"type": x.real_type, "default_value": x.default_value}
                 for x in self.op_overload._schema.arguments
-                if x.kwarg_only
             }
             if isinstance(self.op_overload, torch._ops.OpOverload)
             else {}
         )
+        # FIXME: self.kwargs does not always match kwargs defined in schema, so sometimes
+        # ordered_kwargs_for_cpp_kernel is explicilty passed in.
+        if (
+            isinstance(self.op_overload, torch._ops.OpOverload)
+            and not self.ordered_kwargs_for_cpp_kernel
+        ):
+            self.ordered_kwargs_for_cpp_kernel = [
+                x.name for x in self.op_overload._schema.arguments if x.kwarg_only
+            ]
 
     def fill_non_provided_args(self, args, kwargs, convert_val_to_str=False):
         # Previously, we want to maintain forward-compatibility by skipping
@@ -4386,7 +4383,21 @@ class ExternKernel(InputsKernel):
         pass
 
     def codegen_const_args(self):
-        return map(V.graph.wrapper_code.val_to_arg_str, self.constant_args)
+        if V.graph.cpp_wrapper:
+            result = []
+            for i, x in enumerate(self.constant_args):
+                idx = len(self.inputs) + i
+                type_ = (
+                    self.arg_properties[i].get("type")
+                    if self.arg_properties and idx < len(self.arg_properties)
+                    else None
+                )
+                result.append(
+                    V.graph.wrapper_code.val_to_arg_str(x, type_)  # type: ignore[arg-type]
+                )
+            return result
+        else:
+            return map(V.graph.wrapper_code.val_to_arg_str, self.constant_args)
 
     def codegen_args(self):
         args = []
@@ -4399,10 +4410,10 @@ class ExternKernel(InputsKernel):
                 if V.graph.cpp_wrapper:
                     assert self.arg_properties and i < len(
                         self.arg_properties
-                    ), "Invalid arg_properties accessing"
+                    ), "Invalid access to ExternKernel.arg_properties"
                     type_ = self.arg_properties[i].get("type")
                     args.append(
-                        V.graph.wrapper_code.val_to_cpp_arg_str(  # type: ignore[arg-type]
+                        V.graph.wrapper_code.val_to_arg_str(  # type: ignore[arg-type]
                             x, type_
                         )
                     )
@@ -4414,10 +4425,10 @@ class ExternKernel(InputsKernel):
     def get_kwargs_value(self, arg_name):
         if arg_name in self.kwargs:
             return self.kwargs.get(arg_name)
-        if self.kwarg_properties and self.kwarg_properties.get(arg_name):
-            return self.kwarg_properties.get(arg_name).get("default_value")  # type: ignore[union-attr]
+        if self.allarg_properties and self.allarg_properties.get(arg_name):
+            return self.allarg_properties.get(arg_name).get("default_value")  # type: ignore[union-attr]
         else:
-            raise AssertionError(f"{arg_name} not in self.kwarg_properties")
+            raise AssertionError(f"{arg_name} not in self.allarg_properties")
 
     def codegen_kwargs(self, skip_out=False):
         if V.graph.cpp_wrapper:
@@ -4432,12 +4443,12 @@ class ExternKernel(InputsKernel):
                     kwargs.append(v)
                 else:
                     type_ = (
-                        self.kwarg_properties.get(arg_name).get("type")  # type: ignore[union-attr]
-                        if self.kwarg_properties and arg_name in self.kwarg_properties
+                        self.allarg_properties.get(arg_name).get("type")  # type: ignore[union-attr]
+                        if self.allarg_properties and arg_name in self.allarg_properties
                         else None
                     )
                     kwargs.append(
-                        V.graph.wrapper_code.val_to_cpp_arg_str(  # type: ignore[arg-type]
+                        V.graph.wrapper_code.val_to_arg_str(  # type: ignore[arg-type]
                             v, type_
                         )
                     )
@@ -5420,7 +5431,7 @@ class FallbackKernel(ExternKernelAlloc):
         if V.graph.cpp_wrapper and isinstance(self.op_overload, torch._ops.OpOverload):
             args = self.fill_non_provided_args(args, kwargs)
             args = [
-                V.graph.wrapper_code.val_to_cpp_arg_str(x, param.real_type)
+                V.graph.wrapper_code.val_to_arg_str(x, param.real_type)
                 for param, x in zip(self.op_overload._schema.arguments, args)
             ]
         else:
@@ -5474,6 +5485,9 @@ class FallbackKernel(ExternKernelAlloc):
         ordered_kwargs = [
             kwargs.get(key, None) for key in self.ordered_kwargs_for_cpp_kernel
         ]
+        if not V.graph.aot_mode:
+            # No need to serialize in the cpp wrapper JIT mode
+            return [*args, *ordered_kwargs]
 
         serializer = GraphModuleSerializer(None, None)  # type: ignore[arg-type]
         named_arguments = serializer.serialize_inputs(self.op_overload, args, kwargs)  # type: ignore[arg-type]
@@ -6263,7 +6277,7 @@ class MKLPackedLinear(ExternKernelAlloc):
         )
 
     @classmethod
-    def create(cls, x, packed_w, orig_w, batch_size):
+    def create(cls, x, packed_w, orig_w, B, batch_size):
         x = cls.require_stride1(cls.realize_input(x))
         orig_w = cls.require_stride1(cls.realize_input(orig_w))
         *m, _ = x.get_size()
@@ -6271,7 +6285,11 @@ class MKLPackedLinear(ExternKernelAlloc):
         output_size = list(m) + [oc]
         output_stride = make_contiguous_strides_for(output_size)
         inputs = [x, packed_w, orig_w]
-        constant_args = [None, batch_size]
+        constant_args = [batch_size]
+        if B is not None:
+            inputs += [B]
+        else:
+            constant_args.insert(0, None)
 
         return MKLPackedLinear(
             layout=FixedLayout(
@@ -8069,6 +8087,11 @@ class LoopBodyBlock:
                 index = add_index(index, "other")
                 return self._inner.index_expr(index, dtype)
 
+            def check_bounds(self, index, size, lower, upper):
+                index = add_index(index, "other")
+                size = add_index(size, "other")
+                return self._inner.check_bounds(index, size, lower, upper)
+
             def bucketize(
                 self,
                 values,
@@ -8163,7 +8186,7 @@ class LoopBodyBlock:
             CaptureIndexing(proxy_ops), self.body.var_ranges
         )
         if config.constant_and_index_propagation:
-            handler = IndexPropagation(handler)
+            handler = IndexPropagation(handler, self.body.var_ranges)
 
         with V.set_ops_handler(handler):
             # This indirection is just a cute way to get IndexPropagation to
