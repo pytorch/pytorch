@@ -752,7 +752,7 @@ class UvClient : public UvTcpSocket {
     if (!stream.read_key(key))
       return false;
 
-    auto data = store->get(key);
+    const auto& data = store->get(key);
     StreamWriter sw(iptr());
     sw.write_vector(data);
     sw.send();
@@ -884,8 +884,7 @@ class UvClient : public UvTcpSocket {
         return false;
       }
 
-      auto data = store->get(key);
-      sw.write_vector(data);
+      sw.write_vector(store->get(key));
     }
     sw.send();
 
