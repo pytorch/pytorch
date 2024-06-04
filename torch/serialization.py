@@ -62,6 +62,7 @@ __all__ = [
     'clear_safe_globals',
     'get_safe_globals',
     'add_safe_globals',
+    'SafeGlobals'
 ]
 
 
@@ -171,6 +172,14 @@ def add_safe_globals(safe_globals: List[Any]) -> None:
         safe_globals (List[Any]): list of globals to mark as safe
     '''
     _weights_only_unpickler._add_safe_globals(safe_globals)
+
+class SafeGlobals(_weights_only_unpickler._SafeGlobals):
+    r'''Context-manager that adds certain globals as safe for ``weights_only`` load.
+
+    Args:
+        safe_globals: List of globals for weights_only load.
+    '''
+    pass
 
 def _is_zipfile(f) -> bool:
     # This is a stricter implementation than zipfile.is_zipfile().
