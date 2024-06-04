@@ -9,10 +9,11 @@ import sympy
 from sympy import Expr
 
 import torch
+
+import torch._inductor.async_compile  # noqa: F401 required to warm up AsyncCompile pools
 import torch._ops
 from torch.fx.experimental.symbolic_shapes import ConvertIntKey, DivideByKey
 from .. import config, ir
-
 from ..codecache import CudaKernelParamCache
 from ..utils import cache_on_self, sympy_product
 from ..virtualized import V
@@ -1533,15 +1534,15 @@ class CppWrapperCpu(WrapperCodeGen):
         else:
             return LAYOUT_TO_ATEN[layout]
 
-    @functools.lru_cache(None)
+    @functools.lru_cache(None)  # noqa: B019
     def codegen_int_array_var(
         self,
         int_array: str,
         writer=None,
         known_statically=False,
         graph=None,  # for per-graph caching
-        is_bool=False,
     ):
+        # This is used for size/stride declaration
         # Because the memory planning is done in two passes (see the implementation
         # of self.generate), the writeline behavior is different in the two passes.
         # As a result, the emitted int array declarations may appear in a later
@@ -1552,50 +1553,13 @@ class CppWrapperCpu(WrapperCodeGen):
             writer = self
 
         var = f"int_array_{next(self.int_array_id)}"
-        ctype = "int32_t" if is_bool else "int64_t"
+        ctype = "int64_t"
         if var not in self.declared_int_array_vars:
             self.declared_int_array_vars.add(var)
             if known_statically:
                 writer.writeline(f"static constexpr {ctype} {var}[] = {int_array};")
             else:
                 writer.writeline(f"const {ctype} {var}[] = {int_array};")
-        return var
-
-    @functools.lru_cache(None)
-    def codegen_var_array(
-        self,
-        var_array: str,
-        writer=None,
-        known_statically=False,
-        graph=None,  # for per-graph caching
-        type_hint=None,  # ['int64_t', 'tensor', 'bool']
-    ):
-        # Because the memory planning is done in two passes (see the implementation
-        # of self.generate), the writeline behavior is different in the two passes.
-        # As a result, the emitted int array declarations may appear in a later
-        # position of the generated code, so the second pass codegen should not
-        # reuse int array declarations generated in the first pass
-        if writer is None:
-            # The first pass codegen uses `self` as the writer
-            writer = self
-        if not type_hint or type_hint in ["bool", "int64_t"]:
-            return self.codegen_int_array_var(
-                var_array,
-                writer,
-                known_statically,
-                graph,
-                is_bool=type_hint == "bool",
-            )
-
-        var = f"var_array_{next(self.var_array_id)}"
-        assert type_hint == "tensor"
-        ctype = "AtenTensorHandle*"
-        if var not in self.declared_var_array_vars:
-            self.declared_var_array_vars.add(var)
-            if known_statically:
-                writer.writeline(f"static constexpr {ctype} {var}[] = {var_array};")
-            else:
-                writer.writeline(f"const {ctype} {var}[] = {var_array};")
         return var
 
     def make_buffer_allocation(self, buffer):
@@ -2109,7 +2073,7 @@ class CppWrapperCpu(WrapperCodeGen):
 
         def extract_output_name(out):
             assert out is not None, "None, i.e. optional output is not supported"
-            if isinstance(out, ir.MultiOutput):
+            if isinstance(out, (ir.MultiOutput, ir._CollectiveKernel)):
                 return out.get_name()
             elif isinstance(out, (list, tuple)):
                 return type(out)(extract_output_name(o) for o in out)
@@ -2190,17 +2154,19 @@ if (custom_op_wrapper.get() == NULL) {
                 return f"PyCapsule_New(reinterpret_cast<void*>({raw_arg.codegen_reference()}.get()), NULL, NULL)"
             elif isinstance(arg_type, torch.IntType):
                 # int
-                return f"PyInt_FromLong({raw_arg})"
+                return f"PyLong_FromLongLong({raw_arg})"
             elif isinstance(arg_type, torch.SymIntType):
                 # SymInt
                 expr = (
                     raw_arg.node.expr if isinstance(raw_arg, torch.SymInt) else raw_arg
                 )
-                return f"PyInt_FromLong({self.expr_printer(expr)})"
+                return f"PyLong_FromLongLong({self.expr_printer(expr)})"
             elif isinstance(arg_type, torch.FloatType):
                 return f"PyFloat_FromDouble({raw_arg})"
             elif isinstance(arg_type, torch.BoolType):
-                return f"PyBool_FromBool({raw_arg})"
+                return f"PyBool_FromLong({1 if raw_arg else 0})"
+            elif isinstance(arg_type, torch.StringType):
+                return f'PyUnicode_FromString("{raw_arg}")'
             else:
                 raise NotImplementedError(
                     f"arg type {arg_type} is not yet supported by custom_op_wrapper"
@@ -2334,65 +2300,28 @@ if (py_{buf_name}.get() == NULL) {{
     def generate_save_uncompiled_kernels(self):
         pass
 
-    def val_to_cpp_arg_str(self, val, type_) -> str:
-        if config.abi_compatible and isinstance(type_, torch.OptionalType):
-            if val is None:
-                return "0"  # nullptr is not available in C
-            if not isinstance(type_.getElementType(), torch.TensorType):
-                var_name = f"var_{next(self.arg_var_id)}"
-                if isinstance(
-                    type_.getElementType(),
-                    (torch.ListType, torch.TupleType, torch.DeviceObjType),
-                ):
-                    arg_str = self.val_to_arg_str(val)
-                    if val is None:
-                        return "{arg_str}, 0"
-                    else:
-                        # For datatypes with auxiliary info, we need to hoist out the extra arguments.
-                        # NOTE: This only works if there is one additional argument, though it can easily be generalized.
-                        main_value, aux = arg_str.rsplit(", ")
-                        self.writeline(f"auto {var_name} = {main_value};")
-                        return f"&{var_name}, {aux}"
-                else:
-                    self.writeline(f"auto {var_name} = {self.val_to_arg_str(val)};")
-                    return f"&{var_name}"
-            elif config.c_shim_version == "2":
-                # Similar to other data type, use pointer to denote optional tensor arg in v2 C shim
-                base_handle = self.val_to_arg_str(val)
-                if "wrap_with_raii_handle_if_needed" in base_handle:
-                    # wrap_with_raii_handle_if_needed creates a temp RAIIAtenTensorHandle, so we need to
-                    # explicitly store it. Otherwise, it will be destroyed before the fallback kernel call.
-                    tmp_var_name = f"var_{next(self.arg_var_id)}"
-                    self.writeline(
-                        f"RAIIAtenTensorHandle {tmp_var_name} = {base_handle};"
-                    )
-                    base_handle = tmp_var_name
-                var_name = f"var_{next(self.arg_var_id)}"
-                self.writeline(f"AtenTensorHandle {var_name} = {base_handle}.get();")
-                return f"&{var_name}"
+    def c_type_for_prim_type(self, type_) -> str:
+        assert (
+            config.abi_compatible
+        ), "c_type_for_prim_type is only used in ABI compatible mode"
+        if isinstance(type_, torch.OptionalType):
+            return f"{self.c_type_for_prim_type(type_.getElementType())}*"
+        elif isinstance(type_, torch.TensorType):
+            return "AtenTensorHandle"
+        elif isinstance(type_, (torch.IntType, torch.SymIntType)):
+            return "int64_t"
+        elif isinstance(
+            type_, (torch.BoolType, torch.SymBoolType, torch.EnumType)
+        ) or repr(type_) in ("ScalarType", "Layout"):
+            return "int32_t"
+        elif isinstance(type_, torch.FloatType):
+            return "double"
+        else:
+            raise AssertionError(f"Unexpected type in c_type_for_prim_type: {type_=}")
 
-        return self.val_to_arg_str(val, type_)
-
-    def val_to_arg_str(self, val, type_=None) -> str:
-        if val is None:
-            # When None is passed as an argument, it represents an optional that does not contain a value.
-            if config.abi_compatible:
-                if type_ is None or isinstance(type_, torch.OptionalType):
-                    return "0"  # nullptr is not available in C
-                elif isinstance(type_, torch.TensorType):
-                    var_name = f"var_{next(self.arg_var_id)}"
-                    self.writeline(f"AtenTensorHandle {var_name}_handle;")
-                    self.writeline(
-                        f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_new_uninitialized_tensor(&{var_name}_handle));"
-                    )
-                    self.writeline(
-                        f"RAIIAtenTensorHandle {var_name}({var_name}_handle);"
-                    )
-                    return var_name
-                else:
-                    raise AssertionError("Can not map None to a known data type")
-            return "c10::nullopt"
-        elif isinstance(val, bool):
+    def val_to_arg_str_for_prim_type(self, val, type_) -> str:
+        # TODO: not using type_ as the first step of refactoring. Will update this later.
+        if isinstance(val, bool):
             if config.abi_compatible:
                 return "1" if val else "0"
             else:
@@ -2416,34 +2345,104 @@ if (py_{buf_name}.get() == NULL) {{
             else:
                 return "-std::numeric_limits<float>::infinity()"
         elif isinstance(val, (list, tuple)):
-            # FIXME handle embedded optional types?
-            result = f"{{{', '.join(self.val_to_arg_str(x) for x in val)}}}"
-            if config.abi_compatible:
-                assert len(val) > 0, "Empty array is not supported in C"
-                static = self.is_statically_known_list_of_ints(val)
-                type_hint = "bool" if isinstance(val[0], bool) else "int64_t"
-                if (
-                    type_ is not None
-                    and isinstance(type_, torch._C.ListType)
-                    and isinstance(type_.getElementType(), torch._C.OptionalType)
-                    and isinstance(
-                        type_.getElementType().getElementType(), torch._C.TensorType
-                    )
-                ):
-                    type_hint = "tensor"
-                    tmp_arg_list = ""
-                    for x in val:
-                        tmp_arg_list += f"&{x}_handle, "
-                    result = f"{{{tmp_arg_list}}}"
-                # Need to pass the array length because we can't use std::vector
-                var_array = self.codegen_var_array(
-                    result,
-                    known_statically=static,
-                    graph=self.get_codegened_graph(),
-                    type_hint=type_hint,
-                )
-                return f"{var_array}, {len(val)}"
-            else:
-                return result
+            # FIXME: This happens because type_ is not always properly set to torch.ListType
+            return f"{{{', '.join(self.val_to_arg_str(x, None) for x in val)}}}"
         else:
             return repr(val)
+
+    def val_to_arg_str(self, val, type_=None) -> str:
+        if val is None:
+            # None needs special care. It either represent nullopt or an empty tensor
+            if config.abi_compatible:
+                if type_ is None or isinstance(type_, torch.OptionalType):
+                    if type_ is not None and isinstance(
+                        type_.getElementType(),
+                        (
+                            torch.ListType,
+                            torch.TupleType,
+                            torch.DeviceObjType,
+                        ),
+                    ):
+                        return "0, 0"
+                    else:
+                        return "0"  # nullptr is not available in C
+                elif isinstance(type_, torch.TensorType):
+                    # create an empty tensor, the equivalent of at::Tensor()
+                    var_name = f"var_{next(self.arg_var_id)}"
+                    self.writeline(f"AtenTensorHandle {var_name}_handle;")
+                    self.writeline(
+                        f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_new_uninitialized_tensor(&{var_name}_handle));"
+                    )
+                    self.writeline(
+                        f"RAIIAtenTensorHandle {var_name}({var_name}_handle);"
+                    )
+                    return var_name
+                else:
+                    raise AssertionError("Can not map None to a known data type")
+            else:
+                if isinstance(type_, torch.TensorType):
+                    var_name = f"var_{next(self.arg_var_id)}"
+                    self.writeline(f"at::Tensor {var_name} = at::Tensor();")
+                    return var_name
+                else:
+                    return "std::nullopt"
+
+        if isinstance(type_, torch.OptionalType):
+            element_type = type_.getElementType()
+            if config.abi_compatible:
+                if not isinstance(element_type, torch.TensorType):
+                    var_name = f"var_{next(self.arg_var_id)}"
+                    if isinstance(
+                        element_type,
+                        (torch.ListType, torch.TupleType, torch.DeviceObjType),
+                    ):
+                        # type_ is something like Optional[List] or Optional[Device]
+                        arg_str = self.val_to_arg_str(val, element_type)
+                        # For datatypes with auxiliary info, we need to hoist out the extra arguments.
+                        # NOTE: This only works if there is one additional argument, though it can easily be generalized.
+                        main_value, aux = arg_str.rsplit(", ")
+                        self.writeline(f"auto {var_name} = {main_value};")
+                        return f"&{var_name}, {aux}"
+                    else:
+                        self.writeline(
+                            f"{self.c_type_for_prim_type(element_type)} {var_name} = {self.val_to_arg_str(val, element_type)};"
+                        )
+                        return f"&{var_name}"
+                elif config.c_shim_version == "2":
+                    # type_ is Optional[Tensor]
+                    # Similar to other data type, use pointer to denote optional tensor arg in v2 C shim
+                    base_handle = self.val_to_arg_str(val, element_type)
+                    if "wrap_with_raii_handle_if_needed" in base_handle:
+                        # wrap_with_raii_handle_if_needed creates a temp RAIIAtenTensorHandle, so we need to
+                        # explicitly store it. Otherwise, it will be destroyed before the fallback kernel call.
+                        tmp_var_name = f"var_{next(self.arg_var_id)}"
+                        self.writeline(
+                            f"RAIIAtenTensorHandle {tmp_var_name} = {base_handle};"
+                        )
+                        base_handle = tmp_var_name
+                    var_name = f"var_{next(self.arg_var_id)}"
+                    self.writeline(
+                        f"AtenTensorHandle {var_name} = {base_handle}.get();"
+                    )
+                    return f"&{var_name}"
+            else:
+                return self.val_to_arg_str(val, element_type)
+
+        elif isinstance(type_, torch.ListType):
+            assert isinstance(
+                val, (list, tuple)
+            ), f"{val} does not match with arg type {type_}"
+            element_type = type_.getElementType()
+            if config.abi_compatible:
+                assert len(val) > 0, "Empty array is not supported in C"
+                var_name = f"var_array_{next(self.var_array_id)}"
+                result = f"{{{', '.join(self.val_to_arg_str(x, element_type) for x in val)}}}"
+                self.writeline(
+                    f"const {self.c_type_for_prim_type(element_type)} {var_name}[] = {result};"
+                )
+                # Need to pass the array length because we can't use std::vector
+                return f"{var_name}, {len(val)}"
+            else:
+                return f"{{{', '.join(self.val_to_arg_str(x, element_type) for x in val)}}}"
+
+        return self.val_to_arg_str_for_prim_type(val, type_)

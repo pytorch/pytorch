@@ -6,6 +6,7 @@ import functools
 import inspect
 import itertools
 import types
+import warnings
 from typing import Dict, List, Optional, TYPE_CHECKING, Union
 
 import torch
@@ -634,9 +635,30 @@ class SkipFunctionVariable(VariableTracker):
         else:
             try:
                 path = inspect.getfile(self.value)
+                msg = f"'skip function {self.value.__qualname__} in file {path}'"
             except TypeError:
-                path = f"Builtin {self.value.__name__}"
-            msg = f"'skip function {self.value.__qualname__} in file {path}'"
+                known_python_builtin_modules = {"_abc", "_warnings"}
+                if self.value.__module__ in known_python_builtin_modules:
+                    msg = (
+                        f"Graph break due to unsupported Python builtin {self.value.__module__}.{self.value.__qualname__}. "
+                        f"Please file an issue on GitHub "
+                        f"so the PyTorch team can add support for it. "
+                    )
+                else:
+                    msg = (
+                        f"Graph break due to unsupported builtin {self.value.__module__}.{self.value.__qualname__}. "
+                        f"This function is either a Python builtin (e.g. _warnings.warn) "
+                        f"or a third-party C/C++ Python extension (perhaps created with pybind). "
+                        f"If it is a Python builtin, please file an issue on GitHub "
+                        f"so the PyTorch team can add support for it and see the next case for a workaround. "
+                        f"If it is a third-party C/C++ Python extension, please "
+                        f"either wrap it into a PyTorch-understood custom operator "
+                        f"(see https://pytorch.org/docs/main/notes/custom_operators.html "
+                        f"for more details) or, if it is traceable, use "
+                        f"torch.compiler.allow_in_graph."
+                    )
+                    # also warn on it because most users won't see the graph break message
+                    warnings.warn(msg)
             msg += f"', {self.reason}'" if self.reason else ""
             unimplemented(msg)
 
