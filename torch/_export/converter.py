@@ -40,6 +40,11 @@ def inplace_optimize_sym_size_div(gm: torch.fx.GraphModule):
 def normalize_name(name: str) -> str:
     return name.replace(".", "_")
 
+def ir_name_to_func_name(name: str) -> str:
+    """prim::If -> convert_prim_If"""
+    name_list = name.split("::")
+    return "convert_" + "_".join(name_list)
+
 
 # Those operators will be automatically populated to a instance method
 # of TS2FXGraphConverter with name convert_<namespace>_<opname>().
@@ -93,12 +98,11 @@ class TS2FXGraphConverter:
 
         # Populate methods for the standard operators.
         for k in kind_to_standard_operators.keys():
-            k_list = k.split("::")
-            func_name = "convert_" + "_".join(k_list)
+            handler_func_name = ir_name_to_func_name(k)
             # Create an indirect function call:
             # convert_<namespace>_<opname> --> lambda node: _convert_standard_operator(node)
             setattr(
-                self, func_name, lambda node: self._convert_standard_operators(node)
+                self, handler_func_name, lambda node: self._convert_standard_operators(node)
             )
 
     def add_subgraph(self, subgraph) -> str:
@@ -490,9 +494,9 @@ class TS2FXGraphConverter:
         # Get handler based on namespace and operator name.
         # Provide a default node handler as well in case we don't find
         # matching converter for that.
-        handler_name = "_".join(node_kind_split)
+        handler_func_name = ir_name_to_func_name(node_kind)
         handler_func = getattr(
-            self, f"convert_{handler_name}", self.convert_default_node
+            self, handler_func_name, self.convert_default_node
         )
         handler_func(node)
 
