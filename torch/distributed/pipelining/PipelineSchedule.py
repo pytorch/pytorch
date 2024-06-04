@@ -206,6 +206,8 @@ def _batch_p2p(p2p_ops: List[dist.P2POp], desc: Optional[str] = None):
     """
     Simple wrapper over batch_isend_irecv from torch.distributed, which just adds a descriptive logger on top.
     """
+    if len(p2p_ops) == 0:
+        return None
     desc_str = f"{desc}, " if desc else ""
     logger.debug(f"batch_p2p {desc_str}{p2p_ops}")  # noqa: G004
     return dist.batch_isend_irecv(p2p_ops).pop()
@@ -399,121 +401,114 @@ class Schedule1F1B(PipelineScheduleSingle):
         """
         arg_mbs, kwarg_mbs = self._check_inputs(arg_mbs, kwarg_mbs, target_mbs, losses)
 
-        # Example, 4 GPUs, 8 microbatches
-        # Stage 0: 6 warmup, 2 1f1b, 6 cooldown
-        # Stage 1: 4 warmup, 4 1f1b, 4 cooldown
-        # Stage 2: 2 warmup, 6 1f1b, 2 cooldown
-        # Stage 3: 0 warmup, 8 1f1b, 0 cooldown
-        # fwd only
-        warmup_steps = min(
+        # Last stage has 1 warmup, second-to-last 2 warmups, ...
+        # first stage `num_stages` warmups
+        warmup_chunks = min(
             self._n_microbatches,
-            2 * (self._num_stages - self._stage.stage_index - 1),
-        )
-        # fwd + bwd
-        main_1f1b_steps = self._n_microbatches - warmup_steps
-        # bwd only
-        cooldown_steps = (2 * self._n_microbatches) - (
-            warmup_steps + (2 * main_1f1b_steps)
-        )
-        total_steps = warmup_steps + main_1f1b_steps + cooldown_steps
-        logger.debug(
-            f"Stage {self._stage.stage_index}: "  # noqa: G004
-            f"Warmup steps: {warmup_steps}, "
-            f"Main 1F1B steps: {main_1f1b_steps}, "
-            f"Cooldown steps: {cooldown_steps}, "
-            f"Total steps: {total_steps}"
+            self._num_stages - self._stage.stage_index,
         )
 
-        # Delay send waits
-        fwd_sends_to_wait: List[dist.Work] = []
-        bwd_sends_to_wait: List[dist.Work] = []
-
-        def step_has_forward(i):
-            assert i >= 0, i
-            return i < self._n_microbatches
-
-        def step_has_backward(i):
-            assert i < total_steps, i
-            return i >= warmup_steps and self._has_backward
-
-        def is_1f1b_step(i):
-            return step_has_forward(i) and step_has_backward(i)
-
-        def is_warmup_step(i):
-            return step_has_forward(i) and not step_has_backward(i)
-
-        def is_cooldown_step(i):
-            return not step_has_forward(i) and step_has_backward(i)
-
-        def should_coalesce_fwd_send_bwd_recv(step):
-            return (
-                is_1f1b_step(step)
-                or (is_warmup_step(step) and is_cooldown_step(step + 1))
-                or (step >= 1 and is_warmup_step(step - 1) and is_cooldown_step(step))
-            )
-
-        def should_coalesce_bwd_send_fwd_recv(bwd_send_step):
-            # The backward send to prev stage should be coalesced with the fwd recv from the previous stage
-            return bwd_send_step >= warmup_steps and is_1f1b_step(bwd_send_step + 1)
-
-        # bwd chunk counter
+        # Chunk counters
+        fwd_mb_index = 0
         bwd_mb_index = 0
-        self._stage._configure_data_parallel_mode(last_backward=False)
-        for i in range(total_steps):
-            if step_has_forward(i):
-                with record_function(f"Forward {i}"):
-                    ops = self._stage.get_fwd_recv_ops()
-                    desc = "fwd_recv"
-                    if should_coalesce_bwd_send_fwd_recv(i - 1):
-                        desc += "_bwd_send"
-                        ops.extend(self._stage.get_bwd_send_ops())
 
-                    works = _sorted_batch_p2p(ops, desc=desc)
-                    for work in works.values():
-                        work.wait()
+        # Warmup phase
+        send_work = None
+        fwd_sends = []
+        for _ in range(warmup_chunks):
+            # Receive activations
+            fwd_recvs = self._stage.get_fwd_recv_ops()
+            if recv_work := _batch_p2p(fwd_recvs, desc="fwd_recv"):
+                recv_work.wait()
 
-                    output = self._stage.forward_one_chunk(arg_mbs[i], kwarg_mbs[i])  # type: ignore[index]
+            # Compute
+            output = self._stage.forward_one_chunk(arg_mbs[fwd_mb_index], kwarg_mbs[fwd_mb_index])  # type: ignore[index]
 
-                    if not should_coalesce_fwd_send_bwd_recv(i):
-                        ops = self._stage.get_fwd_send_ops()
-                        works = _sorted_batch_p2p(ops, desc="fwd_send")
-                        fwd_sends_to_wait.extend(works.values())
+            # Clear previous chunk's forward sends (hopefully they have well
+            # finished, otherwise, we are heavily communication bound, in which
+            # case it doesn't create a lot of benefit to compute next chunk
+            # eagerly either)
+            if send_work:
+                send_work.wait()
 
-                self._maybe_compute_loss(self._stage, output, target_mbs, i)
+            # Send activations
+            fwd_sends = self._stage.get_fwd_send_ops()
+            if fwd_mb_index != warmup_chunks - 1:
+                # Safe to fire
+                send_work = _batch_p2p(fwd_sends, desc="fwd_send")
+            # otherwise:
+            #   The last foward send is left for fuse with first 1B in 1B1F below
 
-            if step_has_backward(i):
-                self._stage._configure_data_parallel_mode(
-                    last_backward=(i == total_steps - 1)
-                )
-                with record_function(f"Backward {bwd_mb_index}"):
-                    ops = self._stage.get_bwd_recv_ops()
-                    desc = "bwd_recv"
-                    if should_coalesce_fwd_send_bwd_recv(i):
-                        ops.extend(self._stage.get_fwd_send_ops())
-                        desc += "_fwd_send"
+            # Compute loss
+            self._maybe_compute_loss(self._stage, output, target_mbs, fwd_mb_index)
+            fwd_mb_index += 1
 
-                    works = _sorted_batch_p2p(ops, desc=desc)
-                    for work in works.values():
-                        work.wait()
+        # Now we should have send ops left over, to be fused with first 1B of 1B1F phase below.
 
-                    loss = self._maybe_get_loss(self._stage, bwd_mb_index)
-                    self._stage.backward_one_chunk(loss=loss)
+        # 1B1F phase
+        while True:  # Don't worry, we have a break inside
+            # We actually do 1B first as the `1B1F` name indicates, so prepare its recv ops
+            bwd_recvs = self._stage.get_bwd_recv_ops()
 
-                    if not should_coalesce_bwd_send_fwd_recv(i):
-                        # see Note: coalesced bwd-send/fwd-recv
-                        ops = self._stage.get_bwd_send_ops()
-                        works = _sorted_batch_p2p(ops, desc="bwd_send")
-                        bwd_sends_to_wait.extend(works.values())
+            # Now, we need to fire the fwd_sends and bwd_recvs together
+            if fuse_work := _batch_p2p(fwd_sends + bwd_recvs, desc="fwd_send_bwd_recv"):
+                fuse_work.wait()
 
-                    bwd_mb_index += 1
+            # Backward one chunk
+            loss = self._maybe_get_loss(self._stage, bwd_mb_index)
+            self._stage.backward_one_chunk(loss=loss)
 
-        # Wait for all forward sends to finish
-        for work in fwd_sends_to_wait:
-            work.wait()
+            # Get the bwd send ops, but don't fire, to be fused with the 1F below
+            bwd_sends = self._stage.get_bwd_send_ops()
+            bwd_mb_index += 1
 
-        # Wait for all backward sends to finish
-        for work in bwd_sends_to_wait:
-            work.wait()
+            if fwd_mb_index == self._n_microbatches:
+                # We are done with 1B1F, so break with some left-over bwd_sends
+                break
+
+            # We prepare 1F of the `1B1F`
+            fwd_recvs = self._stage.get_fwd_recv_ops()
+
+            # Fuse it with bwd_sends above
+            if fuse_work := _batch_p2p(bwd_sends + fwd_recvs, desc="bwd_send_fwd_recv"):
+                fuse_work.wait()
+
+            # Now do the fwd
+            output = self._stage.forward_one_chunk(arg_mbs[fwd_mb_index], kwarg_mbs[fwd_mb_index])  # type: ignore[index]
+
+            # Compute loss
+            self._maybe_compute_loss(self._stage, output, target_mbs, fwd_mb_index)
+
+            # Get the fwd send ops, but don't fire, leave it for the next iter (wrap-around)
+            fwd_sends = self._stage.get_fwd_send_ops()
+            fwd_mb_index += 1
+
+        # Remember we still have some bwd_sends left over after the break? Now it is time to fire it
+        send_work = _batch_p2p(bwd_sends, desc="bwd_send")
+
+        # Cooldown
+        while bwd_mb_index < self._n_microbatches:
+            # prepare bwd recv ops
+            bwd_recvs = self._stage.get_bwd_recv_ops()
+            if recv_work := _batch_p2p(bwd_recvs, desc="bwd_recv"):
+                recv_work.wait()
+
+            # Backward one chunk
+            loss = self._maybe_get_loss(self._stage, bwd_mb_index)
+            self._stage.backward_one_chunk(loss=loss)
+
+            # Clear previous chunk's backward sends (hopefully they have well finished)
+            if send_work:
+                send_work.wait()
+
+            # Get the bwd send ops, fire it
+            bwd_sends = self._stage.get_bwd_send_ops()
+            send_work = _batch_p2p(bwd_sends, desc="bwd_send")
+            bwd_mb_index += 1
+
+        # Wait for the last backward send to finish
+        if send_work:
+            send_work.wait()
 
         # Return losses if there is a container passed in
         self._update_losses(self._stage, losses)
