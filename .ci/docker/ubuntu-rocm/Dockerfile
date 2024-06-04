@@ -110,6 +110,13 @@ COPY ./common/install_cache.sh install_cache.sh
 ENV PATH /opt/cache/bin:$PATH
 RUN bash ./install_cache.sh && rm install_cache.sh
 
+# Install AOTriton
+COPY ci_commit_pins/aotriton.txt aotriton.txt
+COPY ./common/common_utils.sh common_utils.sh
+COPY ./common/install_aotriton.sh install_aotriton.sh
+RUN bash ./install_aotriton.sh /opt/rocm/aotriton && rm -rf install_aotriton.sh aotriton aotriton.txt common_utils.sh
+ENV AOTRITON_INSTALLED_PREFIX /opt/rocm/aotriton
+
 # Include BUILD_ENVIRONMENT environment variable in image
 ARG BUILD_ENVIRONMENT
 ENV BUILD_ENVIRONMENT ${BUILD_ENVIRONMENT}
