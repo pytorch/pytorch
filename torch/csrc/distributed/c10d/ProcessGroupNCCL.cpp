@@ -197,6 +197,20 @@ inline std::string getKeyFromDevice(at::Device& device) {
   return std::to_string(device.index());
 }
 
+inline at::DeviceIndex getIndexFromDeviceKey(const std::string& deviceKey) {
+  // initialize the device index to -1, which is an invalid value.
+  int index = -1;
+  try {
+    index = std::stoi(deviceKey);
+  } catch (const std::invalid_argument& e) {
+    LOG(WARNING) << c10::str(
+        "Invalid deviceKey: ", deviceKey, ",", e.what(), ".");
+  } catch (const std::out_of_range& e) {
+    LOG(ERROR) << "Out of range: " << e.what();
+  }
+  return static_cast<at::DeviceIndex>(index);
+}
+
 std::string getKeySendRecv(int myRank, int peer) {
   int lowRank = myRank < peer ? myRank : peer;
   int highRank = myRank < peer ? peer : myRank;
@@ -1050,7 +1064,11 @@ void ProcessGroupNCCL::abortCommsFromMap(
   for (auto& it : ncclCommsMap) {
     auto& devName = it.first;
     auto& ncclComm = it.second;
-
+    at::cuda::OptionalCUDAGuard gpuGuard;
+    at::DeviceIndex deviceIndex = getIndexFromDeviceKey(devName);
+    if (deviceIndex >= 0) {
+      gpuGuard.set_index(deviceIndex);
+    }
     LOG(INFO) << logPrefix() << "ProcessGroupNCCL destroying ncclComm_ "
               << ncclComm->ncclComm_ << " on CUDA device: " << devName;
     ncclComm->ncclCommAbort(abortReason);
@@ -1240,9 +1258,9 @@ void ProcessGroupNCCL::heartbeatMonitor() {
             "Received a dump signal from this local rank and will ",
             "start to dump the debug info. ",
             "Last enqueued NCCL work: ",
-            lastEnqueuedSeq_,
+            pgStatus_.lastEnqueuedSeq,
             ", last completed NCCL work: ",
-            lastCompletedSeq_,
+            pgStatus_.lastCompletedSeq,
             ".");
         exitMsg = c10::str(
             "ProcessGroupNCCL's watchdog detected an exception from the local rank. ",
@@ -1302,9 +1320,9 @@ void ProcessGroupNCCL::heartbeatMonitor() {
               timeOutRank,
               ", and will start to dump the debug info. ",
               "Last enqueued NCCL work: ",
-              lastEnqueuedSeq_,
+              pgStatus_.lastEnqueuedSeq,
               ", last completed NCCL work: ",
-              lastCompletedSeq_,
+              pgStatus_.lastCompletedSeq,
               ".");
           exitMsg = c10::str(
               "ProcessGroupNCCL's watchdog detected a dump signal from rank ",
@@ -1570,9 +1588,9 @@ void ProcessGroupNCCL::watchdogHandler() {
         logPrefix(),
         "NCCL Work update periodically: ",
         "last enqueued NCCL work: ",
-        lastEnqueuedSeq_,
+        pgStatus_.lastEnqueuedSeq,
         ", last completed NCCL work: ",
-        lastCompletedSeq_,
+        pgStatus_.lastCompletedSeq,
         ".");
 #endif
     auto logger = ::c10d::C10dLogger::getLogger();
@@ -1585,13 +1603,19 @@ void ProcessGroupNCCL::watchdogHandler() {
       data.integers["pg_id"] = uid_;
       data.integers["rank"] = rank_;
       data.integers["global_rank"] = globalRank();
-      data.integers["last_enqueued_work"] = lastEnqueuedSeq_;
-      data.integers["last_started_work"] = lastStartedSeq_;
-      data.integers["last_completed_work"] = lastCompletedSeq_;
+      data.integers["last_enqueued_work"] = pgStatus_.lastEnqueuedSeq;
+      data.integers["last_started_work"] = pgStatus_.lastStartedSeq;
+      data.integers["last_completed_work"] = pgStatus_.lastCompletedSeq;
+      data.integers["last_enqueued_numel_in"] = pgStatus_.lastEnqueuedNumelIn;
+      data.integers["last_enqueued_numel_out"] = pgStatus_.lastEnqueuedNumelOut;
+      data.integers["last_completed_numel_in"] = pgStatus_.lastCompletedNumelIn;
+      data.integers["last_completed_numel_out"] =
+          pgStatus_.lastCompletedNumelOut;
       // logging strings
-      data.strings["last_enqueued_work_name"] = lastEnqueuedWorkName_;
-      data.strings["last_started_work_name"] = lastStartedWorkName_;
-      data.strings["last_completed_work_name"] = lastCompletedWorkName_;
+      data.strings["last_enqueued_work_name"] = pgStatus_.lastEnqueuedWorkName;
+      data.strings["last_started_work_name"] = pgStatus_.lastStartedWorkName;
+      data.strings["last_completed_work_name"] =
+          pgStatus_.lastCompletedWorkName;
       data.strings["pg_name"] = pg_name_;
       data.strings["pg_desc"] = pg_desc_;
       logger->log(data);
@@ -1618,9 +1642,9 @@ void ProcessGroupNCCL::watchdogHandler() {
             "Exception (either an error or timeout) detected by watchdog at work: ",
             work.seq_,
             ", last enqueued NCCL work: ",
-            lastEnqueuedSeq_,
+            pgStatus_.lastEnqueuedSeq,
             ", last completed NCCL work: ",
-            lastCompletedSeq_,
+            pgStatus_.lastCompletedSeq,
             ".");
         // try to dump flight records if exception happens.
         // Flight recorder behavior should be independent of desync Debug
@@ -1663,9 +1687,9 @@ void ProcessGroupNCCL::watchdogHandler() {
               "Timeout at NCCL work: ",
               work.seq_,
               ", last enqueued NCCL work: ",
-              lastEnqueuedSeq_,
+              pgStatus_.lastEnqueuedSeq,
               ", last completed NCCL work: ",
-              lastCompletedSeq_,
+              pgStatus_.lastCompletedSeq,
               ".");
           if (desyncDebug_) {
             try {
@@ -1700,18 +1724,20 @@ void ProcessGroupNCCL::watchdogHandler() {
       }
 
       // a work could be started but not completed, so we should not update
-      // lastStartedSeq_ and lastStartedOpName_ if the work state is checked
+      // lastStartedSeq and lastStartedOpName if the work state is checked
       // multiple times after the start
-      if (lastStartedSeq_ < static_cast<int64_t>(work.seq_) &&
+      if (pgStatus_.lastStartedSeq < static_cast<int64_t>(work.seq_) &&
           work.isStarted()) {
-        lastStartedSeq_ = work.seq_;
-        lastStartedWorkName_ = opTypeToString(work.opType_);
+        pgStatus_.lastStartedSeq = work.seq_;
+        pgStatus_.lastStartedWorkName = opTypeToString(work.opType_);
       }
 
       // Clean up completed work
       if (work.isCompleted()) {
-        lastCompletedSeq_ = work.seq_;
-        lastCompletedWorkName_ = opTypeToString(work.opType_);
+        pgStatus_.lastCompletedSeq = work.seq_;
+        pgStatus_.lastCompletedWorkName = opTypeToString(work.opType_);
+        pgStatus_.lastCompletedNumelIn = work.numelIn_;
+        pgStatus_.lastCompletedNumelOut = work.numelOut_;
         NCCLTraceBuffer::get()->retire_id(work.trace_id_, true);
         if (onCompletionHook_) {
           // Move Work object to completedWorkList_ to be consumed by the hook
@@ -2340,8 +2366,11 @@ void ProcessGroupNCCL::workEnqueue(
     // needs to be destructed in user thread. Otherwise will
     // get deadlock. Here we enqueue work without outputs_.
     workMetaList_.emplace_back(*work);
-    lastEnqueuedSeq_ = work->seq_;
-    lastEnqueuedWorkName_ = opTypeToString(work->opType_);
+    // update the PG status related to the last enqueued work
+    pgStatus_.lastEnqueuedSeq = work->seq_;
+    pgStatus_.lastEnqueuedWorkName = opTypeToString(work->opType_);
+    pgStatus_.lastEnqueuedNumelIn = work->numelIn_;
+    pgStatus_.lastEnqueuedNumelOut = work->numelOut_;
     lastWorkListUpdateTime_ = std::chrono::steady_clock::now();
   }
 }
