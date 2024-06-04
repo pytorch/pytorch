@@ -3649,7 +3649,7 @@ def _reshape_view_helper(a: TensorLikeType, *shape, allow_copy: bool) -> TensorL
         else:
             return _a
 
-    if a.is_contiguous() and a.device.type != 'xla':
+    if a.is_contiguous() and a.device.type != "xla":
         torch._check(a.numel() > 0)
         # Special-cases for nd_to_1d
         if len(shape) == 1:
