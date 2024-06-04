@@ -13,7 +13,6 @@ from model_registry import ModelWithKwargs, MultiMLP
 import torch
 import torch.distributed as dist
 from torch.distributed.pipelining import (
-    _PipelineStageBase,
     ManualPipelineStage,
     pipeline,
     PipelineStage,
@@ -23,6 +22,7 @@ from torch.distributed.pipelining import (
     ScheduleLoopedBFS,
 )
 from torch.distributed.pipelining.PipelineSchedule import _Action, _ComputationType
+from torch.distributed.pipelining.PipelineStage import _PipelineStageBase
 from torch.testing._internal.common_cuda import TEST_MULTIGPU
 from torch.testing._internal.common_distributed import (
     MultiProcContinousTest,
@@ -366,23 +366,42 @@ instantiate_parametrized_tests(ScheduleTest)
 def format_pipeline_order(pipeline_order: Dict[int, List[Optional[_Action]]]):
     import itertools
 
-    column_labels = ["Step " + str(i) for i in range(len(pipeline_order[0]))]
+    # Calculate the maximum number of steps across all ranks
+    num_steps = max(len(actions) for actions in pipeline_order.values())
+    step_labels = [
+        "Step " + str(i).zfill(len(str(num_steps - 1))) for i in range(num_steps)
+    ]
     # Sorting the dictionary by keys and retrieving values in that order
-    rank_actions = [pipeline_order[key] for key in sorted(pipeline_order)]
-    pipeline_order_with_labels = [column_labels] + rank_actions
-    # Calculate the maximum length of each column
+    rank_actions = [
+        pipeline_order.get(key, [""] * num_steps) for key in sorted(pipeline_order)
+    ]
+    # Transpose the list of lists (rows to columns)
+    transposed_actions = list(itertools.zip_longest(*rank_actions, fillvalue=""))
+    # Generate column labels for ranks
+    num_ranks = len(pipeline_order)
+    rank_labels = ["Rank " + str(i) for i in range(num_ranks)]
+    # Calculate the maximum length of each column, considering labels
     max_lengths = [
         max(len(str(item)) if item is not None else 0 for item in col)
-        for col in itertools.zip_longest(*pipeline_order_with_labels, fillvalue="")
+        for col in zip(step_labels, *transposed_actions)
     ]
-    # Format each row
+    # Format the header row with rank labels
+    header_row = " " * (len(step_labels[0]) + 2) + " ".join(
+        f"{label:<{max_lengths[i]}}" for i, label in enumerate(rank_labels)
+    )
+    # Format each row with its corresponding label
     formatted_rows = [
-        " ".join(f"{str(item):<{max_lengths[i]}}" for i, item in enumerate(row))
-        for row in pipeline_order_with_labels
+        f"{label}: "
+        + " ".join(f"{str(item):<{max_lengths[i]}}" for i, item in enumerate(row))
+        for label, row in zip(step_labels, transposed_actions)
     ]
     # Join the rows into a single string
     formatted_table = (
-        "=========== ALL_RANK_ACTIONS ===========\n" + "\n".join(formatted_rows) + "\n"
+        "=========== ALL_RANK_ACTIONS ===========\n"
+        + header_row
+        + "\n"
+        + "\n".join(formatted_rows)
+        + "\n"
     )
     return formatted_table
 
