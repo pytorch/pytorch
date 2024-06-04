@@ -3763,6 +3763,17 @@ class CPUReproTests(TestCase):
             exactly=True,
         ).run(code)
 
+    def test_catch_throw(self):
+        # https://github.com/pytorch/pytorch/issues/126691
+        @torch.compile
+        def copy(a):
+            b = torch.arange(start=1, end=-a.numel() - 1, step=-1, device=a.device)
+            return a[b]
+
+        x = torch.rand(1024, 128, device="cpu")
+        with self.assertRaisesRegex(RuntimeError, "index out of bounds"):
+            copy(x)
+
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests

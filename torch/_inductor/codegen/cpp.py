@@ -1986,6 +1986,8 @@ class CppKernel(Kernel):
                     code.writelines(loop_lines)
                     stack.enter_context(code.indent())
                     # generate inner loops or loop body
+                    if loop.parallel:
+                        stack.enter_context(code.catch_inside_parallel())
                     if loop.inner:
                         gen_loops(loop.inner, loop.is_reduction)
                     else:
@@ -3968,6 +3970,7 @@ class WorkSharing:
         if not self.in_parallel:
             self.num_threads = threads
             self.in_parallel = True
+            self.stack.enter_context(self.code.rethrow_exception())
             if config.cpp.dynamic_threads:
                 self.code.writeline("#pragma omp parallel")
             else:
