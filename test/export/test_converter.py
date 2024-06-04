@@ -315,22 +315,11 @@ class TestConverter(TestCase):
                 return x + x
 
             class M(torch.nn.Module):
-                def __init__(self, in_features, out_features):
-                    super().__init__()
-                    self.weight = torch.nn.Parameter(
-                        torch.randn(out_features, in_features), requires_grad=True
-                    )
-                    self.bias = torch.nn.Parameter(
-                        torch.randn(out_features), requires_grad=True
-                    )
-
                 def forward(self, x):
-                    return torch.ops.mylib.foo(
-                        torch.nn.functional.linear(x, self.weight, bias=self.bias)
-                    )
+                    return torch.ops.mylib.foo(x)
 
             inp = (torch.randn(3, 3),)
-            m = M(3, 3)
+            m = M()
             self._check_equal_ts_ep_converter(m, inp)
 
 

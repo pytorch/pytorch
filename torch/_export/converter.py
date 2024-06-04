@@ -403,7 +403,7 @@ class TS2FXGraphConverter:
                     self.name_to_node[output_name] = fx_node
                     return
 
-        self.convert_aten_op(node)
+        self.convert_call_function_op(node)
 
     def convert_aten___getitem__(self, node: torch._C.Node):
         input_container, index = tuple(
