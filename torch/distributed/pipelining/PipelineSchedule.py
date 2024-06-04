@@ -320,7 +320,7 @@ class ScheduleGPipe(PipelineScheduleSingle):
         # Run microbatches
         for i in range(self._n_microbatches):
             with record_function(f"Forward {i}"):
-                ops = self._stage.get_fwd_recv_ops()
+                ops = self._stage.get_fwd_recv_ops(i)
                 works = _sorted_batch_p2p(ops, desc="fwd_recv")
                 for work in works.values():
                     work.wait()
@@ -352,7 +352,7 @@ class ScheduleGPipe(PipelineScheduleSingle):
         bwd_sends_to_wait: List[dist.Work] = []
         for i in range(self._n_microbatches):
             with record_function(f"Backward {i}"):
-                ops = self._stage.get_bwd_recv_ops()
+                ops = self._stage.get_bwd_recv_ops(i)
                 works = _sorted_batch_p2p(ops, desc="bwd_recv")
                 for work in works.values():
                     work.wait()
@@ -414,7 +414,7 @@ class Schedule1F1B(PipelineScheduleSingle):
         fwd_sends = []
         for _ in range(warmup_chunks):
             # Receive activations
-            fwd_recvs = self._stage.get_fwd_recv_ops()
+            fwd_recvs = self._stage.get_fwd_recv_ops(fwd_mb_index)
             if recv_work := _batch_p2p(fwd_recvs, desc="fwd_recv"):
                 recv_work.wait()
 
@@ -445,7 +445,7 @@ class Schedule1F1B(PipelineScheduleSingle):
         # 1B1F phase
         while True:  # Don't worry, we have a break inside
             # We actually do 1B first as the `1B1F` name indicates, so prepare its recv ops
-            bwd_recvs = self._stage.get_bwd_recv_ops()
+            bwd_recvs = self._stage.get_bwd_recv_ops(bwd_mb_index)
 
             # Now, we need to fire the fwd_sends and bwd_recvs together
             if fuse_work := _batch_p2p(fwd_sends + bwd_recvs, desc="fwd_send_bwd_recv"):
@@ -464,7 +464,7 @@ class Schedule1F1B(PipelineScheduleSingle):
                 break
 
             # We prepare 1F of the `1B1F`
-            fwd_recvs = self._stage.get_fwd_recv_ops()
+            fwd_recvs = self._stage.get_fwd_recv_ops(fwd_mb_index)
 
             # Fuse it with bwd_sends above
             if fuse_work := _batch_p2p(bwd_sends + fwd_recvs, desc="bwd_send_fwd_recv"):
@@ -486,7 +486,7 @@ class Schedule1F1B(PipelineScheduleSingle):
         # Cooldown
         while bwd_mb_index < self._n_microbatches:
             # prepare bwd recv ops
-            bwd_recvs = self._stage.get_bwd_recv_ops()
+            bwd_recvs = self._stage.get_bwd_recv_ops(bwd_mb_index)
             if recv_work := _batch_p2p(bwd_recvs, desc="bwd_recv"):
                 recv_work.wait()
 
@@ -614,7 +614,7 @@ class ScheduleLoopedBFS(PipelineScheduleMulti):
         for stage in self._stages:
             for i in range(self._n_microbatches):
                 with record_function(f"Stage {stage.stage_index} Forward"):
-                    ops = stage.get_fwd_recv_ops()
+                    ops = stage.get_fwd_recv_ops(i)
                     if ops:
                         _batch_p2p(ops, desc="fwd_recv").wait()
 
@@ -628,7 +628,7 @@ class ScheduleLoopedBFS(PipelineScheduleMulti):
         for stage in reversed(self._stages):
             for i in range(self._n_microbatches):
                 with record_function(f"Stage {stage.stage_index} Backward"):
-                    ops = stage.get_bwd_recv_ops()
+                    ops = stage.get_bwd_recv_ops(i)
                     if ops:
                         _batch_p2p(ops, desc="bwd_recv").wait()
 
@@ -750,7 +750,7 @@ class ScheduleInterleaved1F1B(PipelineScheduleMulti):
             )
 
             with record_function(f"Forward {step}"):
-                ops.extend(fwd_stage.get_fwd_recv_ops())
+                ops.extend(fwd_stage.get_fwd_recv_ops(mb_index))
                 if ops:
                     work = _batch_p2p(ops, desc="warmup_pre_fwd")
                     work.wait()
@@ -787,8 +787,8 @@ class ScheduleInterleaved1F1B(PipelineScheduleMulti):
             )
             desc = f"1F1B {step}"
             with record_function(desc):
-                ops.extend(fwd_stage.get_fwd_recv_ops())
-                ops.extend(bwd_stage.get_bwd_recv_ops())
+                ops.extend(fwd_stage.get_fwd_recv_ops(fwd_mb_index))
+                ops.extend(bwd_stage.get_bwd_recv_ops(bwd_mb_index))
                 if ops:
                     work = _batch_p2p(ops, desc=desc)
                     work.wait()
@@ -816,7 +816,7 @@ class ScheduleInterleaved1F1B(PipelineScheduleMulti):
             )
             desc = f"Cooldown {step}"
             with record_function(desc):
-                ops.extend(bwd_stage.get_bwd_recv_ops())
+                ops.extend(bwd_stage.get_bwd_recv_ops(bwd_mb_index))
                 if ops:
                     work = _batch_p2p(ops, desc=desc + " pre_bwd")
                     work.wait()

@@ -131,11 +131,6 @@ class _PipelineStageBase(ABC):
         # Caching chunk outputs for final output merge or reduction
         self.output_chunks: List[Any] = []
 
-        # Current forward chunk id to be used in recv
-        self.recv_fwd_chunk_id: int = 0
-        # Current backward chunk id to be used in recv
-        self.recv_bwd_chunk_id: int = 0
-
         # Create stage id to group rank mapping
         # In interleaved case, `group_rank` is stage index % group size.
         self.stage_index_to_group_rank: Dict[int, int] = {}
@@ -269,24 +264,23 @@ class _PipelineStageBase(ABC):
 
         return ops
 
-    def get_fwd_recv_ops(self) -> List[dist.P2POp]:
+    def get_fwd_recv_ops(self, fwd_chunk_id: int) -> List[dist.P2POp]:
         """
         Returns a list of ops that are needed to receive the input arguments
         for this stage.
         """
-        recv_infos: Tuple[InputInfo, ...] = self.args_recv_info[self.recv_fwd_chunk_id]
+        recv_infos: Tuple[InputInfo, ...] = self.args_recv_info[fwd_chunk_id]
 
         # In case there is backward pass, set requires_grad for receive buffers
         # before first forward
-        if self.has_backward and not self.set_requires_grad[self.recv_fwd_chunk_id]:
+        if self.has_backward and not self.set_requires_grad[fwd_chunk_id]:
             for a in recv_infos:
                 if isinstance(a, _RecvInfo):
                     a.buffer.requires_grad_(True)
 
-        self.recv_fwd_chunk_id += 1
         return self._get_recv_ops(recv_infos)
 
-    def get_bwd_recv_ops(self) -> List[dist.P2POp]:
+    def get_bwd_recv_ops(self, bwd_chunk_id: int) -> List[dist.P2POp]:
         """
         Returns a list of ops that are needed to receive the gradients
         for this stage.
@@ -296,12 +290,11 @@ class _PipelineStageBase(ABC):
 
         # Create bwd recv infra lazily
         recv_infos = self.grad_recv_info.setdefault(
-            self.recv_bwd_chunk_id,
+            bwd_chunk_id,
             # `grad_recv_info` is a mirror of `act_send_info`
             self._create_grad_recv_info(self.act_send_info),
         )
 
-        self.recv_bwd_chunk_id += 1
         return self._get_recv_ops(recv_infos)
 
     def get_fwd_send_ops(self, fwd_chunk_id: int) -> List[dist.P2POp]:
@@ -377,9 +370,6 @@ class _PipelineStageBase(ABC):
         """
         Clear runtime states of the stage.
         """
-        # Reset pointers
-        self.recv_fwd_chunk_id = 0
-        self.recv_bwd_chunk_id = 0
         # map microbatch ID to list of forward tensor args
         self.fwd_cache.clear()
         # Caching chunk outputs for final output merge or reduction
