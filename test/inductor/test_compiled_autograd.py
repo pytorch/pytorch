@@ -1927,7 +1927,6 @@ known_failing_tests = {
     "test_autograd_node_isinstance",  # torch._dynamo.exc.Unsupported: 'inline in skipfiles: TestCase.assertIsInstance
     "test_autograd_simple_views_python",  # torch._dynamo.exc.TorchRuntimeError: Failed running call_function
     "test_callback_adds_callback",  # torch._dynamo.exc.Unsupported: call_method UserDefinedObjectVariable
-    "test_callback_propagates_errors_from_device_thread",  # AssertionError: "blah" does not match "call_method
     "test_custom_autograd_no_early_free",  # torch.autograd.gradcheck.GradcheckError: While computing batched gradients
     "test_custom_function_cycle",  # torch._dynamo.exc.Unsupported: call_function UserDefinedClassVariable() [] {}
     "test_custom_function_error",  # AssertionError: "must implement either the backward" does not match "call_function

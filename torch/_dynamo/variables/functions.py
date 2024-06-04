@@ -740,6 +740,9 @@ class CollectiveFunctionRewriteVariable(UserFunctionVariable):
                 f"CollectiveFunctionRewriteVariable can't support async_op=True for {self.fn}"
             )
 
+        if kwargs.get("group") is None or kwargs["group"].value is None:
+            kwargs["group"] = ProcessGroupVariable.get_global_pg_variable()
+
         if self.fn in (
             dist.all_reduce,
             dist.reduce_scatter_tensor,
