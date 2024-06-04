@@ -319,6 +319,11 @@ class CachingAutotuner(KernelInterface):
                     if new_config in seen_configs:
                         continue
                     seen_configs.add(new_config)
+                    log.debug(
+                        "Dynamically scale down RBLOCK from TritonConfig(%s) and get a new TritonConfig(%s)",
+                        triton_config,
+                        new_config,
+                    )
                     self.launchers.append(
                         self._precompile_config(new_config, warm_cache_only)[1]
                     )
@@ -743,7 +748,6 @@ class CachingAutotuner(KernelInterface):
             # User defined triton kernels will have arbitrary kwarg names
             "meta": launcher.config.kwargs,
         }
-
         from torch._inductor.codecache import CudaKernelParamCache
 
         binary = (
@@ -1074,7 +1078,9 @@ def cached_autotune(
                             key
                         )
                     else:
-                        remote_cache = triton.runtime.cache.RedisRemoteCacheBackend(key)
+                        from torch._inductor.remote_cache import RedisRemoteCacheBackend
+
+                        remote_cache = RedisRemoteCacheBackend(key)
                 except Exception:
                     remote_cache = None
                     log.warning("Unable to create a remote cache", exc_info=True)
@@ -1480,12 +1486,32 @@ def _reduction_configs(
     assert len(size_hints) == 2
     rnumel = size_hints[-1]
 
+    MAX_RBLOCK = 2048
+    if (
+        size_hints[0] >= 1024
+        and inductor_meta.get("num_load", 0) + inductor_meta.get("num_reduction", 0)
+        >= 10
+    ):
+        # A heuristics to reduce RBLOCK if a kernel potentially need many registers.
+        # Consider load and reduction since load need move data into registers and
+        # reduction needs an accumulator.
+        #
+        # The magic numbers are a bit arbitrary.
+        #
+        # We cannot rely on dynamically scaling down RBLOCK later, since sometimes
+        # triton makes it to use less registers with worse perf. Check:
+        # https://github.com/pytorch/pytorch/issues/126463
+        #
+        # The heuristic is a very simple one since registers can be reused. But
+        # hopefully it can be a good enough indicator.
+        MAX_RBLOCK = 1024
+
     contiguous_config = triton_config_reduction(
-        size_hints, 1, (rnumel if 256 <= rnumel < 2048 else 2048)
+        size_hints, 1, (rnumel if 256 <= rnumel < MAX_RBLOCK else MAX_RBLOCK)
     )
     outer_config = triton_config_reduction(size_hints, 64, 8)
     tiny_config = triton_config_reduction(
-        size_hints, 2 * (256 // rnumel) if rnumel <= 256 else 1, min(rnumel, 2048)
+        size_hints, 2 * (256 // rnumel) if rnumel <= 256 else 1, min(rnumel, MAX_RBLOCK)
     )
     if inductor_meta.get("max_autotune") or inductor_meta.get("max_autotune_pointwise"):
         pass  # skip all these cases
@@ -1712,7 +1738,7 @@ def grid(*numels):
         max_y_grid = get_max_y_grid()
         if znumel is None:
             div = ceildiv(y_grid, max_y_grid)
-            y_grid = y_grid // div
+            y_grid = ceildiv(y_grid, div)
             z_grid = div
         else:
             z_grid = get_grid_dim(znumel, meta.get("ZBLOCK", None))

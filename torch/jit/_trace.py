@@ -16,8 +16,8 @@ import inspect
 import os
 import re
 import warnings
+from enum import Enum
 from typing import Any, Callable, Dict, List, Optional, Set, TypeVar
-
 from typing_extensions import ParamSpec
 
 import torch
@@ -27,7 +27,6 @@ from torch._jit_internal import (
     is_scripting,
 )
 
-from torch._utils_internal import log_torchscript_usage
 from torch.autograd import function
 from torch.jit._script import _CachedForward, script, ScriptModule
 
@@ -640,6 +639,187 @@ def wrap_check_inputs(check_inputs):
     return [{"forward": c} for c in check_inputs]
 
 
+def analyze_ts_result_with_export_result(export, trace):
+    import torch.utils._pytree as pytree
+
+    flat_export = pytree.tree_leaves(export)
+    flat_trace = pytree.tree_leaves(trace)
+
+    for orig, loaded in zip(flat_export, flat_trace):
+        if orig.layout != loaded.layout:
+            return False
+        # mkldnn is not supported for torch.allclose
+        if orig.layout == torch._mkldnn:  # type: ignore[attr-defined]
+            return True
+        if type(orig) != type(loaded):
+            return False
+
+        if isinstance(orig, torch.Tensor):
+            if not torch.allclose(orig, loaded):
+                return False
+        else:
+            if orig != loaded:
+                return False
+    return True
+
+
+def _trace_impl(
+    func,
+    example_inputs=None,
+    optimize=None,
+    check_trace=True,
+    check_inputs=None,
+    check_tolerance=1e-5,
+    strict=True,
+    _force_outplace=False,
+    _module_class=None,
+    _compilation_unit=_python_cu,
+    example_kwarg_inputs=None,
+    _store_inputs=True,
+):
+    if isinstance(func, torch.jit.ScriptModule):
+        # it is hard to trace it because the forward method on ScriptModule is already defined, so it
+        # would result in an error.
+        warnings.warn(
+            "The input to trace is already a ScriptModule, tracing it is a no-op. Returning the object as is."
+        )
+        return func
+
+    if isinstance(func, torch.nn.Module):
+        if example_inputs is None:
+            if isinstance(example_kwarg_inputs, dict):
+                example_inputs = example_kwarg_inputs
+            else:
+                raise RuntimeError("example_kwarg_inputs should be a dict")
+        return trace_module(
+            func,
+            {"forward": example_inputs},
+            None,
+            check_trace,
+            wrap_check_inputs(check_inputs),
+            check_tolerance,
+            strict,
+            _force_outplace,
+            _module_class,
+            example_inputs_is_kwarg=isinstance(example_kwarg_inputs, dict),
+            _store_inputs=_store_inputs,
+        )
+    if (
+        hasattr(func, "__self__")
+        and isinstance(func.__self__, torch.nn.Module)
+        and func.__name__ == "forward"
+    ):
+        if example_inputs is None:
+            if isinstance(example_kwarg_inputs, dict):
+                example_inputs = example_kwarg_inputs
+            else:
+                raise RuntimeError("example_kwarg_inputs should be a dict")
+        return trace_module(
+            func.__self__,
+            {"forward": example_inputs},
+            None,
+            check_trace,
+            wrap_check_inputs(check_inputs),
+            check_tolerance,
+            strict,
+            _force_outplace,
+            _module_class,
+            example_inputs_is_kwarg=isinstance(example_kwarg_inputs, dict),
+            _store_inputs=_store_inputs,
+        )
+
+    # Special case for common case of passing a single Tensor
+    if (
+        isinstance(example_inputs, (torch.Tensor, dict))
+        and example_kwarg_inputs is None
+    ):
+        example_inputs = (example_inputs,)
+    # done primarily so that weird iterables fail here and not pybind11 code
+    elif example_kwarg_inputs is None and not isinstance(example_inputs, tuple):
+        example_inputs = tuple(example_inputs)
+
+    var_lookup_fn = _create_interpreter_name_lookup_fn(0)
+
+    if hasattr(func, "__self__") and isinstance(func.__self__, torch.nn.Module):
+        raise AttributeError(
+            "trace doesn't support compiling individual module's functions.\n"
+            "Please use trace_module"
+        )
+
+    name = _qualified_name(func)
+    if isinstance(example_kwarg_inputs, dict):
+        example_inputs = example_kwarg_inputs
+        traced = torch._C._create_function_from_trace_with_dict(
+            name,
+            func,
+            example_kwarg_inputs,
+            var_lookup_fn,
+            strict,
+            _force_outplace,
+            get_callable_argument_names(func),
+        )
+    else:
+        traced = torch._C._create_function_from_trace(
+            name,
+            func,
+            example_inputs,
+            var_lookup_fn,
+            strict,
+            _force_outplace,
+            get_callable_argument_names(func),
+        )
+
+    # Check the trace against new traces created from user-specified inputs
+    if check_trace:
+        if check_inputs is not None:
+            _check_trace(
+                check_inputs,
+                func,
+                traced,
+                check_tolerance,
+                strict,
+                _force_outplace,
+                False,
+                _module_class,
+                example_inputs_is_kwarg=isinstance(example_kwarg_inputs, dict),
+            )
+        else:
+            _check_trace(
+                [example_inputs],
+                func,
+                traced,
+                check_tolerance,
+                strict,
+                _force_outplace,
+                False,
+                _module_class,
+                example_inputs_is_kwarg=isinstance(example_kwarg_inputs, dict),
+            )
+
+    # Allow torch.compile() to inline
+    traced._torchdynamo_inline = func  # type: ignore[attr-defined]
+    return traced
+
+
+class _ExportType(str, Enum):
+    DIRECT_EXPORT = "DIRECT_EXPORT"
+    TRACE_AND_EXPORT = "TRACE_AND_EXPORT"
+    SOURCE_TO_SOURCE = "SOURCE_TO_SOURCE"
+
+    def __str__(self) -> str:
+        return self.value
+
+
+class _ExportOutcome(str, Enum):
+    SUCCESS = "SUCCESS"
+    FAILED_TO_EXPORT = "FAILED_TO_EXPORT"
+    FAILED_TO_RUN = "FAILED_TO_RUN"
+    ACCURACY_ERROR = "ACCURACY_ERROR"
+
+    def __str__(self) -> str:
+        return self.value
+
+
 def trace(
     func,
     example_inputs=None,
@@ -803,133 +983,131 @@ def trace(
         return func
     if optimize is not None:
         warnings.warn(
-            "`optimize` is deprecated and has no effect. Use `with torch.jit.optimized_execution() instead"
+            "`optimize` is deprecated and has no effect. "
+            "Use `with torch.jit.optimized_execution()` instead",
+            FutureWarning,
+            stacklevel=2,
         )
+
+    from torch._utils_internal import (
+        check_if_torch_exportable,
+        log_torch_jit_trace_exportability,
+        log_torchscript_usage,
+    )
 
     log_torchscript_usage("trace")
+    traced_func = _trace_impl(
+        func,
+        example_inputs,
+        optimize,
+        check_trace,
+        check_inputs,
+        check_tolerance,
+        strict,
+        _force_outplace,
+        _module_class,
+        _compilation_unit,
+        example_kwarg_inputs,
+        _store_inputs,
+    )
 
-    if isinstance(func, torch.jit.ScriptModule):
-        # it is hard to trace it because the forward method on ScriptModule is already defined, so it
-        # would result in an error.
-        warnings.warn(
-            "The input to trace is already a ScriptModule, tracing it is a no-op. Returning the object as is."
+    if check_if_torch_exportable():
+        from torch._export.converter import TS2EPConverter
+        from torch.export._trace import (
+            _convert_ts_to_export_experimental,
+            _process_jit_trace_inputs_for_export,
         )
-        return func
 
-    if isinstance(func, torch.nn.Module):
-        if example_inputs is None:
-            if isinstance(example_kwarg_inputs, dict):
-                example_inputs = example_kwarg_inputs
-            else:
-                raise RuntimeError("example_kwarg_inputs should be a dict")
-        return trace_module(
+        traced_func_for_export = _trace_impl(
             func,
-            {"forward": example_inputs},
-            None,
-            check_trace,
-            wrap_check_inputs(check_inputs),
-            check_tolerance,
-            strict,
-            _force_outplace,
-            _module_class,
-            example_inputs_is_kwarg=isinstance(example_kwarg_inputs, dict),
-            _store_inputs=_store_inputs,
-        )
-    if (
-        hasattr(func, "__self__")
-        and isinstance(func.__self__, torch.nn.Module)
-        and func.__name__ == "forward"
-    ):
-        if example_inputs is None:
-            if isinstance(example_kwarg_inputs, dict):
-                example_inputs = example_kwarg_inputs
-            else:
-                raise RuntimeError("example_kwarg_inputs should be a dict")
-        return trace_module(
-            func.__self__,
-            {"forward": example_inputs},
-            None,
-            check_trace,
-            wrap_check_inputs(check_inputs),
-            check_tolerance,
-            strict,
-            _force_outplace,
-            _module_class,
-            example_inputs_is_kwarg=isinstance(example_kwarg_inputs, dict),
+            example_inputs=example_inputs,
+            optimize=optimize,
+            check_trace=False,
+            check_inputs=check_inputs,
+            check_tolerance=check_tolerance,
+            strict=strict,
+            _force_outplace=_force_outplace,
+            _module_class=_module_class,
+            _compilation_unit=_compilation_unit,
+            example_kwarg_inputs=example_kwarg_inputs,
             _store_inputs=_store_inputs,
         )
 
-    # Special case for common case of passing a single Tensor
-    if (
-        isinstance(example_inputs, (torch.Tensor, dict))
-        and example_kwarg_inputs is None
-    ):
-        example_inputs = (example_inputs,)
-    # done primarily so that weird iterables fail here and not pybind11 code
-    elif example_kwarg_inputs is None and not isinstance(example_inputs, tuple):
-        example_inputs = tuple(example_inputs)
-
-    var_lookup_fn = _create_interpreter_name_lookup_fn(0)
-
-    if hasattr(func, "__self__") and isinstance(func.__self__, torch.nn.Module):
-        raise AttributeError(
-            "trace doesn't support compiling individual module's functions.\n"
-            "Please use trace_module"
+        export_args, _ = _process_jit_trace_inputs_for_export(
+            example_inputs, example_kwarg_inputs
         )
 
-    name = _qualified_name(func)
-    if isinstance(example_kwarg_inputs, dict):
-        example_inputs = example_kwarg_inputs
-        traced = torch._C._create_function_from_trace_with_dict(
-            name,
-            func,
-            example_kwarg_inputs,
-            var_lookup_fn,
-            strict,
-            _force_outplace,
-            get_callable_argument_names(func),
-        )
-    else:
-        traced = torch._C._create_function_from_trace(
-            name,
-            func,
-            example_inputs,
-            var_lookup_fn,
-            strict,
-            _force_outplace,
-            get_callable_argument_names(func),
-        )
+        def _log_exportability(func_to_export, export_func, export_args, export_type):
+            try:
+                ep_module = export_func(func_to_export, export_args)
+            except Exception as e:
+                log_torch_jit_trace_exportability(
+                    "trace",
+                    str(export_type),
+                    str(_ExportOutcome.FAILED_TO_EXPORT),
+                    str(e),
+                )
+                return
 
-    # Check the trace against new traces created from user-specified inputs
-    if check_trace:
-        if check_inputs is not None:
-            _check_trace(
-                check_inputs,
-                func,
-                traced,
-                check_tolerance,
-                strict,
-                _force_outplace,
-                False,
-                _module_class,
-                example_inputs_is_kwarg=isinstance(example_kwarg_inputs, dict),
-            )
-        else:
-            _check_trace(
-                [example_inputs],
-                func,
-                traced,
-                check_tolerance,
-                strict,
-                _force_outplace,
-                False,
-                _module_class,
-                example_inputs_is_kwarg=isinstance(example_kwarg_inputs, dict),
+            try:
+                export = ep_module(*export_args)
+            except Exception as e:
+                log_torch_jit_trace_exportability(
+                    "trace", str(export_type), str(_ExportOutcome.FAILED_TO_RUN), str(e)
+                )
+                return
+
+            try:
+                traced_result = func_to_export(*export_args)
+            except Exception as e:
+                _ = e
+                log_torch_jit_trace_exportability(
+                    "trace", str(export_type), str(_ExportOutcome.SUCCESS), "succeeded"
+                )
+                return
+
+            if not analyze_ts_result_with_export_result(export, traced_result):
+                log_torch_jit_trace_exportability(
+                    "trace",
+                    str(export_type),
+                    str(_ExportOutcome.ACCURACY_ERROR),
+                    "accuracy error",
+                )
+                return
+
+            log_torch_jit_trace_exportability(
+                "trace", str(export_type), str(_ExportOutcome.SUCCESS), "succeeded"
             )
 
-    # Allow torch.compile() to inline
-    traced._torchdynamo_inline = func  # type: ignore[attr-defined]
-    return traced
+        def _direct_export_and_lower(func, export_args):
+            return torch.export.export(func, export_args, strict=False).module()
+
+        def _convert_ts_to_export_source_to_source(func, export_args):
+            return TS2EPConverter(func, export_args).convert().module()
+
+        # torch.jit.trace is noop when the original module is torch.jit.ScriptModule
+        if not isinstance(traced_func_for_export, torch.jit.ScriptModule):
+            _log_exportability(
+                traced_func_for_export,
+                _direct_export_and_lower,
+                export_args,
+                _ExportType.DIRECT_EXPORT,
+            )
+
+        _log_exportability(
+            traced_func_for_export,
+            _convert_ts_to_export_experimental,
+            export_args,
+            _ExportType.TRACE_AND_EXPORT,
+        )
+        _log_exportability(
+            traced_func_for_export,
+            _convert_ts_to_export_source_to_source,
+            export_args,
+            _ExportType.SOURCE_TO_SOURCE,
+        )
+
+    return traced_func
 
 
 _trace_module_map: Optional[Dict[Any, Any]] = None
@@ -1030,7 +1208,10 @@ def trace_module(
         return mod
     if optimize is not None:
         warnings.warn(
-            "`optimize` is deprecated and has no effect. Use `with torch.jit.optimized_execution() instead"
+            "`optimize` is deprecated and has no effect. "
+            "Use `with torch.jit.optimized_execution()` instead",
+            FutureWarning,
+            stacklevel=2,
         )
 
     var_lookup_fn = _create_interpreter_name_lookup_fn(0)
