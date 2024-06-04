@@ -287,10 +287,6 @@ else:
         _load_global_deps()
     from torch._C import *  # noqa: F403
 
-# Appease the type checker; ordinarily this binding is inserted by the
-# torch._C module initialization code in C
-if TYPE_CHECKING:
-    from . import _C as _C
 
 class SymInt:
     """
@@ -597,7 +593,9 @@ except ImportError:
             ''').strip()) from None
     raise  # If __file__ is not None the cause is unknown, so just re-raise.
 
-from torch import _C as _C  # it is safe to import _C at this point
+# The torch._C submodule is already loaded via `from torch._C import *` above
+# Make an explicit reference to the _C submodule to appease linters
+from torch import _C as _C
 
 __name, __obj = '', None
 for __name in dir(_C):
