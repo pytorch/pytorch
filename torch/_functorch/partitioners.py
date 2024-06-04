@@ -1422,7 +1422,7 @@ def estimate_runtime(node):
             return x.meta["val"].new_zeros(shape)
         return x
 
-    if RUNTIME_MODE == "placeholder":
+    if RUNTIME_MODE == "testing":
         return 1
 
     elif RUNTIME_MODE == "profile":
