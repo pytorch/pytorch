@@ -8,7 +8,8 @@ from typing import Callable, List, Optional
 import torch
 from torch import multiprocessing as mp, nn
 from torch._dynamo import reset
-from torch._dynamo.testing import reset_rng_state
+from torch._dynamo.exc import BackendCompilerFailed
+from torch._dynamo.testing import rand_strided, reset_rng_state
 from torch._inductor import config
 from torch._inductor.autotune_process import (
     BenchmarkRequest,
@@ -268,7 +269,7 @@ class TestMaxAutotune(TestCase):
         cache_module = (
             "triton.runtime.fb_memcache.FbMemcacheRemoteAutotuneCacheBackend"
             if config.is_fbcode()
-            else "triton.runtime.cache.RedisRemoteCacheBackend"
+            else "torch._inductor.remote_cache.RedisRemoteCacheBackend"
         )
 
         with config.patch(
@@ -673,12 +674,10 @@ class TestMaxAutotune(TestCase):
         Make sure the triton template can work with non-contiguous inputs without crash.
         Check https://github.com/pytorch/pytorch/issues/125437 for more details.
         """
-        x = torch.empty_strided(
+        x = rand_strided(
             (50257, 32768), (1, 50304), dtype=torch.bfloat16, device="cuda"
         )
-        y = torch.empty_strided(
-            (32768, 768), (768, 1), dtype=torch.bfloat16, device="cuda"
-        )
+        y = rand_strided((32768, 768), (768, 1), dtype=torch.bfloat16, device="cuda")
 
         @torch.compile(mode="max-autotune")
         def f(x, y):
@@ -686,16 +685,14 @@ class TestMaxAutotune(TestCase):
 
         ref = x @ y
         act = f(x, y)
-        self.assertTrue(torch.allclose(ref, act, atol=4 * 1e-3, rtol=4 * 1e-3))
+        self.assertTrue(torch.allclose(ref, act, atol=1e-2, rtol=1e-2))
 
     def test_non_contiguous_input_addmm(self):
-        b = torch.empty((768), dtype=torch.bfloat16, device="cuda")
-        x = torch.empty_strided(
+        b = torch.randn((768), dtype=torch.bfloat16, device="cuda")
+        x = rand_strided(
             (50257, 32768), (1, 50304), dtype=torch.bfloat16, device="cuda"
         )
-        y = torch.empty_strided(
-            (32768, 768), (768, 1), dtype=torch.bfloat16, device="cuda"
-        )
+        y = rand_strided((32768, 768), (768, 1), dtype=torch.bfloat16, device="cuda")
 
         @torch.compile(mode="max-autotune")
         def f(x, y):
@@ -703,13 +700,13 @@ class TestMaxAutotune(TestCase):
 
         ref = torch.addmm(b, x, y)
         act = f(x, y)
-        self.assertTrue(torch.allclose(ref, act, atol=4 * 1e-3, rtol=4 * 1e-3))
+        self.assertTrue(torch.allclose(ref, act, atol=1e-2, rtol=1e-2))
 
     def test_non_contiguous_input_bmm(self):
-        x = torch.empty_strided(
+        x = rand_strided(
             (1, 50257, 32768), (0, 1, 50304), dtype=torch.bfloat16, device="cuda"
         )
-        y = torch.empty_strided(
+        y = rand_strided(
             (1, 32768, 768), (0, 768, 1), dtype=torch.bfloat16, device="cuda"
         )
 
@@ -719,22 +716,14 @@ class TestMaxAutotune(TestCase):
 
         ref = torch.bmm(x, y)
         act = f(x, y)
-        self.assertTrue(torch.allclose(ref, act, atol=4 * 1e-3, rtol=4 * 1e-3))
+        self.assertTrue(torch.allclose(ref, act, atol=1e-2, rtol=1e-2))
 
     def test_non_contiguous_input_mm_plus_mm(self):
-        x1 = torch.empty_strided(
-            (50257, 32768), (1, 50304), dtype=torch.bfloat16, device="cuda"
-        )
-        y1 = torch.empty_strided(
-            (32768, 768), (768, 1), dtype=torch.bfloat16, device="cuda"
-        )
+        x1 = rand_strided((50257, 32768), (1, 50304), device="cuda")
+        y1 = rand_strided((32768, 768), (768, 1), device="cuda")
 
-        x2 = torch.empty_strided(
-            (50257, 32768), (1, 50304), dtype=torch.bfloat16, device="cuda"
-        )
-        y2 = torch.empty_strided(
-            (32768, 768), (768, 1), dtype=torch.bfloat16, device="cuda"
-        )
+        x2 = rand_strided((50257, 32768), (1, 50304), device="cuda")
+        y2 = rand_strided((32768, 768), (768, 1), device="cuda")
 
         @torch.compile(mode="max-autotune")
         def f(x1, y1, x2, y2):
@@ -742,7 +731,43 @@ class TestMaxAutotune(TestCase):
 
         ref = x1 @ y1 + x2 @ y2
         act = f(x1, y1, x2, y2)
-        self.assertTrue(torch.allclose(ref, act, atol=4 * 1e-3, rtol=4 * 1e-3))
+        self.assertTrue(torch.allclose(ref, act, atol=1e-2, rtol=1e-2))
+
+    @config.patch(
+        max_autotune=True,
+        max_autotune_gemm_backends="",
+        autotune_fallback_to_aten=False,
+    )
+    def test_no_valid_choices(self):
+        a = torch.zeros([2, 2], device="cuda")
+        b = torch.zeros([2, 2], device="cuda")
+        with self.assertRaises(BackendCompilerFailed) as context:
+            torch.compile(lambda a, b: a.matmul(b))(a, b)
+        self.assertIn("NoValidChoicesError", str(context.exception))
+
+    @parametrize("multi_template", (True, False))
+    @config.patch(
+        max_autotune=True,
+        max_autotune_gemm_backends="TRITON",
+        autotune_fallback_to_aten=False,
+    )
+    def test_inf_timing(self, multi_template):
+        from unittest.mock import patch
+
+        lookup = AlgorithmSelectorCache.lookup
+
+        def mock_lookup(self, *args, **kwargs):
+            timings = lookup(self, *args, **kwargs)
+            return {choice: float("inf") for choice in timings.keys()}
+
+        a = torch.zeros([16, 16], device="cuda")
+        b = torch.zeros([16, 16], device="cuda")
+        with patch.object(AlgorithmSelectorCache, "lookup", mock_lookup), config.patch(
+            benchmark_epilogue_fusion=multi_template
+        ):
+            with self.assertRaises(BackendCompilerFailed) as context:
+                torch.compile(lambda a, b: a.matmul(b))(a, b)
+            self.assertIn("NoValidChoicesError", str(context.exception))
 
 
 class TestBenchmarkRequest(BenchmarkRequest):
