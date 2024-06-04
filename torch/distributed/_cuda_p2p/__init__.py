@@ -91,6 +91,8 @@ def _create_cuda_p2p_group(
 
 
 def is_cuda_p2p_group(group: c10d.ProcessGroup) -> bool:
+    if _test_with_non_cuda_p2p_group:
+        return True
     if not c10d.is_nccl_available():
         return False
     try:
