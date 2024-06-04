@@ -1004,11 +1004,11 @@ def use_cpp_packed_gemm_template(layout, mat1, mat2):
     if not config.cpp.weight_prepack:
         return False
 
-    layout_dtypes = [torch.float32, torch.bfloat16, torch.half]
+    layout_dtypes = [torch.float32, torch.bfloat16, torch.half, torch.uint8]
     if int8_gemm:
         assert mat2.get_dtype() == torch.int8
-        assert layout.dtype == torch.float32
-        m, n, k, layout, mat1, mat2 = mm_args(mat1, mat2, out_dtype=torch.float32)
+        assert layout.dtype in [torch.uint8, torch.float32]
+        m, n, k, layout, mat1, mat2 = mm_args(mat1, mat2, out_dtype=layout.dtype)
     else:
         m, n, k, layout, mat1, mat2 = mm_args(mat1, mat2)
     # TODO(jgong5): support dynamic shapes for n or k

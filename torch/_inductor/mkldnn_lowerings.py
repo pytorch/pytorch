@@ -676,8 +676,7 @@ def register_onednn_fusion_ops():
                     x, packed_weight, layout=layout, out_dtype=output_dtype
                 )
                 if (
-                    output_dtype == torch.float32  # Only support u8s8f32 for now
-                    and len(x_zp.get_layout().size) == 0  # Per tensor quant of act
+                    len(x_zp.get_layout().size) == 0  # Per tensor quant of act
                     and isinstance(
                         ir.InputsKernel.unwrap_storage_for_input(w_zp),
                         ir.ConstantBuffer,
@@ -692,12 +691,13 @@ def register_onednn_fusion_ops():
                     W_tensor = W_tensor.to_dense()
                     weight_compo_tensor = torch.sum(W_tensor.to(torch.float), dim=0)
                     weight_compo = V.graph.add_tensor_constant(
-                        weight_compo_tensor, name="BMatricCompo"
+                        weight_compo_tensor,
+                        name=packed_weight.get_name() + "BMatricCompo",
                     )
 
                     def cvt_fp32_epilogue_creator(input_buffer):
                         # Epilogue to convert from s32 to f32 for u8s8f32
-                        assert output_dtype == torch.float32
+                        assert output_dtype in [torch.float32, None, torch.uint8]
                         input_loader = input_buffer.make_loader()
                         weight_compo_loader = weight_compo.make_loader()
                         x_scale_loader = x_scale.make_loader()
@@ -746,7 +746,7 @@ def register_onednn_fusion_ops():
                                 temp = ops.add(temp, _bias)
                             return temp
 
-                        fp32_buf = ir.Pointwise(
+                        output_buf = ir.Pointwise(
                             device=input_buffer.get_device(),
                             dtype=torch.float32,  # Hardcode to FP32 for u8s8f32
                             inner_fn=inner_fn,
@@ -755,11 +755,54 @@ def register_onednn_fusion_ops():
 
                         # Step 3: Doing the post op fusion
                         if attr != "none":
-                            fp32_buf = create_epilogue_with_attr(
-                                fp32_buf, attr, scalars=scalars, algorithm=algorithm
+                            output_buf = create_epilogue_with_attr(
+                                output_buf, attr, scalars=scalars, algorithm=algorithm
                             )
 
-                        return fp32_buf
+                        # Step 4: Doing the requant for uint8 out
+                        if output_dtype != torch.float32:
+                            assert output_dtype in [None, torch.uint8]
+
+                            # from .lowering import quantized_decomposed_quantize_per_tensor_default
+                            # output_buf = quantized_decomposed_quantize_per_tensor_default(
+                            #     output_buf,
+                            #     o_scale,
+                            #     o_zero_point,
+                            #     0,  # quant_min for uint8
+                            #     255,  # quant_max for uint8
+                            #     torch.uint8,
+                            # ).data.data
+
+                            from .lowering import _create_constants
+
+                            requant_input_loader = output_buf.make_loader()
+
+                            def inner_fn_requant(index, scale, zero_point):
+                                input = requant_input_loader(index)
+                                inv_scale, zero_point = _create_constants(
+                                    1.0 / scale, zero_point, dtype=torch.float32
+                                )
+                                val = ops.round(input * inv_scale) + zero_point
+                                qmin, qmax = _create_constants(
+                                    0, 255, dtype=torch.float32
+                                )
+                                clamped = ops.minimum(ops.maximum(val, qmin), qmax)
+                                return ops.to_dtype(clamped, torch.uint8)
+
+                            import functools
+
+                            output_buf = ir.Pointwise(
+                                device=output_buf.get_device(),
+                                dtype=torch.uint8,
+                                inner_fn=functools.partial(
+                                    inner_fn_requant,
+                                    scale=float(o_scale),
+                                    zero_point=int(o_zero_point),
+                                ),
+                                ranges=output_buf.get_size(),
+                            )
+
+                        return output_buf
 
                     if bias is None:
                         assert x.get_dtype() == torch.uint8

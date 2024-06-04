@@ -363,9 +363,12 @@ class TestSelectAlgorithm(TestCase):
             def __init__(self, bias):
                 super().__init__()
                 self.linear = torch.nn.Linear(in_features, out_features, bias)
+                self.linear2 = torch.nn.Linear(out_features, out_features, bias)
 
             def forward(self, x):
-                return self.linear(x)
+                res = self.linear(x)
+                res = self.linear2(res)
+                return res
 
         counters.clear()
         ref_quantized_mod = _generate_qdq_quantized_model(
@@ -413,9 +416,13 @@ class TestSelectAlgorithm(TestCase):
                 super().__init__()
                 self.linear = torch.nn.Linear(in_features, out_features, bias)
                 self.epilogue = _get_epilogue(epilogue)
+                self.linear2 = torch.nn.Linear(out_features, out_features, bias)
+                self.epilogue2 = _get_epilogue(epilogue)
 
             def forward(self, x):
-                return self.epilogue(self.linear(x))
+                res = self.epilogue(self.linear(x))
+                res = self.epilogue2(self.linear2(res))
+                return res
 
         counters.clear()
         ref_quantized_mod = _generate_qdq_quantized_model(

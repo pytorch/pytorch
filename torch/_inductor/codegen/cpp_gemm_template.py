@@ -271,7 +271,7 @@ class CppPackedGemmTemplate(CppTemplate):
         has_bias=False,
         epilogue_creator: Optional[Callable[[ir.Buffer], ir.Pointwise]] = None,
     ):
-        assert layout.dtype in [torch.float, torch.bfloat16, torch.half]
+        assert layout.dtype in [torch.float, torch.bfloat16, torch.half, torch.uint8]
         super().__init__(
             "packed_gemm", input_nodes, layout, epilogue_creator=epilogue_creator
         )
@@ -511,13 +511,22 @@ class CppPackedGemmTemplate(CppTemplate):
                 blocked_w = blocked_w.as_strided(blocked_w.shape, new_stride)
             new_inputs[W_idx] = blocked_w
             if int8_gemm:
-                BMatricCompo = (
-                    V.graph.add_tensor_constant(
-                        V.graph.constants["BMatricCompo"], "BMatricCompo"
+                BMatricCompo = None
+                # (
+                #     V.graph.add_tensor_constant(
+                #         V.graph.constants["BMatricCompo"], "BMatricCompo"
+                #     )
+                #     if isinstance(W, ir.IRNode)
+                #     else V.graph.constants["BMatricCompo"]
+                # )
+                if isinstance(W, ir.IRNode):
+                    BMatricCompo = V.graph.add_tensor_constant(
+                        V.graph.constants[W.get_name() + "BMatricCompo"],
+                        W.get_name() + "BMatricCompo",
                     )
-                    if isinstance(W, ir.IRNode)
-                    else V.graph.constants["BMatricCompo"]
-                )
+                else:
+                    W_dense = W.to_dense()
+                    BMatricCompo = torch.sum(W_dense.to(torch.float), dim=0)
                 new_inputs.append(BMatricCompo)
             return new_inputs, layout_or_out
 
