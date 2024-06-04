@@ -316,6 +316,7 @@ def init(activation_checkpoint):
         ac_config = ACConfigClass()  # use default in this class
         torch._dynamo.config._experimental_support_context_fn_in_torch_utils_checkpoint = True
     if apply_fsdp:
+        torch._dynamo.config.trace_distributed = True
         torch._functorch.config.aggressive_recomputation = False
         # torch._inductor.config.reorder_for_compute_comm_overlap = True
         # torch._inductor.config.reorder_for_compute_comm_overlap_passes = [
@@ -478,18 +479,15 @@ local_rank = int(os.environ["LOCAL_RANK"])
 world_size = int(os.environ["WORLD_SIZE"])
 
 
-# def compiler_fn(iter, backend, fullgraph):
-#     def _fn(gm):
-#         # if dist.get_rank() == 0:
-#         #     # HACK: delay rank 0 by X seconds, so that rank 1 will always fail first.
-#         #     import time
-#         #     time.sleep(600)
-#         torch_log.warning("Compiling autograd?")
-#         if iter == 0:
-#             return torch.compile(gm, backend="eager", fullgraph=False)
-#         else:
-#             return torch.compile(gm, backend=backend, fullgraph=fullgraph)
-#     return _fn
+def compiler_fn(backend, fullgraph):
+    def _fn(gm):
+        # if dist.get_rank() == 0:
+        #     # HACK: delay rank 0 by X seconds, so that rank 1 will always fail first.
+        #     import time
+        #     time.sleep(600)
+        torch_log.warning("Compiling autograd?")
+        return torch.compile(gm, backend=backend, fullgraph=fullgraph)
+    return _fn
 
 
 def run(model, optim, n_iter, hidden_dim, use_compiled_autograd=False):
@@ -506,7 +504,8 @@ def run(model, optim, n_iter, hidden_dim, use_compiled_autograd=False):
         optim.zero_grad(set_to_none=True)
         inp = create_input(hidden_dim)
         if use_compiled_autograd:
-            compiled_autograd_ctx = compiled_autograd.enable(torch._dynamo.compiled_autograd.compiler_fn(backend="aot_eager", fullgraph=True))
+            # compiled_autograd_ctx = compiled_autograd.enable(torch._dynamo.compiled_autograd.compiler_fn(backend="aot_eager", fullgraph=True))
+            compiled_autograd_ctx = compiled_autograd.enable(compiler_fn(backend="aot_eager", fullgraph=True))
         else:
             compiled_autograd_ctx = contextlib.nullcontext()
         with compiled_autograd_ctx:
@@ -540,7 +539,7 @@ def main_compiled(n_iter, activation_checkpoint, backend):
     #     # HACK: delay rank 0 by X seconds, so that rank 1 will always fail first.
     #     import time
     #     time.sleep(600)
-    model_compiled = torch.compile(model, backend=backend, fullgraph=False)
+    model_compiled = torch.compile(model, backend=backend, fullgraph=True)
     res = run(model_compiled, optim, n_iter, hidden_dim, use_compiled_autograd=True)
     print(f"res: {res}")
     torch._dynamo.reset()
