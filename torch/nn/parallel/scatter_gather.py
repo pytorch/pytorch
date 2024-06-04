@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import torch
 from typing import Any, Dict, List, Optional, Sequence, Tuple, TypeVar, Union, overload
 from typing_extensions import deprecated
