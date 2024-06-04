@@ -607,7 +607,10 @@ struct AttentionBackwardKernel {
     using AccumTileGmem = GmemTile<typename Mma::FragmentC, (int)kNumThreads>;
   };
 
-  static constexpr bool kEnableSplitKeys = true;
+  // NOTE: nvcc 12.4 has correctness errors with this on M60 (sm52)
+  // when there is an attention bias. Let's just disable it for now.
+  static constexpr auto kMinSm = ArchTag::kMinComputeCapability;
+  static constexpr bool kEnableSplitKeys = kMinSm >= 70;
 
   static constexpr bool kNeedsAccumGradQ = kEnableSplitKeys ||
       !cutlass::platform::is_same<output_accum_t, output_t>::value;
