@@ -69,7 +69,7 @@ else:
             return self.mesh_stack[-1]
 
         def create_child_mesh(
-            self, parent_mesh: "DeviceMesh", submesh_dim_names: Tuple[str]
+            self, parent_mesh: "DeviceMesh", submesh_dim_names: Tuple[str, ...]
         ) -> "DeviceMesh":
             # submesh_dims are the mesh dimension of the submesh in the parent mesh.
             submesh_dims = [
@@ -382,7 +382,9 @@ else:
                     and self._thread_id == other._thread_id
                 )
 
-        def __getitem__(self, mesh_dim_names: Union[str, Tuple[str]]) -> "DeviceMesh":
+        def __getitem__(
+            self, mesh_dim_names: Union[str, Tuple[str, ...]]
+        ) -> "DeviceMesh":
             """
             Slice the current DeviceMesh based on the mesh_dim_name given to create a child
             DeviceMesh.

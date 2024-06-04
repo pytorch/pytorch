@@ -396,6 +396,39 @@ class TestPatternMatcher(TestPatternMatcherBase):
             matcher_nodes = 1
             self._test_common(mod, (v,), matcher_count, matcher_nodes)
 
+    def test_linear_add_bias(self):
+        class M(torch.nn.Module):
+            def __init__(self, dtype, unary_fn):
+                super().__init__()
+                self.linear = torch.nn.Linear(10, 64, bias=False)
+                self.bias = torch.randn(64).to(dtype=dtype)
+                self.unary_fn = unary_fn
+
+            def forward(self, x):
+                x = self.linear(x) + self.bias
+                return self.unary_fn(x)
+
+        dtypes = []
+        if torch.ops.mkldnn._is_mkldnn_bf16_supported():
+            dtypes.append(torch.bfloat16)
+        if torch.ops.mkldnn._is_mkldnn_fp16_supported():
+            dtypes.append(torch.float16)
+        options = itertools.product(unary_list, dtypes)
+        for unary_fn, dtype in options:
+            metrics.reset()
+            mod = M(dtype, unary_fn).eval()
+            v = torch.randn(2, 10)
+            matcher_count = 3
+            # Add 1 for weight packing pass, add 2 for bias folding pass.
+            matcher_nodes = unary_list[unary_fn] + 3
+            if self._check_unary_is_decomposed(unary_fn):
+                # Has extra dtype conversion nodes for autocast.
+                matcher_nodes += 2
+            self._test_common(
+                mod, (v,), matcher_count, matcher_nodes, check_autocast=dtype
+            )
+            self.assertEqual(metrics.generated_kernel_count, 1)
+
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN
     @skipIfRocm

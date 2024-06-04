@@ -341,7 +341,7 @@ class ScheduleTest(MultiProcContinousTest):
         ]
 
         # Attach to a schedule
-        schedule = ScheduleClass(stages, chunks, loss_fn=loss_fn)
+        schedule = ScheduleClass(stages, loss_fn=loss_fn)
 
         # Run
         for _ in range(2):
