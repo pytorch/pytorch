@@ -164,6 +164,13 @@ class TS2FXGraphConverter:
             name = graph_input.debugName()
             normalized_name = normalize_name(name)
 
+            fx_node = self.fx_graph.placeholder(normalized_name)
+
+            # fx_node.meta["val"] = FakeTensor()
+            # TODO: set fx_node.meta["val"]
+
+            self.name_to_node[name] = fx_node
+
             if name in self.param_names:
                 self.input_specs.append(
                     InputSpec(
@@ -172,7 +179,6 @@ class TS2FXGraphConverter:
                         target=name,
                     )
                 )
-                fx_node = self.fx_graph.get_attr(qualified_name=normalized_name)
             elif name in self.buffer_names:
                 self.input_specs.append(
                     InputSpec(
@@ -182,7 +188,6 @@ class TS2FXGraphConverter:
                         persistent=True,
                     )
                 )
-                fx_node = self.fx_graph.get_attr(qualified_name=normalized_name)
             else:
                 self.input_specs.append(
                     InputSpec(
@@ -191,12 +196,6 @@ class TS2FXGraphConverter:
                         target=name,
                     )
                 )
-                fx_node = self.fx_graph.placeholder(normalized_name)
-
-            self.name_to_node[name] = fx_node
-
-            # fx_node.meta["val"] = FakeTensor()
-            # TODO: set fx_node.meta["val"]
 
     def convert_prim_Constant(self, node: torch._C.Node):
         name = node.output().debugName()
@@ -503,6 +502,7 @@ class TS2FXGraphConverter:
         fx_node = self.fx_graph.call_function(target, args)
         output_name = node.output().debugName()
         self.name_to_node[output_name] = fx_node
+
     def convert_custom_op(self, node: torch._C.Node):
         target = get_op_overload(node)
 
