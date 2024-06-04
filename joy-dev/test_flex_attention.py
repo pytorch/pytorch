@@ -5,7 +5,7 @@ torch.manual_seed(0)
 
 # Lets create some input tensors
 # The input tensor has shape (batch_size, num_heads, seq_len, head_dim)
-query = torch.randn(8, 8, 16, 64, device="cuda", dtype=torch.float32)
+query = torch.randn(8, 8, 1024, 64, device="cuda", dtype=torch.float32)
 key = torch.randn(8, 8, 2048, 64, device="cuda", dtype=torch.float32)
 value = torch.randn(8, 8, 2048, 64, device="cuda", dtype=torch.float32)
 

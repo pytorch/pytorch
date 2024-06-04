@@ -358,10 +358,8 @@ def _get_default_config_fwd(query) -> Tuple[int, int, int, int]:
             default_config = (64, 32, 4, 3)
 
     # For short query, chose a config with BLOCK_M <= query_len
-    assert query_len >= 16, "Query length must be at least 32 to use FlexAttention kernel. Use FlexDecoding for shorter queries. "
-    if (query_len <= 16) and default_config[0] > 16:
-        default_config = (16, int(default_config[0]*default_config[1]/32), default_config[2], default_config[3])
-    elif (query_len <= 32) and default_config[0] > 32:
+    assert query_len >= 32, "Query length must be at least 32 to use FlexAttention kernel. Use FlexDecoding for shorter queries. "
+    if (query_len <= 32) and default_config[0] > 32:
         default_config = (32, int(default_config[0]*default_config[1]/32), default_config[2], default_config[3])
     elif (query_len <= 64) and default_config[0] > 64:
         default_config = (64, int(default_config[0]*default_config[1]/64), default_config[2], default_config[3])
@@ -388,6 +386,8 @@ from torch._inductor.kernel.flex_decoding import create_flex_decoding_kernel
 @register_lowering(torch.ops.higher_order.flex_attention, type_promotion_kind=None)
 def flex_attention(*args, **kwargs):
     query, key, value, subgraph, *other_buffers = args
+    if _use_flex_decoding(query):
+        return create_flex_decoding_kernel(query, key, value, subgraph, other_buffers)
     for buf in [query, key, value]:
         buf.realize()
     placeholder_inps = [

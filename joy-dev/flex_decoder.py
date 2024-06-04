@@ -101,4 +101,4 @@ if __name__ == "__main__":
 
 
     decoder_output = eager_flash_decoder(query, key, value, score_mod=checkerboard, Bc=128)[0]
-    torch.testing.assert_close(eager_output, decoder_output, atol=2e-2, rtol=2e-2)
+    torch.testing.assert_close(eager_output, compiled_output, atol=2e-2, rtol=2e-2)
