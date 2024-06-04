@@ -17,6 +17,7 @@ import torch
 from .functions import (
     CleanDiv,
     FloorDiv,
+    Identity,
     IsNonOverlappingAndDenseIndicator,
     Mod,
     ModularIndexing,
@@ -70,6 +71,7 @@ def handlers():
         ModularIndexing: "modular_indexing",
         sympy.functions.elementary.piecewise.ExprCondPair: "expr_cond_pair",
         sympy.Piecewise: "piecewise",
+        Identity: "identity",
         IsNonOverlappingAndDenseIndicator: "is_non_overlapping_and_dense_indicator",
         Round: "round",
         RoundDecimal: "round",

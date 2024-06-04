@@ -393,6 +393,9 @@ class ExprPrinter(Printer):
     def _print_CleanDiv(self, expr):
         return self._print_FloorDiv(expr)
 
+    def _print_Identity(self, expr):
+        return self._print(expr.args[0])
+
     def _print_GreaterThan(self, expr):
         # GreaterThan:          >=
         # StrictlyGreaterThan:  >

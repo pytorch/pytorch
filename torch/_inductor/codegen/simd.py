@@ -1185,22 +1185,12 @@ class SIMDScheduling(BaseScheduling):
         # Gather all used buffer names
         buffer_names = set()
 
-        # [WIP] remove both can_use_32bit_indexing and all_indexing_expressable_in_32_bits calls
-        can_expr_in_32 = True
         for node in node_schedule:
             if not isinstance(node, scheduler.BaseSchedulerNode):
                 continue
 
             buffer_names.update(node.get_names())
             buffer_names.update(node.used_buffer_names())
-
-            if (
-                can_expr_in_32
-                and not torch._inductor.optimize_indexing.all_indexing_expressable_in_32_bits(
-                    node._body  # type: ignore[attr-defined]
-                )
-            ):
-                can_expr_in_32 = False
 
         # Get buffers objects
         def _get_buffer(name: str) -> Union[ir.Buffer, ir.TensorBox]:
@@ -1216,7 +1206,7 @@ class SIMDScheduling(BaseScheduling):
         # conservative here.
         total_numel = numel * reduction_numel
 
-        if can_expr_in_32 and SIMDScheduling.can_use_32bit_indexing(
+        if SIMDScheduling.can_use_32bit_indexing(
             total_numel, buffers
         ):
             return cls.int32_type

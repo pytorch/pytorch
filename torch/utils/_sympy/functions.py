@@ -16,6 +16,7 @@ __all__ = [
     "IsNonOverlappingAndDenseIndicator",
     "Round",
     "RoundDecimal",
+    "Identity",
 ]
 
 
@@ -394,6 +395,11 @@ class RoundDecimal(sympy.Function):
             return output_type(round(value_type(number), int(ndigits)))
 
 
+class Identity(sympy.Function):
+    def __repr__(self):
+        return f"Identity({self.args[0]})"
+
+
 def make_opaque_unary_fn(name):
     class OpaqueUnaryFn(sympy.Function):
         """
@@ -432,6 +438,7 @@ def make_opaque_unary_fn(name):
 
 
 # Keep in sync with math_op_names in torch/fx/experimental/sym_node.py
+OpaqueUnaryFn_sqrt = make_opaque_unary_fn("sqrt")
 OpaqueUnaryFn_sqrt = make_opaque_unary_fn("sqrt")
 OpaqueUnaryFn_cos = make_opaque_unary_fn("cos")
 OpaqueUnaryFn_cosh = make_opaque_unary_fn("cosh")
