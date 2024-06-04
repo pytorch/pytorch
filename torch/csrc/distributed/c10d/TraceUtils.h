@@ -1,15 +1,18 @@
 #pragma once
-#include <ATen/cuda/CUDAEvent.h>
 #include <c10/core/ScalarType.h>
 #include <c10/util/ApproximateClock.h>
 #include <c10/util/irange.h>
 #include <c10/util/string_view.h>
-#include <torch/csrc/distributed/c10d/NCCLUtils.hpp>
 #include <torch/csrc/distributed/c10d/Store.hpp>
 #include <torch/csrc/distributed/c10d/Types.hpp>
 #include <torch/csrc/distributed/c10d/Utils.hpp>
 #include <torch/csrc/jit/serialization/pickler.h>
 #include <torch/csrc/profiler/combined_traceback.h>
+
+#ifdef USE_C10D_NCCL
+#include <ATen/cuda/CUDAEvent.h>
+#include <torch/csrc/distributed/c10d/NCCLUtils.hpp>
+#endif
 
 #include <sys/types.h>
 #include <cstdlib>
