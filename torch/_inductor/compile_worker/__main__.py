@@ -3,7 +3,7 @@ import os
 import sys
 import typing
 
-from torch._inductor.codecache import caching_device_properties
+from torch._inductor.async_compile import caching_device_properties
 from torch._inductor.compile_worker.subproc_pool import Pipe, SubprocMain
 from torch._inductor.compile_worker.watchdog import _async_compile_initializer
 from torch._inductor.runtime.compile_tasks import _set_triton_ptxas_path

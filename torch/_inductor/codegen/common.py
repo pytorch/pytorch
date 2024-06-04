@@ -403,6 +403,12 @@ class ExprPrinter(Printer):
         assert len(expr.args) == 1
         return f"align({self._print(expr.args[0])})"
 
+    def doprint(self, expr, *, simplify: bool = True):
+        # TODO: why are people passing strings to the printer here :think:
+        if simplify and isinstance(expr, sympy.Expr) and hasattr(V.graph, "sizevars"):
+            expr = V.graph.sizevars.simplify(expr)
+        return super().doprint(expr)
+
 
 class PythonPrinter(ExprPrinter):
     def _print_ModularIndexing(self, expr):
@@ -1637,10 +1643,7 @@ class Kernel(CodeGen):
                             pos = var.bounds & ValueRanges(0, sympy.oo)
                             new_bounds = new_bounds | pos
 
-                    new_var = self.cse.generate(self.compute, stm, bounds=new_bounds)
-                    # Propagate the mask as mask propagation when using where is not correct
-                    new_var.update_on_args("index_wrap", (var,), {})
-                    var = new_var
+                    var = self.cse.generate(self.compute, stm, bounds=new_bounds)
 
                 sympy_var = parent_handler.indirect_indexing(var, size, check)
                 if generate_assert(check):
