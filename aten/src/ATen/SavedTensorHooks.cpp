@@ -35,6 +35,15 @@ void SavedTensorDefaultHooks::enable() {
   tls.disabled_error_message = c10::nullopt;
 }
 
+/* static */ void SavedTensorDefaultHooks::disable_during_tracing() {
+  tls.is_tracing = true;
+}
+
+/* static */ void SavedTensorDefaultHooks::enable_after_tracing() {
+  TORCH_CHECK(tls.is_tracing, "Tracing mode should be set")
+  tls.is_tracing = false;
+}
+
 const std::optional<std::string>& SavedTensorDefaultHooks::get_disabled_error_message() {
   return tls.disabled_error_message;
 }
@@ -66,7 +75,7 @@ void SavedTensorDefaultHooks::pop_hooks() {
 }
 
 std::pair<PyObject*, PyObject*> SavedTensorDefaultHooks::get_hooks() {
-  if (!is_initialized || tls.stack.empty()) {
+  if (!is_initialized || tls.stack.empty() || tls.is_tracing) {
     return std::make_pair(nullptr, nullptr);
   }
   return tls.stack.top();

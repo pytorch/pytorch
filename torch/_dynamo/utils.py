@@ -2658,3 +2658,13 @@ class Lit:
 
     def __repr__(self):
         return self.s
+
+
+@contextlib.contextmanager
+def _disable_saved_tensors_hooks_during_tracing():
+    # See NOTE: [Deferring tensor pack/unpack hooks until runtime]
+    try:
+        torch._C._autograd._saved_tensors_hooks_disable_during_tracing()
+        yield
+    finally:
+        torch._C._autograd._saved_tensors_hooks_enable_after_tracing()

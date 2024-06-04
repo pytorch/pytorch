@@ -22,6 +22,9 @@ struct TORCH_API SavedTensorDefaultHooksTLS {
   // We did this for efficiency (so we didn't have to keep a separate bool
   // around)
   std::optional<std::string> disabled_error_message;
+
+  // See NOTE: [Deferring tensor pack/unpack hooks until runtime]
+  bool is_tracing = false;
 };
 
 } // namespace impl
@@ -45,6 +48,14 @@ struct TORCH_API SavedTensorDefaultHooks {
   static void enable();
   static bool is_enabled();
   static const std::optional<std::string>& get_disabled_error_message();
+
+  // NOTE: [Deferring tensor pack/unpack hooks until runtime]
+  // To preserve eager semantics of pack/unpack hooks firing only once per saved
+  // variable, Dynamo/AOTAutograd need to defer hook firing until runtime. To do
+  // so, we disable these hooks during tracing. See
+  // https://github.com/pytorch/pytorch/issues/113263.
+  static void disable_during_tracing();
+  static void enable_after_tracing();
 };
 
 } // namespace at

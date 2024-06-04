@@ -373,6 +373,12 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
   m.def("_saved_tensors_hooks_enable", at::SavedTensorDefaultHooks::enable);
   m.def("_saved_tensors_hooks_disable", at::SavedTensorDefaultHooks::disable);
   m.def(
+      "_saved_tensors_hooks_disable_during_tracing",
+      at::SavedTensorDefaultHooks::disable_during_tracing);
+  m.def(
+      "_saved_tensors_hooks_enable_after_tracing",
+      at::SavedTensorDefaultHooks::enable_after_tracing);
+  m.def(
       "_saved_tensors_hooks_get_disabled_error_message",
       at::SavedTensorDefaultHooks::get_disabled_error_message);
   m.def(
