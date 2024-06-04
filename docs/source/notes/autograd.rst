@@ -463,7 +463,7 @@ functions are used in the research community since complex numbers are not part 
 ordered field and so having complex valued loss does not make much sense.
 
 It also turns out that no interesting real-valued objective fulfill the
-Cauchy-Riemann equations. So the theory with homomorphic function cannot be
+Cauchy-Riemann equations. So the theory with holomorphic function cannot be
 used for optimization and most people therefore use the Wirtinger calculus.
 
 Wirtinger Calculus comes into the picture ...
@@ -602,7 +602,7 @@ Solving the above equations for :math:`\frac{\partial L}{\partial u}` and :math:
     .. math::
         \begin{aligned}
             \frac{\partial L}{\partial u} = \frac{\partial L}{\partial s} + \frac{\partial L}{\partial s^*} \\
-            \frac{\partial L}{\partial v} = -1j * \left(\frac{\partial L}{\partial s} - \frac{\partial L}{\partial s^*}\right)
+            \frac{\partial L}{\partial v} = 1j * \left(\frac{\partial L}{\partial s} - \frac{\partial L}{\partial s^*}\right)
         \end{aligned}
         :label: [3]
 
@@ -610,9 +610,9 @@ Substituting :eq:`[3]` in :eq:`[1]`, we get:
 
     .. math::
         \begin{aligned}
-            \frac{\partial L}{\partial z^*} &= \left(\frac{\partial L}{\partial s} + \frac{\partial L}{\partial s^*}\right) * \frac{\partial u}{\partial z^*} - 1j * \left(\frac{\partial L}{\partial s} - \frac{\partial L}{\partial s^*}\right) * \frac{\partial v}{\partial z^*}  \\
+            \frac{\partial L}{\partial z^*} &= \left(\frac{\partial L}{\partial s} + \frac{\partial L}{\partial s^*}\right) * \frac{\partial u}{\partial z^*} + 1j * \left(\frac{\partial L}{\partial s} - \frac{\partial L}{\partial s^*}\right) * \frac{\partial v}{\partial z^*}  \\
                                             &= \frac{\partial L}{\partial s} * \left(\frac{\partial u}{\partial z^*} + \frac{\partial v}{\partial z^*} j\right) + \frac{\partial L}{\partial s^*} * \left(\frac{\partial u}{\partial z^*} - \frac{\partial v}{\partial z^*} j\right)  \\
-                                            &= \frac{\partial L}{\partial s^*} * \frac{\partial (u + vj)}{\partial z^*} + \frac{\partial L}{\partial s} * \frac{\partial (u + vj)^*}{\partial z^*}  \\
+                                            &= \frac{\partial L}{\partial s} * \frac{\partial (u + vj)}{\partial z^*} + \frac{\partial L}{\partial s^*} * \frac{\partial (u + vj)^*}{\partial z^*}  \\
                                             &= \frac{\partial L}{\partial s} * \frac{\partial s}{\partial z^*} + \frac{\partial L}{\partial s^*} * \frac{\partial s^*}{\partial z^*}    \\
         \end{aligned}
 
