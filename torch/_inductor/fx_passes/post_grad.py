@@ -16,10 +16,10 @@ from torch._prims_common import is_boolean_dtype, is_expandable_to, is_integer_d
 
 from torch._utils_internal import upload_graph
 from torch.fx.experimental.symbolic_shapes import statically_known_true, sym_eq
+from torch.fx.passes.graph_transform_observer import GraphTransformObserver
 
 from .. import config, ir, pattern_matcher
 from ..fx_utils import FakeTensorUpdater, get_fake_args_kwargs, get_node_storage
-from torch.fx.passes.graph_transform_observer import GraphTransformObserver
 
 from ..lowering import lowerings as L
 from ..pattern_matcher import (

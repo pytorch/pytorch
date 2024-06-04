@@ -1242,7 +1242,7 @@ def group_batch_fusion_passes(graph: torch.fx.Graph, pre_grad=True):
         if has_fbgemm:
             fusions += generate_fusion_from_config(fbgemm_fusions, pre_grad=False)
 
-   for i, rule in enumerate(fusions):
+    for i, rule in enumerate(fusions):
         with GraphTransformObserver(
             graph.owning_module,
             f"group_batch_fusion_{i}",
