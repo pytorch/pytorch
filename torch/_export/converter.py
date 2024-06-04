@@ -73,11 +73,7 @@ def get_op_overload(node: torch._C.Node):
         else:
             op_overload = op_overload_packet.default
     except Exception as e:
-        msg = f"Finding operator overload for {node.kind()}"
-        if override:
-            msg += f" with override {override}"
-        msg += f" fail due to: {e}"
-        raise RuntimeError(msg)
+        raise RuntimeError(f"Unable to find operator {node.kind()} with schema {node.schema}")
 
     return op_overload
 
@@ -517,16 +513,8 @@ class TS2FXGraphConverter:
         # Provide a default node handler as well in case we don't find
         # matching converter for that.
         handler_func_name = ir_name_to_func_name(node_kind)
-        handler_func = getattr(self, handler_func_name, self.convert_default_node)
+        handler_func = getattr(self, handler_func_name, self.convert_call_function_op)
         handler_func(node)
-
-    def convert_default_node(self, node: torch._C.Node):
-        node_kind = node.kind()
-        if node_kind.startswith("aten::"):
-            self.convert_aten_op(node)
-        else:
-            # For all other cases, we assume they are either aten:: ops or custom ops.
-            self.convert_call_function_op(node)
 
     def convert_graph_outputs(self):
         args = []
