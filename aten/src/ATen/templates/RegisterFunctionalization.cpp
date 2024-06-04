@@ -60,7 +60,7 @@ inline Tensor to_meta(const Tensor& t) {
 /*device=*/c10::make_optional(c10::Device(kMeta)), /*pin_memory=*/c10::nullopt);
 }
 
-inline c10::optional<Tensor> to_meta(const c10::optional<Tensor>& t) {
+inline std::optional<Tensor> to_meta(const std::optional<Tensor>& t) {
   if (t.has_value()) {
     return c10::make_optional<Tensor>(to_meta(*t));
   }
@@ -85,8 +85,8 @@ inline c10::List<Tensor> to_meta(const c10::List<Tensor>& t_list) {
   return outputs;
 }
 
-inline c10::List<c10::optional<Tensor>> to_meta(const c10::List<c10::optional<Tensor>>& t_list) {
-  c10::List<c10::optional<Tensor>> outputs;
+inline c10::List<::std::optional<Tensor>> to_meta(const c10::List<::std::optional<Tensor>>& t_list) {
+  c10::List<::std::optional<Tensor>> outputs;
   outputs.reserve(t_list.size());
   for (const auto i : c10::irange(t_list.size())) {
     outputs.push_back(to_meta(t_list[i]));

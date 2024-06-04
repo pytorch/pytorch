@@ -35,7 +35,7 @@ void SavedTensorDefaultHooks::enable() {
   tls.disabled_error_message = c10::nullopt;
 }
 
-const c10::optional<std::string>& SavedTensorDefaultHooks::get_disabled_error_message() {
+const std::optional<std::string>& SavedTensorDefaultHooks::get_disabled_error_message() {
   return tls.disabled_error_message;
 }
 

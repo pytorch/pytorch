@@ -18,6 +18,7 @@ from torch.distributed._tensor.debug import CommDebugMode
 from torch.distributed.fsdp.fully_sharded_data_parallel import (
     CPUOffload,
     FullyShardedDataParallel as FSDP,
+    ShardingStrategy,
 )
 from torch.distributed.tensor.parallel import (
     ColwiseParallel,
@@ -28,7 +29,6 @@ from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import FSDPTest
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
-    parametrize,
     run_tests,
     TEST_WITH_DEV_DBG_ASAN,
 )
@@ -141,31 +141,36 @@ class TestTPFSDPIntegration(FSDPTest):
         tp_world_size = tp_pg.size()
         fsdp_world_size = self.world_size // tp_world_size
         assert (
-            type(tp_fsdp_model) is FSDP and len(list(tp_fsdp_model.parameters())) == 1
+            type(tp_fsdp_model) is FSDP
+            and len([m for m in tp_fsdp_model.modules() if type(m) is FSDP]) == 1
         ), (
             "The following logic assumes a single top-level-only FSDP wrapping "
             "the model with TP already applied"
         )
-        flat_param = tp_fsdp_model.params[0]
-        splits = tuple(param_name_to_numel.values())
-        # Create a mask over the gradient elements to manually reduce
-        unsharded_size = torch.Size([flat_param.numel() * fsdp_world_size])
-        unsharded_zeros = torch.zeros(unsharded_size, device=flat_param.device)
-        per_param_masks = unsharded_zeros.split(splits)
-        for param_idx, param_name in enumerate(
-            param_name_to_numel.keys()
-        ):  # assumes fixed order
-            if param_name not in non_sharded_param_names:
-                per_param_masks[param_idx][:] = 1
-        unsharded_mask = torch.cat(per_param_masks).contiguous().type(torch.BoolTensor)
-        sharded_mask = unsharded_mask.chunk(fsdp_world_size)[self.rank // tp_world_size]
-        grad_device = flat_param.grad.device
-        grad = flat_param.grad.detach().clone().cuda(self.rank)
-        dist.all_reduce(grad, op=dist.ReduceOp.SUM, group=tp_pg)
-        grad = grad.to(grad_device)
-        flat_param.grad[~sharded_mask] = grad[~sharded_mask]
-        # Average *all* gradient elements to match the FSDP only semantics
-        flat_param.grad /= tp_world_size
+        for flat_param in tp_fsdp_model.params:
+            splits = tuple(param_name_to_numel.values())
+            # Create a mask over the gradient elements to manually reduce
+            unsharded_size = torch.Size([flat_param.numel() * fsdp_world_size])
+            unsharded_zeros = torch.zeros(unsharded_size, device=flat_param.device)
+            per_param_masks = unsharded_zeros.split(splits)
+            for param_idx, param_name in enumerate(
+                param_name_to_numel.keys()
+            ):  # assumes fixed order
+                if param_name not in non_sharded_param_names:
+                    per_param_masks[param_idx][:] = 1
+            unsharded_mask = (
+                torch.cat(per_param_masks).contiguous().type(torch.BoolTensor)
+            )
+            sharded_mask = unsharded_mask.chunk(fsdp_world_size)[
+                self.rank // tp_world_size
+            ]
+            grad_device = flat_param.grad.device
+            grad = flat_param.grad.detach().clone().cuda(self.rank)
+            dist.all_reduce(grad, op=dist.ReduceOp.SUM, group=tp_pg)
+            grad = grad.to(grad_device)
+            flat_param.grad[~sharded_mask] = grad[~sharded_mask]
+            # Average *all* gradient elements to match the FSDP only semantics
+            flat_param.grad /= tp_world_size
 
     def _get_grads_as_flattened(
         self,
@@ -182,14 +187,21 @@ class TestTPFSDPIntegration(FSDPTest):
         returns the same value on all ranks.
         """
         local_grads_as_flattened = (
-            torch.cat([torch.flatten(param.grad) for param in model.parameters()])
+            torch.cat(
+                [
+                    torch.flatten(param.grad)
+                    if param.grad is not None
+                    else torch.zeros_like(torch.flatten(param))
+                    for param in model.parameters()
+                ]
+            )
             .contiguous()
             .cuda(self.rank)
         )
         all_grads_as_flattened = torch.cat(
             [torch.empty_like(local_grads_as_flattened) for _ in range(fsdp_pg.size())]
         ).contiguous()
-        dist._all_gather_base(
+        dist.all_gather_into_tensor(
             all_grads_as_flattened, local_grads_as_flattened, group=fsdp_pg
         )
         if not uses_tp:
@@ -214,16 +226,27 @@ class TestTPFSDPIntegration(FSDPTest):
         return torch.cat(all_grads_per_param).contiguous()
 
     @skip_if_lt_x_gpu(4)
-    @parametrize("tensor_parallel_size", [2, 4])
-    @parametrize(
-        "cpu_offload",
-        [CPUOffload(offload_params=False), CPUOffload(offload_params=True)],
-    )
-    def test_fsdp_tp_integration(self, tensor_parallel_size, cpu_offload):
+    def test_fsdp_tp_integration(self):
+        self.run_subtests(
+            {
+                "cpu_offload": [
+                    CPUOffload(offload_params=False),
+                    CPUOffload(offload_params=True),
+                ],
+                "sharding_strategy": [None, ShardingStrategy.SHARD_GRAD_OP],
+                "use_orig_params": [False, True],
+            },
+            self._test_fsdp_tp_integration,
+        )
+
+    def _test_fsdp_tp_integration(
+        self, cpu_offload, sharding_strategy, use_orig_params
+    ):
         """
         Tests training for TP + FSDP integration by comparing an FSDP-only
         model with a TP + FSDP model.
         """
+        tensor_parallel_size = 2
         LR = 3e-5
         torch.manual_seed(0)
         model = SimpleModel().cuda(self.rank)
@@ -246,7 +269,13 @@ class TestTPFSDPIntegration(FSDPTest):
         self.assertEqual(model(inp), tp_fsdp_model(inp))  # sanity check
 
         mesh_1d = init_device_mesh("cuda", (self.world_size,))
-        fsdp_model = FSDP(model, cpu_offload=cpu_offload, device_mesh=mesh_1d)
+        fsdp_model = FSDP(
+            model,
+            cpu_offload=cpu_offload,
+            device_mesh=mesh_1d,
+            sharding_strategy=sharding_strategy,
+            use_orig_params=use_orig_params,
+        )
         mesh_2d = init_device_mesh(
             "cuda",
             (self.world_size // tensor_parallel_size, tensor_parallel_size),
@@ -269,6 +298,8 @@ class TestTPFSDPIntegration(FSDPTest):
             tp_fsdp_model,
             cpu_offload=cpu_offload,
             device_mesh=mesh_2d["dp"],
+            sharding_strategy=sharding_strategy,
+            use_orig_params=use_orig_params,
         )
         fsdp_pg = mesh_2d["dp"].get_group(mesh_dim=0)
 
@@ -356,11 +387,16 @@ class TestTPFSDPIntegration(FSDPTest):
             fsdp_2d_model(torch.rand(2, 10).cuda(self.rank)).sum().backward()
 
         funcol = torch.ops.c10d_functional
+        c10d_ops = torch.ops.c10d
         comm_counts = comm_mode.get_comm_counts()
-        self.assertEqual(comm_mode.get_total_counts(), 5)
+        self.assertEqual(comm_mode.get_total_counts(), 7)
+        # TP comms
         self.assertEqual(comm_counts[funcol.reduce_scatter_tensor], 2)
         self.assertEqual(comm_counts[funcol.all_gather_into_tensor], 2)
         self.assertEqual(comm_counts[funcol.all_reduce], 1)
+        # FSDP comms
+        self.assertEqual(comm_counts[c10d_ops._allgather_base_], 1)
+        self.assertEqual(comm_counts[c10d_ops._reduce_scatter_base_], 1)
 
         grads = [p.grad for p in fsdp_2d_model.parameters() if p.grad is not None]
 

@@ -1,9 +1,11 @@
 # Owner(s): ["module: intel"]
 
 import sys
+import tempfile
 import unittest
 
 import torch
+import torch.xpu._gpu_trace as gpu_trace
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     onlyXPU,
@@ -95,6 +97,14 @@ class TestXpu(TestCase):
         device_capability = torch.xpu.get_device_capability(current_device)
         self.assertTrue(device_capability["max_work_group_size"] > 0)
         self.assertTrue(device_capability["max_num_sub_groups"] > 0)
+        self.assertEqual(
+            device_properties.driver_version, device_capability["driver_version"]
+        )
+        self.assertEqual(device_properties.has_fp16, device_capability["has_fp16"])
+        self.assertEqual(device_properties.has_fp64, device_capability["has_fp64"])
+        self.assertEqual(
+            device_properties.has_atomic64, device_capability["has_atomic64"]
+        )
 
     def test_wrong_xpu_fork(self):
         stderr = TestCase.runWithPytorchAPIUsageStderr(
@@ -157,6 +167,40 @@ if __name__ == "__main__":
         stream.record_event(event)
         event.synchronize()
         self.assertTrue(event.query())
+
+    def test_generic_stream_event(self):
+        stream = torch.Stream("xpu")
+        self.assertEqual(stream.device_index, torch.xpu.current_device())
+        xpu_stream = torch.xpu.Stream(
+            stream_id=stream.stream_id,
+            device_index=stream.device_index,
+            device_type=stream.device_type,
+        )
+        self.assertEqual(stream.stream_id, xpu_stream.stream_id)
+        self.assertNotEqual(stream.stream_id, torch.xpu.current_stream().stream_id)
+
+        event1 = torch.Event("xpu")
+        event2 = torch.Event("xpu")
+        self.assertEqual(event1.event_id, 0)
+        a = torch.randn(1000)
+        b = torch.randn(1000)
+        with torch.xpu.stream(xpu_stream):
+            a_xpu = a.to("xpu", non_blocking=True)
+            b_xpu = b.to("xpu", non_blocking=True)
+            self.assertEqual(stream.stream_id, torch.xpu.current_stream().stream_id)
+        event1.record(stream)
+        event1.synchronize()
+        self.assertTrue(event1.query())
+        c_xpu = a_xpu + b_xpu
+        event2.record()
+        event2.synchronize()
+        self.assertTrue(event2.query())
+        self.assertNotEqual(event1.event_id, event2.event_id)
+        self.assertEqual(c_xpu.cpu(), a + b)
+        with self.assertRaisesRegex(
+            NotImplementedError, "elapsedTime is not supported by XPU backend."
+        ):
+            event1.elapsed_time(event2)
 
     def test_generator(self):
         torch.manual_seed(2024)
@@ -227,8 +271,104 @@ if __name__ == "__main__":
 
             self.assertEqual(expect, actual)
 
+    def test_serialization_array_with_storage(self):
+        x = torch.randn(5, 5).xpu()
+        y = torch.zeros(2, 5, dtype=torch.int, device="xpu")
+        q = [x, y, x, y.storage()]
+        with tempfile.NamedTemporaryFile() as f:
+            torch.save(q, f)
+            f.seek(0)
+            q_copy = torch.load(f)
+        self.assertEqual(q_copy, q, atol=0, rtol=0)
+        q_copy[0].fill_(5)
+        self.assertEqual(q_copy[0], q_copy[2], atol=0, rtol=0)
+        self.assertEqual(q_copy[0].dtype, torch.float)
+        self.assertEqual(q_copy[1].dtype, torch.int)
+        self.assertEqual(q_copy[2].dtype, torch.float)
+        self.assertTrue(isinstance(q_copy[3], torch.storage.TypedStorage))
+        self.assertTrue(isinstance(q_copy[3]._untyped_storage, torch.UntypedStorage))
+        q_copy[1].fill_(10)
+        y.fill_(10)
+        self.assertEqual(q_copy[3], y.storage())
+
+    def test_serialization_array_with_empty(self):
+        x = [
+            torch.randn(4, 4).xpu(),
+            torch.tensor([], dtype=torch.float, device=torch.device("xpu")),
+        ]
+        with tempfile.NamedTemporaryFile() as f:
+            torch.save(x, f)
+            f.seek(0)
+            x_copy = torch.load(f)
+        for original, copy in zip(x, x_copy):
+            self.assertEqual(copy, original)
+            self.assertIs(type(copy), type(original))
+            self.assertEqual(copy.get_device(), original.get_device())
+
 
 instantiate_device_type_tests(TestXpu, globals(), only_for="xpu")
+
+
+class TestXpuTrace(TestCase):
+    def setUp(self):
+        torch._C._activate_gpu_trace()
+        self.mock = unittest.mock.MagicMock()
+
+    def test_event_creation_callback(self):
+        gpu_trace.register_callback_for_event_creation(self.mock)
+
+        event = torch.xpu.Event()
+        event.record()
+        self.mock.assert_called_once_with(event._as_parameter_.value)
+
+    def test_event_deletion_callback(self):
+        gpu_trace.register_callback_for_event_deletion(self.mock)
+
+        event = torch.xpu.Event()
+        event.record()
+        event_id = event._as_parameter_.value
+        del event
+        self.mock.assert_called_once_with(event_id)
+
+    def test_event_record_callback(self):
+        gpu_trace.register_callback_for_event_record(self.mock)
+
+        event = torch.xpu.Event()
+        event.record()
+        self.mock.assert_called_once_with(
+            event._as_parameter_.value, torch.xpu.current_stream().sycl_queue
+        )
+
+    def test_event_wait_callback(self):
+        gpu_trace.register_callback_for_event_wait(self.mock)
+
+        event = torch.xpu.Event()
+        event.record()
+        event.wait()
+        self.mock.assert_called_once_with(
+            event._as_parameter_.value, torch.xpu.current_stream().sycl_queue
+        )
+
+    def test_device_synchronization_callback(self):
+        gpu_trace.register_callback_for_device_synchronization(self.mock)
+
+        torch.xpu.synchronize()
+        self.mock.assert_called()
+
+    def test_stream_synchronization_callback(self):
+        gpu_trace.register_callback_for_stream_synchronization(self.mock)
+
+        stream = torch.xpu.Stream()
+        stream.synchronize()
+        self.mock.assert_called_once_with(stream.sycl_queue)
+
+    def test_event_synchronization_callback(self):
+        gpu_trace.register_callback_for_event_synchronization(self.mock)
+
+        event = torch.xpu.Event()
+        event.record()
+        event.synchronize()
+        self.mock.assert_called_once_with(event._as_parameter_.value)
 
 
 if __name__ == "__main__":

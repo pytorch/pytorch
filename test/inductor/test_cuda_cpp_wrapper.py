@@ -3,6 +3,7 @@ import sys
 import unittest
 from typing import NamedTuple
 
+import torch
 from torch._inductor import config
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch.testing._internal.common_device_type import (
@@ -76,6 +77,7 @@ if TEST_WITH_ROCM:
         "test_foreach_cpp_wrapper_cuda",
         "test_index_put_deterministic_fallback_cuda",
         "test_index_tensor_cuda",
+        "test_inductor_layout_optimization_input_mutations_cuda",
         "test_linear_relu_cuda",
         "test_multi_device_cuda",
         "test_mm_plus_mm2_cuda",
@@ -95,10 +97,7 @@ if TEST_WITH_ROCM:
 
 if config.abi_compatible:
     xfail_list = [
-        "test_bernoulli1_cuda",  # cpp fallback op naming issue
-        "test_conv_backward_cuda",
         "test_profiler_mark_wrapper_call_cuda",
-        "test_scaled_dot_product_attention_cuda_dynamic_shapes",
     ]
     for test_name in xfail_list:
         test_failures_cuda_wrapper[test_name] = test_torchinductor.TestFailure(
@@ -107,10 +106,7 @@ if config.abi_compatible:
         test_failures_cuda_wrapper[
             f"{test_name}_dynamic_shapes"
         ] = test_torchinductor.TestFailure(("cuda_wrapper",), is_skip=False)
-    skip_list = [
-        "test_multi_device_cuda",
-        "test_linear1_cuda",  # segfault from double free
-    ]
+    skip_list = []
     for test_name in skip_list:
         test_failures_cuda_wrapper[test_name] = test_torchinductor.TestFailure(
             ("cuda_wrapper",), is_skip=True
@@ -142,16 +138,21 @@ def make_test_case(
         tests.setUpClass()
         tests.setUp()
         try:
-            _, code = test_torchinductor.run_and_get_cpp_code(
-                func, *func_inputs if func_inputs else []
-            )
-            self.assertEqual("CppWrapperCodeCache" in code, True)
-            self.assertTrue(
-                all(
-                    code.count(string) == code_string_count[string]
-                    for string in code_string_count
+            with torch._C._PreserveDispatchKeyGuard():
+                torch._C._dispatch_tls_set_dispatch_key_included(
+                    torch._C.DispatchKey.Dense, True
                 )
-            )
+
+                _, code = test_torchinductor.run_and_get_cpp_code(
+                    func, *func_inputs if func_inputs else []
+                )
+                self.assertEqual("CppWrapperCodeCache" in code, True)
+                self.assertTrue(
+                    all(
+                        code.count(string) == code_string_count[string]
+                        for string in code_string_count
+                    )
+                )
         finally:
             tests.tearDown()
             tests.tearDownClass()
@@ -177,6 +178,7 @@ if RUN_CUDA:
 
     # Maintain two separate test lists for cuda and cpp for now
     for item in [
+        BaseTest("test_add_complex"),
         BaseTest("test_add_complex4"),
         BaseTest("test_as_strided"),  # buffer reuse
         BaseTest("test_batch_norm_2d_2"),
@@ -184,6 +186,7 @@ if RUN_CUDA:
         BaseTest("test_bitwise"),  # int32
         BaseTest("test_bmm1"),
         BaseTest("test_bmm2"),
+        BaseTest("test_buffer_use_after_remove"),
         BaseTest("test_cat"),  # alias
         BaseTest("test_convolution1"),
         BaseTest("test_conv_backward"),
@@ -194,16 +197,21 @@ if RUN_CUDA:
         BaseTest("test_index_put_deterministic_fallback"),
         BaseTest("test_adding_tensor_offsets"),
         BaseTest("test_index_tensor"),
+        BaseTest("test_inductor_layout_optimization_input_mutations"),
+        BaseTest("test_insignificant_strides"),
         BaseTest("test_layer_norm"),
         BaseTest("test_linear1"),
         BaseTest("test_linear2"),
         BaseTest("test_mm_views"),
         BaseTest("test_multi_device"),
         BaseTest("test_multi_threading"),
+        BaseTest("test_pow3"),
         BaseTest("test_profiler_mark_wrapper_call"),
+        BaseTest("test_randint"),
         BaseTest("test_reduction1"),  # Reduction
         BaseTest("test_relu"),  # multiple inputs
         BaseTest("test_repeat_interleave_2"),
+        BaseTest("test_roi_align"),
         BaseTest("test_scalar_input"),
         BaseTest("test_scaled_dot_product_attention"),
         BaseTest("test_scaled_dot_product_efficient_attention"),

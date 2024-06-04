@@ -328,7 +328,7 @@ inline static void svd_cusolver_gesvd(const Tensor& A, const Tensor& U, const Te
   // gesvd just knows how to handle m >= n, so in the other case we need to transpose A
   const auto not_A_H = A.size(-2) >= A.size(-1);
   Tensor Vcopy = V; // Shallow copy
-#ifdef ROCM_VERSION
+#ifdef USE_ROCM
   // Similar to the case in svd_magma(), experiments have shown Vh tensor is
   // not guaranteed to be column major on ROCM, we have to create a copy to
   // deal with this
@@ -347,7 +347,7 @@ inline static void svd_cusolver_gesvd(const Tensor& A, const Tensor& U, const Te
                                        infos,
                                        full_matrices, compute_uv, calculate_all_batches, batches);
   });
-#ifdef ROCM_VERSION
+#ifdef USE_ROCM
   if (!not_A_H) {
     V.copy_(Vcopy);
   }
@@ -648,7 +648,7 @@ std::string _format_non_converging_batches(const std::vector<int64_t>& batches) 
 void svd_cusolver(const Tensor& A,
                   const bool full_matrices,
                   const bool compute_uv,
-                  const c10::optional<c10::string_view>& driver,
+                  const std::optional<c10::string_view>& driver,
                   const Tensor& U,
                   const Tensor& S,
                   const Tensor& V,
@@ -661,7 +661,7 @@ void svd_cusolver(const Tensor& A,
   static const char* check_svd_doc = "Check doc at https://pytorch.org/docs/stable/generated/torch.linalg.svd.html";
 
   // The default heuristic is to use gesvdj driver
-#ifdef ROCM_VERSION
+#ifdef USE_ROCM
   const auto driver_v = c10::string_view("gesvdj");
 #else
   const auto driver_v = driver.value_or("gesvdj");
@@ -1078,8 +1078,8 @@ static void apply_ormqr(const Tensor& input, const Tensor& tau, const Tensor& ot
   auto side = left ? CUBLAS_SIDE_LEFT : CUBLAS_SIDE_RIGHT;
   auto trans = transpose ? (input.is_complex() ? CUBLAS_OP_C : CUBLAS_OP_T) : CUBLAS_OP_N;
 
-  auto input_data = input.data_ptr<scalar_t>();
-  auto tau_data = tau.data_ptr<scalar_t>();
+  auto input_data = input.const_data_ptr<scalar_t>();
+  auto tau_data = tau.const_data_ptr<scalar_t>();
   auto other_data = other.data_ptr<scalar_t>();
 
   auto input_matrix_stride = matrixStride(input);
@@ -1101,9 +1101,9 @@ static void apply_ormqr(const Tensor& input, const Tensor& tau, const Tensor& ot
   auto info_data = info.data_ptr<int>();
 
   for (auto i = decltype(batch_size){0}; i < batch_size; i++) {
-    scalar_t* input_working_ptr = &input_data[i * input_matrix_stride];
+    const scalar_t* input_working_ptr = &input_data[i * input_matrix_stride];
     scalar_t* other_working_ptr = &other_data[i * other_matrix_stride];
-    scalar_t* tau_working_ptr = &tau_data[i * tau_stride];
+    const scalar_t* tau_working_ptr = &tau_data[i * tau_stride];
     auto handle = at::cuda::getCurrentCUDASolverDnHandle();
 
     // allocate workspace storage

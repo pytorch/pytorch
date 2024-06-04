@@ -9,6 +9,7 @@ from typing import Any
 from itertools import groupby
 import base64
 import warnings
+import operator
 
 cache = lru_cache(None)
 
@@ -354,7 +355,7 @@ def trace(data):
             elif e['action'] == 'oom':
                 size = e['size']
                 free = e['device_free']
-                out.write(f'raise OutOfMemoryError() # {Bytes(size)} requested, {Bytes(free)} free in CUDA\n')
+                out.write(f'raise OutOfMemoryError # {Bytes(size)} requested, {Bytes(free)} free in CUDA\n')
             else:
                 out.write(f'{e}\n')
         out.write(f"TOTAL MEM: {Bytes(count)}")
@@ -492,7 +493,7 @@ def _profile_to_snapshot(profile):
     # create the final snapshot state
     blocks_at_end = [(to_device(tensor_key.device), event['addr'], event['size'], event['frames'])
                      for (tensor_key, version), event in kv_to_elem.items()]
-    for device, blocks in groupby(sorted(blocks_at_end), key=lambda x: x[0]):
+    for device, blocks in groupby(sorted(blocks_at_end), key=operator.itemgetter(0)):
         seg = snapshot['segments'][device]  # type: ignore[index]
         last_addr = seg['address']
         for _, addr, size, frames in blocks:
