@@ -206,6 +206,7 @@ flex_attention_template = TritonTemplate(
         block_shape=(BLOCK_M, BLOCK_DMODEL),
         order=(1, 0)
     )
+    kv_offset = off_hz * stride_kh
     K_block_ptr = tl.make_block_ptr(
         base=K + kv_offset,
         shape=(BLOCK_DMODEL, KV_LEN),
