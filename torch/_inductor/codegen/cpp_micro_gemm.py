@@ -395,7 +395,7 @@ template <bool accum>
 inline void {{kernel_name}}(
     const {{input_t}}* __restrict__ A,
     const {{input2_t}}* __restrict__ B,
-    {{output_t}}* __restrict__ C,
+    {{compute_t}}* __restrict__ C,
     int64_t M,
     int64_t N,
     int64_t K,
@@ -452,7 +452,7 @@ template <bool accum>
 inline void {{kernel_name}}(
     const {{input_t}}* __restrict__ A,
     const {{input2_t}}* __restrict__ B,
-    {{output_t}}* __restrict__ C,
+    {{compute_t}}* __restrict__ C,
     int64_t M,
     int64_t N,
     int64_t K,
@@ -510,7 +510,7 @@ template <int64_t BLOCK_M, int64_t BLOCK_N, bool accum>
 inline void {{kernel_name}}_kernel(
     const {{input_t}}* __restrict__ A,
     const {{input2_t}}* __restrict__ B,
-    {{output_t}}* __restrict__ C,
+    {{compute_t}}* __restrict__ C,
     int64_t K,
     int64_t lda,
     int64_t ldb,
@@ -580,9 +580,7 @@ inline void {{kernel_name}}_kernel(
         constexpr int row = i / COLS;
         constexpr int col = i % COLS;
         {%- if output_dtype == torch.float32 and compute_dtype == torch.int %}
-        // CVT int32 to FP32 and store
-        VectorizedOut temp = _mm512_cvtepi32_ps(vc[i]);
-        temp.store(C + row * ldc + col * VLEN);
+        vc[i].store(C + row * ldc + col * VLEN);
         {%- else %}
         TORCH_CHECK(false, "Except c matrix as fp32 dtype");
         {%- endif %}

@@ -214,8 +214,8 @@ extern "C"
                 const int64_t n_start = nc * N0;
                 const int64_t n_size = N0;
                 {%- if use_local_acc %}
-                {{ kernel.define_buffer("acc_local_buf", ["m_end - m_start", "N0"]) }}
-                {%- set acc = kernel.local_buffers["acc_local_buf"] %}
+                {{ kernel.define_buffer(acc_buf_name, ["m_end - m_start", "N0"], acc_buf_dtype) }}
+                {%- set acc = kernel.local_buffers[acc_buf_name] %}
                 {%- else %}
                 {%- set acc = kernel.slice_nd(GemmOut, [("m_start", "m_end"), ("n_start", "n_start + N0")]) %}
                 {%- endif %}
@@ -668,6 +668,7 @@ class CppPackedGemmTemplate(CppTemplate):
             x_zp=x_zp,
             w_scale=w_scale,
             w_zp=w_zp,
+            acc_buf_dtype=torch.int32 if int8_gemm else torch.float,
         )
         return self._template_from_string(
             INT8_GEMM_TEMPLATE if int8_gemm else GEMM_TEMPLATE

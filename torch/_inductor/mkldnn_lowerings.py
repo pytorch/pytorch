@@ -712,6 +712,9 @@ def register_onednn_fusion_ops():
                         def inner_fn(index):
                             nonlocal bias
                             input = input_loader(index)
+                            # MicroKernel Output is with int32
+                            # cvt to FP32 before doing compensation
+                            input = ops.to_dtype(input, torch.float32)
                             weight_compo_index = (index[-1],)
                             _x_scale = x_scale_loader(())
                             _x_zp = x_zp_loader(())
