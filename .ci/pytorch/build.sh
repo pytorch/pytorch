@@ -284,14 +284,17 @@ else
         # Which should be backward compatible with Numpy-1.X
         python -mpip install --pre numpy==2.0.0rc1
       fi
+
+      WERROR=1 python setup.py clean
+
       if [[ "$USE_SPLIT_BUILD" == "true" ]]; then
         WERROR=1 BUILD_LIBTORCH_WHL=1 BUILD_PYTHON_ONLY=0 python setup.py bdist_wheel
         WERROR=1 BUILD_LIBTORCH_WHL=0 BUILD_PYTHON_ONLY=1 python setup.py bdist_wheel --cmake
       else
-        WERROR=1 python setup.py clean
         WERROR=1 python setup.py bdist_wheel
       fi
     else
+      python setup.py clean
       if [[ "$BUILD_ENVIRONMENT" == *xla* ]]; then
         source .ci/pytorch/install_cache_xla.sh
       fi
@@ -299,7 +302,6 @@ else
         BUILD_LIBTORCH_WHL=1 BUILD_PYTHON_ONLY=0 python setup.py bdist_wheel
         BUILD_PYTHON_ONLY=1 BUILD_LIBTORCH_WHL=0 python setup.py bdist_wheel --cmake
       else
-        python setup.py clean
         python setup.py bdist_wheel
       fi
     fi
