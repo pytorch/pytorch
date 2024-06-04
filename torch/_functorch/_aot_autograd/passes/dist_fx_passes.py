@@ -24,7 +24,7 @@ def _collect_primal_inputs_used_by_set_op(node_list):
     return primal_inputs_used, primal_set_info_dict
 
 
-def reinplace_primal_set_from_allgather_output(mod):
+def use_primal_as_fsdp_allgather_copyout_buffer(mod):
     """
     auto_functionalized = torch._higher_order_ops.auto_functionalize.auto_functionalized(torch.ops.fsdp.split_with_sizes_copy.default, all_gather_output = view_5, all_gather_input_split_sizes = [131072, 256, 131072, 256], dim = 1, out = [view_1, view_2, view_3, view_4]);  view_5 = view_1 = view_2 = view_3 = view_4 = None
     getitem_3 = auto_functionalized[1];  auto_functionalized = None
@@ -33,7 +33,6 @@ def reinplace_primal_set_from_allgather_output(mod):
     as_strided_5: "f32[512, 512]" = torch.ops.aten.as_strided.default(view_6, [512, 512], [512, 1], 0)
     (... uses as_strided_5)
     as_strided_8: "f32[512, 512]" = torch.ops.aten.as_strided.default(view_6, [512, 512], [512, 1], 0);  view_6 = None
-    (... not using as_strided_8)
     set_: "f32[512, 512]" = torch.ops.aten.set_.source_Tensor(primals_6, as_strided_8);  primals_6 = as_strided_8 = None
     (end of graph)
 
@@ -83,7 +82,7 @@ def reinplace_primal_set_from_allgather_output(mod):
     mod.recompile()
 
 
-def move_primal_set_to_end_of_fwd_graph(mod):
+def move_primal_set_to_end_of_graph(mod):
     """
     auto_functionalized = torch._higher_order_ops.auto_functionalize.auto_functionalized(torch.ops.fsdp.split_with_sizes_copy.default, all_gather_output = view_5, all_gather_input_split_sizes = [131072, 256, 131072, 256], dim = 1, out = [view_1, view_2, view_3, view_4]);  view_5 = view_1 = view_2 = view_3 = view_4 = None
     getitem_3 = auto_functionalized[1];  auto_functionalized = None
