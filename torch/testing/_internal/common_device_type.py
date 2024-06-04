@@ -700,7 +700,7 @@ def get_desired_device_type_test_bases(except_for=None, only_for=None, include_l
     if allow_mps and TEST_MPS and MPSTestBase not in test_bases:
         test_bases.append(MPSTestBase)
     if (allow_xpu or only_for == 'xpu') and TEST_XPU and XPUTestBase not in test_bases:
-       test_bases.append(XPUTestBase)
+        test_bases.append(XPUTestBase)
     # Filter out the device types based on user inputs
     desired_device_type_test_bases = filter_desired_device_types(test_bases, except_for, only_for)
     if include_lazy:
@@ -744,7 +744,8 @@ def get_desired_device_type_test_bases(except_for=None, only_for=None, include_l
 # device-specific tests (NB: this supports additional @parametrize usage).
 #
 # See note "Writing Test Templates"
-def instantiate_device_type_tests(generic_test_class, scope, except_for=None, only_for=None, include_lazy=False, allow_mps=False, allow_xpu=False):
+def instantiate_device_type_tests(generic_test_class, scope, except_for=None, only_for=None, include_lazy=False,
+                                  allow_mps=False, allow_xpu=False):
     # Removes the generic test class from its enclosing scope so its tests
     # are not discoverable.
     del scope[generic_test_class.__name__]
@@ -833,7 +834,7 @@ class OpDTypes(Enum):
     any_one = 4  # Test precisely one supported dtype
     none = 5  # Instantiate no dtype variants (no dtype kwarg needed)
     any_common_cpu_cuda_one = 6  # Test precisely one supported dtype that is common to both cuda and cpu
-    any_common_cpu_xpu_one = 7 # Test precisely one supported dtype that is common to both xpu and cpu
+    any_common_cpu_xpu_one = 7  # Test precisely one supported dtype that is common to both xpu and cpu
 
 
 
@@ -1052,8 +1053,8 @@ class skipCUDAIf(skipIf):
 
 class skipXPUIf(skipIf):
 
-    def __init__(self, dep, reason):                                           
-        super().__init__(dep, reason, device_type='xpu') 
+    def __init__(self, dep, reason):
+        super().__init__(dep, reason, device_type='xpu')
 
 # Skips a test on Lazy if the condition is true.
 class skipLazyIf(skipIf):
@@ -1098,7 +1099,7 @@ def _has_sufficient_memory(device, size):
 
     if device == 'xpu':
         raise unittest.SkipTest('TODO: Memory availability checks for XPU?')
-    
+
     if device == 'xla':
         raise unittest.SkipTest('TODO: Memory availability checks for XLA?')
 

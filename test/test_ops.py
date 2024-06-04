@@ -28,7 +28,9 @@ from torch.testing import make_tensor
 
 from torch.testing._internal import composite_compliance, opinfo
 from torch.testing._internal.common_device_type import (
+    any_common_cpu_device_one,
     deviceCountAtLeast,
+    has_gpu_device,
     instantiate_device_type_tests,
     onlyCPU,
     onlyCUDA,
@@ -45,6 +47,7 @@ from torch.testing._internal.common_dtype import (
     integral_types_and,
 )
 from torch.testing._internal.common_methods_invocations import (
+    apply_op_db_for,
     BinaryUfuncInfo,
     op_db,
     ops_and_refs,
@@ -56,7 +59,6 @@ from torch.testing._internal.common_methods_invocations import (
     SpectralFuncInfo,
     UnaryUfuncInfo,
     xfail,
-    enable_backend_test,
 )
 
 from torch.testing._internal.common_utils import (
@@ -88,9 +90,9 @@ from torch.utils._pytree import tree_map
 
 assert torch.get_default_dtype() == torch.float32
 
-
-enable_backend_test(op_db)
-enable_backend_test(python_ref_db)
+if TEST_XPU:
+    apply_op_db_for(op_db, device="xpu")
+    apply_op_db_for(python_ref_db, device="xpu")
 
 # variant testing is only done with torch.float and torch.cfloat to avoid
 #   excessive test times and maximize signal to noise ratio
@@ -135,11 +137,6 @@ _ops_and_refs_with_no_numpy_ref = [op for op in ops_and_refs if op.ref is None]
 
 aten = torch.ops.aten
 
-def any_common_cpu_device_one():
-    return OpDTypes.any_common_cpu_xpu_one if TEST_XPU else OpDTypes.any_common_cpu_cuda_one
-
-def has_gpu_device(devices: List[str]):
-    return "cuda" in devices or "xpu" in devices
 
 # Tests that apply to all operators and aren't related to any particular
 #   system
@@ -306,7 +303,6 @@ class TestCommon(TestCase):
                 return arg.to(device="cpu")
             return arg
 
- 
         samples = op.reference_inputs(device, dtype)
 
         for sample in samples:
@@ -564,12 +560,16 @@ class TestCommon(TestCase):
     )
     @skipIfTorchInductor("Takes too long for inductor")
     @skipOps(
-        "TestCommon", "test_python_ref_executor", \
-            (('_refs.mul', '', 'xpu', (torch.complex32,), False),), all_opinfos=python_ref_db
+        "TestCommon",
+        "test_python_ref_executor",
+        (("_refs.mul", "", "xpu", (torch.complex32,), False),),
+        all_opinfos=python_ref_db,
     )
     @skipOps(
-        "TestCommon", "test_python_ref_executor", \
-            (('_refs.pow', '', 'xpu', (torch.complex32,), False),), all_opinfos=python_ref_db
+        "TestCommon",
+        "test_python_ref_executor",
+        (("_refs.pow", "", "xpu", (torch.complex32,), False),),
+        all_opinfos=python_ref_db,
     )
     def test_python_ref_executor(self, device, dtype, op, executor):
         if (
@@ -644,8 +644,10 @@ class TestCommon(TestCase):
     )
     @skipIfTorchInductor("Takes too long for inductor")
     @skipOps(
-        "TestCommon", "test_python_ref_errors", \
-            (('_refs.where', '', 'xpu', None, False),), all_opinfos=python_ref_db
+        "TestCommon",
+        "test_python_ref_errors",
+        (("_refs.where", "", "xpu", None, False),),
+        all_opinfos=python_ref_db,
     )
     def test_python_ref_errors(self, device, op):
         mode = FakeTensorMode()
@@ -824,7 +826,11 @@ class TestCommon(TestCase):
             # NOTE: only extracts on the CPU and CUDA device types since some
             #   device types don't have storage
             def _extract_data_ptrs(out):
-                if self.device_type != "cpu" and self.device_type != "cuda" and self.device_type != "xpu":
+                if (
+                    self.device_type != "cpu"
+                    and self.device_type != "cuda"
+                    and self.device_type != "xpu"
+                ):
                     return ()
 
                 if isinstance(out, torch.Tensor):
@@ -952,7 +958,11 @@ class TestCommon(TestCase):
             # NOTE: only extracts on the CPU and CUDA device types since some
             #   device types don't have storage
             def _extract_data_ptrs(out):
-                if self.device_type != "cpu" and self.device_type != "cuda" and self.device_type != "xpu":
+                if (
+                    self.device_type != "cpu"
+                    and self.device_type != "cuda"
+                    and self.device_type != "xpu"
+                ):
                     return ()
 
                 if isinstance(out, torch.Tensor):
@@ -1029,7 +1039,7 @@ class TestCommon(TestCase):
                 wrong_device = "cpu"
             elif torch.cuda.is_available():
                 wrong_device = "cuda"
-            
+
             factory_fn_msg = (
                 "\n\nNOTE: If your op is a factory function (i.e., it accepts TensorOptions) you should mark its "
                 "OpInfo with `is_factory_function=True`."
@@ -1416,16 +1426,22 @@ class TestCommon(TestCase):
     @onlyNativeDeviceTypes
     @ops(ops_and_refs, dtypes=OpDTypes.none)
     @skipOps(
-        "TestCommon", "test_dtypes", \
-            (('div', 'floor_rounding', 'xpu', None, False),), all_opinfos=ops_and_refs
+        "TestCommon",
+        "test_dtypes",
+        (("div", "floor_rounding", "xpu", None, False),),
+        all_opinfos=ops_and_refs,
     )
     @skipOps(
-        "TestCommon", "test_dtypes", \
-            (('div', 'no_rounding_mode', 'xpu', None, False),), all_opinfos=ops_and_refs
+        "TestCommon",
+        "test_dtypes",
+        (("div", "no_rounding_mode", "xpu", None, False),),
+        all_opinfos=ops_and_refs,
     )
     @skipOps(
-        "TestCommon", "test_dtypes", \
-            (('div', 'trunc_rounding', 'xpu', None, False),), all_opinfos=ops_and_refs
+        "TestCommon",
+        "test_dtypes",
+        (("div", "trunc_rounding", "xpu", None, False),),
+        all_opinfos=ops_and_refs,
     )
     def test_dtypes(self, device, op):
         # Check complex32 support only if the op claims.
@@ -1697,7 +1713,7 @@ class TestCompositeCompliance(TestCase):
             composite_compliance.check_forward_ad_formula(
                 op.get_op(), args, kwargs, op.gradcheck_wrapper, self.assertEqual
             )
-         
+
     @skipXPU
     @ops(op_db, allowed_dtypes=(torch.float,))
     def test_cow_input(self, device, dtype, op):
@@ -2700,7 +2716,6 @@ class TestFakeTensor(TestCase):
             kwargs["layout"] = torch.strided
             strided_result = op(sample.input, *sample.args, **kwargs)
             self.assertEqual(strided_result.layout, torch.strided)
-
 
 
 instantiate_device_type_tests(TestCommon, globals(), allow_xpu=True)

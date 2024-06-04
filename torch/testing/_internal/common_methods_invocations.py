@@ -24118,11 +24118,12 @@ def apply_op_db_for(op_db_list: List[OpInfo], device='xpu'):
     if TEST_XPU and device == 'xpu':
         # Get the supported op and dtypes from yaml file.
         backend_op_dict = get_backend_op_dict()
-        supported_op_list = [list(op_dict.keys())[0] if type(op_dict) is dict else op_dict for op_dict in backend_op_dict['supported']]
+        supported_op_list = [next(iter(op_dict.keys())) if type(op_dict) is dict else op_dict
+                             for op_dict in backend_op_dict['supported']]
 
         for op in op_db_list:
             # For refs ops get the name of the related torch_opinfo.
-            torch_opinfo = getattr(op, "torch_opinfo") if hasattr(op, "torch_opinfo") else None
+            torch_opinfo = op.torch_opinfo if hasattr(op, "torch_opinfo") else None
             name = torch_opinfo.name if torch_opinfo is not None else op.name
             if name not in supported_op_list:
                 # If the op is not supported add unittest.skip decorators.
@@ -24135,24 +24136,30 @@ def apply_op_db_for(op_db_list: List[OpInfo], device='xpu'):
             else:
                 ind = supported_op_list.index(name)
 
-                if type(backend_op_dict['supported'][ind]) is dict and backend_op_dict['supported'][ind][name] != None:
+                if type(backend_op_dict['supported'][ind]) is dict and backend_op_dict['supported'][ind][name] is not None:
                     # If the op is supported check whether the supported dtypes is different with cuda
                     for _key in backend_op_dict['supported'][ind][name]:
                         # Get the dtypes with difference
-                        _dtypes = [getattr(torch, _dtype) if hasattr(torch, _dtype) else None for _dtype in backend_op_dict['supported'][ind][name][_key]]
+                        _dtypes = [getattr(torch, _dtype) if hasattr(torch, _dtype) else None
+                                   for _dtype in backend_op_dict['supported'][ind][name][_key]]
                         if _key == "unsupported":
-                                op.dtypesIfXPU = set(filter(lambda x: (x not in _dtypes), op.dtypesIfXPU)) \
-                                    if type(op.dtypesIfXPU) is set else _dispatch_dtypes(filter(lambda x: (x not in _dtypes), op.dtypesIfXPU))
-                        if _key ==  "unsupported_backward":
-                                op.backward_dtypesIfXPU = set(filter(lambda x: (x not in _dtypes), op.backward_dtypesIfXPU)) \
-                                    if type(op.backward_dtypesIfXPU) is set else _dispatch_dtypes(filter(lambda x: (x not in _dtypes), op.backward_dtypesIfXPU))
-                        if _key ==  "supported":
-                                if type(op.dtypesIfXPU) is set:
-                                    op.dtypesIfXPU.update(_dtypes)
-                                else:
-                                    op.dtypesIfXPU = _dispatch_dtypes((*op.dtypesIfXPU, *_dtypes))
+                            if type(op.dtypesIfXPU) is set:
+                                op.dtypesIfXPU = set(filter(lambda x: (x not in _dtypes), op.dtypesIfXPU))
+                            else:
+                                _dispatch_dtypes(filter(lambda x: (x not in _dtypes), op.dtypesIfXPU))
+                        if _key == "unsupported_backward":
+                            if type(op.backward_dtypesIfXPU) is set:
+                                op.backward_dtypesIfXPU = set(filter(lambda x: (x not in _dtypes), op.backward_dtypesIfXPU))
+                            else:
+                                op.backward_dtypesIfXPU = _dispatch_dtypes(filter(lambda x: (x not in _dtypes),
+                                                                                  op.backward_dtypesIfXPU))
+                        if _key == "supported":
+                            if type(op.dtypesIfXPU) is set:
+                                op.dtypesIfXPU.update(_dtypes)
+                            else:
+                                op.dtypesIfXPU = _dispatch_dtypes((*op.dtypesIfXPU, *_dtypes))
                         if _key == "supported_backward":
-                                if type(op.backward_dtypesIfXPU) is set:
-                                    op.backward_dtypesIfXPU.update(_dtypes)
-                                else:
-                                    op.backward_dtypesIfXPU = _dispatch_dtypes((*op.backward_dtypesIfXPU, *_dtypes))
+                            if type(op.backward_dtypesIfXPU) is set:
+                                op.backward_dtypesIfXPU.update(_dtypes)
+                            else:
+                                op.backward_dtypesIfXPU = _dispatch_dtypes((*op.backward_dtypesIfXPU, *_dtypes))
