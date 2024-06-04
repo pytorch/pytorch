@@ -46,10 +46,10 @@ from torch.distributed._composable.fsdp._fsdp_init import (
 )
 from torch.distributed.fsdp.wrap import ModuleWrapPolicy
 from torch.distributed._tensor import init_device_mesh
-# from llama_model_toy import ToyTransformer, ModelArgs
-# from llama_model_toy_graph_break import ToyTransformerWithGraphBreak, ModelArgs
+from llama_model_toy import ToyTransformer, ModelArgs
+from llama_model_toy_graph_break import ToyTransformerWithGraphBreak, ModelArgs
 from llama_model import Transformer, ModelArgs
-# from llama_model_graph_break import TransformerWithGraphBreak, ModelArgs
+from llama_model_graph_break import TransformerWithGraphBreak, ModelArgs
 
 # from torchviz import make_dot
 
@@ -277,15 +277,16 @@ def checkpoint_wrapper(module, config):
         )
 
 
-test_case = "toy_transformer"  # "simple_mlp" / "simple_seq_module" / "nested_fully_shard" / "toy_transformer"
+test_case = "toy_transformer_graph_break"  # "simple_mlp" / "simple_seq_module" / "nested_fully_shard" / "nested_fully_shard_graph_break" / "toy_transformer" / "toy_transformer_graph_break"
 balanced = True
 mixed_precision = False  # TODO(yf225): when True, fails accuracy test, needs debugging
 apply_fsdp = True
 enable_1st_eager_run = True
+allow_graph_break = "graph_break" in test_case
 
 def create_input(hidden_dim):
     torch.manual_seed(0)
-    if test_case == "toy_transformer":
+    if "toy_transformer" in test_case:
         inp = torch.zeros((2, hidden_dim), device=device_type, requires_grad=False, dtype=torch.long)
     else:
         inp = torch.randn((2, hidden_dim), device=device_type, requires_grad=False)
@@ -358,7 +359,9 @@ def init(activation_checkpoint):
             for mod in model:
                 fully_shard(mod, mesh=mesh, reshard_after_forward=True, **fsdp_config)
             fully_shard(model, mesh=mesh, reshard_after_forward=True, **fsdp_config)
-    elif test_case == "nested_fully_shard":
+    elif test_case == "nested_fully_shard" or test_case == "nested_fully_shard_graph_break":
+        # if test_case == "nested_fully_shard_graph_break":
+        #     assert allow_graph_break
         class TestSubmodule(nn.Module):
             def __init__(self, hidden_dim):
                 super().__init__()
@@ -366,6 +369,9 @@ def init(activation_checkpoint):
 
             def forward(self, x):
                 ret = torch.matmul(x, self.param)
+                if allow_graph_break:
+                    print(ret)
+                ret = torch.relu(ret)
                 return ret
 
         class TestModule(nn.Module):
@@ -393,17 +399,20 @@ def init(activation_checkpoint):
         #     for mod in model:
         #         fully_shard(mod, mesh=mesh, reshard_after_forward=True, **fsdp_config)
         #     fully_shard(model, mesh=mesh, reshard_after_forward=True, **fsdp_config)
-    elif test_case == "toy_transformer":
+    elif test_case == "toy_transformer" or test_case == "toy_transformer_graph_break":
         model_args = ModelArgs(
             dim=hidden_dim,
             n_layers=3,
             n_heads=2,
             vocab_size=1024,
         )
-        # transformer_class = ToyTransformer  # makes comm-induced peak memory issue more prominent
-        # transformer_class = ToyTransformerWithGraphBreak
-        transformer_class = Transformer
-        # transformer_class = TransformerWithGraphBreak
+        if test_case == "toy_transformer_graph_break":
+            # assert allow_graph_break
+            # transformer_class = ToyTransformerWithGraphBreak
+            transformer_class = TransformerWithGraphBreak
+        else:
+            # transformer_class = ToyTransformer  # makes comm-induced peak memory issue more prominent
+            transformer_class = Transformer
         model = transformer_class(model_args)
         for layer_id, mod in enumerate(model.layers):
             if activation_checkpoint:
@@ -505,7 +514,7 @@ def run(model, optim, n_iter, hidden_dim, use_compiled_autograd=False):
         inp = create_input(hidden_dim)
         if use_compiled_autograd:
             # compiled_autograd_ctx = compiled_autograd.enable(torch._dynamo.compiled_autograd.compiler_fn(backend="aot_eager", fullgraph=True))
-            compiled_autograd_ctx = compiled_autograd.enable(compiler_fn(backend="aot_eager", fullgraph=True))
+            compiled_autograd_ctx = compiled_autograd.enable(compiler_fn(backend="aot_eager", fullgraph=not allow_graph_break))
         else:
             compiled_autograd_ctx = contextlib.nullcontext()
         with compiled_autograd_ctx:
@@ -539,7 +548,7 @@ def main_compiled(n_iter, activation_checkpoint, backend):
     #     # HACK: delay rank 0 by X seconds, so that rank 1 will always fail first.
     #     import time
     #     time.sleep(600)
-    model_compiled = torch.compile(model, backend=backend, fullgraph=True)
+    model_compiled = torch.compile(model, backend=backend, fullgraph=not allow_graph_break)
     res = run(model_compiled, optim, n_iter, hidden_dim, use_compiled_autograd=True)
     print(f"res: {res}")
     torch._dynamo.reset()

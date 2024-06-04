@@ -277,7 +277,7 @@ def aot_dispatch_autograd_graph(
 
     if torch._dynamo.config.trace_distributed:
         # NOTE: This pass temporarily violates the invariant that "all mutations happen at end of graph"
-        # by moving the primal.set_() ops to the middle of the graph and then encourage using primal as op input.
+        # by moving the primal.set_() ops to the middle of the graph and then encourage using primal as subsequent op input.
         # We do this to discourage alias of primals from being saved as output of FWD graph.
         # (Normally we would expect AOTAutograd to be able to dedup aliases,
         # but AOTAutograd's alias dedup logic cannot support subclass + alias + mutation very well yet).
