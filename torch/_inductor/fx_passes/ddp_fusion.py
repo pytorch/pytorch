@@ -24,7 +24,6 @@ import torch.fx as fx
 from torch._dynamo.utils import counters
 from torch.fx.passes.graph_transform_observer import GraphTransformObserver
 from torch.fx.passes.shape_prop import _extract_tensor_metadata, TensorMetadata
-
 from torch.utils._pytree import tree_flatten, tree_map, tree_unflatten
 
 from .. import config
