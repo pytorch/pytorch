@@ -2361,7 +2361,12 @@ class Scheduler:
         but ideally we should have some heuristics to reorder the loop for node2
         to be compatibile with node1 if that's more efficient.
         """
-        if not config.loop_ordering_after_fusion:
+
+        # TODO Don't do loop reordering for CPU for now.
+        # Should debug more why it does not work for CPU codegen
+        if not config.loop_ordering_after_fusion or any(
+            n.get_device().type == "cpu" for n in [node1, node2]
+        ):
             return False
 
         node1_buffer_names = node1.read_writes.buffer_names()
