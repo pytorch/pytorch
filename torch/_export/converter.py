@@ -55,6 +55,7 @@ kind_to_standard_operators = {
     "aten::__is__": operator.is_,
     "aten::__isnot__": operator.is_not,
     "aten::__not__": operator.not_,
+    "aten::__contains__": operator.contains,
 }
 
 
@@ -362,15 +363,6 @@ class TS2FXGraphConverter:
     def convert_prim_CreateObject(self, node: torch._C.Node):
         output_name = node.output().debugName()
         self.attribute_map[output_name] = ""
-
-    def convert_aten___contains__(self, node: torch._C.Node):
-        inp_list = [inp for inp in node.inputs()]
-        assert len(inp_list) == 2, "aten::__contains__ assumes 2 inputs"
-
-        container, ele = inp_list
-        container = self.get_fx_value(container)
-        ele = self.get_fx_value(ele)
-        self.name_to_node[node.output().debugName()] = ele in container
 
     def convert_aten__convolution(self, node: torch._C.Node):
         # converts aten::_convolution as aten.convolution, since aten::_convolution
