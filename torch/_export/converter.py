@@ -91,7 +91,7 @@ class TS2FXGraphConverter:
 
         self.subgraphs: Dict[str, torch.fx.GraphModule] = {}
 
-        # Populate methods for the stanford operators.
+        # Populate methods for the standard operators.
         for k in kind_to_standard_operators.keys():
             k_list = k.split("::")
             func_name = "convert_" + "_".join(k_list)
