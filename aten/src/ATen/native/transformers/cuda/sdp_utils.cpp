@@ -533,11 +533,12 @@ bool can_use_cudnn_attention(const sdp_params& params, bool debug) {
           check_tensor_shapes,
           check_cudnn_tensor_shapes,
           check_runtime_disabled_cudnn,
-          check_cudnn_hardware_support,
           check_cudnn_deterministic,
           // check_cudnn_layout,
           // check_is_causal,
-          check_dtypes_low_precision);
+          check_dtypes_low_precision,
+          check_cudnn_hardware_support,
+	  );
   for (auto& constraint : general_constraints) {
     if (!constraint(params, debug)) {
       return false;
