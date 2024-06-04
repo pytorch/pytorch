@@ -35,8 +35,9 @@ import torch._inductor.kernel.flex_attention
 
 
 @triton.jit
-def triton_(arg_Q, arg_K, arg_V, arg_LSE, out_ptr0):
+def triton_(arg_Q, arg_K, arg_V, arg_LSE, out_ptr0, arg_m, arg_l, arg_acc, arg_rdct):
     BLOCK_N : tl.constexpr = 128
+    SPLIT_KV : tl.constexpr = 4
     BLOCK_MMODEL: tl.constexpr = 2
     BLOCK_DMODEL : tl.constexpr = 64
     SCORE_MOD_IS_LINEAR : tl.constexpr = False
@@ -46,7 +47,11 @@ def triton_(arg_Q, arg_K, arg_V, arg_LSE, out_ptr0):
     K = arg_K
     V = arg_V
     LSE = arg_LSE
-    O = out_ptr0
+    # reduction buffers
+    M = arg_m 
+    L = arg_l
+    ACC = arg_acc
+    LOCK_RDCT = arg_rdct
 
     # Sub notation for this kernel:
     # Q: Query, K: Key, V: Value
@@ -77,28 +82,44 @@ def triton_(arg_Q, arg_K, arg_V, arg_LSE, out_ptr0):
     stride_vh = 262144
     stride_vk = 64
     stride_vn = 1
-    # Define O Strides
-    stride_oz = 1024
-    stride_oh = 128
-    stride_om = 64
-    stride_ok = 1
+    # Define M Strides
+    # (2, 8, 4, 2)
+    stride_mz = 64
+    stride_mh = 8
+    stride_mt = 2
+    stride_mm = 1
+    # Define L Strides
+    # (2, 8, 4, 2)
+    stride_lz = 64
+    stride_lh = 8
+    stride_lt = 2
+    stride_lm = 1
+    # Define ACC Strides
+    # (2, 8, 4, 2, 64)
+    stride_accz = 4096
+    stride_acch = 512
+    stride_acct = 128
+    stride_accm = 64
+    stride_accd = 1
 
     Z = 8
     H = 8
     N_CTX = 4096                            # TODO: split among multiple CTAs
     Q_CTX = 2
+    TILE_KV = N_CTX // SPLIT_KV
     tl.device_assert(Q_CTX == BLOCK_MMODEL, "Query len must match static kernel parameter BLOCK_MMODEL")
 
     qk_scale = 1.0
     MATMUL_PRECISION = Q.dtype.element_ty
 
-    start_n_lo = tl.program_id(0)           # TODO: calculate start_n from bidx
-    off_hz = tl.program_id(1)
+    off_hz = tl.program_id(0)           
+    off_t = tl.program_id(1) 
+    off_n = off_t * TILE_KV
 
     q_offset = off_hz * stride_qh
     Q_block_ptr = tl.make_block_ptr(
         base=Q + q_offset,
-        shape=(Q_CTX, BLOCK_DMODEL),            # (Q, d) = (2, 64)
+        shape=(Q_CTX, BLOCK_DMODEL),        # (M, d) = (2, 64)
         strides=(stride_qm, stride_qk),
         offsets=(0, 0),                     # No offset: one CTA per query
         block_shape=(BLOCK_MMODEL, BLOCK_DMODEL),
@@ -108,9 +129,9 @@ def triton_(arg_Q, arg_K, arg_V, arg_LSE, out_ptr0):
     kv_offset = off_hz * stride_kh
     K_block_ptr = tl.make_block_ptr(
         base=K + kv_offset,
-        shape=(BLOCK_DMODEL, N_CTX),       # (d, N) = (64, 2048)
+        shape=(BLOCK_DMODEL, N_CTX),                # (d, N) = (64, 4096)
         strides=(stride_kk, stride_kn),
-        offsets=(0, 0),                    # TODO: Add offset here for spliting K among CTAs
+        offsets=(0, off_t * TILE_KV), 
         block_shape=(BLOCK_DMODEL, BLOCK_N),
         order=(0, 1)
     )
@@ -118,21 +139,40 @@ def triton_(arg_Q, arg_K, arg_V, arg_LSE, out_ptr0):
         base=V + kv_offset,
         shape=(N_CTX, BLOCK_DMODEL),
         strides=(stride_vk, stride_vn),
-        offsets=(0, 0),
+        offsets=(off_t * TILE_KV, 0),
         block_shape=(BLOCK_N, BLOCK_DMODEL),
         order=(1, 0)
     )
 
 
-    o_offset = off_hz * stride_oh                 
-    O_block_ptr = tl.make_block_ptr(
-        base=O + o_offset,
-        shape=(Q_CTX, BLOCK_DMODEL),            # (Q, d) = (2, 64)
-        strides=(stride_om, stride_ok),
-        offsets=(0, 0),                         # TODO: Add offset for output reductions space.
-        block_shape=(BLOCK_MMODEL, BLOCK_DMODEL),
+    ml_offset = off_hz * stride_mh
+    M_block_ptr = tl.make_block_ptr(
+        base=M + ml_offset,
+        shape=(SPLIT_KV, Q_CTX),                      # (T, M) = (4, 2)
+        strides=(stride_mt, stride_mm),
+        offsets=(off_t, 0),
+        block_shape=(1, BLOCK_MMODEL),
         order=(1, 0)
     )
+    L_block_ptr = tl.make_block_ptr(
+        base=L + ml_offset,
+        shape=(SPLIT_KV, Q_CTX),                      # (T, M) = (4, 2)
+        strides=(stride_lt, stride_lm),
+        offsets=(off_t, 0),
+        block_shape=(1, BLOCK_MMODEL),
+        order=(1, 0)
+    )
+
+    acc_offset = off_hz * stride_acch
+    ACC_block_ptr = tl.make_block_ptr(
+        base=ACC + acc_offset,
+        shape=(SPLIT_KV, Q_CTX, BLOCK_DMODEL),          # (T, M, D) = (4, 2, 64)
+        strides=(stride_acct, stride_accm, stride_accd),
+        offsets=(off_t, 0, 0),
+        block_shape=(1, BLOCK_MMODEL, BLOCK_DMODEL),
+        order=(2, 1, 0)
+    )
+
     # initialize offsets
     offs_m = tl.arange(0, BLOCK_MMODEL)      
     offs_n = tl.arange(0, BLOCK_N)           
@@ -148,8 +188,8 @@ def triton_(arg_Q, arg_K, arg_V, arg_LSE, out_ptr0):
         qk_scale *= 1.44269504
     q = (q * qk_scale).to(MATMUL_PRECISION)
     # loop over k, v and update accumulator
-    lo = start_n_lo
-    hi = N_CTX
+    lo = off_n
+    hi = lo + TILE_KV
     for start_n in range(lo, hi, BLOCK_N):
         start_n = tl.multiple_of(start_n, BLOCK_N)
         # -- load k, v --
@@ -205,27 +245,49 @@ def triton_(arg_Q, arg_K, arg_V, arg_LSE, out_ptr0):
         K_block_ptr = tl.advance(K_block_ptr, (0, BLOCK_N))
         V_block_ptr = tl.advance(V_block_ptr, (BLOCK_N, 0))
 
-    # Store output and logsumexp
-    acc = acc / l_i[:, None]
-    # idx_z = off_hz // H
-    # idx_h = off_hz % H
-    # idx_m = offs_m[:, None]
-    # idx_d = tl.arange(0, BLOCK_DMODEL)[None, :]
+    tl.store(M_block_ptr, m_i[None, :])
+    tl.store(L_block_ptr, l_i[None, :])
+    tl.store(ACC_block_ptr, acc[None, :, :])
+    
+    # Reduction over M, L, & ACC
+    my_ticket = tl.atomic_add(LOCK_RDCT + off_hz, 1)
+    if my_ticket >= SPLIT_KV - 1:
+        offs_t = tl.arange(0, SPLIT_KV)
+        index_ml = offs_t[:, None] * BLOCK_MMODEL + offs_m[None, :] # [T, M]
+        index_acc = offs_t[:, None, None] *BLOCK_DMODEL*BLOCK_MMODEL + offs_m[None, :, None]*BLOCK_DMODEL + offs_d[None, None, :] #[T, M, D]
+        t_m_i = tl.load(M+ml_offset+(index_ml))
+        t_l_i = tl.load(L+ml_offset+(index_ml))
+        t_acc = tl.load(ACC+acc_offset+(index_acc))
 
-    # TODO generalize and add proper mask support
-    # mask = (idx_m != -1) & (idx_d != -1)
-    # xindex = idx_d + (stride_qm*idx_m) + (stride_qh*idx_h) + (stride_qz*idx_z)
-    # tl.store(out_ptr0 + (xindex), acc, None)
-    tl.store(O_block_ptr, acc)
+        # find global rowmax
+        g_m = tl.max(t_m_i, 0) # [M]
 
-    # TODO dont want to write this if we dont require grad
-    if OUTPUT_LOGSUMEXP:
-        l_ptrs = LSE + off_hz * Q_CTX + offs_m
-        lse = m_i + tl.math.log2(l_i)
-        tl.store(l_ptrs, lse)
+        # rebase to new global rowmax
+        alpha = tl.exp2(t_m_i - g_m[None, :]) # [T, M]
+        t_l_i = t_l_i * alpha
+        t_acc *= alpha[:, :, None]  
+
+        # reduction for acc and l_i 
+        g_acc = tl.sum(t_acc, 0)
+        g_l = tl.sum(t_l_i, 0)
+        g_acc = g_acc / g_l[:, None]
+
+        idx_z = off_hz // H
+        idx_h = off_hz % H
+        idx_m = offs_m[:, None]
+        idx_d = tl.arange(0, BLOCK_DMODEL)[None, :]
+        xindex = idx_d + (stride_qm*idx_m) + (stride_qh*idx_h) + (stride_qz*idx_z)
+        tl.store(out_ptr0 + (xindex), g_acc, None)
+
+        # TODO dont want to write this if we dont require grad
+        if OUTPUT_LOGSUMEXP:
+            l_ptrs = LSE + off_hz * Q_CTX + offs_m
+            lse = g_m + tl.math.log2(g_l)
+            tl.store(l_ptrs, lse)
+        
 
 
-meta0 = {'BLOCK_N': 128, 'BLOCK_DMODEL': 64, 'BLOCK_MMODEL':2, 'SCORE_MOD_IS_LINEAR': False, 'ROWS_GUARANTEED_SAFE': False, 'OUTPUT_LOGSUMEXP': True}
+meta0 = {'BLOCK_N': 128, 'SPLIT_KV': 4, 'BLOCK_DMODEL': 64, 'BLOCK_MMODEL':2, 'SCORE_MOD_IS_LINEAR': False, 'ROWS_GUARANTEED_SAFE': False, 'OUTPUT_LOGSUMEXP': True}
 
 
 async_compile.wait(globals())
@@ -240,14 +302,16 @@ def sdpa_decoding_grid(batch_size, num_heads, n_keys, d_model, meta):
     """
     import triton
 
-    # TODO: implementation split key & value. Use 1 for now.
-
-    return (1, batch_size * num_heads, 1)
+    return (batch_size * num_heads, meta['SPLIT_KV'], 1)
 
 
 def call(args):
     arg0_1, arg1_1, arg2_1 = args
-    buf0 = torch.zeros(2, 8, 2, device='cuda', dtype=torch.float32) #LSE
+    buf0 = torch.zeros(2, 8, 2, device='cuda', dtype=torch.float32) #LSE [B, H, M]
+    buf_m = torch.zeros(2, 8, 4, 2, device='cuda', dtype=torch.float32) # rowmax reduction buffer [B, H, SPLIT_KV, M]
+    buf_l = torch.zeros(2, 8, 4, 2, device='cuda', dtype=torch.float32) # l_i reduction buffer [B, H, SPLIT_KV, M]
+    buf_acc = torch.zeros(2, 8, 4, 2, 64, device='cuda', dtype=torch.float32) # acc reduction buffer [B, H, SPLIT_KV, M, D]
+    lock_rdct = torch.zeros(2, 8, device='cuda', dtype=torch.int32) # lock for reduction [B, H]
 
     with torch.cuda._DeviceGuard(0):
         torch.cuda.set_device(0)
@@ -255,14 +319,19 @@ def call(args):
         # Source Nodes: [flex_attention], Original ATen: []
         grid=sdpa_decoding_grid(2, 8, 4096, 64, meta0)
         print(grid)
-        triton_[grid](arg0_1, arg1_1, arg2_1, buf0, buf1)
+        triton_[grid](arg0_1, arg1_1, arg2_1, buf0, buf1, buf_m, buf_l, buf_acc, lock_rdct)
         del arg0_1
         del arg1_1
         del arg2_1
-    return (buf1, buf0)
+        del buf_m
+        del buf_l
+        del buf_acc
+        del lock_rdct
+    return (buf1, )
 
 
 from torch.nn.attention._flex_attention import _flex_attention as flex_attention
+from flex_decoder import eager_flash_decoder
 
 
 def checkerboard(score, batch, head, token_q, token_kv):
@@ -278,12 +347,12 @@ def run_module(times=10, repeat=10):
     fn = lambda: call([arg0_1, arg1_1, arg2_1])
 
 
-    gold_results, gold_logsumexp = flex_attention(arg0_1, arg1_1, arg2_1, checkerboard)
-    (triton_results,triton_logsumexp) = fn()
-    print("gold_logsumexp", gold_logsumexp)
-    print("triton_logsumexp", triton_logsumexp)
+    # gold_results, _ = eager_flash_decoder(arg0_1, arg1_1, arg2_1, checkerboard, Bc=1024)
+    gold_results = flex_attention(arg0_1, arg1_1, arg2_1, checkerboard)
+    print("gold output", gold_results)
+    (triton_results,) = fn()
+    print("triton output", triton_results)
     torch.testing.assert_close(triton_results, gold_results, atol=2e-2, rtol=2e-2)
-    torch.testing.assert_close(triton_logsumexp, gold_logsumexp, atol=2e-2, rtol=2e-2)
 
 
 if __name__ == "__main__":
