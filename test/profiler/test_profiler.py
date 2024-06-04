@@ -1048,11 +1048,7 @@ class TestProfiler(TestCase):
         self.assertEqual(KinetoStepTracker.current_step(), initial_step + 2 * niters)
 
     def test_export_stacks(self):
-        with _profile(
-            with_stack=True,
-            use_kineto=kineto_available(),
-            experimental_config=_ExperimentalConfig(verbose=True),
-        ) as p:
+        with _profile(with_stack=True, use_kineto=kineto_available()) as p:
             x = torch.randn(10, 10)
             y = torch.randn(10, 10)
             z = torch.mm(x, y)

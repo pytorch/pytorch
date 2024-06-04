@@ -428,8 +428,9 @@ struct KinetoThreadLocalState : public ProfilerStateBase {
             [this](ExtraFields<EventType::TorchOp>& i) { invokeCallback(i); },
             [this](ExtraFields<EventType::Backend>& i) { invokeCallback(i); },
             [](auto&) {}));
-
-        kineto_events_.emplace_back(e, config_.experimental_config.verbose);
+        bool enable_python_stack =
+            config_.experimental_config.verbose || config_.with_stack;
+        kineto_events_.emplace_back(e, enable_python_stack);
         AddTensorboardFields add_tb(e, kineto_events_.back());
         AddGenericMetadata add_generic(e, &config_);
 
