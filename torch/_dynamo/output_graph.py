@@ -494,10 +494,7 @@ class OutputGraph:
         cg.foreach(map(variables.ConstantVariable.create, args))
         cg.call_function(len(args), True)
         cg.store(varname)
-        insts = cg.get_instructions()
-        # for inst in insts:
-        #     torch_log.warning(f"inst: {inst}")
-        self.pregraph_bytecode.extend(insts)
+        self.pregraph_bytecode.extend(cg.get_instructions())
         source = SyntheticLocalSource(varname)
         result = VariableBuilder(self.root_tx, source)(example_value)
         TracingContext.get().guards_context.dynamo_guards.remove_guards_with_source(
