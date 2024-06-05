@@ -426,6 +426,7 @@ class TestOperators(TestCase):
                 xfail("_softmax_backward_data", device_type="cpu"),
                 xfail("as_strided"),
                 xfail("as_strided", "partial_views"),
+                xfail("as_strided_copy"),
                 # RuntimeError: !self.requires_grad() || self.is_contiguous()
                 xfail("as_strided_scatter"),
                 # RuntimeError: Tensor must have a last dimension with stride 1
@@ -576,6 +577,7 @@ class TestOperators(TestCase):
                 # AssertionError: Tensor-likes are not close!
                 xfail("as_strided"),
                 xfail("as_strided", "partial_views"),
+                xfail("as_strided_copy"),
                 xfail("as_strided_scatter"),
                 decorate(
                     "linalg.det",
@@ -735,6 +737,7 @@ class TestOperators(TestCase):
                 # BUG
                 # AssertionError: Tensor-likes are not close!
                 xfail("as_strided"),
+                xfail("as_strided_copy"),
                 xfail("as_strided_scatter"),
                 xfail("_softmax_backward_data", device_type="cpu"),
                 xfail("as_strided", "partial_views"),
@@ -1187,8 +1190,8 @@ class TestOperators(TestCase):
         vmapvjp_fail.union(
             {
                 xfail("as_strided"),
-                xfail("as_strided_copy"),
                 xfail("as_strided", "partial_views"),
+                xfail("as_strided_copy"),
             }
         ),
     )
@@ -1891,6 +1894,7 @@ class TestOperators(TestCase):
                 xfail(
                     "as_strided", "partial_views"
                 ),  # AssertionError: Tensor-likes are not close!
+                xfail("as_strided_copy"),
                 xfail(
                     "as_strided_scatter"
                 ),  # AssertionError: Tensor-likes are not close!
