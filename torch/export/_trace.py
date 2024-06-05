@@ -2,7 +2,6 @@ import dataclasses
 import functools
 import inspect
 import logging
-import os
 import re
 import time
 import warnings
@@ -553,10 +552,6 @@ def _export_to_aten_ir(
     pre_dispatch=False,
     _is_torch_jit_trace=False,
 ):
-    # set this to False if env variable is specified
-    if os.environ.get("TORCH_DYNAMO_DO_NOT_EMIT_RUNTIME_ASSERTS", "0") == "1":
-        should_insert_runtime_assertion = False
-
     # [NOTE] If the user is exporting under training mode, we want to detect if there is any
     # state change in the autograd global state and error. If the user is exporting under inference
     # mode, we don't care. At predispatch level, we don't care about the state change.
@@ -676,19 +671,22 @@ def _export_to_aten_ir(
 
     fake_mode = detect_fake_mode(flat_args)
 
-    stack_trace = (
-        'File "torch/fx/passes/runtime_assert.py", line 24, '
-        "in insert_deferred_runtime_asserts"
-    )
-    with _set_node_metadata_hook(
-        gm, functools.partial(_node_metadata_hook, stack_trace=stack_trace)
-    ):
-        insert_deferred_runtime_asserts(
-            gm,
-            fake_mode.shape_env,
-            f"exported program: {first_call_function_nn_module_stack(gm.graph)}",
-            export=True,
+    from torch._dynamo import config as _dynamo_config
+
+    if not _dynamo_config.do_not_emit_runtime_asserts:
+        stack_trace = (
+            'File "torch/fx/passes/runtime_assert.py", line 24, '
+            "in insert_deferred_runtime_asserts"
         )
+        with _set_node_metadata_hook(
+            gm, functools.partial(_node_metadata_hook, stack_trace=stack_trace)
+        ):
+            insert_deferred_runtime_asserts(
+                gm,
+                fake_mode.shape_env,
+                f"exported program: {first_call_function_nn_module_stack(gm.graph)}",
+                export=True,
+            )
 
     if pre_dispatch:
         from torch._export.passes.replace_set_grad_with_hop_pass import (

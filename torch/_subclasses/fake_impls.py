@@ -903,7 +903,7 @@ def meta__efficient_attention_forward(fake_mode, func, *args, **kwargs):
     max_seqlen_q = kwargs["max_seqlen_q"]
     max_seqlen_k = kwargs["max_seqlen_k"]
     compute_log_sumexp = kwargs["compute_log_sumexp"]
-    # unused: bias, cu_seqlens_k, dropout_p, custom_mask_type, scale, causal_diagonal, seqlen_k
+    # unused: bias, cu_seqlens_k, dropout_p, custom_mask_type, scale, seqlen_k
 
     def convert_tensor(t, device):
         return FakeTensor(fake_mode, t, device)
