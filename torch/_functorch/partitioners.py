@@ -28,7 +28,7 @@ from torch.fx.experimental.symbolic_shapes import (
 from torch.fx.passes import graph_drawer
 from . import config
 from .compile_utils import fx_graph_cse, get_aten_target
-from ._aot_autograd.passes import dist_fx_passes
+from ._aot_autograd import dist_fx_passes
 
 
 AOT_PARTITIONER_DEBUG = config.debug_partitioner
@@ -1206,13 +1206,6 @@ def get_default_op_list() -> OpTypes:
         aten.expand,
         aten.as_strided,
         aten.permute,
-        aten.select,
-        aten.transpose,
-        aten._unsafe_view,
-        aten.expand,
-        aten.slice,
-        aten.reshape,
-        aten.broadcast_tensors,
     ]
     view_ops = recomputable_view_ops
     default_recomputable_ops += [
@@ -1320,7 +1313,6 @@ def choose_saved_values_set(
         node_info,
         min_cut_options,
     )
-
     return runtime_optimized_saved_values
 
 
