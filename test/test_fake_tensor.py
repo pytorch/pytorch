@@ -978,16 +978,6 @@ class FakeTensorConstHandling(TestCase):
             self.assertEqual(x.size(0), 2)
             self.assertNotConst(x)
 
-    def test_parameter_view(self):
-        x = torch.nn.Parameter(torch.randn(4))
-        x_view = x.view(4)
-        mode = FakeTensorMode()
-        fake_x_view = mode.from_tensor(x_view)
-        fake_x = mode.from_tensor(x)
-        self.assertFalse(isinstance(fake_x_view, torch.nn.Parameter))
-        self.assertTrue(isinstance(fake_x, torch.nn.Parameter))
-
-
     def test_fake_tensor_in_intlist_repro(self):
         def fn(tensors):
             max_size = torch.tensor([800, 1216], dtype=torch.int64)

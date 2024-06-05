@@ -929,22 +929,7 @@ class GraphLowering(torch.fx.Interpreter):
             # which run through implicit fallback must constrain their
             # arguments' fx strides
             layout_constraint = None
-
-            def needs_fixed_stride_order(target):
-                if (
-                    torch._C.Tag.needs_fixed_stride_order in target.tags
-                    and torch._C.Tag.does_not_need_fixed_stride_order in target.tags
-                ):
-                    # If both tags were specified, pessimistically assume that we do need it.
-                    return True
-                if torch._library.utils.is_builtin(target):
-                    return torch._C.Tag.needs_fixed_stride_order in target.tags
-                else:
-                    return (
-                        torch._C.Tag.does_not_need_fixed_stride_order not in target.tags
-                    )
-
-            if needs_fixed_stride_order(target):
+            if torch._C.Tag.needs_fixed_stride_order in target.tags:
                 # We have to set the current args because call_function will immediately
                 # evaluate this lowering after creating the fallback, without evaluating
                 # the layout constraint
@@ -1681,15 +1666,32 @@ class GraphLowering(torch.fx.Interpreter):
             node_runtimes.append((node, node.get_estimated_runtime()))
         return total_bytes, node_counts, node_runtimes
 
-    @dynamo_timed(phase_name="code_gen")
+    @dynamo_timed(phase_name="code_gen", fwd_only=False)
     def compile_to_module(self):
         from .codecache import PyCodeCache
 
         code, linemap = (
             self.codegen_with_cpp_wrapper() if self.cpp_wrapper else self.codegen()
         )
-        linemap = [(line_no, node.stack_trace) for line_no, node in linemap]
-        key, path = PyCodeCache.write(code)
+
+        output_code_log.debug("Output code: \n%s", code)
+        try:
+            linemap = [(line_no, node.stack_trace) for line_no, node in linemap]
+            key, path = PyCodeCache.write(code)
+        except Exception:
+            trace_structured(
+                "inductor_output_code",
+                # Just omit the filename, I still want the code though!
+                payload_fn=lambda: code,
+            )
+            raise
+        else:
+            trace_structured(
+                "inductor_output_code",
+                lambda: {"filename": path},
+                payload_fn=lambda: code,
+            )
+
         mod = PyCodeCache.load_by_key_path(
             key,
             path,
@@ -1706,12 +1708,6 @@ class GraphLowering(torch.fx.Interpreter):
 
         log_module_code(mod.__file__)
         log.debug("Output code written to: %s", mod.__file__)
-        output_code_log.debug("Output code: \n%s", code)
-        trace_structured(
-            "inductor_output_code",
-            lambda: {"filename": mod.__file__},
-            payload_fn=lambda: code,
-        )
         output_code_log.info("Output code written to: %s", mod.__file__)
         if config.benchmark_kernel:
             print(f"Compiled module path: {mod.__file__}", file=sys.stderr)
