@@ -125,7 +125,7 @@ class TritonBlockPointerTest(InductorTestCase):
             ),  # Multiple of max_block
         ],
     )
-    def test_strided_block_ptr(
+    def test_pointwise(
         self,
         full_size: Tuple[int],
         view_size: Tuple[int],
@@ -134,7 +134,7 @@ class TritonBlockPointerTest(InductorTestCase):
         require_block_ptr: bool,
     ):
         """
-        Test generating strided ND block pointers.
+        Test generating strided ND block pointers for a pointwise kernel.
 
         If require_block_ptr is True, the generated code must contain block
         pointers. However, ND block pointers are not supported for all shapes. So
@@ -185,20 +185,79 @@ class TritonBlockPointerTest(InductorTestCase):
         # Broadcast is not yet supported, so we only expect 2 block pointers: one input, and output
         self.run_and_compare(foo, x, y, expected_num_block_pointers=2)
 
-    def test_reduction(self):
+    @parametrize(
+        "view_size,num_block_pointers,num_triton_kernels",
+        [
+            ((4, 4), 1, 1),
+            ((4, 4, 4), 1, 1),
+            ((8, 8, 8), 1, 1),
+            ((15, 15), 0, 1),  # Non-power of 2
+            ((3 * max_block, 2), 2, 2),  # Multiple of max block. Has unsupported loop.
+            (
+                (2, 3 * max_block),
+                3,
+                2,
+            ),  # Multiple of max block. Loop maps to block pointer.
+            ((128, 128), None, None),
+        ],
+    )
+    def test_reduction(
+        self, view_size: Tuple[int], num_block_pointers: int, num_triton_kernels: int
+    ):
         """
         Tests a reduction kernel.
         """
 
         device = torch.device(GPU_TYPE)
-        full_size = (15, 15)
-        view_size = (8, 8)
+        full_size = tuple(2 * dim for dim in view_size)
         full = torch.randn(full_size).to(device)
         view = torch.as_strided(full, view_size, full.stride())
 
         # Expect 1 block pointer: input
         result, (code,) = self.run_and_compare(
-            torch.sum, view, expected_num_block_pointers=1
+            torch.sum,
+            view,
+            expected_num_block_pointers=num_block_pointers,
+            expected_num_triton_kernels=num_triton_kernels,
+        )
+
+    @parametrize(
+        "view_size,num_block_pointers,num_triton_kernels",
+        [
+            ((8, 8), 2, 1),  # No loops. Should be supported.
+            (
+                (128, 128),
+                None,
+                None,
+            ),  # Looped reduction. Block pointers not yet supported.
+        ],
+    )
+    def test_mixed_pointwise_reduction(
+        self, view_size: Tuple[int], num_block_pointers: int, num_triton_kernels: int
+    ):
+        """
+        Tests mixing pointwise with reduction ops.
+        """
+
+        def foo(x, y):
+            return torch.sum(x + y)
+
+        device = torch.device(GPU_TYPE)
+        full_size = tuple(2 * dim for dim in view_size)
+
+        def get_input() -> torch.Tensor:
+            full = torch.randn(full_size).to(device)
+            view = torch.as_strided(full, view_size, full.stride())
+            return view
+
+        inputs = [get_input() for input_idx in range(2)]
+
+        # Expect 2 block pointers: inputs
+        result, (code,) = self.run_and_compare(
+            foo,
+            *inputs,
+            expected_num_block_pointers=num_block_pointers,
+            expected_num_triton_kernels=num_triton_kernels,
         )
 
     def test_multiple_max_block_non_power_of_2(self):

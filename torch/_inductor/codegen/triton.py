@@ -149,14 +149,17 @@ class BlockPtrOptions:
 
     @staticmethod
     def create(
+        *,
+        shape: List[sympy.Expr],
+        block_shape: List[StrOrExpr],
+        offsets: List[StrOrExpr],
         strides: List[sympy.Expr],
         constant_offset: sympy.Expr,
         range_trees: List[IterationRangesEntry],
         mask_vars: Set[str],
     ) -> BlockPtrOptions:
         """Helper to create a  BlockPtrOptions instance"""
-        block_shape = [f"{t.prefix.upper()}BLOCK" for t in range_trees]
-        reshape_suffix = [*block_shape]
+        reshape_suffix = [f"{t.prefix.upper()}BLOCK" for t in range_trees]
 
         broadcasting_dim = [s == 0 for s in strides]
         for i, is_broadcasting in enumerate(broadcasting_dim):
@@ -187,14 +190,13 @@ class BlockPtrOptions:
 
         return BlockPtrOptions(
             constant_offset=V.graph.sizevars.lookup_precomputed_size(constant_offset),
-            shape=[
-                V.graph.sizevars.lookup_precomputed_size(t.numel)
-                for t in filter(range_trees)
-            ],
+            shape=filter(
+                [V.graph.sizevars.lookup_precomputed_size(dim) for dim in shape]
+            ),
             strides=[*map(V.graph.sizevars.lookup_precomputed_size, filter(strides))],
             block_shape=filter(block_shape),
             order=V.graph.sizevars.guarded_order(filter(strides)),
-            offsets=filter([f"{t.prefix}offset" for t in range_trees]),
+            offsets=filter(offsets),
             mask_vars=mask_vars,
             reshape_suffix=reshape_suffix,
         )
@@ -1173,12 +1175,17 @@ class TritonKernel(SIMDKernel):
                     return None
 
                 self.filter_masks(mask_vars)
-
                 return BlockPtrOptions.create(
-                    [m[s] for s in strides],
-                    m[offset],
-                    range_trees,
-                    mask_vars,  # type: ignore[arg-type]
+                    block_shape=[f"{t.prefix.upper()}BLOCK" for t in range_trees],
+                    shape=[
+                        V.graph.sizevars.lookup_precomputed_size(t.numel)
+                        for t in range_trees
+                    ],
+                    offsets=[f"{t.prefix}offset" for t in range_trees],
+                    strides=[m[s] for s in strides],
+                    constant_offset=m[offset],
+                    range_trees=range_trees,
+                    mask_vars=mask_vars,
                 )
 
             def match_mod_div_block() -> Union[BlockPtrOptions, None]:
@@ -1293,27 +1300,16 @@ class TritonKernel(SIMDKernel):
                     for var_name in dims
                 ]
 
-                # Compute the reshape suffix, adding singleton dimensions if necessary.
-                reshape_suffix = [
-                    str(linear_block_size) if prefix == tree.prefix else "1"
-                    for tree in range_trees
-                ]
-
                 # Form the block pointer.
-                matched_strides = [
-                    sizevars.lookup_precomputed_size(match[stride])
-                    for stride in strides
-                ]
-                matched_offset = sizevars.lookup_precomputed_size(match[offset])
-                return BlockPtrOptions(
-                    constant_offset=matched_offset,
+                self.filter_masks(mask_vars)
+                return BlockPtrOptions.create(
                     shape=dim_values,
-                    strides=matched_strides,
                     block_shape=block_shape,
-                    order=list(range(num_dims)),
                     offsets=block_offsets,
+                    strides=[match[stride] for stride in strides],
+                    constant_offset=match[offset],
+                    range_trees=range_trees,
                     mask_vars=mask_vars,
-                    reshape_suffix=reshape_suffix,
                 )
 
             # Try various pattern matches for block pointers
