@@ -1986,7 +1986,7 @@ class CppKernel(Kernel):
                     code.writelines(loop_lines)
                     stack.enter_context(code.indent())
                     # generate inner loops or loop body
-                    if loop.parallel:
+                    if loop.parallel == 1 or (loop.parallel == 0 and loop.collapsed):
                         stack.enter_context(code.catch_inside_parallel())
                     if loop.inner:
                         gen_loops(loop.inner, loop.is_reduction)
