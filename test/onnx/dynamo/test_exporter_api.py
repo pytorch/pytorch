@@ -290,9 +290,11 @@ class TestONNXExportWithDynamo(common_utils.TestCase):
         )
 
     def test_raises_unrelated_parameters_warning(self):
-        message = "f, export_params, verbose, training, input_names, output_names, operator_export_type, opset_version, \
-            do_constant_folding, keep_initializers_as_inputs, custom_opsets, export_modules_as_functions, and \
-            autograd_inlining are not supported for dynamo export at the moment."
+        message = (
+            "f, export_params, verbose, training, input_names, output_names, operator_export_type, opset_version, "
+            "do_constant_folding, keep_initializers_as_inputs, custom_opsets, export_modules_as_functions, and "
+            "autograd_inlining are not supported for dynamo export at the moment."
+        )
 
         with self.assertWarnsOnceRegex(UserWarning, message):
             _ = torch.onnx.export(

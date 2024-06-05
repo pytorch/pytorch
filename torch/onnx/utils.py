@@ -186,7 +186,6 @@ def exporter_context(model, mode: _C_onnx.TrainingMode, verbose: bool):
         yield (mode_ctx, apex_ctx, log_ctx, diagnostic_ctx)
 
 
-@_beartype.beartype
 def export(
     model: Union[torch.nn.Module, torch.jit.ScriptModule, torch.jit.ScriptFunction],
     args: Union[Tuple[Any, ...], torch.Tensor],
@@ -515,9 +514,9 @@ def export(
         # Unsupported parameters for dynamo export
         # TODO: These are not supported AT THE TIME
         warnings.warn(
-            "f, export_params, verbose, training, input_names, output_names, operator_export_type, opset_version, \
-            do_constant_folding, keep_initializers_as_inputs, custom_opsets, export_modules_as_functions, and \
-            autograd_inlining are not supported for dynamo export at the moment."
+            "f, export_params, verbose, training, input_names, output_names, operator_export_type, opset_version, "
+            "do_constant_folding, keep_initializers_as_inputs, custom_opsets, export_modules_as_functions, and "
+            "autograd_inlining are not supported for dynamo export at the moment."
         )
         # TODO: check args normalization
         args = _decide_input_format(model, args)
@@ -536,11 +535,18 @@ def export(
             )
         # TODO: expose more ExportOptions?
         export_options = torch.onnx.ExportOptions(dynamic_shapes=dynamic_shapes)
-        return torch.onnx.dynamo_export(
+        onnx_program = torch.onnx.dynamo_export(
             model, *args, **kwargs, export_options=export_options
         )
+        if f is not None:
+            onnx_program.save(f)
+        return onnx_program
 
-    assert f is not None, "Exporting to a file is required for non-dynamo exporting."
+    if f is None:
+        raise ValueError(
+            "Export destination must be specified for torchscript-onnx export."
+        )
+
     _export(
         model,
         args,
