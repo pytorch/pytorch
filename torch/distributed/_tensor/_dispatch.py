@@ -5,6 +5,9 @@ import operator
 import warnings
 from typing import cast, Dict, List, Optional, Sequence, Tuple, TYPE_CHECKING
 
+import logging
+torch_log = logging.getLogger("torch")
+
 import torch
 
 import torch.distributed as dist
@@ -112,6 +115,7 @@ class OpDispatcher:
             return self._custom_op_handlers[op_call](op_call, args, kwargs)  # type: ignore[operator]
 
         # extract local tensor and sharding infos to a OpInfo
+        # torch_log.warning(f"args: {args}")
         op_info = self.unwrap_to_op_info(op_call, args, kwargs)
 
         self.sharding_propagator.propagate(op_info)
@@ -180,6 +184,8 @@ class OpDispatcher:
                 if op_info.args_tree_spec
                 else op_info.local_args
             )
+            from torch._functorch._aot_autograd.functional_utils import is_fun
+            local_tensor_args = tuple(x.from_functional() if is_fun(x) else x for x in local_tensor_args)
 
             # run local op computation with potentially modified args/kwargs
             local_tensor_args = cast(Tuple[object, ...], local_tensor_args)
@@ -202,6 +208,7 @@ class OpDispatcher:
                 with rng_context:
                     local_results = op_call(*local_tensor_args, **op_info.local_kwargs)
             else:
+                # torch_log.warning(f"local_tensor_args: {local_tensor_args}")
                 local_results = op_call(*local_tensor_args, **op_info.local_kwargs)
 
         # communicate the result to all ranks for some operators that return scalar value
@@ -339,12 +346,13 @@ class OpDispatcher:
                 if mesh is not None:
                     if mesh != arg.device_mesh:
                         raise NotImplementedError(
-                            f"{op_call}: DTensor does not support cross-mesh operation yet!"
+                            f"{op_call}: DTensor does not support cross-mesh operation yet! LHS: {mesh}, RHS: {arg.device_mesh}"
                         )
                 else:
                     mesh = arg.device_mesh
             elif isinstance(arg, torch.Tensor):
                 mesh = mesh or try_find_mesh_from_args(op_call, args_list)
+                torch_log.warning(f"arg: {arg}, mesh: {mesh}")
                 args_schema.append(try_get_replicate_spec(arg, mesh))
                 local_args.append(arg)
             else:

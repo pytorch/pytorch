@@ -293,6 +293,11 @@ class DTensor(torch.Tensor):  # pyre-ignore[13]: pyre is bad at __new__
     # pyre-fixme[3]: Return type must be annotated.
     # pyre-fixme[2]: Parameter must be annotated.
     def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
+        # import logging
+        # torch_log = logging.getLogger("torch")
+        # torch_log.warning(f"__torch_dispatch__: func: {func}")
+        # for arg in args:
+        #     torch_log.warning(f"__torch_dispatch__: type(arg): {type(arg)}")
         return DTensor._op_dispatcher.dispatch(
             func,
             args,

@@ -4,6 +4,8 @@ import math
 import threading
 from typing import Dict, List, Optional, Tuple, TYPE_CHECKING, Union
 
+torch_log = logging.getLogger("torch")
+
 import torch
 
 from torch.distributed import is_available
@@ -373,6 +375,13 @@ else:
             if id(self) == id(other):
                 return True
             else:
+                # torch_log.warning(f"self._flatten_mesh_list == other._flatten_mesh_list: {self._flatten_mesh_list == other._flatten_mesh_list}")
+                # torch_log.warning(f"self.mesh.shape == other.mesh.shape: {self.mesh.shape == other.mesh.shape}")
+                # torch_log.warning(f"self.device_type == other.device_type: {self.device_type == other.device_type}")
+                # torch_log.warning(f"self.mesh_dim_names == other.mesh_dim_names: {self.mesh_dim_names == other.mesh_dim_names}")
+                # torch_log.warning(f"self._parent_mesh == other._parent_mesh: {self._parent_mesh == other._parent_mesh}")
+                # torch_log.warning(f"self._thread_id == other._thread_id: {self._thread_id == other._thread_id}")
+
                 return (
                     self._flatten_mesh_list == other._flatten_mesh_list
                     and self.mesh.shape == other.mesh.shape
