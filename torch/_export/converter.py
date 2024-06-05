@@ -587,21 +587,19 @@ class TS2FXGraphConverter:
         assert len(inputs) == 1
         predicate = self.get_fx_value(inputs[0])
 
-        def _dfs_build_lifted_arguments_for_input(entry):
-            arguments: Set[str] = set()
-            for block in entry.blocks():
-                for block_node in block.nodes():
-                    for block_node_in in block_node.inputs():
-                        if block_node_in.debugName() in self.name_to_node:
-                            debug_name = block_node_in.debugName()
-                            arguments.add(debug_name)
-                    arguments = arguments.union(
-                        _dfs_build_lifted_arguments_for_input(block_node)
-                    )
-            return arguments
+        # Get union of inputs to blocks
+        arguments = set()
+        for block in node.blocks():
+            block_args = set()
 
-        # # Find inputs.
-        arguments = _dfs_build_lifted_arguments_for_input(node)
+            # TODO: block.inputs(), not sure what theyre used for
+
+            for block_node in block.nodes():
+                for block_node_in in block_node.inputs():
+                    if block_node_in.debugName() in self.name_to_node:
+                        block_args.add(block_node_in.debugName())
+
+            arguments.update(block_args)
 
         # Lift parameters as inputs.
         for block in node.blocks():
