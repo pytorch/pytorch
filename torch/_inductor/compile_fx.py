@@ -126,10 +126,11 @@ def get_static_input_idxs(num_fixed):
     # like we do for normal inputs on each run, we will re-record a cudagraph if these
     # parameter locations change.
     context = torch._guards.TracingContext.try_get()
+    fixed = list(range(num_fixed))
     if not context or not context.fw_metadata:
-        return []
+        return fixed
 
-    return list(range(num_fixed)) + context.fw_metadata.static_parameter_indices
+    return fixed + context.fw_metadata.static_parameter_indices
 
 
 @functools.lru_cache(None)
