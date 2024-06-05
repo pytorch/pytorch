@@ -1316,6 +1316,9 @@ class CommonTemplate:
 
         self.common(fn, (torch.randn(1024),))
 
+    # Fails when testing the scalar version
+    # See https://github.com/pytorch/pytorch/issues/128029.
+    @expectedFailureScalar
     @skipIfRocm
     @config.patch(debug_index_asserts=False)
     def test_neg_index(self):
