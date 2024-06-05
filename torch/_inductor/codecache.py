@@ -2713,12 +2713,14 @@ def _do_validate_cpp_commands(
     use_absolute_path: bool,
 ):
     # PreCI will failed if test machine can't run cuda.
+    temp_dir = tempfile.TemporaryDirectory()
+    test_dir_path = temp_dir.name
     test_cuda = torch.cuda.is_available() and cuda
-    input_path = "/temp/dummy_input.cpp"
-    output_path = "/temp/dummy_output.so"
+    input_path = os.path.join(test_dir_path, "dummy_input.cpp")
+    output_path = os.path.join(test_dir_path, "dummy_output.so")
     extra_flags = ["-D TEST_EXTRA_FLAGS"]
     if compile_only:
-        output_path = "/temp/dummy_output.o"
+        output_path = os.path.join(test_dir_path, "dummy_output.o")
     picked_isa = pick_vec_isa()
 
     old_cmd = cpp_compile_command(
@@ -2750,13 +2752,15 @@ def _do_validate_cpp_commands(
         name="dummy_output",
         sources=input_path,
         BuildOption=dummy_build_option,
-        output_dir="/temp/",
+        output_dir=test_dir_path,
         compile_only=compile_only,
         use_absolute_path=False,
     )
     new_cmd = dummy_builder.get_command_line().split(" ")
 
     _temp_validate_new_and_old_command(new_cmd, old_cmd)
+
+    temp_dir.cleanup()
 
 
 # TODO: Will remove the temp code after switch to new cpp_builder
