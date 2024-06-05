@@ -3536,7 +3536,11 @@ class NCCLTraceTest(NCCLTraceTestBase):
         torch.cuda.synchronize(device=device)
 
         time.sleep(1)
-        t = pickle.loads(torch._C._distributed_c10d._get_collective_trace(onlyActive=only_active, includeStackTraces=include_stacktraces))
+        t = pickle.loads(
+            torch._C._distributed_c10d._get_collective_trace(
+                onlyActive=only_active, includeStackTraces=include_stacktraces
+            )
+        )
         if only_active:
             self.assertEqual(len(t["entries"]), 0)
         else:
@@ -3569,7 +3573,6 @@ class NCCLTraceTest(NCCLTraceTestBase):
             else:
                 self.assertNotIn("frames", last)
 
-
     @requires_nccl()
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
     @parametrize("timing_enabled", [True, False])
@@ -3592,7 +3595,11 @@ class NCCLTraceTest(NCCLTraceTestBase):
         if include_collectives:
             t = pickle.loads(torch._C._distributed_c10d._dump_nccl_trace())
         else:
-            t = pickle.loads(torch._C._distributed_c10d._dump_nccl_trace(includeCollectives=False, includeStackTraces=None, onlyActive=None))
+            t = pickle.loads(
+                torch._C._distributed_c10d._dump_nccl_trace(
+                    includeCollectives=False, includeStackTraces=None, onlyActive=None
+                )
+            )
         ver = t["version"]
         self.assertEqual(ver, "2.1")
         pg_config = t["pg_config"]
