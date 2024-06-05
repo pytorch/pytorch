@@ -1558,7 +1558,7 @@ class DeviceCachingAllocator {
       // splitting a block depends on `max_split_size`, which may have changed
       // between whe checkpoint was taken and now, so we make sure to recreate
       // the behavior from the checkpoint.
-      bool split = (i + 1) < segment.blocks.size();
+      bool split = (i + 1) < segment.blocks.size() && should_split(curr_block, block_state.size);
 
       // curr_block will become next pointer if it is split, so reassign with
       // the returned value
@@ -1584,7 +1584,7 @@ class DeviceCachingAllocator {
       auto& block_state = segment.blocks.at(i);
       TORCH_INTERNAL_ASSERT(curr_block != nullptr);
 
-      if (block_state.allocated) {
+      if (block_state.allocated || !curr_block->mapped) {
         rr.allocations_created.push_back(curr_block);
         continue;
       }
@@ -2431,10 +2431,7 @@ class DeviceCachingAllocator {
       p.err = cudaErrorMemoryAllocation;
       return false;
     } else if (
-        CUDAAllocatorConfig::expandable_segments() &&
-        // our checkpointing logic for private pools doesn't support
-        // the expandable_segments_ structure yet
-        !p.pool->owner_PrivatePool) {
+        CUDAAllocatorConfig::expandable_segments()) {
       p.block = try_allocate_expandable_block(
           p.device(), p.stream(), p.pool, p.size(), ctx);
       if (p.block) {
