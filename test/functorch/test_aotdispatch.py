@@ -5866,8 +5866,14 @@ instantiate_device_type_tests(TestEagerFusionModuleInfo, globals(), only_for=onl
 
 
 class TestAOTAutogradWithDynamo(TestAOTAutograd):
+    """
+    These are the same as TestAOTAutograd tests, but we run dynamo first to get a graph module.
+    """
+
     def assertExpectedInline(self, *args, **kwargs):
         # These will have different outputs because dynamo returns a different graph module
+        # But we don't really care about that assertion when testing with dynamo,
+        # only that the outputs match, etc.
         pass
 
     # Compiler to passes to dynamo
