@@ -201,7 +201,7 @@ class MemoryBudgetTest(TestCase):
         # We are recomputing x1 @ w1 here!
         self.assertEqual(comp_flops, eager_flops + 4)
 
-    @config.patch(activation_memory_budget_runtime_estimator = "profile")
+    @config.patch(activation_memory_budget_runtime_estimator="profile")
     def test_profile(self):
         def f(x, ws):
             x = x.cos()
