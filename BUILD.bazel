@@ -125,10 +125,6 @@ filegroup(
     data = [":generate-code"],
 )
 
-exports_files(
-    srcs = ["aten/src/ATen/cpu/tbb/extra/version_string.ver.in"],
-)
-
 # ATen
 filegroup(
     name = "aten_base_cpp",
@@ -275,7 +271,6 @@ header_template_rule(
         "@AT_BUILD_WITH_LAPACK@": "1",
         "@AT_PARALLEL_OPENMP@": "0",
         "@AT_PARALLEL_NATIVE@": "1",
-        "@AT_PARALLEL_NATIVE_TBB@": "0",
         "@AT_BLAS_F2C@": "0",
         "@AT_BLAS_USE_CBLAS_DOT@": "1",
     },
@@ -359,6 +354,9 @@ cc_library(
         ":aten_src_ATen_config",
     ] + generated_cpu_cpp + aten_ufunc_generated_cpu_sources("aten/src/ATen/{}"),
     copts = ATEN_COPTS,
+    linkopts = [
+      "-ldl",
+    ],
     data = if_cuda(
         [":libcaffe2_nvrtc.so"],
         [],
@@ -457,7 +455,6 @@ filegroup(
     name = "caffe2_core_srcs",
     srcs = [
         "caffe2/core/common.cc",
-        "caffe2/core/types.cc",
     ],
 )
 
@@ -490,10 +487,6 @@ filegroup(
 filegroup(
     name = "caffe2_utils_srcs",
     srcs = [
-        "caffe2/utils/bench_utils.cc",
-        "caffe2/utils/cpuid.cc",
-        "caffe2/utils/murmur_hash3.cc",
-        "caffe2/utils/proto_utils.cc",
         "caffe2/utils/proto_wrap.cc",
         "caffe2/utils/string_utils.cc",
         "caffe2/utils/threadpool/ThreadPool.cc",
@@ -512,12 +505,9 @@ cc_library(
     name = "caffe2_for_aten_headers",
     hdrs = [
         "caffe2/core/common.h",
-        "caffe2/core/logging.h",
-        "caffe2/core/types.h",
         "caffe2/perfkernels/common.h",
         "caffe2/perfkernels/embedding_lookup.h",
         "caffe2/perfkernels/embedding_lookup_idx.h",
-        "caffe2/utils/cpuid.h",
         "caffe2/utils/fixed_divisor.h",
     ] + glob([
         "caffe2/utils/threadpool/*.h",
@@ -527,7 +517,6 @@ cc_library(
     deps = [
         ":caffe2_core_macros",
         "//c10",
-        "//caffe2/proto:caffe2_pb",
     ],
 )
 
@@ -546,14 +535,12 @@ cc_library(
         ],
     ) + if_cuda(glob([
         "caffe2/**/*.cuh",
-        "caffe2/image/*.h",
     ])),
     copts = CAFFE2_COPTS,
     visibility = ["//visibility:public"],
     deps = [
         ":caffe2_core_macros",
         ":caffe2_for_aten_headers",
-        "//caffe2/proto:caffe2_pb",
     ],
 )
 
@@ -574,7 +561,6 @@ cc_library(
         ":caffe2_perfkernels_avx",
         ":caffe2_perfkernels_avx2",
         ":caffe2_perfkernels_avx512",
-        "//caffe2/proto:caffe2_pb",
         "//third_party/miniz-2.1.0:miniz",
         "@com_google_protobuf//:protobuf",
         "@eigen",
@@ -772,6 +758,9 @@ cc_library(
         ],
     )) + torch_sources,
     copts = TORCH_COPTS,
+    linkopts = [
+      "-lrt",
+    ],
     defines = [
         "CAFFE2_NIGHTLY_VERSION=20200115",
     ],
@@ -780,7 +769,6 @@ cc_library(
         ":caffe2",
         ":torch_headers",
         "@kineto",
-        "@cpp-httplib",
     ] + if_cuda([
         "@cuda//:nvToolsExt",
         "@cutlass",
@@ -792,6 +780,9 @@ cc_library(
 cc_library(
     name = "shm",
     srcs = glob(["torch/lib/libshm/*.cpp"]),
+    linkopts = [
+      "-lrt",
+    ],
     deps = [
         ":torch",
     ],
