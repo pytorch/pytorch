@@ -119,7 +119,9 @@ def get_block_lifted_args(graph: torch._C.Graph):
         for node in entry.nodes():
             for block in node.blocks():
                 # Recursively build.
-                arguments = arguments.union(_dfs_build_lifted_arguments_for_param(block))
+                arguments = arguments.union(
+                    _dfs_build_lifted_arguments_for_param(block)
+                )
             if node.kind() == "prim::GetAttr":
                 src_ir, dest_ir, cur_name = get_src_dest_and_cur(node)
                 # Skip for intermediate GetAttr, which will anyway not results a FQN.
@@ -517,21 +519,21 @@ class TS2FXGraphConverter:
                 for block_node in block.nodes():
                     for block_node_in in block_node.inputs():
                         if block_node_in.debugName() in self.name_to_node:
-                            arguments.add(block_node_in.debugName())
-                    arguments = arguments.union(_dfs_build_lifted_arguments_for_input(block_node))
+                            debug_name = block_node_in.debugName()
+                            arguments.add(debug_name)
+                    arguments = arguments.union(
+                        _dfs_build_lifted_arguments_for_input(block_node)
+                    )
             return arguments
 
-        # Lift inputs.
+        # # Find inputs.
         arguments = _dfs_build_lifted_arguments_for_input(node)
 
         # Lift parameters.
         for block in node.blocks():
             arguments = arguments.union(self.block_to_arguments[block])
 
-        # We lift parameters and buffers as inputs for the subgraphs.
-        # TODO: only pass down necessary parameters and buffers.
         arguments = list(arguments)
-        print(arguments)
 
         # Convert blocks to subgraphs
         subgraph_nodes = []
@@ -657,7 +659,6 @@ class TS2EPConverter:
     ):
         self.ts_model = ts_model
         self.ts_graph, self.params, _, _ = _create_jit_graph(ts_model, sample_args)
-        print(self.ts_graph)
 
         self.sample_args = sample_args
         self.sample_kwargs = sample_kwargs
