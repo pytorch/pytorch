@@ -540,6 +540,8 @@ option(BUILD_EXECUTORCH "Master flag to build Executorch" ON)
 if(LINUX)
   set(CMAKE_SHARED_LINKER_FLAGS
       "${CMAKE_SHARED_LINKER_FLAGS} -Wl,--no-as-needed")
+  set(CMAKE_SHARED_LINKER_FLAGS
+      "${CMAKE_SHARED_LINKER_FLAGS} $ENV{LDFLAGS}")
 endif()
 
 if(MSVC)
