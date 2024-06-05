@@ -298,6 +298,17 @@ class TS2FXGraphConverter:
 
         self.block_to_arguments = block_to_arguments
 
+        # Populate methods for the standard operators.
+        for k in kind_to_standard_operators.keys():
+            handler_func_name = ir_name_to_func_name(k)
+            # Create an indirect function call:
+            # convert_<namespace>_<opname> --> lambda node: _convert_standard_operator(node)
+            setattr(
+                self,
+                handler_func_name,
+                lambda node: self._convert_standard_operators(node),
+            )
+
     def add_subgraph(self, subgraph) -> str:
         name = f"subgraph_{len(self.subgraphs)}"
         self.subgraphs[name] = subgraph
