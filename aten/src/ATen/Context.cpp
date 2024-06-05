@@ -265,7 +265,7 @@ bool Context::allowTF32CuBLAS() const {
   TORCH_CHECK(
       legacy_allow_tf32 == allow_tf32,
       "PyTorch is checking whether allow_tf32 is enabled for cuBlas matmul,",
-      "Current status indicate that you have used mix of legacy API and new API to set the TF32 status for cublas matmul. ",
+      "Current status indicate that you have used mix of the legacy and new APIs to set the TF32 status for cublas matmul. ",
       "We suggest only using the new API to set the TF32 flag. See also: ",
       "https://github.com/pytorch/pytorch/blob/main/docs/source/notes/cuda.rst#tensorfloat-32-tf32-on-ampere-and-later-devices");
   return allow_tf32;
@@ -285,7 +285,7 @@ Float32MatmulPrecision Context::float32MatmulPrecision() const {
   TORCH_CHECK(
       !invalid,
       "PyTorch is checking the matmul precision without a specific backend name,",
-      "Current status indicate that you have used mix of legacy API and new API to set the matmul precision. ",
+      "Current status indicate that you have used mix of the legacy and new APIs to set the matmul precision. ",
       "We suggest only using the new API for matmul precision. See also: ",
       "https://github.com/pytorch/pytorch/blob/main/docs/source/notes/cuda.rst#tensorfloat-32-tf32-on-ampere-and-later-devices");
   return float32_matmul_precision;
