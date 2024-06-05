@@ -158,10 +158,6 @@ class ModularIndexing(sympy.Function):
 
     @classmethod
     def eval(cls, base, divisor, modulus):
-        assert isinstance(base, int) or base.is_integer, base
-        assert isinstance(divisor, int) or divisor.is_integer, divisor
-        assert isinstance(modulus, int) or modulus.is_integer, modulus
-
         if base == 0 or modulus == 1:
             return sympy.Integer(0)
 
@@ -404,8 +400,6 @@ class CeilDiv(sympy.Function):
     def __new__(cls, base, divisor):
         base = sympy.sympify(base)
         divisor = sympy.sympify(divisor)
-        assert base.is_integer, base
-        assert divisor.is_integer, divisor
         if sympy.gcd(base, divisor) == divisor:
             return CleanDiv(base, divisor)
         else:
@@ -417,9 +411,6 @@ class LShift(sympy.Function):
 
     @classmethod
     def eval(cls, base, shift):
-        assert base.is_integer, base
-        assert shift.is_integer, shift
-
         if shift < 0:
             raise ValueError("negative shift count")
         return base * 2**shift
@@ -430,9 +421,6 @@ class RShift(sympy.Function):
 
     @classmethod
     def eval(cls, base, shift):
-        assert base.is_integer, base
-        assert shift.is_integer, shift
-
         if shift < 0:
             raise ValueError("negative shift count")
         return base // 2**shift
@@ -478,10 +466,6 @@ class PowByNatural(sympy.Function):
 
     @classmethod
     def eval(cls, base, exp):
-        # exp can be assumed to be is_integer and is_nonnegative, but we may
-        # have concluded this externally from Sympy assumptions, so we can't
-        # assert the nonnegative
-        assert exp.is_integer, exp
         if isinstance(base, sympy.Integer) and isinstance(exp, sympy.Integer):
             r = safe_pow(base, exp)
             if r in (-int_oo, int_oo):
@@ -556,9 +540,6 @@ class IntTrueDiv(sympy.Function):
 
     @classmethod
     def eval(cls, base, divisor):
-        assert base.is_integer, base
-        assert divisor.is_integer, divisor
-
         if divisor.is_zero:
             raise ZeroDivisionError("division by zero")
 
@@ -686,8 +667,6 @@ class ToFloat(sympy.Function):
     def eval(cls, number):
         if number in [sympy.oo, -sympy.oo]:
             return number
-
-        assert number.is_integer, number
 
         if isinstance(number, sympy.Integer):
             return sympy.Float(int(number))
