@@ -463,13 +463,16 @@ class DDPOptimizer:
     def _ignore_parameter(self, parameter):
         return hasattr(parameter, "_ddp_ignored") and parameter._ddp_ignored
 
+    def add_param(self, bucket, param, name):
+        bucket.size += param.untyped_storage().nbytes()
+        bucket.params.append(name)
+        bucket.param_ids.append(id(param))
+
     def add_module_params_to_bucket(self, mod, bucket, processed_modules, prefix):
         processed_modules.add(mod)
         for name, param in mod.named_parameters():
             if param.requires_grad and not self._ignore_parameter(param):
-                bucket.size += param.untyped_storage().nbytes()
-                bucket.params.append(f"{prefix}_{name}")
-                bucket.param_ids.append(id(param))
+                self.add_param(bucket, param, f"{prefix}.{name}")
 
     def compile_fn(self, gm: fx.GraphModule, example_inputs: List[torch.Tensor]):
         """
@@ -520,14 +523,13 @@ class DDPOptimizer:
 
             if node.op == "call_function":
                 for arg in node.args:
+                    if not isinstance(arg, torch.fx.node.Node):
+                        continue
                     param = arg.meta["example_value"]
                     if not isinstance(param, torch.nn.Parameter):
                         continue
                     if param.requires_grad and not self._ignore_parameter(param):
-                        bucket = buckets[0]
-                        bucket.size += param.untyped_storage().nbytes()
-                        bucket.params.append(arg.target)
-                        bucket.param_ids.append(id(param))
+                        self.add_param(buckets[0], param, arg.target)
 
             if node.op == "call_module":
                 target_mod = gm.get_submodule(node.target)
@@ -553,9 +555,7 @@ class DDPOptimizer:
                     and maybe_param.requires_grad
                     and not self._ignore_parameter(maybe_param)
                 ):
-                    buckets[0].size += maybe_param.untyped_storage().nbytes()
-                    buckets[0].params.append(node.target)
-                    buckets[0].param_ids.append(id(maybe_param))
+                    self.add_param(buckets[0], maybe_param, node.target)
 
             # All nodes have to be mapped to a bucket, even if they don't have their own params
             # Ignored params still end up in buckets, we just don't count them towards the capacity
