@@ -1306,6 +1306,15 @@ class CommonTemplate:
         expect = reflection_pad_left(x, 3)
         self.assertEqual(expect, actual)
 
+    def test_index_propagation_device_assert_masked(self):
+        def fn(a):
+            idx = torch.arange(a.size(0), device=a.device)
+            padded_idx = torch.constant_pad_nd(idx, (1050, 0))
+            padded_idx = torch.where(padded_idx >= 0, padded_idx, padded_idx)
+            return a[padded_idx]
+
+        self.common(fn, (torch.randn(1024),))
+
     @skipIfRocm
     @config.patch(debug_index_asserts=False)
     def test_neg_index(self):
@@ -4282,6 +4291,19 @@ class CommonTemplate:
             fn,
             (torch.randn([1, 2, 4, 8]),),
         )
+
+    def test_repeat_as_strided(self):
+        # Reproducer for #127474
+
+        def fn(x):
+            view_size = (3, 2)
+            full = x.repeat((3, 2))
+            view = torch.as_strided(full, view_size, full.stride())
+            result = view + view
+
+            return result
+
+        self.common(fn, (torch.randn(1, 1),))
 
     def test_repeat_interleave(self):
         def fn(x):
@@ -9787,6 +9809,7 @@ class CommonTemplate:
             bar_cuda,
             bar_xpu,
             bar_meta,
+            tags=[torch._C.Tag.needs_fixed_stride_order],
         )
 
         def fn(x):
@@ -9849,68 +9872,12 @@ class CommonTemplate:
             baz_cuda,
             baz_xpu,
             baz_meta,
+            tags=[torch._C.Tag.needs_fixed_stride_order],
         )
 
         with torch.no_grad():
             net = torch.compile(model)
             out = net(input_t)
-
-    @requires_gpu()
-    @config.patch(implicit_fallbacks=True)
-    def test_needs_fixed_stride_order(self):
-        with torch.library._scoped_library("prims", "FRAGMENT") as prims_lib:
-            with torch.library._scoped_library("custom", "FRAGMENT") as custom_lib:
-                strides = []
-
-                def foo_impl(x):
-                    strides.append(x.stride())
-                    return x.clone()
-
-                def foo_meta(x):
-                    return x.clone()
-
-                all_ops = []
-                for (
-                    needs_fixed_stride_order,
-                    does_not_need_fixed_stride_order,
-                ) in itertools.product([True, False], [True, False]):
-                    tags = []
-                    if needs_fixed_stride_order:
-                        tags.append(torch.Tag.needs_fixed_stride_order)
-                    if does_not_need_fixed_stride_order:
-                        tags.append(torch.Tag.does_not_need_fixed_stride_order)
-                    name = f"foo_{int(needs_fixed_stride_order)}{int(does_not_need_fixed_stride_order)}"
-                    for ns, lib in {"custom": custom_lib, "prims": prims_lib}.items():
-                        all_ops.append(ns + "::" + name)
-                        lib.define(f"{name}(Tensor x) -> Tensor", tags=tags)
-                        lib.impl(name, foo_impl, "CompositeExplicitAutograd")
-                        lib.impl(name, foo_meta, "Meta")
-
-                assert len(all_ops) == 8
-                expect_contig_strides = {
-                    "custom::foo_01",
-                    "prims::foo_00",
-                    "prims::foo_01",
-                }
-                print(all_ops)
-
-                for qualname in all_ops:
-                    ns, name = qualname.split("::")
-                    op = getattr(getattr(torch.ops, ns), name)
-
-                    @torch.compile(fullgraph=True)
-                    def f(x):
-                        y = x.t().contiguous().t()
-                        y = y.sin()
-                        return op(y)
-
-                    x = torch.randn(24, 24, device=self.device)
-                    f(x)
-                    stride = strides[-1]
-                    if qualname in expect_contig_strides:
-                        self.assertEqual(stride, (24, 1))
-                    else:
-                        self.assertEqual(stride, (1, 24))
 
     def test_buffer_use_after_remove(self):
         # https://github.com/pytorch/pytorch/issues/102857
@@ -10318,6 +10285,23 @@ class CommonTemplate:
         t = rand_strided((2, 3), (3, 1), device=self.device, dtype=torch.float8_e4m3fn)
         self.assertTrue(t.dtype is torch.float8_e4m3fn)
 
+    def test_large_grid(self):
+        # https://github.com/pytorch/pytorch/issues/123210
+        def fn(primals_5):
+            view = torch.ops.aten.reshape.default(primals_5, [-1, 2, 4])
+            primals_5 = None
+            permute = torch.ops.aten.permute.default(view, [0, 2, 1])
+            clone = torch.ops.aten.clone.default(
+                permute, memory_format=torch.contiguous_format
+            )
+            return clone
+
+        s0 = 16777472
+        s1 = 8
+        compiled_fn = torch._dynamo.optimize()(fn)
+        actual = compiled_fn(torch.ones(s0, s1))
+        self.assertTrue((actual == 1).all())
+
 
 @dataclasses.dataclass
 class TestFailure:
@@ -10479,7 +10463,6 @@ if HAS_GPU and not TEST_WITH_ASAN:
             self.assertEqual(arguments_that_are_divisible_by_16_in_kernel1, (0, 1))
             torch._dynamo.reset()
 
-        @expectedFailureXPU
         @config.patch(assume_aligned_inputs=False)
         def test_codegen_config_option_dont_assume_alignment(self):
             def fn(x: torch.Tensor) -> torch.Tensor:

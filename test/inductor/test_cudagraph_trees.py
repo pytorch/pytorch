@@ -1438,6 +1438,23 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             node = self.get_manager().current_node
             self.assertEqual(len(list(node.path_live_weakrefs())), 1)
 
+        def test_unstable_ptr(self):
+            import torch
+
+            @torch.compile(mode="reduce-overhead")
+            def foo(m, inp):
+                return m(inp)
+
+            def f():
+                l = []
+                m = torch.nn.Linear(20, 20).cuda()
+                for _ in range(4):
+                    inp = torch.rand([20, 20], device="cuda")
+                    foo(m, inp)
+                    m.weight.data = torch.rand([20, 20], device="cuda")
+
+            self.assertRaises(RuntimeError, f)
+
         @requires_multigpu()
         def test_manager_per_device(self):
             def test():
@@ -1713,6 +1730,47 @@ if HAS_CUDA and not TEST_WITH_ASAN:
 
             with self.assertRaisesRegex(Exception, "custom error msg"):
                 device = x.untyped_storage()
+
+        def test_static_inputs_address_mutation_log(self):
+            class Goo(torch.nn.Module):
+                def __init__(self) -> None:
+                    super().__init__()
+                    self.linear = torch.nn.Linear(2, 2, device="cuda")
+
+                def forward(self, x) -> torch.Tensor:
+                    return self.linear(x)
+
+            class Foo(torch.nn.Module):
+                def __init__(self) -> None:
+                    super().__init__()
+                    self.static_tensor = torch.zeros((2, 2), device="cuda")
+                    self.goo = Goo()
+
+                def forward(self, x) -> torch.Tensor:
+                    self.static_tensor.add_(torch.ones((2, 2), device="cuda"))
+                    return self.static_tensor + x + self.goo(x)
+
+            foo = Foo()
+            foo = torch.compile(foo, mode="reduce-overhead")
+            inp = torch.rand((2, 2), device="cuda")
+
+            for _ in range(3):
+                foo(inp)
+
+            # mutates static input tensors' addresses
+            foo.static_tensor = torch.ones((2, 2), device="cuda")
+            foo.goo.linear.bias = torch.nn.Parameter(torch.ones((2,), device="cuda"))
+
+            with self.assertRaisesRegex(
+                Exception,
+                r"static input data pointer changed.\n"
+                r"input name: primals_2. data pointer changed from .* to .*. input stack trace: None\n"
+                r"input name: primals_3. data pointer changed from .* to .*. input stack trace:.*,"
+                r" in forward\n.* self.static_tensor.add\_\(torch.ones\(\(2, 2\), device=\"cuda\"\)\).*\n\n",
+            ):
+                self.curr_node().run(
+                    [foo.goo.linear.weight, foo.goo.linear.bias, foo.static_tensor, inp]
+                )
 
         def run_static_input_param_test(self, fn_eager, num_graphs):
             with torch.device("cuda"):
