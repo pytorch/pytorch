@@ -90,13 +90,16 @@ class SubprocPool:
         self.write_lock = threading.Lock()
         self.read_pipe: Pipe = typing.cast(Pipe, self.process.stdout)
         self.read_thread = threading.Thread(target=self._read_thread, daemon=True)
-        self.read_thread.start()
 
         self.futures_lock = threading.Lock()
         self.pending_futures: Dict[int, Future[Any]] = {}
         self.job_id_count = itertools.count()
 
         self.running = True
+
+        # Start thread last to ensure all member variables are initialized
+        # before any access.
+        self.read_thread.start()
 
     def submit(self, job_fn: Callable[..., Any], *args):
         if args:
