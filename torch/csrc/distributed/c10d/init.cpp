@@ -3151,6 +3151,18 @@ such as `dist.all_reduce(tensor, async_op=True)`.
             - abort() raises.
             The provided Future object result must be a Tensor or a list of Tensors.
            )");
+
+#ifdef USE_C10D_NCCL
+  module.def(
+      "_hash_tensors",
+      [](const std::vector<at::Tensor>& tensors) {
+        return ::c10d::hashTensors(tensors);
+      },
+      py::arg("tensors"),
+      R"(
+        Arguments:
+          tensors(List[torch.Tensor]): List of tensors we want to hash.
+      )");
   module.def(
       "_get_collective_trace",
       [](std::optional<bool> includeStackTraces,
@@ -3166,19 +3178,7 @@ such as `dist.all_reduce(tensor, async_op=True)`.
             onlyActive (bool, optional): Whether to only include active collective work traces. Default is False.
         Returns:
             Stringified pickle collective work traces.
-            Default settings return everything.
-      )");
-
-#ifdef USE_C10D_NCCL
-  module.def(
-      "_hash_tensors",
-      [](const std::vector<at::Tensor>& tensors) {
-        return ::c10d::hashTensors(tensors);
-      },
-      py::arg("tensors"),
-      R"(
-        Arguments:
-          tensors(List[torch.Tensor]): List of tensors we want to hash.
+            Default settings return all collectives with stack traces.
       )");
   module.def(
       "_get_nccl_comm_trace",
