@@ -24,8 +24,6 @@ set(Caffe2_CPU_SRCS ${Caffe2_CPU_SRCS} ${common_srcs})
 if(CXX_AVX2_FOUND)
   add_library(Caffe2_perfkernels_avx STATIC ${avx_srcs})
   add_library(Caffe2_perfkernels_avx2 STATIC ${avx2_srcs})
-  add_dependencies(Caffe2_perfkernels_avx Caffe2_PROTO)
-  add_dependencies(Caffe2_perfkernels_avx2 Caffe2_PROTO)
   target_link_libraries(Caffe2_perfkernels_avx PRIVATE c10)
   target_link_libraries(Caffe2_perfkernels_avx2 PRIVATE c10)
   install(TARGETS Caffe2_perfkernels_avx Caffe2_perfkernels_avx2
@@ -62,7 +60,6 @@ if(CXX_AVX2_FOUND)
 
   if(CAFFE2_COMPILER_SUPPORTS_AVX512_EXTENSIONS)
     add_library(Caffe2_perfkernels_avx512 STATIC ${avx512_srcs})
-    add_dependencies(Caffe2_perfkernels_avx512 Caffe2_PROTO)
     target_link_libraries(Caffe2_perfkernels_avx512 PRIVATE c10)
     install(TARGETS Caffe2_perfkernels_avx512
         ARCHIVE DESTINATION "${CMAKE_INSTALL_LIBDIR}")
