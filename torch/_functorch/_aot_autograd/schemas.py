@@ -467,9 +467,7 @@ class ViewAndMutationMeta:
             else:
                 return None
 
-        self.traced_tangents = [
-            extract_metadata(t) for t in self.traced_tangents
-        ]
+        self.traced_tangents = [extract_metadata(t) for t in self.traced_tangents]
         self.cache_safe = True
 
     @property

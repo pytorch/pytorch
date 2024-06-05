@@ -379,7 +379,6 @@ def _create_runtime_wrapper(
             ret_outs = fw_outs_including_aliases
         else:
             ret_outs = fw_outs
-
         if runtime_metadata.dynamic_outputs:
             for t, o in zip(ret_outs, runtime_metadata.output_info):
                 if o.dynamic_dims is None:
