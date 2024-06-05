@@ -46,6 +46,7 @@ import torch
 import torch.fx
 import torch.fx.traceback as fx_traceback
 from torch.fx.experimental import _config as config
+from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 
 from torch.fx.experimental.recording import (
     FakeTensorMeta,
@@ -61,7 +62,7 @@ from torch._logging import trace_structured, structured
 from torch import SymBool, SymFloat, SymInt
 from torch._guards import ShapeGuard, Source, TracingContext
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
-from torch.utils._sympy.functions import FloorDiv, Mod, PythonMod, IsNonOverlappingAndDenseIndicator, CleanDiv
+from torch.utils._sympy.functions import FloorDiv, Mod, IsNonOverlappingAndDenseIndicator
 from torch.utils._sympy.solve import try_solve
 from torch.utils._sympy.value_ranges import bound_sympy, SymPyValueRangeAnalysis, ValueRanges, ValueRangeError
 from torch.utils._sympy.singleton_int import SingletonInt
@@ -420,6 +421,9 @@ def _iterate_exprs(val: Union[SymInt, torch.Tensor]) -> Iterable[sympy.Basic]:
         yield from _iterate_exprs(val.size())
         yield from _iterate_exprs(val.stride())
         yield from _iterate_exprs(val.storage_offset())
+        if is_traceable_wrapper_subclass(val):
+             for attr in val.__tensor_flatten__()[0]:
+                 yield from _iterate_exprs(getattr(val, attr))
     elif val is None:
         pass
     else:
