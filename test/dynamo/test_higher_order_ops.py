@@ -2840,7 +2840,7 @@ class GraphModule(torch.nn.Module):
 
         _vjp_treespec_compare = torch._functorch.eager_transforms._vjp_treespec_compare(o, _add_batch_dim_1)
 
-        _autograd_grad = torch._functorch.eager_transforms._autograd_grad([o], [diff_primals], [_add_batch_dim_1], retain_graph = True, create_graph = True);  _add_batch_dim_1 = None
+        _autograd_grad = torch._functorch.eager_transforms._autograd_grad([o], [diff_primals], [_add_batch_dim_1], retain_graph = True, create_graph = True);  o = diff_primals = _add_batch_dim_1 = None
         batched_outputs = _autograd_grad[0];  _autograd_grad = None
 
         chunked_result = torch._C._functorch._remove_batch_dim(batched_outputs, 3, 12, 0);  batched_outputs = None
@@ -2876,7 +2876,7 @@ class GraphModule(torch.nn.Module):
         jac_out_in: "f32[4, 3, 4, 3, 12]" = split_2[0];  split_2 = None
 
         unflatten: "f32[4, 3, 4, 3, 4, 3]" = jac_out_in.unflatten(-1, (4, 3));  jac_out_in = None
-        return (unflatten, diff_primals, o)
+        return (unflatten,)
 """,
         )
 
@@ -2943,8 +2943,8 @@ class GraphModule(torch.nn.Module):
         _saved_tensors_hooks_disable_2 = torch._C._autograd._saved_tensors_hooks_disable("torch.func transforms don't yet support saved tensor hooks. Please open an issue with your use case.")
         _grad_increment_nesting = torch._C._functorch._grad_increment_nesting()
 
-        _wrap_for_grad_2 = torch._C._functorch._wrap_for_grad(child_2, 3)
-        child_4 = torch._C._functorch._wrap_for_grad(child_3, 3)
+        _wrap_for_grad_2 = torch._C._functorch._wrap_for_grad(child_2, 3);  child_2 = None
+        child_4 = torch._C._functorch._wrap_for_grad(child_3, 3);  child_3 = None
 
         set_inplace_requires_grad_allowed = torch._C._functorch.set_inplace_requires_grad_allowed(True)
 
@@ -2981,7 +2981,7 @@ class GraphModule(torch.nn.Module):
 
         _vjp_treespec_compare = torch._functorch.eager_transforms._vjp_treespec_compare(o, _add_batch_dim_1)
 
-        _autograd_grad = torch._functorch.eager_transforms._autograd_grad([o], [child_4], [_add_batch_dim_1], retain_graph = True, create_graph = True);  _add_batch_dim_1 = None
+        _autograd_grad = torch._functorch.eager_transforms._autograd_grad([o], [child_4], [_add_batch_dim_1], retain_graph = True, create_graph = True);  o = child_4 = _add_batch_dim_1 = None
         child_5 = _autograd_grad[0];  _autograd_grad = None
 
         child_6 = torch._C._functorch._remove_batch_dim(child_5, 3, 12, 0);  child_5 = None
@@ -3029,7 +3029,7 @@ class GraphModule(torch.nn.Module):
         else:
             self.assertExpectedInline(
                 actual.split("\n")[-2],
-                """        return (unflatten, child_3, child_2, _wrap_for_grad_1, child_4, o)""",
+                """        return (unflatten,)""",
             )
 
     def test_hessian_disable_capture(self):
@@ -3118,7 +3118,7 @@ class GraphModule(torch.nn.Module):
 
         _vjp_treespec_compare = torch._functorch.eager_transforms._vjp_treespec_compare(o, _add_batch_dim)
 
-        _autograd_grad = torch._functorch.eager_transforms._autograd_grad([o], [diff_primals], [_add_batch_dim], retain_graph = True, create_graph = True);  _add_batch_dim = None
+        _autograd_grad = torch._functorch.eager_transforms._autograd_grad([o], [diff_primals], [_add_batch_dim], retain_graph = True, create_graph = True);  o = diff_primals = _add_batch_dim = None
         batched_outputs = _autograd_grad[0];  _autograd_grad = None
 
         chunked_result: "f32[12, 4, 3]" = torch._C._functorch._remove_batch_dim(batched_outputs, 1, 12, 0);  batched_outputs = None
@@ -3130,7 +3130,7 @@ class GraphModule(torch.nn.Module):
         split_1: "f32[12, 4, 3]" = split[0];  split = None
 
         output_input: "f32[4, 3, 4, 3]" = split_1.view((4, 3, 4, 3));  split_1 = None
-        return (output_input, diff_primals, o)
+        return (output_input,)
 """,
         )
 
@@ -3200,7 +3200,7 @@ class GraphModule(torch.nn.Module):
 
         _vjp_treespec_compare = torch._functorch.eager_transforms._vjp_treespec_compare(o, _add_batch_dim)
 
-        _autograd_grad = torch._functorch.eager_transforms._autograd_grad([o], [diff_primals], [_add_batch_dim], retain_graph = True, create_graph = True);  _add_batch_dim = None
+        _autograd_grad = torch._functorch.eager_transforms._autograd_grad([o], [diff_primals], [_add_batch_dim], retain_graph = True, create_graph = True);  o = diff_primals = _add_batch_dim = None
         batched_outputs = _autograd_grad[0];  _autograd_grad = None
 
         chunked_result: "f32[12, 3, 4]" = torch._C._functorch._remove_batch_dim(batched_outputs, 1, 12, 0);  batched_outputs = None
@@ -3212,7 +3212,7 @@ class GraphModule(torch.nn.Module):
         split_1: "f32[12, 3, 4]" = split[0];  split = None
 
         output_input: "f32[3, 4, 3, 4]" = split_1.view((3, 4, 3, 4));  split_1 = None
-        return (output_input, diff_primals, o)
+        return (output_input,)
 """,
         )
 
@@ -3284,7 +3284,7 @@ class GraphModule(torch.nn.Module):
 
         _vjp_treespec_compare = torch._functorch.eager_transforms._vjp_treespec_compare(o, _add_batch_dim)
 
-        _autograd_grad = torch._functorch.eager_transforms._autograd_grad([o], [diff_primals], [_add_batch_dim], retain_graph = True, create_graph = True);  _add_batch_dim = None
+        _autograd_grad = torch._functorch.eager_transforms._autograd_grad([o], [diff_primals], [_add_batch_dim], retain_graph = True, create_graph = True);  o = diff_primals = _add_batch_dim = None
         batched_outputs = _autograd_grad[0];  _autograd_grad = None
 
         chunked_result: "f32[12, 3, 4]" = torch._C._functorch._remove_batch_dim(batched_outputs, 1, 12, 0);  batched_outputs = None
@@ -3296,7 +3296,7 @@ class GraphModule(torch.nn.Module):
         split_1: "f32[12, 3, 4]" = split[0];  split = None
 
         output_input: "f32[3, 4, 3, 4]" = split_1.view((3, 4, 3, 4));  split_1 = None
-        return (output_input, aux_1, diff_primals, o)
+        return (output_input, aux_1)
 """,
         )
 
@@ -3731,7 +3731,7 @@ class GraphModule(torch.nn.Module):
 
         _grad_decrement_nesting = torch._C._functorch._grad_decrement_nesting()
         _saved_tensors_hooks_enable = torch._C._autograd._saved_tensors_hooks_enable()
-        return (grad_input_1, y)
+        return (y, grad_input_1)
 """,
         )
 

@@ -310,13 +310,29 @@ class SideEffects:
                 return is_live(var.mutable_local)
             return True
 
+        # Step 1: Any attribute mutation on a symbolic local (or the stack, aka
+        # return values) are live.
         VariableTracker.visit(visit, (tx.stack, tx.symbolic_locals))
+
+        # Step 2: Any attribute mutation to pre-existing variables are live.
         for var in self.id_to_variable.values():
             if not isinstance(var.mutable_local, AttributeMutationNew):
                 VariableTracker.visit(visit, var)
 
-        for skip_obj, setattrs in self.store_attr_mutations.items():
-            VariableTracker.visit(visit, setattrs)
+        # Step 3: Any attribute mutation to the values of the alive objects are live.
+        tmp_live_new_objects = list(live_new_objects)
+        for mutable_local in tmp_live_new_objects:
+            if mutable_local in self.store_attr_mutations:
+                dct = self.store_attr_mutations[mutable_local]
+                skip_obj = mutable_local
+                VariableTracker.visit(visit, dct)
+
+        # NB: cell variable handling.is tricky.
+        # cell variables must stay alive if any NestedUserFunctionVariable
+        # are live. All three steps can identiy NestedUserFunctionVariable
+        # that are live. Visiting the NestedUserFunctionVariable visits
+        # the .closures field, from which we will see if we need to keep
+        # any mutations to cell variables alive.
 
         self.id_to_variable = {
             k: v for k, v in self.id_to_variable.items() if is_live(v)
