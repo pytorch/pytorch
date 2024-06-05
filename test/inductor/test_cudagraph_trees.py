@@ -11,6 +11,7 @@ import torch
 
 import torch._dynamo.config as dynamo_config
 import torch.nn as nn
+from torch._dynamo.backends.common import aot_autograd
 from torch._dynamo.utils import counters
 from torch._inductor import config
 from torch._inductor.compile_fx import compile_fx_inner
@@ -1769,6 +1770,120 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                 self.curr_node().run(
                     [foo.goo.linear.weight, foo.goo.linear.bias, foo.static_tensor, inp]
                 )
+
+        def test_num_static_inputs(self):
+            def eager(gm, example_inputs):
+                return gm.forward
+
+            inputs = [torch.randn(2, 2)]
+
+            def fw_compiler(gm, example_inputs):
+                tc = torch._guards.TracingContext.try_get()
+                self.assertTrue(tc and tc.params_buffers_flat is not None)
+                dynamo_gm_num_inputs = len(inputs)
+                aot_fw_gm_num_inputs = len(example_inputs)
+                expected = aot_fw_gm_num_inputs - dynamo_gm_num_inputs
+                self.assertEqual(
+                    expected,
+                    torch._inductor.utils.num_fw_fixed_arguments(
+                        dynamo_gm_num_inputs, aot_fw_gm_num_inputs
+                    ),
+                )
+                return eager(gm, example_inputs)
+
+            backend = aot_autograd(
+                fw_compiler=fw_compiler,
+                bw_compiler=eager,
+            )
+
+            class MyModule(torch.nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    self.linear = torch.nn.Linear(2, 2)
+
+                def forward(self, x):
+                    return self.linear(x)
+
+            mod = MyModule()
+
+            @torch.compile(backend=backend)
+            def fn(x):
+                return mod(x)
+
+            fn(inputs[0])
+
+        def test_num_static_inputs_rng_seed_offset(self):
+            def eager(gm, example_inputs):
+                return gm.forward
+
+            inputs = [torch.randn(2, 2)]
+
+            def fw_compiler(gm, example_inputs):
+                tc = torch._guards.TracingContext.try_get()
+                self.assertTrue(tc and tc.params_buffers_flat is not None)
+                dynamo_gm_num_inputs = len(inputs)
+                aot_fw_gm_num_inputs = len(example_inputs)
+                expected = aot_fw_gm_num_inputs - dynamo_gm_num_inputs - 2
+                self.assertEqual(
+                    expected,
+                    torch._inductor.utils.num_fw_fixed_arguments(
+                        dynamo_gm_num_inputs, aot_fw_gm_num_inputs
+                    ),
+                )
+                return eager(gm, example_inputs)
+
+            backend = aot_autograd(
+                fw_compiler=fw_compiler,
+                bw_compiler=eager,
+            )
+
+            class MyModule(torch.nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    self.linear = torch.nn.Linear(2, 2)
+
+                def forward(self, x):
+                    return self.linear(x)
+
+            mod = MyModule()
+
+            @torch.compile(backend=backend)
+            def fn(x):
+                return mod(x)
+
+            with torch._functorch.config.patch(functionalize_rng_ops=True):
+                fn(inputs[0])
+
+        def test_non_dynamo_num_static_inputs(self):
+            def eager(gm, example_inputs):
+                return gm.forward
+
+            inputs = [torch.randn(2, 2)]
+
+            def fw_compiler(gm, example_inputs):
+                self.assertEqual(torch._guards.TracingContext.try_get(), None)
+                frontend_gm_num_inputs = len(inputs)
+                aot_fw_gm_num_inputs = len(example_inputs)
+                expected = aot_fw_gm_num_inputs - frontend_gm_num_inputs
+                self.assertEqual(
+                    expected,
+                    torch._inductor.utils.num_fw_fixed_arguments(
+                        frontend_gm_num_inputs, aot_fw_gm_num_inputs
+                    ),
+                )
+                return eager(gm, example_inputs)
+
+            class MyModule(torch.nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    self.linear = torch.nn.Linear(2, 2)
+
+                def forward(self, x):
+                    return self.linear(x)
+
+            mod = MyModule()
+            opt_mod = fw_compiler(mod, inputs[0])
+            opt_mod(inputs[0])
 
     instantiate_parametrized_tests(CudaGraphTreeTests)
 
