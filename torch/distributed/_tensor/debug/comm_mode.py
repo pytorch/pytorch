@@ -3,6 +3,11 @@ from typing import Any, Dict
 
 import torch
 from torch.distributed._tensor.api import DTensor
+
+from torch.distributed._tensor.examples.advanced_module_tracker import (
+    AdvancedModuleTracker,
+)
+
 from torch.utils._python_dispatch import TorchDispatchMode
 
 
@@ -71,6 +76,7 @@ class CommDebugMode(TorchDispatchMode):
             self.comm_registry.add(py_op)
 
         self.comm_registry.add(torch.ops._dtensor.shard_dim_alltoall)
+        self.advanced_module_tracker = AdvancedModuleTracker()
 
     def get_total_counts(self) -> int:
         return sum(self.comm_counts.values())
@@ -83,13 +89,27 @@ class CommDebugMode(TorchDispatchMode):
         """
         return self.comm_counts
 
+    def get_parameter_info(self) -> Dict[str, Dict[str, Any]]:
+        return self.advanced_module_tracker.module_parameters_dict
+
+    def get_sharding_info(self) -> Dict[str, Dict[str, Any]]:
+        return self.advanced_module_tracker.sharding_dict
+
     def __enter__(self):
         self.comm_counts.clear()
         super().__enter__()
+        self.advanced_module_tracker.__enter__()
         return self
 
     def __exit__(self, *args):
+        self.advanced_module_tracker.__exit__()
         super().__exit__(*args)
+
+    def print_paramater_info(self):
+        self.advanced_module_tracker.print_paramater_info()
+
+    def print_sharding_info(self):
+        self.advanced_module_tracker.print_sharding_info()
 
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
         # When running this mode with DTensor, ordinarily all modes will
