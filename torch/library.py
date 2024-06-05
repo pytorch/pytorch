@@ -109,8 +109,22 @@ class Library:
         assert self.m is not None
         if isinstance(tags, torch.Tag):
             tags = (tags,)
+
+        name = schema.split("(")[0]
+        packet_name = name.split(".")[0] if "." in name else name
+        has_preexisting_packet = hasattr(torch.ops, self.ns) and hasattr(getattr(torch.ops, self.ns), packet_name)
+
         result = self.m.define(schema, alias_analysis, tuple(tags))
-        qualname = self.ns + "::" + schema.split("(")[0]
+        name = schema.split("(")[0]
+        qualname = self.ns + "::" + name
+
+        # If the OpOverloadPacket exists already, then this means we're adding a
+        # new OpOverload for it. Refresh the packet to include the new OpOverload.
+        if has_preexisting_packet:
+            ns = getattr(torch.ops, self.ns)
+            packet = getattr(ns, packet_name)
+            torch._ops._refresh_packet(packet)
+
         self._op_defs.add(qualname)
         _defs.add(qualname)
         return result
