@@ -83,7 +83,13 @@ class CSEPass(PassBase):
         for n in graph_module.graph.nodes:
             # The placeholder, output, and get_attr nodes are copied to the new graph without change
             # do not CSE away random operations
-            if n.op == 'placeholder' or n.op == 'output' or n.op == 'get_attr' or get_aten_target(n) in self.banned_ops:
+            if (
+                n.op == 'placeholder'
+                or n.op == 'output'
+                or n.op == 'get_attr'
+                or get_aten_target(n) in self.banned_ops
+                or n.target in self.banned_ops
+            ):
                 new_node = new_graph.node_copy(n, lambda x: env[x])
                 if self.force_copy_name:
                     new_node.name = n.name

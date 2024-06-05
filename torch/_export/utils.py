@@ -612,9 +612,16 @@ def placeholder_naming_pass(
 
 
 def cse_pass(gm: torch.fx.GraphModule) -> torch.fx.GraphModule:
+    banned_ops = get_CSE_banned_ops()
+    # additional ops that shouldn't be deduplicated,
+    # and won't be handled within export (e.g. set_grad_enabled gets turned into HOO subgraphs)
+    banned_ops = banned_ops.union({
+        torch.ops.pippy._pipe_split.default,
+    })
+
     # run CSE pass
     result = CSEPass(
-        banned_ops=get_CSE_banned_ops(),
+        banned_ops=banned_ops,
         force_copy_name=True,
         args_hash_fn=lambda n, n_args: (
             (n.args[0],)

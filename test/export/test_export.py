@@ -5292,8 +5292,8 @@ def forward(self, x, y):
         for _strict in [True, False]:
             inputs = (torch.randn(8, 4), torch.randn(4))
             dynamic_shapes = {
-                "x": (Dim("dx0"), Dim("dx1")),
-                "y": (Dim("dy"),)
+                "x": (Dim("dx0", max=4096), Dim("dx1", max=4096)),
+                "y": (Dim("dy", max=4096),)
             }
             ep = torch.export._trace._export(
                 Foo(),
