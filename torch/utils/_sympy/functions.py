@@ -403,6 +403,12 @@ class Identity(sympy.Function):
     def __repr__(self):
         return f"Identity({self.args[0]})"
 
+    def _eval_is_real(self):
+        return self.args[0].is_real
+
+    def _eval_is_integer(self):
+        return self.args[0].is_integer  # type: ignore[attr-defined]
+
 
 def make_opaque_unary_fn(name):
     class OpaqueUnaryFn(sympy.Function):
