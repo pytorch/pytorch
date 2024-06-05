@@ -2,7 +2,6 @@ import argparse
 import csv
 import dataclasses
 import os
-import time
 
 from generate import run_llama2_7b_bf16, run_llama2_7b_int8, run_mixtral_8x7b_int8
 from triton.testing import do_bench
@@ -22,103 +21,118 @@ class Experiment:
     actual: float
 
 
-def do_inference(mod, x, num_samples: int = 5):
-    total_time = 0
-    start = -1
+class SimpleMLP(nn.Module):
+    def __init__(self, input_dim, hidden_dim, output_dim, dtype):
+        super().__init__()
+        self.fc1 = nn.Linear(input_dim, hidden_dim, dtype=dtype)
+        self.ln1 = nn.LayerNorm(hidden_dim, dtype=dtype)
+        self.fc2 = nn.Linear(hidden_dim, output_dim, dtype=dtype)
+        self.ln2 = nn.LayerNorm(output_dim, dtype=dtype)
 
-    for i in range(start, num_samples):
-        torch.cuda.synchronize("cuda")
-
-        t0 = time.perf_counter()
-        mod(x)
-
-        if i == -1:
-            print(f"Compilation time: {time.perf_counter() - t0:.2f} seconds")
-            continue
-
-        torch.cuda.synchronize("cuda")
-        total_time += time.perf_counter() - t0
-
-    total_time = total_time / num_samples
-
-    return total_time
-
-
-def run_multi_layer_norm():
-    class MultiLayerNorm(nn.Module):
-        def __init__(self, num_layers, normalized_shape, eps=1e-5, bias=True):
-            super().__init__()
-            self.num_layers = num_layers
-            self.norm_layers = nn.ModuleList(
-                [
-                    nn.LayerNorm(normalized_shape, eps=eps, bias=bias)
-                    for _ in range(num_layers)
-                ]
-            )
-
-        def forward(self, x):
-            for layer_norm in self.norm_layers:
-                x = layer_norm(x)
-            return x
-
-    mod = MultiLayerNorm(num_layers=8, normalized_shape=4096).to("cuda")
-    mod = torch.compile(mod)
-    input = torch.randn([512, 1024, 4096], dtype=torch.bfloat16, device="cuda")
-    inference_time = do_inference(mod, input)
-
-    memory_bandwidth = input.numel() * input.dtype.itemsize / inference_time / 1e9
-
-    return [
-        Experiment(
-            "multi_layer_norm", "memory_bandwidth(GB/s)", 92, f"{memory_bandwidth:.02f}"
-        )
-    ]
+    def forward(self, x):
+        x = self.fc1(x)
+        x = F.gelu(self.ln1(x))
+        x = self.fc2(x)
+        x = F.gelu(self.ln2(x))
+        return x
 
 
 def run_mlp_layer_norm_gelu():
-    class MLP(nn.Module):
-        def __init__(self, input_dim, output_dim, dtype):
-            super().__init__()
-            self.fc = nn.Linear(input_dim, output_dim, dtype=dtype)
-            self.ln = nn.LayerNorm(output_dim, dtype=dtype)
+    dtype_memory_bandwidth_map = {
+        torch.bfloat16: "5000",
+    }
+    input_shapes = [1024, 4096, 8192, 16384]
+    intermediate_size = 14336
+    max_shape = max(input_shapes)
+    num_iters = [max_shape // i for i in input_shapes]
+    results = []
+    for dtype, expected_memory_bandwidth in dtype_memory_bandwidth_map.items():
+        memory_bandwidth = 0
+        for D, num_iter in zip(input_shapes, num_iters):
+            mod = SimpleMLP(
+                input_dim=D, hidden_dim=intermediate_size, output_dim=D, dtype=dtype
+            ).to("cuda")
 
-        def forward(self, x):
-            x = self.fc(x)
-            x = F.gelu(self.ln(x))
-            return x
+            x = torch.randn(D, device="cuda", dtype=torch.bfloat16)
 
-    E = 8
-    dtype = torch.bfloat16
-    memory_bandwidth = 0
-    input_dims = [4096]
-    output_dims = [96]
-    for input_dim, output_dim in zip(input_dims, output_dims):
-        mod = MLP(input_dim, output_dim, dtype).to("cuda")
-        mod = torch.compile(mod)
-        input = torch.randn([E, E, input_dim], dtype=dtype, device="cuda")
-        for _ in range(5):
-            mod(input)
+            compiled_mod = torch.compile(mod)
 
-        us_per_iter = do_bench(lambda: mod(input)) * 1000
-        memory_bandwidth += (
-            (1e6 / us_per_iter) * 4 * input_dim * output_dim * dtype.itemsize / 1e9
+            for _ in range(WARMUP_ITER):
+                compiled_mod(x)
+
+            memory_bandwith_per_shape = 0
+            for _ in range(num_iter):
+                us_per_iter = do_bench(lambda: compiled_mod(x)) * 1000
+                memory_bandwith_per_shape += (
+                    (1e6 / us_per_iter)
+                    * 4
+                    * D
+                    * intermediate_size
+                    * dtype.itemsize
+                    / 1e9
+                )
+            memory_bandwidth += memory_bandwith_per_shape
+
+        memory_bandwidth = memory_bandwidth / len(input_shapes)
+        dtype_str = str(dtype).replace("torch.", "")
+        results.append(
+            Experiment(
+                f"mlp_layer_norm_gelu_{dtype_str}",
+                "memory_bandwidth(GB/s)",
+                expected_memory_bandwidth,
+                f"{memory_bandwidth:.02f}",
+            )
         )
+    return results
 
-    return [
-        Experiment(
-            "mlp_layer_norm_gelu",
-            "memory_bandwidth(GB/s)",
-            92,
-            f"{memory_bandwidth:.02f}",
+
+def run_layer_norm():
+    dtype_memory_bandwidth_map = {
+        torch.bfloat16: "3700",
+    }
+    input_shapes = [1024, 4096, 8192, 16384]
+    max_shape = max(input_shapes)
+    num_iters = [max_shape // i for i in input_shapes]
+    BS = 4096
+    results = []
+    for dtype, expected_memory_bandwidth in dtype_memory_bandwidth_map.items():
+        memory_bandwidth = 0
+        for D, num_iter in zip(input_shapes, num_iters):
+            mod = nn.LayerNorm(D).to("cuda")
+
+            x = torch.randn(BS, D, device="cuda", dtype=dtype)
+
+            compiled_mod = torch.compile(mod)
+
+            for _ in range(WARMUP_ITER):
+                compiled_mod(x)
+
+            memory_bandwith_per_shape = 0
+            for _ in range(num_iter):
+                us_per_iter = do_bench(lambda: compiled_mod(x)) * 1000
+                memory_bandwith_per_shape += (
+                    (1e6 / us_per_iter) * 2 * BS * D * dtype.itemsize / 1e9
+                )
+            memory_bandwidth += memory_bandwith_per_shape
+
+        memory_bandwidth = memory_bandwidth / len(input_shapes)
+        dtype_str = str(dtype).replace("torch.", "")
+        results.append(
+            Experiment(
+                f"layer_norm_{dtype_str}",
+                "memory_bandwidth(GB/s)",
+                expected_memory_bandwidth,
+                f"{memory_bandwidth:.02f}",
+            )
         )
-    ]
+    return results
 
 
 def run_gather_gemv():
     E = 8
     dtype_memory_bandwidth_map = {
-        torch.int8: "6222",
-        torch.bfloat16: "7992",
+        torch.int8: "4000",
+        torch.bfloat16: "6979",
     }
     input_shapes = [1024, 4096, 8192, 16384]
     max_shape = max(input_shapes)
@@ -161,6 +175,51 @@ def run_gather_gemv():
     return results
 
 
+def run_gemv():
+    dtype_memory_bandwidth_map = {
+        torch.int8: "3170",
+        torch.bfloat16: "5100",
+    }
+    input_shapes = [1024, 4096, 8192, 16384]
+    max_shape = max(input_shapes)
+    num_iters = [max_shape // i for i in input_shapes]
+    results = []
+    for dtype, expected_memory_bandwidth in dtype_memory_bandwidth_map.items():
+        memory_bandwidth = 0
+        for D, num_iter in zip(input_shapes, num_iters):
+
+            def gemv(W, x):
+                return W.to(x.dtype) @ x
+
+            W = torch.randn(D, D, device="cuda").to(dtype=dtype)
+            x = torch.randn(D, device="cuda", dtype=torch.bfloat16)
+
+            compiled_fn = torch.compile(gemv)
+
+            for _ in range(WARMUP_ITER):
+                compiled_fn(W, x)
+
+            memory_bandwith_per_shape = 0
+            for _ in range(num_iter):
+                us_per_iter = do_bench(lambda: compiled_fn(W, x)) * 1000
+                memory_bandwith_per_shape += (
+                    (1e6 / us_per_iter) * 2 * D * D * dtype.itemsize / 1e9
+                )
+            memory_bandwidth += memory_bandwith_per_shape
+
+        memory_bandwidth = memory_bandwidth / len(input_shapes)
+        dtype_str = str(dtype).replace("torch.", "")
+        results.append(
+            Experiment(
+                f"gemv_{dtype_str}",
+                "memory_bandwidth(GB/s)",
+                expected_memory_bandwidth,
+                f"{memory_bandwidth:.02f}",
+            )
+        )
+    return results
+
+
 def output_csv(output_file, headers, row):
     if os.path.exists(output_file):
         with open(output_file) as fd:
@@ -190,9 +249,10 @@ all_experiments = {
     run_llama2_7b_int8,
     run_mixtral_8x7b_int8,
     # A list of micro-benchmarks.
-    run_multi_layer_norm,
     run_mlp_layer_norm_gelu,
+    run_layer_norm,
     run_gather_gemv,
+    run_gemv,
 }
 
 
