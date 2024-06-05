@@ -8,7 +8,6 @@
 #include <c10/macros/Macros.h>
 #include <c10/util/MaybeOwned.h>
 #include <c10/util/irange.h>
-#include <caffe2/core/scope_guard.h>
 #include <caffe2/core/timer.h>
 #include <torch/csrc/jit/ir/alias_analysis.h>
 #include <torch/csrc/jit/jit_log.h>
