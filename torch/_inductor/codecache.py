@@ -1534,7 +1534,7 @@ def cpp_flags() -> str:
 
 
 def cpp_wrapper_flags() -> str:
-    return "-DTORCH_INDUCTOR_CPP_WRAPPER"
+    return "-D TORCH_INDUCTOR_CPP_WRAPPER"
 
 
 def optimization_flags() -> str:
@@ -1681,7 +1681,7 @@ def get_include_and_linking_paths(
     macros = ""
     if vec_isa != invalid_vec_isa:
         for x in vec_isa.build_macro():
-            macros_def = f"-D{x} "
+            macros_def = f"-D {x} "
             macros += macros_def
 
     build_arch_flags = ""

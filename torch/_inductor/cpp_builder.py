@@ -580,6 +580,9 @@ def _get_python_related_args():
     else:
         python_lib_path = [sysconfig.get_config_var("LIBDIR")]
 
+    if config.is_fbcode():
+        python_include_dirs.append(build_paths.python())
+
     return python_include_dirs, python_lib_path
 
 
@@ -646,6 +649,8 @@ def _get_openmp_args(cpp_compiler):
         libs = []
     else:
         if config.is_fbcode():
+            include_dir_paths.append(build_paths.openmp())
+
             openmp_lib = build_paths.openmp_lib()
             fb_openmp_extra_flags = f"-Wp,-fopenmp {openmp_lib}"
 
@@ -1075,7 +1080,7 @@ class CppBuilder:
             if _IS_WINDOWS:
                 self._definations_args += f"/D {defination} "
             else:
-                self._definations_args += f"-D{defination} "
+                self._definations_args += f"-D {defination} "
 
         for inc_dir in BuildOption.get_include_dirs():
             if _IS_WINDOWS:
