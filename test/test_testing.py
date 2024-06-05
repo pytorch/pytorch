@@ -2245,6 +2245,7 @@ class TestImports(TestCase):
             else:
                 ignored_modules.append("torch.distributed.nn.api.")
                 ignored_modules.append("torch.distributed.optim.")
+                ignored_modules.append("torch.distributed.pipeline.")
                 ignored_modules.append("torch.distributed.rpc.")
             ignored_modules.append("torch.testing._internal.dist_utils")
             # And these both end up with transitive dependencies on distributed
