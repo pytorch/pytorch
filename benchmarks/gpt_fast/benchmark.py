@@ -9,6 +9,9 @@ from triton.testing import do_bench
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
+
+WARMUP_ITER = 5
 
 
 @dataclasses.dataclass
@@ -72,34 +75,90 @@ def run_multi_layer_norm():
     ]
 
 
-def run_gather_gemv():
+def run_mlp_layer_norm_gelu():
+    class MLP(nn.Module):
+        def __init__(self, input_dim, output_dim, dtype):
+            super().__init__()
+            self.fc = nn.Linear(input_dim, output_dim, dtype=dtype)
+            self.ln = nn.LayerNorm(output_dim, dtype=dtype)
+
+        def forward(self, x):
+            x = self.fc(x)
+            x = F.gelu(self.ln(x))
+            return x
+
     E = 8
-    dtype = torch.int8
+    dtype = torch.bfloat16
     memory_bandwidth = 0
-    input_shapes = [4096]
-    for D in input_shapes:
-
-        def cuda_indexing(W, score_idxs, x):
-            return W[score_idxs].to(x.dtype) @ x
-
-        W = torch.randn(E, D, D, device="cuda").to(dtype=dtype)
-        x = torch.randn(D, device="cuda", dtype=torch.bfloat16)
-        score_idxs = torch.tensor([3, 5], device="cuda")
-
-        compiled_cuda = torch.compile(cuda_indexing, dynamic=False)
-
+    input_dims = [4096]
+    output_dims = [96]
+    for input_dim, output_dim in zip(input_dims, output_dims):
+        mod = MLP(input_dim, output_dim, dtype).to("cuda")
+        mod = torch.compile(mod)
+        input = torch.randn([E, E, input_dim], dtype=dtype, device="cuda")
         for _ in range(5):
-            compiled_cuda(W, score_idxs, x)
+            mod(input)
 
-        us_per_iter = do_bench(lambda: compiled_cuda(W, score_idxs, x)) * 1000
-        memory_bandwidth += (1e6 / us_per_iter) * 2 * D * D * dtype.itemsize / 1e9
+        us_per_iter = do_bench(lambda: mod(input)) * 1000
+        memory_bandwidth += (
+            (1e6 / us_per_iter) * 4 * input_dim * output_dim * dtype.itemsize / 1e9
+        )
 
-    memory_bandwidth = memory_bandwidth / len(input_shapes)
     return [
         Experiment(
-            "gather_gemv", "memory_bandwidth(GB/s)", 92, f"{memory_bandwidth:.02f}"
+            "mlp_layer_norm_gelu",
+            "memory_bandwidth(GB/s)",
+            92,
+            f"{memory_bandwidth:.02f}",
         )
     ]
+
+
+def run_gather_gemv():
+    E = 8
+    dtype_memory_bandwidth_map = {
+        torch.int8: "6222",
+        torch.bfloat16: "7992",
+    }
+    input_shapes = [1024, 4096, 8192, 16384]
+    max_shape = max(input_shapes)
+    num_iters = [max_shape // i for i in input_shapes]
+    results = []
+    for dtype, expected_memory_bandwidth in dtype_memory_bandwidth_map.items():
+        memory_bandwidth = 0
+        for D, num_iter in zip(input_shapes, num_iters):
+
+            def gather_gemv(W, score_idxs, x):
+                return W[score_idxs].to(x.dtype) @ x
+
+            W = torch.randn(E, D, D, device="cuda").to(dtype=dtype)
+            x = torch.randn(D, device="cuda", dtype=torch.bfloat16)
+            score_idxs = torch.tensor([3, 5], device="cuda")
+
+            compiled_fn = torch.compile(gather_gemv)
+
+            for _ in range(WARMUP_ITER):
+                compiled_fn(W, score_idxs, x)
+
+            memory_bandwith_per_shape = 0
+            for _ in range(num_iter):
+                us_per_iter = do_bench(lambda: compiled_fn(W, score_idxs, x)) * 1000
+                memory_bandwith_per_shape += (
+                    (1e6 / us_per_iter) * 4 * D * D * dtype.itemsize / 1e9
+                )
+            memory_bandwidth += memory_bandwith_per_shape
+
+        memory_bandwidth = memory_bandwidth / len(input_shapes)
+        dtype_str = str(dtype).replace("torch.", "")
+        results.append(
+            Experiment(
+                f"gather_gemv_{dtype_str}",
+                "memory_bandwidth(GB/s)",
+                expected_memory_bandwidth,
+                f"{memory_bandwidth:.02f}",
+            )
+        )
+    return results
 
 
 def output_csv(output_file, headers, row):
@@ -132,6 +191,7 @@ all_experiments = {
     run_mixtral_8x7b_int8,
     # A list of micro-benchmarks.
     run_multi_layer_norm,
+    run_mlp_layer_norm_gelu,
     run_gather_gemv,
 }
 
