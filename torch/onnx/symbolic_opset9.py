@@ -1166,13 +1166,13 @@ def unbind(g: jit_utils.GraphContext, self, dim=0, _outputs=None):
 def select(g: jit_utils.GraphContext, self, dim, index):
     """
     Selects elements from the input tensor along a given dimension `dim`.
-    
+
     Args:
         g (jit_utils.GraphContext): The graph context.
         self (Tensor): The input tensor.
         dim (int): The dimension along which to select elements.
-        index (Tensor or int): The indices of the elements to select.
-    
+        index (Tensor or int): The indices of the elements to select. 
+
     Returns:
         Tensor: The selected elements from the input tensor.
     """
