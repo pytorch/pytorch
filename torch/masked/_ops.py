@@ -1,15 +1,12 @@
-
 import warnings
-
-# A workaround to support both TorchScript and MyPy:
 from typing import Any, List, Optional, Tuple, TYPE_CHECKING, Union
 
 import torch
-from torch import Tensor
-from torch.masked import as_masked_tensor, is_masked_tensor, MaskedTensor
-from . import _docs
+from torch import sym_float, Tensor
 from torch._prims_common import corresponding_real_dtype
-from torch import sym_float
+from torch.masked import _docs
+from torch.masked.maskedtensor.core import is_masked_tensor, MaskedTensor
+from torch.masked.maskedtensor.creation import as_masked_tensor
 
 if TYPE_CHECKING:
     from torch.types import _dtype as DType
@@ -469,7 +466,7 @@ def _canonical_dim(dim: DimOrDims, ndim: int) -> Tuple[int, ...]:
             raise RuntimeError(f"dim={d} appears multiple times in the list of dims")
         if d >= ndim or d < -ndim:
             raise IndexError(
-                f"Dimension out of range (expected to be in range of [{-ndim}, {ndim-1}], but got {d})"
+                f"Dimension out of range (expected to be in range of [{-ndim}, {ndim - 1}], but got {d})"
             )
         dims.append(d % ndim)
     return tuple(sorted(dims))
@@ -1420,7 +1417,6 @@ def median(
     dtype: Optional[DType] = None,
     mask: Optional[Tensor] = None,
 ) -> Tensor:
-
     """\
 {reduction_signature}
 {reduction_descr}
@@ -1487,46 +1483,45 @@ def logaddexp(
 ) -> Tensor:
     """logaddexp(input, other, *, dtype=None, input_mask=None, other_mask=None) -> Tensor
 
-Returns logaddexp of all the elements in the :attr:`input` and the :attr:`other`
-tensor. The :attr:`input` elements are masked out according to the boolean tensor
-:attr:`input_mask` and the attr:`other` elements are masked out according to the boolean tensor
-:attr:`other_mask`.
+    Returns logaddexp of all the elements in the :attr:`input` and the :attr:`other`
+    tensor. The :attr:`input` elements are masked out according to the boolean tensor
+    :attr:`input_mask` and the attr:`other` elements are masked out according to the boolean tensor
+    :attr:`other_mask`.
 
-The shapes of a mask tensor and the tensor to be masked
-don't need to match, but they must be :ref:`broadcastable
-<broadcasting-semantics>` and the dimensionality of the mask
-tensor must not be greater than of the tensor to be masked.
+    The shapes of a mask tensor and the tensor to be masked
+    don't need to match, but they must be :ref:`broadcastable
+    <broadcasting-semantics>` and the dimensionality of the mask
+    tensor must not be greater than of the tensor to be masked.
 
-Args:
-    input (Tensor): the input tensor
-    other (Tensor): the second input tensor
+    Args:
+        input (Tensor): the input tensor
+        other (Tensor): the second input tensor
 
-Keyword args:
-    dtype (:class:`torch.dtype`, optional): the desired data type
-      of returned tensor.  If specified, the output tensor is
-      casted to :attr:`dtype` after the operation is
-      performed. Default: None.
-    input_mask (:class:`torch.Tensor`, optional): the boolean tensor
-      containing the binary mask of validity of :attr:`input` tensor elements.
-      Default: None that is equivalent to ``torch.ones(input.shape, dtype=torch.bool)``.
-    other_mask (:class:`torch.Tensor`, optional): the boolean tensor
-      containing the binary mask of validity of :attr:`other` tensor elements.
-      Default: None that is equivalent to ``torch.ones(other.shape, dtype=torch.bool)``.
+    Keyword args:
+        dtype (:class:`torch.dtype`, optional): the desired data type
+          of returned tensor.  If specified, the output tensor is
+          casted to :attr:`dtype` after the operation is
+          performed. Default: None.
+        input_mask (:class:`torch.Tensor`, optional): the boolean tensor
+          containing the binary mask of validity of :attr:`input` tensor elements.
+          Default: None that is equivalent to ``torch.ones(input.shape, dtype=torch.bool)``.
+        other_mask (:class:`torch.Tensor`, optional): the boolean tensor
+          containing the binary mask of validity of :attr:`other` tensor elements.
+          Default: None that is equivalent to ``torch.ones(other.shape, dtype=torch.bool)``.
 
-Example::
+    Example::
 
-    >>> input = torch.tensor([-100.0, -200, -300])
-    >>> input
-    tensor([-100., -200., -300.])
-    >>> other = torch.tensor([-1.0, -2, -3])
-    >>> other
-    tensor([-1., -2., -3.])
-    >>> mask = torch.tensor([True, False, True])
-    >>> mask
-    tensor([ True, False,  True])
-    >>> torch.masked._ops.logaddexp(input, other, input_mask=mask, other_mask=mask)
-    tensor([-1., -inf, -3.])
-"""
+        >>> input = torch.tensor([-100.0, -200, -300])
+        >>> input
+        tensor([-100., -200., -300.])
+        >>> other = torch.tensor([-1.0, -2, -3])
+        >>> other
+        tensor([-1., -2., -3.])
+        >>> mask = torch.tensor([True, False, True])
+        >>> mask
+        tensor([ True, False,  True])
+        >>> torch.masked._ops.logaddexp(input, other, input_mask=mask, other_mask=mask)
+        tensor([-1., -inf, -3.])"""
     if dtype is None:
         dtype = input.dtype
     if input.layout == torch.strided and other.layout == torch.strided:
@@ -1586,7 +1581,9 @@ def _std_var(
     mask: Optional[Tensor],
     take_sqrt: Optional[bool],
 ) -> Tensor:
-    assert (unbiased is None or correction_opt is None), "Only one of unbiased and correction may be given"
+    assert (
+        unbiased is None or correction_opt is None
+    ), "Only one of unbiased and correction may be given"
     correction = 1.0
     if unbiased is not None:
         correction = 1.0 if unbiased else 0.0
@@ -1632,8 +1629,11 @@ def _std_var(
         if not keepdim:
             count = count.reshape(total.shape)
         if correction != 0:
-            real_dtype = (corresponding_real_dtype(compute_dtype)
-                          if compute_dtype.is_complex else compute_dtype)
+            real_dtype = (
+                corresponding_real_dtype(compute_dtype)
+                if compute_dtype.is_complex
+                else compute_dtype
+            )
             count = count.to(real_dtype)
             count = torch.subtract(count, correction)
             count = torch.maximum(count, count.new_zeros([]))

@@ -11,6 +11,8 @@ from itertools import count
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, Union
 from unittest import mock
 
+import torch._inductor.async_compile  # noqa: F401 required to warm up AsyncCompile pools
+
 import torch.fx
 import torch.utils._pytree as pytree
 
@@ -408,7 +410,7 @@ def with_fresh_cache_if_config(f):
 # the backward graph as well.
 @_use_lazy_graph_module(dynamo_config.use_lazy_graph_module)
 @with_fresh_cache_if_config
-@dynamo_utils.dynamo_timed(phase_name="inductor_compile")
+@dynamo_utils.dynamo_timed(phase_name="inductor_compile", fwd_only=False)
 def compile_fx_inner(
     gm: torch.fx.GraphModule,
     example_inputs: List[torch.Tensor],
