@@ -2063,7 +2063,10 @@ def categorize_checks(
             )
             target.append((checkname, url, job_id))
 
-    flaky_or_broken_trunk = failed_checks_categorization["BROKEN_TRUNK"] + failed_checks_categorization["FLAKY"]
+    flaky_or_broken_trunk = (
+        failed_checks_categorization["BROKEN_TRUNK"]
+        + failed_checks_categorization["FLAKY"]
+    )
 
     if flaky_or_broken_trunk:
         warn(
