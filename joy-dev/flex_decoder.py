@@ -98,6 +98,7 @@ if __name__ == "__main__":
     compiled_flex_attention = torch.compile(flex_attention)
     compiled_output= compiled_flex_attention(query, key, value, score_mod=checkerboard)
     print(eager_output, "Eager Flex Decoding output")
+    print(compiled_output, "Compiled Flex Decoding output")
 
 
     decoder_output = eager_flash_decoder(query, key, value, score_mod=checkerboard, Bc=128)[0]

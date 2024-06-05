@@ -206,7 +206,6 @@ flex_attention_template = TritonTemplate(
         block_shape=(BLOCK_M, BLOCK_DMODEL),
         order=(1, 0)
     )
-    kv_offset = off_hz * stride_kh
     K_block_ptr = tl.make_block_ptr(
         base=K + kv_offset,
         shape=(BLOCK_DMODEL, KV_LEN),
@@ -386,8 +385,6 @@ from torch._inductor.kernel.flex_decoding import create_flex_decoding_kernel
 @register_lowering(torch.ops.higher_order.flex_attention, type_promotion_kind=None)
 def flex_attention(*args, **kwargs):
     query, key, value, subgraph, *other_buffers = args
-    if _use_flex_decoding(query):
-        return create_flex_decoding_kernel(query, key, value, subgraph, other_buffers)
     for buf in [query, key, value]:
         buf.realize()
     placeholder_inps = [
@@ -409,6 +406,9 @@ def flex_attention(*args, **kwargs):
         query.get_size(),
         FlexibleLayout.contiguous_strides(query.get_size()),
     )
+
+    if _use_flex_decoding(query):
+        return create_flex_decoding_kernel(subgraph_buffer, layout, query, key, value, subgraph, *other_buffers)
     # see NOTE:[TritonTemplates with multiple outputs]
     logsumexp_shape = query.get_size()[:-1]  # [B, H, M]
     logsumexp = empty_strided(

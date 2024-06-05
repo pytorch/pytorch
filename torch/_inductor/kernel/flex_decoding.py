@@ -1,7 +1,7 @@
 """ Triton Implementation of the flex_attention Kernel for short query length (FlexDecoding)"""
 import torch
 from .. import config
-from ..lowering import empty_strided, lowerings, register_lowering
+from ..lowering import empty_strided, lowerings, register_lowering, as_strided, full
 from ..select_algorithm import autotune_select_algorithm, TritonTemplate
 from torch._prims_common import make_contiguous_strides_for
 from ..ir import (
@@ -96,7 +96,7 @@ flex_decoding_template = TritonTemplate(
     q_offset = off_hz * stride_qh
     Q_block_ptr = tl.make_block_ptr(
         base=Q + q_offset,
-        shape=(Q_CTX, BLOCK_DMODEL),            # (Q, d) = (2, 64)
+        shape=(Q_CTX, BLOCK_DMODEL),        # (M, d)
         strides=(stride_qm, stride_qk),
         offsets=(0, 0),                     # No offset: one CTA per query
         block_shape=(BLOCK_MMODEL, BLOCK_DMODEL),
@@ -106,9 +106,9 @@ flex_decoding_template = TritonTemplate(
     kv_offset = off_hz * stride_kh
     K_block_ptr = tl.make_block_ptr(
         base=K + kv_offset,
-        shape=(BLOCK_DMODEL, N_CTX),       # (d, N) = (64, 2048)
+        shape=(BLOCK_DMODEL, N_CTX),                # (d, N)
         strides=(stride_kk, stride_kn),
-        offsets=(0, 0),                    # TODO: Add offset here for spliting K among CTAs
+        offsets=(0, off_t * TILE_KV), 
         block_shape=(BLOCK_DMODEL, BLOCK_N),
         order=(0, 1)
     )
@@ -116,12 +116,12 @@ flex_decoding_template = TritonTemplate(
         base=V + kv_offset,
         shape=(N_CTX, BLOCK_DMODEL),
         strides=(stride_vk, stride_vn),
-        offsets=(0, 0),
+        offsets=(off_t * TILE_KV, 0),
         block_shape=(BLOCK_N, BLOCK_DMODEL),
         order=(1, 0)
     )
 
-    l_offset = off_hz * stride_mh
+    ml_offset = off_hz * stride_mh
     M_block_ptr = tl.make_block_ptr(
         base=M + ml_offset,
         shape=(SPLIT_KV, Q_CTX),                      # (T, M) 
@@ -205,8 +205,8 @@ flex_decoding_template = TritonTemplate(
 
         # -- scale and update acc --
         acc *= alpha[:, None]
-        p_ = p.to(MATMUL_PRECISION)[:, :, None] # dependent on this triton fix: https://github.com/htyu/triton/commit/c36c24c3cd5e872cb113f1cc56a46fb962ac4e27
-        delta_acc = tl.sum(p_ * v.to(MATMUL_PRECISION), axis=-2)
+        p_ = p.to(MATMUL_PRECISION)[:, :, None] # dependent on this triton fix: https://github.com/triton-lang/triton/pull/4061
+        delta_acc = tl.sum(p_ * v.to(MATMUL_PRECISION), axis=-2) 
         acc += delta_acc 
 
         # -- update m_i and l_i --
@@ -251,7 +251,8 @@ flex_decoding_template = TritonTemplate(
         idx_d = tl.arange(0, BLOCK_DMODEL)[None, :]
         # TODO generalize and add proper mask support
         mask = (idx_m != -1) & (idx_d != -1)
-        {{store_output(("idx_z", "idx_h", "idx_m", "idx_d"), "g_acc")}}
+        {{store_output(("idx_z", "idx_h", "idx_m", "idx_d"), "g_acc", "mask", indent_width=8)}} 
+        # indentation hack https://github.com/pytorch/pytorch/pull/125515
 
 
         # TODO dont want to write this if we dont require grad
@@ -313,29 +314,7 @@ def _get_decoding_default_config(query):
 from torch._inductor.kernel.flex_attention import create_placeholder, build_subgraph_buffer, SubgraphType
 
 
-def create_flex_decoding_kernel(*args):
-    query, key, value, subgraph, *other_buffers = args
-    for buf in [query, key, value]:
-        buf.realize()
-    placeholder_inps = [
-        create_placeholder(name, dtype, query.get_device())
-        for name, dtype in [
-            ("score", query.get_dtype()),
-            ("b", torch.int32),
-            ("h", torch.int32),
-            ("m", torch.int32),
-            ("n", torch.int32),
-        ]
-    ]
-    subgraph_buffer = build_subgraph_buffer(
-        args, placeholder_inps, subgraph, graph_type=SubgraphType.FWD
-    )
-    layout = FixedLayout(
-        query.get_device(),
-        query.get_dtype(),
-        query.get_size(),
-        FlexibleLayout.contiguous_strides(query.get_size()),
-    )
+def create_flex_decoding_kernel(subgraph_buffer, layout, query, key, value, subgraph, *other_buffers):
     # see NOTE:[TritonTemplates with multiple outputs]
     logsumexp_shape = query.get_size()[:-1]  # [B, H, M]
     logsumexp = empty_strided(
@@ -366,7 +345,6 @@ def create_flex_decoding_kernel(*args):
     for BLOCK_N, SPLIT_KV, num_warps, num_stages in configs:
         # create config dependent intermediate buffers
         buf_ML_shape = query.get_size()[:-2] + [SPLIT_KV, query.get_size()[-2]]   # [B, H, SPLIT_KV, M]
-        print("buffer_ML_shape", buf_ML_shape)
         buf_M = empty_strided(
             buf_ML_shape,
             None,
@@ -381,7 +359,6 @@ def create_flex_decoding_kernel(*args):
         )
 
         buf_ACC_shape = query.get_size()[:-2] + [SPLIT_KV] + query.get_size()[-2:]   # [B, H, SPLIT_KV, M]
-        print("buffer ACC shape", buf_ACC_shape)
         buf_ACC = empty_strided(
             buf_ACC_shape,
             None,
@@ -389,19 +366,9 @@ def create_flex_decoding_kernel(*args):
             device=query.get_device(),
         )
 
-        # lock_rdct_tensor = torch.zeros(
-        #     query.get_size()[:-2], 
-        #     dtype = torch.int32,
-        #     device = query.get_device(), 
-        # )
-        # LOCK_RDCT = torch.as_strided(lock_rdct_tensor, query.get_size()[:-2], stride=(query.get_size()[-3], 1))
 
-        lock_RDCT = empty_strided(
-            query.get_size()[:-2], 
-            None, 
-            dtype = torch.int32,
-            device=query.get_device(),
-        )
+        lock_RDCT = full(query.get_size()[:-2], fill_value=0, dtype=torch.int32, device=query.get_device())
+        lock_RDCT = as_strided(lock_RDCT, query.get_size()[:-2], (query.get_size()[-3], 1))
 
 
         flex_decoding_template.maybe_append_choice(
@@ -426,7 +393,7 @@ def create_flex_decoding_kernel(*args):
             ROWS_GUARANTEED_SAFE=False,
             OUTPUT_LOGSUMEXP=True,
         )
-    inputs_for_autotuning = [query, key, value, logsumexp, buf_M, buf_L, buf_ACC, LOCK_RDCT] + list(other_buffers)
+    inputs_for_autotuning = [query, key, value, logsumexp, buf_M, buf_L, buf_ACC, lock_RDCT] + list(other_buffers)
     return (
         autotune_select_algorithm(
             "flex_decoding", choices, inputs_for_autotuning, layout

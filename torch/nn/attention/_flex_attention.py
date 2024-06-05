@@ -104,10 +104,10 @@ def _flex_attention(
     if query.size(-2) >= 32: # use Attention Kernel
         if query.size(-2) < 128 & query.size(-2) not in [32, 64]:
             raise ValueError("NYI: S must be <32, 32, 64 or a multiple of 128")
-        if query.size(-2) % 128 != 0: 
+        if query.size(-2) >= 128 & query.size(-2) % 128 != 0: 
             raise ValueError("NYI: S must be <32, 32, 64 or a multiple of 128")
     if key.size(-2) % 128 != 0: 
-            raise ValueError("NYI: L must be <32, 32, 64 or a multiple of 128")
+            raise ValueError("NYI: L must be a multiple of 128")
 
     if not torch._dynamo.is_dynamo_supported():
         raise RuntimeError("flex_attention requires dynamo support.")
