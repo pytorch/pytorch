@@ -310,7 +310,10 @@ class TritonTemplateKernel(TritonKernel):
         Args:
             subgraph_number (int): The index of the subgraph in self.subgraphs
         """
-        with self.create_subgraph_body(f"modification_{subgraph_number}"):
+        num = 0
+        while f"mod_{subgraph_number}_{num}" in self.subgraph_bodies:
+            num += 1
+        with self.create_subgraph_body(f"mod_{subgraph_number}_{num}"):
             assert isinstance(subgraph_number, int)
             assert isinstance(self.subgraphs, list)
             assert (
@@ -382,7 +385,7 @@ class TritonTemplateKernel(TritonKernel):
             assert isinstance(mask, (str, type(None)))
             assert self.template_mask is None
             indices = list(map(TritonPrinter.paren, indices))
-            index_symbols = [sympy.Symbol(x) for x in indices]
+            index_symbols = [sympy.Symbol(x, integer=True) for x in indices]
             lengths = [
                 V.graph.sizevars.simplify(s) for s in self.output_node.get_size()
             ]
@@ -406,7 +409,7 @@ class TritonTemplateKernel(TritonKernel):
             output_index = self.output_node.get_layout().make_indexer()(index_symbols)
             output_index = self.rename_indexing(output_index)
             if output_index == contiguous_index:
-                output_index = sympy.Symbol("xindex")
+                output_index = sympy.Symbol("xindex", integer=True)
 
             epilogue_args = [val]
             for input_node in itertools.chain(
@@ -577,6 +580,7 @@ class TritonTemplate(KernelTemplate):
         epilogue_fn=identity,
         subgraphs=None,
         mutated_inputs=None,
+        call_sizes=None,
         **kwargs,
     ):
         """This function generates a TritonTemplateCaller
@@ -611,6 +615,9 @@ class TritonTemplate(KernelTemplate):
                 "64-bit indexing is not yet implemented for triton templates"
             )
 
+        if call_sizes is None:
+            call_sizes = layout.size
+
         kernel_options = dict(
             input_nodes=input_nodes,
             defines=defines,
@@ -618,13 +625,14 @@ class TritonTemplate(KernelTemplate):
             num_warps=num_warps,
             grid_fn=self.grid,
             meta=kwargs,
-            call_sizes=layout.size,
+            call_sizes=call_sizes,
             prefix_args=prefix_args,
             suffix_args=suffix_args,
             epilogue_fn=epilogue_fn,
             index_dtype="tl.int32",
             subgraphs=subgraphs,
         )
+
         with patch.object(
             V.graph, "get_dtype", self._fake_get_dtype(fake_out)
         ), TritonTemplateKernel(
@@ -698,7 +706,7 @@ class TritonTemplate(KernelTemplate):
         assert mod.__file__ is not None
         grid = self.grid(
             *V.graph.sizevars.size_hints(
-                layout.size,
+                call_sizes,
                 fallback=config.unbacked_symint_fallback,
             ),
             kwargs,
