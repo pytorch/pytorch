@@ -296,6 +296,8 @@ class TS2FXGraphConverter:
     def is_top_level_graph(self):
         return isinstance(self.ts_graph, torch._C.Graph)
 
+        self.block_to_arguments = block_to_arguments
+
     def add_subgraph(self, subgraph) -> str:
         name = f"subgraph_{len(self.subgraphs)}"
         self.subgraphs[name] = subgraph
@@ -661,7 +663,7 @@ class TS2FXGraphConverter:
                 for block_node_in in block_node.inputs():
                     if block_node_in.debugName() in self.name_to_node:
                         block_args.add(block_node_in.debugName())
-            
+
             arguments.update(block_args)
 
         # Lift parameters as inputs.
