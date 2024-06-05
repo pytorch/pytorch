@@ -2596,7 +2596,11 @@ class TestCase(expecttest.TestCase):
     # the test, skip it instead.
     _ignore_not_implemented_error = False
 
-    def __init__(self, method_name='runTest'):
+    def __init__(self, method_name='runTest', methodName='runTest'):
+        # methodName is the correct naming in unittest and testslide uses keyword arguments.
+        # So we need to use both to 1) not break BC and, 2) support testslide.
+        if methodName != "runTest":
+            method_name = methodName
         super().__init__(method_name)
 
         test_method = getattr(self, method_name, None)
