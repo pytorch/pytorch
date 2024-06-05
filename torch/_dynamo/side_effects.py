@@ -311,12 +311,12 @@ class SideEffects:
             return True
 
         VariableTracker.visit(visit, (tx.stack, tx.symbolic_locals))
-        for var in self.id_to_variable.values():
-            if not isinstance(var.mutable_local, AttributeMutationNew):
-                VariableTracker.visit(visit, var)
+        # for var in self.id_to_variable.values():
+        #     if not isinstance(var.mutable_local, AttributeMutationNew):
+        #         VariableTracker.visit(visit, var)
 
-        for skip_obj, setattrs in self.store_attr_mutations.items():
-            VariableTracker.visit(visit, setattrs)
+        # for skip_obj, setattrs in self.store_attr_mutations.items():
+        #     VariableTracker.visit(visit, setattrs)
 
         self.id_to_variable = {
             k: v for k, v in self.id_to_variable.items() if is_live(v)
