@@ -39,16 +39,14 @@ class SimpleMLP(nn.Module):
 
 def run_mlp_layer_norm_gelu():
     dtype_memory_bandwidth_map = {
-        torch.bfloat16: "5000",
+        torch.bfloat16: "1805",
     }
     input_shapes = [1024, 4096, 8192, 16384]
     intermediate_size = 14336
-    max_shape = max(input_shapes)
-    num_iters = [max_shape // i for i in input_shapes]
     results = []
     for dtype, expected_memory_bandwidth in dtype_memory_bandwidth_map.items():
         memory_bandwidth = 0
-        for D, num_iter in zip(input_shapes, num_iters):
+        for D in input_shapes:
             mod = SimpleMLP(
                 input_dim=D, hidden_dim=intermediate_size, output_dim=D, dtype=dtype
             ).to("cuda")
@@ -60,18 +58,10 @@ def run_mlp_layer_norm_gelu():
             for _ in range(WARMUP_ITER):
                 compiled_mod(x)
 
-            memory_bandwith_per_shape = 0
-            for _ in range(num_iter):
-                us_per_iter = do_bench(lambda: compiled_mod(x)) * 1000
-                memory_bandwith_per_shape += (
-                    (1e6 / us_per_iter)
-                    * 4
-                    * D
-                    * intermediate_size
-                    * dtype.itemsize
-                    / 1e9
-                )
-            memory_bandwidth += memory_bandwith_per_shape
+            us_per_iter = do_bench(lambda: compiled_mod(x)) * 1000
+            memory_bandwidth += (
+                (1e6 / us_per_iter) * 4 * D * intermediate_size * dtype.itemsize / 1e9
+            )
 
         memory_bandwidth = memory_bandwidth / len(input_shapes)
         dtype_str = str(dtype).replace("torch.", "")
@@ -88,16 +78,14 @@ def run_mlp_layer_norm_gelu():
 
 def run_layer_norm():
     dtype_memory_bandwidth_map = {
-        torch.bfloat16: "3700",
+        torch.bfloat16: "1050",
     }
     input_shapes = [1024, 4096, 8192, 16384]
-    max_shape = max(input_shapes)
-    num_iters = [max_shape // i for i in input_shapes]
     BS = 4096
     results = []
     for dtype, expected_memory_bandwidth in dtype_memory_bandwidth_map.items():
         memory_bandwidth = 0
-        for D, num_iter in zip(input_shapes, num_iters):
+        for D in input_shapes:
             mod = nn.LayerNorm(D).to("cuda")
 
             x = torch.randn(BS, D, device="cuda", dtype=dtype)
@@ -107,13 +95,8 @@ def run_layer_norm():
             for _ in range(WARMUP_ITER):
                 compiled_mod(x)
 
-            memory_bandwith_per_shape = 0
-            for _ in range(num_iter):
-                us_per_iter = do_bench(lambda: compiled_mod(x)) * 1000
-                memory_bandwith_per_shape += (
-                    (1e6 / us_per_iter) * 2 * BS * D * dtype.itemsize / 1e9
-                )
-            memory_bandwidth += memory_bandwith_per_shape
+            us_per_iter = do_bench(lambda: compiled_mod(x)) * 1000
+            memory_bandwidth += (1e6 / us_per_iter) * 2 * BS * D * dtype.itemsize / 1e9
 
         memory_bandwidth = memory_bandwidth / len(input_shapes)
         dtype_str = str(dtype).replace("torch.", "")
@@ -131,16 +114,14 @@ def run_layer_norm():
 def run_gather_gemv():
     E = 8
     dtype_memory_bandwidth_map = {
-        torch.int8: "4000",
-        torch.bfloat16: "6979",
+        torch.int8: "1195",
+        torch.bfloat16: "2180",
     }
     input_shapes = [1024, 4096, 8192, 16384]
-    max_shape = max(input_shapes)
-    num_iters = [max_shape // i for i in input_shapes]
     results = []
     for dtype, expected_memory_bandwidth in dtype_memory_bandwidth_map.items():
         memory_bandwidth = 0
-        for D, num_iter in zip(input_shapes, num_iters):
+        for D in input_shapes:
 
             def gather_gemv(W, score_idxs, x):
                 return W[score_idxs].to(x.dtype) @ x
@@ -154,13 +135,8 @@ def run_gather_gemv():
             for _ in range(WARMUP_ITER):
                 compiled_fn(W, score_idxs, x)
 
-            memory_bandwith_per_shape = 0
-            for _ in range(num_iter):
-                us_per_iter = do_bench(lambda: compiled_fn(W, score_idxs, x)) * 1000
-                memory_bandwith_per_shape += (
-                    (1e6 / us_per_iter) * 4 * D * D * dtype.itemsize / 1e9
-                )
-            memory_bandwidth += memory_bandwith_per_shape
+            us_per_iter = do_bench(lambda: compiled_fn(W, score_idxs, x)) * 1000
+            memory_bandwidth += (1e6 / us_per_iter) * 4 * D * D * dtype.itemsize / 1e9
 
         memory_bandwidth = memory_bandwidth / len(input_shapes)
         dtype_str = str(dtype).replace("torch.", "")
@@ -177,16 +153,14 @@ def run_gather_gemv():
 
 def run_gemv():
     dtype_memory_bandwidth_map = {
-        torch.int8: "3170",
-        torch.bfloat16: "5100",
+        torch.int8: "1080",
+        torch.bfloat16: "1750",
     }
     input_shapes = [1024, 4096, 8192, 16384]
-    max_shape = max(input_shapes)
-    num_iters = [max_shape // i for i in input_shapes]
     results = []
     for dtype, expected_memory_bandwidth in dtype_memory_bandwidth_map.items():
         memory_bandwidth = 0
-        for D, num_iter in zip(input_shapes, num_iters):
+        for D in input_shapes:
 
             def gemv(W, x):
                 return W.to(x.dtype) @ x
@@ -199,13 +173,8 @@ def run_gemv():
             for _ in range(WARMUP_ITER):
                 compiled_fn(W, x)
 
-            memory_bandwith_per_shape = 0
-            for _ in range(num_iter):
-                us_per_iter = do_bench(lambda: compiled_fn(W, x)) * 1000
-                memory_bandwith_per_shape += (
-                    (1e6 / us_per_iter) * 2 * D * D * dtype.itemsize / 1e9
-                )
-            memory_bandwidth += memory_bandwith_per_shape
+            us_per_iter = do_bench(lambda: compiled_fn(W, x)) * 1000
+            memory_bandwidth += (1e6 / us_per_iter) * 2 * D * D * dtype.itemsize / 1e9
 
         memory_bandwidth = memory_bandwidth / len(input_shapes)
         dtype_str = str(dtype).replace("torch.", "")
