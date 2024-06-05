@@ -619,6 +619,15 @@ class FakeTensorTest(TestCase):
 
             self.assertRaises(DynamicOutputShapeException, lambda: torch.nonzero(x))
 
+    def test_parameter_view(self):
+        x = torch.nn.Parameter(torch.randn(4))
+        x_view = x.view(4)
+        mode = FakeTensorMode()
+        fake_x_view = mode.from_tensor(x_view)
+        fake_x = mode.from_tensor(x)
+        self.assertFalse(isinstance(fake_x_view, torch.nn.Parameter))
+        self.assertTrue(isinstance(fake_x, torch.nn.Parameter))
+
     def test_tolist(self):
         shape_env = ShapeEnv()
         with FakeTensorMode(allow_fallback_kernels=False, shape_env=shape_env):
@@ -977,16 +986,6 @@ class FakeTensorConstHandling(TestCase):
             x.resize_([2])
             self.assertEqual(x.size(0), 2)
             self.assertNotConst(x)
-
-    def test_parameter_view(self):
-        x = torch.nn.Parameter(torch.randn(4))
-        x_view = x.view(4)
-        mode = FakeTensorMode()
-        fake_x_view = mode.from_tensor(x_view)
-        fake_x = mode.from_tensor(x)
-        self.assertFalse(isinstance(fake_x_view, torch.nn.Parameter))
-        self.assertTrue(isinstance(fake_x, torch.nn.Parameter))
-
 
     def test_fake_tensor_in_intlist_repro(self):
         def fn(tensors):
