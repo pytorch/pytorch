@@ -298,6 +298,8 @@ class TS2FXGraphConverter:
 
         self.block_to_arguments = block_to_arguments
 
+        self.renaming_map = renaming_map
+
         # Populate methods for the standard operators.
         for k in kind_to_standard_operators.keys():
             handler_func_name = ir_name_to_func_name(k)
@@ -327,6 +329,11 @@ class TS2FXGraphConverter:
 
     def get_fx_value(self, value: torch._C.Value):
         value_name = value.debugName()
+
+        # Traverse down renaming path.
+        while value_name in self.renaming_map:
+            value_name = self.renaming_map[value_name]
+
         if value_name in self.name_to_node:
             input_node = self.name_to_node[value_name]
             return input_node
@@ -664,19 +671,42 @@ class TS2FXGraphConverter:
         predicate = self.get_fx_value(inputs[0])
 
         def _dfs_build_lifted_arguments_for_input(entry):
+            """
+            Bottom-up finding inputs that should be lifted. This is needed
+            for nested sub-blocks when the input is hidden in the nested sub-block.
+            We need a DFS to extrapolate the hidden input arguments.
+            """
             arguments: Set[str] = set()
             for block in entry.blocks():
                 for block_node in block.nodes():
                     for block_node_in in block_node.inputs():
                         if block_node_in.debugName() in self.name_to_node:
                             debug_name = block_node_in.debugName()
+
+                            # The edge case is some variable only has digit e.g., 20, which
+                            # will cause error when it is embedded into a codegen function
+                            # (invalid argument name). We rename if the name is not valid for
+                            # code generation.
+                            if not is_legal_for_codegen(debug_name):
+                                prefix = self.name_to_node[
+                                    debug_name
+                                ].name  # type: ignore[union-attr]
+                                rename_debug_name = f"{prefix}_{debug_name}"
+                                self.renaming_map[
+                                    debug_name
+                                ] = rename_debug_name  # For sub-block tracing.
+                                self.name_to_node[
+                                    rename_debug_name
+                                ] = self.name_to_node[debug_name]
+                                debug_name = rename_debug_name
+
                             arguments.add(debug_name)
                     arguments = arguments.union(
                         _dfs_build_lifted_arguments_for_input(block_node)
                     )
             return arguments
 
-        # # Find inputs.
+        # Find inputs.
         arguments = _dfs_build_lifted_arguments_for_input(node)
 
         # Lift parameters as inputs.
