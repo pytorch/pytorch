@@ -326,6 +326,10 @@ class FSDPParam:
            avoid `self.all_gather_outputs` being captured as a graph input.
         3. Under compile, after populating `self._unsharded_param`, we always clean up
            `self.all_gather_outputs`, to avoid it being captured as a graph output.
+
+        With these invariants, only these tensors will be inputs to the graph:
+        - Sharded parameters
+        - Placeholders for the `self._unsharded_param` nn.Parameter
         """
         if (
             not torch._dynamo.compiled_autograd.compiled_autograd_enabled
