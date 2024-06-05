@@ -673,7 +673,6 @@ def mps_ops_modifier(ops):
     MACOS_BEFORE_14_4_XFAILLIST = {
         # These ops work fine in 14.4 but fail in 14.2 or 13.x
         'fft.hfft2': [torch.complex64],
-        'nn.functional.conv3d': [torch.float16],
     }
 
     # Those ops are not expected to work
@@ -1029,6 +1028,9 @@ def mps_ops_modifier(ops):
         # Unsupported
         # input types 'tensor<1x3x9x9xf16>' and 'tensor<1xf32>' are not broadcast compatible
         'nn.functional.avg_pool2d': [torch.float16],
+
+        # This doesn't work on M1, but is partially working on M2 with the exception of torch.float16
+        'nn.functional.conv3d': None,
     }
 
     def addDecorator(op, d) -> None:
