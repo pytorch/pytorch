@@ -547,13 +547,14 @@ We only support storage resizing on graph inputs as long as the input either sta
                     ):
                         # Hidden from autograd = run under no_grad, **and** don't bump VC
                         # (although if the tensor was created in inference mode, it has no VC)
-                        maybe_preserve_vc = nullcontext()
-                        if not inpt_old.is_inference():
-                            maybe_preserve_vc = (  # type: ignore[assignment]
+                        if inpt_old.is_inference():
+                            maybe_preserve_vc = nullcontext()
+                        else:
+                            maybe_preserve_vc = (
                                 torch.autograd._unsafe_preserve_version_counter(
                                     inpt_old
                                 )
-                            )
+                            )  # type: ignore[assignment]
                         with torch.no_grad(), maybe_preserve_vc:
                             inpt_old.copy_(inpt_new)
                     elif (

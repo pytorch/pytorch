@@ -25,6 +25,7 @@ import weakref
 from unittest.mock import patch
 
 import numpy as np
+
 import torch
 import torch._dynamo.testing
 
@@ -32,9 +33,10 @@ import torch._inductor.test_case
 import torch.onnx.operators
 
 import torch.utils._pytree as pytree
+import torch.utils.cpp_extension
 from torch import Tensor
 from torch._C import FileCheck
-from torch._dynamo import allow_in_graph, bytecode_analysis, bytecode_transformation
+from torch._dynamo import allow_in_graph
 from torch._dynamo.eval_frame import _debug_get_cache_entry_list
 from torch._dynamo.exc import Unsupported
 from torch._dynamo.source import ConstantSource, GetItemSource, LocalSource
@@ -221,6 +223,38 @@ class MiscTests(torch._inductor.test_case.TestCase):
 
         with self.assertRaises(TypeError):
             fn(torch.randn(16))
+
+    def test_cpp_extension_recommends_custom_ops(self):
+        cpp_source = """
+        #include <torch/extension.h>
+        at::Tensor foobar(const at::Tensor& x) {
+            return x.clone();
+        }
+        """
+        module = torch.utils.cpp_extension.load_inline(
+            name="mylib",
+            cpp_sources=cpp_source,
+            functions="foobar",
+            verbose=True,
+        )
+
+        x = torch.ones(2, 2, requires_grad=True)
+        counters.clear()
+
+        @torch.compile(backend="eager")
+        def f(x):
+            return module.foobar(x)
+
+        with self.assertWarnsOnceRegex(
+            UserWarning, ".*https://pytorch.org/docs/main/notes/custom_operators.html.*"
+        ):
+            f(x)
+        self.assertEqual(len(counters["graph_break"]), 1)
+        first_graph_break = list(counters["graph_break"].keys())[0]
+        self.assertExpectedInline(
+            first_graph_break,
+            """Graph break due to unsupported builtin mylib.PyCapsule.foobar. This function is either a Python builtin (e.g. _warnings.warn) or a third-party C/C++ Python extension (perhaps created with pybind). If it is a Python builtin, please file an issue on GitHub so the PyTorch team can add support for it and see the next case for a workaround. If it is a third-party C/C++ Python extension, please either wrap it into a PyTorch-understood custom operator (see https://pytorch.org/docs/main/notes/custom_operators.html for more details) or, if it is traceable, use torch.compiler.allow_in_graph.""",
+        )
 
     def test_callpacked(self):
         def call_packed(args):
@@ -666,7 +700,7 @@ class MiscTests(torch._inductor.test_case.TestCase):
                     """\
 def forward(self, arg0_1: "f32[3]", arg1_1: "f32[3]", arg2_1: "f32[3]", arg3_1: "f32[3]", arg4_1: "f32[3]"):
         # No stacktrace found for following nodes
-        foo_default = torch.ops.mylib.foo.default(arg0_1, [arg3_1, arg4_1], arg1_1, 2, arg2_1);  arg0_1 = arg3_1 = arg4_1 = arg1_1 = arg2_1 = None
+        foo_default = torch.ops.mylib.foo.default(arg4_1, [arg2_1, arg3_1], arg1_1, 2, arg0_1);  arg4_1 = arg2_1 = arg3_1 = arg1_1 = arg0_1 = None
         return ()""",
                 )
 
@@ -725,7 +759,7 @@ def forward(self, arg0_1: "f32[3]", arg1_1: "f32[3]", arg2_1: "f32[3]", arg3_1: 
                     """\
 def forward(self, arg0_1: "f32[3]", arg1_1: "f32[3]", arg2_1: "f32[3]", arg3_1: "f32[3]", arg4_1: "f32[3]"):
         # No stacktrace found for following nodes
-        foo_default = torch.ops.mylib.foo.default(arg0_1, [arg3_1, arg4_1], arg1_1, 2, arg2_1);  arg0_1 = arg3_1 = arg4_1 = arg1_1 = arg2_1 = None
+        foo_default = torch.ops.mylib.foo.default(arg4_1, [arg2_1, arg3_1], arg1_1, 2, arg0_1);  arg4_1 = arg2_1 = arg3_1 = arg1_1 = arg0_1 = None
         getitem_4: "f32[3]" = foo_default[0]
         getitem_5: "f32[3]" = foo_default[1];  foo_default = None
         return (getitem_4, getitem_5)""",
@@ -817,7 +851,7 @@ def forward(self, arg0_1: "f32[3]", arg1_1: "f32[3]", arg2_1: "f32[3]", arg3_1: 
                     """\
 def forward(self, arg0_1: "f32[3]", arg1_1: "f32[3]", arg2_1: "f32[3]", arg3_1: "f32[3]"):
         # No stacktrace found for following nodes
-        foo_default = torch.ops.mylib.foo.default(None, [arg2_1, arg3_1], arg0_1, 2, arg1_1);  arg2_1 = arg3_1 = arg0_1 = arg1_1 = None
+        foo_default = torch.ops.mylib.foo.default(None, [arg2_1, arg3_1], arg1_1, 2, arg0_1);  arg2_1 = arg3_1 = arg1_1 = arg0_1 = None
         return ()""",
                 )
 
@@ -1357,6 +1391,21 @@ utils_device.CURRENT_DEVICE == None""".split(
                 return torch.arange(0, y)
 
         self.assertRaises(torch._dynamo.exc.UserError, lambda: f(torch.tensor([3])))
+
+    def test_assert(self):
+        @torch.compile
+        def fn1(x):
+            assert x.shape != x.shape
+
+        with self.assertRaises(AssertionError):
+            a = torch.randn(10)
+            fn1(a)
+
+        def fn2(x):
+            assert x.shape == x.shape
+            return x.abs()
+
+        torch._dynamo.testing.standard_test(self, fn=fn2, nargs=1, expected_ops=1)
 
     def test_config_obj(self):
         class Cfg:
@@ -3965,101 +4014,6 @@ utils_device.CURRENT_DEVICE == None""".split(
                 # Make sure sparse clone is successful.
                 self.assertEqual(sparse_input, sparse_copy)
 
-    @skipIfNotPy311
-    def test_linetable_311_writer1(self):
-        def fn():
-            a = 10
-            b = 20
-            c = a + b
-            f = "linetable_writer"
-            return f"Test if {f} generates correct co_linetable: {c}"
-
-        keys = bytecode_transformation.get_code_keys()
-        code_options = {k: getattr(fn.__code__, k) for k in keys}
-        result = bytecode_transformation.clean_and_assemble_instructions(
-            bytecode_transformation.cleaned_instructions(fn.__code__),
-            keys,
-            code_options,
-        )
-        l1, l2 = list(fn.__code__.co_positions()), list(result[1].co_positions())
-        self.assertEqual(len(l1), len(l2))
-        for p1, p2 in zip(l1, l2):
-            self.assertEqual(p1, p2)
-        # TODO co_lnotab is deprecated in 3.12 and will be removed in 3.14
-        # In 3.11+,. it is computed lazily from other linetable attributes (e.g. co_linetable),
-        # so we do not set this attribute ourselves.
-        self.assertEqual(fn.__code__.co_lnotab, result[1].co_lnotab)
-
-    @skipIfNotPy311
-    def test_linetable_311_writer2(self):
-        """
-        test large ops (LOAD_METHOD) and EXTENDED_ARGS
-        fn_str is in the form:
-        def fn():
-            ...
-            x0 = 1
-            x1 = 1
-            ...
-            l = [x0, x1, ...]
-        """
-        fn_str = f"""\
-def fn():
-    foo.bar(1, 2, 3)
-{str(chr(10)).join(' ' * 4 + 'x' + str(i) + ' = 1' for i in range(1 << 9))}
-    l = [{' '.join('x' + str(i) + ',' for i in range(1 << 9))}]
-        """
-        locals = {}
-        exec(fn_str, {}, locals)
-        fn = locals["fn"]
-        orig_inst_str = "\n".join(list(map(str, dis.get_instructions(fn))))
-        self.assertIn("EXTENDED_ARG", orig_inst_str)
-        load_method_str = "LOAD_ATTR" if sys.version_info >= (3, 12) else "LOAD_METHOD"
-        self.assertIn(load_method_str, orig_inst_str)
-        keys = bytecode_transformation.get_code_keys()
-        code_options = {k: getattr(fn.__code__, k) for k in keys}
-        result = bytecode_transformation.clean_and_assemble_instructions(
-            bytecode_transformation.cleaned_instructions(fn.__code__),
-            keys,
-            code_options,
-        )
-        new_inst_str = "\n".join(list(map(str, result[0])))
-        self.assertIn("EXTENDED_ARG", new_inst_str)
-        self.assertIn(load_method_str, new_inst_str)
-        l1, l2 = list(fn.__code__.co_positions()), list(result[1].co_positions())
-        self.assertEqual(len(l1), len(l2))
-        for p1, p2 in zip(l1, l2):
-            self.assertEqual(p1, p2)
-        self.assertEqual(fn.__code__.co_lnotab, result[1].co_lnotab)
-
-    @unittest.skipIf(
-        sys.version_info < (3, 10) or sys.version_info >= (3, 11),
-        "linetable test for Python 3.10",
-    )
-    def test_linetable_310_writer(self):
-        def fn():
-            a = 10
-            b = 20
-            c = a + b
-            f = "linetable_writer"
-            return f"Test if {f} generates correct co_linetable: {c}"
-
-        inst = dis.get_instructions(fn)
-        result = bytecode_transformation.assemble(inst, fn.__code__.co_firstlineno)
-        self.assertTrue(result[1] == fn.__code__.co_linetable)
-
-    @unittest.skipIf(sys.version_info >= (3, 10), "use lnotab when python < 3.10")
-    def test_lnotab_writer(self):
-        def fn():
-            a = 10
-            b = 20
-            c = a + b
-            f = "lnotab_writer"
-            return f"Test if {f} generates correct co_lnotab: {c}"
-
-        inst = dis.get_instructions(fn)
-        result = bytecode_transformation.assemble(inst, fn.__code__.co_firstlineno)
-        self.assertTrue(result[1] == fn.__code__.co_lnotab)
-
     def test_tensor_is_contiguous(self):
         def fn(x):
             input = torch.randn((1, 16, 1, 1))
@@ -4309,6 +4263,59 @@ def fn():
         opt_fn = torch._dynamo.optimize(cnts)(fn_has_breaks)
         opt_fn(x)
         self.assertEqual(cnts.frame_count, 2)
+
+    def test_id_guarded_object(self):
+        class UDO:
+            @torch.compile(backend="eager")
+            def call(self, x, ref_id):
+                self_id = id(self)
+                if self_id == ref_id:
+                    x = torch.mul(x, 1.0)
+                else:
+                    x = torch.mul(x, 0)
+                return x
+
+        # Make sure we do recompile when id(self) is executed on
+        # different self objects.
+        x = torch.ones(2)
+        obj1 = UDO()
+        obj1_id = id(obj1)
+        self.assertEqual(obj1.call(x, obj1_id), torch.ones(2))
+
+        obj2 = UDO()
+        # if we do not install ID_MATCH: ___check_obj_id(L['self'], xxx) this fails.
+        self.assertEqual(obj2.call(x, obj1_id), torch.zeros(2))
+
+    def test_id_guarded_module(self):
+        class M(torch.nn.Module):
+            def forward(self, x, ref_id):
+                self_id = id(self)
+                if self_id == ref_id:
+                    x = torch.mul(x, 1.0)
+                else:
+                    x = torch.mul(x, 0)
+                return x
+
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        # Make sure we do recompile when id(self) is executed on
+        # different self objects.
+        x = torch.ones(2)
+        m1 = M()
+        m1_id = id(m1)
+        opt_m1 = torch._dynamo.optimize(cnts, nopython=True)(m1)
+        self.assertEqual(opt_m1(x, m1_id), torch.ones(2))
+        self.assertEqual(opt_m1(x, m1_id), torch.ones(2))
+
+        self.assertEqual(cnts.frame_count, 1)
+        self.assertEqual(cnts.op_count, 1)
+
+        m2 = M()
+        opt_m2 = torch._dynamo.optimize(cnts, nopython=True)(m2)
+        # if we do not install ID_MATCH: ___check_obj_id(L['self'], xxx) this fails.
+        self.assertEqual(opt_m2(x, m1_id), torch.zeros(2))
+        self.assertEqual(cnts.frame_count, 2)
+        self.assertEqual(cnts.op_count, 2)
 
     def test_id_of_nn_module(self):
         class M(torch.nn.Module):
@@ -5381,9 +5388,14 @@ def fn():
                 return map(body, xs)
 
         mod = Module()
-        with self.assertRaisesRegex(
-            Unsupported, "Can't inplace modify module params/buffers"
-        ):
+
+        error_message = ""
+        if torch._dynamo.config.inline_inbuilt_nn_modules:
+            error_message = r"HigherOrderOperator: Mutating a variable not in the current scope \(SideEffects\)"
+        else:
+            error_message = "Can't inplace modify module params/buffers"
+
+        with self.assertRaisesRegex(Unsupported, error_message):
             opt_fn = torch._dynamo.optimize("eager", nopython=True)(mod)
             opt_fn(torch.randn(3, 2))
 
@@ -6777,313 +6789,6 @@ def fn():
         res = opt_fn(x)
         self.assertTrue(same(ref, res))
 
-    def test_if_tensor_is_none(self):
-        """
-        Python 3.11 adds new jump instructions that check if
-        TOS is None. We do not support these instructions.
-        """
-
-        def f(x, y):
-            z = 1
-            if x is None:
-                z *= 2
-            if y is not None:
-                z *= 3
-            return z
-
-        opt_f = torch._dynamo.optimize("eager", nopython=True)(f)
-        self.assertEqual(opt_f(None, torch.ones(2)), 6)
-
-        if sys.version_info >= (3, 11):
-            insts = bytecode_transformation.cleaned_instructions(f.__code__)
-            for inst in insts:
-                self.assertNotIn("_NONE", inst.opname)
-
-    @skipIfNotPy311
-    def test_py311_jump_offset(self):
-        new_inst = bytecode_transformation.create_instruction
-        load_global = bytecode_transformation.create_load_global
-        consts = (None, 1, 2, 3, 4)
-
-        def create_test_code(jump_opname, target_idx):
-            targets = [
-                new_inst("LOAD_CONST", argval=1),
-                new_inst("LOAD_CONST", argval=3),
-            ]
-            jump_to_target_inst = new_inst(jump_opname, target=targets[target_idx])
-            """
-            pseudocode of generated bytecode:
-            def test_py311_fn():
-                goto target1
-            target0:
-                return 1
-            target1:
-                goto [target0/target2] (via fwd or bwd jump)
-                return 2
-            target2:
-                return 3
-                return 4
-            """
-            # test with LOAD_GLOBAL since it has a different instruction size
-            insts = [
-                new_inst("RESUME", arg=0),
-                new_inst("JUMP_FORWARD", target=jump_to_target_inst),
-                targets[0],
-                load_global("print", False),
-                new_inst("POP_TOP"),
-                new_inst("RETURN_VALUE"),
-                jump_to_target_inst,
-                new_inst("LOAD_CONST", argval=2),
-                load_global("print", False),
-                new_inst("POP_TOP"),
-                new_inst("RETURN_VALUE"),
-                targets[1],
-                new_inst("RETURN_VALUE"),
-                new_inst("LOAD_CONST", argval=4),
-                new_inst("RETURN_VALUE"),
-            ]
-            code_options = collections.OrderedDict(
-                [
-                    ("co_argcount", 0),
-                    ("co_posonlyargcount", 0),
-                    ("co_kwonlyargcount", 0),
-                    ("co_nlocals", 0),
-                    ("co_stacksize", 2),
-                    ("co_flags", 3),
-                    ("co_code", b""),
-                    ("co_consts", consts),
-                    ("co_names", ("print",)),
-                    ("co_varnames", ()),
-                    ("co_filename", __file__),
-                    ("co_name", "test_py311_fn"),
-                    ("co_qualname", "test_py311_fn"),
-                    ("co_firstlineno", 1),
-                    ("co_linetable", b""),
-                    ("co_exceptiontable", b""),
-                    ("co_freevars", ()),
-                    ("co_cellvars", ()),
-                ]
-            )
-            return bytecode_transformation.clean_and_assemble_instructions(
-                insts,
-                list(code_options.keys()),
-                code_options,
-            )
-
-        # format: jump_opname, target_idx, expected forward jump, expected return value
-        test_args = (
-            ("JUMP_FORWARD", 0, False, 1),
-            ("JUMP_FORWARD", 1, True, 3),
-            ("JUMP_BACKWARD", 0, False, 1),
-            ("JUMP_BACKWARD", 1, True, 3),
-        )
-
-        for test in test_args:
-            insts, code = create_test_code(test[0], test[1])
-            # check if offset of latest jump instruction is forward/backward
-            for inst in reversed(insts):
-                if inst.opname.startswith("JUMP"):
-                    if test[2]:
-                        self.assertIn("FORWARD", inst.opname)
-                    else:
-                        self.assertIn("BACKWARD", inst.opname)
-                    break
-            # run the code and check result
-
-            def dummy_fn():
-                pass
-
-            dummy_fn.__code__ = code
-            self.assertEqual(dummy_fn(), test[3])
-
-            dummy_opt = torch._dynamo.optimize("eager")(dummy_fn)
-            self.assertEqual(dummy_opt(), test[3])
-
-    def test_exception_table_encode_varint(self):
-        # these numbers have no real meaning to them
-        nums = [
-            0b111_101010_000000,
-            0b1100_111000_010101_101010,
-        ]
-        b = bytecode_transformation.encode_exception_table_varint(
-            nums[0]
-        ) + bytecode_transformation.encode_exception_table_varint(nums[1])
-        nums_new = []
-        b_iter = iter(bytes(b))
-        while True:
-            try:
-                nums_new.append(
-                    bytecode_transformation.decode_exception_table_varint(b_iter)
-                )
-            except StopIteration:
-                break
-        self.assertEqual(nums, nums_new)
-
-    @skipIfNotPy311
-    def test_exception_table_parsing(self):
-        def fn():
-            try:
-                with a():
-                    b()
-                c()
-            except Exception:
-                d()
-            finally:
-                e()
-            f()
-
-        tab = bytecode_transformation.parse_exception_table(
-            fn.__code__.co_exceptiontable
-        )
-        b = bytecode_transformation.assemble_exception_table(tab)
-        self.assertEqual(b, fn.__code__.co_exceptiontable)
-
-    @skipIfNotPy311
-    def test_exception_table_e2e(self):
-        def fn():
-            try:
-                with a():
-                    b()
-                c()
-            except Exception:
-                d()
-            finally:
-                e()
-            f()
-
-        def nothing(*args):
-            pass
-
-        code = bytecode_transformation.transform_code_object(fn.__code__, nothing)
-        self.assertEqual(code.co_exceptiontable, fn.__code__.co_exceptiontable)
-
-    @skipIfNotPy311
-    def test_exception_table_e2e_2(self):
-        # last instructions of an exn_table entry is a large instruction
-        # i.e., LOAD_GLOBAL a
-        def fn():
-            try:
-                return a
-            except Exception:
-                pass
-
-        def nothing(*args):
-            pass
-
-        code = bytecode_transformation.transform_code_object(fn.__code__, nothing)
-        self.assertEqual(code.co_exceptiontable, fn.__code__.co_exceptiontable)
-
-    @skipIfNotPy311
-    def test_exception_table_entry_propagation(self):
-        insts = []
-        for _ in range(10):
-            insts.append(bytecode_transformation.create_instruction("NOP"))
-        insts[8].exn_tab_entry = bytecode_transformation.InstructionExnTabEntry(
-            insts[0], insts[9], insts[0], 0, True
-        )
-        insts[0].exn_tab_entry = bytecode_transformation.InstructionExnTabEntry(
-            insts[0], insts[0], insts[1], 0, True
-        )
-        insts[1].exn_tab_entry = bytecode_transformation.InstructionExnTabEntry(
-            insts[0], insts[2], insts[2], 0, True
-        )
-        insts[5].exn_tab_entry = bytecode_transformation.InstructionExnTabEntry(
-            insts[4], insts[6], insts[3], 0, True
-        )
-        insts[9].exn_tab_entry = bytecode_transformation.InstructionExnTabEntry(
-            insts[9], insts[9], insts[4], 0, True
-        )
-        insts[7].exn_tab_entry = bytecode_transformation.InstructionExnTabEntry(
-            insts[7], insts[9], insts[5], 0, True
-        )
-        bytecode_transformation.propagate_inst_exn_table_entries(insts)
-        expected = [1, 2, 2, 0, 3, 3, 3, 5, 5, 4]
-        for inst, exp in zip(insts, expected):
-            self.assertIsNotNone(inst.exn_tab_entry)
-            self.assertIs(inst.exn_tab_entry.target, insts[exp])
-
-    @skipIfNotPy311
-    def test_compute_exception_table_nested(self):
-        insts = []
-        for _ in range(20):
-            insts.append(bytecode_transformation.create_instruction("NOP"))
-        insts[10].exn_tab_entry = bytecode_transformation.InstructionExnTabEntry(
-            insts[1], insts[10], insts[0], 0, True
-        )
-        insts[0].exn_tab_entry = bytecode_transformation.InstructionExnTabEntry(
-            insts[1], insts[1], insts[1], 0, True
-        )
-        insts[1].exn_tab_entry = bytecode_transformation.InstructionExnTabEntry(
-            insts[1], insts[3], insts[2], 0, True
-        )
-        insts[5].exn_tab_entry = bytecode_transformation.InstructionExnTabEntry(
-            insts[5], insts[7], insts[3], 0, True
-        )
-        insts[9].exn_tab_entry = bytecode_transformation.InstructionExnTabEntry(
-            insts[10], insts[10], insts[4], 0, True
-        )
-        insts[7].exn_tab_entry = bytecode_transformation.InstructionExnTabEntry(
-            insts[8], insts[10], insts[5], 0, True
-        )
-        insts[14].exn_tab_entry = bytecode_transformation.InstructionExnTabEntry(
-            insts[13], insts[17], insts[6], 0, True
-        )
-        insts[16].exn_tab_entry = bytecode_transformation.InstructionExnTabEntry(
-            insts[15], insts[16], insts[7], 0, True
-        )
-        bytecode_transformation.update_offsets(insts)
-        tab = bytecode_transformation.compute_exception_table(insts)
-        expected = [
-            (1, 1, 1),
-            (2, 3, 2),
-            (4, 4, 0),
-            (5, 7, 3),
-            (8, 9, 5),
-            (10, 10, 4),
-            (13, 14, 6),
-            (15, 16, 7),
-            (17, 17, 6),
-        ]
-        self.assertEqual(len(tab), len(expected))
-        for entry, exp in zip(tab, expected):
-            self.assertEqual(entry.start, exp[0] * 2)
-            self.assertEqual(entry.end, exp[1] * 2)
-            self.assertEqual(entry.target, exp[2] * 2)
-
-    @skipIfNotPy311
-    def test_remove_dead_code_with_exn_table_entries(self):
-        create_instruction = bytecode_transformation.create_instruction
-        target1 = create_instruction("NOP")
-        target2 = create_instruction("NOP")
-        target3 = create_instruction("NOP")
-        exn_start = create_instruction("NOP")
-        exn_end = create_instruction("NOP")
-        insts = [
-            create_instruction("JUMP_FORWARD", target=target1),
-            exn_start,  # dead
-            target1,
-            create_instruction("JUMP_FORWARD", target=target3),
-            exn_end,  # dead
-            target2,
-            target3,
-        ]
-        exn_start.exn_tab_entry = bytecode_transformation.InstructionExnTabEntry(
-            exn_start, exn_end, target2, 0, True
-        )
-        bytecode_transformation.propagate_inst_exn_table_entries(insts)
-        insts = bytecode_analysis.remove_dead_code(insts)
-        self.assertEqual(len(insts), 5)
-        self.assertNotIn(exn_start, insts)
-        self.assertNotIn(exn_end, insts)
-        self.assertIn(target2, insts)
-        self.assertIn(target3, insts)
-        bytecode_transformation.update_offsets(insts)
-        tab = bytecode_transformation.compute_exception_table(insts)
-        self.assertEqual(len(tab), 1)
-        self.assertEqual(tab[0].start, 2)
-        self.assertEqual(tab[0].end, 4)
-        self.assertEqual(tab[0].target, 6)
-
     def test_unhandled_exception_in_dynamo(self):
         # traceback.format_exc() approximates an unhandled exception
         def f(a):
@@ -7135,7 +6840,7 @@ def fn():
                 x += 1
             return x
 
-        opt_fn = torch._dynamo.optimize("eager")(fn)
+        opt_fn = torch._dynamo.optimize("eager", nopython=True)(fn)
         self.assertEqual(opt_fn(), torch.tensor([2.0]))
 
     def test_nested_sequential_with(self):
@@ -9576,8 +9281,8 @@ def ___make_guard_fn():
 ShapeEnv not equal: field values don't match:
 
 ==> settings: values don't match.
-  >  Left: ShapeEnvSettings(allow_scalar_outputs=False, allow_dynamic_output_shape_ops=True, assume_static_by_default=False, specialize_zero_one=True, duck_shape=True, prefer_deferred_runtime_asserts_over_guards=False)
-  > Right: ShapeEnvSettings(allow_scalar_outputs=True, allow_dynamic_output_shape_ops=True, assume_static_by_default=False, specialize_zero_one=True, duck_shape=True, prefer_deferred_runtime_asserts_over_guards=False)
+  >  Left: ShapeEnvSettings(allow_scalar_outputs=False, allow_dynamic_output_shape_ops=True, assume_static_by_default=False, specialize_zero_one=True, duck_shape=True, prefer_deferred_runtime_asserts_over_guards=False, _allow_complex_guards_as_runtime_asserts=False)
+  > Right: ShapeEnvSettings(allow_scalar_outputs=True, allow_dynamic_output_shape_ops=True, assume_static_by_default=False, specialize_zero_one=True, duck_shape=True, prefer_deferred_runtime_asserts_over_guards=False, _allow_complex_guards_as_runtime_asserts=False)
 """,
         )
         self._replay_and_check(main)
@@ -10371,6 +10076,7 @@ fn
         c2 = _debug_get_cache_entry_list(fn.__code__)
         self.assertIs(c1[1], c2[0])
 
+    @torch._dynamo.config.patch(inline_inbuilt_nn_modules=False)
     def test_dynamo_cache_invalidate(self):
         class Mod(torch.nn.Module):
             def __init__(self):
@@ -10673,6 +10379,51 @@ fn
         # Check recompilation
         self.assertEqual(cnts.frame_count, 2)
         self.assertEqual(res, fn(x, d))
+
+    def test_contains_dunder_dict(self):
+        class UserDefined:
+            def __init__(self):
+                self.a = 3
+                self.b = 5
+
+            def run(self, x):
+                if "a" in self.__dict__:
+                    x = x * self.a
+                if "b" in self.__dict__:
+                    x = x * self.b
+                self.c = 7
+                if "c" in self.__dict__:
+                    x = x * self.c
+                return x * self.__dict__.get("a") * self.__dict__.get("z", 2)
+
+        obj = UserDefined()
+
+        def fn(x):
+            return obj.run(x)
+
+        x = torch.randn(4)
+        ref = fn(x)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        res = opt_fn(x)
+        self.assertEqual(ref, res)
+
+    def test_module_dunder_dict(self):
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.foo = 1
+                self.bar = 2
+                self.baz = 3
+
+            def forward(self, x):
+                if "foo" in self.__dict__:
+                    return x * self.bar
+                return x * self.baz
+
+        mod = MyModule()
+        x = torch.randn(10)
+        opt_mod = torch.compile(mod, backend="eager", fullgraph=True)
+        self.assertEqual(mod(x), opt_mod(x))
 
 
 class TestTracer(JitTestCase):

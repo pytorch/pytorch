@@ -37,7 +37,7 @@ backwards ops, due to how AOTAutograd compiled functions interact with
 dispatcher hooks.
 
 The basic strategy for optimizing DDP with Dynamo is outlined in
-`distributed.py <https://github.com/pytorch/pytorch/blob/main/torch/_dynamo/optimizations/distributed.py>`__
+`distributed.py <https://github.com/pytorch/pytorch/blob/main/torch/_dynamo/backends/distributed.py>`__
 where the main idea will be to graph break on `DDP bucket
 boundaries <https://pytorch.org/docs/stable/notes/ddp.html#internal-design>`__.
 
@@ -186,7 +186,7 @@ The above are general principles for accelerating PyTorch code but
 different backends will each make different tradeoffs on what to
 optimize. For example Inductor first takes care of fusing whatever it
 can and only then generates `Triton <https://openai.com/blog/triton/>`__
-kernels. It can also
+kernels.
 
 Triton in addition offers speedups because of automatic memory
 coalescing, memory management and scheduling within each Streaming
@@ -554,7 +554,7 @@ Using this decorator, we can also differentiate through NumPy code!
    @torch.compile(fullgraph=True)
    @torch.compiler.wrap_numpy
    def numpy_fn(X, Y):
-       return np.sum(X[:, :, None] * Y[:, None, :], axis=(-2, -1))
+       return np.mean(np.sum(X[:, :, None] * Y[:, None, :], axis=(-2, -1)))
 
    X = torch.randn(1024, 64, device="cuda", requires_grad=True)
    Y = torch.randn(1024, 64, device="cuda")
