@@ -1155,7 +1155,6 @@ class TritonKernel(SIMDKernel):
                 index, {v: t.expr for v, t in self.range_tree_nodes.items()}
             )
             range_trees = self.active_range_trees(reorder=True)
-            symbols = [t.symbol() for t in range_trees]
 
             def match_strided_block() -> Union[BlockPtrOptions, None]:
                 """
@@ -1164,6 +1163,7 @@ class TritonKernel(SIMDKernel):
 
                 This implies strides (s1, ..., SN).
                 """
+                symbols = [t.symbol() for t in range_trees]
                 strides = [sympy.Wild(f"stride_{s}", exclude=symbols) for s in symbols]
                 offset = sympy.Wild("_offset", exclude=symbols)
                 m = index_relative_to_xyr_index.match(
@@ -1194,22 +1194,28 @@ class TritonKernel(SIMDKernel):
 
                 This iterates over a block of shape (dN, ..., d1) and stride (sN, ..., s1).
                 """
-
-                # Get info about iteration ranges
-                # Check the index variable. We expect a linear index.
-                if len(symbols) != 1:
+                # Get info about iteration ranges.
+                # Check that only one range tree is in use.
+                # Also check the index variable. We expect a linear index.
+                nonsingleton_range_trees = [
+                    tree for tree in range_trees if len(tree.var_ranges) > 0
+                ]
+                symbols = index_relative_to_xyr_index.free_symbols
+                if len(symbols) != 1 or len(nonsingleton_range_trees) != 1:
                     return None
-                index_var = symbols[0]
+                index_var = next(iter(symbols))
+                assert isinstance(index_var, sympy.Symbol)  # For type checking
+                range_tree = nonsingleton_range_trees[0]
 
-                # Get the dims in reverse numerical order. E.g. x(N-1), ..., x0.
+                # Get the dims in descending order. E.g. x(N-1), ..., x0.
                 # This matches the order of dims in torch tensors and triton blocks.
                 sizevars = V.graph.sizevars
-                var_ranges = next(iter(self.range_tree_nodes.values())).var_ranges
                 dims = dict(
                     reversed(
                         [
                             (var, sizevars.lookup_precomputed_size(size))
-                            for (var, size) in var_ranges.items()
+                            for (var, size) in range_tree.var_ranges.items()
+                            if var in index.free_symbols
                         ]
                     )
                 )
@@ -1259,10 +1265,8 @@ class TritonKernel(SIMDKernel):
                 #     with n and m integers, then either numel is a multiple of XBLOCK, or numel
                 #     is less than XBLOCK. (If numel is less than XBLOCK, we round up to 1 below.)
                 #  2. Numels are multiples of the maximum possible block size.
-                if len(range_trees) != 1:
-                    return None
-                prefix = range_trees[0].prefix.upper()
-                max_block = TRITON_MAX_BLOCK[prefix]
+                prefix = range_tree.prefix
+                max_block = TRITON_MAX_BLOCK[prefix.upper()]
                 if any(
                     not sizevars.statically_known_multiple_of(numel, max_block)
                     and not sizevars.statically_known_power_of_2(numel)
@@ -1273,20 +1277,26 @@ class TritonKernel(SIMDKernel):
                 # Compute the ND block shape from the linear block size.
                 # Use CielDiv to round leading dimensions up to 1.
                 linear_block_size = sympy.Symbol(
-                    f"{prefix}BLOCK", integer=True, nonzero=True
+                    f"{prefix.upper()}BLOCK", integer=True, nonzero=True
                 )
                 block_shape: List[StrOrExpr] = [
                     ConstExprMin(CeilDiv(linear_block_size, slice_numel), dim)
                     for slice_numel, dim in zip(slice_numels, dim_values)
                 ]
 
-                # Compute block offsets from xoffset and the range tree.
-                xoffset = sympy.Symbol("xoffset", integer=True)
+                # Compute block offsets from {xyzr}offset and the range tree.
+                offset_symbol = sympy.Symbol(f"{prefix}offset", integer=True)
                 block_offsets: List[StrOrExpr] = [
                     sympy_subs(
-                        self.range_tree_nodes[var_name].expr, {index_var: xoffset}
+                        self.range_tree_nodes[var_name].expr, {index_var: offset_symbol}
                     )
                     for var_name in dims
+                ]
+
+                # Compute the reshape suffix, adding singleton dimensions if necessary.
+                reshape_suffix = [
+                    str(linear_block_size) if prefix == tree.prefix else "1"
+                    for tree in range_trees
                 ]
 
                 # Form the block pointer.
@@ -1303,7 +1313,7 @@ class TritonKernel(SIMDKernel):
                     order=list(range(num_dims)),
                     offsets=block_offsets,
                     mask_vars=mask_vars,
-                    reshape_suffix=[str(linear_block_size)],
+                    reshape_suffix=reshape_suffix,
                 )
 
             # Try various pattern matches for block pointers

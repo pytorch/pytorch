@@ -66,9 +66,10 @@ class TritonBlockPointerTest(InductorTestCase):
         for ref, actual in zip(ref_tensors, actual_tensors):
             self.assertTrue(torch.allclose(ref, actual))
 
-        def count_code(substr: str, expected: int):
+        def count_code(substr: str, expected: Optional[int]):
             count = sum(prog.count(substr) for prog in code)
-            self.assertEqual(count, expected)
+            if expected is not None:
+                self.assertEqual(count, expected)
 
         # Check the code
         self.assertEqual(len(code), expected_num_programs)
@@ -181,25 +182,24 @@ class TritonBlockPointerTest(InductorTestCase):
         # Check that input sizes are not the same
         self.assertNotEqual(x.shape, y.shape)
 
-        # Expect 4 block pointers: 2 inputs and 2 outputs
-        self.run_and_compare(foo, x, y, expected_num_block_pointers=4)
+        # Broadcast is not yet supported, so we only expect 2 block pointers: one input, and output
+        self.run_and_compare(foo, x, y, expected_num_block_pointers=2)
 
-    def test_partial_block_pointer(self):
+    def test_reduction(self):
         """
-        Test mixing block pointers with non-structured pointers.
+        Tests a reduction kernel.
         """
-
-        def foo(*args):
-            return sum(torch.sum(arg) for arg in args)
 
         device = torch.device(GPU_TYPE)
-        full_size = (15, 15)  # Not a power of 2
+        full_size = (15, 15)
         view_size = (8, 8)
         full = torch.randn(full_size).to(device)
         view = torch.as_strided(full, view_size, full.stride())
 
-        # Expect 1 block pointer: view
-        self.run_and_compare(foo, full, view, expected_num_block_pointers=1)
+        # Expect 1 block pointer: input
+        result, (code,) = self.run_and_compare(
+            torch.sum, view, expected_num_block_pointers=1
+        )
 
     def test_multiple_max_block_non_power_of_2(self):
         """
