@@ -12,7 +12,6 @@ import torch
 import torch._dynamo.config
 import torch._export
 import torch.export._trace
-import torch.utils._pytree as pytree
 from torch._dynamo.source import ConstantSource
 from torch._inductor.utils import is_cpu_device
 from torch._subclasses.fake_tensor import FakeTensor
