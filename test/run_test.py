@@ -745,7 +745,6 @@ def test_distributed(test_module, test_directory, options):
             old_environ = dict(os.environ)
             os.environ["TEMP_DIR"] = tmp_dir
             os.environ["BACKEND"] = backend
-            os.environ["INIT_METHOD"] = "env://"
             os.environ.update(env_vars)
             if with_init_file:
                 if test_module.name == "test_distributed_spawn":
