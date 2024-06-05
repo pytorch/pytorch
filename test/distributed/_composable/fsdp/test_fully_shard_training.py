@@ -293,7 +293,7 @@ class TestFullyShard1DTrainingCore(FSDPTest):
             },
             self._test_train_parity_multi_group,
         )
-    
+
     @skip_if_lt_x_gpu(2)
     def test_train_parity_multi_group_cpu_offload_eager(self):
         """
