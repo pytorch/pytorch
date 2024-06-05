@@ -539,7 +539,7 @@ def reordering_to_mimic_autograd_engine(gm: fx.GraphModule) -> fx.GraphModule:
         insertable_nodes = set()
         while len(cur_nodes) > 0:
             node = cur_nodes.pop()
-            if node in insertable_nodes:
+            if node in insertable_nodes or node in env:
                 continue
             insertable_nodes.add(node)
 
