@@ -3521,9 +3521,9 @@ def lookup_inner(
     # - The list of torch in graph functions.
     try:
         can_hash = hashable(obj)
-    except:
+    except Exception:
         can_hash = False
-    if not can_hash::
+    if not can_hash:
         if reasons is not None:
             reasons.add("obj is not hashable")
         return None
