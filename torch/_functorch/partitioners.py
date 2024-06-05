@@ -28,8 +28,6 @@ from torch.fx.experimental.symbolic_shapes import (
 from torch.fx.passes import graph_drawer
 from . import config
 from .compile_utils import fx_graph_cse, get_aten_target
-from ._aot_autograd.passes import dist_fx_passes
-from ._aot_autograd.passes.utils import flatten_arg_list
 
 
 AOT_PARTITIONER_DEBUG = config.debug_partitioner
@@ -535,12 +533,13 @@ def reordering_to_mimic_autograd_engine(gm: fx.GraphModule) -> fx.GraphModule:
 
     # Populate depth for the nodes. Depth is the distance from the inputs.
     depths = {}
-    output_node = next(iter(gm.graph.find_nodes(op="output")))
     for node in gm.graph.nodes:
         if node.op == "placeholder":
             depths[node] = 0
         else:
-            depths[node] = max([depths[arg] for arg in node.all_input_nodes], default=0)
+            depths[node] = (
+                max((depths[arg] for arg in node.all_input_nodes), default=0) + 1
+            )
 
     def insert_node_in_graph(node):
         if node in env:
@@ -804,6 +803,8 @@ def get_saved_values(
             return False
         if node.target == operator.getitem:
             return False
+        if op_types.is_view(node):
+            return False
         if node.target in [aten.lift_fresh_copy.default, aten.lift_fresh.default]:
             return False
         # NB: "recompute" == 0 means that must save this node.
@@ -856,6 +857,14 @@ def get_saved_values(
 
     def get_node_weight(node) -> float:
         mem_sz = _size_of(node)
+        if op_types.is_view(node):
+            # We never choose to save views, since views are free to recompute.
+            # It makes it a bit simpler to analyze
+            # NB: If they're not free to recompute (e.g. nested tensors)... I
+            # think we should modify checks for view_ops to `is_view` and check
+            # that. Basically, with nested tensors, `aten.view` is not a "view
+            # op".
+            return math.inf
 
         if isinstance(node.meta["val"], py_sym_types):
             # We never want to save symfloats
@@ -1190,13 +1199,6 @@ def get_default_op_list() -> OpTypes:
         aten.expand,
         aten.as_strided,
         aten.permute,
-        aten.select,
-        aten.transpose,
-        aten._unsafe_view,
-        aten.expand,
-        aten.slice,
-        aten.reshape,
-        aten.broadcast_tensors,
     ]
     view_ops = recomputable_view_ops
     default_recomputable_ops += [
@@ -1304,41 +1306,6 @@ def choose_saved_values_set(
         node_info,
         min_cut_options,
     )
-
-    if torch._dynamo.config.trace_distributed:
-        # For Traceable FSDP, we need to trace lineage of saved nodes that are aliases of primals, and move
-        # the entire view chain to BWD graph so that only primals (along with non-view op output intermediates)
-        # are saved as FWD graph output.
-        # (Normally we would expect AOTAutograd to be able to dedup aliases,
-        # but AOTAutograd's alias dedup logic cannot support subclass + alias + mutation very well yet).
-        op_types = get_default_op_list()
-        def is_view_of_primal_input(primal_inputs, node):
-            if hasattr(node, "target") and op_types.is_view(node):
-                view_chain = [node]
-                flattened_arg_list = flatten_arg_list(node.args)
-                for arg in flattened_arg_list:
-                    if arg in primal_inputs:
-                        return True, view_chain
-                    else:
-                        upstream_is_alias, upstream_view_chain = is_view_of_primal_input(primal_inputs, arg)
-                        if upstream_is_alias:
-                            view_chain.extend(upstream_view_chain)
-                            return True, view_chain
-            return False, []
-
-        primal_inputs = list(filter(_is_primal, joint_graph.nodes))
-        for saved_value in runtime_optimized_saved_values:
-            is_alias, view_chain = is_view_of_primal_input(primal_inputs, saved_value)
-            if is_alias:
-                node_info.required_bw_nodes.update(set(view_chain))
-
-        # Run min-cut partitioning again to get the saved values that are not aliases of primals.
-        runtime_optimized_saved_values, _ = get_saved_values(
-            joint_graph,
-            node_info,
-            min_cut_options,
-        )
-
     return runtime_optimized_saved_values
 
 
@@ -1467,8 +1434,6 @@ def min_cut_rematerialization_partition(
         saved_sym_nodes=saved_sym_nodes,
         num_fwd_outputs=num_fwd_outputs,
     )
-    if torch._dynamo.config.trace_distributed:
-        dist_fx_passes.move_primal_set_to_end_of_graph(fw_module)
 
     if graph_has_recomputable_ops:
         if graph_has_recomputable_rng_ops:
