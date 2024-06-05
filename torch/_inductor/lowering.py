@@ -3285,7 +3285,7 @@ def scatter_reduce_(self, dim: int, index, src, reduce, *, include_self: bool = 
         index = view(index, [1])
 
     if index.get_numel() == 0:
-        return clone(self)
+        return self
 
     dim = _validate_dim(self, dim)
 
