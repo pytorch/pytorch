@@ -164,7 +164,13 @@ def get_block_to_lifted_attrs(graph: torch._C.Graph) -> Dict[torch._C.Block, Set
         for node in entry.nodes():
             for block in node.blocks():
                 # Recursively build.
+<<<<<<< HEAD
                 arguments = arguments.union(_map_blocks_to_lifted_attrs(block))
+=======
+                arguments = arguments.union(
+                    _dfs_build_lifted_arguments_for_param(block)
+                )
+>>>>>>> b7a09764bd5 (more test cases)
             if node.kind() == "prim::GetAttr":
                 irv_name = node.output().debugName()
                 # Skip for intermediate GetAttr, which will anyway not result a FQN.
@@ -576,11 +582,14 @@ class TS2FXGraphConverter:
                 for block_node in block.nodes():
                     for block_node_in in block_node.inputs():
                         if block_node_in.debugName() in self.name_to_node:
-                            arguments.add(block_node_in.debugName())
-                    arguments = arguments.union(_dfs_build_lifted_arguments_for_input(block_node))
+                            debug_name = block_node_in.debugName()
+                            arguments.add(debug_name)
+                    arguments = arguments.union(
+                        _dfs_build_lifted_arguments_for_input(block_node)
+                    )
             return arguments
 
-        # Lift inputs.
+        # # Find inputs.
         arguments = _dfs_build_lifted_arguments_for_input(node)
 
         # Lift parameters as inputs.
@@ -721,7 +730,6 @@ class TS2EPConverter:
     ):
         self.ts_model = ts_model
         self.ts_graph, self.params, _, _ = _create_jit_graph(ts_model, sample_args)
-        print(self.ts_graph)
 
         self.sample_args = sample_args
         self.sample_kwargs = sample_kwargs
