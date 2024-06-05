@@ -1216,6 +1216,7 @@ def main():
         "utils/data/*.pyi",
         "utils/data/datapipes/*.pyi",
         "lib/*.pdb",
+        "lib/*shm*",
         "lib/torch_shm_manager",
         "lib/*.h",
         "include/*.h",
