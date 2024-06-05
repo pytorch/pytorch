@@ -28,6 +28,7 @@ from torch.fx.experimental.symbolic_shapes import (
 from torch.fx.passes import graph_drawer
 from . import config
 from .compile_utils import fx_graph_cse, get_aten_target
+from ._aot_autograd.passes import dist_fx_passes
 
 
 AOT_PARTITIONER_DEBUG = config.debug_partitioner
@@ -882,6 +883,14 @@ def get_saved_values(
     nx_graph = nx.DiGraph()
     banned_nodes = set()
 
+    def ban_recomputation(node):
+        banned_nodes.add(node)
+        # A node will only ever be recomputed if there is a path from an
+        # ancestor of this node to the backwards path through this node that
+        # doesn't go through any saved value. If this node is saved, then that
+        # condition is not possible.
+        nx_graph.add_edge("source", node.name + "_in", capacity=math.inf)
+
     def ban_recomputation_if_allowed(node):
         if op_types.is_view(node):
             return False
@@ -898,12 +907,7 @@ def get_saved_values(
         if "val" in node.meta and isinstance(node.meta["val"], torch.SymFloat):
             return False
 
-        banned_nodes.add(node)
-        # A node will only ever be recomputed if there is a path from an
-        # ancestor of this node to the backwards path through this node that
-        # doesn't go through any saved value. If this node is saved, then that
-        # condition is not possible.
-        nx_graph.add_edge("source", node.name + "_in", capacity=math.inf)
+        ban_recomputation(node)
         return True
 
     for node in joint_graph.nodes:
@@ -944,6 +948,9 @@ def get_saved_values(
             weight = (
                 0.0 if isinstance(node.meta.get("val"), BackwardState) else math.inf
             )
+        elif torch._dynamo.config.trace_distributed and dist_fx_passes.should_ban_recomputation(node):
+            ban_recomputation(node)
+            weight = 0.0
         else:
             weight = get_node_weight(node)
         # Creates the weights on the "node" edge
@@ -1199,6 +1206,13 @@ def get_default_op_list() -> OpTypes:
         aten.expand,
         aten.as_strided,
         aten.permute,
+        aten.select,
+        aten.transpose,
+        aten._unsafe_view,
+        aten.expand,
+        aten.slice,
+        aten.reshape,
+        aten.broadcast_tensors,
     ]
     view_ops = recomputable_view_ops
     default_recomputable_ops += [
@@ -1306,6 +1320,7 @@ def choose_saved_values_set(
         node_info,
         min_cut_options,
     )
+
     return runtime_optimized_saved_values
 
 
@@ -1347,10 +1362,29 @@ def min_cut_rematerialization_partition(
 
     fx_g = joint_module.graph
 
-    #  add the CSE pass
-    if config.cse:
-        cse_graph = fx_graph_cse(fx_g)
-        joint_module.graph = cse_graph
+    """
+    TODO(yf225)
+    Unfortunately CSE here turns this graph:
+    ```
+    empty: "f32[262144]" = torch.ops.aten.empty.memory_format([262144])
+    empty_1: "f32[512]" = torch.ops.aten.empty.memory_format([512])
+    empty_2: "f32[262144]" = torch.ops.aten.empty.memory_format([262144])
+    empty_3: "f32[512]" = torch.ops.aten.empty.memory_format([512])
+    out = torch.ops.fsdp.split_with_sizes_copy.default(..., out = [empty, empty_1, empty_2, empty_3])
+    ```
+
+    into this graph which is wrong :( we need to debug why this happens. For now just set functorch.config.cse = False
+
+    ```
+    empty: "f32[262144]" = torch.ops.aten.empty.memory_format([262144])
+    empty_1: "f32[512]" = torch.ops.aten.empty.memory_format([512])
+    out = torch.ops.fsdp.split_with_sizes_copy.default(..., out = [empty, empty_1, empty, empty_1])
+    ```
+    """
+    # #  add the CSE pass
+    # if config.cse:
+    #     cse_graph = fx_graph_cse(fx_g)
+    #     joint_module.graph = cse_graph
     joint_graph = joint_module.graph
 
     graph_has_recomputable_ops = has_recomputable_ops(joint_module)
@@ -1434,6 +1468,8 @@ def min_cut_rematerialization_partition(
         saved_sym_nodes=saved_sym_nodes,
         num_fwd_outputs=num_fwd_outputs,
     )
+    if torch._dynamo.config.trace_distributed:
+        dist_fx_passes.return_primal_instead_of_view(fw_module)
 
     if graph_has_recomputable_ops:
         if graph_has_recomputable_rng_ops:
