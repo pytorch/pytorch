@@ -85,6 +85,9 @@ def get_block_lifted_args(graph: torch._C.Graph):
     in a bottom-up fashion.
     """
 
+    # A map from a block to its expected to be lifted arguments.
+    block_to_arguments: Dict[torch._C.Block, Set[str]] = dict()
+
     # Reference map stores the input (i.e., src) and output (i.e., dest) IR of a
     # GetAttr node. By traversing this reference map, we can figure out the
     # full IR aliasing pass and figure out the FQN of an attribute.
@@ -94,9 +97,6 @@ def get_block_lifted_args(graph: torch._C.Graph):
     # In nutshell, for each GetAttr call, GetAttr(input IR, attribute name) -> output IR
     # This name map stores which attribute name is called for a src IR --> dest IR action.
     name_map: Dict[str, str] = dict()
-
-    # A map from a block to its expected to be lifted arguments.
-    block_to_arguments: Dict[torch._C.Block, Set[str]] = dict()
 
     def _dfs_get_attr_dependency(entry):
         """
@@ -110,7 +110,7 @@ def get_block_lifted_args(graph: torch._C.Graph):
             for block in node.blocks():
                 _dfs_get_attr_dependency(block)
 
-    def _dfs_build_arguments(entry):
+    def _dfs_build_lifted_arguments_for_param(entry):
         """
         Walk the graph in a bottom-up fashion to build the expected to be
         lifted arguments for each block.
@@ -119,18 +119,20 @@ def get_block_lifted_args(graph: torch._C.Graph):
         for node in entry.nodes():
             for block in node.blocks():
                 # Recursively build.
-                arguments = arguments.union(_dfs_build_arguments(block))
+                arguments = arguments.union(_dfs_build_lifted_arguments_for_param(block))
             if node.kind() == "prim::GetAttr":
                 src_ir, dest_ir, cur_name = get_src_dest_and_cur(node)
                 # Skip for intermediate GetAttr, which will anyway not results a FQN.
                 if dest_ir not in set(ref_map.values()):
                     arguments.add(construct_fqn(dest_ir, ref_map, name_map))
-        if not isinstance(entry, torch._C.Graph):  # Skip to top level.
-            block_to_arguments[entry] = arguments
+        if not isinstance(entry, torch._C.Graph):  # Skip the top level.
+            if entry not in block_to_arguments:
+                block_to_arguments[entry] = set()
+            block_to_arguments[entry] = block_to_arguments[entry].union(arguments)
         return arguments
 
     _dfs_get_attr_dependency(graph)
-    _dfs_build_arguments(graph)
+    _dfs_build_lifted_arguments_for_param(graph)
 
     return block_to_arguments
 
@@ -509,20 +511,20 @@ class TS2FXGraphConverter:
         assert len(inputs) == 1
         predicate = self.get_fx_value(inputs[0])
 
-        # Get union of inputs to blocks
-        arguments = set()
-        for block in node.blocks():
-            block_args = set()
+        def _dfs_build_lifted_arguments_for_input(entry):
+            arguments: Set[str] = set()
+            for block in entry.blocks():
+                for block_node in block.nodes():
+                    for block_node_in in block_node.inputs():
+                        if block_node_in.debugName() in self.name_to_node:
+                            arguments.add(block_node_in.debugName())
+                    arguments = arguments.union(_dfs_build_lifted_arguments_for_input(block_node))
+            return arguments
 
-            # TODO: block.inputs(), not sure what theyre used for
+        # Lift inputs.
+        arguments = _dfs_build_lifted_arguments_for_input(node)
 
-            for block_node in block.nodes():
-                for block_node_in in block_node.inputs():
-                    if block_node_in.debugName() in self.name_to_node:
-                        block_args.add(block_node_in.debugName())
-
-            arguments.update(block_args)
-
+        # Lift parameters.
         for block in node.blocks():
             arguments = arguments.union(self.block_to_arguments[block])
 
