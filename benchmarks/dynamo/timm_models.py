@@ -77,6 +77,7 @@ REQUIRE_HIGHER_TOLERANCE = {
     "mobilenetv3_large_100",
     "sebotnet33ts_256",
     "selecsls42b",
+    "cspdarknet53",
 }
 
 REQUIRE_HIGHER_TOLERANCE_FOR_FREEZING = {

@@ -539,12 +539,20 @@ class PythonPrinter(ExprPrinter):
         assert len(expr.args) == 1
         return f"math.floor({self._print(expr.args[0])})"
 
+    def _print_FloorToInt(self, expr):
+        assert len(expr.args) == 1
+        return f"math.floor({self._print(expr.args[0])})"
+
     def _print_TruncToInt(self, expr):
         assert len(expr.args) == 1
         # This also could have been int(), they'll do the same thing for float
         return f"math.trunc({self._print(expr.args[0])})"
 
     def _print_ceiling(self, expr):
+        assert len(expr.args) == 1
+        return f"math.ceil({self._print(expr.args[0])})"
+
+    def _print_CeilToInt(self, expr):
         assert len(expr.args) == 1
         return f"math.ceil({self._print(expr.args[0])})"
 
