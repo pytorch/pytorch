@@ -344,7 +344,6 @@ class FooToPickle(torch.nn.Module):
         self.bar = torch.jit.ScriptModule()
 
 
-@skipIfTorchDynamo()
 class TestJitProfiler(JitTestCase):
     """
     This runs tests that requires setting some global states like torch._C._set_graph_executor_optimize
@@ -409,7 +408,6 @@ class TestJitProfiler(JitTestCase):
             self.assertTrue(other_fn_events[thread] >= mul_time)
 
 
-@skipIfTorchDynamo()
 class TestJit(JitTestCase):
     @unittest.skip("Requires a lot of RAM")
     def test_big(self):
@@ -1680,6 +1678,13 @@ graph(%Ra, %Rb):
                   torch.bfloat16, torch.complex64, torch.complex128, torch.bool]:
             self.assertEqual(scr(x, t), foo(x, t))
 
+    def test_script_bool_literal_conversion(self):
+        def foo(x):
+            return torch.mul(x, True)
+        scr = torch.jit.script(foo)
+        x = torch.rand(3, 4)
+        self.assertEqual(scr(x), foo(x))
+
     def test_shape_analysis_masked_select(self):
         input_str = """graph(%0 : Float(),
           %1 : Bool()):
@@ -2944,7 +2949,6 @@ graph(%Ra, %Rb):
         self.assertRegex(graph.__repr__(), source_range_regex)
 
 
-@skipIfTorchDynamo()
 class TestFrontend(JitTestCase):
 
     def test_instancing_error(self):
@@ -3001,7 +3005,6 @@ class TestFrontend(JitTestCase):
             res_2 = traced_model_2(**{'x': torch.rand([2]), 'z': torch.rand([2])})  # noqa: PIE804
 
 
-@skipIfTorchDynamo()
 class TestScript(JitTestCase):
 
     # Tests that calling torch.jit.script repeated on function is allowed.
@@ -4326,7 +4329,7 @@ def foo(x):
             return torch.blargh(xyz)
 
         _, lineno = inspect.getsourcelines(foobar)
-        with self.assertRaisesRegex(RuntimeError, f"test_jit.py\", line {lineno + 1}"):
+        with self.assertRaisesRegex(RuntimeError, f'test_jit.py", line {lineno + 1}'):
             scripted = torch.jit.script(foobar)
 
     def test_file_line_error_class_defn(self):
@@ -4335,7 +4338,7 @@ def foo(x):
                 return torch.blargh(xyz)
 
         _, lineno = inspect.getsourcelines(FooBar)
-        with self.assertRaisesRegex(RuntimeError, f"test_jit.py\", line {lineno + 2}"):
+        with self.assertRaisesRegex(RuntimeError, f'test_jit.py", line {lineno + 2}'):
             torch.jit.script(FooBar)
 
     def test_file_line_graph(self):
@@ -4402,7 +4405,7 @@ def foo(xyz):
         loaded = self.getExportImportCopy(ft)
         _, lineno = inspect.getsourcelines(FooTest)
 
-        with self.assertRaisesRegex(RuntimeError, f'test_jit.py\", line {lineno + 3}'):
+        with self.assertRaisesRegex(RuntimeError, f'test_jit.py", line {lineno + 3}'):
             loaded(torch.rand(3, 4), torch.rand(30, 40))
 
     def test_serialized_source_ranges_graph(self):
@@ -4428,7 +4431,7 @@ def foo(xyz):
 
         _, lineno = inspect.getsourcelines(FooTest2)
 
-        with self.assertRaisesRegex(torch.jit.Error, f'test_jit.py\", line {lineno + 3}'):
+        with self.assertRaisesRegex(torch.jit.Error, f'test_jit.py", line {lineno + 3}'):
             ft = FooTest2()
             loaded = self.getExportImportCopy(ft)
             loaded()
@@ -5595,7 +5598,7 @@ a")
         g = parse_ir(graph_str)
         m = self.createFunctionFromGraph(g)
         self.getExportImportCopy(m)
-        with self.assertRaisesRegex(RuntimeError, "isInt"):
+        with self.assertRaisesRegex(RuntimeError, "expected int"):
             m()
 
 
@@ -5863,7 +5866,7 @@ a")
 
     def test_python_frontend_source_range(self):
         def fn():
-            raise Exception("hello")
+            raise Exception("hello")  # noqa: TRY002
         ast = torch.jit.frontend.get_jit_def(fn, fn.__name__)
         FileCheck().check("SourceRange at:") \
                    .check("def fn():") \
@@ -5874,7 +5877,7 @@ a")
 
     def test_python_frontend_py3(self):
         def fn():
-            raise Exception("hello")
+            raise Exception("hello")  # noqa: TRY002
         ast = torch.jit.frontend.get_jit_def(fn, fn.__name__)
         self.assertExpected(str(ast))
 
@@ -10257,7 +10260,7 @@ dedent """
         n = next(graph.inputs())
         self.assertTrue(n.type() == torch._C.TensorType.getInferred())
 
-        with self.assertRaisesRegex(RuntimeError, "Inferred \'x\' to be of type \'Tensor"):
+        with self.assertRaisesRegex(RuntimeError, "Inferred 'x' to be of type 'Tensor"):
             fn("1")
 
     def test_script_define_order(self):
@@ -12306,7 +12309,7 @@ dedent """
         tm = torch.jit.trace(TracedModule(), torch.rand(3, 4))
 
         FileCheck().check_not("value=<Tensor>").check("aten::mm")\
-            .check("prim::CallMethod[name=\"forward\"]").check("aten::add") \
+            .check('prim::CallMethod[name="forward"]').check("aten::add") \
             .run(str(tm.graph))
         FileCheck().check("aten::mm").run(str(tm.mod.graph))
 
@@ -14740,7 +14743,7 @@ dedent """
                 return self.hello("hi"), self.hello(.5)
 
         w = CompileOverloadError()
-        with self.assertRaisesRegex(Exception, "but instead found type \'str\'"):
+        with self.assertRaisesRegex(Exception, "but instead found type 'str'"):
             torch.jit.script(w)
 
         # testing overload declared first, then non-overload
@@ -15676,7 +15679,7 @@ dedent """
     def test_unicode_comments(self):
         @torch.jit.script
         def test(self, a):
-            # 🤷🤷🤷🤷
+            # shrug
             return torch.nn.functional.relu(a)
 
     def test_get_set_state_with_tensors(self):
@@ -16041,12 +16044,10 @@ EXCLUDE_ALIAS = {
 }
 
 
-@skipIfTorchDynamo()
 class TestJitGeneratedModule(JitTestCase):
     pass
 
 
-@skipIfTorchDynamo()
 class TestJitGeneratedFunctional(JitTestCase):
     pass
 
@@ -16240,7 +16241,7 @@ def normalize_check_ad(check_ad, name):
     elif len(check_ad) == 3:
         check_ad = list(check_ad)
     else:
-        raise Exception('Invalid check_ad, requires (bool, str|List[str], str|List[str])')
+        raise Exception('Invalid check_ad, requires (bool, str|List[str], str|List[str])')  # noqa: TRY002
 
     check_ad = [[t] if isinstance(t, str) else t for t in check_ad]
 

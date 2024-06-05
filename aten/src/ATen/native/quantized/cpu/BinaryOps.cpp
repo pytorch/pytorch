@@ -326,8 +326,8 @@ Tensor xnnp_add(Tensor qa, Tensor qb, double scale, int64_t zero_point) {
   auto output_min = std::numeric_limits<underlying_t>::min();
   if (ReLUFused) {
     /*
-     * FIXME: use acticationLimits<T>()
-     * With <T>, MSVC runs into "error C3862: indetifier activationLimits not found".
+     * FIXME: use activationLimits<T>()
+     * With <T>, MSVC runs into "error C3862: identifier activationLimits not found".
      */
     constexpr int64_t qmin = std::numeric_limits<underlying_t>::min();
     constexpr int64_t qmax = std::numeric_limits<underlying_t>::max();
@@ -405,7 +405,7 @@ Tensor qadd(Tensor qa, Tensor qb, double scale, int64_t zero_point) {
 #endif // USE_XNNPACK
 
 #ifdef USE_PYTORCH_QNNPACK
-    if(qa.sizes() == qb.sizes() && /* qnnpack does not support boradcasting */
+    if(qa.sizes() == qb.sizes() && /* qnnpack does not support boardcasting */
       qa.scalar_type() == kQUInt8) {
     return qnnpack_add<ReLUFused>(qa, qb, scale, zero_point);
     }

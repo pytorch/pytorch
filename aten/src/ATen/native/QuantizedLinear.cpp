@@ -64,7 +64,7 @@ Tensor fbgemm_linear_int8_weight_fp32_activation(
                   "and will be removed in a future PyTorch release.")
 
   const Tensor input_contig = input.contiguous();
-  const float* input_ptr = input_contig.data_ptr<float>();
+  const float* input_ptr = input_contig.const_data_ptr<float>();
 
   TORCH_CHECK(input.dim() >= 2);
   // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
@@ -125,6 +125,9 @@ Tensor fbgemm_linear_int8_weight_fp32_activation(
   auto& pack_b =
       cpp_custom_type_hack::cast<fbgemm::PackBMatrix<int8_t>>(packed);
 
+  int32_t* col_offsets_data = col_offsets.data_ptr<int32_t>();
+  float* bias_contig_data = bias_contig.data_ptr<float>();
+
   const int num_tasks = at::get_num_threads();
   at::parallel_for(0, num_tasks, 1, [&](int64_t begin, int64_t end) {
     // This operation does the following:
@@ -162,8 +165,8 @@ Tensor fbgemm_linear_int8_weight_fp32_activation(
           /*Aq_zero_point=*/q_params.zero_point,
           /*Bq_zero_point=*/&weight_zero_point_int32,
           /*row_offsets=*/pack_a.getRowOffsetBuffer(),
-          /*col_offsets=*/col_offsets.data_ptr<int32_t>(),
-          /*bias=*/bias_contig.data_ptr<float>(),
+          /*col_offsets=*/col_offsets_data,
+          /*bias=*/bias_contig_data,
           /*nCol=*/N);
       // Do the GEMM
       fbgemm::fbgemmPacked(
@@ -302,7 +305,7 @@ Tensor fbgemm_pack_quantized_matrix(const Tensor& weight) {
   const int64_t K = weight.size(1);
   const int64_t N = weight.size(0);
   const Tensor weight_contig = weight.contiguous();
-  const int8_t* weight_ptr = weight_contig.data_ptr<int8_t>();
+  const int8_t* weight_ptr = weight_contig.const_data_ptr<int8_t>();
   auto ptr = std::make_unique<fbgemm::PackBMatrix<int8_t>>(
       /*trans=*/fbgemm::matrix_op_t::Transpose,
       /*nRow=*/K,
@@ -421,7 +424,7 @@ Tensor fbgemm_linear_fp16_weight_fp32_activation(
   TORCH_CHECK(fbgemm::fbgemmSupportedCPU(), "Your CPU doesn't support FBGEMM.");
 
   const Tensor input_contig = input.contiguous();
-  const float* input_ptr = input_contig.data_ptr<float>();
+  const float* input_ptr = input_contig.const_data_ptr<float>();
 
   // Pull out the PackedGemmMatrixFP16 instance from the owning tensor
   const fbgemm::PackedGemmMatrixFP16& packed_weight_fp16 =

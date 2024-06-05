@@ -1,5 +1,6 @@
 import abc
 import io
+import operator
 from dataclasses import dataclass
 from enum import auto, Enum
 from functools import reduce
@@ -7,11 +8,12 @@ from typing import Any, List, Optional, Tuple, Union
 
 import torch
 
-from .metadata import (
+from torch.distributed.checkpoint.metadata import (
     ChunkStorageMetadata,
     Metadata,
     MetadataIndex,
     STATE_DICT_TYPE,
+    StorageMeta,
     TensorProperties,
 )
 
@@ -67,7 +69,7 @@ class WriteItem:
         if self.tensor_data is None:
             return None
 
-        numels = reduce(lambda x, y: x * y, self.tensor_data.size, 1)
+        numels = reduce(operator.mul, self.tensor_data.size, 1)
         dtype_size = torch._utils._element_size(self.tensor_data.properties.dtype)
         return numels * dtype_size
 
@@ -141,9 +143,14 @@ class SavePlanner(abc.ABC):
 
     >>> # xdoctest: +SKIP("undefined vars")
     >>> class RenamePlanner(DefaultSavePlanner):
-    >>>     def set_up_planner(self, state_dict, is_coordinator):
+    >>>     def set_up_planner(
+    >>>         self,
+    >>>         state_dict: STATE_DICT_TYPE,
+    >>>         storage_meta: Optional[StorageMeta],
+    >>>         is_coordinator: bool,
+    >>>     ) -> None:
     >>>         # prefix all keys with `foo_``
-    >>>         super().set_up_planner({"foo_" + k: v for k, v in state_dict.items()}, is_coordinator)
+    >>>         super().set_up_planner({"foo_" + k: v for k, v in state_dict.items()}, storage_meta, is_coordinator)
 
     Modifying local plan and lookup in tandem. This is useful when fine control of how data is persisted
 
@@ -196,7 +203,12 @@ class SavePlanner(abc.ABC):
     """
 
     @abc.abstractmethod
-    def set_up_planner(self, state_dict: STATE_DICT_TYPE, is_coordinator: bool) -> None:
+    def set_up_planner(
+        self,
+        state_dict: STATE_DICT_TYPE,
+        storage_meta: Optional[StorageMeta] = None,
+        is_coordinator: bool = False,
+    ) -> None:
         """
         Initialize this planner to save ``state_dict``.
 
@@ -298,7 +310,12 @@ class LoadPlanner:
 
     >>> # xdoctest: +SKIP("undefined vars")
     >>> class RenamePlanner(DefaultLoadPlanner):
-    >>>     def set_up_planner(self, state_dict, metadata, is_coordinator):
+    >>>     def set_up_planner(
+    >>>         self,
+    >>>         state_dict: STATE_DICT_TYPE,
+    >>>         metadata: Metadata,
+    >>>         is_coordinator: bool,
+    >>>     ) -> None:
     >>>         self.original_state_dict = state_dict
     >>>         state_dict = {"foo_" + k: v for k, v in state_dict.items()}
     >>>
@@ -333,8 +350,8 @@ class LoadPlanner:
     def set_up_planner(
         self,
         state_dict: STATE_DICT_TYPE,
-        metadata: Metadata,
-        is_coordinator: bool,
+        metadata: Optional[Metadata] = None,
+        is_coordinator: bool = False,
     ) -> None:
         """
         Initialize this instance to load data into ``state_dict``.
@@ -378,6 +395,14 @@ class LoadPlanner:
         """
         pass
 
+    def resolve_bytes(self, read_item: ReadItem) -> io.BytesIO:
+        """
+        Return the BytesIO to be used by the StorageReader to load `read_item`.
+
+        The BytesIO should alias with one on the underlying state_dict as StorageReader will replace its contents.
+        """
+        raise NotImplementedError("LoadPlanner.resolve_bytes is not implemented")
+
     @abc.abstractmethod
     def resolve_tensor(self, read_item: ReadItem) -> torch.Tensor:
         """
@@ -401,3 +426,39 @@ class LoadPlanner:
         The contents of tensor will follow its device synchronization model.
         """
         pass
+
+
+class _Checkpointable:
+    """
+    Interface for checkpointable objects.
+    This is to allow arbitrary objects/tensor subclasses to hook into DCP seamlessly through implementing the interface.
+    """
+
+    @abc.abstractmethod
+    def _create_write_items(self, fqn: str, object: Any) -> List[WriteItem]:
+        """
+        Return a list of WriteItems based on object's contents.
+        """
+        raise NotImplementedError(
+            "_Checkpointable._create_write_items is not implemented"
+        )
+
+    @abc.abstractmethod
+    def _create_chunk_list(self, tensor: torch.Tensor) -> List[ChunkStorageMetadata]:
+        """
+        Return a list of `ChunkStorageMetadata` based on object's contents.
+        """
+        raise NotImplementedError(
+            "_Checkpointable._create_chunk_list is not implemented"
+        )
+
+    @abc.abstractmethod
+    def _get_tensor_shard(
+        self, tensor: torch.Tensor, index: MetadataIndex
+    ) -> torch.Tensor:
+        """
+        Return a 'torch.Tensor' shard based on 'MetadataIndex'.
+        """
+        raise NotImplementedError(
+            "_Checkpointable._get_tensor_shard is not implemented"
+        )

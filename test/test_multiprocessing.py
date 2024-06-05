@@ -1,12 +1,12 @@
 # Owner(s): ["module: multiprocessing"]
 
 import contextlib
+import copy
 import gc
 import os
 import sys
 import time
 import unittest
-import copy
 from sys import platform
 
 import torch
@@ -14,9 +14,20 @@ import torch.cuda
 import torch.multiprocessing as mp
 import torch.utils.hooks
 from torch.nn import Parameter
-from torch.testing._internal.common_utils import (TestCase, run_tests, IS_WINDOWS, NO_MULTIPROCESSING_SPAWN, TEST_WITH_ASAN,
-                                                  load_tests, slowTest, TEST_WITH_TSAN, TEST_WITH_TORCHDYNAMO,
-                                                  TEST_WITH_ROCM, IS_MACOS)
+from torch.testing._internal.common_cuda import IS_JETSON
+from torch.testing._internal.common_utils import (
+    IS_MACOS,
+    IS_WINDOWS,
+    load_tests,
+    NO_MULTIPROCESSING_SPAWN,
+    run_tests,
+    slowTest,
+    TEST_WITH_ASAN,
+    TEST_WITH_ROCM,
+    TEST_WITH_TORCHDYNAMO,
+    TEST_WITH_TSAN,
+    TestCase,
+)
 
 
 # load_tests from common_utils is used to automatically filter tests for
@@ -24,16 +35,21 @@ from torch.testing._internal.common_utils import (TestCase, run_tests, IS_WINDOW
 load_tests = load_tests
 
 TEST_REPEATS = 30
-HAS_SHM_FILES = os.path.isdir('/dev/shm')
+HAS_SHM_FILES = os.path.isdir("/dev/shm")
 MAX_WAITING_TIME_IN_SECONDS = 30
-TEST_CUDA_IPC = torch.cuda.is_available() and \
-    sys.platform != 'darwin' and \
-    sys.platform != 'win32' and \
-    not TEST_WITH_ROCM  # https://github.com/pytorch/pytorch/issues/90940
+
+TEST_CUDA_IPC = (
+    torch.cuda.is_available()
+    and sys.platform != "darwin"
+    and sys.platform != "win32"
+    and not IS_JETSON
+    and not TEST_WITH_ROCM
+)  # https://github.com/pytorch/pytorch/issues/90940
+
 TEST_MULTIGPU = TEST_CUDA_IPC and torch.cuda.device_count() > 1
 
 if TEST_CUDA_IPC:
-    torch.cuda.memory._set_allocator_settings('expandable_segments:False')
+    torch.cuda.memory._set_allocator_settings("expandable_segments:False")
 
 
 class SubProcess(mp.Process):
@@ -50,7 +66,7 @@ def _test_cuda_ipc_deadlock_actor(queue, iterations):
     for i in range(iterations):
         if not queue.empty():
             queue.get()
-        time.sleep(.01)
+        time.sleep(0.01)
 
 
 def _test_cuda_ipc_deadlock_learner(queue, iterations):
@@ -58,7 +74,7 @@ def _test_cuda_ipc_deadlock_learner(queue, iterations):
     for i in range(iterations):
         if not queue.full():
             queue.put(copy.deepcopy(net.state_dict()))
-        time.sleep(.01)
+        time.sleep(0.01)
 
 
 def simple_fill(queue, event):
@@ -107,8 +123,14 @@ def sum_tensors(inq, outq):
     with torch.cuda.device(1):
         tensors = inq.get()
         for tensor in tensors:
-            outq.put((tensor.sum().item(), tensor.get_device(),
-                      tensor.numel(), tensor.storage().size()))
+            outq.put(
+                (
+                    tensor.sum().item(),
+                    tensor.get_device(),
+                    tensor.numel(),
+                    tensor.storage().size(),
+                )
+            )
 
 
 def queue_get_exception(inqueue, outqueue):
@@ -118,7 +140,7 @@ def queue_get_exception(inqueue, outqueue):
     except Exception as e:
         outqueue.put(e)
     else:
-        outqueue.put('no exception')
+        outqueue.put("no exception")
 
 
 # Multiply by two in a separate stream
@@ -148,7 +170,7 @@ def autograd_sharing(queue, ready, master_modified, device, is_parameter):
     ready.set()
     master_modified.wait()
 
-    expected_var = torch.arange(1., 26, device=device).view(5, 5)
+    expected_var = torch.arange(1.0, 26, device=device).view(5, 5)
     expected_var[0, 0] = 1000
     is_ok = var.data.equal(expected_var)
     var.data[:] = torch.ones(5, 5, device=device)
@@ -174,14 +196,16 @@ def mixed_type_producer(queue, event):
         event.wait()
         event.clear()
 
+
 def simple_autograd_function(a=1):
     torch.rand(3).requires_grad_(True).mean().backward()
-    return a ** 2
+    return a**2
+
 
 @contextlib.contextmanager
 def fs_sharing():
     prev_strategy = mp.get_sharing_strategy()
-    mp.set_sharing_strategy('file_system')
+    mp.set_sharing_strategy("file_system")
     try:
         yield
     finally:
@@ -189,7 +213,6 @@ def fs_sharing():
 
 
 class leak_checker:
-
     def __init__(self, test_case):
         self.checked_pids = [os.getpid()]
         self.test_case = test_case
@@ -228,7 +251,7 @@ class leak_checker:
             return False
 
         result = self._has_shm_files()
-        if not result or mp.get_sharing_strategy() != 'file_system' or not wait:
+        if not result or mp.get_sharing_strategy() != "file_system" or not wait:
             return result
 
         total_waiting_time = 0
@@ -243,23 +266,25 @@ class leak_checker:
 
     def _has_shm_files(self):
         gc.collect()
-        names = ['torch_' + str(pid) for pid in self.checked_pids]
-        for filename in os.listdir('/dev/shm'):
+        names = ["torch_" + str(pid) for pid in self.checked_pids]
+        for filename in os.listdir("/dev/shm"):
             for name in names:
                 if filename.startswith(name):
                     return True
         return False
 
 
-@unittest.skipIf(TEST_WITH_TSAN, "TSAN is not fork-safe since we're forking in a multi-threaded environment")
+@unittest.skipIf(
+    TEST_WITH_TSAN,
+    "TSAN is not fork-safe since we're forking in a multi-threaded environment",
+)
 class TestMultiprocessing(TestCase):
-
     def tearDown(self):
         # This will keep tests isolated from each-other
         if torch.cuda.is_available():
             torch.cuda.ipc_collect()
 
-    def _test_sharing(self, ctx=mp, device='cpu', dtype=torch.float, repeat=1):
+    def _test_sharing(self, ctx=mp, device="cpu", dtype=torch.float, repeat=1):
         def test_fill():
             x = torch.zeros(5, 5).to(device, dtype)
             q = ctx.Queue()
@@ -360,24 +385,36 @@ class TestMultiprocessing(TestCase):
             for _ in range(repeat):
                 do_test()
 
-    @unittest.skipIf(platform == 'darwin', "file descriptor strategy is not supported on macOS")
-    @unittest.skipIf(TEST_WITH_ASAN,
-                     "seems to hang with ASAN, see https://github.com/pytorch/pytorch/issues/5326")
+    @unittest.skipIf(
+        platform == "darwin", "file descriptor strategy is not supported on macOS"
+    )
+    @unittest.skipIf(
+        TEST_WITH_ASAN,
+        "seems to hang with ASAN, see https://github.com/pytorch/pytorch/issues/5326",
+    )
     def test_fd_sharing(self):
         self._test_sharing(repeat=TEST_REPEATS)
 
-    @unittest.skipIf(platform == 'darwin', "file descriptor strategy is not supported on macOS")
+    @unittest.skipIf(
+        platform == "darwin", "file descriptor strategy is not supported on macOS"
+    )
     def test_fd_preserve_sharing(self):
         self._test_preserve_sharing(repeat=TEST_REPEATS)
 
-    @unittest.skipIf(platform == 'darwin', "file descriptor strategy is not supported on macOS")
+    @unittest.skipIf(
+        platform == "darwin", "file descriptor strategy is not supported on macOS"
+    )
     def test_fd_pool(self):
         self._test_pool(repeat=TEST_REPEATS)
 
-    @unittest.skipIf(TEST_WITH_ASAN,
-                     "seems to hang with ASAN, see https://github.com/pytorch/pytorch/issues/5326")
-    @unittest.skipIf(TEST_WITH_TORCHDYNAMO,
-                     "Fail to clean up temporary /dev/shm/torch_* file, see https://github.com/pytorch/pytorch/issues/91467")
+    @unittest.skipIf(
+        TEST_WITH_ASAN,
+        "seems to hang with ASAN, see https://github.com/pytorch/pytorch/issues/5326",
+    )
+    @unittest.skipIf(
+        TEST_WITH_TORCHDYNAMO,
+        "Fail to clean up temporary /dev/shm/torch_* file, see https://github.com/pytorch/pytorch/issues/91467",
+    )
     def test_fs_sharing(self):
         with fs_sharing():
             # The test works but is very slow on MacOS, see https://github.com/pytorch/pytorch/pull/93183,
@@ -385,21 +422,27 @@ class TestMultiprocessing(TestCase):
             repeat = 1 if IS_MACOS else TEST_REPEATS
             self._test_sharing(repeat=repeat)
 
-    @unittest.skipIf(TEST_WITH_TORCHDYNAMO,
-                     "Fail to clean up temporary /dev/shm/torch_* file, see https://github.com/pytorch/pytorch/issues/91467")
+    @unittest.skipIf(
+        TEST_WITH_TORCHDYNAMO,
+        "Fail to clean up temporary /dev/shm/torch_* file, see https://github.com/pytorch/pytorch/issues/91467",
+    )
     def test_fs_preserve_sharing(self):
         with fs_sharing():
             self._test_preserve_sharing(repeat=TEST_REPEATS)
 
-    @unittest.skipIf(TEST_WITH_TORCHDYNAMO,
-                     "Fail to clean up temporary /dev/shm/torch_* file, see https://github.com/pytorch/pytorch/issues/91467")
+    @unittest.skipIf(
+        TEST_WITH_TORCHDYNAMO,
+        "Fail to clean up temporary /dev/shm/torch_* file, see https://github.com/pytorch/pytorch/issues/91467",
+    )
     def test_fs_pool(self):
         with fs_sharing():
             self._test_pool(repeat=TEST_REPEATS)
 
     @unittest.skipIf(not HAS_SHM_FILES, "don't not how to check if shm files exist")
-    @unittest.skipIf(TEST_WITH_TORCHDYNAMO,
-                     "Fail to clean up temporary /dev/shm/torch_* file, see https://github.com/pytorch/pytorch/issues/91467")
+    @unittest.skipIf(
+        TEST_WITH_TORCHDYNAMO,
+        "Fail to clean up temporary /dev/shm/torch_* file, see https://github.com/pytorch/pytorch/issues/91467",
+    )
     def test_fs(self):
         def queue_put():
             x = torch.DoubleStorage(4)
@@ -426,39 +469,53 @@ class TestMultiprocessing(TestCase):
 
     @unittest.skipIf(IS_WINDOWS, "Test needs to use fork multiprocessing")
     def test_autograd_errors(self):
-        ctx = mp.get_context('fork')
+        ctx = mp.get_context("fork")
         simple_autograd_function()
         # Autograd only uses thread when GPUs are involved
-        if torch.cuda.is_available() or torch.backends.mps.is_available():
-            with self.assertRaisesRegex(RuntimeError, r'Unable to handle autograd'):
+        if (
+            torch.cuda.is_available()
+            or torch.backends.mps.is_available()
+            or torch.xpu.is_available()
+        ):
+            with self.assertRaisesRegex(RuntimeError, r"Unable to handle autograd"):
                 with ctx.Pool(3) as pool:
                     pool.map(simple_autograd_function, [1, 2, 3])
         else:
             with ctx.Pool(3) as pool:
                 pool.map(simple_autograd_function, [1, 2, 3])
 
-    @unittest.skipIf(NO_MULTIPROCESSING_SPAWN, "Test needs to use spawn multiprocessing")
+    @unittest.skipIf(
+        NO_MULTIPROCESSING_SPAWN, "Test needs to use spawn multiprocessing"
+    )
     def test_autograd_fine_with_spawn(self):
-        ctx = mp.get_context('spawn')
+        ctx = mp.get_context("spawn")
         simple_autograd_function()
         with ctx.Pool(3) as pool:
             pool.map(simple_autograd_function, [1, 2, 3])
 
-    @unittest.skipIf(NO_MULTIPROCESSING_SPAWN, "Disabled for environments that \
-                     don't support multiprocessing with spawn start method")
-    @unittest.skipIf(not TEST_CUDA_IPC, 'CUDA IPC not available')
+    @unittest.skipIf(
+        NO_MULTIPROCESSING_SPAWN,
+        "Disabled for environments that \
+                     don't support multiprocessing with spawn start method",
+    )
+    @unittest.skipIf(not TEST_CUDA_IPC, "CUDA IPC not available")
     def test_cuda_simple(self):
         torch.cuda.FloatTensor([1])  # initialize CUDA outside of leak checker
-        self._test_sharing(mp.get_context('spawn'), 'cuda', torch.float)
+        self._test_sharing(mp.get_context("spawn"), "cuda", torch.float)
 
-    @unittest.skipIf(NO_MULTIPROCESSING_SPAWN, "Disabled for environments that \
-                     don't support multiprocessing with spawn start method")
-    @unittest.skipIf(not TEST_CUDA_IPC, 'CUDA IPC not available')
+    @unittest.skipIf(
+        NO_MULTIPROCESSING_SPAWN,
+        "Disabled for environments that \
+                     don't support multiprocessing with spawn start method",
+    )
+    @unittest.skipIf(not TEST_CUDA_IPC, "CUDA IPC not available")
     def test_cuda_memory_allocation(self):
-        ctx = mp.get_context('spawn')
+        ctx = mp.get_context("spawn")
         q = ctx.Queue()
         e = ctx.Event()
-        p = ctx.Process(target=send_and_delete_tensors, args=(q, e, 'cuda', torch.int, 5))
+        p = ctx.Process(
+            target=send_and_delete_tensors, args=(q, e, "cuda", torch.int, 5)
+        )
         p.start()
         t = []
         for _ in range(5):
@@ -468,15 +525,19 @@ class TestMultiprocessing(TestCase):
         e.set()
         p.join(1)
 
-    @unittest.skipIf(NO_MULTIPROCESSING_SPAWN, "Disabled for environments that \
-                     don't support multiprocessing with spawn start method")
-    @unittest.skipIf(not TEST_CUDA_IPC, 'CUDA IPC not available')
+    @unittest.skipIf(
+        NO_MULTIPROCESSING_SPAWN,
+        "Disabled for environments that \
+                     don't support multiprocessing with spawn start method",
+    )
+    @unittest.skipIf(not TEST_CUDA_IPC, "CUDA IPC not available")
     def test_cuda_ipc_deadlock(self):
-        ctx = mp.get_context('spawn')
+        ctx = mp.get_context("spawn")
         queue = ctx.Queue(1)
         processes = dict(
             a=ctx.Process(target=_test_cuda_ipc_deadlock_actor, args=(queue, 100)),
-            l=ctx.Process(target=_test_cuda_ipc_deadlock_learner, args=(queue, 100)))
+            l=ctx.Process(target=_test_cuda_ipc_deadlock_learner, args=(queue, 100)),
+        )
 
         for p in processes.values():
             p.start()
@@ -487,22 +548,30 @@ class TestMultiprocessing(TestCase):
         for p in processes.values():
             self.assertFalse(p.is_alive())
 
-
     @slowTest
-    @unittest.skipIf(NO_MULTIPROCESSING_SPAWN, "Disabled for environments that \
-                     don't support multiprocessing with spawn start method")
-    @unittest.skipIf(not TEST_CUDA_IPC, 'CUDA IPC not available')
+    @unittest.skipIf(
+        NO_MULTIPROCESSING_SPAWN,
+        "Disabled for environments that \
+                     don't support multiprocessing with spawn start method",
+    )
+    @unittest.skipIf(not TEST_CUDA_IPC, "CUDA IPC not available")
     def test_cuda_send_many(self, name=None, size=5, count=100000):
-        ctx = mp.get_context('spawn')
+        ctx = mp.get_context("spawn")
         q1 = ctx.Queue()
         q2 = ctx.Queue()
         q3 = ctx.Queue()
         e1 = ctx.Event()
         e2 = ctx.Event()
         e3 = ctx.Event()
-        p1 = ctx.Process(target=send_and_delete_tensors, args=(q1, e1, 'cuda', torch.long, count, size))
+        p1 = ctx.Process(
+            target=send_and_delete_tensors,
+            args=(q1, e1, "cuda", torch.long, count, size),
+        )
         p2 = ctx.Process(target=receive_and_send, args=(q1, q2, e2, count))
-        p3 = ctx.Process(target=receive_and_send_sum, args=(q2, q3, e3, 'cuda', torch.long, count, size))
+        p3 = ctx.Process(
+            target=receive_and_send_sum,
+            args=(q2, q3, e3, "cuda", torch.long, count, size),
+        )
         p1.start()
         p2.start()
         p3.start()
@@ -516,18 +585,21 @@ class TestMultiprocessing(TestCase):
         p2.join(1)
         p3.join(1)
 
-    @unittest.skipIf(NO_MULTIPROCESSING_SPAWN, "Disabled for environments that \
-                     don't support multiprocessing with spawn start method")
-    @unittest.skipIf(not TEST_CUDA_IPC, 'CUDA IPC not available')
-    @unittest.skipIf(not TEST_MULTIGPU, 'found only 1 GPU')
+    @unittest.skipIf(
+        NO_MULTIPROCESSING_SPAWN,
+        "Disabled for environments that \
+                     don't support multiprocessing with spawn start method",
+    )
+    @unittest.skipIf(not TEST_CUDA_IPC, "CUDA IPC not available")
+    @unittest.skipIf(not TEST_MULTIGPU, "found only 1 GPU")
     def test_cuda_small_tensors(self):
         # Check multiple small tensors which will likely use the same
         # underlying cached allocation
-        ctx = mp.get_context('spawn')
+        ctx = mp.get_context("spawn")
         tensors = []
         for i in range(5):
             device = i % 2
-            tensors += [torch.arange(i * 5., (i + 1) * 5).cuda(device)]
+            tensors += [torch.arange(i * 5.0, (i + 1) * 5).cuda(device)]
 
         inq = ctx.Queue()
         outq = ctx.Queue()
@@ -542,7 +614,7 @@ class TestMultiprocessing(TestCase):
 
         for i, _tensor in enumerate(tensors):
             v, device, tensor_size, storage_size = results[i]
-            self.assertEqual(v, torch.arange(i * 5., (i + 1) * 5).sum())
+            self.assertEqual(v, torch.arange(i * 5.0, (i + 1) * 5).sum())
             self.assertEqual(device, i % 2)
             self.assertEqual(tensor_size, 5)
 
@@ -563,8 +635,8 @@ class TestMultiprocessing(TestCase):
         # memory 'file' for performance reason
         torch.cuda.ipc_collect()
 
-    @unittest.skipIf(IS_WINDOWS, 'not applicable to Windows (only fails with fork)')
-    @unittest.skipIf(not torch.cuda.is_available(), 'CUDA not available')
+    @unittest.skipIf(IS_WINDOWS, "not applicable to Windows (only fails with fork)")
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
     def test_cuda_bad_call(self):
         # Initialize CUDA
         t = torch.zeros(5, 5).cuda().cpu()
@@ -576,10 +648,11 @@ class TestMultiprocessing(TestCase):
         p.join()
         self.assertIsInstance(outq.get(), RuntimeError)
 
-    @unittest.skipIf(IS_WINDOWS, 'not applicable to Windows (only fails with fork)')
-    @unittest.skipIf(not torch.cuda.is_available(), 'CUDA not available')
+    @unittest.skipIf(IS_WINDOWS, "not applicable to Windows (only fails with fork)")
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
     def test_wrong_cuda_fork(self):
-        stderr = TestCase.runWithPytorchAPIUsageStderr("""\
+        stderr = TestCase.runWithPytorchAPIUsageStderr(
+            """\
 import torch
 from torch.multiprocessing import Process
 def run(rank):
@@ -595,14 +668,18 @@ if __name__ == "__main__":
         processes.append(p)
     for p in processes:
         p.join()
-""")
+"""
+        )
         self.assertRegex(stderr, "Cannot re-initialize CUDA in forked subprocess.")
 
-    @unittest.skipIf(NO_MULTIPROCESSING_SPAWN, "Disabled for environments that \
-                     don't support multiprocessing with spawn start method")
-    @unittest.skipIf(not TEST_CUDA_IPC, 'CUDA IPC not available')
+    @unittest.skipIf(
+        NO_MULTIPROCESSING_SPAWN,
+        "Disabled for environments that \
+                     don't support multiprocessing with spawn start method",
+    )
+    @unittest.skipIf(not TEST_CUDA_IPC, "CUDA IPC not available")
     def test_event(self):
-        ctx = mp.get_context('spawn')
+        ctx = mp.get_context("spawn")
         queue = ctx.Queue()
         ready = ctx.Event()
         done = ctx.Event()
@@ -631,19 +708,23 @@ if __name__ == "__main__":
         event.synchronize()
         c2p.put(1)  # notify parent synchronization is done
 
-    @unittest.skipIf(NO_MULTIPROCESSING_SPAWN, "Disabled for environments that \
-                     don't support multiprocessing with spawn start method")
-    @unittest.skipIf(not TEST_CUDA_IPC, 'CUDA IPC not available')
+    @unittest.skipIf(
+        NO_MULTIPROCESSING_SPAWN,
+        "Disabled for environments that \
+                     don't support multiprocessing with spawn start method",
+    )
+    @unittest.skipIf(not TEST_CUDA_IPC, "CUDA IPC not available")
     def test_event_multiprocess(self):
         event = torch.cuda.Event(enable_timing=False, interprocess=True)
         self.assertTrue(event.query())
 
-        ctx = mp.get_context('spawn')
+        ctx = mp.get_context("spawn")
         p2c = ctx.SimpleQueue()
         c2p = ctx.SimpleQueue()
         p = ctx.Process(
             target=TestMultiprocessing._test_event_multiprocess_child,
-            args=(event, p2c, c2p))
+            args=(event, p2c, c2p),
+        )
         p.start()
 
         c2p.get()  # wait for until child process is ready
@@ -656,13 +737,16 @@ if __name__ == "__main__":
         self.assertTrue(event.query())
         p.join()
 
-    @unittest.skipIf(NO_MULTIPROCESSING_SPAWN, "Disabled for environments that \
-                     don't support multiprocessing with spawn start method")
-    @unittest.skipIf(not TEST_CUDA_IPC, 'CUDA IPC not available')
-    @unittest.skipIf(not TEST_MULTIGPU, 'found only 1 GPU')
+    @unittest.skipIf(
+        NO_MULTIPROCESSING_SPAWN,
+        "Disabled for environments that \
+                     don't support multiprocessing with spawn start method",
+    )
+    @unittest.skipIf(not TEST_CUDA_IPC, "CUDA IPC not available")
+    @unittest.skipIf(not TEST_MULTIGPU, "found only 1 GPU")
     def test_event_handle_multi_gpu(self):
-        d0 = torch.device('cuda:0')
-        d1 = torch.device('cuda:1')
+        d0 = torch.device("cuda:0")
+        d1 = torch.device("cuda:1")
         with torch.cuda.device(d0):
             e0 = torch.cuda.Event(enable_timing=False, interprocess=True)
 
@@ -689,19 +773,23 @@ if __name__ == "__main__":
         c2p.put(1)  # notify synchronization is done in child
         p2c.get()  # wait for parent to finish before destructing child event
 
-    @unittest.skipIf(NO_MULTIPROCESSING_SPAWN, "Disabled for environments that \
-                     don't support multiprocessing with spawn start method")
-    @unittest.skipIf(not TEST_CUDA_IPC, 'CUDA IPC not available')
+    @unittest.skipIf(
+        NO_MULTIPROCESSING_SPAWN,
+        "Disabled for environments that \
+                     don't support multiprocessing with spawn start method",
+    )
+    @unittest.skipIf(not TEST_CUDA_IPC, "CUDA IPC not available")
     def test_event_handle_importer(self):
         e0 = torch.cuda.Event(enable_timing=False, interprocess=True)
         self.assertTrue(e0.query())
 
-        ctx = mp.get_context('spawn')
+        ctx = mp.get_context("spawn")
         p2c = ctx.SimpleQueue()
         c2p = ctx.SimpleQueue()
         p = ctx.Process(
             target=TestMultiprocessing._test_event_handle_importer_consumer,
-            args=(e0.ipc_handle(), p2c, c2p))
+            args=(e0.ipc_handle(), p2c, c2p),
+        )
         p.start()
 
         c2p.get()  # wait for child to become ready
@@ -719,8 +807,7 @@ if __name__ == "__main__":
     def _test_event_handle_exporter_consumer(handle, p2c, c2p):
         stream = torch.cuda.Stream()
         with torch.cuda.stream(stream):
-            e1 = torch.cuda.Event.from_ipc_handle(
-                torch.cuda.current_device(), handle)
+            e1 = torch.cuda.Event.from_ipc_handle(torch.cuda.current_device(), handle)
             torch.cuda._sleep(50000000)  # spin for about 50 ms
             e1.record()
             c2p.put(0)
@@ -728,18 +815,22 @@ if __name__ == "__main__":
             # destructing e1
             p2c.get()
 
-    @unittest.skipIf(NO_MULTIPROCESSING_SPAWN, "Disabled for environments that \
-                     don't support multiprocessing with spawn start method")
-    @unittest.skipIf(not TEST_CUDA_IPC, 'CUDA IPC not available')
+    @unittest.skipIf(
+        NO_MULTIPROCESSING_SPAWN,
+        "Disabled for environments that \
+                     don't support multiprocessing with spawn start method",
+    )
+    @unittest.skipIf(not TEST_CUDA_IPC, "CUDA IPC not available")
     def test_event_handle_exporter(self):
         e0 = torch.cuda.Event(enable_timing=False, interprocess=True)
 
-        ctx = mp.get_context('spawn')
+        ctx = mp.get_context("spawn")
         p2c = ctx.SimpleQueue()
         c2p = ctx.SimpleQueue()
         p = ctx.Process(
             target=TestMultiprocessing._test_event_handle_exporter_consumer,
-            args=(e0.ipc_handle(), p2c, c2p))
+            args=(e0.ipc_handle(), p2c, c2p),
+        )
         p.start()
         # wait for event in child process is recorded
         c2p.get()
@@ -758,21 +849,24 @@ if __name__ == "__main__":
         self.assertEqual(out, empty)
 
     def test_empty_tensor_sharing(self):
-        self._test_empty_tensor_sharing(torch.float32, torch.device('cpu'))
-        self._test_empty_tensor_sharing(torch.int64, torch.device('cpu'))
+        self._test_empty_tensor_sharing(torch.float32, torch.device("cpu"))
+        self._test_empty_tensor_sharing(torch.int64, torch.device("cpu"))
 
-    @unittest.skipIf(not torch.cuda.is_available(), 'CUDA not available')
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
     def test_empty_tensor_sharing_cuda(self):
-        self._test_empty_tensor_sharing(torch.float32, torch.device('cuda'))
-        self._test_empty_tensor_sharing(torch.int64, torch.device('cuda'))
+        self._test_empty_tensor_sharing(torch.float32, torch.device("cuda"))
+        self._test_empty_tensor_sharing(torch.int64, torch.device("cuda"))
 
     def _test_autograd_sharing(self, var, ctx=mp, is_parameter=False):
-        device = 'cuda' if var.is_cuda else 'cpu'
+        device = "cuda" if var.is_cuda else "cpu"
 
         ready = ctx.Event()
         master_modified = ctx.Event()
         queue = ctx.Queue()
-        p = ctx.Process(target=autograd_sharing, args=(queue, ready, master_modified, device, is_parameter))
+        p = ctx.Process(
+            target=autograd_sharing,
+            args=(queue, ready, master_modified, device, is_parameter),
+        )
         p.daemon = True
         p.start()
 
@@ -823,28 +917,35 @@ if __name__ == "__main__":
         time.sleep(5)
         p.join()
 
-    @unittest.skipIf(TEST_WITH_ASAN,
-                     "non-deterministically hangs with ASAN https://github.com/pytorch/pytorch/issues/94024")
+    @unittest.skipIf(
+        TEST_WITH_ASAN,
+        "non-deterministically hangs with ASAN https://github.com/pytorch/pytorch/issues/94024",
+    )
     def test_variable_sharing(self):
         for requires_grad in [True, False]:
-            var = torch.arange(1., 26).view(5, 5).requires_grad_(requires_grad)
+            var = torch.arange(1.0, 26).view(5, 5).requires_grad_(requires_grad)
             self._test_autograd_sharing(var)
 
     # See https://github.com/pytorch/pytorch/issues/14997
-    @unittest.skipIf(TEST_WITH_ASAN,
-                     "non-deterministically hangs with ASAN")
+    @unittest.skipIf(TEST_WITH_ASAN, "non-deterministically hangs with ASAN")
     def test_leaf_variable_sharing(self):
-        devices = ['cpu']
+        devices = ["cpu"]
         if torch.cuda.is_available() and not NO_MULTIPROCESSING_SPAWN and TEST_CUDA_IPC:
-            devices.append('cuda')
+            devices.append("cuda")
         for device in devices:
             for requires_grad in [True, False]:
-                var = torch.arange(1., 26, device=device).view(5, 5).requires_grad_(requires_grad)
+                var = (
+                    torch.arange(1.0, 26, device=device)
+                    .view(5, 5)
+                    .requires_grad_(requires_grad)
+                )
                 self.assertTrue(var.is_leaf)
-                ctx = mp.get_context('spawn') if device == 'cuda' else mp
+                ctx = mp.get_context("spawn") if device == "cuda" else mp
                 ready = ctx.Event()
                 queue = ctx.Queue()
-                p = ctx.Process(target=requires_grad_variable_sharing, args=(queue, ready))
+                p = ctx.Process(
+                    target=requires_grad_variable_sharing, args=(queue, ready)
+                )
                 p.daemon = True
                 p.start()
                 queue.put(var)
@@ -853,65 +954,86 @@ if __name__ == "__main__":
                 self.assertTrue(worker_requires_grad == requires_grad)
 
     def test_non_leaf_variable_sharing(self):
-        devices = ['cpu'] if not torch.cuda.is_available() else ['cpu', 'cuda']
+        devices = ["cpu"] if not torch.cuda.is_available() else ["cpu", "cuda"]
         for device in devices:
-            var0 = torch.arange(1., 26, device=device).view(5, 5).requires_grad_(True)
+            var0 = torch.arange(1.0, 26, device=device).view(5, 5).requires_grad_(True)
             var = var0 * 2
             # Don't use a regular Queue; it uses a background thread (which
             # means we can't catch the exceptions)
             queue = mp.SimpleQueue()
-            self.assertRaisesRegex(RuntimeError, r'requires_grad', lambda: queue.put(var))
+            self.assertRaisesRegex(
+                RuntimeError, r"requires_grad", lambda: queue.put(var)
+            )
 
-    @unittest.skipIf(NO_MULTIPROCESSING_SPAWN, "Disabled for environments that \
-                     don't support multiprocessing with spawn start method")
-    @unittest.skipIf(not TEST_CUDA_IPC, 'CUDA IPC not available')
+    @unittest.skipIf(
+        NO_MULTIPROCESSING_SPAWN,
+        "Disabled for environments that \
+                     don't support multiprocessing with spawn start method",
+    )
+    @unittest.skipIf(not TEST_CUDA_IPC, "CUDA IPC not available")
     def test_cuda_variable_sharing(self):
         for requires_grad in [True, False]:
-            var = torch.arange(1., 26, device='cuda').view(5, 5).requires_grad_(requires_grad)
-            self._test_autograd_sharing(var, mp.get_context('spawn'))
+            var = (
+                torch.arange(1.0, 26, device="cuda")
+                .view(5, 5)
+                .requires_grad_(requires_grad)
+            )
+            self._test_autograd_sharing(var, mp.get_context("spawn"))
 
-    @unittest.skipIf(NO_MULTIPROCESSING_SPAWN, "Disabled for environments that \
-                     don't support multiprocessing with spawn start method")
-    @unittest.skipIf(not TEST_CUDA_IPC, 'CUDA IPC not available')
+    @unittest.skipIf(
+        NO_MULTIPROCESSING_SPAWN,
+        "Disabled for environments that \
+                     don't support multiprocessing with spawn start method",
+    )
+    @unittest.skipIf(not TEST_CUDA_IPC, "CUDA IPC not available")
     def test_mixed_types_cuda_sharing(self):
-        self._test_mixed_types_cuda_sharing(mp.get_context('spawn'))
+        self._test_mixed_types_cuda_sharing(mp.get_context("spawn"))
 
     def test_parameter_sharing(self):
-        param = Parameter(torch.arange(1., 26).view(5, 5))
+        param = Parameter(torch.arange(1.0, 26).view(5, 5))
         self._test_autograd_sharing(param, is_parameter=True)
 
-    @unittest.skipIf(NO_MULTIPROCESSING_SPAWN, "Disabled for environments that \
-                     don't support multiprocessing with spawn start method")
-    @unittest.skipIf(not TEST_CUDA_IPC, 'CUDA IPC not available')
+    @unittest.skipIf(
+        NO_MULTIPROCESSING_SPAWN,
+        "Disabled for environments that \
+                     don't support multiprocessing with spawn start method",
+    )
+    @unittest.skipIf(not TEST_CUDA_IPC, "CUDA IPC not available")
     def test_cuda_parameter_sharing(self):
-        param = Parameter(torch.arange(1., 26, device='cuda').view(5, 5))
-        self._test_autograd_sharing(param, mp.get_context('spawn'), is_parameter=True)
+        param = Parameter(torch.arange(1.0, 26, device="cuda").view(5, 5))
+        self._test_autograd_sharing(param, mp.get_context("spawn"), is_parameter=True)
 
-    @unittest.skipIf(NO_MULTIPROCESSING_SPAWN, "Disabled for environments that \
-                     don't support multiprocessing with spawn start method")
+    @unittest.skipIf(
+        NO_MULTIPROCESSING_SPAWN,
+        "Disabled for environments that \
+                     don't support multiprocessing with spawn start method",
+    )
     def test_integer_parameter_serialization_cpu(self):
-        self._test_integer_parameter_serialization(device='cpu')
+        self._test_integer_parameter_serialization(device="cpu")
 
-    @unittest.skipIf(NO_MULTIPROCESSING_SPAWN, "Disabled for environments that \
-                     don't support multiprocessing with spawn start method")
-    @unittest.skipIf(not TEST_CUDA_IPC, 'CUDA IPC not available')
+    @unittest.skipIf(
+        NO_MULTIPROCESSING_SPAWN,
+        "Disabled for environments that \
+                     don't support multiprocessing with spawn start method",
+    )
+    @unittest.skipIf(not TEST_CUDA_IPC, "CUDA IPC not available")
     def test_integer_parameter_serialization_cuda(self):
-        self._test_integer_parameter_serialization(device='cuda')
+        self._test_integer_parameter_serialization(device="cuda")
 
     def _test_integer_parameter_serialization(self, device):
         param = torch.nn.Parameter(
-            torch.tensor(0, dtype=torch.int64, device=device),
-            requires_grad=False
+            torch.tensor(0, dtype=torch.int64, device=device), requires_grad=False
         )
 
-        ctx = mp.get_context('spawn')
+        ctx = mp.get_context("spawn")
         p = ctx.Process(target=integer_parameter_serialization, args=(param,))
         p.start()
         p.join()
 
         self.assertEqual(
-            0, p.exitcode,
-            msg=f'Failed to serialize successfully for "{device}" device!'
+            0,
+            p.exitcode,
+            msg=f'Failed to serialize successfully for "{device}" device!',
         )
 
     def test_empty_shared(self):
@@ -924,7 +1046,9 @@ if __name__ == "__main__":
         t.share_memory_()
         self.assertTrue(t.is_shared())
 
-    @unittest.skipIf(platform == 'darwin', "file descriptor strategy is not supported on macOS")
+    @unittest.skipIf(
+        platform == "darwin", "file descriptor strategy is not supported on macOS"
+    )
     def test_is_shared(self):
         self._test_is_shared()
 
@@ -932,11 +1056,11 @@ if __name__ == "__main__":
         with fs_sharing():
             self._test_is_shared()
 
-    @unittest.skipIf(not torch.cuda.is_available(), 'CUDA not available')
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
     def test_is_shared_cuda(self):
         t = torch.randn(5, 5).cuda()
         self.assertTrue(t.is_shared())
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     run_tests()

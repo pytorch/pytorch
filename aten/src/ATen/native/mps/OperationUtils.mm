@@ -3,8 +3,10 @@
 #include <ATen/TensorIterator.h>
 #include <ATen/mps/MPSAllocatorInterface.h>
 #include <ATen/mps/MPSProfiler.h>
+#include <ATen/native/mps/MPSGraphSonomaOps.h>
 #include <ATen/native/mps/MPSGraphVenturaOps.h>
 #include <ATen/native/mps/OperationUtils.h>
+#include <fmt/format.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -48,12 +50,24 @@ void runMPSGraph(MPSStream* mpsStream, MPSGraph* mpsGraph, NSDictionary* feeds, 
   mpsStream->executeMPSGraph(mpsGraph, feeds, results, SyncType::COMMIT_ADAPTIVE);
 }
 
+static inline void checkSupportsComplex() {
+  TORCH_CHECK_TYPE(supportsComplex(), "MPS complex types are only supported on MacOS 14.0 or newer.");
+}
+
+static inline void checkSupportsBFloat16() {
+  TORCH_CHECK_TYPE(is_macos_13_or_newer(MacOSVersion::MACOS_VER_14_0_PLUS),
+                   "MPS bfloat16 type is supported on MacOS 14.0 or newer.");
+}
+
 MPSDataType getMPSDataType(ScalarType scalar_type) {
   switch (scalar_type) {
     case ScalarType::Float:
       return MPSDataTypeFloat32;
     case ScalarType::Half:
       return MPSDataTypeFloat16;
+    case ScalarType::BFloat16:
+      checkSupportsBFloat16();
+      return MPSDataTypeBFloat16;
     case ScalarType::Int:
       return MPSDataTypeInt32;
     case ScalarType::Long:
@@ -71,12 +85,10 @@ MPSDataType getMPSDataType(ScalarType scalar_type) {
                        "Cannot convert a float64 Tensor to MPS as the MPS framework doesn't support float64. "
                        "Please use float32 instead.")
     case ScalarType::ComplexHalf:
-      TORCH_CHECK_TYPE(is_macos_13_or_newer(MacOSVersion::MACOS_VER_14_0_PLUS),
-                       "MPS complex types are only supported on MacOS 14.0 or newer.");
+      checkSupportsComplex();
       return MPSDataTypeComplexFloat16;
     case ScalarType::ComplexFloat:
-      TORCH_CHECK_TYPE(is_macos_13_or_newer(MacOSVersion::MACOS_VER_14_0_PLUS),
-                       "MPS complex types are only supported on MacOS 14.0 or newer.");
+      checkSupportsComplex();
       return MPSDataTypeComplexFloat32;
     default:
       TORCH_CHECK_TYPE(
@@ -132,6 +144,9 @@ MPSDataType getMPSScalarType(ScalarType scalar_type) {
       return MPSDataTypeFloat32;
     case ScalarType::Half:
       return MPSDataTypeFloat16;
+    case ScalarType::BFloat16:
+      checkSupportsBFloat16();
+      return MPSDataTypeBFloat16;
     case ScalarType::Int:
       return MPSDataTypeInt32;
     case ScalarType::Long:
@@ -145,12 +160,13 @@ MPSDataType getMPSScalarType(ScalarType scalar_type) {
     case ScalarType::Bool:
       return MPSDataTypeBool;
     case ScalarType::ComplexHalf:
-      TORCH_CHECK_TYPE(is_macos_13_or_newer(MacOSVersion::MACOS_VER_14_0_PLUS),
-                       "MPS complex types are only supported on MacOS 14.0 or newer.");
+      checkSupportsComplex();
       return MPSDataTypeComplexFloat16;
+    // This is an intentional fallthrough supporting ComplexDouble for Scalar
+    // types as they are casted to Complex64 currently.
+    case ScalarType::ComplexDouble:
     case ScalarType::ComplexFloat:
-      TORCH_CHECK_TYPE(is_macos_13_or_newer(MacOSVersion::MACOS_VER_14_0_PLUS),
-                       "MPS complex types are only supported on MacOS 14.0 or newer.");
+      checkSupportsComplex();
       return MPSDataTypeComplexFloat32;
     default:
       TORCH_CHECK_TYPE(
@@ -166,6 +182,8 @@ std::string getMPSTypeString(ScalarType scalar_type, bool short_name) {
       return short_name ? "f32" : "Float32";
     case ScalarType::Half:
       return short_name ? "f16" : "Float16";
+    case ScalarType::BFloat16:
+      return short_name ? "bf16" : "BFloat16";
     case ScalarType::Int:
       return short_name ? "i32" : "Int32";
     case ScalarType::Long:
@@ -193,6 +211,9 @@ std::string scalarToMetalTypeString(const c10::ScalarType& scalar_type) {
       return "float";
     case ScalarType::Half:
       return "half";
+    case ScalarType::BFloat16:
+      checkSupportsBFloat16();
+      return "bfloat";
     case ScalarType::Int:
       return "int";
     case ScalarType::Long:
@@ -256,7 +277,7 @@ std::string getArrayRefString(const IntArrayRef s) {
   return ss.str();
 }
 
-std::string getTensorsStringKey(const TensorList& tensors, bool short_dtype) {
+std::string getTensorsStringKey(const TensorList& tensors, bool short_dtype, bool exclude_shape) {
   std::string str;
   // The key format per tensor would look like ":Float32[1,1,1,10]:"
   for (const Tensor& tensor : tensors) {
@@ -267,8 +288,12 @@ std::string getTensorsStringKey(const TensorList& tensors, bool short_dtype) {
       if (tensor.dim() == 0) {
         str += "Scalar";
       } else {
-        const NSString* ns_shape_key = [[getMPSShape(tensor) valueForKey:@"description"] componentsJoinedByString:@","];
-        str += std::string(ns_shape_key.UTF8String);
+        if (exclude_shape) {
+          str += "[-1]";
+        } else {
+          str +=
+              std::string([[getMPSShape(tensor) valueForKey:@"description"] componentsJoinedByString:@","].UTF8String);
+        }
       }
       str += "]";
     } else {
@@ -343,9 +368,8 @@ Placeholder::Placeholder(MPSGraphTensor* mpsGraphTensor,
   TORCH_CHECK(src.is_mps(), "Placeholder storage has not been allocated on MPS device!");
   // extract the pointer to MTLBuffer from the Tensor's storage
   id<MTLBuffer> srcBuf = getMTLBufferStorage(src);
-  bool sliceViewTensor = canSliceViewTensor(src, mpsShape);
   // a view tensor could be contiguous (e.g., slice ops) or non-contiguous (e.g., transpose())
-  if ((!src.is_contiguous() || (src.storage_offset() && !sliceViewTensor)) && gatherTensorData) {
+  if (needsGather(src) && gatherTensorData) {
     Tensor emptyShell = Tensor();
     // use "_tensor" from Placeholder to retain view's output during its usage in other ops
     _tensor = gatherViewTensor(src, emptyShell);
@@ -365,13 +389,9 @@ Placeholder::Placeholder(MPSGraphTensor* mpsGraphTensor,
     const auto scalar_type = _tensor.scalar_type();
     dataType = _tensor.dim() == 0 ? getMPSScalarType(scalar_type) : getMPSDataType(scalar_type);
   }
-  if (src.is_contiguous() && src.storage_offset() && sliceViewTensor) {
-    _value = getMPSGraphTensorDataForView(src, mpsShape, dataType);
-  } else {
-    _value = [[[MPSGraphTensorData alloc] initWithMTLBuffer:srcBuf
-                                                      shape:mpsShape ? mpsShape : getMPSShape(_tensor)
-                                                   dataType:dataType] autorelease];
-  }
+  _value = [[[MPSGraphTensorData alloc] initWithMTLBuffer:srcBuf
+                                                    shape:mpsShape ? mpsShape : getMPSShape(_tensor)
+                                                 dataType:dataType] autorelease];
 
   TORCH_INTERNAL_ASSERT(_value);
   _placeholder = mpsGraphTensor;
@@ -402,6 +422,8 @@ MPSScalar getMPSScalar(const Scalar& scalar, ScalarType type) {
       return {.value.f = scalar.to<float>(), .size = sizeof(float), .type = type};
     case ScalarType::Half:
       return {.value.h = scalar.to<at::Half>(), .size = sizeof(short), .type = type};
+    case ScalarType::BFloat16:
+      return {.value.bf16 = scalar.to<at::BFloat16>(), .size = sizeof(short), .type = type};
     case ScalarType::Long:
       return {.value.i = scalar.to<int64_t>(), .size = sizeof(int64_t), .type = type};
     case ScalarType::Int:
@@ -414,6 +436,11 @@ MPSScalar getMPSScalar(const Scalar& scalar, ScalarType type) {
       return {.value.i = scalar.to<uint8_t>(), .size = sizeof(uint8_t), .type = type};
     case ScalarType::Bool:
       return {.value.b = scalar.to<bool>(), .size = sizeof(bool), .type = type};
+    case ScalarType::ComplexHalf:
+      return {.value.ch = scalar.to<c10::complex<at::Half>>(), .size = sizeof(int32_t), .type = type};
+    case ScalarType::ComplexFloat:
+    case ScalarType::ComplexDouble:
+      return {.value.cf = scalar.to<c10::complex<float>>(), .size = sizeof(int64_t), .type = type};
     default:
       TORCH_INTERNAL_ASSERT(false, "Unsupported scalar type '", type, "' on MPS backend.");
   }
@@ -583,6 +610,76 @@ id<MTLBuffer> generateKernelDataOffsets(id<MTLComputeCommandEncoder> commandEnco
   mtl_dispatch1DJob(commandEncoder, kernelDataOffsetsPSO, numThreads);
 
   return kernelDataOffsets;
+}
+
+id<MTLLibrary> MetalShaderLibrary::getLibrary() {
+  if (C10_UNLIKELY(!library)) {
+    TORCH_INTERNAL_ASSERT(nparams == 0);
+    library = compileLibrary(shaderSource);
+  }
+  return library;
+}
+
+id<MTLLibrary> MetalShaderLibrary::getLibrary(const std::initializer_list<std::string>& params) {
+  TORCH_INTERNAL_ASSERT(nparams == params.size());
+  std::string key = "";
+  for (auto p : params) {
+    key += ":" + p;
+  }
+  auto lib = libMap[key];
+  if (lib) {
+    return lib;
+  }
+  auto it = params.begin();
+  switch (nparams) {
+    case 1:
+      lib = compileLibrary(fmt::format(shaderSource, *it));
+      break;
+    case 2: {
+      auto& first = *it++;
+      auto& second = *it;
+      lib = compileLibrary(fmt::format(shaderSource, first, second));
+      break;
+    }
+    case 3: {
+      auto& first = *it++;
+      auto& second = *it++;
+      auto& third = *it;
+      lib = compileLibrary(fmt::format(shaderSource, first, second, third));
+      break;
+    }
+    default:
+      TORCH_INTERNAL_ASSERT(false, "Unsupported number of paramaters ", nparams);
+  }
+  return libMap[key] = lib;
+}
+
+id<MTLLibrary> MetalShaderLibrary::compileLibrary(const std::string& src) {
+  NSError* error = nil;
+  MTLCompileOptions* options = [[MTLCompileOptions new] autorelease];
+  [options setLanguageVersion:is_macos_13_or_newer(MacOSVersion::MACOS_VER_14_0_PLUS) ? MTLLanguageVersion3_1
+                                                                                      : MTLLanguageVersion2_3];
+  auto str = [NSString stringWithCString:src.c_str() encoding:NSASCIIStringEncoding];
+  auto device = MPSDevice::getInstance()->device();
+  library = [device newLibraryWithSource:str options:options error:&error];
+  TORCH_CHECK(library, "Failed to create metal library, error: ", [[error description] UTF8String]);
+  return library;
+}
+
+id<MTLComputePipelineState> MetalShaderLibrary::getLibraryPipelineState(id<MTLLibrary> lib, const std::string& fname) {
+  auto key = fmt::format("{}:{}", reinterpret_cast<void*>(lib), fname);
+  auto cpl = cplMap[key];
+  if (cpl) {
+    return cpl;
+  }
+
+  NSError* error = nil;
+  id<MTLFunction> func = [lib newFunctionWithName:[NSString stringWithUTF8String:fname.c_str()]];
+  TORCH_CHECK(func, "Failed to create function state object for: ", fname);
+  cpl = [[lib device] newComputePipelineStateWithFunction:func error:&error];
+  TORCH_CHECK(cpl, "Failed to created pipeline state object, error: ", [[error description] UTF8String]);
+
+  return cplMap[key] = cpl;
 }
 
 } // namespace at::native::mps

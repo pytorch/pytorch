@@ -46,10 +46,10 @@ struct TORCH_API KinetoEvent {
   int64_t debugHandle() const;
   std::string name() const;
   c10::DeviceType deviceType() const;
-  uint8_t deviceIndex() const;
+  int deviceIndex() const;
   int64_t nBytes() const;
-  uint64_t startUs() const;
-  uint64_t durationUs() const;
+  uint64_t startNs() const;
+  uint64_t durationNs() const;
   bool isAsync() const;
   uint64_t correlationId() const;
   uint64_t linkedCorrelationId() const;
@@ -87,8 +87,8 @@ struct TORCH_API ProfilerResult {
       std::vector<experimental_event_t>&& event_tree);
   ~ProfilerResult();
 
-  uint64_t trace_start_us() const {
-    return trace_start_us_;
+  uint64_t trace_start_ns() const {
+    return trace_start_ns_;
   }
 
   const std::vector<KinetoEvent>& events() const {
@@ -102,7 +102,7 @@ struct TORCH_API ProfilerResult {
   void save(const std::string& path);
 
  private:
-  uint64_t trace_start_us_ = 0;
+  uint64_t trace_start_ns_ = 0;
   std::vector<KinetoEvent> events_;
   std::unique_ptr<torch::profiler::impl::kineto::ActivityTraceWrapper> trace_;
   std::vector<experimental_event_t> event_tree_;

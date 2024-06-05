@@ -2,6 +2,7 @@
 
 from torch.testing._internal.common_utils import TestCase, run_tests
 import torch
+import torch._dynamo
 import unittest
 import warnings
 import operator
@@ -17,13 +18,15 @@ from torch.fx.experimental.symbolic_shapes import (
     guard_int, GuardOnDataDependentSymNode
 )
 from torch.testing._internal.custom_op_db import custom_op_db
-from torch.testing._internal.control_flow_opinfo_db import control_flow_opinfo_db
+from torch.testing._internal.hop_db import hop_db
 from torch.testing._internal.common_device_type import ops
 import torch.testing._internal.optests as optests
 from torch._C import _disabled_torch_function_impl
 from torch.fx.experimental.proxy_tensor import make_fx, DecompositionInterpreter, get_isolated_graphmodule
 from torch.utils._pytree import tree_map
+from torch.fx.passes.runtime_assert import insert_deferred_runtime_asserts
 from torch import nn
+import torch._functorch.config
 import re
 
 import functools
@@ -955,7 +958,7 @@ class TestSymbolicTracing(TestCase):
         import torch.library
         from torch.library import Library
 
-        foo = Library("foo", "DEF")
+        foo = Library("foo", "DEF")  # noqa: TOR901
         foo.define("foo(Tensor self) -> Tensor")
 
         # Operator where meta and cpu disagree on strides
@@ -1068,7 +1071,7 @@ def forward(self, x_1, y_1):
         self.assertTrue(eval_guards(gm, torch.randn(4, 5)))
         self.assertEqual(repr(bind_symbols(gm, torch.randn(4, 5))), "{s0: 4, s1: 5}")
         self.assertFalse(eval_guards(gm, torch.randn(25, 5)))
-        self.assertExpectedInline(show_guards(gm), """L['x'].size()[0] < 20""")
+        self.assertExpectedInline(show_guards(gm), """L['x'].size()[0] <= 19""")
 
     def test_repeat_interleave(self):
         def f(src_tokens, beam_size_src):
@@ -1104,6 +1107,37 @@ def forward(self, y_1, x_1):
     repeat_interleave = torch.ops.aten.repeat_interleave.Tensor(x_1);  x_1 = None
     index_select = torch.ops.aten.index_select.default(y_1, 1, repeat_interleave);  y_1 = repeat_interleave = None
     return index_select""")
+
+    def test_mod_gcd_unbacked(self):
+        def f(_a, _b, _stride):
+            a = _a.item()
+            b = _b.item()
+            stride = _stride.item()
+            torch._check_is_size(a)
+            torch._check_is_size(b)
+            torch._check_is_size(stride)
+            ta = torch.randn(a * stride)
+            tb = torch.randn(b * stride)
+            r = torch.cat([ta, tb])
+            return r.view(a + b, stride)
+
+        _a = torch.tensor(30)
+        _b = torch.tensor(20)
+        _stride = torch.tensor(10)
+        r = str(make_fx(f, tracing_mode="symbolic")(_a, _b, _stride).code).strip()
+        self.assertExpectedInline(r, """\
+def forward(self, _a_1, _b_1, _stride_1):
+    _local_scalar_dense = torch.ops.aten._local_scalar_dense.default(_a_1);  _a_1 = None
+    _local_scalar_dense_1 = torch.ops.aten._local_scalar_dense.default(_b_1);  _b_1 = None
+    _local_scalar_dense_2 = torch.ops.aten._local_scalar_dense.default(_stride_1);  _stride_1 = None
+    mul = _local_scalar_dense * _local_scalar_dense_2
+    randn = torch.ops.aten.randn.default([mul], device = device(type='cpu'), pin_memory = False);  mul = None
+    mul_1 = _local_scalar_dense_1 * _local_scalar_dense_2
+    randn_1 = torch.ops.aten.randn.default([mul_1], device = device(type='cpu'), pin_memory = False);  mul_1 = None
+    cat = torch.ops.aten.cat.default([randn, randn_1]);  randn = randn_1 = None
+    add = _local_scalar_dense + _local_scalar_dense_1;  _local_scalar_dense = _local_scalar_dense_1 = None
+    view = torch.ops.aten.view.default(cat, [add, _local_scalar_dense_2]);  cat = add = _local_scalar_dense_2 = None
+    return view""")
 
     def test_cumsum_unbacked(self):
         def f(x):
@@ -1345,7 +1379,7 @@ def forward(self, crop_camera_1, mask_1):
                 for s in p.shape:
                     guard_int(s)
             x = x[mask]
-            torch._constrain_as_value(x.shape[0], min=1)
+            torch._check(x.shape[0] >= 1)
             for p in params.values():
                 p.grad = None
             return torch.func.functional_call(mod, {**params, **buffers}, (x,)).sum()
@@ -1405,12 +1439,32 @@ def forward(self, x_1, y_1):
     add = torch.ops.aten.add.Tensor(zeros, y_1);  zeros = y_1 = None
     return add""")  # noqa: B950
 
+    def test_reshape_divisibility_unbacked(self):
+        def f(x):
+            i0 = x.item()
+            r = torch.zeros(i0, 4, 20)
+            r = r.transpose(2, 1)
+            return r.reshape(-1, 80)
+        make_fx(f, tracing_mode="symbolic")(torch.tensor(24))
+
     def test_view_divisibility_unbacked(self):
         def f(x):
             i0 = x.item()
             r = torch.zeros(i0, 192)
             return r.view(12, -1, 192)
         make_fx(f, tracing_mode="symbolic")(torch.tensor(24))
+
+    @unittest.skipIf(not HAS_CUDA, 'CUDA-only test')
+    def test_view_divisibility_unbacked_relatively_prime(self):
+        # See https://github.com/pytorch/pytorch/issues/123651
+        def f(x):
+            i0 = x.item()
+            torch._check_is_size(i0)
+            # To trigger the original issue, the max bound has to
+            # be chosen such that 448 / 447 < 2 (which it is.)
+            torch._check(i0 <= 448)
+            return torch.zeros(256 * i0).view(-1, 447)
+        make_fx(f, tracing_mode="symbolic")(torch.tensor(256 * 447, device="cuda"))
 
     def test_unbacked_unify_guard(self):
         def f(x, y):
@@ -1429,6 +1483,8 @@ def forward(self, x_1, y_1):
     add = torch.ops.aten.add.Tensor(y_1, 2);  y_1 = None
     return add""")  # noqa: B950
 
+    @unittest.skipIf(not HAS_CUDA, 'CUDA-only test')
+    @unittest.expectedFailure
     def test_unbacked_unify_guard_transitivity(self):
         def f(x1, x2, y):
             z1 = torch.zeros(x1.item())
@@ -1440,21 +1496,59 @@ def forward(self, x_1, y_1):
             else:
                 return y + 2
 
-        r = str(make_fx(f, tracing_mode="symbolic")(torch.tensor(10), torch.tensor(10), torch.randn(10)).code).strip()
-        self.assertExpectedInline(r, """\
-def forward(self, x1_1, x2_1, y_1):
-    _local_scalar_dense = torch.ops.aten._local_scalar_dense.default(x1_1);  x1_1 = None
-    zeros = torch.ops.aten.zeros.default([_local_scalar_dense], device = device(type='cpu'), pin_memory = False);  _local_scalar_dense = None
-    _local_scalar_dense_1 = torch.ops.aten._local_scalar_dense.default(x2_1);  x2_1 = None
-    zeros_1 = torch.ops.aten.zeros.default([_local_scalar_dense_1], device = device(type='cpu'), pin_memory = False);  _local_scalar_dense_1 = None
-    add = torch.ops.aten.add.Tensor(y_1, 2);  y_1 = None
-    return add""")  # noqa: B950
+        gm = make_fx(f, tracing_mode="symbolic")(
+            torch.tensor(10, device="cuda"),
+            torch.tensor(10, device="cuda"),
+            torch.randn(10, device="cuda")
+        )
+        insert_deferred_runtime_asserts(gm, gm.shape_env, "test")
+        gm.recompile()
+        r = str(gm.code).strip()
+        # self.assertExpectedInline(
+        #     r, """"""  # noqa: B950
+        # )
+
+    @unittest.skipIf(not HAS_CUDA, 'CUDA-only test')
+    def test_unbacked_unify_dependency_violation(self):
+        def f(x1, x2, x3, y):
+            z1 = x1.item()
+            torch._check(z1 // 9 == 1)
+            z2 = x2.item()
+            z3 = x3.item()
+            torch._check(z1 == z2 + z3)
+            return y * 2
+            if z2 + z3 == z1:
+                return y * 2
+            else:
+                return y + 3
+
+        # NB: inputs are done as CUDA to ensure they aren't queried to be
+        # backed
+
+        gm = make_fx(f, tracing_mode="symbolic")(
+            torch.tensor(10, device="cuda"), torch.tensor(5, device="cuda"),
+            torch.tensor(5, device="cuda"), torch.randn(1, device="cuda")
+        )
+        insert_deferred_runtime_asserts(gm, gm.shape_env, "test")
+        gm.recompile()
+        self.assertEqual(gm(
+            torch.tensor(12, device="cuda"), torch.tensor(6, device="cuda"),
+            torch.tensor(6, device="cuda"), torch.tensor([1.0], device="cuda")),
+            torch.tensor([2.0], device="cuda")
+        )
+        with self.assertRaises(RuntimeError):
+            gm(
+                torch.tensor(20, device="cuda"), torch.tensor(10, device="cuda"),
+                torch.tensor(10, device="cuda"), torch.tensor([1.0], device="cuda")
+            )
+
 
     def test_split_unbacked_sizes(self):
         def f(lengths, values):
             # tolist not directly supported atm
             sizes = [lengths[i].item() for i in range(lengths.size(0))]
             for s in sizes:
+                # TODO(avik): no assertion generated with torch._check_is_size?
                 torch._constrain_as_size(s)
             return torch.split(values, sizes)
 
@@ -1497,6 +1591,22 @@ def forward(self, lengths_1, values_1):
                 self.fail("didn't raise exception")
             except GuardOnDataDependentSymNode:
                 pass
+
+        make_fx(f, tracing_mode="symbolic")(torch.randn(4))
+
+    @torch._functorch.config.patch(fake_tensor_propagate_real_tensors=True)
+    def test_invalidate_nonzero_propagate_real_tensors(self):
+        def f(a):
+            b = a.clone()
+            x = b.nonzero()
+            x1 = b.nonzero()
+            x2 = b.nonzero()
+            assert x1.shape[0] == x2.shape[0]
+            b.normal_()
+            y = b.nonzero()
+            # Because you're not actually going to generate exactly zero with
+            # normal_ lol
+            assert x1.shape[0] == y.shape[0]
 
         make_fx(f, tracing_mode="symbolic")(torch.randn(4))
 
@@ -1714,14 +1824,14 @@ def forward(self, x_1):
             assert a.shape[0] > 5 and a.shape[0] > 12
             return a.cos()
         tensor = make_fx(f, tracing_mode="symbolic")(torch.randn(15))
-        self.assertExpectedInline(show_guards(tensor), """L['a'].size()[0] > 12""")
+        self.assertExpectedInline(show_guards(tensor), """13 <= L['a'].size()[0]""")
 
     def test_guard_lowerbound_range_refinement(self):
         def f(a):
             assert a.shape[0] < 20 and a.shape[0] < 30
             return a.cos()
         tensor = make_fx(f, tracing_mode="symbolic")(torch.randn(15))
-        self.assertExpectedInline(show_guards(tensor), """L['a'].size()[0] < 20""")
+        self.assertExpectedInline(show_guards(tensor), """L['a'].size()[0] <= 19""")
 
     def test_guard_upperbound_range_refinement_multivariate(self):
         def f(a):
@@ -1731,7 +1841,8 @@ def forward(self, x_1):
         tensor = make_fx(f, tracing_mode="symbolic")(torch.randn((15, 20)))
         self.assertExpectedInline(show_guards(tensor), """\
 L['a'].size()[1] > L['a'].size()[0]
-L['a'].size()[0] > 12""")
+13 <= L['a'].size()[0]
+14 <= L['a'].size()[1]""")
 
     def test_guard_lowerbound_range_refinement_multivariate(self):
         def f(a):
@@ -1743,7 +1854,8 @@ L['a'].size()[0] > 12""")
             show_guards(tensor),
             """\
 L['a'].size()[1] < L['a'].size()[0]
-L['a'].size()[0] < 20""")
+L['a'].size()[0] <= 19
+L['a'].size()[1] <= 18""")
 
     def test_sym_storage_offset(self):
         def f(x, y):
@@ -1852,7 +1964,6 @@ make_fx_failures = {
     xfail('corrcoef'),
     xfail('quantile'),
     xfail('nanquantile'),
-    xfail('narrow'),
 
     # Seems like it's creating a sparse tensor that isn't captured by tensor.is_sparse
     xfail('sparse.sampled_addmm'),
@@ -1867,42 +1978,31 @@ make_fx_failures = {
     skip('empty_strided', '', device_type='cpu'),
 }
 
+only_real_tensor_failures = {
+    xfail('narrow'),
+}
+
+only_fake_tensor_failures = {
+    xfail('narrow'),
+}
+
 fake_tensor_failures = {
     # ASAN failures due to divide by 0
     skip('nn.functional.nll_loss'),
 }
 
 symbolic_tensor_failures = {
-    xfail('linalg.eig'),
-    xfail('linalg.eigvals'),
     xfail('combinations', ''),
-    xfail('frexp', ''),  # aten.frexp.Tensor - couldn't find symbolic meta function/decomposition
     xfail('geqrf', ''),  # aten.geqrf.default - couldn't find symbolic meta function/decomposition
-    xfail('histc', ''),  # Could not run 'aten::histc' with arguments from the 'Meta' backend. This could be because...
     xfail('histogram', ''),  # Could not run 'aten::histogram.bin_ct' with arguments from the 'Meta' backend. This c...
     xfail('histogramdd', ''),  # aten._histogramdd_bin_edges.default - couldn't find symbolic meta function/decomposition
-    xfail('isin', ''),  # aten.isin.Tensor_Tensor - couldn't find symbolic meta function/decomposition
     xfail('kthvalue', ''),  # aten.kthvalue.default - couldn't find symbolic meta function/decomposition
     xfail('nanquantile', ''),  # Could not run 'aten::equal' with arguments from the 'Meta' backend.
-    xfail('narrow', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
     xfail('nn.functional.binary_cross_entropy', ''),  # aten.new_empty.default - couldn't find symbolic meta function/decom...
     xfail('nn.functional.cross_entropy', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
     xfail('nn.functional.ctc_loss'),  # aten._ctc_loss.Tensor - couldn't find symbolic meta function/decomposition
-    xfail('nn.functional.fractional_max_pool2d', ''),  # argument 'size' must be tuple of ints, but found element of t...
-    xfail('nn.functional.fractional_max_pool3d', ''),  # argument 'size' must be tuple of ints, but found element of t...
-    xfail('nn.functional.interpolate', 'linear'),  # aten.upsample_linear1d.vec - couldn't find symbolic meta function/dec...
-    xfail('nn.functional.interpolate', 'trilinear'),  # aten.upsample_trilinear3d.vec - couldn't find symbolic meta functi...
     xfail('quantile', ''),  # Could not run 'aten::equal' with arguments from the 'Meta' backend.
-    xfail('resize_as_', ''),  # aten.clone.default - couldn't find symbolic meta function/decomposition
     xfail('unique_consecutive', ''),  # aten.unique_consecutive.default - couldn't find symbolic meta function/decomposition
-    xfail('unique', ''),  # aten._unique2.default - couldn't find symbolic meta function/decomposition
-
-    # AssertionError: False != True - https://github.com/pytorch/pytorch/issues/113905
-    xfail('dist', ''),
-    xfail('norm', ''),
-    xfail('linalg.vector_norm', ''),
-    xfail('linalg.norm', 'subgradients_at_zero'),
-    xfail('renorm', ''),
 
     xfail('max_pool2d_with_indices_backward', ''),  # Expected a value of type 'List[int]' for argument 'kernel_size' but...
 
@@ -1930,67 +2030,36 @@ symbolic_tensor_segfaults = {
 
 symbolic_tensor_failures.update(symbolic_tensor_segfaults)
 
-outplace_symbolic_tensor_failures = {
-    xfail('i0', ''),  # aten.i0.default - couldn't find symbolic meta function/decomposition
-
-    xfail('linalg.norm', ''),
-}
-
 inplace_symbolic_tensor_failures = {
     # bugs
     xfail('float_power', ''),  # base given to float_power_ has dtype Float but the operation's result requires dtype Double
-    # decomp not implemented
-    xfail('unique', ''),
 }
 
 out_symbolic_tensor_failures = {
+    # Cast error details: Unable to cast (...) to Tensor
+    #
+    # This happens because the test is set up to call the out variant using the `out` kwarg:
+    #   torch._some_op(arg1, arg2, out=(out1, out2, out3))
+    #
+    # However, this only works on torch ops, not aten ops. For `_batch_norm_with_update`,
+    # this fails because the op has no python bindings, so it doesn't support the `out` kwarg
+    # way of calling its out variant.
+    xfail('_batch_norm_with_update', ''),
     xfail('_native_batch_norm_legit', ''),
-    xfail('aminmax', ''),
     xfail('angle', ''),
     xfail('argmax', ''),
     xfail('argmin', ''),
-    xfail('bmm', ''),
-    xfail('cummax', ''),
-    xfail('cummin', ''),
     xfail('fft.fft2', ''),
     xfail('fft.fftn', ''),
     xfail('fft.ifft2', ''),
     xfail('fft.ifftn', ''),
     xfail('gather', ''),
-    xfail('i0', ''),
-    xfail('linalg.cholesky', ''),
-    xfail('linalg.cholesky_ex', ''),
-    xfail('linalg.det', ''),
-    xfail('linalg.det', 'singular'),
-    xfail('linalg.eigh', ''),
-    xfail('linalg.inv', ''),
-    xfail('linalg.inv_ex', ''),
-    xfail('linalg.ldl_factor', ''),
-    xfail('linalg.ldl_factor_ex', ''),
-    xfail('linalg.lu', ''),
-    xfail('linalg.lu_factor', ''),
-    xfail('linalg.lu_factor_ex', ''),
     xfail('linalg.pinv', ''),
     xfail('linalg.pinv', 'hermitian'),
-    xfail('linalg.qr', ''),
-    xfail('linalg.slogdet', ''),
-    xfail('linalg.solve_ex', ''),
-    xfail('linalg.svd', ''),
-    xfail('linalg.svdvals', ''),
     xfail('lu', ''),
-    xfail('lu_unpack', ''),
-    xfail('max', 'reduction_with_dim'),
-    xfail('min', 'reduction_with_dim'),
-    xfail('mode', ''),
-    xfail('nn.functional.avg_pool2d', ''),
-    xfail('nn.functional.linear', ''),
-    xfail('qr', ''),
     xfail('scatter_add', ''),
     xfail('scatter', ''),
-    xfail('sort', ''),
-    xfail('svd', ''),
     xfail('take_along_dim', ''),
-    xfail('topk', ''),
     xfail('triangular_solve', ''),
     xfail('view_copy', ''),
 
@@ -1998,6 +2067,12 @@ out_symbolic_tensor_failures = {
     xfail('ones', ''),
     xfail('randn', ''),
     xfail('zeros', ''),
+
+    # RuntimeError: Cannot call numel() on tensor with symbolic sizes/strides
+    xfail('index_reduce', 'prod'),
+    xfail('index_reduce', 'mean'),
+    xfail('index_reduce', 'amax'),
+    xfail('index_reduce', 'amin'),
 }
 
 out_symbolic_tensor_segfaults = {
@@ -2039,20 +2114,37 @@ def _test_make_fx_helper(self, device, dtype, op, tracing_mode, inplace=False, o
             self.skipTest("Dynamic output shape operation in trace")
 
 
+def skipIfNameMatches(pattern):
+    """
+    Decorator to skip a test if its name matches the given pattern.
+    """
+    def decorator(test_func):
+        def wrapper(*args, **kwargs):
+            if re.match(pattern, test_func.__name__):
+                raise unittest.SkipTest(f"Test '{test_func.__name__}' skipped because its name matches the pattern '{pattern}'")
+            return test_func(*args, **kwargs)
+        return wrapper
+    return decorator
+
+# Auto functionalize shouldn't work with make_fx directly
+filtered_hop_db = [op for op in hop_db if op.name != "auto_functionalize"]
+
+@unittest.skipIf(not torch._dynamo.is_dynamo_supported(), "Cond requires dynamo")
 class TestProxyTensorOpInfo(TestCase):
-    @ops(op_db + custom_op_db + control_flow_opinfo_db, allowed_dtypes=(torch.float,))
-    @skipOps('TestProxyTensorOpInfo', 'test_make_fx_exhaustive', make_fx_failures)
+    @ops(op_db + filtered_hop_db + custom_op_db, allowed_dtypes=(torch.float,))
+    @skipOps('TestProxyTensorOpInfo', 'test_make_fx_exhaustive', make_fx_failures.union(only_real_tensor_failures))
     def test_make_fx_exhaustive(self, device, dtype, op):
         _test_make_fx_helper(self, device, dtype, op, "real")
 
-    @ops(op_db + custom_op_db + control_flow_opinfo_db, allowed_dtypes=(torch.float,))
-    @skipOps('TestProxyTensorOpInfo', 'test_make_fx_fake_exhaustive', make_fx_failures.union(fake_tensor_failures))
+    @ops(op_db + filtered_hop_db + custom_op_db, allowed_dtypes=(torch.float,))
+    @skipOps('TestProxyTensorOpInfo', 'test_make_fx_fake_exhaustive',
+             make_fx_failures.union(fake_tensor_failures, only_fake_tensor_failures))
     def test_make_fx_fake_exhaustive(self, device, dtype, op):
         _test_make_fx_helper(self, device, dtype, op, "fake")
 
-    @ops(op_db + custom_op_db + control_flow_opinfo_db, allowed_dtypes=(torch.float,))
+    @ops(op_db + filtered_hop_db + custom_op_db, allowed_dtypes=(torch.float,))
     @skipOps('TestProxyTensorOpInfo', 'test_make_fx_symbolic_exhaustive',
-             make_fx_failures | fake_tensor_failures | symbolic_tensor_failures | outplace_symbolic_tensor_failures)
+             make_fx_failures | fake_tensor_failures | symbolic_tensor_failures)
     def test_make_fx_symbolic_exhaustive(self, device, dtype, op):
         _test_make_fx_helper(self, device, dtype, op, "symbolic")
 

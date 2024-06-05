@@ -36,9 +36,11 @@
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #else
+#include <ATen/ops/_chunk_cat_native.h>
 #include <ATen/ops/_conj_copy_native.h>
 #include <ATen/ops/_convert_indices_from_coo_to_csr.h>
 #include <ATen/ops/_convert_indices_from_csr_to_coo.h>
+#include <ATen/ops/_foreach_copy.h>
 #include <ATen/ops/_fw_primal_copy_native.h>
 #include <ATen/ops/_indices_copy_native.h>
 #include <ATen/ops/_make_dual.h>
@@ -226,7 +228,7 @@ inline void cat_check_no_zero_dim(const MaterializedITensorListRef& tensors) {
 }
 
 inline c10::MemoryFormat cat_compute_output_memory_format(const MaterializedITensorListRef& inputs) {
-  c10::optional<c10::MemoryFormat> format = c10::nullopt;
+  std::optional<c10::MemoryFormat> format = c10::nullopt;
   for (const Tensor& t : inputs) {
     auto f = t.suggest_memory_format();
     if (f == c10::MemoryFormat::Contiguous) {
@@ -419,9 +421,19 @@ Tensor& set_storage_meta__symint(Tensor& result, Storage storage, c10::SymInt st
     // it.  TODO: Actually this might not quite be correct if we use special
     // pointers to track whether or not fake cuda tensors are pinned or not
     const auto itemsize = result.dtype().itemsize();
-    c10::SymInt size_bytes = at::detail::computeStorageNbytes(
+    c10::SymInt new_size_bytes = at::detail::computeStorageNbytes(
         size, stride, itemsize, std::move(storage_offset));
-    storage.set_nbytes(std::move(size_bytes));
+    // TODO: When there are unbacked SymInts, we unconditionally skip the
+    // setter.  This is technically wrong, but we cannot conveniently test
+    // the real condition in many cases, because a lot of people are using
+    // set_ just to swizzle metadata on a tensor, they didn't actually want
+    // to see if they need to resize the storage.
+    //
+    // The old behavior was to unconditionally set_nbytes, but I think not
+    // setting it is more safe.
+    if (new_size_bytes.has_hint() && storage.sym_nbytes().has_hint() && TORCH_GUARD_SIZE_OBLIVIOUS(new_size_bytes.sym_gt(storage.sym_nbytes()))) {
+      storage.set_nbytes(std::move(new_size_bytes));
+    }
   }
   return result;
 }
@@ -509,7 +521,7 @@ Tensor sparse_broadcast_to(const Tensor& self, IntArrayRef size) {
     }
   }
   // to_broadcast conserves is_coalesced property iff only the last
-  // sparse dimensions are expaned. Possible expansion of dense
+  // sparse dimensions are expanded. Possible expansion of dense
   // dimensions can be discarded as it does not affect the is_coalesce
   // property.
   bool is_coalesced = self.dim()==0 || (self.is_coalesced() && (max_unchanged_dim < min_broadcast_dim || min_broadcast_dim == -1));
@@ -554,7 +566,7 @@ static void fastCatOutDim0(const Tensor& out, const MaterializedITensorListRef& 
   for (const Tensor& input : inputs) {
     TORCH_CHECK(outBytes >= totalBytes);
     if (input.nbytes() > 0) {
-      std::memcpy(dataPtr + totalBytes, input.data_ptr(), input.nbytes());
+      std::memcpy(dataPtr + totalBytes, input.const_data_ptr(), input.nbytes());
     }
     totalBytes += input.nbytes();
   }
@@ -609,7 +621,7 @@ TORCH_IMPL_FUNC(cat_out_cpu)
       .set_check_mem_overlap(false)
       .resize_outputs(false)
       .add_output(result_slice)
-      .add_input(source_slice)
+      .add_const_input(source_slice)
       .enforce_safe_casting_to_output(true)
       .build();
 
@@ -617,10 +629,10 @@ TORCH_IMPL_FUNC(cat_out_cpu)
       if (cat_should_skip_tensor(tensor)) {
         continue;
       }
-      auto source_data = static_cast<char*>(tensor.data_ptr());
+      auto source_data = static_cast<const char*>(tensor.const_data_ptr());
       auto result_data = static_cast<char*>(result_slice_data) + offset * result_stride_bytes;
       iter.unsafe_replace_operand(0, result_data);
-      iter.unsafe_replace_operand(1, source_data);
+      iter.unsafe_replace_operand(1, const_cast<char*>(source_data));
       copy_stub(iter.device_type(), iter, false);
       offset += slice_dim_size;
     }
@@ -636,7 +648,7 @@ TORCH_IMPL_FUNC(cat_out_cpu)
         .set_check_mem_overlap(false)  // Already checked above
         .resize_outputs(false)
         .add_output(result_slice)
-        .add_input(tensor)
+        .add_const_input(tensor)
         .promote_inputs_to_common_dtype(true)
         .cast_common_dtype_to_outputs(true)
         .enforce_safe_casting_to_output(true)
@@ -1004,7 +1016,7 @@ std::vector<Tensor> tensor_split(const Tensor& self, const Tensor& tensor_indice
     int64_t sections = tensor_indices_or_sections.item<int64_t>();
     return self.tensor_split(sections, dim);
   } else {
-    auto indices_data = tensor_indices_or_sections.data_ptr<int64_t>();
+    auto indices_data = tensor_indices_or_sections.const_data_ptr<int64_t>();
     auto stride = tensor_indices_or_sections.stride(0);
     auto numel = tensor_indices_or_sections.numel();
     std::vector<int64_t> indices(numel);
@@ -1344,22 +1356,22 @@ Tensor& narrow_copy_dense_cpu_out(
     return output;
   }
 
-  char* src_bytes = static_cast<char*>(self_contig->data_ptr());
+  const char* src_bytes = static_cast<const char*>(self_contig->const_data_ptr());
   char* dst_bytes = static_cast<char*>(output.data_ptr());
 
   size_t src_block_size_bytes = itemsize * src_block_size;
   size_t dst_block_size_bytes = itemsize * dst_block_size;
   size_t src_offset = unit * start;
 
-  char* src_offset_bytes = src_bytes + itemsize * src_offset;
+  const char* src_offset_bytes = src_bytes + itemsize * src_offset;
   char* dst_offset_bytes = dst_bytes;
 
   for (const auto i : c10::irange(num_blocks)) {
-    char* local_src_offset_bytes = src_offset_bytes + i * src_block_size_bytes;
+    const char* local_src_offset_bytes = src_offset_bytes + i * src_block_size_bytes;
     char* local_dst_offset_bytes = dst_offset_bytes + i * dst_block_size_bytes;
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
-        static_cast<void*>(local_src_offset_bytes + dst_block_size_bytes) <=
-        static_cast<void*>(src_bytes + src_nbytes));
+        static_cast<const void*>(local_src_offset_bytes + dst_block_size_bytes) <=
+        static_cast<const void*>(src_bytes + src_nbytes));
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
         static_cast<void*>(local_dst_offset_bytes + dst_block_size_bytes) <=
         static_cast<void*>(dst_bytes + dst_nbytes));
@@ -1444,16 +1456,12 @@ static _permute_size_stride_estimation(const Tensor& self, IntArrayRef dims) {
 }
 
 Tensor permute(const Tensor& self, IntArrayRef dims) {
-  DimVector new_sizes, new_strides;
-  std::vector<int64_t> _;
-  std::tie(new_sizes, new_strides, _) = _permute_size_stride_estimation(self, dims);
+  auto [new_sizes, new_strides, _] = _permute_size_stride_estimation(self, dims);
   return self.as_strided(new_sizes, new_strides);
 }
 
 Tensor permute_sparse_coo(const Tensor& self, IntArrayRef dims) {
-  DimVector new_sizes, _;
-  std::vector<int64_t> wrapped_dims;
-  std::tie(new_sizes, _, wrapped_dims) = _permute_size_stride_estimation(self, dims);
+  auto [new_sizes, _, wrapped_dims] = _permute_size_stride_estimation(self, dims);
 
   const auto ndim = self.dim();
   const auto sparse_ndim = self.sparse_dim();
@@ -1827,7 +1835,7 @@ Tensor select_symint(const Tensor& self, int64_t dim, c10::SymInt index) {
   auto size = self.sym_sizes()[dim];
   // Note: `size < -index` is not equivalent to `size <= -1 - index` if index is INT64_MIN
   // For std::numeric_limits<int64_t>::min() result of unary minus is undefined by the standard
-  // but in practice is equal to self. On the other hand, indexing wraping is valid for all
+  // but in practice is equal to self. On the other hand, indexing wrapping is valid for all
   // negative int64_t values, as x[INT64_MIN] is the same as x[INT64_MAX]
   if (size <= -1 - index || size <= index) {
     if (self.has_names() && self.names()[dim] != Dimname::wildcard()) {
@@ -1878,7 +1886,7 @@ Tensor select_backward_symint(const Tensor& grad, c10::SymIntArrayRef input_size
 Tensor index_select_sparse_cpu(const Tensor& self, int64_t dim, const Tensor& index) {
   /*
     Algorithm:
-    index - a 1-D tensor of indicies with shape (n,)
+    index - a 1-D tensor of indices with shape (n,)
     self - sparse tensor, its shape is sizes = sparse_shape + dense_shape
       indices - 2-D tensor of indices, shape is (sparse_dims, nnz)
       values - (1+len(dense_shape))-D tensor of values, shape is (nnz,) + dense_shape
@@ -2023,15 +2031,13 @@ Tensor index_select_sparse_cpu(const Tensor& self, int64_t dim, const Tensor& in
             return std::make_tuple(dim_indices, at::arange(nnz, dim_indices.options()), nneg_index);
           }
           else {
-            Tensor sorted_dim_indices, sorted_dim_indices_idx;
-            std::tie(sorted_dim_indices, sorted_dim_indices_idx) = dim_indices.sort();
+            auto [sorted_dim_indices, sorted_dim_indices_idx] = dim_indices.sort();
             return std::make_tuple(sorted_dim_indices, sorted_dim_indices_idx, nneg_index);
           }
         }
         // sort nneg_index to binary search into it
         else {
-          Tensor sorted_nneg_index, sorted_nneg_index_idx;
-          std::tie(sorted_nneg_index, sorted_nneg_index_idx) = nneg_index.sort();
+          auto [sorted_nneg_index, sorted_nneg_index_idx] = nneg_index.sort();
           return std::make_tuple(sorted_nneg_index, sorted_nneg_index_idx, dim_indices);
         }
       }();
@@ -2062,7 +2068,7 @@ Tensor index_select_sparse_cpu(const Tensor& self, int64_t dim, const Tensor& in
       // fill in src_int_idx, sorted_int_idx, int_counts
       {
         const auto sorted_len = sorted.numel();
-        const auto* ptr_sorted = sorted.data_ptr<int64_t>();
+        const auto* ptr_sorted = sorted.const_data_ptr<int64_t>();
         const auto* ptr_sorted_start = ptr_sorted;
         const auto* ptr_sorted_end = ptr_sorted + sorted_len;
 
@@ -2072,7 +2078,7 @@ Tensor index_select_sparse_cpu(const Tensor& self, int64_t dim, const Tensor& in
             auto* ptr_tid_src_int_idx = src_int_idx.select(0, tid).data_ptr<int64_t>();
             auto* ptr_tid_sorted_int_idx = sorted_int_idx.select(0, tid).data_ptr<int64_t>();
             auto* ptr_tid_int_counts = int_counts.select(0, tid).data_ptr<int64_t>();
-            const auto* ptr_src = src.data_ptr<int64_t>() + start;
+            const auto* ptr_src = src.const_data_ptr<int64_t>() + start;
 
             for (const auto i : c10::irange(start, end)) {
               const auto src_val = *ptr_src++;
@@ -2125,14 +2131,14 @@ Tensor index_select_sparse_cpu(const Tensor& self, int64_t dim, const Tensor& in
         auto* ptr_selected_src = selected_src.data_ptr<int64_t>();
 
         const auto thread_offsets = compressed_int_counts.cumsum(0).sub_(compressed_int_counts);
-        const auto* ptr_sorted_idx = sorted_idx.data_ptr<int64_t>();
+        const auto* ptr_sorted_idx = sorted_idx.const_data_ptr<int64_t>();
         at::parallel_for(0, n_threads_src, 1, [&](int64_t tid, C10_UNUSED int64_t _) {
             const auto start = tid * chunk_size_src;
             const auto end = std::min(start + chunk_size_src, src_len);
             const auto tid_offset = thread_offsets.const_data_ptr<int64_t>()[tid];
-            const auto* ptr_tid_src_int_idx = src_int_idx.select(0, tid).data_ptr<int64_t>();
-            const auto* ptr_tid_sorted_int_idx = sorted_int_idx.select(0, tid).data_ptr<int64_t>();
-            const auto* ptr_tid_int_counts = int_counts.select(0, tid).data_ptr<int64_t>();
+            const auto* ptr_tid_src_int_idx = src_int_idx.select(0, tid).const_data_ptr<int64_t>();
+            const auto* ptr_tid_sorted_int_idx = sorted_int_idx.select(0, tid).const_data_ptr<int64_t>();
+            const auto* ptr_tid_int_counts = int_counts.select(0, tid).const_data_ptr<int64_t>();
             auto* ptr_tid_selected_sorted = ptr_selected_sorted + tid_offset;
             auto* ptr_tid_selected_src = ptr_selected_src + tid_offset;
 
@@ -2167,7 +2173,7 @@ Tensor index_select_sparse_cpu(const Tensor& self, int64_t dim, const Tensor& in
         bool run_in_parallel = true) -> Tensor {
       auto cidx = at::empty({len + 1}, idx.options());
 
-      const auto* ptr_idx = idx.data_ptr<int64_t>();
+      const auto* ptr_idx = idx.const_data_ptr<int64_t>();
       auto* ptr_cidx = cidx.data_ptr<int64_t>();
 
       const auto idx_len = idx.numel();
@@ -2206,7 +2212,7 @@ Tensor index_select_sparse_cpu(const Tensor& self, int64_t dim, const Tensor& in
         }
         else {
           auto* ptr_counts = counts.data_ptr<int64_t>();
-          const auto* ptr_vals = t.data_ptr<int64_t>();
+          const auto* ptr_vals = t.const_data_ptr<int64_t>();
           for (C10_UNUSED const auto _ : c10::irange(t.numel())) {
             ++ptr_counts[*ptr_vals++];
           }
@@ -2314,10 +2320,10 @@ Tensor index_select_sparse_cpu(const Tensor& self, int64_t dim, const Tensor& in
         const auto src_idx_len = src_intersection_offsets.const_data_ptr<int64_t>()[size - 1];
         auto src_idx = at::empty({src_idx_len}, src.options());
 
-        const auto* ptr_src = src.data_ptr<int64_t>();
-        const auto* ptr_intersection_counts = intersection_counts.data_ptr<int64_t>();
-        const auto* ptr_src_intersection_counts = src_intersection_counts.data_ptr<int64_t>();
-        const auto* ptr_src_intersection_offsets = src_intersection_offsets.data_ptr<int64_t>();
+        const auto* ptr_src = src.const_data_ptr<int64_t>();
+        const auto* ptr_intersection_counts = intersection_counts.const_data_ptr<int64_t>();
+        const auto* ptr_src_intersection_counts = src_intersection_counts.const_data_ptr<int64_t>();
+        const auto* ptr_src_intersection_offsets = src_intersection_offsets.const_data_ptr<int64_t>();
         auto* ptr_src_idx = src_idx.data_ptr<int64_t>();
 
         const auto src_len = src.numel();
@@ -2330,9 +2336,9 @@ Tensor index_select_sparse_cpu(const Tensor& self, int64_t dim, const Tensor& in
             const auto end = std::min(start + chunk_size, src_len);
             auto* ptr_src_tid = ptr_src + start;
             const auto* ptr_src_counts_per_thread
-              = src_counts_per_thread.select(0, tid).data_ptr<int64_t>();
+              = src_counts_per_thread.select(0, tid).const_data_ptr<int64_t>();
             const auto* ptr_src_offset_counts_per_thread
-              = src_offset_counts_per_thread.select(0, tid).data_ptr<int64_t>();
+              = src_offset_counts_per_thread.select(0, tid).const_data_ptr<int64_t>();
             auto tid_counts = at::zeros({size}, src.options());
             auto* ptr_tid_counts = tid_counts.data_ptr<int64_t>();
 
@@ -2357,8 +2363,7 @@ Tensor index_select_sparse_cpu(const Tensor& self, int64_t dim, const Tensor& in
         return std::make_tuple(src_idx, src_idx_offsets);
       }();
 
-      Tensor idx_selected, src_selected;
-      std::tie(idx_selected, src_selected) = [&](
+      auto [idx_selected, src_selected] = [&](
           int64_t grain_size = at::internal::GRAIN_SIZE
       ) -> std::tuple<Tensor, Tensor> {
         const auto thread_offset = [&]() {
@@ -2367,16 +2372,16 @@ Tensor index_select_sparse_cpu(const Tensor& self, int64_t dim, const Tensor& in
           auto counts_per_thread = idx_counts_per_thread.mul_(src_counts).sum(-1);
           return counts_per_thread.cumsum(0).sub_(counts_per_thread);
         }();
-        const auto* ptr_thread_offset = thread_offset.data_ptr<int64_t>();
+        const auto* ptr_thread_offset = thread_offset.const_data_ptr<int64_t>();
 
         auto idx_selected = at::empty({res_len}, idx.options());
         auto src_selected = at::empty({res_len}, src.options());
 
-        const auto* ptr_idx = idx.data_ptr<int64_t>();
-        const auto* ptr_src_counts = src_counts.data_ptr<int64_t>();
-        const auto* ptr_intersection_counts = intersection_counts.data_ptr<int64_t>();
-        const auto* ptr_src_idx = src_idx.data_ptr<int64_t>();
-        const auto* ptr_src_idx_offsets = src_idx_offsets.data_ptr<int64_t>();
+        const auto* ptr_idx = idx.const_data_ptr<int64_t>();
+        const auto* ptr_src_counts = src_counts.const_data_ptr<int64_t>();
+        const auto* ptr_intersection_counts = intersection_counts.const_data_ptr<int64_t>();
+        const auto* ptr_src_idx = src_idx.const_data_ptr<int64_t>();
+        const auto* ptr_src_idx_offsets = src_idx_offsets.const_data_ptr<int64_t>();
         auto* ptr_idx_selected = idx_selected.data_ptr<int64_t>();
         auto* ptr_src_selected = src_selected.data_ptr<int64_t>();
 
@@ -2429,8 +2434,7 @@ Tensor index_select_sparse_cpu(const Tensor& self, int64_t dim, const Tensor& in
     const auto get_result_small_nnz_small_index = [&]()
       -> Tensor {
       const auto dim_indices_in_inner_loop = nnz >= index_len;
-      Tensor outer, inner;
-      std::tie(outer, inner) = [&]() -> std::tuple<Tensor, Tensor> {
+      auto [outer, inner] = [&]() -> std::tuple<Tensor, Tensor> {
         if (dim_indices_in_inner_loop) {
           return std::make_tuple(nneg_index, dim_indices);
         }
@@ -2439,8 +2443,8 @@ Tensor index_select_sparse_cpu(const Tensor& self, int64_t dim, const Tensor& in
         }
       }();
 
-      const auto* ptr_outer = outer.data_ptr<int64_t>();
-      const auto* ptr_inner = inner.data_ptr<int64_t>();
+      const auto* ptr_outer = outer.const_data_ptr<int64_t>();
+      const auto* ptr_inner = inner.const_data_ptr<int64_t>();
       // NOTE: if very critical, replace std::vector with
       // a data structure that operates on stack up to some limit.
       auto outer_selected_idx = std::vector<int64_t>();
@@ -2507,8 +2511,8 @@ Tensor index_select_sparse_cpu(const Tensor& self, int64_t dim, const Tensor& in
 Tensor slice(
     const Tensor& self,
     int64_t dim,
-    c10::optional<int64_t> start,
-    c10::optional<int64_t> end,
+    std::optional<int64_t> start,
+    std::optional<int64_t> end,
     int64_t step) {
   int64_t ndim = self.dim();
   if (ndim == 0) {
@@ -2564,8 +2568,8 @@ Tensor slice_inverse_symint(
     const Tensor& self,
     const Tensor& base,
     int64_t /* dim */,
-    c10::optional<SymInt> /* start */,
-    c10::optional<SymInt> /* end */,
+    std::optional<SymInt> /* start */,
+    std::optional<SymInt> /* end */,
     SymInt /* step */) {
   // assume self has enough to storage to be viewed with base's metadata
   return self.as_strided_symint(base.sym_sizes(), base.sym_strides(), base.sym_storage_offset());
@@ -2729,6 +2733,38 @@ static void check_stack_inputs(TensorList tensors, int64_t dim) {
       "stack expects each tensor to be equal size, but got ", entry_shape,
       " at entry 0 and ", tensors[i].sizes(), " at entry ", i);
   }
+}
+
+// Pads each tensor on `dim`-th dimension such that padded_dim % num_chunks == 0.
+static std::vector<Tensor> _pad_chunk(TensorList tensors, int64_t dim, int64_t num_chunks) {
+  auto num_tensors = tensors.size();
+  std::vector<Tensor> padded_tensors;
+  padded_tensors.reserve(num_tensors);
+  for (const auto & tensor : tensors) {
+    auto tensor_size = tensor.sizes();
+    std::vector<int64_t> padded_size(tensor_size.vec());
+    padded_size[dim] = (tensor_size[dim] + num_chunks - 1) / num_chunks * num_chunks;
+    Tensor padded_tensor = tensor;
+    if (padded_size != tensor_size) {
+      padded_tensor = tensor.new_zeros(padded_size);
+      padded_tensor.narrow(dim, 0, tensor_size[dim]).copy_(tensor);
+    }
+    std::vector<int64_t> view_sizes(tensor_size.begin(), tensor_size.begin()+dim);
+    view_sizes.insert(view_sizes.end(), {num_chunks, -1});
+    padded_tensors.push_back(padded_tensor.view(view_sizes));
+  }
+  return padded_tensors;
+}
+
+Tensor _chunk_cat(TensorList tensors, int64_t dim, int64_t num_chunks) {
+  auto wrapped_dim = at::native::preprocess_chunk_cat_inputs(tensors, dim, num_chunks);
+  return at::cat(_pad_chunk(tensors, wrapped_dim, num_chunks), wrapped_dim+1);
+}
+
+Tensor& _chunk_cat_out(TensorList tensors, int64_t dim, int64_t num_chunks, Tensor& out) {
+  auto wrapped_dim = at::native::preprocess_chunk_cat_inputs(tensors, dim, num_chunks);
+  at::cat_out(out, _pad_chunk(tensors, wrapped_dim, num_chunks), wrapped_dim+1);
+  return out;
 }
 
 // TODO(msubkhankulov): refactor to use _stack
@@ -2940,11 +2976,11 @@ Tensor & transpose_(Tensor & self, int64_t dim0, int64_t dim1) {
   }
 
   // Sparse COO is an exceptional sparse format as it allows transpose
-  // to be a view operation which is a convinient property for
+  // to be a view operation which is a convenient property for
   // in-place operations. For other sparse formats, the in-place
   // transpose would not be possible without shuffling the specified
   // values. So we don't support this as it would defeat the purpose
-  // of in-place opeations of being memory-efficient.
+  // of in-place opreations of being memory-efficient.
   if (self.is_sparse()) {
     return sparse_transpose_(self, dim0, dim1);
   }
@@ -3191,16 +3227,28 @@ static inferSqueezeGeometry(const Tensor &tensor, std::bitset<dim_bitset_size> d
 namespace {
 // Named type instead of a pair/tuple so that we can be sure to
 // construct the vectors in place and get NRVO.
+template <typename T>
 struct InferUnsqueezeGeometryResult {
-  DimVector sizes;
-  DimVector strides;
-  InferUnsqueezeGeometryResult(IntArrayRef tensor_sizes, IntArrayRef tensor_strides)
+  SmallVector<T, kDimVectorStaticSize>sizes;
+  SmallVector<T, kDimVectorStaticSize> strides;
+  InferUnsqueezeGeometryResult(ArrayRef<T> tensor_sizes, ArrayRef<T> tensor_strides)
       : sizes(tensor_sizes.begin(), tensor_sizes.end())
       , strides(tensor_strides.begin(), tensor_strides.end()) {}
 };
-InferUnsqueezeGeometryResult
+
+InferUnsqueezeGeometryResult<c10::SymInt>
+inferUnsqueezeGeometry_symint(const Tensor& tensor, int64_t dim) {
+  InferUnsqueezeGeometryResult<c10::SymInt> result(tensor.sym_sizes(), tensor.sym_strides());
+  c10::SymInt new_stride = dim >= tensor.dim() ? 1 : result.sizes[dim] * result.strides[dim];
+  result.sizes.insert(result.sizes.begin() + dim, 1);
+  result.strides.insert(result.strides.begin() + dim, new_stride);
+
+  return result;
+}
+
+InferUnsqueezeGeometryResult<int64_t>
 inferUnsqueezeGeometry(const Tensor& tensor, int64_t dim) {
-  InferUnsqueezeGeometryResult result(tensor.sizes(), tensor.strides());
+  InferUnsqueezeGeometryResult<int64_t> result(tensor.sizes(), tensor.strides());
   int64_t new_stride = dim >= tensor.dim() ? 1 : result.sizes[dim] * result.strides[dim];
   result.sizes.insert(result.sizes.begin() + dim, 1);
   result.strides.insert(result.strides.begin() + dim, new_stride);
@@ -3211,13 +3259,11 @@ inferUnsqueezeGeometry(const Tensor& tensor, int64_t dim) {
 // dim is present if squeezing a single dimension and absent if squeezing all dimensions
 Tensor squeeze_qtensor(const Tensor& self, c10::OptionalIntArrayRef dims) {
   auto quantizer = get_qtensorimpl(self)->quantizer();
-  SymDimVector sizes;
-  SymDimVector strides;
   const auto ndim = self.dim();
   auto mask = dims.has_value()
       ? dim_list_to_bitset(dims, self.dim())
       : std::bitset<dim_bitset_size>((1ull << self.dim()) - 1);
-  std::tie(sizes, strides) = inferSqueezeGeometry(self, mask);
+  auto [sizes, strides] = inferSqueezeGeometry(self, mask);
   if (quantizer->qscheme() == QScheme::PER_CHANNEL_AFFINE) {
     const auto* per_channel_quantizer = static_cast<at::PerChannelAffineQuantizer*>(quantizer.get());
     auto axis = per_channel_quantizer->axis();
@@ -3343,8 +3389,8 @@ Tensor _unsafe_view(const Tensor& self, IntArrayRef size) {
 
 Tensor unsqueeze(const Tensor& self, int64_t dim) {
   dim = maybe_wrap_dim(dim, self.dim() + 1);
-  auto g = inferUnsqueezeGeometry(self, dim);
-  return self.as_strided(g.sizes, g.strides);
+  auto g = inferUnsqueezeGeometry_symint(self, dim);
+  return self.as_strided_symint(g.sizes, g.strides);
 }
 
 Tensor unsqueeze_sparse(Tensor const &self, int64_t dim) {
@@ -3429,6 +3475,10 @@ Tensor flatten(const Tensor& self, int64_t start_dim, int64_t end_dim) {
 }
 
 Tensor flatten(const Tensor& self, int64_t start_dim, int64_t end_dim, Dimname out_dim) {
+  start_dim = maybe_wrap_dim(start_dim, self.dim());
+  end_dim = maybe_wrap_dim(end_dim, self.dim());
+  TORCH_CHECK(start_dim <= end_dim, "flatten() has invalid args: start_dim cannot come after end_dim");
+
   auto outnames = self.names().vec();
   outnames.erase(outnames.begin() + start_dim, outnames.begin() + end_dim + 1);
   outnames.insert(outnames.begin() + start_dim, out_dim);
@@ -3469,7 +3519,7 @@ static inline void handle_unflatten_exception(const std::runtime_error &e,
                                               const Tensor &self,
                                               int64_t dim,
                                               SymIntArrayRef sizes,
-                                              c10::optional <DimnameList> names) {
+                                              std::optional <DimnameList> names) {
   if (!strstr(e.what(), "is invalid for input of size")) {
     TORCH_CHECK(false, "unflatten got an unexpected error:\n", e.what());
   }
@@ -3486,7 +3536,7 @@ static inline void handle_unflatten_exception(const std::runtime_error &e,
   }
 }
 
-static Tensor unflatten_impl(const Tensor& self, int64_t dim, SymIntArrayRef sizes, c10::optional<DimnameList> names) {
+static Tensor unflatten_impl(const Tensor& self, int64_t dim, SymIntArrayRef sizes, std::optional<DimnameList> names) {
   dim = maybe_wrap_dim(dim, self.dim());
 
   TORCH_CHECK(!sizes.empty(), "unflatten: sizes must be non-empty");
@@ -3963,7 +4013,7 @@ at::Tensor clone_preserve_strides(const at::Tensor& self) {
 }
 
 
-at::Tensor slice_scatter(const at::Tensor& self, const at::Tensor& src, int64_t dim, c10::optional<int64_t> start, c10::optional<int64_t> end, int64_t step) {
+at::Tensor slice_scatter(const at::Tensor& self, const at::Tensor& src, int64_t dim, std::optional<int64_t> start, std::optional<int64_t> end, int64_t step) {
     // See Note [*_scatter ops preserve strides]
     auto output = clone_preserve_strides(self);
     auto slice = output.slice(dim, start, end, step);
@@ -3986,7 +4036,7 @@ at::Tensor diagonal_scatter(const at::Tensor& self, const at::Tensor& src, int64
     slice.copy_(src);
     return output;
 }
-at::Tensor as_strided_scatter_symint(const at::Tensor& self, const at::Tensor& src, at::SymIntArrayRef size, at::SymIntArrayRef stride, c10::optional<c10::SymInt> storage_offset) {
+at::Tensor as_strided_scatter_symint(const at::Tensor& self, const at::Tensor& src, at::SymIntArrayRef size, at::SymIntArrayRef stride, std::optional<c10::SymInt> storage_offset) {
     // See Note [as_strided_scatter backward support]
     TORCH_INTERNAL_ASSERT(!self.requires_grad() || self.is_contiguous(), "as_strided_scatter is currently only supported for contiguous inputs");
     // See Note [*_scatter ops preserve strides]
@@ -4044,11 +4094,13 @@ void unbind_copy_int_out(const at::Tensor & self, int64_t dim, at::TensorList  o
   }
 }
 
-int64_t sparse_dim_strided(const at::Tensor& self) {
+int64_t sparse_dim_default(const Tensor& self) {
+  TORCH_CHECK(self.layout() == kStrided, "sparse_dim expected sparse or strided tensor layout but got ", self.layout());
   return 0;
 }
 
-int64_t dense_dim_strided(const at::Tensor& self) {
+int64_t dense_dim_default(const Tensor& self) {
+  TORCH_CHECK(self.layout() == kStrided, "dense_dim expected sparse or strided tensor layout but got ", self.layout());
   return self.dim();
 }
 

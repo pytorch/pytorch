@@ -13,8 +13,6 @@
 #include <ATen/cpu/vec/vec_base.h>
 #include <c10/util/complex.h>
 
-#define SLEEF_MEMORY_WORKAROUND
-
 namespace at {
 namespace vec {
 
@@ -393,40 +391,84 @@ struct Vectorized<T, std::enable_if_t<is_zarch_implemented<T>()>> {
   C10_ALWAYS_INLINE Vectorized(T s)
       : _vec0{vec_splats((ElementType)s)}, _vec1{vec_splats((ElementType)s)} {}
 
-  static Vectorized<value_type> C10_ALWAYS_INLINE
-  loadu(const void* ptr, int count = size()) {
-    if (count == size()) {
+  template <typename U, typename DUMMY = void>
+  struct LoaduHelper {
+    static Vectorized<T> C10_ALWAYS_INLINE
+    loadu(const U* ptr, int count = size()) {
+      __at_align__ ElementType tmp_values[size()] = {};
+      std::memcpy(tmp_values, ptr, std::min(count, size()) * sizeof(ElementType));
+
       return {
-          vec_xl(offset0, reinterpret_cast<const ElementType*>(ptr)),
-          vec_xl(offset16, reinterpret_cast<const ElementType*>(ptr))};
+          vec_xl(offset0, &(tmp_values[0])),
+          vec_xl(offset16, &(tmp_values[0]))};
     }
+  };
 
-    __at_align__ ElementType tmp_values[size()] = {};
-    std::memcpy(tmp_values, ptr, std::min(count, size()) * sizeof(ElementType));
+  template <typename DUMMY>
+  struct LoaduHelper<ElementType, DUMMY> {
+    static Vectorized<T> C10_ALWAYS_INLINE
+    loadu(const ElementType* ptr, int count = size()) {
+      if (count == size()) {
+        return {
+            vec_xl(offset0, ptr),
+            vec_xl(offset16, ptr)};
+      }
 
-    return {
-        vec_xl(offset0, reinterpret_cast<const ElementType*>(tmp_values)),
-        vec_xl(offset16, reinterpret_cast<const ElementType*>(tmp_values))};
+      __at_align__ ElementType tmp_values[size()] = {};
+      std::memcpy(tmp_values, ptr, std::min(count, size()) * sizeof(ElementType));
+
+      return {
+          vec_xl(offset0, &(tmp_values[0])),
+          vec_xl(offset16, &(tmp_values[0]))};
+    }
+  };
+
+  template <typename U>
+  static Vectorized<T> C10_ALWAYS_INLINE
+  loadu(const U* ptr, int count = size()) {
+    return LoaduHelper<U>::loadu(ptr, count);
   }
 
-  static Vectorized<value_type> C10_ALWAYS_INLINE
-  loadu_one_fourth(const void* ptr) {
+  template <typename U>
+  static Vectorized<T> C10_ALWAYS_INLINE
+  loadu_one_fourth(const U* ptr) {
     // load only first 8 bytes
     // only intended to be used with uint8_t
     return loadu(ptr, 8 / sizeof(ElementType));
   }
 
-  void C10_ALWAYS_INLINE store(void* ptr, int count = size()) const {
-    if (count == size()) {
-      vec_xst(_vec0, offset0, reinterpret_cast<ElementType*>(ptr));
-      vec_xst(_vec1, offset16, reinterpret_cast<ElementType*>(ptr));
-    } else if (count > 0) {
-      __at_align__ ElementType tmp_values[size()];
-      vec_xst(_vec0, offset0, reinterpret_cast<ElementType*>(tmp_values));
-      vec_xst(_vec1, offset16, reinterpret_cast<ElementType*>(tmp_values));
-      std::memcpy(
-          ptr, tmp_values, std::min(count, size()) * sizeof(ElementType));
+  template <typename U, typename DUMMY = void>
+  struct StoreHelper {
+    static void C10_ALWAYS_INLINE store(const Vectorized<T> &vec, U* ptr, int count = size()) {
+      if (count > 0) {
+        __at_align__ ElementType tmp_values[size()];
+        vec_xst(vec._vec0, offset0, &(tmp_values[0]));
+        vec_xst(vec._vec1, offset16, &(tmp_values[0]));
+        std::memcpy(
+            ptr, tmp_values, std::min(count, size()) * sizeof(ElementType));
+      }
     }
+  };
+
+  template <typename DUMMY>
+  struct StoreHelper<ElementType, DUMMY> {
+    static void C10_ALWAYS_INLINE store(const Vectorized<T> &vec, ElementType* ptr, int count = size()) {
+      if (count == size()) {
+        vec_xst(vec._vec0, offset0, ptr);
+        vec_xst(vec._vec1, offset16, ptr);
+      } else if (count > 0) {
+        __at_align__ ElementType tmp_values[size()];
+        vec_xst(vec._vec0, offset0, &(tmp_values[0]));
+        vec_xst(vec._vec1, offset16, &(tmp_values[0]));
+        std::memcpy(
+            ptr, tmp_values, std::min(count, size()) * sizeof(ElementType));
+      }
+    }
+  };
+
+  template <typename U>
+  void C10_ALWAYS_INLINE store(U* ptr, int count = size()) const {
+    return StoreHelper<U>::store(*this, ptr, count);
   }
 
   C10_ALWAYS_INLINE const vtype& vec0() const {
@@ -1104,32 +1146,20 @@ struct Vectorized<T, std::enable_if_t<is_zarch_implemented<T>()>> {
   }
 
   Vectorized<T> sin() const {
-#ifndef SLEEF_MEMORY_WORKAROUND
     return mapSleef(Sleef_sinf4_u10, Sleef_sind2_u10);
-#else
-    return mapOrdinary(std::sin);
-#endif
   }
   Vectorized<T> sinh() const {
     return mapSleef(Sleef_sinhf4_u10, Sleef_sinhd2_u10);
   }
   Vectorized<T> cos() const {
-#ifndef SLEEF_MEMORY_WORKAROUND
     return mapSleef(Sleef_cosf4_u10, Sleef_cosd2_u10);
-#else
-    return mapOrdinary(std::cos);
-#endif
   }
   Vectorized<T> cosh() const {
     return mapSleef(Sleef_coshf4_u10, Sleef_coshd2_u10);
   }
 
   Vectorized<T> tan() const {
-#ifndef SLEEF_MEMORY_WORKAROUND
     return mapSleef(Sleef_tanf4_u10, Sleef_tand2_u10);
-#else
-    return mapOrdinary(std::tan);
-#endif
   }
   Vectorized<T> tanh() const {
     return mapSleef(Sleef_tanhf4_u10, Sleef_tanhd2_u10);
@@ -1461,19 +1491,19 @@ inline ZSimdVect<int> vec_flt_int(const ZSimdVect<float> x) {
 #define vec_flt_int vec_signed
 #endif
 
-Vectorized<float> convert_to_float(const Vectorized<int32_t>& x) {
+Vectorized<float> zvec_convert_to_float(const Vectorized<int32_t>& x) {
   return {vec_int_flt(x.vec0()), vec_int_flt(x.vec1())};
 }
 
-Vectorized<int32_t> convert_to_int(const Vectorized<float>& x) {
+Vectorized<int32_t> zvec_convert_to_int(const Vectorized<float>& x) {
   return {vec_flt_int(x.vec0()), vec_flt_int(x.vec1())};
 }
 
-Vectorized<double> convert_to_float(const Vectorized<int64_t>& x) {
+Vectorized<double> zvec_convert_to_float(const Vectorized<int64_t>& x) {
   return {vec_double(x.vec0()), vec_double(x.vec1())};
 }
 
-Vectorized<int64_t> convert_to_int(const Vectorized<double>& x) {
+Vectorized<int64_t> zvec_convert_to_int(const Vectorized<double>& x) {
   return {vec_signed(x.vec0()), vec_signed(x.vec1())};
 }
 
@@ -1531,13 +1561,13 @@ Vectorized<int64_t> C10_ALWAYS_INLINE fmadd(
 template <>
 Vectorized<int64_t> C10_ALWAYS_INLINE
 convert_to_int_of_same_size<double>(const Vectorized<double>& src) {
-  return convert_to_int(src);
+  return zvec_convert_to_int(src);
 }
 
 template <>
 Vectorized<int32_t> C10_ALWAYS_INLINE
 convert_to_int_of_same_size<float>(const Vectorized<float>& src) {
-  return convert_to_int(src);
+  return zvec_convert_to_int(src);
 }
 
 template <>
@@ -1549,7 +1579,7 @@ inline void convert(const int32_t* src, float* dst, int64_t n) {
     const int32_t* src_a = src + i;
     float* dst_a = dst + i;
     auto input_vec = Vectorized<int32_t>::loadu(src_a);
-    auto output_vec = convert_to_float(input_vec);
+    auto output_vec = zvec_convert_to_float(input_vec);
     output_vec.store(dst_a);
   }
 
@@ -1566,7 +1596,7 @@ inline void convert(const int64_t* src, double* dst, int64_t n) {
     const int64_t* src_a = src + i;
     double* dst_a = dst + i;
     auto input_vec = Vectorized<int64_t>::loadu(src_a);
-    auto output_vec = convert_to_float(input_vec);
+    auto output_vec = zvec_convert_to_float(input_vec);
     output_vec.store(dst_a);
   }
   for (; i < n; i++) {
@@ -1710,12 +1740,14 @@ struct Vectorized<T, std::enable_if_t<is_zarch_implemented_quant<T>()>> {
     return _vec;
   }
 
+  template <typename U>
   static Vectorized<T> C10_ALWAYS_INLINE
-  loadu(const void* ptr, int count = size()) {
+  loadu(const U* ptr, int count = size()) {
     return Vectorized<T>{vinner_type::loadu(ptr, count)};
   }
 
-  void C10_ALWAYS_INLINE store(void* ptr, int count = size()) const {
+  template <typename U>
+  void C10_ALWAYS_INLINE store(U* ptr, int count = size()) const {
     _vec.store(ptr, count);
   }
 
@@ -1743,7 +1775,7 @@ struct Vectorized<T, std::enable_if_t<is_zarch_implemented_quant<T>()>> {
       Vectorized<float> scale,
       Vectorized<float> zero_point,
       Vectorized<float> scale_zp_premul) const {
-    auto float_val = convert_to_float(_vec);
+    auto float_val = zvec_convert_to_float(_vec);
     return {fmadd(scale, float_val, scale_zp_premul)};
   }
 
@@ -1753,7 +1785,7 @@ struct Vectorized<T, std::enable_if_t<is_zarch_implemented_quant<T>()>> {
   float_vec_return_type dequantize(
       Vectorized<float> scale,
       Vectorized<float> zero_point) const {
-    auto float_val = convert_to_float(_vec);
+    auto float_val = zvec_convert_to_float(_vec);
     return {(float_val - zero_point) * scale};
   }
 
@@ -1768,7 +1800,7 @@ struct Vectorized<T, std::enable_if_t<is_zarch_implemented_quant<T>()>> {
     Vectorized<float> vecf = rhs[0];
     vecf = vecf * Vectorized<float>(inverse_scale);
     vecf = vecf.rint() + Vectorized<float>((float)(zero_point));
-    auto veci = convert_to_int(vecf);
+    auto veci = zvec_convert_to_int(vecf);
 
     return Vectorized<T>{veci};
   }
@@ -1781,10 +1813,10 @@ struct Vectorized<T, std::enable_if_t<is_zarch_implemented_quant<T>()>> {
       float multiplier,
       int32_t zero_point) {
     Vectorized<T> vi = inp[0];
-    auto vecf = convert_to_float(vi.vec());
+    auto vecf = zvec_convert_to_float(vi.vec());
     vecf = vecf * Vectorized<float>(multiplier);
     vecf = vecf.rint();
-    auto veci = convert_to_int(vecf) + Vectorized<int>(zero_point);
+    auto veci = zvec_convert_to_int(vecf) + Vectorized<int>(zero_point);
 
     return Vectorized<T>{veci};
   }
@@ -1819,11 +1851,11 @@ struct Vectorized<T, std::enable_if_t<is_zarch_implemented_quant<T>()>> {
     auto ret32_0 = unpack(ret16.first);
     auto ret32_1 = unpack(ret16.second);
 
-    auto vecf_0 = convert_to_float(ret32_0.first);
-    auto vecf_1 = convert_to_float(ret32_0.second);
+    auto vecf_0 = zvec_convert_to_float(ret32_0.first);
+    auto vecf_1 = zvec_convert_to_float(ret32_0.second);
 
-    auto vecf_2 = convert_to_float(ret32_1.first);
-    auto vecf_3 = convert_to_float(ret32_1.second);
+    auto vecf_2 = zvec_convert_to_float(ret32_1.first);
+    auto vecf_3 = zvec_convert_to_float(ret32_1.second);
     return {
         fmadd(scale, vecf_0, scale_zp_premul),
         fmadd(scale, vecf_1, scale_zp_premul),
@@ -1842,11 +1874,11 @@ struct Vectorized<T, std::enable_if_t<is_zarch_implemented_quant<T>()>> {
     auto ret32_0 = unpack(ret16.first);
     auto ret32_1 = unpack(ret16.second);
 
-    auto vecf_0 = convert_to_float(ret32_0.first);
-    auto vecf_1 = convert_to_float(ret32_0.second);
+    auto vecf_0 = zvec_convert_to_float(ret32_0.first);
+    auto vecf_1 = zvec_convert_to_float(ret32_0.second);
 
-    auto vecf_2 = convert_to_float(ret32_1.first);
-    auto vecf_3 = convert_to_float(ret32_1.second);
+    auto vecf_2 = zvec_convert_to_float(ret32_1.first);
+    auto vecf_3 = zvec_convert_to_float(ret32_1.second);
 
     return {
         (vecf_0 - zero_point) * scale,
@@ -1881,10 +1913,10 @@ struct Vectorized<T, std::enable_if_t<is_zarch_implemented_quant<T>()>> {
     vecf4 = vecf4.rint() + vec_zero_point;
     vecf6 = vecf6.rint() + vec_zero_point;
 
-    auto veci0 = convert_to_int(vecf0);
-    auto veci2 = convert_to_int(vecf2);
-    auto veci4 = convert_to_int(vecf4);
-    auto veci6 = convert_to_int(vecf6);
+    auto veci0 = zvec_convert_to_int(vecf0);
+    auto veci2 = zvec_convert_to_int(vecf2);
+    auto veci4 = zvec_convert_to_int(vecf4);
+    auto veci6 = zvec_convert_to_int(vecf6);
 
     auto vecshi0 = pack(veci0, veci2);
     auto vecshi2 = pack(veci4, veci6);
@@ -1908,11 +1940,11 @@ struct Vectorized<T, std::enable_if_t<is_zarch_implemented_quant<T>()>> {
     Vectorized<c10::qint32> vi2 = inp[2];
     Vectorized<c10::qint32> vi3 = inp[3];
 
-    auto vecf0 = convert_to_float(vi0.vec());
-    auto vecf2 = convert_to_float(vi1.vec());
+    auto vecf0 = zvec_convert_to_float(vi0.vec());
+    auto vecf2 = zvec_convert_to_float(vi1.vec());
 
-    auto vecf4 = convert_to_float(vi2.vec());
-    auto vecf6 = convert_to_float(vi3.vec());
+    auto vecf4 = zvec_convert_to_float(vi2.vec());
+    auto vecf6 = zvec_convert_to_float(vi3.vec());
 
     vecf0 = vecf0 * vec_multiplier;
     vecf2 = vecf2 * vec_multiplier;
@@ -1925,10 +1957,10 @@ struct Vectorized<T, std::enable_if_t<is_zarch_implemented_quant<T>()>> {
     vecf4 = vecf4.rint();
     vecf6 = vecf6.rint();
 
-    auto veci0 = convert_to_int(vecf0);
-    auto veci2 = convert_to_int(vecf2);
-    auto veci4 = convert_to_int(vecf4);
-    auto veci6 = convert_to_int(vecf6);
+    auto veci0 = zvec_convert_to_int(vecf0);
+    auto veci2 = zvec_convert_to_int(vecf2);
+    auto veci4 = zvec_convert_to_int(vecf4);
+    auto veci6 = zvec_convert_to_int(vecf6);
 
     veci0 = veci0 + vec_zero_point;
     veci2 = veci2 + vec_zero_point;
@@ -2174,12 +2206,14 @@ struct Vectorized<T, std::enable_if_t<is_zarch_implemented_complex<T>()>> {
     return _vec.data();
   }
 
+  template <typename U>
   static Vectorized<T> C10_ALWAYS_INLINE
-  loadu(const void* ptr, int count = size()) {
+  loadu(const U* ptr, int count = size()) {
     return Vectorized<T>{vinner_type::loadu(ptr, 2 * count)};
   }
 
-  void C10_ALWAYS_INLINE store(void* ptr, int count = size()) const {
+  template <typename U>
+  void C10_ALWAYS_INLINE store(U* ptr, int count = size()) const {
     return _vec.store(ptr, 2 * count);
   }
 
@@ -2790,19 +2824,23 @@ std::pair<Vectorized<int64_t>, Vectorized<int64_t>> inline deinterleave2<
   return inner_deinterleave2<int64_t>(a, b);
 }
 
-inline Vectorized<float> convert_uint8_to_float(const Vectorized<uint8_t> &src) {
+template <typename T>
+typename std::enable_if<std::is_same<T, uint8_t>::value, at::vec::Vectorized<float>>::type
+inline convert_int8_to_float(const Vectorized<T> &src) {
   // Note: this function only convert inputs number of elements equal to at::vec::Vectorized<float>.size()
   // Only handle first 64 bits
   auto vec_int = src.to_vec_float_helper();
 
-  return convert_to_float(vec_int);
+  return zvec_convert_to_float(vec_int);
 }
 
-inline Vectorized<uint8_t> convert_float_to_uint8(const Vectorized<float> &src) {
-  constexpr auto min_val = std::numeric_limits<uint8_t>::min();
-  constexpr auto max_val = std::numeric_limits<uint8_t>::max();
+template <typename T>
+typename std::enable_if<std::is_same<T, uint8_t>::value, at::vec::Vectorized<T>>::type
+inline convert_float_to_int8(const Vectorized<float> &src) {
+  constexpr auto min_val = std::numeric_limits<T>::min();
+  constexpr auto max_val = std::numeric_limits<T>::max();
 
-  auto vec_int = clamp(convert_to_int(src), Vectorized<int32_t>(min_val), Vectorized<int32_t>(max_val));
+  auto vec_int = clamp(zvec_convert_to_int(src), Vectorized<int32_t>(min_val), Vectorized<int32_t>(max_val));
 
   return vec_int.to_vec_uint8_helper();
 }

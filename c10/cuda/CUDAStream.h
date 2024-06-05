@@ -1,8 +1,5 @@
 #pragma once
 
-#include <cstdint>
-#include <utility>
-
 #include <cuda_runtime_api.h>
 
 #include <c10/core/DeviceGuard.h>

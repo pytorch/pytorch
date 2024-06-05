@@ -151,7 +151,7 @@ size_t SourceRangeHasher::operator()(const torch::jit::SourceRange& key) const {
       std::hash<size_t>()(key.start()) ^ std::hash<size_t>()(key.end()));
 }
 
-c10::optional<SourceRange> Source::findSourceRangeThatGenerated(
+std::optional<SourceRange> Source::findSourceRangeThatGenerated(
     const SourceRange& range) {
   if (!gen_ranges_) {
     return c10::nullopt;
@@ -267,10 +267,7 @@ void SourceRange::print_with_context(
 
   // print out location information
   if (auto flc = file_line_col()) {
-    std::string filename;
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-    size_t line, col;
-    std::tie(filename, line, col) = *flc;
+    auto [filename, line, col] = *flc;
     out << "  File \"" << filename << "\", line " << line;
     if (!funcname.empty()) {
       out << ", in " << funcname;

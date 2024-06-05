@@ -83,6 +83,7 @@ void PrefixStore::append(
 std::vector<std::vector<uint8_t>> PrefixStore::multiGet(
     const std::vector<std::string>& keys) {
   std::vector<std::string> prefixed_keys;
+  prefixed_keys.reserve(keys.size());
   for (auto& key : keys) {
     prefixed_keys.push_back(joinKey(key));
   }
@@ -93,6 +94,7 @@ void PrefixStore::multiSet(
     const std::vector<std::string>& keys,
     const std::vector<std::vector<uint8_t>>& values) {
   std::vector<std::string> prefixed_keys;
+  prefixed_keys.reserve(keys.size());
   for (auto& key : keys) {
     prefixed_keys.push_back(joinKey(key));
   }

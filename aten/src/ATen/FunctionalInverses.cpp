@@ -145,7 +145,7 @@ Tensor FunctionalInverses::_neg_view_inverse(const Tensor& base, const Tensor& m
     }
 }
 
-Tensor FunctionalInverses::as_strided_inverse(const Tensor& base, const Tensor& mutated_view, InverseReturnMode inverse_return_mode, at::SymIntArrayRef size, at::SymIntArrayRef stride, c10::optional<c10::SymInt> storage_offset) {
+Tensor FunctionalInverses::as_strided_inverse(const Tensor& base, const Tensor& mutated_view, InverseReturnMode inverse_return_mode, at::SymIntArrayRef size, at::SymIntArrayRef stride, std::optional<c10::SymInt> storage_offset) {
     if (inverse_return_mode == InverseReturnMode::AlwaysView) {
       // NB: assumes mutated_view is a narrowed view of base.
       // We should NOT do this for functionalization
@@ -174,8 +174,8 @@ Tensor FunctionalInverses::expand_inverse(const Tensor& base, const Tensor& muta
       return mutated_view.as_strided_symint(
           base.sym_sizes(), base.sym_strides(), base.sym_storage_offset());
     } else {
-      return at::sum_to(
-          mutated_view,
+      return base + at::sum_to(
+          mutated_view - base,
           base.sym_sizes(),
           /*always_return_non_view=*/inverse_return_mode == InverseReturnMode::NeverView
       );
@@ -220,7 +220,7 @@ Tensor FunctionalInverses::lift_fresh_inverse(const Tensor& base, const Tensor& 
     return mutated_view;
 }
 
-Tensor FunctionalInverses::slice_Tensor_inverse(const Tensor& base, const Tensor& mutated_view, InverseReturnMode inverse_return_mode, int64_t dim, c10::optional<c10::SymInt> start, c10::optional<c10::SymInt> end, c10::SymInt step) {
+Tensor FunctionalInverses::slice_Tensor_inverse(const Tensor& base, const Tensor& mutated_view, InverseReturnMode inverse_return_mode, int64_t dim, std::optional<c10::SymInt> start, std::optional<c10::SymInt> end, c10::SymInt step) {
     if (inverse_return_mode == InverseReturnMode::AlwaysView) {
       // NB: assumes mutated_view is a narrowed view of base.
       // We should NOT do this for functionalization
@@ -301,6 +301,29 @@ Tensor FunctionalInverses::transpose_int_inverse(const Tensor& base, const Tenso
 Tensor FunctionalInverses::_nested_view_from_buffer_inverse(const Tensor& base, const Tensor& mutated_view, InverseReturnMode inverse_return_mode, const Tensor& nested_sizes, const Tensor& nested_strides, const Tensor& storage_offsets) {
     TORCH_INTERNAL_ASSERT(false, "Attempted to call _nested_view_from_buffer() during the functionalization pass. For now, nested tensors aren't supported during functionalization");
     return Tensor();
+}
+
+Tensor FunctionalInverses::_nested_view_from_jagged_inverse(const Tensor& base, const Tensor& mutated_view, InverseReturnMode inverse_return_mode, const Tensor& offsets, const Tensor& dummy, const std::optional<Tensor>& lengths, int64_t ragged_idx) {
+  auto values = at::_nested_get_values(mutated_view);
+  if (inverse_return_mode != InverseReturnMode::NeverView) {
+    return values;
+  } else {
+    return values.clone(/*memory_format=*/at::MemoryFormat::Contiguous);
+  }
+}
+
+Tensor FunctionalInverses::_nested_get_values_inverse(const Tensor& base, const Tensor& mutated_view, InverseReturnMode inverse_return_mode) {
+  auto offsets = at::_nested_get_offsets(base);
+  auto lengths = at::_nested_get_lengths(base);
+  auto ragged_idx = at::_nested_get_ragged_idx(base);
+  auto dummy = at::_nested_get_jagged_dummy(base);
+  auto nt = at::_nested_view_from_jagged(mutated_view, offsets, dummy, lengths, ragged_idx);
+
+  if (inverse_return_mode != InverseReturnMode::NeverView) {
+    return nt;
+  } else {
+    return nt.clone(/*memory_format=*/at::MemoryFormat::Contiguous);
+  }
 }
 
 Tensor FunctionalInverses::unsqueeze_inverse(const Tensor& base, const Tensor& mutated_view, InverseReturnMode inverse_return_mode, int64_t dim) {

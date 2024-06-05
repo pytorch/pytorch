@@ -30,8 +30,7 @@ class BaseDataScheduler:
     def __init__(self, data_sparsifier, schedule_param: str, last_epoch=-1, verbose=False):
         # Attach sparsifier
         if not isinstance(data_sparsifier, BaseDataSparsifier):
-            raise TypeError('{} is not an instance of torch.ao.pruning.BaseDataSparsifier'.format(
-                type(data_sparsifier).__name__))
+            raise TypeError(f'{type(data_sparsifier).__name__} is not an instance of torch.ao.pruning.BaseDataSparsifier')
         self.data_sparsifier = data_sparsifier
         self.schedule_param = schedule_param
 

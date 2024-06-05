@@ -53,7 +53,7 @@ RUN if [ -n "${DB}" ]; then bash ./install_db.sh; fi
 RUN rm install_db.sh
 ENV INSTALLED_DB ${DB}
 
-# (optional) Install vision packages like OpenCV and ffmpeg
+# (optional) Install vision packages like OpenCV
 ARG VISION
 COPY ./common/install_vision.sh ./common/cache_vision_models.sh ./common/common_utils.sh ./
 RUN if [ -n "${VISION}" ]; then bash ./install_vision.sh; fi
@@ -77,6 +77,11 @@ ENV PATH /opt/rocm/llvm/bin:$PATH
 ENV MAGMA_HOME /opt/rocm/magma
 ENV LANG C.UTF-8
 ENV LC_ALL C.UTF-8
+
+# Install amdsmi
+COPY ./common/install_amdsmi.sh install_amdsmi.sh
+RUN bash ./install_amdsmi.sh
+RUN rm install_amdsmi.sh
 
 # (optional) Install non-default CMake version
 ARG CMAKE_VERSION
@@ -104,6 +109,13 @@ RUN rm install_triton.sh common_utils.sh triton-rocm.txt triton_version.txt
 COPY ./common/install_cache.sh install_cache.sh
 ENV PATH /opt/cache/bin:$PATH
 RUN bash ./install_cache.sh && rm install_cache.sh
+
+# Install AOTriton
+COPY ci_commit_pins/aotriton.txt aotriton.txt
+COPY ./common/common_utils.sh common_utils.sh
+COPY ./common/install_aotriton.sh install_aotriton.sh
+RUN bash ./install_aotriton.sh /opt/rocm/aotriton && rm -rf install_aotriton.sh aotriton aotriton.txt common_utils.sh
+ENV AOTRITON_INSTALLED_PREFIX /opt/rocm/aotriton
 
 # Include BUILD_ENVIRONMENT environment variable in image
 ARG BUILD_ENVIRONMENT

@@ -11,7 +11,7 @@
 
 #include <utility>
 
-namespace at { namespace functorch {
+namespace at::functorch {
 
 static bool is_allowed_dim_on_scalar_tensor(int64_t dim) {
   return dim == 0 || dim == -1;
@@ -75,7 +75,7 @@ static Tensor any_decomp(const Tensor& self) {
   return at::any(self.flatten(), 0, false);
 }
 
-enum ReductionCase { DimArray, Dim };
+enum class ReductionCase:uint8_t { DimArray, Dim };
 
 // Macros and templates have a difficult time dealing with enums,
 // so we didn't turn this into an enum.
@@ -123,15 +123,13 @@ void boxed_reduction_batch_rule(const c10::OperatorHandle& op, torch::jit::Stack
   auto arguments = torch::jit::pop(*stack, num_arguments);
 
   TORCH_INTERNAL_ASSERT(arguments[0].isTensor());
-  Tensor self;
-  optional<int64_t> self_bdim;
-  std::tie(self, self_bdim) = unwrapTensorAtLevel(arguments[0].toTensor(), cur_level);
+  auto [self, self_bdim] = unwrapTensorAtLevel(arguments[0].toTensor(), cur_level);
 
   self = moveBatchDimToFront(self, self_bdim);
 
   auto logical_dim = rankWithoutBatchDim(self, self_bdim);
   std::vector<int64_t> dims;
-  ReductionCase reduction_case;
+  ReductionCase reduction_case{};
   if (arguments[dim_arg_pos].isIntList()) {
     reduction_case = ReductionCase::DimArray;
     dims = arguments[dim_arg_pos].toIntList().vec();
@@ -171,7 +169,7 @@ void boxed_reduction_batch_rule(const c10::OperatorHandle& op, torch::jit::Stack
     new_dims.push_back(getPhysicalDim(self, self_bdim.has_value(), dim));
   }
   bool is_scalar_case = logical_dim == 0 && dims.size() == 1 && is_allowed_dim_on_scalar_tensor(dims[0]);
-  c10::optional<bool> maybe_keepdim;
+  std::optional<bool> maybe_keepdim;
   if (is_scalar_case) {
     // NOTE: [boxed_reduction_batch_rule scalar tensor handling]
     // Reduction operations in PyTorch have an edge case where they allow
@@ -323,9 +321,9 @@ static std::tuple<Tensor,optional<int64_t>> searchsorted_batch_rule(
     optional<int64_t> self_bdim,
     bool out_int32,
     bool right,
-    c10::optional<c10::string_view> side,
-    const c10::optional<Tensor>& sorter,
-    c10::optional<int64_t> sorter_bdim) {
+    std::optional<c10::string_view> side,
+    const std::optional<Tensor>& sorter,
+    std::optional<int64_t> sorter_bdim) {
   auto buckets_logical_rank = rankWithoutBatchDim(sorted_sequence, sorted_sequence_bdim);
   auto self_logical_rank = rankWithoutBatchDim(self, self_bdim);
 
@@ -509,4 +507,5 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   VMAP_SUPPORT(_is_all_true, _is_all_true_batch_rule);
   VMAP_SUPPORT(_is_any_true, _is_any_true_batch_rule);
 }
-}}
+
+} // namespace at::functorch

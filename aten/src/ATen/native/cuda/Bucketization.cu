@@ -18,7 +18,7 @@
 namespace at::native {
 
 // Implement a numpy like searchsorted and a TF like bucketize function running on cuda
-// See details in ATen/nativate/Bucketization.cpp
+// See details in ATen/native/Bucketization.cpp
 
 namespace {
 
@@ -134,8 +134,8 @@ Tensor& searchsorted_out_cuda(
     const Tensor& self,
     bool out_int32,
     bool right,
-    const c10::optional<c10::string_view> side_opt,
-    const c10::optional<Tensor>& sorter_opt,
+    const std::optional<c10::string_view> side_opt,
+    const std::optional<Tensor>& sorter_opt,
     Tensor& result) {
   // See [Note: hacky wrapper removal for optional tensor]
   c10::MaybeOwned<Tensor> sorter_maybe_owned = at::borrow_from_optional_tensor(sorter_opt);
@@ -149,7 +149,7 @@ Tensor& searchsorted_out_cuda(
     return result;
   }
 
-  // for non-contiguous result tensors, we write the output to a contiguous copy so we can later copy back, maintaing the original result tensor
+  // for non-contiguous result tensors, we write the output to a contiguous copy so we can later copy back, maintaining the original result tensor
   Tensor out = result;
   if (!result.is_contiguous()) {
     out = result.contiguous();
@@ -180,8 +180,8 @@ Tensor& searchsorted_out_cuda(
     const Scalar& self,
     bool out_int32,
     bool right,
-    const c10::optional<c10::string_view> side_opt,
-    const c10::optional<Tensor>& sorter_opt,
+    const std::optional<c10::string_view> side_opt,
+    const std::optional<Tensor>& sorter_opt,
     Tensor& result) {
   const Tensor& scalar_tensor = searchsorted_scalar_tensor(self, sorted_sequence.device());
   return searchsorted_out_cuda(sorted_sequence, scalar_tensor, out_int32, right, side_opt, sorter_opt, result);
@@ -192,8 +192,8 @@ Tensor searchsorted_cuda(
     const Tensor& self,
     bool out_int32,
     bool right,
-    const c10::optional<c10::string_view> side_opt,
-    const c10::optional<Tensor>& sorter) {
+    const std::optional<c10::string_view> side_opt,
+    const std::optional<Tensor>& sorter) {
   ScalarType scalar_type = out_int32 ? ScalarType::Int : ScalarType::Long;
   c10::TensorOptions options = TensorOptions().device(self.options().device()).dtype(scalar_type);
   Tensor result = at::empty({0}, options, MemoryFormat::Contiguous);
@@ -206,8 +206,8 @@ Tensor searchsorted_cuda(
     const Scalar& self,
     bool out_int32,
     bool right,
-    const c10::optional<c10::string_view> side_opt,
-    const c10::optional<Tensor>& sorter) {
+    const std::optional<c10::string_view> side_opt,
+    const std::optional<Tensor>& sorter) {
   const Tensor& scalar_tensor = searchsorted_scalar_tensor(self, sorted_sequence.device());
   return searchsorted_cuda(sorted_sequence, scalar_tensor, out_int32, right, side_opt, sorter);
 }

@@ -20,7 +20,6 @@
 #include <fmt/format.h>
 
 #include <sys/wait.h>
-#include <atomic>
 #include <csignal>
 #include <map>
 #include <set>

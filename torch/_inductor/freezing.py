@@ -33,7 +33,7 @@ def replace_params_with_constants(
     Replaces the parameters of a PyTorch GraphModule with constants wherever possible.
     Returns a list of indices representing the input parameters that were not converted to constants.
     """
-    params = [node for node in gm.graph.nodes if node.op == "placeholder"]
+    params = gm.graph.find_nodes(op="placeholder")
     fake_inp_nodes = params[: len(params)]
     preserved_arg_indices = []
     aliased_input_args = [
@@ -97,9 +97,7 @@ def freeze(
             aot_autograd_gm, params_flat, fw_metadata
         )
     else:
-        inputs = [
-            node for node in aot_autograd_gm.graph.nodes if node.op == "placeholder"
-        ]
+        inputs = aot_autograd_gm.graph.find_nodes(op="placeholder")
         preserved_arg_indices = list(range(len(inputs)))
 
     # TODO - further restrict cse ? right now needed to dedup aliasing ops

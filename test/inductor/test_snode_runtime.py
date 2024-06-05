@@ -8,9 +8,9 @@ import torch.distributed as dist
 
 from torch._inductor import metrics
 from torch._inductor.comm_analysis import estimate_nccl_collective_runtime
-from torch._inductor.compile_fx import compile_fx, count_bytes_inner
+from torch._inductor.compile_fx import compile_fx, compile_fx_inner
+from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import is_collective
-from torch.testing._internal.common_utils import TestCase as TorchTestCase
 from torch.testing._internal.inductor_utils import HAS_CUDA
 
 aten = torch.ops.aten
@@ -18,8 +18,12 @@ c10d = torch.ops.c10d_functional
 _c10d = torch.ops._c10d_functional
 
 
-def count_bytes_inductor(gm, example_inputs):
-    return compile_fx(gm, example_inputs, inner_compile=count_bytes_inner)
+def compile_but_use_eager(gm, example_inputs):
+    def inner_compile(gm, *args, **kwargs):
+        compile_fx_inner(gm, *args, **kwargs)
+        return gm
+
+    return compile_fx(gm, example_inputs, inner_compile=inner_compile)
 
 
 def calculate_runtime(f, *args) -> float:
@@ -27,7 +31,7 @@ def calculate_runtime(f, *args) -> float:
     Assumes all inputs are fp32
     """
     metrics.reset()
-    torch._dynamo.optimize(count_bytes_inductor)(f)(*args)
+    torch.compile(f, backend=compile_but_use_eager)(*args)
     print(metrics.node_runtimes)
 
     ret = 0.0
@@ -44,7 +48,7 @@ def T(*size, dtype=torch.float32, device=DEVICE, grad=False) -> torch.Tensor:
     return torch.randn(size, dtype=dtype, device=device, requires_grad=grad)
 
 
-class TestCase(TorchTestCase):
+class TestCase(InductorTestCase):
     device = DEVICE
 
     """
@@ -187,7 +191,7 @@ class TestCommAnalysis(TestCase):
         )
         try:
             metrics.reset()
-            torch._dynamo.optimize(count_bytes_inductor)(fn)(*inps)
+            torch.compile(fn)(*inps)
             found_collective = False
             for snode, runtime in metrics.node_runtimes:
                 if not is_collective(snode.node):
@@ -303,7 +307,7 @@ class TestCommAnalysis(TestCase):
 
 
 if __name__ == "__main__":
-    from torch._dynamo.test_case import run_tests
+    from torch._inductor.test_case import run_tests
 
     if HAS_CUDA:
         run_tests(needs="filelock")

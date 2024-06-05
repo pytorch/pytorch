@@ -913,7 +913,7 @@ void qhardsigmoid_kernel(const Tensor& qx, Tensor& qy) {
     fVec kThreeVec(3.0f);
     fVec kSixVec(6.0f);
 
-    // Naive implemenentation: uses dequantize/execute/quantize routine
+    // Naive implementation: uses dequantize/execute/quantize routine
     cpu_kernel_vec(
         iter,
         [&](scalar_t qx) -> scalar_t {
@@ -1070,7 +1070,7 @@ void qthreshold_kernel(
     Vec threshold_vec = Vec(threshold_float);
     Vec value_vec = Vec(value_float);
 
-    // Naive implemenentation: uses dequantize/execute/quantize routine
+    // Naive implementation: uses dequantize/execute/quantize routine
     cpu_kernel_vec(
         iter,
         [&](scalar_t value_qx) -> scalar_t {
@@ -1152,7 +1152,7 @@ void qtanh_kernel(const Tensor& qx, Tensor& qy) {
   auto scale_neg_zp_premul_vec = scale_vec * zero_point_vec.neg();
 
   AT_DISPATCH_QINT_TYPES(qx.scalar_type(), "qtanh", [&]() {
-    // Naive implemenentation: uses dequantize/execute/quantize routine
+    // Naive implementation: uses dequantize/execute/quantize routine
     // - Output scale is set to 2.0 / 2^(BIT_NUM)
     // - For signed types output zero point is set to 0
     // - For unsigned types output zero point is set to (qmax + qmin) / 2.0
@@ -2023,7 +2023,7 @@ void _qavg_pool_nhwc_kernel(
     int padH,
     int padD,
     bool count_include_pad,
-    c10::optional<int64_t> divisor_override) {
+    std::optional<int64_t> divisor_override) {
   T* idata = static_cast<T*>(qx.data_ptr());
   T* odata = static_cast<T*>(qy.data_ptr());
   int strideC = 1;
@@ -2135,7 +2135,7 @@ void qavg_pool2d_nhwc_kernel(
     int padW,
     int padH,
     bool count_include_pad,
-    c10::optional<int64_t> divisor_override) {
+    std::optional<int64_t> divisor_override) {
   AT_DISPATCH_QINT_TYPES(qx.scalar_type(), "avg_pool2d_nhwc", [&]() {
     _qavg_pool_nhwc_kernel<scalar_t>(
       qx,
@@ -2183,7 +2183,7 @@ void qavg_pool3d_nhwc_kernel(
     int padH,
     int padD,
     bool count_include_pad,
-    c10::optional<int64_t> divisor_override) {
+    std::optional<int64_t> divisor_override) {
   AT_DISPATCH_QINT_TYPES(qx.scalar_type(), "avg_pool3d_nhwc", [&]() {
     _qavg_pool_nhwc_kernel<scalar_t>(
       qx,
@@ -2288,8 +2288,8 @@ void qupsample_bilinear2d_nhwc_kernel(
     int64_t nbatch,
     int64_t channels,
     bool align_corners,
-    c10::optional<double> scales_h,
-    c10::optional<double> scales_w) {
+    std::optional<double> scales_h,
+    std::optional<double> scales_w) {
   AT_DISPATCH_QINT_TYPES(input.scalar_type(), "upsample_bilinear2d_nhwc", [&]() {
     auto* idata = static_cast<scalar_t*>(input.data_ptr());
     auto* odata = static_cast<scalar_t*>(output.data_ptr());
@@ -2734,7 +2734,7 @@ void fake_quantize_learnable_channel_grad_kernel_cpu(
     float grad_factor) {
   iter.for_each([&](char** data, const int64_t* strides, int64_t n) {
     /*  To see how the input and outputs are referenced and assigned,
-        please see the implemenetation of
+        please see the implementation of
         fake_quantize_learnable_tensor_grad_kernel_cpu.
     */
     for (const auto i : c10::irange(n)) {
@@ -2797,8 +2797,8 @@ void quantized_normalize_kernel(
         "Unexpected size of beta");
 
     scalar_t* X_data = X.data_ptr<scalar_t>();
-    const float* gamma_data = gamma.defined() ? gamma.data_ptr<float>() : nullptr;
-    const float* beta_data = beta.defined() ? beta.data_ptr<float>() : nullptr;
+    const float* gamma_data = gamma.defined() ? gamma.const_data_ptr<float>() : nullptr;
+    const float* beta_data = beta.defined() ? beta.const_data_ptr<float>() : nullptr;
     scalar_t* Y_data = Y->data_ptr<scalar_t>();
     const bool gamma_null = gamma_data == nullptr;
     const bool beta_null = beta_data == nullptr;
@@ -2940,7 +2940,7 @@ void qmean_inner_dim_kernel(
     const Tensor& self,
     OptionalIntArrayRef opt_dim,
     bool keepdim,
-    c10::optional<ScalarType> opt_dtype,
+    std::optional<ScalarType> opt_dtype,
     Tensor& result) {
   // 'opt_dtype' should be none or equal to that of input
   ScalarType dtype = self.scalar_type();
@@ -2989,7 +2989,7 @@ void qmean_inner_dim_kernel(
 void qstd_inner_dim_kernel(
     const Tensor& self,
     OptionalIntArrayRef dim,
-    const c10::optional<Scalar>& correction_opt,
+    const std::optional<Scalar>& correction_opt,
     bool keepdim,
     Tensor& result) {
   ScalarType dtype = self.scalar_type();
@@ -3085,8 +3085,8 @@ void quantized_groupnorm_nhwc_kernel(
         "Unexpected size of beta");
 
     scalar_t* X_data = X.data_ptr<scalar_t>();
-    const float* gamma_data = gamma.defined() ? gamma.data_ptr<float>() : nullptr;
-    const float* beta_data = beta.defined() ? beta.data_ptr<float>() : nullptr;
+    const float* gamma_data = gamma.defined() ? gamma.const_data_ptr<float>() : nullptr;
+    const float* beta_data = beta.defined() ? beta.const_data_ptr<float>() : nullptr;
     scalar_t* Y_data = Y->data_ptr<scalar_t>();
     const bool gamma_null = gamma_data == nullptr;
     const bool beta_null = beta_data == nullptr;
@@ -3265,7 +3265,7 @@ void quantized_groupnorm_nhwc_kernel(
       //
       // We could fuse step 3 and 4 into a single session but this way is better:
       //   a. D might be too small for vectorization;
-      //   b. Avoid duplicate caculation of scale/bias, each HxW plain share the same scale/bias
+      //   b. Avoid duplicate calculation of scale/bias, each HxW plain share the same scale/bias
       //
       for (const auto n : c10::irange(Bs)) {
         for (const auto g : c10::irange(G)) {
@@ -3336,7 +3336,7 @@ void quantize_tensor_per_tensor_affine_cpu(
   AT_DISPATCH_QINT_TYPES(
       qtensor.scalar_type(), "quantize_tensor_per_tensor_affine_cpu", [&]() {
         check_tensor_memory_format(rtensor, qtensor);
-        const float* rd = rtensor.data_ptr<float>();
+        const float* rd = rtensor.const_data_ptr<float>();
         auto qd = reinterpret_cast<underlying_t*>(qtensor.data_ptr<scalar_t>());
         // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
         fbgemm::TensorQuantizationParams qparams;
@@ -3668,7 +3668,7 @@ void quantize_tensor_per_tensor_affine_cpu(
     double scale,
     int64_t zero_point) {
   check_tensor_memory_format(rtensor, qtensor);
-  const float* rdata = rtensor.data_ptr<float>();
+  const float* rdata = rtensor.const_data_ptr<float>();
   int numel = rtensor.numel();
 #if defined(__ARM_NEON__) || defined(__aarch64__)
   AT_DISPATCH_QINT_TYPES(
@@ -3707,7 +3707,7 @@ void dequantize_tensor_per_tensor_affine_cpu(
 #if defined(__ARM_NEON__) || defined(__aarch64__)
   AT_DISPATCH_QINT_TYPES(
       qtensor.scalar_type(), "dequantize_tensor_per_tensor_affine_cpu", [&]() {
-        const scalar_t* qdata = qtensor.data_ptr<scalar_t>();
+        const scalar_t* qdata = qtensor.const_data_ptr<scalar_t>();
         auto dequantize_range = [&](int64_t begin, int64_t end) {
           dequantize_tensor_arm<scalar_t>(
             qdata + begin, rdata + begin, end - begin, scale, zero_point);
@@ -3722,7 +3722,7 @@ void dequantize_tensor_per_tensor_affine_cpu(
   // Fallback path
   AT_DISPATCH_QINT_TYPES(
       qtensor.scalar_type(), "dequantize_tensor_per_tensor_affine_cpu", [&]() {
-        const scalar_t* qdata = qtensor.data_ptr<scalar_t>();
+        const scalar_t* qdata = qtensor.const_data_ptr<scalar_t>();
         for (const auto i : c10::irange(numel)) {
           rdata[i] = dequantize_val<scalar_t>(scale, zero_point, qdata[i]);
         }
@@ -3743,7 +3743,7 @@ void quantize_tensor_per_channel_impl(
   // TODO: channels last kernel can be made faster.
   // For contiguous tensors, e.g. NCHW, arbitrary axis can be used.
   // For channels_last/3d however axis == 0 or 1.
-  // Since current implemntation on channels_last format does not
+  // Since current implementation on channels_last format does not
   // cover per channel quant with arbitrary axis value, it is better
   // to check and fail.
   int64_t batches = size_to_dim_(axis, rtensor.sizes());
@@ -3752,7 +3752,7 @@ void quantize_tensor_per_channel_impl(
   int64_t channels = rtensor.size(axis);
   auto scales_data = scales.data_ptr<double>();
   auto zero_points_data = zero_points.data_ptr<int64_t>();
-  const float* in = rtensor.data_ptr<float>();
+  const float* in = rtensor.const_data_ptr<float>();
   auto out = qtensor.data_ptr<T>();
   if (axis == 1 &&
       (rtensor.is_contiguous(MemoryFormat::ChannelsLast) ||
@@ -3804,7 +3804,7 @@ void quantize_tensor_per_channel_impl<c10::quint8>(
   int64_t channels = rtensor.size(axis);
   auto scales_data = scales.data_ptr<double>();
   auto zero_points_data = zero_points.data_ptr<int64_t>();
-  const float* in = rtensor.data_ptr<float>();
+  const float* in = rtensor.const_data_ptr<float>();
   auto out = (uint8_t*)qtensor.data_ptr<c10::quint8>();
 #if defined(__ARM_NEON__)
   // magic float and magic int to take care of rounding
@@ -4008,7 +4008,7 @@ void dequantize_per_channel_affine_kernel(
 
   // For contiguous tensors, e.g. NCHW, arbitrary axis can be used.
   // For channels_last/3d however axis == 0 or 1.
-  // Since current implemntation on channels_last format does not
+  // Since current implementation on channels_last format does not
   // cover per channel quant with arbitrary axis value, it is better
   // to check and fail.
   TORCH_CHECK(rtensor.is_contiguous() || (axis <=1),
@@ -4022,7 +4022,7 @@ void dequantize_per_channel_affine_kernel(
   auto scales_data = scales.data_ptr<T>();
   auto zero_points_data = zero_points.data_ptr<N>();
   check_tensor_memory_format(qtensor, rtensor);
-  const auto* qd = qtensor.data_ptr<Q>();
+  const auto* qd = qtensor.const_data_ptr<Q>();
   float* rd = rtensor.data_ptr<float>();
   const auto elem_per_byte = 8 / bit_width;
   if (axis == 1 && (rtensor.is_contiguous(MemoryFormat::ChannelsLast) ||
@@ -4084,7 +4084,7 @@ void quantize_tensor_per_channel_float_qparams_cpu(
     int64_t axis) {
   // For contiguous tensors, e.g. NCHW, arbitrary axis can be used.
   // For channels_last/3d however axis == 0 or 1.
-  // Since current implemntation on channels_last format does not
+  // Since current implementation on channels_last format does not
   // cover per channel quant with arbitrary axis value, it is better
   // to check and fail.
   TORCH_CHECK(rtensor.is_contiguous() || (axis <=1),
@@ -4099,7 +4099,7 @@ void quantize_tensor_per_channel_float_qparams_cpu(
         auto scales_data = scales.data_ptr<float>();
         auto zero_points_data = zero_points.data_ptr<float>();
         check_tensor_memory_format(rtensor, qtensor);
-        const float* rdata = rtensor.data_ptr<float>();
+        const float* rdata = rtensor.const_data_ptr<float>();
         auto qdata = reinterpret_cast<underlying_t*>(qtensor.data_ptr<scalar_t>());
         const auto elem_per_byte = CHAR_BIT / bit_width;
         int qvalue = 0;
@@ -4163,7 +4163,7 @@ void quantize_tensor_per_tensor_affine_sub_byte_cpu(
   AT_DISPATCH_QINT_AND_SUB_BYTE_TYPES(
     qtensor.scalar_type(), "quantize_tensor_per_tensor_affine_sub_byte_cpu", [&]() {
       check_tensor_memory_format(rtensor, qtensor);
-      const float* const rdata = rtensor.data_ptr<float>();
+      const float* const rdata = rtensor.const_data_ptr<float>();
       auto qdata = reinterpret_cast<underlying_t*>(qtensor.data_ptr<scalar_t>());
       auto numel = rtensor.numel();
       const auto elem_per_byte = CHAR_BIT / bit_width;
@@ -4196,7 +4196,7 @@ void dequantize_tensor_per_tensor_affine_sub_byte_cpu(
     qtensor.scalar_type(), "dequantize_tensor_per_tensor_affine_sub_byte_cpu", [&]() {
       check_tensor_memory_format(rtensor, qtensor);
       auto rdata = rtensor.data_ptr<float>();
-      const underlying_t* qdata = reinterpret_cast<underlying_t*>(qtensor.data_ptr<scalar_t>());
+      const underlying_t* qdata = reinterpret_cast<const underlying_t*>(qtensor.const_data_ptr<scalar_t>());
       auto numel = rtensor.numel();
       const auto elem_per_byte = CHAR_BIT / bit_width;
 

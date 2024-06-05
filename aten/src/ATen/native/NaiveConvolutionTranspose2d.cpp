@@ -298,13 +298,16 @@ void slow_conv_transpose2d_out_cpu_template(
   }
   columns.zero_();
 
+  // Materialize if COW, since we cannot do so during parallel_for
+  output.mutable_data_ptr();
+
   AT_DISPATCH_FLOATING_TYPES_AND3(at::ScalarType::Long, at::ScalarType::BFloat16,
       at::ScalarType::Half, input.scalar_type(), "slow_conv_transpose2d_out_cpu", [&] {
 
     at::parallel_for(0, batch_size, 0, [&](int64_t begin, int64_t end) {
       // For each elt in batch, do:
       for (const auto elt : c10::irange(begin, end)) {
-        // Matrix mulitply per output:
+        // Matrix multiply per output:
         Tensor input_n = input_.select(0, elt);
         Tensor output_n = output.select(0, elt);
         Tensor columns_n = columns.select(0, elt);
@@ -353,7 +356,7 @@ void slow_conv_transpose2d_out_cpu_template(
 
         // Unpack columns back into input:
         col2im<scalar_t>(
-            columns_n.data_ptr<scalar_t>(),
+            columns_n.const_data_ptr<scalar_t>(),
             n_output_plane,
             output_height,
             output_width,
@@ -501,14 +504,14 @@ static void slow_conv_transpose2d_backward_out_cpu_template(
 
         // For each elt in batch, do:
         for (const auto elt : c10::irange(batch_size)) {
-          // Matrix mulitply per sample:
+          // Matrix multiply per sample:
           grad_input_n = grad_input.select(0, elt);
           grad_output_n = grad_output.select(0, elt);
 
           if (need_columns) {
             // Extract columns:
             im2col<scalar_t>(
-                  grad_output_n.data_ptr<scalar_t>(),
+                  grad_output_n.const_data_ptr<scalar_t>(),
                   n_output_plane,
                   output_height,
                   output_width,
@@ -526,8 +529,8 @@ static void slow_conv_transpose2d_backward_out_cpu_template(
                   use_channels_last);
           }
 
-          auto gemm_in_ptr = need_columns ? grad_columns.data_ptr<scalar_t>()
-              : grad_output_n.data_ptr<scalar_t>();
+          auto gemm_in_ptr = need_columns ? grad_columns.const_data_ptr<scalar_t>()
+              : grad_output_n.const_data_ptr<scalar_t>();
 
           if (use_channels_last) {
             int64_t m = n_input_plane;
@@ -695,18 +698,18 @@ void slow_conv_transpose2d_acc_grad_parameters_cpu(
 
         // For each elt in batch, do:
         for (const auto elt : c10::irange(batch_size)) {
-          // Matrix mulitply per output:
+          // Matrix multiply per output:
           grad_output_n = grad_output.select(0, elt);
 
           // Do Weight:
           if (grad_weight.defined()) {
-            // Matrix mulitply per output:
+            // Matrix multiply per output:
             input_n = input.select(0, elt);
 
             if (need_columns) {
               // Extract columns:
               im2col<scalar_t>(
-                  grad_output_n.data_ptr<scalar_t>(),
+                  grad_output_n.const_data_ptr<scalar_t>(),
                   n_output_plane,
                   output_height,
                   output_width,
@@ -724,8 +727,8 @@ void slow_conv_transpose2d_acc_grad_parameters_cpu(
                   use_channels_last);
             }
 
-            auto gemm_in_ptr = need_columns ? columns.data_ptr<scalar_t>()
-                : grad_output_n.data_ptr<scalar_t>();
+            auto gemm_in_ptr = need_columns ? columns.const_data_ptr<scalar_t>()
+                : grad_output_n.const_data_ptr<scalar_t>();
 
             if (use_channels_last) {
               int64_t m = kernel_height * kernel_width * n_output_plane;

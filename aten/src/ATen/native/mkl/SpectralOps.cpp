@@ -200,7 +200,7 @@ Tensor& _fft_c2c_mkl_out(const Tensor& self, IntArrayRef dim, int64_t normalizat
 }
 
 }} // namespace at::native
-#endif /* AT_MKL_ENALED() || AT_POCKETFFT_ENABLED() */
+#endif /* AT_MKL_ENABLED() || AT_POCKETFFT_ENABLED() */
 
 #if AT_POCKETFFT_ENABLED()
 #include <pocketfft_hdronly.h>
@@ -229,7 +229,7 @@ inline std::complex<T> *tensor_cdata(Tensor& t) {
 
 template<typename T>
 inline const std::complex<T> *tensor_cdata(const Tensor& t) {
-  return reinterpret_cast<const std::complex<T>*>(t.data_ptr<c10::complex<T>>());
+  return reinterpret_cast<const std::complex<T>*>(t.const_data_ptr<c10::complex<T>>());
 }
 
 template<typename T>
@@ -291,11 +291,11 @@ Tensor _fft_r2c_mkl(const Tensor& self, IntArrayRef dim, int64_t normalization, 
   pocketfft::shape_t axes(dim.begin(), dim.end());
   if (self.scalar_type() == kFloat) {
     pocketfft::r2c(shape_from_tensor(self), stride_from_tensor(self), stride_from_tensor(out), axes, true,
-                   self.data_ptr<float>(),
+                   self.const_data_ptr<float>(),
                    tensor_cdata<float>(out), compute_fct<float>(self, dim, normalization));
   } else {
     pocketfft::r2c(shape_from_tensor(self), stride_from_tensor(self), stride_from_tensor(out), axes, true,
-                   self.data_ptr<double>(),
+                   self.const_data_ptr<double>(),
                    tensor_cdata<double>(out), compute_fct<double>(self, dim, normalization));
   }
 
@@ -484,9 +484,9 @@ static Tensor& _exec_fft(Tensor& out, const Tensor& self, IntArrayRef out_sizes,
 
   // run the FFT
   if (forward) {
-    MKL_DFTI_CHECK(DftiComputeForward(descriptor.get(), input.data_ptr(), out.data_ptr()));
+    MKL_DFTI_CHECK(DftiComputeForward(descriptor.get(), const_cast<void*>(input.const_data_ptr()), out.data_ptr()));
   } else {
-    MKL_DFTI_CHECK(DftiComputeBackward(descriptor.get(), input.data_ptr(), out.data_ptr()));
+    MKL_DFTI_CHECK(DftiComputeBackward(descriptor.get(), const_cast<void*>(input.const_data_ptr()), out.data_ptr()));
   }
 
   // Inplace reshaping to original batch shape and inverting the dimension permutation

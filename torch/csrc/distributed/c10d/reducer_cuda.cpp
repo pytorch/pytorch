@@ -48,7 +48,7 @@ class CudaTimer : public Timer {
     getEvent(event).record();
   }
 
-  c10::optional<int64_t> measureDifference(Event start, Event end) override {
+  std::optional<int64_t> measureDifference(Event start, Event end) override {
     c10::DeviceGuard g(device);
     at::cuda::CUDAEvent& start_event = getEvent(start);
     at::cuda::CUDAEvent& end_event = getEvent(end);

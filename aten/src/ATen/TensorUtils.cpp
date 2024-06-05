@@ -9,7 +9,7 @@
 
 namespace at {
 
-std::ostream& operator<<(std::ostream & out, TensorGeometryArg t) {
+std::ostream& operator<<(std::ostream & out, const TensorGeometryArg& t) {
   if (t.pos == 0) {
     // 0 is distinguished; it usually indicates 'self' or the return
     // tensor
@@ -68,7 +68,7 @@ void checkAllContiguous(CheckedFrom c, at::ArrayRef<TensorArg> ts) {
 }
 
 void checkSize(CheckedFrom c, const TensorGeometryArg& t, IntArrayRef sizes) {
-  checkDim(c, t, sizes.size());
+  checkDim(c, t, static_cast<int64_t>(sizes.size()));
   TORCH_CHECK(
     t->sizes().equals(sizes),
     "Expected tensor of size ", sizes, ", but got tensor of size ", t->sizes(),
@@ -76,7 +76,7 @@ void checkSize(CheckedFrom c, const TensorGeometryArg& t, IntArrayRef sizes) {
 }
 
 void checkSize_symint(CheckedFrom c, const TensorGeometryArg& t, c10::SymIntArrayRef sizes) {
-  checkDim(c, t, sizes.size());
+  checkDim(c, t, static_cast<int64_t>(sizes.size()));
   TORCH_CHECK(
     t->sym_sizes().equals(sizes),
     "Expected tensor of size ", sizes, ", but got tensor of size ", t->sizes(),
@@ -91,7 +91,7 @@ void checkSize(CheckedFrom c, const TensorGeometryArg& t, int64_t dim, int64_t s
     " (while checking arguments for ", c, ")");
 }
 
-void checkSize_symint(CheckedFrom c, const TensorGeometryArg& t, int64_t dim, c10::SymInt size) {
+void checkSize_symint(CheckedFrom c, const TensorGeometryArg& t, int64_t dim, const c10::SymInt& size) {
   TORCH_CHECK(
     t->sym_size(dim) == size,
     "Expected tensor to have size ", size, " at dimension ", dim,
@@ -327,7 +327,7 @@ std::vector<int64_t> defaultStrides(IntArrayRef sizes) {
 // see overloads of computeStride() below.
 //
 template <typename ResultVec, typename NewShapeVec, typename Numel>
-inline c10::optional<ResultVec> computeStride_impl(
+inline std::optional<ResultVec> computeStride_impl(
     const NewShapeVec& oldshape,
     const NewShapeVec& oldstride,
     const NewShapeVec& newshape,
@@ -395,7 +395,7 @@ inline c10::optional<ResultVec> computeStride_impl(
   return newstride;
 }
 
-c10::optional<std::vector<int64_t>> computeStride(
+std::optional<std::vector<int64_t>> computeStride(
     IntArrayRef oldshape,
     IntArrayRef oldstride,
     IntArrayRef newshape) {
@@ -403,7 +403,7 @@ c10::optional<std::vector<int64_t>> computeStride(
   return computeStride_impl<std::vector<int64_t>, IntArrayRef, int64_t>(oldshape, oldstride, newshape, toResult);
 }
 
-c10::optional<SymDimVector> computeStride(
+std::optional<SymDimVector> computeStride(
     c10::SymIntArrayRef oldshape,
     c10::SymIntArrayRef oldstride,
     c10::SymIntArrayRef newshape) {
@@ -411,7 +411,7 @@ c10::optional<SymDimVector> computeStride(
   return computeStride_impl<SymDimVector, c10::SymIntArrayRef, c10::SymInt>(oldshape, oldstride, newshape, toResult);
 }
 
-c10::optional<DimVector> computeStride(
+std::optional<DimVector> computeStride(
     IntArrayRef oldshape,
     IntArrayRef oldstride,
     const DimVector& newshape) {

@@ -649,6 +649,19 @@ TEST(StaticRuntime, EmbeddingBagWithExtraneousOutput) {
   testStaticRuntime(embedding_bag_max_last_offset_ir, args, args2);
 }
 
+TEST(StaticRuntime, EmbeddingBagWithMixedInt32Int64Input) {
+  const std::string embedding_bag_default = R"JIT(
+    def forward(self, a: Tensor, b: Tensor, c: Tensor):
+        x, y, z, _ = torch.embedding_bag(a, b, c)
+        return (x.clone(), y.clone(), z.clone(), _.clone())
+  )JIT";
+  auto weight = torch::randn({3, 11}, at::ScalarType::Float);
+  auto input = torch::tensor({0, 1, 0, 2}, at::ScalarType::Long);
+  auto offset = torch::tensor({0, 2, 4}, at::ScalarType::Int);
+  std::vector<IValue> args{weight, input, offset};
+  testStaticRuntime(embedding_bag_default, args);
+}
+
 TEST(StaticRuntime, LayerNorm) {
   const std::string layer_norm_with_weights = R"JIT(
     def forward(self, input: Tensor, normalized_shape: List[int], weight: Tensor, bias: Tensor):
@@ -658,6 +671,12 @@ TEST(StaticRuntime, LayerNorm) {
   const std::string layer_norm_without_weights = R"JIT(
     def forward(self, input: Tensor, normalized_shape: List[int]):
         return torch.layer_norm(input, normalized_shape, None, None, 1e-05, False).clone()
+  )JIT";
+
+  const std::string layer_norm_with_noncontiguous_input = R"JIT(
+    def forward(self, input: Tensor, normalized_shape: List[int], weight: Tensor, bias: Tensor):
+        input = torch.transpose(input, 1, 2)
+        return torch.layer_norm(input, normalized_shape, weight, bias, 1e-05, False).clone()
   )JIT";
 
   const auto a = torch::rand({1, 2, 2, 2});
@@ -671,6 +690,7 @@ TEST(StaticRuntime, LayerNorm) {
     std::vector<IValue> args1{b, normalized_shape, weight, bias};
     testStaticRuntime(layer_norm_with_weights, args);
     testStaticRuntime(layer_norm_with_weights, args, args1);
+    testStaticRuntime(layer_norm_with_noncontiguous_input, args);
 
     args = {a, normalized_shape};
     testStaticRuntime(layer_norm_without_weights, args);

@@ -1,5 +1,6 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/native/Copy.h>
+#include <ATen/native/Copy.h>
 
 #include <ATen/core/Tensor.h>
 #include <ATen/Dispatch.h>
@@ -25,8 +26,12 @@
 #include <ATen/ops/_copy_from.h>
 #include <ATen/ops/_propagate_xla_data.h>
 #include <ATen/ops/_propagate_xla_data_native.h>
+#include <ATen/ops/copy.h>
 #include <ATen/ops/copy_native.h>
+#include <ATen/ops/_foreach_copy.h>
+#include <ATen/ops/_foreach_copy_native.h>
 #include <ATen/ops/empty.h>
+#include <ATen/ops/empty_strided.h>
 #include <ATen/ops/expand_copy.h>
 #endif
 
@@ -81,7 +86,7 @@ void copy_same_type_transpose_(Tensor& self, const Tensor& src) {
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(self.sizes().equals(src.sizes()));
 
   _AT_DISPATCH_CP_TYPES(self.scalar_type(), "copy_", [&] {
-    scalar_t* sp = src.data_ptr<scalar_t>();
+    const scalar_t* sp = src.const_data_ptr<scalar_t>();
     scalar_t* rp = self.data_ptr<scalar_t>();
     scalar_t* bp = buf.data_ptr<scalar_t>();
 
@@ -89,7 +94,7 @@ void copy_same_type_transpose_(Tensor& self, const Tensor& src) {
     int64_t NC = src.size(1);
     for (int64_t R = 0; R < NR; R += BLOCK_SZ) {
       for (int64_t C = 0; C < NC; C += BLOCK_SZ) {
-        scalar_t* spo = sp + R + C * NR;
+        const scalar_t* spo = sp + R + C * NR;
         scalar_t* rpo = rp + C + R * NC;
 
         int nr = std::min(NR - R, BLOCK_SZ);
@@ -156,7 +161,7 @@ static Tensor & copy_impl(Tensor & self, const Tensor & src, bool non_blocking) 
         auto* output_ptr =
             reinterpret_cast<fbgemm::float16*>(self.data_ptr<at::Half>());
         if (self.numel() < at::internal::GRAIN_SIZE) {
-          fbgemm::FloatToFloat16_simd(src.data_ptr<float>(), output_ptr, self.numel());
+          fbgemm::FloatToFloat16_simd(src.const_data_ptr<float>(), output_ptr, self.numel());
         } else {
           at::parallel_for(
               0,
@@ -164,14 +169,14 @@ static Tensor & copy_impl(Tensor & self, const Tensor & src, bool non_blocking) 
               at::internal::GRAIN_SIZE,
               [&](int64_t begin, int64_t end) {
                 fbgemm::FloatToFloat16_simd(
-                    src.data_ptr<float>() + begin,
+                    src.const_data_ptr<float>() + begin,
                     output_ptr + begin,
                   end - begin);
               });
         }
       } else {
-        auto in_data = reinterpret_cast<fbgemm::float16*>(
-            src.data_ptr<at::Half>());
+        auto in_data = reinterpret_cast<const fbgemm::float16*>(
+            src.const_data_ptr<at::Half>());
         auto* output_ptr = self.data_ptr<float>();
         if (self.numel() < at::internal::GRAIN_SIZE) {
           fbgemm::Float16ToFloat_simd(in_data, output_ptr, self.numel());
@@ -265,7 +270,7 @@ static Tensor & copy_impl(Tensor & self, const Tensor & src, bool non_blocking) 
 
   auto iter = TensorIteratorConfig()
     .add_output(self)
-    .add_input(src)
+    .add_const_input(src)
     .resize_outputs(false)
     .check_all_same_dtype(false)
     .check_all_same_device(false)
@@ -296,20 +301,50 @@ static Tensor & copy_impl(Tensor & self, const Tensor & src, bool non_blocking) 
   }
 #endif
 
-  if(!self.is_complex() && src.is_complex()) {
+  if(!(self.is_complex() || self.dtype() == at::kBool) && src.is_complex()) {
     TORCH_WARN_ONCE("Casting complex values to real discards the imaginary part");
   }
   copy_stub(device_type, iter, non_blocking);
   return self;
 }
 
-Tensor copy(const Tensor& self, const Tensor& src, bool non_blocking) {
-  // copy() is the "functional" form of copy_(). It exists so we can properly functionalize copy_(), but:
-  // (1) It isn't exposed to the frontend (no python bindings)
-  // (2) It isn't exposed to the backend (it's a composite, that decomposes into to() and expand_as() calls.
+Tensor copy_meta(const Tensor& self, const Tensor& src, bool non_blocking) {
+  // Must directly use self(), so we can dispatch properly is self is a subclass
   auto r = clone_preserve_strides(self);
   r.copy_(src, non_blocking);
   return r;
+}
+
+Tensor copy(const Tensor& self, const Tensor& src, bool non_blocking) {
+  at::Tensor r;
+  // copy() is the "functional" form of copy_(). It exists so we can properly functionalize copy_(), but:
+  // (1) It isn't exposed to the frontend (no python bindings)
+  // (2) It isn't exposed to the backend (it's a composite, that decomposes into to() and expand_as() calls.
+  auto self_storage = self.unsafeGetTensorImpl()->unsafe_storage().unsafeGetStorageImpl();
+  // If self has no real storage, we can't actually clone it.
+  // Instead, generate an empty tensor with the right sizes/strides, since we should be able to assume
+  // that copy_() will fully overwrite all data with that of src
+  if (self_storage->nbytes() == 0) {
+    r = at::empty_strided(self.sizes(), self.strides(), self.options());
+  } else {
+    r = clone_preserve_strides(self);
+  }
+  r.copy_(src, non_blocking);
+  return r;
+}
+
+::std::vector<at::Tensor> _foreach_copy(at::TensorList self, at::TensorList src, bool non_blocking) {
+  std::vector<at::Tensor> outs;
+  outs.reserve(self.size());
+  // This is a very slow implementation, but needs to directly call the copy() kernel above to handle
+  // when self has zero storage.
+  // This kernel should never really be run, except with debugging using compile(backend="aot_eager")
+  for (const auto i : c10::irange(src.size())) {
+    auto curr_src = src[i];
+    auto curr_self = self[i];
+    outs.push_back(at::copy(curr_self, curr_src, non_blocking));
+  }
+  return outs;
 }
 
 Tensor& copy_(Tensor& self, const Tensor& src, bool non_blocking) {
@@ -335,7 +370,7 @@ void copy_ignoring_overlaps(const TensorBase &dst, const TensorBase &src) {
   // FIXME: really, overlapping writes should be illegal/an error in Torch
   auto iter = TensorIteratorConfig()
       .add_output(dst)
-      .add_input(src)
+      .add_const_input(src)
       .resize_outputs(false)
       .set_check_mem_overlap(false)
       .check_all_same_dtype(true)

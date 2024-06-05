@@ -6,7 +6,6 @@
  */
 
 #include <ATen/core/function_schema.h>
-#include <c10/util/C++17.h>
 #include <c10/util/Metaprogramming.h>
 
 namespace c10 {
@@ -156,6 +155,6 @@ FunctionSchema inferFunctionSchemaSingleReturn(std::string&& name, std::string&&
   return detail::infer_schema::createFunctionSchemaFromTraitsSingleReturn<guts::infer_function_traits_t<FuncType>>(std::move(name), std::move(overload_name));
 }
 
-TORCH_API c10::optional<std::string> findSchemaDifferences(const FunctionSchema& inferred, const FunctionSchema& specified);
+TORCH_API std::optional<std::string> findSchemaDifferences(const FunctionSchema& inferred, const FunctionSchema& specified);
 
 }

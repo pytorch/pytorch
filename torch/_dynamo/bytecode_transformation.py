@@ -97,8 +97,12 @@ def create_instruction(
     `argval` or `target`.
 
     Do not use for LOAD_GLOBAL - use create_load_global instead.
+    Do not use for LOAD_ATTR - use create_load_attr instead.
+    Do not use for LOAD_SUPER_ATTR - if you need to create this instruction,
+        implement a create_load_super_attr function.
     """
-    assert name != "LOAD_GLOBAL"
+    if name in ("LOAD_GLOBAL", "LOAD_ATTR", "LOAD_SUPER_ATTR"):
+        raise RuntimeError(f"cannot create_instruction with {name}")
     cnt = (arg is not None) + (argval is not _NotProvided) + (target is not None)
     if cnt > 1:
         raise RuntimeError(
@@ -191,7 +195,7 @@ def create_call_function(nargs, push_null) -> List[Instruction]:
     (assume `math` is available in the global scope),
 
     create_load_global("math", True)  # pushes a null
-    create_instruction("LOAD_ATTR", argval="sqrt")
+    create_load_attr("sqrt")
     create_instruction("LOAD_CONST", argval=25)
     create_call_function(1, False)
     """
@@ -200,19 +204,91 @@ def create_call_function(nargs, push_null) -> List[Instruction]:
         if push_null:
             output.append(create_instruction("PUSH_NULL"))
             output.extend(create_rot_n(nargs + 2))
-        output.append(create_instruction("PRECALL", arg=nargs))
+        if sys.version_info < (3, 12):
+            output.append(create_instruction("PRECALL", arg=nargs))
         output.append(create_instruction("CALL", arg=nargs))
         return output
     return [create_instruction("CALL_FUNCTION", arg=nargs)]
 
 
 def create_call_method(nargs) -> List[Instruction]:
+    if sys.version_info >= (3, 12):
+        return [create_instruction("CALL", arg=nargs)]
     if sys.version_info >= (3, 11):
         return [
             create_instruction("PRECALL", arg=nargs),
             create_instruction("CALL", arg=nargs),
         ]
     return [create_instruction("CALL_METHOD", arg=nargs)]
+
+
+def create_load_attr(name) -> Instruction:
+    # in 3.12, create a LOAD_ATTR instruction with the low bit unset
+    return Instruction(
+        opcode=dis.opmap["LOAD_ATTR"],
+        opname="LOAD_ATTR",
+        arg=False,  # lowbit for 3.12
+        argval=name,
+    )
+
+
+def create_load_method(name) -> Instruction:
+    if sys.version_info >= (3, 12):
+        # in 3.12, create a LOAD_ATTR instruction with the low bit set
+        return Instruction(
+            opcode=dis.opmap["LOAD_ATTR"],
+            opname="LOAD_ATTR",
+            arg=True,  # lowbit for 3.12
+            argval=name,
+        )
+    return create_instruction("LOAD_METHOD", argval=name)
+
+
+def create_setup_with(target) -> Instruction:
+    opname = "BEFORE_WITH" if sys.version_info >= (3, 11) else "SETUP_WITH"
+    return create_instruction(opname, target=target)
+
+
+def create_swap(n) -> List[Instruction]:
+    if sys.version_info >= (3, 11):
+        return [create_instruction("SWAP", arg=n)]
+    # in Python < 3.11, SWAP is a macro that expands to multiple instructions
+    if n == 1:
+        return []
+    """
+    e.g. swap "a" and "b" in this stack:
+    0 a 1 2 3 b
+    0 a [1 2 3 b]
+    0 a [1 2 3 b] [1 2 3 b]
+    0 a [1 2 3 b] [1 2 3 b] -1
+    0 a [1 2 3 b] b
+    0 b a [1 2 3 b]
+    0 b a [1 2 3 b] [1 2 3 b]
+    0 b [1 2 3 b] a [1 2 3 b]
+    0 b [1 2 3 b] a [1 2 3 b] -1
+    0 b [1 2 3 a]
+    0 b [1 2 3 a] [1 2 3 a]
+    0 b [1 2 3 a] [1 2 3 a] reverse
+    0 b [a 3 2 1] None
+    0 b [a 3 2 1]
+    0 b 1 2 3 a
+    """
+    return [
+        create_instruction("BUILD_LIST", arg=n - 1),
+        create_instruction("DUP_TOP"),
+        create_instruction("LOAD_CONST", argval=-1),
+        create_instruction("BINARY_SUBSCR"),
+        create_instruction("ROT_THREE"),
+        create_instruction("DUP_TOP"),
+        create_instruction("ROT_THREE"),
+        create_instruction("LOAD_CONST", argval=-1),
+        create_instruction("STORE_SUBSCR"),
+        create_instruction("DUP_TOP"),
+        create_load_method("reverse"),
+        *create_call_method(0),
+        create_instruction("POP_TOP"),
+        create_instruction("UNPACK_SEQUENCE", arg=n - 1),
+    ]
 
 
 def lnotab_writer(
@@ -367,7 +443,7 @@ def encode_exception_table_varint(n: int) -> List[int]:
     while n > 0:
         b.append(n & 63)
         n >>= 6
-    b = list(reversed(b))
+    b.reverse()
     for i in range(len(b) - 1):
         b[i] |= 64
     return b
@@ -759,6 +835,7 @@ def strip_extended_args(instructions: List[Instruction]) -> None:
 
 def remove_load_call_method(instructions: List[Instruction]) -> List[Instruction]:
     """LOAD_METHOD puts a NULL on the stack which causes issues, so remove it"""
+    assert sys.version_info < (3, 11)
     rewrites = {"LOAD_METHOD": "LOAD_ATTR", "CALL_METHOD": "CALL_FUNCTION"}
     for inst in instructions:
         if inst.opname in rewrites:
@@ -774,12 +851,23 @@ def remove_jump_if_none(instructions: List[Instruction]) -> None:
         if "_NONE" in inst.opname:
             is_op = create_instruction("IS_OP", arg=int("NOT" in inst.opname))
             is_op.argval = is_op.arg
-            jump_op = create_instruction(
-                "POP_JUMP_FORWARD_IF_TRUE"
-                if "FORWARD" in inst.opname
-                else "POP_JUMP_BACKWARD_IF_TRUE",
-                target=inst.target,
-            )
+            is_op.positions = inst.positions
+            if sys.version_info < (3, 12):
+                jump_op = create_instruction(
+                    "POP_JUMP_FORWARD_IF_TRUE"
+                    if "FORWARD" in inst.opname
+                    else "POP_JUMP_BACKWARD_IF_TRUE",
+                    target=inst.target,
+                )
+            else:
+                jump_op = create_instruction("POP_JUMP_IF_TRUE", target=inst.target)
+            jump_op.positions = inst.positions
+            # update inst.exn_tab_entry.end if necessary
+            if inst.exn_tab_entry and inst.exn_tab_entry.end is inst:
+                inst.exn_tab_entry.end = jump_op
+            # preserve exception table entries
+            is_op.exn_tab_entry = copy.copy(inst.exn_tab_entry)
+            jump_op.exn_tab_entry = copy.copy(inst.exn_tab_entry)
             # modify inst in-place to preserve jump target
             inst.opcode = dis.opmap["LOAD_CONST"]
             inst.opname = "LOAD_CONST"
@@ -789,15 +877,46 @@ def remove_jump_if_none(instructions: List[Instruction]) -> None:
     instructions[:] = new_insts
 
 
+def remove_binary_store_slice(instructions: List[Instruction]) -> None:
+    new_insts = []
+    for inst in instructions:
+        new_insts.append(inst)
+        if inst.opname in ("BINARY_SLICE", "STORE_SLICE"):
+            # new instruction
+            subscr_inst = create_instruction(inst.opname.replace("SLICE", "SUBSCR"))
+            if inst.exn_tab_entry and inst.exn_tab_entry.end is inst:
+                inst.exn_tab_entry.end = subscr_inst
+            subscr_inst.exn_tab_entry = copy.copy(inst.exn_tab_entry)
+            subscr_inst.positions = inst.positions
+            # modify inst in-place to preserve jump target
+            inst.opcode = dis.opmap["BUILD_SLICE"]
+            inst.opname = "BUILD_SLICE"
+            inst.arg = 2
+            inst.argval = 2
+            new_insts.append(subscr_inst)
+    instructions[:] = new_insts
+
+
 def explicit_super(code: types.CodeType, instructions: List[Instruction]) -> None:
     """convert super() with no args into explicit arg form"""
     cell_and_free = (code.co_cellvars or tuple()) + (code.co_freevars or tuple())
+    if not len(code.co_varnames):
+        # A function with no argument cannot contain a valid "super()" call
+        return
     output = []
     for idx, inst in enumerate(instructions):
         output.append(inst)
         if inst.opname == "LOAD_GLOBAL" and inst.argval == "super":
             nexti = instructions[idx + 1]
-            if nexti.opname in ("CALL_FUNCTION", "PRECALL") and nexti.arg == 0:
+            if nexti.arg == 0 and (
+                (sys.version_info >= (3, 12) and nexti.opname == "CALL")
+                or (
+                    sys.version_info >= (3, 11)
+                    and sys.version_info < (3, 12)
+                    and nexti.opname == "PRECALL"
+                )
+                or (sys.version_info < (3, 11) and nexti.opname == "CALL_FUNCTION")
+            ):
                 assert "__class__" in cell_and_free
                 output.append(create_instruction("LOAD_DEREF", argval="__class__"))
                 first_var = code.co_varnames[0]
@@ -849,26 +968,11 @@ def fix_extended_args(instructions: List[Instruction]) -> int:
     return added
 
 
-# from https://github.com/python/cpython/blob/v3.11.1/Include/internal/pycore_opcode.h#L41
-# TODO use the actual object instead, can interface from eval_frame.c
-_PYOPCODE_CACHES = {
-    "BINARY_SUBSCR": 4,
-    "STORE_SUBSCR": 1,
-    "UNPACK_SEQUENCE": 1,
-    "STORE_ATTR": 4,
-    "LOAD_ATTR": 4,
-    "COMPARE_OP": 2,
-    "LOAD_GLOBAL": 5,
-    "BINARY_OP": 1,
-    "LOAD_METHOD": 10,
-    "PRECALL": 1,
-    "CALL": 4,
-}
-
-
 def instruction_size(inst) -> int:
+    import torch
+
     if sys.version_info >= (3, 11):
-        return 2 * (_PYOPCODE_CACHES.get(dis.opname[inst.opcode], 0) + 1)
+        return 2 * (torch._C._dynamo.eval_frame.py_opcode_caches[inst.opcode] + 1)
     return 2
 
 
@@ -925,6 +1029,17 @@ def get_const_index(code_options, val) -> int:
 def fix_vars(instructions: List[Instruction], code_options, varname_from_oparg=None):
     # compute instruction arg from argval if arg is not provided
     names = {name: idx for idx, name in enumerate(code_options["co_names"])}
+
+    def get_name_index(name) -> int:
+        try:
+            idx = names[name]
+        except KeyError:
+            # Add a missing item to co_names
+            idx = names[name] = len(names)
+            code_options["co_names"] = (*code_options["co_names"], name)
+            assert len(code_options["co_names"]) == len(names)
+        return idx
+
     if sys.version_info < (3, 11):
         assert varname_from_oparg is None
         varnames = {name: idx for idx, name in enumerate(code_options["co_varnames"])}
@@ -959,17 +1074,36 @@ def fix_vars(instructions: List[Instruction], code_options, varname_from_oparg=N
             assert instructions[i].arg is not None
             assert instructions[i].argval is not _NotProvided
             if sys.version_info >= (3, 11):
-                instructions[i].arg = (names[instructions[i].argval] << 1) + (
+                instructions[i].arg = (get_name_index(instructions[i].argval) << 1) + (
                     cast(int, instructions[i].arg) % 2
                 )
             else:
-                instructions[i].arg = names[instructions[i].argval]
+                instructions[i].arg = get_name_index(instructions[i].argval)
+        elif instructions[i].opname == "LOAD_ATTR":
+            # 3.12 LOAD_ATTR requires both arg and argval, like LOAD_GLOBAL
+            assert instructions[i].arg is not None
+            assert instructions[i].argval is not _NotProvided
+            if sys.version_info >= (3, 12):
+                instructions[i].arg = (get_name_index(instructions[i].argval) << 1) + (
+                    cast(int, instructions[i].arg) % 2
+                )
+            else:
+                instructions[i].arg = get_name_index(instructions[i].argval)
+        elif instructions[i].opname == "LOAD_SUPER_ATTR":
+            assert instructions[i].arg is not None
+            assert instructions[i].argval is not _NotProvided
+            # Copy low bit, force second bit on for explicit super (the "+ 2")
+            instructions[i].arg = (
+                (get_name_index(instructions[i].argval) << 2)
+                + (cast(int, instructions[i].arg) % 2)
+                + 2
+            )
         elif instructions[i].opcode in HAS_LOCAL:
             if should_compute_arg():
                 instructions[i].arg = varnames[instructions[i].argval]
         elif instructions[i].opcode in HAS_NAME:
             if should_compute_arg():
-                instructions[i].arg = names[instructions[i].argval]
+                instructions[i].arg = get_name_index(instructions[i].argval)
         elif instructions[i].opcode in HAS_FREE:
             if should_compute_arg():
                 instructions[i].arg = freenames[instructions[i].argval]
@@ -981,6 +1115,23 @@ def fix_vars(instructions: List[Instruction], code_options, varname_from_oparg=N
                 idx = get_const_index(code_options, instructions[i].argval)
                 assert idx >= 0
                 instructions[i].arg = idx
+
+
+def clear_instruction_args(instructions):
+    # Clear the instruction arg for instructions that have argvals.
+    # Useful for using dis'd bytecode within generated bytecode.
+    for inst in instructions:
+        if (
+            inst.argval is not _NotProvided
+            and (
+                inst.opcode in HAS_LOCAL
+                or inst.opcode in HAS_NAME
+                or inst.opcode in HAS_FREE
+                or inst.opcode in HAS_CONST
+            )
+            and inst.opname not in ("LOAD_GLOBAL", "LOAD_ATTR", "LOAD_SUPER_ATTR")
+        ):
+            inst.arg = None
 
 
 def get_code_keys() -> List[str]:
@@ -1071,6 +1222,7 @@ def clean_and_assemble_instructions(
         code_options["co_exceptiontable"] = assemble_exception_table(
             compute_exception_table(instructions)
         )
+
     return instructions, types.CodeType(*[code_options[k] for k in keys])
 
 
@@ -1091,11 +1243,14 @@ def cleaned_instructions(code, safe=False) -> List[Instruction]:
     if not safe:
         if sys.version_info < (3, 11):
             remove_load_call_method(instructions)
-        else:
-            remove_jump_if_none(instructions)
-            update_offsets(instructions)
-            devirtualize_jumps(instructions)
-        explicit_super(code, instructions)
+        if sys.version_info < (3, 12):
+            explicit_super(code, instructions)
+    if sys.version_info >= (3, 11):
+        remove_jump_if_none(instructions)
+        if sys.version_info >= (3, 12):
+            remove_binary_store_slice(instructions)
+        update_offsets(instructions)
+        devirtualize_jumps(instructions)
     return instructions
 
 
@@ -1109,3 +1264,100 @@ def unique_id(name) -> str:
 def is_generator(code: types.CodeType) -> bool:
     co_generator = 0x20
     return (code.co_flags & co_generator) > 0
+
+
+def bytecode_from_template(fn, varname_map=None, noreturn=True, noprefix=True):
+    """Generates bytecode from a template function `fn` for use in
+    dynamo bytecode generation.
+
+    For example, we can generate Python-version-independent bytecode
+    for looping through a dictionary and copying the values to a new dictionary.
+
+    def template(d1, d2):
+        for k, v in d1.items():
+            d2[k] = v
+
+
+    or a try block:
+
+    def template():
+        try:
+            dummy1
+        except:
+            dummy2
+            raise
+        dummy3
+
+    Args:
+        fn: a function template to generate bytecode from
+        varname_map: a mapping of `fn`'s varnames to new names. This
+            map will be applied to the generated bytecode's varnames.
+            For example, local variables in `fn` can be replaced with
+            new names that are generated by `OutputGraph.new_var`.
+        noreturn: remove all RETURN_* bytecodes and replace them with a jump
+            to the end of the bytecode.
+        noprefix: remove prefix bytecodes (all bytecode before the first RESUME, inclusive).
+    """
+    insts = cleaned_instructions(fn.__code__)
+    clear_instruction_args(insts)
+
+    if noprefix:
+        for i, inst in enumerate(insts):
+            if inst.opname == "RESUME":
+                insts = insts[i + 1 :]
+                break
+
+    for inst in insts:
+        # If we don't reset starts_line, then the generated
+        # bytecode's line number will be based on fn's.
+        inst.starts_line = None
+        if varname_map and inst.argval in varname_map:
+            inst.argval = varname_map[inst.argval]
+
+    if noreturn:
+        if sys.version_info >= (3, 12):
+            # replace RETURN_CONST with LOAD_CONST RETURN_VALUE
+            new_insts = []
+            for inst in insts:
+                if inst.opname == "RETURN_CONST":
+                    inst.opcode = dis.opmap["LOAD_CONST"]
+                    inst.opname = "LOAD_CONST"
+                    new_insts.append(inst)
+                    # no need to propagate target/exn table
+                    new_insts.append(create_instruction("RETURN_VALUE"))
+                else:
+                    new_insts.append(inst)
+            insts = new_insts
+
+        returns = []
+        for inst in insts:
+            if inst.opname == "RETURN_VALUE":
+                returns.append(inst)
+
+        if len(returns) == 1 and returns[0] is insts[-1]:
+            # only 1 return at the end - just pop it
+            insts.pop(-1)
+        elif len(returns) > 0:
+            # create jump target - if the last inst is a return,
+            # we can replace it with a NOP and make that the jump target.
+            if insts[-1] is returns[-1]:
+                insts[-1].opname = "NOP"
+                insts[-1].opcode = dis.opmap["NOP"]
+                insts[-1].arg = None
+                insts[-1].argval = _NotProvided
+                returns.pop(-1)
+            else:
+                insts.append(create_instruction("NOP"))
+
+            # replace returns with jumps
+            for inst in returns:
+                # don't replace inst with new instruction
+                # due to targetting/exn table/etc.
+                jump_inst = create_jump_absolute(insts[-1])
+                inst.opname = jump_inst.opname
+                inst.opcode = jump_inst.opcode
+                inst.arg = jump_inst.arg
+                inst.argval = jump_inst.argval
+                inst.target = jump_inst.target
+
+    return insts

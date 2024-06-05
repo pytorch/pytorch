@@ -17,6 +17,7 @@
     - [Release Candidate Storage](#release-candidate-storage)
     - [Release Candidate health validation](#release-candidate-health-validation)
     - [Cherry Picking Fixes](#cherry-picking-fixes)
+      - [How to do Cherry Picking](#how-to-do-cherry-picking)
     - [Cherry Picking Reverts](#cherry-picking-reverts)
   - [Preparing and Creating Final Release candidate](#preparing-and-creating-final-release-candidate)
   - [Promoting RCs to Stable](#promoting-rcs-to-stable)
@@ -36,6 +37,7 @@
     - [TL;DR](#tldr)
   - [Accelerator Software](#accelerator-software)
     - [Special support cases](#special-support-cases)
+  - [Operating Systems](#operating-systems)
 - [Submitting Tutorials](#submitting-tutorials)
 - [Special Topics](#special-topics)
   - [Updating submodules for a release](#updating-submodules-for-a-release)
@@ -47,13 +49,14 @@
 
 Following is the Release Compatibility Matrix for PyTorch releases:
 
-| PyTorch version | Python | Stable CUDA | Experimental CUDA |
-| --- | --- | --- | --- |
-| 2.2 | >=3.8, <=3.11 | CUDA 11.8, CUDNN 8.7.0.84 | CUDA 12.1, CUDNN 8.9.2.26 |
-| 2.1 | >=3.8, <=3.11 | CUDA 11.8, CUDNN 8.7.0.84 | CUDA 12.1, CUDNN 8.9.2.26 |
-| 2.0 | >=3.8, <=3.11 | CUDA 11.7, CUDNN 8.5.0.96 | CUDA 11.8, CUDNN 8.7.0.84 |
-| 1.13 | >=3.7, <=3.10 | CUDA 11.6, CUDNN 8.3.2.44 | CUDA 11.7, CUDNN 8.5.0.96 |
-| 1.12 | >=3.7, <=3.10 | CUDA 11.3, CUDNN 8.3.2.44 | CUDA 11.6, CUDNN 8.3.2.44 |
+| PyTorch version | Python | Stable CUDA | Experimental CUDA | Stable ROCm |
+| --- | --- | --- | --- | --- |
+| 2.3 | >=3.8, <=3.11, (3.12 experimental) | CUDA 11.8, CUDNN 8.7.0.84 | CUDA 12.1, CUDNN 8.9.2.26 | ROCm 6.0 |
+| 2.2 | >=3.8, <=3.11, (3.12 experimental) | CUDA 11.8, CUDNN 8.7.0.84 | CUDA 12.1, CUDNN 8.9.2.26 | ROCm 5.7 |
+| 2.1 | >=3.8, <=3.11 | CUDA 11.8, CUDNN 8.7.0.84 | CUDA 12.1, CUDNN 8.9.2.26 | ROCm 5.6 |
+| 2.0 | >=3.8, <=3.11 | CUDA 11.7, CUDNN 8.5.0.96 | CUDA 11.8, CUDNN 8.7.0.84 | ROCm 5.4 |
+| 1.13 | >=3.7, <=3.10 | CUDA 11.6, CUDNN 8.3.2.44 | CUDA 11.7, CUDNN 8.5.0.96 | ROCm 5.2 |
+| 1.12 | >=3.7, <=3.10 | CUDA 11.3, CUDNN 8.3.2.44 | CUDA 11.6, CUDNN 8.3.2.44 | ROCm 5.0 |
 
 ## Release Cadence
 
@@ -63,8 +66,8 @@ Following is the release cadence for year 2023/2024. All dates below are tentati
 | --- | --- | --- | --- | --- |
 | 2.1 | Aug 2023 | Oct 2023 | Nov 2023 | Dec 2023 |
 | 2.2 | Dec 2023 | Jan 2024 | Feb 2024 | Mar 2024 |
-| 2.3 | Mar 2024 | Apr 2024 | May 2024 | Jun 2024 |
-| 2.4 | May 2024 | Jul 2024 | Aug 2024 | Sep 2024 |
+| 2.3 | Mar 2024 | Apr 2024 | Jun 2024 | Not planned |
+| 2.4 | Jun 2024 | Jul 2024 | Aug 2024 | Sep 2024 |
 | 2.5 | Aug 2024 | Oct 2024 | Nov 2024 | Dec 2024 |
 
 ## General Overview
@@ -217,7 +220,7 @@ Validate the release jobs for pytorch and domain libraries should be green. Vali
   * [TorchVision](https://hud.pytorch.org/hud/pytorch/vision/release%2F1.12)
   * [TorchAudio](https://hud.pytorch.org/hud/pytorch/audio/release%2F1.12)
 
-Validate that the documentation build has completed and generated entry corresponding to the release in  [docs folder](https://github.com/pytorch/pytorch.github.io/tree/site/docs/) of pytorch.github.io repository
+Validate that the documentation build has completed and generated entry corresponding to the release in  [docs repository](https://github.com/pytorch/docs/tree/main/).
 
 ### Cherry Picking Fixes
 
@@ -232,9 +235,35 @@ Please also make sure to add milestone target to the PR/issue, especially if it 
 
 **NOTE**: The cherry pick process is not an invitation to add new features, it is mainly there to fix regressions
 
+#### How to do Cherry Picking
+
+You can now use `pytorchbot` to cherry pick a PyTorch PR that has been committed
+to the main branch using `@pytorchbot cherry-pick` command as follows.
+
+```
+usage: @pytorchbot cherry-pick --onto ONTO [--fixes FIXES] -c
+                               {regression,critical,fixnewfeature,docs,release}
+
+Cherry pick a pull request onto a release branch for inclusion in a release
+
+optional arguments:
+  --onto ONTO           Branch you would like to cherry pick onto (Example: release/2.2)
+  --fixes FIXES         Link to the issue that your PR fixes (i.e. https://github.com/pytorch/pytorch/issues/110666)
+  -c {regression,critical,fixnewfeature,docs,release}
+                        A machine-friendly classification of the cherry-pick reason.
+```
+
+For example, [#120567](https://github.com/pytorch/pytorch/pull/120567#issuecomment-1978964376)
+created a cherry pick PR [#121232](https://github.com/pytorch/pytorch/pull/121232) onto `release/2.2`
+branch to fix a regression issue. You can then refer to the original
+and the cherry-picked PRs on the release tracker issue. Please note
+that the cherry-picked PR will still need to be reviewed by PyTorch
+RelEng team before it can go into the release branch. This feature
+requires `pytorchbot`, so it's only available in PyTorch atm.
+
 ### Cherry Picking Reverts
 
-If PR that has been cherry-picked into release branch has been reverted, it's cherry-pick must be reverted as well.
+If PR that has been cherry-picked into release branch has been reverted, its cherry-pick must be reverted as well.
 
 Reverts for changes that was committed into the main branch prior to the branch cut, must be propagated into release branch as well.
 
@@ -397,6 +426,15 @@ the size restrictions for publishing on PyPI so the default version that is publ
 
 These special support cases will be handled on a case by case basis and support may be continued if current PyTorch maintainers feel as though there may still be a
 need to support these particular versions of software.
+
+## Operating Systems
+Supported OS flavors are summarized in the table below:
+| Operating System family | Architectrue | Notes |
+| --- | --- | --- |
+| Linux | aarch64, x86_64 | Wheels are manylinux2014 compatible, i.e. they should be runnable on any Linux system with glibc-2.17 or above. |
+| MacOS | arm64 | Builds should be compatible with MacOS 11 (Big Sur) or newer, but are actively tested against MacOS 14 (Sonoma). |
+| MacOS | x86_64 | Requires MacOS Catalina or above, not supported after 2.2, see https://github.com/pytorch/pytorch/issues/114602 |
+| Windows | x86_64 | Buils are compatible with Windows-10 or newer. |
 
 # Submitting Tutorials
 

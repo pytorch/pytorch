@@ -13,7 +13,7 @@ from unittest.mock import patch
 import torch
 
 from torch._dispatch.python import enable_python_dispatcher
-from torch._dynamo.test_case import run_tests
+from torch._inductor.test_case import run_tests, TestCase
 from torch._subclasses.fake_tensor import (
     DataDependentOutputException,
     DynamicOutputShapeException,
@@ -40,7 +40,6 @@ from torch.testing._internal.common_utils import (
     TEST_MKL,
     TEST_WITH_ASAN,
     TEST_WITH_ROCM,
-    TestCase,
 )
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CPU, HAS_CUDA
 from torch.utils._python_dispatch import TorchDispatchMode
@@ -168,6 +167,8 @@ inductor_skips = defaultdict(dict)
 inductor_skips["cpu"] = {
     "linalg.ldl_factor": {f32, f64},  # flaky
     "nn.functional.cosine_embedding_loss": {b8},  # flaky
+    ("index_reduce", "prod"): {f16},  # flaky
+    ("index_reduce", "mean"): {f16},  # flaky
 }
 
 if IS_MACOS and IS_X86:
@@ -192,6 +193,7 @@ inductor_skips["cuda"] = {
     "nn.functional.cosine_embedding_loss": {b8},
     "native_batch_norm": {f16, f32, f64},
     "_native_batch_norm_legit": {f16, f32, f64},
+    "_batch_norm_with_update": {f16, f32, f64},
 }
 
 if not SM80OrLater:
@@ -200,6 +202,7 @@ if not SM80OrLater:
 if TEST_WITH_ROCM:
     # Tensors are not alike
     inductor_skips["cuda"]["logcumsumexp"] = {f32}
+    inductor_skips["cuda"]["special.modified_bessel_i1"] = {f64}
 
 inductor_expected_failures_single_sample = defaultdict(dict)
 
@@ -210,14 +213,13 @@ inductor_expected_failures_single_sample["cpu"] = {
     "_upsample_bilinear2d_aa": {f32, f64},
     "cholesky": {f32, f64},
     "complex": {f16},
-    "cross": {f16},
     "resize_": {b8, f16, f32, f64, i32, i64},
     "resize_as_": {b8, f16, f32, f64, i32, i64},
     "histc": {f16},
-    "linalg.cross": {f16},
     "multinomial": {f16, f32, f64},
     "nn.functional.avg_pool1d": {i64},
     "nn.functional.avg_pool2d": {i64},
+    "nn.functional.avg_pool3d": {i64},
     "nn.functional.local_response_norm": {i64},
     "nn.functional.rrelu": {f32, f64},
     "nonzero_static": {b8, f16, f32, f64, i32, i64},
@@ -225,7 +227,10 @@ inductor_expected_failures_single_sample["cpu"] = {
     ("normal", "number_mean"): {f16, f32, f64},
     ("sparse.mm", "reduce"): {f32, f64},
     "sparse.sampled_addmm": {f32, f64},
-    "to_sparse": {f32, f64},
+    "to_sparse": {
+        f32,
+        f64,
+    },  # NYI: could not find kernel for aten.view.default at dispatch key DispatchKey.SparseCPU
     "view_as_complex": {f16},
 }
 
@@ -234,34 +239,44 @@ inductor_expected_failures_single_sample["cuda"] = {
     "_upsample_bilinear2d_aa": {f16, f32, f64},
     "cholesky": {f32, f64},
     "multinomial": {f16, f32, f64},
-    "nn.functional.normalize": {f16},
     ("normal", "in_place"): {f16, f32, f64},
     ("normal", "number_mean"): {f16, f32, f64},
     "sparse.sampled_addmm": {f32, f64},
-    "to_sparse": {f16, f32, f64},
-    "torch.ops.aten._efficient_attention_forward": {f16, bf16, f32},
-    "torch.ops.aten._flash_attention_forward": {f16, bf16, f32},
+    "torch.ops.aten._flash_attention_forward": {f16},
+    "torch.ops.aten._efficient_attention_forward": {f16, f32},
+    "to_sparse": {
+        f16,
+        f32,
+        f64,
+    },  # NYI: could not find kernel for aten.view.default at dispatch key DispatchKey.SparseCUDA
 }
 
 
 # intentionally not handled
 intentionally_not_handled = {
-    ("as_strided", "partial_views"): {b8, f16, f32, f64, i32, i64},
     "resize_": {b8, f16, f32, f64, i32, i64},
     "resize_as_": {b8, f16, f32, f64, i32, i64},
 }
+# This is only fixed when this config is set
+# We should eventually always turn it on
+import torch._functorch.config as functorch_config
+
+if not functorch_config.view_replay_for_aliased_outputs:
+    intentionally_not_handled['("as_strided", "partial_views")'] = {
+        b8,
+        f16,
+        f32,
+        f64,
+        i32,
+        i64,
+    }
 
 inductor_expected_failures_single_sample["cuda"].update(intentionally_not_handled)
 
 
 inductor_gradient_expected_failures_single_sample = defaultdict(dict)
 
-inductor_gradient_expected_failures_single_sample["cuda"] = {
-    "nn.functional.normalize": {f16},
-}
-
-if not TEST_WITH_ROCM:
-    inductor_gradient_expected_failures_single_sample["cuda"]["tanh"] = {f16}
+inductor_gradient_expected_failures_single_sample["cuda"] = {}
 
 if not TEST_MKL:
     inductor_expected_failures_single_sample["cpu"].update({})
@@ -314,6 +329,8 @@ inductor_override_kwargs = {
     "empty_strided": {"assert_equal": False},
     "new_empty_strided": {"assert_equal": False},
     "randn": {"assert_equal": False},
+    ("cross", "cuda", f16): {"reference_in_float": True},
+    ("linalg.cross", "cuda", f16): {"reference_in_float": True},
     ("addr", "cuda", f16): {"reference_in_float": True},
     ("baddbmm", "cuda", f16): {"atol": 2e-3, "rtol": 0.002},  # decomp affects accuracy
     ("angle", "cuda", f64): {"reference_in_float": True},
@@ -321,7 +338,9 @@ inductor_override_kwargs = {
     ("atanh", "cuda", f16): {"reference_in_float": True},
     ("cauchy", "cuda"): {"reference_in_float": True},
     ("cummax", "cuda", f16): {"atol": 5e-4, "rtol": 0.002},
+    ("cumsum", "cuda", f16): {"reference_in_float": True},
     ("cumprod", "cuda"): {"reference_in_float": True, "atol": 7e-5, "rtol": 0.002},
+    ("logcumsumexp", "cuda"): {"grad_atol": 8e-4, "grad_rtol": 0.001},
     ("exponential", "cuda"): {"reference_in_float": True},
     ("geometric", "cuda"): {"reference_in_float": True},
     ("kron", "cuda", f16): {"reference_in_float": True},
@@ -334,6 +353,8 @@ inductor_override_kwargs = {
     ("nn.functional.cosine_similarity", "cuda", f16): {"reference_in_float": True},
     ("nn.functional.instance_norm", "cuda", f16): {"reference_in_float": True},
     ("nn.functional.local_response_norm", "cuda", f16): {"reference_in_float": True},
+    ("nn.functional.normalize", "cuda", f16): {"atol": 1e-3, "rtol": 0.05},
+    ("nn.functional.rms_norm", "cuda", f16): {"reference_in_float": True},
     ("nn.functional.soft_margin_loss", "cuda", f16): {"reference_in_float": True},
     ("nn.functional.softmin", "cuda", f16): {"atol": 1e-4, "rtol": 0.01},
     ("nn.functional.softsign", "cuda", f16): {"reference_in_float": True},
@@ -345,32 +366,44 @@ inductor_override_kwargs = {
         "atol": 1e-4,
         "rtol": 0.02,
     },
+    ("sinc", "cuda", f16): {"atol": 0.008, "rtol": 0.002},
     ("softmax", "cpu", f16): {"atol": 1e-4, "rtol": 0.02},
     ("softmax", "cuda", f16): {"atol": 1e-4, "rtol": 0.02},
     ("_softmax_backward_data", "cuda", f16): {"atol": 0.008, "rtol": 0.002},
     ("special.log_ndtr", "cuda", f64): {"atol": 1e-6, "rtol": 1e-5},
+    ("polygamma.polygamma_n_0", "cpu", f32): {"atol": 1e-3, "rtol": 1e-4},
+    ("polygamma.polygamma_n_1", "cpu", f32): {"atol": 1e-3, "rtol": 1e-4},
+    ("polygamma.polygamma_n_2", "cpu", f32): {"atol": 1e-3, "rtol": 1e-4},
+    ("polygamma.polygamma_n_3", "cpu", f32): {"atol": 1e-3, "rtol": 1e-4},
+    ("polygamma.polygamma_n_4", "cpu", f32): {"atol": 1e-3, "rtol": 1e-4},
+    ("special.polygamma.special_polygamma_n_0", "cpu", f32): {
+        "atol": 1e-3,
+        "rtol": 1e-4,
+    },
     ("std_mean.unbiased", "cuda", f16): {"reference_in_float": True},
     ("uniform", "cuda"): {"reference_in_float": True},
     # Following tests are failing with strict comparision but atol=1 is acceptable due roundings errors
     ("nn.functional.interpolate.bilinear", "cpu", u8): {"atol": 1, "rtol": 0},
     ("nn.functional.upsample_bilinear", "cpu", u8): {"atol": 1, "rtol": 0},
+    ("nn.functional.interpolate.bicubic", "cpu", u8): {"atol": 1, "rtol": 0},
+    # High atol due to precision loss
     ("nn.functional.interpolate.bilinear", "cuda", f64): {"atol": 5e-4, "rtol": 0},
     ("nn.functional.upsample_bilinear", "cuda", f64): {"atol": 5e-4, "rtol": 0},
-    # Temporarily skip interpolat bicubic tests:
-    "nn.functional.interpolate.bicubic": {
-        "assert_equal": False,
-        "check_gradient": False,
-    },
+    ("nn.functional.interpolate.bicubic", "cpu", f32): {"atol": 5e-3, "rtol": 0},
+    ("nn.functional.interpolate.bicubic", "cuda", f64): {"atol": 1e-3, "rtol": 0},
+    # Unreasonably high atol requirement:
+    ("index_reduce.mean", "cuda", f16): {"check_gradient": False},
+    ("index_reduce.mean", "cuda", f32): {"check_gradient": False},
+    ("index_reduce.mean", "cuda", f64): {"check_gradient": False},
+    # Gradient contains non-finite entries:
+    ("index_reduce.amin", "cuda", f64): {"check_gradient": False},
+    ("index_reduce.amin", "cuda", f32): {"check_gradient": False},
+    ("index_reduce.amin", "cuda", f16): {"check_gradient": False},
+    ("index_reduce.amax", "cuda", f64): {"check_gradient": False},
+    ("index_reduce.amax", "cuda", f32): {"check_gradient": False},
+    ("index_reduce.amax", "cuda", f16): {"check_gradient": False},
+    ("tanh", "cuda", f16): {"atol": 1e-4, "rtol": 1e-2},
 }
-
-
-if not TEST_WITH_ROCM:
-    inductor_override_kwargs.update(
-        {
-            # We have better precision than eager
-            ("cumsum", "cuda", f16): {"reference_in_float": True},
-        }
-    )
 
 
 # Always test with all sample for following ops
@@ -382,6 +415,10 @@ inductor_all_samples = {
     "softmax.with_dtype",
     "index_add",
     "index_copy",
+    "index_reduce.prod",
+    "index_reduce.mean",
+    "index_reduce.amax",
+    "index_reduce.amin",
     "scatter_reduce.sum",
     "select_scatter",
     "squeeze",
@@ -401,6 +438,11 @@ inductor_all_samples = {
     "mH",
     "rsub",
     "triu",
+    "cummax",
+    "cummin",
+    "nextafter",
+    "_chunk_cat",
+    "constant_pad_nd",
 }
 
 
@@ -459,6 +501,7 @@ class TestInductorOpInfo(TestCase):
         allowed_dtypes = [f16, f32, f64, i32, i64, b8]
         if op_name not in (
             "nn.functional.interpolate.bilinear",
+            "nn.functional.interpolate.bicubic",
             "nn.functional.upsample_bilinear",
             "nn.functional.upsample_nearest",
         ):
@@ -497,7 +540,6 @@ class TestInductorOpInfo(TestCase):
             overridden_kwargs = inductor_override_kwargs[(op_name, device_type)]
         elif (op_name, device_type, dtype) in inductor_override_kwargs:
             overridden_kwargs = inductor_override_kwargs[(op_name, device_type, dtype)]
-
         func = op.get_op()
 
         def fn(*args, **kwargs):

@@ -1,3 +1,4 @@
+import functools
 from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import Any, Callable
@@ -76,6 +77,21 @@ def _maybe_run_with_interpreter(fn):
     return maybe_interpreted_fn
 
 
+def reenter_make_fx(fn):
+    from torch.fx.experimental.proxy_tensor import _CURRENT_MAKE_FX_TRACER
+
+    @functools.wraps(fn)
+    def wrapped(*args):
+        assert (
+            _CURRENT_MAKE_FX_TRACER is not None
+        ), "Cannot reenter make_fx when we're not under a make_fx tracing session"
+        return _CURRENT_MAKE_FX_TRACER.trace_subgraph(
+            _maybe_run_with_interpreter(fn), *args
+        )
+
+    return wrapped
+
+
 @contextmanager
 def _set_compilation_env():
     _old_is_tracing = torch.fx._symbolic_trace._is_fx_tracing_flag
@@ -88,14 +104,14 @@ def _set_compilation_env():
         torch.fx._symbolic_trace._is_fx_tracing_flag = _old_is_tracing
 
 
-def _has_potential_branch_input_mutation(branch, inputs):
+def _has_potential_branch_input_mutation(branch, inputs, pre_dispatch=False):
     """
     Dispatch-trace the branch with inputs and check if
     producing graph has mutable op on the input. This is
     bit restrictive as the branch must be traceable.
     """
     try:
-        gm = make_fx(branch)(*inputs)
+        gm = make_fx(branch, pre_dispatch=pre_dispatch)(*inputs)
     except UnsupportedAliasMutationException:
         # this can happen when nested cond_op is
         # functionalized
@@ -128,15 +144,14 @@ def _has_potential_branch_input_mutation(branch, inputs):
     return _detect_input_mutation(gm)
 
 
-def _has_potential_branch_input_alias(branch, inputs):
+def _has_potential_branch_input_alias(branch, inputs, pre_dispatch=False):
     """
     Dispatch-trace the branch with inputs and check if
     producing graph has output aliasing the branch input. This is
     bit restrictive as the branch must be traceable.
     """
     try:
-        gm = make_fx(branch)(*inputs)
-
+        gm = make_fx(branch, pre_dispatch=pre_dispatch)(*inputs)
     except UnsupportedAliasMutationException:
         # this can happen when nested cond_op is
         # functionalized
@@ -170,3 +185,19 @@ def _has_potential_branch_input_alias(branch, inputs):
         return False
 
     return _detect_input_alias(gm)
+
+
+def unique_graph_id(proxy_mode, prefix):
+    """Returns a unique name and id for a graph to be added to a proxy_mode tracer"""
+    # There are probably better ways - I know that create_arg has some self incrementing name
+    # magic to it, but since we explicitly have to get the name for register_module,
+    # I was not sure how to do that. This kinda simulates it.
+    next_name = None
+    i = 0
+    while not next_name:
+        candidate = f"{prefix}_{i}"
+        if hasattr(proxy_mode.tracer.root, candidate):
+            i += 1
+        else:
+            next_name = candidate
+    return i, next_name

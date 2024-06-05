@@ -79,8 +79,8 @@
 #define C10_STRINGIZE(x) C10_STRINGIZE_IMPL(x)
 
 /**
- * C10_ANONYMOUS_VARIABLE(str) introduces an identifier starting with
- * str and ending with a number that varies with the line.
+ * C10_ANONYMOUS_VARIABLE(str) introduces a new identifier which starts with
+ * str and ends with a unique number.
  */
 #ifdef __COUNTER__
 #define C10_UID __COUNTER__
@@ -235,13 +235,6 @@ using namespace c10::xpu;
 
 #define C10_ERASE C10_ALWAYS_INLINE C10_ATTR_VISIBILITY_HIDDEN
 
-// C10_FALLTHROUGH - Annotate fallthrough to the next case in a switch.
-#if C10_HAS_CPP_ATTRIBUTE(fallthrough)
-#define C10_FALLTHROUGH [[fallthrough]]
-#else
-#define C10_FALLTHROUGH
-#endif
-
 #include <cstdint>
 
 #ifdef __HIPCC__
@@ -330,8 +323,7 @@ constexpr uint32_t CUDA_THREADS_PER_BLOCK_FALLBACK = 256;
 // CUDA_KERNEL_ASSERT checks the assertion
 // even when NDEBUG is defined. This is useful for important assertions in CUDA
 // code that would otherwise be suppressed when building Release.
-#if defined(__ANDROID__) || defined(__APPLE__) || defined(__FreeBSD__) || \
-    (defined(USE_ROCM) && ROCM_VERSION < 40100)
+#if defined(__ANDROID__) || defined(__APPLE__) || defined(__FreeBSD__)
 // Those platforms do not support assert()
 #define CUDA_KERNEL_ASSERT(cond)
 #define SYCL_KERNEL_ASSERT(cond)
@@ -435,16 +427,6 @@ __host__ __device__
 #define C10_ALWAYS_INLINE_UNLESS_MOBILE inline
 #else
 #define C10_ALWAYS_INLINE_UNLESS_MOBILE C10_ALWAYS_INLINE
-#endif
-
-// Portable determination of whether type T is trivially copyable.
-// Warning: __has_trivial_copy for GCC may not always detect the non-POD
-// correctly. For example, T = std::unique_ptr may evaluate to true and be
-// treated as POD. This can cause unexpected behavior.
-#if defined(__GNUG__) && __GNUC__ < 5 && !defined(__clang__)
-#define C10_IS_TRIVIALLY_COPYABLE(T) __has_trivial_copy(T)
-#else
-#define C10_IS_TRIVIALLY_COPYABLE(T) std::is_trivially_copyable<T>::value
 #endif
 
 #if defined(__CUDA_ARCH__)

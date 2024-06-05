@@ -229,7 +229,7 @@ class C10_API SymInt {
     return data_;
   }
 
-  c10::optional<int64_t> maybe_as_int() const {
+  std::optional<int64_t> maybe_as_int() const {
     if (!is_heap_allocated()) {
       return c10::make_optional(data_);
     }
@@ -411,6 +411,13 @@ inline bool sym_ge(int64_t a, int64_t b) {
 
 inline SymBool sym_ge(const SymInt& a, const SymInt& b) {
   return a.sym_ge(b);
+}
+
+inline bool definitely_true(
+    const c10::SymBool& b,
+    const char* file,
+    int64_t line) {
+  return b.has_hint() && b.guard_bool(file, line);
 }
 
 } // namespace c10

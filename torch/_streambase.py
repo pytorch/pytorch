@@ -5,41 +5,41 @@ class _StreamBase(ABC):
     r"""Base stream class abstraction for multi backends Stream to herit from"""
 
     @abstractmethod
-    def wait_event(self, event):
-        raise NotImplementedError()
+    def wait_event(self, event) -> None:
+        raise NotImplementedError
 
     @abstractmethod
-    def wait_stream(self, stream):
-        raise NotImplementedError()
+    def wait_stream(self, stream) -> None:
+        raise NotImplementedError
 
     @abstractmethod
-    def record_event(self, event=None):
-        raise NotImplementedError()
+    def record_event(self, event=None) -> None:
+        raise NotImplementedError
 
     @abstractmethod
-    def query(self):
-        raise NotImplementedError()
+    def query(self) -> bool:
+        raise NotImplementedError
 
     @abstractmethod
-    def synchronize(self):
-        raise NotImplementedError()
+    def synchronize(self) -> None:
+        raise NotImplementedError
 
     @abstractmethod
-    def __eq__(self, stream):
-        raise NotImplementedError()
+    def __eq__(self, stream) -> bool:
+        raise NotImplementedError
 
 
 class _EventBase(ABC):
     r"""Base Event class abstraction for multi backends Event to herit from"""
 
     @abstractmethod
-    def wait(self, stream=None):
-        raise NotImplementedError()
+    def wait(self, stream=None) -> None:
+        raise NotImplementedError
 
     @abstractmethod
-    def query(self):
-        raise NotImplementedError()
+    def query(self) -> bool:
+        raise NotImplementedError
 
     @abstractmethod
-    def synchronize(self):
-        raise NotImplementedError()
+    def synchronize(self) -> None:
+        raise NotImplementedError

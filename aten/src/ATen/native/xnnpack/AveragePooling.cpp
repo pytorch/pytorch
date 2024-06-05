@@ -33,11 +33,6 @@ Tensor global_average_pool(const Tensor& input) {
 
   xnn_operator_t global_average_pooling_op{};
   const xnn_status create_status = xnn_create_global_average_pooling_nwc_f32(
-      input_padded_contig_nhwc.size(Layout::Activation4D::channels), // channels
-      input_padded_contig_nhwc.size(
-          Layout::Activation4D::channels), // input stride
-      input_padded_contig_nhwc.size(
-          Layout::Activation4D::channels), // output stride
       -std::numeric_limits<float>::infinity(),
       std::numeric_limits<float>::infinity(),
       0 /* flags */,
@@ -57,6 +52,11 @@ Tensor global_average_pool(const Tensor& input) {
       input_padded_contig_nhwc.size(Layout::Activation4D::batch), // batch_size
       input_padded_contig_nhwc.size(Layout::Activation4D::width) *
           input_padded_contig_nhwc.size(Layout::Activation4D::height), // width
+      input_padded_contig_nhwc.size(Layout::Activation4D::channels), // channels
+      input_padded_contig_nhwc.size(
+          Layout::Activation4D::channels), // input stride
+      input_padded_contig_nhwc.size(
+          Layout::Activation4D::channels), // output stride
       &workspace_size, // workspace_size
       &workspace_alignment, // workspace_alignment
       caffe2::pthreadpool_());

@@ -70,14 +70,26 @@ bool SimpleValue::hasAttr(
     const SourceRange& loc,
     GraphFunction& m,
     const std::string& field) {
-  auto class_type = value_->type()->cast<ClassType>();
-  if (!class_type) {
-    throw ErrorReport(loc) << "hasattr's first argument must be an object, got "
-                           << value_->type()->repr_str() << " instead";
+  if (auto class_type = value_->type()->cast<ClassType>()) {
+    return class_type->hasMethod(field) || class_type->hasAttribute(field) ||
+        class_type->hasConstant(field);
+  } else if (auto tuple_type = value_->type()->cast<TupleType>()) {
+    if (tuple_type->schema()) {
+      for (const auto& arg : tuple_type->schema()->arguments()) {
+        if (arg.name() == field) {
+          return true;
+        }
+      }
+      return false;
+    } else {
+      throw ErrorReport(loc) << "hasattr's first argument must be a object "
+                             << "or NamedTuple, but got a normal Tuple "
+                             << value_->type()->repr_str() << " instead";
+    }
   }
-
-  return class_type->hasMethod(field) || class_type->hasAttribute(field) ||
-      class_type->hasConstant(field);
+  throw ErrorReport(loc) << "hasattr's first argument must be an object or "
+                         << "NamedTuple, got " << value_->type()->repr_str()
+                         << " instead";
 }
 
 // support syntax sugar for x.foo(y, z) by allowing x.foo to return a
@@ -133,7 +145,7 @@ std::shared_ptr<SugaredValue> SimpleValue::attr(
            {"H", "prim"},
            {"mT", "aten"},
            {"mH", "aten"},
-           {"is_ort", "prim"},
+           {"is_maia", "prim"},
            {"itemsize", "prim"},
            {"nbytes", "prim"},
            {"ndim", "prim"},
@@ -271,7 +283,7 @@ std::shared_ptr<SugaredValue> SimpleValue::attr(
 std::vector<std::shared_ptr<SugaredValue>> SimpleValue::asTuple(
     const SourceRange& loc,
     GraphFunction& m,
-    const c10::optional<size_t>& size_hint) {
+    const std::optional<size_t>& size_hint) {
   static const auto make_simple_value =
       [](Value* v) -> std::shared_ptr<SugaredValue> {
     return std::make_shared<SimpleValue>(v);
@@ -513,7 +525,7 @@ RangeValue::RangeValue(
     const SourceRange& loc,
     GraphFunction& m,
     std::vector<Value*> inputs,
-    c10::optional<int64_t> static_len) {
+    std::optional<int64_t> static_len) {
   for (const auto i : c10::irange(inputs.size())) {
     auto typ = inputs[i]->type();
     if (!typ->cast<IntType>()) {
@@ -633,7 +645,7 @@ void IterableTree::addChild(
     const SourceRange& range,
     GraphFunction& m,
     const SugaredValuePtr& iter_value) {
-  c10::optional<int64_t> child_len = iter_value->staticLen();
+  std::optional<int64_t> child_len = iter_value->staticLen();
   if (children_.empty()) {
     unroll_length_ = child_len;
   } else {
@@ -736,7 +748,7 @@ std::shared_ptr<SugaredValue> NamedTupleConstructor::call(
 
 std::shared_ptr<BuiltinFunction> BuiltinFunction::tryCreate(
     Symbol symbol,
-    c10::optional<NamedValue> self) {
+    std::optional<NamedValue> self) {
   for (const std::shared_ptr<Operator>& op : getAllOperatorsFor(symbol)) {
     if (!self) {
       return std::make_shared<BuiltinFunction>(symbol, nullptr);

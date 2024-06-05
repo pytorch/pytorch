@@ -16,6 +16,6 @@ void quantize_multiplier(double scale,
 
 } // namespace ruy_utils
 } // namespace native
-} // namesplace
+} // namespace
 
 #endif // USE_RUY_QMATMUL

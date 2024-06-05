@@ -12,7 +12,7 @@ import torch.nn as nn
 from torch.distributed._spmd.api import compile, COMPILED_OBJECT_KEY, Override
 from torch.distributed._spmd.comm_tensor import CommTensor
 from torch.distributed._tensor import DeviceMesh
-from torch.distributed._tensor.op_schema import OpSchema, OutputSharding
+from torch.distributed._tensor._op_schema import OpSchema, OutputSharding
 from torch.distributed._tensor.ops.utils import register_prop_rule
 from torch.distributed._tensor.placement_types import DTensorSpec
 from torch.distributed.distributed_c10d import get_global_rank, get_world_size
@@ -256,7 +256,7 @@ def ddm_backward(grad: torch.Tensor) -> torch.Tensor:
     return grad
 
 
-dummy_lib = torch.library.Library("dummy", "DEF")
+dummy_lib = torch.library.Library("dummy", "DEF")  # noqa: TOR901
 dummy_lib.define("ddm(Tensor x) -> Tensor")
 dummy_lib.impl("ddm", ddm, "CompositeExplicitAutograd")
 dummy_lib.define("ddm_backward(Tensor x) -> Tensor")

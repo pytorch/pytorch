@@ -1,17 +1,19 @@
 import logging
 import math
+from dataclasses import dataclass
+from functools import lru_cache
 
 from typing import List, Optional
 
 import torch
+import torch.distributed._functional_collectives as funcol
 import torch.distributed._tensor.placement_types as placement_types
 from torch.distributed.device_mesh import _mesh_resources, DeviceMesh
 from torch.distributed.distributed_c10d import (
-    all_to_all,
+    _get_group_size_by_name,
     broadcast,
     get_global_rank,
     get_rank,
-    get_world_size,
     GroupMember,
     ProcessGroup,
     scatter,
@@ -21,7 +23,44 @@ from torch.distributed.distributed_c10d import (
 logger = logging.getLogger(__name__)
 
 
-# TODO: we need to migrate these APIs to be functional collectives
+if not torch._running_with_deploy():
+
+    @torch.library.register_fake("_dtensor::shard_dim_alltoall")
+    def _shard_dim_alltoall_meta(input, gather_dim, shard_dim, group_name):
+        group_size = _get_group_size_by_name(group_name)
+        stacked_list = [torch.empty_like(input) for _ in range(group_size)]
+        return torch.cat(stacked_list, dim=gather_dim).chunk(group_size, dim=shard_dim)
+
+else:
+    import warnings
+
+    warnings.warn(
+        "PyTorch Distributed functional collectives do not work with torch::deploy."
+    )
+
+
+def shard_dim_alltoall(input, gather_dim, shard_dim, mesh, mesh_dim):
+    if mesh.device_type == "cpu":
+        # Gloo does not support alltoall, so falling back to allgather + chunk
+
+        # TODO: This logs way too much
+        logger.warning(
+            "CPU process group does not support alltoall yet, falling back with allgather + chunk!"
+        )
+        out = funcol.all_gather_tensor(input, gather_dim, (mesh, mesh_dim))
+        if isinstance(out, funcol.AsyncCollectiveTensor):
+            # stick to the same behavior for the alltoall case, remove this once we enable alltoall async
+            out = out.wait()
+        out = torch.chunk(out, mesh.size(mesh_dim), dim=shard_dim)[
+            mesh.get_local_rank(mesh_dim)
+        ]
+        return out.contiguous() if not out.is_contiguous() else out
+
+    group_name = funcol._resolve_group_name((mesh, mesh_dim))
+    # TODO: enable async op for shard_dim_alltoall
+    return torch.ops._dtensor.shard_dim_alltoall(
+        input, gather_dim, shard_dim, group_name
+    )
 
 
 def mesh_scatter(
@@ -120,46 +159,37 @@ def mesh_broadcast(
     return broadcast(tensor, src=src_for_dim, group=dim_group, async_op=async_op)
 
 
-# TODO: test uneven split on GLOO and NCCL
-def mesh_all_to_all(
-    output_tensor_list: List[torch.Tensor],
-    input_tensor_list: List[torch.Tensor],
-    mesh: DeviceMesh,
-    mesh_dim: int = 0,
-    async_op: bool = False,
-) -> Optional[Work]:
-    dim_group = mesh.get_group(mesh_dim)
-    assert isinstance(dim_group, ProcessGroup)
+def pad_tensor(tensor: torch.Tensor, pad_dim: int, pad_size: int) -> torch.Tensor:
+    if pad_size == 0:
+        return tensor
+    pad = [0, 0] * (tensor.ndim - pad_dim)
+    pad[-1] = pad_size
+    return torch.nn.functional.pad(tensor, pad)
 
-    work = None
-    # no direct dist.all_to_all support on 'gloo' so we manually do scatters
-    if mesh.device_type == "cpu":
-        logger.warning(
-            "ProcessGroupGloo does not support all_to_all, falling back with scatters!"
-        )
-        # TODO: pull the handle of uneven case in #492
-        dim_group_size = get_world_size(dim_group)
-        for i in range(dim_group_size):
-            # src need to be global rank
-            src_for_dim = i
-            if dim_group is not GroupMember.WORLD:
-                src_for_dim = get_global_rank(dim_group, i)
 
-            work = scatter(
-                output_tensor_list[i],
-                input_tensor_list if mesh.get_rank() == src_for_dim else [],
-                group=dim_group,
-                src=src_for_dim,
-                async_op=async_op,
-            )
-    else:
-        work = all_to_all(
-            output_tensor_list,
-            input_tensor_list,
-            dim_group,
-            async_op=async_op,
-        )
-    return work
+def unpad_tensor(tensor: torch.Tensor, pad_dim: int, pad_size: int) -> torch.Tensor:
+    if pad_size == 0:
+        return tensor
+    return tensor.narrow(
+        pad_dim,
+        start=0,
+        length=tensor.size(pad_dim) - pad_size,
+    )
+
+
+def fill_empty_tensor_to_shards(
+    shards: List[torch.Tensor], shard_dim: int, num_empty_tensors: int
+) -> List[torch.Tensor]:
+    if num_empty_tensors == 0:
+        return shards
+    tensor_size = list(shards[0].size())
+    tensor_size = [
+        size if idx != shard_dim else 0 for idx, size in enumerate(tensor_size)
+    ]
+    tensor = shards[0].new_zeros(tensor_size)
+    for _ in range(num_empty_tensors):
+        shards.append(tensor)
+    return shards
 
 
 def spec_to_bytes(spec: "placement_types.DTensorSpec") -> int:
@@ -167,65 +197,85 @@ def spec_to_bytes(spec: "placement_types.DTensorSpec") -> int:
     return spec.tensor_meta.dtype.itemsize * math.prod(spec.shape)
 
 
-def get_bandwidth_factor(mesh: DeviceMesh) -> List[float]:
-    # generate bandwidth factor for intra-host/inter-host communication pattern
-    factors = [1.0] * mesh.ndim
-    num_devices_per_host = _mesh_resources.num_devices_per_host(mesh.device_type)
+@dataclass
+class MeshTopoInfo:
+    """
+    Mesh information for collective cost estimation
+    """
 
-    num_devices = 1
-    for mesh_dim in reversed(range(mesh.ndim)):
-        num_devices *= mesh.size(mesh_dim)
-        if num_devices <= num_devices_per_host:
-            # magic number for intra-host communication bandwidth factor
-            # TODO: see if we need to tweak this or offer a way for user
-            # to specify the bandwidths
-            factors[mesh_dim] = 0.2
+    mesh: DeviceMesh
+    mesh_dim_devices: List[int]
+    mesh_dim_bandwidth: List[float]
+    mesh_dim_latency: List[float]
 
-    return factors
+    @staticmethod
+    @lru_cache(None)
+    def build_from_mesh(mesh: DeviceMesh) -> "MeshTopoInfo":
+        # Generate mesh topology info for intra-host/inter-host communication pattern
+        # Note that we made bunch of assumptions for simplicity:
+        # 1. we assume the mesh is homogeneous, and it's gpu/nccl model
+        # 2. we assume gpu arch is Ampere or Hopper
+        # 3. we assume collectives are all ring base algo for now
+        num_devices_per_host = _mesh_resources.num_devices_per_host(mesh.device_type)
+        # the base bw number (intra-node), GB/s
+        base_bw = 87.7
+        mesh_dim_bandwidth = [base_bw] * mesh.ndim
+        # the latency in terms of us (intra-node, nv-link)
+        mesh_dim_latency = [0.6] * mesh.ndim
+        mesh_dim_devices = [1] * mesh.ndim
+
+        total_num_devices = 1
+        for mesh_dim in reversed(range(mesh.ndim)):
+            num_devices = mesh.size(mesh_dim)
+            mesh_dim_devices[mesh_dim] = num_devices
+            total_num_devices *= num_devices
+            if total_num_devices > num_devices_per_host:
+                # magic number for inter-host communication bandwidth/latency factor
+                # This number assumes latest GPU arch, i.e. Ampere or Hopper
+                # TODO: see if we need to tweak this or offer a way for user
+                # to specify the bandwidths/latency
+                mesh_dim_bandwidth[mesh_dim] *= 0.22
+                # set to ethernet latency for inter-host
+                mesh_dim_latency[mesh_dim] = 2.7
+
+        return MeshTopoInfo(
+            mesh, mesh_dim_devices, mesh_dim_bandwidth, mesh_dim_latency
+        )
 
 
-def allgather_cost(num_bytes: float, mesh: DeviceMesh, mesh_dim: int) -> float:
-    num_devices_on_mesh_dim = mesh.size(mesh_dim)
-    bandwidth_factor = get_bandwidth_factor(mesh)[mesh_dim]
-    # constant latency factor + bandwidth cost
-    return (
-        1
-        + bandwidth_factor
-        * num_bytes
-        * (num_devices_on_mesh_dim - 1)
-        / num_devices_on_mesh_dim
-    )
+def allgather_cost(bytes_gb: float, mesh_topo: MeshTopoInfo, mesh_dim: int) -> float:
+    num_devices_on_mesh_dim = mesh_topo.mesh_dim_devices[mesh_dim]
+    mesh_dim_bandwidth = mesh_topo.mesh_dim_bandwidth[mesh_dim]
+    num_hops = num_devices_on_mesh_dim - 1
+    # base latency + comm latency
+    latency = 6.6 + num_hops * mesh_topo.mesh_dim_latency[mesh_dim]  # us
+    bw = (bytes_gb * num_hops / num_devices_on_mesh_dim) / mesh_dim_bandwidth  # s
+    return latency + bw * 1e6  # rescale to us
 
 
-def allreduce_cost(num_bytes: float, mesh: DeviceMesh, mesh_dim: int) -> float:
-    num_devices_on_mesh_dim = mesh.size(mesh_dim)
-    bandwidth_factor = get_bandwidth_factor(mesh)[mesh_dim]
-    # allreduce have 2x comm bytes compare to allgather/reduce_scatter
-    return (
-        1
-        + 2
-        * bandwidth_factor
-        * num_bytes
-        * (num_devices_on_mesh_dim - 1)
-        / num_devices_on_mesh_dim
-    )
+def allreduce_cost(bytes_gb: float, mesh_topo: MeshTopoInfo, mesh_dim: int) -> float:
+    num_devices_on_mesh_dim = mesh_topo.mesh_dim_devices[mesh_dim]
+    mesh_dim_bandwidth = mesh_topo.mesh_dim_bandwidth[mesh_dim]
+    # allreduce have almost 2x comm bytes compare to allgather/reduce_scatter
+    num_hops = 2 * num_devices_on_mesh_dim - 1
+
+    latency = 6.6 + num_hops * mesh_topo.mesh_dim_latency[mesh_dim]
+    bw = (bytes_gb * num_hops / num_devices_on_mesh_dim) / mesh_dim_bandwidth
+    return latency + bw * 1e6
 
 
 def reduce_scatter_cost(
-    num_bytes: float,
-    mesh: DeviceMesh,
+    bytes_gb: float,
+    mesh_topo: MeshTopoInfo,
     mesh_dim: int,
 ) -> float:
-    num_devices_on_mesh_dim = mesh.size(mesh_dim)
-    bandwidth_factor = get_bandwidth_factor(mesh)[mesh_dim]
-    # constant latency factor + bandwidth cost
-    return (
-        1
-        + bandwidth_factor
-        * num_bytes
-        * (num_devices_on_mesh_dim - 1)
-        / num_devices_on_mesh_dim
-    )
+    num_devices_on_mesh_dim = mesh_topo.mesh_dim_devices[mesh_dim]
+    mesh_dim_bandwidth = mesh_topo.mesh_dim_bandwidth[mesh_dim]
+    num_hops = num_devices_on_mesh_dim - 1
+    # base latency + comm latency
+    latency = 6.6 + num_hops * mesh_topo.mesh_dim_latency[mesh_dim]
+    bw = (bytes_gb * num_hops / num_devices_on_mesh_dim) / mesh_dim_bandwidth
+    return latency + bw * 1e6
 
 
 def redistribute_cost(
@@ -251,9 +301,11 @@ def redistribute_cost(
         # comm cost is 0 if current spec is already full replication
         return 0.0
 
-    mesh = current_spec.mesh
+    mesh_topo = MeshTopoInfo.build_from_mesh(current_spec.mesh)
     cost = 0.0
-    comm_bytes = spec_to_bytes(current_spec) / current_spec.num_shards
+    comm_bytes_gb = (
+        spec_to_bytes(current_spec) / current_spec.num_shards / 1024 / 1024 / 1024
+    )
     # Transformation that considered for redistribute cost:
     # 1. allgather 2. alltoall
     # 3. allreduce 4. reduce_scatter
@@ -262,23 +314,25 @@ def redistribute_cost(
     ):
         if current == target:
             continue
+
+        num_devices_on_mesh_dim = mesh_topo.mesh_dim_devices[i]
         if current.is_shard() and target.is_replicate():
             # allgather gives larger comm bytes
-            comm_bytes *= mesh.size(i)
+            comm_bytes_gb *= num_devices_on_mesh_dim
             # add up allgather comm cost
-            cost += allgather_cost(comm_bytes, current_spec.mesh, i)
+            cost += allgather_cost(comm_bytes_gb, mesh_topo, i)
         elif current.is_shard() and target.is_shard():
             # should be alltoall comm, since we haven't implement it yet, add penalty
             # to favor allgather instead
-            cost += allgather_cost(comm_bytes, current_spec.mesh, i) + 1.0
+            cost += allgather_cost(comm_bytes_gb, mesh_topo, i) + 1.0
         elif current.is_partial() and target.is_replicate():
             # add up allreduce comm cost
-            cost += allreduce_cost(comm_bytes, current_spec.mesh, i)
+            cost += allreduce_cost(comm_bytes_gb, mesh_topo, i)
         elif current.is_partial() and target.is_shard():
             # add up reduce_scatter comm cost
-            cost += reduce_scatter_cost(comm_bytes, current_spec.mesh, i)
+            cost += reduce_scatter_cost(comm_bytes_gb, mesh_topo, i)
             # after reduce_scatter the comm bytes for further collectives halved.
-            comm_bytes /= mesh.size(i)
+            comm_bytes_gb /= num_devices_on_mesh_dim
         elif current.is_shard() and target.is_partial():
             # ban shard -> partial as it does not make sense to perform
             # this redistribute

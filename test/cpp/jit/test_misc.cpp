@@ -1302,7 +1302,7 @@ TEST(RecordFunctionTest, OperatorNameOverload) {
   at::addGlobalCallback(at::RecordFunctionCallback(
                             [](const at::RecordFunction& fn)
                                 -> std::unique_ptr<at::ObserverContext> {
-                              c10::optional<c10::OperatorName> op_name =
+                              std::optional<c10::OperatorName> op_name =
                                   fn.operator_name();
                               if (op_name.has_value()) {
                                 operator_names.insert(c10::toString(*op_name));
@@ -3134,6 +3134,7 @@ TEST_F(Composed, ComposedOp) {
 }
 
 TEST(ConstantPropagation, CustomClassesCanBePropagated) {
+#ifdef USE_PYTORCH_QNNPACK
   const auto src = R"IR(
     graph():
         %none: NoneType = prim::Constant()
@@ -3154,6 +3155,7 @@ TEST(ConstantPropagation, CustomClassesCanBePropagated) {
   ConstantPropagation(graph);
 
   testing::FileCheck().check_not("quantized::linear_prepack")->run(*graph);
+#endif
 }
 
 } // namespace jit

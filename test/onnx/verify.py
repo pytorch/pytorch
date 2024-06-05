@@ -154,7 +154,7 @@ class Errors:
         NB: It is an error to "fail" without having added any errors to
         the error context.
         """
-        raise self.exc_class()
+        raise self.exc_class
 
     def failWith(self, msg):
         """
@@ -489,7 +489,7 @@ def verify(
                     errs.requireEqual(
                         proto_bytes.getvalue(), alt_proto_bytes.getvalue()
                     )
-                    raise AssertionError()
+                    raise AssertionError
 
             # TODO: test that the traced model also returns the same thing...
             run_helper(torch_out, args, remained_onnx_input_idx)

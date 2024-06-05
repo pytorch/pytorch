@@ -8,7 +8,9 @@ from typing import (
     Sequence,
     Tuple,
     cast,
+    TYPE_CHECKING,
 )
+from typing_extensions import deprecated
 import copy
 import warnings
 from functools import reduce
@@ -19,7 +21,6 @@ import torch
 import torch.distributed as dist
 from torch.distributed import rpc
 from torch.distributed import distributed_c10d
-from torch.distributed._shard.metadata import ShardMetadata
 import torch.distributed._shard.sharding_spec as shard_spec
 from torch.distributed._shard.sharding_spec.api import (
     _dispatch_custom_op,
@@ -46,6 +47,9 @@ from .utils import (
 from torch.distributed.remote_device import _remote_device
 from torch.utils import _pytree as pytree
 import operator
+
+if TYPE_CHECKING:
+    from torch.distributed._shard.metadata import ShardMetadata
 
 # Tracking for sharded tensor objects.
 _sharded_tensor_lock = threading.Lock()
@@ -262,7 +266,7 @@ class ShardedTensor(ShardedTensorBase):
 
         self._metadata.tensor_properties.memory_format = memory_format
 
-        current_rank = dist.get_rank(self._process_group)
+        current_rank = dist.get_rank()  # global rank
 
         for shard_metadata in self._metadata.shards_metadata:
             rank, device = _parse_and_validate_remote_device(self._process_group, shard_metadata.placement)
@@ -281,12 +285,7 @@ class ShardedTensor(ShardedTensorBase):
         self._init_rrefs = init_rrefs
         self._sharded_tensor_id = None
 
-        self._process_group = (
-            process_group
-            if process_group is not None
-            else distributed_c10d._get_default_group()
-        )
-
+        self._process_group = self._normalize_pg(process_group)
         self._remote_shards: Dict[int, List[rpc.RRef[Shard]]] = {}
 
     def _post_init(self):
@@ -398,7 +397,11 @@ class ShardedTensor(ShardedTensorBase):
             return reduce(operator.mul, shard_md.shard_sizes)  # type: ignore[attr-defined]
 
         if enforce_dtype:
-            warnings.warn("enforce_dtype is deprecated.  Please use dtype instead.")
+            warnings.warn(
+                "`enforce_dtype` is deprecated. Please use `dtype` instead.",
+                FutureWarning,
+                stacklevel=2,
+            )
 
         rank = dist.get_rank(self._process_group)
         full_size = self.metadata().size
@@ -674,6 +677,11 @@ class ShardedTensor(ShardedTensorBase):
         )
         return st_to
 
+    @classmethod
+    def _normalize_pg(cls, process_group: Optional[dist.ProcessGroup]) -> dist.ProcessGroup:
+        if process_group is not None:
+            return process_group
+        return distributed_c10d._get_default_group()
 
     @classmethod
     def _init_from_local_shards(
@@ -684,12 +692,8 @@ class ShardedTensor(ShardedTensorBase):
         init_rrefs=False,
     ):
         # STEP 1: Validate the Shardmetadatas locally
-        process_group = (
-            process_group
-            if process_group is not None
-            else distributed_c10d._get_default_group()
-        )
-        current_rank = dist.get_rank(process_group)
+        process_group = cls._normalize_pg(process_group)
+        current_rank = dist.get_rank()  # intentional to get global rank
         world_size = dist.get_world_size(process_group)
 
         local_sharded_tensor_metadata: Optional[ShardedTensorMetadata] = None
@@ -738,6 +742,7 @@ class ShardedTensor(ShardedTensorBase):
         return sharded_tensor
 
     @classmethod
+    @deprecated(DEPRECATE_MSG, category=FutureWarning)
     def _init_from_local_tensor(
         cls,
         local_tensor: torch.Tensor,
@@ -802,8 +807,6 @@ class ShardedTensor(ShardedTensorBase):
                  We fully rely on the user to ensure local tensor is sharded based on the
                  sharding spec.
         """
-        warnings.warn(DEPRECATE_MSG)
-
         if not local_tensor.is_contiguous():
             raise ValueError('local_tensor is not a contiguous Tensor.')
 
@@ -819,12 +822,8 @@ class ShardedTensor(ShardedTensorBase):
             tensor_properties
         )
 
-        process_group = (
-            process_group
-            if process_group is not None
-            else distributed_c10d._get_default_group()
-        )
-        current_rank = dist.get_rank(process_group)
+        process_group = cls._normalize_pg(process_group)
+        current_rank = dist.get_rank()  # intentional to get global rank
 
         local_shards: List[Shard] = []
         for shard_metadata in sharded_tensor_metadata.shards_metadata:
@@ -859,12 +858,8 @@ class ShardedTensor(ShardedTensorBase):
                  not do cross rank validations, and fully rely on the user
                  for the correctness of sharded_tensor_metadata on each rank
         """
-        process_group = (
-            process_group
-            if process_group is not None
-            else distributed_c10d._get_default_group()
-        )
-        current_rank = dist.get_rank(process_group)
+        process_group = cls._normalize_pg(process_group)
+        current_rank = dist.get_rank()  # intentional to get global rank
 
         shards_metadata = sharded_tensor_metadata.shards_metadata
 
@@ -989,6 +984,7 @@ class ShardedTensor(ShardedTensorBase):
         """
         return self._sharding_spec
 
+    @deprecated(DEPRECATE_MSG, category=FutureWarning)
     def reshard(self, resharding_spec: shard_spec.ShardingSpec) -> ShardedTensor:
         """
         Reshard a sharded tensor given the ``resharding_spec``. For now, we only support
@@ -1059,8 +1055,6 @@ class ShardedTensor(ShardedTensorBase):
             tensor([[3], [3], [5], [5], [7], [7], [9], [9]]) # Rank 2
             tensor([[4], [4], [6], [6], [8], [8], [10], [10]]) # Rank 3
         """
-        warnings.warn(DEPRECATE_MSG)
-
         if (
             not isinstance(resharding_spec, shard_spec.ChunkShardingSpec) or
             not isinstance(self._sharding_spec, shard_spec.ChunkShardingSpec)
@@ -1105,6 +1099,7 @@ class ShardedTensor(ShardedTensorBase):
         return self.local_shards()[0].tensor
 
     @classmethod
+    @deprecated(DEPRECATE_MSG, category=FutureWarning)
     def __torch_function__(cls, func, types, args=(), kwargs=None):
         def dispatch(st: ShardedTensor, func: Callable):
             # Dispatch to custom user provided op first if it exists.
@@ -1129,7 +1124,6 @@ class ShardedTensor(ShardedTensorBase):
                 f"torch function '{func.__name__}', with args: {args} and "
                 f"kwargs: {kwargs} not supported for ShardedTensor!")
 
-        warnings.warn(DEPRECATE_MSG)
         # Find ShardedTensor instance to get process_group and sharding_spec.
         st_instance = None
 

@@ -105,6 +105,7 @@ if HAS_PYDOT:
             Visualize a torch.fx.Graph with graphviz
             Example:
                 >>> # xdoctest: +REQUIRES(module:pydot)
+                >>> # xdoctest: +REQUIRES(module:ubelt)
                 >>> # define module
                 >>> class MyModule(torch.nn.Module):
                 >>>     def __init__(self):
@@ -412,7 +413,10 @@ else:
                 graph_module: torch.fx.GraphModule,
                 name: str,
                 ignore_getattr: bool = False,
+                ignore_parameters_and_buffers: bool = False,
+                skip_node_names_in_args: bool = True,
                 parse_stack_trace: bool = False,
+                dot_graph_shape: Optional[str] = None,
             ):
                 raise RuntimeError('FXGraphDrawer requires the pydot package to be installed. Please install '
                                    'pydot through your favorite Python package manager.')

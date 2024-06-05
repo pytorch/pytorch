@@ -18,13 +18,11 @@
 #include <torch/csrc/profiler/perf.h>
 #include <torch/csrc/profiler/standalone/itt_observer.h>
 #include <torch/csrc/profiler/standalone/nvtx_observer.h>
+#include <torch/csrc/profiler/standalone/privateuse1_observer.h>
 #include <torch/csrc/profiler/util.h>
 
 #include <ATen/Context.h>
 
-#include <deque>
-#include <limits>
-#include <sstream>
 #include <stdexcept>
 #include <utility>
 
@@ -53,11 +51,11 @@ namespace autograd {
 namespace profiler {
 
 namespace {
-inline int64_t getTimeUs() {
+inline int64_t getTimeNs() {
 #ifdef USE_KINETO
   return libkineto::timeSinceEpoch(std::chrono::system_clock::now());
 #else
-  return c10::getTime() / 1000;
+  return c10::getTime();
 #endif // USE_KINETO
 }
 
@@ -83,16 +81,18 @@ struct OpArgData {
   std::vector<std::string> dtypes;
   std::vector<c10::IValue> concrete_inputs;
   std::vector<std::vector<int64_t>> shapes_for_kineto_event;
+  std::vector<shape> strides;
 };
 
 auto parseArgData(
     const std::vector<op_input_t>& input_shapes,
     const std::vector<op_input_t>& concrete_inputs) {
   if (input_shapes.empty()) {
-    return OpArgData{false, {}, {}, {}, {}};
+    return OpArgData{false, {}, {}, {}, {}, {}};
   }
 
   std::vector<shape> shapes(input_shapes.size());
+  std::vector<shape> strides(input_shapes.size());
   std::vector<std::vector<int64_t>> shapes_for_kineto_event(
       input_shapes.size());
 
@@ -106,14 +106,19 @@ auto parseArgData(
               shapes[i] = t.sizes_;
               shapes_for_kineto_event[i] = t.sizes_;
               dtypes[i] = std::string(scalarTypeToTypeMeta(t.dtype_).name());
+              strides[i] = t.strides_;
             },
             [&](const std::vector<TensorMetadata>& l) {
               std::vector<std::vector<int64_t>> shape;
               shape.reserve(l.size());
+              std::vector<std::vector<int64_t>> stride;
+              stride.reserve(l.size());
               for (const auto& t : l) {
                 shape.emplace_back(t.sizes_);
+                stride.emplace_back(t.strides_);
               }
               shapes[i] = shape;
+              strides[i] = stride;
               dtypes[i] = "TensorList";
             },
             [&](const c10::IValue& val) { dtypes[i] = "Scalar"; },
@@ -144,7 +149,12 @@ auto parseArgData(
   }
 
   return OpArgData{
-      true, shapes, dtypes, concrete_inputs_list, shapes_for_kineto_event};
+      true,
+      shapes,
+      dtypes,
+      concrete_inputs_list,
+      shapes_for_kineto_event,
+      strides};
 }
 
 struct MetadataBase {
@@ -197,7 +207,7 @@ struct AddTensorboardFields : public MetadataBase {
     result->visit_if_base<PyExtraFieldsBase>([&, this](const auto& i) -> void {
       this->addMetadata("Python id", std::to_string(i.id_));
 
-      c10::optional<std::string> parent_id;
+      std::optional<std::string> parent_id;
       std::shared_ptr<Result> parent = result->parent_.lock();
       while (parent && !parent_id.has_value()) {
         parent->visit_if_base<PyExtraFieldsBase>(
@@ -239,6 +249,7 @@ struct AddGenericMetadata : public MetadataBase {
     if (arg_data.has_data) {
       if (get_record_concrete_inputs_enabled()) {
         addMetadata("Input Dims", variantShapesToStr(arg_data.shapes));
+        addMetadata("Input Strides", variantShapesToStr(arg_data.strides));
       } else {
         addMetadata(
             "Input Dims", shapesToStr(arg_data.shapes_for_kineto_event));
@@ -270,6 +281,8 @@ struct AddGenericMetadata : public MetadataBase {
       addMetadata("Fwd thread id", std::to_string(op_event.forward_tid_));
       addMetadata("Sequence number", std::to_string(op_event.sequence_number_));
     }
+    addMetadata(
+        "Record function id", std::to_string(op_event.record_function_id_));
   }
 
   void operator()(ExtraFields<EventType::Backend>& backend_event) {
@@ -308,7 +321,7 @@ struct KinetoThreadLocalState : public ProfilerStateBase {
       const ProfilerConfig& config,
       std::set<torch::profiler::impl::ActivityType> activities)
       : ProfilerStateBase(config),
-        start_time_(getTimeUs()),
+        start_time_(getTimeNs()),
         record_queue_(config, std::move(activities)) {}
   ~KinetoThreadLocalState() override = default;
 
@@ -375,7 +388,7 @@ struct KinetoThreadLocalState : public ProfilerStateBase {
 
   std::unique_ptr<torch::profiler::impl::kineto::ActivityTraceWrapper>
   finalizeTrace() {
-    auto end_time = getTimeUs();
+    auto end_time = getTimeNs();
     record_queue_.stop();
 
     std::lock_guard<std::mutex> guard(state_mutex_);
@@ -556,7 +569,9 @@ void prepareProfiler(
           config.state == ProfilerState::KINETO_PRIVATEUSE1_FALLBACK,
       "Supported only in Kineto profiler");
   torch::profiler::impl::kineto::prepareTrace(
-      /*cpuOnly=*/!(at::hasCUDA() || at::hasXPU() || at::hasMTIA()),
+      /*cpuOnly=*/!(
+          at::hasCUDA() || at::hasXPU() || at::hasMTIA() ||
+          c10::get_privateuse1_backend() != "privateuseone"),
       activities,
       config.experimental_config);
 
@@ -624,6 +639,9 @@ void enableProfiler(
   } else if (config.state == ProfilerState::ITT) {
     torch::profiler::impl::pushITTCallbacks(config, scopes);
     return;
+  } else if (config.state == ProfilerState::PRIVATEUSE1) {
+    torch::profiler::impl::pushPRIVATEUSE1CallbacksStub(config, scopes);
+    return;
   }
 
   TORCH_CHECK(
@@ -659,7 +677,8 @@ std::unique_ptr<ProfilerResult> disableProfiler() {
            config.state == ProfilerState::KINETO_PRIVATEUSE1_FALLBACK ||
            config.state == ProfilerState::KINETO_ONDEMAND ||
            config.state == ProfilerState::NVTX ||
-           config.state == ProfilerState::ITT),
+           config.state == ProfilerState::ITT ||
+           config.state == ProfilerState::PRIVATEUSE1),
       "Can't disable Kineto profiler when it's not running");
 
   state_ptr->removeCallback();
@@ -671,9 +690,11 @@ std::unique_ptr<ProfilerResult> disableProfiler() {
     return std::make_unique<ProfilerResult>();
   }
 
-  // Shared among NVTX, KINETO, KINETO_GPU_FALLBACK, KINETO_PRIVATEUSE1_FALLBACK
+  // Shared among NVTX, PRIVATEUSE1, KINETO, KINETO_GPU_FALLBACK,
+  // KINETO_PRIVATEUSE1_FALLBACK
   std::unique_ptr<ProfilerResult> result;
-  if (state_ptr->config().state == ProfilerState::NVTX) {
+  if (state_ptr->config().state == ProfilerState::NVTX ||
+      state_ptr->config().state == ProfilerState::PRIVATEUSE1) {
     result = std::make_unique<ProfilerResult>();
   }
 
@@ -773,8 +794,8 @@ const c10::ArrayRef<std::string> KinetoEvent::moduleHierarchy() const {
   return {};
 }
 
-uint64_t KinetoEvent::durationUs() const {
-  return (result_->endTimeNS() - result_->start_time_ns_) / 1000;
+uint64_t KinetoEvent::durationNs() const {
+  return (result_->endTimeNS() - result_->start_time_ns_);
 }
 
 int64_t KinetoEvent::debugHandle() const {
@@ -784,16 +805,16 @@ int64_t KinetoEvent::debugHandle() const {
       [](const auto&) -> int64_t { return -1; }));
 }
 
-uint8_t KinetoEvent::deviceIndex() const {
+int KinetoEvent::deviceIndex() const {
   return result_->visit(c10::overloaded(
       [](const ExtraFields<EventType::Allocation>& i) {
-        return static_cast<uint8_t>(i.device_index_);
+        return static_cast<int>(i.device_index_);
       },
       [](const ExtraFields<EventType::OutOfMemory>& i) {
-        return static_cast<uint8_t>(i.device_index_);
+        return static_cast<int>(i.device_index_);
       },
       [&](const auto&) {
-        return static_cast<uint8_t>(result_->kineto_info_.device);
+        return static_cast<int>(result_->kineto_info_.device);
       }));
 }
 
@@ -855,7 +876,7 @@ FORWARD_FROM_RESULT(endThreadId, endTID())
 FORWARD_FROM_RESULT(activityType, kinetoType())
 FORWARD_FROM_RESULT(name, name())
 FORWARD_FROM_RESULT(deviceType, deviceType())
-FORWARD_FROM_RESULT(startUs, start_time_ns_ / 1000)
+FORWARD_FROM_RESULT(startNs, start_time_ns_)
 FORWARD_FROM_RESULT(correlationId, correlationID())
 FORWARD_FROM_RESULT(deviceResourceId, kineto_info_.resource)
 #undef FORWARD_FROM_RESULT
@@ -907,7 +928,7 @@ ProfilerResult::ProfilerResult(
     std::unique_ptr<torch::profiler::impl::kineto::ActivityTraceWrapper>&&
         trace,
     std::vector<experimental_event_t>&& event_tree)
-    : trace_start_us_(start_time),
+    : trace_start_ns_(start_time),
       events_(std::move(events)),
       trace_(std::move(trace)),
       event_tree_(std::move(event_tree)) {}

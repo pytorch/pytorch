@@ -8,6 +8,7 @@ from torch.distributed._shard.metadata import ShardMetadata
 from torch.distributed._shard.sharded_tensor import ShardedTensor
 from torch.distributed._tensor import DTensor
 from torch.distributed._tensor._utils import compute_local_shape_and_global_offset
+from torch.distributed.checkpoint.planner import _Checkpointable
 
 from torch.utils._pytree import tree_map_only
 
@@ -217,7 +218,12 @@ def _create_default_metadata_only_plan(state_dict: STATE_DICT_TYPE) -> SavePlan:
 
 
 def _create_write_items(fqn: str, object: Any) -> List[WriteItem]:
-    if isinstance(object, DTensor):
+    if isinstance(object, _Checkpointable):
+        return object._create_write_items(fqn, object)
+    elif isinstance(object, DTensor):
+        # DTensor can contain a local tensor that is a tensor subclass
+        if isinstance(object.to_local(), _Checkpointable):
+            return object.to_local()._create_write_items(fqn, object)  # type: ignore[arg-type]
         return [_create_write_items_for_dtensor(fqn, object)]
     elif isinstance(object, ShardedTensor):
         return [
@@ -241,21 +247,39 @@ def _create_chunk_from_dtensor(tensor: DTensor) -> ChunkStorageMetadata:
     )
 
 
+def _create_chunk_list(tensor: torch.Tensor) -> List[ChunkStorageMetadata]:
+    if isinstance(tensor, _Checkpointable):
+        local_chunks = tensor._create_chunk_list(tensor)
+    elif isinstance(tensor, DTensor):
+        # DTensor can contain a local tensor that is a tensor subclass
+        if isinstance(tensor.to_local(), _Checkpointable):
+            return tensor.to_local()._create_chunk_list(tensor)  # type: ignore[arg-type]
+        local_chunks = [_create_chunk_from_dtensor(tensor)]
+    elif isinstance(tensor, ShardedTensor):
+        local_chunks = [
+            _chunk_for_shard(shard.metadata) for shard in tensor.local_shards()
+        ]
+    elif isinstance(tensor, torch.Tensor):
+        local_chunks = [_create_chunk_from_tensor(tensor)]
+    else:
+        raise ValueError(
+            "Unsupported Type, expecting one of [Tensor, DTensor, ShardedTensor] "
+            f",but got {type(tensor)}"
+        )
+
+    return local_chunks
+
+
 def _create_read_items(fqn: str, md: STORAGE_TYPES, obj: Any) -> List[ReadItem]:
     if not isinstance(md, BytesStorageMetadata):
-        if isinstance(obj, DTensor):
-            local_chunks = [_create_chunk_from_dtensor(obj)]
-        elif isinstance(obj, ShardedTensor):
-            local_chunks = [
-                _chunk_for_shard(shard.metadata) for shard in obj.local_shards()
-            ]
-        elif isinstance(obj, torch.Tensor):
-            local_chunks = [_create_chunk_from_tensor(obj)]
-        else:
+        try:
+            local_chunks = _create_chunk_list(obj)
+        except ValueError as ex:
             raise ValueError(
                 f"Invalid checkpoint metadata for {fqn}, "
-                + f"expected BytesStorageMetadata but found {type(md)}"
-            )
+                + f"expected BytesStorageMetadata but found {type(md)}",
+            ) from ex
+
         return create_read_items_for_chunk_list(fqn, md, local_chunks)
     else:
         return [

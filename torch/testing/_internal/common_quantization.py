@@ -14,10 +14,7 @@ from torch.ao.nn.intrinsic import _FusedModule
 import torch.distributed as dist
 from torch.testing._internal.common_utils import TestCase, TEST_WITH_ROCM
 
-from torch._export import (
-    capture_pre_autograd_graph,
-    dynamic_dim,
-)
+from torch._export import capture_pre_autograd_graph
 from torch.ao.quantization import (
     QuantType,
     default_dynamic_qat_qconfig,
@@ -423,6 +420,22 @@ def skipIfNoDynamoSupport(fn):
             fn(*args, **kwargs)
     return wrapper
 
+def skipIfNoInductorSupport(fn):
+    reason = "inductor doesn't support."
+    if isinstance(fn, type):
+        if not torchdynamo.is_inductor_supported():
+            fn.__unittest_skip__ = True
+            fn.__unittest_skip_why__ = reason
+        return fn
+
+    @functools.wraps(fn)
+    def wrapper(*args, **kwargs):
+        if not torchdynamo.is_inductor_supported():
+            raise unittest.SkipTest(reason)
+        else:
+            fn(*args, **kwargs)
+    return wrapper
+
 try:
     import torchvision  # noqa: F401
     HAS_TORCHVISION = True
@@ -443,6 +456,81 @@ def lengths_to_offsets(t, offset_type=np.int64, use_begin_offset=True):
     if use_begin_offset:
         return tt[:-1]
     return tt[1:]
+
+
+def _group_quantize_tensor(w, n_bit=4, q_group_size=16):
+    assert w.dim() == 2
+    w = w.transpose(0, 1).contiguous()
+    assert q_group_size > 1
+    assert w.shape[-1] % q_group_size == 0
+
+    to_quant = w.reshape(-1, q_group_size)
+    assert torch.isnan(to_quant).sum() == 0
+
+    max_val = to_quant.amax(dim=1, keepdim=True)
+    min_val = to_quant.amin(dim=1, keepdim=True)
+    max_int = 2 ** n_bit - 1
+    min_int = 0
+    scales = (max_val - min_val).clamp(min=1e-6) / max_int
+    assert torch.isnan(scales).sum() == 0
+
+    zeros = min_val + scales * (2 ** (n_bit - 1))
+    assert torch.isnan(zeros).sum() == 0
+
+    out = to_quant.sub(min_val).div(scales).round().clamp_(min_int, max_int)
+    assert torch.isnan(out).sum() == 0
+
+    out = out.to(dtype=torch.int32).reshape(w.shape)
+
+    # Scales and zeros for the same q-group should be contiguous, so we can
+    # load as a 32-bit word
+    scales = scales.view(w.shape[0], -1)
+    zeros = zeros.view(w.shape[0], -1)
+    scales_and_zeros = (
+        torch.cat(
+            [
+                scales.reshape(scales.size(0), scales.size(1), 1),
+                zeros.reshape(zeros.size(0), zeros.size(1), 1),
+            ],
+            2,
+        ).transpose(0, 1).contiguous()
+    )
+
+    return out, scales_and_zeros
+
+
+def _dynamically_quantize_per_channel(x, quant_min, quant_max, target_dtype):
+    # source: https://github.com/pytorch-labs/gpt-fast/blob/main/quantize.py
+    # default setup for affine quantization of activations
+    x_dtype = x.dtype
+    x = x.float()
+    eps = torch.finfo(torch.float32).eps
+
+    # get min and max
+    min_val, max_val = torch.aminmax(x, dim=1)
+
+    # calculate scales and zero_points based on min and max
+    # reference: https://fburl.com/code/srbiybme
+    min_val_neg = torch.min(min_val, torch.zeros_like(min_val))
+    max_val_pos = torch.max(max_val, torch.zeros_like(max_val))
+    device = min_val_neg.device
+
+    # reference: https://fburl.com/code/4wll53rk
+    max_val_pos = torch.max(-min_val_neg, max_val_pos)
+    scales = max_val_pos / (float(quant_max - quant_min) / 2)
+    # ensure scales is the same dtype as the original tensor
+    scales = torch.clamp(scales, min=eps).to(x.dtype)
+    zero_points = torch.zeros(min_val_neg.size(), dtype=torch.int64, device=device)
+
+    # quantize based on qmin/qmax/scales/zp
+    x_div = x / scales.unsqueeze(-1)
+    x_round = torch.round(x_div)
+    x_zp = x_round + zero_points.unsqueeze(-1)
+    quant = torch.clamp(x_zp, quant_min, quant_max).to(target_dtype)
+
+    return quant, scales.to(x_dtype), zero_points
+
+
 
 # QuantizationTestCase used as a base class for testing quantization on modules
 class QuantizationTestCase(TestCase):
@@ -825,10 +913,8 @@ class QuantizationTestCase(TestCase):
                     (exp_type_end_b is act_type_end_b)
                 self.assertTrue(
                     types_match,
-                    'Type mismatch at {}: expected {}, got {}'.format(
-                        k,
-                        (exp_type_start_a, exp_type_end_a, exp_type_start_b, exp_type_end_b),
-                        (act_type_start_a, act_type_end_a, act_type_start_b, act_type_end_b))
+                    f'Type mismatch at {k}: expected {(exp_type_start_a, exp_type_end_a, exp_type_start_b, exp_type_end_b)}, '
+                    f'got {(act_type_start_a, act_type_end_a, act_type_start_b, act_type_end_b)}'
                 )
 
         def assert_ns_compare_dict_valid(
@@ -1162,6 +1248,7 @@ class PT2EQuantizationTestCase(QuantizationTestCase):
         fx_qconfig_mapping=None,
         export_with_dynamic_shape=False,
         is_qat=False,
+        is_debug_mode=False,
     ):
         # resetting dynamo cache
         torch._dynamo.reset()
@@ -1169,10 +1256,14 @@ class PT2EQuantizationTestCase(QuantizationTestCase):
 
         # program capture
         m = copy.deepcopy(m_eager)
+        dynamic_shapes = tuple(
+            {0: torch.export.Dim("dim")} if i == 0 else None
+            for i in range(len(example_inputs))
+        )
         m = capture_pre_autograd_graph(
             m,
             example_inputs,
-            constraints=[dynamic_dim(example_inputs[0], 0)] if export_with_dynamic_shape else [],
+            dynamic_shapes=dynamic_shapes if export_with_dynamic_shape else None,
         )
 
         if is_qat:
@@ -1181,7 +1272,9 @@ class PT2EQuantizationTestCase(QuantizationTestCase):
             m = prepare_pt2e(m, quantizer)
         # Calibrate
         m(*example_inputs)
-        m = convert_pt2e(m, fold_quantize=True)
+        m = convert_pt2e(m)
+        if is_debug_mode:
+            print("quantized model", m)
 
         pt2_quant_output = m(*example_inputs)
         ns = NodeSpec
@@ -1208,7 +1301,7 @@ class PT2EQuantizationTestCase(QuantizationTestCase):
             m_fx = capture_pre_autograd_graph(
                 m_fx,
                 example_inputs,
-                constraints=[dynamic_dim(example_inputs[0], 0)] if export_with_dynamic_shape else [],
+                dynamic_shapes=dynamic_shapes if export_with_dynamic_shape else None,
             )
             node_occurrence = {}
             for k, v in PT2EQuantizationTestCase._MAP_TO_FX_TRACED_OPS.items():
@@ -1218,7 +1311,7 @@ class PT2EQuantizationTestCase(QuantizationTestCase):
             fx_quant_output = m_fx(*example_inputs)
             self.assertEqual(fx_quant_output, pt2_quant_output)
 
-    def _quantize(self, m, quantizer, example_inputs):
+    def _quantize(self, m, quantizer, example_inputs, is_qat: bool = False):
         # resetting dynamo cache
         torch._dynamo.reset()
 
@@ -1226,9 +1319,12 @@ class PT2EQuantizationTestCase(QuantizationTestCase):
             m,
             example_inputs,
         )
-        m = prepare_pt2e(m, quantizer)
+        if is_qat:
+            m = prepare_qat_pt2e(m, quantizer)
+        else:
+            m = prepare_pt2e(m, quantizer)
         m(*example_inputs)
-        m = convert_pt2e(m, fold_quantize=True)
+        m = convert_pt2e(m)
         return m
 
     def _get_pt2e_quantized_linear(self, is_per_channel=False) -> torch.fx.GraphModule:
@@ -2688,6 +2784,27 @@ class TestHelperModules:
 
         def forward(self, x):
             x = self.conv(x)
+            x = self.bn(x)
+            return self.relu(x)
+
+    class ConvTWithBNRelu(torch.nn.Module):
+        def __init__(self, relu, dim=2, bn=True, bias=True):
+            super().__init__()
+            convts = {1: torch.nn.ConvTranspose1d, 2: torch.nn.ConvTranspose2d}
+            bns = {1: torch.nn.BatchNorm1d, 2: torch.nn.BatchNorm2d}
+            self.convt = convts[dim](3, 3, 3, bias=bias)
+
+            if bn:
+                self.bn = bns[dim](3)
+            else:
+                self.bn = torch.nn.Identity()
+            if relu:
+                self.relu = torch.nn.ReLU()
+            else:
+                self.relu = torch.nn.Identity()
+
+        def forward(self, x):
+            x = self.convt(x)
             x = self.bn(x)
             return self.relu(x)
 

@@ -28,7 +28,26 @@
 #include <torch/csrc/profiler/standalone/execution_trace_observer.h>
 #include <torch/csrc/profiler/util.h>
 
+#ifdef USE_DISTRIBUTED
+#include <torch/csrc/distributed/c10d/ParamCommsUtils.hpp>
+#endif // USE_DISTRIBUTED
+
 using namespace at;
+
+// Collective property attributes
+// https://github.com/pytorch/pytorch/issues/124674
+#ifdef USE_DISTRIBUTED
+constexpr auto kETCommsName = "collective_name";
+constexpr auto kETInMsgNelems = "in_msg_nelems";
+constexpr auto kETOutMsgNelems = "out_msg_nelems";
+constexpr auto kETInSplit = "in_split_size";
+constexpr auto kETOutSplit = "out_split_size";
+constexpr auto kETGlobalRankStart = "global_rank_start";
+constexpr auto kETGlobalRankStride = "global_rank_stride";
+constexpr auto kETGroupSize = "pg_size";
+constexpr auto kETProcessGroupName = "pg_name";
+constexpr auto kETProcessGroupDesc = "pg_desc";
+#endif // USE_DISTRIBUTED
 
 namespace torch {
 namespace profiler {
@@ -172,7 +191,7 @@ struct TORCH_API ExecutionTraceObserver {
   enum class RunState { uninitialized, disabled, enabled };
 
   // Mutex for multithreaded access to the shared containers.
-  std::mutex g_mutex{};
+  std::recursive_mutex g_mutex{};
   // Stream to write output JSON.
   std::ofstream out{};
 
@@ -236,6 +255,8 @@ const ExecutionTraceObserver::ID root_id{1};
 
 struct FunctionCallContext : public ObserverContext {
   std::string name;
+  std::string kernel_backend;
+  std::string kernel_file;
   ExecutionTraceObserver::ID op_id{uninitialized_id};
   ExecutionTraceObserver::ID parent_id{uninitialized_id};
   ExecutionTraceObserver::ID fw_parent_id{uninitialized_id};
@@ -256,6 +277,19 @@ static std::ofstream openOutputFile(const std::string& name) {
   return stream;
 }
 
+static inline std::string getAttrJson(
+    const std::string& name,
+    const std::string& type,
+    const std::string& value) {
+  // note name and type are not quoted but value should be if it is a string.
+  return fmt::format(
+      R"JSON(
+  {{"name": "{}", "type": "{}", "value": {}}})JSON",
+      name,
+      type,
+      value);
+}
+
 static void writeJsonNode(
     std::ofstream& out,
     const std::string& name,
@@ -273,14 +307,17 @@ static void writeJsonNode(
     const std::string& outputs = "[]",
     const std::string& output_shapes = "[]",
     const std::string& output_types = "[]",
-    const std::string& operator_schema = "") {
+    const std::string& operator_schema = "",
+    const std::string& kernel_backend = "",
+    const std::string& kernel_file = "",
+    const std::string& additiona_attrs = "") {
   out << fmt::format(
       R"JSON(
     {{
       "id": {}, "name": "{}", "ctrl_deps": {},
       "inputs": {{"values": {}, "shapes": {}, "types": {}}},
       "outputs": {{"values": {}, "shapes": {}, "types": {}}},
-      "attrs": [{{"name": "rf_id", "type": "uint64", "value": {}}}, {{"name": "fw_parent", "type": "uint64", "value": {}}}, {{"name": "seq_id", "type": "int64", "value": {}}}, {{"name": "scope", "type": "uint64", "value": {}}}, {{"name": "tid", "type": "uint64", "value": {}}}, {{"name": "fw_tid", "type": "uint64", "value": {}}}, {{"name": "op_schema", "type": "string", "value": "{}"}}]
+      "attrs": [{{"name": "rf_id", "type": "uint64", "value": {}}},{{"name": "fw_parent", "type": "uint64", "value": {}}},{{"name": "seq_id", "type": "int64", "value": {}}},{{"name": "scope", "type": "uint64", "value": {}}},{{"name": "tid", "type": "uint64", "value": {}}},{{"name": "fw_tid", "type": "uint64", "value": {}}},{{"name": "op_schema", "type": "string", "value": "{}"}},{{"name": "kernel_backend", "type": "string", "value": "{}"}},{{"name": "kernel_file", "type": "string", "value": "{}"}}{}]
     }})JSON",
       id,
       name,
@@ -297,7 +334,10 @@ static void writeJsonNode(
       scope,
       tid,
       fw_tid,
-      operator_schema);
+      operator_schema,
+      kernel_backend,
+      kernel_file,
+      additiona_attrs);
 }
 
 inline std::string timeString(const std::time_t timepoint) {
@@ -326,7 +366,7 @@ static bool initExecutionTraceStart(ExecutionTraceObserver& ob) {
 
   ob.out << fmt::format(
       R"JSON({{
-  "schema": "1.0.2-chakra.0.0.4", "pid": {}, "time": "{}", "start_ts": {},
+  "schema": "1.1.0-chakra.0.0.4", "pid": {}, "time": "{}", "start_ts": {},
   "nodes": [)JSON",
       ob.pid,
       ob.record_time,
@@ -442,6 +482,94 @@ inline void appendValueInfo(
   shapes.push_back(getValueShape(val));
 }
 
+inline void handleKernelBackendInfo(
+    FunctionCallContext& fc,
+    const RecordFunction& fn) {
+  // triton kernel related information are in kwinputs
+  const auto& kwinputs = fn.kwinputs();
+  if (kwinputs.find("kernel_backend") != kwinputs.end()) {
+    fc.kernel_backend = kwinputs.at("kernel_backend").toStringRef();
+    if (fc.kernel_backend == "triton") {
+      fc.kernel_file = kwinputs.at("kernel_file").toStringRef();
+      TORCH_INTERNAL_ASSERT(
+          kwinputs.find("kernel_file") != kwinputs.end(),
+          "kernel file is missing in triton kernel");
+      // Remove the path of the file name
+      if (fc.kernel_file.find_last_of('/') != std::string::npos)
+        fc.kernel_file =
+            fc.kernel_file.substr(fc.kernel_file.find_last_of('/') + 1);
+
+      // get grid information
+      TORCH_INTERNAL_ASSERT(
+          kwinputs.find("grid") != kwinputs.end(),
+          "grid is missing in triton kernel");
+      fc.input_values.emplace_back(
+          "\"" + kwinputs.at("grid").toStringRef() + "\"");
+      fc.input_types.emplace_back("\"String\"");
+      fc.input_shapes.emplace_back("[]");
+
+      // get stream information
+      TORCH_INTERNAL_ASSERT(
+          kwinputs.find("stream") != kwinputs.end(),
+          "stream is missing in triton kernel");
+      fc.input_values.emplace_back(
+          std::to_string(kwinputs.at("stream").toInt()));
+      fc.input_types.emplace_back("\"Int\"");
+      fc.input_shapes.emplace_back("[]");
+    }
+  }
+}
+
+// Additional attributes for commounication collectives
+inline std::string getCommsNodeAttrs(const RecordFunction& fn) {
+  std::vector<std::string> attrs;
+
+#ifdef USE_DISTRIBUTED
+  // We rely on paramcommsdebug object that is available in thread local info
+  auto debugInfo = dynamic_cast<ParamCommsDebugInfo*>(
+      c10::ThreadLocalDebugInfo::get(c10::DebugInfoKind::PARAM_COMMS_INFO));
+  if (debugInfo == nullptr) {
+    LOG(WARNING) << "ParamCommsDebugInfo not available for function: "
+                 << fn.name();
+    return ", " + getAttrJson("debug", "string", "\"missing comms info\"");
+  }
+
+  // get NcclMeta from record function, this used ParamCommsDebugInfo above
+  auto meta = saveNcclMeta(fn, false /*truncate*/);
+
+  auto addAttr =
+      [&](const char* commsMetaName, const char* etMetaName, const char* type) {
+        auto it = meta.find(commsMetaName);
+        if (it != meta.end()) {
+          attrs.push_back(getAttrJson(etMetaName, type, it->second));
+        }
+      };
+
+  addAttr(kCommsName, kETCommsName, "string");
+  addAttr(kDtype, kDtype, "string");
+
+  addAttr(kInMsgNelems, kETInMsgNelems, "uint64");
+  addAttr(kOutMsgNelems, kETOutMsgNelems, "uint64");
+
+  // following two metadata are lists.
+  addAttr(kInSplit, kETInSplit, "string");
+  addAttr(kOutSplit, kETOutSplit, "string");
+
+  addAttr(kGlobalRankStart, kETGlobalRankStart, "uint64");
+  addAttr(kGlobalRankStride, kETGlobalRankStride, "uint64");
+
+  // pg_name is a string.
+  addAttr(kProcessGroupName, kETProcessGroupName, "string");
+  addAttr(kProcessGroupDesc, kETProcessGroupDesc, "string");
+
+  addAttr(kGroupSize, kETGroupSize, "uint64");
+
+#endif // USE_DISTRIBUTED
+
+  // XXX consider using as string stream?
+  return attrs.size() == 0 ? "" : fmt::format(", {}", fmt::join(attrs, ", "));
+}
+
 static void recordOperatorStart(
     ExecutionTraceObserver& ob,
     FunctionCallContext& fc,
@@ -449,7 +577,7 @@ static void recordOperatorStart(
   auto tid = fn.threadId();
 
   try {
-    const std::lock_guard<std::mutex> lock(ob.g_mutex);
+    const std::lock_guard<std::recursive_mutex> lock(ob.g_mutex);
 
     // if current thread stack is empty, push the root node to the stack first
     if (ob.op_stack[tid].empty()) {
@@ -491,6 +619,9 @@ static void recordOperatorStart(
       appendValueInfo(
           ob, inputs[i], fc.input_values, fc.input_types, fc.input_shapes);
     }
+
+    handleKernelBackendInfo(fc, fn);
+
     fc.parent_id = ob.op_stack[tid].top();
     // get parent id from the forward stack, this can be different for
     // autograd ops, which may execute on a different thread than the original
@@ -583,7 +714,7 @@ static void onFunctionExit(const RecordFunction& fn, ObserverContext* ctx_ptr) {
     std::vector<std::string> output_shapes;
     std::vector<std::string> output_values;
     try {
-      const std::lock_guard<std::mutex> lock(ob->g_mutex);
+      const std::lock_guard<std::recursive_mutex> lock(ob->g_mutex);
       // remove current op id from stack
 
       ob->op_stack[fn.threadId()].pop();
@@ -597,6 +728,9 @@ static void onFunctionExit(const RecordFunction& fn, ObserverContext* ctx_ptr) {
       if (op_schema.has_value()) {
         op_schema_str = json_str_escape(c10::toString(op_schema.value()));
       }
+
+      const std::string additiona_attrs =
+          fn.isNcclMeta() ? getCommsNodeAttrs(fn) : "";
 
       writeJsonNode(
           ob->out,
@@ -615,7 +749,10 @@ static void onFunctionExit(const RecordFunction& fn, ObserverContext* ctx_ptr) {
           vectorToString(output_values),
           vectorToString(output_shapes),
           vectorToString(output_types),
-          op_schema_str);
+          op_schema_str,
+          fc.kernel_backend,
+          fc.kernel_file,
+          additiona_attrs);
       ob->out << ",";
     } catch (const std::exception& e) {
       LOG(WARNING) << "Exception in execution trace observer: [" << fc.name
@@ -679,7 +816,7 @@ void removeExecutionTraceObserver() {
 }
 
 void enableExecutionTraceObserver() {
-  VLOG(1) << "enableExecutionTraceObserver() ";
+  LOG(WARNING) << "Enabling Execution Trace Observer";
   auto& ob = *ObserverManager::get();
   // Make sure we are not already enabled.
   if (ob.getState() == ExecutionTraceObserver::RunState::enabled) {
@@ -691,7 +828,7 @@ void enableExecutionTraceObserver() {
 }
 
 void disableExecutionTraceObserver() {
-  VLOG(1) << "disableExecutionTraceObserver()";
+  LOG(WARNING) << "Disabling Execution Trace Observer";
   auto& ob = *ObserverManager::get();
   if (ob.getState() != ExecutionTraceObserver::RunState::disabled) {
     ob.setState(ExecutionTraceObserver::RunState::disabled);

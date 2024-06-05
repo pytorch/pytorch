@@ -23,6 +23,69 @@ concurrency:
 permissions: read-all
 
 jobs:
+  llm-td:
+    name: before-test
+    uses: ./.github/workflows/llm_td_retrieval.yml
+    permissions:
+      id-token: write
+      contents: read
+
+  target-determination:
+    name: before-test
+    uses: ./.github/workflows/target_determination.yml
+    needs: llm-td
+    permissions:
+      id-token: write
+      contents: read
+
+  linux-focal-cuda12_1-py3_10-gcc9-build:
+    name: linux-focal-cuda12.1-py3.10-gcc9
+    uses: ./.github/workflows/_linux-build.yml
+    with:
+      build-environment: linux-focal-cuda12.1-py3.10-gcc9
+      docker-image-name: pytorch-linux-focal-cuda12.1-cudnn8-py3-gcc9
+      test-matrix: |
+        { include: [
+          { config: "nogpu_AVX512", shard: 1, num_shards: 1, runner: "linux.2xlarge" },
+          { config: "nogpu_NO_AVX2", shard: 1, num_shards: 1, runner: "linux.2xlarge" },
+          { config: "jit_legacy", shard: 1, num_shards: 1, runner: "linux.4xlarge.nvidia.gpu" },
+        ]}
+
+  linux-focal-cuda12_1-py3_10-gcc9-test:
+    name: linux-focal-cuda12.1-py3.10-gcc9
+    uses: ./.github/workflows/_linux-test.yml
+    needs:
+      - linux-focal-cuda12_1-py3_10-gcc9-build
+      - target-determination
+    with:
+      build-environment: linux-focal-cuda12.1-py3.10-gcc9
+      docker-image: ${{ needs.linux-focal-cuda12_1-py3_10-gcc9-build.outputs.docker-image }}
+      test-matrix: ${{ needs.linux-focal-cuda12_1-py3_10-gcc9-build.outputs.test-matrix }}
+
+  linux-focal-cuda12_4-py3_10-gcc9-build:
+    name: linux-focal-cuda12.4-py3.10-gcc9
+    uses: ./.github/workflows/_linux-build.yml
+    with:
+      build-environment: linux-focal-cuda12.4-py3.10-gcc9
+      docker-image-name: pytorch-linux-focal-cuda12.4-cudnn8-py3-gcc9
+      test-matrix: |
+        { include: [
+          { config: "nogpu_AVX512", shard: 1, num_shards: 1, runner: "linux.2xlarge" },
+          { config: "nogpu_NO_AVX2", shard: 1, num_shards: 1, runner: "linux.2xlarge" },
+          { config: "jit_legacy", shard: 1, num_shards: 1, runner: "linux.4xlarge.nvidia.gpu" },
+        ]}
+
+  linux-focal-cuda12_4-py3_10-gcc9-test:
+    name: linux-focal-cuda12.4-py3.10-gcc9
+    uses: ./.github/workflows/_linux-test.yml
+    needs:
+      - linux-focal-cuda12_4-py3_10-gcc9-build
+      - target-determination
+    with:
+      build-environment: linux-focal-cuda12.4-py3.10-gcc9
+      docker-image: ${{ needs.linux-focal-cuda12_4-py3_10-gcc9-build.outputs.docker-image }}
+      test-matrix: ${{ needs.linux-focal-cuda12_4-py3_10-gcc9-build.outputs.test-matrix }}
+
   parallelnative-linux-jammy-py3_8-gcc11-build:
     name: parallelnative-linux-jammy-py3.8-gcc11
     uses: ./.github/workflows/_linux-build.yml
@@ -39,7 +102,9 @@ jobs:
   parallelnative-linux-jammy-py3_8-gcc11-test:
     name: parallelnative-linux-jammy-py3.8-gcc11
     uses: ./.github/workflows/_linux-test.yml
-    needs: parallelnative-linux-jammy-py3_8-gcc11-build
+    needs:
+      - parallelnative-linux-jammy-py3_8-gcc11-build
+      - target-determination
     with:
       build-environment: parallelnative-linux-jammy-py3.8-gcc11
       docker-image: ${{ needs.parallelnative-linux-jammy-py3_8-gcc11-build.outputs.docker-image }}
@@ -86,7 +151,9 @@ jobs:
   linux-focal-cuda11_8-py3_10-gcc9-debug-test:
     name: linux-focal-cuda11.8-py3.10-gcc9-debug
     uses: ./.github/workflows/_linux-test.yml
-    needs: linux-focal-cuda11_8-py3_10-gcc9-debug-build
+    needs:
+      - linux-focal-cuda11_8-py3_10-gcc9-debug-build
+      - target-determination
     with:
       build-environment: linux-focal-cuda11.8-py3.10-gcc9-debug
       docker-image: ${{ needs.linux-focal-cuda11_8-py3_10-gcc9-debug-build.outputs.docker-image }}
@@ -110,7 +177,9 @@ jobs:
   win-vs2019-cuda11_8-py3-test:
     name: win-vs2019-cuda11.8-py3
     uses: ./.github/workflows/_win-test.yml
-    needs: win-vs2019-cuda11_8-py3-build
+    needs:
+      - win-vs2019-cuda11_8-py3-build
+      - target-determination
     with:
       build-environment: win-vs2019-cuda11.8-py3
       cuda-version: "11.8"
@@ -130,7 +199,7 @@ jobs:
           { config: "default",
             shard: 1,
             num_shards: 1,
-            runner: "macos-13-xlarge",
+            runner: "macos-14-xlarge",
             ios_platform: "SIMULATOR",
             ios_arch: "arm64",
             use_lite_interpreter: 1,
@@ -141,7 +210,7 @@ jobs:
           { config: "default",
             shard: 1,
             num_shards: 1,
-            runner: "macos-13-xlarge",
+            runner: "macos-14-xlarge",
             ios_platform: "OS",
             ios_arch: "arm64",
             use_lite_interpreter: 1,
@@ -196,11 +265,11 @@ jobs:
       docker-image: ${{ needs.linux-vulkan-focal-py3_11-clang10-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-vulkan-focal-py3_11-clang10-build.outputs.test-matrix }}
 
-  linux-focal-rocm5_7-py3_8-build:
-    name: linux-focal-rocm5.7-py3.8
+  linux-focal-rocm6_1-py3_8-build:
+    name: linux-focal-rocm6.1-py3.8
     uses: ./.github/workflows/_linux-build.yml
     with:
-      build-environment: linux-focal-rocm5.7-py3.8
+      build-environment: linux-focal-rocm6.1-py3.8
       docker-image-name: pytorch-linux-focal-rocm-n-py3
       test-matrix: |
         { include: [
@@ -208,14 +277,16 @@ jobs:
           { config: "distributed", shard: 2, num_shards: 2, runner: "linux.rocm.gpu" },
         ]}
 
-  linux-focal-rocm5_7-py3_8-test:
+  linux-focal-rocm6_1-py3_8-test:
     permissions:
       id-token: write
       contents: read
-    name: linux-focal-rocm5.7-py3.8
+    name: linux-focal-rocm6.1-py3.8
     uses: ./.github/workflows/_rocm-test.yml
-    needs: linux-focal-rocm5_7-py3_8-build
+    needs:
+      - linux-focal-rocm6_1-py3_8-build
+      - target-determination
     with:
-      build-environment: linux-focal-rocm5.7-py3.8
-      docker-image: ${{ needs.linux-focal-rocm5_7-py3_8-build.outputs.docker-image }}
-      test-matrix: ${{ needs.linux-focal-rocm5_7-py3_8-build.outputs.test-matrix }}
+      build-environment: linux-focal-rocm6.1-py3.8
+      docker-image: ${{ needs.linux-focal-rocm6_1-py3_8-build.outputs.docker-image }}
+      test-matrix: ${{ needs.linux-focal-rocm6_1-py3_8-build.outputs.test-matrix }}

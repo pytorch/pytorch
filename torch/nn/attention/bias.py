@@ -79,7 +79,7 @@ class CausalVariant(IntEnum):
     LOWER_RIGHT = auto()
 
 
-class CausalBias:
+class CausalBias(torch.Tensor):
     """
     A bias representing causal attention patterns. For an overview of the bias structure, see the :class:`CausalVariant` enum.
 
@@ -249,7 +249,6 @@ class CausalBias:
                     custom_mask_type=int(attn_mask.variant),
                     compute_log_sumexp=compute_log_sumexp,
                     scale=scale,
-                    causal_diagonal=None,
                     seqlen_k=None,
                 )[0].transpose(1, 2)
             else:

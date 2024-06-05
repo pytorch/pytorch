@@ -1,9 +1,50 @@
 #define TORCH_ASSERT_NO_OPERATORS
 #include <ATen/Dispatch.h>
+#include <ATen/Parallel.h>
 #include <ATen/native/CPUBlas.h>
 #include <ATen/native/cpu/zmath.h>
 #include <c10/util/irange.h>
 #include <c10/util/Unroll.h>
+
+#if defined(__aarch64__) && !defined(C10_MOBILE)
+#include <arm_neon.h>
+
+namespace at::native::blas_impl {
+void fp16_gemv_notrans(
+    const int m,
+    const int n,
+    const float alpha,
+    const float16_t* a,
+    const int lda,
+    const float16_t* x,
+    const int incx,
+    const float beta,
+    float16_t* y,
+    const int incy);
+
+void fp16_gemv_trans(
+    const int m,
+    const int n,
+    const float alpha,
+    const float16_t* a,
+    const int lda,
+    const float16_t* x,
+    const int incx,
+    const float beta,
+    float16_t* y,
+    const int incy);
+
+float fp16_dot_with_fp32_arith(
+  const float16_t* x,
+  const float16_t* a,
+  int64_t len);
+
+float bf16_dot_with_fp32_arith(
+  const at::BFloat16* x,
+  const at::BFloat16* a,
+  int64_t len);
+}
+#endif
 
 namespace at::native {
 namespace cpublas {
@@ -241,6 +282,120 @@ void gemm_transab_(
     }
   }
 }
+
+#if defined(__aarch64__) && !defined(C10_MOBILE)
+template <>
+void gemm_notrans_(
+    int64_t m,
+    int64_t n,
+    int64_t k,
+    float alpha,
+    const at::Half* a,
+    int64_t lda,
+    const at::Half* b,
+    int64_t ldb,
+    float beta,
+    at::Half* c,
+    int64_t ldc) {
+  // c += alpha * (a @ b)
+  if (n == 1 && beta == 0.0) {
+    at::native::blas_impl::fp16_gemv_notrans(m, k, alpha, reinterpret_cast<const float16_t*>(a), lda, reinterpret_cast<const float16_t*>(b), 1, beta, reinterpret_cast<float16_t*>(c), 1);
+    return;
+  }
+  for (const auto i : c10::irange(m)) {
+    for (const auto j : c10::irange(n)) {
+      const auto dot = sum(k, [&](int64_t l) -> float {
+        return float(c10::detail::fp16_from_bits(a[l * lda + i].x)) *
+            float(c10::detail::fp16_from_bits(b[j * ldb + l].x));
+      });
+      if (beta == 0) {
+        c[j * ldc + i] = alpha * dot;
+      } else {
+        c[j * ldc + i] = beta * c[j * ldc + i] + alpha * dot;
+      }
+    }
+  }
+}
+
+
+inline float32x4_t load_as_float32x4(const BFloat16* ptr) {
+  int32x4_t shift = vdupq_n_s32(16);
+  uint32x4_t as_int = vmovl_u16(vld1_u16(reinterpret_cast<const uint16_t *>(ptr)));
+  return vreinterpretq_f32_u32(vshlq_u32(as_int, shift));
+}
+
+static float compute_dot(const at::Half* a, const at::Half* b, int64_t len) {
+  return at::native::blas_impl::fp16_dot_with_fp32_arith(
+    reinterpret_cast<const float16_t*>(a),
+    reinterpret_cast<const float16_t*>(b),
+    len);
+}
+
+static float compute_dot(const at::BFloat16* a, const at::BFloat16* b, int64_t len) {
+  return at::native::blas_impl::bf16_dot_with_fp32_arith(a, b, len);
+}
+
+template <>
+void gemm_transa_(
+    TransposeType transa,
+    int64_t m, int64_t n, int64_t k,
+    float alpha,
+    const at::Half *a, int64_t lda,
+    const at::Half *b, int64_t ldb,
+    float beta,
+    at::Half *c, int64_t ldc) {
+  // c = alpha * (a.T @ b) + beta * c
+  if (n == 1 && beta == 0.0) {
+    at::native::blas_impl::fp16_gemv_trans(k, m, alpha, reinterpret_cast<const float16_t*>(a), lda, reinterpret_cast<const float16_t*>(b), 1, beta, reinterpret_cast<float16_t*>(c), 1);
+    return;
+  }
+  parallel_for(0, m, 1, [&](int64_t begin, int64_t end) {
+    const auto *a_ = a + begin * lda;
+    for (const auto i : c10::irange(begin, end)) {
+      const auto *b_ = b;
+      for (const auto j : c10::irange(n)) {
+        const auto dot = compute_dot(a_, b_, k);
+        b_ += ldb;
+        if (beta == 0) {
+          c[j*ldc+i] = alpha*dot;
+        } else {
+          c[j*ldc+i] = beta*c[j*ldc+i]+alpha*dot;
+        }
+      }
+      a_ += lda;
+    }
+  });
+}
+
+template <>
+void gemm_transa_(
+    TransposeType transa,
+    int64_t m, int64_t n, int64_t k,
+    float alpha,
+    const at::BFloat16 *a, int64_t lda,
+    const at::BFloat16 *b, int64_t ldb,
+    float beta,
+    at::BFloat16 *c, int64_t ldc) {
+  // c = alpha * (a.T @ b) + beta * c
+  parallel_for(0, m, 1, [&](int64_t begin, int64_t end) {
+    const auto *a_ = a + begin * lda;
+    for (const auto i : c10::irange(begin, end)) {
+      const auto *b_ = b;
+      for (const auto j : c10::irange(n)) {
+        const auto dot = compute_dot(a_, b_, k);
+        b_ += ldb;
+        if (beta == 0) {
+          c[j*ldc+i] = alpha*dot;
+        } else {
+          c[j*ldc+i] = beta*c[j*ldc+i]+alpha*dot;
+        }
+      }
+      a_ += lda;
+    }
+  });
+}
+
+#endif
 
 template <typename scalar_t, typename opmath_t>
 void gemm_core_(

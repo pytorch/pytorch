@@ -1,4 +1,4 @@
-from typing import Any, Dict, List, Tuple, Union
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 import torch
 import torch.utils._pytree as pytree
@@ -23,7 +23,7 @@ from torch.fx.experimental.proxy_tensor import (
 # op. First, when FakeTensor sees this op:
 # - If the schema says it returns nothing, we can generate a trivial
 #   FakeTensor rule for it (that returns nothing).
-# - Otherwise, the user needs to provide a FakeTensor rule (abstract impl)
+# - Otherwise, the user needs to provide a FakeTensor impl (fake impl)
 #
 # Next, when Python FunctionalTensor sees the op, it will functionalize
 # it by emitting a call to an auto_functionalize(op, ["x"], {"x": ...})
@@ -108,6 +108,7 @@ def can_auto_functionalize(op: torch._ops.OperatorBase) -> bool:
 @auto_functionalized.py_impl(DispatchKey.CompositeExplicitAutograd)
 def auto_functionalized_dense(
     _mutable_op: torch._ops.OpOverload,
+    _only_clone_these_tensors: Optional[Tuple[str, ...]] = None,
     **kwargs: Dict[str, Any],
 ) -> Tuple[Any, Tuple[Tensor, ...]]:
     new_kwargs = dict(**kwargs)
@@ -115,16 +116,24 @@ def auto_functionalized_dense(
 
     _mutable_args_names = get_mutable_arg_names(_mutable_op)
     for name in _mutable_args_names:
-        new_kwargs[name] = (
-            clone_preserve_strides(kwargs[name]) if kwargs[name] is not None else None
-        )
+        if (
+            _only_clone_these_tensors is not None
+            and name not in _only_clone_these_tensors
+        ):
+            new_kwargs[name] = kwargs[name]
+        else:
+            new_kwargs[name] = (
+                clone_preserve_strides(kwargs[name])
+                if kwargs[name] is not None
+                else None
+            )
         result.append(new_kwargs[name])
     out = _mutable_op(**new_kwargs)
 
     if isinstance(out, tuple):
-        return (*out, *result)
+        return (*out, *result)  # type: ignore[return-value]
     else:
-        return (out, *result)
+        return (out, *result)  # type: ignore[return-value]
 
 
 @auto_functionalized.py_impl(FakeTensorMode)
@@ -242,3 +251,11 @@ def do_auto_functionalize(
         ctx.sync(orig_arg)
 
     return ctx.wrap_tensors(unwrapped_actual_out)  # type: ignore[arg-type]
+
+
+@auto_functionalized.py_functionalize_impl
+def auto_functionalized_func(ctx, _mutable_op, **kwargs):
+    unwrapped_kwargs = ctx.unwrap_tensors(kwargs)
+    with ctx.redispatch_to_next():
+        result = auto_functionalized(_mutable_op, **unwrapped_kwargs)
+    return ctx.wrap_tensors(result)

@@ -1,11 +1,28 @@
+import math
+
 import sympy
 from sympy import S
 from sympy.core.logic import fuzzy_and, fuzzy_not, fuzzy_or
 
 __all__ = [
-    "FloorDiv", "ModularIndexing", "CleanDiv", "CeilDiv", "Pow", "TrueDiv",
-    "LShift", "RShift", "IsNonOverlappingAndDenseIndicator", "Round", "RoundDecimal",
+    "FloorDiv",
+    "ModularIndexing",
+    "CleanDiv",
+    "CeilDiv",
+    "Pow",
+    "TrueDiv",
+    "LShift",
+    "RShift",
+    "IsNonOverlappingAndDenseIndicator",
+    "Round",
+    "RoundDecimal",
 ]
+
+
+def fuzzy_eq(x, y):
+    if None in (x, y):
+        return None
+    return x == y
 
 
 class FloorDiv(sympy.Function):
@@ -14,6 +31,7 @@ class FloorDiv(sympy.Function):
     1. We can use divisibility guards to simplify FloorDiv(a, b) to a / b.
     2. Printing out the expression is nicer (compared to say, representing a//b as (a - a % b) / b)
     """
+
     nargs = (2,)
     precedence = 50  # precedence of mul  # noqa: F811
 
@@ -46,11 +64,14 @@ class FloorDiv(sympy.Function):
     @classmethod
     def eval(cls, base, divisor):
         def check_supported_type(x):
-            if (x.is_integer is False and x.is_real is False and x.is_complex) or x.is_Boolean:
+            if (
+                x.is_integer is False and x.is_real is False and x.is_complex
+            ) or x.is_Boolean:
                 raise TypeError(
                     f"unsupported operand type(s) for //: "
                     f"'{type(base).__name__}' and '{type(divisor).__name__}'"
-                    f", expected integer or real")
+                    f", expected integer or real"
+                )
 
         check_supported_type(base)
         check_supported_type(divisor)
@@ -70,7 +91,9 @@ class FloorDiv(sympy.Function):
             return sympy.Mul(base, -1)
         if isinstance(base, sympy.Integer) and isinstance(divisor, sympy.Integer):
             return base // divisor
-        if isinstance(base, (sympy.Integer, sympy.Float)) and isinstance(divisor, (sympy.Integer, sympy.Float)):
+        if isinstance(base, (sympy.Integer, sympy.Float)) and isinstance(
+            divisor, (sympy.Integer, sympy.Float)
+        ):
             return sympy.floor(base / divisor)
         if isinstance(base, FloorDiv):
             return FloorDiv(base.args[0], base.args[1] * divisor)
@@ -95,7 +118,7 @@ class FloorDiv(sympy.Function):
 
 class ModularIndexing(sympy.Function):
     """
-    ModularIndexing(a, b, c) => (a // b) % c
+    ModularIndexing(a, b, c) => (a // b) % c where % is the C modulus
     """
 
     nargs = (3,)
@@ -118,7 +141,9 @@ class ModularIndexing(sympy.Function):
                 gcd = sympy.gcd(base, divisor)
                 if gcd != 1:
                     return ModularIndexing(
-                        sympy.simplify(base / gcd), sympy.simplify(divisor / gcd), modulus
+                        sympy.simplify(base / gcd),
+                        sympy.simplify(divisor / gcd),
+                        modulus,
                     )
         except sympy.PolynomialError:
             pass  # https://github.com/pytorch/pytorch/issues/108276
@@ -148,6 +173,15 @@ class ModularIndexing(sympy.Function):
         if isinstance(base, FloorDiv):
             return ModularIndexing(base.args[0], base.args[1] * divisor, modulus)
 
+    def _eval_is_nonnegative(self):
+        p, q = self.args[:2]
+        return fuzzy_eq(p.is_nonnegative, q.is_nonnegative)  # type: ignore[attr-defined]
+
+    def _eval_is_positive(self):
+        p, q = self.args[:2]
+        return fuzzy_eq(p.is_positive, q.is_positive)  # type: ignore[attr-defined]
+
+
 class Where(sympy.Function):
     """
     Good ol' ternary operator
@@ -161,6 +195,7 @@ class Where(sympy.Function):
             return p
         elif c == sympy.false:
             return q
+
 
 class Mod(sympy.Function):
     """
@@ -209,6 +244,9 @@ class Mod(sympy.Function):
         if less.is_Boolean and bool(less) and r.is_positive:
             return p
 
+        if sympy.Mod(p, q) == 0:
+            return S.Zero
+
     def _eval_is_integer(self):
         p, q = self.args
         return fuzzy_and([p.is_integer, q.is_integer, fuzzy_not(q.is_zero)])  # type: ignore[attr-defined]
@@ -247,16 +285,17 @@ class LShift(sympy.Function):
     @classmethod
     def eval(cls, base, shift):
         if shift < 0:
-            raise ValueError('negative shift count')
-        return base * 2 ** shift
+            raise ValueError("negative shift count")
+        return base * 2**shift
 
 
 class RShift(sympy.Function):
     @classmethod
     def eval(cls, base, shift):
         if shift < 0:
-            raise ValueError('negative shift count')
-        return base // 2 ** shift
+            raise ValueError("negative shift count")
+        return base // 2**shift
+
 
 # Overloaded to be compatible with regular Python.
 # https://github.com/pytorch/pytorch/issues/90900
@@ -268,7 +307,8 @@ class Pow(sympy.Function):
         elif base.is_zero and exp < 0:
             raise ZeroDivisionError(f"{base} cannot be raised to a negative power")
         else:
-            return base ** exp
+            return base**exp
+
 
 # Overloaded to be compatible with regular Python.
 # https://github.com/pytorch/pytorch/issues/90900
@@ -301,15 +341,27 @@ class IsNonOverlappingAndDenseIndicator(sympy.Function):
         # in dim 0.
         if all(isinstance(a, sympy.Integer) for a in args):
             # sym_node imported in torch.__init__. Local import to avoid an import cycle
-            from torch.fx.experimental.symbolic_shapes import eval_is_non_overlapping_and_dense
+            from torch.fx.experimental.symbolic_shapes import (
+                eval_is_non_overlapping_and_dense,
+            )
 
             size_args = args[0:dim]
             stride_args = args[dim:]
             return eval_is_non_overlapping_and_dense(
-                [int(a) for a in size_args],
-                [int(a) for a in stride_args]
+                [int(a) for a in size_args], [int(a) for a in stride_args]
             )
         return None
+
+
+class Trunc(sympy.Function):
+    is_integer = True
+
+    @classmethod
+    def eval(cls, number):
+        if number.is_integer:
+            return number
+        elif isinstance(number, sympy.Number):
+            return sympy.Integer(math.trunc(float(number)))
 
 
 class Round(sympy.Function):
@@ -334,5 +386,62 @@ class RoundDecimal(sympy.Function):
         if number.is_integer and ndigits >= 0:
             return number
         elif isinstance(number, sympy.Number) and isinstance(ndigits, sympy.Integer):
-            value_type, output_type = (int, sympy.Integer) if isinstance(number, sympy.Integer) else (float, sympy.Float)
+            value_type, output_type = (
+                (int, sympy.Integer)
+                if isinstance(number, sympy.Integer)
+                else (float, sympy.Float)
+            )
             return output_type(round(value_type(number), int(ndigits)))
+
+
+def make_opaque_unary_fn(name):
+    class OpaqueUnaryFn(sympy.Function):
+        """
+        Unlike the builtin sympy functions on real numbers like sympy.sqrt,
+        these equivalents do not do any nontrivial reasoning besides
+        constant propagation.  This helps avoid performing transformations
+        that are valid for real numbers but are invalid for floating point;
+        in particular, while we are willing to make optimizations that change
+        numerics for Tensor compute, we are NOT willing to make optimziations
+        that change numerics for size compute.
+        """
+
+        _torch_handler_name = name
+
+        @classmethod
+        def eval(cls, a):
+            if isinstance(a, (sympy.Integer, sympy.Float)):
+                # Python converts to float64 before computing, c.f.
+                # >>> math.sin(2**53+1)
+                # -0.848925964814655
+                # >>> math.sin(float(2**53+1))
+                # -0.848925964814655
+                try:
+                    return sympy.Float(getattr(math, name)(float(a)))
+                # Just use sympy semantics for infinity/overflow, you might get some
+                # weird objects but ask silly questions, get silly answers
+                except OverflowError:
+                    return getattr(sympy, name)(a)
+            elif a in [sympy.oo, -sympy.oo, sympy.zoo, -sympy.zoo]:
+                return getattr(sympy, name)(a)
+            return None
+
+    OpaqueUnaryFn.__name__ = "OpaqueUnaryFn_" + name
+
+    return OpaqueUnaryFn
+
+
+# Keep in sync with math_op_names in torch/fx/experimental/sym_node.py
+OpaqueUnaryFn_sqrt = make_opaque_unary_fn("sqrt")
+OpaqueUnaryFn_cos = make_opaque_unary_fn("cos")
+OpaqueUnaryFn_cosh = make_opaque_unary_fn("cosh")
+OpaqueUnaryFn_sin = make_opaque_unary_fn("sin")
+OpaqueUnaryFn_sinh = make_opaque_unary_fn("sinh")
+OpaqueUnaryFn_tan = make_opaque_unary_fn("tan")
+OpaqueUnaryFn_tanh = make_opaque_unary_fn("tanh")
+OpaqueUnaryFn_asin = make_opaque_unary_fn("asin")
+OpaqueUnaryFn_acos = make_opaque_unary_fn("acos")
+OpaqueUnaryFn_atan = make_opaque_unary_fn("atan")
+OpaqueUnaryFn_exp = make_opaque_unary_fn("exp")
+OpaqueUnaryFn_log = make_opaque_unary_fn("log")
+OpaqueUnaryFn_asinh = make_opaque_unary_fn("asinh")
