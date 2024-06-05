@@ -173,14 +173,14 @@
 namespace c10d {
 
 TORCH_API size_t hashTensors(const std::vector<at::Tensor>& tensors);
-std::string getNcclVersion();
-std::string ncclGetErrorWithVersion(ncclResult_t error);
+TORCH_API std::string getNcclVersion();
+TORCH_API std::string ncclGetErrorWithVersion(ncclResult_t error);
 bool nccl_use_nonblocking();
 int nccl_nonblocking_timeout();
 
 // Provides additional detail into NCCL error codes based on when these are
 // thrown in the NCCL codebase.
-std::string getNcclErrorDetailStr(
+TORCH_API std::string getNcclErrorDetailStr(
     ncclResult_t error,
     std::optional<std::string> processGroupFailureReason = c10::nullopt);
 
@@ -286,22 +286,12 @@ class NCCLComm {
   }
 #endif
 
-#ifdef NCCL_HAS_COMM_SPLIT
   static std::shared_ptr<NCCLComm> split(
       NCCLComm* source,
       int color_id,
       int rank,
-      ncclConfig_t& config) {
-    auto comm = std::make_shared<NCCLComm>();
-    C10D_NCCL_CHECK(
-        ncclCommSplit(
-            source->ncclComm_, color_id, rank, &(comm->ncclComm_), &config),
-        c10::nullopt);
-    ++source->ncclCommSplitCounter_;
-    comm->rank_ = rank;
-    return comm;
-  }
-#endif
+      ncclConfig_t& config,
+      std::vector<uint64_t>& ranks_ull);
 
 #if defined(IS_NCCLX) && defined(NCCL_COMM_DUMP)
   std::unordered_map<std::string, std::string> ncclCommDump() {
