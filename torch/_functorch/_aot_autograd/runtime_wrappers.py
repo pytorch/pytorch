@@ -1216,11 +1216,11 @@ def merge_view_inputs(
             storage_ref_to_idx[storage_ref].append(i)
         else:
             other_args.append(inpt)
-    # for i, (sref, idxs) in enumerate(storage_ref_to_idx.items()):
-    #     # torch_log.warning(f"i: {i}, idxs: {idxs}")
-    #     # for idx in idxs:
-    #     #     t = fwd_inputs[idx]
-    #     #     torch_log.warning(f"t: {t}, id(t): {id(t)}, t.shape: {t.shape}, t.stride(): {t.stride()}, t.storage_offset(): {t.storage_offset()}, t.requires_grad: {t.requires_grad}, id(t.untyped_storage()): {id(t.untyped_storage())}")
+    for i, (sref, idxs) in enumerate(storage_ref_to_idx.items()):
+        torch_log.warning(f"i: {i}, idxs: {idxs}")
+        for idx in idxs:
+            t = fwd_inputs[idx]
+            torch_log.warning(f"t: {t}, id(t): {id(t)}, t.shape: {t.shape}, t.stride(): {t.stride()}, t.storage_offset(): {t.storage_offset()}, t.requires_grad: {t.requires_grad}, id(t.untyped_storage()): {id(t.untyped_storage())}")
     # Note [Synthetic Base Info Metadata]
     # This list contains metadata that tells you what the i'th argument in the inner calling convention should be.
     # It's either:
