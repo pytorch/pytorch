@@ -162,6 +162,9 @@ def squeeze_leading_ones(t):
     # If unsqueezing on the 0th dim becomes supported, we would unsqueeze
     # at step (4) and we would need to update this function to record how
     # many ones we unsqueezed.
+    if len(t.shape) == 0:
+        # scalar tensor case
+        return t
     while t.shape[0] == 1:
         t = t.squeeze(0)
     return t
@@ -807,6 +810,15 @@ def sum_dim_IntList(func, *args, **kwargs):
         if new_kwargs["keepdim"]:
             out = out.unsqueeze(0)
         return out
+
+
+@register_jagged_func(torch.ops.aten.sum.default, "self: jt, dtype: any?")
+def sum_default(func, *args, **kwargs):
+    _, new_kwargs = normalize_function(
+        func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
+    )
+    inp = new_kwargs.pop("input")
+    return func(inp._values, **new_kwargs)
 
 
 @register_jagged_func(

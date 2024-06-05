@@ -4361,6 +4361,22 @@ class TestNestedTensorSubclass(TestCase):
         self.assertIsNone(nt.grad)
         self.assertIsNone(nt._values.grad)
 
+    @dtypes(torch.float32, torch.double, torch.half)
+    @parametrize("requires_grad", [False, True])
+    def test_sum(self, device, dtype, requires_grad):
+        nt = random_nt_from_dims(
+            [5, None, 10], device=device, dtype=dtype, layout=torch.jagged,
+            requires_grad=requires_grad)
+
+        output = nt.sum()
+        expected_output = nt._values.sum()
+        self.assertEqual(output, expected_output)
+
+        if requires_grad:
+            # ensure gradients flow back correctly
+            output.backward()
+            self.assertEqual(nt.grad, torch.ones_like(nt))
+
 
 instantiate_parametrized_tests(TestNestedTensor)
 instantiate_device_type_tests(TestNestedTensorDeviceType, globals())
