@@ -673,7 +673,6 @@ def aot_dispatch_subclass(
         return unwrapped_outs
 
     def joint_fn(primals, tangents):
-        # print("joint_fn")
         return inner_fn(
             flat_fn_maybe_joint,
             (primals, tangents),
@@ -682,13 +681,11 @@ def aot_dispatch_subclass(
         )
 
     def fw_fn(*primals):
-        # print("fw_fn")
         return inner_fn(
             flat_fn_maybe_joint, primals, use_trace_joint=False, append_extra=True
         )
 
     def metadata_fn(*primals):
-        # print("metadata_fn")
         return inner_fn(fw_only, primals, use_trace_joint=False, append_extra=False)
 
     # print("aot_dispatch_subclass")

@@ -35,6 +35,124 @@ from torch.testing._internal.common_utils import (
 )
 from torch.testing._internal.inductor_utils import HAS_CUDA
 from torch.testing._internal.two_tensor import TwoTensor
+from torch.utils._python_dispatch import return_and_correct_aliasing
+
+
+# A simple tensor subclass that holds two tensors internally, and runs every op on both tensors.
+class AnotherTwoTensor(torch.Tensor):
+    @staticmethod
+    def __new__(cls, a, b, outer_size=None, outer_stride=None):
+        if outer_size is None:
+            outer_size = a.size()
+        if outer_stride is None:
+            outer_stride = a.stride()
+        shape = outer_size
+        stride = outer_stride
+        kwargs = {}
+        kwargs["strides"] = stride
+        kwargs["device"] = a.device
+        kwargs["layout"] = a.layout
+        kwargs["requires_grad"] = a.requires_grad
+        kwargs["dtype"] = a.dtype
+        out = torch.Tensor._make_wrapper_subclass(cls, shape, **kwargs)
+
+        assert a.shape == b.shape
+        assert a.stride() == b.stride()
+        assert a.storage_offset() == b.storage_offset()
+        return out
+
+    def __init__(self, a, b, outer_size=None, outer_stride=None):
+        self.a = a
+        self.b = b
+
+    def __repr__(self):
+        a_repr = repr(self.a)
+        b_repr = repr(self.b)
+        return f"TwoTensor({a_repr}, {b_repr})"
+
+    def __tensor_flatten__(self):
+        return ["a", "b"], None
+
+    @staticmethod
+    def __tensor_unflatten__(inner_tensors, meta, outer_size, outer_stride):
+        assert meta is None
+        a, b = inner_tensors["a"], inner_tensors["b"]
+        return AnotherTwoTensor(a, b, outer_size, outer_stride)
+
+    @classmethod
+    def __torch_dispatch__(cls, func, types, args, kwargs):
+        if kwargs is None:
+            kwargs = {}
+        args_a = pytree.tree_map_only(AnotherTwoTensor, lambda x: x.a, args)
+        args_b = pytree.tree_map_only(AnotherTwoTensor, lambda x: x.b, args)
+
+        kwargs_a = pytree.tree_map_only(AnotherTwoTensor, lambda x: x.a, kwargs)
+        kwargs_b = pytree.tree_map_only(AnotherTwoTensor, lambda x: x.b, kwargs)
+
+        out_a = func(*args_a, **kwargs_a)
+        out_b = func(*args_b, **kwargs_b)
+        assert type(out_a) == type(out_b)
+        out_a_flat, spec = pytree.tree_flatten(out_a)
+        out_b_flat = pytree.tree_leaves(out_b)
+        # for aten ops that return non-tensors, just assume that
+        # our two inner tensors return the same value
+        out_flat = [
+            AnotherTwoTensor(o_a, o_b) if isinstance(o_a, torch.Tensor) else o_a
+            for o_a, o_b in zip(out_a_flat, out_b_flat)
+        ]
+        out = pytree.tree_unflatten(out_flat, spec)
+        return return_and_correct_aliasing(func, args, kwargs, out)
+
+
+class DoubleTensor(torch.Tensor):
+    @staticmethod
+    def __new__(cls, a, outer_size=None, outer_stride=None):
+        if outer_size is None:
+            outer_size = [x * 2 for x in a.size()]
+        if outer_stride is None:
+            outer_stride = [x * 2 for x in a.stride()]
+
+        shape = outer_size
+        stride = outer_stride
+        kwargs = {}
+        kwargs["strides"] = stride
+        kwargs["device"] = a.device
+        kwargs["layout"] = a.layout
+        kwargs["requires_grad"] = a.requires_grad
+        kwargs["dtype"] = a.dtype
+        out = torch.Tensor._make_wrapper_subclass(cls, shape, **kwargs)
+        return out
+
+    def __init__(self, a, outer_size=None, outer_stride=None):
+        self.a = a
+
+    def __repr__(self):
+        a_repr = repr(self.a)
+        return f"DoubleTensor({a_repr})"
+
+    def __tensor_flatten__(self):
+        return ["a"], None
+
+    @staticmethod
+    def __tensor_unflatten__(inner_tensors, meta, outer_size, outer_stride):
+        assert meta is None
+        a = inner_tensors["a"]
+        return DoubleTensor(a, outer_size, outer_stride)
+
+    @classmethod
+    def __torch_dispatch__(cls, func, types, args, kwargs):
+        if kwargs is None:
+            kwargs = {}
+        args_a = pytree.tree_map_only(DoubleTensor, lambda x: x.a, args)
+        kwargs_a = pytree.tree_map_only(DoubleTensor, lambda x: x.a, kwargs)
+
+        out_a = func(*args_a, **kwargs_a)
+
+        if out_a.numel() == 1:  # short-circuit to assertEqual to work with DoubleTensor
+            return out_a
+
+        out = DoubleTensor(out_a)
+        return return_and_correct_aliasing(func, args, kwargs, out)
 
 
 def traceable_subclass(c):
@@ -1424,15 +1542,18 @@ class GraphModule(torch.nn.Module):
             expected = fn(*inp)
             got = c(*inp)
             self.assertEqual(expected, got)
+            e_shape = pytree.tree_map_only(torch.Tensor, lambda x: x.shape, expected)
+            g_shape = pytree.tree_map_only(torch.Tensor, lambda x: x.shape, got)
+            self.assertEqual(e_shape, g_shape)
         return fw_compiler.graphs
 
-    def test_tensor_subclass_simple(self):
+    def test_tensor_subclass_TwoTensor_simple(self):
         def f(tt):
             return tt * tt.size()[0]
 
         a = torch.ones(3, 4)
         b = a.clone()
-        tt = TwoTensor(a, b)
+        tt = AnotherTwoTensor(a, b)
 
         wrapped_gms = self._compile_check(f, [(tt,)], dynamic=True)
         actual = normalize_gm(wrapped_gms[0].print_readable(print_output=False))
@@ -1448,14 +1569,14 @@ class <lambda>(torch.nn.Module):
 """,  # noqa: B950
         )
 
-    def test_tensor_subclass_clone_view(self):
+    def test_tensor_subclass_TwoTensor_clone_view(self):
         def f(tt):
             y = tt.clone()
             return y.view(y.shape[1], y.shape[0])
 
         a = torch.ones(3, 4)
         b = a.clone()
-        tt = TwoTensor(a, b)
+        tt = AnotherTwoTensor(a, b)
 
         wrapped_gms = self._compile_check(f, [(tt,)], dynamic=True)
         actual = normalize_gm(wrapped_gms[0].print_readable(print_output=False))
@@ -1474,7 +1595,7 @@ class <lambda>(torch.nn.Module):
 """,  # noqa: B950
         )
 
-    def test_tensor_subclass_mul(self):
+    def test_tensor_subclass_TwoTensor_mul(self):
         def f(tt, a, b):
             s0, s1 = a.size()
             s2, s3 = b.size()
@@ -1482,7 +1603,7 @@ class <lambda>(torch.nn.Module):
 
         a = torch.ones(3, 4)
         b = a.clone()
-        tt = TwoTensor(a, b)
+        tt = AnotherTwoTensor(a, b)
 
         wrapped_gms = self._compile_check(f, [(tt, a, b)], dynamic=True)
         actual = normalize_gm(wrapped_gms[0].print_readable(print_output=False))
@@ -1504,14 +1625,14 @@ class <lambda>(torch.nn.Module):
 """,  # noqa: B950
         )
 
-    def test_tensor_subclass_view(self):
+    def test_tensor_subclass_TwoTensor_view(self):
         def f(tt):
             y = tt.clone()
             return y.view(y.shape[0], y.shape[1])
 
         a = torch.ones(3, 4)
         b = a.clone()
-        tt = TwoTensor(a, b)
+        tt = AnotherTwoTensor(a, b)
 
         wrapped_gms = self._compile_check(f, [(tt,)], dynamic=True)
         actual = normalize_gm(wrapped_gms[0].print_readable(print_output=False))
@@ -1530,14 +1651,14 @@ class <lambda>(torch.nn.Module):
 """,  # noqa: B950
         )
 
-    def test_tensor_subclass_view_mul(self):
+    def test_tensor_subclass_TwoTensor_view_mul(self):
         def f(tt):
             y = tt.clone()
             return y.view(y.shape[0] * y.shape[1])
 
         a = torch.ones(3, 4)
         b = a.clone()
-        tt = TwoTensor(a, b)
+        tt = AnotherTwoTensor(a, b)
 
         wrapped_gms = self._compile_check(f, [(tt,)], dynamic=True)
         actual = normalize_gm(wrapped_gms[0].print_readable(print_output=False))
@@ -1557,14 +1678,14 @@ class <lambda>(torch.nn.Module):
 """,  # noqa: B950
         )
 
-    def test_tensor_subclass_return_multiple(self):
+    def test_tensor_subclass_TwoTensor_return_multiple(self):
         def f(tt):
             y = tt.clone()
             return y.a, y.view(y.shape[0] * y.shape[1]), y.b, y.view(-1)
 
         a = torch.ones(3, 4)
         b = a.clone()
-        tt = TwoTensor(a, b)
+        tt = AnotherTwoTensor(a, b)
 
         wrapped_gms = self._compile_check(f, [(tt,)], dynamic=True)
         actual = normalize_gm(wrapped_gms[0].print_readable(print_output=False))
@@ -1586,7 +1707,7 @@ class <lambda>(torch.nn.Module):
 """,  # noqa: B950
         )
 
-    def test_tensor_subclass_automatic_dynamic_shapes(self):
+    def test_tensor_subclass_TwoTensor_automatic_dynamic_shapes(self):
         def f(tt):
             y = tt.clone()
             return y.a, y.view(-1), y.b
@@ -1634,17 +1755,156 @@ class <lambda>(torch.nn.Module):
 """,  # noqa: B950
         )
 
-    def test_tensor_subclass_return_shape(self):
+    def test_tensor_subclass_TwoTensor_mark_dynamic_shapes(self):
+        def f(tt):
+            y = tt.clone()
+            return y.a, y.view(-1), y.b
+
+        a = torch.ones(3, 4)
+        b = a.clone()
+        tt = TwoTensor(a, b)
+        torch._dynamo.mark_dynamic(tt, 1)
+
+        wrapped_gms = self._compile_check(
+            f,
+            [
+                (tt,),
+            ],
+            dynamic=None,
+        )
+        actual = normalize_gm(wrapped_gms[0].print_readable(print_output=False))
+
+        self.assertExpectedInline(
+            actual,
+            """\
+class <lambda>(torch.nn.Module):
+    def forward(self, arg0_1: "f32[3, s0]", arg1_1: "f32[3, s0]", arg2_1: "Sym(s0)", arg3_1: "Sym(s0)"):
+        clone: "f32[3, s0]" = torch.ops.aten.clone.default(arg0_1);  arg0_1 = None
+        clone_1: "f32[3, s0]" = torch.ops.aten.clone.default(arg1_1);  arg1_1 = None
+
+        view: "f32[3*s0]" = torch.ops.aten.view.default(clone, [-1])
+        view_1: "f32[3*s0]" = torch.ops.aten.view.default(clone_1, [-1])
+
+        sym_size_int: "Sym(3*s0)" = torch.ops.aten.sym_size.int(view, 0)
+        return [clone, view, view_1, clone_1, sym_size_int]
+""",  # noqa: B950
+        )
+
+    def test_tensor_subclass_TwoTensor_return_shape(self):
         @torch.compile(backend="aot_eager", dynamic=True)
         def fn(x):
             return x.clone().view(x.shape[0] * x.shape[1])
 
         a = torch.ones(2, 3)
         b = a.clone()
-        tt = TwoTensor(a, b)
+        tt = AnotherTwoTensor(a, b)
         out = fn(tt)
         self.assertEqual(tt.view(2 * 3), out)
         self.assertEqual(out.shape, (6,))
+
+    def test_tensor_subclass_DoubleTensor_simple(self):
+        def f(t):
+            return t * t.size()[0]
+
+        a = torch.ones(3, 4)
+        t = DoubleTensor(a)
+
+        wrapped_gms = self._compile_check(f, [(t,)], dynamic=True)
+        actual = normalize_gm(wrapped_gms[0].print_readable(print_output=False))
+
+        self.assertExpectedInline(
+            actual,
+            """\
+class <lambda>(torch.nn.Module):
+    def forward(self, arg0_1: "f32[s3, s4]", arg1_1: "Sym(s0)", arg2_1: "Sym(s1)", arg3_1: "Sym(s2)", arg4_1: "Sym(s0)", arg5_1: "Sym(s1)"):
+        mul: "f32[s3, s4]" = torch.ops.aten.mul.Tensor(arg0_1, arg4_1);  arg4_1 = None
+
+        sym_size_int: "Sym(s3)" = torch.ops.aten.sym_size.int(arg0_1, 0)
+        mul_1: "Sym(2*s3)" = sym_size_int * 2;  sym_size_int = None
+        sym_size_int_1: "Sym(s4)" = torch.ops.aten.sym_size.int(arg0_1, 1);  arg0_1 = None
+        mul_2: "Sym(2*s4)" = sym_size_int_1 * 2;  sym_size_int_1 = None
+        return [mul, mul_1, mul_2]
+""",  # noqa: B950
+        )
+
+    def test_tensor_subclass_DoubleTensor_automatic_dynamic_shapes(self):
+        def f(t):
+            y = t.clone()
+            return y.a, y.view(-1), y.a * 10
+
+        a = torch.ones(3)
+        t1 = DoubleTensor(a)
+
+        a = torch.ones(5)
+        t2 = DoubleTensor(a)
+
+        wrapped_gms = self._compile_check(f, [(t1,), (t2,)], dynamic=None)
+        actual = normalize_gm(wrapped_gms[0].print_readable(print_output=False))
+
+        self.assertExpectedInline(
+            actual,
+            """\
+class <lambda>(torch.nn.Module):
+    def forward(self, arg0_1: "f32[3]"):
+        clone: "f32[3]" = torch.ops.aten.clone.default(arg0_1);  arg0_1 = None
+
+        view: "f32[3]" = torch.ops.aten.view.default(clone, [-1])
+        mul: "f32[3]" = torch.ops.aten.mul.Tensor(clone, 10)
+        return [clone, view, mul]
+""",  # noqa: B950
+        )
+
+        actual = normalize_gm(wrapped_gms[1].print_readable(print_output=False))
+
+        self.assertExpectedInline(
+            actual,
+            """\
+class <lambda>(torch.nn.Module):
+    def forward(self, arg0_1: "f32[s2]", arg1_1: "Sym(s0)", arg2_1: "Sym(s1)", arg3_1: "Sym(s0)"):
+        clone: "f32[s2]" = torch.ops.aten.clone.default(arg0_1)
+
+        view: "f32[s2]" = torch.ops.aten.view.default(clone, [-1])
+        mul: "f32[s2]" = torch.ops.aten.mul.Tensor(clone, 10)
+
+        sym_size_int: "Sym(s2)" = torch.ops.aten.sym_size.int(arg0_1, 0);  arg0_1 = None
+        mul_1: "Sym(2*s2)" = sym_size_int * 2;  sym_size_int = None
+        return [clone, view, mul, mul_1]
+""",  # noqa: B950
+        )
+
+    def test_tensor_subclass_DoubleTensor_mark_dynamic_shapes(self):
+        def f(t):
+            y = t.clone()
+            return y.view(a.shape[1] * a.shape[0]), y.a, y.view(a.shape[0] * a.shape[1])
+
+        a = torch.ones(3, 4)
+        t = DoubleTensor(a)
+        torch._dynamo.mark_dynamic(t, 0)
+
+        wrapped_gms = self._compile_check(
+            f,
+            [
+                (t,),
+            ],
+            dynamic=None,
+        )
+        actual = normalize_gm(wrapped_gms[0].print_readable(print_output=False))
+
+        self.assertExpectedInline(
+            actual,
+            """\
+class <lambda>(torch.nn.Module):
+    def forward(self, arg0_1: "f32[s3, 4]", arg1_1: "Sym(s3)", arg2_1: "Sym(s0)", arg3_1: "Sym(s2)", arg4_1: "Sym(s1)", arg5_1: "f32[s3, 4]", arg6_1: "Sym(s0)"):
+        clone: "f32[s3, 4]" = torch.ops.aten.clone.default(arg0_1);  arg0_1 = None
+
+        mul: "Sym(4*s3)" = 4 * arg1_1;  arg1_1 = None
+        view: "f32[4*s3]" = torch.ops.aten.view.default(clone, [mul])
+        view_1: "f32[4*s3]" = torch.ops.aten.view.default(clone, [mul])
+
+        mul_2: "Sym(8*s3)" = mul * 2;  mul = None
+        return [view, clone, view_1, mul_2, mul_2]
+""",  # noqa: B950
+        )
 
 
 instantiate_parametrized_tests(SubclassTests)

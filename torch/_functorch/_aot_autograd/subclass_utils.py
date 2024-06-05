@@ -41,15 +41,15 @@ def create_subclass_meta(
 ) -> List[Union[int, SubclassCreationMeta]]:
     idx = 0
     infos: List[Union[int, SubclassCreationMeta]] = []
-    # Each tensor subclass adds K extra arguments in "unwrap_tensor_subclasses".
-    all_sizes_count = sum(
+    # Each tensor subclass i adds K_i extra arguments.
+    num_extra_sizes = sum(
         [
             len(a.size())
             for a in curr_args
             if isinstance(a, Tensor) and is_traceable_wrapper_subclass(a)
         ]
     )
-    curr_sizes_pos = len(curr_args) - all_sizes_count
+    extra_sizes_count = 0
 
     for a in curr_args:
         if isinstance(a, Tensor) and is_traceable_wrapper_subclass(a):
@@ -57,15 +57,14 @@ def create_subclass_meta(
             start_idx = idx
             cnt = len(attrs)
             curr_cnt = cnt
-            # "curr_args" contains not just the wrapper subclass but its sizes (K extra values)
-            # Store a pointer to the first element
-            curr_sizes_pos = all_sizes_count
-            all_sizes_count -= len(a.shape)
+            # Compute the offset of the first extra size w.r.t the current tensor "a"
+            offset = num_extra_sizes - extra_sizes_count
+            extra_sizes_count += len(a.shape)
             infos.append(
                 SubclassCreationMeta(
                     flat_tensor_start_idx=start_idx,
                     arg_count=curr_cnt,
-                    flat_tensor_sizes_idx=curr_sizes_pos,
+                    flat_tensor_extra_sizes_offset=offset,
                     original_subclass=a,
                     meta=meta,
                     inner_keys=attrs,
@@ -104,7 +103,6 @@ def unwrap_tensor_subclasses(
 
     def concat_inner_tensors_from_subclasses(xs, is_forward: bool):
         xs_inner = []
-        has_symint = any(isinstance(x, SymInt) for x in xs)
 
         for x in xs:
             if isinstance(x, Tensor) and is_traceable_wrapper_subclass(x):
@@ -134,14 +132,11 @@ def unwrap_tensor_subclasses(
                         if isinstance(s, SymInt)
                     ]
         else:
-            # print("has_symint", has_symint)
-            # print("is_forward", is_forward)
             for x in xs:
                 if (
                     isinstance(x, Tensor)
                     and is_traceable_wrapper_subclass(x)
                     and is_forward
-                    # and has_symint
                 ):
                     # x.size() can have both ints ans SymInts: `Size([3, sz1, 5])`
                     xs_inner += [sz for sz in x.size() if isinstance(sz, SymInt)]
@@ -159,7 +154,6 @@ def unwrap_tensor_subclasses(
         unwrapped_args_tangents = concat_inner_tensors_from_subclasses(
             wrapped_args[1], is_forward=False
         )
-        # print(len(unwrapped_args_fw), len(unwrapped_args_tangents))
         unwrapped_args = (unwrapped_args_fw, unwrapped_args_tangents)
     else:
         assert isinstance(wrapped_args, (list, tuple))
@@ -167,10 +161,6 @@ def unwrap_tensor_subclasses(
             wrapped_args, is_forward=True
         )
         unwrapped_args = unwrapped_args_fw
-        # print(len(unwrapped_args))
-    # print(unwrapped_args)
-    # print(wrapped_args)
-    # print("---")
     return unwrapped_args
 
 
