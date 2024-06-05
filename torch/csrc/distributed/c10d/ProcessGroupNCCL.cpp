@@ -405,8 +405,9 @@ std::string get_nccl_comm_trace() {
 // TODO(c-p-i-o): add a JSON endpoint.
 control_plane::RegisterHandler dumpHandler{
     "dump_nccl_trace_pickle",
-    [](const control_plane::Request&, control_plane::Response& res) {
-      res.setContent(dump_nccl_trace(), "application/octet-stream");
+    [](const control_plane::Request& req, control_plane::Response& res) {
+      // TODO: c-p-i-o: params from the request need to go to dump_nccl_trace.
+      res.setContent(dump_nccl_trace(true, true, false), "application/octet-stream");
     }};
 
 std::optional<std::function<void(std::function<void(const std::string&)>)>>&
@@ -965,7 +966,12 @@ void ProcessGroupNCCL::performNocolorSplit(at::Device device) {
   LOG(INFO) << logPrefix() << "Performing nocolor split on backend device "
             << device << ", key " << key << ", i am " << this;
   auto comm = getNCCLComm(key, device, OpType::ALLREDUCE);
-  NCCLComm::split(comm.get(), NCCL_SPLIT_NOCOLOR, rank_, options_->config);
+  NCCLComm::split(
+      comm.get(),
+      NCCL_SPLIT_NOCOLOR,
+      rank_,
+      options_->config,
+      options_->global_ranks_in_group);
 #endif
 }
 
@@ -2114,6 +2120,7 @@ std::shared_ptr<NCCLComm> ProcessGroupNCCL::getNCCLComm(
     numRanks = 2;
     rank = p2pRank;
   }
+
   // Get the device index
   auto deviceIndex = device.index();
   gpuGuard.set_index(deviceIndex);
@@ -2130,13 +2137,17 @@ std::shared_ptr<NCCLComm> ProcessGroupNCCL::getNCCLComm(
       auto& parentComm = dit->second;
       if (parentComm != nullptr && !parentComm->isAborted()) {
         ncclComm = NCCLComm::split(
-            parentComm.get(), options_->split_color, rank, options_->config);
+            parentComm.get(),
+            options_->split_color,
+            rank,
+            options_->config,
+            options_->global_ranks_in_group);
       }
     }
   }
 #endif
 
-  // To simplify conditioonal nesting, just create the ncclComms[i]
+  // To simplify conditional nesting, just create the ncclComms[i]
   // entry if it hasn't been yet rather than untangling the
   // conditions that might have resulted in a split above.
   if (!ncclComm) {
