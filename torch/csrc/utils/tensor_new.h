@@ -5,8 +5,7 @@
 
 #include <ATen/core/Tensor.h>
 
-namespace torch {
-namespace utils {
+namespace torch::utils {
 
 // NOTE: [torch.tensor, lift_fresh, and device movement]
 //
@@ -134,5 +133,4 @@ at::Tensor asarray(
     std::optional<c10::Device> device,
     std::optional<bool> copy,
     bool requires_grad);
-} // namespace utils
-} // namespace torch
+} // namespace torch::utils
