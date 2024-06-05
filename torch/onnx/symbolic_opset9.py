@@ -355,7 +355,23 @@ def add(g: jit_utils.GraphContext, self, other, alpha=None):
 @_onnx_symbolic("aten::sub")
 @_beartype.beartype
 def sub(g: jit_utils.GraphContext, self, other, alpha=None):
-    if alpha and symbolic_helper._scalar(symbolic_helper._maybe_get_scalar(alpha)) != 1:
+    """
+    Subtracts two tensors.
+
+    This function subtracts two tensors element-wise, with an optional scaling factor. 
+
+    Args:
+        g (GraphContext): The graph context.
+        self (Tensor): The first operand.
+        other (Tensor): The second operand.
+        alpha (Optional[Tensor]): A scaling factor to apply to the second operand. 
+            If `alpha` is not provided, it defaults to 1.
+
+    Returns:
+        element-wise subtraction of two tensors, with an optional scaling of the 
+        second operand by a factor 'alpha'.
+    """ 
+   if alpha and symbolic_helper._scalar(symbolic_helper._maybe_get_scalar(alpha)) != 1:
         other = g.op("Mul", other, alpha)
     return g.op("Sub", self, other)
 
