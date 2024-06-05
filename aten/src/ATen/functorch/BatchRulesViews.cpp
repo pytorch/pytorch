@@ -439,6 +439,7 @@ std::tuple<Tensor,optional<int64_t>> view_copy_batch_rule(
   return std::make_tuple(at::view_copy_symint(self_, view_size), 0);
 }
 
+
 template <typename F, F Func>
 std::tuple<Tensor, optional<int64_t>> expand_batch_rule(
     const Tensor &self, optional<int64_t> self_bdim, SymIntArrayRef size, bool implicit)
