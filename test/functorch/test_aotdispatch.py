@@ -5868,6 +5868,7 @@ instantiate_device_type_tests(TestEagerFusionOpInfo, globals(), only_for=only_fo
 instantiate_device_type_tests(TestEagerFusionModuleInfo, globals(), only_for=only_for)
 
 
+@skipIfTorchDynamo("This test suite already uses dynamo")
 class TestAOTAutogradWithDynamo(TestAOTAutograd):
     """
     These are the same as TestAOTAutograd tests, but we run dynamo first to get a graph module.
