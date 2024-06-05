@@ -25,6 +25,10 @@ Argument:
       type: SymIntArgument
     as_sym_ints:
       type: List[SymIntArgument]
+    as_sym_float:
+      type: SymFloatArgument
+    as_sym_floats:
+      type: List[SymFloatArgument]
     as_scalar_type:
       type: ScalarType
     as_memory_format:
@@ -131,6 +135,8 @@ Graph:
       type: Dict[str, TensorMeta]
     sym_int_values:
       type: Dict[str, SymInt]
+    sym_float_values:
+      type: Dict[str, SymFloat]
     sym_bool_values:
       type: Dict[str, SymBool]
     is_single_tensor_return:
@@ -380,6 +386,13 @@ SymIntArgument:
       type: str
     as_int:
       type: int
+SymFloatArgument:
+  kind: union
+  fields:
+    as_name:
+      type: str
+    as_float:
+      type: float
 TensorArgument:
   kind: struct
   fields:
