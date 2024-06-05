@@ -658,11 +658,14 @@ class TS2FXGraphConverter:
                 for block_node in block.nodes():
                     for block_node_in in block_node.inputs():
                         if block_node_in.debugName() in self.name_to_node:
-                            arguments.add(block_node_in.debugName())
-                    arguments = arguments.union(_dfs_build_lifted_arguments_for_input(block_node))
+                            debug_name = block_node_in.debugName()
+                            arguments.add(debug_name)
+                    arguments = arguments.union(
+                        _dfs_build_lifted_arguments_for_input(block_node)
+                    )
             return arguments
 
-        # Lift inputs.
+        # # Find inputs.
         arguments = _dfs_build_lifted_arguments_for_input(node)
 
         # Lift parameters as inputs.

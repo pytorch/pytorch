@@ -419,7 +419,40 @@ class TestConverter(TestCase):
         inp = ((torch.zeros(1, 4), torch.ones(1, 4)),)
         self._check_equal_ts_ep_converter(MUnpackTuple(), inp)
         
-    def test_convert_nn_module_with_param(self):
+    def test_convert_nn_module_with_nested_param(self):
+        class M(torch.nn.Module):
+            def __init__(self, dim: int) -> None:
+                super().__init__()
+                self.linear = torch.nn.Linear(dim, dim)
+
+            def forward(self, x: torch.Tensor):
+                return self.linear(x)
+
+        class NestedM(torch.nn.Module):
+            def __init__(self, dim: int) -> None:
+                super().__init__()
+                self.linear = torch.nn.Linear(dim, dim)
+                self.m = M(dim)
+
+            def forward(self, x: torch.Tensor):
+                return self.linear(self.m(x))
+
+        class SuperNestedM(torch.nn.Module):
+            def __init__(self, dim: int) -> None:
+                super().__init__()
+                self.linear = torch.nn.Linear(dim, dim)
+                self.m = NestedM(dim)
+
+            def forward(self, x: torch.Tensor):
+                return self.linear(self.m(x))
+
+        inp = (torch.ones(3),)
+        orig_m = NestedM(3)
+        ep = self._check_equal_ts_ep_converter(orig_m, inp)
+        orig_m = SuperNestedM(3)
+        ep = self._check_equal_ts_ep_converter(orig_m, inp)
+
+    def test_convert_nn_module_with_nested_if_and_param(self):
         class M(torch.nn.Module):
             def __init__(self, dim: int) -> None:
                 super().__init__()
@@ -456,7 +489,6 @@ class TestConverter(TestCase):
                 else:
                     return self.linear(self.m2(x))
 
-
         # Super nested, even the input needs to be
         # lifted recursively due to value propogation optimiztaion.
         class SuperNestedM2(torch.nn.Module):
@@ -472,7 +504,7 @@ class TestConverter(TestCase):
                 else:
                     return self.linear(self.m2(x))
 
-        # # Basic module testing.
+        # Basic module testing.
         inp = (torch.ones(3),)
         orig_m = M(3)
         ep = self._check_equal_ts_ep_converter(orig_m, inp)
@@ -484,7 +516,7 @@ class TestConverter(TestCase):
             orig_m(*inp),
         )
 
-        # # Nested module testing.
+        # Nested module testing.
         inp = (torch.ones(3),)
         orig_m = NestedM(3)
         ep = self._check_equal_ts_ep_converter(orig_m, inp)
