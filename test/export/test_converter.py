@@ -407,7 +407,7 @@ class TestConverter(TestCase):
                 else:
                     return self.linear(self.m2(x))
 
-        class SuperNestedM(torch.nn.Module):
+        class SuperNestedM1(torch.nn.Module):
             def __init__(self, dim: int) -> None:
                 super().__init__()
                 self.m1 = NestedM(dim)
@@ -415,7 +415,7 @@ class TestConverter(TestCase):
                 self.linear = torch.nn.Linear(dim, dim)
 
             def forward(self, x: torch.Tensor):
-                if torch.sum(x) > 1:
+                if torch.max(x) > 1:
                     return self.linear(self.m1(x))
                 else:
                     return self.linear(self.m2(x))
