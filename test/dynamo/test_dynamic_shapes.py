@@ -104,6 +104,9 @@ DynamicShapesExportTests.test_retracibility_dynamic_shapes = slowTest(  # noqa: 
 DynamicShapesExportTests.test_retracibility_dict_container_inp_out_dynamic_shapes = slowTest(  # noqa: F821
     DynamicShapesExportTests.test_retracibility_dict_container_inp_out_dynamic_shapes  # noqa: F821
 )
+DynamicShapesExportTests.test_retracibility_nested_list_out_dynamic_shapes = slowTest(  # noqa: F821
+    DynamicShapesExportTests.test_retracibility_nested_list_out_dynamic_shapes  # noqa: F821
+)
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
