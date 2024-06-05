@@ -64,6 +64,8 @@ class PyCodegen:
         self.new_var = self.tx.output.new_var
         self.mutable_side_effects_from_source = False
         self.value_from_source: bool = True
+        self.loaded_closures = set({})
+        self.loaded_tempvars = set({})
 
     def restore_stack(self, stack_values, *, value_from_source=True):
         prior = self.mutable_side_effects_from_source
@@ -111,6 +113,8 @@ class PyCodegen:
 
         if allow_cache:
             if value.mutable_local and value.mutable_local in self.tempvars:
+                # closure case?
+                self.loaded_tempvars.add(self.tempvars[value.mutable_local])
                 output.append(self.create_load(self.tempvars[value.mutable_local]))
                 self.top_of_stack = value
                 return
@@ -256,6 +260,8 @@ class PyCodegen:
 
     def create_load_closure(self, name) -> Instruction:
         assert name in self.cell_and_freevars()
+        print(f"!!!! create_load_closure {name}")
+        self.loaded_closures.add(name)
         return create_instruction("LOAD_CLOSURE", argval=name)
 
     def create_store(self, name) -> Instruction:

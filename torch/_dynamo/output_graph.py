@@ -1021,6 +1021,13 @@ class OutputGraph:
             name: nn_module_proxy(mod) for name, mod in self.nn_modules.items()
         }
         root = FakeRootModule(nn_modules_proxies)
+
+        # first pass to determine if any of the cellvars are dead.
+        graph_output_var = self.new_var("graph_out")
+        pass1 = PyCodegen(tx, root, graph_output_var)
+        self.codegen_suffix(tx, stack_values, pass1)
+        print("loaded closures: ", pass1.loaded_closures)
+
         # Add all the local vars to the "stack" so restore at the end
         restore_vars = []
         val_to_names: Dict[VariableTracker, List[str]] = {}
@@ -1032,6 +1039,8 @@ class OutputGraph:
         # last instruction and no more locals are used.  The fanciness here
         # is only needed for partial graphs.
         for k, v in tx.symbolic_locals.items():
+            if reason.reason == "return_value" and k not in pass1.loaded_closures:
+                continue
             # Note! this explicitly uses .local_name for matching
             # Failure to do so will cause spurious registrations in val_to_names.
             # This will in turn result in spurious variables showing up in the graph.
@@ -1091,20 +1100,27 @@ class OutputGraph:
             and not len(tx.debug_locals) != 0
             and not self.backward_state
         ):
+            # WE ARE HERE
+            print("we are here 1")
+
             append_prefix_insts()
             # optimization to generate better code in a common case
             self.add_output_instructions(
                 self.compile_and_call_fx_graph(tx, list(reversed(stack_values)), root)
                 + [create_instruction("UNPACK_SEQUENCE", arg=len(stack_values))]
             )
+            print("we are here 2")
             # restore all the live local vars
             self.add_output_instructions(
                 [PyCodegen(tx).create_store(var) for var in reversed(restore_vars)]
             )
+            print("we are here 3")
         else:
+            print("we are here 0")
             graph_output_var = self.new_var("graph_out")
             pass1 = PyCodegen(tx, root, graph_output_var)
             self.codegen_suffix(tx, stack_values, pass1)
+            print("we are here 1")
 
             # one more time now that we have established tempvars
             pass2 = PyCodegen(
@@ -1114,6 +1130,9 @@ class OutputGraph:
                 tempvars={val: None for val, count in pass1.uses.items() if count > 1},
             )
             self.codegen_suffix(tx, stack_values, pass2)
+
+            print("we are here 2")
+            # breakpoint()
 
             stored_graph_output_var = False
             output = []
@@ -1130,6 +1149,7 @@ class OutputGraph:
             append_prefix_insts()
             self.add_output_instructions(output + pass2.get_instructions())
 
+            print("we are here 3")
             # restore all the live local vars
             self.add_output_instructions(
                 [PyCodegen(tx).create_store(var) for var in reversed(restore_vars)]
@@ -1139,6 +1159,7 @@ class OutputGraph:
                 self.add_output_instructions(
                     [PyCodegen(tx).create_delete(graph_output_var)]
                 )
+            print("we are here 4")
 
     def codegen_suffix(self, tx, stack_values, cg):
         if self.backward_state:
