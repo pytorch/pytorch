@@ -8238,7 +8238,7 @@ class _CollectiveKernel(FallbackKernel):
     # mutation of the input buffers.
     @classmethod
     def create_inplace(
-        cls, kernel, inputs: Union[TensorBox, List[TensorBox]], *args, **kwargs
+        cls, kernel, mutated_inputs: Union[TensorBox, List[TensorBox]], *args, **kwargs
     ) -> None:
         cpp_kernel_name = kernel._name
         python_kernel_name = cpp_kernel_name.replace("::", ".")
@@ -8249,7 +8249,7 @@ class _CollectiveKernel(FallbackKernel):
                 non_tensor_args,
                 unflatten_args,
                 unbacked_bindings,
-            ) = cls.process_kernel(kernel, inputs, *args, **kwargs)
+            ) = cls.process_kernel(kernel, mutated_inputs, *args, **kwargs)
         assert not unbacked_bindings, f"{kernel} {unbacked_bindings}"
         for tensor_arg in tensor_args:
             tensor_arg.realize()
@@ -8338,6 +8338,15 @@ class _CollectiveKernel(FallbackKernel):
             packed.python_kernel_name = python_kernel_name
             packed.outputs = [packed]
             return packed
+
+    def codegen(self, wrapper):
+        super().codegen(wrapper)
+        # NOTE(yf225): It should always be safe to attempt to free the output of inplace-collective/wait_tensor right after the op,
+        # because downstream should depend on the input (instead of the output) of the inplace-collective/wait_tensor.
+        # This is important for being able to release collective memory as soon as possible by decreasing the collective output's refcount.
+        if isinstance(self.layout, NoneLayout):
+            from .codegen.wrapper import FreeIfNotReusedLine
+            wrapper.writeline(FreeIfNotReusedLine(wrapper, self))
 
 
 class _WaitKernel(_CollectiveKernel):
