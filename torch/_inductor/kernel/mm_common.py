@@ -27,10 +27,14 @@ def filtered_configs(
     n: int,
     k: int,
     configs: List[Tuple[int, int, int, int, int]],
+    has_int8_tensor=False,
 ):
     """Heuristic to shrink configs when they are bigger than the input size"""
 
-    min_block_size = 16
+    # According to https://github.com/openai/triton/issues/2156#issuecomment-1695897424
+    # it's safer to use at least [32, 32] block size for int8/uint8
+    # tensors
+    min_block_size = 32 if has_int8_tensor else 16
     m = max(
         next_power_of_2(
             V.graph.sizevars.size_hint(
@@ -162,18 +166,6 @@ int8_mm_kernel_configs = [
     {"config": (256, 128, 128, 3, 8), "cond": torch.version.hip is None},
 ]
 
-# Mixed precision kernel configs for small sizes of m for mm's like (16, 8192) x (8192, 8192).
-mixed_mm_kernel_configs_small_m = [
-    {"config": (16, 128, 256, 3, 4), "cond": True},
-    {"config": (16, 128, 256, 5, 8), "cond": True},
-]
-
-mixed_mm_kernel_configs = (
-    mm_kernel_configs + mixed_mm_kernel_configs_small_m
-    if inductor_config.max_autotune_gemm_search_space != "EXHAUSTIVE"
-    else mm_kernel_configs
-)
-
 # Create filtered list of configs based on cond evaluation
 
 
@@ -187,11 +179,6 @@ int8_platform_configs = tuple(
     for config in int8_mm_kernel_configs
     if config["cond"]
 )
-mixed_mm_platform_configs = tuple(
-    cast(Tuple[int, int, int, int, int], config["config"])
-    for config in mixed_mm_kernel_configs
-    if config["cond"]
-)
 
 # On ROCm convert num_stages to 0 to enable software pipelining
 if torch.version.hip:
@@ -203,10 +190,6 @@ if torch.version.hip:
         (config[0], config[1], config[2], 0, config[4])
         for config in mm_platform_configs
     )
-    mixed_mm_platform_configs = tuple(
-        (config[0], config[1], config[2], 0, config[4])
-        for config in mixed_mm_platform_configs
-    )
 
 mm_configs = functools.partial(
     filtered_configs,
@@ -216,11 +199,6 @@ mm_configs = functools.partial(
 int8_mm_configs = functools.partial(
     filtered_configs,
     configs=int8_platform_configs,
-)
-
-mixed_mm_configs = functools.partial(
-    filtered_configs,
-    configs=mixed_mm_platform_configs,
 )
 
 
