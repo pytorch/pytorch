@@ -72,9 +72,6 @@ def xfailIf(condition):
 def xfailIfMacOS14_4Plus(func):
     return unittest.expectedFailure(func) if product_version > 14.3 else func  # noqa: F821
 
-def xfailIfMacOS14_2(func):
-    return unittest.expectedFailure(func) if product_version == 14.2 else func  # noqa: F821
-
 def mps_ops_grad_modifier(ops):
     XFAILLIST_GRAD = {
 
