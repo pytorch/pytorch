@@ -245,11 +245,9 @@ static PyObject* THPModule_crashIfCsrcASAN(PyObject* module, PyObject* arg) {
 }
 
 static PyObject* THPModule_crashIfCsrcLSAN(PyObject* module, PyObject* noarg) {
-  HANDLE_TH_ERRORS
   // NOLINTNEXTLINE(*malloc*)
-  malloc(7);
+  malloc(1024ull * 1024);
   return THPUtils_packInt32(0);
-  END_HANDLE_TH_ERRORS
 }
 
 static PyObject* THPModule_crashIfCsrcUBSAN(PyObject* module, PyObject* arg) {
