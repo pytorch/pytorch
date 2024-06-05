@@ -44,7 +44,7 @@ def get_mem_and_flops(f, memory_budget=None):
     # Returns megabytes rounded to 1 decimal point and FLOPs
     # Note that each value of size (512, 512, torch.float32) is 1 MiB
     torch._dynamo.reset()
-    with config.patch(memory_budget=memory_budget):
+    with config.patch(activation_memory_budget=memory_budget):
         if memory_budget is not None:
             f = torch.compile(f, backend="aot_eager_decomp_partition")
 
@@ -200,6 +200,26 @@ class MemoryBudgetTest(TestCase):
         self.assertEqual(comp_mem, 4)
         # We are recomputing x1 @ w1 here!
         self.assertEqual(comp_flops, eager_flops + 4)
+
+    @config.patch(activation_memory_budget_runtime_estimator = "profile")
+    def test_profile(self):
+        def f(x, ws):
+            x = x.cos()
+            for w in ws:
+                x = torch.mm(x, w).cos()
+            return x.sum()
+
+        x = torch.randn(512, 512, requires_grad=True)
+        ws = [torch.randn(512, 512, requires_grad=True) for _ in range(5)]
+
+        def call():
+            return f(x, ws)
+
+        eager_mem, eager_flops = get_mem_and_flops(call)
+        mem, flops = get_mem_and_flops(call, memory_budget=0.2)
+        # We start saving the matmuls
+        self.assertEqual(mem, 2)
+        self.assertEqual(flops, eager_flops + 3)
 
     def test_prioritize_cheaper_matmul2(self):
         def f(xs, ws):
