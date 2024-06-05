@@ -60,6 +60,7 @@ from .virtualized import V
 
 log = logging.getLogger(__name__)
 fusion_log = torch._logging.getArtifactLogger(__name__, "fusion")
+loop_ordering_log = torch._logging.getArtifactLogger(__name__, "loop_ordering")
 
 
 class WhyNoFuse:
@@ -810,6 +811,9 @@ class SchedulerNode(BaseSchedulerNode):
 
     def apply_new_loop_order(self, new_order: Sequence[int]) -> None:
         assert len(self._sizes[0]) == len(new_order)
+        loop_ordering_log.debug(
+            "Reorder loops for %s with order %s", self.get_name(), new_order
+        )
         reorder_fn = ir.same_reorder(new_order)
 
         iter_size, reduce_size = self._sizes
