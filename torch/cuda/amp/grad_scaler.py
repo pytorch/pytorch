@@ -1,6 +1,7 @@
 from typing_extensions import deprecated
 
 import torch
+from torch.amp.grad_scaler import OptState
 
 __all__ = ["GradScaler"]
 
