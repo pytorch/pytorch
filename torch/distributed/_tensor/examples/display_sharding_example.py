@@ -10,6 +10,7 @@ from torch.distributed._tensor.debug import CommDebugMode
 from torch.distributed._tensor.examples.advanced_module_tracker import (
     AdvancedModuleTracker,
 )
+
 from torch.distributed.tensor.parallel import (
     ColwiseParallel,
     parallelize_module,
@@ -41,7 +42,7 @@ aten = torch.ops.aten
 supported_ops = [aten.view.default, aten._to_copy.default]
 
 
-class DisplayShardingExampleTest:
+class DisplayShardingExample:
     """
     Checks if the set of keys in ground truth dictionary and the set produced in advanced_module_tracker are in the same order
     """
@@ -86,7 +87,7 @@ class DisplayShardingExampleTest:
 
         return module_parameters_dict
 
-    def test_display_parameters_no_distributed(self):
+    def test_display_parameters_MLP(self):
         """Example of obtaining all module's FQN and parameters for a given model"""
 
         inp_size = [8, 10]
@@ -124,7 +125,7 @@ class DisplayShardingExampleTest:
             )
         )
 
-    def test_display_parameters_distributed(
+    def test_display_parameters_MLP_distributed(
         self, is_seq_parallel=False, recompute_activation=False
     ):
         "Example of obtaining all module's FQN and parameters for a given distributed model and printing the sharding info"
@@ -154,19 +155,20 @@ class DisplayShardingExampleTest:
         from torch.distributed._tensor.debug import CommDebugMode
 
         comm_mode = CommDebugMode()
-        module_tracker = AdvancedModuleTracker()
+        # module_tracker = AdvancedModuleTracker()
 
-        with comm_mode, module_tracker:
+        with comm_mode:
             output_tp = model(inp)
             output_tp.sum().backward()
 
         print(
             self.same_set_of_keys(
-                self.ground_truth(model), module_tracker.module_parameters_dict
+                self.ground_truth(model), comm_mode.get_parameter_info()
             )
         )
 
-        module_tracker.print_sharding_info()
+        comm_mode.print_paramater_info()
+        comm_mode.print_sharding_info()
 
 
 def run_example(world_size, rank):
