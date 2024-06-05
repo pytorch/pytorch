@@ -1395,6 +1395,7 @@ class Kernel(CodeGen):
         self.must_keep_buffers = set()
         self.store_buffer_names = set()
         self._load_mask = None
+        self._other_val = None
         # set in set_current_node
         self.current_node = None
         self.node_to_bounds: Optional[Dict[torch.fx.Node, ValueRanges[Any]]] = None

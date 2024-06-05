@@ -864,7 +864,7 @@ class CppOverrides(OpOverrides):
         return ops.to_dtype(var, dtype)
 
     @staticmethod
-    def masked(mask, body, other):
+    def masked(mask, body, other, is_pure=False):
         code = BracesBuffer()
 
         # Write masked operation into a lambda
@@ -1393,7 +1393,7 @@ class CppVecOverrides(CppOverrides):
             )
 
     @staticmethod
-    def masked(mask, body, other):
+    def masked(mask, body, other, is_pure=False):
         assert isinstance(V.kernel, CppVecKernel)
         code = BracesBuffer()
         var = V.kernel.cse.newvar()
@@ -2996,7 +2996,7 @@ class CppVecKernelChecker(CppVecKernel):
                 return sympy_index_symbol(str(index_var))
 
             @staticmethod
-            def masked(mask, body, other):
+            def masked(mask, body, other, is_pure=False):
                 body()
                 return self.cse.newvar()
 

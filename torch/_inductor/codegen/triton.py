@@ -608,7 +608,7 @@ class TritonOverrides(OpOverrides):
         raise NotImplementedError("ops.index_expr not implemented outside a kernel")
 
     @staticmethod
-    def masked(mask, body, other):
+    def masked(mask, body, other, is_pure=False):
         raise NotImplementedError("ops.masked not implemented outside a kernel")
 
     @staticmethod
@@ -870,7 +870,11 @@ class TritonKernelOverrides(TritonOverrides):
         return var
 
     @staticmethod
-    def masked(mask, body, other):
+    def masked(mask, body, other, is_pure=False):
+        if is_pure:
+            with V.kernel.mask_loads(mask) as new_mask, V.kernel.load_other(other):
+                return body()
+
         with V.kernel.mask_loads(mask) as new_mask:
             result = body()
 
@@ -1291,7 +1295,10 @@ class TritonKernel(SIMDKernel):
                 ep = ", eviction_policy='evict_first'"
         else:
             ep = ""
-        if (has_tmpmask or has_rindex) and indexing.has_mask():
+
+        if self._other_val:
+            other = f", other={self._other_val}"
+        elif (has_tmpmask or has_rindex) and indexing.has_mask():
             other = ", other=0.0"
         else:
             other = ""

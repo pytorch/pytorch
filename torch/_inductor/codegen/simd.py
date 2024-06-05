@@ -719,6 +719,17 @@ class SIMDKernel(Kernel):
         finally:
             self._load_mask = prior
 
+    @contextlib.contextmanager
+    def load_other(self, value):
+        """Context manager to add a fallback value to tl.load"""
+        prior = self._other_val
+        assert prior is None
+        self._other_val = value
+        try:
+            yield value
+        finally:
+            self._other_val = None
+
     def get_strides_of_load(self, index: sympy.Expr):
         """
         This gets the stride of the index for each of the tiling variables

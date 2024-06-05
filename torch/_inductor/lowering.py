@@ -3594,7 +3594,14 @@ def constant_pad_nd(x, padding, fill_value=0):
             if high != 0:
                 mask.append(range_mask_high(idx, length))
         mask = functools.reduce(ops.and_, mask)
-        return ops.masked(mask, lambda: x_loader(index), fill_value)
+        return ops.masked(
+            mask,
+            lambda: x_loader(index),
+            fill_value,
+            isinstance(x, TensorBox)
+            and isinstance(x.data, ir.StorageBox)
+            and x.data.is_input_buffer(),
+        )
 
     def offset_fn(index):
         new_index = list(index[:n])
