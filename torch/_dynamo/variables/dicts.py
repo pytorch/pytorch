@@ -557,12 +557,20 @@ def _is_matching_diffusers_cls(cls) -> bool:
 
 def _call_hasattr_customobj(self, tx, name: str) -> "VariableTracker":
     """Shared method between DataClassVariable and CustomizedDictVariable where items are attrs"""
+    if tx.output.side_effects.is_attribute_mutation(self):
+        try:
+            result = tx.output.side_effects.load_attr(self, name, deleted_ok=True)
+            return variables.ConstantVariable.create(
+                not isinstance(result, variables.DeletedVariable)
+            )
+        except KeyError:
+            pass
     if name in self.items or hasattr(self.user_cls, name):
         return ConstantVariable(True)
     elif istype(self.mutable_local, MutableLocal) and self.source is None:
         # Something created locally can't have any extra fields on it
         return ConstantVariable(False)
-    elif self.mutable_local is None and self.source:
+    elif self.source:
         # Maybe add a guard
         try:
             example = tx.output.root_tx.get_example_value(self.source)
@@ -585,6 +593,7 @@ class DataClassVariable(ConstDictVariable):
 
     Keeping since we wish to support dataclasses in general in the future
     """
+
     pass
 
 

@@ -496,7 +496,8 @@ class VariableBuilder:
         elif CustomizedDictVariable.is_matching_cls_hf(type(value)):
             self.install_guards(GuardBuilder.TYPE_MATCH)
             result = CustomizedDictVariable.wrap(self, value)
-            return self.set_source_and_track_mutable(value, result)
+            result.source = self.source
+            return self.tx.output.side_effects.track_object_existing(value, result)
         elif istype(value, (dict, collections.defaultdict, collections.OrderedDict)):
             if not value and self.get_source().is_nn_module():
                 # It is faster to guard on 'false' property than to guard
