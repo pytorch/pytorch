@@ -348,6 +348,36 @@ class CleanDiv(FloorDiv):
     pass
 
 
+# Don't use sympy ceiling/floor as they will attempt simplifications involving
+# frac
+class CeilToInt(sympy.Function):
+    is_integer = True
+
+    @classmethod
+    def eval(cls, number):
+        # assert number.is_integer is not True, number
+        if number == sympy.oo:
+            return sympy.Integer(sys.maxsize - 1)
+        if number == -sympy.oo:
+            return sympy.Integer(-sys.maxsize - 1)
+        if isinstance(number, sympy.Number):
+            return sympy.Integer(math.ceil(float(number)))
+
+
+class FloorToInt(sympy.Function):
+    is_integer = True
+
+    @classmethod
+    def eval(cls, number):
+        # assert number.is_integer is not True, number
+        if number == sympy.oo:
+            return sympy.Integer(sys.maxsize - 1)
+        if number == -sympy.oo:
+            return sympy.Integer(-sys.maxsize - 1)
+        if isinstance(number, sympy.Number):
+            return sympy.Integer(math.floor(float(number)))
+
+
 class CeilDiv(sympy.Function):
     """
     Div used in indexing that rounds up.
