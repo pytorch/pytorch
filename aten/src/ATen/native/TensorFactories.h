@@ -63,7 +63,7 @@ inline int64_t get_tril_size(int64_t row, int64_t col, int64_t offset) {
 }
 
 inline void check_args(
-    int64_t row, int64_t col, c10::optional<Layout> layout_opt) {
+    int64_t row, int64_t col, std::optional<Layout> layout_opt) {
   TORCH_CHECK(row >= 0, "row must be non-negative, got", row);
   TORCH_CHECK(col >= 0, "col must be non-negative, got", col);
   if (layout_opt.has_value()) {
@@ -124,7 +124,7 @@ struct ZeroTensorAllocator final : public at::Allocator {
   static void deleter(void* const pointer) {
     TORCH_INTERNAL_ASSERT(!pointer);
   }
-  DataPtr allocate(const size_t /*nbytes*/) const override {
+  DataPtr allocate(const size_t /*nbytes*/) override {
     return {nullptr, nullptr, &deleter, device_};
   }
   DeleterFnPtr raw_deleter() const override {

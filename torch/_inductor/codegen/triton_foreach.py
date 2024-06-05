@@ -6,11 +6,12 @@ from typing import Dict, List, Tuple
 from sympy import Integer
 
 from .. import metrics
+from ..runtime.hints import DeviceProperties
 from ..scheduler import SchedulerNode
 from ..utils import ceildiv, Placeholder
 from ..virtualized import V
 from .common import IndentedBuffer, Kernel
-from .triton import TritonKernel
+from .triton import gen_common_triton_imports, TritonKernel
 from .triton_utils import config_of, signature_to_meta
 
 
@@ -151,22 +152,30 @@ class ForeachKernel(Kernel):
         self.sub_kernels.append(sub_kernel)
         return sub_kernel
 
-    def jit_line(self):
+    def jit_lines(self):
         can_use_32bit = all(k.index_dtype == "tl.int32" for k in self.sub_kernels)
         size_dtype = "tl.int32" if can_use_32bit else "tl.int64"
-        _, _, signature = self.args.python_argdefs()
+        _, _, signature, _ = self.args.python_argdefs()
         triton_meta = {
             "signature": signature_to_meta(signature, size_dtype=size_dtype),
-            "device": V.graph.scheduler.current_device.index,
-            "device_type": V.graph.scheduler.current_device.type,
+            "device": DeviceProperties.create(
+                V.graph.scheduler.get_current_device_or_throw()
+            ),
             "constants": {},
         }
         triton_meta["configs"] = [config_of(signature)]
-        inductor_meta = {"kernel_name": str(Placeholder.DESCRIPTIVE_NAME)}
-        return (
-            f"@foreach(num_warps={self.num_warps}, triton_meta={triton_meta!r}, inductor_meta={inductor_meta!r})\n"
-            + "@triton.jit"
-        )
+        inductor_meta = {
+            "kernel_name": str(Placeholder.DESCRIPTIVE_NAME),
+            **TritonKernel.inductor_meta_common(),
+        }
+        return f"""
+            @triton_heuristics.foreach(
+                num_warps={self.num_warps},
+                triton_meta={triton_meta!r},
+                inductor_meta={inductor_meta!r},
+            )
+            @triton.jit
+        """
 
     def grid(self):
         return (
@@ -180,19 +189,9 @@ class ForeachKernel(Kernel):
     def codegen_kernel(self, name=None):
         code = IndentedBuffer()
 
-        code.splice(
-            """
-                import triton
-                import triton.language as tl
-                from torch._inductor.triton_heuristics import foreach
-                from torch._inductor.utils import instance_descriptor
-                from torch._inductor import triton_helpers
-            """
-        )
-        if TritonKernel.gen_attr_descriptor_import():
-            code.splice(TritonKernel.gen_attr_descriptor_import())
-        argdefs, _, _ = self.args.python_argdefs()
-        code.writeline(self.jit_line())
+        code.splice(gen_common_triton_imports())
+        argdefs, _, _, _ = self.args.python_argdefs()
+        code.splice(self.jit_lines())
         code.writeline(
             f"def {name or str(Placeholder.KERNEL_NAME)}({', '.join(argdefs)}):"
         )
@@ -228,24 +227,24 @@ class ForeachKernel(Kernel):
         return code.getvalue()
 
     def call_kernel(self, code, name: str):
-        _, call_args, _ = self.args.python_argdefs()
+        _, call_args, _, arg_types = self.args.python_argdefs()
         # dynamo wraps unspec variable as 0d CPU tensor, need convert to scalar
         for i in range(len(call_args)):
             if V.graph.is_unspec_arg(call_args[i]):
                 call_args[i] = call_args[i] + ".item()"
+        current_device = V.graph.scheduler.get_current_device_or_throw()
         if V.graph.cpp_wrapper:
             V.graph.wrapper_code.generate_kernel_call(
                 name,
                 call_args,
-                device_index=V.graph.scheduler.current_device.index,
+                device_index=current_device.index,
                 grid=self.grid(),
+                arg_types=arg_types,
             )
         else:
             # TODO: refactor generate_kernel_call
             call_args_str = ", ".join(call_args)
-            stream_name = code.write_get_raw_stream(
-                V.graph.scheduler.current_device.index
-            )
+            stream_name = code.write_get_raw_stream(current_device.index)
             code.writeline(
                 f"{name}.run({call_args_str}, grid=({self.grid()}), stream={stream_name})"
             )

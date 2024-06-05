@@ -1,17 +1,20 @@
 # Owner(s): ["oncall: jit"]
 
-import torch
-from torch.testing._internal.jit_utils import JitTestCase, RUN_CUDA, _inline_everything
-from torch import nn
-from torch.testing import FileCheck
+import unittest
 from typing import Callable, List
 
-import unittest
+import torch
+from torch import nn
+from torch.testing import FileCheck
+from torch.testing._internal.jit_utils import _inline_everything, JitTestCase, RUN_CUDA
 
-if __name__ == '__main__':
-    raise RuntimeError("This test file is not meant to be run directly, use:\n\n"
-                       "\tpython test/test_jit.py TESTNAME\n\n"
-                       "instead.")
+if __name__ == "__main__":
+    raise RuntimeError(
+        "This test file is not meant to be run directly, use:\n\n"
+        "\tpython test/test_jit.py TESTNAME\n\n"
+        "instead."
+    )
+
 
 class TestPeephole(JitTestCase):
     def test_peephole_with_writes(self):
@@ -62,11 +65,11 @@ class TestPeephole(JitTestCase):
 
         tf = torch.jit.trace(f, (a, b))
         FileCheck().check("type_as").run(str(tf.graph))
-        self.run_pass('peephole', tf.graph)
+        self.run_pass("peephole", tf.graph)
         FileCheck().check_not("type_as").run(str(tf.graph))
         tf2 = torch.jit.trace(f, (a, c))
         s = str(tf2.graph)
-        self.run_pass('peephole', tf2.graph)
+        self.run_pass("peephole", tf2.graph)
         self.assertEqual(s, str(s))
 
     def test_peephole_dynamic(self):
@@ -83,7 +86,7 @@ class TestPeephole(JitTestCase):
         def foo(x, y, z):
             return len([x, y, z])
 
-        self.run_pass('peephole', foo.graph)
+        self.run_pass("peephole", foo.graph)
         FileCheck().check("value=3").check_next("return").run(foo.graph)
 
         @torch.jit.script
@@ -93,7 +96,7 @@ class TestPeephole(JitTestCase):
                 li.append(x)
             return len([x, y, z])
 
-        self.run_pass('peephole', foo.graph)
+        self.run_pass("peephole", foo.graph)
         FileCheck().check_not("aten::len").run(foo.graph)
 
         @torch.jit.script
@@ -102,7 +105,7 @@ class TestPeephole(JitTestCase):
             return li[1], li[-2]
 
         FileCheck().check("aten::__getitem__").run(foo.graph)
-        self.run_pass('peephole', foo.graph)
+        self.run_pass("peephole", foo.graph)
         FileCheck().check_not("aten::__getitem__").run(foo.graph)
 
         @torch.jit.script
@@ -110,7 +113,7 @@ class TestPeephole(JitTestCase):
             li = [x, y, z]
             return li[-7]
 
-        self.run_pass('peephole', foo.graph)
+        self.run_pass("peephole", foo.graph)
         FileCheck().check("aten::__getitem__").run(foo.graph)
 
         @torch.jit.script
@@ -120,25 +123,25 @@ class TestPeephole(JitTestCase):
                 li.append(x)
             return li[-2]
 
-        self.run_pass('peephole', foo.graph)
+        self.run_pass("peephole", foo.graph)
         FileCheck().check("aten::__getitem__").run(foo.graph)
 
     @unittest.skipIf(not RUN_CUDA, "cpp tests require CUDA")
     def test_peephole_cuda(self):
-        a = torch.tensor([0.4], device='cpu')
-        b = torch.tensor([0.7], device='cuda')
-        c = torch.tensor([0.7], device='cuda')
+        a = torch.tensor([0.4], device="cpu")
+        b = torch.tensor([0.7], device="cuda")
+        c = torch.tensor([0.7], device="cuda")
 
         def f(x, y):
             return x.type_as(y)
 
         trace = torch.jit.trace(f, (a, c))
         s = str(trace.graph)
-        self.run_pass('peephole', trace.graph)
+        self.run_pass("peephole", trace.graph)
         self.assertEqual(s, str(trace.graph))
         trace = torch.jit.trace(f, (b, c))
-        self.run_pass('peephole', trace.graph)
-        self.run_pass('dce', trace.graph)
+        self.run_pass("peephole", trace.graph)
+        self.run_pass("dce", trace.graph)
         FileCheck().check_not("type_as").run(str(trace.graph))
 
     @_inline_everything
@@ -152,7 +155,7 @@ class TestPeephole(JitTestCase):
             return refine(torch.tensor(4))
 
         FileCheck().check("prim::unchecked_cast").run(test.graph)
-        self.run_pass('peephole', test.graph)
+        self.run_pass("peephole", test.graph)
         FileCheck().check_not("prim::unchecked_cast").run(test.graph)
 
         # refinement not optimzied out
@@ -166,7 +169,7 @@ class TestPeephole(JitTestCase):
         self.checkScript(is_int_tensor, (torch.tensor(2),))
         self.checkScript(is_int_tensor, (torch.tensor(2.5),))
         graph = torch.jit.script(is_int_tensor).graph
-        self.run_pass('peephole', graph)
+        self.run_pass("peephole", graph)
         FileCheck().check("prim::unchecked_cast").run(graph)
 
     def test_short_circuit_optimization(self):
@@ -174,8 +177,11 @@ class TestPeephole(JitTestCase):
         def const_expressions(x):
             # type: (int) -> Tuple[bool, bool]
             return x == 1 and False, x == 1 or True
-        self.run_pass('constant_propagation', const_expressions.graph)
-        FileCheck().check_not("prim::If").check_not("aten::eq").run(const_expressions.graph)
+
+        self.run_pass("constant_propagation", const_expressions.graph)
+        FileCheck().check_not("prim::If").check_not("aten::eq").run(
+            const_expressions.graph
+        )
         self.assertEqual(const_expressions(1), (False, True))
 
         @torch.jit.script
@@ -183,15 +189,18 @@ class TestPeephole(JitTestCase):
             # type: (int) -> Tuple[bool, bool]
             return x == 1 and True, x == 1 or False
 
-        self.run_pass('peephole', redundant_expressions.graph)
+        self.run_pass("peephole", redundant_expressions.graph)
         self.assertEqual(redundant_expressions(1), (True, True))
         self.assertEqual(redundant_expressions(0), (False, False))
         # and True / or False are removed from graph
-        FileCheck().check("aten::eq").check_not("prim::If").run(redundant_expressions.graph)
+        FileCheck().check("aten::eq").check_not("prim::If").run(
+            redundant_expressions.graph
+        )
 
     def test_conv_dim_folding(self):
         modules = [nn.Conv1d, nn.Conv2d, nn.Conv3d]
         for mod in modules:
+
             class ConvDim(torch.nn.Module):
                 def __init__(self):
                     super().__init__()
@@ -233,7 +242,6 @@ class TestPeephole(JitTestCase):
         FileCheck().check_count("aten::sub", 2, exactly=True).run(op_graph)
         FileCheck().check_count("aten::rsub", 0, exactly=True).run(op_graph)
 
-
     def test_normalized_is_op(self):
         def convertible_is_op(x: bool, y: bool):
             return x is True, False is x, x is y
@@ -266,7 +274,7 @@ class TestPeephole(JitTestCase):
         @torch.jit.script
         def foo(x: List[int], y: List[int]):
             if len(x) != 4 or len(y) != 5:
-                raise Exception("")
+                raise Exception("")  # noqa: TRY002
 
             return len(x) + len(y)
 
@@ -280,7 +288,7 @@ class TestPeephole(JitTestCase):
             if len(x) == 4 and len(y) == 5:
                 pass
             else:
-                raise Exception("hi")
+                raise Exception("hi")  # noqa: TRY002
 
             return len(x) + len(y)
 
@@ -292,15 +300,15 @@ class TestPeephole(JitTestCase):
         @torch.jit.script
         def foo(x: List[int], y: List[int], z: List[int]):
             if len(x) != 4:
-                raise Exception("..")
+                raise Exception("..")  # noqa: TRY002
             else:
                 if len(y) != 8:
-                    raise Exception("...")
+                    raise Exception("...")  # noqa: TRY002
                 else:
                     if len(z) == 3:
                         pass
                     else:
-                        raise Exception("...")
+                        raise Exception("...")  # noqa: TRY002
 
             return len(x) + len(y) * len(z)
 
@@ -450,7 +458,7 @@ class TestPeephole(JitTestCase):
         @torch.jit.script
         def foo(x: int, y: int):
             if x != 4 or y != 5:
-                raise Exception("")
+                raise Exception("")  # noqa: TRY002
 
             return x + y
 
@@ -469,7 +477,7 @@ class TestPeephole(JitTestCase):
             if x == 4 and y == 5:
                 pass
             else:
-                raise Exception("hi")
+                raise Exception("hi")  # noqa: TRY002
 
             return x + y
 
@@ -481,15 +489,15 @@ class TestPeephole(JitTestCase):
         @torch.jit.script
         def foo(x: int, y: int, z: int):
             if x != 4:
-                raise Exception("..")
+                raise Exception("..")  # noqa: TRY002
             else:
                 if y != 8:
-                    raise Exception("...")
+                    raise Exception("...")  # noqa: TRY002
                 else:
                     if z == 3:
                         pass
                     else:
-                        raise Exception("...")
+                        raise Exception("...")  # noqa: TRY002
 
             return x + y * z
 
@@ -558,7 +566,7 @@ class TestPeephole(JitTestCase):
 
         def foo4():
             x = torch.zeros([2, 2])
-            return x + 0.
+            return x + 0.0
 
         funcs = foo1, foo2, foo3, foo4
         inps = (torch.ones([2]),), (), (), ()
@@ -582,7 +590,7 @@ class TestPeephole(JitTestCase):
         self.assertEqual(func(torch.ones([2, 2])), func_s(torch.ones([2, 2])))
 
         def func(x):
-            return (x + 0.) - 5
+            return (x + 0.0) - 5
 
         func_s = torch.jit.script(func)
         inp = next(func_s.graph.inputs())
@@ -640,6 +648,7 @@ class TestPeephole(JitTestCase):
                 return z
             else:
                 return z2
+
         out = next(foo.graph.findNode("prim::If").outputs())
         out.setType(torch._C.OptionalType(torch._C.IntType.get()))
         self.run_pass("peephole", foo.graph)
@@ -665,12 +674,13 @@ class TestPeephole(JitTestCase):
             _6 = torch.add(1 * torch.sub(_3, 3) // 1, 1) / 1
             return [_5, int(_6)]
 
-        FileCheck().check("aten::add").check("aten::sub") \
-                   .check("aten::mul").check("aten::floordiv") \
-                   .check("aten::div").run(foo.graph)
+        FileCheck().check("aten::add").check("aten::sub").check("aten::mul").check(
+            "aten::floordiv"
+        ).check("aten::div").run(foo.graph)
         self.run_pass("peephole", foo.graph)
-        FileCheck().check("graph").check("):") \
-                   .check_next("ListConstruct").check_next("return").run(foo.graph)
+        FileCheck().check("graph").check("):").check_next("ListConstruct").check_next(
+            "return"
+        ).run(foo.graph)
         self.assertEqual(foo(0, 1, 2, 3), [1, 3])
 
     def test_peephole_dict_getitem_simple(self):
@@ -687,9 +697,9 @@ class TestPeephole(JitTestCase):
 
         @torch.jit.script
         def foo(a: int, b: int):
-            d = {'0': a, '1': b}
-            x = d['1']
-            y = d['0']
+            d = {"0": a, "1": b}
+            x = d["1"]
+            y = d["0"]
             return x, y
 
         self.run_pass("peephole", foo.graph)
@@ -815,14 +825,14 @@ class TestPeephole(JitTestCase):
         graph = torch.jit.script(foo).graph
         self.run_pass("peephole", graph)
         FileCheck().check_not("aten::slice").run(graph)
-        self.checkScript(foo, (3, ))
+        self.checkScript(foo, (3,))
 
     def test_peephole_slice_one_empty_arg(self):
         def check_helper(fn: Callable[[int], None]) -> None:
             graph = torch.jit.script(fn).graph
             self.run_pass("peephole", graph)
             FileCheck().check_not("aten::slice").run(graph)
-            self.checkScript(fn, (3, ))
+            self.checkScript(fn, (3,))
 
         def foo(x: int):
             return [1, 2, x, 4, 5, 6, 7][1::2]
@@ -844,7 +854,7 @@ class TestPeephole(JitTestCase):
             graph = torch.jit.script(fn).graph
             self.run_pass("peephole", graph)
             FileCheck().check_not("aten::slice").run(graph)
-            self.checkScript(fn, (3, ))
+            self.checkScript(fn, (3,))
 
         def foo(x: int):
             return [1, 2, x, 4, 5, 6, 7][::2]

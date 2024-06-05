@@ -133,7 +133,11 @@ from argparse import ArgumentParser, RawTextHelpFormatter, REMAINDER
 from os.path import expanduser
 from typing import Dict, List
 
-from torch.distributed.elastic.multiprocessing import start_processes, Std
+from torch.distributed.elastic.multiprocessing import (
+    DefaultLogsSpecs as _DefaultLogsSpecs,
+    start_processes,
+    Std,
+)
 
 format_str = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 logging.basicConfig(level=logging.INFO, format=format_str)
@@ -174,7 +178,7 @@ class _CPUinfo:
 
             # physical cores := core column in lscpu output
             #  logical cores :=  cPU column in lscpu output
-            self.node_nums = int(max([line[3] for line in self.cpuinfo])) + 1
+            self.node_nums = int(max(line[3] for line in self.cpuinfo)) + 1
             self.node_physical_cores: List[List[int]] = []  # node_id is index
             self.node_logical_cores: List[List[int]] = []  # node_id is index
             self.physical_core_node_map = {}  # physical core to numa node id
@@ -590,6 +594,9 @@ won't take effect even if it is set explicitly."
         launch_args = {}
         launch_envs: Dict[int, Dict] = {}
         launch_tee = {}
+        # check whether is launched from torchrun with --nproc-per-node <num workers>
+        local_size = int(os.environ.get("LOCAL_WORLD_SIZE", 1))
+        local_rank = int(os.environ.get("LOCAL_RANK", 0))
         for i in range(args.ninstances):
             cmd = []
             cur_process_cores = ""
@@ -615,6 +622,15 @@ won't take effect even if it is set explicitly."
                     ]
 
                 core_ranges: List[Dict] = []
+                if local_size > 1:
+                    total_num_cores = len(core_list)
+                    cores_per_rank = total_num_cores // local_size
+                    assert (
+                        cores_per_rank >= 1
+                    ), "At least one core needs to be assigned to each rank"
+                    core_list = core_list[
+                        cores_per_rank * local_rank : cores_per_rank * (local_rank + 1)
+                    ]
                 for core in core_list:
                     if len(core_ranges) == 0:
                         range_elem = {"start": core, "end": core}
@@ -666,8 +682,7 @@ won't take effect even if it is set explicitly."
             entrypoint=entrypoint,
             args=launch_args,
             envs=launch_envs,
-            log_dir=args.log_path,
-            tee=launch_tee,
+            logs_specs=_DefaultLogsSpecs(log_dir=args.log_path, tee=launch_tee),
         )
         ctx.wait()
 

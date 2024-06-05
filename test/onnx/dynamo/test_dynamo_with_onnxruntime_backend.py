@@ -6,13 +6,14 @@ import copy
 import dataclasses
 import os
 import sys
+import unittest
 from typing import Tuple
 
 import onnxruntime
+from parameterized import parameterized
 
 import torch
 import torch._dynamo.backends.registry
-from parameterized import parameterized
 from torch import nn
 from torch.onnx import (
     _OrtBackend as OrtBackend,
@@ -23,7 +24,6 @@ from torch.onnx import (
 from torch.testing._internal import common_utils
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
 import onnx_test_common
 
 
@@ -48,6 +48,20 @@ class TestDynamoWithONNXRuntime(onnx_test_common._TestONNXRuntime):
         super().tearDown()
         torch._dynamo.reset()
         OrtBackend.clear_cached_instances()
+
+    def test_get_ort_device_type(self):
+        self.assertEqual(
+            torch.onnx._internal.onnxruntime._get_ort_device_type("cuda"),
+            torch.onnx._internal.onnxruntime.ORTC.OrtDevice.cuda(),
+        )
+        self.assertEqual(
+            torch.onnx._internal.onnxruntime._get_ort_device_type("cpu"),
+            torch.onnx._internal.onnxruntime.ORTC.OrtDevice.cpu(),
+        )
+        self.assertEqual(
+            torch.onnx._internal.onnxruntime._get_ort_device_type("maia"),
+            torch.onnx._internal.onnxruntime.ORTC.OrtDevice.npu(),
+        )
 
     def test_torch_compile_backend_registration(self):
         self.assertIn("onnxrt", torch._dynamo.backends.registry.list_backends())
@@ -457,7 +471,7 @@ class TestDynamoWithONNXRuntime(onnx_test_common._TestONNXRuntime):
 
         if test_local_backend:
             assert local_ort is not None
-            number_of_captured_graphs = 2 if test_backward else 1
+            number_of_captured_graphs = 3 if test_backward else 2
             execution_count = len(example_args_collection) * number_of_captured_graphs
             self._assert_counting_information(
                 local_ort,
@@ -550,7 +564,7 @@ class TestDynamoWithONNXRuntime(onnx_test_common._TestONNXRuntime):
 
         if test_local_backend:
             assert local_ort is not None
-            number_of_captured_graphs = 2 if test_backward else 1
+            number_of_captured_graphs = 3 if test_backward else 2
             execution_count = len(example_args_collection) * number_of_captured_graphs
             self._assert_counting_information(
                 local_ort,
@@ -635,7 +649,7 @@ class TestDynamoWithONNXRuntime(onnx_test_common._TestONNXRuntime):
 
         if test_local_backend:
             assert local_ort is not None
-            number_of_captured_graphs = 2 if test_backward else 1
+            number_of_captured_graphs = 3 if test_backward else 2
             execution_count = len(example_args_collection) * number_of_captured_graphs
             self._assert_counting_information(
                 local_ort,
@@ -716,6 +730,131 @@ class TestDynamoWithONNXRuntime(onnx_test_common._TestONNXRuntime):
             result = compiled_model(*example_args)
             self.assertTrue(os.path.exists(expected))
             self.assertFalse(os.path.exists(not_expected))
+
+    @unittest.skipIf(not torch.cuda.is_available(), "No CUDA to run mix devicei nputs")
+    def test_mix_device_inputs(self):
+        data = torch.randn(4, 8, device="cuda")
+        ref_data = torch.randn(8, 4, device="cpu")
+
+        def reshape_wrapper(data, ref_cpu_data):
+            # Dummy line to make sure ref_cpu_data
+            # is included in the captured graph.
+            ref_cpu_data += 1
+            shape = ref_cpu_data.shape
+            # A call with GPU and CPU inputs.
+            return torch.reshape(data, shape)
+
+        compiled_model = torch.compile(
+            reshape_wrapper,
+            backend="onnxrt",
+            dynamic=True,
+        )
+
+        result = compiled_model(data, ref_data)
+
+        self.assertTrue(torch.allclose(result, data.view(ref_data.shape)))
+
+    def test_no_input(self):
+        def reshape_wrapper():
+            # A model without input.
+            ones = torch.ones(4, 8)
+            zeros = torch.zeros(4, 8)
+            return ones + zeros
+
+        recorded_models = []
+
+        def record_onnx_model_transform(onnx_model):
+            # Record the ONNX model seen by the transform.
+            recorded_models.append(onnx_model)
+
+        compiled_model = torch.compile(
+            reshape_wrapper,
+            backend="onnxrt",
+            dynamic=True,
+            options=torch.onnx._OrtBackendOptions(
+                pre_ort_model_transforms=[
+                    record_onnx_model_transform,
+                ]
+            ),
+        )
+
+        result = compiled_model()
+
+        self.assertEqual(len(recorded_models), 1)
+        # NOTE: Constant folded by optimizer
+        self.assertTrue(
+            "Constant" in [node.op_type for node in recorded_models[0].graph.node]
+        )
+
+        self.assertEqual(result, torch.ones(4, 8))
+
+    def test_custom_onnx_transform(self):
+        # This test consists of 2 parts:
+        # 1. If a registered ONNX transform is called and recorded a model.
+        # 2. If a registered ONNX transform is called and changed the model
+
+        # Part 1: Record the ONNX model seen by the transform.
+        # This list contains the models recorded by record_onnx_model_transform.
+        recorded_models = []
+
+        def record_onnx_model_transform(onnx_model):
+            # Record the ONNX model seen by the transform.
+            recorded_models.append(onnx_model)
+
+        def example_model(x: torch.Tensor):
+            y = torch.sigmoid(x)
+            z = x + y
+            return z
+
+        compiled_model = torch.compile(
+            example_model,
+            backend="onnxrt",
+            dynamic=True,
+            options=torch.onnx._OrtBackendOptions(
+                pre_ort_model_transforms=[record_onnx_model_transform]
+            ),
+        )
+
+        x = torch.randn(2)
+        assert len(recorded_models) == 0
+        y = compiled_model(x)
+        assert len(recorded_models) == 1
+
+        # Part 2: Change the ONNX model seen by the transform so that
+        # ORT receives a different model.
+        # NOTE: the function is optimized away by optimizer
+        def replace_relu_with_sigmoid(onnx_model):
+            for node in onnx_model.graph.node:
+                if node.op_type == "Relu":
+                    node.op_type = "Sigmoid"
+
+        def another_example_model(x: torch.Tensor):
+            y = torch.relu(x)
+            z = x + y
+            return z
+
+        another_compiled = torch.compile(
+            another_example_model,
+            backend="onnxrt",
+            dynamic=True,
+            options=torch.onnx._OrtBackendOptions(
+                pre_ort_model_transforms=[
+                    replace_relu_with_sigmoid,
+                    record_onnx_model_transform,
+                ]
+            ),
+        )
+
+        another_y = another_compiled(x)
+        # We have 2 models recorded `record_onnx_model_transform`
+        # by the 2 torch.compile calls above.
+        assert len(recorded_models) == 2
+        # Since we have changed "Relu" to "Sigmoid" in replace_sigmoid_with_relu,
+        # the result should be the same to previous y.
+        torch.testing.assert_close(y, another_y)
+        # another_example_model still uses "Relu", so the result should be different
+        # than y.
+        self.assertFalse(torch.allclose(y, another_example_model(x)))
 
 
 if __name__ == "__main__":

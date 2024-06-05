@@ -1265,7 +1265,7 @@ int64_t ret_single_non_tensor(
 
 torch::Tensor opt_op(
     const torch::Tensor& self,
-    const c10::optional<at::Tensor>& other) {
+    const std::optional<at::Tensor>& other) {
   if (other.has_value()) {
     return self + other.value();
   } else {
@@ -1461,11 +1461,11 @@ TEST(TestAutogradNotImplementedFallback, OptOp) {
   auto opHandle =
       c10::Dispatcher::singleton().findSchemaOrThrow("_test::opt_op", "");
   auto op = [&](const torch::Tensor& _1,
-                const c10::optional<torch::Tensor>& _2) {
+                const std::optional<torch::Tensor>& _2) {
     return callOpUnboxed<
         torch::Tensor,
         const torch::Tensor&,
-        const c10::optional<torch::Tensor>&>(opHandle, _1, _2);
+        const std::optional<torch::Tensor>&>(opHandle, _1, _2);
   };
 
   auto a = torch::tensor({1.}, {torch::kFloat32}).set_requires_grad(true);
@@ -1500,14 +1500,11 @@ TEST(TestAutogradNotImplementedFallback, RetTupleNonTensor) {
   auto opHandle = c10::Dispatcher::singleton().findSchemaOrThrow(
       "_test::ret_tuple_non_tensor", "");
   auto op = [&](const torch::Tensor& _1, const torch::Tensor& _2) {
-    torch::Tensor out0;
-    torch::Tensor out1;
-    int64_t out2;
     auto out = callOpUnboxed<
         std::tuple<torch::Tensor, torch::Tensor, int64_t>,
         const torch::Tensor&,
         const torch::Tensor&>(opHandle, _1, _2);
-    std::tie(out0, out1, out2) = std::move(out);
+    auto [out0, out1, out2] = std::move(out);
     return out0;
   };
 
@@ -1664,7 +1661,7 @@ TEST(TestAutogradNotImplementedFallback, TensorlistOp) {
 
   ASSERT_THROWS_WITH(
       torch::autograd::grad({out}, {vec[0]}),
-      "One of the differentiated Tensors does not require grad");
+      "element 0 of the input tensors does not require grad");
   ASSERT_THROWS_WITH(
       torch::autograd::grad({out}, {vec[1]}), "is not implemented");
 

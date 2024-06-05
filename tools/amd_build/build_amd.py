@@ -200,7 +200,11 @@ hipify_python.hipify(
     output_directory=out_dir,
     includes=includes,
     ignores=ignores,
-    extra_files=["torch/_inductor/codegen/wrapper.py"],
+    extra_files=[
+        "torch/_inductor/codegen/cpp_wrapper_cpu.py",
+        "torch/_inductor/codegen/cpp_wrapper_cuda.py",
+        "torch/_inductor/codegen/wrapper.py",
+    ],
     out_of_place_only=args.out_of_place_only,
     hip_clang_launch=is_hip_clang(),
 )

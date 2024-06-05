@@ -71,7 +71,7 @@ static void reduced_float_copy_kernel(TensorIteratorBase &iter, bool requires_ne
       using Vecs = Vectorized<scalar_t>;
       c10::SmallBuffer<char*, 2> ptrs(2);
       dest_t* output_data = iter.tensor_base(0).data_ptr<dest_t>();
-      scalar_t* input_data = iter.tensor_base(1).data_ptr<scalar_t>();
+      scalar_t* input_data = const_cast<scalar_t*>(iter.tensor_base(1).const_data_ptr<scalar_t>());
       ptrs[0] = reinterpret_cast<char*>(output_data);
       ptrs[1] = reinterpret_cast<char*>(input_data);
 
@@ -139,7 +139,7 @@ static void reduced_float_copy_kernel(TensorIteratorBase &iter, bool requires_ne
       using Vecs = Vectorized<source_t>;
       c10::SmallBuffer<char*, 2> ptrs(2);
       dest_t* output_data = iter.tensor_base(0).data_ptr<dest_t>();
-      source_t* input_data = iter.tensor_base(1).data_ptr<source_t>();
+      source_t* input_data = const_cast<source_t*>(iter.tensor_base(1).const_data_ptr<source_t>());
 
       ptrs[0] = reinterpret_cast<char*>(output_data);
       ptrs[1] = reinterpret_cast<char*>(input_data);

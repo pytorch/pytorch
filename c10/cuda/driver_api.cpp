@@ -3,7 +3,6 @@
 #include <c10/util/CallOnce.h>
 #include <c10/util/Exception.h>
 #include <dlfcn.h>
-#include <iostream>
 
 namespace c10::cuda {
 

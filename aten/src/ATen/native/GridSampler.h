@@ -211,7 +211,7 @@ static inline bool within_bounds_3d(int64_t d, int64_t h, int64_t w, int64_t D, 
 
 template<typename scalar_t>
 static inline scalar_t get_value_bounded(
-    scalar_t* data,
+    const scalar_t* data,
     scalar_t x,
     scalar_t y,
     int64_t W,

@@ -1,19 +1,40 @@
 import functools
+import hashlib
 import itertools
+import json
 import logging
 import os
+import os.path
 import re
+import tempfile
 from dataclasses import dataclass, field
 from importlib import __import__
-from typing import Dict, List, Optional, Set, Union
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
 from weakref import WeakSet
 
+import torch._logging.structured
+from torch.utils._traceback import CapturedTraceback
+
 log = logging.getLogger(__name__)
+
+# This is a synthetic logger which doesn't correspond to an actual logger,
+# but handles all of our "tracing" logging, which is structured and doesn't go
+# to stderr but always goes to a dedicated log file.  We don't put these
+# loggers in the classic module hierarchy, because we don't want a suppression
+# of logs to also cause a trace to get suppressed (traces typically are not
+# collected, unless we are in prod, in which case they always are collected.)
+#
+# TODO: Maybe we should allow for some sub-hierarchy so you can control which
+# traces you want to collect, for performance reasons.
+#
+# See https://docs.google.com/document/d/1CX_hJ0PNy9f3R1y8TJrfkSeLkvGjjjLU84BSXgS2AZ8/edit
+trace_log = logging.getLogger("torch.__trace")
 
 DEFAULT_LOG_LEVEL = logging.WARNING
 LOG_ENV_VAR = "TORCH_LOGS"
 LOG_OUT_ENV_VAR = "TORCH_LOGS_OUT"
 LOG_FORMAT_ENV_VAR = "TORCH_LOGS_FORMAT"
+TRACE_ENV_VAR = "TORCH_TRACE"
 
 
 @dataclass
@@ -191,7 +212,9 @@ def set_logs(
     recompiles_verbose: bool = False,
     trace_source: bool = False,
     trace_call: bool = False,
+    trace_bytecode: bool = False,
     output_code: bool = False,
+    kernel_code: bool = False,
     schedule: bool = False,
     perf_hints: bool = False,
     post_grad_graphs: bool = False,
@@ -202,6 +225,7 @@ def set_logs(
     modules: Optional[Dict[str, Union[int, bool]]] = None,
     cudagraphs: bool = False,
     sym_node: bool = False,
+    compiled_autograd_verbose: bool = False,
 ):
     """
     Sets the log level for individual components and toggles individual log
@@ -327,8 +351,15 @@ def set_logs(
             Whether to emit detailed line location when TorchDynamo creates an FX node
             corresponding to function call. Python 3.11+ only. Default: ``False``
 
+        trace_bytecode (:class:`bool`):
+            Whether to emit bytecode instructions and traced stack state as TorchDynamo
+            traces bytecode. Default: ``False``
+
         output_code (:class:`bool`):
-            Whether to emit the TorchInductor output code. Default: ``False``
+            Whether to emit the TorchInductor output code on a per-graph basis. Default: ``False``
+
+        kernel_code (:class:`bool`):
+            Whether to emit the TorchInductor output code on a per-kernel bases. Default: ``False``
 
         schedule (:class:`bool`):
             Whether to emit the TorchInductor schedule. Default: ``False``
@@ -444,7 +475,9 @@ def set_logs(
         recompiles_verbose=recompiles_verbose,
         trace_source=trace_source,
         trace_call=trace_call,
+        trace_bytecode=trace_bytecode,
         output_code=output_code,
+        kernel_code=kernel_code,
         schedule=schedule,
         perf_hints=perf_hints,
         post_grad_graphs=post_grad_graphs,
@@ -455,6 +488,7 @@ def set_logs(
         sym_node=sym_node,
         export=export,
         cudagraphs=cudagraphs,
+        compiled_autograd_verbose=compiled_autograd_verbose,
     )
 
 
@@ -696,6 +730,10 @@ def _has_registered_parent(log_qname):
 
 # apply custom formats to artifacts when necessary
 class TorchLogsFormatter(logging.Formatter):
+    def __init__(self, *, trace: bool = False):
+        super().__init__()
+        self._is_trace = trace
+
     def format(self, record):
         artifact_name = getattr(logging.getLogger(record.name), "artifact_name", None)
         if artifact_name is not None:
@@ -706,7 +744,7 @@ class TorchLogsFormatter(logging.Formatter):
                 return artifact_formatter.format(record)
 
         record.message = record.getMessage()
-        record.asctime = self.formatTime(record, self.datefmt)
+        record.asctime = self.formatTime(record, "%m%d %H:%M:%S")
 
         # exception handling - copied from logging.Formatter.format
         s = record.message
@@ -724,17 +762,50 @@ class TorchLogsFormatter(logging.Formatter):
                 s = s + "\n"
             s = s + self.formatStack(record.stack_info)
 
-        lines = s.split("\n")
         record.rankprefix = ""
-        if dist.is_available() and dist.is_initialized():
+        if not self._is_trace and dist.is_available() and dist.is_initialized():
             record.rankprefix = f"[rank{dist.get_rank()}]:"
 
         record.traceid = ""
-        if (trace_id := torch._guards.CompileContext.current_trace_id()) is not None:
+        if (
+            not self._is_trace
+            and (trace_id := torch._guards.CompileContext.current_trace_id())
+            is not None
+        ):
             record.traceid = f" [{trace_id}]"
 
-        prefix = f"{record.rankprefix}[{record.asctime}]{record.traceid} {record.name}: [{record.levelname}]"
-        return "\n".join(f"{prefix} {l}" for l in lines)
+        glog_level_to_abbr = {
+            "DEBUG": "V",  # V is for VERBOSE in glog
+            "INFO": "I",
+            "WARNING": "W",
+            "ERROR": "E",
+            "CRITICAL": "C",
+        }
+
+        shortlevel = glog_level_to_abbr.get(record.levelname, record.levelname)
+
+        record.artifactprefix = ""
+        if artifact_name is not None:
+            record.artifactprefix = f" [__{artifact_name}]"
+
+        prefix = (
+            f"{record.rankprefix}{shortlevel}{record.asctime}.{int(record.msecs*1000):06d} {record.thread} "
+            f"{os.path.relpath(record.pathname, os.path.dirname(os.path.dirname(torch.__file__)))}:"
+            f"{record.lineno}]{record.traceid}{record.artifactprefix}"
+        )
+        if self._is_trace:
+            assert s == ""
+            try:
+                r = f"{prefix} {json.dumps(record.metadata)}"
+            except TypeError:
+                log.warning("failing metadata: %r", record.metadata)
+                raise
+            if record.payload is not None:
+                r += "".join(f"\n\t{l}" for l in record.payload.split("\n"))
+            return r
+        else:
+            lines = s.split("\n")
+            return "\n".join(f"{prefix} {l}" for l in lines)
 
 
 def _default_formatter():
@@ -742,6 +813,8 @@ def _default_formatter():
     if fmt is None:
         return TorchLogsFormatter()
     else:
+        if fmt in ("short", "basic"):
+            fmt = logging.BASIC_FORMAT
         return logging.Formatter(fmt)
 
 
@@ -791,6 +864,9 @@ def _reset_logs():
         log = logging.getLogger(artifact_log_qname)
         log.setLevel(logging.NOTSET)
         log.propagate = True
+
+    trace_log.propagate = False
+    _clear_handlers(trace_log)
 
 
 def _get_log_state():
@@ -846,6 +922,105 @@ def _init_logs(log_file_name=None):
         log = logging.getLogger(artifact_log_qname)
         configure_artifact_log(log)
 
+    # Setup handler for the special trace_log, with different default
+    # configuration
+    trace_dir_name = os.environ.get(TRACE_ENV_VAR, None)
+    # This handler may remove itself if trace_dir_name is None and we are not
+    # actually in an FB environment.  This allows us to defer actually
+    # initializing it until we actually need to log anything.  This is
+    # important because JK initializes a C++ singleton, which will pork our
+    # process if we subsequently fork.
+    handler = LazyTraceHandler(trace_dir_name)
+    # This log is ALWAYS at debug level.  We will additionally test if there
+    # are any handlers before deciding to actually call logging on this.  Do
+    # not manually call
+    trace_log.setLevel(logging.DEBUG)
+    trace_log_handler = _track_handler(handler)
+    trace_log_handler.setFormatter(TorchLogsFormatter(trace=True))
+    trace_log.addHandler(trace_log_handler)
+
+
+class LazyTraceHandler(logging.StreamHandler):
+    """Like FileHandler, but the file is allocated lazily only upon the first log message"""
+
+    def __init__(self, root_dir: Optional[str]):
+        # This is implemented in the same way that delay is implemented on
+        # FileHandler
+        self.root_dir = root_dir
+        logging.Handler.__init__(self)
+        self.stream = None
+        self._builtin_open = open
+
+    # cloned from FileHandler in cpython
+    def close(self):
+        self.acquire()
+        try:
+            try:
+                if self.stream:
+                    try:
+                        self.flush()
+                    finally:
+                        stream = self.stream
+                        self.stream = None
+                        if hasattr(stream, "close"):
+                            stream.close()
+            finally:
+                # Issue #19523: call unconditionally to
+                # prevent a handler leak when delay is set
+                # Also see Issue #42378: we also rely on
+                # self._closed being set to True there
+                logging.StreamHandler.close(self)
+        finally:
+            self.release()
+
+    def emit(self, record):
+        if self.stream is None:
+            ok = False
+            if self.root_dir is None:
+                TRACE_LOG_DIR = "/logs"
+                open_func = self._builtin_open
+
+                import torch.version as torch_version
+
+                if hasattr(torch_version, "git_version"):
+                    log.info("LazyTraceHandler: disabled because not fbcode")
+                elif not torch._utils_internal.justknobs_check("pytorch/trace:enable"):
+                    log.info(
+                        "LazyTraceHandler: disabled because justknobs_check('pytorch/trace:enable') returned False"
+                    )
+                elif not os.path.exists(TRACE_LOG_DIR):
+                    log.info(
+                        "LazyTraceHandler: disabled because %s does not exist",
+                        TRACE_LOG_DIR,
+                    )
+                elif not os.access(TRACE_LOG_DIR, os.W_OK):
+                    log.info(
+                        "LazyTraceHandler: disabled because %s is not writeable",
+                        TRACE_LOG_DIR,
+                    )
+                else:
+                    self.root_dir = TRACE_LOG_DIR
+
+            if self.root_dir is not None:
+                os.makedirs(self.root_dir, exist_ok=True)
+                ranksuffix = ""
+                if dist.is_available() and dist.is_initialized():
+                    ranksuffix = f"rank_{dist.get_rank()}_"
+                self.stream = tempfile.NamedTemporaryFile(
+                    mode="w+",
+                    suffix=".log",
+                    prefix=f"dedicated_log_torch_trace_{ranksuffix}",
+                    dir=self.root_dir,
+                    delete=False,
+                )
+                log.info("LazyTraceHandler: logging to %s", self.stream.name)
+            else:
+                # We go poof, remove and no-op
+                trace_log.removeHandler(self)
+                return
+        if self.stream:
+            super().emit(record)
+
 
 @functools.lru_cache(None)
 def warning_once(logger_obj, *args, **kwargs):
@@ -868,5 +1043,69 @@ class LazyString:
         return self.func(*self.args, **self.kwargs)
 
 
+def trace_structured(
+    name: str,
+    # NB: metadata expected to be dict so adding more info is forward compatible
+    # Tuple[str, int] is a special case for string interning
+    metadata_fn: Callable[[], Union[Dict[str, Any], Tuple[str, int]]] = dict,
+    *,
+    payload_fn: Callable[[], Optional[Union[str, object]]] = lambda: None,
+    suppress_context: bool = False,
+):
+    """
+    metadata is an arbitrary JSON compatible struct, but it's expected to not be
+    too long (e.g., less than 1MB)
+
+    payload is an arbitrary string, which can be arbitrarily long (but expected to have
+    newlines so no lines are too long)
+    """
+    assert "name" not in ["rank", "frame_id", "frame_compile_id", "attempt"]
+    assert callable(
+        metadata_fn
+    ), f"metadata_fn should be callable, but got {type(metadata_fn)}"
+    assert callable(
+        payload_fn
+    ), f"payload_fn should be callable, but got {type(payload_fn)}"
+    # trace_log never propagates and is ALWAYS DEBUG, so also check that there
+    # are handlers instead of checking the log level
+    if trace_log.handlers:
+        record: Dict[str, object] = {}
+        record[name] = metadata_fn()
+        if not suppress_context:
+            # TODO: Actually, the rank probably should just be emitted once at
+            # the top, and not repeatedly spammed in all the logs, since it
+            # never changes and we assume no interleaving
+            if dist.is_available() and dist.is_initialized():
+                record["rank"] = dist.get_rank()
+            if (
+                trace_id := torch._guards.CompileContext.current_trace_id()
+            ) is not None:
+                record["frame_id"] = trace_id.compile_id.frame_id
+                record["frame_compile_id"] = trace_id.compile_id.frame_compile_id
+                record["attempt"] = trace_id.attempt
+            else:
+                # Record the stack of the log call to better diagnose why we
+                # don't have a frame id for it
+                record["stack"] = torch._logging.structured.from_traceback(
+                    CapturedTraceback.extract(skip=1).summary()
+                )
+        payload = payload_fn()
+        if payload is not None:
+            if not isinstance(payload, str):
+                if isinstance(payload, list):
+                    # special case to look better
+                    payload = "[\n" + ",\n".join(json.dumps(i) for i in payload) + "\n]"
+                else:
+                    # force newlines so we are unlikely to overflow line limit
+                    payload = json.dumps(payload, indent=0)
+            h = hashlib.md5()
+            h.update(payload.encode("utf-8"))
+            record["has_payload"] = h.hexdigest()
+        trace_log.debug(
+            "", extra={"metadata": record, "payload": payload}, stacklevel=2
+        )
+
+
 import torch._guards
+import torch._utils_internal
 import torch.distributed as dist

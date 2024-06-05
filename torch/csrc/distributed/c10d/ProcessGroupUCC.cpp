@@ -1,5 +1,6 @@
 #ifdef USE_C10D_UCC
 
+#include <ATen/cuda/nvrtc_stub/ATenNVRTC.h>
 #include <torch/csrc/distributed/c10d/ProcessGroupUCC.hpp>
 #include <torch/csrc/distributed/c10d/UCCTracing.hpp>
 #include <torch/csrc/distributed/c10d/UCCUtils.hpp>
@@ -11,7 +12,6 @@
 namespace c10d {
 
 namespace {
-constexpr int64_t kBusyWaitMillis = 10;
 
 const std::map<c10::DeviceType, ucc_memory_type_t> ucc_mtype_map = {
     {c10::kCPU, UCC_MEMORY_TYPE_HOST},
@@ -44,7 +44,7 @@ ucc_datatype_t to_ucc_dType(at::Tensor _tensor) {
   }
   try {
     return ucc_dtype_map.at(_tensor.scalar_type());
-  } catch (const std::out_of_range& e) {
+  } catch (const std::out_of_range&) {
     TORCH_CHECK(false, "Not supported data type for UCC");
   }
 }
@@ -77,7 +77,7 @@ ucc_reduction_op_t to_ucc_reduceOp(
 
   try {
     return ucc_op_map.at(_op);
-  } catch (const std::out_of_range& e) {
+  } catch (const std::out_of_range&) {
     TORCH_CHECK(false, "Not supported ReduceOp for UCC");
   }
 }
@@ -528,6 +528,13 @@ void Comm::progress_loop() {
 #ifdef USE_CUDA
     if ((!device_set) && (cuda_device_index != TORCH_UCC_DEVICE_NOT_SET)) {
       c10::cuda::set_device(cuda_device_index);
+      CUcontext pctx = nullptr;
+      at::globalContext().getNVRTC().cuCtxGetCurrent(&pctx);
+      if (C10_UNLIKELY(!pctx)) {
+        at::globalContext().getNVRTC().cuDevicePrimaryCtxRetain(
+            &pctx, cuda_device_index);
+        at::globalContext().getNVRTC().cuCtxSetCurrent(pctx);
+      }
       device_set = true;
     }
 #endif
@@ -701,7 +708,7 @@ void ProcessGroupUCC::runHealthCheck() {
         if (is_last_device) {
           healthCheckData.healthCheckCv.notify_one();
         }
-      } catch (const std::exception& e) {
+      } catch (const std::exception&) {
         // Populate exception ptr.
         healthCheckData.healthCheckException = std::current_exception();
         // Unblock waiting main thread which will report exception.

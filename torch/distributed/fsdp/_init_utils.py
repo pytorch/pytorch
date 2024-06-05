@@ -15,6 +15,7 @@ from typing import (
     Optional,
     Set,
     Tuple,
+    TYPE_CHECKING,
     Union,
 )
 
@@ -58,7 +59,9 @@ from torch.distributed.tensor.parallel.fsdp import DTensorExtensions
 from torch.distributed.utils import _sync_params_and_buffers
 
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
-from torch.utils.hooks import RemovableHandle
+
+if TYPE_CHECKING:
+    from torch.utils.hooks import RemovableHandle
 
 _TORCHDISTX_AVAIL = True
 try:
@@ -116,8 +119,8 @@ def _init_process_group_state(
             # passed in, there is no way to ensure all wrapped FSDP instances use the same
             # process groups.
             raise ValueError(
-                f"Manual wrapping with {sharding_strategy}",
-                "requires explicit specification of process group or device_mesh.",
+                f"Manual wrapping with {sharding_strategy} "
+                "requires explicit specification of process group or device_mesh."
             )
         else:
             state = _init_process_group_state_for_hybrid_shard(
@@ -213,11 +216,11 @@ def _init_intra_node_process_group(num_devices_per_node: int) -> dist.ProcessGro
     Return a process group across the current node.
 
     For example, given each row is a distinct node:
-    0 1 2 3 4 5 6 7 8
-    9 10 11 12 13 14 15
+    0  1  2  3  4  5  6  7
+    8  9 10 11 12 13 14 15
     This API would return an intra-node subgroup across
-    [0, 7] or [8, 15] depending on the process's rank.
-    For example, rank 3 would get [0, 7].
+    [0, 1, ..., 7] or [8, 9, ..., 15] depending on the process's rank.
+    For example, rank 3 would get [0, 1, ..., 7].
     """
     intra_node_subgroup, _ = dist.new_subgroups(num_devices_per_node)
     return intra_node_subgroup
@@ -232,11 +235,11 @@ def _init_inter_node_process_group(
     Return an inter-node process group where each contained rank has the same local rank.
 
     For example, given each row is a distinct node:
-    0 1 2 3 4 5 6 7 8
-    9 10 11 12 13 14 15
-    This API would return inter-node process group {0, 8}, {1, 9}, {2, 10}, and so forth
-    depending on the process's rank. For example, rank 1 would get {1, 9}, rank 5
-    would get {5, 13}.
+    0  1  2  3  4  5  6  7
+    8  9 10 11 12 13 14 15
+    This API would return inter-node process group [0, 8], [1, 9], [2, 10], and so forth
+    depending on the process's rank. For example, rank 1 would get [1, 9], rank 5
+    would get [5, 13].
     """
     # the inter-node pg that is returned
     inter_node_pg = None
@@ -440,6 +443,15 @@ def _init_core_state(
                 "the world size is 1."
             )
         sharding_strategy = ShardingStrategy.NO_SHARD
+    elif sharding_strategy == ShardingStrategy.NO_SHARD:
+        warnings.warn(
+            "The `NO_SHARD` sharding strategy is deprecated. If having issues, "
+            "please use `DistributedDataParallel` instead.",
+            FutureWarning,
+            # Level 1 is here, level 2 is from `FullyShardedDataParallel`, and
+            # level 3 is from the true caller
+            stacklevel=3,
+        )
     state.sharding_strategy = sharding_strategy or ShardingStrategy.FULL_SHARD
     state.mixed_precision = mixed_precision or MixedPrecision()
     if mixed_precision is not None:
@@ -461,6 +473,7 @@ def _init_core_state(
         backward_prefetch_limit,
         forward_prefetch_limit,
     )
+    state._unshard_event = None
     # Mapping from fully sharded module to the handles it is responsible to
     # unshard and reshard (see [Note: Fully Sharded Module])
     _fully_sharded_module_to_handle: Dict[nn.Module, FlatParamHandle] = dict()
@@ -1081,25 +1094,6 @@ def _sync_module_params_and_buffers(
     _sync_params_and_buffers(
         process_group,
         module_states,
-        PARAM_BROADCAST_BUCKET_SIZE,
-        src=0,
-    )
-
-
-def _sync_module_states(
-    params: List[nn.Parameter],
-    buffers: List[torch.Tensor],
-    process_group: dist.ProcessGroup,
-) -> None:
-    # Assumes that each call to this method passes in disjoint `params` and
-    # and `buffers` across calls, so there is no chance of re-synchronizing
-    params_and_buffers = [param.detach() for param in params] + [
-        buffer.detach() for buffer in buffers
-    ]
-    _check_module_states_for_sync_module_states(params_and_buffers)
-    _sync_params_and_buffers(
-        process_group,
-        params_and_buffers,
         PARAM_BROADCAST_BUCKET_SIZE,
         src=0,
     )

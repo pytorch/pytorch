@@ -39,7 +39,7 @@ def _create_immutable_container(base, mutable_functions):
 
 immutable_list = _create_immutable_container(
     list,
-    [
+    (
         "__delitem__",
         "__iadd__",
         "__imul__",
@@ -50,7 +50,9 @@ immutable_list = _create_immutable_container(
         "insert",
         "pop",
         "remove",
-    ],
+        "reverse",
+        "sort",
+    ),
 )
 immutable_list.__reduce__ = lambda self: (immutable_list, (tuple(iter(self)),))
 immutable_list.__hash__ = lambda self: hash(tuple(self))
@@ -59,14 +61,16 @@ compatibility(is_backward_compatible=True)(immutable_list)
 
 immutable_dict = _create_immutable_container(
     dict,
-    [
+    (
         "__delitem__",
+        "__ior__",
         "__setitem__",
         "clear",
         "pop",
         "popitem",
+        "setdefault",
         "update",
-    ],
+    ),
 )
 immutable_dict.__reduce__ = lambda self: (immutable_dict, (iter(self.items()),))
 immutable_dict.__hash__ = lambda self: hash(tuple(self.items()))
@@ -100,11 +104,13 @@ register_pytree_node(
     immutable_dict,
     _immutable_dict_flatten,
     _immutable_dict_unflatten,
+    serialized_type_name="torch.fx.immutable_collections.immutable_dict",
     flatten_with_keys_fn=_dict_flatten_with_keys,
 )
 register_pytree_node(
     immutable_list,
     _immutable_list_flatten,
     _immutable_list_unflatten,
+    serialized_type_name="torch.fx.immutable_collections.immutable_list",
     flatten_with_keys_fn=_list_flatten_with_keys,
 )

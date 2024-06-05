@@ -31,7 +31,7 @@ using caffe2::serialize::ReadAdapterInterface;
 c10::IValue readArchive(
     const std::string& archive_name,
     PyTorchStreamReader& stream_reader) {
-  c10::optional<at::Device> device;
+  std::optional<at::Device> device;
   std::shared_ptr<CompilationUnit> compilation_unit =
       std::make_shared<CompilationUnit>();
 
@@ -75,9 +75,7 @@ static uint64_t _get_model_bytecode_version_from_bytes(char* data, size_t size);
 uint64_t _get_model_bytecode_version(std::istream& in) {
   auto orig_pos = in.tellg();
   in.seekg(0, in.beg);
-  std::shared_ptr<char> data;
-  size_t size = 0;
-  std::tie(data, size) = get_stream_content(in);
+  auto [data, size] = get_stream_content(in);
   in.seekg(orig_pos, in.beg);
   return _get_model_bytecode_version_from_bytes(data.get(), size);
 }
@@ -89,9 +87,7 @@ uint64_t _get_model_bytecode_version(const std::string& filename) {
 
 uint64_t _get_model_bytecode_version(
     std::shared_ptr<ReadAdapterInterface> rai) {
-  std::shared_ptr<char> data;
-  size_t size = 0;
-  std::tie(data, size) = get_rai_content(rai.get());
+  auto [data, size] = get_rai_content(rai.get());
   return _get_model_bytecode_version_from_bytes(data.get(), size);
 }
 

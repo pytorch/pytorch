@@ -24,6 +24,8 @@ from . import (  # usort:skip. Keep the order instead of sorting lexicographical
     symbolic_opset16,
     symbolic_opset17,
     symbolic_opset18,
+    symbolic_opset19,
+    symbolic_opset20,
     utils,
 )
 
@@ -82,6 +84,8 @@ __all__ = [
     "symbolic_opset16",
     "symbolic_opset17",
     "symbolic_opset18",
+    "symbolic_opset19",
+    "symbolic_opset20",
     # Enums
     "ExportTypes",
     "OperatorExportTypes",

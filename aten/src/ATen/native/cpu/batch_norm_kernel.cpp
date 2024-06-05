@@ -34,13 +34,13 @@ void batch_norm_cpu_collect_linear_and_constant_terms(
     const Tensor& save_mean, const Tensor& save_invstd,
     const Tensor& running_mean, const Tensor& running_var, bool train, double eps) {
 
-  const param_t* weight_data = weight.defined() ? weight.data_ptr<param_t>() : nullptr;
-  const param_t* bias_data = bias.defined() ? bias.data_ptr<param_t>() : nullptr;
+  const param_t* weight_data = weight.defined() ? weight.const_data_ptr<param_t>() : nullptr;
+  const param_t* bias_data = bias.defined() ? bias.const_data_ptr<param_t>() : nullptr;
 
-  auto save_mean_a = conditional_accessor_1d<param_t>(save_mean);
-  auto save_invstd_a = conditional_accessor_1d<param_t>(save_invstd);
-  auto running_mean_a = conditional_accessor_1d<param_t>(running_mean);
-  auto running_var_a = conditional_accessor_1d<param_t>(running_var);
+  auto save_mean_a = conditional_accessor_1d<const param_t>(save_mean);
+  auto save_invstd_a = conditional_accessor_1d<const param_t>(save_invstd);
+  auto running_mean_a = conditional_accessor_1d<const param_t>(running_mean);
+  auto running_var_a = conditional_accessor_1d<const param_t>(running_var);
 
   /// Collect the linear and constant terms regarding the input.
   /// output(n, c, h, w)
@@ -91,7 +91,7 @@ batch_norm_cpu_contiguous_impl(Tensor& output, const Tensor& input,
      save_mean, save_invstd, running_mean, running_var, train, eps);
 
   scalar_t* output_data = output.data_ptr<scalar_t>();
-  const scalar_t* input_data = input.data_ptr<scalar_t>();
+  const scalar_t* input_data = input.const_data_ptr<scalar_t>();
 
   // Apply the linear terms to the input,
   // output(n, c, h, w) = input(n, c, h, w) * alpha(c) + beta(c)
@@ -143,7 +143,7 @@ batch_norm_cpu_channels_last_impl(Tensor& output, const Tensor& input,
       save_mean, save_invstd, running_mean, running_var, train, eps);
 
   scalar_t* output_data = output.data_ptr<scalar_t>();
-  const scalar_t* input_data = input.data_ptr<scalar_t>();
+  const scalar_t* input_data = input.const_data_ptr<scalar_t>();
 
   // Apply the linear terms to the input,
   // output(n, c, h, w) = input(n, c, h, w) * alpha(c) + beta(c)
@@ -185,7 +185,7 @@ batch_norm_cpu_collect_stats_contiguous_impl(
   int64_t image_size = input.numel() / n_batch / n_channel;
   int64_t N = input.numel() / n_channel;
 
-  const scalar_t* input_data = input.data_ptr<scalar_t>();
+  const scalar_t* input_data = input.const_data_ptr<scalar_t>();
   scalar_t* mean_data = mean.data_ptr<scalar_t>();
   scalar_t* var_sum_data = var_sum.data_ptr<scalar_t>();
 
@@ -229,7 +229,7 @@ batch_norm_cpu_collect_stats_channels_last_impl(
   int64_t n_channel = input.size(1);
   int64_t N = input.numel() / n_channel;
 
-  const scalar_t* input_data = input.data_ptr<scalar_t>();
+  const scalar_t* input_data = input.const_data_ptr<scalar_t>();
   scalar_t* mean_data = mean.data_ptr<scalar_t>();
   scalar_t* var_sum_data = var_sum.data_ptr<scalar_t>();
 
@@ -416,8 +416,8 @@ batch_norm_cpu_backward_contiguous_impl(Tensor& grad_input, Tensor& grad_weight,
   int64_t image_size = input.numel() / n_batch / n_channel;
   int64_t N = input.numel() / n_channel;
 
-  const scalar_t* grad_output_data = grad_output.data_ptr<scalar_t>();
-  const scalar_t* input_data = input.data_ptr<scalar_t>();
+  const scalar_t* grad_output_data = grad_output.const_data_ptr<scalar_t>();
+  const scalar_t* input_data = input.const_data_ptr<scalar_t>();
 
   scalar_t* grad_input_data = grad_input.defined() ? grad_input.mutable_data_ptr<scalar_t>() : nullptr;
   scalar_t* grad_weight_data = grad_weight.defined() ? grad_weight.data_ptr<scalar_t>() : nullptr;
@@ -426,11 +426,11 @@ batch_norm_cpu_backward_contiguous_impl(Tensor& grad_input, Tensor& grad_weight,
   const bool grad_weight_null = grad_weight_data == nullptr;
   const bool grad_bias_null = grad_bias_data == nullptr;
 
-  auto weight_a = conditional_accessor_1d<scalar_t>(weight);
-  auto save_mean_a = conditional_accessor_1d<scalar_t>(save_mean);
-  auto save_invstd_a = conditional_accessor_1d<scalar_t>(save_invstd);
-  auto running_mean_a = conditional_accessor_1d<scalar_t>(running_mean);
-  auto running_var_a = conditional_accessor_1d<scalar_t>(running_var);
+  auto weight_a = conditional_accessor_1d<const scalar_t>(weight);
+  auto save_mean_a = conditional_accessor_1d<const scalar_t>(save_mean);
+  auto save_invstd_a = conditional_accessor_1d<const scalar_t>(save_invstd);
+  auto running_mean_a = conditional_accessor_1d<const scalar_t>(running_mean);
+  auto running_var_a = conditional_accessor_1d<const scalar_t>(running_var);
 
   // parallel dim reduce on 'channel'
   at::parallel_for(0, n_channel, 1, [&](int64_t begin, int64_t end) {
@@ -537,22 +537,22 @@ batch_norm_cpu_backward_channels_last_impl(Tensor& grad_input, Tensor& grad_weig
   int64_t n_channel = input.size(1);
   int64_t N = input.numel() / n_channel;
 
-  const scalar_t* grad_output_data = grad_output.data_ptr<scalar_t>();
-  const scalar_t* input_data = input.data_ptr<scalar_t>();
+  const scalar_t* grad_output_data = grad_output.const_data_ptr<scalar_t>();
+  const scalar_t* input_data = input.const_data_ptr<scalar_t>();
 
   scalar_t* grad_input_data = grad_input.defined() ? grad_input.mutable_data_ptr<scalar_t>() : nullptr;
   scalar_t* grad_weight_data = grad_weight.defined() ? grad_weight.data_ptr<scalar_t>() : nullptr;
   scalar_t* grad_bias_data = grad_bias.defined() ? grad_bias.data_ptr<scalar_t>() : nullptr;
 
-  scalar_t* save_mean_data = conditional_data_ptr<scalar_t>(save_mean);
+  const scalar_t* save_mean_data = conditional_data_ptr<const scalar_t>(save_mean);
   scalar_t* save_invstd_data = conditional_data_ptr<scalar_t>(save_invstd);
-  scalar_t* running_mean_data = conditional_data_ptr<scalar_t>(running_mean);
-  scalar_t* running_var_data = conditional_data_ptr<scalar_t>(running_var);
+  const scalar_t* running_mean_data = conditional_data_ptr<const scalar_t>(running_mean);
+  const scalar_t* running_var_data = conditional_data_ptr<const scalar_t>(running_var);
 
   Tensor weight_ = weight.defined() ? weight : at::ones({n_channel}, input.options());
-  const scalar_t* weight_data = weight_.data_ptr<scalar_t>();
+  const scalar_t* weight_data = weight_.const_data_ptr<scalar_t>();
 
-  scalar_t* mean_ptr = nullptr;
+  const scalar_t* mean_ptr = nullptr;
   scalar_t* invstd_ptr = nullptr;
   Tensor invstd = at::empty({0}, input.options());
   if (train) {
@@ -735,7 +735,7 @@ batch_norm_cpu_contiguous_impl(Tensor& output, const Tensor& input,
   }
 
   scalar_t* output_data = output.data_ptr<scalar_t>();
-  const scalar_t* input_data = input.data_ptr<scalar_t>();
+  const scalar_t* input_data = input.const_data_ptr<scalar_t>();
 
   const int64_t loop_size = image_size - (image_size % bVec::size());
   at::parallel_for(0, n_batch * n_channel, 1, [&](int64_t begin, int64_t end) {
@@ -753,8 +753,7 @@ batch_norm_cpu_contiguous_impl(Tensor& output, const Tensor& input,
       int64_t d = 0;
       for (; d < loop_size; d += bVec::size()) {
         bVec data_bvec = bVec::loadu(input_ptr + d);
-        fVec data_fvec0, data_fvec1;
-        std::tie(data_fvec0, data_fvec1) = convert_to_float<scalar_t>(data_bvec);
+        auto [data_fvec0, data_fvec1] = convert_to_float<scalar_t>(data_bvec);
 
         fVec out_fvec0 = data_fvec0 * alpha_fvec + beta_fvec;
         fVec out_fvec1 = data_fvec1 * alpha_fvec + beta_fvec;
@@ -799,7 +798,7 @@ batch_norm_cpu_channels_last_impl(Tensor& output, const Tensor& input,
   }
 
   scalar_t* output_data = output.data_ptr<scalar_t>();
-  const scalar_t* input_data = input.data_ptr<scalar_t>();
+  const scalar_t* input_data = input.const_data_ptr<scalar_t>();
 
   const int64_t loop_size = n_channel - (n_channel % bVec::size());
   at::parallel_for(0, n_batch * image_size, 1, [&](int64_t begin, int64_t end) {
@@ -813,8 +812,7 @@ batch_norm_cpu_channels_last_impl(Tensor& output, const Tensor& input,
         fVec beta_fvec0 = fVec::loadu(beta_data + d);
         fVec beta_fvec1 = fVec::loadu(beta_data + d + fVec::size());
         bVec data_bvec = bVec::loadu(input_ptr + d);
-        fVec data_fvec0, data_fvec1;
-        std::tie(data_fvec0, data_fvec1) = convert_to_float<scalar_t>(data_bvec);
+        auto [data_fvec0, data_fvec1] = convert_to_float<scalar_t>(data_bvec);
 
         fVec out_fvec0 = data_fvec0 * alpha_fvec0 + beta_fvec0;
         fVec out_fvec1 = data_fvec1 * alpha_fvec1 + beta_fvec1;
@@ -839,7 +837,7 @@ inline void batch_norm_cpu_collect_stats_contiguous_internal(
   int64_t image_size = input.numel() / n_batch / n_channel;
   int64_t N = input.numel() / n_channel;
 
-  const scalar_t* input_data = input.data_ptr<scalar_t>();
+  const scalar_t* input_data = input.const_data_ptr<scalar_t>();
   param_t* mean_data = mean.data_ptr<param_t>();
   param_t* var_sum_data = var_sum.data_ptr<param_t>();
 
@@ -852,8 +850,7 @@ inline void batch_norm_cpu_collect_stats_contiguous_internal(
         int64_t d = 0;
         for (; d < image_size - (image_size % bVec::size()); d += bVec::size()) {
           bVec data_bvec = bVec::loadu(input_ptr + d);
-          fVec data_fvec0, data_fvec1;
-          std::tie(data_fvec0, data_fvec1) = convert_to_float<scalar_t>(data_bvec);
+          auto [data_fvec0, data_fvec1] = convert_to_float<scalar_t>(data_bvec);
           sum_fvec += data_fvec0;
           sum_fvec += data_fvec1;
         }
@@ -874,8 +871,7 @@ inline void batch_norm_cpu_collect_stats_contiguous_internal(
         int64_t d = 0;
         for (; d < image_size - (image_size % bVec::size()); d += bVec::size()) {
           bVec data_bvec = bVec::loadu(input_ptr + d);
-          fVec data_fvec0, data_fvec1;
-          std::tie(data_fvec0, data_fvec1) = convert_to_float<scalar_t>(data_bvec);
+          auto [data_fvec0, data_fvec1] = convert_to_float<scalar_t>(data_bvec);
           var_fvec += (data_fvec0 - mean_fvec) * (data_fvec0 - mean_fvec);
           var_fvec += (data_fvec1 - mean_fvec) * (data_fvec1 - mean_fvec);
         }
@@ -912,7 +908,7 @@ inline void batch_norm_cpu_collect_stats_channels_last_internal(
   int64_t n_channel = input.size(1);
   int64_t N = input.numel() / n_channel;
 
-  const scalar_t* input_data = input.data_ptr<scalar_t>();
+  const scalar_t* input_data = input.const_data_ptr<scalar_t>();
   param_t* mean_data = mean.data_ptr<param_t>();
   param_t* var_sum_data = var_sum.data_ptr<param_t>();
 
@@ -929,8 +925,7 @@ inline void batch_norm_cpu_collect_stats_channels_last_internal(
       int64_t d = 0;
       for (; d < n_channel - (n_channel % bVec::size()); d += bVec::size()) {
         bVec data_bvec = bVec::loadu(input_ptr + d);
-        fVec data_fvec0, data_fvec1;
-        std::tie(data_fvec0, data_fvec1) = convert_to_float<scalar_t>(data_bvec);
+        auto [data_fvec0, data_fvec1] = convert_to_float<scalar_t>(data_bvec);
         fVec sum_fvec0 = fVec::loadu(buffer_ptr + d) + data_fvec0;
         fVec sum_fvec1 = fVec::loadu(buffer_ptr + d + fVec::size()) + data_fvec1;
         sum_fvec0.store(buffer_ptr + d);
@@ -960,10 +955,8 @@ inline void batch_norm_cpu_collect_stats_channels_last_internal(
       int64_t d = 0;
       for (; d < n_channel - (n_channel % bVec::size()); d += bVec::size()) {
         bVec data_bvec = bVec::loadu(input_ptr + d);
-        fVec data_fvec0, data_fvec1;
-        std::tie(data_fvec0, data_fvec1) = convert_to_float<scalar_t>(data_bvec);
-        fVec mean_fvec0, mean_fvec1;
-        std::tie(mean_fvec0, mean_fvec1) = load2f(mean_data + d);
+        auto [data_fvec0, data_fvec1] = convert_to_float<scalar_t>(data_bvec);
+        auto [mean_fvec0, mean_fvec1] = load2f(mean_data + d);
         fVec var_fvec0 = fVec::loadu(buffer_ptr + d);
         fVec var_fvec1 = fVec::loadu(buffer_ptr + d + fVec::size());
         var_fvec0 += (data_fvec0 - mean_fvec0) * (data_fvec0 - mean_fvec0);
@@ -1013,8 +1006,8 @@ void batch_norm_cpu_backward_contiguous_internal(Tensor& grad_input, Tensor& gra
   int64_t image_size = input.numel() / n_batch / n_channel;
   int64_t N = input.numel() / n_channel;
 
-  const scalar_t* grad_output_data = grad_output.data_ptr<scalar_t>();
-  const scalar_t* input_data = input.data_ptr<scalar_t>();
+  const scalar_t* grad_output_data = grad_output.const_data_ptr<scalar_t>();
+  const scalar_t* input_data = input.const_data_ptr<scalar_t>();
 
   scalar_t* grad_input_data = grad_input.defined() ? grad_input.mutable_data_ptr<scalar_t>() : nullptr;
   param_t* grad_weight_data = grad_weight.defined() ? grad_weight.data_ptr<param_t>() : nullptr;
@@ -1023,11 +1016,11 @@ void batch_norm_cpu_backward_contiguous_internal(Tensor& grad_input, Tensor& gra
   const bool grad_weight_null = grad_weight_data == nullptr;
   const bool grad_bias_null = grad_bias_data == nullptr;
 
-  auto weight_a = conditional_accessor_1d<param_t>(weight);
-  auto save_mean_a = conditional_accessor_1d<param_t>(save_mean);
-  auto save_invstd_a = conditional_accessor_1d<param_t>(save_invstd);
-  auto running_mean_a = conditional_accessor_1d<param_t>(running_mean);
-  auto running_var_a = conditional_accessor_1d<param_t>(running_var);
+  auto weight_a = conditional_accessor_1d<const param_t>(weight);
+  auto save_mean_a = conditional_accessor_1d<const param_t>(save_mean);
+  auto save_invstd_a = conditional_accessor_1d<const param_t>(save_invstd);
+  auto running_mean_a = conditional_accessor_1d<const param_t>(running_mean);
+  auto running_var_a = conditional_accessor_1d<const param_t>(running_var);
 
   // parallel dim reduce on 'channel'
   at::parallel_for(0, n_channel, 1, [&](int64_t begin, int64_t end) {
@@ -1053,14 +1046,12 @@ void batch_norm_cpu_backward_contiguous_internal(Tensor& grad_input, Tensor& gra
         int64_t d = 0;
         for (; d < image_size - (image_size % bVec::size()); d += bVec::size()) {
           bVec dy_bvec = bVec::loadu(dy_ptr + d);
-          fVec dy_fvec0, dy_fvec1;
-          std::tie(dy_fvec0, dy_fvec1) = convert_to_float<scalar_t>(dy_bvec);
+          auto [dy_fvec0, dy_fvec1] = convert_to_float<scalar_t>(dy_bvec);
           sum_fvec += dy_fvec0;
           sum_fvec += dy_fvec1;
 
           bVec x_bvec = bVec::loadu(x_ptr + d);
-          fVec x_fvec0, x_fvec1;
-          std::tie(x_fvec0, x_fvec1) = convert_to_float<scalar_t>(x_bvec);
+          auto [x_fvec0, x_fvec1] = convert_to_float<scalar_t>(x_bvec);
           dotp_fvec += (x_fvec0 - fVec(mean)) * dy_fvec0;
           dotp_fvec += (x_fvec1 - fVec(mean)) * dy_fvec1;
         }
@@ -1137,18 +1128,18 @@ void batch_norm_cpu_backward_channels_last_internal(Tensor& grad_input, Tensor& 
   int64_t n_channel = input.size(1);
   int64_t N = input.numel() / n_channel;
 
-  const scalar_t* grad_output_data = grad_output.data_ptr<scalar_t>();
-  const scalar_t* input_data = input.data_ptr<scalar_t>();
+  const scalar_t* grad_output_data = grad_output.const_data_ptr<scalar_t>();
+  const scalar_t* input_data = input.const_data_ptr<scalar_t>();
 
   scalar_t* grad_input_data = grad_input.defined() ? grad_input.mutable_data_ptr<scalar_t>() : nullptr;
   param_t* grad_weight_data = grad_weight.defined() ? grad_weight.data_ptr<param_t>() : nullptr;
   param_t* grad_bias_data = grad_bias.defined() ? grad_bias.data_ptr<param_t>() : nullptr;
 
-  auto weight_a = conditional_accessor_1d<param_t>(weight);
-  auto save_mean_a = conditional_accessor_1d<param_t>(save_mean);
-  auto save_invstd_a = conditional_accessor_1d<param_t>(save_invstd);
-  auto running_mean_a = conditional_accessor_1d<param_t>(running_mean);
-  auto running_var_a = conditional_accessor_1d<param_t>(running_var);
+  auto weight_a = conditional_accessor_1d<const param_t>(weight);
+  auto save_mean_a = conditional_accessor_1d<const param_t>(save_mean);
+  auto save_invstd_a = conditional_accessor_1d<const param_t>(save_invstd);
+  auto running_mean_a = conditional_accessor_1d<const param_t>(running_mean);
+  auto running_var_a = conditional_accessor_1d<const param_t>(running_var);
 
   // use float as acc type
   bool weight_defined = weight.defined();
@@ -1188,16 +1179,14 @@ void batch_norm_cpu_backward_channels_last_internal(Tensor& grad_input, Tensor& 
       int64_t d = 0;
       for(; d < n_channel - (n_channel % bVec::size()); d += bVec::size()) {
         bVec dy_bvec = bVec::loadu(dy_ptr + d);
-        fVec dy_fvec0, dy_fvec1;
-        std::tie(dy_fvec0, dy_fvec1) = convert_to_float<scalar_t>(dy_bvec);
+        auto [dy_fvec0, dy_fvec1] = convert_to_float<scalar_t>(dy_bvec);
         fVec sum_fvec0 = dy_fvec0 + fVec::loadu(sum_ptr + d);
         fVec sum_fvec1 = dy_fvec1 + fVec::loadu(sum_ptr + d + fVec::size());
         sum_fvec0.store(sum_ptr + d);
         sum_fvec1.store(sum_ptr + d + fVec::size());
 
         bVec x_bvec = bVec::loadu(x_ptr + d);
-        fVec x_fvec0, x_fvec1;
-        std::tie(x_fvec0, x_fvec1) = convert_to_float<scalar_t>(x_bvec);
+        auto [x_fvec0, x_fvec1] = convert_to_float<scalar_t>(x_bvec);
         fVec mean_fvec0 = fVec::loadu(mean_data + d);
         fVec mean_fvec1 = fVec::loadu(mean_data + d + fVec::size());
         fVec dotp_fvec0 = fVec::loadu(dotp_ptr + d);
@@ -1246,8 +1235,7 @@ void batch_norm_cpu_backward_channels_last_internal(Tensor& grad_input, Tensor& 
           int64_t d = 0;
           for (; d < n_channel - (n_channel % bVec::size()); d += bVec::size()) {
             bVec x_bvec = bVec::loadu(x_ptr + d);
-            fVec x_fvec0, x_fvec1;
-            std::tie(x_fvec0, x_fvec1) = convert_to_float<scalar_t>(x_bvec);
+            auto [x_fvec0, x_fvec1] = convert_to_float<scalar_t>(x_bvec);
             fVec mean_fvec0 = fVec::loadu(mean_data + d);
             fVec mean_fvec1 = fVec::loadu(mean_data + d + fVec::size());
             fVec dotp_fvec0 = fVec::loadu(dotp_data + d);
@@ -1259,8 +1247,7 @@ void batch_norm_cpu_backward_channels_last_internal(Tensor& grad_input, Tensor& 
             fVec dx_fvec0 = (x_fvec0 - mean_fvec0) * k_fvec0;
             fVec dx_fvec1 = (x_fvec1 - mean_fvec1) * k_fvec1;
             bVec dy_bvec = bVec::loadu(dy_ptr + d);
-            fVec dy_fvec0, dy_fvec1;
-            std::tie(dy_fvec0, dy_fvec1) = convert_to_float<scalar_t>(dy_bvec);
+            auto [dy_fvec0, dy_fvec1] = convert_to_float<scalar_t>(dy_bvec);
             fVec grad_mean_fvec0 = fVec::loadu(sum_data + d) / fVec(N);
             fVec grad_mean_fvec1 = fVec::loadu(sum_data + d + fVec::size()) / fVec(N);
             fVec w_fvec0 = fVec::loadu(weight_data + d);
@@ -1287,8 +1274,7 @@ void batch_norm_cpu_backward_channels_last_internal(Tensor& grad_input, Tensor& 
           int64_t d = 0;
           for (; d < n_channel - (n_channel % bVec::size()); d += bVec::size()) {
             bVec dy_bvec = bVec::loadu(dy_ptr + d);
-            fVec dy_fvec0, dy_fvec1;
-            std::tie(dy_fvec0, dy_fvec1) = convert_to_float<scalar_t>(dy_bvec);
+            auto [dy_fvec0, dy_fvec1] = convert_to_float<scalar_t>(dy_bvec);
             fVec invstd_fvec0 = fVec::loadu(invstd_data + d);
             fVec invstd_fvec1 = fVec::loadu(invstd_data + d + fVec::size());
             fVec w_fvec0 = fVec::loadu(weight_data + d);

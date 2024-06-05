@@ -30,10 +30,12 @@
 #include <ATen/ops/nansum_native.h>
 #include <ATen/ops/norm_native.h>
 #include <ATen/ops/prod_native.h>
+#include <ATen/ops/std_mean_native.h>
 #include <ATen/ops/std_native.h>
 #include <ATen/ops/sum.h>
 #include <ATen/ops/sum_native.h>
 #include <ATen/ops/trace_native.h>
+#include <ATen/ops/var_mean_native.h>
 #include <ATen/ops/var_native.h>
 #endif
 
@@ -316,8 +318,8 @@ static void impl_func_norm_mps(const Tensor& input_tensor,
 
   auto reciprocal_p = 1 / p;
   bool pIsZero = (p == 0.0);
-  bool pIsPosInf = (p == numeric_limits<double>::infinity());
-  bool pIsNegInf = (p == -numeric_limits<double>::infinity());
+  bool pIsPosInf = (p == std::numeric_limits<double>::infinity());
+  bool pIsNegInf = (p == -std::numeric_limits<double>::infinity());
 
   int64_t num_input_dims = input_shape.size();
   int64_t num_reduce_dims = dim.size();
@@ -1429,7 +1431,7 @@ static std::tuple<Tensor, Tensor> min_mps(const Tensor& input_t, int64_t dim, bo
 Tensor median_mps(const Tensor& input_t) {
   if (!is_macos_13_or_newer()) {
     TORCH_WARN_ONCE("MPS: median op is supported natively starting from macOS 13.0. ",
-                    "Falling back on CPU. This may have performace implications.");
+                    "Falling back on CPU. This may have performance implications.");
     return at::median(input_t.to("cpu"));
   }
 
@@ -1644,7 +1646,7 @@ TORCH_API ::std::tuple<at::Tensor&, at::Tensor&> median_out_mps(const at::Tensor
 
   if (!is_macos_13_or_newer()) {
     TORCH_WARN_ONCE("MPS: median op is supported natively starting from macOS 13.0.",
-                    "Falling back on CPU. This may have performace implications.");
+                    "Falling back on CPU. This may have performance implications.");
     return median_from_cpu(input_t.to("cpu"),
                            dim,
                            keepdim,
@@ -1657,6 +1659,28 @@ TORCH_API ::std::tuple<at::Tensor&, at::Tensor&> median_out_mps(const at::Tensor
   median_out_mps(input_t, dim, keepdim, values, indices, "median_out_mps");
 
   return std::tuple<Tensor&, Tensor&>{values, indices};
+}
+
+std::tuple<Tensor, Tensor> std_mean_mps(const Tensor& self,
+                                        at::OptionalIntArrayRef dim,
+                                        const c10::optional<Scalar>& correction,
+                                        bool keepdim) {
+  // TODO: Refactor it into a proper std_var_mean composite function
+  auto std = std_mps(self, dim, correction, keepdim);
+  auto mean = at::empty(std.sizes(), self.scalar_type(), c10::nullopt, kMPS, c10::nullopt, MemoryFormat::Contiguous);
+  mps::reduction_out_mps(self, dim, keepdim, c10::nullopt, mean, mps::MPSReductionType::MEAN, "mean_out_mps");
+  return {std, mean};
+}
+
+std::tuple<Tensor, Tensor> var_mean_mps(const Tensor& self,
+                                        at::OptionalIntArrayRef dim,
+                                        const c10::optional<Scalar>& correction,
+                                        bool keepdim) {
+  // TODO: Refactor it into a proper std_var_mean composite function
+  auto var = var_mps(self, dim, correction, keepdim);
+  auto mean = at::empty(var.sizes(), self.scalar_type(), c10::nullopt, kMPS, c10::nullopt, MemoryFormat::Contiguous);
+  mps::reduction_out_mps(self, dim, keepdim, c10::nullopt, mean, mps::MPSReductionType::MEAN, "mean_out_mps");
+  return {var, mean};
 }
 
 } // namespace at::native

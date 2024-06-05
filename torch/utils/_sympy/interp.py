@@ -24,6 +24,7 @@ from .functions import (
     Round,
     RoundDecimal,
     TrueDiv,
+    Trunc,
     Where,
 )
 
@@ -51,6 +52,7 @@ def handlers():
         TrueDiv: "truediv",
         FloorDiv: "floordiv",
         CleanDiv: "div",
+        Trunc: "trunc",
         Where: "where",
         sympy.Add: "add",
         sympy.Mul: "mul",
@@ -106,7 +108,10 @@ def sympy_interp(
 
     # Recursive case
     args = [sympy_interp(analysis, env, arg) for arg in expr.args]  # type: ignore[arg-type]
-    handler_name = handlers()[expr.func]
+    if hasattr(expr.func, "_torch_handler_name"):
+        handler_name = expr.func._torch_handler_name
+    else:
+        handler_name = handlers()[expr.func]
     handler = getattr(analysis, handler_name)
     if handler_name in ASSOCIATIVE_OPS:
         assert len(args) > 1

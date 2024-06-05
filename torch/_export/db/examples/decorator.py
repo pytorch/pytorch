@@ -14,7 +14,7 @@ def test_decorator(func):
 
 
 @export_case(
-    example_inputs=(torch.ones(3, 2), torch.ones(3, 2)),
+    example_inputs=(torch.randn(3, 2), torch.randn(3, 2)),
 )
 class Decorator(torch.nn.Module):
     """

@@ -3,7 +3,6 @@
 #include <c10/util/CallOnce.h>
 
 #include <ATen/cuda/CUDAConfig.h>
-#include <mutex>
 #include <deque>
 #include <vector>
 
@@ -23,7 +22,7 @@ void initCUDAContextVectors() {
 }
 
 void initDeviceProperty(DeviceIndex device_index) {
-  cudaDeviceProp device_prop;
+  cudaDeviceProp device_prop{};
   AT_CUDA_CHECK(cudaGetDeviceProperties(&device_prop, device_index));
   device_properties[device_index] = device_prop;
 }
@@ -44,7 +43,7 @@ cudaDeviceProp* getCurrentDeviceProperties() {
   return getDeviceProperties(device);
 }
 
-cudaDeviceProp* getDeviceProperties(int64_t device) {
+cudaDeviceProp* getDeviceProperties(c10::DeviceIndex device) {
   c10::call_once(init_flag, initCUDAContextVectors);
   if (device == -1) device = c10::cuda::current_device();
   AT_ASSERT(device >= 0 && device < num_gpus, "device=", device, ", num_gpus=", num_gpus);
@@ -52,7 +51,7 @@ cudaDeviceProp* getDeviceProperties(int64_t device) {
   return &device_properties[device];
 }
 
-bool canDeviceAccessPeer(int64_t device, int64_t peer_device) {
+bool canDeviceAccessPeer(c10::DeviceIndex device, c10::DeviceIndex peer_device) {
   c10::call_once(init_flag, initCUDAContextVectors);
   if (device == -1) device = c10::cuda::current_device();
   AT_ASSERT(device >= 0 && device < num_gpus, "device=", device, ", num_gpus=", num_gpus);

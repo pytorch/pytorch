@@ -43,7 +43,7 @@ __global__ void upsample_trilinear3d_out_frame(
     const accscalar_t rheight,
     const accscalar_t rwidth,
     const bool align_corners,
-    const PackedTensorAccessor64<scalar_t, 5> idata,
+    const PackedTensorAccessor64<const scalar_t, 5> idata,
     PackedTensorAccessor64<scalar_t, 5> odata) {
   int index = threadIdx.x + blockIdx.x * blockDim.x;
 
@@ -128,7 +128,7 @@ __global__ void upsample_trilinear3d_backward_out_frame(
     const accscalar_t rwidth,
     const bool align_corners,
     PackedTensorAccessor64<scalar_t, 5> idata,
-    const PackedTensorAccessor64<scalar_t, 5> odata,
+    const PackedTensorAccessor64<const scalar_t, 5> odata,
     scalar_t* idata_ptr) {
   int index = threadIdx.x + blockIdx.x * blockDim.x;
 
@@ -245,9 +245,9 @@ static void upsample_trilinear3d_out_cuda_template(
     const Tensor& input,
     IntArrayRef output_size,
     bool align_corners,
-    c10::optional<double> scales_d,
-    c10::optional<double> scales_h,
-    c10::optional<double> scales_w) {
+    std::optional<double> scales_d,
+    std::optional<double> scales_h,
+    std::optional<double> scales_w) {
   TensorArg input_arg{input, "input", 1}, output_arg{output, "output", 2};
   checkAllSameGPU("upsample_trilinear3d_out_cuda", {input_arg, output_arg});
 
@@ -269,7 +269,7 @@ static void upsample_trilinear3d_out_cuda_template(
       input.scalar_type(), "upsample_trilinear3d_out_frame", [&] {
         using accscalar_t = at::acc_type<scalar_t, true>;
 
-        auto idata = input.packed_accessor64<scalar_t, 5>();
+        auto idata = input.packed_accessor64<const scalar_t, 5>();
         auto odata = output.packed_accessor64<scalar_t, 5>();
 
         const accscalar_t rdepth = area_pixel_compute_scale<accscalar_t>(
@@ -301,9 +301,9 @@ static void upsample_trilinear3d_backward_out_cuda_template(
     IntArrayRef output_size,
     IntArrayRef input_size,
     bool align_corners,
-    c10::optional<double> scales_d,
-    c10::optional<double> scales_h,
-    c10::optional<double> scales_w) {
+    std::optional<double> scales_d,
+    std::optional<double> scales_h,
+    std::optional<double> scales_w) {
   TensorArg grad_input_arg{grad_input_, "grad_input_", 1},
       grad_output_arg{grad_output_, "grad_output_", 2};
   checkAllSameGPU(
@@ -340,7 +340,7 @@ static void upsample_trilinear3d_backward_out_cuda_template(
         using accscalar_t = at::acc_type<scalar_t, true>;
 
         auto idata = grad_input.packed_accessor64<scalar_t, 5>();
-        auto odata = grad_output.packed_accessor64<scalar_t, 5>();
+        auto odata = grad_output.packed_accessor64<const scalar_t, 5>();
         scalar_t* idata_ptr = grad_input.mutable_data_ptr<scalar_t>();
 
         const accscalar_t rdepth = area_pixel_compute_scale<accscalar_t>(
@@ -377,9 +377,9 @@ TORCH_IMPL_FUNC(upsample_trilinear3d_out_cuda) (
     const Tensor& input,
     IntArrayRef output_size,
     bool align_corners,
-    c10::optional<double> scales_d,
-    c10::optional<double> scales_h,
-    c10::optional<double> scales_w,
+    std::optional<double> scales_d,
+    std::optional<double> scales_h,
+    std::optional<double> scales_w,
     const Tensor& output) {
   upsample_trilinear3d_out_cuda_template(output, input, output_size, align_corners, scales_d, scales_h, scales_w);
 }
@@ -389,9 +389,9 @@ TORCH_IMPL_FUNC(upsample_trilinear3d_backward_out_cuda) (
     IntArrayRef output_size,
     IntArrayRef input_size,
     bool align_corners,
-    c10::optional<double> scales_d,
-    c10::optional<double> scales_h,
-    c10::optional<double> scales_w,
+    std::optional<double> scales_d,
+    std::optional<double> scales_h,
+    std::optional<double> scales_w,
     const Tensor& grad_input) {
   // See Note [Writing Nondeterministic Operations]
   // Nondeterministic because of atomicAdd usage

@@ -329,7 +329,7 @@ void slow_conv_transpose3d_out_cpu_template(
 
           // Unpack columns back into input:
           at::native::col2vol<scalar_t>(
-              columns.data_ptr<scalar_t>(),
+              columns.const_data_ptr<scalar_t>(),
               n_output_plane,
               output_depth,
               output_height,
@@ -562,8 +562,8 @@ void slow_conv_transpose3d_backward_out_cpu_template(
 
           // Do GEMM (note: this is a bit confusing because gemm assumes
           // column-major matrices)
-          auto gemm_in_ptr = need_columns ? grad_columns.data_ptr<scalar_t>()
-              : grad_output_n.data_ptr<scalar_t>();
+          auto gemm_in_ptr = need_columns ? grad_columns.const_data_ptr<scalar_t>()
+              : grad_output_n.const_data_ptr<scalar_t>();
           cpublas::gemm(
               TransposeType::NoTranspose,
               TransposeType::NoTranspose,
@@ -782,8 +782,8 @@ void slow_conv_transpose3d_acc_grad_parameters_cpu(
 
             // Do GEMM (note: this is a bit confusing because gemm assumes
             // column-major matrices)
-            auto gemm_in_ptr = need_columns ? columns.data_ptr<scalar_t>()
-                : grad_output_n.data_ptr<scalar_t>();
+            auto gemm_in_ptr = need_columns ? columns.const_data_ptr<scalar_t>()
+                : grad_output_n.const_data_ptr<scalar_t>();
             cpublas::gemm(
                 TransposeType::Transpose,
                 TransposeType::NoTranspose,
@@ -819,7 +819,7 @@ void slow_conv_transpose3d_acc_grad_parameters_cpu(
 
 Tensor& slow_conv_transpose3d_out_cpu(const Tensor& input,
     const Tensor& weight,
-    IntArrayRef kernel_size, const c10::optional<Tensor>& bias_opt,
+    IntArrayRef kernel_size, const std::optional<Tensor>& bias_opt,
     IntArrayRef stride,
     IntArrayRef padding,
     IntArrayRef output_padding,
@@ -846,7 +846,7 @@ Tensor& slow_conv_transpose3d_out_cpu(const Tensor& input,
 Tensor slow_conv_transpose3d_cpu(
     const Tensor& input,
     const Tensor& weight,
-    IntArrayRef kernel_size, const c10::optional<Tensor>& bias_opt,
+    IntArrayRef kernel_size, const std::optional<Tensor>& bias_opt,
     IntArrayRef stride,
     IntArrayRef padding,
     IntArrayRef output_padding,

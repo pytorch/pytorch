@@ -199,6 +199,8 @@ Tensor autograd functions
     Function.jvp
     Function.vmap
 
+.. _context_method_mixins:
+
 Context method mixins
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 When creating a new :class:`Function`, the following methods are available to `ctx`.

@@ -101,7 +101,7 @@ std::vector<size_t> getBroadcastPositions(Node* node) {
 // Determine whether `from` can broadcast to `to`, and if so at which
 // position. `from` must be a suffix of `to`, except that any
 // occurrences of 1 in `from` are treated as wildcards.
-c10::optional<size_t> fusibleExpandTo(
+std::optional<size_t> fusibleExpandTo(
     at::IntArrayRef from,
     at::IntArrayRef to) {
   if (from.size() > to.size()) {
@@ -156,7 +156,7 @@ void fuseBroadcast(Block* b) {
       }
 
       // Not all broadcasts are supported by ONNX broadcast.
-      c10::optional<size_t> axis = fusibleExpandTo(
+      std::optional<size_t> axis = fusibleExpandTo(
           unexpanded_input->type()
               ->expectRef<TensorType>()
               .sizes()
@@ -547,7 +547,7 @@ void fixDefaultRnnHiddenState(Block* b, int opset_version) {
       continue;
     }
     // Hidden state is the sixth input for RNN, LSTM, GRU.
-    // See https://pytorch.org/docs/master/nn.html#torch.nn.RNN
+    // See https://pytorch.org/docs/main/nn.html#torch.nn.RNN
     if (n->inputs().size() < 6) {
       continue;
     }
@@ -566,7 +566,7 @@ void fixDefaultLstmCellState(Block* b, int opset_version) {
       continue;
     }
     // Cell state is the seventh input for LSTM.
-    // See https://pytorch.org/docs/master/nn.html#torch.nn.LSTM
+    // See https://pytorch.org/docs/main/nn.html#torch.nn.LSTM
     if (n->inputs().size() < 7) {
       continue;
     }

@@ -117,20 +117,29 @@ def _from_local_no_grad(
     global_stride: Tuple[int, ...],
 ) -> DTensor:
     """
-    This method is similar to ``DTensor.from_local()`` except it avoids some
-    CPU overhead by avoiding default args and not being differentiable.
+    This method is similar to ``DTensor.from_local()`` except that in eager mode
+    it avoids some CPU overhead by avoiding default args and not being differentiable.
     """
-    return DTensor(
-        # Use the local tensor directly instead of constructing a new tensor
-        # variable, e.g. with `view_as()`, since this is not differentiable
-        local_tensor,
-        device_mesh,
-        placements,
-        shape=global_size,
-        dtype=local_tensor.dtype,
-        requires_grad=local_tensor.requires_grad,
-        stride=global_stride,
-    )
+    if not torch._dynamo.compiled_autograd.compiled_autograd_enabled:
+        return DTensor(
+            # Use the local tensor directly instead of constructing a new tensor
+            # variable, e.g. with `view_as()`, since this is not differentiable
+            local_tensor,
+            device_mesh,
+            placements,
+            shape=global_size,
+            dtype=local_tensor.dtype,
+            requires_grad=local_tensor.requires_grad,
+            stride=global_stride,
+        )
+    else:
+        return DTensor.from_local(
+            local_tensor,
+            device_mesh,
+            placements,
+            shape=global_size,
+            stride=global_stride,
+        )
 
 
 def _to_dtype_if_needed(
@@ -139,3 +148,13 @@ def _to_dtype_if_needed(
     if dtype is not None and tensor.dtype != dtype:
         return tensor.to(dtype)
     return tensor
+
+
+def _cast_fp_tensor(dtype: torch.dtype, x: torch.Tensor) -> torch.Tensor:
+    if (
+        not isinstance(x, torch.Tensor)
+        or not torch.is_floating_point(x)
+        or x.dtype == dtype
+    ):
+        return x
+    return x.to(dtype)

@@ -6,19 +6,21 @@
 #include <c10/util/irange.h>
 #include <torch/csrc/autograd/function.h>
 #include <torch/csrc/autograd/variable.h>
+#include <torch/csrc/autograd/variable_info.h>
+#include <torch/csrc/dynamo/compiled_autograd.h>
 #include <vector>
 
 namespace torch::autograd {
 
-using optional_variable_list = std::vector<c10::optional<Variable>>;
+using optional_variable_list = std::vector<std::optional<Variable>>;
 using _jvp_fn_t = std::function<variable_list(variable_list, variable_list)>;
 using _view_as_self_fn_t = std::function<at::Tensor(at::Tensor)>;
 
-TORCH_API std::vector<c10::optional<Variable>> _wrap_outputs(
+TORCH_API std::vector<std::optional<Variable>> _wrap_outputs(
     const variable_list& input_vars,
     const std::unordered_set<at::TensorImpl*>& non_differentiable,
     const std::unordered_set<at::TensorImpl*>& dirty_inputs,
-    const at::ArrayRef<c10::optional<Variable>> raw_outputs,
+    const at::ArrayRef<std::optional<Variable>> raw_outputs,
     const std::shared_ptr<Node>& cdata,
     const _jvp_fn_t& jvp_user_function,
     const std::unordered_set<at::TensorImpl*>& to_save_if_setup_context,
@@ -39,7 +41,7 @@ using forward_t = decltype(X::forward(nullptr, std::declval<Args>()...));
 /// `forward` can take as many arguments as you want and should return either a
 /// variable list or a Variable. Use of any direct Variable arguments will be
 /// registered in the graph but no vectors/sets or any other data structures
-/// will be traversed. You can use c10::optional<Tensor> as one of the arguments
+/// will be traversed. You can use std::optional<Tensor> as one of the arguments
 /// and it will be registered as a variable in the graph if the argument has a
 /// value. It should take a pointer to `torch::autograd::AutogradContext` as the
 /// first argument. Variables can be saved in the `ctx` using
@@ -57,11 +59,16 @@ using forward_t = decltype(X::forward(nullptr, std::declval<Args>()...));
 /// `ctx->get_saved_variables` (see
 /// `torch::autograd::AutogradContext::get_saved_variables`) and other saved
 /// data can be accessed from `ctx->saved_data`.
+/// To enable compiled autograd support (torch.compile for backward) for your
+/// custom autograd operation, you can set MyFunction::is_traceable
+/// (see Function::istraceable notes below).
 ///
 /// For example:
 /// ```
 /// class MyFunction : public Function<MyFunction> {
 ///   public:
+///   static constexpr bool is_traceable = true;
+///
 ///   static variable_list forward(AutogradContext *ctx, int n, Variable var) {
 ///      // Save data for backward in context
 ///      ctx->saved_data["n"] = n;
@@ -97,6 +104,15 @@ struct TORCH_API Function {
   template <typename X = T, typename... Args>
   static auto apply(Args&&... args)
       -> std::enable_if_t<std::is_same_v<X, T>, forward_t<X, Args...>>;
+
+  // This flag is for an experimental feature: compiled autograd. Not all
+  // built-in APIs are supported at the moment e.g. mark_dirty and
+  // mark_non_differentiable. Before setting this flag to enable tracing for
+  // your custom function <T>, you need to ensure that the backward function is
+  // traceable i.e. any variables accessed in the backward other than the input
+  // arguments must be handled in a similar manner to built-ins in
+  // CppNode::compiled_args and CppNode::apply_with_saved.
+  static constexpr bool is_traceable = false;
 };
 
 /// Context to save information during `forward` that can be accessed in
@@ -157,20 +173,6 @@ struct TORCH_API AutogradContext {
   friend struct CppNode;
 };
 
-struct TORCH_API VariableInfo {
-  explicit VariableInfo();
-  explicit VariableInfo(const Variable& var);
-
-  Variable zeros(at::OptionalDeviceGuard& device_guard) const;
-
-  at::Layout layout = at::Layout::Strided;
-  at::Device device = at::kCPU;
-  at::ScalarType scalar_type = at::kFloat;
-  std::vector<c10::SymInt> size;
-  bool requires_grad;
-  bool is_empty;
-};
-
 // CppNode<T> is the Node in the autograd graph that represents the user defined
 // backward function for Function<T>. Calls to CppNode::apply are forward to
 // T::backward().
@@ -186,6 +188,56 @@ struct CppNode : public Node {
 
   void set_ctx_grad_fn(const std::shared_ptr<Node>& node);
   void save_variables_to_ctx();
+
+  void compiled_args(CompiledNodeArgs& args) override {
+    if (!T::is_traceable) {
+      throw std::runtime_error(
+          std::string(
+              "compiled_args not implemented for non-traceable node: ") +
+          name());
+    }
+
+    // although neither of the 2 methods below have uniqueness guarantees
+    // it is unlikely for them to collide at the same time
+    args.collect(static_cast<uint64_t>(typeid(T).hash_code()));
+    args.collect(std::string(typeid(T).name()));
+
+    args.collect(ctx_.saved_data);
+    TORCH_INTERNAL_ASSERT(ctx_.non_differentiable_.empty());
+    TORCH_INTERNAL_ASSERT(ctx_.dirty_inputs_.empty());
+    args.collect(ctx_.saved_variables_);
+    TORCH_INTERNAL_ASSERT(ctx_.to_save_.empty());
+    args.collect(ctx_.materialize_grads_);
+    args.collect(ctx_.has_freed_buffers_);
+    args.collect(is_variable_input_);
+    args.collect(input_info_);
+    args.collect(output_info_);
+  }
+
+  variable_list apply_with_saved(
+      const variable_list& inputs,
+      SwapSavedVariables& saved) override {
+    saved.before(ctx_.saved_data);
+    TORCH_INTERNAL_ASSERT(ctx_.non_differentiable_.empty());
+    TORCH_INTERNAL_ASSERT(ctx_.dirty_inputs_.empty());
+    saved.before(ctx_.saved_variables_);
+    TORCH_INTERNAL_ASSERT(ctx_.to_save_.empty());
+    saved.before(ctx_.materialize_grads_);
+    saved.before(ctx_.has_freed_buffers_);
+    saved.before(input_info_);
+    saved.before(output_info_);
+    auto results = apply(variable_list(inputs));
+    saved.after(ctx_.saved_data);
+    TORCH_INTERNAL_ASSERT(ctx_.non_differentiable_.empty());
+    TORCH_INTERNAL_ASSERT(ctx_.dirty_inputs_.empty());
+    saved.after(ctx_.saved_variables_);
+    TORCH_INTERNAL_ASSERT(ctx_.to_save_.empty());
+    saved.after(ctx_.materialize_grads_);
+    saved.after(ctx_.has_freed_buffers_);
+    saved.after(input_info_);
+    saved.after(output_info_);
+    return results;
+  }
 };
 
 struct ExtractVariables : IterArgs<ExtractVariables> {
@@ -195,7 +247,7 @@ struct ExtractVariables : IterArgs<ExtractVariables> {
   variable_list& list_;
   ExtractVariables(std::vector<bool>& is_var, variable_list& list)
       : is_var_(is_var), list_(list) {}
-  void operator()(const c10::optional<at::Tensor>& x) {
+  void operator()(const std::optional<at::Tensor>& x) {
     // NOLINTNEXTLINE(bugprone-branch-clone)
     if (x.has_value() && x.value().defined()) {
       is_var_.push_back(true);
@@ -230,30 +282,30 @@ inline void extract_vars(
 
 template <typename T>
 std::enable_if_t<std::is_same_v<T, variable_list>, T> to_output_type(
-    std::vector<c10::optional<Variable>>& output_list) {
+    std::vector<std::optional<Variable>>& output_list) {
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   variable_list result;
   std::transform(
       output_list.begin(),
       output_list.end(),
       std::back_inserter(result),
-      [](const c10::optional<Variable>& var) { return *var; });
+      [](const std::optional<Variable>& var) { return *var; });
   return result;
 }
 
 template <typename T>
 std::enable_if_t<std::is_same_v<T, Variable>, T> to_output_type(
-    std::vector<c10::optional<Variable>>& output_list) {
+    std::vector<std::optional<Variable>>& output_list) {
   return *output_list[0];
 }
 
-inline std::vector<c10::optional<Variable>> to_optional(Variable& output) {
-  return std::vector<c10::optional<Variable>>{output};
+inline std::vector<std::optional<Variable>> to_optional(Variable& output) {
+  return std::vector<std::optional<Variable>>{output};
 }
 
-inline std::vector<c10::optional<Variable>> to_optional(variable_list& output) {
+inline std::vector<std::optional<Variable>> to_optional(variable_list& output) {
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  std::vector<c10::optional<Variable>> result;
+  std::vector<std::optional<Variable>> result;
   std::transform(
       output.begin(),
       output.end(),

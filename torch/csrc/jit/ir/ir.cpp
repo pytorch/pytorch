@@ -354,10 +354,7 @@ std::ostream& Node::print(
       }
     }
     if (auto file_line_col = r.file_line_col()) {
-      std::string filename;
-      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-      size_t line, col;
-      std::tie(filename, line, col) = *file_line_col;
+      auto [filename, line, col] = *file_line_col;
       out << " # " << filename << ":" << line << ":" << col;
     }
   }
@@ -421,7 +418,7 @@ std::ostream& operator<<(std::ostream& out, const Graph& g) {
 
 static void checkSameDevice(const Node* node) {
   bool has_device = false;
-  c10::optional<at::Device> device = c10::nullopt;
+  std::optional<at::Device> device = c10::nullopt;
   auto checkValue = [&](const Value* v) {
     if (TensorTypePtr type = v->type()->cast<TensorType>()) {
       if (type->device() && !has_device) {
@@ -593,8 +590,7 @@ void Graph::lint() const {
       anticipated_uses[n] = -1; // we saw the anticipated user!
       scope->insert(n);
       for (auto block : n->blocks()) {
-        std::unique_ptr<LintScope> new_scope(new LintScope(std::move(scope)));
-        scope = std::move(new_scope);
+        scope = std::make_unique<LintScope>(std::move(scope));
         check_block(block);
         scope = std::move(scope->parent);
       }
@@ -987,7 +983,7 @@ static size_t findArgument(const FunctionSchema& the_schema, Symbol name) {
   return findArgument(the_schema, unqualName);
 }
 
-c10::optional<IValue> Node::get(Symbol name) const {
+std::optional<IValue> Node::get(Symbol name) const {
   return toIValue(namedInput(name));
 }
 
@@ -1689,7 +1685,7 @@ Value* Graph::insert(
     Symbol opname,
     at::ArrayRef<NamedValue> args,
     at::ArrayRef<NamedValue> kwargs,
-    const c10::optional<SourceRange>& range) {
+    const std::optional<SourceRange>& range) {
   return emitBuiltinCall(
       range.value_or(fakeRange()), *this, opname, args, kwargs);
 }
@@ -1996,8 +1992,8 @@ Node* Graph::createClone(
 
 Value* Graph::insertConstant(
     const IValue& val,
-    c10::optional<SourceRange> loc,
-    c10::optional<ScopePtr> scope) {
+    std::optional<SourceRange> loc,
+    std::optional<ScopePtr> scope) {
   return jit::insertConstant(*this, val, std::move(loc), std::move(scope));
 }
 
@@ -2054,14 +2050,14 @@ void inlineCallStackOfNode(
     std::unordered_map<InlinedCallStack*, InlinedCallStackPtr>& new_cs_entries,
     Function* callee,
     Node* to_replace,
-    c10::optional<ModuleInstanceInfo> m_info);
+    std::optional<ModuleInstanceInfo> m_info);
 
 static void inlineCallStackOfBlock(
     Block* b,
     std::unordered_map<InlinedCallStack*, InlinedCallStackPtr>& new_cs_entries,
     Function* callee,
     Node* to_replace,
-    c10::optional<ModuleInstanceInfo> m_info) {
+    std::optional<ModuleInstanceInfo> m_info) {
   for (auto n : b->nodes()) {
     inlineCallStackOfNode(n, new_cs_entries, callee, to_replace, m_info);
   }
@@ -2072,7 +2068,7 @@ void inlineCallStackOfNode(
     std::unordered_map<InlinedCallStack*, InlinedCallStackPtr>& new_cs_entries,
     Function* callee,
     Node* to_replace,
-    c10::optional<ModuleInstanceInfo> m_info) {
+    std::optional<ModuleInstanceInfo> m_info) {
   auto new_node_cs = new_node->callstack();
 
   InlinedCallStack* raw_callstack_ptr =
@@ -2111,7 +2107,7 @@ std::vector<Value*> inlineCallTo(
   std::unordered_map<InlinedCallStack*, InlinedCallStackPtr>
       new_callstack_entries;
 
-  c10::optional<ModuleInstanceInfo> module_instance_info = c10::nullopt;
+  std::optional<ModuleInstanceInfo> module_instance_info = c10::nullopt;
   if (to_replace->kind() == prim::CallMethod) {
     auto class_type_ptr = to_replace->input(0)->type()->cast<c10::ClassType>();
     if (to_replace->input(0)->node()->kind() == prim::GetAttr) {
