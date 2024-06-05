@@ -5291,6 +5291,22 @@ def forward(self, tangents_1, tangents_2):
         self.assertEqual(a_ref_base.grad.a, a_test_base.grad.a)
         self.assertEqual(a_ref_base.grad.b, a_test_base.grad.b)
 
+    def test_aot_dispatch_output_requires_grad_in_no_grad(self):
+        def fn(x):
+            with torch.enable_grad():
+                out = x + 1
+            return out
+
+        def inp_fn():
+            return torch.ones(10, requires_grad=True)
+
+        compiled_f = aot_function(fn, nop)
+        with torch.no_grad():
+            ref_out = fn(inp_fn())
+            out = compiled_f(inp_fn())
+
+        self.assertEqual(ref_out.requires_grad, out.requires_grad)
+
 
 class TestAOTModuleSimplified(AOTTestCase):
     def test_aot_module_simplified(self):

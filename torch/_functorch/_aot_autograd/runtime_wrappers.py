@@ -199,8 +199,9 @@ def _create_runtime_wrapper(
             for idx in indices_of_inps_to_detach:
                 if isinstance(args_[idx], torch.Tensor):
                     args_[idx] = args_[idx].detach()
-            needs_grad = any(x.requires_grad for x in args_ if isinstance(x, Tensor))
-            with torch.autograd._force_original_view_tracking(True), torch.enable_grad() if needs_grad else nullcontext():
+            with torch.autograd._force_original_view_tracking(
+                True
+            ), torch.enable_grad():
                 all_outs = call_func_at_runtime_with_args(
                     compiled_fn, args_, disable_amp=disable_amp, steal_args=True
                 )

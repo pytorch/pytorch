@@ -544,7 +544,9 @@ def create_aot_dispatcher_function(
 
         fake_flat_args = process_inputs(flat_args)
 
-        needs_autograd = any(x.requires_grad for x in fake_flat_args if isinstance(x, Tensor))
+        needs_autograd = any(
+            x.requires_grad for x in fake_flat_args if isinstance(x, Tensor)
+        )
 
         with enable_python_dispatcher():
             # Patch set_rng_state as set_rng_state with fake tensors is
