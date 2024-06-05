@@ -11,7 +11,7 @@ import itertools
 import unittest
 import warnings
 from contextlib import nullcontext
-from functools import partial
+from functools import partial, wraps
 from typing import Any, Callable, Dict, List, Optional, Union
 from unittest.mock import patch
 
@@ -285,19 +285,24 @@ def is_in_base(t, maybe_tensors):
     return False
 
 
-def skipIfDynamoInput(reason):
+def skipIfDynamoInput(reason, xfail=False):
     """
     Skip TestAOTAutograd if running with dynamo input
     """
 
     def decorator(func):
+        @wraps(func)
         def wrapper(self, *args, **kwargs):
+            fn = func
             if isinstance(self, TestAOTAutogradWithDynamo):
-                self.skipTest(
-                    f"Skipping {self._testMethodName} in TestAOTAutogradWithDynamo because {reason}"
-                )
+                if xfail:
+                    fn = unittest.expectedFailure(fn)
+                else:
+                    self.skipTest(
+                        f"Skipping {self._testMethodName} in TestAOTAutogradWithDynamo because {reason}"
+                    )
             else:
-                func(self, *args, **kwargs)
+                fn(self, *args, **kwargs)
 
         return wrapper
 
@@ -615,7 +620,7 @@ def forward(self, primals_1, primals_2):
     # https://github.com/pytorch/pytorch/issues/126236
     # https://github.com/pytorch/pytorch/pull/126113
     @xfailIfTorchDynamo
-    @skipIfDynamoInput("Not supported by dynamo")
+    @skipIfDynamoInput("Not supported by dynamo", xfail=True)
     def test_set__and_data_mutation_bad(self):
         def f(a):
             a_view = a.view(-1)
@@ -717,8 +722,6 @@ def forward(self, primals_1):
 
         out_ref = f(ref_view)
         out_test = f_compiled(test_view)
-        print(ref)
-        print(test)
         self.assertEqual(ref, test)
 
     def test_input_mutation_modifies_autograd_meta_of_aliases(self):
@@ -1848,7 +1851,7 @@ def forward(self, primals_1):
         )
 
     @parametrize("req_grad", [False, True])
-    @skipIfDynamoInput("Runtime error not raised with dynamo")
+    @skipIfDynamoInput("Runtime error not raised with dynamo", xfail=True)
     def test_subclass_metadata_mutation(self, req_grad):
         def f(a):
             a.transpose_(1, 0)
@@ -1922,7 +1925,7 @@ def forward(self, primals_1, primals_2):
     return [t, view_1, view_2]""",
         )
 
-    @skipIfDynamoInput("https://github.com/pytorch/pytorch/issues/128035")
+    @skipIfDynamoInput("https://github.com/pytorch/pytorch/issues/128035", xfail=True)
     def test_view_detach(self):
         def f(a):
             tmp = a.detach()
@@ -2641,7 +2644,7 @@ def forward(self, primals_1, primals_2, primals_3):
 
         self.verify_aot_autograd(f, inp_callable, test_mutation=True)
 
-    @skipIfDynamoInput("https://github.com/pytorch/pytorch/issues/128035")
+    @skipIfDynamoInput("https://github.com/pytorch/pytorch/issues/128035", xfail=True)
     def test_input_mutation_alias_everything(self):
         # Mondo test that tests a combination of:
         # input is mutated, that aliases another input (so we make a synthetic base)
