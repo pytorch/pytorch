@@ -1067,8 +1067,89 @@ def values_default(func, *args, **kwargs):
 
 
 @register_jagged_func(
+    torch.ops.aten.to_padded_tensor.default, "self: jt, padding: any, output_size: any?"
+)
+def to_padded_tensor_default(func, *args, **kwargs):
+    _, new_kwargs = normalize_function(
+        func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
+    )
+
+    inp = new_kwargs.pop("input")
+
+    # TODO: Handle the rest of output_size
+    output_size = new_kwargs["output_size"]
+    if output_size is not None:
+        max_seq_len = output_size[inp._ragged_idx]
+    else:
+        max_seq_len = inp._max_seqlen
+
+    if inp.is_cuda:
+        # > 2D values is not supported by the underlying FBGEMM kernel so do shape gymnastics
+        values = inp.values()
+        values_shape = values.shape
+        if values.dim() > 2:
+            values = values.flatten(start_dim=1)
+
+        padded_out = torch.ops.aten._jagged_to_padded_dense_forward(
+            values,
+            [inp._offsets],
+            [max_seq_len],
+            new_kwargs["padding"],
+        )
+
+        # shape gymnastics part 2
+        if len(values_shape) > 2:
+            padded_out = padded_out.unflatten(-1, values_shape[1:])
+
+        return padded_out
+    else:
+        # TODO: backup non-FBGEMM impl
+        return None
+
+
+@register_jagged_func(
+    torch.ops.aten._nested_from_padded_tensor.default,
+    "padded: t, offsets: t, dummy: jt, dim: any?, sum_S: any?",
+)
+def _nested_from_padded_tensor_default(func, *args, **kwargs):
+    _, new_kwargs = normalize_function(
+        func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
+    )
+
+    if new_kwargs["dim"] != 1:
+        raise RuntimeError(
+            "_nested_from_padded_tensor(): only dim=1 supported for jagged layout"
+        )
+
+    padded, offsets = new_kwargs["padded"], new_kwargs["offsets"]
+
+    # non-3D padded is not supported by the underlying FBGEMM kernel so do shape gymnastics
+    padded_shape = padded.shape
+    if padded.dim() > 3:
+        padded = padded.flatten(start_dim=2)
+    elif padded.dim() < 3:
+        padded = padded.unsqueeze(-1)
+
+    if padded.is_cuda:
+        values = torch.ops.aten._padded_dense_to_jagged_forward(
+            padded, [offsets], new_kwargs["sum_S"]
+        )
+
+        # shape gymnastics part 2
+        if len(padded_shape) > 3:
+            values = values.unflatten(-1, padded_shape[2:])
+        elif len(padded_shape) < 3:
+            values = values.squeeze(-1)
+
+        return NestedTensor(values, offsets)
+    else:
+        # TODO: backup non-FBGEMM impl
+        return None
+
+
+@register_jagged_func(
     torch.ops.aten._nested_view_from_jagged.default,
-    "values: t, offsets: t, dummy: jt_all, lengths: t?, ragged_idx: any?",
+    "values: t, offsets: t, dummy: jt_all, lengths: t?, ragged_idx: any?, min_seqlen: t?, max_seqlen: t?",
 )
 def _nested_view_from_jagged_default(func, *args, **kwargs):
     _, new_kwargs = normalize_function(
@@ -1081,8 +1162,21 @@ def _nested_view_from_jagged_default(func, *args, **kwargs):
         new_kwargs["lengths"],
     )
     ragged_idx = new_kwargs["ragged_idx"]
+    min_seqlen = new_kwargs["min_seqlen"]
+    max_seqlen = new_kwargs["max_seqlen"]
+    metadata_cache = {}
+    if min_seqlen is not None:
+        metadata_cache["min_seqlen"] = min_seqlen
+    if max_seqlen is not None:
+        metadata_cache["max_seqlen"] = max_seqlen
 
-    return NestedTensor(values, offsets, lengths=lengths, _ragged_idx=ragged_idx)
+    return NestedTensor(
+        values,
+        offsets,
+        lengths=lengths,
+        _ragged_idx=ragged_idx,
+        _metadata_cache=metadata_cache,
+    )
 
 
 @register_jagged_func(torch.ops.aten._nested_get_offsets.default, "self: jt_all")
@@ -1113,6 +1207,26 @@ def _nested_get_ragged_idx(func, *args, **kwargs):
 
     inp = new_kwargs.pop("input")
     return inp._ragged_idx
+
+
+@register_jagged_func(torch.ops.aten._nested_get_min_seqlen.default, "self: jt_all")
+def _nested_get_min_seqlen(func, *args, **kwargs):
+    _, new_kwargs = normalize_function(
+        func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
+    )
+
+    inp = new_kwargs.pop("input")
+    return inp._metadata_cache.get("min_seqlen", None)
+
+
+@register_jagged_func(torch.ops.aten._nested_get_max_seqlen.default, "self: jt_all")
+def _nested_get_max_seqlen(func, *args, **kwargs):
+    _, new_kwargs = normalize_function(
+        func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
+    )
+
+    inp = new_kwargs.pop("input")
+    return inp._metadata_cache.get("max_seqlen", None)
 
 
 # Make the dummy available on the C++ side.
