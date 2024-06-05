@@ -1072,7 +1072,6 @@ exclude_patterns = [
     'test/test_jit_disabled.py',
     'test/test_jit_fuser.py',
     'test/test_jit_fuser_legacy.py',
-    'test/test_jit_fuser_te.py',
     'test/test_jit_legacy.py',
     'test/test_jit_llga_fuser.py',
     'test/test_jit_profiling.py',
@@ -1582,7 +1581,6 @@ exclude_patterns = [
     'torch/distributed/tensor/parallel/input_reshard.py',
     'torch/distributed/tensor/parallel/multihead_attention_tp.py',
     'torch/distributed/tensor/parallel/style.py',
-    'torch/distributed/utils.py',
     'torch/fft/__init__.py',
     'torch/func/__init__.py',
     'torch/functional.py',
@@ -1674,18 +1672,6 @@ exclude_patterns = [
     'torch/hub.py',
     'torch/library.py',
     'torch/linalg/__init__.py',
-    # UFMT causes import cycle on masked
-    'torch/masked/__init__.py',
-    'torch/masked/_docs.py',
-    'torch/masked/_ops.py',
-    'torch/masked/maskedtensor/__init__.py',
-    'torch/masked/maskedtensor/_ops_refs.py',
-    'torch/masked/maskedtensor/binary.py',
-    'torch/masked/maskedtensor/core.py',
-    'torch/masked/maskedtensor/creation.py',
-    'torch/masked/maskedtensor/passthrough.py',
-    'torch/masked/maskedtensor/reductions.py',
-    'torch/masked/maskedtensor/unary.py',
     'torch/monitor/__init__.py',
     'torch/nested/__init__.py',
     'torch/nn/__init__.py',
@@ -2120,7 +2106,7 @@ init_command = [
     'python3',
     'tools/linter/adapters/pip_init.py',
     '--dry-run={{DRYRUN}}',
-    'ruff==0.4.5',
+    'ruff==0.4.6',
 ]
 is_formatter = true
 

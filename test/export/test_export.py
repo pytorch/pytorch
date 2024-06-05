@@ -3312,6 +3312,15 @@ def forward(self, x):
             "torch.ops.aten._assert_scalar.default", 1, exactly=True
         ).run(ep.graph_module.code)
 
+        ep = ep.run_decompositions()
+
+        FileCheck().check_count(
+            "torch.ops.aten.sym_constrain_range.default", 1, exactly=True
+        ).run(ep.graph_module.code)
+        FileCheck().check_count(
+            "torch.ops.aten._assert_scalar.default", 1, exactly=True
+        ).run(ep.graph_module.code)
+
     def test_non_arg_name_dynamic_shapes_api(self):
         class Foo(torch.nn.Module):
             def forward(self, a, b):
