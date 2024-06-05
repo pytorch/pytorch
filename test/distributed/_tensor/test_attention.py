@@ -21,6 +21,7 @@ from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_FLASH_ATTENTION,
     PLATFORM_SUPPORTS_FUSED_ATTENTION,
     PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
+    TEST_CUDA,
 )
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_utils import (
@@ -28,6 +29,7 @@ from torch.testing._internal.common_utils import (
     parametrize,
     run_tests,
     skipIfRocm,
+    TEST_WITH_ROCM,
 )
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
@@ -308,6 +310,10 @@ class RingAttentionTest(DTensorTestBase):
         not PLATFORM_SUPPORTS_FUSED_ATTENTION,
         "Does not support flash nor efficient attention",
     )
+    @unittest.skipIf(
+        TEST_CUDA and not TEST_WITH_ROCM and not PLATFORM_SUPPORTS_FLASH_ATTENTION,
+        "Does not support flash attention",
+    )  # On CUDA (not ROCM) platform, the UT is skipped if no FA support (even if ME may get supported)
     @with_comms
     @parametrize(
         "attention_fn",
