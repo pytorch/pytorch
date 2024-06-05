@@ -376,13 +376,8 @@ def should_use_remote_fx_graph_cache():
     if torch.version.hip is not None:
         return False
 
-    try:
-        from triton.runtime.fb_memcache import MEMCACHE_VERSION
-    except ModuleNotFoundError:
-        return False
-
-    return MEMCACHE_VERSION >= torch._utils_internal.justknobs_getval_int(
-        "pytorch/remote_cache:fx_graph_memcache_version"
+    return torch._utils_internal.justknobs_check(
+        "pytorch/remote_cache:fx_graph_remote_cache_enabled"
     )
 
 
