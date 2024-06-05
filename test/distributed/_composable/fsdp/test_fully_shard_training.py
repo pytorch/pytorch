@@ -285,11 +285,29 @@ class TestFullyShard1DTrainingCore(FSDPTest):
             {
                 "reshard_after_forward": [True, False, 2],
                 "device_type": ["cuda"],
+                "offload_policy": [OffloadPolicy()],
+                "delay_after_forward": [False, True],
+                "delay_before_all_gather": [False, True],
+                "delay_before_reduce_scatter": [False, True],
+                "delay_before_optim": [False, True],
+            },
+            self._test_train_parity_multi_group,
+        )
+    
+    @skip_if_lt_x_gpu(2)
+    def test_train_parity_multi_group_cpu_offload_eager(self):
+        """
+        Tests train parity against DDP when using multiple parameter groups for
+        communication and CPU offloading.
+        """
+        self.run_subtests(
+            {
+                "reshard_after_forward": [True],  # save CI time
                 "offload_policy": [
-                    OffloadPolicy(),
                     CPUOffloadPolicy(pin_memory=True),
                     CPUOffloadPolicy(pin_memory=False),
                 ],
+                "device_type": ["cuda"],
                 "delay_after_forward": [False, True],
                 "delay_before_all_gather": [False, True],
                 "delay_before_reduce_scatter": [False, True],
