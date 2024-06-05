@@ -598,7 +598,11 @@ class profile(_KinetoProfile):
     ):
         activities_set = set(activities) if activities else supported_activities()
         if use_cuda is not None:
-            warn("use_cuda is deprecated, use activities argument instead")
+            warn(
+                "`use_cuda` is deprecated, use `activities` argument instead",
+                FutureWarning,
+                stacklevel=2,
+            )
             if use_cuda:
                 activities_set.add(ProfilerActivity.CUDA)
             elif ProfilerActivity.CUDA in activities_set:
