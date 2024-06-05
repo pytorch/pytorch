@@ -929,22 +929,7 @@ class GraphLowering(torch.fx.Interpreter):
             # which run through implicit fallback must constrain their
             # arguments' fx strides
             layout_constraint = None
-
-            def needs_fixed_stride_order(target):
-                if (
-                    torch._C.Tag.needs_fixed_stride_order in target.tags
-                    and torch._C.Tag.does_not_need_fixed_stride_order in target.tags
-                ):
-                    # If both tags were specified, pessimistically assume that we do need it.
-                    return True
-                if torch._library.utils.is_builtin(target):
-                    return torch._C.Tag.needs_fixed_stride_order in target.tags
-                else:
-                    return (
-                        torch._C.Tag.does_not_need_fixed_stride_order not in target.tags
-                    )
-
-            if needs_fixed_stride_order(target):
+            if torch._C.Tag.needs_fixed_stride_order in target.tags:
                 # We have to set the current args because call_function will immediately
                 # evaluate this lowering after creating the fallback, without evaluating
                 # the layout constraint
