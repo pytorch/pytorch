@@ -407,7 +407,8 @@ control_plane::RegisterHandler dumpHandler{
     "dump_nccl_trace_pickle",
     [](const control_plane::Request& req, control_plane::Response& res) {
       // TODO: c-p-i-o: params from the request need to go to dump_nccl_trace.
-      res.setContent(dump_nccl_trace(true, true, false), "application/octet-stream");
+      res.setContent(
+          dump_nccl_trace(true, true, false), "application/octet-stream");
     }};
 
 std::optional<std::function<void(std::function<void(const std::string&)>)>>&
