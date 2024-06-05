@@ -316,6 +316,13 @@ class TestONNXExportWithDynamo(common_utils.TestCase):
                 dynamo=True,
             )
 
+    def test_saved_f_exists_after_export(self):
+        with common_utils.TemporaryFileName(suffix=".onnx") as path:
+            _ = torch.onnx.export(
+                SampleModel(), torch.randn(1, 1, 2), path, dynamo=True
+            )
+            self.assertTrue(os.path.exists(path))
+
 
 if __name__ == "__main__":
     common_utils.run_tests()
