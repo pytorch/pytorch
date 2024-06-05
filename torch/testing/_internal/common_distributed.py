@@ -867,7 +867,9 @@ def run_subtests(
         # Map keyword to chosen value
         subtest_kwargs = dict(zip(subtest_config_keys, values))
         with cls_inst.subTest(**subtest_kwargs):
+            torch._dynamo.reset()
             test_fn(*test_args, **test_kwargs, **subtest_kwargs)
+            torch._dynamo.reset()
         c10d.barrier()
 
 
