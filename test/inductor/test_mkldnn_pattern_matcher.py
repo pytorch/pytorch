@@ -20,6 +20,7 @@ from torch.ao.quantization.quantize_pt2e import (
 )
 from torch.ao.quantization.quantizer.x86_inductor_quantizer import X86InductorQuantizer
 from torch.nn import functional as F
+from torch.testing._internal.common_mkldnn import bf32_on_and_off
 from torch.testing._internal.common_quantization import (
     skipIfNoDynamoSupport,
     skipIfNoONEDNN,
@@ -27,7 +28,6 @@ from torch.testing._internal.common_quantization import (
 )
 from torch.testing._internal.common_utils import IS_LINUX, skipIfRocm, TEST_MKL
 from torch.testing._internal.inductor_utils import _check_has_dynamic_shape, HAS_CPU
-from torch.testing._internal.common_mkldnn import bf32_on_and_off
 
 
 # The dict value is match_nodes(computation_op+unary_op)
