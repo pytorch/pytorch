@@ -692,6 +692,7 @@ class OpOverload(OperatorBase):
         return self._schema.name.split("::")[0]
 
     def decompose(self, *args, **kwargs):
+        return NotImplemented
         dk = torch._C.DispatchKey.CompositeImplicitAutograd
         if dk in self.py_kernels:
             # NB: This branch is not too necessary anymore, because we can
@@ -717,6 +718,7 @@ class OpOverload(OperatorBase):
 
     # This implements the pre-computation logic for the Python dispatcher.
     def _get_dispatch(self, key):
+        print(self, key)
         # This is only called upon a cache miss
         assert key not in self._dispatch_cache, f"{self} {key}"
 

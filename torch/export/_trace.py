@@ -220,6 +220,23 @@ def _convert_input_to_fake(gm, args, kwargs):
     return fake_args, fake_kwargs, fake_params_buffers, fake_mode
 
 
+import contextlib
+all_patches = [torch.ops.aten.linear.default]
+@contextlib.contextmanager
+def patch_impl():
+    for op in all_patches:
+        def func(*args, **kwargs):
+            nonlocal op
+            print("DO I GET CALLED HERE")
+            with torch._C._AutoDispatchBelowAutograd():
+                return op(*args, **kwargs)
+        print("I AM GETTING HERE")
+        op.py_impl(torch._C.DispatchKey.OverrideCompositeImplicitAutogradFromPython)(func)
+    try:
+        yield
+    finally:
+        pass
+
 def _replace_param_buffer_names(param_buffer_table, sig):
     for spec in sig.input_specs:
         if spec.kind in (
@@ -1452,19 +1469,26 @@ def _export(
 
     # Call the appropriate export function based on the strictness of tracing.
     export_func = _strict_export if strict else _non_strict_export
-    aten_export_artifact = export_func(
-        mod,
-        args,
-        kwargs,
-        dynamic_shapes,
-        preserve_module_call_signature,
-        pre_dispatch,
-        original_state_dict,
-        orig_in_spec,
-        _allow_complex_guards_as_runtime_asserts,
-        _disable_forced_specializations,
-        _is_torch_jit_trace,
-    )
+
+    include = torch._C._dispatch_tls_local_include_set().add(torch._C.DispatchKey.OverrideCompositeImplicitAutogradFromPython)
+    exclude = torch._C._dispatch_tls_local_exclude_set()
+    
+    with patch_impl(), torch._C._ForceDispatchKeyGuard(include, exclude):
+        print("INCLUDE", torch._C._dispatch_tls_local_include_set())
+        print("EXCLUDE", torch._C._dispatch_tls_local_exclude_set())
+        aten_export_artifact = export_func(
+            mod,
+            args,
+            kwargs,
+            dynamic_shapes,
+            preserve_module_call_signature,
+            pre_dispatch,
+            original_state_dict,
+            orig_in_spec,
+            _allow_complex_guards_as_runtime_asserts,
+            _disable_forced_specializations,
+            _is_torch_jit_trace,
+        )
 
     # Decompose here for readability.
     gm = aten_export_artifact.gm

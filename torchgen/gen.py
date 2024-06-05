@@ -336,6 +336,7 @@ def static_dispatch_keys(backends: List[BackendIndex]) -> List[DispatchKey]:
         return []
     else:
         return [backend.dispatch_key for backend in backends] + [
+            DispatchKey.OverrideCompositeImplicitAutogradFromPython,
             DispatchKey.CompositeImplicitAutograd,
             DispatchKey.CompositeImplicitAutogradNestedTensor,
             DispatchKey.CompositeExplicitAutograd,
@@ -2902,6 +2903,7 @@ def main() -> None:
     functions_keys = {
         DispatchKey.CPU,
         DispatchKey.CUDA,
+        DispatchKey.OverrideCompositeImplicitAutogradFromPython,
         DispatchKey.CompositeImplicitAutograd,
         DispatchKey.CompositeImplicitAutogradNestedTensor,
         DispatchKey.CompositeExplicitAutograd,
@@ -2910,6 +2912,8 @@ def main() -> None:
     }
     if options.mps:
         functions_keys.add(DispatchKey.MPS)
+
+    print("DISPATCHERRRRR", dispatch_keys)
 
     if options.backend_whitelist:
         dispatch_keys = [

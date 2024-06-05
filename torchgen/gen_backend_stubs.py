@@ -552,6 +552,7 @@ def run(
     )
     backend_key = parsed_backend_yaml.backend_key
     autograd_key = parsed_backend_yaml.autograd_key
+    print("AUTOGRADDDDD", autograd_key)
     cpp_namespace = parsed_backend_yaml.cpp_namespace
     class_name = parsed_backend_yaml.class_name
     backend_indices = parsed_backend_yaml.backend_indices

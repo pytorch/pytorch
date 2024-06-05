@@ -1,4 +1,5 @@
 import builtins
+import contextlib
 import copy
 import dataclasses
 import inspect
@@ -68,6 +69,23 @@ from .unflatten import FlatArgsAdapter, unflatten, UnflattenedModule
 
 
 PassType = Callable[[torch.fx.GraphModule], Optional[PassResult]]
+
+
+all_patches = [torch.ops.aten.linear.default]
+@contextlib.contextmanager
+def patch_impl():
+    for op in all_patches:
+        def func(*args, **kwargs):
+            nonlocal op
+            with torch._C._AutoDispatchBelowAutograd():
+                return op(*args, **kwargs)
+        print("HE", torch._C.DispatchKey.__dict__)
+        op.py_impl(torch._C.DispatchKey.OverrideCompositeImplicitAutogradFromPython)(func)
+        print("HELLO", op.py_kernels)
+    try:
+        yield
+    finally:
+        pass
 
 
 def export(
@@ -170,16 +188,16 @@ def export(
         raise ValueError(
             f"Expected `mod` to be an instance of `torch.nn.Module`, got {type(mod)}."
         )
-
-    return _export(
-        mod,
-        args,
-        kwargs,
-        dynamic_shapes,
-        strict=strict,
-        preserve_module_call_signature=preserve_module_call_signature,
-        pre_dispatch=True,
-    )
+    with patch_impl():
+        return _export(
+            mod,
+            args,
+            kwargs,
+            dynamic_shapes,
+            strict=strict,
+            preserve_module_call_signature=preserve_module_call_signature,
+            pre_dispatch=True,
+        )
 
 
 def save(

@@ -195,6 +195,8 @@ const char* toString(DispatchKey t) {
 
     case DispatchKey::Autograd:
       return "Autograd";
+    case DispatchKey::OverrideCompositeImplicitAutogradFromPython:
+      return "OverrideCompositeImplicitAutogradFromPython";
     case DispatchKey::CompositeImplicitAutograd:
       return "CompositeImplicitAutograd";
     case DispatchKey::CompositeImplicitAutogradNestedTensor:
@@ -366,6 +368,8 @@ c10::DispatchKey parseDispatchKey(const std::string& k) {
       {"AutogradPrivateUse3", c10::DispatchKey::AutogradPrivateUse3},
 
       {"Autograd", c10::DispatchKey::Autograd},
+      {"OverrideCompositeImplicitAutogradFromPython",
+       c10::DispatchKey::OverrideCompositeImplicitAutogradFromPython},
       {"CompositeImplicitAutograd",
        c10::DispatchKey::CompositeImplicitAutograd},
       {"CompositeImplicitAutogradNestedTensor",

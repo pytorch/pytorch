@@ -459,6 +459,7 @@ enum class DispatchKey : uint16_t {
 
   // See Note [Alias Dispatch Key : Autograd]
   Autograd,
+  OverrideCompositeImplicitAutogradFromPython,
   CompositeImplicitAutograd, // registered at
   // build/aten/src/ATen/RegisterCompositeImplicitAutograd.cpp
 

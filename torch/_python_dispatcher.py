@@ -65,6 +65,7 @@ class PythonDispatcher:
     alias_keys = [
         "CompositeExplicitAutograd",
         "Autograd",
+        "OverrideCompositeImplicitAutogradFromPython",
         "CompositeImplicitAutograd",
     ]
     supported_keys = runtime_keys + alias_keys

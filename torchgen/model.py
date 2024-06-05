@@ -123,6 +123,8 @@ class DispatchKey(Enum):
 
     ADInplaceOrView = auto()
     Autograd = auto()
+    OverrideCompositeImplicitAutogradFromPython = auto()
+
     CompositeImplicitAutograd = auto()
     CompositeImplicitAutogradNestedTensor = auto()
     CompositeExplicitAutograd = auto()
@@ -276,6 +278,7 @@ dispatch_keys = [
     DispatchKey.QuantizedCPU,
     DispatchKey.QuantizedCUDA,
     DispatchKey.CompositeImplicitAutograd,
+    DispatchKey.OverrideCompositeImplicitAutogradFromPython,
     DispatchKey.CompositeImplicitAutogradNestedTensor,
     DispatchKey.CompositeExplicitAutograd,
     DispatchKey.CompositeExplicitAutogradNonFunctional,
@@ -299,6 +302,7 @@ def is_generic_dispatch_key(dk: DispatchKey) -> bool:
         DispatchKey.CompositeExplicitAutograd,
         DispatchKey.CompositeExplicitAutogradNonFunctional,
         DispatchKey.CompositeImplicitAutograd,
+        DispatchKey.OverrideCompositeImplicitAutogradFromPython,
         DispatchKey.CompositeImplicitAutogradNestedTensor,
     }
 
