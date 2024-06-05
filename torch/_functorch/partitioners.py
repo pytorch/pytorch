@@ -534,25 +534,22 @@ def reordering_to_mimic_autograd_engine(gm: fx.GraphModule) -> fx.GraphModule:
     for idx, node in enumerate(gm.graph.nodes):
         order[node] = idx
 
-    # Populate depth for the nodes. Depth is the distance from the inputs.
-    depths = {}
-    output_node = next(iter(gm.graph.find_nodes(op="output")))
-    for node in gm.graph.nodes:
-        if node.op == "placeholder":
-            depths[node] = 0
-        else:
-            depths[node] = max([depths[arg] for arg in node.all_input_nodes], default=0)
-
     def insert_node_in_graph(node):
-        if node in env:
-            return env[node]
+        cur_nodes = [node]
+        insertable_nodes = set()
+        while len(cur_nodes) > 0:
+            node = cur_nodes.pop()
+            if node in insertable_nodes:
+                continue
+            insertable_nodes.add(node)
 
-        # Bias traversal towards the nodes that have higher depth - prioritizes
-        # critical path first.
-        for arg, _ in sort_depths(node.all_input_nodes, depths):
-            env[arg] = insert_node_in_graph(arg)
-        env[node] = new_graph.node_copy(node, lambda x: env[x])
-        return env[node]
+            # Bias traversal towards the nodes that have higher depth - prioritizes
+            # critical path first.
+            cur_nodes += node.all_input_nodes
+
+        insertable_nodes = sorted(insertable_nodes, key=lambda n: order[n])
+        for node in insertable_nodes:
+            env[node] = new_graph.node_copy(node, lambda x: env[x])
 
     # Find first bwd node in the graph
     tangent_inputs = list(filter(_is_tangent, gm.graph.nodes))
@@ -752,7 +749,7 @@ def cleanup_recompute_tags(joint_module: fx.GraphModule) -> fx.GraphModule:
     return joint_module
 
 
-def get_saved_values(
+def solve_min_cut(
     joint_graph: fx.Graph,
     node_info: NodeInfo,
     min_cut_options: MinCutOptions,
@@ -1420,7 +1417,14 @@ def estimate_runtime(node):
 
             shape = [realize_symbol(s) for s in shape]
             return x.meta["val"].new_zeros(shape)
-        return x
+        elif isinstance(x, fx.Node) and isinstance(x.meta["val"], torch.SymInt):
+            return hint_int(x.meta["val"], fallback=4096)
+        elif isinstance(x, fx.Node) and isinstance(x.meta["val"], torch.SymFloat):
+            return 1.0
+        elif isinstance(x, fx.Node) and isinstance(x.meta["val"], torch.SymBool):
+            return True
+        else:
+            return x
 
     if RUNTIME_MODE == "testing":
         return 1
@@ -1472,7 +1476,7 @@ def choose_saved_values_set(
     if memory_budget == 0:
         return node_info.inputs
 
-    runtime_optimized_saved_values, _ = get_saved_values(
+    runtime_optimized_saved_values, _ = solve_min_cut(
         joint_graph,
         node_info,
         min_cut_options,
@@ -1504,7 +1508,7 @@ def choose_saved_values_set(
         ban_if_long_fusible_chains=False,
         ban_if_materialized_backward=False,
     )
-    more_aggressive_saved_values, _ = get_saved_values(
+    more_aggressive_saved_values, _ = solve_min_cut(
         joint_graph, node_info, more_aggressive_options
     )
     if get_mem_ratio(more_aggressive_saved_values) < memory_budget:
@@ -1514,7 +1518,7 @@ def choose_saved_values_set(
         more_aggressive_options,
         ban_if_not_in_allowlist=False,
     )
-    aggressive_recomputation_saved_values, banned_nodes = get_saved_values(
+    aggressive_recomputation_saved_values, banned_nodes = solve_min_cut(
         joint_graph, node_info, aggressive_options
     )
 
@@ -1569,7 +1573,7 @@ def choose_saved_values_set(
             dont_ban.add(all_recomputable_banned_nodes[idx])
         assert dont_ban.issubset(all_recomputable_banned_nodes)
 
-        saved_values, _ = get_saved_values(
+        saved_values, _ = solve_min_cut(
             joint_graph,
             node_info,
             aggressive_options,
