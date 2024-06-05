@@ -5065,8 +5065,8 @@ def forward(self, primals_1, primals_2):
             return nt.cos()
 
         torch.compile(fn)(gen_nt(19))
+        # should not error
         torch.compile(fn)(gen_nt(20))
->>>>>>> b5de2c4211f (fix)
 
 
 instantiate_parametrized_tests(ReproTests)
