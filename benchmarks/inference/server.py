@@ -187,8 +187,9 @@ class BackendWorker:
     def _setup(self):
         import time
 
-        import torch
         from torchvision.models.resnet import BasicBlock, ResNet
+
+        import torch
 
         # Create ResNet18 on meta device
         with torch.device("meta"):

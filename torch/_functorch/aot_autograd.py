@@ -2,7 +2,7 @@
 
 import itertools
 from contextlib import contextmanager, nullcontext
-from functools import wraps
+from functools import partial, wraps
 from typing import Any, Callable, Dict, List, Optional, Tuple
 from unittest.mock import patch
 
@@ -23,10 +23,6 @@ from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 from . import config
 from ._aot_autograd.collect_metadata_analysis import (  # noqa: F401
     run_functionalized_fw_and_collect_metadata,
-)
-from ._aot_autograd.dispatch_and_compile_graph import (  # noqa: F401
-    aot_dispatch_autograd_graph,
-    aot_dispatch_base_graph,
 )
 from ._aot_autograd.functional_utils import (  # noqa: F401
     _check_if_mutation_can_be_in_graph,
@@ -51,6 +47,7 @@ from ._aot_autograd.input_output_analysis import (  # noqa: F401
 from ._aot_autograd.jit_compile_runtime_wrappers import (  # noqa: F401
     aot_dispatch_autograd,
     aot_dispatch_base,
+    aot_dispatch_export,
 )
 from ._aot_autograd.logging_utils import (  # noqa: F401
     callback_set,
@@ -423,7 +420,7 @@ aot_autograd_decompositions = {}
 @dynamo_timed
 def create_aot_dispatcher_function(
     flat_fn, flat_args: List[Any], aot_config: AOTConfig
-):
+) -> Tuple[Callable, ViewAndMutationMeta]:
     """
     Traces the forward and backward graphs of the attr:`flat_fn` to generate a
     joint graph. The joint graph is an Fx graph with Aten ops. Please refer to
@@ -496,6 +493,12 @@ def create_aot_dispatcher_function(
                         return shape_env.create_symintnode(
                             shape_env.create_symbol(x, source), hint=x, source=source
                         )
+                if isinstance(
+                    x, torch.ScriptObject
+                ) and torch._library.fake_class_registry.has_fake_class(
+                    x._type().qualified_name()
+                ):
+                    return torch._library.fake_class_registry.to_fake_obj(fake_mode, x)
                 if not isinstance(x, torch.Tensor):
                     return x
                 if isinstance(x, FakeTensor):
@@ -512,10 +515,14 @@ def create_aot_dispatcher_function(
                 # see note [Tensor Fakification and Symbol Caching]
                 symbolic_context = None
                 source = None
+                trace = True
                 if tracing_context := torch._guards.TracingContext.try_get():
                     if x in tracing_context.tensor_to_context:
                         symbolic_context = tracing_context.tensor_to_context[x]
                         source = symbolic_context.tensor_source
+                        # We already fakeified this tensor in Dynamo, don't
+                        # dump the trace for it again
+                        trace = False
                 if (
                     idx < aot_config.num_params_buffers
                     and config.static_weight_shapes
@@ -530,6 +537,7 @@ def create_aot_dispatcher_function(
                     static_shapes=False,
                     symbolic_context=symbolic_context,
                     source=source,
+                    trace=trace,
                 )
 
             return [convert(idx, x) for idx, x in enumerate(flat_args)]
@@ -593,6 +601,7 @@ def create_aot_dispatcher_function(
                             subclass_fw_graph_out_meta=fw_metadata.subclass_fw_graph_out_meta,
                             subclass_tangent_meta=fw_metadata.subclass_tangent_meta,
                             is_train=needs_autograd,
+                            tokens=fw_metadata.tokens,
                         )
 
         if fw_metadata.num_intermediate_bases > 0:
@@ -651,54 +660,25 @@ Functionalized RNG is not currently supported in the aot_export workflow. Please
 or otherwise set torch._functorch.config.functionalize_rng_ops = False."""
                 )
 
-        # crappy version of dispatcher
-        # TODO: Do this properly
-        if needs_autograd and not aot_config.pre_dispatch:
-            # For now, aot_dispatch_autograd knows to explicitly return a graph
-            # when run with export, and an opaque callable otherwise.
-            # In theory we could factor these out, but I wanted to let the dust
-            # settle on how functionalized rng fits into export first.
-            compiler_fn = (
-                aot_dispatch_autograd_graph
-                if aot_config.is_export
-                else aot_dispatch_autograd
-            )
-        else:
-            # aot_dispatch_base_graph contains only the "graph bits", while aot_dispatch_base
-            # includes some extra work around handling a runtime epilogue.
-            compiler_fn = (
-                aot_dispatch_base_graph if aot_config.is_export else aot_dispatch_base
-            )
+        def choose_dispatcher(needs_autograd, aot_config):
+            """
+            Pick a dispatcher based on the config rules.
+            """
+            if aot_config.is_export:
+                # export uses just the "graph bits", whereas the other
+                # two dispatchers include some extra work around handling a runtime epilogue
+                return partial(aot_dispatch_export, needs_autograd=needs_autograd)
+            elif needs_autograd and not aot_config.pre_dispatch:
+                return aot_dispatch_autograd
+            else:
+                return aot_dispatch_base
 
-        # Wrappers that edit fw_metadata
-        fw_metadata_wrappers = [
-            AOTDedupeWrapper(),
-            AOTSyntheticBaseWrapper(trace_joint=needs_autograd),
-            # Add more passes here
-        ]
-        for wrapper in fw_metadata_wrappers:
-            flat_fn, fake_flat_args, fw_metadata = wrapper.pre_compile(
-                flat_fn, fake_flat_args, aot_config, fw_metadata=fw_metadata
-            )
-        # Once all fw_metadata_wrappers have run, runtime_metadata is fixed
-        runtime_metadata = fw_metadata
+        compiler_fn = choose_dispatcher(needs_autograd, aot_config)
 
-        compiled_fn = compiler_fn(
-            flat_fn, fake_flat_args, aot_config, fw_metadata=runtime_metadata
+        compiled_fn, fw_metadata = compiler_fn(
+            flat_fn, fake_flat_args, aot_config, fw_metadata=fw_metadata
         )
-
-        for wrapper in reversed(fw_metadata_wrappers):
-            compiled_fn = wrapper.post_compile(
-                compiled_fn, aot_config, runtime_metadata=runtime_metadata
-            )
-
-        if aot_config.is_export:
-            # During export, we don't get back a callable - we get back the raw fx graph
-            # (either a joint or an inference-only graph)
-            assert isinstance(compiled_fn, torch.fx.GraphModule)
-            return compiled_fn, fw_metadata
-
-        return compiled_fn
+        return compiled_fn, fw_metadata
 
 
 def aot_function(
@@ -798,7 +778,7 @@ def aot_function(
         if cached_res is None:
             flat_fn, out_spec = create_tree_flattened_fn(fn, args, kwargs)
 
-            compiled_fn = create_aot_dispatcher_function(
+            compiled_fn, _ = create_aot_dispatcher_function(
                 flat_fn,
                 flat_args,
                 aot_config,
@@ -962,7 +942,7 @@ def aot_module_simplified(
     )
 
     with compiled_autograd.disable():
-        compiled_fn = create_aot_dispatcher_function(
+        compiled_fn, _ = create_aot_dispatcher_function(
             functional_call,
             full_args,
             aot_config,

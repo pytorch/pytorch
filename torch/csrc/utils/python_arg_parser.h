@@ -77,8 +77,6 @@
 #include <c10/core/DispatchKeySet.h>
 #include <array>
 #include <cstddef>
-#include <memory>
-#include <sstream>
 #include <string>
 #include <vector>
 
@@ -224,6 +222,7 @@ struct PythonArgs {
 
   int idx;
   bool traceable;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
   const FunctionSignature& signature;
   PyObject** args;
   std::vector<PyObject*> overloaded_args; // NOTE: borrowed references
@@ -347,6 +346,7 @@ struct FunctionParameter {
     at::ScalarType default_scalartype;
     at::Layout default_layout;
   };
+  std::string default_value;
 };
 
 template <int N>
@@ -503,7 +503,7 @@ inline std::vector<int64_t> PythonArgs::intlist(int i) {
   return intlistWithDefault(i, signature.params[i].default_intlist);
 }
 
-inline PyObject* toPyObject(c10::SymInt symint) {
+inline PyObject* toPyObject(const c10::SymInt& symint) {
   if (symint.is_symbolic()) {
     auto r = py::cast(symint).release().ptr();
     TORCH_INTERNAL_ASSERT(r);

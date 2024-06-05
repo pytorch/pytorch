@@ -28,6 +28,14 @@ IF(NOT MKLDNN_FOUND)
     endif()
 
     set(DNNL_MAKE_COMMAND "cmake" "--build" ".")
+    include(ProcessorCount)
+    ProcessorCount(proc_cnt)
+    if ((DEFINED ENV{MAX_JOBS}) AND ("$ENV{MAX_JOBS}" LESS_EQUAL ${proc_cnt}))
+      list(APPEND DNNL_MAKE_COMMAND "-j" "$ENV{MAX_JOBS}")
+      if(CMAKE_GENERATOR MATCHES "Make|Ninja")
+        list(APPEND DNNL_MAKE_COMMAND "--" "-l" "$ENV{MAX_JOBS}")
+      endif()
+    endif()
     ExternalProject_Add(xpu_mkldnn_proj
       SOURCE_DIR ${MKLDNN_ROOT}
       PREFIX ${XPU_MKLDNN_DIR_PREFIX}
@@ -101,7 +109,7 @@ IF(NOT MKLDNN_FOUND)
   IF(NOT MKLDNN_CPU_RUNTIME)
     SET(MKLDNN_CPU_RUNTIME "OMP" CACHE STRING "")
   ELSEIF(MKLDNN_CPU_RUNTIME STREQUAL "TBB")
-    IF(USE_TBB)
+    IF(TARGET TBB::tbb)
       MESSAGE(STATUS "MKL-DNN is using TBB")
 
       SET(TBB_cmake_included TRUE)

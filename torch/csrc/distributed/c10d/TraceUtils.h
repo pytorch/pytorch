@@ -9,6 +9,11 @@
 #include <torch/csrc/jit/serialization/pickler.h>
 #include <torch/csrc/profiler/combined_traceback.h>
 
+#ifdef USE_C10D_NCCL
+#include <ATen/cuda/CUDAEvent.h>
+#include <torch/csrc/distributed/c10d/NCCLUtils.hpp>
+#endif
+
 #include <sys/types.h>
 #include <cstdlib>
 #include <fstream>
