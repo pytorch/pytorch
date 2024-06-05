@@ -319,7 +319,13 @@ class TS2FXGraphConverter:
         output_name = node.output().debugName()
         self.name_to_node[output_name] = output_dict
 
-    def convert_prim_Unpack(self, node: torch._C.Node):
+    def convert_prim_ListUnpack(self, node: torch._C.Node):
+        self._convert_prim_unpack_iterator(node)
+
+    def convert_prim_TupleUnpack(self, node: torch._C.Node):
+        self._convert_prim_unpack_iterator(node)
+
+    def _convert_prim_unpack_iterator(self, node: torch._C.Node):
         # Single input and multiple outputs for unpacking.
         for i, outp in enumerate(node.outputs()):
             outp_name = outp.debugName()
