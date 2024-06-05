@@ -124,6 +124,8 @@ select = [
     "PT025",
     "PT026",
     "PYI",
+    "Q003",  # avoidable escaped quote
+    "Q004",  # unnecessary escaped quote
     "RSE",
     "RUF008", # mutable dataclass default
     "RUF015", # access first ele in constant time

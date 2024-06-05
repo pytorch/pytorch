@@ -19,6 +19,7 @@ from torch.distributed._tensor import DTensor, init_device_mesh
 from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
     apply_activation_checkpointing,
 )
+from torch.distributed.checkpoint import state_dict as ptd_state_dict
 from torch.distributed.checkpoint.state_dict import (
     _patch_model_state_dict,
     _patch_optimizer_state_dict,
@@ -605,9 +606,11 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
             # Drop the states to simulate loading from rank0
             if dist.get_rank() > 0:
                 load_states = {}
+                load_states2 = {}
                 load_optim_states = {}
             else:
                 load_states = copy.deepcopy(states)
+                load_states2 = copy.deepcopy(states)
                 load_optim_states = copy.deepcopy(optim_states)
 
             set_model_state_dict(
@@ -625,7 +628,21 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
                     broadcast_from_rank0=True, full_state_dict=True
                 ),
             )
+
             check(equal=True)
+            # Verify the `strict` flag.
+            load_states = load_states2
+            if load_states:
+                key = next(iter(load_states.keys()))
+                load_states.pop(key)
+            with self.assertRaisesRegex(RuntimeError, "Missing key"):
+                set_model_state_dict(
+                    fsdp_model,
+                    model_state_dict=load_states,
+                    options=StateDictOptions(
+                        broadcast_from_rank0=True, full_state_dict=True
+                    ),
+                )
 
         device_mesh = init_device_mesh("cuda", (self.world_size,))
         self.run_subtests(
@@ -650,6 +667,49 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
         fsdp_optim = torch.optim.Adam(fsdp_model.parameters())
         get_model_state_dict(fsdp_model)
         get_optimizer_state_dict(fsdp_model, fsdp_optim)
+
+    @with_comms
+    @skip_if_lt_x_gpu(2)
+    def test_optim_state_dict_param_matching(self) -> None:
+        # This test verifies parameters between optim and optim_state_dict
+        # "initial_lr" is added to optim_state_dict, but not to the new optim
+        # We test whether "initial_lr" appear in optim after
+        # set_optimizer_state_dict.
+        device = "cuda"
+        torch.manual_seed(0)
+        model = nn.Sequential(
+            *[nn.Linear(4, 4, device=device, bias=False) for _ in range(2)]
+        )
+        for layer in model:
+            fully_shard(layer)
+        fully_shard(model)
+        optim = torch.optim.Adam(model.parameters(), lr=1e-2)
+        torch.optim.lr_scheduler.LambdaLR(
+            optim, lr_lambda=[lambda epoch: 0.95**epoch]
+        )
+        opt_state_dict = ptd_state_dict.get_optimizer_state_dict(
+            model,
+            optim,
+            options=ptd_state_dict.StateDictOptions(
+                full_state_dict=True, cpu_offload=True
+            ),
+        )
+        if dist.get_rank() == 0:
+            self.assertTrue("initial_lr" in opt_state_dict["param_groups"][0])
+
+        optim = torch.optim.Adam(model.parameters(), lr=1e-2)
+        self.assertTrue("initial_lr" not in optim.param_groups[0])
+
+        ptd_state_dict.set_optimizer_state_dict(
+            model,
+            optim,
+            optim_state_dict=opt_state_dict,
+            options=ptd_state_dict.StateDictOptions(
+                broadcast_from_rank0=True, full_state_dict=True
+            ),
+        )
+        if dist.get_rank() == 0:
+            self.assertTrue("initial_lr" in optim.param_groups[0])
 
     @with_comms
     @skip_if_lt_x_gpu(2)
