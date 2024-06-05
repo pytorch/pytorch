@@ -115,7 +115,9 @@ activation_memory_budget_runtime_estimator = "flops"
 activation_memory_budget_solver = "dp"
 
 # This dumps out a png visualization of the expected runtime vs. activation
-# memory tradeoffs for all memory budget values from 0 to 1 in increments of 0.5
+# memory tradeoffs for all memory budget values from 0 to 1 in increments of
+# 0.5. See an example here:
+# https://github.com/pytorch/pytorch/pull/126320#discussion_r1625104015
 visualize_memory_budget_pareto = (
     os.environ.get("PARTITIONER_MEMORY_BUDGET_PARETO", "0") == "1"
 )
