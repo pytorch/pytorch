@@ -2,8 +2,17 @@ import math
 import torch
 import operator
 from collections import defaultdict
-from .utils import flatten_arg_list, propagate_node_meta
 from torch._prims_common import make_contiguous_strides_for
+
+
+def _flatten_arg_list(args):
+    flat_args = []
+    for arg in args:
+        if isinstance(arg, (list, tuple)):
+            flat_args.extend(_flatten_arg_list(arg))
+        else:
+            flat_args.append(arg)
+    return flat_args
 
 
 def _collect_primal_inputs_used_by_set_op(node_list):
