@@ -14,7 +14,6 @@ import torch.utils._pytree as pytree
 from torch._guards import Source
 from torch._subclasses import FakeTensor
 from torch._subclasses.fake_tensor import is_fake
-from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 
 from .. import config
 
@@ -445,32 +444,6 @@ class ViewAndMutationMeta:
         # which tensors to be saved for the bwd graph.  num_forward captures
         # this information.
         self.num_forward = self.num_forward_returns + self.num_outputs_rng_offset
-        self.cache_safe = False
-
-    def make_cache_safe(self):
-        """
-        There are various fields in ViewAndMutationMeta that aren't serializable. This function is called after all tracing
-        is completed to simplify certain fields in the metadata so that they can be safely cached.
-
-        Doing so may lose information (in the case of traced_tangents), but none of the information is needed at runtime.
-        """
-        # TODO: This function is only a best effort: there are other fields that may not be cache safe
-        # (i.e., there's no guarantee that tensor_flatten() returns a serializable result), or that
-        # SubclassCreationMeta is cache safe.
-        assert not self.cache_safe
-        traced_tangent_metadata = []
-
-        def extract_metadata(t):
-            if isinstance(t, torch.Tensor) and is_traceable_wrapper_subclass(t):
-                (inner_tensors, flatten_spec) = t.__tensor_flatten__()  # type: ignore[attr-defined]
-                return (inner_tensors, flatten_spec)
-            else:
-                return None
-
-        self.traced_tangents = [
-            extract_metadata(t) for t in self.traced_tangents
-        ]
-        self.cache_safe = True
 
     @property
     def tensors_saved_for_backwards_slice(self):
@@ -749,9 +722,6 @@ class AOTConfig:
     enable_log: bool = True
     # this is always false outside of export.
     pre_dispatch: bool = False
-
-    # Key to use for AOTAutogradCache
-    cache_key: Optional[str] = None
 
     def __post_init__(self):
         if self.pre_dispatch:

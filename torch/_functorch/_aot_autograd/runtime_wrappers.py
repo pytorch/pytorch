@@ -1373,14 +1373,14 @@ class AOTDispatchAutograd:
 
     # See Note [Tangents must be contiguous, Part 2]
     @staticmethod
-    def coerce_runtime_tangent(x, metadata):
+    def coerce_runtime_tangent(x, metadata_tensor):
         if not isinstance(x, torch.Tensor):
             return x
         if not is_traceable_wrapper_subclass(x):
             return x
-        assert metadata is not None
-        (_, expected_tangent_metadata) = metadata
+        assert is_traceable_wrapper_subclass(metadata_tensor)
         _, runtime_tangent_metadata = x.__tensor_flatten__()  # type: ignore[attr-defined]
+        _, expected_tangent_metadata = metadata_tensor.__tensor_flatten__()
         if runtime_tangent_metadata == expected_tangent_metadata:
             return x
         if not hasattr(x, "__coerce_same_metadata_as_tangent__"):
@@ -1397,7 +1397,7 @@ shape: {str(x.shape)}
 To fix this, your tensor subclass must implement the dunder method __force_to_same_metadata__.
 """
             )
-        return x.__coerce_same_metadata_as_tangent__(expected_tangent_metadata)  # type: ignore[attr-defined]
+        return x.__coerce_same_metadata_as_tangent__(metadata_tensor)  # type: ignore[attr-defined]
 
     @staticmethod
     def post_compile(
@@ -1412,7 +1412,6 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
         aot_config: AOTConfig,
         *,
         fw_metadata: ViewAndMutationMeta,  # runtime metadata
-        try_save_cache_entry: Optional[Callable],  # Save cache entry after compilation
     ):
         class CompiledFunction(torch.autograd.Function):
             compiled_fw = compiled_fw_func
@@ -1762,11 +1761,7 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
 
                 def call_compiled_backward():
                     if ctx._is_compiled_autograd_tracing():
-                        if lazy_backward_info is None:
-                            raise RuntimeError(
-                                """This compiled backward function was saved by AOTAutogradCache, which does not support
-                            compiled autograd. Please turn off AOTAutogradCache to continue."""
-                            )
+                        assert lazy_backward_info is not None
                         bw_module = lazy_backward_info.bw_module
                         # For compiled autograd, run raw FX graph so that it can be inlined into the larger graph
                         symints = ctx._get_compiled_autograd_symints()
@@ -1807,9 +1802,6 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                             CompiledFunction.compiled_bw = aot_config.bw_compiler(
                                 bw_module, placeholder_list
                             )
-                            # Maybe save cache entry
-                            if try_save_cache_entry is not None:
-                                try_save_cache_entry(CompiledFunction.compiled_bw)
 
                     out = call_func_at_runtime_with_args(
                         CompiledFunction.compiled_bw,
