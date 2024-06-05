@@ -121,9 +121,7 @@ class TestBinaryUfuncs(TestCase):
         def _helper_reference_numerics(
             expected, actual, msg, exact_dtype, equal_nan=True
         ):
-            if not torch.can_cast(
-                numpy_to_torch_dtype_dict[expected.dtype.type], dtype
-            ):
+            if not torch.can_cast(numpy_to_torch_dtype_dict[expected.dtype], dtype):
                 exact_dtype = False
 
             if dtype is torch.bfloat16 and expected.dtype == np.float32:
