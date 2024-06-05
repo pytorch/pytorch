@@ -175,6 +175,11 @@ def wrap_tensor_subclasses(
 ) -> Tuple[Any, ...]:
     wrapped_args = []
     num_args_tallied = 0
+    num_args = sum(
+        1 if isinstance(meta, int) else meta.arg_count for meta in subclass_metas
+    )
+    count_extra = len(unwrapped_args) > num_args
+    extra_args = 0
     for subclass_meta in subclass_metas:
         if isinstance(subclass_meta, int):
             wrapped_args.append(unwrapped_args[subclass_meta])
@@ -185,6 +190,10 @@ def wrap_tensor_subclasses(
                 subclass_meta.creation_fn(unwrapped_args, is_runtime=is_runtime)
             )
             num_args_tallied += subclass_meta.arg_count
+            if count_extra:
+                extra_args += len(
+                    [x for x in subclass_meta.outer_size if isinstance(x, SymInt)]
+                )
 
     # Note: [Partitioner handling for Subclasses, Part 2]
     # At the beginning of AOTAutograd, we collect metadata on the inputs and outputs of the user fw,
@@ -220,7 +229,7 @@ def wrap_tensor_subclasses(
             return wrapped_args + activations
         return tuple(list(wrapped_args) + list(activations))
     else:
-        # assert len(unwrapped_args) == num_args_tallied
+        assert len(unwrapped_args) == num_args_tallied + extra_args
         return tuple(wrapped_args)
 
 
