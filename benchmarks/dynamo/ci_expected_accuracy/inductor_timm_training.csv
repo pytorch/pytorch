@@ -6,7 +6,7 @@ adv_inception_v3,pass,6
 
 
 
-beit_base_patch16_224,pass,7
+beit_base_patch16_224,fail_accuracy,7
 
 
 
