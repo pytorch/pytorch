@@ -7905,15 +7905,6 @@
   autogen: set, set.out
   tags: inplace_view
 
-- func: _unsafe_set_storage_(Tensor(a!) self, Storage source) -> Tensor(a!)
-  variants: method
-  device_check: NoCheck
-  device_guard: False
-  tags: inplace_view
-  dispatch:
-    CPU, CUDA, Meta, MPS, NestedTensorCPU, NestedTensorCUDA, NestedTensorMeta: _unsafe_set_storage_
-  autogen: _unsafe_set_storage, _unsafe_set_storage.out
-
 # Not making it CompositeImplicitAutograd because lift
 # should be a primitive w.r.t. functorch
 
