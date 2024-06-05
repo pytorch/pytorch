@@ -7,7 +7,6 @@
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #else
-#include <ATen/ops/_apply_cow.h>
 #include <ATen/ops/_has_same_storage_numel_native.h>
 #include <ATen/ops/_make_dual_native.h>
 #include <ATen/ops/_new_zeros_with_same_feature_meta_native.h>
@@ -93,7 +92,12 @@ bool _has_same_storage_numel(const at::Tensor& base, const at::Tensor& other) {
 }
 
 Tensor _lazy_clone(Tensor const& self) {
-  return self.view_symint(self.sym_sizes())._apply_cow_();
+  Tensor res = self.view_symint(self.sym_sizes());
+  StorageImpl* storage_impl = res.unsafeGetTensorImpl()->storage().unsafeGetStorageImpl();
+  c10::Storage new_storage = c10::impl::cow::lazy_clone_storage(*storage_impl);
+  TORCH_INTERNAL_ASSERT(new_storage.sym_nbytes() == storage_impl->sym_nbytes());
+  res.unsafeGetTensorImpl()->set_storage_keep_dtype(new_storage);
+  return res;
 }
 
 } // namespace at::native

@@ -13,6 +13,7 @@ import warnings
 import zipfile
 from pathlib import Path
 from typing import Dict, Optional, Any
+from typing_extensions import deprecated
 from urllib.error import HTTPError, URLError
 from urllib.request import urlopen, Request
 from urllib.parse import urlparse  # noqa: F401
@@ -233,7 +234,7 @@ def _get_cache_or_reload(github, force_reload, trust_repo, calling_fn, verbose=T
 
         try:
             url = _git_archive_link(repo_owner, repo_name, ref)
-            sys.stderr.write(f'Downloading: \"{url}\" to {cached_file}\n')
+            sys.stderr.write(f'Downloading: "{url}" to {cached_file}\n')
             download_url_to_file(url, cached_file, progress=False)
         except HTTPError as err:
             if err.code == 300:
@@ -680,10 +681,13 @@ def _is_legacy_zip_format(filename: str) -> bool:
     return False
 
 
+@deprecated(
+    'Falling back to the old format < 1.6. This support will be '
+    'deprecated in favor of default zipfile format introduced in 1.6. '
+    'Please redo torch.save() to save it in the new zipfile format.',
+    category=FutureWarning,
+)
 def _legacy_zip_load(filename: str, model_dir: str, map_location: MAP_LOCATION, weights_only: bool) -> Dict[str, Any]:
-    warnings.warn('Falling back to the old format < 1.6. This support will be '
-                  'deprecated in favor of default zipfile format introduced in 1.6. '
-                  'Please redo torch.save() to save it in the new zipfile format.')
     # Note: extractall() defaults to overwrite file if exists. No need to clean up beforehand.
     #       We deliberately don't handle tarfile here since our legacy serialization format was in tar.
     #       E.g. resnet18-5c106cde.pth which is widely used.

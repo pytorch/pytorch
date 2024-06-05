@@ -1306,7 +1306,6 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch._C.unify_type_list",
         "torch._C.vitals_enabled",
         "torch._C.wait",
-        "torch._apply_cow_",
         "torch._cast_Byte",
         "torch._cast_Char",
         "torch._cast_Double",

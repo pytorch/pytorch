@@ -1347,15 +1347,18 @@ def forward(self, crop_camera_1, mask_1):
     sym_size_int = torch.ops.aten.sym_size.int(index, 0)
     expand = torch.ops.aten.expand.default(eye, [sym_size_int, 3, 3])
     view = torch.ops.aten.view.default(expand, [sym_size_int, 3, 3]);  expand = None
+    _lazy_clone = torch.ops.aten._lazy_clone.default(view);  view = None
     sym_size_int_1 = torch.ops.aten.sym_size.int(crop_camera_1, 1)
     sym_size_int_2 = torch.ops.aten.sym_size.int(crop_camera_1, 2)
     expand_1 = torch.ops.aten.expand.default(index, [sym_size_int, sym_size_int_1, sym_size_int_2]);  index = None
     view_1 = torch.ops.aten.view.default(expand_1, [sym_size_int, sym_size_int_1, sym_size_int_2]);  expand_1 = sym_size_int_1 = sym_size_int_2 = None
-    bmm = torch.ops.aten.bmm.default(view, view_1);  view = view_1 = None
+    _lazy_clone_1 = torch.ops.aten._lazy_clone.default(view_1);  view_1 = None
+    bmm = torch.ops.aten.bmm.default(_lazy_clone, _lazy_clone_1);  _lazy_clone = _lazy_clone_1 = None
     view_2 = torch.ops.aten.view.default(bmm, [sym_size_int, 3, 3]);  bmm = None
     mul = sym_size_int * 3
     view_3 = torch.ops.aten.view.default(view_2, [mul, 3]);  view_2 = mul = None
-    mm = torch.ops.aten.mm.default(view_3, eye);  view_3 = eye = None
+    _lazy_clone_2 = torch.ops.aten._lazy_clone.default(view_3);  view_3 = None
+    mm = torch.ops.aten.mm.default(_lazy_clone_2, eye);  _lazy_clone_2 = eye = None
     view_4 = torch.ops.aten.view.default(mm, [sym_size_int, 3, 3]);  mm = sym_size_int = None
     index_put_ = torch.ops.aten.index_put_.default(crop_camera_1, [mask_1], view_4);  crop_camera_1 = mask_1 = view_4 = None
     return None""")  # noqa: B950
@@ -2003,7 +2006,6 @@ symbolic_tensor_failures = {
     xfail('nn.functional.ctc_loss'),  # aten._ctc_loss.Tensor - couldn't find symbolic meta function/decomposition
     xfail('quantile', ''),  # Could not run 'aten::equal' with arguments from the 'Meta' backend.
     xfail('unique_consecutive', ''),  # aten.unique_consecutive.default - couldn't find symbolic meta function/decomposition
-    xfail('unique', ''),  # aten._unique2.default - couldn't find symbolic meta function/decomposition
 
     xfail('max_pool2d_with_indices_backward', ''),  # Expected a value of type 'List[int]' for argument 'kernel_size' but...
 
@@ -2034,8 +2036,6 @@ symbolic_tensor_failures.update(symbolic_tensor_segfaults)
 inplace_symbolic_tensor_failures = {
     # bugs
     xfail('float_power', ''),  # base given to float_power_ has dtype Float but the operation's result requires dtype Double
-    # decomp not implemented
-    xfail('unique', ''),
 }
 
 out_symbolic_tensor_failures = {

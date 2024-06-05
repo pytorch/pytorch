@@ -31,13 +31,11 @@
 #include <c10/util/SmallVector.h>
 #include <c10/util/accumulate.h>
 #include <c10/util/irange.h>
-#include <c10/core/impl/COW.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #else
-#include <ATen/ops/_apply_cow.h>
 #include <ATen/ops/_chunk_cat_native.h>
 #include <ATen/ops/_conj_copy_native.h>
 #include <ATen/ops/_convert_indices_from_coo_to_csr.h>
@@ -45,6 +43,7 @@
 #include <ATen/ops/_foreach_copy.h>
 #include <ATen/ops/_fw_primal_copy_native.h>
 #include <ATen/ops/_indices_copy_native.h>
+#include <ATen/ops/_lazy_clone.h>
 #include <ATen/ops/_make_dual.h>
 #include <ATen/ops/_make_dual_copy_native.h>
 #include <ATen/ops/_mkldnn_reshape.h>
@@ -1637,7 +1636,7 @@ Tensor reshape_symint(const Tensor& self, c10::SymIntArrayRef proposed_shape) {
   }
 
   if (self.is_contiguous() && !self.is_mkldnn()) {
-    return self.view_symint(proposed_shape)._apply_cow_();
+    return self.view_symint(proposed_shape)._lazy_clone();
   }
 
   c10::SymDimVector shape = infer_size_dv(proposed_shape, self.sym_numel());
@@ -1668,9 +1667,9 @@ Tensor reshape_symint(const Tensor& self, c10::SymIntArrayRef proposed_shape) {
     // We need to do the checks here instead of in `native_functions.yaml`
     // to preserve backwards compatibility.
     if (!self.is_xla() && !self.is_lazy() && !self.is_ipu() && !at::isTensorSubclassLike(self)) {
-      return self._reshape_alias_symint(shape, stride.value())._apply_cow_();
+      return self._reshape_alias_symint(shape, stride.value())._lazy_clone();
     } else {
-      return self.view_symint(shape)._apply_cow_();
+      return self.view_symint(shape)._lazy_clone();
     }
   }
   return at::_unsafe_view_symint(self.clone(at::MemoryFormat::Contiguous), shape);
@@ -1727,9 +1726,9 @@ Tensor reshape(const Tensor& self, IntArrayRef proposed_shape) {
     // We need to do the checks here instead of in `native_functions.yaml`
     // to preserve backwards compatibility.
     if (!self.is_xla() && !self.is_lazy() && !self.is_ipu()) {
-      return self._reshape_alias(shape, stride.value())._apply_cow_();
+      return self._reshape_alias(shape, stride.value())._lazy_clone();
     } else {
-      return self.view(shape)._apply_cow_();
+      return self.view(shape)._lazy_clone();
     }
   }
   return at::_unsafe_view(self.clone(at::MemoryFormat::Contiguous), shape);

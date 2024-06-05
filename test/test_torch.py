@@ -95,12 +95,22 @@ def torch_vital_set(value):
             del os.environ['TORCH_VITAL']
 
 @contextlib.contextmanager
-def assertNoWarning():
+def assertNoLeakedLazyCloneWarnings():
+    patterns = [
+        ".*creates a conditional view",
+        ".*first write",
+        ".*divergent behavior",
+    ]
     with warnings.catch_warnings(record=True) as w:
+        warnings.filterwarnings('ignore')
+        for pattern in patterns:
+            warnings.filterwarnings('always', pattern)
         try:
             yield
         finally:
-            assert len(w) == 0
+            assert len(w) == 0, (
+                'Expected no warnings related to lazy clone to leak, '
+                f'but got: {list(str(w_) for w_ in w)}')
 
 @contextlib.contextmanager
 def extraConditionalViewWarningsGuard(mode=False):
@@ -5157,7 +5167,7 @@ else:
         self.assertTrue(torch._C._data_address(clone) == orig_data_ptr)
 
     @dtypes(*all_types_and_complex_and(torch.half, torch.bfloat16))
-    @assertNoWarning()
+    @assertNoLeakedLazyCloneWarnings()
     @futureLazyCloneGuard(False)
     def test_simulate_lazy_clone(self, device, dtype):
         def init_tensors():
@@ -5214,10 +5224,8 @@ else:
             b[b0_ind] += 1
             b[b1_ind] += 1
 
-    @assertNoWarning()
+    @assertNoLeakedLazyCloneWarnings()
     @futureLazyCloneGuard(False)
-    # TODO: Figure out why this fails for inductor
-    @skipIfTorchInductor("FIXME")
     def test_simulate_lazy_clone_reshape(self, device):
         a = torch.randn(10, device=device)
         b = a.reshape(a.size())
@@ -5230,7 +5238,7 @@ else:
         b = a.reshape(a.size())
         self.assertTrue(b.requires_grad)
 
-    @assertNoWarning()
+    @assertNoLeakedLazyCloneWarnings()
     @extraConditionalViewWarningsGuard()
     @futureLazyCloneGuard(False)
     def test_simulate_lazy_clone_extra_warnings(self, device):
@@ -6324,8 +6332,8 @@ else:
         GradScaler = torch.cuda.amp.GradScaler if "cuda" == device.type else torch.cpu.amp.GradScaler
 
         with self.assertWarnsRegex(
-            UserWarning,
-            rf"torch.{device.type}.amp.GradScaler\(args...\) is deprecated.",
+            FutureWarning,
+            rf"`torch.{device.type}.amp.GradScaler\(args...\)` is deprecated.",
         ):
             _ = GradScaler(init_scale=2.0)
 
@@ -8523,7 +8531,7 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
     def test_iter(self) -> None:
         x = torch.randn(5, 5)
         for i, sub in enumerate(x):
-            self.assertEqual(sub, x[i])
+            self.assertEqual(sub, x[i])  # noqa: PLR1736
 
         x = torch.tensor([])
         self.assertEqual(list(x), [])
