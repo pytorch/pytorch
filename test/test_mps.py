@@ -436,6 +436,7 @@ def mps_ops_modifier(ops):
         'mv',
         'ne',
         'neg',
+        'nn.functional.conv3d',
         'nn.functional.padconstant',
         'nn.functional.padreflect',
         'nn.functional.padreplicate',
@@ -668,7 +669,7 @@ def mps_ops_modifier(ops):
     }
 
     MACOS_14_2_XFAILLIST = {
-        # This op works fine in 14.4 but fails in 14.2
+        # This op works fine in 14.4 m1 but fails in 14.2 m2
         'fft.hfft2': [torch.complex64],
     }
 
