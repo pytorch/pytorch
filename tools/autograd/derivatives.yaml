@@ -2852,7 +2852,7 @@
       self: unbind_backward(grads, dim)
       result: auto_linear
     AutogradNestedTensor:
-      self: unbind_backward_nested(grads, at::native::get_nested_tensor_impl(self)->get_nested_sizes(), dim, self.options())
+      self: "self.layout() == c10::kJagged ? unbind_backward_nested_jagged(grads, self, dim) : unbind_backward_nested(grads, at::native::get_nested_tensor_impl(self)->get_nested_sizes(), dim, self.options())"
       result: auto_linear
 
 - name: stack(Tensor[] tensors, int dim=0) -> Tensor
