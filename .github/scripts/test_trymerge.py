@@ -773,13 +773,13 @@ class TestBypassFailures(TestCase):
                 # than the one on the base commit. This should still count as broken trunk
                 "pr_num": 104214,
                 "related_failure_count": 0,
-                "unrelated_failure_count": 1,
+                "flaky_or_broken_trunk": 1,
             },
             {
                 # This PR had one broken trunk failure and it used ghstack
                 "pr_num": 105145,
                 "related_failure_count": 0,
-                "unrelated_failure_count": 1,
+                "flaky_or_broken_trunk": 1,
             },
             {
                 # The failure on the merge base was retried successfully and
@@ -788,20 +788,20 @@ class TestBypassFailures(TestCase):
                 # be used to detect broken trunk
                 "pr_num": 107160,
                 "related_failure_count": 0,
-                "unrelated_failure_count": 4,
+                "flaky_or_broken_trunk": 1,
             },
             {
                 # This PR used Dr.CI broken trunk classification
                 "pr_num": 111253,
                 "related_failure_count": 1,
-                "unrelated_failure_count": 2,
+                "flaky_or_broken_trunk": 1,
             },
         ]
 
         for case in test_cases:
             pr_num = case["pr_num"]
             related_failure_count = case["related_failure_count"]
-            unrelated_failure_count = case["unrelated_failure_count"]
+            flaky_or_broken_trunk = case["flaky_or_broken_trunk"]
 
             pr = GitHubPR("pytorch", "pytorch", pr_num)
             checks = pr.get_checkrun_conclusions()
@@ -823,7 +823,7 @@ class TestBypassFailures(TestCase):
             )
             self.assertTrue(len(pending) == 0)
             self.assertTrue(
-                len(failed) == unrelated_failure_count + related_failure_count
+                len(failed) == flaky_or_broken_trunk + related_failure_count
             )
 
     def test_ignore_current(self, *args: Any) -> None:

@@ -2065,7 +2065,7 @@ def categorize_checks(
             )
             target.append((checkname, url, job_id))
 
-            if classification in ("BROKEN_TRUNK", "FLAKY", "UNSTABLE"):
+            if classification in ("BROKEN_TRUNK", "FLAKY"):
                 ok_failed_checks.append((checkname, url, job_id))
 
     if ok_failed_checks:
