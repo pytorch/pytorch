@@ -84,7 +84,7 @@ install(TARGETS clog
 # ---[ clog tests
 if(CLOG_BUILD_TESTS)
   # ---[ Build google test
-  if(NOT TARGET gtest)
+  if(NOT TARGET GTest::gtest)
     if(MSVC AND NOT CLOG_RUNTIME_TYPE STREQUAL "static")
       set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
     endif()
@@ -98,6 +98,6 @@ if(CLOG_BUILD_TESTS)
     CXX_STANDARD 11
     CXX_EXTENSIONS NO)
   CLOG_TARGET_RUNTIME_LIBRARY(clog-test)
-  target_link_libraries(clog-test PRIVATE clog gtest gtest_main)
+  target_link_libraries(clog-test PRIVATE clog GTest::gtest GTest::gtest_main)
   add_test(clog-test clog-test)
 endif()

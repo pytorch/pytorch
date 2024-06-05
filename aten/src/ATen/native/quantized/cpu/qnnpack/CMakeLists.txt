@@ -438,7 +438,7 @@ install(TARGETS pytorch_qnnpack
 # ---[ QNNPACK unit tests
 if(PYTORCH_QNNPACK_BUILD_TESTS)
   # ---[ Build google test
-  if(NOT TARGET gtest)
+  if(NOT TARGET GTest::gtest)
     set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
     add_subdirectory(
       "${GOOGLETEST_SOURCE_DIR}"
@@ -452,7 +452,7 @@ if(PYTORCH_QNNPACK_BUILD_TESTS)
     CXX_STANDARD_REQUIRED YES
     CXX_EXTENSIONS NO)
   target_include_directories(convolution-test PRIVATE src test)
-  target_link_libraries(convolution-test PRIVATE pytorch_qnnpack clog cpuinfo fp16 gtest gtest_main)
+  target_link_libraries(convolution-test PRIVATE pytorch_qnnpack clog cpuinfo fp16 GTest::gtest GTest::gtest_main)
   add_test(convolution-test convolution-test)
 
   add_executable(deconvolution-test test/deconvolution.cc)
@@ -461,7 +461,7 @@ if(PYTORCH_QNNPACK_BUILD_TESTS)
     CXX_STANDARD_REQUIRED YES
     CXX_EXTENSIONS NO)
   target_include_directories(deconvolution-test PRIVATE src test)
-  target_link_libraries(deconvolution-test PRIVATE pytorch_qnnpack cpuinfo fp16 gtest gtest_main)
+  target_link_libraries(deconvolution-test PRIVATE pytorch_qnnpack cpuinfo fp16 GTest::gtest GTest::gtest_main)
   add_test(deconvolution-test deconvolution-test)
 
   add_executable(fully-connected-test test/fully-connected.cc)
@@ -470,7 +470,7 @@ if(PYTORCH_QNNPACK_BUILD_TESTS)
     CXX_STANDARD_REQUIRED YES
     CXX_EXTENSIONS NO)
   target_include_directories(fully-connected-test PRIVATE src test)
-  target_link_libraries(fully-connected-test PRIVATE pytorch_qnnpack clog cpuinfo fp16 gtest gtest_main)
+  target_link_libraries(fully-connected-test PRIVATE pytorch_qnnpack clog cpuinfo fp16 GTest::gtest GTest::gtest_main)
   add_test(fully-connected-test fully-connected-test)
 
   add_executable(fully-connected-sparse-test test/fully-connected-sparse.cc)
@@ -479,7 +479,7 @@ if(PYTORCH_QNNPACK_BUILD_TESTS)
     CXX_STANDARD_REQUIRED YES
     CXX_EXTENSIONS NO)
   target_include_directories(fully-connected-sparse-test PRIVATE src test)
-  target_link_libraries(fully-connected-sparse-test PRIVATE pytorch_qnnpack clog cpuinfo fp16 gtest gtest_main)
+  target_link_libraries(fully-connected-sparse-test PRIVATE pytorch_qnnpack clog cpuinfo fp16 GTest::gtest GTest::gtest_main)
   add_test(fully-connected-sparse-test fully-connected-sparse-test)
 
   add_executable(channel-shuffle-test test/channel-shuffle.cc)
@@ -488,7 +488,7 @@ if(PYTORCH_QNNPACK_BUILD_TESTS)
     CXX_STANDARD_REQUIRED YES
     CXX_EXTENSIONS NO)
   target_include_directories(channel-shuffle-test PRIVATE src test)
-  target_link_libraries(channel-shuffle-test PRIVATE pytorch_qnnpack cpuinfo gtest gtest_main)
+  target_link_libraries(channel-shuffle-test PRIVATE pytorch_qnnpack cpuinfo GTest::gtest GTest::gtest_main)
   add_test(channel-shuffle-test channel-shuffle-test)
 
   add_executable(add-test test/add.cc)
@@ -497,7 +497,7 @@ if(PYTORCH_QNNPACK_BUILD_TESTS)
     CXX_STANDARD_REQUIRED YES
     CXX_EXTENSIONS NO)
   target_include_directories(add-test PRIVATE src test)
-  target_link_libraries(add-test PRIVATE pytorch_qnnpack cpuinfo gtest gtest_main)
+  target_link_libraries(add-test PRIVATE pytorch_qnnpack cpuinfo GTest::gtest GTest::gtest_main)
   add_test(add-test add-test)
 
   add_executable(leaky-relu-test test/leaky-relu.cc)
@@ -506,7 +506,7 @@ if(PYTORCH_QNNPACK_BUILD_TESTS)
     CXX_STANDARD_REQUIRED YES
     CXX_EXTENSIONS NO)
   target_include_directories(leaky-relu-test PRIVATE src test)
-  target_link_libraries(leaky-relu-test PRIVATE pytorch_qnnpack cpuinfo gtest gtest_main)
+  target_link_libraries(leaky-relu-test PRIVATE pytorch_qnnpack cpuinfo GTest::gtest GTest::gtest_main)
   add_test(leaky-relu-test leaky-relu-test)
 
   add_executable(sigmoid-test test/sigmoid.cc)
@@ -515,7 +515,7 @@ if(PYTORCH_QNNPACK_BUILD_TESTS)
     CXX_STANDARD_REQUIRED YES
     CXX_EXTENSIONS NO)
   target_include_directories(sigmoid-test PRIVATE src test)
-  target_link_libraries(sigmoid-test PRIVATE pytorch_qnnpack cpuinfo gtest gtest_main)
+  target_link_libraries(sigmoid-test PRIVATE pytorch_qnnpack cpuinfo GTest::gtest GTest::gtest_main)
   add_test(sigmoid-test sigmoid-test)
 
   add_executable(clamp-test test/clamp.cc)
@@ -524,7 +524,7 @@ if(PYTORCH_QNNPACK_BUILD_TESTS)
     CXX_STANDARD_REQUIRED YES
     CXX_EXTENSIONS NO)
   target_include_directories(clamp-test PRIVATE src test)
-  target_link_libraries(clamp-test PRIVATE pytorch_qnnpack cpuinfo gtest gtest_main)
+  target_link_libraries(clamp-test PRIVATE pytorch_qnnpack cpuinfo GTest::gtest GTest::gtest_main)
   add_test(clamp-test clamp-test)
 
   add_executable(softargmax-test test/softargmax.cc)
@@ -533,7 +533,7 @@ if(PYTORCH_QNNPACK_BUILD_TESTS)
     CXX_STANDARD_REQUIRED YES
     CXX_EXTENSIONS NO)
   target_include_directories(softargmax-test PRIVATE src test)
-  target_link_libraries(softargmax-test PRIVATE pytorch_qnnpack cpuinfo gtest gtest_main)
+  target_link_libraries(softargmax-test PRIVATE pytorch_qnnpack cpuinfo GTest::gtest GTest::gtest_main)
   add_test(softargmax-test softargmax-test)
 
   add_executable(tanh-test test/tanh.cc)
@@ -542,7 +542,7 @@ if(PYTORCH_QNNPACK_BUILD_TESTS)
     CXX_STANDARD_REQUIRED YES
     CXX_EXTENSIONS NO)
   target_include_directories(tanh-test PRIVATE src test)
-  target_link_libraries(tanh-test PRIVATE pytorch_qnnpack cpuinfo gtest gtest_main)
+  target_link_libraries(tanh-test PRIVATE pytorch_qnnpack cpuinfo GTest::gtest GTest::gtest_main)
   add_test(tanh-test tanh-test)
 
   add_executable(hardsigmoid-test test/hardsigmoid.cc)
@@ -551,7 +551,7 @@ if(PYTORCH_QNNPACK_BUILD_TESTS)
     CXX_STANDARD_REQUIRED YES
     CXX_EXTENSIONS NO)
   target_include_directories(hardsigmoid-test PRIVATE src test)
-  target_link_libraries(hardsigmoid-test PRIVATE pytorch_qnnpack cpuinfo gtest gtest_main)
+  target_link_libraries(hardsigmoid-test PRIVATE pytorch_qnnpack cpuinfo GTest::gtest GTest::gtest_main)
   add_test(hardsigmoid-test hardsigmoid-test)
 
   add_executable(hardswish-test test/hardswish.cc)
@@ -560,7 +560,7 @@ if(PYTORCH_QNNPACK_BUILD_TESTS)
     CXX_STANDARD_REQUIRED YES
     CXX_EXTENSIONS NO)
   target_include_directories(hardswish-test PRIVATE src test)
-  target_link_libraries(hardswish-test PRIVATE pytorch_qnnpack cpuinfo gtest gtest_main)
+  target_link_libraries(hardswish-test PRIVATE pytorch_qnnpack cpuinfo GTest::gtest GTest::gtest_main)
   add_test(hardswish-test hardswish-test)
 
   add_executable(max-pooling-test test/max-pooling.cc)
@@ -569,7 +569,7 @@ if(PYTORCH_QNNPACK_BUILD_TESTS)
     CXX_STANDARD_REQUIRED YES
     CXX_EXTENSIONS NO)
   target_include_directories(max-pooling-test PRIVATE src test)
-  target_link_libraries(max-pooling-test PRIVATE pytorch_qnnpack cpuinfo gtest gtest_main)
+  target_link_libraries(max-pooling-test PRIVATE pytorch_qnnpack cpuinfo GTest::gtest GTest::gtest_main)
   add_test(max-pooling-test max-pooling-test)
 
   add_executable(average-pooling-test test/average-pooling.cc)
@@ -578,7 +578,7 @@ if(PYTORCH_QNNPACK_BUILD_TESTS)
     CXX_STANDARD_REQUIRED YES
     CXX_EXTENSIONS NO)
   target_include_directories(average-pooling-test PRIVATE src test)
-  target_link_libraries(average-pooling-test PRIVATE pytorch_qnnpack cpuinfo gtest gtest_main)
+  target_link_libraries(average-pooling-test PRIVATE pytorch_qnnpack cpuinfo GTest::gtest GTest::gtest_main)
   add_test(average-pooling-test average-pooling-test)
 
   add_executable(global-average-pooling-test test/global-average-pooling.cc)
@@ -587,7 +587,7 @@ if(PYTORCH_QNNPACK_BUILD_TESTS)
     CXX_STANDARD_REQUIRED YES
     CXX_EXTENSIONS NO)
   target_include_directories(global-average-pooling-test PRIVATE src test)
-  target_link_libraries(global-average-pooling-test PRIVATE pytorch_qnnpack cpuinfo gtest gtest_main)
+  target_link_libraries(global-average-pooling-test PRIVATE pytorch_qnnpack cpuinfo GTest::gtest GTest::gtest_main)
   add_test(global-average-pooling-test global-average-pooling-test)
 
   # ---[ Build unit tests for micro-kernels
@@ -597,7 +597,7 @@ if(PYTORCH_QNNPACK_BUILD_TESTS)
     CXX_STANDARD_REQUIRED YES
     CXX_EXTENSIONS NO)
   target_include_directories(q8gemm-test PRIVATE src test)
-  target_link_libraries(q8gemm-test PRIVATE pytorch_qnnpack cpuinfo fp16 gtest gtest_main)
+  target_link_libraries(q8gemm-test PRIVATE pytorch_qnnpack cpuinfo fp16 GTest::gtest GTest::gtest_main)
   add_test(q8gemm-test q8gemm-test)
 
   add_executable(q8gemm-sparse-test test/q8gemm_sparse.cc)
@@ -606,7 +606,7 @@ if(PYTORCH_QNNPACK_BUILD_TESTS)
     CXX_STANDARD_REQUIRED YES
     CXX_EXTENSIONS NO)
   target_include_directories(q8gemm-sparse-test PRIVATE src test)
-  target_link_libraries(q8gemm-sparse-test PRIVATE pytorch_qnnpack cpuinfo fp16 gtest gtest_main)
+  target_link_libraries(q8gemm-sparse-test PRIVATE pytorch_qnnpack cpuinfo fp16 GTest::gtest GTest::gtest_main)
   add_test(q8gemm-sparse-test q8gemm-sparse-test)
 
   add_executable(q8conv-test test/q8conv.cc)
@@ -615,7 +615,7 @@ if(PYTORCH_QNNPACK_BUILD_TESTS)
     CXX_STANDARD_REQUIRED YES
     CXX_EXTENSIONS NO)
   target_include_directories(q8conv-test PRIVATE src test)
-  target_link_libraries(q8conv-test PRIVATE pytorch_qnnpack cpuinfo fp16 gtest gtest_main)
+  target_link_libraries(q8conv-test PRIVATE pytorch_qnnpack cpuinfo fp16 GTest::gtest GTest::gtest_main)
   add_test(q8conv-test q8conv-test)
 
   add_executable(q8dwconv-test test/q8dwconv.cc)
@@ -624,7 +624,7 @@ if(PYTORCH_QNNPACK_BUILD_TESTS)
     CXX_STANDARD_REQUIRED YES
     CXX_EXTENSIONS NO)
   target_include_directories(q8dwconv-test PRIVATE src test)
-  target_link_libraries(q8dwconv-test PRIVATE pytorch_qnnpack cpuinfo fp16 gtest gtest_main)
+  target_link_libraries(q8dwconv-test PRIVATE pytorch_qnnpack cpuinfo fp16 GTest::gtest GTest::gtest_main)
   add_test(q8dwconv-test q8dwconv-test)
 
   add_executable(q8vadd-test test/q8vadd.cc)
@@ -633,7 +633,7 @@ if(PYTORCH_QNNPACK_BUILD_TESTS)
     CXX_STANDARD_REQUIRED YES
     CXX_EXTENSIONS NO)
   target_include_directories(q8vadd-test PRIVATE src test)
-  target_link_libraries(q8vadd-test PRIVATE pytorch_qnnpack cpuinfo fp16 gtest gtest_main)
+  target_link_libraries(q8vadd-test PRIVATE pytorch_qnnpack cpuinfo fp16 GTest::gtest GTest::gtest_main)
   add_test(q8vadd-test q8vadd-test)
 
   add_executable(q8avgpool-test test/q8avgpool.cc)
@@ -642,7 +642,7 @@ if(PYTORCH_QNNPACK_BUILD_TESTS)
     CXX_STANDARD_REQUIRED YES
     CXX_EXTENSIONS NO)
   target_include_directories(q8avgpool-test PRIVATE src test)
-  target_link_libraries(q8avgpool-test PRIVATE pytorch_qnnpack cpuinfo fp16 gtest gtest_main)
+  target_link_libraries(q8avgpool-test PRIVATE pytorch_qnnpack cpuinfo fp16 GTest::gtest GTest::gtest_main)
   add_test(q8avgpool-test q8avgpool-test)
 
   add_executable(q8gavgpool-test test/q8gavgpool.cc)
@@ -651,7 +651,7 @@ if(PYTORCH_QNNPACK_BUILD_TESTS)
     CXX_STANDARD_REQUIRED YES
     CXX_EXTENSIONS NO)
   target_include_directories(q8gavgpool-test PRIVATE src test)
-  target_link_libraries(q8gavgpool-test PRIVATE pytorch_qnnpack cpuinfo fp16 gtest gtest_main)
+  target_link_libraries(q8gavgpool-test PRIVATE pytorch_qnnpack cpuinfo fp16 GTest::gtest GTest::gtest_main)
   add_test(q8gavgpool-test q8gavgpool-test)
 
   add_executable(u8maxpool-test test/u8maxpool.cc)
@@ -660,7 +660,7 @@ if(PYTORCH_QNNPACK_BUILD_TESTS)
     CXX_STANDARD_REQUIRED YES
     CXX_EXTENSIONS NO)
   target_include_directories(u8maxpool-test PRIVATE src test)
-  target_link_libraries(u8maxpool-test PRIVATE pytorch_qnnpack cpuinfo fp16 gtest gtest_main)
+  target_link_libraries(u8maxpool-test PRIVATE pytorch_qnnpack cpuinfo fp16 GTest::gtest GTest::gtest_main)
   add_test(u8maxpool-test u8maxpool-test)
 
   add_executable(u8clamp-test test/u8clamp.cc)
@@ -669,7 +669,7 @@ if(PYTORCH_QNNPACK_BUILD_TESTS)
     CXX_STANDARD_REQUIRED YES
     CXX_EXTENSIONS NO)
   target_include_directories(u8clamp-test PRIVATE src test)
-  target_link_libraries(u8clamp-test PRIVATE pytorch_qnnpack cpuinfo fp16 gtest gtest_main)
+  target_link_libraries(u8clamp-test PRIVATE pytorch_qnnpack cpuinfo fp16 GTest::gtest GTest::gtest_main)
   add_test(u8clamp-test u8clamp-test)
 
   add_executable(u8rmax-test test/u8rmax.cc)
@@ -678,7 +678,7 @@ if(PYTORCH_QNNPACK_BUILD_TESTS)
     CXX_STANDARD_REQUIRED YES
     CXX_EXTENSIONS NO)
   target_include_directories(u8rmax-test PRIVATE src test)
-  target_link_libraries(u8rmax-test PRIVATE pytorch_qnnpack cpuinfo fp16 gtest gtest_main)
+  target_link_libraries(u8rmax-test PRIVATE pytorch_qnnpack cpuinfo fp16 GTest::gtest GTest::gtest_main)
   add_test(u8rmax-test u8rmax-test)
 
   add_executable(u8lut32norm-test test/u8lut32norm.cc)
@@ -687,7 +687,7 @@ if(PYTORCH_QNNPACK_BUILD_TESTS)
     CXX_STANDARD_REQUIRED YES
     CXX_EXTENSIONS NO)
   target_include_directories(u8lut32norm-test PRIVATE src test)
-  target_link_libraries(u8lut32norm-test PRIVATE pytorch_qnnpack cpuinfo fp16 gtest gtest_main)
+  target_link_libraries(u8lut32norm-test PRIVATE pytorch_qnnpack cpuinfo fp16 GTest::gtest GTest::gtest_main)
   add_test(u8lut32norm-test u8lut32norm-test)
 
   add_executable(x8lut-test test/x8lut.cc)
@@ -696,7 +696,7 @@ if(PYTORCH_QNNPACK_BUILD_TESTS)
     CXX_STANDARD_REQUIRED YES
     CXX_EXTENSIONS NO)
   target_include_directories(x8lut-test PRIVATE src test)
-  target_link_libraries(x8lut-test PRIVATE pytorch_qnnpack cpuinfo fp16 gtest gtest_main)
+  target_link_libraries(x8lut-test PRIVATE pytorch_qnnpack cpuinfo fp16 GTest::gtest GTest::gtest_main)
   add_test(x8lut-test x8lut-test)
 
   add_executable(x8zip-test test/x8zip.cc)
@@ -705,7 +705,7 @@ if(PYTORCH_QNNPACK_BUILD_TESTS)
     CXX_STANDARD_REQUIRED YES
     CXX_EXTENSIONS NO)
   target_include_directories(x8zip-test PRIVATE src test)
-  target_link_libraries(x8zip-test PRIVATE pytorch_qnnpack cpuinfo fp16 gtest gtest_main)
+  target_link_libraries(x8zip-test PRIVATE pytorch_qnnpack cpuinfo fp16 GTest::gtest GTest::gtest_main)
   add_test(x8zip-test x8zip-test)
 
   add_executable(hgemm-test test/hgemm.cc)
@@ -714,7 +714,7 @@ if(PYTORCH_QNNPACK_BUILD_TESTS)
     CXX_STANDARD_REQUIRED YES
     CXX_EXTENSIONS NO)
   target_include_directories(hgemm-test PRIVATE src test)
-  target_link_libraries(hgemm-test PRIVATE pytorch_qnnpack cpuinfo fp16 gtest gtest_main)
+  target_link_libraries(hgemm-test PRIVATE pytorch_qnnpack cpuinfo fp16 GTest::gtest GTest::gtest_main)
   add_test(hgemm-test hgemm-test)
 
   add_executable(sgemm-test test/sgemm.cc)
@@ -723,7 +723,7 @@ if(PYTORCH_QNNPACK_BUILD_TESTS)
     CXX_STANDARD_REQUIRED YES
     CXX_EXTENSIONS NO)
   target_include_directories(sgemm-test PRIVATE src test)
-  target_link_libraries(sgemm-test PRIVATE pytorch_qnnpack cpuinfo fp16 gtest gtest_main)
+  target_link_libraries(sgemm-test PRIVATE pytorch_qnnpack cpuinfo fp16 GTest::gtest GTest::gtest_main)
   add_test(sgemm-test sgemm-test)
 endif()
 
