@@ -272,17 +272,52 @@ def triton_reshape(value: str, old_shape: List[str], new_shape: List[str]):
     return f"{value}[{', '.join(expand)}]"
 
 
+# NB: Inheriting from PythonPrinter is somewhat dangerous, because there are a
+# number of operators which Triton "implements", but in a way that is
+# inconsistent with Python semantics (and consistent with C semantics).  We
+# must override all of these, or it is potential silent correctness problem
 class TritonPrinter(PythonPrinter):
+    def _print_TruncToInt(self, expr):
+        assert len(expr.args) == 1
+        return (
+            f"libdevice.trunc({self._print(expr.args[0])}).to({V.kernel.index_dtype})"
+        )
+
+    def _print_ToFloat(self, expr):
+        assert len(expr.args) == 1
+        return f"{self.paren(self._print(expr.args[0]))}.to(tl.float64)"
+
+    # TODO: This is wrong if one of the inputs is negative.  This is hard to
+    # tickle though, as the inputs are typically positive (and if we can prove
+    # they are positive, we will have used Mod instead, for which this codegen
+    # is right).  If you are trying to hit this, maybe try something like
+    # torch.arange(n, device="cuda") - 1 and then do a modulus on it
+    def _print_PythonMod(self, expr):
+        return " % ".join(map(self.paren, map(self._print, expr.args)))
+
+    # TODO: This is wrong, see
+    # https://github.com/triton-lang/triton/issues/955
+    # But for Sympy expressions, things will /mostly/ work out because we
+    # don't usually deal with negative numbers in the division
+    def _print_FloorDiv(self, expr):
+        assert expr.is_integer
+        x, div = expr.args
+        x = self.paren(self.doprint(x))
+        div = self.paren(self.doprint(div))
+        return f"({x} // {div})"
+
+    # TODO: This is wrong, when lhs, rhs > 2**53, Python does a higher
+    # precision algorithm, which we would need to replicate here
+    def _print_IntTrueDiv(self, expr):
+        lhs, rhs = expr.args
+        return f"{self.paren(self._print(lhs))} / {self.paren(self._print(rhs))}"
+
+    # NB: sympy.floor/ceiling produce integers, so we have to do the
+    # conversion to index dtype
     def _print_floor(self, expr):
         assert len(expr.args) == 1
         return (
             f"libdevice.floor({self._print(expr.args[0])}).to({V.kernel.index_dtype})"
-        )
-
-    def _print_Trunc(self, expr):
-        assert len(expr.args) == 1
-        return (
-            f"libdevice.trunc({self._print(expr.args[0])}).to({V.kernel.index_dtype})"
         )
 
     def _print_ceiling(self, expr):
@@ -359,20 +394,9 @@ class TritonPrinter(PythonPrinter):
         assert len(expr.args) == 1
         return f"libdevice.atan(({self._print(expr.args[0])}).to(tl.float32))"
 
-    def _print_FloorDiv(self, expr):
-        if expr.is_integer:
-            return super()._print_FloorDiv(expr)
-
-        x, div = expr.args
-        x = self.paren(self.doprint(x))
-        div = self.paren(self.doprint(div))
-        return f"libdevice.floor({x} / {div}).to({V.kernel.index_dtype})"
-
-    def _print_Round(self, expr):
+    def _print_RoundToInt(self, expr):
         assert len(expr.args) == 1
-        return (
-            f"libdevice.llrint({self._print(expr.args[0])}).to({V.kernel.index_dtype})"
-        )
+        return f"libdevice.llrint({self._print(expr.args[0])})"
 
     def _print_RoundDecimal(self, expr):
         assert len(expr.args) == 2
@@ -432,12 +456,6 @@ class TritonCSEVariable(CSEVariable):
         self.mask_vars: Set[str] = set()
 
     def update_on_args(self, name, args, kwargs):
-        # When making a variable that is going to be used in indirect indexing
-        # if a where clause is used it should mean that the result is always a
-        # valid index, so you shouldn't include any of the dependent variables
-        # in the resulting load mask
-        if name == "where":
-            return
         for arg in args:
             if isinstance(arg, TritonCSEVariable):
                 self.mask_vars.update(arg.mask_vars)
@@ -889,7 +907,9 @@ class TritonKernelOverrides(TritonOverrides):
             f"tl.full({result}.shape, {constant_repr(other)}, {result}.dtype)",
             bounds=ValueRanges.wrap(other),
         )
-        return ops.where(new_mask, result, other)
+        ret = ops.where(new_mask, result, other)
+        ret.mask_vars.discard(new_mask)
+        return ret
 
     @staticmethod
     def load_seed(name, offset):
@@ -1295,14 +1315,7 @@ class TritonKernel(SIMDKernel):
                 ep = ", eviction_policy='evict_first'"
         else:
             ep = ""
-        # "other" below is a workaround for https://github.com/openai/triton/issues/737
-        # for bool, even though it's likely subject to the same bug, setting `other` leads
-        # to LLVM errors so we are skipping it for now
-        if (
-            (has_tmpmask or has_rindex)
-            and V.graph.get_dtype(name) != torch.bool
-            and indexing.has_mask()
-        ):
+        if (has_tmpmask or has_rindex) and indexing.has_mask():
             other = ", other=0.0"
         else:
             other = ""
@@ -2352,7 +2365,10 @@ class TritonKernel(SIMDKernel):
             and not entry.has_zdim
             and not (isinstance(entry.numel, int) and entry.numel <= get_max_y_grid())
         ):
-            key = f"{key} * (tl.program_id({entry.grid_dim + 1}) + 1)"
+            # For ynumel larger than max_ygrid, we need to use zdim.
+            # For each z dimension, there are tl.num_programs(1) yblocks which is passed by grad(x,y,z).
+            # So, we need to add tl.program_id(z) * tl.num_programs(y) *YBLOCK to get the correct yoffset.
+            key = f"({key} + tl.program_id({entry.grid_dim + 1}) * tl.num_programs({entry.grid_dim}))"
         pid = entry.pid_cache.get(key, key)
         if self.index_dtype != "tl.int32":
             return f"{pid}.to({self.index_dtype})"

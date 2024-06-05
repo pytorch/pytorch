@@ -84,6 +84,7 @@ if config.abi_compatible:
         "test_qconv2d_maxpool2d_linear_dynamic_cpu",
         "test_qconv2d_relu_cpu",
         "test_qlinear_cpu",
+        "test_qlinear_add_cpu",
         "test_qlinear_dequant_promotion_cpu",
         "test_qlinear_relu_cpu",
     ]
