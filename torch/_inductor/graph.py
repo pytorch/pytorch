@@ -929,22 +929,7 @@ class GraphLowering(torch.fx.Interpreter):
             # which run through implicit fallback must constrain their
             # arguments' fx strides
             layout_constraint = None
-
-            def needs_fixed_stride_order(target):
-                if (
-                    torch._C.Tag.needs_fixed_stride_order in target.tags
-                    and torch._C.Tag.does_not_need_fixed_stride_order in target.tags
-                ):
-                    # If both tags were specified, pessimistically assume that we do need it.
-                    return True
-                if torch._library.utils.is_builtin(target):
-                    return torch._C.Tag.needs_fixed_stride_order in target.tags
-                else:
-                    return (
-                        torch._C.Tag.does_not_need_fixed_stride_order not in target.tags
-                    )
-
-            if needs_fixed_stride_order(target):
+            if torch._C.Tag.needs_fixed_stride_order in target.tags:
                 # We have to set the current args because call_function will immediately
                 # evaluate this lowering after creating the fallback, without evaluating
                 # the layout constraint
@@ -1211,11 +1196,8 @@ class GraphLowering(torch.fx.Interpreter):
             elif is_magic_method(n.target):
                 # TODO: this is sus, it probably should be handled in the
                 # lowerings themselves similarly to sym_size/sym-stride
-                # https://github.com/pytorch/pytorch/issues/127789
                 debug("is_magic_method")
-                if isinstance(
-                    n.meta["val"], (torch.SymInt, torch.SymFloat, torch.SymBool)
-                ):
+                if isinstance(n.meta["val"], torch.SymInt):
                     result = n.meta["val"].node.expr
                 else:
                     result = super().run_node(n)

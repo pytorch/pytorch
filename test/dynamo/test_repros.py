@@ -5041,6 +5041,33 @@ def forward(self, primals_1, primals_2):
         self.assertEqual(func(x, m), opt_func(x, m))
         self.assertEqual(func(x, 0), opt_func(x, 0))
 
+    def test_grad(self):
+        def fn(x, y):
+            x._grad = y
+            return x.grad.data
+
+        x = torch.randn(4, requires_grad=True)
+        y = torch.randn(4)
+        opt_fn = torch.compile(fn, backend="eager")
+        self.assertEqual(fn(x, y), opt_fn(x, y))
+
+    # https://github.com/pytorch/pytorch/issues/127970
+    @torch._inductor.config.patch(fx_graph_cache=True)
+    def test_inductor_codecache_subclass_input_inner_tensor_symint(self):
+        def gen_nt(r):
+            values = torch.randn(r, 16)
+            offsets = torch.tensor([0, 2, 3, 6, 13, r])
+            return torch.nested.nested_tensor_from_jagged(values, offsets)
+
+        def fn(nt):
+            if nt.values().size(0) % 16 == 0:
+                return nt.sin()
+            return nt.cos()
+
+        torch.compile(fn)(gen_nt(19))
+        torch.compile(fn)(gen_nt(20))
+>>>>>>> b5de2c4211f (fix)
+
 
 instantiate_parametrized_tests(ReproTests)
 
