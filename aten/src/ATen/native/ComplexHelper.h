@@ -27,6 +27,11 @@ inline Tensor view_tensor(
       c10::TensorImpl::VIEW, std::move(storage), key_set, scalarTypeToTypeMeta(dtype));
   auto * impl = new_tensor.unsafeGetTensorImpl();
   impl->set_sizes_and_strides(sizes, strides, offset);
+  // pass c10::BackendMeta
+  auto backend_meta = tensor.unsafeGetTensorImpl()->get_backend_meta_intrusive_ptr();
+  if (backend_meta != nullptr) {
+    impl->set_backend_meta(backend_meta);
+  }
   return new_tensor;
 }
 

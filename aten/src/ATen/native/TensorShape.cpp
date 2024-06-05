@@ -1602,6 +1602,10 @@ Tensor alias_with_sizes_and_strides(
     self_tmp_->set_storage_offset(self.storage_offset());
     self_tmp_->set_sizes_and_strides(sizes, strides);
   }
+  auto backend_meta = self.unsafeGetTensorImpl()->get_backend_meta_intrusive_ptr();
+  if (backend_meta != nullptr) {
+    self_.unsafeGetTensorImpl()->set_backend_meta(backend_meta);
+  }
   namedinference::propagate_names(self_, self);
   return self_;
 }
@@ -1624,6 +1628,10 @@ Tensor alias_with_sizes_and_strides(
     self_ = at::detail::make_tensor<TensorImpl>(
     c10::TensorImpl::VIEW, Storage(self.storage()), self.key_set(), self.dtype());
     self_.unsafeGetTensorImpl()->set_sizes_and_strides(sizes, strides, self.sym_storage_offset());
+  }
+  auto backend_meta = self.unsafeGetTensorImpl()->get_backend_meta_intrusive_ptr();
+  if (backend_meta != nullptr) {
+    self_.unsafeGetTensorImpl()->set_backend_meta(backend_meta);
   }
   namedinference::propagate_names(self_, self);
   return self_;
@@ -3380,7 +3388,6 @@ inline Tensor view_impl(const Tensor& self, IntArrayRef size) {
     "not compatible with input tensor's size and stride (at least one dimension"
     " spans across two contiguous subspaces). Use .reshape(...) instead.");
   return alias_with_sizes_and_strides(self, inferred_size, *stride);
-
 }
 
 Tensor _unsafe_view(const Tensor& self, IntArrayRef size) {
@@ -3769,7 +3776,9 @@ Tensor view(const Tensor& self,
 }
 
 Tensor alias(const Tensor& self) {
-  return alias_with_sizes_and_strides(self, self.sym_sizes(), self.sym_strides());
+  auto self_ = self.as_strided_symint(self.sym_sizes(), self.sym_strides());
+  namedinference::propagate_names(self_, self);
+  return self_;
 }
 
 Tensor detach(const Tensor& self) {

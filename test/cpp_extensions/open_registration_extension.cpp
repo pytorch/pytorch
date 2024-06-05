@@ -458,6 +458,23 @@ const at::Tensor& custom_resize_(const at::Tensor& self, at::IntArrayRef size,
   return self;
 }
 
+at::Tensor custom_as_strided_tensorimpl(const at::Tensor& self,
+                                        at::IntArrayRef size,
+                                        at::IntArrayRef stride,
+                                        std::optional<int64_t> storage_offset_) {
+  TORCH_INTERNAL_ASSERT(self.is_privateuseone(), "custom_as_strided_tensorimpl only support privateUser1");
+  auto storage_offset = storage_offset_.value_or(self.storage_offset());
+  auto result = at::detail::make_tensor<c10::TensorImpl>(
+      c10::TensorImpl::VIEW, c10::Storage(self.storage()), self.key_set(), self.dtype());
+  // Pass c10::BackendMeta
+  at::native::setStrided(result, size, stride, storage_offset);
+  auto backend_meta = self.unsafeGetTensorImpl()->get_backend_meta_intrusive_ptr();
+  if (backend_meta != nullptr) {
+    result.unsafeGetTensorImpl()->set_backend_meta(backend_meta);
+  }
+  return result;
+}
+
 // This macro does the heavy lifting.
 // With TORCH_LIBRARY_IMPL, you can register custom kernels for your backend.
 // For open registration, we're registering all of our kernels to the PrivateUse1 dispatch key.
@@ -480,7 +497,7 @@ TORCH_LIBRARY_IMPL(aten, PrivateUse1, m) {
   m.impl("_pin_memory", &custom__pin_memory);
   m.impl("is_pinned", &custom_is_pinned);
   m.impl("resize_", &custom_resize_);
-  m.impl("as_strided", at::native::as_strided_tensorimpl);
+  m.impl("as_strided", &custom_as_strided_tensorimpl);
   m.impl("quantize_per_tensor", at::native::quantize_per_tensor);
 }
 

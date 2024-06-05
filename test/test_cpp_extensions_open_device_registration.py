@@ -449,6 +449,19 @@ class TestCppExtensionOpenRgistration(common.TestCase):
             # loads BackendMeta data correctly
             self.assertFalse(self.module.check_backend_meta(z2))
 
+    def test_open_device_pass_custom_backend_meta(self):
+        x = torch.empty(4, 4, 2, 3)
+        y = x.foo()
+        self.assertFalse(self.module.check_backend_meta(y))
+        self.module.custom_set_backend_meta(y)
+        self.assertTrue(self.module.check_backend_meta(y))
+
+        # test tensor pass backend_meta
+        y_alias = torch.ops.aten.alias(y)
+        self.assertTrue(self.module.check_backend_meta(y_alias))
+        y_permute = y.permute((0, 2, 3, 1))
+        self.assertTrue(self.module.check_backend_meta(y_permute))
+
     def test_open_device_storage_resize(self):
         cpu_tensor = torch.randn([8])
         foo_tensor = cpu_tensor.foo()

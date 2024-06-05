@@ -788,6 +788,11 @@ Tensor view_dtype(const Tensor& self, ScalarType dtype) {
   auto new_tensor = detail::make_tensor<TensorImpl>(
       std::move(storage), self.key_set(), type_meta);
   auto* impl = new_tensor.unsafeGetTensorImpl();
+  // pass c10::BackendMeta
+  auto backend_meta = self.unsafeGetTensorImpl()->get_backend_meta_intrusive_ptr();
+  if (backend_meta != nullptr) {
+    impl->set_backend_meta(backend_meta);
+  }
 
   if (self_element_size == new_element_size) {
     impl->set_sizes_and_strides(self.sym_sizes(), self.sym_strides(), self.sym_storage_offset());

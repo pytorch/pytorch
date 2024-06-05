@@ -701,6 +701,7 @@ class TestProfilerTree(TestCase):
                       <built-in function isinstance>
                       <built-in method as_subclass of Tensor object at 0xXXXXXXXXXXXX>
                         aten::alias
+                          aten::as_strided
                       <built-in function isinstance>
               torch/profiler/profiler.py(...): __exit__
                 torch/profiler/profiler.py(...): stop
