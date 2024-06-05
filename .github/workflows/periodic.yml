@@ -67,7 +67,7 @@ jobs:
     uses: ./.github/workflows/_linux-build.yml
     with:
       build-environment: linux-focal-cuda11.8-py3.9-gcc9
-      docker-image-name: pytorch-linux-focal-cuda11.8-cudnn9-py3-gcc9
+      docker-image-name: pytorch-linux-focal-cuda11.8-cudnn8-py3-gcc9
       cuda-arch-list: 8.6
       test-matrix: |
         { include: [
@@ -89,7 +89,7 @@ jobs:
     uses: ./.github/workflows/_linux-build.yml
     with:
       build-environment: linux-focal-cuda11.8-py3.10-gcc9-debug
-      docker-image-name: pytorch-linux-focal-cuda11.8-cudnn9-py3-gcc9
+      docker-image-name: pytorch-linux-focal-cuda11.8-cudnn8-py3-gcc9
       build-with-debug: true
       test-matrix: |
         { include: [
