@@ -525,6 +525,10 @@ class DDPOptimizer:
                 for arg in node.args:
                     if not isinstance(arg, torch.fx.node.Node):
                         continue
+                    if arg.op != "placeholder":
+                        continue
+                    # DELETE COMMET BEFORE LANDONG:
+                    # I am assuming that Params should have example values associated, is that a correct assumption?
                     param = arg.meta["example_value"]
                     if not isinstance(param, torch.nn.Parameter):
                         continue
