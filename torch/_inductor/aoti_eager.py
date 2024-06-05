@@ -6,7 +6,6 @@ from unittest import mock
 
 import torch
 import torch._export
-import torch.utils._pytree as pytree
 from torch._inductor.utils import is_cpu_device
 from .runtime.runtime_utils import cache_dir
 
