@@ -13,6 +13,7 @@ __all__ = [
     "OutputKind",
     "OutputSpec",
     "SymIntArgument",
+    "SymFloatArgument",
     "TensorArgument",
 ]
 
