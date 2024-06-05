@@ -3,7 +3,6 @@ import enum
 import functools
 import pprint
 import re
-import sys
 import unittest
 import warnings
 
@@ -3020,17 +3019,10 @@ class GraphModule(torch.nn.Module):
         unflatten: "f32[4, 3, 3, 4, 3, 4]" = jac_out_in.unflatten(-1, (3, 4));  jac_out_in = None""",
         )
 
-        # Python 3.10 and 3.11 produces slightly different graphs
-        if sys.version_info[:2] > (3, 10):
-            self.assertExpectedInline(
-                actual.split("\n")[-2],
-                """        return (unflatten, child_2, _wrap_for_grad_1, child_3, child_4, o)""",
-            )
-        else:
-            self.assertExpectedInline(
-                actual.split("\n")[-2],
-                """        return (unflatten,)""",
-            )
+        self.assertExpectedInline(
+            actual.split("\n")[-2],
+            """        return (unflatten,)""",
+        )
 
     def test_hessian_disable_capture(self):
         counters.clear()
