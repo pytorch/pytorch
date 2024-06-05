@@ -72,6 +72,9 @@ def xfailIf(condition):
 def xfailIfMacOS14_4Plus(func):
     return unittest.expectedFailure(func) if product_version > 14.3 else func  # noqa: F821
 
+def xfailIfMacOS14_2(func):
+    return unittest.expectedFailure(func) if product_version == 14.2 else func  # noqa: F821
+
 def mps_ops_grad_modifier(ops):
     XFAILLIST_GRAD = {
 
@@ -667,6 +670,11 @@ def mps_ops_modifier(ops):
         'special.polygammaspecial_polygamma_n_0': [torch.float32, torch.int16, torch.int8],
     }
 
+    MACOS_14_2_XFAILLIST = {
+        # This op works fine in 14.4 but fails in 14.2
+        'fft.hfft2': [torch.complex64],
+    }
+
     # Those ops are not expected to work
     UNIMPLEMENTED_XFAILLIST = {
         # Failures due to lack of op implementation on MPS backend
@@ -1039,6 +1047,11 @@ def mps_ops_modifier(ops):
                 addDecorator(op, DecorateInfo(
                              unittest.expectedFailure,
                              dtypes=xfaillist[key]))
+
+        if key in MACOS_14_2_XFAILLIST and (product_version == 14.2):
+            addDecorator(op, DecorateInfo(
+                         unittest.expectedFailure,
+                         dtypes=MACOS_14_2_XFAILLIST[key]))
 
         if key in MACOS_BEFORE_13_3_XFAILLIST and (torch.backends.mps.is_macos13_or_newer() and product_version < 13.3):
             addDecorator(op, DecorateInfo(
