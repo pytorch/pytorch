@@ -350,7 +350,7 @@ std::string get_collective_trace(bool includeStackTraces, bool onlyActive) {
 std::unordered_map<std::string, std::unordered_map<std::string, std::string>>
 get_nccl_dump_map() {
   std::unordered_map<
-      std::string,
+      std::string /* ncclUniqueID */,
       std::unordered_map<std::string, std::string> /* dump from this comm */>
       ncclDumpMap;
   // dump_nccl_trace is only called from the default PG (uid_=0), but we want to
@@ -376,16 +376,13 @@ std::string dump_nccl_trace(
     bool includeCollectives,
     bool includeStackTraces,
     bool onlyActive) {
-  std::unordered_map<
-      std::string /* ncclUniqueID */,
-      std::unordered_map<std::string, std::string> /* dump from this comm */>
-      ncclDumpMap = get_nccl_dump_map();
+  auto ncclDumpMap = get_nccl_dump_map();
   return NCCLTraceBuffer::get()->dump(
       ncclDumpMap, includeCollectives, includeStackTraces, onlyActive);
 }
 
 std::string get_nccl_comm_trace() {
-  ncclDumpMap = get_nccl_dump_map();
+  auto ncclDumpMap = get_nccl_dump_map();
   return NCCLTraceBuffer::get()->dump(ncclDumpMap, false, false, false);
 }
 #else
