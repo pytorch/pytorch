@@ -1,4 +1,3 @@
-#include <pybind11/pytypes.h>
 #include <torch/csrc/python_headers.h>
 
 #include <c10/util/intrusive_ptr.h>
@@ -42,7 +41,6 @@
 #include <fmt/format.h>
 #include <pybind11/chrono.h>
 #include <torch/csrc/distributed/c10d/PrefixStore.hpp>
-#include <torch/csrc/utils/pybind.h>
 
 #include <torch/csrc/distributed/c10d/comm.hpp>
 #include <torch/csrc/distributed/c10d/debug.h>
