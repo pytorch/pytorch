@@ -2047,7 +2047,7 @@ class CUDAGraphTreeManager:
     ) -> Tuple[Callable[..., Any], List[Optional[Tensor]]]:
         if torch._inductor.config.triton.cudagraph_static_input_params:
             all_static_input_idxs = set(static_input_idxs)
-            for i,inp in enumerate(inputs):
+            for i, inp in enumerate(inputs):
                 if isinstance(inp, torch.nn.Parameter):
                     all_static_input_idxs.add(i)
             static_input_idxs = all_static_input_idxs
