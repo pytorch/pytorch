@@ -671,8 +671,9 @@ def mps_ops_modifier(ops):
     }
 
     MACOS_BEFORE_14_4_XFAILLIST = {
-        # This op works fine in 14.4 m1 but fails in 14.2 m2
+        # These ops work fine in 14.4 but fail in 14.2 or 13.x
         'fft.hfft2': [torch.complex64],
+        'nn.functional.conv3d': [torch.float16],
     }
 
     # Those ops are not expected to work
@@ -1048,7 +1049,7 @@ def mps_ops_modifier(ops):
                              unittest.expectedFailure,
                              dtypes=xfaillist[key]))
 
-        if key in MACOS_BEFORE_14_4_XFAILLIST and (product_version >= 14.0 and product_version < 14.4):
+        if key in MACOS_BEFORE_14_4_XFAILLIST and (product_version < 14.4):
             addDecorator(op, DecorateInfo(
                          unittest.expectedFailure,
                          dtypes=MACOS_BEFORE_14_4_XFAILLIST[key]))
