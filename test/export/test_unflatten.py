@@ -10,6 +10,7 @@ from typing import Any, List
 
 import torch
 import torch._dynamo as torchdynamo
+
 from functorch.experimental.control_flow import cond, map
 from torch import Tensor
 from torch._export.utils import (
@@ -745,6 +746,28 @@ class TestUnflatten(TestCase):
         ep = export(m, inps)
         unep = unflatten(ep)
         self.assertTrue(torch.allclose(unep(*inps), m(*inps)))
+
+    def test_attr_as_submod_input(self):
+        class layer(torch.nn.Module):
+            def forward(self, x, const) -> torch.Tensor:
+                return x + const
+
+        class M(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.register_buffer("const", torch.ones(4, 8))
+                self.layers = torch.nn.ModuleList([layer() for _ in range(2)])
+
+            def forward(self, x: torch.Tensor) -> torch.Tensor:
+                for layer in self.layers:
+                    x = layer(x, self.const)
+                return x
+
+        mod = M()
+        x = torch.randn(4, 8)
+        ep = export(mod, (x,))
+        unflattened = unflatten(ep)
+        torch.testing.assert_close(unflattened(x), mod(x))
 
 
 if __name__ == "__main__":

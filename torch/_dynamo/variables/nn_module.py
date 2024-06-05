@@ -67,14 +67,76 @@ def initialize_lazy_module(tx, mod, args, kwargs):
         mod._infer_parameters(mod, fake_args, fake_kwargs)
 
 
+def cleanup_source_for_nn_module_stack(source):
+    # TODO(anijain2305, export-team) This is a bad hack to fix the nn module
+    # fully_qualified_name to work with export/unflatten. It converts
+    # mod._modules['net1'] to mod.net1.
+
+    # This type of source occurs when we use UnspecializedNNModule variable
+    # because unspecialized nn module variable inlines module __getattr__ calls.
+    # For export, we rely heavily on NNModuleVariable and do not support
+    # UnspecializedNNModule. But there is one case where this gets exposed -
+    # Pippy. Pippy uses export/unflatten (an export feature) and also
+    # monkepatches the `forward` method of a mod that forces Dynamo to use
+    # UnspecializedNNModule. Therefore, we will need proper work to retain the
+    # nn module stack when we let export rely on UnspecializedNNModule variable.
+
+    # This does not work if we have recursively UnspecializedNNModule variables
+    # e.g. mod._modules['net1']._modules['net2']. This is unlikely to happen in
+    # Pippy so the hotfix is enough for Pippy.
+
+    if (
+        isinstance(source, GetItemSource)
+        and isinstance(source.base, AttrSource)
+        and isinstance(source.base.base, NNModuleSource)
+        and source.base.member == "_modules"
+    ):
+        return AttrSource(source.base.base, source.index)
+    return source
+
+
 @contextmanager
 def record_nn_module_stack(module_key: str, source, tx, mod: torch.nn.Module):
-    fully_qualified_name = source.name()
+    source_for_nn_module_stack = cleanup_source_for_nn_module_stack(source)
+    fully_qualified_name = source_for_nn_module_stack.name()
     try:
         tx.nn_module_stack[module_key] = (fully_qualified_name, mod.__class__)
         yield
     finally:
         del tx.nn_module_stack[module_key]
+
+
+def guard_to_detect_forward_monkeypatching(source, mod):
+    # Users sometimes patch the forward method of a nn module instance to
+    # perform optimizations like quantization. Though this is not a good
+    # software practice, but python allows this and Dynamo needs to detect
+    # this patching.
+    #
+    # One way to do this is to add an ID_MATCH guard on every function
+    # getting inlined (https://github.com/pytorch/pytorch/pull/124975). But
+    # this increased guard overhead by around 20%.
+    #
+    # To keep the guard overhead down, we just guard on the `forward` being
+    # not present in the mod __dict__. The common case of patching forward
+    # method adds `forward` in the instance __dict__, whereas the unpatched
+    # `forward` sits in the type(mod).__dict__
+    if source:
+        if "forward" in mod.__dict__ and callable(mod.__dict__["forward"]):
+            # Monkeypatched forward method, add an ID_MATCH guard on forward function
+            fwd = mod.__dict__["forward"]
+            forward_source = AttrSource(source, "forward")
+            if type(fwd) is types.MethodType:
+                forward_source = AttrSource(forward_source, "__func__")
+            install_guard(forward_source.make_guard(GuardBuilder.CLOSURE_MATCH))
+        else:
+            # Common case - check that the forward key is absent in mod __dict__
+            install_guard(
+                source.make_guard(
+                    functools.partial(
+                        GuardBuilder.NOT_PRESENT_IN_GENERIC_DICT, attr="forward"
+                    )
+                )
+            )
 
 
 class NNModuleVariable(VariableTracker):
@@ -156,6 +218,19 @@ class NNModuleVariable(VariableTracker):
             GenerationTracker.mark_class_dynamic(type(mod))
         raise UnspecializeRestartAnalysis
 
+    def has_key_in_generic_dict(self, tx, key):
+        base = tx.output.get_submodule(self.module_key)
+
+        if object_has_getattribute(base):
+            unimplemented("NNModuleVariable with custom __getattribute__")
+
+        if tx.output.side_effects.has_pending_mutation_of_attr(self, key):
+            mutated_attr = tx.output.side_effects.load_attr(self, key, deleted_ok=True)
+            return not isinstance(mutated_attr, variables.DeletedVariable)
+
+        base_dict = object.__getattribute__(base, "__dict__")
+        return key in base_dict
+
     def _custom_getattr_fallback(self, base, tx, name, options):
         """Check for a __getattr__ and handle it specially if it is implemented"""
         if object_has_getattribute(base):
@@ -190,6 +265,9 @@ class NNModuleVariable(VariableTracker):
         if not self.source:
             unimplemented("GETATTR with no source")
 
+        if name == "__dict__":
+            return variables.GetAttrVariable(self, name, source=source)
+
         if name in base_dict:
             subobj = base_dict[name]
         elif (
@@ -215,6 +293,9 @@ class NNModuleVariable(VariableTracker):
                     return result
                 # if we can't find a __getattr__, just raise the AttributeError
                 raise
+
+        if name == "forward":
+            guard_to_detect_forward_monkeypatching(self.source, base)
 
         if name == "__class__" and not object_member:
             return variables.UserDefinedClassVariable(base.__class__, source=source)
@@ -745,6 +826,8 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
             source = AttrSource(AttrSource(self.source, "__class__"), name)
         else:
             source = None
+
+        guard_to_detect_forward_monkeypatching(self.source, mod)
 
         ctx = (
             record_nn_module_stack(str(id(mod)), self.source, tx, mod)

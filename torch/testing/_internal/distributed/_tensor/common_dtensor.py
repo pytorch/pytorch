@@ -35,7 +35,6 @@ from torch.utils._pytree import tree_flatten, tree_unflatten, TreeSpec
 DEVICE_TYPE = (
     "cuda" if torch.cuda.is_available() and torch.cuda.device_count() > 1 else "cpu"
 )
-PG_BACKEND = "nccl" if DEVICE_TYPE == "cuda" else "gloo"
 
 NUM_DEVICES = 4
 
@@ -63,12 +62,12 @@ class RMSNormPython(torch.nn.Module):
 
 
 class MLPModule(nn.Module):
-    def __init__(self, device):
+    def __init__(self, device, bias: bool = True):
         super().__init__()
         torch.manual_seed(5)
-        self.net1 = nn.Linear(10, 16, device=device)
+        self.net1 = nn.Linear(10, 16, bias=bias, device=device)
         self.relu = nn.ReLU()
-        self.net2 = nn.Linear(16, 10, device=device)
+        self.net2 = nn.Linear(16, 10, bias=bias, device=device)
 
     def forward(self, x):
         return self.net2(self.relu(self.net1(x)))
@@ -298,10 +297,11 @@ class DTensorTestBase(MultiProcessTestCase):
 
     @property
     def backend(self) -> str:
-        return PG_BACKEND
+        backend = "nccl" if self.device_type == "cuda" else "gloo"
+        return backend
 
     def build_device_mesh(self) -> DeviceMesh:
-        return DeviceMesh(DEVICE_TYPE, list(range(self.world_size)))
+        return DeviceMesh(self.device_type, list(range(self.world_size)))
 
     def init_pg(self) -> None:
         if "nccl" in self.backend and torch.cuda.device_count() < self.world_size:
@@ -359,11 +359,11 @@ def with_comms(func: TestFunc) -> TestFunc:
     def wrapper(
         self, *args: Tuple[object], **kwargs: Dict[str, Any]  # type: ignore[misc]
     ) -> None:
-        # if backend not specified, and cuda available, then use nccl, else gloo
-        if torch.cuda.is_available() and torch.cuda.device_count() >= self.world_size:
-            self.device_type = "cuda"
-        else:
+        # if enough GPU we can use GPU, otherwise we fallback to CPU
+        if not torch.cuda.is_available() or torch.cuda.device_count() < self.world_size:
             self.device_type = "cpu"
+        else:
+            self.device_type = DEVICE_TYPE
 
         self.init_pg()
         func(self, *args, **kwargs)  # type: ignore[misc]

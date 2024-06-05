@@ -60,12 +60,19 @@ class FileSystem(FileSystemBase):
 
         try:
             url_to_fs(checkpoint_id)
-        except ValueError as e:
+        except ValueError:
             return False
 
         return True
 
+    def exists(self, path: Union[str, os.PathLike]) -> bool:
+        return self.fs.exists(path)
 
+    def rm_file(self, path: Union[str, os.PathLike]) -> None:
+        self.fs.rm(path)
+
+
+# TODO: add the dcp.async_save mixin
 class FsspecWriter(FileSystemWriter):
     """
     Basic implementation of StorageWriter using FFspec.
@@ -87,6 +94,7 @@ class FsspecWriter(FileSystemWriter):
         sync_files: bool = True,
         thread_count: int = 1,
         per_thread_copy_ahead: int = 10_000_000,
+        overwrite: bool = True,
     ) -> None:
         """
         Initialize the writer pointing to `path`.
@@ -97,11 +105,17 @@ class FsspecWriter(FileSystemWriter):
             sync_files : force files to be synced to permanent storage. Default to True.
             thread_count: Number of IO threads to use to write. Default to 1.
             per_thread_copy_ahead: How many bytes to copy from the GPU ahead of saving then. Default 10Mb.
+            overwrite: Whether to allow overwriting existing checkpoints. Defaults to True.
 
         N. B. If sync_files is disabled, there's no guarantee that the checkpoint will be consistent in the case of a failure.
         """
         super().__init__(
-            path, single_file_per_rank, sync_files, thread_count, per_thread_copy_ahead
+            path,
+            single_file_per_rank,
+            sync_files,
+            thread_count,
+            per_thread_copy_ahead,
+            overwrite=overwrite,
         )
         self.fs = FileSystem()
         self.path = self.fs.init_path(path)

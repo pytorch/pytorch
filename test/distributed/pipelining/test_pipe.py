@@ -1,8 +1,8 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 # Owner(s): ["oncall: distributed"]
-import torch
+from model_registry import MLPModule, ModelWithParamAlias
 
-from model_registry import MLPModule
+import torch
 from torch.distributed.pipelining import pipe_split, pipeline
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -22,19 +22,18 @@ torch.manual_seed(0)
 class ExampleCode(torch.nn.Module):
     def __init__(self):
         super().__init__()
-        self.mm_param0 = torch.nn.Parameter(torch.randn(d_hid, d_hid))
         self.mm_param1 = torch.nn.Parameter(torch.randn(d_hid, d_hid))
         self.mm_param2 = torch.nn.Parameter(torch.randn(d_hid, d_hid))
         self.lin1 = torch.nn.Linear(d_hid, d_hid)
         self.lin2 = torch.nn.Linear(d_hid, d_hid)
 
     def forward(self, x, y):
-        x = torch.mm(x, self.mm_param0)
+        x = torch.mm(x, self.mm_param1)  # mutli-use param
         skip_connection = x
         x = x + y
         x = torch.relu(x)
         pipe_split()
-        x = torch.mm(x, self.mm_param1)
+        x = torch.mm(x, self.mm_param1)  # mutli-use param
         x = self.lin1(x)
         pipe_split()
         x = torch.relu(x)
@@ -65,8 +64,21 @@ class MultiMLP(torch.nn.Module):
         return x - y
 
 
+EXPECTED_N_STAGES = {
+    ExampleCode: 4,
+    MultiMLP: 4,
+    ModelWithParamAlias: 2,
+}
+
+# Currently, we don't enforce full set equality on the FQNs between the original
+# and pipelined models, because in the multi-use param case, PP will deduplicate
+# the FQNs from the state_dict.
+# TODO
+CHECK_FQN_SET_EQUALITY = False
+
+
 class PipeTests(TestCase):
-    @parametrize("ModelClass", [ExampleCode, MultiMLP])
+    @parametrize("ModelClass", [ExampleCode, MultiMLP, ModelWithParamAlias])
     def test_model_split(self, ModelClass):
         mod = ModelClass()
         x = torch.randn(batch_size, d_hid)
@@ -78,7 +90,9 @@ class PipeTests(TestCase):
             example_args=(x, y),
         )
 
-        assert pipe.num_stages == 4, f"nstages = {pipe.num_stages}, expect 4"
+        assert (
+            pipe.num_stages == EXPECTED_N_STAGES[ModelClass]
+        ), f"nstages = {pipe.num_stages}, expect {EXPECTED_N_STAGES[ModelClass]}"
 
         ref_out = mod(x, y)
         out = pipe(x, y)[0]
@@ -91,14 +105,17 @@ class PipeTests(TestCase):
         new_names = set()
         for idx in range(pipe.num_stages):
             stage_mod = pipe.get_stage_module(idx)
-            new_names.update(stage_mod.state_dict().keys())
+            stage_fqns = set(stage_mod.state_dict().keys())
+            assert stage_fqns.issubset(old_names)
+            new_names.update(stage_fqns)
 
-        assert (
-            old_names == new_names
-        ), f"""
-        old names {old_names}
-        new names {new_names}
-        """
+        if CHECK_FQN_SET_EQUALITY:
+            assert (
+                old_names == new_names
+            ), f"""
+            old names {old_names}
+            new names {new_names}
+            """
         print("Qualname check passed")
 
 

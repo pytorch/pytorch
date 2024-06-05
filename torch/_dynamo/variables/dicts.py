@@ -150,6 +150,15 @@ class ConstDictVariable(VariableTracker):
     def as_proxy(self):
         return {k.vt.as_proxy(): v.as_proxy() for k, v in self.items.items()}
 
+    def debug_repr(self):
+        return (
+            "{"
+            + ", ".join(
+                f"{k.vt.debug_repr()}: {v.debug_repr()}" for k, v in self.items.items()
+            )
+            + "}"
+        )
+
     def as_python_constant(self):
         return {
             k.vt.as_python_constant(): v.as_python_constant()
@@ -195,7 +204,7 @@ class ConstDictVariable(VariableTracker):
     def getitem_const(self, arg: VariableTracker):
         key = ConstDictVariable._HashableTracker(arg)
         if key not in self.items:
-            raise KeyError(arg.value)
+            unimplemented(f"dict KeyError: {arg.value}")
         return self.items[key]
 
     def call_method(
@@ -315,6 +324,11 @@ class DefaultDictVariable(ConstDictVariable):
             return False
         return super().is_python_constant()
 
+    def debug_repr(self):
+        return (
+            f"defaultdict({self.default_factory.debug_repr()}, {super().debug_repr()})"
+        )
+
     @staticmethod
     def is_supported_arg(arg):
         if isinstance(arg, variables.BuiltinVariable):
@@ -358,6 +372,12 @@ class SetVariable(ConstDictVariable):
         items = dict.fromkeys(items, SetVariable._default_value())
         super().__init__(items, **kwargs)
 
+    def debug_repr(self):
+        if not self.items:
+            return "set()"
+        else:
+            return "{" + ",".join(k.vt.debug_repr() for k in self.items.keys()) + "}"
+
     @property
     def set_items(self):
         return set(self.items.keys())
@@ -387,6 +407,8 @@ class SetVariable(ConstDictVariable):
         args: List[VariableTracker],
         kwargs: Dict[str, VariableTracker],
     ) -> "VariableTracker":
+        from . import ListVariable, TupleVariable
+
         # We foward the calls to the dictionary model
         if name == "add":
             assert not kwargs
@@ -406,6 +428,24 @@ class SetVariable(ConstDictVariable):
             return variables.UserFunctionVariable(
                 polyfill.set_isdisjoint
             ).call_function(tx, [self, args[0]], {})
+        elif (
+            name == "update"
+            and len(args) == 1
+            and isinstance(
+                args[0],
+                (
+                    SetVariable,
+                    ListVariable,
+                    TupleVariable,
+                ),
+            )
+            and self.mutable_local
+        ):
+            if isinstance(args[0], (ListVariable, TupleVariable)):
+                arg = SetVariable(args[0].unpack_var_sequence(tx))
+            else:
+                arg = args[0]
+            return super().call_method(tx, "update", (arg,), kwargs)
         return super().call_method(tx, name, args, kwargs)
 
     def getitem_const(self, arg: VariableTracker):

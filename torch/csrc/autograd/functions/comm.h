@@ -19,7 +19,7 @@ struct TORCH_CUDA_CU_API Scatter : public Node {
       std::vector<at::Device> devices,
       std::optional<std::vector<int64_t>> chunk_sizes = c10::nullopt,
       int64_t dim = 0,
-      std::optional<std::vector<c10::optional<at::cuda::CUDAStream>>> streams =
+      std::optional<std::vector<std::optional<at::cuda::CUDAStream>>> streams =
           c10::nullopt,
       bool unsqueeze_scalars = false);
   ~Scatter() override;
@@ -29,7 +29,7 @@ struct TORCH_CUDA_CU_API Scatter : public Node {
   std::vector<at::Device> devices_;
   std::optional<std::vector<int64_t>> chunk_sizes_;
   int64_t dim_;
-  std::optional<std::vector<c10::optional<at::cuda::CUDAStream>>> streams_;
+  std::optional<std::vector<std::optional<at::cuda::CUDAStream>>> streams_;
   bool unsqueeze_scalars_;
 };
 
