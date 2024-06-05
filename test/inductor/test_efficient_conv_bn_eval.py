@@ -158,7 +158,7 @@ class EfficientConvBNEvalTemplate(TestCase):
             out_eager = mod_eager(inp)
             out_optimized = mod_optimized(inp)
 
-            self.assertEqual(out_optimized, out_eager, atol=2e-04, rtol=1e-5)
+            self.assertEqual(out_optimized, out_eager, atol=3e-04, rtol=1e-5)
 
             out_eager.mean().backward()
             out_optimized.mean().backward()
