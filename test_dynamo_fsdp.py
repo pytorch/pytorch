@@ -277,7 +277,7 @@ def checkpoint_wrapper(module, config):
         )
 
 
-test_case = "toy_transformer_graph_break"  # "simple_mlp" / "simple_seq_module" / "nested_fully_shard" / "nested_fully_shard_graph_break" / "toy_transformer" / "toy_transformer_graph_break"
+test_case = "toy_transformer"  # "simple_mlp" / "simple_seq_module" / "nested_fully_shard" / "nested_fully_shard_graph_break" / "toy_transformer" / "toy_transformer_graph_break"
 balanced = True
 mixed_precision = False  # TODO(yf225): when True, fails accuracy test, needs debugging
 apply_fsdp = True
@@ -402,8 +402,8 @@ def init(activation_checkpoint):
     elif test_case == "toy_transformer" or test_case == "toy_transformer_graph_break":
         model_args = ModelArgs(
             dim=hidden_dim,
-            n_layers=3,
-            n_heads=2,
+            n_layers=1,
+            n_heads=1,
             vocab_size=1024,
         )
         if test_case == "toy_transformer_graph_break":
@@ -411,8 +411,8 @@ def init(activation_checkpoint):
             # transformer_class = ToyTransformerWithGraphBreak
             transformer_class = TransformerWithGraphBreak
         else:
-            # transformer_class = ToyTransformer  # makes comm-induced peak memory issue more prominent
-            transformer_class = Transformer
+            transformer_class = ToyTransformer  # makes comm-induced peak memory issue more prominent
+            # transformer_class = Transformer
         model = transformer_class(model_args)
         for layer_id, mod in enumerate(model.layers):
             if activation_checkpoint:
