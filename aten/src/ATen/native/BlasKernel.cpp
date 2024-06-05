@@ -450,8 +450,8 @@ static C10_ALWAYS_INLINE void dot_with_fp32_arith_main_inner_loop(
   float32x4_t sum[kF32RegistersPerIteration],
   int registerPairIndex) {
 #ifdef __ARM_FEATURE_BF16
-  const bfloat16x8_t temp_vec1 = vld1q_bf16(&vec1[registerPairIndex * 2 * kF32ElementsPerRegister]);
-  const bfloat16x8_t temp_vec2 = vld1q_bf16(&vec2[registerPairIndex * 2 * kF32ElementsPerRegister]);
+  const bfloat16x8_t temp_vec1 = vld1q_bf16(reinterpret_cast<const __bf16*>(&vec1[registerPairIndex * 2 * kF32ElementsPerRegister]));
+  const bfloat16x8_t temp_vec2 = vld1q_bf16(reinterpret_cast<const __bf16*>(&vec2[registerPairIndex * 2 * kF32ElementsPerRegister]));
   // TODO: we leave half of sum unused. Does this cause suboptimal code generation?
   sum[registerPairIndex] = f32_dot_bf16(sum[registerPairIndex], temp_vec1, temp_vec2);
 #else
