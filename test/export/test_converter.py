@@ -407,6 +407,8 @@ class TestConverter(TestCase):
                 else:
                     return self.linear(self.m2(x))
 
+        # Super nested, parameters neeed to lifted
+        # multiple times.
         class SuperNestedM1(torch.nn.Module):
             def __init__(self, dim: int) -> None:
                 super().__init__()
@@ -420,29 +422,57 @@ class TestConverter(TestCase):
                 else:
                     return self.linear(self.m2(x))
 
-        # # Basic module testing.
-        # inp = (torch.ones(3),)
-        # orig_m = M(3)
-        # ep = self._check_equal_ts_ep_converter(orig_m, inp)
 
-        # t = inp[0]
-        # t -= 0.8
-        # torch.testing.assert_close(
-        #     ep.module()(*inp),
-        #     orig_m(*inp),
-        # )
+        # Super nested, even the input needs to be
+        # lifted recursively due to value propogation optimiztaion.
+        class SuperNestedM2(torch.nn.Module):
+            def __init__(self, dim: int) -> None:
+                super().__init__()
+                self.m1 = NestedM(dim)
+                self.m2 = NestedM(dim)
+                self.linear = torch.nn.Linear(dim, dim)
+
+            def forward(self, x: torch.Tensor):
+                if torch.sum(x) > 1:
+                    return self.linear(self.m1(x))
+                else:
+                    return self.linear(self.m2(x))
+
+        # # Basic module testing.
+        inp = (torch.ones(3),)
+        orig_m = M(3)
+        ep = self._check_equal_ts_ep_converter(orig_m, inp)
+
+        t = inp[0]
+        t -= 0.8
+        torch.testing.assert_close(
+            ep.module()(*inp),
+            orig_m(*inp),
+        )
 
         # # Nested module testing.
-        # inp = (torch.ones(3),)
-        # orig_m = NestedM(3)
-        # ep = self._check_equal_ts_ep_converter(orig_m, inp)
+        inp = (torch.ones(3),)
+        orig_m = NestedM(3)
+        ep = self._check_equal_ts_ep_converter(orig_m, inp)
 
-        # t = inp[0]
-        # t -= 0.8
-        # torch.testing.assert_close(
-        #     ep.module()(*inp),
-        #     orig_m(*inp),
-        # )
+        t = inp[0]
+        t -= 0.8
+        torch.testing.assert_close(
+            ep.module()(*inp),
+            orig_m(*inp),
+        )
+
+        # Super nested module testing.
+        inp = (torch.ones(3),)
+        orig_m = SuperNestedM1(3)
+        ep = self._check_equal_ts_ep_converter(orig_m, inp)
+
+        t = inp[0]
+        t -= 0.8
+        torch.testing.assert_close(
+            ep.module()(*inp),
+            orig_m(*inp),
+        )
 
     def test_convert_nn_module_with_nested_param(self):
         class M(torch.nn.Module):
