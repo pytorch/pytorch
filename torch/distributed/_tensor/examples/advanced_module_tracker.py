@@ -14,6 +14,7 @@ class AdvancedModuleTracker(ModuleTracker):
     def __init__(self):
         super().__init__()
         self.module_parameters_dict = {}
+        self.sharding_dict = {}
 
     def _fw_pre_hook(self, mod, input):
         name = super()._get_mod_name(mod)
@@ -29,6 +30,13 @@ class AdvancedModuleTracker(ModuleTracker):
                 self.module_parameters_dict[name] = {}
 
             self.module_parameters_dict[name][param_name] = param.data
+            if type(param.data) == torch.distributed._tensor.api.DTensor:
+                key_name = name + "." + param_name
+                self.sharding_dict[key_name] = param.data.placements
+
+    def print_sharding_info(self):
+        for key, value in self.sharding_dict.items():
+            print(key + ": " + str(value))
 
     def __enter__(self):
         self.module_parameters_dict.clear()
