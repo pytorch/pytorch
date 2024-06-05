@@ -41,7 +41,15 @@ def normalize_name(name: str) -> str:
     return name.replace(".", "_")
 
 
-# Given a node: torch._C.Node, map from node.kind() to a standard operator
+def ir_name_to_func_name(name: str) -> str:
+    """prim::If -> convert_prim_If"""
+    name_list = name.split("::")
+    return "convert_" + "_".join(name_list)
+
+
+# Those operators will be automatically populated to a instance method
+# of TS2FXGraphConverter with name convert_<namespace>_<opname>().
+# Please check __init__ for method population implementations.
 kind_to_standard_operators = {
     "prim::TupleIndex": operator.getitem,
     "aten::__is__": operator.is_,
@@ -88,6 +96,17 @@ class TS2FXGraphConverter:
         self.tensor_constants: Dict[str, torch.Tensor] = {}
 
         self.subgraphs: Dict[str, torch.fx.GraphModule] = {}
+
+        # Populate methods for the standard operators.
+        for k in kind_to_standard_operators.keys():
+            handler_func_name = ir_name_to_func_name(k)
+            # Create an indirect function call:
+            # convert_<namespace>_<opname> --> lambda node: _convert_standard_operator(node)
+            setattr(
+                self,
+                handler_func_name,
+                lambda node: self._convert_standard_operators(node),
+            )
 
     def add_subgraph(self, subgraph) -> str:
         name = f"subgraph_{len(self.subgraphs)}"
@@ -263,7 +282,13 @@ class TS2FXGraphConverter:
         output_name = node.output().debugName()
         self.name_to_node[output_name] = fx_node
 
+    def convert_prim_TupleConstruct(self, node: torch._C.Node):
+        self._convert_prim_iterator(node)
+
     def convert_prim_ListConstruct(self, node: torch._C.Node):
+        self._convert_prim_iterator(node)
+
+    def _convert_prim_iterator(self, node: torch._C.Node):
         output_list = []
         for inp in node.inputs():
             output_list.append(self.get_fx_value(inp))
@@ -376,7 +401,7 @@ class TS2FXGraphConverter:
         output_name = node.output().debugName()
         self.name_to_node[output_name] = fx_node
 
-    def convert_prim_if(self, node: torch._C.Node):
+    def convert_prim_If(self, node: torch._C.Node):
         inputs = list(node.inputs())
         assert len(inputs) == 1
         predicate = self.get_fx_value(inputs[0])
@@ -429,7 +454,10 @@ class TS2FXGraphConverter:
         output_name = node.output().debugName()
         self.name_to_node[output_name] = cond_node
 
-    def convert_as_noop(self, node: torch._C.Node):
+    def convert_aten_Bool(self, node: torch._C.Node):
+        self._convert_as_noop(node)
+
+    def _convert_as_noop(self, node: torch._C.Node):
         # Converts the node as a no-op by mapping its output node as arg[0]
 
         target = get_op_overload(node)
@@ -455,7 +483,7 @@ class TS2FXGraphConverter:
         args = tuple(self.get_fx_value(input) for input in node.inputs())
         self.fx_graph.call_function(target, args)
 
-    def convert_standard_operators(self, node: torch._C.Node):
+    def _convert_standard_operators(self, node: torch._C.Node):
         target = kind_to_standard_operators[node.kind()]
         args = tuple(self.get_fx_value(input) for input in node.inputs())
         fx_node = self.fx_graph.call_function(target, args)
@@ -464,43 +492,18 @@ class TS2FXGraphConverter:
 
     def convert_node(self, node: torch._C.Node):
         node_kind = node.kind()
-        if node_kind == "prim::CreateObject":
-            self.convert_prim_CreateObject(node)
-        elif node_kind == "prim::Constant":
-            self.convert_prim_Constant(node)
-        elif node_kind == "prim::GetAttr":
-            self.convert_prim_GetAttr(node)
-        elif node_kind == "prim::NumToTensor":
-            self.convert_prim_NumToTensor(node)
-        elif node_kind in {"prim::ListConstruct", "prim::TupleConstruct"}:
-            # Tuple is just a non-mutable List, so we can handle them together.
-            self.convert_prim_ListConstruct(node)
-        elif node_kind == "prim::device":
-            self.convert_prim_device(node)
-        elif node_kind == "prim::dtype":
-            self.convert_prim_dtype(node)
-        elif node_kind == "prim::DictConstruct":
-            self.convert_prim_DictConstruct(node)
-        # elif node_kind == "aten::Int":
-        #     convert_aten_Int(node)
-        elif node_kind == "aten::_convolution":
-            self.convert_aten__convolution(node)
-        elif node_kind == "aten::__getitem__":
-            self.convert_aten___getitem__(node)
-        elif node_kind == "aten::div":
-            self.convert_aten_div(node)
-        elif node_kind == "prim::If":
-            self.convert_prim_if(node)
-        elif node_kind == "aten::Bool":
-            self.convert_as_noop(node)
-        elif node_kind == "profiler::_record_function_enter_new":
-            self.convert_profiler__record_function_enter_new(node)
-        elif node_kind == "profiler::_record_function_exit":
-            self.convert_profiler__record_function_exit(node)
-        elif node_kind in kind_to_standard_operators:
-            self.convert_standard_operators(node)
-        elif node_kind.startswith("aten::"):
-            # order matters! this should be handled after kind_to_standard_operators
+        node_kind_split = node_kind.split("::")
+
+        # Get handler based on namespace and operator name.
+        # Provide a default node handler as well in case we don't find
+        # matching converter for that.
+        handler_func_name = ir_name_to_func_name(node_kind)
+        handler_func = getattr(self, handler_func_name, self.convert_default_node)
+        handler_func(node)
+
+    def convert_default_node(self, node: torch._C.Node):
+        node_kind = node.kind()
+        if node_kind.startswith("aten::"):
             self.convert_aten_op(node)
         else:
             raise ValueError(f"Unsupported node kind: {node_kind}")
