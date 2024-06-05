@@ -435,7 +435,7 @@ class TestOperators(TestCase):
                 decorate(
                     "nn.functional.scaled_dot_product_attention",
                     decorator=expectedFailureIf(not TEST_WITH_ROCM),
-                ), # Works on ROCm
+                ),  # Works on ROCm
                 xfail("torch.ops.aten._flash_attention_forward"),
                 xfail("torch.ops.aten._efficient_attention_forward"),
                 # RuntimeError: Expected contiguous tensor, but got
@@ -736,7 +736,7 @@ class TestOperators(TestCase):
                 decorate(
                     "nn.functional.scaled_dot_product_attention",
                     decorator=expectedFailureIf(not TEST_WITH_ROCM),
-                ), # Works on ROCm
+                ),  # Works on ROCm
                 xfail("torch.ops.aten._flash_attention_forward"),
                 xfail("torch.ops.aten._efficient_attention_forward"),
                 # BUG
