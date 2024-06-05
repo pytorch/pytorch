@@ -18,123 +18,151 @@ What is ``torch.distributed.pipelining``?
 
 .. currentmodule:: torch.distributed.pipelining
 
-While promising for scaling, pipelining is often difficult to implement, requiring intrusive code changes to model code and difficult-to-implement runtime orchestration code. ``torch.distributed.pipelining`` aims to provide **a toolkit that does said things automatically to allow high-productivity scaling of models.** It consists of a **compiler** and a **runtime** stack for easy pipelining of PyTorch models. In particular, it provides the following features:
+While promising for scaling, pipelining is often difficult to implement, requiring intrusive code changes to model code and difficult-to-implement runtime orchestration code. ``torch.distributed.pipelining`` aims to provide **a toolkit that does said things automatically to allow high-productivity scaling of models.**
+``torch.distributed.pipelining`` consists of two parts: a *compiler* and a *runtime*. The compiler takes your model code, splits it up, and transforms it into a ``Pipe``, which is a wrapper that describes the model at each pipeline stage and their data-flow relationship. The runtime executes the ``PipelineStage`` in parallel, handling things like micro-batch splitting, scheduling, communication, and gradient propagation, etc. We will cover the APIs for these concepts in this section.
+Overall, the ``pipelining`` package provides the following features:
 
 * Splitting of model code based on your specification. The goal is for the user to provide model code as-is to the system for parallelization, without having to make heavyweight modifications to make parallelism work. The specification is also simple.
 * Support for rich pipeline scheduling paradigms, including GPipe, 1F1B, Interleaved 1F1B and Looped BFS. It will be also easy to customize your own schedule under this framework.
 * First-class support for cross-host pipeline parallelism, as this is where PP is typically used (over slower interconnects).
 * Composability with other PyTorch parallel schemes such as data parallelism (DDP, FSDP) or tensor  parallelism (overall, known as "3d parallelism").
 
-Examples
-********
+Step 1: Choosing the Frontend that Fits Your Need
+*************************************************
 
-In the `PiPPy <https://github.com/pytorch/PiPPy>`_ repo where this package is migrated from, we provide rich examples based on realistic models. In particular, we show how to apply pipelining without any model code change. You can refer to the `HuggingFace examples directory <https://github.com/pytorch/PiPPy/tree/main/examples/huggingface>`_. Popular examples include: `GPT2 <https://github.com/pytorch/PiPPy/tree/main/examples/huggingface/pippy_gpt2.py>`_, and `LLaMA <https://github.com/pytorch/PiPPy/tree/main/examples/llama>`_.
+The ``pipelining`` package provides two frontends for two different scenarios. Depending on whether you have (i) a full model or (ii) module constructor for each stage, you can choose one of the frontends below.
 
-Techniques Explained
-********************
+Frontend 1: the ``pipeline`` API -- If You Have a Full Model
+============================================================
 
-``torch.distributed.pipelining`` consists of two parts: a *compiler* and a *runtime*. The compiler takes your model code, splits it up, and transforms it into a ``Pipe``, which is a wrapper that describes the model at each pipeline stage and their data-flow relationship. The runtime executes the ``PipelineStage`` in parallel, handling things like micro-batch splitting, scheduling, communication, and gradient propagation, etc. We will cover the APIs for these concepts in this section.
-
-Splitting a Model with ``pipeline``
-===================================
-
-To see how we can split a model into a pipeline, let's first take an example trivial neural network:
+If you don't want to modify model code into a sequence of "model partitions", the ``pipeline`` API is here to help. Here is a brief example:
 
 .. code-block:: python
 
   import torch
 
-  class MyNetworkBlock(torch.nn.Module):
-      def __init__(self, in_dim, out_dim):
+  class Layer(torch.nn.Module):
+      def __init__(self) -> None:
           super().__init__()
-          self.lin = torch.nn.Linear(in_dim, out_dim)
+          self.lin = torch.nn.Linear(3, 3)
 
-      def forward(self, x):
-          x = self.lin(x)
-          x = torch.relu(x)
+      def forward(self, x: torch.Tensor) -> torch.Tensor:
+          return self.lin(x)
+
+  class LMHead(torch.nn.Module):
+      def __init__(self) -> None:
+          super().__init__()
+          self.proj = torch.nn.Linear(3, 3)
+
+      def forward(self, x: torch.Tensor) -> torch.Tensor:
+          return self.proj(x)
+
+  class Model(torch.nn.Module):
+      def __init__(self) -> None:
+          super().__init__()
+          self.emb = torch.nn.Embedding(10, 3)
+          self.layers = torch.nn.ModuleList(
+              Layer() for _ in range(2)
+          )
+          self.lm = LMHead()
+
+      def forward(self, x: torch.Tensor) -> torch.Tensor:
+          x = self.emb(x)
+          for layer in self.layers:
+              x = layer(x)
+          x = self.lm(x)
           return x
 
-
-  class MyNetwork(torch.nn.Module):
-      def __init__(self, in_dim, layer_dims):
-          super().__init__()
-
-          prev_dim = in_dim
-          for i, dim in enumerate(layer_dims):
-              setattr(self, f'layer{i}', MyNetworkBlock(prev_dim, dim))
-              prev_dim = dim
-
-          self.num_layers = len(layer_dims)
-          # 10 output classes
-          self.output_proj = torch.nn.Linear(layer_dims[-1], 10)
-
-      def forward(self, x):
-          for i in range(self.num_layers):
-              x = getattr(self, f'layer{i}')(x)
-
-          return self.output_proj(x)
-
-
-  in_dim = 512
-  layer_dims = [512, 1024, 256]
-  mn = MyNetwork(in_dim, layer_dims).to(device)
-
-This network is written as free-form Python code; it has not been modified for any specific parallelism technique.
-
-Let us see our usage of the ``pipeline`` interface:
-
-.. code-block:: python
-
-  from torch.distributed.pipelining import annotate_split_points, pipeline, Pipe, SplitPoint
-
-  annotate_split_points(mn, {'layer0': SplitPoint.END,
-                            'layer1': SplitPoint.END})
-
-  batch_size = 32
-  example_input = torch.randn(batch_size, in_dim, device=device)
-  chunks = 4
-
-  pipe = pipeline(mn, chunks, example_args=(example_input,))
-  print(pipe)
+  mod = Model()
+  print(mod)
 
 ::
-
-  ************************************* pipe *************************************
-  GraphModule(
-    (submod_0): GraphModule(
-      (layer0): InterpreterModule(
-        (lin): InterpreterModule()
+  Model(
+    (emb): Embedding(10, 3)
+    (layers): ModuleList(
+      (0-1): 2 x Layer(
+        (lin): Linear(in_features=3, out_features=3, bias=True)
       )
     )
-    (submod_1): GraphModule(
-      (layer1): InterpreterModule(
-        (lin): InterpreterModule()
-      )
-    )
-    (submod_2): GraphModule(
-      (layer2): InterpreterModule(
-        (lin): InterpreterModule()
-      )
-      (output_proj): InterpreterModule()
+    (lm): LMHead(
+      (proj): Linear(in_features=3, out_features=3, bias=True)
     )
   )
 
-  def forward(self, arg8_1):
-      submod_0 = self.submod_0(arg8_1);  arg8_1 = None
+This network is written as free-form Python code; it has not been modified for any specific parallelism technique.
+
+Let us see how the ``pipeline`` works:
+
+.. code-block:: python
+
+  from torch.distributed.pipelining import pipeline, SplitPoint
+
+  x = torch.LongTensor([1, 2, 4, 5])
+
+  pipe = pipeline(
+      module=mod,
+      num_chunks=1,
+      example_args=(x,),
+      split_spec={
+          "layers.1": SplitPoint.BEGINNING,
+      }
+  )
+  print(pipe)
+
+::
+  GraphModule(
+    (submod_0): GraphModule(
+      (emb): InterpreterModule()
+      (layers): Module(
+        (0): InterpreterModule(
+          (lin): InterpreterModule()
+        )
+      )
+    )
+    (submod_1): GraphModule(
+      (layers): Module(
+        (1): InterpreterModule(
+          (lin): InterpreterModule()
+        )
+      )
+      (lm): InterpreterModule(
+        (proj): InterpreterModule()
+      )
+    )
+  )
+
+  def forward(self, x):
+      submod_0 = self.submod_0(x);  x = None
       submod_1 = self.submod_1(submod_0);  submod_0 = None
-      submod_2 = self.submod_2(submod_1);  submod_1 = None
-      return (submod_2,)
+      return (submod_1,)
 
-So what's going on here? First, ``pipeline`` turns our model into a directed acyclic graph (DAG) by tracing the model. Then, it groups together the operations and parameters into *pipeline stages*. Stages are represented as ``submod_N`` submodules, where ``N`` is a natural number.
 
-We used ``annotate_split_points`` to specify that the code should be split and the end of ``layer0`` and ``layer1``. Our code has thus been split into *three* pipeline stages. Our library also provides ``SplitPoint.BEGINNING`` if a user wants to split before certain annotation point.
+The ``pipeline`` API accepts a ``nn.Module``  -- your original full model -- and a set of split points per your specification.
+It splits your model into multiple "model partitions" -- each of which to be executed at a stage, and put them in a container called `Pipe`.
 
-While the ``annotate_split_points`` API gives users a way to specify the split points without modifying the model, our library also provides an API for in-model annotation: ``pipe_split()``. For details, you can read `this example <https://github.com/pytorch/PiPPy/blob/main/test/test_pipe.py>`_.
+Different from conventional submodule access methods like ``Module.children()``, the ``pipeline`` API cuts the ``forward`` function of your model, at the places where those split-point FQNs are called.
 
-This covers the basic usage of the ``Pipe`` API. For more information, please see the documentation.
+This provides a few safety guarantees and flexibility:
 
-Using ``PipelineSchedule`` for Execution
-========================================
+* All operations of your ``forward`` function are preserved.
+* Split points can be at arbitrary hierarchy of your model.
+
+Each model partition is a reconstructed ``nn.Module``, and the ``Pipe`` container provides a ``get_stage_module`` method for you to retrieve them:
+
+Frontend 2: the ``ManualPipelineStage`` API -- If You Already Have the Module for Each Stage
+============================================================================================
+
+If you already have the module for each stage, you can skip the pipeline split step and directly use the runtime offering of the ``pipelining`` package.
+
+This can be done by creating a ``ManualPipelineStage`` to wrap your stage module:
+
+.. currentmodule:: torch.distributed.pipelining.PipelineStage
+
+.. autoclass:: ManualPipelineStage
+
+
+Step 2: Using ``PipelineSchedule`` for Execution
+************************************************
 
 After transforming the model into a ``Pipe`` representation, we can run its stages in a distributed *runtime*. This can be done in two steps:
 * instantiate a ``PipelineStage`` from a stage module of ``Pipe``;
@@ -180,6 +208,27 @@ Note that since we split our model into three stages, we must run this script wi
 .. code-block:: bash
 
   torchrun --nproc_per_node=3 example.py
+
+Examples
+********
+
+In the `PiPPy <https://github.com/pytorch/PiPPy>`_ repo where this package is migrated from, we provide rich examples based on realistic models. In particular, we show how to apply pipelining without any model code change. You can refer to the `HuggingFace examples directory <https://github.com/pytorch/PiPPy/tree/main/examples/huggingface>`_. Popular examples include: `GPT2 <https://github.com/pytorch/PiPPy/tree/main/examples/huggingface/pippy_gpt2.py>`_, and `LLaMA <https://github.com/pytorch/PiPPy/tree/main/examples/llama>`_.
+
+Techniques Deep Dive
+********************
+
+How does the ``pipeline`` API split a model?
+============================================
+
+First, the ``pipeline`` API turns our model into a directed acyclic graph (DAG) by tracing the model.
+We trace the model via ``torch.export`` -- a PyTorch 2 full-graph capturing tool.
+Then, it groups together the operations and parameters into *pipeline stages*.
+Stages are represented as ``submod_N`` submodules, where ``N`` is a natural number.
+
+For the `split_spec`, our library also provides ``SplitPoint.BEGINNING`` for a user to specify a split point *before* execution of certain module, and similarly, ``SplitPoint.END``  for split point *after* execution of certain module.
+
+API Reference
+*************
 
 Pipeline Transformation APIs
 ============================
