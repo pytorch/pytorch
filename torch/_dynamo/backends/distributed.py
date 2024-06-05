@@ -521,7 +521,7 @@ class DDPOptimizer:
             if node.op == "call_function":
                 for arg in node.args:
                     param = arg.meta["example_value"]
-                    if not isinstance(arg.meta["example_value"], torch.nn.Parameter):
+                    if not isinstance(param, torch.nn.Parameter):
                         continue
                     if param.requires_grad and not self._ignore_parameter(param):
                         bucket = buckets[0]
