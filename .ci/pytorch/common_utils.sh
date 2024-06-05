@@ -60,10 +60,24 @@ function pip_install_whl() {
   # Convert the input arguments into an array
   local args=("$@")
 
-  for path in "${args[@]}"; do
-    python3 -mpip install --no-index --no-deps "$path"
-  done
+  # Check if the first argument contains multiple paths separated by spaces
+  if [[ "${args[0]}" == *" "* ]]; then
+    # Split the string by spaces into an array
+    IFS=' ' read -r -a paths <<< "${args[0]}"
+    # Loop through each path and install individually
+    for path in "${paths[@]}"; do
+      echo "Installing $path"
+      python3 -mpip install --no-index --no-deps "$path"
+    done
+  else
+    # Loop through each argument and install individually
+    for path in "${args[@]}"; do
+      echo "Installing $path"
+      python3 -mpip install --no-index --no-deps "$path"
+    done
+  fi
 }
+
 
 function pip_install() {
   # retry 3 times
