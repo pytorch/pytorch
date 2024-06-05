@@ -31,11 +31,20 @@ class _ComputationType(Enum):
     FORWARD = 1
     BACKWARD = 2
 
+    def __str__(self):
+        if self == _ComputationType.FORWARD:
+            return "F"
+        else:
+            return "B"
+
 
 class _Action(NamedTuple):
     computation_type: _ComputationType
     microbatch_index: int
     stage_index: int
+
+    def __repr__(self):
+        return f"{self.computation_type}{self.microbatch_index}_s{self.stage_index}"
 
 
 class _PipelineSchedule(ABC):

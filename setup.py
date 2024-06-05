@@ -1059,7 +1059,7 @@ def configure_extension_build():
 
     # These extensions are built by cmake and copied manually in build_extensions()
     # inside the build_ext implementation
-    if cmake_cache_vars["BUILD_CAFFE2"]:
+    if cmake_cache_vars["BUILD_CAFFE2"] and not BUILD_LIBTORCH_WHL:
         extensions.append(
             Extension(name="caffe2.python.caffe2_pybind11_state", sources=[]),
         )
@@ -1071,7 +1071,7 @@ def configure_extension_build():
             extensions.append(
                 Extension(name="caffe2.python.caffe2_pybind11_state_hip", sources=[]),
             )
-    if cmake_cache_vars["BUILD_FUNCTORCH"]:
+    if cmake_cache_vars["BUILD_FUNCTORCH"] and not BUILD_LIBTORCH_WHL:
         extensions.append(
             Extension(name="functorch._C", sources=[]),
         )
@@ -1381,7 +1381,7 @@ def main():
         "utils/model_dump/*.mjs",
     ]
 
-    if BUILD_PYTHON_ONLY:
+    if not BUILD_LIBTORCH_WHL:
         torch_package_data.extend(
             [
                 "lib/libtorch_python.so",
@@ -1389,7 +1389,7 @@ def main():
                 "lib/libtorch_python.dll",
             ]
         )
-    else:
+    if not BUILD_PYTHON_ONLY:
         torch_package_data.extend(
             [
                 "lib/*.so*",
