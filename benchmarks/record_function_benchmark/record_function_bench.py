@@ -1,12 +1,12 @@
 import argparse
 import sys
 
-import torch
-import torch.utils.benchmark as benchmark_utils
-
 from benchmarks.fastrnns.factory import lstm_creator
 
 from torchvision.models import resnet50
+
+import torch
+import torch.utils.benchmark as benchmark_utils
 
 
 def prepare_lstm_jit(bench_args):
