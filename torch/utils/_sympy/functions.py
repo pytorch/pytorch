@@ -364,6 +364,36 @@ class CleanDiv(FloorDiv):
     pass
 
 
+# Don't use sympy ceiling/floor as they will attempt simplifications involving
+# frac
+class CeilToInt(sympy.Function):
+    is_integer = True
+
+    @classmethod
+    def eval(cls, number):
+        # assert number.is_integer is not True, number
+        if number == sympy.oo:
+            return int_oo
+        if number == -sympy.oo:
+            return -int_oo
+        if isinstance(number, sympy.Number):
+            return sympy.Integer(math.ceil(float(number)))
+
+
+class FloorToInt(sympy.Function):
+    is_integer = True
+
+    @classmethod
+    def eval(cls, number):
+        # assert number.is_integer is not True, number
+        if number == sympy.oo:
+            return int_oo
+        if number == -sympy.oo:
+            return -int_oo
+        if isinstance(number, sympy.Number):
+            return sympy.Integer(math.floor(float(number)))
+
+
 class CeilDiv(sympy.Function):
     """
     Div used in indexing that rounds up.
@@ -617,7 +647,7 @@ class RoundToInt(sympy.Function):
             return int_oo
         if number is -sympy.oo:
             return -int_oo
-        if isinstance(number, sympy.Float):
+        if isinstance(number, sympy.Number):
             return sympy.Integer(round(float(number), 0))
 
 
@@ -644,7 +674,7 @@ class RoundDecimal(sympy.Function):
     def eval(cls, number, ndigits):
         # assert number.is_integer is not True, number
 
-        if isinstance(number, sympy.Float) and isinstance(ndigits, sympy.Integer):
+        if isinstance(number, sympy.Number) and isinstance(ndigits, sympy.Integer):
             return sympy.Float(round(float(number), int(ndigits)))
 
 

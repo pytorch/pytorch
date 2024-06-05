@@ -1385,6 +1385,8 @@ SYMPY_INTERP = {
     'IsNonOverlappingAndDenseIndicator': eval_is_non_overlapping_and_dense,
     'floor': math.floor,
     'ceiling': math.ceil,
+    'FloorToInt': math.floor,
+    'CeilToInt': math.ceil,
     'cast_symbool_to_symint_guardless': cast_symbool_to_symint_guardless,
     'RoundToInt': builtins.round,
     'RoundDecimal': builtins.round,
@@ -4303,12 +4305,10 @@ class ShapeEnv:
             # https://github.com/pytorch/pytorch/pull/123675
             for x in self.size_like & var_to_range.keys():
                 if var_to_range[x] is not None:
-                    # TODO: Maybe we should preserve the lower bound here?
-                    # NB: Upper bound the range with some large amount
-                    # (281 TB here was arbitrarily chosen to match addressable
-                    # virtual space on x86_64) so that comparisons against
-                    # sys.maxsize can no-op
-                    var_to_range[x] = ValueRanges(2, 2 ** 48)
+                    # NB: do NOT set upper to 2 ** 48, we're using this solely
+                    # to determine if we can do size-like replacement, the
+                    # upper bound is irrelevant here
+                    var_to_range[x] = ValueRanges(2, int_oo)
                     assert var_to_range[x].is_int
         return bound_sympy(expr, var_to_range)
 
@@ -4426,11 +4426,12 @@ class ShapeEnv:
                 vr = self._default_unspecified_value_range()
             if size_oblivious and k in self.size_like:
                 lower = max(2, vr.lower)
+                upper = min(2 ** 48, vr.upper)
                 # This is a bit dodgy: what this means is that there was a
                 # size-like unbacked symbol whose upper bound < 2.  This
                 # causes... problems.
-                if lower <= vr.upper:
-                    vr = ValueRanges(lower, vr.upper)
+                if lower <= upper:
+                    vr = ValueRanges(lower, upper)
             else:
                 lower = vr.lower
             # Don't do anything if we don't have a nontrivial lower bound

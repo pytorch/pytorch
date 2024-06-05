@@ -16,10 +16,12 @@ from sympy.logic.boolalg import Boolean as SympyBoolean, BooleanAtom
 
 import torch
 from .functions import (
+    CeilToInt,
     CleanDiv,
     FloatPow,
     FloatTrueDiv,
     FloorDiv,
+    FloorToInt,
     IntTrueDiv,
     IsNonOverlappingAndDenseIndicator,
     Mod,
@@ -146,6 +148,8 @@ def sympy_interp(
         TruncToInt: "trunc_to_int",
         sympy.floor: "floor_to_int",
         sympy.ceiling: "ceil_to_int",
+        FloorToInt: "floor_to_int",
+        CeilToInt: "ceil_to_int",
         RoundToInt: "round_to_int",
     }
     if (handler_name := INDEX_DTYPE_HANDLERS.get(expr.func)) is not None:
@@ -162,9 +166,12 @@ def sympy_interp(
             acc = handler(args[0], args[1])
             for i in range(2, len(args)):
                 acc = handler(acc, args[i])
+            log.debug("%s(%s) -> %s", handler_name, args, acc)
             return acc
         else:
-            return handler(*args)
+            r = handler(*args)
+            log.debug("%s(%s) -> %s", handler_name, args, r)
+            return r
     except Exception:
         log.warning("failed while executing %s(%s)", handler_name, args)
         raise

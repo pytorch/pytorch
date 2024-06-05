@@ -253,7 +253,6 @@ Target Expressions:
   ==> (>= 0 s1)
   ==> (>= 0 s2)
   ==> (>= 0 s3)
-  ==> (>= 9223372036854775806 s0)
 
 Failed Source Expressions:
   ==> (== (+ L['shape'][0] L['shape'][1] L['shape'][2]) L['x'].size()[0])""",

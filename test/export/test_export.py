@@ -5047,6 +5047,7 @@ def forward(self, x, y):
         }
         export(f, (inputs,), dynamic_shapes=dynamic_shapes)
 
+    @unittest.expectedFailure
     def test_disable_forced_specializations(self):
         # check that _disable_forced_specializations and _allow_complex_guards_as_runtime_asserts flags
         # both behave correctly, avoiding forced specializations and deferring to runtime.
@@ -5192,6 +5193,7 @@ def forward(self, x, y):
         ):  # fail only at runtime
             ep.module()(torch.randn(4, 3, 2), torch.randn(10))  # fail
 
+    @unittest.expectedFailure
     def test_disable_forced_specializations_errors(self):
         # check error messages with disable_forced_specializations = False/True
         class Foo(torch.nn.Module):

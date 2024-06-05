@@ -27,7 +27,6 @@ import torch._logging
 import torch.fx
 from torch._decomp import get_decompositions
 from torch._dynamo.utils import defake, dynamo_timed
-from torch.utils._sympy.numbers import int_oo
 from torch._logging import LazyString, trace_structured
 from torch._prims_common import make_channels_last_strides_for
 from torch._subclasses.fake_tensor import FakeTensor
@@ -42,6 +41,7 @@ from torch.fx.experimental.symbolic_shapes import (
     SymTypes,
 )
 from torch.utils._mode_utils import no_dispatch
+from torch.utils._sympy.numbers import int_oo
 
 from . import config, ir
 from .codegen.common import (
@@ -930,22 +930,7 @@ class GraphLowering(torch.fx.Interpreter):
             # which run through implicit fallback must constrain their
             # arguments' fx strides
             layout_constraint = None
-
-            def needs_fixed_stride_order(target):
-                if (
-                    torch._C.Tag.needs_fixed_stride_order in target.tags
-                    and torch._C.Tag.does_not_need_fixed_stride_order in target.tags
-                ):
-                    # If both tags were specified, pessimistically assume that we do need it.
-                    return True
-                if torch._library.utils.is_builtin(target):
-                    return torch._C.Tag.needs_fixed_stride_order in target.tags
-                else:
-                    return (
-                        torch._C.Tag.does_not_need_fixed_stride_order not in target.tags
-                    )
-
-            if needs_fixed_stride_order(target):
+            if torch._C.Tag.needs_fixed_stride_order in target.tags:
                 # We have to set the current args because call_function will immediately
                 # evaluate this lowering after creating the fallback, without evaluating
                 # the layout constraint

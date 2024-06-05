@@ -15,7 +15,6 @@ from torch.fx._compatibility import compatibility
 from torch.fx._utils import lazy_format_graph_code
 from torch.fx.experimental.sym_node import SymNode
 from torch.fx.graph_module import GraphModule
-from torch.utils._sympy.numbers import int_oo
 
 log = logging.getLogger(__name__)
 graph_code_log = torch._logging.getArtifactLogger(__name__, "graph_code")
@@ -86,6 +85,7 @@ def insert_deferred_runtime_asserts(
         InnerTensorKey,
     )
     from torch.utils._sympy.interp import sympy_interp
+    from torch.utils._sympy.numbers import int_oo
     from torch.utils._sympy.reference import PythonReferenceAnalysis
 
     # TODO: Request simplification on runtime asserts before emitting them

@@ -381,6 +381,17 @@ class TestPySymInt(TestCase):
         self.assertTrue(str(expand_x.shape[1]), str(x.shape[0]))
         self.assertTrue(str(expand_x.shape[1]), str(result.shape[0]))
 
+    def test_floordiv_static(self):
+        shape_env = ShapeEnv()
+        s0 = create_symint(shape_env, 8)
+        # This was extracted from
+        # python test/inductor/test_cuda_cpp_wrapper.py -k
+        # DynamicShapesCudaWrapperCudaTests.test_insignificant_strides_cuda_dynamic_shapes_cuda_wrapper
+        bool(s0 % 2 == 0)
+        bool(s0 % (s0 // 2) == 0)
+        bool(2 * (s0 // 2) == s0)
+        self.assertTrue(statically_known_true(s0 // (s0 // 2) == 2))
+
     def test_numel(self):
         shape_env = ShapeEnv()
         x = create_symbolic_tensor("x", torch.randn(5), shape_env)
@@ -487,14 +498,14 @@ class TestPySymInt(TestCase):
         self.assertIsInstance(r, torch.SymInt, msg=type(r))
         self.assertExpectedInline(
             str(shape_env.guards[0][0]),
-            """Eq(floor(IntTrueDiv(s0, 2)), 2)""",
+            """Eq(FloorToInt(IntTrueDiv(s0, 2)), 2)""",
         )
         r = math.floor(3.0 * a0)
         self.assertEqual(r, 15)
         self.assertIsInstance(r, torch.SymInt, msg=type(r))
         self.assertExpectedInline(
             str(shape_env.guards[1][0]),
-            """Eq(floor(3.0*ToFloat(s0)), 15)""",
+            """Eq(FloorToInt(3.0*ToFloat(s0)), 15)""",
         )
 
     def test_sym_trunc(self):
@@ -521,7 +532,7 @@ class TestPySymInt(TestCase):
         self.assertIsInstance(r, torch.SymInt, msg=type(r))
         self.assertExpectedInline(
             str(shape_env.guards[0][0]),
-            """Eq(ceiling(IntTrueDiv(s0, 2)), 3)""",
+            """Eq(CeilToInt(IntTrueDiv(s0, 2)), 3)""",
         )
         r1 = 3.0 * a0
         r = math.floor(r1)
@@ -529,7 +540,7 @@ class TestPySymInt(TestCase):
         self.assertIsInstance(r, torch.SymInt, msg=type(r))
         self.assertExpectedInline(
             str(shape_env.guards[1][0]),
-            """Eq(floor(3.0*ToFloat(s0)), 15)""",
+            """Eq(FloorToInt(3.0*ToFloat(s0)), 15)""",
         )
 
     def test_sym_ite(self):
