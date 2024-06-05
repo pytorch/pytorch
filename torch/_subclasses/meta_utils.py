@@ -1305,9 +1305,6 @@ class MetaConverter:
                         symbolic_context=base_symbolic_context,
                     )
 
-                    if t.base.is_parameter:
-                        base._is_param = True
-
                     def is_c_of_r(complex_dtype, real_dtype):
                         return (
                             utils.is_complex_dtype(complex_dtype)
@@ -1540,6 +1537,9 @@ class MetaConverter:
             # Need to reflect this in the generated FakeTensor.
             if t.storage is not None and t.storage.size == 0:
                 r.untyped_storage().resize_(0)
+
+            if t.is_parameter:
+                r._is_param = True
 
             self.set_tensor_memo(t, r)
 
