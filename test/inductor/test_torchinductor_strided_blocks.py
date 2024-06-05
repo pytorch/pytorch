@@ -27,6 +27,8 @@ skip_windows_ci(__name__, __file__)
 
 importlib.import_module("filelock")
 
+max_block: int = TRITON_MAX_BLOCK["X"]
+
 
 @requires_gpu()
 @config.patch("triton.use_block_ptr", True)
@@ -42,6 +44,7 @@ class TritonBlockPointerTest(InductorTestCase):
         compile_kwargs: Optional[dict] = None,
         expected_num_block_pointers: Optional[int] = None,
         expected_num_programs: int = 1,
+        expected_num_triton_kernels: int = 1,
     ):
         """
         Runs the module through Inductor, comparing to eager reference.
@@ -63,11 +66,14 @@ class TritonBlockPointerTest(InductorTestCase):
         for ref, actual in zip(ref_tensors, actual_tensors):
             self.assertTrue(torch.allclose(ref, actual))
 
+        def count_code(substr: str, expected: int):
+            count = sum(prog.count(substr) for prog in code)
+            self.assertEqual(count, expected)
+
         # Check the code
         self.assertEqual(len(code), expected_num_programs)
-        num_block_pointers = sum(prog.count("tl.make_block_ptr") for prog in code)
-        if expected_num_block_pointers is not None:
-            self.assertEqual(num_block_pointers, expected_num_block_pointers)
+        count_code("@triton.jit", expected_num_triton_kernels)
+        count_code("tl.make_block_ptr", expected_num_block_pointers)
 
         return result, code
 
@@ -91,7 +97,7 @@ class TritonBlockPointerTest(InductorTestCase):
         device = torch.device(GPU_TYPE)
         inputs = [torch.randn(8).to(device) for arg_idx in range(2)]
 
-        # Allow failure for bad inputs
+        # Expect failure for bad inputs
         with self.assertRaises(AssertionError) if raises else contextlib.nullcontext():
             # Expect 3 block pointers: 2 inputs 1 output
             self.run_and_compare(
@@ -105,9 +111,17 @@ class TritonBlockPointerTest(InductorTestCase):
             ((16, 8, 8, 8), (8, 8, 4, 2), None, None, True),
             ((8, 8), (4, 4), None, 10, True),  # Storage offset
             ((8, 8), (4, 4), (16, 2), None, True),  # Non-default strides
+            ((8, 8), (4, 4), (1, 8), None, True),  # Transposed strides
             ((15, 9), (8, 8), None, None, True),  # Non-power-of-2 full dims
             ((15, 9), (15, 3), None, None, False),  # Non-power-of-2 view dims
             ((1, 1, 1), (1, 1, 1), None, None, False),  # Scalar
+            (
+                (2, 4 * max_block),
+                (2, 3 * max_block),
+                None,
+                None,
+                True,
+            ),  # Multiple of max_block
         ],
     )
     def test_strided_block_ptr(
@@ -121,9 +135,9 @@ class TritonBlockPointerTest(InductorTestCase):
         """
         Test generating strided ND block pointers.
 
-        If `require_block_ptr=True`, the generated code must contain block
+        If require_block_ptr is True, the generated code must contain block
         pointers. However, ND block pointers are not supported for all shapes. So
-        we also test some odd shapes with `require_block_ptr=False`, to ensure that
+        we also test some odd shapes with require_block_ptr set to False, to ensure that
         block pointer analysis does not break these cases.
         """
 
@@ -144,26 +158,28 @@ class TritonBlockPointerTest(InductorTestCase):
             foo, *args, expected_num_block_pointers=3 if require_block_ptr else None
         )
 
-    def test_different_sized_blocks(self):
+    def test_broadcast(self):
         """
         Test that we can generate strided block pointers when inputs have different
-        shapes.
+        shapes, and they are broadcast together.
         """
 
         def foo(x, y):
-            return x + 1, y * 2
+            a = x + 1
+            b = y * 2
+            return a + b
 
         device = torch.device(GPU_TYPE)
         full_size = (16, 16)
         full = torch.randn(full_size).to(device)
         x_size = (8, 8)
-        y_size = (4, 4)
+        y_size = (1, 8)
         x, y = tuple(
             torch.as_strided(full, size, full.stride()) for size in (x_size, y_size)
         )
 
         # Check that input sizes are not the same
-        self.assertNotEqual(x_size, y_size)
+        self.assertNotEqual(x.shape, y.shape)
 
         # Expect 4 block pointers: 2 inputs and 2 outputs
         self.run_and_compare(foo, x, y, expected_num_block_pointers=4)
@@ -195,7 +211,6 @@ class TritonBlockPointerTest(InductorTestCase):
             return x - 1
 
         device = torch.device(GPU_TYPE)
-        max_block = TRITON_MAX_BLOCK["X"]
         full_size = (3 * max_block, 3)
         view_size = (3 * max_block, 2)
         full = torch.randn(full_size).to(device)
@@ -235,24 +250,21 @@ class TritonBlockPointerTest(InductorTestCase):
         Test dynamic shapes, where we know the shape is a multiple of the max block
         size. We should be able to generate a block pointer for this case.
         """
-        max_block = TRITON_MAX_BLOCK["X"]
 
         def foo(x):
             tile_dims = (3 * max_block * x.shape[0], 3 * x.shape[1])
             view_size = (3 * max_block * x.shape[0], 2 * x.shape[1])
             full = x.tile(tile_dims)
             view = torch.as_strided(full, view_size, full.stride())
-            result = view + view
-
-            return result
+            return view + view
 
         device = torch.device(GPU_TYPE)
         x_size = (1, 1)
         x = torch.randn(x_size).to(device)
 
-        # Expect 3 block pointers: 2 inputs and output
+        # Expect 2 block pointers: input and output
         self.run_and_compare(
-            x, compile_kwargs={"dynamic": True}, expected_num_block_pointers=3
+            x, compile_kwargs={"dynamic": True}, expected_num_block_pointers=2
         )
 
 
