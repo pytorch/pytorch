@@ -471,7 +471,6 @@ def build_deps():
     check_submodules()
     check_pydep("yaml", "pyyaml")
     build_python = not BUILD_LIBTORCH_WHL
-    print(f"build python is {build_python}")
     build_caffe2(
         version=version,
         cmake_python_library=cmake_python_library,
@@ -1381,7 +1380,7 @@ def main():
         "utils/model_dump/*.mjs",
     ]
 
-    if BUILD_PYTHON_ONLY:
+    if not BUILD_LIBTORCH_WHL:
         torch_package_data.extend(
             [
                 "lib/libtorch_python.so",
@@ -1389,7 +1388,7 @@ def main():
                 "lib/libtorch_python.dll",
             ]
         )
-    else:
+    if not BUILD_PYTHON_ONLY:
         torch_package_data.extend(
             [
                 "lib/*.so*",
@@ -1444,7 +1443,6 @@ def main():
         "torch": torch_package_data,
     }
 
-    exclude_package_data = {}
     if not BUILD_LIBTORCH_WHL:
         package_data["torchgen"] = torchgen_package_data
         package_data["caffe2"] = [
@@ -1476,7 +1474,6 @@ def main():
         author_email="packages@pytorch.org",
         python_requires=f">={python_min_version_str}",
         # PyPI package information.
-        include_package_data=True,
         classifiers=[
             "Development Status :: 5 - Production/Stable",
             "Intended Audience :: Developers",
