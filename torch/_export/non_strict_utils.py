@@ -82,6 +82,7 @@ def fakify(
         constraint_sizes=[None] * n_dims,
     )
     t_id = id(t)
+    assert mode.shape_env is not None
     if t_id in t_constraints:
         for i, constraint in t_constraints[t_id].items():
             symbolic_context.constraint_sizes[i] = constraint.constraint_range
@@ -255,7 +256,7 @@ def produce_guards_and_solve_constraints(
         _disable_forced_specializations: if True, avoids forced specializations
     """
     shape_env = fake_mode.shape_env
-    assert shape_env.tracked_fakes is not None
+    assert shape_env is not None and shape_env.tracked_fakes is not None
 
     placeholders = [tf.fake for tf in shape_env.tracked_fakes]
     sources = [tf.source for tf in shape_env.tracked_fakes]
@@ -321,6 +322,7 @@ def make_constraints(
     """
 
     shape_env = fake_mode.shape_env
+    assert shape_env is not None
     inline_constraints = gm.meta.get("inline_constraints", [])
     range_constraints = {
         symbol: inline_constraints[symbol] for symbol in inline_constraints
