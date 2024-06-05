@@ -538,7 +538,7 @@ bool can_use_cudnn_attention(const sdp_params& params, bool debug) {
           // check_is_causal,
           check_dtypes_low_precision,
           check_cudnn_hardware_support
-	  );
+          );
   for (auto& constraint : general_constraints) {
     if (!constraint(params, debug)) {
       return false;
