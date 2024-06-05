@@ -9810,6 +9810,7 @@ class CommonTemplate:
             bar_cuda,
             bar_xpu,
             bar_meta,
+            tags=[torch._C.Tag.needs_fixed_stride_order],
         )
 
         def fn(x):
@@ -9872,68 +9873,12 @@ class CommonTemplate:
             baz_cuda,
             baz_xpu,
             baz_meta,
+            tags=[torch._C.Tag.needs_fixed_stride_order],
         )
 
         with torch.no_grad():
             net = torch.compile(model)
             out = net(input_t)
-
-    @requires_gpu()
-    @config.patch(implicit_fallbacks=True)
-    def test_needs_fixed_stride_order(self):
-        with torch.library._scoped_library("prims", "FRAGMENT") as prims_lib:
-            with torch.library._scoped_library("custom", "FRAGMENT") as custom_lib:
-                strides = []
-
-                def foo_impl(x):
-                    strides.append(x.stride())
-                    return x.clone()
-
-                def foo_meta(x):
-                    return x.clone()
-
-                all_ops = []
-                for (
-                    needs_fixed_stride_order,
-                    does_not_need_fixed_stride_order,
-                ) in itertools.product([True, False], [True, False]):
-                    tags = []
-                    if needs_fixed_stride_order:
-                        tags.append(torch.Tag.needs_fixed_stride_order)
-                    if does_not_need_fixed_stride_order:
-                        tags.append(torch.Tag.does_not_need_fixed_stride_order)
-                    name = f"foo_{int(needs_fixed_stride_order)}{int(does_not_need_fixed_stride_order)}"
-                    for ns, lib in {"custom": custom_lib, "prims": prims_lib}.items():
-                        all_ops.append(ns + "::" + name)
-                        lib.define(f"{name}(Tensor x) -> Tensor", tags=tags)
-                        lib.impl(name, foo_impl, "CompositeExplicitAutograd")
-                        lib.impl(name, foo_meta, "Meta")
-
-                assert len(all_ops) == 8
-                expect_contig_strides = {
-                    "custom::foo_01",
-                    "prims::foo_00",
-                    "prims::foo_01",
-                }
-                print(all_ops)
-
-                for qualname in all_ops:
-                    ns, name = qualname.split("::")
-                    op = getattr(getattr(torch.ops, ns), name)
-
-                    @torch.compile(fullgraph=True)
-                    def f(x):
-                        y = x.t().contiguous().t()
-                        y = y.sin()
-                        return op(y)
-
-                    x = torch.randn(24, 24, device=self.device)
-                    f(x)
-                    stride = strides[-1]
-                    if qualname in expect_contig_strides:
-                        self.assertEqual(stride, (24, 1))
-                    else:
-                        self.assertEqual(stride, (1, 24))
 
     def test_buffer_use_after_remove(self):
         # https://github.com/pytorch/pytorch/issues/102857
