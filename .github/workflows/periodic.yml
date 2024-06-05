@@ -37,7 +37,6 @@ jobs:
     permissions:
       id-token: write
       contents: read
-      
   linux-focal-cuda12_1-py3_10-gcc9-build:
     name: linux-focal-cuda12.1-py3.10-gcc9
     uses: ./.github/workflows/_linux-build.yml
