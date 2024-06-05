@@ -521,6 +521,25 @@ def reciprocal(g: jit_utils.GraphContext, self):
 @symbolic_helper.parse_args("v", "i")
 @_beartype.beartype
 def cat(g: jit_utils.GraphContext, tensor_list, dim):
+    """
+    Concatenates the tensors in the input `tensor_list` along the specified `dim` dimension.
+
+    Args:
+        g (jit_utils.GraphContext): The graph context.
+        tensor_list (List[Tensor]): The list of tensors to concatenate.
+        dim (int): The dimension along which to concatenate the tensors.
+
+    Returns:
+        Tensor: The concatenated tensor.
+
+    Raises:
+        AssertionError: If the `tensor_list` is empty or if the tensors have different ranks.
+
+    Note:
+        - Empty tensors, such as `torch.Tensor([])`, are ignored during concatenation.
+        - The input `tensor_list` is modified in-place.
+
+    """
     tensors = symbolic_helper._unpack_list(tensor_list)
     # torch.cat ignores empty tensors such as `torch.Tensor([])`
     # These needs to be removed as input from ONNX's concat too, otherwise shape inference
@@ -849,6 +868,19 @@ def numpy_T(g: jit_utils.GraphContext, input):
 @symbolic_helper.quantized_args(True)
 @_beartype.beartype
 def expand(g: jit_utils.GraphContext, self, size, implicit):
+    """
+    Expand the tensor `self` to the specified `size`.
+
+    Args:
+        g (jit_utils.GraphContext): The graph context.
+        self (Tensor): The input tensor to be expanded.
+        size (Union[int, List[int]]): The desired size of the output tensor.
+        implicit (bool): Whether the expansion is implicit or explicit.
+
+    Returns:
+        Tensor: The expanded tensor.
+
+    """
     size = symbolic_helper._maybe_get_const(size, "is")
     if not symbolic_helper._is_value(size):
         size = g.op("Constant", value_t=torch.LongTensor(size))
@@ -1132,6 +1164,18 @@ def unbind(g: jit_utils.GraphContext, self, dim=0, _outputs=None):
 @symbolic_helper.parse_args("v", "i", "v")
 @_beartype.beartype
 def select(g: jit_utils.GraphContext, self, dim, index):
+    """
+    Selects elements from the input tensor along a given dimension `dim`.
+    
+    Args:
+        g (jit_utils.GraphContext): The graph context.
+        self (Tensor): The input tensor.
+        dim (int): The dimension along which to select elements.
+        index (Tensor or int): The indices of the elements to select.
+    
+    Returns:
+        Tensor: The selected elements from the input tensor.
+    """
     index = symbolic_helper._maybe_get_scalar(index)
     if (not symbolic_helper._is_value(index)) and (index < 0):
         if index == -1:
@@ -4081,6 +4125,25 @@ def alias(g: jit_utils.GraphContext, self):
 @symbolic_helper.parse_args("v", "i")
 @_beartype.beartype
 def unsqueeze(g: jit_utils.GraphContext, self, dim):
+    """
+    Unsqueeze the input tensor by inserting a dimension of size one at the specified dimension index.
+
+    Args:
+        g (jit_utils.GraphContext): The graph context.
+        self (torch.Tensor): The input tensor.
+        dim (int): The dimension index at which to insert the new dimension.
+
+    Returns:
+        torch.Tensor: The unsqueezed tensor.
+
+    Raises:
+        NotImplementedError: If the input rank is unknown and the dimension index is negative.
+
+    Warning:
+        If the dimension index is negative, the onnx model might be incorrect as negative axis is not supported in ONNX.
+        The dimension index is converted to `dim + rank + 1` based on the input shape at export time.
+        Passing a tensor of different rank during execution will result in incorrect behavior.
+    """
     # Handle negative dim
     if dim < 0:
         rank = symbolic_helper._get_tensor_rank(self)
@@ -5580,6 +5643,19 @@ def lift(g: jit_utils.GraphContext, self):
 @_onnx_symbolic("aten::masked_fill")
 @_beartype.beartype
 def masked_fill(g: jit_utils.GraphContext, self, mask, value):
+    """
+    Fills elements of the input tensor `self` with `value` where `mask` is True.
+
+    Args:
+        g (jit_utils.GraphContext): The graph context.
+        self (torch.Tensor): The input tensor.
+        mask (torch.Tensor): The mask tensor.
+        value (float or torch.Tensor): The value to fill the tensor with.
+
+    Returns:
+        torch.Tensor: The tensor with elements filled according to the mask.
+
+    """
     mask = g.op("Cast", mask, to_i=_C_onnx.TensorProtoDataType.BOOL)
     value = symbolic_helper._maybe_get_scalar(value)
     return g.op("Where", mask, symbolic_helper._if_scalar_type_as(value, self), self)
