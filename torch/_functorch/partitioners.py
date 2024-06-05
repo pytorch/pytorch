@@ -1394,7 +1394,7 @@ def _optimize_runtime_with_given_memory(
     runtimes: List[float],
     max_memory: float,
 ) -> Tuple[float, List[int], List[int]]:
-    SOLVER = config.memory_budget_solver
+    SOLVER = config.activation_memory_budget_solver
     if SOLVER == "greedy":
         return greedy_knapsack(memory, runtimes, max_memory)
     elif SOLVER == "ilp":
@@ -1409,7 +1409,7 @@ from torch.utils._mode_utils import no_dispatch
 
 
 def estimate_runtime(node):
-    RUNTIME_MODE = config.memory_budget_runtime_estimator
+    RUNTIME_MODE = config.activation_memory_budget_runtime_estimator
 
     def materialize_arg(x):
         if isinstance(x, fx.Node) and isinstance(x.meta["val"], torch.Tensor):
@@ -1742,7 +1742,7 @@ def min_cut_rematerialization_partition(
             for user in node.users:
                 node.dist_from_bw = min(node.dist_from_bw, user.dist_from_bw + 1)
 
-    memory_budget = config.memory_budget
+    memory_budget = config.activation_memory_budget
     for node in joint_graph.nodes:
         if isinstance(node.meta.get("memory_budget", None), float):
             memory_budget = node.meta["memory_budget"]
