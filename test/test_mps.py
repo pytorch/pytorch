@@ -436,7 +436,6 @@ def mps_ops_modifier(ops):
         'mv',
         'ne',
         'neg',
-        'nn.functional.conv3d',
         'nn.functional.padconstant',
         'nn.functional.padreflect',
         'nn.functional.padreplicate',
@@ -668,7 +667,7 @@ def mps_ops_modifier(ops):
         'special.polygammaspecial_polygamma_n_0': [torch.float32, torch.int16, torch.int8],
     }
 
-    MACOS_14_2_XFAILLIST = {
+    MACOS_BEFORE_14_4_XFAILLIST = {
         # This op works fine in 14.4 m1 but fails in 14.2 m2
         'fft.hfft2': [torch.complex64],
     }
@@ -1046,10 +1045,10 @@ def mps_ops_modifier(ops):
                              unittest.expectedFailure,
                              dtypes=xfaillist[key]))
 
-        if key in MACOS_14_2_XFAILLIST and (product_version == 14.2):
+        if key in MACOS_BEFORE_14_4_XFAILLIST and (product_version >= 14.0 and product_version < 14.4):
             addDecorator(op, DecorateInfo(
                          unittest.expectedFailure,
-                         dtypes=MACOS_14_2_XFAILLIST[key]))
+                         dtypes=MACOS_BEFORE_14_4_XFAILLIST[key]))
 
         if key in MACOS_BEFORE_13_3_XFAILLIST and (torch.backends.mps.is_macos13_or_newer() and product_version < 13.3):
             addDecorator(op, DecorateInfo(
