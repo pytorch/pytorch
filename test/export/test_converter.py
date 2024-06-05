@@ -1,7 +1,7 @@
 # Owner(s): ["oncall: export"]
 
 import unittest
-from typing import Tuple
+from typing import Tuple, Dict
 
 import torch
 
@@ -273,10 +273,19 @@ class TestConverter(TestCase):
             def forward(self, x: torch.Tensor):
                 return x.dtype in [-1]
 
+        
+        class MTensorIn(torch.nn.Module):
+            def forward(self, x: torch.Tensor, x_dict: Dict[torch.Tensor, str]):
+                return x in x_dict
+
         inp = (torch.tensor(4),)
         self._check_equal_ts_ep_converter(MIn(), inp)
         self._check_equal_ts_ep_converter(MNotIn(), inp)
 
+        inp = (torch.tensor(4), {torch.tensor(4): "foo"})
+        self._check_equal_ts_ep_converter(MTensorIn(), inp)
+        inp = (torch.tensor(1), {torch.tensor(4): "foo"})
+        self._check_equal_ts_ep_converter(MTensorIn(), inp)
 
 if __name__ == "__main__":
     run_tests()
