@@ -379,7 +379,6 @@ class SubmodCompiler(torch.fx.interpreter.Interpreter):
 
 
 class DDPOptimizer:
-
     """Note [DDPOptimizer]
     DDPOptimizer applies when dynamo compiles models wrapped in DistributedDataParallel (DDP),
     breaking the dynamo graph into chunks to compile separately, with the breaks aligning to
@@ -518,6 +517,18 @@ class DDPOptimizer:
                     if buckets[0].opcount_increased_to_capture_external_output == 0:
                         buckets[0].paramsize_before_opcount_increase = buckets[0].size
                     buckets[0].opcount_increased_to_capture_external_output += 1
+
+            if node.op == "call_function":
+                for arg in node.args:
+                    param = arg.meta["example_value"]
+                    if not isinstance(arg.meta["example_value"], torch.nn.Parameter):
+                        continue
+                    if param.requires_grad and not self._ignore_parameter(param):
+                        bucket = buckets[0]
+                        bucket.size += param.untyped_storage().nbytes()
+                        bucket.params.append(arg.target)
+                        bucket.param_ids.append(id(param))
+
             if node.op == "call_module":
                 target_mod = gm.get_submodule(node.target)
                 if target_mod not in processed_modules:
