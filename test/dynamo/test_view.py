@@ -4,9 +4,8 @@ import torch
 import torch._dynamo
 import torch._dynamo.test_case
 
-torch._dynamo.config.capture_scalar_outputs = True
 
-
+@torch._dynamo.config.patch("capture_scalar_outputs", True)
 class ViewTests(torch._dynamo.test_case.TestCase):
     def test_view_to_2d(self):
         @torch.compile(fullgraph=True, backend="eager")
