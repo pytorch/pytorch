@@ -1501,6 +1501,11 @@ class TestReductions(TestCase):
             result = torch.prod(torch.tensor(val, device=device)).item()
             expect = np.prod(np.array(val))
             self.assertEqual(result, expect)
+        # https://github.com/pytorch/pytorch/issues/127866
+        val = [False] * 256
+        result = torch.prod(torch.tensor(val, device=device), dtype=torch.bool).item()
+        expect = np.prod(np.array(val), dtype=bool)
+        self.assertEqual(result, expect)
 
     @onlyCPU
     def test_max_mixed_devices(self, device):
