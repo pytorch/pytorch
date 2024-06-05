@@ -13,8 +13,8 @@ import torch
 import torch.nn as nn
 from torch import _inductor as inductor
 from torch._dynamo import compiled_autograd, config
-from torch._inductor import config as inductor_config
 from torch._dynamo.utils import counters
+from torch._inductor import config as inductor_config
 from torch._inductor.test_case import run_tests, TestCase
 from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
 from torch.testing._internal.logging_utils import logs_to_string
@@ -1696,13 +1696,18 @@ TORCH_LIBRARY(test_autograd_cpp_node_data_dependent, m) {
 
         self.assertEqual(counters["inductor"]["cudagraph_skips"], 1)
 
+    @unittest.skipIf(not HAS_CUDA, "requires cuda")
     def test_cudagraphs_sdpa(self):
-        query = torch.rand(32, 8, 128, 64, dtype=torch.float16, device="cuda", requires_grad=True)
+        query = torch.rand(
+            32, 8, 128, 64, dtype=torch.float16, device="cuda", requires_grad=True
+        )
         key = torch.rand(32, 8, 128, 64, dtype=torch.float16, device="cuda")
         value = torch.rand(32, 8, 128, 64, dtype=torch.float16, device="cuda")
         out = torch.nn.functional.scaled_dot_product_attention(query, key, value)
 
-        with config.patch(compiled_autograd=True), inductor_config.patch("triton.cudagraphs", True):
+        with config.patch(compiled_autograd=True), inductor_config.patch(
+            "triton.cudagraphs", True
+        ):
             opt_bwd = torch.compile(lambda: out.sum().backward())
             opt_bwd()
 
