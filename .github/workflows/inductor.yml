@@ -44,7 +44,7 @@ jobs:
     uses: ./.github/workflows/_linux-build.yml
     with:
       build-environment: linux-focal-cuda12.1-py3.10-gcc9-sm86
-      docker-image-name: pytorch-linux-focal-cuda12.1-cudnn8-py3-gcc9-inductor-benchmarks
+      docker-image-name: pytorch-linux-focal-cuda12.1-cudnn9-py3-gcc9-inductor-benchmarks
       cuda-arch-list: '8.6'
       test-matrix: |
         { include: [
@@ -86,7 +86,7 @@ jobs:
     uses: ./.github/workflows/_linux-build.yml
     with:
       build-environment: linux-focal-cuda12.1-py3.10-gcc9-sm80
-      docker-image-name: pytorch-linux-focal-cuda12.1-cudnn8-py3-gcc9-inductor-benchmarks
+      docker-image-name: pytorch-linux-focal-cuda12.1-cudnn9-py3-gcc9-inductor-benchmarks
       cuda-arch-list: '8.0'
       test-matrix: |
         { include: [
@@ -112,7 +112,7 @@ jobs:
     uses: ./.github/workflows/_linux-build.yml
     with:
       build-environment: linux-focal-cuda12.1-py3.12-gcc9-sm86
-      docker-image-name: pytorch-linux-focal-cuda12.1-cudnn8-py3.12-gcc9-inductor-benchmarks
+      docker-image-name: pytorch-linux-focal-cuda12.1-cudnn9-py3.12-gcc9-inductor-benchmarks
       cuda-arch-list: '8.6'
       test-matrix: |
         { include: [
@@ -133,18 +133,22 @@ jobs:
     uses: ./.github/workflows/_linux-build.yml
     with:
       build-environment: linux-focal-cuda12.4-py3.10-gcc9-sm86
-      docker-image-name: pytorch-linux-focal-cuda12.4-cudnn8-py3-gcc9-inductor-benchmarks
+      docker-image-name: pytorch-linux-focal-cuda12.4-cudnn9-py3-gcc9-inductor-benchmarks
       cuda-arch-list: '8.6'
       test-matrix: |
         { include: [
           { config: "inductor", shard: 1, num_shards: 1, runner: "linux.g5.4xlarge.nvidia.gpu" },
           { config: "inductor_distributed", shard: 1, num_shards: 1, runner: "linux.g5.12xlarge.nvidia.gpu" },
           { config: "inductor_huggingface", shard: 1, num_shards: 1, runner: "linux.g5.4xlarge.nvidia.gpu" },
+          { config: "inductor_timm", shard: 1, num_shards: 2, runner: "linux.g5.4xlarge.nvidia.gpu" },
           { config: "inductor_timm", shard: 2, num_shards: 2, runner: "linux.g5.4xlarge.nvidia.gpu" },
           { config: "inductor_torchbench", shard: 1, num_shards: 2, runner: "linux.g5.4xlarge.nvidia.gpu" },
+          { config: "inductor_torchbench", shard: 2, num_shards: 2, runner: "linux.g5.4xlarge.nvidia.gpu" },
           { config: "dynamic_inductor_huggingface", shard: 1, num_shards: 1, runner: "linux.g5.4xlarge.nvidia.gpu" },
+          { config: "dynamic_inductor_timm", shard: 1, num_shards: 2, runner: "linux.g5.4xlarge.nvidia.gpu" },
           { config: "dynamic_inductor_timm", shard: 2, num_shards: 2, runner: "linux.g5.4xlarge.nvidia.gpu" },
           { config: "dynamic_inductor_torchbench", shard: 1, num_shards: 2, runner: "linux.g5.4xlarge.nvidia.gpu" },
+          { config: "dynamic_inductor_torchbench", shard: 2, num_shards: 2, runner: "linux.g5.4xlarge.nvidia.gpu" },
           { config: "aot_inductor_huggingface", shard: 1, num_shards: 1, runner: "linux.g5.4xlarge.nvidia.gpu" },
           { config: "aot_inductor_timm", shard: 1, num_shards: 2, runner: "linux.g5.4xlarge.nvidia.gpu" },
           { config: "aot_inductor_timm", shard: 2, num_shards: 2, runner: "linux.g5.4xlarge.nvidia.gpu" },
@@ -171,7 +175,7 @@ jobs:
     uses: ./.github/workflows/_linux-build.yml
     with:
       build-environment: linux-focal-cuda12.4-py3.10-gcc9-sm80
-      docker-image-name: pytorch-linux-focal-cuda12.4-cudnn8-py3-gcc9-inductor-benchmarks
+      docker-image-name: pytorch-linux-focal-cuda12.4-cudnn9-py3-gcc9-inductor-benchmarks
       cuda-arch-list: '8.0'
       test-matrix: |
         { include: [
@@ -185,12 +189,24 @@ jobs:
     uses: ./.github/workflows/_linux-build.yml
     with:
       build-environment: linux-focal-cuda12.4-py3.12-gcc9-sm86
-      docker-image-name: pytorch-linux-focal-cuda12.4-cudnn8-py3.12-gcc9-inductor-benchmarks
+      docker-image-name: pytorch-linux-focal-cuda12.4-cudnn9-py3.12-gcc9-inductor-benchmarks
       cuda-arch-list: '8.6'
       test-matrix: |
         { include: [
           { config: "inductor", shard: 1, num_shards: 1, runner: "linux.g5.4xlarge.nvidia.gpu" },
         ]}
+
+  linux-focal-cuda12_4-py3_10-gcc9-inductor-test-gcp:
+    name: cuda12.4-py3.10-gcc9-sm80
+    uses: ./.github/workflows/_linux-test.yml
+    needs: linux-focal-cuda12_4-py3_10-gcc9-inductor-build-gcp
+    with:
+      build-environment: linux-focal-cuda12.4-py3.10-gcc9-sm80
+      docker-image: ${{ needs.linux-focal-cuda12_4-py3_10-gcc9-inductor-build-gcp.outputs.docker-image }}
+      test-matrix: ${{ needs.linux-focal-cuda12_4-py3_10-gcc9-inductor-build-gcp.outputs.test-matrix }}
+      use-gha: anything-non-empty-to-use-gha
+    secrets:
+      HUGGING_FACE_HUB_TOKEN: ${{ secrets.HUGGING_FACE_HUB_TOKEN }}
 
   linux-focal-cuda12_4-py3_12-gcc9-inductor-test:
     name: cuda12.4-py3.12-gcc9-sm86
@@ -214,6 +230,11 @@ jobs:
           { config: "cpu_inductor_timm", shard: 2, num_shards: 2, runner: "linux.12xlarge" },
           { config: "cpu_inductor_torchbench", shard: 1, num_shards: 2, runner: "linux.12xlarge" },
           { config: "cpu_inductor_torchbench", shard: 2, num_shards: 2, runner: "linux.12xlarge" },
+          { config: "cpu_inductor_huggingface_freezing", shard: 1, num_shards: 1, runner: "linux.12xlarge" },
+          { config: "cpu_inductor_timm_freezing", shard: 1, num_shards: 2, runner: "linux.12xlarge" },
+          { config: "cpu_inductor_timm_freezing", shard: 2, num_shards: 2, runner: "linux.12xlarge" },
+          { config: "cpu_inductor_torchbench_freezing", shard: 1, num_shards: 2, runner: "linux.12xlarge" },
+          { config: "cpu_inductor_torchbench_freezing", shard: 2, num_shards: 2, runner: "linux.12xlarge" },
           { config: "dynamic_cpu_inductor_huggingface", shard: 1, num_shards: 1, runner: "linux.12xlarge" },
           { config: "dynamic_cpu_inductor_timm", shard: 1, num_shards: 2, runner: "linux.12xlarge" },
           { config: "dynamic_cpu_inductor_timm", shard: 2, num_shards: 2, runner: "linux.12xlarge" },
