@@ -418,7 +418,7 @@ class TestConverter(TestCase):
         self._check_equal_ts_ep_converter(MUnpackList(), inp)
         inp = ((torch.zeros(1, 4), torch.ones(1, 4)),)
         self._check_equal_ts_ep_converter(MUnpackTuple(), inp)
-        
+
     def test_convert_nn_module_with_nested_param(self):
         class M(torch.nn.Module):
             def __init__(self, dim: int) -> None:
@@ -470,6 +470,7 @@ class TestConverter(TestCase):
 
             def forward(self, x: torch.Tensor):
                 if torch.sum(x) > 1:
+                    y = x
                     return self.linear(self.m1(x))
                 else:
                     return self.linear(self.m2(x))
