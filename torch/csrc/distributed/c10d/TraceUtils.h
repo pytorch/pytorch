@@ -8,8 +8,6 @@
 #include <torch/csrc/distributed/c10d/Utils.hpp>
 #include <torch/csrc/jit/serialization/pickler.h>
 #include <torch/csrc/profiler/combined_traceback.h>
-#include <iostream>
-#include <memory>
 
 #ifdef USE_C10D_NCCL
 #include <ATen/cuda/CUDAEvent.h>
