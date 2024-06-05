@@ -65,6 +65,58 @@ kind_to_standard_operators = {
 }
 
 
+# Map node to its lifted arguments.
+node_to_lifted_args: Dict[torch._C.Node, Set[str]] = dict()
+
+
+def get_src_dest_and_cur(node):
+    src_ir, dest_ir = node.input().debugName(), node.output().debugName()
+    cur_name = node.s("name")
+    return src_ir, dest_ir, cur_name
+
+
+def construct_fqn(ir, ref_map, name_map):
+    name_list = []
+    while ir in ref_map:
+        name_list.append(name_map[ir])
+        ir = ref_map[ir]
+    return ".".join(reversed(name_list))
+
+
+def get_node_lifted_args(entry: Union[torch._C.Graph, torch._C.Block]):
+    ref_map = dict()
+    name_map = dict()
+    entry_to_arguments = dict()
+
+    stack = []
+
+    def _dfs_get_attr_dependency(entry):
+        for node in entry.nodes():
+            if node.kind() == "prim::GetAttr":
+                stack.append(node)
+                src_ir, dest_ir, cur_name = get_src_dest_and_cur(node)
+                ref_map[dest_ir] = src_ir
+                name_map[dest_ir] = cur_name
+            for block in node.blocks():
+                _dfs_get_attr_dependency(block)
+
+    def _dfs_build_arguments(entry):
+        arguments = set()
+        for node in entry.nodes():
+            for block in node.blocks():
+                arguments.union(_dfs_build_arguments(block))
+            if node.kind() == "prim::GetAttr":
+                src_ir, dest_ir, cur_name = get_src_dest_and_cur(node)
+                if dest_ir not in set(ref_map.values()):
+                    arguments.add(construct_fqn(dest_ir, ref_map, name_map))
+        entry_to_arguments[entry] = arguments
+        return arguments
+
+    _dfs_get_attr_dependency(entry)
+    _dfs_build_arguments(entry)
+    print(entry_to_arguments)
+
+
 def get_op_overload(node: torch._C.Node):
     schema_str = node.schema()
     schema = FunctionSchema.parse(schema_str)
@@ -593,6 +645,9 @@ class TS2EPConverter:
             self.mod_param_and_buffer_map[normalize_name(name)] = buffer
 
     def convert(self) -> ExportedProgram:
+        get_node_lifted_args(self.ts_graph) 
+        return
+
         graph_converter = TS2FXGraphConverter(
             self.ts_graph,
             self.param_names,
