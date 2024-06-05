@@ -32,7 +32,6 @@ from .traced_function_transforms import (
     fn_prepped_for_autograd,
 )
 from .utils import root_module_when_exporting_non_strict, unlift_tokens
-from .passes import dist_fx_passes
 
 aot_graphs_log = getArtifactLogger(__name__, "aot_graphs")
 
