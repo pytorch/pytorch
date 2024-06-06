@@ -76,24 +76,6 @@ Here is a brief example:
 
 .. code-block:: python
 
-  import torch
-
-  class Layer(torch.nn.Module):
-      def __init__(self) -> None:
-          super().__init__()
-          self.lin = torch.nn.Linear(3, 3)
-
-      def forward(self, x: torch.Tensor) -> torch.Tensor:
-          return self.lin(x)
-
-  class LMHead(torch.nn.Module):
-      def __init__(self) -> None:
-          super().__init__()
-          self.proj = torch.nn.Linear(3, 3)
-
-      def forward(self, x: torch.Tensor) -> torch.Tensor:
-          return self.proj(x)
-
   class Model(torch.nn.Module):
       def __init__(self) -> None:
           super().__init__()
