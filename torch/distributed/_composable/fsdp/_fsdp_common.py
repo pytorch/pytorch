@@ -6,6 +6,7 @@ from enum import auto, Enum
 from typing import Any, cast, List, Optional, Tuple
 
 import torch
+import torch._dynamo.compiled_autograd as ca
 import torch.distributed as dist
 import torch.nn as nn
 from torch.distributed._composable.contract import _get_registry
@@ -120,7 +121,7 @@ def _from_local_no_grad(
     This method is similar to ``DTensor.from_local()`` except that in eager mode
     it avoids some CPU overhead by avoiding default args and not being differentiable.
     """
-    if not torch._dynamo.compiled_autograd.compiled_autograd_enabled:
+    if not ca.compiled_autograd_enabled:
         return DTensor(
             # Use the local tensor directly instead of constructing a new tensor
             # variable, e.g. with `view_as()`, since this is not differentiable

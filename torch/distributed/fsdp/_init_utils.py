@@ -446,7 +446,8 @@ def _init_core_state(
     elif sharding_strategy == ShardingStrategy.NO_SHARD:
         warnings.warn(
             "The `NO_SHARD` sharding strategy is deprecated. If having issues, "
-            "please use DistributedDataParallel instead.",
+            "please use `DistributedDataParallel` instead.",
+            FutureWarning,
             # Level 1 is here, level 2 is from `FullyShardedDataParallel`, and
             # level 3 is from the true caller
             stacklevel=3,
