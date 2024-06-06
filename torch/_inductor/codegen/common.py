@@ -976,7 +976,11 @@ class BracesBuffer(IndentedBuffer):
     def catch_inside_parallel(self):
         @contextlib.contextmanager
         def ctx():
-            self.writelines(["try {", "  at::internal::ThreadIdGuard tid_guard(tid);"])
+            self.writelines(
+                [
+                    "try {",
+                ]
+            )
             yield
             self.writelines(
                 [

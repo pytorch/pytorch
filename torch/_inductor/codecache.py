@@ -2448,7 +2448,6 @@ class CppPythonBindingsCodeCache(CppCodeCache):
         #include <Python.h>
         #include <sstream>
         #include <cstdlib>
-        #include <torch/csrc/Exceptions.h>
 
         #ifndef _MSC_VER
         #if __cplusplus < 202002L
@@ -2485,7 +2484,7 @@ class CppPythonBindingsCodeCache(CppCodeCache):
                 %s
             } catch(std::exception const& e) {
                 PyErr_SetString(PyExc_RuntimeError, e.what());
-                torch::translate_exception_to_python(std::current_exception());
+                std::rethrow_exception(std::current_exception());
                 return nullptr;
             } catch(...) {
                 PyErr_SetString(PyExc_RuntimeError, "unhandled error");
