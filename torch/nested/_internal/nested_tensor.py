@@ -181,7 +181,7 @@ class NestedTensor(torch.Tensor):
         return inner_tensors, ctx
 
     @staticmethod
-    def __tensor_unflatten__(inner_tensors: Dict, meta, outer_size, outer_stride, original_tensors=None):
+    def __tensor_unflatten__(inner_tensors: Dict, meta, outer_size, outer_stride):
         # inner tensors: _values, _offsets, [_lengths]
         assert len(inner_tensors) >= 2 and len(inner_tensors) <= 3
         values = inner_tensors["_values"]
