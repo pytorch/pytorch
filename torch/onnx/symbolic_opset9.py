@@ -3,6 +3,7 @@
 Opset 9 is supported by ONNX release 1.4.1
 release on 01/23/19
 """
+
 from __future__ import annotations
 
 import builtins
@@ -1171,7 +1172,7 @@ def select(g: jit_utils.GraphContext, self, dim, index):
         g (jit_utils.GraphContext): The graph context.
         self (Tensor): The input tensor.
         dim (int): The dimension along which to select elements.
-        index (Tensor or int): The indices of the elements to select. 
+        index (Tensor or int): The indices of the elements to select.
 
     Returns:
         Tensor: The selected elements from the input tensor.
@@ -1461,29 +1462,39 @@ def get_pool_ceil_padding(input, kernel_size, stride, padding):
     ]
     # ensure last pooling starts inside
     ceiled_output_dim = [
-        ceiled_output_dim[i] - 1
-        if (((ceiled_output_dim[i] - 1) * stride[i]) >= (dim[i] + padding[i]))
-        else ceiled_output_dim[i]
+        (
+            ceiled_output_dim[i] - 1
+            if (((ceiled_output_dim[i] - 1) * stride[i]) >= (dim[i] + padding[i]))
+            else ceiled_output_dim[i]
+        )
         for i in range(0, len(ceiled_output_dim))
     ]
     padding_ceil = [
-        0
-        if (stride[i] == 1)
-        else (
-            kernel_size[i]
-            - (dim[i] + 2 * padding[i] - ((ceiled_output_dim[i] - 1) * stride[i] + 1))
+        (
+            0
+            if (stride[i] == 1)
+            else (
+                kernel_size[i]
+                - (
+                    dim[i]
+                    + 2 * padding[i]
+                    - ((ceiled_output_dim[i] - 1) * stride[i] + 1)
+                )
+            )
         )
         for i in range(0, len(padding))
     ]
     # ensure padding is not > kernel_size
     padding_ceil = [
         (
-            int(padding_ceil[i])
-            if padding_ceil[i] < kernel_size[i] - 1
-            else int(kernel_size[i] - 1)
+            (
+                int(padding_ceil[i])
+                if padding_ceil[i] < kernel_size[i] - 1
+                else int(kernel_size[i] - 1)
+            )
+            if ((padding_ceil[i] + 2 * padding[i]) >= (kernel_size[i]))
+            else int(padding_ceil[i])
         )
-        if ((padding_ceil[i] + 2 * padding[i]) >= (kernel_size[i]))
-        else int(padding_ceil[i])
         for i in range(0, len(padding_ceil))
     ]
     return padding_ceil
