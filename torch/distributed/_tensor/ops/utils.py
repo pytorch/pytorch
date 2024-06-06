@@ -1,15 +1,22 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 import functools
+import itertools
 import operator
 from typing import cast, Iterable, List, Sequence, Tuple, Union
 
 import torch
 from torch.distributed._tensor._collective_utils import redistribute_cost
+from torch.distributed._tensor._op_schema import (
+    OpSchema,
+    OpStrategy,
+    PlacementStrategy,
+    RuntimeSchemaInfo,
+)
 from torch.distributed._tensor.api import DTensor
-from torch.distributed._tensor.op_schema import OpStrategy, RuntimeSchemaInfo
+from torch.distributed._tensor.device_mesh import DeviceMesh
 from torch.distributed._tensor.placement_types import (
-    _Partial,
     DTensorSpec,
+    Partial,
     Placement,
     Replicate,
     Shard,
@@ -193,7 +200,7 @@ def map_placements_after_broadcast(
     """Map each placement based on the output shape after broadcast."""
     new_placements: List[Placement] = []
     for placement in placements:
-        if isinstance(placement, (Replicate, _Partial)):
+        if isinstance(placement, (Replicate, Partial)):
             new_placements.append(placement)
         else:
             assert isinstance(placement, Shard)
@@ -224,3 +231,55 @@ def generate_redistribute_costs(
         redistribute_costs.append(redistribute_cost(strat.output_spec, dst_spec))
 
     return redistribute_costs
+
+
+def expand_to_full_mesh_op_strategy(
+    mesh: DeviceMesh,
+    op_schema: OpSchema,
+    single_mesh_dim_strategies: List[List[Placement]],
+    *,
+    input_index: int = 1,
+    inplace_op: bool = False,
+) -> OpStrategy:
+    # Expand the single_mesh_dim_strategies to full mesh dim strategies.
+    all_mesh_dim_strategies = [single_mesh_dim_strategies] * mesh.ndim
+
+    strategy_combs = itertools.product(*all_mesh_dim_strategies)
+
+    all_strategies = []
+    for strategy_comb in strategy_combs:
+        spec_list = []
+        for specs in zip(*strategy_comb):
+            spec_list.append(DTensorSpec(mesh, tuple(specs)))
+
+        input_specs = spec_list[input_index:]
+        input_args_strategy = op_schema.args_strategy
+        assert len(input_specs) == len(input_args_strategy)
+        self_spec = input_args_strategy[0].strategies[0].output_spec
+        if inplace_op and self_spec.placements != input_specs[0].placements:
+            # if it's inplace op, we would only allow the placement strategy to be added when the
+            # input_spec matches the first argument's runtime sharding, otherwise we skip
+            continue
+
+        # check inputs shardable
+        inputs_shardable = all(
+            is_tensor_shardable(inp.shape, s)
+            for inp, s in zip(input_args_strategy, input_specs)
+        )
+
+        # only add to the all_strategies list when all inputs are shardable
+        if inputs_shardable:
+            redistribute_cost = [
+                generate_redistribute_costs(input_strategy, input_spec)
+                for input_strategy, input_spec in zip(input_args_strategy, input_specs)
+            ]
+            strategy = PlacementStrategy(
+                output_specs=tuple(spec_list[:input_index])
+                if input_index > 1
+                else spec_list[0],
+                input_specs=input_specs,
+                redistribute_cost=redistribute_cost,
+            )
+            all_strategies.append(strategy)
+
+    return OpStrategy(all_strategies)

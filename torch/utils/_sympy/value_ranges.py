@@ -154,8 +154,7 @@ class ValueRanges(Generic[_T]):
             raise AssertionError(f"not bool like {self}")
 
     def __contains__(self, x: AllIn) -> bool:
-        x = simple_sympify(x)
-        return sympy_generic_le(self.lower, x) and sympy_generic_le(x, self.upper)
+        return ValueRanges.wrap(x).issubset(self)
 
     def issubset(self, other):
         return sympy_generic_le(other.lower, self.lower) and sympy_generic_le(
@@ -247,6 +246,8 @@ class ValueRanges(Generic[_T]):
     def wrap(arg: Union[AllIn, AllVR]) -> AllVR:
         if isinstance(arg, ValueRanges):
             return arg
+        if isinstance(arg, float) and math.isnan(arg):
+            return ValueRanges.unknown()
         # arg is either ExprIn or BoolIn, but we don't know it here
         return ValueRanges(arg, arg)  # type: ignore[arg-type]
 
