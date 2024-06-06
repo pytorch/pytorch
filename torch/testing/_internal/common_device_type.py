@@ -957,7 +957,7 @@ class ops(_TestParametrizer):
             else:
                 raise RuntimeError(f"Unknown OpDType: {self.opinfo_dtypes}")
 
-            if self.allowed_dtypes is not None and dtypes is not None:
+            if self.allowed_dtypes is not None:
                 dtypes = dtypes.intersection(self.allowed_dtypes)
 
             # Construct the test name; device / dtype parts are handled outside.
