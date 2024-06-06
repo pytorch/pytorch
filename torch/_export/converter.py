@@ -165,6 +165,7 @@ def get_block_to_lifted_attrs(graph: torch._C.Graph) -> Dict[torch._C.Block, Set
             for block in node.blocks():
                 # Recursively build.
 <<<<<<< HEAD
+<<<<<<< HEAD
                 arguments = arguments.union(_map_blocks_to_lifted_attrs(block))
 =======
                 arguments = arguments.union(
@@ -182,6 +183,14 @@ def get_block_to_lifted_attrs(graph: torch._C.Graph) -> Dict[torch._C.Block, Set
                     arguments.add(
                         construct_fqn(irv_name, node_to_parent_map, node_to_attr_name)
                     )
+=======
+                arguments = arguments.union(_map_blocks_to_lifted_attrs(block))
+            if node.kind() == "prim::GetAttr":
+                dest_ir = node.output().debugName()
+                # Skip for intermediate GetAttr, which will anyway not results a FQN.
+                if dest_ir not in set(ref_map.values()):
+                    arguments.add(construct_fqn(dest_ir, ref_map, node_to_attr_name))
+>>>>>>> 1223b2491f4 (address comments)
         if not isinstance(entry, torch._C.Graph):  # Skip the top level.
             blocks_to_lifted_attrs[entry] = arguments
         return arguments
@@ -217,8 +226,14 @@ class TS2FXGraphConverter:
     def __init__(
         self,
         ts_graph: Union[torch._C.Graph, torch._C.Block],
+<<<<<<< HEAD
         name_to_param_map: Dict[str, torch.Tensor],
         name_to_buffer_map: Dict[str, torch.Tensor],
+=======
+        param_names: Set[str],
+        buffer_names: Set[str],
+        mod_param_and_buffer_map: Dict[str, Any],
+>>>>>>> 1223b2491f4 (address comments)
         blocks_to_lifted_attrs: Dict[torch._C.Block, Set[str]],
     ):
         self.ts_graph = ts_graph
@@ -240,6 +255,7 @@ class TS2FXGraphConverter:
 
         self.blocks_to_lifted_attrs = blocks_to_lifted_attrs
 
+<<<<<<< HEAD
         # Populate methods for the standard operators.
         for k in kind_to_standard_operators.keys():
             handler_func_name = ir_name_to_func_name(k)
@@ -255,6 +271,9 @@ class TS2FXGraphConverter:
         return isinstance(self.ts_graph, torch._C.Graph)
 
         self.block_to_arguments = block_to_arguments
+=======
+        self.blocks_to_lifted_attrs = blocks_to_lifted_attrs
+>>>>>>> 1223b2491f4 (address comments)
 
         # Populate methods for the standard operators.
         for k in kind_to_standard_operators.keys():
@@ -266,6 +285,10 @@ class TS2FXGraphConverter:
                 handler_func_name,
                 lambda node: self._convert_standard_operators(node),
             )
+
+    @property
+    def is_top_level_graph(self):
+        return isinstance(self.ts_graph, torch._C.Graph)
 
     def add_subgraph(self, subgraph) -> str:
         name = f"subgraph_{len(self.subgraphs)}"
@@ -363,6 +386,11 @@ class TS2FXGraphConverter:
                 )
                 fx_node = self.fx_graph.placeholder(normalized_name)
 
+<<<<<<< HEAD
+=======
+            # TODO: set fx_node.meta["val"]
+
+>>>>>>> 1223b2491f4 (address comments)
             self.name_to_node[name] = fx_node
 
     def convert_aten_tensor(self, node: torch._C.Node):
@@ -611,7 +639,11 @@ class TS2FXGraphConverter:
         subgraph_nodes = []
         for block in node.blocks():
             subgraph_converter = TS2FXGraphConverter(
+<<<<<<< HEAD
                 block, dict(), dict(), self.blocks_to_lifted_attrs
+=======
+                block, set(), set(), dict(), self.blocks_to_lifted_attrs
+>>>>>>> 1223b2491f4 (address comments)
             )
             subgraph_converter.constant_map = self.constant_map
             subgraph_converter.attribute_map = self.attribute_map
@@ -762,12 +794,22 @@ class TS2EPConverter:
             self.mod_param_and_buffer_map[normalize_name(name)] = buffer
 
     def convert(self) -> ExportedProgram:
+<<<<<<< HEAD
         blocks_to_lifted_attrs = get_block_to_lifted_attrs(self.ts_graph)
 
         graph_converter = TS2FXGraphConverter(
             self.ts_graph,
             self.name_to_param_map,
             self.name_to_buffer_map,
+=======
+        blocks_to_lifted_attrs = get_block_lifted_args(self.ts_graph)
+
+        graph_converter = TS2FXGraphConverter(
+            self.ts_graph,
+            self.param_names,
+            self.buffer_names,
+            self.mod_param_and_buffer_map,
+>>>>>>> 1223b2491f4 (address comments)
             blocks_to_lifted_attrs,
         )
         gm = graph_converter.convert()
