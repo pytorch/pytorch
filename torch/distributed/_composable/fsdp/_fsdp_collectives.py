@@ -2,6 +2,7 @@ from typing import List, NamedTuple, Optional, Tuple, Union
 
 import torch
 import torch.distributed as dist
+from torch.distributed._tensor import DTensor
 from torch.distributed.distributed_c10d import ReduceOp
 from ._fsdp_common import (
     _get_dim0_padded_size,
@@ -224,9 +225,12 @@ def foreach_reduce(
                     fsdp_param.grad_offload_event = reduce_scatter_stream.record_event()
 
             if to_accumulate_grad:
+                assert isinstance(fsdp_param.sharded_param.grad, DTensor)
                 fsdp_param.sharded_param.grad._local_tensor += new_sharded_grad
             else:
-                new_sharded_dtensor_grad = fsdp_param.to_sharded_dtensor(new_sharded_grad)
+                new_sharded_dtensor_grad = fsdp_param.to_sharded_dtensor(
+                    new_sharded_grad
+                )
                 fsdp_param.sharded_param.grad = new_sharded_dtensor_grad
 
             padded_sharded_numel = padded_unsharded_size.numel() // world_size
