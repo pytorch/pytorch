@@ -28,6 +28,7 @@ from torch.fx.experimental.symbolic_shapes import (
 from torch.fx.passes import graph_drawer
 from . import config
 from .compile_utils import fx_graph_cse, get_aten_target
+from ._aot_autograd import dist_fx_passes
 
 
 AOT_PARTITIONER_DEBUG = config.debug_partitioner
@@ -533,12 +534,13 @@ def reordering_to_mimic_autograd_engine(gm: fx.GraphModule) -> fx.GraphModule:
 
     # Populate depth for the nodes. Depth is the distance from the inputs.
     depths = {}
-    output_node = next(iter(gm.graph.find_nodes(op="output")))
     for node in gm.graph.nodes:
         if node.op == "placeholder":
             depths[node] = 0
         else:
-            depths[node] = max([depths[arg] for arg in node.all_input_nodes], default=0)
+            depths[node] = (
+                max((depths[arg] for arg in node.all_input_nodes), default=0) + 1
+            )
 
     def insert_node_in_graph(node):
         if node in env:
@@ -802,6 +804,8 @@ def get_saved_values(
             return False
         if node.target == operator.getitem:
             return False
+        if op_types.is_view(node):
+            return False
         if node.target in [aten.lift_fresh_copy.default, aten.lift_fresh.default]:
             return False
         # NB: "recompute" == 0 means that must save this node.
@@ -854,6 +858,14 @@ def get_saved_values(
 
     def get_node_weight(node) -> float:
         mem_sz = _size_of(node)
+        if op_types.is_view(node):
+            # We never choose to save views, since views are free to recompute.
+            # It makes it a bit simpler to analyze
+            # NB: If they're not free to recompute (e.g. nested tensors)... I
+            # think we should modify checks for view_ops to `is_view` and check
+            # that. Basically, with nested tensors, `aten.view` is not a "view
+            # op".
+            return math.inf
 
         if isinstance(node.meta["val"], py_sym_types):
             # We never want to save symfloats
@@ -871,6 +883,14 @@ def get_saved_values(
     nx_graph = nx.DiGraph()
     banned_nodes = set()
 
+    def ban_recomputation(node):
+        banned_nodes.add(node)
+        # A node will only ever be recomputed if there is a path from an
+        # ancestor of this node to the backwards path through this node that
+        # doesn't go through any saved value. If this node is saved, then that
+        # condition is not possible.
+        nx_graph.add_edge("source", node.name + "_in", capacity=math.inf)
+
     def ban_recomputation_if_allowed(node):
         if op_types.is_view(node):
             return False
@@ -887,12 +907,7 @@ def get_saved_values(
         if "val" in node.meta and isinstance(node.meta["val"], torch.SymFloat):
             return False
 
-        banned_nodes.add(node)
-        # A node will only ever be recomputed if there is a path from an
-        # ancestor of this node to the backwards path through this node that
-        # doesn't go through any saved value. If this node is saved, then that
-        # condition is not possible.
-        nx_graph.add_edge("source", node.name + "_in", capacity=math.inf)
+        ban_recomputation(node)
         return True
 
     for node in joint_graph.nodes:
@@ -933,6 +948,13 @@ def get_saved_values(
             weight = (
                 0.0 if isinstance(node.meta.get("val"), BackwardState) else math.inf
             )
+        elif (
+            torch._dynamo.config.trace_distributed
+            and config.return_primal_instead_of_view
+            and dist_fx_passes.should_ban_recomputation(node)
+        ):
+            ban_recomputation(node)
+            weight = 0.0
         else:
             weight = get_node_weight(node)
         # Creates the weights on the "node" edge
@@ -1423,6 +1445,8 @@ def min_cut_rematerialization_partition(
         saved_sym_nodes=saved_sym_nodes,
         num_fwd_outputs=num_fwd_outputs,
     )
+    if torch._dynamo.config.trace_distributed and config.return_primal_instead_of_view:
+        dist_fx_passes.return_primal_instead_of_view(fw_module)
 
     if graph_has_recomputable_ops:
         if graph_has_recomputable_rng_ops:
