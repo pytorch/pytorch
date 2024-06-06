@@ -91,13 +91,19 @@ def _dtensor_init_helper(
     else:
         local_tensor = init_op(local_shape, **kwargs)
 
+    spec = DTensorSpec(
+        device_mesh,
+        tuple(placements),
+        tensor_meta=TensorMeta(
+            size,
+            torch_stride,
+            local_tensor.dtype,
+        ),
+    )
+
     return DTensor(
-        local_tensor=local_tensor,
-        device_mesh=device_mesh,
-        placements=tuple(placements),
-        shape=size,
-        dtype=local_tensor.dtype,
-        stride=torch_stride,
+        local_tensor,
+        spec,
         requires_grad=kwargs["requires_grad"],
     )
 
