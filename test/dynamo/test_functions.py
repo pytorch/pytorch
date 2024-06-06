@@ -1620,6 +1620,10 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         return np.full_like(x, 2.4, dtype=dt)
 
     @make_test
+    def test_numpy_dtype_attr(x):
+        return np.ones_like(x).dtype == x.dtype
+
+    @make_test
     def test_numpy_linalg(x):
         return np.linalg.norm(x.numpy(), axis=0)
 
@@ -2311,6 +2315,24 @@ class GraphModule(torch.nn.Module):
         test(-1.1, 1.1)
         test(True, False)
         test(torch.ones(4, dtype=torch.float32), 1.1)
+
+    def test_index(self):
+        def fn(x, t):
+            v = operator.index(x)
+            torch.mul(t, v)
+
+        def test(a, b):
+            self.assertEqual(opt_fn(a, b), fn(a, b))
+
+        for dynamic in [True, False]:
+            torch._dynamo.reset()
+            opt_fn = torch._dynamo.optimize(dynamic=dynamic)(fn)
+            t = torch.ones(1)
+            test(10, t)
+            test(-100, t)
+            test(10, t)
+            test(False, t)
+            test(True, t)
 
     def test_truth(self):
         def fn(x, y):

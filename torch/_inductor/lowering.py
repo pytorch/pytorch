@@ -892,7 +892,7 @@ def repeat(x, repeats):
     if zero_tensor:
         return empty(new_size, dtype=x.get_dtype(), device=x.get_device())
     if all((a == 1 or b == 1) for a, b in zip(repeats, old_size)):
-        return expand(x, new_size)
+        return clone(expand(x, new_size))
 
     x_loader: Callable[[Any], Any]
 
@@ -2421,7 +2421,7 @@ def slice_scatter(x, src, dim=0, start=None, end=None, step=1):
                     ops.index_expr(
                         ModularIndexing(idx[dim] - start, 1, step), torch.int64
                     ),
-                    ops.constant(0, torch.torch.int64),
+                    ops.constant(0, torch.int64),
                 )
             )
         assert mask
