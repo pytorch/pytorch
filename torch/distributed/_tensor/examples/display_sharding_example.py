@@ -14,7 +14,7 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
 )
 
 
-class DisplayShardingExampleTest:
+class DisplayShardingExample:
     """
     Checks if the set of keys in ground truth dictionary and the set produced in advanced_module_tracker are in the same order
     """
@@ -54,7 +54,7 @@ class DisplayShardingExampleTest:
 
         return module_parameters_dict
 
-    def test_mlp_training_e2e(self):
+    def test_display_parameters_MLP(self):
         """
         Example of using obtaining all module's FQN and parameters for a given model
         """
@@ -63,7 +63,7 @@ class DisplayShardingExampleTest:
 
         rng_seed = 0
         torch.manual_seed(rng_seed)
-        inp = torch.rand(*inp_size, device=None)
+        inp = torch.rand(*inp_size)
         model = MLPModule(None)
 
         LR = 0.25
@@ -94,5 +94,5 @@ class DisplayShardingExampleTest:
 
 
 if __name__ == "__main__":
-    instantiated_test = DisplayShardingExampleTest()
-    instantiated_test.test_mlp_training_e2e()
+    instantiated_test = DisplayShardingExample()
+    instantiated_test.test_display_parameters_MLP()
