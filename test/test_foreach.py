@@ -88,7 +88,9 @@ class ForeachFuncWrapper:
                 actual = self.func(*inputs, **kwargs)
             keys = tuple([e.key for e in p.key_averages()])
             mta_called = any("multi_tensor_apply_kernel" in k for k in keys)
-            assert mta_called == (expect_fastpath and (not zero_size))
+            assert mta_called == (
+                expect_fastpath and (not zero_size)
+            ), f"{mta_called=}, {expect_fastpath=}, {zero_size=}"
         else:
             actual = self.func(*inputs, **kwargs)
         if self.is_inplace:
@@ -595,7 +597,7 @@ class TestForeach(TestCase):
         # Empty lists
         for fop in ops_to_test:
             with self.assertRaisesRegex(
-                RuntimeError, "There were no tensor arguments to this function"
+                RuntimeError, "Tensor list must have at least one tensor."
             ):
                 fop(tensors1, tensors2)
 
@@ -922,7 +924,10 @@ class TestForeach(TestCase):
     # note: BFloat16 has the same number of exponent bits as FP32
     # so if squared L2 norm overflows in BF16, then it also overflows in FP32.
     @onlyCUDA
-    @ops(foreach_reduce_op_db, allowed_dtypes=(torch.half, torch.bfloat16))
+    @ops(
+        [o for o in foreach_reduce_op_db if "norm" in o.name],
+        allowed_dtypes=(torch.half, torch.bfloat16),
+    )
     def test_foreach_l2_large_value_input(self, device, dtype, op):
         ord, N = 2, 10
         max_value = torch.finfo(dtype).max
@@ -976,14 +981,20 @@ class TestForeach(TestCase):
 
         import math
 
-        for ord in (1, 2, math.inf):
+        if op.name == "_foreach_norm":
+            ords = (1, 2, math.inf)
+        else:
+            ords = (None,)
+
+        for ord in ords:
+            kwargs = {"ord": ord} if ord else {}
             if not use_cuda_graph:
                 actual = fn(
                     inputs=[tensorlist],
                     is_cuda=True,
                     expect_fastpath=True,
-                    ord=ord,
                     zero_size=False,
+                    **kwargs,
                 )
             else:
                 # When using CUDA graphs and the tensor metadata doesn't fit in
@@ -993,9 +1004,9 @@ class TestForeach(TestCase):
                 # test verifies multi_tensor_apply's behavior in the scenario.
                 g = torch.cuda.CUDAGraph()
                 with torch.cuda.graph(g):
-                    actual = fn.func(tensorlist, ord=ord)
+                    actual = fn.func(tensorlist, **kwargs)
                 g.replay()
-            expect = ref_fn(inputs=[tensorlist], ord=ord)
+            expect = ref_fn(inputs=[tensorlist], **kwargs)
 
             self.assertEqual(expect, actual, equal_nan=True)
 
@@ -1003,16 +1014,23 @@ class TestForeach(TestCase):
     @ops(foreach_reduce_op_db)
     def test_foreach_reduce_large_input(self, device, dtype, op):
         # test inputs larger than kChunkSize = 65536
-        ord, N = 2, 65536 * 2
-        disable_fastpath = True
-        if ord in (1, 2) and dtype in floating_types_and(torch.half, torch.bfloat16):
-            disable_fastpath = False
+        N = 65536 * 2
+        disable_fastpath = False
+        kwargs = {}
+        if op.name == "_foreach_norm":
+            ord = 2
+            disable_fastpath = not (
+                ord in (1, 2)
+                and dtype in floating_types_and(torch.half, torch.bfloat16)
+            )
+            kwargs["ord"] = ord
+
         inputs = ([make_tensor((N,), dtype=dtype, device=device, noncontiguous=False)],)
         wrapped_op, ref, _, _ = self._get_funcs(op)
         self.assertEqual(
-            ref(inputs, ord=ord),
+            ref(inputs, **kwargs),
             wrapped_op(
-                inputs, self.is_cuda, not disable_fastpath, ord=ord, zero_size=False
+                inputs, self.is_cuda, not disable_fastpath, zero_size=False, **kwargs
             ),
         )
 
@@ -1229,6 +1247,28 @@ class TestForeach(TestCase):
                     for t, s in zip(ref_input, rhs_tensors):
                         copy_(t, s, non_blocking)
                     self.assertEqual(ref_input, sample.input)
+
+    @onlyCUDA
+    @ops(filter(lambda op: op.name == "_foreach_copy", foreach_binary_op_db))
+    def test_foreach_copy_with_multi_dtypes(self, device, dtype, op):
+        # check (a) multi_tensor_apply is called and (b) numerical parity with for-loop and Tensor.copy_
+        foreach_copy_ = ForeachFuncWrapper(op.inplace_variant)
+        for sample in op.sample_inputs(device, dtype, noncontiguous=False):
+            for src_dtype in floating_types_and(torch.half, torch.bfloat16):
+                if src_dtype == dtype:
+                    continue
+                self_tensors = [t.clone() for t in sample.input]
+                src_tensors = [t.to(src_dtype) for t in self_tensors]
+                out = foreach_copy_(
+                    (self_tensors, src_tensors), is_cuda=True, expect_fastpath=True
+                )
+                self.assertEqual(
+                    out,
+                    [
+                        torch.empty_like(t).copy_(s)
+                        for t, s in zip(self_tensors, src_tensors)
+                    ],
+                )
 
     # Test reverse-mode & forward-mode AD if supported.
     @onlyCUDA

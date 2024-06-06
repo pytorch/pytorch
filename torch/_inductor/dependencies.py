@@ -228,8 +228,10 @@ class StarDep(Dep):
 # if A reads a buffer and B mutates it
 # B must be ordered after A
 #
-# It is weak because if it turns out A's read is never used, we can still
-# eliminate it
+# This is useful for a variety of reasons.
+# For example, if A's read is never actually used, we can eliminate it.
+# Another case is if A's buffer ends up being fused away, we never need to
+# materialize that buffer
 @dataclasses.dataclass(frozen=True)
 class WeakDep(Dep):
     name: str
