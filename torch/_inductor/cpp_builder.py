@@ -234,7 +234,8 @@ class BuildOptionsBase:
         # Some args is hard to abstract to OS compatable, passthough it directly.
         self._passthough_args: List[str] = []
 
-        self._aot_mode = False
+        self._aot_mode: bool = False
+        self._use_absolute_path: bool = False
 
     def _remove_duplicate_options(self):
         self._definations = _remove_duplication_in_list(self._definations)
@@ -271,6 +272,9 @@ class BuildOptionsBase:
 
     def get_aot_mode(self) -> bool:
         return self._aot_mode
+
+    def get_use_absolute_path(self) -> bool:
+        return self._use_absolute_path
 
 
 def _get_warning_all_cflag(warning_all: bool = True) -> List[str]:
@@ -399,9 +403,11 @@ class CppOptions(BuildOptionsBase):
         compile_only: bool,
         warning_all: bool = True,
         extra_flags: Sequence[str] = (),
+        use_absolute_path: bool = False,
     ) -> None:
         super().__init__()
         self._compiler = _get_cpp_compiler()
+        self._use_absolute_path = use_absolute_path
 
         (
             definations,
@@ -784,7 +790,10 @@ class CppTorchOptions(CppOptions):
         extra_flags: Sequence[str] = (),
     ) -> None:
         super().__init__(
-            compile_only=compile_only, warning_all=warning_all, extra_flags=extra_flags
+            compile_only=compile_only,
+            warning_all=warning_all,
+            extra_flags=extra_flags,
+            use_absolute_path=use_absolute_path,
         )
 
         self._aot_mode = aot_mode
@@ -1027,7 +1036,6 @@ class CppBuilder:
         BuildOption: BuildOptionsBase,
         output_dir: str = "",
         compile_only: bool = False,
-        use_absolute_path: bool = False,
     ) -> None:
         self._compiler = ""
         self._cflags_args = ""
@@ -1041,13 +1049,20 @@ class CppBuilder:
         self._output_dir = ""
         self._target_file = ""
 
+        self._use_absolute_path: bool = False
+
         self._name = name
+
+        # Code start here, initial self internal veriables firstly.
+        self._compiler = BuildOption.get_compiler()
+        self._use_absolute_path = BuildOption.get_use_absolute_path()
+        self._compile_only = compile_only
 
         if isinstance(sources, str):
             sources = [sources]
 
         if config.is_fbcode():
-            if BuildOption.get_aot_mode() and not use_absolute_path:
+            if BuildOption.get_aot_mode() and not self._use_absolute_path:
                 inp_name = sources
                 # output process @ get_name_and_dir_from_output_file_path
             else:
@@ -1058,8 +1073,6 @@ class CppBuilder:
         else:
             self._sources_args = " ".join(sources)
 
-        self._compile_only = compile_only
-
         if len(output_dir) == 0:
             self._output_dir = os.path.dirname(os.path.abspath(__file__))
         else:
@@ -1067,8 +1080,6 @@ class CppBuilder:
 
         file_ext = self.get_object_ext() if compile_only else self.get_shared_lib_ext()
         self._target_file = os.path.join(self._output_dir, f"{self._name}{file_ext}")
-
-        self._compiler = BuildOption.get_compiler()
 
         for cflag in BuildOption.get_cflags():
             if _IS_WINDOWS:
