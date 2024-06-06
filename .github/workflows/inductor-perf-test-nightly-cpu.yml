@@ -66,7 +66,7 @@ jobs:
     if: github.event.schedule == '0 7 * * 1-6'
     with:
       build-environment: linux-focal-cpu-py3.8-gcc9
-      dashboard-tag: training-true-inference-true-inductor_cpu-true
+      dashboard-tag: training-false-inference-true-inductor_cpu-true
       docker-image: ${{ needs.linux-focal-cpu-py3_8-gcc9-inductor-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-focal-cpu-py3_8-gcc9-inductor-build.outputs.test-matrix }}
       use-gha: anything-non-empty-to-use-gha
