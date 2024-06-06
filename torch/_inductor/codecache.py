@@ -567,9 +567,9 @@ def get_code_hash(roots):
             contents[spec.name] = f.read()
     hasher = hashlib.sha256()
     # Iterate over dict in sorted order since iter_modules may not be deterministic
-    for name in sorted(contents.keys()):
+    for name, value in sorted(contents.items()):
         hasher.update(name.encode("utf-8"))
-        hasher.update(contents[name])
+        hasher.update(value)
     return hasher.digest()
 
 
@@ -660,7 +660,6 @@ class FxGraphHashDetails:
         self.torch_version = torch_key()
         self.system_info = CacheBase.get_system()
         self.inductor_config = config.save_config_portable()
-        self.torch_key = torch_key()
 
     def debug_str(self) -> str:
         """
