@@ -10,6 +10,8 @@ constexpr auto kProcessGroupCudaP2PDefaultTimeout =
 
 namespace c10d {
 
+using namespace c10d::intra_node_comm;
+
 class TORCH_API ProcessGroupCudaP2P : public Backend {
  public:
   struct Options : Backend::Options {
@@ -22,6 +24,7 @@ class TORCH_API ProcessGroupCudaP2P : public Backend {
 
   bool is_p2p_available();
   size_t get_buffer_size();
+  void ensure_min_buffer_size(size_t min_buffer_size);
 
   c10::Stream stream();
 
@@ -139,8 +142,16 @@ class TORCH_API ProcessGroupCudaP2P : public Backend {
   void shutdown(c10::optional<std::string> reason = c10::nullopt);
 
  private:
+  void init_p2p_backend();
+
+  c10::intrusive_ptr<Store> store_;
+  int rank_;
+  int size_;
+  c10::intrusive_ptr<Options> options_;
+
+  size_t p2p_backend_seq_ = 0;
   c10::intrusive_ptr<ProcessGroupNCCL> nccl_backend_;
-  c10::intrusive_ptr<c10d::intra_node_comm::IntraNodeComm> p2p_backend_;
+  c10::intrusive_ptr<IntraNodeComm> p2p_backend_;
   c10::Stream stream_;
 };
 

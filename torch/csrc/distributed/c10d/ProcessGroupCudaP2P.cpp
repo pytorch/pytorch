@@ -3,16 +3,44 @@
 
 #include <torch/csrc/distributed/c10d/PrefixStore.hpp>
 
+namespace {
+
+std::string get_p2p_store_prefix(size_t seq) {
+  std::ostringstream oss;
+  oss << "p2p-" << seq;
+  return oss.str();
+}
+
+} // namespace
+
 namespace c10d {
 
 using namespace c10d::intra_node_comm;
+
+void ProcessGroupCudaP2P::init_p2p_backend() {
+  p2p_backend_ = c10::make_intrusive<IntraNodeComm>(
+      c10::make_intrusive<PrefixStore>(
+          get_p2p_store_prefix(p2p_backend_seq_), store_),
+      rank_,
+      size_,
+      options_->buffer_size);
+  if (!p2p_backend_->rendezvous()) {
+    p2p_backend_ = nullptr;
+  }
+  p2p_backend_seq_ += 1;
+}
 
 ProcessGroupCudaP2P::ProcessGroupCudaP2P(
     const c10::intrusive_ptr<Store>& store,
     int rank,
     int size,
     c10::intrusive_ptr<Options> options)
-    : Backend(rank, size), stream_(c10::cuda::getStreamFromPool()) {
+    : Backend(rank, size),
+      store_(store),
+      rank_(rank),
+      size_(size),
+      options_(options),
+      stream_(c10::cuda::getStreamFromPool()) {
   nccl_backend_ = c10::make_intrusive<ProcessGroupNCCL>(
       c10::make_intrusive<PrefixStore>("nccl", store),
       rank,
@@ -20,14 +48,10 @@ ProcessGroupCudaP2P::ProcessGroupCudaP2P(
       options->nccl_options);
   nccl_backend_->setSequenceNumberForGroup();
 
-  p2p_backend_ = c10::make_intrusive<IntraNodeComm>(
-      c10::make_intrusive<PrefixStore>("p2p", store),
-      rank,
-      size,
-      options->buffer_size);
-  if (!p2p_backend_->rendezvous()) {
-    p2p_backend_ = nullptr;
+  if (!options_->buffer_size.has_value()) {
+    options_->buffer_size = kDefaultBufferSize;
   }
+  init_p2p_backend();
 }
 
 bool ProcessGroupCudaP2P::is_p2p_available() {
@@ -40,6 +64,15 @@ size_t ProcessGroupCudaP2P::get_buffer_size() {
     return 0;
   }
   return p2p_backend_->getBufferSize();
+}
+
+void ProcessGroupCudaP2P::ensure_min_buffer_size(size_t min_buffer_size) {
+  TORCH_CHECK(options_->buffer_size.has_value());
+  if (min_buffer_size <= get_buffer_size()) {
+    return;
+  }
+  options_->buffer_size = min_buffer_size;
+  init_p2p_backend();
 }
 
 c10::Stream ProcessGroupCudaP2P::stream() {

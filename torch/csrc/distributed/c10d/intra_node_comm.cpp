@@ -1,19 +1,14 @@
 #include <torch/csrc/distributed/c10d/intra_node_comm.hpp>
 
+#include <ATen/ceil_div.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <c10/cuda/CUDAGuard.h>
 #include <c10/util/Logging.h>
 #include <torch/csrc/distributed/c10d/Utils.hpp>
 
 #include <iostream>
-#include <utility>
 
-#include <fcntl.h>
-#include <pthread.h>
-#include <semaphore.h>
-#include <sys/mman.h>
-#include <sys/stat.h>
-#include <unistd.h>
+#include <sys/syscall.h>
 
 #if !defined(USE_ROCM) && defined(PYTORCH_C10_DRIVER_API_SUPPORTED)
 #include <c10/cuda/driver_api.h>
@@ -31,15 +26,9 @@ static std::vector<std::string> ENABLE_INTRA_NODE_COMM = {
 // for testing purposes.
 static std::vector<std::string> TEST_INTRA_NODE_COMM = {"TEST_INTRA_NODE_COMM"};
 
-////////////////////////////////////////////////////////////////////////////////
-// CUDA Functions
-////////////////////////////////////////////////////////////////////////////////
-
 bool isIntraNodeCommSupported();
 
 std::optional<HybridCubeMesh> getHybridCubeMesh(NvlMesh nvlMesh);
-
-void* initP2pState();
 
 void* initTopoInfo(Topology topology, NvlMesh nvlMesh, size_t rank);
 
@@ -199,6 +188,58 @@ static Topology detectTopology(const NvlMesh nvlMesh, size_t worldSize) {
   return Topology::UNKNOWN;
 };
 
+#if !defined(USE_ROCM) && defined(PYTORCH_C10_DRIVER_API_SUPPORTED)
+static size_t allocP2pBlock(
+    CUmemGenericAllocationHandle* handle,
+    size_t size,
+    int deviceIdx) {
+  CUmemAllocationProp prop = {};
+  prop.type = CU_MEM_ALLOCATION_TYPE_PINNED;
+  prop.location.type = CU_MEM_LOCATION_TYPE_DEVICE;
+  // NOLINTNEXTLINE(bugprone-signed-char-misuse)
+  prop.location.id = static_cast<int>(deviceIdx);
+  prop.requestedHandleTypes = CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR;
+
+  size_t granularity;
+  C10_CUDA_DRIVER_CHECK(
+      c10::cuda::DriverAPI::get()->cuMemGetAllocationGranularity_(
+          &granularity, &prop, CU_MEM_ALLOC_GRANULARITY_RECOMMENDED));
+  size = at::round_up(size, granularity);
+
+  C10_CUDA_DRIVER_CHECK(
+      c10::cuda::DriverAPI::get()->cuMemCreate_(handle, size, &prop, 0));
+  return size;
+}
+
+static void mapP2pBlock(
+    void** ptr,
+    CUmemGenericAllocationHandle handle,
+    size_t size,
+    int deviceIdx) {
+  auto driverApi = c10::cuda::DriverAPI::get();
+  auto devPtr = reinterpret_cast<CUdeviceptr*>(ptr);
+  C10_CUDA_DRIVER_CHECK(
+      driverApi->cuMemAddressReserve_(devPtr, size, 0ULL, 0, 0ULL));
+  C10_CUDA_DRIVER_CHECK(driverApi->cuMemMap_(*devPtr, size, 0, handle, 0ULL));
+
+  CUmemAccessDesc desc;
+  desc.location.type = CU_MEM_LOCATION_TYPE_DEVICE;
+  // NOLINTNEXTLINE(bugprone-signed-char-misuse)
+  desc.location.id = static_cast<int>(deviceIdx);
+  desc.flags = CU_MEM_ACCESS_FLAGS_PROT_READWRITE;
+  C10_CUDA_DRIVER_CHECK(driverApi->cuMemSetAccess_(*devPtr, size, &desc, 1));
+}
+#endif
+
+int duplicateRemoteFd(int targetPid, int targetFd) {
+#if defined(SYS_pidfd_open)
+  int pidfd = syscall(SYS_pidfd_open, targetPid, 0);
+  return syscall(SYS_pidfd_getfd, pidfd, targetFd, 0);
+#else
+  TORCH_CHECK(false, "IntraNodeComm requires SYS_pidfd_open support");
+#endif
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 // Rendezvous and Initialization
 ////////////////////////////////////////////////////////////////////////////////
@@ -215,26 +256,28 @@ IntraNodeComm::IntraNodeComm(
       barrierReady_(at::cuda::CUDAEvent()) {}
 
 IntraNodeComm::~IntraNodeComm() {
+#if !defined(USE_ROCM) && defined(PYTORCH_C10_DRIVER_API_SUPPORTED)
   if (!isInitialized_) {
     return;
   }
+  auto driverApi = c10::cuda::DriverAPI::get();
   // Intentionally releasing resources without synchronizing devices. The
   // teardown logic is safe for propoerly sync'd user program. We don't want
   // improperly sync'd user program to hang here.
   for (size_t r = 0; r < worldSize_; ++r) {
-    if (r == rank_) {
-      continue;
-    }
-    AT_CUDA_CHECK(cudaIpcCloseMemHandle(p2pStates_[r]));
-    AT_CUDA_CHECK(cudaIpcCloseMemHandle(buffers_[r]));
+    C10_CUDA_DRIVER_CHECK(driverApi->cuMemUnmap_(
+        reinterpret_cast<CUdeviceptr>(p2pStates_[r]), p2pStateAllocSize_));
+    C10_CUDA_DRIVER_CHECK(driverApi->cuMemUnmap_(
+        reinterpret_cast<CUdeviceptr>(buffers_[r]), bufferAllocSize_));
   }
-  AT_CUDA_CHECK(cudaFree(p2pStates_[rank_]));
-  AT_CUDA_CHECK(cudaFree(buffers_[rank_]));
+  C10_CUDA_DRIVER_CHECK(driverApi->cuMemRelease_(p2pStateHandle_));
+  C10_CUDA_DRIVER_CHECK(driverApi->cuMemRelease_(bufferHandle_));
   if (topoInfo_ != nullptr) {
     AT_CUDA_CHECK(cudaFree(topoInfo_));
   }
   AT_CUDA_CHECK(cudaFree(p2pStatesDev_));
   AT_CUDA_CHECK(cudaFree(buffersDev_));
+#endif
 }
 
 bool IntraNodeComm::isEnabled() {
@@ -344,30 +387,41 @@ bool IntraNodeComm::rendezvous() {
   // Detect topology
   Topology topology = detectTopology(nvlMesh, worldSize_);
 
-  // Initialize p2p state
-  auto p2pState = initP2pState();
+  auto driverApi = c10::cuda::DriverAPI::get();
 
-  // Allocate buffer
-  void* buffer = nullptr;
-  AT_CUDA_CHECK(cudaMalloc(&buffer, bufferSize_));
+  // Allocate p2p state and buffer
+  p2pStateAllocSize_ =
+      allocP2pBlock(&p2pStateHandle_, kP2pStateSize, deviceIdx);
+  bufferAllocSize_ = allocP2pBlock(&bufferHandle_, bufferSize_, deviceIdx);
 
-  // Second handshake: exchange topology and CUDA IPC handles
+  void *p2pState, *buffer;
+  mapP2pBlock(&p2pState, p2pStateHandle_, p2pStateAllocSize_, deviceIdx);
+  AT_CUDA_CHECK(cudaMemset(p2pState, 0, p2pStateAllocSize_));
+  mapP2pBlock(&buffer, bufferHandle_, bufferAllocSize_, deviceIdx);
+
+  // Export p2p state and buffer for sharing
+  int p2pStateFd, bufferFd;
+  C10_CUDA_DRIVER_CHECK(driverApi->cuMemExportToShareableHandle_(
+      &p2pStateFd,
+      p2pStateHandle_,
+      CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR,
+      0));
+  C10_CUDA_DRIVER_CHECK(driverApi->cuMemExportToShareableHandle_(
+      &bufferFd, bufferHandle_, CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR, 0));
+
+  // Second handshake: exchange topology and fds
   struct IpcInfo {
     NvlMesh nvlMesh;
     Topology topology;
-    cudaIpcMemHandle_t p2pStateHandle, bufferHandle;
+    int pid, p2pStateFd, bufferFd;
   };
-
-  // Make p2p state and buffer available for IPC
-  cudaIpcMemHandle_t p2pStateHandle, bufferHandle;
-  AT_CUDA_CHECK(cudaIpcGetMemHandle(&p2pStateHandle, p2pState));
-  AT_CUDA_CHECK(cudaIpcGetMemHandle(&bufferHandle, buffer));
 
   IpcInfo ipcInfo{
       .nvlMesh = nvlMesh,
       .topology = topology,
-      .p2pStateHandle = p2pStateHandle,
-      .bufferHandle = bufferHandle};
+      .pid = getpid(),
+      .p2pStateFd = p2pStateFd,
+      .bufferFd = bufferFd};
 
   auto peerIpcInfos =
       storeAllGather(store_, "handshake-1", rank_, worldSize_, ipcInfo);
@@ -378,8 +432,12 @@ bool IntraNodeComm::rendezvous() {
       LOG(WARNING) << "Aborting IntraNodeComm::rendezvous because some "
                       "participants are observing different topologies ("
                    << int(info.topology) << " and " << int(topology) << ")";
-      AT_CUDA_CHECK(cudaFree(p2pState));
-      AT_CUDA_CHECK(cudaFree(buffer));
+      C10_CUDA_DRIVER_CHECK(driverApi->cuMemUnmap_(
+          reinterpret_cast<CUdeviceptr>(p2pState), p2pStateAllocSize_));
+      C10_CUDA_DRIVER_CHECK(driverApi->cuMemUnmap_(
+          reinterpret_cast<CUdeviceptr>(buffer), bufferAllocSize_));
+      C10_CUDA_DRIVER_CHECK(driverApi->cuMemRelease_(p2pStateHandle_));
+      C10_CUDA_DRIVER_CHECK(driverApi->cuMemRelease_(bufferHandle_));
       return false;
     }
   }
@@ -390,16 +448,36 @@ bool IntraNodeComm::rendezvous() {
       p2pStates[r] = p2pState;
       buffers[r] = buffer;
     } else {
-      AT_CUDA_CHECK(cudaIpcOpenMemHandle(
-          &p2pStates[r],
-          peerIpcInfos[r].p2pStateHandle,
-          cudaIpcMemLazyEnablePeerAccess));
-      AT_CUDA_CHECK(cudaIpcOpenMemHandle(
-          &buffers[r],
-          peerIpcInfos[r].bufferHandle,
-          cudaIpcMemLazyEnablePeerAccess));
+      auto& peerIpcInfo = peerIpcInfos[r];
+      // Duplicate the remote fds into the current process
+      int remoteP2pStateFd =
+          duplicateRemoteFd(peerIpcInfo.pid, peerIpcInfo.p2pStateFd);
+      int remoteBufferFd =
+          duplicateRemoteFd(peerIpcInfo.pid, peerIpcInfo.bufferFd);
+      // Import the allocation handles from the fds
+      CUmemGenericAllocationHandle remoteP2pStateHandle = {};
+      CUmemGenericAllocationHandle remoteBufferHandle = {};
+      C10_CUDA_DRIVER_CHECK(driverApi->cuMemImportFromShareableHandle_(
+          &remoteP2pStateHandle,
+          (void*)(uintptr_t)remoteP2pStateFd,
+          CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR));
+      C10_CUDA_DRIVER_CHECK(driverApi->cuMemImportFromShareableHandle_(
+          &remoteBufferHandle,
+          (void*)(uintptr_t)remoteBufferFd,
+          CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR));
+      // Map the allocation handles
+      mapP2pBlock(
+          &p2pStates[r], remoteP2pStateHandle, p2pStateAllocSize_, deviceIdx);
+      mapP2pBlock(&buffers[r], remoteBufferHandle, bufferAllocSize_, deviceIdx);
+      close(remoteP2pStateFd);
+      close(remoteBufferFd);
     }
   }
+
+  storeAllGather(store_, "barrier-1", rank_, worldSize_, 1);
+  close(p2pStateFd);
+  close(bufferFd);
+
   void* p2pStatesDev = nullptr;
   AT_CUDA_CHECK(cudaMalloc(&p2pStatesDev, sizeof(p2pStates)));
   AT_CUDA_CHECK(cudaMemcpy(

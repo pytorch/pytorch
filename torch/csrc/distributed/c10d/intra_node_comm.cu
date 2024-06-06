@@ -132,6 +132,8 @@ struct P2pState {
   uint32_t signals1[kMaxAllReduceBlocks][kMaxDevices];
 };
 
+static_assert(kP2pStateSize >= sizeof(P2pState));
+
 template <uint32_t kWorldSize, bool kAligned>
 static __global__ void oneShotAllReduceKernel(
     at::BFloat16* input,
@@ -478,13 +480,6 @@ bool isIntraNodeCommSupported() {
 #endif
 }
 
-void* initP2pState() {
-  void* state = nullptr;
-  AT_CUDA_CHECK(cudaMalloc(&state, sizeof(P2pState)));
-  AT_CUDA_CHECK(cudaMemset(state, 0, sizeof(P2pState)));
-  return state;
-}
-
 void* initTopoInfo(Topology topology, NvlMesh nvlMesh, size_t rank) {
   void* topoInfo = nullptr;
   if (topology != Topology::HYBRID_CUBE_MESH) {
@@ -758,11 +753,12 @@ at::Tensor IntraNodeComm::getBuffer(
   const auto numel = std::accumulate(sizes.begin(), sizes.end(), 0);
   const auto elementSize = c10::elementSize(dtype);
   TORCH_CHECK((numel + storageOffset) * elementSize <= bufferSize_);
-  auto options = at::TensorOptions().dtype(dtype).device(
-      at::kCUDA, at::cuda::current_device());
+  auto device = c10::Device(c10::DeviceType::CUDA, at::cuda::current_device());
+  auto options = at::TensorOptions().dtype(dtype).device(device);
   return at::for_blob(buffers_[rank], sizes)
       .storage_offset(storageOffset)
       .options(options)
+      .target_device(device)
       .make_tensor();
 }
 

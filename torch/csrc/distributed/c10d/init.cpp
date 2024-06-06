@@ -2733,6 +2733,9 @@ Example::
               "is_p2p_available",
               &::c10d::ProcessGroupCudaP2P::is_p2p_available)
           .def("get_buffer_size", &::c10d::ProcessGroupCudaP2P::get_buffer_size)
+          .def(
+              "ensure_min_buffer_size",
+              &::c10d::ProcessGroupCudaP2P::ensure_min_buffer_size)
           .def("stream", &::c10d::ProcessGroupCudaP2P::stream)
           .def(
               "intra_node_barrier",

@@ -147,6 +147,32 @@ class ProcessGroupCudaP2PTest(MultiProcessTestCase):
 
     @skipIfRocm
     @skip_if_lt_x_gpu(2)
+    def test_ensure_min_buffer_size(self) -> None:
+        BUFFER_SIZE = 2 * 1024 * 1024
+
+        self._init_process_group(BUFFER_SIZE)
+        rank = self.rank
+        world_size = self.world_size
+
+        assert is_cuda_p2p_group(dist.group.WORLD)
+        backend = get_cuda_p2p_backend(dist.group.WORLD)
+
+        with self.assertRaises(RuntimeError):
+            backend.get_p2p_buffer(
+                (rank) % world_size, (BUFFER_SIZE * 2 // 4,), torch.float
+            )
+
+        backend.ensure_min_buffer_size(BUFFER_SIZE * 2)
+        backend.get_p2p_buffer(
+            (rank) % world_size, (BUFFER_SIZE * 2 // 4,), torch.float
+        )
+
+        dist.barrier()
+        torch.cuda.synchronize()
+        dist.destroy_process_group()
+
+    @skipIfRocm
+    @skip_if_lt_x_gpu(2)
     @parametrize("gather_dim", [0, 1])
     def test_fused_all_gather_matmul(self, gather_dim: int) -> None:
         B = 8
