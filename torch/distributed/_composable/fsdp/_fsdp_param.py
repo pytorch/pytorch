@@ -126,7 +126,7 @@ class FSDPParam:
     sharded_param: nn.Parameter  # ND
     _sharded_post_forward_param_data: Optional[torch.Tensor]  # 1D
     _sharded_post_forward_param: Optional[nn.Parameter]  # ND
-    _unsharded_param: nn.Parameter  # ND
+    _unsharded_param: Optional[nn.Parameter]  # ND
     unsharded_accumulated_grad: Optional[torch.Tensor]  # ND
     _spmd_placements: Tuple[Placement, ...]
     _global_size: torch.Size
@@ -321,8 +321,9 @@ class FSDPParam:
         2. Under compile, we always recreate `self.all_gather_outputs` per AllGather.
            This is to ensure the buffer creation is internal to the graph and
            avoid `self.all_gather_outputs` being captured as a graph input.
-        3. Under compile, after populating `self._unsharded_param`, we always clean up
-           `self.all_gather_outputs`, to avoid it being captured as a graph output.
+        3. Under compile, at the end of `free_unsharded_param()`, we always clean up
+           `self.all_gather_outputs` and `self._unsharded_inner_tensors`,
+           to avoid them being captured as graph output.
 
         With these invariants, only these tensors will be inputs to the graph:
         - Sharded parameters
