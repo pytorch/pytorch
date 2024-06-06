@@ -719,6 +719,11 @@ class CppWrapperCpu(WrapperCodeGen):
                 ), f"input {name=} cannot be symbolic"
                 self.write_input_output_info("inputs_info_", idx, name)
 
+            all_cuda = all(
+                V.graph.get_original_value_of_constant(name).is_cuda
+                for name in V.graph.constants.keys()
+                if name not in V.graph.folded_constants
+            )
             for idx, name in enumerate(V.graph.constants.keys()):
                 tensor = V.graph.get_original_value_of_constant(name)
                 assert isinstance(tensor, torch.Tensor)
@@ -730,7 +735,7 @@ class CppWrapperCpu(WrapperCodeGen):
                     f"constants_info_[{idx}].offset = {tensor.storage_offset()};"
                 )
 
-                # For data_size, we always align it to 64.
+                # If constants to serialize contain cpu tensors, we always align data_size it to 64.
                 # When loading the constants, the valid data will depends on the size
                 # not the data_size so there won't be correctness issue.
                 data_size = (
@@ -739,7 +744,7 @@ class CppWrapperCpu(WrapperCodeGen):
                     else tensor.untyped_storage().nbytes()
                 )
                 self.prefix.writeline(
-                    f"constants_info_[{idx}].data_size = {_align(data_size)};"
+                    f"constants_info_[{idx}].data_size = {data_size if all_cuda else _align(data_size)};"
                 )
 
                 from_folded = "true" if name in V.graph.folded_constants else "false"

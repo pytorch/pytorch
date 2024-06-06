@@ -2091,7 +2091,7 @@ class AotCodeCompiler:
             else:
                 run_command_and_check(compile_cmd)
 
-            def _to_bytes(t: torch.Tensor) -> bytes:
+            def _to_bytes(t: torch.Tensor, all_cuda: bool) -> bytes:
                 def _pad_to_alignment(raw_bytes):
                     padded_bytes = raw_bytes.ljust(
                         (len(raw_bytes) + ALIGN_BYTES - 1) // ALIGN_BYTES * ALIGN_BYTES,
@@ -2118,10 +2118,20 @@ class AotCodeCompiler:
                     data_ptr,
                     ctypes.POINTER(ctypes.c_ubyte * nbytes),
                 )
-                return _pad_to_alignment(bytes(raw_array.contents))
+                raw_bytes = bytes(raw_array.contents)
+                return (
+                    raw_bytes
+                    if all_cuda
+                    else _pad_to_alignment(bytes(raw_array.contents))
+                )
 
+            all_cuda = all(
+                graph.get_original_value_of_constant(name).is_cuda
+                for name in graph.constants.keys()
+                if name not in graph.folded_constants
+            )
             serialized_weights = b"".join(
-                _to_bytes(graph.get_original_value_of_constant(name))
+                _to_bytes(graph.get_original_value_of_constant(name), all_cuda)
                 for name in graph.constants.keys()
                 if name not in graph.folded_constants
             )
