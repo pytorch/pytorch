@@ -423,6 +423,11 @@ class _PipelineStageBase(ABC):
         Retrieve the activations received for the current stage during forward.
         """
         recv_infos = self.args_recv_info[self.fwd_chunk_id]
+
+        # add check that all recv_infos are _RecvInfo
+        # filters out root level placeholders, which can occur with non-zero stage inputs
+        recv_infos = tuple([info for info in recv_infos if isinstance(info, _RecvInfo)])
+        
         activations = self._map_tensor_from_recv_info(recv_infos)
         return activations
 
@@ -496,8 +501,9 @@ class _PipelineStageBase(ABC):
             composite_kwargs = kwargs or {}
         else:
             # Receive activations for this chunk
-            # Activations only come in args form
-            composite_args = self._retrieve_recv_activations()
+            # Add activations from previous stage and positional args from user input
+            # These later-stage user inputs are received through schedule.step()
+            composite_args = self._retrieve_recv_activations() + args
             composite_kwargs = {}
 
         self._validate_fwd_input(args, kwargs)

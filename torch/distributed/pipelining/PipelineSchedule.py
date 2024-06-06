@@ -308,6 +308,13 @@ class PipelineScheduleSingle(_PipelineSchedule):
 
         # Return merged results per original format
         if self._stage.is_last:
+            # check for any tensors with dim 0, which would fail in merge_outputs, and unsqueeze
+            # primarily a solution for models that return loss tensors with dim 0
+            if self._output_merge_spec is None:
+                for chunk in self._stage.output_chunks:
+                    for tensor in chunk:
+                        if isinstance(tensor, torch.Tensor) and tensor.dim() == 0:
+                            tensor.unsqueeze_(0)
             return self._merge_outputs(self._stage.output_chunks)
         else:
             return None
