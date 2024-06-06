@@ -55,6 +55,7 @@ kind_to_standard_operators = {
     "aten::__is__": operator.is_,
     "aten::__isnot__": operator.is_not,
     "aten::__not__": operator.not_,
+    "aten::__contains__": operator.contains,
 }
 
 
@@ -506,7 +507,6 @@ class TS2FXGraphConverter:
 
     def convert_node(self, node: torch._C.Node):
         node_kind = node.kind()
-        node_kind_split = node_kind.split("::")
 
         # Get handler based on namespace and operator name.
         # Provide a default node handler as well in case we don't find

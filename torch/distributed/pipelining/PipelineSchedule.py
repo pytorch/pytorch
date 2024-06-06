@@ -4,15 +4,27 @@ import logging
 from abc import ABC, abstractmethod
 from collections import defaultdict
 from enum import Enum
-from typing import Any, Callable, Dict, List, NamedTuple, Optional, Tuple, Union
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    List,
+    NamedTuple,
+    Optional,
+    Tuple,
+    TYPE_CHECKING,
+    Union,
+)
 
 import torch
 import torch.distributed as dist
 from torch.profiler import record_function
 
-from ._IR import Pipe
 from .microbatch import merge_chunks, split_args_kwargs_into_chunks
 from .PipelineStage import _PipelineStageBase
+
+if TYPE_CHECKING:
+    from ._IR import Pipe
 
 
 __all__ = [
