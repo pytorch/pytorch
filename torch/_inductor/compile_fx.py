@@ -48,9 +48,7 @@ from torch._logging import trace_structured
 from torch._ops import OpOverload
 from torch._subclasses.fake_tensor import FakeTensor
 from torch._utils_internal import compile_time_strobelight_meta
-from torch.export._trace import _make_argument_spec
 
-from torch.export.graph_signature import _sig_to_specs, OutputKind
 from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols
 from torch.fx.passes.fake_tensor_prop import FakeTensorProp
 
@@ -201,40 +199,21 @@ def _unlift_graph(mod, gm, graph_signature):
 
     from torch.export._unlift import _unlift
 
-    _, output_specs = _sig_to_specs(
-        user_inputs=set(graph_signature.user_inputs),
-        inputs_to_parameters=graph_signature.inputs_to_parameters,  # type: ignore[arg-type]
-        inputs_to_buffers=graph_signature.inputs_to_buffers,  # type: ignore[arg-type]
-        user_outputs=set(graph_signature.user_outputs),  # type: ignore[arg-type]
-        buffer_mutations=graph_signature.buffers_to_mutate,  # type: ignore[arg-type]
-        user_input_mutations=graph_signature.user_inputs_to_mutate,  # type: ignore[arg-type]
-        grad_params={},  # type: ignore[arg-type, union-attr]
-        grad_user_inputs={},  # type: ignore[arg-type, union-attr]
-        loss_output=None,  # type: ignore[arg-type, union-attr]
-        inputs=[
-            _make_argument_spec(i, node, graph_signature.input_tokens)
-            for i, node in enumerate(gm.graph.nodes)
-            if node.op == "placeholder"
-        ],
-        outputs=[
-            _make_argument_spec(i, node, graph_signature.input_tokens)
-            for i, node in enumerate(
-                pytree.tree_leaves(next(iter(reversed(gm.graph.nodes))).args)
-            )
-        ],
-        input_tokens=graph_signature.input_tokens,
-        output_tokens=graph_signature.output_tokens,
-    )
-
-    mutated_outputs: List[Optional[str]] = [
-        (
-            out_spec.target
-            if out_spec.kind
-            in (OutputKind.BUFFER_MUTATION, OutputKind.USER_INPUT_MUTATION)
-            else None
-        )
-        for out_spec in output_specs
-    ]
+    outputs = list(gm.graph.nodes)[-1].args[0]
+    mutated_outputs = []
+    buffer_mutations = graph_signature.buffers_to_mutate
+    user_input_mutations = graph_signature.user_inputs_to_mutate
+    output_tokens = graph_signature.output_tokens
+    for idx, out in enumerate(outputs):
+        if idx < len(buffer_mutations) + len(user_input_mutations) + len(output_tokens):
+            if out.name in graph_signature.buffers_to_mutate:
+                mutated_outputs.append(graph_signature.buffers_to_mutate[out.name])
+            elif out.name in graph_signature.user_inputs_to_mutate:
+                mutated_outputs.append(graph_signature.user_inputs_to_mutate[out.name])
+            else:
+                mutated_outputs.append(None)
+        else:
+            mutated_outputs.append(None)
 
     unlifted_gm = _unlift(
         gm,
