@@ -118,7 +118,7 @@ static FusionStrategy getInitialStrategy() {
 }
 
 // defer initial value so that we can load in gflags
-static c10::optional<FusionStrategy> fusion_strategy = c10::nullopt;
+static std::optional<FusionStrategy> fusion_strategy = c10::nullopt;
 
 FusionStrategy getFusionStrategy() {
   std::lock_guard<std::mutex> guard(fusion_strategy_lock);
@@ -613,7 +613,7 @@ size_t ProfilingGraphExecutorImpl::getInstantiatedBailoutDepth() {
 
 const ExecutionPlan& ProfilingGraphExecutorImpl::getOptimizedPlanFor(
     Stack& stack,
-    c10::optional<size_t> remaining_bailout_depth) {
+    std::optional<size_t> remaining_bailout_depth) {
   GRAPH_DEBUG("Running ProfilingGraphExecutorImpl ", this);
 
   // TODO: instantiate simple executor when getProfilingMode() is false
@@ -700,7 +700,7 @@ const ExecutionPlan& ProfilingGraphExecutorImpl::getOptimizedPlanFor(
 
 const ExecutionPlan& ProfilingGraphExecutorImpl::getPlanFor(
     Stack& stack,
-    c10::optional<size_t> remaining_bailout_depth) {
+    std::optional<size_t> remaining_bailout_depth) {
   std::lock_guard<std::mutex> lock(compile_mutex);
 
   // IMPORTANT: This is a hot path of calling a torchscript function. Try not to

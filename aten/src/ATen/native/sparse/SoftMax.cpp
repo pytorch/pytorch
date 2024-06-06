@@ -615,7 +615,7 @@ static Tensor _sparse_softmax(const Tensor& input_, const int64_t dim_) {
   return result;
 }
 
-Tensor _sparse_softmax(const Tensor& input_, const int64_t dim_, c10::optional<ScalarType> dtype) {
+Tensor _sparse_softmax(const Tensor& input_, const int64_t dim_, std::optional<ScalarType> dtype) {
   auto result = [&]() {
     NoNamesGuard guard;
     if (input_.is_cuda() && input_.scalar_type() == ScalarType::Half && dtype == ScalarType::Float){
@@ -642,7 +642,7 @@ static Tensor _sparse_log_softmax(const Tensor& input_, const int64_t dim_) {
   return result;
 }
 
-Tensor _sparse_log_softmax(const Tensor& input_, const int64_t dim_, c10::optional<ScalarType> dtype) {
+Tensor _sparse_log_softmax(const Tensor& input_, const int64_t dim_, std::optional<ScalarType> dtype) {
   auto result = [&]() {
     NoNamesGuard guard;
     if (input_.is_cuda() && input_.scalar_type() == ScalarType::Half && dtype == ScalarType::Float){

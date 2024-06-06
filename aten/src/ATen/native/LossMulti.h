@@ -41,7 +41,7 @@ namespace {
     const int64_t& ndims,
     const Tensor& input,
     const Tensor& target,
-    const c10::optional<Tensor>& weight) {
+    const std::optional<Tensor>& weight) {
     TORCH_CHECK(
         (ndims == 2 && input.size(1) != 0) || (ndims == 1 && input.size(0) != 0) || ndims == 0,
         "Expected non-empty vector or matrix with optional 0-dim batch size, but got: ",

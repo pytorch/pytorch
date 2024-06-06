@@ -97,6 +97,14 @@ struct TORCH_API FunctionalTensorWrapper : public c10::TensorImpl {
         ->are_all_mutations_under_no_grad_or_inference_mode();
   }
 
+  void maybe_mark_symbolic(const functionalization::ViewMeta& meta) {
+    is_symbolic_ = is_symbolic_ | meta.has_symbolic_inputs;
+  }
+
+  bool is_symbolic() const {
+    return is_symbolic_;
+  }
+
   // Runs the forward_fn of every ViewMeta collected in the current instance
   // to some other base.
   Tensor apply_view_metas(const Tensor& base);
@@ -250,6 +258,8 @@ struct TORCH_API FunctionalTensorWrapper : public c10::TensorImpl {
   bool is_multi_output_view_ = false;
   // Did the tensor experience a set_() call.
   bool was_storage_changed_ = false;
+  // Did the tensor experience any view operation with symbolic int.
+  bool is_symbolic_ = false;
 
   size_t generation_ = 0;
   std::vector<at::functionalization::ViewMeta> view_metas_;
@@ -276,32 +286,32 @@ TORCH_API inline FunctionalTensorWrapper* unsafeGetFunctionalWrapper(
 }
 
 TORCH_API bool isFunctionalTensor(const at::Tensor& tensor);
-TORCH_API bool isFunctionalTensor(const c10::optional<Tensor>& t);
+TORCH_API bool isFunctionalTensor(const std::optional<Tensor>& t);
 TORCH_API bool isFunctionalTensor(
-    const c10::List<c10::optional<Tensor>>& t_list);
+    const c10::List<std::optional<Tensor>>& t_list);
 TORCH_API bool isFunctionalTensor(ITensorListRef list);
 
 TORCH_API Tensor to_functional_tensor(const Tensor& tensor);
-TORCH_API c10::optional<Tensor> to_functional_tensor(
-    const c10::optional<Tensor>& tensor);
-TORCH_API c10::List<c10::optional<Tensor>> to_functional_tensor(
-    const c10::List<c10::optional<Tensor>>& t_list);
+TORCH_API std::optional<Tensor> to_functional_tensor(
+    const std::optional<Tensor>& tensor);
+TORCH_API c10::List<std::optional<Tensor>> to_functional_tensor(
+    const c10::List<std::optional<Tensor>>& t_list);
 TORCH_API std::vector<Tensor> to_functional_tensor(ITensorListRef t_list);
 
 TORCH_API void freeze_functional_tensor(const Tensor& tensor);
 
 TORCH_API Tensor
 from_functional_tensor(const Tensor& tensor, bool assert_functional = true);
-TORCH_API c10::optional<Tensor> from_functional_tensor(
-    const c10::optional<Tensor>& t,
+TORCH_API std::optional<Tensor> from_functional_tensor(
+    const std::optional<Tensor>& t,
     bool assert_functional = true);
-TORCH_API c10::List<c10::optional<Tensor>> from_functional_tensor(
-    const c10::List<c10::optional<Tensor>>& t_list);
+TORCH_API c10::List<std::optional<Tensor>> from_functional_tensor(
+    const c10::List<std::optional<Tensor>>& t_list);
 TORCH_API std::vector<Tensor> from_functional_tensor(ITensorListRef t_list);
 
 TORCH_API void sync(const at::Tensor& t);
-TORCH_API void sync(const c10::optional<Tensor>& t);
-TORCH_API void sync(const c10::List<c10::optional<Tensor>>& t_list);
+TORCH_API void sync(const std::optional<Tensor>& t);
+TORCH_API void sync(const c10::List<std::optional<Tensor>>& t_list);
 TORCH_API void sync(ITensorListRef t_list);
 
 TORCH_API void replace_(const Tensor& functional_tensor, const Tensor& other);

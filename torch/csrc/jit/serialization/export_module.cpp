@@ -254,7 +254,7 @@ std::pair<IValue, IValue> getFunctionTuple(
 
   // schema
   const auto& schema = func.getSchema();
-  auto type_printer = [&](const c10::Type& t) -> c10::optional<std::string> {
+  auto type_printer = [&](const c10::Type& t) -> std::optional<std::string> {
     auto namedType = t.cast<c10::NamedType>();
     if (namedType && namedType->name()) {
       return type_name_uniquer_.getUniqueName(namedType).qualifiedName();
@@ -313,7 +313,7 @@ std::pair<IValue, IValue> getFunctionTuple(
   }
   auto bytecode_vals = to_tuple({qn, codeTable, schemaTable});
 
-  c10::optional<IValue> debug_info_vals;
+  std::optional<IValue> debug_info_vals;
   // module debug info
   // This is just a set of debug handles.
   // We always save debug handles.
@@ -754,7 +754,7 @@ void ScriptModuleSerializer::writeByteCode(
 
 namespace {
 
-c10::optional<std::string> type_printer(
+std::optional<std::string> type_printer(
     const c10::Type& type,
     torch::jit::TypeNameUniquer& type_name_uniquer) {
   if (auto dyn = type.castRaw<c10::DynamicType>()) {

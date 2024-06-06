@@ -233,7 +233,7 @@ namespace detail {
 inline Tensor softmax(
     const Tensor& input,
     int64_t dim,
-    c10::optional<torch::Dtype> dtype) {
+    std::optional<torch::Dtype> dtype) {
   Tensor ret;
 
   if (dtype == c10::nullopt) {
@@ -270,7 +270,7 @@ namespace detail {
 inline Tensor softmin(
     const Tensor& input,
     int64_t dim,
-    c10::optional<torch::Dtype> dtype) {
+    std::optional<torch::Dtype> dtype) {
   Tensor ret;
 
   if (dtype == c10::nullopt) {
@@ -307,7 +307,7 @@ namespace detail {
 inline Tensor log_softmax(
     const Tensor& input,
     int64_t dim,
-    c10::optional<torch::Dtype> dtype) {
+    std::optional<torch::Dtype> dtype) {
   Tensor ret;
 
   if (dtype == c10::nullopt) {

@@ -12,7 +12,7 @@ class ConcreteSourceRangeUnpickler : public SourceRangeUnpickler {
  public:
   ConcreteSourceRangeUnpickler(at::DataPtr&& data, size_t size);
 
-  c10::optional<SourceRange> findSourceRangeThatGenerated(
+  std::optional<SourceRange> findSourceRangeThatGenerated(
       const SourceRange& range) override;
 
  private:

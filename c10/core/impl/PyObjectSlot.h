@@ -93,8 +93,8 @@ struct C10_API PyObjectSlot {
   // be properly treated as a nonhermetic PyObject.
   //
   // NB: this lives in header so that we can avoid actually creating the
-  // c10::optional
-  c10::optional<PyObject*> check_pyobj(
+  // std::optional
+  std::optional<PyObject*> check_pyobj(
       PyInterpreter* self_interpreter,
       bool ignore_hermetic_tls = false) const {
     // Note [Memory ordering on Python interpreter tag]

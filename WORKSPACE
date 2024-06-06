@@ -168,14 +168,10 @@ new_local_repository(
     path = "third_party/opentelemetry-cpp",
 )
 
-new_patched_local_repository(
-    name = "tbb",
-    build_file = "//third_party:tbb.BUILD",
-    patch_strip = 1,
-    patches = [
-        "@//third_party:tbb.patch",
-    ],
-    path = "third_party/tbb",
+new_local_repository(
+    name = "cpp-httplib",
+    build_file = "//third_party:cpp-httplib.BUILD",
+    path = "third_party/cpp-httplib",
 )
 
 new_local_repository(
@@ -353,11 +349,6 @@ local_repository(
 local_repository(
     name = "unused_onnx_benchmark",
     path = "third_party/onnx/third_party/benchmark",
-)
-
-local_repository(
-    name = "unused_onnx_tensorrt_benchmark",
-    path = "third_party/onnx-tensorrt/third_party/onnx/third_party/benchmark",
 )
 
 ### Unused repos end

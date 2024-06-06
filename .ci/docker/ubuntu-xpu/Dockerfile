@@ -62,7 +62,7 @@ RUN if [ -n "${INDUCTOR_BENCHMARKS}" ]; then bash ./install_inductor_benchmark_d
 RUN rm install_inductor_benchmark_deps.sh common_utils.sh timm.txt huggingface.txt
 
 # Install XPU Dependencies
-ARG BASEKIT_VERSION
+ARG XPU_VERSION
 COPY ./common/install_xpu.sh install_xpu.sh
 RUN bash ./install_xpu.sh && rm install_xpu.sh
 

@@ -31,6 +31,7 @@ struct ViewMeta {
   ViewMeta(
       std::function<Tensor(const Tensor&, int64_t)> forward,
       std::function<Tensor(const Tensor&, const Tensor&, int64_t)> reverse,
+      bool has_symbolic_inputs,
       bool is_multi_output = false,
       bool is_as_strided = false,
       int64_t out_idx = 0)
@@ -38,7 +39,8 @@ struct ViewMeta {
         reverse_fn(std::move(reverse)),
         out_index(out_idx),
         is_multi_output(is_multi_output),
-        is_as_strided(is_as_strided) {}
+        is_as_strided(is_as_strided),
+        has_symbolic_inputs(has_symbolic_inputs) {}
 
   std::function<Tensor(const Tensor&, int64_t)> forward_fn;
   std::function<Tensor(const Tensor&, const Tensor&, int64_t)> reverse_fn;
@@ -49,6 +51,9 @@ struct ViewMeta {
   bool is_multi_output;
 
   bool is_as_strided;
+
+  // Tells us if this view operation has any symbolic inputs
+  bool has_symbolic_inputs;
 
   // Returns a copy of the current ViewMeta, if out_idx matches the current
   // out_index. Otherwise, returns a new ViewMeta with the same forward/reverse

@@ -22,7 +22,7 @@ c10::AliasAnalysisKind aliasAnalysisFromSchema() {
 // helper to determine if an optional tensor argument/value passed in is
 // statically defined (neither a None constant nor a Optional[Tensor] type)
 // return yes, no, or no value if we can't tell
-static c10::optional<bool> isDefined(Value* tensor) {
+static std::optional<bool> isDefined(Value* tensor) {
   if (tensor->type()->isSubtypeOf(*TensorType::get())) {
     return true;
   }

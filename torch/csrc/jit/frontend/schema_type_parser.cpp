@@ -82,12 +82,27 @@ TypePtr SchemaTypeParser::parseBaseType() {
 
   auto it = type_map.find(text);
   if (it == type_map.end()) {
-    if (!text.empty() && islower(text[0])) {
+    if (allow_typevars_ && !text.empty() && islower(text[0])) {
       // lower case identifiers that are not otherwise valid types
       // are treated as type variables
       return c10::TypeFactory::createNamed<VarType>(text);
     }
-    throw ErrorReport(tok.range) << "unknown type specifier";
+    if (text == "double") {
+      throw ErrorReport(tok.range)
+          << "Use `float` instead of `double` in an operator's schema string. "
+             "`float` in schema corresponds to the double type in C++";
+    }
+    if (text == "int64_t") {
+      throw ErrorReport(tok.range)
+          << "Use `SymInt` or `int` instead of `int64_t` in an operator's schema string. "
+             "`SymInt` corresponds to c10::SymInt in C++ while `int` in schema corresponds "
+             "to the int64_t type in C++.";
+    }
+    throw ErrorReport(tok.range)
+        << "unknown type specifier. Common valid schema types include "
+           "Tensor, SymInt, int, float, bool, Scalar; "
+           "for a full list, please see "
+           "https://github.com/pytorch/pytorch/blob/main/aten/src/ATen/native/README.md#func ";
   }
   return it->second;
 }
@@ -98,7 +113,7 @@ TypePtr SchemaTypeParser::parseBaseType() {
 // Tensor!  // shorthand for Tensor(fresh_identifier!)
 // Tensor(a! -> a|b) // Tensor is in set a, written to,
 //                      and after the write is in set a AND b.
-c10::optional<AliasInfo> SchemaTypeParser::parseAliasAnnotation() {
+std::optional<AliasInfo> SchemaTypeParser::parseAliasAnnotation() {
   AliasInfo alias_info;
   if (L.nextIf('(')) {
     // optional 'alias set annotation'
@@ -147,7 +162,7 @@ c10::optional<AliasInfo> SchemaTypeParser::parseAliasAnnotation() {
   return alias_info;
 }
 
-c10::optional<at::ScalarType> SchemaTypeParser::parseTensorDType(
+std::optional<at::ScalarType> SchemaTypeParser::parseTensorDType(
     const std::string& dtype) {
 #define DEFINE_SCALAR_TYPE(_1, n) {#n, at::ScalarType::n},
 
@@ -161,7 +176,7 @@ c10::optional<at::ScalarType> SchemaTypeParser::parseTensorDType(
   return c10::nullopt;
 }
 
-c10::optional<c10::Device> SchemaTypeParser::tryToParseDeviceType() {
+std::optional<c10::Device> SchemaTypeParser::tryToParseDeviceType() {
   L.expect('=');
   const std::string& dev = L.expect(TK_IDENT).text();
 
@@ -195,7 +210,7 @@ c10::optional<c10::Device> SchemaTypeParser::tryToParseDeviceType() {
   throw ErrorReport(L.cur()) << "cannot parse device type '" << dev << "'\n";
 }
 
-c10::optional<bool> SchemaTypeParser::tryToParseRequiresGrad() {
+std::optional<bool> SchemaTypeParser::tryToParseRequiresGrad() {
   L.expect('=');
   const std::string& num = L.expect(TK_NUMBER).text();
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
@@ -218,8 +233,8 @@ TypePtr SchemaTypeParser::parseRefinedTensor() {
   TypePtr ptr;
   L.expect('(');
   TypePtr tensor_type;
-  c10::optional<c10::Device> device;
-  c10::optional<bool> requires_grad;
+  std::optional<c10::Device> device;
+  std::optional<bool> requires_grad;
   // Parse a type with either no ranks, known ranks with sizes, ranks with
   // unknown sizes, a mix of ranks with known and unknown sizes, or ranks with
   // known sizes and strides. The type might also have requires_grad and/or
@@ -227,7 +242,7 @@ TypePtr SchemaTypeParser::parseRefinedTensor() {
   //   Long(10, 8, 6, strides=[48, 6, 1], requires_grad=0, device=cuda:1)
   //   Float(10, *, 20, device=cuda:1)
   //   Float(requires_grad=1)
-  std::vector<c10::optional<int64_t>> dims;
+  std::vector<std::optional<int64_t>> dims;
   bool seen_strides = false;
   std::vector<int64_t> strides;
   parseList(TK_NOTHING, ',', ')', [&] {
@@ -339,16 +354,16 @@ TypePtr SchemaTypeParser::parseRefinedTensor() {
   return ptr;
 }
 
-std::pair<TypePtr, c10::optional<AliasInfo>> SchemaTypeParser::parseType() {
+std::pair<TypePtr, std::optional<AliasInfo>> SchemaTypeParser::parseType() {
   auto r = parseFakeAndRealType();
   return std::make_pair(std::move(std::get<0>(r)), std::move(std::get<2>(r)));
 }
 
-std::tuple</*fake*/ TypePtr, /*real*/ TypePtr, c10::optional<AliasInfo>>
+std::tuple</*fake*/ TypePtr, /*real*/ TypePtr, std::optional<AliasInfo>>
 SchemaTypeParser::parseFakeAndRealType() {
   TypePtr fake_value;
   TypePtr real_value;
-  c10::optional<AliasInfo> alias_info;
+  std::optional<AliasInfo> alias_info;
   // Tuple type
   if (L.cur().kind == '(') {
     std::vector<TypePtr> types;
@@ -465,7 +480,7 @@ SchemaTypeParser::parseFakeAndRealType() {
       auto container = parseAliasAnnotation();
       if (alias_info) {
         if (!container) {
-          container = c10::optional<AliasInfo>(AliasInfo());
+          container = std::optional<AliasInfo>(AliasInfo());
           container->setIsWrite(alias_info->isWrite());
         }
         container->addContainedType(std::move(*alias_info));
