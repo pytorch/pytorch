@@ -346,7 +346,7 @@ def add(g: jit_utils.GraphContext, self, other, alpha=None):
     """
     Adds two tensors.
 
-    This function takes two tensors as input and returns a new tensor that is the element-wise 
+    This function takes two tensors as input and returns a new tensor that is the element-wise
     sum of the input tensors.
     If alpha is specified, the second operand will be multiplied by alpha before the addition.
 
