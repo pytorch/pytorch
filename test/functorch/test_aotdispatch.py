@@ -71,6 +71,7 @@ from torch.testing._internal.common_utils import (
     skipIfRocm,
     skipIfTorchDynamo,
     TestCase,
+    xfailIfTorchDynamo,
 )
 from torch.testing._internal.hop_db import hop_db
 from torch.testing._internal.optests import (
@@ -78,6 +79,7 @@ from torch.testing._internal.optests import (
     aot_autograd_check,
 )
 from torch.testing._internal.two_tensor import TwoTensor, TwoTensorMode
+from torch.testing._internal.custom_tensor import CustomTensor
 
 USE_TORCHVISION = False
 try:
@@ -576,6 +578,9 @@ def forward(self, primals_1, primals_2):
 
     # This is a (hopefully) extremely rare case that is difficult to handle,
     # so we ban it.
+    # https://github.com/pytorch/pytorch/issues/126236
+    # https://github.com/pytorch/pytorch/pull/126113
+    @xfailIfTorchDynamo
     def test_set__and_data_mutation_bad(self):
         def f(a):
             a_view = a.view(-1)
@@ -724,11 +729,28 @@ def forward(self, primals_1):
         self.assertTrue(isinstance(out.b.b, torch.Tensor))
 
         out.sum().backward()
-        # aaaa.grad should be a TwoTensor(TwoTensor, TwoTensor)
-        # but instead it is a TwoTensor(tensor, tensor)
         self.assertTrue(isinstance(aaaa.grad, TwoTensor))
         self.assertTrue(isinstance(aaaa.grad.a, TwoTensor))
         self.assertTrue(isinstance(aaaa.grad.b, TwoTensor))
+
+    def test_nested_subclasses_harder(self):
+        @torch.compile(backend="aot_eager")
+        def f(x, y):
+            x.add_constant(4)
+            #x.elem.add_constant(3)
+            return x.cos() + y.cos()
+
+        a = torch.ones(4, requires_grad=True)
+        b = torch.ones(4, requires_grad=True)
+        custom_a = CustomTensor(a)
+        #custom_aa = CustomTensor(custom_a)
+
+        out = f(custom_a, b)
+        print("A", custom_a.constant_attribute)
+        #print("B", custom_aa.elem.constant_attribute)
+        # compiled_f = torch.compile(f, backend="aot_eager")
+        # compiled_out = compiled_f(aaaa, plain_a, aaaa2)
+        # self.assertTrue((compiled_out - out).sum().item() == 0)
 
     def test_outputs_are_aliased(self):
         # Tensor, None, int

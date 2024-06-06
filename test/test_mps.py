@@ -193,6 +193,9 @@ def mps_ops_grad_modifier(ops):
         # Failures due to lack of implementation of downstream functions on MPS backend
         # TODO: remove these once downstream function 'aten::_linalg_svd.U' have been implemented
         'linalg.matrix_rank': None,
+
+        # Exception: Caused by sample input at index 3 on MPS
+        'nn.functional.conv3d': [torch.float32],
     }
 
     def addDecorator(op, d) -> None:
@@ -297,7 +300,9 @@ def mps_ops_modifier(ops):
         'narrow',
         'narrow_copy',
         'nn.functional.conv1d',
+        'nn.functional.conv2d',
         'nn.functional.conv_transpose1d',
+        'nn.functional.conv_transpose2d',
         'nn.functional.feature_alpha_dropoutwithout_train',
         'nn.functional.padcircular',
         'nn.functional.unfold',
@@ -347,6 +352,7 @@ def mps_ops_modifier(ops):
 
     AFTER_MACOS_14_0_SUPPORTED_COMPLEX_OPS = {
         '__rdiv__',
+        '__rmatmul__',
         '_chunk_cat',
         'acos',
         'acosh',
@@ -355,16 +361,20 @@ def mps_ops_modifier(ops):
         'any',
         'addcdiv',
         'addcmul',
+        'addmmdecomposed',
+        'addmv',
         'asin',
         'atan',
         'atanh',
         'bfloat16',
+        'bmm',
         'bool',
         'cartesian_prod',
         'cat',
         'char',
         'column_stack',
         'combinations',
+        'corrcoef',
         'constant_pad_nd',
         'cos',
         'cosh',
@@ -374,6 +384,7 @@ def mps_ops_modifier(ops):
         'divno_rounding_mode',
         'dot',
         'dstack',
+        'einsum',
         'eq',
         'equal',
         'exp2',
@@ -400,10 +411,13 @@ def mps_ops_modifier(ops):
         'gradient',
         'half',
         'hstack',
+        'inner',
         'int',
         'isclose',
         'isnan',
         'ldexp',
+        'linalg.multi_dot',
+        'linalg.pinv',
         'log10',
         'log1p',
         'log2',
@@ -419,7 +433,10 @@ def mps_ops_modifier(ops):
         'masked.std',
         'masked.sum',
         'masked.var',
+        'matmul',
         'mean',
+        'mm',
+        'mv',
         'ne',
         'neg',
         'nn.functional.padconstant',
@@ -430,6 +447,7 @@ def mps_ops_modifier(ops):
         'nn.functional.rms_norm',
         'nn.functional.softsign',
         'nn.functional.tanhshrink',
+        'pinverse',
         'prod',
         'reciprocal',
         'roll',
@@ -447,6 +465,7 @@ def mps_ops_modifier(ops):
         'sum_to_size',
         'tan',
         'tanh',
+        'tensordot',
         'trace',
         'trapz',
         'trapezoid',
@@ -649,6 +668,11 @@ def mps_ops_modifier(ops):
         'polygammapolygamma_n_4': [torch.float32, torch.int16, torch.int8],
         'special.polygamma': [torch.float32, torch.int16, torch.int32, torch.int8],
         'special.polygammaspecial_polygamma_n_0': [torch.float32, torch.int16, torch.int8],
+    }
+
+    MACOS_BEFORE_14_4_XFAILLIST = {
+        # These ops work fine in 14.4 but fail in 14.2 or 13.x
+        'fft.hfft2': [torch.complex64],
     }
 
     # Those ops are not expected to work
@@ -1004,6 +1028,9 @@ def mps_ops_modifier(ops):
         # Unsupported
         # input types 'tensor<1x3x9x9xf16>' and 'tensor<1xf32>' are not broadcast compatible
         'nn.functional.avg_pool2d': [torch.float16],
+
+        # This doesn't work on M1, but is partially working on M2 with the exception of torch.float16
+        'nn.functional.conv3d': None,
     }
 
     def addDecorator(op, d) -> None:
@@ -1023,6 +1050,11 @@ def mps_ops_modifier(ops):
                 addDecorator(op, DecorateInfo(
                              unittest.expectedFailure,
                              dtypes=xfaillist[key]))
+
+        if key in MACOS_BEFORE_14_4_XFAILLIST and (product_version < 14.4):
+            addDecorator(op, DecorateInfo(
+                         unittest.expectedFailure,
+                         dtypes=MACOS_BEFORE_14_4_XFAILLIST[key]))
 
         if key in MACOS_BEFORE_13_3_XFAILLIST and (torch.backends.mps.is_macos13_or_newer() and product_version < 13.3):
             addDecorator(op, DecorateInfo(
@@ -11758,7 +11790,7 @@ class TestConsistency(TestCaseMPS):
     }
 
     def _compute_tolerances(self, op, dtype):
-        if (op.name in self.FP32_LOW_PRECISION_LIST) and dtype == torch.float32:
+        if (op.name in self.FP32_LOW_PRECISION_LIST) and dtype in [torch.float32, torch.complex64]:
             return (1e-4, 3e-5)
 
         if op.name in self.FP16_LOW_PRECISION_LIST and dtype == torch.float16:

@@ -285,34 +285,6 @@ jobs:
       docker-image: ${{ needs.linux-focal-cuda12_1-py3_10-gcc9-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-focal-cuda12_1-py3_10-gcc9-build.outputs.test-matrix }}
 
-  linux-focal-cuda12_4-py3_10-gcc9-build:
-    name: linux-focal-cuda12.4-py3.10-gcc9
-    uses: ./.github/workflows/_linux-build-label.yml
-    with:
-      build-environment: linux-focal-cuda12.4-py3.10-gcc9
-      docker-image-name: pytorch-linux-focal-cuda12.4-cudnn8-py3-gcc9
-      test-matrix: |
-        { include: [
-          { config: "default", shard: 1, num_shards: 5, runner: "linux.4xlarge.nvidia.gpu" },
-          { config: "default", shard: 2, num_shards: 5, runner: "linux.4xlarge.nvidia.gpu" },
-          { config: "default", shard: 3, num_shards: 5, runner: "linux.4xlarge.nvidia.gpu" },
-          { config: "default", shard: 4, num_shards: 5, runner: "linux.4xlarge.nvidia.gpu" },
-          { config: "default", shard: 5, num_shards: 5, runner: "linux.4xlarge.nvidia.gpu" },
-          { config: "deploy", shard: 1, num_shards: 1, runner: "linux.4xlarge.nvidia.gpu" },
-        ]}
-
-  linux-focal-cuda12_4-py3_10-gcc9-test:
-    name: linux-focal-cuda12.4-py3.10-gcc9
-    uses: ./.github/workflows/_linux-test.yml
-    needs:
-      - linux-focal-cuda12_4-py3_10-gcc9-build
-      - target-determination
-    with:
-      timeout-minutes: 360
-      build-environment: linux-focal-cuda12.4-py3.10-gcc9
-      docker-image: ${{ needs.linux-focal-cuda12_4-py3_10-gcc9-build.outputs.docker-image }}
-      test-matrix: ${{ needs.linux-focal-cuda12_4-py3_10-gcc9-build.outputs.test-matrix }}
-
   linux-jammy-py3-clang12-mobile-build:
     name: linux-jammy-py3-clang12-mobile-build
     uses: ./.github/workflows/_linux-build-label.yml
@@ -496,33 +468,6 @@ jobs:
       build-environment: linux-focal-cuda12.1-py3.10-gcc9-sm86
       docker-image: ${{ needs.linux-focal-cuda12_1-py3_10-gcc9-sm86-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-focal-cuda12_1-py3_10-gcc9-sm86-build.outputs.test-matrix }}
-
-  linux-focal-cuda12_4-py3_10-gcc9-sm86-build:
-    name: linux-focal-cuda12.4-py3.10-gcc9-sm86
-    uses: ./.github/workflows/_linux-build-label.yml
-    with:
-      build-environment: linux-focal-cuda12.4-py3.10-gcc9-sm86
-      docker-image-name: pytorch-linux-focal-cuda12.4-cudnn8-py3-gcc9
-      cuda-arch-list: 8.6
-      test-matrix: |
-        { include: [
-          { config: "default", shard: 1, num_shards: 5, runner: "linux.g5.4xlarge.nvidia.gpu" },
-          { config: "default", shard: 2, num_shards: 5, runner: "linux.g5.4xlarge.nvidia.gpu" },
-          { config: "default", shard: 3, num_shards: 5, runner: "linux.g5.4xlarge.nvidia.gpu" },
-          { config: "default", shard: 4, num_shards: 5, runner: "linux.g5.4xlarge.nvidia.gpu" },
-          { config: "default", shard: 5, num_shards: 5, runner: "linux.g5.4xlarge.nvidia.gpu" },
-        ]}
-
-  linux-focal-cuda12_4-py3_10-gcc9-sm86-test:
-    name: linux-focal-cuda12.4-py3.10-gcc9-sm86
-    uses: ./.github/workflows/_linux-test.yml
-    needs:
-      - linux-focal-cuda12_4-py3_10-gcc9-sm86-build
-      - target-determination
-    with:
-      build-environment: linux-focal-cuda12.4-py3.10-gcc9-sm86
-      docker-image: ${{ needs.linux-focal-cuda12_4-py3_10-gcc9-sm86-build.outputs.docker-image }}
-      test-matrix: ${{ needs.linux-focal-cuda12_4-py3_10-gcc9-sm86-build.outputs.test-matrix }}
 
   linux-jammy-py3-clang12-executorch-build:
     name: linux-jammy-py3-clang12-executorch
