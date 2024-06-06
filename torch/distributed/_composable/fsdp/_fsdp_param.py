@@ -21,6 +21,7 @@ from ._fsdp_common import (
     FSDPMeshInfo,
     HSDPMeshInfo,
 )
+from torch._dynamo import create_parameter_op
 
 """
 [Note: FSDP tensors]
@@ -386,8 +387,7 @@ class FSDPParam:
         if self._unsharded_param is not None:
             assert torch._dynamo.compiled_autograd.compiled_autograd_enabled
             with torch.no_grad():
-                alloc_storage(self._unsharded_param)
-                self._unsharded_param.copy_(unsharded_param)
+                torch.ops.create_parameter_op.set_(self._unsharded_param, unsharded_param)
         else:
             self._unsharded_param = nn.Parameter(unsharded_param, requires_grad=self.sharded_param.requires_grad)
         if torch._dynamo.compiled_autograd.compiled_autograd_enabled:
