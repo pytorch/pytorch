@@ -191,7 +191,7 @@ LIBTORCH_CONTAINER_IMAGES: Dict[Tuple[str, str], str] = {
         (
             gpu_arch,
             CXX11_ABI,
-        ): f"pytorch/libtorch-cxx11-builder:cuda{gpu_arch}-e35d452cfec67c67fdd0c849921d9a9506f80a63"
+        ): f"pytorch/libtorch-cxx11-builder:cuda{gpu_arch}-5783bcca9b058422ef8cc947df29f53df1b3eedd"
         # ): f"pytorch/libtorch-cxx11-builder:cuda{gpu_arch}-{DEFAULT_TAG}"
         for gpu_arch in CUDA_ARCHES
     },
