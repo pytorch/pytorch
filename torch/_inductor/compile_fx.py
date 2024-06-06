@@ -675,7 +675,7 @@ def fx_codegen_and_compile(
         f"{'BACKWARDS' if is_backward else 'FORWARDS'} "
         f"graph {graph_id}",
     )
-    V.debug.fx_graph(gm, example_inputs)
+    # V.debug.fx_graph(gm, example_inputs)
     # TODO: Should we actually dump this?  It should be redundant with the aot
     # structured logs...
     # trace_structured("inductor_input_graph", payload_fn=lambda: gm.print_readable(print_output=False))
@@ -847,11 +847,20 @@ def fx_codegen_and_compile(
 
 
 def clone_preserve_strides(x: torch.Tensor):
+    # NOTE(yf225): if we don't do this,
+    # `buffer = torch.as_strided(x, (needed_size,), (1,)).clone()` below will fail with:
+    # "RuntimeError: setStorage: sizes [1522756], strides [1], storage offset 0, and itemsize 4 requiring a storage size of 6091024 are out of bounds for storage of size 0"
     needed_size = (
         sum((shape - 1) * stride for shape, stride in zip(x.size(), x.stride())) + 1
     )
-    buffer = torch.as_strided(x, (needed_size,), (1,)).clone()
-    return torch.as_strided(buffer, x.size(), x.stride())
+    if x.untyped_storage().size() == 0:
+        buffer = torch.empty(needed_size, dtype=x.dtype, device=x.device)
+    else:
+        buffer = torch.as_strided(x, (needed_size,), (1,)).clone()
+    ret = torch.as_strided(buffer, x.size(), x.stride())
+    if x.untyped_storage().size() == 0:
+        ret.untyped_storage().resize_(0)
+    return ret
 
 
 def copy_misaligned_inputs(
@@ -1470,6 +1479,7 @@ def compile_fx(
     with V.set_fake_mode(fake_mode), torch._guards.tracing(
         tracing_context
     ), compiled_autograd.disable(), functorch_config.patch(unlift_effect_tokens=True):
+        print("here1 before aot_autograd() call")
         return aot_autograd(
             fw_compiler=fw_compiler,
             bw_compiler=bw_compiler,

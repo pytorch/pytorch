@@ -1358,10 +1358,29 @@ def min_cut_rematerialization_partition(
 
     fx_g = joint_module.graph
 
-    #  add the CSE pass
-    if config.cse:
-        cse_graph = fx_graph_cse(fx_g)
-        joint_module.graph = cse_graph
+    """
+    TODO(yf225)
+    Unfortunately CSE here turns this graph:
+    ```
+    empty: "f32[262144]" = torch.ops.aten.empty.memory_format([262144])
+    empty_1: "f32[512]" = torch.ops.aten.empty.memory_format([512])
+    empty_2: "f32[262144]" = torch.ops.aten.empty.memory_format([262144])
+    empty_3: "f32[512]" = torch.ops.aten.empty.memory_format([512])
+    out = torch.ops.fsdp.split_with_sizes_copy.default(..., out = [empty, empty_1, empty_2, empty_3])
+    ```
+
+    into this graph which is wrong :( we need to debug why this happens. For now just set functorch.config.cse = False
+
+    ```
+    empty: "f32[262144]" = torch.ops.aten.empty.memory_format([262144])
+    empty_1: "f32[512]" = torch.ops.aten.empty.memory_format([512])
+    out = torch.ops.fsdp.split_with_sizes_copy.default(..., out = [empty, empty_1, empty, empty_1])
+    ```
+    """
+    # #  add the CSE pass
+    # if config.cse:
+    #     cse_graph = fx_graph_cse(fx_g)
+    #     joint_module.graph = cse_graph
     joint_graph = joint_module.graph
 
     graph_has_recomputable_ops = has_recomputable_ops(joint_module)

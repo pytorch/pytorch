@@ -47,6 +47,8 @@ _side_effectful_functions: Set[Callable] = {
     _ops.aten._assert_async.msg,
     _ops.aten._assert_scalar.default,
     _ops.aten.copy_.default,
+    # need this otherwise _foreach_copy_ added by our custom FX pass will be DCE'ed away.
+    _ops.aten._foreach_copy_.default,
     _ops.aten.set_.source_Tensor,
     _ops.aten.index_put_.default,
     _ops.aten.sym_constrain_range.default,
