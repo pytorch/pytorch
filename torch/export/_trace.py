@@ -73,7 +73,6 @@ from .graph_signature import (
     ConstantArgument,
     CustomObjArgument,
     ExportGraphSignature,
-    SymFloatArgument,
     SymIntArgument,
     TensorArgument,
     TokenArgument,
@@ -474,37 +473,6 @@ def _make_module_call_graph(
     return ret
 
 
-def _make_argument_spec(i, node, input_tokens) -> ArgumentSpec:
-    if isinstance(node, (int, bool, float, type(None))):
-        # For const outputs we just directly return this
-        return ConstantArgument(name="", value=node)
-
-    assert (
-        "val" in node.meta
-    ), f"{node} is not a constant or a node with a 'val' metadata field"
-    val = node.meta["val"]
-    if i < len(input_tokens):
-        # TODO: We should be checking for a different type, once we add a new type
-        return TokenArgument(name=node.name)
-    elif isinstance(val, FakeTensor):
-        return TensorArgument(name=node.name)
-    elif isinstance(val, torch.SymInt):
-        return SymIntArgument(name=node.name)
-    elif isinstance(val, torch.SymFloat):
-        return SymFloatArgument(name=node.name)
-    elif isinstance(val, torch.ScriptObject):
-        return CustomObjArgument(name=node.name, class_fqn=val._type().qualified_name())  # type: ignore[attr-defined]
-    elif isinstance(val, FakeScriptObject):
-        return CustomObjArgument(name=node.name, class_fqn=val.script_class_name)
-    elif isinstance(val, (int, bool, str, float, type(None))):
-        return ConstantArgument(name=node.name, value=val)
-    else:
-        raise AssertionError(
-            f"Encountered an unsupported object of type {type(val)} "
-            f"while writing the metadata for exported program"
-        )
-
-
 def _export_to_torch_ir(
     f: Callable,
     args: Tuple[Any, ...],
@@ -624,6 +592,34 @@ def _export_to_aten_ir(
     if isinstance(mod, torch.fx.GraphModule) and hasattr(mod, "meta"):
         gm.meta.update(mod.meta)
 
+    def make_argument_spec(i, node) -> ArgumentSpec:
+        if isinstance(node, (int, bool, float, type(None))):
+            # For const outputs we just directly return this
+            return ConstantArgument(name="", value=node)
+
+        assert (
+            "val" in node.meta
+        ), f"{node} is not a constant or a node with a 'val' metadata field"
+        val = node.meta["val"]
+        if i < len(graph_signature.input_tokens):
+            # TODO: We should be checking for a different type, once we add a new type
+            return TokenArgument(name=node.name)
+        elif isinstance(val, FakeTensor):
+            return TensorArgument(name=node.name)
+        elif isinstance(val, torch.SymInt):
+            return SymIntArgument(name=node.name)
+        elif isinstance(val, torch.ScriptObject):
+            return CustomObjArgument(name=node.name, class_fqn=val._type().qualified_name())  # type: ignore[attr-defined]
+        elif isinstance(val, FakeScriptObject):
+            return CustomObjArgument(name=node.name, class_fqn=val.script_class_name)
+        elif isinstance(val, (int, bool, str, float, type(None))):
+            return ConstantArgument(name=node.name, value=val)
+        else:
+            raise AssertionError(
+                f"Encountered an unsupported object of type {type(val)} "
+                f"while writing the metadata for exported program"
+            )
+
     is_joint = graph_signature.backward_signature is not None
 
     # NOTE: aot_export adds symint metadata for placeholders with int values;
@@ -654,12 +650,12 @@ def _export_to_aten_ir(
         grad_user_inputs=graph_signature.backward_signature.gradients_to_user_inputs if is_joint else {},  # type: ignore[arg-type, union-attr]
         loss_output=graph_signature.backward_signature.loss_output if is_joint else None,  # type: ignore[arg-type, union-attr]
         inputs=[
-            _make_argument_spec(i, node, graph_signature.input_tokens)
+            make_argument_spec(i, node)
             for i, node in enumerate(gm.graph.nodes)
             if node.op == "placeholder"
         ],
         outputs=[
-            _make_argument_spec(i, node, graph_signature.input_tokens)
+            make_argument_spec(i, node)
             for i, node in enumerate(
                 pytree.tree_leaves(next(iter(reversed(gm.graph.nodes))).args)
             )
