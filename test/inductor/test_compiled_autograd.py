@@ -1714,6 +1714,95 @@ TORCH_LIBRARY(test_autograd_cpp_node_data_dependent, m) {
         self.assertEqual(counters["compiled_autograd"]["captures"], 1)
         self.assertEqual(counters["inductor"]["cudagraph_skips"], 0)
 
+    @unittest.skipIf(not HAS_CUDA, "requires cuda")
+    def test_cudagraphs_cpu_scalar_used_in_python_custom_op(self):
+        class MyFn(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                cpu_tensor = torch.tensor(5)
+                ctx.save_for_backward(x, cpu_tensor)  # visible to c++/autograd
+                ctx.cpu_scalar = 5  # opaque to c++/autograd
+                return x.sum()
+
+            @staticmethod
+            def backward(ctx, gO):
+                x, cpu_tensor = ctx.saved_tensors
+                expand = gO * torch.ones_like(x)
+                return expand * cpu_tensor * ctx.cpu_scalar
+
+        x = torch.randn(10, requires_grad=True, device="cuda")
+        out = MyFn.apply(x)
+        with config.patch(compiled_autograd=True), inductor_config.patch(
+            "triton.cudagraphs", True
+        ):
+            opt_bwd = torch.compile(lambda: out.backward())
+            opt_bwd()
+
+        self.assertEqual(counters["compiled_autograd"]["captures"], 1)
+        # Compiled autograd lifts custom autograd.Function bwd instead of tracing it.
+        # Must skip since we do not know if the cpu scalar will be used only in ATen/prim ops.
+        self.assertEqual(counters["inductor"]["cudagraph_skips"], 1)
+
+    @unittest.skipIf(not HAS_CUDA, "requires cuda")
+    def test_cudagraphs_cpu_scalar_used_in_cpp_custom_op(self):
+        cpp_source = """
+struct CustomOpAutogradFunction : public torch::autograd::Function<CustomOpAutogradFunction> {
+  static constexpr bool is_traceable = true;
+
+  static torch::Tensor forward(
+      torch::autograd::AutogradContext* ctx,
+      const torch::Tensor& x) {
+    const auto& cpu_tensor = torch::tensor(1);
+    ctx->save_for_backward({x, cpu_tensor});
+    ctx->saved_data["cpu_scalar"] = 1;
+    return x;
+  }
+
+  static torch::autograd::variable_list backward(
+      torch::autograd::AutogradContext *ctx,
+      torch::autograd::variable_list grad_output) {
+    const auto& saved_variables = ctx->get_saved_variables();
+    assert(saved_variables.size() == 2);
+    torch::Tensor x = saved_variables[0];
+    torch::Tensor cpu_tensor = saved_variables[1];
+    int cpu_scalar = ctx->saved_data["cpu_scalar"].toInt();
+    auto expand = grad_output[0] * torch::ones_like(x);
+    torch::autograd::variable_list grad_inputs(1);
+    grad_inputs[0] = expand * cpu_tensor * cpu_scalar;  // autograd engine asserts that tensors are on same device
+    return grad_inputs;
+  }
+};
+
+torch::Tensor custom_op_backed_by_autograd_fn(const torch::Tensor& x) {
+  return CustomOpAutogradFunction::apply(x);
+}
+
+TORCH_LIBRARY(test_cudagraphs_cpu_scalar_used_in_cpp_custom_op, m) {
+    m.def("custom_op_backed_by_autograd_fn", custom_op_backed_by_autograd_fn);
+}
+        """
+
+        module = torch.utils.cpp_extension.load_inline(
+            name="test_cudagraphs_cpu_scalar_used_in_cpp_custom_op",
+            cpp_sources=cpp_source,
+            functions="custom_op_backed_by_autograd_fn",
+            verbose=True,
+        )
+
+        x = torch.randn(2, 2, requires_grad=True, device="cuda")
+        with config.patch(compiled_autograd=True), inductor_config.patch(
+            "triton.cudagraphs", True
+        ):
+            out = torch.ops.test_cudagraphs_cpu_scalar_used_in_cpp_custom_op.custom_op_backed_by_autograd_fn(
+                x
+            )
+            opt_bwd = torch.compile(lambda: out.sum().backward())
+            opt_bwd()
+
+        self.assertEqual(counters["compiled_autograd"]["captures"], 1)
+        # always safe to move, since we trace into the autograd::function bwd and can see if it's only used by aten ops
+        self.assertEqual(counters["inductor"]["cudagraph_skips"], 0)
+
     def test_verbose_logs_graph(self):
         torch._logging.set_logs(compiled_autograd_verbose=True)
 
@@ -2034,6 +2123,7 @@ known_failing_tests = {
     "test_autograd_function_backed_op",  # RuntimeError: compiled_args not implemented
     "test_setitem",  # AssertionError: Tensor-likes are not close!
     "test_grad_nonleaf_register_hook",  # IndexError: list index out of range (NB: x.grad = y where both x and y are input tensors)
+    "test_scalar_grad_mixed_device",  # Fake Tensors aren't propagating device properly for 0-dim grads
 }
 
 if not HAS_CUDA:
