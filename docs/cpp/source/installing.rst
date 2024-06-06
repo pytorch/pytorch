@@ -154,6 +154,71 @@ should now merrily print the tensor (exact output subject to randomness):
   Also, make sure you specify the correct configuration in the ``cmake --build .``
   line above.
 
+System Requirements
+-------------------
+
+To ensure smooth installation and usage of LibTorch, please ensure your system
+meets the following requirements:
+
+1. **GLIBC Version**:
+  - GLIBC 2.29 or newer for cxx11 ABI version
+  - GLIBC 2.17 or newer for pre-cxx11 ABI version
+
+
+Troubleshooting
+---------------
+
+To check the dependencies of the LibTorch libraries and identify the required
+GLIBC version, you can use the following command from the unzip directory:
+
+.. code-block:: sh
+
+  ldd lib/libtorch.so
+
+If your system do not have the required GLIBC version, the output will look
+like this:
+
+.. code-block:: none
+  
+  root@4b5a67132e81:/libtorch# ldd lib/libtorch.so
+  lib/libtorch.so: /lib64/libc.so.6: version `GLIBC_2.28' not found (required by /libtorch/lib/libtorch_cpu.so)
+  lib/libtorch.so: /lib64/libm.so.6: version `GLIBC_2.27' not found (required by /libtorch/lib/libtorch_cpu.so)
+  lib/libtorch.so: /lib64/libm.so.6: version `GLIBC_2.23' not found (required by /libtorch/lib/libtorch_cpu.so)
+  lib/libtorch.so: /lib64/libm.so.6: version `GLIBC_2.29' not found (required by /libtorch/lib/libtorch_cpu.so)
+  lib/libtorch.so: /lib64/libm.so.6: version `GLIBC_2.29' not found (required by /libtorch/lib/libc10.so)
+    linux-vdso.so.1 =>  (0x00007ffff7ffa000)
+    libtorch_cpu.so => /libtorch/lib/libtorch_cpu.so (0x00007fffe01ae000)
+    libc10.so => /libtorch/lib/libc10.so (0x00007ffff7f12000)
+    librt.so.1 => /lib64/librt.so.1 (0x00007fffdffa6000)
+    libgcc_s.so.1 => /usr/local/pace-apps/spack/packages/linux-rhel7-x86_64/gcc-4.8.5/gcc-10.3.0-o57x6h2gubo7bzh7evmy4mvibdqrlghr/lib64/libgcc_s.so.1 (0x00007fffdfd8e000)
+    libdl.so.2 => /lib64/libdl.so.2 (0x00007fffdfb8a000)
+    libpthread.so.0 => /lib64/libpthread.so.0 (0x00007fffdf96e000)
+    libm.so.6 => /lib64/libm.so.6 (0x00007fffdf66c000)
+    libgomp-98b21ff3.so.1 => /libtorch/lib/libgomp-98b21ff3.so.1 (0x00007ffff7eaa000)
+    libstdc++.so.6 => /usr/local/pace-apps/spack/packages/linux-rhel7-x86_64/gcc-4.8.5/gcc-10.3.0-o57x6h2gubo7bzh7evmy4mvibdqrlghr/lib64/libstdc++.so.6 (0x00007fffdf29e000)
+    libc.so.6 => /lib64/libc.so.6 (0x00007fffdeed0000)
+    /lib64/ld-linux-x86-64.so.2 (0x00007ffff7ddb000)
+
+
+If your system meets the requirements for the GLIBC version, the output will
+look like this instead:
+
+.. code-block:: sh
+
+  root@4b5a67132e81:/libtorch# ldd lib/libtorch.so
+  linux-vdso.so.1 =>  (0x00007ffff7ffa000)
+  libtorch_cpu.so => libtorch/lib/libtorch_cpu.so (0x00007fffe076e000)
+  libc10.so => libtorch/lib/libc10.so (0x00007ffff7efd000)
+  librt.so.1 => /lib64/librt.so.1 (0x00007fffe0566000)
+  libgcc_s.so.1 => /usr/local/pace-apps/spack/packages/linux-rhel7-x86_64_v3/gcc-4.8.5/gcc-12.1.0-qgxpzkq64xukc4zdq2cucb5pw5iqrzjg/lib64/libgcc_s.so.1 (0x00007ffff7ebc000)
+  libdl.so.2 => /lib64/libdl.so.2 (0x00007fffe0362000)
+  libpthread.so.0 => /lib64/libpthread.so.0 (0x00007fffe0146000)
+  libm.so.6 => /lib64/libm.so.6 (0x00007fffdfe44000)
+  libgomp-a34b3233.so.1 => /storage/scratch1/7/ibartol3/libtorch/lib/libgomp-a34b3233.so.1 (0x00007fffdfc1a000)
+  libstdc++.so.6 => /usr/local/pace-apps/spack/packages/linux-rhel7-x86_64_v3/gcc-4.8.5/gcc-12.1.0-qgxpzkq64xukc4zdq2cucb5pw5iqrzjg/lib64/libstdc++.so.6 (0x00007fffdf9f5000)
+  libc.so.6 => /lib64/libc.so.6 (0x00007fffdf627000)
+  /lib64/ld-linux-x86-64.so.2 (0x00007ffff7ddb000)
+
 Visual Studio Extension
 -----------------------
 
@@ -168,3 +233,4 @@ Support
 If you run into any troubles with this installation and minimal usage guide,
 please use our `forum <https://discuss.pytorch.org/>`_ or `GitHub issues
 <https://github.com/pytorch/pytorch/issues>`_ to get in touch.
+
