@@ -14,7 +14,7 @@ from .PipelineSchedule import (
     ScheduleInterleaved1F1B,
     ScheduleLoopedBFS,
 )
-from .PipelineStage import ManualPipelineStage, PipelineStage
+from .PipelineStage import PipelineStage, TracerPipelineStage
 
 __all__ = [
     "Pipe",
