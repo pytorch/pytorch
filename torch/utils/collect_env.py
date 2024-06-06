@@ -434,6 +434,21 @@ def is_xnnpack_available():
         return "N/A"
 
 def get_env_info():
+    """
+    Collects environment information to aid in debugging.
+
+    The returned environment information contains details on torch version, is debug build
+    or not, cuda compiled version, gcc version, clang version, cmake version, operating
+    system, libc version, python version, python platform, CUDA availability, CUDA
+    runtime version, CUDA module loading config, GPU model and configuration, Nvidia
+    driver version, cuDNN version, pip version and versions of relevant pip and
+    conda packages, HIP runtime version, MIOpen runtime version,
+    Caching allocator config, XNNPACK availability and CPU information.
+
+    Returns:
+        SystemEnv (namedtuple): A tuple containining various environment details
+            and system information.
+    """
     run_lambda = run
     pip_version, pip_list_output = get_pip_packages(run_lambda)
 
