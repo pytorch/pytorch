@@ -268,7 +268,7 @@ class TS2FXGraphConverter:
                     )
                 )
                 fx_node = get_node_for_param_and_buffer(
-                    self.fx_graph, normalized_name, self.is_top_level_graph
+                    self.fx_graph, name, self.is_top_level_graph
                 )
             elif name in self.buffer_names:
                 self.input_specs.append(
@@ -280,7 +280,7 @@ class TS2FXGraphConverter:
                     )
                 )
                 fx_node = get_node_for_param_and_buffer(
-                    self.fx_graph, normalized_name, self.is_top_level_graph
+                    self.fx_graph, name, self.is_top_level_graph
                 )
             else:
                 self.input_specs.append(
@@ -672,9 +672,9 @@ class TS2EPConverter:
         # Populate nn module parameters and buffers.
         self.mod_param_and_buffer_map: Dict[str, Any] = dict()
         for name, param in ts_model.named_parameters():
-            self.mod_param_and_buffer_map[normalize_name(name)] = param
+            self.mod_param_and_buffer_map[name] = param
         for name, buffer in ts_model.named_buffers():
-            self.mod_param_and_buffer_map[normalize_name(name)] = buffer
+            self.mod_param_and_buffer_map[name] = buffer
 
     def convert(self) -> ExportedProgram:
         blocks_to_lifted_attrs = get_block_lifted_args(self.ts_graph)

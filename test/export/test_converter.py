@@ -21,6 +21,14 @@ class TestConverter(TestCase):
         ep = TS2EPConverter(ts_model, inp).convert()
         ep_out, _ = pytree.tree_flatten(ep.module()(*inp))
         orig_out, _ = pytree.tree_flatten(mod(*inp))
+
+        # Check module.
+        self.assertEqual(
+            ep.module().state_dict().keys(),
+            mod.state_dict().keys(),
+        )
+
+        # Check results.
         self.assertEqual(len(ep_out), len(orig_out))
         for ep_t, orig_t in zip(ep_out, orig_out):
             if isinstance(ep_t, torch.Tensor):
@@ -263,7 +271,7 @@ class TestConverter(TestCase):
         self._check_equal_ts_ep_converter(MUnpackList(), inp)
         inp = ((torch.zeros(1, 4), torch.ones(1, 4)),)
         self._check_equal_ts_ep_converter(MUnpackTuple(), inp)
-        
+
     def test_convert_nn_module_with_nested_param(self):
         class M(torch.nn.Module):
             def __init__(self, dim: int) -> None:
