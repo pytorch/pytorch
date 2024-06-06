@@ -227,7 +227,7 @@ def _load_state_dict(
         all_reads.wait()
         return None
 
-    _ = distW.all_gather("read", read_data)
+    read_data()
 
 
 def _load_state_dict_from_keys(
