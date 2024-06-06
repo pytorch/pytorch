@@ -487,17 +487,17 @@ def _direct_serialization_reduce(self):
 
 class Pipe(torch.nn.Module):
     # Class variables
-    """
-    args_chunk_spec:
-        Chunking specification for positional inputs. (default: `None`)
-    kwargs_chunk_spec:
-        Chunking specification for keyword inputs. (default: `None`)
-    """
     # args_chunk_spec and kwargs_chunk_spec are used to specify how to chunk
     # inputs. They are used to create microbatched examples before tracing.
     # See context managers `ArgsChunkSpec` and `KwargsChunkSpec`.
     # TODO: Do we need to support `_Replicate`? It's unclear, dropping for now.
+
+    # args_chunk_spec:
+    #     Chunking specification for positional inputs. (default: `None`)
     args_chunk_spec: Optional[Tuple[TensorChunkSpec, ...]] = None
+
+    # kwargs_chunk_spec:
+    #     Chunking specification for keyword inputs. (default: `None`)
     kwargs_chunk_spec: Optional[Dict[str, TensorChunkSpec]] = None
 
     @dataclass
@@ -622,6 +622,9 @@ class Pipe(torch.nn.Module):
         return res
 
     def get_stage_module(self, stage_idx: int) -> torch.nn.Module:
+        """
+        Return a stage module corresponding to `stage_idx` of the `pipe`.
+        """
         if stage_idx < 0 or stage_idx >= self.num_stages:
             raise ValueError(f"Invalid stage index {stage_idx}!")
         return getattr(self.split_gm, f"submod_{stage_idx}")

@@ -196,10 +196,6 @@ step above and directly connect to our runtime offering: ``ManualPipelineStage``
 The ``ManualPipelineStage`` wraps your stage module given a distributed context,
 i.e. a ``ProcessGroup`` along the pipeline dimension.
 
-.. currentmodule:: torch.distributed.pipelining.PipelineStage
-
-.. autoclass:: ManualPipelineStage
-
 TODO: manual example here
 
 
@@ -285,7 +281,7 @@ arbitrary hierarchy of your model. In the split partitions, the original model
 hierarchy related to that partition will be reconstructed at no cost of yours.
 At a result, fully-qualified names (FQNs) pointing to a submodule or parameter
 would be still valid, and services that relies on FQNs (such as FSDP, TP or
-checkpointing) can still run with your partitioned modules at almost zero code
+checkpointing) can still run with your partitioned modules with almost zero code
 change.
 
 
