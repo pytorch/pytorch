@@ -24,7 +24,6 @@ import torch
 import torch.distributed as dist
 from torch.multiprocessing import current_process, get_context
 from torch.testing._internal.common_utils import (
-    FILE_SCHEMA,
     get_report_path,
     IS_CI,
     IS_MACOS,
