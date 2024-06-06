@@ -263,50 +263,66 @@ flex_decoding_template = TritonTemplate(
  """,
 )
 
-# Config: (BLOCK_N, SPLIT_KV, num_warp, num_stages)
+# Config: (BLOCK_N, num_warp, num_stages)
 
-_h100_default_config = {
-    (torch.float32, 64): (128, 4, 4, 3),
-    (torch.float32, 128): (32, 4, 4, 3),
-    (torch.float32, 256): (32, 4, 4, 3),
-    (torch.bfloat16, 64): (128, 4, 4, 3),
-    (torch.bfloat16, 128): (64, 4, 4, 3),
-    (torch.bfloat16, 256): (64, 4, 4, 3),
+_h100_default_config_block = {
+    (torch.float32, 64): (128, 4, 3),
+    (torch.float32, 128): (64, 4, 3),
+    (torch.float32, 256): (32, 4, 3),
+    (torch.bfloat16, 64): (128, 4, 3),
+    (torch.bfloat16, 128): (64, 4, 3),
+    (torch.bfloat16, 256): (64, 4, 3),
 }
+
 
 _a100_default_config = {
-    (torch.float32, 64): (128, 4, 4, 3),
-    (torch.float32, 128): (128, 4, 4, 3),
-    (torch.float32, 256): (64, 4, 4, 3),
-    (torch.bfloat16, 64): (128, 4, 4, 3),
-    (torch.bfloat16, 128): (128, 4, 4, 3),
-    (torch.bfloat16, 256): (32, 4, 4, 3),
+    (torch.float32, 64): (128, 4, 3),
+    (torch.float32, 128): (128, 4, 3),
+    (torch.float32, 256): (64, 4, 3),
+    (torch.bfloat16, 64): (128, 4, 3),
+    (torch.bfloat16, 128): (128, 4, 3),
+    (torch.bfloat16, 256): (64, 4, 3),
 }
 
 
-def _get_decoding_default_config(query):
-    dtype = query.get_dtype()
-    head_dim = query.get_size()[-1]
-    query_len = query.get_size()[-2]
+def _get_decoding_default_config(key):
+    dtype = key.get_dtype()
+    b_h = key.get_size()[0] * key.get_size()[1]
+    head_dim = key.get_size()[-1]
+    key_len = key.get_size()[-2]
     default_config = None
+    max_split = None
 
     if head_dim <= 256 and torch.cuda.get_device_capability() >= (9, 0):  # H100
         if dtype == torch.float32:
-            default_config = (64, 4, 4, 3)
+            default_config = (128, 4, 3)
         else:
-            default_config = (128, 4, 4, 3)
-        default_config = _h100_default_config.get((dtype, head_dim), default_config)
+            default_config = (64, 4, 3)
+        default_config = _h100_default_config_block.get((dtype, head_dim), default_config)
+        max_split = 32
     elif head_dim <= 256 and torch.cuda.get_device_capability() >= (8, 0):  # A100
         if dtype == torch.float32:
-            default_config = (64, 4, 4, 3)
+            default_config = (64, 4, 3)
         else:
-            default_config = (128, 4, 4, 3)
+            default_config = (128, 4, 3)
         default_config = _a100_default_config.get((dtype, head_dim), default_config)
+        max_split = 32
     else:  # modest hardware or extremely large head_dim
         if dtype == torch.float32:
-            default_config = (32, 4, 4, 3)
+            default_config = (32, 4, 3)
         else:
-            default_config = (64, 4, 4, 3)
+            default_config = (64, 4, 3)
+        max_split = 16
+    
+    default_split = None
+    if key_len >= default_config[0] * 4: 
+        default_split = key_len / (default_config[0] * 4)
+        if default_split > max_split: 
+            default_split = max_split
+    else: 
+        default_split = 1
+
+    default_config += (default_split, )
 
     return default_config
 
@@ -325,24 +341,25 @@ def create_flex_decoding_kernel(subgraph_buffer, layout, query, key, value, subg
     )
     choices: List[Any] = []
     configs: List[Tuple[int, int, int, int]] = []
-    configs.append(_get_decoding_default_config(query))
-    if config.max_autotune:
-        configs += [
-            (128, 4, 4, 3),
-            (128, 2, 4, 3),
-            (128, 4, 8, 2),
-            (64, 4, 4, 3),
-            (64, 2, 4, 3),
-            (32, 4, 4, 3),
-            (32, 2, 4, 3),
-            (16, 4, 4, 3),
-            (16, 2, 4, 3),
-        ]
+    configs.append(_get_decoding_default_config(key))
+    print("default config: ", configs[0])
+    # if config.max_autotune:
+    #     configs += [
+    #         (128, 4, 3),
+    #         (128, 2, 4, 3),
+    #         (128, 4, 8, 2),
+    #         (64, 4, 4, 3),
+    #         (64, 2, 4, 3),
+    #         (32, 4, 4, 3),
+    #         (32, 2, 4, 3),
+    #         (16, 4, 4, 3),
+    #         (16, 2, 4, 3),
+    #     ]
 
     # Note, we don't need to pass in the captured buffers explicitly
     # because they're implicitly added by the score_mod function
     # We do need to explicitly pass it in for autotuning though.
-    for BLOCK_N, SPLIT_KV, num_warps, num_stages in configs:
+    for BLOCK_N, num_warps, num_stages, SPLIT_KV in configs:
         # create config dependent intermediate buffers
         buf_ML_shape = query.get_size()[:-2] + [SPLIT_KV, query.get_size()[-2]]   # [B, H, SPLIT_KV, M]
         buf_M = empty_strided(

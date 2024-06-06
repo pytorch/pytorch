@@ -36,7 +36,7 @@ class ExperimentConfig:
     calculate_bwd_time: bool
 
     def __post_init__(self):
-        assert len(self.shape) == 4, "Shape must be of length 4"
+        assert len(self.shape) == 5, "Shape must be of length 5" #[B, H, Q, D, KV]
 
     def asdict(self):
         # Convert the dataclass instance to a dictionary
@@ -108,12 +108,12 @@ def generate_inputs(
 
 def run_single_experiment(config: ExperimentConfig, dynamic=False) -> ExperimentResults:
     device = torch.device("cuda")
-    batch_size, num_heads, q_seq_len, head_dim = config.shape
+    batch_size, num_heads, q_seq_len, head_dim, kv_seq_len = config.shape
     query, key, value = generate_inputs(
         batch_size,
         num_heads,
         q_seq_len,
-        q_seq_len,
+        kv_seq_len,
         head_dim,
         config.dtype,
         device,
@@ -167,6 +167,16 @@ def calculate_speedup(results: ExperimentResults, type: str) -> float:
     else:
         raise ValueError(f"Invalid type {type}")
 
+def calculate_bandwidth(config: ExperimentConfig, results: ExperimentResults, type: str) -> float:
+    if type == "fwd":
+        query_size = config.shape[0] * config.shape[1] * config.shape[2] * config.shape[3] * torch.finfo(config.dtype).bits / 8
+        kv_size =config.shape[0] * config.shape[1] * config.shape[4] * config.shape[3] * torch.finfo(config.dtype).bits / 8 * 2
+        total_size = (query_size + kv_size) / 1024 / 1024 / 1024 # In GB 
+        time_in_seconds = results.fwd_times.compiled_time / 10**6
+        return total_size / time_in_seconds / 1024
+    else:
+        raise ValueError(f"Invalid type {type}")
+
 
 def get_func_name(func):
     return func.__name__.split("<locals>.")[-1].split(" at ")[0]
@@ -175,6 +185,7 @@ def get_func_name(func):
 def get_average_speedups(results: List[Experiment], type: str):
     # Calculate speedups
     speedups = [calculate_speedup(r.results, type) for r in results]
+    bw = [calculate_bandwidth(r.config, r.results, type) for r in results]
 
     # Find indices of max and min speedups
     max_speedup_index = np.argmax(speedups)
@@ -199,8 +210,8 @@ def get_average_speedups(results: List[Experiment], type: str):
             "Speedup": np.mean(speedups),
             **dict.fromkeys(max_config_dict),
         },
-        {"Type": "Max", "Speedup": speedups[max_speedup_index], **max_config_dict},
-        {"Type": "Min", "Speedup": speedups[min_speedup_index], **min_config_dict},
+        {"Type": "Max", "Speedup": speedups[max_speedup_index], "BandWidth (TB/s)":  bw[max_speedup_index],  **max_config_dict},
+        {"Type": "Min", "Speedup": speedups[min_speedup_index], "BandWidth (TB/s)": bw[min_speedup_index], **min_config_dict},
     ]
 
     return table_data
@@ -226,6 +237,10 @@ def print_results(results: List[Experiment]):
     if results[0].config.calculate_bwd_time:
         bwd_speedups = [calculate_speedup(r.results, type="bwd") for r in results]
         table_data["bwd_speedup"] = bwd_speedups
+    
+    # calculate theoretical bandwidth
+    fwd_bandwidth = [calculate_bandwidth(r.config, r.results, type="fwd") for r in results]
+    table_data["fwd_bw (TB/s)"] = fwd_bandwidth
 
     table_data["score_mod"] = [get_func_name(func) for func in table_data["score_mod"]]
     print(tabulate(table_data, headers="keys", tablefmt="github", floatfmt=".3f"))
@@ -261,9 +276,10 @@ def generate_score_mods() -> List[Callable]:
 
 
 def generate_experiment_configs(calculate_bwd: bool) -> List[ExperimentConfig]:
-    batch_sizes = [2, 8, 16]
-    num_heads = [16]
-    q_kv_seq_lens = [(512, 512), (1024, 1024), (4096, 4096)]
+    kv_cache_sizes = [(2, 4096), (8, 1024), (16, 512), (1, 16384), (1, 65536)]
+    batch_sizes = [1, 2, 8, 16]
+    num_heads = [8]
+    q_seq_lens = [1]
     head_dims = [64, 128, 256]
     dtypes = [
         torch.bfloat16,
@@ -271,19 +287,18 @@ def generate_experiment_configs(calculate_bwd: bool) -> List[ExperimentConfig]:
     score_mods = generate_score_mods()
     all_configs = []
     for (
-        bsz,
+        q_seq_len,
         n_heads,
-        (q_seq_len, kv_seq_len),
+        (bsz, kv_seq_len),
         head_dim,
         score_mod,
         dtype,
     ) in itertools.product(
-        batch_sizes, num_heads, q_kv_seq_lens, head_dims, score_mods, dtypes
+        q_seq_lens, num_heads, kv_cache_sizes, head_dims, score_mods, dtypes
     ):
-        assert q_seq_len == kv_seq_len, "Only equal length inputs supported for now."
         all_configs.append(
             ExperimentConfig(
-                shape=(bsz, n_heads, q_seq_len, head_dim),
+                shape=(bsz, n_heads, q_seq_len, head_dim, kv_seq_len),
                 score_mod=score_mod,
                 dtype=dtype,
                 calculate_bwd_time=calculate_bwd,

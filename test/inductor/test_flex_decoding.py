@@ -264,7 +264,6 @@ class TestTemplatedSDPA(InductorTestCase):
 
     @supported_platform
     @common_utils.parametrize("dtype", test_dtypes_fast)
-    @skip("TODO: figure out this error")
     def test_load_rel_bias(self, dtype):
         rel_bias = torch.randn(M+N, device="cuda", dtype=dtype)
 
@@ -458,7 +457,6 @@ class TestTemplatedSDPA(InductorTestCase):
         self.run_test(causal_njt, dtype)
 
     @supported_platform
-    @skip("TODO: figure out autotuning w kernel buffers. ")
     def test_mixed_dtypes_fails(self):
         query = torch.randn((1, 1, 2, 64), dtype=torch.float32, device="cuda")
         key = torch.randn((1, 1, 1024, 64), dtype=torch.float16, device="cuda")
