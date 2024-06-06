@@ -175,7 +175,7 @@ class Guard:
     def sort_key(self):
         # Put the duplicate input guards at the end. The duplicate guards have
         # two sources while guard.name only considers one source.
-        from ._dynamo.guards import GuardBuilder
+        from torch._dynamo.guards import GuardBuilder
 
         is_duplicate_input = (
             isinstance(self.create_fn, functools.partial)
