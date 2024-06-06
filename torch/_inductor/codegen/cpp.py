@@ -1986,7 +1986,7 @@ class CppKernel(Kernel):
                     code.writelines(loop_lines)
                     stack.enter_context(code.indent())
                     # generate inner loops or loop body
-                    if loop.parallel == 1 or (loop.parallel == 0 and loop.collapsed):
+                    if loop.catch_exception:
                         stack.enter_context(code.catch_inside_parallel())
                     if loop.inner:
                         gen_loops(loop.inner, loop.is_reduction)
@@ -4015,6 +4015,7 @@ class LoopLevel:
     inner: List["LoopLevel"] = dataclasses.field(default_factory=list)
     # kernel assigned to this loop level, only valid when it is a leaf
     kernel: Optional[CppKernel] = None
+    catch_exception: bool = False
 
     def __post_init__(self):
         # Regarding the C++/OpenMP backend, `codecache.pick_vec_isa()` to check
@@ -4247,6 +4248,7 @@ class LoopNestWithSplit:
         for i in range(1, par_depth):
             loops = loops[0].inner
             loops[0].collapsed = True
+        loops[0].catch_exception = True
 
     def split_with_tiling(self, depth, factor):
         """
