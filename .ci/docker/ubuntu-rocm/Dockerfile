@@ -14,13 +14,6 @@ ENV PYTORCH_ROCM_ARCH ${PYTORCH_ROCM_ARCH}
 COPY ./common/install_base.sh install_base.sh
 RUN bash ./install_base.sh && rm install_base.sh
 
-# Install AOTriton (Early fail)
-COPY ./aotriton_version.txt aotriton_version.txt
-COPY ./common/common_utils.sh common_utils.sh
-COPY ./common/install_aotriton.sh install_aotriton.sh
-RUN ["/bin/bash", "-c", "./install_aotriton.sh /opt && rm -rf install_aotriton.sh aotriton aotriton_version.txt common_utils.sh"]
-ENV AOTRITON_INSTALLED_PREFIX /opt/aotriton
-
 # Install clang
 ARG LLVMDEV
 ARG CLANG_VERSION
@@ -111,6 +104,13 @@ COPY ci_commit_pins/triton-rocm.txt triton-rocm.txt
 COPY triton_version.txt triton_version.txt
 RUN if [ -n "${TRITON}" ]; then bash ./install_triton.sh; fi
 RUN rm install_triton.sh common_utils.sh triton-rocm.txt triton_version.txt
+
+# Install AOTriton
+COPY ./aotriton_version.txt aotriton_version.txt
+COPY ./common/common_utils.sh common_utils.sh
+COPY ./common/install_aotriton.sh install_aotriton.sh
+RUN ["/bin/bash", "-c", "./install_aotriton.sh /opt/rocm && rm -rf install_aotriton.sh aotriton_version.txt common_utils.sh"]
+ENV AOTRITON_INSTALLED_PREFIX /opt/rocm/aotriton
 
 # Install ccache/sccache (do this last, so we get priority in PATH)
 COPY ./common/install_cache.sh install_cache.sh

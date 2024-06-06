@@ -22,13 +22,6 @@ RUN yum -y install https://packages.endpoint.com/rhel/7/os/x86_64/endpoint-repo-
     sed -i "s/packages.endpoint/packages.endpointdev/" /etc/yum.repos.d/endpoint.repo)
 RUN yum install -y git
 
-# Install AOTriton (Early fail)
-COPY ./aotriton_version.txt aotriton_version.txt
-COPY ./common/common_utils.sh common_utils.sh
-COPY ./common/install_aotriton.sh install_aotriton.sh
-RUN ["/bin/bash", "-c", "./install_aotriton.sh /opt && rm -rf install_aotriton.sh aotriton aotriton_version.txt common_utils.sh"]
-ENV AOTRITON_INSTALLED_PREFIX /opt/aotriton
-
 # Install devtoolset
 ARG DEVTOOLSET_VERSION
 COPY ./common/install_devtoolset.sh install_devtoolset.sh
@@ -119,6 +112,13 @@ COPY ci_commit_pins/triton-rocm.txt triton-rocm.txt
 COPY triton_version.txt triton_version.txt
 RUN if [ -n "${TRITON}" ]; then bash ./install_triton.sh; fi
 RUN rm install_triton.sh common_utils.sh triton-rocm.txt triton_version.txt
+
+# Install AOTriton (Early fail)
+COPY ./aotriton_version.txt aotriton_version.txt
+COPY ./common/common_utils.sh common_utils.sh
+COPY ./common/install_aotriton.sh install_aotriton.sh
+RUN ["/bin/bash", "-c", "./install_aotriton.sh /opt/rocm && rm -rf install_aotriton.sh aotriton_version.txt common_utils.sh"]
+ENV AOTRITON_INSTALLED_PREFIX /opt/rocm/aotriton
 
 # Install ccache/sccache (do this last, so we get priority in PATH)
 COPY ./common/install_cache.sh install_cache.sh
