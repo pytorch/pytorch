@@ -572,9 +572,5 @@ class TestConverter(TestCase):
         )
 
 
-    def test_convert_func_without_param(self):
-        pass
-
-
 if __name__ == "__main__":
     run_tests()
