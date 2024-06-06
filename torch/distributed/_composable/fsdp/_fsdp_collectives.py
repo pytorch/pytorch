@@ -10,7 +10,7 @@ from ._fsdp_common import (
 )
 from ._fsdp_param import FSDPParam
 
-lib = torch.library.Library("fsdp", "DEF")
+lib = torch.library.Library("fsdp", "FRAGMENT")
 
 
 class AllGatherResult(NamedTuple):
