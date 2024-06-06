@@ -421,8 +421,8 @@ def _iterate_exprs(val: Union[SymInt, torch.Tensor]) -> Iterable[sympy.Basic]:
         yield from _iterate_exprs(val.stride())
         yield from _iterate_exprs(val.storage_offset())
         if is_traceable_wrapper_subclass(val):
-             for attr in val.__tensor_flatten__()[0]:
-                 yield from _iterate_exprs(getattr(val, attr))
+            for attr in val.__tensor_flatten__()[0]:
+                yield from _iterate_exprs(getattr(val, attr))
     elif val is None:
         pass
     else:
