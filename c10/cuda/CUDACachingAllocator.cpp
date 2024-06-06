@@ -1264,38 +1264,41 @@ class DeviceCachingAllocator {
       });
     }
 
-    block->allocated = true;
-    block->requested_size = orig_size;
+    // Skip unmapped expandable segments when reapplying checkpoints
+    if (block->mapped) {
+      block->allocated = true;
+      block->requested_size = orig_size;
 
-    block->context_when_allocated = std::move(context);
-    record_trace(
-        TraceEntry::ALLOC,
-        int64_t(block->ptr),
-        orig_size,
-        block->stream,
-        block->device,
-        block->context_when_allocated);
+      block->context_when_allocated = std::move(context);
+      record_trace(
+          TraceEntry::ALLOC,
+          int64_t(block->ptr),
+          orig_size,
+          block->stream,
+          block->device,
+          block->context_when_allocated);
 
-    // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
-    bool inserted = active_blocks.insert(block).second;
-    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(inserted);
+      // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
+      bool inserted = active_blocks.insert(block).second;
+      TORCH_INTERNAL_ASSERT_DEBUG_ONLY(inserted);
 
-    for_each_selected_stat_type(params.stat_types, [&](size_t stat_type) {
-      increase_stat(stats.allocation[stat_type], 1);
-      increase_stat(stats.allocated_bytes[stat_type], block->size);
-      increase_stat(stats.active[stat_type], 1);
-      increase_stat(stats.active_bytes[stat_type], block->size);
-      increase_stat(stats.requested_bytes[stat_type], block->requested_size);
-    });
-    if (block->size >= CUDAAllocatorConfig::max_split_size())
-      increase_stat(stats.oversize_allocations, 1);
+      for_each_selected_stat_type(params.stat_types, [&](size_t stat_type) {
+        increase_stat(stats.allocation[stat_type], 1);
+        increase_stat(stats.allocated_bytes[stat_type], block->size);
+        increase_stat(stats.active[stat_type], 1);
+        increase_stat(stats.active_bytes[stat_type], block->size);
+        increase_stat(stats.requested_bytes[stat_type], block->requested_size);
+      });
+      if (block->size >= CUDAAllocatorConfig::max_split_size())
+        increase_stat(stats.oversize_allocations, 1);
 
-    c10::reportMemoryUsageToProfiler(
-        block->ptr,
-        static_cast<int64_t>(block->size),
-        stats.allocated_bytes[static_cast<size_t>(StatType::AGGREGATE)].current,
-        stats.reserved_bytes[static_cast<size_t>(StatType::AGGREGATE)].current,
-        c10::Device(c10::DeviceType::CUDA, device));
+      c10::reportMemoryUsageToProfiler(
+          block->ptr,
+          static_cast<int64_t>(block->size),
+          stats.allocated_bytes[static_cast<size_t>(StatType::AGGREGATE)].current,
+          stats.reserved_bytes[static_cast<size_t>(StatType::AGGREGATE)].current,
+          c10::Device(c10::DeviceType::CUDA, device));
+    }
 
     return block;
   }
