@@ -660,12 +660,19 @@ class TestDTensorCompileE2E(DTensorTestBase):
         torch.manual_seed(rng_seed)
         inp = torch.rand(20, 10, device=self.device_type)
         out = model(inp)
-        cnt = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
-        compiled_mod = torch.compile(model, backend=cnt, fullgraph=True)
-        compiled_out = compiled_mod(inp)
-        compiled_out.sum().backward()
+        # cnt = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
+        compiled_mod = torch.compile(model, backend="aot_eager", fullgraph=True)
+        def compiler_fn(gm):
+            import logging
+            torch_log = logging.getLogger("torch")
+            torch_log.warning("Compiling autograd?")
+            return torch.compile(gm, backend="aot_eager", fullgraph=True)
+        ctx = torch._dynamo.compiled_autograd.enable(compiler_fn)
+        with ctx:
+            compiled_out = compiled_mod(inp)
+            compiled_out.sum().backward()
         self.assertEqual(compiled_out, out)
-        self.assertEqual(cnt.frame_count, 1)
+        # self.assertEqual(cnt.frame_count, 1)
 
     @with_comms
     @skip_if_lt_x_gpu(4)

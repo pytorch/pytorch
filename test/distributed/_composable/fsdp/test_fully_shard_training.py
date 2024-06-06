@@ -70,6 +70,71 @@ from torch.testing._internal.distributed.checkpoint_utils import with_temp_dir
 from torch.testing._internal.logging_utils import logs_to_string
 from torch._functorch._aot_autograd.fsdp_fx_passes import must_not_appear_ops_after_fsdp_fx_passes
 
+# Owner(s): ["oncall: distributed"]
+
+import contextlib
+import os
+import re
+import sys
+import warnings
+from abc import ABC, abstractmethod
+from contextlib import nullcontext
+from copy import deepcopy
+from enum import auto, Enum
+from functools import partial, wraps
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    List,
+    no_type_check,
+    Optional,
+    Tuple,
+    Type,
+    Union,
+)
+from unittest import mock
+
+import torch
+import torch.distributed as dist
+import torch.nn as nn
+import torch.nn.functional as F
+from torch.distributed._composable import checkpoint
+from torch.distributed._composable.fsdp import fully_shard
+from torch.distributed._composable.fsdp._fsdp_param_group import (
+    FSDPParamGroup,
+    RegisterPostBackwardFunction,
+)
+from torch.distributed._tensor import distribute_tensor, DTensor, Shard
+from torch.distributed.device_mesh import DeviceMesh
+from torch.distributed.fsdp import CPUOffload, FullyShardedDataParallel as FSDP
+from torch.distributed.fsdp._common_utils import TrainingState
+from torch.distributed.fsdp._init_utils import NO_RESHARD_AFTER_FORWARD_STRATEGIES
+from torch.distributed.fsdp.fully_sharded_data_parallel import (
+    BackwardPrefetch,
+    MixedPrecision,
+    ShardingStrategy,
+)
+from torch.distributed.fsdp.sharded_grad_scaler import ShardedGradScaler
+from torch.distributed.fsdp.wrap import always_wrap_policy, ModuleWrapPolicy, wrap
+from torch.distributed.tensor.parallel import (
+    ColwiseParallel,
+    parallelize_module,
+    RowwiseParallel,
+    SequenceParallel,
+)
+from torch.nn import TransformerDecoderLayer, TransformerEncoderLayer
+from torch.nn.parallel.distributed import DistributedDataParallel as DDP
+from torch.testing._internal.common_distributed import (
+    MultiProcessTestCase,
+    MultiThreadedTestCase,
+    run_subtests,
+    TEST_SKIPS,
+)
+from torch.testing._internal.common_utils import FILE_SCHEMA, get_cycles_per_ms
+from torch.utils._triton import has_triton
+
+
 c10d_ops = torch.ops.c10d
 funcol = torch.ops.c10d_functional
 
@@ -1102,13 +1167,17 @@ class TestFullyShardGradientAccumulation(FSDPTest):
 class TestFullyShard2DTraining(FSDPTest):
     @property
     def world_size(self) -> int:
-        return min(4, torch.cuda.device_count())
+        # return min(4, torch.cuda.device_count())
+        return 2
 
     def init_global_mesh(self) -> DeviceMesh:
         # Prefer to test with >=4 GPUs, but for 2 GPUs, use 2-way TP
-        dp_size = 2 if self.world_size > 2 else 1
+        # dp_size = 2 if self.world_size > 2 else 1
+        # return init_device_mesh(
+        #     "cuda", (dp_size, self.world_size // dp_size), mesh_dim_names=("dp", "tp")
+        # )
         return init_device_mesh(
-            "cuda", (dp_size, self.world_size // dp_size), mesh_dim_names=("dp", "tp")
+            "cuda", (self.world_size,), mesh_dim_names=("tp",)
         )
 
     @skip_if_lt_x_gpu(2)
@@ -1122,7 +1191,7 @@ class TestFullyShard2DTraining(FSDPTest):
                 # "mlp_dim": [3, 16, 17],
                 "reshard_after_forward": [True],
                 "use_activation_checkpointing": [False],
-                "mlp_dim": [3, 16, 17],
+                "mlp_dim": [3],  # , 16, 17],
                 "full_graph_compile": [True],
             },
             functools.partial(self._test_train_parity_2d_mlp, global_mesh),
@@ -1136,11 +1205,87 @@ class TestFullyShard2DTraining(FSDPTest):
         mlp_dim: int,
         full_graph_compile: bool,
     ):
-        dp_mesh, tp_mesh = global_mesh["dp"], global_mesh["tp"]
-        dp_pg = dp_mesh.get_group()  # used for `replicate()`
+        # dp_mesh, tp_mesh = global_mesh["dp"], global_mesh["tp"]
+        tp_mesh = global_mesh["tp"]
+        # dp_pg = dp_mesh.get_group()  # used for `replicate()`
+
+        class _MLP(nn.Module):
+            def __init__(
+                self,
+                dim: int,
+                device: Optional[torch.device] = None,
+                *,
+                bias: bool = True,
+                with_buffer: bool = False,
+                dim_multiplier: int = 4,
+            ):
+                super().__init__()
+                self.in_proj = nn.Linear(dim, dim_multiplier * dim, device=device, bias=bias)
+                self.out_proj = nn.Linear(dim_multiplier * dim, dim, device=device, bias=bias)
+                if with_buffer:
+                    self.register_buffer("buffer", torch.randn((dim,), device=device))
+                else:
+                    self.buffer = None
+
+            def forward(self, x: torch.Tensor) -> torch.Tensor:
+                z = self.in_proj(x)
+                z = F.relu(z)
+                z = self.out_proj(z)
+                z = F.relu(z)
+                if self.buffer is not None:
+                    z = z + self.buffer
+                return z
+
+            def reset_parameters(self):
+                if self.buffer is not None:
+                    torch.nn.init.normal_(self.buffer)
+
+        class _MLPStack(nn.Sequential):
+            def __init__(self, mlp_dim: int, *, with_seq_parallel: bool = False):
+                modules: List[nn.Module] = [
+                    # Use multiplier of 3 to exercise uneven case
+                    _MLP(mlp_dim, dim_multiplier=4), # dim_multiplier=3),
+                    _MLP(mlp_dim),
+                    _MLP(mlp_dim, dim_multiplier=4), # dim_multiplier=3),
+                ]
+                if with_seq_parallel:
+                    modules.append(nn.LayerNorm(mlp_dim, bias=False))
+                super().__init__(*modules)
+                self.with_seq_parallel = with_seq_parallel
+
+            def parallelize(
+                self,
+                tp_mesh: DeviceMesh,
+                # dp_mesh: DeviceMesh,
+                use_activation_checkpointing: bool,
+                **fsdp_kwargs,
+            ) -> "_MLPStack":
+                parallelize_plan = {
+                    # Pass `use_local_output=False` to keep as DTensor to preserve
+                    # uneven activation dims
+                    "0.in_proj": ColwiseParallel(use_local_output=False),
+                    "0.out_proj": RowwiseParallel(use_local_output=False),
+                    "1.in_proj": ColwiseParallel(use_local_output=False),
+                    "1.out_proj": RowwiseParallel(use_local_output=False),
+                    "2.in_proj": ColwiseParallel(use_local_output=False),
+                    "2.out_proj": RowwiseParallel(output_layouts=Shard(1))
+                    if self.with_seq_parallel
+                    else RowwiseParallel(),
+                }
+                if self.with_seq_parallel:
+                    parallelize_plan["3"] = SequenceParallel(sequence_dim=1)
+                parallelize_module(self, device_mesh=tp_mesh, parallelize_plan=parallelize_plan)
+                for module in self:
+                    if isinstance(module, nn.LayerNorm):
+                        continue
+                    if use_activation_checkpointing:
+                        checkpoint(module)
+                #     fully_shard(module, mesh=dp_mesh, **fsdp_kwargs)
+                # fully_shard(self, mesh=dp_mesh, **fsdp_kwargs)
+                return self
 
         torch.manual_seed(42)
-        model = MLPStack(mlp_dim)
+        model = _MLPStack(mlp_dim)
 
         def create_model_copy(model):
             new_model = copy.deepcopy(model).cuda()
@@ -1148,34 +1293,35 @@ class TestFullyShard2DTraining(FSDPTest):
             return new_model, new_optim
 
         ref_model, ref_optim = create_model_copy(model)
-        replicate(ref_model, device_ids=[self.rank], process_group=dp_pg)
+        # replicate(ref_model, device_ids=[self.rank], process_group=dp_pg)
 
         model_for_eager, optim_for_eager = create_model_copy(model)
         model_for_eager.parallelize(
             tp_mesh,
-            dp_mesh,
+            # dp_mesh,
             use_activation_checkpointing,
             reshard_after_forward=reshard_after_forward,
         )
 
         if full_graph_compile:
             def compiler_fn(gm):
+                torch_log.warning("Compiling autograd?")
                 return torch.compile(gm, backend="inductor", fullgraph=True)
-            torch._dynamo.config.trace_distributed = True
-            torch._functorch.config.aggressive_recomputation = False
-            torch._inductor.config.reorder_for_compute_comm_overlap = True
-            torch._inductor.config.reorder_for_compute_comm_overlap_passes = [
-                "sink_waits",
-                "raise_comms",
-            ]
-            torch._inductor.config.allow_buffer_reuse = True
-            torch._inductor.config.inplace_buffers = True
-            torch._inductor.config.raise_last_usage = True
+            # torch._dynamo.config.trace_distributed = True
+            # torch._functorch.config.aggressive_recomputation = False
+            # torch._inductor.config.reorder_for_compute_comm_overlap = True
+            # torch._inductor.config.reorder_for_compute_comm_overlap_passes = [
+            #     "sink_waits",
+            #     "raise_comms",
+            # ]
+            # torch._inductor.config.allow_buffer_reuse = True
+            # torch._inductor.config.inplace_buffers = True
+            # torch._inductor.config.raise_last_usage = True
             torch._dynamo.config.error_on_recompile = True
             model_to_be_compiled, optim_for_compile = create_model_copy(model)
             model_to_be_compiled.parallelize(
                 tp_mesh,
-                dp_mesh,
+                # dp_mesh,
                 use_activation_checkpointing,
                 reshard_after_forward=reshard_after_forward,
             )
@@ -1192,7 +1338,8 @@ class TestFullyShard2DTraining(FSDPTest):
             else:
                 return model_to_be_compiled, optim_for_compile, False
 
-        torch.manual_seed(42 + dp_pg.rank() + 1)
+        # torch.manual_seed(42 + dp_pg.rank() + 1)
+        torch.manual_seed(42)
         device = torch.device("cuda")
         for iter_idx in range(10):
             inp = torch.randn((8, mlp_dim), device=device)

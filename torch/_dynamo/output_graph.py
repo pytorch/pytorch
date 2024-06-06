@@ -112,6 +112,7 @@ graph_code_log = torch._logging.getArtifactLogger(__name__, "graph_code")
 graph_sizes_log = torch._logging.getArtifactLogger(__name__, "graph_sizes")
 trace_call_log = torch._logging.getArtifactLogger(__name__, "trace_call")
 
+torch_log = logging.getLogger("torch")
 
 @dataclass(frozen=True)
 class VariableTrackerCacheKey:
@@ -480,21 +481,39 @@ class OutputGraph:
                 GlobalStateSource().make_guard(GuardBuilder.FUNCTORCH_STACK_MATCH)
             )
 
-    def synthetic_graph_input(self, fn, args):
+    # def synthetic_graph_input(self, fn, args):
+    # def synthetic_graph_input(self, fn):
+    def synthetic_graph_input(self, callable_var_name, example_value):
         """
         call fn(*args) before the graph runs and turn the result into a fake input.
         """
-        example_value = fn(*args)
+        # example_value = fn(*args)
+        # torch_log.warning(f"type(example_value): {type(example_value)}")
+        # torch_log.warning(f"example_value: {example_value}")
         varname = self.new_var()
         cg = PyCodegen(self.root_tx)
-        cg.load_import_from(
-            fn.__module__,
-            fn.__name__,
+        # cg.load_import_from(
+        #     fn.__module__,
+        #     fn.__name__,
+        # )
+        cg.append_output(cg.create_load_global(callable_var_name, push_null=False, add=True))
+
+        """
+        prefix = f"_stream_{self.device}"
+        name = codegen.tx.output.install_global_by_id(prefix, self.value)
+        codegen.append_output(
+            codegen.create_load_global(name, push_null=False, add=True)
         )
-        cg.foreach(map(variables.ConstantVariable.create, args))
-        cg.call_function(len(args), True)
+        """
+
+        # cg.foreach(map(variables.ConstantVariable.create, args))
+        # cg.call_function(len(args), True)
+        cg.call_function(0, True)
         cg.store(varname)
-        self.pregraph_bytecode.extend(cg.get_instructions())
+        insts = cg.get_instructions()
+        # for inst in insts:
+        #     torch_log.warning(f"inst: {inst}")
+        self.pregraph_bytecode.extend(insts)
         source = SyntheticLocalSource(varname)
         result = VariableBuilder(self.root_tx, source)(example_value)
         TracingContext.get().guards_context.dynamo_guards.remove_guards_with_source(
