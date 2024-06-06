@@ -344,11 +344,9 @@ def reshape_as(g: jit_utils.GraphContext, self, other):
 @_beartype.beartype
 def add(g: jit_utils.GraphContext, self, other, alpha=None):
     """
-    Adds two tensors.
+    This function takes the add function and returns the corresponding ONNX operator.
 
-    This function takes two tensors as input and returns a new tensor that is the element-wise
-    sum of the input tensors.
-    If alpha is specified, the second operand will be multiplied by alpha before the addition.
+    This function is not meant to be called directly by the user.
 
     Args:
         g (GraphContext): The graph context.
@@ -357,7 +355,7 @@ def add(g: jit_utils.GraphContext, self, other, alpha=None):
         alpha (float, optional): The scaling factor for the second operand. Defaults to None.
 
     Returns:
-        Tensor: The sum of the scaled second operand and the first operand.
+        ONNX operator.
     """
     if symbolic_helper._is_value(self) and symbolic_helper._is_tensor_list(self):
         return symbolic_helper._onnx_opset_unsupported_detailed(
