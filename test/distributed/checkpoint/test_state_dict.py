@@ -2,6 +2,7 @@
 
 import copy
 import functools
+import os
 import sys
 from itertools import chain
 from typing import Callable, Tuple, Type, Union
@@ -710,6 +711,38 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
         )
         if dist.get_rank() == 0:
             self.assertTrue("initial_lr" in optim.param_groups[0])
+
+    @with_comms
+    @skip_if_lt_x_gpu(2)
+    def test_optim_state_dict_tensor_matching(self) -> None:
+        device = "cuda"
+        torch.manual_seed(0)
+        model = nn.Sequential(*[nn.Linear(4, 4, device=device, bias=False) for _ in range(2)])
+        for layer in model:
+            fully_shard(layer)
+        fully_shard(model)
+        optim = torch.optim.Adam(model.parameters(), lr=1e-2)
+        x = torch.randn((4, 4), device=device)
+        model(x).sum().backward()
+        optim.step()
+        optim.zero_grad()
+        print(vars(optim))
+        self.assertTrue(isinstance(list(optim.state.values())[0]['exp_avg'], DTensor))
+        opt_state_dict = ptd_state_dict.get_optimizer_state_dict(
+            model,
+            optim,
+            options=ptd_state_dict.StateDictOptions(
+                full_state_dict=True
+            ),
+        )
+        optim = torch.optim.Adam(model.parameters(), lr=1e-2)
+        ptd_state_dict.set_optimizer_state_dict(
+            model,
+            optim,
+            optim_state_dict=opt_state_dict,
+            options=ptd_state_dict.StateDictOptions(full_state_dict=True),
+        )
+        self.assertTrue(isinstance(list(optim.state.values())[0]['exp_avg'], DTensor))
 
     @with_comms
     @skip_if_lt_x_gpu(2)
