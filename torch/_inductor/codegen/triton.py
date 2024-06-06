@@ -1996,8 +1996,7 @@ class TritonKernel(SIMDKernel):
     @staticmethod
     def inductor_meta_common():
         inductor_meta = {
-            # Hash is upper case so that it can't contain any Python keywords.
-            "backend_hash": torch.utils._triton.triton_hash_with_backend().upper(),
+            "backend_hash": torch.utils._triton.triton_hash_with_backend(),
             "are_deterministic_algorithms_enabled": torch.are_deterministic_algorithms_enabled(),
             "assert_indirect_indexing": config.assert_indirect_indexing,
             "autotune_local_cache": config.autotune_local_cache,
