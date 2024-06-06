@@ -13,25 +13,14 @@ from .lowering import (
     permute,
     register_lowering,
     to_dtype,
-    view,
 )
-from .select_algorithm import (
-    autotune_select_algorithm,
-    ChoiceCaller,
-    ExternKernelChoice,
-)
+from .select_algorithm import autotune_select_algorithm, ExternKernelChoice
 from .utils import use_aten_gemm_kernels, use_cpp_packed_gemm_template, use_max_autotune
 from .virtualized import V
 
 
 def register_onednn_fusion_ops():
     if torch._C._has_mkldnn:
-        aten_mkldnn_linear_unary = ExternKernelChoice(
-            torch.ops.mkldnn._linear_pointwise,
-            "mkldnn::_linear_pointwise",
-            has_out_variant=False,
-            kernel_creator=ir.LinearUnary.create,
-        )
         cpu_needs_realized_inputs = [
             torch.ops.mkldnn._convolution_pointwise,
             torch.ops.mkldnn._convolution_pointwise_,
@@ -139,75 +128,11 @@ def register_onednn_fusion_ops():
 
         @register_lowering(torch.ops.mkldnn._linear_pointwise)
         def linear_unary(
-            x: TensorBox,
-            w: TensorBox,
-            b: TensorBox,
-            attr,
-            scalars,
-            algorithm,
-            layout=None,
+            x: TensorBox, w: TensorBox, b: TensorBox, attr, scalars, algorithm
         ):
-            x_size = x.get_size()
-            if len(x_size) > 2:
-                # GEMM template needs 2D input, normalize input shape here
-                x = view(x, [-1, x_size[-1]])
-            choices: List[ChoiceCaller] = []
-            if len(choices) == 0 or use_aten_gemm_kernels():
-                choices.append(
-                    aten_mkldnn_linear_unary.bind(
-                        (x, w),
-                        layout,
-                        B=None,
-                        attr=attr,
-                        scalars=scalars,
-                        algorithm=algorithm,
-                    )
-                    if b is None
-                    else aten_mkldnn_linear_unary.bind(
-                        (x, w, b),
-                        layout,
-                        attr=attr,
-                        scalars=scalars,
-                        algorithm=algorithm,
-                    )
-                )
-            if use_max_autotune():
-                transposed_w = permute(w, [1, 0])
-                *_, layout, x, transposed_w = mm_args(x, transposed_w, layout=layout)
-                # TODO(jgong5): support epilogue fusion
-                if (
-                    use_cpp_packed_gemm_template(layout, x, transposed_w)
-                    and attr == "none"
-                ):
-                    if b is None:
-                        CppPackedGemmTemplate.add_choices(
-                            choices,
-                            layout,
-                            [x, w],
-                            trans_w=True,
-                        )
-                    else:
-                        CppPackedGemmTemplate.add_choices(
-                            choices,
-                            layout,
-                            [x, w, b],
-                            trans_w=True,
-                            input_indices=[2, 0, 1],
-                        )
-            assert w.get_name() in V.graph.constants
-            input_gen_fns = {
-                1: lambda x: V.graph.constants[x.get_name()],
-            }
-            result = autotune_select_algorithm(
-                "linear_unary",
-                choices,
-                [x, w] if b is None else [x, w, b],
-                layout,
-                input_gen_fns=input_gen_fns,
+            return TensorBox.create(
+                ir.LinearUnary.create(x, w, b, attr, scalars, algorithm)
             )
-            if len(x_size) > 2:
-                result = view(result, (*x_size[:-1], result.get_size()[-1]))
-            return result
 
         @register_lowering(torch.ops.mkldnn._linear_pointwise.binary)
         def linear_binary(x: TensorBox, y: TensorBox, w: TensorBox, b: TensorBox, attr):
@@ -425,6 +350,70 @@ def register_onednn_fusion_ops():
                 )
             )
 
+        @register_lowering(
+            torch.ops.onednn.qlinear_pointwise.binary, type_promotion_kind=None
+        )
+        @register_lowering(
+            torch.ops.onednn.qlinear_pointwise.binary_tensor, type_promotion_kind=None
+        )
+        def qlinear_binary(
+            x: TensorBox,
+            x_scale,
+            x_zp,
+            packed_weight: TensorBox,
+            w_scale: TensorBox,
+            w_zp: TensorBox,
+            bias: TensorBox,
+            o_inv_scale,
+            o_zero_point,
+            output_dtype,
+            x2: TensorBox,
+            x2_scale,
+            x2_zp,
+            binary_attr,
+            alpha,
+            unary_attr,
+            unary_scalars,
+            unary_algorithmm,
+        ):
+            if binary_attr == "sum":
+                if output_dtype in [
+                    torch.float32,
+                    torch.bfloat16,
+                ] and x2.get_dtype() in [torch.float32, torch.bfloat16]:
+                    if x2.get_dtype() != output_dtype:
+                        # For int8-mixed-bf16 quantization and inplace add,
+                        # there is case when accum dtype is float32 but output dtype is bfloat16.
+                        # Since the accum will be inplaced changed with post op sum,
+                        # we will do accum dtype convertion here.
+                        x2 = to_dtype(x2, output_dtype)
+                else:
+                    assert (
+                        x2.get_dtype() == output_dtype
+                    ), "dtype of accum for qlinear post op sum should be the same as output"
+            return TensorBox.create(
+                ir.QLinearPointwiseBinaryPT2E.create(
+                    x,
+                    x_scale,
+                    x_zp,
+                    packed_weight,
+                    w_scale,
+                    w_zp,
+                    bias,
+                    o_inv_scale,
+                    o_zero_point,
+                    output_dtype,
+                    x2,
+                    x2_scale,
+                    x2_zp,
+                    binary_attr,
+                    alpha,
+                    unary_attr,
+                    unary_scalars,
+                    unary_algorithmm,
+                )
+            )
+
         if torch._C.has_mkl:
             aten_mkl_linear = ExternKernelChoice(
                 torch.ops.mkl._mkl_linear,
@@ -444,7 +433,15 @@ def register_onednn_fusion_ops():
                 *,
                 layout=None,
             ):
-                choices: List[ChoiceCaller] = []
+                choices = (
+                    [
+                        aten_mkl_linear.bind(
+                            (x, packed_w, orig_w), layout, B=None, batch_size=batch_size
+                        )
+                    ]
+                    if use_aten_gemm_kernels()
+                    else []
+                )
                 if use_max_autotune():
                     transposed_w = permute(orig_w, [1, 0])
                     *_, layout, x, transposed_w = mm_args(
@@ -458,13 +455,6 @@ def register_onednn_fusion_ops():
                             trans_w=True,
                             input_indices=[0, 2],
                         )
-
-                if len(choices) == 0 or use_aten_gemm_kernels():
-                    choices.append(
-                        aten_mkl_linear.bind(
-                            (x, packed_w, orig_w), layout, B=None, batch_size=batch_size
-                        )
-                    )
 
                 assert packed_w.get_name() in V.graph.constants
                 assert orig_w.get_name() in V.graph.constants

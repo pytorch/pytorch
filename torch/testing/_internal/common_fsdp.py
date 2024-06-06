@@ -9,8 +9,18 @@ from abc import ABC, abstractmethod
 from contextlib import nullcontext
 from copy import deepcopy
 from enum import auto, Enum
-from functools import partial, wraps
-from typing import Any, Callable, Dict, no_type_check, Optional, Tuple, Type, Union
+from functools import wraps
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    List,
+    no_type_check,
+    Optional,
+    Tuple,
+    Type,
+    Union,
+)
 from unittest import mock
 
 import torch
@@ -39,6 +49,7 @@ from torch.distributed.tensor.parallel import (
     ColwiseParallel,
     parallelize_module,
     RowwiseParallel,
+    SequenceParallel,
 )
 from torch.nn import TransformerDecoderLayer, TransformerEncoderLayer
 from torch.nn.parallel.distributed import DistributedDataParallel as DDP
@@ -865,43 +876,47 @@ class MLP(nn.Module):
 
 
 class MLPStack(nn.Sequential):
-    def __init__(self, mlp_dim: int):
-        modules = [
-            nn.LayerNorm(mlp_dim, bias=False),
+    def __init__(self, mlp_dim: int, *, with_seq_parallel: bool = False):
+        modules: List[nn.Module] = [
             # Use multiplier of 3 to exercise uneven case
             MLP(mlp_dim, dim_multiplier=3),
             MLP(mlp_dim),
             MLP(mlp_dim, dim_multiplier=3),
         ]
+        if with_seq_parallel:
+            modules.append(nn.LayerNorm(mlp_dim, bias=False))
         super().__init__(*modules)
+        self.with_seq_parallel = with_seq_parallel
 
     def parallelize(
         self,
         tp_mesh: DeviceMesh,
         dp_mesh: DeviceMesh,
         use_activation_checkpointing: bool,
-        reshard_after_forward: bool,
+        **fsdp_kwargs,
     ) -> "MLPStack":
-        parallelize_module(
-            self,
-            device_mesh=tp_mesh,
-            # Leave the layer norm as implicitly replicated
-            parallelize_plan={
-                # Pass `use_local_output=False` to keep as DTensor to preserve
-                # uneven activation dims
-                "1.in_proj": ColwiseParallel(use_local_output=False),
-                "1.out_proj": RowwiseParallel(use_local_output=False),
-                "2.in_proj": ColwiseParallel(use_local_output=False),
-                "2.out_proj": RowwiseParallel(use_local_output=False),
-                "3.in_proj": ColwiseParallel(use_local_output=False),
-                "3.out_proj": RowwiseParallel(),
-            },
-        )
-        for mlp in self:
+        parallelize_plan = {
+            # Pass `use_local_output=False` to keep as DTensor to preserve
+            # uneven activation dims
+            "0.in_proj": ColwiseParallel(use_local_output=False),
+            "0.out_proj": RowwiseParallel(use_local_output=False),
+            "1.in_proj": ColwiseParallel(use_local_output=False),
+            "1.out_proj": RowwiseParallel(use_local_output=False),
+            "2.in_proj": ColwiseParallel(use_local_output=False),
+            "2.out_proj": RowwiseParallel(output_layouts=Shard(1))
+            if self.with_seq_parallel
+            else RowwiseParallel(),
+        }
+        if self.with_seq_parallel:
+            parallelize_plan["3"] = SequenceParallel(sequence_dim=1)
+        parallelize_module(self, device_mesh=tp_mesh, parallelize_plan=parallelize_plan)
+        for module in self:
+            if isinstance(module, nn.LayerNorm):
+                continue
             if use_activation_checkpointing:
-                checkpoint(mlp)
-            fully_shard(mlp, mesh=dp_mesh, reshard_after_forward=reshard_after_forward)
-        fully_shard(self, mesh=dp_mesh, reshard_after_forward=reshard_after_forward)
+                checkpoint(module)
+            fully_shard(module, mesh=dp_mesh, **fsdp_kwargs)
+        fully_shard(self, mesh=dp_mesh, **fsdp_kwargs)
         return self
 
 
@@ -1071,6 +1086,12 @@ class FSDPTestMultiThread(MultiThreadedTestCase):
     def run_subtests(self, *args, **kwargs):
         return run_subtests(self, *args, **kwargs)
 
+    def perThreadSetUp(self):
+        torch._dynamo.reset()
+
+    def perThreadTearDown(self):
+        torch._dynamo.reset()
+
 
 class FSDPTest(MultiProcessTestCase):
     def setUp(self):
@@ -1141,7 +1162,9 @@ class FSDPTest(MultiProcessTestCase):
         # immediately exiting due to a skip doesn't cause flakiness.
         dist.barrier(device_ids=device_ids)
 
+        torch._dynamo.reset()
         self.run_test(test_name, pipe)
+        torch._dynamo.reset()
 
         dist.barrier(device_ids=device_ids)
 
@@ -1401,45 +1424,49 @@ class FSDPTest(MultiProcessTestCase):
 
 def test_compiled_fsdp(compile_compute_on_module: Optional[type] = None):
     def fully_shard_with_compiled_compute(*args, **kwargs):
-        # compile ``module._call_impl``
-        # to showcase how to include user-registered hooks
+        torch.distributed._composable.fsdp.fully_shard(*args, **kwargs)  # type: ignore[operator]
         if compile_compute_on_module is None or isinstance(
             args[0], compile_compute_on_module
         ):
             args[0].compile()
-        return torch.distributed._composable.fsdp.fully_shard(*args, **kwargs)  # type: ignore[operator]
 
-    class FullyShardPatch(Enum):
-        # apply ``partial`` in order to use ``Enum.value``
-        EAGER = partial(torch.distributed._composable.fsdp.fully_shard)  # type: ignore[var-annotated, arg-type]
-        COMPILED_COMPUTE = partial(fully_shard_with_compiled_compute)  # type: ignore[arg-type]
-        # add FULL for tracing FSDP
+    class FullyShardMode(Enum):
+        EAGER = auto()
+        COMPILED_COMPUTE = auto()
 
     def decorator(func):
         @wraps(func)
         def wrapper(*args, **kwargs):
             original_fully_shard = torch.distributed._composable.fsdp.fully_shard
-            for fully_shard_patch in FullyShardPatch:
-                if fully_shard_patch != FullyShardPatch.EAGER and not has_triton():
+            for mode in FullyShardMode:
+                if mode != FullyShardMode.EAGER and not has_triton():
                     warnings.warn("Inductor on GPU needs Triton and recent GPU arch")
                     continue
-                imported_fully_shard = (
-                    f"{func.__module__}.{original_fully_shard.__name__}"
-                )
-                with mock.patch(
-                    imported_fully_shard,
-                    fully_shard_patch.value,
-                ):
-                    func(*args, **kwargs)
-                    torch.distributed.barrier()
-                # mock.patch.__exit__ does not work with multi-thread
-                # thread 1 set {func.__module__}.fully_shard
-                # thread 2 read {func.__module__}.fully_shard and thought it is original
-                # hence we manually reset them after __exit__
-                import_path, _ = mock._get_target(imported_fully_shard)  # type: ignore[attr-defined]
-                setattr(
-                    import_path(), original_fully_shard.__name__, original_fully_shard
-                )
+                # barrier to ensure thread reading the same value
+                original_skip_fsdp_hooks = torch._dynamo.config.skip_fsdp_hooks
+                original_compile_threads = torch._inductor.config.compile_threads
+                torch.distributed.barrier()
+
+                if mode == FullyShardMode.EAGER:
+                    fully_shard_patch = original_fully_shard
+                elif mode == FullyShardMode.COMPILED_COMPUTE:
+                    torch._dynamo.config.skip_fsdp_hooks = True
+                    torch._inductor.config.compile_threads = 1
+                    fully_shard_patch = fully_shard_with_compiled_compute  # type: ignore[assignment]
+                else:
+                    raise NotImplementedError(
+                        f"Need to implement FullyShardMode={mode}"
+                    )
+
+                # fully_shard is imported as a global
+                # through `from ... import fully_shard`
+                func.__globals__[original_fully_shard.__name__] = fully_shard_patch
+                func(*args, **kwargs)
+                # other threads use patched func before this thread restores
+                torch.distributed.barrier()
+                func.__globals__[original_fully_shard.__name__] = original_fully_shard
+                torch._dynamo.config.skip_fsdp_hooks = original_skip_fsdp_hooks
+                torch._inductor.config.compile_threads = original_compile_threads
 
         return wrapper
 

@@ -77,6 +77,9 @@ RUN rm install_rocm.sh
 COPY ./common/install_rocm_magma.sh install_rocm_magma.sh
 RUN bash ./install_rocm_magma.sh
 RUN rm install_rocm_magma.sh
+COPY ./common/install_amdsmi.sh install_amdsmi.sh
+RUN bash ./install_amdsmi.sh
+RUN rm install_amdsmi.sh
 ENV PATH /opt/rocm/bin:$PATH
 ENV PATH /opt/rocm/hcc/bin:$PATH
 ENV PATH /opt/rocm/hip/bin:$PATH
@@ -114,6 +117,13 @@ RUN rm install_triton.sh common_utils.sh triton-rocm.txt triton_version.txt
 COPY ./common/install_cache.sh install_cache.sh
 ENV PATH /opt/cache/bin:$PATH
 RUN bash ./install_cache.sh && rm install_cache.sh
+
+# Install AOTriton
+COPY ci_commit_pins/aotriton.txt aotriton.txt
+COPY ./common/common_utils.sh common_utils.sh
+COPY ./common/install_aotriton.sh install_aotriton.sh
+RUN bash ./install_aotriton.sh /opt/rocm/aotriton && rm -rf install_aotriton.sh aotriton aotriton.txt common_utils.sh
+ENV AOTRITON_INSTALLED_PREFIX /opt/rocm/aotriton
 
 # Include BUILD_ENVIRONMENT environment variable in image
 ARG BUILD_ENVIRONMENT

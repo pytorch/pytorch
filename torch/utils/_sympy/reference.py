@@ -1,12 +1,25 @@
 import math
 
+import operator
+
 import sympy
 
 import torch
 from torch.utils._sympy.functions import (
+    _keep_float,
+    FloatPow,
+    FloatTrueDiv,
+    FloorDiv,
+    IntTrueDiv,
+    Mod,
     OpaqueUnaryFn_exp,
     OpaqueUnaryFn_log,
     OpaqueUnaryFn_sqrt,
+    PowByNatural,
+    RoundDecimal,
+    RoundToInt,
+    ToFloat,
+    TruncToInt,
 )
 
 
@@ -62,18 +75,41 @@ class ReferenceAnalysis:
 
     @staticmethod
     def reciprocal(x):
-        return 1 / x
+        return FloatTrueDiv(1.0, x)
 
     @staticmethod
     def square(x):
-        return x * x
+        return PowByNatural(x, 2)
+
+    @staticmethod
+    def trunc_to_int(x, dtype):
+        return TruncToInt(x)
+
+    @staticmethod
+    def ceil_to_int(x, dtype):
+        return sympy.ceiling(x)
+
+    @staticmethod
+    def floor_to_int(x, dtype):
+        return sympy.floor(x)
+
+    @staticmethod
+    def floor(x):
+        return _keep_float(sympy.floor)(x)
+
+    @staticmethod
+    def ceil(x):
+        return _keep_float(sympy.ceiling)(x)
+
+    @staticmethod
+    def to_dtype(x, dtype):
+        if dtype == torch.float64:
+            return ToFloat(x)
+        raise NotImplementedError(f"to_dtype {dtype} NYI")
 
     @staticmethod
     def mod(x, y):
-        ret = abs(x) % abs(y)
-        if x < 0:
-            ret *= -1
-        return ret
+        return Mod(x, y)
 
     @staticmethod
     def abs(x):
@@ -85,37 +121,31 @@ class ReferenceAnalysis:
 
     @staticmethod
     def truediv(a, b):
-        return a / b
+        return FloatTrueDiv(a, b)
 
     @staticmethod
-    def div(a, b):
-        return ReferenceAnalysis.truediv(a, b)
+    def int_truediv(a, b):
+        return IntTrueDiv(a, b)
 
     @staticmethod
     def floordiv(a, b):
-        if b == 0:
-            return sympy.nan if a == 0 else sympy.zoo
-        return a // b
+        return FloorDiv(a, b)
 
     @staticmethod
     def truncdiv(a, b):
-        result = a / b
-        if result.is_finite:
-            result = sympy.Integer(result)
-
-        return result
+        raise NotImplementedError("TODO: truncdiv")
 
     @staticmethod
     def add(a, b):
-        return a + b
+        return _keep_float(operator.add)(a, b)
 
     @staticmethod
     def mul(a, b):
-        return a * b
+        return _keep_float(operator.mul)(a, b)
 
     @staticmethod
     def sub(a, b):
-        return a - b
+        return _keep_float(operator.sub)(a, b)
 
     @staticmethod
     def exp(x):
@@ -131,39 +161,27 @@ class ReferenceAnalysis:
 
     @staticmethod
     def pow(a, b):
-        return a**b
+        return _keep_float(FloatPow)(a, b)
+
+    @staticmethod
+    def pow_by_natural(a, b):
+        return PowByNatural(a, b)
 
     @staticmethod
     def minimum(a, b):
-        # Poorman's version of upcasting in Sympy
-        # This won't do for sympy.Expr as the casting does nothing for those
-        if a.is_Float or not a.is_finite or b.is_Float or not b.is_finite:
-            result_type = sympy.Float
-        else:
-            assert a.is_Integer
-            assert b.is_Integer
-            result_type = sympy.Integer
-        return sympy.Min(result_type(a), result_type(b))
+        return sympy.Min(a, b)
 
     @staticmethod
     def maximum(a, b):
-        # Poorman's version of upcasting in Sympy
-        # This won't do for sympy.Expr as the casting does nothing for those
-        if a.is_Float or not a.is_finite or b.is_Float or not b.is_finite:
-            result_type = sympy.Float
-        else:
-            assert a.is_Integer
-            assert b.is_Integer
-            result_type = sympy.Integer
-        return sympy.Max(result_type(a), result_type(b))
+        return sympy.Max(a, b)
 
     @staticmethod
-    def floor(x):
-        return sympy.floor(x)
+    def round_to_int(a, dtype):
+        return RoundToInt(a)
 
     @staticmethod
-    def ceil(x):
-        return sympy.ceiling(x)
+    def round_decimal(a, b):
+        return RoundDecimal(a, b)
 
 
 # Unlike ReferenceAnalysis, does NOT sympyify, instead, works with plain
@@ -190,8 +208,18 @@ class PythonReferenceAnalysis(ReferenceAnalysis):
         return a // b
 
     @staticmethod
+    def mod(x, y):
+        return x % y
+
+    @staticmethod
     def truncdiv(a, b):
         return a / b
+
+    @staticmethod
+    def to_dtype(x, dtype):
+        if dtype == torch.float64:
+            return float(x)
+        raise NotImplementedError(f"to_dtype {dtype} NYI")
 
     @staticmethod
     def exp(x):
@@ -214,9 +242,40 @@ class PythonReferenceAnalysis(ReferenceAnalysis):
         return torch.sym_max(a, b)
 
     @staticmethod
-    def floor(x):
+    def floor_to_int(x, dtype):
         return math.floor(x)
 
     @staticmethod
-    def ceil(x):
+    def ceil_to_int(x, dtype):
         return math.ceil(x)
+
+    @staticmethod
+    def floor(x):
+        return float(math.floor(x))
+
+    @staticmethod
+    def ceil(x):
+        return float(math.ceil(x))
+
+    @staticmethod
+    def truediv(a, b):
+        return a / b
+
+    @staticmethod
+    def pow(a, b):
+        return a**b
+
+    @staticmethod
+    def pow_by_natural(a, b):
+        # Pray that safe_pow is not needed here lol.  In particular, this
+        # never participates in VR low/high ranges, so overflow should be
+        # unlikely
+        return a**b
+
+    @staticmethod
+    def round_to_int(a, dtype):
+        return round(a)
+
+    @staticmethod
+    def round_decimal(a, b):
+        return round(a, ndigits=b)
