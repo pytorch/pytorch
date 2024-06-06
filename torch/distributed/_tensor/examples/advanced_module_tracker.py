@@ -10,7 +10,11 @@ from torch.utils._pytree import tree_flatten
 from torch.utils.module_tracker import ModuleTracker
 
 
-class AdvancedModuleTracker(ModuleTracker):
+class ModuleParamaterShardingTracker(ModuleTracker):
+    """
+    Inherits ModuleTracker and expands on its functionality to track the parameters and sharding information of a model at a module-level
+    """
+
     def __init__(self):
         super().__init__()
         self.module_parameters_dict = {}
