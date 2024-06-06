@@ -579,7 +579,7 @@ def _get_torch_related_args(include_pytorch: bool, aot_mode: bool):
 
 
 def _get_python_related_args():
-    python_include_dirs = []
+    python_include_dirs =  _get_python_include_dirs()
     python_include_path = sysconfig.get_path(
         "include", scheme="nt" if _IS_WINDOWS else "posix_prefix"
     )
@@ -855,11 +855,8 @@ def _get_cuda_related_args(cuda: bool, aot_mode: bool):
 
     from torch.utils import cpp_extension
 
-    # After pass fb_code, move `_get_python_include_dirs` and `sysconfig.get_config_var("LIBDIR")` to correct place.
-    include_dirs = cpp_extension.include_paths(cuda) + _get_python_include_dirs()
-    libraries_dirs = cpp_extension.library_paths(cuda) + [
-        sysconfig.get_config_var("LIBDIR")
-    ]
+    include_dirs = cpp_extension.include_paths(cuda)
+    libraries_dirs = cpp_extension.library_paths(cuda)
 
     if cuda:
         definations.append(" USE_ROCM" if torch.version.hip else " USE_CUDA")
@@ -886,11 +883,11 @@ def _get_cuda_related_args(cuda: bool, aot_mode: bool):
         if cuda and torch.version.hip is None:
             _transform_cuda_paths(libraries_dirs)
 
-        if config.is_fbcode():
-            if torch.version.hip is not None:
-                include_dirs.append(os.path.join(build_paths.rocm(), "include"))
-            else:
-                include_dirs.append(os.path.join(build_paths.cuda(), "include"))
+    if config.is_fbcode():
+        if torch.version.hip is not None:
+            include_dirs.append(os.path.join(build_paths.rocm(), "include"))
+        else:
+            include_dirs.append(os.path.join(build_paths.cuda(), "include"))
 
     if aot_mode and cuda and config.is_fbcode():
         if torch.version.hip is None:
