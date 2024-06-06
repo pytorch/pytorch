@@ -189,25 +189,6 @@ class NestedTensor(torch.Tensor):
         lengths = inner_tensors.get("_lengths", None)
         ragged_idx = meta["ragged_idx"]
         ragged_source = offsets if lengths is None else lengths
-        # for the functional to fake wrapping, don't need to do anything (since we rely on unwrapping)
-        # for the initial fakification? (different, and we've already saved it on the fake tensor)
-        # for the grad_output thing (same, and so we need to do this)
-        # for the runtime wrapper (different, and we just create a fresh one because we're in eager)
-        # the thing is... this is not enough?
-        if original_tensors:
-            orig_offsets = original_tensors.get("_offsets", None)
-            orig_lengths = original_tensors.get("_lengths", None)
-            orig_ragged_source = orig_offsets if orig_lengths is None else orig_lengths
-            if type(orig_ragged_source) is type(ragged_source):
-                from torch.nested._internal import union_find
-                assert orig_ragged_source is not None
-                uf = union_find.get_union_find()
-                uf.merge(ragged_source, orig_ragged_source)
-                # Two FakeTensor now share the same NestedInt?!
-                # Previously this was not the case. We also don't need to do
-                # the union find thing above?
-                ragged_source._nested_int_memo = orig_ragged_source._nested_int_memo
-                ragged_source._nested_int_memo_vc = ragged_source._version
 
         return NestedTensor(
             values,
