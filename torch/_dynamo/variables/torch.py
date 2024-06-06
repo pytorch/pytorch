@@ -933,6 +933,12 @@ Either create the tensor outside the compiled region, or do not set the tensor t
         cg.store(varname)
         tx.output.pregraph_bytecode.extend(cg.get_instructions())
 
+        data_node = data.as_proxy().node
+        if data_node.op not in ("placeholder", "get_attr"):
+            unimplemented(
+                "Unexpected type of data placeholder op for parameter construction"
+            )
+
         # add the newly constructed nn.Parameter as a graph input
         source = SyntheticLocalSource(varname)
         example_value = torch.nn.Parameter(
