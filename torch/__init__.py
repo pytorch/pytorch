@@ -1924,7 +1924,7 @@ from torch import quasirandom as quasirandom  # usort: skip
 # If you are seeing this, it means that this call site was not checked if
 # the memory format could be preserved, and it was switched to old default
 # behaviour of contiguous
-legacy_contiguous_format = _C.contiguous_format
+legacy_contiguous_format = contiguous_format  # defined by _C._initExtension()
 
 # Register fork handler to initialize OpenMP in child processes (see gh-28389)
 from torch.multiprocessing._atfork import register_after_fork
