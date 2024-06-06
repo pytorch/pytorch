@@ -486,7 +486,7 @@ class PowByNatural(sympy.Function):
         if isinstance(exp, sympy.Integer):
             # Rely on regular sympy Pow for this (note that iterated
             # multiplication turns into a Pow anyway, you can't escape!!)
-            return sympy.Pow(se, exp)
+            return sympy.Pow(base, exp)
         if exp in (int_oo, sympy.oo):
             if base.is_nonnegative:
                 return int_oo
