@@ -143,7 +143,7 @@ def _create_tcp_store(params: RendezvousParameters) -> TCPStore:
     else:
         is_host = _matches_machine_hostname(host)
 
-    use_libuv = params.get_as_bool("use_libuv", False)
+    use_libuv = params.get_as_bool("use_libuv", True)
 
     # The timeout
     read_timeout = cast(int, params.get_as_int("read_timeout", 60))
