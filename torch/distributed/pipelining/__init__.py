@@ -24,7 +24,7 @@ __all__ = [
     "pipeline",
     "ArgsChunkSpec",
     "KwargsChunkSpec",
-    "ManualPipelineStage",
+    "TracerPipelineStage",
     "PipelineStage",
     "Schedule1F1B",
     "ScheduleGPipe",

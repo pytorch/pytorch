@@ -224,7 +224,7 @@ Pipeline Stages
 
 .. autoclass:: PipelineStage
 
-.. autoclass:: ManualPipelineStage
+.. autoclass:: TracerPipelineStage
 
 Pipeline Schedules
 ==================

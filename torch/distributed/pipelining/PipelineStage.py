@@ -80,7 +80,7 @@ def _make_tensor_from_meta(
 class _PipelineStageBase(ABC):
     """
     Base class for pipeline stages.
-    Implements common methods used by both the `PipelineStage` used by the tracing frontend and `ManualPipelineStage`.
+    Implements common methods used by both the `TracerPipelineStage` used by the tracing frontend and `PipelineStage`.
     """
 
     def __init__(
