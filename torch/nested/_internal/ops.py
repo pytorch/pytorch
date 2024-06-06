@@ -625,6 +625,11 @@ def unbind_int(func, *args, **kwargs):
         raise RuntimeError(
             "unbind(): nested tensor ragged_idx out of bounds (should be >= 1)"
         )
+    for i in range(lengths.shape[0]):
+        if offsets[i] + lengths[i] > values.shape[ragged_idx - 1]:
+            raise RuntimeError(
+                "unbind(): nested tensor offsets and lengths do not match ragged_idx dimension"
+            )
     return [
         torch.narrow(values, dim=(ragged_idx - 1), start=offsets[i], length=lengths[i])
         for i in range(lengths.shape[0])
