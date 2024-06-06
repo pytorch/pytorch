@@ -77,7 +77,7 @@ Features described in this documentation are classified by release status:
    torch.distributed.algorithms.join <distributed.algorithms.join>
    torch.distributed.elastic <distributed.elastic>
    torch.distributed.fsdp <fsdp>
-   torch.distributed.xeon <xeon>
+   torch.distributed.xeon <distributed.xeon>
    torch.distributed.optim <distributed.optim>
    torch.distributed.pipelining <distributed.pipelining>
    torch.distributed.tensor.parallel <distributed.tensor.parallel>
