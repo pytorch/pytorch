@@ -356,9 +356,9 @@ def add(g: jit_utils.GraphContext, self, other, alpha=None):
 @_beartype.beartype
 def sub(g: jit_utils.GraphContext, self, other, alpha=None):
     """
-    Subtracts two tensors.
+    Consumes sub function and returns the corresponding ONNX operator.
 
-    This function subtracts two tensors element-wise, with an optional scaling factor.
+    This function is not meant to be called directly by the user.
 
     Args:
         g (GraphContext): The graph context.
@@ -368,8 +368,7 @@ def sub(g: jit_utils.GraphContext, self, other, alpha=None):
             If `alpha` is not provided, it defaults to 1.
 
     Returns:
-        element-wise subtraction of two tensors, with an optional scaling of the
-        second operand by a factor 'alpha'.
+        ONNX graph node representing the concatenated tensor.
     """
     if alpha and symbolic_helper._scalar(symbolic_helper._maybe_get_scalar(alpha)) != 1:
         other = g.op("Mul", other, alpha)
