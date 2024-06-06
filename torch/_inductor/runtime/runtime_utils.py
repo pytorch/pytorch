@@ -89,12 +89,27 @@ def do_bench_gpu(
         properties = torch.cuda.get_device_properties(device)
         return properties.l2CacheSize
 
+    # we still flush 256MB to mimic the original calculation for
+    # warmup/repeat iters. since the overhead of flushing the cache
+    # is included in the runtime estimation, decreasing the size of
+    # the flush may cause the number of warmup/repeat iters to spike
+    # significantly. on H100 with ~2TB/s (2000MB/ms) bandwidth the
+    # original 256MB flush takes ~0.13ms but the new flush (50MB
+    # on H100) takes only ~0.025ms. for small kernels (0.1ms actual
+    # runtime) this more than 2x the number of iterations and for very
+    # small kernels (0.01ms actual runtime) this can more than 5x the
+    # number of iterations. this obviously negates the benefit of
+    # flushing a smaller cache, and actually causes overall slowdowns
+    # as the overhead cost of doing a single iteration, besides the
+    # kernel runtime and the cache flush overhead, is non-negligable
+    # TODO(nmacchioni): fix this!
     if fast_flush:
         cache = torch.empty(int(256e6 // 4), dtype=torch.int, device="cuda")
     else:
         cache = torch.empty(int(256e6), dtype=torch.int8, device="cuda")
 
     estimation_iters = 5
+
     event_pairs = [
         (
             torch.cuda.Event(enable_timing=True),
@@ -102,12 +117,18 @@ def do_bench_gpu(
         )
         for _ in range(estimation_iters)
     ]
+
     for start_event, end_event in event_pairs:
         start_event.record()
         cache.zero_()
         fn()
         end_event.record()
     torch.cuda.synchronize()
+
+    # explicitly clean up the cache, since having this stick around can
+    # mess with memory compression calculations during benchmarking
+    del cache
+
     estimate_ms = min(
         [event_pair[0].elapsed_time(event_pair[1]) for event_pair in event_pairs]
     )
@@ -136,10 +157,15 @@ def do_bench_gpu(
         end_event.record()
     torch.cuda.synchronize()
 
+    # explicitly clean up the cache, since having this stick around can
+    # mess with memory compression calculations during benchmarking
+    del cache
+
     timings = torch.tensor(
         [event_pair[0].elapsed_time(event_pair[1]) for event_pair in event_pairs],
         dtype=torch.float,
     )
+
     if quantiles is not None:
         timing_quantiles = torch.quantile(
             timings, torch.tensor(quantiles, dtype=torch.float)
@@ -147,6 +173,7 @@ def do_bench_gpu(
         if len(timing_quantiles) == 1:
             timing_quantiles = timing_quantiles[0]
         return timing_quantiles
+
     return getattr(torch, return_mode)(timings).item()
 
 
