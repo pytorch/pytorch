@@ -203,34 +203,38 @@ example, and run with data:
 .. code-block:: python
 
   from torch.distributed.pipelining import ScheduleGPipe
-  schedule = ScheduleGPipe(stage, chunks)
 
-  # Input data
+  # Create a schedule
+  schedule = ScheduleGPipe(stage, n_microbatches)
+
+  # Input data (whole batch)
   x = torch.randn(batch_size, in_dim, device=device)
 
-  # Run the pipeline with input `x`. Divide the batch into 4 micro-batches
-  # and run them in parallel on the pipeline
+  # Run the pipeline with input `x`
+  # `x` will be divided into microbatches internally
   if rank == 0:
       schedule.step(x)
   else:
       output = schedule.step()
 
-Note that the above code needs to be launched for each worker, thus we can a
-launcher service like ``torchrun`` to launch multiple processes.
+Note that the above code needs to be launched for each worker, thus we use a
+launcher service to launch multiple processes:
 
 .. code-block:: bash
 
   torchrun --nproc_per_node=2 example.py
 
 
-Examples
-********
+Hugging Face Examples
+*********************
 
 In the `PiPPy <https://github.com/pytorch/PiPPy>`_ repo where this package was
 original created, we kept examples based on unmodified Hugging Face models.
-You can refer to the `examples/huggingface
+See the `examples/huggingface
 <https://github.com/pytorch/PiPPy/tree/main/examples/huggingface>`_ directory.
-See for example:
+
+Examples include:
+
 * `GPT2 <https://github.com/pytorch/PiPPy/tree/main/examples/huggingface/pippy_gpt2.py>`_
 * `Llama <https://github.com/pytorch/PiPPy/tree/main/examples/llama>`_
 
