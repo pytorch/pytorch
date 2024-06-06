@@ -412,11 +412,6 @@ Tensor& set_storage_meta__symint(Tensor& result, Storage storage, c10::SymInt st
 
   // Matches maybe_resize_storage_cpu no-numel behavior
   if (TORCH_GUARD_SIZE_OBLIVIOUS(result.sym_numel().sym_ne(0))) {
-    // Following checks are implied by the condition above but
-    // cannot be inferred due to incompleteness of symbolic reasoning
-    for (auto i = 0; i < result.dim(); ++i) {
-      TORCH_SYM_CHECK(result.sym_size(i).sym_ne(0), "Size must be non-zero");
-    }
     // maybe_resize_storage_cpu can handle no storage exists at all but
     // that should never be the case here
     TORCH_INTERNAL_ASSERT(storage);
