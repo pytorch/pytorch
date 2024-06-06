@@ -550,11 +550,9 @@ We only support storage resizing on graph inputs as long as the input either sta
                         if inpt_old.is_inference():
                             maybe_preserve_vc = nullcontext()
                         else:
-                            maybe_preserve_vc = (
-                                torch.autograd._unsafe_preserve_version_counter(
-                                    inpt_old
-                                )
-                            )  # type: ignore[assignment]
+                            maybe_preserve_vc = torch.autograd._unsafe_preserve_version_counter(
+                                inpt_old  # type: ignore[assignment]
+                            )
                         with torch.no_grad(), maybe_preserve_vc:
                             inpt_old.copy_(inpt_new)
                     elif (
