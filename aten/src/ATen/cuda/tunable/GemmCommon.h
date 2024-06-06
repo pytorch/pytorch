@@ -81,7 +81,8 @@ struct GemmParams : OpParams {
   }
 
   std::string Signature() const override {
-    return c10::str(transa, transb, "_", m, "_", n, "_", k);
+    static std::string val = c10::str(transa, transb, "_", m, "_", n, "_", k);
+    return val;
   }
 
   size_t GetSize(bool duplicate_inputs) const {
@@ -146,7 +147,8 @@ private:
 template <typename T>
 struct GemmAndBiasParams : OpParams {
   std::string Signature() const override {
-    return c10::str(transa, transb, "_", m, "_", n, "_", k);
+    static std::string val = c10::str(transa, transb, "_", m, "_", n, "_", k);
+    return val;
   }
 
   size_t GetSize(bool duplicate_inputs) const {
@@ -216,7 +218,8 @@ struct GemmStridedBatchedParams : OpParams {
   }
 
   std::string Signature() const override {
-    return c10::str(transa, transb, "_", m, "_", n, "_", k, "_B_", batch);
+    static std::string val = c10::str(transa, transb, "_", m, "_", n, "_", k, "_B_", batch);
+    return val;
   }
 
   size_t GetSize(bool duplicate_inputs) const {
@@ -289,7 +292,8 @@ struct ScaledGemmParams : OpParams {
   }
 
   std::string Signature() const override {
-    return c10::str(transa, transb, "_", m, "_", n, "_", k);
+    static std::string val = c10::str(transa, transb, "_", m, "_", n, "_", k);
+    return val;
   }
 
   size_t GetSize(bool duplicate_inputs) const {

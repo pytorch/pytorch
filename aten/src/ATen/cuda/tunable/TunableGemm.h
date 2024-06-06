@@ -287,7 +287,8 @@ class GemmTunableOp : public TunableOp<GemmParams<T>, StreamTimer> {
   }
 
   std::string Signature() override {
-    return c10::str("GemmTunableOp_", TypeName<T>(T{}), "_", BlasOpToString(ALayout), BlasOpToString(BLayout));
+    static std::string val = c10::str("GemmTunableOp_", TypeName<T>(T{}), "_", BlasOpToString(ALayout), BlasOpToString(BLayout));
+    return val;
   }
 };
 
@@ -323,7 +324,8 @@ class GemmAndBiasTunableOp : public TunableOp<GemmAndBiasParams<T>, StreamTimer>
   }
 
   std::string Signature() override {
-    return c10::str("GemmAndBiasTunableOp_", TypeName<T>(T{}), "_", BlasOpToString(ALayout), BlasOpToString(BLayout));
+    static std::string val = c10::str("GemmAndBiasTunableOp_", TypeName<T>(T{}), "_", BlasOpToString(ALayout), BlasOpToString(BLayout));
+    return val;
   }
 };
 
@@ -366,7 +368,8 @@ class GemmStridedBatchedTunableOp : public TunableOp<GemmStridedBatchedParams<T>
   }
 
   std::string Signature() override {
-    return c10::str("GemmStridedBatchedTunableOp_", TypeName<T>(T{}), "_", BlasOpToString(ALayout), BlasOpToString(BLayout));
+    static std::string val = c10::str("GemmStridedBatchedTunableOp_", TypeName<T>(T{}), "_", BlasOpToString(ALayout), BlasOpToString(BLayout));
+    return val;
   }
 };
 
@@ -388,11 +391,12 @@ class ScaledGemmTunableOp : public TunableOp<ScaledGemmParams<CT>, StreamTimer> 
   }
 
   std::string Signature() override {
-    return c10::str("ScaledGemmTunableOp",
+    static std::string val = c10::str("ScaledGemmTunableOp",
             "_", TypeName<AT>(AT{}),
             "_", TypeName<BT>(BT{}),
             "_", TypeName<CT>(CT{}),
             "_", BlasOpToString(ALayout), BlasOpToString(BLayout));
+    return val;
   }
 };
 
