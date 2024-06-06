@@ -33,10 +33,13 @@ import torch
 import torch.utils._pytree as pytree
 from torch.export._tree_utils import is_equivalent, reorder_kwargs
 from torch.fx._compatibility import compatibility
+
+from torch.fx._utils import first_call_function_nn_module_stack
 from torch.fx.experimental.proxy_tensor import maybe_disable_fake_tensor_mode
 
 from torch.fx.passes.infra.pass_base import PassResult
 from torch.fx.passes.infra.pass_manager import PassManager
+from torch.fx.passes.runtime_assert import insert_deferred_runtime_asserts
 
 from .graph_signature import (  # noqa: F401
     _sig_to_specs,
@@ -224,7 +227,7 @@ class ExportedProgram:
 
         self._graph_signature: ExportGraphSignature = graph_signature
         self._state_dict: Dict[str, Any] = state_dict
-        self._range_constraints: "Dict[sympy.Symbol, ValueRanges]" = range_constraints
+        self._range_constraints: Dict[sympy.Symbol, ValueRanges] = range_constraints
         assert module_call_graph is not None
         self._module_call_graph: List[ModuleCallEntry] = module_call_graph
         self._example_inputs = example_inputs
@@ -448,7 +451,7 @@ class ExportedProgram:
                 res = pytree.tree_unflatten(res, self.call_spec.out_spec)
             except Exception:
                 _, received_spec = pytree.tree_flatten(res)
-                raise error.InternalError(  # noqa: TRY200
+                raise error.InternalError(  # noqa: B904
                     "Trying to flatten user outputs with exported output tree spec: \n"
                     f"{self.call_spec.out_spec}\n"
                     "but actually got outputs with tree spec of: \n"
@@ -660,6 +663,29 @@ class ExportedProgram:
 
         _replace_sym_size_ops_pass(gm)
 
+        from torch._dynamo import config as _dynamo_config
+        from torch._export.passes._node_metadata_hook import (
+            _node_metadata_hook,
+            _set_node_metadata_hook,
+        )
+
+        if not _dynamo_config.do_not_emit_runtime_asserts:
+            stack_trace = (
+                'File "torch/fx/passes/runtime_assert.py", line 24, '
+                "in insert_deferred_runtime_asserts"
+            )
+            shape_env = _get_shape_env(gm)
+            if shape_env is not None:
+                with _set_node_metadata_hook(
+                    gm, functools.partial(_node_metadata_hook, stack_trace=stack_trace)
+                ):
+                    insert_deferred_runtime_asserts(
+                        gm,
+                        shape_env,
+                        f"exported program: {first_call_function_nn_module_stack(gm.graph)}",
+                        export=True,
+                    )
+
         exported_program = ExportedProgram(
             root=gm,
             graph=gm.graph,
@@ -799,30 +825,31 @@ class ExportedProgram:
         )
 
 
+def _get_shape_env(gm):
+    vals = [
+        node.meta["val"]
+        for node in gm.graph.nodes
+        if node.meta.get("val", None) is not None
+    ]
+    from torch._guards import detect_fake_mode
+
+    fake_mode = detect_fake_mode(vals)
+    if fake_mode is not None:
+        return fake_mode.shape_env
+    for v in vals:
+        if isinstance(v, torch.SymInt):
+            return v.node.shape_env
+
+
 def _get_updated_range_constraints(
     gm: torch.fx.GraphModule,
     old_range_constraints: "Optional[Dict[sympy.Symbol, Any]]" = None,
     _is_executorch: bool = True,
 ) -> "Dict[sympy.Symbol, Any]":
-    def get_shape_env(gm):
-        vals = [
-            node.meta["val"]
-            for node in gm.graph.nodes
-            if node.meta.get("val", None) is not None
-        ]
-        from torch._guards import detect_fake_mode
-
-        fake_mode = detect_fake_mode(vals)
-        if fake_mode is not None:
-            return fake_mode.shape_env
-        for v in vals:
-            if isinstance(v, torch.SymInt):
-                return v.node.shape_env
-
     # FIXME(tmanlaibaatar) Remove this whole branch once https://github.com/pytorch/pytorch/pull/123764
     if _is_executorch:
         assert old_range_constraints is None
-        shape_env = get_shape_env(gm)
+        shape_env = _get_shape_env(gm)
         if shape_env is None:
             return {}
         range_constraints = {
@@ -840,7 +867,7 @@ def _get_updated_range_constraints(
 
     assert old_range_constraints is not None
 
-    shape_env = get_shape_env(gm)
+    shape_env = _get_shape_env(gm)
     if shape_env is None:
         return {}
 

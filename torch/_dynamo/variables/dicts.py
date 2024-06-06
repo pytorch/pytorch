@@ -407,6 +407,8 @@ class SetVariable(ConstDictVariable):
         args: List[VariableTracker],
         kwargs: Dict[str, VariableTracker],
     ) -> "VariableTracker":
+        from . import ListVariable, TupleVariable
+
         # We foward the calls to the dictionary model
         if name == "add":
             assert not kwargs
@@ -426,6 +428,24 @@ class SetVariable(ConstDictVariable):
             return variables.UserFunctionVariable(
                 polyfill.set_isdisjoint
             ).call_function(tx, [self, args[0]], {})
+        elif (
+            name == "update"
+            and len(args) == 1
+            and isinstance(
+                args[0],
+                (
+                    SetVariable,
+                    ListVariable,
+                    TupleVariable,
+                ),
+            )
+            and self.mutable_local
+        ):
+            if isinstance(args[0], (ListVariable, TupleVariable)):
+                arg = SetVariable(args[0].unpack_var_sequence(tx))
+            else:
+                arg = args[0]
+            return super().call_method(tx, "update", (arg,), kwargs)
         return super().call_method(tx, name, args, kwargs)
 
     def getitem_const(self, arg: VariableTracker):

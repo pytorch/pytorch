@@ -337,16 +337,35 @@ class UnflattenedModule(torch.nn.Module):
                 inputs_to_state[n] = targets
 
         _sink_params(self, inputs_to_state, [])
-        # Check all input nodes has been processed.
-        for name, module in self.named_modules():
-            if not hasattr(module, "graph"):
-                continue
-            for node in module.graph.nodes:
-                if node.op != "placeholder":
-                    continue
-                assert (
-                    node.name not in inputs_to_state
-                ), f"{node.name} was not sunk into the module {name} which has the graph: {module.graph}"
+
+        # Helper function to check input nodes of `module` has been processed.
+        def check_module_inputs(module, scope):
+            if hasattr(module, "graph"):
+                for node in module.graph.nodes:
+                    # sink_params() should turn placeholders into get_attr nodes
+                    # for attributes that are within scope of the current
+                    # module. We allow attributes to remain as placeholders if
+                    # they are inputs in the original module signature, meaning
+                    # they are a parent module's attribute, and therefore out of
+                    # scope of the current module.
+                    if (
+                        node.op == "placeholder"
+                        and node.name in inputs_to_state
+                        and any(
+                            fqn.split(".")[: len(scope)] == scope
+                            for fqn in inputs_to_state[node.name]
+                        )  # matching scope to avoid wrong assert
+                    ):
+                        raise AssertionError(
+                            f"{node.name} was not sunk into the module {scope} which has the graph: {module.graph}"
+                        )
+            # Recursively check the submodules.
+            for name, submod in module.named_children():
+                scope.append(name)
+                check_module_inputs(submod, scope)
+
+        # Recurively check all input nodes have been processed.
+        check_module_inputs(self, [])
 
         # Cache so we don't have to compute this every time.
         # NOTE: this needs to be kept in sync with the placeholders in
@@ -891,11 +910,25 @@ class _ModuleFrame:
                 self.finalize_outputs()
                 return node_idx
 
-            node_module_stack = (
-                [path for path, ty in node.meta["nn_module_stack"].values()]
-                if "nn_module_stack" in node.meta
-                else self.module_stack
+            if len(node.meta.get("nn_module_stack", {})) == 0:
+                raise RuntimeError(f"Unable to find nn_module_stack for node {node}")
+
+            nn_module_stack = node.meta["nn_module_stack"]
+            from torch._export.passes._node_metadata_hook import (
+                _EMPTY_NN_MODULE_STACK_KEY,
             )
+
+            if (
+                len(nn_module_stack) == 1
+                and _EMPTY_NN_MODULE_STACK_KEY in nn_module_stack
+            ):
+                # Empty case from the node_metadata_hook
+                node_module_stack = self.module_stack
+            else:
+                node_module_stack = [
+                    path for path, ty in node.meta["nn_module_stack"].values()
+                ]
+
             if node_module_stack[: len(self.module_stack)] != self.module_stack:
                 # This means that the current module is done executing and the
                 # current node is the beginning of a new module.
@@ -996,14 +1029,23 @@ def _sink_params(
     scope: tracks where we are in the module hierarchy, so that we can emit the
         right `getattr(self, "foo.bar")` calls, etc.
     """
+    # This dict records inputs removed by child modules.
+    # Maps the module object id to the list of placeholder node names
+    # in the child module that were removed.
+    module_id_to_inputs_removed: Dict[int, List[str]] = defaultdict(list)
+
     # We need to use _modules here instead of named_children(), because we
     # explicitly want duplicate modules to show up in the traversal.
     for name, submodule in module._modules.items():
-        _sink_params(cast(torch.nn.Module, submodule), inputs_to_state, scope + [name])
+        submod_id_to_inputs_removed = _sink_params(
+            cast(torch.nn.Module, submodule), inputs_to_state, scope + [name]
+        )
+        for k, v in submod_id_to_inputs_removed.items():
+            module_id_to_inputs_removed[k].extend(v)
 
     if not hasattr(module, "graph"):
         # Not all modules have graphs defined, if they are empty modules with no operations (like ParameterList)
-        return
+        return module_id_to_inputs_removed
 
     graph = module.graph
     inputs = list(filter(lambda n: n.op == "placeholder", graph.nodes))
@@ -1012,32 +1054,49 @@ def _sink_params(
     # Also remove from call_module nodes
     call_module_nodes = filter(lambda n: n.op == "call_module", graph.nodes)
     for node in call_module_nodes:
-        node.args = tuple(filter(lambda n: n.name not in inputs_to_state, node.args))
+        submodule = _recursive_getattr(module, node.target.split("."))
+        # remove placeholder from call_module node arguments, only if we've
+        # erased the placeholder node in the corresponding _sink_params() call
+        if submodule is not None and id(submodule) in module_id_to_inputs_removed:
+            node.args = tuple(
+                filter(
+                    lambda n: n.name not in module_id_to_inputs_removed[id(submodule)],
+                    node.args,
+                )
+            )
 
+    # Filter out inputs_to_state corresponding to current scope.
+    inputs_to_state_of_scope: Dict[torch.fx.Node, list[str]] = {}
     for node in inputs:
         if node.name not in inputs_to_state:
             continue
 
+        state_name = None
+        for sn in inputs_to_state[node.name]:
+            sn_split = sn.split(".")
+            if sn_split[: len(scope)] == scope:
+                state_name = sn_split
+                break
+
+        # If there's a mismatch beteewn scope name and state name, then
+        # there must be multuple scopes pointing to the same state name,
+        # meaning some modules are shared. In such case, we can simply skip
+        # updating the current node because another later iteration will
+        # take care of this input node when the unique match between scope
+        # and state name occurs.  To make sure this always happen, we should
+        # enforce the invariant that no placeholder node in the unflattened
+        # graph appears in inputs_to_state dict, which means all the extra
+        # input nodes have been handled.
+        if state_name is None:
+            continue
+
+        inputs_to_state_of_scope[node] = state_name
+
+    # Record name of remove inputs for return purpose.
+    inputs_removed: List[str] = []
+
+    for node, state_name in inputs_to_state_of_scope.items():
         if len(node.users) > 0:
-            state_name = None
-            for sn in inputs_to_state[node.name]:
-                sn_split = sn.split(".")
-                if sn_split[: len(scope)] == scope:
-                    state_name = sn_split
-                    break
-
-            # If there's a mismatch beteewn scope name and state name, then
-            # there must be multuple scopes pointing to the same state name,
-            # meaning some modules are shared. In such case, we can simply skip
-            # updating the current node because another later iteration will
-            # take care of this input node when the unique match between scope
-            # and state name occurs.  To make sure this always happen, we should
-            # enforce the invariant that no placeholder node in the unflattened
-            # graph appears in inputs_to_state dict, which means all the extra
-            # input nodes have been handled.
-            if state_name is None:
-                continue
-
             attr_path = state_name[len(scope) :]
             state_attr = _recursive_getattr(module, attr_path)
             assert isinstance(state_attr, (torch.Tensor, torch.ScriptObject))
@@ -1047,13 +1106,20 @@ def _sink_params(
                 new_node = graph.create_node("get_attr", ".".join(attr_path))
 
             node.replace_all_uses_with(new_node, propagate_meta=True)
+
         graph.erase_node(node)
+        inputs_removed.append(node.name)
+
     if isinstance(module, InterpreterModule):
         module.finalize()
+
+    return {id(module): inputs_removed}
 
 
 def _recursive_getattr(obj, attr_path):
     for attr in attr_path:
+        if not hasattr(obj, attr):
+            return None
         obj = getattr(obj, attr)
 
     return obj

@@ -1,5 +1,4 @@
 # Welcome to the PyTorch setup.py.
-#
 # Environment variables you are probably interested in:
 #
 #   DEBUG
@@ -88,29 +87,14 @@
 #     disables use of system-wide nccl (we will use our submoduled
 #     copy in third_party/nccl)
 #
-#   USE_IBVERBS
-#     toggle features related to distributed support
-#
-#   USE_OPENCV
-#     enables use of OpenCV for additional operators
-#
 #   USE_OPENMP=0
 #     disables use of OpenMP for parallelization
-#
-#   USE_FFMPEG
-#     enables use of ffmpeg for additional operators
 #
 #   USE_FLASH_ATTENTION=0
 #     disables building flash attention for scaled dot product attention
 #
 #   USE_MEM_EFF_ATTENTION=0
 #    disables building memory efficient attention for scaled dot product attention
-#
-#   USE_LEVELDB
-#     enables use of LevelDB for storage
-#
-#   USE_LMDB
-#     enables use of LMDB for storage
 #
 #   BUILD_BINARY
 #     enables the additional binaries/ build
@@ -147,12 +131,6 @@
 #
 #   MKL_THREADING
 #     MKL threading mode: SEQ, TBB or OMP (default)
-#
-#   USE_REDIS
-#     Whether to use Redis for distributed workflows (Linux only)
-#
-#   USE_ZSTD
-#     Enables use of ZSTD, if the libraries are found
 #
 #   USE_ROCM_KERNEL_ASSERT=1
 #     Enable kernel assert in ROCm platform
@@ -201,13 +179,6 @@
 #     possible values:
 #       OMP - use OpenMP for intra-op and native backend for inter-op tasks
 #       NATIVE - use native thread pool for both intra- and inter-op tasks
-#       TBB - using TBB for intra- and native thread pool for inter-op parallelism
-#
-#   USE_TBB
-#      enable TBB support
-#
-#   USE_SYSTEM_TBB
-#      Use system-provided Intel TBB.
 #
 #   USE_SYSTEM_LIBS (work in progress)
 #      Use system-provided libraries to satisfy the build dependencies.
@@ -220,7 +191,15 @@
 #
 #   USE_PRIORITIZED_TEXT_FOR_LD
 #      Uses prioritized text form cmake/prioritized_text.txt for LD
+#
+#   BUILD_LIBTORCH_WHL
+#      Builds libtorch.so and its dependencies as a wheel
+#
+#   BUILD_PYTHON_ONLY
+#      Builds pytorch as a wheel using libtorch.so from a seperate wheel
 
+import os
+import pkgutil
 import sys
 
 if sys.platform == "win32" and sys.maxsize.bit_length() == 31:
@@ -230,6 +209,22 @@ if sys.platform == "win32" and sys.maxsize.bit_length() == 31:
     sys.exit(-1)
 
 import platform
+
+
+def _get_package_path(package_name):
+    loader = pkgutil.find_loader(package_name)
+    if loader:
+        # The package might be a namespace package, so get_data may fail
+        try:
+            file_path = loader.get_filename()
+            return os.path.dirname(file_path)
+        except AttributeError:
+            pass
+    return None
+
+
+BUILD_LIBTORCH_WHL = os.getenv("BUILD_LIBTORCH_WHL", "0") == "1"
+BUILD_PYTHON_ONLY = os.getenv("BUILD_PYTHON_ONLY", "0") == "1"
 
 python_min_version = (3, 8, 0)
 python_min_version_str = ".".join(map(str, python_min_version))
@@ -243,7 +238,6 @@ import filecmp
 import glob
 import importlib
 import json
-import os
 import shutil
 import subprocess
 import sysconfig
@@ -259,8 +253,25 @@ from setuptools.dist import Distribution
 from tools.build_pytorch_libs import build_caffe2
 from tools.generate_torch_version import get_torch_version
 from tools.setup_helpers.cmake import CMake
-from tools.setup_helpers.env import build_type, IS_DARWIN, IS_LINUX, IS_WINDOWS
+from tools.setup_helpers.env import (
+    build_type,
+    IS_DARWIN,
+    IS_LINUX,
+    IS_WINDOWS,
+    LIBTORCH_PKG_NAME,
+)
 from tools.setup_helpers.generate_linker_script import gen_linker_script
+
+# set up appropriate env variables
+if BUILD_LIBTORCH_WHL:
+    # Set up environment variables for ONLY building libtorch.so and not libtorch_python.so
+    # functorch is not supported without python
+    os.environ["BUILD_FUNCTORCH"] = "OFF"
+
+
+if BUILD_PYTHON_ONLY:
+    os.environ["BUILD_LIBTORCHLESS"] = "ON"
+    os.environ["LIBTORCH_LIB_PATH"] = f"{_get_package_path(LIBTORCH_PKG_NAME)}/lib"
 
 ################################################################################
 # Parameters parsed from environment
@@ -335,7 +346,10 @@ cmake_python_include_dir = sysconfig.get_path("include")
 ################################################################################
 # Version, create_version_file, and package_name
 ################################################################################
-package_name = os.getenv("TORCH_PACKAGE_NAME", "torch")
+
+DEFAULT_PACKAGE_NAME = LIBTORCH_PKG_NAME if BUILD_LIBTORCH_WHL else "torch"
+
+package_name = os.getenv("TORCH_PACKAGE_NAME", DEFAULT_PACKAGE_NAME)
 package_type = os.getenv("PACKAGE_TYPE", "wheel")
 version = get_torch_version()
 report(f"Building wheel {package_name}-{version}")
@@ -350,7 +364,6 @@ def get_submodule_folders():
         for name in [
             "gloo",
             "cpuinfo",
-            "tbb",
             "onnx",
             "foxi",
             "QNNPACK",
@@ -458,11 +471,12 @@ def build_deps():
 
     check_submodules()
     check_pydep("yaml", "pyyaml")
+    build_python = not BUILD_LIBTORCH_WHL
 
     build_caffe2(
         version=version,
         cmake_python_library=cmake_python_library,
-        build_python=True,
+        build_python=build_python,
         rerun_cmake=RERUN_CMAKE,
         cmake_only=CMAKE_ONLY,
         cmake=cmake,
@@ -719,6 +733,8 @@ class build_ext(setuptools.command.build_ext.build_ext):
             "caffe2.python.caffe2_pybind11_state_gpu",
             "caffe2.python.caffe2_pybind11_state_hip",
         ]
+        if BUILD_LIBTORCH_WHL:
+            caffe2_pybind_exts = []
         i = 0
         while i < len(self.extensions):
             ext = self.extensions[i]
@@ -950,8 +966,13 @@ def configure_extension_build():
 
     main_compile_args = []
     main_libraries = ["torch_python"]
+
     main_link_args = []
     main_sources = ["torch/csrc/stub.c"]
+
+    if BUILD_LIBTORCH_WHL:
+        main_libraries = ["torch"]
+        main_sources = []
 
     if cmake_cache_vars["USE_CUDA"]:
         library_dirs.append(os.path.dirname(cmake_cache_vars["CUDA_CUDA_LIB"]))
@@ -1074,7 +1095,6 @@ def configure_extension_build():
             "default = torch.distributed.elastic.multiprocessing:DefaultLogsSpecs",
         ],
     }
-
     return extensions, cmdclass, packages, entry_points, extra_install_requires
 
 
@@ -1101,6 +1121,11 @@ def print_box(msg):
 
 
 def main():
+    if BUILD_LIBTORCH_WHL and BUILD_PYTHON_ONLY:
+        raise RuntimeError(
+            "Conflict: 'BUILD_LIBTORCH_WHL' and 'BUILD_PYTHON_ONLY' can't both be 1. Set one to 0 and rerun."
+        )
+
     # the list of runtime dependencies required by this built package
     install_requires = [
         "filelock",
@@ -1111,6 +1136,12 @@ def main():
         "fsspec",
         'mkl>=2021.1.1,<=2021.4.0; platform_system == "Windows"',
     ]
+
+    if sys.version_info >= (3, 12, 0):
+        install_requires.append("setuptools")
+
+    if BUILD_PYTHON_ONLY:
+        install_requires.append(LIBTORCH_PKG_NAME)
 
     use_prioritized_text = str(os.getenv("USE_PRIORITIZED_TEXT_FOR_LD", ""))
     if (
@@ -1187,10 +1218,6 @@ def main():
         "nn/parallel/*.pyi",
         "utils/data/*.pyi",
         "utils/data/datapipes/*.pyi",
-        "lib/*.so*",
-        "lib/*.dylib*",
-        "lib/*.dll",
-        "lib/*.lib",
         "lib/*.pdb",
         "lib/torch_shm_manager",
         "lib/*.h",
@@ -1356,6 +1383,23 @@ def main():
         "utils/model_dump/*.mjs",
     ]
 
+    if BUILD_PYTHON_ONLY:
+        torch_package_data.extend(
+            [
+                "lib/libtorch_python*",
+                "lib/*shm*",
+                "lib/libtorch_global_deps*",
+            ]
+        )
+    else:
+        torch_package_data.extend(
+            [
+                "lib/*.so*",
+                "lib/*.dylib*",
+                "lib/*.dll",
+                "lib/*.lib",
+            ]
+        )
     if get_cmake_cache_vars()["BUILD_CAFFE2"]:
         torch_package_data.extend(
             [
@@ -1398,6 +1442,29 @@ def main():
         "packaged/autograd/*",
         "packaged/autograd/templates/*",
     ]
+
+    if BUILD_LIBTORCH_WHL:
+        modified_packages = []
+        for package in packages:
+            parts = package.split(".")
+            if parts[0] == "torch":
+                modified_packages.append(DEFAULT_PACKAGE_NAME + package[len("torch") :])
+        packages = modified_packages
+        package_dir = {LIBTORCH_PKG_NAME: "torch"}
+        torch_package_dir_name = LIBTORCH_PKG_NAME
+        package_data = {LIBTORCH_PKG_NAME: torch_package_data}
+        extensions = []
+    else:
+        torch_package_dir_name = "torch"
+        package_dir = {}
+        package_data = {
+            "torch": torch_package_data,
+            "torchgen": torchgen_package_data,
+            "caffe2": [
+                "python/serialized_test/data/operator_test/*.zip",
+            ],
+        }
+
     setup(
         name=package_name,
         version=version,
@@ -1413,13 +1480,8 @@ def main():
         entry_points=entry_points,
         install_requires=install_requires,
         extras_require=extras_require,
-        package_data={
-            "torch": torch_package_data,
-            "torchgen": torchgen_package_data,
-            "caffe2": [
-                "python/serialized_test/data/operator_test/*.zip",
-            ],
-        },
+        package_data=package_data,
+        package_dir=package_dir,
         url="https://pytorch.org/",
         download_url="https://github.com/pytorch/pytorch/tags",
         author="PyTorch Team",

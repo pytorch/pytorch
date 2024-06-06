@@ -138,7 +138,7 @@ def capture_pre_autograd_graph(
         An nn.Module containing the traced method.
 
     """
-    from torch.export._trace import _convert_input_to_fake, DEFAULT_EXPORT_DYNAMO_CONFIG
+    from torch.export._trace import _convert_input_to_fake, DEFAULT_EXPORT_DYNAMO_CONFIG, _ignore_backend_decomps
     from torch._utils_internal import export_api_rollout_check
 
     capture_pre_autograd_graph_warning()
@@ -149,7 +149,10 @@ def capture_pre_autograd_graph(
         kwargs = {}
 
     if export_api_rollout_check():
-        log.warning("Using torch.export._trace._export")
+        @lru_cache
+        def print_export_warning():
+            log.warning("Using torch.export._trace._export")
+        print_export_warning()
         module = torch.export._trace._export(f, args, kwargs, dynamic_shapes=dynamic_shapes, pre_dispatch=True).module()
     else:
         log_export_usage(event="export.private_api", flags={"capture_pre_autograd_graph"})
@@ -162,7 +165,7 @@ def capture_pre_autograd_graph(
             for op in FunctionalTensor.maybe_aliasing_or_mutating_ops
             if op != torch.ops.aten.dropout.default
         }
-        with torch._dynamo.config.patch(dataclasses.asdict(DEFAULT_EXPORT_DYNAMO_CONFIG)):
+        with torch._dynamo.config.patch(dataclasses.asdict(DEFAULT_EXPORT_DYNAMO_CONFIG)), _ignore_backend_decomps():
             m = torch._dynamo.export(
                 f,
                 dynamic_shapes=dynamic_shapes,

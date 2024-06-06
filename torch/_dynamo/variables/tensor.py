@@ -125,6 +125,7 @@ class TensorVariable(VariableTracker):
         is_quantized,
         is_sparse,
         class_type,
+        has_grad_fn,
         size=None,
         stride=None,
         is_contiguous=None,
@@ -144,6 +145,7 @@ class TensorVariable(VariableTracker):
         self.is_contiguous = is_contiguous
         self.is_sparse = is_sparse
         self.class_type = class_type
+        self.has_grad_fn = has_grad_fn
         if _is_name_set is None:
             # no need to rename inputs
             _is_name_set = self.proxy.node.op == "placeholder"
@@ -171,6 +173,13 @@ class TensorVariable(VariableTracker):
             "is_sparse": value.is_sparse,
             "class_type": type(value),
         }
+        try:
+            props["has_grad_fn"] = value.grad_fn is not None
+        except Exception:
+            # Workaround for issues with create_parameter_op in Dynamo. Reading
+            # grad_fn should never cause an issue.
+            props["has_grad_fn"] = False
+
         if is_sparse_any(value) and not has_free_symbols(value):
             props["size"] = tuple(
                 [int(s) if is_symbolic(s) else s for s in value.size()]
@@ -312,6 +321,12 @@ class TensorVariable(VariableTracker):
 
     def method_attr_data(self, tx):
         return self.call_method(tx, "detach", [], {})
+
+    def method_attr_grad_fn(self, tx):
+        if self.has_grad_fn:
+            unimplemented("TensorVariable has a grad_fn")
+        else:
+            return variables.ConstantVariable(None)
 
     def method_attr__version(self, tx):
         from ..tensor_version_op import _tensor_version
@@ -749,6 +764,12 @@ class TensorVariable(VariableTracker):
     def method_resize_as_(self, *args, **kwargs):
         unimplemented("Tensor.resize_as_")
 
+    def method_sparse_resize_(self, *args, **kwargs):
+        unimplemented("Tensor.sparse_resize_")
+
+    def method_sparse_resize_and_clear_(self, *args, **kwargs):
+        unimplemented("Tensor.sparse_resize_and_clear_")
+
     def method_set_(self, *args, **kwargs):
         if len(args) > 1:
             # torch.Tensor.set_() has several overloads.
@@ -1019,7 +1040,7 @@ class SymNodeVariable(VariableTracker):
         try:
             return guard_scalar(self.sym_num)
         except GuardOnDataDependentSymNode as e:
-            raise UserError(  # noqa: TRY200
+            raise UserError(  # noqa: B904
                 UserErrorType.ANTI_PATTERN,
                 f"Consider annotating your code using torch._check*(). {str(e)}",
                 case_name="constrain_as_size_example",

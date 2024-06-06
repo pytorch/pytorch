@@ -32,7 +32,7 @@ try:
         import triton
         from triton import language as tl
     except ImportError:
-        raise unittest.SkipTest("requires triton")  # noqa: TRY200
+        raise unittest.SkipTest("requires triton")  # noqa: B904
 
     try:
         from . import test_torchinductor
@@ -417,8 +417,8 @@ class CudaReproTests(TestCase):
             block_start = pid * XBLOCK
             offsets = block_start + tl.arange(0, XBLOCK)
             mask = offsets < xnumel
-            x = tl.load(in_out_ptr0 + offsets, mask=mask)
-            y = tl.load(in_ptr0 + offsets, mask=mask)
+            x = tl.load(in_out_ptr0 + offsets, mask=mask, other=0.0)
+            y = tl.load(in_ptr0 + offsets, mask=mask, other=0.0)
             output = x + y
             tl.store(in_out_ptr0 + offsets, output, mask=mask)
 
@@ -1134,6 +1134,109 @@ class CudaReproTests(TestCase):
         ]
         fn(*args)
         torch.cuda.synchronize()  # shake out Triton Error [CUDA]: misaligned address
+
+    def test_non_commutative_scan_op(self):
+        from torch._higher_order_ops.associative_scan import associative_scan
+
+        a = torch.randn(1024, 8192, dtype=torch.float64, device="cuda")
+        b = torch.randn(1024, 8192, dtype=torch.float64, device="cuda")
+
+        def baseline(v, u):
+            A = []
+            A.append(b[:, 0])
+            for i in range(1, v.shape[1]):
+                A.append(a[:, i] * A[i - 1] + b[:, i])
+            return torch.stack(A, dim=1)
+
+        def combine_fn(i, j):
+            ia, ib = i
+            ja, jb = j
+            return ia * ja, ib * ja + jb
+
+        @torch.compile
+        def compiled_scan(a, b):
+            return associative_scan(combine_fn, (a, b), dim=-1)[1]
+
+        out1 = baseline(a, b)
+        out2 = compiled_scan(a, b)
+        self.assertEqual(out1, out2)
+
+    def test_dynamic_persistent_reductions(self):
+        @torch.compile(dynamic=True)
+        def inner_reduce(x):
+            assert x.shape[1] <= 1024
+            return x.sum(1)
+
+        a = torch.randn(50, 600, device="cuda")
+        out, code = run_and_get_code(inner_reduce, a)
+        self.assertEqual(inner_reduce(a), out)
+        self.assertTrue("for roffset" not in code)
+
+        @torch.compile(dynamic=True)
+        def outer_reduce(x):
+            assert x.shape[0] <= 64
+            return x.sum(0)
+
+        out, code = run_and_get_code(outer_reduce, a)
+        self.assertEqual(outer_reduce(a), out)
+        self.assertTrue("for roffset" not in code)
+
+    def test_epilogue_fusion_with_view(self):
+        class ToyModel(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = torch.nn.Conv2d(3, 64, kernel_size=3, stride=1, padding=1)
+                self.linear = torch.nn.Linear(262144, 100)
+                self.relu = torch.nn.ReLU()
+
+            def forward(self, x):
+                x = self.conv(x)
+                x = x.view(x.size(0), -1)
+                return self.relu(self.linear(x))
+
+        m = ToyModel().to(device="cuda:0")
+        input_tensor = torch.randn(32, 3, 64, 64).to(device="cuda:0")
+        from torch._inductor.utils import fresh_inductor_cache
+
+        with fresh_inductor_cache():
+            cm = torch.compile(m, mode="max-autotune")
+            out = cm(input_tensor)
+            out2 = m(input_tensor)
+            self.assertEqual(out, out2, atol=1e-3, rtol=1e-3)
+
+    def test_reflection_pad_loop_order(self):
+        def fn(x, y):
+            a = torch.nn.functional.pad(x, (5, 5, 5, 5), mode="reflect")
+            b = torch.nn.functional.pad(y, (5, 5, 5, 5), mode="reflect")
+            return a + b
+
+        cfn = torch.compile(fn)
+        a = torch.rand((10, 10, 10), device="cuda")
+        b = torch.rand((10, 10, 10), device="cuda")
+        expect = fn(a, b)
+        actual, code = run_and_get_code(cfn, a, b)
+        self.assertEqual(expect, actual)
+
+        # Expect the code iterates in contiguous order, and is not tiled
+        kernel_code = "\n".join(code[0].split("\n")[50:64])
+        self.assertExpectedInline(
+            kernel_code,
+            """\
+@triton.jit
+def triton_(in_ptr0, in_ptr1, out_ptr0, xnumel, XBLOCK : tl.constexpr):
+    xnumel = 4000
+    xoffset = tl.program_id(0) * XBLOCK
+    xindex = xoffset + tl.arange(0, XBLOCK)[:]
+    xmask = xindex < xnumel
+    x0 = xindex % 20
+    x1 = (xindex // 20) % 20
+    x2 = (xindex // 400)
+    x3 = xindex
+    tmp0 = tl.load(in_ptr0 + (99 + ((-1)*(tl_math.abs((-9) + (tl_math.abs((-5) + x0))))) + ((-10)*(tl_math.abs((-9) + (tl_math.abs((-5) + x1))))) + (100*x2)), xmask, eviction_policy='evict_last')
+    tmp1 = tl.load(in_ptr1 + (99 + ((-1)*(tl_math.abs((-9) + (tl_math.abs((-5) + x0))))) + ((-10)*(tl_math.abs((-9) + (tl_math.abs((-5) + x1))))) + (100*x2)), xmask, eviction_policy='evict_last')
+    tmp2 = tmp0 + tmp1
+    tl.store(out_ptr0 + (x3), tmp2, xmask)""",  # noqa: B950
+        )
 
 
 if __name__ == "__main__":

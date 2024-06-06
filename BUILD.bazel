@@ -125,10 +125,6 @@ filegroup(
     data = [":generate-code"],
 )
 
-exports_files(
-    srcs = ["aten/src/ATen/cpu/tbb/extra/version_string.ver.in"],
-)
-
 # ATen
 filegroup(
     name = "aten_base_cpp",
@@ -275,7 +271,6 @@ header_template_rule(
         "@AT_BUILD_WITH_LAPACK@": "1",
         "@AT_PARALLEL_OPENMP@": "0",
         "@AT_PARALLEL_NATIVE@": "1",
-        "@AT_PARALLEL_NATIVE_TBB@": "0",
         "@AT_BLAS_F2C@": "0",
         "@AT_BLAS_USE_CBLAS_DOT@": "1",
     },
@@ -359,6 +354,9 @@ cc_library(
         ":aten_src_ATen_config",
     ] + generated_cpu_cpp + aten_ufunc_generated_cpu_sources("aten/src/ATen/{}"),
     copts = ATEN_COPTS,
+    linkopts = [
+      "-ldl",
+    ],
     data = if_cuda(
         [":libcaffe2_nvrtc.so"],
         [],
@@ -456,50 +454,7 @@ CAFFE2_COPTS = COMMON_COPTS + [
 filegroup(
     name = "caffe2_core_srcs",
     srcs = [
-        "caffe2/core/allocator.cc",
-        "caffe2/core/blob_serialization.cc",
-        "caffe2/core/blob_stats.cc",
         "caffe2/core/common.cc",
-        "caffe2/core/context.cc",
-        "caffe2/core/context_base.cc",
-        "caffe2/core/db.cc",
-        "caffe2/core/event.cc",
-        "caffe2/core/export_c10_op_to_caffe2.cc",
-        "caffe2/core/graph.cc",
-        "caffe2/core/init.cc",
-        "caffe2/core/init_denormals.cc",
-        "caffe2/core/init_intrinsics_check.cc",
-        "caffe2/core/init_omp.cc",
-        "caffe2/core/int8_serialization.cc",
-        "caffe2/core/memonger.cc",
-        "caffe2/core/module.cc",
-        "caffe2/core/net.cc",
-        "caffe2/core/net_async_base.cc",
-        "caffe2/core/net_async_scheduling.cc",
-        "caffe2/core/net_async_task.cc",
-        "caffe2/core/net_async_task_future.cc",
-        "caffe2/core/net_async_task_graph.cc",
-        "caffe2/core/net_async_tracing.cc",
-        "caffe2/core/net_dag_utils.cc",
-        "caffe2/core/net_parallel.cc",
-        "caffe2/core/net_simple.cc",
-        "caffe2/core/net_simple_refcount.cc",
-        "caffe2/core/nomnigraph/Representations/NeuralNet.cc",
-        "caffe2/core/nomnigraph/tests/test_util.cc",
-        "caffe2/core/numa.cc",
-        "caffe2/core/operator.cc",
-        "caffe2/core/operator_schema.cc",
-        "caffe2/core/plan_executor.cc",
-        "caffe2/core/prof_dag_counters.cc",
-        "caffe2/core/qtensor.cc",
-        "caffe2/core/qtensor_serialization.cc",
-        "caffe2/core/stats.cc",
-        "caffe2/core/tensor.cc",
-        "caffe2/core/tensor_int8.cc",
-        "caffe2/core/test_utils.cc",
-        "caffe2/core/transform.cc",
-        "caffe2/core/types.cc",
-        "caffe2/core/workspace.cc",
     ],
 )
 
@@ -532,19 +487,7 @@ filegroup(
 filegroup(
     name = "caffe2_utils_srcs",
     srcs = [
-        "caffe2/utils/bench_utils.cc",
-        "caffe2/utils/cpuid.cc",
-        "caffe2/utils/math/broadcast.cc",
-        "caffe2/utils/math/elementwise.cc",
-        "caffe2/utils/math/reduce.cc",
-        "caffe2/utils/math/transpose.cc",
-        "caffe2/utils/math/utils.cc",
-        "caffe2/utils/math_cpu.cc",
-        "caffe2/utils/murmur_hash3.cc",
-        "caffe2/utils/proto_utils.cc",
         "caffe2/utils/proto_wrap.cc",
-        "caffe2/utils/signal_handler.cc",
-        "caffe2/utils/smart_tensor_printer.cc",
         "caffe2/utils/string_utils.cc",
         "caffe2/utils/threadpool/ThreadPool.cc",
         "caffe2/utils/threadpool/pthreadpool.cc",
@@ -562,12 +505,9 @@ cc_library(
     name = "caffe2_for_aten_headers",
     hdrs = [
         "caffe2/core/common.h",
-        "caffe2/core/logging.h",
-        "caffe2/core/types.h",
         "caffe2/perfkernels/common.h",
         "caffe2/perfkernels/embedding_lookup.h",
         "caffe2/perfkernels/embedding_lookup_idx.h",
-        "caffe2/utils/cpuid.h",
         "caffe2/utils/fixed_divisor.h",
     ] + glob([
         "caffe2/utils/threadpool/*.h",
@@ -577,7 +517,6 @@ cc_library(
     deps = [
         ":caffe2_core_macros",
         "//c10",
-        "//caffe2/proto:caffe2_pb",
     ],
 )
 
@@ -585,18 +524,9 @@ cc_library(
     name = "caffe2_headers",
     hdrs = glob(
         [
-            "caffe2/core/*.h",
-            "caffe2/core/nomnigraph/include/nomnigraph/Converters/*.h",
-            "caffe2/core/nomnigraph/include/nomnigraph/Generated/*.h",
-            "caffe2/core/nomnigraph/include/nomnigraph/Graph/*.h",
-            "caffe2/core/nomnigraph/include/nomnigraph/Representations/*.h",
-            "caffe2/core/nomnigraph/include/nomnigraph/Support/*.h",
-            "caffe2/core/nomnigraph/include/nomnigraph/Transformations/*.h",
-            "caffe2/core/nomnigraph/tests/*.h",
             "caffe2/perfkernels/*.h",
             "caffe2/serialize/*.h",
             "caffe2/utils/*.h",
-            "caffe2/utils/math/*.h",
             "caffe2/utils/threadpool/*.h",
             "modules/**/*.h",
         ],
@@ -605,18 +535,12 @@ cc_library(
         ],
     ) + if_cuda(glob([
         "caffe2/**/*.cuh",
-        "caffe2/image/*.h",
     ])),
     copts = CAFFE2_COPTS,
-    includes = [
-        "caffe2/core/nomnigraph/include",
-    ],
     visibility = ["//visibility:public"],
     deps = [
         ":caffe2_core_macros",
         ":caffe2_for_aten_headers",
-        "//caffe2/proto:caffe2_pb",
-        "//caffe2/proto:cc_proto",
     ],
 )
 
@@ -637,8 +561,6 @@ cc_library(
         ":caffe2_perfkernels_avx",
         ":caffe2_perfkernels_avx2",
         ":caffe2_perfkernels_avx512",
-        "//caffe2/proto:caffe2_pb",
-        "//caffe2/proto:cc_proto",
         "//third_party/miniz-2.1.0:miniz",
         "@com_google_protobuf//:protobuf",
         "@eigen",
@@ -772,7 +694,7 @@ cc_library(
         [
             "torch/*.h",
             "torch/csrc/**/*.h",
-            "torch/csrc/distributed/c10d/*.hpp",
+            "torch/csrc/distributed/c10d/**/*.hpp",
             "torch/lib/libshm/*.h",
         ],
         exclude = [
@@ -836,6 +758,9 @@ cc_library(
         ],
     )) + torch_sources,
     copts = TORCH_COPTS,
+    linkopts = [
+      "-lrt",
+    ],
     defines = [
         "CAFFE2_NIGHTLY_VERSION=20200115",
     ],
@@ -843,8 +768,8 @@ cc_library(
     deps = [
         ":caffe2",
         ":torch_headers",
-        "//caffe2/proto:torch_cc_proto",
         "@kineto",
+        "@cpp-httplib",
     ] + if_cuda([
         "@cuda//:nvToolsExt",
         "@cutlass",
@@ -856,6 +781,9 @@ cc_library(
 cc_library(
     name = "shm",
     srcs = glob(["torch/lib/libshm/*.cpp"]),
+    linkopts = [
+      "-lrt",
+    ],
     deps = [
         ":torch",
     ],

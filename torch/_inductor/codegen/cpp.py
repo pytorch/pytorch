@@ -8,7 +8,7 @@ import re
 import sys
 from copy import copy, deepcopy
 from enum import Enum
-from typing import Any, cast, Dict, List, Optional, Set, Tuple, Union
+from typing import Any, cast, Dict, List, Optional, Sequence, Set, Tuple, Union
 
 import sympy
 
@@ -17,7 +17,7 @@ import torch.fx
 from torch._inductor import dependencies
 from torch._prims_common import is_float_dtype
 from torch.utils import _pytree as pytree
-from torch.utils._sympy.functions import FloorDiv, ModularIndexing
+from torch.utils._sympy.functions import CeilDiv, FloorDiv, ModularIndexing
 from torch.utils._sympy.symbol import free_symbol_is_type, symbol_is_type, SymT
 from torch.utils._sympy.value_ranges import bound_sympy, ValueRanges
 from ..._dynamo.utils import counters
@@ -275,11 +275,11 @@ def simplify_index_in_vec_range(index: sympy.Expr, var: sympy.Expr, vec_length: 
 
     original_index = index
 
-    div = sympy.Wild("divisor")
+    div = sympy.Wild("divisor", integer=True)
     if index.has(FloorDiv):
         index = index.replace(FloorDiv(var, div), visit_indexing_div)
 
-    mod = sympy.Wild("modulus")
+    mod = sympy.Wild("modulus", integer=True)
     if index.has(ModularIndexing):
         index = index.replace(ModularIndexing(var, div, mod), visit_modular_indexing)
 
@@ -1236,8 +1236,8 @@ class CppVecOverrides(CppOverrides):
         return f"{x}.log2()"
 
     @staticmethod
-    def nextafter(x):
-        return f"{x}.nextafter()"
+    def nextafter(x, y):
+        return f"{x}.nextafter({y})"
 
     @staticmethod
     def copysign(a, b):
@@ -1413,10 +1413,14 @@ class CppVecOverrides(CppOverrides):
             else f"{V.kernel._get_vec_type(dtype)}({body_code})"
         )
         other_code = value_to_cpp(other, DTYPE_TO_CPP[dtype])
-        other_code_vec = f"{V.kernel._get_vec_type(dtype)}({other_code})"
+        # loading bool as VecMask<float, N>
+        other_code_vec = (
+            f"{V.kernel._get_mask_type()}::from({other_code})"
+            if dtype == torch.bool
+            else f"{V.kernel._get_vec_type(dtype)}({other_code})"
+        )
         assert isinstance(new_mask, CppCSEVariable), new_mask
         if new_mask.is_vec:
-            type = f"decltype({body_code_vec})"
             code = BracesBuffer()
             code.writeline("[&]")
             with V.kernel.swap_buffers(code), code.indent():
@@ -1425,8 +1429,21 @@ class CppVecOverrides(CppOverrides):
                     code.writeline(f"return {other_code_vec};")
                 code.writeline("else")
                 with code.indent():
+                    # Create cse variable to reuse kernel.overrides.where
+                    body_vec_var = V.kernel.cse.generate(
+                        V.kernel.compute,
+                        body_code_vec,
+                    )
+                    other_vec_var = V.kernel.cse.generate(
+                        V.kernel.compute,
+                        other_code_vec,
+                    )
+                    assert isinstance(body_vec_var, CppCSEVariable), body_vec_var
+                    assert isinstance(other_vec_var, CppCSEVariable), other_vec_var
+                    body_vec_var.dtype = dtype
+                    other_vec_var.dtype = dtype
                     code.writeline(
-                        f"return {type}::blendv({other_code_vec}, {body_code_vec}, {V.kernel._get_mask_cast(new_mask, dtype)});"
+                        f"return {V.kernel.overrides.where(new_mask, body_vec_var, other_vec_var)};"
                     )
             code.writeline("()")
             csevar = V.kernel.cse.generate(
@@ -1503,6 +1520,7 @@ class CppKernel(Kernel):
         self.local_reduction_init = IndentedBuffer()
         self.local_reduction_stores = IndentedBuffer()
         self.is_reduction = False
+        self.non_parallel_reduction_prefix = IndentedBuffer()
         self.reduction_cse = CSE(self.newvar_prefix, self.suffix, name_prefix="tmp_acc")
         self.preloads = IndentedBuffer()
         self.poststores = IndentedBuffer()
@@ -1517,6 +1535,7 @@ class CppKernel(Kernel):
         dtype,
         reduction_combine_fn=reduction_combine,
         reduction_init_fn=reduction_init,
+        welford_weight_reciprocal_vec_fn=None,
     ):
         if config.cpp.dynamic_threads and not self.parallel_reduction_prefix:
             self.parallel_reduction_prefix.writeline(
@@ -1553,6 +1572,15 @@ class CppKernel(Kernel):
                 "}",
             ],
         )
+        if (
+            reduction_type == "welford_reduce"
+            and welford_weight_reciprocal_vec_fn
+            and hasattr(self, "weight_recp_vec_range")
+            and "vec" in f"{acc_type}"
+        ):
+            self.local_reduction_init.writeline(
+                welford_weight_reciprocal_vec_fn(dtype, num_threads)
+            )
 
     def get_reduction_var_pattern(self, line: str):
         return re.search("tmp_acc[0-9]+", line)
@@ -1672,6 +1700,39 @@ class CppKernel(Kernel):
         return itervar in index.free_symbols or self.index_indirect_depends_on(
             index, itervar
         )
+
+    def var_ranges(self):
+        return dict(zip(self.itervars, self.ranges))
+
+    def check_bounds(
+        self,
+        expr: sympy.Expr,
+        size: sympy.Expr,
+        lower: bool,
+        upper: bool,
+    ):
+        if not (lower or upper):
+            return
+
+        indirect = free_symbol_is_type(expr, SymT.TMP)
+        if indirect:
+            # indexing in compute
+            csevar = ops.index_expr(expr, torch.int32).value
+            buffer = V.kernel.compute
+        else:
+            # indexing in loads
+            prior_compute = V.kernel.compute
+            try:
+                V.kernel.compute = self.loads
+                csevar = ops.index_expr(expr, torch.int32).value
+            finally:
+                V.kernel.compute = prior_compute
+            buffer = self.loads
+
+        size_str = V.kernel.sexpr(self.rename_indexing(size)) if upper else None
+
+        line = self.indirect_assert(csevar, "0" if lower else None, size_str)
+        self.cse.generate(buffer, line, assignment=False)
 
     def load(self, name: str, index: sympy.Expr):
         var = self.args.input(name)
@@ -1881,6 +1942,8 @@ class CppKernel(Kernel):
                             prefix = kernel.reduction_prefix
                             if loop.parallel:
                                 prefix = prefix + kernel.parallel_reduction_prefix
+                            else:
+                                prefix = prefix + kernel.non_parallel_reduction_prefix
                             return prefix
 
             def gen_loops(loops: List[LoopLevel], in_reduction=False):
@@ -1941,6 +2004,8 @@ class CppKernel(Kernel):
     @property
     def assert_function(self) -> str:
         if V.graph.aot_mode:
+            # TODO: Using AOTI_TORCH_CHECK is causing performance drop for some models
+            # compared with JIT Inductor which uses TORCH_CHECK
             return "AOTI_TORCH_CHECK"
         else:
             return "TORCH_CHECK"
@@ -2319,9 +2384,25 @@ class CppVecKernel(CppKernel):
         self.reduction_prefix.writeline(
             f"{acc_type_vec} {acc_vec} = {self.reduction_init_vec(reduction_type, dtype)};"
         )
-        self.stores.writeline(
-            f"{acc_vec} = {self.reduction_combine_vec(reduction_type, acc_vec, value)};"
+        # save the reciprocal of weights for welford reduce if using static shape
+        reduction_size = functools.reduce(
+            lambda x, y: x * y, self.ranges[self.reduction_depth :]
         )
+        if reduction_type == "welford_reduce":
+            reduction_factor = (
+                self.tiling_factor if self.tiling_idx >= self.reduction_depth else 1
+            )
+            self.weight_recp_vec_range = FloorDiv(reduction_size, reduction_factor)
+            self.non_parallel_reduction_prefix.writeline(
+                self.welford_weight_reciprocal_vec(dtype, None)
+            )
+            self.stores.writeline(
+                f"{acc_vec} = {self.reduction_combine_vec(reduction_type, acc_vec, value, True)};"
+            )
+        else:
+            self.stores.writeline(
+                f"{acc_vec} = {self.reduction_combine_vec(reduction_type, acc_vec, value)};"
+            )
         self._gen_parallel_reduction_buffers(
             acc,
             acc_type,
@@ -2335,6 +2416,7 @@ class CppVecKernel(CppKernel):
             dtype,
             reduction_combine_fn=self.reduction_combine_vec,
             reduction_init_fn=self.reduction_init_vec,
+            welford_weight_reciprocal_vec_fn=self.welford_weight_reciprocal_vec,
         )
         tmpvar: Union[str, CSEVariable]
         if self.tiling_idx >= self.reduction_depth:
@@ -2436,7 +2518,18 @@ class CppVecKernel(CppKernel):
 
         return vec_type
 
-    def reduction_combine_vec(self, reduction_type, var, next_value):
+    def welford_weight_reciprocal_vec(self, dtype, num_threads=None):
+        vec_num_range_thread = (
+            CeilDiv(self.weight_recp_vec_range, num_threads)
+            if num_threads
+            else self.weight_recp_vec_range
+        )
+        vec_num_range_thread_expr = cexpr_index(vec_num_range_thread)
+        return f"static WeightRecp<{self._get_vec_type(dtype)}> weight_recps({vec_num_range_thread_expr});"
+
+    def reduction_combine_vec(
+        self, reduction_type, var, next_value, use_weight_recps=False
+    ):
         if reduction_type == "max":
             return f"at::vec::maximum({var}, {next_value})"
         elif reduction_type == "min":
@@ -2448,7 +2541,10 @@ class CppVecKernel(CppKernel):
         elif reduction_type == "xor_sum":
             return f"{var} ^ {next_value}"
         elif reduction_type == "welford_reduce":
-            return f"welford_combine({var}, {next_value})"
+            if use_weight_recps:
+                return f"welford_combine({var}, {next_value}, &weight_recps)"
+            else:
+                return f"welford_combine({var}, {next_value})"
         elif reduction_type == "welford_combine":
             if isinstance(next_value, tuple):
                 # When reading a value from Inductor IR we have a tuple of variable names
@@ -2744,12 +2840,18 @@ class CppVecKernelChecker(CppVecKernel):
             return tuple([self.simd_vec] * 3)
         return self.simd_vec
 
+    def check_bounds(
+        self, expr: sympy.Expr, size: sympy.Expr, lower: bool, upper: bool
+    ):
+        return self.simd_vec
+
     def store_reduction(self, name, index, value):
         return self.simd_vec
 
     def __exit__(self, exc_type, exc_val, exc_tb):
+        assert self._orig_wrapper_code is not None
         # Restore the wrapper_code
-        V.graph.wrapper_code = self._orig_wrapper_code  # type: ignore[assignment]
+        V.graph.wrapper_code = self._orig_wrapper_code
         self.exit_stack.__exit__(exc_type, exc_val, exc_tb)
 
     def __enter__(self):
@@ -2791,6 +2893,12 @@ class CppVecKernelChecker(CppVecKernel):
             @staticmethod
             def store_reduction(name, index, value):
                 return self.store_reduction(name, index, value)
+
+            @staticmethod
+            def check_bounds(
+                expr: sympy.Expr, size: sympy.Expr, lower: bool, upper: bool
+            ):
+                return self.check_bounds(expr, size, lower, upper)
 
             @staticmethod
             def constant(val, dtype):
@@ -3170,7 +3278,7 @@ class CppKernelProxy(CppKernel):
             for fn, var_sizes in zip(fn_list, var_sizes_list):
                 if var_sizes in [
                     (group, reduction_group),
-                    (group + reduction_group, ()),
+                    (tuple(itertools.chain(group, reduction_group)), ()),
                 ]:
                     assert not in_suffix
                     fn(vars, reduction_vars)
@@ -3351,7 +3459,7 @@ class CppKernelProxy(CppKernel):
 class OuterLoopFusedKernel(CppKernel):
     def __init__(self, kernel_group):
         super().__init__(kernel_group.args, kernel_group.ws.num_threads)
-        self.inner: List["LoopLevel"] = []
+        self.inner: List[LoopLevel] = []
 
     def decide_parallel_depth(self, max_parallel_depth, threads) -> int:
         kernels_parallel_depth = []
@@ -3694,7 +3802,9 @@ class CppScheduling(BaseScheduling):
         )
 
     def codegen_template(
-        self, template_node: BaseSchedulerNode, epilogue_nodes: List[SchedulerNode]
+        self,
+        template_node: BaseSchedulerNode,
+        epilogue_nodes: Sequence[BaseSchedulerNode],
     ):
         """
         Codegen a CPP template, possibly with fused epilogues
@@ -3707,7 +3817,7 @@ class CppScheduling(BaseScheduling):
         _, (_, rnumel) = template_node.group
         assert rnumel == ()
         ctb: ir.CppTemplateBuffer = cast(ir.CppTemplateBuffer, template_node.node)
-        epilogue_ir_nodes: List[ir.Buffer] = [n.node for n in epilogue_nodes]
+        epilogue_ir_nodes: List[Optional[ir.Buffer]] = [n.node for n in epilogue_nodes]
         assert all(
             isinstance(n, ir.ComputedBuffer) for n in epilogue_ir_nodes
         ), "Epilogue nodes must all be instances of ir.ComputedBuffer"
@@ -3715,7 +3825,7 @@ class CppScheduling(BaseScheduling):
         with kernel:
             for node in [template_node, *epilogue_nodes]:
                 node.decide_inplace_update()
-                node.mark_run()
+                node.mark_run()  # type: ignore[attr-defined]
             src_code = render()
 
         with V.set_kernel_handler(kernel):
