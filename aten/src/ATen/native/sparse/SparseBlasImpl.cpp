@@ -410,6 +410,9 @@ void addmv_out_sparse_csr(
     const Tensor& result) {
 #if !AT_USE_MKL_SPARSE()
   TORCH_CHECK(mat.layout() == kSparseBsr || mat.layout() == kSparseCsr, "Unexpected layout", mat.layout());
+  if (beta.toComplexDouble() == 0.) {
+    result.zero_();
+  }
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(
       result.scalar_type(), "addmv_out_sparse_csr_impl_reference", [&] {
         if (mat.crow_indices().scalar_type() == kLong) {
