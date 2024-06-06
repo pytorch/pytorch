@@ -190,7 +190,7 @@ def aoti_compile_with_persistent_cache(
         isinstance(
             input,
             (
-                supported_scalar_types(),
+                supported_scalar_types,
                 torch.Tensor,
                 list,
                 str,
