@@ -145,8 +145,8 @@ def compare(before, after, format_flamegraph=format_flamegraph):
     before_segs = {_seg_key(seg) for seg in before}
     after_segs = {_seg_key(seg) for seg in after}
 
-    print(f'only_before = {[a for a,_ in (before_segs - after_segs)]}')
-    print(f'only_after = {[a for a,_ in (after_segs - before_segs)]}')
+    print(f'only_before = {[a for a, _ in (before_segs - after_segs)]}')
+    print(f'only_after = {[a for a, _ in (after_segs - before_segs)]}')
 
     for seg in before:
         if _seg_key(seg) not in after_segs:
@@ -382,7 +382,11 @@ add_local_files(local_files, $VIZ_KIND)
 
 def _format_viz(data, viz_kind, device):
     if device is not None:
-        warnings.warn('device argument is deprecated, plots now contain all device')
+        warnings.warn(
+            'device argument is deprecated, plots now contain all device',
+            FutureWarning,
+            stacklevel=3,
+        )
     buffer = pickle.dumps(data)
     buffer += b'\x00' * (3 - len(buffer) % 3)
     # Encode the buffer with base64
