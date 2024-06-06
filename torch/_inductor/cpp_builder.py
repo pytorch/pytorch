@@ -236,6 +236,7 @@ class BuildOptionsBase:
 
         self._aot_mode: bool = False
         self._use_absolute_path: bool = False
+        self._compile_only: bool = False
 
     def _remove_duplicate_options(self):
         self._definations = _remove_duplication_in_list(self._definations)
@@ -275,6 +276,9 @@ class BuildOptionsBase:
 
     def get_use_absolute_path(self) -> bool:
         return self._use_absolute_path
+
+    def get_compile_only(self) -> bool:
+        return self._compile_only
 
 
 def _get_warning_all_cflag(warning_all: bool = True) -> List[str]:
@@ -408,6 +412,7 @@ class CppOptions(BuildOptionsBase):
         super().__init__()
         self._compiler = _get_cpp_compiler()
         self._use_absolute_path = use_absolute_path
+        self._compile_only = compile_only
 
         (
             definations,
@@ -1035,7 +1040,6 @@ class CppBuilder:
         sources: Union[str, List[str]],
         BuildOption: BuildOptionsBase,
         output_dir: str = "",
-        compile_only: bool = False,
     ) -> None:
         self._compiler = ""
         self._cflags_args = ""
@@ -1062,7 +1066,7 @@ class CppBuilder:
         else:
             self._output_dir = output_dir
 
-        self._compile_only = compile_only
+        self._compile_only = BuildOption.get_compile_only()
         file_ext = (
             self.get_object_ext() if self._compile_only else self.get_shared_lib_ext()
         )
