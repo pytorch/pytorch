@@ -1833,7 +1833,7 @@ class TestMethods(TestCase):
         a = np.array(["aaaaaaaaa" for i in range(100)], dtype=np.unicode_)
         assert_equal(a.argsort(kind="m"), r)
 
-    @xpassIfTorchDynamo  # (reason="TODO: searchsorted with nans differs in pytorch")
+    @xfail  # (reason="TODO: searchsorted with nans differs in pytorch")
     @parametrize(
         "a",
         [
@@ -1905,7 +1905,7 @@ class TestMethods(TestCase):
         b = a.searchsorted([0, 1, 2], "right")
         assert_equal(b, [0, 2, 2])
 
-    @xpassIfTorchDynamo  # (
+    @xfail  # (
     #    reason="RuntimeError: self.storage_offset() must be divisible by 8"
     # )
     def test_searchsorted_unaligned_array(self):
@@ -1984,7 +1984,7 @@ class TestMethods(TestCase):
         # assert_raises(ValueError, np.searchsorted, a, 0, sorter=[-1, 0, 1, 2, 3])
         # assert_raises(ValueError, np.searchsorted, a, 0, sorter=[4, 0, -1, 2, 3])
 
-    @xpassIfTorchDynamo  # (reason="self.storage_offset() must be divisible by 8")
+    @xfail  # (reason="self.storage_offset() must be divisible by 8")
     def test_searchsorted_with_sorter(self):
         a = np.random.rand(300)
         s = a.argsort()
@@ -3713,7 +3713,14 @@ class TestTake(TestCase):
         y = np.take(x, [1, 2, 3], out=x[2:5], mode="wrap")
         assert_equal(y, np.array([1, 2, 3]))
 
-    @parametrize("shape", [(1, 2), (1,), ()])
+    @parametrize(
+        "shape",
+        [
+            subtest((1, 2)),
+            subtest((1,)),
+            subtest((), decorators=[skip("Sensitive to np version")]),
+        ],
+    )
     def test_ret_is_out(self, shape):
         # 0d arrays should not be an exception to this rule
         x = np.arange(5)
