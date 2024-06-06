@@ -380,9 +380,9 @@ class CeilToInt(sympy.Function):
     @classmethod
     def eval(cls, number):
         # assert number.is_integer is not True, number
-        if number == sympy.oo:
+        if number in (sympy.oo, int_oo):
             return int_oo
-        if number == -sympy.oo:
+        if number in (-sympy.oo, -int_oo):
             return -int_oo
         if isinstance(number, sympy.Number):
             return sympy.Integer(math.ceil(float(number)))
@@ -394,9 +394,9 @@ class FloorToInt(sympy.Function):
     @classmethod
     def eval(cls, number):
         # assert number.is_integer is not True, number
-        if number == sympy.oo:
+        if number in (sympy.oo, int_oo):
             return int_oo
-        if number == -sympy.oo:
+        if number in (-sympy.oo, int_oo):
             return -int_oo
         if isinstance(number, sympy.Number):
             return sympy.Integer(math.floor(float(number)))
@@ -490,7 +490,7 @@ class PowByNatural(sympy.Function):
             for _ in range(int(exp)):
                 r *= base
             return r
-        if exp is int_oo:
+        if exp in (int_oo, sympy.oo):
             if base.is_nonnegative:
                 return int_oo
             elif base.is_negative:
@@ -558,7 +558,10 @@ class IntTrueDiv(sympy.Function):
         if (
             isinstance(base, sympy.Number)
             and isinstance(divisor, sympy.Number)
-            and (base in (int_oo, -int_oo) or divisor in (int_oo, -int_oo))
+            and (
+                base in (int_oo, -int_oo, sympy.oo, -sympy.oo)
+                or divisor in (int_oo, -int_oo, sympy.oo, -sympy.oo)
+            )
         ):
             # Don't have to worry about precision here, you're getting zero or
             # inf from the division
