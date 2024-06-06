@@ -277,5 +277,5 @@ def spawn(fn, args=(), nprocs=1, join=True, daemon=False, start_method="spawn"):
             "To use a different start_method use:\n\t\t"
             " torch.multiprocessing.start_processes(...)"
         )
-        warnings.warn(msg)
+        warnings.warn(msg, FutureWarning, stacklevel=2)
     return start_processes(fn, args, nprocs, join, daemon, start_method="spawn")

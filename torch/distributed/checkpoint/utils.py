@@ -14,6 +14,7 @@ import torch.distributed as dist
 from torch.distributed._shard.sharded_tensor import ShardedTensor
 from torch.distributed._shard.sharded_tensor.shard import Shard
 from torch.distributed._tensor import DTensor
+from torch.distributed.checkpoint.planner import _Checkpointable
 
 from .api import (
     _is_wrapped_exception,
@@ -301,7 +302,12 @@ def _find_shard(tensor: ShardedTensor, index: MetadataIndex) -> Shard:
 
 
 def find_tensor_shard(tensor: torch.Tensor, index: MetadataIndex) -> torch.Tensor:
-    if isinstance(tensor, DTensor):
+    if isinstance(tensor, _Checkpointable):
+        return tensor._get_tensor_shard(tensor, index)
+    elif isinstance(tensor, DTensor):
+        # DTensor can contain a local tensor that is a tensor subclass
+        if isinstance(tensor.to_local(), _Checkpointable):
+            return tensor.to_local()._get_tensor_shard(tensor, index)  # type: ignore[arg-type]
         return tensor.to_local()
     if isinstance(tensor, ShardedTensor):
         return _find_shard(tensor, index).tensor
