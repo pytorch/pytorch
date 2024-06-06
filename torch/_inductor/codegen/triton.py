@@ -1218,58 +1218,90 @@ class TritonKernel(SIMDKernel):
                 assert isinstance(index_var, sympy.Symbol)  # For type checking
                 range_tree = nonsingleton_range_trees[0]
 
-                # Get the dims in descending order. E.g. x(N-1), ..., x0.
-                # This matches the order of dims in torch tensors and triton blocks.
-                sizevars = V.graph.sizevars
-                tree_vars, dims = zip(
-                    *reversed(
-                        [
-                            (var, sizevars.lookup_precomputed_size(size))
-                            for (var, size) in range_tree.var_ranges.items()
-                        ]
-                    )
+                # Bound the possible number of dims. We use the following heuristics:
+                # - At least one dim for each range tree node.
+                # - We have at least one dim for every FloorDiv or ModularIndexing op.
+                # - We need to try at least 2 dims to pattern match.
+                num_dims = max(
+                    2,
+                    len(self.range_tree_nodes),
+                    (
+                        index_relative_to_xyr_index.count(FloorDiv)
+                        + index_relative_to_xyr_index.count(ModularIndexing)
+                    ),
                 )
-                num_dims = len(dims)
-                if num_dims == 0:
-                    return None
 
                 # Pattern match to find the strides and offset.
-                strides = [
+                dims: List[sympy.Expr] = [
+                    sympy.Wild(f"dim{idx}", exclude=symbols) for idx in range(num_dims)
+                ]
+                strides: List[sympy.Expr] = [
                     sympy.Wild(f"stride{idx}", exclude=symbols)
                     for idx in range(num_dims)
                 ]
-                offset = sympy.Wild("offset", exclude=symbols)
+                offset: sympy.Expr = sympy.Wild("offset", exclude=symbols)
 
-                # Compute the cumulative size of each dimension's slice.
-                # This proceeds from the last dim up to the second.
-                slice_numels = [sympy.Integer(1)]
-                for dim in dims[:0:-1]:
-                    numel = dim * slice_numels[0]
-                    slice_numels.insert(0, numel)
+                def get_slice_numels(dims: List[Any]) -> List[Any]:
+                    """
+                    Compute the cumulative size of each dimension's slice.
+                    This proceeds from the last dim up to the second.
+                    """
+                    numels = [sympy.Integer(1)]
+                    for dim in dims[:0:-1]:
+                        numel = dim * numels[0]
+                        numels.insert(0, numel)
+                    return numels
 
-                # Division term.
-                match_expr = strides[0] * FloorDiv(index_var, slice_numels[0])
+                # The first dimension's index is computed by division.
+                slice_numels = get_slice_numels(dims)
+                block_index_exprs = [FloorDiv(index_var, slice_numels[0])]
 
-                # Modulo terms.
+                # The remaining dimensions' indices are computed by modulo.
                 for dim_idx in range(1, num_dims):
                     cur_dim = dims[dim_idx]
                     next_dim = dims[dim_idx + 1] if dim_idx < num_dims - 1 else 1
-                    match_expr += strides[dim_idx] * ModularIndexing(
-                        index_var, next_dim, cur_dim
+                    block_index_exprs.append(
+                        ModularIndexing(index_var, next_dim, cur_dim)
                     )
 
-                # Offset term.
-                match_expr += offset
+                # Calculate a linear index from block indices.
+                match_expr = sympy_dot(strides, block_index_exprs) + offset
 
                 match = index_relative_to_xyr_index.match(match_expr)
                 if match is None:
                     return None
 
+                sizevars = V.graph.sizevars
+
+                def get_match(expr: sympy.Expr) -> sympy.Expr:
+                    return sizevars.lookup_precomputed_size(match[expr])
+
+                # Replace wildcards with matched expressions.
+                dims = [dims[0]] + [get_match(dim) for dim in dims[1:]]
+                strides = [get_match(stride) for stride in strides]
+                offset = get_match(offset)
+                slice_numels = get_slice_numels(dims)
+                block_index_exprs = [
+                    sympy_subs(expr, match) for expr in block_index_exprs
+                ]
+
+                # The leading dimension is not directly matched in our expression.
+                # We solve for it by dividing the range tree numel by the product of
+                # all other dimensions. We quit if they are not known to be divisible.
+                assert (
+                    dims[0] not in match
+                ), "Expected not to match the leading dimension!"
+                if not sizevars.statically_known_multiple_of(
+                    range_tree.numel, slice_numels[0]
+                ):
+                    return None
+                dims[0] = range_tree.numel / slice_numels[0]
+
                 # Check for applicable iteration range sizes.
                 # When mapping a 1D block into an ND one, we need to know that
-                # the iteration order is not changed. This means the slice numels of the
-                # ND iteration range must evenly divide the length of the 1D block. There are
-                # two cases where we can guarantee this:
+                # the number of elements is not changed. This means the slice numels of
+                # the ND iteration range must evenly divide the length of the 1D block.
+                # There are two cases where we can guarantee this:
                 #  1. Numels are powers of 2. If numel == 2 ** n, and we know XBLOCK == 2 ** m,
                 #     with n and m integers, then either numel is a multiple of XBLOCK, or numel
                 #     is less than XBLOCK. (If numel is less than XBLOCK, we round up to 1 below.)
@@ -1293,13 +1325,11 @@ class TritonKernel(SIMDKernel):
                     for slice_numel, dim in zip(slice_numels, dims)
                 ]
 
-                # Compute block offsets from {xyzr}offset and the range tree.
+                # Compute block offsets from {xyzr}offset and the matched expressions.
                 offset_symbol = sympy.Symbol(f"{prefix}offset", integer=True)
                 block_offsets: List[StrOrExpr] = [
-                    sympy_subs(
-                        self.range_tree_nodes[var].expr, {index_var: offset_symbol}
-                    )
-                    for var in tree_vars
+                    sympy_subs(expr, {index_var: offset_symbol})
+                    for expr in block_index_exprs
                 ]
 
                 # Form the block pointer.
@@ -1308,8 +1338,8 @@ class TritonKernel(SIMDKernel):
                     shape=list(dims),
                     block_shape=block_shape,
                     offsets=block_offsets,
-                    strides=[match[stride] for stride in strides],
-                    constant_offset=match[offset],
+                    strides=strides,
+                    constant_offset=offset,
                     range_trees=range_trees,
                     mask_vars=mask_vars,
                 )
