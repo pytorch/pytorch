@@ -94,7 +94,7 @@ class DisplayShardingExample:
 
         rng_seed = 0
         torch.manual_seed(rng_seed)
-        inp = torch.rand(*inp_size, device=None)
+        inp = torch.rand(*inp_size)
         model = MLPModule(None)
 
         LR = 0.25
