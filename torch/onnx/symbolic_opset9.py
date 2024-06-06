@@ -746,11 +746,15 @@ def atan2(g: jit_utils.GraphContext, self, other):
 @symbolic_helper.quantized_args(True, scale=1.0 / 256.0, zero_point=0)
 @_beartype.beartype
 def sigmoid(g: jit_utils.GraphContext, self):
-    """Applies the sigmoid function element-wise. The sigmoid function is defined as: sigmoid(x) = 1 / (1 + exp(-x)).
+    """Converts the corresponding PyTorch function into ONNX operators.
+
+    It is not meant to be called directly by a user.
+
     Args:
+        g (jit_utils.GraphContext): Graph context.
         self (Tensor): the input tensor.
     Returns:
-        Tensor: a new tensor with the sigmoid of the elements of `self`.
+        ONNX graph node representing the concatenated tensor.
     """
     return g.op("Sigmoid", self)
 
