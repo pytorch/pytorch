@@ -10,7 +10,7 @@ from sympy import Expr
 
 import torch
 
-import torch._inductor.async_compile
+import torch._inductor.async_compile  # noqa: F401 required to warm up AsyncCompile pools
 import torch._ops
 from torch.fx.experimental.symbolic_shapes import ConvertIntKey, DivideByKey
 from .. import config, ir
@@ -1534,7 +1534,7 @@ class CppWrapperCpu(WrapperCodeGen):
         else:
             return LAYOUT_TO_ATEN[layout]
 
-    @functools.lru_cache(None)
+    @functools.lru_cache(None)  # noqa: B019
     def codegen_int_array_var(
         self,
         int_array: str,

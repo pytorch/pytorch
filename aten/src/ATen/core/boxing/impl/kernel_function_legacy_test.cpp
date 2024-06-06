@@ -40,10 +40,6 @@ int64_t incrementKernel(const Tensor& tensor, int64_t input) {
   return input + 1;
 }
 
-int64_t decrementKernel(const Tensor& tensor, int64_t input) {
-  return input - 1;
-}
-
 void expectCallsIncrement(DispatchKey dispatch_key) {
   at::AutoDispatchBelowAutograd mode;
 
