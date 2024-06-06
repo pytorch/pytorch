@@ -8,7 +8,7 @@ from torch.distributed._tensor import DeviceMesh, Shard
 from torch.distributed._tensor.debug import CommDebugMode
 
 from torch.distributed._tensor.examples.advanced_module_tracker import (
-    AdvancedModuleTracker,
+    ModuleParamaterShardingTracker,
 )
 
 from torch.distributed.tensor.parallel import (
@@ -101,7 +101,7 @@ class DisplayShardingExample:
 
         optim = torch.optim.SGD(model.parameters(), lr=LR)
         comm_mode = CommDebugMode()
-        module_tracker = AdvancedModuleTracker()
+        module_tracker = ModuleParamaterShardingTracker()
 
         with comm_mode, module_tracker:
             output = model(inp)
