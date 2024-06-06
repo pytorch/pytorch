@@ -399,8 +399,7 @@ def init(activation_checkpoint):
         #     for mod in model:
         #         fully_shard(mod, mesh=mesh, reshard_after_forward=True, **fsdp_config)
         #     fully_shard(model, mesh=mesh, reshard_after_forward=True, **fsdp_config)
-
-    elif test_case == "toy_transformer" or test_case == "toy_transformer_graph_break":
+    elif test_case == "toy_transformer" or test_case == "toy_transformer_graph_break":  # test
         model_args = ModelArgs(
             dim=hidden_dim,
             n_layers=1,
