@@ -16,6 +16,8 @@ class Experiment:
     metric: str
     target: float
     actual: float
+    quantization: str
+    device: str
 
 
 def do_inference(mod, x, num_samples: int = 5):
@@ -40,7 +42,7 @@ def do_inference(mod, x, num_samples: int = 5):
     return total_time
 
 
-def run_multi_layer_norm():
+def run_multi_layer_norm(device: str = "cuda"):
     class MultiLayerNorm(nn.Module):
         def __init__(self, num_layers, normalized_shape, eps=1e-5, bias=True):
             super().__init__()
@@ -57,16 +59,21 @@ def run_multi_layer_norm():
                 x = layer_norm(x)
             return x
 
-    mod = MultiLayerNorm(num_layers=8, normalized_shape=4096).to("cuda")
+    mod = MultiLayerNorm(num_layers=8, normalized_shape=4096).to(device)
     mod = torch.compile(mod)
-    input = torch.randn([512, 1024, 4096], dtype=torch.bfloat16, device="cuda")
+    input = torch.randn([512, 1024, 4096], dtype=torch.bfloat16, device=device)
     inference_time = do_inference(mod, input)
 
     memory_bandwidth = input.numel() * input.dtype.itemsize / inference_time / 1e9
 
     return [
         Experiment(
-            "multi_layer_norm", "memory_bandwidth(GB/s)", 92, f"{memory_bandwidth:.02f}"
+            "multi_layer_norm",
+            "memory_bandwidth(GB/s)",
+            92,
+            f"{memory_bandwidth:.02f}",
+            "bfloat16",
+            device,
         )
     ]
 
