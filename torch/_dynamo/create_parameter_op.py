@@ -41,7 +41,12 @@ class TracableCreateParameter(torch.autograd.Function):
             # placeholder._local_tensor.set_(tensor._local_tensor)
             # placeholder._spec = tensor._spec
         else:
-            torch.ops.create_parameter_op.set_(placeholder, tensor)
+            # TODO(yf225): we should use `torch.ops.create_parameter_op.set_` here,
+            # but somehow Dynamo/AOTAutograd will turn that into a `copy_`
+            # which causes segfault because the sacrificial placeholder is size-0.
+            # We need to just keep using `set_` instead of `copy_` in the graph.
+            placeholder.set_(tensor)
+            # torch.ops.create_parameter_op.set_(placeholder, tensor)
         # torch_log.warning(f"after: placeholder: {placeholder}")
         # torch_log.warning(f"after: tensor: {tensor}")
         return placeholder
