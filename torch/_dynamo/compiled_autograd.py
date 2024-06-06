@@ -211,13 +211,9 @@ class AutogradCompilerInstance:
     # Eager autograd backward implements scalars as 0-dim tensors, see DivBackward0::other_.
     # When compiled autograd traces those nodes, it lifts the scalar tensors, resulting in a graph
     # with some cpu 0-dim tensor inputs. To prevent the entire graph from skipping cudagraph, we move the
-    # scalars tensors to cuda.
-    # To simplify this fx pass, we make a few assumptions specific to the compiled autograd graph:
-    #   1. cpu tensor inputs never affect the output device type of their users,
-    #      e.g. aten.div inherits type from numerator, not denominator
-    #   2. cpu tensor inputs are used in ops that accept cuda tensors too
+    # scalars tensors to cuda. This works because ATen/prims ops will accept cuda 0-dim tensors too.
     def move_graph_nodes_to_cuda(self, graph) -> List[int]:
-        cpu_scalar_inputs: Dict[int, torch.fx.Node] = {}
+        to_move: Dict[int, torch.fx.Node] = {}
         has_cuda_inputs = False
         nodes = list(graph.nodes)
         assert nodes[0].target == "inputs"
@@ -237,16 +233,23 @@ class AutogradCompilerInstance:
             is_cpu = node.meta["val"].device.type == "cpu"
             is_scalar = len(node.meta["val"].size()) == 0
             if is_cpu and is_scalar:
-                cpu_scalar_inputs[i] = node
+                node_users = list(node.users.keys())
+                if all(
+                    isinstance(user.target, torch._ops.OpOverload)
+                    and user.target.namespace in ("prims", "aten")
+                    for user in node_users
+                ):
+                    # all users are prims/aten, can move safely
+                    to_move[i] = node
 
         # only move cpu scalars to cuda if there were cuda activations in this graph,
         # this is to handle the case where cudagraphs is enabled on a cpu-only graph
         if has_cuda_inputs:
-            for node in cpu_scalar_inputs.values():
+            for node in to_move.values():
                 node.meta["val"] = node.meta["val"].cuda()
 
             # return runtime indices we need to move to cuda
-            return list(cpu_scalar_inputs.keys())
+            return list(to_move.keys())
 
         return []
 
