@@ -341,6 +341,8 @@ def compute_inner_mutated_inp_indices_from_subclass_meta(
         # Sometimes we don't have subclass info, e.g. synthetic_base codepaths
         return inner_metadata.mutated_inp_runtime_indices
     assert len(fw_metadata.subclass_inp_meta) == len(fw_metadata.input_info)
+    int_imp_meta = None
+    num_extra_symints = 0
     for outer_idx, inp_meta in enumerate(fw_metadata.subclass_inp_meta):
         if isinstance(inp_meta, int):
             assert outer_idx < len(fw_metadata.input_info)
@@ -350,15 +352,24 @@ def compute_inner_mutated_inp_indices_from_subclass_meta(
                     inner_metadata.input_info[inner_idx]
                     == fw_metadata.input_info[outer_idx]
                 )
-            updated_input_info.append(fw_metadata.input_info[outer_idx])
+            int_imp_meta = fw_metadata.input_info[outer_idx]
+            updated_input_info.append(int_imp_meta)
             inner_idx += 1
         else:
+            num_extra_symints += sum(
+                1 for s in inp_meta.original_subclass.size() if isinstance(s, SymInt)
+            )
             for _ in range(inp_meta.arg_count):
                 updated_input_info.append(fw_metadata.input_info[outer_idx])
                 inner_idx += 1
-    # if inner_metadata is not None:
-    #     assert len(inner_metadata.input_info) == len(updated_input_info)
 
+    # duplicates one of the non-class inp metas for the extra SymInts
+    if num_extra_symints > 0:
+        assert int_imp_meta is not None
+        updated_input_info += [int_imp_meta] * num_extra_symints
+
+    if inner_metadata is not None:
+        assert len(inner_metadata.input_info) == len(updated_input_info)
     return [
         i
         for i, inp in enumerate(updated_input_info)
