@@ -382,7 +382,7 @@ class UniformQuantizationObserverBase(ObserverBase):
                     [float(zero_point)], dtype=zero_point.dtype, device=device
                 )
 
-        return scale, zero_point
+        return scale.to(torch.float32), zero_point.to(torch.int64)
 
     @torch.jit.export
     def reset_min_max_vals(self):
