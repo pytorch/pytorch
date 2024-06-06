@@ -1186,7 +1186,7 @@ def fw_compiler_freezing(
     # constant params will be real tensors, not fake
     tracing_context = torch._guards.TracingContext.try_get()
     if tracing_context is not None:
-        params_flat = tracing_context.params_buffers_flat
+        params_flat = tracing_context.params_flat
         assert params_flat is not None
         for i in range(len(params_flat)):
             if i not in preserved_arg_indices:
