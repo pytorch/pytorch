@@ -87,8 +87,8 @@ from torch.utils.checkpoint import (
     gen_selective_checkpoint_context_fn,
 )
 from torch.utils.cpp_extension import load_inline
-from torch.utils.hooks import RemovableHandle
 from torch.utils.flop_counter import FlopCounterMode
+from torch.utils.hooks import RemovableHandle
 
 
 def graph_desc(fn):
@@ -13209,7 +13209,7 @@ class TestSelectiveActivationCheckpoint(TestCase):
                 gen_selective_checkpoint_context_fn,
                 [
                     torch.ops.aten.mm.default,
-                ]
+                ],
             )
             out = checkpoint(fn, x, y, use_reentrant=False, context_fn=context_fn)
             return out

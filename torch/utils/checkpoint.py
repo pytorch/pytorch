@@ -1294,6 +1294,10 @@ def gen_selective_checkpoint_context_fn(policy_fn_or_list, allow_cache_entry_mut
 
     Example:
         >>> # xdoctest: +REQUIRES(LINUX)
+        >>> import functools
+        >>>
+        >>> x = torch.rand(10, 10, requires_grad=True)
+        >>> y = torch.rand(10, 10, requires_grad=True)
         >>>
         >>> ops_to_save = [
         >>>    torch.ops.aten.mm.default,
