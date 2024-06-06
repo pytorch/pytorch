@@ -493,7 +493,11 @@ def create_aot_dispatcher_function(
                         return shape_env.create_symintnode(
                             shape_env.create_symbol(x, source), hint=x, source=source
                         )
-                if isinstance(x, torch.ScriptObject):
+                if isinstance(
+                    x, torch.ScriptObject
+                ) and torch._library.fake_class_registry.has_fake_class(
+                    x._type().qualified_name()
+                ):
                     return torch._library.fake_class_registry.to_fake_obj(fake_mode, x)
                 if not isinstance(x, torch.Tensor):
                     return x
