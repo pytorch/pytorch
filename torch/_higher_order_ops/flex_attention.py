@@ -406,17 +406,20 @@ def flex_attention_autograd(
     score_mod: Callable,
     *other_buffers: Tuple[torch.Tensor, ...],
 ) -> Tuple[torch.Tensor, torch.Tensor]:
-    input_requires_grad = any(t.requires_grad for t in (query, key, value))
-    if torch.is_grad_enabled() and input_requires_grad:
-        example_vals = [
-            torch.zeros((), dtype=query.dtype, requires_grad=input_requires_grad)
-        ] + [torch.zeros((), dtype=torch.int) for _ in range(4)]
-        fw_graph, bw_graph = create_fw_bw_graph(score_mod, example_vals, other_buffers)
-    else:
-        fw_graph, bw_graph = score_mod, None
-    out, logsumexp = FlexAttentionAutogradOp.apply(
-        query, key, value, fw_graph, bw_graph, *other_buffers
-    )
+    with TransformGetItemToIndex():
+        input_requires_grad = any(t.requires_grad for t in (query, key, value))
+        if torch.is_grad_enabled() and input_requires_grad:
+            example_vals = [
+                torch.zeros((), dtype=query.dtype, requires_grad=input_requires_grad)
+            ] + [torch.zeros((), dtype=torch.int) for _ in range(4)]
+            fw_graph, bw_graph = create_fw_bw_graph(
+                score_mod, example_vals, other_buffers
+            )
+        else:
+            fw_graph, bw_graph = score_mod, None
+        out, logsumexp = FlexAttentionAutogradOp.apply(
+            query, key, value, fw_graph, bw_graph, *other_buffers
+        )
     return out, logsumexp
 
 
@@ -449,9 +452,10 @@ def sdpa_dense_backward(
     score_mod = torch.vmap(score_mod, in_dims=(0, None, 0, None, None) + in_dim_buffers)
     score_mod = torch.vmap(score_mod, in_dims=(0, 0, None, None, None) + in_dim_buffers)
 
-    post_mod_scores = score_mod(scores, b, h, m, n, *other_buffers).to(
-        working_precision
-    )
+    with TransformGetItemToIndex():
+        post_mod_scores = score_mod(scores, b, h, m, n, *other_buffers).to(
+            working_precision
+        )
 
     softmax_scores = torch.exp(post_mod_scores - logsumexp.unsqueeze(-1))
 
@@ -485,9 +489,10 @@ def sdpa_dense_backward(
         in_dims=(0, 0, None, None, None, 0) + in_dim_buffers,
         out_dims=out_dims,
     )
-    grad_scores, *_ = joint_score_mod(
-        scores, b, h, m, n, grad_score_mod, *other_buffers
-    )
+    with TransformGetItemToIndex():
+        grad_scores, *_ = joint_score_mod(
+            scores, b, h, m, n, grad_score_mod, *other_buffers
+        )
     grad_scores = grad_scores.to(query.dtype)
 
     grad_query = grad_scores @ key
@@ -524,8 +529,9 @@ def trace_flex_attention_backward(
         torch.zeros((), dtype=query.dtype, requires_grad=query.requires_grad)
     ] + [torch.zeros((), dtype=torch.int) for _ in range(4)]
     bw_example_vals = fw_example_vals + [torch.zeros((), dtype=query.dtype)]
-    fw_graph = make_fx(fw_graph)(*fw_example_vals, *other_buffers)
-    joint_graph = make_fx(joint_graph)(*bw_example_vals, *other_buffers)
+    with TransformGetItemToIndex():
+        fw_graph = reenter_make_fx(fw_graph)(*fw_example_vals, *other_buffers)
+        joint_graph = reenter_make_fx(joint_graph)(*bw_example_vals, *other_buffers)
     proxy_mode.tracer.root.register_module("fw_graph", fw_graph)
     proxy_mode.tracer.root.register_module("joint_graph", joint_graph)
     node_args = (

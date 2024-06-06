@@ -8,6 +8,7 @@ from torch.testing._internal.common_utils import run_tests, TEST_CUDA, TestCase
 
 try:
     import tabulate  # noqa: F401  # type: ignore[import]
+
     from torch.utils.benchmark.utils.compile import bench_all
 
     HAS_TABULATE = True

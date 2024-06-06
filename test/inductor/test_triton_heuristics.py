@@ -4,9 +4,8 @@ import sys
 import unittest
 
 import torch
-from torch.testing._internal.common_device_type import expectedFailureXPU
 
-from torch.testing._internal.common_utils import IS_LINUX
+from torch.testing._internal.common_utils import IS_LINUX, skipIfXpu
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 
 try:
@@ -14,7 +13,7 @@ try:
 except ImportError:
     if __name__ == "__main__":
         sys.exit(0)
-    raise unittest.SkipTest("requires triton")  # noqa: TRY200
+    raise unittest.SkipTest("requires triton")  # noqa: B904
 
 from torch._inductor import config
 from torch._inductor.runtime.hints import TRITON_MAX_BLOCK
@@ -38,7 +37,7 @@ class TestTritonHeuristics(TestCase):
 
     def _test_artificial_zgrid(self):
         def forward(primals_1, primals_2, primals_5):
-            view = torch.ops.aten.reshape.default(primals_5, [-1, 4, 128])
+            view = torch.ops.aten.reshape.default(primals_5, [-1, 2, 4])
             primals_5 = None
             permute = torch.ops.aten.permute.default(view, [0, 2, 1])
             clone = torch.ops.aten.clone.default(
@@ -53,8 +52,8 @@ class TestTritonHeuristics(TestCase):
             primals_2 = None
             return addmm
 
-        s0 = 727828
-        s1 = 512
+        s0 = 16777472
+        s1 = 8
 
         args = [
             torch.rand([2, 4], device=GPU_TYPE),
@@ -73,12 +72,11 @@ class TestTritonHeuristics(TestCase):
         ]
         self.assertEqual(forward(*args), foo_c(*args))
 
-    @unittest.skip("https://github.com/pytorch/pytorch/issues/123210")
-    @expectedFailureXPU
+    @skipIfXpu
     def test_artificial_zgrid(self):
         self._test_artificial_zgrid()
 
-    @expectedFailureXPU
+    @skipIfXpu
     @config.patch("cpp_wrapper", True)
     def test_artificial_grid_cpp_wrapper(self):
         self._test_artificial_zgrid()

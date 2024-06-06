@@ -153,8 +153,8 @@ void RegisterDecomposition(
     ConstantPropagationImmutableTypes(g);
   }
 
-  std::unique_ptr<GraphFunction> new_func(new GraphFunction(
-      schema.name(), g, nullptr, ExecutorExecutionMode::SIMPLE));
+  auto new_func = std::make_unique<GraphFunction>(
+      schema.name(), g, nullptr, ExecutorExecutionMode::SIMPLE);
   user_registered_funcs.emplace(&schema, std::move(new_func));
   schema_to_function[&schema] = user_registered_funcs[&schema].get();
   schema_to_decomposition[&schema] = g;

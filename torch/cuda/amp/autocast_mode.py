@@ -1,16 +1,8 @@
-import collections
 import functools
-import warnings
+from typing import Any
+from typing_extensions import deprecated
 
 import torch
-
-try:
-    import numpy as np
-
-    HAS_NUMPY = True
-except ModuleNotFoundError:
-    np = None  # type: ignore[assignment]
-from typing import Any
 
 __all__ = ["autocast", "custom_fwd", "custom_bwd"]
 
@@ -21,6 +13,11 @@ class autocast(torch.amp.autocast_mode.autocast):
     ``torch.cuda.amp.autocast(args...)`` is deprecated. Please use ``torch.amp.autocast("cuda", args...)`` instead.
     """
 
+    @deprecated(
+        "`torch.cuda.amp.autocast(args...)` is deprecated. "
+        "Please use `torch.amp.autocast('cuda', args...)` instead.",
+        category=FutureWarning,
+    )
     def __init__(
         self,
         enabled: bool = True,
@@ -32,10 +29,6 @@ class autocast(torch.amp.autocast_mode.autocast):
             self.device = "cuda"
             self.fast_dtype = dtype
             return
-        warnings.warn(
-            "torch.cuda.amp.autocast(args...) is deprecated. Please use torch.amp.autocast('cuda', args...) instead.",
-            DeprecationWarning,
-        )
         super().__init__(
             "cuda", enabled=enabled, dtype=dtype, cache_enabled=cache_enabled
         )
@@ -57,93 +50,39 @@ class autocast(torch.amp.autocast_mode.autocast):
         return super().__call__(func)
 
 
-# Casts Tensors and containers of Tensors.  Special-cases passthroughs for strings and np.ndarrays, which
-# may be falsely detected as "Iterables."
+# Preserved only for BC reasons
+@deprecated(
+    "`torch.cuda.amp.autocast_mode._cast(value, dtype)` is deprecated. "
+    "Please use `torch.amp.autocast_mode._cast(value, 'cuda', dtype)` instead.",
+    category=FutureWarning,
+)
 def _cast(value, dtype):
-    if isinstance(value, torch.Tensor):
-        is_eligible = (
-            value.is_floating_point()
-            and value.is_cuda
-            and (value.dtype is not torch.float64)
-        )
-        return value.to(dtype) if is_eligible else value
-    elif isinstance(value, (str, bytes)):
-        return value
-    elif HAS_NUMPY and isinstance(value, np.ndarray):
-        return value
-    elif isinstance(value, collections.abc.Mapping):
-        return {_cast(k, dtype): _cast(v, dtype) for k, v in value.items()}
-    elif isinstance(value, collections.abc.Iterable):
-        iterable = (_cast(v, dtype) for v in value)
-        if isinstance(value, (list, tuple)):
-            return type(value)(iterable)
-        else:
-            return iterable
-    else:
-        return value
+    return torch.amp.autocast_mode._cast(value, "cuda", dtype)
 
 
-# custom_fwd is a decorator that may or may not be used with arguments, following
-# https://github.com/dabeaz/python-cookbook/tree/master/src/9/defining_a_decorator_that_takes_an_optional_argument.
-# this works:
-#     @custom_fwd
-#     def forward(...):
-# this also works:
-#     @custom_fwd(cast_inputs=torch.float)
-#     def forward(...):
+@deprecated(
+    "`torch.cuda.amp.custom_fwd(args...)` is deprecated. "
+    "Please use `torch.amp.custom_fwd(args..., device_type='cuda')` instead.",
+    category=FutureWarning,
+)
 def custom_fwd(fwd=None, *, cast_inputs=None):
     """
-    Create a helper decorator for ``forward`` methods of custom autograd functions.
-
-    Autograd functions are subclasses of :class:`torch.autograd.Function`.
-    See the :ref:`example page<amp-custom-examples>` for more detail.
-
-    Args:
-        cast_inputs (:class:`torch.dtype` or None, optional, default=None):  If not ``None``,
-            when ``forward`` runs in an autocast-enabled region, casts incoming
-            floating-point CUDA Tensors to the target dtype (non-floating-point Tensors are not affected),
-            then executes ``forward`` with autocast disabled.
-            If ``None``, ``forward``'s internal ops execute with the current autocast state.
-
-    .. note::
-        If the decorated ``forward`` is called outside an autocast-enabled region,
-        :func:`custom_fwd<custom_fwd>` is a no-op and ``cast_inputs`` has no effect.
+    ``torch.cuda.amp.custom_fwd(args...)`` is deprecated. Please use
+    ``torch.amp.custom_fwd(args..., device_type='cuda')`` instead.
     """
-    if fwd is None:
-        return functools.partial(custom_fwd, cast_inputs=cast_inputs)
-
-    @functools.wraps(fwd)
-    def decorate_fwd(*args, **kwargs):
-        args[0]._dtype = torch.get_autocast_gpu_dtype()
-        if cast_inputs is None:
-            args[0]._fwd_used_autocast = torch.is_autocast_enabled()
-            return fwd(*args, **kwargs)
-        else:
-            autocast_context = torch.is_autocast_enabled()
-            args[0]._fwd_used_autocast = False
-            if autocast_context:
-                with autocast(enabled=False):
-                    return fwd(*_cast(args, cast_inputs), **_cast(kwargs, cast_inputs))
-            else:
-                return fwd(*args, **kwargs)
-
-    return decorate_fwd
+    return functools.partial(torch.amp.custom_fwd, device_type="cuda")(
+        fwd=fwd, cast_inputs=cast_inputs
+    )
 
 
-# Autograd ensures incoming gradients are the same type as forward outputs.  Allowing a separate
-# cast_inputs argument on custom_bwd is unnecessary and could cause errors if it doesn't match
-# cast_inputs supplied to custom_fwd.
+@deprecated(
+    "`torch.cuda.amp.custom_bwd(args...)` is deprecated. "
+    "Please use `torch.amp.custom_bwd(args..., device_type='cuda')` instead.",
+    category=FutureWarning,
+)
 def custom_bwd(bwd):
-    """Create a helper decorator for backward methods of custom autograd functions.
-
-    Autograd functions are subclasses of :class:`torch.autograd.Function`.
-    Ensures that ``backward`` executes with the same autocast state as ``forward``.
-    See the :ref:`example page<amp-custom-examples>` for more detail.
     """
-
-    @functools.wraps(bwd)
-    def decorate_bwd(*args, **kwargs):
-        with autocast(enabled=args[0]._fwd_used_autocast, dtype=args[0]._dtype):
-            return bwd(*args, **kwargs)
-
-    return decorate_bwd
+    ``torch.cuda.amp.custom_bwd(args...)`` is deprecated. Please use
+    ``torch.amp.custom_bwd(args..., device_type='cuda')`` instead.
+    """
+    return functools.partial(torch.amp.custom_bwd, device_type="cuda")(bwd)

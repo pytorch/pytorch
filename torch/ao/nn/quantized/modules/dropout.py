@@ -19,7 +19,7 @@ class Dropout(torch.nn.Dropout):
         return 'QuantizedDropout'
 
     @classmethod
-    def from_float(cls, mod):
+    def from_float(cls, mod, use_precomputed_fake_quant=False):
         return cls(mod.p, mod.inplace)
 
     @classmethod

@@ -91,9 +91,9 @@ _UCC_COMMIT=20eae37090a4ce1b32bcce6144ccad0b49943e0b
 # configuration, so we hardcode everything here rather than do it
 # from scratch
 case "$image" in
-  pytorch-linux-focal-cuda12.4-cudnn8-py3-gcc9)
+  pytorch-linux-focal-cuda12.4-cudnn9-py3-gcc9)
     CUDA_VERSION=12.4.0
-    CUDNN_VERSION=8
+    CUDNN_VERSION=9
     ANACONDA_PYTHON_VERSION=3.10
     GCC_VERSION=9
     PROTOBUF=yes
@@ -105,9 +105,9 @@ case "$image" in
     CONDA_CMAKE=yes
     TRITON=yes
     ;;
-  pytorch-linux-focal-cuda12.1-cudnn8-py3-gcc9)
+  pytorch-linux-focal-cuda12.1-cudnn9-py3-gcc9)
     CUDA_VERSION=12.1.1
-    CUDNN_VERSION=8
+    CUDNN_VERSION=9
     ANACONDA_PYTHON_VERSION=3.10
     GCC_VERSION=9
     PROTOBUF=yes
@@ -119,9 +119,9 @@ case "$image" in
     CONDA_CMAKE=yes
     TRITON=yes
     ;;
-  pytorch-linux-focal-cuda12.4-cudnn8-py3-gcc9-inductor-benchmarks)
+  pytorch-linux-focal-cuda12.4-cudnn9-py3-gcc9-inductor-benchmarks)
     CUDA_VERSION=12.4.0
-    CUDNN_VERSION=8
+    CUDNN_VERSION=9
     ANACONDA_PYTHON_VERSION=3.10
     GCC_VERSION=9
     PROTOBUF=yes
@@ -134,9 +134,9 @@ case "$image" in
     TRITON=yes
     INDUCTOR_BENCHMARKS=yes
     ;;
-  pytorch-linux-focal-cuda12.1-cudnn8-py3-gcc9-inductor-benchmarks)
+  pytorch-linux-focal-cuda12.1-cudnn9-py3-gcc9-inductor-benchmarks)
     CUDA_VERSION=12.1.1
-    CUDNN_VERSION=8
+    CUDNN_VERSION=9
     ANACONDA_PYTHON_VERSION=3.10
     GCC_VERSION=9
     PROTOBUF=yes
@@ -149,9 +149,39 @@ case "$image" in
     TRITON=yes
     INDUCTOR_BENCHMARKS=yes
     ;;
-  pytorch-linux-focal-cuda11.8-cudnn8-py3-gcc9)
+  pytorch-linux-focal-cuda12.1-cudnn9-py3.12-gcc9-inductor-benchmarks)
+    CUDA_VERSION=12.1.1
+    CUDNN_VERSION=9
+    ANACONDA_PYTHON_VERSION=3.12
+    GCC_VERSION=9
+    PROTOBUF=yes
+    DB=yes
+    VISION=yes
+    KATEX=yes
+    UCX_COMMIT=${_UCX_COMMIT}
+    UCC_COMMIT=${_UCC_COMMIT}
+    CONDA_CMAKE=yes
+    TRITON=yes
+    INDUCTOR_BENCHMARKS=yes
+    ;;
+  pytorch-linux-focal-cuda12.4-cudnn9-py3.12-gcc9-inductor-benchmarks)
+    CUDA_VERSION=12.4.0
+    CUDNN_VERSION=9
+    ANACONDA_PYTHON_VERSION=3.12
+    GCC_VERSION=9
+    PROTOBUF=yes
+    DB=yes
+    VISION=yes
+    KATEX=yes
+    UCX_COMMIT=${_UCX_COMMIT}
+    UCC_COMMIT=${_UCC_COMMIT}
+    CONDA_CMAKE=yes
+    TRITON=yes
+    INDUCTOR_BENCHMARKS=yes
+    ;;
+  pytorch-linux-focal-cuda11.8-cudnn9-py3-gcc9)
     CUDA_VERSION=11.8.0
-    CUDNN_VERSION=8
+    CUDNN_VERSION=9
     ANACONDA_PYTHON_VERSION=3.10
     GCC_VERSION=9
     PROTOBUF=yes
@@ -163,9 +193,9 @@ case "$image" in
     CONDA_CMAKE=yes
     TRITON=yes
     ;;
-  pytorch-linux-focal-cuda12.4-cudnn8-py3-gcc9)
+  pytorch-linux-focal-cuda12.4-cudnn9-py3-gcc9)
     CUDA_VERSION=12.4.0
-    CUDNN_VERSION=8
+    CUDNN_VERSION=9
     ANACONDA_PYTHON_VERSION=3.10
     GCC_VERSION=9
     PROTOBUF=yes
@@ -177,9 +207,23 @@ case "$image" in
     CONDA_CMAKE=yes
     TRITON=yes
     ;;
-  pytorch-linux-focal-cuda12.1-cudnn8-py3-gcc9)
+  pytorch-linux-focal-cuda12.1-cudnn9-py3-gcc9)
     CUDA_VERSION=12.1.1
-    CUDNN_VERSION=8
+    CUDNN_VERSION=9
+    ANACONDA_PYTHON_VERSION=3.10
+    GCC_VERSION=9
+    PROTOBUF=yes
+    DB=yes
+    VISION=yes
+    KATEX=yes
+    UCX_COMMIT=${_UCX_COMMIT}
+    UCC_COMMIT=${_UCC_COMMIT}
+    CONDA_CMAKE=yes
+    TRITON=yes
+    ;;
+  pytorch-linux-focal-cuda12.4-cudnn9-py3-gcc9)
+    CUDA_VERSION=12.4.0
+    CUDNN_VERSION=9
     ANACONDA_PYTHON_VERSION=3.10
     GCC_VERSION=9
     PROTOBUF=yes
@@ -286,10 +330,10 @@ case "$image" in
     DOCS=yes
     INDUCTOR_BENCHMARKS=yes
     ;;
-  pytorch-linux-jammy-cuda11.8-cudnn8-py3.8-clang12)
+  pytorch-linux-jammy-cuda11.8-cudnn9-py3.8-clang12)
     ANACONDA_PYTHON_VERSION=3.8
     CUDA_VERSION=11.8
-    CUDNN_VERSION=8
+    CUDNN_VERSION=9
     CLANG_VERSION=12
     PROTOBUF=yes
     DB=yes
@@ -336,7 +380,7 @@ case "$image" in
     ANACONDA_PYTHON_VERSION=3.9
     CONDA_CMAKE=yes
     ;;
-  pytorch-linux-jammy-cuda11.8-cudnn8-py3.9-linter)
+  pytorch-linux-jammy-cuda11.8-cudnn9-py3.9-linter)
     ANACONDA_PYTHON_VERSION=3.9
     CUDA_VERSION=11.8
     CONDA_CMAKE=yes
@@ -403,7 +447,7 @@ tmp_tag=$(basename "$(mktemp -u)" | tr '[:upper:]' '[:lower:]')
 #when using cudnn version 8 install it separately from cuda
 if [[ "$image" == *cuda*  && ${OS} == "ubuntu" ]]; then
   IMAGE_NAME="nvidia/cuda:${CUDA_VERSION}-cudnn${CUDNN_VERSION}-devel-ubuntu${UBUNTU_VERSION}"
-  if [[ ${CUDNN_VERSION} == 8 ]]; then
+  if [[ ${CUDNN_VERSION} == 9 ]]; then
     IMAGE_NAME="nvidia/cuda:${CUDA_VERSION}-devel-ubuntu${UBUNTU_VERSION}"
   fi
 fi
@@ -455,7 +499,7 @@ docker build \
        "$@" \
        .
 
-# NVIDIA dockers for RC releases use tag names like `11.0-cudnn8-devel-ubuntu18.04-rc`,
+# NVIDIA dockers for RC releases use tag names like `11.0-cudnn9-devel-ubuntu18.04-rc`,
 # for this case we will set UBUNTU_VERSION to `18.04-rc` so that the Dockerfile could
 # find the correct image. As a result, here we have to replace the
 #   "$UBUNTU_VERSION" == "18.04-rc"

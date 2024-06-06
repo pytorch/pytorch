@@ -406,8 +406,8 @@ inline CppFunction dispatch(c10::DeviceType type, Func&& raw_f) {
 /// ```
 ///
 /// \ingroup torch-schema-overloads
-inline c10::FunctionSchema schema(const char* str, c10::AliasAnalysisKind k) {
-  c10::FunctionSchema s = torch::jit::parseSchema(str);
+inline c10::FunctionSchema schema(const char* str, c10::AliasAnalysisKind k, bool allow_typevars=false) {
+  c10::FunctionSchema s = torch::jit::parseSchema(str, /*allow_typevars*/allow_typevars);
   s.setAliasAnalysis(k);
   return s;
 }
@@ -415,8 +415,8 @@ inline c10::FunctionSchema schema(const char* str, c10::AliasAnalysisKind k) {
 /// Function schemas can be directly constructed from string literals.
 ///
 /// \ingroup torch-schema-overloads
-inline c10::FunctionSchema schema(const char* s) {
-  return schema(s, c10::AliasAnalysisKind::FROM_SCHEMA);
+inline c10::FunctionSchema schema(const char* s, bool allow_typevars=false) {
+  return schema(s, c10::AliasAnalysisKind::FROM_SCHEMA, allow_typevars);
 }
 
 /// \private

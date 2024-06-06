@@ -1,7 +1,6 @@
+import operator_benchmark as op_bench
 import torch
 import torch.ao.quantization.observer as obs
-
-import operator_benchmark as op_bench
 
 qobserver_short_configs_dict = {
     "attr_names": ("C", "M", "N", "dtype", "device"),

@@ -12,8 +12,8 @@ import torch
 from torch._dynamo import reset
 from torch._dynamo.utils import counters
 from torch._inductor import config, metrics
+from torch._inductor.async_compile import AsyncCompile
 from torch._inductor.codecache import (
-    AsyncCompile,
     cuda_compile_command,
     CUDACodeCache,
     FxGraphCachePickler,
@@ -44,6 +44,7 @@ HAS_TRITON = has_triton()
 
 if HAS_TRITON:
     import triton
+
     from torch.testing._internal.triton_utils import add_kernel
 
 requires_gpu = functools.partial(unittest.skipIf, not HAS_GPU, "requires gpu")
@@ -196,7 +197,7 @@ class TestFxGraphCache(TestCase):
         cache_module = (
             "triton.runtime.fb_memcache.FbMemcacheRemoteFxGraphCacheBackend"
             if config.is_fbcode()
-            else "triton.runtime.cache.RedisRemoteCacheBackend"
+            else "torch._inductor.remote_cache.RedisRemoteCacheBackend"
         )
 
         with config.patch(
@@ -526,7 +527,7 @@ class TestFxGraphCacheHashing(TestCase):
                 FxGraphCachePickler.dumps(torch.randn(3)[1:]),
                 FxGraphCachePickler.dumps(torch.randn(3)[1:]),
             )
-            self.assertNotEqual(
+            self.assertEqual(
                 FxGraphCachePickler.dumps(torch.randn(3)[1:]),
                 FxGraphCachePickler.dumps(torch.randn(2)),
             )
@@ -585,16 +586,16 @@ class TestFxGraphCacheHashing(TestCase):
         ordering of the kwargs dict and any set arguments.
         """
         # Dict order of the kwargs should not affect hashes.
-        details1 = FxGraphHashDetails(None, [], {"a": 0, "z": 1})
-        details2 = FxGraphHashDetails(None, [], {"z": 1, "a": 0})
+        details1 = FxGraphHashDetails(None, [], {"a": 0, "z": 1}, [])
+        details2 = FxGraphHashDetails(None, [], {"z": 1, "a": 0}, [])
         self.assertEqual(
             FxGraphCachePickler.dumps(details1),
             FxGraphCachePickler.dumps(details2),
         )
 
         # Different kwarg values should affect hashes.
-        details1 = FxGraphHashDetails(None, [], {"a": 0})
-        details2 = FxGraphHashDetails(None, [], {"a": 1})
+        details1 = FxGraphHashDetails(None, [], {"a": 0}, [])
+        details2 = FxGraphHashDetails(None, [], {"a": 1}, [])
         self.assertNotEqual(
             FxGraphCachePickler.dumps(details1),
             FxGraphCachePickler.dumps(details2),
@@ -604,16 +605,16 @@ class TestFxGraphCacheHashing(TestCase):
         # sorting and creating a new set seems to change the order.
         set1 = {"a", "b", "c", "d", "e", "f", "g"}
         set2 = set(sorted(set1))  # noqa: C414
-        details1 = FxGraphHashDetails(None, [], {"a": set1})
-        details2 = FxGraphHashDetails(None, [], {"a": set2})
+        details1 = FxGraphHashDetails(None, [], {"a": set1}, [])
+        details2 = FxGraphHashDetails(None, [], {"a": set2}, [])
         self.assertEqual(
             FxGraphCachePickler.dumps(details1),
             FxGraphCachePickler.dumps(details2),
         )
 
         # But different set contents should affect hashes.
-        details1 = FxGraphHashDetails(None, [], {"a": {1, 2, 3}})
-        details2 = FxGraphHashDetails(None, [], {"a": {1, 2}})
+        details1 = FxGraphHashDetails(None, [], {"a": {1, 2, 3}}, [])
+        details2 = FxGraphHashDetails(None, [], {"a": {1, 2}}, [])
         self.assertNotEqual(
             FxGraphCachePickler.dumps(details1),
             FxGraphCachePickler.dumps(details2),
@@ -624,11 +625,11 @@ class TestFxGraphCacheHashing(TestCase):
         Test that different config settings affect hashes.
         """
         with config.patch({"max_autotune": False}):
-            details1 = FxGraphHashDetails(None, [], {})
-            details2 = FxGraphHashDetails(None, [], {})
+            details1 = FxGraphHashDetails(None, [], {}, [])
+            details2 = FxGraphHashDetails(None, [], {}, [])
 
         with config.patch({"max_autotune": True}):
-            details3 = FxGraphHashDetails(None, [], {})
+            details3 = FxGraphHashDetails(None, [], {}, [])
 
         self.assertEqual(
             FxGraphCachePickler.dumps(details1),

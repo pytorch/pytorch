@@ -207,7 +207,10 @@ def pre_grad_passes(gm: torch.fx.GraphModule, example_inputs=None):
                 inductor_before_change = save_inductor_dict(
                     [pattern_matcher_pass.pass_name]
                 )
-                pattern_matcher_pass.apply(gm.graph)  # type: ignore[arg-type]
+                # we support run same pattern multiple times, the default is to run only once
+                counter = config.pre_grad_fusion_options[pass_name].get("counter", 1)
+                for _ in range(counter):
+                    pattern_matcher_pass.apply(gm.graph)  # type: ignore[arg-type]
                 if not is_same_dict(counters["inductor"], inductor_before_change):
                     optimus_scuba_log[
                         f"{pattern_matcher_pass.pass_name}_pre_grad"

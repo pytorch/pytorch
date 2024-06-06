@@ -87,6 +87,7 @@ constant_fold_functions = [
     torch.cuda.get_device_properties,
     torch.cuda.is_available,
     torch.distributed.is_available,
+    torch.get_autocast_dtype,
     torch.get_autocast_gpu_dtype,
     torch.get_default_dtype,
     torch.is_autocast_cache_enabled,

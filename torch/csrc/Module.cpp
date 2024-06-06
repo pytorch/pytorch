@@ -375,22 +375,14 @@ PyObject* THPModule_swap_tensor_impl(PyObject* _unused, PyObject* args) {
   THPVariable* a = reinterpret_cast<THPVariable*>(a_);
   THPVariable* b = reinterpret_cast<THPVariable*>(b_);
 
-  TORCH_CHECK(
-      a->cdata->use_count() == 1,
-      "Expected single reference to a's Tensor object but got ",
-      a->cdata->use_count());
-  TORCH_CHECK(
-      b->cdata->use_count() == 1,
-      "Expected single reference to b's Tensor object but got ",
-      b->cdata->use_count());
   // weak_use_count() adds 1 if use_count is non-zero
   TORCH_CHECK(
       a->cdata->weak_use_count() == 1,
-      "Expected no weakrefs to a's Tensor object but got  ",
+      "Expected no weakrefs to t1's Tensor object but got  ",
       a->cdata->weak_use_count() - 1);
   TORCH_CHECK(
       b->cdata->weak_use_count() == 1,
-      "Expected no weakrefs to b's Tensor object but got  ",
+      "Expected no weakrefs to t2's Tensor object but got  ",
       b->cdata->weak_use_count() - 1);
 
   // Swap the Tensor Impl
@@ -2145,50 +2137,13 @@ Call this whenever a new thread is created in order to propagate values from
         return torch::should_allow_numbers_as_tensors(name);
       });
 
-  // FIXME(crcrpar): Better to have `at::ScalarType` get mapped to `torch.dtype`
-  // Currently I see the second item of the key is displayed as
-  // e.g. `torch._C._te.ScalarType at 0x7fcf318adab0`
-  // I thought adding an appropriate type_caster of `at::ScalarType` to
-  // torch/csrc/pybind.h` would solve this but it caused segmentation fault in
-  // my environment.
-  using _DeviceDtypeKey = std::pair<at::Device, std::string>;
-  // Custom hasher is necessary to make unordered_map compilable for Windows
-  // debug targets. As `at::native::ParamsHash` only works on structs with
-  // standard layout, but std::string isn't one in Visual C++ debug builds,
-  // which one can easily verify by running something like:
-  //   #define _DEBUG
-  //   #include <type_traits>
-  //   #include <string>
-  //   static_assert(std::is_standard_layout_v<std::string>, "Oh noes");
-  // If above condition is not met, VC++ raises a very cryptic compilation
-  // error. See
-  // https://github.com/pytorch/pytorch/pull/100007#discussion_r1227116292 for
-  // more detail
-  struct _DeviceDtypeHasher {
-    std::size_t operator()(const _DeviceDtypeKey& k) const noexcept {
-      static at::native::ParamsHash<at::Device> device_hasher;
-      static std::hash<std::string> string_hasher;
-      return device_hasher(k.first) ^ string_hasher(k.second);
-    }
-  };
-  using _FlatMap = std::unordered_map<
-      _DeviceDtypeKey,
-      at::native::TensorsAndIndicesT,
-      _DeviceDtypeHasher>;
   py_module.def(
       "_group_tensors_by_device_and_dtype",
       [](const std::vector<std::vector<std::optional<at::Tensor>>>&
              nested_tensorlist,
          const bool with_indices) {
-        _FlatMap map;
-        for (const auto& iter :
-             at::native::_group_tensors_by_first_tensors_device_and_dtype(
-                 nested_tensorlist, with_indices)) {
-          const auto scalar_type_name =
-              torch::utils::getDtypeNames(iter.first.second).first;
-          map.insert({{iter.first.first, scalar_type_name}, iter.second});
-        }
-        return map;
+        return at::native::_group_tensors_by_first_tensors_device_and_dtype(
+            nested_tensorlist, with_indices);
       });
 
   py_module.def(
