@@ -402,8 +402,6 @@ def schedule(
     assert (
         wait >= 0 and warmup >= 0 and active > 0 and repeat >= 0 and skip_first >= 0
     ), "Invalid profiler schedule arguments"
-    if warmup == 0:
-        warn("Profiler won't be using warmup, this can skew profiler results")
     return schedule_fn
 
 
