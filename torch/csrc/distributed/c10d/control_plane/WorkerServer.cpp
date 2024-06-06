@@ -71,15 +71,7 @@ std::string jsonStrEscape(const std::string& str) {
 }
 } // namespace
 
-WorkerServer::WorkerServer(const std::string& socketFile) {
-  // using unix sockets
-  server_.set_address_family(AF_UNIX);
-
-  // adjust keep alives as it stops the server from shutting down quickly
-  server_.set_keep_alive_timeout(1); // second, default is 5
-  server_.set_keep_alive_max_count(
-      30); // wait max 30 seconds before closing socket
-
+WorkerServer::WorkerServer(const std::string& hostOrFile, int port) {
   server_.Get("/", [](const httplib::Request& req, httplib::Response& res) {
     res.set_content(
         R"BODY(<h1>torch.distributed.WorkerServer</h1>
@@ -139,13 +131,29 @@ WorkerServer::WorkerServer(const std::string& socketFile) {
         }
       });
 
-  if (std::filesystem::exists(socketFile)) {
-    throw std::runtime_error(fmt::format("{} already exists", socketFile));
-  }
+  // adjust keep alives as it stops the server from shutting down quickly
+  server_.set_keep_alive_timeout(1); // second, default is 5
+  server_.set_keep_alive_max_count(
+      30); // wait max 30 seconds before closing socket
 
-  C10D_WARNING("Server listening to {}", socketFile);
-  if (!server_.bind_to_port(socketFile, 80)) {
-    throw std::runtime_error(fmt::format("Error binding to {}", socketFile));
+  if (port == -1) {
+    // using unix sockets
+    server_.set_address_family(AF_UNIX);
+
+    if (std::filesystem::exists(hostOrFile)) {
+      throw std::runtime_error(fmt::format("{} already exists", hostOrFile));
+    }
+
+    C10D_WARNING("Server listening to UNIX {}", hostOrFile);
+    if (!server_.bind_to_port(hostOrFile, 80)) {
+      throw std::runtime_error(fmt::format("Error binding to {}", hostOrFile));
+    }
+  } else {
+    C10D_WARNING("Server listening to TCP {}:{}", hostOrFile, port);
+    if (!server_.bind_to_port(hostOrFile, port)) {
+      throw std::runtime_error(
+          fmt::format("Error binding to {}:{}", hostOrFile, port));
+    }
   }
 
   serverThread_ = std::thread([this]() {

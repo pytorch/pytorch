@@ -1497,36 +1497,34 @@ def disable_translation_validation_if_dynamic_shapes(fn):
 # See: https://github.com/pytorch/pytorch/pull/59402#issuecomment-858811135
 TestEnvironment.def_flag("TEST_CUDA_MEM_LEAK_CHECK", env_var="PYTORCH_TEST_CUDA_MEM_LEAK_CHECK")
 
-# True if CI is running TBB-enabled Pytorch
-IS_TBB = "tbb" in os.getenv("BUILD_ENVIRONMENT", "")
 
 # Dict of NumPy dtype -> torch dtype (when the correspondence exists)
 numpy_to_torch_dtype_dict = {
-    np.bool_      : torch.bool,
-    np.uint8      : torch.uint8,
-    np.uint16     : torch.uint16,
-    np.uint32     : torch.uint32,
-    np.uint64     : torch.uint64,
-    np.int8       : torch.int8,
-    np.int16      : torch.int16,
-    np.int32      : torch.int32,
-    np.int64      : torch.int64,
-    np.float16    : torch.float16,
-    np.float32    : torch.float32,
-    np.float64    : torch.float64,
-    np.complex64  : torch.complex64,
-    np.complex128 : torch.complex128
+    np.dtype(np.bool_)     : torch.bool,
+    np.dtype(np.uint8)     : torch.uint8,
+    np.dtype(np.uint16)    : torch.uint16,
+    np.dtype(np.uint32)    : torch.uint32,
+    np.dtype(np.uint64)    : torch.uint64,
+    np.dtype(np.int8)      : torch.int8,
+    np.dtype(np.int16)     : torch.int16,
+    np.dtype(np.int32)     : torch.int32,
+    np.dtype(np.int64)     : torch.int64,
+    np.dtype(np.float16)   : torch.float16,
+    np.dtype(np.float32)   : torch.float32,
+    np.dtype(np.float64)   : torch.float64,
+    np.dtype(np.complex64) : torch.complex64,
+    np.dtype(np.complex128): torch.complex128
 }
 
 
-# numpy dtypes like np.float64 are not instances, but rather classes. This leads to rather absurd cases like
-# np.float64 != np.dtype("float64") but np.float64 == np.dtype("float64").type.
-# Especially when checking against a reference we can't be sure which variant we get, so we simply try both.
+# numpy dtypes like np.float64 are not instances, but rather classes. This leads
+# to rather absurd cases like np.float64 != np.dtype("float64") but
+# np.dtype(np.float64) == np.dtype("float64") and
+# np.dtype(np.dtype("float64")) == np.dtype("float64").  Especially when
+# checking against a reference we can't be sure which variant we get, so we
+# simply apply the conversion.
 def numpy_to_torch_dtype(np_dtype):
-    try:
-        return numpy_to_torch_dtype_dict[np_dtype]
-    except KeyError:
-        return numpy_to_torch_dtype_dict[np_dtype.type]
+    return numpy_to_torch_dtype_dict[np.dtype(np_dtype)]
 
 
 def has_corresponding_torch_dtype(np_dtype):
@@ -1874,19 +1872,6 @@ def skipIfNoSciPy(fn):
         else:
             fn(*args, **kwargs)
     return wrapper
-
-
-def skipIfTBB(message="This test makes TBB sad"):
-    def dec_fn(fn):
-        @wraps(fn)
-        def wrapper(*args, **kwargs):
-            if IS_TBB:
-                raise unittest.SkipTest(message)
-            else:
-                fn(*args, **kwargs)
-        return wrapper
-    return dec_fn
-
 
 def skip_if_pytest(fn):
     @wraps(fn)
@@ -2299,7 +2284,7 @@ def check_if_enable(test: unittest.TestCase):
 
                     print(f"Test {disabled_test} is disabled for some unrecognized ",
                           f"platforms: [{invalid_plats_str}]. Please edit issue {issue_url} to fix the platforms ",
-                          "assigned to this flaky test, changing \"Platforms: ...\" to a comma separated ",
+                          'assigned to this flaky test, changing "Platforms: ..." to a comma separated ',
                           f"subset of the following (or leave it blank to match all platforms): {valid_plats}")
 
                     # Sanitize the platforms list so that we continue to disable the test for any valid platforms given
@@ -2611,7 +2596,11 @@ class TestCase(expecttest.TestCase):
     # the test, skip it instead.
     _ignore_not_implemented_error = False
 
-    def __init__(self, method_name='runTest'):
+    def __init__(self, method_name='runTest', methodName='runTest'):
+        # methodName is the correct naming in unittest and testslide uses keyword arguments.
+        # So we need to use both to 1) not break BC and, 2) support testslide.
+        if methodName != "runTest":
+            method_name = methodName
         super().__init__(method_name)
 
         test_method = getattr(self, method_name, None)
@@ -4416,8 +4405,8 @@ def check_test_defined_in_running_script(test_case):
     if running_script_path is None:
         return
     test_case_class_file = os.path.abspath(os.path.realpath(inspect.getfile(test_case.__class__)))
-    assert test_case_class_file == running_script_path, f"Class of loaded TestCase \"{test_case.id()}\" " \
-        f"is not defined in the running script \"{running_script_path}\", but in \"{test_case_class_file}\". Did you " \
+    assert test_case_class_file == running_script_path, f'Class of loaded TestCase "{test_case.id()}" ' \
+        f'is not defined in the running script "{running_script_path}", but in "{test_case_class_file}". Did you ' \
         "accidentally import a unittest.TestCase from another file?"
 
 def load_tests(loader, tests, pattern):
@@ -4722,24 +4711,6 @@ dtype_abbrs = {
     torch.uint8: 'u8',
 }
 
-
-def set_single_threaded_if_parallel_tbb(fn):
-    """Set test to be single threaded for parallel tbb.
-
-    See https://github.com/pytorch/pytorch/issues/64571#issuecomment-914691883
-    """
-    if not IS_TBB:
-        return fn
-
-    @wraps(fn)
-    def wrap_fn(*args, **kwargs):
-        num_threads = torch.get_num_threads()
-        torch.set_num_threads(1)
-        try:
-            return fn(*args, **kwargs)
-        finally:
-            torch.set_num_threads(num_threads)
-    return wrap_fn
 
 
 @functools.lru_cache

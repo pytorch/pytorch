@@ -3312,6 +3312,15 @@ def forward(self, x):
             "torch.ops.aten._assert_scalar.default", 1, exactly=True
         ).run(ep.graph_module.code)
 
+        ep = ep.run_decompositions()
+
+        FileCheck().check_count(
+            "torch.ops.aten.sym_constrain_range.default", 1, exactly=True
+        ).run(ep.graph_module.code)
+        FileCheck().check_count(
+            "torch.ops.aten._assert_scalar.default", 1, exactly=True
+        ).run(ep.graph_module.code)
+
     def test_non_arg_name_dynamic_shapes_api(self):
         class Foo(torch.nn.Module):
             def forward(self, a, b):
@@ -5308,6 +5317,30 @@ def forward(self, x, y):
             r"Runtime assertion failed for expression Eq\(s0\**2 \- 3\*s1, 0\)",
         ):
             ep.module()(torch.randn(10), torch.randn(9))  # fail
+
+        # this should be set with command line flag TORCH_DYNAMO_DO_NOT_EMIT_RUNTIME_ASSERTS=1,
+        # but dynamo checks that at torch import time, so setting os.environ makes no difference
+        # instead, manually patch dynamo config and test.
+        # test that setting this flag removes runtime asserts
+        from torch._dynamo import config as _dynamo_config
+
+        with _dynamo_config.patch(
+            do_not_emit_runtime_asserts=True,
+        ):
+            ep = torch.export._trace._export(
+                Foo(),
+                inputs,
+                dynamic_shapes=dynamic_shapes,
+                _allow_complex_guards_as_runtime_asserts=True,
+            ).run_decompositions()
+
+        self.assertEqual(
+            [
+                node.target == torch.ops.aten._assert_scalar.default
+                for node in ep.graph.nodes
+            ].count(True),
+            0,
+        )
 
     def test_constant_aliasing(self):
         class M1(torch.nn.Module):
