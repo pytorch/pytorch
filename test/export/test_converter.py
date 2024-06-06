@@ -23,10 +23,11 @@ class TestConverter(TestCase):
         orig_out, _ = pytree.tree_flatten(mod(*inp))
 
         # Check module.
-        self.assertEqual(
-            ep.module().state_dict().keys(),
-            mod.state_dict().keys(),
-        )
+        if isinstance(mod, torch.nn.Module):
+            self.assertEqual(
+                ep.module().state_dict().keys(),
+                mod.state_dict().keys(),
+            )
 
         # Check results.
         self.assertEqual(len(ep_out), len(orig_out))
@@ -463,9 +464,30 @@ class TestConverter(TestCase):
             m = M()
             self._check_equal_ts_ep_converter(m, inp)
 
-
     def test_convert_func_without_param(self):
-        pass
+        def func1(x, y):
+            return x + y
+
+        def func2(x, y):
+            if x.sum() > 0:
+                return x + y
+            else:
+                return x - y
+
+        inp = (
+            torch.tensor(1),
+            torch.tensor(1),
+        )
+        self._check_equal_ts_ep_converter(func1, inp)
+
+        ep = self._check_equal_ts_ep_converter(func2, inp)
+
+        t = inp[0]
+        t -= 1
+        torch.testing.assert_close(
+            ep.module()(*inp),
+            func2(*inp),
+        )
 
 
 if __name__ == "__main__":
