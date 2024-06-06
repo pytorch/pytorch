@@ -127,6 +127,9 @@ class ValueRanges(Generic[_T]):
     is_int: bool
     is_float: bool
 
+    def __repr__(self) -> str:
+        return f"VR[{self.lower}, {self.upper}]"
+
     @overload
     def __init__(self: ValueRanges[sympy.Expr], lower: ExprIn, upper: ExprIn) -> None:
         ...
