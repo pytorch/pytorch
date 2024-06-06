@@ -16,6 +16,7 @@ class Experiment:
     metric: str
     target: float
     actual: float
+    model: str
     quantization: str
     device: str
 
@@ -72,6 +73,7 @@ def run_multi_layer_norm(device: str = "cuda"):
             "memory_bandwidth(GB/s)",
             92,
             f"{memory_bandwidth:.02f}",
+            MultiLayerNorm.__name__,
             "bfloat16",
             device,
         )
