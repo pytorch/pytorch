@@ -106,7 +106,7 @@ def clamp_probs(probs):
         >>> clamp_probs(probs)
         tensor([1.1921e-07, 5.0000e-01, 1.0000e+00])
 
-        >>> probs = torch.tensor([0.1, 0.5, 1.0], dtype=torch.float64)
+        >>> probs = torch.tensor([0.0, 0.5, 1.0], dtype=torch.float64)
         >>> clamp_probs(probs)
         tensor([2.2204e-16, 5.0000e-01, 1.0000e+00], dtype=torch.float64)
 
