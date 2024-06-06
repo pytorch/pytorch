@@ -1383,6 +1383,8 @@ SYMPY_INTERP = {
     'IsNonOverlappingAndDenseIndicator': eval_is_non_overlapping_and_dense,
     'floor': math.floor,
     'ceiling': math.ceil,
+    'FloorToInt': math.floor,
+    'CeilToInt': math.ceil,
     'cast_symbool_to_symint_guardless': cast_symbool_to_symint_guardless,
     'RoundToInt': builtins.round,
     'RoundDecimal': builtins.round,
