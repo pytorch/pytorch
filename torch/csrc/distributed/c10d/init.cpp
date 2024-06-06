@@ -3170,11 +3170,12 @@ such as `dist.all_reduce(tensor, async_op=True)`.
       module, "_WorkerServer", R"(
 )")
       .def(
-          py::init([](const std::string& socketPath) {
+          py::init([](const std::string& hostOrFile, int port) {
             return c10::make_intrusive<::c10d::control_plane::WorkerServer>(
-                socketPath);
+                hostOrFile, port);
           }),
-          py::arg("socket_path"))
+          py::arg("host_or_file"),
+          py::arg("port") = -1)
       .def("shutdown", &::c10d::control_plane::WorkerServer::shutdown);
   Py_RETURN_TRUE;
 }
