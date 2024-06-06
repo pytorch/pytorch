@@ -362,7 +362,11 @@ class TS2FXGraphConverter:
                     )
                 )
                 fx_node = get_node_for_param_and_buffer(
+<<<<<<< HEAD
                     self.fx_graph, name, self.is_top_level_graph()
+=======
+                    self.fx_graph, name, self.is_top_level_graph
+>>>>>>> 87b4f7caf91 (address comments)
                 )
             elif name in self.name_to_buffer_map:
                 self.input_specs.append(
@@ -374,7 +378,11 @@ class TS2FXGraphConverter:
                     )
                 )
                 fx_node = get_node_for_param_and_buffer(
+<<<<<<< HEAD
                     self.fx_graph, name, self.is_top_level_graph()
+=======
+                    self.fx_graph, name, self.is_top_level_graph
+>>>>>>> 87b4f7caf91 (address comments)
                 )
             else:
                 self.input_specs.append(
@@ -789,9 +797,9 @@ class TS2EPConverter:
         # Populate nn module parameters and buffers.
         self.mod_param_and_buffer_map: Dict[str, Any] = dict()
         for name, param in ts_model.named_parameters():
-            self.mod_param_and_buffer_map[normalize_name(name)] = param
+            self.mod_param_and_buffer_map[name] = param
         for name, buffer in ts_model.named_buffers():
-            self.mod_param_and_buffer_map[normalize_name(name)] = buffer
+            self.mod_param_and_buffer_map[name] = buffer
 
     def convert(self) -> ExportedProgram:
 <<<<<<< HEAD
