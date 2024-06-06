@@ -62,8 +62,7 @@ def supported_builtin_dtype_torch_dtype():
 
 def supported_scalar_types():
     type_to_torch_dtype = supported_builtin_dtype_torch_dtype()
-    supported_scalar_types = tuple(type_to_torch_dtype.keys())
-    return supported_scalar_types
+    return tuple(type_to_torch_dtype.keys())
 
 
 def extract_tensor_metadata(dynamic: bool, input: torch.Tensor) -> Dict[str, Any]:
@@ -138,11 +137,9 @@ def aoti_compile_with_persistent_cache(
     Compile the given function with persistent cache for AOTI eager mode.
     """
     assert not dynamic, "Only support static shape for now"
-    type_to_torch_dtype = {int: torch.int32, float: torch.float, bool: torch.bool}
-    supported_scalar_types = tuple(type_to_torch_dtype.keys())
     flattened_inputs = list(args) + list(kwargs.values())
     if not all(
-        isinstance(input, (supported_scalar_types, torch.Tensor, list, str))
+        isinstance(input, (supported_scalar_types(), torch.Tensor, list, str))
         for input in flattened_inputs
     ):
         raise NotImplementedError(
