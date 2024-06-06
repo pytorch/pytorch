@@ -384,9 +384,6 @@ class ScheduleGPipe(PipelineScheduleSingle):
         # Delay send waits
         bwd_sends_to_wait: List[dist.Work] = []
         for i in range(self._n_microbatches):
-            # set library-specific data-parallel config flags to ensure gradient accumulation across microbatches
-            self._stage._configure_data_parallel_mode(i == self._n_microbatches - 1)
-
             with record_function(f"Backward {i}"):
                 ops = self._stage.get_bwd_recv_ops(i)
                 works = _sorted_batch_p2p(ops, desc="bwd_recv")
@@ -663,7 +660,6 @@ class ScheduleLoopedBFS(PipelineScheduleMulti):
 
         for stage in reversed(self._stages):
             for i in range(self._n_microbatches):
-                stage._configure_data_parallel_mode(i == self._n_microbatches - 1)
                 with record_function(f"Stage {stage.stage_index} Backward"):
                     ops = stage.get_bwd_recv_ops(i)
                     if ops:
@@ -878,9 +874,6 @@ class ScheduleInterleaved1F1B(PipelineScheduleMulti):
                 elif computation_type == _ComputationType.BACKWARD:
                     # perform backward computation
                     stage = stage_index_to_stage[stage_index]
-                    stage._configure_data_parallel_mode(
-                        mb_index == self._n_microbatches - 1
-                    )
                     loss = self._maybe_get_loss(stage, mb_index)
                     stage.backward_one_chunk(mb_index, loss=loss)
                     ops.extend(stage.get_bwd_send_ops(mb_index))
