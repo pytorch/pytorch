@@ -384,7 +384,9 @@ class FSDPParam:
                 alloc_storage(self._unsharded_param)
                 self._unsharded_param.copy_(unsharded_param)
         else:
-            self._unsharded_param = nn.Parameter(unsharded_param, requires_grad=self.sharded_param.requires_grad)
+            self._unsharded_param = nn.Parameter(
+                unsharded_param, requires_grad=self.sharded_param.requires_grad
+            )
 
     def _unflatten_all_gather_outputs(self) -> Tuple[torch.Tensor, ...]:
         return tuple(

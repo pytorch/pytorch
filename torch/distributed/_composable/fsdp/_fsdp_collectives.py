@@ -1,6 +1,7 @@
 from typing import List, NamedTuple, Optional, Tuple, Union
 
 import torch
+import torch._dynamo.compiled_autograd as ca
 import torch.distributed as dist
 from torch.distributed.distributed_c10d import ReduceOp
 from ._fsdp_common import (
@@ -9,7 +10,6 @@ from ._fsdp_common import (
     _to_dtype_if_needed,
 )
 from ._fsdp_param import FSDPParam
-import torch._dynamo.compiled_autograd as ca
 
 
 class AllGatherResult(NamedTuple):
