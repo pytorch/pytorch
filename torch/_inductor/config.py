@@ -423,6 +423,8 @@ _fuse_ddp_communication_passes: List[Union[Callable[..., None], str]] = [
     "schedule_comm_wait",
 ]
 
+_micro_pipeline_tp: bool = False
+
 
 def decide_compile_threads():
     """
@@ -881,6 +883,12 @@ class trace:
     # INDUCTOR_DOT_GRAPH_SHAPE_SVG = "none" would let us generate HTML-like lables
     # to workaround the above failure.
     dot_graph_shape = os.environ.get("INDUCTOR_DOT_GRAPH_SHAPE_SVG", None)
+
+    # If not None, this is the URL that saves the SVG files of the input/output
+    # graph of each pass that changed the graph
+    # The nodes that are being transformed in each pass will be colored in yellow
+    # URL only supports local directory for now
+    log_url_for_graph_xform = os.environ.get("INDUCTOR_LOG_URL_FOR_GRAPH_XFORM", None)
 
     # Store cProfile (see snakeviz to view)
     compile_profile = False
