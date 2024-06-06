@@ -664,8 +664,9 @@ def _get_openmp_args(cpp_compiler):
 
             openmp_lib = build_paths.openmp_lib()
             fb_openmp_extra_flags = f"-Wp,-fopenmp {openmp_lib}"
-
             passthough_args.append(fb_openmp_extra_flags)
+
+            libs.append("omp")
         else:
             if _is_clang(cpp_compiler):
                 # TODO: fix issue, can't find omp.h
