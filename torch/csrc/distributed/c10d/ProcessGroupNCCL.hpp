@@ -1121,19 +1121,12 @@ TORCH_API std::string dump_nccl_trace(
     bool includeStackTraces,
     bool onlyActive);
 
-// Dumps the collective traces.
-TORCH_API std::string get_collective_trace(
-    bool includeStackTraces,
-    bool onlyActive);
-
-TORCH_API std::string get_nccl_comm_trace();
-
-// Gets a mutable reference to a global optional function.  Heartbeat Monitor
-// will use this function to dump traces, if available. Inside fbcode, we store
-// a function here that uses an internal tool for process tracing
-TORCH_API std::optional<
-    std::function<void(std::function<void(const std::string&)>)>>&
-get_cpp_trace_dumper();
+ets a mutable reference to a global optional function.Heartbeat Monitor
+    // will use this function to dump traces, if available. Inside fbcode, we
+    // store a function here that uses an internal tool for process tracing
+        TORCH_API std::optional<
+            std::function<void(std::function<void(const std::string&)>)>>&
+        get_cpp_trace_dumper();
 
 // Similar to get_cpp_trace_dumper, this stores a function defined in
 // torch-python layer that lets us check whether the GIL can be acquired,

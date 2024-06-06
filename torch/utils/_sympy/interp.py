@@ -15,10 +15,12 @@ from sympy.logic.boolalg import Boolean as SympyBoolean, BooleanAtom
 
 import torch
 from .functions import (
+    CeilToInt,
     CleanDiv,
     FloatPow,
     FloatTrueDiv,
     FloorDiv,
+    FloorToInt,
     IntTrueDiv,
     IsNonOverlappingAndDenseIndicator,
     Mod,
@@ -142,6 +144,8 @@ def sympy_interp(
         TruncToInt: "trunc_to_int",
         sympy.floor: "floor_to_int",
         sympy.ceiling: "ceil_to_int",
+        FloorToInt: "floor_to_int",
+        CeilToInt: "ceil_to_int",
         RoundToInt: "round_to_int",
     }
     if (handler_name := INDEX_DTYPE_HANDLERS.get(expr.func)) is not None:
