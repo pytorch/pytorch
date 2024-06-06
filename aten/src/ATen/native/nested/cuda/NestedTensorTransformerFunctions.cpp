@@ -265,7 +265,9 @@ _scaled_dot_product_flash_attention_nestedtensor_cuda(
           dropout_p,
           is_causal,
           return_debug_mask,
-          scale);
+          scale,
+          c10::nullopt,
+          c10::nullopt);
   // Reshape output to convert nnz to batch_size and seq_len
   attention = wrap_buffer(attention.view(-1), output_shape).transpose(1, 2);
   return std::make_tuple(

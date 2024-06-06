@@ -571,6 +571,15 @@ class FloatTensorSource(ChainedSource):
         return self.base.guard_source()
 
 
+@dataclasses.dataclass(frozen=True)
+class CallMethodItemSource(ChainedSource):
+    def name(self) -> str:
+        return f"{self.base.name()}.item()"
+
+    def guard_source(self):
+        return self.base.guard_source()
+
+
 # This is a synthetic source that is associated with the singleton
 # shape env guard we always register for all frames.  We get the actual
 # guard contents from the ambient ShapeEnv

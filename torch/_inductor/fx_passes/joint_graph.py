@@ -7,7 +7,6 @@ from typing import Dict, List, Set, Union
 import torch
 import torch._guards
 from torch._inductor.constant_folding import ConstantFolder
-from torch._inductor.virtualized import V
 from torch.fx.experimental.symbolic_shapes import statically_known_true
 from torch.multiprocessing.reductions import StorageWeakRef
 
@@ -463,8 +462,7 @@ def mul_softmax_pattern(match: Match, *, inp, other, dim, keepdim, dtype=None):
         max_ = torch.amax(inp, dim=dim, keepdim=keepdim)
         return (inp - max_) * (sign * other)
 
-    with V.fake_mode:
-        match.replace_by_example(repl, [inp, other])
+    match.replace_by_example(repl, [inp, other])
 
 
 for reverse, to_dtype in itertools.product((False, True), repeat=2):
@@ -491,8 +489,7 @@ def div_softmax_pattern(match: Match, *, inp, other, dim, keepdim, dtype=None):
         max_ = torch.amax(inp, dim=dim, keepdim=keepdim)
         return (inp - max_) / (sign * other)
 
-    with V.fake_mode:
-        match.replace_by_example(repl, [inp, other])
+    match.replace_by_example(repl, [inp, other])
 
 
 for to_dtype in (False, True):

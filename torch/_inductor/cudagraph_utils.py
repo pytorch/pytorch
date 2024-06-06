@@ -143,15 +143,16 @@ class BoxedDeviceIndex:
 
 
 def check_for_mutation_ignore_cuda_graph_managed_tensor(
-    gm: torch.fx.GraphModule, compiled_graph, num_fixed: int
+    gm: torch.fx.GraphModule, compiled_graph, static_input_idxs: List[int]
 ) -> Optional[str]:
     default_msg = format_default_skip_message("mutated inputs")
 
     # doesnt work for non-trees because the warmup run would apply mutation twice
     if torch._inductor.config.triton.cudagraph_trees:
+        unique_idxs = set(static_input_idxs)
         # checking if mutation is only on parameters/static inputs
         mutation_indices = [
-            idx for idx in compiled_graph.mutated_input_idxs if idx >= num_fixed
+            idx for idx in compiled_graph.mutated_input_idxs if idx not in unique_idxs
         ]
         has_mutation = len(mutation_indices) != 0
         if not has_mutation:
@@ -162,3 +163,17 @@ def check_for_mutation_ignore_cuda_graph_managed_tensor(
     else:
         has_mutation = len(compiled_graph.mutated_inputs) != 0
         return None if not has_mutation else default_msg
+
+
+def get_placeholder_stack_trace(placeholder: torch.fx.Node) -> Optional[str]:
+    """
+    Gets the first non-empty stack trace of a placeholder or its users.
+    """
+    if placeholder.stack_trace:
+        return placeholder.stack_trace
+
+    for user in placeholder.users:
+        if user.stack_trace:
+            return user.stack_trace
+
+    return None

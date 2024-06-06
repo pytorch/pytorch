@@ -118,6 +118,7 @@ def generate_ttir(kernel, kwargs):
     from triton.runtime.jit import JITFunction
 
     import torch
+    import torch._inductor.ir
     from torch._subclasses.fake_tensor import FakeTensor
 
     if isinstance(kernel, Autotuner):
@@ -287,7 +288,27 @@ def ttir_to_functions(ttir_module) -> Dict[str, Dict[Intermediate, List[Op]]]:
                 # child block to return the block result
                 return_ops = []
                 for block_id in child_block_ids:
-                    if name.startswith("scf."):
+                    if name == "scf.for":
+                        # example:
+                        # %result = scf.for %iv = %lb to %ub step %step iter_args(%arg = %init) -> (i32) ...
+                        # block args: 2 (%iv, %arg)
+                        # op operands: 4 (%lb, %ub, %step, %init)
+                        # `%arg` is mapping to `%init`
+                        for i, idx in enumerate(block_id_to_block_arg_ids[block_id]):
+                            if i == 0:
+                                next_fake_intermediate -= 1
+                                replacements[idx] = Intermediate(next_fake_intermediate)
+                            else:
+                                replacements[idx] = Intermediate(operand_ids[i + 2])
+                    elif name == "scf.while":
+                        # example:
+                        # %3:3 = scf.while (%arg2 = %1, %arg3 = %2, %arg4 = %c0_i32_8) ...
+                        # block args: 3 (%arg2, %arg3, %arg4)
+                        # op operands: 3 (%1, %2, %c0_i32_8)
+                        # `%arg2` is mapping to `%1`, `%arg3` is mapping to `%2`, ...
+                        for i, idx in enumerate(block_id_to_block_arg_ids[block_id]):
+                            replacements[idx] = Intermediate(operand_ids[i])
+                    elif name == "scf.if":
                         # the scf block args are ignored by the pass. but, as they
                         # may be used as operands of the ops inside the block
                         # (and nested blocks inlined in the current block by now),

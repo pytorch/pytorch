@@ -62,6 +62,9 @@ else:
         def __init__(self) -> None:
             self.mesh_stack: List[DeviceMesh] = []
             self.child_to_parent_mapping: Dict[DeviceMesh, DeviceMesh] = {}
+            self.mesh_dim_group_options: Dict[
+                int, Tuple[str, Optional[ProcessGroup.Options]]
+            ] = {}
 
         def get_current_mesh(self) -> "DeviceMesh":
             if len(self.mesh_stack) == 0:
@@ -69,31 +72,46 @@ else:
             return self.mesh_stack[-1]
 
         def create_child_mesh(
-            self, device_mesh: "DeviceMesh", mesh_dim: int, mesh_dim_name: str
+            self, parent_mesh: "DeviceMesh", submesh_dim_names: Tuple[str, ...]
         ) -> "DeviceMesh":
-            # swap the current dim to the last dim then reshape to flatten out other
-            # dims, so we can just extract the list of ranks which contains cur_rank.
-            cur_rank = device_mesh.get_rank()
-            pg_ranks_by_dim = device_mesh.mesh.swapdims(-1, mesh_dim).reshape(
-                -1, device_mesh.mesh.size(mesh_dim)
-            )
+            # submesh_dims are the mesh dimension of the submesh in the parent mesh.
+            submesh_dims = [
+                not_none(parent_mesh.mesh_dim_names).index(mesh_dim_name)
+                for mesh_dim_name in submesh_dim_names
+            ]
+            submesh_dim_sizes = [
+                parent_mesh.mesh.size(mesh_dim) for mesh_dim in submesh_dims
+            ]
 
-            for mesh_1d in pg_ranks_by_dim:
-                sub_mesh = DeviceMesh(
-                    device_mesh.device_type,
-                    mesh_1d,
-                    mesh_dim_names=(mesh_dim_name,),
+            mesh_dims_remained = list(range(parent_mesh.mesh.ndim))
+            for submesh_dim in submesh_dims:
+                mesh_dims_remained.remove(submesh_dim)
+
+            # pg_ranks_by_dim is the size of [number of local ranks of the outermost submesh dimension, *sub_mesh_dims]
+            # This means on each local rank of the outermost slice mesh dim, we have a tensor of submesh size with
+            # the pg ranks of the submesh. From this, we can extract the submesh mesh tensor contains the current rank.
+            pg_ranks_by_dim = parent_mesh.mesh.permute(
+                *mesh_dims_remained, *submesh_dims
+            ).reshape(-1, *submesh_dim_sizes)
+
+            cur_rank = parent_mesh.get_rank()
+            for mesh_nd in pg_ranks_by_dim:
+                submesh = DeviceMesh(
+                    parent_mesh.device_type,
+                    mesh_nd,
+                    mesh_dim_names=submesh_dim_names,
                     _init_backend=False,
                 )
-                if cur_rank in mesh_1d:
-                    res_sub_mesh = sub_mesh
+                if cur_rank in mesh_nd:
+                    res_submesh = submesh
 
-            res_sub_mesh._dim_group_infos = [device_mesh._dim_group_infos[mesh_dim]]  # type: ignore[possibly-undefined]
-            res_sub_mesh._parent_mesh = device_mesh
-            # Assign the current DeviceMesh as the parent of the child DeviceMesh.
-            # We need to update the mappings after the child mesh hash update.
-            self.child_to_parent_mapping[res_sub_mesh] = device_mesh
-            return res_sub_mesh
+            res_submesh._parent_mesh = parent_mesh  # type: ignore[possibly-undefined]
+            res_submesh._dim_group_infos = [
+                parent_mesh._dim_group_infos[mesh_dim] for mesh_dim in submesh_dims  # type: ignore[possibly-undefined]
+            ]
+            self.child_to_parent_mapping[res_submesh] = parent_mesh
+
+            return res_submesh
 
         def get_parent_mesh(self, device_mesh: "DeviceMesh") -> Optional["DeviceMesh"]:
             return self.child_to_parent_mapping.get(device_mesh, None)
@@ -139,6 +157,14 @@ else:
                     f"Available mesh dimensions are: mesh_dim_names={device_mesh.mesh_dim_names}",
                 )
             return not_none(device_mesh.mesh_dim_names.index(mesh_dim_name))
+
+        def _set_mesh_dim_group_options(
+            self,
+            dim: int,
+            backend: str,
+            pg_options: Optional[ProcessGroup.Options] = None,
+        ) -> None:
+            self.mesh_dim_group_options[dim] = (backend, pg_options)
 
     _mesh_resources: _MeshEnv = _MeshEnv()
 
@@ -209,13 +235,13 @@ else:
             self.mesh = (
                 mesh.detach().to(dtype=torch.int)
                 if isinstance(mesh, torch.Tensor)
-                else torch.tensor(mesh, dtype=torch.int)
+                else torch.tensor(mesh, device="cpu", dtype=torch.int)
             )
             self.mesh_dim_names = tuple(mesh_dim_names) if mesh_dim_names else None
 
             # private field to pre-generate DeviceMesh's hash
             self._flatten_mesh_list = tuple(self.mesh.flatten().tolist())
-            self._parent_mesh: Optional["DeviceMesh"] = None
+            self._parent_mesh: Optional[DeviceMesh] = None
             self._thread_id = threading.get_ident()
 
             # Skip process group initialization if xla device or init backend is False
@@ -297,10 +323,24 @@ else:
                     for dim_mesh in pg_ranks_by_dim:
                         subgroup_ranks = dim_mesh.tolist()
 
+                        # Respect dim group options specified via _MeshEnv.set_dim_group_options().
+                        # Inherit from the parent group if no options are specified for the group.
+                        if dim in _mesh_resources.mesh_dim_group_options:
+                            (
+                                backend,
+                                pg_options,
+                            ) = _mesh_resources.mesh_dim_group_options[dim]
+                        else:
+                            backend, pg_options = None, None
+
                         # We temporarily revert the re-use subgroup, since it breaks two internal tests.
                         # Temporarily reverting to resolve test timeout while root-causing.
                         # TODO: Add two tests to cover internal tests scenarios and re-enable reuse subgroup if exists.
-                        dim_group = new_group(ranks=subgroup_ranks)
+                        dim_group = new_group(
+                            ranks=subgroup_ranks,
+                            backend=backend,
+                            pg_options=pg_options,
+                        )
 
                         # only add to dim_groups if the current rank in the subgroup
                         if self.get_rank() in subgroup_ranks:
@@ -367,14 +407,16 @@ else:
                     and self._thread_id == other._thread_id
                 )
 
-        def __getitem__(self, mesh_dim_name: str) -> "DeviceMesh":
+        def __getitem__(
+            self, mesh_dim_names: Union[str, Tuple[str, ...]]
+        ) -> "DeviceMesh":
             """
             Slice the current DeviceMesh based on the mesh_dim_name given to create a child
             DeviceMesh.
 
             Args:
-                mesh_dim_name (str): the name of the mesh dimension of the parent DeviceMesh
-                to create a child DeviceMesh for.
+                mesh_dim_name (Union[str, Tuple[str]]): the name or the tuple of names of the
+                mesh dimension of the parent DeviceMesh to create the child DeviceMesh for.
             Returns:
                 A :class:`DeviceMesh` object
 
@@ -395,16 +437,37 @@ else:
                 >>> # of cross-host(dim 0), and within-host (dim 1).
                 >>> mesh = DeviceMesh(device_type="cuda", mesh=[[0, 1, 2, 3],[4, 5, 6, 7]])
             """
-            if self.mesh.ndim == 1:
-                if self.mesh_dim_names and mesh_dim_name == self.mesh_dim_names[0]:
-                    return self
-                else:
-                    raise RuntimeError(
-                        f"Invalid mesh_dim_name {mesh_dim_name} specified."
-                    )
+            if not self.mesh_dim_names:
+                raise RuntimeError("Cannot slice a DeviceMesh without mesh_dim_names!")
 
-            mesh_dim = _mesh_resources.get_mesh_dim_by_name(self, mesh_dim_name)
-            submesh = _mesh_resources.create_child_mesh(self, mesh_dim, mesh_dim_name)
+            mesh_dim_names = (
+                (mesh_dim_names,) if isinstance(mesh_dim_names, str) else mesh_dim_names
+            )
+
+            error_msg = (
+                f"Invalid mesh_dim_name {mesh_dim_names} specified. "
+                f"Valid mesh_dim_names should be a contiguous subsequence of {self.mesh_dim_names}."
+            )
+
+            if mesh_dim_names == self.mesh_dim_names:
+                return self
+            elif len(mesh_dim_names) > len(self.mesh_dim_names) or not all(
+                mesh_dim_name in self.mesh_dim_names for mesh_dim_name in mesh_dim_names
+            ):
+                raise KeyError(error_msg)
+            # Check if the user-provided slicing is a valid contiguous subsequence of the mesh_dim_names
+            # of the current DeviceMesh.
+            else:
+                outermost_dim_name = mesh_dim_names[0]
+                outermost_dim_idx = self.mesh_dim_names.index(outermost_dim_name)
+                for i, j in zip(
+                    mesh_dim_names,
+                    self.mesh_dim_names[outermost_dim_idx : len(mesh_dim_names)],
+                ):
+                    if i != j:
+                        raise KeyError(error_msg)
+
+            submesh = _mesh_resources.create_child_mesh(self, mesh_dim_names)
             return submesh
 
         def get_group(
@@ -451,21 +514,67 @@ else:
                 return dim_groups
 
         @staticmethod
-        def from_group(group: ProcessGroup, device_type: str) -> "DeviceMesh":
+        def from_group(
+            group: Union[ProcessGroup, List[ProcessGroup]],
+            device_type: str,
+            mesh: Optional[Union[torch.Tensor, "ArrayLike"]] = None,
+            *,
+            mesh_dim_names: Optional[Tuple[str, ...]] = None,
+        ) -> "DeviceMesh":
             """
             Contstructs a :class:`DeviceMesh` with ``device_type`` from an
             existing :class:`ProcessGroup`.
 
-            The constructed device mesh is assumed to be 1D.
+            The constructed device mesh has number of dimensions equal to the
+            number of groups passed. If more than one group is passed, then the
+            ``mesh`` argument is required.
             """
-            # Manually define `_dim_group_infos` instead of relying on the
-            # normal logic since we already have the PG
-            group_ranks = get_process_group_ranks(group)
-            mesh = DeviceMesh(device_type, group_ranks, _init_backend=False)
-            mesh._dim_group_infos = [
-                (_get_group_tag(group), group_ranks, group.group_name)
+            if isinstance(group, ProcessGroup):
+                group_ranks = get_process_group_ranks(group)
+                if (
+                    isinstance(mesh, torch.Tensor) and mesh.tolist() != group_ranks
+                ) or (mesh is not None and mesh != group_ranks):
+                    raise ValueError(
+                        f"Invalid mesh {str(mesh)} for ProcessGroup with ranks {group_ranks}"
+                    )
+                mesh = torch.tensor(group_ranks, device="cpu", dtype=torch.int)
+                device_mesh = DeviceMesh(
+                    device_type,
+                    mesh,
+                    mesh_dim_names=mesh_dim_names,
+                    _init_backend=False,
+                )
+                device_mesh._dim_group_infos = [
+                    (_get_group_tag(group), group_ranks, group.group_name)
+                ]
+                return device_mesh
+            groups = list(group)
+            if len(groups) == 0:
+                raise ValueError("Expects at least one ProcessGroup to be passed")
+            if mesh is None:
+                raise ValueError("Must pass mesh if passing multiple ProcessGroups")
+            mesh = (
+                mesh.detach().to(dtype=torch.int, device="cpu")
+                if isinstance(mesh, torch.Tensor)
+                else torch.tensor(mesh, device="cpu", dtype=torch.int)
+            )
+            if mesh.ndim != len(groups):
+                raise ValueError(
+                    "Expects mesh with ndim equal to number of ProcessGroups but got "
+                    f"mesh {mesh.tolist()} and {len(groups)} ProcessGroups"
+                )
+            device_mesh = DeviceMesh(
+                device_type, mesh, mesh_dim_names=mesh_dim_names, _init_backend=False
+            )
+            device_mesh._dim_group_infos = [
+                (
+                    _get_group_tag(group),
+                    get_process_group_ranks(group),
+                    group.group_name,
+                )
+                for group in groups
             ]
-            return mesh
+            return device_mesh
 
         def size(self, mesh_dim: Optional[int] = None) -> int:
             return self.mesh.numel() if mesh_dim is None else self.mesh.size(mesh_dim)
