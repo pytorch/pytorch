@@ -102,7 +102,6 @@ dtensor_fails = {
     xfail("addr"),
     xfail("all"),
     xfail("allclose"),
-    xfail("alias_copy"),
     xfail("amax"),
     xfail("amin"),
     xfail("aminmax"),

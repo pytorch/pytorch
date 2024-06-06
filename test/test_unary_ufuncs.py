@@ -184,7 +184,7 @@ class TestUnaryUfuncs(TestCase):
             expected, actual, msg, exact_dtype, equal_nan=True
         ):
             if not torch.can_cast(
-                numpy_to_torch_dtype_dict[expected.dtype], dtype
+                numpy_to_torch_dtype_dict[expected.dtype.type], dtype
             ):
                 exact_dtype = False
 
