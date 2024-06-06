@@ -2,6 +2,7 @@
 import copyreg
 import enum
 import functools
+import os
 import warnings
 from collections import OrderedDict
 from copy import deepcopy
@@ -1514,6 +1515,9 @@ class Tensor(torch._C.TensorBase):
                     event = torch.cuda.Event()
                     event.record(sync_stream)
                     stream.wait_event(event)
+        if self.device.type == 'xla' and os.environ.get('PJRT_DEVICE', '').lower() == 'cuda':
+            import torch_xla.utils.dlpack as xla_dlpack
+            return xla_dlpack.to_dlpack(self)
         return torch.to_dlpack(self)
 
     def __dlpack_device__(self) -> Tuple[enum.IntEnum, int]:
@@ -1533,8 +1537,10 @@ class Tensor(torch._C.TensorBase):
             device_type = DLDeviceType.kDLGPU
         elif torch_device_type == "cpu":
             device_type = DLDeviceType.kDLCPU
-        elif self.device.type == "xpu":
+        elif torch_device_type == "xpu":
             device_type = DLDeviceType.kDLOneAPI
+        elif torch_device_type == 'xla' and os.environ.get('PJRT_DEVICE', '').lower() == 'cuda':
+            device_type = DLDeviceType.kDLGPU
         else:
             raise ValueError(f"Unknown device type {torch_device_type} for Dlpack")
         return (device_type, idx)
