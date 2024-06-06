@@ -381,12 +381,12 @@ TORCH_API void ensureUniqueIfOutOfPlaced(
 
 template <
     typename T,
-    typename = torch::enable_if_t<
-        (!std::is_convertible_v<torch::decay_t<T>, at::TensorList> &&
-         !std::is_convertible_v<torch::decay_t<T>, c10::List<at::Tensor>> &&
-         !std::is_convertible_v<torch::decay_t<T>, at::Tensor> &&
+    typename = std::enable_if_t<
+        (!std::is_convertible_v<std::decay_t<T>, at::TensorList> &&
+         !std::is_convertible_v<std::decay_t<T>, c10::List<at::Tensor>> &&
+         !std::is_convertible_v<std::decay_t<T>, at::Tensor> &&
          !std::is_convertible_v<
-             torch::decay_t<T>,
+             std::decay_t<T>,
              c10::intrusive_ptr<c10::ivalue::Object>>)>>
 void addOutput(Node* node, T&&) {
   AT_ERROR(
