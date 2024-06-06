@@ -405,6 +405,75 @@ class SymInt:
 
     # Magic methods installed by torch.fx.experimental.sym_node
 
+    def __round__(self, ndigits=None):
+        return self
+
+    def __truediv__(self, other):
+        if isinstance(other, (builtins.float, SymFloat)):
+            return sym_float(self).__float_truediv__(other)
+        if not isinstance(other, (builtins.int, SymInt)):
+            return NotImplemented
+        return self.__int_truediv__(other)
+
+    def __rtruediv__(self, other):
+        if isinstance(other, (builtins.float, SymFloat)):
+            return sym_float(self).__rfloat_truediv__(other)
+        if not isinstance(other, (builtins.int, SymInt)):
+            return NotImplemented
+        return self.__rint_truediv__(other)
+
+    def __floordiv__(self, other):
+        if isinstance(other, (builtins.float, SymFloat)):
+            return torch.sym_float(math.floor(sym_float(self) / other))
+        if not isinstance(other, (builtins.int, SymInt)):
+            return NotImplemented
+        return self.__int_floordiv__(other)
+
+    def __rfloordiv__(self, other):
+        if isinstance(other, (builtins.float, SymFloat)):
+            return torch.sym_float(math.floor(other / sym_float(self)))
+        if not isinstance(other, (builtins.int, SymInt)):
+            return NotImplemented
+        return self.__rint_floordiv__(other)
+
+    # nb: complex is impossible to handle correctly lol, with
+    # negative base and integral float need to diverge semantics and
+    # just always return complex.  Neener neener pretend this problem
+    # doesn't exist
+    def __pow__(self, other):
+        if isinstance(other, (builtins.float, SymFloat)):
+            return sym_float(self).__pow__(other)
+        if not isinstance(other, (builtins.int, SymInt)):
+            return NotImplemented
+        # Guards!  This guard is necessary because we need to know it to
+        # determine the output type of this operation
+        if other >= 0:
+            return self.__pow_by_natural__(other)
+        else:
+            # Mercifully, when the exponent is negative, Python just promotes
+            # to doubles and does a float pow:
+            #
+            #   if (Py_SIZE(b) < 0 && c == NULL) {
+            #       /* if exponent is negative and there's no modulus:
+            #              return a float.  This works because we know
+            #              that this calls float_pow() which converts its
+            #              arguments to double. */
+            #       Py_DECREF(a);
+            #       Py_DECREF(b);
+            #       return PyFloat_Type.tp_as_number->nb_power(v, w, x);
+            #   }
+            return sym_float(self).__pow__(sym_float(other))
+
+    def __rpow__(self, other):
+        if isinstance(other, (builtins.float, SymFloat)):
+            return sym_float(self).__rpow__(other)
+        if not isinstance(other, (builtins.int, SymInt)):
+            return NotImplemented
+        if self >= 0:  # self is exponent
+            return self.__rpow_by_natural__(other)
+        else:
+            return sym_float(self).__rpow__(sym_float(other))
+
     def __eq__(self, other: object) -> builtins.bool:
         raise NotImplementedError("type stub not overridden")
 
@@ -424,6 +493,24 @@ class SymInt:
         raise NotImplementedError("type stub not overridden")
 
     def __mul__(self, other) -> "SymInt":
+        raise NotImplementedError("type stub not overridden")
+
+    def __pow_by_natural__(self, other) -> "SymInt":
+        raise NotImplementedError("type stub not overridden")
+
+    def __rpow_by_natural__(self, other) -> "SymInt":
+        raise NotImplementedError("type stub not overridden")
+
+    def __int_truediv__(self, other) -> "SymFloat":
+        raise NotImplementedError("type stub not overridden")
+
+    def __rint_truediv__(self, other) -> "SymFloat":
+        raise NotImplementedError("type stub not overridden")
+
+    def __int_floordiv__(self, other) -> "SymFloat":
+        raise NotImplementedError("type stub not overridden")
+
+    def __rint_floordiv__(self, other) -> "SymFloat":
         raise NotImplementedError("type stub not overridden")
 
     def __sym_max__(self, other):
@@ -461,8 +548,42 @@ class SymFloat:
         # class has a field named node that stores SymNode
         self.node = node
 
+    def __truediv__(self, other):
+        if not isinstance(other, (builtins.int, builtins.float, SymInt, SymFloat)):
+            return NotImplemented
+        return self.__float_truediv__(sym_float(other))
+
+    def __rtruediv__(self, other):
+        if not isinstance(other, (builtins.int, builtins.float, SymInt, SymFloat)):
+            return NotImplemented
+        return self.__rfloat_truediv__(sym_float(other))
+
+    def __floordiv__(self, other):
+        if not isinstance(other, (builtins.int, builtins.float, SymInt, SymFloat)):
+            return NotImplemented
+        return torch.sym_float(math.floor(self / sym_float(other)))
+
+    def __rfloordiv__(self, other):
+        if not isinstance(other, (builtins.int, builtins.float, SymInt, SymFloat)):
+            return NotImplemented
+        return torch.sym_float(math.floor(sym_float(other) / self))
+
     def __bool__(self):
         return self.node.bool_()
+
+    # Symbolic power does NOT work with negative base, this is to avoid
+    # potential complex outputs
+    def __pow__(self, other):
+        if not isinstance(other, (builtins.int, builtins.float, SymInt, SymFloat)):
+            return NotImplemented
+        torch._check(self >= 0)
+        return self.__float_pow__(other)
+
+    def __rpow__(self, other):
+        if not isinstance(other, (builtins.int, builtins.float, SymInt, SymFloat)):
+            return NotImplemented
+        torch._check(other >= 0)
+        return self.__rfloat_pow__(other)
 
     # Magic methods installed by torch.fx.experimental.sym_node
 
@@ -479,6 +600,18 @@ class SymFloat:
         raise NotImplementedError("type stub not overridden")
 
     def __ge__(self, other) -> builtins.bool:
+        raise NotImplementedError("type stub not overridden")
+
+    def __float_pow__(self, other) -> "SymFloat":
+        raise NotImplementedError("type stub not overridden")
+
+    def __rfloat_pow__(self, other) -> "SymFloat":
+        raise NotImplementedError("type stub not overridden")
+
+    def __float_truediv__(self, other) -> "SymFloat":
+        raise NotImplementedError("type stub not overridden")
+
+    def __rfloat_truediv__(self, other) -> "SymFloat":
         raise NotImplementedError("type stub not overridden")
 
     def __trunc__(self):
@@ -613,28 +746,42 @@ def sym_int(a):
 
 
 def sym_max(a, b):
-    """SymInt-aware utility for max()."""
+    """
+    SymInt-aware utility for max which avoids branching on a < b.
+    Unlike builtins.max(), this only works for int/float, and it always
+    promotes to float if any argument is float (unlike builtins.max, which
+    will faithfully preserve the type of the input argument).
+    """
     if overrides.has_torch_function((a, b)):
         return overrides.handle_torch_function(sym_max, (a, b), a, b)
     if isinstance(a, (SymInt, SymFloat)):
         return a.__sym_max__(b)
     elif isinstance(b, (SymInt, SymFloat)):
-        # NB: If you actually care about preserving output type exactly
-        # if you do something like max(0, 0.0), it is NOT sound to treat
-        # min/max as commutative
+        # Due to promotion semantics, this is operator is commutative:
+        # max(1, 1.0) === max(1.0, 1) === 1.0
         return b.__sym_max__(a)
-    return builtins.max(a, b)  # type: ignore[operator]
+    # TODO: Probably can make bool work too, just lazy
+    assert isinstance(a, (builtins.int, builtins.float)), type(a)
+    assert isinstance(b, (builtins.int, builtins.float)), type(b)
+    if isinstance(a, builtins.float) or isinstance(b, builtins.float):
+        return builtins.float(builtins.max(a, b))
+    else:
+        return builtins.max(a, b)
 
 
 def sym_min(a, b):
-    """SymInt-aware utility for min()."""
     if overrides.has_torch_function((a, b)):
         return overrides.handle_torch_function(sym_min, (a, b), a, b)
     if isinstance(a, (SymInt, SymFloat)):
         return a.__sym_min__(b)
     elif isinstance(b, (SymInt, SymFloat)):
         return b.__sym_min__(a)
-    return builtins.min(a, b)  # type: ignore[operator]
+    assert isinstance(a, (builtins.int, builtins.float)), type(a)
+    assert isinstance(b, (builtins.int, builtins.float)), type(b)
+    if isinstance(a, builtins.float) or isinstance(b, builtins.float):
+        return builtins.float(builtins.min(a, b))
+    else:
+        return builtins.min(a, b)
 
 
 # Drop in replacement for math.sqrt, math.sin, math.cos etc
@@ -721,14 +868,14 @@ for __name in dir(_C):
         __all__.append(__name)
         __obj = getattr(_C, __name)
         if callable(__obj) or inspect.isclass(__obj):
-            if __obj.__module__ != __name__:
+            if __obj.__module__ != __name__:  # "torch"
                 # TODO: fix their module from C++ side
                 if __name not in {
                     "DisableTorchFunctionSubclass",
                     "DisableTorchFunction",
                     "Generator",
                 }:
-                    __obj.__module__ = __name__
+                    __obj.__module__ = __name__  # "torch"
     elif __name == "TensorBase":
         # issue 109438 / pr 109940. Prevent TensorBase from being copied into torch.
         delattr(sys.modules[__name__], __name)
@@ -1758,7 +1905,7 @@ for __name in dir(_C._VariableFunctions):
     if __name.startswith("__") or __name in PRIVATE_OPS:
         continue
     __obj = getattr(_C._VariableFunctions, __name)
-    __obj.__module__ = __name__
+    __obj.__module__ = __name__  # "torch"
     # Hide some APIs that should not be public
     if __name == "segment_reduce":
         # TODO: Once the undocumented FC window is passed, remove the line bellow
@@ -1876,7 +2023,7 @@ import torch.nn.qat
 import torch.nn.quantizable
 import torch.nn.quantized
 
-_C._init_names(list(torch._storage_classes))
+_C._init_names(list(_storage_classes))
 
 # attach docstrings to torch and tensor functions
 from torch import _size_docs, _storage_docs, _tensor_docs, _torch_docs
@@ -1905,7 +2052,7 @@ from torch import quasirandom as quasirandom  # usort: skip
 # If you are seeing this, it means that this call site was not checked if
 # the memory format could be preserved, and it was switched to old default
 # behaviour of contiguous
-legacy_contiguous_format = contiguous_format
+legacy_contiguous_format = _C.contiguous_format
 
 # Register fork handler to initialize OpenMP in child processes (see gh-28389)
 from torch.multiprocessing._atfork import register_after_fork
@@ -2185,7 +2332,10 @@ def compile(
         backend = _TorchCompileWrapper(backend, mode, options, dynamic)
 
     return torch._dynamo.optimize(
-        backend=backend, nopython=fullgraph, dynamic=dynamic, disable=disable
+        backend=backend,
+        nopython=fullgraph,
+        dynamic=dynamic,
+        disable=disable,
     )(model)
 
 
@@ -2290,8 +2440,6 @@ else:
 
         # Lazy modules
         if name in _lazy_modules:
-            import importlib
-
             return importlib.import_module(f".{name}", __name__)
 
         raise AttributeError(f"module '{__name__}' has no attribute '{name}'")
@@ -2322,7 +2470,9 @@ def get_device_module(device: Optional[Union[torch.device, str]] = None):
 
 
 def _constrain_as_size(
-    symbol, min: Optional[builtins.int] = None, max: Optional[builtins.int] = None
+    symbol,
+    min: Optional[builtins.int] = None,
+    max: Optional[builtins.int] = None,
 ):
     """
     This indicates that a given int is size-like, and can be used in any context where a size is expected.

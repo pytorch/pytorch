@@ -275,16 +275,6 @@ void expectOutOfPlaceMultiBoxedCallingWorks(const KernelFunction& func) {
   EXPECT_TRUE(stack[1].toTensor().is_same(t2));
 }
 
-void expectBoxedCallingFailsWith(const KernelFunction& func, const char* errorMessage) {
-  called_with_args = c10::nullopt;
-  vector<IValue> stack {3, 4};
-  OperatorHandle dummy = makeDummyOperatorHandle();
-
-  expectThrows<c10::Error>([&] {
-    func.callBoxed(dummy, CPU_TEST_SET, &stack);
-  }, errorMessage);
-}
-
 //
 // unboxed calling tests:
 //
