@@ -18,7 +18,7 @@ RUN bash ./install_base.sh && rm install_base.sh
 COPY ./aotriton_version.txt aotriton_version.txt
 COPY ./common/common_utils.sh common_utils.sh
 COPY ./common/install_aotriton.sh install_aotriton.sh
-RUN bash ./install_aotriton.sh /opt && rm -rf install_aotriton.sh aotriton aotriton_version.txt common_utils.sh
+RUN ["/bin/bash", "-c", "./install_aotriton.sh /opt && rm -rf install_aotriton.sh aotriton aotriton_version.txt common_utils.sh"]
 ENV AOTRITON_INSTALLED_PREFIX /opt/aotriton
 
 # Install clang
