@@ -63,20 +63,22 @@ class ScheduleTest(MultiProcContinousTest):
         target = torch.randn(batch_size, d_hid, device=self.device)
         loss_fn = torch.nn.MSELoss(reduction="sum")
 
-        # Create a pipeline
         chunks = 4
+        x_mb = x.chunk(chunks)[0]
+
+        # Create a pipeline
         split_spec = mod.split_spec if hasattr(mod, "split_spec") else None
         pipe = pipeline(
             mod,
-            chunks,
-            example_args=(x,),
+            mb_args=(x_mb,),
             split_spec=split_spec,
         )
 
         stage = PipelineStage(
             pipe,
             self.rank,
-            device=self.device,
+            self.device,
+            chunks,  # to be cleaned
         )
 
         # Attach to a schedule
@@ -105,17 +107,20 @@ class ScheduleTest(MultiProcContinousTest):
         loss_fn = torch.nn.MSELoss(reduction="sum")
 
         chunks = 4
+        x_mb = x.chunk(chunks)[0]
+        y_mb = y.chunk(chunks)[0]
+
         pipe = pipeline(
             mod,
-            chunks,
-            example_args=(x,),
-            example_kwargs={"y": y},
+            mb_args=(x_mb,),
+            mb_kwargs={"y": y_mb},
         )
 
         stage = PipelineStage(
             pipe,
             self.rank,
-            device=self.device,
+            self.device,
+            chunks,  # to be cleaned
         )
 
         # Attach to a schedule
@@ -166,18 +171,19 @@ class ScheduleTest(MultiProcContinousTest):
 
         # Create a pipeline
         chunks = 4
+        x_mb = x.chunk(chunks)[0]
         split_spec = mod.split_spec if hasattr(mod, "split_spec") else None
         pipe = pipeline(
             mod,
-            chunks,
-            example_args=(x,),
+            mb_args=(x_mb,),
             split_spec=split_spec,
         )
 
         stage = PipelineStage(
             pipe,
             self.rank,
-            device=self.device,
+            self.device,
+            chunks,  # to be cleaned
         )
 
         # Attach to a schedule

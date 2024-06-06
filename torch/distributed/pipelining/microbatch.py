@@ -3,6 +3,7 @@ import logging
 from typing import Any, Dict, List, Optional, Tuple
 
 import torch
+from torch.fx.node import map_aggregate
 from torch.utils._pytree import tree_flatten, tree_unflatten
 
 
@@ -64,6 +65,60 @@ class TensorChunkSpec:
 # Class used to specify replication of inputs
 class _Replicate:
     pass
+
+
+class ArgsChunkSpec:
+    """
+    A helper for creating chunking specification for positional tensor
+    arguments.
+
+    Example:
+        >>> # xdoctest: +SKIP
+        >>> # There are three positional arguments to the model, and
+        >>> # we are chunking them along dimension 0, 0 and 1, respectively
+        >>> args_chunk_spec = ArgsChunkSpec.create((0, 0, 1))
+
+    # TODO: Do we need to support `_Replicate`? It's unclear, dropping for now.
+    """
+
+    @staticmethod
+    def create(
+        chunk_dims: Tuple[int, ...],
+    ):
+        """
+        Create a tuple of `TensorChunkSpec` from a tuple of chunk dimensions
+        (int's).
+        """
+        args_chunk_spec = map_aggregate(
+            chunk_dims,
+            lambda dim: TensorChunkSpec(dim),
+        )
+        return args_chunk_spec
+
+
+class KwargsChunkSpec:
+    """
+    A helper for creating chunking specification for keyword tensor arguments.
+
+    Example:
+        >>> # xdoctest: +SKIP
+        >>> # Chunk dimension 0 for the "id" argument, 1 for the "mask" argument
+        >>> kwargs_chunk_spec = KwargsChunkSpec.create({"id": 0, "mask": 1})
+    """
+
+    @staticmethod
+    def create(
+        chunk_dims: Dict[str, int],
+    ):
+        """
+        Create a dictionary of `TensorChunkSpec` from a dictionary of chunk
+        dimensions (int's).
+        """
+        kwargs_chunk_spec = map_aggregate(
+            chunk_dims,
+            lambda dim: TensorChunkSpec(dim),
+        )
+        return kwargs_chunk_spec
 
 
 def _shard_dict_of_args(

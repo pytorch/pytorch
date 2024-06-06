@@ -1,11 +1,11 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 # Owner(s): ["oncall: distributed"]
 import torch
-from torch.distributed.pipelining import (
+from torch.distributed.pipelining import pipe_split, pipeline
+from torch.distributed.pipelining.microbatch import (
     ArgsChunkSpec,
     KwargsChunkSpec,
-    pipe_split,
-    pipeline,
+    split_args_kwargs_into_chunks,
 )
 from torch.testing._internal.common_utils import run_tests, TestCase
 
@@ -50,15 +50,24 @@ class ChunkSpecTests(TestCase):
         y = torch.randn(batch_size, d_hid)
         z = torch.randn(batch_size, d_hid)
 
-        chunks = 4
+        num_chunks = 4
 
-        with ArgsChunkSpec((0, 0)), KwargsChunkSpec({"z": 0}):
-            pipe = pipeline(
-                mod,
-                chunks,
-                example_args=(x, y),
-                example_kwargs={"z": z},
-            )
+        args_chunk_spec = ArgsChunkSpec.create((0, 0))
+        kwargs_chunk_spec = KwargsChunkSpec.create({"z": 0})
+
+        args_split, kwargs_split = split_args_kwargs_into_chunks(
+            (x, y),
+            {"z": z},
+            num_chunks,
+            args_chunk_spec,
+            kwargs_chunk_spec,
+        )
+
+        pipe = pipeline(
+            mod,
+            mb_args=args_split[0],
+            mb_kwargs=kwargs_split[0],
+        )
 
         assert pipe.num_stages == 4
 
