@@ -3600,7 +3600,8 @@ def constant_pad_nd(x, padding, fill_value=0):
             fill_value,
             isinstance(x, TensorBox)
             and isinstance(x.data, ir.StorageBox)
-            and x.data.is_input_buffer(),
+            and x.data.is_input_buffer()
+            and x.get_numel() != 0,
         )
 
     def offset_fn(index):
