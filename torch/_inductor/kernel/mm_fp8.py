@@ -239,8 +239,8 @@ def tuned_fp8_mm(
     layout=None,
 ):
     add_layout_constraint(aten._fp8_mm.default, constrain_to_fx_strides)
-    m, n, k, layout, mat_a, mat_b = mm_args(
-        mat_a, mat_b, layout=layout, out_dtype=out_dtype
+    m, n, k, layout, mat_a, mat_b, scale_a, scale_b = mm_args(
+        mat_a, mat_b, scale_a, scale_b, layout=layout, out_dtype=out_dtype
     )
 
     is_scaling = not (scale_a is None and scale_b is None)
@@ -261,7 +261,6 @@ def tuned_fp8_mm(
         )
 
     static_shape, is_nonzero = _is_static_problem([mat_a, mat_b], layout)
-
     if is_nonzero and use_triton_template(layout, enable_float8=True):
         for config in fp8_mm_configs(m, n, k):
             kwargs = fp8_mm_options(
