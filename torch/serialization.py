@@ -816,6 +816,7 @@ def _save(obj, zip_file, pickle_module, pickle_protocol, _disable_byteorder_reco
             # If storage is allocated, ensure that any other saved storages
             # pointing to the same data all have the same dtype. If storage is
             # not allocated, don't perform this check
+            # FIXME: data_ptr access was deprecated for FakeTensor
             if storage.data_ptr() != 0:
                 if storage.data_ptr() in storage_dtypes:
                     if storage_dtype != storage_dtypes[storage.data_ptr()]:
@@ -826,7 +827,10 @@ def _save(obj, zip_file, pickle_module, pickle_protocol, _disable_byteorder_reco
                     storage_dtypes[storage.data_ptr()] = storage_dtype
 
             storage_key = id_map.setdefault(storage._cdata, str(len(id_map)))
-            location = location_tag(storage)
+            if hasattr(storage, "_fake_device"):
+                location = storage._fake_device.type
+            else:
+                location = location_tag(storage)
             serialized_storages[storage_key] = storage
 
             return ('storage',
@@ -856,14 +860,18 @@ def _save(obj, zip_file, pickle_module, pickle_protocol, _disable_byteorder_reco
     for key in sorted(serialized_storages.keys()):
         name = f'data/{key}'
         storage = serialized_storages[key]
-        # given that we copy things around anyway, we might use storage.cpu()
-        # this means to that to get tensors serialized, you need to implement
-        # .cpu() on the underlying Storage
-        if storage.device.type != 'cpu':
-            storage = storage.cpu()
-        # Now that it is on the CPU we can directly copy it into the zip file
         num_bytes = storage.nbytes()
-        zip_file.write_record(name, storage, num_bytes)
+        if hasattr(storage, "_fake_device"):
+            zip_file.write_record_metadata(name, num_bytes)
+            del storage._fake_device
+        else:
+            # given that we copy things around anyway, we might use storage.cpu()
+            # this means to that to get tensors serialized, you need to implement
+            # .cpu() on the underlying Storage
+            if storage.device.type != 'cpu':
+                storage = storage.cpu()
+            # Now that it is on the CPU we can directly copy it into the zip file
+            zip_file.write_record(name, storage, num_bytes)
 
 
 def load(

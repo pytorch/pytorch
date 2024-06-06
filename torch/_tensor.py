@@ -217,6 +217,11 @@ class Tensor(torch._C.TensorBase):
         if has_torch_function_unary(self):
             return handle_torch_function(Tensor.__reduce_ex__, (self,), self, proto)
         func, args = self._reduce_ex_internal(proto)
+        if (
+            type(self) is torch._subclasses.fake_tensor.FakeTensor
+            and not self.untyped_storage()._serialize
+        ):
+            return (_rebuild_from_type_v2, (func, Tensor, args, None))
         return (_rebuild_from_type_v2, (func, type(self), args, state))
 
     def storage(self):
@@ -390,6 +395,7 @@ class Tensor(torch._C.TensorBase):
                 )
                 or self.data_ptr() == 0
             )
+            and self.untyped_storage()._serialize
         ):
             arg_wrapper_subclass = (
                 type(self),
@@ -416,6 +422,12 @@ class Tensor(torch._C.TensorBase):
                     dtype=self.dtype,
                     _internal=True,
                 )  # type: ignore[assignment]
+            if type(self) is torch._subclasses.FakeTensor:
+                # stash device on storage
+                if isinstance(storage, torch.storage.UntypedStorage):
+                    storage._fake_device = self.device  # type: ignore[attr-defined]
+                elif isinstance(storage, torch.storage.TypedStorage):
+                    storage._untyped_storage._fake_device = self.device
             args = (
                 storage,
                 self.storage_offset(),

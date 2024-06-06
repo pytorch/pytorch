@@ -20,6 +20,7 @@ from copy import deepcopy
 from itertools import product
 from types import ModuleType
 
+from torch._subclasses import FakeTensorMode
 from torch._utils_internal import get_file_path_2
 from torch._utils import _rebuild_tensor
 from torch.utils._import_utils import import_dill
@@ -4018,10 +4019,17 @@ class TestSerialization(TestCase, SerializationMixin):
             self.assertEqual(y['x'][:2].to(dtype=torch.float32), torch.tensor([-0.25, 0.25]))
 
     @parametrize('filename', (True, False))
+    @parametrize('device', (torch.device('cpu'), torch.device('cuda')))
+    @parametrize('dtype', (torch.complex32, torch.float32))  # test both rebuild_v2 and rebuild_v3 dtypes
     @unittest.skipIf(IS_WINDOWS, "NamedTemporaryFile on windows")
     @unittest.skipIf(IS_FBCODE, "miniz version differs between fbcode and oss")
-    def test_filewriter_metadata_writing(self, filename):
-        sd = torch.nn.Linear(3, 5).state_dict()
+    def test_filewriter_metadata_writing(self, filename, device, dtype):
+        '''
+        Using a FakeTensorMode and annotating untyped_storage with `_serialize` will
+        use the write_record_metadata path for storages. This test verifies the result
+        of saving such a checkpoint (metadata + space reserved for the storage size).
+        '''
+        sd = torch.nn.Linear(3, 5, device=device, dtype=dtype).state_dict()
         weight_nbytes = sd['weight'].untyped_storage().nbytes()
         bias_nbytes = sd['bias'].untyped_storage().nbytes()
         # TemporaryFileName will give a string
@@ -4043,17 +4051,16 @@ class TestSerialization(TestCase, SerializationMixin):
             # write nulls for 'data/0' and 'data/1'
             with open(f if filename else f.name, 'rb+') as opened_f:
                 opened_f.seek(data_0_offset)
-                opened_f.write(b'0' * weight_nbytes)
+                opened_f.write(b'\x00' * weight_nbytes)
                 opened_f.seek(data_1_offset)
-                opened_f.write(b'0' * bias_nbytes)
+                opened_f.write(b'\x00' * bias_nbytes)
 
-            with torch.serialization._open_zipfile_writer(g) as zip_file:
-                data_value = data_file.getvalue()
-                zip_file.write_record('data.pkl', data_value, len(data_value))
-                zip_file.write_record('byteorder', sys.byteorder, len(sys.byteorder))
-                # Only write metadata for storages
-                zip_file.write_record_metadata('data/0', weight_nbytes)
-                zip_file.write_record_metadata('data/1', bias_nbytes)
+            with FakeTensorMode():
+                sd2 = torch.nn.Linear(3, 5, device=device, dtype=dtype).state_dict()
+
+            for v in sd2.values():
+                v.untyped_storage()._serialize = False
+            torch.save(sd2, g)
 
             if not filename:
                 f.seek(0)

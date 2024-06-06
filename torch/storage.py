@@ -25,6 +25,7 @@ class _StorageBase:
     is_sparse: bool = False
     is_sparse_csr: bool = False
     device: torch.device
+    _serialize: bool = True
 
     def __init__(self, *args, **kwargs): ...  # noqa: E704
     def __len__(self) -> int: ...  # type: ignore[empty-body] # noqa: E704
@@ -547,6 +548,10 @@ class TypedStorage:
         """Returns the file name associated with this storage if the storage was memory mapped from a file.
            or ``None`` if the storage was not created by memory mapping a file."""
         return self._untyped_storage.filename
+
+    @property
+    def _serialize(self) -> bool:
+        return self._untyped_storage._serialize
 
     def fill_(self, value):
         _warn_typed_storage_removal()
