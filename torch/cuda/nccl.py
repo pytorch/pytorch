@@ -32,6 +32,15 @@ def is_available(tensors):
 
 
 def version():
+    """
+    Returns the version of the NCCL.
+
+
+    This function returns a tuple containing the major, minor, and patch version numbers of the NCCL.
+    The suffix is also included in the tuple if a version suffix exists.
+    Returns:
+        tuple: The version information of the NCCL.
+    """
     ver = torch._C._nccl_version()
     major = ver >> 32
     minor = (ver >> 16) & 65535
@@ -89,8 +98,10 @@ def reduce(
             )
         else:
             warnings.warn(
-                "nccl.reduce with an output tensor list is deprecated. "
-                "Please specify a single output tensor with argument 'output' instead instead."
+                "`nccl.reduce` with an output tensor list is deprecated. "
+                "Please specify a single output tensor with argument 'output' instead instead.",
+                FutureWarning,
+                stacklevel=2,
             )
             _output = outputs[root]
     elif not isinstance(output, torch.Tensor) and isinstance(
@@ -99,7 +110,9 @@ def reduce(
         # User called old API with positional arguments of list of output tensors.
         warnings.warn(
             "nccl.reduce with an output tensor list is deprecated. "
-            "Please specify a single output tensor."
+            "Please specify a single output tensor.",
+            FutureWarning,
+            stacklevel=2,
         )
         _output = output[root]
     else:

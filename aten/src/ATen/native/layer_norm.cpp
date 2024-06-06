@@ -74,7 +74,7 @@ void layer_norm_cpu_out(
 
 std::tuple<Tensor, Tensor, Tensor> layer_norm_cpu(
     const Tensor& input,
-    IntArrayRef normalized_shape, const std::optional<Tensor>& weight_opt /* optional */, const c10::optional<Tensor>& bias_opt /* optional */,
+    IntArrayRef normalized_shape, const std::optional<Tensor>& weight_opt /* optional */, const std::optional<Tensor>& bias_opt /* optional */,
     double eps) {
   // See [Note: hacky wrapper removal for optional tensor]
   c10::MaybeOwned<Tensor> weight_maybe_owned = at::borrow_from_optional_tensor(weight_opt);
@@ -186,7 +186,7 @@ std::tuple<Tensor, Tensor, Tensor> layer_norm_backward_cpu(
 
 Tensor layer_norm_symint(
     const Tensor& input,
-    c10::SymIntArrayRef normalized_shape, const std::optional<Tensor>& weight_opt /* optional */, const c10::optional<Tensor>& bias_opt /* optional */,
+    c10::SymIntArrayRef normalized_shape, const std::optional<Tensor>& weight_opt /* optional */, const std::optional<Tensor>& bias_opt /* optional */,
     double eps,
     bool /* cudnn_enable, deprecated */) {
   // See [Note: hacky wrapper removal for optional tensor]
@@ -204,7 +204,7 @@ DEFINE_DISPATCH(LayerNormBackwardKernel);
 // Ported from pytorch/xla repo
 std::tuple<Tensor, Tensor, Tensor> math_native_layer_norm(
     const Tensor& input,
-    IntArrayRef normalized_shape, const std::optional<Tensor>& weight_opt, const c10::optional<Tensor>& bias_opt,
+    IntArrayRef normalized_shape, const std::optional<Tensor>& weight_opt, const std::optional<Tensor>& bias_opt,
     double eps) {
   // See [Note: hacky wrapper removal for optional tensor]
   c10::MaybeOwned<Tensor> weight_maybe_owned = at::borrow_from_optional_tensor(weight_opt);

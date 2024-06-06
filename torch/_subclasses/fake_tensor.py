@@ -24,7 +24,7 @@ from weakref import ReferenceType
 import torch
 import torch._custom_op
 import torch._logging
-from torch._C._functorch import is_functorch_wrapped_tensor
+from torch._C._functorch import is_functorch_wrapped_tensor, is_legacy_batchedtensor
 
 from torch._guards import Source
 from torch._ops import OpOverload
@@ -56,6 +56,20 @@ if TYPE_CHECKING:
 
 class _Unassigned:
     pass
+
+
+def _is_plain_tensor(t):
+    return (
+        type(t) is torch.Tensor
+        and t.layout == torch.strided
+        and not (
+            t.is_sparse
+            or t.is_nested
+            or is_functorch_wrapped_tensor(t)
+            or is_legacy_batchedtensor(t)
+            or torch._is_functional_tensor(t)
+        )
+    )
 
 
 _UNASSIGNED = _Unassigned()
@@ -214,9 +228,11 @@ class FakeTensorConverter:
 
     meta_converter: MetaConverter
     constant_storage_mapping: Dict[StorageWeakRef, List[ReferenceType]]
+    export: bool
 
-    def __init__(self, *, copy_data=False):
+    def __init__(self, *, copy_data=False, export=False):
         self.meta_converter = MetaConverter(copy_data=copy_data)
+        self.export = export
 
         # map from to storage to corresponding constant tensors
         self.constant_storage_mapping = {}
@@ -275,6 +291,7 @@ class FakeTensorConverter:
         *,
         source=None,
         symbolic_context=None,
+        trace=True,
     ):
         # see note [Tensor Fakification and Symbol Caching]
         if not symbolic_context and not source and shape_env:
@@ -317,9 +334,79 @@ class FakeTensorConverter:
             callback=mk_fake_tensor,
             source=source,
             symbolic_context=symbolic_context,
+            trace=trace,
         )
         if out is NotImplemented:
             raise UnsupportedFakeTensorException("meta converter nyi")
+
+        from torch._dynamo.source import RandomValueSource
+
+        value = None
+        if (
+            not self.export
+            and _is_plain_tensor(t)  # mostly, we want to know if item() works
+            and t.dim() == 0
+            and t.device.type == "cpu"
+            # All integer types are fair game, because signed overflow is UB
+            # (and even int64 can overflow, since integers in Python are
+            # arbitrary precision). But only float64 is OK for float, because
+            # switching between float32 and float64 changes semantics in an
+            # observable way without hitting UB.
+            and t.dtype
+            in [torch.int64, torch.int32, torch.int16, torch.int8, torch.float64]
+            and source is not None
+            # Impede setting up item() on things coming from random.  These
+            # are not "real" item() calls, instead UnspecializedPythonVariable
+            # is unsafely pretending an int is a tensor, which can sometimes
+            # implicitly cause an item call.  The problem is this is pretty
+            # unsound: there's no reason substituting an int with a Tensor is
+            # going to give the same results.  Today, you mostly get around
+            # this by typically not having capture_scalar_outputs on and graph
+            # breaking when someone tries to use the unspec variable in an
+            # int-y context.  But allowing it through here would break that.
+            # So don't.
+            #
+            # Once random values are setup to be represented as
+            # SymNodeVariable, this condition can be removed.  To check if
+            # you've done it right, this is a good test:
+            #
+            #   PYTORCH_TEST_WITH_DYNAMO=1 python test/test_reductions.py -k
+            #   TestReductionsCPU.test_dim_reduction_fns_fn_name_amax_cpu_bfloat16
+            and not isinstance(source, RandomValueSource)
+            # In Dynamo, shape_env is never none (even with static shapes).
+            # However, FakeTensorMode can be used by hand and in some cases
+            # ShapeEnv is not allocated.
+            and shape_env is not None
+        ):
+            from torch._dynamo.source import CallMethodItemSource, FloatTensorSource
+            from torch.fx.experimental.symbolic_shapes import DimDynamic
+
+            with no_dispatch():
+                value = t.item()
+            # Peephole strip out unnecessary torch.as_tensor(x).item()
+            if isinstance(source, FloatTensorSource):
+                item_source = source.base
+            else:
+                item_source = CallMethodItemSource(source)
+            symbol = shape_env.create_unspecified_symbol(
+                value,
+                source=item_source,
+                dynamic_dim=DimDynamic.DYNAMIC,
+            )
+            # NB: reusing item_memo here ensures that we invalidate on
+            # mutation
+            if t.dtype == torch.int64:
+                out.item_memo = shape_env.create_symintnode(
+                    symbol,
+                    hint=value,
+                    source=item_source,
+                )
+            elif t.dtype == torch.float64:
+                out.item_memo = shape_env.create_symfloatnode(
+                    symbol,
+                    hint=value,
+                    source=item_source,
+                )
         if make_constant:
             self.add_constant_storage_mapping(out)
         # NB: meta_converter set the memo
@@ -853,6 +940,16 @@ class FakeTensorMode(TorchDispatchMode):
         allow_non_fake_inputs=False,
         shape_env=None,
         static_shapes=None,
+        # TODO: This is a temporary measure, see
+        # https://github.com/pytorch/pytorch/pull/126245#discussion_r1604185748
+        # We're currently solely using this to impede population of
+        # item_memo for 0d scalar tensor inputs when export, because this
+        # causes things that used to be deferred runtime asserts to turn into
+        # guards, and then the guards are just lost.  We can potentially fix
+        # this by ensuring guards also get put in the graph, but this is
+        # pending a rework of how deferred runtime asserts in export.  Once
+        # that's done, we can remove this.
+        export=False,
     ):
         log.debug("create_mode 0x%x", id(self))
         self.allow_fallback_kernels = allow_fallback_kernels
@@ -864,7 +961,8 @@ class FakeTensorMode(TorchDispatchMode):
             torch._functorch.config.fake_tensor_propagate_real_tensors
         )
         self.fake_tensor_converter = FakeTensorConverter(
-            copy_data=self.propagate_real_tensors
+            copy_data=self.propagate_real_tensors,
+            export=export,
         )
 
         if static_shapes is not None:
@@ -1629,7 +1727,7 @@ class FakeTensorMode(TorchDispatchMode):
         for run_impl_check, op_impl in op_implementations_checks:
             if run_impl_check(func):
                 op_impl_out = op_impl(self, func, *args, **kwargs)
-                if op_impl_out != NotImplemented:
+                if op_impl_out is not NotImplemented:
                     return maybe_propagate_real_tensors(op_impl_out)
 
         def maybe_run_unsafe_fallback(error=None):
@@ -1829,6 +1927,7 @@ class FakeTensorMode(TorchDispatchMode):
         static_shapes=None,
         source: Optional[Source] = None,
         symbolic_context=None,
+        trace=True,
     ):
         shape_env: Optional[ShapeEnv] = self.shape_env
         if static_shapes is None:
@@ -1844,6 +1943,7 @@ class FakeTensorMode(TorchDispatchMode):
             shape_env=shape_env,
             source=source,
             symbolic_context=symbolic_context,
+            trace=trace,
         )
 
 
