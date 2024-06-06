@@ -967,7 +967,6 @@ class OpInfo:
                 if self.backward_dtypes is not None
                 else self.dtypesIfXPU
                 if self.dtypesIfXPU is not None
-                #else self.dtypes
                 else self.backward_dtypesIfCUDA
             )
         )
