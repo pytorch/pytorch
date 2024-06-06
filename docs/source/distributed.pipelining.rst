@@ -16,58 +16,64 @@ Why Pipeline Parallel?
 Pipeline Parallelism is one of the **primitive** parallelism for deep learning.
 It allows the **execution** of a model to be partitioned such that multiple
 **micro-batches** can execute different parts of the model code concurrently.
-Pipeline parallelism can be an effective technique for large-scale jobs or
-bandwidth-limited clusters, where popular techniques like FSDP face **increased
-overhead** from all-gathering model weights.
+Pipeline parallelism can be an effective technique for:
+
+* large-scale training
+* bandwidth-limited clusters
+* large model inference.
+
+The above scenarios share a commonality that the computation per device cannot
+hide the communication of conventional parallelism, for example, the weight
+all-gather of FSDP.
 
 
 What is ``torch.distributed.pipelining``?
 *****************************************
 
 While promising for scaling, pipelining is often difficult to implement because
-it needs to partition the **execution** of a model in addition to model weights.
+it needs to **partition the execution** of a model in addition to model weights.
 The partitioning of execution often requires intrusive code changes to your
-model. Another aspect of complexity comes from the need for scheduling
-micro-batches in a **distributed** environment, with **data flow dependency**
-considered.
+model. Another aspect of complexity comes from **scheduling micro-batches in a
+distributed environment**, with **data flow dependency** considered.
 
 The ``pipelining`` package provides a toolkit that does said things
-**automatically** and allows easy implementation of pipeline parallelism
+**automatically** which allows easy implementation of pipeline parallelism
 on **general** models.
 
 It consists of two parts: a
-**transformation frontend** and a **distributed runtime**.
-The transformation frontend takes your model code as-is, splits it up into
-"model partitions", and capture the data-flow relationship.  The distributed
-runtime executes the pipeline stages on different devices in parallel, handling
-things like micro-batch splitting, scheduling, communication, and gradient
-propagation, etc.
+**splitting frontend** and a **distributed runtime**.
+The splitting frontend takes your model code as-is, splits it up into "model
+partitions", and capture the data-flow relationship.  The distributed runtime
+executes the pipeline stages on different devices in parallel, handling things
+like micro-batch splitting, scheduling, communication, and gradient propagation,
+etc.
 
 Overall, the ``pipelining`` package provides the following features:
 
-* Splitting of model code based on simple specification. The goal is for the
-  user to provide model code with **zero code change**, and make
-  parallelism work.
+* Splitting of model code based on simple specification. The goal is to make
+  parallelism work for your model with **zero model code change**.
 * Rich support for pipeline schedules, including GPipe, 1F1B,
   Interleaved 1F1B and Looped BFS, and provide the infrastruture for writing
-  customized schedule if desired.
+  customized schedules.
 * First-class support for cross-host pipeline parallelism, as this is where PP
   is typically used (over slower interconnects).
 * Composability with other PyTorch parallel techniques such as data parallel
   (DDP, FSDP) or tensor  parallel. The `TorchTitan
-  <https://github.com/pytorch/torchtitan>`_ project demonstrates such a "3D
-  parallel" application on the Llama model.
+  <https://github.com/pytorch/torchtitan>`_ project demonstrates a "3D parallel"
+  application on the Llama model.
 
 
-Step 1: Choosing the Frontend that Fits Your Need
-*************************************************
+Step 1: choose the frontend that fits your need
+***********************************************
 
 The ``pipelining`` package provides two frontends for two different use cases.
-You can make your choice based on whether you have (i) a full model or (ii)
-module constructors for each stage.
+You can make your choice based on whether you have:
+
+* a full model, or
+* module constructor for each stage.
 
 
-Frontend 1: the ``pipeline`` API -- If You Have a Full Model
+Frontend 1: the ``pipeline`` API -- if you have a full model
 ============================================================
 
 If you have a full model and do not want to spend time on modifying it into a
@@ -112,6 +118,7 @@ Let us see how the ``pipeline`` API works:
 .. code-block:: python
 
   from torch.distributed.pipelining import pipeline, SplitPoint
+
   x = torch.LongTensor([1, 2, 4, 5])
   pipe = pipeline(
       module=mod,
@@ -125,8 +132,7 @@ Let us see how the ``pipeline`` API works:
 The ``pipeline`` API splits your model given a ``split_spec``, where
 ``SplitPoint.BEGINNING`` stands for adding a split point
 *before* execution of certain submodule in the ``forward`` function, and
-*similarly, ``SplitPoint.END`` for
-split point *after* such.
+similarly, ``SplitPoint.END`` for split point *after* such.
 
 If we ``print(pipe)``, we can see::
 
@@ -158,7 +164,7 @@ If we ``print(pipe)``, we can see::
 
 
 The "model partitions" are represented by submodules (``submod_0``,
-``submod_1``), each of which are reconstructed with original model operations
+``submod_1``), each of which is reconstructed with original model operations
 and hierarchies.  In addition, a "root-level" ``forward`` function is
 reconstructed to capture the data flow between those partitions. Such data flow
 will be replayed by the pipeline runtime later, in a distributed fashion.
@@ -179,17 +185,16 @@ You can also create a distributed stage runtime on a device using ``Pipe``:
 
 .. note::
   The ``pipeline`` frontend uses a tracer (``torch.export``) to capture your
-  model into a single graph. If your model is not single-graphable, you can use
+  model into a single graph. If your model is not full-graph'able, you can use
   our manual frontend below.
 
-Frontend 2: ``ManualPipelineStage`` -- If You Already Have the Module for Each Stage
-====================================================================================
+Frontend 2: ``ManualPipelineStage`` -- if you already have module for each stage
+================================================================================
 
 If you already have the module for each stage, you can skip the pipeline split
-step above and directly connect to the runtime offering of the ``pipelining``
-package.
-This can be done by creating a ``ManualPipelineStage`` to wrap your stage
-module:
+step above and directly connect to our runtime offering: ``ManualPipelineStage``.
+The ``ManualPipelineStage`` wraps your stage module given a distributed context,
+i.e. a ``ProcessGroup`` along the pipeline dimension.
 
 .. currentmodule:: torch.distributed.pipelining.PipelineStage
 
@@ -198,11 +203,11 @@ module:
 TODO: manual example here
 
 
-Step 2: Using ``PipelineSchedule`` for Execution
-************************************************
+Step 2: use ``PipelineSchedule`` for execution
+**********************************************
 
-We can now attach the ``PipelineStage`` to a pipeline schedule, GPipe for
-example, and run with data:
+We can now attach the ``PipelineStage`` to a pipeline schedule, and run the
+schedule with input data. Here is a GPipe example:
 
 .. code-block:: python
 
@@ -215,7 +220,7 @@ example, and run with data:
   x = torch.randn(batch_size, in_dim, device=device)
 
   # Run the pipeline with input `x`
-  # `x` will be divided into microbatches internally
+  # `x` will be divided into microbatches automatically
   if rank == 0:
       schedule.step(x)
   else:
@@ -253,22 +258,22 @@ First, the ``pipeline`` API turns our model into a directed acyclic graph (DAG)
 by tracing the model.  It traces the model using ``torch.export`` -- a PyTorch 2
 full-graph capturing tool.
 
-Then, it groups together the **operations** and **parameters** needed by a stage
+Then, it groups together the **operations and parameters** needed by a stage
 into a reconstructed submodule: ``submod_0``, ``submod_1``, ...
 
 Different from conventional submodule access methods like ``Module.children()``,
 the ``pipeline`` API does not only cut the module structure of your model, but
-also the **``forward``** function of your model.
+also the **forward** function of your model.
 
 This is necessary because model structure like ``Module.children()`` merely
 captures information during ``Module.__init__()``, and does not capture any
 information about ``Module.forward()``. Said differently, ``Module.children()``
-lacks information on the following aspects which are key to pipelininig:
+lacks information about the following aspects key to pipelininig:
 
 * Exectuion order of child modules in ``forward``
 * Activation flows between child modules
 * Whether there are any functional operators between child modules (for example,
-  ``relu`` or ``add`` operations would be be captured by ``Module.children()``).
+  ``relu`` or ``add`` operations will not be captured by ``Module.children()``).
 
 The ``pipeline`` API, on the contrary, makes sure that the ``forward`` behavior
 is truly preserved. It also captures the activation flow between the partitions,
@@ -282,7 +287,6 @@ At a result, fully-qualified names (FQNs) pointing to a submodule or parameter
 would be still valid, and services that relies on FQNs (such as FSDP, TP or
 checkpointing) can still run with your partitioned modules at almost zero code
 change.
-
 
 
 Implementing Your Own Schedule
