@@ -1,36 +1,23 @@
 # Owner(s): ["module: dynamo"]
-import unittest
-import warnings
 
 from torch._dynamo import config
 from torch._dynamo.testing import make_test_cls_with_patches
-from torch.fx.experimental import _config as fx_config
-from torch.testing._internal.common_utils import slowTest, TEST_Z3
 
 try:
     from . import (
         test_aot_autograd,
-        test_ctx_manager,
-        test_export,
         test_functions,
         test_higher_order_ops,
         test_misc,
         test_modules,
-        test_repros,
-        test_sdpa,
-        test_subgraphs,
+        # test_repros,
     )
 except ImportError:
     import test_aot_autograd
-    import test_ctx_manager
-    import test_export
     import test_functions
     import test_higher_order_ops
     import test_misc
     import test_modules
-    import test_repros
-    import test_sdpa
-    import test_subgraphs
 
 
 test_classes = {}
@@ -58,6 +45,12 @@ def make_inline_inbuilt_nn_modules_cls(cls):
 
 tests = [
     test_misc.MiscTests,
+    test_functions.FunctionTests,
+    test_modules.NNModuleTests,
+    test_higher_order_ops.HigherOrderOpTests,
+    test_higher_order_ops.FuncTorchHigherOrderOpTests,
+    test_aot_autograd.AotAutogradFallbackTests,
+    # test_repros.ReproTests,
 ]
 for test in tests:
     make_inline_inbuilt_nn_modules_cls(test)
