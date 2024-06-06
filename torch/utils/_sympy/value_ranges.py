@@ -121,12 +121,12 @@ class ValueRanges(Generic[_T]):
     upper: _T
     is_bool: bool
 
+    def __repr__(self) -> str:
+        return f"VR[{self.lower}, {self.upper}]"
+
     @overload
     def __init__(self: ValueRanges[sympy.Expr], lower: ExprIn, upper: ExprIn) -> None:
         ...
-
-    def __repr__(self):
-        return f"VR[{self.lower}, {self.upper}]"
 
     @overload
     def __init__(self: ValueRanges[SympyBoolean], lower: BoolIn, upper: BoolIn) -> None:
