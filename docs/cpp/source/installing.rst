@@ -178,8 +178,8 @@ GLIBC version, you can use the following command from the unzip directory:
 If your system do not have the required GLIBC version, the output will look
 like this:
 
-.. code-block:: none
-  
+.. code-block:: sh
+
   root@4b5a67132e81:/libtorch# ldd lib/libtorch.so
   lib/libtorch.so: /lib64/libc.so.6: version `GLIBC_2.28' not found (required by /libtorch/lib/libtorch_cpu.so)
   lib/libtorch.so: /lib64/libm.so.6: version `GLIBC_2.27' not found (required by /libtorch/lib/libtorch_cpu.so)
