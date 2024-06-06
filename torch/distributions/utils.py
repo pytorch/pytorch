@@ -92,7 +92,7 @@ def logits_to_probs(logits, is_binary=False):
 def clamp_probs(probs):
     """Clamps the probabilities to be in the open interval `(0, 1)`.
 
-    The probabilities would be clamped to be greater than `eps` and less than `1 - eps`,
+    The probabilities would be clamped between `eps` and `1 - eps`,
     and `eps` would be the smallest representable positive number for the input data type.
 
     Args:
