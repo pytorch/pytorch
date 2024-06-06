@@ -484,12 +484,9 @@ class PowByNatural(sympy.Function):
                 return r
             return sympy.Integer(r)
         if isinstance(exp, sympy.Integer):
-            # Translate power into iterated multiplication
-            # (Rely on this for base is int_oo case too.)
-            r = sympy.Integer(1)
-            for _ in range(int(exp)):
-                r *= base
-            return r
+            # Rely on regular sympy Pow for this (note that iterated
+            # multiplication turns into a Pow anyway, you can't escape!!)
+            return sympy.Pow(se, exp)
         if exp in (int_oo, sympy.oo):
             if base.is_nonnegative:
                 return int_oo

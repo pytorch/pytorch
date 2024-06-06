@@ -40,6 +40,9 @@ class IntInfinity(Number, metaclass=Singleton):
     def __new__(cls):
         return AtomicExpr.__new__(cls)
 
+    def __str__(self):
+        return "int_oo"
+
     def _eval_subs(self, old, new):
         if self == old:
             return new
@@ -228,6 +231,9 @@ class NegativeIntInfinity(Number, metaclass=Singleton):
     def _eval_subs(self, old, new):
         if self == old:
             return new
+
+    def __str__(self):
+        return "-int_oo"
 
     """
     def _eval_evalf(self, prec=None):

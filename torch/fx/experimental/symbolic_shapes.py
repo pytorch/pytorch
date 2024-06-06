@@ -4688,9 +4688,6 @@ class ShapeEnv:
         if a in self.var_to_range:
             src_bound = self.var_to_range[a]
 
-            def issubset(x, y):
-                return x.issubset(y)
-
             # First, refine the value range of a based on the computed value range
             # of tgt.  This is always OK to do, even if we decide not to do the
             # substitution in the end.  This might be a no-op, if a already has
@@ -4703,7 +4700,7 @@ class ShapeEnv:
             #  - the source bound non-trivially improves over what we get out of
             #    the existing bounds.
             #  - the replacement is univariate and we can invert the tgt expression
-            if not issubset(tgt_bound, src_bound) and len(tgt.free_symbols) == 1:
+            if not tgt_bound.issubset(src_bound) and len(tgt.free_symbols) == 1:
                 b = next(iter(tgt.free_symbols))
                 # Try to invert the equality
                 r = try_solve(sympy.Eq(a, tgt), b, floordiv_inequality=False)
@@ -4711,7 +4708,7 @@ class ShapeEnv:
                     b_bound = self.bound_sympy(r[1])
                     self.var_to_range[b] = b_bound & self.var_to_range[b]
                     tgt_bound = self.bound_sympy(tgt)
-                    assert issubset(tgt_bound, src_bound)
+                    assert tgt_bound.issubset(src_bound)
 
             # TODO: Should we propagate size-like-ness?
             #
@@ -4749,13 +4746,13 @@ class ShapeEnv:
             #  - If the variable is unbacked, only substitute if the substitution
             #    would preserve the bounds also under size-like-ness conditions.
 
-            if not issubset(tgt_bound, src_bound):
+            if not tgt_bound.issubset(src_bound):
                 self.log.debug("skipped set_replacement %s = %s (%s) [%s not subset of %s]", a, tgt, msg, tgt_bound, src_bound)
                 return
             elif a in self.size_like:
                 tgt_bound_so = self.bound_sympy(tgt, size_oblivious=True)
                 src_bound_so = self.bound_sympy(a, size_oblivious=True)
-                if not issubset(tgt_bound_so, src_bound_so):
+                if not tgt_bound_so.issubset(src_bound_so):
                     self.log.debug("skipped set_replacement %s = %s (%s) "
                                    "[%s not subset of %s (size-oblivious conditions)]", a, tgt, msg, tgt_bound_so, src_bound_so)
                     return
