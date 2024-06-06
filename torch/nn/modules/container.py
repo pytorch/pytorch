@@ -1,3 +1,4 @@
+import warnings
 from collections import OrderedDict, abc as container_abcs
 from itertools import chain, islice
 import operator
@@ -9,7 +10,6 @@ from torch._jit_internal import _copy_to_script_wrapper
 
 from typing import Any, Dict, Iterable, Iterator, Mapping, Optional, overload, Tuple, TypeVar, Union
 from typing_extensions import Self
-from typing_extensions import deprecated
 
 __all__ = ['Container', 'Sequential', 'ModuleList', 'ModuleDict', 'ParameterList', 'ParameterDict']
 
@@ -29,14 +29,13 @@ def _addindent(s_, numSpaces):
     return s
 
 
-@deprecated(
-    "`nn.Container` is deprecated. "
-    "All of it's functionality is now implemented in `nn.Module`. Subclass that instead.",
-    category=FutureWarning,
-)
 class Container(Module):
+
     def __init__(self, **kwargs: Any) -> None:
         super().__init__()
+        # DeprecationWarning is ignored by default <sigh>
+        warnings.warn("nn.Container is deprecated. All of it's functionality "
+                      "is now implemented in nn.Module. Subclass that instead.")
         for key, value in kwargs.items():
             self.add_module(key, value)
 
