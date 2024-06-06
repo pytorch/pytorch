@@ -296,7 +296,6 @@ class GraphLowering(torch.fx.Interpreter):
         gm: torch.fx.GraphModule,
         example_inputs: Optional[List[torch.Tensor]] = None,
         shape_env=None,
-        num_static_inputs=None,
         graph_id=None,
         cpp_wrapper=False,
         aot_mode=False,
@@ -311,7 +310,6 @@ class GraphLowering(torch.fx.Interpreter):
         name=None,
     ):
         super().__init__(gm)
-
         self.example_inputs = example_inputs
         self.layout_opt = (
             layout_opt
@@ -374,7 +372,6 @@ class GraphLowering(torch.fx.Interpreter):
             Callable[[List[ir.ExternKernelNode]], Any]
         ] = extern_node_serializer
         self.current_node: torch.fx.Node = None  # type: ignore[assignment]
-        self.num_static_inputs = num_static_inputs
         self.lists: Dict[str, List[str]] = {}
         self.mutated_inputs: Set[str] = set()
         self.mutated_input_idxs: List[int] = []
@@ -1196,8 +1193,11 @@ class GraphLowering(torch.fx.Interpreter):
             elif is_magic_method(n.target):
                 # TODO: this is sus, it probably should be handled in the
                 # lowerings themselves similarly to sym_size/sym-stride
+                # https://github.com/pytorch/pytorch/issues/127789
                 debug("is_magic_method")
-                if isinstance(n.meta["val"], torch.SymInt):
+                if isinstance(
+                    n.meta["val"], (torch.SymInt, torch.SymFloat, torch.SymBool)
+                ):
                     result = n.meta["val"].node.expr
                 else:
                     result = super().run_node(n)
