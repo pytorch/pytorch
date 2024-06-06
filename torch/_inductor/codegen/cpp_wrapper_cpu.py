@@ -1534,7 +1534,7 @@ class CppWrapperCpu(WrapperCodeGen):
         else:
             return LAYOUT_TO_ATEN[layout]
 
-    @functools.lru_cache(None)  # noqa: B019
+    @functools.lru_cache(None)
     def codegen_int_array_var(
         self,
         int_array: str,

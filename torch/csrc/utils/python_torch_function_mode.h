@@ -2,7 +2,8 @@
 
 #include <ATen/PythonTorchFunctionTLS.h>
 
-namespace torch::overrides {
+namespace torch {
+namespace overrides {
 
 struct StashTorchFunctionModeGuard {
   StashTorchFunctionModeGuard() {
@@ -20,4 +21,5 @@ struct StashTorchFunctionModeGuard {
   std::shared_ptr<c10::SafePyObject> cur_mode_;
 };
 
-} // namespace torch::overrides
+} // namespace overrides
+} // namespace torch
