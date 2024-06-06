@@ -45,6 +45,13 @@ def init(output_file, flags=None, output_mode="key_value"):
 
 
 def start():
+    """
+    Starts Cuda Profiler 
+
+    Example:
+        >>> profiler = Profiler();
+        >>> profiler.start()
+    """
     check_error(cudart().cudaProfilerStart())
 
 
