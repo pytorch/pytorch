@@ -89,8 +89,8 @@ endif()
 if(USE_XPU)
   include(${CMAKE_CURRENT_LIST_DIR}/public/xpu.cmake)
   if(NOT PYTORCH_FOUND_XPU)
-    # message(WARNING "Not compiling with XPU. Could NOT find SYCL."
-    # "Suppress this warning with -DUSE_XPU=OFF.")
+    message(WARNING "Not compiling with XPU. Could NOT find SYCL."
+    "Suppress this warning with -DUSE_XPU=OFF.")
     caffe2_update_option(USE_XPU OFF)
   endif()
 endif()
@@ -147,21 +147,13 @@ set(AT_MKLDNN_ACL_ENABLED 0)
 set(AT_MKLDNN_ENABLED 0)
 set(AT_MKL_ENABLED 0)
 # setting default preferred BLAS options if not already present.
-if(NOT DEFINED BLAS)
-  if(NOT INTERN_BUILD_MOBILE)
-    set(BLAS "MKL" CACHE STRING "Selected BLAS library")
-  else()
-    set(BLAS "Eigen" CACHE STRING "Selected BLAS library")
-  endif()
-elseif(NOT BLAS STREQUAL "MKL")
-    if(USE_MKLDNN)
-      message(WARNING
-        "You explicitly chose with BLAS to not use MKL, so disabling USE_MKLDNN. Suppress this warning with "
-        "-DUSE_MKLDNN=OFF.")
-      set(USE_MKLDNN OFF)
-    endif()
+if(NOT INTERN_BUILD_MOBILE)
+  set(BLAS "MKL" CACHE STRING "Selected BLAS library")
+else()
+  set(BLAS "Eigen" CACHE STRING "Selected BLAS library")
+  set(AT_MKLDNN_ENABLED 0)
+  set(AT_MKL_ENABLED 0)
 endif()
-
 set_property(CACHE BLAS PROPERTY STRINGS "ATLAS;BLIS;Eigen;FLAME;Generic;MKL;OpenBLAS;vecLib")
 message(STATUS "Trying to find preferred BLAS backend of choice: " ${BLAS})
 
@@ -1290,8 +1282,6 @@ if(CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO AND NOT INTERN_DISABLE_ONNX)
     add_definitions(-DONNX_ML=1)
   endif()
   add_definitions(-DONNXIFI_ENABLE_EXT=1)
-  # Add op schemas in "ai.onnx.pytorch" domain
-  add_subdirectory("${CMAKE_CURRENT_LIST_DIR}/../caffe2/onnx/torch_ops")
   if(NOT USE_SYSTEM_ONNX)
     add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/../third_party/onnx EXCLUDE_FROM_ALL)
     if(NOT MSVC)
@@ -1689,3 +1679,7 @@ endif()
 
 # Include google/FlatBuffers
 include(${CMAKE_CURRENT_LIST_DIR}/FlatBuffers.cmake)
+
+# Include cpp-httplib
+add_library(httplib INTERFACE IMPORTED)
+target_include_directories(httplib SYSTEM INTERFACE ${PROJECT_SOURCE_DIR}/third_party/cpp-httplib)
