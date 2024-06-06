@@ -579,7 +579,7 @@ def _get_torch_related_args(include_pytorch: bool, aot_mode: bool):
 
 
 def _get_python_related_args():
-    python_include_dirs =  _get_python_include_dirs()
+    python_include_dirs = _get_python_include_dirs()
     python_include_path = sysconfig.get_path(
         "include", scheme="nt" if _IS_WINDOWS else "posix_prefix"
     )
