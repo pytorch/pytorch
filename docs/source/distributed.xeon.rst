@@ -191,8 +191,8 @@ positional arguments
 +----------------------+---------------------------------------------------------------------------------------------------+
 | knob                 | help                                                                                              |
 +======================+===================================================================================================+
-| program              | The full path to the program/script to be launched, followed by all the arguments for the script. |
-| program_args         |                                                                                                   |
+| |program             | The full path to the program/script to be launched, followed by all the arguments for the script. |
+| |program_args        |                                                                                                   |
 |----------------------+---------------------------------------------------------------------------------------------------+
 
 Explanation of the options
