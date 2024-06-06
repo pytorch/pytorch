@@ -96,12 +96,15 @@ from torch.testing._internal.common_dtype import get_all_dtypes
 from torch.utils._import_utils import _check_module_exists
 import torch.utils._pytree as pytree
 
-from .composite_compliance import no_dispatch
 try:
     import pytest
     has_pytest = True
 except ImportError:
     has_pytest = False
+
+
+def freeze_rng_state(*args, **kwargs):
+    return torch.testing._utils.freeze_rng_state(*args, **kwargs)
 
 
 # Class to keep track of test flags configurable by environment variables.
@@ -1497,31 +1500,31 @@ TestEnvironment.def_flag("TEST_CUDA_MEM_LEAK_CHECK", env_var="PYTORCH_TEST_CUDA_
 
 # Dict of NumPy dtype -> torch dtype (when the correspondence exists)
 numpy_to_torch_dtype_dict = {
-    np.bool_      : torch.bool,
-    np.uint8      : torch.uint8,
-    np.uint16     : torch.uint16,
-    np.uint32     : torch.uint32,
-    np.uint64     : torch.uint64,
-    np.int8       : torch.int8,
-    np.int16      : torch.int16,
-    np.int32      : torch.int32,
-    np.int64      : torch.int64,
-    np.float16    : torch.float16,
-    np.float32    : torch.float32,
-    np.float64    : torch.float64,
-    np.complex64  : torch.complex64,
-    np.complex128 : torch.complex128
+    np.dtype(np.bool_)     : torch.bool,
+    np.dtype(np.uint8)     : torch.uint8,
+    np.dtype(np.uint16)    : torch.uint16,
+    np.dtype(np.uint32)    : torch.uint32,
+    np.dtype(np.uint64)    : torch.uint64,
+    np.dtype(np.int8)      : torch.int8,
+    np.dtype(np.int16)     : torch.int16,
+    np.dtype(np.int32)     : torch.int32,
+    np.dtype(np.int64)     : torch.int64,
+    np.dtype(np.float16)   : torch.float16,
+    np.dtype(np.float32)   : torch.float32,
+    np.dtype(np.float64)   : torch.float64,
+    np.dtype(np.complex64) : torch.complex64,
+    np.dtype(np.complex128): torch.complex128
 }
 
 
-# numpy dtypes like np.float64 are not instances, but rather classes. This leads to rather absurd cases like
-# np.float64 != np.dtype("float64") but np.float64 == np.dtype("float64").type.
-# Especially when checking against a reference we can't be sure which variant we get, so we simply try both.
+# numpy dtypes like np.float64 are not instances, but rather classes. This leads
+# to rather absurd cases like np.float64 != np.dtype("float64") but
+# np.dtype(np.float64) == np.dtype("float64") and
+# np.dtype(np.dtype("float64")) == np.dtype("float64").  Especially when
+# checking against a reference we can't be sure which variant we get, so we
+# simply apply the conversion.
 def numpy_to_torch_dtype(np_dtype):
-    try:
-        return numpy_to_torch_dtype_dict[np_dtype]
-    except KeyError:
-        return numpy_to_torch_dtype_dict[np_dtype.type]
+    return numpy_to_torch_dtype_dict[np.dtype(np_dtype)]
 
 
 def has_corresponding_torch_dtype(np_dtype):
@@ -1949,35 +1952,6 @@ def set_rng_seed(seed):
         np.random.seed(seed)
 
 
-disable_functorch = torch._C._DisableFuncTorch
-
-
-@contextlib.contextmanager
-def freeze_rng_state():
-    # no_dispatch needed for test_composite_compliance
-    # Some OpInfos use freeze_rng_state for rng determinism, but
-    # test_composite_compliance overrides dispatch for all torch functions
-    # which we need to disable to get and set rng state
-    with no_dispatch(), disable_functorch():
-        rng_state = torch.get_rng_state()
-        if torch.cuda.is_available():
-            cuda_rng_state = torch.cuda.get_rng_state()
-    try:
-        yield
-    finally:
-        # Modes are not happy with torch.cuda.set_rng_state
-        # because it clones the state (which could produce a Tensor Subclass)
-        # and then grabs the new tensor's data pointer in generator.set_state.
-        #
-        # In the long run torch.cuda.set_rng_state should probably be
-        # an operator.
-        #
-        # NB: Mode disable is to avoid running cross-ref tests on thes seeding
-        with no_dispatch(), disable_functorch():
-            if torch.cuda.is_available():
-                torch.cuda.set_rng_state(cuda_rng_state)
-            torch.set_rng_state(rng_state)
-
 @contextlib.contextmanager
 def set_default_dtype(dtype):
     saved_dtype = torch.get_default_dtype()
@@ -2310,7 +2284,7 @@ def check_if_enable(test: unittest.TestCase):
 
                     print(f"Test {disabled_test} is disabled for some unrecognized ",
                           f"platforms: [{invalid_plats_str}]. Please edit issue {issue_url} to fix the platforms ",
-                          "assigned to this flaky test, changing \"Platforms: ...\" to a comma separated ",
+                          'assigned to this flaky test, changing "Platforms: ..." to a comma separated ',
                           f"subset of the following (or leave it blank to match all platforms): {valid_plats}")
 
                     # Sanitize the platforms list so that we continue to disable the test for any valid platforms given
@@ -2622,7 +2596,11 @@ class TestCase(expecttest.TestCase):
     # the test, skip it instead.
     _ignore_not_implemented_error = False
 
-    def __init__(self, method_name='runTest'):
+    def __init__(self, method_name='runTest', methodName='runTest'):
+        # methodName is the correct naming in unittest and testslide uses keyword arguments.
+        # So we need to use both to 1) not break BC and, 2) support testslide.
+        if methodName != "runTest":
+            method_name = methodName
         super().__init__(method_name)
 
         test_method = getattr(self, method_name, None)
@@ -4427,8 +4405,8 @@ def check_test_defined_in_running_script(test_case):
     if running_script_path is None:
         return
     test_case_class_file = os.path.abspath(os.path.realpath(inspect.getfile(test_case.__class__)))
-    assert test_case_class_file == running_script_path, f"Class of loaded TestCase \"{test_case.id()}\" " \
-        f"is not defined in the running script \"{running_script_path}\", but in \"{test_case_class_file}\". Did you " \
+    assert test_case_class_file == running_script_path, f'Class of loaded TestCase "{test_case.id()}" ' \
+        f'is not defined in the running script "{running_script_path}", but in "{test_case_class_file}". Did you ' \
         "accidentally import a unittest.TestCase from another file?"
 
 def load_tests(loader, tests, pattern):

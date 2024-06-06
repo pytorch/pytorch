@@ -856,7 +856,7 @@ namespace {
 /**
  * @brief Computes the optimal matrix chain multiplication order
  *
- * Follows the dynamic programming algorithm from Cormen et al,
+ * Follows the dynamic programming algorithm from Cormen et al.,
  * "Introduction to Algorithms, Third Edition", Chapter 15.2,
  * p. 370-378. Note that the book uses 1-based indexing.
  *
