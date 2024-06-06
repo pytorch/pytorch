@@ -2,7 +2,8 @@ import contextlib
 
 import warnings
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Set, Union, TypeGuard
+from typing import Any, Dict, List, Optional, Set, Union
+from typing_extensions import TypeGuard
 
 import torch
 import torchgen
@@ -264,12 +265,15 @@ class BaseTorchDispatchMode(TorchDispatchMode):
         return func(*args, **kwargs)
 
 
+# Subtypes which have __tensor_flatten__ and __tensor_unflatten__. A Protocol
+# would have been better but you can't specify a protocol that says "something
+# that inherits from Tensor and adds these methods".
 TensorWithFlatten = Union[
-    "torch.distributed._tensor.api.DTensor",
     "torch.distributed._functional_collectives.AsyncCollectiveTensor",
+    "torch.distributed._tensor.api.DTensor",
     "torch.nested._internal.nested_tensor.NestedTensor",
-    "torch.testing._internal.two_tensor.TwoTensor",
     "torch.sparse.semi_structured.SparseSemiStructuredTensor",
+    "torch.testing._internal.two_tensor.TwoTensor",
 ]
 
 

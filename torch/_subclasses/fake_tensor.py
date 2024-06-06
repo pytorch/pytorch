@@ -18,16 +18,14 @@ from typing import (
     Literal,
     Mapping,
     Optional,
-    Self,
     Sequence,
     Set,
     Tuple,
     Type,
-    TYPE_CHECKING,
-    TypeGuard,
     TypeVar,
     Union,
 )
+from typing_extensions import Self, TypeGuard
 from weakref import ReferenceType
 
 import torch
@@ -36,6 +34,8 @@ import torch._logging
 
 from torch import SymInt
 from torch._C._functorch import is_functorch_wrapped_tensor, is_legacy_batchedtensor
+
+from torch._guards import Source
 from torch._ops import OpOverload
 from torch._prims_common import suggest_memory_format
 from torch._subclasses.meta_utils import (
@@ -46,10 +46,16 @@ from torch._subclasses.meta_utils import (
     MetaConverter,
 )
 from torch._utils import render_call
+from torch.fx.experimental.symbolic_shapes import (
+    ShapeEnv,
+    StatefulSymbolicContext,
+    SymbolicContext,
+)
 from torch.fx.immutable_collections import immutable_dict
 from torch.fx.operator_schemas import normalize_function
 from torch.multiprocessing.reductions import StorageWeakRef
 from torch.overrides import TorchFunctionMode
+from torch.types import _bool
 from torch.utils._mode_utils import no_dispatch
 from torch.utils._python_dispatch import (
     is_traceable_wrapper_subclass,
@@ -58,15 +64,6 @@ from torch.utils._python_dispatch import (
 from torch.utils._pytree import PyTree, tree_map, tree_map_, TreeSpec
 from torch.utils._stats import count
 from torch.utils._traceback import CapturedTraceback
-
-if TYPE_CHECKING:
-    from torch._guards import Source
-    from torch.fx.experimental.symbolic_shapes import (
-        ShapeEnv,
-        StatefulSymbolicContext,
-        SymbolicContext,
-    )
-    from torch.types import _bool
 
 
 class UNKNOWN:
@@ -243,9 +240,9 @@ class FakeTensorConverter:
     @property
     def tensor_memo(
         self,
-    ) -> weakref.WeakValueDictionary[
-        "torch._subclasses.meta_utils.MetaTensorId", Optional["FakeTensor"]
-    ]:
+    ) -> weakref.WeakValueDictionary:
+        # not valid until py3.10
+        # weakref.WeakValueDictionary["torch._subclasses.meta_utils.MetaTensorId", Optional["FakeTensor"]]
         return self.meta_converter.tensor_memo
 
     meta_converter: MetaConverter
@@ -582,7 +579,7 @@ class FakeTensor(torch.Tensor):
         else:
             return self.fake_device
 
-    @device.set
+    @device.setter
     def device(self, _: torch.device) -> None:
         raise NotImplementedError
 
@@ -608,7 +605,7 @@ class FakeTensor(torch.Tensor):
             "torch.compile doesn't support named tensors"
         )
 
-    @names.set
+    @names.setter
     def names(self, _: List[str]) -> None:
         raise NotImplementedError
 
@@ -990,6 +987,7 @@ class FakeTensorMode(TorchDispatchMode):
     static_shapes: bool
     shape_env: Optional[ShapeEnv]
     _stack: Optional[str]
+    allow_meta: bool
 
     def __init__(
         self,
