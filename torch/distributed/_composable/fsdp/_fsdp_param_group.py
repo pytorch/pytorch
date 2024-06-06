@@ -353,9 +353,7 @@ class FSDPParamGroup:
             # have mistargeted prefetches if not all modules used in forward
             # are used in this backward
             target_fsdp_param_group = self.comm_ctx.post_forward_order[target_index]
-            with torch.profiler.record_function(
-                "FSDP::backward_prefetch"
-            ):
+            with torch.profiler.record_function("FSDP::backward_prefetch"):
                 # NOTE: Dynamo doesn't support custom context manager at the moment,
                 # so we can't use `with use_training_state(X)`.
                 old_training_state = target_fsdp_param_group._training_state
