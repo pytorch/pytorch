@@ -52,6 +52,8 @@ def _dtensor_init_helper(
     placements=None,
     **kwargs,
 ) -> DTensor:
+    from torch.distributed._tensor.placement_types import DTensorSpec, TensorMeta
+
     # if device_mesh is None, use the one from mesh resources
     device_mesh = device_mesh or _mesh_resources.get_current_mesh()
     kwargs["device"] = device_mesh.device_type
@@ -76,8 +78,6 @@ def _dtensor_init_helper(
     elif init_op == torch.rand or init_op == torch.randn:
         # this tensor meta is not used except `shape`
         dtype = kwargs.get("dtype", torch.get_default_dtype())
-
-        from torch.distributed._tensor.placement_types import DTensorSpec, TensorMeta
 
         tensor_meta = TensorMeta(size, (0,), dtype)
         spec = DTensorSpec(device_mesh, placements, tensor_meta=tensor_meta)
