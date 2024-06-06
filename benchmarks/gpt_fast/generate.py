@@ -235,7 +235,7 @@ def run_llama2_7b_bf16(device: str = "cuda"):
     token_per_sec, memory_bandwidth = run_experiment(model)
     return [
         Experiment(
-            "llama2_7b",
+            "llama2_7b_bf16",
             "token_per_sec",
             model.token_per_sec,
             f"{token_per_sec:.02f}",
@@ -243,7 +243,7 @@ def run_llama2_7b_bf16(device: str = "cuda"):
             device,
         ),
         Experiment(
-            "llama2_7b",
+            "llama2_7b_bf16",
             "memory_bandwidth(GB/s)",
             model.memory_bandwidth,
             f"{memory_bandwidth:.02f}",
@@ -268,7 +268,7 @@ def run_llama2_7b_int8(device: str = "cuda"):
     token_per_sec, memory_bandwidth = run_experiment(model)
     return [
         Experiment(
-            "llama2_7b",
+            "llama2_7b_int8",
             "token_per_sec",
             model.token_per_sec,
             f"{token_per_sec:.02f}",
@@ -276,7 +276,7 @@ def run_llama2_7b_int8(device: str = "cuda"):
             device,
         ),
         Experiment(
-            "llama2_7b",
+            "llama2_7b_int8",
             "memory_bandwidth(GB/s)",
             model.memory_bandwidth,
             f"{memory_bandwidth:.02f}",
@@ -302,7 +302,7 @@ def run_mixtral_8x7b_int8(device: str = "cuda"):
     token_per_sec, memory_bandwidth = run_experiment(model)
     return [
         Experiment(
-            "mixtral_8x7b",
+            "mixtral_8x7b_int8",
             "token_per_sec",
             model.token_per_sec,
             f"{token_per_sec:.02f}",
@@ -310,7 +310,7 @@ def run_mixtral_8x7b_int8(device: str = "cuda"):
             device,
         ),
         Experiment(
-            "mixtral_8x7b",
+            "mixtral_8x7b_int8",
             "memory_bandwidth(GB/s)",
             model.memory_bandwidth,
             f"{memory_bandwidth:.02f}",
