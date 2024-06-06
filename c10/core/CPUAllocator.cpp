@@ -7,6 +7,9 @@
 #include <c10/mobile/CPUProfilingAllocator.h>
 #include <c10/util/Logging.h>
 
+#include <cuda_runtime_api.h>
+#include <driver_types.h>
+
 // TODO: rename flag to C10
 C10_DEFINE_bool(
     caffe2_report_cpu_memory_usage,
@@ -20,7 +23,12 @@ struct C10_API DefaultCPUAllocator final : at::Allocator {
   at::DataPtr allocate(size_t nbytes) override {
     void* data = nullptr;
     try {
-      data = c10::alloc_cpu(nbytes);
+      if (cudaMallocManaged(&data, nbytes, cudaMemAttachHost) != cudaSuccess)
+        CAFFE_ENFORCE(
+		data,
+		"DefaultCPUAllocator: not enough memory: you tried to allocate ",
+		nbytes,
+		" bytes.");
     } catch (c10::Error& e) {
       profiledCPUMemoryReporter().OutOfMemory(nbytes);
       throw e;
@@ -34,7 +42,7 @@ struct C10_API DefaultCPUAllocator final : at::Allocator {
       return;
     }
     profiledCPUMemoryReporter().Delete(ptr);
-    free_cpu(ptr);
+    cudaFree(ptr);
   }
 
   at::DeleterFnPtr raw_deleter() const override {
