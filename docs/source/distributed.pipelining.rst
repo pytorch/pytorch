@@ -177,6 +177,10 @@ You can also create a distributed stage runtime on a device using ``Pipe``:
 
   stage = PipelineStage(pipe, stage_idx, device)
 
+.. note::
+  The ``pipeline`` frontend uses a tracer (``torch.export``) to capture your
+  model into a single graph. If your model is not single-graphable, you can use
+  our manual frontend below.
 
 Frontend 2: ``ManualPipelineStage`` -- If You Already Have the Module for Each Stage
 ====================================================================================
