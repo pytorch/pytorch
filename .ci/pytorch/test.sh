@@ -565,7 +565,11 @@ test_dynamo_benchmark() {
     test_single_dynamo_benchmark "dashboard" "$suite" "$shard_id" "$@"
   else
     if [[ "${TEST_CONFIG}" == *cpu_inductor* ]]; then
-      test_single_dynamo_benchmark "inference" "$suite" "$shard_id" --inference --float32 "$@"
+      if [[ "${TEST_CONFIG}" == *freezing* ]]; then
+        test_single_dynamo_benchmark "inference" "$suite" "$shard_id" --inference --float32 --freezing "$@"
+      else
+        test_single_dynamo_benchmark "inference" "$suite" "$shard_id" --inference --float32 "$@"
+      fi
     elif [[ "${TEST_CONFIG}" == *aot_inductor* ]]; then
       test_single_dynamo_benchmark "inference" "$suite" "$shard_id" --inference --bfloat16 "$@"
     else

@@ -65,7 +65,7 @@ enum class Backend {
   NumOptions
 };
 
-static inline Backend dispatchKeyToBackend(DispatchKey t) {
+inline Backend dispatchKeyToBackend(DispatchKey t) {
   if (t == DispatchKey::CPU || t == DispatchKey::AutogradCPU) {
     return Backend::CPU;
   } else if (t == DispatchKey::CUDA || t == DispatchKey::AutogradCUDA) {
@@ -142,7 +142,7 @@ static inline Backend dispatchKeyToBackend(DispatchKey t) {
   }
 }
 
-static inline DispatchKey backendToDispatchKey(Backend b) {
+inline DispatchKey backendToDispatchKey(Backend b) {
   switch (b) {
     case Backend::CPU:
       return DispatchKey::CPU;
@@ -217,7 +217,7 @@ static inline DispatchKey backendToDispatchKey(Backend b) {
   }
 }
 
-static inline DeviceType backendToDeviceType(Backend b) {
+inline DeviceType backendToDeviceType(Backend b) {
   switch (b) {
     case Backend::CPU:
     case Backend::MkldnnCPU:
@@ -281,8 +281,7 @@ static inline DeviceType backendToDeviceType(Backend b) {
   }
 }
 
-// TODO: This probably shouldn't actually be static inline
-static inline const char* toString(Backend b) {
+inline const char* toString(Backend b) {
   switch (b) {
     case Backend::CPU:
       return "CPU";
@@ -357,7 +356,7 @@ static inline const char* toString(Backend b) {
   }
 }
 
-static inline bool isSparse(Backend b) {
+inline bool isSparse(Backend b) {
   switch (b) {
     case Backend::SparseXPU:
     case Backend::SparseCPU:
@@ -371,7 +370,7 @@ static inline bool isSparse(Backend b) {
   }
 }
 
-static inline bool isSparseCsr(Backend b) {
+inline bool isSparseCsr(Backend b) {
   switch (b) {
     case Backend::SparseCsrXPU:
     case Backend::SparseCsrCPU:

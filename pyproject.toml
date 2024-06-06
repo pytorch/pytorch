@@ -48,7 +48,6 @@ ignore = [
     # these ignores are from flake8-bugbear; please fix!
     "B007", "B008", "B017",
     "B018", # Useless expression
-    "B019",
     "B023",
     "B028", # No explicit `stacklevel` keyword argument found
     "E402",
@@ -69,7 +68,6 @@ ignore = [
     "PERF401",
     "PERF403",
     # these ignores are from PYI; please fix!
-    "PYI019",
     "PYI024",
     "PYI036",
     "PYI041",
@@ -126,6 +124,8 @@ select = [
     "PT025",
     "PT026",
     "PYI",
+    "Q003",  # avoidable escaped quote
+    "Q004",  # unnecessary escaped quote
     "RSE",
     "RUF008", # mutable dataclass default
     "RUF015", # access first ele in constant time
