@@ -264,8 +264,9 @@ void index_put_kernel_quantized_cuda(TensorIterator& iter, const IntArrayRef ind
 #ifndef USE_ROCM
       qvalue = std::clamp(qvalue, qmin, qmax);
 #else
-      int64_t new_max = std::max<int64_t>(qmin, qvalue);
-      qvalue = std::min<int64_t>(qmax, new_max);
+      qvalue = (qvalue < qmin) ? qmin : (qmax < qvalue) ? qmax : qvalue;
+
+
 #endif
       *(scalar_t*)(out_data + offset) = static_cast<scalar_t>(qvalue);
     });
