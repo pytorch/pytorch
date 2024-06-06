@@ -168,6 +168,9 @@ class OptimizedModule(torch.nn.Module):
             self._forward = self.forward
             self.forward = self._call_lazy_check
 
+    def __reduce__(self):
+        return (self.__class__, (self._orig_mod, self.dynamo_ctx))
+
     def __getstate__(self):
         state = dict(self.__dict__)
         state.pop("forward", None)
@@ -273,9 +276,11 @@ class _TorchDynamoContext:
         super().__init__()
         assert callable(callback) or callback is False or callback is None
         self.callback: DynamoCallback = callback
+        self._backend_ctx_ctor = backend_ctx_ctor
         self.prior: Union[Unset, DynamoCallback] = unset
         self.first_ctx = first_ctx
         self.export = export
+        self._dynamic = dynamic
         self.compiler_config = compiler_config
         self.cleanup_fns: List[Callable[[], Any]] = []
         self.enter_exit_hooks = []
@@ -379,7 +384,13 @@ class _TorchDynamoContext:
             # call to a builtin without a frame for us to capture
             fn = external_utils.wrap_inline(fn)
 
-        callback = self.callback
+        def do_nothing(*arg, **kwargs):
+            pass
+
+        if hasattr(self, "callback"):
+            callback = self.callback
+        else:
+            callback = do_nothing
 
         is_jit_tracing = torch._C._is_tracing
         is_fx_tracing = torch.fx._symbolic_trace.is_fx_tracing
@@ -522,6 +533,17 @@ class OptimizeContext(_TorchDynamoContext):
 
             self.enter_exit_hooks.append(call_compiled_autograd)
 
+    def __reduce__(self):
+        return (
+            self.__class__,
+            (self.callback, self._backend_ctx_ctor, self.first_ctx),
+            {
+                "export": self.export,
+                "dynamic": self._dynamic,
+                "compiler_config": self.compiler_config,
+            },
+        )
+
 
 class RunOnlyContext(_TorchDynamoContext):
     def __init__(self):
@@ -530,6 +552,9 @@ class RunOnlyContext(_TorchDynamoContext):
             torch._dynamo.mutation_guard.GenerationTracker.generation += 1
 
         super().__init__(callback=False, on_enter=on_enter)
+
+    def __reduce__(self):
+        return (self.__class__, ())
 
 
 class DisableContext(_TorchDynamoContext):
@@ -582,6 +607,9 @@ class DisableContext(_TorchDynamoContext):
         _fn._torchdynamo_orig_callable = fn  # type: ignore[attr-defined]
 
         return _fn
+
+    def __reduce__(self):
+        return (self.__class__, ())
 
 
 def _optimize_catch_errors(
