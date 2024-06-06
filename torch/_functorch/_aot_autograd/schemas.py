@@ -464,11 +464,15 @@ class ViewAndMutationMeta:
         # (i.e., there's no guarantee that tensor_flatten() returns a serializable result), or that
         # SubclassCreationMeta is cache safe.
         assert self.traced_tangent_metas is None
-        traced_tangent_metadata = []
 
         def extract_metadata(t):
             if isinstance(t, torch.Tensor) and is_traceable_wrapper_subclass(t):
                 (inner_tensors, flatten_spec) = t.__tensor_flatten__()  # type: ignore[attr-defined]
+                # Technically, we only need the flatten_spec, not the inner tensors.
+                # However, some Tensor subclasses (like TwoTensor) may have flatten_spec = None.
+                # And we want to be able to assert that this metadata is non-None,
+                # to distinguish between "this was a tensor subclass with no metadata" vs.
+                # "this wasn't a tensor subclass at all".
                 return (inner_tensors, flatten_spec)
             else:
                 return None
