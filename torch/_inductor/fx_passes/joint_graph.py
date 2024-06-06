@@ -8,6 +8,7 @@ import torch
 import torch._guards
 from torch._inductor.constant_folding import ConstantFolder
 from torch.fx.experimental.symbolic_shapes import statically_known_true
+from torch.fx.passes.tensorify_python_scalars import tensorify_python_scalars
 from torch.multiprocessing.reductions import StorageWeakRef
 
 from .. import config
@@ -22,6 +23,9 @@ from ..pattern_matcher import (
     stable_topological_sort,
 )
 from .replace_random import replace_random_passes
+from torch._dynamo.utils import (
+    detect_fake_mode,
+)
 
 log = logging.getLogger(__name__)
 patterns = PatternMatcherPass()
@@ -319,6 +323,10 @@ def joint_graph_passes(graph: torch.fx.GraphModule):
     if config.pattern_matcher:
         for patterns in pass_patterns:
             count += patterns.apply(graph.graph)  # type: ignore[arg-type]
+
+    fake_mode = detect_fake_mode()
+    if fake_mode is not None:
+        tensorify_python_scalars(graph, fake_mode.shape_env)
 
     if not config.fallback_random:
         count += replace_random_passes(graph)
