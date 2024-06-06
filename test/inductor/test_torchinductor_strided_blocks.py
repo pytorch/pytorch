@@ -57,12 +57,11 @@ class TritonBlockPointerTest(InductorTestCase):
             return flat
 
         compiled = torch.compile(func, backend="inductor", **compile_kwargs)
-
-        ref_tensors = flatten_tensors(func(*args))
         result, code = run_and_get_code(compiled, *args)
-        actual_tensors = flatten_tensors(result)
 
         # Check numerical accuracy
+        ref_tensors = flatten_tensors(func(*args))
+        actual_tensors = flatten_tensors(result)
         for ref, actual in zip(ref_tensors, actual_tensors):
             self.assertTrue(torch.allclose(ref, actual))
 
@@ -159,7 +158,18 @@ class TritonBlockPointerTest(InductorTestCase):
             foo, *args, expected_num_block_pointers=3 if require_block_ptr else None
         )
 
-    def test_broadcast(self):
+    @parametrize(
+        "x_size,y_size",
+        [
+            ((8, 8), (8, 1)),
+            ((8, 8), (1, 8)),
+            (
+                (4, 1, 4),
+                (1, 4, 1),
+            ),  # Very important case: index variables are disjoint!
+        ],
+    )
+    def test_broadcast(self, x_size: Tuple[int], y_size: Tuple[int]):
         """
         Test that we can generate strided block pointers when inputs have different
         shapes, and they are broadcast together.
@@ -170,20 +180,24 @@ class TritonBlockPointerTest(InductorTestCase):
             b = y * 2
             return a + b
 
-        device = torch.device(GPU_TYPE)
-        full_size = (16, 16)
-        full = torch.randn(full_size).to(device)
-        x_size = (8, 8)
-        y_size = (1, 8)
-        x, y = tuple(
-            torch.as_strided(full, size, full.stride()) for size in (x_size, y_size)
-        )
+        def get_input(view_size: Tuple[int]) -> torch.Tensor:
+            device = torch.device(GPU_TYPE)
+            full_size = tuple(2 * dim for dim in view_size)
+            full = torch.randn(full_size).to(device)
+            view = torch.as_strided(full, view_size, full.stride())
+            return view
+
+        x, y = (get_input(size) for size in (x_size, y_size))
 
         # Check that input sizes are not the same
         self.assertNotEqual(x.shape, y.shape)
 
-        # Broadcast is not yet supported, so we only expect 2 block pointers: one input, and output
-        self.run_and_compare(foo, x, y, expected_num_block_pointers=2)
+        # Check that at least one dimension is a singleton
+        all_dims = x.shape + y.shape
+        self.assertIn(1, all_dims)
+
+        # Expect 3 block pointers: 2 inputs one output
+        self.run_and_compare(foo, x, y, expected_num_block_pointers=3)
 
     @parametrize(
         "view_size,num_block_pointers,num_triton_kernels",

@@ -161,9 +161,13 @@ class BlockPtrOptions:
         """Helper to create a  BlockPtrOptions instance"""
         reshape_suffix = [f"{t.prefix.upper()}BLOCK" for t in range_trees]
 
+        # Only drop broadcast dims if the output has the same
+        # rank as the block. Otherwise, we will get shape errors.
+        drop_broadcasts = len(reshape_suffix) == len(strides)
+
         broadcasting_dim = [s == 0 for s in strides]
         for i, is_broadcasting in enumerate(broadcasting_dim):
-            if is_broadcasting:
+            if is_broadcasting and drop_broadcasts:
                 # drop any stride==0 dimensions for performance
                 reshape_suffix[i] = "1"
 
@@ -185,7 +189,7 @@ class BlockPtrOptions:
             return [
                 item
                 for item, is_broadcasting in zip(it, broadcasting_dim)
-                if not is_broadcasting
+                if not is_broadcasting or not drop_broadcasts
             ]
 
         return BlockPtrOptions(
@@ -1205,7 +1209,7 @@ class TritonKernel(SIMDKernel):
                 # Check that only one range tree is in use.
                 # Also check the index variable. We expect a linear index.
                 nonsingleton_range_trees = [
-                    tree for tree in range_trees if len(tree.var_ranges) > 0
+                    tree for tree in range_trees if tree.numel != 1
                 ]
                 symbols = index_relative_to_xyr_index.free_symbols
                 if len(symbols) != 1 or len(nonsingleton_range_trees) != 1:
@@ -1217,12 +1221,11 @@ class TritonKernel(SIMDKernel):
                 # Get the dims in descending order. E.g. x(N-1), ..., x0.
                 # This matches the order of dims in torch tensors and triton blocks.
                 sizevars = V.graph.sizevars
-                dims = dict(
-                    reversed(
+                tree_vars, dims = zip(
+                    *reversed(
                         [
                             (var, sizevars.lookup_precomputed_size(size))
                             for (var, size) in range_tree.var_ranges.items()
-                            if var in index.free_symbols
                         ]
                     )
                 )
@@ -1240,23 +1243,22 @@ class TritonKernel(SIMDKernel):
                 # Compute the cumulative size of each dimension's slice.
                 # This proceeds from the last dim up to the second.
                 slice_numels = [sympy.Integer(1)]
-                dim_values = list(dims.values())
-                for dim in dim_values[:0:-1]:
+                for dim in dims[:0:-1]:
                     numel = dim * slice_numels[0]
                     slice_numels.insert(0, numel)
 
-                # Division term
+                # Division term.
                 match_expr = strides[0] * FloorDiv(index_var, slice_numels[0])
 
-                # Modulo terms
+                # Modulo terms.
                 for dim_idx in range(1, num_dims):
-                    cur_dim = dim_values[dim_idx]
-                    next_dim = dim_values[dim_idx + 1] if dim_idx < num_dims - 1 else 1
+                    cur_dim = dims[dim_idx]
+                    next_dim = dims[dim_idx + 1] if dim_idx < num_dims - 1 else 1
                     match_expr += strides[dim_idx] * ModularIndexing(
                         index_var, next_dim, cur_dim
                     )
 
-                # Offset term
+                # Offset term.
                 match_expr += offset
 
                 match = index_relative_to_xyr_index.match(match_expr)
@@ -1288,22 +1290,22 @@ class TritonKernel(SIMDKernel):
                 )
                 block_shape: List[StrOrExpr] = [
                     ConstExprMin(CeilDiv(linear_block_size, slice_numel), dim)
-                    for slice_numel, dim in zip(slice_numels, dim_values)
+                    for slice_numel, dim in zip(slice_numels, dims)
                 ]
 
                 # Compute block offsets from {xyzr}offset and the range tree.
                 offset_symbol = sympy.Symbol(f"{prefix}offset", integer=True)
                 block_offsets: List[StrOrExpr] = [
                     sympy_subs(
-                        self.range_tree_nodes[var_name].expr, {index_var: offset_symbol}
+                        self.range_tree_nodes[var].expr, {index_var: offset_symbol}
                     )
-                    for var_name in dims
+                    for var in tree_vars
                 ]
 
                 # Form the block pointer.
                 self.filter_masks(mask_vars)
                 return BlockPtrOptions.create(
-                    shape=dim_values,
+                    shape=list(dims),
                     block_shape=block_shape,
                     offsets=block_offsets,
                     strides=[match[stride] for stride in strides],
