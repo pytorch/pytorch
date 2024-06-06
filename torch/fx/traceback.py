@@ -17,7 +17,8 @@ def preserve_node_meta():
     """
     Preserves state of ``meta`` field of a graph node
 
-    This function preserves a node's meta fields (stack_trace, nn_module_stack, val, tensor_meta, ...) during fx.Transformer and aot_autograd transformations.
+    This function preserves a node's meta fields (stack_trace, nn_module_stack, val, tensor_meta, ...)
+    during fx.Transformer and aot_autograd transformations.
 
     Example:
 
