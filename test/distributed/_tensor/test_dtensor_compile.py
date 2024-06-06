@@ -220,7 +220,7 @@ class TestDTensorCompile(torch._dynamo.test_case.TestCase):
         x = torch.randn(32, requires_grad=True)
         spec = DTensorSpec(
             mesh,
-            (Replicate()),
+            (Replicate(),),
             tensor_meta=TensorMeta(shape=torch.Size([32]), stride=(1,), dtype=x.dtype),
         )
 
