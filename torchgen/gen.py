@@ -2917,12 +2917,12 @@ def main() -> None:
         if DispatchKey.MPS in dispatch_keys:
             del dispatch_keys[dispatch_keys.index(DispatchKey.MPS)]
 
+    parsed_yaml = parse_native_yaml(native_yaml_path, tags_yaml_path, ignore_keys)
     whitelist_keys = set()
     if options.backend_whitelist:
         whitelist_keys = set(
             [k for k in dispatch_keys if str(k) in options.backend_whitelist]
         )
-        print(f"\n Whitelist_keys: {whitelist_keys}")
 
     parsed_yaml = parse_native_yaml(
         native_yaml_path, tags_yaml_path, ignore_keys, whitelist_keys
