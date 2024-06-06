@@ -16,7 +16,7 @@ class PixelShuffle(Module):
 
     See the paper:
     `Real-Time Single Image and Video Super-Resolution Using an Efficient Sub-Pixel Convolutional Neural Network`_
-    by Shi et. al (2016) for more details.
+    by Shi et al. (2016) for more details.
 
     Args:
         upscale_factor (int): factor to increase spatial resolution by
@@ -69,7 +69,7 @@ class PixelUnshuffle(Module):
 
     See the paper:
     `Real-Time Single Image and Video Super-Resolution Using an Efficient Sub-Pixel Convolutional Neural Network`_
-    by Shi et. al (2016) for more details.
+    by Shi et al. (2016) for more details.
 
     Args:
         downscale_factor (int): factor to decrease spatial resolution by
