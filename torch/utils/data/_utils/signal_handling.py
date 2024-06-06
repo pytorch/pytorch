@@ -35,7 +35,7 @@ import threading
 
 # Some of the following imported functions are not used in this file, but are to
 # be used `_utils.signal_handling.XXXXX`.
-from torch._C import (  # noqa: F401  # noqa: F401
+from torch._C import (  # noqa: F401
     _error_if_any_worker_fails,
     _remove_worker_pids,
     _set_worker_pids,
