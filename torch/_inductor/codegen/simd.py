@@ -20,7 +20,6 @@ from typing import (
     Sequence,
     Set,
     Tuple,
-    TYPE_CHECKING,
     Union,
 )
 
@@ -54,8 +53,6 @@ from ..virtualized import ops, OpsWrapper, V
 from .common import CSEVariable, index_prevent_reordering, Kernel, PythonPrinter
 from .multi_kernel import MultiKernel
 
-if TYPE_CHECKING:
-    pass
 
 log = logging.getLogger(__name__)
 perf_hint_log = torch._logging.getArtifactLogger(__name__, "perf_hints")
