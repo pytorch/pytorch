@@ -2045,6 +2045,12 @@ class CUDAGraphTreeManager:
         placeholders,
         mutated_input_idxs,
     ) -> Tuple[Callable[..., Any], List[Optional[Tensor]]]:
+        if torch._inductor.config.triton.cudagraph_static_input_params:
+            all_static_input_idxs = set(static_input_idxs)
+            for i, inp in enumerate(inputs):
+                if isinstance(inp, torch.nn.Parameter):
+                    all_static_input_idxs.add(i)
+            static_input_idxs = all_static_input_idxs
         id = self.new_func_id()
         self.ids_to_stack_traces[id] = stack_traces
         self.ids_to_funcs[id] = WrappedFunction(
