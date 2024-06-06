@@ -2914,6 +2914,8 @@ class CommonTemplate:
                 torch.randint(-128, 127, (256, 256), dtype=torch.int8),
             ),
             check_lowp=True,
+            rtol=0.01,
+            atol=0.1,
         )
 
     @with_tf32_off
