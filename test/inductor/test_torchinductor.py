@@ -1583,7 +1583,7 @@ class CommonTemplate:
 
         atol = None
         rtol = None
-        if os.getenv("ATEN_CPU_CAPABILITY") == "default":
+        if self.device == "cpu" and os.getenv("ATEN_CPU_CAPABILITY") == "default":
             atol = 1e-4
             rtol = 1e-4
         self.common(
@@ -1603,7 +1603,7 @@ class CommonTemplate:
 
         atol = None
         rtol = None
-        if os.getenv("ATEN_CPU_CAPABILITY") == "default":
+        if self.device == "cpu" and os.getenv("ATEN_CPU_CAPABILITY") == "default":
             atol = 1e-3
             rtol = 1e-3
         self.common(
