@@ -3970,6 +3970,7 @@ class WorkSharing:
         if not self.in_parallel:
             self.num_threads = threads
             self.in_parallel = True
+            self.stack.enter_context(self.code.indent())
             self.stack.enter_context(self.code.rethrow_exception())
             if config.cpp.dynamic_threads:
                 self.code.writeline("#pragma omp parallel")
