@@ -31,11 +31,10 @@ if HAS_CUDA:
             fast_dividef as my_fast_dividef,
         )
 
-
-# Define shared triton constants here.
-CONSTANT_C = 4
-STRING_CONSTANT_C = "CONSTANT_C"
-BOOL_CONSTANT_C = True
+    # Define shared triton constants here.
+    CONSTANT_C: tl.constexpr = 4
+    STRING_CONSTANT_C: tl.constexpr = "CONSTANT_C"
+    BOOL_CONSTANT_C: tl.constexpr = True
 
 
 class KernelTests(torch._inductor.test_case.TestCase):
@@ -600,7 +599,7 @@ def forward(self, x_1, output_1):
             offsets = block_start + tl.arange(0, BLOCK_SIZE)
             mask = offsets < n_elements
             x = tl.load(in_ptr0 + offsets, mask=mask)
-            if CONSTANT_NAME.value == STRING_CONSTANT_C:
+            if CONSTANT_NAME == STRING_CONSTANT_C:
                 output = CONSTANT_C * x
             if BOOL_CONSTANT_C:
                 output *= CONSTANT_C

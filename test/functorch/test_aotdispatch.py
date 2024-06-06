@@ -5293,9 +5293,10 @@ def forward(self, tangents_1, tangents_2):
 
     def test_aot_dispatch_output_requires_grad_in_no_grad(self):
         def fn(x):
+            out1 = x.sin()
             with torch.enable_grad():
-                out = x + 1
-            return out
+                out2 = x.cos()
+            return out1, out2
 
         inp_fns = [
             lambda: torch.ones(10, requires_grad=True),
@@ -5305,10 +5306,18 @@ def forward(self, tangents_1, tangents_2):
         compiled_f = aot_function(fn, nop)
         for inp_fn in inp_fns:
             with torch.no_grad():
-                ref_out = fn(inp_fn())
-                out = compiled_f(inp_fn())
-
-                self.assertEqual(ref_out.requires_grad, out.requires_grad)
+                ref_x = inp_fn()
+                ref_out = fn(ref_x)
+                x = inp_fn()
+                out = compiled_f(x)
+                for r, o in zip(ref_out, out):
+                    self.assertEqual(r.requires_grad, o.requires_grad)
+            if ref_x.requires_grad:
+                with torch.enable_grad():
+                    (ref_out[0] + ref_out[1]).sum().backward()
+                    (out[0] + out[1]).sum().backward()
+                    self.assertEqual(ref_x.grad, x.grad)
+                    assert torch.allclose(ref_x.grad, x.grad, atol=1e-3, rtol=1e-3)
 
 
 class TestAOTModuleSimplified(AOTTestCase):
