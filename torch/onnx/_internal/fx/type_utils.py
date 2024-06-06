@@ -22,7 +22,7 @@ import torch
 from torch._subclasses import fake_tensor
 
 if TYPE_CHECKING:
-    import onnx.defs.OpSchema.AttrType  # type: ignore[import]
+    import onnx.defs.OpSchema.AttrType  # type: ignore[import]  # noqa: TCH004
 
 
 # Enable both TorchScriptTensor and torch.Tensor to be tested

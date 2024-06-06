@@ -2,9 +2,9 @@
 // Licensed under the BSD-3-Clause license
 // This is the CPU implementation of the Connectionist Temporal Loss.
 // We mostly follow Graves.
-// 1. Graves et al: http://www.cs.toronto.edu/~graves/icml_2006.pdf
+// 1. Graves et al.: http://www.cs.toronto.edu/~graves/icml_2006.pdf
 // We use the equations from above link, but note that [1] has 1-based indexing and we (of course) use 0-based.
-// Graves et al call the probabilities y, we use log_probs (also calling them inputs)
+// Graves et al. call the probabilities y, we use log_probs (also calling them inputs)
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 
 #include <ATen/core/Tensor.h>
