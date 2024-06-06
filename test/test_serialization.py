@@ -4023,6 +4023,7 @@ class TestSerialization(TestCase, SerializationMixin):
     @parametrize('dtype', (torch.complex32, torch.float32))  # test both rebuild_v2 and rebuild_v3 dtypes
     @unittest.skipIf(IS_WINDOWS, "NamedTemporaryFile on windows")
     @unittest.skipIf(IS_FBCODE, "miniz version differs between fbcode and oss")
+    @unittest.skipIf(not torch.cuda.is_available())
     def test_filewriter_metadata_writing(self, filename, device, dtype):
         '''
         Using a FakeTensorMode and annotating untyped_storage with `_serialize` will
