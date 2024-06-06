@@ -342,8 +342,10 @@ void cacheAllocatorDeregisterHook(
 }
 
 #if defined(IS_NCCLX) && defined(NCCL_COMM_DUMP)
-std::unordered_map<std::string, std::unordered_map<std::string, std::string>>
-get_nccl_dump_map() {
+std::string dump_nccl_trace(
+    bool includeCollectives,
+    bool includeStackTraces,
+    bool onlyActive) {
   std::unordered_map<
       std::string /* ncclUniqueID */,
       std::unordered_map<std::string, std::string> /* dump from this comm */>
@@ -363,15 +365,6 @@ get_nccl_dump_map() {
     std::string ncclUniqueIDStr = buildNcclUniqueIdStr(ncclComm->getNcclId());
     ncclDumpMap[ncclUniqueIDStr] = ncclComm->ncclCommDump();
   }
-
-  return ncclDumpMap;
-}
-
-std::string dump_nccl_trace(
-    bool includeCollectives,
-    bool includeStackTraces,
-    bool onlyActive) {
-  auto ncclDumpMap = get_nccl_dump_map();
   return NCCLTraceBuffer::get()->dump(
       ncclDumpMap, includeCollectives, includeStackTraces, onlyActive);
 }
