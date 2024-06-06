@@ -10,11 +10,30 @@ allowed to compute gradients on).
 """.strip()
 
 
+lib = torch.library.Library("create_parameter_op", "FRAGMENT")
+
+lib.define("set_(Tensor(a!) tensor, Tensor data) -> ()")
+
+@torch.library.impl(lib, "set_", "Meta")
+def set_(tensor, data):
+    tensor.set_(data)
+
+@torch.library.impl(lib, "set_", "CUDA")
+def set_(tensor, data):
+    tensor.set_(data)
+
+
 class TracableCreateParameter(torch.autograd.Function):
     @staticmethod
     def forward(ctx, tensor, placeholder):
         assert not tensor.requires_grad
-        return placeholder.set_(tensor)
+        # TODO(yf225): we should use `torch.ops.create_parameter_op.set_` here,
+        # but somehow Dynamo/AOTAutograd will turn that into a `copy_`
+        # which causes segfault because the sacrificial placeholder is size-0.
+        # We need to just keep using `set_` instead of `copy_` in the graph.
+        placeholder.set_(tensor)
+        # torch.ops.create_parameter_op.set_(placeholder, tensor)
+        return placeholder
 
     @staticmethod
     def backward(ctx, grad):
