@@ -1400,15 +1400,10 @@ def is_wait(node):
 
 def num_fw_fixed_arguments(dynamo_gm_num_inputs: int, aot_fw_gm_num_inputs: int):
     "Computes the number of inputs to the aot fw graph which have fixed addresses (params and buffers)"
-    tracing_context = torch._guards.TracingContext.try_get()
-    if tracing_context and tracing_context.params_buffers_flat is not None:
-        return len(tracing_context.params_buffers_flat)
-    else:
-        # non-dynamo frontends
-        num_rng_seed_offset_inputs = (
-            2 if torch._functorch.config.functionalize_rng_ops else 0
-        )
-        return aot_fw_gm_num_inputs - dynamo_gm_num_inputs - num_rng_seed_offset_inputs
+    num_rng_seed_offset_inputs = (
+        2 if torch._functorch.config.functionalize_rng_ops else 0
+    )
+    return aot_fw_gm_num_inputs - dynamo_gm_num_inputs - num_rng_seed_offset_inputs
 
 
 def count_tangents(fx_g: torch.fx.GraphModule):

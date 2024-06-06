@@ -627,8 +627,7 @@ class TracingContext:
         self.fw_metadata = None
         # this is only set after aot_autograd
         self.aot_graph_name = None
-        # Params/buffers registered on the GraphModule compiled by AOTAutograd, mutated by inductor freezing
-        self.params_buffers_flat: Optional[List[Optional[torch.Tensor]]] = None
+        self.params_flat = None
         # this is for extended return calling convention from backend
         # compiler to aot_autograd
         # Per output, what the compiler specified stride of the output is,
