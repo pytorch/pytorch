@@ -1,7 +1,7 @@
 import copy
 import itertools
 import warnings
-
+import inspect
 import torch
 import torch.nn as nn
 import torch.ao.nn.quantized as nnq
@@ -233,6 +233,13 @@ def _add_observer_(module, qconfig_propagation_list=None, non_leaf_module_list=N
     # Insert observers only for leaf nodes, note that this observer is for
     # the output of the module, for input QuantStub will observe them
     if has_no_children_ignoring_parametrizations(module) and not isinstance(module, torch.nn.Sequential) \
+       and type_before_parametrizations(module) in qconfig_propagation_list:
+        insert_activation_post_process(module)
+    # This is a special case for AdaRound eager mode
+    # AdaRound contains weight_fake_quant to be propagated from API to convert
+    # leaf node check with a number of children looks naive assumption that blocks
+    # Adding an exception case for AdaRound
+    if hasattr(module, "weight_fake_quant") and not isinstance(module, torch.nn.Sequential) \
        and type_before_parametrizations(module) in qconfig_propagation_list:
         insert_activation_post_process(module)
 
@@ -520,7 +527,8 @@ def quantize_qat(model, run_fn, run_args, inplace=False):
 
 def convert(
         module, mapping=None, inplace=False, remove_qconfig=True,
-        is_reference=False, convert_custom_config_dict=None):
+        is_reference=False, convert_custom_config_dict=None,
+        use_precomputed_fake_quant=False):
     r"""Converts submodules in input module to a different module according to `mapping`
     by calling `from_float` method on the target module class. And remove qconfig at the
     end if remove_qconfig is set to True.
@@ -533,6 +541,7 @@ def convert(
         `inplace`: carry out model transformations in-place, the original module
                    is mutated
         `convert_custom_config_dict`: custom configuration dictionary for convert function
+        `use_precomputed_fake_quant`: a flag to enable use of precomputed fake quant
 
     .. code-block:: python
 
@@ -552,14 +561,16 @@ def convert(
         module = copy.deepcopy(module)
     _convert(
         module, mapping, inplace=True, is_reference=is_reference,
-        convert_custom_config_dict=convert_custom_config_dict)
+        convert_custom_config_dict=convert_custom_config_dict,
+        use_precomputed_fake_quant=use_precomputed_fake_quant)
     if remove_qconfig:
         _remove_qconfig(module)
     return module
 
 def _convert(
         module, mapping=None, inplace=False,
-        is_reference=False, convert_custom_config_dict=None):
+        is_reference=False, convert_custom_config_dict=None,
+        use_precomputed_fake_quant=False):
     r"""Converts submodules in input module to a different module according to `mapping`
     by calling `from_float` method on the target module class
 
@@ -571,6 +582,7 @@ def _convert(
         inplace: carry out model transformations in-place, the original module
                  is mutated
         is_reference: a flag to enable quantized reference module
+        use_precomputed_fake_quant: a flag to enable use of precomputed fake quant
 
     """
     if mapping is None:
@@ -589,15 +601,16 @@ def _convert(
         if not isinstance(mod, _FusedModule) and \
            type_before_parametrizations(mod) not in custom_module_class_mapping:
             _convert(mod, mapping, True,  # inplace
-                     is_reference, convert_custom_config_dict)
-        reassign[name] = swap_module(mod, mapping, custom_module_class_mapping)
+                     is_reference, convert_custom_config_dict,
+                     use_precomputed_fake_quant=use_precomputed_fake_quant)
+        reassign[name] = swap_module(mod, mapping, custom_module_class_mapping, use_precomputed_fake_quant)
 
     for key, value in reassign.items():
         module._modules[key] = value
 
     return module
 
-def swap_module(mod, mapping, custom_module_class_mapping):
+def swap_module(mod, mapping, custom_module_class_mapping, use_precomputed_fake_quant=False):
     r"""Swaps the module if it has a quantized counterpart and it has an
     `observer` attached.
 
@@ -623,7 +636,11 @@ def swap_module(mod, mapping, custom_module_class_mapping):
                 weight_qparams = get_qparam_dict(weight_post_process)
                 new_mod = qmod.from_float(mod, weight_qparams)
             else:
-                new_mod = qmod.from_float(mod)
+                sig = inspect.signature(qmod.from_float)
+                if 'use_precomputed_fake_quant' in sig.parameters:
+                    new_mod = qmod.from_float(mod, use_precomputed_fake_quant=use_precomputed_fake_quant)
+                else:
+                    new_mod = qmod.from_float(mod)
             swapped = True
 
         if swapped:

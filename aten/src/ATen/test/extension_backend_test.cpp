@@ -15,8 +15,8 @@ using namespace at;
 
 static int test_int;
 
-Tensor empty_override(SymIntArrayRef size, std::optional<ScalarType> dtype, c10::optional<Layout> layout,
-                      std::optional<Device> device, c10::optional<bool> pin_memory, c10::optional<MemoryFormat> optional_memory_format) {
+Tensor empty_override(SymIntArrayRef size, std::optional<ScalarType> dtype, std::optional<Layout> layout,
+                      std::optional<Device> device, std::optional<bool> pin_memory, std::optional<MemoryFormat> optional_memory_format) {
   test_int = 1;
   auto tensor_impl = c10::make_intrusive<TensorImpl, UndefinedTensorImpl>(
       Storage(

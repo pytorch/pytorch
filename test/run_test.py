@@ -29,7 +29,6 @@ from torch.testing._internal.common_utils import (
     IS_CI,
     IS_MACOS,
     IS_WINDOWS,
-    parser as common_parser,
     retry_shell,
     set_cwd,
     shell,
@@ -59,6 +58,9 @@ from tools.testing.discover_tests import (
 )
 from tools.testing.do_target_determination_for_s3 import import_results
 from tools.testing.target_determination.gen_artifact import gen_ci_artifact
+from tools.testing.target_determination.heuristics.previously_failed_in_pr import (
+    gen_additional_test_failures_file,
+)
 from tools.testing.target_determination.heuristics.utils import get_pr_number
 
 from tools.testing.test_run import TestRun
@@ -240,7 +242,8 @@ CI_SERIAL_LIST = [
     "test_native_mha",  # OOM
     "test_module_hooks",  # OOM
     "inductor/test_max_autotune",
-    "inductor/test_cutlass_backend",  # slow due to many nvcc compilation steps
+    "inductor/test_cutlass_backend",  # slow due to many nvcc compilation steps,
+    "inductor/test_flex_attention",  # OOM
 ]
 # A subset of onnx tests that cannot run in parallel due to high memory usage.
 ONNX_SERIAL_LIST = [
@@ -380,7 +383,7 @@ def run_test(
 ) -> int:
     env = env or os.environ.copy()
     maybe_set_hip_visible_devies()
-    unittest_args = options.additional_unittest_args.copy()
+    unittest_args = options.additional_args.copy()
     test_file = test_module.name
     stepcurrent_key = test_file
 
@@ -407,7 +410,7 @@ def run_test(
         stepcurrent_key = f"{test_file}_{test_module.shard}_{os.urandom(8).hex()}"
 
     if options.verbose:
-        unittest_args.append(f'-{"v"*options.verbose}')  # in case of pytest
+        unittest_args.append(f'-{"v" * options.verbose}')  # in case of pytest
 
     if test_file in RUN_PARALLEL_BLOCKLIST:
         unittest_args = [
@@ -1053,7 +1056,6 @@ def parse_args():
         description="Run the PyTorch unit test suite",
         epilog="where TESTS is any of: {}".format(", ".join(TESTS)),
         formatter_class=argparse.RawTextHelpFormatter,
-        parents=[common_parser],
     )
     parser.add_argument(
         "-v",
@@ -1198,15 +1200,10 @@ def parse_args():
         and not IS_SLOW
         and not TEST_WITH_ROCM
         and not IS_MACOS
+        and "xpu" not in BUILD_ENVIRONMENT
         and "onnx" not in BUILD_ENVIRONMENT
         and "debug" not in BUILD_ENVIRONMENT
         and "parallelnative" not in BUILD_ENVIRONMENT,
-    )
-    parser.add_argument(
-        "additional_unittest_args",
-        nargs="*",
-        help="additional arguments passed through to unittest, e.g., "
-        "python run_test.py -i sparse -- TestSparse.test_factory_size_check",
     )
     parser.add_argument(
         "--shard",
@@ -1269,7 +1266,11 @@ def parse_args():
         help="Run tests with TorchInductor turned on",
     )
 
-    return parser.parse_args()
+    args, extra = parser.parse_known_args()
+    if "--" in extra:
+        extra.remove("--")
+    args.additional_args = extra
+    return args
 
 
 def exclude_tests(
@@ -1622,7 +1623,7 @@ def run_tests(
             options_clone = copy.deepcopy(options)
             if can_run_in_pytest(test):
                 options_clone.pytest = True
-            options_clone.additional_unittest_args.extend(["-m", "serial"])
+            options_clone.additional_args.extend(["-m", "serial"])
             failure = run_test_module(test, test_directory, options_clone)
             test_failed = handle_error_messages(failure)
             if (
@@ -1637,7 +1638,7 @@ def run_tests(
             options_clone = copy.deepcopy(options)
             if can_run_in_pytest(test):
                 options_clone.pytest = True
-            options_clone.additional_unittest_args.extend(["-m", "not serial"])
+            options_clone.additional_args.extend(["-m", "not serial"])
             pool.apply_async(
                 run_test_module,
                 args=(test, test_directory, options_clone),
@@ -1794,6 +1795,9 @@ def main():
                         **test_stats,
                     },
                 )
+            gen_additional_test_failures_file(
+                [test.test_file for test, _ in all_failures]
+            )
 
     if len(all_failures):
         for _, err in all_failures:

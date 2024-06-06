@@ -92,7 +92,7 @@ class ModuleCloneHelper {
       const ModuleQConfigMap& module_qconfig_map,
       bool inplace = false) {
     std::unordered_map<TypePtr, QConfigTypePtrMap> type_remap;
-    IValue::HashAliasedIValueMap memo;
+    IValue::HashIdentityIValueMap memo;
     return clone_impl(
         module, module_qconfig_map, type_remap, inplace, std::move(memo));
   }
@@ -103,7 +103,7 @@ class ModuleCloneHelper {
       const ModuleQConfigMap& module_qconfig_map,
       std::unordered_map<TypePtr, QConfigTypePtrMap>& type_remap,
       bool inplace,
-      IValue::HashAliasedIValueMap memo) {
+      IValue::HashIdentityIValueMap memo) {
     auto qconfig = module_qconfig_map.at(module._ivalue());
     auto type = module.type();
     // Create a new _ivalue in the same compilation unit.

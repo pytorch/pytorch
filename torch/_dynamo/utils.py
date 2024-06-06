@@ -113,7 +113,9 @@ log = logging.getLogger(__name__)
 compilation_time_metrics: Dict[str, List[float]] = {}
 
 # profiling compilation time by frame phase
-frame_phase_timing: Dict[str, Dict[str, float]] = {}
+frame_phase_timing: Dict[str, Dict[str, float]] = collections.defaultdict(
+    lambda: collections.defaultdict(float)
+)
 
 timer_counter = itertools.count()
 
@@ -154,12 +156,9 @@ def increment_op_count(cnt):
     op_count += cnt
 
 
-# Print a report of time spent so far
-# Ex:
-# TIMING:
-# entire_frame_compile:8.574629999999999
-# backend_compile:5.26806
-def print_time_report():
+# Calculate total time spent so far for each phase
+# For example, {'entire_frame_compile':8.574629999999999, 'backend_compile':5.26806}
+def calculate_time_spent():
     total = 0.0
     total_by_key = {}
     for timings in frame_phase_timing.values():
@@ -170,11 +169,26 @@ def print_time_report():
             else:
                 total_by_key[key] += timing
 
+    return total_by_key
+
+
+# Print a report of time spent so far
+# Ex:
+# TIMING:
+# entire_frame_compile:8.574629999999999
+# backend_compile:5.26806
+def print_time_report():
+    total_by_key = calculate_time_spent()
+
     out = "TIMING:"
     for key, value in total_by_key.items():
         out = f"{out} {key}:{round(value, 5)}"
 
     print(out)
+
+
+def _add_time_spent(key, phase_name, time_spent):
+    frame_phase_timing[key][phase_name] += time_spent
 
 
 # dynamo_timed API works as a function decorator
@@ -193,9 +207,12 @@ def print_time_report():
 # phase_names record an extra record into a separate compilation timing structure,
 # one keyed on frame+name rather than function.
 # The frame is incremented outside of this function, in def increment_frame() above.
+# `fwd_only` is used to identify if this phase or function is only called
+# during compiling fwd graphs, e.g, `entire_frame_compile` and `backend_compile`.
+# The other phases (`inductor_compile` and `code_gen`) are called for both fwd and bwd graphs.
 
 
-def dynamo_timed(original_function=None, phase_name=None):
+def dynamo_timed(original_function=None, phase_name=None, fwd_only=True):
     def dynamo_timed_inner(func):
         if config.cprofile:
             return func
@@ -205,19 +222,70 @@ def dynamo_timed(original_function=None, phase_name=None):
             key = func.__qualname__
             if key not in compilation_time_metrics:
                 compilation_time_metrics[key] = []
-            with torch.profiler.record_function(f"{key} (dynamo_timed)"):
-                t0 = time.time()
-                r = func(*args, **kwargs)
-                time_spent = time.time() - t0
-            compilation_time_metrics[key].append(time_spent)
-            if phase_name:
-                frame_key = str(curr_frame)
-                if frame_key not in frame_phase_timing:
-                    frame_phase_timing[frame_key] = {}
-                if phase_name not in frame_phase_timing[frame_key]:
-                    frame_phase_timing[frame_key][phase_name] = time_spent
-                else:
-                    frame_phase_timing[frame_key][phase_name] += time_spent
+
+            fail_type: Optional[str] = None
+            fail_reason: Optional[str] = None
+            time_spent = float("-inf")
+            try:
+                with torch.profiler.record_function(f"{key} (dynamo_timed)"):
+                    t0 = time.time()
+                    r = func(*args, **kwargs)
+                    time_spent = time.time() - t0
+                compilation_time_metrics[key].append(time_spent)
+            except Exception as e:
+                fail_type = str(type(e))
+                fail_reason = str(e)
+                raise
+            finally:
+                # Only record backward compilation metrics if phase_name is not None!
+                if phase_name:
+                    frame_key = str(curr_frame)
+                    # fwd only compilation stages: entire_frame_compile, backend_compile.
+                    # use frame_key as time aggregation key.
+                    if fwd_only and fail_type is None:
+                        _add_time_spent(frame_key, phase_name, time_spent)
+                    else:
+                        # fwd + bwd compilation stages: inductor_compile, code_gen.
+                        # use frame_key as time aggregation key for fwd graphs;
+                        # use compile_id as time aggregation key for bwd graphs.
+                        if torch._guards.TracingContext.try_get() is not None:
+                            aot_graph_name = str(
+                                torch._guards.TracingContext.get().aot_graph_name
+                            )
+                            if (
+                                "forward" in aot_graph_name
+                                or "inference" in aot_graph_name
+                            ) and fail_type is None:
+                                _add_time_spent(frame_key, phase_name, time_spent)
+                            elif "backward" in aot_graph_name:
+                                compile_id = str(
+                                    torch._guards.CompileContext.current_compile_id()
+                                )
+                                if fail_type is None:
+                                    _add_time_spent(compile_id, phase_name, time_spent)
+
+                                # log backward compilation metrics at the end of `inductor_compile` of bwd graph,
+                                # one record for one bwd graph.
+                                if phase_name == "inductor_compile":
+                                    if fail_type is None:
+                                        inductor_compile_time = frame_phase_timing[
+                                            compile_id
+                                        ].get("inductor_compile", None)
+                                        code_gen_time = frame_phase_timing[
+                                            compile_id
+                                        ].get("code_gen", None)
+                                    else:
+                                        inductor_compile_time = None
+                                        code_gen_time = None
+                                    metrics = BwdCompilationMetrics(
+                                        compile_id,
+                                        inductor_compile_time,
+                                        code_gen_time,
+                                        fail_type,
+                                        fail_reason,
+                                    )
+                                    record_compilation_metrics(metrics)
+
             return r
 
         return time_wrapper
@@ -590,6 +658,7 @@ def proxy_args_kwargs(args, kwargs):
 
 @dataclasses.dataclass
 class CompilationMetrics:
+    compile_id: str
     frame_key: str
     co_name: str
     co_filename: str
@@ -620,26 +689,44 @@ class CompilationMetrics:
     has_guarded_code: bool
 
 
+@dataclasses.dataclass
+class BwdCompilationMetrics:
+    compile_id: str
+    inductor_compile_time_s: Optional[float]
+    code_gen_time_s: Optional[float]
+    fail_type: Optional[str]
+    fail_reason: Optional[str]
+
+
 DEFAULT_COMPILATION_METRICS_LIMIT = 64
 
 
-_compilation_metrics: Deque[CompilationMetrics] = collections.deque(
-    maxlen=DEFAULT_COMPILATION_METRICS_LIMIT
-)
+_compilation_metrics: Deque[
+    Union[CompilationMetrics, BwdCompilationMetrics]
+] = collections.deque(maxlen=DEFAULT_COMPILATION_METRICS_LIMIT)
 
 
-def record_compilation_metrics(compilation_metrics: CompilationMetrics):
+def record_compilation_metrics(
+    compilation_metrics: Union[CompilationMetrics, BwdCompilationMetrics]
+):
     global _compilation_metrics
     _compilation_metrics.append(compilation_metrics)
-    torch._logging.trace_structured(
-        "compilation_metrics",
-        lambda: {
-            k: list(v) if isinstance(v, set) else v
-            for k, v in dataclasses.asdict(compilation_metrics).items()
-        },
-    )
-    if config.log_compilation_metrics:
-        log_compilation_event(compilation_metrics)
+    if isinstance(compilation_metrics, CompilationMetrics):
+        name = "compilation_metrics"
+    else:
+        name = "bwd_compilation_metrics"
+    # Currently only record fwd compilation metrics, will add bwd compilation metrics
+    # after the internal Scuba logging changes finish.
+    if isinstance(compilation_metrics, CompilationMetrics):
+        torch._logging.trace_structured(
+            name,
+            lambda: {
+                k: list(v) if isinstance(v, set) else v
+                for k, v in dataclasses.asdict(compilation_metrics).items()
+            },
+        )
+        if config.log_compilation_metrics:
+            log_compilation_event(compilation_metrics)
 
 
 def set_compilation_metrics_limit(new_size: int) -> None:
@@ -655,7 +742,7 @@ def clear_compilation_metrics() -> None:
     _compilation_metrics.clear()
 
 
-def get_compilation_metrics() -> List[CompilationMetrics]:
+def get_compilation_metrics() -> List[Union[CompilationMetrics, BwdCompilationMetrics]]:
     return list(_compilation_metrics)
 
 
@@ -1751,7 +1838,7 @@ def get_fake_value(node, tx, allow_non_graph_fake=False):
         elif isinstance(
             cause, torch.fx.experimental.symbolic_shapes.GuardOnDataDependentSymNode
         ):
-            raise UserError(  # noqa: TRY200
+            raise UserError(  # noqa: B904
                 UserErrorType.CONSTRAINT_VIOLATION,
                 "Tried to use data-dependent value in the subsequent computation. "
                 "This can happen when we encounter unbounded dynamic value that is unknown during tracing time.  "
@@ -2019,6 +2106,14 @@ state_dict_hook_names = [
 all_hook_names = forward_hook_names + backward_hook_names + state_dict_hook_names
 
 
+def nn_module_has_global_hooks():
+    # This is limited to backward hooks for now because NNModuleVariable
+    # supports fwd hooks underneath.
+    return len(torch.nn.modules.module._global_backward_hooks) or len(
+        torch.nn.modules.module._global_backward_pre_hooks
+    )
+
+
 def nn_module_get_all_hooks(
     mod,
     check_forward_hooks=False,
@@ -2162,8 +2257,8 @@ class numpy_operator_wrapper:
 def defake(x):
     if not isinstance(x, FakeTensor):
         return x
-    size: "torch._prims_common.ShapeType"
-    stride: "torch._prims_common.StrideType"
+    size: torch._prims_common.ShapeType
+    stride: torch._prims_common.StrideType
     if x._has_symbolic_sizes_strides:
         size = []
         for s in x.size():
@@ -2204,7 +2299,7 @@ def build_checkpoint_variable(**options):
 
     # TODO - This is a temporary situation where we have two versions of
     # checkpointing implementation. We will converge on one and remove the other.
-    activation_checkpoint_op: "torch._ops.HigherOrderOperator" = (
+    activation_checkpoint_op: torch._ops.HigherOrderOperator = (
         higher_order_ops.tag_activation_checkpoint
     )
     if torch._functorch.config.functionalize_rng_ops:
@@ -2521,12 +2616,17 @@ def is_torch_function_object(value):
 
 
 def has_torch_function(vt: "torch._dynamo.variables.base.VariableTracker") -> bool:
-    from torch._dynamo.variables import UserDefinedObjectVariable
+    from torch._dynamo.variables import LazyVariableTracker, UserDefinedObjectVariable
     from torch._dynamo.variables.torch_function import TensorWithTFOverrideVariable
 
-    return isinstance(vt, TensorWithTFOverrideVariable) or (
-        isinstance(vt, UserDefinedObjectVariable)
-        and hasattr(vt.value, "__torch_function__")
+    if isinstance(vt, TensorWithTFOverrideVariable):
+        return True
+
+    if isinstance(vt, LazyVariableTracker):
+        LazyVariableTracker.realize(vt)
+
+    return isinstance(vt, UserDefinedObjectVariable) and hasattr(
+        vt.value, "__torch_function__"
     )
 
 

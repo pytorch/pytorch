@@ -1,6 +1,7 @@
 import contextlib
 import functools
 import gc
+import warnings
 from dataclasses import asdict, dataclass, field
 from itertools import chain
 from typing import (
@@ -123,7 +124,7 @@ class StateDictOptions:
       won't contain any frozen parameters -- the ``requires_grad`` is False.
       The default value is False.
 
-    - ``keep_submodule_prefixes``: when ``submodules`` is not None, this option
+    - ``keep_submodule_prefixes`` (deprecated): when ``submodules`` is not None, this option
       indicates whether to keep the submodule prefixes from the state_dict keys.
       or example, if the submodule is ``module.pretrain`` and the full FQN of
       the parameter is ``pretrain.layer1.weight`` of the param. When this option
@@ -135,7 +136,6 @@ class StateDictOptions:
 
     - ``strict``: the ``strict`` option when ``set_state_dict`` calls
       model.load_state_dict().
-      The default value is False.
 
     - ``broadcast_from_rank0``: when the option is True, rank0 should receive a
        full state_dict and will broadcast the tensors in the state_dict/
@@ -151,6 +151,7 @@ class StateDictOptions:
     keep_submodule_prefixes: bool = True
     strict: bool = True
     broadcast_from_rank0: bool = False
+    flatten_optimizer_state_dict: bool = False
 
 
 @dataclass
@@ -275,6 +276,13 @@ def _verify_options(
     """
     Verify the model and options passed by the user and generates _StateDictInfo.
     """
+    if submodules:
+        warnings.warn(
+            "Getting submodules only model/optim state_dict is deprecated and "
+            "will be removed in 2.5. This feature can be achieved by manually "
+            "filtering out the state_dict returned from get_state_dict.",
+            FutureWarning,
+        )
     if optim_only and not optims:
         raise RuntimeError(
             "Optimizers are not passed in but optim_only is set to True."
@@ -333,8 +341,24 @@ def _verify_options(
             )
             state_dict_type = StateDictType.SHARDED_STATE_DICT
 
+        @contextlib.contextmanager
+        def fsdp_state_dict_type_without_warning(
+            module,
+            state_dict_type,
+            state_dict_config,
+            optim_state_dict_config,
+        ):
+            with warnings.catch_warnings():
+                with FSDP.state_dict_type(
+                    module=module,
+                    state_dict_type=state_dict_type,
+                    state_dict_config=state_dict_config,
+                    optim_state_dict_config=optim_state_dict_config,
+                ):
+                    yield
+
         fsdp_context = functools.partial(
-            FSDP.state_dict_type,
+            fsdp_state_dict_type_without_warning,
             module=model,
             state_dict_type=state_dict_type,
             state_dict_config=state_dict_config,
@@ -383,7 +407,7 @@ def _verify_state_dict(
 
     if info.handle_optim:
         if (
-            not (optim_state_dict and optim_state_dict[STATE])
+            not optim_state_dict
             and not (info.cpu_offload and info.full_state_dict)
             and (not info.broadcast_from_rank0)
         ):
@@ -405,6 +429,24 @@ def _state_dict_fn(obj: Union[nn.Module, torch.optim.Optimizer], api: str) -> Ca
     if call in _patched_state_dict:
         call = functools.partial(getattr(obj.__class__, api), self=obj)
     return call
+
+
+def _maybe_full_or_cpu_state_dict(
+    state_dict: Dict[str, Any], info: _StateDictInfo
+) -> Dict[str, Any]:
+    if info.full_state_dict:
+        ranks_only = (
+            tuple()
+            if (not info.cpu_offload or not torch.distributed.is_initialized())
+            else (0,)
+        )
+        return _gather_state_dict(
+            state_dict, cpu_offload=info.cpu_offload, ranks_only=ranks_only
+        )
+    elif info.cpu_offload:
+        return _offload_state_dict_to_cpu(state_dict)
+    else:
+        return state_dict
 
 
 def _get_model_state_dict(
@@ -471,15 +513,7 @@ def _get_model_state_dict(
         if torch.is_tensor(p) and p.is_meta:
             state_dict.pop(key)
 
-    if info.full_state_dict:
-        ranks_only = tuple() if not info.cpu_offload else (0,)
-        return _gather_state_dict(
-            state_dict, cpu_offload=info.cpu_offload, ranks_only=ranks_only
-        )
-    elif info.cpu_offload:
-        return _offload_state_dict_to_cpu(state_dict)
-    else:
-        return state_dict
+    return _maybe_full_or_cpu_state_dict(state_dict, info)
 
 
 def _load_model_state_dict(
@@ -513,7 +547,9 @@ def _load_model_state_dict(
                 else:
                     assert device == value.device
         assert device is not None
-        _broadcast_state_dict(state_dict, local_state_dict, device=device)
+        _broadcast_state_dict(
+            state_dict, local_state_dict, device=device, strict=info.strict
+        )
         for fqn, local_state in local_state_dict.items():
             state_dict[fqn] = local_state
 
@@ -562,6 +598,115 @@ def _init_optim_state(optim: torch.optim.Optimizer) -> None:
         if "lr" in param_group:
             param_group["lr"] = lrs.pop(0)
     optim.zero_grad(set_to_none=True)
+
+
+def _flatten_optim_state_dict(state_dict: OptimizerStateType) -> Dict[str, ValueType]:
+    """
+    This API flattens the optimizer state_dict to support optimizer resharding for
+    MPMD, e.g., pipeline parallelism.
+
+    Without the API, the original optimizer state_dict looks like:
+    {
+        "state": {
+            "layer1.weight": {
+                "step": 10, "exp_avg": SomeTensor, "exp_avg_sq": SomeTensor
+            },
+            "layer2.weight": {
+                "step": 10, "exp_avg": SomeTensor, "exp_avg_sq": SomeTensor
+            },
+        },
+        "param_group": [
+            {
+                "lr": 0.0,
+                "betas": (0.9, 0.95), ...,
+                "params": ["layer1.weight", "layer2.weight"]
+            }
+        ]
+    }
+
+    With this API, the optimizer state_dict looks like:
+    {
+        "state.layer1.weight.step": 10,
+        "state.layer2.weight.step": 10,
+        "state.layer1.weight.exp_avg": SomeTensor,
+        "state.layer2.weight.exp_avg": SomeTensor,
+        "state.layer1.weight.exp_avg_sq": SomeTensor,
+        "state.layer2.weight.exp_avg_sq": SomeTensor,
+        "param_group.layer1.weight.lr" : 0.1,
+        "param_group.layer2.weight.lr" : 0.1,
+        "param_group.layer1.weight.betas" : (0.9, 0.95),
+        "param_group.layer2.weight.betas" : (0.9, 0.95),
+    }
+
+    Note that if any of the value is a container, like the betas in the example,
+    this API won't flattent it.
+    """
+
+    def _raise_if_type_not_supported(v):
+        if not isinstance(v, (torch.Tensor, int, float)):
+            raise NotImplementedError(
+                "Flattening optimizer state_dict only supports "
+                "tensor, int, float states now. "
+                f"Type is {type(v)}."
+            )
+
+    ret: Dict[str, ValueType] = {}
+    for fqn, state in cast(DictValueType, state_dict[STATE]).items():
+        for k, v in cast(DictValueType, state).items():
+            _raise_if_type_not_supported(v)
+            ret[f"{STATE}.{fqn}.{k}"] = v
+
+    for param_group in cast(ListDictValueType, state_dict[PG]):
+        fqns = param_group.pop(PARAMS)
+        for fqn in cast(List[str], fqns):
+            for k, v in param_group.items():
+                ret[f"{PG}.{fqn}.{k}"] = v
+    return ret
+
+
+def _unflatten_optim_state_dict(
+    optim: torch.optim.Optimizer,
+    state_dict: Dict[str, ValueType],
+    info: _StateDictInfo,
+) -> OptimizerStateType:
+    """
+    This API unflattens the state_dict generated by _flatten_optim_state_dict().
+    See the docstring of _flatten_optim_state_dict() for more detail.
+    """
+    state: DictValueType = {}
+    pg_state: ListDictValueType = []
+    return_osd: OptimizerStateType = {STATE: state, PG: pg_state}
+
+    for param_group in optim.param_groups:
+        pg_state.append({PARAMS: []})
+        for param in param_group[PARAMS]:
+            for fqn in info.fqn_param_mapping[param]:
+                params = pg_state[-1][PARAMS]
+                assert isinstance(params, list)  # typing
+                params.append(fqn)
+                if not param.requires_grad:
+                    continue
+                state[fqn] = {}
+                for state_name in optim.state[param].keys():
+                    cast(DictValueType, state[fqn])[state_name] = state_dict[
+                        f"{STATE}.{fqn}.{state_name}"
+                    ]
+
+        first_param_fqn = cast(List[str], pg_state[-1][PARAMS])[0]
+        for k in param_group.keys():
+            if k == PARAMS:
+                continue
+            value = state_dict[f"{PG}.{first_param_fqn}.{k}"]
+            if k not in pg_state[-1]:
+                pg_state[-1][k] = value
+            elif pg_state[-1][k] != value:
+                raise RuntimeError(
+                    "All the parameters in the same parameter group should have "
+                    f"the same saved param_group value. But {first_param_fqn}.{k} "
+                    f"is {value} while other(s) is {pg_state[-1][k]}."
+                )
+
+    return return_osd
 
 
 def _get_optim_state_dict(
@@ -619,15 +764,12 @@ def _get_optim_state_dict(
         cast(DictValueType, optim_state_dict[STATE]).update(osd[STATE])
         cast(ListDictValueType, optim_state_dict[PG]).extend(osd[PG])
 
-    if info.full_state_dict:
-        ranks_only = tuple() if not info.cpu_offload else (0,)
-        return _gather_state_dict(
-            optim_state_dict, cpu_offload=info.cpu_offload, ranks_only=ranks_only
+    if info.flatten_optimizer_state_dict:
+        optim_state_dict = cast(
+            OptimizerStateType, _flatten_optim_state_dict(optim_state_dict)
         )
-    elif info.cpu_offload:
-        return _offload_state_dict_to_cpu(optim_state_dict)
-    else:
-        return optim_state_dict
+
+    return _maybe_full_or_cpu_state_dict(optim_state_dict, info)
 
 
 def _split_optim_state_dict(
@@ -655,6 +797,11 @@ def _split_optim_state_dict(
     pg_state: ListDictValueType = []
     return_osd: OptimizerStateType = {STATE: state, PG: pg_state}
     pg_mapping: Dict[int, int] = {}
+
+    if all(
+        isinstance(k, int) for k in cast(DictValueType, optim_state_dict[STATE]).keys()
+    ):
+        return optim_state_dict
 
     for param_group in optim.param_groups:
         pg_state.append({PARAMS: []})
@@ -696,7 +843,14 @@ def _load_optim_state_dict(
     for optim in optimizers:
         _init_optim_state(optim)
         if state_dict:
-            optim_state_dict = _split_optim_state_dict(model, optim, state_dict, info)
+            if STATE in state_dict:
+                optim_state_dict = _split_optim_state_dict(
+                    model, optim, state_dict, info
+                )
+            else:
+                optim_state_dict = _unflatten_optim_state_dict(
+                    optim, cast(Dict[str, ValueType], state_dict), info
+                )
         else:
             optim_state_dict = {}
         if info.fsdp_modules:
@@ -748,6 +902,15 @@ def _load_optim_state_dict(
             flatten_osd, osd_mapping = _flatten_state_dict(optim_state_dict)
             flatten_local_osd, local_osd_mapping = _flatten_state_dict(local_state_dict)
             _broadcast_state_dict(flatten_osd, flatten_local_osd, device=device)
+            # The modifications listed seek to address the problem where optim might possess
+            # dissimilar parameters in comparison to optim_state_dict. This is achieved by
+            # incorporating differential parameters within local, which may result in optim
+            # having additional parameters ultimately.
+            for optim_key in flatten_osd.keys():
+                if optim_key not in flatten_local_osd:
+                    assert optim_key in osd_mapping
+                    flatten_local_osd[optim_key] = flatten_osd[optim_key]
+                    local_osd_mapping[optim_key] = osd_mapping[optim_key]
             optim_state_dict = _unflatten_state_dict(
                 flatten_local_osd, local_osd_mapping
             )
@@ -771,7 +934,7 @@ def get_model_state_dict(
 
     Args:
         model (nn.Module): the nn.Module to the model.
-        submodules: Optional[Set[nn.Module]]: only return the model parameters
+        submodules (deprecated): Optional[Set[nn.Module]]: only return the model parameters
             that belong to the submodules.
         options (StateDictOptions): the options to control how
             model state_dict and optimizer state_dict should be returned. See
@@ -811,7 +974,7 @@ def get_optimizer_state_dict(
         model (nn.Module): the nn.Module to the model.
         optimizers (Union[None, Optimizer, Iterable[Optimizer]]):
             The optimizers that are used to optimize ``model``.
-        submodules: Optional[Set[nn.Module]]: only return the model parameters
+        submodules (deprecated): Optional[Set[nn.Module]]: only return the model parameters
             that belong to the submodules.
         options (StateDictOptions): the options to control how
             model state_dict and optimizer state_dict should be returned. See
@@ -898,7 +1061,7 @@ def get_state_dict(
         model (nn.Module): the nn.Module to the model.
         optimizers (Union[None, Optimizer, Iterable[Optimizer]]):
             The optimizers that are used to optimize ``model``.
-        submodules: Optional[Set[nn.Module]]: only return the model parameters
+        submodules (deprecated): Optional[Set[nn.Module]]: only return the model parameters
             that belong to the submodules.
         options (StateDictOptions): the options to control how
             model state_dict and optimizer state_dict should be returned. See
@@ -937,6 +1100,13 @@ def _unflatten_model_state_dict(
         return {}
 
     if isinstance(next(iter(state_dict.keys())), nn.Module):
+        warnings.warn(
+            "Passing model_state_dict as a ``Dict[nn.Module, Dict[str, Any]]``"
+            "is deprecated and will be removed in 2.5. If you need this "
+            "feature, please preprocessing the model_state_dict to achieve the "
+            "same functionality.",
+            FutureWarning,
+        )
         cast_state_dict = cast(Dict[nn.Module, Dict[str, ValueType]], state_dict)
         new_state_dict: Dict[str, ValueType] = {}
         for submodule, sub_state_dict in cast_state_dict.items():
@@ -997,8 +1167,8 @@ def set_model_state_dict(
 def set_optimizer_state_dict(
     model: nn.Module,
     optimizers: Union[torch.optim.Optimizer, Iterable[torch.optim.Optimizer]],
-    *,
     optim_state_dict: OptimizerStateType,
+    *,
     options: Optional[StateDictOptions] = None,
 ) -> None:
     """Load the optimizers state_dict.

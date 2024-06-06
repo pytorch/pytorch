@@ -1,7 +1,7 @@
 import contextlib
 import functools
-import warnings
 from typing import Callable, Optional
+from typing_extensions import deprecated
 
 import torch
 from torch._library.utils import Kernel, RegistrationHandle
@@ -124,10 +124,11 @@ class AbstractImplCtx:
         self._shape_env = _fake_mode.shape_env
         self._op = _op
 
+    @deprecated(
+        "`create_unbacked_symint` is deprecated, please use `new_dynamic_size` instead",
+        category=FutureWarning,
+    )
     def create_unbacked_symint(self, *, min=2, max=None) -> torch.SymInt:
-        warnings.warn(
-            "create_unbacked_symint is deprecated, please use new_dynamic_size instead"
-        )
         return self.new_dynamic_size(min=min, max=max)
 
     def new_dynamic_size(self, *, min=0, max=None) -> torch.SymInt:

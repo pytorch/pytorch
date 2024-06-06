@@ -3,6 +3,7 @@
 
 #include <ATen/ATen.h>
 #include <ATen/core/boxing/KernelFunction.h>
+#include <ATen/core/function_schema.h>
 
 #include <torch/csrc/dynamo/guards.h>
 #include <torch/csrc/inductor/aoti_eager/kernel_meta_info.h>
@@ -82,7 +83,10 @@ class AOTIPythonKernelHolder : public c10::OperatorKernel {
   void init_aoti_kernel_cache();
   // Abstract the meta information of each tensor for the given operation. The
   // meta infomation will be used for cache lookup as the key.
-  AOTIKernelMetadata get_inputs_metadata(const std::vector<at::Tensor>&);
+  AOTIKernelMetadata get_inputs_metadata(
+      const std::vector<at::Tensor>& inputs,
+      const std::vector<c10::Argument>& inputs_argument,
+      const std::vector<size_t>& inputs_argument_index);
   // Load the AOTIModelContainerRunner object from the given file path.
   std::shared_ptr<AOTIModelContainerRunner> load_aoti_model_runner(
       const std::string&);
