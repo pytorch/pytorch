@@ -3865,6 +3865,24 @@ class TestNestedTensorSubclass(TestCase):
         for i, t in enumerate(out):
             self.assertEqual(t, tensor_list[i])
 
+    def test_unbind_lengths_ragged_idx_equals_2_bad_dim(self, device):
+        values = torch.randn(16, 8, 128, device=device)
+        offsets = torch.tensor([0, 8, 12, 13, 16], device=device)
+        lengths = torch.tensor([6, 2, 1, 2], device=device)
+        ragged_idx = 2
+        nt = torch.nested._internal.nested_tensor.NestedTensor(
+            values,
+            offsets=offsets,
+            lengths=lengths,
+            _ragged_idx=ragged_idx)  # 4D nested tensor
+
+        self.assertRaisesRegex(
+            RuntimeError,
+            r"unbind\(\): nested tensor offsets and lengths.*",
+            lambda: nt.unbind()
+        )
+
+
     def test_unbind_lengths_ragged_idx_2(self, device):
         values = torch.randn(16, 8, 128, device=device)
         offsets = torch.tensor([0, 2, 4, 8], device=device)
