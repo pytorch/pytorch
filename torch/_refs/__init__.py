@@ -1989,6 +1989,7 @@ def _to_device(
     non_blocking: bool = False,
     copy: bool = False,
     memory_format: Optional[torch.memory_format] = None,
+    layout: Optional[torch.layout] = None,
 ) -> Dict[str, Any]:
     kwargs = {
         "device": device,
@@ -1996,6 +1997,7 @@ def _to_device(
         "non_blocking": non_blocking,
         "copy": copy,
         "memory_format": memory_format,
+        "layout": layout,
     }
     return kwargs
 
@@ -2007,6 +2009,7 @@ def _to_device_str(
     non_blocking: bool = False,
     copy: bool = False,
     memory_format: Optional[torch.memory_format] = None,
+    layout: Optional[torch.layout] = None,
 ) -> Dict[str, Any]:
     kwargs = {
         "device": torch.device(device),
@@ -2014,6 +2017,7 @@ def _to_device_str(
         "non_blocking": non_blocking,
         "copy": copy,
         "memory_format": memory_format,
+        "layout": layout,
     }
     return kwargs
 
@@ -2024,12 +2028,14 @@ def _to_dtype(
     non_blocking: bool = False,
     copy: bool = False,
     memory_format: Optional[torch.memory_format] = None,
+    layout: Optional[torch.layout] = None,
 ) -> Dict[str, Any]:
     kwargs = {
         "dtype": dtype,
         "non_blocking": non_blocking,
         "copy": copy,
         "memory_format": memory_format,
+        "layout": layout,
     }
     return kwargs
 
@@ -2040,6 +2046,7 @@ def _to_other(
     non_blocking: bool = False,
     copy: bool = False,
     memory_format: Optional[torch.memory_format] = None,
+    layout: Optional[torch.layout] = None,
 ) -> Dict[str, Any]:
     device = other.device
     dtype = other.dtype

@@ -37,11 +37,11 @@ static PyObject * THPVariable__parse_to(PyObject* module, PyObject* args, PyObje
 {
   HANDLE_TH_ERRORS
   static PythonArgParser parser({
-    "to(Device device=None, ScalarType dtype=None, bool non_blocking=False, bool copy=False, *, MemoryFormat? memory_format=None)",
-    "to(ScalarType dtype, bool non_blocking=False, bool copy=False, *, MemoryFormat? memory_format=None)",
-    "to(Tensor tensor, bool non_blocking=False, bool copy=False, *, MemoryFormat? memory_format=None)",
+    "to(Device device=None, ScalarType dtype=None, bool non_blocking=False, bool copy=False, *, MemoryFormat? memory_format=None, Layout? layout=None)",
+    "to(ScalarType dtype, bool non_blocking=False, bool copy=False, *, MemoryFormat? memory_format=None, Layout? layout=None)",
+    "to(Tensor tensor, bool non_blocking=False, bool copy=False, *, MemoryFormat? memory_format=None, Layout? layout=None)",
   });
-  ParsedArgs<5> parsed_args;
+  ParsedArgs<6> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
   if (r.has_torch_function()) {
     return handle_torch_function(r, args, kwargs, THPNNVariableFunctionsModule, "torch.nn", "_parse_to");
@@ -51,6 +51,13 @@ static PyObject * THPVariable__parse_to(PyObject* module, PyObject* args, PyObje
   auto& scalarType = std::get<1>(parsed);
   auto non_blocking = std::get<2>(parsed);
   auto opt_memory_format = std::get<4>(parsed);
+  auto opt_layout = std::get<5>(parsed);
+
+  TORCH_CHECK(
+    !opt_layout.has_value(),
+    "setting layout is not supported for module.to()"
+  )
+
   auto tuple = THPObjectPtr{PyTuple_New(4)};
   if (!tuple) throw python_error();
   if (device) {
