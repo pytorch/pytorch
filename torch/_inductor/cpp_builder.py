@@ -20,6 +20,7 @@ from typing import List, Sequence, Tuple, Union
 import torch
 from torch._inductor import config, exc
 from torch._inductor.codecache import (
+    _get_python_include_dirs,
     _LINKER_SCRIPT,
     _transform_cuda_paths,
     get_lock_dir,
@@ -854,8 +855,11 @@ def _get_cuda_related_args(cuda: bool, aot_mode: bool):
 
     from torch.utils import cpp_extension
 
-    include_dirs = cpp_extension.include_paths(cuda)
-    libraries_dirs = cpp_extension.library_paths(cuda)
+    # After pass fb_code, move `_get_python_include_dirs` and `sysconfig.get_config_var("LIBDIR")` to correct place.
+    include_dirs = cpp_extension.include_paths(cuda) + _get_python_include_dirs()
+    libraries_dirs = cpp_extension.library_paths(cuda) + [
+        sysconfig.get_config_var("LIBDIR")
+    ]
 
     if cuda:
         definations.append(" USE_ROCM" if torch.version.hip else " USE_CUDA")
