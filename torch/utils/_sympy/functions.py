@@ -102,6 +102,15 @@ class FloorDiv(sympy.Function):
         # makes it difficult to check the types.
         if divisor.is_zero:
             raise ZeroDivisionError("division by zero")
+        if base in (int_oo, -int_oo, sympy.oo, -sympy.oo) and divisor in (
+            int_oo,
+            -int_oo,
+            sympy.oo,
+            -sympy.oo,
+        ):
+            return sympy.nan
+        if base is sympy.nan or divisor is sympy.nan:
+            return sympy.nan
 
         if base.is_zero:
             return sympy.S.Zero
@@ -112,7 +121,10 @@ class FloorDiv(sympy.Function):
         if (
             isinstance(base, sympy.Number)
             and isinstance(divisor, sympy.Number)
-            and (base in (int_oo, -int_oo) or divisor in (int_oo, -int_oo))
+            and (
+                base in (int_oo, -int_oo, sympy.oo, -sympy.oo)
+                or divisor in (int_oo, -int_oo, sympy.oo, -sympy.oo)
+            )
         ):
             r = float(base) / float(divisor)
             if r == math.inf:

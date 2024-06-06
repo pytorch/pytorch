@@ -633,10 +633,6 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             func, (torch.randn(3, 4),)
         )
 
-    @pytorch_test_common.xfail_if_model_type_is_exportedprogram(
-        error_message="Unsupported FX nodes: {'call_function': ['aten._assert_async.msg']}.",
-        reason="https://github.com/pytorch/pytorch/issues/112622",
-    )
     def test_operator_with_scalar_output(self):
         class Foo(torch.nn.Module):
             def forward(self, x, y):

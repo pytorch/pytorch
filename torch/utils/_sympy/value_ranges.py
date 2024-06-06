@@ -546,19 +546,17 @@ class SymPyValueRangeAnalysis:
     def floordiv(a, b):
         a = ValueRanges.wrap(a)
         b = ValueRanges.wrap(b)
-
         if 0 in b:
-            # TODO: I kind of feel like we should just assume b cannot be zero
-            # and compute the ranges accordingly here
-            return ValueRanges.unknown_int()
-        elif a.lower > 0 and b.lower > 0:
-            # We can do tight bounds even when infinity is present
-            return ValueRanges(FloorDiv(a.lower, b.upper), FloorDiv(a.upper, b.lower))
-        elif (-int_oo in a or int_oo in a) and (-int_oo in b or int_oo in b):
-            # Give up if we didn't manage to get it
-            return ValueRanges.unknown_int()
-        else:
-            return ValueRanges.coordinatewise_monotone_map(a, b, FloorDiv)
+            return ValueRanges.unknown()
+        products = []
+        for x, y in itertools.product([a.lower, a.upper], [b.lower, b.upper]):
+            r = FloorDiv(x, y)
+            if r is sympy.nan:
+                products.append((sympy.sign(x) * sympy.sign(y)) * int_oo)
+            else:
+                products.append(r)
+
+        return ValueRanges(min(products), max(products))
 
     @classmethod
     def mod(cls, x, y):
