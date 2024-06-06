@@ -495,10 +495,15 @@ class WrapperCodeGen(CodeGen):
                 import random
                 import os
                 import tempfile
+                import sys
+                import gc
                 from math import inf, nan
                 from torch._inductor.hooks import run_intermediate_hooks
-                from torch._inductor.utils import maybe_profile
+                from torch._inductor.utils import maybe_profile, cuda_sync_and_print
+                # from torch._inductor.utils import maybe_profile
                 from torch._inductor.codegen.memory_planning import _align as align
+                import logging
+                torch_log = logging.getLogger("torch")
 
                 from torch import device, empty_strided
                 from {async_compile.__name__} import AsyncCompile
@@ -1455,7 +1460,21 @@ class WrapperCodeGen(CodeGen):
         return f"{self.declare}{new_name} = {old_name}{self.ending}  {self.comment} {comment}"
 
     def make_buffer_free(self, buffer):
-        return f"del {buffer.get_name()}"
+#         if buffer.get_name().startswith("buf"):
+#             ret = f"""\
+# torch.cuda.synchronize()
+#         gc.collect()
+#         mem_before_del = torch.cuda.memory_allocated()
+#         torch_log.warning("{buffer.get_name()} refcount: " + str(sys.getrefcount({buffer.get_name()})))
+#         del {buffer.get_name()}
+#         torch.cuda.synchronize()
+#         gc.collect()
+#         mem_after_del = torch.cuda.memory_allocated()
+#         torch_log.warning("{buffer.get_name()} deleted, delta in memory_allocated: " + str(mem_after_del - mem_before_del))
+# """
+#         else:
+        ret = f"del {buffer.get_name()}"
+        return ret
 
     def make_free_by_names(self, names_to_del: List[str]):
         return f"del {', '.join(name for name in names_to_del)}"

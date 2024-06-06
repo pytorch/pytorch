@@ -10,7 +10,7 @@ from .. import variables
 from ..exc import unimplemented, UserError, UserErrorType
 from ..guards import GuardBuilder, install_guard
 from ..utils import common_constant_types, istype, np
-from .base import typestr, VariableTracker
+from .base import typestr, VariableTracker, MutableLocal
 
 _type_to_assert_reason = {
     # NB - We CAN have ConstantVariable.create(set) because of how sets interact with guards.
@@ -55,7 +55,7 @@ class ConstantVariable(VariableTracker):
                 return variables.BaseListVariable.cls_for(type(value))(items, **kwargs)
             else:
                 assert isinstance(value, (set, frozenset)), type(value)
-                return variables.SetVariable(items)
+                return variables.SetVariable(items, mutable_local=MutableLocal())
 
         return ConstantVariable(value, **kwargs)
 
