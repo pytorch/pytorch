@@ -346,7 +346,7 @@ add_custom_command(
   OUTPUT
   ${TORCH_GENERATED_CODE}
   COMMAND
-  "${Python_EXECUTABLE}" tools/setup_helpers/generate_code.py
+  Python::Interpreter tools/setup_helpers/generate_code.py
     --native-functions-path "aten/src/ATen/native/native_functions.yaml"
     --tags-path "aten/src/ATen/native/tags.yaml"
     $<$<BOOL:${INTERN_DISABLE_AUTOGRAD}>:--disable-autograd>
@@ -772,7 +772,7 @@ if(NOT MSVC)
   set_source_files_properties(${PROJECT_SOURCE_DIR}/torch/csrc/distributed/c10d/socket.cpp PROPERTIES COMPILE_OPTIONS "-Wno-error=deprecated")
 endif()
 
-if("${CMAKE_CXX_COMPILER_ID}" MATCHES "Clang" AND NOT USE_VULKAN AND NOT USE_IOS AND NOT USE_PYTORCH_METAL AND NOT USE_COREML_DELEGATE)
+if("${CMAKE_CXX_COMPILER_ID}" MATCHES "Clang" AND NOT USE_VULKAN AND NOT USE_IOS AND NOT USE_COREML_DELEGATE)
   target_compile_options_if_supported(torch_cpu "-Wmissing-prototypes")
   target_compile_options_if_supported(torch_cpu "-Werror=missing-prototypes")
   get_target_property(TORCH_CPU_SOURCES torch_cpu SOURCES)
@@ -1094,7 +1094,7 @@ if(BUILD_LITE_INTERPRETER AND SELECTED_OP_LIST)
     add_custom_command(
       OUTPUT ${CMAKE_BINARY_DIR}/aten/src/ATen/selected_mobile_ops.h
       COMMAND
-        "${Python_EXECUTABLE}"
+        Python::Interpreter
         -m tools.code_analyzer.gen_oplist
         --model_file_list_path "${SELECTED_OP_LIST}"
         --output_dir "${CMAKE_BINARY_DIR}/aten/src/ATen"
@@ -1109,7 +1109,7 @@ if(BUILD_LITE_INTERPRETER AND SELECTED_OP_LIST)
     add_custom_command(
       OUTPUT ${CMAKE_BINARY_DIR}/aten/src/ATen/selected_mobile_ops.h
       COMMAND
-        "${Python_EXECUTABLE}"
+        Python::Interpreter
         -m tools.lite_interpreter.gen_selected_mobile_ops_header
         --yaml_file_path "${SELECTED_OP_LIST}"
         --output_file_path "${CMAKE_BINARY_DIR}/aten/src/ATen"
@@ -1887,51 +1887,10 @@ endif()
 # only rerun when needed.
 
 if(BUILD_PYTHON)
-  # Python site-packages
-  # Get canonical directory for python site packages (relative to install
-  # location).  It varies from system to system.
-  # We should pin the path separator to the forward slash on Windows.
-  # More details can be seen at
-  # https://github.com/pytorch/pytorch/tree/main/tools/build_pytorch_libs.bat#note-backslash-munging-on-windows
-  pycmd(PYTHON_SITE_PACKAGES "
-      import os
-      import sysconfig
-      relative_site_packages = sysconfig.get_path('purelib').replace(sysconfig.get_path('data'), '').lstrip(os.path.sep)
-      print(relative_site_packages)
-  ")
-  file(TO_CMAKE_PATH ${PYTHON_SITE_PACKAGES} PYTHON_SITE_PACKAGES)
-  set(PYTHON_SITE_PACKAGES ${PYTHON_SITE_PACKAGES} PARENT_SCOPE) # for Summary
   # ---[ Options.
-  set(PYTHON_LIB_REL_PATH "${PYTHON_SITE_PACKAGES}" CACHE STRING "Python installation path (relative to CMake installation prefix)")
+  set(PYTHON_LIB_REL_PATH "${Python_SITELIB}" CACHE STRING "Python installation path (relative to CMake installation prefix)")
   message(STATUS "Using ${PYTHON_LIB_REL_PATH} as python relative installation path")
-  # Python extension suffix
-  # Try to get from python through sysconfig.get_env_var('EXT_SUFFIX') first,
-  # fallback to ".pyd" if windows and ".so" for all others.
-  pycmd(PY_EXT_SUFFIX "
-      def get_ext_suffix():
-          import sys
-          import sysconfig
-          return sysconfig.get_config_var('EXT_SUFFIX')
 
-      suffix = get_ext_suffix()
-      if suffix is not None:
-          print(suffix)
-      else:
-          print()
-  ")
-  if("${PY_EXT_SUFFIX}" STREQUAL "")
-    if(MSVC)
-      set(PY_EXT_SUFFIX ".pyd")
-    else()
-      set(PY_EXT_SUFFIX ".so")
-    endif()
-  endif()
-
-  if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
-    # Workaround for https://gcc.gnu.org/bugzilla/show_bug.cgi?id=80947 in EmbeddingBag.cpp
-    set_source_files_properties(../aten/src/ATen/native/EmbeddingBag.cpp PROPERTIES COMPILE_FLAGS -Wno-attributes)
-    set_source_files_properties(${TORCH_SRC_DIR}/../caffe2/operators/box_with_nms_limit_op.cc PROPERTIES COMPILE_FLAGS -Wno-attributes)
-  endif()
 
   set(build_files)
   foreach(python_src ${PYTHON_SRCS})
@@ -1948,12 +1907,6 @@ if(BUILD_PYTHON)
 
   # Install commands
   # Pick up static python files
-  install(DIRECTORY ${CMAKE_BINARY_DIR}/caffe2 DESTINATION ${PYTHON_LIB_REL_PATH}
-          FILES_MATCHING PATTERN "*.py")
-  # Caffe proto files
-  install(DIRECTORY ${CMAKE_BINARY_DIR}/caffe DESTINATION ${PYTHON_LIB_REL_PATH}
-          FILES_MATCHING PATTERN "*.py")
-  # Caffe2 proto files
   install(DIRECTORY ${CMAKE_BINARY_DIR}/caffe2 DESTINATION ${PYTHON_LIB_REL_PATH}
           FILES_MATCHING PATTERN "*.py")
 endif()
