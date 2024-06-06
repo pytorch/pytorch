@@ -1,6 +1,6 @@
 import functools
-import warnings
 from typing import Any
+from typing_extensions import deprecated
 
 import torch
 
@@ -13,6 +13,11 @@ class autocast(torch.amp.autocast_mode.autocast):
     ``torch.cuda.amp.autocast(args...)`` is deprecated. Please use ``torch.amp.autocast("cuda", args...)`` instead.
     """
 
+    @deprecated(
+        "`torch.cuda.amp.autocast(args...)` is deprecated. "
+        "Please use `torch.amp.autocast('cuda', args...)` instead.",
+        category=FutureWarning,
+    )
     def __init__(
         self,
         enabled: bool = True,
@@ -24,10 +29,6 @@ class autocast(torch.amp.autocast_mode.autocast):
             self.device = "cuda"
             self.fast_dtype = dtype
             return
-        warnings.warn(
-            "torch.cuda.amp.autocast(args...) is deprecated. Please use torch.amp.autocast('cuda', args...) instead.",
-            DeprecationWarning,
-        )
         super().__init__(
             "cuda", enabled=enabled, dtype=dtype, cache_enabled=cache_enabled
         )
@@ -50,29 +51,38 @@ class autocast(torch.amp.autocast_mode.autocast):
 
 
 # Preserved only for BC reasons
+@deprecated(
+    "`torch.cuda.amp.autocast_mode._cast(value, dtype)` is deprecated. "
+    "Please use `torch.amp.autocast_mode._cast(value, 'cuda', dtype)` instead.",
+    category=FutureWarning,
+)
 def _cast(value, dtype):
     return torch.amp.autocast_mode._cast(value, "cuda", dtype)
 
 
+@deprecated(
+    "`torch.cuda.amp.custom_fwd(args...)` is deprecated. "
+    "Please use `torch.amp.custom_fwd(args..., device_type='cuda')` instead.",
+    category=FutureWarning,
+)
 def custom_fwd(fwd=None, *, cast_inputs=None):
     """
     ``torch.cuda.amp.custom_fwd(args...)`` is deprecated. Please use
     ``torch.amp.custom_fwd(args..., device_type='cuda')`` instead.
     """
-    warnings.warn(
-        "torch.cuda.amp.custom_fwd(args...) is deprecated. Please use torch.amp.custom_fwd(args..., device_type='cuda') instead."
-    )
     return functools.partial(torch.amp.custom_fwd, device_type="cuda")(
         fwd=fwd, cast_inputs=cast_inputs
     )
 
 
+@deprecated(
+    "`torch.cuda.amp.custom_bwd(args...)` is deprecated. "
+    "Please use `torch.amp.custom_bwd(args..., device_type='cuda')` instead.",
+    category=FutureWarning,
+)
 def custom_bwd(bwd):
     """
     ``torch.cuda.amp.custom_bwd(args...)`` is deprecated. Please use
     ``torch.amp.custom_bwd(args..., device_type='cuda')`` instead.
     """
-    warnings.warn(
-        "torch.cuda.amp.custom_bwd(args...) is deprecated. Please use torch.amp.custom_bwd(args..., device_type='cuda') instead."
-    )
     return functools.partial(torch.amp.custom_bwd, device_type="cuda")(bwd)
