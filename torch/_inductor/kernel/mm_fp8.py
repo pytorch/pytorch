@@ -4,7 +4,13 @@ import sympy
 
 import torch
 from .. import config as inductor_config
-from ..lowering import add_layout_constraint, constrain_to_fx_strides, register_lowering
+from ..lowering import (
+    add_layout_constraint,
+    constrain_to_fx_strides,
+    empty,
+    fallback_handler,
+    register_lowering,
+)
 from ..select_algorithm import (
     autotune_select_algorithm,
     ExternKernelChoice,
@@ -182,6 +188,7 @@ fp8_mm_bias_template = TritonTemplate(
 )
 
 
+# how to refer to the blas.cpp namespace?
 aten__fp8_mm = ExternKernelChoice(torch._fp8_mm, "at::_fp8_mm", has_out_variant=False)
 
 
@@ -227,22 +234,34 @@ def fp8_mm_options(
     )
 
 
-@register_lowering(aten._fp8_mm.default, type_promotion_kind=None)
+# @register_lowering(aten._fp8_mm.default, type_promotion_kind=None)
+@register_lowering(aten._scaled_mm.default, type_promotion_kind=None)
 def tuned_fp8_mm(
     mat_a,
     mat_b,
-    scale_a=None,  # TODO handle None case for Triton with an additional template
-    scale_b=None,
     bias=None,
+    scale_a=None,
+    scale_b=None,
+    scale_result=None,
     out_dtype=None,
     use_fast_accum=True,
     layout=None,
 ):
     add_layout_constraint(aten._fp8_mm.default, constrain_to_fx_strides)
+
+    # low-precision output case  TODO error on non-tensorwise scaling
+    if out_dtype is torch.float8_e4m3fn:  # list all fp8 types
+        m, n, k, layout, mat_a, mat_b = mm_args(
+            mat_a, mat_b, layout=layout, out_dtype=out_dtype
+        )
+        log.info(f"Siyu DEBUG low-precision case. scale_a dtype {scale_a.dtype}, shape {scale_a.get_size()}")
+        return fallback_handler(aten._scaled_mm.default)(mat_a, mat_b, bias, scale_a, scale_b, scale_result, out_dtype=out_dtype, use_fast_accum=use_fast_accum)
+
+    # high-precision output case
+    log.info("Siyu DEBUG high-precision case")
     m, n, k, layout, mat_a, mat_b, scale_a, scale_b = mm_args(
         mat_a, mat_b, scale_a, scale_b, layout=layout, out_dtype=out_dtype
     )
-
     is_scaling = not (scale_a is None and scale_b is None)
     is_scaling_rowwise = is_scaling and len(scale_a.get_size()) != 0
 
@@ -276,4 +295,5 @@ def tuned_fp8_mm(
             )
 
     output = autotune_select_algorithm("fp8_mm", choices, input_nodes, layout)
-    return output
+    output_amax_placeholder = empty((1), dtype=torch.float32, device=mat_a.get_device())
+    return output, output_amax_placeholder

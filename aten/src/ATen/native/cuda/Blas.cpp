@@ -821,10 +821,10 @@ static bool _scaled_mm_allowed_device() {
 std::tuple<Tensor&, Tensor&>
 _scaled_mm_out_cuda(const Tensor& mat1, const Tensor& mat2,
           const c10::optional<at::Tensor>& bias,
-          c10::optional<c10::ScalarType> out_dtype,
           const c10::optional<at::Tensor>& scale_a,
           const c10::optional<at::Tensor>& scale_b,
           const c10::optional<at::Tensor>& scale_result,
+          c10::optional<c10::ScalarType> out_dtype,
           bool use_fast_accum,
           Tensor& out, Tensor& amax) {
   // Check sizes
@@ -928,15 +928,15 @@ _scaled_mm_out_cuda(const Tensor& mat1, const Tensor& mat2,
 std::tuple<Tensor, Tensor>
 _scaled_mm_cuda(const Tensor& mat_a, const Tensor& mat_b,
           const c10::optional<at::Tensor>& bias,
-          c10::optional<c10::ScalarType> out_dtype,
           const c10::optional<at::Tensor>& scale_a,
           const c10::optional<at::Tensor>& scale_b,
           const c10::optional<at::Tensor>& scale_result,
+          c10::optional<c10::ScalarType> out_dtype,
           bool use_fast_accum) {
   const auto out_dtype_ = out_dtype.value_or(mat_a.scalar_type());
   Tensor out = at::empty({0}, mat_a.options().dtype(out_dtype_));
   Tensor amax = at::empty({0}, mat_a.options().dtype(ScalarType::Float));
-  return _scaled_mm_out_cuda(mat_a, mat_b, bias, out_dtype, scale_a, scale_b, scale_result, use_fast_accum, out, amax);
+  return _scaled_mm_out_cuda(mat_a, mat_b, bias, scale_a, scale_b, scale_result, out_dtype, use_fast_accum, out, amax);
 }
 
 Tensor
