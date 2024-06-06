@@ -1,6 +1,5 @@
 import math
 from enum import Enum
-from functools import partial
 from typing import List, Optional, Sequence, Tuple, Union
 
 import torch
@@ -3134,295 +3133,6 @@ def meta_addbmm(self, batch1, batch2, *, beta=1, alpha=1):
     return self.new_empty(self.size())
 
 
-def register_meta_foreach(ops):
-    def wrapper(fn):
-        def register(op):
-            op_name = str(op).split(".")[1]
-            scalar_op = getattr(aten, op_name.replace("_foreach_", ""))
-
-            _add_op_to_registry(
-                meta_table,
-                op,
-                partial(
-                    fn,
-                    _scalar_op=scalar_op,
-                ),
-            )
-
-        pytree.tree_map_(register, ops)
-        return fn
-
-    return wrapper
-
-
-@register_meta_foreach(
-    [
-        aten._foreach_abs,
-        aten._foreach_acos,
-        aten._foreach_asin,
-        aten._foreach_atan,
-        aten._foreach_ceil,
-        aten._foreach_cos,
-        aten._foreach_cosh,
-        aten._foreach_erf,
-        aten._foreach_erfc,
-        aten._foreach_exp,
-        aten._foreach_expm1,
-        aten._foreach_frac,
-        aten._foreach_floor,
-        aten._foreach_lgamma,
-        aten._foreach_log,
-        aten._foreach_log10,
-        aten._foreach_log1p,
-        aten._foreach_log2,
-        aten._foreach_neg,
-        aten._foreach_norm,
-        aten._foreach_reciprocal,
-        aten._foreach_round,
-        aten._foreach_sigmoid,
-        aten._foreach_sign,
-        aten._foreach_sin,
-        aten._foreach_sinh,
-        aten._foreach_sqrt,
-        aten._foreach_tan,
-        aten._foreach_tanh,
-        aten._foreach_trunc,
-        aten._foreach_zero,
-        aten._foreach_add,
-        aten._foreach_sub,
-        aten._foreach_mul,
-        aten._foreach_div,
-        aten._foreach_clamp_min,
-        aten._foreach_clamp_max,
-        aten._foreach_lerp,
-    ],
-)
-def _meta_foreach_out_of_place(*args, _scalar_op=None, **kwargs):
-    torch._check(
-        isinstance(args[0], list),
-        lambda: (f"The first argument must be List[Tensor], but got {type(args[0])}."),
-    )
-
-    nelem = len(args[0])
-    torch._check(
-        nelem > 0,
-        lambda: ("Tensor list must have at least one tensor."),
-    )
-
-    nlists = 1
-    for iarg, arg in enumerate(args[1:]):
-        if isinstance(arg, list):
-            nlists += 1
-            torch._check(
-                len(arg) == nelem,
-                lambda: (
-                    f"self and argument-{iarg+2} must match in length, "
-                    f"but got {nelem} and {len(arg)}."
-                ),
-            )
-        elif isinstance(arg, Tensor):
-            torch._check(
-                arg.dim() == 0 and arg.numel() == 1,
-                lambda: (
-                    "scalar tensor expected to be 0 dim but it has "
-                    f"{arg.dim()} dimensions and {arg.numel()} elements."
-                ),
-            )
-        else:
-            break
-
-    result = []
-    for elem in range(nelem):
-        each_args = [args[i][elem] for i in range(nlists)]
-        result.append(_scalar_op(*each_args, *args[nlists:], **kwargs))
-
-    return result
-
-
-@register_meta_foreach(
-    [
-        aten._foreach_abs_,
-        aten._foreach_acos_,
-        aten._foreach_asin_,
-        aten._foreach_atan_,
-        aten._foreach_ceil_,
-        aten._foreach_cos_,
-        aten._foreach_cosh_,
-        aten._foreach_erf_,
-        aten._foreach_erfc_,
-        aten._foreach_exp_,
-        aten._foreach_expm1_,
-        aten._foreach_frac_,
-        aten._foreach_floor_,
-        aten._foreach_lgamma_,
-        aten._foreach_log_,
-        aten._foreach_log10_,
-        aten._foreach_log1p_,
-        aten._foreach_log2_,
-        aten._foreach_neg_,
-        aten._foreach_reciprocal_,
-        aten._foreach_round_,
-        aten._foreach_sigmoid_,
-        aten._foreach_sign_,
-        aten._foreach_sin_,
-        aten._foreach_sinh_,
-        aten._foreach_sqrt_,
-        aten._foreach_tan_,
-        aten._foreach_tanh_,
-        aten._foreach_trunc_,
-        aten._foreach_zero_,
-        aten._foreach_add_,
-        aten._foreach_sub_,
-        aten._foreach_mul_,
-        aten._foreach_div_,
-        aten._foreach_clamp_min_,
-        aten._foreach_clamp_max_,
-        aten._foreach_lerp_,
-        aten._foreach_copy_,
-    ]
-)
-def _meta_foreach_inplace(*args, _scalar_op=None, **kwargs):
-    _meta_foreach_out_of_place(*args, _scalar_op=_scalar_op, **kwargs)
-    return
-
-
-@register_meta([aten._foreach_pow.ScalarAndTensor])
-def meta__foreach_pow_scalar_and_tensor(self, exponent):
-    # Only foreach_pow has a ScalarAndTensor method and needs special
-    # handling because it does not work with _meta_foreach_out_of_place.
-    torch._check(
-        isinstance(exponent, List),
-        lambda: f"exponent must be a tensor list but got {type(exponent)}",
-    )
-    return [torch.empty_like(e) for e in exponent]
-
-
-def _check_foreach_binop_tensor_lists(self, other):
-    torch._check(
-        isinstance(self, List) and isinstance(other, List),
-        lambda: (
-            "The first two arguments of must be List[Tensor], "
-            f"but got {type(self)} and {type(other)}."
-        ),
-    )
-    torch._check(
-        len(self) > 0 and len(self) == len(other),
-        lambda: (
-            "self and other must be non-empty and match in length, "
-            f"but got {len(self)} and {len(other)}."
-        ),
-    )
-
-
-@register_meta(
-    [
-        aten._foreach_maximum,
-        aten._foreach_minimum,
-    ]
-)
-def meta__foreach_binop_scalar(*args):
-    # aten.maximum(Tensor, Scalar) does not exist.
-    return _meta_foreach_out_of_place(*args, _scalar_op=aten.clamp_min)
-
-
-@register_meta(
-    [
-        aten._foreach_maximum_,
-        aten._foreach_minimum_,
-    ]
-)
-def meta__foreach_binop__scalar(*args):
-    # aten.maximum(Tensor, Scalar) does not exist
-    _meta_foreach_inplace(*args, _scalar_op=aten.clamp_min_)
-    return
-
-
-@register_meta(
-    [
-        aten._foreach_addcdiv.Scalar,
-        aten._foreach_addcmul.Scalar,
-    ]
-)
-def meta__foreach_addcop_scalar(self, tensor1, tensor2, scalar=1):
-    # forach_addcdiv and addcdiv have different signatures and
-    # cannot use _meta_foreach_out_of_place.
-    torch._check(
-        all(isinstance(l, List) for l in [self, tensor1, tensor2]),
-        lambda: (
-            "All arguments must be List[Tensor], "
-            f"but got {type(self)}, {type(tensor1)}, and {type(tensor2)}"
-        ),
-    )
-    torch._check(len(self) > 0, lambda: "input tensor list must not be empty.")
-    torch._check(
-        len(self) == len(tensor1) and len(self) == len(tensor2),
-        lambda: "All input tensor lists must have the same length",
-    )
-
-    return [torch.empty_like(s) for s in self]
-
-
-@register_meta([aten._foreach_addcdiv_.Tensor, aten._foreach_addcmul_.Tensor])
-def meta__foreach_addcop_tensor(self, tensor1, tensor2, scalars):
-    torch._check(
-        all(isinstance(l, List) for l in [self, tensor1, tensor2])
-        and isinstance(scalars, torch.Tensor),
-        lambda: (
-            "_foreach_addc*_ op expects arguments of type: List[Tensor], List[Tensor], List[Tensor], tensor, "
-            f"but got: {type(self)}, {type(tensor1)}, {type(tensor2)}, and {type(scalars)}"
-        ),
-    )
-    torch._check(len(self) > 0, lambda: "input tensor list must not be empty.")
-    torch._check(
-        len(self) == len(tensor1) and len(self) == len(tensor2),
-        lambda: "All input tensor lists must have the same length",
-    )
-
-
-@register_meta(
-    [
-        aten._foreach_addcdiv_.Scalar,
-        aten._foreach_addcmul_.Scalar,
-    ]
-)
-def meta__foreach_addcop__scalar(self, tensor1, tensor2, scalar=1):
-    torch._check(
-        all(isinstance(l, List) for l in [self, tensor1, tensor2]),
-        lambda: (
-            "All arguments of _foreach_addc*_ must be List[Tensor], "
-            f"but got {type(self)}, {type(tensor1)}, and {type(tensor2)}"
-        ),
-    )
-    torch._check(len(self) > 0, lambda: "input tensor list must not be empty.")
-    torch._check(
-        len(self) == len(tensor1) and len(self) == len(tensor2),
-        lambda: "All input tensor lists must have the same length",
-    )
-
-
-@register_meta(
-    [
-        aten._foreach_addcdiv_.ScalarList,
-        aten._foreach_addcmul_.ScalarList,
-    ]
-)
-def meta__foreach_addcop__scalarlist(self, tensor1, tensor2, scalars):
-    torch._check(
-        all(isinstance(l, List) for l in [self, tensor1, tensor2, scalars]),
-        lambda: (
-            "_foreach_addc*_ op expects arguments of type: List[Tensor], List[Tensor], List[Tensor], List[Scalar], "
-            f"but got {type(self)}, {type(tensor1)}, {type(tensor2)}, and {type(scalars)}"
-        ),
-    )
-    torch._check(len(self) > 0, lambda: "input tensor list must not be empty.")
-    torch._check(
-        len(self) == len(tensor1)
-        and len(self) == len(tensor2)
-        and len(self) == len(scalars),
-        lambda: "All input tensor lists must have the same length",
-    )
-
-
 @register_meta([aten._fused_adam_.default])
 def meta__fused_adam_(
     self,
@@ -3910,6 +3620,14 @@ def meta_index_put(self, indices, values, accumulate=False):
 def meta_masked_fill_(self, mask, value):
     check_inplace_broadcast(self.shape, mask.shape)
     return self
+
+
+@register_meta(aten._masked_scale.default)
+def meta__masked_scale(self, mask, scale):
+    masked_scale = self.new_empty(self.size()).to(
+        memory_format=utils.suggest_memory_format(self)
+    )
+    return masked_scale
 
 
 @register_meta(aten.masked_scatter_)
@@ -5518,10 +5236,29 @@ def meta__efficient_attention_backward(
     bias_requires_grad: bool,
     scale: Optional[float] = None,
     num_splits_key: Optional[int] = None,
+    shared_storage_dqdkdv: bool = False,
 ):
-    grad_query = torch.empty_like(query)
-    grad_key = torch.empty_like(key)
-    grad_value = torch.empty_like(value)
+    if shared_storage_dqdkdv:
+        torch._check(
+            query.shape[1] == key.shape[1],
+            lambda: "seqlen must match for `shared_storage_dqdkdv",
+        )
+        torch._check(
+            query.shape[3] == key.shape[3],
+            lambda: "embedding dim must match for `shared_storage_dqdkdv",
+        )
+        chunk = torch.empty(
+            (*query.shape[0:-2], 3, query.shape[-2], query.shape[-1]),
+            dtype=query.dtype,
+            device=query.device,
+        )
+        grad_query = chunk.select(-3, 0)
+        grad_key = chunk.select(-3, 1)
+        grad_value = chunk.select(-3, 2)
+    else:
+        grad_query = torch.empty_like(query)
+        grad_key = torch.empty_like(key)
+        grad_value = torch.empty_like(value)
 
     if bias is not None:
         lastDim = bias.size(-1)
@@ -6309,6 +6046,11 @@ def meta_channel_shuffle(input, groups):
         layout=input.layout,
         device=input.device,
     )
+
+
+@register_meta(aten._local_scalar_dense)
+def meta_local_scalar_dense(self: Tensor):
+    raise RuntimeError("Tensor.item() cannot be called on meta tensors")
 
 
 def _create_unary_float_meta_func(func):

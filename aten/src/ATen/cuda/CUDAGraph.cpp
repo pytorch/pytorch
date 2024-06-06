@@ -268,7 +268,7 @@ void CUDAGraph::debug_dump(const std::string& debug_path) {
     TORCH_WARN("DEBUG: calling debug_dump()");
     if (has_graph_) {
       TORCH_WARN("DEBUG: calling cudaGraphDebugDotPrint() with ", debug_path);
-      C10_CUDA_CHECK_WARN(cudaGraphDebugDotPrint(graph_, debug_path.c_str(), 1<<10)); // most verbose output
+      C10_CUDA_CHECK_WARN(cudaGraphDebugDotPrint(graph_, debug_path.c_str(), cudaGraphDebugDotFlagsVerbose)); // most verbose output
       AT_CUDA_CHECK(cudaGraphDestroy(graph_));
     }
   } else {

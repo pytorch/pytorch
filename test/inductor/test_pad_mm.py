@@ -169,6 +169,16 @@ class PadMMTest(TestCase):
             res2, (code,) = run_and_get_code(compiled_fn, a, b)
         self.assertEqual(res1, res2)
 
+    @inductor_config.patch(force_shape_pad=True)
+    def test_zero_dim(self):
+        def addmm(x, a, b):
+            return torch.addmm(x, a, b)
+
+        x = torch.randn(100).cuda()
+        a = torch.randn(0, 10).cuda()
+        b = torch.randn(10, 100).cuda()
+        self.assertEqual(torch.compile(addmm)(x, a, b), addmm(x, a, b))
+
     @inductor_config.patch(max_autotune=True, max_autotune_gemm_backends="TRITON")
     def test_pad_bmm_dyn_b(self):
         B = 10

@@ -10,7 +10,13 @@ size_t TaskThreadPoolBase::defaultNumThreads() {
   size_t num_threads = 0;
 #if !defined(__powerpc__) && !defined(__s390x__)
   if (cpuinfo_initialize()) {
+    // In cpuinfo parlance cores are physical ones and processors are virtual
+    // ThreadPool should be defaulted to number of physical cores
+    size_t num_cores = cpuinfo_get_cores_count();
     num_threads = cpuinfo_get_processors_count();
+    if (num_cores > 0 && num_cores < num_threads) {
+      return num_cores;
+    }
     if (num_threads > 0) {
       return num_threads;
     }

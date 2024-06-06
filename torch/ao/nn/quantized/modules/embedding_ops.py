@@ -137,7 +137,7 @@ class Embedding(torch.nn.Module):
         return self._packed_params._weight()
 
     @classmethod
-    def from_float(cls, mod):
+    def from_float(cls, mod, use_precomputed_fake_quant=False):
         r"""Create a quantized embedding module from a float module
 
         Args:
@@ -241,7 +241,7 @@ class EmbeddingBag(Embedding):
         return 'QuantizedEmbeddingBag'
 
     @classmethod
-    def from_float(cls, mod):
+    def from_float(cls, mod, use_precomputed_fake_quant=False):
         r"""Create a quantized embedding_bag module from a float module
 
         Args:

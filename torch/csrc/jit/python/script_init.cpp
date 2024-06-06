@@ -668,13 +668,13 @@ static constexpr std::array<const char*, 48> magic_method_names = {
 };
 
 struct DeepCopyMemoTable {
-  std::shared_ptr<IValue::HashAliasedIValueMap> map;
+  std::shared_ptr<IValue::HashIdentityIValueMap> map;
 };
 
 IValue pyIValueDeepcopy(const IValue& ivalue, const py::dict& memo) {
   if (!memo.contains(py::str("__torch_script_memo_table"))) {
     memo["__torch_script_memo_table"] =
-        DeepCopyMemoTable{std::make_shared<IValue::HashAliasedIValueMap>()};
+        DeepCopyMemoTable{std::make_shared<IValue::HashIdentityIValueMap>()};
   }
   auto& ivalue_memo =
       *py::cast<DeepCopyMemoTable>(memo["__torch_script_memo_table"]).map;

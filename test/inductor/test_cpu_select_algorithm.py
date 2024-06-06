@@ -77,11 +77,11 @@ class TestSelectAlgorithm(TestCase):
     @torch.no_grad
     @unittest.skipIf(not TEST_MKL, "Test requires MKL")
     @parametrize("batch_size", (1, 2, 1000))
-    @parametrize("in_features", (1, 1000))
-    @parametrize("out_features", (1, 1024))
+    @parametrize("in_features", (1, 2, 1000))
+    @parametrize("out_features", (1, 32, 1024))
     @parametrize("bias", (True, False))
     @parametrize("input_3d", (True, False))
-    @dtypes(torch.float, torch.bfloat16, torch.half)
+    @dtypes(torch.float)
     def test_linear_static_shapes(
         self, batch_size, in_features, out_features, bias, input_3d, dtype
     ):
@@ -97,18 +97,15 @@ class TestSelectAlgorithm(TestCase):
         mod = M(bias=bias).to(dtype=dtype).eval()
         B = (2, batch_size) if input_3d else (batch_size,)
         v = torch.randn(*B, in_features).to(dtype=dtype)
-        # For bfloat16 and half, we have to relax the tolerance
-        # due to the difference associave orders in different
-        # kernel implementations
-        atol, rtol = 1e-4, 1e-4
-        if dtype == torch.half or dtype == torch.bfloat16:
-            atol, rtol = 1e-2, 1e-2
-        with patch.object(select_algorithm, "VERIFY", dict(atol=atol, rtol=rtol)):
-            self.common(mod, (v,), atol=atol, rtol=rtol)
-        self.assertEqual(
-            counters["inductor"]["select_algorithm_autotune"],
-            1 if out_features != 1 else 0,
-        )
+        self.common(mod, (v,))
+        if (
+            counters["inductor"]["decompose_mm"] > 0
+            or counters["inductor"]["decompose_addmm"] > 0
+        ):
+            # This is a special case where we go directly with vectorized codegen
+            self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 0)
+        else:
+            self.assertEqual(counters["inductor"]["select_algorithm_autotune"], 1)
 
     @inductor_config.patch({"freezing": True})
     @patches

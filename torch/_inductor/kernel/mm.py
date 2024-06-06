@@ -165,12 +165,19 @@ def tuned_mm(mat1, mat2, *, layout=None):
             [mat1, mat2],
         )
 
-    if len(choices) == 0 and not use_aten_gemm_kernels():
+    if (
+        len(choices) == 0
+        and not use_aten_gemm_kernels()
+        and inductor_config.autotune_fallback_to_aten
+    ):
         log.warning("No choices for GEMM, using ATen backend as fallback")
-        choices.append(aten_mm.bind((mat1, mat2), aten_layout))
+        return aten_mm.bind((mat1, mat2), aten_layout).output_node()
+
     try:
         return autotune_select_algorithm("mm", choices, [mat1, mat2], layout)
     except NoValidChoicesError:
+        if not inductor_config.autotune_fallback_to_aten:
+            raise
         log.warning("All choices for GEMM were invalid, using ATen backend as fallback")
         return aten_mm.bind((mat1, mat2), aten_layout).output_node()
 
@@ -233,6 +240,8 @@ def tuned_int_mm(mat1, mat2, *, layout=None):
     try:
         return autotune_select_algorithm("int_mm", choices, [mat1, mat2], layout)
     except NoValidChoicesError:
+        if not inductor_config.autotune_fallback_to_aten:
+            raise
         log.warning("All choices for GEMM were invalid, using ATen backend as fallback")
         choices = [aten__int_mm.bind((mat1, mat2), layout)]
         return autotune_select_algorithm("int_mm", choices, [mat1, mat2], layout)
@@ -362,6 +371,8 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
             "addmm", choices, [inp_expanded, mat1, mat2], layout
         )
     except NoValidChoicesError:
+        if not inductor_config.autotune_fallback_to_aten:
+            raise
         log.warning("All choices for GEMM were invalid, using ATen backend as fallback")
         fallback_choice = aten_addmm.bind(
             (inp, mat1, mat2),

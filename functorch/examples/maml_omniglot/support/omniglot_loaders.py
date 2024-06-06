@@ -22,11 +22,11 @@ import os
 import os.path
 
 import numpy as np
+import torchvision.transforms as transforms
+from PIL import Image
 
 import torch
 import torch.utils.data as data
-import torchvision.transforms as transforms
-from PIL import Image
 
 
 class Omniglot(data.Dataset):

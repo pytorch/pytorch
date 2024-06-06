@@ -1167,6 +1167,11 @@ def include_paths(cuda: bool = False) -> List[str]:
         # but gcc doesn't like having /usr/include passed explicitly
         if cuda_home_include != '/usr/include':
             paths.append(cuda_home_include)
+
+        # Support CUDA_INC_PATH env variable supported by CMake files
+        if (cuda_inc_path := os.environ.get("CUDA_INC_PATH", None)) and \
+                cuda_inc_path != '/usr/include':
+            paths.append(cuda_inc_path)
         if CUDNN_HOME is not None:
             paths.append(os.path.join(CUDNN_HOME, 'include'))
     return paths
@@ -1874,9 +1879,6 @@ def _prepare_ldflags(extra_ldflags, with_cuda, verbose, is_standalone):
         extra_ldflags.append('-ltorch')
         if not is_standalone:
             extra_ldflags.append('-ltorch_python')
-
-        if is_standalone and "TBB" in torch.__config__.parallel_info():
-            extra_ldflags.append('-ltbb')
 
         if is_standalone:
             extra_ldflags.append(f"-Wl,-rpath,{TORCH_LIB_PATH}")

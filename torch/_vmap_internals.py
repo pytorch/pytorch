@@ -1,6 +1,6 @@
 import functools
-import warnings
 from typing import Any, Callable, List, Optional, Tuple, Union
+from typing_extensions import deprecated
 
 import torch
 from torch import Tensor
@@ -190,14 +190,14 @@ def _get_name(func: Callable):
 # vmap(func)(inputs) wraps all Tensor inputs to be batched in BatchedTensors,
 # sends those into func, and then unwraps the output BatchedTensors. Operations
 # on BatchedTensors perform the batched operations that the user is asking for.
+@deprecated(
+    "Please use `torch.vmap` instead of `torch._vmap_internals.vmap`.",
+    category=FutureWarning,
+)
 def vmap(func: Callable, in_dims: in_dims_t = 0, out_dims: out_dims_t = 0) -> Callable:
     """
     Please use torch.vmap instead of this API.
     """
-    warnings.warn(
-        "Please use torch.vmap instead of torch._vmap_internals.vmap. ",
-        stacklevel=2,
-    )
     return _vmap(func, in_dims, out_dims)
 
 

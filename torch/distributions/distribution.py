@@ -1,5 +1,6 @@
 import warnings
 from typing import Any, Dict, Optional, Tuple
+from typing_extensions import deprecated
 
 import torch
 from torch.distributions import constraints
@@ -171,14 +172,15 @@ class Distribution:
         """
         raise NotImplementedError
 
+    @deprecated(
+        "`sample_n(n)` will be deprecated. Use `sample((n,))` instead.",
+        category=FutureWarning,
+    )
     def sample_n(self, n: int) -> torch.Tensor:
         """
         Generates n samples or n batches of samples if the distribution
         parameters are batched.
         """
-        warnings.warn(
-            "sample_n will be deprecated. Use .sample((n,)) instead", UserWarning
-        )
         return self.sample(torch.Size((n,)))
 
     def log_prob(self, value: torch.Tensor) -> torch.Tensor:
