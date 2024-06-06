@@ -265,8 +265,6 @@ void index_put_kernel_quantized_cuda(TensorIterator& iter, const IntArrayRef ind
       qvalue = std::clamp(qvalue, qmin, qmax);
 #else
       qvalue = (qvalue < qmin) ? qmin : (qmax < qvalue) ? qmax : qvalue;
-
-
 #endif
       *(scalar_t*)(out_data + offset) = static_cast<scalar_t>(qvalue);
     });
