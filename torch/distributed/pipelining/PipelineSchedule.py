@@ -715,7 +715,7 @@ class ScheduleInterleaved1F1B(PipelineScheduleMulti):
         # This will be used to keep track of the current state of the entire pipeline
         # pipeline_order[rank] = [Action(computation_type, microbatch_index, stage_index), ...]
         self.pipeline_order: Dict[int, List[Optional[_Action]]] = {}
-        
+
         for rank in range(self.pp_group_size):
             rank_ops = self._calculate_single_rank_operations(rank)
             self.pipeline_order[rank] = rank_ops
@@ -867,8 +867,7 @@ class ScheduleInterleaved1F1B(PipelineScheduleMulti):
                     # perform forward computation
                     stage = stage_index_to_stage[stage_index]
                     output = stage.forward_one_chunk(
-                        mb_index,
-                        arg_mbs[mb_index], kwarg_mbs[mb_index]
+                        mb_index, arg_mbs[mb_index], kwarg_mbs[mb_index]
                     )
                     self._maybe_compute_loss(stage, output, target_mbs, mb_index)
                     ops.extend(stage.get_fwd_send_ops(mb_index))
