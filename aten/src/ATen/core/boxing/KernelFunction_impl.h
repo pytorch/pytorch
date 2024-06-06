@@ -71,7 +71,7 @@ inline typename remove_symint<c10::SymIntArrayRef>::type unpackSymInt(c10::SymIn
 }
 
 template <>
-inline typename remove_symint<std::optional<c10::SymInt>>::type unpackSymInt(c10::optional<c10::SymInt> x) {
+inline typename remove_symint<std::optional<c10::SymInt>>::type unpackSymInt(std::optional<c10::SymInt> x) {
   return x.has_value() ? c10::make_optional(x->guard_int(__FILE__, __LINE__)) : c10::nullopt;
 }
 

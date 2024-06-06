@@ -15,6 +15,7 @@ import pickle
 import shutil
 import pathlib
 import platform
+from collections import OrderedDict
 from copy import deepcopy
 from itertools import product
 
@@ -27,9 +28,10 @@ from torch.serialization import check_module_version_greater_or_equal, get_defau
 from torch.testing._internal.common_utils import (
     IS_FILESYSTEM_UTF8_ENCODING, TemporaryDirectoryName,
     TestCase, IS_FBCODE, IS_WINDOWS, TEST_DILL, run_tests, download_file, BytesIOContext, TemporaryFileName,
-    parametrize, instantiate_parametrized_tests, AlwaysWarnTypedStorageRemoval, serialTest)
+    parametrize, instantiate_parametrized_tests, AlwaysWarnTypedStorageRemoval, serialTest, skipIfTorchDynamo)
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_dtype import all_types_and_complex_and
+from torch.testing._internal.two_tensor import TwoTensor  # noqa: F401
 
 if not IS_WINDOWS:
     from mmap import MAP_SHARED, MAP_PRIVATE
@@ -1038,7 +1040,7 @@ class TestSerialization(TestCase, SerializationMixin):
             self.assertIsNone(torch.load(f, weights_only=False))
             f.seek(0)
             # Safe load should assert
-            with self.assertRaisesRegex(pickle.UnpicklingError, "Unsupported class"):
+            with self.assertRaisesRegex(pickle.UnpicklingError, "Unsupported global: GLOBAL __builtin__.print"):
                 torch.load(f, weights_only=True)
 
     @parametrize('weights_only', (False, True))
@@ -4186,6 +4188,60 @@ class TestSubclassSerialization(TestCase):
             torch.save(tensor, f)
             f.seek(0)
             tensor2 = torch.load(f)
+
+    @skipIfTorchDynamo("name 'SYNTHETIC_LOCAL' is not defined")
+    def test_safe_globals_for_weights_only(self):
+        '''
+        Tests import semantic for tensor subclass and the {add/get/clear}_safe_globals APIs
+        '''
+        t = TwoTensor(torch.randn(2, 3), torch.randn(2, 3))
+        p = torch.nn.Parameter(t)
+        sd = OrderedDict([('t', t), ('p', p)])
+
+        with tempfile.NamedTemporaryFile() as f:
+            torch.save(sd, f)
+
+            # Loading tensor subclass with weights_only=True should fail
+            # since tensor subclass is not in safe_globals
+            with self.assertRaisesRegex(pickle.UnpicklingError,
+                                        "Unsupported global: GLOBAL torch.testing._internal.two_tensor.TwoTensor"):
+                f.seek(0)
+                sd = torch.load(f, weights_only=True)
+
+            # Loading tensor subclass should work if the class is marked safe
+            f.seek(0)
+            try:
+                torch.serialization.add_safe_globals([TwoTensor])
+                self.assertTrue(torch.serialization.get_safe_globals() == [TwoTensor])
+                sd = torch.load(f, weights_only=True)
+                self.assertEqual(sd['t'], t)
+                self.assertEqual(sd['p'], p)
+
+                # Should fail again when safe globals are cleared
+                torch.serialization.clear_safe_globals()
+                f.seek(0)
+                with self.assertRaisesRegex(pickle.UnpicklingError,
+                                            "Unsupported global: GLOBAL torch.testing._internal.two_tensor.TwoTensor"):
+                    torch.load(f, weights_only=True)
+            finally:
+                torch.serialization.clear_safe_globals()
+
+    @unittest.skipIf(not torch.cuda.is_available(), "map_location loads to cuda")
+    def test_tensor_subclass_map_location(self):
+        t = TwoTensor(torch.randn(2, 3), torch.randn(2, 3))
+        sd = {'t': t}
+
+        with TemporaryFileName() as f:
+            torch.save(sd, f)
+            sd_loaded = torch.load(f, map_location=torch.device('cuda:0'))
+            self.assertTrue(sd_loaded['t'].device == torch.device('cuda:0'))
+            self.assertTrue(sd_loaded['t'].a.device == torch.device('cuda:0'))
+            self.assertTrue(sd_loaded['t'].b.device == torch.device('cuda:0'))
+            # make sure map_location is not propagated over multiple torch.load calls
+            sd_loaded = torch.load(f)
+            self.assertTrue(sd_loaded['t'].device == torch.device('cpu'))
+            self.assertTrue(sd_loaded['t'].a.device == torch.device('cpu'))
+            self.assertTrue(sd_loaded['t'].b.device == torch.device('cpu'))
 
 
 instantiate_device_type_tests(TestBothSerialization, globals())

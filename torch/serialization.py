@@ -32,7 +32,7 @@ PROTOCOL_VERSION = 1001
 STORAGE_KEY_SEPARATOR = ','
 
 FILE_LIKE: TypeAlias = Union[str, os.PathLike, BinaryIO, IO[bytes]]
-MAP_LOCATION: TypeAlias = Optional[Union[Callable[[torch.Tensor, str], torch.Tensor], torch.device, str, Dict[str, str]]]
+MAP_LOCATION: TypeAlias = Optional[Union[Callable[[Storage, str], Storage], torch.device, str, Dict[str, str]]]
 STORAGE: TypeAlias = Union[Storage, torch.storage.TypedStorage, torch.UntypedStorage]
 
 IS_WINDOWS = sys.platform == "win32"
@@ -59,6 +59,9 @@ __all__ = [
     'LoadEndianness',
     'get_default_load_endianness',
     'set_default_load_endianness',
+    'clear_safe_globals',
+    'get_safe_globals',
+    'add_safe_globals',
 ]
 
 
@@ -147,6 +150,27 @@ def set_default_mmap_options(flags: int):
         raise ValueError("Invalid argument in function set_default_mmap_options, "
                          f"expected mmap.MAP_PRIVATE or mmap.MAP_SHARED, but got {flags}")
     _default_mmap_options = flags
+
+def clear_safe_globals() -> None:
+    '''
+    Clears the list of globals that are safe for ``weights_only`` load.
+    '''
+    _weights_only_unpickler._clear_safe_globals()
+
+def get_safe_globals() -> List[Any]:
+    '''
+    Returns the list of user-added globals that are safe for ``weights_only`` load.
+    '''
+    return _weights_only_unpickler._get_safe_globals()
+
+def add_safe_globals(safe_globals: List[Any]) -> None:
+    '''
+    Marks the given globals as safe for ``weights_only`` load.
+
+    Args:
+        safe_globals (List[Any]): list of globals to mark as safe
+    '''
+    _weights_only_unpickler._add_safe_globals(safe_globals)
 
 def _is_zipfile(f) -> bool:
     # This is a stricter implementation than zipfile.is_zipfile().
@@ -897,7 +921,8 @@ def load(
         pickle_module: module used for unpickling metadata and objects (has to
             match the :attr:`pickle_module` used to serialize file)
         weights_only: Indicates whether unpickler should be restricted to
-            loading only tensors, primitive types and dictionaries
+            loading only tensors, primitive types, dictionaries
+            and any types added via :func:`torch.serialization.add_safe_globals`.
         mmap: Indicates whether the file should be mmaped rather than loading all the storages into memory.
             Typically, tensor storages in the file will first be moved from disk to CPU memory, after which they
             are moved to the location that they were tagged with when saving, or specified by ``map_location``. This
@@ -952,7 +977,9 @@ def load(
     UNSAFE_MESSAGE = (
         "Weights only load failed. Re-running `torch.load` with `weights_only` set to `False`"
         " will likely succeed, but it can result in arbitrary code execution."
-        "Do it only if you get the file from a trusted source. WeightsUnpickler error: "
+        " Do it only if you get the file from a trusted source. Alternatively, to load"
+        " with `weights_only` please check the recommended steps in the following error message."
+        " WeightsUnpickler error: "
     )
     # Add ability to force safe only weight loads via environment variable
     if os.getenv("TORCH_FORCE_WEIGHTS_ONLY_LOAD", "0").lower() in ['1', 'y', 'yes', 'true']:
@@ -1240,7 +1267,7 @@ def _legacy_load(f, map_location, pickle_module, **pickle_load_args):
     if not hasattr(f, 'readinto') and (3, 8, 0) <= sys.version_info < (3, 8, 2):
         raise RuntimeError(
             "torch.load does not work with file-like objects that do not implement readinto on Python 3.8.0 and 3.8.1. "
-            f"Received object of type \"{type(f)}\". Please update to Python 3.8.2 or newer to restore this "
+            f'Received object of type "{type(f)}". Please update to Python 3.8.2 or newer to restore this '
             "functionality.")
 
     magic_number = pickle_module.load(f, **pickle_load_args)
@@ -1427,7 +1454,11 @@ def _load(zip_file, map_location, pickle_module, pickle_file='data.pkl', overall
 
     unpickler = UnpicklerWrapper(data_file, **pickle_load_args)
     unpickler.persistent_load = persistent_load
+    # Needed for tensors where storage device and rebuild tensor device are
+    # not connected (wrapper subclasses and tensors rebuilt using numpy)
+    torch._utils._thread_local_state.map_location = map_location
     result = unpickler.load()
+    del torch._utils._thread_local_state.map_location
 
     torch._utils._validate_loaded_sparse_tensors()
     torch._C._log_api_usage_metadata(

@@ -348,7 +348,7 @@ def _forward_unimplemented(self, *input: Any) -> None:
         instead of this since the former takes care of running the
         registered hooks while the latter silently ignores them.
     """
-    raise NotImplementedError(f"Module [{type(self).__name__}] is missing the required \"forward\" function")
+    raise NotImplementedError(f'Module [{type(self).__name__}] is missing the required "forward" function')
 
 
 class Module:
@@ -794,6 +794,13 @@ class Module:
 
         should_use_swap_tensors = torch.__future__.get_swap_module_params_on_conversion()
 
+        def compute_should_use_swap_tensors(tensor, tensor_applied):
+            return (should_use_swap_tensors
+                    # subclasses may have multiple child tensors so we need to use swap_tensors
+                    or is_traceable_wrapper_subclass(tensor_applied)
+                    or tensor.device.type == 'xla'
+                    or tensor_applied.device.type == 'xla')
+
         for key, param in self._parameters.items():
             if param is None:
                 continue
@@ -804,8 +811,7 @@ class Module:
                 param_applied = fn(param)
             p_should_use_set_data = compute_should_use_set_data(param, param_applied)
 
-            # subclasses may have multiple child tensors so we need to use swap_tensors
-            p_should_use_swap_tensors = should_use_swap_tensors or is_traceable_wrapper_subclass(param_applied)
+            p_should_use_swap_tensors = compute_should_use_swap_tensors(param, param_applied)
 
             param_grad = param.grad
             if p_should_use_swap_tensors:
@@ -1335,20 +1341,28 @@ class Module:
     def _maybe_warn_non_full_backward_hook(self, inputs, result, grad_fn):
         if not isinstance(result, torch.Tensor):
             if not (isinstance(result, tuple) and all(isinstance(r, torch.Tensor) for r in result)):
-                warnings.warn("Using non-full backward hooks on a Module that does not return a "
-                              "single Tensor or a tuple of Tensors is deprecated and will be removed "
-                              "in future versions. This hook will be missing some of the grad_output. "
-                              "Please use register_full_backward_hook to get the documented behavior.")
+                warnings.warn(
+                    "Using non-full backward hooks on a Module that does not return a "
+                    "single Tensor or a tuple of Tensors is deprecated and will be removed "
+                    "in future versions. This hook will be missing some of the grad_output. "
+                    "Please use register_full_backward_hook to get the documented behavior.",
+                    FutureWarning,
+                    stacklevel=2,
+                )
                 return
         else:
             result = (result,)
 
         if not isinstance(inputs, torch.Tensor):
             if not (isinstance(inputs, tuple) and all(isinstance(i, torch.Tensor) for i in inputs)):
-                warnings.warn("Using non-full backward hooks on a Module that does not take as input a "
-                              "single Tensor or a tuple of Tensors is deprecated and will be removed "
-                              "in future versions. This hook will be missing some of the grad_input. "
-                              "Please use register_full_backward_hook to get the documented behavior.")
+                warnings.warn(
+                    "Using non-full backward hooks on a Module that does not take as input a "
+                    "single Tensor or a tuple of Tensors is deprecated and will be removed "
+                    "in future versions. This hook will be missing some of the grad_input. "
+                    "Please use register_full_backward_hook to get the documented behavior.",
+                    FutureWarning,
+                    stacklevel=2,
+                )
                 return
         else:
             inputs = (inputs,)
@@ -1356,13 +1370,21 @@ class Module:
         # At this point we are sure that inputs and result are tuple of Tensors
         out_grad_fn = {r.grad_fn for r in result if r.grad_fn is not None}
         if len(out_grad_fn) == 0 or (len(out_grad_fn) == 1 and grad_fn not in out_grad_fn):
-            warnings.warn("Using a non-full backward hook when outputs are nested in python data structure "
-                          "is deprecated and will be removed in future versions. This hook will be missing "
-                          "some grad_output.")
+            warnings.warn(
+                "Using a non-full backward hook when outputs are nested in python data structure "
+                "is deprecated and will be removed in future versions. This hook will be missing "
+                "some grad_output.",
+                FutureWarning,
+                stacklevel=2,
+            )
         elif len(out_grad_fn) > 1:
-            warnings.warn("Using a non-full backward hook when outputs are generated by different autograd Nodes "
-                          "is deprecated and will be removed in future versions. This hook will be missing "
-                          "some grad_output. Please use register_full_backward_hook to get the documented behavior.")
+            warnings.warn(
+                "Using a non-full backward hook when outputs are generated by different autograd Nodes "
+                "is deprecated and will be removed in future versions. This hook will be missing "
+                "some grad_output. Please use register_full_backward_hook to get the documented behavior.",
+                FutureWarning,
+                stacklevel=2,
+            )
         else:
             # At this point the grad_output part of the hook will most likely be correct
             inputs_grad_fn = {i.grad_fn for i in inputs if i.grad_fn is not None}
@@ -1370,10 +1392,14 @@ class Module:
             next_functions = {n[0] for n in grad_fn.next_functions}
 
             if inputs_grad_fn != next_functions:
-                warnings.warn("Using a non-full backward hook when the forward contains multiple autograd Nodes "
-                              "is deprecated and will be removed in future versions. This hook will be missing "
-                              "some grad_input. Please use register_full_backward_hook to get the documented "
-                              "behavior.")
+                warnings.warn(
+                    "Using a non-full backward hook when the forward contains multiple autograd Nodes "
+                    "is deprecated and will be removed in future versions. This hook will be missing "
+                    "some grad_input. Please use register_full_backward_hook to get the documented "
+                    "behavior.",
+                    FutureWarning,
+                    stacklevel=2,
+                )
 
     def register_forward_pre_hook(
         self,
@@ -1887,17 +1913,20 @@ class Module:
         """
         # TODO: Remove `args` and the parsing logic when BC allows.
         if len(args) > 0:
+            # DeprecationWarning is ignored by default
+            warnings.warn(
+                "Positional args are being deprecated, use kwargs instead. Refer to "
+                "https://pytorch.org/docs/main/generated/torch.nn.Module.html#torch.nn.Module.state_dict"
+                " for details.",
+                FutureWarning,
+                stacklevel=2,
+            )
             if destination is None:
                 destination = args[0]
             if len(args) > 1 and prefix == '':
                 prefix = args[1]
             if len(args) > 2 and keep_vars is False:
                 keep_vars = args[2]
-            # DeprecationWarning is ignored by default
-            warnings.warn(
-                "Positional args are being deprecated, use kwargs instead. Refer to "
-                "https://pytorch.org/docs/main/generated/torch.nn.Module.html#torch.nn.Module.state_dict"
-                " for details.")
 
         if destination is None:
             destination = OrderedDict()

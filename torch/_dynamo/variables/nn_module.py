@@ -67,9 +67,38 @@ def initialize_lazy_module(tx, mod, args, kwargs):
         mod._infer_parameters(mod, fake_args, fake_kwargs)
 
 
+def cleanup_source_for_nn_module_stack(source):
+    # TODO(anijain2305, export-team) This is a bad hack to fix the nn module
+    # fully_qualified_name to work with export/unflatten. It converts
+    # mod._modules['net1'] to mod.net1.
+
+    # This type of source occurs when we use UnspecializedNNModule variable
+    # because unspecialized nn module variable inlines module __getattr__ calls.
+    # For export, we rely heavily on NNModuleVariable and do not support
+    # UnspecializedNNModule. But there is one case where this gets exposed -
+    # Pippy. Pippy uses export/unflatten (an export feature) and also
+    # monkepatches the `forward` method of a mod that forces Dynamo to use
+    # UnspecializedNNModule. Therefore, we will need proper work to retain the
+    # nn module stack when we let export rely on UnspecializedNNModule variable.
+
+    # This does not work if we have recursively UnspecializedNNModule variables
+    # e.g. mod._modules['net1']._modules['net2']. This is unlikely to happen in
+    # Pippy so the hotfix is enough for Pippy.
+
+    if (
+        isinstance(source, GetItemSource)
+        and isinstance(source.base, AttrSource)
+        and isinstance(source.base.base, NNModuleSource)
+        and source.base.member == "_modules"
+    ):
+        return AttrSource(source.base.base, source.index)
+    return source
+
+
 @contextmanager
 def record_nn_module_stack(module_key: str, source, tx, mod: torch.nn.Module):
-    fully_qualified_name = source.name()
+    source_for_nn_module_stack = cleanup_source_for_nn_module_stack(source)
+    fully_qualified_name = source_for_nn_module_stack.name()
     try:
         tx.nn_module_stack[module_key] = (fully_qualified_name, mod.__class__)
         yield
@@ -189,6 +218,19 @@ class NNModuleVariable(VariableTracker):
             GenerationTracker.mark_class_dynamic(type(mod))
         raise UnspecializeRestartAnalysis
 
+    def has_key_in_generic_dict(self, tx, key):
+        base = tx.output.get_submodule(self.module_key)
+
+        if object_has_getattribute(base):
+            unimplemented("NNModuleVariable with custom __getattribute__")
+
+        if tx.output.side_effects.has_pending_mutation_of_attr(self, key):
+            mutated_attr = tx.output.side_effects.load_attr(self, key, deleted_ok=True)
+            return not isinstance(mutated_attr, variables.DeletedVariable)
+
+        base_dict = object.__getattribute__(base, "__dict__")
+        return key in base_dict
+
     def _custom_getattr_fallback(self, base, tx, name, options):
         """Check for a __getattr__ and handle it specially if it is implemented"""
         if object_has_getattribute(base):
@@ -222,6 +264,9 @@ class NNModuleVariable(VariableTracker):
 
         if not self.source:
             unimplemented("GETATTR with no source")
+
+        if name == "__dict__":
+            return variables.GetAttrVariable(self, name, source=source)
 
         if name in base_dict:
             subobj = base_dict[name]

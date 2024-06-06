@@ -9,13 +9,20 @@ import warnings
 from inspect import signature
 
 from typing import Any, Dict, Optional, Tuple, Union
+from typing_extensions import deprecated
 
 import torch
 from torch import _C
 
 from torch.types import Device
 from .._utils import _dummy_type
-from . import _get_device_index, _get_nvml_device_index, _lazy_init, is_initialized
+from . import (
+    _get_amdsmi_device_index,
+    _get_device_index,
+    _get_nvml_device_index,
+    _lazy_init,
+    is_initialized,
+)
 
 from ._memory_viz import memory as _memory, segments as _segments
 
@@ -440,21 +447,21 @@ def max_memory_reserved(device: Union[Device, int] = None) -> int:
     return memory_stats(device=device).get("reserved_bytes.all.peak", 0)
 
 
+@deprecated(
+    "`torch.cuda.memory_cached` has been renamed to `torch.cuda.memory_reserved`",
+    category=FutureWarning,
+)
 def memory_cached(device: Union[Device, int] = None) -> int:
     r"""Deprecated; see :func:`~torch.cuda.memory_reserved`."""
-    warnings.warn(
-        "torch.cuda.memory_cached has been renamed to torch.cuda.memory_reserved",
-        FutureWarning,
-    )
     return memory_reserved(device=device)
 
 
+@deprecated(
+    "`torch.cuda.max_memory_cached` has been renamed to `torch.cuda.max_memory_reserved`",
+    category=FutureWarning,
+)
 def max_memory_cached(device: Union[Device, int] = None) -> int:
     r"""Deprecated; see :func:`~torch.cuda.max_memory_reserved`."""
-    warnings.warn(
-        "torch.cuda.max_memory_cached has been renamed to torch.cuda.max_memory_reserved",
-        FutureWarning,
-    )
     return max_memory_reserved(device=device)
 
 
@@ -609,26 +616,53 @@ def list_gpu_processes(device: Union[Device, int] = None) -> str:
             printout for the current device, given by :func:`~torch.cuda.current_device`,
             if :attr:`device` is ``None`` (default).
     """
-    try:
-        import pynvml  # type: ignore[import]
-    except ModuleNotFoundError:
-        return "pynvml module not found, please install pynvml"
-    from pynvml import NVMLError_DriverNotLoaded
+    if not torch.version.hip:
+        try:
+            import pynvml  # type: ignore[import]
+        except ModuleNotFoundError:
+            return "pynvml module not found, please install pynvml"
+        from pynvml import NVMLError_DriverNotLoaded
 
-    try:
-        pynvml.nvmlInit()
-    except NVMLError_DriverNotLoaded:
-        return "cuda driver can't be loaded, is cuda enabled?"
-    device = _get_nvml_device_index(device)
-    handle = pynvml.nvmlDeviceGetHandleByIndex(device)
-    procs = pynvml.nvmlDeviceGetComputeRunningProcesses(handle)
+        try:
+            pynvml.nvmlInit()
+        except NVMLError_DriverNotLoaded:
+            return "cuda driver can't be loaded, is cuda enabled?"
+
+        device = _get_nvml_device_index(device)
+        handle = pynvml.nvmlDeviceGetHandleByIndex(device)
+        procs = pynvml.nvmlDeviceGetComputeRunningProcesses(handle)
+    else:
+        try:
+            import amdsmi  # type: ignore[import]
+        except ModuleNotFoundError:
+            return "amdsmi module not found, please install amdsmi"
+        try:
+            amdsmi.amdsmi_init()  # type: ignore[attr-defined]
+        except amdsmi.AmdSmiException:  # type: ignore[attr-defined]
+            return "amdsmi driver can't be loaded, is ROCm installed?"
+
+        device = _get_amdsmi_device_index(device)
+        handle = amdsmi.amdsmi_get_processor_handles()[device]  # type: ignore[attr-defined]
+        procs = amdsmi.amdsmi_get_gpu_process_list(handle)  # type: ignore[attr-defined]
+
     lines = []
     lines.append(f"GPU:{device}")
     if len(procs) == 0:
         lines.append("no processes are running")
     for p in procs:
-        mem = p.usedGpuMemory / (1024 * 1024)
-        lines.append(f"process {p.pid:>10d} uses {mem:>12.3f} MB GPU memory")
+        if not torch.version.hip:
+            mem = p.usedGpuMemory / (1024 * 1024)
+            pid = p.pid
+        else:
+            try:
+                proc_info = amdsmi.amdsmi_get_gpu_process_info(handle, p)  # type: ignore[possibly-undefined]
+            except AttributeError:
+                # https://github.com/ROCm/amdsmi/commit/c551c3caedbd903ba828e7fdffa5b56d475a15e7
+                # is a BC-breaking change that removes amdsmi_get_gpu_process_info API from amdsmi
+                proc_info = p
+            mem = proc_info["memory_usage"]["vram_mem"] / (1024 * 1024)
+            pid = proc_info["pid"]
+        lines.append(f"process {pid:>10d} uses {mem:>12.3f} MB GPU memory")
     return "\n".join(lines)
 
 
