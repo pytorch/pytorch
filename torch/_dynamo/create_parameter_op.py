@@ -10,11 +10,25 @@ allowed to compute gradients on).
 """.strip()
 
 
+lib = torch.library.Library("create_parameter_op", "FRAGMENT")
+
+lib.define("set_(Tensor(a!) tensor, Tensor data) -> ()")
+
+@torch.library.impl(lib, "set_", "Meta")
+def set_(tensor, data):
+    tensor.set_(data)
+
+@torch.library.impl(lib, "set_", "CUDA")
+def set_(tensor, data):
+    tensor.set_(data)
+
+
 class TracableCreateParameter(torch.autograd.Function):
     @staticmethod
     def forward(ctx, tensor, placeholder):
         assert not tensor.requires_grad
-        return placeholder.set_(tensor)
+        torch.ops.create_parameter_op.set_(placeholder, tensor)
+        return placeholder
 
     @staticmethod
     def backward(ctx, grad):
