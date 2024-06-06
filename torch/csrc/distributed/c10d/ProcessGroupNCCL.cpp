@@ -341,11 +341,6 @@ void cacheAllocatorDeregisterHook(
   }
 }
 
-std::string get_collective_trace(bool includeStackTraces, bool onlyActive) {
-  return NCCLTraceBuffer::get()->dump(
-      c10::nullopt, true, includeStackTraces, onlyActive);
-}
-
 #if defined(IS_NCCLX) && defined(NCCL_COMM_DUMP)
 std::unordered_map<std::string, std::unordered_map<std::string, std::string>>
 get_nccl_dump_map() {
@@ -381,10 +376,6 @@ std::string dump_nccl_trace(
       ncclDumpMap, includeCollectives, includeStackTraces, onlyActive);
 }
 
-std::string get_nccl_comm_trace() {
-  auto ncclDumpMap = get_nccl_dump_map();
-  return NCCLTraceBuffer::get()->dump(ncclDumpMap, false, false, false);
-}
 #else
 std::string dump_nccl_trace(
     bool includeCollectives,
@@ -392,10 +383,6 @@ std::string dump_nccl_trace(
     bool onlyActive) {
   return NCCLTraceBuffer::get()->dump(
       c10::nullopt, includeCollectives, includeStackTraces, onlyActive);
-}
-
-std::string get_nccl_comm_trace() {
-  return NCCLTraceBuffer::get()->dump(c10::nullopt, false, false, false);
 }
 #endif
 
