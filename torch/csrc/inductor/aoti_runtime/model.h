@@ -222,8 +222,17 @@ class AOTInductorModelBase {
       auto size = this->constant_shape(i);
       auto stride = this->constant_stride(i);
       auto offset = this->constant_offset(i);
+      auto layout = this->constant_layout(i);
+      auto opaque_metadata_ptr = this->opaque_metadata(i);
+      auto opaque_metadata_size = this->opaque_metadata_size(i);
 
       AtenTensorHandle tensor_handle;
+#ifdef AOTI_USE_CREATE_TENSOR_FROM_BLOB_V1
+      // When opaque_metadata_size is not 0, we need to have the
+      // aoti_torch_create_tensor_from_blob_v2 available
+      AOTI_RUNTIME_CHECK(
+          opaque_metadata_size == 0,
+          "Expect opaque_metadata_size to be 0 when AOTI_USE_CREATE_TENSOR_FROM_BLOB_V1 is defined");
       AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_create_tensor_from_blob(
           internal_ptr,
           ndim,
@@ -234,6 +243,21 @@ class AOTInductorModelBase {
           device_type_,
           device_idx_,
           &tensor_handle));
+#else
+      AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_create_tensor_from_blob_v2(
+          internal_ptr,
+          ndim,
+          size,
+          stride,
+          offset,
+          dtype,
+          device_type_,
+          device_idx_,
+          &tensor_handle,
+          layout,
+          opaque_metadata_ptr,
+          opaque_metadata_size));
+#endif // AOTI_USE_CREATE_TENSOR_FROM_BLOB_V1
       constants_map_->emplace(std::move(name), tensor_handle);
     }
     if (constants_map_) {
@@ -340,6 +364,10 @@ class AOTInductorModelBase {
     return constants_info_.at(idx).dtype;
   }
 
+  int32_t constant_layout(int64_t idx) const {
+    return constants_info_.at(idx).layout;
+  }
+
   size_t constant_offset(int64_t idx) const {
     return constants_info_.at(idx).offset;
   }
@@ -350,6 +378,14 @@ class AOTInductorModelBase {
 
   const char* constant_original_fqn(int64_t idx) const {
     return constants_info_.at(idx).original_fqn;
+  }
+
+  const uint8_t* opaque_metadata(int64_t idx) const {
+    return constants_info_.at(idx).opaque_metadata.data();
+  }
+
+  size_t opaque_metadata_size(int64_t idx) {
+    return constants_info_.at(idx).opaque_metadata.size();
   }
 
   bool constant_from_folded(int64_t idx) const {
@@ -485,6 +521,9 @@ class AOTInductorModelBase {
     int32_t dtype;
     int64_t offset;
     size_t data_size;
+    int32_t layout;
+    std::vector<uint8_t> opaque_metadata;
+    int64_t opaque_metadata_size;
     const char* original_fqn = nullptr;
     bool from_folded;
   };

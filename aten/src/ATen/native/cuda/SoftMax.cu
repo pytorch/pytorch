@@ -1113,7 +1113,7 @@ TORCH_IMPL_FUNC(softmax_backward_cuda_out)
   host_softmax_backward<SoftMaxBackwardEpilogue, false>(tmp, output, dim, half_to_float, grad_input);
 }
 
-Tensor masked_softmax_cuda(const Tensor& input_, const Tensor& mask_, const std::optional<int64_t> dim_, const c10::optional<int64_t> mask_type_) {
+Tensor masked_softmax_cuda(const Tensor& input_, const Tensor& mask_, const std::optional<int64_t> dim_, const std::optional<int64_t> mask_type_) {
   Tensor output = at::empty_like(input_, input_.options());
   TORCH_CHECK(mask_.scalar_type() == ScalarType::Bool, "Mask should be a boolean tensor");
 

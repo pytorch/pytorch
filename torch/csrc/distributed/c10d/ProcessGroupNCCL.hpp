@@ -85,6 +85,10 @@ static std::vector<std::string> TORCH_NCCL_ENABLE_MONITORING = {
 static std::vector<std::string> TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC = {
     "TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC"};
 
+// Whether to rethrow CUDA Errors in the watchdog (default true)
+static std::vector<std::string> TORCH_NCCL_RETHROW_CUDA_ERRORS = {
+    "TORCH_NCCL_RETHROW_CUDA_ERRORS"};
+
 // The maximum number of events we store in the flight recorder's ring buffer.
 // (One event could be the start or end of a collective, for example).
 static std::vector<std::string> TORCH_NCCL_TRACE_BUFFER_SIZE = {
@@ -433,6 +437,34 @@ class TORCH_API ProcessGroupNCCL : public Backend {
     std::string group_name;
   };
 
+  // A struct to hold the latest status of the process group.
+  struct ProcessGroupStatus {
+    // the sequential number of the last collective enqueued into workMetaList_
+    // This is useful for indentifying a rank that has not join a collective
+    // initialized to be -1 to indicate no collective has been enqueued
+    int64_t lastEnqueuedSeq{-1};
+    // the sequential number of the last collective started as the kernel
+    int64_t lastStartedSeq{-1};
+    // the sequential number of the last colletive completed marked by
+    // the watchdog thread
+    // initialized to be -1 to indicate no collective has been completed
+    int64_t lastCompletedSeq{-1};
+
+    // the name of the last collective enqueued into workMetaList_
+    std::string lastEnqueuedWorkName;
+    // the name of the last collective started as the kernel
+    std::string lastStartedWorkName;
+    // the name of the last collective completed
+    std::string lastCompletedWorkName;
+
+    // the sizes of the last work enqueued
+    size_t lastEnqueuedNumelIn;
+    size_t lastEnqueuedNumelOut;
+    // the sizes of the last work completed
+    size_t lastCompletedNumelIn;
+    size_t lastCompletedNumelOut;
+  };
+
   // If you wish to create multiple process groups, each with a potentially
   // different rank and size, you can do so by passing a new store instance
   // to each one. If you have only a single store object, you can
@@ -611,7 +643,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   uint64_t getSequenceNumberForGroup() override;
 
   // Return the total number of splits the communicators held by this process
-  // group have performed.
+  // group have performed.  Counts ncclCommCreateFromRanks() for ncclx v2.21.5+
   uint64_t getCommSplitCounter() const;
 
   void registerOnCompletionHook(
@@ -876,6 +908,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // communication, the key will be "1:2" on both processes. Note: this is for
   // the scenario where there is only 1 GPU per process. When it comes to
   // multiple GPUs per process, this part may need to redesigned.
+  // TODO: we probably need a separte map for P2P comms
   std::unordered_map<std::string, std::shared_ptr<NCCLComm>> devNCCLCommMap_;
 
   // The NCCL communicators currently in process of being initialized.
@@ -1041,6 +1074,9 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // Whether or not TORCH_NCCL_AVOID_RECORD_STREAMS was set
   bool avoidRecordStreams_ = false;
 
+  // Whether the NCCL watchdog should rethrow CUDA errors.
+  bool rethrowCUDAErrors_ = false;
+
   // Set of communicators that this process group has aborted and their
   // ncclUniqueId has been written to the store. We don't need a lock
   // for this map since only the watchdog thread accesses this set. The
@@ -1055,33 +1091,14 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // Counting for the sequential number of NCCL collective call.
   // (specifically, how many actual kernels we launched, which differs from
   // op_id_ when coalescing is enabled)
-  uint64_t seq_{0};
+  uint64_t seqCollective_{0};
+
+  // Counting for the sequential number of NCCL P2P calls.
+  uint64_t seqP2P_{0};
 
   // Incrementing counter for logical operations (collective or p2p) issued on
   // the ProcessGroup
   uint64_t op_id_{0};
-
-  // the sequential number of the last colletive enqueued into workMetaList_
-  // This is useful for indentifying a rank that has not join a collective
-  // initialized to be -1 to indicate no collective has been enqueued
-  int64_t lastEnqueuedSeq_{-1};
-
-  // the name of the last collective enqueued into workMetaList_
-  std::string lastEnqueuedWorkName_;
-
-  // the sequential number of the last colletive started as the kernal
-  int64_t lastStartedSeq_{-1};
-
-  // the name of the last collective started as the kernal
-  std::string lastStartedWorkName_;
-
-  // the sequential number of the last colletive completed marked by
-  // the watchdog thread
-  // initialized to be -1 to indicate no collective has been completed
-  int64_t lastCompletedSeq_{-1};
-
-  // the name of the last collective completed
-  std::string lastCompletedWorkName_;
 
   std::exception_ptr watchDogException_ = nullptr;
 
@@ -1090,6 +1107,11 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   std::string logPrefix_;
 
   c10::intrusive_ptr<intra_node_comm::IntraNodeComm> intraNodeComm_;
+
+  // Number of devices on this node.
+  int localDeviceCount_{0};
+
+  ProcessGroupStatus pgStatus_;
 };
 
 TORCH_API std::string dump_nccl_trace();

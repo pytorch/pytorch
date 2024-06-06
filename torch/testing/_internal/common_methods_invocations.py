@@ -36,9 +36,10 @@ from torch.testing._internal.common_utils import (
     make_fullrank_matrices_with_distinct_singular_values,
     TEST_WITH_ROCM, IS_WINDOWS, IS_MACOS, TEST_SCIPY,
     torch_to_numpy_dtype_dict, numpy_to_torch_dtype, TEST_WITH_ASAN,
-    GRADCHECK_NONDET_TOL, freeze_rng_state, slowTest, TEST_WITH_SLOW,
+    GRADCHECK_NONDET_TOL, slowTest, TEST_WITH_SLOW,
     TEST_WITH_TORCHINDUCTOR
 )
+from torch.testing._utils import wrapper_set_seed
 
 import torch._refs as refs  # noqa: F401
 import torch._refs.nn.functional
@@ -2100,7 +2101,7 @@ def error_inputs_T(self, device, has_ndims_error=False):
                                       r'to reverse their shape is not supported\.'))
 
 
-def sample_inputs_singular_matrix_factors(op_info, device, dtype, requires_grad=False, **kwargs):
+def sample_inputs_singular_matrix_factors(op_info, device, dtype, requires_grad=False):
     """
     This function produces two tensors of shape (*, m, k) and (*, n, k) with k <= min(m, n).
     Their matrix product could be used to generate tensor of shape (*, m, n) of rank k.
@@ -2114,13 +2115,18 @@ def sample_inputs_singular_matrix_factors(op_info, device, dtype, requires_grad=
         for k in range(min(3, m, n)):
             a = make_arg((*batch, m, k))
             b = make_arg((*batch, n, k))
-            yield SampleInput(a, b, **kwargs)
+            yield a, b
 
 
 def sample_inputs_svd_lowrank(op_info, device, dtype, requires_grad=False, **kwargs):
-    for sample in sample_inputs_singular_matrix_factors(op_info, device, dtype, requires_grad, **kwargs):
-        *batch, m, k = sample.input.shape
-        *_, n, _ = sample.args[0].shape
+    # Function that's well defined on the outputs for complex inputs
+    def fn(usv):
+        U, S, V = usv
+        return U @ V.mH, S
+
+    for (a, b) in sample_inputs_singular_matrix_factors(op_info, device, dtype, requires_grad):
+        *batch, m, k = a.shape
+        n = b.shape[-2]
 
         # NOTE: since svd_lowrank relies on non rank-revealing SVD,
         # it inherits the problem of unstable behavior with repeated
@@ -2129,20 +2135,13 @@ def sample_inputs_svd_lowrank(op_info, device, dtype, requires_grad=False, **kwa
         # we can only use k for q.
         # This issues could be resolved with using a rank-revealing SVD
         # which does not include "zero" singular values.
-        op_kwargs = {
-            'q': k,
-            'M': None
-        }
+        yield SampleInput(a, b, q=k, M=None).with_metadata(output_process_fn_grad=fn)
 
-        # without M specified
-        yield clone_sample(sample, **op_kwargs)
-
-        # now with M
-        # TODO: fix bug in the documentation for svd_lowrank:
-        # M has to be (*, m, n), and not (*, 1, n) as written
-        # in the documentation
-        op_kwargs['M'] = make_tensor((*batch, m, n), dtype=dtype, device=device, requires_grad=requires_grad)
-        yield clone_sample(sample, **op_kwargs)
+    for (a, b) in sample_inputs_singular_matrix_factors(op_info, device, dtype, requires_grad):
+        *batch, m, k = a.shape
+        n = b.shape[-2]
+        M = make_tensor((*batch, m, n), dtype=dtype, device=device, requires_grad=requires_grad)
+        yield SampleInput(a, b, q=k, M=M).with_metadata(output_process_fn_grad=fn)
 
 def chunk_iter(iterable, size):
     it = iter(iterable)
@@ -2909,6 +2908,14 @@ def error_inputs_gradient(op_info, device, **kwargs):
         yield ErrorInput(SampleInput(t, kwargs=dict(edge_order=2)),
                          error_type=RuntimeError,
                          error_regex='torch.gradient expected each dimension size to be at least')
+
+def sample_inputs_rrelu(op_info, device, dtype, requires_grad, **kwargs):
+    yield from sample_inputs_elementwise_unary(
+        op_info, device, dtype, requires_grad, op_kwargs=dict(lower=0., upper=1., training=True))
+
+    make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+    yield SampleInput(make_arg(S))
+    yield SampleInput(make_arg(S), training=False)
 
 def error_inputs_rrelu(op_info, device, **kwargs):
     input = make_tensor((S, S), device=device, dtype=torch.float32)
@@ -8681,7 +8688,6 @@ def sample_inputs_efficient_attention_forward(op_info, device, dtype, requires_g
             custom_mask_type=mask_type,
             compute_log_sumexp=requires_grad,
             scale=scale,
-            causal_diagonal=None,
             seqlen_k=None
         ))
 
@@ -8699,7 +8705,6 @@ def sample_inputs_efficient_attention_forward(op_info, device, dtype, requires_g
         custom_mask_type=0,  # No Mask
         compute_log_sumexp=requires_grad,
         scale=None,
-        causal_diagonal=None,
         seqlen_k=None
     )
 
@@ -8718,7 +8723,6 @@ def sample_inputs_efficient_attention_forward(op_info, device, dtype, requires_g
             custom_mask_type=0,  # No Mask
             compute_log_sumexp=requires_grad,
             scale=None,
-            causal_diagonal=None,
             seqlen_k=None
         )
     )
@@ -8741,7 +8745,6 @@ def sample_inputs_efficient_attention_forward(op_info, device, dtype, requires_g
             custom_mask_type=0,  # No Mask
             compute_log_sumexp=requires_grad,
             scale=None,
-            causal_diagonal=None,
             seqlen_k=None,
         )
     )
@@ -9157,6 +9160,7 @@ class foreach_inputs_sample_func:
         self._set_rightmost_arg_types(
             rightmost_supports_scalar, rightmost_supports_scalarlist, rightmost_supports_tensor,
         )
+        self._intersperse_empty = (True, False)
 
     def _set_rightmost_arg_types(
         self,
@@ -9321,7 +9325,7 @@ class foreach_inputs_sample_func:
 
         # add empty tensor interspersion to test fully fixing #100701
         for num_tensors, rightmost_arg_type, intersperse_empty_tensors in itertools.product(
-                num_input_tensors, self._rightmost_arg_types, (True, False)):
+                num_input_tensors, self._rightmost_arg_types, self._intersperse_empty):
             if intersperse_empty_tensors and (num_tensors != max(num_input_tensors) or str(device) == 'cpu'):
                 # generate interspersed empty tensors for only 1 N on non-cpu device to lessen redundancy
                 continue
@@ -9355,6 +9359,24 @@ class foreach_inputs_sample_func:
                 )
 
 
+class foreach_max_sample_func(foreach_inputs_sample_func):
+    def __init__(
+        self,
+        arity: int,
+        rightmost_supports_scalar: bool,
+        rightmost_supports_scalarlist: bool,
+        rightmost_supports_tensor: bool = False,
+    ) -> None:
+        super().__init__(arity, rightmost_supports_scalar, rightmost_supports_scalarlist, rightmost_supports_tensor)
+        self._intersperse_empty = (False,)
+
+    def sample_zero_size_tensor_inputs(self, opinfo, device, dtype, requires_grad, **kwargs):
+        return []
+
+    def _should_disable_fastpath(self, opinfo, rightmost_arg, rightmost_arg_type, dtype):
+        return False
+
+
 class foreach_norm_sample_func(foreach_inputs_sample_func):
     def sample_zero_size_tensor_inputs(self, opinfo, device, dtype, requires_grad, **kwargs):
         assert "num_input_tensors" not in kwargs
@@ -9373,12 +9395,16 @@ class foreach_norm_sample_func(foreach_inputs_sample_func):
         _foreach_inputs_kwargs = {k: kwargs.pop(k, v) for k, v in _foreach_inputs_default_kwargs.items()}
         _foreach_inputs_kwargs["requires_grad"] = requires_grad
 
-        for num_tensors, ord in product(num_input_tensors, (0, 1, 2, -1, -2, float('inf'), float('-inf'))):
+        for num_tensors, ord, out_dtype in product(
+            num_input_tensors,
+            (0, 1, 2, -1, -2, float('inf'), float('-inf')),
+            (None,) + (torch.complex128,) if dtype in complex_types() else (torch.float64,),
+        ):
             input = sample_inputs_foreach(None, device, dtype, num_tensors, zero_size=False, **_foreach_inputs_kwargs)
             disable_fastpath = True
             if ord in (1, 2, float('inf')) and dtype in floating_types_and(torch.half, torch.bfloat16):
                 disable_fastpath = False
-            yield ForeachSampleInput(input, ord=ord, disable_fastpath=disable_fastpath)
+            yield ForeachSampleInput(input, ord=ord, disable_fastpath=disable_fastpath, dtype=out_dtype)
 
         # Also test nan propagation with a single tensor, but skip autograd testing
         if not requires_grad:
@@ -9396,8 +9422,6 @@ class foreach_norm_sample_func(foreach_inputs_sample_func):
                 if ord in (1, 2, float('inf')) and dtype in floating_types_and(torch.half, torch.bfloat16):
                     disable_fastpath = False
                 yield ForeachSampleInput([x], ord=ord, disable_fastpath=disable_fastpath)
-
-
 
 
 class foreach_lerp_sample_func(foreach_inputs_sample_func):
@@ -11009,14 +11033,30 @@ foreach_binary_op_db: List[OpInfo] = [
         supports_inplace_autograd=True,
         supports_forward_ad=True,
         decorators=(
-            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_meta_inplace"),
-            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_inplace"),
-            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_meta_inplace"),
-            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_meta_outplace"),
-            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_outplace"),
-            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_meta_outplace"),
-            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_inplace_all_strides"),
-            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_outplace_all_strides"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_meta_inplace",
+                         dtypes=all_types_and(torch.bool, torch.bfloat16, torch.float16)),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_inplace",
+                         dtypes=all_types_and(torch.bool, torch.bfloat16, torch.float16)),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_meta_inplace",
+                         dtypes=all_types_and(torch.bool, torch.bfloat16, torch.float16)),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_inplace_all_strides",
+                         dtypes=all_types_and(torch.bool, torch.bfloat16, torch.float16)),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_meta_outplace",
+                         dtypes=(torch.bool,)),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_meta_outplace",
+                         dtypes=(torch.bool,)),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_outplace",
+                         dtypes=(torch.bool,)),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_outplace_all_strides",
+                         dtypes=(torch.bool,)),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_meta_outplace",
+                         dtypes=(torch.half,), device_type="cpu"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_meta_outplace",
+                         dtypes=(torch.half,), device_type="cpu"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_outplace",
+                         dtypes=(torch.half,), device_type="cpu"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_outplace_all_strides",
+                         dtypes=(torch.half,), device_type="cpu"),
             DecorateInfo(unittest.skip("flaky"), "TestForeach", "test_parity", device_type="cpu", dtypes=(torch.complex64,)),
             DecorateInfo(
                 unittest.expectedFailure,
@@ -11047,10 +11087,14 @@ foreach_pointwise_op_db: List[ForeachFuncInfo] = [
         supports_inplace_autograd=True,
         supports_forward_ad=True,
         decorators=(
-            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_meta_outplace"),
-            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_outplace"),
-            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_meta_outplace"),
-            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_outplace_all_strides"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_meta_outplace",
+                         dtypes=all_types_and(torch.bool, torch.bfloat16, torch.float16)),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_outplace",
+                         dtypes=all_types_and(torch.bool, torch.bfloat16, torch.float16)),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_meta_outplace",
+                         dtypes=all_types_and(torch.bool, torch.bfloat16, torch.float16)),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_outplace_all_strides",
+                         dtypes=all_types_and(torch.bool, torch.bfloat16, torch.float16)),
             # Samples have complex types and inplace only works if the dtype is complex.
             DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_meta_inplace",
                          dtypes=all_types_and(torch.bool, torch.bfloat16, torch.float16)),
@@ -11079,15 +11123,59 @@ foreach_pointwise_op_db: List[ForeachFuncInfo] = [
             DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_inplace_all_strides",
                          dtypes=all_types_and(torch.bool, torch.bfloat16, torch.float16)),
             # fails with div_cpu is not implemented with ComplexHalf
-            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_meta_outplace"),
-            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_outplace"),
-            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_meta_outplace"),
-            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_outplace_all_strides"),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_meta_outplace",
+                         dtypes=all_types_and(torch.bool, torch.bfloat16, torch.float16)),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_outplace",
+                         dtypes=all_types_and(torch.bool, torch.bfloat16, torch.float16)),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_meta_outplace",
+                         dtypes=all_types_and(torch.bool, torch.bfloat16, torch.float16)),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_outplace_all_strides",
+                         dtypes=all_types_and(torch.bool, torch.bfloat16, torch.float16)),
         ),
     ),
 ]
 
 foreach_reduce_op_db: List[ForeachFuncInfo] = [
+    ForeachFuncInfo(
+        "max",
+        sample_inputs_func=foreach_max_sample_func(1, False, False),
+        supports_autograd=True,
+        supports_inplace_autograd=True,
+        supports_forward_ad=True,
+        decorators=(
+            # no complex support for ordering ops like max
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestForeach",
+                "test_autodiff",
+                dtypes=(torch.complex128, torch.complex64),
+            ),
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestForeach",
+                "test_foreach_reduce_large_input",
+                dtypes=(torch.complex128, torch.complex64),
+            ),
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestMeta",
+                "test_dispatch_symbolic_meta_outplace",
+                dtypes=(torch.complex128, torch.complex64),
+            ),
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestMeta",
+                "test_meta_outplace",
+                dtypes=(torch.complex128, torch.complex64),
+            ),
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestMeta",
+                "test_dispatch_meta_outplace",
+                dtypes=(torch.complex128, torch.complex64),
+            ),
+        ),
+    ),
     ForeachFuncInfo(
         "norm",
         sample_inputs_func=foreach_norm_sample_func(1, False, False),
@@ -11287,22 +11375,6 @@ def reference_mse_loss(input, target, reduction="mean"):
         return np.sum(se)
     else:  # reduction == "none"
         return se
-
-
-def wrapper_set_seed(op, *args, **kwargs):
-    """Wrapper to set seed manually for some functions like dropout
-    See: https://github.com/pytorch/pytorch/pull/62315#issuecomment-896143189 for more details.
-    """
-    with freeze_rng_state():
-        torch.manual_seed(42)
-        output = op(*args, **kwargs)
-
-        if isinstance(output, torch.Tensor) and output.device.type == "lazy":
-            # We need to call mark step inside freeze_rng_state so that numerics
-            # match eager execution
-            torch._lazy.mark_step()
-
-        return output
 
 
 def reference_layer_norm(inp: np.ndarray, normalized_shape: Tuple[int], weight=None, bias=None, eps=1e-5):
@@ -14915,8 +14987,6 @@ op_db: List[OpInfo] = [
                # RuntimeError: UNSUPPORTED DTYPE: complex
                DecorateInfo(unittest.expectedFailure, 'TestNNCOpInfo',
                             'test_nnc_correctness', dtypes=(torch.complex64, torch.complex128)),
-               # RuntimeError: Conv3D is not supported on MPS
-               DecorateInfo(unittest.expectedFailure, 'TestConsistency'),
                # AssertionError: Tensor-likes are not close!
                # break slow tests
                DecorateInfo(unittest.skip('Skipped!'), 'TestCommon', 'test_compare_cpu'),
@@ -15751,7 +15821,7 @@ op_db: List[OpInfo] = [
         supports_out=False,
         sample_kwargs=lambda device, dtype, input:
             (dict(lower=0., upper=1., training=True), dict(lower=0., upper=1., training=True)),
-        sample_inputs_func=partial(sample_inputs_elementwise_unary, op_kwargs=dict(lower=0., upper=1., training=True)),
+        sample_inputs_func=sample_inputs_rrelu,
         error_inputs_func=error_inputs_rrelu,
         decorators=(
             DecorateInfo(
@@ -17646,10 +17716,11 @@ op_db: List[OpInfo] = [
                lambda a, b, **kwargs: torch.svd_lowrank(a @ b.mT, **kwargs),
                *args, **kwargs
            ),
-           dtypes=floating_types(),
+           dtypes=floating_and_complex_types(),
            # Runs very slowly on slow gradcheck - alternatively reduce input sizes
            gradcheck_fast_mode=True,
            supports_out=False,
+           # Due to the use of randomness
            check_batched_grad=False,
            check_batched_gradgrad=False,
            check_batched_forward_grad=False,
@@ -17657,14 +17728,29 @@ op_db: List[OpInfo] = [
            supports_forward_ad=True,
            sample_inputs_func=sample_inputs_svd_lowrank,
            decorators=[skipCUDAIfNoCusolver, skipCPUIfNoLapack, with_tf32_off,
-                       DecorateInfo(toleranceOverride({torch.float32: tol(atol=1e-03, rtol=1e-03)}),
-                                    'TestCommon', 'test_noncontiguous_samples',
-                                    device_type='cuda')],
+                       DecorateInfo(toleranceOverride({torch.float32: tol(atol=1e-03, rtol=1e-03),
+                                                       torch.complex64: tol(atol=1e-02, rtol=1e-02)}),
+                                    'TestCommon', 'test_noncontiguous_samples'),
+                       # FIXME This should be the following, but the toleranceOverride does not seem to do anything!
+                       # DecorateInfo(toleranceOverride({torch.complex128: tol(atol=1e-04, rtol=1e-04)}),
+                       #              'TestFwdGradients', 'test_fn_fwgrad_bwgrad'),
+                       DecorateInfo(unittest.skip("See comment above"),
+                                    'TestFwdGradients',
+                                    'test_fn_fwgrad_bwgrad',
+                                    dtypes=[torch.complex128]),
+                       DecorateInfo(unittest.skip("See comment above"),
+                                    'TestBwdGradientsCUDA',
+                                    'test_fn_gradgrad',
+                                    dtypes=[torch.complex128]),
+                       ],
            skips=(
                # test does not work with passing lambda for op
                DecorateInfo(unittest.expectedFailure, "TestNormalizeOperators", "test_normalize_operator_exhaustive"),
                DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
                DecorateInfo(unittest.skip('output is non-deterministic'), 'TestCommon', 'test_compare_cpu'),
+               # Issue with conj and torch dispatch, see https://github.com/pytorch/pytorch/issues/82479
+               DecorateInfo(unittest.expectedFailure, 'TestSchemaCheckModeOpInfo', 'test_schema_correctness',
+                            dtypes=(torch.complex64, torch.complex128)),
                DecorateInfo(slowTest, 'TestCompositeCompliance', 'test_forward_ad'),
            )),
     OpInfo('pca_lowrank',
@@ -17672,7 +17758,7 @@ op_db: List[OpInfo] = [
                lambda a, b, **kwargs: torch.pca_lowrank(a @ b.mT, **kwargs),
                *args, **kwargs
            ),
-           dtypes=floating_types(),
+           dtypes=floating_and_complex_types(),
            # Runs very slowly on slow gradcheck - alternatively reduce input sizes
            gradcheck_fast_mode=True,
            supports_out=False,
@@ -17683,13 +17769,25 @@ op_db: List[OpInfo] = [
            supports_fwgrad_bwgrad=True,
            sample_inputs_func=sample_inputs_pca_lowrank,
            decorators=[skipCUDAIfNoCusolver, skipCPUIfNoLapack, with_tf32_off,
-                       DecorateInfo(toleranceOverride({torch.float32: tol(atol=1e-03, rtol=1e-03)}),
-                                    'TestCommon', 'test_noncontiguous_samples',
-                                    device_type='cuda')],
+                       DecorateInfo(toleranceOverride({torch.float32: tol(atol=1e-03, rtol=1e-03),
+                                                       torch.complex64: tol(atol=4e-02, rtol=4e-02)}),
+                                    'TestCommon', 'test_noncontiguous_samples'),
+                       # FIXME This should be the following, but the toleranceOverride does not seem to do anything!
+                       # DecorateInfo(toleranceOverride({torch.complex128: tol(atol=1e-04, rtol=1e-04)}),
+                       #              'TestFwdGradients', 'test_fn_fwgrad_bwgrad'),
+                       DecorateInfo(unittest.skip("See comment above"),
+                                    'TestFwdGradients',
+                                    'test_fn_fwgrad_bwgrad',
+                                    dtypes=[torch.complex128]),
+
+                       ],
            skips=(
                # test does not work with passing lambda for op
                DecorateInfo(unittest.expectedFailure, "TestNormalizeOperators", "test_normalize_operator_exhaustive"),
                DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
+               # Issue with conj and torch dispatch, see https://github.com/pytorch/pytorch/issues/82479
+               DecorateInfo(unittest.expectedFailure, 'TestSchemaCheckModeOpInfo', 'test_schema_correctness',
+                            dtypes=(torch.complex64, torch.complex128)),
                DecorateInfo(unittest.skip('output is non-deterministic'), 'TestCommon', 'test_compare_cpu'),
            )),
     BinaryUfuncInfo('polar',

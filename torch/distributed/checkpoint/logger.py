@@ -1,7 +1,6 @@
 import functools
 import time
 from typing import Any, Callable, Dict, List, TypeVar
-
 from typing_extensions import ParamSpec
 
 import torch.distributed.c10d_logger as c10d_logger

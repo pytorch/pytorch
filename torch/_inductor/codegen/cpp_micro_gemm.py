@@ -59,11 +59,7 @@ inline void {{kernel_name}}(
 
     def get_common_options(self):
         return {
-            "torch": torch,
             "kernel_name": self.name,
-            "input_dtype": self.input_dtype,
-            "output_dtype": self.output_dtype,
-            "compute_dtype": self.compute_dtype,
             "input_t": DTYPE_TO_CPP[self.input_dtype],
             "output_t": DTYPE_TO_CPP[self.output_dtype],
             "compute_t": DTYPE_TO_CPP[self.compute_dtype],
@@ -140,29 +136,6 @@ def register_micro_gemm(*configs):
     return inner
 
 
-def generate_gemm_config(
-    vec_isa_cls,
-    register_blockings,
-    input_dtype=torch.float,
-    output_dtype=None,
-    compute_dtype=None,
-):
-    if output_dtype is None:
-        output_dtype = input_dtype
-    if compute_dtype is None:
-        compute_dtype = output_dtype
-    return [
-        CppMicroGemmConfig(
-            input_dtype,
-            output_dtype,
-            compute_dtype,
-            vec_isa_cls,
-            GemmBlocking(*blocking),
-        )
-        for blocking in register_blockings
-    ]
-
-
 class CppMicroGemmRef(CppMicroGemm):
     """
     A reference implementation of the CppMicroGemm class with naive C++ code.
@@ -197,41 +170,28 @@ class CppMicroGemmRef(CppMicroGemm):
 
 
 @register_micro_gemm(
-    *generate_gemm_config(
-        VecAVX512, [(8, 48, 1), (8, 32, 1), (16, 16, 1)], input_dtype=torch.float
+    CppMicroGemmConfig(
+        torch.float32, torch.float32, torch.float32, VecAVX512, GemmBlocking(8, 48, 1)
     ),
-    *generate_gemm_config(
-        VecAVX512,
-        [(8, 48, 1), (8, 32, 1), (16, 16, 1)],
-        input_dtype=torch.bfloat16,
-        output_dtype=torch.float,
+    CppMicroGemmConfig(
+        torch.float32, torch.float32, torch.float32, VecAVX512, GemmBlocking(8, 32, 1)
     ),
-    *generate_gemm_config(
-        VecAVX512,
-        [(8, 48, 1), (8, 32, 1), (16, 16, 1)],
-        input_dtype=torch.half,
-        output_dtype=torch.float,
+    CppMicroGemmConfig(
+        torch.float32, torch.float32, torch.float32, VecAVX512, GemmBlocking(16, 16, 1)
     ),
-    *generate_gemm_config(
-        VecAVX2, [(4, 24, 1), (4, 16, 1), (8, 8, 1)], input_dtype=torch.float
+    CppMicroGemmConfig(
+        torch.float32, torch.float32, torch.float32, VecAVX2, GemmBlocking(4, 24, 1)
     ),
-    *generate_gemm_config(
-        VecAVX2,
-        [(4, 24, 1), (4, 16, 1), (8, 8, 1)],
-        input_dtype=torch.bfloat16,
-        output_dtype=torch.float,
+    CppMicroGemmConfig(
+        torch.float32, torch.float32, torch.float32, VecAVX2, GemmBlocking(4, 16, 1)
     ),
-    *generate_gemm_config(
-        VecAVX2,
-        [(4, 24, 1), (4, 16, 1), (8, 8, 1)],
-        input_dtype=torch.half,
-        output_dtype=torch.float,
+    CppMicroGemmConfig(
+        torch.float32, torch.float32, torch.float32, VecAVX2, GemmBlocking(8, 8, 1)
     ),
 )
 class CppMicroGemmFP32Vec(CppMicroGemm):
     """
-    This class generates the code for micro gemm using fp32 vec instructions for compute.
-    It supports input types of torch.float, torch.bfloat16, and torch.half with fp32 output.
+    This class generates the code for fp32 micro gemm using vec instructions.
     """
 
     TEMPLATE_ENTRY = r"""
@@ -279,23 +239,22 @@ class CppMicroGemmFP32Vec(CppMicroGemm):
     TEMPLATE_KERNEL = r"""
 template <int64_t BLOCK_M, int64_t BLOCK_N, bool accum>
 inline void {{kernel_name}}_kernel(
-    const {{input_t}}* __restrict__ A,
-    const {{input_t}}* __restrict__ B,
-    {{output_t}}* __restrict__ C,
+    const float* __restrict__ A,
+    const float* __restrict__ B,
+    float* __restrict__ C,
     int64_t K,
     int64_t lda,
     int64_t ldb,
     int64_t ldc
 ) {
-    using Vectorized = at::vec::Vectorized<{{compute_t}}>;
-    using VectorizedIn = at::vec::Vectorized<{{input_t}}>;
+    using Vectorized = at::vec::Vectorized<float>;
     constexpr auto VLEN = Vectorized::size();
     constexpr auto ROWS = BLOCK_M;
     constexpr auto COLS = BLOCK_N / VLEN;
 
     Vectorized va;
-    at::vec::VectorizedN<{{compute_t}}, COLS> vb;
-    at::vec::VectorizedN<{{compute_t}}, ROWS*COLS> vc;
+    at::vec::VectorizedN<float, COLS> vb;
+    at::vec::VectorizedN<float, ROWS*COLS> vc;
 
     auto loadc = [&](auto i) {
         if constexpr (accum) {
@@ -314,19 +273,14 @@ inline void {{kernel_name}}_kernel(
 
         if constexpr (col == 0) {
             {%- if alpha != 1 %}
-            va = Vectorized(static_cast<{{compute_t}}>(A[row * lda + k]) * {{alpha}});
+            va = Vectorized(A[row * lda + k] * {{alpha}});
             {%- else %}
-            va = Vectorized(static_cast<{{compute_t}}>(A[row * lda + k]));
+            va = Vectorized(A[row * lda + k]);
             {%- endif %}
         }
 
         if constexpr (row == 0) {
-            {%- if input_dtype == torch.bfloat16 or input_dtype == torch.float16 %}
-            auto b = VectorizedIn::loadu(B + k * ldb + col * VLEN, VLEN);
-            vb[col] = at::vec::convert<{{compute_t}}>(b);
-            {%- else %}
             vb[col] = Vectorized::loadu(B + k * ldb + col * VLEN);
-            {%- endif %}
         }
 
         constexpr int idx = row * COLS + col;
@@ -376,7 +330,7 @@ def create_micro_gemm(
     compute_dtype=None,
     alpha=1,
     num_threads=-1,
-    use_ref=False,
+    use_ref=True,
 ) -> Optional[CppMicroGemm]:
     def create_from_config(cls, config: CppMicroGemmConfig):
         return cls(
@@ -395,7 +349,7 @@ def create_micro_gemm(
     if output_dtype is None:
         output_dtype = input_dtype
     if compute_dtype is None:
-        compute_dtype = output_dtype
+        compute_dtype = input_dtype
     if num_threads < 0:
         num_threads = parallel_num_threads()
     vec_isa = pick_vec_isa()

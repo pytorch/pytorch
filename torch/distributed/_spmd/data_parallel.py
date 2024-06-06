@@ -14,16 +14,16 @@ import torch.utils._pytree as pytree
 
 from torch.distributed._spmd.batch_dim_utils import BatchDimAnalyzer
 from torch.distributed._tensor import DeviceMesh, distribute_tensor, Replicate, Shard
-
-from torch.distributed._tensor._utils import compute_local_shape
-from torch.distributed._tensor.op_schema import (
+from torch.distributed._tensor._op_schema import (
     OpStrategy,
     PlacementStrategy,
     StrategyType,
     TupleStrategy,
 )
+from torch.distributed._tensor._redistribute import redistribute_local_tensor
+
+from torch.distributed._tensor._utils import compute_local_shape
 from torch.distributed._tensor.placement_types import _Partial, DTensorSpec, Placement
-from torch.distributed._tensor.redistribute import redistribute_local_tensor
 from torch.fx import GraphModule
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.passes.shape_prop import _extract_tensor_metadata

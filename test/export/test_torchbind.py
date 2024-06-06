@@ -255,15 +255,8 @@ def forward(self, token, obj_attr, x):
         )
 
     @parametrize("pre_dispatch", [True, False])
-    @parametrize("fakify_script_obj", [True, False])
-    def test_input(self, pre_dispatch, fakify_script_obj):
+    def test_input(self, pre_dispatch):
         cc = torch.classes._TorchScriptTesting._Foo(10, 20)
-        if not fakify_script_obj:
-            qual_name = cc._type().qualified_name()  # type: ignore[att-defined]
-            if torch._library.fake_class_registry.has_fake_class(qual_name):
-                torch._library.fake_class_registry.deregister_fake_class(
-                    "_TorchScriptTesting::_Foo"
-                )
 
         class MyModule(torch.nn.Module):
             def __init__(self):
@@ -295,19 +288,11 @@ def forward(self, x, cc):
         # aot_export_function runs the program twice
         # in run_functionalized_fw_and_collect_metadata and create_aot_dispatcher_function
         # We also have a re-tracing test, which doubles the count.
-        if fakify_script_obj:
-            self.assertEqual(self.foo_add_tensor_counter, 4)
+        self.assertEqual(self.foo_add_tensor_counter, 4)
 
     @parametrize("pre_dispatch", [True, False])
-    @parametrize("fakify_script_obj", [True, False])
-    def test_input_as_custom_op_argument(self, pre_dispatch, fakify_script_obj):
+    def test_input_as_custom_op_argument(self, pre_dispatch):
         cc = torch.classes._TorchScriptTesting._Foo(10, 20)
-        if not fakify_script_obj:
-            qual_name = cc._type().qualified_name()  # type: ignore[att-defined]
-            if torch._library.fake_class_registry.has_fake_class(qual_name):
-                torch._library.fake_class_registry.deregister_fake_class(
-                    "_TorchScriptTesting::_Foo"
-                )
 
         class MyModule(torch.nn.Module):
             def __init__(self):
@@ -322,16 +307,13 @@ def forward(self, x, cc):
         torch.ops._TorchScriptTesting.takes_foo.default._dispatch_cache.clear()
         # Even though a C++ implementation for takes_foo.default is registered,
         # we still need the python implementation for takes_foo.default to trace with FakeFoo.
-        if fakify_script_obj:
-            with self.assertRaisesRegex(
-                RuntimeError, "no python implementation is found"
-            ):
-                self._test_export_same_as_eager(
-                    MyModule(),
-                    (torch.ones(2, 3), cc),
-                    strict=False,
-                    pre_dispatch=pre_dispatch,
-                )
+        with self.assertRaisesRegex(RuntimeError, "no python implementation is found"):
+            self._test_export_same_as_eager(
+                MyModule(),
+                (torch.ones(2, 3), cc),
+                strict=False,
+                pre_dispatch=pre_dispatch,
+            )
 
         torch.ops._TorchScriptTesting.takes_foo.default.py_impl(
             torch._C.DispatchKey.Meta
@@ -364,8 +346,7 @@ def forward(self, token, x, cc):
         )
 
     @parametrize("pre_dispatch", [True, False])
-    @parametrize("fakify_script_obj", [True, False])
-    def test_torchbind_alias(self, pre_dispatch, fakify_script_obj):
+    def test_torchbind_alias(self, pre_dispatch):
         class F2(torch.nn.Module):
             def __init__(self, foo):
                 super().__init__()
@@ -378,12 +359,6 @@ def forward(self, token, x, cc):
             def __init__(self):
                 super().__init__()
                 self.alpha = torch.classes._TorchScriptTesting._Foo(10, 20)
-                if not fakify_script_obj:
-                    qual_name = self.alpha._type().qualified_name()
-                    if torch._library.fake_class_registry.has_fake_class(qual_name):
-                        torch._library.fake_class_registry.deregister_fake_class(
-                            "_TorchScriptTesting::_Foo"
-                        )
                 self.beta = self.alpha
                 self.gamma = self.alpha
                 self.foo = F2(self.gamma)
@@ -402,8 +377,7 @@ def forward(self, token, x, cc):
     # TODO(pianpwk): look into this
     @unittest.expectedFailure
     @parametrize("pre_dispatch", [True, False])
-    @parametrize("fakify_script_obj", [True, False])
-    def test_torchbind_input_and_alias(self, pre_dispatch, fakify_script_obj):
+    def test_torchbind_input_and_alias(self, pre_dispatch):
         # alias as model attribute
         class F3(torch.nn.Module):
             def forward(self, x, foo):
@@ -411,12 +385,6 @@ def forward(self, token, x, cc):
                 return x + self.foo.add_tensor(x)
 
         foo = torch.classes._TorchScriptTesting._Foo(10, 20)
-        if not fakify_script_obj:
-            qual_name = foo._type().qualified_name()  # type: ignore[att-defined]
-            if torch._library.fake_class_registry.has_fake_class(qual_name):
-                torch._library.fake_class_registry.deregister_fake_class(
-                    "_TorchScriptTesting::_Foo"
-                )
         self._test_export_same_as_eager(
             F3(), (torch.ones(2, 3), foo), strict=False, pre_dispatch=pre_dispatch
         )
@@ -939,8 +907,10 @@ class TestCompileTorchbind(TestCase):
     def tearDown(self):
         torch._dynamo.reset()
 
-    def test_compile_script_object_input(self):
-        backend = EagerAndRecordGraphs()
+    @parametrize("backend", ["eager", "aot_eager"])
+    def test_compile_script_object_input(self, backend):
+        if backend == "eager":
+            backend = EagerAndRecordGraphs()
 
         class Model(torch.nn.Module):
             def __init__(self):
@@ -984,23 +954,25 @@ class TestCompileTorchbind(TestCase):
         # does not return L_tq_ as output. This is because it's able
         # to detect that L_tq_ is an input therefore don't return
         # it as graph output. Related logic is in dynamo/codegen.py
-        self.assertExpectedInline(
-            backend.graphs[0].code.strip(),
-            """\
-def forward(self, L_tq_ : torch.ScriptObject, L_x_ : torch.Tensor):
-    l_tq_ = L_tq_
-    l_x_ = L_x_
-    cos = l_x_.cos()
-    call_torchbind = torch.ops.higher_order.call_torchbind(l_tq_, 'push', cos);  cos = None
-    sin = l_x_.sin();  l_x_ = None
-    call_torchbind_1 = torch.ops.higher_order.call_torchbind(l_tq_, 'push', sin);  sin = None
-    call_torchbind_2 = torch.ops.higher_order.call_torchbind(l_tq_, 'pop')
-    call_torchbind_3 = torch.ops.higher_order.call_torchbind(l_tq_, 'size');  l_tq_ = None
-    x_sin = call_torchbind_2 - 1;  call_torchbind_2 = None
-    return (x_sin,)""",
-        )
+        if backend == "eager":
+            self.assertExpectedInline(
+                backend.graphs[0].code.strip(),
+                """\
+    def forward(self, L_tq_ : torch.ScriptObject, L_x_ : torch.Tensor):
+        l_tq_ = L_tq_
+        l_x_ = L_x_
+        cos = l_x_.cos()
+        call_torchbind = torch.ops.higher_order.call_torchbind(l_tq_, 'push', cos);  cos = None
+        sin = l_x_.sin();  l_x_ = None
+        call_torchbind_1 = torch.ops.higher_order.call_torchbind(l_tq_, 'push', sin);  sin = None
+        call_torchbind_2 = torch.ops.higher_order.call_torchbind(l_tq_, 'pop')
+        call_torchbind_3 = torch.ops.higher_order.call_torchbind(l_tq_, 'size');  l_tq_ = None
+        x_sin = call_torchbind_2 - 1;  call_torchbind_2 = None
+        return (x_sin,)""",
+            )
 
-    def test_compile_script_object_input_guards(self):
+    @parametrize("backend", ["eager", "aot_eager"])
+    def test_compile_script_object_input_guards(self, backend):
         class Model(torch.nn.Module):
             def __init__(self):
                 super().__init__()
@@ -1013,7 +985,7 @@ def forward(self, L_tq_ : torch.ScriptObject, L_x_ : torch.Tensor):
                 return x_sin, tq
 
         mod = Model()
-        cnt = torch._dynamo.testing.CompileCounter()
+        cnt = torch._dynamo.testing.CompileCounterWithBackend(backend)
         x = torch.randn(2, 3)
 
         tq1 = _empty_tensor_queue()
@@ -1084,8 +1056,10 @@ def forward(self, L_tq_ : torch.ScriptObject, L_x_ : torch.Tensor):
         torch.compile(mod, backend=cnt)(tq3, x)
         self.assertEqual(cnt.frame_count, 2)
 
-    def test_compile_error_on_input_aliasing_contents(self):
-        backend = EagerAndRecordGraphs()
+    @parametrize("backend", ["eager", "aot_eager"])
+    def test_compile_error_on_input_aliasing_contents(self, backend):
+        if backend == "eager":
+            backend = EagerAndRecordGraphs()
 
         class Model(torch.nn.Module):
             def __init__(self):
@@ -1103,7 +1077,11 @@ def forward(self, L_tq_ : torch.ScriptObject, L_x_ : torch.Tensor):
         with self.assertRaisesRegex(RuntimeError, "is alising"):
             torch.compile(mod, backend=backend)(tq1, x)
 
-    def test_compile_error_on_script_obj_setattr(self):
+    @parametrize("backend", ["eager", "aot_eager"])
+    def test_compile_error_on_script_obj_setattr(self, backend):
+        if backend == "eager":
+            backend = EagerAndRecordGraphs()
+
         def setattr_f(tq):
             tq.a = 1
             return tq
@@ -1111,19 +1089,25 @@ def forward(self, L_tq_ : torch.ScriptObject, L_x_ : torch.Tensor):
         with self.assertRaisesRegex(
             RuntimeError, "call method __setattr__ on script object is not safe"
         ):
-            torch.compile(setattr_f, backend="eager")(_empty_tensor_queue())
+            torch.compile(setattr_f, backend=backend)(_empty_tensor_queue())
 
-    def test_compile_error_on_script_obj_missing_attr(self):
+    @parametrize("backend", ["eager", "aot_eager"])
+    def test_compile_error_on_script_obj_missing_attr(self, backend):
+        if backend == "eager":
+            backend = EagerAndRecordGraphs()
+
         def setattr_f(tq):
             return tq._not_defined_attr
 
         with self.assertRaisesRegex(
             RuntimeError, "doesn't define method _not_defined_attr"
         ):
-            torch.compile(setattr_f, backend="eager")(_empty_tensor_queue())
+            torch.compile(setattr_f, backend=backend)(_empty_tensor_queue())
 
-    def test_compile_body_aliasing_contents(self):
-        backend = EagerAndRecordGraphs()
+    @parametrize("backend", ["eager", "aot_eager"])
+    def test_compile_body_aliasing_contents(self, backend):
+        if backend == "eager":
+            backend = EagerAndRecordGraphs()
 
         def f(tq, x):
             x1 = x.view(-1)
@@ -1138,7 +1122,7 @@ def forward(self, L_tq_ : torch.ScriptObject, L_x_ : torch.Tensor):
             f(_empty_tensor_queue(), x),
             torch.compile(f, backend=backend)(_empty_tensor_queue(), x),
         )
-        if not torch._dynamo.is_compiling():
+        if not torch._dynamo.is_compiling() and backend == "eager":
             self.assertExpectedInline(
                 backend.graphs[0].code.strip(),
                 """\
@@ -1156,8 +1140,10 @@ def forward(self, L_x_ : torch.Tensor, L_tq_ : torch.ScriptObject):
     return (sub, add)""",
             )
 
-    def test_compile_error_on_non_fakified_method(self):
-        backend = EagerAndRecordGraphs()
+    @parametrize("backend", ["eager", "aot_eager"])
+    def test_compile_error_on_non_fakified_method(self, backend):
+        if backend == "eager":
+            backend = EagerAndRecordGraphs()
 
         def f(tq, x):
             x1 = x.view(-1)
@@ -1175,7 +1161,8 @@ def forward(self, L_x_ : torch.Tensor, L_tq_ : torch.ScriptObject):
         ):
             torch.compile(f, backend=backend)(_empty_tensor_queue(), x)
 
-    def test_compile_obj_as_hop_input(self):
+    @parametrize("backend", ["eager", "aot_eager"])
+    def test_compile_obj_as_hop_input(self, backend):
         def f(tq, x):
             def fn(tq, x):
                 tq.push(x)
@@ -1187,10 +1174,11 @@ def forward(self, L_x_ : torch.Tensor, L_tq_ : torch.ScriptObject):
         _assertEqualScriptObject(
             self,
             f(_empty_tensor_queue(), x),
-            torch.compile(f, backend="eager")(_empty_tensor_queue(), x),
+            torch.compile(f, backend=backend)(_empty_tensor_queue(), x),
         )
 
-    def test_compile_obj_closure(self):
+    @parametrize("backend", ["eager", "aot_eager"])
+    def test_compile_obj_closure(self, backend):
         def f(x):
             def inner_f(x):
                 tq.push(x.sin())
@@ -1204,7 +1192,8 @@ def forward(self, L_x_ : torch.Tensor, L_tq_ : torch.ScriptObject):
         x = torch.randn(3, 2)
         _assertEqualScriptObject(self, f(x), opt_f(x))
 
-    def test_compile_global_obj(self):
+    @parametrize("backend", ["eager", "aot_eager"])
+    def test_compile_global_obj(self, backend):
         global _TENSOR_QUEUE_GLOBAL_TEST
         _TENSOR_QUEUE_GLOBAL_TEST = _empty_tensor_queue()
 
@@ -1212,7 +1201,7 @@ def forward(self, L_x_ : torch.Tensor, L_tq_ : torch.ScriptObject):
             _TENSOR_QUEUE_GLOBAL_TEST.push(x.sin())
             return _TENSOR_QUEUE_GLOBAL_TEST.pop(), _TENSOR_QUEUE_GLOBAL_TEST
 
-        opt_f = torch.compile(f, backend="eager")
+        opt_f = torch.compile(f, backend=backend)
         x = torch.randn(3, 2)
         eager_ret = f(x)
         opt_ret = opt_f(x)
@@ -1239,8 +1228,10 @@ def forward(self, L_x_ : torch.Tensor, L_tq_ : torch.ScriptObject):
         )
         self.assertEqual(cnt.frame_count, 4)
 
-    def test_compile_obj_attributes(self):
-        backend = EagerAndRecordGraphs()
+    @parametrize("backend", ["eager", "aot_eager"])
+    def test_compile_obj_attributes(self, backend):
+        if backend == "eager":
+            backend = EagerAndRecordGraphs()
 
         class Model(torch.nn.Module):
             def __init__(self):
@@ -1254,21 +1245,23 @@ def forward(self, L_x_ : torch.Tensor, L_tq_ : torch.ScriptObject):
         x = torch.randn(2, 3)
         opt_f = torch.compile(Model(), backend=backend)
         _assertEqualScriptObject(self, Model()(x), opt_f(x))
-        self.assertEqual(len(backend.graphs), 1)
-        # lifted as input. In the future, we would want to cosolidate this
-        # with non-strict behavior, where they're set as attributes.
-        self.assertExpectedInline(
-            backend.graphs[0].code.strip(),
-            """\
-def forward(self, L_self_tq : torch.ScriptObject, L_x_ : torch.Tensor):
-    l_self_tq = L_self_tq
-    l_x_ = L_x_
-    call_torchbind = torch.ops.higher_order.call_torchbind(l_self_tq, 'push', l_x_);  l_x_ = None
-    call_torchbind_1 = torch.ops.higher_order.call_torchbind(l_self_tq, 'pop');  l_self_tq = None
-    return (call_torchbind_1,)""",
-        )
+        if backend == "eager":
+            self.assertEqual(len(backend.graphs), 1)
+            # lifted as input. In the future, we would want to cosolidate this
+            # with non-strict behavior, where they're set as attributes.
+            self.assertExpectedInline(
+                backend.graphs[0].code.strip(),
+                """\
+    def forward(self, L_self_tq : torch.ScriptObject, L_x_ : torch.Tensor):
+        l_self_tq = L_self_tq
+        l_x_ = L_x_
+        call_torchbind = torch.ops.higher_order.call_torchbind(l_self_tq, 'push', l_x_);  l_x_ = None
+        call_torchbind_1 = torch.ops.higher_order.call_torchbind(l_self_tq, 'pop');  l_self_tq = None
+        return (call_torchbind_1,)""",
+            )
 
-    def test_compile_obj_torchbind_op(self):
+    @parametrize("backend", ["eager", "aot_eager"])
+    def test_compile_obj_torchbind_op(self, backend):
         def f(tq, x):
             torch.ops._TorchScriptTesting.queue_push(tq, x.cos())
             torch.ops._TorchScriptTesting.queue_push(tq, x.cos() + 1)
@@ -1276,7 +1269,7 @@ def forward(self, L_self_tq : torch.ScriptObject, L_x_ : torch.Tensor):
             torch.ops._TorchScriptTesting.queue_push(tq, x.sin())
             return tq.pop(), tq.pop() + tq.size(), tq
 
-        opt_f = torch.compile(f, backend="eager")
+        opt_f = torch.compile(f, backend=backend)
         x = torch.randn(2)
         _assertEqualScriptObject(
             self, f(_empty_tensor_queue(), x), opt_f(_empty_tensor_queue(), x)
@@ -1334,6 +1327,7 @@ class TestRegisterFakeClass(TestCase):
 
 
 instantiate_parametrized_tests(TestExportTorchbind)
+instantiate_parametrized_tests(TestCompileTorchbind)
 
 if __name__ == "__main__":
     run_tests()

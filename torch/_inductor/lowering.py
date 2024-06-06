@@ -34,7 +34,7 @@ from torch._prims_common import (
     Number,
 )
 from torch.fx.experimental.sym_node import magic_methods, method_to_operator
-from torch.utils._sympy.functions import CeilDiv, FloorDiv, ModularIndexing
+from torch.utils._sympy.functions import CeilDiv, FloorDiv, IntTrueDiv, ModularIndexing
 from .._dynamo.utils import import_submodule
 
 from . import config, inductor_prims, ir, test_operators  # NOQA: F401
@@ -892,7 +892,7 @@ def repeat(x, repeats):
     if zero_tensor:
         return empty(new_size, dtype=x.get_dtype(), device=x.get_device())
     if all((a == 1 or b == 1) for a, b in zip(repeats, old_size)):
-        return expand(x, new_size)
+        return clone(expand(x, new_size))
 
     x_loader: Callable[[Any], Any]
 
@@ -2421,7 +2421,7 @@ def slice_scatter(x, src, dim=0, start=None, end=None, step=1):
                     ops.index_expr(
                         ModularIndexing(idx[dim] - start, 1, step), torch.int64
                     ),
-                    ops.constant(0, torch.torch.int64),
+                    ops.constant(0, torch.int64),
                 )
             )
         assert mask
@@ -3208,7 +3208,6 @@ def scatter_fallback(
 @register_lowering(aten.scatter_, type_promotion_kind=None)
 def scatter_(self, dim: int, index, src, *, reduce: Optional[str] = None):
     assert reduce in {None, "add", "multiply"}
-
     if reduce is None:
         op_overload = getattr(aten.scatter_, V.graph.current_node.target._overloadname)  # type: ignore[union-attr]
         fallback_result = scatter_fallback(
@@ -3242,7 +3241,6 @@ def scatter_reduce(x, dim: int, index, src, reduction_type, **kwargs):
 @register_lowering(aten.scatter_reduce_, type_promotion_kind=None)
 def scatter_reduce_(self, dim: int, index, src, reduce, *, include_self: bool = True):
     assert reduce in {None, "sum", "prod", "mean", "amax", "amin"}
-
     assert (
         len(aten.scatter_reduce_.overloads()) == 1
         and "two" in aten.scatter_reduce_.overloads()
@@ -4264,7 +4262,7 @@ def _fractional_pooling_offsets(samples, in_sz, out_sz, kernel_sz, dim):
     out_sz = out_sz[dim]
     in_sz = in_sz[dim]
     kernel_sz = kernel_sz[dim]
-    alpha = (in_sz - kernel_sz) / (out_sz - 1)
+    alpha = IntTrueDiv(in_sz - kernel_sz, out_sz - 1)
     samples_loader = samples.make_loader()
 
     def load(prefix, i):
@@ -4374,7 +4372,7 @@ def upsample_nearest2d_backward(
     w_kernel_max = ceildiv(inp_w, out_w)
 
     def start_index(index, out_dim, inp_dim):
-        return CeilDiv(index * inp_dim, out_dim)
+        return CeilDiv(index * inp_dim, sympy.sympify(out_dim))
 
     def end_index(index, out_dim, inp_dim):
         return start_index((index + 1), out_dim, inp_dim)
@@ -4559,7 +4557,7 @@ def _avg_poolnd(
                 factor = ops.index_expr(hend - hstart, torch.int32)
                 divide_factors.append(factor)
             divide_factor = functools.reduce(ops.mul, divide_factors)
-            return ops.div(fn_sum(idx, x_loader), divide_factor)
+            return ops.truediv(fn_sum(idx, x_loader), divide_factor)
 
     rv = Pointwise.create(
         device=x.get_device(),
@@ -5323,7 +5321,7 @@ def logcumsumexp(x, dim):
 def cummax(x, axis=None):
     if len(x.get_size()) == 0:
         assert axis in [0, -1]
-        return clone(x), torch.empty_like(x, dtype=torch.int64)
+        return clone(x), empty_like(x, dtype=torch.int64)
 
     dtype = x.get_dtype()
     combine_fn = ir.get_reduction_combine_fn(
@@ -5353,7 +5351,7 @@ def cummax(x, axis=None):
 def cummin(x, axis=None):
     if len(x.get_size()) == 0:
         assert axis in [0, -1]
-        return clone(x), torch.empty_like(x, dtype=torch.int64)
+        return clone(x), empty_like(x, dtype=torch.int64)
 
     dtype = x.get_dtype()
     combine_fn = ir.get_reduction_combine_fn(
@@ -5919,7 +5917,7 @@ def associative_scan(combine_fn: ir.Subgraph, input, dim: int):
     kwargs["dtypes"] = tuple(x.get_dtype() for x in input)
     kwargs["inner_fns"] = tuple(x.make_loader() for x in input)
     result = ir.Scan.create(**kwargs, combine_fn=wrapped_combine_fn)
-    if result is None:
+    if result[0] is None:
         raise RuntimeError("Unable to generate code for associative_scan op")
     return result
 
