@@ -368,7 +368,7 @@ def sub(g: jit_utils.GraphContext, self, other, alpha=None):
             If `alpha` is not provided, it defaults to 1.
 
     Returns:
-        ONNX graph node representing the concatenated tensor.
+        ONNX operator
     """
     if alpha and symbolic_helper._scalar(symbolic_helper._maybe_get_scalar(alpha)) != 1:
         other = g.op("Mul", other, alpha)
