@@ -45,13 +45,6 @@ def gen_registration_headers(
     rocm: bool,
     backend_only: bool = False,
 ) -> List[str]:
-    if backend_only and backend_index.dispatch_key == DispatchKey.XPU:
-        return [
-                "#include <ATen/ops/empty.h>",
-                "#include <ATen/ops/empty_strided.h>",
-                "#include <ATen/ops/_copy_from_and_resize.h>",
-                "#include <ATen/ops/_copy_from.h>"
-            ]
     if per_operator_headers:
         headers = ["#include <ATen/ops/as_strided_native.h>"]
     else:
@@ -66,6 +59,8 @@ def gen_registration_headers(
             headers.append("#include <ATen/cuda/EmptyTensor.h>")
     elif backend_index.dispatch_key == DispatchKey.MPS:
         headers.append("#include <ATen/mps/EmptyTensor.h>")
+    elif backend_index.dispatch_key == DispatchKey.XPU:
+        headers.append("#include <aten/EmptyTensor.h>")
     elif per_operator_headers:
         headers += [
             "#include <ATen/ops/empty.h>",
@@ -76,6 +71,7 @@ def gen_registration_headers(
     else:
         headers.append("#include <ATen/Functions.h>")
 
+    print("headers", headers)
     return headers
 
 
@@ -90,6 +86,7 @@ def gen_empty_impl_names(
         DispatchKey.CPU,
         DispatchKey.CUDA,
         DispatchKey.MPS,
+        DispatchKey.XPU,
     ):
         dispatch = str(backend_index.dispatch_key).lower()
         empty_impl = f"at::detail::empty_{dispatch}"
@@ -116,30 +113,17 @@ def gen_create_out_helper(backend_index: BackendIndex) -> List[str]:
     if empty_impl is None:
         return []
 
-    if(backend_index.dispatch_key is DispatchKey.XPU):
-        return [
-            f"""
+    return [
+        f"""
 Tensor create_out(IntArrayRef sizes, IntArrayRef strides, const TensorOptions &options) {{
-    if (strides.empty()) {{
-        return at::empty(sizes, {empty_options});
-    }} else {{
-        return at::empty_strided(sizes, strides, {empty_options});
-    }}
+if (strides.empty()) {{
+    return {empty_impl}(sizes, {empty_options});
+}} else {{
+    return {empty_strided_impl}(sizes, strides, {empty_options});
+}}
 }}
 """
-        ]
-    else:
-        return [
-            f"""
-Tensor create_out(IntArrayRef sizes, IntArrayRef strides, const TensorOptions &options) {{
-  if (strides.empty()) {{
-      return {empty_impl}(sizes, {empty_options});
-  }} else {{
-      return {empty_strided_impl}(sizes, strides, {empty_options});
-  }}
-}}
-"""
-        ]
+    ]
 
 
 def gen_maybe_create_proxy_helper(backend_index: BackendIndex) -> List[str]:

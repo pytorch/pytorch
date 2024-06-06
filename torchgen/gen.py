@@ -2958,19 +2958,8 @@ def main() -> None:
         functions_keys.add(DispatchKey.MPS)
 
     if options.backend_whitelist:
-        if not options.only_backend:
-            dispatch_keys = [
-                k
-                for k in dispatch_keys
-                if is_generic_dispatch_key(k) or str(k) in options.backend_whitelist
-            ]
-        else:
-            dispatch_keys = [
-                k
-                for k in dispatch_keys
-                if str(k) in options.backend_whitelist
-            ]
-        print(f'dispatch_keys: {dispatch_keys}')
+        # dispatch_keys = [k for k in dispatch_keys if (is_generic_dispatch_key(k) and (not options.only_backend)) or str(k) in options.backend_wihtelist)]
+        dispatch_keys = [k for k in dispatch_keys if (is_generic_dispatch_key(k) or str(k) in options.backend_whitelist)]
 
     static_dispatch_idx: List[BackendIndex] = []
     if options.static_dispatch_backend:
