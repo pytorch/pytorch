@@ -2,7 +2,14 @@
 
 import torch
 
-from .core import _map_mt_args_kwargs, _masks_match, _tensors_match, _wrap_result, is_masked_tensor
+from .core import (
+    _map_mt_args_kwargs,
+    _masks_match,
+    _tensors_match,
+    _wrap_result,
+    is_masked_tensor,
+)
+
 
 __all__ = []  # type: ignore[var-annotated]
 
@@ -79,25 +86,22 @@ def _binary_helper(fn, args, kwargs, inplace):
         raise ValueError("len(kwargs) must equal 0")
     for a in args[2:]:
         if torch.is_tensor(a):
-            raise TypeError("MaskedTensor binary ops do not support Tensor arguments aside from the lhs and rhs")
+            raise TypeError(
+                "MaskedTensor binary ops do not support Tensor arguments aside from the lhs and rhs"
+            )
 
     if not _masks_match(*args[:2]):
         raise ValueError(
             "Input masks must match. If you need support for this, please open an issue on Github."
         )
 
-    data_args, data_kwargs = _map_mt_args_kwargs(
-        args, kwargs, lambda x: x.get_data()
-    )
-    mask_args, mask_kwargs = _map_mt_args_kwargs(
-        args, kwargs, lambda x: x.get_mask()
-    )
+    data_args, data_kwargs = _map_mt_args_kwargs(args, kwargs, lambda x: x.get_data())
+    mask_args, mask_kwargs = _map_mt_args_kwargs(args, kwargs, lambda x: x.get_mask())
 
     args0_layout = data_args[0].layout
     same_layout = (
-        (torch.is_tensor(data_args[1]) or is_masked_tensor(data_args[1])) and
-        (args0_layout == data_args[1].layout)
-    )
+        torch.is_tensor(data_args[1]) or is_masked_tensor(data_args[1])
+    ) and (args0_layout == data_args[1].layout)
 
     if args0_layout == torch.sparse_coo:
         if same_layout:
@@ -106,7 +110,9 @@ def _binary_helper(fn, args, kwargs, inplace):
                     "sparse_coo indices must match. If you need support for this, please open an issue on Github."
                 )
             if data_args[0].size() != data_args[1].size():
-                raise ValueError("input1 and input2 must have the same size for binary functions.")
+                raise ValueError(
+                    "input1 and input2 must have the same size for binary functions."
+                )
 
             data_args[1] = data_args[1].values()
 

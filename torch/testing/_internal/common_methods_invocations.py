@@ -5267,64 +5267,6 @@ def sample_inputs_index_reduce(op_info, device, dtype, requires_grad, **kwargs):
                           args=(0, idx, src, reduce),
                           kwargs={'include_self': True})
 
-def sample_inputs__unsafe_masked_index(op_info, device, dtype, requires_grad, **kwargs):
-    make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
-
-    def make_idx(n, m, dim, d):
-        view_shape = [1] * dim
-        view_shape[d] = n
-        return make_tensor((n,), device=device, dtype=torch.int64, low=0, high=m).view(view_shape)
-
-    cases = [
-        ((S, S), S, M),
-        ((S, S), M, S),
-        ((S, S, S), S, M),
-    ]
-
-    fill_value = make_tensor([], dtype=dtype, device="cpu").item()
-
-    for c in cases:
-        self_shape, high, idx_size = c
-        dim = len(self_shape)
-        indices = [make_idx(idx_size, high, dim, d) for d in range(dim)]
-        masks = [torch.logical_and(idx >= 0, idx < self_shape[i]) for i, idx in enumerate(indices) if idx is not None]
-        mask = functools.reduce(torch.logical_and, masks)
-        yield SampleInput(make_arg(self_shape), mask, indices, fill_value)
-
-        masks = [torch.logical_and(idx >= 1, idx < self_shape[i] - 1) for i, idx in enumerate(indices) if idx is not None]
-        mask = functools.reduce(torch.logical_and, masks)
-        yield SampleInput(make_arg(self_shape), mask, indices, fill_value)
-
-def sample_inputs__unsafe_masked_index_put_accumulate(op_info, device, dtype, requires_grad, **kwargs):
-    make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
-
-    def make_idx(n, m, dim, d):
-        view_shape = [1] * dim
-        view_shape[d] = n
-        return make_tensor((n,), device=device, dtype=torch.int64, low=0, high=m).view(view_shape)
-
-    cases = [
-        ((S, S), S, (M, M)),
-        ((S, S), M, (S, S + 1)),
-        ((S, S, S), S, (M, M - 1, M + 1)),
-    ]
-
-    fill_value = make_tensor([], dtype=dtype, device="cpu").item()
-
-    for c in cases:
-        self_shape, high, idx_sizes = c
-        dim = len(self_shape)
-        indices = [make_idx(idx_sizes[d], high, dim, d) for d in range(dim)]
-        masks = [torch.logical_and(idx >= 0, idx < self_shape[i]) for i, idx in enumerate(indices) if idx is not None]
-        mask = functools.reduce(torch.logical_and, masks)
-        values = make_arg(idx_sizes)
-        yield SampleInput(make_arg(self_shape), mask, indices, values)
-
-        masks = [torch.logical_and(idx >= 1, idx < self_shape[i] - 1) for i, idx in enumerate(indices) if idx is not None]
-        mask = functools.reduce(torch.logical_and, masks)
-        yield SampleInput(make_arg(self_shape), mask, indices, values)
-
-
 def sample_inputs_mode(op_info, device, dtype, requires_grad, **kwargs):
     args = (
         ((S, S, S), (),),
@@ -8746,7 +8688,6 @@ def sample_inputs_efficient_attention_forward(op_info, device, dtype, requires_g
             custom_mask_type=mask_type,
             compute_log_sumexp=requires_grad,
             scale=scale,
-            causal_diagonal=None,
             seqlen_k=None
         ))
 
@@ -8764,7 +8705,6 @@ def sample_inputs_efficient_attention_forward(op_info, device, dtype, requires_g
         custom_mask_type=0,  # No Mask
         compute_log_sumexp=requires_grad,
         scale=None,
-        causal_diagonal=None,
         seqlen_k=None
     )
 
@@ -8783,7 +8723,6 @@ def sample_inputs_efficient_attention_forward(op_info, device, dtype, requires_g
             custom_mask_type=0,  # No Mask
             compute_log_sumexp=requires_grad,
             scale=None,
-            causal_diagonal=None,
             seqlen_k=None
         )
     )
@@ -8806,7 +8745,6 @@ def sample_inputs_efficient_attention_forward(op_info, device, dtype, requires_g
             custom_mask_type=0,  # No Mask
             compute_log_sumexp=requires_grad,
             scale=None,
-            causal_diagonal=None,
             seqlen_k=None,
         )
     )
@@ -15049,8 +14987,6 @@ op_db: List[OpInfo] = [
                # RuntimeError: UNSUPPORTED DTYPE: complex
                DecorateInfo(unittest.expectedFailure, 'TestNNCOpInfo',
                             'test_nnc_correctness', dtypes=(torch.complex64, torch.complex128)),
-               # RuntimeError: Conv3D is not supported on MPS
-               DecorateInfo(unittest.expectedFailure, 'TestConsistency'),
                # AssertionError: Tensor-likes are not close!
                # break slow tests
                DecorateInfo(unittest.skip('Skipped!'), 'TestCommon', 'test_compare_cpu'),
@@ -18067,6 +18003,9 @@ op_db: List[OpInfo] = [
            supports_fwgrad_bwgrad=True,
            # See https://github.com/pytorch/pytorch/pull/78358
            check_batched_forward_grad=False,
+           skips=(
+               # lambda impl
+               DecorateInfo(unittest.expectedFailure, "TestNormalizeOperators", "test_normalize_operator_exhaustive"),),
            sample_inputs_func=sample_inputs_column_stack,),
     OpInfo('pinverse',
            op=torch.pinverse,
@@ -18157,22 +18096,6 @@ op_db: List[OpInfo] = [
              supports_out=True,
              sample_inputs_func=sample_inputs_index_reduce,
              ) for reduction_type in ('mean', 'prod', 'amin', 'amax')),
-    OpInfo('_unsafe_masked_index',
-           dtypes=all_types_and_complex_and(torch.float16, torch.bfloat16, torch.bool),
-           supports_out=False,
-           supports_inplace_autograd=False,
-           supports_scripting=False,
-           supports_forward_ad=True,
-           supports_fwgrad_bwgrad=True,
-           sample_inputs_func=sample_inputs__unsafe_masked_index),
-    OpInfo('_unsafe_masked_index_put_accumulate',
-           dtypes=all_types_and_complex_and(torch.float16, torch.bfloat16, torch.bool),
-           supports_out=False,
-           supports_inplace_autograd=False,
-           supports_scripting=False,
-           supports_forward_ad=True,
-           supports_fwgrad_bwgrad=True,
-           sample_inputs_func=sample_inputs__unsafe_masked_index_put_accumulate),
     OpInfo('__getitem__',
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16, torch.chalf),
            # Runs very slowly on slow gradcheck - alternatively reduce input sizes
@@ -18199,6 +18122,7 @@ op_db: List[OpInfo] = [
            test_neg_view=False,
            sample_inputs_func=sample_inputs_index_put,
            skips=(
+               DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
                DecorateInfo(unittest.skip("Skipped"), 'TestBwdGradients', 'test_fn_grad', dtypes=[torch.float64],
                             device_type='cuda', active_if=(TEST_WITH_ROCM and TEST_WITH_TORCHINDUCTOR)),
            )),
@@ -19098,6 +19022,7 @@ op_db: List[OpInfo] = [
            skips=(
                # Not implemented on CUDA
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_errors', device_type='cuda'),
+               DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
                # JIT tests don't work with Tensor keyword arguments
                # https://github.com/pytorch/pytorch/issues/58507
                DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
