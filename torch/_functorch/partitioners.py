@@ -28,6 +28,7 @@ from torch.fx.experimental.symbolic_shapes import (
 from torch.fx.passes import graph_drawer
 from . import config
 from .compile_utils import fx_graph_cse, get_aten_target
+from ._aot_autograd import dist_fx_passes
 
 
 AOT_PARTITIONER_DEBUG = config.debug_partitioner
@@ -882,6 +883,14 @@ def get_saved_values(
     nx_graph = nx.DiGraph()
     banned_nodes = set()
 
+    def ban_recomputation(node):
+        banned_nodes.add(node)
+        # A node will only ever be recomputed if there is a path from an
+        # ancestor of this node to the backwards path through this node that
+        # doesn't go through any saved value. If this node is saved, then that
+        # condition is not possible.
+        nx_graph.add_edge("source", node.name + "_in", capacity=math.inf)
+
     def ban_recomputation_if_allowed(node):
         if op_types.is_view(node):
             return False
@@ -898,12 +907,7 @@ def get_saved_values(
         if "val" in node.meta and isinstance(node.meta["val"], torch.SymFloat):
             return False
 
-        banned_nodes.add(node)
-        # A node will only ever be recomputed if there is a path from an
-        # ancestor of this node to the backwards path through this node that
-        # doesn't go through any saved value. If this node is saved, then that
-        # condition is not possible.
-        nx_graph.add_edge("source", node.name + "_in", capacity=math.inf)
+        ban_recomputation(node)
         return True
 
     for node in joint_graph.nodes:
@@ -944,6 +948,13 @@ def get_saved_values(
             weight = (
                 0.0 if isinstance(node.meta.get("val"), BackwardState) else math.inf
             )
+        elif (
+            torch._dynamo.config.trace_distributed
+            and config.return_primal_instead_of_view
+            and dist_fx_passes.should_ban_recomputation(node)
+        ):
+            ban_recomputation(node)
+            weight = 0.0
         else:
             weight = get_node_weight(node)
         # Creates the weights on the "node" edge
@@ -1434,6 +1445,8 @@ def min_cut_rematerialization_partition(
         saved_sym_nodes=saved_sym_nodes,
         num_fwd_outputs=num_fwd_outputs,
     )
+    if torch._dynamo.config.trace_distributed and config.return_primal_instead_of_view:
+        dist_fx_passes.return_primal_instead_of_view(fw_module)
 
     if graph_has_recomputable_ops:
         if graph_has_recomputable_rng_ops:
