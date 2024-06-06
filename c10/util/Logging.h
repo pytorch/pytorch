@@ -22,7 +22,10 @@
 #define CAFFE2_LOG_THRESHOLD INT_MIN
 #endif // CAFFE2_LOG_THRESHOLD
 
+// If glog is used somewhere
+#ifndef LOG
 #include <c10/util/logging_is_not_google_glog.h>
+#endif
 
 C10_DECLARE_int(caffe2_log_level);
 C10_DECLARE_bool(caffe2_use_fatal_for_enforce);
