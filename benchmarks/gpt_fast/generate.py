@@ -235,20 +235,18 @@ def run_llama2_7b_bf16(device: str = "cuda"):
     token_per_sec, memory_bandwidth = run_experiment(model)
     return [
         Experiment(
-            "llama2_7b_bf16",
+            model.name,
             "token_per_sec",
             model.token_per_sec,
             f"{token_per_sec:.02f}",
-            model.name,
             model.mode,
             device,
         ),
         Experiment(
-            "llama2_7b_bf16",
+            model.name,
             "memory_bandwidth(GB/s)",
             model.memory_bandwidth,
             f"{memory_bandwidth:.02f}",
-            model.name,
             model.mode,
             device,
         ),
@@ -270,20 +268,18 @@ def run_llama2_7b_int8(device: str = "cuda"):
     token_per_sec, memory_bandwidth = run_experiment(model)
     return [
         Experiment(
-            "llama2_7b_int8",
+            model.name,
             "token_per_sec",
             model.token_per_sec,
             f"{token_per_sec:.02f}",
-            model.name,
             model.mode,
             device,
         ),
         Experiment(
-            "llama2_7b_int8",
+            model.name,
             "memory_bandwidth(GB/s)",
             model.memory_bandwidth,
             f"{memory_bandwidth:.02f}",
-            model.name,
             model.mode,
             device,
         ),
@@ -306,20 +302,18 @@ def run_mixtral_8x7b_int8(device: str = "cuda"):
     token_per_sec, memory_bandwidth = run_experiment(model)
     return [
         Experiment(
-            "mixtral_8x7b_int8",
+            model.name,
             "token_per_sec",
             model.token_per_sec,
             f"{token_per_sec:.02f}",
-            model.name,
             model.mode,
             device,
         ),
         Experiment(
-            "mixtral_8x7b_int8",
+            model.name,
             "memory_bandwidth(GB/s)",
             model.memory_bandwidth,
             f"{memory_bandwidth:.02f}",
-            model.name,
             model.mode,
             device,
         ),

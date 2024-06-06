@@ -4,12 +4,7 @@ import dataclasses
 import os
 import time
 
-from generate import (
-    device_sync,
-    run_llama2_7b_bf16,
-    run_llama2_7b_int8,
-    run_mixtral_8x7b_int8,
-)
+from generate import run_llama2_7b_bf16, run_llama2_7b_int8, run_mixtral_8x7b_int8
 
 import torch
 import torch.nn as nn
@@ -21,17 +16,16 @@ class Experiment:
     metric: str
     target: float
     actual: float
-    model: str
-    quantization: str
+    dtype: str
     device: str
 
 
-def do_inference(mod, x, num_samples: int = 5, device: str = "cuda"):
+def do_inference(mod, x, num_samples: int = 5):
     total_time = 0
     start = -1
 
     for i in range(start, num_samples):
-        device_sync(device)
+        torch.cuda.synchronize("cuda")
 
         t0 = time.perf_counter()
         mod(x)
@@ -40,7 +34,7 @@ def do_inference(mod, x, num_samples: int = 5, device: str = "cuda"):
             print(f"Compilation time: {time.perf_counter() - t0:.2f} seconds")
             continue
 
-        device_sync(device=device)
+        torch.cuda.synchronize("cuda")
         total_time += time.perf_counter() - t0
 
     total_time = total_time / num_samples
@@ -68,17 +62,16 @@ def run_multi_layer_norm(device: str = "cuda"):
     mod = MultiLayerNorm(num_layers=8, normalized_shape=4096).to(device)
     mod = torch.compile(mod)
     input = torch.randn([512, 1024, 4096], dtype=torch.bfloat16, device=device)
-    inference_time = do_inference(mod, input, device)
+    inference_time = do_inference(mod, input)
 
     memory_bandwidth = input.numel() * input.dtype.itemsize / inference_time / 1e9
 
     return [
         Experiment(
-            "multi_layer_norm",
+            MultiLayerNorm.__name__,
             "memory_bandwidth(GB/s)",
             92,
             f"{memory_bandwidth:.02f}",
-            MultiLayerNorm.__name__,
             "bfloat16",
             device,
         )
