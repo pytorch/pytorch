@@ -754,7 +754,7 @@ def sigmoid(g: jit_utils.GraphContext, self):
         g (jit_utils.GraphContext): Graph context.
         self (Tensor): the input tensor.
     Returns:
-        ONNX graph node representing the concatenated tensor.
+        ONNX operator
     """
     return g.op("Sigmoid", self)
 
