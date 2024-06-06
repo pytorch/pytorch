@@ -2777,7 +2777,7 @@ def validate_new_cpp_commands():
                 for m in include_pytorch:
                     for n in use_absolute_path:
                         print(
-                            f"!!! cuda:{x}, use_mmap_weights:{y}, compile_only:{z}, include_pytorch:{m}， use_absolute_path{n}"
+                            f"!!! cuda:{x}, use_mmap_weights:{y}, compile_only:{z}, include_pytorch:{m}， use_absolute_path:{n}"
                         )
                         _do_validate_cpp_commands(
                             include_pytorch=m,
