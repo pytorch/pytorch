@@ -55,6 +55,7 @@ kind_to_standard_operators = {
     "aten::__is__": operator.is_,
     "aten::__isnot__": operator.is_not,
     "aten::__not__": operator.not_,
+    "aten::__contains__": operator.contains,
 }
 
 
@@ -319,6 +320,20 @@ class TS2FXGraphConverter:
         output_name = node.output().debugName()
         self.name_to_node[output_name] = output_dict
 
+    def convert_prim_ListUnpack(self, node: torch._C.Node):
+        self._convert_prim_unpack_iterator(node)
+
+    def convert_prim_TupleUnpack(self, node: torch._C.Node):
+        self._convert_prim_unpack_iterator(node)
+
+    def _convert_prim_unpack_iterator(self, node: torch._C.Node):
+        # Single input and multiple outputs for unpacking.
+        for i, outp in enumerate(node.outputs()):
+            outp_name = outp.debugName()
+            inp = self.get_fx_value(node.input())
+            fx_node = self.fx_graph.call_function(operator.getitem, (inp, i))
+            self.name_to_node[outp_name] = fx_node
+
     def convert_aten_Int(self, node: torch._C.Node):
         # converts aten::Int as aten._to_copy + aten::_local_scalar_dense
         target = torch.ops.aten._to_copy.default
@@ -492,7 +507,6 @@ class TS2FXGraphConverter:
 
     def convert_node(self, node: torch._C.Node):
         node_kind = node.kind()
-        node_kind_split = node_kind.split("::")
 
         # Get handler based on namespace and operator name.
         # Provide a default node handler as well in case we don't find

@@ -40,6 +40,7 @@ from .codegen.triton import (
 )
 
 from .codegen.triton_utils import config_of, signature_to_meta
+from .codegen.wrapper import pexpr
 from .exc import CUDACompileError
 from .ir import ChoiceCaller, PrimitiveInfoType
 from .runtime.hints import DeviceProperties
@@ -385,7 +386,7 @@ class TritonTemplateKernel(TritonKernel):
             assert isinstance(mask, (str, type(None)))
             assert self.template_mask is None
             indices = list(map(TritonPrinter.paren, indices))
-            index_symbols = [sympy.Symbol(x) for x in indices]
+            index_symbols = [sympy.Symbol(x, integer=True) for x in indices]
             lengths = [
                 V.graph.sizevars.simplify(s) for s in self.output_node.get_size()
             ]
@@ -409,7 +410,7 @@ class TritonTemplateKernel(TritonKernel):
             output_index = self.output_node.get_layout().make_indexer()(index_symbols)
             output_index = self.rename_indexing(output_index)
             if output_index == contiguous_index:
-                output_index = sympy.Symbol("xindex")
+                output_index = sympy.Symbol("xindex", integer=True)
 
             epilogue_args = [val]
             for input_node in itertools.chain(
@@ -537,7 +538,7 @@ class TritonTemplateKernel(TritonKernel):
             meta = wrapper.add_meta_once(self.meta)
 
             grid_call = [
-                texpr(V.graph.sizevars.simplify(s)) for s in self.call_sizes
+                pexpr(V.graph.sizevars.simplify(s)) for s in self.call_sizes
             ] + [meta]
             grid_call = f"{self.grid_fn.__module__}.{self.grid_fn.__name__}({', '.join(grid_call)})"
             wrapper.writeline(
