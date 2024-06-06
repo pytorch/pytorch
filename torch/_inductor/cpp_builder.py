@@ -1056,7 +1056,17 @@ class CppBuilder:
         # Code start here, initial self internal veriables firstly.
         self._compiler = BuildOption.get_compiler()
         self._use_absolute_path = BuildOption.get_use_absolute_path()
+
+        if len(output_dir) == 0:
+            self._output_dir = os.path.dirname(os.path.abspath(__file__))
+        else:
+            self._output_dir = output_dir
+
         self._compile_only = compile_only
+        file_ext = (
+            self.get_object_ext() if self._compile_only else self.get_shared_lib_ext()
+        )
+        self._target_file = os.path.join(self._output_dir, f"{self._name}{file_ext}")
 
         if isinstance(sources, str):
             sources = [sources]
@@ -1068,18 +1078,11 @@ class CppBuilder:
             else:
                 # We need to copy any absolute-path torch includes
                 inp_name = [os.path.basename(i) for i in sources]
+                self._target_file = os.path.basename(self._target_file)
 
             self._sources_args = " ".join(inp_name)
         else:
             self._sources_args = " ".join(sources)
-
-        if len(output_dir) == 0:
-            self._output_dir = os.path.dirname(os.path.abspath(__file__))
-        else:
-            self._output_dir = output_dir
-
-        file_ext = self.get_object_ext() if compile_only else self.get_shared_lib_ext()
-        self._target_file = os.path.join(self._output_dir, f"{self._name}{file_ext}")
 
         for cflag in BuildOption.get_cflags():
             if _IS_WINDOWS:
