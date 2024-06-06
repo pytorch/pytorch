@@ -2753,7 +2753,6 @@ def _do_validate_cpp_commands(
         sources=input_path,
         BuildOption=dummy_build_option,
         output_dir=test_dir_path,
-        compile_only=compile_only,
     )
     new_cmd = dummy_builder.get_command_line().split(" ")
 
