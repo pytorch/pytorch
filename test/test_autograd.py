@@ -81,7 +81,7 @@ from torch.utils._mode_utils import no_dispatch
 from torch.utils._python_dispatch import TorchDispatchMode
 from torch.utils.checkpoint import checkpoint, checkpoint_sequential
 from torch.utils.cpp_extension import load_inline
-from torch.utils.hooks import RemovableHandle
+from torch.utils.hooks import RemovableHandle  # noqa: TCH001
 
 
 def graph_desc(fn):
