@@ -380,10 +380,10 @@ class TestCuda(TestCase):
 
         def check_workspace_size(inp):
             torch._C._cuda_clearCublasWorkspaces()
-            start = torch.torch.cuda.memory_stats()["active_bytes.all.allocated"]
+            start = torch.cuda.memory_stats()["active_bytes.all.allocated"]
             with torch.no_grad():
                 torch.matmul(inp, inp)
-            finish = torch.torch.cuda.memory_stats()["active_bytes.all.allocated"]
+            finish = torch.cuda.memory_stats()["active_bytes.all.allocated"]
             return finish - start
 
         # check default
