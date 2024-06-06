@@ -472,8 +472,6 @@ else:
 
         def get_group(self, mesh_dim: Optional[Union[int, str]] = None) -> ProcessGroup:
             """
-            Returns a single ProcessGroup if mesh_dim is specified or the given mesh has
-            only one mesh dimension.
             Returns the single ProcessGroup specified by mesh_dim, or, if mesh_dim is not specified and the
             DeviceMesh is 1-dimensional, returns the only ProcessGroup in the mesh.
 
