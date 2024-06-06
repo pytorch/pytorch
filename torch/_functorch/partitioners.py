@@ -948,7 +948,11 @@ def get_saved_values(
             weight = (
                 0.0 if isinstance(node.meta.get("val"), BackwardState) else math.inf
             )
-        elif torch._dynamo.config.trace_distributed and dist_fx_passes.should_ban_recomputation(node):
+        elif (
+            torch._dynamo.config.trace_distributed
+            and config.return_primal_instead_of_view
+            and dist_fx_passes.should_ban_recomputation(node)
+        ):
             ban_recomputation(node)
             weight = 0.0
         else:
@@ -1441,7 +1445,7 @@ def min_cut_rematerialization_partition(
         saved_sym_nodes=saved_sym_nodes,
         num_fwd_outputs=num_fwd_outputs,
     )
-    if torch._dynamo.config.trace_distributed:
+    if torch._dynamo.config.trace_distributed and config.return_primal_instead_of_view:
         dist_fx_passes.return_primal_instead_of_view(fw_module)
 
     if graph_has_recomputable_ops:

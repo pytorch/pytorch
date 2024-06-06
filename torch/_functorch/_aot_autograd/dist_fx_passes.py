@@ -76,14 +76,15 @@ def return_primal_instead_of_view(mod):
 
 def _is_fsdp_allgather_copyout(node):
     """
-    # File: /data/users/willfeng/pytorch/torch/distributed/_composable/fsdp/_fsdp_collectives.py:183 in foreach_all_gather_copy_out, code: torch.ops.fsdp.split_with_sizes_copy(
-    view_4: "f32[2, 524544]" = torch.ops.aten.view.default(copy, [2, -1]);  copy = None
     auto_functionalized = torch._higher_order_ops.auto_functionalize.auto_functionalized(torch.ops.fsdp.split_with_sizes_copy.default, all_gather_output = view_4, all_gather_input_split_sizes = [262144, 256, 262144], dim = 1, out = [view_1, view_2, view_3]);  view_4 = view_1 = view_2 = view_3 = None
     getitem_3 = auto_functionalized[1];  auto_functionalized = None
-    getitem_4: "f32[2, 262144]" = getitem_3[0]
-    view_5: "f32[524288]" = torch.ops.aten.view.default(getitem_4, [524288]);  getitem_4 = None
+    getitem_5: "f32[2, 256]" = getitem_3[1]
+    view_7: "f32[512]" = torch.ops.aten.view.default(getitem_5, [512])
+    as_strided_20: "f32[512]" = torch.ops.aten.as_strided.default(view_7, [512], [1], 0);  view_7 = None
+    set__1: "f32[512]" = torch.ops.aten.set_.source_Tensor(primals_6, as_strided_20);  primals_6 = as_strided_20 = None
+    return [..., getitem_5, ...]
 
-    In this case, `view_5` is a FSDP AllGather copy-out node.
+    In this case, `view_7` is a FSDP AllGather copy-out node.
     """
     if (
         node.target == torch.ops.aten.view.default
