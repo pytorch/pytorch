@@ -387,11 +387,11 @@ class FSDPParam:
         if self._unsharded_param is not None:
             assert torch._dynamo.compiled_autograd.compiled_autograd_enabled
             with torch.no_grad():
-                torch.ops.create_parameter_op.set_(self._unsharded_param, unsharded_param)
+                # torch.ops.create_parameter_op.set_(self._unsharded_param, unsharded_param)
+                alloc_storage(self._unsharded_param)
+                self._unsharded_param.copy_(unsharded_param)
         else:
             self._unsharded_param = nn.Parameter(unsharded_param, requires_grad=self.sharded_param.requires_grad)
-        if torch._dynamo.compiled_autograd.compiled_autograd_enabled:
-            self.all_gather_outputs = []
 
     def _unflatten_all_gather_outputs(self) -> Tuple[torch.Tensor, ...]:
         return tuple(
@@ -525,6 +525,8 @@ class FSDPParam:
             self.all_gather_outputs, self._unsharded_inner_tensors
         ):
             free_storage(tensor)
+        if torch._dynamo.compiled_autograd.compiled_autograd_enabled:
+            self.all_gather_outputs = []
 
     @property
     def all_gather_inputs(self) -> List[torch.Tensor]:  # 1D
