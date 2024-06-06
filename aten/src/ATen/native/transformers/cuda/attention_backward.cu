@@ -66,22 +66,27 @@ std::tuple<Tensor, Tensor, Tensor> _flash_attention_backward(
     bool is_causal,
     const Tensor& philox_seed,
     const Tensor& philox_offset,
-    c10::optional<double> scale) {
+    std::optional<double> scale,
+    std::optional<int64_t> window_size_left,
+    std::optional<int64_t> window_size_right) {
 #if defined(USE_FLASH_ATTENTION)
   const auto softmax_scale = sdp::calculate_scale(query, scale).as_float_unchecked();
   //  CUDA code assumes that dout is contiguous
   auto contiguous_grad_out = grad_out.contiguous();
   auto contiguous_out = out.contiguous();
 
-  c10::optional<at::Tensor> dq{c10::nullopt};
-  c10::optional<at::Tensor> dk{c10::nullopt};
-  c10::optional<at::Tensor> dv{c10::nullopt};
+  const int non_null_window_left = window_size_left.has_value() ? window_size_left.value() : -1;
+  const int non_null_window_right = window_size_right.has_value() ? window_size_right.value() : -1;
+
+  std::optional<at::Tensor> dq{c10::nullopt};
+  std::optional<at::Tensor> dk{c10::nullopt};
+  std::optional<at::Tensor> dv{c10::nullopt};
 
   //  The kernel computes irregardless we will drop for this functions return
   Tensor grad_softmax;
 
   // Currently unused args:
-  c10::optional<at::Tensor> alibi_slopes{c10::nullopt};
+  std::optional<at::Tensor> alibi_slopes{c10::nullopt};
 
   bool determinisitic{false};
   auto& ctx = at::globalContext();
@@ -118,8 +123,8 @@ std::tuple<Tensor, Tensor, Tensor> _flash_attention_backward(
         softmax_scale,
         false /*zero_tensors*/,
         is_causal,
-        -1, /*window_size_left*/
-        -1, /*window_size_right*/
+        non_null_window_left,
+        non_null_window_right,
         determinisitic,
         philox_seed,
         philox_offset);
@@ -140,8 +145,8 @@ std::tuple<Tensor, Tensor, Tensor> _flash_attention_backward(
         dropout_p,
         softmax_scale,
         is_causal,
-        -1, /*window_size_left*/
-        -1, /*window_size_right*/
+        non_null_window_left,
+        non_null_window_right,
         determinisitic,
         philox_seed,
         philox_offset);
@@ -167,7 +172,7 @@ std::tuple<Tensor, Tensor, Tensor> _scaled_dot_product_cudnn_attention_backward_
     bool is_causal,
     const Tensor& philox_seed,
     const Tensor& philox_offset,
-    c10::optional<double> scale) {
+    std::optional<double> scale) {
     const int64_t batch_size = query.size(0);
     const int64_t num_heads = query.size(1);
     const int64_t head_dim = query.size(3);
@@ -205,14 +210,14 @@ _efficient_attention_backward(
     const at::Tensor& query,
     const at::Tensor& key,
     const at::Tensor& value,
-    const c10::optional<at::Tensor>& kernel_bias, // additive attention bias
+    const std::optional<at::Tensor>& kernel_bias, // additive attention bias
     const at::Tensor& out,
     // (Mode 1MHK only) [b+1]: cu_seqlens_q[b] contains the
     // position of the first query token for batch $b
-    const c10::optional<at::Tensor>& cu_seqlens_q_dummy,
+    const std::optional<at::Tensor>& cu_seqlens_q_dummy,
     // (Mode 1MHK only) [b+1]: cu_seqlens_k[b] contains the
     // position of the first key token for batch $b
-    const c10::optional<at::Tensor>& cu_seqlens_k_dummy,
+    const std::optional<at::Tensor>& cu_seqlens_k_dummy,
     // (Mode 1MHK only) Maximum sequence length across batches
     int64_t max_seqlen_q,
     // (Mode 1MHK only) Maximum sequence length across batches
@@ -223,9 +228,10 @@ _efficient_attention_backward(
     const at::Tensor& philox_offset, // offset into random number sequence
     int64_t custom_mask_type,
     const bool bias_requires_grad,
-    const c10::optional<double> scale,
-    c10::optional <int64_t> num_splits_key,
-    const c10::optional<int64_t> window_size) {
+    const std::optional<double> scale,
+    std::optional <int64_t> num_splits_key,
+    const std::optional<int64_t> window_size,
+    const bool shared_storage_dqdkdv) {
   #if defined(USE_MEM_EFF_ATTENTION)
   if (!grad_out_.defined()) {
     return std::make_tuple(Tensor{}, Tensor{}, Tensor{}, Tensor{});
@@ -233,8 +239,8 @@ _efficient_attention_backward(
   // This path is used when we directly call _efficient_attention_forward
   // from python.
   // This is needed because SaveVariable automatically converts
-  // c10::optional to undefined tensor
-  c10::optional<Tensor> bias, cu_seqlens_q, cu_seqlens_k;
+  // std::optional to undefined tensor
+  std::optional<Tensor> bias, cu_seqlens_q, cu_seqlens_k;
   bias = kernel_bias.has_value() && !kernel_bias->defined() ? c10::nullopt : kernel_bias;
   cu_seqlens_q = cu_seqlens_q_dummy.has_value() && !cu_seqlens_q_dummy->defined() ? c10::nullopt : cu_seqlens_q_dummy;
   cu_seqlens_k = cu_seqlens_k_dummy.has_value() && !cu_seqlens_k_dummy->defined() ? c10::nullopt : cu_seqlens_k_dummy;
@@ -305,9 +311,33 @@ _efficient_attention_backward(
   int64_t Kv = value.size(3);
 
   at::Tensor grad_q, grad_k, grad_v, grad_bias;
-  grad_q = at::empty(query.sizes(), query.options());
-  grad_k = at::empty(key.sizes(), key.options());
-  grad_v = at::empty(value.sizes(), value.options());
+  if (shared_storage_dqdkdv) {
+    // Create one big contiguous chunk
+    // This is because q, k and v usually come from a single
+    // output of a linear layer that is chunked.
+    // Creating the gradients with the right layout saves us
+    // a `torch.cat` call in the backward pass
+    TORCH_CHECK(
+      query.size(1) == key.size(1),
+      "`shared_storage_dqdkdv` is only supported when Q/K/V "
+      "have the same sequence length: got ", query.size(1),
+      " query tokens and ", key.size(1), " key/value tokens"
+    );
+    TORCH_CHECK(
+      query.size(3) == key.size(3),
+      "`shared_storage_dqdkdv` is only supported when Q/K/V "
+      "have the same embed dim: got ", query.size(3),
+      " for Q, and ", key.size(3), " for K"
+    );
+    at::Tensor chunk = at::empty({B, M, 3, nH, K}, query.options());
+    grad_q = chunk.select(2, 0);
+    grad_k = chunk.select(2, 1);
+    grad_v = chunk.select(2, 2);
+  } else {
+    grad_q = at::empty(query.sizes(), query.options());
+    grad_k = at::empty(key.sizes(), key.options());
+    grad_v = at::empty(value.sizes(), value.options());
+  }
 
   if (bias_requires_grad) {
     // force alignment for the last dim
@@ -434,8 +464,7 @@ _efficient_attention_backward(
     ASSIGN_CHECK_OVERFLOW(p.gQ_strideH, grad_q.stride(2));
     ASSIGN_CHECK_OVERFLOW(p.gK_strideH, grad_k.stride(2));
     ASSIGN_CHECK_OVERFLOW(p.gV_strideH, grad_v.stride(2));
-    // We removed the chunk/cat optimization and the multiplier is always 1
-    p.gQKV_strideM_multiplier = 1;
+    p.gQKV_strideM_multiplier = shared_storage_dqdkdv ? 3 : 1;
     TORCH_INTERNAL_ASSERT(p.gQ_strideM() == grad_q.stride(1));
     TORCH_INTERNAL_ASSERT(p.gK_strideM() == grad_k.stride(1));
     TORCH_INTERNAL_ASSERT(p.gV_strideM() == grad_v.stride(1));
@@ -498,8 +527,12 @@ _efficient_attention_backward(
     auto parallelism_without_split_key =
         p.getBlocksGrid().x * p.getBlocksGrid().y * p.getBlocksGrid().z;
     p.num_splits_key = cutlass::ceil_div(p.num_keys, Kernel::kBlockSizeJ);
-    if (num_splits_key.has_value()) { // Skip heuristic, if user provided an explicit value
-      p.num_splits_key = std::max<int64_t>(p.num_splits_key, num_splits_key.value());
+    if (num_splits_key.has_value()) {
+      p.num_splits_key =
+          std::min<int64_t>(p.num_splits_key, num_splits_key.value());
+    } else {
+      // Keys splitting heuristic
+
       // If we already have enough parallelism, split-keys can help
       // better use L2 cache.
       // This is negligible when the seqlen is too small tho
@@ -539,6 +572,15 @@ _efficient_attention_backward(
       if (p.should_zero_workspace()) {
         workspace.zero_();
       }
+    }
+
+    // Handle the edge-cases where some tensors are empty
+    if (p.num_queries == 0 || p.num_keys == 0 || p.num_batches == 0 ||
+        p.num_heads == 0) {
+      grad_k.zero_();
+      grad_v.zero_();
+      grad_q.zero_();
+      return;
     }
     Kernel::check_supported(p);
 
@@ -603,7 +645,7 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor> _scaled_dot_product_flash_attenti
     bool is_causal,
     const at::Tensor& philox_seed,
     const at::Tensor& philox_offset,
-    c10::optional<double> scale){
+    std::optional<double> scale){
   if (!grad_out_.defined()) {
     return std::make_tuple(Tensor{}, Tensor{}, Tensor{});
   }
@@ -653,7 +695,7 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor, at::Tensor> _scaled_dot_product_e
     double dropout_p,
     std::array<bool, 4> grad_input_mask,
     bool causal,
-    c10::optional<double> scale) {
+    std::optional<double> scale) {
 
   if (!grad_out_.defined()) {
     return std::make_tuple(Tensor{}, Tensor{}, Tensor{}, Tensor{});
@@ -667,8 +709,8 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor, at::Tensor> _scaled_dot_product_e
   Tensor grad_q, grad_k, grad_v, grad_bias;
 
   // This is needed because SaveVariable automatically converts
-  // c10::optional to undefined tensor
-  c10::optional<Tensor> kernel_bias;
+  // std::optional to undefined tensor
+  std::optional<Tensor> kernel_bias;
   if (attn_bias.defined()) {
     kernel_bias = attn_bias;
   }

@@ -10,6 +10,7 @@ import sys
 import unittest
 
 import etcd
+
 from torch.distributed.elastic.rendezvous.etcd_rendezvous import (
     EtcdRendezvous,
     EtcdRendezvousHandler,
@@ -54,9 +55,9 @@ class EtcdServerTest(unittest.TestCase):
                 last_call_timeout=30,
             )
             rdzv_handler = EtcdRendezvousHandler(rdzv)
-            store, rank, world_size = rdzv_handler.next_rendezvous()
-            self.assertIsNotNone(store)
-            self.assertEqual(0, rank)
-            self.assertEqual(1, world_size)
+            rdzv_info = rdzv_handler.next_rendezvous()
+            self.assertIsNotNone(rdzv_info.store)
+            self.assertEqual(0, rdzv_info.rank)
+            self.assertEqual(1, rdzv_info.world_size)
         finally:
             server.stop()

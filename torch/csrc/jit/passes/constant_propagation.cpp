@@ -19,7 +19,7 @@
 namespace torch {
 namespace jit {
 
-c10::optional<std::vector<IValue>> runNodeIfInputsAreConstant(
+std::optional<std::vector<IValue>> runNodeIfInputsAreConstant(
     const Node* n,
     bool ignore_custom_classes,
     AliasDb* db) {

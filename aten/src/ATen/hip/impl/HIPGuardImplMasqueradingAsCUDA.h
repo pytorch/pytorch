@@ -104,10 +104,6 @@ struct HIPGuardImplMasqueradingAsCUDA final : public c10::impl::DeviceGuardImplI
     int deviceCnt;
     hipError_t _err;
     _err = hipGetDeviceCount(&deviceCnt);
-#if defined(USE_ROCM) && (ROCM_VERSION < 50201)
-    if(_err == hipErrorInvalidDevice)
-        return 0;
-#endif
     if(_err != hipErrorNoDevice && _err != hipSuccess)
         C10_HIP_CHECK(_err);
     return deviceCnt;

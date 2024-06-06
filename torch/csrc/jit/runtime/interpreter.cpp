@@ -181,7 +181,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
   void callFunction(
       Function& f,
       Stack& stack,
-      c10::optional<size_t> bailOut = c10::nullopt,
+      std::optional<size_t> bailOut = c10::nullopt,
       bool next = true) {
     bool newFrame = f.call(stack, bailOut, [&](const Code& code) {
       enterFrame(code, stack.size() - code.num_inputs());
@@ -882,7 +882,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
       // Janky af.  See https://github.com/pytorch/pytorch/issues/54612
       auto* not_implemented_error = dynamic_cast<c10::NotImplementedError*>(&e);
 
-      c10::optional<std::string> python_class_name;
+      std::optional<std::string> python_class_name;
       if (jit_exception) {
         python_class_name = jit_exception->getPythonClassName();
       }
@@ -913,7 +913,7 @@ struct InterpreterStateImpl : c10::intrusive_ptr_target {
       const std::exception& e,
       bool is_jit_exception,
       c10::NotImplementedError* not_implemented_error,
-      c10::optional<std::string> python_class_name) {
+      std::optional<std::string> python_class_name) {
     ExceptionMessage msg(e);
     std::ostringstream ss;
     std::string class_name =

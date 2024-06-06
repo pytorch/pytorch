@@ -121,7 +121,7 @@ Tensor & masked_fill__quantized_cuda(Tensor& self, const Tensor & mask, const Te
   return masked_fill_impl_quantized_cuda(self, mask, value.item());
 }
 
-Tensor& _index_put_impl_quantized_cpu_(Tensor & self, const torch::List<c10::optional<Tensor>>& indices, const Tensor & value, const bool accumulate, const bool unsafe) {
+Tensor& _index_put_impl_quantized_cpu_(Tensor & self, const torch::List<std::optional<Tensor>>& indices, const Tensor & value, const bool accumulate, const bool unsafe) {
   TORCH_CHECK_INDEX(indices.size() <= (size_t)self.dim(), "too many indices for tensor of dimension ", self.dim(), " (got ", indices.size(), ")");
   TORCH_CHECK(!value.is_quantized(), "Value argument for quantized input_put should not be quantized");
   TORCH_CHECK(self.qscheme() == c10::kPerTensorAffine, "index_put for quantized tensors is currently only supported for per tensor quantized tensors");
@@ -145,7 +145,7 @@ Tensor& _index_put_impl_quantized_cpu_(Tensor & self, const torch::List<c10::opt
   }
   at::assert_no_overlap(self, value);
   // NOLINTNEXTLINE(performance-implicit-conversion-in-loop)
-  for (const c10::optional<Tensor>& index: indices) {
+  for (const std::optional<Tensor>& index: indices) {
     if (index.has_value()) {
       at::assert_no_overlap(self, *index);
     }
@@ -157,7 +157,7 @@ Tensor& _index_put_impl_quantized_cpu_(Tensor & self, const torch::List<c10::opt
   return self;
 }
 
-Tensor& _index_put_impl_quantized_cuda_(Tensor & self, const torch::List<c10::optional<Tensor>>& indices, const Tensor & value, const bool accumulate, const bool unsafe) {
+Tensor& _index_put_impl_quantized_cuda_(Tensor & self, const torch::List<std::optional<Tensor>>& indices, const Tensor & value, const bool accumulate, const bool unsafe) {
   TORCH_CHECK_INDEX(indices.size() <= (size_t)self.dim(), "too many indices for tensor of dimension ", self.dim(), " (got ", indices.size(), ")");
   TORCH_CHECK(!value.is_quantized(), "Value argument for quantized input_put should not be quantized");
   TORCH_CHECK(self.qscheme() == c10::kPerTensorAffine, "index_put for quantized tensors is currently only supported for per tensor quantized tensors");
@@ -183,7 +183,7 @@ Tensor& _index_put_impl_quantized_cuda_(Tensor & self, const torch::List<c10::op
 
   at::assert_no_overlap(self, value);
   // NOLINTNEXTLINE(performance-implicit-conversion-in-loop)
-  for (const c10::optional<Tensor>& index: indices) {
+  for (const std::optional<Tensor>& index: indices) {
     if (index.has_value()) {
       at::assert_no_overlap(self, *index);
     }

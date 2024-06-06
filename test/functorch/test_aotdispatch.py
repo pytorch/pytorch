@@ -15,11 +15,13 @@ from functools import partial
 from typing import Any, Callable, Dict, List, Optional, Union
 from unittest.mock import patch
 
+from common_utils import decorate, decorateForModules, skip, skipOps, xfail
+
 import torch
 import torch._dynamo as torchdynamo
 import torch.nn as nn
 import torch.utils._pytree as pytree
-from common_utils import decorate, decorateForModules, skip, skipOps, xfail
+
 from functorch import grad, jacrev, make_fx, vjp, vmap
 from functorch.compile import (
     aot_function,
@@ -67,7 +69,9 @@ from torch.testing._internal.common_utils import (
     parametrize,
     run_tests,
     skipIfRocm,
+    skipIfTorchDynamo,
     TestCase,
+    xfailIfTorchDynamo,
 )
 from torch.testing._internal.hop_db import hop_db
 from torch.testing._internal.optests import (
@@ -101,8 +105,7 @@ except ImportError:
 
 
 class AOTTestCase(TestCase):
-    def setUp(self):
-        super().setUp()
+    pass
 
 
 class TestPythonKey(AOTTestCase):
@@ -574,6 +577,9 @@ def forward(self, primals_1, primals_2):
 
     # This is a (hopefully) extremely rare case that is difficult to handle,
     # so we ban it.
+    # https://github.com/pytorch/pytorch/issues/126236
+    # https://github.com/pytorch/pytorch/pull/126113
+    @xfailIfTorchDynamo
     def test_set__and_data_mutation_bad(self):
         def f(a):
             a_view = a.view(-1)
@@ -3475,7 +3481,6 @@ def forward(self, tangents_1):
 
         return lambda f: aot_function(f, fw_compiler=lambda g, _: partial(wrapper, g))
 
-    @patch("functorch.compile.config.view_replay_for_aliased_outputs", True)
     def test_output_aliases_input_view_meta_replay(self):
         @self._compile_and_erase_bases(0)
         def f(a):
@@ -3489,7 +3494,6 @@ def forward(self, tangents_1):
             str(out.grad_fn.__class__), """<class 'ViewBackward0'>"""
         )
 
-    @patch("functorch.compile.config.view_replay_for_aliased_outputs", True)
     def test_output_aliases_intermediate_view_meta_replay(self):
         @self._compile_and_erase_bases(0, 1)
         def f(a):
@@ -3509,7 +3513,6 @@ def forward(self, tangents_1):
             str(out2.grad_fn.__class__), """<class 'ViewBackward0'>"""
         )
 
-    @patch("functorch.compile.config.view_replay_for_aliased_outputs", True)
     def test_output_aliases_output_view_meta_replay(self):
         @self._compile_and_erase_bases(1)
         def f(a):
@@ -3520,6 +3523,33 @@ def forward(self, tangents_1):
         out1, out2 = f(inp)
 
         self.assertEqual(out1.untyped_storage(), out2.untyped_storage())
+        self.assertIsNotNone(out2.grad_fn)
+        self.assertExpectedInline(
+            str(out2.grad_fn.__class__), """<class 'ViewBackward0'>"""
+        )
+
+    @skipIfTorchDynamo()
+    @patch("torch._dynamo.config.assume_static_by_default", False)
+    def test_dynamic_output_aliases_input_view_meta_replay(self):
+        # - torch.compile: using it so we can have a SymInt in the FX graph.
+        # - Compiling with inductor, so that tensor._base isn't tracked.
+        #
+        # This should force the use of as_strided in the view reconstruction path.
+        # The first 2 view-replay paths won't be taken because:
+        #   - target_functional_tensor will be symbolic (_functionalize_is_symbolic call)
+        #   - tensor._base will be None
+        @torch.compile(backend="inductor")
+        def f(a, sz):
+            return a.view(sz), a.view(-1)
+
+        inp = torch.ones(2, 2, requires_grad=True)
+        out1, out2 = f(inp, (4,))
+
+        self.assertIsNotNone(out1.grad_fn)
+        self.assertExpectedInline(
+            str(out1.grad_fn.__class__), """<class 'AsStridedBackward0'>"""
+        )
+
         self.assertIsNotNone(out2.grad_fn)
         self.assertExpectedInline(
             str(out2.grad_fn.__class__), """<class 'ViewBackward0'>"""
@@ -4804,70 +4834,6 @@ class TestPartitioning(AOTTestCase):
         )
         self.assertEqual(get_num_ins_outs(fw_graph), (4, 2))
         self.assertEqual(get_num_ins_outs(bw_graph), (2, 4))
-
-    @unittest.skipIf(not USE_NETWORKX, "networkx not available")
-    def test_min_cut_partitioner_recomputable_ops(self):
-        def f(x):
-            return x * x * x
-
-        recomputable_ops = []
-        partition_fn = partial(
-            min_cut_rematerialization_partition, recomputable_ops=recomputable_ops
-        )
-
-        fw_graph, bw_graph = get_fw_bw_graph(
-            f, [torch.randn(3, requires_grad=True)], partition_fn
-        )
-        # Expected forward graph:
-        # opcode         name       target           args                        kwargs
-        # -------------  ---------  ---------------  --------------------------  --------
-        # placeholder    primals_1  primals_1        ()                          {}
-        # call_function  mul        aten.mul.Tensor  (primals_1, primals_1)      {}
-        # call_function  mul_1      aten.mul.Tensor  (mul, primals_1)            {}
-        # output         output     output           ([mul_1, primals_1, mul],)  {}
-        self.assertEqual(get_num_ins_outs(fw_graph), (1, 3))
-        # Expected backward graph:
-        # opcode         name        target           args                     kwargs
-        # -------------  ----------  ---------------  -----------------------  --------
-        # placeholder    primals_1   primals_1        ()                       {}
-        # placeholder    mul         mul              ()                       {}
-        # placeholder    tangents_1  tangents_1       ()                       {}
-        # call_function  mul_2       aten.mul.Tensor  (tangents_1, mul)        {}
-        # call_function  mul_3       aten.mul.Tensor  (tangents_1, primals_1)  {}
-        # call_function  mul_4       aten.mul.Tensor  (mul_3, primals_1)       {}
-        # call_function  add         aten.add.Tensor  (mul_2, mul_4)           {}
-        # call_function  add_1       aten.add.Tensor  (add, mul_4)             {}
-        # output         output      output           ([add_1],)               {}
-        self.assertEqual(get_num_ins_outs(bw_graph), (3, 1))
-
-        recomputable_ops = [torch.ops.aten.mul]
-        partition_fn = partial(
-            min_cut_rematerialization_partition, recomputable_ops=recomputable_ops
-        )
-        fw_graph, bw_graph = get_fw_bw_graph(
-            f, [torch.randn(3, requires_grad=True)], partition_fn
-        )
-        # Expected forward graph:
-        # opcode         name       target           args                    kwargs
-        # -------------  ---------  ---------------  ----------------------  --------
-        # placeholder    primals_1  primals_1        ()                      {}
-        # call_function  mul        aten.mul.Tensor  (primals_1, primals_1)  {}
-        # call_function  mul_1      aten.mul.Tensor  (mul, primals_1)        {}
-        # output         output     output           ([mul_1, primals_1],)   {}
-        self.assertEqual(get_num_ins_outs(fw_graph), (1, 2))
-        # Expected backward graph:
-        # opcode         name        target           args                     kwargs
-        # -------------  ----------  ---------------  -----------------------  --------
-        # placeholder    primals_1   primals_1        ()                       {}
-        # placeholder    tangents_1  tangents_1       ()                       {}
-        # call_function  mul         aten.mul.Tensor  (primals_1, primals_1)   {} # RECOMPUTED
-        # call_function  mul_2       aten.mul.Tensor  (tangents_1, mul)        {}
-        # call_function  mul_3       aten.mul.Tensor  (tangents_1, primals_1)  {}
-        # call_function  mul_4       aten.mul.Tensor  (mul_3, primals_1)       {}
-        # call_function  add         aten.add.Tensor  (mul_2, mul_4)           {}
-        # call_function  add_1       aten.add.Tensor  (add, mul_4)             {}
-        # output         output      output           ([add_1],)               {}
-        self.assertEqual(get_num_ins_outs(bw_graph), (2, 1))
 
     def test_contiguous(self):
         # The test simulates the condition where transpose followed by view

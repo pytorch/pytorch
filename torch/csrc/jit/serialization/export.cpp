@@ -145,26 +145,6 @@ void validateBlock(
             "\n\nDefined at:\n" + getNodeStackTraceString(node))
       }
     } else {
-#ifdef BUILD_CAFFE2
-      // Assuming this is a Caffe2 change as it only modifies an aten op
-      // for operator_export_type == ONNX_ATEN_FALLBACK, which is a common
-      // pattern for Caffe2-specific scenarios.
-      if (node->kind() == aten::expand) {
-        if (operator_export_type ==
-            onnx_torch::OperatorExportTypes::ONNX_ATEN_FALLBACK) {
-          WithInsertPoint guard(node);
-          auto* new_node =
-              b->owningGraph()->insertNode(b->owningGraph()->create(
-                  Symbol(::c10::aten::ATen),
-                  node->inputs(),
-                  node->outputs().size()));
-          for (size_t i = 0; i < node->outputs().size(); ++i) {
-            node->output(i)->replaceAllUsesWith(new_node->output(i));
-          }
-          new_node->s_(Symbol::fromQualString("attr::operator"), "expand");
-        }
-      }
-#endif
       if (node->kind() == prim::PackPadded || node->kind() == prim::PadPacked) {
         if (operator_export_type !=
             onnx_torch::OperatorExportTypes::ONNX_FALLTHROUGH) {
@@ -209,7 +189,7 @@ std::string GetFileRootPath(const std::string& rootPath) {
 }
 
 std::string GetExternalFileName(
-    const c10::optional<std::string>& external_ref) {
+    const std::optional<std::string>& external_ref) {
   auto tensorName = external_ref.value();
   const std::string illegalChars = "\\/:?\"<>|";
   for (char& i : tensorName) {
@@ -363,7 +343,7 @@ class GraphEncoder {
   void EncodeTensor(
       onnx::TensorProto* tensor_proto,
       const at::Tensor& tensor,
-      const c10::optional<std::string> external_ref = {},
+      const std::optional<std::string> external_ref = {},
       const bool use_external_data_format = false,
       const std::string& onnx_file_path = std::string());
 
@@ -1300,7 +1280,7 @@ void GraphEncoder::EncodeTypeProto(
 void GraphEncoder::EncodeTensor(
     onnx::TensorProto* tensor_proto,
     const at::Tensor& tensor,
-    const c10::optional<std::string> external_ref,
+    const std::optional<std::string> external_ref,
     const bool use_external_data_format,
     const std::string& onnx_file_path) {
   for (auto d : tensor.sizes()) {

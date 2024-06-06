@@ -11,17 +11,17 @@ namespace torch::jit {
 struct TORCH_API JITException : public std::runtime_error {
   explicit JITException(
       const std::string& msg,
-      c10::optional<std::string> python_class_name = c10::nullopt,
-      c10::optional<std::string> original_msg = c10::nullopt);
+      std::optional<std::string> python_class_name = c10::nullopt,
+      std::optional<std::string> original_msg = c10::nullopt);
 
-  c10::optional<std::string> getPythonClassName() const {
+  std::optional<std::string> getPythonClassName() const {
     return python_class_name_;
   }
 
   // the original msg if this is from a python exception. The interpretor has
   // changed the original message by adding "The following operation failed in
   // the TorchScript interpreter." in front of it in the handleError function.
-  c10::optional<std::string> getOriginalMsg() const {
+  std::optional<std::string> getOriginalMsg() const {
     return original_msg_;
   }
 
@@ -31,8 +31,8 @@ struct TORCH_API JITException : public std::runtime_error {
   static void setCaughtPythonClassName(const std::string& pythonClassName);
 
  private:
-  c10::optional<std::string> python_class_name_;
-  c10::optional<std::string> original_msg_;
+  std::optional<std::string> python_class_name_;
+  std::optional<std::string> original_msg_;
 };
 
 } // namespace torch::jit

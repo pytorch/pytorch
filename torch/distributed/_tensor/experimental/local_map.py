@@ -2,6 +2,7 @@
 from typing import Callable, Optional, Sequence, Tuple, Union
 
 import torch
+from torch.distributed._functional_collectives import AsyncCollectiveTensor
 from torch.distributed._tensor import DeviceMesh, DTensor
 from torch.distributed._tensor.placement_types import Placement
 
@@ -12,7 +13,7 @@ except ImportError:
 
 
 PlacementType = Optional[Sequence[Placement]]
-InputPlacements = Union[PlacementType, Tuple[PlacementType, ...]]
+InputPlacements = Optional[Tuple[PlacementType, ...]]
 OutputPlacements = Union[PlacementType, Tuple[PlacementType, ...]]
 
 
@@ -32,24 +33,36 @@ def local_map(
         func (Callable): the function to be applied on each local shard of
             :class:`DTensor`s.
         out_placements (Union[`PlacementType`, Tuple[`PlacementType`, ...]]):
-            the desired placements of the output :class:`DTensor`s. If the `output` of
-            `func` is a Python collection, the `out_placements` will be a Tuple of
-            `PlacementType` values 1:1 mapping to the flattened `output`. For
-            :class:`Tensor` output, the corresponding `PlacementType` will be its
+            the desired placements of the :class:`DTensor`s in `func`'s flattened output.
+            If the flattened `output` is a single value, the `out_placements` should be
+            of type `PlacementType`. Otherwise if the flattened `output` has multiple
+            values, the `out_placements` should be a tuple of `PlacementType` values 1:1
+            mapping to the flattened `output`.
+            Besides, for :class:`Tensor` output, we use `PlacementType` as its
             placements (a `Tuple[Placement]` value). For non-:class:`Tensor` output,
-            the `PlacementType` will be `None`.
-        in_placements (Union[`PlacementType`, Tuple[`PlacementType`, ...]], optional):
-            the required placements of the input :class:`DTensor`s. If not specified,
-            the input :class:`DTensor` will not be redistributed before passing its local
-            tensor to `func`. Similarly to `out_placements`, `in_placements` should keep
-            a 1:1 mapping to the flattened input of `func`. If a redistribution is
-            required according to `in_placements` and `redistribute_inputs` is `False`,
-            an exception will be raised.
+            the `PlacementType` should be `None`.
+            Note that the only exception is when no :class:`DTensor` argument is passed
+            in. In this case, even if `out_placements` is not `None`, the result function
+            should ignore the desired placements because the application is not on
+            :class:`DTensors`.
+        in_placements (Tuple[`PlacementType`, ...], optional):
+            the required placements of the :class:`DTensor`s in `func`'s flattened input.
+            If `in_placements` is specified, `local_map` would examine whether the
+            placements of each :class:`DTensor` argument is the same as the required
+            placements or not. If the placements are not the same and
+            `redistribute_inputs` is `False`, an exception will be raised. Otherwise if
+            `redistribute_inputs` is `True`, the argument will be first redistributed to
+            the required sharding placements before passing its local tensor to `func`.
+            The only exception is when required placements are not `None` and the
+            argument is a :class:`torch.Tensor`. In this case, the placements examination
+            will be skipped and the argument will be directly passed to `func`.
+            If `in_placements` is `None`, no placements examination will be performed.
+            Default: `None`
         device_mesh (:class:`DeviceMesh`, optional):
             the device mesh that all the :class:`DTensor`s are placed on. If not
             specified, this will be inferred from the input :class:`DTensor`s' device
             mesh. `local_map` requires every :class:`DTensor`s to be placed on the same
-            device mesh.
+            device mesh. Default: `None`.
         redistribute_inputs (bool, optional):
             the bool value indicating whether to reshard the input :class:`DTensor`s when
             their placements are different from the required input placements. If this
@@ -93,9 +106,9 @@ def local_map(
         >>>     device_mesh=device_mesh,
         >>> )
         >>>
-        >>> W_dt = distribute_tensor(W, device_mesh, col_wise)  # col-wisely sharded W tensor
-        >>> X_dt = distribute_tensor(X, device_mesh, row_wise)  # row-wisely sharded X tensor
-        >>> Y_dt = local_mm_allreduce_forward(W_dt, X_dt)  # apply local_mm_allreduce_forward to DTensors
+        >>> W_dt = distribute_tensor(W, device_mesh, (col_wise))  # col-wisely sharded W tensor
+        >>> X_dt = distribute_tensor(X, device_mesh, (row_wise))  # row-wisely sharded X tensor
+        >>> Y_dt = local_mm_allreduce_forward(device_mesh, W_dt, X_dt)  # apply local_mm_allreduce_forward to DTensors
 
     NOTE: This API is currently experimental and subject to change
     """
@@ -103,10 +116,16 @@ def local_map(
     def wrapped(*args, **kwargs):
         # process input args
         flat_args, args_spec = pytree.tree_flatten(args)
+        if in_placements is not None:
+            assert len(in_placements) == len(flat_args), (
+                f"in_placements length {len(in_placements)} does not match the number "
+                f"of input args {len(flat_args)}!"
+            )
 
         # we assume every DTensor object is placed on the same device mesh
         flat_local_args = []
         nonlocal device_mesh  # access var device_mesh from the outer scope
+        seen_dtensor_arg = False
         for idx, arg in enumerate(flat_args):
             if isinstance(arg, DTensor):
                 # TODO: the current code doesn't consider the uneven sharding case
@@ -115,17 +134,16 @@ def local_map(
                 if device_mesh is None:  # infer device mesh from the DTensor arg
                     device_mesh = arg.device_mesh
 
+                # this function is applied to at least one DTensor argument
+                seen_dtensor_arg = True
+
                 assert arg.device_mesh == device_mesh, (
-                    f"arg {arg} in local_map has a mismatched device mesh:"
-                    f"{arg} has device mesh {arg.device_mesh} while"
+                    f"arg {arg} in local_map has a mismatched device mesh: "
+                    f"{arg} has device mesh {arg.device_mesh} while "
                     f"the expected device mesh is {device_mesh}!"
                 )
                 if in_placements is not None:
-                    spec = (
-                        in_placements[idx]
-                        if isinstance(in_placements, tuple)
-                        else in_placements
-                    )
+                    spec = in_placements[idx]
                     assert (
                         spec is not None
                     ), f"DTensor input {arg} expects placements but received {spec}!"
@@ -139,44 +157,62 @@ def local_map(
                             arg = arg.redistribute(device_mesh, spec)
                         else:
                             raise ValueError(
-                                f"arg {arg} in local_map has a mismatched placements:"
-                                f"arg placements is {arg.placements} but the input"
-                                f"placements is {spec}!"
-                                "If redistribute_inputs is wanted, set redistribute_inputs=True to local_map."
+                                f"arg {arg} in local_map has a mismatched placements: "
+                                f"arg placements is {arg.placements} but the input "
+                                f"placements is {spec}! "
+                                "If redistribute_inputs is wanted, set "
+                                "redistribute_inputs=True to local_map."
                             )
 
-                flat_local_args.append(arg.to_local())
+                local_arg = arg.to_local()
+                if isinstance(local_arg, AsyncCollectiveTensor):
+                    local_arg = local_arg.wait()
+
+                flat_local_args.append(local_arg)
             else:
+                # Non-Tensor input must have None in `in_placements`
+                if in_placements is not None and not isinstance(arg, torch.Tensor):
+                    spec = in_placements[idx]
+                    assert spec is None, (
+                        f"Non-Tensor input {arg} expects None placements "
+                        f"but received {spec}!"
+                    )
+
                 flat_local_args.append(arg)
 
         local_args = pytree.tree_unflatten(flat_local_args, args_spec)
 
-        out = func(device_mesh, *local_args, **kwargs)
+        out = func(*local_args, **kwargs)
 
-        # process output
-        flat_out, out_spec = pytree.tree_flatten(out)
-        flat_dist_out = []
-        for idx, out in enumerate(flat_out):
-            spec = (
-                out_placements[idx]
-                if isinstance(out_placements, tuple)
-                else out_placements
-            )
-            if isinstance(out, torch.Tensor):
-                assert not isinstance(
-                    out, DTensor
-                ), f"torch.Tensor output expected but received {type(out)}: {out}"
+        if seen_dtensor_arg:
+            # process output
+            flat_out, out_spec = pytree.tree_flatten(out)
 
-                flat_dist_out.append(
-                    DTensor.from_local(out, device_mesh, spec, run_check=False)
+            flat_dist_out = []
+            for idx, out in enumerate(flat_out):
+                spec = (
+                    out_placements[idx]
+                    if isinstance(out_placements, tuple)
+                    else out_placements
                 )
-            else:
-                assert (
-                    spec is None
-                ), f"Non-tensor output {out} expects None placements but received {spec}!"
 
-                flat_dist_out.append(out)
+                if isinstance(out, torch.Tensor):
+                    assert not isinstance(
+                        out, DTensor
+                    ), f"torch.Tensor output expected but received {type(out)}: {out}"
 
-        return pytree.tree_unflatten(flat_dist_out, out_spec)
+                    flat_dist_out.append(
+                        DTensor.from_local(out, device_mesh, spec, run_check=False)
+                    )
+                else:
+                    assert (
+                        spec is None
+                    ), f"Non-tensor output {out} expects None placements but received {spec}!"
+
+                    flat_dist_out.append(out)
+
+            return pytree.tree_unflatten(flat_dist_out, out_spec)
+        else:
+            return out
 
     return wrapped

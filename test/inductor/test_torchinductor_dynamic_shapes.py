@@ -3,6 +3,7 @@ import contextlib
 import importlib
 
 import math
+import operator
 import os
 import sys
 import unittest
@@ -116,7 +117,7 @@ class TestInductorDynamic(TestCase):
         if not HAS_GPU:
             self.skipTest("Triton not available")
         torch._dynamo.reset()
-        super(TestCase, self).setUp()
+        TestCase.setUp(self)
         # this should be in setUpClass, but device-generic tests
         # don't work with setUpClass well (non-deterministically the wrong setUpClass is resolved),
         # so put it in test setUp, it's cheap
@@ -134,7 +135,7 @@ class TestInductorDynamic(TestCase):
 
     def tearDown(self):
         self._stack.close()
-        super(TestCase, self).tearDown()
+        TestCase.tearDown(self)
         torch._dynamo.reset()
 
     def test_arange_dynamic(self, device):
@@ -315,6 +316,7 @@ class TestInductorDynamic(TestCase):
 
         f(torch.tensor([3], device=device), torch.randn(10, device=device))
 
+    @unittest.expectedFailure
     @torch._dynamo.config.patch(
         capture_scalar_outputs=True, capture_dynamic_output_shape_ops=True
     )
@@ -646,6 +648,33 @@ class TestInductorDynamic(TestCase):
         cfn = self.compile_fn(fn)
         expect = fn(5)
         actual = cfn(5)
+        self.assertEqual(expect, actual)
+
+    def test_interpolate_ceil_eq(self, device):
+        ceiling = math.ceil
+        IntTrueDiv = operator.truediv
+
+        def fn(t):
+            s0, s2, s3 = t.size()
+            x = torch.zeros(
+                (
+                    s0,
+                    2048,
+                    ceiling(IntTrueDiv(2 * ((s2 - 1) // 8) + 2, 1)),
+                    ceiling(IntTrueDiv(2 * ((s3 - 1) // 8) + 2, 1)),
+                ),
+                dtype=torch.bfloat16,
+            )
+            return torch.nn.functional.interpolate(
+                x,
+                scale_factor=2,
+                mode="nearest",
+            )
+
+        cfn = self.compile_fn(fn)
+        arg = torch.randn(4, 16, 18)
+        expect = fn(arg)
+        actual = cfn(arg)
         self.assertEqual(expect, actual)
 
     def test_full_recompiles(self, device):

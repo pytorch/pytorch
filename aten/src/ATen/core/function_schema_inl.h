@@ -162,8 +162,8 @@ inline bool Argument::isForwardCompatibleWith(
 inline std::string FunctionSchema::formatTypeMismatchMsg(
     const Argument& expected,
     const std::string& actual_type,
-    c10::optional<size_t> position,
-    c10::optional<std::string> value) const {
+    std::optional<size_t> position,
+    std::optional<std::string> value) const {
   std::string position_str;
   if (position) {
     position_str = c10::str("Position: ", *position, "\n");

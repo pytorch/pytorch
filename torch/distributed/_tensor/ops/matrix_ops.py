@@ -4,7 +4,7 @@ import itertools
 from typing import List, Optional
 
 import torch
-from torch.distributed._tensor.op_schema import OpSchema, OpStrategy, PlacementStrategy
+from torch.distributed._tensor._op_schema import OpSchema, OpStrategy, PlacementStrategy
 from torch.distributed._tensor.ops.basic_strategy import gen_einsum_strategies
 from torch.distributed._tensor.ops.utils import (
     generate_redistribute_costs,
@@ -65,9 +65,9 @@ def _mm_like_strategy(
         assert strtg.input_specs is not None
         self_spec = strtg.input_specs[0]
         mat2_spec = strtg.input_specs[1]
-        if is_tensor_shardable(
-            self_strategy.output_shape, self_spec
-        ) and is_tensor_shardable(mat2_strategy.output_shape, mat2_spec):
+        if is_tensor_shardable(self_strategy.shape, self_spec) and is_tensor_shardable(
+            mat2_strategy.shape, mat2_spec
+        ):
             redistribute_cost = [
                 generate_redistribute_costs(self_strategy, self_spec),
                 generate_redistribute_costs(mat2_strategy, mat2_spec),
@@ -87,13 +87,11 @@ def _addmm_like_strategy(
     assert isinstance(self_strategy, OpStrategy)
     assert isinstance(mat1_strategy, OpStrategy)
     assert isinstance(mat2_strategy, OpStrategy)
-    self_shape = self_strategy.output_shape
+    self_shape = self_strategy.shape
     mm_out_shape = torch.Size(
         [
-            mat2_strategy.output_shape[-1]
-            if i == len(mat1_strategy.output_shape) - 1
-            else dim_size
-            for i, dim_size in enumerate(mat1_strategy.output_shape)
+            mat2_strategy.shape[-1] if i == len(mat1_strategy.shape) - 1 else dim_size
+            for i, dim_size in enumerate(mat1_strategy.shape)
         ]
     )
     # generate all possible strategies for mm
@@ -116,9 +114,9 @@ def _addmm_like_strategy(
         )
         self_spec = DTensorSpec(mesh=mesh, placements=self_placements)
 
-        if is_tensor_shardable(
-            mat1_strategy.output_shape, mat1_spec
-        ) and is_tensor_shardable(mat2_strategy.output_shape, mat2_spec):
+        if is_tensor_shardable(mat1_strategy.shape, mat1_spec) and is_tensor_shardable(
+            mat2_strategy.shape, mat2_spec
+        ):
             # update input specs with new self spec
             strtg.input_specs = (self_spec, mat1_spec, mat2_spec)
 
@@ -167,7 +165,7 @@ def scaled_dot_product_flash_attention_strategy(
     q_input_strategy = op_schema.args_schema[0]
     assert isinstance(q_input_strategy, OpStrategy)
     # assuming q/k/v have the same shape
-    qkv_shape = q_input_strategy.output_shape
+    qkv_shape = q_input_strategy.shape
 
     all_mesh_dim_strategies = []
 
@@ -258,7 +256,7 @@ def scaled_dot_product_flash_attention_backward_strategy(
     q_input_strategy = op_schema.args_schema[1]
     assert isinstance(q_input_strategy, OpStrategy)
     # assuming q/k/v have the same shape
-    qkv_shape = q_input_strategy.output_shape
+    qkv_shape = q_input_strategy.shape
 
     tensor_input_indices = [
         i
@@ -384,7 +382,7 @@ def scaled_dot_product_efficient_attention_strategy(
     q_input_strategy = op_schema.args_schema[0]
     assert isinstance(q_input_strategy, OpStrategy)
     # assuming q/k/v have the same shape
-    qkv_shape = q_input_strategy.output_shape
+    qkv_shape = q_input_strategy.shape
     has_attn_bias = op_schema.args_schema[3] is not None
     compute_log_sumexp = op_schema.args_schema[4]
 
@@ -465,7 +463,7 @@ def scaled_dot_product_efficient_attention_backward_strategy(
     q_input_strategy = op_schema.args_schema[1]
     assert isinstance(q_input_strategy, OpStrategy)
     # assuming q/k/v have the same shape
-    qkv_shape = q_input_strategy.output_shape
+    qkv_shape = q_input_strategy.shape
     has_attn_bias = op_schema.args_schema[4] is not None
 
     tensor_input_indices = [

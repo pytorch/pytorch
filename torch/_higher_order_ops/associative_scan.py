@@ -110,16 +110,12 @@ associative_scan_op = HigherOrderOperator("associative_scan")
 def trace_associative_scan(
     proxy_mode, func_overload, combine_fn: Callable, input: List[torch.Tensor], dim: int
 ):
-    pre_dispatch = getattr(proxy_mode, "pre_dispatch", False)
-
     with disable_proxy_modes_tracing():
         sample_inputs = [
             torch.full((), False, dtype=x.dtype, device=x.device)
             for x in itertools.chain(input, input)
         ]
-        combine_graph = reenter_make_fx(combine_fn, pre_dispatch=pre_dispatch)(
-            *sample_inputs
-        )
+        combine_graph = reenter_make_fx(combine_fn)(*sample_inputs)
 
     outputs = None
     for node in combine_graph.graph.nodes:

@@ -35,9 +35,9 @@ struct C10_API TorchDispatchModeTLS {
       int64_t idx);
   static int64_t stack_len();
 
-  static const c10::optional<std::shared_ptr<PyObject_TorchDispatchMode>>
+  static const std::optional<std::shared_ptr<PyObject_TorchDispatchMode>>
   get_mode(TorchDispatchModeKey mode_key);
-  static const c10::optional<std::shared_ptr<PyObject_TorchDispatchMode>>
+  static const std::optional<std::shared_ptr<PyObject_TorchDispatchMode>>
   unset_mode(TorchDispatchModeKey mode_key);
   static void set_mode(
       const std::shared_ptr<PyObject_TorchDispatchMode>& mode,
@@ -55,7 +55,7 @@ struct C10_API TorchDispatchModeTLS {
   // However, we only allow a single FakeTensorMode onto the stack at a time
   // (Pushing additional FakeTensorModes onto the stack is a no-op)
   std::array<
-      c10::optional<std::shared_ptr<PyObject_TorchDispatchMode>>,
+      std::optional<std::shared_ptr<PyObject_TorchDispatchMode>>,
       static_cast<size_t>(TorchDispatchModeKey::NUM_MODE_KEYS)>
       infra_modes_;
 };

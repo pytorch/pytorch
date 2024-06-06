@@ -645,6 +645,8 @@ coverage_ignore_functions = [
     "create_workers",
     "spawn_workers",
     "worker",
+    # torch.distributed.pipelining.PipelineSchedule
+    "step",
     # torch.distributed.rendezvous
     "register_rendezvous_handler",
     "rendezvous",
@@ -2796,6 +2798,7 @@ coverage_ignore_classes = [
     "ConstraintViolationError",
     "DynamicDimConstraintPrinter",
     "GuardOnDataDependentSymNode",
+    "PendingUnbackedSymbolNotFound",
     "LoggingShapeGuardPrinter",
     "RelaxedUnspecConstraint",
     "RuntimeAssert",

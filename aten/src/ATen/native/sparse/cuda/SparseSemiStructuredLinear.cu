@@ -600,9 +600,9 @@ Tensor two_four_sgemm_dispatch_layouts_bias_activation(
 // number of checks throughout the code.
 Tensor _sparse_semi_structured_linear(
       const Tensor& input, const Tensor& weight,
-      const Tensor& meta, const c10::optional<Tensor>& bias_opt,
-      const c10::optional<c10::string_view> activation_opt,
-      const c10::optional<c10::ScalarType> out_dtype_opt) {
+      const Tensor& meta, const std::optional<Tensor>& bias_opt,
+      const std::optional<c10::string_view> activation_opt,
+      const std::optional<c10::ScalarType> out_dtype_opt) {
     TORCH_WARN_ONCE("_sparse_semi_structured_linear is deprecated and will be "
                     "removed in a future PyTorch release.  Please use "
                     "_sparse_semi_structured_mm/_sparse_semi_structured_addmm "

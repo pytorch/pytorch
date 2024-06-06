@@ -82,7 +82,7 @@ static PyObject* THPStream_pynew(
   // It requires other device backends override getNewStream method. How the new
   // stream is created is backend specific. Backend should be able to correctly
   // manage the lifetime of streams.
-  c10::optional<c10::Stream> stream_opt;
+  std::optional<c10::Stream> stream_opt;
   if (r.idx == 0) {
     c10::impl::VirtualGuardImpl impl{static_cast<c10::DeviceType>(device_type)};
     stream_opt = impl.getNewStream(
