@@ -5297,15 +5297,18 @@ def forward(self, tangents_1, tangents_2):
                 out = x + 1
             return out
 
-        def inp_fn():
-            return torch.ones(10, requires_grad=True)
+        inp_fns = [
+            lambda: torch.ones(10, requires_grad=True),
+            lambda: torch.ones(10, requires_grad=False),
+        ]
 
         compiled_f = aot_function(fn, nop)
-        with torch.no_grad():
-            ref_out = fn(inp_fn())
-            out = compiled_f(inp_fn())
+        for inp_fn in inp_fns:
+            with torch.no_grad():
+                ref_out = fn(inp_fn())
+                out = compiled_f(inp_fn())
 
-        self.assertEqual(ref_out.requires_grad, out.requires_grad)
+                self.assertEqual(ref_out.requires_grad, out.requires_grad)
 
 
 class TestAOTModuleSimplified(AOTTestCase):
