@@ -179,6 +179,18 @@ class SuperVariable(VariableTracker):
         unimplemented(f"non-function or method super: {inner_fn}")
 
 
+class ExceptionVariable(VariableTracker):
+    def __init__(self, exc_type, args, **kwargs):
+        super().__init__(**kwargs)
+        self.exc_type = exc_type
+        self.args = args
+
+    def reconstruct(self, codegen):
+        codegen.load_import_from("builtins", self.exc_type.__name__)
+        codegen.foreach(self.args)
+        codegen.call_function(len(self.args), True)
+
+
 class UnknownVariable(VariableTracker):
     """
     It could be anything!
@@ -679,11 +691,13 @@ class GetAttrVariable(VariableTracker):
             and self.name == "__dict__"
             and not kwargs
             and args[0].is_python_constant()
-            and isinstance(self.obj, variables.UserDefinedObjectVariable)
+            and isinstance(
+                self.obj,
+                (variables.UserDefinedObjectVariable, variables.NNModuleVariable),
+            )
         ):
             obj = self.obj
             key = args[0].as_python_constant()
-            obj._check_for_getattribute()
             if obj.has_key_in_generic_dict(tx, key):
                 # redirect to var_getattr on the original obj
                 return obj.var_getattr(tx, key)
@@ -701,11 +715,13 @@ class GetAttrVariable(VariableTracker):
             and len(args) == 1
             and args[0].is_python_constant()
             and not kwargs
-            and isinstance(self.obj, variables.UserDefinedObjectVariable)
+            and isinstance(
+                self.obj,
+                (variables.UserDefinedObjectVariable, variables.NNModuleVariable),
+            )
         ):
             obj = self.obj
             key = args[0].as_python_constant()
-            obj._check_for_getattribute()
             if obj.has_key_in_generic_dict(tx, key):
                 return variables.ConstantVariable(True)
             else:

@@ -14,6 +14,7 @@ import warnings
 from collections import namedtuple
 from datetime import timedelta
 from typing import Any, Callable, Dict, Optional, Tuple, Union, List, TYPE_CHECKING
+from typing_extensions import deprecated
 
 import torch
 from torch._C._distributed_c10d import (
@@ -364,11 +365,12 @@ class _reduce_op:
             setattr(self, k, v)
         self.__members__ = ReduceOp.RedOpType.__members__
 
+    @deprecated(
+        "`torch.distributed.reduce_op` is deprecated, "
+        "please use `torch.distributed.ReduceOp` instead",
+        category=FutureWarning,
+    )
     def __getattribute__(self, key):
-        warnings.warn(
-            "torch.distributed.reduce_op is deprecated, please use "
-            "torch.distributed.ReduceOp instead"
-        )
         return object.__getattribute__(self, key)
 
 
@@ -675,7 +677,9 @@ def _get_pg_default_device(group: Optional[ProcessGroup] = None) -> torch.device
         warnings.warn(
             f"You are using a Backend {type(group)} as a ProcessGroup. "
             "This usage is deprecated since PyTorch 2.0. Please use a public API "
-            "of PyTorch Distributed instead."
+            "of PyTorch Distributed instead.",
+            FutureWarning,
+            stacklevel=3,
         )
         # Most users create Gloo with private API for object collectives
         _world.pg_default_device[group] = torch.device("cpu")
@@ -829,13 +833,15 @@ def get_global_rank(group: ProcessGroup, group_rank: int) -> int:
             return rank
     raise ValueError(f"Group rank {group_rank} is not part of group {group}")
 
+
 # TODO: remove this once the ecosystem moves away from it.
+@deprecated(
+    "`torch.distributed.distributed_c10d._get_global_rank` is deprecated, "
+    "please use `torch.distributed.distributed_c10d.get_global_rank` instead",
+    category=FutureWarning,
+)
 def _get_global_rank(group, rank) -> int:
     """Use get_global_rank as this method is deprecated."""
-    warnings.warn(
-        "torch.distributed.distributed_c10d._get_global_rank is deprecated "
-        "please use torch.distributed.distributed_c10d.get_global_rank instead"
-    )
     return get_global_rank(group, rank)
 
 
@@ -2286,6 +2292,12 @@ def all_reduce(tensor, op=ReduceOp.SUM, group=None, async_op=False):
         work.wait()
 
 @_exception_logger
+@deprecated(
+    "`torch.distributed.all_reduce_coalesced` will be deprecated. If you must "
+    "use it, please revisit our documentation later at "
+    "https://pytorch.org/docs/main/distributed.html#collective-functions",
+    category=FutureWarning,
+)
 def all_reduce_coalesced(tensors, op=ReduceOp.SUM, group=None, async_op=False):
     """
     WARNING: at this time individual shape checking is not implemented across nodes.
@@ -2320,11 +2332,6 @@ def all_reduce_coalesced(tensors, op=ReduceOp.SUM, group=None, async_op=False):
         None, if not async_op or if not part of the group.
 
     """
-    warnings.warn(
-        "torch.distributed.all_reduce_coalesced will be deprecated. If you must "
-        "use it, please revisit our documentation later at "
-        "https://pytorch.org/docs/main/distributed.html#collective-functions"
-    )
     if isinstance(tensors, torch.Tensor):
         tensors = [tensors]
     _check_tensor_list(tensors, "tensor")
@@ -3198,6 +3205,11 @@ def all_gather_into_tensor(output_tensor, input_tensor, group=None, async_op=Fal
 
 
 @_exception_logger
+@deprecated(
+    "`torch.distributed._all_gather_base` is a private function and will be deprecated. "
+    "Please use `torch.distributed.all_gather_into_tensor` instead.",
+    category=FutureWarning,
+)
 def _all_gather_base(output_tensor, input_tensor, group=None, async_op=False):
     """
     Single tensor all gather. Gathers a single tensor from all ranks, and puts them in a single output tensor.
@@ -3219,15 +3231,16 @@ def _all_gather_base(output_tensor, input_tensor, group=None, async_op=False):
         `all_gather_into_tensor` instead.
 
     """
-    warnings.warn(
-        "torch.distributed._all_gather_base is a private function and will be "
-        "deprecated. Please use torch.distributed.all_gather_into_tensor "
-        "instead."
-    )
     return all_gather_into_tensor(output_tensor, input_tensor, group, async_op)
 
 
 @_exception_logger
+@deprecated(
+    "`torch.distributed.all_gather_coalesced` will be deprecated. If you must use it, "
+    "please revisit our documentation later at "
+    "https://pytorch.org/docs/main/distributed.html#collective-functions",
+    category=FutureWarning,
+)
 def all_gather_coalesced(
     output_tensor_lists, input_tensor_list, group=None, async_op=False
 ):
@@ -3274,11 +3287,6 @@ def all_gather_coalesced(
     performance improvements but users of this function should take extra care
     to ensure that each node passes in tensors whose shapes match across nodes.
     """
-    warnings.warn(
-        "torch.distributed.all_gather_coalesced will be deprecated. If you must "
-        "use it, please revisit our documentation later at "
-        "https://pytorch.org/docs/main/distributed.html#collective-functions"
-    )
     # We only check basic compatibility with C++ params here, C++ code will
     # do shape and type checking.
     if _rank_not_in_group(group):
@@ -3608,6 +3616,11 @@ def reduce_scatter_tensor(output, input, op=ReduceOp.SUM, group=None, async_op=F
         work.wait()
 
 
+@deprecated(
+    "`torch.distributed._reduce_scatter_base` is a private function and will be deprecated. "
+    "Please use `torch.distributed.reduce_scatter_tensor` instead.",
+    category=FutureWarning,
+)
 def _reduce_scatter_base(output, input, op=ReduceOp.SUM, group=None, async_op=False):
     """
     Reduces, then scatters a flattened tensor to all processes in a group.
@@ -3628,11 +3641,6 @@ def _reduce_scatter_base(output, input, op=ReduceOp.SUM, group=None, async_op=Fa
         `reduce_scatter_tensor` instead.
 
     """
-    warnings.warn(
-        "torch.distributed._reduce_scatter_base is a private function and will "
-        "be deprecated. Please use torch.distributed.reduce_scatter_tensor "
-        "instead."
-    )
     return reduce_scatter_tensor(output, input, op, group, async_op)
 
 
