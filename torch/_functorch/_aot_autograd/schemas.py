@@ -290,6 +290,13 @@ class ViewAndMutationMeta:
     # (need to default it to not break internal)
     is_train: bool = False
 
+    # length = (# inputs w data mutations) + (# user outputs that are non_aliasing tensors)
+    #        + (# intermediate bases)
+    # At runtime, we don't keep the traced_tangents around since they're not serializable.
+    # Instead, we keep any necessary subclass metadata necessary about each traced_tangent.
+    # This list is generated after calling make_cache_safe().
+    traced_tangent_metas: Optional[List[Any]] = None
+
     num_symints_saved_for_bw: Optional[int] = None
 
     # The grad_enabled mutation that will be emitted in the runtime_wrapper epilogue
@@ -445,7 +452,6 @@ class ViewAndMutationMeta:
         # which tensors to be saved for the bwd graph.  num_forward captures
         # this information.
         self.num_forward = self.num_forward_returns + self.num_outputs_rng_offset
-        self.cache_safe = False
 
     def make_cache_safe(self):
         """
@@ -457,7 +463,7 @@ class ViewAndMutationMeta:
         # TODO: This function is only a best effort: there are other fields that may not be cache safe
         # (i.e., there's no guarantee that tensor_flatten() returns a serializable result), or that
         # SubclassCreationMeta is cache safe.
-        assert not self.cache_safe
+        assert self.traced_tangent_metas is None
         traced_tangent_metadata = []
 
         def extract_metadata(t):
@@ -467,10 +473,9 @@ class ViewAndMutationMeta:
             else:
                 return None
 
-        self.traced_tangents = [
-            extract_metadata(t) for t in self.traced_tangents
-        ]
-        self.cache_safe = True
+        self.traced_tangent_metas = [extract_metadata(t) for t in self.traced_tangents]
+        # Clear traced tangents at runtime
+        self.traced_tangents = []
 
     @property
     def tensors_saved_for_backwards_slice(self):

@@ -1734,10 +1734,11 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                             is_joint_structure=False,
                         )
                     )
+                    assert CompiledFunction.metadata.traced_tangent_metas is not None
                     all_args = [
                         AOTDispatchAutograd.coerce_runtime_tangent(
                             t,
-                            CompiledFunction.metadata.traced_tangents[
+                            CompiledFunction.metadata.traced_tangent_metas[
                                 i - tangents_start_idx
                             ],
                         )

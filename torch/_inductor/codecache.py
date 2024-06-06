@@ -579,7 +579,11 @@ def torch_key():
     """
     if not config.is_fbcode():
         inductor_root = os.path.dirname(__file__)
-        return get_code_hash([inductor_root])
+        return get_code_hash(
+            [
+                inductor_root,
+            ]
+        )
 
     from libfb.py import parutil
 
