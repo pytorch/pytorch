@@ -5,6 +5,7 @@ from typing import List
 
 import torch
 import torch.utils._pytree as pytree
+from torch.autograd.variable import compiled_autograd_final_callbacks
 
 try:
     import numpy as np
@@ -95,6 +96,21 @@ def call_backward(backward_c_function, saved_tensors, *args):
 
 def untyped_storage_size(x: torch.Tensor):
     return x.untyped_storage().size()
+
+
+class CompiledAutogradEngine:
+    @staticmethod
+    def queue_callback(final_callbacks, cb):
+        final_callbacks.append(cb)
+
+    @staticmethod
+    def exec_final_callbacks(final_callbacks):
+        for cb in final_callbacks:
+            cb()
+        final_callbacks.clear()
+
+    def _exec_final_callbacks_stub(self):
+        raise NotImplementedError
 
 
 def call_hook_from_backward_state(*args, bw_state, hook_name: str, **kwargs):

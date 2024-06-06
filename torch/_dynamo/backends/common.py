@@ -62,6 +62,7 @@ def aot_autograd(**kwargs):
         try:
             # NB: NOT cloned!
             with enable_aot_logging(), patch_config:
+                print("here2")
                 cg = aot_module_simplified(gm, example_inputs, **kwargs)
                 counters["aot_autograd"]["ok"] += 1
                 return disable(cg)

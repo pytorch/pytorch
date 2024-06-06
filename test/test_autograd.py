@@ -7079,6 +7079,29 @@ for shape in [(1,), ()]:
         ):
             self.assertEqual(param.grad, checkpoint_param.grad)
 
+    def test_callback(self):
+        called = [0]
+
+        def callback_final():
+            called[0] += 1
+
+        class MyFunc(Function):
+            @staticmethod
+            def forward(ctx, input):
+                return input
+
+            @staticmethod
+            @once_differentiable
+            def backward(ctx, grad):
+                Variable._execution_engine.queue_callback(callback_final)
+                return grad
+
+        a = torch.rand((3, 3), requires_grad=True)
+        b = MyFunc.apply(a)
+        b.sum().backward()
+
+        self.assertEqual(called[0], 1)
+
     def test_callback_adds_callback(self):
         called = [0]
 

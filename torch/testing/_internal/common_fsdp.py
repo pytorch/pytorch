@@ -879,9 +879,9 @@ class MLPStack(nn.Sequential):
     def __init__(self, mlp_dim: int, *, with_seq_parallel: bool = False):
         modules: List[nn.Module] = [
             # Use multiplier of 3 to exercise uneven case
-            MLP(mlp_dim, dim_multiplier=3),
+            MLP(mlp_dim, dim_multiplier=4), # dim_multiplier=3),
             MLP(mlp_dim),
-            MLP(mlp_dim, dim_multiplier=3),
+            MLP(mlp_dim, dim_multiplier=4), # dim_multiplier=3),
         ]
         if with_seq_parallel:
             modules.append(nn.LayerNorm(mlp_dim, bias=False))
@@ -1414,7 +1414,7 @@ class FSDPTest(MultiProcessTestCase):
             )
 
 
-def test_compiled_fsdp(compile_compute_on_module: Optional[type] = None):
+def test_graph_break_fsdp(compile_compute_on_module: Optional[type] = None):
     def fully_shard_with_compiled_compute(*args, **kwargs):
         # compile ``module._call_impl``
         # to showcase how to include user-registered hooks
