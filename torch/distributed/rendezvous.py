@@ -58,6 +58,12 @@ def _query_to_dict(query: str) -> Dict[str, str]:
     return {pair[0]: pair[1] for pair in (pair.split("=") for pair in filter(None, query.split("&")))}
 
 
+def _get_use_libuv_from_query_dict(query_dict: Dict[str, str]) -> bool:
+    # libuv is the default backend for TCPStore. To enable the non-libuv backend,
+    # user can explicitly specify ``use_libuv=0`` in the URL parameter.
+    return query_dict.get("use_libuv", os.environ.get("USE_LIBUV", "1")) == "1"
+
+
 def _rendezvous_helper(url: str, rank: int, world_size_opt: Optional[int], **kwargs):
     result = urlparse(url)
     if world_size_opt is None:
@@ -197,9 +203,8 @@ def _tcp_rendezvous_handler(
 
     rank = int(query_dict["rank"])
     world_size = int(query_dict["world_size"])
-    # libuv is the default backend for TCPStore. To enable the non-libuv backend,
-    # user can explicitly specify ``use_libuv=0`` in the URL parameter.
-    use_libuv = query_dict.get("use_libuv", os.environ.get("USE_LIBUV", "1")) == "1"
+    use_libuv = _get_use_libuv_from_query_dict(query_dict)
+
     assert result.hostname is not None
 
     store = _create_c10d_store(result.hostname, result.port, rank, world_size, timeout, use_libuv)
@@ -247,9 +252,7 @@ def _env_rendezvous_handler(
 
     master_addr = _get_env_or_raise("MASTER_ADDR")
     master_port = int(_get_env_or_raise("MASTER_PORT"))
-    # libuv is the default backend for TCPStore. To enable the non-libuv backend,
-    # user can explicitly specify ``use_libuv=0`` in the URL parameter.
-    use_libuv = query_dict.get("use_libuv", os.environ.get("USE_LIBUV", "1")) == "1"
+    use_libuv = _get_use_libuv_from_query_dict(query_dict)
 
     store = _create_c10d_store(master_addr, master_port, rank, world_size, timeout, use_libuv)
 

@@ -297,7 +297,7 @@ TCPStore::TCPStore(std::string host, const TCPStoreOptions& opts)
       constexpr auto* msg =
           "The libuv TCPStore backend does not support initialization with an listen fd. "
           "Please switch to the legacy TCPStore by setting environment variable USE_LIBUV "
-          "to \"1\".";
+          "to \"0\".";
       C10D_ERROR(msg);
       C10_THROW_ERROR(NotImplementedError, msg);
       return;
