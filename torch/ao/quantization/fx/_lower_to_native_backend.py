@@ -926,8 +926,14 @@ def _lower_dynamic_weighted_ref_functional(
         # Linear prepack args: (quantized weights[, bias])
         # Conv prepack args: (quantized weights[, bias, stride, padding, dilation, groups])
         prepack_args = [quantized_weight] + remaining_func_args
+        prepack_kwargs = {}
         if func_node.target == F.linear:
             prepack_op = get_linear_prepack_op_for_dtype(weight_dtype)
+            kwargs = func_node.kwargs.copy()
+            if 'bias' in kwargs:
+                prepack_kwargs['B'] = kwargs['bias']
+                del kwargs['bias']
+                func_node.kwargs = kwargs
         elif func_node.target in CONV_FUNCTIONAL_OPS:
             prepack_op = get_qconv_prepack_op(func_node.target)
             # For conv1d, the stride, padding, and dilation args may be ints,
@@ -939,7 +945,7 @@ def _lower_dynamic_weighted_ref_functional(
         else:
             raise ValueError(f"Lowering is not supported for op '{func_node.target}'")
         with model.graph.inserting_before(func_node):
-            packed_weight = model.graph.create_node("call_function", prepack_op, tuple(prepack_args), {})
+            packed_weight = model.graph.create_node("call_function", prepack_op, tuple(prepack_args), prepack_kwargs)
 
         # Step 3: Replace reference pattern with the corresponding quantized op
         func_node.target = q_relu_func if relu_node is not None else q_func

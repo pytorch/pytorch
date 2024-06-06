@@ -9,6 +9,10 @@
 # - `torch.nn.Parameter`
 # - `collections.Counter`
 # - `collections.OrderedDict`
+# Additionally, users can use an allowlist for adding classes they have deemed as safe using
+# `_add_safe_globals()` (`torch.serialization.add_safe_globals`)
+# `_clear_safe_globals()` (`torch.serialization.clear_safe_globals`)
+# `_get_safe_globals()` (`torch.serialization.get_safe_globals`)
 
 # Based of https://github.com/python/cpython/blob/main/Lib/pickle.py
 # Expected to be useful for loading PyTorch model weights
@@ -64,6 +68,52 @@ from typing import Any, Dict, List
 
 import torch
 
+_marked_safe_globals_list: List[Any] = []
+
+
+def _add_safe_globals(safe_globals: List[Any]):
+    global _marked_safe_globals_list
+    _marked_safe_globals_list += safe_globals
+
+
+def _get_safe_globals() -> List[Any]:
+    global _marked_safe_globals_list
+    return _marked_safe_globals_list
+
+
+def _clear_safe_globals():
+    global _marked_safe_globals_list
+    _marked_safe_globals_list = []
+
+
+# Separate from _get_allowed_globals because of the lru_cache on _get_allowed_globals
+# For example if user had a script like
+#   torch.load(file_a)
+#   torch.serialization._add_safe_globals([torch.foo])
+#   torch.load(file_b)
+# the dynamic additions to safe_globals would not be picked up by
+# _get_allowed_globals due to the lru_cache
+def _get_user_allowed_globals():
+    rc: Dict[str, Any] = {}
+    for f in _marked_safe_globals_list:
+        rc[f"{f.__module__}.{f.__name__}"] = f
+    return rc
+
+
+def _tensor_rebuild_functions():
+    return {
+        torch._utils._rebuild_parameter,
+        torch._utils._rebuild_parameter_with_state,
+        torch._utils._rebuild_qtensor,
+        torch._utils._rebuild_tensor,
+        torch._utils._rebuild_tensor_v2,
+        torch._utils._rebuild_tensor_v3,
+        torch._utils._rebuild_sparse_tensor,
+        torch._utils._rebuild_meta_tensor_no_storage,
+        torch._utils._rebuild_nested_tensor,
+        torch._utils._rebuild_wrapper_subclass,
+    }
+
 
 # Unpickling machinery
 @_functools.lru_cache(maxsize=1)
@@ -75,6 +125,7 @@ def _get_allowed_globals():
         "torch.serialization._get_layout": torch.serialization._get_layout,
         "torch.Size": torch.Size,
         "torch.Tensor": torch.Tensor,
+        "torch.device": torch.device,
     }
     # dtype
     for t in torch.storage._dtype_to_storage_type_map().keys():
@@ -103,17 +154,7 @@ def _get_allowed_globals():
     ]:
         rc[str(qt)] = qt
     # Rebuild functions
-    for f in [
-        torch._utils._rebuild_parameter,
-        torch._utils._rebuild_parameter_with_state,
-        torch._utils._rebuild_qtensor,
-        torch._utils._rebuild_tensor,
-        torch._utils._rebuild_tensor_v2,
-        torch._utils._rebuild_tensor_v3,
-        torch._utils._rebuild_sparse_tensor,
-        torch._utils._rebuild_meta_tensor_no_storage,
-        torch._utils._rebuild_nested_tensor,
-    ]:
+    for f in _tensor_rebuild_functions():
         rc[f"torch._utils.{f.__name__}"] = f
 
     # Handles Tensor Subclasses, Tensor's with attributes.
@@ -151,8 +192,14 @@ class Unpickler:
                 full_path = f"{module}.{name}"
                 if full_path in _get_allowed_globals():
                     self.append(_get_allowed_globals()[full_path])
+                elif full_path in _get_user_allowed_globals():
+                    self.append(_get_user_allowed_globals()[full_path])
                 else:
-                    raise RuntimeError(f"Unsupported class {full_path}")
+                    raise RuntimeError(
+                        f"Unsupported global: GLOBAL {full_path} was not an allowed global by default. "
+                        "Please use `torch.serialization.add_safe_globals` to allowlist this global "
+                        "if you trust this class/function."
+                    )
             elif key[0] == NEWOBJ[0]:
                 args = self.stack.pop()
                 cls = self.stack.pop()
@@ -162,7 +209,10 @@ class Unpickler:
             elif key[0] == REDUCE[0]:
                 args = self.stack.pop()
                 func = self.stack[-1]
-                if func not in _get_allowed_globals().values():
+                if (
+                    func not in _get_allowed_globals().values()
+                    and func not in _get_user_allowed_globals().values()
+                ):
                     raise RuntimeError(
                         f"Trying to call reduce for unrecognized function {func}"
                     )

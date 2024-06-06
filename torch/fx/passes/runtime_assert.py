@@ -48,6 +48,31 @@ def insert_deferred_runtime_asserts(
     when they occur.  Instead, we accumulate them in the ShapeEnv, and in this
     pass insert them into the graph as proper tests.
     """
+
+    # We hash (node_name, min_val, max_val)
+    nodes_that_already_have_sym_constraint_range = set()
+
+    # We hash only node name here because size don't take min/max
+    nodes_that_already_have_sym_constraint_size = set()
+    # TODO this only works for top-level nodes today, also
+    # we should potentially use it not create duplicate
+    # assert_async nodes
+    for node in gm.graph.nodes:
+        if (
+            node.op == "call_function"
+            and node.target == torch.ops.aten.sym_constrain_range.default
+        ):
+            assert len(node.args) == 1
+            nodes_that_already_have_sym_constraint_range.add(
+                (node.args[0], node.kwargs["min"], node.kwargs["max"])
+            )
+        if (
+            node.op == "call_function"
+            and node.target == torch.ops.aten.sym_constrain_range_for_size.default
+        ):
+            assert len(node.args) == 1
+            nodes_that_already_have_sym_constraint_size.add(node.args[0])
+
     # Import sympy locally
     import sympy
 
@@ -57,6 +82,7 @@ def insert_deferred_runtime_asserts(
         ConvertIntKey,
         DivideByKey,
         free_symbols,
+        InnerTensorKey,
     )
     from torch.utils._sympy.interp import sympy_interp
     from torch.utils._sympy.reference import PythonReferenceAnalysis
@@ -73,16 +99,30 @@ def insert_deferred_runtime_asserts(
         lazy_format_graph_code(f"pre insert_deferred_runtime_asserts {name}", gm),
     )
 
+    # deduplicate unassociated runtime assertions
+    # we could do better, some guards might be redundant,
+    # e.g. Eq(s0, 4) & Eq(2*s0, 8)
+    # but unclear how to handle all of that right now.
+    # TODO(pianpwk): better way of doing this
+    new_ras = []
+    ras_exprs: Set[sympy.Expr] = set()
+    for ras in ras_by_symbol.pop(None, []):  # type: ignore[call-overload]
+        if ras.expr not in ras_exprs:
+            new_ras.append(ras)
+            ras_exprs.add(ras.expr)
+    ras_by_symbol[None] = new_ras  # type: ignore[index]
+
     # We are going to mutate the dict
     symbol_to_proxy: Dict[sympy.Symbol, fx.Proxy] = {}
     placeholders = set()
     last_placeholder = None
     for node in graph.nodes:
         if node.op != "placeholder":
-            last_placeholder = node
             break
+        last_placeholder = node
         placeholders.add(node)
-    assert last_placeholder is not None
+    if last_placeholder is None:  # no placeholders, just insert before first node
+        last_placeholder = next(iter(graph.nodes))
 
     # Identify what symbols we need to reify.  This isn't strictly needed
     # but helps reduce churn on the graph
@@ -120,6 +160,7 @@ def insert_deferred_runtime_asserts(
                     ),
                 )
 
+    inserted_sym_nodes = 0  # for inserting unassociated runtime asserts
     nodes = list(graph.nodes)
     for i, node in enumerate(nodes[:-1]):
         # Placeholders can match symbols, but when we destructure them
@@ -147,6 +188,8 @@ def insert_deferred_runtime_asserts(
                     ):
                         symbol_to_proxy[s] = fx.Proxy(cb())
                         log.debug("symbol_to_proxy[%s] = %s", s, symbol_to_proxy[s])
+                        nonlocal inserted_sym_nodes
+                        inserted_sym_nodes += 1
 
                 match_symbol(example_value, lambda: node)
                 if isinstance(t := example_value, torch.Tensor):
@@ -174,8 +217,13 @@ def insert_deferred_runtime_asserts(
             # Handle asserts that aren't associated with any symbol.  This
             # doesn't really have to be in the loop as it will only run once,
             # it just needs to happen right after the placeholders.
+            # insert this after placeholders & added sym nodes, and before non-placeholders.
             if node not in placeholders:
-                add_runtime_asserts(ras_by_symbol.pop(None, []))  # type: ignore[call-overload]
+                last_sym_node = last_placeholder
+                for _ in range(inserted_sym_nodes):
+                    last_sym_node = last_sym_node.next
+                with graph.inserting_before(last_sym_node.next):
+                    add_runtime_asserts(ras_by_symbol.pop(None, []))  # type: ignore[call-overload]
 
             defs = []
 
@@ -193,6 +241,22 @@ def insert_deferred_runtime_asserts(
                             and isinstance(keypath[0], CallMethodKey)
                             and isinstance(keypath[1], pytree.SequenceKey)
                         ):
+                            if keypath[0].name == "size":
+                                return go(
+                                    graph.call_function(
+                                        torch.ops.aten.sym_size.int,
+                                        (node, keypath[1].idx),
+                                    ),
+                                    keypath[2:],
+                                )
+                            if keypath[0].name == "stride":
+                                return go(
+                                    graph.call_function(
+                                        torch.ops.aten.stride.int,
+                                        (node, keypath[1].idx),
+                                    ),
+                                    keypath[2:],
+                                )
                             return go(
                                 graph.call_method(
                                     keypath[0].name, (node, keypath[1].idx)
@@ -222,6 +286,13 @@ def insert_deferred_runtime_asserts(
                             return go(
                                 graph.call_function(
                                     operator.floordiv, (node, keypath[0].divisor)
+                                ),
+                                keypath[1:],
+                            )
+                        elif isinstance(keypath[0], InnerTensorKey):
+                            return go(
+                                graph.call_function(
+                                    getattr, (node, keypath[0].inner_name)
                                 ),
                                 keypath[1:],
                             )
@@ -275,10 +346,14 @@ def insert_deferred_runtime_asserts(
 
                 if i0 in shape_env.size_like:
                     if export:
-                        graph.call_function(
-                            torch.ops.aten.sym_constrain_range_for_size.default,
-                            (symbol_to_proxy[i0].node,),
-                        )
+                        if (
+                            symbol_to_proxy[i0].node
+                            not in nodes_that_already_have_sym_constraint_size
+                        ):
+                            graph.call_function(
+                                torch.ops.aten.sym_constrain_range_for_size.default,
+                                (symbol_to_proxy[i0].node,),
+                            )
                     else:
                         graph.call_function(
                             torch._check_is_size, (symbol_to_proxy[i0].node,)
@@ -296,7 +371,14 @@ def insert_deferred_runtime_asserts(
                         except TypeError:
                             return None
 
-                    if export:
+                    min_val = convert(vr.lower)
+                    max_val = convert(vr.upper)
+
+                    if (
+                        symbol_to_proxy[i0].node,
+                        min_val,
+                        max_val,
+                    ) not in nodes_that_already_have_sym_constraint_range:
                         graph.call_function(
                             torch.ops.aten.sym_constrain_range.default,
                             (symbol_to_proxy[i0].node,),
@@ -304,15 +386,6 @@ def insert_deferred_runtime_asserts(
                                 "min": convert(vr.lower),
                                 "max": convert(vr.upper),
                             },
-                        )
-                    else:
-                        graph.call_function(
-                            torch._constrain_as_value,
-                            (
-                                symbol_to_proxy[i0].node,
-                                convert(vr.lower),
-                                convert(vr.upper),
-                            ),
                         )
 
                 add_runtime_asserts(ras)

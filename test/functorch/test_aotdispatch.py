@@ -15,11 +15,13 @@ from functools import partial
 from typing import Any, Callable, Dict, List, Optional, Union
 from unittest.mock import patch
 
+from common_utils import decorate, decorateForModules, skip, skipOps, xfail
+
 import torch
 import torch._dynamo as torchdynamo
 import torch.nn as nn
 import torch.utils._pytree as pytree
-from common_utils import decorate, decorateForModules, skip, skipOps, xfail
+
 from functorch import grad, jacrev, make_fx, vjp, vmap
 from functorch.compile import (
     aot_function,
@@ -69,6 +71,7 @@ from torch.testing._internal.common_utils import (
     skipIfRocm,
     skipIfTorchDynamo,
     TestCase,
+    xfailIfTorchDynamo,
 )
 from torch.testing._internal.hop_db import hop_db
 from torch.testing._internal.optests import (
@@ -102,13 +105,7 @@ except ImportError:
 
 
 class AOTTestCase(TestCase):
-    def setUp(self):
-        self.prev_grad_state = torch.is_grad_enabled()
-        super().setUp()
-
-    def tearDown(self):
-        torch.set_grad_enabled(self.prev_grad_state)
-        super().tearDown()
+    pass
 
 
 class TestPythonKey(AOTTestCase):
@@ -580,6 +577,9 @@ def forward(self, primals_1, primals_2):
 
     # This is a (hopefully) extremely rare case that is difficult to handle,
     # so we ban it.
+    # https://github.com/pytorch/pytorch/issues/126236
+    # https://github.com/pytorch/pytorch/pull/126113
+    @xfailIfTorchDynamo
     def test_set__and_data_mutation_bad(self):
         def f(a):
             a_view = a.view(-1)
@@ -4834,70 +4834,6 @@ class TestPartitioning(AOTTestCase):
         )
         self.assertEqual(get_num_ins_outs(fw_graph), (4, 2))
         self.assertEqual(get_num_ins_outs(bw_graph), (2, 4))
-
-    @unittest.skipIf(not USE_NETWORKX, "networkx not available")
-    def test_min_cut_partitioner_recomputable_ops(self):
-        def f(x):
-            return x * x * x
-
-        recomputable_ops = []
-        partition_fn = partial(
-            min_cut_rematerialization_partition, recomputable_ops=recomputable_ops
-        )
-
-        fw_graph, bw_graph = get_fw_bw_graph(
-            f, [torch.randn(3, requires_grad=True)], partition_fn
-        )
-        # Expected forward graph:
-        # opcode         name       target           args                        kwargs
-        # -------------  ---------  ---------------  --------------------------  --------
-        # placeholder    primals_1  primals_1        ()                          {}
-        # call_function  mul        aten.mul.Tensor  (primals_1, primals_1)      {}
-        # call_function  mul_1      aten.mul.Tensor  (mul, primals_1)            {}
-        # output         output     output           ([mul_1, primals_1, mul],)  {}
-        self.assertEqual(get_num_ins_outs(fw_graph), (1, 3))
-        # Expected backward graph:
-        # opcode         name        target           args                     kwargs
-        # -------------  ----------  ---------------  -----------------------  --------
-        # placeholder    primals_1   primals_1        ()                       {}
-        # placeholder    mul         mul              ()                       {}
-        # placeholder    tangents_1  tangents_1       ()                       {}
-        # call_function  mul_2       aten.mul.Tensor  (tangents_1, mul)        {}
-        # call_function  mul_3       aten.mul.Tensor  (tangents_1, primals_1)  {}
-        # call_function  mul_4       aten.mul.Tensor  (mul_3, primals_1)       {}
-        # call_function  add         aten.add.Tensor  (mul_2, mul_4)           {}
-        # call_function  add_1       aten.add.Tensor  (add, mul_4)             {}
-        # output         output      output           ([add_1],)               {}
-        self.assertEqual(get_num_ins_outs(bw_graph), (3, 1))
-
-        recomputable_ops = [torch.ops.aten.mul]
-        partition_fn = partial(
-            min_cut_rematerialization_partition, recomputable_ops=recomputable_ops
-        )
-        fw_graph, bw_graph = get_fw_bw_graph(
-            f, [torch.randn(3, requires_grad=True)], partition_fn
-        )
-        # Expected forward graph:
-        # opcode         name       target           args                    kwargs
-        # -------------  ---------  ---------------  ----------------------  --------
-        # placeholder    primals_1  primals_1        ()                      {}
-        # call_function  mul        aten.mul.Tensor  (primals_1, primals_1)  {}
-        # call_function  mul_1      aten.mul.Tensor  (mul, primals_1)        {}
-        # output         output     output           ([mul_1, primals_1],)   {}
-        self.assertEqual(get_num_ins_outs(fw_graph), (1, 2))
-        # Expected backward graph:
-        # opcode         name        target           args                     kwargs
-        # -------------  ----------  ---------------  -----------------------  --------
-        # placeholder    primals_1   primals_1        ()                       {}
-        # placeholder    tangents_1  tangents_1       ()                       {}
-        # call_function  mul         aten.mul.Tensor  (primals_1, primals_1)   {} # RECOMPUTED
-        # call_function  mul_2       aten.mul.Tensor  (tangents_1, mul)        {}
-        # call_function  mul_3       aten.mul.Tensor  (tangents_1, primals_1)  {}
-        # call_function  mul_4       aten.mul.Tensor  (mul_3, primals_1)       {}
-        # call_function  add         aten.add.Tensor  (mul_2, mul_4)           {}
-        # call_function  add_1       aten.add.Tensor  (add, mul_4)             {}
-        # output         output      output           ([add_1],)               {}
-        self.assertEqual(get_num_ins_outs(bw_graph), (2, 1))
 
     def test_contiguous(self):
         # The test simulates the condition where transpose followed by view

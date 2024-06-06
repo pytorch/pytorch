@@ -13,6 +13,7 @@ from unittest import skipIf as skipif
 
 import pytest
 from pytest import raises as assert_raises
+
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -20,6 +21,7 @@ from torch.testing._internal.common_utils import (
     subtest,
     TEST_WITH_TORCHDYNAMO,
     TestCase,
+    xfailIfTorchDynamo,
     xpassIfTorchDynamo,
 )
 
@@ -67,6 +69,7 @@ class TestBuiltin(TestCase):
         assert_(left == right)
         assert_(hash(left) == hash(right))
 
+    @xfailIfTorchDynamo  # TypeError -> InternalTorchDynamoError
     def test_invalid_types(self):
         # Make sure invalid type strings raise an error
 

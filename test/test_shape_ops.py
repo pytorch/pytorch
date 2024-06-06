@@ -1,22 +1,41 @@
 # Owner(s): ["module: tests"]
 
-import torch
+import random
+import unittest
+import warnings
+from functools import partial
+
+from itertools import chain, combinations, permutations, product
+
 import numpy as np
 
-from itertools import product, combinations, permutations, chain
-from functools import partial
-import random
-import warnings
-import unittest
+import torch
 
 from torch import nan
 from torch.testing import make_tensor
-from torch.testing._internal.common_utils import (
-    TestCase, run_tests, skipIfTorchDynamo, torch_to_numpy_dtype_dict, IS_JETSON, TEST_PRIVATEUSE1_DEVICE_TYPE)
 from torch.testing._internal.common_device_type import (
-    instantiate_device_type_tests, onlyCPU, onlyCUDA, dtypes, onlyNativeDeviceTypes,
-    dtypesIfCUDA, largeTensorTest)
-from torch.testing._internal.common_dtype import all_types_and_complex_and, all_types, all_types_and
+    dtypes,
+    dtypesIfCUDA,
+    instantiate_device_type_tests,
+    largeTensorTest,
+    onlyCPU,
+    onlyCUDA,
+    onlyNativeDeviceTypes,
+)
+from torch.testing._internal.common_dtype import (
+    all_types,
+    all_types_and,
+    all_types_and_complex_and,
+)
+from torch.testing._internal.common_utils import (
+    IS_JETSON,
+    run_tests,
+    skipIfTorchDynamo,
+    TEST_PRIVATEUSE1_DEVICE_TYPE,
+    TestCase,
+    torch_to_numpy_dtype_dict,
+)
+
 
 # TODO: replace with make_tensor
 def _generate_input(shape, dtype, device, with_extremal):
@@ -29,17 +48,19 @@ def _generate_input(shape, dtype, device, with_extremal):
                 x = torch.randn(*shape, device=device) * random.randint(30, 100)
                 x = x.to(torch.bfloat16)
             else:
-                x = torch.randn(*shape, dtype=dtype, device=device) * random.randint(30, 100)
+                x = torch.randn(*shape, dtype=dtype, device=device) * random.randint(
+                    30, 100
+                )
             x[torch.randn(*shape) > 0.5] = 0
             if with_extremal and dtype.is_floating_point:
                 # Use extremal values
-                x[torch.randn(*shape) > 0.5] = float('nan')
-                x[torch.randn(*shape) > 0.5] = float('inf')
-                x[torch.randn(*shape) > 0.5] = float('-inf')
+                x[torch.randn(*shape) > 0.5] = float("nan")
+                x[torch.randn(*shape) > 0.5] = float("inf")
+                x[torch.randn(*shape) > 0.5] = float("-inf")
             elif with_extremal and dtype.is_complex:
-                x[torch.randn(*shape) > 0.5] = complex('nan')
-                x[torch.randn(*shape) > 0.5] = complex('inf')
-                x[torch.randn(*shape) > 0.5] = complex('-inf')
+                x[torch.randn(*shape) > 0.5] = complex("nan")
+                x[torch.randn(*shape) > 0.5] = complex("inf")
+                x[torch.randn(*shape) > 0.5] = complex("-inf")
         elif dtype == torch.bool:
             x = torch.zeros(shape, dtype=dtype, device=device)
             x[torch.randn(*shape) > 0.5] = True
@@ -48,8 +69,8 @@ def _generate_input(shape, dtype, device, with_extremal):
 
     return x
 
-class TestShapeOps(TestCase):
 
+class TestShapeOps(TestCase):
     # TODO: update to work on CUDA, too
     @onlyCPU
     def test_unbind(self, device):
@@ -71,7 +92,7 @@ class TestShapeOps(TestCase):
         tensor0D = torch.tensor(list0D)
         self.assertEqual(tensor0D.tolist(), list0D)
 
-        table1D = [1., 2., 3.]
+        table1D = [1.0, 2.0, 3.0]
         tensor1D = torch.tensor(table1D)
         storage = torch.Storage(table1D)
         self.assertEqual(tensor1D.tolist(), table1D)
@@ -102,19 +123,29 @@ class TestShapeOps(TestCase):
                 fn(x, 0, 5)
 
             # Mismatch in size of `source` and `destination`
-            with self.assertRaisesRegex(RuntimeError, "movedim: Invalid source or destination dims:"):
-                fn(x, (1, 0), (0, ))
+            with self.assertRaisesRegex(
+                RuntimeError, "movedim: Invalid source or destination dims:"
+            ):
+                fn(x, (1, 0), (0,))
 
-            with self.assertRaisesRegex(RuntimeError, "movedim: repeated dim in `source`"):
+            with self.assertRaisesRegex(
+                RuntimeError, "movedim: repeated dim in `source`"
+            ):
                 fn(x, (0, 0), (0, 1))
 
-            with self.assertRaisesRegex(RuntimeError, "movedim: repeated dim in `source`"):
+            with self.assertRaisesRegex(
+                RuntimeError, "movedim: repeated dim in `source`"
+            ):
                 fn(x, (0, 1, 0), (0, 1, 2))
 
-            with self.assertRaisesRegex(RuntimeError, "movedim: repeated dim in `destination`"):
+            with self.assertRaisesRegex(
+                RuntimeError, "movedim: repeated dim in `destination`"
+            ):
                 fn(x, (0, 1), (1, 1))
 
-            with self.assertRaisesRegex(RuntimeError, "movedim: repeated dim in `destination`"):
+            with self.assertRaisesRegex(
+                RuntimeError, "movedim: repeated dim in `destination`"
+            ):
                 fn(x, (0, 1, 2), (1, 0, 1))
 
     @dtypes(torch.int64, torch.float, torch.complex128)
@@ -137,8 +168,12 @@ class TestShapeOps(TestCase):
 
                         # Integer `source` and `destination`
                         torch_fn = partial(fn, source=src_dim, destination=dst_dim)
-                        np_fn = partial(np.moveaxis, source=src_dim, destination=dst_dim)
-                        self.compare_with_numpy(torch_fn, np_fn, x, device=None, dtype=None)
+                        np_fn = partial(
+                            np.moveaxis, source=src_dim, destination=dst_dim
+                        )
+                        self.compare_with_numpy(
+                            torch_fn, np_fn, x, device=None, dtype=None
+                        )
 
                     if nd == 0:
                         continue
@@ -148,9 +183,13 @@ class TestShapeOps(TestCase):
                         sequence[random_idx] = sequence[random_idx] - nd
                         return tuple(src_sequence)
 
-                    for src_sequence in permutations(range(nd), r=random.randint(1, nd)):
+                    for src_sequence in permutations(
+                        range(nd), r=random.randint(1, nd)
+                    ):
                         # Sequence `source` and `destination`
-                        dst_sequence = tuple(random.sample(range(nd), len(src_sequence)))
+                        dst_sequence = tuple(
+                            random.sample(range(nd), len(src_sequence))
+                        )
 
                         # Randomly change a dim to a negative dim representation of itself.
                         random_prob = random.random()
@@ -166,9 +205,15 @@ class TestShapeOps(TestCase):
                             random_idx = random.randint(0, len(src_sequence) - 1)
                             src_sequence = make_index_negative(src_sequence, random_idx)
 
-                        torch_fn = partial(fn, source=src_sequence, destination=dst_sequence)
-                        np_fn = partial(np.moveaxis, source=src_sequence, destination=dst_sequence)
-                        self.compare_with_numpy(torch_fn, np_fn, x, device=None, dtype=None)
+                        torch_fn = partial(
+                            fn, source=src_sequence, destination=dst_sequence
+                        )
+                        np_fn = partial(
+                            np.moveaxis, source=src_sequence, destination=dst_sequence
+                        )
+                        self.compare_with_numpy(
+                            torch_fn, np_fn, x, device=None, dtype=None
+                        )
 
             # Move dim to same position
             x = torch.randn(2, 3, 5, 7, 11)
@@ -213,10 +258,7 @@ class TestShapeOps(TestCase):
     def test_diagonal_multidim(self, device, dtype):
         x = torch.randn(10, 11, 12, 13, dtype=dtype, device=device)
         xn = x.numpy()
-        for args in [(2, 2, 3),
-                     (2,),
-                     (-2, 1, 2),
-                     (0, -2, -1)]:
+        for args in [(2, 2, 3), (2,), (-2, 1, 2), (0, -2, -1)]:
             result = torch.diagonal(x, *args)
             expected = xn.diagonal(*args)
             self.assertEqual(expected.shape, result.shape)
@@ -270,14 +312,22 @@ class TestShapeOps(TestCase):
             max_vals = max_vals.cpu().numpy()
 
         # Use NumPy implementation as reference
-        X_clamped = torch.tensor(np.clip(X.cpu().numpy(), a_min=min_vals, a_max=max_vals), device=device)
+        X_clamped = torch.tensor(
+            np.clip(X.cpu().numpy(), a_min=min_vals, a_max=max_vals), device=device
+        )
         return X, X_clamped
 
     # Tests clamp and its alias, clip
     @dtypes(torch.int64, torch.float32)
     def test_clamp(self, device, dtype):
-        op_list = (torch.clamp, torch.Tensor.clamp, torch.Tensor.clamp_,
-                   torch.clip, torch.Tensor.clip, torch.Tensor.clip_)
+        op_list = (
+            torch.clamp,
+            torch.Tensor.clamp,
+            torch.Tensor.clamp_,
+            torch.clip,
+            torch.Tensor.clip,
+            torch.Tensor.clip_,
+        )
 
         # min/max argument product
         args = product((-10, None), (10, None))
@@ -287,10 +337,9 @@ class TestShapeOps(TestCase):
                 if min_val is None and max_val is None:
                     continue
 
-                X, Y_expected = self.generate_clamp_baseline(device, dtype,
-                                                             min_vals=min_val,
-                                                             max_vals=max_val,
-                                                             with_nans=False)
+                X, Y_expected = self.generate_clamp_baseline(
+                    device, dtype, min_vals=min_val, max_vals=max_val, with_nans=False
+                )
 
                 # Test op
                 X1 = X.clone()  # So that the in-place ops do not change X
@@ -304,8 +353,14 @@ class TestShapeOps(TestCase):
                     self.assertEqual(Y_expected, Y_out)
 
     def test_clamp_propagates_nans(self, device):
-        op_list = (torch.clamp, torch.Tensor.clamp, torch.Tensor.clamp_,
-                   torch.clip, torch.Tensor.clip, torch.Tensor.clip_)
+        op_list = (
+            torch.clamp,
+            torch.Tensor.clamp,
+            torch.Tensor.clamp_,
+            torch.clip,
+            torch.Tensor.clip,
+            torch.Tensor.clip_,
+        )
 
         # min/max argument product
         args = product((-10, None), (10, None))
@@ -315,10 +370,13 @@ class TestShapeOps(TestCase):
                 if min_val is None and max_val is None:
                     continue
 
-                X, Y_expected = self.generate_clamp_baseline(device, torch.float,
-                                                             min_vals=min_val,
-                                                             max_vals=max_val,
-                                                             with_nans=True)
+                X, Y_expected = self.generate_clamp_baseline(
+                    device,
+                    torch.float,
+                    min_vals=min_val,
+                    max_vals=max_val,
+                    with_nans=True,
+                )
                 Y_expected = torch.isnan(Y_expected)
 
                 # Test op
@@ -334,7 +392,7 @@ class TestShapeOps(TestCase):
 
     def test_clamp_raises_arg_errors(self, device):
         X = torch.randn(100, dtype=torch.float, device=device)
-        error_msg = 'At least one of \'min\' or \'max\' must not be None'
+        error_msg = "At least one of 'min' or 'max' must not be None"
         with self.assertRaisesRegex(RuntimeError, error_msg):
             X.clamp()
         with self.assertRaisesRegex(RuntimeError, error_msg):
@@ -369,18 +427,22 @@ class TestShapeOps(TestCase):
                         self.assertEqual(in_t.flip(p_dims), out_t)
                         if len(p_dims) > 0:
                             # Wrap 1st dim
-                            self.assertEqual(in_t.flip((-n + p_dims[0],) + p_dims[1:]), out_t)
+                            self.assertEqual(
+                                in_t.flip((-n + p_dims[0],) + p_dims[1:]), out_t
+                            )
 
         def gen_data():
             # Basic tests
             data = make_from_data([1, 2, 3, 4, 5, 6, 7, 8]).view(2, 2, 2)
             nonctg = make_from_size((2, 2, 2), noncontiguous=True).copy_(data)
 
-            dims_result = ((0, make_from_data([5, 6, 7, 8, 1, 2, 3, 4]).view(2, 2, 2)),
-                           (1, make_from_data([3, 4, 1, 2, 7, 8, 5, 6]).view(2, 2, 2)),
-                           (2, make_from_data([2, 1, 4, 3, 6, 5, 8, 7]).view(2, 2, 2)),
-                           ((0, 1), make_from_data([7, 8, 5, 6, 3, 4, 1, 2]).view(2, 2, 2)),
-                           ((0, 1, 2), make_from_data([8, 7, 6, 5, 4, 3, 2, 1]).view(2, 2, 2)))
+            dims_result = (
+                (0, make_from_data([5, 6, 7, 8, 1, 2, 3, 4]).view(2, 2, 2)),
+                (1, make_from_data([3, 4, 1, 2, 7, 8, 5, 6]).view(2, 2, 2)),
+                (2, make_from_data([2, 1, 4, 3, 6, 5, 8, 7]).view(2, 2, 2)),
+                ((0, 1), make_from_data([7, 8, 5, 6, 3, 4, 1, 2]).view(2, 2, 2)),
+                ((0, 1, 2), make_from_data([8, 7, 6, 5, 4, 3, 2, 1]).view(2, 2, 2)),
+            )
             for in_tensor, (dims, out_tensor) in product((data, nonctg), dims_result):
                 yield in_tensor, dims, out_tensor
 
@@ -393,7 +455,9 @@ class TestShapeOps(TestCase):
             yield in_t, 1, in_t
 
             # Transposed
-            in_t = make_from_data([1, 2, 3, 4, 5, 6, 7, 8]).view(2, 2, 2).transpose(0, 1)
+            in_t = (
+                make_from_data([1, 2, 3, 4, 5, 6, 7, 8]).view(2, 2, 2).transpose(0, 1)
+            )
             dims = (0, 1, 2)
             out_t = make_from_data([8, 7, 4, 3, 6, 5, 2, 1]).view(2, 2, 2)
             yield in_t, dims, out_t
@@ -411,7 +475,9 @@ class TestShapeOps(TestCase):
             if device == "cpu" and dtype != torch.bfloat16:
                 for mf in [torch.contiguous_format, torch.channels_last]:
                     for c in [2, 3, 8, 16]:
-                        in_t = make_from_size((2, c, 32, 32)).contiguous(memory_format=mf)
+                        in_t = make_from_size((2, c, 32, 32)).contiguous(
+                            memory_format=mf
+                        )
                         np_in_t = in_t.numpy()
 
                         np_out_t = np_in_t[:, :, :, ::-1].copy()
@@ -464,7 +530,9 @@ class TestShapeOps(TestCase):
         size = [2, 3, 4]
         data = make_from_size(size)
         possible_dims = range(len(size))
-        test_dims = chain(combinations(possible_dims, 1), combinations(possible_dims, 2))
+        test_dims = chain(
+            combinations(possible_dims, 1), combinations(possible_dims, 2)
+        )
 
         for dims in test_dims:
             self.assertEqual(size, list(data.flip(dims).size()))
@@ -482,7 +550,6 @@ class TestShapeOps(TestCase):
         # not allow dim > max dim
         self.assertRaises(IndexError, lambda: data.flip(0, 1, 2, 3))
         self.assertRaises(IndexError, lambda: data.flip(3))
-
 
     def _rand_shape(self, dim, min_size, max_size):
         return tuple(torch.randint(min_size, max_size + 1, (dim,)))
@@ -504,8 +571,10 @@ class TestShapeOps(TestCase):
                     self.compare_with_numpy(torch_fn, np_fn, data)
 
     @onlyCUDA  # CPU is too slow
-    @largeTensorTest('17GB')  # 4 tensors of 4GB (in, out) x (torch, numpy) + 1GB
-    @largeTensorTest("81GB", "cpu")  # even for CUDA test, sufficient system memory is required
+    @largeTensorTest("17GB")  # 4 tensors of 4GB (in, out) x (torch, numpy) + 1GB
+    @largeTensorTest(
+        "81GB", "cpu"
+    )  # even for CUDA test, sufficient system memory is required
     @unittest.skipIf(IS_JETSON, "Too large for Jetson")
     def test_flip_large_tensor(self, device):
         t_in = torch.empty(2**32 + 1, dtype=torch.uint8).random_()
@@ -569,7 +638,9 @@ class TestShapeOps(TestCase):
 
         # test tensor with more than 2D
         data = torch.arange(1, 9, device=device).view(2, 2, 2)
-        self.assertEqual(torch.tensor([2, 4, 1, 3, 6, 8, 5, 7]).view(2, 2, 2), data.rot90(1, [1, 2]))
+        self.assertEqual(
+            torch.tensor([2, 4, 1, 3, 6, 8, 5, 7]).view(2, 2, 2), data.rot90(1, [1, 2])
+        )
         self.assertEqual(data.rot90(1, [1, -1]), data.rot90(1, [1, 2]))
 
         # test for errors
@@ -601,7 +672,6 @@ class TestShapeOps(TestCase):
 
     @dtypes(*all_types_and(torch.half, torch.bool, torch.bfloat16))
     def test_nonzero(self, device, dtype):
-
         shapes = [
             torch.Size((12,)),
             torch.Size((12, 1)),
@@ -616,7 +686,9 @@ class TestShapeOps(TestCase):
                 return torch.randint(2, shape, device=device, dtype=dtype)
             else:
                 # windows does not work for bfloat16 randing
-                return torch.randint(2, shape, device=device, dtype=torch.float).to(dtype)
+                return torch.randint(2, shape, device=device, dtype=torch.float).to(
+                    dtype
+                )
 
         for shape in shapes:
             tensor = gen_nontrivial_input(shape, dtype, device)
@@ -624,20 +696,31 @@ class TestShapeOps(TestCase):
             dst2 = tensor.nonzero(as_tuple=False)
             dst3 = torch.empty([], dtype=torch.long, device=device)
             torch.nonzero(tensor, out=dst3)
-            if self.device_type != 'xla':
+            if self.device_type != "xla":
                 # xla does not raise runtime error
                 self.assertRaisesRegex(
                     RuntimeError,
                     "scalar type Long",
-                    lambda: torch.nonzero(tensor, out=torch.empty([], dtype=torch.float, device=device))
+                    lambda: torch.nonzero(
+                        tensor, out=torch.empty([], dtype=torch.float, device=device)
+                    ),
                 )
-            if self.device_type == 'cuda' or self.device_type == TEST_PRIVATEUSE1_DEVICE_TYPE:
+            if (
+                self.device_type == "cuda"
+                or self.device_type == TEST_PRIVATEUSE1_DEVICE_TYPE
+            ):
                 self.assertRaisesRegex(
                     RuntimeError,
                     "on the same device",
-                    lambda: torch.nonzero(tensor, out=torch.empty([], dtype=torch.long))
+                    lambda: torch.nonzero(
+                        tensor, out=torch.empty([], dtype=torch.long)
+                    ),
                 )
-            np_array = tensor.cpu().numpy() if dtype != torch.bfloat16 else tensor.float().cpu().numpy()
+            np_array = (
+                tensor.cpu().numpy()
+                if dtype != torch.bfloat16
+                else tensor.float().cpu().numpy()
+            )
             np_result = torch.from_numpy(np.stack(np_array.nonzero())).t()
             self.assertEqual(dst1.cpu(), np_result, atol=0, rtol=0)
             self.assertEqual(dst2.cpu(), np_result, atol=0, rtol=0)
@@ -656,7 +739,9 @@ class TestShapeOps(TestCase):
         with self.assertRaises(RuntimeError):
             torch.nonzero(t, as_tuple=True, out=out)
 
-        self.assertEqual(torch.nonzero(t, as_tuple=False, out=out), torch.nonzero(t, out=out))
+        self.assertEqual(
+            torch.nonzero(t, as_tuple=False, out=out), torch.nonzero(t, out=out)
+        )
 
         # Verifies that JIT script cannot handle the as_tuple kwarg
         # See Issue https://github.com/pytorch/pytorch/issues/45499.
@@ -684,7 +769,9 @@ class TestShapeOps(TestCase):
     def test_nonzero_discontiguous(self, device):
         shape = (4, 4)
         tensor = torch.randint(2, shape, device=device)
-        tensor_nc = torch.empty(shape[0], shape[1] * 2, device=device)[:, ::2].copy_(tensor)
+        tensor_nc = torch.empty(shape[0], shape[1] * 2, device=device)[:, ::2].copy_(
+            tensor
+        )
         dst1 = tensor.nonzero(as_tuple=False)
         dst2 = tensor_nc.nonzero(as_tuple=False)
         self.assertEqual(dst1, dst2, atol=0, rtol=0)
@@ -695,7 +782,9 @@ class TestShapeOps(TestCase):
         self.assertEqual(data_ptr, dst3.data_ptr())
         self.assertEqual(dst1, dst3, atol=0, rtol=0)
         # discontiguous out
-        dst4 = torch.empty(dst1.size(0), dst1.size(1) * 2, dtype=torch.long, device=device)[:, ::2]
+        dst4 = torch.empty(
+            dst1.size(0), dst1.size(1) * 2, dtype=torch.long, device=device
+        )[:, ::2]
         data_ptr = dst4.data_ptr()
         strides = dst4.stride()
         torch.nonzero(tensor, out=dst4)
@@ -710,7 +799,7 @@ class TestShapeOps(TestCase):
 
     @dtypes(torch.int64, torch.float, torch.complex128)
     def test_sparse_dense_dim(self, device, dtype):
-        for shape in [(), (2, ), (2, 3)]:
+        for shape in [(), (2,), (2, 3)]:
             if dtype.is_complex or dtype.is_floating_point:
                 x = torch.rand(shape, device=device, dtype=dtype)
             else:
@@ -718,7 +807,8 @@ class TestShapeOps(TestCase):
             self.assertEqual(x.sparse_dim(), 0)
             self.assertEqual(x.dense_dim(), len(shape))
 
+
 instantiate_device_type_tests(TestShapeOps, globals())
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     run_tests()

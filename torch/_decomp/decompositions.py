@@ -330,8 +330,8 @@ def rrelu_with_noise(
 def rrelu_with_noise_(
     self: Tensor,
     noise: Tensor,
-    lower: float,
-    upper: float,
+    lower: float = 0.125,
+    upper: float = 0.3333333333333333,
     training: bool = False,
     generator: Optional[torch.Generator] = None,
 ) -> Tensor:
@@ -2147,7 +2147,7 @@ def cudnn_batch_norm(
 
 def _broadcast_batch_norm_backward(x, broadcast_mask):
     for axis, mask in enumerate(broadcast_mask):
-        if mask == 1 and not (axis < x.ndim and x.shape[axis] == broadcast_mask[axis]):
+        if mask == 1 and not (axis < x.ndim and x.shape[axis] == mask):
             x = x.unsqueeze(axis)
     return x
 

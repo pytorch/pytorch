@@ -771,7 +771,9 @@ class DistributedDataParallel(Module, Joinable):
             # do not receive gradients.
             warnings.warn(
                 "The `check_reduction` argument in `DistributedDataParallel` "
-                "module is deprecated. Please avoid using it."
+                "module is deprecated. Please avoid using it.",
+                FutureWarning,
+                stacklevel=2,
             )
 
         # Check that a module does not have Uninitialized parameters

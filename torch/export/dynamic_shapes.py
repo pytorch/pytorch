@@ -1,7 +1,6 @@
 import builtins
 import dataclasses
 import inspect
-import math
 import sys
 import weakref
 from collections import defaultdict
@@ -254,10 +253,13 @@ class _Constraint(_ConstraintTarget, metaclass=_ConstraintFactory):
     shared: Optional[_ConstraintTarget] = None
     debug_name: Optional[str] = None
 
-    def _clone_with_range(self, lower=0, upper=math.inf):
+    def _clone_with_range(self, lower=0, upper=None):
         # Import sympy locally
         from torch.fx.experimental.symbolic_shapes import StrictMinMaxConstraint
         from torch.utils._sympy.value_ranges import ValueRanges
+
+        if upper is None:
+            upper = sys.maxsize - 1
 
         constraint_range = StrictMinMaxConstraint(
             vr=self.constraint_range.vr & ValueRanges(lower=lower, upper=upper),
@@ -486,7 +488,6 @@ def dynamic_dim(t: torch.Tensor, index: int, debug_name: Optional[str] = None):
         )
 
     # Import sympy locally
-    import sympy
 
     from torch.fx.experimental.symbolic_shapes import StrictMinMaxConstraint
     from torch.utils._sympy.value_ranges import ValueRanges
@@ -496,7 +497,7 @@ def dynamic_dim(t: torch.Tensor, index: int, debug_name: Optional[str] = None):
         id(t),
         index,
         StrictMinMaxConstraint(
-            vr=ValueRanges(lower=0, upper=sympy.oo), warn_only=False
+            vr=ValueRanges(lower=0, upper=sys.maxsize - 1), warn_only=False
         ),
         debug_name=debug_name,
     )
@@ -602,18 +603,20 @@ def _tree_map(
     return tree_map(f, tree, *dynamic_shapes, is_leaf=is_leaf)
 
 
-def _combine_args(f, args, kwargs):
+def _combine_args(f, args, kwargs, _is_torch_jit_trace=False):
     # combine args and kwargs following the signature of f, as it happens
     # in the body of f when called with *args, **kwargs
     if isinstance(f, ExportedProgram):
         f = f.module()
-    signature = (
-        inspect.signature(f.forward)
-        if isinstance(f, torch.nn.Module)
-        else inspect.signature(f)
-    )
-    kwargs = kwargs if kwargs is not None else {}
-    return signature.bind(*args, **kwargs).arguments
+    if not _is_torch_jit_trace:
+        signature = (
+            inspect.signature(f.forward)
+            if isinstance(f, torch.nn.Module)
+            else inspect.signature(f)
+        )
+        kwargs = kwargs if kwargs is not None else {}
+        return signature.bind(*args, **kwargs).arguments
+    return args
 
 
 class ShapesCollection:
@@ -692,6 +695,7 @@ def _process_dynamic_shapes(
     args: Tuple[Any, ...],
     kwargs: Optional[Dict[str, Any]] = None,
     dynamic_shapes: Optional[Union[Dict[str, Any], Tuple[Any], List[Any]]] = None,
+    _is_torch_jit_trace=False,
 ) -> Optional[List[Constraint]]:
     from torch._dynamo.exc import UserError, UserErrorType
 
@@ -720,7 +724,7 @@ def _process_dynamic_shapes(
             if solution is not None:
                 return int(solution[1])  # type: ignore[call-overload]
             else:
-                raise UserError(  # noqa: TRY200
+                raise UserError(  # noqa: B904
                     UserErrorType.CONSTRAINT_VIOLATION,
                     f"Expected shape[{i}] = {tensor.shape[i]} of input Tensor to be "
                     f"of the form {expr}, where {symbol} is an integer",
@@ -858,7 +862,9 @@ def _process_dynamic_shapes(
 
         _tree_map(assoc_shape, combined_args, dynamic_shapes)
 
-    combined_args = _combine_args(f, args, kwargs)
+    combined_args = _combine_args(
+        f, args, kwargs, _is_torch_jit_trace=_is_torch_jit_trace
+    )
     if not isinstance(dynamic_shapes, dict):
         assert isinstance(dynamic_shapes, (tuple, list))
         combined_args = type(dynamic_shapes)(combined_args.values())  # type: ignore[assignment, misc]

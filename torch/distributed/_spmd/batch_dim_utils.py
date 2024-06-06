@@ -9,11 +9,7 @@ import torch.utils._pytree as pytree
 from torch import Tensor
 
 from torch.distributed._tensor import DeviceMesh, Replicate, Shard
-from torch.distributed._tensor.ops.view_ops import (
-    DimSpec,
-    InputDim,
-    ops as view_op_rules,
-)
+from torch.distributed._tensor.ops.view_ops import dim_maps, DimSpec, InputDim
 from torch.distributed._tensor.placement_types import _Partial, DTensorSpec
 
 aten = torch.ops.aten
@@ -80,12 +76,12 @@ class BatchDimAnalyzer:
             return self.batch_dim_map[node]
 
         if node.target in self.dim_rule_map:
-            view_op_rule = view_op_rules[self.dim_rule_map[node.target]]  # type: ignore[index]
+            dim_map = dim_maps[self.dim_rule_map[node.target]]  # type: ignore[index]
             args_val = pytree.tree_map_only(fx.Node, lambda n: n.meta["val"], node.args)
             kwargs_val = pytree.tree_map_only(
                 fx.Node, lambda n: n.meta["val"], node.kwargs
             )
-            output_dim_rules = view_op_rule.dim_map(*args_val, **kwargs_val)
+            output_dim_rules = dim_map(*args_val, **kwargs_val)
 
             def collect_input_dim(cmd: DimSpec, input_dims: Set[int]):
                 if isinstance(cmd, InputDim):
