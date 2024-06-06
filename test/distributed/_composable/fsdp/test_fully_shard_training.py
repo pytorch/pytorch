@@ -1255,12 +1255,12 @@ class TestFullyShardHSDPTraining(FSDPTest):
             check_sharded_parity(self, ref_model, model)
 
 
-class TestFullyShardCustomForwardMethod(FSDPTestMultiThread):
+class TestFullyShardCustomForwardMethod(FSDPTest):
     @property
     def world_size(self) -> int:
-        return 2
+        return min(torch.cuda.device_count(), 2)
 
-    @unittest.skipIf(not TEST_CUDA, "no cuda")
+    @skip_if_lt_x_gpu(2)
     def test_register_fsdp_forward_method(self):
         """Based on https://github.com/pytorch/pytorch/issues/109385"""
 
@@ -1287,8 +1287,6 @@ class TestFullyShardCustomForwardMethod(FSDPTestMultiThread):
 
         torch.manual_seed(42)
         model = Model()
-        for param in model.parameters():
-            dist.broadcast(param.detach(), src=0)
         ref_model = copy.deepcopy(model).cuda()
         fully_shard(model.vit)
         fully_shard(model.projector)
