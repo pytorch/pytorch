@@ -2631,7 +2631,7 @@ REGISTER_OPERATOR_FUNCTOR(aten::cat, aten_cat, [](Node* n) -> SROperator {
 
 REGISTER_OPERATOR_FUNCTOR(aten::cumsum, aten_cumsum, [](Node* n) -> SROperator {
   if (!n->matches(torch::schema(
-          "aten::cumsum(Tensor self, int dim, ScalarType? dtype=None, bool full=False) -> Tensor"))) {
+          "aten::cumsum(Tensor self, int dim, ScalarType? dtype=None, bool prepend=False) -> Tensor"))) {
     LogAndDumpSchema(n);
     return nullptr;
   }
@@ -2639,14 +2639,14 @@ REGISTER_OPERATOR_FUNCTOR(aten::cumsum, aten_cumsum, [](Node* n) -> SROperator {
     const auto& input = p_node->Input(0).toTensor();
     const auto dim = p_node->Input(1).toInt();
     const auto dtype = p_node->Input(2).toOptional<c10::ScalarType>();
-    const auto full = p_node->Input(3).toBool();
+    const auto prepend = p_node->Input(3).toBool();
     if (p_node->Output(0).isNone()) {
-      p_node->Output(0) = at::cpu::cumsum(input, dim, dtype, full);
+      p_node->Output(0) = at::cpu::cumsum(input, dim, dtype, prepend);
       return;
     }
     auto& output = p_node->Output(0).toTensor();
     fastResizeToZero(output);
-    at::cpu::cumsum_out(output, input, dim, dtype, full);
+    at::cpu::cumsum_out(output, input, dim, dtype, prepend);
   };
 });
 

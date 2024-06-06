@@ -246,7 +246,7 @@ static void meta_func_cum_ops(
     const Tensor& self,
     int64_t dim,
     std::optional<ScalarType> dtype,
-    bool full) {
+    bool prepend) {
   // Checking whether 'dim' is valid.
   int64_t wrapped_dim = maybe_wrap_dim(dim, self.dim());
 
@@ -261,7 +261,7 @@ static void meta_func_cum_ops(
   }
 
   std::vector<int64_t> new_sizes(self.sizes().begin(), self.sizes().end());
-  if (full) {
+  if (prepend) {
     new_sizes[wrapped_dim] += 1;
   }
 
@@ -270,13 +270,13 @@ static void meta_func_cum_ops(
 }
 
 TORCH_META_FUNC(cumsum)
-(const Tensor& self, int64_t dim, std::optional<ScalarType> dtype, bool full) {
-  meta_func_cum_ops(*this, "cumsum", self, dim, dtype, full);
+(const Tensor& self, int64_t dim, std::optional<ScalarType> dtype, bool prepend) {
+  meta_func_cum_ops(*this, "cumsum", self, dim, dtype, prepend);
 }
 
 TORCH_META_FUNC(cumprod)
-(const Tensor& self, int64_t dim, std::optional<ScalarType> dtype) {
-  meta_func_cum_ops(*this, "cumprod", self, dim, dtype, false);
+(const Tensor& self, int64_t dim, std::optional<ScalarType> dtype, bool prepend) {
+  meta_func_cum_ops(*this, "cumprod", self, dim, dtype, prepend);
 }
 
 TORCH_META_FUNC2(sum, dim_IntList)
@@ -481,12 +481,12 @@ template <class Stub>
 void impl_func_cum_ops(
     const Tensor& self,
     int64_t dim,
-    bool full,
+    bool prepend,
     const Tensor& result,
     Stub& stub) {
   NoNamesGuard guard;
-  if (full) {
-    TORCH_INTERNAL_ASSERT(false, "TODO implement full=True");
+  if (prepend) {
+    TORCH_INTERNAL_ASSERT(false, "TODO implement prepend=True");
   }
   if (self.dim() == 0) {
     result.fill_(self);
@@ -494,7 +494,7 @@ void impl_func_cum_ops(
     result.zero_();
   } else {
     dim = maybe_wrap_dim(dim, self.dim());
-    stub(self.device().type(), result, self.to(result.scalar_type()), dim, full);
+    stub(self.device().type(), result, self.to(result.scalar_type()), dim, prepend);
   }
 }
 
@@ -502,20 +502,21 @@ TORCH_IMPL_FUNC(cumsum_out)
 (const Tensor& self,
  int64_t dim,
  std::optional<ScalarType> dtype,
- bool full,
+ bool prepend,
  const Tensor& result) {
-  if (full) {
-    TORCH_INTERNAL_ASSERT(false, "TODO: implement support for full=True");
+  if (prepend) {
+    TORCH_INTERNAL_ASSERT(false, "TODO: implement support for prepend=True");
   }
-  impl_func_cum_ops(self, dim, full, result, cumsum_stub);
+  impl_func_cum_ops(self, dim, prepend, result, cumsum_stub);
 }
 
 TORCH_IMPL_FUNC(cumprod_out)
 (const Tensor& self,
  int64_t dim,
  std::optional<ScalarType> dtype,
+ bool prepend,
  const Tensor& result) {
-  impl_func_cum_ops(self, dim, false, result, cumprod_stub);
+  impl_func_cum_ops(self, dim, prepend, result, cumprod_stub);
 }
 
 static Tensor reversed_cumsum(const Tensor& w, int64_t dim) {

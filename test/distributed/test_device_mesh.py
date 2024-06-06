@@ -672,9 +672,9 @@ class DeviceMeshCollectiveTest(DTensorTestBase):
             )
             unpadded_list = [
                 (
-                    unpad_tensor(big_tensor_chunks[i], shard_dim, pad_sizes[i])
+                    unpad_tensor(big_tensor, shard_dim, pad_sizes[i])
                     if pad_sizes[i] > 0
-                    else big_tensor_chunks[i]
+                    else big_tensor
                 )
                 for i, big_tensor in enumerate(big_tensor_chunks)
             ]

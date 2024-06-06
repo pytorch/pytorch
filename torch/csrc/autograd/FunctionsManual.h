@@ -217,7 +217,7 @@ at::Tensor solve_backward_A(
     const at::Tensor& self,
     const at::Tensor& A,
     const at::Tensor& solution);
-at::Tensor cumsum_backward(const at::Tensor& grad, int64_t dim, bool full);
+at::Tensor cumsum_backward(const at::Tensor& grad, int64_t dim, bool prepend);
 at::Tensor logsumexp_backward(
     at::Tensor grad,
     const at::Tensor& self,
@@ -1001,7 +1001,8 @@ Tensor cumprod_jvp(
     const Tensor& self_t,
     const Tensor& self_p,
     const Tensor& result,
-    int dim);
+    int dim,
+    bool prepend);
 Tensor gather_with_keepdimed_indices(
     const Tensor& input,
     int64_t dim,

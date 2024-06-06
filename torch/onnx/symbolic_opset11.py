@@ -429,7 +429,7 @@ def scatter(g: jit_utils.GraphContext, self, dim, index, src):
 @_onnx_symbolic("aten::cumsum")
 @symbolic_helper.parse_args("v", "i", "none", "b")
 @_beartype.beartype
-def cumsum(g: jit_utils.GraphContext, self, dim, dtype=None, full=False):
+def cumsum(g: jit_utils.GraphContext, self, dim, dtype=None, prepend=False):
     dim_tensor = g.op("Constant", value_t=torch.tensor(dim, dtype=torch.int))
     if dtype and dtype.node().kind() != "prim::Constant":
         parsed_dtype = symbolic_helper._get_const(dtype, "i", "dtype")
@@ -439,8 +439,8 @@ def cumsum(g: jit_utils.GraphContext, self, dim, dtype=None, full=False):
     else:
         cast = self
 
-    if full:
-        return symbolic_helper._unimplemented("cumsum", "full", full)
+    if prepend:
+        return symbolic_helper._unimplemented("cumsum", "prepend", prepend)
     csum = g.op("CumSum", cast, dim_tensor)
     return csum
 

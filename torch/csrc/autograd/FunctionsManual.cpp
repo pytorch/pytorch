@@ -878,10 +878,10 @@ static Tensor generic_solve_jvp(
   return solve(A, dB, dA_contrib);
 }
 
-Tensor cumsum_backward(const Tensor& grad, int64_t dim, bool full) {
+Tensor cumsum_backward(const Tensor& grad, int64_t dim, bool prepend) {
   // Trivial case
-  if (full) {
-    TORCH_INTERNAL_ASSERT(false, "TODO: implement support for full");
+  if (prepend) {
+    TORCH_INTERNAL_ASSERT(false, "TODO: implement support for prepend");
   }
   if (grad.sym_numel() <= 1 || grad.sym_size(dim) == 1) {
     return grad;
@@ -6029,7 +6029,12 @@ Tensor cumprod_jvp(
     const Tensor& self_t,
     const Tensor& self_p,
     const Tensor& result,
-    int dim) {
+    int dim,
+    bool prepend) {
+  if (prepend) {
+    TORCH_INTERNAL_ASSERT(false, "TODO: support prepend=True in cumprod_jvp");
+  }
+
   // Generic formula when no 0. is involved
   Tensor gradient = (self_t / self_p).cumsum(dim) * result;
 
