@@ -142,7 +142,7 @@ def aoti_compile_with_persistent_cache(
     supported_scalar_types = tuple(type_to_torch_dtype.keys())
     flattened_inputs = list(args) + list(kwargs.values())
     if not all(
-        isinstance(input, (supported_scalar_types(), torch.Tensor, list, str))
+        isinstance(input, (supported_scalar_types, torch.Tensor, list, str))
         for input in flattened_inputs
     ):
         raise NotImplementedError(
