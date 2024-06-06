@@ -186,11 +186,20 @@ def get_block_to_lifted_attrs(graph: torch._C.Graph) -> Dict[torch._C.Block, Set
 =======
                 arguments = arguments.union(_map_blocks_to_lifted_attrs(block))
             if node.kind() == "prim::GetAttr":
+<<<<<<< HEAD
                 dest_ir = node.output().debugName()
                 # Skip for intermediate GetAttr, which will anyway not results a FQN.
                 if dest_ir not in set(ref_map.values()):
                     arguments.add(construct_fqn(dest_ir, ref_map, node_to_attr_name))
 >>>>>>> 1223b2491f4 (address comments)
+=======
+                irv_name = node.output().debugName()
+                # Skip for intermediate GetAttr, which will anyway not result a FQN.
+                if irv_name not in set(node_to_parent_map.values()):
+                    arguments.add(
+                        construct_fqn(irv_name, node_to_parent_map, node_to_attr_name)
+                    )
+>>>>>>> 3277b3504df (address comments)
         if not isinstance(entry, torch._C.Graph):  # Skip the top level.
             blocks_to_lifted_attrs[entry] = arguments
         return arguments
@@ -227,6 +236,7 @@ class TS2FXGraphConverter:
         self,
         ts_graph: Union[torch._C.Graph, torch._C.Block],
 <<<<<<< HEAD
+<<<<<<< HEAD
         name_to_param_map: Dict[str, torch.Tensor],
         name_to_buffer_map: Dict[str, torch.Tensor],
 =======
@@ -234,6 +244,10 @@ class TS2FXGraphConverter:
         buffer_names: Set[str],
         mod_param_and_buffer_map: Dict[str, Any],
 >>>>>>> 1223b2491f4 (address comments)
+=======
+        name_to_param_map: Dict[str, torch.Tensor],
+        name_to_buffer_map: Dict[str, torch.Tensor],
+>>>>>>> 3277b3504df (address comments)
         blocks_to_lifted_attrs: Dict[torch._C.Block, Set[str]],
     ):
         self.ts_graph = ts_graph
@@ -286,7 +300,6 @@ class TS2FXGraphConverter:
                 lambda node: self._convert_standard_operators(node),
             )
 
-    @property
     def is_top_level_graph(self):
         return isinstance(self.ts_graph, torch._C.Graph)
 
@@ -353,7 +366,11 @@ class TS2FXGraphConverter:
             name = graph_input.debugName()
             normalized_name = normalize_name(name)
 
+<<<<<<< HEAD
             if name in self.name_to_param_map:
+=======
+            if name in self.name_to_param_map.keys():
+>>>>>>> 3277b3504df (address comments)
                 self.input_specs.append(
                     InputSpec(
                         InputKind.PARAMETER,
@@ -363,12 +380,18 @@ class TS2FXGraphConverter:
                 )
                 fx_node = get_node_for_param_and_buffer(
 <<<<<<< HEAD
+<<<<<<< HEAD
                     self.fx_graph, name, self.is_top_level_graph()
 =======
                     self.fx_graph, name, self.is_top_level_graph
 >>>>>>> 87b4f7caf91 (address comments)
                 )
             elif name in self.name_to_buffer_map:
+=======
+                    self.fx_graph, name, self.is_top_level_graph()
+                )
+            elif name in self.name_to_buffer_map.keys():
+>>>>>>> 3277b3504df (address comments)
                 self.input_specs.append(
                     InputSpec(
                         InputKind.BUFFER,
@@ -379,10 +402,14 @@ class TS2FXGraphConverter:
                 )
                 fx_node = get_node_for_param_and_buffer(
 <<<<<<< HEAD
+<<<<<<< HEAD
                     self.fx_graph, name, self.is_top_level_graph()
 =======
                     self.fx_graph, name, self.is_top_level_graph
 >>>>>>> 87b4f7caf91 (address comments)
+=======
+                    self.fx_graph, name, self.is_top_level_graph()
+>>>>>>> 3277b3504df (address comments)
                 )
             else:
                 self.input_specs.append(
@@ -648,10 +675,14 @@ class TS2FXGraphConverter:
         for block in node.blocks():
             subgraph_converter = TS2FXGraphConverter(
 <<<<<<< HEAD
+<<<<<<< HEAD
                 block, dict(), dict(), self.blocks_to_lifted_attrs
 =======
                 block, set(), set(), dict(), self.blocks_to_lifted_attrs
 >>>>>>> 1223b2491f4 (address comments)
+=======
+                block, dict(), dict(), self.blocks_to_lifted_attrs
+>>>>>>> 3277b3504df (address comments)
             )
             subgraph_converter.constant_map = self.constant_map
             subgraph_converter.attribute_map = self.attribute_map
@@ -793,6 +824,7 @@ class TS2EPConverter:
             if isinstance(ts_model, torch.jit.ScriptModule)
             else dict()
         )
+<<<<<<< HEAD
 
         # Populate nn module parameters and buffers.
         self.mod_param_and_buffer_map: Dict[str, Any] = dict()
@@ -818,6 +850,16 @@ class TS2EPConverter:
             self.buffer_names,
             self.mod_param_and_buffer_map,
 >>>>>>> 1223b2491f4 (address comments)
+=======
+
+    def convert(self) -> ExportedProgram:
+        blocks_to_lifted_attrs = get_block_to_lifted_attrs(self.ts_graph)
+
+        graph_converter = TS2FXGraphConverter(
+            self.ts_graph,
+            self.name_to_param_map,
+            self.name_to_buffer_map,
+>>>>>>> 3277b3504df (address comments)
             blocks_to_lifted_attrs,
         )
         gm = graph_converter.convert()
@@ -830,7 +872,11 @@ class TS2EPConverter:
         # TODO: adjust input orders to match GraphSignature convention
         ep = torch.export._trace._export(
             gm,
+<<<<<<< HEAD
             self.sample_args,
+=======
+            tuple(self.sample_args),
+>>>>>>> 3277b3504df (address comments)
             strict=False,
             pre_dispatch=True,
         )
