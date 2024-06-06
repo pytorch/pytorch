@@ -13,10 +13,12 @@
 #include <ATen/cuda/nvrtc_stub/ATenNVRTC.h>
 #include <ATen/detail/CUDAHooksInterface.h>
 #include <ATen/native/cuda/CuFFTPlanCache.h>
+#include <ATen/MapAllocator.h>
 #include <c10/util/Exception.h>
 #include <c10/cuda/CUDACachingAllocator.h>
 #include <c10/cuda/CUDAFunctions.h>
 #include <c10/util/irange.h>
+#include <torch/csrc/CudaIPCTypes.h>
 
 #if AT_CUDNN_ENABLED()
 #include <ATen/cudnn/cudnn-wrapper.h>
@@ -35,6 +37,7 @@
 #endif
 
 #include <cuda.h>
+#include <cuda_runtime.h>
 
 #include <sstream>
 #include <cstddef>
@@ -443,6 +446,140 @@ int CUDAHooks::getNumGPUs() const {
 void CUDAHooks::deviceSynchronize(DeviceIndex device_index) const {
   at::DeviceGuard device_guard(at::Device(at::DeviceType::CUDA, device_index));
   c10::cuda::device_synchronize();
+}
+
+void CUDAHooks::getIpcHandleSize(size_t& ipc_memory_handle_size,
+                                 size_t& ipc_event_handle_size) const{
+  ipc_memory_handle_size = CUDA_IPC_HANDLE_SIZE;
+  ipc_event_handle_size = CUDA_IPC_HANDLE_SIZE;
+}
+
+void CUDAHooks::StorageShareDevice(const c10::Storage& storage,
+                                   ptrdiff_t& offset_bytes,
+                                   char*& new_memory_handle,
+                                   char*& new_event_handle,
+                                   char*& new_ref_counter,
+                                   uint64_t& new_ref_counter_offset,
+                                   bool& new_event_sync_required) const {
+
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+  size_t base_size;
+  void* base_ptr = c10::cuda::CUDACachingAllocator::getBaseAllocation(
+      storage.mutable_data(), &base_size);
+  offset_bytes = (char*)storage.data() - (char*)base_ptr;
+
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+  cudaIpcMemHandle_t handle;
+  C10_CUDA_CHECK(cudaIpcGetMemHandle(&handle, base_ptr));
+  std::memcpy(new_memory_handle, (char*)&handle, sizeof(cudaIpcMemHandle_t));
+
+  // Put Storage Data behind new ref counting context
+  // See Note [CUDA IPC Refcounting implementation explained]
+  at::DataPtr sent_data_ptr = torch::GetNewRefCountedSentData(
+      storage.mutable_data(), storage.device());
+  auto old_data_ptr = storage.set_data_ptr(std::move(sent_data_ptr));
+  auto sent_data =
+      static_cast<torch::CudaIPCSentData*>(storage.data_ptr().get_context());
+  sent_data->set_original_ptr(std::move(old_data_ptr));
+  std::memcpy(new_ref_counter, (sent_data->handle()).c_str(), sizeof(sent_data->handle()));
+  new_ref_counter_offset = sent_data->offset();
+
+  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+  cudaIpcEventHandle_t ipc_event_handle;
+  if (sent_data->event_sync_required_) {
+    C10_CUDA_CHECK(
+        cudaIpcGetEventHandle(&ipc_event_handle, sent_data->event_));
+  }
+  std::memcpy(new_event_handle, (char*)&ipc_event_handle, sizeof(cudaIpcEventHandle_t));
+  new_event_sync_required = sent_data->event_sync_required_;
+}
+
+void CUDAHooks::StorageNewSharedDevice(const c10::DeviceIndex& device,
+                                       bool& event_sync_required,
+                                       std::string& s_ipc_event_handle,
+                                       std::string& s_handle,
+                                       std::string& ref_counter_handle,
+                                       ptrdiff_t& ref_counter_offset,
+                                       ptrdiff_t& storage_offset_bytes,
+                                       c10::DataPtr& data_ptr) const {
+  if (event_sync_required) {
+    auto ipc_event_handle = reinterpret_cast<const cudaIpcEventHandle_t*>(
+        s_ipc_event_handle.c_str());
+    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
+    cudaEvent_t event;
+    cudaIpcOpenEventHandle(&event, *ipc_event_handle);
+    C10_CUDA_CHECK(
+        cudaStreamWaitEvent(c10::cuda::getCurrentCUDAStream(device), event, 0));
+    cudaEventDestroy(event);
+  }
+  if (s_handle.empty()) return;
+
+  std::shared_ptr<void> basePtr = c10::cuda::CUDACachingAllocator::getIpcDevPtr(s_handle);
+  // Offset the basePtr to reconstruct the real storage
+  // devPtr = basePtr + storage_offset
+  void* devPtr = basePtr.get();
+  devPtr = (char*)devPtr + storage_offset_bytes;
+
+  struct IpcDeleterContext {
+    std::string ref_counter_handle;
+    ptrdiff_t ref_counter_offset{};
+    c10::DeviceIndex device{-1};
+    torch::CudaIPCReceivedData received_data;
+  };
+
+  auto ctx = std::make_unique<IpcDeleterContext>();
+  ctx->ref_counter_handle = std::move(ref_counter_handle);
+  ctx->ref_counter_offset = ref_counter_offset;
+  ctx->device = device;
+  ctx->received_data.shared_ptr_ = std::move(basePtr);
+
+  auto cur_device = at::cuda::current_device();
+
+  data_ptr = c10::DataPtr(
+      devPtr,
+      ctx.release(),
+      +[](void* ctx_) {
+        std::unique_ptr<IpcDeleterContext> ctx(
+            static_cast<IpcDeleterContext*>(ctx_));
+        ctx->received_data.shared_ptr_.reset();
+
+        // Sync default stream to make sure all operations related to the
+        // storage is finished (otherwise another process may reuse memory and
+        // corrupt data)
+
+        // Ideally all shared memory reference counting could be replaced by
+        // sending untriggered CUDA event from the producer to consumer and
+        // using this event as the criteria of memory release. However, CUDA
+        // (atm 10.1) does not support the creation of untriggered events and
+        // performance impact of having thousands of shared events is unknown.
+
+        // TODO: Instead of cudaStreamSynchronize it is possible to add Stream
+        // Callback and release counter inside of it (need to check performance
+        // impact)
+        at::cuda::stream_synchronize(
+            c10::cuda::getCurrentCUDAStream(ctx->device));
+
+        // We don't want to break existing code, so resource deletion is best
+        // effort basis. Exception expected if producer process terminated
+        // before consumer released data.
+        int flags =
+            at::ALLOCATOR_MAPPED_SHAREDMEM | at::ALLOCATOR_MAPPED_NOCREATE;
+        try {
+          auto sptr = at::RefcountedMapAllocator::makeDataPtr(
+              ctx->ref_counter_handle.c_str(),
+              flags,
+              sizeof(int64_t) * torch::CUDA_IPC_REF_COUNTER_FILE_SIZE,
+              nullptr);
+          *(static_cast<int64_t*>(sptr.get()) + ctx->ref_counter_offset) -= 1;
+        } catch (c10::Error& err) {
+          // Already warned inside of producer process
+        }
+      },
+      at::Device(at::DeviceType::CUDA, cur_device));
+}
+
+void CUDAHooks::getIpcRefCounterFileSize(int64_t& ipc_ref_counter_file_size) const {
+  ipc_ref_counter_file_size = torch::CUDA_IPC_REF_COUNTER_FILE_SIZE;
 }
 
 // Sigh, the registry doesn't support namespaces :(

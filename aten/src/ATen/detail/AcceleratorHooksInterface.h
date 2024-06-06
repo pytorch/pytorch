@@ -2,6 +2,8 @@
 
 #include <c10/core/Device.h>
 #include <c10/core/Stream.h>
+#include <c10/core/Storage.h>
+#include <c10/core/DeviceGuard.h>
 namespace at {
 
 // AcceleratorHooksInterface is a shared interface provided by all
@@ -39,6 +41,37 @@ struct TORCH_API AcceleratorHooksInterface {
     TORCH_CHECK(false, "Backend doesn't support maybeExchangeDevice()");
     return -1;
   }
+
+  virtual void getIpcHandleSize(size_t& ipc_memory_handle_size,
+                                size_t& ipc_event_handle_size) const{
+    TORCH_CHECK(false, "Backend doesn't support getIpcHandleSize");
+  }
+
+  virtual void StorageShareDevice(const c10::Storage& storage,
+                                  ptrdiff_t& offset_bytes,
+                                  char*& new_memory_handle,
+                                  char*& new_event_handle,
+                                  char*& new_ref_counter,
+                                  uint64_t& new_ref_counter_offset,
+                                  bool& new_event_sync_required) const {
+  TORCH_CHECK(false, "Backend doesn't support StorageShareDevice");
+  };
+
+  virtual void StorageNewSharedDevice(const c10::DeviceIndex& device,
+                                      bool& event_sync_required,
+                                      std::string& s_ipc_event_handle,
+                                      std::string& s_handle,
+                                      std::string& ref_counter_handle,
+                                      ptrdiff_t& ref_counter_offset,
+                                      ptrdiff_t& storage_offset_bytes,
+                                      c10::DataPtr& data_ptr) const {
+  TORCH_CHECK(false, "Backend doesn't support StorageNewSharedDevice");
+  };
+
+  virtual void getIpcRefCounterFileSize(int64_t& ipc_ref_counter_file_size) const {
+    TORCH_CHECK(false, "Backend doesn't support getIpcRefCounterFileSize");
+  };
+
 };
 
 } // namespace at

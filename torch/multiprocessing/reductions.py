@@ -120,7 +120,7 @@ def rebuild_tensor(cls, storage, metadata):
     return t
 
 
-def rebuild_cuda_tensor(
+def rebuild_device_tensor(
     tensor_cls,
     tensor_size,
     tensor_stride,
@@ -145,7 +145,7 @@ def rebuild_cuda_tensor(
             storage_cls, (storage_handle, storage_offset_bytes)
         )
         if storage is None:
-            torch.cuda._lazy_init()
+            torch.get_device_module()._lazy_init()
             storage = storage_cls._new_shared_device(
                 storage_device,
                 storage_handle,
@@ -309,7 +309,7 @@ def reduce_tensor(tensor):
 
     storage = tensor._typed_storage()
 
-    if storage._untyped_storage.device.type == "cuda":
+    if storage._untyped_storage.device.type == torch._C._get_accelerator(True).type :
         (
             device,
             handle,
@@ -325,7 +325,7 @@ def reduce_tensor(tensor):
         # _backward_hooks purposely omitted here, see
         # Note [Don't serialize hooks]
         return (
-            rebuild_cuda_tensor,
+            rebuild_device_tensor,
             (
                 type(tensor),
                 tensor.size(),
@@ -549,10 +549,9 @@ def reduce_typed_storage_child(storage):
 
 def reduce_storage(storage):
     from . import get_sharing_strategy
-
-    if storage.is_cuda:
+    if storage.device.type == torch._C._get_accelerator(True).type :
         raise RuntimeError(
-            "Cannot pickle CUDA storage; try pickling a CUDA tensor instead"
+            "Cannot pickle Device storage; try pickling a Device tensor instead"
         )
     elif get_sharing_strategy() == "file_system":
         metadata = storage._share_filename_cpu_()

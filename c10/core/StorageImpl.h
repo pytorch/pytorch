@@ -293,7 +293,7 @@ struct C10_API StorageImpl : public c10::intrusive_ptr_target {
   bool size_bytes_is_heap_allocated_;
   bool resizable_;
   // Identifies that Storage was received from another process and doesn't have
-  // local to process cuda memory allocation
+  // local to process device memory allocation
   bool received_device_;
   // All special checks in data/data_ptr calls are guarded behind this single
   // boolean. This is for performance: .data/.data_ptr calls are commonly in the

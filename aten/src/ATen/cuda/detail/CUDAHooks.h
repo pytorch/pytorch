@@ -50,6 +50,24 @@ struct CUDAHooks : public at::CUDAHooksInterface {
   void cuFFTClearPlanCache(DeviceIndex device_index) const override;
   int getNumGPUs() const override;
   void deviceSynchronize(DeviceIndex device_index) const override;
+  void getIpcHandleSize(size_t& ipc_memory_handle_size,
+                        size_t& ipc_event_handle_size) const override;
+  void StorageShareDevice(const c10::Storage& storage,
+                          ptrdiff_t& offset_bytes,
+                          char*& new_memory_handle,
+                          char*& new_event_handle,
+                          char*& new_ref_counter,
+                          uint64_t& new_ref_counter_offset,
+                          bool& new_event_sync_required) const override;
+  void StorageNewSharedDevice(const c10::DeviceIndex& device,
+                              bool& event_sync_required,
+                              std::string& s_ipc_event_handle,
+                              std::string& s_handle,
+                              std::string& ref_counter_handle,
+                              ptrdiff_t& ref_counter_offset,
+                              ptrdiff_t& storage_offset_bytes,
+                              c10::DataPtr& data_ptr) const override;
+  void getIpcRefCounterFileSize(int64_t& ipc_ref_counter_file_size) const override;
 };
 
 } // at::cuda::detail
