@@ -21,7 +21,7 @@ def get_approximate_basis(
     of the size of :math:`A` or :math:`M`.
 
     .. note:: The implementation is based on the Algorithm 4.4 from
-              Halko et al, 2009.
+              Halko et al., 2009.
 
     .. note:: For an adequate approximation of a k-rank matrix
               :math:`A`, where k is not known in advance but could be
@@ -94,7 +94,7 @@ def svd_lowrank(
     SVD is computed for the matrix :math:`A - M`.
 
     .. note:: The implementation is based on the Algorithm 5.1 from
-              Halko et al, 2009.
+              Halko et al., 2009.
 
     .. note:: For an adequate approximation of a k-rank matrix
               :math:`A`, where k is not known in advance but could be
@@ -152,7 +152,7 @@ def _svd_lowrank(
     niter: Optional[int] = 2,
     M: Optional[Tensor] = None,
 ) -> Tuple[Tensor, Tensor, Tensor]:
-    # Algorithm 5.1 in Halko et al 2009
+    # Algorithm 5.1 in Halko et al., 2009
 
     q = 6 if q is None else q
     m, n = A.shape[-2:]
