@@ -14,6 +14,13 @@ ENV PYTORCH_ROCM_ARCH ${PYTORCH_ROCM_ARCH}
 COPY ./common/install_base.sh install_base.sh
 RUN bash ./install_base.sh && rm install_base.sh
 
+# Install AOTriton (Early fail)
+COPY ./aotriton_version.txt aotriton_version.txt
+COPY ./common/common_utils.sh common_utils.sh
+COPY ./common/install_aotriton.sh install_aotriton.sh
+RUN bash ./install_aotriton.sh /opt && rm -rf install_aotriton.sh aotriton aotriton_version.txt common_utils.sh
+ENV AOTRITON_INSTALLED_PREFIX /opt/aotriton
+
 # Install clang
 ARG LLVMDEV
 ARG CLANG_VERSION
@@ -109,13 +116,6 @@ RUN rm install_triton.sh common_utils.sh triton-rocm.txt triton_version.txt
 COPY ./common/install_cache.sh install_cache.sh
 ENV PATH /opt/cache/bin:$PATH
 RUN bash ./install_cache.sh && rm install_cache.sh
-
-# Install AOTriton
-COPY ci_commit_pins/aotriton.txt aotriton.txt
-COPY ./common/common_utils.sh common_utils.sh
-COPY ./common/install_aotriton.sh install_aotriton.sh
-RUN bash ./install_aotriton.sh /opt/rocm/aotriton && rm -rf install_aotriton.sh aotriton aotriton.txt common_utils.sh
-ENV AOTRITON_INSTALLED_PREFIX /opt/rocm/aotriton
 
 # Include BUILD_ENVIRONMENT environment variable in image
 ARG BUILD_ENVIRONMENT
