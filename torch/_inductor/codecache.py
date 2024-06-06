@@ -25,7 +25,6 @@ import textwrap
 import threading
 import warnings
 from bisect import bisect_right
-from concurrent.futures import Future
 from copy import copy
 from ctypes import c_void_p, cdll, CDLL
 from functools import partial
@@ -56,7 +55,6 @@ from torch._inductor.runtime.compile_tasks import (
     _reload_python_module,
     _reload_python_module_in_subproc,
 )
-from torch._inductor.runtime.hints import HalideMeta
 from torch._inductor.runtime.runtime_utils import cache_dir
 from torch._inductor.utils import clear_on_fresh_inductor_cache, is_linux
 
@@ -69,8 +67,11 @@ from torch._subclasses.fake_tensor import (
 from torch.fx.experimental.symbolic_shapes import has_hint, hint_int, ShapeEnv
 
 if TYPE_CHECKING:
+    from concurrent.futures import Future
+
     from torch._inductor.graph import GraphLowering
     from torch._inductor.ir import ChoiceCaller
+    from torch._inductor.runtime.hints import HalideMeta
 
 
 _HERE = os.path.abspath(__file__)
