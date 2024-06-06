@@ -474,6 +474,20 @@ class DDPOptimizer:
             if param.requires_grad and not self._ignore_parameter(param):
                 self.add_param(bucket, param, f"{prefix}.{name}")
 
+    def add_param_args(self, bucket, node):
+        for arg in node.args:
+            if not isinstance(arg, torch.fx.node.Node):
+                continue
+            if arg.op != "placeholder":
+                continue
+            # DELETE COMMET BEFORE LANDONG:
+            # I am assuming that Params should have example values associated, is that a correct assumption?
+            param = arg.meta["example_value"]
+            if not isinstance(param, torch.nn.Parameter):
+                continue
+            if param.requires_grad and not self._ignore_parameter(param):
+                self.add_param(bucket, param, arg.target)
+
     def compile_fn(self, gm: fx.GraphModule, example_inputs: List[torch.Tensor]):
         """
         Implements graph splitting, first determining a set of of buckets by counting
@@ -522,20 +536,9 @@ class DDPOptimizer:
                     buckets[0].opcount_increased_to_capture_external_output += 1
 
             if node.op == "call_function":
-                for arg in node.args:
-                    if not isinstance(arg, torch.fx.node.Node):
-                        continue
-                    if arg.op != "placeholder":
-                        continue
-                    # DELETE COMMET BEFORE LANDONG:
-                    # I am assuming that Params should have example values associated, is that a correct assumption?
-                    param = arg.meta["example_value"]
-                    if not isinstance(param, torch.nn.Parameter):
-                        continue
-                    if param.requires_grad and not self._ignore_parameter(param):
-                        self.add_param(buckets[0], param, arg.target)
+                self.add_param_args(buckets[0], node)
 
-            if node.op == "call_module":
+            elif node.op == "call_module":
                 target_mod = gm.get_submodule(node.target)
                 if target_mod not in processed_modules:
                     self.add_module_params_to_bucket(
@@ -547,11 +550,18 @@ class DDPOptimizer:
                     try:
                         target_mod = gm.get_submodule(node.args[0].target)
                     except AttributeError:
+                        # This handles situations like  tmp = torch.mm(x, self.weight.t())
+                        # t: "f32[512, 512]" = l_self_seq_2_weight.t();  l_self_seq_2_weight = None
+                        # tmp: "f32[512, 512]" = torch.mm(input_2, t);  input_2 = t = None
+
+                        # DELETE THIS COMMENT BEFORE LANDING SHALL WE ONLY HANDLE .t()
+                        self.add_param_args(buckets[0], node)
                         pass
                     if target_mod is not None and target_mod not in processed_modules:
                         self.add_module_params_to_bucket(
                             target_mod, buckets[0], processed_modules, node.target
                         )
+
             elif node.op == "get_attr":
                 maybe_param = getattr(gm, node.target)
                 if (
