@@ -2632,12 +2632,9 @@
     "TensorPipeRpcBackendOptions"
   ],
   "torch.distributed.pipelining": [
-    "ArgsChunkSpec",
-    "KwargsChunkSpec",
     "Pipe",
     "PipelineStage",
     "SplitPoint",
-    "annotate_split_points",
     "pipe_split",
     "pipeline"
   ],

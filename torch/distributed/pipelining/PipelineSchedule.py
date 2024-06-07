@@ -79,8 +79,7 @@ class _PipelineSchedule(ABC):
         """
         # args_chunk_spec and kwargs_chunk_spec specify how to chunk inputs.
         # They are used to convert batch to microbatches in `step(x)`.  See
-        # `ArgsChunkSpec` and `KwargsChunkSpec` for helper methods for creating
-        # them.
+        # `TensorChunkSpec` for helper methods for creating them.
         """
 
         # Derived
