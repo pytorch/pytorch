@@ -418,11 +418,14 @@ CacheNode* _compiled_autograd_impl(
   std::vector<std::shared_ptr<Node>> worklist{graph_root};
   AutogradCompilerCall compiler_call;
 
-  for (const auto i : c10::irange(output_edges.size())) {
-    compiler_call.node_calls
-        .lookup(output_edges[i].function)
-        // NOLINTNEXTLINE(*-narrowing-conversions)
-        .mark_output(output_edges[i].input_nr, i);
+  if (!accumulate_grad) {
+    // called via torch.autograd.grad
+    for (const auto i : c10::irange(output_edges.size())) {
+      compiler_call.node_calls
+          .lookup(output_edges[i].function)
+          // NOLINTNEXTLINE(*-narrowing-conversions)
+          .mark_output(output_edges[i].input_nr, i);
+    }
   }
   const bool check_exec_info = !graph_task.exec_info_.empty();
   CacheNode* cache = CacheNode::root();
@@ -615,9 +618,6 @@ variable_list compiled_autograd(
     GraphTask& graph_task,
     bool accumulate_grad,
     const edge_list& output_edges) {
-  TORCH_CHECK(
-      output_edges.empty() || !accumulate_grad,
-      "specifying inputs= with .backward() not yet implemented for compiled autograd")
   TORCH_CHECK(
       c10::impl::TorchDispatchModeTLS::stack_len() == 0,
       "TorchDispatchMode not yet implemented for compiled autograd")
