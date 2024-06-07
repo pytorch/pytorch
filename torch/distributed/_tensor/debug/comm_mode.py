@@ -61,6 +61,7 @@ class ModuleParamaterShardingTracker(ModuleTracker):
     def __init__(self):
         super().__init__()
         self.module_parameters_dict = {}
+        self.sharding_dict = {}
 
     def _fw_pre_hook(self, mod, input):
         name = super()._get_mod_name(mod)
@@ -77,13 +78,25 @@ class ModuleParamaterShardingTracker(ModuleTracker):
 
             self.module_parameters_dict[name][param_name] = param.data
 
+            if isinstance(param.data, DTensor):
+                key_name = name + "." + param_name
+                self.sharding_dict[key_name] = param.data.placements
+
     def __enter__(self):
         self.module_parameters_dict.clear()
+        self.sharding_dict.clear()
         self._fw_pre_handle = register_module_forward_pre_hook(self._fw_pre_hook)
         self._fw_post_handle = register_module_forward_hook(super()._fw_post_hook)
 
     def __exit__(self, *args):
         super().__exit__(*args)
+
+    def print_paramater_info(self):
+        print(self.module_parameters_dict)
+
+    def print_sharding_info(self):
+        for key, value in self.sharding_dict.items():
+            print(key + ": " + str(value))
 
 
 class CommDebugMode(TorchDispatchMode):
@@ -130,6 +143,9 @@ class CommDebugMode(TorchDispatchMode):
     def get_parameter_info(self) -> Dict[str, Dict[str, Any]]:
         return self.advanced_module_tracker.module_parameters_dict
 
+    def get_sharding_info(self) -> Dict[str, Dict[str, Any]]:
+        return self.advanced_module_tracker.sharding_dict
+
     def __enter__(self):
         self.comm_counts.clear()
         super().__enter__()
@@ -139,6 +155,12 @@ class CommDebugMode(TorchDispatchMode):
     def __exit__(self, *args):
         self.advanced_module_tracker.__exit__()
         super().__exit__(*args)
+
+    def print_paramater_info(self):
+        self.advanced_module_tracker.print_paramater_info()
+
+    def print_sharding_info(self):
+        self.advanced_module_tracker.print_sharding_info()
 
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
         # When running this mode with DTensor, ordinarily all modes will
