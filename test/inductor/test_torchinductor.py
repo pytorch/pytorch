@@ -10934,7 +10934,9 @@ if HAS_GPU and not TEST_WITH_ASAN:
                 ),
                 (
                     fn3,
-                    "triton_poi_fused_LayerNorm_ReLU",
+                    "triton_poi_fused_layer_norm_relu"
+                    if torch._dynamo.config.inline_inbuilt_nn_modules
+                    else "triton_poi_fused_LayerNorm_ReLU",
                     (torch.randn(4, 4, device=GPU_TYPE),),
                 ),
             ]
