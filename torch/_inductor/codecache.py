@@ -559,20 +559,28 @@ class FxGraphCachePickler(pickle.Pickler):
         return "\n".join(lines)
 
 
-def get_code_hash(roots):
-    contents: Dict[str, bytes] = {torch.__version__: b""}
-    for lib in pkgutil.iter_modules(roots):
+def build_code_hash(roots, prefix, hasher):
+    for lib in sorted(pkgutil.iter_modules(roots, prefix), key=lambda x: x.name):
         spec = lib.module_finder.find_spec(lib.name, None)
         assert spec is not None
         module = spec.origin
         assert module is not None
         with open(module, "rb") as f:
-            contents[spec.name] = f.read()
+            hasher.update(spec.name.encode("utf-8"))
+            hasher.update(f.read())
+        if lib.ispkg:
+            # need to also hash submodules
+            build_code_hash(spec.submodule_search_locations, f"{spec.name}.", hasher)
+
+
+def get_code_hash(roots, extra_files=()):
     hasher = hashlib.sha256()
-    # Iterate over dict in sorted order since iter_modules may not be deterministic
-    for name, value in sorted(contents.items()):
-        hasher.update(name.encode("utf-8"))
-        hasher.update(value)
+    hasher.update(torch.__version__.encode("utf-8"))
+    build_code_hash(roots, "", hasher)
+    for path in extra_files:
+        if os.path.exists(path):
+            with open(path, "rb") as f:
+                hasher.update(f.read())
     return hasher.digest()
 
 
@@ -583,7 +591,15 @@ def torch_key():
     """
     if not config.is_fbcode():
         inductor_root = os.path.dirname(__file__)
-        return get_code_hash([inductor_root])
+        extra_files = (
+            "codegen/aoti_runtime/interface.cpp",
+            "codegen/aoti_runtime/implementation.cpp",
+            "codegen/cpp_prefix.h",
+            "script.ld",
+        )
+        return get_code_hash(
+            [inductor_root], [os.path.join(inductor_root, x) for x in extra_files]
+        )
 
     from libfb.py import parutil
 
