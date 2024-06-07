@@ -1,4 +1,5 @@
 # mypy: allow-untyped-defs
+r"""Resilient backpropagation."""
 from typing import List, Optional, Tuple
 
 import torch
@@ -22,6 +23,8 @@ __all__ = ["Rprop", "rprop"]
 
 
 class Rprop(Optimizer):
+    r"""Implementation for the Resilient backpropagation."""
+
     def __init__(
         self,
         params: ParamsT,
@@ -33,7 +36,7 @@ class Rprop(Optimizer):
         foreach: Optional[bool] = None,
         maximize: bool = False,
         differentiable: bool = False,
-    ):
+    ):  # noqa: D107
         if not 0.0 <= lr:
             raise ValueError(f"Invalid learning rate: {lr}")
         if not 0.0 < etas[0] < 1.0 < etas[1]:
@@ -50,7 +53,7 @@ class Rprop(Optimizer):
         )
         super().__init__(params, defaults)
 
-    def __setstate__(self, state):
+    def __setstate__(self, state):  # noqa: D105
         super().__setstate__(state)
         for group in self.param_groups:
             group.setdefault("foreach", None)
@@ -109,7 +112,7 @@ class Rprop(Optimizer):
 
     @_use_grad_for_differentiable
     def step(self, closure=None):
-        """Performs a single optimization step.
+        """Perform a single optimization step.
 
         Args:
             closure (Callable, optional): A closure that reevaluates the model
