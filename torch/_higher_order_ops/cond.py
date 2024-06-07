@@ -137,10 +137,15 @@ def cond(pred, true_fn, false_fn, operands):
 
     with _set_compilation_env():
         with torch._dynamo.utils.disable_cache_limit():
-            with _temp_remove_pre_dispatch_torch_function_mode():
-                return torch.compile(cond_op, backend="eager", fullgraph=True)(
-                    pred, true_fn, false_fn, operands
-                )
+            # TODO(anijain2305, export-team) For non-strict export with module
+            # stack info, the codepatch forces the nn module __getattr__ to
+            # ProxyAttr __getattr__ downstream. To circumvent the issue for
+            # now, skip inlining inbuilt nn modules for cond.
+            with torch._dynamo.config.patch(inline_inbuilt_nn_modules=False):
+                with _temp_remove_pre_dispatch_torch_function_mode():
+                    return torch.compile(cond_op, backend="eager", fullgraph=True)(
+                        pred, true_fn, false_fn, operands
+                    )
 
 
 """
