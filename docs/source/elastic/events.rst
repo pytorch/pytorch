@@ -10,6 +10,8 @@ API Methods
 
 .. autofunction:: torch.distributed.elastic.events.record
 
+.. autofunction:: torch.distributed.elastic.events.record
+
 .. autofunction:: torch.distributed.elastic.events.get_logging_handler
 
 Event Objects
