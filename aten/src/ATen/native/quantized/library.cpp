@@ -10,6 +10,7 @@ extern template int register_conv_params<3>();
 int register_embedding_params();
 
 TORCH_LIBRARY(quantized, m) {
+  m.set_python_module("caffe2.torch.fb.model_transform.splitting.split_dispatcher");
   register_linear_params();
   register_conv_params<2>();
   register_conv_params<3>();

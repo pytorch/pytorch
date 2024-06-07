@@ -329,6 +329,7 @@ def jagged_torch_function(func, *args, **kwargs):
         torch.ops.aten.is_non_overlapping_and_dense.default,
         torch.ops.aten.sym_size.default,
         torch.ops.aten.dim.default,
+        torch.ops.aten.numel.default,
         torch.ops.aten.sym_numel.default,
         torch.ops.aten.sym_stride.default,
         torch.ops.aten.sym_storage_offset.default,
@@ -345,7 +346,7 @@ def tensor_attr_supported_getter(func, *args, **kwargs):
     if func == torch.ops.aten.dim.default:
         return len(args[0]._size)
 
-    if func == torch.ops.aten.sym_numel.default:
+    if func in (torch.ops.aten.sym_numel.default, torch.ops.aten.numel.default):
         if args[0]._lengths is not None:
             return int(sum(args[0]._lengths) * math.prod(args[0]._size[2:]))
         return args[0]._values.numel()
@@ -615,16 +616,23 @@ def unbind_int(func, *args, **kwargs):
     values = inp.values()
     offsets = inp.offsets()
     lengths = inp.lengths()
-
-    if inp._ragged_idx != 1:
-        raise RuntimeError(
-            "unbind(): only supported for NestedTensor when jagged dimension is 1"
-        )
+    ragged_idx = inp._ragged_idx
 
     if lengths is None:
-        return torch.split(values, offsets.diff().tolist())
+        return torch.split(values, offsets.diff().tolist(), dim=(ragged_idx - 1))
+
+    if ragged_idx <= 0:
+        raise RuntimeError(
+            "unbind(): nested tensor ragged_idx out of bounds (should be >= 1)"
+        )
+    for i in range(lengths.shape[0]):
+        if offsets[i] + lengths[i] > values.shape[ragged_idx - 1]:
+            raise RuntimeError(
+                "unbind(): nested tensor offsets and lengths do not match ragged_idx dimension"
+            )
     return [
-        values[offsets[i] : (offsets[i] + lengths[i])] for i in range(lengths.shape[0])
+        torch.narrow(values, dim=(ragged_idx - 1), start=offsets[i], length=lengths[i])
+        for i in range(lengths.shape[0])
     ]
 
 

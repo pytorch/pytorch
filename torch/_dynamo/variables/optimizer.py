@@ -124,9 +124,23 @@ class OptimizerVariable(UserDefinedObjectVariable):
         from . import LazyVariableTracker
         from .builder import VariableBuilder
 
-        # Set capturable to True
-        for group in self.value.param_groups:
-            if "capturable" in group:
+        # We only set capturable if params are on cuda
+        # and the state is not initialized
+        def safe_to_set_capturable(group):
+            all_uninitialized = True
+            all_cuda = True
+
+            for p in group.get("params", list()):
+                all_cuda &= p.is_cuda
+                all_uninitialized &= p not in self.value.state
+
+            return "capturable" in group and all_uninitialized and all_cuda
+
+        # track indices to not set so we don't need to
+        # in the variable tracker realize the whole state
+        # we handle guarding the state specially
+        for ind, group in enumerate(self.value.param_groups):
+            if safe_to_set_capturable(group):
                 group["capturable"] = True
 
         param_groups_vt = LazyVariableTracker.realize_all(
@@ -134,12 +148,11 @@ class OptimizerVariable(UserDefinedObjectVariable):
                 self.value.param_groups
             )
         )
-        for param_group_vt in param_groups_vt.items:
+        for ind, param_group_vt in enumerate(param_groups_vt.items):
             key = ConstDictVariable._HashableTracker(
                 ConstantVariable.create("capturable")
             )
-            if key in param_group_vt.items:
-                param_group_vt.items[key] = ConstantVariable.create(True)
+            param_group_vt.items[key] = ConstantVariable.create(True)
 
     def get_python_args(self, *args, **kwargs):
         """Get python values equivalent to the variable tracker args"""

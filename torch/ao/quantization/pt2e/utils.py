@@ -21,7 +21,6 @@ from torch.ao.quantization.quantizer import QuantizationAnnotation
 
 __all__ = [
     "fold_bn_weights_into_conv_node",
-    "_get_aten_graph_module_for_pattern",
     "remove_tensor_overload_for_qdq_ops",
 ]
 

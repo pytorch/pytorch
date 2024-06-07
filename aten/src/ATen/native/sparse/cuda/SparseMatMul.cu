@@ -387,7 +387,7 @@ struct CusparseMatrixMultiplyOp {
       Tensor &output_values,
       Tensor &output_indices)
   {
-    TORCH_INTERNAL_ASSERT(false, "cusparse csr sparse-sparse MM only supports data type of float and double.");
+    static_assert(false&&sizeof(scalar_t), "cusparse csr sparse-sparse MM only supports data type of float and double.");
   }
 };
 

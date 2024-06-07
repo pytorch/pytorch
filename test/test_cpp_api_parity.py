@@ -3,9 +3,6 @@
 
 import os
 
-import torch
-import torch.testing._internal.common_nn as common_nn
-import torch.testing._internal.common_utils as common
 from cpp_api_parity import (
     functional_impl_check,
     module_impl_check,
@@ -14,6 +11,10 @@ from cpp_api_parity import (
 )
 from cpp_api_parity.parity_table_parser import parse_parity_tracker_table
 from cpp_api_parity.utils import is_torch_nn_functional_test
+
+import torch
+import torch.testing._internal.common_nn as common_nn
+import torch.testing._internal.common_utils as common
 
 # NOTE: turn this on if you want to print source code of all C++ tests (e.g. for debugging purpose)
 PRINT_CPP_SOURCE = False

@@ -7,7 +7,7 @@ namespace c10 {
 namespace impl {
 
 namespace {
-  std::string toString(c10::optional<DispatchKey> k) {
+  std::string toString(std::optional<DispatchKey> k) {
     if (k.has_value()) {
       return toString(*k);
     } else {
@@ -39,7 +39,7 @@ namespace {
     // TODO: figure out if we can just directly save real schema at def time
     FunctionSchema from_def = from_def_.cloneWithRealTypes(kernel.isValidSymUnboxed());
     FunctionSchema inferred = inferred_.cloneWithRealTypes();
-    c10::optional<std::string> schema_difference = findSchemaDifferences(from_def, inferred);
+    std::optional<std::string> schema_difference = findSchemaDifferences(from_def, inferred);
     if (schema_difference.has_value()) {
       TORCH_CHECK(false,
         "Inferred operator schema for a C++ kernel function doesn't match the expected function schema.\n"
@@ -101,9 +101,9 @@ void OperatorEntry::deregisterSchema() {
 
 OperatorEntry::AnnotatedKernelContainerIterator OperatorEntry::registerKernel(
   const c10::Dispatcher& dispatcher,
-  c10::optional<DispatchKey> dispatch_key,
+  std::optional<DispatchKey> dispatch_key,
   KernelFunction kernel,
-  c10::optional<CppSignature> cpp_signature,
+  std::optional<CppSignature> cpp_signature,
   std::unique_ptr<FunctionSchema> inferred_function_schema,
   std::string debug
 ) {
@@ -181,7 +181,7 @@ OperatorEntry::AnnotatedKernelContainerIterator OperatorEntry::registerKernel(
 
 void OperatorEntry::deregisterKernel_(
   const c10::Dispatcher& dispatcher,
-  c10::optional<DispatchKey> dispatch_key,
+  std::optional<DispatchKey> dispatch_key,
   AnnotatedKernelContainerIterator kernel
 ) {
   // Redirect catchAll deregistrations to CompositeImplicitAutograd.

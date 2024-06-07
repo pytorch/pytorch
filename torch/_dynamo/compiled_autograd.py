@@ -1,6 +1,6 @@
 import contextlib
 import functools
-from typing import List, Optional, TYPE_CHECKING
+from typing import Dict, List, Optional, TYPE_CHECKING
 
 import torch
 from torch._dynamo.external_utils import call_backward, call_hook
@@ -35,6 +35,14 @@ def snapshot_verbose_logging_enabled():
     return torch._logging._internal.log_state.is_artifact_enabled(
         "compiled_autograd_verbose"
     )
+
+
+def cpp_verbose_log_fn(msg: str) -> None:
+    verbose_log.debug(msg)
+
+
+def snapshot_cudagraph_enabled():
+    return torch._inductor.config.triton.cudagraphs
 
 
 def maybe_clone(x):
@@ -199,6 +207,52 @@ class AutogradCompilerInstance:
             self.bind_tensors_to_proxies(input, proxies)
         return input
 
+    # Note: [Compiled autograd and cudagraphs]
+    # Eager autograd backward implements scalars as 0-dim tensors, see DivBackward0::other_.
+    # When compiled autograd traces those nodes, it lifts the scalar tensors, resulting in a graph
+    # with some cpu 0-dim tensor inputs. To prevent the entire graph from skipping cudagraph, we move the
+    # scalars tensors to cuda. This works because ATen/prims ops will accept cuda 0-dim tensors too.
+    def move_graph_nodes_to_cuda(self, graph) -> List[int]:
+        to_move: Dict[int, torch.fx.Node] = {}
+        has_cuda_inputs = False
+        nodes = list(graph.nodes)
+        assert nodes[0].target == "inputs"
+        inputs = nodes[0]
+        inputs_users = list(inputs.users.keys())
+        # the ordering of the nodes should always [inputs, sizes, hooks, getitem, getitem1, ...]
+        # where getitemi accesses inputs[i]
+        first_getitem_idx = 3
+        assert nodes[first_getitem_idx] == inputs_users[0]
+        last_getitem_idx = first_getitem_idx + len(inputs_users) - 1
+        assert nodes[last_getitem_idx] == inputs_users[-1]
+        for i, node in enumerate(inputs_users):
+            if not has_cuda_inputs and node.meta["val"].device.type == "cuda":
+                has_cuda_inputs = True
+                continue
+
+            is_cpu = node.meta["val"].device.type == "cpu"
+            is_scalar = len(node.meta["val"].size()) == 0
+            if is_cpu and is_scalar:
+                node_users = list(node.users.keys())
+                if all(
+                    isinstance(user.target, torch._ops.OpOverload)
+                    and user.target.namespace in ("prims", "aten")
+                    for user in node_users
+                ):
+                    # all users are prims/aten, can move safely
+                    to_move[i] = node
+
+        # only move cpu scalars to cuda if there were cuda activations in this graph,
+        # this is to handle the case where cudagraphs is enabled on a cpu-only graph
+        if has_cuda_inputs:
+            for node in to_move.values():
+                node.meta["val"] = node.meta["val"].cuda()
+
+            # return runtime indices we need to move to cuda
+            return list(to_move.keys())
+
+        return []
+
     def end_capture(self, outputs):
         self.stack.close()
         self.fx_tracer.create_node(
@@ -208,6 +262,10 @@ class AutogradCompilerInstance:
             {},
         )
         self.reorder_accumulate_grad_nodes()
+        runtime_inputs_to_move: List[int] = []
+        if snapshot_cudagraph_enabled():
+            runtime_inputs_to_move = self.move_graph_nodes_to_cuda(self.fx_tracer.graph)
+
         graph = GraphModule(
             self.fx_tracer.root, self.fx_tracer.graph, "CompiledAutograd"
         )
@@ -216,13 +274,23 @@ class AutogradCompilerInstance:
             "%s", lazy_format_graph_code("Compiled autograd graph", graph)
         )
         verbose_log.debug(
-            "%s", lazy_format_graph_code("Compiled autograd graph", graph)
+            "%s",
+            lazy_format_graph_code(
+                "Compiled autograd graph", graph, include_device=True
+            ),
         )
         trace_structured(
             "compiled_autograd_graph",
             payload_fn=lambda: graph.print_readable(print_output=False),
         )
-        return self.compiler_fn(graph)
+
+        def runtime_wrapper(compiled_fn, inputs, sizes, hooks):
+            for i in runtime_inputs_to_move:
+                inputs[i] = inputs[i].cuda()
+
+            return compiled_fn(inputs, sizes, hooks)
+
+        return runtime_wrapper, self.compiler_fn(graph)
 
     def reorder_accumulate_grad_nodes(self):
         """
@@ -292,9 +360,8 @@ def enable(compiler_fn):
     prior = torch._C._dynamo.compiled_autograd.set_autograd_compiler(
         functools.partial(AutogradCompilerInstance, compiler_fn)
     )
-    torch._C._dynamo.compiled_autograd.set_verbose_logging(
-        snapshot_verbose_logging_enabled()
-    )
+    if snapshot_verbose_logging_enabled():
+        torch._C._dynamo.compiled_autograd.set_verbose_logger(cpp_verbose_log_fn)
     global compiled_autograd_enabled, compiled_autograd_enabled_count
     compiled_autograd_enabled = True
     compiled_autograd_enabled_count += 1
@@ -319,3 +386,11 @@ def disable():
         if prior:
             compiled_autograd_enabled = True
         torch._C._dynamo.compiled_autograd.set_autograd_compiler(prior)
+
+
+# return to starting state of a new process
+def reset() -> None:
+    compiled_autograd_enable = False
+    assert compiled_autograd_enabled_count == 0
+    torch._C._dynamo.compiled_autograd.set_autograd_compiler(None)
+    torch._C._dynamo.compiled_autograd.set_verbose_logger(None)

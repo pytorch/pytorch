@@ -1921,7 +1921,8 @@ class GraphModule(torch.nn.Module):
         self.assertTrue(len(wrap_node.args), 3)
 
         # Check that the linear bias and weight are getattr in the outer graph
-        self.assertTrue(len(dict(backend.graphs[0].named_parameters())) == 2)
+        if not torch._dynamo.config.inline_inbuilt_nn_modules:
+            self.assertTrue(len(dict(backend.graphs[0].named_parameters())) == 2)
 
         # Check that the inner function has one op and its a linear op
         body_function = getattr(backend.graphs[0], wrap_node.args[0].name)
@@ -2052,7 +2053,8 @@ class GraphModule(torch.nn.Module):
         self.assertTrue(len(wrap_node.args), 3)
 
         # Check that the linear bias and weight are getattr in the outer graph
-        self.assertTrue(len(dict(backend.graphs[0].named_parameters())) == 2)
+        if not torch._dynamo.config.inline_inbuilt_nn_modules:
+            self.assertTrue(len(dict(backend.graphs[0].named_parameters())) == 2)
 
         # Check that the inner function has one op and its a linear op
         body_function = getattr(backend.graphs[0], wrap_node.args[0].name)
@@ -5116,10 +5118,10 @@ class GraphModule(torch.nn.Module):
             actual,
             """\
 class GraphModule(torch.nn.Module):
-    def forward(self, L_self_tensor_constant0: "f32[3, 3, 3]"):
-        l_self_tensor_constant0 = L_self_tensor_constant0
+    def forward(self, L_self_buffers_tensor_constant0_: "f32[3, 3, 3]"):
+        l_self_buffers_tensor_constant0_ = L_self_buffers_tensor_constant0_
 
-        alias_default: "f32[3, 3, 3]" = torch.ops.aten.alias.default(l_self_tensor_constant0);  l_self_tensor_constant0 = None
+        alias_default: "f32[3, 3, 3]" = torch.ops.aten.alias.default(l_self_buffers_tensor_constant0_);  l_self_buffers_tensor_constant0_ = None
 
         sin_default: "f32[3, 3, 3]" = torch.ops.aten.sin.default(alias_default)
 
@@ -5138,16 +5140,16 @@ class GraphModule(torch.nn.Module):
             actual,
             """\
 class GraphModule(torch.nn.Module):
-    def forward(self, getattr_L_self_FX_CONST_FOLDED_ATTRS_0_: "f32[3, 3, 3]", getattr_L_self_FX_CONST_FOLDED_ATTRS_1_: "f32[3, 3, 3]", L_flat_tangents_1_: "f32[3, 3, 3]"):
-        getattr_l_self_fx_const_folded_attrs_0_ = getattr_L_self_FX_CONST_FOLDED_ATTRS_0_
-        getattr_l_self_fx_const_folded_attrs_1_ = getattr_L_self_FX_CONST_FOLDED_ATTRS_1_
+    def forward(self, L_self_modules_FX_CONST_FOLDED_ATTRS_parameters_0_: "f32[3, 3, 3]", L_self_modules_FX_CONST_FOLDED_ATTRS_parameters_1_: "f32[3, 3, 3]", L_flat_tangents_1_: "f32[3, 3, 3]"):
+        l_self_modules_fx_const_folded_attrs_parameters_0_ = L_self_modules_FX_CONST_FOLDED_ATTRS_parameters_0_
+        l_self_modules_fx_const_folded_attrs_parameters_1_ = L_self_modules_FX_CONST_FOLDED_ATTRS_parameters_1_
         l_flat_tangents_1_ = L_flat_tangents_1_
 
-        _new_zeros_with_same_feature_meta_default: "f32[3, 3, 3]" = torch.ops.aten._new_zeros_with_same_feature_meta.default(l_flat_tangents_1_, getattr_l_self_fx_const_folded_attrs_0_);  getattr_l_self_fx_const_folded_attrs_0_ = None
+        _new_zeros_with_same_feature_meta_default: "f32[3, 3, 3]" = torch.ops.aten._new_zeros_with_same_feature_meta.default(l_flat_tangents_1_, l_self_modules_fx_const_folded_attrs_parameters_0_);  l_self_modules_fx_const_folded_attrs_parameters_0_ = None
 
         copy__default: "f32[3, 3, 3]" = torch.ops.aten.copy_.default(_new_zeros_with_same_feature_meta_default, l_flat_tangents_1_);  _new_zeros_with_same_feature_meta_default = l_flat_tangents_1_ = None
 
-        mul_tensor: "f32[3, 3, 3]" = torch.ops.aten.mul.Tensor(copy__default, getattr_l_self_fx_const_folded_attrs_1_);  copy__default = getattr_l_self_fx_const_folded_attrs_1_ = None
+        mul_tensor: "f32[3, 3, 3]" = torch.ops.aten.mul.Tensor(copy__default, l_self_modules_fx_const_folded_attrs_parameters_1_);  copy__default = l_self_modules_fx_const_folded_attrs_parameters_1_ = None
         return (mul_tensor,)
 """,
         )
@@ -5894,7 +5896,7 @@ class GraphModule(torch.nn.Module):
         actual = opt(x, 0), opt(x, 1), opt(x, 2)
         self.assertEqual(expected, actual)
         self.assertEqual(cnt.frame_count, 3)
-        self.assertEqual(cnt.op_count, 33)
+        self.assertEqual(cnt.op_count, 27)
 
     def test_vmap_multiple_invocation_out_dims(self):
         counters.clear()
@@ -5910,7 +5912,7 @@ class GraphModule(torch.nn.Module):
         actual = opt(x, 0), opt(x, 1), opt(x, 2)
         self.assertEqual(expected, actual)
         self.assertEqual(cnt.frame_count, 3)
-        self.assertEqual(cnt.op_count, 30)
+        self.assertEqual(cnt.op_count, 27)
 
     def test_vmap_new_tensor_in_body(self):
         def fn(x):

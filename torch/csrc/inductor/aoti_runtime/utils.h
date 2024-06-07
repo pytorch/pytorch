@@ -174,4 +174,7 @@ inline AtenTensorHandle wrap_with_raii_handle_if_needed(
   static auto cached_torch_device_type_##device = \
       aoti_torch_device_type_##device()
 
+#define CACHE_TORCH_LAYOUT(layout) \
+  static auto cached_torch_layout_##layout = aoti_torch_layout_##layout()
+
 } // namespace torch::aot_inductor

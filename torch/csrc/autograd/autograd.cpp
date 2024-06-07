@@ -165,7 +165,7 @@ static variable_list run_backward(
 void backward(
     const variable_list& tensors,
     const variable_list& grad_tensors,
-    c10::optional<bool> retain_graph,
+    std::optional<bool> retain_graph,
     bool create_graph,
     const variable_list& inputs) {
   variable_list gradients = _make_grads(tensors, grad_tensors);
@@ -186,7 +186,7 @@ variable_list grad(
     const variable_list& outputs,
     const variable_list& inputs,
     const variable_list& grad_outputs,
-    c10::optional<bool> retain_graph,
+    std::optional<bool> retain_graph,
     bool create_graph,
     bool allow_unused) {
   variable_list gradients = _make_grads(outputs, grad_outputs);

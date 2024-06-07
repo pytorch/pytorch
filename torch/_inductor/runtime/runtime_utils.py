@@ -70,7 +70,18 @@ def get_max_y_grid():
     return 65535
 
 
-def do_bench(*args, **kwargs):
+def do_bench(fn, fn_args, fn_kwargs, **kwargs):
+    from torch._inductor.utils import is_cpu_device
+
+    args = list(fn_args)
+    args.extend(fn_kwargs.values())
+    if is_cpu_device(args):
+        return do_bench_cpu(lambda: fn(*fn_args, **fn_kwargs), **kwargs)
+    else:
+        return do_bench_gpu(lambda: fn(*fn_args, **fn_kwargs), **kwargs)
+
+
+def do_bench_gpu(*args, **kwargs):
     @functools.lru_cache(None)
     def load_triton():
         try:
@@ -176,7 +187,7 @@ try:
     dynamo_timed = torch._dynamo.utils.dynamo_timed
 except AttributeError:  # Compile workers only have a mock version of torch
 
-    def dynamo_timed(original_function=None, phase_name=None):
+    def dynamo_timed(original_function=None, phase_name=None, fwd_only=True):
         if original_function:
             return original_function
         return dynamo_timed
