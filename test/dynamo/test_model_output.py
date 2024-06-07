@@ -102,6 +102,15 @@ class TestModelOutput(torch._dynamo.test_case.TestCase):
         self._common(fn, 2)
 
     @maybe_skip
+    def test_mo_getattr_missing(self):
+        def fn(obj: BaseModelOutput):
+            if getattr(obj, "asdf", None) is not None:
+                obj.asdf += 1
+            return obj.attentions + 1
+
+        self._common(fn, 1)
+
+    @maybe_skip
     def test_mo_getitem(self):
         def fn(obj: BaseModelOutput):
             x = obj["last_hidden_state"] * 10
