@@ -23,7 +23,6 @@ from torch.fx.passes.split_module import split_module
 
 from ._backward import _null_coalesce_accumulate, stage_backward
 from ._unflatten import _outline_submodules
-from .microbatch import split_args_kwargs_into_chunks, TensorChunkSpec
 
 
 logger = logging.getLogger(__name__)
@@ -486,28 +485,11 @@ def _direct_serialization_reduce(self):
 
 
 class Pipe(torch.nn.Module):
-    # Class variables
-    """
-    args_chunk_spec:
-        Chunking specification for positional inputs. (default: `None`)
-    kwargs_chunk_spec:
-        Chunking specification for keyword inputs. (default: `None`)
-    """
-    # args_chunk_spec and kwargs_chunk_spec are used to specify how to chunk
-    # inputs. They are used to create microbatched examples before tracing.
-    # See context managers `ArgsChunkSpec` and `KwargsChunkSpec`.
-    # TODO: Do we need to support `_Replicate`? It's unclear, dropping for now.
-    args_chunk_spec: Optional[Tuple[TensorChunkSpec, ...]] = None
-    kwargs_chunk_spec: Optional[Dict[str, TensorChunkSpec]] = None
-
     @dataclass
     class PipeInfo:
         graph: fx.Graph
         num_stages: int
-        num_chunks: int
         has_loss_and_backward: bool
-        args_chunk_spec: Optional[Tuple[Any, ...]] = None
-        kwargs_chunk_spec: Optional[Dict[str, Any]] = None
 
     def __init__(
         self,
@@ -622,6 +604,9 @@ class Pipe(torch.nn.Module):
         return res
 
     def get_stage_module(self, stage_idx: int) -> torch.nn.Module:
+        """
+        Return a stage module corresponding to `stage_idx` of the `pipe`.
+        """
         if stage_idx < 0 or stage_idx >= self.num_stages:
             raise ValueError(f"Invalid stage index {stage_idx}!")
         return getattr(self.split_gm, f"submod_{stage_idx}")
@@ -865,7 +850,11 @@ class Pipe(torch.nn.Module):
         inputs_to_state: Dict[str, List[str]] = {}
         for attr in attr_nodes:
             _, tensor = _recursive_getattr_with_parent(mod, attr.target)
-            inputs_to_state[attr.name] = list(id_to_fqns[id(tensor)])
+            fqns = list(id_to_fqns[id(tensor)])
+            if fqns:
+                inputs_to_state[attr.name] = fqns
+            elif attr.target in exported_program.constants:  # lifted constants
+                inputs_to_state[attr.name] = [attr.target]
 
         # [aliasing] for each submodule split, assign attributes on FQNs that may be used.
         # We determine this based on whether or not the FQN attribute parent exists.
@@ -993,7 +982,6 @@ class Pipe(torch.nn.Module):
     @staticmethod
     def from_tracing(
         mod: torch.nn.Module,
-        num_chunks: int,
         example_args: Tuple[Any, ...],
         example_kwargs: Optional[Dict[str, Any]] = None,
         split_policy: Optional[Callable[[fx.GraphModule], fx.GraphModule]] = None,
@@ -1012,19 +1000,11 @@ class Pipe(torch.nn.Module):
             )
         """
 
-        args_split, kwargs_split = split_args_kwargs_into_chunks(
-            example_args,
-            example_kwargs,
-            num_chunks,
-            Pipe.args_chunk_spec,
-            Pipe.kwargs_chunk_spec,
-        )
-
         # Trace with export
         exported_program = Pipe._trace_with_export(
             mod,
-            example_args=args_split[0],
-            example_kwargs=kwargs_split[0],
+            example_args,
+            example_kwargs,
         )
 
         pipe = Pipe._from_traced(
@@ -1068,10 +1048,7 @@ class Pipe(torch.nn.Module):
         pipe.pipe_info = Pipe.PipeInfo(
             graph=pipe.split_gm.graph,
             num_stages=pipe.num_stages,
-            num_chunks=num_chunks,
             has_loss_and_backward=pipe.has_loss_and_backward,
-            args_chunk_spec=Pipe.args_chunk_spec,
-            kwargs_chunk_spec=Pipe.kwargs_chunk_spec,
         )
         return pipe
 
@@ -1138,29 +1115,26 @@ def annotate_split_points(mod: torch.nn.Module, spec: Dict[str, SplitPoint]):
 
 def pipeline(
     module: torch.nn.Module,
-    num_chunks: int,
-    example_args: Tuple[Any, ...],
-    example_kwargs: Optional[Dict[str, Any]] = None,
+    mb_args: Tuple[Any, ...],
+    mb_kwargs: Optional[Dict[str, Any]] = None,
     split_spec: Optional[Dict[str, SplitPoint]] = None,
     split_policy: Optional[Callable[[fx.GraphModule], fx.GraphModule]] = None,
 ) -> Pipe:
     """
-    Creates a pipeline representation for the provided module.
+    Split a module based on a specification.
 
     See `Pipe` for more details.
 
     Arguments
     ---------
     module:
-        The module to be transformed into a `Pipe`.
-    num_chunks:
-        The number of microbatches to be run with this pipeline.
-    example_args:
-        Example positional inputs to be used with this pipeline.
-    example_kwargs:
-        Example keyword inputs to be used with this pipeline. (default: `None`)
+        The module to be splitted.
+    mb_args:
+        Example positional inputs, in micro-batch form.
+    mb_kwargs:
+        Example keyword inputs, in micro-batch form. (default: `None`)
     split_spec:
-        A dictionary mapping module names to `SplitPoint`s. (default: `None`)
+        A dictionary using submodule names as split marker. (default: `None`)
     split_policy:
         The policy to use for splitting the module. (default: `None`)
 
@@ -1178,77 +1152,14 @@ def pipeline(
         annotate_split_points(module, split_spec)
         return Pipe.from_tracing(
             mod=module,
-            num_chunks=num_chunks,
-            example_args=example_args,
-            example_kwargs=example_kwargs,
+            example_args=mb_args,
+            example_kwargs=mb_kwargs,
         )
     else:
         # Use split policy
         return Pipe.from_tracing(
             mod=module,
-            num_chunks=num_chunks,
-            example_args=example_args,
-            example_kwargs=example_kwargs,
+            example_args=mb_args,
+            example_kwargs=mb_kwargs,
             split_policy=split_policy,
         )
-
-
-class ArgsChunkSpec:
-    """
-    Context manager for setting `args_chunk_spec` during creation of Pipe
-
-    Example:
-        >>> # xdoctest: +SKIP
-        >>> # There are three positional arguments to the model, and
-        >>> # we are chunking them along dimension 0, 0 and 1, respectively
-        >>> with ArgsChunkSpec((0, 0, 1)):
-        >>>     pipe = pipeline(model, num_chunks, example_args)
-    """
-
-    def __init__(
-        self,
-        chunk_dims: Tuple[int, ...],
-    ):
-        self.args_chunk_spec = map_aggregate(
-            chunk_dims,
-            lambda dim: TensorChunkSpec(dim),
-        )
-
-    def __enter__(self):
-        # Inject into the Pipe class
-        Pipe.args_chunk_spec = self.args_chunk_spec
-        return self.args_chunk_spec
-
-    def __exit__(self, exc_type, exc_val, traceback):
-        # Remove from the Pipe class
-        Pipe.args_chunk_spec = None
-
-
-class KwargsChunkSpec:
-    """
-    Context manager for setting `kwargs_chunk_spec` during creation of Pipe
-
-    Example:
-        >>> # xdoctest: +SKIP
-        >>> # Chunk dimension 0 for the "id" argument, 1 for the "mask" argument
-        >>> with KwargsChunkSpec({"id": 0, "mask": 1}):
-        >>>     pipe = pipeline(model, num_chunks, (), example_kwargs)
-    """
-
-    def __init__(
-        self,
-        chunk_dims: Dict[str, int],
-    ):
-        self.kwargs_chunk_spec = map_aggregate(
-            chunk_dims,
-            lambda dim: TensorChunkSpec(dim),
-        )
-
-    def __enter__(self):
-        # Inject into the Pipe class
-        Pipe.kwargs_chunk_spec = self.kwargs_chunk_spec
-        return self.kwargs_chunk_spec
-
-    def __exit__(self, exc_type, exc_val, traceback):
-        # Remove from the Pipe class
-        Pipe.kwargs_chunk_spec = None

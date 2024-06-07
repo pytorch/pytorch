@@ -1,10 +1,8 @@
 import copy
 import warnings
-
 from torch.utils.data.datapipes.datapipe import MapDataPipe
 
-
-__all__ = ["SequenceWrapperMapDataPipe"]
+__all__ = ["SequenceWrapperMapDataPipe", ]
 
 
 class SequenceWrapperMapDataPipe(MapDataPipe):
