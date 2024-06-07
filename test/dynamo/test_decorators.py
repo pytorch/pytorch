@@ -337,7 +337,11 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
         ):
             torch._dynamo.optimize("eager")(e)(x)
 
-        self.assertEqual(len(seen_frames), 0)
+        if torch._dynamo.config.inline_inbuilt_nn_modules:
+            # inlining getattr .. twice because of restart analysis
+            self.assertEqual(len(seen_frames), 2)
+        else:
+            self.assertEqual(len(seen_frames), 0)
 
     def test_torch_guards_stack_frame_register_inlining_partially_disable(self):
         y = torch.nn.Parameter(torch.tensor([0.25, 0.25]))
