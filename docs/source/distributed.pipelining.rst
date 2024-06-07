@@ -112,41 +112,42 @@ To directly construct a `PipelineStage`, the user is responsible for providing a
 
 .. code-block:: python
 
-class Transformer(nn.Module):
+  class Transformer(nn.Module):
 
-    def __init__(self, model_args: ModelArgs):
-        super().__init__()
+      def __init__(self, model_args: ModelArgs):
+          super().__init__()
 
-        self.tok_embeddings = nn.Embedding(model_args.vocab_size, model_args.dim)
-        self.register_buffer("freqs_cis", self._precompute_freqs_cis(), persistent=True)
+          self.tok_embeddings = nn.Embedding(model_args.vocab_size, model_args.dim)
+          self.register_buffer("freqs_cis", self._precompute_freqs_cis(), persistent=True)
 
-        # Using a ModuleDict instead of a ModuleList lets us delete unwanted layers without affecting layer names (FQNs),
-        # which is important for ensuring checkpoints will correctly save and load.
-        self.layers = torch.nn.ModuleDict()
-        for layer_id in range(model_args.n_layers):
-            self.layers[str(layer_id)] = TransformerBlock(layer_id, model_args)
+          # Using a ModuleDict instead of a ModuleList lets us delete unwanted layers without affecting layer names (FQNs),
+          # which is important for ensuring checkpoints will correctly save and load.
+          self.layers = torch.nn.ModuleDict()
+          for layer_id in range(model_args.n_layers):
+              self.layers[str(layer_id)] = TransformerBlock(layer_id, model_args)
 
-        self.norm = create_norm(
-            model_args.norm_type, dim=model_args.dim, eps=model_args.norm_eps
-        )
-        self.output = nn.Linear(model_args.dim, model_args.vocab_size, bias=False)
-        self.init_weights()
+          self.norm = create_norm(
+              model_args.norm_type, dim=model_args.dim, eps=model_args.norm_eps
+          )
+          self.output = nn.Linear(model_args.dim, model_args.vocab_size, bias=False)
+          self.init_weights()
 
-    def forward(self, tokens: torch.Tensor):
-        # allowing for the possibility that certain input/output layers may be set to none makes it possible to reuse
-        # this forward method on every stage
-        h = self.tok_embeddings(tokens) if self.tok_embeddings else tokens
+      def forward(self, tokens: torch.Tensor):
+          # allowing for the possibility that certain input/output layers may be set to none makes it possible to reuse
+          # this forward method on every stage
+          h = self.tok_embeddings(tokens) if self.tok_embeddings else tokens
 
-        for layer in self.layers.values():
-            h = layer(h, self.freqs_cis)
+          for layer in self.layers.values():
+              h = layer(h, self.freqs_cis)
 
-        h = self.norm(h) if self.norm else h
-        output = self.output(h).float() if self.output else h
-        return output
+          h = self.norm(h) if self.norm else h
+          output = self.output(h).float() if self.output else h
+          return output
 
 A model defined in this manner can be easily configured per stage by first initializing the whole model (using meta-device to avoid OOM errors), deleting undesired layers for that stage, and then creating a PipelineStage that wraps the model.  For example:
 
 .. code-block:: python
+
   with torch.device("meta"):
       assert num_stages == 2, "This is a simple 2-stage example"
 
