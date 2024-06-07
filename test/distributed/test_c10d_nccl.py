@@ -3668,7 +3668,7 @@ class NCCLTraceTest(NCCLTraceTestBase):
     @requires_nccl()
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
     @parametrize("timing_enabled", [True, False])
-    def test_trace_while_active(self, timing_enabled, only_active):
+    def test_trace_while_active(self, timing_enabled):
         if self.rank == self.MAIN_PROCESS_RANK:
             for c in self.children_pipes:
                 self.assertEqual(c.recv(), "next")
@@ -3689,11 +3689,10 @@ class NCCLTraceTest(NCCLTraceTestBase):
             if self.rank != 0:
                 pg.allreduce(a).wait()
             e.synchronize()
-            t = pickle.loads(torch._C._distributed_c10d._dump_nccl_trace(onlyActive=only_active))
+            t = pickle.loads(torch._C._distributed_c10d._dump_nccl_trace())
             t = t["entries"]
-          
+            self.assertEqual(t[-1]["profiling_name"], "nccl:all_reduce")
             if self.rank == 0:
-                self.assertEqual(t[-1]["profiling_name"], "nccl:all_reduce")
                 self.assertEqual(t[-1]["collective_seq_id"], 1)
                 self.assertEqual(t[-1]["state"], "completed")
             else:
