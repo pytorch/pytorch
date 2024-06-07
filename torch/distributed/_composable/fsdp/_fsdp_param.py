@@ -328,10 +328,9 @@ class FSDPParam:
         - Sharded parameters
         - Placeholders for the `self._unsharded_param` nn.Parameter
         """
-        if (
-            not ca.compiled_autograd_enabled
-            and hasattr(self, "_unsharded_param")  # after the 1st all-gather
-        ):
+        if not ca.compiled_autograd_enabled and hasattr(
+            self, "_unsharded_param"
+        ):  # after the 1st all-gather
             inner_tensor = self._sharded_local_tensor
             if not hasattr(inner_tensor, "fsdp_post_all_gather"):
                 return  # already initialized
