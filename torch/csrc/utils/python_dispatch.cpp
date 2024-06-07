@@ -668,7 +668,6 @@ void initDispatchBindings(PyObject* module) {
       DEF_ONE(CompositeExplicitAutograd)
       DEF_ONE(CompositeImplicitAutogradNestedTensor)
       DEF_ONE(CompositeImplicitAutograd)
-      DEF_ONE(OverrideCompositeImplicitAutogradFromPython)
       // NestedTensor is not a backend key
       DEF_ONE(AutogradNestedTensor)
       DEF_ONE(AutogradOther)

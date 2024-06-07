@@ -96,6 +96,15 @@ class FunctionalTensor(torch.Tensor):
         torch.ops.aten._batch_norm_impl_index.default,  # type: ignore[has-type]
         torch.ops.aten.cudnn_batch_norm.default,  # type: ignore[has-type]
         torch.ops.aten.miopen_batch_norm.default,  # type: ignore[has-type]
+        torch.ops.aten.atleast_1d.default,  # type: ignore[has-type]
+        torch.ops.aten.atleast_2d.default,  # type: ignore[has-type]
+        torch.ops.aten.atleast_3d.default,  # type: ignore[has-type]
+        torch.ops.aten.cartesian_prod.default,  # type: ignore[has-type]
+        torch.ops.aten.conj_physical.default,  # type: ignore[has-type]
+        torch.ops.aten.alpha_dropout.default,  # type: ignore[has-type]
+        torch.ops.aten.feature_dropout.default,  # type: ignore[has-type]
+        torch.ops.aten.feature_alpha_dropout.default,  # type: ignore[has-type]
+        torch.ops.aten.unsafe_chunk.default,  # type: ignore[has-type]
     ]
 
     def __new__(cls, elem):
