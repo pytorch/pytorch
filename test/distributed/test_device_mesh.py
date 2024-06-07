@@ -208,6 +208,15 @@ class DeviceMeshTest(DTensorTestBase):
                 "cuda:0", mesh_shape=mesh_shape, mesh_dim_names=("dp", "tp")
             )
 
+    @with_comms
+    def test_set_mesh_dim_group_options(self):
+        device_type = "cuda" if torch.cuda.is_available() else "cpu"
+        _mesh_resources._set_mesh_dim_group_options(1, "fake", None)
+
+        mesh_tensor = torch.arange(4).reshape(2, 2)
+        mesh = DeviceMesh(device_type, mesh_tensor)
+        self.assertEqual(mesh.get_group(1)._get_backend_name(), "fake")
+
 
 class DeviceMeshTestNDim(DTensorTestBase):
     @property
