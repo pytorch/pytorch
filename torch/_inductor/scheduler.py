@@ -36,7 +36,7 @@ from torch.utils._triton import has_triton
 
 from . import comms, config, dependencies, ir, metrics
 from .codecache import write_text
-from .codegen.common import get_scheduling_for_device, Kernel
+from .codegen.common import get_scheduling_for_device, index_prevent_reordering, Kernel
 from .comm_analysis import estimate_nccl_collective_runtime
 from .dependencies import Dep, MemoryDep, StarDep, WeakDep
 from .ir import ComputedBuffer, MultiOutput, MultiOutputLayout
@@ -1506,6 +1506,7 @@ class Scheduler:
         self.topological_sort_schedule()
         self.logged_slow_fusion: Set[Tuple[str, str]] = set()
         self.fuse_nodes()
+        self.merge_loops()
         self.finalize_multi_template_buffers()
         if config.reorder_for_compute_comm_overlap:
             # Refresh node_users and inverse_users to reflect fused nodes
@@ -1908,6 +1909,64 @@ class Scheduler:
         for order, node in enumerate(self.nodes):
             node.min_order = order
             node.max_order = order
+
+    def merge_loops(self) -> None:
+        for node in self.nodes:
+            if node.get_device().type == "cpu" or not config.loop_ordering_after_fusion:
+                continue
+            for snode in node.get_nodes():
+                # merge loops for the scheduler node
+                if not isinstance(snode, SchedulerNode):
+                    continue
+
+                old_body = snode._body
+                assert isinstance(old_body, ir.LoopBody)
+                old_iter_vars, old_reduce_vars = old_body.vars
+                old_iter_sizes, old_reduce_sizes = snode._sizes
+
+                index_exprs = [*old_body.indexing_exprs.values()]
+
+                iter_sizes, reindex, prune = V.graph.sizevars._simplify_loops(
+                    old_iter_vars,
+                    old_iter_sizes,
+                    index_prevent_reordering(
+                        index_exprs, old_iter_vars, old_iter_sizes
+                    ),
+                )
+                if iter_sizes == old_iter_sizes:
+                    # no dimensions get merged.
+                    continue
+
+                # Note: if no dimension get merges, the symbol prefix will
+                # remain 'y'. But if we merge dimensions, we change prefix to
+                # 'z'. If this is an issue, we can always retrace the LoopBody
+                # to change symbol prefix to 'z'.
+                (
+                    iter_vars,
+                    reduce_vars,
+                ), var_ranges = dependencies.index_vars_no_squeeze(
+                    iter_sizes, old_reduce_sizes, prefix="z"
+                )
+                snode._body = ir.LoopBody(
+                    old_body,
+                    [reindex(iter_vars), reduce_vars],
+                    var_ranges,
+                )
+                snode._sizes = (iter_sizes, old_reduce_sizes)
+                snode.set_read_writes(
+                    dependencies.extract_read_writes(
+                        snode._body, *snode._sizes, normalize=True
+                    )
+                )
+
+                # Note that for CPU backend, merging loops will change
+                # snode.group. It's fine for Triton backend.
+                # But if we simplify update snode.group like this:
+                #   group_fn = self.get_backend(snode.node.get_device()).group_fn
+                #   snode.group = (snode.node.get_device(), group_fn(snode._sizes))
+                # There is still an issue due to different snode in a
+                # FusedSchedulerNode having different merged loops.
+                # Skip CPU backend for now.
 
     def fuse_nodes(self) -> None:
         """

@@ -3439,7 +3439,7 @@ class ComputedBuffer(Buffer):
             index_vars,
             support_vars,
             index_size,
-            not config.loop_ordering_after_fusion,
+            self.get_device().type == "cpu" or not config.loop_ordering_after_fusion,
         )
         reduce_ranges, reduce_reindex, _ = simplify_and_reorder(
             reduce_vars, support_vars, reduce_size
@@ -3447,7 +3447,7 @@ class ComputedBuffer(Buffer):
 
         # retrace the loop body with simplification and reordering applied
         (iter_vars, reduce_vars), var_ranges = dependencies.index_vars_no_squeeze(
-            iter_ranges, reduce_ranges, prefix="z"
+            iter_ranges, reduce_ranges, prefix="y"
         )
         body = LoopBody(
             body, [iter_reindex(iter_vars), reduce_reindex(reduce_vars)], var_ranges
@@ -7952,6 +7952,7 @@ class LoopBody:
 
     def __init__(self, fn, args, var_ranges):
         super().__init__()
+        self.vars = args
         self.var_ranges = var_ranges
         self.indexing_exprs = {}
         self.indexing_exprs_name = {}
