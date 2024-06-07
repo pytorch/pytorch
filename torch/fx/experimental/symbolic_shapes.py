@@ -4426,6 +4426,12 @@ class ShapeEnv:
                 vr = self._default_unspecified_value_range()
             if size_oblivious and k in self.size_like:
                 lower = max(2, vr.lower)
+                # Clamping size-oblivious to some quantity below sys.maxsize
+                # helps us determine that f(u0) != sys.maxsize, which is a
+                # test that is looking for sys.maxsize as a sentinel, but you
+                # don't really want to worry about it for unbacked SymInts.
+                # This is similar to the flavor where size oblivious omits
+                # 0/1, it changes semantics but in a benign way.
                 upper = min(2 ** 48, vr.upper)
                 # This is a bit dodgy: what this means is that there was a
                 # size-like unbacked symbol whose upper bound < 2.  This
