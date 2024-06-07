@@ -220,7 +220,6 @@ class StageTest(MultiProcContinousTest):
             self.rank,
             self.world_size,
             self.device,
-            chunks,
             input_args=x.chunk(chunks)[0],
         )
 
