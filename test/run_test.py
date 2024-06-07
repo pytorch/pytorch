@@ -740,12 +740,6 @@ def _test_autoload(test_directory, options, enable=True):
 
     # "install" the test modules and run tests
     python_path = os.environ.get("PYTHONPATH", "")
-    os.environ["TORCH_DEVICE_BACKEND_AUTOLOAD"] = str(enable)
-    test_module = "test_autoload_" + ("enable" if enable else "disable")
-    shutil.copyfile(
-        test_directory + "/test_autoload.py",
-        test_directory + "/" + test_module + ".py",
-    )
 
     try:
         cpp_extensions = os.path.join(test_directory, "cpp_extensions")
@@ -758,12 +752,14 @@ def _test_autoload(test_directory, options, enable=True):
 
         assert install_directory, "install_directory must not be empty"
         os.environ["PYTHONPATH"] = os.pathsep.join([install_directory, python_path])
-        return run_test(ShardedTest(test_module, 1, 1), test_directory, options)
+        os.environ["TORCH_DEVICE_BACKEND_AUTOLOAD"] = str(enable)
+
+        cmd = [sys.executable, "test_autoload.py"]
+        return_code = shell(cmd, cwd=test_directory, env=os.environ)
+        return return_code
     finally:
         os.environ["PYTHONPATH"] = python_path
         os.environ.pop("TORCH_DEVICE_BACKEND_AUTOLOAD")
-        if os.path.exists(test_directory + "/" + test_module + ".py"):
-            os.remove(test_directory + "/" + test_module + ".py")
 
 
 def test_distributed(test_module, test_directory, options):

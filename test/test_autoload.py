@@ -1,7 +1,8 @@
 # Owner(s): ["module: unknown"]
 
 import os
-import torch
+
+import torch  # noqa: F401
 
 from torch.testing._internal.common_utils import run_tests, TestCase
 
@@ -12,9 +13,10 @@ class TestDeviceBackendAutoload(TestCase):
 
         # After importing the extension, the value of this environment variable should be true
         # See: test/cpp_extensions/torch_test_cpp_extension/__init__.py
-        is_imported = os.getenv("IS_CUSTOM_DEVICE_BACKEND_IMPORTED", "false")
-        expected = "true" if bool(switch) else "false"
-        self.assertEqual(is_imported, expected)
+        is_imported = os.getenv("IS_CUSTOM_DEVICE_BACKEND_IMPORTED", "False")
+
+        # Both values should be equal
+        self.assertEqual(is_imported, switch)
 
 
 if __name__ == "__main__":
