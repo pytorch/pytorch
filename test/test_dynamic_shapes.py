@@ -487,14 +487,14 @@ class TestPySymInt(TestCase):
         self.assertIsInstance(r, torch.SymInt, msg=type(r))
         self.assertExpectedInline(
             str(shape_env.guards[0][0]),
-            """Eq(floor(IntTrueDiv(s0, 2)), 2)""",
+            """Eq(FloorToInt(IntTrueDiv(s0, 2)), 2)""",
         )
         r = math.floor(3.0 * a0)
         self.assertEqual(r, 15)
         self.assertIsInstance(r, torch.SymInt, msg=type(r))
         self.assertExpectedInline(
             str(shape_env.guards[1][0]),
-            """Eq(floor(3.0*ToFloat(s0)), 15)""",
+            """Eq(FloorToInt(3.0*ToFloat(s0)), 15)""",
         )
 
     def test_sym_trunc(self):
@@ -521,7 +521,7 @@ class TestPySymInt(TestCase):
         self.assertIsInstance(r, torch.SymInt, msg=type(r))
         self.assertExpectedInline(
             str(shape_env.guards[0][0]),
-            """Eq(ceiling(IntTrueDiv(s0, 2)), 3)""",
+            """Eq(CeilToInt(IntTrueDiv(s0, 2)), 3)""",
         )
         r1 = 3.0 * a0
         r = math.floor(r1)
@@ -529,7 +529,7 @@ class TestPySymInt(TestCase):
         self.assertIsInstance(r, torch.SymInt, msg=type(r))
         self.assertExpectedInline(
             str(shape_env.guards[1][0]),
-            """Eq(floor(3.0*ToFloat(s0)), 15)""",
+            """Eq(FloorToInt(3.0*ToFloat(s0)), 15)""",
         )
 
     def test_sym_ite(self):
