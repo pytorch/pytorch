@@ -26,9 +26,11 @@ from torch.testing._internal.common_dtype import get_all_dtypes
 
 try:
     import psutil  # type: ignore[import]
+
     HAS_PSUTIL = True
-except ImportError:
+except ModuleNotFoundError:
     HAS_PSUTIL = False
+    psutil = None
 
 # Note [Writing Test Templates]
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

@@ -142,11 +142,13 @@ def cache_dir() -> str:
     return cache_dir
 
 
-HAS_COLORAMA = True
 try:
     import colorama
-except ImportError:
+
+    HAS_COLORAMA = True
+except ModuleNotFoundError:
     HAS_COLORAMA = False
+    colorama = None  # type: ignore[assignment]
 
 
 def _color_text(msg, color):
