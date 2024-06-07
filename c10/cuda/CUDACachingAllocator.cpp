@@ -2439,6 +2439,10 @@ class DeviceCachingAllocator {
           p.device(), p.stream(), p.pool, p.size(), ctx);
       if (p.block) {
         p.err = cudaSuccess;
+        if (p.pool->owner_PrivatePool) {
+          // The block is for a CUDA graph's PrivatePool.
+          p.pool->owner_PrivatePool->cudaMalloc_count++;
+        }
       } else {
         p.err = cudaErrorMemoryAllocation;
       }
