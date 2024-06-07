@@ -134,7 +134,9 @@ class Library:
 
         name = schema.split("(")[0]
         packet_name = name.split(".")[0] if "." in name else name
-        has_preexisting_packet = hasattr(torch.ops, self.ns) and hasattr(getattr(torch.ops, self.ns), packet_name)
+        has_preexisting_packet = hasattr(torch.ops, self.ns) and hasattr(
+            getattr(torch.ops, self.ns), packet_name
+        )
 
         result = self.m.define(schema, alias_analysis, tuple(tags))
         name = schema.split("(")[0]
