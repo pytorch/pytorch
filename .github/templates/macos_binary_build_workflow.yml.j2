@@ -1,0 +1,115 @@
+{% import 'common.yml.j2' as common %}
+{% import 'upload.yml.j2' as upload %}
+
+{%- block name -%}
+# Template is at:    .github/templates/macos_binary_build_workflow.yml.j2
+# Generation script: .github/scripts/generate_ci_workflows.py
+name: !{{ build_environment }}
+{%- endblock %}
+
+{%- macro set_runner_specific_vars() -%}
+      # NOTE: These environment variables are put here so that they can be applied on every job equally
+      #       They are also here because setting them at a workflow level doesn't give us access to the
+      #       runner.temp variable, which we need.
+      - name: Populate binary env
+        shell: bash
+        run: |
+          # shellcheck disable=SC2129
+          echo "BINARY_ENV_FILE=${RUNNER_TEMP}/env" >> "${GITHUB_ENV}"
+          # shellcheck disable=SC2129
+          echo "PYTORCH_FINAL_PACKAGE_DIR=${RUNNER_TEMP}/artifacts" >> "${GITHUB_ENV}"
+          # shellcheck disable=SC2129
+          echo "MAC_PACKAGE_WORK_DIR=${RUNNER_TEMP}" >> "${GITHUB_ENV}"
+{%- endmacro %}
+
+on:
+# TODO: Migrate to new ciflow trigger, reference https://github.com/pytorch/pytorch/pull/70321
+  push:
+    # NOTE: Meta Employees can trigger new nightlies using: https://fburl.com/trigger_pytorch_nightly_build
+    branches:
+      - nightly
+    tags:
+      # NOTE: Binary build pipelines should only get triggered on release candidate builds
+      # Release candidate tags look like: v1.11.0-rc1
+      - v[0-9]+.[0-9]+.[0-9]+-rc[0-9]+
+{%- for label in ciflow_config.labels | sort %}
+    {%- if loop.first and branches != "nightly" %}
+    tags:
+    {%- endif %}
+      - '!{{ label }}/*'
+{%- endfor %}
+  workflow_dispatch:
+
+env:
+  # Needed for conda builds
+  ALPINE_IMAGE: "308535385114.dkr.ecr.us-east-1.amazonaws.com/tool/alpine"
+  ANACONDA_USER: pytorch
+  AWS_DEFAULT_REGION: us-east-1
+  BUILD_ENVIRONMENT: !{{ build_environment }}
+  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+  PR_NUMBER: ${{ github.event.pull_request.number }}
+  SKIP_ALL_TESTS: 0
+{%- if cross_compile_arm64 %}
+  CROSS_COMPILE_ARM64: 1
+{% endif %}
+!{{ common.concurrency(build_environment) }}
+
+jobs:
+{%- for config in build_configs %}
+  !{{ config["build_name"] }}-build:
+    if: ${{ github.repository_owner == 'pytorch' }}
+    runs-on: !{{ macos_runner }}
+    timeout-minutes: !{{ common.timeout_minutes }}
+    !{{ upload.binary_env(config, true) }}
+    {%- if config.pytorch_extra_install_requirements is defined and config.pytorch_extra_install_requirements|d('')|length > 0  %}
+      PYTORCH_EXTRA_INSTALL_REQUIREMENTS: !{{ config.pytorch_extra_install_requirements }}
+    {%- endif %}
+      # For sccache access (only on non-forked PRs)
+      AWS_ACCESS_KEY_ID: ${{ secrets.MACOS_SCCACHE_S3_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.MACOS_SCCACHE_S3_SECRET_ACCESS_KEY }}
+    steps:
+      !{{ set_runner_specific_vars() }}
+      - name: Install conda and dependencies
+        run: |
+          # Install conda, setup-miniconda messes with the path that messes with the ruby stuff we do later on
+          curl --retry 3 --retry-all-errors -o "${RUNNER_TEMP}/conda.sh" "https://repo.anaconda.com/miniconda/Miniconda3-py310_23.5.2-0-MacOSX-$(uname -m).sh"
+          chmod +x "${RUNNER_TEMP}/conda.sh"
+          /bin/bash "${RUNNER_TEMP}/conda.sh" -b -p "${RUNNER_TEMP}/anaconda"
+          echo "${RUNNER_TEMP}/anaconda/bin" >> "${GITHUB_PATH}"
+          if [ -d "/Applications/Xcode_14.3.1.app" ]; then
+            echo "DEVELOPER_DIR=/Applications/Xcode_14.3.1.app/Contents/Developer" >> "${GITHUB_ENV}"
+          elif [ -d "/Applications/Xcode_13.3.1.app" ]; then
+            echo "DEVELOPER_DIR=/Applications/Xcode_13.3.1.app/Contents/Developer" >> "${GITHUB_ENV}"
+          fi
+      !{{ common.checkout(deep_clone=False, directory="pytorch") }}
+      !{{ common.checkout(deep_clone=False, directory="builder", repository=common.builder_repo, branch=common.builder_branch) }}
+      - name: Install sccache (only for non-forked PRs, and pushes to trunk)
+        uses: nick-fields/retry@v2.8.2
+        if: ${{ github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository }}
+        with:
+          timeout_minutes: 5
+          max_attempts: 3
+          retry_wait_seconds: 90
+          command: |
+            sudo curl --retry 3 --retry-all-errors https://s3.amazonaws.com/ossci-macos/sccache_v2.15 --output /usr/local/bin/sccache
+            sudo chmod +x /usr/local/bin/sccache
+            echo "SCCACHE_BUCKET=ossci-compiler-cache-circleci-v2" >> "${GITHUB_ENV}"
+      - name: Populate binary env
+        run: |
+          # shellcheck disable=SC1091
+          source "${RUNNER_TEMP}/anaconda/bin/activate"
+          "${PYTORCH_ROOT}/.circleci/scripts/binary_populate_env.sh"
+      - name: Build PyTorch binary
+        run: |
+          # shellcheck disable=SC1091
+          source "${RUNNER_TEMP}/anaconda/bin/activate"
+          "${PYTORCH_ROOT}/.circleci/scripts/binary_macos_build.sh"
+      - uses: actions/upload-artifact@v3
+        if: always()
+        with:
+          name: !{{ config["build_name"] }}
+          retention-days: 14
+          if-no-files-found: error
+          path: "${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
+  !{{ upload.upload_binaries(config, has_test=False, use_s3=False) }}
+{%- endfor %}

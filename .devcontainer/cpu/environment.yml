@@ -1,0 +1,6 @@
+# This environment is specific to Debian
+name: PyTorch
+dependencies:
+  - cmake
+  - ninja
+  - libopenblas
