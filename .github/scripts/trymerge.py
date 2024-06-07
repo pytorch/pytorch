@@ -2027,10 +2027,8 @@ def categorize_checks(
     pending_checks: List[Tuple[str, Optional[str], Optional[int]]] = []
     failed_checks: List[Tuple[str, Optional[str], Optional[int]]] = []
 
-    # ok_failed_checks is used with ok_failed_checks_threshold while ignorable_failed_checks
-    # is used to keep track of all ignorable failures when saving the merge record on Rockset
-    ok_failed_checks: List[Tuple[str, Optional[str], Optional[int]]] = []
-    ignorable_failed_checks: Dict[str, List[Any]] = defaultdict(list)
+    # failed_checks_categorization is used to keep track of all ignorable failures when saving the merge record on Rockset
+    failed_checks_categorization: Dict[str, List[Any]] = defaultdict(list)
 
     # If required_checks is not set or empty, consider all names are relevant
     relevant_checknames = [
@@ -2058,36 +2056,38 @@ def categorize_checks(
             continue
         elif not is_passing_status(check_runs[checkname].status):
             target = (
-                ignorable_failed_checks[classification]
+                failed_checks_categorization[classification]
                 if classification
                 in ("IGNORE_CURRENT_CHECK", "BROKEN_TRUNK", "FLAKY", "UNSTABLE")
                 else failed_checks
             )
             target.append((checkname, url, job_id))
 
-            if classification in ("BROKEN_TRUNK", "FLAKY", "UNSTABLE"):
-                ok_failed_checks.append((checkname, url, job_id))
+    flaky_or_broken_trunk = (
+        failed_checks_categorization["BROKEN_TRUNK"]
+        + failed_checks_categorization["FLAKY"]
+    )
 
-    if ok_failed_checks:
+    if flaky_or_broken_trunk:
         warn(
-            f"The following {len(ok_failed_checks)} checks failed but were likely due flakiness or broken trunk: "
-            + ", ".join([x[0] for x in ok_failed_checks])
+            f"The following {len(flaky_or_broken_trunk)} checks failed but were likely due flakiness or broken trunk: "
+            + ", ".join([x[0] for x in flaky_or_broken_trunk])
             + (
                 f" but this is greater than the threshold of {ok_failed_checks_threshold} so merge will fail"
                 if ok_failed_checks_threshold is not None
-                and len(ok_failed_checks) > ok_failed_checks_threshold
+                and len(flaky_or_broken_trunk) > ok_failed_checks_threshold
                 else ""
             )
         )
 
     if (
         ok_failed_checks_threshold is not None
-        and len(ok_failed_checks) > ok_failed_checks_threshold
+        and len(flaky_or_broken_trunk) > ok_failed_checks_threshold
     ):
-        failed_checks = failed_checks + ok_failed_checks
+        failed_checks = failed_checks + flaky_or_broken_trunk
 
-    # The list of ignorable_failed_checks is returned so that it can be saved into the Rockset merge record
-    return (pending_checks, failed_checks, ignorable_failed_checks)
+    # The list of failed_checks_categorization is returned so that it can be saved into the Rockset merge record
+    return (pending_checks, failed_checks, failed_checks_categorization)
 
 
 def merge(
