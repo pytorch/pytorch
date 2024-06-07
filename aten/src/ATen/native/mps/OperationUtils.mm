@@ -56,7 +56,7 @@ void runMPSGraph(MPSStream* mpsStream, MPSCachedGraph *cachedGraph, NSDictionary
   if (disableTypeInference) {
     @autoreleasepool {
       MPSGraph *mpsGraph = cachedGraph->graph();
-      executable = cachedGraph->getExecultable();
+      executable = cachedGraph->getExecutable();
       if (!executable) {
         NSMutableDictionary* shapes = [[NSMutableDictionary new] autorelease];
         for (MPSGraphTensor* graphTensor in feeds) {
@@ -71,7 +71,7 @@ void runMPSGraph(MPSStream* mpsStream, MPSCachedGraph *cachedGraph, NSDictionary
                                  targetOperations:nil
                             compilationDescriptor:compilationDescriptor] retain];
         // store the executable within the cachedGraph to reuse next time
-        cachedGraph->setExecultable(executable);
+        cachedGraph->setExecutable(executable);
       }
     }
   }
