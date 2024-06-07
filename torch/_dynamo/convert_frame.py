@@ -178,9 +178,7 @@ def preserve_global_state(fn):
             finally:
                 cleanup.close()
                 torch._C._set_grad_enabled(prior_grad_mode)
-                torch.torch.autograd.grad_mode._enter_inference_mode(
-                    prior_inference_mode
-                )
+                torch.autograd.grad_mode._enter_inference_mode(prior_inference_mode)
                 torch.use_deterministic_algorithms(
                     prior_deterministic, warn_only=prior_warn_only
                 )
