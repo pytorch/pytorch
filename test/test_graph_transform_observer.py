@@ -15,7 +15,6 @@ from torch.testing._internal.inductor_utils import HAS_CUDA
 if HAS_CUDA and PLATFORM_SUPPORTS_FUSED_ATTENTION:
 
     class TestGraphTransformObserver(TestCase):
-
         @skipIfRocm
         def test_sdpa_rewriter(self):
             def dot_prod_attention(
@@ -35,9 +34,9 @@ if HAS_CUDA and PLATFORM_SUPPORTS_FUSED_ATTENTION:
             compiled_fn = torch.compile(dot_prod_attention, fullgraph=True)
 
             tensor_shape = (4, 2, 16, 32)
-            q = torch.randn(tensor_shape, device='cuda')
-            k = torch.randn(tensor_shape, device='cuda')
-            v = torch.randn(tensor_shape, device='cuda')
+            q = torch.randn(tensor_shape, device="cuda")
+            k = torch.randn(tensor_shape, device="cuda")
+            v = torch.randn(tensor_shape, device="cuda")
             compiled_fn(q, k, v)
 
             found_input_svg = False
