@@ -795,7 +795,11 @@ class TorchLogsFormatter(logging.Formatter):
         )
         if self._is_trace:
             assert s == ""
-            r = f"{prefix} {json.dumps(record.metadata)}"
+            try:
+                r = f"{prefix} {json.dumps(record.metadata)}"
+            except TypeError:
+                log.warning("failing metadata: %r", record.metadata)
+                raise
             if record.payload is not None:
                 r += "".join(f"\n\t{l}" for l in record.payload.split("\n"))
             return r

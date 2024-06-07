@@ -51,6 +51,9 @@ def insert_deferred_runtime_asserts(
 
     # We hash (node_name, min_val, max_val)
     nodes_that_already_have_sym_constraint_range = set()
+
+    # We hash only node name here because size don't take min/max
+    nodes_that_already_have_sym_constraint_size = set()
     # TODO this only works for top-level nodes today, also
     # we should potentially use it not create duplicate
     # assert_async nodes
@@ -63,6 +66,12 @@ def insert_deferred_runtime_asserts(
             nodes_that_already_have_sym_constraint_range.add(
                 (node.args[0], node.kwargs["min"], node.kwargs["max"])
             )
+        if (
+            node.op == "call_function"
+            and node.target == torch.ops.aten.sym_constrain_range_for_size.default
+        ):
+            assert len(node.args) == 1
+            nodes_that_already_have_sym_constraint_size.add(node.args[0])
 
     # Import sympy locally
     import sympy
@@ -337,10 +346,14 @@ def insert_deferred_runtime_asserts(
 
                 if i0 in shape_env.size_like:
                     if export:
-                        graph.call_function(
-                            torch.ops.aten.sym_constrain_range_for_size.default,
-                            (symbol_to_proxy[i0].node,),
-                        )
+                        if (
+                            symbol_to_proxy[i0].node
+                            not in nodes_that_already_have_sym_constraint_size
+                        ):
+                            graph.call_function(
+                                torch.ops.aten.sym_constrain_range_for_size.default,
+                                (symbol_to_proxy[i0].node,),
+                            )
                     else:
                         graph.call_function(
                             torch._check_is_size, (symbol_to_proxy[i0].node,)
