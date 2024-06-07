@@ -198,31 +198,11 @@ class PythonSymNodeImpl : public c10::SymNodeImpl {
     return dispatch_common_(__func__, other);
   }
 
-  c10::SymNode float_truediv(const c10::SymNode& other) override {
-    return dispatch_common_(__func__, other);
-  }
-
-  c10::SymNode int_truediv(const c10::SymNode& other) override {
-    return dispatch_common_(__func__, other);
-  }
-
   c10::SymNode pow(const c10::SymNode& other) override {
     return dispatch_common_(__func__, other);
   }
 
-  c10::SymNode float_pow(const c10::SymNode& other) override {
-    return dispatch_common_(__func__, other);
-  }
-
-  c10::SymNode pow_by_natural(const c10::SymNode& other) override {
-    return dispatch_common_(__func__, other);
-  }
-
   c10::SymNode floordiv(const c10::SymNode& other) override {
-    return dispatch_common_(__func__, other);
-  }
-
-  c10::SymNode int_floordiv(const c10::SymNode& other) override {
     return dispatch_common_(__func__, other);
   }
 
