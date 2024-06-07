@@ -13,7 +13,6 @@
 #include <torch/csrc/utils/python_arg_parser.h>
 
 #include <limits>
-#include <optional>
 
 namespace torch::jit {
 
@@ -817,7 +816,7 @@ py::object invokeOperatorFromPython(
   return createPyObjectForStack(std::move(stack));
 }
 
-std::optional<py::object> _maybe_handle_torch_function(
+py::tuple _maybe_handle_torch_function(
     const std::string& ns,
     const std::string& method_name,
     const std::string& overload_name,
@@ -862,16 +861,18 @@ std::optional<py::object> _maybe_handle_torch_function(
     }
     std::string module_name("torch.ops");
     module_name.append(ns);
-    return {pybind11::reinterpret_steal<py::object>(
-        handle_torch_function_no_python_arg_parser(
-            overloaded_args,
-            args.ptr(),
-            kwargs.ptr(),
-            method_name.c_str(),
-            self_func.ptr(),
-            module_name.c_str()))};
+    return py::make_tuple(
+        true,
+        pybind11::reinterpret_steal<py::object>(
+            handle_torch_function_no_python_arg_parser(
+                overloaded_args,
+                args.ptr(),
+                kwargs.ptr(),
+                method_name.c_str(),
+                self_func.ptr(),
+                module_name.c_str())));
   }
-  return std::nullopt;
+  return py::make_tuple(false, py::none());
 }
 
 py::object _get_operation_for_overload_or_packet(
@@ -886,9 +887,9 @@ py::object _get_operation_for_overload_or_packet(
   std::string overload_name = operations[0]->schema().overload_name();
   auto res = _maybe_handle_torch_function(
       ns, method_name, overload_name, is_overload, args, kwargs);
-  auto torch_function_called = res.has_value();
+  auto torch_function_called = py::cast<bool>(res[0]);
   return torch_function_called
-      ? *res
+      ? res[1]
       : invokeOperatorFromPython(operations, args, kwargs, dk);
 }
 

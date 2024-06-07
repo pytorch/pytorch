@@ -351,7 +351,7 @@ def _create_runtime_wrapper(
 
                 o_grad = info.requires_grad
                 if info.output_type == OutputType.alias_of_input:
-                    aliased_base_tensor = orig_inputs[info.base_idx + num_tokens]  # type: ignore[index]
+                    aliased_base_tensor = orig_inputs[info.base_idx + num_tokens]  # type: ignore[index, operator]
                     regenerated_out = gen_alias_from_base(
                         aliased_base_tensor,
                         o_,
@@ -362,7 +362,7 @@ def _create_runtime_wrapper(
                     fw_outs_including_aliases.append(regenerated_out)
                     continue
                 elif info.output_type == OutputType.is_input:
-                    aliased_base_tensor = orig_inputs[info.base_idx + num_tokens]  # type: ignore[index]
+                    aliased_base_tensor = orig_inputs[info.base_idx + num_tokens]  # type: ignore[index, operator]
                     regenerated_out = aliased_base_tensor
                     fw_outs_including_aliases.append(regenerated_out)
                     continue
@@ -383,7 +383,9 @@ def _create_runtime_wrapper(
                 # We need a way to check whether a tensor came from a custom autograd fn from python,
                 # AND a way to replay that custom view fn.
                 regenerated_out = gen_alias_from_base(
-                    aliased_base_tensor, o_, o_grad, info.functional_tensor
+                    aliased_base_tensor, o_, o_grad, info.functional_tensor,
+                    replay_views=replay_views,
+
                 )
                 fw_outs_including_aliases.append(regenerated_out)
             ret_outs = fw_outs_including_aliases
@@ -1004,6 +1006,8 @@ class AOTSyntheticBaseWrapper(CompilerWrapper):
             aliased_arg_idx_with_metadata_mutations
         )
 
+        replay_views = config.view_replay_for_aliased_outputs
+
         def _unpack_synthetic_bases(primals: Tuple[Any, ...]) -> List[Any]:
             f_args_inner = []
             for inner_idx_or_tuple in synthetic_base_info:
@@ -1013,7 +1017,8 @@ class AOTSyntheticBaseWrapper(CompilerWrapper):
                     inner_base_idx, view_tensor = inner_idx_or_tuple
                     base = primals[inner_base_idx]
                     view_arg = gen_alias_from_base(
-                        base, view_tensor, view_tensor.requires_grad
+                        base, view_tensor, view_tensor.requires_grad,
+                        replay_views=replay_views,
                     )
                     f_args_inner.append(view_arg)
             return f_args_inner

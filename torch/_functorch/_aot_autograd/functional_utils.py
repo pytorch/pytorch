@@ -7,6 +7,8 @@ This file contains utilities related to functionalization in AOTAutograd:
 """
 from __future__ import annotations
 
+from typing import Optional
+
 import torch
 from torch import Tensor
 from torch._logging import getArtifactLogger
