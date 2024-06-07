@@ -4,6 +4,7 @@ from enum import auto, Enum
 from typing import Any, cast, List, Optional, Sequence, Tuple
 
 import torch
+import torch._dynamo.compiled_autograd as ca
 import torch.nn as nn
 
 from torch._prims_common import make_contiguous_strides_for
@@ -326,7 +327,9 @@ class FSDPParam:
             self._extensions_data.clear()
             return
         inner_tensor = self._sharded_local_tensor
-        if hasattr(inner_tensor, "fsdp_post_all_gather"):
+        if not ca.compiled_autograd_enabled and hasattr(
+            inner_tensor, "fsdp_post_all_gather"
+        ):
             all_gather_outputs = self._unflatten_all_gather_outputs()
             (
                 unsharded_tensor,
@@ -496,7 +499,9 @@ class FSDPParam:
     def all_gather_inputs(self) -> List[torch.Tensor]:  # 1D
         self._assert_in_states(ShardedState.SHARDED, ShardedState.SHARDED_POST_FORWARD)
         if self.sharded_state == ShardedState.SHARDED:
-            if hasattr(self._sharded_local_tensor, "fsdp_pre_all_gather"):
+            if not ca.compiled_autograd_enabled and hasattr(
+                self._sharded_local_tensor, "fsdp_pre_all_gather"
+            ):
                 sharded_local_tensor = self._sharded_local_tensor
                 if self.offload_to_cpu:
                     sharded_local_tensor = sharded_local_tensor.to(
@@ -517,7 +522,9 @@ class FSDPParam:
                 )
             return [_to_dtype_if_needed(sharded_param_data, self.param_dtype)]
         elif self.sharded_state == ShardedState.SHARDED_POST_FORWARD:
-            if hasattr(self._sharded_local_tensor, "fsdp_pre_all_gather"):
+            if not ca.compiled_autograd_enabled and hasattr(
+                self._sharded_local_tensor, "fsdp_pre_all_gather"
+            ):
                 raise NotImplementedError
             all_gather_input = _to_dtype_if_needed(
                 cast(torch.Tensor, self._sharded_post_forward_param_data),
