@@ -89,7 +89,6 @@ class _PipelineStageBase(ABC):
         stage_index: int,
         num_stages: int,
         device: torch.device,
-        num_microbatches: int,
         group: Optional[dist.ProcessGroup] = None,
     ):
         """
@@ -113,7 +112,6 @@ class _PipelineStageBase(ABC):
         self.stage_index = stage_index
         self.num_stages = num_stages
         self.device = device
-        self.chunks = num_microbatches
         self.group = group
 
         # `group_rank` is rank in process group `group`.
@@ -159,6 +157,9 @@ class _PipelineStageBase(ABC):
         # grad reduction in DDP or FSDP.
         self._seen_bwd_chunks = 0
 
+        # To be populated later
+        self.chunks: Optional[int] = None
+
     @property
     def has_backward(self) -> bool:
         """
@@ -185,6 +186,10 @@ class _PipelineStageBase(ABC):
         return self.stage_index == self.num_stages - 1
 
     def _check_chunk_id(self, chunk_id: int):
+        if self.chunks is None:
+            raise RuntimeError(
+                "Attempted to access chunk_id before chunks have been configured."
+            )
         if chunk_id >= self.chunks:
             raise RuntimeError(
                 f"Chunk id {chunk_id} is out of range [0, {self.chunks})"
@@ -235,6 +240,20 @@ class _PipelineStageBase(ABC):
             f"{self.log_prefix} Grad send info: {grad_send_info}"  # noqa: G004
         )
         return grad_send_info
+
+    @abstractmethod
+    def _prepare_forward_infra(self, num_microbatches: int):
+        raise NotImplementedError
+
+    def _prepare_backward_infra(self, num_microbatches: int):
+        # TODO: this is needed for backward_maybe_with_nosync
+        self.chunks = num_microbatches
+
+        for mb_index in range(num_microbatches):
+            # `grad_recv_info` is a mirror of `act_send_info`
+            self.grad_recv_info[mb_index] = self._create_grad_recv_info(
+                self.act_send_info
+            )
 
     @abstractmethod
     def _create_grad_recv_info(
@@ -292,13 +311,7 @@ class _PipelineStageBase(ABC):
         if not self.has_backward or self.is_last:
             return []
 
-        # Create bwd recv infra lazily
-        recv_infos = self.grad_recv_info.setdefault(
-            bwd_chunk_id,
-            # `grad_recv_info` is a mirror of `act_send_info`
-            self._create_grad_recv_info(self.act_send_info),
-        )
-
+        recv_infos = self.grad_recv_info[bwd_chunk_id]
         return self._get_recv_ops(recv_infos)
 
     def get_fwd_send_ops(self, fwd_chunk_id: int) -> List[dist.P2POp]:
@@ -449,7 +462,7 @@ class _PipelineStageBase(ABC):
         there are additional state-variables and performance considerations depending on the data parallelism used.
         This helper should adapt any pipeline parallel schedule to work with common/supported data parallel libraries.
         """
-        last_backward = self._seen_bwd_chunks == self.chunks - 1
+        last_backward = self._seen_bwd_chunks == self.chunks - 1  # type: ignore[operator]
 
         # If submod is wrapped by DDP
         if isinstance(self.submod, DistributedDataParallel):
@@ -643,7 +656,6 @@ class _PipelineStage(_PipelineStageBase):
             stage_index,
             pipe_info.num_stages,
             device,
-            num_chunks,
             group,
         )
         self.pipe_info = pipe_info
@@ -669,9 +681,6 @@ class _PipelineStage(_PipelineStageBase):
         self.submod_to_stage_index: Dict[str, int] = {}
         for i, node in enumerate(submod_nodes):
             self.submod_to_stage_index.setdefault(node.name, i)
-
-        # Prepare forward send/recv infrastructure
-        self._prepare_forward_infra()
 
         # Cast submodule to device
         self._move_submod_to_device()
@@ -700,13 +709,13 @@ class _PipelineStage(_PipelineStageBase):
         if isinstance(self.submod, torch.fx.GraphModule):
             modify_graph_op_device(self.submod, self.device)
 
-    def _prepare_forward_infra(self):
+    def _prepare_forward_infra(self, num_microbatches: int):
         """
         Create send/recv infrastructures for activations (during forward)
         """
         # Flag per chunk to keep track of whether we have set `requires_grad`
         # for receive buffers. Format: {chunk : Boolean}
-        for chunk in range(self.chunks):
+        for chunk in range(num_microbatches):
             self.args_recv_info[chunk] = self._create_act_recv_info()
             self.set_requires_grad[chunk] = False
 
@@ -1099,14 +1108,11 @@ class PipelineStage(_PipelineStageBase):
         stage_index: int,
         num_stages: int,
         device: torch.device,
-        num_microbatches: int,
         input_args: Union[torch.Tensor, Tuple[torch.Tensor, ...]],
         output_args: Optional[Union[torch.Tensor, Tuple[torch.Tensor, ...]]] = None,
         group: Optional[dist.ProcessGroup] = None,
     ):
-        super().__init__(
-            submodule, stage_index, num_stages, device, num_microbatches, group
-        )
+        super().__init__(submodule, stage_index, num_stages, device, group)
         self.submod.to(self.device)
         # When we materialize the model partition on cuda, we call reset_parameters() if it is available
         self.inputs: List[torch.Tensor] = []
@@ -1138,9 +1144,17 @@ class PipelineStage(_PipelineStageBase):
         self.prev_stage = stage_global_rank((self.group_rank - 1) % self.group_size)
         self.next_stage = stage_global_rank((self.group_rank + 1) % self.group_size)
 
+        logger.debug(
+            f"finished pipeline stage init, {self.stage_index=}, {self.is_first=}, "  # noqa: G004
+            f"{self.is_last=}, {self.num_stages=}, "
+            f"inputs: {[inp.shape for inp in self.inputs]}, "
+            f"output: {[output.shape for output in self.outputs]}"
+        )
+
+    def _prepare_forward_infra(self, num_microbatches: int) -> None:
         # Receive info during forward
         # TODO: create args_recv_info lazily? (same needed for PipelineStage)
-        for chunk_id in range(self.chunks):
+        for chunk_id in range(num_microbatches):
             self.set_requires_grad[chunk_id] = False
             if not self.is_first:
                 # We assume that we always receive from stage - 1
@@ -1170,13 +1184,6 @@ class PipelineStage(_PipelineStageBase):
                 self.act_send_info[idx] = [self.stage_index + 1]
             else:
                 self.act_send_info[idx] = []
-
-        logger.debug(
-            f"finished pipeline stage init, {self.stage_index=}, {self.is_first=}, "  # noqa: G004
-            f"{self.is_last=}, {self.num_stages=}, "
-            f"inputs: {[inp.shape for inp in self.inputs]}, "
-            f"output: {[output.shape for output in self.outputs]}"
-        )
 
     def _create_grad_recv_info(
         self,
