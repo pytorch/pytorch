@@ -14,7 +14,13 @@ from torch.distributed._tensor import (
     init_device_mesh,
 )
 from torch.distributed._tensor.debug import CommDebugMode
-from torch.distributed._tensor.placement_types import Partial, Replicate, Shard
+from torch.distributed._tensor.placement_types import (
+    DTensorSpec,
+    Partial,
+    Replicate,
+    Shard,
+    TensorMeta,
+)
 from torch.distributed.tensor.parallel import (
     ColwiseParallel,
     parallelize_module,
@@ -55,27 +61,29 @@ class DTensorTest(DTensorTestBase):
         device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
         placements = [Shard(0)]
         local_tensor = torch.randn(3, 3, requires_grad=True)
-        dist_tensor_shape = torch.Size([self.world_size * 3, 3])
+
+        spec = DTensorSpec(
+            device_mesh,
+            tuple(placements),
+            tensor_meta=TensorMeta(
+                torch.Size([self.world_size * 3, 3]),
+                local_tensor.stride(),
+                local_tensor.dtype,
+            ),
+        )
+
         dist_tensor = DTensor(
             local_tensor,
-            device_mesh,
-            placements,
-            shape=dist_tensor_shape,
-            dtype=local_tensor.dtype,
+            spec,
             requires_grad=True,
-            stride=local_tensor.stride(),
         )
         self.assertEqual(dist_tensor.size(), torch.Size((self.world_size * 3, 3)))
 
         with self.assertWarnsRegex(UserWarning, "To construct"):
             DTensor(
                 local_tensor,
-                device_mesh,
-                placements,
-                shape=dist_tensor_shape,
-                dtype=local_tensor.dtype,
+                spec,
                 requires_grad=False,
-                stride=local_tensor.stride(),
             )
 
     @with_comms
@@ -272,19 +280,23 @@ class DTensorTest(DTensorTestBase):
     def test_to_local(self):
         device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
         placements = (Shard(0),)
-        dist_tensor_shape = torch.Size([self.world_size * 3, 3])
         local_tensor_with_grad = torch.randn(
             3, 3, device=self.device_type, requires_grad=True
         )
-
+        dist_tensor_shape = torch.Size([self.world_size * 3, 3])
+        spec = DTensorSpec(
+            mesh=device_mesh,
+            placements=placements,
+            tensor_meta=TensorMeta(
+                dist_tensor_shape,
+                local_tensor_with_grad.stride(),
+                local_tensor_with_grad.dtype,
+            ),
+        )
         sharded_tensor = DTensor(
             local_tensor_with_grad,
-            device_mesh,
-            placements,
-            shape=dist_tensor_shape,
-            dtype=local_tensor_with_grad.dtype,
+            spec,
             requires_grad=True,
-            stride=local_tensor_with_grad.stride(),
         )
         self.assertEqual(sharded_tensor.size(), dist_tensor_shape)
         self.assertEqual(sharded_tensor.to_local(), local_tensor_with_grad)
