@@ -132,6 +132,10 @@ def get_platform_specific_sdpa():
     return ret
 
 PLATFORM_SPECIFIC_SDPA = get_platform_specific_sdpa()
+# Indicate the Efficient attention backend can support:
+# 1. sequence longher than 512
+# 2. head dimsion larger than 64
+MEM_EFF_CAPABILITY_MATCHES_SM80 = SM80OrLater or TEST_WITH_ROCM
 
 def rand_sdpa_tensor(shape: SdpaShape, device: str, dtype: torch.dtype, type: str,
                      requires_grad: bool = False, packed: bool = False) -> torch.Tensor:
@@ -2576,13 +2580,13 @@ class TestSDPACudaOnly(NNTestCase):
     @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Does not support SDPA")
     @unittest.skipIf(IS_JETSON, "causing sigkill on Jetson")
     @parametrize("batch_size", [1, 8])
-    @parametrize("seq_len_q", [4, 8, 64, 128, 256, 512, 1024, 2048] if SM80OrLater or TEST_WITH_ROCM else [4, 8, 64, 128, 256, 512])
-    @parametrize("seq_len_k", [4, 8, 64, 128, 256, 512, 1024, 2048] if SM80OrLater or TEST_WITH_ROCM else [4, 8, 64, 128, 256, 512])
-    @parametrize("head_dim", [8, 16, 32, 64, 72, 96, 128] if SM80OrLater or TEST_WITH_ROCM else [8, 16, 32, 64])
+    @parametrize("seq_len_q", [4, 8, 64, 128, 256, 512, 1024, 2048] if MEM_EFF_CAPABILITY_MATCHES_SM80 else [4, 8, 64, 128, 256, 512])
+    @parametrize("seq_len_k", [4, 8, 64, 128, 256, 512, 1024, 2048] if MEM_EFF_CAPABILITY_MATCHES_SM80 else [4, 8, 64, 128, 256, 512])
+    @parametrize("head_dim", [8, 16, 32, 64, 72, 96, 128] if MEM_EFF_CAPABILITY_MATCHES_SM80 else [8, 16, 32, 64])
     @parametrize("is_causal", [False, True])
     @parametrize("dropout_p", [0.0, 0.22])
     @parametrize("dtype", [torch.float16, torch.bfloat16, torch.float32] if
-                 SM80OrLater or TEST_WITH_ROCM else [torch.float16, torch.float32])
+                 MEM_EFF_CAPABILITY_MATCHES_SM80 else [torch.float16, torch.float32])
     @parametrize("scale", [None, "l1"])
     def test_mem_efficient_attention_vs_math_ref_grads(self, device, batch_size: int, seq_len_q: int, seq_len_k: int,
                                                        head_dim: int, is_causal: bool, dropout_p: float, dtype: torch.dtype,
@@ -2682,13 +2686,13 @@ class TestSDPACudaOnly(NNTestCase):
     @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Does not support SDPA")
     @unittest.skipIf(IS_JETSON, "causing sigkill on Jetson")
     @parametrize("batch_size", [1, 8])
-    @parametrize("seq_len_q", [4, 8, 64, 128, 256, 312, 512, 1024, 2048] if SM80OrLater else [4, 8, 64, 128, 152, 256, 512])
-    @parametrize("seq_len_k", [4, 8, 64, 65, 128, 256, 408, 512, 1024, 2048] if SM80OrLater else [4, 8, 37, 64, 128, 256, 512])
-    @parametrize("head_dim", [8, 16, 32, 64, 72, 96, 128] if SM80OrLater else [8, 16, 32, 64])
+    @parametrize("seq_len_q", [4, 8, 64, 128, 256, 312, 512, 1024, 2048] if MEM_EFF_CAPABILITY_MATCHES_SM80 else [4, 8, 64, 128, 152, 256, 512])
+    @parametrize("seq_len_k", [4, 8, 64, 65, 128, 256, 408, 512, 1024, 2048] if MEM_EFF_CAPABILITY_MATCHES_SM80 else [4, 8, 37, 64, 128, 256, 512])
+    @parametrize("head_dim", [8, 16, 32, 64, 72, 96, 128] if MEM_EFF_CAPABILITY_MATCHES_SM80 else [8, 16, 32, 64])
     @parametrize("is_causal", [False])
     @parametrize("dropout_p", [0.0, 0.22])
     @parametrize("dtype", [torch.float16, torch.bfloat16, torch.float32] if
-                 SM80OrLater or TEST_WITH_ROCM else [torch.float16, torch.float32])
+                 MEM_EFF_CAPABILITY_MATCHES_SM80 or TEST_WITH_ROCM else [torch.float16, torch.float32])
     @parametrize("scale", [None, "l1"])
     def test_mem_efficient_attention_attn_mask_vs_math_ref_grads(self, device, batch_size: int, seq_len_q: int,
                                                                  seq_len_k: int, head_dim: int, is_causal: bool,
@@ -2821,7 +2825,7 @@ class TestSDPACudaOnly(NNTestCase):
             self.skipTest("Flash attention on sm86, sm87, and sm89 for headdim > 192 currently disabled")
         if is_causal and seq_len_q != seq_len_k:
             self.skipTest("Flash V2 does not accept is_casual when seq_len_q != seq_len_k")
-        if TEST_WITH_ROCM and seq_len_q >= 1024 and seq_len_k >= 1024 and head_dim > 128 and batch_size > 1:
+        if TEST_WITH_ROCM and seq_len_q >= 1024 and seq_len_k >= 1024 and batch_size > 1:
             torch.cuda.empty_cache()  # Prevent memory fragmentation
 
         scale = scale if scale is None else (1 / head_dim)
