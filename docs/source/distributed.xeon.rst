@@ -2,9 +2,9 @@ torch.backends.xeon.run_cpu
 ===========================
 
 There are a set of configurations that would influence the performance of PyTorch inference running on Intel(R) Xeon(R) Scalable Processors.
-To get the peak performance, the ``torch.backends.xeon.run_cpu`` script is provided that optimizes the configuration of thread and memory management.
-For thread management, the script configures thread affinity and the preload of Intel OMP library.
-For memory management, it configures NUMA binding and preload optimized memory allocation library (e.g. tcmalloc, jemalloc).
+To get peak performance, the ``torch.backends.xeon.run_cpu`` script is provided that optimizes the configuration of thread and memory management.
+For thread management, the script configures thread affinity and the preload of Intel(R) OMP library.
+For memory management, it configures NUMA binding and preloads optimized memory allocation libraries (e.g. tcmalloc, jemalloc).
 In addition, the script provides tunable parameters for compute resource allocation in both single instance and multiple instance scenarios,
 helping the users try out an optimal coordination of resource utilization for the specific workloads.
 
@@ -14,23 +14,23 @@ Prerequisites
 NUMA Access Control
 ~~~~~~~~~~~~~~~~~~~
 
-It is a good thing that more and more CPU cores are provided to users in one socket, because this brings more computation resources.
+It is a good thing that more and more CPU cores are provided to users in one socket, as it brings in more computation resources.
 However, this also brings memory access competitions. Program can stall because memory is busy to visit.
 To address this problem, Non-Uniform Memory Access (NUMA) was introduced.
-Comparing to Uniform Memory Access (UMA), in which scenario all memories are connected to all cores equally,
+Comparing to Uniform Memory Access (UMA), in which scenario all the memories are connected to all cores equally,
 NUMA tells memories into multiple groups. Certain number of memories are directly attached to one socket's integrated memory controller to become local memory of this socket.
-As described in the previous section, local memory access is much faster than remote memory access.
+Local memory access is much faster than remote memory access.
 
-Users can get CPU information with ``lscpu`` command on Linux to learn how many cores, sockets there on the machine.
+Users can get CPU information with ``lscpu`` command on Linux to learn how many cores, sockets are there on the machine.
 Also, NUMA information like how CPU cores are distributed can also be retrieved.
 The following is an example of ``lscpu`` execution on a machine with Intel (R) Xeon (R) CPU Max 9480.
 2 sockets were detected. Each socket has 56 physical cores onboard. Since Hyper-Threading is enabled, each core can run 2 threads.
 i.e. each socket has another 56 logical cores. Thus, there are 224 CPU cores on service.
 When indexing CPU cores, usually physical cores are indexed before logical core.
 In this case, the first 56 cores (0-55) are physical cores on the first NUMA socket (node), the second 56 cores (56-111) are physical cores on the second NUMA socket (node).
-Logical cores are indexed afterward. 112-167 are 56 logical cores on the first NUMA socket (node),
-168-223 are the second 56 logical cores on the second NUMA socket (node).
-Typically, running PyTorch with compute intense workloads should avoid using logical cores to get good performance.
+Logical cores are indexed afterward. 112-167 are 56 logical cores on the first NUMA socket,
+168-223 are the second 56 logical cores on the second NUMA socket.
+Typically, running PyTorch programs with compute intense workloads should avoid using logical cores to get good performance.
 
 .. code-block:: console
 
@@ -89,8 +89,9 @@ OpenMP
 ~~~~~~
 
 OpenMP is an implementation of multithreading, a method of parallelizing where a primary thread (a series of instructions executed consecutively) forks a specified number of sub-threads and the system divides a task among them. The threads then run concurrently, with the runtime environment allocating threads to different processors.
-Users can control OpenMP behaviors with some environment variable settings to fit for their workloads, the settings are read and executed by OMP libraries. By default, PyTorch uses GNU OpenMP Library (GNU libgomp) for parallel computation. On Intel platforms, Intel OpenMP Runtime Library (libiomp) provides OpenMP API specification support. It sometimes brings more performance benefits compared to libgomp.
-The Intel OpenMP Runtime Library can be installed via the command
+Users can control OpenMP behaviors with some environment variable settings to fit for their workloads, the settings are read and executed by OMP libraries. By default, PyTorch uses GNU OpenMP Library (GNU libgomp) for parallel computation. On Intel(R) platforms, Intel(R) OpenMP Runtime Library (libiomp) provides OpenMP API specification support. It usually brings more performance benefits compared to libgomp.
+
+The Intel(R) OpenMP Runtime Library can be installed via the command
 
 .. code-block:: console
 
@@ -151,7 +152,7 @@ in conda environment.
 Quick Start Example Commands
 ----------------------------
 
-1. To run single-instance inference with 1 thread on 1 CPU core
+1. To run single-instance inference with 1 thread on 1 CPU core (only Core #0 would be used)
 
 .. code-block:: console
 
@@ -175,6 +176,10 @@ Quick Start Example Commands
 
    $ python -m torch.backends.xeon.run_cpu --throughput-mode <program.py> [program_args]
 
+.. note::
+
+   Term "instance" here doesn't refer to a cloud instance. This script is executed as a single process which invokes multiple "instances" which are formed from multiple threads. "Instance" is kind of group of threads in this context.
+
 Usage of torch.backends.xeon.run_cpu
 ------------------------------------
 
@@ -188,12 +193,13 @@ The argument list and usage guidance can be shown with
 positional arguments
 ~~~~~~~~~~~~~~~~~~~~
 
-+----------------------+---------------------------------------------------------------------------------------------------+
-| knob                 | help                                                                                              |
-+======================+===================================================================================================+
-| |program             | The full path to the program/script to be launched, followed by all the arguments for the script. |
-| |program_args        |                                                                                                   |
-|----------------------+---------------------------------------------------------------------------------------------------+
++------------------+---------------------------------------------------------+
+| knob             | help                                                    |
++==================+=========================================================+
+| ``program``      | The full path of the program/script to be launched.     |
+|------------------+---------------------------------------------------------+
+| ``program_args`` | All the arguments for the program/script to be launched.|
+|------------------+---------------------------------------------------------+
 
 Explanation of the options
 ~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -205,9 +211,9 @@ The generic option settings (knobs) are:
 +======================+======+===============+=========================================================================================================================+
 | ``-h``, ``--help``   |      |               | Show the help message and exit.                                                                                         |
 +----------------------+------+---------------+-------------------------------------------------------------------------------------------------------------------------+
-| ``-m``, ``--module`` |      | False         | Changes each process to interpret the launch script as a python module, executing with the same behavior as 'python -m'.|
+| ``-m``, ``--module`` |      |               | Changes each process to interpret the launch script as a python module, executing with the same behavior as 'python -m'.|
 +----------------------+------+---------------+-------------------------------------------------------------------------------------------------------------------------+
-| ``--no-python``      |      | False         | Do not prepend the program with "python" - just exec it directly. Useful when the script is not a Python script.        |
+| ``--no-python``      | bool | False         | Do not prepend the program with "python" - just exec it directly. Useful when the script is not a Python script.        |
 +----------------------+------+---------------+-------------------------------------------------------------------------------------------------------------------------+
 | ``--log-path``       | str  | ''            | The log file directory. Default path is ``''``, which means disable logging to files.                                   |
 +----------------------+------+---------------+-------------------------------------------------------------------------------------------------------------------------+
@@ -216,17 +222,17 @@ The generic option settings (knobs) are:
 
 Knobs for applying or disabling optimizations are:
 
-+-----------------------------+------+---------------+--------------------------------------------------------------------------------------------------------------------+
-| knob                        | type | default value | help                                                                                                               |
-+=============================+======+===============+====================================================================================================================+
-| ``--enable-tcmalloc``       | bool | False         | Enable ``TCMalloc`` memory allocator.                                                                              |
-+-----------------------------+------+---------------+--------------------------------------------------------------------------------------------------------------------+
-| ``--enable-jemalloc``       | bool | False         | Enable ``JeMalloc`` memory allocator.                                                                              |
-+-----------------------------+------+---------------+--------------------------------------------------------------------------------------------------------------------+
-| ``--use-default-allocator`` | bool | False         | Use default memory allocator. Neither ``TCMalloc`` nor ``JeMalloc`` would be used.                                 |
-+-----------------------------+------+---------------+--------------------------------------------------------------------------------------------------------------------+
-| ``--disable-iomp``          | bool | False         | By default, Intel OpenMP lib will be used if installed. Setting this flag would disable the usage of Intel OpenMP. |
-+-----------------------------+------+---------------+--------------------------------------------------------------------------------------------------------------------+
++-----------------------------+------+---------------+--------------------------------------------------------------------------------------------------------------------------+
+| knob                        | type | default value | help                                                                                                                     |
++=============================+======+===============+==========================================================================================================================+
+| ``--enable-tcmalloc``       | bool | False         | Enable ``TCMalloc`` memory allocator.                                                                                    |
++-----------------------------+------+---------------+--------------------------------------------------------------------------------------------------------------------------+
+| ``--enable-jemalloc``       | bool | False         | Enable ``JeMalloc`` memory allocator.                                                                                    |
++-----------------------------+------+---------------+--------------------------------------------------------------------------------------------------------------------------+
+| ``--use-default-allocator`` | bool | False         | Use default memory allocator. Neither ``TCMalloc`` nor ``JeMalloc`` would be used.                                       |
++-----------------------------+------+---------------+--------------------------------------------------------------------------------------------------------------------------+
+| ``--disable-iomp``          | bool | False         | By default, Intel(R) OpenMP lib will be used if installed. Setting this flag would disable the usage of Intel(R) OpenMP. |
++-----------------------------+------+---------------+--------------------------------------------------------------------------------------------------------------------------+
 
 .. note::
 
@@ -261,10 +267,6 @@ Knobs for controlling instance number and compute resource allocation are:
 +-----------------------------+------+---------------+----------------------------------------------------------------------------------------------------------------------------------------------+
 | ``--disable-taskset``       | bool | False         | Disable the usage of ``taskset`` command.                                                                                                    |
 +-----------------------------+------+---------------+----------------------------------------------------------------------------------------------------------------------------------------------+
-
-.. note::
-
-   Term "instance" here doesn't refer to a cloud instance. This script is executed as a single process. It invokes multiple "instances" which are formed from multiple threads for each. "instance" is kind of group of threads in this context.
 
 .. note::
 
