@@ -5482,6 +5482,14 @@ class CommonTemplate:
         for dtype in all_types():
             self.common(fn, (make_tensor(8, dtype=dtype, device=self.device),))
 
+    def test_full_boolean(self):
+        def fn(n):
+            x = torch.full((1,), n >= 1024, device=self.device)
+            return x, x + 1
+
+        self.common(fn, (1024,))
+        self.common(fn, (1023,))
+
     def test_index1(self):
         def fn(a, b, c):
             return aten.index(a, [b, c])

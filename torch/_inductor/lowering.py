@@ -170,7 +170,7 @@ def is_boolean_type(x):
 
 def get_promoted_dtype(*args, type_promotion_kind: ELEMENTWISE_TYPE_PROMOTION_KIND):
     def construct_input(inp):
-        if isinstance(inp, (Number, sympy.Expr)):
+        if isinstance(inp, (Number, sympy.Basic)):
             return inp
         else:
             assert hasattr(inp, "get_dtype")
@@ -209,7 +209,7 @@ def transform_args(args, broadcast, type_promotion_kind, convert_input_to_bool):
             promoting_args = [
                 a
                 for a in args
-                if isinstance(a, (Number, sympy.Expr))
+                if isinstance(a, (Number, sympy.Basic))
                 or getattr(a, "dtype", None) is not None
             ]
             dtype = get_promoted_dtype(
@@ -361,15 +361,15 @@ def promote_constants(inputs, override_return_dtype=None, type_promotion_kind=No
     if override_return_dtype is None and type_promotion_kind is None:
         type_promotion_kind = ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
 
-    if not any(isinstance(x, (sympy.Expr, int, float)) for x in inputs):
+    if not any(isinstance(x, (sympy.Basic, int, float)) for x in inputs):
         return inputs
-    if all(isinstance(x, (int, float, sympy.Expr)) for x in inputs):
+    if all(isinstance(x, (int, float, sympy.Basic)) for x in inputs):
         dtype = override_return_dtype or get_promoted_dtype(
             *inputs, type_promotion_kind=type_promotion_kind
         )
 
         def const_func(x):
-            if isinstance(x, sympy.Expr):
+            if isinstance(x, sympy.Basic):
                 return ir.IndexingConstant(x, dtype, decode_device(None))
             else:
                 return ir.Constant(x, dtype, decode_device(None))
@@ -384,7 +384,7 @@ def promote_constants(inputs, override_return_dtype=None, type_promotion_kind=No
                     ir.Constant(x, ex.get_dtype(), ex.get_device()), list(ex.get_size())
                 )
             )
-        elif isinstance(x, sympy.Expr):
+        elif isinstance(x, sympy.Basic):
             out.append(
                 ExpandView.create(
                     IndexingConstant(x, ex.get_dtype(), ex.get_device()),
@@ -2462,7 +2462,7 @@ def tensor(data, *, dtype=None, device=None, layout=None, pin_memory=False):
 
     ranges: List[sympy.Expr] = []
 
-    if isinstance(data, sympy.Expr):
+    if isinstance(data, sympy.Basic):
 
         def inner_fn(index):
             return ops.index_expr(data, dtype)
@@ -2588,7 +2588,7 @@ def _full(fill_value, device, dtype, size):
         def inner_fn(index):
             return ops.constant(value, dtype)
 
-    elif isinstance(value, sympy.Expr):
+    elif isinstance(value, sympy.Basic):
 
         def inner_fn(index):
             return ops.index_expr(value, dtype)

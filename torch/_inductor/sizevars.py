@@ -192,7 +192,10 @@ class SizeVarAllocator:
         """
         sizes = list(map(self.simplify, sizes))
 
-        strides = [self.stride_vars(x, index_vars) for x in index_formulas]
+        strides = [
+            self.stride_vars(x, index_vars) if isinstance(x, sympy.Expr) else [0] * len(index_vars)
+            for x in index_formulas
+        ]
         assert len(sizes) == len(strides[0]), (len(sizes), len(strides[0]))
 
         for i in range(len(sizes)):
