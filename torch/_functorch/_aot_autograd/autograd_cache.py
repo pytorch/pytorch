@@ -469,7 +469,7 @@ class AOTAutogradCache:
         # Count missing the FXGraphCache as a miss not a bypass
         except FXGraphCacheMiss:
             counters["aot_autograd"]["autograd_cache_miss"] += 1
-        except BypassAOTAutogradCache:
+        except BypassAOTAutogradCache as e:
             cache_key = None
             counters["aot_autograd"]["autograd_cache_bypass"] += 1
         if compiled_fn is None:
@@ -507,7 +507,7 @@ class AOTAutogradCache:
             content = AOTAutogradCacheEntryPickler.dumps(entry)
         except Exception as e:
             log.warning("AOTAutograd cache unable to serialize compiled graph: %s", e)
-            raise e
+            return None
         subdir = os.path.join(AOTAutogradCache._get_tmp_dir(), key)
         if not os.path.exists(subdir):
             os.makedirs(subdir, exist_ok=True)

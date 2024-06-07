@@ -21,7 +21,6 @@ import torch
 import torch._dynamo as torchdynamo
 import torch.nn as nn
 import torch.utils._pytree as pytree
-
 from functorch import grad, jacrev, make_fx, vjp, vmap
 from functorch.compile import (
     aot_function,
@@ -33,6 +32,7 @@ from functorch.compile import (
     default_partition,
     get_aot_compilation_context,
     make_boxed_compiler,
+    make_boxed_func,
     memory_efficient_fusion,
     min_cut_rematerialization_partition,
     nnc_jit,
@@ -40,13 +40,14 @@ from functorch.compile import (
 )
 from functorch.experimental import control_flow
 from torch._decomp import decomposition_table
+from torch._functorch._aot_autograd.autograd_cache import AOTAutogradCache
 from torch._functorch.aot_autograd import aot_export_joint_simple, aot_export_module
 from torch._higher_order_ops.out_dtype import out_dtype
+from torch._inductor.codecache import compiled_fx_graph_hash
 from torch._subclasses.fake_tensor import DynamicOutputShapeException, FakeTensorMode
 from torch.fx.experimental.proxy_tensor import is_sym_node
 from torch.fx.experimental.symbolic_shapes import GuardOnDataDependentSymNode, ShapeEnv
 from torch.nn.utils.rnn import PackedSequence
-
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     ops,
@@ -362,7 +363,7 @@ class TestAOTAutograd(AOTTestCase):
         # TODO: probably consolidate all tests to make inp a Callable.
         make_inputs_subclasses: bool = False,
     ):
-        for keep_input_mutations in [True] if keep_inp_mutations else [True, False]:
+        def make_inputs(inp_):
             # Some tests pass in a callable for inp, to generate the inputs
             # (useful if we want to generate complicated aliasing inputs)
             if isinstance(inp_, Callable):
@@ -371,47 +372,45 @@ class TestAOTAutograd(AOTTestCase):
                 # (The idea is that we might want to compile a function with the graph inputs,
                 # but test autograd backprop all the way through the actual inputs)
                 with TwoTensorMode() if make_inputs_subclasses else nullcontext():
-                    inp_copy, graph_inps_copy = inp_callable()
                     inp, graph_inps = inp_callable()
             else:
-                inp_copy = []
                 inp = []
                 # Our input clones need to mimic when inputs are duplicates of one another
                 dupes_map = {}
                 for i, x in enumerate(inp_):
                     if x in dupes_map:
                         x_dupe_idx = dupes_map[x]
-                        inp_copy.append(inp_copy[x_dupe_idx])
                         inp.append(inp[x_dupe_idx])
                     else:
                         dupes_map[x] = i
                         if not isinstance(x, torch.Tensor):
                             x_copy = x
-                            x_copy2 = x
                         else:
                             x_copy = x.clone().detach().requires_grad_(x.requires_grad)
-                            x_copy2 = x.clone().detach().requires_grad_(x.requires_grad)
                             if x.requires_grad and not x.is_leaf:
                                 x_copy = x_copy.clone()
-                                x_copy2 = x_copy2.clone()
-                        inp_copy.append(x_copy)
-                        inp.append(x_copy2)
+
+                        inp.append(x_copy)
 
                 if test_mutation:
                     # For graphs where we mutate inputs, need our test to make sure inputs aren't leaves
                     graph_inps = [x.add(1) for x in inp]
-                    graph_inps_copy = [x.add(1) for x in inp_copy]
                 else:
                     graph_inps = inp
-                    graph_inps_copy = inp_copy
-            fw_graph_cell = [None]
-            compiled_f = self.run_autograd(
-                f, fw_graph_cell, decompositions, keep_input_mutations, dynamic
-            )
-            ref_out, ref_grad = outs_and_grads(f, graph_inps, inp)
-            test_out, test_grad = outs_and_grads(compiled_f, graph_inps_copy, inp_copy)
-            self.assertEqual(ref_grad, test_grad)
 
+            return inp, graph_inps
+
+        def check_results(
+            ref_results,
+            test_results,
+            ref_graph_inps,
+            test_graph_inps,
+            ref_inp,
+            test_inp,
+        ):
+            ref_out, ref_grad = ref_results
+            test_out, test_grad = test_results
+            self.assertEqual(ref_grad, test_grad)
             if isinstance(ref_out, torch.Tensor):
                 self.assertTrue(isinstance(test_out, torch.Tensor))
                 ref_out, test_out = [ref_out], [test_out]
@@ -420,10 +419,10 @@ class TestAOTAutograd(AOTTestCase):
                     self.assertEqual(ref_o.requires_grad, test_o.requires_grad)
                     self.assertEqual(ref_o.is_leaf, test_o.is_leaf)
                     ref_is_view_of_non_interm = is_in_base(
-                        ref_o, graph_inps
+                        ref_o, ref_graph_inps
                     ) or is_in_base(ref_o, ref_out)
                     test_is_view_of_non_interm = is_in_base(
-                        test_o, graph_inps_copy
+                        test_o, test_graph_inps
                     ) or is_in_base(test_o, test_out)
                     self.assertEqual(
                         ref_is_view_of_non_interm, test_is_view_of_non_interm
@@ -432,13 +431,46 @@ class TestAOTAutograd(AOTTestCase):
                     if test_mutation:
                         # This tests that autograd meta is set properly on the output we can
                         # mutate it.
-                        ref_o.mul_(2)
-                        test_o.mul_(2)
+                        ref_o.add(2)
+                        test_o.add(2)
                         self.assertEqual(ref_o, test_o)
-            for ref_i, test_i in zip(inp, inp_copy):
+                        # Reverse the modification
+                        ref_o.sub(2)
+                        test_o.sub(2)
+                        self.assertEqual(ref_o, test_o)
+            for ref_i, test_i in zip(ref_inp, test_inp):
                 if isinstance(ref_i, torch.Tensor):
                     self.assertEqual(ref_i.requires_grad, test_i.requires_grad)
                 self.assertEqual(ref_i, test_i)
+
+        for keep_input_mutations in [True] if keep_inp_mutations else [True, False]:
+            inp, graph_inps = make_inputs(inp_)
+            test_inp, test_graph_inps = make_inputs(inp_)
+            fw_graph_cell = [None]
+            compiled_f = self.run_autograd(
+                f, fw_graph_cell, decompositions, keep_input_mutations, dynamic
+            )
+            ref_results = outs_and_grads(f, graph_inps, inp)
+            test_results = outs_and_grads(compiled_f, test_graph_inps, test_inp)
+
+            check_results(
+                ref_results, test_results, graph_inps, test_graph_inps, inp, test_inp
+            )
+            if isinstance(self, TestAOTAutogradWithCache):
+                # When testing with cache, run compiled_f a second time
+                cached_inp, cached_graph_inps = make_inputs(inp_)
+                cached_results = outs_and_grads(
+                    compiled_f, cached_graph_inps, cached_inp
+                )
+                check_results(
+                    ref_results,
+                    cached_results,
+                    graph_inps,
+                    cached_graph_inps,
+                    inp,
+                    cached_inp,
+                )
+
         return fw_graph_cell[0]
 
     def test_non_tensor_and_none_inputs(self):
@@ -5880,6 +5912,9 @@ class TestAOTAutogradWithDynamo(TestAOTAutograd):
         # only that the outputs match, etc.
         pass
 
+    def make_compiler(self, graph_cell):
+        return make_boxed_compiler(partial(extract_graph, graph_cell=graph_cell))
+
     # Compiler to passes to dynamo
     def run_autograd(
         self,
@@ -5897,10 +5932,8 @@ class TestAOTAutogradWithDynamo(TestAOTAutograd):
             result = aot_module_simplified(
                 gm,
                 inputs,
-                fw_compiler=make_boxed_compiler(
-                    partial(extract_graph, graph_cell=fw_graph_cell)
-                ),
-                bw_compiler=nop,
+                fw_compiler=self.make_compiler(fw_graph_cell),
+                bw_compiler=self.make_compiler([None]),
                 decompositions=decompositions,
                 keep_inference_input_mutations=keep_input_mutations,
                 # Dynamic is calculated from whether the inputs have fake tensors
@@ -5918,6 +5951,102 @@ class TestAOTAutogradWithDynamo(TestAOTAutograd):
             return result
 
         return torch_compile_wrapper
+
+
+class MockFXGraphCache:
+    """
+    In memory version of FXGraphCache so we can isolate testing for FXGraphCache
+    """
+
+    def __init__(self):
+        self.cache = {}
+
+    def save(self, key, gm):
+        self.cache[key] = gm
+
+    def load(self, gm, inputs):
+        key = compiled_fx_graph_hash(gm, inputs, {}, {})
+        if key in self.cache:
+            gm = make_boxed_func(gm)
+            gm._fx_graph_cache_key = key
+            return gm
+        else:
+            self.save(key, gm)
+            gm = make_boxed_func(gm)
+            gm._fx_graph_cache_key = key
+            return gm
+
+    def _lookup_graph(self, key, inputs, _local, _remote):
+        gm = self.cache.get(key)
+        if gm is not None:
+            gm = make_boxed_func(gm)
+        return gm
+
+
+class TestAOTAutogradWithCache(TestAOTAutogradWithDynamo):
+    """
+    In memory version of FXGraphCache so we can isolate testing for FXGraphCache
+    """
+    def setUp(self):
+        super().setUp()
+        AOTAutogradCache.clear()
+
+    def make_compiler(self, fw_graph_cell):
+        inductor_cache = self.inductor_cache
+
+        def compiler(gm, inputs):
+            nonlocal inductor_cache, fw_graph_cell
+            result = inductor_cache.load(gm, inputs)
+            fw_graph_cell[0] = gm
+            return result
+
+        return compiler
+
+    def run_autograd(
+        self,
+        f: Callable,
+        fw_graph_cell: List[Optional[Callable]],
+        decompositions: Optional[Dict],
+        keep_input_mutations: bool,
+        dynamic: bool,
+    ):
+        return super().run_autograd(
+            f,
+            fw_graph_cell,
+            decompositions,
+            keep_input_mutations,
+            dynamic,
+        )
+
+    @torch._functorch.config.patch("enable_autograd_cache", True)
+    @torch._inductor.config.patch("fx_graph_cache", True)
+    def verify_aot_autograd(
+        self,
+        f,
+        inp_: Union[Callable, List[Any]],
+        *,
+        test_mutation: bool = False,
+        keep_inp_mutations: bool = False,
+        decompositions: Optional[Dict] = None,
+        dynamic: bool = False,
+        # Only active when inp_ is Callable.
+        # TODO: probably consolidate all tests to make inp a Callable.
+        make_inputs_subclasses: bool = False,
+    ):
+        self.inductor_cache = MockFXGraphCache()
+        with patch(
+            "torch._inductor.codecache.FxGraphCache._lookup_graph",
+            new=self.inductor_cache._lookup_graph,
+        ):
+            return super().verify_aot_autograd(
+                f,
+                inp_,
+                test_mutation=test_mutation,
+                keep_inp_mutations=keep_inp_mutations,
+                decompositions=decompositions,
+                dynamic=dynamic,
+                make_inputs_subclasses=make_inputs_subclasses,
+            )
 
 
 if __name__ == "__main__":
