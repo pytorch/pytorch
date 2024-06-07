@@ -55,7 +55,6 @@ from torch.fx.immutable_collections import immutable_dict
 from torch.fx.operator_schemas import normalize_function
 from torch.multiprocessing.reductions import StorageWeakRef
 from torch.overrides import TorchFunctionMode
-from torch.types import _bool
 from torch.utils._mode_utils import no_dispatch
 from torch.utils._python_dispatch import (
     is_traceable_wrapper_subclass,
@@ -1064,7 +1063,7 @@ class FakeTensorMode(TorchDispatchMode):
         # If another fake mode was already active when we enter, we also stash it here.
         # That way when we exit, we know to re-enable the previous fake mode.
         self.enter_stack: List[
-            Tuple[bool, Optional[TorchDispatchMode], Optional[_bool]]
+            Tuple[bool, Optional[TorchDispatchMode], Optional[bool]]
         ] = []
 
         self.shape_env = shape_env
