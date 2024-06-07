@@ -369,6 +369,11 @@ static PyObject* THPStorage_shareDevice(PyObject* self, PyObject* noargs) {
   HANDLE_TH_ERRORS
   THPStorage_assertNotNull(self);
   const auto& storage = THPStorage_Unpack(self);
+
+  TORCH_CHECK(
+      storage.device_type() == at::getAccelerator(true).value(),
+      "_share_device_: only available on device tensor");
+
   c10::StorageImpl* storage_impl = storage.unsafeGetStorageImpl();
   if (storage_impl->received_device()) {
     AT_ERROR(
