@@ -2,6 +2,7 @@
 #include <deque>
 #include <exception>
 #include <memory>
+#include <ostream>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
