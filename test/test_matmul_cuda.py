@@ -524,7 +524,7 @@ class TestFP8MatmulCuda(TestCase):
         out_fp8_s, amax_fp8_s = torch._scaled_mm(x, y, scale_a=scale_a, scale_b=scale_b, use_fast_accum=True)
         self.assertEqual(out_fp8, out_fp8_s)
 
-    @unittest.skipIf(not scaled_mm_supported_device(), f8_msg)
+    @unittest.skipIf(not scaled_mm_supported_device() or IS_WINDOWS, f8_msg)
     @skipIfRocm()
     @parametrize("use_fast_accum", [True, False])
     def test_float8_rowwise_scaling_sanity(self, device, use_fast_accum: bool) -> None:
@@ -551,7 +551,7 @@ class TestFP8MatmulCuda(TestCase):
             out_fp8.to(torch.float32), torch.full((M, N), K * (fill_value**2), device=device)
         )
 
-    @unittest.skipIf(not scaled_mm_supported_device(), f8_msg)
+    @unittest.skipIf(not scaled_mm_supported_device() or IS_WINDOWS, f8_msg)
     @skipIfRocm()
     def test_float8_error_messages(self, device) -> None:
         M, K, N = (1024, 512, 2048)
@@ -621,7 +621,7 @@ class TestFP8MatmulCuda(TestCase):
                 out_dtype=torch.bfloat16,
             )
 
-    @unittest.skipIf(not scaled_mm_supported_device(), f8_msg)
+    @unittest.skipIf(not scaled_mm_supported_device() or IS_WINDOWS, f8_msg)
     @skipIfRocm()
     @parametrize("base_dtype", [torch.bfloat16])
     def test_scaled_mm_vs_emulated_row_wise(self, base_dtype):

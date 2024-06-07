@@ -8688,7 +8688,6 @@ def sample_inputs_efficient_attention_forward(op_info, device, dtype, requires_g
             custom_mask_type=mask_type,
             compute_log_sumexp=requires_grad,
             scale=scale,
-            causal_diagonal=None,
             seqlen_k=None
         ))
 
@@ -8706,7 +8705,6 @@ def sample_inputs_efficient_attention_forward(op_info, device, dtype, requires_g
         custom_mask_type=0,  # No Mask
         compute_log_sumexp=requires_grad,
         scale=None,
-        causal_diagonal=None,
         seqlen_k=None
     )
 
@@ -8725,7 +8723,6 @@ def sample_inputs_efficient_attention_forward(op_info, device, dtype, requires_g
             custom_mask_type=0,  # No Mask
             compute_log_sumexp=requires_grad,
             scale=None,
-            causal_diagonal=None,
             seqlen_k=None
         )
     )
@@ -8748,7 +8745,6 @@ def sample_inputs_efficient_attention_forward(op_info, device, dtype, requires_g
             custom_mask_type=0,  # No Mask
             compute_log_sumexp=requires_grad,
             scale=None,
-            causal_diagonal=None,
             seqlen_k=None,
         )
     )
@@ -11588,6 +11584,12 @@ def reference_flatten(input, start_dim=0, end_dim=-1):
     out_shape = in_shape[:start_dim] + (flatten_bit_dim,) + in_shape[end_dim + 1:]
     return np.reshape(input, out_shape)
 
+
+def sample_inputs_alias_copy(op_info, device, dtype, requires_grad, **kwargs):
+    yield SampleInput(make_tensor((S,), dtype=dtype, device=device, requires_grad=requires_grad))
+    yield SampleInput(make_tensor((), dtype=dtype, device=device, requires_grad=requires_grad))
+
+
 # Operator database (sorted alphabetically)
 op_db: List[OpInfo] = [
     UnaryUfuncInfo('abs',
@@ -13091,6 +13093,11 @@ op_db: List[OpInfo] = [
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            sample_inputs_func=sample_inputs_diagonal_scatter),
+    OpInfo('alias_copy',
+           dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16, torch.chalf),
+           sample_inputs_func=sample_inputs_alias_copy,
+           supports_forward_ad=True,
+           supports_fwgrad_bwgrad=True),
     BinaryUfuncInfo('eq',
                     ref=np.equal,
                     dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16, torch.chalf),
@@ -14991,8 +14998,6 @@ op_db: List[OpInfo] = [
                # RuntimeError: UNSUPPORTED DTYPE: complex
                DecorateInfo(unittest.expectedFailure, 'TestNNCOpInfo',
                             'test_nnc_correctness', dtypes=(torch.complex64, torch.complex128)),
-               # RuntimeError: Conv3D is not supported on MPS
-               DecorateInfo(unittest.expectedFailure, 'TestConsistency'),
                # AssertionError: Tensor-likes are not close!
                # break slow tests
                DecorateInfo(unittest.skip('Skipped!'), 'TestCommon', 'test_compare_cpu'),
@@ -23229,6 +23234,10 @@ python_ref_db = [
     #
     # View & Shape OpInfos
     #
+    PythonRefInfo(
+        "_refs.alias_copy",
+        torch_opinfo_name="alias_copy",
+    ),
     PythonRefInfo(
         "_refs.atleast_1d",
         torch_opinfo_name="atleast_1d",
