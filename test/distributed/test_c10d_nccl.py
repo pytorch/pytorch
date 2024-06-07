@@ -3668,7 +3668,8 @@ class NCCLTraceTest(NCCLTraceTestBase):
     @requires_nccl()
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
     @parametrize("timing_enabled", [True, False])
-    def test_trace_while_active(self, timing_enabled):
+    @parametrize("only_active", [True, False])
+    def test_trace_while_active(self, timing_enabled, only_active):
         if self.rank == self.MAIN_PROCESS_RANK:
             for c in self.children_pipes:
                 self.assertEqual(c.recv(), "next")
@@ -3689,17 +3690,24 @@ class NCCLTraceTest(NCCLTraceTestBase):
             if self.rank != 0:
                 pg.allreduce(a).wait()
             e.synchronize()
-            t = pickle.loads(torch._C._distributed_c10d._dump_nccl_trace())
+            t = pickle.loads(torch._C._distributed_c10d._dump_nccl_trace(onlyActive=only_active))
             t = t["entries"]
-            self.assertEqual(t[-1]["profiling_name"], "nccl:all_reduce")
-            if self.rank == 0:
-                self.assertEqual(t[-1]["collective_seq_id"], 1)
-                self.assertEqual(t[-1]["state"], "completed")
-            else:
-                self.assertEqual(t[-1]["collective_seq_id"], 2)
-                self.assertEqual(
-                    t[-1]["state"], self.started_or_scheduled(timing_enabled)
-                )
+            if only_active:
+                if self.rank == 0:
+                    self.assertEqual(len(t), 0)
+                else:
+                    self.assertEqual(len(t), 1)
+            if not only_active:
+                if self.rank == 0:
+                    self.assertEqual(t[-1]["profiling_name"], "nccl:all_reduce")
+                    self.assertEqual(t[-1]["collective_seq_id"], 1)
+                    self.assertEqual(t[-1]["state"], "completed")
+                else:
+                    self.assertEqual(t[-1]["profiling_name"], "nccl:all_reduce")
+                    self.assertEqual(t[-1]["collective_seq_id"], 2)
+                    self.assertEqual(
+                        t[-1]["state"], self.started_or_scheduled(timing_enabled)
+                    )
 
             self.parent.send("next")
             self.assertEqual("next", self.parent.recv())
