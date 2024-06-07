@@ -295,12 +295,15 @@ class SideEffects:
     def prune_dead_object_new(self, tx):
         live_new_objects = set()
 
-        # VariableTracker.visit is a graph traversal algorithm. This is the visited set.
-        # We want to visit each node only once.
-        visited: Any = {}
+        # use this to avoid cycles in mutable_local (though I'm not sure if that
+        # can actually happen).
+        visited: Any = set({})
 
         def visit(var: VariableTracker):
             if isinstance(var.mutable_local, AttributeMutationNew):
+                if var in visited:
+                    return
+                visited.add(var)
                 # Object may have been mutated, store this mutation.
                 live_new_objects.add(var.mutable_local)
                 # It's possible that we have mutated the value of this variable
@@ -308,7 +311,7 @@ class SideEffects:
                 # Also recurse through the new value to detect alive AttributeMutationNew.
                 if var.mutable_local in self.store_attr_mutations:
                     VariableTracker.visit(
-                        visit, self.store_attr_mutations[var.mutable_local], visited
+                        visit, self.store_attr_mutations[var.mutable_local]
                     )
 
         def is_live(var: Union[MutableLocalBase, VariableTracker]):
@@ -327,9 +330,7 @@ class SideEffects:
         # The only live side effects come from returns (tx.stack), any intermediates
         # during a graph break (tx.symbolic_locals), and mutation on pre-existing variables.
         # Recursively visit Variables and see if any of them have been mutated.
-        VariableTracker.visit(
-            visit, (tx.stack, tx.symbolic_locals, pre_existing_vars), visited
-        )
+        VariableTracker.visit(visit, (tx.stack, tx.symbolic_locals, pre_existing_vars))
 
         # NB: cell variable handling.is tricky.
         # cell variables must stay alive if any NestedUserFunctionVariable
