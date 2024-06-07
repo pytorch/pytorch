@@ -1500,31 +1500,31 @@ TestEnvironment.def_flag("TEST_CUDA_MEM_LEAK_CHECK", env_var="PYTORCH_TEST_CUDA_
 
 # Dict of NumPy dtype -> torch dtype (when the correspondence exists)
 numpy_to_torch_dtype_dict = {
-    np.dtype(np.bool_)     : torch.bool,
-    np.dtype(np.uint8)     : torch.uint8,
-    np.dtype(np.uint16)    : torch.uint16,
-    np.dtype(np.uint32)    : torch.uint32,
-    np.dtype(np.uint64)    : torch.uint64,
-    np.dtype(np.int8)      : torch.int8,
-    np.dtype(np.int16)     : torch.int16,
-    np.dtype(np.int32)     : torch.int32,
-    np.dtype(np.int64)     : torch.int64,
-    np.dtype(np.float16)   : torch.float16,
-    np.dtype(np.float32)   : torch.float32,
-    np.dtype(np.float64)   : torch.float64,
-    np.dtype(np.complex64) : torch.complex64,
-    np.dtype(np.complex128): torch.complex128
+    np.bool_      : torch.bool,
+    np.uint8      : torch.uint8,
+    np.uint16     : torch.uint16,
+    np.uint32     : torch.uint32,
+    np.uint64     : torch.uint64,
+    np.int8       : torch.int8,
+    np.int16      : torch.int16,
+    np.int32      : torch.int32,
+    np.int64      : torch.int64,
+    np.float16    : torch.float16,
+    np.float32    : torch.float32,
+    np.float64    : torch.float64,
+    np.complex64  : torch.complex64,
+    np.complex128 : torch.complex128
 }
 
 
-# numpy dtypes like np.float64 are not instances, but rather classes. This leads
-# to rather absurd cases like np.float64 != np.dtype("float64") but
-# np.dtype(np.float64) == np.dtype("float64") and
-# np.dtype(np.dtype("float64")) == np.dtype("float64").  Especially when
-# checking against a reference we can't be sure which variant we get, so we
-# simply apply the conversion.
+# numpy dtypes like np.float64 are not instances, but rather classes. This leads to rather absurd cases like
+# np.float64 != np.dtype("float64") but np.float64 == np.dtype("float64").type.
+# Especially when checking against a reference we can't be sure which variant we get, so we simply try both.
 def numpy_to_torch_dtype(np_dtype):
-    return numpy_to_torch_dtype_dict[np.dtype(np_dtype)]
+    try:
+        return numpy_to_torch_dtype_dict[np_dtype]
+    except KeyError:
+        return numpy_to_torch_dtype_dict[np_dtype.type]
 
 
 def has_corresponding_torch_dtype(np_dtype):
