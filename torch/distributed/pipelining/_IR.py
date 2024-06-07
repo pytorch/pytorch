@@ -868,7 +868,11 @@ class Pipe(torch.nn.Module):
         inputs_to_state: Dict[str, List[str]] = {}
         for attr in attr_nodes:
             _, tensor = _recursive_getattr_with_parent(mod, attr.target)
-            inputs_to_state[attr.name] = list(id_to_fqns[id(tensor)])
+            fqns = list(id_to_fqns[id(tensor)])
+            if fqns:
+                inputs_to_state[attr.name] = fqns
+            elif attr.target in exported_program.constants:  # lifted constants
+                inputs_to_state[attr.name] = [attr.target]
 
         # [aliasing] for each submodule split, assign attributes on FQNs that may be used.
         # We determine this based on whether or not the FQN attribute parent exists.
