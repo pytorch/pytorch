@@ -1925,7 +1925,6 @@ def forward(self, primals_1, primals_2):
     return [t, view_1, view_2]""",
         )
 
-    @skipIfDynamoInput("https://github.com/pytorch/pytorch/issues/128035", xfail=True)
     def test_view_detach(self):
         def f(a):
             tmp = a.detach()
@@ -2644,7 +2643,6 @@ def forward(self, primals_1, primals_2, primals_3):
 
         self.verify_aot_autograd(f, inp_callable, test_mutation=True)
 
-    @skipIfDynamoInput("https://github.com/pytorch/pytorch/issues/128035", xfail=True)
     def test_input_mutation_alias_everything(self):
         # Mondo test that tests a combination of:
         # input is mutated, that aliases another input (so we make a synthetic base)
