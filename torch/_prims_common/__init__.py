@@ -1363,6 +1363,8 @@ def number_type(
 
 
 def expr_type(x: sympy.Basic) -> Type:
+    import sympy
+
     if isinstance(x, sympy.logic.boolalg.Boolean):
         return bool
     elif x.is_integer:  # type: ignore[attr-defined]

@@ -928,7 +928,9 @@ class ValueRangeAnalysis(SymPyValueRangeAnalysis):
         if dtype == torch.bool:
             if x.is_singleton():
                 return ValueRanges.wrap(x.lower != 0)
-            elif False not in x:
+            elif x.is_bool:
+                return x
+            elif 0 not in x:
                 return ValueRanges.wrap(sympy.true)
             else:
                 return ValueRanges(sympy.false, sympy.true)
