@@ -367,10 +367,14 @@ class TS2FXGraphConverter:
             normalized_name = normalize_name(name)
 
 <<<<<<< HEAD
+<<<<<<< HEAD
             if name in self.name_to_param_map:
 =======
             if name in self.name_to_param_map.keys():
 >>>>>>> 3277b3504df (address comments)
+=======
+            if name in self.name_to_param_map:
+>>>>>>> bd695367044 (address comments)
                 self.input_specs.append(
                     InputSpec(
                         InputKind.PARAMETER,
@@ -390,8 +394,12 @@ class TS2FXGraphConverter:
 =======
                     self.fx_graph, name, self.is_top_level_graph()
                 )
+<<<<<<< HEAD
             elif name in self.name_to_buffer_map.keys():
 >>>>>>> 3277b3504df (address comments)
+=======
+            elif name in self.name_to_buffer_map:
+>>>>>>> bd695367044 (address comments)
                 self.input_specs.append(
                     InputSpec(
                         InputKind.BUFFER,
@@ -422,10 +430,13 @@ class TS2FXGraphConverter:
                 fx_node = self.fx_graph.placeholder(normalized_name)
 
 <<<<<<< HEAD
+<<<<<<< HEAD
 =======
             # TODO: set fx_node.meta["val"]
 
 >>>>>>> 1223b2491f4 (address comments)
+=======
+>>>>>>> bd695367044 (address comments)
             self.name_to_node[name] = fx_node
 
     def convert_aten_tensor(self, node: torch._C.Node):
