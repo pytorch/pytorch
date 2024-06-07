@@ -843,6 +843,57 @@ class PreserveVersionContextVariable(ContextWrappingVariable):
         )
 
 
+class FSDPParamGroupUseTrainingStateVariable(ContextWrappingVariable):
+    _guards_singleton = Guard(GlobalStateSource(), GuardBuilder.FSDP_TRAINING_STATE)
+
+    @staticmethod
+    def create(tx, target_value, **kwargs):
+        var = FSDPParamGroupUseTrainingStateVariable(
+            target_values=[target_value],
+            # initial_values=[torch.is_grad_enabled()], TODO
+            **kwargs,
+        )
+        if initialized:
+            var._call_func(tx, var.target_values)
+        return var
+
+    def __init__(self, target_values, initial_values=None, initialized=True, **kwargs):
+        super().__init__(
+            target_values=target_values, initial_values=initial_values, **kwargs
+        )
+        install_guard(self._guards_singleton)
+
+    def enter(self, tx):
+        self._call_func(tx, self.target_values)
+        return variables.ConstantVariable.create(None)
+
+    def exit(self, tx, *args):
+        self._call_func(tx, self.initial_values)
+        return variables.ConstantVariable.create(None)
+
+    def call_function(
+        self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
+    ):
+        self._call_func(tx, self.initial_values)  # undo eager initialization
+        return super().call_function(tx, args, kwargs)
+
+    def _call_func(self, tx, values):
+        assert len(values) == 1
+        value = values[0]
+        # # Coalesce grad mode mutations
+        # if torch.is_grad_enabled() != value:
+        #     tx.output.create_node(
+        #         "call_function", torch._C._set_grad_enabled, (value,), {}
+        #     )
+        #     torch._C._set_grad_enabled(value)  # TODO(yf225): interesting - we are changing the eager state - maybe okay to do this?
+
+    def module_name(self):
+        return "torch.distributed._composable.fsdp._fsdp_param_group.FSDPParamGroup"
+
+    def fn_name(self):
+        return "use_training_state"
+
+
 class StreamVariable(VariableTracker):
     def __init__(self, proxy, value, device, **kwargs):
         if proxy is not None and "example_value" in proxy.node.meta:

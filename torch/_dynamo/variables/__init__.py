@@ -19,6 +19,7 @@ from .ctx_manager import (
     StreamVariable,
     VmapIncrementNestingCtxManagerVariable,
     WithExitFunctionVariable,
+    FSDPParamGroupUseTrainingStateVariable,
 )
 from .dicts import (
     ConstDictVariable,

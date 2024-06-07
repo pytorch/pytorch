@@ -309,6 +309,7 @@ manual_torch_name_rule_map = {
     f"torch/testing/_internal/distributed/_tensor/common_dtensor.py#{TORCH_DYNAMO_RESUME_IN_PREFIX}": UserFunctionVariable,
     "torch/testing/_internal/common_distributed.py#forward": UserFunctionVariable,
     f"torch/testing/_internal/common_distributed.py#{TORCH_DYNAMO_RESUME_IN_PREFIX}": UserFunctionVariable,
+    f"torch.distributed._composable.fsdp._fsdp_param_group.FSDPParamGroup.use_training_state": UserFunctionVariable,
 }
 
 
@@ -2863,6 +2864,8 @@ def get_torch_obj_rule_map():
                 obj = load_object(k)
             else:
                 obj = _module_dir(torch) + k[len("torch/") :]
+            if isinstance(obj, str) and "fsdp" in obj:
+                print(f"obj: {obj}")
             if obj is not None:
                 if obj in d and d[obj] != v:
                     raise AssertionError(
@@ -2889,11 +2892,14 @@ def load_object(name):
         if len(x) == 2:
             obj = _load_obj_from_str(x[0])
             val = getattr(obj, x[1])
+            print(f"here1: obj: {obj}, val: {val}")
         else:
             assert len(x) == 1, f"Invalid obj name {name}"
             val = _load_obj_from_str(x[0])
+            print(f"here2: val: {val}")
         val = unwrap_if_wrapper(val)
-    except (AttributeError, ImportError):
+    except (AttributeError, ImportError) as e:
+        print(f"here3: Failed to load {name}: {e}")
         val = None
     return val
 
@@ -3526,6 +3532,7 @@ def lookup_inner(
     if obj is not None:
         if is_aten_op_or_tensor_method(obj):
             return TorchInGraphFunctionVariable
+        print(f"obj to check: {obj}")
         rule = get_torch_obj_rule_map().get(obj, None)
         if rule is not None:
             if reasons is not None:

@@ -183,6 +183,9 @@ class TorchCtxManagerClassVariable(BaseTorchVariable):
         # We can't do isinstance(value, type) check because some ctx managers
         # are implemented as a function decorated by contextlib.contextmanager,
         # E.g., torch._functorch.vmap.vmap_increment_nesting.
+        import logging
+        torch_log = logging.getLogger("torch")
+        torch_log.warning(f"value: {value}")
         return (
             # Context manager type or function with @contextmanager is callable
             callable(value)
@@ -206,6 +209,7 @@ class TorchCtxManagerClassVariable(BaseTorchVariable):
             SetFwdGradEnabledContextManager,
             StreamVariable,
             VmapIncrementNestingCtxManagerVariable,
+            FSDPParamGroupUseTrainingStateVariable,
         )
 
         if self.value is torch.no_grad:
@@ -295,7 +299,30 @@ class TorchCtxManagerClassVariable(BaseTorchVariable):
             return DisabledSavedTensorsHooksVariable.create(
                 tx, args[0].as_python_constant()
             )
-
+        elif self.value is torch.distributed._composable.fsdp._fsdp_param_group.FSDPParamGroup.use_training_state:  # TODO(yf225): does this comparison actually work, since we are looking into an instance attribute?
+            """
+            Alternatively, maybe we need something similar to:
+            ```
+            if len(args) == 1 and isinstance(
+                args[0], variables.functions.BaseUserFunctionVariable
+            ):
+                ctx = GradModeVariable.create(tx, True)
+                return ctx.call_function(tx, args, kwargs)
+            return GradModeVariable.create(tx, True)
+            ```
+            or
+            ```
+            elif self.value is torch._C.DisableTorchFunctionSubclass:
+            ```
+            """
+            assert len(args) == 2 and isinstance(args[1], variables.functions.BaseUserFunctionVariable)
+            # assert len(args) == 2
+            # return VmapIncrementNestingCtxManagerVariable.create(
+            #     tx,
+            #     [guard_if_dyn(x) for x in args],
+            # )
+            ctx = FSDPParamGroupUseTrainingStateVariable.create(tx, args[0].as_python_constant())
+            return ctx.call_function(tx, args, kwargs)
         return super().call_function(tx, args, kwargs)
 
 
