@@ -10,6 +10,7 @@ import torch.distributed as dist
 import torch.nn as nn
 from torch.distributed._composable.contract import _get_registry
 from torch.distributed._tensor import DeviceMesh, DTensor, Placement
+from torch.distributed._tensor.placement_types import DTensorSpec, TensorMeta
 
 
 @dataclass
@@ -120,17 +121,23 @@ def _from_local_no_grad(
     This method is similar to ``DTensor.from_local()`` except that in eager mode
     it avoids some CPU overhead by avoiding default args and not being differentiable.
     """
+
     if not torch._dynamo.compiled_autograd.compiled_autograd_enabled:
+        spec = DTensorSpec(
+            device_mesh,
+            placements,
+            tensor_meta=TensorMeta(
+                global_size,
+                global_stride,
+                local_tensor.dtype,
+            ),
+        )
         return DTensor(
             # Use the local tensor directly instead of constructing a new tensor
             # variable, e.g. with `view_as()`, since this is not differentiable
             local_tensor,
-            device_mesh,
-            placements,
-            shape=global_size,
-            dtype=local_tensor.dtype,
+            spec,
             requires_grad=local_tensor.requires_grad,
-            stride=global_stride,
         )
     else:
         return DTensor.from_local(
