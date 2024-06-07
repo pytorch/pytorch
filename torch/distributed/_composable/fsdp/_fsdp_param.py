@@ -11,7 +11,7 @@ from torch._prims_common import make_contiguous_strides_for
 from torch.distributed._functional_collectives import AsyncCollectiveTensor
 from torch.distributed._tensor import DTensor, Replicate, Shard
 from torch.distributed._tensor.device_mesh import _mesh_resources
-from torch.distributed._tensor.placement_types import DTensorSpec, TensorMeta
+from torch.distributed._tensor.placement_types import DTensorSpec, Placement, TensorMeta
 from ._fsdp_api import CPUOffloadPolicy, MixedPrecisionPolicy, OffloadPolicy
 from ._fsdp_common import (
     _chunk_with_empty,
@@ -211,7 +211,7 @@ class FSDPParam:
                 )
 
             # TODO: Hard code FSDP + TP; need to support HSDP + TP
-            self._spmd_placements = (
+            self._spmd_placements: Tuple[Placement, ...] = (
                 Shard(0),
                 self._tp_spec.placements[0],
             )
@@ -225,7 +225,7 @@ class FSDPParam:
         else:
             self._spmd_mesh = self.mesh_info.mesh
             if isinstance(self.mesh_info, HSDPMeshInfo):
-                self._spmd_placements = (Replicate(), Shard(0))
+                self._spmd_placements: Tuple[Placement, ...] = (Replicate(), Shard(0))
             else:
                 self._spmd_placements = (Shard(0),)
             self._sharding_spec = DTensorSpec(
