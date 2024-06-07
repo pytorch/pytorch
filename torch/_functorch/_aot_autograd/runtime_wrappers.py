@@ -148,6 +148,104 @@ class RuntimeWrapper(CompilerWrapper):
         )
 
 
+class NoopAliasHandler:
+    def __init__(self, info, runtime_metadata, trace_joint):
+        pass
+
+    def __call__(self, orig_inputs, fw_outs, out):
+        return out
+
+
+def _unwrap_tensoralias(x):
+    assert isinstance(x, TensorAlias)
+    return x.alias
+
+
+def _identity(x):
+    return x
+
+
+class AliasOfInputHandler:
+    def __init__(self, info, runtime_metadata, trace_joint):
+        num_tokens = len(runtime_metadata.tokens)
+        self.base_idx = info.base_idx + num_tokens
+        self.unwrap_out = _unwrap_tensoralias if trace_joint else _identity
+        self.requires_grad = info.requires_grad
+        self.functional_tensor = info.functional_tensor
+        self.replay_views = config.view_replay_for_aliased_outputs
+
+    def __call__(self, orig_inputs, fw_outs, out):
+        aliased_base_tensor = orig_inputs[self.base_idx]
+        return gen_alias_from_base(
+            aliased_base_tensor,
+            self.unwrap_out(out),
+            self.requires_grad,
+            self.functional_tensor,
+            replay_views=self.replay_views,
+        )
+
+
+class IsInputHandler:
+    def __init__(self, info, runtime_metadata, trace_joint):
+        num_tokens = len(runtime_metadata.tokens)
+        self.base_idx = info.base_idx + num_tokens
+        self.unwrap_out = _unwrap_tensoralias if trace_joint else _identity
+
+    def __call__(self, orig_inputs, fw_outs, out):
+        aliased_base_tensor = orig_inputs[self.base_idx]
+        return aliased_base_tensor
+
+
+class AliasOfIntermediateHandler:
+    def __init__(self, info, runtime_metadata, trace_joint):
+        if info.output_type in (
+            OutputType.alias_of_intermediate,
+            OutputType.alias_of_intermediate_save_as_output,
+        ):
+            num_user_outputs = len(runtime_metadata.output_infos)
+            self.base_idx = info.base_idx + num_user_outputs
+        else:
+            self.base_idx = info.base_idx
+
+        self.unwrap_out = _unwrap_tensoralias if trace_joint else _identity
+        self.requires_grad = info.requires_grad
+        self.functional_tensor = info.functional_tensor
+        self.replay_views = config.view_replay_for_aliased_outputs
+
+    def __call__(self, orig_inputs, fw_outs, out):
+        aliased_base_tensor = fw_outs[self.base_idx]
+        return gen_alias_from_base(
+            aliased_base_tensor,
+            self.unwrap_out(out),
+            self.requires_grad,
+            self.functional_tensor,
+            replay_views=self.replay_views,
+        )
+
+
+def make_output_handler(info, runtime_metadata, trace_joint):
+    if info.output_type in (
+        OutputType.non_alias,
+        OutputType.unsafe_view_alias,
+        OutputType.custom_function_view,
+    ):
+        return NoopAliasHandler(info, runtime_metadata, trace_joint)
+    elif info.output_type == OutputType.alias_of_input:
+        return AliasOfInputHandler(info, runtime_metadata, trace_joint)
+    elif info.output_type == OutputType.is_input:
+        return IsInputHandler(info, runtime_metadata, trace_joint)
+    elif info.output_type in (
+        OutputType.alias_of_intermediate,
+        OutputType.alias_of_intermediate_save_as_output,
+        OutputType.alias_of_intermediate_base_is_user_output,
+    ):
+        return AliasOfIntermediateHandler(info, runtime_metadata, trace_joint)
+    # TODO: handle the custom autograd function case here.
+    # We need a way to check whether a tensor came from a custom autograd fn from python,
+    # AND a way to replay that custom view fn.
+    assert False, f"Unhandled output type {info.output_type}"
+
+
 def _create_runtime_wrapper(
     compiled_fn,
     *,
@@ -186,6 +284,11 @@ def _create_runtime_wrapper(
         assert num_tokens == 0
 
     replay_views = config.view_replay_for_aliased_outputs
+    if runtime_metadata.num_outputs_aliased > 0:
+        output_handlers = tuple(
+            make_output_handler(info, runtime_metadata, trace_joint)
+            for info in runtime_metadata.output_info
+        )
 
     def runtime_wrapper(args: List[Any]):
         if num_tokens > 0:
@@ -320,77 +423,14 @@ def _create_runtime_wrapper(
         # compiling them.
         if runtime_metadata.num_outputs_aliased > 0:
             # The compiled forward also returned intermediate bases. We don't want to return them to the user.
-            if runtime_metadata.num_intermediate_bases > 0:
-                fw_outs_no_intermediate_bases = fw_outs[
-                    : -runtime_metadata.num_intermediate_bases
-                ]
-                intermediate_bases = fw_outs[-runtime_metadata.num_intermediate_bases :]
-            else:
-                fw_outs_no_intermediate_bases = fw_outs
-                intermediate_bases = []
-
-            assert len(fw_outs_no_intermediate_bases) == len(
-                runtime_metadata.output_info
-            )
-            fw_outs_including_aliases = []
-            for o, info in builtins.zip(
-                fw_outs_no_intermediate_bases, runtime_metadata.output_info
-            ):
-                if info.output_type in [
-                    OutputType.non_alias,
-                    OutputType.unsafe_view_alias,
-                    OutputType.custom_function_view,
-                ]:
-                    fw_outs_including_aliases.append(o)
-                    continue
-                if trace_joint:
-                    assert isinstance(o, TensorAlias)
-                    o_ = o.alias
-                else:
-                    o_ = o
-
-                o_grad = info.requires_grad
-                if info.output_type == OutputType.alias_of_input:
-                    aliased_base_tensor = orig_inputs[info.base_idx + num_tokens]  # type: ignore[index, operator]
-                    regenerated_out = gen_alias_from_base(
-                        aliased_base_tensor,
-                        o_,
-                        o_grad,
-                        info.functional_tensor,
-                        replay_views=replay_views,
-                    )
-                    fw_outs_including_aliases.append(regenerated_out)
-                    continue
-                elif info.output_type == OutputType.is_input:
-                    aliased_base_tensor = orig_inputs[info.base_idx + num_tokens]  # type: ignore[index, operator]
-                    regenerated_out = aliased_base_tensor
-                    fw_outs_including_aliases.append(regenerated_out)
-                    continue
-                elif info.output_type == OutputType.alias_of_intermediate:
-                    base_tensor_list = intermediate_bases
-                elif (
-                    info.output_type == OutputType.alias_of_intermediate_save_as_output
-                ):
-                    base_tensor_list = intermediate_bases
-                else:
-                    assert (
-                        info.output_type
-                        == OutputType.alias_of_intermediate_base_is_user_output
-                    )
-                    base_tensor_list = fw_outs_no_intermediate_bases
-                aliased_base_tensor = base_tensor_list[info.base_idx]
-                # TODO: handle the custom autograd function case here.
-                # We need a way to check whether a tensor came from a custom autograd fn from python,
-                # AND a way to replay that custom view fn.
-                regenerated_out = gen_alias_from_base(
-                    aliased_base_tensor,
-                    o_,
-                    o_grad,
-                    info.functional_tensor,
-                    replay_views=replay_views,
+            expect_num_outputs = len(output_handlers) + runtime_metadata.num_intermediate_bases
+            assert len(fw_outs) == expect_num_outputs
+            ret_outs = [
+                handler(orig_inputs, fw_outs, out)
+                for out, handler in builtins.zip(
+                    fw_outs, output_handlers
                 )
-                fw_outs_including_aliases.append(regenerated_out)
-            ret_outs = fw_outs_including_aliases
+            ]
         else:
             ret_outs = fw_outs
 
