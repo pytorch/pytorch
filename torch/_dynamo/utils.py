@@ -1908,7 +1908,7 @@ def run_node(tracer, node, args, kwargs, nnmodule):
                 assert nnmodule is not None
                 return nnmodule(*args, **kwargs)
             elif op == "get_attr":
-                return tracer.get_submodule(node.target)
+                return tracer.output_graph.get_submodule(node.target)
             elif op == "placeholder":
                 assert "example_value" in node.meta
                 return node.meta["example_value"]
