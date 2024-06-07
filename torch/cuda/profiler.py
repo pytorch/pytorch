@@ -49,6 +49,12 @@ def start():
 
 
 def stop():
+    """
+    Stops Cuda Profiler 
+    Example:
+        >>> profiler = Profiler();
+        >>> profiler.stop()
+    """
     check_error(cudart().cudaProfilerStop())
 
 
