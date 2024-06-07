@@ -53,6 +53,12 @@ class MockPipelineStage(_PipelineStageBase):
     def _create_grad_recv_info(self, *args, **kwargs):
         return None
 
+    def _prepare_forward_infra(self, n_microbatches):
+        pass
+
+    def _prepare_backward_infra(self, n_microbatches):
+        pass
+
 
 class ScheduleTest(MultiProcContinousTest):
     @classmethod
@@ -274,7 +280,6 @@ class ScheduleTest(MultiProcContinousTest):
             self.rank,
             self.world_size,
             self.device,
-            chunks,
             input_args=x.chunk(chunks)[0],
         )
 
@@ -358,7 +363,6 @@ class ScheduleTest(MultiProcContinousTest):
                 stage_idx,
                 n_stages,
                 self.device,
-                chunks,
                 input_args=input_args,
             )
             for stage_module, stage_idx in zip(stage_modules, stage_indices)
