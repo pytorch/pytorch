@@ -53,7 +53,7 @@ Overall, the ``pipelining`` package provides the following features:
 * Splitting of model code based on simple specification. The goal is to make
   parallelism work for your model with **zero model code change**.
 * Rich support for pipeline schedules, including GPipe, 1F1B,
-  Interleaved 1F1B and Looped BFS, and provide the infrastruture for writing
+  Interleaved 1F1B and Looped BFS, and providing the infrastruture for writing
   customized schedules.
 * First-class support for cross-host pipeline parallelism, as this is where PP
   is typically used (over slower interconnects).
@@ -179,7 +179,7 @@ You can also create a distributed stage runtime on a device using ``Pipe``:
 
 .. code-block:: python
 
-  from torch.distributed.pipelining import PipelineStage
+  from torch.distributed.pipelining import TracerPipelineStage
   stage = TracerPipelineStage(pipe, stage_idx, device)
 
 .. note::
@@ -187,15 +187,28 @@ You can also create a distributed stage runtime on a device using ``Pipe``:
   model into a single graph. If your model is not full-graph'able, you can use
   our manual frontend below.
 
-Frontend 2: ``ManualPipelineStage`` -- if you already have module for each stage
+Frontend 2: ``PipelineStage`` -- if you already have module for each stage
 ================================================================================
 
 If you already have the module for each stage, you can skip the pipeline split
-step above and directly connect to our runtime offering: ``ManualPipelineStage``.
-The ``ManualPipelineStage`` wraps your stage module given a distributed context,
+step above and directly connect to our runtime offering: ``PipelineStage``.
+The ``PipelineStage`` wraps your stage module given a distributed context,
 i.e. a ``ProcessGroup`` along the pipeline dimension.
 
-TODO: manual example here
+.. code-block:: python
+
+  from torch.distributed.pipelining import PipelineStage
+  stage = PipelineStage(
+      stage_mod,
+      stage_idx,
+      num_stages,
+      device,
+      input_args=x.chunk(num_microbatches)[0],
+  )
+
+The ``PipelineStage`` requires an example argument (similar to ``example_args`` used in ``pipeline``).
+This argument is passed through the forward method of the stage module to determine the
+input and output shapes required for communication.
 
 
 Step 2: use ``PipelineSchedule`` for execution
@@ -265,7 +278,7 @@ captures information during ``Module.__init__()``, and does not capture any
 information about ``Module.forward()``. Said differently, ``Module.children()``
 lacks information about the following aspects key to pipelininig:
 
-* Exectuion order of child modules in ``forward``
+* Execution order of child modules in ``forward``
 * Activation flows between child modules
 * Whether there are any functional operators between child modules (for example,
   ``relu`` or ``add`` operations will not be captured by ``Module.children()``).
@@ -276,8 +289,8 @@ helping the distributed runtime to make correct send/receive calls without human
 intervention.
 
 Another flexibility of the ``pipeline`` API is that split points can be at
-arbitrary hierarchy of your model. In the split partitions, the original model
-hierarchy related to that partition will be reconstructed at no cost of yours.
+arbitrary levels within your model hierarchy. In the split partitions, the original model
+hierarchy related to that partition will be reconstructed at no cost to you.
 At a result, fully-qualified names (FQNs) pointing to a submodule or parameter
 would be still valid, and services that relies on FQNs (such as FSDP, TP or
 checkpointing) can still run with your partitioned modules with almost zero code
