@@ -472,6 +472,10 @@ def create_aot_dispatcher_function(
     else:
         shape_env = fake_mode.shape_env
 
+    maybe_suppress: Callable[[], Any] = nullcontext
+    if shape_env is not None:
+        maybe_suppress = shape_env.suppress_guards
+
     python_dispatcher_mode = (
         enable_python_dispatcher() if shape_env is not None else nullcontext()
     )
@@ -557,7 +561,7 @@ def create_aot_dispatcher_function(
                     ctx = _detect_attribute_assignment(mod)
                 else:
                     ctx = nullcontext()
-                with ctx, shape_env.suppress_guards():
+                with ctx, maybe_suppress():
                     fw_metadata = run_functionalized_fw_and_collect_metadata(
                         flat_fn,
                         keep_input_mutations=aot_config.keep_inference_input_mutations,
@@ -683,7 +687,7 @@ or otherwise set torch._functorch.config.functionalize_rng_ops = False."""
 
         compiler_fn = choose_dispatcher(needs_autograd, aot_config)
 
-        with shape_env.suppress_guards():
+        with maybe_suppress():
             compiled_fn, fw_metadata = compiler_fn(
                 flat_fn, fake_flat_args, aot_config, fw_metadata=fw_metadata
             )
