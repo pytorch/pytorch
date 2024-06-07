@@ -3,9 +3,10 @@
 import sys
 
 import test_c10d_spawn
+from test_c10d_spawn import _torch_dist_nn_available, TestDistributedNNFunctions
+
 import torch
 import torch.distributed as c10d
-from test_c10d_spawn import _torch_dist_nn_available, TestDistributedNNFunctions
 from torch.testing._internal.common_cuda import TEST_MULTIGPU
 from torch.testing._internal.common_distributed import requires_ucc, skip_if_lt_x_gpu
 from torch.testing._internal.common_utils import (
