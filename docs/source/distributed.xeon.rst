@@ -70,7 +70,7 @@ on Ubuntu, or
 
 on CentOS.
 
-The ``taskset`` command in Linux is another powerful utility that allows you to set or retrieve the CPU affinity of a running process. 
+The ``taskset`` command in Linux is another powerful utility that allows you to set or retrieve the CPU affinity of a running process.
 ``taskset`` are pre-installed in most Linux distributions and in case it's not, we can install it with command
 
 .. code-block:: console
@@ -112,19 +112,19 @@ TCMalloc can be installed by
 .. code-block:: console
 
    $ apt-get install google-perftools
-   
+
 on Ubuntu, or
 
 .. code-block:: console
 
    $ yum install gperftools
-   
+
 on CentOS.
 
 In conda environment, it can also be installed by
 
 .. code-block:: console
-   
+
    $ conda install conda-forge::gperftools
 
 JeMalloc can be installed by
@@ -163,7 +163,7 @@ Quick Start Example Commands
 
    $ python -m torch.backends.xeon.run_cpu --node-id 0 <program.py> [program_args]
 
-3. To run multi-instance inference, 8 instances with 14 cores per instance on a 112-core CPU 
+3. To run multi-instance inference, 8 instances with 14 cores per instance on a 112-core CPU
 
 .. code-block:: console
 
@@ -178,7 +178,7 @@ Quick Start Example Commands
 Usage of torch.backends.xeon.run_cpu
 ------------------------------------
 
-The argument list and usage guidance can be shown with 
+The argument list and usage guidance can be shown with
 
 .. code-block:: console
 
@@ -287,4 +287,3 @@ Knobs for controlling instance number and compute resource allocation are:
    +------------------+-------------------------------------------------------------------------------------------------+
 
    Please note that the script respects environment variables set preliminarily. i.e. If you have set the environment variables mentioned above before running the script, the values of the variables will not overwritten by the script.
-
