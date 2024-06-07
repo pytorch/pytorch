@@ -576,8 +576,9 @@ def get_code_hash(roots, extra_files=()):
     hasher.update(torch.__version__.encode("utf-8"))
     build_code_hash(roots, "", hasher)
     for path in extra_files:
-        with open(path, "rb") as f:
-            hasher.update(f.read())
+        if os.path.exists(path):
+            with open(path, "rb") as f:
+                hasher.update(f.read())
     return hasher.digest()
 
 
