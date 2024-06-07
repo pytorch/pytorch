@@ -490,7 +490,7 @@ else:
                     f"Found the DeviceMesh have {self.mesh.ndim} dimensions",
                     "Optional kwarg `mesh_dim` needs to be specified when device_mesh.ndim > 1.",
                     "If you want to get the list of all the ProcessGroups in the DeviceMesh,"
-                    "please use `get_groups()` instead.",
+                    "please use `get_all_groups()` instead.",
                 )
 
             if self.mesh.ndim == 1 and mesh_dim is None:
@@ -506,7 +506,7 @@ else:
                 _find_pg_by_ranks_and_tag(*self._dim_group_infos[mesh_dim][:2])  # type: ignore[index]
             )
 
-        def get_groups(self) -> List[ProcessGroup]:
+        def get_all_groups(self) -> List[ProcessGroup]:
             """
             Returns a list of ProcessGroups for all mesh dimensions.
 
