@@ -2122,7 +2122,7 @@ class AotCodeCompiler:
                 return (
                     raw_bytes
                     if all_cuda
-                    else _pad_to_alignment(bytes(raw_array.contents))
+                    else _pad_to_alignment(raw_bytes)
                 )
 
             all_cuda = all(
