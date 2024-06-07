@@ -1,5 +1,5 @@
 import os
-from typing import Any, Dict, TYPE_CHECKING
+from typing import Any, Dict
 
 import torch
 
@@ -18,10 +18,6 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
     MLPStacked,
     NUM_DEVICES,
 )
-
-
-if TYPE_CHECKING:
-    pass
 
 
 def get_device_type():
