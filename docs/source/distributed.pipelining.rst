@@ -71,7 +71,7 @@ A `PipelineStage` needs to know the input and output shapes for the stage model,
 
 Users may construct a `PipelineStage` instance directly, by passing in an `nn.Module` representing the portion of the model that should run on the stage.  This may require changes to the original model code.  See the example below "Preparing a model for pipeline splitting".
 
-Alternatively, the tracing frontend can use graph-partitioning to construct a `GraphModule` that represents the desired subset of the model automatically.  This technique requires the model is traceable with torch.Export in non-strict mode. Composability of the resulting `GraphModule` with other parallelism techniquies and torch.compile is experimental, and may require some workarounds.  Usage of this frontend may be more appealing if the user cannot easily change the model code.  See "Splitting a Model with the ``pipeline`` tracing frontend" for more information.
+Alternatively, the tracing frontend can use graph-partitioning to construct a `GraphModule` that represents the desired subset of the model automatically.  This technique requires the model is traceable with torch.Export in non-strict mode. Composability of the resulting `GraphModule` with other parallelism techniques and torch.compile is experimental, and may require some workarounds.  Usage of this frontend may be more appealing if the user cannot easily change the model code.  See "Splitting a Model with the ``pipeline`` tracing frontend" for more information.
 
 
 Step 2: use ``PipelineSchedule`` for execution
@@ -157,21 +157,21 @@ A model defined in this manner can be easily configured per stage by first initi
           del model.layers["1"]
           model.norm = None
           model.output = None
-      elif pp_stage == 1:
+      elif stage_index == 1:
           model.tok_embeddings = None
           del model.layers["0"]
 
       from torch.distributed.pipelining import PipelineStage
       stage = PipelineStage(
           model,
-          stage_idx,
+          stage_index,
           num_stages,
           device,
           input_args=x.chunk(num_microbatches)[0],
       )
 
 
-The ``PipelineStage`` requires an example argument (similar to ``example_args`` used in ``pipeline``).
+The ``PipelineStage`` requires an example argument `input_args` representing the runtime input to the stage, which would be one microbatch worth of input data.
 This argument is passed through the forward method of the stage module to determine the
 input and output shapes required for communication.
 
