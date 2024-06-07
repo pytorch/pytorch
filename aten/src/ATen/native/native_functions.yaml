@@ -1979,14 +1979,14 @@
     CPU, CUDA: cumprod_out
     MPS: cumprod_out_mps
 
-- func: cumprod.dimname(Tensor self, Dimname dim, *, ScalarType? dtype=None) -> Tensor
+- func: cumprod.dimname(Tensor self, Dimname dim, *, ScalarType? dtype=None, bool prepend=False) -> Tensor
   device_check: NoCheck   # TensorIterator
   variants: function, method
 
-- func: cumprod_.dimname(Tensor(a!) self, Dimname dim, *, ScalarType? dtype=None) -> Tensor(a!)
+- func: cumprod_.dimname(Tensor(a!) self, Dimname dim, *, ScalarType? dtype=None, bool prepend=False) -> Tensor(a!)
   variants: method
 
-- func: cumprod.dimname_out(Tensor self, Dimname dim, *, ScalarType? dtype=None, Tensor(a!) out) -> Tensor(a!)
+- func: cumprod.dimname_out(Tensor self, Dimname dim, *, ScalarType? dtype=None, bool prepend=False, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
 
 - func: cumprod_backward(Tensor grad, Tensor input, int dim, Tensor output, bool prepend=False) -> Tensor
@@ -2011,14 +2011,14 @@
     CPU, CUDA: cumsum_out
     MPS: cumsum_out_mps
 
-- func: cumsum.dimname(Tensor self, Dimname dim, *, ScalarType? dtype=None) -> Tensor
+- func: cumsum.dimname(Tensor self, Dimname dim, *, ScalarType? dtype=None, bool prepend=False) -> Tensor
   device_check: NoCheck   # TensorIterator
   variants: function, method
 
-- func: cumsum_.dimname(Tensor(a!) self, Dimname dim, *, ScalarType? dtype=None) -> Tensor(a!)
+- func: cumsum_.dimname(Tensor(a!) self, Dimname dim, *, ScalarType? dtype=None, bool prepend=False) -> Tensor(a!)
   variants: method
 
-- func: cumsum.dimname_out(Tensor self, Dimname dim, *, ScalarType? dtype=None, Tensor(a!) out) -> Tensor(a!)
+- func: cumsum.dimname_out(Tensor self, Dimname dim, *, ScalarType? dtype=None, bool prepend=False, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
 
 - func: cumulative_trapezoid.x(Tensor y, Tensor x, *, int dim=-1) -> Tensor
