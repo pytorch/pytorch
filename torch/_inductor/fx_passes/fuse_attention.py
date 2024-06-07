@@ -588,7 +588,7 @@ def _sfdp_extra_check(scale_factor_op=None, disable_cuda=False):
     return fn
 
 
-def _sfdp_disable_for_single_thread(scale_factor_op=None, disable_cuda=False):
+def _sfdp_enable_for_single_thread(scale_factor_op=None, disable_cuda=False):
     if torch.get_num_threads() == 1:
         return False
     else:
@@ -806,7 +806,7 @@ def _get_sfdp_patterns():
                 d,
                 # CUDA AOT Inductor CI job's GPT2ForSequenceClassification accuracy test failed
                 # Accuracy issue on CPU for BF16 dtype with single thread. GitHub issue 123503
-                _sfdp_disable_for_single_thread(disable_cuda=True),
+                _sfdp_enable_for_single_thread(disable_cuda=True),
             ),
             (
                 _sfdp_pattern_18,
@@ -815,7 +815,7 @@ def _get_sfdp_patterns():
                 d,
                 # CUDA AOT Inductor CI job's GPT2ForSequenceClassification accuracy test failed
                 # Accuracy issue on CPU for BF16 dtype with single thread. GitHub issue 123503
-                _sfdp_disable_for_single_thread(disable_cuda=True),
+                _sfdp_enable_for_single_thread(disable_cuda=True),
             ),
             (
                 _sfdp_pattern_19,
