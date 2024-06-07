@@ -537,6 +537,7 @@ bool can_use_cudnn_attention(const sdp_params& params, bool debug) {
           // check_cudnn_layout,
           // check_is_causal,
           check_dtypes_low_precision,
+          check_for_attn_mask_cudnn,
           check_cudnn_hardware_support
           );
   for (auto& constraint : general_constraints) {
