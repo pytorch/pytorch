@@ -214,9 +214,6 @@ def _add_time_spent(key, phase_name, time_spent):
 
 def dynamo_timed(original_function=None, phase_name=None, fwd_only=True):
     def dynamo_timed_inner(func):
-        if config.cprofile:
-            return func
-
         @wraps(func)
         def time_wrapper(*args, **kwargs):
             key = func.__qualname__
