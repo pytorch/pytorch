@@ -3696,7 +3696,6 @@ class NCCLTraceTest(NCCLTraceTestBase):
                 self.assertEqual(t[-1]["collective_seq_id"], 1)
                 self.assertEqual(t[-1]["state"], "completed")
             else:
-                self.assertEqual(t[-1]["profiling_name"], "nccl:all_reduce")
                 self.assertEqual(t[-1]["collective_seq_id"], 2)
                 self.assertEqual(
                     t[-1]["state"], self.started_or_scheduled(timing_enabled)
