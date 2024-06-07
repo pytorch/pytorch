@@ -2119,18 +2119,14 @@ def _import_device_backends():
     Leverage the Python plugin mechanism to load out-of-the-tree device extensions.
     See this RFC: https://github.com/pytorch/pytorch/issues/122468
     """
-    if sys.version_info < (3, 10):
-        try:
-            from importlib_metadata import entry_points
-        except ImportError:
-            raise ImportError("importlib_metadata is not installed. Please install it using 'pip install importlib-metadata'.")
-    else:
-        from importlib.metadata import entry_points
+    from importlib.metadata import entry_points
 
     for backend_extension in entry_points(group='torch.backends'):
         try:
-            # Just load the extension without calling
-            backend_extension.load()
+            # Load the extension
+            extension_entrypoint = backend_extension.load()
+            # Call the entrypoint
+            extension_entrypoint()
         except Exception as err:
             raise RuntimeError(
                 f"Failed to load the backend extension: {backend_extension.name}. "
