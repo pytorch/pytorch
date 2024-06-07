@@ -208,7 +208,7 @@ SGD.__doc__ = (
 
     .. note::
         The implementation of SGD with Momentum/Nesterov subtly differs from
-        Sutskever et. al. and implementations in some other frameworks.
+        Sutskever et al. and implementations in some other frameworks.
 
         Considering the specific case of Momentum, the update can be written as
 
@@ -221,7 +221,7 @@ SGD.__doc__ = (
         where :math:`p`, :math:`g`, :math:`v` and :math:`\mu` denote the
         parameters, gradient, velocity, and momentum respectively.
 
-        This is in contrast to Sutskever et. al. and
+        This is in contrast to Sutskever et al. and
         other frameworks which employ an update of the form
 
         .. math::
