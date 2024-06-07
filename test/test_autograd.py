@@ -9508,6 +9508,13 @@ for shape in [(1,), ()]:
             memory_with_hooks = torch.cuda.memory_allocated()
             self.assertEqual(memory_with_hooks, memory_without_grad)
 
+    @unittest.skipIf(not TEST_CUDA, "test requires CUDA")
+    def test_scalar_grad_mixed_device(self):
+        x = torch.tensor(1.0, requires_grad=True)
+        y = torch.randn(2, 2, device="cuda")
+        out = x * y
+        out.sum().backward()
+
     def test_multi_grad_all_hooks(self):
         t1 = torch.rand(2, requires_grad=True)
         t2 = torch.rand(2, requires_grad=True)
