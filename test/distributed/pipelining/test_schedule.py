@@ -13,13 +13,13 @@ from model_registry import ModelWithKwargs, MultiMLP
 import torch
 import torch.distributed as dist
 from torch.distributed.pipelining import (
-    ManualPipelineStage,
     pipeline,
     PipelineStage,
     Schedule1F1B,
     ScheduleGPipe,
     ScheduleInterleaved1F1B,
     ScheduleLoopedBFS,
+    TracerPipelineStage,
 )
 from torch.distributed.pipelining.PipelineSchedule import _Action, _ComputationType
 from torch.distributed.pipelining.PipelineStage import _PipelineStageBase
@@ -81,20 +81,22 @@ class ScheduleTest(MultiProcContinousTest):
         target = torch.randn(batch_size, d_hid, device=self.device)
         loss_fn = torch.nn.MSELoss(reduction="sum")
 
-        # Create a pipeline
         chunks = 4
+        x_mb = x.chunk(chunks)[0]
+
+        # Create a pipeline
         split_spec = mod.split_spec if hasattr(mod, "split_spec") else None
         pipe = pipeline(
             mod,
-            chunks,
-            example_args=(x,),
+            mb_args=(x_mb,),
             split_spec=split_spec,
         )
 
-        stage = PipelineStage(
+        stage = TracerPipelineStage(
             pipe,
             self.rank,
-            device=self.device,
+            self.device,
+            chunks,  # to be cleaned
         )
 
         # Attach to a schedule
@@ -123,17 +125,20 @@ class ScheduleTest(MultiProcContinousTest):
         loss_fn = torch.nn.MSELoss(reduction="sum")
 
         chunks = 4
+        x_mb = x.chunk(chunks)[0]
+        y_mb = y.chunk(chunks)[0]
+
         pipe = pipeline(
             mod,
-            chunks,
-            example_args=(x,),
-            example_kwargs={"y": y},
+            mb_args=(x_mb,),
+            mb_kwargs={"y": y_mb},
         )
 
-        stage = PipelineStage(
+        stage = TracerPipelineStage(
             pipe,
             self.rank,
-            device=self.device,
+            self.device,
+            chunks,  # to be cleaned
         )
 
         # Attach to a schedule
@@ -184,18 +189,19 @@ class ScheduleTest(MultiProcContinousTest):
 
         # Create a pipeline
         chunks = 4
+        x_mb = x.chunk(chunks)[0]
         split_spec = mod.split_spec if hasattr(mod, "split_spec") else None
         pipe = pipeline(
             mod,
-            chunks,
-            example_args=(x,),
+            mb_args=(x_mb,),
             split_spec=split_spec,
         )
 
-        stage = PipelineStage(
+        stage = TracerPipelineStage(
             pipe,
             self.rank,
-            device=self.device,
+            self.device,
+            chunks,  # to be cleaned
         )
 
         # Attach to a schedule
@@ -263,7 +269,7 @@ class ScheduleTest(MultiProcContinousTest):
         stage_module = full_mod.get_submodule(submod_name)
         chunks = 4
         # Create a pipeline stage to wrap that submodule
-        stage = ManualPipelineStage(
+        stage = PipelineStage(
             stage_module,
             self.rank,
             self.world_size,
@@ -347,7 +353,7 @@ class ScheduleTest(MultiProcContinousTest):
         chunks = 8
         input_args = x.chunk(chunks)[0]
         stages = [
-            ManualPipelineStage(
+            PipelineStage(
                 stage_module,
                 stage_idx,
                 n_stages,
