@@ -1820,6 +1820,9 @@ def joint_fwd_bwd(fn: Callable[..., Any], args: Sequence[Any]) -> torch.fx.Graph
         )(*args)
     assert gm
 
+    from .fx_passes.post_grad import remove_noop_ops
+    remove_noop_ops(gm.graph)
+
     from .fx_passes.joint_graph import pointless_view
 
     matcher_pass = PatternMatcherPass()
