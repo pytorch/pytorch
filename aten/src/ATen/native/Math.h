@@ -508,7 +508,7 @@ static inline C10_HOST_DEVICE scalar_t calc_polygamma(scalar_t x, int n) {
 
 /* References
  * [igam1] "The Digital Library of Mathematical Functions", dlmf.nist.gov
- * [igam2] Maddock et. al., "Incomplete Gamma Functions",
+ * [igam2] Maddock et al., "Incomplete Gamma Functions",
  *     https://www.boost.org/doc/libs/1_61_0/libs/math/doc/html/math_toolkit/sf_gamma/igamma.html
  */
 
