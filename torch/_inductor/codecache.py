@@ -565,9 +565,13 @@ def get_code_hash(roots):
         module = spec.origin
         assert module is not None
         with open(module, "rb") as f:
-            contents[module] = f.read()
-
-    return hashlib.sha256(pickle.dumps(contents)).digest()
+            contents[spec.name] = f.read()
+    hasher = hashlib.sha256()
+    # Iterate over dict in sorted order since iter_modules may not be deterministic
+    for name, value in sorted(contents.items()):
+        hasher.update(name.encode("utf-8"))
+        hasher.update(value)
+    return hasher.digest()
 
 
 @functools.lru_cache(None)
