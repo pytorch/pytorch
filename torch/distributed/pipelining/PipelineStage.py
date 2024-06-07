@@ -2,7 +2,7 @@
 import logging
 import operator
 from abc import ABC, abstractmethod
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, Iterable, List, Optional, Tuple, Union
 
 import torch
 import torch.distributed as dist
@@ -21,7 +21,7 @@ from ._utils import flatten_args, modify_graph_op_device, validate_tensors_metad
 
 __all__ = [
     "PipelineStage",
-    "ManualPipelineStage",
+    "TracerPipelineStage",
 ]
 
 logger = logging.getLogger(__name__)
@@ -80,7 +80,7 @@ def _make_tensor_from_meta(
 class _PipelineStageBase(ABC):
     """
     Base class for pipeline stages.
-    Implements common methods used by both the `PipelineStage` used by the tracing frontend and `ManualPipelineStage`.
+    Implements common methods used by both the `TracerPipelineStage` used by the tracing frontend and `PipelineStage`.
     """
 
     def __init__(
@@ -154,6 +154,10 @@ class _PipelineStageBase(ABC):
         # Backward infra will created lazily
         self.grad_recv_info: Dict = {}
         self.grad_send_info: Optional[List] = None
+
+        # Number of backward chunks seen. This is used to determine when to do
+        # grad reduction in DDP or FSDP.
+        self._seen_bwd_chunks = 0
 
     @property
     def has_backward(self) -> bool:
@@ -374,6 +378,8 @@ class _PipelineStageBase(ABC):
         self.fwd_cache.clear()
         # Caching chunk outputs for final output merge or reduction
         self.output_chunks.clear()
+        # Reset bwd chunk counter
+        self._seen_bwd_chunks = 0
 
         # Clear grad of input buffers in between schedule steps. This is because
         # `torch.autograd.backward()` will accumulate gradients into leaf
@@ -426,17 +432,6 @@ class _PipelineStageBase(ABC):
         grads = self._map_tensor_from_recv_info(recv_infos)
         return grads
 
-    def _configure_data_parallel_mode(self, last_backward: bool):
-        """
-        Whether using PP with FSDP or DDP, there are some runtime differences between the last backward step and the
-        other steps.  Namely, we need to accumulate gradients on previous steps and reduce them on the last step, but
-        there are additional state-variables and performance considerations depending on the data parallelism used.
-        This helper should adapt any pipeline parallel schedule to work with common/supported data parallel libraries.
-        """
-        if isinstance(self.submod, FSDPModule):
-            self.submod.set_is_last_backward(last_backward)
-            self.submod.set_requires_gradient_sync(last_backward)
-
     def forward_maybe_with_nosync(self, *args, **kwargs):
         # If submod is wrapped with DDP, we use the `no_sync` context manager to
         # avoid gradient all-reduce per microbatch
@@ -447,9 +442,18 @@ class _PipelineStageBase(ABC):
             out_val = self.submod(*args, **kwargs)
         return out_val
 
-    def backward_maybe_with_nosync(self, bwd_kwargs: Dict, bwd_chunk_id: int):
+    def backward_maybe_with_nosync(self, bwd_kwargs: Dict):
+        """
+        Whether using PP with FSDP or DDP, there are some runtime differences between the last backward step and the
+        other steps.  Namely, we need to accumulate gradients on previous steps and reduce them on the last step, but
+        there are additional state-variables and performance considerations depending on the data parallelism used.
+        This helper should adapt any pipeline parallel schedule to work with common/supported data parallel libraries.
+        """
+        last_backward = self._seen_bwd_chunks == self.chunks - 1
+
+        # If submod is wrapped by DDP
         if isinstance(self.submod, DistributedDataParallel):
-            if bwd_chunk_id == self.chunks - 1:
+            if last_backward:
                 # Last chunk, prepare for gradient reduction
                 # HACK: reaching into DDP implementation details here. Is there a better way?
                 self.submod.reducer.prepare_for_backward(  # type: ignore[union-attr, operator]
@@ -463,10 +467,16 @@ class _PipelineStageBase(ABC):
             else:
                 with self.submod.no_sync():  # type: ignore[operator]
                     grads_input = stage_backward(**bwd_kwargs)
+        # If submod is a FSDP module
+        elif isinstance(self.submod, FSDPModule):
+            self.submod.set_is_last_backward(last_backward)
+            self.submod.set_requires_gradient_sync(last_backward)
+            grads_input = stage_backward(**bwd_kwargs)
         else:
-            # Non-DDP submodule, regular backward
+            # Non-DP submodule, regular backward
             grads_input = stage_backward(**bwd_kwargs)
 
+        self._seen_bwd_chunks += 1
         return grads_input
 
     def forward_one_chunk(
@@ -568,7 +578,7 @@ class _PipelineStageBase(ABC):
                 "input_values": input_values,
             }
 
-        self.grads_input = self.backward_maybe_with_nosync(bwd_kwargs, bwd_chunk_id)
+        self.grads_input = self.backward_maybe_with_nosync(bwd_kwargs)
         logger.debug(f"{self.log_prefix} Backwarded chunk {bwd_chunk_id}")  # noqa: G004
 
     def _validate_fwd_input(self, args, kwargs):
@@ -885,7 +895,8 @@ class _PipelineStage(_PipelineStageBase):
         return grad_recv_info_tuple
 
 
-class PipelineStage(_PipelineStage):
+# TODO: Update this to be returned by helper method under Pipe (kwen)
+class TracerPipelineStage(_PipelineStage):
     def __init__(
         self,
         pipe: Pipe,
@@ -913,7 +924,7 @@ PLACEHOLDER_VAL = -1
 
 
 def _create_empty_tensors(
-    tensor: Union[torch.Tensor, List[torch.Tensor]], device: torch.device
+    tensor: Union[torch.Tensor, Iterable[torch.Tensor]], device: torch.device
 ) -> List[torch.Tensor]:
     """
     Creates a list of empty tensors with the same properties (like shape and dtype) as the input tensor(s),
@@ -1063,7 +1074,7 @@ def _get_stage_shapes(
     return stage_id_to_shapes
 
 
-class ManualPipelineStage(_PipelineStageBase):
+class PipelineStage(_PipelineStageBase):
     """
     A class representing a pipeline stage in a pipeline parallelism setup.
     This class is created manually by providing a example input (and optionally output)
@@ -1077,8 +1088,8 @@ class ManualPipelineStage(_PipelineStageBase):
         num_stages (int): The total number of stages.
         device (torch.device): The device where this stage is located.
         num_microbatches (int): The number of microbatches to use.
-        input_args (Union[torch.Tensor, List[torch.tensor]], optional): The input arguments for the submodule.
-        output_args (Union[torch.Tensor, List[torch.tensor]], optional): The output arguments for the submodule.
+        input_args (Union[torch.Tensor, Tuple[torch.tensor]], optional): The input arguments for the submodule.
+        output_args (Union[torch.Tensor, Tuple[torch.tensor]], optional): The output arguments for the submodule.
         group (dist.ProcessGroup, optional): The process group for distributed training. If None, default group.
     """
 
@@ -1089,8 +1100,8 @@ class ManualPipelineStage(_PipelineStageBase):
         num_stages: int,
         device: torch.device,
         num_microbatches: int,
-        input_args: Union[torch.Tensor, List[torch.Tensor]],
-        output_args: Optional[Union[torch.Tensor, List[torch.Tensor]]] = None,
+        input_args: Union[torch.Tensor, Tuple[torch.Tensor, ...]],
+        output_args: Optional[Union[torch.Tensor, Tuple[torch.Tensor, ...]]] = None,
         group: Optional[dist.ProcessGroup] = None,
     ):
         super().__init__(
@@ -1098,7 +1109,6 @@ class ManualPipelineStage(_PipelineStageBase):
         )
         self.submod.to(self.device)
         # When we materialize the model partition on cuda, we call reset_parameters() if it is available
-        # logger.info(f"input args {input_args=}")
         self.inputs: List[torch.Tensor] = []
         self.outputs: List[torch.Tensor] = []
 
@@ -1213,7 +1223,7 @@ class ManualPipelineStage(_PipelineStageBase):
         return True
 
 
-def _validate_stage_shapes(pipeline_stages: List[ManualPipelineStage]):
+def _validate_stage_shapes(pipeline_stages: List[PipelineStage]):
     """
     Check that the buffer shapes match between stages was expected by performing an all_gather between
     all stages.

@@ -9,10 +9,10 @@ from model_registry import ExampleCode, ModelWithKwargs, MultiMLP
 import torch
 import torch.distributed as dist
 from torch.distributed.pipelining import (
-    ManualPipelineStage,
     pipeline,
     PipelineStage,
     ScheduleGPipe,
+    TracerPipelineStage,
 )
 from torch.distributed.pipelining._utils import PipeliningShapeError
 from torch.testing._internal.common_cuda import TEST_MULTIGPU
@@ -91,7 +91,7 @@ class StageTest(MultiProcContinousTest):
             split_spec=split_spec,
         )
 
-        stage = PipelineStage(
+        stage = TracerPipelineStage(
             pipe,
             self.rank,
             self.device,
@@ -160,7 +160,7 @@ class StageTest(MultiProcContinousTest):
             mb_kwargs={"y": y_mb},
         )
 
-        stage = PipelineStage(
+        stage = TracerPipelineStage(
             pipe,
             self.rank,
             self.device,
@@ -215,7 +215,7 @@ class StageTest(MultiProcContinousTest):
 
         x = torch.randn(batch_size, d_hid, device=self.device)
 
-        stage = ManualPipelineStage(
+        stage = PipelineStage(
             stage_mod,
             self.rank,
             self.world_size,

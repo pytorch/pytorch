@@ -13,13 +13,13 @@ from model_registry import ModelWithKwargs, MultiMLP
 import torch
 import torch.distributed as dist
 from torch.distributed.pipelining import (
-    ManualPipelineStage,
     pipeline,
     PipelineStage,
     Schedule1F1B,
     ScheduleGPipe,
     ScheduleInterleaved1F1B,
     ScheduleLoopedBFS,
+    TracerPipelineStage,
 )
 from torch.distributed.pipelining.PipelineSchedule import _Action, _ComputationType
 from torch.distributed.pipelining.PipelineStage import _PipelineStageBase
@@ -92,7 +92,7 @@ class ScheduleTest(MultiProcContinousTest):
             split_spec=split_spec,
         )
 
-        stage = PipelineStage(
+        stage = TracerPipelineStage(
             pipe,
             self.rank,
             self.device,
@@ -134,7 +134,7 @@ class ScheduleTest(MultiProcContinousTest):
             mb_kwargs={"y": y_mb},
         )
 
-        stage = PipelineStage(
+        stage = TracerPipelineStage(
             pipe,
             self.rank,
             self.device,
@@ -197,7 +197,7 @@ class ScheduleTest(MultiProcContinousTest):
             split_spec=split_spec,
         )
 
-        stage = PipelineStage(
+        stage = TracerPipelineStage(
             pipe,
             self.rank,
             self.device,
@@ -269,7 +269,7 @@ class ScheduleTest(MultiProcContinousTest):
         stage_module = full_mod.get_submodule(submod_name)
         chunks = 4
         # Create a pipeline stage to wrap that submodule
-        stage = ManualPipelineStage(
+        stage = PipelineStage(
             stage_module,
             self.rank,
             self.world_size,
@@ -353,7 +353,7 @@ class ScheduleTest(MultiProcContinousTest):
         chunks = 8
         input_args = x.chunk(chunks)[0]
         stages = [
-            ManualPipelineStage(
+            PipelineStage(
                 stage_module,
                 stage_idx,
                 n_stages,

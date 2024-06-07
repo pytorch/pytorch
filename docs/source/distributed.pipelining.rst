@@ -180,8 +180,7 @@ You can also create a distributed stage runtime on a device using ``Pipe``:
 .. code-block:: python
 
   from torch.distributed.pipelining import PipelineStage
-
-  stage = PipelineStage(pipe, stage_idx, device)
+  stage = TracerPipelineStage(pipe, stage_idx, device)
 
 .. note::
   The ``pipeline`` frontend uses a tracer (``torch.export``) to capture your
@@ -299,12 +298,6 @@ You can implement your own pipeline schedule by extending one of the following t
 For example, ``ScheduleGPipe`` and ``Schedule1F1B`` are subclasses of ``PipelineScheduleSingle``.
 Whereas, ``ScheduleInterleaved1F1B`` and ``ScheduleLoopedBFS`` are subclasses of ``PipelineScheduleMulti``.
 
-.. currentmodule:: torch.distributed.pipelining.PipelineSchedule
-
-.. autoclass:: PipelineScheduleSingle
-
-.. autoclass:: PipelineScheduleMulti
-
 
 API Reference
 *************
@@ -348,7 +341,7 @@ Pipeline Stages
 
 .. autoclass:: PipelineStage
 
-.. autoclass:: ManualPipelineStage
+.. autoclass:: TracerPipelineStage
 
 Pipeline Schedules
 ==================
@@ -364,3 +357,9 @@ Pipeline Schedules
 .. autoclass:: ScheduleInterleaved1F1B
 
 .. autoclass:: ScheduleLoopedBFS
+
+.. autoclass:: PipelineScheduleSingle
+  :members:
+
+.. autoclass:: PipelineScheduleMulti
+  :members:

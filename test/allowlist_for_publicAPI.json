@@ -211,30 +211,6 @@
   "torch.distributed.optim.utils": [
     "Type"
   ],
-  "torch.distributed.pipeline.sync.pipe": [
-    "Pipeline"
-  ],
-  "torch.distributed.pipeline.sync.skip.layout": [
-    "SkipLayout",
-    "inspect_skip_layout"
-  ],
-  "torch.distributed.pipeline.sync.skip.portal": [
-    "Context",
-    "Portal",
-    "PortalBlue",
-    "PortalCopy",
-    "PortalOrange"
-  ],
-  "torch.distributed.pipeline.sync.skip.skippable": [
-    "Skippable"
-  ],
-  "torch.distributed.pipeline.sync.skip.tracker": [
-    "SkipTracker",
-    "SkipTrackerThroughPotals",
-    "ThreadLocal",
-    "current_skip_tracker",
-    "use_skip_tracker"
-  ],
   "torch.distributed.remote_device": [
     "Optional",
     "Union"
@@ -1694,10 +1670,6 @@
   "torch.distributed.launch": [
     "get_args_parser",
     "run"
-  ],
-  "torch.distributed.pipeline.sync": [
-    "NoChunk",
-    "WithDevice"
   ],
   "torch.distributed.rpc.rref_proxy": [
     "Future",
