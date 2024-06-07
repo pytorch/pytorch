@@ -38,7 +38,7 @@ try:
     import numpy
 
     HAS_NUMPY = True
-except ImportError:
+except ModuleNotFoundError:
     HAS_NUMPY = False
 
 

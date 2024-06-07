@@ -15,7 +15,7 @@ try:
     import numpy as np
 
     HAS_NUMPY = True
-except ImportError:
+except ModuleNotFoundError:
     HAS_NUMPY = False
     np = None  # type: ignore[assignment]
 
