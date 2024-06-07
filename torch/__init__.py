@@ -128,7 +128,7 @@ assert __all__ == sorted(__all__)
 # Load the extension module
 ################################################################################
 
-if platform.system() == 'Windows':
+if sys.platform == 'win32':
 
     def _load_dll_libraries():
         import sysconfig
