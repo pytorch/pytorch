@@ -532,7 +532,7 @@ class MetaTensorDesc:
             # fields (feel free to add other special cases as appropriate)
             if k in ["data", "autograd_meta_from"]:
                 return None  # never repr these
-            if k in set(self._UNSERIALIZABLE):
+            if k in set(MetaTensorDesc._UNSERIALIZABLE):
                 return repr(v)
             if isinstance(v, (torch.device, torch.dtype, torch.layout)):
                 return repr(v)

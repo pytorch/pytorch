@@ -3051,7 +3051,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         with self.assertRaisesRegex(AssertionError, "torch.Size"):
             opt_f(args)
         self.assertEqual(
-            torch._dynamo.utils.counters["unimplemented"][
+            torch._dynamo.utils.counters["graph_break"][
                 "assert with non-string message"
             ],
             1,

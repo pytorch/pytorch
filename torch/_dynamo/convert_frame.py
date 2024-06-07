@@ -876,6 +876,7 @@ def _compile(
                 dynamo_time_before_restart = time.time() - start_time
 
             metrics = CompilationMetrics(
+                str(compile_id),
                 frame_key,
                 code.co_name,
                 code.co_filename,

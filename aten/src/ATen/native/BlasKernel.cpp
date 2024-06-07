@@ -105,6 +105,11 @@ void fp16_gemv_trans(
     const float beta,
     float16_t* y,
     const int incy);
+
+float fp16_dot_with_fp32_arith(
+    const float16_t* vec1,
+    const float16_t* vec2,
+    int64_t len);
 #endif
 
 template <typename scalar_t>

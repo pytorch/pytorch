@@ -981,6 +981,7 @@ def trace(
             "`optimize` is deprecated and has no effect. "
             "Use `with torch.jit.optimized_execution()` instead",
             FutureWarning,
+            stacklevel=2,
         )
 
     from torch._utils_internal import (
@@ -1190,6 +1191,7 @@ def trace_module(
             "`optimize` is deprecated and has no effect. "
             "Use `with torch.jit.optimized_execution()` instead",
             FutureWarning,
+            stacklevel=2,
         )
 
     var_lookup_fn = _create_interpreter_name_lookup_fn(0)

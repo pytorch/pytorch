@@ -11,6 +11,7 @@
 #include <ATen/mps/MPSProfiler.h>
 #include <ATen/native/mps/OperationUtils.h>
 #include <fmt/format.h>
+#include <iostream>
 
 // #define _CAPTURE_KERNEL 1
 
@@ -146,6 +147,66 @@ INSTANTIATE_INT4MM(bfloat, 128);
 INSTANTIATE_INT4MM(bfloat, 256);
 #endif
 
+template <typename T, unsigned blockSize=8>
+kernel void
+int8pack_mm(constant T *A [[buffer(0)]], constant char *B [[buffer(1)]],
+            constant T *scales [[buffer(2)]],
+            device T *outputData [[buffer(3)]],
+            constant int3 &sizes [[buffer(4)]],
+            uint2 group_index [[threadgroup_position_in_grid]],
+            uint2 threadgroup_index [[thread_position_in_threadgroup]]) {
+  using vecT = typename Vec4Type<T>::type;
+  const uint lda = sizes.y;
+  const uint ldc = sizes.z;
+  int out_idx = (group_index.x * blockSize + threadgroup_index.x) * 4;
+  int n = out_idx % sizes.z;
+  int m = out_idx / sizes.z;
+  // Offset pointers
+  A += m * lda;
+  B += n * lda;
+  outputData += m *ldc;
+
+  float4 rc = 0;
+  for (unsigned k = threadgroup_index.y * 4; k < sizes.y; k += 4 * blockSize) {
+    threadgroup_barrier(mem_flags::mem_none);
+    auto a_val = float4(*reinterpret_cast<constant vecT *>(A  + k));
+    float4x4 b_val;
+    for (int i = 0; i < 4; ++i) {
+      b_val[i] = float4(*reinterpret_cast<constant char4 *>(B + i * lda + k));
+    }
+    rc += transpose(b_val) * a_val;
+  }
+
+  // Accumulate results acorss SIMD group? (8 threads using vec4)
+  threadgroup float4 tgp_memory[blockSize][blockSize];
+  tgp_memory[threadgroup_index.x][threadgroup_index.y] = rc;
+  threadgroup_barrier(mem_flags::mem_threadgroup);
+  if (threadgroup_index.y == 0) {
+    for (int i = 1; i < blockSize; i++) {
+      rc += tgp_memory[threadgroup_index.x][i];
+    }
+    *reinterpret_cast<device vecT *>(outputData + n) =
+        vecT(rc * float4(*reinterpret_cast<constant vecT *>(scales + n)));
+  }
+}
+
+#define INSTANTIATE_INT8MM(DTYPE)                                              \
+  template [[host_name("int8pack_mm_" #DTYPE)]] kernel void                    \
+  int8pack_mm<DTYPE>(                                                          \
+      constant DTYPE * A [[buffer(0)]], constant char *B [[buffer(1)]],        \
+      constant DTYPE *scales [[buffer(2)]],                                    \
+      device DTYPE *outputData [[buffer(3)]],                                  \
+      constant int3 &sizes [[buffer(4)]],                                      \
+      uint2 group_index [[threadgroup_position_in_grid]],                      \
+      uint2 threadgroup_index [[thread_position_in_threadgroup]]);
+
+INSTANTIATE_INT8MM(half);
+INSTANTIATE_INT8MM(float);
+#if __METAL_VERSION__ >= 310
+INSTANTIATE_INT8MM(bfloat);
+#endif
+
+// ------------------------------ For M >= 4 ------------------------------------
 template <typename T> struct BlockType {};
 
 template <> struct BlockType<float> {
@@ -193,7 +254,7 @@ kernel void kernel_mul_mm(
     constant T                 * scalesAndZeros [[buffer(2)]],
     device T                   * outputData     [[buffer(3)]],  // 2 x 1024
     constant uint3             & sizes          [[buffer(4)]],
-    threadgroup uchar          * shared_memory  [[threadgroup(0)]], // threadgroup buffer at index 0
+    threadgroup char           * shared_memory  [[threadgroup(0)]], // threadgroup buffer at index 0
     uint3                        tgpig          [[threadgroup_position_in_grid]], // 3d coordinates
     uint                         tiitg          [[thread_index_in_threadgroup]], // 128 per threadgroup
     uint                         sgitg          [[simdgroup_index_in_threadgroup]]) {
@@ -203,7 +264,7 @@ kernel void kernel_mul_mm(
     // sizes: x = M, y = K, z = N
     // pytorch: M x K @ N x K -> M x N
     // ggml: K x N @ K x M -> N x M
-    uint32_t ne00 = sizes.y; // K
+    short ne00 = sizes.y; // K
     uint32_t nb00 = sizeof(W);
     uint32_t nb01 = nb00 * ne00;
     uint32_t ne10 = sizes.y; // K
@@ -215,8 +276,8 @@ kernel void kernel_mul_mm(
     constant char * src1 = (constant char *)A;
 
     // 8192 for sa, 4096 for sb
-    threadgroup float * sa = (threadgroup float *)(shared_memory);
-    threadgroup T     * sb = (threadgroup T     *)(shared_memory + 8192);
+    threadgroup bfloat * sa = (threadgroup bfloat *)(shared_memory);
+    threadgroup T      * sb = (threadgroup T      *)(shared_memory + 8192);
 
     const uint r0 = tgpig.y;
     const uint r1 = tgpig.x;
@@ -229,10 +290,10 @@ kernel void kernel_mul_mm(
     short thread_row = ((short)tiitg/THREAD_PER_ROW) < n_rows ? ((short)tiitg/THREAD_PER_ROW) : n_rows - 1;
     short thread_col = ((short)tiitg/THREAD_PER_COL) < n_cols ? ((short)tiitg/THREAD_PER_COL) : n_cols - 1;
 
-    simdgroup_float8x8 ma[4]; // dequantized weight
+    simdgroup_bfloat8x8 ma[4]; // dequantized weight
     Tsimd8x8 mb[2]; // input
     simdgroup_float8x8 c_res[8]; // outer product result
-    for (int i = 0; i < 8; i++){
+    for (short i = 0; i < 8; i++){
         c_res[i] = make_filled_simdgroup_matrix<float, 8>(0.f);
     }
 
@@ -243,28 +304,28 @@ kernel void kernel_mul_mm(
         + nb11 * (r1 * BLOCK_SIZE_N + thread_col)
         + nb10 * (BLOCK_SIZE_K / THREAD_PER_COL * (tiitg % THREAD_PER_COL)));
 
-    for (uint32_t loop_k = 0; loop_k < ne00; loop_k += BLOCK_SIZE_K) {
+    for (short loop_k = 0; loop_k < ne00; loop_k += BLOCK_SIZE_K) {
         // load data and store to threadgroup memory
         threadgroup_barrier(mem_flags::mem_threadgroup);
 
         #pragma unroll(16)
-        for (int i = 0; i < 16; i++) {
-            float weight = *(x + i);
+        for (short i = 0; i < 16; i++) {
+            bfloat weight = *(x + i);
             // for example, tiitg 32, i 12 -> 0 + 1 = 1, it needs to work on sg mat grid row 1
-            int sg_mat_grid_row_index = (tiitg % THREAD_PER_ROW) * THREAD_PER_ROW + i / 8;
+            short sg_mat_grid_row_index = (tiitg % THREAD_PER_ROW) * THREAD_PER_ROW + i / 8;
             // same example, sg mat grid col index: 32 / 2 / 8 = 2, so currently need to work with sg mat at (1, 2)
-            int sg_mat_grid_col_index = tiitg / THREAD_PER_ROW / 8;
+            short sg_mat_grid_col_index = tiitg / THREAD_PER_ROW / 8;
             // now inside sg mat, which index to write to? starting point is SG_MAT_SIZE * sg_mat_offset
-            int row_offset = i & 7;
-            int col_offset = (tiitg / THREAD_PER_ROW) % 8;
+            short row_offset = i & 7;
+            short col_offset = (tiitg / THREAD_PER_ROW) % 8;
             // now calculates the overall offset for sa
-            int sa_offset = (sg_mat_grid_row_index * 8 + sg_mat_grid_col_index) * 64 + (row_offset * 8 + col_offset);
+            short sa_offset = (sg_mat_grid_row_index * 8 + sg_mat_grid_col_index) * 64 + (row_offset * 8 + col_offset);
             *(sa + sa_offset) = weight;
         }
         // read 8 values for input matrix
 
         #pragma unroll(8)
-        for (int i = 0; i < 8; i++) {
+        for (short i = 0; i < 8; i++) {
             *((threadgroup T *)(sb + (tiitg % THREAD_PER_COL) * 8 * 32 + 8 * (tiitg / THREAD_PER_COL)) + i) = *(y + i);
         }
 
@@ -274,18 +335,18 @@ kernel void kernel_mul_mm(
         threadgroup_barrier(mem_flags::mem_threadgroup);
 
         // load matrices from threadgroup memory and conduct outer products
-        threadgroup float * lsma = (sa + THREAD_MAT_M * SG_MAT_SIZE * (sgitg % 2));
-        threadgroup T     * lsmb = (sb + THREAD_MAT_N * SG_MAT_SIZE * (sgitg / 2));
+        threadgroup bfloat * lsma = (sa + THREAD_MAT_M * SG_MAT_SIZE * (sgitg % 2));
+        threadgroup T      * lsmb = (sb + THREAD_MAT_N * SG_MAT_SIZE * (sgitg / 2));
 
         #pragma unroll(4)
-        for (int ik = 0; ik < BLOCK_SIZE_K / 8; ik++) {
+        for (short ik = 0; ik < BLOCK_SIZE_K / 8; ik++) {
             #pragma unroll(4)
-            for (int i = 0; i < 4; i++) {
+            for (short i = 0; i < 4; i++) {
                 simdgroup_load(ma[i],lsma + SG_MAT_SIZE * i);
             }
             simdgroup_barrier(mem_flags::mem_none);
             #pragma unroll(2)
-            for (int i = 0; i < 2; i++) {
+            for (short i = 0; i < 2; i++) {
                 simdgroup_load(mb[i],lsmb + SG_MAT_SIZE * i);
             }
 
@@ -293,7 +354,7 @@ kernel void kernel_mul_mm(
             lsmb += BLOCK_SIZE_N / SG_MAT_ROW * SG_MAT_SIZE;
 
             #pragma unroll(8)
-            for (int i = 0; i < 8; i++){
+            for (short i = 0; i < 8; i++){
                 simdgroup_multiply_accumulate(c_res[i], mb[i/4], ma[i%4], c_res[i]);
             }
         }
@@ -340,12 +401,9 @@ kernel void kernel_mul_mm(
         threadgroup_barrier(mem_flags::mem_threadgroup);
         simdgroup_float8x8 simd_scale;
         simdgroup_load(simd_scale, temp_scale, BLOCK_SIZE_M);
-        simdgroup_float8x8 simd_zero = make_filled_simdgroup_matrix<float, 8>(0.f);
-        simdgroup_multiply_accumulate(c_res[i], c_res[i], simd_scale, simd_zero);
+        simdgroup_multiply(c_res[i], c_res[i], simd_scale);
         simdgroup_store(c_res[i], temp_str + 8 * (i%4) + 8 * BLOCK_SIZE_M * (i/4), BLOCK_SIZE_M);
     }
-
-    threadgroup_barrier(mem_flags::mem_threadgroup);
 
     device T * C = outputData + (BLOCK_SIZE_M * r0) + (BLOCK_SIZE_N * r1) * ne0;
     if (sgitg == 0) {
@@ -360,14 +418,14 @@ kernel void kernel_mul_mm(
 
 #define INSTANTIATE_MM(DTYPE, WDTYPE, DEQUANT_FUNC)                      \
 template                                                                 \
-[[host_name("int8pack_mm_" #DTYPE)]]                                     \
+[[host_name("large_m_int8pack_mm_" #DTYPE)]]                                     \
 kernel void kernel_mul_mm<DTYPE, WDTYPE, DEQUANT_FUNC>(                  \
     constant DTYPE             * A              [[buffer(0)]],           \
     constant char              * B              [[buffer(1)]],           \
     constant DTYPE             * scalesAndZeros [[buffer(2)]],           \
     device   DTYPE             * outputData     [[buffer(3)]],           \
     constant uint3             & sizes          [[buffer(4)]],           \
-    threadgroup uchar          * shared_memory  [[threadgroup(0)]],      \
+    threadgroup char           * shared_memory  [[threadgroup(0)]],      \
     uint3                        tgpig          [[threadgroup_position_in_grid]], \
     uint                         tiitg          [[thread_index_in_threadgroup]],  \
     uint                         sgitg          [[simdgroup_index_in_threadgroup]])
@@ -378,6 +436,125 @@ INSTANTIATE_MM(half, char, get_scale_zero_q8);
 #if __METAL_VERSION__ >= 310
 INSTANTIATE_MM(bfloat, char, get_scale_zero_q8);
 #endif
+
+// ---------------------------------------mv---------------------------------------
+
+// putting them in the kernel causes a significant performance penalty, could use function constant to optimize?
+#define NB_Q8_0 8
+#define N_DST 4        // each SIMD group works on 4 rows
+#define N_SIMDGROUP 2  // number of SIMD groups in a thread group
+#define N_SIMDWIDTH 32 // assuming SIMD group size is 32
+#define QK8_0 32       // 32 weights in each packed weight in ggml block_q8_0 type.
+
+template<typename T>
+kernel void kernel_mul_mv(
+    constant T                 * A              [[buffer(0)]],
+    constant char              * B              [[buffer(1)]],
+    constant T                 * scalesAndZeros [[buffer(2)]],
+    device T                   * outputData     [[buffer(3)]],
+    constant uint3             & sizes          [[buffer(4)]],
+    uint3                        tgpig          [[threadgroup_position_in_grid]],
+    uint                         tiisg          [[thread_index_in_simdgroup]],
+    uint                         sgitg          [[simdgroup_index_in_threadgroup]]) {
+
+    using T4 = typename BlockType<T>::type4;
+
+    const int nr  = N_DST;
+    const int nsg = N_SIMDGROUP;
+    const int nw  = N_SIMDWIDTH;
+
+    // sizes: x = M, y = K, z = N, given mv, x = M = 1
+    // pytorch: M x K @ N x K -> M x N
+    // ggml: K x N @ K x M -> N x M
+    short ne00 = sizes.y; // K
+    short ne01 = sizes.z; // N
+    uint32_t ne10 = sizes.y; // K
+    uint32_t ne0 = sizes.z; // N
+    constant char * src0 = (constant char *)B;
+    constant T    * src1 = (constant T    *)A;
+
+    const int nb = ne00/QK8_0;
+    const int r0 = tgpig.x;
+    const int r1 = tgpig.y;
+    /*
+     * Each SIMD group in a threadgroup handles N_DST = nr = 4 rows.
+     *      - r0 is the x index of the threadgroup. r0 * nsg -> the overall offset of SIMD groups, for this threadgroup.
+     *      - r0 * nsg + sgitg -> the overall index of SIMD group, in all SIMD groups.
+     *      - (r0 * nsg + sgitg) * nr -> the starting index of the row that this SIMD group needs to handle.
+     */
+    const int first_row = (r0 * nsg + sgitg) * nr;
+
+    const uint offset0 = first_row * ne00;
+
+    // x: weight, y: input
+    constant char * x = (constant char *) src0 + offset0;
+    constant T    * y = (constant T    *) src1 + r1*ne10;
+
+    float yl[NB_Q8_0];
+    float sumf[nr]={0.f};
+    T4 scales[2]; // NB_Q8_0 = 8 = 2x4
+    scales[sgitg%2] = *(constant T4 *)(scalesAndZeros + first_row);
+
+    // Group threads in SIMD group into 8x4 block, each thread handles 8 input values.
+    const int ix = tiisg/4;
+    const int il = tiisg%4;
+
+    // QK8_0 = 32 means we have 32 weights in 1 block_q8_0.
+    // Find the starting point of input that this thread need to work on, load yb into yl.
+    constant T * yb = y + ix * QK8_0 + NB_Q8_0*il;
+
+    // each thread in a SIMD group deals with NB_Q8_0 quants at a time
+    for (int ib = ix; ib < nb; ib += nw/4) {
+        // Load data
+        for (int i = 0; i < NB_Q8_0; ++i) {
+            yl[i] = yb[i];
+        }
+
+        // Locate where x should be.
+        // row offset: row * ne00
+        // col offset: ib * QK8_0 + il * NB_Q8_0
+        // x index: row * ne00 + ib * QK8_0 + il * NB_Q8_0
+        for (int row = 0; row < nr; row++) {
+            constant int8_t * qs = (constant int8_t *)(x + row * ne00 + ib * QK8_0 + il * NB_Q8_0);
+            float sumq = 0.f;
+            for (int iq = 0; iq < NB_Q8_0; ++iq) {
+                sumq += qs[iq] * yl[iq];
+            }
+            sumf[row] += sumq*scales[sgitg%2][row];
+        }
+
+        yb += NB_Q8_0 * nw;
+    }
+
+    for (int row = 0; row < nr; ++row) {
+        const float tot = simd_sum(sumf[row]);
+        if (tiisg == 0 && first_row + row < ne01) {
+            outputData[r1*ne0 + first_row + row] = (device T)tot;
+        }
+    }
+}
+
+
+#define INSTANTIATE_MV(DTYPE)                                                   \
+template                                                                        \
+[[host_name("int8pack_mv_" #DTYPE)]]                                            \
+kernel void kernel_mul_mv<DTYPE>(                                               \
+    constant DTYPE             * A              [[buffer(0)]],                  \
+    constant char              * B              [[buffer(1)]],                  \
+    constant DTYPE             * scalesAndZeros [[buffer(2)]],                  \
+    device   DTYPE             * outputData     [[buffer(3)]],                  \
+    constant uint3             & sizes          [[buffer(4)]],                  \
+    uint3                        tgpig          [[threadgroup_position_in_grid]],   \
+    uint                         tiisg          [[thread_index_in_simdgroup]],      \
+    uint                         sgitg          [[simdgroup_index_in_threadgroup]])
+
+
+INSTANTIATE_MV(float);
+INSTANTIATE_MV(half);
+#if __METAL_VERSION__ >= 310
+INSTANTIATE_MV(bfloat);
+#endif
+
 )METAL_QUANTIZED");
 
 Tensor _weight_int4pack_mm_mps(const Tensor& A, const Tensor& B, int64_t qGroupSize, const Tensor& qScaleAndZeros) {
@@ -469,16 +646,29 @@ Tensor _weight_int8pack_mm_mps(const Tensor& A, const Tensor& B, const Tensor& s
       }
 #endif
       id<MTLComputeCommandEncoder> computeEncoder = mpsStream->commandEncoder();
-      const std::string kernel = fmt::format("int8pack_mm_{}", scalarToMetalTypeString(A));
+      std::string kernel;
+      if (M == 1) {
+        kernel = fmt::format("int8pack_mv_{}", scalarToMetalTypeString(A));
+      } else if (M < 4){
+        kernel = fmt::format("int8pack_mm_{}", scalarToMetalTypeString(A));
+      } else {
+        kernel = fmt::format("large_m_int8pack_mm_{}", scalarToMetalTypeString(A));
+      }
       id<MTLComputePipelineState> quantizedPSO = lib.getPipelineStateForFunc(kernel);
       [computeEncoder setComputePipelineState:quantizedPSO];
       mtl_setBuffer(computeEncoder, A, 0);
       mtl_setBuffer(computeEncoder, B, 1);
       mtl_setBuffer(computeEncoder, scales, 2);
       mtl_setBuffer(computeEncoder, C, 3);
-      [computeEncoder setBytes:sizes.data() length:16 atIndex:4];
-      [computeEncoder setThreadgroupMemoryLength:12288 atIndex:0];
-      [computeEncoder dispatchThreadgroups:MTLSizeMake( (M + 31)/32, (N + 63)/64, 1) threadsPerThreadgroup:MTLSizeMake(128, 1, 1)];
+      [computeEncoder setBytes:sizes.data() length:sizeof(uint32_t) * sizes.size() atIndex:4];
+      if (M == 1) {
+        [computeEncoder dispatchThreadgroups:MTLSizeMake((N + 7)/8, 1, 1) threadsPerThreadgroup:MTLSizeMake(64, 1, 1)];
+      } else if (M < 4) {
+        [computeEncoder dispatchThreads:MTLSizeMake(M * N / 4, 8, 1) threadsPerThreadgroup:MTLSizeMake(8, 8, 1)];
+      } else {
+        [computeEncoder setThreadgroupMemoryLength:12288 atIndex:0];
+        [computeEncoder dispatchThreadgroups:MTLSizeMake( (M + 31)/32, (N + 63)/64, 1) threadsPerThreadgroup:MTLSizeMake(128, 1, 1)];
+      }
 #if _CAPTURE_KERNEL
       if (getMPSProfiler().isCapturing()) {
         getMPSProfiler().stopCapture(mpsStream);

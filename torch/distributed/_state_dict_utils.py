@@ -331,6 +331,7 @@ def _copy_state_dict(
     state_dict: Dict[str, Any],
     copy_state_dict: Dict[str, Any],
     non_blocking: bool = False,
+    type_check: bool = True,
 ) -> Dict[str, Any]:
     """
     Copies all tensors in a given state dict into a different state_dict with the
@@ -352,6 +353,9 @@ def _copy_state_dict(
             The state dict we are copying into. This state_dict must have exactly
              the same structure as the source `state_dict`.
         non_blocking: (bool): Whether copy ops should be performed asynchronously
+        type_check (bool): check if the instance data type is a supported type
+            that can be saved by DCP. The current supported data types are
+            torch.Tensor, DTensor, int, float, str, list, dict, None.
 
     Returns:
         State Dict copy
@@ -367,7 +371,7 @@ def _copy_state_dict(
         cpu_offload=False,
         ranks_only=tuple(),
         companion_obj=copy_state_dict,
-        type_check=True,
+        type_check=type_check,
         non_blocking=non_blocking,
     )
 

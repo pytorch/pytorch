@@ -712,6 +712,20 @@ class BuiltinVariable(VariableTracker):
                 tx, [v.realize() for v in args], kwargs
             )
 
+        if inspect.isclass(fn) and issubclass(fn, Exception):
+
+            def create_exception_class_object(tx, args, kwargs):
+                if fn is AssertionError and not all(
+                    isinstance(x, variables.ConstantVariable)
+                    and isinstance(x.value, str)
+                    for x in args
+                ):
+                    unimplemented("assert with non-string message")
+
+                return variables.ExceptionVariable(fn, args, **kwargs)
+
+            return create_exception_class_object
+
         if obj.can_insert_in_graph() and not (
             fn is operator.getitem
             and not issubclass(arg_types[0], variables.TensorVariable)
