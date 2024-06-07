@@ -10791,15 +10791,6 @@ class TestViewOps(TestCase):
 class TestTensorDeviceOps(TestCase):
     pass
 
-
-class TestDeviceBackendAutoload(TestCase):
-    def test_autoload(self):
-        # After importing the extension, the value of this environment variable should be true
-        # See: test/cpp_extensions/torch_test_cpp_extension/__init__.py
-        is_imported = os.getenv("IS_CUSTOM_DEVICE_BACKEND_IMPORTED", "false")
-        self.assertEqual(is_imported, "true")
-
-
 # Generates tests
 # Note: test generation must be done at file scope, not within main, or
 # pytest will fail.

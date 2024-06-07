@@ -2120,7 +2120,10 @@ def _import_device_backends():
     See this RFC: https://github.com/pytorch/pytorch/issues/122468
     """
     if sys.version_info < (3, 10):
-        from importlib_metadata import entry_points
+        try:
+            from importlib_metadata import entry_points
+        except ImportError:
+            raise ImportError("importlib_metadata is not installed. Please install it using 'pip install importlib-metadata'.")
     else:
         from importlib.metadata import entry_points
 
