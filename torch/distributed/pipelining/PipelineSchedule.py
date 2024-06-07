@@ -353,14 +353,14 @@ class ScheduleGPipe(PipelineScheduleSingle):
         # Run microbatches
         for i in range(self._n_microbatches):
             with record_function(f"Forward {i}"):
-                ops = self._stage.get_fwd_recv_ops()
+                ops = self._stage.get_fwd_recv_ops(i)
                 works = _sorted_batch_p2p(ops, desc="fwd_recv")
                 for work in works.values():
                     work.wait()
 
-                output = self._stage.forward_one_chunk(arg_mbs[i], kwarg_mbs[i])  # type: ignore[index]
+                output = self._stage.forward_one_chunk(i, arg_mbs[i], kwarg_mbs[i])  # type: ignore[index]
 
-                ops = self._stage.get_fwd_send_ops()
+                ops = self._stage.get_fwd_send_ops(i)
                 works = _sorted_batch_p2p(ops, desc="fwd_send")
                 fwd_sends_to_wait.extend(works.values())
 
@@ -388,15 +388,15 @@ class ScheduleGPipe(PipelineScheduleSingle):
             self._stage._configure_data_parallel_mode(i == self._n_microbatches - 1)
 
             with record_function(f"Backward {i}"):
-                ops = self._stage.get_bwd_recv_ops()
+                ops = self._stage.get_bwd_recv_ops(i)
                 works = _sorted_batch_p2p(ops, desc="bwd_recv")
                 for work in works.values():
                     work.wait()
 
                 loss = self._maybe_get_loss(self._stage, i)
-                self._stage.backward_one_chunk(loss=loss)
+                self._stage.backward_one_chunk(i, loss=loss)
 
-                ops = self._stage.get_bwd_send_ops()
+                ops = self._stage.get_bwd_send_ops(i)
                 works = _sorted_batch_p2p(ops, desc="bwd_send")
                 bwd_sends_to_wait.extend(works.values())
 
@@ -450,12 +450,12 @@ class Schedule1F1B(PipelineScheduleSingle):
         fwd_sends = []
         for _ in range(warmup_chunks):
             # Receive activations
-            fwd_recvs = self._stage.get_fwd_recv_ops()
+            fwd_recvs = self._stage.get_fwd_recv_ops(fwd_mb_index)
             if recv_work := _batch_p2p(fwd_recvs, desc="fwd_recv"):
                 recv_work.wait()
 
             # Compute
-            output = self._stage.forward_one_chunk(arg_mbs[fwd_mb_index], kwarg_mbs[fwd_mb_index])  # type: ignore[index]
+            output = self._stage.forward_one_chunk(fwd_mb_index, arg_mbs[fwd_mb_index], kwarg_mbs[fwd_mb_index])  # type: ignore[index]
 
             # Clear previous chunk's forward sends (hopefully they have well
             # finished, otherwise, we are heavily communication bound, in which
@@ -465,7 +465,7 @@ class Schedule1F1B(PipelineScheduleSingle):
                 send_work.wait()
 
             # Send activations
-            fwd_sends = self._stage.get_fwd_send_ops()
+            fwd_sends = self._stage.get_fwd_send_ops(fwd_mb_index)
             if fwd_mb_index != warmup_chunks - 1:
                 # Safe to fire
                 send_work = _batch_p2p(fwd_sends, desc="fwd_send")
@@ -481,7 +481,7 @@ class Schedule1F1B(PipelineScheduleSingle):
         # 1B1F phase
         while True:  # Don't worry, we have a break inside
             # We actually do 1B first as the `1B1F` name indicates, so prepare its recv ops
-            bwd_recvs = self._stage.get_bwd_recv_ops()
+            bwd_recvs = self._stage.get_bwd_recv_ops(bwd_mb_index)
 
             # Now, we need to fire the fwd_sends and bwd_recvs together
             if fuse_work := _batch_p2p(fwd_sends + bwd_recvs, desc="fwd_send_bwd_recv"):
@@ -489,10 +489,10 @@ class Schedule1F1B(PipelineScheduleSingle):
 
             # Backward one chunk
             loss = self._maybe_get_loss(self._stage, bwd_mb_index)
-            self._stage.backward_one_chunk(loss=loss)
+            self._stage.backward_one_chunk(bwd_mb_index, loss=loss)
 
             # Get the bwd send ops, but don't fire, to be fused with the 1F below
-            bwd_sends = self._stage.get_bwd_send_ops()
+            bwd_sends = self._stage.get_bwd_send_ops(bwd_mb_index)
             bwd_mb_index += 1
 
             if fwd_mb_index == self._n_microbatches:
@@ -500,20 +500,20 @@ class Schedule1F1B(PipelineScheduleSingle):
                 break
 
             # We prepare 1F of the `1B1F`
-            fwd_recvs = self._stage.get_fwd_recv_ops()
+            fwd_recvs = self._stage.get_fwd_recv_ops(fwd_mb_index)
 
             # Fuse it with bwd_sends above
             if fuse_work := _batch_p2p(bwd_sends + fwd_recvs, desc="bwd_send_fwd_recv"):
                 fuse_work.wait()
 
             # Now do the fwd
-            output = self._stage.forward_one_chunk(arg_mbs[fwd_mb_index], kwarg_mbs[fwd_mb_index])  # type: ignore[index]
+            output = self._stage.forward_one_chunk(fwd_mb_index, arg_mbs[fwd_mb_index], kwarg_mbs[fwd_mb_index])  # type: ignore[index]
 
             # Compute loss
             self._maybe_compute_loss(self._stage, output, target_mbs, fwd_mb_index)
 
             # Get the fwd send ops, but don't fire, leave it for the next iter (wrap-around)
-            fwd_sends = self._stage.get_fwd_send_ops()
+            fwd_sends = self._stage.get_fwd_send_ops(fwd_mb_index)
             fwd_mb_index += 1
 
         # Remember we still have some bwd_sends left over after the break? Now it is time to fire it
@@ -522,20 +522,20 @@ class Schedule1F1B(PipelineScheduleSingle):
         # Cooldown
         while bwd_mb_index < self._n_microbatches:
             # prepare bwd recv ops
-            bwd_recvs = self._stage.get_bwd_recv_ops()
+            bwd_recvs = self._stage.get_bwd_recv_ops(bwd_mb_index)
             if recv_work := _batch_p2p(bwd_recvs, desc="bwd_recv"):
                 recv_work.wait()
 
             # Backward one chunk
             loss = self._maybe_get_loss(self._stage, bwd_mb_index)
-            self._stage.backward_one_chunk(loss=loss)
+            self._stage.backward_one_chunk(bwd_mb_index, loss=loss)
 
             # Clear previous chunk's backward sends (hopefully they have well finished)
             if send_work:
                 send_work.wait()
 
             # Get the bwd send ops, fire it
-            bwd_sends = self._stage.get_bwd_send_ops()
+            bwd_sends = self._stage.get_bwd_send_ops(bwd_mb_index)
             send_work = _batch_p2p(bwd_sends, desc="bwd_send")
             bwd_mb_index += 1
 
@@ -650,14 +650,14 @@ class ScheduleLoopedBFS(PipelineScheduleMulti):
         for stage in self._stages:
             for i in range(self._n_microbatches):
                 with record_function(f"Stage {stage.stage_index} Forward"):
-                    ops = stage.get_fwd_recv_ops()
+                    ops = stage.get_fwd_recv_ops(i)
                     if ops:
                         _batch_p2p(ops, desc="fwd_recv").wait()
 
-                    output = stage.forward_one_chunk(arg_mbs[i], kwarg_mbs[i])
+                    output = stage.forward_one_chunk(i, arg_mbs[i], kwarg_mbs[i])
                     self._maybe_compute_loss(stage, output, target_mbs, i)
 
-                    ops = stage.get_fwd_send_ops()
+                    ops = stage.get_fwd_send_ops(i)
                     if ops:
                         _batch_p2p(ops, desc="fwd_send")
 
@@ -665,14 +665,14 @@ class ScheduleLoopedBFS(PipelineScheduleMulti):
             for i in range(self._n_microbatches):
                 stage._configure_data_parallel_mode(i == self._n_microbatches - 1)
                 with record_function(f"Stage {stage.stage_index} Backward"):
-                    ops = stage.get_bwd_recv_ops()
+                    ops = stage.get_bwd_recv_ops(i)
                     if ops:
                         _batch_p2p(ops, desc="bwd_recv").wait()
 
                     loss = self._maybe_get_loss(stage, i)
-                    stage.backward_one_chunk(loss=loss)
+                    stage.backward_one_chunk(i, loss=loss)
 
-                    ops = stage.get_bwd_send_ops()
+                    ops = stage.get_bwd_send_ops(i)
                     if ops:
                         _batch_p2p(ops, desc="bwd_send")
 
@@ -719,7 +719,7 @@ class ScheduleInterleaved1F1B(PipelineScheduleMulti):
         # This will be used to keep track of the current state of the entire pipeline
         # pipeline_order[rank] = [Action(computation_type, microbatch_index, stage_index), ...]
         self.pipeline_order: Dict[int, List[Optional[_Action]]] = {}
-        # ========================================================================
+
         for rank in range(self.pp_group_size):
             rank_ops = self._calculate_single_rank_operations(rank)
             self.pipeline_order[rank] = rank_ops
@@ -871,10 +871,10 @@ class ScheduleInterleaved1F1B(PipelineScheduleMulti):
                     # perform forward computation
                     stage = stage_index_to_stage[stage_index]
                     output = stage.forward_one_chunk(
-                        arg_mbs[mb_index], kwarg_mbs[mb_index]
+                        mb_index, arg_mbs[mb_index], kwarg_mbs[mb_index]
                     )
                     self._maybe_compute_loss(stage, output, target_mbs, mb_index)
-                    ops.extend(stage.get_fwd_send_ops())
+                    ops.extend(stage.get_fwd_send_ops(mb_index))
                 elif computation_type == _ComputationType.BACKWARD:
                     # perform backward computation
                     stage = stage_index_to_stage[stage_index]
@@ -882,8 +882,8 @@ class ScheduleInterleaved1F1B(PipelineScheduleMulti):
                         mb_index == self._n_microbatches - 1
                     )
                     loss = self._maybe_get_loss(stage, mb_index)
-                    stage.backward_one_chunk(loss=loss)
-                    ops.extend(stage.get_bwd_send_ops())
+                    stage.backward_one_chunk(mb_index, loss=loss)
+                    ops.extend(stage.get_bwd_send_ops(mb_index))
                 else:
                     raise ValueError(f"Unknown computation type {computation_type}")
 
@@ -901,7 +901,7 @@ class ScheduleInterleaved1F1B(PipelineScheduleMulti):
                         # TODO: We are assuming that stage will always receive from stage-1
                         # however that is not necessarily true of get_fwd_recv_ops
                         stage = stage_index_to_stage[stage_index + 1]
-                        ops.extend(stage.get_fwd_recv_ops())
+                        ops.extend(stage.get_fwd_recv_ops(mb_index))
                 elif computation_type == _ComputationType.BACKWARD:
                     # Previous rank doing backward has no influence for the current rank forward recv
                     pass
@@ -923,7 +923,7 @@ class ScheduleInterleaved1F1B(PipelineScheduleMulti):
                         # TODO: We are assuming that stage will always receive from stage+1
                         # however that is not necessarily true of get_bwd_recv_ops
                         stage = stage_index_to_stage[stage_index - 1]
-                        ops.extend(stage.get_bwd_recv_ops())
+                        ops.extend(stage.get_bwd_recv_ops(mb_index))
                 else:
                     raise ValueError(f"Unknown computation type {computation_type}")
 
