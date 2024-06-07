@@ -601,6 +601,7 @@ class profile(_KinetoProfile):
             warn(
                 "`use_cuda` is deprecated, use `activities` argument instead",
                 FutureWarning,
+                stacklevel=2,
             )
             if use_cuda:
                 activities_set.add(ProfilerActivity.CUDA)
