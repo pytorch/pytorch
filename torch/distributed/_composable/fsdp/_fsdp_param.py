@@ -225,7 +225,7 @@ class FSDPParam:
         else:
             self._spmd_mesh = self.mesh_info.mesh
             if isinstance(self.mesh_info, HSDPMeshInfo):
-                self._spmd_placements: Tuple[Placement, ...] = (Replicate(), Shard(0))
+                self._spmd_placements = (Replicate(), Shard(0))
             else:
                 self._spmd_placements = (Shard(0),)
             self._sharding_spec = DTensorSpec(
