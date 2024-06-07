@@ -708,11 +708,10 @@ def _floor_ceil_helper(a, fn):
     return fn(a)
 
 
-# NB: this is Python semantics so it returns an int
 def _sympy_floor(a):
-    import sympy
+    from torch.utils._sympy.functions import FloorToInt
 
-    return _floor_ceil_helper(a, sympy.floor)
+    return FloorToInt(a)
 
 
 # NB: this is Python trunc semantics which returns an int.  Do NOT use this to
@@ -723,11 +722,10 @@ def _sympy_trunc(a):
     return TruncToInt(a)
 
 
-# NB: this is Python semantics so it returns an int
 def _sympy_ceil(a):
-    import sympy
+    from torch.utils._sympy.functions import CeilToInt
 
-    return _floor_ceil_helper(a, sympy.ceiling)
+    return CeilToInt(a)
 
 
 def _sympy_eq(a, b):
