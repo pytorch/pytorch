@@ -303,6 +303,17 @@ class PipelineScheduleSingle(_PipelineSchedule):
         self._stage.has_backward = self._has_backward
 
     def step(self, *args, target=None, losses: Optional[List] = None, **kwargs):
+        """
+        Run one iteration of the pipeline schedule with *whole-batch* input.
+        Will chunk the input into microbatches automatically, and go through the
+        microbatches according to the schedule implementation.
+
+        args: positional arguments to the model (as in non-pipeline case).
+        kwargs: keyword arguments to the model (as in non-pipeline case).
+        target: target for the loss function.
+        losses: a list to store the losses for each microbatch.
+        """
+
         # Clean per iteration
         self._stage.clear_runtime_states()
 
@@ -583,6 +594,17 @@ class PipelineScheduleMulti(_PipelineSchedule):
         )
 
     def step(self, *args, target=None, losses: Optional[List] = None, **kwargs):
+        """
+        Run one iteration of the pipeline schedule with *whole-batch* input.
+        Will chunk the input into microbatches automatically, and go through the
+        microbatches according to the schedule implementation.
+
+        args: positional arguments to the model (as in non-pipeline case).
+        kwargs: keyword arguments to the model (as in non-pipeline case).
+        target: target for the loss function.
+        losses: a list to store the losses for each microbatch.
+        """
+
         # Clean per iteration
         for stage in self._stages:
             stage.clear_runtime_states()
