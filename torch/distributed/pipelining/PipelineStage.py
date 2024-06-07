@@ -153,6 +153,10 @@ class _PipelineStageBase(ABC):
         self.grad_recv_info: Dict = {}
         self.grad_send_info: Optional[List] = None
 
+        # Number of backward chunks seen. This is used to determine when to do
+        # grad reduction in DDP or FSDP.
+        self._seen_bwd_chunks = 0
+
         # To be populated later
         self.chunks: Optional[int] = None
 
@@ -182,6 +186,10 @@ class _PipelineStageBase(ABC):
         return self.stage_index == self.num_stages - 1
 
     def _check_chunk_id(self, chunk_id: int):
+        if self.chunks is None:
+            raise RuntimeError(
+                "Attempted to access chunk_id before chunks have been configured."
+            )
         if chunk_id >= self.chunks:
             raise RuntimeError(
                 f"Chunk id {chunk_id} is out of range [0, {self.chunks})"
@@ -383,6 +391,8 @@ class _PipelineStageBase(ABC):
         self.fwd_cache.clear()
         # Caching chunk outputs for final output merge or reduction
         self.output_chunks.clear()
+        # Reset bwd chunk counter
+        self._seen_bwd_chunks = 0
 
         # Clear grad of input buffers in between schedule steps. This is because
         # `torch.autograd.backward()` will accumulate gradients into leaf
@@ -435,17 +445,6 @@ class _PipelineStageBase(ABC):
         grads = self._map_tensor_from_recv_info(recv_infos)
         return grads
 
-    def _configure_data_parallel_mode(self, last_backward: bool):
-        """
-        Whether using PP with FSDP or DDP, there are some runtime differences between the last backward step and the
-        other steps.  Namely, we need to accumulate gradients on previous steps and reduce them on the last step, but
-        there are additional state-variables and performance considerations depending on the data parallelism used.
-        This helper should adapt any pipeline parallel schedule to work with common/supported data parallel libraries.
-        """
-        if isinstance(self.submod, FSDPModule):
-            self.submod.set_is_last_backward(last_backward)
-            self.submod.set_requires_gradient_sync(last_backward)
-
     def forward_maybe_with_nosync(self, *args, **kwargs):
         # If submod is wrapped with DDP, we use the `no_sync` context manager to
         # avoid gradient all-reduce per microbatch
@@ -456,9 +455,18 @@ class _PipelineStageBase(ABC):
             out_val = self.submod(*args, **kwargs)
         return out_val
 
-    def backward_maybe_with_nosync(self, bwd_kwargs: Dict, bwd_chunk_id: int):
+    def backward_maybe_with_nosync(self, bwd_kwargs: Dict):
+        """
+        Whether using PP with FSDP or DDP, there are some runtime differences between the last backward step and the
+        other steps.  Namely, we need to accumulate gradients on previous steps and reduce them on the last step, but
+        there are additional state-variables and performance considerations depending on the data parallelism used.
+        This helper should adapt any pipeline parallel schedule to work with common/supported data parallel libraries.
+        """
+        last_backward = self._seen_bwd_chunks == self.chunks - 1  # type: ignore[operator]
+
+        # If submod is wrapped by DDP
         if isinstance(self.submod, DistributedDataParallel):
-            if bwd_chunk_id == self.chunks - 1:
+            if last_backward:
                 # Last chunk, prepare for gradient reduction
                 # HACK: reaching into DDP implementation details here. Is there a better way?
                 self.submod.reducer.prepare_for_backward(  # type: ignore[union-attr, operator]
@@ -472,10 +480,16 @@ class _PipelineStageBase(ABC):
             else:
                 with self.submod.no_sync():  # type: ignore[operator]
                     grads_input = stage_backward(**bwd_kwargs)
+        # If submod is a FSDP module
+        elif isinstance(self.submod, FSDPModule):
+            self.submod.set_is_last_backward(last_backward)
+            self.submod.set_requires_gradient_sync(last_backward)
+            grads_input = stage_backward(**bwd_kwargs)
         else:
-            # Non-DDP submodule, regular backward
+            # Non-DP submodule, regular backward
             grads_input = stage_backward(**bwd_kwargs)
 
+        self._seen_bwd_chunks += 1
         return grads_input
 
     def forward_one_chunk(
@@ -577,7 +591,7 @@ class _PipelineStageBase(ABC):
                 "input_values": input_values,
             }
 
-        self.grads_input = self.backward_maybe_with_nosync(bwd_kwargs, bwd_chunk_id)
+        self.grads_input = self.backward_maybe_with_nosync(bwd_kwargs)
         logger.debug(f"{self.log_prefix} Backwarded chunk {bwd_chunk_id}")  # noqa: G004
 
     def _validate_fwd_input(self, args, kwargs):
