@@ -2,9 +2,9 @@ import functools
 import inspect
 import logging
 import math
-import sys
 
 import torch
+from torch.nn.attention import sdpa_kernel, SDPBackend
 from ..._dynamo.utils import counters
 from ..pattern_matcher import (
     filter_nodes,
@@ -18,10 +18,14 @@ aten = torch.ops.aten
 
 
 if torch.version.hip:
+
     def _scaled_dot_product_attention(*args, **kwargs):
-        return aten._scaled_dot_product_attention_math(*args, **kwargs)[0]
+        with sdpa_kernel(backends=[SDPBackend.MATH, SDPBackend.FLASH_ATTENTION]):
+            return aten.scaled_dot_product_attention(*args, **kwargs)
+
 else:
     _scaled_dot_product_attention = aten.scaled_dot_product_attention
+
 
 def _sfdp_pattern_1(query, key, value, inv_scale):
     return (
