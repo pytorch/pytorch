@@ -1943,6 +1943,9 @@ def get_real_value(node, tracer):
         lambda n: get_real_value(n, tracer),
     )
 
+    if op == "placeholder" and "grapharg" in node.meta:
+        return node.meta["grapharg"].example
+
     if op == "call_module":
         nn_module = tracer.output_graph.nn_modules[node.target]
         if not is_lazy_module(nn_module):
