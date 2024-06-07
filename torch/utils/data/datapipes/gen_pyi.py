@@ -44,10 +44,10 @@ def find_file_paths(dir_paths: List[str], files_to_exclude: Set[str]) -> Set[str
 
 def extract_method_name(line: str) -> str:
     """Extract method name from decorator in the form of "@functional_datapipe({method_name})"."""
-    if "(\"" in line:
-        start_token, end_token = "(\"", "\")"
-    elif "(\'" in line:
-        start_token, end_token = "(\'", "\')"
+    if '("' in line:
+        start_token, end_token = '("', '")'
+    elif "('" in line:
+        start_token, end_token = "('", "')"
     else:
         raise RuntimeError(f"Unable to find appropriate method name within line:\n{line}")
     start, end = line.find(start_token) + len(start_token), line.find(end_token)
@@ -71,9 +71,9 @@ def parse_datapipe_file(file_path: str) -> Tuple[Dict[str, str], Dict[str, str],
         method_name, class_name, signature = "", "", ""
         skip = False
         for line in f:
-            if line.count("\"\"\"") % 2 == 1:
+            if line.count('"""') % 2 == 1:
                 skip = not skip
-            if skip or "\"\"\"" in line:  # Saving docstrings
+            if skip or '"""' in line:  # Saving docstrings
                 doc_string_dict[method_name].append(line)
                 continue
             if "@functional_datapipe" in line:

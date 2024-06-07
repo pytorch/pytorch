@@ -208,6 +208,15 @@ class DeviceMeshTest(DTensorTestBase):
                 "cuda:0", mesh_shape=mesh_shape, mesh_dim_names=("dp", "tp")
             )
 
+    @with_comms
+    def test_set_mesh_dim_group_options(self):
+        device_type = "cuda" if torch.cuda.is_available() else "cpu"
+        _mesh_resources._set_mesh_dim_group_options(1, "fake", None)
+
+        mesh_tensor = torch.arange(4).reshape(2, 2)
+        mesh = DeviceMesh(device_type, mesh_tensor)
+        self.assertEqual(mesh.get_group(1)._get_backend_name(), "fake")
+
 
 class DeviceMeshTestNDim(DTensorTestBase):
     @property
@@ -672,9 +681,9 @@ class DeviceMeshCollectiveTest(DTensorTestBase):
             )
             unpadded_list = [
                 (
-                    unpad_tensor(big_tensor_chunks[i], shard_dim, pad_sizes[i])
+                    unpad_tensor(big_tensor, shard_dim, pad_sizes[i])
                     if pad_sizes[i] > 0
-                    else big_tensor_chunks[i]
+                    else big_tensor
                 )
                 for i, big_tensor in enumerate(big_tensor_chunks)
             ]
