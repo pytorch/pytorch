@@ -88,8 +88,9 @@ try:
     import psutil
 
     HAS_PSUTIL = True
-except ImportError:
+except ModuleNotFoundError:
     HAS_PSUTIL = False
+    psutil = None
 
 
 from torch._C._profiler import _ExperimentalConfig, _ExtraFields_PyCall

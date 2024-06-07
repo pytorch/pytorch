@@ -10,8 +10,9 @@ try:
     import psutil
 
     HAS_PSUTIL = True
-except ImportError:
+except ModuleNotFoundError:
     HAS_PSUTIL = False
+    psutil = None
 
 device = torch.device("cpu")
 
