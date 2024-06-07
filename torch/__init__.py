@@ -157,7 +157,7 @@ if platform.system() == "Windows":
             if os.path.exists(p)
         ]
 
-        if not any(
+        if not builtins.any(
             os.path.exists(os.path.join(p, "nvToolsExt64_1.dll")) for p in dll_paths
         ):
             nvtoolsext_dll_path = os.path.join(
@@ -171,7 +171,7 @@ if platform.system() == "Windows":
         else:
             nvtoolsext_dll_path = ""
 
-        if cuda_version and all(
+        if cuda_version and builtins.all(
             not glob.glob(os.path.join(p, "cudart64*.dll")) for p in dll_paths
         ):
             cuda_version_1 = cuda_version.replace(".", "_")
