@@ -3577,7 +3577,7 @@ class NCCLTraceTest(NCCLTraceTestBase):
             self.assertEqual(last["output_sizes"], ((3, 4),))
             self.assertEqual(last["output_dtypes"], ["Float"])
             self.assertEqual(last["collective_seq_id"], 2)
-            self.assertEqual(last["timeout"], 600000)
+            self.assertEqual(last["timeout_ms"], 600000)
             now = datetime.now()
             event_created_time = datetime.fromtimestamp(
                 last["time_created_ns"] / 1000000000
@@ -3662,7 +3662,7 @@ class NCCLTraceTest(NCCLTraceTestBase):
         self.assertEqual(last["input_dtypes"], ["Float"])
         self.assertEqual(last["output_sizes"], ((3, 4),))
         self.assertEqual(last["output_dtypes"], ["Float"])
-        self.assertEqual(last["timeout"], 600000)
+        self.assertEqual(last["timeout_ms"], 600000)
         self.assertEqual(last["collective_seq_id"] - first["collective_seq_id"], 9)
 
     @requires_nccl()
@@ -3690,7 +3690,9 @@ class NCCLTraceTest(NCCLTraceTestBase):
             if self.rank != 0:
                 pg.allreduce(a).wait()
             e.synchronize()
-            t = pickle.loads(torch._C._distributed_c10d._dump_nccl_trace(onlyActive=only_active))
+            t = pickle.loads(
+                torch._C._distributed_c10d._dump_nccl_trace(onlyActive=only_active)
+            )
             t = t["entries"]
             if only_active:
                 if self.rank == 0:
@@ -3875,7 +3877,7 @@ class NCCLTraceTest(NCCLTraceTestBase):
                 self.assertTrue(0.001 < duration < 10000, duration)
             else:
                 self.assertTrue("duration_ms" not in t["entries"][coalesced_op])
-            self.assertEqual(t["entries"][coalesced_op]["timeout"], 600000)
+            self.assertEqual(t["entries"][coalesced_op]["timeout_ms"], 600000)
 
     @requires_nccl()
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
