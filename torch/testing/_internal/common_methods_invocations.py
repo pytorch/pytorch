@@ -13103,7 +13103,7 @@ op_db: List[OpInfo] = [
                    unittest.skip('Skipped!'),
                    'TestOnnxModelOutputConsistency_opset_version_18_model_type_TorchModelType.TORCH_NN_MODULECPU',
                    'test_output_match',
-                   device_type='cpu', dtypes=(torch.bool, torch.complex64)))),
+                   device_type='cpu', dtypes=(torch.bool, torch.complex64)),)),
     BinaryUfuncInfo('eq',
                     ref=np.equal,
                     dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16, torch.chalf),
