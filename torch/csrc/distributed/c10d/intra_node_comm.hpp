@@ -101,8 +101,10 @@ class TORCH_API IntraNodeComm : public c10::intrusive_ptr_target {
 
   size_t p2pStateAllocSize_ = 0;
   size_t bufferAllocSize_ = 0;
+#if !defined(USE_ROCM) && defined(PYTORCH_C10_DRIVER_API_SUPPORTED)
   CUmemGenericAllocationHandle p2pStateHandle_{};
   CUmemGenericAllocationHandle bufferHandle_{};
+#endif
 
   std::array<void*, kMaxDevices> p2pStates_{};
   std::array<void*, kMaxDevices> buffers_{};
