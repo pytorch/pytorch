@@ -541,6 +541,7 @@ class _PipelineStageBase(ABC):
         This should only be called once per microbatch.
         """
         self._check_chunk_id(bwd_chunk_id)
+
         (
             stage_output,
             input_values,
