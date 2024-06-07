@@ -46,7 +46,7 @@ def init(output_file, flags=None, output_mode="key_value"):
 
 def start():
     """
-    Starts Cuda Profiler 
+    Starts Cuda profile data collection
 
     Example:
         >>> profiler = Profiler();
