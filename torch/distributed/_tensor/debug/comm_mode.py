@@ -32,10 +32,14 @@ c10d_collective_ops = {
     c10d_ops.allgather_into_tensor_coalesced_,
     c10d_ops.allreduce_,
     c10d_ops.allreduce_coalesced_,
+    c10d_ops.alltoall_,
+    c10d_ops.alltoall_base_,
     c10d_ops.broadcast_,
     c10d_ops.gather_,
     c10d_ops.scatter_,
     c10d_ops.reduce_,
+    c10d_ops.reduce_scatter_,
+    c10d_ops.reduce_scatter_tensor_coalesced_,
 }
 
 
