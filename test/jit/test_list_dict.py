@@ -5,7 +5,7 @@ import os
 import sys
 import types
 import unittest
-from collections import OrderedDict
+from collections import defaultdict, OrderedDict
 from textwrap import dedent
 from typing import Any, Dict, List, NamedTuple, Optional, Tuple
 
@@ -2966,3 +2966,32 @@ class TestScriptList(JitTestCase):
         self.assertEqual(len(l), 3)
         self.assertTrue(3 in l)
         self.assertEqual(l[2], 3)
+
+    def test_defaultdict(self):
+        def get_dict():
+            test_dict = defaultdict(list)
+            return test_dict
+
+        class Test(torch.nn.Module):
+            segments_groupby_col: Dict[str, List[str]]
+
+            def __init__(self):
+                super().__init__()
+                self.segments_groupby_col = get_dict()
+                self.col1 = "a"
+                self.col2 = "b"
+
+            def forward(self):
+                if self.col1 in self.segments_groupby_col.keys():
+                    return 1
+                else:
+                    return 2
+
+        test = Test()
+        test_script = torch.jit.script(test)
+        test_script.segments_groupby_col
+
+        # Smoketest for flakiness. Takes around 2s.
+        for i in range(300):
+            test = Test()
+            test_script = torch.jit.script(test)
