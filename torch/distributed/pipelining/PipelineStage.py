@@ -128,17 +128,8 @@ class _PipelineStageBase(ABC):
         self._outputs_meta: Optional[Tuple[torch.Tensor, ...]] = None
         # map microbatch ID to list of forward tensor args
         self.fwd_cache: Dict[int, Tuple[Any, List[torch.Tensor]]] = {}
-        # Current forward chunk id to be used in computation
-        self.fwd_chunk_id: int = 0
-        # Current backward chunk id to be used in computation
-        self.bwd_chunk_id: int = 0
         # Caching chunk outputs for final output merge or reduction
         self.output_chunks: List[Any] = []
-
-        # Current forward chunk id to be used in recv
-        self.recv_fwd_chunk_id: int = 0
-        # Current backward chunk id to be used in recv
-        self.recv_bwd_chunk_id: int = 0
 
         # Create stage id to group rank mapping
         # In interleaved case, `group_rank` is stage index % group size.
@@ -188,6 +179,12 @@ class _PipelineStageBase(ABC):
         Returns true if this stage is the last stage in the pipeline.
         """
         return self.stage_index == self.num_stages - 1
+
+    def _check_chunk_id(self, chunk_id: int):
+        if chunk_id >= self.chunks:
+            raise RuntimeError(
+                f"Chunk id {chunk_id} is out of range [0, {self.chunks})"
+            )
 
     def _configure_outputs_meta(self, outputs_meta: Tuple[torch.Tensor, ...]):
         """
@@ -267,24 +264,23 @@ class _PipelineStageBase(ABC):
 
         return ops
 
-    def get_fwd_recv_ops(self) -> List[dist.P2POp]:
+    def get_fwd_recv_ops(self, fwd_chunk_id: int) -> List[dist.P2POp]:
         """
         Returns a list of ops that are needed to receive the input arguments
         for this stage.
         """
-        recv_infos: Tuple[InputInfo, ...] = self.args_recv_info[self.recv_fwd_chunk_id]
+        recv_infos: Tuple[InputInfo, ...] = self.args_recv_info[fwd_chunk_id]
 
         # In case there is backward pass, set requires_grad for receive buffers
         # before first forward
-        if self.has_backward and not self.set_requires_grad[self.recv_fwd_chunk_id]:
+        if self.has_backward and not self.set_requires_grad[fwd_chunk_id]:
             for a in recv_infos:
                 if isinstance(a, _RecvInfo):
                     a.buffer.requires_grad_(True)
 
-        self.recv_fwd_chunk_id += 1
         return self._get_recv_ops(recv_infos)
 
-    def get_bwd_recv_ops(self) -> List[dist.P2POp]:
+    def get_bwd_recv_ops(self, bwd_chunk_id: int) -> List[dist.P2POp]:
         """
         Returns a list of ops that are needed to receive the gradients
         for this stage.
@@ -294,20 +290,18 @@ class _PipelineStageBase(ABC):
 
         # Create bwd recv infra lazily
         recv_infos = self.grad_recv_info.setdefault(
-            self.recv_bwd_chunk_id,
+            bwd_chunk_id,
             # `grad_recv_info` is a mirror of `act_send_info`
             self._create_grad_recv_info(self.act_send_info),
         )
 
-        self.recv_bwd_chunk_id += 1
         return self._get_recv_ops(recv_infos)
 
-    def get_fwd_send_ops(self) -> List[dist.P2POp]:
+    def get_fwd_send_ops(self, fwd_chunk_id: int) -> List[dist.P2POp]:
         """
         Get the activation send ops for current stage's forward.
         """
-        # Use "-1" to get the outputs created by the last chunk
-        output = self.output_chunks[-1]
+        output = self.output_chunks[fwd_chunk_id]
         # Unify output form to tuple for easy correspondance with
         # `act_send_info`
         output_tuple = output if type(output) is tuple else (output,)
@@ -333,10 +327,12 @@ class _PipelineStageBase(ABC):
 
         return ops
 
-    def get_bwd_send_ops(self) -> List[dist.P2POp]:
+    def get_bwd_send_ops(self, bwd_chunk_id: int) -> List[dist.P2POp]:
         """
         Get the gradient send ops for current stage's backward.
         """
+        self._check_chunk_id(bwd_chunk_id)
+
         if not self.has_backward or self.is_first:
             return []
 
@@ -365,7 +361,7 @@ class _PipelineStageBase(ABC):
             else:
                 if not (grad is None and grad_recv_stage is None):
                     raise RuntimeError(
-                        f"[{self.stage_index}] for chunk {self.bwd_chunk_id - 1} has gradients {grad} "
+                        f"[{self.stage_index}] for chunk {bwd_chunk_id - 1} has gradients {grad} "
                         f"and is expecting to send gradients to stage {grad_recv_stage}"
                     )
         return ops
@@ -374,11 +370,6 @@ class _PipelineStageBase(ABC):
         """
         Clear runtime states of the stage.
         """
-        # Reset pointers
-        self.fwd_chunk_id = 0
-        self.bwd_chunk_id = 0
-        self.recv_fwd_chunk_id = 0
-        self.recv_bwd_chunk_id = 0
         # map microbatch ID to list of forward tensor args
         self.fwd_cache.clear()
         # Caching chunk outputs for final output merge or reduction
@@ -416,23 +407,22 @@ class _PipelineStageBase(ABC):
 
         return tensors
 
-    def _retrieve_recv_activations(
-        self,
-    ):
+    def _retrieve_recv_activations(self, fwd_chunk_id: int):
         """
         Retrieve the activations received for the current stage during forward.
         """
-        recv_infos = self.args_recv_info[self.fwd_chunk_id]
+        recv_infos = self.args_recv_info[fwd_chunk_id]
         activations = self._map_tensor_from_recv_info(recv_infos)
         return activations
 
     def _retrieve_recv_grads(
         self,
+        bwd_chunk_id: int,
     ):
         """
         Retrieve the gradients received for the current stage during backward.
         """
-        recv_infos = self.grad_recv_info[self.bwd_chunk_id]
+        recv_infos = self.grad_recv_info[bwd_chunk_id]
         grads = self._map_tensor_from_recv_info(recv_infos)
         return grads
 
@@ -481,6 +471,7 @@ class _PipelineStageBase(ABC):
 
     def forward_one_chunk(
         self,
+        fwd_chunk_id: int,
         args: Tuple[Any, ...],
         kwargs: Optional[Dict[str, Any]] = None,
     ):
@@ -497,7 +488,7 @@ class _PipelineStageBase(ABC):
         else:
             # Receive activations for this chunk
             # Activations only come in args form
-            composite_args = self._retrieve_recv_activations()
+            composite_args = self._retrieve_recv_activations(fwd_chunk_id)
             composite_kwargs = {}
 
         self._validate_fwd_input(args, kwargs)
@@ -529,30 +520,32 @@ class _PipelineStageBase(ABC):
         flat_args = flatten_args(composite_args)
         flat_kwargs = flatten_args(composite_kwargs)
         flatten_input_tensors = flat_args + flat_kwargs
-        self.fwd_cache[self.fwd_chunk_id] = (
+        self.fwd_cache[fwd_chunk_id] = (
             output_tuple,  # stage_output
             flatten_input_tensors,  # input_values
         )
 
         logger.debug(
-            f"{self.log_prefix} Forwarded chunk {self.fwd_chunk_id}, outputs: {map_debug_info(output)}"  # noqa: G004
+            f"{self.log_prefix} Forwarded chunk {fwd_chunk_id}, outputs: {map_debug_info(output)}"  # noqa: G004
         )
         self._validate_fwd_outputs(output_tuple)
-        self.fwd_chunk_id += 1
         return output
 
     def backward_one_chunk(
         self,
+        bwd_chunk_id: int,
         loss=None,
     ):
         """
         Perform backward pass on the module.
         This should only be called once per microbatch.
         """
+        self._check_chunk_id(bwd_chunk_id)
+
         (
             stage_output,
             input_values,
-        ) = self.fwd_cache.pop(self.bwd_chunk_id)
+        ) = self.fwd_cache.pop(bwd_chunk_id)
 
         # Compute backward
         if self.is_last:
@@ -565,7 +558,7 @@ class _PipelineStageBase(ABC):
             }
         else:
             # Otherwise, receive gradients from next stage
-            grads_output = self._retrieve_recv_grads()
+            grads_output = self._retrieve_recv_grads(bwd_chunk_id)
             # If an input to the pipeline requires gradient,
             # `torch.autograd.backward` will accumulate the gradient into the
             # `.grad` field of such input
@@ -575,20 +568,17 @@ class _PipelineStageBase(ABC):
                 "input_values": input_values,
             }
 
-        self.grads_input = self.backward_maybe_with_nosync(
-            bwd_kwargs, self.bwd_chunk_id
-        )
-        logger.debug(
-            f"{self.log_prefix} Backwarded chunk {self.bwd_chunk_id}"  # noqa: G004
-        )
-        self.bwd_chunk_id += 1
+        self.grads_input = self.backward_maybe_with_nosync(bwd_kwargs, bwd_chunk_id)
+        logger.debug(f"{self.log_prefix} Backwarded chunk {bwd_chunk_id}")  # noqa: G004
 
     def _validate_fwd_input(self, args, kwargs):
         """Raises a RuntimeError if shapes of input args/kwargs do not match the shapes configured for this stage."""
 
         if self.is_first:
             # TODO why is there a separate recv_info for each pipeline chunk?
-            expected_args = self.args_recv_info[self.fwd_chunk_id]
+            # kwen2501: to avoid passing a `fwd_chunk_id` to this function, we
+            # check all chunks against args_recv_info[0]
+            expected_args = self.args_recv_info[0]
         else:
             # We don't check inputs for non-0 stages assuming they don't accept
             # user inputs in canonical pipeline scenarios
