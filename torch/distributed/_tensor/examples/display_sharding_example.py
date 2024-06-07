@@ -4,9 +4,7 @@ import torch
 
 from torch.distributed._tensor.debug import CommDebugMode
 
-from torch.distributed._tensor.examples.advanced_module_tracker import (
-    ModuleParamaterShardingTracker,
-)
+from torch.distributed._tensor.debug.comm_mode import ModuleParamaterShardingTracker
 
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     MLPModule,
@@ -16,7 +14,8 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
 
 class DisplayShardingExample:
     """
-    Checks if the set of keys in ground truth dictionary and the set produced in advanced_module_tracker are in the same order
+    Checks if the set of keys in ground truth dictionary and the set
+    produced in advanced_module_tracker are in the same order
     """
 
     def same_set_of_keys(self, dict1, dict2):
