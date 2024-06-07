@@ -513,9 +513,6 @@ else:
             Returns:
                 A list of :class:`ProcessGroup` object.
             """
-            if not hasattr(self, "_dim_group_infos"):
-                raise RuntimeError("DeviceMesh process groups not initialized!")
-
             return [self.get_group(i) for i in range(self.mesh.ndim)]
 
         @staticmethod
