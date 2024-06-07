@@ -587,6 +587,7 @@ def create_aot_dispatcher_function(
 
                 if needs_autograd and output_and_mutation_safe:
                     # We realized that none of the outputs require grad,
+                    # and none of the inputs that require grad are mutated.
                     # so we actually have an inference graph.
                     needs_autograd = False
                     # A bit silly: right now in the subclass codepath, our ViewAndMutationMeta
