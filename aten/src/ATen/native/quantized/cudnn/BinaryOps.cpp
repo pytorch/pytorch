@@ -186,7 +186,7 @@ Tensor add(Tensor qa, Tensor qb, double output_scale, int64_t output_zero_point)
   // relu_op computes
   // relu( (qa_int8 + qb_int8 * ( qb_scale/qa_scale ) )  )
   // output is a fp32 tensor
-  c10::optional<cudnn_frontend::Operation> relu_op;
+  std::optional<cudnn_frontend::Operation> relu_op;
   if (kReluFused) {
     // we use inplace operation here where the output is assigned to the input
     relu_op.emplace(cudnn_frontend::OperationBuilder(CUDNN_BACKEND_OPERATION_POINTWISE_DESCRIPTOR)

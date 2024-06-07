@@ -297,9 +297,9 @@ TORCH_API Tensor cached_cast(
     c10::DeviceType device_type = c10::DeviceType::CUDA);
 
 // Overload to process optional<Tensor>
-inline c10::optional<Tensor> cached_cast(
+inline std::optional<Tensor> cached_cast(
     at::ScalarType to_type,
-    const c10::optional<Tensor>& arg,
+    const std::optional<Tensor>& arg,
     c10::DeviceType device_type = c10::DeviceType::CUDA) {
   if (arg.has_value()) {
     return cached_cast(to_type, *arg, device_type);
@@ -353,9 +353,9 @@ Otherwise, set it to the autocast type.
 ********************************************************/
 
 // Overload to catch dtype flags
-c10::optional<ScalarType> inline set_opt_dtype(
+std::optional<ScalarType> inline set_opt_dtype(
     at::ScalarType to_type,
-    const c10::optional<ScalarType>& dtype) {
+    const std::optional<ScalarType>& dtype) {
   return dtype.has_value() ? dtype : to_type;
 }
 
@@ -392,7 +392,7 @@ enum class CastPolicy : uint8_t {
   fp32, // Cast all inputs to at::kFloat before running the op.
   fp32_set_opt_dtype, // Treats functions (like softmax) that
                       //  1. we'd like to run in fp32 and
-                      //  2. have a c10::optional<ScalarType> arg that controls
+                      //  2. have a std::optional<ScalarType> arg that controls
                       //  the output type.
                       // fp32_set_opt_dtype wrappers' policy is: if the output
                       // type is already set, don't touch it, otherwise, set
@@ -865,24 +865,24 @@ copy pasted in from VariableTypeEverything.cpp with appropriate substitutions.
   _(ADD_NS(norm),                                                           \
     "norm.Scalar",                                                          \
     Tensor(const Tensor&, const Scalar&),                                   \
-    Tensor(const Tensor&, const c10::optional<Scalar>&, ScalarType),        \
+    Tensor(const Tensor&, const std::optional<Scalar>&, ScalarType),        \
     fp32_append_dtype)                                                      \
   _(ADD_NS(norm),                                                           \
     "norm.ScalarOpt_dim",                                                   \
-    Tensor(const Tensor&, const c10::optional<Scalar>&, IntArrayRef, bool), \
+    Tensor(const Tensor&, const std::optional<Scalar>&, IntArrayRef, bool), \
     Tensor(                                                                 \
         const Tensor&,                                                      \
-        const c10::optional<Scalar>&,                                       \
+        const std::optional<Scalar>&,                                       \
         IntArrayRef,                                                        \
         bool,                                                               \
         ScalarType),                                                        \
     fp32_append_dtype)                                                      \
   _(ADD_NS(norm),                                                           \
     "norm.names_ScalarOpt_dim",                                             \
-    Tensor(const Tensor&, const c10::optional<Scalar>&, DimnameList, bool), \
+    Tensor(const Tensor&, const std::optional<Scalar>&, DimnameList, bool), \
     Tensor(                                                                 \
         const Tensor&,                                                      \
-        const c10::optional<Scalar>&,                                       \
+        const std::optional<Scalar>&,                                       \
         DimnameList,                                                        \
         bool,                                                               \
         ScalarType),                                                        \
@@ -895,6 +895,7 @@ copy pasted in from VariableTypeEverything.cpp with appropriate substitutions.
   _(bilinear)                \
   _(cross)                   \
   _(dot)                     \
+  _(vdot)                    \
   _(grid_sampler)            \
   _(index_put)               \
   _(tensordot)               \

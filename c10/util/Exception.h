@@ -3,6 +3,7 @@
 
 #include <c10/macros/Export.h>
 #include <c10/macros/Macros.h>
+#include <c10/util/Backtrace.h>
 #include <c10/util/Lazy.h>
 #include <c10/util/StringUtil.h>
 
@@ -27,11 +28,6 @@ namespace c10 {
 /// NB: c10::Error is handled specially by the default torch to suppress the
 /// backtrace, see torch/csrc/Exceptions.h
 class C10_API Error : public std::exception {
- public:
-  // Symbolizing the backtrace can be expensive; pass it around as a lazy string
-  // so it is symbolized only if actually needed.
-  using Backtrace = std::shared_ptr<const LazyValue<std::string>>;
-
  private:
   // The actual error message.
   std::string msg_;

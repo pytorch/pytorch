@@ -433,10 +433,10 @@ struct TORCH_API RecordFunction {
     return handle_;
   }
 
-  c10::optional<OperatorName> operator_name() const;
+  std::optional<OperatorName> operator_name() const;
 
   // This method returns a copy of the FunctionSchema and can be expensive.
-  c10::optional<FunctionSchema> operator_schema() const;
+  std::optional<FunctionSchema> operator_schema() const;
 
   void setHandle(RecordFunctionHandle handle) {
     handle_ = handle;
@@ -521,7 +521,7 @@ struct TORCH_API RecordFunction {
 
 TORCH_API StepCallbacks getStepCallbacks(RecordScope scope);
 
-TORCH_API c10::optional<StepCallbacks> getStepCallbacksUnlessEmpty(
+TORCH_API std::optional<StepCallbacks> getStepCallbacksUnlessEmpty(
     RecordScope scope);
 
 namespace detail {

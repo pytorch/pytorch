@@ -11,6 +11,7 @@ import torch
 from .. import device as _device
 from . import amp
 
+
 __all__ = [
     "is_available",
     "synchronize",
@@ -49,7 +50,6 @@ def synchronize(device: _device_t = None) -> None:
 
     N.B. This function only exists to facilitate device-agnostic code.
     """
-    pass
 
 
 class Stream:
@@ -57,7 +57,7 @@ class Stream:
     N.B. This class only exists to facilitate device-agnostic code
     """
 
-    def __init__(self, priority: int = -1):
+    def __init__(self, priority: int = -1) -> None:
         pass
 
     def wait_stream(self, stream) -> None:
@@ -68,13 +68,13 @@ class Event:
     def query(self) -> bool:
         return True
 
-    def record(self, stream=None):
+    def record(self, stream=None) -> None:
         pass
 
-    def synchronize(self):
+    def synchronize(self) -> None:
         pass
 
-    def wait(self, stream=None):
+    def wait(self, stream=None) -> None:
         pass
 
 
@@ -100,6 +100,7 @@ class StreamContext(AbstractContextManager):
     N.B. This class only exists to facilitate device-agnostic code
 
     """
+
     cur_stream: Optional[Stream]
 
     def __init__(self, stream):
@@ -115,7 +116,7 @@ class StreamContext(AbstractContextManager):
         self.prev_stream = _current_stream
         _current_stream = cur_stream
 
-    def __exit__(self, type: Any, value: Any, traceback: Any):
+    def __exit__(self, type: Any, value: Any, traceback: Any) -> None:
         cur_stream = self.stream
         if cur_stream is None:
             return
@@ -146,7 +147,6 @@ def set_device(device: _device_t) -> None:
 
     N.B. This function only exists to facilitate device-agnostic code
     """
-    pass
 
 
 def current_device() -> str:

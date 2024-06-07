@@ -12,15 +12,15 @@
 
 namespace torch::autograd {
 
-using optional_variable_list = std::vector<c10::optional<Variable>>;
+using optional_variable_list = std::vector<std::optional<Variable>>;
 using _jvp_fn_t = std::function<variable_list(variable_list, variable_list)>;
 using _view_as_self_fn_t = std::function<at::Tensor(at::Tensor)>;
 
-TORCH_API std::vector<c10::optional<Variable>> _wrap_outputs(
+TORCH_API std::vector<std::optional<Variable>> _wrap_outputs(
     const variable_list& input_vars,
     const std::unordered_set<at::TensorImpl*>& non_differentiable,
     const std::unordered_set<at::TensorImpl*>& dirty_inputs,
-    const at::ArrayRef<c10::optional<Variable>> raw_outputs,
+    const at::ArrayRef<std::optional<Variable>> raw_outputs,
     const std::shared_ptr<Node>& cdata,
     const _jvp_fn_t& jvp_user_function,
     const std::unordered_set<at::TensorImpl*>& to_save_if_setup_context,
@@ -41,7 +41,7 @@ using forward_t = decltype(X::forward(nullptr, std::declval<Args>()...));
 /// `forward` can take as many arguments as you want and should return either a
 /// variable list or a Variable. Use of any direct Variable arguments will be
 /// registered in the graph but no vectors/sets or any other data structures
-/// will be traversed. You can use c10::optional<Tensor> as one of the arguments
+/// will be traversed. You can use std::optional<Tensor> as one of the arguments
 /// and it will be registered as a variable in the graph if the argument has a
 /// value. It should take a pointer to `torch::autograd::AutogradContext` as the
 /// first argument. Variables can be saved in the `ctx` using
@@ -247,7 +247,7 @@ struct ExtractVariables : IterArgs<ExtractVariables> {
   variable_list& list_;
   ExtractVariables(std::vector<bool>& is_var, variable_list& list)
       : is_var_(is_var), list_(list) {}
-  void operator()(const c10::optional<at::Tensor>& x) {
+  void operator()(const std::optional<at::Tensor>& x) {
     // NOLINTNEXTLINE(bugprone-branch-clone)
     if (x.has_value() && x.value().defined()) {
       is_var_.push_back(true);
@@ -282,30 +282,30 @@ inline void extract_vars(
 
 template <typename T>
 std::enable_if_t<std::is_same_v<T, variable_list>, T> to_output_type(
-    std::vector<c10::optional<Variable>>& output_list) {
+    std::vector<std::optional<Variable>>& output_list) {
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   variable_list result;
   std::transform(
       output_list.begin(),
       output_list.end(),
       std::back_inserter(result),
-      [](const c10::optional<Variable>& var) { return *var; });
+      [](const std::optional<Variable>& var) { return *var; });
   return result;
 }
 
 template <typename T>
 std::enable_if_t<std::is_same_v<T, Variable>, T> to_output_type(
-    std::vector<c10::optional<Variable>>& output_list) {
+    std::vector<std::optional<Variable>>& output_list) {
   return *output_list[0];
 }
 
-inline std::vector<c10::optional<Variable>> to_optional(Variable& output) {
-  return std::vector<c10::optional<Variable>>{output};
+inline std::vector<std::optional<Variable>> to_optional(Variable& output) {
+  return std::vector<std::optional<Variable>>{output};
 }
 
-inline std::vector<c10::optional<Variable>> to_optional(variable_list& output) {
+inline std::vector<std::optional<Variable>> to_optional(variable_list& output) {
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  std::vector<c10::optional<Variable>> result;
+  std::vector<std::optional<Variable>> result;
   std::transform(
       output.begin(),
       output.end(),

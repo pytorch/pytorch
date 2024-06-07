@@ -26,10 +26,9 @@ def generate_code(
     force_schema_registration: bool = False,
     operator_selector: Any = None,
 ) -> None:
-    from torchgen.selective_build.selector import SelectiveBuilder
-
     from tools.autograd.gen_annotated_fn_args import gen_annotated
     from tools.autograd.gen_autograd import gen_autograd, gen_autograd_python
+    from torchgen.selective_build.selector import SelectiveBuilder
 
     # Build ATen based Variable classes
     if install_dir is None:

@@ -21,6 +21,7 @@ from ..utils import (
     is_namedtuple,
     istype,
     iter_contains,
+    Lit,
     namedtuple_fields,
     odict_values,
     set_example_value,
@@ -70,6 +71,9 @@ class BaseListVariable(VariableTracker):
     @property
     def value(self):
         return self.as_python_constant()
+
+    def debug_repr_helper(self, prefix, suffix):
+        return prefix + ", ".join(i.debug_repr() for i in self.items) + suffix
 
     def as_python_constant(self):
         return self.python_type()([x.as_python_constant() for x in self.items])
@@ -165,6 +169,9 @@ class RangeVariable(BaseListVariable):
 
         assert stop is not None
         super().__init__([start, stop, step], **kwargs)
+
+    def debug_repr(self):
+        return self.debug_repr_helper("range(", ")")
 
     def python_type(self):
         return range
@@ -274,6 +281,9 @@ class ListVariable(CommonListMethodsVariable):
     def __repr__(self):
         return f"{self.__class__.__name__}(length={len(self.items)})"
 
+    def debug_repr(self):
+        return self.debug_repr_helper("[", "]")
+
     def reconstruct(self, codegen):
         codegen.foreach(self.items)
         codegen.append_output(create_instruction("BUILD_LIST", arg=len(self.items)))
@@ -315,6 +325,9 @@ class ListVariable(CommonListMethodsVariable):
 class DequeVariable(CommonListMethodsVariable):
     def python_type(self):
         return collections.deque
+
+    def debug_repr(self):
+        return self.debug_repr_helper("deque([", "])")
 
     def reconstruct(self, codegen):
         assert "deque" not in codegen.tx.f_globals
@@ -374,6 +387,9 @@ class TupleVariable(BaseListVariable):
     def python_type(self):
         return tuple
 
+    def debug_repr(self):
+        return self.debug_repr_helper("(", ")")
+
     def reconstruct(self, codegen):
         codegen.foreach(self.items)
         codegen.append_output(create_instruction("BUILD_TUPLE", arg=len(self.items)))
@@ -409,6 +425,9 @@ class SizeVariable(TupleVariable):
     ):
         self.proxy = proxy
         super().__init__(items, **kwargs)
+
+    def debug_repr(self):
+        return self.debug_repr_helper("torch.Size([", "])")
 
     def python_type(self):
         return torch.Size
@@ -529,6 +548,9 @@ class SizeVariable(TupleVariable):
             assert isinstance(index, (int, torch.SymInt))
             return self.items[index]
 
+    def call_hasattr(self, tx, name: str) -> "VariableTracker":
+        return variables.ConstantVariable.create(hasattr(torch.Size, name))
+
 
 class NamedTupleVariable(TupleVariable):
     _nonvar_fields = {
@@ -539,6 +561,9 @@ class NamedTupleVariable(TupleVariable):
     def __init__(self, items, tuple_cls, **kwargs):
         super().__init__(items, **kwargs)
         self.tuple_cls = tuple_cls
+
+    def debug_repr(self):
+        return repr(self.tuple_cls(*(Lit(x.debug_repr()) for x in self.items)))
 
     def python_type(self):
         return self.tuple_cls
@@ -609,6 +634,9 @@ class SliceVariable(BaseListVariable):
             unimplemented("Dynamic slicing on data-dependent value is not supported")
 
         super().__init__([start, stop, step], **kwargs)
+
+    def debug_repr(self):
+        return self.debug_repr_helper("slice(", ")")
 
     def as_proxy(self):
         return slice(*self._as_proxy())
@@ -749,6 +777,15 @@ class RestrictedListSubclassVariable(ListVariable):
         self.user_cls_source = user_cls_source
         assert istype(user_cls, type)
         assert isinstance(user_cls_source, Source)
+
+    def debug_repr(self):
+        # The constructor is safe as no methods, including __init__, are
+        # allowed to be overridden
+        # NB: This is guaranteed to print like a list, as __repr__ cannot be
+        # overridden, this is... well, it's OK I guess (consistent with
+        # eager), but it could be misleading.  You will have to query type
+        # instead for details.
+        return repr(self.user_cls([Lit(x.debug_repr()) for x in self.items]))
 
     def python_type(self):
         return self.user_cls

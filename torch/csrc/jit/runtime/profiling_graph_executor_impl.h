@@ -18,7 +18,7 @@ struct TORCH_API ProfilingGraphExecutorImpl : public GraphExecutorImplBase {
 
   const ExecutionPlan& getPlanFor(
       Stack& stack,
-      c10::optional<size_t> remaining_bailout_depth) override;
+      std::optional<size_t> remaining_bailout_depth) override;
   GraphExecutorState getDebugState() override;
   ~ProfilingGraphExecutorImpl() override = default;
 
@@ -31,7 +31,7 @@ struct TORCH_API ProfilingGraphExecutorImpl : public GraphExecutorImplBase {
  private:
   const ExecutionPlan& getOptimizedPlanFor(
       Stack& stack,
-      c10::optional<size_t> remaining_bailout_depth);
+      std::optional<size_t> remaining_bailout_depth);
   void runProfilingInsensitiveOptimizations(std::shared_ptr<Graph>& graph);
   void runProfilingOptimizations(
       std::shared_ptr<Graph>& graph,
@@ -47,13 +47,13 @@ struct TORCH_API ProfilingGraphExecutorImpl : public GraphExecutorImplBase {
   void clearTheGraphCompilationIntermediateGraphs();
 
   std::unique_ptr<ProfilingRecord> pr_;
-  c10::optional<ExecutionPlan>
+  std::optional<ExecutionPlan>
       profiling_plan_; // plan to run in order to profiling the code
-  c10::optional<ExecutionPlan> optimized_plan_;
+  std::optional<ExecutionPlan> optimized_plan_;
   FusionStrategy fusion_strategy_;
 
   // this plan is used if getGraphExecutorOptimize is unset
-  c10::optional<ExecutionPlan> fallback_plan_;
+  std::optional<ExecutionPlan> fallback_plan_;
   // fallback functions are inserted for tensorexpr fusion groups
   // and by specialize_autogradzero. Whenever, at runtime, input
   // tensor don't match profiled properties, fallback functions are called
@@ -63,7 +63,7 @@ struct TORCH_API ProfilingGraphExecutorImpl : public GraphExecutorImplBase {
   // They only exist in the optimized graph which is a private property
   // of the GraphExecutor and only shared with InterpreterState
   std::vector<std::unique_ptr<Function>> fallback_functions_;
-  c10::optional<size_t> remaining_bailout_depth_;
+  std::optional<size_t> remaining_bailout_depth_;
   // The time the optimized_plan_ is created.
   int32_t time_optimized_plan_created_ = 0;
   // Has the extra memory used by the graph for profiling is released?

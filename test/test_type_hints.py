@@ -1,16 +1,18 @@
 # Owner(s): ["module: typing"]
 
-import unittest
-from torch.testing._internal.common_utils import TestCase, run_tests, set_cwd
-import tempfile
-import torch
 import doctest
-import os
 import inspect
+import os
+import tempfile
+import unittest
 from pathlib import Path
+
+import torch
+from torch.testing._internal.common_utils import run_tests, set_cwd, TestCase
 
 try:
     import mypy.api
+
     HAVE_MYPY = True
 except ImportError:
     HAVE_MYPY = False
@@ -22,7 +24,7 @@ def get_examples_from_docstring(docstr):
     in docstrings; returns a list of lines.
     """
     examples = doctest.DocTestParser().get_examples(docstr)
-    return [f'    {l}' for e in examples for l in e.source.splitlines()]
+    return [f"    {l}" for e in examples for l in e.source.splitlines()]
 
 
 def get_all_examples():
@@ -79,7 +81,7 @@ class TestTypeHints(TestCase):
         """
         Run documentation examples through mypy.
         """
-        fn = Path(__file__).resolve().parent / 'generated_type_hints_smoketest.py'
+        fn = Path(__file__).resolve().parent / "generated_type_hints_smoketest.py"
         with open(fn, "w") as f:
             print(get_all_examples(), file=f)
 
@@ -116,23 +118,25 @@ class TestTypeHints(TestCase):
             try:
                 os.symlink(
                     os.path.dirname(torch.__file__),
-                    os.path.join(tmp_dir, 'torch'),
-                    target_is_directory=True
+                    os.path.join(tmp_dir, "torch"),
+                    target_is_directory=True,
                 )
             except OSError:
-                raise unittest.SkipTest('cannot symlink') from None
+                raise unittest.SkipTest("cannot symlink") from None
             repo_rootdir = Path(__file__).resolve().parent.parent
             # TODO: Would be better not to chdir here, this affects the
             # entire process!
             with set_cwd(str(repo_rootdir)):
-                (stdout, stderr, result) = mypy.api.run([
-                    '--cache-dir=.mypy_cache/doc',
-                    '--no-strict-optional',  # needed because of torch.lu_unpack, see gh-36584
-                    str(fn),
-                ])
+                (stdout, stderr, result) = mypy.api.run(
+                    [
+                        "--cache-dir=.mypy_cache/doc",
+                        "--no-strict-optional",  # needed because of torch.lu_unpack, see gh-36584
+                        str(fn),
+                    ]
+                )
             if result != 0:
                 self.fail(f"mypy failed:\n{stderr}\n{stdout}")
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     run_tests()

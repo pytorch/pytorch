@@ -43,30 +43,9 @@ def matmul(A: Optional[Tensor], B: Tensor) -> Tensor:
     return torch.matmul(A, B)
 
 
-def conjugate(A):
-    """Return conjugate of tensor A.
-
-    .. note:: If A's dtype is not complex, A is returned.
-    """
-    if A.is_complex():
-        return A.conj()
-    return A
-
-
-def transpose(A):
-    """Return transpose of a matrix or batches of matrices."""
-    ndim = len(A.shape)
-    return A.transpose(ndim - 1, ndim - 2)
-
-
-def transjugate(A):
-    """Return transpose conjugate of a matrix or batches of matrices."""
-    return conjugate(transpose(A))
-
-
 def bform(X: Tensor, A: Optional[Tensor], Y: Tensor) -> Tensor:
     """Return bilinear form of matrices: :math:`X^T A Y`."""
-    return matmul(transpose(X), matmul(A, Y))
+    return matmul(X.mT, matmul(A, Y))
 
 
 def qform(A: Optional[Tensor], S: Tensor):

@@ -24,18 +24,18 @@ struct TORCH_API CPUGeneratorImpl : public c10::GeneratorImpl {
   static c10::DeviceType device_type();
   uint32_t random();
   uint64_t random64();
-  c10::optional<float> next_float_normal_sample();
-  c10::optional<double> next_double_normal_sample();
-  void set_next_float_normal_sample(c10::optional<float> randn);
-  void set_next_double_normal_sample(c10::optional<double> randn);
+  std::optional<float> next_float_normal_sample();
+  std::optional<double> next_double_normal_sample();
+  void set_next_float_normal_sample(std::optional<float> randn);
+  void set_next_double_normal_sample(std::optional<double> randn);
   at::mt19937 engine();
   void set_engine(at::mt19937 engine);
 
  private:
   CPUGeneratorImpl* clone_impl() const override;
   at::mt19937 engine_;
-  c10::optional<float> next_float_normal_sample_;
-  c10::optional<double> next_double_normal_sample_;
+  std::optional<float> next_float_normal_sample_;
+  std::optional<double> next_double_normal_sample_;
 };
 
 namespace detail {

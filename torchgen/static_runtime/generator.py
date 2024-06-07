@@ -402,7 +402,7 @@ def test_value_expression(
         num_dim = test_tensor_dim(op_name)
         size_per_dim = math.ceil(num_tensors / float(num_dim))
         size_per_dim += size_per_dim % 2
-        tensor_size_ex = "{%s}" % (",".join([f"{size_per_dim}"] * num_dim))
+        tensor_size_ex = "{{{}}}".format(",".join([f"{size_per_dim}"] * num_dim))
     if should_use_int_tensor(op_name):
         tensor_expression = f"at::randint(1, 100, {tensor_size_ex}, at::kInt)"
     elif should_use_complex_tensor(op_name):

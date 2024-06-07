@@ -6,6 +6,7 @@ from collections import defaultdict, namedtuple
 from operator import attrgetter
 
 from typing import Any, Dict, List, Optional, Tuple
+from typing_extensions import deprecated
 
 import torch
 from torch.autograd import DeviceType
@@ -415,6 +416,10 @@ class FormattedTimesMixin:
         return 0.0 if self.count == 0 else 1.0 * self.device_time_total / self.count  # type: ignore[attr-defined]
 
     @property
+    @deprecated(
+        "`cuda_time` is deprecated, please use `device_time` instead.",
+        category=FutureWarning,
+    )
     def cuda_time(self):  # To be deprecated
         return self.device_time
 
@@ -538,8 +543,12 @@ class FunctionEvent(FormattedTimesMixin):
         )
 
     @property
+    @deprecated(
+        "`self_cuda_memory_usage` is deprecated. Use `self_device_memory_usage` instead.",
+        category=FutureWarning,
+    )
     def self_cuda_memory_usage(self):  # To be deprecated
-        self.self_device_memory_usage
+        return self.self_device_memory_usage
 
     @property
     def cpu_time_total(self):
@@ -574,8 +583,12 @@ class FunctionEvent(FormattedTimesMixin):
             return self.time_range.elapsed_us()
 
     @property
+    @deprecated(
+        "`cuda_time_total` is deprecated. Use `device_time_total` instead.",
+        category=FutureWarning,
+    )
     def cuda_time_total(self):  # To be deprecated
-        self.device_time_total
+        return self.device_time_total
 
     @property
     def self_device_time_total(self):
@@ -590,8 +603,12 @@ class FunctionEvent(FormattedTimesMixin):
             return self.device_time_total
 
     @property
+    @deprecated(
+        "`self_cuda_time_total` is deprecated. Use `self_device_time_total` instead.",
+        category=FutureWarning,
+    )
     def self_cuda_time_total(self):  # To be deprecated
-        self.self_device_time_total
+        return self.self_device_time_total
 
     @property
     def key(self):
@@ -877,7 +894,6 @@ def _build_table(
     row_format_lst = [""]
     header_sep_lst = [""]
     line_length_lst = [-SPACING_SIZE]
-    MAX_STACK_ENTRY = 5
 
     def add_column(padding, text_dir=">"):
         row_format_lst[0] += (
@@ -1043,7 +1059,7 @@ def _build_table(
 
         if has_stack:
             empty_headers = [""] * (len(headers) - 1)
-            for entry in evt.stack[1:MAX_STACK_ENTRY]:
+            for entry in evt.stack[1:]:
                 append(
                     row_format.format(
                         *(empty_headers + [trim_path(entry, src_column_width)])

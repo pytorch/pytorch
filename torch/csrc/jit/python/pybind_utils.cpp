@@ -55,7 +55,7 @@ IValue listToIValue(py::handle obj) {
   return c10::impl::toList<T>(rs);
 }
 
-IValue toIValue(py::handle obj, const TypePtr& type, c10::optional<int32_t> N) {
+IValue toIValue(py::handle obj, const TypePtr& type, std::optional<int32_t> N) {
   switch (type->kind()) {
     case TypeKind::TensorType: {
       if (obj.ptr() == Py_None) {
@@ -802,7 +802,7 @@ py::object invokeOperatorFromPython(
     const std::vector<std::shared_ptr<Operator>>& operations,
     py::args args,
     const py::kwargs& kwargs,
-    c10::optional<c10::DispatchKey> dk) {
+    std::optional<c10::DispatchKey> dk) {
   auto [found_op, stack] = getOpWithStack(operations, args, kwargs);
   {
     pybind11::gil_scoped_release no_gil_guard;
@@ -881,7 +881,7 @@ py::object _get_operation_for_overload_or_packet(
     py::args args,
     const py::kwargs& kwargs,
     bool is_overload,
-    c10::optional<c10::DispatchKey> dk) {
+    std::optional<c10::DispatchKey> dk) {
   std::string ns = symbol.ns().toUnqualString();
   std::string method_name = symbol.toUnqualString();
   std::string overload_name = operations[0]->schema().overload_name();

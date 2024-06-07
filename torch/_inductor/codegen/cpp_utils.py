@@ -1,5 +1,7 @@
 import math
 
+from collections import namedtuple
+
 import torch
 
 from .common import ExprPrinter
@@ -9,13 +11,13 @@ DTYPE_TO_CPP = {
     torch.float64: "double",
     torch.float16: "half",
     torch.int64: "int64_t",
-    torch.int32: "int",
-    torch.int16: "short",
-    torch.int8: "signed char",
+    torch.int32: "int32_t",
+    torch.int16: "int16_t",
+    torch.int8: "int8_t",
     torch.uint64: "uint64_t",
-    torch.uint32: "unsigned int",
-    torch.uint16: "unsigned short",
-    torch.uint8: "unsigned char",
+    torch.uint32: "uint32_t",
+    torch.uint16: "uint16_t",
+    torch.uint8: "uint8_t",
     torch.bool: "bool",
     torch.bfloat16: "bfloat16",
     torch.complex64: "complex64",
@@ -53,7 +55,14 @@ DEVICE_TO_ATEN = {
     "cuda": "at::kCUDA",
 }
 
+LAYOUT_TO_ATEN = {
+    torch.strided: "at::kStrided",
+    torch._mkldnn: "at::kMkldnn",  # type: ignore[attr-defined]
+}
+
 INDEX_TYPE = "long"
+
+GemmBlocking = namedtuple("GemmBlocking", ["block_m", "block_n", "block_k"])
 
 
 class CppPrinter(ExprPrinter):
@@ -103,16 +112,19 @@ class CppPrinter(ExprPrinter):
 
         if exp == 0.5 or exp == -0.5:
             return f"std::sqrt({base})" if exp == 0.5 else f"1.0/std::sqrt({base})"
-        assert exp.is_integer
-        exp = int(exp)
-        if exp > 0:
-            r = "*".join([self.paren(base)] * exp)
-        elif exp < 0:
-            r = "1.0/" + self.paren("*".join([self.paren(base)] * abs(exp)))
-        else:  # exp == 0
-            r = "1.0"
+        if exp.is_integer:
+            exp = int(exp)
+            if exp > 0:
+                r = "*".join([self.paren(base)] * exp)
+            elif exp < 0:
+                r = "1.0/" + self.paren("*".join([self.paren(base)] * abs(exp)))
+            else:  # exp == 0
+                r = "1.0"
 
-        return f"static_cast<{INDEX_TYPE}>({r})" if expr.is_integer else r
+            return f"static_cast<{INDEX_TYPE}>({r})" if expr.is_integer else r
+        else:
+            # TODO: float vs double
+            return f"std::pow({base}, {float(exp)})"
 
     def _print_Rational(self, expr):
         # Uses float constants to perform FP div

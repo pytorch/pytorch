@@ -177,6 +177,7 @@ def _get_existing_inline_assertions(
 
             compare_arg = node.args[0]
             if not (
+                isinstance(compare_arg, torch.fx.Node) and
                 compare_arg.op == "call_function" and
                 compare_arg.target in (operator.le, operator.ge) and
                 len(compare_arg.args) == 2
