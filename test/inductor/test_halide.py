@@ -3,6 +3,7 @@ import textwrap
 import unittest
 
 import torch
+import torch._inductor.async_compile  # noqa: F401 required to warm up AsyncCompile pools
 from torch._inductor import config
 from torch._inductor.codecache import HalideCodeCache
 from torch._inductor.runtime.hints import HalideInputSpec, HalideMeta
@@ -29,7 +30,6 @@ except ImportError:
 
 make_halide = config.patch(
     cpu_backend="halide",
-    inplace_buffers=False,  # TODO(jansel): support inplace
     fallback_random=True,  # TODO(jansel): support random
 )
 
@@ -48,7 +48,7 @@ class HalideTests(TestCase):
                         shape=["1024L"],
                     ),
                 ],
-                target="host",
+                target="host-no_runtime",
                 scheduler="Mullapudi2016",
                 scheduler_flags={
                     "parallelism": parallel_num_threads(),

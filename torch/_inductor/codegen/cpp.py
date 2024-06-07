@@ -48,6 +48,7 @@ from ..utils import (
 
 from ..virtualized import NullKernelHandler, ops, OpsValue, V
 from .common import (
+    BackendFeature,
     BracesBuffer,
     CppWrapperKernelArgs,
     CSE,
@@ -275,11 +276,11 @@ def simplify_index_in_vec_range(index: sympy.Expr, var: sympy.Expr, vec_length: 
 
     original_index = index
 
-    div = sympy.Wild("divisor")
+    div = sympy.Wild("divisor", integer=True)
     if index.has(FloorDiv):
         index = index.replace(FloorDiv(var, div), visit_indexing_div)
 
-    mod = sympy.Wild("modulus")
+    mod = sympy.Wild("modulus", integer=True)
     if index.has(ModularIndexing):
         index = index.replace(ModularIndexing(var, div, mod), visit_modular_indexing)
 
@@ -3492,10 +3493,15 @@ class CppScheduling(BaseScheduling):
     # https://github.com/python/cpython/commit/a285af7e626d1b81cf09f8b2bf7656f100bc1237
     # We set a conservative threshold here.
     MAX_FUSED_KERNEL_ARGS_NUM = 500
+    backend_features = dict.fromkeys(
+        [
+            BackendFeature.INPLACE_BUFFERS,
+        ]
+    )
 
     @classmethod
     def get_backend_features(cls, device: torch.device):
-        return ()
+        return cls.backend_features
 
     def __init__(self, scheduler):
         super().__init__()

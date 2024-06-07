@@ -62,7 +62,7 @@ nan_asserts = os.environ.get("TORCHINDUCTOR_NAN_ASSERTS") == "1"
 pick_loop_orders = True
 
 # reuse a kernel input as the output
-inplace_buffers = False
+inplace_buffers = True
 
 # reuse a buffer for an unrelated purpose
 allow_buffer_reuse = True
@@ -420,6 +420,8 @@ _fuse_ddp_communication_passes: List[Union[Callable[..., None], str]] = [
     "fuse_ddp_with_concat_op",
     "schedule_comm_wait",
 ]
+
+_micro_pipeline_tp: bool = False
 
 
 def decide_compile_threads():
@@ -851,7 +853,7 @@ class halide:
     # Halide autoscheduler to use, choices are:
     # "Anderson2021" (gpu-only), "Li2018", "Adams2019" (cpu-only), or "Mullapudi2016" (cpu-only)
     scheduler_cuda = "Anderson2021"
-    scheduler_cpu = "Adams2019"
+    scheduler_cpu = "Mullapudi2016"
 
     # Controls `no_asserts` flag passed to Halide target (warning: can false positive)
     asserts = False

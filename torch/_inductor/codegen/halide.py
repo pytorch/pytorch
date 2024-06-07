@@ -163,6 +163,13 @@ class HalidePrinter(PythonPrinter):
         assert len(expr.args) == 1
         return self.cast_index(f"hl.round({self._print(expr.args[0])})")
 
+    _print_RoundToInt = _print_Round
+
+    def _print_IntTrueDiv(self, expr):
+        a, b = expr.args
+        # force a cast to float
+        return f"({a}) / ({b}+hl.f32(0))"
+
     def _print_RoundDecimal(self, expr):
         val, n = expr.args
         val = self._print(val)
@@ -425,6 +432,10 @@ class HalideOverrides(OpOverrides):
         return f"hl.floor({x})"
 
     @staticmethod
+    def int_truediv(a, b):
+        return f"({a}) / ({b} + hl.f32(0))"
+
+    @staticmethod
     def floordiv(a, b):
         # TODO(jansel): find a better ways to do this, the select-based trick from triton.py didn't work
         return (
@@ -444,7 +455,11 @@ class HalideOverrides(OpOverrides):
 
     @staticmethod
     def truncdiv(a, b):
-        return f"hl.div_round_to_zero({a}, {b})"
+        # this causes crashes with floating point exception, see test_div_zero_dim_cpu
+        # return f"hl.div_round_to_zero({a}, {b})"
+        return (
+            f"hl.trunc(hl.cast(hl.Float(max(32, {a.name}.type().bits())), {a}) / {b})"
+        )
 
     @staticmethod
     def ceil(x):
@@ -547,10 +562,6 @@ class HalideKernel(SIMDKernel):
         reduction_hint=ReductionHint.DEFAULT,
         disable_persistent_reduction=False,
     ):
-        if not config.fallback_random or config.inplace_buffers:
-            raise NotImplementedError(
-                "Halide backend requires: fallback_random=True and inplace_buffers=False"
-            )
         super().__init__(
             *groups,
             index_dtype=index_dtype,
@@ -636,13 +647,35 @@ class HalideKernel(SIMDKernel):
         index = self.prepare_indexing(index)
         index_str = self.index_to_str(index)
         if self.is_indirect_indexing(index) or self._load_mask:
-            # Halide doesn't have a great way to do masked loads
-            var = f"hl.BoundaryConditions.constant_exterior({var}, 0)"
+            last = self.kexpr(self.rename_indexing(self.halide_buffer_numel(name)) - 1)
+            # workaround https://github.com/halide/Halide/issues/8261#issuecomment-2148835692
+            # index_str = f"hl.unsafe_promise_clamped({index_str}, 0, {last})"
+            index_str = f"hl.clamp({index_str}, 0, {last})"
+
         line = f"{var}[{index_str}]"
         dtype = V.graph.get_dtype(name)
         if dtype in (torch.float16, torch.bfloat16):
+            dtype = torch.float32
             line = f"hl.cast(hl.Float(32), {line})"
-        return self.genfunc(line, self.used_dims_from_index(index))
+
+        if self._load_mask:
+            assert (
+                isinstance(self._load_mask, HalideCSEVariable)
+                and self._load_mask.used_dims is not None
+            )
+            all_dims = {*self.used_dims_from_index(index), *self._load_mask.used_dims}
+            result = self.newfunc(
+                [tree.name for tree in self.range_trees if tree.name in all_dims]
+            )
+            self.body.writeline(f"{result.name}_mask = hl.RDom([hl.Range(0, 1)])")
+            self.body.writeline(f"{result.name}_mask.where({self._load_mask})")
+            self.body.writeline(f"{result} = hl.cast({halide_type(dtype)}, 0)")
+            self.body.writeline(
+                f"{result} = {line} + hl.cast({halide_type(dtype)}, {result.name}_mask)"
+            )
+            return result
+        else:
+            return self.genfunc(line, self.used_dims_from_index(index))
 
     def index_to_dom(self, index: sympy.Expr, suffix: str):
         """Replace xindex => xindex_dom, x0 => x0_dom, etc for update-style indexing"""
@@ -679,7 +712,7 @@ class HalideKernel(SIMDKernel):
         hl.RDom()+update codegen.
         """
         assert value.used_dims is not None
-        assert name not in self.store_buffer_dimensions
+        assert var not in self.store_buffer_dimensions
         eq = V.graph.sizevars.statically_known_equals
 
         if index == 0 and eq(self.halide_buffer_numel(name), 1) and mode is None:
@@ -709,7 +742,7 @@ class HalideKernel(SIMDKernel):
         except NotImplementedError:
             pass
         else:
-            self.store_buffer_dimensions[name] = dim_sizes
+            self.store_buffer_dimensions[var] = dim_sizes
             for v in index_vars:
                 self.body.writeline(
                     DeferredLine(name, f"{v.name} = hl.Var({v.name!r})")
@@ -1010,17 +1043,18 @@ class HalideKernel(SIMDKernel):
                 shape = None
                 dtype = "long"
             else:
-                if arg.buffer in self.store_buffer_dimensions and "out" in arg.name:
+                if arg.name in self.store_buffer_dimensions and "out" in arg.name:
                     shape = [
                         cexpr(self.rename_indexing(x))
-                        for x in self.store_buffer_dimensions[arg.buffer]
+                        for x in self.store_buffer_dimensions[arg.name]
                     ]
+                    assert shape
                 else:
                     shape = [
                         cexpr(
                             self.rename_indexing(self.halide_buffer_numel(arg.buffer))
                         )
-                    ]
+                    ] or ["1"]
                 dtype = f"{DTYPE_TO_CPP[arg.dtype]}*"
             argtypes.append(
                 HalideInputSpec(
@@ -1108,7 +1142,7 @@ class HalideKernel(SIMDKernel):
                 assert arg.buffer, arg
                 argcls = "hl.OutputBuffer" if "out" in arg.name else "hl.InputBuffer"
                 argtype = halide_type(arg.dtype)
-                ndim = len(self.store_buffer_dimensions.get(arg.buffer, (0,)))
+                ndim = len(self.store_buffer_dimensions.get(arg.name, (0,)))
                 code.writeline(f"{arg.name} = {argcls}({argtype}, {ndim})")
         code.splice(
             """
@@ -1170,9 +1204,9 @@ class HalideKernel(SIMDKernel):
                 hint = V.graph.sizevars.size_hint(arg.expr, fallback=1)
                 code.writeline(f"{arg.name}.set_estimate({hint})")
             else:
-                if arg.buffer in self.store_buffer_dimensions and "out" in arg.name:
+                if arg.name in self.store_buffer_dimensions and "out" in arg.name:
                     hints = V.graph.sizevars.size_hints(
-                        self.store_buffer_dimensions[arg.buffer], fallback=1
+                        self.store_buffer_dimensions[arg.name], fallback=1
                     )
                 else:
                     hints = V.graph.sizevars.size_hints(
@@ -1194,11 +1228,19 @@ class HalideKernel(SIMDKernel):
             if __name__ == "__main__":
                 hl.main()
             else:
-                with hl.GeneratorContext(
-                    hl.Target({meta.target!r}),
-                    hl.AutoschedulerParams({meta.scheduler!r}, {meta.scheduler_flags!r}
-                )):
-                    kernel = Kernel().compile_to_callable()
+                hl.load_plugin({HalideCodeCache.find_libautoschedule(meta.scheduler)!r})
+                target = hl.Target({meta.target!r})
+                autoscheduler = hl.AutoschedulerParams({meta.scheduler!r}, {meta.scheduler_flags!r})
+                with hl.GeneratorContext(target, autoscheduler):
+                    gen = Kernel()
+                    pipeline = gen._build_pipeline()
+                    # gen.compile_to_callable() does not run the autoscheduler
+                    pipeline.apply_autoscheduler(target, autoscheduler)
+                    kernel = pipeline.compile_to_callable([
+                            gen._get_input_parameter(a.name)._to_argument()
+                            for a in gen._get_arginfos()
+                            if a.dir == hl.ArgInfoDirection.Input
+                        ], target)
             """
         )
         return code.getvalue()
