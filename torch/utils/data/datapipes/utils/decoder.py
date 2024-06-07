@@ -151,7 +151,7 @@ class ImageHandler:
 
         try:
             import numpy as np
-        except ImportError as e:
+        except ModuleNotFoundError as e:
             raise ModuleNotFoundError(
                 "Package `numpy` is required to be installed for default image decoder."
                 "Please use `pip install numpy` to install the package"
@@ -159,7 +159,7 @@ class ImageHandler:
 
         try:
             import PIL.Image
-        except ImportError as e:
+        except ModuleNotFoundError as e:
             raise ModuleNotFoundError(
                 "Package `PIL` is required to be installed for default image decoder."
                 "Please use `pip install Pillow` to install the package"
