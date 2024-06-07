@@ -604,6 +604,9 @@ class Pipe(torch.nn.Module):
         return res
 
     def get_stage_module(self, stage_idx: int) -> torch.nn.Module:
+        """
+        Return a stage module corresponding to `stage_idx` of the `pipe`.
+        """
         if stage_idx < 0 or stage_idx >= self.num_stages:
             raise ValueError(f"Invalid stage index {stage_idx}!")
         return getattr(self.split_gm, f"submod_{stage_idx}")

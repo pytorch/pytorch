@@ -1,14 +1,15 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 # Owner(s): ["oncall: distributed"]
+from model_registry import ModelWithKwargs
+
 import torch
-from torch.distributed.pipelining import pipe_split, pipeline
+from torch.distributed.pipelining import pipeline
 from torch.distributed.pipelining.microbatch import (
     merge_chunks,
     split_args_kwargs_into_chunks,
     TensorChunkSpec,
 )
 from torch.testing._internal.common_utils import run_tests, TestCase
-from model_registry import ModelWithKwargs
 
 
 d_hid = 512
@@ -54,7 +55,6 @@ class MicrobatchTests(TestCase):
         torch.testing.assert_close(merged_kwargs, kwargs)
         print("Microbatch test passed")
 
-
     def test_chunk_spec(self):
         mod = ModelWithKwargs()
         batch_size = ModelWithKwargs.DEFAULT_BATCH_SIZE
@@ -85,6 +85,7 @@ class MicrobatchTests(TestCase):
         out = pipe(x, y)[0]
         torch.testing.assert_close(out, ref)
         print(f"equivalence test passed {torch.sum(out)} ref {torch.sum(ref)}")
+
 
 if __name__ == "__main__":
     run_tests()
