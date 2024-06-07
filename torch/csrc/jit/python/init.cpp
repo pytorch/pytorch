@@ -1200,8 +1200,13 @@ void initJITBindings(PyObject* module) {
       SYMNODE_BINARY(sub)
       SYMNODE_BINARY(mul)
       SYMNODE_BINARY(truediv)
+      SYMNODE_BINARY(int_truediv)
+      SYMNODE_BINARY(float_truediv)
       SYMNODE_BINARY(pow)
+      SYMNODE_BINARY(float_pow)
+      SYMNODE_BINARY(pow_by_natural)
       SYMNODE_BINARY(floordiv)
+      SYMNODE_BINARY(int_floordiv)
       SYMNODE_BINARY(mod)
       SYMNODE_BINARY(eq)
       SYMNODE_BINARY(ne)
@@ -1782,9 +1787,9 @@ void initJITBindings(PyObject* module) {
             args,
             kwargs);
         if (res) {
-          return py::make_tuple(false, py::none());
-        } else {
           return py::make_tuple(true, *res);
+        } else {
+          return py::make_tuple(false, py::none());
         }
       });
 

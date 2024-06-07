@@ -421,6 +421,8 @@ _fuse_ddp_communication_passes: List[Union[Callable[..., None], str]] = [
     "schedule_comm_wait",
 ]
 
+_micro_pipeline_tp: bool = False
+
 
 def decide_compile_threads():
     """
