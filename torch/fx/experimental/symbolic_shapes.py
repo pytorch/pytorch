@@ -3612,6 +3612,7 @@ class ShapeEnv:
         sources,
         source_ref=lambda n: n.name(),
         *,
+        guards: List[ShapeGuard] = None,
         input_contexts: Optional[DimList[SymbolicContext]] = None,
         # Encodes user-specified input shape equations of the form s = s' and s = fn(s').
         # (See docs on EqualityConstraint for details of the encoding.)
@@ -4080,7 +4081,7 @@ class ShapeEnv:
         # First, issue all guards.
         # This removes all the checks that follow from bounds
         # We could simply emit those and also the bounds 2 <= size when necessary
-        for guard in self.guards:
+        for guard in (guards if guards is not None else self.guards):
             if self._maybe_evaluate_static(guard.expr, axioms=()) is not None:
                 continue
             issue_guard(guard)
@@ -4208,10 +4209,18 @@ class ShapeEnv:
             with fx_traceback.preserve_node_meta():
                 PopulateValidator(self.graph, self.validator).run()
 
-        self._check_translation_validate()
+        # Only run translation validation when we are not passing custom guards
+        if guards is None:
+            self._check_translation_validate()
         return exprs
 
-    def produce_guards_expression(self, placeholders, ignore_static=True):
+    def produce_guards_expression(
+        self,
+        placeholders,
+        *,
+        guards: Optional[List[ShapeGuard]] = None,
+        ignore_static=True
+    ):
         """
         Expected to be used with evaluate_guards_expression(). Produces the guards
         for the given placeholders and returns a string expression to be evaluated
@@ -4219,9 +4228,14 @@ class ShapeEnv:
         """
         from torch._dynamo.source import LocalSource
         arg_names = [f"t{i}" for i in range(len(placeholders))]
-        guards = self.produce_guards(placeholders, [LocalSource(a) for a in arg_names], ignore_static=ignore_static)
-        if guards:
-            return " and ".join(guards)
+        produced_guards = self.produce_guards(
+            placeholders,
+            [LocalSource(a) for a in arg_names],
+            guards=guards,
+            ignore_static=ignore_static,
+        )
+        if produced_guards:
+            return " and ".join(produced_guards)
         return None
 
     def evaluate_guards_expression(self, code, args):
@@ -4239,6 +4253,18 @@ class ShapeEnv:
         if code:
             return self.evaluate_guards_expression(code, args)
         return True
+
+    def get_pruned_guards(self, symints):
+        """
+        Get a list of guards, but pruned so it only provides guards that
+        reference symints from the passed in input
+        """
+        symints = {s.node.expr for s in symints if isinstance(s.node.expr, sympy.Symbol)}
+        guards = []
+        for g in self.guards:
+            if all(s in symints for s in g.expr.free_symbols):
+                guards.append(g)
+        return guards
 
     def bind_symbols(self, placeholders, args):
         """
