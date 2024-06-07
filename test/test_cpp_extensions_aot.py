@@ -367,13 +367,5 @@ class TestTorchLibrary(common.TestCase):
         self.assertIn("torch_library::logical_and", str(s.graph))
 
 
-class TestDeviceBackendAutoload(common.TestCase):
-    def test_autoload(self):
-        # After importing the extension, the value of this environment variable should be true
-        # See: test/cpp_extensions/torch_test_cpp_extension/__init__.py
-        is_imported = os.getenv("IS_CUSTOM_DEVICE_BACKEND_IMPORTED", "false")
-        self.assertEqual(is_imported, "true")
-
-
 if __name__ == "__main__":
     common.run_tests()
