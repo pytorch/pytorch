@@ -232,11 +232,12 @@ static void mapP2pBlock(
 #endif
 
 int duplicateRemoteFd(int targetPid, int targetFd) {
-#if defined(SYS_pidfd_open)
+#if defined(SYS_pidfd_open) and defined(SYS_pidfd_getfd)
   int pidfd = syscall(SYS_pidfd_open, targetPid, 0);
   return syscall(SYS_pidfd_getfd, pidfd, targetFd, 0);
 #else
-  TORCH_CHECK(false, "IntraNodeComm requires SYS_pidfd_open support");
+  TORCH_CHECK(
+      false, "IntraNodeComm requires pidfd_open and pidfd_getfd support");
 #endif
 }
 
