@@ -455,7 +455,6 @@ filegroup(
     name = "caffe2_core_srcs",
     srcs = [
         "caffe2/core/common.cc",
-        "caffe2/core/types.cc",
     ],
 )
 
@@ -488,7 +487,6 @@ filegroup(
 filegroup(
     name = "caffe2_utils_srcs",
     srcs = [
-        "caffe2/utils/cpuid.cc",
         "caffe2/utils/proto_wrap.cc",
         "caffe2/utils/string_utils.cc",
         "caffe2/utils/threadpool/ThreadPool.cc",
@@ -507,12 +505,9 @@ cc_library(
     name = "caffe2_for_aten_headers",
     hdrs = [
         "caffe2/core/common.h",
-        "caffe2/core/logging.h",
-        "caffe2/core/types.h",
         "caffe2/perfkernels/common.h",
         "caffe2/perfkernels/embedding_lookup.h",
         "caffe2/perfkernels/embedding_lookup_idx.h",
-        "caffe2/utils/cpuid.h",
         "caffe2/utils/fixed_divisor.h",
     ] + glob([
         "caffe2/utils/threadpool/*.h",
@@ -522,7 +517,6 @@ cc_library(
     deps = [
         ":caffe2_core_macros",
         "//c10",
-        "//caffe2/proto:caffe2_pb",
     ],
 )
 
@@ -547,7 +541,6 @@ cc_library(
     deps = [
         ":caffe2_core_macros",
         ":caffe2_for_aten_headers",
-        "//caffe2/proto:caffe2_pb",
     ],
 )
 
@@ -568,7 +561,6 @@ cc_library(
         ":caffe2_perfkernels_avx",
         ":caffe2_perfkernels_avx2",
         ":caffe2_perfkernels_avx512",
-        "//caffe2/proto:caffe2_pb",
         "//third_party/miniz-2.1.0:miniz",
         "@com_google_protobuf//:protobuf",
         "@eigen",
@@ -777,6 +769,7 @@ cc_library(
         ":caffe2",
         ":torch_headers",
         "@kineto",
+        "@cpp-httplib",
     ] + if_cuda([
         "@cuda//:nvToolsExt",
         "@cutlass",
