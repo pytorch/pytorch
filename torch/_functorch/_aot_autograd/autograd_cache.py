@@ -15,7 +15,7 @@ import shutil
 
 from dataclasses import dataclass
 
-from typing import Any, Callable, List, Optional
+from typing import Any, Callable, List, Optional, TYPE_CHECKING
 
 import torch
 from torch._dynamo.utils import counters
@@ -42,8 +42,6 @@ from torch._subclasses.fake_tensor import (
     TensorMetadata,
 )
 
-from torch.fx.node import Node
-
 from .runtime_wrappers import (
     AOTDispatchAutograd,
     AOTDispatchSubclassWrapper,
@@ -55,6 +53,9 @@ from .runtime_wrappers import (
 )
 
 from .schemas import AOTConfig, ViewAndMutationMeta  # noqa: F401
+
+if TYPE_CHECKING:
+    from torch.fx.node import Node
 
 log = logging.getLogger(__name__)
 
