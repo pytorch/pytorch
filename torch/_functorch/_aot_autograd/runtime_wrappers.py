@@ -383,9 +383,11 @@ def _create_runtime_wrapper(
                 # We need a way to check whether a tensor came from a custom autograd fn from python,
                 # AND a way to replay that custom view fn.
                 regenerated_out = gen_alias_from_base(
-                    aliased_base_tensor, o_, o_grad, info.functional_tensor,
+                    aliased_base_tensor,
+                    o_,
+                    o_grad,
+                    info.functional_tensor,
                     replay_views=replay_views,
-
                 )
                 fw_outs_including_aliases.append(regenerated_out)
             ret_outs = fw_outs_including_aliases
@@ -1017,7 +1019,9 @@ class AOTSyntheticBaseWrapper(CompilerWrapper):
                     inner_base_idx, view_tensor = inner_idx_or_tuple
                     base = primals[inner_base_idx]
                     view_arg = gen_alias_from_base(
-                        base, view_tensor, view_tensor.requires_grad,
+                        base,
+                        view_tensor,
+                        view_tensor.requires_grad,
                         replay_views=replay_views,
                     )
                     f_args_inner.append(view_arg)
