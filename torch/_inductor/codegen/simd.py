@@ -705,30 +705,22 @@ class SIMDKernel(Kernel):
         return expr
 
     @contextlib.contextmanager
-    def mask_loads(self, mask):
+    def mask_loads(self, mask, value):
         """Context manager to add an additional mask to tl.load/store"""
         prior = self._load_mask
+        prior_val = self._other_val
         if prior:
             mask = ops.logical_and(mask, prior)
 
         mask = OpsWrapper._unwrap(mask)
         self._load_mask = mask
+        self._other_val = value
         try:
             # TODO(jansel): do we need a reshape here?
             yield mask
         finally:
             self._load_mask = prior
-
-    @contextlib.contextmanager
-    def load_other(self, value):
-        """Context manager to add a fallback value to tl.load"""
-        prior = self._other_val
-        assert prior is None
-        self._other_val = value
-        try:
-            yield value
-        finally:
-            self._other_val = None
+            self._other_val = prior_val
 
     def get_strides_of_load(self, index: sympy.Expr):
         """

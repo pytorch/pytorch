@@ -8106,9 +8106,7 @@ class LoopBodyBlock:
                 )
 
             @staticmethod
-            def masked(
-                mask_proxy, masked_body: Callable[..., Any], other_proxy, is_pure=False
-            ):
+            def masked(mask_proxy, masked_body: Callable[..., Any], other_proxy):
                 """
                 Recursively capture the masked out body in another LoopBodyBlock
                 """
@@ -8116,7 +8114,7 @@ class LoopBodyBlock:
                 subblock: LoopBodyBlock
 
                 def shim(mask, other):
-                    return V.ops.masked(mask, subblock, other, is_pure=is_pure)
+                    return V.ops.masked(mask, subblock, other)
 
                 name = self.body.add_submodule(shim, "masked_subblock")
                 subblock = LoopBodyBlock(self.body, masked_body, [])

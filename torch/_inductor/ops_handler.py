@@ -102,17 +102,14 @@ class OpsHandler(Protocol[T]):
         """Computes inductor_prims.randint.  offset has dtype int32."""
         ...
 
-    def masked(
-        self, mask: T, body: Callable[[], T], other: T, is_pure: bool = False
-    ) -> T:
+    def masked(self, mask: T, body: Callable[[], T], other: T) -> T:
         """
         Computes body, but only perform loads/stores if the boolean mask
         evaluates to true.  For example, you would use this if you needed to
         perform an indirect load that may not be valid on some elements;
         without masking, invalid accesses can cause IMAs.  When mask is true,
-        the result is the result of body; otherwise it is other.
-        When is_pure is True, the body only has the load operation and can be
-        used for optimizing the operation.
+        the result is the result of body; otherwise it is other. Here, `other`
+        needs to be a constant.
 
         Contrast this with ops.where, which can multiplex between two values
         that have been unconditionally computed.
@@ -690,7 +687,7 @@ class NoopHandler:
         return inner
 
     @staticmethod
-    def masked(mask, body, other, is_pure=False) -> None:
+    def masked(mask, body, other) -> None:
         return None
 
     @staticmethod
@@ -724,7 +721,7 @@ class MockHandler:
         return inner
 
     @staticmethod
-    def masked(mask, body, other, is_pure=False) -> str:
+    def masked(mask, body, other) -> str:
         return f"ops.masked({mask}, {body()}, {other})"
 
     @staticmethod

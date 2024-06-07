@@ -608,7 +608,7 @@ class TritonOverrides(OpOverrides):
         raise NotImplementedError("ops.index_expr not implemented outside a kernel")
 
     @staticmethod
-    def masked(mask, body, other, is_pure=False):
+    def masked(mask, body, other):
         raise NotImplementedError("ops.masked not implemented outside a kernel")
 
     @staticmethod
@@ -870,13 +870,30 @@ class TritonKernelOverrides(TritonOverrides):
         return var
 
     @staticmethod
-    def masked(mask, body, other, is_pure=False):
-        if is_pure:
-            with V.kernel.mask_loads(mask) as new_mask, V.kernel.load_other(other):
-                return body()
+    def masked(mask, body, other):
+        handler = V.get_ops_handler()
+        found_non_load = False
+        load_count = 0
 
-        with V.kernel.mask_loads(mask) as new_mask:
+        class FindLoad:
+            def __getattr__(self, name: str) -> Callable[..., CSEVariable]:
+                def inner(*args, **kwargs):
+                    nonlocal found_non_load, load_count
+                    if name != "load":
+                        found_non_load = True
+                    else:
+                        load_count += 1
+                    return getattr(handler, name)(*args, **kwargs)
+
+                return inner
+
+        with V.kernel.mask_loads(mask, value=other) as new_mask, V.set_ops_handler(
+            FindLoad()
+        ):
             result = body()
+
+        if not found_non_load and load_count == 1:
+            return result
 
         # Remove once CSEVariables track the dtype
         if result.bounds.is_bool:
@@ -1716,6 +1733,7 @@ class TritonKernel(SIMDKernel):
                         helper,
                         getattr(overrides, name)(*args, **kwargs),
                     )
+                    return self.inner(*args, **kwargs)
 
                 return inner
 
