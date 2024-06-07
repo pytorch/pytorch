@@ -5,6 +5,7 @@ This module defines runtime wrappers, which, based on previous analysis attempts
 3. handle functionalized randomness
 4. deduplicate inputs and consolidate views into their bases (see input_output_analysis)
 """
+import builtins
 import collections
 import pprint
 from contextlib import nullcontext
@@ -181,10 +182,13 @@ def _create_runtime_wrapper(
             assert isinstance(info.base_idx, int)
             epilogue_args_idx.append(info.base_idx + num_tokens)
 
+    if config.unlift_effect_tokens:
+        assert num_tokens == 0
+
+    replay_views = config.view_replay_for_aliased_outputs
+
     def runtime_wrapper(args: List[Any]):
-        if config.unlift_effect_tokens:
-            assert num_tokens == 0
-        elif num_tokens > 0:
+        if num_tokens > 0:
             # Pass in effect tokens (See Note [Side-Effectful Tokens in AOTAutograd])
             old_args = args
             args = [[None] * num_tokens, *args]
@@ -329,8 +333,8 @@ def _create_runtime_wrapper(
                 runtime_metadata.output_info
             )
             fw_outs_including_aliases = []
-            for i, (o, info) in enumerate(
-                zip(fw_outs_no_intermediate_bases, runtime_metadata.output_info)
+            for o, info in builtins.zip(
+                fw_outs_no_intermediate_bases, runtime_metadata.output_info
             ):
                 if info.output_type in [
                     OutputType.non_alias,
@@ -345,16 +349,20 @@ def _create_runtime_wrapper(
                 else:
                     o_ = o
 
-                o_grad = runtime_metadata.output_info[i].requires_grad
+                o_grad = info.requires_grad
                 if info.output_type == OutputType.alias_of_input:
-                    aliased_base_tensor = orig_inputs[info.base_idx + num_tokens]  # type: ignore[index]
+                    aliased_base_tensor = orig_inputs[info.base_idx + num_tokens]  # type: ignore[index, operator]
                     regenerated_out = gen_alias_from_base(
-                        aliased_base_tensor, o_, o_grad, info.functional_tensor
+                        aliased_base_tensor,
+                        o_,
+                        o_grad,
+                        info.functional_tensor,
+                        replay_views=replay_views,
                     )
                     fw_outs_including_aliases.append(regenerated_out)
                     continue
                 elif info.output_type == OutputType.is_input:
-                    aliased_base_tensor = orig_inputs[info.base_idx + num_tokens]  # type: ignore[index]
+                    aliased_base_tensor = orig_inputs[info.base_idx + num_tokens]  # type: ignore[index, operator]
                     regenerated_out = aliased_base_tensor
                     fw_outs_including_aliases.append(regenerated_out)
                     continue
@@ -375,7 +383,9 @@ def _create_runtime_wrapper(
                 # We need a way to check whether a tensor came from a custom autograd fn from python,
                 # AND a way to replay that custom view fn.
                 regenerated_out = gen_alias_from_base(
-                    aliased_base_tensor, o_, o_grad, info.functional_tensor
+                    aliased_base_tensor, o_, o_grad, info.functional_tensor,
+                    replay_views=replay_views,
+
                 )
                 fw_outs_including_aliases.append(regenerated_out)
             ret_outs = fw_outs_including_aliases
@@ -996,6 +1006,8 @@ class AOTSyntheticBaseWrapper(CompilerWrapper):
             aliased_arg_idx_with_metadata_mutations
         )
 
+        replay_views = config.view_replay_for_aliased_outputs
+
         def _unpack_synthetic_bases(primals: Tuple[Any, ...]) -> List[Any]:
             f_args_inner = []
             for inner_idx_or_tuple in synthetic_base_info:
@@ -1005,7 +1017,8 @@ class AOTSyntheticBaseWrapper(CompilerWrapper):
                     inner_base_idx, view_tensor = inner_idx_or_tuple
                     base = primals[inner_base_idx]
                     view_arg = gen_alias_from_base(
-                        base, view_tensor, view_tensor.requires_grad
+                        base, view_tensor, view_tensor.requires_grad,
+                        replay_views=replay_views,
                     )
                     f_args_inner.append(view_arg)
             return f_args_inner
