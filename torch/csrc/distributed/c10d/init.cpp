@@ -1017,9 +1017,9 @@ Example::
                  const std::string& desired_value) -> py::bytes {
                 std::vector<uint8_t> value;
                 {
-                    py::call_guard<py::gil_scoped_release>();
-                    value = store.compareSet(
-                        key, toVec8(expected_value), toVec8(desired_value));
+                  py::call_guard<py::gil_scoped_release>();
+                  value = store.compareSet(
+                      key, toVec8(expected_value), toVec8(desired_value));
                 }
                 return toPyBytes(value);
               },
