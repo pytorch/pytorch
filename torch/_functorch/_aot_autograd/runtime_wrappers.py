@@ -5,6 +5,7 @@ This module defines runtime wrappers, which, based on previous analysis attempts
 3. handle functionalized randomness
 4. deduplicate inputs and consolidate views into their bases (see input_output_analysis)
 """
+import builtins
 import collections
 import pprint
 from contextlib import nullcontext
@@ -181,10 +182,13 @@ def _create_runtime_wrapper(
             assert isinstance(info.base_idx, int)
             epilogue_args_idx.append(info.base_idx + num_tokens)
 
+    if config.unlift_effect_tokens:
+        assert num_tokens == 0
+
+    replay_views = config.view_replay_for_aliased_outputs
+
     def runtime_wrapper(args: List[Any]):
-        if config.unlift_effect_tokens:
-            assert num_tokens == 0
-        elif num_tokens > 0:
+        if num_tokens > 0:
             # Pass in effect tokens (See Note [Side-Effectful Tokens in AOTAutograd])
             old_args = args
             args = [[None] * num_tokens, *args]
@@ -329,8 +333,8 @@ def _create_runtime_wrapper(
                 runtime_metadata.output_info
             )
             fw_outs_including_aliases = []
-            for i, (o, info) in enumerate(
-                zip(fw_outs_no_intermediate_bases, runtime_metadata.output_info)
+            for o, info in builtins.zip(
+                fw_outs_no_intermediate_bases, runtime_metadata.output_info
             ):
                 if info.output_type in [
                     OutputType.non_alias,
@@ -345,11 +349,15 @@ def _create_runtime_wrapper(
                 else:
                     o_ = o
 
-                o_grad = runtime_metadata.output_info[i].requires_grad
+                o_grad = info.requires_grad
                 if info.output_type == OutputType.alias_of_input:
                     aliased_base_tensor = orig_inputs[info.base_idx + num_tokens]  # type: ignore[index]
                     regenerated_out = gen_alias_from_base(
-                        aliased_base_tensor, o_, o_grad, info.functional_tensor
+                        aliased_base_tensor,
+                        o_,
+                        o_grad,
+                        info.functional_tensor,
+                        replay_views=replay_views,
                     )
                     fw_outs_including_aliases.append(regenerated_out)
                     continue
