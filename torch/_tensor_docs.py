@@ -1228,9 +1228,16 @@ different device.
 
 Args:
     src (Tensor): the source tensor to copy from
-    non_blocking (bool): if ``True`` and this copy is between CPU and GPU,
-        the copy may occur asynchronously with respect to the host. For other
-        cases, this argument has no effect.
+    non_blocking (bool): if ``True`` the source is on a different device than the
+        destination, the copy may occur asynchronously with respect to the host.
+        For other cases, this argument has no effect. Defaults to ``False``.
+
+.. warning:: When ``non_blocking=True``, a subsequent access to the tensor data
+    after a device to CUDA transfer will trigger a CUDA stream synchronization.
+    In all other cases (CUDA to CPU or other device transfer) a call to ``synchronize``
+    is required for safe data access. Not calling ``torch.<device>.synchronize()``
+    will result in silent errors.
+
 """,
 )
 
@@ -1400,9 +1407,10 @@ then no copy is performed and the original object is returned.
 Args:
     device (:class:`torch.device`): The destination GPU device.
         Defaults to the current CUDA device.
-    non_blocking (bool): If ``True`` and the source is in pinned memory,
-        the copy will be asynchronous with respect to the host.
-        Otherwise, the argument has no effect. Default: ``False``.
+    non_blocking (bool): If ``True`` and the source and destination are on different
+        devices, the copy will be asynchronous with respect to the host. Otherwise,
+        the argument has no effect. This call doesn't require an explicit call to
+        :func:`~torch.cuda.synchronize`. Defaults to ``False``.
     {memory_format}
 """.format(
         **common_args
@@ -1422,10 +1430,16 @@ then no copy is performed and the original object is returned.
 Args:
     device (:class:`torch.device`): The destination IPU device.
         Defaults to the current IPU device.
-    non_blocking (bool): If ``True`` and the source is in pinned memory,
-        the copy will be asynchronous with respect to the host.
-        Otherwise, the argument has no effect. Default: ``False``.
+    non_blocking (bool): if ``True`` the source is on a different device than the
+        destination, the copy may occur asynchronously with respect to the host.
+        For other cases, this argument has no effect. Defaults to ``False``.
     {memory_format}
+
+.. warning:: When ``non_blocking=True``, a subsequent access to the tensor data
+    after a device to CUDA transfer will trigger a CUDA stream synchronization.
+    In all other cases (CUDA to CPU or other device transfer) a call to ``synchronize``
+    is required for safe data access. Not calling ``torch.<device>.synchronize()``
+    will result in silent errors.
 """.format(
         **common_args
     ),
@@ -1444,10 +1458,16 @@ then no copy is performed and the original object is returned.
 Args:
     device (:class:`torch.device`): The destination XPU device.
         Defaults to the current XPU device.
-    non_blocking (bool): If ``True`` and the source is in pinned memory,
-        the copy will be asynchronous with respect to the host.
-        Otherwise, the argument has no effect. Default: ``False``.
+    non_blocking (bool): if ``True`` the source is on a different device than the
+        destination, the copy may occur asynchronously with respect to the host.
+        For other cases, this argument has no effect. Defaults to ``False``.
     {memory_format}
+
+.. warning:: When ``non_blocking=True``, a subsequent access to the tensor data
+    after a device to CUDA transfer will trigger a CUDA stream synchronization.
+    In all other cases (CUDA to CPU or other device transfer) a call to ``synchronize``
+    is required for safe data access. Not calling ``torch.<device>.synchronize()``
+    will result in silent errors.
 """.format(
         **common_args
     ),
@@ -6004,12 +6024,17 @@ original object is returned.
 
 Args:
     dtype (dtype or string): The desired type
-    non_blocking (bool): If ``True``, and the source is in pinned memory
-        and destination is on the GPU or vice versa, the copy is performed
-        asynchronously with respect to the host. Otherwise, the argument
-        has no effect.
+    non_blocking (bool): if ``True`` the source is on a different device than the
+        destination, the copy may occur asynchronously with respect to the host.
+        For other cases, this argument has no effect. Defaults to ``False``.
     **kwargs: For compatibility, may contain the key ``async`` in place of
         the ``non_blocking`` argument. The ``async`` arg is deprecated.
+
+.. warning:: When ``non_blocking=True``, a subsequent access to the tensor data
+    after a device to CUDA transfer will trigger a CUDA stream synchronization.
+    In all other cases (CUDA to CPU or other device transfer) a call to ``synchronize``
+    is required for safe data access. Not calling ``torch.<device>.synchronize()``
+    will result in silent errors.
 """,
 )
 

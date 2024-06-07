@@ -47,9 +47,11 @@ class _StorageBase:
 
         Args:
             device (int): The destination GPU id. Defaults to the current device.
-            non_blocking (bool): If ``True`` and the source is in pinned memory,
-                the copy will be asynchronous with respect to the host. Otherwise,
-                the argument has no effect.
+            non_blocking (bool): If ``True`` and the source and destination are on different
+                devices, the copy will be asynchronous with respect to the host. Otherwise,
+                the argument has no effect. This call doesn't require an explicit call to
+                :func:`~torch.cuda.synchronize`. Defaults to ``False``.
+
         """
         device2 = torch.device('cuda', device) if device else torch.device('cuda')
         return self.to(device=device2, non_blocking=non_blocking)
@@ -62,9 +64,16 @@ class _StorageBase:
 
         Args:
             device (int): The destination HPU id. Defaults to the current device.
-            non_blocking (bool): If ``True`` and the source is in pinned memory,
-                the copy will be asynchronous with respect to the host. Otherwise,
-                the argument has no effect.
+            non_blocking (bool): If ``True``, and source and destination are on
+                different devices, the copy is performed asynchronously with
+                respect to the host. Otherwise, the argument has no effect.
+                Defaults to ``False``.
+
+                .. warning:: When ``non_blocking=True``, subsequent access to the tensor data
+                    after a device to CUDA transfer will trigger a CUDA stream synchronization.
+                    In all other cases (CUDA to CPU or other device transfer) a call to ``synchronize``
+                    is required for safe data access. Not calling ``torch.<device>.synchronize()``
+                    will result in silent errors.
         """
         device2 = torch.device('hpu', device) if device else torch.device('hpu')
         return self.to(device=device2, non_blocking=non_blocking)
