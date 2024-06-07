@@ -1790,6 +1790,11 @@ def fwd_only(
     # TODO - look into using aot autograd, asserting no mutating ops here
     with enable_python_dispatcher():
         gm = make_fx(fn, select_decomp_table(), tracing_mode="real")(*args)
+
+    from .fx_passes.post_grad import remove_noop_ops
+
+    remove_noop_ops(gm.graph)
+
     if run_dce:
         gm.graph.eliminate_dead_code()
     gm.recompile()
@@ -1821,6 +1826,7 @@ def joint_fwd_bwd(fn: Callable[..., Any], args: Sequence[Any]) -> torch.fx.Graph
     assert gm
 
     from .fx_passes.post_grad import remove_noop_ops
+
     remove_noop_ops(gm.graph)
 
     from .fx_passes.joint_graph import pointless_view
