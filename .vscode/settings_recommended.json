@@ -1,0 +1,17 @@
+{
+    "[python]": {
+        "editor.tabSize": 4
+    },
+    "files.associations": {
+        "*.py.in": "python",
+        "*.pyi.in": "python",
+        "editor.defaultFormatter": "omnilib.ufmt"
+    },
+    "files.eol": "\n",
+    "files.insertFinalNewline": true,
+    "files.trimFinalNewlines": true,
+    "files.trimTrailingWhitespace": true,
+    "python.formatting.provider": "none",
+    "python.linting.enabled": true,
+    "python.linting.flake8Enabled": true
+}
