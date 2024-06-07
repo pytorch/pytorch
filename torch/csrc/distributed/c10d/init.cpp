@@ -1015,11 +1015,14 @@ Example::
                  const std::string& key,
                  const std::string& expected_value,
                  const std::string& desired_value) -> py::bytes {
-                auto value = store.compareSet(
-                    key, toVec8(expected_value), toVec8(desired_value));
+                std::vector<uint8_t> value;
+                {
+                    py::call_guard<py::gil_scoped_release>();
+                    value = store.compareSet(
+                        key, toVec8(expected_value), toVec8(desired_value));
+                }
                 return toPyBytes(value);
               },
-              py::call_guard<py::gil_scoped_release>(),
               R"(
 Inserts the key-value pair into the store based on the supplied ``key`` and
 performs comparison between ``expected_value`` and ``desired_value`` before inserting. ``desired_value``
