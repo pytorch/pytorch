@@ -270,9 +270,11 @@ def override_composite_implicit_decomp():
                         torch._C.DispatchKey.AutogradCUDA,
                         torch._C.DispatchKey.AutogradMeta,
                     ]:
-                        op_overload.py_impl(override_dispatch_key)(
-                            torch._C.DispatchKey.Autograd
-                        )
+                        if override_dispatch_key not in op_overload.py_kernels:
+                            op_overload.py_impl(override_dispatch_key)(
+                                torch._C.DispatchKey.CompositeImplicitAutograd
+                            )
+                            
     try:
         yield
     finally:

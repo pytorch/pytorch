@@ -64,7 +64,7 @@ try:
     from torchrec.sparse.jagged_tensor import KeyedJaggedTensor
 
     HAS_TORCHREC = True
-except ImportError:
+except (ImportError, AttributeError):
     HAS_TORCHREC = False
 
 try:
@@ -642,6 +642,33 @@ class TestExport(TestCase):
             if node.op == "call_function":
                 actual_result.append(node.meta.get("torch_fn"))
         self.assertEqual(actual_result, expected_result)
+
+    def test_export_preserve_linear_at_aot_level(self):
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(3, 3)
+
+            def forward(self, x):
+                x = self.linear(x)
+                return torch.ops.aten.chunk.default(x, 3, 0)
+
+        gm = torch.export._trace._export(
+            Foo(), (torch.randn(3, 3),), pre_dispatch=False
+        ).graph_module
+        # linear is CompositeImplicitAutograd functional op so we should preserve it
+        # chunk is CompositeImplicitAutograd non-functional op we decompose.
+        self.assertExpectedInline(
+            str(gm.code).strip(),
+            """\
+def forward(self, p_linear_weight, p_linear_bias, x):
+    linear = torch.ops.aten.linear.default(x, p_linear_weight, p_linear_bias);  x = p_linear_weight = p_linear_bias = None
+    split = torch.ops.aten.split.Tensor(linear, 1);  linear = None
+    getitem = split[0]
+    getitem_1 = split[1]
+    getitem_2 = split[2];  split = None
+    return (getitem, getitem_1, getitem_2)""",
+        )
 
     # TODO(yidi)
     # Expected failure for test cases that calls run_decomposition().
