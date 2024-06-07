@@ -46,7 +46,8 @@ def check_dynamic_shape_capture():
 
 
 def count_ops(gm, args, freq, op):
-    assert [node.target for node in gm.graph.nodes].count(op) == freq
+    actual = [node.target for node in gm.graph.nodes].count(op)
+    assert actual == freq, f"expected={freq}, actual={actual}"
     return gm
 
 
@@ -6036,8 +6037,9 @@ class ActivationCheckpointingTests(torch._dynamo.test_case.TestCase):
         fw_compiler = functools.partial(
             count_ops, freq=1, op=torch.ops.rngprims.philox_rand.default
         )
+        # we should recompute dropout in bwd, and philox_rand is passed from fwd
         bw_compiler = functools.partial(
-            count_ops, freq=1, op=torch.ops.rngprims.philox_rand.default
+            count_ops, freq=0, op=torch.ops.rngprims.philox_rand.default
         )
         backend = aot_autograd(fw_compiler=fw_compiler, bw_compiler=bw_compiler)
         self._validate(

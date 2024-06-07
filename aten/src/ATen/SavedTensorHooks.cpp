@@ -74,6 +74,7 @@ std::pair<PyObject*, PyObject*> SavedTensorDefaultHooks::pop_hooks() {
 }
 
 std::pair<PyObject*, PyObject*> SavedTensorDefaultHooks::get_hooks() {
+  // For tls.is_tracing, see NOTE: [Deferring tensor pack/unpack hooks until runtime]
   if (!is_initialized || tls.stack.empty() || tls.is_tracing) {
     return std::make_pair(nullptr, nullptr);
   }

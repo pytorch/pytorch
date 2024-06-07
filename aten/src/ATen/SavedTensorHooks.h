@@ -51,8 +51,10 @@ struct TORCH_API SavedTensorDefaultHooks {
 
   // NOTE: [Deferring tensor pack/unpack hooks until runtime]
   // To preserve eager semantics of pack/unpack hooks firing only once per saved
-  // variable, Dynamo/AOTAutograd need to defer hook firing until runtime. To do
-  // so, we disable these hooks during tracing. See
+  // variable, Dynamo/AOTAutograd need to defer hook firing until runtime. Using
+  // disable() would loud error at trace time, and pushing a no-op hook would
+  // fail when the traced code is wrapped in a disable_saved_tensors_hooks ctx.
+  // To do so, we disable these hooks during tracing. See
   // https://github.com/pytorch/pytorch/issues/113263.
   static bool set_tracing(bool is_tracing);
 };
