@@ -1386,6 +1386,7 @@ class _MakefxTracer:
             self.tracing_mode,
             self._allow_non_fake_inputs,
             self.pre_dispatch,
+            self.export_inference,
             self.record_module_stack,
             self._allow_fake_constant,
             self._error_on_data_dependent_ops
