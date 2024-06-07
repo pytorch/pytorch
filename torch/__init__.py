@@ -99,13 +99,13 @@ if platform.system() == 'Windows':
 
         dll_paths = [p for p in (th_dll_path, py_dll_path, base_py_dll_path, usebase_path) if os.path.exists(p)]
 
-        if not any(os.path.exists(os.path.join(p, 'nvToolsExt64_1.dll')) for p in dll_paths):
+        if not builtins.any(os.path.exists(os.path.join(p, 'nvToolsExt64_1.dll')) for p in dll_paths):
             nvtoolsext_dll_path = os.path.join(
                 os.getenv('NVTOOLSEXT_PATH', os.path.join(pfiles_path, 'NVIDIA Corporation', 'NvToolsExt')), 'bin', 'x64')
         else:
             nvtoolsext_dll_path = ''
 
-        if cuda_version and all(not glob.glob(os.path.join(p, 'cudart64*.dll')) for p in dll_paths):
+        if cuda_version and builtins.all(not glob.glob(os.path.join(p, 'cudart64*.dll')) for p in dll_paths):
             cuda_version_1 = cuda_version.replace('.', '_')
             cuda_path_var = 'CUDA_PATH_V' + cuda_version_1
             default_path = os.path.join(pfiles_path, 'NVIDIA GPU Computing Toolkit', 'CUDA', 'v' + cuda_version)
