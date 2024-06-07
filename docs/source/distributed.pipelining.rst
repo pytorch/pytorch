@@ -180,8 +180,7 @@ You can also create a distributed stage runtime on a device using ``Pipe``:
 .. code-block:: python
 
   from torch.distributed.pipelining import PipelineStage
-
-  stage = PipelineStage(pipe, stage_idx, device)
+  stage = TracerPipelineStage(pipe, stage_idx, device)
 
 .. note::
   The ``pipeline`` frontend uses a tracer (``torch.export``) to capture your
@@ -348,7 +347,7 @@ Pipeline Stages
 
 .. autoclass:: PipelineStage
 
-.. autoclass:: ManualPipelineStage
+.. autoclass:: TracerPipelineStage
 
 Pipeline Schedules
 ==================
