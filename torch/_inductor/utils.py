@@ -1465,6 +1465,7 @@ def get_cloned_parameter_buffer_name(name: str):
 
 
 def is_gpu(device: str):
+    assert isinstance(device, str)
     return device in ["cuda", "xpu"]
 
 

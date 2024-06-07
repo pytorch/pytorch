@@ -1,3 +1,4 @@
+import functools
 import itertools
 import logging
 import operator
@@ -44,15 +45,13 @@ from torch.utils._mode_utils import no_dispatch
 
 from . import config, ir
 from .codegen.common import (
+    BackendFeature,
     DeviceOpOverrides,
+    get_backend_features,
     get_device_op_overrides,
-    get_scheduling_for_device,
     get_wrapper_codegen_for_device,
-    register_backend_for_device,
+    init_backend_registration,
 )
-from .codegen.cpp_wrapper_cpu import CppWrapperCpu
-from .codegen.cpp_wrapper_cuda import CppWrapperCuda
-from .codegen.wrapper import WrapperCodeGen
 from .exc import (
     CppWrapperCodeGenError,
     LoweringException,
@@ -62,6 +61,7 @@ from .exc import (
 from .ir import (
     Constant,
     FixedLayout,
+    get_device_type,
     InputBuffer,
     Pointwise,
     Reduction,
@@ -93,6 +93,7 @@ from .virtualized import NullHandler, V
 
 if TYPE_CHECKING:
     from torch._higher_order_ops.effects import _EffectType
+    from .codegen.wrapper import WrapperCodeGen
 
 log = logging.getLogger(__name__)
 perf_hint_log = torch._logging.getArtifactLogger(__name__, "perf_hints")
@@ -270,27 +271,6 @@ class GraphLowering(torch.fx.Interpreter):
         stride = [sympy.Integer(i) for i in ex.stride()]
         return size, stride
 
-    def init_backend_registration(self):
-        if get_scheduling_for_device("cpu") is None:
-            from .codegen.cpp import CppScheduling
-
-            register_backend_for_device(
-                "cpu", CppScheduling, WrapperCodeGen, CppWrapperCpu
-            )
-
-        if get_scheduling_for_device("cuda") is None:
-            from .codegen.cuda_combined_scheduling import CUDACombinedScheduling
-
-            # CUDACombinedScheduling combines Triton and CUDA C++ scheduling for CUDA devices via delegation
-            register_backend_for_device(
-                "cuda", CUDACombinedScheduling, WrapperCodeGen, CppWrapperCuda
-            )
-
-        if get_scheduling_for_device("xpu") is None:
-            from .codegen.triton import TritonScheduling
-
-            register_backend_for_device("xpu", TritonScheduling, WrapperCodeGen)
-
     def __init__(
         self,
         gm: torch.fx.GraphModule,
@@ -418,11 +398,15 @@ class GraphLowering(torch.fx.Interpreter):
         self.allocated_constant_name = (
             const_module.allocated_constant_name if const_module is not None else {}
         )
-        self.init_backend_registration()
+        init_backend_registration()
+        self.get_backend_features = functools.lru_cache(None)(get_backend_features)
 
         self.effectful_ops: Dict[_EffectType, ir.Buffer] = {}
-
         self.aligned_inputs: Set[str] = set()
+
+    def has_feature(self, device, feature):
+        assert isinstance(feature, BackendFeature), feature
+        return feature in self.get_backend_features(get_device_type(device))
 
     @staticmethod
     def decide_layout_opt(gm, *, is_inference) -> bool:
