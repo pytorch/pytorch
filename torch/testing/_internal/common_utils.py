@@ -14,6 +14,7 @@ import ctypes
 import errno
 import functools
 import gc
+import hashlib
 import inspect
 import io
 import json
@@ -292,20 +293,39 @@ def clear_tracked_input():
 # Wraps an iterator and tracks the most recent value the iterator produces
 # for debugging purposes. Tracked values are stored on the test function.
 class TrackedInputIter:
-    def __init__(self, child_iter, input_type_desc, callback=lambda x: x):
+    def __init__(self, child_iter, input_type_desc,
+                 callback=lambda x: x, set_seed=True, restrict_to_index=None):
         self.child_iter = enumerate(child_iter)
         # Input type describes the things we're tracking (e.g. "sample input", "error input").
         self.input_type_desc = input_type_desc
         # Callback is run on each iterated thing to get the thing to track.
         self.callback = callback
         self.test_fn = extract_test_fn()
+        # Indicates whether the random seed should be set before each call to the iterator
+        self.set_seed = set_seed
+        # Indicates that iteration should be restricted to only the provided index.
+        # If None, no restriction is done
+        self.restrict_to_index = restrict_to_index
 
     def __iter__(self):
         return self
 
     def __next__(self):
-        # allow StopIteration to bubble up
-        input_idx, input_val = next(self.child_iter)
+        while True:
+            if self.set_seed:
+                # use a test-name-specific hash for the seed if possible
+                seed = (
+                    int.from_bytes(hashlib.sha256(
+                        self.test_fn.__qualname__.encode("utf-8")).digest()[:4], 'little')
+                    if self.test_fn is not None else SEED
+                )
+                set_rng_seed(seed)
+
+            # allow StopIteration to bubble up
+            input_idx, input_val = next(self.child_iter)
+            if (self.restrict_to_index is None) or (input_idx == self.restrict_to_index):
+                break
+
         self._set_tracked_input(
             TrackedInput(
                 index=input_idx, val=self.callback(input_val), type_desc=self.input_type_desc

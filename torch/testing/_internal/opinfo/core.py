@@ -1182,7 +1182,11 @@ class OpInfo:
             else:
                 sample.input[0] = conjugate(sample.input[0])
 
-        return TrackedInputIter(iter(conj_samples), "conjugate sample input")
+        return TrackedInputIter(
+            iter(conj_samples),
+            "conjugate sample input",
+            restrict_to_index=kwargs.get("restrict_to_index", None),
+        )
 
     def sample_inputs(self, device, dtype, requires_grad=False, **kwargs):
         """
@@ -1201,7 +1205,11 @@ class OpInfo:
             samples_list.extend(conj_samples)
             samples = tuple(samples_list)
 
-        return TrackedInputIter(iter(samples), "sample input")
+        return TrackedInputIter(
+            iter(samples),
+            "sample input",
+            restrict_to_index=kwargs.get("restrict_to_index", None),
+        )
 
     def reference_inputs(self, device, dtype, requires_grad=False, **kwargs):
         """
@@ -1215,7 +1223,11 @@ class OpInfo:
             samples = self.sample_inputs_func(
                 self, device, dtype, requires_grad, **kwargs
             )
-            return TrackedInputIter(iter(samples), "sample input")
+            return TrackedInputIter(
+                iter(samples),
+                "sample input",
+                restrict_to_index=kwargs.get("restrict_to_index", None),
+            )
 
         if kwargs.get("include_conjugated_inputs", False):
             raise NotImplementedError
@@ -1223,7 +1235,11 @@ class OpInfo:
         references = self.reference_inputs_func(
             self, device, dtype, requires_grad, **kwargs
         )
-        return TrackedInputIter(iter(references), "reference input")
+        return TrackedInputIter(
+            iter(references),
+            "reference input",
+            restrict_to_index=kwargs.get("restrict_to_index", None),
+        )
 
     def error_inputs(self, device, **kwargs):
         """
@@ -1231,7 +1247,10 @@ class OpInfo:
         """
         errs = self.error_inputs_func(self, device, **kwargs)
         return TrackedInputIter(
-            iter(errs), "error input", callback=lambda e: e.sample_input
+            iter(errs),
+            "error input",
+            callback=lambda e: e.sample_input,
+            restrict_to_index=kwargs.get("restrict_to_index", None),
         )
 
     def error_inputs_sparse(self, device, layout, **kwargs):
