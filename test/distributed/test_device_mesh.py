@@ -73,7 +73,7 @@ class DeviceMeshTest(DTensorTestBase):
             device_mesh = DeviceMesh(self.device_type, mesh)
 
     @with_comms
-    def test_get_group_and_get_groups(self):
+    def test_get_group_and_get_all_groups(self):
         mesh_shape = (2, self.world_size // 2)
         mesh_2d = init_device_mesh(
             self.device_type, mesh_shape, mesh_dim_names=("dp", "tp")
@@ -88,7 +88,7 @@ class DeviceMeshTest(DTensorTestBase):
         self.assertEqual(mesh_2d.get_group("dp"), dp_mesh.get_group())
         self.assertEqual(mesh_2d.get_group("tp"), tp_mesh.get_group())
 
-        groups = mesh_2d.get_groups()
+        groups = mesh_2d.get_all_groups()
         self.assertEqual(len(groups), 2)
         self.assertTrue(tp_mesh.get_group() in groups)
         self.assertTrue(dp_mesh.get_group() in groups)
@@ -127,7 +127,7 @@ class DeviceMeshTest(DTensorTestBase):
         mesh = DeviceMesh(self.device_type, mesh_tensor)
 
         # check all dim groups
-        dim_to_subgroups = mesh.get_groups()
+        dim_to_subgroups = mesh.get_all_groups()
 
         expected_ranks_by_dim = [[[0, 2], [1, 3]], [[0, 1], [2, 3]]]
         for dim, dim_group in enumerate(dim_to_subgroups):
@@ -192,7 +192,7 @@ class DeviceMeshTest(DTensorTestBase):
             DeviceMesh.from_group(global_pg, "cuda", invalid_mesh)
 
         device_mesh = init_device_mesh(self.device_type, (2, 2))
-        groups = device_mesh.get_groups()
+        groups = device_mesh.get_all_groups()
         invalid_mesh = (0, 1, 2, 3)  # 1D mesh when we need 2D
         regex = r"Expects mesh with ndim equal to number of ProcessGroups but got mesh \[0, 1, 2, 3\] and 2 ProcessGroups"
         with self.assertRaisesRegex(ValueError, regex):
@@ -231,7 +231,7 @@ class DeviceMeshTestNDim(DTensorTestBase):
         mesh = DeviceMesh(self.device_type, mesh_tensor)
 
         # check all dim groups
-        dim_to_subgroups = mesh.get_groups()
+        dim_to_subgroups = mesh.get_all_groups()
 
         for dim, dim_group in enumerate(dim_to_subgroups):
             self.assertTrue(dim < mesh_tensor.ndim)
@@ -804,7 +804,7 @@ class DeviceMeshCollectiveTest(DTensorTestBase):
         local_tensor = torch.ones(3, 3, device=self.device_type) * self.rank
 
         # check all dim groups
-        dim_to_subgroups = mesh.get_groups()
+        dim_to_subgroups = mesh.get_all_groups()
         for dim, dim_group in enumerate(dim_to_subgroups):
             dim_group_size = get_world_size(dim_group)
             global_ranks = [
@@ -821,7 +821,7 @@ class DeviceMeshCollectiveTest(DTensorTestBase):
         mesh = DeviceMesh(self.device_type, mesh_tensor)
 
         # check all dim groups
-        dim_to_subgroups = mesh.get_groups()
+        dim_to_subgroups = mesh.get_all_groups()
         for dim, dim_group in enumerate(dim_to_subgroups):
             dim_group_size = get_world_size(dim_group)
             global_ranks = [
