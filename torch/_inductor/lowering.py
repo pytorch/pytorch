@@ -34,7 +34,7 @@ from torch._prims_common import (
     Number,
 )
 from torch.fx.experimental.sym_node import magic_methods, method_to_operator
-from torch.utils._sympy.functions import CeilDiv, FloorDiv, ModularIndexing
+from torch.utils._sympy.functions import CeilDiv, FloorDiv, IntTrueDiv, ModularIndexing
 from .._dynamo.utils import import_submodule
 
 from . import config, inductor_prims, ir, test_operators  # NOQA: F401
@@ -1945,7 +1945,10 @@ def bucketize(
 ):
     assert len(boundaries.get_size()) == 1
 
-    if not (is_triton(input) and is_triton(boundaries)):
+    if not (
+        V.graph.has_feature(input, BackendFeature.BUCKETIZE)
+        and V.graph.has_feature(boundaries, BackendFeature.BUCKETIZE)
+    ):
         return fallback_handler(aten.bucketize.Tensor, add_to_fallback_set=False)(
             input, boundaries, out_int32=out_int32, right=right
         )
@@ -1956,7 +1959,6 @@ def bucketize(
     # we call boundaries.realize().
     boundaries.realize()
     boundaries_size = boundaries.get_size()[0]
-    boundaries_loader = boundaries.make_loader()
     device = input.get_device()
     input_loader = input.make_loader()
 
@@ -2421,7 +2423,7 @@ def slice_scatter(x, src, dim=0, start=None, end=None, step=1):
                     ops.index_expr(
                         ModularIndexing(idx[dim] - start, 1, step), torch.int64
                     ),
-                    ops.constant(0, torch.torch.int64),
+                    ops.constant(0, torch.int64),
                 )
             )
         assert mask
@@ -4262,7 +4264,7 @@ def _fractional_pooling_offsets(samples, in_sz, out_sz, kernel_sz, dim):
     out_sz = out_sz[dim]
     in_sz = in_sz[dim]
     kernel_sz = kernel_sz[dim]
-    alpha = (in_sz - kernel_sz) / (out_sz - 1)
+    alpha = IntTrueDiv(in_sz - kernel_sz, out_sz - 1)
     samples_loader = samples.make_loader()
 
     def load(prefix, i):
@@ -4372,7 +4374,7 @@ def upsample_nearest2d_backward(
     w_kernel_max = ceildiv(inp_w, out_w)
 
     def start_index(index, out_dim, inp_dim):
-        return CeilDiv(index * inp_dim, out_dim)
+        return CeilDiv(index * inp_dim, sympy.sympify(out_dim))
 
     def end_index(index, out_dim, inp_dim):
         return start_index((index + 1), out_dim, inp_dim)
@@ -5539,7 +5541,7 @@ register_pointwise_numeric(aten.log10)
 register_pointwise_numeric(aten.log2)
 register_pointwise_numeric(aten.nextafter)
 
-from .codegen.common import pointwise_overrides_data
+from .codegen.common import BackendFeature, pointwise_overrides_data
 
 
 def _get_pointwise_overrides(ns, name):
