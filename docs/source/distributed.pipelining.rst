@@ -258,5 +258,7 @@ Whereas, ``ScheduleInterleaved1F1B`` and ``ScheduleLoopedBFS`` are subclasses of
 .. currentmodule:: torch.distributed.pipelining.PipelineSchedule
 
 .. autoclass:: PipelineScheduleSingle
+  :members:
 
 .. autoclass:: PipelineScheduleMulti
+  :members:
