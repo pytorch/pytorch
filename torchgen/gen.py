@@ -2911,8 +2911,6 @@ def main() -> None:
     if options.mps:
         functions_keys.add(DispatchKey.MPS)
 
-    print("DISPATCHERRRRR", dispatch_keys)
-
     if options.backend_whitelist:
         dispatch_keys = [
             k

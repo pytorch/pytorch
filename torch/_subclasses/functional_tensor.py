@@ -277,6 +277,7 @@ class FunctionalTensor(torch.Tensor):
 class FunctionalTensorMode(TorchDispatchMode):
     def __init__(self, pre_dispatch=False, export=False, _allow_token_discovery=False):
         self.export = export
+        self.export_inference = not pre_dispatch and export
         self.is_on_stack = False
         self.enter_stack = []
         # Indicates to our torch_dispatch dispatching infra that
@@ -339,26 +340,32 @@ class FunctionalTensorMode(TorchDispatchMode):
 
         def _can_decompose(func):
             # See https://github.com/pytorch/pytorch/pull/115258#issuecomment-1900755832
-            # We never decompose dropout in export
+            # Never decompose dropout in export
             if self.export and func == torch.ops.aten.dropout.default:
                 return False
 
-            # only decompose view or inplace mutating ops
+            # We unconditionally decompose ops that are maybe aliasing or mutating ops
             if func in FunctionalTensor.maybe_aliasing_or_mutating_ops:
                 return True
-            alias_info = len(
-                [i for i in func._schema.arguments if i.alias_info is not None]
-            )
-            should_decompose = alias_info != 0 or func._schema.is_mutable
-            if not should_decompose:
+
+            # We unconditionally decompose ops that are mutating or aliasing ops
+            alias_info_present = any(arg.alias_info for arg in func._schema.arguments)
+            if alias_info_present or func._schema.is_mutable:
+                return True
+
+            # If we are here, it means we are seeing functional composite op.
+            # For pre-dispatch IR or export inference IR, we wont' decompose them
+            if self.export_inference or self.pre_dispatch:
                 if func.namespace not in ["aten", "prim"]:
                     warnings.warn(
-                        f"At pre-dispatch tracing, we will assume that any "
-                        f"custom op that is marked with CompositeImplicitAutograd "
-                        f"and functional are safe to not decompose. We found {func}"
-                        f" to be one such op."
+                        f"At pre-dispatch tracing, we assume that any custom op marked with "
+                        f"CompositeImplicitAutograd and functional are safe to not decompose. "
+                        f"Found {func} to be one such op."
                     )
-            return False
+                return False
+
+            # in normal torch.compile IR, we decompose functional composite ops
+            return True
 
         if (
             func not in FunctionalTensor.metadata_fns

@@ -708,6 +708,39 @@ def forward(self, primals_1):
         self.assertEqual(x_ref.grad, x_test.grad)
         self.assertEqual(x_ref_view.grad, x_test_view.grad)
 
+    def test_composite_impl_compile(self):
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(3, 3)
+
+            def forward(self, a):
+                return self.linear(a)
+
+        inp = [torch.ones(3, 3, requires_grad=True)]
+        fw_graph = self.verify_aot_autograd(Foo(), inp, test_mutation=True)
+        inp = [torch.ones(3, 3, requires_grad=False)]
+        self.assertExpectedInline(
+            fw_graph.code.strip(),
+            """\
+def forward(self, primals_1, primals_2, primals_3):
+    t = torch.ops.aten.t.default(primals_1);  primals_1 = None
+    addmm = torch.ops.aten.addmm.default(primals_2, primals_3, t);  primals_2 = None
+    return [addmm, primals_3, t]""",
+        )
+
+        with torch.inference_mode():
+            fw_graph = self.verify_aot_autograd(Foo(), inp, test_mutation=True)
+            inp = [torch.ones(3, 3, requires_grad=False)]
+            self.assertExpectedInline(
+                fw_graph.code.strip(),
+                """\
+def forward(self, arg0_1, arg1_1, arg2_1):
+    t = torch.ops.aten.t.default(arg0_1);  arg0_1 = None
+    addmm = torch.ops.aten.addmm.default(arg1_1, arg2_1, t);  arg1_1 = arg2_1 = t = None
+    return (addmm,)""",
+            )
+
     def test_outputs_are_aliased(self):
         # Tensor, None, int
         def f(a):
