@@ -1,6 +1,17 @@
 import dataclasses
 import traceback
-from typing import Any, Callable, Container, Dict, List, Optional, OrderedDict, Tuple, TypeVar, overload
+from typing import (
+    Any,
+    Callable,
+    Container,
+    Dict,
+    List,
+    Optional,
+    OrderedDict,
+    overload,
+    Tuple,
+    TypeVar,
+)
 
 import torch
 import torch.distributed as dist
@@ -40,6 +51,7 @@ def _pack_kwargs(*args: Any, **kwargs: Any) -> Tuple[Tuple[Any, ...], Tuple[str,
 
     return tuple(flat_args), tuple(kwarg_keys)
 
+
 def _cast_forward_inputs(
     dtype: Optional[torch.dtype],
     *args: Any,
@@ -60,7 +72,10 @@ def _cast_forward_inputs(
 
     return (_apply_to_tensors(cast_fn, args), _apply_to_tensors(cast_fn, kwargs))
 
-def _unpack_kwargs(flat_args: Tuple[Any, ...], kwarg_keys: Tuple[str, ...]) -> Tuple[Tuple[Any, ...], Dict[str, Any]]:
+
+def _unpack_kwargs(
+    flat_args: Tuple[Any, ...], kwarg_keys: Tuple[str, ...]
+) -> Tuple[Tuple[Any, ...], Dict[str, Any]]:
     """See _pack_kwargs."""
     assert len(kwarg_keys) <= len(
         flat_args
@@ -77,12 +92,16 @@ T = TypeVar("T", torch.Tensor, PackedSequence)
 
 
 @overload
-def _recursive_to(inputs: S, target_device: torch.device, use_side_stream_for_tensor_copies: bool) -> List[S]:
+def _recursive_to(
+    inputs: S, target_device: torch.device, use_side_stream_for_tensor_copies: bool
+) -> List[S]:
     ...
 
 
 @overload
-def _recursive_to(inputs: T, target_device: torch.device, use_side_stream_for_tensor_copies: bool) -> Tuple[T]:
+def _recursive_to(
+    inputs: T, target_device: torch.device, use_side_stream_for_tensor_copies: bool
+) -> Tuple[T]:
     ...
 
 
@@ -155,9 +174,7 @@ def _alloc_storage(tensor: torch.Tensor, size: torch.Size) -> None:
         storage was already allocated.
     """
     with torch.no_grad():
-        if (
-            not torch.distributed._functional_collectives.is_torchdynamo_compiling()
-        ):
+        if not torch.distributed._functional_collectives.is_torchdynamo_compiling():
             already_allocated = tensor._typed_storage()._size() == size.numel()
             if not already_allocated:
                 tensor_storage_size = tensor._typed_storage()._size()
@@ -177,9 +194,7 @@ def _free_storage(tensor: torch.Tensor):
         storage was already freed.
     """
     with torch.no_grad():
-        if (
-            not torch.distributed._functional_collectives.is_torchdynamo_compiling()
-        ):
+        if not torch.distributed._functional_collectives.is_torchdynamo_compiling():
             already_freed = tensor._typed_storage()._size() == 0
             if not already_freed:
                 _p_assert(
@@ -190,7 +205,6 @@ def _free_storage(tensor: torch.Tensor):
                     f"tensor shape: {tensor.shape}",
                 )
                 tensor._typed_storage()._resize_(0)
-
 
 
 Q = TypeVar("Q")
@@ -264,7 +278,9 @@ def _to_kwargs(
 
 
 def _verify_param_shape_across_processes(
-    process_group: dist.ProcessGroup, tensors: List[torch.Tensor], logger: Optional[dist.Logger] = None
+    process_group: dist.ProcessGroup,
+    tensors: List[torch.Tensor],
+    logger: Optional[dist.Logger] = None,
 ):
     return dist._verify_params_across_processes(process_group, tensors, logger)
 
