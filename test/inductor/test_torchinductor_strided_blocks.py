@@ -206,13 +206,13 @@ class TritonBlockPointerTest(InductorTestCase):
             ((4, 4, 4), 1, 1),
             ((8, 8, 8), 1, 1),
             ((15, 15), 0, 1),  # Non-power of 2
-            ((3 * max_block, 2), 2, 2),  # Multiple of max block. Has unsupported loop.
+            ((3 * max_block, 2), 3, 2),  # Multiple of max block. Uses loops.
             (
                 (2, 3 * max_block),
                 3,
                 2,
-            ),  # Multiple of max block. Loop maps to block pointer.
-            ((128, 128), None, None),
+            ),  # Multiple of max block. Uses loops.
+            ((128, 128), 3, 2),  # Test a large size, with loops.
         ],
     )
     def test_reduction(
