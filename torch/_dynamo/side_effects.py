@@ -294,14 +294,22 @@ class SideEffects:
 
     def prune_dead_object_new(self, tx):
         live_new_objects = set()
-        skip_obj = None
+
+        # VariableTracker.visit is a graph traversal algorithm. This is the visited set.
+        # We want to visit each node only once.
+        visited: Any = {}
 
         def visit(var: VariableTracker):
-            if (
-                isinstance(var.mutable_local, AttributeMutationNew)
-                and var.mutable_local is not skip_obj
-            ):
+            if isinstance(var.mutable_local, AttributeMutationNew):
+                # Object may have been mutated, store this mutation.
                 live_new_objects.add(var.mutable_local)
+                # It's possible that we have mutated the value of this variable
+                # to be another one. The new value is in store_attr_mutations.
+                # Also recurse through the new value to detect alive AttributeMutationNew.
+                if var.mutable_local in self.store_attr_mutations:
+                    VariableTracker.visit(
+                        visit, self.store_attr_mutations[var.mutable_local], visited
+                    )
 
         def is_live(var: Union[MutableLocalBase, VariableTracker]):
             if isinstance(var, AttributeMutationNew):
@@ -310,27 +318,22 @@ class SideEffects:
                 return is_live(var.mutable_local)
             return True
 
-        # Step 1: Any attribute mutation on a symbolic local (or the stack, aka
-        # return values) are live.
-        VariableTracker.visit(visit, (tx.stack, tx.symbolic_locals))
+        pre_existing_vars = [
+            var
+            for var in self.id_to_variable.values()
+            if not isinstance(var.mutable_local, AttributeMutationNew)
+        ]
 
-        # Step 2: Any attribute mutation to pre-existing variables are live.
-        for var in self.id_to_variable.values():
-            if not isinstance(var.mutable_local, AttributeMutationNew):
-                VariableTracker.visit(visit, var)
-
-        # Step 3: Any attribute mutation to the values of the alive objects are live.
-        tmp_live_new_objects = list(live_new_objects)
-        for mutable_local in tmp_live_new_objects:
-            if mutable_local in self.store_attr_mutations:
-                dct = self.store_attr_mutations[mutable_local]
-                skip_obj = mutable_local
-                VariableTracker.visit(visit, dct)
+        # The only live side effects come from returns (tx.stack), any intermediates
+        # during a graph break (tx.symbolic_locals), and mutation on pre-existing variables.
+        # Recursively visit Variables and see if any of them have been mutated.
+        VariableTracker.visit(
+            visit, (tx.stack, tx.symbolic_locals, pre_existing_vars), visited
+        )
 
         # NB: cell variable handling.is tricky.
         # cell variables must stay alive if any NestedUserFunctionVariable
-        # are live. All three steps can identiy NestedUserFunctionVariable
-        # that are live. Visiting the NestedUserFunctionVariable visits
+        # are live. "visit"-ing the NestedUserFunctionVariable visits
         # the .closures field, from which we will see if we need to keep
         # any mutations to cell variables alive.
 
@@ -362,13 +365,7 @@ class SideEffects:
             elif isinstance(var.mutable_local, AttributeMutationNew):
                 if isinstance(var, variables.AutogradFunctionContextVariable):
                     unimplemented("AutogradFunctionContextVariable escaped")
-                if "__call_nn_module_init" in self.store_attr_mutations.get(
-                    var.mutable_local, {}
-                ):
-                    assert isinstance(var, variables.UnspecializedNNModuleVariable)
-                    cg.load_import_from(utils.__name__, "nn_module_new")
-                else:
-                    cg.load_import_from(utils.__name__, "object_new")
+                cg.load_import_from(utils.__name__, "object_new")
                 cg(var.mutable_local.cls_source)
                 cg.extend_output(create_call_function(1, True))
                 cg.add_cache(var)
@@ -495,9 +492,25 @@ class SideEffects:
                     ]
                 )
             elif self.is_attribute_mutation(var):
-                for name, value in self.store_attr_mutations.get(
-                    var.mutable_local, {}
-                ).items():
+                # Applying mutations involves two steps: 1) Push all
+                # reconstructed objects onto the stack.  2) Call STORE_ATTR to
+                # apply the mutations.
+                #
+                # Dynamo must ensure that mutations are applied in the same
+                # order as in the original program. Therefore, two reverse
+                # operations occur below.
+                #
+                # The first reverse operation concerns `suffixes`. We apply
+                # suffixes in reverse order due to the way Python handles the
+                # stack. In Step 1, we push all reconstructed objects onto the
+                # stack, but the item at the top of the stack refers to the last
+                # attribute in the mutation order. If not fixed, this will apply
+                # the mutations of attributes in the reverse order.  To account
+                # for this reversal, we iterate through the mutable attributes
+                # in reverse order.
+                for name, value in reversed(
+                    self.store_attr_mutations.get(var.mutable_local, {}).items()
+                ):
                     if isinstance(var, variables.NewGlobalVariable):
                         cg.tx.output.update_co_names(name)
                         cg(value)
@@ -505,8 +518,6 @@ class SideEffects:
                         suffixes.append(
                             [create_instruction("STORE_GLOBAL", argval=name)]
                         )
-                    elif name == "__call_nn_module_init":
-                        pass  # handled in codegen_save_tempvars
                     elif isinstance(value, variables.DeletedVariable):
                         if isinstance(
                             var.mutable_local, AttributeMutationExisting

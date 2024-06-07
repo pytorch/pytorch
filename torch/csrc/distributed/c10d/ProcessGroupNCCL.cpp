@@ -28,6 +28,7 @@
 #include <torch/csrc/distributed/c10d/ProcessGroupNCCL.hpp>
 #include <torch/csrc/distributed/c10d/TraceUtils.h>
 #include <torch/csrc/distributed/c10d/Utils.hpp>
+#include <torch/csrc/distributed/c10d/control_plane/Handlers.hpp>
 #include <torch/csrc/distributed/c10d/logger.hpp>
 #include <torch/torch.h>
 
@@ -341,7 +342,10 @@ void cacheAllocatorDeregisterHook(
 }
 
 #if defined(IS_NCCLX) && defined(NCCL_COMM_DUMP)
-std::string dump_nccl_trace() {
+std::string dump_nccl_trace(
+    bool includeCollectives,
+    bool includeStackTraces,
+    bool onlyActive) {
   std::unordered_map<
       std::string /* ncclUniqueID */,
       std::unordered_map<std::string, std::string> /* dump from this comm */>
@@ -361,13 +365,28 @@ std::string dump_nccl_trace() {
     std::string ncclUniqueIDStr = buildNcclUniqueIdStr(ncclComm->getNcclId());
     ncclDumpMap[ncclUniqueIDStr] = ncclComm->ncclCommDump();
   }
-  return NCCLTraceBuffer::get()->dump(ncclDumpMap);
+  return NCCLTraceBuffer::get()->dump(
+      ncclDumpMap, includeCollectives, includeStackTraces, onlyActive);
 }
+
 #else
-std::string dump_nccl_trace() {
-  return NCCLTraceBuffer::get()->dump(c10::nullopt);
+std::string dump_nccl_trace(
+    bool includeCollectives,
+    bool includeStackTraces,
+    bool onlyActive) {
+  return NCCLTraceBuffer::get()->dump(
+      c10::nullopt, includeCollectives, includeStackTraces, onlyActive);
 }
 #endif
+
+// TODO(c-p-i-o): add a JSON endpoint.
+control_plane::RegisterHandler dumpHandler{
+    "dump_nccl_trace_pickle",
+    [](const control_plane::Request& req, control_plane::Response& res) {
+      // TODO: c-p-i-o: params from the request need to go to dump_nccl_trace.
+      res.setContent(
+          dump_nccl_trace(true, true, false), "application/octet-stream");
+    }};
 
 std::optional<std::function<void(std::function<void(const std::string&)>)>>&
 get_cpp_trace_dumper() {
@@ -925,7 +944,12 @@ void ProcessGroupNCCL::performNocolorSplit(at::Device device) {
   LOG(INFO) << logPrefix() << "Performing nocolor split on backend device "
             << device << ", key " << key << ", i am " << this;
   auto comm = getNCCLComm(key, device, OpType::ALLREDUCE);
-  NCCLComm::split(comm.get(), NCCL_SPLIT_NOCOLOR, rank_, options_->config);
+  NCCLComm::split(
+      comm.get(),
+      NCCL_SPLIT_NOCOLOR,
+      rank_,
+      options_->config,
+      options_->global_ranks_in_group);
 #endif
 }
 
@@ -1184,7 +1208,7 @@ bool ProcessGroupNCCL::dumpDebuggingInfo() {
     // We dump nccl trace into local disk by default and users can register
     // their customized writer by inheriting `DebugInfoWriter` via
     // `registerDebugInfoWriter`.
-    auto ncclTrace = dump_nccl_trace();
+    auto ncclTrace = dump_nccl_trace(true, true, false);
     DebugInfoWriter& writer = DebugInfoWriter::getWriter(globalRank());
     LOG(INFO) << logPrefix() << "ProcessGroupNCCL dumping nccl trace to "
               << writer.getWriterTarget();
@@ -2074,6 +2098,7 @@ std::shared_ptr<NCCLComm> ProcessGroupNCCL::getNCCLComm(
     numRanks = 2;
     rank = p2pRank;
   }
+
   // Get the device index
   auto deviceIndex = device.index();
   gpuGuard.set_index(deviceIndex);
@@ -2090,13 +2115,17 @@ std::shared_ptr<NCCLComm> ProcessGroupNCCL::getNCCLComm(
       auto& parentComm = dit->second;
       if (parentComm != nullptr && !parentComm->isAborted()) {
         ncclComm = NCCLComm::split(
-            parentComm.get(), options_->split_color, rank, options_->config);
+            parentComm.get(),
+            options_->split_color,
+            rank,
+            options_->config,
+            options_->global_ranks_in_group);
       }
     }
   }
 #endif
 
-  // To simplify conditioonal nesting, just create the ncclComms[i]
+  // To simplify conditional nesting, just create the ncclComms[i]
   // entry if it hasn't been yet rather than untangling the
   // conditions that might have resulted in a split above.
   if (!ncclComm) {
