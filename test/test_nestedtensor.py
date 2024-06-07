@@ -4359,7 +4359,7 @@ class TestNestedTensorSubclass(TestCase):
         self.assertEqual(expected, nt._values)
         # apply_ should swap values in-place without appending to autograd graph
         self.assertIsNone(nt.grad)
-        self.assertIsNone(nt._values.grad)
+        self.assertIsNone(nt._values.grad_fn)
 
     @dtypes(torch.float32, torch.double, torch.half)
     @parametrize("requires_grad", [False, True])
