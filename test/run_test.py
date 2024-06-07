@@ -24,7 +24,6 @@ import torch
 import torch.distributed as dist
 from torch.multiprocessing import current_process, get_context
 from torch.testing._internal.common_utils import (
-    FILE_SCHEMA,
     get_report_path,
     IS_CI,
     IS_MACOS,
@@ -745,14 +744,7 @@ def test_distributed(test_module, test_directory, options):
             old_environ = dict(os.environ)
             os.environ["TEMP_DIR"] = tmp_dir
             os.environ["BACKEND"] = backend
-            os.environ["INIT_METHOD"] = "env://"
             os.environ.update(env_vars)
-            if with_init_file:
-                if test_module.name == "test_distributed_spawn":
-                    init_method = f"{FILE_SCHEMA}{tmp_dir}/"
-                else:
-                    init_method = f"{FILE_SCHEMA}{tmp_dir}/shared_init_file"
-                os.environ["INIT_METHOD"] = init_method
             try:
                 os.mkdir(os.path.join(tmp_dir, "barrier"))
                 os.mkdir(os.path.join(tmp_dir, "test_dir"))
