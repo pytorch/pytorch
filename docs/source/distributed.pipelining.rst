@@ -317,13 +317,7 @@ The following set of APIs transform your model into a pipeline representation.
 
 .. autoclass:: Pipe
 
-.. autofunction:: annotate_split_points
-
 .. autofunction:: pipe_split
-
-.. autoclass:: ArgsChunkSpec
-
-.. autoclass:: KwargsChunkSpec
 
 Microbatch Utilities
 ====================
