@@ -2066,6 +2066,26 @@ def _fused_dropout_decomposition(input, p, generator=None):
     return (res, mask)
 
 
+def device_hint(tensor):
+    if isinstance(tensor, torch._subclasses.FakeTensor):
+        return tensor.fake_device
+    else:
+        return None
+
+
+def wrap_output_with_input_device_(x, common_device):
+    # wrap meta tensor
+    if common_device is not None and x.device.type == "meta":
+        from torch._subclasses.fake_tensor import FakeTensorMode
+
+        fake_mode = FakeTensorMode()
+        fake_mode.in_kernel_invocation = True
+        converter = fake_mode.fake_tensor_converter
+        return converter.from_meta_and_device(fake_mode, x, common_device)
+
+    return x
+
+
 @register_decomposition(aten._to_copy)
 @out_wrapper()
 def _to_copy(
@@ -2083,6 +2103,8 @@ def _to_copy(
     if device is None and dtype is None and memory_format is None:
         return x.clone()
     dtype_converted = False
+    common_device = device_hint(x)
+    input_is_fake = isinstance(x, torch._subclasses.FakeTensor)
 
     if device is not None and device != x.device:
         # avoid conversions on cpu
@@ -2095,6 +2117,8 @@ def _to_copy(
         x = torch._prims.convert_element_type(x, dtype)
         dtype_converted = True
 
+    if dtype_converted and input_is_fake and not isinstance(x, torch._subclasses.FakeTensor):
+        x = wrap_output_with_input_device_(x, common_device)
     if memory_format is not None:  # no ref/prim for memory format
         return torch.clone(x, memory_format=memory_format)
     return x
