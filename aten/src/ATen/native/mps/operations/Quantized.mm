@@ -264,7 +264,7 @@ kernel void kernel_mul_mm(
     // sizes: x = M, y = K, z = N
     // pytorch: M x K @ N x K -> M x N
     // ggml: K x N @ K x M -> N x M
-    short ne00 = sizes.y; // K
+    uint32_t ne00 = sizes.y; // K
     uint32_t nb00 = sizeof(W);
     uint32_t nb01 = nb00 * ne00;
     uint32_t ne10 = sizes.y; // K
@@ -436,10 +436,6 @@ INSTANTIATE_MM(half, char, get_scale_zero_q8);
 #if __METAL_VERSION__ >= 310
 INSTANTIATE_MM(bfloat, char, get_scale_zero_q8);
 #endif
-
-// ---------------------------------------mv---------------------------------------
-
-
 /* Matrix vector multiplication
 
                       for loop ->
@@ -490,6 +486,7 @@ kernel void kernel_mul_mv(
     constant T                 * scalesAndZeros [[buffer(2)]],
     device T                   * outputData     [[buffer(3)]],
     constant uint3             & sizes          [[buffer(4)]],
+    threadgroup char           * shared_memory  [[threadgroup(0)]],
     uint3                        tgpig          [[threadgroup_position_in_grid]],
     uint                         tiisg          [[thread_index_in_simdgroup]],
     uint                         sgitg          [[simdgroup_index_in_threadgroup]]) {
@@ -503,8 +500,8 @@ kernel void kernel_mul_mv(
     // sizes: x = M, y = K, z = N, given mv, x = M = 1
     // pytorch: M x K @ N x K -> M x N
     // ggml: K x N @ K x M -> N x M
-    short ne00 = sizes.y; // K
-    short ne01 = sizes.z; // N
+    uint32_t ne00 = sizes.y; // K
+    uint32_t ne01 = sizes.z; // N
     uint32_t ne10 = sizes.y; // K
     uint32_t ne0 = sizes.z; // N
     constant char * src0 = (constant char *)B;
@@ -527,10 +524,17 @@ kernel void kernel_mul_mv(
     constant char * x = (constant char *) src0 + offset0;
     constant T    * y = (constant T    *) src1 + r1*ne10;
 
-    float yl[NB_Q8_0];
-    float sumf[nr]={0.f};
-    T4 scales[2]; // NB_Q8_0 = 8 = 2x4
-    scales[sgitg%2] = *(constant T4 *)(scalesAndZeros + first_row);
+    // Load data to shared memory
+    threadgroup T * shared_scale = (threadgroup T *)(shared_memory); // length 8 * sizeof(float)
+    // Load scale:
+    if (tiisg < 4) {
+        *(shared_scale + (sgitg % 2) * 4 + tiisg) = *(scalesAndZeros + (r0 * NB_Q8_0) + (sgitg % 2) * 4 + tiisg);
+    }
+
+    // Accumulate on float4
+    float2x4 yl;
+    float4x4 xl[2];
+    float4 sumf = 0;
 
     // Group threads in SIMD group into 8x4 block, each thread handles 8 input values.
     const int ix = tiisg/4;
@@ -541,32 +545,34 @@ kernel void kernel_mul_mv(
     constant T * yb = y + ix * QK8_0 + NB_Q8_0*il;
 
     // each thread in a SIMD group deals with NB_Q8_0 quants at a time
-    for (int ib = ix; ib < nb; ib += nw/4) {
-        // Load data
-        for (int i = 0; i < NB_Q8_0; ++i) {
-            yl[i] = yb[i];
+    for (short ib = ix; ib < nb; ib += nw/4) {
+        // Load y data
+        for (short i = 0; i < 2; i++) {
+            short offset = i * 4;
+            yl[i] = {*(yb + offset), *(yb + offset + 1), *(yb + offset + 2), *(yb + offset + 3)};
         }
 
-        // Locate where x should be.
-        // row offset: row * ne00
-        // col offset: ib * QK8_0 + il * NB_Q8_0
-        // x index: row * ne00 + ib * QK8_0 + il * NB_Q8_0
-        for (int row = 0; row < nr; row++) {
+        for (short row = 0; row < nr; row++) {
+            // Locate where x should be.
+            // row offset: row * ne00
+            // col offset: ib * QK8_0 + il * NB_Q8_0
+            // x index: row * ne00 + ib * QK8_0 + il * NB_Q8_0
             constant int8_t * qs = (constant int8_t *)(x + row * ne00 + ib * QK8_0 + il * NB_Q8_0);
-            float sumq = 0.f;
-            for (int iq = 0; iq < NB_Q8_0; ++iq) {
-                sumq += qs[iq] * yl[iq];
+            for (short batch = 0; batch < 2; batch++) {
+                short offset = batch * 4;
+                xl[batch][row] = {(float)qs[offset], (float)qs[offset+1], (float)qs[offset+2], (float)qs[offset+3]};
             }
-            sumf[row] += sumq*scales[sgitg%2][row];
         }
-
+        sumf += yl[0] * xl[0];
+        sumf += yl[1] * xl[1];
         yb += NB_Q8_0 * nw;
     }
 
     for (int row = 0; row < nr; ++row) {
         const float tot = simd_sum(sumf[row]);
+        float scale = *(shared_scale + (sgitg % 2) * 4 + row);
         if (tiisg == 0 && first_row + row < ne01) {
-            outputData[r1*ne0 + first_row + row] = (device T)tot;
+            outputData[r1*ne0 + first_row + row] = (device T)(tot * scale);
         }
     }
 }
@@ -581,6 +587,7 @@ kernel void kernel_mul_mv<DTYPE>(                                               
     constant DTYPE             * scalesAndZeros [[buffer(2)]],                  \
     device   DTYPE             * outputData     [[buffer(3)]],                  \
     constant uint3             & sizes          [[buffer(4)]],                  \
+    threadgroup char           * shared_memory  [[threadgroup(0)]],             \
     uint3                        tgpig          [[threadgroup_position_in_grid]],   \
     uint                         tiisg          [[thread_index_in_simdgroup]],      \
     uint                         sgitg          [[simdgroup_index_in_threadgroup]])
@@ -686,7 +693,7 @@ Tensor _weight_int8pack_mm_mps(const Tensor& A, const Tensor& B, const Tensor& s
       std::string kernel;
       if (M == 1) {
         kernel = fmt::format("int8pack_mv_{}", scalarToMetalTypeString(A));
-      } else if (M < 4){
+      } else if (M < 4) {
         kernel = fmt::format("int8pack_mm_{}", scalarToMetalTypeString(A));
       } else {
         kernel = fmt::format("large_m_int8pack_mm_{}", scalarToMetalTypeString(A));
@@ -699,12 +706,15 @@ Tensor _weight_int8pack_mm_mps(const Tensor& A, const Tensor& B, const Tensor& s
       mtl_setBuffer(computeEncoder, C, 3);
       [computeEncoder setBytes:sizes.data() length:sizeof(uint32_t) * sizes.size() atIndex:4];
       if (M == 1) {
-        [computeEncoder dispatchThreadgroups:MTLSizeMake((N + 7)/8, 1, 1) threadsPerThreadgroup:MTLSizeMake(64, 1, 1)];
+        [computeEncoder setThreadgroupMemoryLength:32 atIndex:0];
+        [computeEncoder dispatchThreadgroups:MTLSizeMake((N + 7) / 8, 1, 1)
+                       threadsPerThreadgroup:MTLSizeMake(64, 1, 1)];
       } else if (M < 4) {
         [computeEncoder dispatchThreads:MTLSizeMake(M * N / 4, 8, 1) threadsPerThreadgroup:MTLSizeMake(8, 8, 1)];
       } else {
         [computeEncoder setThreadgroupMemoryLength:12288 atIndex:0];
-        [computeEncoder dispatchThreadgroups:MTLSizeMake( (M + 31)/32, (N + 63)/64, 1) threadsPerThreadgroup:MTLSizeMake(128, 1, 1)];
+        [computeEncoder dispatchThreadgroups:MTLSizeMake((M + 31) / 32, (N + 63) / 64, 1)
+                       threadsPerThreadgroup:MTLSizeMake(128, 1, 1)];
       }
 #if _CAPTURE_KERNEL
       if (getMPSProfiler().isCapturing()) {
