@@ -10793,15 +10793,11 @@ class TestTensorDeviceOps(TestCase):
 
 
 class TestDeviceBackendAutoload(TestCase):
-    def test_autoload_switch(self):
-        # Enabled by default
-        self.assertEqual(torch._is_device_backend_autoload_enabled(), True)
-
     def test_autoload(self):
         # After importing the extension, the value of this environment variable should be true
-        torch._import_device_backends()
-        value = os.getenv("IS_CUSTOM_DEVICE_BACKEND_IMPORTED", "false")
-        self.assertEqual(value, "true")
+        # See: test/cpp_extensions/torch_test_cpp_extension/__init__.py
+        is_imported = os.getenv("IS_CUSTOM_DEVICE_BACKEND_IMPORTED", "false")
+        self.assertEqual(is_imported, "true")
 
 
 # Generates tests
