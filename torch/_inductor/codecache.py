@@ -2119,11 +2119,7 @@ class AotCodeCompiler:
                     ctypes.POINTER(ctypes.c_ubyte * nbytes),
                 )
                 raw_bytes = bytes(raw_array.contents)
-                return (
-                    raw_bytes
-                    if all_cuda
-                    else _pad_to_alignment(raw_bytes)
-                )
+                return raw_bytes if all_cuda else _pad_to_alignment(raw_bytes)
 
             all_cuda = all(
                 graph.get_original_value_of_constant(name).is_cuda
