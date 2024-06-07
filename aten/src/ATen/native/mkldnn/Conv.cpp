@@ -231,9 +231,6 @@ static void _mkldnn_convolution_out(
   auto weight = weight_t.is_mkldnn() ? weight_t : weight_t.contiguous(memory_format);
   const ideep::tensor x = itensor_from_tensor(input, /*from_const_data_ptr*/true);
   const ideep::tensor w = itensor_from_tensor(weight, /*from_const_data_ptr*/true);
-  if (mkldnn_conv_enabled_fpmath_mode_bf16() && input_t.scalar_type() ==at::kFloat){
-    op_attr.set_fpmath_mode(dnnl_fpmath_mode_bf16);
-  }
   if (bias.defined()) {
     const ideep::tensor b = itensor_from_tensor(bias, /*from_const_data_ptr*/true);
     ideep::convolution_forward::compute_v3(
