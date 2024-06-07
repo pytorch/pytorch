@@ -1275,7 +1275,7 @@ class TestFxToOnnxFakeTensorWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
         model_type=pytorch_test_common.TorchModelType.TORCH_NN_MODULE,
     )
     @pytorch_test_common.xfail_if_model_type_is_exportedprogram(
-        error_message="aot_autograd expected to have an entirely functional graph",
+        error_message="n=copy_, n.args[0]=zeros_like, placeholders={",
         reason="aot_autograd doesn't support it.",
     )
     def test_fake_tensor_mode_huggingface_openai_whisper(self):

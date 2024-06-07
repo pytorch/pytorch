@@ -7,7 +7,18 @@ import logging
 import os
 import textwrap
 from functools import lru_cache
-from typing import Any, Callable, cast, Dict, List, Optional, Set, Tuple, Union
+from typing import (
+    Any,
+    Callable,
+    cast,
+    Dict,
+    List,
+    Optional,
+    Set,
+    Tuple,
+    TYPE_CHECKING,
+    Union,
+)
 
 import sympy
 
@@ -23,7 +34,6 @@ from ...utils._sympy.value_ranges import ValueRanges
 
 from .. import config, ir
 from ..codecache import code_hash, get_path, PyCodeCache
-from ..ir import IRNode
 from ..metrics import is_metric_table_enabled, log_kernel_metadata
 from ..runtime.hints import ReductionHint, TRITON_MAX_BLOCK
 from ..runtime.runtime_utils import do_bench_gpu, get_max_y_grid, next_power_of_2
@@ -51,6 +61,9 @@ from .common import (
 )
 from .simd import constant_repr, IterationRangesEntry, pexpr, SIMDKernel, SIMDScheduling
 from .triton_utils import config_of, signature_of, signature_to_meta
+
+if TYPE_CHECKING:
+    from ..ir import IRNode
 
 log = logging.getLogger(__name__)
 perf_hint_log = torch._logging.getArtifactLogger(__name__, "perf_hints")
@@ -2302,10 +2315,18 @@ class TritonKernel(SIMDKernel):
         _, call_args, arg_types, _ = self.args.python_argdefs()
         for arg, arg_type in zip(call_args, arg_types):
             if isinstance(arg_type, TensorArg):
-                line = f"assert not {arg}.isnan().any().item()"
-                wrapper.writeline(line)
-                line = f"assert not {arg}.isinf().any().item()"
-                wrapper.writeline(line)
+                if V.graph.cpp_wrapper:
+                    if config.abi_compatible:
+                        wrapper.writeline(
+                            f'AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_check_inf_and_nan("{arg}", {arg}));'
+                        )
+                    else:
+                        wrapper.writeline(f'assert_inf_and_nan("{arg}", {arg});')
+                else:
+                    line = f"assert not {arg}.isnan().any().item()"
+                    wrapper.writeline(line)
+                    line = f"assert not {arg}.isinf().any().item()"
+                    wrapper.writeline(line)
 
     def create_cse_var(self, *args, **kwargs):
         return TritonCSEVariable(*args, **kwargs)
@@ -2341,7 +2362,10 @@ class TritonKernel(SIMDKernel):
             and not entry.has_zdim
             and not (isinstance(entry.numel, int) and entry.numel <= get_max_y_grid())
         ):
-            key = f"{key} * (tl.program_id({entry.grid_dim + 1}) + 1)"
+            # For ynumel larger than max_ygrid, we need to use zdim.
+            # For each z dimension, there are tl.num_programs(1) yblocks which is passed by grad(x,y,z).
+            # So, we need to add tl.program_id(z) * tl.num_programs(y) *YBLOCK to get the correct yoffset.
+            key = f"({key} + tl.program_id({entry.grid_dim + 1}) * tl.num_programs({entry.grid_dim}))"
         pid = entry.pid_cache.get(key, key)
         if self.index_dtype != "tl.int32":
             return f"{pid}.to({self.index_dtype})"

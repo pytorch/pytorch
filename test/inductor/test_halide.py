@@ -3,7 +3,7 @@ import textwrap
 import unittest
 
 import torch
-import torch._inductor.async_compile
+import torch._inductor.async_compile  # noqa: F401 required to warm up AsyncCompile pools
 from torch._inductor.codecache import HalideCodeCache
 from torch._inductor.runtime.hints import HalideInputSpec, HalideMeta
 from torch._inductor.test_case import run_tests, TestCase

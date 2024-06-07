@@ -22,7 +22,7 @@ import sympy
 from filelock import FileLock
 
 import torch
-import torch._inductor.async_compile
+import torch._inductor.async_compile  # noqa: F401 required to warm up AsyncCompile pools
 from torch._dynamo.testing import rand_strided
 from torch._dynamo.utils import counters, identity, preserve_rng_state
 
@@ -40,6 +40,7 @@ from .codegen.triton import (
 )
 
 from .codegen.triton_utils import config_of, signature_to_meta
+from .codegen.wrapper import pexpr
 from .exc import CUDACompileError
 from .ir import ChoiceCaller, PrimitiveInfoType
 from .runtime.hints import DeviceProperties
@@ -310,7 +311,10 @@ class TritonTemplateKernel(TritonKernel):
         Args:
             subgraph_number (int): The index of the subgraph in self.subgraphs
         """
-        with self.create_subgraph_body(f"modification_{subgraph_number}"):
+        num = 0
+        while f"mod_{subgraph_number}_{num}" in self.subgraph_bodies:
+            num += 1
+        with self.create_subgraph_body(f"mod_{subgraph_number}_{num}"):
             assert isinstance(subgraph_number, int)
             assert isinstance(self.subgraphs, list)
             assert (
@@ -534,7 +538,7 @@ class TritonTemplateKernel(TritonKernel):
             meta = wrapper.add_meta_once(self.meta)
 
             grid_call = [
-                texpr(V.graph.sizevars.simplify(s)) for s in self.call_sizes
+                pexpr(V.graph.sizevars.simplify(s)) for s in self.call_sizes
             ] + [meta]
             grid_call = f"{self.grid_fn.__module__}.{self.grid_fn.__name__}({', '.join(grid_call)})"
             wrapper.writeline(
@@ -577,6 +581,7 @@ class TritonTemplate(KernelTemplate):
         epilogue_fn=identity,
         subgraphs=None,
         mutated_inputs=None,
+        call_sizes=None,
         **kwargs,
     ):
         """This function generates a TritonTemplateCaller
@@ -611,6 +616,9 @@ class TritonTemplate(KernelTemplate):
                 "64-bit indexing is not yet implemented for triton templates"
             )
 
+        if call_sizes is None:
+            call_sizes = layout.size
+
         kernel_options = dict(
             input_nodes=input_nodes,
             defines=defines,
@@ -618,13 +626,14 @@ class TritonTemplate(KernelTemplate):
             num_warps=num_warps,
             grid_fn=self.grid,
             meta=kwargs,
-            call_sizes=layout.size,
+            call_sizes=call_sizes,
             prefix_args=prefix_args,
             suffix_args=suffix_args,
             epilogue_fn=epilogue_fn,
             index_dtype="tl.int32",
             subgraphs=subgraphs,
         )
+
         with patch.object(
             V.graph, "get_dtype", self._fake_get_dtype(fake_out)
         ), TritonTemplateKernel(
@@ -698,7 +707,7 @@ class TritonTemplate(KernelTemplate):
         assert mod.__file__ is not None
         grid = self.grid(
             *V.graph.sizevars.size_hints(
-                layout.size,
+                call_sizes,
                 fallback=config.unbacked_symint_fallback,
             ),
             kwargs,
@@ -770,7 +779,7 @@ class ExternKernelChoice:
     def call_name(self):
         return f"extern_kernels.{self.name}"
 
-    @functools.lru_cache(None)
+    @functools.lru_cache(None)  # noqa: B019
     def hash_key(self):
         fn = self.to_callable()
         parts = [

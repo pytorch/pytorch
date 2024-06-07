@@ -78,7 +78,7 @@ set(TORCH_PYTHON_INCLUDE_DIRECTORIES
 list(APPEND TORCH_PYTHON_INCLUDE_DIRECTORIES ${LIBSHM_SRCDIR})
 
 set(TORCH_PYTHON_LINK_LIBRARIES
-    python::python
+    Python::Module
     pybind::pybind11
     opentelemetry::api
     httplib
@@ -298,7 +298,6 @@ endif()
 
 
 add_library(torch_python SHARED ${TORCH_PYTHON_SRCS})
-add_dependencies(torch_python Caffe2_PROTO)
 add_dependencies(torch_python onnx_proto)
 # Avoid numpy for the DEPLOY build
 if(USE_NUMPY)

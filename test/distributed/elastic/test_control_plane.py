@@ -81,6 +81,17 @@ class WorkerServerTest(TestCase):
             self.assertEqual(resp.status, 200)
             out = pickle.loads(resp.data)
 
+    def test_tcp(self) -> None:
+        import requests
+
+        from torch._C._distributed_c10d import _WorkerServer
+
+        server = _WorkerServer("", 1234)
+        out = requests.get("http://localhost:1234/handler/")
+        self.assertEqual(out.status_code, 200)
+
+        server.shutdown()
+
 
 if __name__ == "__main__":
     run_tests()

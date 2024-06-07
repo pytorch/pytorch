@@ -179,13 +179,6 @@
 #     possible values:
 #       OMP - use OpenMP for intra-op and native backend for inter-op tasks
 #       NATIVE - use native thread pool for both intra- and inter-op tasks
-#       TBB - using TBB for intra- and native thread pool for inter-op parallelism
-#
-#   USE_TBB
-#      enable TBB support
-#
-#   USE_SYSTEM_TBB
-#      Use system-provided Intel TBB.
 #
 #   USE_SYSTEM_LIBS (work in progress)
 #      Use system-provided libraries to satisfy the build dependencies.
@@ -371,7 +364,6 @@ def get_submodule_folders():
         for name in [
             "gloo",
             "cpuinfo",
-            "tbb",
             "onnx",
             "foxi",
             "QNNPACK",
@@ -1144,6 +1136,9 @@ def main():
         "fsspec",
         'mkl>=2021.1.1,<=2021.4.0; platform_system == "Windows"',
     ]
+
+    if sys.version_info >= (3, 12, 0):
+        install_requires.append("setuptools")
 
     if BUILD_PYTHON_ONLY:
         install_requires.append(LIBTORCH_PKG_NAME)
