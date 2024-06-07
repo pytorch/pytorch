@@ -78,10 +78,10 @@ class no_grad(_NoParamDecoratorContextManager):
 
     def __enter__(self) -> None:
         self.prev = torch.is_grad_enabled()
-        torch.set_grad_enabled(False)
+        torch._C._set_grad_enabled(False)
 
     def __exit__(self, exc_type: Any, exc_value: Any, traceback: Any) -> None:
-        torch.set_grad_enabled(self.prev)
+        torch._C._set_grad_enabled(self.prev)
 
 
 class enable_grad(_NoParamDecoratorContextManager):
