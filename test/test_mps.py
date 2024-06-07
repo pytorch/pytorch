@@ -193,6 +193,9 @@ def mps_ops_grad_modifier(ops):
         # Failures due to lack of implementation of downstream functions on MPS backend
         # TODO: remove these once downstream function 'aten::_linalg_svd.U' have been implemented
         'linalg.matrix_rank': None,
+
+        # Exception: Caused by sample input at index 3 on MPS
+        'nn.functional.conv3d': [torch.float32],
     }
 
     def addDecorator(op, d) -> None:
@@ -667,6 +670,11 @@ def mps_ops_modifier(ops):
         'special.polygammaspecial_polygamma_n_0': [torch.float32, torch.int16, torch.int8],
     }
 
+    MACOS_BEFORE_14_4_XFAILLIST = {
+        # These ops work fine in 14.4 but fail in 14.2 or 13.x
+        'fft.hfft2': [torch.complex64],
+    }
+
     # Those ops are not expected to work
     UNIMPLEMENTED_XFAILLIST = {
         # Failures due to lack of op implementation on MPS backend
@@ -1020,6 +1028,9 @@ def mps_ops_modifier(ops):
         # Unsupported
         # input types 'tensor<1x3x9x9xf16>' and 'tensor<1xf32>' are not broadcast compatible
         'nn.functional.avg_pool2d': [torch.float16],
+
+        # This doesn't work on M1, but is partially working on M2 with the exception of torch.float16
+        'nn.functional.conv3d': None,
     }
 
     def addDecorator(op, d) -> None:
@@ -1039,6 +1050,11 @@ def mps_ops_modifier(ops):
                 addDecorator(op, DecorateInfo(
                              unittest.expectedFailure,
                              dtypes=xfaillist[key]))
+
+        if key in MACOS_BEFORE_14_4_XFAILLIST and (product_version < 14.4):
+            addDecorator(op, DecorateInfo(
+                         unittest.expectedFailure,
+                         dtypes=MACOS_BEFORE_14_4_XFAILLIST[key]))
 
         if key in MACOS_BEFORE_13_3_XFAILLIST and (torch.backends.mps.is_macos13_or_newer() and product_version < 13.3):
             addDecorator(op, DecorateInfo(
@@ -3260,6 +3276,36 @@ class TestMPS(TestCaseMPS):
         helper((2, 3, 4, 5), 0.1)
         helper((2, 8, 4, 5), 0.2)
         helper((2, 3, 4, 5), 1.0)  # value of 1 should be ignored internally
+
+    def test_addcdiv_transpose(self):
+        # Regression test for issue https://github.com/pytorch/pytorch/issues/118115
+        # Testing continuity of all input tensors
+
+        def helper(shape, value):
+            shape_t = shape[::-1]
+            for i in range(2):
+                for j in range(2):
+                    for k in range(2):
+                        x = torch.rand(shape, device="cpu") if i == 0 else torch.rand(shape_t, device="cpu").t()
+                        y = torch.rand(shape, device="cpu") if j == 0 else torch.rand(shape_t, device="cpu").t()
+                        z = torch.rand(shape, device="cpu") if k == 0 else torch.rand(shape_t, device="cpu").t()
+
+                        x_mps = x.detach().clone().to(device="mps")
+                        y_mps = y.detach().clone().to(device="mps")
+                        z_mps = z.detach().clone().to(device="mps")
+
+                        result_cpu = x.addcdiv_(y, z, value=value)
+                        result_mps = x_mps.addcdiv(y_mps, z_mps, value=value)
+                        result_mps_out = result_cpu.detach().clone().to('mps')
+                        torch.addcdiv(x_mps, y_mps, z_mps, out=result_mps_out, value=value)
+
+                        self.assertEqual(result_cpu, result_mps)
+                        self.assertEqual(result_cpu, result_mps_out)
+
+        helper((2, 3), 1.0)
+        helper((2, 3), 0.2)
+        helper((100, 300), 1.0)
+        helper((100, 300), 0.2)
 
     def test_buffer_size_match(self):
         # this test shouldn't cause any crash
