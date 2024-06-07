@@ -52,9 +52,6 @@ typedef NS_ENUM(NSUInteger, MPSGraphResizeNearestRoundingMode)
 #define MPSDataTypeComplexBit 0x01000000
 #define MPSDataTypeComplexFloat32 ((MPSDataType) (MPSDataTypeFloatBit | MPSDataTypeComplexBit | 64))
 #define MPSDataTypeComplexFloat16 ((MPSDataType) (MPSDataTypeFloatBit | MPSDataTypeComplexBit | 32))
-#else
-#define MPSDataTypeComplexFloat32 ((MPSDataType) 0)
-#define MPSDataTypeComplexFloat16 ((MPSDataType) 0)
 #endif
 
 - (MPSGraphTensor * _Nonnull) convolution3DWithSourceTensor:(MPSGraphTensor * _Nonnull) source
