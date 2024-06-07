@@ -85,13 +85,13 @@ inline void adam_math_amsgrad(
   exp_avg = beta1 * exp_avg + (1 - beta1) * grad;
   exp_avg_sq = beta2 * exp_avg_sq + (1 - beta2) * grad * grad;
   const float casted_state_steps = static_cast<float>(state_steps);
-  const T bias_correction1 = 1 - metal::pow(beta1, casted_state_steps);
+  const T bias_correction1 = 1 - metal::precise::pow(beta1, casted_state_steps);
   const T step_size = lr / bias_correction1;
-  const T bias_correction2 = 1 - metal::pow(beta2, casted_state_steps);
-  const T bias_correction2_sqrt = metal::sqrt(bias_correction2);
+  const T bias_correction2 = 1 - metal::precise::pow(beta2, casted_state_steps);
+  const T bias_correction2_sqrt = metal::precise::sqrt(bias_correction2);
   max_exp_avg_sq = metal::max(max_exp_avg_sq, exp_avg_sq);
 
-  const T denom = (metal::sqrt(max_exp_avg_sq) / bias_correction2_sqrt) + eps;
+  const T denom = (metal::precise::sqrt(max_exp_avg_sq) / bias_correction2_sqrt) + eps;
   param -= step_size * exp_avg / denom;
   grad = grad_;
 }
@@ -131,11 +131,11 @@ inline void adam_math(
   exp_avg = beta1 * exp_avg + (1 - beta1) * grad;
   exp_avg_sq = beta2 * exp_avg_sq + (1 - beta2) * grad * grad;
   const float casted_state_steps = static_cast<float>(state_steps);
-  const T bias_correction1 = 1 - metal::pow(beta1, casted_state_steps);
+  const T bias_correction1 = 1 - metal::precise::pow(beta1, casted_state_steps);
   const T step_size = lr / bias_correction1;
-  const T bias_correction2 = 1 - metal::pow(beta2, casted_state_steps);
-  const T bias_correction2_sqrt = metal::sqrt(bias_correction2);
-  const T denom = (metal::sqrt(exp_avg_sq) / bias_correction2_sqrt) + eps;
+  const T bias_correction2 = 1 - metal::precise::pow(beta2, casted_state_steps);
+  const T bias_correction2_sqrt = metal::precise::sqrt(bias_correction2);
+  const T denom = (metal::precise::sqrt(exp_avg_sq) / bias_correction2_sqrt) + eps;
   param -= step_size * exp_avg / denom;
   grad = grad_;
 }
@@ -274,6 +274,7 @@ static id<MTLLibrary> compileFusedOptimizerOpsLibrary(const id<MTLDevice>& devic
   NSError* error = nil;
   MTLCompileOptions* options = [[MTLCompileOptions new] autorelease];
   [options setLanguageVersion:MTLLanguageVersion2_3];
+  [options setFastMathEnabled:NO];
   fusedOptimizerLibrary = [device newLibraryWithSource:[NSString stringWithCString:kernel
                                                                          encoding:NSASCIIStringEncoding]
                                               options:options

@@ -29,11 +29,20 @@ static void multi_tensor_apply_for_fused_adam(
     const double eps,
     const bool maximize
     ) {
+  const auto num_tensors = tensor_lists[0].size();
+
+  if (num_tensors == 0) {
+    return;
+  }
+
   TORCH_CHECK(
       tensor_lists.size() == depth,
       "Number of tensor lists has to match the depth");
+  for (const auto& d : c10::irange(depth)) {
+    TORCH_CHECK(
+      tensor_lists[d][0].scalar_type() == at::ScalarType::Float || tensor_lists[d][0].scalar_type() == at::ScalarType::Half, "Only float and half are supported");
+  }
 
-  const auto num_tensors = tensor_lists[0].size();
   id<MTLDevice> device = MPSDevice::getInstance()->device();
   MPSStream* mpsStream = getCurrentMPSStream();
 

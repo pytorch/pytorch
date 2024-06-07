@@ -308,6 +308,8 @@ Adam.__doc__ = (
         {_capturable_doc}
         {_differentiable_doc}
         {_fused_doc}
+    .. Note::
+        A prototype implementation of Adam and AdamW for MPS supports `torch.float32` and `torch.float16`.
     .. _Adam\: A Method for Stochastic Optimization:
         https://arxiv.org/abs/1412.6980
     .. _On the Convergence of Adam and Beyond:
@@ -659,6 +661,10 @@ def _fused_adam(
         ),
         _,
     ) in grouped_tensors.items():
+        if device.type == "mps":  # type: ignore[union-attr]
+            assert found_inf is None and grad_scale is None
+            assert not isinstance(lr, Tensor)
+
         device_grad_scale, device_found_inf = None, None
         if grad_scale is not None:
             device_grad_scale = grad_scale_dict.setdefault(
@@ -671,13 +677,8 @@ def _fused_adam(
         if lr_dict is not None and device not in lr_dict:
             lr_dict[device] = lr.to(device=device, non_blocking=True)  # type: ignore[union-attr]
             lr = lr_dict[device]
-        if device.type == "mps":  # type: ignore[union-attr]
-            assert found_inf is None and grad_scale is None
-            assert not isinstance(lr, Tensor)
-            for device_state_step in device_state_steps:
-                device_state_step += 1
-        else:
-            torch._foreach_add_(device_state_steps, 1)
+
+        torch._foreach_add_(device_state_steps, 1)
 
         torch._fused_adam_(
             device_params,
