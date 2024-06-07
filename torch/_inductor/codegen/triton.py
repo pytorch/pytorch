@@ -2315,10 +2315,18 @@ class TritonKernel(SIMDKernel):
         _, call_args, arg_types, _ = self.args.python_argdefs()
         for arg, arg_type in zip(call_args, arg_types):
             if isinstance(arg_type, TensorArg):
-                line = f"assert not {arg}.isnan().any().item()"
-                wrapper.writeline(line)
-                line = f"assert not {arg}.isinf().any().item()"
-                wrapper.writeline(line)
+                if V.graph.cpp_wrapper:
+                    if config.abi_compatible:
+                        wrapper.writeline(
+                            f'AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_check_inf_and_nan("{arg}", {arg}));'
+                        )
+                    else:
+                        wrapper.writeline(f'assert_inf_and_nan("{arg}", {arg});')
+                else:
+                    line = f"assert not {arg}.isnan().any().item()"
+                    wrapper.writeline(line)
+                    line = f"assert not {arg}.isinf().any().item()"
+                    wrapper.writeline(line)
 
     def create_cse_var(self, *args, **kwargs):
         return TritonCSEVariable(*args, **kwargs)

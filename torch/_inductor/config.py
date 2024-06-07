@@ -12,9 +12,6 @@ def is_fbcode():
 # add some debug printouts
 debug = False
 
-# add inf and NaN checkers
-debug_check_inf_and_nan = False
-
 # Whether to disable a progress bar for autotuning
 disable_progress = True
 
