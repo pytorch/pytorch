@@ -12,9 +12,11 @@ from itertools import chain
 __all__ = ['FxGraphDrawer']
 try:
     import pydot
+
     HAS_PYDOT = True
-except ImportError:
+except ModuleNotFoundError:
     HAS_PYDOT = False
+    pydot = None
 
 _COLOR_MAP = {
     "placeholder": '"AliceBlue"',
