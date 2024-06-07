@@ -10791,6 +10791,19 @@ class TestViewOps(TestCase):
 class TestTensorDeviceOps(TestCase):
     pass
 
+
+class TestDeviceBackendAutoload(TestCase):
+    def test_autoload_switch(self):
+        # Enabled by default
+        self.assertEqual(torch._is_device_backend_autoload_enabled(), True)
+
+    def test_autoload(self):
+        # After importing the extension, the value of this environment variable should be true
+        torch._import_device_backends()
+        value = os.getenv("IS_CUSTOM_DEVICE_BACKEND_IMPORTED", "false")
+        self.assertEqual(value, "true")
+
+
 # Generates tests
 # Note: test generation must be done at file scope, not within main, or
 # pytest will fail.

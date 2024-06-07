@@ -2129,10 +2129,13 @@ def _import_device_backends():
             # Just load the extension without calling
             backend_extension.load()
         except Exception as err:
-            raise RuntimeError(f"Failed to load the backend extension: {backend_extension.name}. You can disable extension auto-loading with TORCH_DEVICE_BACKEND_AUTOLOAD=0.") from err
+            raise RuntimeError(
+                f"Failed to load the backend extension: {backend_extension.name}. "
+                f"You can disable extension auto-loading with TORCH_DEVICE_BACKEND_AUTOLOAD=0."
+            ) from err
 
 
-def _is_device_backend_autoload_enabled() -> bool:
+def _is_device_backend_autoload_enabled() -> builtins.bool:
     """
     Whether autoloading out-of-the-tree device extensions is enabled.
     The switch depends on the value of the environment variable
@@ -2143,7 +2146,7 @@ def _is_device_backend_autoload_enabled() -> bool:
 
     Examples:
         >>> torch._is_device_backend_autoload_enabled()
-        Ture
+        True
     """
     # enabled by default
     is_enable = os.getenv("TORCH_DEVICE_BACKEND_AUTOLOAD", "1")

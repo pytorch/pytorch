@@ -111,7 +111,7 @@ setup(
     cmdclass={"build_ext": BuildExtension.with_options(use_ninja=USE_NINJA)},
     entry_points={
         "torch.backends": [
-            "device_backend = autoload_extension:_autoload",
+            "device_backend = torch_test_cpp_extension:_autoload",
         ],
     },
 )
