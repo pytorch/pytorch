@@ -31,7 +31,6 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_ROCM,
     torch_to_numpy_dtype_dict,
     TrackedInputIter,
-    TEST_XPU,
 )
 from torch.testing._internal.opinfo import utils
 
