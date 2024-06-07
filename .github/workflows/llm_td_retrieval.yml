@@ -12,7 +12,6 @@ jobs:
   llm-retrieval:
     runs-on: lf.linux.4xlarge
     continue-on-error: true
-    environment: target-determinator-env
     steps:
       - name: Clone PyTorch
         uses: actions/checkout@v3
