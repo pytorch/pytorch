@@ -50,7 +50,7 @@ def start():
 
 def stop():
     """
-    Stops Cuda Profiler 
+    Stops cuda profile data collection
     Example:
         >>> profiler = Profiler();
         >>> profiler.stop()
