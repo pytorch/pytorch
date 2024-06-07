@@ -8,7 +8,7 @@ import unittest
 import torch
 import torch._dynamo.test_case
 from torch._dynamo import bytecode_analysis, bytecode_transformation
-from torch._dynamo.testing import skipIfNotPy311
+from torch._dynamo.testing import skipIfNotPy311, skipIfNotPy312
 
 
 class BytecodeTests(torch._dynamo.test_case.TestCase):
@@ -413,6 +413,119 @@ def fn():
         self.assertEqual(tab[0].start, 2)
         self.assertEqual(tab[0].end, 4)
         self.assertEqual(tab[0].target, 6)
+
+    def test_bytecode_from_template(self):
+        def fn(d1):
+            for k, v in d1.items():
+                d2[k] = v
+
+        varname_map = {"d1": "var1", "d2": "var2", "k": "var3", "v": "var4"}
+        insts = bytecode_transformation.bytecode_from_template(fn, varname_map)
+        for inst in insts:
+            self.assertIsNone(inst.starts_line)
+            if inst.opname.startswith("LOAD"):
+                self.assertNotIn(inst.argval, varname_map)
+                if inst.opname not in ("LOAD_GLOBAL", "LOAD_ATTR"):
+                    self.assertIsNone(inst.arg)
+            self.assertFalse(inst.opname.startswith("RETURN"))
+
+    @skipIfNotPy311
+    def test_bytecode_from_template_noprefix(self):
+        # Test that 3.11+ prefix instructions are removed
+        def gen_fn():
+            cl = None
+
+            def fn():
+                return cl
+
+            return fn
+
+        fn = gen_fn()
+
+        dis_insts = list(dis.get_instructions(fn))
+        names = {inst.opname for inst in dis_insts}
+        self.assertIn("RESUME", names)
+        self.assertIn("COPY_FREE_VARS", names)
+
+        insts = bytecode_transformation.bytecode_from_template(fn)
+        names = {inst.opname for inst in insts}
+        self.assertNotIn("RESUME", names)
+        self.assertNotIn("COPY_FREE_VARS", names)
+
+    def test_bytecode_from_template_noreturn1(self):
+        # Test that functions with multiple returns will have their
+        # returns replaced with jumps to the end
+        def fn():
+            if x:
+                return y
+            z = 3
+            return z
+
+        dis_insts = list(dis.get_instructions(fn))
+        dis_returns = list(filter(lambda x: x.opname.startswith("RETURN"), dis_insts))
+        self.assertGreater(len(dis_returns), 1)
+        self.assertTrue(dis_insts[-1].opname.startswith("RETURN"))
+
+        insts = bytecode_transformation.bytecode_from_template(fn, noprefix=False)
+        self.assertEqual(insts[-1].opname, "NOP")
+        self.assertEqual(len(dis_insts), len(insts))
+        for i0, i1 in zip(dis_insts, insts):
+            if i0.opname.startswith("RETURN"):
+                if i1 is insts[-1]:
+                    continue
+                self.assertIn("JUMP", i1.opname)
+                self.assertIs(i1.target, insts[-1])
+
+    # Should work with 3.10, but testing with 3.11+ is sufficient.
+    # In 3.8, `fn` ends with a RETURN_VALUE.
+    @skipIfNotPy311
+    def test_bytecode_from_template_noreturn2(self):
+        # Test function that doesn't end with RETURN_VALUE
+        def fn():
+            if x:
+                return x
+            if x:
+                return x
+            raise RuntimeError
+
+        dis_insts = list(dis.get_instructions(fn))
+        self.assertFalse(dis_insts[-1].opname.startswith("RETURN"))
+
+        insts = bytecode_transformation.bytecode_from_template(fn, noprefix=False)
+        self.assertEqual(insts[-1].opname, "NOP")
+        self.assertEqual(insts[-2].opname, dis_insts[-1].opname)
+        self.assertEqual(len(dis_insts) + 1, len(insts))
+        for i0, i1 in zip(dis_insts, insts):
+            if i0.opname.startswith("RETURN"):
+                self.assertIn("JUMP", i1.opname)
+                self.assertIs(i1.target, insts[-1])
+
+    @skipIfNotPy312
+    def test_bytecode_from_template_noreturn_const(self):
+        # Test 3.12+ RETURN_CONST
+        def fn():
+            if x:
+                return 1
+            return 0
+
+        dis_insts = list(dis.get_instructions(fn))
+        dis_return_consts = list(
+            filter(lambda x: x.opname == "RETURN_CONST", dis_insts)
+        )
+        self.assertGreater(len(dis_return_consts), 1)
+        self.assertTrue(dis_insts[-1].opname == "RETURN_CONST")
+
+        insts = bytecode_transformation.bytecode_from_template(fn, noprefix=False)
+        self.assertEqual(insts[-1].opname, "NOP")
+        insts_i = 0
+        for i, inst in enumerate(dis_insts):
+            if inst.opname == "RETURN_CONST":
+                self.assertEqual(insts[insts_i].opname, "LOAD_CONST")
+                insts_i += 1
+                if insts_i != len(insts) - 1:
+                    self.assertIn("JUMP", insts[insts_i].opname)
+                    self.assertIs(insts[insts_i].target, insts[-1])
+            insts_i += 1
 
 
 class BytecodeHookTests(torch._dynamo.test_case.TestCase):

@@ -9,11 +9,10 @@
 #include <torch/csrc/python_headers.h>
 #include <torch/csrc/utils/object_ptr.h>
 
-namespace torch {
-namespace utils {
+namespace torch::utils {
 
-// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables,cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
-static PyObject* thp_qscheme_array[at::COMPILE_TIME_NUM_QSCHEMES];
+// NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
+static std::array<PyObject*, at::COMPILE_TIME_NUM_QSCHEMES> thp_qscheme_array;
 
 void initializeQSchemes() {
   auto torch_module = THPObjectPtr(PyImport_ImportModule("torch"));
@@ -40,6 +39,4 @@ PyObject* getTHPQScheme(at::QScheme qscheme) {
   }
   return qscheme_;
 }
-
-} // namespace utils
-} // namespace torch
+} // namespace torch::utils

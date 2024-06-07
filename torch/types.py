@@ -2,6 +2,7 @@ import builtins
 from typing import Any, List, Optional, Sequence, Tuple, Union
 
 import torch
+from torch import SymInt
 
 # Convenience aliases for common composite types that we need
 # to talk about in PyTorch
@@ -27,6 +28,7 @@ _dtype = torch.dtype
 _device = torch.device
 _qscheme = torch.qscheme
 _size = Union[torch.Size, List[_int], Tuple[_int, ...]]
+_symsize = Union[torch.Size, List[Union[_int, SymInt]], Tuple[Union[_int, SymInt], ...]]
 _layout = torch.layout
 _dispatchkey = Union[str, torch._C.DispatchKey]
 

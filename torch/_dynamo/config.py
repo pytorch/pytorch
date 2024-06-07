@@ -116,8 +116,9 @@ guard_nn_modules_using_dict_tags = True
 # This feature doesn't really work.  We offer this flag for experimental
 # purposes / if you want to help us build out support.
 #
-# torchdynamo has very limited support for tensor subclasses that implement
-# __torch_function__.  Our current support is limited to tensor subclasses
+# torchdynamo has limited support for tensor subclasses that implement
+# __torch_function__ see [Note: __torch_function__] in torch_function.py.
+# Our current support is limited to tensor subclasses
 # that DO NOT store metadata on the tensor (in general, dynamo does not
 # support Python code that stores extra attributes on tensors at present).
 # If your tensor subclass purely changes function call behavior via
@@ -453,6 +454,10 @@ fake_tensor_cache_crosscheck_enabled = (
 # support `context_fn` in torch.utils.checkpoint.checkpoint API under torch.compile().
 # WARNING: this is an experimental flag and is subject to change.
 _experimental_support_context_fn_in_torch_utils_checkpoint = False
+
+# Enables the Compiled Autograd engine to trace .backward() calls made under torch.compile().
+# Note: AOT Autograd will still trace joint graphs.
+compiled_autograd = False
 
 if TYPE_CHECKING:
     from torch.utils._config_typing import *  # noqa: F401, F403
