@@ -1200,6 +1200,7 @@ def parse_args():
         and not IS_SLOW
         and not TEST_WITH_ROCM
         and not IS_MACOS
+        and "xpu" not in BUILD_ENVIRONMENT
         and "onnx" not in BUILD_ENVIRONMENT
         and "debug" not in BUILD_ENVIRONMENT
         and "parallelnative" not in BUILD_ENVIRONMENT,
