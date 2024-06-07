@@ -14,7 +14,7 @@ torch.dtype
 
 .. class:: dtype
 
-.. versions:: 0.4.0 +
+Introductory version: 0.4.0 +
 
 A :class:`torch.dtype` is an object that represents the data type of a
 :class:`torch.Tensor`. PyTorch has twelve different data types:
@@ -138,7 +138,7 @@ torch.device
 
 .. class:: device
 
-.. versions:: 0.4.0 +
+Introductory version: 0.4.0 +
 
 A :class:`torch.device` is an object representing the device on which a :class:`torch.Tensor` is
 or will be allocated.
@@ -254,7 +254,7 @@ torch.layout
 
 .. class:: layout
 
-.. versions:: 0.4.0+
+Introductory version: 0.4.0+
 
 .. warning::
   The ``torch.layout`` class is in beta and subject to change.
@@ -288,7 +288,7 @@ torch.memory_format
 
 .. class:: memory_format
 
-.. versions:: 1.5.0+
+Introductory version: 1.5.0+
 
 A :class:`torch.memory_format` is an object representing the memory format on which a :class:`torch.Tensor` is
 or will be allocated.
