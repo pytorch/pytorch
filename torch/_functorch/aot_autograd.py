@@ -575,9 +575,17 @@ def create_aot_dispatcher_function(
                     fake_flat_args, fw_metadata
                 )
 
-                if needs_autograd and not any(
+                output_and_mutation_safe = not any(
                     x.requires_grad for x in fw_metadata.output_info
-                ):
+                ) and not any(
+                    x.requires_grad
+                    and x.mutates_data
+                    and not x.mutations_under_no_grad_or_inference_mode
+                    and not x.mutations_hidden_from_autograd
+                    for x in fw_metadata.input_info
+                )
+
+                if needs_autograd and output_and_mutation_safe:
                     # We realized that none of the outputs require grad,
                     # so we actually have an inference graph.
                     needs_autograd = False
