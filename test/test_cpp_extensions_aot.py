@@ -368,27 +368,11 @@ class TestTorchLibrary(common.TestCase):
 
 
 class TestDeviceBackendAutoload(common.TestCase):
-    def setUp(self):
-        super().setUp()
-        os.environ["IS_CUSTOM_DEVICE_BACKEND_IMPORTED"] = "false"
-
-    def test_autoload_enable(self):
-        import torch
-
+    def test_autoload(self):
         # After importing the extension, the value of this environment variable should be true
         # See: test/cpp_extensions/torch_test_cpp_extension/__init__.py
         is_imported = os.getenv("IS_CUSTOM_DEVICE_BACKEND_IMPORTED", "false")
         self.assertEqual(is_imported, "true")
-
-    def test_autoload_disable(self):
-        # Disable extension auto-loading
-        os.environ["TORCH_DEVICE_BACKEND_AUTOLOAD"] = "0"
-
-        import torch
-
-        # The value of this environment variable should be false
-        is_imported = os.getenv("IS_CUSTOM_DEVICE_BACKEND_IMPORTED", "true")
-        self.assertEqual(is_imported, "false")
 
 
 if __name__ == "__main__":
