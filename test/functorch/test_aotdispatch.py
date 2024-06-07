@@ -5987,16 +5987,13 @@ class TestAOTAutogradWithCache(TestAOTAutogradWithDynamo):
     """
     In memory version of FXGraphCache so we can isolate testing for FXGraphCache
     """
-    def setUp(self):
-        super().setUp()
-        AOTAutogradCache.clear()
 
     def make_compiler(self, fw_graph_cell):
-        inductor_cache = self.inductor_cache
+        mock_inductor_cache = self.inductor_cache
 
         def compiler(gm, inputs):
-            nonlocal inductor_cache, fw_graph_cell
-            result = inductor_cache.load(gm, inputs)
+            nonlocal mock_inductor_cache, fw_graph_cell
+            result = mock_inductor_cache.load(gm, inputs)
             fw_graph_cell[0] = gm
             return result
 
@@ -6018,7 +6015,9 @@ class TestAOTAutogradWithCache(TestAOTAutogradWithDynamo):
             dynamic,
         )
 
-    @torch._functorch.config.patch("enable_autograd_cache", True)
+    @torch._functorch.config.patch(
+        {"enable_autograd_cache": True, "strict_autograd_cache": True}
+    )
     @torch._inductor.config.patch("fx_graph_cache", True)
     def verify_aot_autograd(
         self,
@@ -6034,6 +6033,7 @@ class TestAOTAutogradWithCache(TestAOTAutogradWithDynamo):
         make_inputs_subclasses: bool = False,
     ):
         self.inductor_cache = MockFXGraphCache()
+        AOTAutogradCache.clear()
         with patch(
             "torch._inductor.codecache.FxGraphCache._lookup_graph",
             new=self.inductor_cache._lookup_graph,
@@ -6048,6 +6048,47 @@ class TestAOTAutogradWithCache(TestAOTAutogradWithDynamo):
                 make_inputs_subclasses=make_inputs_subclasses,
             )
 
+
+# The following tests fail in strict caching mode (i.e. they bypass or cache miss instead of cache hitting)
+# They will be fixed in the PRs above this.
+FAILING_CACHE_TESTS = (
+    # BypassAOTAutogradCache: unsupported nodes
+    "test_backward_mutation_data",
+    "test_backward_mutation_metadata",
+    "test_custom_autograd",
+    "test_inner_grad",
+    "test_input_mutation_set__nop",
+    "test_nonidempotent_amp",  # einsum
+    # Pickle error: OutputAliasInfo/functional tensor
+    "test_input_aliased_with_mutation_output_alias",
+    "test_input_data_and_metadata_mutation",
+    "test_input_mutation_aliases_and_output_alias",
+    "test_input_mutation_and_output_view",
+    "test_input_mutation_false_aliasing",
+    "test_input_mutation_output_view_multiple",
+    "test_input_output_aliase_custom_autograd_function",
+    "test_input_output_view_metadata_mutate_multiple",
+    "test_input_output_view_mutate_multiple",
+    "test_input_output_view_simple",
+    "test_output_aliases_intermediate_and_returned",
+    "test_output_aliases_intermediate_and_returned_different_grad",
+    "test_output_aliases_intermediate_and_returned_flipped",
+    "test_output_aliases_intermediate_multiple",
+    "test_output_aliases_intermediate_multiple_mixed",
+    "test_output_aliases_intermediate_returned_multiple_times",
+    "test_output_aliases_multiple_inputs_get_correct_one",
+    "test_output_all_alias_types",
+    "test_some_outputs_dont_require_grad_view",
+    "test_view_and_inplace_view",
+    "test_some_output_requires_grad_input_doesnt",
+)
+
+for test_name in FAILING_CACHE_TESTS:
+    setattr(
+        TestAOTAutogradWithCache,
+        test_name,
+        unittest.expectedFailure(getattr(TestAOTAutogradWithDynamo, test_name)),
+    )
 
 if __name__ == "__main__":
     run_tests()
