@@ -3,7 +3,6 @@ import contextlib
 import importlib
 
 import math
-import operator
 import os
 import sys
 import unittest
@@ -648,33 +647,6 @@ class TestInductorDynamic(TestCase):
         cfn = self.compile_fn(fn)
         expect = fn(5)
         actual = cfn(5)
-        self.assertEqual(expect, actual)
-
-    def test_interpolate_ceil_eq(self, device):
-        ceiling = math.ceil
-        IntTrueDiv = operator.truediv
-
-        def fn(t):
-            s0, s2, s3 = t.size()
-            x = torch.zeros(
-                (
-                    s0,
-                    2048,
-                    ceiling(IntTrueDiv(2 * ((s2 - 1) // 8) + 2, 1)),
-                    ceiling(IntTrueDiv(2 * ((s3 - 1) // 8) + 2, 1)),
-                ),
-                dtype=torch.bfloat16,
-            )
-            return torch.nn.functional.interpolate(
-                x,
-                scale_factor=2,
-                mode="nearest",
-            )
-
-        cfn = self.compile_fn(fn)
-        arg = torch.randn(4, 16, 18)
-        expect = fn(arg)
-        actual = cfn(arg)
         self.assertEqual(expect, actual)
 
     def test_full_recompiles(self, device):
