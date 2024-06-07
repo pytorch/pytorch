@@ -8,7 +8,7 @@ import sys
 from concurrent.futures import Future, ProcessPoolExecutor, ThreadPoolExecutor
 from functools import partial
 from time import time
-from typing import Any, Callable, Dict, List, Optional, Set
+from typing import Any, Callable, Dict, List, Optional, Set, TYPE_CHECKING
 
 import torch
 from torch._dynamo.device_interface import get_registered_device_interfaces
@@ -34,9 +34,11 @@ from torch._inductor.runtime.compile_tasks import (
     _set_triton_ptxas_path,
     _worker_compile_triton,
 )
-from torch._inductor.runtime.hints import HalideMeta
 
 from torch.hub import _Faketqdm, tqdm
+
+if TYPE_CHECKING:
+    from torch._inductor.runtime.hints import HalideMeta
 
 # timing metrics for time spent in the compilation
 _cumulative_compile_time = 0.0
