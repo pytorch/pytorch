@@ -2,6 +2,7 @@
 PYTEST_DONT_REWRITE (prevents pytest from rewriting assertions, which interferes
 with test_rewrite_assert_with_msg and test_rewrite_assert_without_msg)
 """
+
 # Owner(s): ["module: dynamo"]
 import collections
 import contextlib
@@ -1150,13 +1151,12 @@ class ReproTests(torch._dynamo.test_case.TestCase):
     def test_reformer_train(self):
         with torch.enable_grad():
             cnt = self._reformer(nopython=False)
-        # cant inline torch.autograd.Function means graph break
-        if torch._dynamo.config.assume_static_by_default:
-            self.assertExpectedInline(cnt.frame_count, """1""")
-            self.assertExpectedInline(cnt.op_count, """5""")
-        else:
-            self.assertExpectedInline(cnt.frame_count, """1""")
-            self.assertExpectedInline(cnt.op_count, """5""")
+        expected_op_count = (
+            """11""" if torch._dynamo.config.inline_inbuilt_nn_modules else """5"""
+        )
+
+        self.assertExpectedInline(cnt.frame_count, """1""")
+        self.assertExpectedInline(cnt.op_count, expected_op_count)
 
     @disable_translation_validation_if_dynamic_shapes
     def test_longformer_chunk(self):
@@ -1609,7 +1609,10 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         opt_model(inp)
         opt_model(inp)
         self.assertEqual(cnt.frame_count, 1)
-        self.assertEqual(cnt.op_count, 12)
+
+        self.assertEqual(
+            18 if torch._dynamo.config.inline_inbuilt_nn_modules else 12, cnt.op_count
+        )
 
     def test_exec_import(self):
         def fn1():
