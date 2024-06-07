@@ -1,43 +1,45 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 
 from functools import partial
-from typing import Callable, Any, Dict, TYPE_CHECKING
+from typing import Any, Callable, Dict, TYPE_CHECKING
+
 import torch
-
-if TYPE_CHECKING:
-    import torch._ops
-
-from .binary import (
-    _apply_native_binary,
-    NATIVE_BINARY_FNS,
-    NATIVE_INPLACE_BINARY_FNS,
+from .binary import _apply_native_binary, NATIVE_BINARY_FNS, NATIVE_INPLACE_BINARY_FNS
+from .core import (
+    _get_data,
+    _masks_match,
+    _maybe_get_mask,
+    is_masked_tensor,
+    MaskedTensor,
 )
-from .core import is_masked_tensor, MaskedTensor, _get_data, _masks_match, _maybe_get_mask
-from .passthrough import (
-    _apply_pass_through_fn,
-    PASSTHROUGH_FNS
-)
+from .passthrough import _apply_pass_through_fn, PASSTHROUGH_FNS
 from .reductions import (
     _apply_reduction,
     NATIVE_REDUCE_FNS,
-    TORCH_REDUCE_FNS,
     TENSOR_REDUCE_FNS,
+    TORCH_REDUCE_FNS,
 )
-from .unary import (
-    _apply_native_unary,
-    NATIVE_UNARY_FNS,
-    NATIVE_INPLACE_UNARY_FNS,
-)
+from .unary import _apply_native_unary, NATIVE_INPLACE_UNARY_FNS, NATIVE_UNARY_FNS
+
+
+if TYPE_CHECKING:
+    from torch._ops import OpOverload
 
 
 __all__ = []  # type: ignore[var-annotated]
 
 
-def _check_args_kwargs_length(args, kwargs, error_prefix, len_args=None, len_kwargs=None):
+def _check_args_kwargs_length(
+    args, kwargs, error_prefix, len_args=None, len_kwargs=None
+):
     if len_args is not None and len_args != len(args):
-        raise ValueError(f"{error_prefix}: len(args) must be {len_args} but got {len(args)}")
+        raise ValueError(
+            f"{error_prefix}: len(args) must be {len_args} but got {len(args)}"
+        )
     if len_kwargs is not None and len_kwargs != len(kwargs):
-        raise ValueError(f"{error_prefix}: len(kwargs) must be {len_kwargs} but got {len(kwargs)}")
+        raise ValueError(
+            f"{error_prefix}: len(kwargs) must be {len_kwargs} but got {len(kwargs)}"
+        )
 
 
 class _MaskedContiguous(torch.autograd.Function):
@@ -116,7 +118,9 @@ class _MaskedToSparseCsr(torch.autograd.Function):
             raise ValueError("MaskedToSparseCsr forward: input must be a MaskedTensor.")
 
         if input._masked_data.ndim != 2:
-            raise ValueError(f"Only 2D tensors can be converted to the SparseCsr layout but got shape: {input._masked_data.size()}")
+            raise ValueError(
+                f"Only 2D tensors can be converted to the SparseCsr layout but got shape: {input._masked_data.size()}"
+            )
 
         if input.layout == torch.sparse_csr:
             return input
@@ -157,7 +161,11 @@ class _MaskedWhere(torch.autograd.Function):
 _MASKEDTENSOR_FUNCTION_TABLE = {}
 
 _function_fn_apply_map = {
-    (tuple(NATIVE_REDUCE_FNS), tuple(TORCH_REDUCE_FNS), tuple(TENSOR_REDUCE_FNS)): _apply_reduction,
+    (
+        tuple(NATIVE_REDUCE_FNS),
+        tuple(TORCH_REDUCE_FNS),
+        tuple(TENSOR_REDUCE_FNS),
+    ): _apply_reduction,
 }
 
 for fn_map_list, apply_fn in _function_fn_apply_map.items():
@@ -177,9 +185,11 @@ def register_function_func(ops):
     def foo(func, *args, **kwargs):
         <implementation>
     """
+
     def wrapper(func):
         for op in ops:
             _MASKEDTENSOR_FUNCTION_TABLE[op] = partial(func, op)
+
     return wrapper
 
 
@@ -190,7 +200,9 @@ def _general_function_reductions(func, *args, **kwargs):
 
 @register_function_func([torch.Tensor.where, torch.where])
 def _function_where(func, *args, **kwargs):
-    _check_args_kwargs_length(args, kwargs, "__torch_function__, torch.where", len_args=3, len_kwargs=0)
+    _check_args_kwargs_length(
+        args, kwargs, "__torch_function__, torch.where", len_args=3, len_kwargs=0
+    )
     return _MaskedWhere.apply(*args)
 
 
@@ -214,7 +226,8 @@ def _function_to_sparse_csr(func, *args, **kwargs):
     return _MaskedToSparseCsr.apply(args[0])
 
 
-_MASKEDTENSOR_DISPATCH_TABLE: Dict["torch._ops.OpOverload", Callable[..., Any]] = {}
+_MASKEDTENSOR_DISPATCH_TABLE: Dict["OpOverload", Callable[..., Any]] = {}
+
 
 def register_dispatch_func(aten_ops):
     """
@@ -227,9 +240,11 @@ def register_dispatch_func(aten_ops):
     def foo(func, *args, **kwargs):
         <implementation>
     """
+
     def wrapper(func):
         for aten_op in aten_ops:
             _MASKEDTENSOR_DISPATCH_TABLE[aten_op] = partial(func, aten_op)
+
     return wrapper
 
 
@@ -272,9 +287,7 @@ def layout(func, *args, **kwargs):
 def is_contiguous(func, *args, **kwargs):
     data = _get_data(args[0])
     if data.is_sparse:
-        raise ValueError(
-            "MaskedTensors with sparse data do not have is_contiguous"
-        )
+        raise ValueError("MaskedTensors with sparse data do not have is_contiguous")
     return func(data, *args[1:], **kwargs)
 
 
@@ -301,9 +314,7 @@ def is_non_overlapping_and_dense(func, *args, **kwargs):
 @register_dispatch_func([torch.ops.aten.contiguous])
 def contiguous(func, *args, **kwargs):
     if _get_data(args[0]).is_sparse:
-        raise ValueError(
-            "MaskedTensors with sparse data do not have contiguous"
-        )
+        raise ValueError("MaskedTensors with sparse data do not have contiguous")
     return _MaskedContiguous.apply(args[0])
 
 
@@ -313,9 +324,13 @@ def new_empty_strided(func, *args, **kwargs):
     data = _get_data(args[0])
     mask = _maybe_get_mask(args[0])
     if tuple(args[1]) != tuple(data.size()):
-        raise ValueError(f"__torch_dispatch__, {func}: args[1] expected to be the same as data.size()")
+        raise ValueError(
+            f"__torch_dispatch__, {func}: args[1] expected to be the same as data.size()"
+        )
     if tuple(args[2]) != tuple(data.stride()):
-        raise ValueError(f"__torch_dispatch__, {func}: args[2] expected to be the same as data.stride()")
+        raise ValueError(
+            f"__torch_dispatch__, {func}: args[2] expected to be the same as data.stride()"
+        )
     return MaskedTensor(func(data, args[1], args[2], **kwargs), mask)
 
 
@@ -339,7 +354,9 @@ def _to_copy(func, *args, **kwargs):
 
 @register_dispatch_func([torch.ops.aten._softmax])
 def _softmax(func, *args, **kwargs):
-    _check_args_kwargs_length(args, kwargs, f"__torch_dispatch__, {func}", len_args=3, len_kwargs=0)
+    _check_args_kwargs_length(
+        args, kwargs, f"__torch_dispatch__, {func}", len_args=3, len_kwargs=0
+    )
     data = _get_data(args[0])
     mask = _maybe_get_mask(args[0])
     result_data = torch.ops.aten._masked_softmax(data, ~mask, args[1], 2)
@@ -359,7 +376,9 @@ def _softmax_backward_data(func, *args, **kwargs):
     grad, output, dim, input_dtype = args
     if is_masked_tensor(grad) and is_masked_tensor(output):
         if not _masks_match(grad, output):
-            raise ValueError("__torch_dispatch__, {func}: expected the masks of grad and output to match")
+            raise ValueError(
+                "__torch_dispatch__, {func}: expected the masks of grad and output to match"
+            )
         grad_data = _get_data(grad)
         new_grad_data = torch.ops.aten._masked_softmax_backward(
             grad_data,
@@ -370,7 +389,9 @@ def _softmax_backward_data(func, *args, **kwargs):
         res = MaskedTensor(new_grad_data, _maybe_get_mask(grad))
         return res
     else:
-        raise ValueError(f"__torch_dispatch__, {func}: grad and output must both be MaskedTensors")
+        raise ValueError(
+            f"__torch_dispatch__, {func}: grad and output must both be MaskedTensors"
+        )
 
 
 @register_dispatch_func([torch.ops.aten.copy_])
@@ -384,7 +405,9 @@ def copy_(func, *args, **kwargs):
 
 @register_dispatch_func([torch.ops.aten.where])
 def where(func, *args, **kwargs):
-    _check_args_kwargs_length(args, kwargs, f"__torch_dispatch__, {func}", len_args=3, len_kwargs=0)
+    _check_args_kwargs_length(
+        args, kwargs, f"__torch_dispatch__, {func}", len_args=3, len_kwargs=0
+    )
     if not torch.is_tensor(args[0]):
         raise ValueError("__torch_dispatch__, {func}: expected args[0] to be a tensor")
     mx = args[1]
@@ -400,7 +423,9 @@ def where(func, *args, **kwargs):
 
 @register_dispatch_func([torch.ops.aten._to_sparse])
 def _to_sparse(func, *args, **kwargs):
-    _check_args_kwargs_length(args, kwargs, f"__torch_dispatch__, {func}", len_args=1, len_kwargs=0)
+    _check_args_kwargs_length(
+        args, kwargs, f"__torch_dispatch__, {func}", len_args=1, len_kwargs=0
+    )
     if not torch.is_tensor(args[0]):
         raise TypeError("__torch_dispatch__, {func}: expected args[0] to be a tensor")
     mt = args[0]
@@ -415,7 +440,9 @@ def _to_sparse(func, *args, **kwargs):
 
 @register_dispatch_func([torch.ops.aten._to_sparse_csr])
 def _to_sparse_csr(func, *args, **kwargs):
-    _check_args_kwargs_length(args, kwargs, f"__torch_dispatch__, {func}", len_args=1, len_kwargs=0)
+    _check_args_kwargs_length(
+        args, kwargs, f"__torch_dispatch__, {func}", len_args=1, len_kwargs=0
+    )
     if not torch.is_tensor(args[0]):
         raise ValueError("__torch_dispatch__, {func}: expected args[0] to be a tensor")
     mt = args[0]
@@ -430,7 +457,9 @@ def _to_sparse_csr(func, *args, **kwargs):
 
 @register_dispatch_func([torch.ops.aten._to_dense])
 def _to_dense(func, *args, **kwargs):
-    _check_args_kwargs_length(args, kwargs, f"__torch_dispatch__, {func}", len_args=1, len_kwargs=0)
+    _check_args_kwargs_length(
+        args, kwargs, f"__torch_dispatch__, {func}", len_args=1, len_kwargs=0
+    )
     if not torch.is_tensor(args[0]):
         raise ValueError("__torch_dispatch__, {func}: expected args[0] to be a tensor")
     mt = args[0]
@@ -444,14 +473,18 @@ def _to_dense(func, *args, **kwargs):
 @register_dispatch_func([torch.ops.aten._indices])
 def _indices(func, *args, **kwargs):
     # Assumes data is sparse
-    _check_args_kwargs_length(args, kwargs, f"__torch_dispatch__, {func}", len_args=1, len_kwargs=0)
+    _check_args_kwargs_length(
+        args, kwargs, f"__torch_dispatch__, {func}", len_args=1, len_kwargs=0
+    )
     data = _get_data(args[0]).indices()
     return MaskedTensor(data, torch.ones_like(data).bool())
 
 
 @register_dispatch_func([torch.ops.aten._values])
 def _values(func, *args, **kwargs):
-    _check_args_kwargs_length(args, kwargs, f"__torch_dispatch__, {func}", len_args=1, len_kwargs=0)
+    _check_args_kwargs_length(
+        args, kwargs, f"__torch_dispatch__, {func}", len_args=1, len_kwargs=0
+    )
     data = _get_data(args[0]).values()
     return MaskedTensor(data, torch.ones_like(data).bool())
 
