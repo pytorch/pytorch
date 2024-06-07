@@ -163,7 +163,6 @@ class FSDPParam:
         self._init_extensions()
         self.all_gather_outputs: List[torch.Tensor] = []
         self.unsharded_accumulated_grad = None
-        self._unsharded_param = None
         self._param_fqn: Optional[str] = None  # prefixed from root module
         # TODO: Remove this padding logic once DTensor pads the local tensor:
         # https://github.com/pytorch/pytorch/issues/113045
@@ -331,7 +330,7 @@ class FSDPParam:
         """
         if (
             not ca.compiled_autograd_enabled
-            and self._unsharded_param is not None  # after the 1st all-gather
+            and hasattr(self, "_unsharded_param")  # after the 1st all-gather
         ):
             inner_tensor = self._sharded_local_tensor
             if not hasattr(inner_tensor, "fsdp_post_all_gather"):
@@ -378,7 +377,7 @@ class FSDPParam:
                 self._global_size,
                 self._global_stride,
             )
-        if self._unsharded_param is not None:
+        if hasattr(self, "_unsharded_param"):
             assert ca.compiled_autograd_enabled
             with torch.no_grad():
                 alloc_storage(self._unsharded_param)
