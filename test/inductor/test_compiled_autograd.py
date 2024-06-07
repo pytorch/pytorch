@@ -680,6 +680,28 @@ main()
 
         self.check_output_and_recompiles(fn)
 
+    def test_no_output_nodes_different_leaves_will_recompile(self):
+        def fn():
+            def fwd(x, y, z):
+                out = x * y  # MulBackward0
+                out2 = out * z  # MulBackward0
+                return out2.sum()  # SumBackward0
+
+            x = torch.randn(5, requires_grad=True)
+            y = torch.randn(5, requires_grad=True)
+            z = torch.randn(5, requires_grad=True)
+            loss = fwd(x, y, z)
+            torch.compile(lambda: torch.autograd.backward(loss, inputs=[x]))()
+            yield x.grad
+            x.grad = None
+
+            loss = fwd(x, y, z)
+            torch.compile(lambda: torch.autograd.backward(loss, inputs=[y]))()
+            yield y.grad
+
+        # Guarded by TensorArg id, mismatch on last MulBackward0
+        self.check_output_and_recompiles(fn, 2)
+
     def test_dynamic_shapes(self):
         def fn():
             model = torch.nn.Sequential(
