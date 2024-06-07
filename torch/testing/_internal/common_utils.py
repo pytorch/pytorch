@@ -251,6 +251,9 @@ TestEnvironment.def_setting(
     "OPINFO_SAMPLE_INPUT_INDEX",
     env_var="PYTORCH_OPINFO_SAMPLE_INPUT_INDEX",
     default=None,
+    # Don't include the env var value in the repro command because the info will
+    # be queried from the tracked sample input instead
+    include_in_repro=False,
     parse_fn=lambda val: None if val is None else int(val),
 )
 
