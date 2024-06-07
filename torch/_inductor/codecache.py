@@ -78,6 +78,8 @@ _HERE = os.path.abspath(__file__)
 _TORCH_PATH = os.path.dirname(os.path.dirname(_HERE))
 _LINKER_SCRIPT = os.path.join(_TORCH_PATH, "_inductor/script.ld")
 
+_IS_WINDOWS = sys.platform == "win32"
+
 if config.is_fbcode():
     from triton.fb import build_paths
     from triton.fb.build import _run_build_command
@@ -565,9 +567,13 @@ def get_code_hash(roots):
         module = spec.origin
         assert module is not None
         with open(module, "rb") as f:
-            contents[module] = f.read()
-
-    return hashlib.sha256(pickle.dumps(contents)).digest()
+            contents[spec.name] = f.read()
+    hasher = hashlib.sha256()
+    # Iterate over dict in sorted order since iter_modules may not be deterministic
+    for name, value in sorted(contents.items()):
+        hasher.update(name.encode("utf-8"))
+        hasher.update(value)
+    return hasher.digest()
 
 
 @functools.lru_cache(None)
@@ -905,7 +911,10 @@ class FxGraphCache:
         shape_env = FxGraphCache._get_shape_env()
         assert shape_env is not None
         symints = FxGraphCache._filter_backed_symints(example_inputs)
-        disk_compiled_graph.guards_expr = shape_env.produce_guards_expression(symints)
+        guards = shape_env.get_pruned_guards(symints)
+        disk_compiled_graph.guards_expr = shape_env.produce_guards_expression(
+            placeholders=symints, guards=guards
+        )
 
         try:
             content = pickle.dumps(disk_compiled_graph)
@@ -1224,7 +1233,7 @@ def _get_isa_dry_compile_fingerprint(isa_flags: str) -> str:
 
 class VecISA:
     _bit_width: int
-    _macro: str
+    _macro: List[str]
     _arch_flags: str
     _dtype_nelements: Dict[torch.dtype, int]
 
@@ -1270,7 +1279,7 @@ cdll.LoadLibrary("__lib_path__")
     def nelements(self, dtype: torch.dtype = torch.float) -> int:
         return self._dtype_nelements[dtype]
 
-    def build_macro(self) -> str:
+    def build_macro(self) -> List[str]:
         return self._macro
 
     def build_arch_flags(self) -> str:
@@ -1281,6 +1290,8 @@ cdll.LoadLibrary("__lib_path__")
 
     @functools.lru_cache(None)  # noqa: B019
     def __bool__(self) -> bool:
+        from torch._inductor.cpp_builder import CppBuilder, CppTorchOptions
+
         if config.cpp.vec_isa_ok is not None:
             return config.cpp.vec_isa_ok
 
@@ -1297,16 +1308,21 @@ cdll.LoadLibrary("__lib_path__")
         lock_dir = get_lock_dir()
         lock = FileLock(os.path.join(lock_dir, key + ".lock"), timeout=LOCK_TIMEOUT)
         with lock:
-            output_path = input_path[:-3] + "so"
-            build_cmd = shlex.split(
-                cpp_compile_command(
-                    input_path, output_path, warning_all=False, vec_isa=self
-                )
+            output_dir = os.path.dirname(input_path)
+            buid_options = CppTorchOptions(vec_isa=self, warning_all=False)
+            x86_isa_help_builder = CppBuilder(
+                key,
+                [input_path],
+                buid_options,
+                output_dir,
             )
             try:
                 # Check if the output file exist, and compile when not.
+                output_path = x86_isa_help_builder.get_target_file_path()
                 if not os.path.isfile(output_path):
-                    compile_file(input_path, output_path, build_cmd)
+                    status, target_file = x86_isa_help_builder.build()
+                    if status:
+                        return False
 
                 # Check build result
                 subprocess.check_call(
@@ -1327,9 +1343,9 @@ cdll.LoadLibrary("__lib_path__")
 @dataclasses.dataclass
 class VecNEON(VecISA):
     _bit_width = 256  # This is required to leverage the compute implemented in aten/src/ATen/cpu/vec/vec256/vec256_float_neon.h
-    _macro = "-DCPU_CAPABILITY_NEON"
+    _macro = ["CPU_CAPABILITY_NEON"]
     if sys.platform == "darwin" and platform.processor() == "arm":
-        _macro += " -DAT_BUILD_ARM_VEC256_WITH_SLEEF"
+        _macro.append("AT_BUILD_ARM_VEC256_WITH_SLEEF")
     _arch_flags = ""  # Unused
     _dtype_nelements = {torch.float: 8, torch.bfloat16: 16, torch.float16: 16}
 
@@ -1342,8 +1358,12 @@ class VecNEON(VecISA):
 @dataclasses.dataclass
 class VecAVX512(VecISA):
     _bit_width = 512
-    _macro = "-DCPU_CAPABILITY_AVX512"
-    _arch_flags = "-mavx512f -mavx512dq -mavx512vl -mavx512bw -mfma"
+    _macro = ["CPU_CAPABILITY_AVX512"]
+    _arch_flags = (
+        "-mavx512f -mavx512dq -mavx512vl -mavx512bw -mfma"
+        if not _IS_WINDOWS
+        else "/arch:AVX512"
+    )  # TODO: use cflags
     _dtype_nelements = {torch.float: 16, torch.bfloat16: 32, torch.float16: 32}
 
     def __str__(self) -> str:
@@ -1355,8 +1375,10 @@ class VecAVX512(VecISA):
 @dataclasses.dataclass
 class VecAVX2(VecISA):
     _bit_width = 256
-    _macro = "-DCPU_CAPABILITY_AVX2"
-    _arch_flags = "-mavx2 -mfma"
+    _macro = ["CPU_CAPABILITY_AVX2"]
+    _arch_flags = (
+        "-mavx2 -mfma" if not _IS_WINDOWS else "/arch:AVX2"
+    )  # TODO: use cflags
     _dtype_nelements = {torch.float: 8, torch.bfloat16: 16, torch.float16: 16}
 
     def __str__(self) -> str:
@@ -1368,7 +1390,11 @@ class VecAVX2(VecISA):
 @dataclasses.dataclass
 class VecZVECTOR(VecISA):
     _bit_width = 256
-    _macro = "-DCPU_CAPABILITY_ZVECTOR -DCPU_CAPABILITY=ZVECTOR -DHAVE_ZVECTOR_CPU_DEFINITION"
+    _macro = [
+        "CPU_CAPABILITY_ZVECTOR",
+        "CPU_CAPABILITY=ZVECTOR",
+        "HAVE_ZVECTOR_CPU_DEFINITION",
+    ]
     _arch_flags = "-mvx -mzvector"
     _dtype_nelements = {torch.float: 8, torch.bfloat16: 16, torch.float16: 16}
 
@@ -1380,7 +1406,7 @@ class VecZVECTOR(VecISA):
 
 class InvalidVecISA(VecISA):
     _bit_width = 0
-    _macro = ""
+    _macro = [""]
     _arch_flags = ""
     _dtype_nelements = {}
 
@@ -1391,6 +1417,31 @@ class InvalidVecISA(VecISA):
         return False
 
     __hash__: Callable[[VecISA], Any] = VecISA.__hash__
+
+
+def x86_isa_checker() -> List[str]:
+    supported_isa: List[str] = []
+
+    def _check_and_append_supported_isa(
+        dest: List[str], isa_supported: bool, isa_name: str
+    ):
+        if isa_supported:
+            dest.append(isa_name)
+
+    Arch = platform.machine()
+    """
+    Arch value is x86_64 on Linux, and the value is AMD64 on Windows.
+    """
+    if Arch != "x86_64" and Arch != "AMD64":
+        return supported_isa
+
+    avx2 = torch.cpu._is_cpu_support_avx2()
+    avx512 = torch.cpu._is_cpu_support_avx512()
+
+    _check_and_append_supported_isa(supported_isa, avx2, "avx2")
+    _check_and_append_supported_isa(supported_isa, avx512, "avx512")
+
+    return supported_isa
 
 
 invalid_vec_isa = InvalidVecISA()
@@ -1405,7 +1456,8 @@ def valid_vec_isa_list() -> List[VecISA]:
     if sys.platform == "darwin" and platform.processor() == "arm":
         return [VecNEON()]
 
-    if sys.platform != "linux":
+    cur_os = sys.platform
+    if cur_os != "linux" and cur_os != "win32":
         return []
 
     if platform.machine() == "s390x":
@@ -1423,12 +1475,11 @@ def valid_vec_isa_list() -> List[VecISA]:
         return []
 
     isa_list = []
-    with open("/proc/cpuinfo") as _cpu_info:
-        _cpu_info_content = _cpu_info.read()
-        for isa in supported_vec_isa_list:
-            if str(isa) in _cpu_info_content and isa:
-                isa_list.append(isa)
-        return isa_list
+    _cpu_supported_isa = x86_isa_checker()
+    for isa in supported_vec_isa_list:
+        if str(isa) in _cpu_supported_isa:
+            isa_list.append(isa)
+    return isa_list
 
 
 def pick_vec_isa() -> VecISA:
@@ -1483,7 +1534,7 @@ def cpp_flags() -> str:
 
 
 def cpp_wrapper_flags() -> str:
-    return "-DTORCH_INDUCTOR_CPP_WRAPPER"
+    return "-D TORCH_INDUCTOR_CPP_WRAPPER"
 
 
 def optimization_flags() -> str:
@@ -1625,7 +1676,14 @@ def get_include_and_linking_paths(
     _set_gpu_runtime_env()
     from torch.utils import cpp_extension
 
-    macros = vec_isa.build_macro() if vec_isa != invalid_vec_isa else ""
+    # Remove below in the further
+    # macros = "-D {}".format(vec_isa.build_macro()) if vec_isa != invalid_vec_isa else ""
+    macros = ""
+    if vec_isa != invalid_vec_isa:
+        for x in vec_isa.build_macro():
+            macros_def = f"-D {x} "
+            macros += macros_def
+
     build_arch_flags = ""
     if sys.platform == "linux" and (
         include_pytorch
@@ -1842,7 +1900,7 @@ def cpp_compile_command(
             {get_glibcxx_abi_build_flags()}
             {ipaths_str} {lpaths} {libs} {build_arch_flags}
             {macros} {linker_paths} {clang_flags}
-            {optimization_flags()}
+            {optimization_flags()} {cpp_wrapper_flags()}
             {use_custom_generated_macros()}
             {use_fb_internal_macros()}
             {use_standard_sys_dir_headers()}
@@ -2347,8 +2405,21 @@ class CppCodeCache:
             "vec_isa": pick_vec_isa(),
             "extra_flags": extra_flags,
         }
-        cpp_command = repr(cpp_compile_command("i", "o", **compile_command))
-        key, input_path = write(source_code, "cpp", extra=cpp_command)
+
+        _set_gpu_runtime_env()  # cpp_extension consults the env
+
+        from torch._inductor.cpp_builder import CppBuilder, CppTorchCudaOptions
+
+        dummy_builder = CppBuilder(
+            name="o", sources="i", BuildOption=CppTorchCudaOptions(**compile_command)
+        )
+        # write function will calc source_code hash, the same source code with different
+        # ISA level should be generate different hash.
+        # So we need get a command_line which contains isa related parameter as a part of hash key.
+        # And then pass the command_line to below write function as extra parameter to
+        # guarantee the source code hash contains ISA difference.
+        dummy_cmd = repr(dummy_builder.get_command_line())
+        key, input_path = write(source_code, "cpp", extra=dummy_cmd)
 
         if key not in cls.cache:
             from filelock import FileLock
@@ -2619,6 +2690,101 @@ class CppWrapperCodeCache(CppPythonBindingsCodeCache):
         }
         """
     )
+
+
+# TODO: Will remove the temp code after switch to new cpp_builder
+def _temp_validate_new_and_old_command(new_cmd: List[str], old_cmd: List[str]):
+    new_diff: List[str] = [x for x in new_cmd if x not in old_cmd]
+    old_diff: List[str] = [y for y in old_cmd if y not in new_cmd]
+
+    if new_diff or old_diff:
+        print("!!! new_cmd: ", new_cmd)
+        print("!!! old_cmd: ", old_cmd)
+        print("!!! new_diff: ", new_diff)
+        print("!!! old_diff: ", old_diff)
+        raise RuntimeError("Error in new and old command different.")
+
+
+def _do_validate_cpp_commands(
+    include_pytorch: bool,
+    cuda: bool,
+    compile_only: bool,
+    mmap_weights: bool,
+    use_absolute_path: bool,
+):
+    # PreCI will failed if test machine can't run cuda.
+    temp_dir = tempfile.TemporaryDirectory()
+    test_dir_path = temp_dir.name
+    test_cuda = torch.cuda.is_available() and cuda
+    input_path = os.path.join(test_dir_path, "dummy_input.cpp")
+    output_path = os.path.join(test_dir_path, "dummy_output.so")
+    extra_flags = ["-D TEST_EXTRA_FLAGS"]
+    if compile_only:
+        output_path = os.path.join(test_dir_path, "dummy_output.o")
+    picked_isa = pick_vec_isa()
+
+    old_cmd = cpp_compile_command(
+        input=input_path,
+        output=output_path,
+        include_pytorch=include_pytorch,
+        vec_isa=picked_isa,
+        cuda=test_cuda,
+        aot_mode=False,
+        compile_only=compile_only,
+        use_absolute_path=use_absolute_path,
+        use_mmap_weights=mmap_weights,
+        extra_flags=extra_flags,
+    ).split(" ")
+
+    from torch._inductor.cpp_builder import CppBuilder, CppTorchCudaOptions
+
+    dummy_build_option = CppTorchCudaOptions(
+        vec_isa=picked_isa,
+        include_pytorch=include_pytorch,
+        cuda=test_cuda,
+        compile_only=compile_only,
+        use_absolute_path=use_absolute_path,
+        use_mmap_weights=mmap_weights,
+        extra_flags=extra_flags,
+    )
+
+    dummy_builder = CppBuilder(
+        name="dummy_output",
+        sources=input_path,
+        BuildOption=dummy_build_option,
+        output_dir=test_dir_path,
+    )
+    new_cmd = dummy_builder.get_command_line().split(" ")
+
+    _temp_validate_new_and_old_command(new_cmd, old_cmd)
+
+    temp_dir.cleanup()
+
+
+# TODO: Will remove the temp code after switch to new cpp_builder
+# It could help on sync new cpp_builder generate same command line as the old one.
+def validate_new_cpp_commands():
+    cuda = [True, False]
+    use_mmap_weights = [True, False]
+    compile_only = [True, False]
+    include_pytorch = [True, False]
+    use_absolute_path = [True, False]
+
+    for x in cuda:
+        for y in use_mmap_weights:
+            for z in compile_only:
+                for m in include_pytorch:
+                    for n in use_absolute_path:
+                        print(
+                            f"!!! cuda:{x}, use_mmap_weights:{y}, compile_only:{z}, include_pytorch:{m}， use_absolute_path:{n}"
+                        )
+                        _do_validate_cpp_commands(
+                            include_pytorch=m,
+                            cuda=x,
+                            mmap_weights=y,
+                            compile_only=z,
+                            use_absolute_path=n,
+                        )
 
 
 @clear_on_fresh_inductor_cache
