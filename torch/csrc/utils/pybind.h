@@ -255,7 +255,7 @@ template <>
 struct type_caster<c10::DispatchKey>
     : public type_caster_base<c10::DispatchKey> {
   using base = type_caster_base<c10::DispatchKey>;
-  c10::DispatchKey tmp;
+  c10::DispatchKey tmp{};
 
  public:
   bool load(handle src, bool convert) {

@@ -57,6 +57,7 @@ def fuse(
             "Passing a fuse_custom_config_dict to fuse is deprecated and will not be supported "
             "in a future version. Please pass in a FuseCustomConfig instead.",
             FutureWarning,
+            stacklevel=2,
         )
         fuse_custom_config = FuseCustomConfig.from_dict(fuse_custom_config)
 
@@ -65,6 +66,7 @@ def fuse(
             "Passing a backend_config_dict to prepare is deprecated and will not be supported "
             "in a future version. Please pass in a BackendConfig instead.",
             FutureWarning,
+            stacklevel=2,
         )
         backend_config = BackendConfig.from_dict(backend_config)
 

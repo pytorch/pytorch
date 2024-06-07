@@ -89,8 +89,8 @@ endif()
 if(USE_XPU)
   include(${CMAKE_CURRENT_LIST_DIR}/public/xpu.cmake)
   if(NOT PYTORCH_FOUND_XPU)
-    # message(WARNING "Not compiling with XPU. Could NOT find SYCL."
-    # "Suppress this warning with -DUSE_XPU=OFF.")
+    message(WARNING "Not compiling with XPU. Could NOT find SYCL."
+    "Suppress this warning with -DUSE_XPU=OFF.")
     caffe2_update_option(USE_XPU OFF)
   endif()
 endif()
@@ -144,6 +144,8 @@ endif()
 # ---[ BLAS
 
 set(AT_MKLDNN_ACL_ENABLED 0)
+set(AT_MKLDNN_ENABLED 0)
+set(AT_MKL_ENABLED 0)
 # setting default preferred BLAS options if not already present.
 if(NOT INTERN_BUILD_MOBILE)
   set(BLAS "MKL" CACHE STRING "Selected BLAS library")
@@ -235,7 +237,6 @@ else()
 endif()
 
 if(NOT INTERN_BUILD_MOBILE)
-  set(AT_MKL_ENABLED 0)
   set(AT_MKL_SEQUENTIAL 0)
   set(USE_BLAS 1)
   if(NOT (ATLAS_FOUND OR BLIS_FOUND OR GENERIC_BLAS_FOUND OR MKL_FOUND OR OpenBLAS_FOUND OR VECLIB_FOUND OR FlexiBLAS_FOUND OR NVPL_BLAS_FOUND))
@@ -1281,8 +1282,6 @@ if(CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO AND NOT INTERN_DISABLE_ONNX)
     add_definitions(-DONNX_ML=1)
   endif()
   add_definitions(-DONNXIFI_ENABLE_EXT=1)
-  # Add op schemas in "ai.onnx.pytorch" domain
-  add_subdirectory("${CMAKE_CURRENT_LIST_DIR}/../caffe2/onnx/torch_ops")
   if(NOT USE_SYSTEM_ONNX)
     add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/../third_party/onnx EXCLUDE_FROM_ALL)
     if(NOT MSVC)
@@ -1463,8 +1462,6 @@ if(NOT INTERN_BUILD_MOBILE)
     set(AT_ROCM_ENABLED 1)
   endif()
 
-  set(AT_MKLDNN_ENABLED 0)
-  set(AT_MKLDNN_ACL_ENABLED 0)
   if(USE_MKLDNN)
     if(NOT CMAKE_SIZEOF_VOID_P EQUAL 8)
       message(WARNING
@@ -1682,3 +1679,7 @@ endif()
 
 # Include google/FlatBuffers
 include(${CMAKE_CURRENT_LIST_DIR}/FlatBuffers.cmake)
+
+# Include cpp-httplib
+add_library(httplib INTERFACE IMPORTED)
+target_include_directories(httplib SYSTEM INTERFACE ${PROJECT_SOURCE_DIR}/third_party/cpp-httplib)
