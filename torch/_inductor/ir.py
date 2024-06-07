@@ -2565,7 +2565,7 @@ class Layout(IRNode):
     def is_transposed(self):
         for left, right, size in zip(
             self.stride,
-            reversed(FlexibleLayout.contiguous_strides(self.size)),
+            reversed(FlexibleLayout.contiguous_strides(list(reversed(self.size)))),
             self.size,
         ):
             if size != 1 and left != right:

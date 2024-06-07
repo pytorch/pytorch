@@ -189,7 +189,8 @@ fx_passes_numeric_check: Dict[str, Any] = {
 # torch._inductor.kernel.mm.tuned_mixed_mm's fused kernel.
 # Autotune will not compare with normal cast->then->mm option.
 # (if force_mixed_mm is true, the use_mixed_mm flag will be ignored)
-force_mixed_mm = False
+# TODO: Update description
+force_mixed_mm = "no"
 
 # enable reordering pass for increasing overlap between compute and communication
 reorder_for_compute_comm_overlap = False
