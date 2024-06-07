@@ -309,7 +309,9 @@ Whereas, ``ScheduleInterleaved1F1B`` and ``ScheduleLoopedBFS`` are subclasses of
 API Reference
 *************
 
-Pipeline Transformation APIs
+.. automodule:: torch.distributed.pipelining
+
+Model Split APIs
 ============================
 
 The following set of APIs transform your model into a pipeline representation.
