@@ -6,6 +6,7 @@ from enum import auto, Enum
 from typing import Any, cast, List, Optional, Tuple
 
 import torch
+import torch._dynamo.compiled_autograd as ca
 import torch.distributed as dist
 import torch.nn as nn
 from torch.distributed._composable.contract import _get_registry
@@ -122,7 +123,7 @@ def _from_local_no_grad(
     it avoids some CPU overhead by avoiding default args and not being differentiable.
     """
 
-    if not torch._dynamo.compiled_autograd.compiled_autograd_enabled:
+    if not ca.compiled_autograd_enabled:
         spec = DTensorSpec(
             device_mesh,
             placements,
