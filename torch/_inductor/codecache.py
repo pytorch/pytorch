@@ -25,7 +25,6 @@ import textwrap
 import threading
 import warnings
 from bisect import bisect_right
-from concurrent.futures import Future
 from copy import copy
 from ctypes import c_void_p, cdll, CDLL
 from functools import partial
@@ -56,7 +55,6 @@ from torch._inductor.runtime.compile_tasks import (
     _reload_python_module,
     _reload_python_module_in_subproc,
 )
-from torch._inductor.runtime.hints import HalideMeta
 from torch._inductor.runtime.runtime_utils import cache_dir
 from torch._inductor.utils import clear_on_fresh_inductor_cache, is_linux
 
@@ -69,8 +67,11 @@ from torch._subclasses.fake_tensor import (
 from torch.fx.experimental.symbolic_shapes import has_hint, hint_int, ShapeEnv
 
 if TYPE_CHECKING:
+    from concurrent.futures import Future
+
     from torch._inductor.graph import GraphLowering
     from torch._inductor.ir import ChoiceCaller
+    from torch._inductor.runtime.hints import HalideMeta
 
 
 _HERE = os.path.abspath(__file__)
@@ -564,9 +565,13 @@ def get_code_hash(roots):
         module = spec.origin
         assert module is not None
         with open(module, "rb") as f:
-            contents[module] = f.read()
-
-    return hashlib.sha256(pickle.dumps(contents)).digest()
+            contents[spec.name] = f.read()
+    hasher = hashlib.sha256()
+    # Iterate over dict in sorted order since iter_modules may not be deterministic
+    for name, value in sorted(contents.items()):
+        hasher.update(name.encode("utf-8"))
+        hasher.update(value)
+    return hasher.digest()
 
 
 @functools.lru_cache(None)
@@ -904,7 +909,10 @@ class FxGraphCache:
         shape_env = FxGraphCache._get_shape_env()
         assert shape_env is not None
         symints = FxGraphCache._filter_backed_symints(example_inputs)
-        disk_compiled_graph.guards_expr = shape_env.produce_guards_expression(symints)
+        guards = shape_env.get_pruned_guards(symints)
+        disk_compiled_graph.guards_expr = shape_env.produce_guards_expression(
+            placeholders=symints, guards=guards
+        )
 
         try:
             content = pickle.dumps(disk_compiled_graph)
@@ -1327,6 +1335,8 @@ cdll.LoadLibrary("__lib_path__")
 class VecNEON(VecISA):
     _bit_width = 256  # This is required to leverage the compute implemented in aten/src/ATen/cpu/vec/vec256/vec256_float_neon.h
     _macro = "-DCPU_CAPABILITY_NEON"
+    if sys.platform == "darwin" and platform.processor() == "arm":
+        _macro += " -DAT_BUILD_ARM_VEC256_WITH_SLEEF"
     _arch_flags = ""  # Unused
     _dtype_nelements = {torch.float: 8, torch.bfloat16: 16, torch.float16: 16}
 

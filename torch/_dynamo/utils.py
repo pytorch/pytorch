@@ -2018,12 +2018,12 @@ def object_has_getattribute(value: Any):
     return False
 
 
-def get_custom_getattr(value: Any):
+def get_custom_getattr(value: Any, ignore_nn_module_getattr: bool = False):
     try:
         getattr_fn = inspect.getattr_static(type(value), "__getattr__")
     except AttributeError:
         getattr_fn = None
-    if getattr_fn is torch.nn.Module.__getattr__:
+    if ignore_nn_module_getattr and getattr_fn is torch.nn.Module.__getattr__:
         # ignore this case of getattr
         getattr_fn = None
     return getattr_fn
@@ -2104,6 +2104,14 @@ state_dict_hook_names = [
     "_load_state_dict_post_hooks",
 ]
 all_hook_names = forward_hook_names + backward_hook_names + state_dict_hook_names
+
+
+def nn_module_has_global_hooks():
+    # This is limited to backward hooks for now because NNModuleVariable
+    # supports fwd hooks underneath.
+    return len(torch.nn.modules.module._global_backward_hooks) or len(
+        torch.nn.modules.module._global_backward_pre_hooks
+    )
 
 
 def nn_module_get_all_hooks(

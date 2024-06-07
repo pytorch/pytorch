@@ -3865,6 +3865,24 @@ class TestNestedTensorSubclass(TestCase):
         for i, t in enumerate(out):
             self.assertEqual(t, tensor_list[i])
 
+    def test_unbind_lengths_ragged_idx_equals_2_bad_dim(self, device):
+        values = torch.randn(16, 8, 128, device=device)
+        offsets = torch.tensor([0, 8, 12, 13, 16], device=device)
+        lengths = torch.tensor([6, 2, 1, 2], device=device)
+        ragged_idx = 2
+        nt = torch.nested._internal.nested_tensor.NestedTensor(
+            values,
+            offsets=offsets,
+            lengths=lengths,
+            _ragged_idx=ragged_idx)  # 4D nested tensor
+
+        self.assertRaisesRegex(
+            RuntimeError,
+            r"unbind\(\): nested tensor offsets and lengths.*",
+            lambda: nt.unbind()
+        )
+
+
     def test_unbind_lengths_ragged_idx_2(self, device):
         values = torch.randn(16, 8, 128, device=device)
         offsets = torch.tensor([0, 2, 4, 8], device=device)
@@ -4551,6 +4569,31 @@ class TestNestedTensorSubclass(TestCase):
         self.assertTrue(torch.allclose(attn_output_eager, attn_output))
         self.assertTrue(torch.allclose(value_grad, value.grad))
 
+    @dtypes(torch.float64, torch.float32, torch.half)
+    @onlyCUDA
+    def test_fbgemm_jagged_to_padded_dense_kernels(self, device, dtype):
+        values = torch.randn(10, 5, device=device, dtype=dtype)
+        offsets = torch.tensor([0, 1, 3, 8, 10], device=device, dtype=torch.int64)
+        max_length = offsets.diff().max().item()
+        padding_value = 1.3
+
+        # convert jagged -> padded dense
+        padded = torch.ops.aten._jagged_to_padded_dense_forward(
+            values, [offsets], [max_length], padding_value
+        )
+
+        batch_size = offsets.shape[0] - 1
+        expected_padded_shape = (batch_size, max_length, values.shape[-1])
+        self.assertEqual(padded.shape, expected_padded_shape)
+
+        # convert padded dense -> jagged
+        total_L = values.shape[0]
+        output_jagged = torch.ops.aten._padded_dense_to_jagged_forward(
+            padded, [offsets], total_L
+        )
+
+        # should be equivalent to the original values
+        self.assertEqual(values, output_jagged)
 
 instantiate_parametrized_tests(TestNestedTensor)
 instantiate_device_type_tests(TestNestedTensorDeviceType, globals())
