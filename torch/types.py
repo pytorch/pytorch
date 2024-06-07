@@ -1,11 +1,7 @@
 import builtins
-from typing import Any, List, Optional, Sequence, Tuple, TYPE_CHECKING, Union
+from typing import Any, List, Optional, Sequence, Tuple, Union
 
 import torch
-
-if TYPE_CHECKING:
-    from torch.autograd.graph import GradientEdge
-
 
 # Convenience aliases for common composite types that we need
 # to talk about in PyTorch
@@ -14,8 +10,8 @@ _TensorOrTensors = Union[torch.Tensor, Sequence[torch.Tensor]]
 _TensorOrTensorsOrGradEdge = Union[
     torch.Tensor,
     Sequence[torch.Tensor],
-    "GradientEdge",
-    Sequence["GradientEdge"],
+    "torch.autograd.graph.GradientEdge",
+    Sequence["torch.autograd.graph.GradientEdge"],
 ]
 
 # In some cases, these basic types are shadowed by corresponding
@@ -35,7 +31,7 @@ _layout = torch.layout
 _dispatchkey = Union[str, torch._C.DispatchKey]
 
 # Meta-type for "numeric" things; matches our docs
-Number = Union[_int, _float, _bool]
+Number = Union[builtins.int, builtins.float, builtins.bool]
 
 # Meta-type for "device-like" things.  Not to be confused with 'device' (a
 # literal device object).  This nomenclature is consistent with PythonArgParser.
@@ -47,51 +43,42 @@ del Optional
 
 
 class Storage:
-    _cdata: _int
+    _cdata: int
     device: torch.device
     dtype: torch.dtype
-    _torch_load_uninitialized: _bool
+    _torch_load_uninitialized: bool
 
-    def __deepcopy__(self, memo) -> "Storage":
-        raise NotImplementedError
+    def __deepcopy__(self, memo) -> "Storage":  # type: ignore[empty-body]
+        ...
 
-    def _new_shared(self, int) -> "Storage":
-        raise NotImplementedError
+    def _new_shared(self, int) -> "Storage":  # type: ignore[empty-body]
+        ...
 
     def _write_file(
-        self,
-        f: Any,
-        is_real_file: _bool,
-        save_size: _bool,
-        element_size: _int,
+        self, f: Any, is_real_file: _bool, save_size: _bool, element_size: int
     ) -> None:
-        raise NotImplementedError
+        ...
 
-    def element_size(self) -> _int:
-        raise NotImplementedError
+    def element_size(self) -> int:  # type: ignore[empty-body]
+        ...
 
-    def is_shared(self) -> _bool:
-        raise NotImplementedError
+    def is_shared(self) -> bool:  # type: ignore[empty-body]
+        ...
 
-    def share_memory_(self) -> "Storage":
-        raise NotImplementedError
+    def share_memory_(self) -> "Storage":  # type: ignore[empty-body]
+        ...
 
-    def nbytes(self) -> _int:
-        raise NotImplementedError
+    def nbytes(self) -> int:  # type: ignore[empty-body]
+        ...
 
-    def cpu(self) -> "Storage":
-        raise NotImplementedError
+    def cpu(self) -> "Storage":  # type: ignore[empty-body]
+        ...
 
-    def data_ptr(self) -> _int:
-        raise NotImplementedError
+    def data_ptr(self) -> int:  # type: ignore[empty-body]
+        ...
 
-    def from_file(
-        self,
-        filename: str,
-        shared: _bool = False,
-        nbytes: _int = 0,
-    ) -> "Storage":
-        raise NotImplementedError
+    def from_file(self, filename: str, shared: bool = False, nbytes: int = 0) -> "Storage":  # type: ignore[empty-body]
+        ...
 
-    def _new_with_file(self, f: Any, element_size: _int) -> "Storage":
-        raise NotImplementedError
+    def _new_with_file(self, f: Any, element_size: int) -> "Storage":  # type: ignore[empty-body]
+        ...
