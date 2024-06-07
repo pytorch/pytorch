@@ -12,7 +12,6 @@ try:
 
     HAS_NUMPY = True
 except ModuleNotFoundError:
-    HAS_NUMPY = False
     np = None  # type: ignore[assignment]
 
 __all__ = [

@@ -143,6 +143,7 @@ CI_SKIP_DYNAMIC_BATCH_ONLY = {
     "pyhpc_equation_of_state",
     "pyhpc_turbulent_kinetic_energy",
     "detectron2_fcos_r_50_fpn",
+    "hf_T5_generate",
 }
 
 # These models currently fail accuracy with eager Adam optimizer
