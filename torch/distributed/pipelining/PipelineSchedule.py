@@ -20,7 +20,7 @@ import torch
 import torch.distributed as dist
 from torch.profiler import record_function
 
-from .microbatch import merge_chunks, split_args_kwargs_into_chunks
+from .microbatch import merge_chunks, split_args_kwargs_into_chunks, TensorChunkSpec
 from .PipelineStage import _PipelineStageBase
 
 if TYPE_CHECKING:
@@ -64,12 +64,24 @@ class _PipelineSchedule(ABC):
         self,
         n_microbatches: int,
         loss_fn: Optional[Callable[..., torch.Tensor]] = None,
+        args_chunk_spec: Optional[Tuple[TensorChunkSpec, ...]] = None,
+        kwargs_chunk_spec: Optional[Dict[str, TensorChunkSpec]] = None,
         output_merge_spec: Optional[Union[Dict[str, Any], Tuple[Any]]] = None,
     ):
         # From arguments
         self._n_microbatches = n_microbatches
         self._loss_fn = loss_fn
+        # Chunking specification for positional inputs. (default: `None`)
+        self._args_chunk_spec = args_chunk_spec
+        # Chunking specification for keyword inputs. (default: `None`)
+        self._kwargs_chunk_spec = kwargs_chunk_spec
         self._output_merge_spec = output_merge_spec
+        """
+        # args_chunk_spec and kwargs_chunk_spec specify how to chunk inputs.
+        # They are used to convert batch to microbatches in `step(x)`.  See
+        # `TensorChunkSpec` for helper methods for creating them.
+        """
+
         # Derived
         self._has_backward = self._loss_fn is not None
         # To be filled by subclasses
@@ -201,22 +213,13 @@ class _PipelineSchedule(ABC):
         Splits a full-batch input into chunks (i.e. microbatches) and returns
         the chunks
         """
-        if self._pipe_info is not None:
-            # Use spec from `pipe_info`
-            args_chunk_spec = self._pipe_info.args_chunk_spec
-            kwargs_chunk_spec = self._pipe_info.kwargs_chunk_spec
-        else:
-            # Use default spec from `microbatch.py` (i.e. chunk dim 0 for each arg/kwarg)
-            args_chunk_spec = None
-            kwargs_chunk_spec = None
-
         if args or kwargs:
             args_split, kwargs_split = split_args_kwargs_into_chunks(
                 args,
                 kwargs,
                 self._n_microbatches,
-                args_chunk_spec,
-                kwargs_chunk_spec,
+                self._args_chunk_spec,
+                self._kwargs_chunk_spec,
             )
             return args_split, kwargs_split
         else:
@@ -285,12 +288,16 @@ class PipelineScheduleSingle(_PipelineSchedule):
         stage: _PipelineStageBase,
         n_microbatches: int,
         loss_fn: Optional[Callable] = None,
+        args_chunk_spec: Optional[Tuple[TensorChunkSpec, ...]] = None,
+        kwargs_chunk_spec: Optional[Dict[str, TensorChunkSpec]] = None,
         output_merge_spec: Optional[Union[Dict[str, Any], Tuple[Any]]] = None,
     ):
         # Init parent
         super().__init__(
             n_microbatches=n_microbatches,
             loss_fn=loss_fn,
+            args_chunk_spec=args_chunk_spec,
+            kwargs_chunk_spec=kwargs_chunk_spec,
             output_merge_spec=output_merge_spec,
         )
         self._pipe_info = (
@@ -567,6 +574,8 @@ class PipelineScheduleMulti(_PipelineSchedule):
         stages: List[_PipelineStageBase],
         n_microbatches: int,
         loss_fn: Optional[Callable] = None,
+        args_chunk_spec: Optional[Tuple[TensorChunkSpec, ...]] = None,
+        kwargs_chunk_spec: Optional[Dict[str, TensorChunkSpec]] = None,
         output_merge_spec: Optional[Union[Dict[str, Any], Tuple[Any]]] = None,
     ):
         if len(stages) <= 1:
@@ -577,6 +586,8 @@ class PipelineScheduleMulti(_PipelineSchedule):
         super().__init__(
             n_microbatches=n_microbatches,
             loss_fn=loss_fn,
+            args_chunk_spec=args_chunk_spec,
+            kwargs_chunk_spec=kwargs_chunk_spec,
             output_merge_spec=output_merge_spec,
         )
         self._pipe_info = (
@@ -712,6 +723,8 @@ class ScheduleInterleaved1F1B(PipelineScheduleMulti):
         stages: List[_PipelineStageBase],
         n_microbatches: int,
         loss_fn: Optional[Callable] = None,
+        args_chunk_spec: Optional[Tuple[TensorChunkSpec, ...]] = None,
+        kwargs_chunk_spec: Optional[Dict[str, TensorChunkSpec]] = None,
         output_merge_spec: Optional[Union[Dict[str, Any], Tuple[Any]]] = None,
     ):
         self.pp_group_size = stages[0].group_size
@@ -726,6 +739,8 @@ class ScheduleInterleaved1F1B(PipelineScheduleMulti):
             stages=stages,
             n_microbatches=n_microbatches,
             loss_fn=loss_fn,
+            args_chunk_spec=args_chunk_spec,
+            kwargs_chunk_spec=kwargs_chunk_spec,
             output_merge_spec=output_merge_spec,
         )
 
