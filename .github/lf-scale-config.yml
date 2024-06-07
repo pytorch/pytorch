@@ -1,0 +1,154 @@
+# Defines runner types that will be provisioned by by LF Self-hosted
+# runners for pytorch/pytorch and their labels.
+#
+# Runners listed here will be available as self hosted runners.
+# Configuration is directly pulled from the main branch.
+#
+# Default values:
+#
+# runner_types:
+#   runner_label: # label to specify in the Github Actions workflow
+#     instance_type: m4.large
+#     os: linux
+#     max_available: 20
+#     disk_size: 50
+#     is_ephemeral: true
+
+runner_types:
+  lf.linux.12xlarge:
+    disk_size: 200
+    instance_type: c5.12xlarge
+    is_ephemeral: false
+    max_available: 1000
+    os: linux
+  lf.linux.24xl.spr-metal:
+    disk_size: 200
+    instance_type: c7i.metal-24xl
+    is_ephemeral: false
+    max_available: 30
+    os: linux
+  lf.linux.16xlarge.spr:
+    disk_size: 200
+    instance_type: c7i.16xlarge
+    is_ephemeral: false
+    max_available: 30
+    os: linux
+  lf.linux.12xlarge.ephemeral:
+    disk_size: 200
+    instance_type: c5.12xlarge
+    is_ephemeral: true
+    max_available: 300
+    os: linux
+  lf.linux.16xlarge.nvidia.gpu:
+    disk_size: 150
+    instance_type: g3.16xlarge
+    is_ephemeral: false
+    max_available: 30
+    os: linux
+  lf.linux.24xlarge:
+    disk_size: 150
+    instance_type: c5.24xlarge
+    is_ephemeral: false
+    max_available: 250
+    os: linux
+  lf.linux.2xlarge:
+    disk_size: 150
+    instance_type: c5.2xlarge
+    is_ephemeral: false
+    max_available: 3120
+    os: linux
+  lf.linux.4xlarge:
+    disk_size: 150
+    instance_type: c5.4xlarge
+    is_ephemeral: false
+    max_available: 1000
+    os: linux
+  lf.linux.4xlarge.nvidia.gpu:
+    disk_size: 150
+    instance_type: g3.4xlarge
+    is_ephemeral: false
+    max_available: 520
+    os: linux
+  lf.linux.8xlarge.nvidia.gpu:
+    disk_size: 150
+    instance_type: g3.8xlarge
+    is_ephemeral: false
+    max_available: 400
+    os: linux
+  lf.linux.g4dn.12xlarge.nvidia.gpu:
+    disk_size: 150
+    instance_type: g4dn.12xlarge
+    is_ephemeral: false
+    max_available: 50
+    os: linux
+  lf.linux.g4dn.metal.nvidia.gpu:
+    disk_size: 150
+    instance_type: g4dn.metal
+    is_ephemeral: false
+    max_available: 30
+    os: linux
+  lf.linux.g5.48xlarge.nvidia.gpu:
+    disk_size: 150
+    instance_type: g5.48xlarge
+    is_ephemeral: false
+    max_available: 20
+    os: linux
+  lf.linux.g5.12xlarge.nvidia.gpu:
+    disk_size: 150
+    instance_type: g5.12xlarge
+    is_ephemeral: false
+    max_available: 150
+    os: linux
+  lf.linux.g5.4xlarge.nvidia.gpu:
+    disk_size: 150
+    instance_type: g5.4xlarge
+    is_ephemeral: false
+    max_available: 1200
+    os: linux
+  lf.linux.large:
+    disk_size: 15
+    instance_type: c5.large
+    is_ephemeral: false
+    os: linux
+  lf.linux.arm64.2xlarge:
+    disk_size: 256
+    instance_type: t4g.2xlarge
+    is_ephemeral: false
+    max_available: 200
+    os: linux
+  lf.linux.arm64.m7g.2xlarge:
+    disk_size: 256
+    instance_type: m7g.2xlarge
+    is_ephemeral: false
+    max_available: 20
+    os: linux
+  lf.windows.4xlarge:
+    disk_size: 256
+    instance_type: c5d.4xlarge
+    is_ephemeral: true
+    max_available: 420
+    os: windows
+  lf.windows.4xlarge.nonephemeral:
+    disk_size: 256
+    instance_type: c5d.4xlarge
+    is_ephemeral: false
+    max_available: 420
+    os: windows
+  lf.windows.8xlarge.nvidia.gpu:
+    disk_size: 256
+    instance_type: p3.2xlarge
+    is_ephemeral: true
+    max_available: 150
+    os: windows
+  lf.windows.8xlarge.nvidia.gpu.nonephemeral:
+    disk_size: 256
+    instance_type: p3.2xlarge
+    is_ephemeral: false
+    max_available: 150
+    os: windows
+  lf.windows.g5.4xlarge.nvidia.gpu:
+    disk_size: 256
+    instance_type: g5.4xlarge
+    is_ephemeral: false
+    max_available: 250
+    os: windows
