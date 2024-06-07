@@ -1084,12 +1084,14 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
             # far from an exhaustive check of all the expected guards, just check a couple of them.
             FileCheck().check("""local "L['self']" TYPE_MATCH""").check(
                 """local "L['self']" ID_MATCH"""
-            ).check(f"""{expected_guard_source} "L['self'].net" TYPE_MATCH""").check(
-                f"""{expected_guard_source} "L['self'].net" ID_MATCH"""
             ).check(
-                f"""{expected_guard_source} "L['self'].net[0]" TYPE_MATCH"""
+                f"""{expected_guard_source} "L['self']._modules['net']" TYPE_MATCH"""
             ).check(
-                f"""{expected_guard_source} "L['self'].net[0]" ID_MATCH"""
+                f"""{expected_guard_source} "L['self']._modules['net']" ID_MATCH"""
+            ).check(
+                f"""{expected_guard_source} "L['self']._modules['net']._modules['0']" TYPE_MATCH"""
+            ).check(
+                f"""{expected_guard_source} "L['self']._modules['net']._modules['1']" ID_MATCH"""
             ).run(
                 GUARDS_FILE.getvalue()
             )
