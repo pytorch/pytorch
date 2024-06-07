@@ -47,6 +47,7 @@ def _create_graph(f, args, *, aot_config: AOTConfig) -> torch.fx.GraphModule:
             decomposition_table=aot_config.decompositions,
             record_module_stack=True,
             pre_dispatch=aot_config.pre_dispatch,
+            export_inference=aot_config.is_export and not aot_config.pre_dispatch,
         )(*args)
 
     return fx_g

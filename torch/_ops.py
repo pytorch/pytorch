@@ -692,7 +692,6 @@ class OpOverload(OperatorBase):
         return self._schema.name.split("::")[0]
 
     def decompose(self, *args, **kwargs):
-        return NotImplemented
         dk = torch._C.DispatchKey.CompositeImplicitAutograd
         if dk in self.py_kernels:
             # NB: This branch is not too necessary anymore, because we can
@@ -718,7 +717,6 @@ class OpOverload(OperatorBase):
 
     # This implements the pre-computation logic for the Python dispatcher.
     def _get_dispatch(self, key):
-        print(self, key)
         # This is only called upon a cache miss
         assert key not in self._dispatch_cache, f"{self} {key}"
 
@@ -1163,8 +1161,10 @@ class _OpNamespace(types.ModuleType):
         # for overloads and raise an exception if there are more than one.
         namespace_name = self.name
         qualified_op_name = f"{namespace_name}::{op_name}"
+        module_name = self.__module__ + "." + namespace_name
+
         try:
-            op, overload_names = torch._C._jit_get_operation(qualified_op_name)
+            op, overload_names = _get_packet(qualified_op_name, module_name)
             if op is None:
                 raise AttributeError(
                     f"'_OpNamespace' '{self.name}' object has no attribute '{op_name}'"
@@ -1176,10 +1176,7 @@ class _OpNamespace(types.ModuleType):
                 f"'_OpNamespace' '{self.name}' object has no attribute '{op_name}'"
             ) from e
 
-        # let the script frontend know that op is identical to the builtin op
-        # with qualified_op_name
-        torch.jit._builtins._register_builtin(op, qualified_op_name)
-        op.__module__ = self.__module__ + "." + namespace_name
+        op.__module__ = module_name
         opoverloadpacket = OpOverloadPacket(
             qualified_op_name, op_name, op, overload_names
         )
@@ -1189,6 +1186,23 @@ class _OpNamespace(types.ModuleType):
         setattr(self, op_name, opoverloadpacket)
         self._dir.append(op_name)
         return opoverloadpacket
+
+
+def _get_packet(qualname, op_module):
+    op, overload_names = torch._C._jit_get_operation(qualname)
+    if op is not None:
+        # let the script frontend know that op is identical to the builtin op
+        # with qualified_op_name
+        torch.jit._builtins._register_builtin(op, qualname)
+        op.__module__ = op_module
+    return op, overload_names
+
+
+def _refresh_packet(packet):
+    op, overload_names = _get_packet(packet._qualified_op_name, packet._op.__module__)
+    assert op is not None
+    packet._op = op
+    packet._overload_names = overload_names
 
 
 class _PyOpNamespace(_OpNamespace):

@@ -97,11 +97,12 @@ def tvm(
                 )
             # TODO(shingjan): This could be replaced by tvm.contrib.torch.optimize_torch
             # once USE_PT_TVMDSOOP is updated and turned on by default in TVM.
+            assert trials > 0
             database = ms.relay_integration.tune_relay(
                 mod=mod,
                 target=target,
                 work_dir=work_dir,
-                max_trials_global=20000,
+                max_trials_global=trials,
                 num_trials_per_iter=64,
                 params=params,
                 strategy="evolutionary",
