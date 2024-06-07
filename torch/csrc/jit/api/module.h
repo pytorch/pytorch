@@ -541,9 +541,7 @@ struct slot_list_impl {
   size_t size() const {
     if (!size_) {
       size_ = size_t(0);
-      // NOLINTNEXTLINE(clang-diagnostic-unused-variable)
-      for (const value_type& s : *(this)) {
-        (void)s; // Suppress unused variable warning
+      for ([[maybe_unused]] const value_type& _ : *(this)) {
         ++*size_;
       }
     }

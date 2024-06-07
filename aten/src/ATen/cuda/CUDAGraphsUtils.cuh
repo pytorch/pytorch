@@ -27,7 +27,7 @@ inline CaptureStatus currentStreamCaptureStatus() {
   }
 }
 
-inline void assertNotCapturing(std::string attempt) {
+inline void assertNotCapturing(const std::string& attempt) {
   auto status = currentStreamCaptureStatus();
   TORCH_CHECK(status == CaptureStatus::None,
               attempt,
@@ -37,7 +37,7 @@ inline void assertNotCapturing(std::string attempt) {
               status);
 }
 
-inline void errorIfCapturingCudnnBenchmark(std::string version_specific) {
+inline void errorIfCapturingCudnnBenchmark(const std::string& version_specific) {
   auto status = currentStreamCaptureStatus();
   TORCH_CHECK(status == CaptureStatus::None,
               "Current cudaStreamCaptureStatus: ",

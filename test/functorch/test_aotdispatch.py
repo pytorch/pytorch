@@ -71,6 +71,7 @@ from torch.testing._internal.common_utils import (
     skipIfRocm,
     skipIfTorchDynamo,
     TestCase,
+    xfailIfTorchDynamo,
 )
 from torch.testing._internal.hop_db import hop_db
 from torch.testing._internal.optests import (
@@ -576,6 +577,9 @@ def forward(self, primals_1, primals_2):
 
     # This is a (hopefully) extremely rare case that is difficult to handle,
     # so we ban it.
+    # https://github.com/pytorch/pytorch/issues/126236
+    # https://github.com/pytorch/pytorch/pull/126113
+    @xfailIfTorchDynamo
     def test_set__and_data_mutation_bad(self):
         def f(a):
             a_view = a.view(-1)

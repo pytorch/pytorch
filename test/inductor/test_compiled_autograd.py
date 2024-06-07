@@ -11,7 +11,7 @@ from unittest import mock
 import torch
 import torch.nn as nn
 from torch import _inductor as inductor
-from torch._dynamo import compiled_autograd
+from torch._dynamo import compiled_autograd, config
 from torch._dynamo.utils import counters
 from torch._inductor.test_case import run_tests, TestCase
 from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
@@ -54,10 +54,14 @@ def hook3(gI, gO):
 class TestCompiledAutograd(TestCase):
     def setUp(self) -> None:
         super().setUp()
+        torch._logging.set_logs(compiled_autograd_verbose=False)
+        config.compiled_autograd = False
         compiled_autograd.reset()
 
     def tearDown(self) -> None:
         super().tearDown()
+        torch._logging.set_logs(compiled_autograd_verbose=False)
+        config.compiled_autograd = False
         compiled_autograd.reset()
 
     def check_output_and_recompiles(
@@ -229,6 +233,170 @@ main()
                 model.zero_grad()
 
         self.check_output_and_recompiles(fn)
+
+    def test_torch_compile_api_inductor(self):
+        def fn():
+            torch.manual_seed(123)
+            model = torch.nn.Sequential(
+                torch.nn.Linear(4, 4),
+                torch.nn.Sigmoid(),
+            )
+
+            res = []
+            for _ in range(3):
+                x = torch.randn([1, 4])
+
+                result = model(x).sum()
+                result.backward()
+                res.append(model[0].weight.grad)
+                res.append(model[0].bias.grad)
+                model.zero_grad()
+            return res
+
+        expected = fn()
+        with config.patch(compiled_autograd=True):
+            compiled_fn = torch.compile(fn)
+        actual = compiled_fn()
+        self.assertEqual(expected, actual)
+        self.assertEqual(counters["compiled_autograd"]["captures"], 1)
+
+    def test_torch_compile_api_aot_eager(self):
+        def fn():
+            torch.manual_seed(123)
+            model = torch.nn.Sequential(
+                torch.nn.Linear(4, 4),
+                torch.nn.Sigmoid(),
+            )
+
+            res = []
+            for _ in range(3):
+                x = torch.randn([1, 4])
+
+                result = model(x).sum()
+                result.backward()
+                res.append(model[0].weight.grad)
+                res.append(model[0].bias.grad)
+                model.zero_grad()
+            return res
+
+        expected = fn()
+        with config.patch(compiled_autograd=True):
+            compiled_fn = torch.compile(fn, backend="aot_eager")
+        actual = compiled_fn()
+        self.assertEqual(expected, actual)
+        self.assertEqual(counters["compiled_autograd"]["captures"], 1)
+
+    def test_torch_compile_api_eager(self):
+        def fn():
+            torch.manual_seed(123)
+            model = torch.nn.Sequential(
+                torch.nn.Linear(4, 4),
+                torch.nn.Sigmoid(),
+            )
+
+            res = []
+            for _ in range(3):
+                x = torch.randn([1, 4])
+
+                result = model(x).sum()
+                result.backward()
+                res.append(model[0].weight.grad)
+                res.append(model[0].bias.grad)
+                model.zero_grad()
+            return res
+
+        expected = fn()
+        with config.patch(compiled_autograd=True):
+            compiled_fn = torch.compile(fn, backend="eager")
+        actual = compiled_fn()
+        self.assertEqual(expected, actual)
+        self.assertEqual(counters["compiled_autograd"]["captures"], 1)
+
+    def test_multiple_torch_compile(self):
+        model = torch.nn.Sequential(
+            torch.nn.Linear(4, 4),
+            torch.nn.Sigmoid(),
+        )
+        x = torch.randn([1, 4])
+
+        def fn():
+            result = model(x).sum()
+            result.backward()
+
+        model2 = torch.nn.Linear(4, 4)
+        x2 = torch.randn([1, 4])
+
+        def fn2():
+            result = model2(x2).sum()
+            result.backward()
+
+        no_ca1 = torch.compile(fn)
+        no_ca1()
+        self.assertEqual(counters["compiled_autograd"]["captures"], 0)
+        counters.clear()
+
+        with config.patch(compiled_autograd=True):
+            with_ca = torch.compile(fn2)
+            with_ca()
+            self.assertEqual(counters["compiled_autograd"]["captures"], 1)
+            counters.clear()
+
+        no_ca2 = torch.compile(fn)
+        no_ca2()
+        self.assertEqual(counters["compiled_autograd"]["captures"], 0)
+
+    def test_torch_compile_graph_break(self):
+        model = torch.nn.Sequential(
+            torch.nn.Linear(4, 4),
+            torch.nn.Sigmoid(),
+        )
+        x = torch.randn([1, 4])
+
+        @torch._dynamo.disable()
+        def fn():
+            result = model(x).sum()
+            result.backward()
+
+        with config.patch(compiled_autograd=True):
+            opt_fn = torch.compile(fn)
+            opt_fn()
+
+        self.assertEqual(counters["compiled_autograd"]["captures"], 1)
+
+    def test_torch_compile_graph_break2(self):
+        model = torch.nn.Sequential(
+            torch.nn.Linear(4, 4),
+            torch.nn.Sigmoid(),
+        )
+        x = torch.randn([1, 4])
+
+        @torch._dynamo.disable()
+        def inner_fn(loss):
+            loss.backward()
+
+        def fn():
+            result = model(x).sum()
+            inner_fn(result)
+
+        with config.patch(compiled_autograd=True):
+            opt_fn = torch.compile(fn)
+            opt_fn()
+
+        self.assertEqual(counters["compiled_autograd"]["captures"], 1)
+
+    def test_torch_compile_only_backward_call(self):
+        model = torch.nn.Sequential(
+            torch.nn.Linear(4, 4),
+            torch.nn.Sigmoid(),
+        )
+        x = torch.randn([1, 4])
+
+        result = model(x).sum()
+        with config.patch(compiled_autograd=True):
+            opt_bwd = torch.compile(lambda: result.backward())
+            opt_bwd()
+
+        self.assertEqual(counters["compiled_autograd"]["captures"], 1)
 
     def test_dynamo_boxed(self):
         def get_placeholders(gm_):
