@@ -2,7 +2,7 @@
 import logging
 import operator
 from abc import ABC, abstractmethod
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, Iterable, List, Optional, Tuple, Union
 
 import torch
 import torch.distributed as dist
@@ -21,7 +21,7 @@ from ._utils import flatten_args, modify_graph_op_device, validate_tensors_metad
 
 __all__ = [
     "PipelineStage",
-    "ManualPipelineStage",
+    "TracerPipelineStage",
 ]
 
 logger = logging.getLogger(__name__)
@@ -80,7 +80,7 @@ def _make_tensor_from_meta(
 class _PipelineStageBase(ABC):
     """
     Base class for pipeline stages.
-    Implements common methods used by both the `PipelineStage` used by the tracing frontend and `ManualPipelineStage`.
+    Implements common methods used by both the `TracerPipelineStage` used by the tracing frontend and `PipelineStage`.
     """
 
     def __init__(
@@ -894,7 +894,8 @@ class _PipelineStage(_PipelineStageBase):
         return grad_recv_info_tuple
 
 
-class PipelineStage(_PipelineStage):
+# TODO: Update this to be returned by helper method under Pipe (kwen)
+class TracerPipelineStage(_PipelineStage):
     def __init__(
         self,
         pipe: Pipe,
@@ -919,7 +920,7 @@ PLACEHOLDER_VAL = -1
 
 
 def _create_empty_tensors(
-    tensor: Union[torch.Tensor, List[torch.Tensor]], device: torch.device
+    tensor: Union[torch.Tensor, Iterable[torch.Tensor]], device: torch.device
 ) -> List[torch.Tensor]:
     """
     Creates a list of empty tensors with the same properties (like shape and dtype) as the input tensor(s),
@@ -1069,7 +1070,7 @@ def _get_stage_shapes(
     return stage_id_to_shapes
 
 
-class ManualPipelineStage(_PipelineStageBase):
+class PipelineStage(_PipelineStageBase):
     """
     A class representing a pipeline stage in a pipeline parallelism setup.
     This class is created manually by providing a example input (and optionally output)
@@ -1083,8 +1084,8 @@ class ManualPipelineStage(_PipelineStageBase):
         num_stages (int): The total number of stages.
         device (torch.device): The device where this stage is located.
         num_microbatches (int): The number of microbatches to use.
-        input_args (Union[torch.Tensor, List[torch.tensor]], optional): The input arguments for the submodule.
-        output_args (Union[torch.Tensor, List[torch.tensor]], optional): The output arguments for the submodule.
+        input_args (Union[torch.Tensor, Tuple[torch.tensor]], optional): The input arguments for the submodule.
+        output_args (Union[torch.Tensor, Tuple[torch.tensor]], optional): The output arguments for the submodule.
         group (dist.ProcessGroup, optional): The process group for distributed training. If None, default group.
     """
 
@@ -1095,8 +1096,8 @@ class ManualPipelineStage(_PipelineStageBase):
         num_stages: int,
         device: torch.device,
         num_microbatches: int,
-        input_args: Union[torch.Tensor, List[torch.Tensor]],
-        output_args: Optional[Union[torch.Tensor, List[torch.Tensor]]] = None,
+        input_args: Union[torch.Tensor, Tuple[torch.Tensor, ...]],
+        output_args: Optional[Union[torch.Tensor, Tuple[torch.Tensor, ...]]] = None,
         group: Optional[dist.ProcessGroup] = None,
     ):
         super().__init__(
@@ -1104,7 +1105,6 @@ class ManualPipelineStage(_PipelineStageBase):
         )
         self.submod.to(self.device)
         # When we materialize the model partition on cuda, we call reset_parameters() if it is available
-        # logger.info(f"input args {input_args=}")
         self.inputs: List[torch.Tensor] = []
         self.outputs: List[torch.Tensor] = []
 
@@ -1219,7 +1219,7 @@ class ManualPipelineStage(_PipelineStageBase):
         return True
 
 
-def _validate_stage_shapes(pipeline_stages: List[ManualPipelineStage]):
+def _validate_stage_shapes(pipeline_stages: List[PipelineStage]):
     """
     Check that the buffer shapes match between stages was expected by performing an all_gather between
     all stages.
