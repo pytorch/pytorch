@@ -6643,6 +6643,11 @@ class CommonTemplate:
 
         self.common(fn, [torch.randn(64, 64)])
 
+    def test_new_cpp_build_logical(self):
+        from torch._inductor.codecache import validate_new_cpp_commands
+
+        validate_new_cpp_commands()
+
     def test_as_strided(self):
         def fn(x):
             return (
@@ -9190,7 +9195,6 @@ class CommonTemplate:
             graph = GraphLowering(
                 gm,
                 shape_env=shape_env,
-                num_static_inputs=0,
             )
             with V.set_graph_handler(graph), V.set_debug_handler(DebugContext()):
                 graph.run(*example_inputs)
@@ -10417,7 +10421,6 @@ if HAS_GPU and not TEST_WITH_ASAN:
             cxt = TritonCodeGenTests.NoOpCompilerBackend()
             torch._dynamo.optimize(backend=cxt.noop_backend)(fn)(*args)
             graph = GraphLowering(cxt.model)
-            graph.num_static_inputs = 0
             kernels = []
             with V.set_graph_handler(graph), V.set_debug_handler(DebugContext()):
                 graph.run(*(cxt.example_args))
@@ -10931,7 +10934,9 @@ if HAS_GPU and not TEST_WITH_ASAN:
                 ),
                 (
                     fn3,
-                    "triton_poi_fused_LayerNorm_ReLU",
+                    "triton_poi_fused_layer_norm_relu"
+                    if torch._dynamo.config.inline_inbuilt_nn_modules
+                    else "triton_poi_fused_LayerNorm_ReLU",
                     (torch.randn(4, 4, device=GPU_TYPE),),
                 ),
             ]
