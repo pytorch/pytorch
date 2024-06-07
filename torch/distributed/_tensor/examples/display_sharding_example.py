@@ -4,12 +4,8 @@ from typing import Any, Dict, TYPE_CHECKING
 import torch
 
 from torch.distributed._tensor import DeviceMesh, Shard
-
 from torch.distributed._tensor.debug import CommDebugMode
-
-from torch.distributed._tensor.examples.advanced_module_tracker import (
-    ModuleParamaterShardingTracker,
-)
+from torch.distributed._tensor.debug.comm_mode import ModuleParamaterShardingTracker
 
 from torch.distributed.tensor.parallel import (
     ColwiseParallel,
@@ -44,7 +40,8 @@ supported_ops = [aten.view.default, aten._to_copy.default]
 
 class DisplayShardingExample:
     """
-    Checks if the set of keys in ground truth dictionary and the set produced in advanced_module_tracker are in the same order
+    Checks if the set of keys in ground truth dictionary and the set
+    produced in advanced_module_tracker are in the same order
     """
 
     def __init__(self, world_size, rank):
@@ -113,8 +110,6 @@ class DisplayShardingExample:
             )
         )
 
-        print(module_tracker.module_parameters_dict)
-
         model2 = MLPStacked(None)
         with comm_mode, module_tracker:
             output = model2(inp)
@@ -152,10 +147,7 @@ class DisplayShardingExample:
 
         model = parallelize_module(model, device_mesh, parallelize_plan)
 
-        from torch.distributed._tensor.debug import CommDebugMode
-
         comm_mode = CommDebugMode()
-        # module_tracker = AdvancedModuleTracker()
 
         with comm_mode:
             output_tp = model(inp)
@@ -167,7 +159,6 @@ class DisplayShardingExample:
             )
         )
 
-        comm_mode.print_paramater_info()
         comm_mode.print_sharding_info()
 
 
@@ -176,8 +167,8 @@ def run_example(world_size, rank):
     torch.manual_seed(0)
 
     # run the example
-    instantiated_test = DisplayShardingExampleTest(world_size, rank)
-    instantiated_test.test_display_parameters_distributed()
+    instantiated_test = DisplayShardingExample(world_size, rank)
+    instantiated_test.test_display_parameters_MLP_distributed()
 
 
 if __name__ == "__main__":
@@ -187,7 +178,3 @@ if __name__ == "__main__":
     assert world_size == 4  # our example uses 4 worker ranks
 
     run_example(world_size, rank)
-
-    """single_test_instance = DisplayShardingExampleTest(0,0)
-    single_test_instance.test_display_parameters_no_distributed()
-    """
