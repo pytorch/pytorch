@@ -1,3 +1,4 @@
+# ruff: noqa: TCH004
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -74,22 +75,12 @@ def assume_constant_result(fn):
 
 def allow_in_graph(fn):
     """
-    Customize which functions TorchDynamo will include in the generated
-    graph. Similar to `torch.fx.wrap()`.
-    ::
+    Tells the compiler frontend (Dynamo) to skip symbolic introspection of the function
+    and instead directly write it to the graph when encountered.
 
-        torch._dynamo.allow_in_graph(my_custom_function)
+    See :func:`torch.compiler.allow_in_graph`'s docstring for the full documentation
 
-        @torch._dynamo.optimize(...)
-        def fn(a):
-            x = torch.add(x, 1)
-            x = my_custom_function(x)
-            x = torch.add(x, 1)
-            return x
-
-        fn(...)
-
-    Will capture a single graph containing `my_custom_function()`.
+    WARNING: this API can be a footgun, please read the documentation carefully.
     """
     if isinstance(fn, (list, tuple)):
         return [allow_in_graph(x) for x in fn]

@@ -43,6 +43,7 @@ from ..utils import decode_device, is_pointwise_use
 from ..virtualized import V
 from .ddp_fusion import fuse_ddp_communication
 from .group_batch_fusion import group_batch_fusion_passes, POST_GRAD_FUSIONS
+from .micro_pipeline_tp import patterns as micro_pipeline_tp_patterns
 from .pre_grad import is_same_dict, save_inductor_dict
 from .reinplace import reinplace_inplaceable_ops
 from .split_cat import POST_GRAD_PATTERNS
@@ -102,6 +103,9 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
                 optimus_scuba_log[
                     f"{pattern_matcher_pass.pass_name}_post_grad"
                 ] = upload_graph(gm.graph)
+
+    if config._micro_pipeline_tp:
+        micro_pipeline_tp_patterns.apply(gm)
 
     if config._fuse_ddp_communication:
         fuse_ddp_communication(
@@ -268,11 +272,12 @@ def cuda_and_enabled_mixed_mm_and_not_int8(match):
                                 KeywordArg("mat2"),
                                 0xF,
                             ),
-                            CallFunction(
-                                aten.__rshift__.Scalar,
-                                KeywordArg("mat2"),
-                                4,
-                            ),
+                            # CallFunction(
+                            #    aten.__rshift__.Scalar,
+                            #    KeywordArg("mat2"),
+                            #    4,
+                            # ),
+                            True,
                         ),
                         1,
                     ),
@@ -347,8 +352,7 @@ def pointless_cumsum_replacement(match: Match, shape, fill_value, device, dtype,
 
     # only replace the output node, not all nodes
     match.nodes = [match.output_node()]
-    with V.fake_mode:
-        match.replace_by_example(repl, list(shape))
+    match.replace_by_example(repl, list(shape))
 
 
 def shape_of_mm(a, b):
@@ -708,8 +712,7 @@ def decompose_auto_functionalized(graph):
             args, kwargs = pytree.tree_unflatten(flat_args, spec)
             return auto_functionalized_dense(*args, only_clone_these_tensors, **kwargs)
 
-        with V.fake_mode:
-            match.replace_by_example(decomp, flat_args, run_dce=False)
+        match.replace_by_example(decomp, flat_args, run_dce=False)
 
     graph_pass.apply(graph)
     for node in graph.find_nodes(
@@ -825,8 +828,7 @@ def unfuse_bias_add_to_pointwise(match: Match, mat1, mat2, *, inp):
     def repl(inp, x1, x2):
         return x1 @ x2 + inp
 
-    with V.fake_mode:
-        match.replace_by_example(repl, [inp, mat1, mat2])
+    match.replace_by_example(repl, [inp, mat1, mat2])
 
 
 def is_valid_addmm_fusion(match):
@@ -869,8 +871,7 @@ def addmm(match, mat1, mat2, *, inp):
     def repl(inp, mat1, mat2):
         return aten.addmm(inp, mat1, mat2)
 
-    with V.fake_mode:
-        match.replace_by_example(repl, [inp, mat1, mat2])
+    match.replace_by_example(repl, [inp, mat1, mat2])
 
 
 def check_shape_cuda_and_fused_int_mm_mul_enabled(match):
