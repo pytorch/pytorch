@@ -883,13 +883,13 @@ def _get_sfdp_patterns():
                 "pass_dicts": patterns,
                 "extra_check": extra_check,
                 "scalar_workaround": workaround,
+                # with dropout turned into clone, we end up with a number of
+                # semantically identical graphs
+                "skip_duplicates": True,
             }
 
 
 @functools.lru_cache(None)
 def _sfdp_init():
     for key, register_replacement_kwargs in _get_sfdp_patterns():
-        try:
-            gen_register_replacement(key, **register_replacement_kwargs)
-        except:
-            continue
+        gen_register_replacement(key, **register_replacement_kwargs)
