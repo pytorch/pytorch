@@ -82,7 +82,6 @@ TEST(TestScalar, TestScalar) {
     // NOLINTNEXTLINE(cppcoreguidelines-avoid-goto,hicpp-avoid-goto)
     ASSERT_NO_THROW(gen.set_current_seed(std::random_device()()));
   }
-  auto&& C = at::globalContext();
   if (at::hasCUDA()) {
     auto t2 = zeros({4, 4}, at::kCUDA);
     cout << &t2 << "\n";

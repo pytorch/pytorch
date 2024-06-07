@@ -98,7 +98,7 @@ class Quantize(torch.nn.Module):
                                          int(self.zero_point), self.dtype)
 
     @staticmethod
-    def from_float(mod):
+    def from_float(mod, use_precomputed_fake_quant=False):
         assert hasattr(mod, 'activation_post_process')
         scale, zero_point = mod.activation_post_process.calculate_qparams()
         return Quantize(scale.float().item(), zero_point.long().item(), mod.activation_post_process.dtype)
@@ -127,5 +127,5 @@ class DeQuantize(torch.nn.Module):
         return Xq.dequantize()
 
     @staticmethod
-    def from_float(mod):
+    def from_float(mod, use_precomputed_fake_quant=False):
         return DeQuantize()
