@@ -375,7 +375,7 @@ class TestConverter(TestCase):
                     return self.w + self.m1(x)
                 else:
                     return self.w + self.m2(x)
-        
+
         # Super nested module testing.
         inp = (torch.ones(1),)
         orig_m = SuperNestedM()
