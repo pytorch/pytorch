@@ -92,7 +92,6 @@ class DisplayShardingExample:
 
         LR = 0.25
 
-        optim = torch.optim.SGD(model.parameters(), lr=LR)
         comm_mode = CommDebugMode()
         module_tracker = ModuleParamaterShardingTracker()
 
