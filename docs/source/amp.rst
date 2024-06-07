@@ -276,7 +276,6 @@ please file an issue.
 XPU Ops that can autocast to ``float16``
 """"""""""""""""""""""""""""""""""""""""
 
-``__matmul__``,
 ``addbmm``,
 ``addmm``,
 ``addmv``,
@@ -297,7 +296,6 @@ XPU Ops that can autocast to ``float16``
 ``matmul``,
 ``mm``,
 ``mv``,
-``prelu``,
 ``RNNCell``
 
 XPU Ops that can autocast to ``float32``
@@ -309,9 +307,7 @@ XPU Ops that can autocast to ``float32``
 ``__rtruediv__``,
 ``binary_cross_entropy_with_logits``,
 ``cosine_embedding_loss``,
-``cdist``,
 ``cosine_similarity``,
-``cross_entropy``,
 ``cumsum``,
 ``dist``,
 ``exp``,
@@ -323,10 +319,8 @@ XPU Ops that can autocast to ``float32``
 ``log``,
 ``log_softmax``,
 ``margin_ranking_loss``,
-``multilabel_margin_loss``,
 ``nll_loss``,
 ``normalize``,
-``pdist``,
 ``poisson_nll_loss``,
 ``pow``,
 ``reciprocal``,
