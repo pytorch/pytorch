@@ -187,7 +187,7 @@ try:
     dynamo_timed = torch._dynamo.utils.dynamo_timed
 except AttributeError:  # Compile workers only have a mock version of torch
 
-    def dynamo_timed(original_function=None, phase_name=None):
+    def dynamo_timed(original_function=None, phase_name=None, fwd_only=True):
         if original_function:
             return original_function
         return dynamo_timed

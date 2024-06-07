@@ -1,5 +1,3 @@
-import warnings
-
 from .distance import PairwiseDistance
 from .module import Module
 from .. import functional as F
@@ -7,6 +5,7 @@ from .. import _reduction as _Reduction
 
 from torch import Tensor
 from typing import Callable, Optional
+from typing_extensions import deprecated
 
 __all__ = ['L1Loss', 'NLLLoss', 'NLLLoss2d', 'PoissonNLLLoss', 'GaussianNLLLoss', 'KLDivLoss',
            'MSELoss', 'BCELoss', 'BCEWithLogitsLoss', 'HingeEmbeddingLoss', 'MultiLabelMarginLoss',
@@ -218,12 +217,15 @@ class NLLLoss(_WeightedLoss):
         return F.nll_loss(input, target, weight=self.weight, ignore_index=self.ignore_index, reduction=self.reduction)
 
 
+@deprecated(
+    "`NLLLoss2d` has been deprecated. "
+    "Please use `NLLLoss` instead as a drop-in replacement and see "
+    "https://pytorch.org/docs/main/nn.html#torch.nn.NLLLoss for more details.",
+    category=FutureWarning,
+)
 class NLLLoss2d(NLLLoss):
     def __init__(self, weight: Optional[Tensor] = None, size_average=None, ignore_index: int = -100,
                  reduce=None, reduction: str = 'mean') -> None:
-        warnings.warn("NLLLoss2d has been deprecated. "
-                      "Please use NLLLoss instead as a drop-in replacement and see "
-                      "https://pytorch.org/docs/main/nn.html#torch.nn.NLLLoss for more details.")
         super().__init__(weight, size_average, ignore_index, reduce, reduction)
 
 

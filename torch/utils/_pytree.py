@@ -48,6 +48,7 @@ from typing import (
     TypeVar,
     Union,
 )
+from typing_extensions import deprecated
 
 
 __all__ = [
@@ -251,6 +252,11 @@ def _register_namedtuple(
     )
 
 
+@deprecated(
+    "`torch.utils._pytree._register_pytree_node` is deprecated. "
+    "Please use `torch.utils._pytree.register_pytree_node` instead.",
+    category=FutureWarning,
+)
 def _register_pytree_node(
     cls: Type[Any],
     flatten_fn: FlattenFunc,
@@ -287,16 +293,12 @@ def _register_pytree_node(
             Like ``flatten_fn``, but in place of a List[leaf], it should return
             a List[(keypath, leaf)].
     """
-    warnings.warn(
-        "torch.utils._pytree._register_pytree_node is deprecated. "
-        "Please use torch.utils._pytree.register_pytree_node instead.",
-        stacklevel=2,
-    )
-
     if to_str_fn is not None or maybe_from_str_fn is not None:
         warnings.warn(
-            "to_str_fn and maybe_from_str_fn is deprecated. "
-            "Please use to_dumpable_context and from_dumpable_context instead."
+            "`to_str_fn` and `maybe_from_str_fn` is deprecated. "
+            "Please use `to_dumpable_context` and `from_dumpable_context` instead.",
+            FutureWarning,
+            stacklevel=2,
         )
 
     _private_register_pytree_node(
@@ -1451,14 +1453,20 @@ def treespec_pprint(treespec: TreeSpec) -> str:
 
 
 # TODO(angelayi): remove this function after OSS/internal stabilize
+@deprecated(
+    "`pytree_to_str` is deprecated. Please use `treespec_dumps` instead.",
+    category=FutureWarning,
+)
 def pytree_to_str(treespec: TreeSpec) -> str:
-    warnings.warn("pytree_to_str is deprecated. Please use treespec_dumps")
     return treespec_dumps(treespec)
 
 
 # TODO(angelayi): remove this function after OSS/internal stabilize
+@deprecated(
+    "`str_to_pytree` is deprecated. Please use `treespec_loads` instead.",
+    category=FutureWarning,
+)
 def str_to_pytree(json: str) -> TreeSpec:
-    warnings.warn("str_to_pytree is deprecated. Please use treespec_loads")
     return treespec_loads(json)
 
 
