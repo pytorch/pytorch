@@ -286,6 +286,42 @@ class TestConverter(TestCase):
         inp = (torch.tensor(1), {torch.tensor(4): "foo"})
         self._check_equal_ts_ep_converter(MTensorIn(), inp)
 
+    def test_ts2ep_converter_custom_op(self):
+        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
+            torch._dynamo.config.capture_scalar_outputs = True
+            torch._dynamo.config.capture_dynamic_output_shape_ops = True
+
+            torch.library.define(
+                "mylib::foo",
+                "(Tensor x) -> Tensor",
+                lib=lib,
+            )
+
+            # PyTorch custorm op implementation
+            @torch.library.impl(
+                "mylib::foo",
+                "CompositeExplicitAutograd",
+                lib=lib,
+            )
+            def foo_impl(x):
+                return x + x
+
+            # Meta function of the custom op.
+            @torch.library.impl_abstract(
+                "mylib::foo",
+                lib=lib,
+            )
+            def foo_meta(x):
+                return x + x
+
+            class M(torch.nn.Module):
+                def forward(self, x):
+                    return torch.ops.mylib.foo(x)
+
+            inp = (torch.randn(3, 3),)
+            m = M()
+            self._check_equal_ts_ep_converter(m, inp)
+
 
 if __name__ == "__main__":
     run_tests()
