@@ -111,7 +111,12 @@ def make_fake_params_buffers(
 
 
 def make_fake_inputs(
-    nn_module, args, kwargs, dynamic_shapes, _is_torch_jit_trace=False
+    nn_module,
+    args,
+    kwargs,
+    dynamic_shapes,
+    _is_torch_jit_trace=False,
+    _allow_complex_guards_as_runtime_asserts=False,
 ):
     """
     Given an nn module, example inputs, and constraints, return a new fake mode,
@@ -156,13 +161,22 @@ def make_fake_inputs(
             "co_firstlineno": code.co_firstlineno,
         }
         fake_mode = FakeTensorMode(
-            shape_env=ShapeEnv(tracked_fakes=[], co_fields=co_fields),
+            shape_env=ShapeEnv(
+                tracked_fakes=[],
+                co_fields=co_fields,
+                prefer_deferred_runtime_asserts_over_guards=_allow_complex_guards_as_runtime_asserts,
+                _allow_complex_guards_as_runtime_asserts=_allow_complex_guards_as_runtime_asserts,
+            ),
             allow_non_fake_inputs=True,
             export=True,
         )
     else:
         fake_mode = FakeTensorMode(
-            shape_env=ShapeEnv(tracked_fakes=[]),
+            shape_env=ShapeEnv(
+                tracked_fakes=[],
+                prefer_deferred_runtime_asserts_over_guards=_allow_complex_guards_as_runtime_asserts,
+                _allow_complex_guards_as_runtime_asserts=_allow_complex_guards_as_runtime_asserts,
+            ),
             allow_non_fake_inputs=True,
         )
     if fake_mode.shape_env is None or fake_mode.shape_env.tracked_fakes is None:

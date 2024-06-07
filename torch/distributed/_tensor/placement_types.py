@@ -32,7 +32,7 @@ class Placement:
         return isinstance(self, Replicate)
 
     def is_partial(self) -> bool:
-        return isinstance(self, _Partial)
+        return isinstance(self, Partial)
 
 
 @dataclass(frozen=True)
@@ -412,7 +412,7 @@ class Partial(Placement):
     def _reduce_value(
         self, tensor: torch.Tensor, mesh: DeviceMesh, mesh_dim: int
     ) -> torch.Tensor:
-        # _Partial placement contract #1:
+        # Partial placement contract #1:
         # _reduce_value: reduce the value of the tensor on the mesh dimension
         return funcol.all_reduce(
             tensor, reduceOp=self.reduce_op, group=(mesh, mesh_dim)
@@ -425,7 +425,7 @@ class Partial(Placement):
         mesh_dim: int,
         shard_spec: Placement,
     ) -> torch.Tensor:
-        # _Partial placement contract #2:
+        # Partial placement contract #2:
         # _reduce_shard_value: reduce_scatter the value of the tensor over the mesh dimension
         shard_spec = cast(Shard, shard_spec)
         return shard_spec._reduce_shard_tensor(tensor, mesh, self.reduce_op, mesh_dim)
@@ -433,7 +433,7 @@ class Partial(Placement):
     def _partition_value(
         self, tensor: torch.Tensor, mesh: DeviceMesh, mesh_dim: int
     ) -> torch.Tensor:
-        # _Partial placement contract #3:
+        # Partial placement contract #3:
         # _partition_value: partition the value of a replicated tensor on the mesh dimension
 
         # _partition_value is the conjugate operation of _reduce_value
@@ -446,7 +446,7 @@ class Partial(Placement):
         return tensor / num_chunks
 
     def __eq__(self, other: object) -> bool:
-        if not isinstance(other, _Partial):
+        if not isinstance(other, Partial):
             return False
         return self.reduce_op == other.reduce_op
 
@@ -457,7 +457,7 @@ class Partial(Placement):
         """
         machine readable representation of the Partial placement
         """
-        return f"_Partial({self.reduce_op})"
+        return f"Partial({self.reduce_op})"
 
     def __str__(self) -> str:
         """
@@ -668,7 +668,7 @@ class DTensorSpec:
 
         # find all mesh dims that need pending reductions
         for s in sums:
-            placements[s] = _Partial()
+            placements[s] = Partial()
 
         for i, m in enumerate(dim_map):
             if m >= 0:

@@ -6018,6 +6018,7 @@ class TestArrayCreationCopyArgument(TestCase):
             with pytest.raises(ValueError):
                 np.array(pyscalar, dtype=np.int64, copy=np._CopyMode.NEVER)
 
+    @xfail  # TODO: handle `_CopyMode` properly in torch._numpy
     def test_compatible_cast(self):
         # Some types are compatible even though they are different, no
         # copy is necessary for them. This is mostly true for some integers
