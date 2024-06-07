@@ -317,7 +317,6 @@ class TestSDPAPatternRewriterTemplate(TestCase):
             checkpoint_wrapper(dot_prod_attention), contains=False, has_dropout=True
         )
 
-    @skipIfRocm  # AssertionError: expected size 4==4, stride 32==64 at dim=0
     def _test_sdpa_rewriter_5(self):
         def sfdp_pattern_5_v1(query, key, value):
             attn_mask = torch.ones(
@@ -594,7 +593,6 @@ class TestSDPAPatternRewriterTemplate(TestCase):
 
         self._check_common(dot_prod_attention)
 
-    @skipIfRocm  # AssertionError: expected size 4==4, stride 32==512 at dim=0
     def _test_sdpa_rewriter_12(self):
         def dot_prod_attention(
             query: torch.Tensor,
