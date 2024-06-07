@@ -39,7 +39,7 @@ jobs:
     uses: ./.github/workflows/_linux-build-label.yml
     with:
       build-environment: linux-focal-cuda12.4-py3.10-gcc9-sm86
-      docker-image-name: pytorch-linux-focal-cuda12.4-cudnn8-py3-gcc9
+      docker-image-name: pytorch-linux-focal-cuda12.4-cudnn9-py3-gcc9
       cuda-arch-list: 8.6
       test-matrix: |
         { include: [
@@ -66,7 +66,7 @@ jobs:
     uses: ./.github/workflows/_linux-build.yml
     with:
       build-environment: libtorch-linux-focal-cuda12.1-py3.7-gcc9
-      docker-image-name: pytorch-linux-focal-cuda12.1-cudnn8-py3-gcc9
+      docker-image-name: pytorch-linux-focal-cuda12.1-cudnn9-py3-gcc9
       build-generates-artifacts: false
       runner: linux.4xlarge
       test-matrix: |
@@ -80,7 +80,7 @@ jobs:
     uses: ./.github/workflows/_linux-build.yml
     with:
       build-environment: linux-focal-cuda12.1-py3.10-gcc9-no-ops
-      docker-image-name: pytorch-linux-focal-cuda12.1-cudnn8-py3-gcc9
+      docker-image-name: pytorch-linux-focal-cuda12.1-cudnn9-py3-gcc9
       test-matrix: |
         { include: [
           { config: "default", shard: 1, num_shards: 1 },
@@ -91,7 +91,7 @@ jobs:
     uses: ./.github/workflows/_linux-build.yml
     with:
       build-environment: libtorch-linux-focal-cuda12.4-py3.7-gcc9
-      docker-image-name: pytorch-linux-focal-cuda12.4-cudnn8-py3-gcc9
+      docker-image-name: pytorch-linux-focal-cuda12.4-cudnn9-py3-gcc9
       build-generates-artifacts: false
       runner: linux.4xlarge
       test-matrix: |
@@ -105,7 +105,7 @@ jobs:
     uses: ./.github/workflows/_linux-build.yml
     with:
       build-environment: linux-focal-cuda12.4-py3.10-gcc9-no-ops
-      docker-image-name: pytorch-linux-focal-cuda12.4-cudnn8-py3-gcc9
+      docker-image-name: pytorch-linux-focal-cuda12.4-cudnn9-py3-gcc9
       test-matrix: |
         { include: [
           { config: "default", shard: 1, num_shards: 1 },
