@@ -7,6 +7,9 @@ from importlib.machinery import SourceFileLoader
 from pathlib import Path
 from unittest import mock
 
+import logging
+torch_log = logging.getLogger("torch")
+
 import torch
 import torch.nn as nn
 from torch import _inductor as inductor
@@ -22,6 +25,8 @@ from torch.testing._internal.logging_utils import logs_to_string
 def make_compiler_fn(fullgraph=True, dynamic=True):
     def _compiler_fn(gm):
         """Same as torch.compile() but counts number of compiles"""
+
+        torch_log.warning("Compiling autograd?")
 
         def _inner_compiler(gm_, example_inputs_):
             counters["compiled_autograd"]["compiles"] += 1
@@ -1433,6 +1438,62 @@ TORCH_LIBRARY(test_autograd_cpp_node_data_dependent, m) {
 
             out = compiled_fn(activations)
             self.assertTrue(len(activations) == 0)
+
+    def test_callback_graph_break(self):
+        # TODO(yf225): Test graph break between queue_callback and exec_final_callbacks
+        # TODO(yf225): Memory check for tensors involved the callback
+        called = [0]
+
+        def callback_final():
+            called[0] += 1
+
+        class MyFunc(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, input):
+                return input
+
+            @staticmethod
+            @torch.autograd.function.once_differentiable
+            def backward(ctx, grad):
+                torch.autograd.Variable._execution_engine.queue_callback(callback_final)
+                torch._dynamo.graph_break()
+                return grad
+
+        a = torch.rand((3, 3), requires_grad=True)
+        with compiled_autograd.enable(make_compiler_fn(fullgraph=False)):
+            b = MyFunc.apply(a)
+            b.sum().backward()
+
+        self.assertEqual(called[0], 1)
+
+    def test_callback_adds_callback_graph_break(self):
+        called = [0]
+
+        def callback_final():
+            called[0] += 1
+
+        def callback_adds_callback():
+            called[0] += 1
+            torch.autograd.Variable._execution_engine.queue_callback(callback_final)
+
+        class MyFunc(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, input):
+                return input
+
+            @staticmethod
+            @torch.autograd.function.once_differentiable
+            def backward(ctx, grad):
+                torch.autograd.Variable._execution_engine.queue_callback(callback_adds_callback)
+                torch._dynamo.graph_break()
+                return grad
+
+        a = torch.rand((3, 3), requires_grad=True)
+        torch._dynamo.reset()
+        with compiled_autograd.enable(make_compiler_fn(fullgraph=False)):
+            b = MyFunc.apply(a)
+            b.sum().backward()
+        self.assertEqual(called[0], 2)
 
     def test_verbose_logs_graph(self):
         torch._logging.set_logs(compiled_autograd_verbose=True)
