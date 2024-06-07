@@ -233,6 +233,10 @@ class _PipelineStageBase(ABC):
         )
         return grad_send_info
 
+    @abstractmethod
+    def _prepare_forward_infra(self, num_microbatches: int):
+        raise NotImplementedError
+
     def _prepare_backward_infra(self, num_microbatches: int):
         # TODO: this is needed for backward_maybe_with_nosync
         self.chunks = num_microbatches
