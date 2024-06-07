@@ -15,13 +15,16 @@ from torch.nn.parallel import DistributedDataParallel
 
 from ._backward import stage_backward
 from ._debug import map_debug_info
-from ._IR import Pipe
-from ._utils import flatten_args, modify_graph_op_device, validate_tensors_metadata
+from ._utils import (
+    flatten_args,
+    modify_graph_op_device,
+    PipeInfo,
+    validate_tensors_metadata,
+)
 
 
 __all__ = [
     "PipelineStage",
-    "TracerPipelineStage",
 ]
 
 logger = logging.getLogger(__name__)
@@ -80,7 +83,8 @@ def _make_tensor_from_meta(
 class _PipelineStageBase(ABC):
     """
     Base class for pipeline stages.
-    Implements common methods used by both the `TracerPipelineStage` used by the tracing frontend and `PipelineStage`.
+    Defines or implements common methods used by the `_PipelineStage` used by
+    the tracing frontend and `PipelineStage` used by manual frontend.
     """
 
     def __init__(
@@ -97,7 +101,6 @@ class _PipelineStageBase(ABC):
             stage_index (int): The index of this stage.
             num_stages (int): The total number of stages in this pipeline.
             device (torch.device): The device to run this stage on.
-            num_microbatches (int): The number of microbatches to be run with this stage.
             group (Optional[dist.ProcessGroup]): The process group to use for communication.
                 If `None`, the default process group will be used.
                 Default: `None`.
@@ -641,9 +644,8 @@ class _PipelineStage(_PipelineStageBase):
         self,
         stage_module: torch.nn.Module,
         stage_index: int,
-        pipe_info: Pipe.PipeInfo,
+        pipe_info: PipeInfo,
         device: torch.device,
-        num_chunks: int,
         group: Optional[dist.ProcessGroup] = None,
     ):
         """
@@ -904,28 +906,6 @@ class _PipelineStage(_PipelineStageBase):
         return grad_recv_info_tuple
 
 
-# TODO: Update this to be returned by helper method under Pipe (kwen)
-class TracerPipelineStage(_PipelineStage):
-    def __init__(
-        self,
-        pipe: Pipe,
-        stage_index: int,
-        device: torch.device,
-        num_chunks: int,  # To be cleaned
-        group: Optional[dist.ProcessGroup] = None,
-    ):
-        """
-        Create a pipeline stage given a `Pipe` (representing the whole pipeline) and a stage index.
-        """
-        # Find my stage module
-        stage_module = pipe.get_stage_module(stage_index)
-        # Get my pipe info
-        pipe_info = pipe.info()
-        super().__init__(
-            stage_module, stage_index, pipe_info, device, num_chunks, group
-        )
-
-
 # Manual PipelineStage functions and definition
 
 METADATA_TENSOR_LEN = 100
@@ -1096,7 +1076,6 @@ class PipelineStage(_PipelineStageBase):
         stage_index (int): The ID of this stage.
         num_stages (int): The total number of stages.
         device (torch.device): The device where this stage is located.
-        num_microbatches (int): The number of microbatches to use.
         input_args (Union[torch.Tensor, Tuple[torch.tensor]], optional): The input arguments for the submodule.
         output_args (Union[torch.Tensor, Tuple[torch.tensor]], optional): The output arguments for the submodule.
         group (dist.ProcessGroup, optional): The process group for distributed training. If None, default group.

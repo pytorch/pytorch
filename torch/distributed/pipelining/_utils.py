@@ -1,5 +1,6 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 import logging
+from dataclasses import dataclass
 from typing import List, Tuple, Union
 
 import torch
@@ -120,3 +121,14 @@ def validate_tensors_metadata(
         validate_tensor_metadata(
             f"{desc}: value {i}", expected_tensors[i], actual_tensors[i]
         )
+
+
+@dataclass
+class PipeInfo:
+    """
+    Captures information for a pipeline (`Pipe` object).
+    """
+
+    graph: fx.Graph
+    num_stages: int
+    has_loss_and_backward: bool

@@ -3,7 +3,6 @@ import copy
 import logging
 import operator
 from collections import defaultdict
-from dataclasses import dataclass
 from enum import Enum
 from inspect import Parameter, signature, Signature
 from types import MethodType
@@ -11,6 +10,7 @@ from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
 
 import torch
 import torch.fx as fx
+from torch.distributed import ProcessGroup
 from torch.export import ExportedProgram
 from torch.export.unflatten import (
     _assign_attr,
@@ -20,9 +20,11 @@ from torch.export.unflatten import (
 )
 from torch.fx.node import map_aggregate
 from torch.fx.passes.split_module import split_module
-
 from ._backward import _null_coalesce_accumulate, stage_backward
 from ._unflatten import _outline_submodules
+from ._utils import PipeInfo
+
+from .PipelineStage import _PipelineStage
 
 
 logger = logging.getLogger(__name__)
@@ -485,12 +487,6 @@ def _direct_serialization_reduce(self):
 
 
 class Pipe(torch.nn.Module):
-    @dataclass
-    class PipeInfo:
-        graph: fx.Graph
-        num_stages: int
-        has_loss_and_backward: bool
-
     def __init__(
         self,
         split_gm: fx.GraphModule,
@@ -505,7 +501,6 @@ class Pipe(torch.nn.Module):
         self.num_stages: int = num_stages
         self.has_loss_and_backward = has_loss_and_backward
         self.loss_spec = loss_spec
-        self.pipe_info: Optional[Pipe.PipeInfo] = None
 
         for node in split_gm.graph.nodes:
             assert (
@@ -1044,12 +1039,6 @@ class Pipe(torch.nn.Module):
             )
             submod0.recompile()
 
-        # Create pipe info
-        pipe.pipe_info = Pipe.PipeInfo(
-            graph=pipe.split_gm.graph,
-            num_stages=pipe.num_stages,
-            has_loss_and_backward=pipe.has_loss_and_backward,
-        )
         return pipe
 
     def __str__(self):
@@ -1058,12 +1047,31 @@ class Pipe(torch.nn.Module):
     def __repr__(self):
         return self.split_gm.__repr__()
 
-    def info(self) -> PipeInfo:
-        if self.pipe_info is None:
-            raise RuntimeError(
-                "Pipe info is not available. Please use the `pipeline` method to create the `Pipe` object."
-            )
-        return self.pipe_info
+    def _info(self) -> PipeInfo:
+        return PipeInfo(
+            graph=self.split_gm.graph,
+            num_stages=self.num_stages,
+            has_loss_and_backward=self.has_loss_and_backward,
+        )
+
+    def build_stage(
+        self,
+        stage_index: int,
+        device: torch.device,
+        group: Optional[ProcessGroup] = None,
+    ) -> _PipelineStage:
+        """
+        Create a pipeline stage given a stage index and distributed context.
+        """
+        # Find stage module
+        stage_module = self.get_stage_module(stage_index)
+        # Detach pipe info
+        # Note: be careful what's included in `pipe_info`. We don't want to keep
+        # a reference to `Pipe` or `Pipe.split_gm` which stops python from
+        # recycling them. When python recycles them, other stage modules (which
+        # are irrelevant to current rank) can be automatically freed.
+        pipe_info = self._info()
+        return _PipelineStage(stage_module, stage_index, pipe_info, device, group)
 
 
 class SplitPoint(Enum):
