@@ -128,12 +128,17 @@ class _PipelineStageBase(ABC):
         self._outputs_meta: Optional[Tuple[torch.Tensor, ...]] = None
         # map microbatch ID to list of forward tensor args
         self.fwd_cache: Dict[int, Tuple[Any, List[torch.Tensor]]] = {}
-        # Current forward chunk id
+        # Current forward chunk id to be used in computation
         self.fwd_chunk_id: int = 0
-        # Current backward chunk id
+        # Current backward chunk id to be used in computation
         self.bwd_chunk_id: int = 0
         # Caching chunk outputs for final output merge or reduction
         self.output_chunks: List[Any] = []
+
+        # Current forward chunk id to be used in recv
+        self.recv_fwd_chunk_id: int = 0
+        # Current backward chunk id to be used in recv
+        self.recv_bwd_chunk_id: int = 0
 
         # Create stage id to group rank mapping
         # In interleaved case, `group_rank` is stage index % group size.
@@ -267,15 +272,16 @@ class _PipelineStageBase(ABC):
         Returns a list of ops that are needed to receive the input arguments
         for this stage.
         """
-        recv_infos: Tuple[InputInfo, ...] = self.args_recv_info[self.fwd_chunk_id]
+        recv_infos: Tuple[InputInfo, ...] = self.args_recv_info[self.recv_fwd_chunk_id]
 
         # In case there is backward pass, set requires_grad for receive buffers
         # before first forward
-        if self.has_backward and not self.set_requires_grad[self.fwd_chunk_id]:
+        if self.has_backward and not self.set_requires_grad[self.recv_fwd_chunk_id]:
             for a in recv_infos:
                 if isinstance(a, _RecvInfo):
                     a.buffer.requires_grad_(True)
 
+        self.recv_fwd_chunk_id += 1
         return self._get_recv_ops(recv_infos)
 
     def get_bwd_recv_ops(self) -> List[dist.P2POp]:
@@ -288,11 +294,12 @@ class _PipelineStageBase(ABC):
 
         # Create bwd recv infra lazily
         recv_infos = self.grad_recv_info.setdefault(
-            self.bwd_chunk_id,
+            self.recv_bwd_chunk_id,
             # `grad_recv_info` is a mirror of `act_send_info`
             self._create_grad_recv_info(self.act_send_info),
         )
 
+        self.recv_bwd_chunk_id += 1
         return self._get_recv_ops(recv_infos)
 
     def get_fwd_send_ops(self) -> List[dist.P2POp]:
@@ -370,6 +377,8 @@ class _PipelineStageBase(ABC):
         # Reset pointers
         self.fwd_chunk_id = 0
         self.bwd_chunk_id = 0
+        self.recv_fwd_chunk_id = 0
+        self.recv_bwd_chunk_id = 0
         # map microbatch ID to list of forward tensor args
         self.fwd_cache.clear()
         # Caching chunk outputs for final output merge or reduction
@@ -581,7 +590,9 @@ class _PipelineStageBase(ABC):
             # TODO why is there a separate recv_info for each pipeline chunk?
             expected_args = self.args_recv_info[self.fwd_chunk_id]
         else:
-            expected_args = tuple()
+            # We don't check inputs for non-0 stages assuming they don't accept
+            # user inputs in canonical pipeline scenarios
+            return
 
         if len(kwargs):
             # TODO- need a mapping of kwarg to position in self.args_recv_info
@@ -596,7 +607,9 @@ class _PipelineStageBase(ABC):
             e.meta if isinstance(e, _RootArgPlaceholder) else e.buffer
             for e in expected_args
         ]
-        validate_tensors_metadata("forward input args", expected_tensors_meta, args)
+        validate_tensors_metadata(
+            f"Stage {self.stage_index} forward inputs", expected_tensors_meta, args
+        )
 
     def _validate_fwd_outputs(self, outputs: Tuple[torch.Tensor, ...]):
         """Raises a RuntimeError if this stage produces an output of unexpected shape/dtype.
@@ -605,7 +618,9 @@ class _PipelineStageBase(ABC):
         mixed precision which changes output dtype.
         """
         expected_tensors_meta = self.get_outputs_meta()
-        validate_tensors_metadata("forward outputs", expected_tensors_meta, outputs)
+        validate_tensors_metadata(
+            f"Stage {self.stage_index} forward outputs", expected_tensors_meta, outputs
+        )
 
 
 class _PipelineStage(_PipelineStageBase):
@@ -1061,6 +1076,7 @@ class ManualPipelineStage(_PipelineStageBase):
     as opposed to the PipelineStage class that is outputed from pipeline().
     This class extends the `_PipelineStageBase` class and can similarly be used
     in `PipelineScheule`.
+
     Args:
         submodule (nn.Module): The PyTorch module wrapped by this stage.
         stage_index (int): The ID of this stage.

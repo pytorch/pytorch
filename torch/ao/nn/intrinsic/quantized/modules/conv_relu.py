@@ -53,13 +53,13 @@ class ConvReLU1d(nnq.Conv1d):
         return 'QuantizedConvReLU1d'
 
     @classmethod
-    def from_float(cls, mod):
+    def from_float(cls, mod, use_precomputed_fake_quant=False):
         if type(mod) == torch.ao.nn.intrinsic.qat.ConvBnReLU1d:
             assert mod.bn.running_var is not None and mod.bn.running_mean is not None
             mod.weight, mod.bias = fuse_conv_bn_weights(
                 mod.weight, mod.bias, mod.bn.running_mean, mod.bn.running_var,
                 mod.bn.eps, mod.bn.weight, mod.bn.bias)
-        return super().from_float(mod)
+        return super().from_float(mod, use_precomputed_fake_quant)
 
     @classmethod
     def from_reference(cls, ref_qconv, output_scale, output_zero_point):
@@ -103,13 +103,13 @@ class ConvReLU2d(nnq.Conv2d):
         return 'QuantizedConvReLU2d'
 
     @classmethod
-    def from_float(cls, mod):
+    def from_float(cls, mod, use_precomputed_fake_quant=False):
         if type(mod) == torch.ao.nn.intrinsic.qat.ConvBnReLU2d:
             assert mod.bn.running_var is not None and mod.bn.running_mean is not None
             mod.weight, mod.bias = fuse_conv_bn_weights(
                 mod.weight, mod.bias, mod.bn.running_mean, mod.bn.running_var,
                 mod.bn.eps, mod.bn.weight, mod.bn.bias)
-        return super().from_float(mod)
+        return super().from_float(mod, use_precomputed_fake_quant=use_precomputed_fake_quant)
 
     @classmethod
     def from_reference(cls, ref_qconv, output_scale, output_zero_point):
@@ -154,7 +154,7 @@ class ConvReLU3d(nnq.Conv3d):
         return 'QuantizedConvReLU3d'
 
     @classmethod
-    def from_float(cls, mod):
+    def from_float(cls, mod, use_precomputed_fake_quant=False):
         if type(mod) == torch.ao.nn.intrinsic.qat.ConvBnReLU3d:
             assert mod.bn.running_var is not None and mod.bn.running_mean is not None
             mod.weight, mod.bias = fuse_conv_bn_weights(
@@ -166,7 +166,7 @@ class ConvReLU3d(nnq.Conv3d):
                 mod.bn.weight,
                 mod.bn.bias,
             )
-        return super().from_float(mod)
+        return super().from_float(mod, use_precomputed_fake_quant=use_precomputed_fake_quant)
 
     @classmethod
     def from_reference(cls, ref_qconv, output_scale, output_zero_point):
