@@ -151,7 +151,7 @@ dist.init_process_group(rank=rank, world_size=world_size)
 # Pipeline stage is our main pipeline runtime. It takes in the pipe object,
 # the rank of this process, and the device.
 from torch.distributed.pipelining import PipelineStage
-stage = PipelineStage(pipe, rank, device)
+stage = TracerPipelineStage(pipe, rank, device)
 ```
 
 We can now run the pipeline by attaching the `PipelineStage` to a pipeline schedule, GPipe for example:
