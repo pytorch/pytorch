@@ -87,20 +87,22 @@ class ScheduleTest(MultiProcContinousTest):
         target = torch.randn(batch_size, d_hid, device=self.device)
         loss_fn = torch.nn.MSELoss(reduction="sum")
 
-        # Create a pipeline
         chunks = 4
+        x_mb = x.chunk(chunks)[0]
+
+        # Create a pipeline
         split_spec = mod.split_spec if hasattr(mod, "split_spec") else None
         pipe = pipeline(
             mod,
-            chunks,
-            example_args=(x,),
+            mb_args=(x_mb,),
             split_spec=split_spec,
         )
 
         stage = TracerPipelineStage(
             pipe,
             self.rank,
-            device=self.device,
+            self.device,
+            chunks,  # to be cleaned
         )
 
         # Attach to a schedule
@@ -129,17 +131,20 @@ class ScheduleTest(MultiProcContinousTest):
         loss_fn = torch.nn.MSELoss(reduction="sum")
 
         chunks = 4
+        x_mb = x.chunk(chunks)[0]
+        y_mb = y.chunk(chunks)[0]
+
         pipe = pipeline(
             mod,
-            chunks,
-            example_args=(x,),
-            example_kwargs={"y": y},
+            mb_args=(x_mb,),
+            mb_kwargs={"y": y_mb},
         )
 
         stage = TracerPipelineStage(
             pipe,
             self.rank,
-            device=self.device,
+            self.device,
+            chunks,  # to be cleaned
         )
 
         # Attach to a schedule
@@ -190,18 +195,19 @@ class ScheduleTest(MultiProcContinousTest):
 
         # Create a pipeline
         chunks = 4
+        x_mb = x.chunk(chunks)[0]
         split_spec = mod.split_spec if hasattr(mod, "split_spec") else None
         pipe = pipeline(
             mod,
-            chunks,
-            example_args=(x,),
+            mb_args=(x_mb,),
             split_spec=split_spec,
         )
 
         stage = TracerPipelineStage(
             pipe,
             self.rank,
-            device=self.device,
+            self.device,
+            chunks,  # to be cleaned
         )
 
         # Attach to a schedule
@@ -554,13 +560,15 @@ class TestSchedulePlan(unittest.TestCase):
             if len(error_msg) != 0:
                 self.fail(f"Error at timestep {timestep}: " + ",".join(error_msg))
 
-    def test_pipeline_order(self):
+    @parametrize("ScheduleClass", [ScheduleInterleaved1F1B, ScheduleLoopedBFS])
+    def test_pipeline_order(self, ScheduleClass):
         # Define a list of test cases with varying num_local_stages, num_microbatches, and group_size
         # These should succeed since num_microbatches % group_size == 0
         test_cases = [
             # small number of stages
             (2, 2, 2),
             (2, 4, 4),
+            (2, 8, 2),
             (2, 8, 4),
             (2, 8, 8),
             (4, 4, 4),
@@ -595,12 +603,14 @@ class TestSchedulePlan(unittest.TestCase):
                     for i in range(num_local_stages)
                 ]
 
-                schedule = ScheduleInterleaved1F1B(stages, num_microbatches)
+                schedule = ScheduleClass(stages, num_microbatches)
                 # print(format_pipeline_order(schedule.pipeline_order))
                 self._validate_pipeline_order(
                     schedule.pipeline_order, num_microbatches, num_stages
                 )
 
+
+instantiate_parametrized_tests(TestSchedulePlan)
 
 if __name__ == "__main__":
     # Run only the TestSchedulePlan tests (single process)

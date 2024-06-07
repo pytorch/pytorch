@@ -1,6 +1,7 @@
 import builtins
 import dataclasses
 import inspect
+import math
 import sys
 import weakref
 from collections import defaultdict
@@ -265,13 +266,10 @@ class _Constraint(_ConstraintTarget, metaclass=_ConstraintFactory):
     shared: Optional[_ConstraintTarget] = None
     debug_name: Optional[str] = None
 
-    def _clone_with_range(self, lower=0, upper=None):
+    def _clone_with_range(self, lower=0, upper=math.inf):
         # Import sympy locally
         from torch.fx.experimental.symbolic_shapes import StrictMinMaxConstraint
         from torch.utils._sympy.value_ranges import ValueRanges
-
-        if upper is None:
-            upper = sys.maxsize - 1
 
         constraint_range = StrictMinMaxConstraint(
             vr=self.constraint_range.vr & ValueRanges(lower=lower, upper=upper),
@@ -500,6 +498,7 @@ def dynamic_dim(t: torch.Tensor, index: int, debug_name: Optional[str] = None):
         )
 
     # Import sympy locally
+    import sympy
 
     from torch.fx.experimental.symbolic_shapes import StrictMinMaxConstraint
     from torch.utils._sympy.value_ranges import ValueRanges
@@ -509,7 +508,7 @@ def dynamic_dim(t: torch.Tensor, index: int, debug_name: Optional[str] = None):
         id(t),
         index,
         StrictMinMaxConstraint(
-            vr=ValueRanges(lower=0, upper=sys.maxsize - 1), warn_only=False
+            vr=ValueRanges(lower=0, upper=sympy.oo), warn_only=False
         ),
         debug_name=debug_name,
     )
