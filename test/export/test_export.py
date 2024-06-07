@@ -64,7 +64,7 @@ try:
     from torchrec.sparse.jagged_tensor import KeyedJaggedTensor
 
     HAS_TORCHREC = True
-except (ImportError, AttributeError):
+except ImportError:
     HAS_TORCHREC = False
 
 try:

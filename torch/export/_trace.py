@@ -219,10 +219,7 @@ def _convert_input_to_fake(gm, args, kwargs):
     return fake_args, fake_kwargs, fake_params_buffers, fake_mode
 
 
-import contextlib
-
-
-@contextlib.contextmanager
+@contextmanager
 def override_composite_implicit_decomp():
     # This function overrides CompositeImplicitAutograd decomp for
     # functional composite ops. Ideally we want to not-decompose
