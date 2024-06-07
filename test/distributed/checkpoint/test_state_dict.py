@@ -30,7 +30,7 @@ from torch.distributed.checkpoint.state_dict import (
     set_optimizer_state_dict,
     StateDictOptions,
 )
-from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
+from torch.distributed.fsdp import FullyShardedDataParallel as FSDP, StateDictType
 from torch.distributed.fsdp.wrap import ModuleWrapPolicy
 from torch.distributed.optim import _apply_optimizer_in_backward
 from torch.nn.parallel import DistributedDataParallel as DDP
@@ -737,6 +737,81 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
             fsdp_model, optimizers=fsdp_optim2, optim_state_dict=osd1
         )
         self.assertEqual(fsdp_optim.state_dict(), fsdp_optim2.state_dict())
+
+    @with_comms
+    @skip_if_lt_x_gpu(1)
+    def test_deprecate_partial(self) -> None:
+        model = CompositeParamModel(device=torch.device("cuda"))
+
+        model_state_dict1 = get_model_state_dict(model)
+        model_state_dict1 = copy.deepcopy(model_state_dict1)
+        with self.assertWarnsRegex(
+            FutureWarning,
+            "Getting submodules only model/optim state_dict is deprecated",
+        ):
+            model_state_dict2 = get_model_state_dict(model, submodules={model.l})
+        model_state_dict2 = copy.deepcopy(model_state_dict2)
+        with self.assertWarnsRegex(
+            FutureWarning,
+            "Getting submodules only model/optim state_dict is deprecated",
+        ):
+            model_state_dict3 = get_model_state_dict(
+                model,
+                submodules={model.l},
+                options=StateDictOptions(keep_submodule_prefixes=False),
+            )
+        model_state_dict3 = copy.deepcopy(model_state_dict3)
+        self.assertEqual(len(model_state_dict2), 2)
+        self.assertEqual(len(model_state_dict3), 2)
+        for key in model_state_dict3.keys():
+            full_fqn = f"l.{key}"
+            value1 = model_state_dict1[full_fqn]
+            value2 = model_state_dict2[full_fqn]
+            value3 = model_state_dict3[key]
+            self.assertEqual(value1, value2)
+            self.assertEqual(value2, value3)
+
+        zeros_state_dict = {
+            k: torch.zeros_like(v) for k, v in model_state_dict1.items()
+        }
+        model.load_state_dict(zeros_state_dict)
+        set_model_state_dict(
+            model,
+            model_state_dict=model_state_dict2,
+            options=StateDictOptions(strict=False),
+        )
+        self.assertEqual(model.l.weight, model_state_dict1["l.weight"])
+        self.assertEqual(model.l.bias, model_state_dict1["l.bias"])
+
+        model.load_state_dict(zeros_state_dict)
+        with self.assertWarnsRegex(FutureWarning, "Passing model_state_dict as a "):
+            set_model_state_dict(
+                model,
+                model_state_dict={model.l: model_state_dict3},
+                options=StateDictOptions(strict=False),
+            )
+        self.assertEqual(model.l.weight, model_state_dict1["l.weight"])
+        self.assertEqual(model.l.bias, model_state_dict1["l.bias"])
+
+    @with_comms
+    @skip_if_lt_x_gpu(1)
+    def test_deprecate_fsdp_api(self) -> None:
+        device_mesh = init_device_mesh("cuda", (self.world_size,))
+        model = CompositeParamModel(device=torch.device("cuda"))
+        fsdp_model = FSDP(copy.deepcopy(model), device_mesh=device_mesh)
+        with self.assertWarnsRegex(
+            FutureWarning,
+            r"FSDP.state_dict_type\(\) and FSDP.set_state_dict_type\(\) are being deprecated",
+        ):
+            with FSDP.state_dict_type(fsdp_model, StateDictType.FULL_STATE_DICT):
+                fsdp_model.state_dict()
+
+        with self.assertRaisesRegex(AssertionError, "FutureWarning not triggered"):
+            with self.assertWarnsRegex(
+                FutureWarning,
+                r"FSDP.state_dict_type\(\) and FSDP.set_state_dict_type\(\) are being deprecated",
+            ):
+                get_model_state_dict(model)
 
 
 class TestNoComm(MultiProcessTestCase):
