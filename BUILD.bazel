@@ -463,7 +463,6 @@ filegroup(
     srcs = [
         "caffe2/perfkernels/embedding_lookup.cc",
         "caffe2/perfkernels/embedding_lookup_idx.cc",
-        "caffe2/perfkernels/math_cpu_base.cc",
     ],
 )
 
