@@ -71,10 +71,8 @@ __all__ = [
 
 _FLAT_PARAM = "_flat_param"
 _PG = "param_groups"
-_STATE = "state"
 _PARAMS = "params"
-_patched_state_dict: Set[Callable] = set()
-
+_STATE = "state"
 
 FQNS_T = Set[str]
 PrimitiveType = Union[DTensor, ShardedTensor, torch.Tensor, int, float, str]
@@ -84,6 +82,9 @@ ValueType = Union[
 DictValueType = Dict[str, ValueType]
 ListDictValueType = List[DictValueType]
 OptimizerStateType = Dict[str, Union[DictValueType, ListDictValueType]]
+
+
+_patched_state_dict: Set[Callable] = set()
 
 
 @contextlib.contextmanager
