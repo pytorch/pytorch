@@ -129,6 +129,8 @@ class FSDPParam:
     _unsharded_param: nn.Parameter  # ND
     unsharded_accumulated_grad: Optional[torch.Tensor]  # ND
     _sharding_spec: DTensorSpec
+    # DTensor attributes (only defined for DTensor `param`):
+    _tp_spec: DTensorSpec
     all_gather_outputs: List[torch.Tensor]  # 1D
     # All-gather extension attributes
     _extensions_data: ExtensionsData
@@ -180,13 +182,13 @@ class FSDPParam:
         # https://github.com/pytorch/pytorch/issues/113045
         self.is_dtensor = isinstance(param, DTensor)
         if self.is_dtensor:
-            _tp_spec = cast(DTensor, param)._spec
+            self._tp_spec = cast(DTensor, param)._spec
             if (
                 self.mesh_info.shard_mesh_dim != 0
                 or self.mesh_info.replicate_mesh_dim is not None
             ):
                 raise NotImplementedError("Using TP with HSDP is not supported")
-            dp_mesh, tp_mesh = (self.mesh_info.mesh, _tp_spec.mesh)
+            dp_mesh, tp_mesh = (self.mesh_info.mesh, self._tp_spec.mesh)
             dp_global_mesh = _mesh_resources.get_parent_mesh(dp_mesh)
             tp_global_mesh = _mesh_resources.get_parent_mesh(tp_mesh)
             if dp_global_mesh != tp_global_mesh or (
@@ -203,27 +205,21 @@ class FSDPParam:
 
             submesh_names = dp_mesh.mesh_dim_names + tp_mesh.mesh_dim_names
             self._spmd_mesh = dp_global_mesh[submesh_names]
-            if len(_tp_spec.placements) != 1:
+            if len(self._tp_spec.placements) != 1:
                 raise NotImplementedError(
-                    f"FSDP only supports 1D TP, not {_tp_spec.placements}"
+                    f"FSDP only supports 1D TP, not {self._tp_spec.placements}"
                 )
 
             # TODO: Hard code FSDP + TP; need to support HSDP + TP
             self._spmd_placements = (
                 Shard(0),
-                _tp_spec.placements[0],
+                self._tp_spec.placements[0],
             )
 
-            self._global_size = param.size()
-            self._global_stride = param.stride()
             self._sharding_spec = DTensorSpec(
                 self._spmd_mesh,
                 self._spmd_placements,
-                tensor_meta=TensorMeta(
-                    param.size(),
-                    param.stride(),
-                    param.dtype,
-                ),
+                tensor_meta=self._tp_spec.tensor_meta,
             )
             param_data = cast(DTensor, param)._local_tensor
         else:
@@ -232,8 +228,6 @@ class FSDPParam:
                 self._spmd_placements = (Replicate(), Shard(0))
             else:
                 self._spmd_placements = (Shard(0),)
-            # self._global_size = param.size()
-            # self._global_stride = param.stride()
             self._sharding_spec = DTensorSpec(
                 self._spmd_mesh,
                 self._spmd_placements,
@@ -366,13 +360,7 @@ class FSDPParam:
             storage_offset=0,
         )
         if self.is_dtensor:
-            unsharded_param = _from_local_no_grad(
-                unsharded_param,
-                self._tp_spec.mesh,
-                self._tp_spec.placements,
-                self._global_size,
-                self._global_stride,
-            )
+            unsharded_param = _from_local_no_grad(unsharded_param, self._tp_spec)
         self._unsharded_param = nn.Parameter(unsharded_param)
         self._unsharded_param.requires_grad_(self.sharded_param.requires_grad)
 
