@@ -126,7 +126,7 @@ class FSDPParam:
     sharded_param: nn.Parameter  # ND
     _sharded_post_forward_param_data: Optional[torch.Tensor]  # 1D
     _sharded_post_forward_param: Optional[nn.Parameter]  # ND
-    _unsharded_param: Optional[nn.Parameter]  # ND
+    _unsharded_param: nn.Parameter  # ND
     unsharded_accumulated_grad: Optional[torch.Tensor]  # ND
     _spmd_placements: Tuple[Placement, ...]
     _global_size: torch.Size
