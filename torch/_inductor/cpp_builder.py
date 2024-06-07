@@ -427,6 +427,7 @@ class CppOptions(BuildOptionsBase):
             cpp_compiler=self._compiler,
             compile_only=compile_only,
             extra_flags=extra_flags,
+            warning_all=warning_all,
         )
 
         _append_list(self._definations, definations)
@@ -837,7 +838,7 @@ class CppTorchOptions(CppOptions):
         self._remove_duplicate_options()
 
 
-def _get_cuda_related_args(cuda: bool, aot_mode: bool):
+def get_cpp_torch_cuda_options(cuda: bool, aot_mode: bool = False):
     definations: List[str] = []
     include_dirs: List[str] = []
     cflags: List[str] = []
@@ -905,36 +906,6 @@ def _get_cuda_related_args(cuda: bool, aot_mode: bool):
     )
 
 
-def get_cpp_torch_cuda_options(cuda: bool, aot_mode: bool = False):
-    definations: List[str] = []
-    include_dirs: List[str] = []
-    cflags: List[str] = []
-    ldflags: List[str] = []
-    libraries_dirs: List[str] = []
-    libraries: List[str] = []
-    passthough_args: List[str] = []
-
-    (
-        definations,
-        include_dirs,
-        cflags,
-        ldflags,
-        libraries_dirs,
-        libraries,
-        passthough_args,
-    ) = _get_cuda_related_args(cuda=cuda, aot_mode=aot_mode)
-
-    return (
-        definations,
-        include_dirs,
-        cflags,
-        ldflags,
-        libraries_dirs,
-        libraries,
-        passthough_args,
-    )
-
-
 class CppTorchCudaOptions(CppTorchOptions):
     """
     This class is inherited from CppTorchOptions, which automatic contains
@@ -954,8 +925,6 @@ class CppTorchCudaOptions(CppTorchOptions):
         shared: bool = True,
         extra_flags: Sequence[str] = (),
     ) -> None:
-        # from torch._inductor.codecache import pick_vec_isa
-
         super().__init__(
             vec_isa=vec_isa,
             include_pytorch=include_pytorch,
