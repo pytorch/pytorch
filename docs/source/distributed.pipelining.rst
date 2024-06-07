@@ -43,7 +43,7 @@ on **general** models.
 It consists of two parts: a
 **splitting frontend** and a **distributed runtime**.
 The splitting frontend takes your model code as-is, splits it up into "model
-partitions", and capture the data-flow relationship.  The distributed runtime
+partitions", and captures the data-flow relationship.  The distributed runtime
 executes the pipeline stages on different devices in parallel, handling things
 like micro-batch splitting, scheduling, communication, and gradient propagation,
 etc.
@@ -113,28 +113,21 @@ To directly construct a `PipelineStage`, the user is responsible for providing a
 .. code-block:: python
 
   class Transformer(nn.Module):
-
       def __init__(self, model_args: ModelArgs):
           super().__init__()
 
-          self.tok_embeddings = nn.Embedding(model_args.vocab_size, model_args.dim)
-          self.register_buffer("freqs_cis", self._precompute_freqs_cis(), persistent=True)
+          self.tok_embeddings = nn.Embedding(...)
 
-          # Using a ModuleDict instead of a ModuleList lets us delete unwanted layers without affecting layer names (FQNs),
-          # which is important for ensuring checkpoints will correctly save and load.
+          # Using a ModuleDict lets us delete layers witout affecting names,
+          # ensuring checkpoints will correctly save and load.
           self.layers = torch.nn.ModuleDict()
           for layer_id in range(model_args.n_layers):
-              self.layers[str(layer_id)] = TransformerBlock(layer_id, model_args)
+              self.layers[str(layer_id)] = TransformerBlock(...)
 
-          self.norm = create_norm(
-              model_args.norm_type, dim=model_args.dim, eps=model_args.norm_eps
-          )
-          self.output = nn.Linear(model_args.dim, model_args.vocab_size, bias=False)
-          self.init_weights()
+          self.output = nn.Linear(...)
 
       def forward(self, tokens: torch.Tensor):
-          # allowing for the possibility that certain input/output layers may be set to none makes it possible to reuse
-          # this forward method on every stage
+          # Handling layers being 'None' at runtime enables easy pipeline splitting
           h = self.tok_embeddings(tokens) if self.tok_embeddings else tokens
 
           for layer in self.layers.values():
@@ -154,11 +147,15 @@ A model defined in this manner can be easily configured per stage by first initi
       # we construct the entire model, then delete the parts we do not need for this stage
       # in practice, this can be done using a helper function that automatically divides up layers across stages.
       model = Transformer()
+
       if stage_index == 0:
+          # prepare the first stage model
           del model.layers["1"]
           model.norm = None
           model.output = None
+
       elif stage_index == 1:
+          # prepare the second stage model
           model.tok_embeddings = None
           del model.layers["0"]
 
@@ -168,7 +165,7 @@ A model defined in this manner can be easily configured per stage by first initi
           stage_index,
           num_stages,
           device,
-          input_args=x.chunk(num_microbatches)[0],
+          input_args=example_input_microbatch,
       )
 
 
