@@ -13102,7 +13102,7 @@ op_db: List[OpInfo] = [
                DecorateInfo(
                    unittest.skip('Skipped!'),
                    'TestOnnxModelOutputConsistency_opset_version_18_model_type_TorchModelType.TORCH_NN_MODULECPU',
-                   'test_output_match',
+                   'test_fx_op_consistency',
                    device_type='cpu', dtypes=(torch.bool, torch.complex64)),)),
     BinaryUfuncInfo('eq',
                     ref=np.equal,
