@@ -487,6 +487,22 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
             fn(B), torch.compile(fn, backend="eager", fullgraph=True, dynamic=True)(B)
         )
 
+    def test_assume_constant_result_on_computation_with_graph_input(self):
+        @torch._dynamo.assume_constant_result
+        def check(y):
+            return y[0].item() == 1
+
+        def fn(x, y):
+            if check(y):
+                return x + 2
+            else:
+                return x + 1
+
+        y = torch.tensor([1])
+        x = torch.tensor(1)
+
+        self.assertEqual(fn(x, y), torch.compile(fn)(x, y))
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
