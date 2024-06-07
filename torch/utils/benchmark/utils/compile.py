@@ -14,9 +14,8 @@ _default_float_32_precision = torch.get_float32_matmul_precision()
 try:
     from tabulate import tabulate
     HAS_TABULATE = True
-except ModuleNotFoundError:
+except ImportError:
     HAS_TABULATE = False
-    tabulate = None  # type: ignore[assignment]
     print("tabulate is not installed, please pip install tabulate to use this utility")
 
 if HAS_TABULATE:

@@ -4052,6 +4052,7 @@ class TestQuantizedLinear(TestCase):
            use_channelwise=st.sampled_from([False]))  # channelwise currently not supported for qlinear cudnn
     @skipIfNoFBGEMM
     @unittest.skipIf(not TEST_CUDNN, "cudnn is not enabled.")
+    @unittest.skipIf(TEST_CUDNN and torch.backends.cudnn.version() == 90100, "expected failure on cuDNN 9.1.0")
     @unittest.skipIf(not SM80OrLater, "requires sm80 or later.")
     @unittest.skipIf(TEST_ROCM, "not supported on rocm.")
     # TODO: check with yang regarding CUDNN flags

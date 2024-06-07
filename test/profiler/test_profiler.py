@@ -88,9 +88,8 @@ try:
     import psutil
 
     HAS_PSUTIL = True
-except ModuleNotFoundError:
+except ImportError:
     HAS_PSUTIL = False
-    psutil = None
 
 
 from torch._C._profiler import _ExperimentalConfig, _ExtraFields_PyCall
@@ -2409,6 +2408,7 @@ aten::mm""",
             num_matched.append(len(pattern.matched_events()))
         self.assertEqual(num_matched, [i for i, _ in cases])
 
+    @skipIfTorchDynamo("profiler gets ignored if dynamo activated")
     def test_profiler_pattern_matcher_json_report(self):
         x = torch.ones((100, 100))
         model = nn.Sequential(
