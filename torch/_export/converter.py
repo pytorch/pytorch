@@ -82,11 +82,13 @@ def construct_fqn(ir, ref_map, name_map):
 def get_block_to_lifted_attrs(graph: torch._C.Graph) -> Dict[torch._C.Block, Set[str]]:
     """
     Perform two passes to get a mapping of blocks to a set of FQNs of its lifted attributes.
-    When a graph has control flow, the graph will be divided into multiple blocks. For all
-    of those blocks, model parameters are expected to be lifted as inputs. We perform the
-    first pass in order to figure out where model parameters are used through tracing
-    the GetAttr calls. Then, the second pass goes from bottom up to find lifted attributes
-    of each block by unioning the lifted attributes of all its child blocks.
+    When a graph has control flow, the graph will be divided into multiple blocks. We want to convert
+    each block to a graph which will be passed into torch.cond. A restriction for torch.cond is that model
+    parameters/buffers are expected to be lifted as inputs to the subgraphs. Before converting the model,
+    we will run this pass which will:
+        1. Figure out which params/buffers are used within blocks through tracing the GetAttr calls.
+        2. Process the graph bottom up to find the lifted attributes of each block by taking the union
+        of the attributes used in the current block, and the lifted attributes of all its child blocks.
 
     Returns:
         A mapping of blocks to a set of FQNs of its lifted attributes.
@@ -268,7 +270,7 @@ class TS2FXGraphConverter:
             name = graph_input.debugName()
             normalized_name = normalize_name(name)
 
-            if name in self.name_to_param_map.keys():
+            if name in self.name_to_param_map:
                 self.input_specs.append(
                     InputSpec(
                         InputKind.PARAMETER,
@@ -279,7 +281,7 @@ class TS2FXGraphConverter:
                 fx_node = get_node_for_param_and_buffer(
                     self.fx_graph, name, self.is_top_level_graph()
                 )
-            elif name in self.name_to_buffer_map.keys():
+            elif name in self.name_to_buffer_map:
                 self.input_specs.append(
                     InputSpec(
                         InputKind.BUFFER,
@@ -300,8 +302,6 @@ class TS2FXGraphConverter:
                     )
                 )
                 fx_node = self.fx_graph.placeholder(normalized_name)
-
-            # TODO: set fx_node.meta["val"]
 
             self.name_to_node[name] = fx_node
 
@@ -541,7 +541,7 @@ class TS2FXGraphConverter:
 
             arguments.update(block_args)
 
-        # Lift parameters.
+        # Lift parameters as inputs.
         for block in node.blocks():
             arguments = arguments.union(self.blocks_to_lifted_attrs[block])
 
@@ -550,7 +550,6 @@ class TS2FXGraphConverter:
         # Convert blocks to subgraphs
         subgraph_nodes = []
         for block in node.blocks():
-            # Convert subgraph with always lifting.
             subgraph_converter = TS2FXGraphConverter(
                 block, dict(), dict(), self.blocks_to_lifted_attrs
             )
