@@ -1,4 +1,4 @@
-name: Retrieval PyTorch Tests for Target Determination
+name: Retrieval PyTorch Tests  for Target Determination
 
 on:
   workflow_call:
