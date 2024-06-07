@@ -276,11 +276,11 @@ def simplify_index_in_vec_range(index: sympy.Expr, var: sympy.Expr, vec_length: 
 
     original_index = index
 
-    div = sympy.Wild("divisor")
+    div = sympy.Wild("divisor", integer=True)
     if index.has(FloorDiv):
         index = index.replace(FloorDiv(var, div), visit_indexing_div)
 
-    mod = sympy.Wild("modulus")
+    mod = sympy.Wild("modulus", integer=True)
     if index.has(ModularIndexing):
         index = index.replace(ModularIndexing(var, div, mod), visit_modular_indexing)
 
@@ -2069,7 +2069,7 @@ class CppVecKernel(CppKernel):
             tiling_factor = self.vec_isa.nelements(dtype=tiling_dtype)
         self.tiling_factor = tiling_factor
         self.tiling_idx = tiling_idx
-        self.vector_size = tiling_factor
+        self.num_elems = tiling_factor
 
     def _try_get_const_stride(self, index: sympy.Expr, itervar: sympy.Symbol):
         if self.index_indirect_depends_on(index, itervar):
@@ -2148,7 +2148,7 @@ class CppVecKernel(CppKernel):
             line = (
                 f"{load_mask_str}.template loadu<{cpp_type},{num_vectors}>({loadbuf})"
                 if load_mask_str
-                else f"{self._get_vec_type(dtype)}::loadu({loadbuf}, {self.vector_size})"
+                else f"{self._get_vec_type(dtype)}::loadu({loadbuf}, {self.num_elems})"
             )
         return line
 
@@ -2182,9 +2182,9 @@ class CppVecKernel(CppKernel):
 
         def get_result_size(dtype: torch.dtype) -> int:
             if dtype.itemsize < 4:
-                return self.vector_size * (4 // dtype.itemsize)
+                return self.num_elems * (4 // dtype.itemsize)
             else:
-                return self.vector_size
+                return self.num_elems
 
         def vec_to_array(vec_var: CppCSEVariable) -> CppCSEVariable:
             assert vec_var.is_vec
@@ -2244,12 +2244,12 @@ class CppVecKernel(CppKernel):
                 else:
                     load_mask = f"{self._load_mask} != 0"
             if codecache.is_gcc():
-                code.writeline(f"#pragma GCC unroll {self.vector_size}")
+                code.writeline(f"#pragma GCC unroll {self.num_elems}")
             else:
-                code.writeline(f"#pragma unroll {self.vector_size}")
+                code.writeline(f"#pragma unroll {self.num_elems}")
             code.writeline(
                 f"for (long {itervar_inner} = 0; "
-                + f"{itervar_inner} < {self.vector_size}; "
+                + f"{itervar_inner} < {self.num_elems}; "
                 + f"{itervar_inner}++)"
             )
             with code.indent(), contextlib.ExitStack() as stack:
@@ -2327,7 +2327,7 @@ class CppVecKernel(CppKernel):
         stride = self._try_get_const_stride(index, tiling_var)
         code = IndentedBuffer()
         if stride == 1:
-            code.writeline(f"{value}.store({var_expr}, {self.vector_size});")
+            code.writeline(f"{value}.store({var_expr}, {self.num_elems});")
         else:
             self._load_or_store_non_contiguous(
                 var, index, dtype, buffer=code, store_value=value
@@ -2618,6 +2618,7 @@ class CppVecKernel(CppKernel):
 
 
 class CppVecMaskKernel(CppVecKernel):
+    "A masked vector kernel for handling the tail loop"
     overrides = CppVecOverrides  # type: ignore[assignment]
 
     def __init__(
@@ -2630,26 +2631,26 @@ class CppVecMaskKernel(CppVecKernel):
         tiling_dtype=torch.float,
     ):
         super().__init__(args, num_threads, tiling_factor, tiling_idx, tiling_dtype)
-        self.vector_size = tail_size
+        self.num_elems = tail_size
 
     def reduction_combine_vec(
         self, reduction_type, var, next_value, use_weight_recps=False
     ):
         if reduction_type == "max":
-            return f"max_masked_reduce({var}, {next_value}, {self.vector_size})"
+            return f"max_masked_reduce({var}, {next_value}, {self.num_elems})"
         elif reduction_type == "min":
-            return f"min_masked_reduce({var}, {next_value}, {self.vector_size})"
+            return f"min_masked_reduce({var}, {next_value}, {self.num_elems})"
         elif reduction_type == "sum":
-            return f"sum_masked_reduce({var}, {next_value}, {self.vector_size})"
+            return f"sum_masked_reduce({var}, {next_value}, {self.num_elems})"
         elif reduction_type == "prod":
-            return f"prod_masked_reduce({var}, {next_value}, {self.vector_size})"
+            return f"prod_masked_reduce({var}, {next_value}, {self.num_elems})"
         elif reduction_type == "xor_sum":
-            return f"xor_sum_masked_reduce({var}, {next_value}, {self.vector_size})"
+            return f"xor_sum_masked_reduce({var}, {next_value}, {self.num_elems})"
         elif reduction_type == "welford_reduce":
             if use_weight_recps:
-                return f"welford_combine({var}, {next_value}, {self.vector_size}, &weight_recps)"
+                return f"welford_combine({var}, {next_value}, {self.num_elems}, &weight_recps)"
             else:
-                return f"welford_combine({var}, {next_value}, {self.vector_size})"
+                return f"welford_combine({var}, {next_value}, {self.num_elems})"
         elif reduction_type == "welford_combine":
             if isinstance(next_value, tuple):
                 # When reading a value from Inductor IR we have a tuple of variable names
@@ -2657,7 +2658,9 @@ class CppVecMaskKernel(CppVecKernel):
             else:
                 # When combining intermediate accumulators we have a Welford<T> struct
                 mean, m2, weight = reduction_project(reduction_type, next_value)
-            return f"welford_combine({var}, {{{mean}, {m2}, {weight}}}, {self.vector_size})"
+            return (
+                f"welford_combine({var}, {{{mean}, {m2}, {weight}}}, {self.num_elems})"
+            )
         else:
             raise NotImplementedError
 
