@@ -1,6 +1,7 @@
 import contextlib
 import functools
 import gc
+import warnings
 from dataclasses import asdict, dataclass, field
 from itertools import chain
 from typing import (
@@ -123,7 +124,7 @@ class StateDictOptions:
       won't contain any frozen parameters -- the ``requires_grad`` is False.
       The default value is False.
 
-    - ``keep_submodule_prefixes``: when ``submodules`` is not None, this option
+    - ``keep_submodule_prefixes`` (deprecated): when ``submodules`` is not None, this option
       indicates whether to keep the submodule prefixes from the state_dict keys.
       or example, if the submodule is ``module.pretrain`` and the full FQN of
       the parameter is ``pretrain.layer1.weight`` of the param. When this option
@@ -275,6 +276,13 @@ def _verify_options(
     """
     Verify the model and options passed by the user and generates _StateDictInfo.
     """
+    if submodules:
+        warnings.warn(
+            "Getting submodules only model/optim state_dict is deprecated and "
+            "will be removed in 2.5. This feature can be achieved by manually "
+            "filtering out the state_dict returned from get_state_dict.",
+            FutureWarning,
+        )
     if optim_only and not optims:
         raise RuntimeError(
             "Optimizers are not passed in but optim_only is set to True."
@@ -333,8 +341,24 @@ def _verify_options(
             )
             state_dict_type = StateDictType.SHARDED_STATE_DICT
 
+        @contextlib.contextmanager
+        def fsdp_state_dict_type_without_warning(
+            module,
+            state_dict_type,
+            state_dict_config,
+            optim_state_dict_config,
+        ):
+            with warnings.catch_warnings():
+                with FSDP.state_dict_type(
+                    module=module,
+                    state_dict_type=state_dict_type,
+                    state_dict_config=state_dict_config,
+                    optim_state_dict_config=optim_state_dict_config,
+                ):
+                    yield
+
         fsdp_context = functools.partial(
-            FSDP.state_dict_type,
+            fsdp_state_dict_type_without_warning,
             module=model,
             state_dict_type=state_dict_type,
             state_dict_config=state_dict_config,
@@ -910,7 +934,7 @@ def get_model_state_dict(
 
     Args:
         model (nn.Module): the nn.Module to the model.
-        submodules: Optional[Set[nn.Module]]: only return the model parameters
+        submodules (deprecated): Optional[Set[nn.Module]]: only return the model parameters
             that belong to the submodules.
         options (StateDictOptions): the options to control how
             model state_dict and optimizer state_dict should be returned. See
@@ -950,7 +974,7 @@ def get_optimizer_state_dict(
         model (nn.Module): the nn.Module to the model.
         optimizers (Union[None, Optimizer, Iterable[Optimizer]]):
             The optimizers that are used to optimize ``model``.
-        submodules: Optional[Set[nn.Module]]: only return the model parameters
+        submodules (deprecated): Optional[Set[nn.Module]]: only return the model parameters
             that belong to the submodules.
         options (StateDictOptions): the options to control how
             model state_dict and optimizer state_dict should be returned. See
@@ -1037,7 +1061,7 @@ def get_state_dict(
         model (nn.Module): the nn.Module to the model.
         optimizers (Union[None, Optimizer, Iterable[Optimizer]]):
             The optimizers that are used to optimize ``model``.
-        submodules: Optional[Set[nn.Module]]: only return the model parameters
+        submodules (deprecated): Optional[Set[nn.Module]]: only return the model parameters
             that belong to the submodules.
         options (StateDictOptions): the options to control how
             model state_dict and optimizer state_dict should be returned. See
@@ -1068,6 +1092,39 @@ def get_state_dict(
         return model_state_dict, optim_state_dict
 
 
+def _unflatten_model_state_dict(
+    model: nn.Module,
+    state_dict: Union[Dict[nn.Module, Dict[str, ValueType]], Dict[str, ValueType]],
+) -> Dict[str, ValueType]:
+    if not state_dict:
+        return {}
+
+    if isinstance(next(iter(state_dict.keys())), nn.Module):
+        warnings.warn(
+            "Passing model_state_dict as a ``Dict[nn.Module, Dict[str, Any]]``"
+            "is deprecated and will be removed in 2.5. If you need this "
+            "feature, please preprocessing the model_state_dict to achieve the "
+            "same functionality.",
+            FutureWarning,
+        )
+        cast_state_dict = cast(Dict[nn.Module, Dict[str, ValueType]], state_dict)
+        new_state_dict: Dict[str, ValueType] = {}
+        for submodule, sub_state_dict in cast_state_dict.items():
+            for name, m in model.named_modules():
+                if m != submodule:
+                    continue
+
+                fqns = _get_fqns(model, name)
+                assert len(fqns) == 1, "FQNs for a submodule should only have 1 element"
+                prefix = f"{next(iter(fqns))}."
+                new_state_dict.update(
+                    {prefix + subfqn: value for subfqn, value in sub_state_dict.items()}
+                )
+        return new_state_dict
+    else:
+        return cast(Dict[str, ValueType], state_dict)
+
+
 def set_model_state_dict(
     model: nn.Module,
     model_state_dict: Dict[str, ValueType],
@@ -1081,7 +1138,11 @@ def set_model_state_dict(
 
     Args:
         model (nn.Module): the nn.Module to the model.
-        model_state_dict: (Dict[str, ValueType]): the model state_dict to load.
+        model_state_dict: (Dict[str, ValueType]):
+           the model state_dict to load. If the key of the ``model_state_dict``
+           is nn.Module, the key is a submodule of ``model`` and the value should
+           be the state_dict of the submodule. When loading the state_dict,
+           the prefix of the submodule will be append to the state_dict.
         options (StateDictOptions): the options to control how
             model state_dict and optimizer state_dict should be loaded. See
             `StateDictOptions` for the details.
@@ -1093,6 +1154,9 @@ def set_model_state_dict(
 
     :type model_state_dict: typing.Dict[str, ValueType]
     """
+    model_state_dict: Dict[str, ValueType] = _unflatten_model_state_dict(
+        model, model_state_dict
+    )
     with gc_context():
         info = _verify_options(model, tuple(), optim_only=False, options=options)
 
@@ -1161,7 +1225,11 @@ def set_state_dict(
         model (nn.Module): the nn.Module to the model.
         optimizers (Union[Optimizer, Iterable[Optimizer]]):
             The optimizers that are used to optimize ``model``.
-        model_state_dict: (Dict[str, ValueType]]): the model state_dict to load.
+        model_state_dict: (Union[Dict[nn.Module, Dict[str, ValueType]], Dict[str, ValueType]]):
+           the model state_dict to load. If the key of the ``model_state_dict``
+           is nn.Module, the key is a submodule of ``model`` and the value should
+           be the state_dict of the submodule. When loading the state_dict,
+           the prefix of the submodule will be append to the state_dict.
         optim_state_dict: OptimizerStateType:
             the optimizer state_dict to load.
         options (StateDictOptions): the options to control how
@@ -1177,6 +1245,9 @@ def set_state_dict(
     :type optim_state_dict: typing.OptimizerStateType
     """
 
+    model_state_dict: Dict[str, ValueType] = _unflatten_model_state_dict(
+        model, model_state_dict
+    )
     with gc_context():
         optimizers = (
             (optimizers,)
