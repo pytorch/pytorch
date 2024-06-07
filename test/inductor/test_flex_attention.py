@@ -144,6 +144,8 @@ class TestFlexAttention(InductorTestCase):
     ):
         compiled_error = (golden_out - compiled_out).abs().mean()
         ref_error = (golden_out - ref_out).abs().mean()
+        if torch.isnan(compiled_error).any() and not torch.isnan(ref_error).any():
+            self.assertTrue(False, "Output/Grad with NaN")
         if compiled_error > ref_error * fudge_factor:
             name = tensor_name if tensor_name is not None else ""
             msg = f"{name} Compiled error {compiled_error} is greater than ref error {ref_error} by more than {fudge_factor}X."
@@ -195,7 +197,7 @@ class TestFlexAttention(InductorTestCase):
             self._check_equal(
                 k_gold.grad, k_ref.grad, k.grad, k_fudge_factor, "Grad_Key"
             )
-            v_fudge_factor = 8 * fudge_factor
+            v_fudge_factor = 4 * fudge_factor
             self._check_equal(
                 v_gold.grad, v_ref.grad, v.grad, v_fudge_factor, "Grad_Value"
             )
