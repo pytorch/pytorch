@@ -54,6 +54,18 @@ def stop():
 
 @contextlib.contextmanager
 def profile():
+    """
+    Enable profiling.
+    
+    Context Manager to enabling profile collection by the active profiling tool from CUDA backend.
+    Example:
+        >>> import torch
+        >>> import torchvision.models as models
+        >>> model = models.resnet18().cuda()
+        >>> inputs = torch.randn(5, 3, 224, 224).cuda()
+        >>> with torch.cuda.profiler.profile() as prof:
+        ...     model(inputs)  
+    """
     try:
         start()
         yield
