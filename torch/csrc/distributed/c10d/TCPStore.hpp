@@ -63,7 +63,7 @@ struct TCPStoreOptions {
   std::optional<int> masterListenFd = c10::nullopt;
 
   // A boolean value indicating whether to use the experimental libUV backend.
-  bool useLibUV = false;
+  bool useLibUV = true;
 
   // A boolean value to indicate if we want no_delay socket option.
   bool noDelay = true;
@@ -161,7 +161,7 @@ class TORCH_API TCPStore : public Store {
   const std::string keyPrefix_ = "/";
   std::mutex activeOpLock_;
   std::unordered_map<std::string, detail::Counter> clientCounters_;
-  bool usingLibUv_ = false;
+  bool usingLibUv_ = true;
 };
 
 } // namespace c10d
