@@ -974,10 +974,12 @@ class ops(_TestParametrizer):
                         except Exception as e:
                             tracked_input = get_tracked_input()
                             if PRINT_REPRO_ON_FAILURE and tracked_input is not None:
-                                raise Exception(  # noqa: TRY002
+                                new_e = Exception(  # noqa: TRY002
                                     f"Caused by {tracked_input.type_desc} "
                                     f"at index {tracked_input.index}: "
-                                    f"{_serialize_sample(tracked_input.val)}") from e
+                                    f"{_serialize_sample(tracked_input.val)}")
+                                new_e._tracked_input = tracked_input  # type: ignore[attr]
+                                raise new_e from e
                             raise e
                         finally:
                             clear_tracked_input()
