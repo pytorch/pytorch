@@ -18,6 +18,8 @@ class TestDeviceBackendAutoload(TestCase):
         # Both values should be equal
         if switch:
             self.assertEqual(is_imported, switch)
+        else:
+            self.assertTrue(is_imported)
 
 
 if __name__ == "__main__":
