@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 """This module implements the user facing API for flex_attention in PyTorch."""
 import functools
 from typing import Callable
