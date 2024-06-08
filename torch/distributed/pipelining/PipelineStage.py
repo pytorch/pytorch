@@ -1096,7 +1096,6 @@ class PipelineStage(_PipelineStageBase):
         stage_index (int): The ID of this stage.
         num_stages (int): The total number of stages.
         device (torch.device): The device where this stage is located.
-        num_microbatches (int): The number of microbatches to use.
         input_args (Union[torch.Tensor, Tuple[torch.tensor]], optional): The input arguments for the submodule.
         output_args (Union[torch.Tensor, Tuple[torch.tensor]], optional): The output arguments for the submodule.
         group (dist.ProcessGroup, optional): The process group for distributed training. If None, default group.
