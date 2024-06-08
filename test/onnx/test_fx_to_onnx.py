@@ -17,7 +17,7 @@ from torch import nn
 from torch._subclasses import fake_tensor
 from torch.nn import functional as F
 from torch.onnx import dynamo_export, ExportOptions
-from torch.onnx._internal.diagnostics import infra
+from torch.onnx._internal.diagnostics import infra  # noqa: TCH001
 from torch.onnx._internal.fx import diagnostics, registration
 from torch.testing._internal import common_utils
 
