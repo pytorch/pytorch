@@ -44,7 +44,7 @@ static struct PyMemberDef NodeBase_members[] = {
 };
 
 static PyTypeObject NodeBaseType = {
-    PyVarObject_HEAD_INIT(nullptr, 0) "torch._C.NodeBase", /* tp_name */
+    PyVarObject_HEAD_INIT(nullptr, 0) "torch._C._NodeBase", /* tp_name */
     sizeof(NodeBase), /* tp_basicsize */
     0, /* tp_itemsize */
     (destructor)NodeBase_dealloc, /* tp_dealloc */
@@ -88,7 +88,7 @@ bool NodeBase_init(PyObject* module) {
     return false;
   }
   Py_INCREF(&NodeBaseType);
-  if (PyModule_AddObject(module, "NodeBase", (PyObject*)&NodeBaseType) != 0) {
+  if (PyModule_AddObject(module, "_NodeBase", (PyObject*)&NodeBaseType) != 0) {
     return false;
   }
   return true;
@@ -96,7 +96,7 @@ bool NodeBase_init(PyObject* module) {
 
 ////////////////////////////////
 // NodeIter
-///////////////////////////////
+////////////////////////////////
 
 struct NodeIter {
   PyObject_HEAD bool _reversed;

@@ -11,7 +11,7 @@ import inspect
 import warnings
 from torch.fx.operator_schemas import normalize_function, normalize_module, ArgsKwargsPair
 from .._ops import ops as _ops
-from torch._C import NodeBase
+from torch._C import _NodeBase
 
 if TYPE_CHECKING:
     from .graph import Graph
@@ -140,7 +140,7 @@ def _format_arg(arg, max_list_len=float('inf')) -> str:
         return str(arg)
 
 @compatibility(is_backward_compatible=True)
-class Node(NodeBase):
+class Node(_NodeBase):
     """
     ``Node`` is the data structure that represents individual operations within
     a ``Graph``. For the most part, Nodes represent callsites to various entities,
@@ -245,6 +245,16 @@ class Node(NodeBase):
         # Dictionary to store metadata passes need to do their
         # transformations. This metadata is preserved across node copies
         self.meta : Dict[str, Any] = {}
+
+    def __getstate__(self):
+        return self.__dict__, self._erased, self._prev, self._next
+
+    def __setstate__(self, state):
+        d, erased, prev, next = state
+        self.__dict__.update(d)
+        self._erased = erased
+        self._prev = prev
+        self._next = next
 
     @property
     def next(self) -> 'Node':
