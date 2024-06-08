@@ -202,8 +202,11 @@ class CudaInterface(DeviceInterface):
 
     @staticmethod
     def get_compute_capability(device: _device_t = None):
-        major, min = torch.cuda.get_device_capability(device)
-        return major * 10 + min
+        if torch.version.hip is None:
+            major, min = torch.cuda.get_device_capability(device)
+            return major * 10 + min
+        else:
+            return torch.cuda.get_device_properties(device).gcnArchName.split(":", 1)[0]
 
 
 get_xpu_stream: Optional[Callable[[int], int]]

@@ -21,8 +21,7 @@ from typing import (
     TYPE_CHECKING,
     Union,
 )
-
-from typing_extensions import TypeAlias
+from typing_extensions import deprecated, TypeAlias
 
 
 if TYPE_CHECKING:
@@ -47,12 +46,13 @@ NumberTypeType: TypeAlias = Union[Type[bool], Type[int], Type[float], Type[compl
 NumberType: TypeAlias = Union[bool, int, float, complex]
 RealNumberType: TypeAlias = Union[bool, int, float]
 
-Number = (bool, int, float, complex, torch.SymInt, torch.SymFloat)
+Number = (bool, int, float, complex, torch.SymInt, torch.SymFloat, torch.SymBool)
 # I don't call it Integral because numbers.Integral includes bool, but IntLike
 # does not
 Dim = int
 IntLike = (int, torch.SymInt)
 FloatLike = (float, torch.SymFloat)
+BoolLike = (bool, torch.SymBool)
 IntWithoutSymInt = int
 FloatWithoutSymFloat = float
 DeviceLikeType: TypeAlias = Union[str, torch.device, int]
@@ -85,6 +85,7 @@ torch_function_passthrough = {
     torch.Tensor.__format__,
     torch.Tensor.__repr__,
     torch.Tensor.requires_grad.__get__,  # type: ignore[attr-defined]
+    torch.Tensor.__getitem__,
 }
 
 
@@ -1348,11 +1349,15 @@ class RETURN_TYPE(Enum):
 
 
 # TODO: when NumberType contains the sym types, can simplify this
-def number_type(x: Union[NumberType, torch.SymInt, torch.SymFloat]) -> Type:
+def number_type(
+    x: Union[NumberType, torch.SymInt, torch.SymFloat, torch.SymBool]
+) -> Type:
     if isinstance(x, torch.SymInt):
         return int
     elif isinstance(x, torch.SymFloat):
         return float
+    elif isinstance(x, torch.SymBool):
+        return bool
     else:
         return type(x)
 
@@ -1784,6 +1789,11 @@ def check_in_bounds_for_storage(
 # NOTE: This function should ideally be removed, but some Meta internal models
 # packaged with `torch.package` are using it, so it will have to be removed
 # at some point in the future when those models no longer use this function.
+@deprecated(
+    "`torch._prims_common.check` is deprecated and will be removed in the future. "
+    "Please use `torch._check*` functions instead.",
+    category=FutureWarning,
+)
 def check(
     b: bool, s: Callable[[], str], exc_type: Type[Exception] = RuntimeError
 ) -> None:
@@ -1796,12 +1806,6 @@ def check(
     .. note:: This function is planned for removal in the future. Please use
         `torch._check*` functions instead.
     """
-    warnings.warn(
-        DeprecationWarning(
-            "'torch._prims_common.check' will be removed in the future. Please use "
-            "'torch._check*' functions instead"
-        )
-    )
     torch._check_with(exc_type, b, s)
 
 

@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-from typing import Dict, List
-
-import torch
-
-from torch.fx import Node
+from typing import Dict, List, TYPE_CHECKING
 
 from .quantizer import QuantizationAnnotation, Quantizer
+
+if TYPE_CHECKING:
+    import torch
+    from torch.fx import Node
 
 __all__ = [
     "ComposableQuantizer",

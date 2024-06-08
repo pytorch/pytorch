@@ -14,7 +14,7 @@ miopen_rnn(const Tensor & input_r,
            TensorList weight,
            int64_t weight_stride0,
            const Tensor & hx,
-           const c10::optional<Tensor>& cx_opt,
+           const std::optional<Tensor>& cx_opt,
            int64_t fn_mode,
            int64_t fn_hidden_size,
            int64_t fn_num_layers,
@@ -23,7 +23,7 @@ miopen_rnn(const Tensor & input_r,
            bool fn_train,
            bool fn_bidirectional,
            IntArrayRef fn_batch_sizes,
-           const c10::optional<Tensor>& fn_dropout_state_opt) {
+           const std::optional<Tensor>& fn_dropout_state_opt) {
 
 #if AT_ROCM_ENABLED()
 

@@ -27,7 +27,7 @@ def val_expressable_in_32_bits(val):
         iinfo = torch.iinfo(torch.int32)
         return val <= iinfo.max and val >= iinfo.min
 
-    raise Exception(f"Unexpected value {val}")  # noqa: TRY002
+    raise TypeError(f"Unexpected value {val}")
 
 
 def range_expressable_in_32_bits(range):

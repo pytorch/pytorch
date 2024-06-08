@@ -248,6 +248,8 @@ aten::_foreach_log2
 aten::_foreach_log2.out
 aten::_foreach_log2_
 aten::_foreach_log_
+aten::_foreach_max
+aten::_foreach_max.out
 aten::_foreach_maximum.List
 aten::_foreach_maximum.List_out
 aten::_foreach_maximum.Scalar
@@ -339,6 +341,9 @@ aten::_functional_assert_async.msg
 aten::_functional_assert_scalar
 aten::_functional_sym_constrain_range
 aten::_functional_sym_constrain_range_for_size
+aten::_fused_adagrad
+aten::_fused_adagrad.out
+aten::_fused_adagrad_
 aten::_fused_adam
 aten::_fused_adam.out
 aten::_fused_adam.tensor_lr
@@ -383,6 +388,7 @@ aten::_int_mm
 aten::_int_mm.out
 aten::_is_all_true
 aten::_is_any_true
+aten::_jagged_to_padded_dense_forward
 aten::_lazy_clone
 aten::_linalg_check_errors
 aten::_linalg_det
@@ -472,6 +478,7 @@ aten::_nnpack_spatial_convolution.out
 aten::_nnz
 aten::_pack_padded_sequence
 aten::_pack_padded_sequence.out
+aten::_padded_dense_to_jagged_forward
 aten::_pdist_backward
 aten::_pdist_backward.out
 aten::_pdist_forward
@@ -487,6 +494,7 @@ aten::_resize_output_
 aten::_sample_dirichlet
 aten::_sample_dirichlet.out
 aten::_scaled_dot_product_cudnn_attention
+aten::_scaled_dot_product_cudnn_attention_backward
 aten::_scaled_dot_product_efficient_attention
 aten::_scaled_dot_product_efficient_attention_backward
 aten::_scaled_dot_product_flash_attention
@@ -934,8 +942,6 @@ aten::min.dim_min
 aten::min.unary_out
 aten::miopen_batch_norm
 aten::miopen_batch_norm.out
-aten::miopen_batch_norm_backward
-aten::miopen_batch_norm_backward.out
 aten::miopen_convolution
 aten::miopen_convolution.out
 aten::miopen_convolution_add_relu
@@ -1148,8 +1154,6 @@ aten::segment_reduce.out
 aten::select.int
 aten::select_copy.int
 aten::select_copy.int_out
-aten::select_scatter
-aten::select_scatter.out
 aten::set
 aten::set.out
 aten::set.source_Storage

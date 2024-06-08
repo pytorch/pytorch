@@ -10,6 +10,8 @@ import math
 
 import numpy as np
 import torch
+import torch._dynamo
+import torch._dynamo.testing
 import torch.nn
 import torch.nn.functional as F
 from torch.testing._internal.common_cuda import (
@@ -185,8 +187,7 @@ def layout_name(layout):
     return layout.__repr__().split(".")[-1]
 
 
-# Internally-defined conversion functions are lifted to here for maximum test realism.
-# TODO: Remove these when ViewNestedFromBuffer, etc. are deprecated.
+# Helper function for test_dummy_mha_with_nt
 @torch.fx.wrap
 def convert_dense_to_nested_tensor(values):
     offsets = torch.arange(
@@ -198,6 +199,8 @@ def convert_dense_to_nested_tensor(values):
     )
     return nt
 
+
+# Helper function for test_dummy_mha_with_nt
 @torch.fx.wrap
 def convert_jagged_to_nested_tensor(
     values: torch.Tensor, offsets: torch.Tensor, max_length: int
@@ -207,6 +210,7 @@ def convert_jagged_to_nested_tensor(
     return nt
 
 
+# Helper function for test_dummy_mha_with_nt
 @torch.fx.wrap
 def convert_nt_to_jagged(nt):
     return buffer_from_jagged(nt)
@@ -3044,6 +3048,15 @@ class TestNestedTensorSubclass(TestCase):
                 _make_tensor(5, 5, 6),
                 _make_tensor(6, 5, 6),
             ],
+            # (B, *, D_0, D_1, D_2) with B=6
+            [
+                _make_tensor(2, 5, 6, 7),
+                _make_tensor(3, 5, 6, 7),
+                _make_tensor(4, 5, 6, 7, requires_grad=False),
+                _make_tensor(5, 5, 6, 7),
+                _make_tensor(6, 5, 6, 7),
+                _make_tensor(7, 5, 6, 7),
+            ],
         ]
 
         if include_list_of_lists:
@@ -3068,6 +3081,7 @@ class TestNestedTensorSubclass(TestCase):
             torch.ops.aten.is_non_overlapping_and_dense.default,
             torch.ops.aten.sym_size.default,
             torch.ops.aten.dim.default,
+            torch.ops.aten.numel.default,
             torch.ops.aten.sym_numel.default,
             torch.ops.aten.sym_stride.default,
             torch.ops.aten.sym_storage_offset.default,
@@ -3781,11 +3795,157 @@ class TestNestedTensorSubclass(TestCase):
             nt = torch.nested.nested_tensor(
                 tensor_list,
                 layout=torch.jagged,
-                device=device)
+                device=device)  # ragged_idx = 1
             out = nt.unbind()
             self.assertEqual(len(out), len(tensor_list))
             for i, t in enumerate(out):
                 self.assertEqual(t, tensor_list[i])
+
+    @parametrize("ragged_idx", [2, 3])
+    def test_unbind_transpose(self, device, ragged_idx):
+        for tensor_list in self._get_example_tensor_lists():
+            nt = torch.nested.nested_tensor(
+                tensor_list,
+                layout=torch.jagged,
+                device=device)
+            if ragged_idx < nt.dim():
+                nt = nt.transpose(1, ragged_idx)  # set ragged_idx
+                out = nt.unbind()
+                self.assertEqual(len(out), len(tensor_list))
+                for i, t in enumerate(out):
+                    self.assertEqual(t.transpose(0, ragged_idx - 1), tensor_list[i])  # transpose back each element of result
+
+    def test_unbind_transpose_ragged_idx_last_dim(self, device):
+        for tensor_list in self._get_example_tensor_lists():
+            nt = torch.nested.nested_tensor(
+                tensor_list,
+                layout=torch.jagged,
+                device=device).transpose(1, -1)  # set ragged_idx = last dimension
+            out = nt.unbind()
+            self.assertEqual(len(out), len(tensor_list))
+            for i, t in enumerate(out):
+                self.assertEqual(t.transpose(0, -1), tensor_list[i])  # transpose back each element of result
+
+    def test_unbind_lengths(self, device):
+        values = torch.randn(16, 128, device=device)
+        offsets = torch.tensor([0, 8, 12, 13, 16], device=device)
+        lengths = torch.tensor([6, 2, 1, 2], device=device)
+        nt = torch.nested.nested_tensor_from_jagged(
+            values,
+            offsets=offsets,
+            lengths=lengths)  # 3D nested tensor
+
+        tensor_list = []
+        for i in range(offsets.shape[0] - 1):
+            tensor_list.append(values[offsets[i] : (offsets[i] + lengths[i])])
+
+        out = nt.unbind()
+        self.assertEqual(len(out), len(tensor_list))
+        for i, t in enumerate(out):
+            self.assertEqual(t, tensor_list[i])
+
+    def test_unbind_lengths_ragged_idx_1(self, device):
+        values = torch.randn(16, 8, 128, device=device)
+        offsets = torch.tensor([0, 8, 12, 13, 16], device=device)
+        lengths = torch.tensor([6, 2, 1, 2], device=device)
+        ragged_idx = 1
+        nt = torch.nested._internal.nested_tensor.NestedTensor(
+            values,
+            offsets=offsets,
+            lengths=lengths,
+            _ragged_idx=ragged_idx)  # 4D nested tensor
+
+        tensor_list = []
+        for i in range(offsets.shape[0] - 1):
+            tensor_list.append(values[offsets[i] : (offsets[i] + lengths[i]), :, :])
+
+        out = nt.unbind()
+
+        self.assertEqual(len(out), len(tensor_list))
+        for i, t in enumerate(out):
+            self.assertEqual(t, tensor_list[i])
+
+    def test_unbind_lengths_ragged_idx_equals_2_bad_dim(self, device):
+        values = torch.randn(16, 8, 128, device=device)
+        offsets = torch.tensor([0, 8, 12, 13, 16], device=device)
+        lengths = torch.tensor([6, 2, 1, 2], device=device)
+        ragged_idx = 2
+        nt = torch.nested._internal.nested_tensor.NestedTensor(
+            values,
+            offsets=offsets,
+            lengths=lengths,
+            _ragged_idx=ragged_idx)  # 4D nested tensor
+
+        self.assertRaisesRegex(
+            RuntimeError,
+            r"unbind\(\): nested tensor offsets and lengths.*",
+            lambda: nt.unbind()
+        )
+
+
+    def test_unbind_lengths_ragged_idx_2(self, device):
+        values = torch.randn(16, 8, 128, device=device)
+        offsets = torch.tensor([0, 2, 4, 8], device=device)
+        lengths = torch.tensor([2, 1, 3], device=device)
+        ragged_idx = 2
+        nt = torch.nested._internal.nested_tensor.NestedTensor(
+            values,
+            offsets=offsets,
+            lengths=lengths,
+            _ragged_idx=ragged_idx)  # 4D nested tensor
+
+        tensor_list = []
+        for i in range(offsets.shape[0] - 1):
+            tensor_list.append(values[:, offsets[i] : (offsets[i] + lengths[i]), :])
+
+        out = nt.unbind()
+
+        self.assertEqual(len(out), len(tensor_list))
+        for i, t in enumerate(out):
+            self.assertEqual(t, tensor_list[i])
+
+    def test_unbind_lengths_ragged_idx_3(self, device):
+        values = torch.randn(16, 8, 128, device=device)
+        offsets = torch.tensor([0, 100, 128], device=device)
+        lengths = torch.tensor([50, 28], device=device)
+        ragged_idx = 3
+        nt = torch.nested._internal.nested_tensor.NestedTensor(
+            values,
+            offsets=offsets,
+            lengths=lengths,
+            _ragged_idx=ragged_idx)  # 4D nested tensor
+
+        tensor_list = []
+        for i in range(offsets.shape[0] - 1):
+            tensor_list.append(values[:, :, offsets[i] : (offsets[i] + lengths[i])])
+
+        out = nt.unbind()
+
+        self.assertEqual(len(out), len(tensor_list))
+        for i, t in enumerate(out):
+            self.assertEqual(t, tensor_list[i])
+
+    @skipIfTorchDynamo("TorchDynamo raises an error for ragged_idx == 0 earlier than Torch")
+    def test_unbind_lengths_ragged_idx_0(self, device):
+        values = torch.randn(16, 8, 128, device=device)
+        offsets = torch.tensor([0, 100, 128], device=device)
+        lengths = torch.tensor([50, 28], device=device)
+        ragged_idx = 0
+        nt = torch.nested._internal.nested_tensor.NestedTensor(
+            values,
+            offsets=offsets,
+            lengths=lengths,
+            _ragged_idx=ragged_idx)  # 4D nested tensor
+
+        tensor_list = []
+        for i in range(offsets.shape[0] - 1):
+            tensor_list.append(values[:, :, offsets[i] : (offsets[i] + lengths[i])])
+
+        self.assertRaisesRegex(
+            RuntimeError,
+            r"unbind\(\): nested tensor.*out of bounds",
+            lambda: nt.unbind()
+        )
 
     @xfailIfTorchDynamo
     def test_layer_norm_2(self, device):
@@ -3875,6 +4035,14 @@ class TestNestedTensorSubclass(TestCase):
         self.assertTrue(nt_contiguous.is_contiguous(memory_format=torch.contiguous_format))
         self.assertTrue(not nt_noncontiguous.is_contiguous(memory_format=torch.contiguous_format))
         self.assertTrue(nt_contiguous_narrow.is_contiguous(memory_format=torch.contiguous_format))
+
+    def test_layout_under_torch_dispatch_mode(self):
+        from torch.testing._internal.logging_tensor import capture_logs_with_logging_tensor_mode
+
+        nt = random_nt_from_dims([2, None, 3], torch.device('cpu'), torch.float32, layout=torch.jagged)
+
+        with capture_logs_with_logging_tensor_mode():
+            self.assertEqual(nt.layout, torch.jagged)
 
     @skipIfTorchDynamo("Not a suitable test for TorchDynamo")
     @parametrize("func", [torch.empty_like, torch.randn_like],
@@ -3996,6 +4164,70 @@ class TestNestedTensorSubclass(TestCase):
 
         nt1_t, nt2_t, nt3_t, nt4_t = (x.transpose(1, 2) for x in (nt1, nt2, nt3, nt4))
         check_size(nt1_t, nt2_t, nt3_t, nt4_t)
+
+    @skipIfTorchDynamo("compiles internally")
+    @unittest.skipIf(IS_WINDOWS, reason="Windows not yet supported for torch.compile")
+    @skipCUDAIf(not SM70OrLater, "GPU capability is < SM70")
+    def test_specialize_dynamic_shape(self, device):
+        values = torch.randn((18, 16), device=device)
+        offsets = torch.tensor([0, 2, 3, 6, 15, 18], device=device)
+        like_values = torch.randn_like(values)
+
+        # this marks values as dynamic
+        nt = torch.nested.nested_tensor_from_jagged(values, offsets)
+
+        def fn(values, same_size):
+            # here, the dynamic shape is specialized by same_size's shape
+            # https://github.com/pytorch/pytorch/issues/127097
+            # make sure this doesn't error out in torch.compile
+            return values + same_size
+
+        self.assertEqual(
+            fn(values, like_values),
+            torch.compile(fn)(values, like_values),
+        )
+
+    @skipIfTorchDynamo("compiles internally")
+    @unittest.skipIf(IS_WINDOWS, reason="Windows not yet supported for torch.compile")
+    @skipCUDAIf(not SM70OrLater, "GPU capability is < SM70")
+    def test_specialize_dynamic_shape_recompile(self, device):
+        def generate_inp(total_len):
+            values = torch.randn((total_len, 16), device=device)
+            offsets = torch.tensor([0, 2, 3, 6, 15, total_len], device=device)
+            like_values = torch.randn_like(values)
+            return values, offsets, like_values
+
+        def check_results(ref_fn, res_fn, args):
+            values, offsets, like_values = args
+            # this may add dynamic shape markings
+            # goal of this test is to make sure that whatever markings are there,
+            # we eventually stop recompiling as shape changes.
+            nt = torch.nested.nested_tensor_from_jagged(values, offsets)
+
+            self.assertEqual(
+                ref_fn(values, like_values),
+                res_fn(values, like_values),
+            )
+
+
+        def fn(values, same_size):
+            return values + same_size
+
+        compile_counter = torch._dynamo.testing.CompileCounter()
+
+        compiled_fn = torch._dynamo.optimize(compile_counter, nopython=True)(fn)
+        check_results(fn, compiled_fn, generate_inp(18))
+        self.assertEqual(compile_counter.frame_count, 1)
+
+        check_results(fn, compiled_fn, generate_inp(19))
+        # we'll probably recompile here with dynamic shapes - it's okay if not though.
+        frame_count_2 = compile_counter.frame_count
+        self.assertIn(frame_count_2, [1, 2])
+
+        # make sure that by now we've already compiled with dynamic shapes, so additional
+        # shapes should not trigger additional recompiles.
+        check_results(fn, compiled_fn, generate_inp(20))
+        self.assertEqual(compile_counter.frame_count, frame_count_2)
 
     @skipCUDAIf(not SM70OrLater, "GPU capability is < SM70")
     def test_return_nt_constructed_in_graph(self, device):
@@ -4255,7 +4487,7 @@ class TestNestedTensorSubclass(TestCase):
             # Low Precision Math Reference
             out_lp_ref = torch.ops.aten._scaled_dot_product_attention_math(
                 q, k, v)[0].transpose(-2, -3)
-            output_ref_atol, output_ref_rtol = get_tolerances(out, out_lp_ref)
+            output_ref_atol, output_ref_rtol = get_tolerances(out, out_lp_ref, fudge_factor=2)
 
             self.assertEqual(out, out_component, atol=output_ref_atol, rtol=output_ref_rtol)
 
@@ -4284,6 +4516,104 @@ class TestNestedTensorSubclass(TestCase):
         output.sum().backward()
         self.assertEqual(values.grad, torch.ones_like(values))
 
+    # Internally-defined NT use cases are lifted to here for maximum test realism.
+    # TODO: Remove these when ViewNestedFromBuffer, etc. are deprecated.
+    @skipCUDAIfRocm  # not needed
+    @skipIfTorchDynamo("compiles internally")
+    @unittest.skipIf(IS_WINDOWS, reason="Windows not yet supported for torch.compile")
+    @skipCUDAIf(not SM70OrLater, "GPU capability is < SM70")
+    def test_dummy_mha_with_nt(self, device):
+        bs = 3
+        d1 = 2
+        d2 = 4
+        d3 = 6
+        n_heads = 2
+        d_head = d3 // n_heads
+        max_length_1 = 10
+        max_length_2 = 20
+        torch.manual_seed(0)
+
+        class mha(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                torch.manual_seed(0)
+                self.linear = torch.nn.Linear(d2, d3, device=device)
+
+            def forward(self, query, value, offsets):
+
+                value = self.linear(value)
+                key = convert_jagged_to_nested_tensor(value, offsets, max_length_1)
+                value = convert_jagged_to_nested_tensor(value, offsets, max_length_2)
+                query = convert_dense_to_nested_tensor(query)
+                q = query.view(bs, -1, n_heads, d_head).transpose(1, 2)
+                k = key.view(bs, -1, n_heads, d_head).transpose(1, 2)
+                v = value.view(bs, -1, n_heads, d_head).transpose(1, 2)
+                attn_output = torch.nn.functional.scaled_dot_product_attention(
+                    q,
+                    k,
+                    v,
+                    attn_mask=None,
+                    dropout_p=0.0,
+                    is_causal=False,
+                )
+                attn_output = attn_output.transpose(1, 2)
+                attn_output = convert_nt_to_jagged(attn_output)
+                return attn_output, key._max_seqlen, value._max_seqlen
+
+        query = torch.rand(bs, d1, d3, device=device)
+        value = torch.rand(6, d2, requires_grad=True, device=device)
+        offsets = torch.tensor([0, 2, 3, 6], device=device)
+
+        m = mha()
+        symbolic_traced: torch.fx.GraphModule = torch.fx.symbolic_trace(m)
+        m = torch.compile(symbolic_traced)
+        attn_output, cached_key_max_seqlen, cached_value_max_seqlen = m(
+            query, value, offsets
+        )
+        loss = attn_output.sum()
+        # Check that NT can be fx traced and torch.compile, and backward works
+        loss.backward()
+
+        # Check that value.requires_grad is not lost after tracing and compiling
+        value_grad = value.grad  # save for comparison later
+        self.assertIsNotNone(value_grad)
+        # check that max_seqlen is cached properly
+        self.assertEqual(cached_key_max_seqlen, max_length_1)
+        self.assertEqual(cached_value_max_seqlen, max_length_2)
+
+        # check if the output is numerically equivalent with the eager mode
+        m_eager = mha()
+        value.grad = None
+        attn_output_eager, _, _ = m_eager(query, value, offsets)
+        attn_output_eager.sum().backward()
+        self.assertTrue(torch.allclose(attn_output_eager, attn_output))
+        self.assertTrue(torch.allclose(value_grad, value.grad))
+
+    @dtypes(torch.float64, torch.float32, torch.half)
+    @onlyCUDA
+    def test_fbgemm_jagged_to_padded_dense_kernels(self, device, dtype):
+        values = torch.randn(10, 5, device=device, dtype=dtype)
+        offsets = torch.tensor([0, 1, 3, 8, 10], device=device, dtype=torch.int64)
+        max_length = offsets.diff().max().item()
+        padding_value = 1.3
+
+        # convert jagged -> padded dense
+        padded = torch.ops.aten._jagged_to_padded_dense_forward(
+            values, [offsets], [max_length], padding_value
+        )
+
+        batch_size = offsets.shape[0] - 1
+        expected_padded_shape = (batch_size, max_length, values.shape[-1])
+        self.assertEqual(padded.shape, expected_padded_shape)
+
+        # convert padded dense -> jagged
+        total_L = values.shape[0]
+        output_jagged = torch.ops.aten._padded_dense_to_jagged_forward(
+            padded, [offsets], total_L
+        )
+
+        # should be equivalent to the original values
+        self.assertEqual(values, output_jagged)
 
 instantiate_parametrized_tests(TestNestedTensor)
 instantiate_device_type_tests(TestNestedTensorDeviceType, globals())

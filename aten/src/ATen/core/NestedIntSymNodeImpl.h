@@ -134,17 +134,19 @@ class TORCH_API NestedIntSymNodeImpl : public SymNodeImpl {
   c10::SymNode le(const c10::SymNode& other) override;
   c10::SymNode mul(const c10::SymNode& other) override;
 
-  c10::optional<int64_t> nested_int() override {
+  std::optional<int64_t> nested_int() override {
     return val_;
   }
 
-  c10::optional<int64_t> nested_int_coeff() override {
+  std::optional<int64_t> nested_int_coeff() override {
     return coeff_;
   }
 
   bool is_symbolic() override {
     return false;
   }
+
+  c10::SymNode clone() override;
 
 #define DEFINE_BINARY_NOT_SUPPORTED(name)                           \
   c10::SymNode name(const c10::SymNode& other) override {           \
@@ -173,7 +175,6 @@ class TORCH_API NestedIntSymNodeImpl : public SymNodeImpl {
   DEFINE_NOT_SUPPORTED(ceil)
   DEFINE_NOT_SUPPORTED(floor)
   DEFINE_NOT_SUPPORTED(neg)
-  DEFINE_NOT_SUPPORTED(clone)
   DEFINE_NOT_SUPPORTED(sym_float)
 
 #undef DEFINE_NOT_SUPPORTED

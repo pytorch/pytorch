@@ -21,7 +21,7 @@ static Tensor& fill_scalar_mps_impl(Tensor& self, const Scalar& value) {
   }
   Tensor output = self;
   bool needsCopyToOutput = false;
-  if (!self.is_contiguous() || self.storage_offset()) {
+  if (needsGather(self)) {
     output = at::empty(self.sizes(), self.scalar_type(), c10::nullopt, kMPS, c10::nullopt, c10::nullopt);
     needsCopyToOutput = true;
   }

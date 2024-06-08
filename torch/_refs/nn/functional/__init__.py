@@ -600,7 +600,7 @@ def margin_ranking_loss(
     margin: float = 0.0,
     reduction: str = "mean",
 ) -> TensorLikeType:
-    # loss_without_reduction = max(0, −target * (input1 − input2) + margin)
+    # loss_without_reduction = max(0, -target * (input1 - input2) + margin)
     if input1.ndim != input2.ndim or input1.ndim != target.ndim:
         raise RuntimeError(
             "margin_ranking_loss : All input tensors should have same dimension but got sizes: "

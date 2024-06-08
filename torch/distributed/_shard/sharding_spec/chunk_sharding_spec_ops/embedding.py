@@ -202,7 +202,7 @@ def _handle_col_wise_sharding(
         padding_idx: If specified, the entries at padding_idx do
             not contribute to the gradient; therefore, the embedding
             vector at padding_idx is not updated during training,
-            i.e. it remains as a fixed “pad”.
+            i.e. it remains as a fixed "pad".
         pg: process group.
 
     Returns: final result of lookup.
@@ -250,7 +250,7 @@ def _handle_row_wise_sharding(
         padding_idx: If specified, the entries at padding_idx do
             not contribute to the gradient; therefore, the embedding
             vector at padding_idx is not updated during training,
-            i.e. it remains as a fixed “pad”.
+            i.e. it remains as a fixed "pad".
         rank: # of cuda process.
         pg: process group.
 

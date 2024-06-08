@@ -299,9 +299,9 @@ class TORCH_API CppFunction final {
   }
 
  private:
-  c10::optional<c10::DispatchKey> dispatch_key_;
+  std::optional<c10::DispatchKey> dispatch_key_;
   c10::KernelFunction func_;
-  c10::optional<c10::impl::CppSignature> cpp_signature_;
+  std::optional<c10::impl::CppSignature> cpp_signature_;
   std::unique_ptr<c10::FunctionSchema> schema_;
   std::string debug_;
 
@@ -316,7 +316,7 @@ class TORCH_API CppFunction final {
 
   CppFunction(
       c10::KernelFunction func,
-      c10::optional<c10::impl::CppSignature> cpp_signature,
+      std::optional<c10::impl::CppSignature> cpp_signature,
       std::unique_ptr<c10::FunctionSchema> schema);
 };
 
@@ -555,7 +555,7 @@ class TORCH_API Library final {
   Library(
       Kind kind,
       std::string ns,
-      c10::optional<c10::DispatchKey> k,
+      std::optional<c10::DispatchKey> k,
       const char* file,
       uint32_t line);
 
@@ -847,9 +847,9 @@ class TORCH_API Library final {
 
  private:
   Kind kind_;
-  c10::optional<std::string> ns_;
-  c10::optional<c10::DispatchKey> dispatch_key_;
-  c10::optional<std::pair<const char*, const char*>> python_module_;
+  std::optional<std::string> ns_;
+  std::optional<c10::DispatchKey> dispatch_key_;
+  std::optional<std::pair<const char*, const char*>> python_module_;
   const char* file_;
   uint32_t line_;
 
@@ -889,7 +889,7 @@ class TorchLibraryInit final {
       Library::Kind kind,
       InitFn* fn,
       const char* ns,
-      c10::optional<c10::DispatchKey> k,
+      std::optional<c10::DispatchKey> k,
       const char* file,
       uint32_t line)
       : lib_(kind, ns, k, file, line) {

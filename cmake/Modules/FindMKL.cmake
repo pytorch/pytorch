@@ -71,8 +71,8 @@ IF (NOT "${MKL_THREADING}" STREQUAL "SEQ" AND
   MESSAGE(FATAL_ERROR "Invalid MKL_THREADING (${MKL_THREADING}), should be one of: SEQ, TBB, OMP")
 ENDIF()
 
-IF ("${MKL_THREADING}" STREQUAL "TBB" AND NOT USE_TBB)
-  MESSAGE(FATAL_ERROR "MKL_THREADING is TBB but USE_TBB is turned off")
+IF ("${MKL_THREADING}" STREQUAL "TBB" AND NOT TARGET TBB::tbb)
+  MESSAGE(FATAL_ERROR "MKL_THREADING is TBB but TBB is not found")
 ENDIF()
 
 MESSAGE(STATUS "MKL_THREADING = ${MKL_THREADING}")
@@ -263,10 +263,13 @@ MACRO(CHECK_ALL_LIBRARIES LIBRARIES OPENMP_TYPE OPENMP_LIBRARY _name _list _flag
       ELSE()
         IF(MSVC)
           SET(lib_names ${_library}_dll)
+          SET(lib_names_static ${_library})
+          # Both seek shared and static mkl library.
+          FIND_LIBRARY(${_prefix}_${_library}_LIBRARY NAMES ${lib_names} ${lib_names_static})
         ELSE()
           SET(lib_names ${_library})
+          FIND_LIBRARY(${_prefix}_${_library}_LIBRARY NAMES ${lib_names})
         ENDIF()
-        FIND_LIBRARY(${_prefix}_${_library}_LIBRARY NAMES ${lib_names})
       ENDIF()
       MARK_AS_ADVANCED(${_prefix}_${_library}_LIBRARY)
       IF(NOT (${_library} STREQUAL "tbb"))

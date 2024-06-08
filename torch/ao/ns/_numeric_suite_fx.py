@@ -125,7 +125,6 @@ from torch.ao.quantization.fx.match_utils import _find_matches
 from torch.ao.quantization.fx.graph_module import _get_observed_graph_module_attr
 from torch.ao.quantization.fx.qconfig_mapping_utils import _generate_node_name_to_qconfig
 from torch.ao.quantization.fx.quantize_handler import _get_pattern_to_quantize_handlers
-from torch.ao.quantization.qconfig import QConfigAny
 from torch.ao.quantization import QConfigMapping
 from torch.ao.ns.fx.n_shadows_utils import (
     OutputProp,
@@ -140,7 +139,10 @@ from torch.ao.ns.fx.n_shadows_utils import (
 )
 from torch.ao.ns.fx.qconfig_multi_mapping import QConfigMultiMapping
 
-from typing import Dict, Tuple, Callable, List, Optional, Set, Any, Type
+from typing import Dict, Tuple, Callable, List, Optional, Set, Any, Type, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from torch.ao.quantization.qconfig import QConfigAny
 
 RNNReturnType = Tuple[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]
 

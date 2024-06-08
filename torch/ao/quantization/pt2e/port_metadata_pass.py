@@ -101,10 +101,25 @@ def _port_metadata_for_input_quant_nodes(
         # if the q_node can be traced back to get_attr node
         q_to_get_attr_nodes = [q_node]
         q_node_input = q_node.args[0]
-        while isinstance(q_node_input, torch.fx.Node) and q_node_input.op not in [
-            "placeholder",
-            "get_attr",
-        ]:
+        while (
+            isinstance(q_node_input, torch.fx.Node)
+            and q_node_input.op == "call_function"
+            and q_node_input.target
+            in [
+                torch.ops.aten.flatten.using_ints,
+                torch.ops.aten.permute.default,
+                torch.ops.aten.permute_copy.default,
+                torch.ops.aten.slice_copy.Tensor,
+                torch.ops.aten.squeeze.dim,
+                torch.ops.aten.squeeze_copy.dim,
+                torch.ops.aten.transpose.Dimname,
+                torch.ops.aten.transpose.int,
+                torch.ops.aten.transpose_,
+                torch.ops.aten.view_copy.default,
+                torch.ops.aten.view.default,
+                torch.ops.aten._mkldnn_transpose,
+            ]
+        ):
             q_to_get_attr_nodes.append(q_node_input)
             q_node_input = q_node_input.args[0]
         if isinstance(q_node_input, torch.fx.Node) and q_node_input.op == "get_attr":
@@ -121,7 +136,7 @@ def _port_metadata_for_output_quant_nodes(
 
     node_users = _filter_sym_size_users(node)
     if len(node_users) != 1:
-        raise InternalError(f"Expecting {node} to have single user")
+        logger.warning(f"Expecting {node} to have single user")  # noqa: G004
     q_node = node_users.pop()
     if q_node.op != "call_function" or q_node.target not in _QUANTIZE_OPS:
         logger.warning(

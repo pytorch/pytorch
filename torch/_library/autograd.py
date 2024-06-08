@@ -22,16 +22,38 @@ def make_autograd_impl(op: _ops.OpOverload, info: InfoProtocol) -> Callable:
     name: str = f"GeneratedBackwardFor_{op._namespace}_{op._opname}_{op._overloadname}"
 
     saved_keyset = None
+    saved_keyword_only_args = None
+    has_kwarg_only_args = utils.has_kwarg_only_args(op._schema)
 
     def forward(ctx, *args):
         with _C._AutoDispatchBelowAutograd():
-            nonlocal saved_keyset
+            nonlocal saved_keyset, saved_keyword_only_args
             keyset = saved_keyset
             assert keyset is not None, "Should have been set by autograd_impl"
             saved_keyset = None
-            result = op.redispatch(keyset & _C._after_autograd_keyset, *args)
+            kwargs = saved_keyword_only_args
+            assert kwargs is not None, "Should have been set by autograd_impl"
+            saved_keyword_only_args = None
+            result = op.redispatch(keyset & _C._after_autograd_keyset, *args, **kwargs)
             if info._setup_context_fn:
-                info._setup_context_fn(ctx, args, result)
+                # The Dispatcher will remove args that are equal to their default
+                # values from (args, kwargs). We're going to add it back so that
+                # the user can access them.
+                #
+                # This is OK to do: The Dispatcher removed the args for serialization
+                # FC/BC reasons (that is, a graph will not store args that are equal
+                # to their default values), but that doesn't matter here. If the user
+                # adds a new default arg, then they must update
+                # their setup_context (along with the rest of their operator
+                # registrations)
+                args, kwargs = utils.fill_defaults(op._schema, args, kwargs)
+
+                if has_kwarg_only_args:
+                    info._setup_context_fn(
+                        ctx=ctx, inputs=args, keyword_only_inputs=kwargs, output=result
+                    )
+                else:
+                    info._setup_context_fn(ctx=ctx, inputs=args, output=result)
             return result
 
     def backward(ctx, *grads):
@@ -60,13 +82,17 @@ def make_autograd_impl(op: _ops.OpOverload, info: InfoProtocol) -> Callable:
     ):
         Generated = supports_tensorlist(Generated)
 
-    def autograd_impl(keyset, *args):
+    # The dispatcher passes any keyword-only-args as kwargs and the
+    # rest of the args (even if specified as kwargs) as args.
+    def autograd_impl(keyset, *args, **keyword_only_args):
         # We set a nonlocal to ferry keyset from here to the forward.
         # This supports recursive calls (we implement the forward carefully so
         # that it'll read saved_keyset before making a recursive call to the op).
-        nonlocal saved_keyset
+        nonlocal saved_keyset, saved_keyword_only_args
         assert saved_keyset is None
         saved_keyset = keyset
+        assert saved_keyword_only_args is None
+        saved_keyword_only_args = keyword_only_args
         result = Generated.apply(*args)  # type: ignore[attr-defined]
         return result
 

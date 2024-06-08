@@ -19,19 +19,15 @@ using CaptureStatus = c10::cuda::CaptureStatus;
 
 // Use this version where you don't want to create a CUDA context if none exists.
 inline CaptureStatus currentStreamCaptureStatus() {
-#if !defined(USE_ROCM) || ROCM_VERSION >= 50300
   // don't create a context if we don't have to
   if (c10::cuda::hasPrimaryContext(c10::cuda::current_device())) {
     return c10::cuda::currentStreamCaptureStatusMayInitCtx();
   } else {
     return CaptureStatus::None;
   }
-#else
-  return CaptureStatus::None;
-#endif
 }
 
-inline void assertNotCapturing(std::string attempt) {
+inline void assertNotCapturing(const std::string& attempt) {
   auto status = currentStreamCaptureStatus();
   TORCH_CHECK(status == CaptureStatus::None,
               attempt,
@@ -41,7 +37,7 @@ inline void assertNotCapturing(std::string attempt) {
               status);
 }
 
-inline void errorIfCapturingCudnnBenchmark(std::string version_specific) {
+inline void errorIfCapturingCudnnBenchmark(const std::string& version_specific) {
   auto status = currentStreamCaptureStatus();
   TORCH_CHECK(status == CaptureStatus::None,
               "Current cudaStreamCaptureStatus: ",

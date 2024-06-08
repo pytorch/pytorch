@@ -1,4 +1,5 @@
 import functools
+import inspect
 import itertools
 import logging
 from dataclasses import dataclass
@@ -220,52 +221,64 @@ def _extract_shape_env_and_assert_equal(args, kwargs):
 def record_shapeenv_event(*, save_tracked_fakes: bool = False) -> Callable:
     def decorator(fn: Callable) -> Callable:
         assert callable(fn)
+        args = inspect.getfullargspec(fn).args
+        assert args and args[0] == "self", (
+            "record_shapeenv_event should only wrap methods on ShapeEnv; refactor your "
+            "code so that it calls into a method on ShapeEnv"
+        )
         name = fn.__name__
 
         @functools.wraps(fn)
         def wrapper(*args, **kwargs):
             from torch.fx.experimental.symbolic_shapes import ShapeEnv
 
-            if isinstance(args[0], ShapeEnv) and args[0].is_recording:  # type: ignore[has-type]
-                # If ShapeEnv is already recording an event, call the wrapped
-                # function directly.
-                #
-                # NB: here, we skip the check of whether all ShapeEnv instances
-                # are equal, in favor of a faster dispatch.
-                return fn(*args, **kwargs)
+            assert isinstance(args[0], ShapeEnv)
 
-            # Retrieve an instance of ShapeEnv.
-            # Assumption: the collection of args and kwargs may not reference
-            # different ShapeEnv instances.
-            self = _extract_shape_env_and_assert_equal(args, kwargs)
+            try:
+                if args[0].is_recording:  # type: ignore[has-type]
+                    # If ShapeEnv is already recording an event, call the wrapped
+                    # function directly.
+                    #
+                    # NB: here, we skip the check of whether all ShapeEnv instances
+                    # are equal, in favor of a faster dispatch.
+                    return fn(*args, **kwargs)
 
-            # If we are calling this function without any ShapeEnv instance
-            # alive in its arguments, we don't record and call the original.
-            if self is None:
-                return fn(*args, **kwargs)
+                # Retrieve an instance of ShapeEnv.
+                # Assumption: the collection of args and kwargs may not reference
+                # different ShapeEnv instances.
+                self = _extract_shape_env_and_assert_equal(args, kwargs)
 
-            # Otherwise, start recording and call the function.
-            with self._recording():
-                # Take a snapshot of the current tracked_fakes.
-                tracked_fakes = (
-                    self._snapshot_tracked_fakes() if save_tracked_fakes else None
-                )
-                # Record the event for 'fn'.
-                event = ShapeEnvEvent(
-                    fn, list(args), kwargs, tracked_fakes, name=fn.__name__
-                )
-                # Play the event on this ShapeEnv.
-                # NB: It's important to put the event first, because running
-                # the event can trigger internal events that must be ordered
-                # after this event.  However, if an exception happens, we do
-                # NOT want to have the event in the list, so pop it off from
-                # the record if an error happened
-                self.events.append(event)
-                try:
-                    return event.run(self)
-                except Exception:
-                    self.events.pop()
-                    raise
+                # If we are calling this function without any ShapeEnv instance
+                # alive in its arguments, we don't record and call the original.
+                if self is None:
+                    return fn(*args, **kwargs)
+
+                # Otherwise, start recording and call the function.
+                with self._recording():
+                    # Take a snapshot of the current tracked_fakes.
+                    tracked_fakes = (
+                        self._snapshot_tracked_fakes() if save_tracked_fakes else None
+                    )
+                    # Record the event for 'fn'.
+                    event = ShapeEnvEvent(
+                        fn, list(args), kwargs, tracked_fakes, name=fn.__name__
+                    )
+                    # Play the event on this ShapeEnv.
+                    # NB: It's important to put the event first, because running
+                    # the event can trigger internal events that must be ordered
+                    # after this event.  However, if an exception happens, we do
+                    # NOT want to have the event in the list, so pop it off from
+                    # the record if an error happened
+                    self.events.append(event)
+                    try:
+                        return event.run(self)
+                    except Exception:
+                        self.events.pop()
+                        raise
+
+            except Exception:
+                log.error("failed while running %s(*%s, **%s)", name, args[1:], kwargs)
+                raise
 
         return wrapper
 

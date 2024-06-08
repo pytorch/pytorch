@@ -116,7 +116,7 @@ def i1e(a: TensorLikeType) -> TensorLikeType:
     type_promotion_kind=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
 )
 def log_ndtr(a: TensorLikeType) -> TensorLikeType:
-    # Note: M_SQRT1_2 is the value of 1 / √2
+    # Note: M_SQRT1_2 is the value of 1 / sqrt(2)
     M_SQRT1_2 = 0.707106781186547524400844362104849039
     t = a * M_SQRT1_2
     return torch.where(
@@ -185,7 +185,7 @@ def multigammaln(a: TensorLikeType, p: int) -> TensorLikeType:
     type_promotion_kind=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
 )
 def ndtr(a: TensorLikeType) -> TensorLikeType:
-    # Note: M_SQRT1_2 is the value of 1 / √2
+    # Note: M_SQRT1_2 is the value of 1 / sqrt(2)
     M_SQRT1_2 = 0.707106781186547524400844362104849039
     a_sqrt_2 = a * M_SQRT1_2
     return (1 + torch.erf(a_sqrt_2)) * 0.5

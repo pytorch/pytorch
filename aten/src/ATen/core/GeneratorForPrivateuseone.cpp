@@ -5,8 +5,8 @@ namespace at {
 
 static std::mutex _generator_mutex_lock;
 
-c10::optional<GeneratorFuncType>& GetGeneratorPrivate() {
-  static c10::optional<GeneratorFuncType> generator_privateuse1 = c10::nullopt;
+std::optional<GeneratorFuncType>& GetGeneratorPrivate() {
+  static std::optional<GeneratorFuncType> generator_privateuse1 = c10::nullopt;
   return generator_privateuse1;
 }
 

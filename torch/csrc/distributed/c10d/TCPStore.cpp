@@ -268,7 +268,7 @@ using detail::Socket;
 TCPStore::TCPStore(
     const std::string& masterAddr,
     std::uint16_t masterPort,
-    c10::optional<int> numWorkers,
+    std::optional<int> numWorkers,
     bool isServer,
     const std::chrono::milliseconds& timeout,
     bool waitWorkers)
@@ -277,7 +277,7 @@ TCPStore::TCPStore(
           TCPStoreOptions{
               masterPort,
               isServer,
-              numWorkers ? c10::optional<std::size_t>(*numWorkers)
+              numWorkers ? std::optional<std::size_t>(*numWorkers)
                          : c10::nullopt,
               waitWorkers,
               timeout}} {}
@@ -291,6 +291,17 @@ TCPStore::TCPStore(std::string host, const TCPStoreOptions& opts)
     TORCH_CHECK(
         ::c10d::detail::is_libuv_tcpstore_backend_available(),
         "use_libuv was requested but PyTorch was build without libuv support");
+
+    if (opts.masterListenFd.has_value()) {
+      // TODO(xilunwu): support this init method after testing
+      constexpr auto* msg =
+          "The libuv TCPStore backend does not support initialization with an listen fd. "
+          "Please switch to the legacy TCPStore by setting environment variable USE_LIBUV "
+          "to \"0\".";
+      C10D_ERROR(msg);
+      C10_THROW_ERROR(NotImplementedError, msg);
+      return;
+    }
   }
 
   Socket::initialize();
