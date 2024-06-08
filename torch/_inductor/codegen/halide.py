@@ -28,6 +28,7 @@ from ..utils import (
 )
 from ..virtualized import _ops as ops, OpsHandler, V
 from .common import (
+    BackendFeature,
     CSEVariable,
     DeferredLine,
     IndentedBuffer,
@@ -161,6 +162,13 @@ class HalidePrinter(PythonPrinter):
     def _print_Round(self, expr):
         assert len(expr.args) == 1
         return self.cast_index(f"hl.round({self._print(expr.args[0])})")
+
+    _print_RoundToInt = _print_Round
+
+    def _print_IntTrueDiv(self, expr):
+        a, b = expr.args
+        # force a cast to float
+        return f"({a}) / ({b}+hl.f32(0))"
 
     def _print_RoundDecimal(self, expr):
         val, n = expr.args
@@ -424,6 +432,10 @@ class HalideOverrides(OpOverrides):
         return f"hl.floor({x})"
 
     @staticmethod
+    def int_truediv(a, b):
+        return f"({a}) / ({b} + hl.f32(0))"
+
+    @staticmethod
     def floordiv(a, b):
         # TODO(jansel): find a better ways to do this, the select-based trick from triton.py didn't work
         return (
@@ -443,7 +455,11 @@ class HalideOverrides(OpOverrides):
 
     @staticmethod
     def truncdiv(a, b):
-        return f"hl.div_round_to_zero({a}, {b})"
+        # this causes crashes with floating point exception, see test_div_zero_dim_cpu
+        # return f"hl.div_round_to_zero({a}, {b})"
+        return (
+            f"hl.trunc(hl.cast(hl.Float(max(32, {a.name}.type().bits())), {a}) / {b})"
+        )
 
     @staticmethod
     def ceil(x):
@@ -546,10 +562,6 @@ class HalideKernel(SIMDKernel):
         reduction_hint=ReductionHint.DEFAULT,
         disable_persistent_reduction=False,
     ):
-        if not config.fallback_random or config.inplace_buffers:
-            raise NotImplementedError(
-                "Halide backend requires: fallback_random=True and inplace_buffers=False"
-            )
         super().__init__(
             *groups,
             index_dtype=index_dtype,
@@ -678,7 +690,7 @@ class HalideKernel(SIMDKernel):
         hl.RDom()+update codegen.
         """
         assert value.used_dims is not None
-        assert name not in self.store_buffer_dimensions
+        assert var not in self.store_buffer_dimensions
         eq = V.graph.sizevars.statically_known_equals
 
         if index == 0 and eq(self.halide_buffer_numel(name), 1) and mode is None:
@@ -708,7 +720,7 @@ class HalideKernel(SIMDKernel):
         except NotImplementedError:
             pass
         else:
-            self.store_buffer_dimensions[name] = dim_sizes
+            self.store_buffer_dimensions[var] = dim_sizes
             for v in index_vars:
                 self.body.writeline(
                     DeferredLine(name, f"{v.name} = hl.Var({v.name!r})")
@@ -894,24 +906,27 @@ class HalideKernel(SIMDKernel):
         argtypes = []
         for _, arg in self.halide_argdefs():
             if isinstance(arg, SizeArg):
-                numel = None
+                shape = None
                 dtype = "long"
             else:
-                if arg.buffer in self.store_buffer_dimensions and "out" in arg.name:
-                    numel = ", ".join(
+                if arg.name in self.store_buffer_dimensions and "out" in arg.name:
+                    shape = [
                         cexpr(self.rename_indexing(x))
-                        for x in self.store_buffer_dimensions[arg.buffer]
-                    )
+                        for x in self.store_buffer_dimensions[arg.name]
+                    ]
+                    assert shape
                 else:
-                    numel = cexpr(
-                        self.rename_indexing(self.halide_buffer_numel(arg.buffer))
-                    )
+                    shape = [
+                        cexpr(
+                            self.rename_indexing(self.halide_buffer_numel(arg.buffer))
+                        )
+                    ] or ["1"]
                 dtype = f"{DTYPE_TO_CPP[arg.dtype]}*"
             argtypes.append(
                 HalideInputSpec(
                     dtype,
                     arg.name,
-                    numel,
+                    shape,
                 )
             )
         target = ["host", "strict_float"]
@@ -936,7 +951,7 @@ class HalideKernel(SIMDKernel):
         """Called at the end to generate a final kernel string"""
         if self.args.inplace_buffers:
             raise Unsupported("inplace_buffers")
-        self.halide_kernel_meta()  # ensure needed args are added
+        meta = self.halide_kernel_meta()  # ensure needed args are added early
         code = IndentedBuffer()
         code.splice(
             """
@@ -955,7 +970,7 @@ class HalideKernel(SIMDKernel):
                 assert arg.buffer, arg
                 argcls = "hl.OutputBuffer" if "out" in arg.name else "hl.InputBuffer"
                 argtype = halide_type(arg.dtype)
-                ndim = len(self.store_buffer_dimensions.get(arg.buffer, (0,)))
+                ndim = len(self.store_buffer_dimensions.get(arg.name, (0,)))
                 code.writeline(f"{arg.name} = {argcls}({argtype}, {ndim})")
         code.splice(
             """
@@ -1017,9 +1032,9 @@ class HalideKernel(SIMDKernel):
                 hint = V.graph.sizevars.size_hint(arg.expr, fallback=1)
                 code.writeline(f"{arg.name}.set_estimate({hint})")
             else:
-                if arg.buffer in self.store_buffer_dimensions and "out" in arg.name:
+                if arg.name in self.store_buffer_dimensions and "out" in arg.name:
                     hints = V.graph.sizevars.size_hints(
-                        self.store_buffer_dimensions[arg.buffer], fallback=1
+                        self.store_buffer_dimensions[arg.name], fallback=1
                     )
                 else:
                     hints = V.graph.sizevars.size_hints(
@@ -1064,6 +1079,30 @@ class HalideScheduling(SIMDScheduling):
     # TODO(jansel): Halide doesn't actually support 64 bit indexing...
     int64_type = "hl.Int(64)"
     kernel_type = HalideKernel
+    backend_features = dict.fromkeys(
+        [
+            BackendFeature.SCAN,
+            BackendFeature.TUPLE_REDUCTION,
+        ]
+    )
+    backend_features_cpu = dict.fromkeys(
+        [
+            *backend_features,
+        ]
+    )
+    backend_features_cuda = dict.fromkeys(
+        [
+            *backend_features,
+        ]
+    )
+
+    @classmethod
+    def get_backend_features(cls, device: torch.device):
+        if device.type == "cpu":
+            return cls.backend_features_cpu
+        if device.type == "cuda":
+            return cls.backend_features_cuda
+        raise NotImplementedError(device.type)
 
     def define_kernel(self, src_code, node_schedule, kernel):
         """Codegen kernel definition to go in output wrapper code"""
