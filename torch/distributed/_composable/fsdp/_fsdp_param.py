@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import itertools
 from dataclasses import dataclass, field
 from enum import auto, Enum
