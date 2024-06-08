@@ -445,6 +445,7 @@ class CppPackedGemmTemplate(CppTemplate):
                 and Y.get_stride() == template_buffer.get_stride()
             ):
                 reindexers.extend([None] * len(epilogue_nodes))
+                Y_2d = Y
             else:
                 stride_reversed_order = list(
                     reversed(ir.get_stride_order(Y.get_stride()))
