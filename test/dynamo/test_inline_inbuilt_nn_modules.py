@@ -6,6 +6,7 @@ from torch._dynamo.testing import make_test_cls_with_patches
 try:
     from . import (
         test_aot_autograd,
+        test_export,
         test_functions,
         test_higher_order_ops,
         test_misc,
@@ -14,6 +15,7 @@ try:
     )
 except ImportError:
     import test_aot_autograd
+    import test_export
     import test_functions
     import test_higher_order_ops
     import test_misc
@@ -50,6 +52,7 @@ tests = [
     test_higher_order_ops.HigherOrderOpTests,
     test_higher_order_ops.FuncTorchHigherOrderOpTests,
     test_aot_autograd.AotAutogradFallbackTests,
+    test_export.ExportTests,
     # test_repros.ReproTests,
 ]
 for test in tests:
