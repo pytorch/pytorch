@@ -1509,6 +1509,30 @@ class ExportTests(torch._dynamo.test_case.TestCase):
         graph, guards = torch._dynamo.export(model)(inp)
         self.assertEqual(model(inp), graph(inp))
 
+    def test_export_with_constant_in_unspecialized_nn_module(self):
+        class Module(torch.nn.Module):
+            def __init__(self, y):
+                super().__init__()
+                self.y = y
+
+            @torch._dynamo.assume_constant_result
+            def check(self):
+                return self.y[0].item() == 1
+
+            def forward(self, x):
+                # This line leads to module obj being tracked as UnspecializedNNModuleVariable in dynamo
+                self.device = x.device
+
+                if self.check():
+                    return x + 1
+                else:
+                    return x + 2
+
+        model = Module(torch.tensor([1]))
+        inp = torch.ones(3, 4)
+        graph, _ = torch._dynamo.export(model)(inp)
+        self.assertEqual(model(inp), graph(inp))
+
     def test_export_decomp(self):
         def f(x):
             return x.t() + x.t()
@@ -2385,7 +2409,8 @@ def forward(self, x):
         with self.assertRaisesRegex(
             torch._dynamo.exc.UserError,
             "Constraints violated .*!(.*\n)*.*"
-            "Not all values of dim0 .* satisfy the generated guard 4 <= .* and .* <= 10(.*\n)*.*",
+            "by dim0 = 2\\*dim1(.*\n)*.*"
+            "Not all values of dim1 .* satisfy the generated guard 2 <= .* and .* <= 5(.*\n)*.*",
         ):
             torch.export.export(foo, (t,), dynamic_shapes=dynamic_shapes)
 
