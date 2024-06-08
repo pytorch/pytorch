@@ -236,11 +236,13 @@ std::tuple<Tensor, Tensor> _cudnn_ctc_loss_tensor(
   checkBackend(c, {*log_probs}, Backend::CUDA);
   checkBackend(c, {*targets}, Backend::CUDA);
   const auto batch_size = log_probs->size(1);
+  int64_t input_lengths_size = input_lengths.sizes().size() ? input_lengths.size(0) : 1;
+  int64_t target_lengths_size = target_lengths.sizes().size() ? target_lengths.size(0) : 1;
   TORCH_CHECK(
-      static_cast<int64_t>(input_lengths.size(0)) == batch_size,
+      input_lengths_size == batch_size,
       "input_lengths needs to have size to match batch_size");
   TORCH_CHECK(
-      static_cast<int64_t>(target_lengths.size(0)) == batch_size,
+      target_lengths_size == batch_size,
       "target_lengths needs to have size to match batch_size");
 
   TORCH_CHECK(BLANK == 0, "blank must be label 0 for cudnn_ctc_loss");
