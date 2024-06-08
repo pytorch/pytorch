@@ -19,7 +19,6 @@ from torch.distributed.pipelining import (
     ScheduleGPipe,
     ScheduleInterleaved1F1B,
     ScheduleLoopedBFS,
-    TracerPipelineStage,
 )
 from torch.distributed.pipelining.PipelineSchedule import _Action, _ComputationType
 from torch.distributed.pipelining.PipelineStage import _PipelineStageBase
@@ -98,11 +97,9 @@ class ScheduleTest(MultiProcContinousTest):
             split_spec=split_spec,
         )
 
-        stage = TracerPipelineStage(
-            pipe,
+        stage = pipe.build_stage(
             self.rank,
             self.device,
-            chunks,  # to be cleaned
         )
 
         # Attach to a schedule
@@ -140,11 +137,9 @@ class ScheduleTest(MultiProcContinousTest):
             mb_kwargs={"y": y_mb},
         )
 
-        stage = TracerPipelineStage(
-            pipe,
+        stage = pipe.build_stage(
             self.rank,
             self.device,
-            chunks,  # to be cleaned
         )
 
         # Attach to a schedule
@@ -203,11 +198,9 @@ class ScheduleTest(MultiProcContinousTest):
             split_spec=split_spec,
         )
 
-        stage = TracerPipelineStage(
-            pipe,
+        stage = pipe.build_stage(
             self.rank,
             self.device,
-            chunks,  # to be cleaned
         )
 
         # Attach to a schedule

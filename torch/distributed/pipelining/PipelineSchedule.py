@@ -4,17 +4,7 @@ import logging
 from abc import ABC, abstractmethod
 from collections import defaultdict
 from enum import Enum
-from typing import (
-    Any,
-    Callable,
-    Dict,
-    List,
-    NamedTuple,
-    Optional,
-    Tuple,
-    TYPE_CHECKING,
-    Union,
-)
+from typing import Any, Callable, Dict, List, NamedTuple, Optional, Tuple, Union
 
 import torch
 import torch.distributed as dist
@@ -22,9 +12,6 @@ from torch.profiler import record_function
 
 from .microbatch import merge_chunks, split_args_kwargs_into_chunks, TensorChunkSpec
 from .PipelineStage import _PipelineStageBase
-
-if TYPE_CHECKING:
-    from ._IR import Pipe
 
 
 __all__ = [
@@ -84,8 +71,6 @@ class _PipelineSchedule(ABC):
 
         # Derived
         self._has_backward = self._loss_fn is not None
-        # To be filled by subclasses
-        self._pipe_info: Optional[Pipe.PipeInfo] = None
 
         # Holds the losses for each microbatch.
         self._internal_losses: List[torch.Tensor] = []
@@ -299,9 +284,6 @@ class PipelineScheduleSingle(_PipelineSchedule):
             args_chunk_spec=args_chunk_spec,
             kwargs_chunk_spec=kwargs_chunk_spec,
             output_merge_spec=output_merge_spec,
-        )
-        self._pipe_info = (
-            stage.pipe_info if hasattr(stage, "pipe_info") else None  # type: ignore[attr-defined]
         )
         # Self attributes
         self._stage = stage
@@ -594,9 +576,6 @@ class PipelineScheduleMulti(_PipelineSchedule):
             args_chunk_spec=args_chunk_spec,
             kwargs_chunk_spec=kwargs_chunk_spec,
             output_merge_spec=output_merge_spec,
-        )
-        self._pipe_info = (
-            stages[0].pipe_info if hasattr(stages[0], "pipe_info") else None  # type: ignore[attr-defined]
         )
         # Self attributes
         self._stages = stages
