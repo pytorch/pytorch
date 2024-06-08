@@ -61,7 +61,9 @@ def triton_hash_with_backend():
 
     backend = triton_backend()
     key = f"{triton_key()}-{backend.hash()}"
-    return hashlib.sha256(key.encode("utf-8")).hexdigest()
+
+    # Hash is upper case so that it can't contain any Python keywords.
+    return hashlib.sha256(key.encode("utf-8")).hexdigest().upper()
 
 
 def dtype_to_string(dtype):
