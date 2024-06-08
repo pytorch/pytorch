@@ -3236,6 +3236,8 @@ MOD_INLINELIST = {
     "torch.cuda.amp.autocast_mode",
     "torch.distributions",
     "torch.fx._pytree",
+    "torch.fx._symbolic_trace",
+    "torch.fx.experimental.proxy_tensor",
     "torch.fx.passes.shape_prop",
     "torch.nn",
     "torch.random",
