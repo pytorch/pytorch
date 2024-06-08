@@ -24,7 +24,9 @@ static PyObject* NodeBase_new(
 
 static int NodeBase_init_fn(NodeBase* self, PyObject* args, PyObject* kwds) {
   self->_erased = false;
+  Py_INCREF(self);
   self->_prev = self;
+  Py_INCREF(self);
   self->_next = self;
   return 0;
 }
@@ -128,7 +130,9 @@ static int NodeIter_init_fn(NodeIter* self, PyObject* args, PyObject* kwargs) {
     return -1;
   }
   self->_reversed = reversed;
+  Py_INCREF(root);
   self->_root = root;
+  Py_INCREF(root);
   self->_cur = root;
   return 0;
 }

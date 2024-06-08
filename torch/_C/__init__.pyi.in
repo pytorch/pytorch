@@ -2335,8 +2335,8 @@ def _fuse_to_static_module(graph_or_module: Union[Graph,ScriptModule], min_size:
 # Defined in torch/csrc/fx/node.cpp
 class NodeBase:
     _erased: bool
-    _prev: NodeBase
-    _next: NodeBase
+    _prev: "NodeBase"
+    _next: "NodeBase"
 
 class _NodeIter:
     def __init__(self, root, reversed: bool) -> None: ...
