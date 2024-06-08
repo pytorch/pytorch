@@ -67,38 +67,9 @@ def initialize_lazy_module(tx, mod, args, kwargs):
         mod._infer_parameters(mod, fake_args, fake_kwargs)
 
 
-def cleanup_source_for_nn_module_stack(source):
-    # TODO(anijain2305, export-team) This is a bad hack to fix the nn module
-    # fully_qualified_name to work with export/unflatten. It converts
-    # mod._modules['net1'] to mod.net1.
-
-    # This type of source occurs when we use UnspecializedNNModule variable
-    # because unspecialized nn module variable inlines module __getattr__ calls.
-    # For export, we rely heavily on NNModuleVariable and do not support
-    # UnspecializedNNModule. But there is one case where this gets exposed -
-    # Pippy. Pippy uses export/unflatten (an export feature) and also
-    # monkepatches the `forward` method of a mod that forces Dynamo to use
-    # UnspecializedNNModule. Therefore, we will need proper work to retain the
-    # nn module stack when we let export rely on UnspecializedNNModule variable.
-
-    # This does not work if we have recursively UnspecializedNNModule variables
-    # e.g. mod._modules['net1']._modules['net2']. This is unlikely to happen in
-    # Pippy so the hotfix is enough for Pippy.
-
-    if (
-        isinstance(source, GetItemSource)
-        and isinstance(source.base, AttrSource)
-        and isinstance(source.base.base, NNModuleSource)
-        and source.base.member == "_modules"
-    ):
-        return AttrSource(source.base.base, source.index)
-    return source
-
-
 @contextmanager
 def record_nn_module_stack(module_key: str, source, tx, mod: torch.nn.Module):
-    source_for_nn_module_stack = cleanup_source_for_nn_module_stack(source)
-    fully_qualified_name = source_for_nn_module_stack.name()
+    fully_qualified_name = source.name()
     try:
         tx.nn_module_stack[module_key] = (fully_qualified_name, mod.__class__)
         yield
@@ -155,6 +126,10 @@ class NNModuleVariable(VariableTracker):
         self.module_key = module_key
         self.module = module
         assert self.source
+        self.nn_module_stack_source = self.source
+
+    def set_nn_module_stack_source(self, source):
+        self.nn_module_stack_source = source
 
     def python_type(self):
         return self.module_type
@@ -343,7 +318,9 @@ class NNModuleVariable(VariableTracker):
     ) -> "VariableTracker":
         mod = tx.output.get_submodule(self.module_key)
 
-        with record_nn_module_stack(self.module_key, self.source, tx, mod):
+        with record_nn_module_stack(
+            self.module_key, self.nn_module_stack_source, tx, mod
+        ):
             is_lazy = is_lazy_module(mod)
             if (
                 isinstance(mod, torch.nn.Sequential)
@@ -487,7 +464,9 @@ class NNModuleVariable(VariableTracker):
             # Example: `self.layer.forward(x)`
             # This is used for explicit calling `forward` in a forward function.
             # Dynamo puts `call_method` node in FX, doesn't trigger hooks.
-            with record_nn_module_stack(self.module_key, self.source, tx, module):
+            with record_nn_module_stack(
+                self.module_key, self.nn_module_stack_source, tx, module
+            ):
                 return generic_call_method_helper(name)
 
         if name == "_check_input_dim" and trace_rules.is_torch_inline_allowed(
@@ -778,6 +757,10 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
 
         super().__init__(value=value, **kwargs)
         self.is_state_mutated = False
+        self.nn_module_stack_source = self.source
+
+    def set_nn_module_stack_source(self, source):
+        self.nn_module_stack_source = source
 
     @staticmethod
     @functools.lru_cache(None)
@@ -830,7 +813,7 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
         guard_to_detect_forward_monkeypatching(self.source, mod)
 
         ctx = (
-            record_nn_module_stack(str(id(mod)), self.source, tx, mod)
+            record_nn_module_stack(str(id(mod)), self.nn_module_stack_source, tx, mod)
             if self.source
             else nullcontext()
         )
