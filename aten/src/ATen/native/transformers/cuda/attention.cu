@@ -959,7 +959,6 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt> _efficient_
     int64_t custom_mask_type,
     bool compute_logsumexp,
     std::optional<double> scale,
-    const std::optional<at::Tensor>& causal_diagonal,
     const std::optional<at::Tensor>& seqlen_k,
     const std::optional<int64_t> window_size) {
 #if defined(USE_MEM_EFF_ATTENTION)
@@ -1147,12 +1146,6 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt> _efficient_
     p.num_keys = max_seqlen_k;
     p.num_batches = seqstart_q.has_value() ? seqstart_q->size(0) - 1 : B;
     p.custom_mask_type = custom_mask_type;
-    p.causal_diagonal_ptr = nullptr;
-    if (causal_diagonal.has_value()) {
-      CHECK_NOSPARSE_LASTCONTIGUOUS_CUDA(causal_diagonal.value());
-      TORCH_CHECK(causal_diagonal->scalar_type() == at::ScalarType::Int);
-      p.causal_diagonal_ptr = (const int32_t*)causal_diagonal->const_data_ptr();
-    }
 
     p.seqlen_k_ptr = nullptr;
     if (seqlen_k.has_value()) {
@@ -1222,8 +1215,13 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt> _efficient_
           " kb)");
       AT_CUDA_CHECK(err);
     }
+    auto blocks = p.getBlocksGrid();
+    if (blocks.x * blocks.y * blocks.z == 0 || key.size(1) == 0) {
+      res.zero_();
+      return;
+    }
     Kernel::check_supported(p);
-    kernel_fn<<<p.getBlocksGrid(), p.getThreadsGrid(), smem_bytes, stream>>>(p);
+    kernel_fn<<<blocks, p.getThreadsGrid(), smem_bytes, stream>>>(p);
   };
 
   // Dispatch to the right kernel
