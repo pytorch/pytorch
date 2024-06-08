@@ -524,7 +524,7 @@ class WrapperCodeGen(CodeGen):
             """
             import triton
             import triton.language as tl
-            from {} import grid, split_scan_grid, start_graph, end_graph
+            from {} import grid, split_scan_grid, grid_combo_kernels, start_graph, end_graph
             {}
             """.format(
                 triton_heuristics.__name__,
@@ -1359,8 +1359,15 @@ class WrapperCodeGen(CodeGen):
             """
         )
 
-    def generate_default_grid(self, name: str, grid_args: List[Any]):
-        return grid_args
+    def generate_default_grid(
+        self,
+        name: str,
+        grid: List[Any],
+        cuda: bool = True,
+        grid_callable: Optional[Callable[..., Any]] = None,
+        **grid_extra_kwags,
+    ):
+        return grid
 
     def generate_kernel_call(
         self,
@@ -1373,6 +1380,7 @@ class WrapperCodeGen(CodeGen):
         arg_types=None,
         grid_fn: str = "grid",
         triton_meta=None,
+        grid_extra_kwargs="",
     ):
         """
         Generates kernel call code.
@@ -1389,6 +1397,8 @@ class WrapperCodeGen(CodeGen):
             stream_name = self.write_get_raw_stream(current_device.index, V.graph)
             if triton:
                 grid_str = ", ".join(pexpr(item) for item in grid)
+                if grid_extra_kwargs:
+                    grid_str = f"{grid_str}, {grid_extra_kwargs}"
                 grid_str = f"{grid_fn}({grid_str})"
                 self.writeline(
                     f"{name}.run({call_args_str}, grid={grid_str}, stream={stream_name})"
