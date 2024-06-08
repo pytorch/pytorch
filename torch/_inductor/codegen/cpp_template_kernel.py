@@ -153,7 +153,7 @@ class CppTemplateKernel(Kernel):
             assert len(_range) == 2
             start, end = parse_expr_with_index_symbols(_range)
             sliced = L.slice_(sliced, dim, start, end, clamp=False)
-        assert isinstance(sliced.data, ir.ReinterpretView)
+        assert isinstance(sliced.data, ir.ReinterpretView), sliced.data
         return sliced.data
 
     def view(self, node, sizes: List[Any]) -> ir.View:
