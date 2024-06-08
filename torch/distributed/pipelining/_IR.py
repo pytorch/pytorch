@@ -486,6 +486,41 @@ def _direct_serialization_reduce(self):
     )
 
 
+def _modify_graph_op_device(
+    gm: torch.fx.GraphModule,
+    new_device: torch.device,
+):
+    """
+    Modify the device argument of all "call_function" nodes in the graph.  This
+    is useful for moving the graph to a different device. In particular for
+    generator ops, like torch.ones.
+    """
+    modified = False
+    for node in gm.graph.nodes:
+        if node.op == "call_function":
+            if "device" in node.kwargs and node.kwargs["device"] != new_device:
+                logger.debug(
+                    f"Changing device of Node {node.name} from {node.kwargs['device']} to {new_device}"  # noqa: G004
+                )
+                node.update_kwarg("device", new_device)
+                modified = True
+        elif node.op == "call_module":
+            # Recursively modify "device" in submodules
+            submod = gm.get_submodule(node.target)
+            if isinstance(submod, torch.fx.GraphModule):
+                _modify_graph_op_device(submod, new_device)
+            elif isinstance(submod, InterpreterModule):
+                # If unflattening has been performed, we need to access its graph module by `.graph_module`
+                _modify_graph_op_device(submod.graph_module, new_device)
+            else:
+                logger.warning(
+                    f"Skipping device modification for submodule {node.target} because it is a {type(submod)}"  # noqa: G004
+                )
+
+    if modified:
+        gm.recompile()
+
+
 class Pipe(torch.nn.Module):
     def __init__(
         self,
@@ -1061,10 +1096,24 @@ class Pipe(torch.nn.Module):
         group: Optional[ProcessGroup] = None,
     ) -> _PipelineStage:
         """
-        Create a pipeline stage given a stage index and distributed context.
+        Create a `PipelineStage` given a stage index and distributed context.
         """
         # Find stage module
         stage_module = self.get_stage_module(stage_index)
+
+        # Move ops argument to device
+        # Today PT2 tracer does not treat `x.device` as a symbolic device;
+        # instead, the device of tracing time got burned into the generated
+        # code.  Here we provide a workaround for users to manually modify the
+        # "device" kwarg of operations. Such operation may include:
+        # `torch.ones`, `torch.zeros`, `torch.rand`, etc.
+        if isinstance(stage_module, torch.fx.GraphModule):
+            _modify_graph_op_device(stage_module, device)
+        else:
+            logger.warning(
+                f"Expected a `torch.fx.GraphModule` but got {type(stage_module)}"  # noqa: G004
+            )
+
         # Detach pipe info
         # Note: be careful what's included in `pipe_info`. We don't want to keep
         # a reference to `Pipe` or `Pipe.split_gm` which stops python from
