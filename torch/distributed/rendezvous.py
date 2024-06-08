@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 try:
     from urllib.parse import urlparse, urlunparse
 except ImportError as e:
