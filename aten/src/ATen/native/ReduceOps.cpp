@@ -523,7 +523,7 @@ static Tensor reversed_cumsum(const Tensor& w, int64_t dim) {
   return w.flip(dim).cumsum(dim).flip(dim);
 }
 
-Tensor cumprod_backward(const Tensor& grad, const Tensor& input, int64_t dim, const Tensor& output) {
+Tensor cumprod_backward(const Tensor& grad, const Tensor& input, int64_t dim, const Tensor& output, bool prepend) {
   /*
     We show here how to derive an O(n) gradient formula for
     arbitrary inputs. It follows via a basic application of the
@@ -610,6 +610,10 @@ Tensor cumprod_backward(const Tensor& grad, const Tensor& input, int64_t dim, co
     conjugating the input. We may also reuse the output as, since the map is holomorphic,
     cumprod(input.conj()) = cumprod(input).conj()
   */
+
+  if (prepend) {
+    TORCH_INTERNAL_ASSERT(false, "TODO implement prepend=True for cumprod_backward");
+  }
 
   if (input.sym_numel() <= 1) {
     return grad;
@@ -2182,23 +2186,23 @@ Tensor logcumsumexp(const Tensor& self, Dimname dim) {
 Tensor& logcumsumexp_out(const Tensor& self, Dimname dim, Tensor& result) {
   return at::logcumsumexp_out(result, self, dimname_to_position(self, dim));
 }
-Tensor cumsum(const Tensor& self, Dimname dim, std::optional<ScalarType> dtype) {
-  return at::cumsum(self, dimname_to_position(self, dim), dtype);
+Tensor cumsum(const Tensor& self, Dimname dim, std::optional<ScalarType> dtype, bool prepend) {
+  return at::cumsum(self, dimname_to_position(self, dim), dtype, prepend);
 }
-Tensor& cumsum_(Tensor& self, Dimname dim, std::optional<ScalarType> dtype) {
-  return at::cumsum_out(self, self, dimname_to_position(self, dim), dtype);
+Tensor& cumsum_(Tensor& self, Dimname dim, std::optional<ScalarType> dtype, bool prepend) {
+  return at::cumsum_out(self, self, dimname_to_position(self, dim), dtype, prepend);
 }
-Tensor& cumsum_out(const Tensor& self, Dimname dim, std::optional<ScalarType> dtype, Tensor& result) {
-  return at::cumsum_out(result, self, dimname_to_position(self, dim), dtype);
+Tensor& cumsum_out(const Tensor& self, Dimname dim, std::optional<ScalarType> dtype, bool prepend, Tensor& result) {
+  return at::cumsum_out(result, self, dimname_to_position(self, dim), dtype, prepend);
 }
-Tensor cumprod(const Tensor& self, Dimname dim, std::optional<ScalarType> dtype) {
-  return at::cumprod(self, dimname_to_position(self, dim), dtype);
+Tensor cumprod(const Tensor& self, Dimname dim, std::optional<ScalarType> dtype, bool prepend) {
+  return at::cumprod(self, dimname_to_position(self, dim), dtype, prepend);
 }
-Tensor& cumprod_(Tensor& self, Dimname dim, std::optional<ScalarType> dtype) {
-  return at::cumprod_out(self, self, dimname_to_position(self, dim), dtype);
+Tensor& cumprod_(Tensor& self, Dimname dim, std::optional<ScalarType> dtype, bool prepend) {
+  return at::cumprod_out(self, self, dimname_to_position(self, dim), dtype, prepend);
 }
-Tensor& cumprod_out(const Tensor& self, Dimname dim, std::optional<ScalarType> dtype, Tensor& result) {
-  return at::cumprod_out(result, self, dimname_to_position(self, dim), dtype);
+Tensor& cumprod_out(const Tensor& self, Dimname dim, std::optional<ScalarType> dtype, bool prepend, Tensor& result) {
+  return at::cumprod_out(result, self, dimname_to_position(self, dim), dtype, prepend);
 }
 std::tuple<Tensor, Tensor> cummax(const Tensor& self, Dimname dim) {
   return at::cummax(self, dimname_to_position(self, dim));
