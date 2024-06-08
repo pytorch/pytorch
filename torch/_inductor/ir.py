@@ -5638,8 +5638,8 @@ class FallbackKernel(ExternKernelAlloc):
                 unbacked_bindings,
             ) = cls.process_kernel(kernel, *args, **kwargs)
 
+        device = cls.find_device(tensor_args, example_output)
         if example_output is None:
-            device = cls.find_device(tensor_args, example_output)
             packed = cls(
                 NoneLayout(device),
                 kernel,
@@ -5650,7 +5650,6 @@ class FallbackKernel(ExternKernelAlloc):
             )
 
         else:
-            device = cls.find_device(tensor_args, example_output)
             assert device, "Not sure where to find device info"
 
             packed = cls(
