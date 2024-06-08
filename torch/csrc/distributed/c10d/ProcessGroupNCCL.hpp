@@ -643,7 +643,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   uint64_t getSequenceNumberForGroup() override;
 
   // Return the total number of splits the communicators held by this process
-  // group have performed.
+  // group have performed.  Counts ncclCommCreateFromRanks() for ncclx v2.21.5+
   uint64_t getCommSplitCounter() const;
 
   void registerOnCompletionHook(
