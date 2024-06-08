@@ -1002,11 +1002,21 @@ class Pipe(torch.nn.Module):
         example_kwargs: Optional[Dict[str, Any]] = None,
     ) -> ExportedProgram:
         logger.info("Tracing model ...")
-        ep = torch.export.export(
-            mod,
-            example_args,
-            example_kwargs,
-        )
+        try:
+            ep = torch.export.export(
+                mod,
+                example_args,
+                example_kwargs,
+            )
+        except Exception as e:
+            raise RuntimeError(
+                "It seems that we cannot capture your model as a full graph. "
+                "Typical reasons include graph breaks, data/shape-dependent "
+                "control flow, or missing meta kernels for custom operators. "
+                "You can use our manual pipeline interfaces, or try to fix the "
+                "graph breaks, see https://pytorch.org/docs/stable/export.html"
+            ) from e
+
         return ep
 
     @staticmethod
