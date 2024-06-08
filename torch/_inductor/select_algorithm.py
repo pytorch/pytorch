@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import builtins
 import contextlib
 import functools
