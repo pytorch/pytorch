@@ -91,8 +91,7 @@ bool _use_cudnn_ctc_loss(
   bool use_cudnn = ctx.userEnabledCuDNN() && (BLANK == 0) &&
       (targets.dim() == 1) && (log_probs.scalar_type() == at::kFloat) &&
       (targets.scalar_type() == at::kInt) &&
-      (log_probs.device().type() == at::kCUDA) &&
-      (targets.is_contiguous()) &&
+      (log_probs.device().type() == at::kCUDA) && (targets.is_contiguous()) &&
       (log_probs.dim() == 3);
 
   if (use_cudnn) {
@@ -123,8 +122,7 @@ bool _use_cudnn_ctc_loss_tensor(
   bool use_cudnn = ctx.userEnabledCuDNN() && (BLANK == 0) &&
       (targets.dim() == 1) && (log_probs.scalar_type() == at::kFloat) &&
       (targets.scalar_type() == at::kInt) &&
-      (log_probs.device().type() == at::kCUDA) &&
-      (targets.is_contiguous()) &&
+      (log_probs.device().type() == at::kCUDA) && (targets.is_contiguous()) &&
       (log_probs.dim() == 3);
 
   return use_cudnn;
@@ -261,7 +259,10 @@ std::tuple<Tensor, Tensor> _cudnn_ctc_loss_tensor(
   // so the CuDNN gradient semantics have changed between 7.1 and 7.6,
   // this is CuDNN 7.6 only, see PyTorch 1.2 for older CuDNN.
   ctc_loss_desc.set_v9(
-      CUDNN_DATA_FLOAT, CUDNN_LOSS_NORMALIZATION_SOFTMAX, CUDNN_CTC_SKIP_OOB_GRADIENTS, 255);
+      CUDNN_DATA_FLOAT,
+      CUDNN_LOSS_NORMALIZATION_SOFTMAX,
+      CUDNN_CTC_SKIP_OOB_GRADIENTS,
+      255);
   TensorDescriptor log_probs_desc{log_probs_t};
   Tensor grad = at::empty_like(log_probs_t, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   TensorDescriptor grad_desc{grad};
@@ -292,9 +293,9 @@ std::tuple<Tensor, Tensor> _cudnn_ctc_loss_tensor(
       grad.data_ptr(),
       workspace_size,
       workspace.data_ptr()
-      
-      ));
-   return std::make_tuple(costs, grad);
+
+          ));
+  return std::make_tuple(costs, grad);
 }
 
 } // namespace native
