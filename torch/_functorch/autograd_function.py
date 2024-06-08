@@ -498,7 +498,7 @@ def get_tangents_in_dims(input_dims, tangents):
 # in_dims = 0
 # vmap(Sum.apply, in_dims)(x)
 #
-# Let’s assume for a moment that we didn’t vmap setup_context in VmappedSum:
+# Let's assume for a moment that we didn't vmap setup_context in VmappedSum:
 #
 # class VmappedSum(torch.autograd.Function):
 #    @staticmethod
@@ -519,7 +519,7 @@ def get_tangents_in_dims(input_dims, tangents):
 #        return gx
 #
 # We end up saving [B, 4] as x_shape. In the backward, gy has shape [B],
-# and we’re doing:
+# and we're doing:
 #
 # def backward_no_context(gy):
 #     return gy.expand([B, 4])
@@ -680,6 +680,15 @@ def reductify_leaf(
     if input_bdim != grad_input_bdim:
         grad_input = grad_input.movedim(grad_input_bdim, input_bdim)
     return grad_input
+
+
+def autograd_function_forward_rewritten(original_forward, original_setup_context):
+    def new_forward(ctx, *args, **kwargs):
+        output = original_forward(*args, **kwargs)
+        original_setup_context(ctx, args, output)
+        return output
+
+    return new_forward
 
 
 class AutogradFunctionApply(HigherOrderOperator):

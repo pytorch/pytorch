@@ -1,7 +1,7 @@
 import contextlib
 import functools
-import warnings
 from typing import Callable, Optional
+from typing_extensions import deprecated
 
 import torch
 from torch._library.utils import Kernel, RegistrationHandle
@@ -124,10 +124,11 @@ class AbstractImplCtx:
         self._shape_env = _fake_mode.shape_env
         self._op = _op
 
+    @deprecated(
+        "`create_unbacked_symint` is deprecated, please use `new_dynamic_size` instead",
+        category=FutureWarning,
+    )
     def create_unbacked_symint(self, *, min=2, max=None) -> torch.SymInt:
-        warnings.warn(
-            "create_unbacked_symint is deprecated, please use new_dynamic_size instead"
-        )
         return self.new_dynamic_size(min=min, max=max)
 
     def new_dynamic_size(self, *, min=0, max=None) -> torch.SymInt:
@@ -205,38 +206,3 @@ class AbstractImplCtx:
             result, min=min, max=max
         )
         return result
-
-    def to_fake_tensor(self, tensor: torch.Tensor):
-        """
-        Creates a fake tensor from a concrete tensor. Note: this is not needed for register_fake.
-
-        This is useful for register_fake_class (which is necessary for torch.compile) for custom class.
-        Users need to implement a from_real method that takes a real custom object and creates a fake
-        custom object. Users can use this API to create fake tensors for the tensor states in the custom object.
-
-        Args:
-            tensor (torch.Tensor): A concrete tensor.
-
-        Example::
-            >>> import torch
-            >>> @torch._library.register_fake_class("_TorchScriptTesting::_TensorQueue")  # xdoctest: +SKIP
-            ... class FakeTensorQueue:
-            ...     def __init__(self, q):
-            ...         self.queue = q
-            ...
-            ...     @classmethod
-            ...     def from_real(cls, real_tq):
-            ...         ctx = torch.library.get_ctx()
-            ...         fake_queue = [ctx.to_fake_tensor(t) for t in real_tq.get_raw_queue()]
-            ...         return cls(fake_queue)
-            ...
-            ...     def push(self, x):
-            ...         self.queue.append(x)
-            ...
-            ...     def pop(self):
-            ...         return self.queue.pop(0)
-            ...
-            ...     def size(self):
-            ...         return len(self.queue)
-        """
-        return self._fake_mode.from_tensor(tensor)

@@ -1,5 +1,6 @@
 from .utils import _toposort, groupby
 from .variadic import isvariadic
+import operator
 
 __all__ = ["AmbiguityWarning", "supercedes", "consistent", "ambiguous", "ambiguities", "super_signature",
            "edge", "ordering"]
@@ -111,7 +112,7 @@ def ordering(signatures):
     """
     signatures = list(map(tuple, signatures))
     edges = [(a, b) for a in signatures for b in signatures if edge(a, b)]
-    edges = groupby(lambda x: x[0], edges)
+    edges = groupby(operator.itemgetter(0), edges)
     for s in signatures:
         if s not in edges:
             edges[s] = []

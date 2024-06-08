@@ -55,6 +55,22 @@ struct C10_API SafePyObject {
   c10::impl::PyInterpreter* pyinterpreter_;
 };
 
+// A newtype wrapper around SafePyObject for type safety when a python object
+// represents a specific type. Note that `T` is only used as a tag and isn't
+// actually used for any true purpose.
+template <typename T>
+struct SafePyObjectT : private SafePyObject {
+  SafePyObjectT(PyObject* data, c10::impl::PyInterpreter* pyinterpreter)
+      : SafePyObject(data, pyinterpreter) {}
+  SafePyObjectT(SafePyObjectT&& other) noexcept : SafePyObject(other) {}
+  SafePyObjectT(SafePyObjectT const&) = delete;
+  SafePyObjectT& operator=(SafePyObjectT const&) = delete;
+
+  using SafePyObject::ptr;
+  using SafePyObject::pyinterpreter;
+  using SafePyObject::release;
+};
+
 // Like SafePyObject, but non-owning.  Good for references to global PyObjects
 // that will be leaked on interpreter exit.  You get a copy constructor/assign
 // this way.

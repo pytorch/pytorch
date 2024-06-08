@@ -9,7 +9,7 @@ append_cxx_flag_if_supported("-Wno-unused-private-field" CMAKE_CXX_FLAGS)
 
 # Generate unboxing kernels
 set(GEN_COMMAND
-        "${PYTHON_EXECUTABLE}" -m torchgen.gen_executorch
+        "${Python_EXECUTABLE}" -m torchgen.gen_executorch
         --source-path=${TEST_ROOT}
         --install-dir=${OUTPUT_DIRECTORY}
         --tags-path=${TORCH_ROOT}/aten/src/ATen/native/tags.yaml

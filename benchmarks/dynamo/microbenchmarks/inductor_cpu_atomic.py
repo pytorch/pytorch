@@ -1,8 +1,9 @@
 import itertools
 
+from benchmark_helper import time_with_torch_timer
+
 import torch
 import torch._dynamo
-from benchmark_helper import time_with_torch_timer
 
 
 @torch._dynamo.optimize("inductor", nopython=True)

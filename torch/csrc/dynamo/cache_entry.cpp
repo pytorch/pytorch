@@ -10,7 +10,8 @@ CacheEntry::CacheEntry(const py::handle& guarded_code, PyObject* backend) {
   this->backend = backend;
   // TODO - clean this up when enable_cpp_guard_manager is True by default
   if (py::hasattr(this->check_fn, "root")) {
-    this->root_mgr = convert_to_root_guard_manager(this->check_fn.attr("root"));
+    this->root_mgr = torch::dynamo::convert_to_root_guard_manager(
+        this->check_fn.attr("root"));
   }
 }
 

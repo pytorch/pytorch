@@ -123,16 +123,6 @@ list(APPEND ATen_XPU_TEST_SRCS
   ${CMAKE_CURRENT_SOURCE_DIR}/xpu_generator_test.cpp
   )
 
-# Caffe2 specific tests
-if(BUILD_CAFFE2)
-  list(APPEND ATen_CPU_TEST_SRCS
-    ${CMAKE_CURRENT_SOURCE_DIR}/ExclusivelyOwned_test.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/tensor_interop_test.cpp)
-  list(APPEND ATen_CUDA_TEST_SRCS
-    ${CMAKE_CURRENT_SOURCE_DIR}/cuda_tensor_interop_test.cpp)
-endif()
-
-
 # ---[ Send the lists to the parent scope.
 set(ATen_CPU_TEST_SRCS ${ATen_CPU_TEST_SRCS} PARENT_SCOPE)
 set(ATen_CUDA_TEST_SRCS ${ATen_CUDA_TEST_SRCS} PARENT_SCOPE)

@@ -16,10 +16,10 @@ from typing import (
     TypeVar,
     Union,
 )
+from typing_extensions import TypeGuard
 
 import sympy
 from sympy.logic.boolalg import Boolean as SympyBoolean, BooleanAtom
-from typing_extensions import TypeGuard
 
 import torch
 
@@ -137,8 +137,8 @@ class ValueRanges(Generic[_T]):
         try:
             if not sympy_generic_le(lower, upper):
                 raise ValueRangeError(f"Invalid ranges [{lower}:{upper}]")
-        except TypeError:
-            raise TypeError(f"Could not compare {lower} <= {upper}")
+        except TypeError as e:
+            raise TypeError(f"Could not compare {lower} <= {upper}") from e
         # Because this is a frozen class
         object.__setattr__(self, "lower", lower)
         object.__setattr__(self, "upper", upper)
@@ -154,8 +154,7 @@ class ValueRanges(Generic[_T]):
             raise AssertionError(f"not bool like {self}")
 
     def __contains__(self, x: AllIn) -> bool:
-        x = simple_sympify(x)
-        return sympy_generic_le(self.lower, x) and sympy_generic_le(x, self.upper)
+        return ValueRanges.wrap(x).issubset(self)
 
     def issubset(self, other):
         return sympy_generic_le(other.lower, self.lower) and sympy_generic_le(
@@ -247,6 +246,8 @@ class ValueRanges(Generic[_T]):
     def wrap(arg: Union[AllIn, AllVR]) -> AllVR:
         if isinstance(arg, ValueRanges):
             return arg
+        if isinstance(arg, float) and math.isnan(arg):
+            return ValueRanges.unknown()
         # arg is either ExprIn or BoolIn, but we don't know it here
         return ValueRanges(arg, arg)  # type: ignore[arg-type]
 
@@ -340,6 +341,9 @@ class SymPyValueRangeAnalysis:
 
     @staticmethod
     def constant(value, dtype):
+        if isinstance(value, ValueRanges):
+            assert value.is_singleton()
+            value = value.lower
         # NB: value is NOT a sympy expression, it's a constant!
         is_python = isinstance(value, (int, float, bool))
         assert is_python or isinstance(
@@ -663,7 +667,9 @@ class SymPyValueRangeAnalysis:
         b = ValueRanges.wrap(b)
         c = ValueRanges.wrap(c)
         a = a.boolify()
-        assert b.is_bool == c.is_bool
+        # We sometimes write unknown without specifying the type correctly
+        # In particular, we do that when initialising the bounds for loads in bounds.py
+        assert b.is_bool == c.is_bool or ValueRanges.unknown() in (b, c)
         if b.is_bool:
             return ValueRanges(sympy.And(b.lower, c.lower), sympy.Or(b.upper, c.upper))
         else:
@@ -867,12 +873,15 @@ def bound_sympy(
         #      size variables can come with a lower bound of 2, as we specialise on 0 and 1
         unbounded_ranges: Dict[sympy.Symbol, ValueRanges] = {}
         for s in unbounded_vars:
-            assert s.is_integer  # type: ignore[attr-defined]
-            if s.is_positive:  # type: ignore[attr-defined]
-                lower = 1
-            elif s.is_nonnegative:  # type: ignore[attr-defined]
-                lower = 0
+            if s.is_integer:  # type: ignore[attr-defined]
+                if s.is_positive:  # type: ignore[attr-defined]
+                    lower = 1
+                elif s.is_nonnegative:  # type: ignore[attr-defined]
+                    lower = 0
+                else:
+                    lower = -math.inf  # type: ignore[assignment]
             else:
+                # Don't bother trying very hard here
                 lower = -math.inf  # type: ignore[assignment]
             unbounded_ranges[s] = ValueRanges(lower, math.inf)  # type: ignore[index]
         ranges = {**ranges, **unbounded_ranges}

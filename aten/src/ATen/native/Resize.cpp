@@ -136,7 +136,7 @@ const Tensor& resize_as_sparse_(const Tensor& self, const Tensor& src);
 const Tensor& resize_as_(
     const Tensor& self,
     const Tensor& the_template,
-    c10::optional<MemoryFormat> optional_memory_format) {
+    std::optional<MemoryFormat> optional_memory_format) {
   if (self.is_sparse() && the_template.is_sparse()) {
     TORCH_CHECK(
         !optional_memory_format.has_value(),
@@ -243,7 +243,7 @@ template <typename T>
 const Tensor& _resize_(
     const Tensor& self,
     ArrayRef<T> size,
-    c10::optional<MemoryFormat> optional_memory_format) {
+    std::optional<MemoryFormat> optional_memory_format) {
   auto* self_ = self.unsafeGetTensorImpl();
   int64_t old_storage_nbytes = self_->unsafe_storage() ? self_->unsafe_storage().sym_nbytes().maybe_as_int().value_or(-1) : 0;
   // NOLINTNEXTLINE(bugprone-argument-comment)
@@ -267,7 +267,7 @@ const Tensor& _resize_(
 const Tensor& resize_(
     const Tensor& self,
     IntArrayRef size,
-    c10::optional<MemoryFormat> optional_memory_format) {
+    std::optional<MemoryFormat> optional_memory_format) {
   if (self.has_names()) {
     return resize_named_tensor_(self, size, optional_memory_format);
   }
@@ -277,7 +277,7 @@ const Tensor& resize_(
 const Tensor& resize__symint(
     const Tensor& self,
     c10::SymIntArrayRef size,
-    c10::optional<MemoryFormat> optional_memory_format) {
+    std::optional<MemoryFormat> optional_memory_format) {
   TORCH_INTERNAL_ASSERT(!self.has_names())
   return _resize_(self, size, optional_memory_format);
 }

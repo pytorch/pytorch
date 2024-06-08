@@ -59,10 +59,11 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
     std::chrono::milliseconds timeout;
 
     // backend name
+    // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
     const std::string backend;
   };
 
-  enum BackendType {
+  enum BackendType : uint8_t {
     UNDEFINED = 0,
     GLOO = 1,
     NCCL = 2,
@@ -161,7 +162,7 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
                     at::TensorList,
                     const c10::intrusive_ptr<::c10d::ProcessGroup>&,
                     const c10::intrusive_ptr<::c10d::ReduceOp>&,
-                    const c10::optional<at::Tensor>& sparse_indices,
+                    const std::optional<at::Tensor>& sparse_indices,
                     int64_t)>();
 
     return std::get<1>(op.call(
@@ -619,7 +620,7 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
   void setBackend(
       c10::DeviceType deviceType,
       BackendType backendType,
-      const c10::optional<c10::intrusive_ptr<Backend>>& backend) {
+      const std::optional<c10::intrusive_ptr<Backend>>& backend) {
     // TODO: should we add these entries after the backend setting succeeds?
     deviceTypeToBackendType_[deviceType] = backendType;
     deviceTypes_.insert(deviceType);
@@ -702,11 +703,11 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
   // optimizations such as automatic use of ncclCommSplit.  The device
   // is specified in `init_process_group` and eventually makes it
   // here and then down into the actual backend instances.
-  c10::optional<at::Device> getBoundDeviceId() const {
+  std::optional<at::Device> getBoundDeviceId() const {
     return bound_device_id_;
   }
 
-  void setBoundDeviceId(c10::optional<at::Device> device) {
+  void setBoundDeviceId(std::optional<at::Device> device) {
     if (device) {
       TORCH_CHECK(device->has_index(), "setBoundDeviceId must have an index");
     }
@@ -719,9 +720,13 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
   void init();
 
   c10::intrusive_ptr<c10d::Store> store_;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
   const int rank_;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
   const int size_;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
   const c10::intrusive_ptr<Options> options_;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
   const BackendType backendType_;
   std::string pg_desc_;
 
@@ -737,7 +742,7 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
   std::unordered_map<BackendType, c10::intrusive_ptr<Backend>>
       backendTypeToBackend_;
 
-  c10::optional<at::Device> bound_device_id_;
+  std::optional<at::Device> bound_device_id_;
 };
 
 } // namespace c10d

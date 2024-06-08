@@ -247,7 +247,7 @@ void Logger::calculate_avg_time(
     Timer::Event start_event,
     Timer::Event end_event) {
   TORCH_CHECK(num_iterations_stats_recorded_ > 0);
-  c10::optional<int64_t> maybe_time_duration =
+  std::optional<int64_t> maybe_time_duration =
       timer.measureDifference(start_event, end_event);
   if (!maybe_time_duration.has_value()) {
     return;

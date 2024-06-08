@@ -1,6 +1,7 @@
 from typing import List, Tuple, Union, Dict, Any, Set, Mapping, Optional
 import collections
 from dataclasses import dataclass
+import operator
 
 import torch
 import torch.fx
@@ -243,6 +244,31 @@ def legalize_graph(gm: torch.fx.GraphModule) -> torch.fx.GraphModule:
     Returns:
         The graph module in-place sorted
     """
+
+    # These operators are used for making runtime assertions before any
+    # data-dependent operators occur. We want to prioritize sorting these to
+    # ensure that these assertions appear before any data-dependent operations
+    # in the graph.
+    PRIORITIZED_OPS = [
+        operator.add,
+        operator.mul,
+        operator.sub,
+        operator.floordiv,
+        operator.truediv,
+        operator.mod,
+        operator.le,
+        operator.lt,
+        operator.ge,
+        operator.gt,
+        operator.eq,
+        operator.ne,
+        torch.ops.aten.sym_constrain_range.default,
+        torch.ops.aten.sym_constrain_range_for_size.default,
+        torch.ops.aten._assert_async.msg,
+        torch.ops.aten.scalar_tensor.default,
+        torch.ops.aten._assert_scalar.default,
+    ]
+
     indeg = dict.fromkeys(gm.graph.nodes, 0)
     new_graph = torch.fx.Graph()
     # Track how many unfulfilled dependencies each node has
@@ -263,7 +289,10 @@ def legalize_graph(gm: torch.fx.GraphModule) -> torch.fx.GraphModule:
         for user in cur.users:
             indeg[user] -= 1
             if indeg[user] == 0:
-                queue.append(user)
+                if user.op == "call_function" and user.target in PRIORITIZED_OPS:
+                    queue.appendleft(user)
+                else:
+                    queue.append(user)
     # If the new graph's size is not as large as the old one, then there must be
     # a cycle (i.e. some node's dependencies were not satisfied.)
     if len(new_graph.nodes) < len(gm.graph.nodes):
