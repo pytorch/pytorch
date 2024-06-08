@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 """This file exports ONNX ops for opset 9.
 
 Opset 9 is supported by ONNX release 1.4.1

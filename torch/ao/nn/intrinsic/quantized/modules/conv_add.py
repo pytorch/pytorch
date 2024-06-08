@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import torch
 import torch.ao.nn.intrinsic
 import torch.ao.nn.intrinsic.qat
