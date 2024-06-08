@@ -21,7 +21,7 @@ static std::string shapes_as_str(TensorList tensors) {
 }
 } // anonymous namespace
 
-static std::tuple<bool, Tensor> canDispatchToMaskedFill(const Tensor& self, const torch::List<c10::optional<at::Tensor>>& indices,
+static std::tuple<bool, Tensor> canDispatchToMaskedFill(const Tensor& self, const torch::List<std::optional<at::Tensor>>& indices,
 const Tensor& value){
   if (!(value.numel() ==1 && value.device().is_cpu())){
     return std::make_tuple(false,Tensor());
@@ -29,7 +29,7 @@ const Tensor& value){
   int64_t num_ind = 0;
   Tensor mask;
   auto self_device = self.device();
-  for (const c10::optional<Tensor>& i: indices) {
+  for (const std::optional<Tensor>& i: indices) {
     if (!i.has_value() || !(*i).defined()){
       num_ind++;
     } else {

@@ -12,7 +12,7 @@ struct TensorInfo {
   std::vector<int64_t> dims;
   c10::ScalarType dtype;
 };
-c10::optional<TensorInfo> getTensorInfo(BufHandle b);
+std::optional<TensorInfo> getTensorInfo(BufHandle b);
 
 int64_t normalizeAndCheckIndex(int64_t idx, int64_t list_size);
 
@@ -26,7 +26,7 @@ ExprHandle promoteIntegerToDefaultType(const ExprHandle& e);
 ExprHandle promoteHalfToFloat(const ExprHandle& e);
 ExprHandle demoteOutput(
     const ExprHandle& e,
-    const c10::optional<ScalarType> type);
+    const std::optional<ScalarType> type);
 
 std::vector<ExprHandle> broadcastShapes(
     std::vector<std::vector<ExprHandle>> shapes);
@@ -51,31 +51,31 @@ Tensor computeChunk(
     const std::vector<ArgValue>& inputs,
     const std::vector<ExprHandle>& outputShape,
     const std::vector<ExprHandle>& outputStrides,
-    const c10::optional<ScalarType>& outputType,
+    const std::optional<ScalarType>& outputType,
     at::Device device);
 Tensor computeTranspose(
     const std::vector<ArgValue>& inputs,
     const std::vector<ExprHandle>& outputShape,
     const std::vector<ExprHandle>& outputStrides,
-    const c10::optional<ScalarType>& outputType,
+    const std::optional<ScalarType>& outputType,
     at::Device device);
 Tensor computeExpand(
     const std::vector<ArgValue>& inputs,
     const std::vector<ExprHandle>& outputShape,
     const std::vector<ExprHandle>& outputStrides,
-    const c10::optional<ScalarType>& outputType,
+    const std::optional<ScalarType>& outputType,
     at::Device device);
 Tensor computeReshape(
     const std::vector<ArgValue>& inputs,
     const std::vector<ExprHandle>& outputShape,
     const std::vector<ExprHandle>& outputStrides,
-    const c10::optional<ScalarType>& outputType,
+    const std::optional<ScalarType>& outputType,
     at::Device device);
 Tensor computeFlatten(
     const std::vector<ArgValue>& inputs,
     const std::vector<ExprHandle>& outputShape,
     const std::vector<ExprHandle>& outputStrides,
-    const c10::optional<ScalarType>& outputType,
+    const std::optional<ScalarType>& outputType,
     at::Device device);
 Tensor computeCatWoConditionals(
     const std::vector<ArgValue>& inputs,
@@ -84,13 +84,13 @@ Tensor computeCat(
     const std::vector<ArgValue>& inputs,
     const std::vector<ExprHandle>& outputShape,
     const std::vector<ExprHandle>& outputStrides,
-    const c10::optional<ScalarType>& outputType,
+    const std::optional<ScalarType>& outputType,
     at::Device device);
 Tensor computeEmbedding(
     const std::vector<ArgValue>& inputs,
     const std::vector<ExprHandle>& outputShape,
     const std::vector<ExprHandle>& outputStrides,
-    const c10::optional<ScalarType>& outputType,
+    const std::optional<ScalarType>& outputType,
     at::Device device);
 
 } // namespace tensorexpr

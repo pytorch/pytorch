@@ -54,10 +54,10 @@ TORCH_API void RegisterShapeComputeGraphForSchema(
     const FunctionSchema& schema,
     std::shared_ptr<Graph> g);
 
-TORCH_API c10::optional<std::shared_ptr<Graph>> shapeComputeGraphForSchema(
+TORCH_API std::optional<std::shared_ptr<Graph>> shapeComputeGraphForSchema(
     const FunctionSchema& schema);
 
-TORCH_API c10::optional<BoundedShapeGraphs> boundedGraphsForSchema(
+TORCH_API std::optional<BoundedShapeGraphs> boundedGraphsForSchema(
     const FunctionSchema& schema);
 
 TORCH_API std::vector<const FunctionSchema*> RegisteredShapeComputeSchemas();

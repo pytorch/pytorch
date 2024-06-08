@@ -19,7 +19,7 @@ namespace {
  * @post if there's one constant in two operands, then the second operand is
  *       constant.
  */
-c10::optional<int64_t> checkArithNode(Node& node) {
+std::optional<int64_t> checkArithNode(Node& node) {
   if (node.inputs().size() != 2 || node.input(0)->type() != IntType::get() ||
       node.input(1)->type() != IntType::get()) {
     return {};

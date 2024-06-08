@@ -1184,8 +1184,6 @@ class _CachingTorchDispatchMode(TorchDispatchMode):
         self.storage[func].append(out_detached)
 
     def _handle_compile_in_forward_ctx(self, should_not_recompute, func, args, kwargs):
-        if func in _ignored_ops:
-            return func(*args, **kwargs)
         if should_not_recompute:
             fx_traceback.current_meta["recompute"] = 0
         # NOTE: Here we just store and reuse output of all ops, since in torch.compile mode
@@ -1197,6 +1195,8 @@ class _CachingTorchDispatchMode(TorchDispatchMode):
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
         if kwargs is None:
             kwargs = {}
+        if func in _ignored_ops:
+            return func(*args, **kwargs)
         should_not_recompute = self.policy_fn("forward", func, *args, **kwargs)
         if _is_compiling(func, args, kwargs):
             return self._handle_compile_in_forward_ctx(should_not_recompute, func, args, kwargs)
@@ -1207,7 +1207,6 @@ class _CachingTorchDispatchMode(TorchDispatchMode):
             else:
                 out = func(*args, **kwargs)
             return out
-
 
 class _CachedTorchDispatchMode(TorchDispatchMode):
     r"""
@@ -1224,14 +1223,14 @@ class _CachedTorchDispatchMode(TorchDispatchMode):
         return out
 
     def _handle_compile_in_recompute_ctx(self, should_not_recompute, func, args, kwargs):
-        if func in _ignored_ops:
-            return func(*args, **kwargs)
         out = self.pop_from_storage(func, args, kwargs)
         return out
 
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
         if kwargs is None:
             kwargs = {}
+        if func in _ignored_ops:
+            return func(*args, **kwargs)
         should_not_recompute = self.policy_fn("recompute", func, *args, **kwargs)
         if _is_compiling(func, args, kwargs):
             return self._handle_compile_in_recompute_ctx(should_not_recompute, func, args, kwargs)
@@ -1241,7 +1240,6 @@ class _CachedTorchDispatchMode(TorchDispatchMode):
             else:
                 out = func(*args, **kwargs)
             return out
-
 
 def _pt2_selective_checkpoint_context_fn_gen(policy_fn):
     """

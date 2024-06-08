@@ -5798,7 +5798,7 @@ class TestQuantizeFx(QuantizationTestCase):
             self.checkGraphModuleNodes(model, expected_node_occurrence=expected_node_occurrence)
         except AssertionError as e:
             if qconfig_name is not None:
-                print("ERROR: Validation for QConfig '%s' failed" % qconfig_name)
+                print(f"ERROR: Validation for QConfig '{qconfig_name}' failed")
             raise e
 
     def test_backend_config_quantization_range(self):

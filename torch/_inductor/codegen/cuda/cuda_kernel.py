@@ -156,7 +156,7 @@ class CUDATemplateKernel(CUDAKernel):
         as well as all required inputs and outputs.
         """
         wrapper = V.graph.wrapper_code
-        _, call_args, _ = self.args.python_argdefs()
+        _, call_args, _, arg_types = self.args.python_argdefs()
         # dynamo wraps unspec variable as 0d CPU tensor, need convert to scalar
         for i in range(len(call_args)):
             if V.graph.is_unspec_arg(call_args[i]):
@@ -176,12 +176,14 @@ class CUDATemplateKernel(CUDAKernel):
         else:
             call_args.append("None")
 
+        current_device = V.graph.scheduler.get_current_device_or_throw()
         wrapper.generate_kernel_call(
             name,
             call_args,
-            device_index=V.graph.scheduler.current_device.index,
+            device_index=current_device.index,
             cuda=True,
             triton=False,
+            arg_types=arg_types,
         )
         if node.get_workspace_size() > 0:
             wrapper.writeline(wrapper.make_free_by_names(["workspace"]))

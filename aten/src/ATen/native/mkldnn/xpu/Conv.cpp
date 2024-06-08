@@ -563,7 +563,7 @@ Tensor _convolution(
 Tensor convolution_overrideable(
     const Tensor& input_r,
     const Tensor& weight_r,
-    const c10::optional<at::Tensor>& bias_r_opt,
+    const std::optional<at::Tensor>& bias_r_opt,
     IntArrayRef stride_,
     IntArrayRef padding_,
     IntArrayRef dilation_,

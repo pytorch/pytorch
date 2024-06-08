@@ -2,7 +2,6 @@ import itertools
 import logging
 import operator
 from typing import Any, Callable, Dict, List, Optional, Sequence, Set, Tuple, Union
-
 from typing_extensions import TypeAlias
 
 import torch
@@ -55,7 +54,9 @@ pre_grad_pass_names = [
 ]
 
 post_grad_pass_names = [
+    "normalization_aten_pass",
     "decompose_mm_pass",
+    "unbind_stack_aten_pass",
 ]
 
 for pass_name in pre_grad_pass_names:
@@ -1610,3 +1611,112 @@ def merge_stack_tahn_unbind(match: Match, split_sections: List[int], dim: int):
                 split_sections = new_split_sections
 
                 counters["inductor"]["merge_stack_tahn_unbind_pass"] += 1
+
+
+@register_graph_pattern(
+    CallFunctionVarArgs(torch.ops.aten.cat.default, users=MULTIPLE),
+    pass_dict=construct_pattern_matcher_pass("normalization_aten_pass"),
+)
+def normalize_cat_default_aten(match: Match, *args, **kwargs):
+    cat_node = match.nodes[0]
+    graph = match.graph
+    tensors = get_arg_value(cat_node, 0, "tensors")
+    cat_dim = get_arg_value(cat_node, 1, "dim")
+    if cat_dim is None:
+        cat_axis = cat_node.kwargs.get("axis")
+        if cat_axis is not None:
+            cat_dim = cat_axis
+        else:
+            cat_dim = 0
+    if tensors is None or cat_dim is None:
+        log.info("couldn't find cat args")
+        return
+    assert isinstance(tensors, (list, tuple))
+    for tensor in itertools.chain([cat_node], tensors):
+        if "val" not in tensor.meta:
+            log.warning("val absent for node: %s", tensor)
+            return
+
+    ndim = cat_node.meta["val"].dim()
+
+    def is_empty_tensor(x: torch.fx.Node) -> bool:
+        # special case where torch.ops.aten.cat.default supports cat'ing with an empty tensor
+        x_shape = x.meta["val"].shape
+        return len(x_shape) == 1 and x_shape[0] == 0
+
+    assert all(ndim == x.meta["val"].dim() or is_empty_tensor(x) for x in tensors)
+
+    if cat_dim < 0:  # Normalize cat dim
+        cat_dim += ndim
+
+    with graph.inserting_after(cat_node):
+        new_cat_node = graph.call_function(
+            torch.ops.aten.cat.default,
+            args=(tensors,),
+            kwargs={"dim": cat_dim},
+        )
+    cat_node.replace_all_uses_with(new_cat_node)
+    new_cat_node.meta.update(cat_node.meta)
+    graph.erase_node(cat_node)
+    counters["inductor"]["normalization_aten_pass"] += 1
+
+
+@register_graph_pattern(
+    CallFunction(
+        torch.ops.aten.cat,
+        ListOf(CallFunctionVarArgs(torch.ops.aten.unsqueeze)),
+        _users=MULTIPLE,
+    ),
+    pass_dict=construct_pattern_matcher_pass("unbind_stack_aten_pass"),
+)
+def merge_unbind_stack_aten(match: Match, *args, **kwargs):
+    node = match.nodes[-1]
+    graph = match.graph
+    # pyre-fixme[6]
+    unsqueeze_nodes = list(node.args[0])  # type: ignore[arg-type]
+    cat_dim = get_arg_value(node, 1, "dim")
+    # check the unsqueeze nodes come from the select nodes
+    if not all(
+        get_arg_value(unsqueeze_node, 0, "input").target == torch.ops.aten.select
+        for unsqueeze_node in unsqueeze_nodes
+    ):
+        return
+    select_nodes = [
+        get_arg_value(unsqueeze_node, 0, "input") for unsqueeze_node in unsqueeze_nodes
+    ]
+    parent_of_select_node = get_arg_value(select_nodes[0], 0, "input")
+    # check the target of select_nodes are the same
+    if not all(
+        select_node.target == torch.ops.aten.select for select_node in select_nodes
+    ):
+        return
+    # check the select nodes come from the same parent node
+    if not all(
+        get_arg_value(select_node, 0, "input") == parent_of_select_node
+        for select_node in select_nodes
+    ):
+        return
+    if len(unsqueeze_nodes) != len(select_nodes):
+        return
+    # check the select nodes have the same dim
+    if not all(
+        get_arg_value(select_node, 1, "dim") == cat_dim for select_node in select_nodes
+    ):
+        return
+    # check the select nodes have consecutive indices starting from 0
+    if get_arg_value(select_nodes[0], 2, "index") != 0 or not is_sorted_and_consecutive(
+        [get_arg_value(select_node, 2, "index") for select_node in select_nodes]
+    ):
+        return
+    # check the users of parent of select node only from unsqueeze nodes that go to the cat node
+    # we simply check the number of users of the parent of select node
+    if len(parent_of_select_node.users.keys()) != len(node.args[0]):  # type: ignore[arg-type]
+        return
+    node.replace_all_uses_with(parent_of_select_node)
+    graph.erase_node(node)
+    for unsqueeze_node in unsqueeze_nodes:
+        graph.erase_node(unsqueeze_node)
+    for select_node in select_nodes:
+        if len(select_node.users) == 0:
+            graph.erase_node(select_node)
+    counters["inductor"]["unbind_stack_aten_pass"] += 1

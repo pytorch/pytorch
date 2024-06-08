@@ -6,7 +6,7 @@ namespace utils {
 void SchemaInfo::addArgumentValue(
     const std::string& name,
     const at::IValue& value) {
-  c10::optional<int> index = schema_.argumentIndexWithName(name);
+  std::optional<int> index = schema_.argumentIndexWithName(name);
   TORCH_INTERNAL_ASSERT(
       index != c10::nullopt, "Schema has no argument named ", name);
   value_map_[name] = value;
@@ -14,7 +14,7 @@ void SchemaInfo::addArgumentValue(
 }
 
 void SchemaInfo::addArgumentValues(
-    const std::vector<c10::optional<at::IValue>>& value_list) {
+    const std::vector<std::optional<at::IValue>>& value_list) {
   TORCH_INTERNAL_ASSERT(
       value_list.size() <= schema_.arguments().size(),
       "Schema does not have enough arguments for value list");
@@ -106,7 +106,7 @@ bool SchemaInfo::has_argument(c10::string_view name) {
 }
 
 bool SchemaInfo::is_mutable(c10::string_view name) {
-  c10::optional<int> index = schema_.argumentIndexWithName(name);
+  std::optional<int> index = schema_.argumentIndexWithName(name);
   TORCH_INTERNAL_ASSERT(
       index.has_value(), "Schema has no argument named ", name);
 
@@ -144,10 +144,10 @@ bool SchemaInfo::may_alias(
   if (basic_check) {
     return true;
   }
-  c10::optional<c10::AliasTypeSet> lhsAliasTypeSet =
+  std::optional<c10::AliasTypeSet> lhsAliasTypeSet =
       schema_.mapTypeToAliasTypeSet(
           schema_.getCorrectList(lhs.type)[lhs.index].type());
-  c10::optional<c10::AliasTypeSet> rhsAliasTypeSet =
+  std::optional<c10::AliasTypeSet> rhsAliasTypeSet =
       schema_.mapTypeToAliasTypeSet(
           schema_.getCorrectList(rhs.type)[rhs.index].type());
   bool types_can_alias =
@@ -205,10 +205,10 @@ bool SchemaInfo::may_contain_alias(
 bool SchemaInfo::mayContainAliasImpl(
     const c10::SchemaArgument& lhs,
     const c10::SchemaArgument& rhs) {
-  c10::optional<c10::AliasTypeSet> lhsContainedAliasTypeSet =
+  std::optional<c10::AliasTypeSet> lhsContainedAliasTypeSet =
       schema_.getAliasTypeSetContainedTypes(schema_.mapTypeToAliasTypeSet(
           schema_.getCorrectList(lhs.type)[lhs.index].type()));
-  c10::optional<c10::AliasTypeSet> rhsAliasTypeSet =
+  std::optional<c10::AliasTypeSet> rhsAliasTypeSet =
       schema_.mapTypeToAliasTypeSet(
           schema_.getCorrectList(rhs.type)[rhs.index].type());
   bool types_can_alias =
@@ -339,7 +339,7 @@ void SchemaInfo::initSchemaInfo() {
           }
         }
       }
-      c10::optional<c10::AliasTypeSet> contained_types =
+      std::optional<c10::AliasTypeSet> contained_types =
           schema_.getAliasTypeSetContainedTypes(
               schema_.mapTypeToAliasTypeSet(argument.type()));
       if (contained_types && !contained_types->empty()) {

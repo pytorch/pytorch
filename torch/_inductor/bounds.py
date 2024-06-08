@@ -22,11 +22,12 @@ class BoundVars:
     """
 
     def __init__(self, loop_body: LoopBody) -> None:
+        def upper_bound(v):
+            return bound_sympy(v).upper if isinstance(v, Expr) else v
+
         self.loop_body = loop_body
         self.replacement_vals = {
-            k: ValueRanges[Expr](0, v - 1)
-            if (isinstance(v, int) or v.is_number)
-            else bound_sympy(v)
+            k: ValueRanges[Expr](0, upper_bound(v) - 1)
             for k, v in loop_body.var_ranges.items()
         }
         # avoid computing these values, pessimistically assume that they are unbounded
@@ -79,7 +80,6 @@ class BoundVars:
                     )
 
                 result[key] = make_fn(subblock)
-
             elif "set_indirect" in key:
                 idx = int(key[len("set_indirect") :])
                 var = self.loop_body.indirect_vars[idx]
