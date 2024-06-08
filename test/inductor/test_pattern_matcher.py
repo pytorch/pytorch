@@ -193,7 +193,7 @@ class TestPatternMatcher(TestCase):
         self.assertEqual("fallback_mixed_mm" in code, fallback_mixed_mm_expected)
 
     @unittest.skipIf(not SM80OrLater, "need sm_80")
-    @inductor_config.patch(force_mixed_mm="autotune")
+    @inductor_config.patch(force_mixed_mm="triton")
     def test_mixed_mm(self):
         def fn(a, b):
             return torch.mm(a, b.to(a.dtype))
@@ -221,7 +221,7 @@ class TestPatternMatcher(TestCase):
             self._test_mixed_impl(fn, args, True, False)
 
     @unittest.skipIf(not SM80OrLater, "need sm_80")
-    @inductor_config.patch(force_mixed_mm="autotune")
+    @inductor_config.patch(force_mixed_mm="triton")
     def test_mixed_mm_bad_cases(self):
         def fn(a, b):
             return torch.mm(a, b.to(a.dtype))
@@ -246,7 +246,7 @@ class TestPatternMatcher(TestCase):
             self._test_mixed_impl(fn, args, True, True)
 
     @unittest.skipIf(not SM80OrLater, "need sm_80")
-    @inductor_config.patch(force_mixed_mm="autotune", max_autotune_gemm=True)
+    @inductor_config.patch(force_mixed_mm="triton", max_autotune_gemm=True)
     def test_mixed_mm_epi_works(self):
         def fn(a, b, c, d):
             return torch.mm(a, b.to(a.dtype)) * c + d
@@ -284,6 +284,14 @@ class TestPatternMatcher(TestCase):
         # examples that should not be selected by heuristic
         args_list = [
             (
+                torch.randn(1, 4097, device="cuda"),
+                torch.randint(-128, 127, (4097, 4096), dtype=torch.int8, device="cuda"),
+            ),
+            (
+                torch.randn(1, 4096, device="cuda"),
+                torch.randint(-128, 127, (4096, 4097), dtype=torch.int8, device="cuda"),
+            ),
+            (
                 torch.randn(8, 8, device="cuda"),
                 torch.randint(-128, 127, (8, 8), dtype=torch.int8, device="cuda"),
             ),
@@ -316,6 +324,10 @@ class TestPatternMatcher(TestCase):
 
         # examples that should be selected by heuristic
         args_list = [
+            (
+                torch.randn(1, 4096, device="cuda"),
+                torch.randint(-128, 127, (4096, 4096), dtype=torch.int8, device="cuda"),
+            ),
             (
                 torch.randn(4, 4096, device="cuda"),
                 torch.randint(-128, 127, (4096, 4096), dtype=torch.int8, device="cuda"),
@@ -371,16 +383,26 @@ class TestPatternMatcher(TestCase):
             self._test_mixed_impl(fn, args, True, True)
 
         # will use mixed_mm kernel
-        with inductor_config.patch(
-            {"force_mixed_mm": "autotune", "use_mixed_mm": False}
-        ):
+        with inductor_config.patch({"force_mixed_mm": "triton", "use_mixed_mm": False}):
             self._test_mixed_impl(fn, args, True, False)
 
         # shows that use_mixed_mm doesn't do anything if foce_mixed_mm is set
-        with inductor_config.patch(
-            {"force_mixed_mm": "autotune", "use_mixed_mm": True}
-        ):
+        with inductor_config.patch({"force_mixed_mm": "triton", "use_mixed_mm": True}):
             self._test_mixed_impl(fn, args, True, False)
+
+        # will use fallback_mixed_mm kernel
+        with inductor_config.patch({"force_mixed_mm": "aten", "use_mixed_mm": False}):
+            self._test_mixed_impl(fn, args, True, True)
+
+        # will use fallback_mixed_mm kernel
+        with inductor_config.patch({"force_mixed_mm": "aten", "use_mixed_mm": True}):
+            self._test_mixed_impl(fn, args, True, True)
+
+        # will use fallback_mixed_mm kernel because fallback is the only choice
+        with inductor_config.patch(
+            {"force_mixed_mm": "aten", "use_mixed_mm": True, "max_autotune_gemm": True}
+        ):
+            self._test_mixed_impl(fn, args, True, True)
 
     @inductor_config.patch(use_mixed_mm=True)
     def test_mixed_mm_cpu(self):
