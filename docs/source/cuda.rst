@@ -9,6 +9,7 @@ torch.cuda
 
     StreamContext
     can_device_access_peer
+    cudart
     current_blas_handle
     current_device
     current_stream

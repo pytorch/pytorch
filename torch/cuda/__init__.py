@@ -334,6 +334,29 @@ def _lazy_init():
 
 
 def cudart():
+    r"""Retrieves the CUDA runtime API module.
+
+
+    This function initializes the CUDA runtime environment if it is not already
+    initialized and returns the CUDA runtime API module (_cudart). The CUDA
+    runtime API module provides access to various CUDA runtime functions.
+
+    Args:
+        ``None``
+
+    Returns:
+        module: The CUDA runtime API module (_cudart).
+
+    Raises:
+        RuntimeError: If CUDA cannot be re-initialized in a forked subprocess.
+        AssertionError: If PyTorch is not compiled with CUDA support or if libcudart functions are unavailable.
+
+    Example:
+        >>> import torch
+        >>> cudart = torch.cuda.cudart()
+        >>> print(cudart)
+        <module 'torch._C._cudart'>
+    """
     _lazy_init()
     return _cudart
 
