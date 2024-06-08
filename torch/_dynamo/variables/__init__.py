@@ -19,7 +19,6 @@ from .ctx_manager import (
     StreamVariable,
     VmapIncrementNestingCtxManagerVariable,
     WithExitFunctionVariable,
-    FSDPParamGroupUseTrainingStateVariable,
 )
 from .dicts import (
     ConstDictVariable,
@@ -64,6 +63,7 @@ from .misc import (
     AutogradFunctionVariable,
     ClosureVariable,
     DeletedVariable,
+    ExceptionVariable,
     GetAttrVariable,
     InspectSignatureVariable,
     LambdaVariable,

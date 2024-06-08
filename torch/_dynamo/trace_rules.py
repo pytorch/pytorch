@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import _collections_abc
 import _weakrefset
 import abc
@@ -309,7 +310,6 @@ manual_torch_name_rule_map = {
     f"torch/testing/_internal/distributed/_tensor/common_dtensor.py#{TORCH_DYNAMO_RESUME_IN_PREFIX}": UserFunctionVariable,
     "torch/testing/_internal/common_distributed.py#forward": UserFunctionVariable,
     f"torch/testing/_internal/common_distributed.py#{TORCH_DYNAMO_RESUME_IN_PREFIX}": UserFunctionVariable,
-    f"torch.distributed._composable.fsdp._fsdp_param_group.FSDPParamGroup.use_training_state": UserFunctionVariable,
 }
 
 
@@ -406,6 +406,8 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch._C._construct_CUDA_Tensor_From_Storage_And_Metadata",
         "torch._C._construct_storage_from_data_pointer",
         "torch._C._conv_determine_backend_memory_format",
+        "torch._C._cpu._is_cpu_support_avx2",
+        "torch._C._cpu._is_cpu_support_avx512",
         "torch._C._cpu._is_cpu_support_vnni",
         "torch._C._crash_if_aten_asan",
         "torch._C._crash_if_csrc_asan",
@@ -1996,7 +1998,6 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch.not_equal",
         "torch.nuclear_norm",
         "torch.numel",
-        "torch.obj",
         "torch.ones_like",
         "torch.ones",
         "torch.orgqr",
@@ -2183,6 +2184,7 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch.xlogy",
         "torch.zero_",
         "torch.zeros",
+        "torch.zeros_like",
         "torch._fused_sgd_",
         "torch.slice_inverse",
         "torch._assert_scalar",
@@ -2417,6 +2419,8 @@ torch_non_c_binding_in_graph_functions = dict.fromkeys(
         "torch.chain_matmul",
         "torch.compile",
         "torch.compiled_with_cxx11_abi",
+        "torch.cpu._is_cpu_support_avx2",
+        "torch.cpu._is_cpu_support_avx512",
         "torch.cpu._is_cpu_support_vnni",
         "torch.cpu.current_device",
         "torch.cpu.current_stream",
@@ -2864,8 +2868,6 @@ def get_torch_obj_rule_map():
                 obj = load_object(k)
             else:
                 obj = _module_dir(torch) + k[len("torch/") :]
-            if isinstance(obj, str) and "fsdp" in obj:
-                print(f"obj: {obj}")
             if obj is not None:
                 if obj in d and d[obj] != v:
                     raise AssertionError(
@@ -2892,14 +2894,11 @@ def load_object(name):
         if len(x) == 2:
             obj = _load_obj_from_str(x[0])
             val = getattr(obj, x[1])
-            print(f"here1: obj: {obj}, val: {val}")
         else:
             assert len(x) == 1, f"Invalid obj name {name}"
             val = _load_obj_from_str(x[0])
-            print(f"here2: val: {val}")
         val = unwrap_if_wrapper(val)
-    except (AttributeError, ImportError) as e:
-        print(f"here3: Failed to load {name}: {e}")
+    except (AttributeError, ImportError):
         val = None
     return val
 
@@ -3532,7 +3531,6 @@ def lookup_inner(
     if obj is not None:
         if is_aten_op_or_tensor_method(obj):
             return TorchInGraphFunctionVariable
-        print(f"obj to check: {obj}")
         rule = get_torch_obj_rule_map().get(obj, None)
         if rule is not None:
             if reasons is not None:
