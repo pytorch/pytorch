@@ -2900,6 +2900,24 @@ class CommonTemplate:
             check_lowp=True,
         )
 
+    @skipIfPy312  # segfaults
+    @config.patch(force_mixed_mm=True)
+    def test_mixed_mm3(self):
+        def fn(a, b):
+            return torch.mm(a, b.to(a.dtype))
+
+        # (256, 256) @ (256, 256) so different block sizes are tried out during autotuning
+        self.common(
+            fn,
+            (
+                torch.randn(256, 256),
+                torch.randint(-128, 127, (256, 256), dtype=torch.int8),
+            ),
+            check_lowp=True,
+            rtol=0.01,
+            atol=0.1,
+        )
+
     @with_tf32_off
     @config.patch(use_mixed_mm=True)
     def test_uint4x2_mixed_mm(self):
