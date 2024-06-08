@@ -5999,7 +5999,6 @@ FAILING_CACHE_TESTS = (
     "test_input_mutation_aliases_and_output_alias",
     "test_input_mutation_alias_everything",
     "test_input_mutation_and_output_view",
-    "test_input_mutation_false_aliasing",
     "test_input_mutation_output_view_multiple",
     "test_input_output_aliase_custom_autograd_function",
     "test_input_output_view_metadata_mutate_multiple",
@@ -6085,6 +6084,12 @@ class TestAOTAutogradWithCache(TestAOTAutogradWithDynamo):
                 dynamic=dynamic,
                 make_inputs_subclasses=make_inputs_subclasses,
             )
+
+    def test_input_mutation_false_aliasing(self):
+        # This test is disabled because it fails in strict cache mode
+        # But also can't be xfailed because it causes undefined behavior for
+        # ASAN
+        self.skipTest("Skipping because it fails in strict cache mode")
 
 
 if __name__ == "__main__":
