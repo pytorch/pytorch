@@ -2375,7 +2375,7 @@ void Reducer::reset_state() {
   // Reset unused parameter accounting.
   // See Note [local_used_map_ -> local_used_map_dev copying]
   if (find_unused_parameters_) {
-    local_used_map_.fill_(0);
+    local_used_map_.zero_();
     local_used_map_reduced_ = false;
   }
 }
