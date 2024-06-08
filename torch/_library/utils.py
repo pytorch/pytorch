@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import dataclasses
 import inspect
 import sys
