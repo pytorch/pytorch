@@ -313,6 +313,10 @@ def joint_graph_passes(graph: torch.fx.GraphModule):
         config.joint_custom_pre_pass(graph.graph)
         count += 1
 
+    from .post_grad import remove_noop_ops
+
+    remove_noop_ops(graph.graph)
+
     if config.joint_graph_constant_folding:
         constant_fold_uniform_value(graph)
 
