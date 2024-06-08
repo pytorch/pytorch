@@ -1,11 +1,3 @@
-if(UNIX)
-  # prevent Unknown CMake command "check_function_exists".
-  include(CheckFunctionExists)
-endif()
-include(CheckIncludeFile)
-include(CheckCSourceCompiles)
-include(CheckCSourceRuns)
-include(CheckCCompilerFlag)
 include(CheckCXXSourceCompiles)
 include(CheckCXXCompilerFlag)
 include(CMakePushCheckState)
