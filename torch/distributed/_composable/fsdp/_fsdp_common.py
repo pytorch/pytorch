@@ -34,9 +34,7 @@ class FSDPMeshInfo(DataParallelMeshInfo):
         if self.shard_mesh_dim is None:
             raise AssertionError("Expects non-None shard_mesh_dim")
         self.shard_mesh_size: int = self.mesh.size(self.shard_mesh_dim)
-        self.shard_process_group = cast(
-            dist.ProcessGroup, self.mesh.get_group(self.shard_mesh_dim)
-        )
+        self.shard_process_group = self.mesh.get_group(self.shard_mesh_dim)
         self.shard_mesh_rank: int = self.shard_process_group.rank()
 
 
@@ -47,9 +45,7 @@ class DDPMeshInfo(DataParallelMeshInfo):
         if self.replicate_mesh_dim is None:
             raise AssertionError("Expects non-None replicate_mesh_dim")
         self.replicate_mesh_size: int = self.mesh.size(self.replicate_mesh_dim)
-        self.replicate_process_group = cast(
-            dist.ProcessGroup, self.mesh.get_group(self.replicate_mesh_dim)
-        )
+        self.replicate_process_group = self.mesh.get_group(self.replicate_mesh_dim)
         self.replicate_mesh_rank: int = self.replicate_process_group.rank()
 
 
