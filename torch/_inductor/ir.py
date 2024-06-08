@@ -3404,15 +3404,8 @@ class ComputedBuffer(Buffer):
             ]
             index_formulas += extra_indexing_expr
 
-        reads_bufs = [
-            V.graph.name_to_buffer[reads_name]
-            if reads_name in V.graph.name_to_buffer.keys()
-            else None
-            for reads_name in body.reads_name2expr.keys()
-        ]
         memory_addrs = [
-            *body.reads_name2expr.values(),
-            *body.writes_name2expr.values(),
+            *body.writes_name2expr.values()
         ]
 
         def simplify_and_reorder(x_vars, support_vars, sizes):
@@ -3426,10 +3419,6 @@ class ComputedBuffer(Buffer):
                 sizes,
                 index_prevent_reordering(index_formulas, x_vars, sizes),
             )
-            x_vars = prune(x_vars)
-            # sizes, reindex1, prune = _simplify_loops(x_vars, sizes, index_formulas)
-            # x_vars = prune(x_vars)
-            # sizes, reindex2 = self._apply_loop_reordering(x_vars, sizes, memory_addrs)
             reindex = fuse_reindexing(reindex1, reindex2)
             return sizes, reindex, reindex1
 
