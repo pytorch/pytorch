@@ -2,7 +2,7 @@
 import logging
 import operator
 from abc import ABC, abstractmethod
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, Iterable, List, Optional, Tuple, Union
 
 import torch
 import torch.distributed as dist
@@ -21,7 +21,7 @@ from ._utils import flatten_args, modify_graph_op_device, validate_tensors_metad
 
 __all__ = [
     "PipelineStage",
-    "ManualPipelineStage",
+    "TracerPipelineStage",
 ]
 
 logger = logging.getLogger(__name__)
@@ -80,7 +80,7 @@ def _make_tensor_from_meta(
 class _PipelineStageBase(ABC):
     """
     Base class for pipeline stages.
-    Implements common methods used by both the `PipelineStage` used by the tracing frontend and `ManualPipelineStage`.
+    Implements common methods used by both the `TracerPipelineStage` used by the tracing frontend and `PipelineStage`.
     """
 
     def __init__(
@@ -89,7 +89,6 @@ class _PipelineStageBase(ABC):
         stage_index: int,
         num_stages: int,
         device: torch.device,
-        num_microbatches: int,
         group: Optional[dist.ProcessGroup] = None,
     ):
         """
@@ -113,7 +112,6 @@ class _PipelineStageBase(ABC):
         self.stage_index = stage_index
         self.num_stages = num_stages
         self.device = device
-        self.chunks = num_microbatches
         self.group = group
 
         # `group_rank` is rank in process group `group`.
@@ -159,6 +157,9 @@ class _PipelineStageBase(ABC):
         # grad reduction in DDP or FSDP.
         self._seen_bwd_chunks = 0
 
+        # To be populated later
+        self.chunks: Optional[int] = None
+
     @property
     def has_backward(self) -> bool:
         """
@@ -185,6 +186,10 @@ class _PipelineStageBase(ABC):
         return self.stage_index == self.num_stages - 1
 
     def _check_chunk_id(self, chunk_id: int):
+        if self.chunks is None:
+            raise RuntimeError(
+                "Attempted to access chunk_id before chunks have been configured."
+            )
         if chunk_id >= self.chunks:
             raise RuntimeError(
                 f"Chunk id {chunk_id} is out of range [0, {self.chunks})"
@@ -235,6 +240,20 @@ class _PipelineStageBase(ABC):
             f"{self.log_prefix} Grad send info: {grad_send_info}"  # noqa: G004
         )
         return grad_send_info
+
+    @abstractmethod
+    def _prepare_forward_infra(self, num_microbatches: int):
+        raise NotImplementedError
+
+    def _prepare_backward_infra(self, num_microbatches: int):
+        # TODO: this is needed for backward_maybe_with_nosync
+        self.chunks = num_microbatches
+
+        for mb_index in range(num_microbatches):
+            # `grad_recv_info` is a mirror of `act_send_info`
+            self.grad_recv_info[mb_index] = self._create_grad_recv_info(
+                self.act_send_info
+            )
 
     @abstractmethod
     def _create_grad_recv_info(
@@ -292,13 +311,7 @@ class _PipelineStageBase(ABC):
         if not self.has_backward or self.is_last:
             return []
 
-        # Create bwd recv infra lazily
-        recv_infos = self.grad_recv_info.setdefault(
-            bwd_chunk_id,
-            # `grad_recv_info` is a mirror of `act_send_info`
-            self._create_grad_recv_info(self.act_send_info),
-        )
-
+        recv_infos = self.grad_recv_info[bwd_chunk_id]
         return self._get_recv_ops(recv_infos)
 
     def get_fwd_send_ops(self, fwd_chunk_id: int) -> List[dist.P2POp]:
@@ -449,7 +462,7 @@ class _PipelineStageBase(ABC):
         there are additional state-variables and performance considerations depending on the data parallelism used.
         This helper should adapt any pipeline parallel schedule to work with common/supported data parallel libraries.
         """
-        last_backward = self._seen_bwd_chunks == self.chunks - 1
+        last_backward = self._seen_bwd_chunks == self.chunks - 1  # type: ignore[operator]
 
         # If submod is wrapped by DDP
         if isinstance(self.submod, DistributedDataParallel):
@@ -630,6 +643,7 @@ class _PipelineStage(_PipelineStageBase):
         stage_index: int,
         pipe_info: Pipe.PipeInfo,
         device: torch.device,
+        num_chunks: int,
         group: Optional[dist.ProcessGroup] = None,
     ):
         """
@@ -642,7 +656,6 @@ class _PipelineStage(_PipelineStageBase):
             stage_index,
             pipe_info.num_stages,
             device,
-            pipe_info.num_chunks,
             group,
         )
         self.pipe_info = pipe_info
@@ -668,9 +681,6 @@ class _PipelineStage(_PipelineStageBase):
         self.submod_to_stage_index: Dict[str, int] = {}
         for i, node in enumerate(submod_nodes):
             self.submod_to_stage_index.setdefault(node.name, i)
-
-        # Prepare forward send/recv infrastructure
-        self._prepare_forward_infra()
 
         # Cast submodule to device
         self._move_submod_to_device()
@@ -699,13 +709,13 @@ class _PipelineStage(_PipelineStageBase):
         if isinstance(self.submod, torch.fx.GraphModule):
             modify_graph_op_device(self.submod, self.device)
 
-    def _prepare_forward_infra(self):
+    def _prepare_forward_infra(self, num_microbatches: int):
         """
         Create send/recv infrastructures for activations (during forward)
         """
         # Flag per chunk to keep track of whether we have set `requires_grad`
         # for receive buffers. Format: {chunk : Boolean}
-        for chunk in range(self.chunks):
+        for chunk in range(num_microbatches):
             self.args_recv_info[chunk] = self._create_act_recv_info()
             self.set_requires_grad[chunk] = False
 
@@ -894,12 +904,14 @@ class _PipelineStage(_PipelineStageBase):
         return grad_recv_info_tuple
 
 
-class PipelineStage(_PipelineStage):
+# TODO: Update this to be returned by helper method under Pipe (kwen)
+class TracerPipelineStage(_PipelineStage):
     def __init__(
         self,
         pipe: Pipe,
         stage_index: int,
         device: torch.device,
+        num_chunks: int,  # To be cleaned
         group: Optional[dist.ProcessGroup] = None,
     ):
         """
@@ -909,7 +921,9 @@ class PipelineStage(_PipelineStage):
         stage_module = pipe.get_stage_module(stage_index)
         # Get my pipe info
         pipe_info = pipe.info()
-        super().__init__(stage_module, stage_index, pipe_info, device, group)
+        super().__init__(
+            stage_module, stage_index, pipe_info, device, num_chunks, group
+        )
 
 
 # Manual PipelineStage functions and definition
@@ -919,7 +933,7 @@ PLACEHOLDER_VAL = -1
 
 
 def _create_empty_tensors(
-    tensor: Union[torch.Tensor, List[torch.Tensor]], device: torch.device
+    tensor: Union[torch.Tensor, Iterable[torch.Tensor]], device: torch.device
 ) -> List[torch.Tensor]:
     """
     Creates a list of empty tensors with the same properties (like shape and dtype) as the input tensor(s),
@@ -1069,7 +1083,7 @@ def _get_stage_shapes(
     return stage_id_to_shapes
 
 
-class ManualPipelineStage(_PipelineStageBase):
+class PipelineStage(_PipelineStageBase):
     """
     A class representing a pipeline stage in a pipeline parallelism setup.
     This class is created manually by providing a example input (and optionally output)
@@ -1082,9 +1096,8 @@ class ManualPipelineStage(_PipelineStageBase):
         stage_index (int): The ID of this stage.
         num_stages (int): The total number of stages.
         device (torch.device): The device where this stage is located.
-        num_microbatches (int): The number of microbatches to use.
-        input_args (Union[torch.Tensor, List[torch.tensor]], optional): The input arguments for the submodule.
-        output_args (Union[torch.Tensor, List[torch.tensor]], optional): The output arguments for the submodule.
+        input_args (Union[torch.Tensor, Tuple[torch.tensor]], optional): The input arguments for the submodule.
+        output_args (Union[torch.Tensor, Tuple[torch.tensor]], optional): The output arguments for the submodule.
         group (dist.ProcessGroup, optional): The process group for distributed training. If None, default group.
     """
 
@@ -1094,17 +1107,13 @@ class ManualPipelineStage(_PipelineStageBase):
         stage_index: int,
         num_stages: int,
         device: torch.device,
-        num_microbatches: int,
-        input_args: Union[torch.Tensor, List[torch.Tensor]],
-        output_args: Optional[Union[torch.Tensor, List[torch.Tensor]]] = None,
+        input_args: Union[torch.Tensor, Tuple[torch.Tensor, ...]],
+        output_args: Optional[Union[torch.Tensor, Tuple[torch.Tensor, ...]]] = None,
         group: Optional[dist.ProcessGroup] = None,
     ):
-        super().__init__(
-            submodule, stage_index, num_stages, device, num_microbatches, group
-        )
+        super().__init__(submodule, stage_index, num_stages, device, group)
         self.submod.to(self.device)
         # When we materialize the model partition on cuda, we call reset_parameters() if it is available
-        # logger.info(f"input args {input_args=}")
         self.inputs: List[torch.Tensor] = []
         self.outputs: List[torch.Tensor] = []
 
@@ -1134,9 +1143,17 @@ class ManualPipelineStage(_PipelineStageBase):
         self.prev_stage = stage_global_rank((self.group_rank - 1) % self.group_size)
         self.next_stage = stage_global_rank((self.group_rank + 1) % self.group_size)
 
+        logger.debug(
+            f"finished pipeline stage init, {self.stage_index=}, {self.is_first=}, "  # noqa: G004
+            f"{self.is_last=}, {self.num_stages=}, "
+            f"inputs: {[inp.shape for inp in self.inputs]}, "
+            f"output: {[output.shape for output in self.outputs]}"
+        )
+
+    def _prepare_forward_infra(self, num_microbatches: int) -> None:
         # Receive info during forward
         # TODO: create args_recv_info lazily? (same needed for PipelineStage)
-        for chunk_id in range(self.chunks):
+        for chunk_id in range(num_microbatches):
             self.set_requires_grad[chunk_id] = False
             if not self.is_first:
                 # We assume that we always receive from stage - 1
@@ -1166,13 +1183,6 @@ class ManualPipelineStage(_PipelineStageBase):
                 self.act_send_info[idx] = [self.stage_index + 1]
             else:
                 self.act_send_info[idx] = []
-
-        logger.debug(
-            f"finished pipeline stage init, {self.stage_index=}, {self.is_first=}, "  # noqa: G004
-            f"{self.is_last=}, {self.num_stages=}, "
-            f"inputs: {[inp.shape for inp in self.inputs]}, "
-            f"output: {[output.shape for output in self.outputs]}"
-        )
 
     def _create_grad_recv_info(
         self,
@@ -1219,7 +1229,7 @@ class ManualPipelineStage(_PipelineStageBase):
         return True
 
 
-def _validate_stage_shapes(pipeline_stages: List[ManualPipelineStage]):
+def _validate_stage_shapes(pipeline_stages: List[PipelineStage]):
     """
     Check that the buffer shapes match between stages was expected by performing an all_gather between
     all stages.
