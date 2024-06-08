@@ -23,8 +23,7 @@ from torch.fx.passes.split_module import split_module
 from ._backward import _null_coalesce_accumulate, stage_backward
 from ._unflatten import _outline_submodules
 from ._utils import PipeInfo
-
-from .PipelineStage import _PipelineStage
+from .stage import _PipelineStage
 
 
 logger = logging.getLogger(__name__)
