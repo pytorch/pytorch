@@ -5014,11 +5014,7 @@ def lerp(start: Tensor, end: Tensor, weight: Union[Tensor, NumberType]):
     # make sure the decomposition output's stride is same as non-decomposition path.
     stride = utils.compute_elementwise_output_strides(*_maybe_broadcast(*inputs))
     if output.stride() != stride:
-        output = torch.ops.aten.as_strided_copy(
-            output,
-            output.size(),
-            stride,
-        )
+        output = prims.copy_strided(output, stride)
 
     return handle_noncontiguous_outputs(inputs, output)
 

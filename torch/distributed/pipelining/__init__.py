@@ -6,14 +6,13 @@ from .PipelineSchedule import (
     ScheduleInterleaved1F1B,
     ScheduleLoopedBFS,
 )
-from .PipelineStage import PipelineStage, TracerPipelineStage
+from .PipelineStage import PipelineStage
 
 __all__ = [
     "Pipe",
     "pipe_split",
     "SplitPoint",
     "pipeline",
-    "TracerPipelineStage",
     "PipelineStage",
     "Schedule1F1B",
     "ScheduleGPipe",
