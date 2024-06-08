@@ -906,6 +906,7 @@ class PatternPrettyPrinter:
         self.memoized_objs_pp: Dict[PatternExpr, str] = {}
 
     @staticmethod
+    @functools.lru_cache(None)
     def run(obj: PatternExpr, output_name: str = "output") -> str:
         """
         Serializes obj to python code with obj written out to `output_name`
@@ -1463,6 +1464,7 @@ def gen_register_replacement(
     extra_check: Callable[[Match], bool] = _return_true,
     scalar_workaround: Union[Dict[str, Union[float, int]], None] = None,
     exclusive_arg_names: Sequence[str] = (),
+    skip_duplicates: bool = False,
 ) -> None:
     # Make sure the example_inputs is materialized.
     example_inputs = tuple(example_inputs)
@@ -1491,6 +1493,8 @@ def gen_register_replacement(
             # Since this is just an optimization we can clear it out.
             arg.constant = None
 
+    if PatternPrettyPrinter.run(pat) in _seen_patterns and skip_duplicates:
+        return
     _known_precompiled_patterns.append(
         (search_fn, example_inputs, trace_fn, scalar_workaround, pat)
     )
@@ -1790,6 +1794,11 @@ def fwd_only(
     # TODO - look into using aot autograd, asserting no mutating ops here
     with enable_python_dispatcher():
         gm = make_fx(fn, select_decomp_table(), tracing_mode="real")(*args)
+
+    from .fx_passes.post_grad import remove_noop_ops
+
+    remove_noop_ops(gm.graph)
+
     if run_dce:
         gm.graph.eliminate_dead_code()
     gm.recompile()
@@ -1819,6 +1828,10 @@ def joint_fwd_bwd(fn: Callable[..., Any], args: Sequence[Any]) -> torch.fx.Graph
             enable_log=False,
         )(*args)
     assert gm
+
+    from .fx_passes.post_grad import remove_noop_ops
+
+    remove_noop_ops(gm.graph)
 
     from .fx_passes.joint_graph import pointless_view
 
