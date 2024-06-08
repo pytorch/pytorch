@@ -20,6 +20,7 @@ from ._utils import flatten_args, PipeInfo, validate_tensors_metadata
 
 __all__ = [
     "PipelineStage",
+    "build_stage",
 ]
 
 logger = logging.getLogger(__name__)
@@ -646,6 +647,13 @@ class _PipelineStage(_PipelineStageBase):
         """
         Create a pipeline stage given a stage_module to be wrapped by this stage
         and a `pipe_info` describing the stage relationship of the pipeline.
+
+        Args:
+            stage_module (torch.nn.Module): the module to be wrapped by this stage
+            stage_index (int): the index of this stage in the pipeline
+            pipe_info (PipeInfo): information about the pipeline, can be retrieved by `pipe.info()`
+            device (torch.device): the device to be used by this stage
+            group (Optional[dist.ProcessGroup]): the process group to be used by this stage
         """
         _PipelineStageBase.__init__(
             self,
@@ -888,6 +896,37 @@ class _PipelineStage(_PipelineStageBase):
             f"{self.log_prefix} Grad recv info: {grad_recv_info_tuple}"  # noqa: G004
         )
         return grad_recv_info_tuple
+
+
+# A helper function to create a pipeline stage based on traced pipeline information
+def build_stage(
+    stage_module: torch.nn.Module,
+    stage_index: int,
+    pipe_info: PipeInfo,
+    device: torch.device,
+    group: Optional[dist.ProcessGroup] = None,
+) -> _PipelineStage:
+    """
+    Create a pipeline stage given a stage_module to be wrapped by this stage
+    and pipeline information.
+
+    Args:
+        stage_module (torch.nn.Module): the module to be wrapped by this stage
+        stage_index (int): the index of this stage in the pipeline
+        pipe_info (PipeInfo): information about the pipeline, can be retrieved by `pipe.info()`
+        device (torch.device): the device to be used by this stage
+        group (Optional[dist.ProcessGroup]): the process group to be used by this stage
+
+    Returns:
+        _PipelineStage: a pipeline stage that can run with `PipelineSchedules`.
+    """
+    return _PipelineStage(
+        stage_module,
+        stage_index,
+        pipe_info,
+        device,
+        group,
+    )
 
 
 # Manual PipelineStage functions and definition

@@ -340,6 +340,8 @@ Pipeline Stages
 
 .. autoclass:: PipelineStage
 
+.. autofunction:: build_stage
+
 Pipeline Schedules
 ==================
 
