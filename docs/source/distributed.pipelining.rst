@@ -62,16 +62,37 @@ Overall, the ``pipelining`` package provides the following features:
   application on the Llama model.
 
 
-Step 1: build ``PipelineStage`` objects for Execution
-*****************************************************
+Step 1: build ``PipelineStage`` for execution
+*********************************************
 
-Before we can use a PipelineSchedule, we need to create PipelineStage objects that wrap the part of the model running in that stage.  The `PipelineStage` is responsible for allocating communication buffers and creating send/recv ops to communicate with its peers.  It manages intermediate buffers e.g. for the outputs of forward that have not been consumed yet, and it provides a utility for running the backwards for the stage model.
+Before we can use a ``PipelineSchedule``, we need to create ``PipelineStage``
+objects that wrap the part of the model running in that stage.  The
+``PipelineStage`` is responsible for allocating communication buffers and
+creating send/recv ops to communicate with its peers.  It manages intermediate
+buffers e.g. for the outputs of forward that have not been consumed yet, and it
+provides a utility for running the backwards for the stage model.
 
-A `PipelineStage` needs to know the input and output shapes for the stage model, so that it can correctly allocate communication buffers.  The shapes must be static, e.g. at runtime the shapes can not change from step to step.  A class `PipeliningShapeError` will be raised if runtime shapes do not match the expected shapes.  When composing with other paralleisms or applying mixed precision, these techniques must be taken into account so the `PipelineStage` knows the correct shape (and dtype) for the output of the stage module at runtime.
+A ``PipelineStage`` needs to know the input and output shapes for the stage
+model, so that it can correctly allocate communication buffers.  The shapes must
+be static, e.g. at runtime the shapes can not change from step to step.  A class
+``PipeliningShapeError`` will be raised if runtime shapes do not match the
+expected shapes.  When composing with other paralleisms or applying mixed
+precision, these techniques must be taken into account so the ``PipelineStage``
+knows the correct shape (and dtype) for the output of the stage module at
+runtime.
 
-Users may construct a `PipelineStage` instance directly, by passing in an `nn.Module` representing the portion of the model that should run on the stage.  This may require changes to the original model code.  See the example below "Preparing a model for pipeline splitting".
+Users may construct a ``PipelineStage`` instance directly, by passing in an
+``nn.Module`` representing the portion of the model that should run on the
+stage.  This may require changes to the original model code.  See the example
+in :ref:`option_1_manual`.
 
-Alternatively, the tracing frontend can use graph-partitioning to construct a `GraphModule` that represents the desired subset of the model automatically.  This technique requires the model is traceable with torch.Export in non-strict mode. Composability of the resulting `GraphModule` with other parallelism techniques and torch.compile is experimental, and may require some workarounds.  Usage of this frontend may be more appealing if the user cannot easily change the model code.  See "Splitting a Model with the ``pipeline`` tracing frontend" for more information.
+Alternatively, the splitting frontend can use graph partitioning to split your
+model into a series of ``nn.Module`` automatically.  This technique requires the
+model is traceable with ``torch.Export``. Composability of the resulting
+``nn.Module`` with other parallelism techniques is experimental, and may require
+some workarounds.  Usage of this frontend may be more appealing if the user
+cannot easily change the model code.  See :ref:`option_2_tracer` for more
+information.
 
 
 Step 2: use ``PipelineSchedule`` for execution
@@ -105,10 +126,20 @@ launcher service to launch multiple processes:
   torchrun --nproc_per_node=2 example.py
 
 
-Preparing a model for pipeline splitting
-========================================
+Options for Splitting a Model
+*****************************
 
-To directly construct a `PipelineStage`, the user is responsible for providing a single nn.Module instance that owns the relevant nn.Parameters and nn.Buffers, and defines a .forward() method that executes the operations relevant for that stage.  For example, a condensed version of the Transformer class defined in Torchtitan shows a pattern of building an easily partitionable model.
+.. _option_1_manual:
+
+Option 1: splitting a model manually
+====================================
+
+To directly construct a ``PipelineStage``, the user is responsible for providing
+a single ``nn.Module`` instance that owns the relevant ``nn.Parameters`` and
+``nn.Buffers``, and defines a ``forward()`` method that executes the operations
+relevant for that stage.  For example, a condensed version of the Transformer
+class defined in Torchtitan shows a pattern of building an easily partitionable
+model.
 
 .. code-block:: python
 
@@ -137,7 +168,10 @@ To directly construct a `PipelineStage`, the user is responsible for providing a
           output = self.output(h).float() if self.output else h
           return output
 
-A model defined in this manner can be easily configured per stage by first initializing the whole model (using meta-device to avoid OOM errors), deleting undesired layers for that stage, and then creating a PipelineStage that wraps the model.  For example:
+A model defined in this manner can be easily configured per stage by first
+initializing the whole model (using meta-device to avoid OOM errors), deleting
+undesired layers for that stage, and then creating a PipelineStage that wraps
+the model.  For example:
 
 .. code-block:: python
 
@@ -169,15 +203,20 @@ A model defined in this manner can be easily configured per stage by first initi
       )
 
 
-The ``PipelineStage`` requires an example argument `input_args` representing the runtime input to the stage, which would be one microbatch worth of input data.
-This argument is passed through the forward method of the stage module to determine the
-input and output shapes required for communication.
+The ``PipelineStage`` requires an example argument ``input_args`` representing
+the runtime input to the stage, which would be one microbatch worth of input
+data.  This argument is passed through the forward method of the stage module to
+determine the input and output shapes required for communication.
 
-When composing with other Data or Model parallelism techniques, `output_args` may also be required, if the output shape/dtype of the model chunk will be affected.
+When composing with other Data or Model parallelism techniques, ``output_args``
+may also be required, if the output shape/dtype of the model chunk will be
+affected.
 
 
-Splitting a Model with the ``pipeline`` tracing frontend
-========================================================
+.. _option_2_tracer:
+
+Option 2: splitting a model automatically
+=========================================
 
 If you have a full model and do not want to spend time on modifying it into a
 sequence of "model partitions", the ``pipeline`` API is here to help.
