@@ -1365,7 +1365,7 @@ def number_type(
 def expr_type(x: sympy.Basic) -> Type:
     import sympy
 
-    if isinstance(x, sympy.logic.boolalg.Boolean):
+    if x.kind is sympy.core.kind.BooleanKind:
         return bool
     elif x.is_integer:  # type: ignore[attr-defined]
         return int
