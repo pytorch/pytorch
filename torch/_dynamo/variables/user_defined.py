@@ -866,7 +866,9 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                     # nn_module_stack source is BC surface area. Ensure that
                     # mod._modules["linear"] is reflected as mod.linear for
                     # nn_module_stack.
-                    out.set_nn_module_stack_source(AttrSource(self.source, name))
+                    out.set_nn_module_stack_source(
+                        AttrSource(self.nn_module_stack_source, name)
+                    )
                 return out
 
             elif getattr_fn is not None:
