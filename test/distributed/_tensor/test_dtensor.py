@@ -331,6 +331,11 @@ class DTensorTest(DTensorTestBase):
         except RuntimeError:
             self.assertEqual(sharded_tensor.grad.stride(), [1, 3 * self.world_size])
 
+        # test the case under no-grad we directly return the local tensor
+        with torch.no_grad():
+            local_no_grad = sharded_tensor.to_local()
+            assert local_no_grad is sharded_tensor._local_tensor
+
     @with_comms
     def test_to_local_grad_hint(self):
         device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
