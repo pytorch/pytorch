@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import functools
 import itertools
 import logging
@@ -34,7 +35,7 @@ from torch._prims_common import (
     Number,
 )
 from torch.fx.experimental.sym_node import magic_methods, method_to_operator
-from torch.utils._sympy.functions import CeilDiv, FloorDiv, IntTrueDiv, ModularIndexing
+from torch.utils._sympy.functions import CeilDiv, FloorDiv, ModularIndexing
 from .._dynamo.utils import import_submodule
 
 from . import config, inductor_prims, ir, test_operators  # NOQA: F401
@@ -4262,7 +4263,7 @@ def _fractional_pooling_offsets(samples, in_sz, out_sz, kernel_sz, dim):
     out_sz = out_sz[dim]
     in_sz = in_sz[dim]
     kernel_sz = kernel_sz[dim]
-    alpha = IntTrueDiv(in_sz - kernel_sz, out_sz - 1)
+    alpha = (in_sz - kernel_sz) / (out_sz - 1)
     samples_loader = samples.make_loader()
 
     def load(prefix, i):
@@ -4372,7 +4373,7 @@ def upsample_nearest2d_backward(
     w_kernel_max = ceildiv(inp_w, out_w)
 
     def start_index(index, out_dim, inp_dim):
-        return CeilDiv(index * inp_dim, sympy.sympify(out_dim))
+        return CeilDiv(index * inp_dim, out_dim)
 
     def end_index(index, out_dim, inp_dim):
         return start_index((index + 1), out_dim, inp_dim)

@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import collections
 import contextlib
 import dataclasses
@@ -44,6 +45,7 @@ from torch._prims_common import (
     is_boolean_dtype,
     is_float_dtype,
     make_channels_last_strides_for,
+    make_contiguous_strides_for,
     StrideType,
 )
 from torch._subclasses.fake_tensor import get_schema_info
@@ -235,7 +237,7 @@ def ir_node_to_tensor(x, guard_shape=True):
     if is_storage_and_layout(x):
         stride = [shape_fn(s) for s in x.get_layout().stride]  # type: ignore[misc]
     else:
-        stride = FlexibleLayout.contiguous_strides(size)  # type: ignore[arg-type]
+        stride = make_contiguous_strides_for(size)  # type: ignore[arg-type]
     dtype = x.get_dtype()
     device = x.get_device()
     size = convert_shape_to_symint(size)
@@ -2765,7 +2767,6 @@ class FlexibleLayout(Layout):
 
     allow_indexing = False
 
-    # WARNING!  This doesn't handle zero size tensors correctly
     @staticmethod
     def contiguous_strides(sizes):
         if len(sizes) == 0:
@@ -5915,7 +5916,7 @@ def _prepare_convolution_fusion_create(
     # To align the behavior of the Conv kernel, we set the output_stride in such case to be contiguous instead of channels last.
     dynamic_shapes = not all(isinstance(i, int) for i in (output_size))
     if dynamic_shapes and is_contiguous_storage_and_layout(x):
-        output_stride = FlexibleLayout.contiguous_strides(output_size)
+        output_stride = make_contiguous_strides_for(output_size)
     else:
         output_stride = make_channels_last_strides_for(output_size)
 
@@ -5967,7 +5968,7 @@ def _prepare_linear_fusion_create(
     assert x.get_device().type == "cpu" and weight.get_device().type == "cpu"
     inputs = [x, weight]
 
-    output_stride = FlexibleLayout.contiguous_strides(output_size)
+    output_stride = make_contiguous_strides_for(output_size)
     kernel_layout = FixedLayout(
         x.get_device(),
         x.get_dtype(),
@@ -6283,7 +6284,7 @@ class MKLPackedLinear(ExternKernelAlloc):
         *m, _ = x.get_size()
         oc, _ = orig_w.get_size()
         output_size = list(m) + [oc]
-        output_stride = FlexibleLayout.contiguous_strides(output_size)
+        output_stride = make_contiguous_strides_for(output_size)
         inputs = [x, packed_w, orig_w]
         constant_args = [batch_size]
         if B is not None:
@@ -6601,13 +6602,13 @@ class MkldnnRnnLayer(ExternKernelAlloc):
 
         def get_strides_of_lstm_output(output_shape, batch_first):
             assert len(output_shape) == 3, "Expect output_shape to be 3D"
-            return FlexibleLayout.contiguous_strides(output_shape)
+            return make_contiguous_strides_for(output_shape)
 
         output_sizes = [output_shape, hy_shape, cy_shape]
         output_strides = [
             get_strides_of_lstm_output(output_shape, batch_first),
-            FlexibleLayout.contiguous_strides(hy_shape),
-            FlexibleLayout.contiguous_strides(cy_shape),
+            make_contiguous_strides_for(hy_shape),
+            make_contiguous_strides_for(cy_shape),
         ]
         output_ir = [
             MultiOutput(
