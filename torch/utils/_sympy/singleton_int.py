@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import sympy
 from sympy.multipledispatch import dispatch
 

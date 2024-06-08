@@ -1,8 +1,10 @@
+# mypy: allow-untyped-defs
 """This file exports ONNX ops for opset 9.
 
 Opset 9 is supported by ONNX release 1.4.1
 release on 01/23/19
 """
+
 from __future__ import annotations
 
 import builtins
@@ -521,6 +523,16 @@ def reciprocal(g: jit_utils.GraphContext, self):
 @symbolic_helper.parse_args("v", "i")
 @_beartype.beartype
 def cat(g: jit_utils.GraphContext, tensor_list, dim):
+    """Implement concatenation of pytorch tensors in ONNX along the specified `dim` dimension.
+
+    Parameters:
+        g (jit_utils.GraphContext): Graph context.
+        tensor_list (List[torch.Tensor]): List of tensors to concatenate.
+        dim (int): Dimension along which to concatenate the tensors.
+
+    Returns:
+        ONNX graph node representing the concatenated tensor.
+    """
     tensors = symbolic_helper._unpack_list(tensor_list)
     # torch.cat ignores empty tensors such as `torch.Tensor([])`
     # These needs to be removed as input from ONNX's concat too, otherwise shape inference
@@ -746,6 +758,16 @@ def atan2(g: jit_utils.GraphContext, self, other):
 @symbolic_helper.quantized_args(True, scale=1.0 / 256.0, zero_point=0)
 @_beartype.beartype
 def sigmoid(g: jit_utils.GraphContext, self):
+    """Converts the corresponding PyTorch function into ONNX operators.
+
+    It is not meant to be called directly by a user.
+
+    Args:
+        g (jit_utils.GraphContext): Graph context.
+        self (Tensor): the input tensor.
+    Returns:
+        ONNX operator
+    """
     return g.op("Sigmoid", self)
 
 
@@ -849,6 +871,7 @@ def numpy_T(g: jit_utils.GraphContext, input):
 @symbolic_helper.quantized_args(True)
 @_beartype.beartype
 def expand(g: jit_utils.GraphContext, self, size, implicit):
+    """Implement the expand function for a pytorch tensor in ONNX according to specified `size`"""
     size = symbolic_helper._maybe_get_const(size, "is")
     if not symbolic_helper._is_value(size):
         size = g.op("Constant", value_t=torch.LongTensor(size))
@@ -1132,6 +1155,10 @@ def unbind(g: jit_utils.GraphContext, self, dim=0, _outputs=None):
 @symbolic_helper.parse_args("v", "i", "v")
 @_beartype.beartype
 def select(g: jit_utils.GraphContext, self, dim, index):
+    """Implement the select functionality for a pytorch tensor in ONNX.
+
+    Selects elements from the input tensor along the specified `dim` dimension based on the `index` tensor.
+    """
     index = symbolic_helper._maybe_get_scalar(index)
     if (not symbolic_helper._is_value(index)) and (index < 0):
         if index == -1:
@@ -1417,29 +1444,39 @@ def get_pool_ceil_padding(input, kernel_size, stride, padding):
     ]
     # ensure last pooling starts inside
     ceiled_output_dim = [
-        ceiled_output_dim[i] - 1
-        if (((ceiled_output_dim[i] - 1) * stride[i]) >= (dim[i] + padding[i]))
-        else ceiled_output_dim[i]
+        (
+            ceiled_output_dim[i] - 1
+            if (((ceiled_output_dim[i] - 1) * stride[i]) >= (dim[i] + padding[i]))
+            else ceiled_output_dim[i]
+        )
         for i in range(0, len(ceiled_output_dim))
     ]
     padding_ceil = [
-        0
-        if (stride[i] == 1)
-        else (
-            kernel_size[i]
-            - (dim[i] + 2 * padding[i] - ((ceiled_output_dim[i] - 1) * stride[i] + 1))
+        (
+            0
+            if (stride[i] == 1)
+            else (
+                kernel_size[i]
+                - (
+                    dim[i]
+                    + 2 * padding[i]
+                    - ((ceiled_output_dim[i] - 1) * stride[i] + 1)
+                )
+            )
         )
         for i in range(0, len(padding))
     ]
     # ensure padding is not > kernel_size
     padding_ceil = [
         (
-            int(padding_ceil[i])
-            if padding_ceil[i] < kernel_size[i] - 1
-            else int(kernel_size[i] - 1)
+            (
+                int(padding_ceil[i])
+                if padding_ceil[i] < kernel_size[i] - 1
+                else int(kernel_size[i] - 1)
+            )
+            if ((padding_ceil[i] + 2 * padding[i]) >= (kernel_size[i]))
+            else int(padding_ceil[i])
         )
-        if ((padding_ceil[i] + 2 * padding[i]) >= (kernel_size[i]))
-        else int(padding_ceil[i])
         for i in range(0, len(padding_ceil))
     ]
     return padding_ceil
@@ -4081,6 +4118,7 @@ def alias(g: jit_utils.GraphContext, self):
 @symbolic_helper.parse_args("v", "i")
 @_beartype.beartype
 def unsqueeze(g: jit_utils.GraphContext, self, dim):
+    """Implement unsqueezing a pytorch tensor in ONNX by inserting a new dimension at the specified `dim`"""
     # Handle negative dim
     if dim < 0:
         rank = symbolic_helper._get_tensor_rank(self)
@@ -5580,6 +5618,10 @@ def lift(g: jit_utils.GraphContext, self):
 @_onnx_symbolic("aten::masked_fill")
 @_beartype.beartype
 def masked_fill(g: jit_utils.GraphContext, self, mask, value):
+    """Implement the masked_fill functionality available for a pytorch tensor in ONNX.
+
+    Fills elements of the input tensor with `value` where `mask` is True.
+    """
     mask = g.op("Cast", mask, to_i=_C_onnx.TensorProtoDataType.BOOL)
     value = symbolic_helper._maybe_get_scalar(value)
     return g.op("Where", mask, symbolic_helper._if_scalar_type_as(value, self), self)
