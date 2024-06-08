@@ -3213,7 +3213,7 @@ void install_tensor_aliasing_guard(
   std::shared_ptr<RelationalGuard> guard =
       std::make_shared<TENSOR_ALIASING>(std::move(verbose_code_parts));
 
-  // Register the resetter on the toor gaurd mananger, so that it can reset
+  // Register the resetter on the toor guard mananger, so that it can reset
   // the newly added relational guard when the guard eval fails.
   x->get_root()->add_relational_guard_resetter(guard);
   x->add_leaf_guard(guard);
@@ -3230,7 +3230,7 @@ void install_no_tensor_aliasing_guard(
   std::shared_ptr<RelationalGuard> guard = std::make_shared<NO_TENSOR_ALIASING>(
       std::move(tensor_names), std::move(verbose_code_parts));
 
-  // Register the resetter on the toor gaurd mananger, so that it can reset
+  // Register the resetter on the toor guard mananger, so that it can reset
   // the newly added relational guard when the guard eval fails.
   py::cast<GuardManager*>(guard_managers[0])
       ->get_root()

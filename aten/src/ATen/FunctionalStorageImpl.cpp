@@ -10,7 +10,7 @@ namespace at::functionalization {
 
 ViewMeta ViewMeta::to_out_idx(int64_t out_idx) {
   if (out_idx == this->out_index) return *this;
-  return ViewMeta(forward_fn, reverse_fn, is_multi_output, is_as_strided, out_idx);
+  return ViewMeta(forward_fn, reverse_fn, has_symbolic_inputs, is_multi_output, is_as_strided, out_idx);
 }
 
 // Note [Functionalization: Alias Removal Part 2]
@@ -97,7 +97,16 @@ FunctionalStorageImpl::FunctionalStorageImpl(const Tensor& base)
       /*resizable=*/true
     ),
     base_(base)
-  {
+{
+  // SparseTensorImpl has no storage, so we cannot query its nbytes.
+  // (original_storage_size is only used for storage resizing in fsdp anyway, which does not apply to sparse)
+  // Same for XLA
+  if (base.unsafeGetTensorImpl()->has_storage() && base.device().type() != c10::DeviceType::XLA) {
+    original_storage_size_ = base.unsafeGetTensorImpl()->unsafe_storage().unsafeGetStorageImpl()->sym_nbytes();
+  } else {
+    original_storage_size_ = -1;
+  }
+  curr_storage_size_ = original_storage_size_;
   TORCH_INTERNAL_ASSERT(!at::functionalization::impl::isFunctionalTensor(base_));
 }
 

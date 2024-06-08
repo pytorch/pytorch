@@ -502,6 +502,40 @@ def _sfdp_replacement_18(query, key, value, causal_mask, dropout_p):
     )
 
 
+def _sfdp_pattern_19(query, key, value, causal_mask, attn_mask, dropout_p):
+    # for token-classification+gpt2 / text-generation+gpt2
+    attn_weights = torch.matmul(query, key.permute(0, 1, 3, 2))
+    inv_scale = torch.full(
+        [],
+        value.size(-1) ** 0.5,
+        dtype=attn_weights.dtype,
+        device=attn_weights.device,
+    )
+    attn_weights = attn_weights.div(inv_scale)
+    causal_mask_value = torch.full(
+        (), torch.finfo(query.dtype).min, dtype=query.dtype, device=query.device
+    )
+    attn_weights = torch.where(causal_mask, attn_weights, causal_mask_value)
+    attn_weights = attn_weights + attn_mask
+    attn_weights = attn_weights.softmax(dim=-1).type(value.dtype)
+    return torch.nn.functional.dropout(attn_weights, dropout_p).matmul(value)
+
+
+def _sfdp_replacement_19(query, key, value, causal_mask, attn_mask, dropout_p):
+    counters["inductor"]["fuse_attention"] += 1
+    fill_value = torch.full((), -float("inf"), dtype=query.dtype, device=query.device)
+    attn_mask = torch.where(causal_mask, attn_mask, fill_value)
+    return aten.scaled_dot_product_attention(
+        query,
+        key,
+        value,
+        attn_mask=attn_mask,
+        dropout_p=dropout_p,
+        is_causal=False,
+        scale=1.0 / math.sqrt(value.size(-1)),
+    )
+
+
 def _sfdp_params_check(match):
     assert all(k in match.kwargs for k in ("query", "key", "value"))
     query = match.kwargs["query"].meta["val"]
@@ -618,6 +652,8 @@ def _get_sfdp_patterns():
     for dtype in [torch.float, torch.half]:
         g = functools.partial(g_inp, dtype=dtype)
         b = functools.partial(b_inp, dtype=dtype)
+        b_float = functools.partial(b_inp, dtype=torch.float)
+        b_bool = functools.partial(b_inp, dtype=torch.bool)
         m = functools.partial(m_inp, dtype=dtype)
         m_float = functools.partial(m_inp, dtype=torch.float)
         m_bool = functools.partial(m_inp, dtype=torch.bool)
@@ -771,6 +807,13 @@ def _get_sfdp_patterns():
                 d,
                 # CUDA AOT Inductor CI job's GPT2ForSequenceClassification accuracy test failed
                 _sfdp_extra_check(disable_cuda=True),
+            ),
+            (
+                _sfdp_pattern_19,
+                _sfdp_replacement_19,
+                [g(), g(), g(), b_bool(), b_float()],
+                d,
+                _sfdp_params_check,
             ),
         ]
         mask_fp32_patterns = ["pattern_16"]

@@ -907,6 +907,57 @@ class TestSDPAPatternRewriterTemplate(TestCase):
             check_train=False,
         )
 
+    @skipIfRocm
+    def _test_sdpa_rewriter_19(self):
+        def dot_prod_attention(
+            query: torch.Tensor,
+            key: torch.Tensor,
+            value: torch.Tensor,
+            causal_mask: torch.Tensor,
+            attn_mask: torch.Tensor,
+            training,
+        ) -> torch.Tensor:
+            attn_weights = torch.matmul(query, key.permute(0, 1, 3, 2))
+            inv_scale = torch.full(
+                (),
+                math.sqrt(value.size(-1)),
+                dtype=attn_weights.dtype,
+                device=attn_weights.device,
+            )
+            attn_weights = attn_weights.div(inv_scale)
+            causal_mask_value = torch.full(
+                (), torch.finfo(query.dtype).min, dtype=query.dtype, device=query.device
+            )
+            attn_weights = torch.where(causal_mask, attn_weights, causal_mask_value)
+            attn_weights = attn_weights + attn_mask
+            attn_weights = attn_weights.softmax(dim=-1).type(value.dtype)
+            return torch.nn.functional.dropout(
+                attn_weights,
+                p=0.4,
+                training=training,
+                inplace=False,
+            ).matmul(value)
+
+        tensor_shape = (4, 2, 16, 32)
+        causal_mask = torch.ones(16, 16, dtype=torch.bool, device=self.device).tril(
+            diagonal=0
+        )
+        attn_mask = torch.randn((16, 16), dtype=torch.float, device=self.device)
+        args = [
+            torch.randn(tensor_shape, device=self.device),
+            torch.randn(tensor_shape, device=self.device),
+            torch.randn(tensor_shape, device=self.device),
+            causal_mask,
+            attn_mask,
+        ]
+        self._check_common(
+            dot_prod_attention,
+            args1=args,
+            contains=False,
+            has_dropout=True,
+            check_train=False,
+        )
+
 
 if HAS_CUDA and PLATFORM_SUPPORTS_FUSED_ATTENTION:
 
@@ -978,6 +1029,9 @@ if HAS_CUDA and PLATFORM_SUPPORTS_FUSED_ATTENTION:
         test_sdpa_rewriter_17_cuda = functools.partialmethod(
             TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_17
         )
+        test_sdpa_rewriter_19_cuda = functools.partialmethod(
+            TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_19
+        )
 
     class SDPAPatternRewriterCudaDynamicTests(SDPAPatternRewriterCudaTests):
         use_static_shapes = False
@@ -1028,6 +1082,9 @@ if HAS_CPU:
         )
         test_sdpa_rewriter_18_cpu = functools.partialmethod(
             TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_18
+        )
+        test_sdpa_rewriter_19_cpu = functools.partialmethod(
+            TestSDPAPatternRewriterTemplate._test_sdpa_rewriter_19
         )
 
     class SDPAPatternRewriterCpuDynamicTests(SDPAPatternRewriterCpuTests):

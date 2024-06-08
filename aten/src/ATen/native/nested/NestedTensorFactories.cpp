@@ -8,11 +8,11 @@ namespace native {
 
 static TensorOptions verify_empty_parameters(
     const at::Tensor& self,
-    c10::optional<ScalarType> dtype,
-    c10::optional<Layout> layout,
-    c10::optional<Device> device,
-    c10::optional<bool> pin_memory,
-    c10::optional<c10::MemoryFormat> optional_memory_format) {
+    std::optional<ScalarType> dtype,
+    std::optional<Layout> layout,
+    std::optional<Device> device,
+    std::optional<bool> pin_memory,
+    std::optional<c10::MemoryFormat> optional_memory_format) {
   TensorOptions options_ = TensorOptions()
                                .dtype(dtype)
                                .layout(layout)
@@ -37,11 +37,11 @@ static TensorOptions verify_empty_parameters(
 
 Tensor empty_like_nested(
     const Tensor& self,
-    c10::optional<ScalarType> dtype,
-    c10::optional<Layout> layout,
-    c10::optional<Device> device,
-    c10::optional<bool> pin_memory,
-    c10::optional<c10::MemoryFormat> optional_memory_format) {
+    std::optional<ScalarType> dtype,
+    std::optional<Layout> layout,
+    std::optional<Device> device,
+    std::optional<bool> pin_memory,
+    std::optional<c10::MemoryFormat> optional_memory_format) {
   auto options = verify_empty_parameters(
       self, dtype, layout, device, pin_memory, optional_memory_format);
   auto self_nt = get_nested_tensor_impl(self);
@@ -83,12 +83,12 @@ static inline Device ensure_has_index(Device device) {
 
 Tensor _to_copy_nested(
     const Tensor& self,
-    c10::optional<ScalarType> dtype,
-    c10::optional<Layout> layout,
-    c10::optional<Device> device,
-    c10::optional<bool> pin_memory,
+    std::optional<ScalarType> dtype,
+    std::optional<Layout> layout,
+    std::optional<Device> device,
+    std::optional<bool> pin_memory,
     bool non_blocking,
-    c10::optional<c10::MemoryFormat> optional_memory_format) {
+    std::optional<c10::MemoryFormat> optional_memory_format) {
   TORCH_CHECK(
       !layout.has_value() || self.layout() == layout.value(),
       "to(options) doesn't support converting to a different layout, "
@@ -132,7 +132,7 @@ Tensor& copy_nested_(Tensor& self, const Tensor& src, bool non_blocking) {
 
 Tensor clone_nested(
     const Tensor& self,
-    c10::optional<c10::MemoryFormat> optional_memory_format) {
+    std::optional<c10::MemoryFormat> optional_memory_format) {
   auto memory_format = optional_memory_format.value_or(c10::MemoryFormat::Preserve);
   auto self_ptr = get_nested_tensor_impl(self);
   if (memory_format == c10::MemoryFormat::Preserve ||

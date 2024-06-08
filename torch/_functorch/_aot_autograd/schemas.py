@@ -130,6 +130,7 @@ class InputAliasInfo:
     mutates_metadata: bool
     mutations_hidden_from_autograd: bool
     mutations_under_no_grad_or_inference_mode: bool
+    mutation_inductor_storage_resize: bool
     mutates_storage_metadata: bool
     requires_grad: bool
     keep_input_mutations: bool
@@ -144,7 +145,11 @@ class InputAliasInfo:
 
     @functools.cached_property
     def mutation_type(self) -> MutationType:
-        if (not self.mutates_data) and (not self.mutates_metadata):
+        if (
+            (not self.mutates_data)
+            and (not self.mutates_metadata)
+            and not (self.mutation_inductor_storage_resize)
+        ):
             return MutationType.NOT_MUTATED
 
         if _check_if_mutation_can_be_in_graph(
@@ -154,6 +159,7 @@ class InputAliasInfo:
             self.mutations_hidden_from_autograd,
             self.mutations_under_no_grad_or_inference_mode,
             self.mutates_storage_metadata,
+            self.mutation_inductor_storage_resize,
             self.requires_grad,
         ):
             return MutationType.MUTATED_IN_GRAPH
@@ -297,6 +303,9 @@ class ViewAndMutationMeta:
     # forward, but is turned on during the backward call, then an error is
     # raised
     deterministic: Optional[bool] = None
+
+    # Keeps track of which input indices store parameters (which we will treat as static)
+    static_parameter_indices: List[int] = field(default_factory=list)
 
     # Map of effect type (ex. _EffectType.ORDERED) to token.  If there are
     # side-effectful operators, FunctionalTensorMode will populate this

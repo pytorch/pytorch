@@ -207,8 +207,9 @@ class TestSparse(TestSparseBase):
         """
         assert not x.is_coalesced()
         existing_indices = set()
+        indices = x._indices()
         for i in range(x._nnz()):
-            index = str(x._indices()[:, i])
+            index = str(indices[:, i])
             if index in existing_indices:
                 return True
             else:
@@ -4445,6 +4446,10 @@ class TestSparseMeta(TestCase):
             f = FakeTensor.from_tensor(t, fake_mode)
             self.assertIsInstance(f, FakeTensor)
             self.assertEqualMeta(f, t, 0)
+
+            d = f.detach()
+            self.assertIsInstance(d, FakeTensor)
+            self.assertEqualMeta(d, t, 0)
 
     @all_sparse_layouts('layout', include_strided=False)
     @parametrize("dtype", [torch.float64])

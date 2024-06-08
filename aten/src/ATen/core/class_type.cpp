@@ -469,7 +469,7 @@ bool ClassType::isSubtypeOfExt(const Type& rhs, std::ostream* why_not) const {
 }
 
 ClassTypePtr ClassType::create(
-    c10::optional<QualifiedName> qualifiedName,
+    std::optional<QualifiedName> qualifiedName,
     std::weak_ptr<CompilationUnit> cu,
     bool is_module,
     std::string doc_string,
@@ -483,7 +483,7 @@ ClassTypePtr ClassType::create(
 }
 
 ClassType::ClassType(
-    c10::optional<QualifiedName> name,
+    std::optional<QualifiedName> name,
     std::weak_ptr<CompilationUnit> cu,
     bool is_module,
     std::string doc_string,
@@ -620,7 +620,7 @@ IValue ClassType::getConstant(size_t slot) const {
   return constantValues_[slot];
 }
 
-c10::optional<IValue> ClassType::findConstant(const std::string& name) const {
+std::optional<IValue> ClassType::findConstant(const std::string& name) const {
   TORCH_INTERNAL_ASSERT(constantNames_.size() == constantValues_.size());
   size_t pos = 0;
   for (const auto& c : constantNames_) {
@@ -652,7 +652,7 @@ std::shared_ptr<const CompilationUnit> ClassType::compilation_unit() const {
   return cu;
 }
 
-c10::optional<ClassType::Property> ClassType::getProperty(const std::string& name) {
+std::optional<ClassType::Property> ClassType::getProperty(const std::string& name) {
   for (auto& prop : properties_) {
     if (name == prop.name) {
       return prop;
@@ -667,7 +667,7 @@ void ClassType::addProperty(const std::string& name, torch::jit::Function* gette
   properties_.push_back({name, getter, setter});
 }
 
-c10::optional<size_t> ClassType::findConstantSlot(const std::string& name) const {
+std::optional<size_t> ClassType::findConstantSlot(const std::string& name) const {
   TORCH_CHECK(constantNames_.size() == constantValues_.size());
   size_t slot = 0;
   for (const auto& constant : constantNames_) {

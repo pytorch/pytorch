@@ -8,6 +8,12 @@ from typing import Dict, List, Sequence
 from unittest.mock import Mock, patch
 from warnings import warn
 
+from tools.autograd.gen_python_functions import (
+    group_overloads,
+    load_signatures,
+    should_generate_py_binding,
+)
+
 from torchgen.api.python import (
     PythonSignatureGroup,
     PythonSignatureNativeFunctionPair,
@@ -17,12 +23,6 @@ from torchgen.gen import parse_native_yaml, parse_tags_yaml
 
 from torchgen.model import _TorchDispatchModeKey, DispatchKey, Variant
 from torchgen.utils import FileManager
-
-from tools.autograd.gen_python_functions import (
-    group_overloads,
-    load_signatures,
-    should_generate_py_binding,
-)
 
 """
 This module implements generation of type stubs for PyTorch,
@@ -798,6 +798,9 @@ def gen_pyi(
             "_functionalize_are_all_mutations_under_no_grad_or_inference_mode": [
                 "def _functionalize_are_all_mutations_under_no_grad_or_inference_mode(t: Tensor) -> _bool: ..."
             ],
+            "_functionalize_was_inductor_storage_resized": [
+                "def _functionalize_was_inductor_storage_resized(t: Tensor) -> _bool: ..."
+            ],
             "_functionalize_sync": ["def _functionalize_sync(t: Tensor) -> None: ..."],
             "_functionalize_was_storage_changed": [
                 "def _functionalize_was_storage_changed(tensor: Tensor) -> _bool: ..."
@@ -807,6 +810,9 @@ def gen_pyi(
             ],
             "_functionalize_apply_view_metas": [
                 "def _functionalize_apply_view_metas(tensor: Tensor,  base: Tensor) -> Tensor: ..."
+            ],
+            "_functionalize_is_symbolic": [
+                "def _functionalize_is_symbolic(tensor: Tensor) -> _bool: ..."
             ],
             "_enable_functionalization": [
                 "def _enable_functionalization(*, reapply_views: _bool = False): ..."
@@ -1114,6 +1120,18 @@ def gen_pyi(
             "nelement": ["def nelement(self) -> _int: ..."],
             "cuda": [
                 "def cuda({}) -> Tensor: ...".format(
+                    ", ".join(
+                        [
+                            "self",
+                            "device: Optional[Union[_device, _int, str]] = None",
+                            "non_blocking: _bool = False",
+                            "memory_format: torch.memory_format = torch.preserve_format",
+                        ]
+                    )
+                )
+            ],
+            "xpu": [
+                "def xpu({}) -> Tensor: ...".format(
                     ", ".join(
                         [
                             "self",

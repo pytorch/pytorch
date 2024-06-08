@@ -260,12 +260,16 @@ class CapabilityBasedPartitioner:
         for id, partition in partitions_by_id.items():
             logger.debug("partition #%s: %s", id, [node.name for node in partition.nodes])
 
-        return list(partitions_by_id.values())
+        return [partition for partition in partitions_by_id.values() if partition.size() > 0]
 
-    def fuse_partitions(self, partitions: List[Partition]) -> GraphModule:
+    def fuse_partitions(self, partitions: List[Partition], prefix: str = "fused_") -> GraphModule:
         logger.debug("Fusing partitions...")
         # fuse_by_partitions expects partitions in List[List[Node]]: [ [node0, node1], [node2, node3] ]
-        return fuse_by_partitions(self.graph_module, [list(partition.nodes) for partition in partitions])
+        return fuse_by_partitions(
+            self.graph_module,
+            [list(partition.nodes) for partition in partitions],
+            prefix=prefix,
+        )
 
     # remove non-compute-ops that sits at the boundary of a partition.
     def remove_bookend_non_compute_ops(self, partitions: List[Partition]):
@@ -323,7 +327,7 @@ class CapabilityBasedPartitioner:
             if len(remove_node) != 0:
                 partition.nodes = partition.nodes - remove_node
 
-    def partition_and_fuse(self) -> GraphModule:
+    def partition_and_fuse(self, prefix: str = "fused_") -> GraphModule:
         partitions = self.propose_partitions()
-        fused_gm = self.fuse_partitions(partitions)
+        fused_gm = self.fuse_partitions(partitions, prefix=prefix)
         return fused_gm

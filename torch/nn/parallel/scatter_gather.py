@@ -1,13 +1,17 @@
 import torch
 from typing import Any, Dict, List, Optional, Sequence, Tuple, TypeVar, Union, overload
+from typing_extensions import deprecated
 from ._functions import Scatter, Gather
-import warnings
 
 __all__ = ['scatter', 'scatter_kwargs', 'gather']
 
+
+@deprecated(
+    "`is_namedtuple` is deprecated, please use the python checks instead",
+    category=FutureWarning,
+)
 def is_namedtuple(obj: Any) -> bool:
     # Check if type was created from collections.namedtuple or a typing.NamedTuple.
-    warnings.warn("is_namedtuple is deprecated, please use the python checks instead")
     return _is_namedtuple(obj)
 
 def _is_namedtuple(obj: Any) -> bool:

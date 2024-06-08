@@ -67,6 +67,7 @@ from .ir import (
     Reduction,
     StorageBox,
     TensorBox,
+    TorchBindObject,
 )
 from .lowering import (
     constrain_to_fx_strides,
@@ -88,7 +89,7 @@ from .utils import (
     maybe_get_suppress_shape_guards_ctx,
     should_assume_input_aligned,
 )
-from .virtualized import V
+from .virtualized import NullHandler, V
 
 if TYPE_CHECKING:
     from torch._higher_order_ops.effects import _EffectType
@@ -295,7 +296,6 @@ class GraphLowering(torch.fx.Interpreter):
         gm: torch.fx.GraphModule,
         example_inputs: Optional[List[torch.Tensor]] = None,
         shape_env=None,
-        num_static_inputs=None,
         graph_id=None,
         cpp_wrapper=False,
         aot_mode=False,
@@ -310,7 +310,6 @@ class GraphLowering(torch.fx.Interpreter):
         name=None,
     ):
         super().__init__(gm)
-
         self.example_inputs = example_inputs
         self.layout_opt = (
             layout_opt
@@ -358,6 +357,7 @@ class GraphLowering(torch.fx.Interpreter):
         self.constants: Dict[str, torch.Tensor] = (
             const_module.constants if const_module else {}
         )
+        self.torchbind_constants: Dict[str, torch._C.ScriptObject] = {}
         self.constant_reprs: Dict[str, str] = {}
         self.removed_buffers: Set[str] = set()
         self.removed_inplace_buffers: Set[str] = set()
@@ -372,7 +372,6 @@ class GraphLowering(torch.fx.Interpreter):
             Callable[[List[ir.ExternKernelNode]], Any]
         ] = extern_node_serializer
         self.current_node: torch.fx.Node = None  # type: ignore[assignment]
-        self.num_static_inputs = num_static_inputs
         self.lists: Dict[str, List[str]] = {}
         self.mutated_inputs: Set[str] = set()
         self.mutated_input_idxs: List[int] = []
@@ -391,7 +390,7 @@ class GraphLowering(torch.fx.Interpreter):
         self.aot_mode = aot_mode
         self.graph_id = graph_id
         self.post_grad_graph_id = next(_post_grad_graph_counter)
-        self.scheduler: "torch._inductor.scheduler.Scheduler" = None  # type: ignore[assignment]
+        self.scheduler: torch._inductor.scheduler.Scheduler = None  # type: ignore[assignment]
         self.nodes_prefer_channels_last = (
             self.find_nodes_prefer_channels_last() if self.layout_opt else set()
         )
@@ -800,46 +799,46 @@ class GraphLowering(torch.fx.Interpreter):
             else self.constants[name]
         )
 
+    def allocate_non_dup_const_name(self, name, data):
+        orig_name = name
+        if not config.aot_inductor.use_runtime_constant_folding:
+            for constant_name, value in self.constants.items():
+                if (
+                    not data.is_mkldnn
+                    and data.size() == value.size()
+                    and data.stride() == value.stride()
+                    and data.dtype == value.dtype
+                    and data.device == value.device
+                    and data.untyped_storage().data_ptr()
+                    == value.untyped_storage().data_ptr()
+                    and data.storage_offset() == value.storage_offset()
+                ):
+                    return constant_name
+
+        if name is None:
+            name = f"constant{len(self.constants)}"
+        if name[0].isdigit():
+            name = f"constant_{name}"
+        name = self.qualify_name(name)
+        # We may generate a var name for each constant in the codegen.
+        # Let's only keep sane characters.
+        prefix = re.sub(r"[^a-zA-Z0-9_]", "_", name)
+        name = prefix
+        cnt = 0
+        while name in self.constants:
+            name = f"{prefix}_{cnt}"
+            cnt += 1
+        self.constants[name] = data
+        self.constant_reprs[name] = (
+            f"{data.device!r} {data.dtype!r} "
+            f"{tuple(data.size())!r} {tuple(data.stride())!r} "
+            f"{hash(data):x}"
+        )
+        self.allocated_constant_name[name] = orig_name
+        return name
+
     def add_tensor_constant(self, data, name=None):
-        def allocate(name):
-            if not config.aot_inductor.use_runtime_constant_folding:
-                for constant_name, value in self.constants.items():
-                    if (
-                        not data.is_mkldnn
-                        and data.size() == value.size()
-                        and data.stride() == value.stride()
-                        and data.dtype == value.dtype
-                        and data.device == value.device
-                        and data.untyped_storage().data_ptr()
-                        == value.untyped_storage().data_ptr()
-                        and data.storage_offset() == value.storage_offset()
-                    ):
-                        return constant_name
-
-            if name is None:
-                name = f"constant{len(self.constants)}"
-            if name[0].isdigit():
-                name = f"constant_{name}"
-            name = self.qualify_name(name)
-            # We may generate a var name for each constant in the codegen.
-            # Let's only keep sane characters.
-            prefix = re.sub(r"[^a-zA-Z0-9_]", "_", name)
-            name = prefix
-            cnt = 0
-            while name in self.constants:
-                name = f"{prefix}_{cnt}"
-                cnt += 1
-            self.constants[name] = data
-            self.constant_reprs[name] = (
-                f"{data.device!r} {data.dtype!r} "
-                f"{tuple(data.size())!r} {tuple(data.stride())!r} "
-                f"{hash(data):x}"
-            )
-            return name
-
-        new_name = allocate(name)
-        self.allocated_constant_name[new_name] = name
-
+        new_name = self.allocate_non_dup_const_name(name, data)
         return TensorBox.create(
             ir.ConstantBuffer(
                 new_name,
@@ -855,10 +854,10 @@ class GraphLowering(torch.fx.Interpreter):
         """
         if self.constants[name].device == device_override or device_override is None:
             return name
-        alt_name = f"{name}_{device_override.type}{device_override.index or 0}"
-        if alt_name not in self.constants:
-            self.constants[alt_name] = self.constants[name].to(device_override)
-        return alt_name
+        return self.allocate_non_dup_const_name(
+            f"{name}_{device_override.type}{device_override.index or 0}",
+            self.constants[name].to(device_override),
+        )
 
     def placeholder(self, target: str, args, kwargs):
         example = super().placeholder(target, args, kwargs)
@@ -991,6 +990,11 @@ class GraphLowering(torch.fx.Interpreter):
 
         if isinstance(value, torch.fx.GraphModule):
             return ir.Subgraph(name=target, graph_module=value)
+
+        if isinstance(value, torch._C.ScriptObject):
+            self.torchbind_constants[target] = value
+            self.constant_reprs[target] = ""
+            return TorchBindObject(target, value)
 
         if (
             config.aot_inductor.use_runtime_constant_folding
@@ -1296,6 +1300,8 @@ class GraphLowering(torch.fx.Interpreter):
                                 torch.ops.aten.mkldnn_rnn_layer.default,
                                 torch.ops.onednn.qlinear_pointwise.default,
                                 torch.ops.onednn.qlinear_pointwise.tensor,
+                                torch.ops.onednn.qlinear_pointwise.binary,
+                                torch.ops.onednn.qlinear_pointwise.binary_tensor,
                             ]
                             need_fixed_channels_last_layout += [
                                 torch.ops.mkldnn._convolution_pointwise.default,
@@ -1532,7 +1538,11 @@ class GraphLowering(torch.fx.Interpreter):
         if "cuda" in self.device_types:
             # first pass
             self.cpp_wrapper = False
-            compiled = self.compile_to_module().call
+            # Although triton.store_cubin was set in compile_fx, the backward pass didn't pick
+            # that up. In theory it should work by only setting triton.store_cubin to True here,
+            # but that will cause a problem when use_runtime_constant_folding is set.
+            with config.patch({"triton.store_cubin": True}):
+                compiled = self.compile_to_module().call
 
             def materialize(x):
                 if isinstance(x, (torch.SymInt, torch.SymFloat)):
@@ -1546,7 +1556,10 @@ class GraphLowering(torch.fx.Interpreter):
                     ), "Unknown type when creating real inputs" + str(type(x))
                     return x
 
-            if tracing_context := torch._guards.TracingContext.try_get():
+            tracing_context = torch._guards.TracingContext.try_get()
+            if tracing_context is not None and not isinstance(
+                V.real_inputs, NullHandler
+            ):
                 if tracing_context.output_strides:
                     tracing_context.output_strides.clear()
 
@@ -1559,7 +1572,17 @@ class GraphLowering(torch.fx.Interpreter):
                     materialize(x) for x in itertools.chain(params_flat, V.real_inputs)
                 ]
             else:
-                real_inputs = [materialize(x) for x in V.real_inputs]
+                # In the backward pass, V.real_inputs is not set.
+                # Generating random inputs based on self.example_inputs sometimes can be problematic,
+                # e.g. illegal memory access. A comprehensive fix is to autotune in a separate process.
+                real_inputs = [
+                    materialize(x)
+                    for x in (
+                        self.example_inputs
+                        if isinstance(V.real_inputs, NullHandler)
+                        else V.real_inputs
+                    )
+                ]
 
             if self.mutated_inputs:
                 from .compile_fx import clone_preserve_strides
@@ -1581,7 +1604,6 @@ class GraphLowering(torch.fx.Interpreter):
                     real_inputs[idx] = clone_preserve_strides(real_inputs[idx])
 
             with torch.utils._python_dispatch._disable_current_modes():
-                assert self.example_inputs is not None
                 compiled(real_inputs)
             del real_inputs
 
@@ -1631,31 +1653,47 @@ class GraphLowering(torch.fx.Interpreter):
         self.scheduler.codegen()
 
     def count_bytes(self):
-        from .scheduler import Scheduler
-
-        scheduler = Scheduler(self.buffers)
-
         total_bytes = 0
         node_counts = []
         node_runtimes = []
-        for node in scheduler.nodes:
+        for node in self.scheduler.nodes:
             num_bytes = node.get_read_write_buffers_sizes()
             total_bytes += num_bytes
             node_counts.append((node, num_bytes // 4))
             node_runtimes.append((node, node.get_estimated_runtime()))
         return total_bytes, node_counts, node_runtimes
 
-    @dynamo_timed(phase_name="code_gen")
+    @dynamo_timed(phase_name="code_gen", fwd_only=False)
     def compile_to_module(self):
         from .codecache import PyCodeCache
 
         code, linemap = (
             self.codegen_with_cpp_wrapper() if self.cpp_wrapper else self.codegen()
         )
-        linemap = [(line_no, node.stack_trace) for line_no, node in linemap]
-        key, path = PyCodeCache.write(code)
+
+        output_code_log.debug("Output code: \n%s", code)
+        try:
+            linemap = [(line_no, node.stack_trace) for line_no, node in linemap]
+            key, path = PyCodeCache.write(code)
+        except Exception:
+            trace_structured(
+                "inductor_output_code",
+                # Just omit the filename, I still want the code though!
+                payload_fn=lambda: code,
+            )
+            raise
+        else:
+            trace_structured(
+                "inductor_output_code",
+                lambda: {"filename": path},
+                payload_fn=lambda: code,
+            )
+
         mod = PyCodeCache.load_by_key_path(
-            key, path, linemap=linemap, attrs=self.constants
+            key,
+            path,
+            linemap=linemap,
+            attrs={**self.constants, **self.torchbind_constants},
         )
         self.cache_key = key
         self.cache_path = path
@@ -1667,12 +1705,6 @@ class GraphLowering(torch.fx.Interpreter):
 
         log_module_code(mod.__file__)
         log.debug("Output code written to: %s", mod.__file__)
-        output_code_log.debug("Output code: \n%s", code)
-        trace_structured(
-            "inductor_output_code",
-            lambda: {"filename": mod.__file__},
-            payload_fn=lambda: code,
-        )
         output_code_log.info("Output code written to: %s", mod.__file__)
         if config.benchmark_kernel:
             print(f"Compiled module path: {mod.__file__}", file=sys.stderr)

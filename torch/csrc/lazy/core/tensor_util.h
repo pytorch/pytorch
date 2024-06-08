@@ -43,7 +43,7 @@ inline at::Tensor CopyTensor(
 }
 
 template <typename T, typename S>
-T OptionalOr(const c10::optional<S>& value, T defval) {
+T OptionalOr(const std::optional<S>& value, T defval) {
   return value ? static_cast<T>(*value) : defval;
 }
 

@@ -10,6 +10,7 @@ from typing import List
 from unittest.mock import patch
 
 import numpy as np
+
 import torch
 import torch._dynamo
 import torch._dynamo.logging
@@ -1083,12 +1084,14 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
             # far from an exhaustive check of all the expected guards, just check a couple of them.
             FileCheck().check("""local "L['self']" TYPE_MATCH""").check(
                 """local "L['self']" ID_MATCH"""
-            ).check(f"""{expected_guard_source} "L['self'].net" TYPE_MATCH""").check(
-                f"""{expected_guard_source} "L['self'].net" ID_MATCH"""
             ).check(
-                f"""{expected_guard_source} "L['self'].net[0]" TYPE_MATCH"""
+                f"""{expected_guard_source} "L['self']._modules['net']" TYPE_MATCH"""
             ).check(
-                f"""{expected_guard_source} "L['self'].net[0]" ID_MATCH"""
+                f"""{expected_guard_source} "L['self']._modules['net']" ID_MATCH"""
+            ).check(
+                f"""{expected_guard_source} "L['self']._modules['net']._modules['0']" TYPE_MATCH"""
+            ).check(
+                f"""{expected_guard_source} "L['self']._modules['net']._modules['1']" ID_MATCH"""
             ).run(
                 GUARDS_FILE.getvalue()
             )
@@ -1178,6 +1181,7 @@ class TestSingleProc(DynamoDistributedSingleProcTestCase):
         fsdp_out = fsdp_model(inp)
         self.assertEqual(local_out, fsdp_out)
 
+    @patch.object(config, "guard_nn_modules", True)
     def test_fsdp_dup_tensors_diff_source(self):
         """
         Tests that FSDP-managed modules' parameters and buffers with different

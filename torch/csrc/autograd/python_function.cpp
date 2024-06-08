@@ -619,7 +619,7 @@ static void _wrap_outputs(
   auto non_differentiable = _parse_non_differentiable(self);
   auto dirty_inputs = _mark_dirty(self);
 
-  std::vector<c10::optional<Variable>> raw_output_vars;
+  std::vector<std::optional<Variable>> raw_output_vars;
   raw_output_vars.reserve(num_outputs);
   for (const auto i : c10::irange(num_outputs)) {
     PyObject* obj = PyTuple_GET_ITEM(raw_output, i);
@@ -746,7 +746,7 @@ static void _wrap_outputs(
 static void _get_tensors_to_save(
     THPFunction* self,
     std::unordered_set<at::TensorImpl*>& to_save_if_setup_context,
-    std::vector<c10::optional<at::Tensor>>& tensors_to_save,
+    std::vector<std::optional<at::Tensor>>& tensors_to_save,
     bool overridden_setup_context,
     bool is_executable) {
   if (self->saved_for_forward && overridden_setup_context) {
@@ -804,7 +804,7 @@ static void _get_tensors_to_save(
 }
 // Save any variables that requested by to_save
 static void _save_variables(
-    const std::vector<c10::optional<at::Tensor>>& tensors_to_save,
+    const std::vector<std::optional<at::Tensor>>& tensors_to_save,
     const std::shared_ptr<PyNode>& cdata_ptr,
     THPFunction* self) {
   if (!self->to_save)
@@ -1106,7 +1106,7 @@ PyObject* process_outputs(
   }
 
   std::unordered_set<at::TensorImpl*> to_save_if_setup_context{};
-  std::vector<c10::optional<at::Tensor>> tensors_to_save{};
+  std::vector<std::optional<at::Tensor>> tensors_to_save{};
   _get_tensors_to_save(
       grad_fn,
       to_save_if_setup_context,

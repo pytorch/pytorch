@@ -13,6 +13,17 @@
   } else {                                                              \
   }
 
+#if IS_PYTHON_3_13_PLUS
+// Gave up after fixing a few of these
+// pycore_opcode.h is gone (new is pycore_opcode_metadata.h ?)
+// f_code is gone (new is f_executable?)
+
+// Fake definitions for what we removed
+const uint8_t* THP_PyOpcode_Caches = NULL;
+const int THP_PyOpcode_Caches_size = 0;
+
+#else
+
 // NOTE: all `assert`s below are converted to `CHECK`s
 
 #if IS_PYTHON_3_11_PLUS
@@ -29,8 +40,8 @@
 #define NEED_OPCODE_TABLES // To get _PyOpcode_Deopt, _PyOpcode_Caches
 #include <internal/pycore_opcode.h>
 #undef NEED_OPCODE_TABLES
-#undef Py_BUILD_CORE
 #include <internal/pycore_frame.h>
+#undef Py_BUILD_CORE
 
 // As a simple way to reduce the impact of ABI changes on the CPython side, this check forces
 // us to manually re-check that the function didn't change on the next major version
@@ -677,3 +688,5 @@ const uint8_t* THP_PyOpcode_Caches = NULL;
 const int THP_PyOpcode_Caches_size = 0;
 
 #endif
+
+#endif // CPython 3.13

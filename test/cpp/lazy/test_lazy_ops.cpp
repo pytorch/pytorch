@@ -475,7 +475,7 @@ TEST_F(LazyOpsTest, TestDiv) {
 }
 
 TEST_F(LazyOpsTest, TestDivWithRoundingMode) {
-  c10::optional<c10::string_view> rounding_modes[] = {
+  std::optional<c10::string_view> rounding_modes[] = {
       "trunc", "floor", c10::nullopt};
   for (const auto& rounding_mode : rounding_modes) {
     for (torch::ScalarType scalar_type1 :
@@ -535,7 +535,7 @@ TEST_F(LazyOpsTest, TestDivInPlace) {
 }
 
 TEST_F(LazyOpsTest, TestDivInPlaceWithRoundingMode) {
-  c10::optional<c10::string_view> rounding_modes[] = {
+  std::optional<c10::string_view> rounding_modes[] = {
       "trunc", "floor", c10::nullopt};
   for (const auto& rounding_mode : rounding_modes) {
     for (torch::ScalarType scalar_type1 : {torch::kFloat}) {
@@ -1553,7 +1553,7 @@ TEST_F(LazyOpsTest, TestStdWithCorrection) {
   torch::Tensor a = torch::rand(
       {4, 3, 4}, torch::TensorOptions(torch::kFloat).device(DefaultDevice()));
   // int rank = a.dim();
-  c10::optional<c10::Scalar> corrections[] = {1, 2, c10::nullopt};
+  std::optional<c10::Scalar> corrections[] = {1, 2, c10::nullopt};
   for (const auto& correction : corrections) {
     for (auto keepdim : {true, false}) {
       for (const auto& dim :
@@ -1573,7 +1573,7 @@ TEST_F(LazyOpsTest, TestStdMeanWithCorrection) {
   torch::Tensor a = torch::rand(
       {4, 3, 4}, torch::TensorOptions(torch::kFloat).device(DefaultDevice()));
   // int rank = a.dim();
-  c10::optional<c10::Scalar> corrections[] = {1, 2, c10::nullopt};
+  std::optional<c10::Scalar> corrections[] = {1, 2, c10::nullopt};
   for (const auto& correction : corrections) {
     for (auto keepdim : {true, false}) {
       for (const auto& dim :
@@ -1710,7 +1710,7 @@ TEST_F(LazyOpsTest, TestVarWithDim) {
 TEST_F(LazyOpsTest, TestVarWithCorrection) {
   torch::Tensor a = torch::rand(
       {4, 3, 4}, torch::TensorOptions(torch::kFloat).device(DefaultDevice()));
-  c10::optional<c10::Scalar> corrections[] = {1, 2, c10::nullopt};
+  std::optional<c10::Scalar> corrections[] = {1, 2, c10::nullopt};
   for (const auto& dim : std::vector<std::vector<int64_t>>{{0, 1}, {-3, -2}}) {
     for (bool keepDim : {true, false}) {
       for (const auto& correction : corrections) {
@@ -1730,7 +1730,7 @@ TEST_F(LazyOpsTest, TestVarWithCorrection) {
 TEST_F(LazyOpsTest, TestVarMeanWithCorrection) {
   torch::Tensor a = torch::rand(
       {4, 3, 4}, torch::TensorOptions(torch::kFloat).device(DefaultDevice()));
-  c10::optional<c10::Scalar> corrections[] = {1, 2, c10::nullopt};
+  std::optional<c10::Scalar> corrections[] = {1, 2, c10::nullopt};
   for (const auto& dim : std::vector<std::vector<int64_t>>{{0, 1}, {-3, -2}}) {
     for (const auto& correction : corrections) {
       for (auto keepdim : {true, false}) {

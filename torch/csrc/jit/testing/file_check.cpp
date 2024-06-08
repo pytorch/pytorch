@@ -43,17 +43,17 @@ struct Check {
   Check(
       CheckType type,
       std::string str,
-      c10::optional<size_t> count = c10::nullopt)
+      std::optional<size_t> count = c10::nullopt)
       : type_(type), count_(count), search_str_(std::move(str)) {}
 
   Check(
       CheckType type,
       c10::string_view str,
-      c10::optional<size_t> count = c10::nullopt)
+      std::optional<size_t> count = c10::nullopt)
       : Check(type, std::string(str.begin(), str.end()), count) {}
 
   CheckType type_;
-  c10::optional<size_t> count_;
+  std::optional<size_t> count_;
   const std::string search_str_;
 
   friend std::ostream& operator<<(std::ostream& out, const Check& c);
@@ -234,7 +234,7 @@ struct FileCheckImpl {
   TORCH_API void addCheck(
       CheckType type,
       const std::string& s,
-      c10::optional<size_t> count = c10::nullopt) {
+      std::optional<size_t> count = c10::nullopt) {
     addCheck(Check(type, s, count));
   }
 
@@ -264,7 +264,7 @@ struct FileCheckImpl {
       }
       size_t end_check_string = suffix_pos + check_suffix.size();
       CheckType type = check_pair.first;
-      c10::optional<size_t> count = c10::nullopt;
+      std::optional<size_t> count = c10::nullopt;
       auto end_line = source->text_str().find("\n", end_check_string);
       bool exactly = false;
       if (type == CHECK_COUNT) {

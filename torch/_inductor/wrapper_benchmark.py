@@ -4,7 +4,11 @@ from collections import defaultdict
 
 import torch
 from torch.autograd import DeviceType
-from .runtime.runtime_utils import create_bandwidth_info_str, do_bench, get_num_bytes
+from .runtime.runtime_utils import (
+    create_bandwidth_info_str,
+    do_bench_gpu,
+    get_num_bytes,
+)
 
 _kernel_category_choices = [
     "foreach",
@@ -116,7 +120,7 @@ def benchmark_all_kernels(benchmark_name, benchmark_all_configs):
                     f"  {get_info_str(ms, launcher.n_regs, launcher.n_spills, launcher.shared)} @ {launcher.config}"
                 )
         else:
-            ms = do_bench(lambda: kernel_mod.call(args), rep=40, fast_flush=True)
+            ms = do_bench_gpu(lambda: kernel_mod.call(args), rep=40, fast_flush=True)
             assert (
                 len(triton_kernel.launchers) == 1
             ), "Autotuner should have selected the best config"

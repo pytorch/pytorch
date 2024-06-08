@@ -1,5 +1,5 @@
 import collections
-from typing import Any, Dict, Union
+from typing import Any, Dict, List, Union
 
 import torch
 from torch._export.verifier import SpecViolationError
@@ -26,7 +26,9 @@ class ConstantAttrMap(collections.abc.MutableMapping):
 
     def __init__(self):
         # Underlying dict that we use to implement this mapping.
-        self._constant_attrs: Dict[Union[int, torch.Tensor, FakeScriptObject], Any] = {}
+        self._constant_attrs: Dict[
+            Union[int, torch.Tensor, FakeScriptObject], List[Any]
+        ] = {}
         # Map from the hash(ScriptObject) to the ScriptObject itself. Used for
         # APIs like `__iter__` that should look like they're returning the
         # original ScriptObjects.
@@ -39,14 +41,25 @@ class ConstantAttrMap(collections.abc.MutableMapping):
         assert isinstance(real_key, (int, torch.Tensor, FakeScriptObject))
         return self._constant_attrs[real_key]
 
-    def __setitem__(
+    def __setitem__(self, key: Union[torch.Tensor, torch.ScriptObject], value):
+        # we shouldn't actually call this, should go to add() instead to handle aliasing
+        raise NotImplementedError(
+            """Directly setting values for ConstantAttrMap is not supported, please use add(key, value) instead.
+The same key can be mapped to multiple values, for handling constant aliasing."""
+        )
+
+    def add(
         self, key: Union[torch.Tensor, torch.ScriptObject, FakeScriptObject], value: Any
     ) -> None:
         if isinstance(key, torch.ScriptObject):
-            self._constant_attrs[hash(key)] = value
+            if hash(key) not in self._constant_attrs:
+                self._constant_attrs[hash(key)] = []
+            self._constant_attrs[hash(key)].append(value)
             self._script_object_map[hash(key)] = key
         elif isinstance(key, (torch.Tensor, FakeScriptObject)):
-            self._constant_attrs[key] = value
+            if key not in self._constant_attrs:
+                self._constant_attrs[key] = []
+            self._constant_attrs[key].append(value)
         else:
             raise TypeError(
                 f"Expected key to be a tensor or ScriptObject, got {type(key)}"
@@ -81,6 +94,14 @@ def get_constant_fqn(node: torch.fx.Node, constant_name: str) -> str:
         return f"{parent_fqn}.{constant_name}"
     else:
         return constant_name
+
+
+def _get_first_fqn(
+    const_attrs: ConstantAttrMap,
+    key: Union[torch.Tensor, torch.ScriptObject, FakeScriptObject],
+) -> Any:
+    fqns = const_attrs.get(key)
+    return fqns[0] if fqns else None
 
 
 def lift_constants_pass(
@@ -136,7 +157,7 @@ def lift_constants_pass(
                 # We already lifted this constant elsewhere. Just rewrite uses
                 # of this get_attr to point to the already-existing placeholder
                 # node.
-                const_placeholder_node = lifted_objs[constant_val]
+                const_placeholder_node = _get_first_fqn(lifted_objs, constant_val)
                 node.replace_all_uses_with(const_placeholder_node)
                 gm.graph.erase_node(node)
                 continue
@@ -152,7 +173,7 @@ def lift_constants_pass(
             # some name and attach it to the module in which it was used.
             if isinstance(constant_val, (torch.ScriptObject, FakeScriptObject)):
                 constant_kind = InputKind.CUSTOM_OBJ
-                constant_fqn = constant_attrs.get(constant_val)
+                constant_fqn = _get_first_fqn(constant_attrs, constant_val)
                 if constant_fqn is not None:
                     constant_name = constant_fqn.replace(".", "_")
                 else:
@@ -161,7 +182,7 @@ def lift_constants_pass(
                     num_custom_obj += 1
             elif isinstance(constant_val, torch.Tensor):
                 constant_kind = InputKind.CONSTANT_TENSOR
-                constant_fqn = constant_attrs.get(constant_val)
+                constant_fqn = _get_first_fqn(constant_attrs, constant_val)
                 if constant_fqn is not None:
                     constant_name = constant_fqn.replace(".", "_")
                 else:
@@ -222,7 +243,7 @@ def lift_constants_pass(
                         f"tried to lift unsupported type {type(constant_val)} from node {node.format_node()}"
                     )
 
-                lifted_objs[constant_val] = const_placeholder_node
+                lifted_objs.add(constant_val, const_placeholder_node)
                 node.replace_all_uses_with(const_placeholder_node)
                 gm.graph.erase_node(node)
 
@@ -235,7 +256,11 @@ def lift_constants_pass(
                         target=constant_fqn,
                     ),
                 )
-                all_constants[constant_fqn] = constant_val
+                if constant_val in constant_attrs:
+                    for fqn in constant_attrs[constant_val]:
+                        all_constants[fqn] = constant_val
+                else:
+                    all_constants[constant_fqn] = constant_val
                 first_user_input_loc += 1
 
     return all_constants

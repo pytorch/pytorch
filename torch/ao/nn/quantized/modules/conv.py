@@ -215,7 +215,7 @@ class _ConvNd(WeightedQuantizedModule):
             return qconv
 
     @staticmethod
-    def from_float(cls, mod):
+    def from_float(cls, mod, use_precomputed_fake_quant=False):
         if hasattr(mod, "weight_fake_quant"):
             # assert type(mod) == cls.__QAT_MODULE, " nnq." + cls.__name__ + \
             # ".from_float only works for " + cls.__QAT_MODULE.__name__
@@ -368,14 +368,14 @@ class Conv1d(_ConvNd):
         return ops.quantized.conv1d(input, self._packed_params, self.scale, self.zero_point)
 
     @classmethod
-    def from_float(cls, mod):
+    def from_float(cls, mod, use_precomputed_fake_quant=False):
         r"""Creates a quantized module from a float module or qparams_dict.
 
         Args:
             mod (Module): a float module, either produced by torch.ao.quantization
               utilities or provided by the user
         """
-        return _ConvNd.from_float(cls, mod)
+        return _ConvNd.from_float(cls, mod, use_precomputed_fake_quant=use_precomputed_fake_quant)
 
 
 class Conv2d(_ConvNd):
@@ -469,14 +469,14 @@ class Conv2d(_ConvNd):
             input, self._packed_params, self.scale, self.zero_point)
 
     @classmethod
-    def from_float(cls, mod):
+    def from_float(cls, mod, use_precomputed_fake_quant=False):
         r"""Creates a quantized module from a float module or qparams_dict.
 
         Args:
             mod (Module): a float module, either produced by torch.ao.quantization
               utilities or provided by the user
         """
-        return _ConvNd.from_float(cls, mod)
+        return _ConvNd.from_float(cls, mod, use_precomputed_fake_quant=use_precomputed_fake_quant)
 
 
 class Conv3d(_ConvNd):
@@ -571,14 +571,14 @@ class Conv3d(_ConvNd):
             input, self._packed_params, self.scale, self.zero_point)
 
     @classmethod
-    def from_float(cls, mod):
+    def from_float(cls, mod, use_precomputed_fake_quant=False):
         r"""Creates a quantized module from a float module or qparams_dict.
 
         Args:
             mod (Module): a float module, either produced by torch.ao.quantization
               utilities or provided by the user
         """
-        return _ConvNd.from_float(cls, mod)
+        return _ConvNd.from_float(cls, mod, use_precomputed_fake_quant=use_precomputed_fake_quant)
 
 # === Transposed Convolutions ===
 MOD = TypeVar('MOD', bound=nn.modules.conv._ConvNd)
@@ -609,7 +609,7 @@ class _ConvTransposeNd(_ConvNd):
         return res
 
     @classmethod
-    def from_float(cls, mod):
+    def from_float(cls, mod, use_precomputed_fake_quant=False):
         r"""Creates a quantized module from a float module or qparams_dict.
         Args:
             mod (Module): a float module, either produced by torch.ao.quantization

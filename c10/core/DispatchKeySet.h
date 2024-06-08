@@ -901,7 +901,7 @@ C10_API bool isIncludedInAlias(DispatchKey k, DispatchKey alias);
 // legacy code that is still using DispatchKey for things like instanceof
 // checks; if at all possible, refactor the code to stop using DispatchKey in
 // those cases.
-static inline DispatchKey legacyExtractDispatchKey(DispatchKeySet s) {
+inline DispatchKey legacyExtractDispatchKey(DispatchKeySet s) {
   // NB: If you add any extra keys that can be stored in TensorImpl on
   // top of existing "backend" keys like CPU/CUDA, you need to add it
   // here.  At the moment, autograd keys and ADInplaceOrView key need this

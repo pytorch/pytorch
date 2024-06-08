@@ -87,7 +87,7 @@ void set_cumsum_kernel_params(
 Tensor cumsum(
     const at::Tensor& input_arg,
     const int64_t dim_arg,
-    const c10::optional<ScalarType> dtype) {
+    const std::optional<ScalarType> dtype) {
   TORCH_CHECK(
       input_arg.dim() >= 1 && input_arg.dim() <= 4,
       "Vulkan cumsum expects 1 <= input dimension <= 4, Tensor input dimensions ",

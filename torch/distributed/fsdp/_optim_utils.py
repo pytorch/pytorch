@@ -1511,9 +1511,9 @@ def _allgather_orig_param_states(
     """
     fsdp_state = fsdp_param_info.state
     if fsdp_state.rank == 0 and dist.get_debug_level() == dist.DebugLevel.DETAIL:
-        logger.warning(
-            "CUDA Memory Summary before calling to _allgather_orig_param_states %s",
-            torch.cuda.memory_summary(),
+        logger.info(
+            "Memory Summary before calling to _allgather_orig_param_states %s",
+            fsdp_state._device_handle.memory_summary(),
         )
 
     output_states: Dict[str, Dict[str, Any]] = {fqn: {} for fqn in input_states.keys()}
@@ -1544,7 +1544,7 @@ def _allgather_orig_param_states(
     )
     gathered_tensor = empty_func(flat_param._padded_unsharded_size)
     # Synchronize can be slow but this will be easier for us to debug.
-    torch.cuda.synchronize()
+    fsdp_state._device_handle.synchronize()
     for state_name, buffers in state_buffers.items():
         local_buffers: List[torch.Tensor] = []
         begin = fsdp_state.rank * flat_param._sharded_size.numel()
@@ -1632,13 +1632,13 @@ def _allgather_orig_param_states(
             "FlatParameter's metadata or the reconstruction logic in optimizer "
             "state dict."
         )
-        torch.cuda.synchronize()
+        fsdp_state._device_handle.synchronize()
         with SimpleProfiler.profile(SimpleProfiler.Type.ALLGATHER):
             dist.all_gather_into_tensor(
                 gathered_tensor, local_shard, group=fsdp_state.process_group
             )
             # Synchronize can be slow but this will be easier for us to debug.
-            torch.cuda.synchronize()
+            fsdp_state._device_handle.synchronize()
 
         unpadded_tensor = gathered_tensor[: flat_param._unpadded_unsharded_size.numel()]
         flat_param_handle = fsdp_param_info.handle
