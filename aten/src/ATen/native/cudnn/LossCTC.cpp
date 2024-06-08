@@ -92,7 +92,7 @@ bool _use_cudnn_ctc_loss(
       (targets.dim() == 1) && (log_probs.scalar_type() == at::kFloat) &&
       (targets.scalar_type() == at::kInt) &&
       (log_probs.device().type() == at::kCUDA) &&
-      (targets.device().type() == at::kCPU) && (targets.is_contiguous()) &&
+      (targets.is_contiguous()) &&
       (log_probs.dim() == 3);
 
   if (use_cudnn) {
@@ -118,11 +118,16 @@ bool _use_cudnn_ctc_loss_tensor(
     const Tensor& input_lengths,
     const Tensor& target_lengths,
     int64_t BLANK) {
-  Tensor ilc = input_lengths.to(Device(at::kCPU), at::kLong).contiguous();
-  Tensor tlc = target_lengths.to(Device(at::kCPU), at::kLong).contiguous();
-  IntArrayRef il(ilc.data_ptr<int64_t>(), ilc.numel());
-  IntArrayRef tl(tlc.data_ptr<int64_t>(), tlc.numel());
-  return at::_use_cudnn_ctc_loss(log_probs, targets, il, tl, BLANK);
+  auto& ctx = at::globalContext();
+
+  bool use_cudnn = ctx.userEnabledCuDNN() && (BLANK == 0) &&
+      (targets.dim() == 1) && (log_probs.scalar_type() == at::kFloat) &&
+      (targets.scalar_type() == at::kInt) &&
+      (log_probs.device().type() == at::kCUDA) &&
+      (targets.is_contiguous()) &&
+      (log_probs.dim() == 3);
+
+  return use_cudnn;
 }
 
 std::tuple<Tensor, Tensor> _cudnn_ctc_loss(
@@ -211,19 +216,85 @@ std::tuple<Tensor, Tensor> _cudnn_ctc_loss(
 }
 
 std::tuple<Tensor, Tensor> _cudnn_ctc_loss_tensor(
-    const Tensor& log_probs,
-    const Tensor& targets,
+    const Tensor& log_probs_t,
+    const Tensor& targets_t,
     const Tensor& input_lengths,
     const Tensor& target_lengths,
     int64_t BLANK,
     bool deterministic,
     bool zero_infinity) {
-  Tensor ilc = input_lengths.to(Device(at::kCPU), at::kLong).contiguous();
-  Tensor tlc = target_lengths.to(Device(at::kCPU), at::kLong).contiguous();
-  IntArrayRef il(ilc.data_ptr<int64_t>(), ilc.numel());
-  IntArrayRef tl(tlc.data_ptr<int64_t>(), tlc.numel());
-  return at::_cudnn_ctc_loss(
-      log_probs, targets, il, tl, BLANK, deterministic, zero_infinity);
+  Tensor targets_t_ = targets_t;
+  if (targets_t.device().type() == at::kCPU) {
+    targets_t_ = targets_t.to(Device(at::kCUDA));
+  }
+  const CheckedFrom c = "cudnn_ctc_loss";
+  const TensorArg log_probs{log_probs_t, "log_probs", 1};
+  const TensorArg targets{targets_t_, "targets", 2};
+  checkDim(c, log_probs, 3);
+  checkScalarType(c, log_probs, kFloat);
+  checkDim(c, targets, 1);
+  checkScalarType(c, targets, kInt);
+  checkContiguous(c, targets); // ?
+  checkBackend(c, {*log_probs}, Backend::CUDA);
+  checkBackend(c, {*targets}, Backend::CUDA);
+  const auto batch_size = log_probs->size(1);
+  TORCH_CHECK(
+      static_cast<int64_t>(input_lengths.size(0)) == batch_size,
+      "input_lengths needs to have size to match batch_size");
+  TORCH_CHECK(
+      static_cast<int64_t>(target_lengths.size(0)) == batch_size,
+      "target_lengths needs to have size to match batch_size");
+
+  TORCH_CHECK(BLANK == 0, "blank must be label 0 for cudnn_ctc_loss");
+  // checked in dispatch:
+  // assert other conditions for cudnnCTCLoss: all label lengths <= 256
+  // all input lengths = logprob.size(0)
+
+  const auto handle = getCudnnHandle();
+
+  const cudnnCTCLossAlgo_t algo =
+      (deterministic ? CUDNN_CTC_LOSS_ALGO_DETERMINISTIC
+                     : CUDNN_CTC_LOSS_ALGO_NON_DETERMINISTIC);
+
+  CTCLossDescriptor ctc_loss_desc;
+
+  // so the CuDNN gradient semantics have changed between 7.1 and 7.6,
+  // this is CuDNN 7.6 only, see PyTorch 1.2 for older CuDNN.
+  ctc_loss_desc.set_v9(
+      CUDNN_DATA_FLOAT, CUDNN_LOSS_NORMALIZATION_SOFTMAX, CUDNN_CTC_SKIP_OOB_GRADIENTS, 255);
+  TensorDescriptor log_probs_desc{log_probs_t};
+  Tensor grad = at::empty_like(log_probs_t, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
+  TensorDescriptor grad_desc{grad};
+
+  size_t workspace_size;
+  AT_CUDNN_CHECK(cudnnGetCTCLossWorkspaceSize_v8(
+      handle,
+      algo,
+      ctc_loss_desc.desc(),
+      log_probs_desc.desc(),
+      grad_desc.desc(),
+      &workspace_size));
+  Tensor workspace =
+      at::empty(workspace_size, log_probs->options().dtype(kByte));
+  Tensor costs = at::empty({log_probs->size(1)}, log_probs->options());
+
+  AT_CUDNN_CHECK(cudnnCTCLoss_v8(
+      handle,
+      algo,
+      ctc_loss_desc.desc(),
+      log_probs_desc.desc(),
+      log_probs_t.data_ptr(),
+      targets_t_.data_ptr<int>(),
+      target_lengths.data_ptr<int>(),
+      input_lengths.data_ptr<int>(),
+      costs.data_ptr(),
+      grad_desc.desc(),
+      grad.data_ptr(),
+      workspace_size,
+      workspace.data_ptr()
+      
+      ));
+   return std::make_tuple(costs, grad);
 }
 
 } // namespace native

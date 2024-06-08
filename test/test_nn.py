@@ -11135,6 +11135,32 @@ class TestNNDeviceType(NNTestCase):
         grad_cudnn, = torch.autograd.grad(loss_cudnn, log_probs, grad_out)
         self.assertEqual(grad_cudnn, grad_native, atol=1e-4, rtol=0)
 
+    @onlyCUDA
+    @skipCUDAIfRocm(msg="skipped Cudnn test on ROCm")
+    @skipCUDAIfCudnnVersionLessThan(7600)
+    def test_ctc_loss_cudnn_tensor(self, device):
+        batch_size = 16
+        input_length = 30
+        num_labels = 101
+        target_length = 15
+        targets = torch.randint(1, num_labels, (batch_size * target_length,),
+                                device='cuda', dtype=torch.long)
+        log_probs = torch.log_softmax(torch.randn(input_length, batch_size, num_labels, device='cuda', dtype=torch.float), 2)
+        log_probs.requires_grad_()
+
+        input_lengths = batch_size * [input_length]
+        input_lengths = torch.linspace(start=15, end=input_length, steps=batch_size, dtype=torch.long, device='cuda')
+        target_lengths = torch.tensor(batch_size * [target_length], dtype=torch.long, device='cuda')
+        grad_out = torch.randn(batch_size, device='cuda', dtype=torch.float)
+        with torch.backends.cudnn.flags(enabled=False):
+            loss_native = torch.nn.functional.ctc_loss(log_probs, targets, input_lengths, target_lengths, reduction='none')
+            grad_native, = torch.autograd.grad(loss_native, log_probs, grad_out)
+        loss_cudnn = torch.nn.functional.ctc_loss(log_probs, targets.to('cuda', torch.int32),
+                                                  input_lengths.to('cuda', torch.int32), target_lengths.to('cuda', torch.int32), reduction='none')
+        self.assertTrue("Cudnn" in str(loss_cudnn.grad_fn))
+        grad_cudnn, = torch.autograd.grad(loss_cudnn, log_probs, grad_out)
+        self.assertEqual(grad_cudnn, grad_native, atol=1e-4, rtol=0)
+
     @dtypesIfCUDA(torch.half, torch.float, torch.double)
     @dtypes(torch.float)
     @tf32_on_and_off(0.005)
