@@ -15,13 +15,12 @@ from torch.nn.parallel import DistributedDataParallel
 
 from ._backward import stage_backward
 from ._debug import map_debug_info
-from ._IR import Pipe
-from ._utils import flatten_args, modify_graph_op_device, validate_tensors_metadata
+from ._utils import flatten_args, PipeInfo, validate_tensors_metadata
 
 
 __all__ = [
     "PipelineStage",
-    "TracerPipelineStage",
+    "build_stage",
 ]
 
 logger = logging.getLogger(__name__)
@@ -80,7 +79,8 @@ def _make_tensor_from_meta(
 class _PipelineStageBase(ABC):
     """
     Base class for pipeline stages.
-    Implements common methods used by both the `TracerPipelineStage` used by the tracing frontend and `PipelineStage`.
+    Defines or implements common methods used by the `_PipelineStage` used by
+    the tracing frontend and `PipelineStage` used by manual frontend.
     """
 
     def __init__(
@@ -97,7 +97,6 @@ class _PipelineStageBase(ABC):
             stage_index (int): The index of this stage.
             num_stages (int): The total number of stages in this pipeline.
             device (torch.device): The device to run this stage on.
-            num_microbatches (int): The number of microbatches to be run with this stage.
             group (Optional[dist.ProcessGroup]): The process group to use for communication.
                 If `None`, the default process group will be used.
                 Default: `None`.
@@ -641,14 +640,20 @@ class _PipelineStage(_PipelineStageBase):
         self,
         stage_module: torch.nn.Module,
         stage_index: int,
-        pipe_info: Pipe.PipeInfo,
+        pipe_info: PipeInfo,
         device: torch.device,
-        num_chunks: int,
         group: Optional[dist.ProcessGroup] = None,
     ):
         """
         Create a pipeline stage given a stage_module to be wrapped by this stage
         and a `pipe_info` describing the stage relationship of the pipeline.
+
+        Args:
+            stage_module (torch.nn.Module): the module to be wrapped by this stage
+            stage_index (int): the index of this stage in the pipeline
+            pipe_info (PipeInfo): information about the pipeline, can be retrieved by `pipe.info()`
+            device (torch.device): the device to be used by this stage
+            group (Optional[dist.ProcessGroup]): the process group to be used by this stage
         """
         _PipelineStageBase.__init__(
             self,
@@ -684,8 +689,6 @@ class _PipelineStage(_PipelineStageBase):
 
         # Cast submodule to device
         self._move_submod_to_device()
-        # Move ops argument to device
-        self._move_ops_to_device()
 
     def _move_submod_to_device(self):
         # Move submodule to indicated device if possible
@@ -699,15 +702,6 @@ class _PipelineStage(_PipelineStageBase):
             logger.debug(f"{self.log_prefix} Found meta parameters!")  # noqa: G004
         else:
             self.submod.to(self.device)
-
-    def _move_ops_to_device(self):
-        # Today PT2 tracer does not treat `x.device` as a symbolic device;
-        # instead, the device of tracing time got burned into the generated
-        # code.  Here we provide a workaround for users to manually modify the
-        # "device" kwarg of operations. Such operation may include:
-        # `torch.ones`, `torch.zeros`, `torch.rand`, etc.
-        if isinstance(self.submod, torch.fx.GraphModule):
-            modify_graph_op_device(self.submod, self.device)
 
     def _prepare_forward_infra(self, num_microbatches: int):
         """
@@ -904,26 +898,35 @@ class _PipelineStage(_PipelineStageBase):
         return grad_recv_info_tuple
 
 
-# TODO: Update this to be returned by helper method under Pipe (kwen)
-class TracerPipelineStage(_PipelineStage):
-    def __init__(
-        self,
-        pipe: Pipe,
-        stage_index: int,
-        device: torch.device,
-        num_chunks: int,  # To be cleaned
-        group: Optional[dist.ProcessGroup] = None,
-    ):
-        """
-        Create a pipeline stage given a `Pipe` (representing the whole pipeline) and a stage index.
-        """
-        # Find my stage module
-        stage_module = pipe.get_stage_module(stage_index)
-        # Get my pipe info
-        pipe_info = pipe.info()
-        super().__init__(
-            stage_module, stage_index, pipe_info, device, num_chunks, group
-        )
+# A helper function to create a pipeline stage based on traced pipeline information
+def build_stage(
+    stage_module: torch.nn.Module,
+    stage_index: int,
+    pipe_info: PipeInfo,
+    device: torch.device,
+    group: Optional[dist.ProcessGroup] = None,
+) -> _PipelineStage:
+    """
+    Create a pipeline stage given a stage_module to be wrapped by this stage
+    and pipeline information.
+
+    Args:
+        stage_module (torch.nn.Module): the module to be wrapped by this stage
+        stage_index (int): the index of this stage in the pipeline
+        pipe_info (PipeInfo): information about the pipeline, can be retrieved by `pipe.info()`
+        device (torch.device): the device to be used by this stage
+        group (Optional[dist.ProcessGroup]): the process group to be used by this stage
+
+    Returns:
+        _PipelineStage: a pipeline stage that can run with `PipelineSchedules`.
+    """
+    return _PipelineStage(
+        stage_module,
+        stage_index,
+        pipe_info,
+        device,
+        group,
+    )
 
 
 # Manual PipelineStage functions and definition
