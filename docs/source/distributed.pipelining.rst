@@ -129,7 +129,7 @@ launcher service to launch multiple processes:
 Options for Splitting a Model
 *****************************
 
-.. option_1_manual:
+.. _option_1_manual:
 
 Option 1: splitting a model manually
 ====================================
@@ -213,7 +213,7 @@ may also be required, if the output shape/dtype of the model chunk will be
 affected.
 
 
-.. option_2_tracer:
+.. _option_2_tracer:
 
 Option 2: splitting a model automatically
 =========================================
