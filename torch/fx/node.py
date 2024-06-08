@@ -11,6 +11,7 @@ import inspect
 import warnings
 from torch.fx.operator_schemas import normalize_function, normalize_module, ArgsKwargsPair
 from .._ops import ops as _ops
+from torch._C import NodeBase
 
 if TYPE_CHECKING:
     from .graph import Graph
@@ -139,7 +140,7 @@ def _format_arg(arg, max_list_len=float('inf')) -> str:
         return str(arg)
 
 @compatibility(is_backward_compatible=True)
-class Node:
+class Node(NodeBase):
     """
     ``Node`` is the data structure that represents individual operations within
     a ``Graph``. For the most part, Nodes represent callsites to various entities,
@@ -197,6 +198,7 @@ class Node:
                 annotation of values in the generated code or for other types
                 of analyses.
         """
+        super().__init__()
         self.graph = graph
         self.name = name  # unique name of value being created
         assert op in ['placeholder', 'call_method', 'call_module', 'call_function', 'get_attr', 'output', 'root']
@@ -235,9 +237,6 @@ class Node:
         # does not produce a value, it's more of a notation. Thus, this value
         # describes the type of args[0] in the ``return`` node.
         self.type : Optional[Any] = return_type
-        self._prev = self
-        self._next = self
-        self._erased = False
         self._sort_key: Any = ()
 
         # If set, use this fn to print this node
