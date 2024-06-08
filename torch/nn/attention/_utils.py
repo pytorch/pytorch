@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 """Defines utilities for interacting with scaled_dot_product_attention"""
 import math
 from typing import List, Optional
