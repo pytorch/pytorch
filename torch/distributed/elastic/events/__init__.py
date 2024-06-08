@@ -95,10 +95,10 @@ def construct_and_record_rdzv_event(
         node_state (NodeState): The state of the node (INIT, RUNNING, SUCCEEDED, FAILED).
         name (str): Event name. (E.g. Current action being performed).
         hostname (str): Hostname of the node.
-        pid (int): The process id of the node.
+        pid (Optional[int]): The process id of the node.
         master_endpoint (str): The master endpoint for the rendezvous store, if known.
-        local_id (int):  The local_id of the node, if defined in dynamic_rendezvous.py
-        rank (int): The rank of the node, if known.
+        local_id (Optional[int]):  The local_id of the node, if defined in dynamic_rendezvous.py
+        rank (Optional[int]): The rank of the node, if known.
     Returns:
         None
     Example:
