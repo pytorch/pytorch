@@ -730,7 +730,9 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
         model(x).sum().backward()
         optim.step()
         optim.zero_grad()
-        self.assertTrue(isinstance(list(optim.state.values())[0]["exp_avg"], DTensor))
+        self.assertIsInstance(
+            list(optim.state.values())[0]["exp_avg"], DTensor  # noqa: RUF015
+        )
         opt_state_dict = ptd_state_dict.get_optimizer_state_dict(
             model,
             optim,
@@ -743,7 +745,9 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
             optim_state_dict=opt_state_dict,
             options=ptd_state_dict.StateDictOptions(full_state_dict=True),
         )
-        self.assertTrue(isinstance(list(optim.state.values())[0]["exp_avg"], DTensor))
+        self.assertIsInstance(
+            list(optim.state.values())[0]["exp_avg"], DTensor  # noqa: RUF015
+        )
 
     @with_comms
     @skip_if_lt_x_gpu(2)
