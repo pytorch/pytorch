@@ -744,10 +744,17 @@ def fx_codegen_and_compile(
         # has some issues with memory in training
         _recursive_post_grad_passes(gm, is_inference=is_inference)
         V.debug.fx_graph_transformed(gm, example_inputs)
-        post_grad_graphs_log.debug("%s", lazy_format_graph_code("AFTER POST GRAD", gm))
+        post_grad_graphs_log.debug(
+            "%s",
+            lazy_format_graph_code(
+                "AFTER POST GRAD", gm, include_stride=True, include_device=True
+            ),
+        )
         trace_structured(
             "inductor_post_grad_graph",
-            payload_fn=lambda: gm.print_readable(print_output=False),
+            payload_fn=lambda: gm.print_readable(
+                print_output=False, include_stride=True, include_device=True
+            ),
         )
         if config.is_fbcode():
             log_optimus_to_scuba(
