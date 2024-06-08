@@ -38,7 +38,7 @@ class CppTemplate(KernelTemplate):
         kernel_name = f"cpp_{self.name}"
         with patch.object(
             V.graph, "get_dtype", self._fake_get_dtype(self.output_node)
-        ), CppTemplateKernel(
+        ), patch.object(ir.FlexibleLayout, "allow_indexing", True), CppTemplateKernel(
             kernel_name=kernel_name,
         ) as kernel:
             code = kernel.render(self, **kwargs)
