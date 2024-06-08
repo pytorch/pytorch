@@ -1,8 +1,10 @@
+# mypy: allow-untyped-defs
 import contextlib
 
 from typing import Any, cast, Dict, List, NamedTuple, Optional, Set, Tuple
 
 import torch
+import torch._dynamo.compiled_autograd as ca
 import torch.distributed as dist
 import torch.nn as nn
 from torch.distributed.fsdp._common_utils import _named_parameters_with_duplicates
@@ -339,7 +341,6 @@ class FSDPParamGroup:
             if fsdp_param.grad_offload_event is not None:
                 fsdp_param.grad_offload_event.synchronize()
                 fsdp_param.grad_offload_event = None
-            fsdp_param._unsharded_param = None
         self._post_forward_indices.clear()
 
     def _prefetch_unshard(self):
@@ -410,8 +411,8 @@ class FSDPParamGroup:
     def _register_post_backward_hook(
         self, args: Tuple[Any, ...], kwargs: Dict[str, Any]
     ) -> Tuple[Tuple[Any, ...], Dict[str, Any]]:
-        # Compile relies on `root_post_backward_callback` to call each ParamGroup's post_backward.
-        if torch._dynamo.compiled_autograd.compiled_autograd_enabled:
+        # Compile relies on `root_post_backward_callback` to call each `FSDPParamGroup.post_backward`
+        if ca.compiled_autograd_enabled:
             return args, kwargs
         if not torch.is_grad_enabled():
             return args, kwargs

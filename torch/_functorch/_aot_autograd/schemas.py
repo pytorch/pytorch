@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 """
 The various dataclasses, Enums, namedtuples etc used in AOTAutograd. This includes
 input/output types, metadata, config, function signatures etc.
@@ -303,6 +304,9 @@ class ViewAndMutationMeta:
     # forward, but is turned on during the backward call, then an error is
     # raised
     deterministic: Optional[bool] = None
+
+    # Keeps track of which input indices store parameters (which we will treat as static)
+    static_parameter_indices: List[int] = field(default_factory=list)
 
     # Map of effect type (ex. _EffectType.ORDERED) to token.  If there are
     # side-effectful operators, FunctionalTensorMode will populate this
