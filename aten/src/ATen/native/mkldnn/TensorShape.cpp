@@ -2,7 +2,6 @@
 #include <ATen/Config.h>
 #include <ATen/InferSize.h>
 #include <ATen/core/Tensor.h>
-#include <ATen/native/mkldnn/TensorShape.h>
 #include <c10/core/SymIntArrayRef.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -106,7 +105,7 @@ namespace at {
 namespace native {
 
 
-Tensor mkldnn_view_symint(const Tensor& self, c10::SymIntArrayRef size) {
+static Tensor mkldnn_view_symint(const Tensor& self, c10::SymIntArrayRef size) {
   return mkldnn_view(self, C10_AS_INTARRAYREF_SLOW(size));
 }
 
