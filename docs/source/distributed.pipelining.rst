@@ -43,15 +43,14 @@ on **general** models.
 It consists of two parts: a
 **splitting frontend** and a **distributed runtime**.
 The splitting frontend takes your model code as-is, splits it up into "model
-partitions", and capture the data-flow relationship.  The distributed runtime
+partitions", and captures the data-flow relationship.  The distributed runtime
 executes the pipeline stages on different devices in parallel, handling things
 like micro-batch splitting, scheduling, communication, and gradient propagation,
 etc.
 
 Overall, the ``pipelining`` package provides the following features:
 
-* Splitting of model code based on simple specification. The goal is to make
-  parallelism work for your model with **zero model code change**.
+* Splitting of model code based on simple specification.
 * Rich support for pipeline schedules, including GPipe, 1F1B,
   Interleaved 1F1B and Looped BFS, and providing the infrastruture for writing
   customized schedules.
@@ -63,18 +62,122 @@ Overall, the ``pipelining`` package provides the following features:
   application on the Llama model.
 
 
-Step 1: choose the frontend that fits your need
-***********************************************
+Step 1: build ``PipelineStage`` objects for Execution
+********************************************************
 
-The ``pipelining`` package provides two frontends for two different use cases.
-You can make your choice based on whether you have:
+Before we can use a PipelineSchedule, we need to create PipelineStage objects that wrap the part of the model running in that stage.  The `PipelineStage` is responsible for allocating communication buffers and creating send/recv ops to communicate with its peers.  It manages intermediate buffers e.g. for the outputs of forward that have not been consumed yet, and it provides a utility for running the backwards for the stage model.
 
-* a full model, or
-* module constructor for each stage.
+A `PipelineStage` needs to know the input and output shapes for the stage model, so that it can correctly allocate communication buffers.  The shapes must be static, e.g. at runtime the shapes can not change from step to step.  A class `PipeliningShapeError` will be raised if runtime shapes do not match the expected shapes.  When composing with other paralleisms or applying mixed precision, these techniques must be taken into account so the `PipelineStage` knows the correct shape (and dtype) for the output of the stage module at runtime.
+
+Users may construct a `PipelineStage` instance directly, by passing in an `nn.Module` representing the portion of the model that should run on the stage.  This may require changes to the original model code.  See the example below "Preparing a model for pipeline splitting".
+
+Alternatively, the tracing frontend can use graph-partitioning to construct a `GraphModule` that represents the desired subset of the model automatically.  This technique requires the model is traceable with torch.Export in non-strict mode. Composability of the resulting `GraphModule` with other parallelism techniques and torch.compile is experimental, and may require some workarounds.  Usage of this frontend may be more appealing if the user cannot easily change the model code.  See "Splitting a Model with the ``pipeline`` tracing frontend" for more information.
 
 
-Frontend 1: the ``pipeline`` API -- if you have a full model
-============================================================
+Step 2: use ``PipelineSchedule`` for execution
+**********************************************
+
+We can now attach the ``PipelineStage`` to a pipeline schedule, and run the
+schedule with input data. Here is a GPipe example:
+
+.. code-block:: python
+
+  from torch.distributed.pipelining import ScheduleGPipe
+
+  # Create a schedule
+  schedule = ScheduleGPipe(stage, n_microbatches)
+
+  # Input data (whole batch)
+  x = torch.randn(batch_size, in_dim, device=device)
+
+  # Run the pipeline with input `x`
+  # `x` will be divided into microbatches automatically
+  if rank == 0:
+      schedule.step(x)
+  else:
+      output = schedule.step()
+
+Note that the above code needs to be launched for each worker, thus we use a
+launcher service to launch multiple processes:
+
+.. code-block:: bash
+
+  torchrun --nproc_per_node=2 example.py
+
+
+Preparing a model for pipeline splitting
+========================================
+
+To directly construct a `PipelineStage`, the user is responsible for providing a single nn.Module instance that owns the relevant nn.Parameters and nn.Buffers, and defines a .forward() method that executes the operations relevant for that stage.  For example, a condensed version of the Transformer class defined in Torchtitan shows a pattern of building an easily partitionable model.
+
+.. code-block:: python
+
+  class Transformer(nn.Module):
+      def __init__(self, model_args: ModelArgs):
+          super().__init__()
+
+          self.tok_embeddings = nn.Embedding(...)
+
+          # Using a ModuleDict lets us delete layers witout affecting names,
+          # ensuring checkpoints will correctly save and load.
+          self.layers = torch.nn.ModuleDict()
+          for layer_id in range(model_args.n_layers):
+              self.layers[str(layer_id)] = TransformerBlock(...)
+
+          self.output = nn.Linear(...)
+
+      def forward(self, tokens: torch.Tensor):
+          # Handling layers being 'None' at runtime enables easy pipeline splitting
+          h = self.tok_embeddings(tokens) if self.tok_embeddings else tokens
+
+          for layer in self.layers.values():
+              h = layer(h, self.freqs_cis)
+
+          h = self.norm(h) if self.norm else h
+          output = self.output(h).float() if self.output else h
+          return output
+
+A model defined in this manner can be easily configured per stage by first initializing the whole model (using meta-device to avoid OOM errors), deleting undesired layers for that stage, and then creating a PipelineStage that wraps the model.  For example:
+
+.. code-block:: python
+
+  with torch.device("meta"):
+      assert num_stages == 2, "This is a simple 2-stage example"
+
+      # we construct the entire model, then delete the parts we do not need for this stage
+      # in practice, this can be done using a helper function that automatically divides up layers across stages.
+      model = Transformer()
+
+      if stage_index == 0:
+          # prepare the first stage model
+          del model.layers["1"]
+          model.norm = None
+          model.output = None
+
+      elif stage_index == 1:
+          # prepare the second stage model
+          model.tok_embeddings = None
+          del model.layers["0"]
+
+      from torch.distributed.pipelining import PipelineStage
+      stage = PipelineStage(
+          model,
+          stage_index,
+          num_stages,
+          device,
+          input_args=example_input_microbatch,
+      )
+
+
+The ``PipelineStage`` requires an example argument `input_args` representing the runtime input to the stage, which would be one microbatch worth of input data.
+This argument is passed through the forward method of the stage module to determine the
+input and output shapes required for communication.
+
+When composing with other Data or Model parallelism techniques, `output_args` may also be required, if the output shape/dtype of the model chunk will be affected.
+
+
+Splitting a Model with the ``pipeline`` tracing frontend
+========================================================
 
 If you have a full model and do not want to spend time on modifying it into a
 sequence of "model partitions", the ``pipeline`` API is here to help.
@@ -185,60 +288,6 @@ You can also create a distributed stage runtime on a device using ``Pipe``:
   The ``pipeline`` frontend uses a tracer (``torch.export``) to capture your
   model into a single graph. If your model is not full-graph'able, you can use
   our manual frontend below.
-
-Frontend 2: ``PipelineStage`` -- if you already have module for each stage
-================================================================================
-
-If you already have the module for each stage, you can skip the pipeline split
-step above and directly connect to our runtime offering: ``PipelineStage``.
-The ``PipelineStage`` wraps your stage module given a distributed context,
-i.e. a ``ProcessGroup`` along the pipeline dimension.
-
-.. code-block:: python
-
-  from torch.distributed.pipelining import PipelineStage
-  stage = PipelineStage(
-      stage_mod,
-      stage_idx,
-      num_stages,
-      device,
-      input_args=x.chunk(num_microbatches)[0],
-  )
-
-The ``PipelineStage`` requires an example argument (similar to ``example_args`` used in ``pipeline``).
-This argument is passed through the forward method of the stage module to determine the
-input and output shapes required for communication.
-
-
-Step 2: use ``PipelineSchedule`` for execution
-**********************************************
-
-We can now attach the ``PipelineStage`` to a pipeline schedule, and run the
-schedule with input data. Here is a GPipe example:
-
-.. code-block:: python
-
-  from torch.distributed.pipelining import ScheduleGPipe
-
-  # Create a schedule
-  schedule = ScheduleGPipe(stage, n_microbatches)
-
-  # Input data (whole batch)
-  x = torch.randn(batch_size, in_dim, device=device)
-
-  # Run the pipeline with input `x`
-  # `x` will be divided into microbatches automatically
-  if rank == 0:
-      schedule.step(x)
-  else:
-      output = schedule.step()
-
-Note that the above code needs to be launched for each worker, thus we use a
-launcher service to launch multiple processes:
-
-.. code-block:: bash
-
-  torchrun --nproc_per_node=2 example.py
 
 
 Hugging Face Examples
