@@ -63,7 +63,7 @@ Overall, the ``pipelining`` package provides the following features:
 
 
 Step 1: build ``PipelineStage`` objects for Execution
-********************************************************
+*****************************************************
 
 Before we can use a PipelineSchedule, we need to create PipelineStage objects that wrap the part of the model running in that stage.  The `PipelineStage` is responsible for allocating communication buffers and creating send/recv ops to communicate with its peers.  It manages intermediate buffers e.g. for the outputs of forward that have not been consumed yet, and it provides a utility for running the backwards for the stage model.
 
@@ -396,9 +396,9 @@ Microbatch Utilities
 Pipeline Stages
 ===============
 
-.. automodule:: torch.distributed.pipelining.PipelineStage
+.. automodule:: torch.distributed.pipelining.stage
 
-.. currentmodule:: torch.distributed.pipelining.PipelineStage
+.. currentmodule:: torch.distributed.pipelining.stage
 
 .. autoclass:: PipelineStage
 
@@ -407,9 +407,9 @@ Pipeline Stages
 Pipeline Schedules
 ==================
 
-.. automodule:: torch.distributed.pipelining.PipelineSchedule
+.. automodule:: torch.distributed.pipelining.schedules
 
-.. currentmodule:: torch.distributed.pipelining.PipelineSchedule
+.. currentmodule:: torch.distributed.pipelining.schedules
 
 .. autoclass:: ScheduleGPipe
 
