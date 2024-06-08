@@ -8,9 +8,7 @@ import operator
 import os
 from collections import defaultdict
 from dataclasses import dataclass, replace
-from typing import Callable, Dict, List, Optional, Set, Tuple, Union
-
-import sympy
+from typing import Callable, Dict, List, Optional, Set, Tuple, TYPE_CHECKING, Union
 
 import torch
 import torch._inductor.inductor_prims
@@ -28,6 +26,9 @@ from torch.fx.experimental.symbolic_shapes import (
 from torch.fx.passes import graph_drawer
 from . import config
 from .compile_utils import fx_graph_cse, get_aten_target
+
+if TYPE_CHECKING:
+    import sympy
 
 
 AOT_PARTITIONER_DEBUG = config.debug_partitioner
