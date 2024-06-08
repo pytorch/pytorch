@@ -1,5 +1,4 @@
 # mypy: allow-untyped-defs
-# mypy: allow-untyped-defs
 
 
 import argparse
