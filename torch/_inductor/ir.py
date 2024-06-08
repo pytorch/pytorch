@@ -3404,9 +3404,7 @@ class ComputedBuffer(Buffer):
             ]
             index_formulas += extra_indexing_expr
 
-        memory_addrs = [
-            *body.writes_name2expr.values()
-        ]
+        memory_addrs = [*body.writes_name2expr.values()]
 
         def simplify_and_reorder(x_vars, support_vars, sizes):
             sizes, reindex0, reindex1 = self._apply_loop_reordering(
