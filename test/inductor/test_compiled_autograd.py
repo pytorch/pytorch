@@ -1,5 +1,6 @@
 # Owner(s): ["module: inductor"]
 import functools
+import io
 import logging
 import re
 import sys
@@ -13,6 +14,7 @@ import torch.nn as nn
 from torch import _inductor as inductor
 from torch._dynamo import compiled_autograd, config
 from torch._dynamo.utils import counters
+from torch._inductor import config as inductor_config
 from torch._inductor.test_case import run_tests, TestCase
 from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
 from torch.testing._internal.logging_utils import logs_to_string
@@ -457,7 +459,7 @@ main()
         param_proxy, activ_proxy = proxies
         buf = activ_proxy * 2
         torch.ops.inductor.accumulate_grad_.default(param_proxy, buf)
-        compiled_fn = compiler.end_capture(buf)
+        runtime_wrapper, compiled_fn = compiler.end_capture(buf)
 
         def bytecode_hook(code, out_code):
             import dis
@@ -494,7 +496,9 @@ main()
         torch._dynamo.reset()
         handle = torch._dynamo.convert_frame.register_bytecode_hook(bytecode_hook)
         try:
-            compiled_fn(inputs=[param, activ], sizes=(), hooks=())
+            runtime_wrapper(
+                compiled_fn=compiled_fn, inputs=[param, activ], sizes=(), hooks=()
+            )
         finally:
             handle.remove()
 
@@ -1658,6 +1662,147 @@ TORCH_LIBRARY(test_autograd_cpp_node_data_dependent, m) {
             out = compiled_fn(activations)
             self.assertTrue(len(activations) == 0)
 
+    @unittest.skipIf(not HAS_CUDA, "requires cuda")
+    def test_cudagraphs_cpu_division(self):
+        from torch._dynamo.testing import reduce_to_scalar_loss
+
+        model = torch.nn.Linear(10, 10, dtype=torch.float16).cuda()
+        inputs = torch.randn(10, 10, dtype=torch.float16).cuda()
+        out = model(inputs)
+        loss = reduce_to_scalar_loss(out)
+
+        stderr_msgs = io.StringIO()
+        with mock.patch("sys.stderr", stderr_msgs), compiled_autograd.enable(
+            compiler_fn
+        ):
+            torch._inductor.config.triton.cudagraphs = True
+            loss.backward()
+            torch._inductor.config.triton.cudagraphs = False
+
+        self.assertFalse("skipping cudagraphs" in stderr_msgs.getvalue())
+
+    def test_cudagraphs_cpu_graph(self):
+        from torch._dynamo.testing import reduce_to_scalar_loss
+
+        model = torch.nn.Linear(10, 10, dtype=torch.float16)
+        inputs = torch.randn(10, 10, dtype=torch.float16)
+        out = model(inputs)
+        loss = reduce_to_scalar_loss(out)
+
+        with compiled_autograd.enable(compiler_fn):
+            torch._inductor.config.triton.cudagraphs = True
+            loss.backward()
+            torch._inductor.config.triton.cudagraphs = False
+
+        self.assertEqual(counters["inductor"]["cudagraph_skips"], 1)
+
+    @unittest.skipIf(not HAS_CUDA, "requires cuda")
+    def test_cudagraphs_sdpa(self):
+        query = torch.rand(
+            32, 8, 128, 64, dtype=torch.float16, device="cuda", requires_grad=True
+        )
+        key = torch.rand(32, 8, 128, 64, dtype=torch.float16, device="cuda")
+        value = torch.rand(32, 8, 128, 64, dtype=torch.float16, device="cuda")
+        out = torch.nn.functional.scaled_dot_product_attention(query, key, value)
+
+        with config.patch(compiled_autograd=True), inductor_config.patch(
+            "triton.cudagraphs", True
+        ):
+            opt_bwd = torch.compile(lambda: out.sum().backward())
+            opt_bwd()
+
+        self.assertEqual(counters["compiled_autograd"]["captures"], 1)
+        self.assertEqual(counters["inductor"]["cudagraph_skips"], 0)
+
+    @unittest.skipIf(not HAS_CUDA, "requires cuda")
+    def test_cudagraphs_cpu_scalar_used_in_python_custom_op(self):
+        class MyFn(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                cpu_tensor = torch.tensor(5)
+                ctx.save_for_backward(x, cpu_tensor)  # visible to c++/autograd
+                ctx.cpu_scalar = 5  # opaque to c++/autograd
+                return x.sum()
+
+            @staticmethod
+            def backward(ctx, gO):
+                x, cpu_tensor = ctx.saved_tensors
+                expand = gO * torch.ones_like(x)
+                return expand * cpu_tensor * ctx.cpu_scalar
+
+        x = torch.randn(10, requires_grad=True, device="cuda")
+        out = MyFn.apply(x)
+        with config.patch(compiled_autograd=True), inductor_config.patch(
+            "triton.cudagraphs", True
+        ):
+            opt_bwd = torch.compile(lambda: out.backward())
+            opt_bwd()
+
+        self.assertEqual(counters["compiled_autograd"]["captures"], 1)
+        # Compiled autograd lifts custom autograd.Function bwd instead of tracing it.
+        # Must skip since we do not know if the cpu scalar will be used only in ATen/prim ops.
+        self.assertEqual(counters["inductor"]["cudagraph_skips"], 1)
+
+    @unittest.skipIf(not HAS_CUDA, "requires cuda")
+    def test_cudagraphs_cpu_scalar_used_in_cpp_custom_op(self):
+        cpp_source = """
+struct CustomOpAutogradFunction : public torch::autograd::Function<CustomOpAutogradFunction> {
+  static constexpr bool is_traceable = true;
+
+  static torch::Tensor forward(
+      torch::autograd::AutogradContext* ctx,
+      const torch::Tensor& x) {
+    const auto& cpu_tensor = torch::tensor(1);
+    ctx->save_for_backward({x, cpu_tensor});
+    ctx->saved_data["cpu_scalar"] = 1;
+    return x;
+  }
+
+  static torch::autograd::variable_list backward(
+      torch::autograd::AutogradContext *ctx,
+      torch::autograd::variable_list grad_output) {
+    const auto& saved_variables = ctx->get_saved_variables();
+    assert(saved_variables.size() == 2);
+    torch::Tensor x = saved_variables[0];
+    torch::Tensor cpu_tensor = saved_variables[1];
+    int cpu_scalar = ctx->saved_data["cpu_scalar"].toInt();
+    auto expand = grad_output[0] * torch::ones_like(x);
+    torch::autograd::variable_list grad_inputs(1);
+    grad_inputs[0] = expand * cpu_tensor * cpu_scalar;  // autograd engine asserts that tensors are on same device
+    return grad_inputs;
+  }
+};
+
+torch::Tensor custom_op_backed_by_autograd_fn(const torch::Tensor& x) {
+  return CustomOpAutogradFunction::apply(x);
+}
+
+TORCH_LIBRARY(test_cudagraphs_cpu_scalar_used_in_cpp_custom_op, m) {
+    m.def("custom_op_backed_by_autograd_fn", custom_op_backed_by_autograd_fn);
+}
+        """
+
+        module = torch.utils.cpp_extension.load_inline(
+            name="test_cudagraphs_cpu_scalar_used_in_cpp_custom_op",
+            cpp_sources=cpp_source,
+            functions="custom_op_backed_by_autograd_fn",
+            verbose=True,
+        )
+
+        x = torch.randn(2, 2, requires_grad=True, device="cuda")
+        with config.patch(compiled_autograd=True), inductor_config.patch(
+            "triton.cudagraphs", True
+        ):
+            out = torch.ops.test_cudagraphs_cpu_scalar_used_in_cpp_custom_op.custom_op_backed_by_autograd_fn(
+                x
+            )
+            opt_bwd = torch.compile(lambda: out.sum().backward())
+            opt_bwd()
+
+        self.assertEqual(counters["compiled_autograd"]["captures"], 1)
+        # always safe to move, since we trace into the autograd::function bwd and can see if it's only used by aten ops
+        self.assertEqual(counters["inductor"]["cudagraph_skips"], 0)
+
     def test_verbose_logs_graph(self):
         torch._logging.set_logs(compiled_autograd_verbose=True)
 
@@ -1978,6 +2123,7 @@ known_failing_tests = {
     "test_autograd_function_backed_op",  # RuntimeError: compiled_args not implemented
     "test_setitem",  # AssertionError: Tensor-likes are not close!
     "test_grad_nonleaf_register_hook",  # IndexError: list index out of range (NB: x.grad = y where both x and y are input tensors)
+    "test_scalar_grad_mixed_device",  # Fake Tensors aren't propagating device properly for 0-dim grads
 }
 
 if not HAS_CUDA:
