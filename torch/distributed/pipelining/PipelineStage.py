@@ -15,12 +15,7 @@ from torch.nn.parallel import DistributedDataParallel
 
 from ._backward import stage_backward
 from ._debug import map_debug_info
-from ._utils import (
-    flatten_args,
-    modify_graph_op_device,
-    PipeInfo,
-    validate_tensors_metadata,
-)
+from ._utils import flatten_args, PipeInfo, validate_tensors_metadata
 
 
 __all__ = [
@@ -686,8 +681,6 @@ class _PipelineStage(_PipelineStageBase):
 
         # Cast submodule to device
         self._move_submod_to_device()
-        # Move ops argument to device
-        self._move_ops_to_device()
 
     def _move_submod_to_device(self):
         # Move submodule to indicated device if possible
@@ -701,15 +694,6 @@ class _PipelineStage(_PipelineStageBase):
             logger.debug(f"{self.log_prefix} Found meta parameters!")  # noqa: G004
         else:
             self.submod.to(self.device)
-
-    def _move_ops_to_device(self):
-        # Today PT2 tracer does not treat `x.device` as a symbolic device;
-        # instead, the device of tracing time got burned into the generated
-        # code.  Here we provide a workaround for users to manually modify the
-        # "device" kwarg of operations. Such operation may include:
-        # `torch.ones`, `torch.zeros`, `torch.rand`, etc.
-        if isinstance(self.submod, torch.fx.GraphModule):
-            modify_graph_op_device(self.submod, self.device)
 
     def _prepare_forward_infra(self, num_microbatches: int):
         """
