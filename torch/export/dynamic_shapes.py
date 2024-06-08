@@ -1,13 +1,21 @@
+# mypy: allow-untyped-defs
 import builtins
 import dataclasses
 import inspect
+import math
 import sys
 import weakref
 from collections import defaultdict
-from typing import Any, Callable, Dict, List, Optional, Tuple, TYPE_CHECKING, Union
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple, TYPE_CHECKING, Union
 
 import torch
-from torch.utils._pytree import _get_node_type, BUILTIN_TYPES, SUPPORTED_NODES, tree_map
+from torch.utils._pytree import (
+    _get_node_type,
+    BUILTIN_TYPES,
+    SUPPORTED_NODES,
+    tree_flatten,
+    tree_map,
+)
 
 from .exported_program import ExportedProgram
 
@@ -18,7 +26,13 @@ if TYPE_CHECKING:
 
     from ..fx.experimental.symbolic_shapes import ShapeEnv, StrictMinMaxConstraint
 
-__all__ = ["Constraint", "Dim", "dims", "dynamic_dim"]
+__all__ = [
+    "Constraint",
+    "Dim",
+    "dims",
+    "dynamic_dim",
+    "refine_dynamic_shapes_from_suggested_fixes",
+]
 
 
 class _Dim(type):
@@ -253,13 +267,10 @@ class _Constraint(_ConstraintTarget, metaclass=_ConstraintFactory):
     shared: Optional[_ConstraintTarget] = None
     debug_name: Optional[str] = None
 
-    def _clone_with_range(self, lower=0, upper=None):
+    def _clone_with_range(self, lower=0, upper=math.inf):
         # Import sympy locally
         from torch.fx.experimental.symbolic_shapes import StrictMinMaxConstraint
         from torch.utils._sympy.value_ranges import ValueRanges
-
-        if upper is None:
-            upper = sys.maxsize - 1
 
         constraint_range = StrictMinMaxConstraint(
             vr=self.constraint_range.vr & ValueRanges(lower=lower, upper=upper),
@@ -488,6 +499,7 @@ def dynamic_dim(t: torch.Tensor, index: int, debug_name: Optional[str] = None):
         )
 
     # Import sympy locally
+    import sympy
 
     from torch.fx.experimental.symbolic_shapes import StrictMinMaxConstraint
     from torch.utils._sympy.value_ranges import ValueRanges
@@ -497,7 +509,7 @@ def dynamic_dim(t: torch.Tensor, index: int, debug_name: Optional[str] = None):
         id(t),
         index,
         StrictMinMaxConstraint(
-            vr=ValueRanges(lower=0, upper=sys.maxsize - 1), warn_only=False
+            vr=ValueRanges(lower=0, upper=sympy.oo), warn_only=False
         ),
         debug_name=debug_name,
     )
@@ -897,3 +909,156 @@ def _process_dynamic_shapes(
                 constraints.append(primary)
 
     return constraints  # type: ignore[return-value]
+
+
+def _get_dim_name_mapping(
+    dynamic_shapes: Union[Dict[str, Any], Tuple[Any], List[Any], None]
+):
+    name_to_dim = {}
+    for dim in tree_flatten(
+        dynamic_shapes,
+        is_leaf=lambda x: isinstance(x, _Dim),
+    )[0]:
+        if dim is None or isinstance(dim, int):
+            continue
+        name_to_dim[dim.__name__] = dim
+        if isinstance(dim, _DerivedDim):
+            name_to_dim[dim.root.__name__] = dim.root  # type: ignore[attr-defined]
+    return name_to_dim
+
+
+def refine_dynamic_shapes_from_suggested_fixes(
+    msg: str,
+    dynamic_shapes: Union[Dict[str, Any], Tuple[Any], List[Any]],
+) -> Union[Dict[str, Any], Tuple[Any], List[Any]]:
+    """
+    For working with export's dynamic shapes suggested fixes, and/or automatic dynamic shapes.
+    Refines the given dynamic shapes spec, given a ConstraintViolation error message and the original dynamic shapes.
+
+    For most cases behavior is straightforward - i.e. for suggested fixes that specialize or refine a Dim's range,
+    or fixes that suggest a derived relation, the new dynamic shapes spec will be updated as such.
+
+    e.g.
+    Suggested fixes:
+
+        dim = Dim('dim', min=3, max=6) -> this just refines the dim's range
+        dim = 4 -> this specializes to a constant
+        dy = dx + 1 -> dy was specified as an independent dim, but is actually tied to dx with this relation
+
+    However, suggested fixes associated with derived dims can be more complicated.
+    For example, if a suggested fix is provided for a root dim, the new derived dim value is evaluated based on the root.
+
+    e.g.
+    dx = Dim('dx')
+    dy = dx + 2
+    dynamic_shapes = {"x": (dx,), "y": (dy,)}
+
+    Suggested fixes:
+
+        dx = 4  # specialization will lead to dy also specializing = 6
+        dx = Dim('dx', max=6)  # dy now has max = 8
+
+    Derived dims suggested fixes can also be used to express divisibility constraints.
+    This involves creating new root dims that aren't tied to a particular input shape.
+    In this case the root dims won't appear directly in the new spec, but as a root of
+    one of the dims.
+
+    e.g.
+    Suggested fixes:
+
+        _dx = Dim('_dx', max=1024)  # this won't appear in the return result, but dx will
+        dx = 4*_dx  # dx is now divisible by 4, with a max value of 4096
+    """
+
+    import re
+
+    import sympy
+
+    from torch._dynamo.exc import UserError, UserErrorType
+    from torch.fx.experimental.symbolic_shapes import _is_supported_equivalence
+
+    try:
+        shape_fixes_msg = msg.split("Suggested fixes:")[1].strip()
+    except Exception as exc:
+        raise UserError(
+            UserErrorType.INVALID_INPUT,
+            "Suggested fixes not found in error message given to refine_dynamic_shapes_from_suggested_fixes()",
+        ) from exc
+
+    # build shape_fixes dictionary
+    shape_fixes = {}
+    for fix in shape_fixes_msg.split("\n"):
+        fix = fix.strip()
+        if match := re.match(r"(.*) = Dim\('(.*)'.*\)", fix):
+            name = match.group(1)
+            _min, _max = None, None
+            if match_min := re.match(r".* = Dim\('.*', min\=([0-9]+).*\)", fix):
+                _min = int(match_min.group(1))
+            if match_max := re.match(r".* = Dim\('.*'.*max\=([0-9]+)\)", fix):
+                _max = int(match_max.group(1))
+            shape_fixes[name] = Dim(name, min=_min, max=_max)
+        else:
+            name, expr = fix.split(" = ")
+            expr = sympy.sympify(expr)
+            if isinstance(expr, sympy.Number):
+                shape_fixes[name] = int(expr)  # static, integer
+            else:
+                shape_fixes[name] = expr  # relation or derived dim
+
+    name_to_dim = _get_dim_name_mapping(dynamic_shapes)
+
+    # track derived dim roots
+    roots: Set[str] = set()
+    for k, c in shape_fixes.items():
+        assert isinstance(c, (int, _Dim, _DerivedDim, sympy.Expr))
+        if isinstance(c, sympy.Expr):  # check dim/derived dim expression
+            assert _is_supported_equivalence(c)
+            shape_fixes[k] = c
+            roots.add(str(next(iter(c.free_symbols))))
+        if isinstance(c, _DerivedDim):
+            roots.add(c.root.__name__)  # type: ignore[attr-defined]
+
+    # check keys are existing dims or new roots
+    for k, c in shape_fixes.items():
+        assert k in name_to_dim or k in roots
+
+    # cache so we don't produce multiple derived dim objects
+    derived_dim_cache: Dict[str, _DerivedDim] = {}
+
+    def apply_fixes(dim, dummy):
+        if dim is None or isinstance(dim, int):  # not dynamic
+            return dim
+        elif dim.__name__ in shape_fixes:  # directly fix
+            fix = shape_fixes[dim.__name__]
+            if isinstance(fix, sympy.Expr):  # now derived or related
+                if str(fix) in derived_dim_cache:
+                    return derived_dim_cache[str(fix)]
+                else:
+                    symbol = next(iter(fix.free_symbols))
+                    # try to locate symbol
+                    if symbol.name in shape_fixes:  # type: ignore[attr-defined]
+                        root = shape_fixes[symbol.name]  # type: ignore[attr-defined]
+                    else:
+                        assert symbol.name in name_to_dim  # type: ignore[attr-defined]
+                        root = name_to_dim[symbol.name]  # type: ignore[attr-defined]
+                    # figure out value of fix
+                    modulus, remainder = sympy.polys.polytools.div(fix, symbol)
+                    dim = root
+                    if modulus != 1:
+                        dim = int(modulus) * dim
+                    if remainder != 0:
+                        dim = dim + int(remainder)
+                    derived_dim_cache[str(fix)] = dim
+                    return dim
+            else:
+                return fix
+        elif isinstance(dim, _DerivedDim) and dim.root.__name__ in shape_fixes:  # type: ignore[attr-defined]
+            if dim.__name__ in derived_dim_cache:
+                return derived_dim_cache[dim.__name__]
+            else:  # evaluate new derived value based on root
+                _dim = dim.fn(shape_fixes[dim.root.__name__])  # type: ignore[attr-defined]
+                derived_dim_cache[dim.__name__] = _dim
+                return _dim
+        return dim  # unchanged dim
+
+    return _tree_map(apply_fixes, dynamic_shapes, dynamic_shapes)
