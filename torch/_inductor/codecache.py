@@ -56,7 +56,7 @@ from torch._inductor.runtime.compile_tasks import (
     _reload_python_module_in_subproc,
 )
 from torch._inductor.runtime.runtime_utils import cache_dir
-from torch._inductor.utils import clear_on_fresh_inductor_cache, is_linux
+from torch._inductor.utils import ALIGN_BYTES, clear_on_fresh_inductor_cache, is_linux
 
 from torch._logging import trace_structured
 from torch._subclasses.fake_tensor import (
@@ -559,20 +559,28 @@ class FxGraphCachePickler(pickle.Pickler):
         return "\n".join(lines)
 
 
-def get_code_hash(roots):
-    contents: Dict[str, bytes] = {torch.__version__: b""}
-    for lib in pkgutil.iter_modules(roots):
+def build_code_hash(roots, prefix, hasher):
+    for lib in sorted(pkgutil.iter_modules(roots, prefix), key=lambda x: x.name):
         spec = lib.module_finder.find_spec(lib.name, None)
         assert spec is not None
         module = spec.origin
         assert module is not None
         with open(module, "rb") as f:
-            contents[spec.name] = f.read()
+            hasher.update(spec.name.encode("utf-8"))
+            hasher.update(f.read())
+        if lib.ispkg:
+            # need to also hash submodules
+            build_code_hash(spec.submodule_search_locations, f"{spec.name}.", hasher)
+
+
+def get_code_hash(roots, extra_files=()):
     hasher = hashlib.sha256()
-    # Iterate over dict in sorted order since iter_modules may not be deterministic
-    for name, value in sorted(contents.items()):
-        hasher.update(name.encode("utf-8"))
-        hasher.update(value)
+    hasher.update(torch.__version__.encode("utf-8"))
+    build_code_hash(roots, "", hasher)
+    for path in extra_files:
+        if os.path.exists(path):
+            with open(path, "rb") as f:
+                hasher.update(f.read())
     return hasher.digest()
 
 
@@ -583,7 +591,15 @@ def torch_key():
     """
     if not config.is_fbcode():
         inductor_root = os.path.dirname(__file__)
-        return get_code_hash([inductor_root])
+        extra_files = (
+            "codegen/aoti_runtime/interface.cpp",
+            "codegen/aoti_runtime/implementation.cpp",
+            "codegen/cpp_prefix.h",
+            "script.ld",
+        )
+        return get_code_hash(
+            [inductor_root], [os.path.join(inductor_root, x) for x in extra_files]
+        )
 
     from libfb.py import parutil
 
@@ -2043,10 +2059,14 @@ class AotCodeCompiler:
                 # as read-only (i.e. .lrodata) which could accomodate larger size of data
                 # to be linked.
                 rename_data = " .data=.lrodata,alloc,load,readonly,data,contents"
+
+            assert (
+                ALIGN_BYTES & (ALIGN_BYTES - 1)
+            ) == 0 and ALIGN_BYTES >= 64, "must be power of 2 and >= 64"
             cmd = (
                 f"{objcopy_command} --rename-section"
                 f"{rename_data}"
-                " --set-section-alignment .data=64"  # following the gAlignment of CPU in c10/core/alignment.h
+                f" --set-section-alignment .data={ALIGN_BYTES}"  # following the gAlignment of CPU in c10/core/alignment.h
                 f" {consts_o} {consts_o}"
             )
             log.debug("aot constant rename section command: %s", cmd)
@@ -2170,7 +2190,14 @@ class AotCodeCompiler:
             else:
                 run_command_and_check(compile_cmd)
 
-            def _to_bytes(t: torch.Tensor) -> bytes:
+            def _to_bytes(t: torch.Tensor, all_cuda: bool) -> bytes:
+                def _pad_to_alignment(raw_bytes):
+                    padded_bytes = raw_bytes.ljust(
+                        (len(raw_bytes) + ALIGN_BYTES - 1) // ALIGN_BYTES * ALIGN_BYTES,
+                        b"\x00",
+                    )
+                    return padded_bytes
+
                 # This serializes the tensor's untyped_storage to bytes by accessing
                 # the raw data of the underlying structure.
                 import ctypes
@@ -2179,22 +2206,27 @@ class AotCodeCompiler:
                     return b""
 
                 if t.is_mkldnn:
-                    raw_array = ctypes.cast(
-                        torch.ops.mkldnn.data_ptr(t),
-                        ctypes.POINTER(ctypes.c_ubyte * torch.ops.mkldnn._nbytes(t)),
-                    )
-                    return bytes(raw_array.contents)
+                    data_ptr = torch.ops.mkldnn.data_ptr(t)
+                    nbytes = torch.ops.mkldnn._nbytes(t)
+                else:
+                    t_cpu = t.untyped_storage().cpu()
+                    data_ptr = t_cpu.data_ptr()
+                    nbytes = t_cpu.nbytes()
 
-                t_cpu = t.untyped_storage().cpu()
                 raw_array = ctypes.cast(
-                    t_cpu.data_ptr(),
-                    ctypes.POINTER(ctypes.c_ubyte * t_cpu.nbytes()),
+                    data_ptr,
+                    ctypes.POINTER(ctypes.c_ubyte * nbytes),
                 )
+                raw_bytes = bytes(raw_array.contents)
+                return raw_bytes if all_cuda else _pad_to_alignment(raw_bytes)
 
-                return bytes(raw_array.contents)
-
+            all_cuda = all(
+                graph.get_original_value_of_constant(name).is_cuda
+                for name in graph.constants.keys()
+                if name not in graph.folded_constants
+            )
             serialized_weights = b"".join(
-                _to_bytes(graph.get_original_value_of_constant(name))
+                _to_bytes(graph.get_original_value_of_constant(name), all_cuda)
                 for name in graph.constants.keys()
                 if name not in graph.folded_constants
             )
