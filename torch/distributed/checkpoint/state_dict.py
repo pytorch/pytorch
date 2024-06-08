@@ -25,7 +25,6 @@ import torch.nn as nn
 from torch.distributed._shard.sharded_tensor import ShardedTensor
 from torch.distributed._state_dict_utils import (
     _broadcast_state_dict,
-    _distribute_state_dict,
     _flatten_state_dict,
     _gather_state_dict,
     _offload_state_dict_to_cpu,
@@ -911,10 +910,12 @@ def _load_optim_state_dict(
                     assert optim_key in osd_mapping
                     flatten_local_osd[optim_key] = flatten_osd[optim_key]
                     local_osd_mapping[optim_key] = osd_mapping[optim_key]
-            if info.broadcast_from_rank0:
-                _broadcast_state_dict(flatten_osd, flatten_local_osd, device=device)
-            else:
-                _distribute_state_dict(flatten_osd, flatten_local_osd, device=device)
+            _broadcast_state_dict(
+                flatten_osd,
+                flatten_local_osd,
+                device=device,
+                broadcast_from_rank0=info.broadcast_from_rank0,
+            )
             optim_state_dict = _unflatten_state_dict(
                 flatten_local_osd, local_osd_mapping
             )
