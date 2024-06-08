@@ -341,8 +341,24 @@ def _verify_options(
             )
             state_dict_type = StateDictType.SHARDED_STATE_DICT
 
+        @contextlib.contextmanager
+        def fsdp_state_dict_type_without_warning(
+            module,
+            state_dict_type,
+            state_dict_config,
+            optim_state_dict_config,
+        ):
+            with warnings.catch_warnings():
+                with FSDP.state_dict_type(
+                    module=module,
+                    state_dict_type=state_dict_type,
+                    state_dict_config=state_dict_config,
+                    optim_state_dict_config=optim_state_dict_config,
+                ):
+                    yield
+
         fsdp_context = functools.partial(
-            FSDP.state_dict_type,
+            fsdp_state_dict_type_without_warning,
             module=model,
             state_dict_type=state_dict_type,
             state_dict_config=state_dict_config,

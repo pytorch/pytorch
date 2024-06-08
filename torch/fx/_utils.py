@@ -16,11 +16,14 @@ def lazy_format_graph_code(name, gm, maybe_id=None, **kwargs):
         else:
             return name
 
+    if "print_output" not in kwargs:
+        kwargs["print_output"] = False
+
     return LazyString(
         lambda: _format_graph_code(
             f"===== {format_name()} =====\n",
             gm.forward.__code__.co_filename,
-            gm.print_readable(print_output=False, **kwargs),
+            gm.print_readable(**kwargs),
         )
     )
 
