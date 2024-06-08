@@ -2117,7 +2117,11 @@ def _to_copy(
         x = torch._prims.convert_element_type(x, dtype)
         dtype_converted = True
 
-    if dtype_converted and input_is_fake and not isinstance(x, torch._subclasses.FakeTensor):
+    if (
+        dtype_converted
+        and input_is_fake
+        and not isinstance(x, torch._subclasses.FakeTensor)
+    ):
         x = wrap_output_with_input_device_(x, common_device)
     if memory_format is not None:  # no ref/prim for memory format
         return torch.clone(x, memory_format=memory_format)
