@@ -4,6 +4,7 @@ import functools
 import importlib
 import logging
 import os
+import sys
 import tempfile
 from types import MappingProxyType
 from typing import Optional
@@ -97,11 +98,12 @@ def tvm(
                 )
             # TODO(shingjan): This could be replaced by tvm.contrib.torch.optimize_torch
             # once USE_PT_TVMDSOOP is updated and turned on by default in TVM.
+            assert trials > 0
             database = ms.relay_integration.tune_relay(
                 mod=mod,
                 target=target,
                 work_dir=work_dir,
-                max_trials_global=20000,
+                max_trials_global=trials,
                 num_trials_per_iter=64,
                 params=params,
                 strategy="evolutionary",
@@ -179,6 +181,10 @@ def has_tvm():
 
 @functools.lru_cache(None)
 def llvm_target():
-    if "avx512" in open("/proc/cpuinfo").read():
-        return "llvm -mcpu=skylake-avx512"
-    return "llvm -mcpu=core-avx2"
+    if sys.platform == "linux":
+        cpuinfo = open("/proc/cpuinfo").read()
+        if "avx512" in cpuinfo:
+            return "llvm -mcpu=skylake-avx512"
+        elif "avx2" in cpuinfo:
+            return "llvm -mcpu=core-avx2"
+    return "llvm"

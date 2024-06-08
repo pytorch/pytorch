@@ -2,7 +2,6 @@ import dataclasses
 import functools
 import inspect
 import logging
-import os
 import re
 import time
 import warnings
@@ -553,10 +552,6 @@ def _export_to_aten_ir(
     pre_dispatch=False,
     _is_torch_jit_trace=False,
 ):
-    # set this to False if env variable is specified
-    if os.environ.get("TORCH_DYNAMO_DO_NOT_EMIT_RUNTIME_ASSERTS", "0") == "1":
-        should_insert_runtime_assertion = False
-
     # [NOTE] If the user is exporting under training mode, we want to detect if there is any
     # state change in the autograd global state and error. If the user is exporting under inference
     # mode, we don't care. At predispatch level, we don't care about the state change.
@@ -676,19 +671,22 @@ def _export_to_aten_ir(
 
     fake_mode = detect_fake_mode(flat_args)
 
-    stack_trace = (
-        'File "torch/fx/passes/runtime_assert.py", line 24, '
-        "in insert_deferred_runtime_asserts"
-    )
-    with _set_node_metadata_hook(
-        gm, functools.partial(_node_metadata_hook, stack_trace=stack_trace)
-    ):
-        insert_deferred_runtime_asserts(
-            gm,
-            fake_mode.shape_env,
-            f"exported program: {first_call_function_nn_module_stack(gm.graph)}",
-            export=True,
+    from torch._dynamo import config as _dynamo_config
+
+    if not _dynamo_config.do_not_emit_runtime_asserts:
+        stack_trace = (
+            'File "torch/fx/passes/runtime_assert.py", line 24, '
+            "in insert_deferred_runtime_asserts"
         )
+        with _set_node_metadata_hook(
+            gm, functools.partial(_node_metadata_hook, stack_trace=stack_trace)
+        ):
+            insert_deferred_runtime_asserts(
+                gm,
+                fake_mode.shape_env,
+                f"exported program: {first_call_function_nn_module_stack(gm.graph)}",
+                export=True,
+            )
 
     if pre_dispatch:
         from torch._export.passes.replace_set_grad_with_hop_pass import (
@@ -999,17 +997,17 @@ def _temp_disable_texpr_fuser():
         torch._C._jit_set_texpr_fuser_enabled(original_state)
 
 
+class _WrapperModule(torch.nn.Module):
+    def __init__(self, f):
+        super().__init__()
+        self.f = f
+
+    def forward(self, *args, **kwargs):
+        return self.f(*args, **kwargs)
+
+
 def _convert_ts_to_export_experimental(traced_callable, args, kwargs=None):
     with _temp_disable_texpr_fuser():
-
-        class _WrapperModule(torch.nn.Module):
-            def __init__(self, f):
-                super().__init__()
-                self.f = f
-
-            def forward(self, *args, **kwargs):
-                return self.f(*args, **kwargs)
-
         from torch.jit._trace import TopLevelTracedModule
 
         export_args, export_kwargs = _process_jit_trace_inputs_for_export(args, kwargs)
@@ -1034,6 +1032,7 @@ def _convert_ts_to_export_experimental(traced_callable, args, kwargs=None):
                     strict=False,
                     _is_torch_jit_trace=True,
                 ).module()
+
         else:
             return _export(
                 _WrapperModule(traced_callable),
