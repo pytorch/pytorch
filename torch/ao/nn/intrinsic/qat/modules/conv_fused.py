@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import math
 import torch
 import torch.nn as nn
