@@ -725,10 +725,6 @@ class WrapperCodeGen(CodeGen):
     ):
         self.writeline(f"{buf_name} = {python_kernel_name}({', '.join(codegen_args)})")
 
-    def generate_inf_and_nan_checker(self, node):
-        # TODO: Add check for python too.
-        pass
-
     @dynamo_timed
     def generate(self, is_inference):
         if config.profile_bandwidth:

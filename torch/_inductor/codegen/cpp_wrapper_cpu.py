@@ -1504,7 +1504,7 @@ class CppWrapperCpu(WrapperCodeGen):
         for buf in nodes.get_names():
             # TODO: Add buf name directly into check_inf_and_nan.
             self.writeline(
-                f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_check_inf_and_nan({buf}));"
+                f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_check_inf_and_nan({buf}));"
             )
 
     def codegen_device(self, device):
