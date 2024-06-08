@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import logging
 
 torch_log = logging.getLogger("torch")
