@@ -1459,10 +1459,21 @@ class BuiltinVariable(VariableTracker):
                 return variables.ConstantVariable(hasattr(obj.fn, name))
             return obj.call_hasattr(tx, name)
 
-    def call_map(self, tx, fn, seq):
-        if seq.has_unpack_var_sequence(tx):
-            items = [fn.call_function(tx, [x], {}) for x in seq.unpack_var_sequence(tx)]
-            return variables.TupleVariable(items)
+   def call_map(self, tx, fn, *seqs):
+        if all(seq.has_unpack_var_sequence(tx) for seq in seqs):
+            unpacked = [seq.unpack_var_sequence(tx) for seq in seqs]
+
+            if not all(len(curr) == len(unpacked[0]) for curr in unpacked):
+                raise UserError(
+                    ValueError,
+                    "map() has atleast one argument of len differing from others",
+                )
+            items = []
+            for i in range(len(unpacked[0])):
+                params = []
+                for j in range(len(unpacked)):
+                    params.append(unpacked[j][i])
+                items.append(fn.call_function(tx, params, {}))
 
     def call_sum(self, tx, seq, start=_SENTINEL):
         # Special case for sum on tuple of floats and ints
