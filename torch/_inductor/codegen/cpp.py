@@ -3506,7 +3506,8 @@ class CppScheduling(BaseScheduling):
     def __init__(self, scheduler):
         super().__init__()
         self.scheduler = scheduler
-        self.reset_kernel_group()
+        if scheduler:
+            self.reset_kernel_group()
         self._ready_to_flush = False
 
     def _set_flush_status(self, status: bool):
