@@ -802,55 +802,6 @@ TORCH_IMPL_FUNC(slow_conv_transpose2d_structured_cpu)
       dilation);
  }
 
-static std::tuple<Tensor&, Tensor&, Tensor&> slow_conv_transpose2d_backward_out_cpu(const Tensor& grad_output,
-    const Tensor& input,
-    const Tensor& weight,
-    IntArrayRef kernel_size,
-    IntArrayRef stride,
-    IntArrayRef padding,
-    IntArrayRef output_padding,
-    IntArrayRef dilation,
-    Tensor& grad_input,
-    Tensor& grad_weight,
-    Tensor& grad_bias) {
-  if (grad_input.defined()) {
-    slow_conv_transpose2d_backward_out_cpu_template(
-        input,
-        grad_output,
-        grad_input,
-        weight,
-        kernel_size,
-        stride,
-        padding,
-        output_padding,
-        dilation);
-  }
-
-  if (grad_bias.defined()) {
-    at::sum_out(grad_bias, grad_output, IntArrayRef{0, 2, 3});
-  }
-
-  if (grad_weight.defined()) {
-    grad_weight.resize_(weight.sizes(), weight.suggest_memory_format());
-    grad_weight.zero_();
-    slow_conv_transpose2d_acc_grad_parameters_cpu(
-        input,
-        weight,
-        grad_output,
-        grad_weight,
-        grad_bias,
-        kernel_size,
-        stride,
-        padding,
-        output_padding,
-        dilation,
-        1);
-  }
-
-  return std::tuple<Tensor&, Tensor&, Tensor&>(
-      grad_input, grad_weight, grad_bias);
-}
-
 static std::tuple<Tensor, Tensor, Tensor> slow_conv_transpose2d_backward_cpu(
     const Tensor& grad_output,
     const Tensor& input,
