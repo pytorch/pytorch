@@ -399,6 +399,7 @@ class Module:
     the change."""
 
     training: bool
+    _is_replica: bool
     _parameters: Dict[str, Optional[Parameter]]
     _buffers: Dict[str, Optional[Tensor]]
     _non_persistent_buffers_set: Set[str]
@@ -445,6 +446,7 @@ class Module:
         super().__setattr__ for all other attributes.
         """
         super().__setattr__('training', True)
+        super().__setattr__('_is_replica', False)
         super().__setattr__('_parameters', OrderedDict())
         super().__setattr__('_buffers', OrderedDict())
         super().__setattr__('_non_persistent_buffers_set', set())
@@ -2505,7 +2507,7 @@ class Module:
             set_to_none (bool): instead of setting to zero, set the grads to None.
                 See :meth:`torch.optim.Optimizer.zero_grad` for details.
         """
-        if getattr(self, '_is_replica', False):
+        if self._is_replica:
             warnings.warn(
                 "Calling .zero_grad() from a module created with nn.DataParallel() has no effect. "
                 "The parameters are copied (in a differentiable manner) from the original module. "
@@ -2579,14 +2581,12 @@ class Module:
 
     def _replicate_for_data_parallel(self):
         replica = self.__new__(type(self))
-        replica.__dict__ = self.__dict__.copy()
+        replica.__dict__ = {k: (v.copy() if isinstance(v, dict) else v) for k, v in self.__dict__.items()}
 
         # replicas do not have parameters themselves, the replicas reference the original
         # module.
         replica._parameters = OrderedDict()
-        replica._buffers = replica._buffers.copy()
-        replica._modules = replica._modules.copy()
-        replica._is_replica = True  # type: ignore[assignment]
+        replica._is_replica = True
 
         return replica
 
