@@ -988,11 +988,11 @@ class CppBuilder:
             3. Final target file: output_dir/name.ext
     """
 
-    def get_shared_lib_ext(self) -> str:
+    def _get_shared_lib_ext(self) -> str:
         SHARED_LIB_EXT = ".dll" if _IS_WINDOWS else ".so"
         return SHARED_LIB_EXT
 
-    def get_object_ext(self) -> str:
+    def _get_object_ext(self) -> str:
         EXT = ".obj" if _IS_WINDOWS else ".o"
         return EXT
 
@@ -1030,7 +1030,7 @@ class CppBuilder:
 
         self._compile_only = BuildOption.get_compile_only()
         file_ext = (
-            self.get_object_ext() if self._compile_only else self.get_shared_lib_ext()
+            self._get_object_ext() if self._compile_only else self._get_shared_lib_ext()
         )
         self._target_file = os.path.join(self._output_dir, f"{self._name}{file_ext}")
 
@@ -1139,6 +1139,7 @@ class CppBuilder:
     def get_target_file_path(self):
         return self._target_file
 
+    """
     def convert_to_cpp_extension_args(self):
         include_dirs = self._include_dirs_args
         cflags = (
@@ -1149,6 +1150,7 @@ class CppBuilder:
         ldflags = self._ldflags_args + self._libraries_args + self._libraries_dirs_args
 
         return include_dirs, cflags, ldflags
+    """
 
     def build(self) -> Tuple[int, str]:
         """
