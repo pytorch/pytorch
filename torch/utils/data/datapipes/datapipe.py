@@ -4,7 +4,6 @@ from typing import Callable, Dict, Generic, Iterator, Optional, TypeVar
 
 from torch.utils._import_utils import import_dill
 from torch.utils.data.datapipes._hook_iterator import _SnapshotState
-
 from torch.utils.data.datapipes._typing import _DataPipeMeta, _IterDataPipeMeta
 from torch.utils.data.datapipes.utils.common import (
     _deprecation_warning,
@@ -12,6 +11,7 @@ from torch.utils.data.datapipes.utils.common import (
     _map_deprecated_functional_names,
 )
 from torch.utils.data.dataset import Dataset, IterableDataset
+
 
 dill = import_dill()
 HAS_DILL = dill is not None

@@ -9,6 +9,7 @@ from typing import Union
 import torch
 from torch._namedtensor_internals import check_serializing_named_tensor
 
+
 try:
     # Early load resource_sharer to prevent a partially initialized instance
     # from being inherited in a forked child process. The reduce_storage method

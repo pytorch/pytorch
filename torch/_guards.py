@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import contextlib
-
 import dataclasses
 import enum
 import functools
@@ -31,6 +30,7 @@ from torch.utils import _pytree as pytree
 from torch.utils._traceback import CapturedTraceback
 from torch.utils.weak import WeakTensorKeyDictionary
 
+
 log = logging.getLogger(__name__)
 
 
@@ -40,7 +40,6 @@ if TYPE_CHECKING:
     # Import the following modules during type checking to enable code intelligence features,
     # such as auto-completion in tools like pylance, even when these modules are not explicitly
     # imported in user code.
-
     import torch
 
 
