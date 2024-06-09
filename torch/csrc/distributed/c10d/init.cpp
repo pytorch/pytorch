@@ -1016,11 +1016,13 @@ Example::
                  const std::string& key,
                  const std::string& expected_value,
                  const std::string& desired_value) -> py::bytes {
-                auto value = store.compareSet(
-                    key, toVec8(expected_value), toVec8(desired_value));
+                auto value = [&]() {
+                  py::gil_scoped_release guard;
+                  return store.compareSet(
+                      key, toVec8(expected_value), toVec8(desired_value));
+                }();
                 return toPyBytes(value);
               },
-              py::call_guard<py::gil_scoped_release>(),
               R"(
 Inserts the key-value pair into the store based on the supplied ``key`` and
 performs comparison between ``expected_value`` and ``desired_value`` before inserting. ``desired_value``
@@ -3171,11 +3173,12 @@ such as `dist.all_reduce(tensor, async_op=True)`.
       module, "_WorkerServer", R"(
 )")
       .def(
-          py::init([](const std::string& socketPath) {
+          py::init([](const std::string& hostOrFile, int port) {
             return c10::make_intrusive<::c10d::control_plane::WorkerServer>(
-                socketPath);
+                hostOrFile, port);
           }),
-          py::arg("socket_path"))
+          py::arg("host_or_file"),
+          py::arg("port") = -1)
       .def("shutdown", &::c10d::control_plane::WorkerServer::shutdown);
   Py_RETURN_TRUE;
 }

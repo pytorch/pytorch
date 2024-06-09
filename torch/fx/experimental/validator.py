@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import functools
 import logging
 import math
@@ -216,7 +217,10 @@ try:
         def abs(self, number: z3.ArithRef) -> z3.ArithRef:
             return z3.Abs(number)
 
-        def round_to_int(self, number: z3.ArithRef) -> z3.ArithRef:
+        def round(self, number: z3.ArithRef, ndigits: Optional[z3.ArithRef] = None) -> z3.ArithRef:
+            if ndigits is not None:
+                raise ValueError("round(..., ndigits=) is currently not supported by shape validations.")
+
             # Pythons builtin 'round' implements the 'round half to even' strategy
             # See https://en.wikipedia.org/wiki/Rounding#Rounding_half_to_even
             # z3 has an equivalent z3.fpRoundToIntegral(z3.RoundNearestTiesToEven(), ...), but this only applies to
@@ -281,7 +285,7 @@ try:
             operator.truediv: lift(ops.div),
             operator.mod: lift(ops.mod),
             operator.abs: lift(ops.abs),
-            builtins.round: lift(ops.round_to_int),
+            builtins.round: lift(ops.round),
 
             # Math module.
             math.ceil: lift(ops.ceil),
@@ -347,7 +351,6 @@ try:
             self._ops = _Z3Ops(self._validator)
 
         def constant(self, value: Any, dtype: torch.dtype) -> z3.ExprRef:
-            # TODO: Probably OK to relax this and allow lower precision
             if dtype is torch.int64:
                 return z3.IntVal(int(value))
             if dtype is torch.double:
@@ -355,20 +358,6 @@ try:
             if dtype is torch.bool:
                 return z3.BoolVal(bool(value))
             raise ValueError(f"unsupported dtype (SympyToZ3): {dtype}")
-
-        def to_dtype(self, x: z3.ArithRef, dtype: torch.dtype) -> z3.ArithRef:
-            if dtype == torch.float64:
-                return z3.ToReal(x)
-            raise NotImplementedError(f"to_dtype {dtype} NYI")
-
-        def trunc_to_int(self, x: z3.ArithRef, dtype: torch.dtype) -> z3.ArithRef:
-            return z3.ToInt(x)
-
-        def round_to_int(self, x: z3.ArithRef, dtype: torch.dtype) -> z3.ArithRef:
-            return self._ops.round_to_int(x)
-
-        def int_truediv(self, numerator: z3.ArithRef, denominator: z3.ArithRef) -> z3.ArithRef:
-            return self._ops.div(numerator, denominator)
 
         def truediv(self, numerator: z3.ArithRef, denominator: z3.ArithRef) -> z3.ArithRef:
             return self._ops.div(numerator, denominator)
@@ -382,17 +371,11 @@ try:
         def pow(self, base: z3.ArithRef, exp: z3.ArithRef) -> z3.ArithRef:
             return self._ops.pow(base, exp)
 
-        def pow_by_natural(self, base: z3.ArithRef, exp: z3.ArithRef) -> z3.ArithRef:
-            return self._ops.pow(base, exp)
-
         def mod(self, p: z3.ArithRef, q: z3.ArithRef) -> z3.ArithRef:
             return self._ops.mod(p, q)
 
-        def ceil_to_int(self, x: z3.ArithRef, dtype: torch.dtype) -> z3.ArithRef:
-            return self._ops.ceil(x)
-
-        def floor_to_int(self, x: z3.ArithRef, dtype: torch.dtype) -> z3.ArithRef:
-            return self._ops.floor(x)
+        def round(self, number: z3.ArithRef, ndigits: Optional[z3.ArithRef] = None) -> z3.ArithRef:
+            return self._ops.round(number, ndigits)
 
         def __getattr__(self, name: str) -> Any:
             REPLACEMENT = {
