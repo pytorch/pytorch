@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import functools
 from collections import namedtuple
 from typing import Any, Callable, Dict, Iterator, List, Optional, Sized, TypeVar, Union
