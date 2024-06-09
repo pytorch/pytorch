@@ -1,10 +1,10 @@
+# mypy: allow-untyped-defs
 import collections
 import copy
 import functools
 import io
 import threading
 import warnings
-from functools import lru_cache
 from typing import Any, cast, Dict as _Dict, Optional as _Optional, Type, TypeVar, Union
 
 import torch
@@ -501,7 +501,7 @@ def _load_from_bytes(b):
     return torch.load(io.BytesIO(b))
 
 
-@lru_cache(maxsize=None)
+@functools.cache
 def _new_dtypes():
     # These are dtypes serialized as UntypedStorage unlike those in
     # _dtype_to_storage_type_map
@@ -519,7 +519,7 @@ def _new_dtypes():
     }
 
 
-@lru_cache(maxsize=None)
+@functools.cache
 def _dtype_to_storage_type_map():
     # NOTE: We should no longer add dtypes to this map. This map
     # is only used for BC/FC with older PyTorch versions. Going forward,
@@ -547,7 +547,7 @@ def _dtype_to_storage_type_map():
     }
 
 
-@lru_cache(maxsize=None)
+@functools.cache
 def _storage_type_to_dtype_map():
     dtype_map = {val: key for key, val in _dtype_to_storage_type_map().items()}
     return dtype_map

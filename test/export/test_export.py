@@ -149,6 +149,7 @@ class Inp:
 
 NON_STRICT_SUFFIX = "_non_strict"
 RETRACEABILITY_SUFFIX = "_retraceability"
+SERDES_SUFFIX = "_serdes"
 PREDISPATCH_SUFFIX = "_pre_dispatch"
 
 
@@ -158,6 +159,10 @@ def is_non_strict_test(test_name):
 
 def is_retracebility_test(test_name):
     return test_name.endswith(RETRACEABILITY_SUFFIX)
+
+
+def is_serdes_test(test_name):
+    return test_name.endswith(SERDES_SUFFIX)
 
 
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo isn't support")

@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 from typing import Any, Callable, Tuple, Union
 
 import torch

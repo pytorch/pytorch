@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 from __future__ import annotations
 
 import collections
@@ -338,7 +339,8 @@ class SIMDKernel(Kernel):
             index = V.graph.sizevars.simplify_with_ranges(index, self.var_ranges())
             for tree in self.range_trees:
                 index = self.combine_contiguous_dims(index, tree)
-            return index
+
+            return self.combine_modular_indexing_pairs(index)
 
         self.simplify_indexing = simplify_indexing
         self.initialize_range_tree(pid_cache)
@@ -422,7 +424,23 @@ class SIMDKernel(Kernel):
         sizes = self.dense_size_list()
         return f"[{', '.join(sizes)}]"
 
+    def combine_modular_indexing_pairs(self, index):
+        if not isinstance(index, ModularIndexing):
+            return index
+        x = index.args[0]
+        if (tree_node := self.range_tree_nodes.get(x)) is None:
+            return index
+        new_index = sympy_subs(index, {x: tree_node.expr})
+        return V.graph.sizevars.combine_modular_indexing_pairs(new_index)
+
     def combine_contiguous_dims(self, index: sympy.Expr, tree: IterationRangesRoot):
+        if expand_res := V.graph.sizevars.expand_floor_div(index):
+            new_index, denominator = expand_res  # type: ignore[misc]
+            return FloorDiv(self._combine_contiguous_dims(new_index, tree), denominator)
+        else:
+            return self._combine_contiguous_dims(index, tree)
+
+    def _combine_contiguous_dims(self, index: sympy.Expr, tree: IterationRangesRoot):
         """
         More aggressive simplification to merge contiguous dims
         """

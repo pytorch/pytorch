@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import itertools
 import operator
 from typing import Any, List, Optional, Sequence, Tuple, TYPE_CHECKING, Union
