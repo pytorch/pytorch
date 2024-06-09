@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 from enum import IntEnum
 from typing import Dict, Sized, Tuple
 
