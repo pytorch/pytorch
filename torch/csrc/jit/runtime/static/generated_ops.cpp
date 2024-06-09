@@ -36,7 +36,8 @@
 #include <torch/csrc/jit/tensorexpr/llvm_codegen.h>
 #include <torch/csrc/jit/tensorexpr/loopnest.h>
 
-namespace torch::jit {
+namespace torch {
+namespace jit {
 
 REGISTER_OPERATOR_FUNCTOR(
     aten::absolute,
@@ -189,6 +190,29 @@ REGISTER_OPERATOR_FUNCTOR(aten::addr, aten_addr, [](Node* n) -> SROperator {
   LogAndDumpSchema(n);
   return nullptr;
 });
+
+REGISTER_OPERATOR_FUNCTOR(
+    aten::_test_functorch_fallback,
+    aten__test_functorch_fallback,
+    [](Node* n) -> SROperator {
+      if (n->matches(torch::schema(
+              "aten::_test_functorch_fallback(Tensor self, Tensor other) -> Tensor"))) {
+        return [](ProcessedNode* p_node) {
+          const auto& self = p_node->Input(0).toTensor();
+          const auto& other = p_node->Input(1).toTensor();
+          if (p_node->Output(0).isNone()) {
+            p_node->Output(0) =
+                at::native::_test_functorch_fallback(self, other);
+            return;
+          }
+          auto& out = p_node->Output(0).toTensor();
+          fastResizeToZero(out);
+          at::native::_test_functorch_fallback_out(self, other, out);
+        };
+      }
+      LogAndDumpSchema(n);
+      return nullptr;
+    });
 
 REGISTER_OPERATOR_FUNCTOR(aten::argmax, aten_argmax, [](Node* n) -> SROperator {
   if (n->matches(torch::schema(
@@ -1314,6 +1338,28 @@ REGISTER_OPERATOR_FUNCTOR(aten::mm, aten_mm, [](Node* n) -> SROperator {
 });
 
 REGISTER_OPERATOR_FUNCTOR(
+    aten::_int_mm,
+    aten__int_mm,
+    [](Node* n) -> SROperator {
+      if (n->matches(torch::schema(
+              "aten::_int_mm(Tensor self, Tensor mat2) -> Tensor"))) {
+        return [](ProcessedNode* p_node) {
+          const auto& self = p_node->Input(0).toTensor();
+          const auto& mat2 = p_node->Input(1).toTensor();
+          if (p_node->Output(0).isNone()) {
+            p_node->Output(0) = at::native::_int_mm_cpu(self, mat2);
+            return;
+          }
+          auto& out = p_node->Output(0).toTensor();
+          fastResizeToZero(out);
+          at::native::_int_mm_out_cpu(self, mat2, out);
+        };
+      }
+      LogAndDumpSchema(n);
+      return nullptr;
+    });
+
+REGISTER_OPERATOR_FUNCTOR(
     aten::multiply,
     aten_multiply,
     [](Node* n) -> SROperator {
@@ -1898,6 +1944,102 @@ REGISTER_OPERATOR_FUNCTOR(
       return nullptr;
     });
 
+REGISTER_OPERATOR_FUNCTOR(
+    aten::_nested_tensor_storage_offsets,
+    aten__nested_tensor_storage_offsets,
+    [](Node* n) -> SROperator {
+      if (n->matches(torch::schema(
+              "aten::_nested_tensor_storage_offsets(Tensor self) -> Tensor"))) {
+        return [](ProcessedNode* p_node) {
+          const auto& self = p_node->Input(0).toTensor();
+          if (p_node->Output(0).isNone()) {
+            p_node->Output(0) =
+                at::native::_nested_tensor_storage_offsets(self);
+            return;
+          }
+          auto& out = p_node->Output(0).toTensor();
+          fastResizeToZero(out);
+          at::native::_nested_tensor_storage_offsets_out(self, out);
+        };
+      }
+      LogAndDumpSchema(n);
+      return nullptr;
+    });
+
+REGISTER_OPERATOR_FUNCTOR(
+    aten::_nested_view_from_buffer_copy,
+    aten__nested_view_from_buffer_copy,
+    [](Node* n) -> SROperator {
+      if (n->matches(torch::schema(
+              "aten::_nested_view_from_buffer_copy(Tensor self, Tensor nested_size, Tensor nested_strides, Tensor offsets) -> Tensor"))) {
+        return [](ProcessedNode* p_node) {
+          const auto& self = p_node->Input(0).toTensor();
+          const auto& nested_size = p_node->Input(1).toTensor();
+          const auto& nested_strides = p_node->Input(2).toTensor();
+          const auto& offsets = p_node->Input(3).toTensor();
+          if (p_node->Output(0).isNone()) {
+            p_node->Output(0) = at::native::_nested_view_from_buffer_copy(
+                self, nested_size, nested_strides, offsets);
+            return;
+          }
+          auto& out = p_node->Output(0).toTensor();
+          fastResizeToZero(out);
+          at::native::_nested_view_from_buffer_copy_out(
+              self, nested_size, nested_strides, offsets, out);
+        };
+      }
+      LogAndDumpSchema(n);
+      return nullptr;
+    });
+
+REGISTER_OPERATOR_FUNCTOR(
+    aten::_nested_view_from_jagged_copy,
+    aten__nested_view_from_jagged_copy,
+    [](Node* n) -> SROperator {
+      if (n->matches(torch::schema(
+              "aten::_nested_view_from_jagged_copy(Tensor self, Tensor offsets, Tensor dummy, Tensor? lengths=None, int ragged_idx=1) -> Tensor"))) {
+        return [](ProcessedNode* p_node) {
+          const auto& self = p_node->Input(0).toTensor();
+          const auto& offsets = p_node->Input(1).toTensor();
+          const auto& dummy = p_node->Input(2).toTensor();
+          const auto lengths = p_node->Input(3).toOptional<at::Tensor>();
+          const auto ragged_idx = p_node->Input(4).toInt();
+          if (p_node->Output(0).isNone()) {
+            p_node->Output(0) = at::native::_nested_view_from_jagged_copy(
+                self, offsets, dummy, lengths, ragged_idx);
+            return;
+          }
+          auto& out = p_node->Output(0).toTensor();
+          fastResizeToZero(out);
+          at::native::_nested_view_from_jagged_copy_out(
+              self, offsets, dummy, lengths, ragged_idx, out);
+        };
+      }
+      LogAndDumpSchema(n);
+      return nullptr;
+    });
+
+REGISTER_OPERATOR_FUNCTOR(
+    aten::_nested_get_values_copy,
+    aten__nested_get_values_copy,
+    [](Node* n) -> SROperator {
+      if (n->matches(torch::schema(
+              "aten::_nested_get_values_copy(Tensor self) -> Tensor"))) {
+        return [](ProcessedNode* p_node) {
+          const auto& self = p_node->Input(0).toTensor();
+          if (p_node->Output(0).isNone()) {
+            p_node->Output(0) = at::native::_nested_get_values_copy(self);
+            return;
+          }
+          auto& out = p_node->Output(0).toTensor();
+          fastResizeToZero(out);
+          at::native::_nested_get_values_copy_out(self, out);
+        };
+      }
+      LogAndDumpSchema(n);
+      return nullptr;
+    });
+
 REGISTER_OPERATOR_FUNCTOR(aten::trunc, aten_trunc, [](Node* n) -> SROperator {
   if (n->matches(torch::schema("aten::trunc(Tensor self) -> Tensor"))) {
     return [](ProcessedNode* p_node) {
@@ -2018,6 +2160,52 @@ REGISTER_OPERATOR_FUNCTOR(
           fastResizeToZero(out);
           at::cpu::_addmm_activation_out(
               out, self, mat1, mat2, beta, alpha, use_gelu);
+        };
+      }
+      LogAndDumpSchema(n);
+      return nullptr;
+    });
+
+REGISTER_OPERATOR_FUNCTOR(
+    aten::_to_sparse_csr,
+    aten__to_sparse_csr,
+    [](Node* n) -> SROperator {
+      if (n->matches(torch::schema(
+              "aten::_to_sparse_csr(Tensor self, int? dense_dim=None) -> Tensor"))) {
+        return [](ProcessedNode* p_node) {
+          const auto& self = p_node->Input(0).toTensor();
+          const auto dense_dim = p_node->Input(1).toOptional<int64_t>();
+          if (p_node->Output(0).isNone()) {
+            p_node->Output(0) =
+                at::native::dense_to_sparse_csr(self, dense_dim);
+            return;
+          }
+          auto& out = p_node->Output(0).toTensor();
+          fastResizeToZero(out);
+          at::native::_to_sparse_csr_out(self, dense_dim, out);
+        };
+      }
+      LogAndDumpSchema(n);
+      return nullptr;
+    });
+
+REGISTER_OPERATOR_FUNCTOR(
+    aten::_to_sparse_csc,
+    aten__to_sparse_csc,
+    [](Node* n) -> SROperator {
+      if (n->matches(torch::schema(
+              "aten::_to_sparse_csc(Tensor self, int? dense_dim=None) -> Tensor"))) {
+        return [](ProcessedNode* p_node) {
+          const auto& self = p_node->Input(0).toTensor();
+          const auto dense_dim = p_node->Input(1).toOptional<int64_t>();
+          if (p_node->Output(0).isNone()) {
+            p_node->Output(0) =
+                at::native::dense_to_sparse_csc(self, dense_dim);
+            return;
+          }
+          auto& out = p_node->Output(0).toTensor();
+          fastResizeToZero(out);
+          at::native::_to_sparse_csc_out(self, dense_dim, out);
         };
       }
       LogAndDumpSchema(n);
@@ -2430,6 +2618,25 @@ REGISTER_OPERATOR_FUNCTOR(aten::addbmm, aten_addbmm, [](Node* n) -> SROperator {
   return nullptr;
 });
 
+REGISTER_OPERATOR_FUNCTOR(aten::diag, aten_diag, [](Node* n) -> SROperator {
+  if (n->matches(
+          torch::schema("aten::diag(Tensor self, int diagonal=0) -> Tensor"))) {
+    return [](ProcessedNode* p_node) {
+      const auto& self = p_node->Input(0).toTensor();
+      const auto diagonal = p_node->Input(1).toInt();
+      if (p_node->Output(0).isNone()) {
+        p_node->Output(0) = at::native::diag(self, diagonal);
+        return;
+      }
+      auto& out = p_node->Output(0).toTensor();
+      fastResizeToZero(out);
+      at::native::diag_out(self, diagonal, out);
+    };
+  }
+  LogAndDumpSchema(n);
+  return nullptr;
+});
+
 REGISTER_OPERATOR_FUNCTOR(aten::cross, aten_cross, [](Node* n) -> SROperator {
   if (n->matches(torch::schema(
           "aten::cross(Tensor self, Tensor other, int? dim=None) -> Tensor"))) {
@@ -2678,6 +2885,30 @@ REGISTER_OPERATOR_FUNCTOR(
           auto& out = p_node->Output(0).toTensor();
           fastResizeToZero(out);
           at::native::masked_select_out_cpu(self, mask, out);
+        };
+      }
+      LogAndDumpSchema(n);
+      return nullptr;
+    });
+
+REGISTER_OPERATOR_FUNCTOR(
+    aten::nonzero_static,
+    aten_nonzero_static,
+    [](Node* n) -> SROperator {
+      if (n->matches(torch::schema(
+              "aten::nonzero_static(Tensor self, *, int size, int fill_value=-1) -> Tensor"))) {
+        return [](ProcessedNode* p_node) {
+          const auto& self = p_node->Input(0).toTensor();
+          const auto size = p_node->Input(1).toInt();
+          const auto fill_value = p_node->Input(2).toInt();
+          if (p_node->Output(0).isNone()) {
+            p_node->Output(0) =
+                at::native::nonzero_static_cpu(self, size, fill_value);
+            return;
+          }
+          auto& out = p_node->Output(0).toTensor();
+          fastResizeToZero(out);
+          at::native::nonzero_static_out_cpu(self, size, fill_value, out);
         };
       }
       LogAndDumpSchema(n);
@@ -4463,132 +4694,6 @@ REGISTER_OPERATOR_FUNCTOR(
       return nullptr;
     });
 
-REGISTER_OPERATOR_FUNCTOR(aten::fft_fft, aten_fft_fft, [](Node* n) -> SROperator {
-  if (n->matches(torch::schema(
-          "aten::fft_fft(Tensor self, SymInt? n=None, int dim=-1, str? norm=None) -> Tensor"))) {
-    return [](ProcessedNode* p_node) {
-      const auto& self = p_node->Input(0).toTensor();
-      const auto n = p_node->Input(1).toOptional<c10::SymInt>();
-      const auto dim = p_node->Input(2).toInt();
-      const auto norm = p_node->Input(3).toOptional<c10::string_view>();
-      if (p_node->Output(0).isNone()) {
-        p_node->Output(0) = at::native::fft_fft_symint(self, n, dim, norm);
-        return;
-      }
-      auto& out = p_node->Output(0).toTensor();
-      fastResizeToZero(out);
-      at::native::fft_fft_symint_out(self, n, dim, norm, out);
-    };
-  }
-  LogAndDumpSchema(n);
-  return nullptr;
-});
-
-REGISTER_OPERATOR_FUNCTOR(aten::fft_ifft, aten_fft_ifft, [](Node* n) -> SROperator {
-  if (n->matches(torch::schema(
-          "aten::fft_ifft(Tensor self, SymInt? n=None, int dim=-1, str? norm=None) -> Tensor"))) {
-    return [](ProcessedNode* p_node) {
-      const auto& self = p_node->Input(0).toTensor();
-      const auto n = p_node->Input(1).toOptional<c10::SymInt>();
-      const auto dim = p_node->Input(2).toInt();
-      const auto norm = p_node->Input(3).toOptional<c10::string_view>();
-      if (p_node->Output(0).isNone()) {
-        p_node->Output(0) = at::native::fft_ifft_symint(self, n, dim, norm);
-        return;
-      }
-      auto& out = p_node->Output(0).toTensor();
-      fastResizeToZero(out);
-      at::native::fft_ifft_symint_out(self, n, dim, norm, out);
-    };
-  }
-  LogAndDumpSchema(n);
-  return nullptr;
-});
-
-REGISTER_OPERATOR_FUNCTOR(aten::fft_rfft, aten_fft_rfft, [](Node* n) -> SROperator {
-  if (n->matches(torch::schema(
-          "aten::fft_rfft(Tensor self, SymInt? n=None, int dim=-1, str? norm=None) -> Tensor"))) {
-    return [](ProcessedNode* p_node) {
-      const auto& self = p_node->Input(0).toTensor();
-      const auto n = p_node->Input(1).toOptional<c10::SymInt>();
-      const auto dim = p_node->Input(2).toInt();
-      const auto norm = p_node->Input(3).toOptional<c10::string_view>();
-      if (p_node->Output(0).isNone()) {
-        p_node->Output(0) = at::native::fft_rfft_symint(self, n, dim, norm);
-        return;
-      }
-      auto& out = p_node->Output(0).toTensor();
-      fastResizeToZero(out);
-      at::native::fft_rfft_symint_out(self, n, dim, norm, out);
-    };
-  }
-  LogAndDumpSchema(n);
-  return nullptr;
-});
-
-REGISTER_OPERATOR_FUNCTOR(aten::fft_irfft, aten_fft_irfft, [](Node* n) -> SROperator {
-  if (n->matches(torch::schema(
-          "aten::fft_irfft(Tensor self, SymInt? n=None, int dim=-1, str? norm=None) -> Tensor"))) {
-    return [](ProcessedNode* p_node) {
-      const auto& self = p_node->Input(0).toTensor();
-      const auto n = p_node->Input(1).toOptional<c10::SymInt>();
-      const auto dim = p_node->Input(2).toInt();
-      const auto norm = p_node->Input(3).toOptional<c10::string_view>();
-      if (p_node->Output(0).isNone()) {
-        p_node->Output(0) = at::native::fft_irfft_symint(self, n, dim, norm);
-        return;
-      }
-      auto& out = p_node->Output(0).toTensor();
-      fastResizeToZero(out);
-      at::native::fft_irfft_symint_out(self, n, dim, norm, out);
-    };
-  }
-  LogAndDumpSchema(n);
-  return nullptr;
-});
-
-REGISTER_OPERATOR_FUNCTOR(aten::fft_hfft, aten_fft_hfft, [](Node* n) -> SROperator {
-  if (n->matches(torch::schema(
-          "aten::fft_hfft(Tensor self, SymInt? n=None, int dim=-1, str? norm=None) -> Tensor"))) {
-    return [](ProcessedNode* p_node) {
-      const auto& self = p_node->Input(0).toTensor();
-      const auto n = p_node->Input(1).toOptional<c10::SymInt>();
-      const auto dim = p_node->Input(2).toInt();
-      const auto norm = p_node->Input(3).toOptional<c10::string_view>();
-      if (p_node->Output(0).isNone()) {
-        p_node->Output(0) = at::native::fft_hfft_symint(self, n, dim, norm);
-        return;
-      }
-      auto& out = p_node->Output(0).toTensor();
-      fastResizeToZero(out);
-      at::native::fft_hfft_symint_out(self, n, dim, norm, out);
-    };
-  }
-  LogAndDumpSchema(n);
-  return nullptr;
-});
-
-REGISTER_OPERATOR_FUNCTOR(aten::fft_ihfft, aten_fft_ihfft, [](Node* n) -> SROperator {
-  if (n->matches(torch::schema(
-          "aten::fft_ihfft(Tensor self, SymInt? n=None, int dim=-1, str? norm=None) -> Tensor"))) {
-    return [](ProcessedNode* p_node) {
-      const auto& self = p_node->Input(0).toTensor();
-      const auto n = p_node->Input(1).toOptional<c10::SymInt>();
-      const auto dim = p_node->Input(2).toInt();
-      const auto norm = p_node->Input(3).toOptional<c10::string_view>();
-      if (p_node->Output(0).isNone()) {
-        p_node->Output(0) = at::native::fft_ihfft_symint(self, n, dim, norm);
-        return;
-      }
-      auto& out = p_node->Output(0).toTensor();
-      fastResizeToZero(out);
-      at::native::fft_ihfft_symint_out(self, n, dim, norm, out);
-    };
-  }
-  LogAndDumpSchema(n);
-  return nullptr;
-});
-
 REGISTER_OPERATOR_FUNCTOR(
     aten::linalg_cross,
     aten_linalg_cross,
@@ -4836,6 +4941,44 @@ REGISTER_OPERATOR_FUNCTOR(
           auto& out = p_node->Output(0).toTensor();
           fastResizeToZero(out);
           at::native::linalg_matrix_power_out(self, n, out);
+        };
+      }
+      LogAndDumpSchema(n);
+      return nullptr;
+    });
+
+REGISTER_OPERATOR_FUNCTOR(
+    aten::segment_reduce,
+    aten_segment_reduce,
+    [](Node* n) -> SROperator {
+      if (n->matches(torch::schema(
+              "aten::segment_reduce(Tensor data, str reduce, *, Tensor? lengths=None, Tensor? indices=None, Tensor? offsets=None, int axis=0, bool unsafe=False, Scalar? initial=None) -> Tensor"))) {
+        return [](ProcessedNode* p_node) {
+          const auto& data = p_node->Input(0).toTensor();
+          const auto reduce = p_node->Input(1).toStringView();
+          const auto lengths = p_node->Input(2).toOptional<at::Tensor>();
+          const auto indices = p_node->Input(3).toOptional<at::Tensor>();
+          const auto offsets = p_node->Input(4).toOptional<at::Tensor>();
+          const auto axis = p_node->Input(5).toInt();
+          const auto unsafe = p_node->Input(6).toBool();
+          const auto initial = p_node->Input(7).toOptional<at::Scalar>();
+          if (p_node->Output(0).isNone()) {
+            p_node->Output(0) = at::native::segment_reduce_kernel(
+                data, reduce, lengths, indices, offsets, axis, unsafe, initial);
+            return;
+          }
+          auto& out = p_node->Output(0).toTensor();
+          fastResizeToZero(out);
+          at::native::segment_reduce_out(
+              data,
+              reduce,
+              lengths,
+              indices,
+              offsets,
+              axis,
+              unsafe,
+              initial,
+              out);
         };
       }
       LogAndDumpSchema(n);
@@ -5133,6 +5276,25 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(aten::t, aten_t, [](Node* n) -> SROperator {
 });
 
 REGISTER_NATIVE_OPERATOR_FUNCTOR(
+    aten::_nested_view_from_buffer,
+    aten__nested_view_from_buffer,
+    [](Node* n) -> SROperator {
+      if (n->matches(torch::schema(
+              "aten::_nested_view_from_buffer(Tensor(a) self, Tensor nested_size, Tensor nested_strides, Tensor offsets) -> Tensor(a)"))) {
+        return [](ProcessedNode* p_node) {
+          const auto& self = p_node->Input(0).toTensor();
+          const auto& nested_size = p_node->Input(1).toTensor();
+          const auto& nested_strides = p_node->Input(2).toTensor();
+          const auto& offsets = p_node->Input(3).toTensor();
+          p_node->Output(0) = at::native::_nested_view_from_buffer(
+              self, nested_size, nested_strides, offsets);
+        };
+      }
+      LogAndDumpSchema(n);
+      return nullptr;
+    });
+
+REGISTER_NATIVE_OPERATOR_FUNCTOR(
     aten::unsqueeze,
     aten_unsqueeze,
     [](Node* n) -> SROperator {
@@ -5281,4 +5443,5 @@ REGISTER_NATIVE_OPERATOR_FUNCTOR(
       return nullptr;
     });
 
-} // namespace torch::jit
+} // namespace jit
+} // namespace torch
