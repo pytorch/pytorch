@@ -278,7 +278,7 @@ EXPECTED_SKIPS_OR_FAILS_WITH_DTYPES: Tuple[onnx_test_common.DecorateMeta, ...] =
         reason="ONNX doesn't have partial view for tensor; [PostInline][ORT] segfaults",
     ),
     skip(
-        "as_strided_copy",
+        "alias_copy",
         dtypes=(torch.bool, torch.complex64),
         reason="OnnxExporterError: Failed to export model",
     ),
