@@ -222,11 +222,12 @@ class MultiKernel:
         )
 
         grid = V.graph.wrapper_code.generate_default_grid(kernel_name, grid)
+        current_device = V.graph.scheduler.get_current_device_or_throw()
         V.graph.wrapper_code.generate_kernel_call(
             kernel_name,
             final_call_args,
             grid,
-            V.graph.scheduler.current_device.index,
+            current_device.index,
             arg_types=arg_types,
         )
 

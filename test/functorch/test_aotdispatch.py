@@ -15,11 +15,13 @@ from functools import partial
 from typing import Any, Callable, Dict, List, Optional, Union
 from unittest.mock import patch
 
+from common_utils import decorate, decorateForModules, skip, skipOps, xfail
+
 import torch
 import torch._dynamo as torchdynamo
 import torch.nn as nn
 import torch.utils._pytree as pytree
-from common_utils import decorate, decorateForModules, skip, skipOps, xfail
+
 from functorch import grad, jacrev, make_fx, vjp, vmap
 from functorch.compile import (
     aot_function,
@@ -69,6 +71,7 @@ from torch.testing._internal.common_utils import (
     skipIfRocm,
     skipIfTorchDynamo,
     TestCase,
+    xfailIfTorchDynamo,
 )
 from torch.testing._internal.hop_db import hop_db
 from torch.testing._internal.optests import (
@@ -102,13 +105,7 @@ except ImportError:
 
 
 class AOTTestCase(TestCase):
-    def setUp(self):
-        self.prev_grad_state = torch.is_grad_enabled()
-        super().setUp()
-
-    def tearDown(self):
-        torch.set_grad_enabled(self.prev_grad_state)
-        super().tearDown()
+    pass
 
 
 class TestPythonKey(AOTTestCase):
@@ -580,6 +577,9 @@ def forward(self, primals_1, primals_2):
 
     # This is a (hopefully) extremely rare case that is difficult to handle,
     # so we ban it.
+    # https://github.com/pytorch/pytorch/issues/126236
+    # https://github.com/pytorch/pytorch/pull/126113
+    @xfailIfTorchDynamo
     def test_set__and_data_mutation_bad(self):
         def f(a):
             a_view = a.view(-1)

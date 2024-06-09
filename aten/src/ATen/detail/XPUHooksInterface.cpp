@@ -2,11 +2,8 @@
 
 #include <c10/util/CallOnce.h>
 
-#include <memory>
-
 namespace at {
 namespace detail {
-
 
 const XPUHooksInterface& getXPUHooks() {
   static XPUHooksInterface* xpu_hooks = nullptr;

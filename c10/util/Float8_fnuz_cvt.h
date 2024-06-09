@@ -4,6 +4,10 @@
 
 #include <cstdint>
 
+#if defined(SYCL_LANGUAGE_VERSION)
+#include <sycl/sycl.hpp>
+#endif
+
 namespace c10::detail {
 
 /*
@@ -33,6 +37,8 @@ inline C10_HOST_DEVICE float fp8_fnuz_to_fp32_value(uint8_t x) {
     // guaranteed mantissa!=0 since cases 0x0 and 0x80 are handled above
 #if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
     uint32_t renorm_shift = __clz(mantissa);
+#elif defined(__SYCL_DEVICE_ONLY__)
+    uint32_t renorm_shift = sycl::clz(mantissa);
 #elif defined(_MSC_VER)
     unsigned long nonsign_bsr;
     _BitScanReverse(&nonsign_bsr, (unsigned long)mantissa);

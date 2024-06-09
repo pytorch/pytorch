@@ -179,6 +179,18 @@ class SuperVariable(VariableTracker):
         unimplemented(f"non-function or method super: {inner_fn}")
 
 
+class ExceptionVariable(VariableTracker):
+    def __init__(self, exc_type, args, **kwargs):
+        super().__init__(**kwargs)
+        self.exc_type = exc_type
+        self.args = args
+
+    def reconstruct(self, codegen):
+        codegen.load_import_from("builtins", self.exc_type.__name__)
+        codegen.foreach(self.args)
+        codegen.call_function(len(self.args), True)
+
+
 class UnknownVariable(VariableTracker):
     """
     It could be anything!
@@ -675,22 +687,45 @@ class GetAttrVariable(VariableTracker):
         kwargs: Dict[str, VariableTracker],
     ) -> VariableTracker:
         if (
-            name == "__getitem__"
+            name in ("__getitem__", "get")
             and self.name == "__dict__"
-            and len(args) == 1
             and not kwargs
             and args[0].is_python_constant()
+            and isinstance(
+                self.obj,
+                (variables.UserDefinedObjectVariable, variables.NNModuleVariable),
+            )
         ):
             obj = self.obj
             key = args[0].as_python_constant()
-            # redirect to var_getattr on the original obj
-            if isinstance(obj, variables.UserDefinedObjectVariable):
-                obj._check_for_getattribute()
-                if (
-                    key in obj.value.__dict__
-                    or tx.output.side_effects.has_pending_mutation_of_attr(obj, key)
-                ):
-                    return obj.var_getattr(tx, key)
+            if obj.has_key_in_generic_dict(tx, key):
+                # redirect to var_getattr on the original obj
+                return obj.var_getattr(tx, key)
+
+            # Return the default value for get
+            if name == "get":
+                if len(args) == 2:
+                    return args[1]
+                else:
+                    return variables.ConstantVariable(None)
+
+        elif (
+            name == "__contains__"
+            and self.name == "__dict__"
+            and len(args) == 1
+            and args[0].is_python_constant()
+            and not kwargs
+            and isinstance(
+                self.obj,
+                (variables.UserDefinedObjectVariable, variables.NNModuleVariable),
+            )
+        ):
+            obj = self.obj
+            key = args[0].as_python_constant()
+            if obj.has_key_in_generic_dict(tx, key):
+                return variables.ConstantVariable(True)
+            else:
+                return variables.ConstantVariable(False)
 
         return super().call_method(tx, name, args, kwargs)
 
@@ -828,25 +863,34 @@ class NumpyVariable(VariableTracker):
         assert len(mod) >= 2 and mod[:2] == ["torch", "_numpy"]
         return fn in cls.constant_fold_functions
 
+    @classmethod
+    def get_constant_collection_for_func(cls, fn):
+        mod = fn.__module__.split(".")
+        assert len(mod) >= 2 and mod[:2] == ["torch", "_numpy"]
+        return np_constant_collections_map.get(fn, None)
+
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
         if not config.trace_numpy:
             unimplemented(f"numpy.{self.value}()")
 
-        import numpy as np
-
         from ..utils import numpy_to_tensor_wrapper
         from .tensor import NumpyNdarrayVariable
 
-        # lookup method name in tnp. Things like np.dtype(float) are not supported yet.
-        if self.value.__name__ == "dtype":
+        func = get_np_to_tnp_map().get(self.value)
+        if func is None:
             unimplemented(
-                f"numpy dtype function is not supported yet. Got type {type(self.value)}."
+                f"Can't find numpy function {self.value} in torch._numpy. "
+                " Please file an issue to request support for this function."
             )
-        elif self.value in (np.iinfo, np.finfo):
+
+        # We are dealing with a function that produces a const collection type (np.dtype, np.iinfo/np.finfo)
+        if (
+            collection_variable_typ := self.get_constant_collection_for_func(func)
+        ) is not None:
             try:
-                return NumpyTypeInfoVariable(
+                return collection_variable_typ(
                     self.value(
                         *[x.as_python_constant() for x in args],
                         **{k: v.as_python_constant() for k, v in kwargs.items()},
@@ -856,14 +900,7 @@ class NumpyVariable(VariableTracker):
                 unimplemented(
                     f"{self.value.__name__} with non-const args: {args} {kwargs}"
                 )
-        else:  # We are dealing with a callable.
-            func = get_np_to_tnp_map().get(self.value)
-            if func is None:
-                unimplemented(
-                    f"Can't find numpy function {self.value} in torch._numpy. "
-                    " Please file an issue to request support for this function."
-                )
-
+        else:
             if (
                 func.__module__ == "torch._numpy.random"
                 and config.use_numpy_random_stream
@@ -1072,9 +1109,14 @@ class ConstantLikeVariable(VariableTracker):
 
     _error_prefix = "ConstantLikeVariable"
     try:
-        from numpy import floating as np_floating
+        from numpy import (
+            dtype as np_dtype,
+            floating as np_floating,
+            generic as np_generic,
+        )
     except ImportError:
         np_floating = type("invalid_type", (), {})
+        np_dtype = type("invalid_type", (), {})
 
     def __init__(self, value, **kwargs):
         super().__init__(**kwargs)
@@ -1113,6 +1155,11 @@ class ConstantLikeVariable(VariableTracker):
         result = getattr(self.value, name)
         if isinstance(result, self.np_floating):
             result = float(result)
+        if isinstance(result, self.np_dtype):
+            return NumpyDTypeVariable(result)
+        if isinstance(result, type) and issubclass(result, self.np_generic):
+            # things like x.dtype.type
+            return NumpyVariable(result)
         if variables.ConstantVariable.is_literal(result):
             return variables.ConstantVariable.create(result)
         return GetAttrVariable(self, name)
@@ -1137,3 +1184,27 @@ class TorchVersionVariable(ConstantLikeVariable):
 
 class NumpyTypeInfoVariable(ConstantLikeVariable):
     _error_prefix = "np.iinfo/np.finfo"
+
+
+class NumpyDTypeVariable(ConstantLikeVariable):
+    _error_prefix = "np.dtype[...]"
+
+    def __init__(self, value, **kwargs):
+        if isinstance(value, tnp.DType):
+            value = ConstantLikeVariable.np_dtype(value.name)
+        super().__init__(value, **kwargs)
+
+    def as_proxy(self):
+        """Similar to how numpy dtype descriptors (e.g. np.float32 ) are handled by NumpyVariable:
+
+        np.dtype() objects are serialized as strings, torch._numpy wrappers will normalize to the torch dtype.
+        This also handles unsupported things nicely (i.e. structured arrays and object arrays).
+        """
+        return self.value.type.__name__
+
+
+np_constant_collections_map = {
+    tnp.finfo: NumpyTypeInfoVariable,
+    tnp.iinfo: NumpyTypeInfoVariable,
+    tnp.dtype: NumpyDTypeVariable,
+}
