@@ -40,7 +40,7 @@ from torch._dynamo.testing import CompileCounterWithBackend
 
 from torch.testing._internal.common_methods_invocations import wrapper_set_seed
 from torch.testing._internal.common_cuda import (
-    SM80OrLater, PLATFORM_SUPPORTS_FLASH_ATTENTION,
+    IS_JETSON, SM80OrLater, PLATFORM_SUPPORTS_FLASH_ATTENTION,
     PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
     PLATFORM_SUPPORTS_FUSED_ATTENTION,
     PLATFORM_SUPPORTS_CUDNN_ATTENTION
@@ -2223,10 +2223,10 @@ class TestSDPACudaOnly(NNTestCase):
         attn_mask_strides = (14, 14, 14, 1)
 
         # Calculate the number of elements needed for each tensor
-        query_num_elements = max([size * stride for size, stride in zip(query_size, query_strides)])
-        key_num_elements = max([size * stride for size, stride in zip(key_size, key_strides)])
-        value_num_elements = max([size * stride for size, stride in zip(value_size, value_strides)])
-        attention_mask_num_elements = max([size * stride for size, stride in zip(attention_mask_size, attn_mask_strides)])
+        query_num_elements = max(size * stride for size, stride in zip(query_size, query_strides))
+        key_num_elements = max(size * stride for size, stride in zip(key_size, key_strides))
+        value_num_elements = max(size * stride for size, stride in zip(value_size, value_strides))
+        attention_mask_num_elements = max(size * stride for size, stride in zip(attention_mask_size, attn_mask_strides))
 
         # Create the tensors with the specified sizes and strides
         query = torch.randn(query_num_elements, device=device).as_strided(query_size, query_strides)
@@ -2570,6 +2570,7 @@ class TestSDPACudaOnly(NNTestCase):
 
     # verified passing successfully on H100
     @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Does not support SDPA")
+    @unittest.skipIf(IS_JETSON, "causing sigkill on Jetson")
     @parametrize("batch_size", [1, 8])
     @parametrize("seq_len_q", [4, 8, 64, 128, 256, 512, 1024, 2048] if SM80OrLater else [4, 8, 64, 128, 256, 512])
     @parametrize("seq_len_k", [4, 8, 64, 128, 256, 512, 1024, 2048] if SM80OrLater else [4, 8, 64, 128, 256, 512])
@@ -2671,6 +2672,7 @@ class TestSDPACudaOnly(NNTestCase):
 
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Does not support SDPA")
+    @unittest.skipIf(IS_JETSON, "causing sigkill on Jetson")
     @parametrize("batch_size", [1, 8])
     @parametrize("seq_len_q", [4, 8, 64, 128, 256, 312, 512, 1024, 2048] if SM80OrLater else [4, 8, 64, 128, 152, 256, 512])
     @parametrize("seq_len_k", [4, 8, 64, 65, 128, 256, 408, 512, 1024, 2048] if SM80OrLater else [4, 8, 37, 64, 128, 256, 512])
@@ -2788,6 +2790,7 @@ class TestSDPACudaOnly(NNTestCase):
                          atol=grad_attn_mask_atol, rtol=grad_attn_mask_rtol)
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Does not support SDPA or pre-SM80 hardware")
+    @unittest.skipIf(IS_JETSON, "causing sigkill on Jetson")
     @parametrize("batch_size", [1, 8])
     @parametrize("seq_len_q", [4, 8, 64, 143, 256, 512, 1024, 2048])
     @parametrize("seq_len_k", [4, 8, 64, 128, 256, 587, 1024, 2048])

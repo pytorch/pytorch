@@ -1,9 +1,11 @@
+# mypy: allow-untyped-defs
 import functools
 import inspect
 import itertools
 import warnings
 from collections import OrderedDict
 from typing import Any, List, Optional, Tuple
+from typing_extensions import deprecated
 
 import torch
 import torch._C as _C
@@ -32,8 +34,8 @@ class FunctionCtx:
     def save_for_backward(self, *tensors: torch.Tensor):
         r"""Save given tensors for a future call to :func:`~Function.backward`.
 
-        ``save_for_backward`` should be called at most once, only from inside the
-        :func:`forward` method, and only with tensors.
+        ``save_for_backward`` should be called at most once, in either the
+        :func:`setup_context` or :func:`forward` methods, and only with tensors.
 
         All tensors intended to be used in the backward pass should be saved
         with ``save_for_backward`` (as opposed to directly on ``ctx``) to prevent
@@ -91,8 +93,9 @@ class FunctionCtx:
     def save_for_forward(self, *tensors: torch.Tensor):
         r"""Save given tensors for a future call to :func:`~Function.jvp`.
 
-        ``save_for_forward`` should be only called once, from inside the :func:`forward`
-        method, and only be called with tensors.
+        ``save_for_forward`` should be called at most once, in either the
+        :func:`setup_context` or :func:`forward` methods, and all arguments
+        should be tensors.
 
         In :func:`jvp`, saved objects can be accessed through the :attr:`saved_tensors`
         attribute.
@@ -144,8 +147,8 @@ class FunctionCtx:
     def mark_dirty(self, *args: torch.Tensor):
         r"""Mark given tensors as modified in an in-place operation.
 
-        **This should be called at most once, only from inside the**
-        :func:`forward` **method, and all arguments should be inputs.**
+        This should be called at most once, in either the :func:`setup_context`
+        or :func:`forward` methods, and all arguments should be inputs.
 
         Every tensor that's been modified in-place in a call to :func:`forward`
         should be given to this function, to ensure correctness of our checks.
@@ -178,18 +181,20 @@ class FunctionCtx:
         """
         self.dirty_tensors = args
 
+    @deprecated(
+        "`mark_shared_storage` is deprecated. "
+        "Tensors with shared storages are automatically tracked. "
+        "Note that calls to `set_()` are not tracked",
+        category=FutureWarning,
+    )
     def mark_shared_storage(self, *pairs):
-        warnings.warn(
-            "mark_shared_storage is deprecated. "
-            "Tensors with shared storages are automatically tracked. Note "
-            "that calls to `set_()` are not tracked"
-        )
+        pass
 
     def mark_non_differentiable(self, *args: torch.Tensor):
         r"""Mark outputs as non-differentiable.
 
-        **This should be called at most once, only from inside the**
-        :func:`forward` **method, and all arguments should be tensor outputs.**
+        This should be called at most once, in either the :func:`setup_context`
+        or :func:`forward` methods, and all arguments should be tensor outputs.
 
         This will mark outputs as not requiring gradients, increasing the
         efficiency of backward computation. You still need to accept a gradient
@@ -220,7 +225,8 @@ class FunctionCtx:
     def set_materialize_grads(self, value: bool):
         r"""Set whether to materialize grad tensors. Default is ``True``.
 
-        **This should be called only from inside the** :func:`forward` **method**
+        This should be called only from either the :func:`setup_context` or
+        :func:`forward` methods.
 
         If ``True``, undefined grad tensors will be expanded to tensors full of zeros
         prior to calling the :func:`backward` and :func:`jvp` methods.
@@ -489,9 +495,8 @@ class Function(_SingleLevelFunction):
     """
 
     def __init__(self, *args, **kwargs):
-        cls = self.__class__
         warnings.warn(
-            f"{cls} should not be instantiated. Methods on autograd functions"
+            f"{self.__class__} should not be instantiated. Methods on autograd functions"
             "are all static, so you should invoke them on the class itself. "
             "Instantiating an autograd function will raise an "
             "error in a future version of PyTorch.",
@@ -559,7 +564,7 @@ class Function(_SingleLevelFunction):
 
             return bound_args.args
 
-        is_setup_ctx_defined = cls.setup_context != _SingleLevelFunction.setup_context
+        is_setup_ctx_defined = _is_setup_context_defined(cls.setup_context)
         if is_setup_ctx_defined:
             args = bind_default_args(cls.forward, *args, **kwargs)
 
@@ -581,6 +586,10 @@ class Function(_SingleLevelFunction):
     @staticmethod
     def _compiled_autograd_key(ctx):
         return (ctx._autograd_function_id,)
+
+
+def _is_setup_context_defined(fn):
+    return fn != _SingleLevelFunction.setup_context
 
 
 def once_differentiable(fn):

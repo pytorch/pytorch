@@ -10,8 +10,8 @@
 
 #include <tuple>
 
-std::tuple<at::Tensor, c10::optional<at::Tensor>> PackedLinearWeightCudnn::unpack() {
-  return std::tuple<at::Tensor, c10::optional<at::Tensor>>{orig_weight, bias_};
+std::tuple<at::Tensor, std::optional<at::Tensor>> PackedLinearWeightCudnn::unpack() {
+  return std::tuple<at::Tensor, std::optional<at::Tensor>>{orig_weight, bias_};
 }
 
 #endif  // AT_CUDNN_ENABLED

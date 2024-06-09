@@ -1,35 +1,33 @@
 # Owner(s): ["oncall: pt2"]
+import functools
 import sys
 import unittest
-import torch
-from torch.testing._internal.common_utils import (
-    TestCase,
-    run_tests,
-)
-
-from torch.testing._internal.common_device_type import instantiate_device_type_tests, dtypes
-from functorch.compile import aot_function, nop, min_cut_rematerialization_partition
 from unittest.mock import patch
-import functools
+
+import torch
 import torch.utils.checkpoint
+from functorch.compile import aot_function, min_cut_rematerialization_partition, nop
 
-
-from torch.testing._internal.common_utils import (
-    IS_CI,
-    IS_WINDOWS,
+from torch.testing._internal.common_device_type import (
+    dtypes,
+    instantiate_device_type_tests,
 )
+
+from torch.testing._internal.common_utils import IS_CI, IS_WINDOWS, run_tests, TestCase
 
 if IS_WINDOWS and IS_CI:
-    sys.stderr.write(
-        "torch.compile not supported on windows"
-    )
+    sys.stderr.write("torch.compile not supported on windows")
     if __name__ == "__main__":
         sys.exit(0)
     raise unittest.SkipTest("torch.compile not supported on windows")
 
+
 def count_philox_rand(gm, args, freq):
-    assert [node.target for node in gm.graph.nodes].count(torch.ops.rngprims.philox_rand.default) == freq
+    assert [node.target for node in gm.graph.nodes].count(
+        torch.ops.rngprims.philox_rand.default
+    ) == freq
     return gm
+
 
 class TestFunctionalizationRngOps(TestCase):
     @dtypes(torch.float32)
@@ -72,8 +70,6 @@ class TestFunctionalizationRngOps(TestCase):
 
             self.assertEqual(ref, res)
 
-
-
     @dtypes(torch.float32)
     @patch.object(torch._functorch.config, "functionalize_rng_ops", True)
     def test_rand_like_dynamic_bwd(self, dtype, device):
@@ -95,7 +91,6 @@ class TestFunctionalizationRngOps(TestCase):
             res.sum().backward()
 
             self.assertEqual(ref, res)
-
 
     @dtypes(torch.float32)
     @patch.object(torch._functorch.config, "functionalize_rng_ops", True)
@@ -134,7 +129,7 @@ class TestFunctionalizationRngOps(TestCase):
 
             @staticmethod
             def backward(ctx, grad_out):
-                x, = ctx.saved_tensors
+                (x,) = ctx.saved_tensors
                 return grad_out * torch.rand_like(grad_out) * torch.cos(x)
 
         custom = Custom.apply
@@ -174,7 +169,7 @@ class TestFunctionalizationRngOps(TestCase):
 
             @staticmethod
             def backward(ctx, grad_out):
-                x, = ctx.saved_tensors
+                (x,) = ctx.saved_tensors
                 return grad_out * torch.rand_like(grad_out) * torch.cos(x)
 
         class CustomOp2(torch.autograd.Function):
@@ -186,9 +181,8 @@ class TestFunctionalizationRngOps(TestCase):
 
             @staticmethod
             def backward(ctx, grad_out):
-                x, = ctx.saved_tensors
+                (x,) = ctx.saved_tensors
                 return grad_out * torch.rand_like(grad_out) * torch.rand_like(x)
-
 
         custom_op1 = CustomOp1.apply
         custom_op2 = CustomOp2.apply
@@ -209,7 +203,6 @@ class TestFunctionalizationRngOps(TestCase):
             a = aot_custom_op1(x)
             b = a.sin()
             return aot_custom_op2(b)
-
 
         for seed in range(10):
             torch.cuda.manual_seed(seed)
@@ -265,7 +258,6 @@ class TestFunctionalizationRngOps(TestCase):
             a = torch.sin(a)
             return a
 
-
         x = torch.rand(*shape, device=device, dtype=dtype, requires_grad=True)
 
         x_clone = x.clone().detach().requires_grad_(True)
@@ -277,7 +269,12 @@ class TestFunctionalizationRngOps(TestCase):
         torch.cuda.manual_seed(123)
         fwd_compiler = functools.partial(count_philox_rand, freq=2)
         bwd_compiler = functools.partial(count_philox_rand, freq=0)
-        aot_custom = aot_function(fn, fwd_compiler, bwd_compiler, partition_fn=min_cut_rematerialization_partition)
+        aot_custom = aot_function(
+            fn,
+            fwd_compiler,
+            bwd_compiler,
+            partition_fn=min_cut_rematerialization_partition,
+        )
         # aot_custom = aot_function(fn, fwd_compiler, bwd_compiler)
         res = aot_custom(x_clone)
         res.sum().backward()

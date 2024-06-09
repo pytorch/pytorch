@@ -60,7 +60,7 @@ bool isAutocastNode(Value* value) {
 //  2. `prim::SetAttr` must follow `prim::CreateObject()` in the same block,
 //    but there might be other nodes in between
 //
-c10::optional<AutocastScope> parseAutocast(
+std::optional<AutocastScope> parseAutocast(
     Value* value,
     const AutocastContext& context) {
   if (!isAutocastNode(value)) {
@@ -71,7 +71,7 @@ c10::optional<AutocastScope> parseAutocast(
     AutocastScope scope;
     scope.instance = value;
     scope.context = context;
-    c10::optional<bool> enabled;
+    std::optional<bool> enabled;
     std::string device;
     c10::ScalarType dtype = c10::ScalarType::Undefined;
     for (Use use : value->uses()) {
@@ -96,17 +96,19 @@ c10::optional<AutocastScope> parseAutocast(
           use.user->s(attr::name) == "fast_dtype") {
         // Search for `prim::SetAttr[name="fast_dtype"]`
         auto ret = constant_as<c10::ScalarType>(use.user->input(1));
-        TORCH_CHECK(
-            ret.has_value() && ret.value() != c10::ScalarType::Undefined,
-            "Autocast dtype argument must be a constant and defined");
-        dtype = ret.value();
+        if (ret.has_value()) {
+          dtype = ret.value();
+        }
       }
     }
     TORCH_CHECK(enabled.has_value(), "Autocast missing _enabled attribute");
+    TORCH_CHECK(!device.empty(), "Autocast missing device attribute");
+    if (dtype == c10::ScalarType::Undefined) {
+      dtype = at::autocast::get_autocast_dtype(c10::Device(device).type());
+    }
     TORCH_CHECK(
         dtype != c10::ScalarType::Undefined,
-        "Autocast missing fast_dtype attribute");
-    TORCH_CHECK(!device.empty(), "Autocast missing device attribute");
+        "Autocast has invalid fast_dtype attribute");
     if (device == "cuda") {
       scope.context.gpu_enabled = enabled.value();
       scope.context.gpu_scalar_type = dtype;
@@ -267,7 +269,7 @@ void updateAutocastEnabledCheck(Node* node, bool is_jit_enabled) {
 void handleBlock(Block* block, AutocastContext initial_state) {
   std::stack<AutocastScope> autocast_stack;
 
-  c10::optional<bool> incompatible_amp = c10::nullopt;
+  std::optional<bool> incompatible_amp = c10::nullopt;
 
   // The current autocast enabled/disabled state
   auto current_state = [&] {
@@ -521,10 +523,10 @@ void Autocast(const std::shared_ptr<Graph>& graph) {
   GRAPH_DUMP("\nBefore Autocast: ", graph);
   if (autocastEnabled()) {
     AutocastContext init = {
-        at::autocast::is_enabled(),
-        at::autocast::is_cpu_enabled(),
-        at::autocast::get_autocast_gpu_dtype(),
-        at::autocast::get_autocast_cpu_dtype()};
+        at::autocast::is_autocast_enabled(at::kCUDA),
+        at::autocast::is_autocast_enabled(at::kCPU),
+        at::autocast::get_autocast_dtype(at::kCUDA),
+        at::autocast::get_autocast_dtype(at::kCPU)};
     handleBlock(graph->block(), init);
   }
   GRAPH_DUMP("\nAfter Autocast: ", graph);

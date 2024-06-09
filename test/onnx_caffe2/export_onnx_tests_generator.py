@@ -5,10 +5,10 @@ import traceback
 
 import onnx
 import onnx_test_common
-
-import torch
 from onnx import numpy_helper
 from test_nn import new_module_tests
+
+import torch
 from torch.autograd import Variable
 from torch.testing._internal.common_nn import module_tests
 

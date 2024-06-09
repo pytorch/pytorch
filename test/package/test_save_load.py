@@ -163,7 +163,9 @@ class TestSaveLoad(PackageTestCase):
         buffer = BytesIO()
         with PackageExporter(buffer) as exporter:
             exporter.intern("**")
-            exporter.save_pickle("container", "container.pkl", container, pickle_protocol=4)
+            exporter.save_pickle(
+                "container", "container.pkl", container, pickle_protocol=4
+            )
 
         buffer.seek(0)
         importer = PackageImporter(buffer)

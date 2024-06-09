@@ -243,7 +243,7 @@ void runAsyncBroadcastTest(
       for (const auto i : c10::irange(numProcesses)) {
         auto tensors = tests[i].getTensors();
         for (const auto& tensor : tensors) {
-          const auto* const data = tensor.data_ptr<float>();
+          const auto* const data = tensor.const_data_ptr<float>();
           for (const auto k : c10::irange(tensor.numel())) {
             EXPECT_EQ(data[k], expected);
           }

@@ -1,7 +1,9 @@
 # Owner(s): ["module: unknown"]
-import torch
 import copy
-from torch.testing._internal.common_utils import TestCase, run_tests
+
+import torch
+from torch.testing._internal.common_utils import run_tests, TestCase
+
 
 class TestPerOverloadAPI(TestCase):
     def test_basics_opoverloadpacket(self):
@@ -10,8 +12,8 @@ class TestPerOverloadAPI(TestCase):
         add_packet = torch.ops.aten.add
 
         # class attributes
-        self.assertEqual(add_packet.__name__, 'add')
-        self.assertEqual(str(add_packet), 'aten.add')
+        self.assertEqual(add_packet.__name__, "add")
+        self.assertEqual(str(add_packet), "aten.add")
 
         # callable
         self.assertEqual(add_packet(torch.tensor(2), torch.tensor(3)), torch.tensor(5))
@@ -36,8 +38,8 @@ class TestPerOverloadAPI(TestCase):
         add_tensoroverload = add_packet.Tensor
 
         # class attributes
-        self.assertEqual(str(add_tensoroverload), 'aten.add.Tensor')
-        self.assertEqual(add_tensoroverload.__name__, 'add.Tensor')
+        self.assertEqual(str(add_tensoroverload), "aten.add.Tensor")
+        self.assertEqual(add_tensoroverload.__name__, "add.Tensor")
         self.assertEqual(add_tensoroverload.overloadpacket, add_packet)
 
         # deepcopy is a no-op
@@ -48,10 +50,14 @@ class TestPerOverloadAPI(TestCase):
         self.assertEqual(id(add_tensoroverload), id(another_add_tensoroverload))
 
         # pretty print
-        self.assertEqual(repr(add_tensoroverload), "<OpOverload(op='aten.add', overload='Tensor')>")
+        self.assertEqual(
+            repr(add_tensoroverload), "<OpOverload(op='aten.add', overload='Tensor')>"
+        )
 
         # callable
-        self.assertEqual(add_tensoroverload(torch.tensor(2), torch.tensor(3)), torch.tensor(5))
+        self.assertEqual(
+            add_tensoroverload(torch.tensor(2), torch.tensor(3)), torch.tensor(5)
+        )
 
         a = torch.tensor(2)
         b = torch.tensor(0)
@@ -65,8 +71,9 @@ class TestPerOverloadAPI(TestCase):
         y = torch.randn(5, 3)
         self.assertEqual(
             torch.ops.aten.linear.default.decompose(x, y),
-            torch.ops.aten.linear.default(x, y)
+            torch.ops.aten.linear.default(x, y),
         )
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     run_tests()

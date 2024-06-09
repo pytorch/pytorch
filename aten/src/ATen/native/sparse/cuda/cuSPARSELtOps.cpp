@@ -101,9 +101,9 @@ at::Tensor _cslt_compress(const Tensor& sparse_input)
 std::tuple<int64_t, at::Tensor> _cslt_sparse_mm_impl(
     const Tensor& compressed_A,
     const Tensor& dense_B,
-    const c10::optional<Tensor>& bias_opt,
-    const c10::optional<Tensor>& alpha_opt,
-    const c10::optional<c10::ScalarType> out_dtype_opt,
+    const std::optional<Tensor>& bias_opt,
+    const std::optional<Tensor>& alpha_opt,
+    const std::optional<c10::ScalarType> out_dtype_opt,
     bool transpose_result,
     int alg_id,
     bool search_alg_id
@@ -343,9 +343,9 @@ std::tuple<int64_t, at::Tensor> _cslt_sparse_mm_impl(
 at::Tensor _cslt_sparse_mm(
     const Tensor& compressed_A,
     const Tensor& dense_B,
-    const c10::optional<Tensor>& bias_opt,
-    const c10::optional<Tensor>& alpha_opt,
-    const c10::optional<c10::ScalarType> out_dtype_opt,
+    const std::optional<Tensor>& bias_opt,
+    const std::optional<Tensor>& alpha_opt,
+    const std::optional<c10::ScalarType> out_dtype_opt,
     bool transpose_result,
     int64_t alg_id
 )
@@ -365,9 +365,9 @@ at::Tensor _cslt_sparse_mm(
 int64_t _cslt_sparse_mm_search(
     const Tensor& compressed_A,
     const Tensor& dense_B,
-    const c10::optional<Tensor>& bias_opt,
-    const c10::optional<Tensor>& alpha_opt,
-    const c10::optional<c10::ScalarType> out_dtype_opt,
+    const std::optional<Tensor>& bias_opt,
+    const std::optional<Tensor>& alpha_opt,
+    const std::optional<c10::ScalarType> out_dtype_opt,
     bool transpose_result
 )
 {
@@ -398,9 +398,9 @@ at::Tensor _cslt_compress(const Tensor& sparse_input){
 at::Tensor _cslt_sparse_mm(
     const Tensor& compressed_A,
     const Tensor& dense_B,
-    const c10::optional<Tensor>& bias_opt,
-    const c10::optional<Tensor>& alpha_opt,
-    const c10::optional<c10::ScalarType> out_dtype,
+    const std::optional<Tensor>& bias_opt,
+    const std::optional<Tensor>& alpha_opt,
+    const std::optional<c10::ScalarType> out_dtype,
     bool transpose_result,
     int64_t alg_id)
 {
@@ -410,9 +410,9 @@ at::Tensor _cslt_sparse_mm(
 int64_t _cslt_sparse_mm_search(
     const Tensor& compressed_A,
     const Tensor& dense_B,
-    const c10::optional<Tensor>& bias_opt,
-    const c10::optional<Tensor>& alpha_opt,
-    const c10::optional<c10::ScalarType> out_dtype,
+    const std::optional<Tensor>& bias_opt,
+    const std::optional<Tensor>& alpha_opt,
+    const std::optional<c10::ScalarType> out_dtype,
     bool transpose_result
 )
 {

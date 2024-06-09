@@ -2,6 +2,8 @@
 
 import os
 
+from torchvision import datasets, transforms
+
 import torch
 import torch._lazy
 import torch._lazy.metrics
@@ -10,7 +12,6 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
 from torch.optim.lr_scheduler import StepLR
-from torchvision import datasets, transforms
 
 torch._lazy.ts_backend.init()
 
@@ -54,13 +55,9 @@ def train(log_interval, model, device, train_loader, optimizer, epoch):
 
         if batch_idx % log_interval == 0:
             print(
-                "Train Epoch: {} [{}/{} ({:.0f}%)]\tLoss: {:.6f}".format(
-                    epoch,
-                    batch_idx * len(data),
-                    len(train_loader.dataset),
-                    100.0 * batch_idx / len(train_loader),
-                    loss.item(),
-                )
+                f"Train Epoch: {epoch} "
+                f"[{batch_idx * len(data)}/{len(train_loader.dataset)} ({100.0 * batch_idx / len(train_loader):.0f}%)]"
+                f"\tLoss: {loss.item():.6f}"
             )
 
 

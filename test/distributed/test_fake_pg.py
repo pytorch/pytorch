@@ -1,34 +1,31 @@
 # Owner(s): ["oncall: distributed"]
 
 import sys
+import unittest
+
 import torch
 import torch.distributed as dist
-import torch.nn as nn
-import unittest
 import torch.distributed._functional_collectives as funcol
-from torch.fx.experimental.proxy_tensor import make_fx
-from torch.testing._internal.distributed.fake_pg import FakeStore
-from torch.testing import FileCheck
-from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
+import torch.nn as nn
 from torch.distributed._tensor import DeviceMesh, init_device_mesh, Shard
-from torch.testing._internal.common_utils import (
-    TestCase,
-    run_tests,
-)
+from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.distributed.tensor.parallel import (
     ColwiseParallel,
     parallelize_module,
     RowwiseParallel,
 )
-from torch.testing._internal.distributed._tensor.common_dtensor import (
-    MLPModule,
-)
+from torch.fx.experimental.proxy_tensor import make_fx
+from torch.testing import FileCheck
+from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.distributed._tensor.common_dtensor import MLPModule
+from torch.testing._internal.distributed.fake_pg import FakeStore
 
 if not dist.is_available():
     print("Distributed not available, skipping tests", file=sys.stderr)
     sys.exit(0)
 
 HAS_CUDA = torch.cuda.is_available()
+
 
 class TestFakePG(TestCase):
     def tearDown(self):
@@ -37,9 +34,7 @@ class TestFakePG(TestCase):
 
     def test_all_reduce(self):
         store = FakeStore()
-        dist.init_process_group(
-            backend="fake", rank=1, world_size=2, store=store
-        )
+        dist.init_process_group(backend="fake", rank=1, world_size=2, store=store)
 
         output = torch.ones(3, 3) * dist.get_rank()
         dist.all_reduce(output)
@@ -47,9 +42,7 @@ class TestFakePG(TestCase):
 
     def test_allgather(self):
         store = FakeStore()
-        dist.init_process_group(
-            backend="fake", rank=1, world_size=2, store=store
-        )
+        dist.init_process_group(backend="fake", rank=1, world_size=2, store=store)
 
         input_tensor = torch.ones(3, 3) * dist.get_rank()
         output_tensors = [torch.empty_like(input_tensor) for _ in range(2)]
@@ -59,9 +52,7 @@ class TestFakePG(TestCase):
 
     def test_reduce_scatter(self):
         store = FakeStore()
-        dist.init_process_group(
-            backend="fake", rank=1, world_size=2, store=store
-        )
+        dist.init_process_group(backend="fake", rank=1, world_size=2, store=store)
 
         to_reduce_scatter = [torch.ones(3, 3) * rank for rank in range(2)]
         output_tensor = torch.empty(3, 3)
@@ -69,24 +60,20 @@ class TestFakePG(TestCase):
         dist.reduce_scatter(output_tensor, to_reduce_scatter)
         self.assertEqual(tuple(output_tensor.shape), (3, 3))
 
-    @unittest.skipIf(not HAS_CUDA, 'No CUDA')
+    @unittest.skipIf(not HAS_CUDA, "No CUDA")
     def test_construct_fsdp(self):
         store = FakeStore()
-        dist.init_process_group(
-            backend="fake", rank=0, world_size=2, store=store
-        )
-        FSDP(nn.Linear(2, 3, device='cuda'))
+        dist.init_process_group(backend="fake", rank=0, world_size=2, store=store)
+        FSDP(nn.Linear(2, 3, device="cuda"))
 
-    @unittest.skipIf(not HAS_CUDA, 'No CUDA')
+    @unittest.skipIf(not HAS_CUDA, "No CUDA")
     def test_fsdp_fake_e2e(self):
         store = dist.HashStore()
-        dist.init_process_group(
-            backend="fake", rank=0, world_size=2, store=store
-        )
+        dist.init_process_group(backend="fake", rank=0, world_size=2, store=store)
         my_module = nn.Sequential(
-            nn.Linear(2, 3, device='cuda'),
+            nn.Linear(2, 3, device="cuda"),
             nn.ReLU(),
-            nn.Linear(3, 2, device='cuda'),
+            nn.Linear(3, 2, device="cuda"),
         )
         sharded_module = FSDP(my_module, use_orig_params=True)
         optim = torch.optim.Adam(sharded_module.parameters(), lr=0.0001)
@@ -96,19 +83,17 @@ class TestFakePG(TestCase):
         loss.backward()
         optim.step()
 
-    @unittest.skipIf(not HAS_CUDA, 'No CUDA')
+    @unittest.skipIf(not HAS_CUDA, "No CUDA")
     def test_fake_pg_tracing(self):
         store = dist.HashStore()
-        dist.init_process_group(
-            backend="fake", rank=0, world_size=2, store=store
-        )
+        dist.init_process_group(backend="fake", rank=0, world_size=2, store=store)
 
         default_pg = dist.distributed_c10d._get_default_group()
 
         def allgather_fn(tensor):
             return funcol.all_gather_tensor(tensor, 0, default_pg)
 
-        gm = make_fx(allgather_fn)(torch.randn(2, 2, device='cuda'))
+        gm = make_fx(allgather_fn)(torch.randn(2, 2, device="cuda"))
         FileCheck().check("all_gather").check("wait_tensor").run(str(gm.graph))
 
     def test_broadcast(self):
@@ -184,15 +169,13 @@ class TestFakePG(TestCase):
         tp_size = 2
 
         store = dist.HashStore()
-        dist.init_process_group(backend="fake", rank=0, world_size=world_size, store=store)
-
-        device_mesh = DeviceMesh(
-            "cuda", torch.arange(0, world_size).view(-1, tp_size)
+        dist.init_process_group(
+            backend="fake", rank=0, world_size=world_size, store=store
         )
+
+        device_mesh = DeviceMesh("cuda", torch.arange(0, world_size).view(-1, tp_size))
         device_mesh = init_device_mesh(
-            "cuda",
-            (world_size // tp_size, tp_size),
-            mesh_dim_names=["dp", "tp"]
+            "cuda", (world_size // tp_size, tp_size), mesh_dim_names=["dp", "tp"]
         )
 
         sequence_parallelize_plan = {
@@ -204,7 +187,6 @@ class TestFakePG(TestCase):
             "net2": RowwiseParallel(),
         }
         for parallel_plan in [sequence_parallelize_plan, pairwise_parallelize_plan]:
-
             my_module = parallelize_module(
                 MLPModule(device="cuda"),
                 device_mesh["tp"],
@@ -212,9 +194,7 @@ class TestFakePG(TestCase):
             )
 
             sharded_module = FSDP(
-                my_module,
-                use_orig_params=True,
-                device_mesh=device_mesh["dp"]
+                my_module, use_orig_params=True, device_mesh=device_mesh["dp"]
             )
             optim = torch.optim.Adam(sharded_module.parameters(), lr=0.0001)
 

@@ -137,7 +137,7 @@ public:
    * and returns it if it is registered WITH A SCHEMA.
    * Returns nullopt otherwise.
    */
-  c10::optional<OperatorHandle> findSchema(const OperatorName& operator_name);
+  std::optional<OperatorHandle> findSchema(const OperatorName& operator_name);
 
   /**
    * Variant of findSchema that results in less code generated at the call site.
@@ -155,7 +155,7 @@ public:
   OperatorHandle findSchemaOrThrow(const char* name, const char* overload_name);
 
   // Like findSchema, but also returns OperatorHandle even if there is no schema
-  c10::optional<OperatorHandle> findOp(const OperatorName& operator_name);
+  std::optional<OperatorHandle> findOp(const OperatorName& operator_name);
 
   // Returns a list of all operator names present in the operatorLookupTable_
   const std::vector<OperatorName> getAllOpNames();
@@ -196,7 +196,7 @@ public:
 
   // Used by torchdeploy/multipy for multiple interpreters racing.
   void waitForDef(const FunctionSchema& schema);
-  void waitForImpl(const OperatorName& op_name, c10::optional<DispatchKey> dispatch_key);
+  void waitForImpl(const OperatorName& op_name, std::optional<DispatchKey> dispatch_key);
 
   // ------------------------------------------------------------------------
   //
@@ -221,20 +221,20 @@ public:
    */
   // NB: steals the inferred function schema, as we may need to hold on to
   // it for a bit until the real schema turns up
-  RegistrationHandleRAII registerImpl(OperatorName op_name, c10::optional<DispatchKey> dispatch_key, KernelFunction kernel, c10::optional<impl::CppSignature> cpp_signature, std::unique_ptr<FunctionSchema> inferred_function_schema, std::string debug);
+  RegistrationHandleRAII registerImpl(OperatorName op_name, std::optional<DispatchKey> dispatch_key, KernelFunction kernel, std::optional<impl::CppSignature> cpp_signature, std::unique_ptr<FunctionSchema> inferred_function_schema, std::string debug);
 
   /**
-   * Given an operator, tells the Dispatcher that we have implemented an abstract impl
+   * Given an operator, tells the Dispatcher that we have implemented a fake impl
    * for this op in the given Python module. Call this a "pystub".
    */
-  RegistrationHandleRAII registerAbstractImplPyStub(const OperatorName& op_name, const char* pymodule, const char* context);
+  RegistrationHandleRAII registerPythonModule(const OperatorName& op_name, const char* pymodule, const char* context);
 
   /**
-   * Given an operator, throws if we have an abstract impl pystub.
+   * Given an operator, throws if we have a pystub.
    */
-  void throwIfHasAbstractImplPyStub(OperatorName op_name);
+  void throwIfHasPythonModule(OperatorName op_name);
 
-  c10::optional<std::pair<const char*, const char*>> getAbstractImplPyStub(OperatorName op_name);
+  std::optional<std::pair<const char*, const char*>> getPyStub(OperatorName op_name);
 
   /**
    * Register a new operator by name.
@@ -299,14 +299,14 @@ public:
    * Returns the names of all operators with a kernel registered for the specified DispatchKey.
    * If no DispatchKey is specified, it returns all registered operators.
    */
-  std::vector<OperatorName> getRegistrationsForDispatchKey(c10::optional<DispatchKey> k) const;
+  std::vector<OperatorName> getRegistrationsForDispatchKey(std::optional<DispatchKey> k) const;
 
 private:
   Dispatcher();
 
-  static int64_t sequenceNumberForRunningRecordFunction(DispatchKey dispatchKey);
-  static void runRecordFunction(at::RecordFunction& guard, at::RecordFunction::schema_ref_t schema_ref, DispatchKey dispatchKey);
-  static void runRecordFunction(at::RecordFunction& guard, at::RecordFunction::schema_ref_t schema_ref, DispatchKey dispatchKey, c10::ArrayRef<const c10::IValue> args);
+  static int64_t sequenceNumberForRunningRecordFunction(DispatchKey dispatchKey, DispatchKeySet dispatchKeySet);
+  static void runRecordFunction(at::RecordFunction& guard, at::RecordFunction::schema_ref_t schema_ref, DispatchKey dispatchKey, DispatchKeySet dispatchKeySet);
+  static void runRecordFunction(at::RecordFunction& guard, at::RecordFunction::schema_ref_t schema_ref, DispatchKey dispatchKey, DispatchKeySet dispatchKeySet, c10::ArrayRef<const c10::IValue> args);
 
   #ifdef FBCODE_CAFFE2
   static bool profilingOperatorEvents();
@@ -321,7 +321,7 @@ private:
   void deregisterImpl_(
     const OperatorHandle& op,
     const OperatorName& op_name,
-    c10::optional<DispatchKey> dispatch_key,
+    std::optional<DispatchKey> dispatch_key,
     impl::OperatorEntry::AnnotatedKernelContainerIterator kernel_handle);
   void deregisterName_(const OperatorHandle& op, const OperatorName& op_name);
   void deregisterFallback_(DispatchKey dispatchKey);
@@ -401,6 +401,10 @@ public:
 
   bool hasKernelForDispatchKey(DispatchKey k) const {
     return operatorDef_->op.hasKernelForDispatchKey(k);
+  }
+
+  bool isKernelFallthroughKernel(DispatchKey k) const {
+    return operatorDef_->op.kernelForDispatchKey(k).isFallthrough();
   }
 
   bool hasKernelForAnyDispatchKey(DispatchKeySet k) const {
@@ -630,15 +634,15 @@ inline Return Dispatcher::callWithDispatchKeySlowPath(const TypedOperatorHandle<
       TORCH_INTERNAL_ASSERT_DEBUG_ONLY(lastArgIdx == num_boxed_args);
       // I don't *think* we need std::launder here, because IValue has
       // no subclasses and no const or reference fields.
-      runRecordFunction(guard, schema_ref, dispatchKey, c10::ArrayRef<const c10::IValue>(reinterpret_cast<IValue *>(boxedArgs), num_boxed_args));
+      runRecordFunction(guard, schema_ref, dispatchKey, dispatchKeySet, c10::ArrayRef<const c10::IValue>(reinterpret_cast<IValue *>(boxedArgs), num_boxed_args));
       for (size_t ii = 0; ii < num_boxed_args; ++ii) {
         reinterpret_cast<IValue *>(&boxedArgs[ii])->~IValue();
       }
     } else {
-      runRecordFunction(guard, schema_ref, dispatchKey);
+      runRecordFunction(guard, schema_ref, dispatchKey, dispatchKeySet);
     }
   } else {
-    runRecordFunction(guard, schema_ref, dispatchKey);
+    runRecordFunction(guard, schema_ref, dispatchKey, dispatchKeySet);
   }
 
   if (C10_UNLIKELY(guard.needsOutputs())) {
@@ -732,8 +736,8 @@ inline void Dispatcher::callBoxed(const OperatorHandle& op, Stack* stack) const 
     auto dispatchKey = dispatchKeySet.highestPriorityTypeId();
     auto& schema = op.schema();
     auto schema_ref = std::reference_wrapper<const FunctionSchema>(schema);
-    guard.needsInputs() ? runRecordFunction(guard, schema_ref, dispatchKey, c10::ArrayRef<const c10::IValue>(stack->data(), stack->size()))
-                        : runRecordFunction(guard, schema_ref, dispatchKey);
+    guard.needsInputs() ? runRecordFunction(guard, schema_ref, dispatchKey, dispatchKeySet, c10::ArrayRef<const c10::IValue>(stack->data(), stack->size()))
+                        : runRecordFunction(guard, schema_ref, dispatchKey, dispatchKeySet);
 
     // keeping the guard alive while executing the kernel
     kernel.callBoxed(op, dispatchKeySet, stack);

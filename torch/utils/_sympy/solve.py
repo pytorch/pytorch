@@ -102,7 +102,7 @@ def _try_isolate_lhs(
     if isinstance(e, sympy.Rel):
         # Move any constants in the left-hand side to the right-hand side.
         lhs_not_thing = (
-            sum([a for a in e.lhs.args if not a.has(thing)])
+            sum(a for a in e.lhs.args if not a.has(thing))
             if isinstance(e.lhs, sympy.Add)
             else 0
         )

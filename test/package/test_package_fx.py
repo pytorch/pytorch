@@ -22,6 +22,7 @@ torch.fx.wrap("len")
 # Do it twice to make sure it doesn't affect anything
 torch.fx.wrap("len")
 
+
 class TestPackageFX(PackageTestCase):
     """Tests for compatibility with FX."""
 
@@ -184,7 +185,6 @@ class TestPackageFX(PackageTestCase):
         loaded_traced = pi.load_pickle("model", "model.pkl")
         input = torch.rand(2, 3)
         self.assertEqual(loaded_traced(input), traced(input))
-
 
 
 if __name__ == "__main__":

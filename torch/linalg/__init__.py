@@ -457,6 +457,8 @@ Supports input of float, double, cfloat and cdouble dtypes.
 Also supports batches of matrices, and if :attr:`A` is a batch of matrices then
 the output has the same batch dimensions.
 
+The returned eigenvalues are not guaranteed to be in any specific order.
+
 .. note:: The eigenvalues and eigenvectors of a real matrix may be complex.
 
 """ + fr"""
@@ -558,6 +560,8 @@ where :math:`\mathrm{I}_n` is the `n`-dimensional identity matrix.
 Supports input of float, double, cfloat and cdouble dtypes.
 Also supports batches of matrices, and if :attr:`A` is a batch of matrices then
 the output has the same batch dimensions.
+
+The returned eigenvalues are not guaranteed to be in any specific order.
 
 .. note:: The eigenvalues of a real matrix may be complex, as the roots of a real polynomial may be complex.
 
@@ -1450,7 +1454,7 @@ Keyword args:
     out (Tensor, optional): output tensor. Ignored if `None`. Default: `None`.
     dtype (:class:`torch.dtype`, optional): type used to perform the accumulation and the return.
         If specified, :attr:`x` is cast to :attr:`dtype` before performing the operation,
-        and the returned tensor’s type will be :attr:`dtype` if real and of its real counterpart if complex.
+        and the returned tensor's type will be :attr:`dtype` if real and of its real counterpart if complex.
         :attr:`dtype` may be complex if :attr:`x` is complex, otherwise it must be real.
         :attr:`x` should be convertible without narrowing to :attr:`dtype`. Default: None
 

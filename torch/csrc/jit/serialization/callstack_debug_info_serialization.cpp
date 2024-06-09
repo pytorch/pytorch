@@ -59,7 +59,7 @@ c10::IValue InlinedCallStackSerializer::serialize(
 }
 
 c10::IValue InlinedCallStackSerializer::serialize_module_instance_info(
-    const c10::optional<ModuleInstanceInfo>& m) {
+    const std::optional<ModuleInstanceInfo>& m) {
   if (!m) {
     return c10::IValue();
   }
@@ -168,7 +168,7 @@ InlinedCallStackPtr InlinedCallStackDeserializer::deserialize(
   return cs_ptr;
 }
 
-c10::optional<ModuleInstanceInfo> InlinedCallStackDeserializer::
+std::optional<ModuleInstanceInfo> InlinedCallStackDeserializer::
     deserialize_module_instance_info(
         const c10::IValue& iv,
         const std::shared_ptr<CompilationUnit>& cu) {

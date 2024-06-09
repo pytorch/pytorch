@@ -79,8 +79,7 @@ class TestDiGraph(PackageTestCase):
         g.add_node(3)
 
         nodes = set()
-        for n in g:
-            nodes.add(n)
+        nodes.update(g)
 
         self.assertEqual(nodes, {1, 2, 3})
 

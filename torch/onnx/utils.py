@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 """Functions to export models into the ONNX IR format.
 
 These models can be loaded with the ONNX library and then
@@ -186,11 +187,10 @@ def exporter_context(model, mode: _C_onnx.TrainingMode, verbose: bool):
         yield (mode_ctx, apex_ctx, log_ctx, diagnostic_ctx)
 
 
-@_beartype.beartype
 def export(
     model: Union[torch.nn.Module, torch.jit.ScriptModule, torch.jit.ScriptFunction],
     args: Union[Tuple[Any, ...], torch.Tensor],
-    f: Union[str, io.BytesIO],
+    f: Optional[Union[str, io.BytesIO]] = None,
     export_params: bool = True,
     verbose: bool = False,
     training: _C_onnx.TrainingMode = _C_onnx.TrainingMode.EVAL,
@@ -206,7 +206,8 @@ def export(
     custom_opsets: Optional[Mapping[str, int]] = None,
     export_modules_as_functions: Union[bool, Collection[Type[torch.nn.Module]]] = False,
     autograd_inlining: Optional[bool] = True,
-) -> None:
+    dynamo: bool = False,
+) -> Optional[torch.onnx.ONNXProgram]:
     r"""Exports a model into ONNX format.
 
     If ``model`` is not a :class:`torch.jit.ScriptModule` nor a
@@ -349,11 +350,6 @@ def export(
                     # converted
                     %3 : Float = onnx::Mul(%2, %0)
                     return (%3)
-
-                If PyTorch was built with Caffe2 (i.e. with ``BUILD_CAFFE2=1``), then
-                Caffe2-specific behavior will be enabled, including special support
-                for ops are produced by the modules described in
-                `Quantization <https://pytorch.org/docs/stable/quantization.html>`_.
 
                 .. warning::
 
@@ -505,6 +501,8 @@ def export(
         autograd_inlining (bool, default True): Flag used to control whether to inline autograd functions.
             Refer to https://github.com/pytorch/pytorch/pull/74765 for more details.
 
+        dynamo (bool, default False): Whether to export the model with Dynamo instead of TorchScript.
+
     Raises:
         :class:`torch.onnx.errors.CheckerError`: If the ONNX checker detects an invalid ONNX graph.
         :class:`torch.onnx.errors.UnsupportedOperatorError`: If the ONNX graph cannot be exported because it
@@ -512,6 +510,43 @@ def export(
         :class:`torch.onnx.errors.OnnxExporterError`: Other errors that can occur during export.
             All errors are subclasses of :class:`errors.OnnxExporterError`.
     """
+
+    if dynamo:
+        # Unsupported parameters for dynamo export
+        # TODO: These are not supported AT THE TIME
+        warnings.warn(
+            "f, export_params, verbose, training, input_names, output_names, operator_export_type, opset_version, "
+            "do_constant_folding, keep_initializers_as_inputs, custom_opsets, export_modules_as_functions, and "
+            "autograd_inlining are not supported for dynamo export at the moment."
+        )
+        # TODO: check args normalization
+        args = _decide_input_format(model, args)
+        kwargs = {}
+        if args is not None and isinstance(args[-1], dict):
+            kwargs = args[-1]
+            args = args[:-1]
+        # TODO: refactor this when we have migrated ExportedProgam and
+        # needs users to specify dynamic_axes
+        if dynamic_axes is None or not isinstance(dynamic_axes, dict):
+            dynamic_shapes = False
+        else:
+            dynamic_shapes = True
+            warnings.warn(
+                "Specified dynamic axes is not supported for dynamo export at the moment."
+            )
+        # TODO: expose more ExportOptions?
+        export_options = torch.onnx.ExportOptions(dynamic_shapes=dynamic_shapes)
+        onnx_program = torch.onnx.dynamo_export(
+            model, *args, **kwargs, export_options=export_options
+        )
+        if f is not None:
+            onnx_program.save(f)
+        return onnx_program
+
+    if f is None:
+        raise ValueError(
+            "Export destination must be specified for torchscript-onnx export."
+        )
 
     _export(
         model,
@@ -531,6 +566,8 @@ def export(
         export_modules_as_functions=export_modules_as_functions,
         autograd_inlining=autograd_inlining,
     )
+
+    return None
 
 
 @_beartype.beartype
@@ -875,7 +912,6 @@ def _decide_input_format(model, args):
         warnings.warn("No input args, skipping _decide_input_format")
     except Exception as e:
         warnings.warn(f"Skipping _decide_input_format\n {e.args[0]}")
-
     return args
 
 
@@ -1446,7 +1482,7 @@ def _setup_trace_module_map(
                 raise RuntimeError(
                     "Only type of the `nn.Module` should be "
                     "passed in the set for argument `export_modules_as_functions`. "
-                    "Got `%s`." % (type(v).__name__)
+                    f"Got `{type(v).__name__}`."
                 )
 
         module_typenames = {_find_typename(v) for v in export_modules_as_functions}
@@ -1771,6 +1807,8 @@ def _run_symbolic_method(g, op_name, symbolic_fn, args):
             original_node=None,  # type: ignore[arg-type]
             params_dict=_params_dict,
             env={},
+            values_in_env=set(),
+            new_nodes=[],
         )
         return symbolic_fn(graph_context, *args)
     except TypeError as e:
@@ -1800,9 +1838,8 @@ def _add_output_to_block(block: _C.Block, value: _C.Value) -> int:
 def _should_aten_fallback(
     name: str, opset_version: int, operator_export_type: _C_onnx.OperatorExportTypes
 ):
-    # For BUILD_CAFFE2=0 builds, if domain=="aten" and operator_export_type==ONNX_ATEN,
+    # For all builds, if domain=="aten" and operator_export_type==ONNX_ATEN,
     #   an aten::ATen operator is created regardless of symbolics existence
-    # For BUILD_CAFFE2=1, the same applies only if there is no symbolic available
 
     is_exportable_aten_op = registration.registry.is_registered_op(name, opset_version)
     is_onnx_aten_export = operator_export_type == _C_onnx.OperatorExportTypes.ONNX_ATEN
@@ -1885,6 +1922,8 @@ def _run_symbolic_function(
     node: _C.Node,
     inputs: Any,
     env: Dict[_C.Value, _C.Value],
+    values_in_env: Set[_C.Value],
+    new_nodes: List[_C.Node],
     operator_export_type=_C_onnx.OperatorExportTypes.ONNX,
 ) -> Optional[Union[_C.Value, Sequence[Optional[_C.Value]]]]:
     """Runs a symbolic function.
@@ -1915,6 +1954,8 @@ def _run_symbolic_function(
         original_node=node,
         params_dict=_params_dict,
         env=env,
+        values_in_env=values_in_env,
+        new_nodes=new_nodes,
     )
 
     # Direct ATen export requested
