@@ -248,6 +248,8 @@ aten::_foreach_log2
 aten::_foreach_log2.out
 aten::_foreach_log2_
 aten::_foreach_log_
+aten::_foreach_max
+aten::_foreach_max.out
 aten::_foreach_maximum.List
 aten::_foreach_maximum.List_out
 aten::_foreach_maximum.Scalar
@@ -386,6 +388,7 @@ aten::_int_mm
 aten::_int_mm.out
 aten::_is_all_true
 aten::_is_any_true
+aten::_jagged_to_padded_dense_forward
 aten::_lazy_clone
 aten::_linalg_check_errors
 aten::_linalg_det
@@ -475,6 +478,7 @@ aten::_nnpack_spatial_convolution.out
 aten::_nnz
 aten::_pack_padded_sequence
 aten::_pack_padded_sequence.out
+aten::_padded_dense_to_jagged_forward
 aten::_pdist_backward
 aten::_pdist_backward.out
 aten::_pdist_forward

@@ -1,5 +1,7 @@
 import math
 
+from collections import namedtuple
+
 import torch
 
 from .common import ExprPrinter
@@ -9,13 +11,13 @@ DTYPE_TO_CPP = {
     torch.float64: "double",
     torch.float16: "half",
     torch.int64: "int64_t",
-    torch.int32: "int",
-    torch.int16: "short",
-    torch.int8: "signed char",
+    torch.int32: "int32_t",
+    torch.int16: "int16_t",
+    torch.int8: "int8_t",
     torch.uint64: "uint64_t",
-    torch.uint32: "unsigned int",
-    torch.uint16: "unsigned short",
-    torch.uint8: "unsigned char",
+    torch.uint32: "uint32_t",
+    torch.uint16: "uint16_t",
+    torch.uint8: "uint8_t",
     torch.bool: "bool",
     torch.bfloat16: "bfloat16",
     torch.complex64: "complex64",
@@ -53,7 +55,14 @@ DEVICE_TO_ATEN = {
     "cuda": "at::kCUDA",
 }
 
+LAYOUT_TO_ATEN = {
+    torch.strided: "at::kStrided",
+    torch._mkldnn: "at::kMkldnn",  # type: ignore[attr-defined]
+}
+
 INDEX_TYPE = "long"
+
+GemmBlocking = namedtuple("GemmBlocking", ["block_m", "block_n", "block_k"])
 
 
 class CppPrinter(ExprPrinter):
@@ -91,10 +100,53 @@ class CppPrinter(ExprPrinter):
         r = f"std::floor({self._print(expr.args[0])})"
         return f"static_cast<{INDEX_TYPE}>({r})" if expr.is_integer else r
 
-    def _print_Trunc(self, expr):
+    def _print_FloorToInt(self, expr):
+        assert len(expr.args) == 1
+        r = f"std::floor({self._print(expr.args[0])})"
+        return f"static_cast<{INDEX_TYPE}>({r})" if expr.is_integer else r
+
+    def _print_TruncToInt(self, expr):
         assert len(expr.args) == 1
         r = f"std::trunc({self._print(expr.args[0])})"
-        return f"static_cast<{INDEX_TYPE}>({r})" if expr.is_integer else r
+        return f"static_cast<{INDEX_TYPE}>({r})"
+
+    def _print_TruncToFloat(self, expr):
+        assert len(expr.args) == 1
+        return f"std::trunc({self._print(expr.args[0])})"
+
+    def _print_ToFloat(self, expr):
+        assert len(expr.args) == 1
+        return f"static_cast<double>({self._print(expr.args[0])})"
+
+    # TODO: This is wrong if one of the inputs is negative.  This is hard to
+    # tickle though, as the inputs are typically positive (and if we can prove
+    # they are positive, we will have used Mod instead, for which this codegen
+    # is right).
+    def _print_PythonMod(self, expr):
+        return " % ".join(map(self.paren, map(self._print, expr.args)))
+
+    def _print_CMod(self, expr):
+        return " % ".join(map(self.paren, map(self._print, expr.args)))
+
+    def _print_IntTrueDiv(self, expr):
+        lhs, rhs = expr.args
+        # TODO: This is only accurate up to 2**53
+        return f"static_cast<double>({self._print(lhs)}) / static_cast<double>({self._print(rhs)})"
+
+    # TODO: PowByNatural: we need to implement our own int-int pow.  Do NOT
+    # use std::pow, that operates on floats
+    def _print_PowByNatural(self, expr):
+        raise NotImplementedError(
+            f"_print_PowByNatural not implemented for {type(self)}"
+        )
+
+    def _print_FloatTrueDiv(self, expr):
+        lhs, rhs = expr.args
+        return f"{self.paren(self._print(lhs))} / {self.paren(self._print(rhs))}"
+
+    def _print_FloatPow(self, expr):
+        base, exp = expr.args
+        return f"std::pow({self._print(base)}, {self._print(exp)})"
 
     def _print_Pow(self, expr):
         # Uses float constants to perform FP div
@@ -126,6 +178,11 @@ class CppPrinter(ExprPrinter):
         return f"static_cast<{INDEX_TYPE}>({r})" if expr.is_integer else r
 
     def _print_ceiling(self, expr):
+        assert len(expr.args) == 1
+        r = f"std::ceil({self._print(expr.args[0])})"
+        return f"static_cast<{INDEX_TYPE}>({r})" if expr.is_integer else r
+
+    def _print_CeilToInt(self, expr):
         assert len(expr.args) == 1
         r = f"std::ceil({self._print(expr.args[0])})"
         return f"static_cast<{INDEX_TYPE}>({r})" if expr.is_integer else r
@@ -191,8 +248,9 @@ class CppPrinter(ExprPrinter):
     def _print_OpaqueUnaryFn_sqrt(self, expr):
         return f"std::sqrt({self._print(expr.args[0])})"
 
-    def _print_Round(self, expr):
+    def _print_RoundToInt(self, expr):
         assert len(expr.args) == 1
+        # TODO: dispatch to llrint depending on index type
         return f"std::lrint({self._print(expr.args[0])})"
 
     def _print_RoundDecimal(self, expr):

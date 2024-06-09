@@ -7,8 +7,12 @@ import subprocess
 import sys
 import warnings
 
+try:
+    from .common import BenchmarkRunner, download_retry_decorator, main, reset_rng_state
+except ImportError:
+    from common import BenchmarkRunner, download_retry_decorator, main, reset_rng_state
+
 import torch
-from common import BenchmarkRunner, download_retry_decorator, main, reset_rng_state
 
 from torch._dynamo.testing import collect_results
 from torch._dynamo.utils import clone_inputs

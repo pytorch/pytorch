@@ -1,6 +1,6 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 import logging
-from typing import Dict, Optional
+from typing import List, Tuple, Union
 
 import torch
 from torch import fx
@@ -88,47 +88,35 @@ def modify_graph_op_device(
         gm.recompile()
 
 
-class QualnameMapMixin:
-    """
-    A mixin class that helps a `Pipe` object to remap its qualnames back to
-    original qualnames.
-    """
+class PipeliningShapeError(RuntimeError):
+    """Shape mismatch between configured and runtime values."""
 
-    def __init__(
-        self,
-        splitter_qualname_map: Optional[Dict[str, str]] = None,
-        tracer_qualname_map: Optional[Dict[str, str]] = None,
-    ):
-        self.new_to_old_qualname_mapping: Dict[str, str] = splitter_qualname_map or {}
-        self.tracer_qualname_map = tracer_qualname_map
 
-    def remap_qualname(self, qualname: str):
-        # TODO: annoying
-        if qualname.startswith("split_gm."):
-            qualname = qualname[len("split_gm.") :]
+def validate_tensor_metadata(desc, expected, given):
+    if not expected.shape == given.shape:
+        raise PipeliningShapeError(
+            f"{desc} has a shape mismatch: expected {expected.shape} actual {given.shape}"
+        )
+    if not expected.dtype == given.dtype:
+        raise PipeliningShapeError(
+            f"{desc} has a dtype mismatch: expected {expected.dtype} actual {given.dtype}"
+        )
+    if not expected.stride() == given.stride():
+        raise PipeliningShapeError(
+            f"{desc} has a stride mismatch: expected {expected.stride()} actual {given.stride()}"
+        )
 
-        name_before_split = None
-        if qualname in self.new_to_old_qualname_mapping:
-            name_before_split = self.new_to_old_qualname_mapping[qualname]
-        else:
-            # The qualname map does not store recursive items, thus,
-            # when passed a qualname with leaves, we need to perform longest prefix match
-            # Split from the right, one each time
-            split_names = qualname.rsplit(".", 1)
-            leaf = split_names[-1]
-            while len(split_names) > 1:
-                prefix = split_names[0]
-                if prefix in self.new_to_old_qualname_mapping:
-                    old_prefix = self.new_to_old_qualname_mapping[prefix]
-                    name_before_split = ".".join([old_prefix, leaf])
-                    break
-                split_names = prefix.rsplit(".", 1)
-                leaf = ".".join([split_names[-1], leaf])
 
-        if name_before_split is None:
-            raise RuntimeError(f"Could not find mapping for {qualname}")
-
-        if self.tracer_qualname_map is not None:
-            return self.tracer_qualname_map[name_before_split]
-        else:
-            return name_before_split
+def validate_tensors_metadata(
+    desc,
+    expected_tensors: Union[List[torch.Tensor], Tuple[torch.Tensor, ...]],
+    actual_tensors: Union[List[torch.Tensor], Tuple[torch.Tensor, ...]],
+):
+    if len(expected_tensors) != len(actual_tensors):
+        raise PipeliningShapeError(
+            f"{desc}: Number of values ({len(actual_tensors)}) does not match expected number ({len(expected_tensors)})"
+        )
+    for i in range(len(expected_tensors)):
+        validate_tensor_metadata(
+            f"{desc}: value {i}", expected_tensors[i], actual_tensors[i]
+        )

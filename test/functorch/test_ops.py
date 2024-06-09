@@ -10,8 +10,6 @@ import functools
 import itertools
 import unittest
 
-import torch
-import torch.autograd.forward_ad as fwAD
 from common_utils import (
     check_vmap_fallback,
     decorate,
@@ -29,8 +27,12 @@ from common_utils import (
     tol2,
     xfail,
 )
-from functorch import grad, jacfwd, jacrev, vjp, vmap
 from functorch_additional_op_db import additional_op_db
+
+import torch
+import torch.autograd.forward_ad as fwAD
+
+from functorch import grad, jacfwd, jacrev, vjp, vmap
 from torch import Tensor
 from torch._functorch.eager_transforms import _as_tuple, jvp
 from torch.testing._internal.autograd_function_db import autograd_function_db
@@ -426,6 +428,7 @@ class TestOperators(TestCase):
                 xfail("_softmax_backward_data", device_type="cpu"),
                 xfail("as_strided"),
                 xfail("as_strided", "partial_views"),
+                xfail("as_strided_copy"),
                 # RuntimeError: !self.requires_grad() || self.is_contiguous()
                 xfail("as_strided_scatter"),
                 # RuntimeError: Tensor must have a last dimension with stride 1
@@ -576,6 +579,7 @@ class TestOperators(TestCase):
                 # AssertionError: Tensor-likes are not close!
                 xfail("as_strided"),
                 xfail("as_strided", "partial_views"),
+                xfail("as_strided_copy"),
                 xfail("as_strided_scatter"),
                 decorate(
                     "linalg.det",
@@ -607,6 +611,7 @@ class TestOperators(TestCase):
                 "nn.functional.batch_norm", {torch.float32: tol(atol=4e-05, rtol=5e-05)}
             ),
             tol1("nn.functional.conv2d", {torch.float32: tol(atol=4e-05, rtol=5e-05)}),
+            tol1("svd_lowrank", {torch.float32: tol(atol=5e-05, rtol=5e-05)}),
             tol1("pca_lowrank", {torch.float32: tol(atol=5e-05, rtol=5e-05)}),
             tol1(
                 "nn.functional.multi_head_attention_forward",
@@ -735,6 +740,7 @@ class TestOperators(TestCase):
                 # BUG
                 # AssertionError: Tensor-likes are not close!
                 xfail("as_strided"),
+                xfail("as_strided_copy"),
                 xfail("as_strided_scatter"),
                 xfail("_softmax_backward_data", device_type="cpu"),
                 xfail("as_strided", "partial_views"),
@@ -1187,8 +1193,8 @@ class TestOperators(TestCase):
         vmapvjp_fail.union(
             {
                 xfail("as_strided"),
-                xfail("as_strided_copy"),
                 xfail("as_strided", "partial_views"),
+                xfail("as_strided_copy"),
             }
         ),
     )
@@ -1891,6 +1897,7 @@ class TestOperators(TestCase):
                 xfail(
                     "as_strided", "partial_views"
                 ),  # AssertionError: Tensor-likes are not close!
+                xfail("as_strided_copy"),
                 xfail(
                     "as_strided_scatter"
                 ),  # AssertionError: Tensor-likes are not close!
@@ -2033,6 +2040,10 @@ class TestOperators(TestCase):
             tol1("linalg.multi_dot", {torch.float32: tol(atol=5e-04, rtol=5e-04)}),
             tol2(
                 "linalg.pinv", "hermitian", {torch.float32: tol(atol=5e-04, rtol=5e-04)}
+            ),
+            tol1(
+                "nn.functional.conv_transpose2d",
+                {torch.float32: tol(atol=5e-04, rtol=5e-04)},
             ),
             tol1("svd", {torch.float32: tol(atol=5e-04, rtol=5e-04)}),
             tol1("matrix_exp", {torch.float32: tol(atol=5e-04, rtol=5e-04)}),
@@ -2369,6 +2380,8 @@ class TestOperators(TestCase):
                 "linalg.pinv", "hermitian", {torch.float32: tol(atol=5e-06, rtol=5e-06)}
             ),
             tol1("nn.functional.conv3d", {torch.float32: tol(atol=5e-04, rtol=9e-03)}),
+            tol1("svd_lowrank", {torch.float32: tol(atol=5e-05, rtol=5e-05)}),
+            tol1("pca_lowrank", {torch.float32: tol(atol=5e-05, rtol=5e-05)}),
         ),
     )
     def test_vmap_autograd_grad(self, device, dtype, op):

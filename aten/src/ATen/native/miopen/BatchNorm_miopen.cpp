@@ -22,13 +22,13 @@ namespace at { namespace native {
 // See Note [ATen preprocessor philosophy]
 
 std::tuple<Tensor, Tensor, Tensor> miopen_batch_norm(
-    const Tensor& input, const Tensor& weight, const std::optional<Tensor>& bias_opt, const c10::optional<Tensor>& running_mean_opt, const c10::optional<Tensor>& running_var_opt,
+    const Tensor& input, const Tensor& weight, const std::optional<Tensor>& bias_opt, const std::optional<Tensor>& running_mean_opt, const std::optional<Tensor>& running_var_opt,
     bool training, double exponential_average_factor, double epsilon) {
   AT_ERROR("miopen_batch_norm: ATen not compiled with MIOpen support");
 }
 
 std::tuple<Tensor, Tensor, Tensor> miopen_batch_norm_backward(
-    const Tensor& input, const Tensor& grad_output, const Tensor& weight, const std::optional<Tensor>& running_mean_opt, const c10::optional<Tensor>& running_var_opt, const c10::optional<Tensor>& save_mean_opt, const c10::optional<Tensor>& save_var_opt,
+    const Tensor& input, const Tensor& grad_output, const Tensor& weight, const std::optional<Tensor>& running_mean_opt, const std::optional<Tensor>& running_var_opt, const std::optional<Tensor>& save_mean_opt, const std::optional<Tensor>& save_var_opt,
     double epsilon) {
   AT_ERROR("miopen_batch_norm_backward: ATen not compiled with MIOpen support");
 }
@@ -58,7 +58,7 @@ Tensor expandScale(const Tensor& t, int64_t dim) {
 }  // namespace
 
 std::tuple<Tensor, Tensor, Tensor> miopen_batch_norm(
-    const Tensor& input_t, const Tensor& weight_t, const std::optional<Tensor>& bias_t_opt, const c10::optional<Tensor>& running_mean_t_opt, const c10::optional<Tensor>& running_var_t_opt,
+    const Tensor& input_t, const Tensor& weight_t, const std::optional<Tensor>& bias_t_opt, const std::optional<Tensor>& running_mean_t_opt, const std::optional<Tensor>& running_var_t_opt,
     bool training, double exponential_average_factor, double epsilon)
 {
   // See [Note: hacky wrapper removal for optional tensor]

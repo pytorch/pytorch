@@ -28,12 +28,13 @@ if not c10d.is_available() or not c10d.is_nccl_available():
 from typing import Dict, List
 
 import test_c10d_common
+from test_c10d_common import ConvNet, DoubleGpuNet, gpus_for_rank, ModuleForDdpCommHook
+
 import torch.distributed as dist
 import torch.distributed.algorithms.ddp_comm_hooks.default_hooks as default
 import torch.distributed.algorithms.ddp_comm_hooks.powerSGD_hook as powerSGD
 import torch.nn.functional as F
 import torch.testing._internal.common_utils as common
-from test_c10d_common import ConvNet, DoubleGpuNet, gpus_for_rank, ModuleForDdpCommHook
 from torch import nn
 from torch._C._distributed_c10d import OpType
 from torch.nn.parallel import DistributedDataParallel
@@ -598,6 +599,9 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
 
     @requires_nccl_version((2, 18), "Need NCCL 2.18+ for ncclCommSplit")
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
+    @skip_but_pass_in_sandcastle_if(
+        torch.cuda.nccl.version()[-1] == "x", "NCCL test not for NCCLX"
+    )
     def test_comm_split_subgroup(self):
         # Test `ncclCommSplit` for smaller subgroups of the world when
         # we've passed a specific device_id to init_process_group.
@@ -613,12 +617,18 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         # rank 0 hasn't split yet, but rank 1 did for the
         # nocolor... so split count matches rank count coincidentally
         # in each of the proceses this test spawned!
-        self.assertEqual(backend.comm_split_count(), self.rank)
+        # when using ncclCommCreateFromRanks() in version 2.21+,
+        # unused ranks are not included in split
+        version = torch.cuda.nccl.version()
+        is_nccl_2_21 = version >= (2, 21)
+        exp_count = 0 if (is_nccl_2_21 or self.rank == 0) else 1
+        self.assertEqual(backend.comm_split_count(), exp_count)
         if self.rank == 0:
             dist.broadcast(tensor, 0, group=ng)
 
         # now everyone has split because rank 0 has performed a comm
-        self.assertEqual(backend.comm_split_count(), 1)
+        exp_count = 1 if not is_nccl_2_21 else (1 if self.rank == 0 else 0)
+        self.assertEqual(backend.comm_split_count(), exp_count)
         self.assertEqual(tensor, original_tensor)
 
     @requires_nccl_version((2, 18), "Need NCCL 2.18+ for ncclCommSplit")
