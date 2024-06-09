@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import functools
 import itertools
 import logging
@@ -161,9 +162,9 @@ class SizeVarAllocator:
         if expr.has(ModularIndexing):
             expr = expr.replace(
                 ModularIndexing(
-                    sympy.Wild("base", integer=True),
-                    sympy.Wild("divisor", integer=True),
-                    sympy.Wild("modulus", integer=True),
+                    sympy.Wild("base"),
+                    sympy.Wild("divisor"),
+                    sympy.Wild("modulus"),
                 ),
                 visit_modular_indexing,
             )
@@ -171,8 +172,8 @@ class SizeVarAllocator:
         if expr.has(FloorDiv):
             expr = expr.replace(
                 FloorDiv(
-                    sympy.Wild("base", integer=True),
-                    sympy.Wild("divisor", integer=True),
+                    sympy.Wild("base"),
+                    sympy.Wild("divisor"),
                 ),
                 visit_indexing_div,
             )
@@ -583,6 +584,137 @@ class SizeVarAllocator:
     def free_symbols(self) -> Set[sympy.Symbol]:
         return set(self.var_to_val.keys()) - set(self.replacements.keys())
 
+    def combine_modular_indexing_pairs(self, index: sympy.Expr) -> sympy.Expr:
+        """
+        A pair of special ModularIndexing can be combined.
+
+        E.g. ModularIndexing(ModularIndexing(x, 1, a), 1, b)
+        We can simplify this to ModuleIndexing(x, 1, b), if
+        1. x is non negative integer
+        2. a and b are positive integers
+        3. a is a multiple of b.
+        """
+
+        def _check_args(x, div, mod, is_first):
+            if not isinstance(div, sympy.Integer) or not isinstance(mod, sympy.Integer):
+                return False
+            if div != 1:
+                return False
+            if mod <= 0:
+                return False
+
+            if is_first:
+                # first ModularIndexing should conatins a nested ModularIndex
+                if not isinstance(x, ModularIndexing):
+                    return False
+            else:
+                # second ModularIndexing should constains a non-negative
+                # symbol
+                if not isinstance(x, sympy.Symbol) or not self.statically_known_geq(
+                    x, 0
+                ):
+                    return False
+            return True
+
+        if isinstance(index, ModularIndexing):
+            x, div, mod = index.args
+
+            if not _check_args(x, div, mod, True):
+                return index
+
+            x2, div2, mod2 = x.args
+
+            if not _check_args(x2, div2, mod2, False):
+                return index
+
+            if mod2 % mod != 0:
+                return index
+
+            return ModularIndexing(x2, 1, mod)
+
+        return index
+
+    def expand_floor_div(
+        self, index: sympy.Expr
+    ) -> Union[bool, Tuple[sympy.Expr, sympy.Expr]]:
+        """
+        Expand the FloorDiv to the entire expression so that the expression may
+        be simplfied.
+
+        E.g., for a 2D contiguous tensor with shape [a, 2 * b], and index variables
+        x1, x2, index expression 'x1 * 2b + x2' can be easily combined.
+        But index expression 'x1 * b + x2 // 2' can not.
+        By expanding the FloorDiv to the entire expression, we get
+        '(x1 * 2b + x2) // 2'. This transformation allows us to merge loops
+        for the numerator!
+
+        Return false if this optimization can be applied;
+        Return the new expression and the denominator otherwise.
+        The original expression will be equivalent to 'new_expression // denominator'
+        """
+        if not isinstance(index, sympy.Add):
+            return False
+        terms = index.args
+
+        if len(terms) < 2:
+            return False
+        floor_div_index = -1
+        varlist = []
+        factorlist = []
+        for idx, term in enumerate(terms):
+            if isinstance(term, sympy.Mul):
+                # For dynamic shape, term like '2*s1*x1' has 3 child nodes.
+                # - A integer for 2
+                # - A symbol for s1
+                # - A symbol for x1
+                # Skip for now.
+                if len(term.args) != 2:
+                    return False
+                factor, var = term.args
+                varlist.append(var)
+                factorlist.append(factor)
+                if not isinstance(factor, sympy.Integer) or not isinstance(
+                    var, sympy.Symbol
+                ):
+                    return False
+                # It's easier to reason about the correceness of the transformation
+                # for non-negative integers.
+                if not self.statically_known_geq(var, 0):
+                    return False
+            elif isinstance(term, FloorDiv):
+                var, factor = term.args
+                if not isinstance(factor, sympy.Integer) or not isinstance(
+                    var, sympy.Symbol
+                ):
+                    return False
+                if not self.statically_known_geq(var, 0):
+                    return False
+                if floor_div_index >= 0:
+                    # can not handle multi FloorDiv yet
+                    return False
+
+                floor_div_index = idx
+                varlist.append(var)
+                # this factor is denominator
+                factorlist.append(factor)
+            else:
+                return False
+
+        if floor_div_index < 0:
+            return False
+
+        # Construct the new expression and remember the denominator
+        denominator = factorlist[floor_div_index]
+        new_index = sympy.Integer(0)
+
+        for var, factor, idx in zip(varlist, factorlist, itertools.count()):
+            if idx == floor_div_index:
+                new_index += var
+            else:
+                new_index += (factor * denominator) * var
+
+        return new_index, denominator
+
 
 def join_dimensions(expr: Expr) -> Expr:
     if not isinstance(expr, sympy.Add) or not expr.has(ModularIndexing):
@@ -604,11 +736,11 @@ def _join_dimensions_cached(expr: Expr) -> Expr:
     """
     assert isinstance(expr, sympy.Add)
 
-    scale = sympy.Wild("scale", exclude=[0], integer=True)
-    base = sympy.Wild("base", integer=True)
-    divisor = sympy.Wild("divisor", integer=True)
-    mod1 = sympy.Wild("modulus", integer=True)
-    mod2 = sympy.Wild("modulus2", integer=True)
+    scale = sympy.Wild("scale", exclude=[0])
+    base = sympy.Wild("base")
+    divisor = sympy.Wild("divisor")
+    mod1 = sympy.Wild("modulus")
+    mod2 = sympy.Wild("modulus2")
     for term1 in expr.args:
         m1 = term1.match(scale * ModularIndexing(base, divisor, mod1))
         if m1:

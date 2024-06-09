@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import _collections_abc
 import _weakrefset
 import abc
@@ -405,6 +406,8 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch._C._construct_CUDA_Tensor_From_Storage_And_Metadata",
         "torch._C._construct_storage_from_data_pointer",
         "torch._C._conv_determine_backend_memory_format",
+        "torch._C._cpu._is_cpu_support_avx2",
+        "torch._C._cpu._is_cpu_support_avx512",
         "torch._C._cpu._is_cpu_support_vnni",
         "torch._C._crash_if_aten_asan",
         "torch._C._crash_if_csrc_asan",
@@ -2416,6 +2419,8 @@ torch_non_c_binding_in_graph_functions = dict.fromkeys(
         "torch.chain_matmul",
         "torch.compile",
         "torch.compiled_with_cxx11_abi",
+        "torch.cpu._is_cpu_support_avx2",
+        "torch.cpu._is_cpu_support_avx512",
         "torch.cpu._is_cpu_support_vnni",
         "torch.cpu.current_device",
         "torch.cpu.current_stream",
