@@ -202,7 +202,7 @@ class AliasOfIntermediateHandler:
             OutputType.alias_of_intermediate,
             OutputType.alias_of_intermediate_save_as_output,
         ):
-            num_user_outputs = len(runtime_metadata.output_infos)
+            num_user_outputs = len(runtime_metadata.output_info)
             self.base_idx = info.base_idx + num_user_outputs
         else:
             self.base_idx = info.base_idx
