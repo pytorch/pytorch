@@ -4,7 +4,7 @@ import functools
 import itertools
 import warnings
 import weakref
-from collections import namedtuple, OrderedDict
+from collections import OrderedDict, namedtuple
 from typing import (
     Any,
     Callable,
@@ -13,16 +13,16 @@ from typing import (
     List,
     Mapping,
     Optional,
-    overload,
     Set,
     Tuple,
     TypeVar,
     Union,
+    overload,
 )
 from typing_extensions import Self
 
 import torch
-from torch import device, dtype, Tensor
+from torch import Tensor, device, dtype
 from torch._prims_common import DeviceLikeType
 from torch.nn.parameter import Parameter
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
