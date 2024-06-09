@@ -23,9 +23,10 @@ import torch
 try:
     import numpy as np
 
-    NUMPY_AVAILABLE = True
+    HAS_NUMPY = True
 except ModuleNotFoundError:
-    NUMPY_AVAILABLE = False
+    HAS_NUMPY = False
+    np = None  # type: ignore[assignment]
 
 
 class ErrorMeta(Exception):
@@ -452,7 +453,7 @@ class BooleanPair(Pair):
     @property
     def _supported_types(self) -> Tuple[Type, ...]:
         cls: List[Type] = [bool]
-        if NUMPY_AVAILABLE:
+        if HAS_NUMPY:
             cls.append(np.bool_)
         return tuple(cls)
 
@@ -546,7 +547,7 @@ class NumberPair(Pair):
     @property
     def _supported_types(self) -> Tuple[Type, ...]:
         cls = list(self._NUMBER_TYPES)
-        if NUMPY_AVAILABLE:
+        if HAS_NUMPY:
             cls.append(np.number)
         return tuple(cls)
 
@@ -562,7 +563,7 @@ class NumberPair(Pair):
     def _to_number(
         self, number_like: Any, *, id: Tuple[Any, ...]
     ) -> Union[int, float, complex]:
-        if NUMPY_AVAILABLE and isinstance(number_like, np.number):
+        if HAS_NUMPY and isinstance(number_like, np.number):
             return number_like.item()
         elif isinstance(number_like, self._NUMBER_TYPES):
             return number_like  # type: ignore[return-value]
