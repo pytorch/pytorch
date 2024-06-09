@@ -222,6 +222,7 @@ BLOCKED_OPS = frozenset(
         "special_spherical_bessel_j0",
         "_foobar",
         "_nested_tensor_strides",
+        "_nested_tensor_storage_offsets",
         "_nested_view_from_jagged",
         "_nested_get_values",
         "_int_mm",  # testing needs to be patched

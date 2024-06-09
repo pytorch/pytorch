@@ -3100,36 +3100,6 @@ TEST(StaticRuntime, autogen_threshold_backward) {
       /*check_resize=*/true);
 }
 
-TEST(StaticRuntime, autogen__nested_tensor_storage_offsets) {
-  const std::string script = R"IR(
-    graph(%self: Tensor):
-        %bias: None = prim::Constant()
-        %ret = aten::_nested_tensor_storage_offsets(%self)
-        %cloned = aten::clone(%ret, %bias)
-        return (%cloned)
-  )IR";
-
-  auto self0 = at::rand({6, 6, 6});
-  std::vector<IValue> args{self0};
-  testStaticRuntime(
-      script,
-      args,
-      {},
-      /*use_allclose=*/false,
-      /*use_equalnan=*/false,
-      /*check_resize=*/true);
-
-  auto self1 = at::rand({22, 22, 22});
-  std::vector<IValue> args2{self1};
-  testStaticRuntime(
-      script,
-      args,
-      args2,
-      /*use_allclose=*/false,
-      /*use_equalnan=*/false,
-      /*check_resize=*/true);
-}
-
 TEST(StaticRuntime, autogen__nested_view_from_buffer_copy) {
   const std::string script = R"IR(
     graph(%self: Tensor, %nested_size: Tensor, %nested_strides: Tensor, %offsets: Tensor):

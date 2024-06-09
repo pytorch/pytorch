@@ -1923,28 +1923,6 @@ REGISTER_OPERATOR_FUNCTOR(
     });
 
 REGISTER_OPERATOR_FUNCTOR(
-    aten::_nested_tensor_storage_offsets,
-    aten__nested_tensor_storage_offsets,
-    [](Node* n) -> SROperator {
-      if (n->matches(torch::schema(
-              "aten::_nested_tensor_storage_offsets(Tensor self) -> Tensor"))) {
-        return [](ProcessedNode* p_node) {
-          const auto& self = p_node->Input(0).toTensor();
-          if (p_node->Output(0).isNone()) {
-            p_node->Output(0) =
-                at::native::_nested_tensor_storage_offsets(self);
-            return;
-          }
-          auto& out = p_node->Output(0).toTensor();
-          fastResizeToZero(out);
-          at::native::_nested_tensor_storage_offsets_out(self, out);
-        };
-      }
-      LogAndDumpSchema(n);
-      return nullptr;
-    });
-
-REGISTER_OPERATOR_FUNCTOR(
     aten::_nested_view_from_buffer_copy,
     aten__nested_view_from_buffer_copy,
     [](Node* n) -> SROperator {
