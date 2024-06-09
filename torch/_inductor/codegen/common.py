@@ -341,6 +341,8 @@ class DataTypePropagation:
         DataTypePropagation.propagate_loopbody(node._body)
 
 
+# This printer contains rules that are supposed to be generic for both C/C++ and
+# Python
 class ExprPrinter(Printer):
     @staticmethod
     def paren(string):
@@ -370,12 +372,6 @@ class ExprPrinter(Printer):
             return string
         return f"({string})"
 
-    def _print_Infinity(self, expr):
-        return "math.inf"
-
-    def _print_NegativeInfinity(self, expr):
-        return "-math.inf"
-
     def _print_Relational(self, expr):
         return f" {expr.rel_op} ".join(map(self.paren, map(self._print, expr.args)))
 
@@ -385,11 +381,14 @@ class ExprPrinter(Printer):
     def _print_Add(self, expr):
         return " + ".join(map(self.paren, map(self._print, expr.args)))
 
+    # NB: this is OK to put here, because Mod is only defined for positive
+    # numbers, and so across C/Python its behavior is consistent
     def _print_Mod(self, expr):
         return " % ".join(map(self.paren, map(self._print, expr.args)))
 
-    def _print_FloorDiv(self, expr):
-        raise NotImplementedError(f"_print_FloorDiv not implemented for {type(self)}")
+    def _print_FloatTrueDiv(self, expr):
+        lhs, rhs = expr.args
+        return f"{self.paren(self._print(lhs))} / {self.paren(self._print(rhs))}"
 
     def _print_CleanDiv(self, expr):
         return self._print_FloorDiv(expr)
@@ -400,9 +399,83 @@ class ExprPrinter(Printer):
         # Go figure...
         return " >= ".join(map(self.paren, map(self._print, expr.args)))
 
+    # NB: The C implementation is injected into codegen at
+    # torch/_inductor/codegen/wrapper.py
     def _print_align(self, expr):
         assert len(expr.args) == 1
         return f"align({self._print(expr.args[0])})"
+
+    # This must be implemented because sympy will collect x * x into Pow(x, 2), without
+    # any explicit intervention.  We print it just like x * x, notably, we
+    # never generate sympy.Pow with floats.
+    #
+    # NB: this pow by natural, you should never have used builtin sympy.pow
+    # for FloatPow, and a symbolic exponent should be PowByNatural.  These
+    # means exp is guaranteed to be integer.
+    def _print_Pow(self, expr):
+        base, exp = expr.args
+        base = self._print(base)
+        assert exp == int(exp), exp
+        exp = int(exp)
+        assert exp >= 0
+        if exp > 0:
+            return "*".join([self.paren(base)] * exp)
+        else:  # exp == 0
+            return "1"
+
+    # Explicit NotImplemented functions are to prevent default sympy printing
+    # behavior, which will just barf out ToFloat(...) to your IR.  The error
+    # message is better here because it tells you which printer class it needs
+    # to go in.
+
+    def _print_ToFloat(self, expr):
+        raise NotImplementedError(f"_print_ToFloat not implemented for {type(self)}")
+
+    def _print_Infinity(self, expr):
+        raise NotImplementedError(f"_print_Infinity not implemented for {type(self)}")
+
+    def _print_NegativeInfinity(self, expr):
+        raise NotImplementedError(
+            f"_print_NegativeInfinity not implemented for {type(self)}"
+        )
+
+    def _print_FloorDiv(self, expr):
+        raise NotImplementedError(f"_print_FloorDiv not implemented for {type(self)}")
+
+    def _print_PythonMod(self, expr):
+        raise NotImplementedError(f"_print_PythonMod not implemented for {type(self)}")
+
+    def _print_IntTrueDiv(self, expr):
+        raise NotImplementedError(f"_print_IntTrueDiv not implemented for {type(self)}")
+
+    def _print_PowByNatural(self, expr):
+        raise NotImplementedError(
+            f"_print_PowByNatural not implemented for {type(self)}"
+        )
+
+    def _print_FloatPow(self, expr):
+        raise NotImplementedError(f"_print_FloatPow not implemented for {type(self)}")
+
+    def _print_TruncToInt(self, expr):
+        raise NotImplementedError(f"_print_TruncToInt not implemented for {type(self)}")
+
+    def _print_RoundToInt(self, expr):
+        raise NotImplementedError(f"_print_RoundToInt not implemented for {type(self)}")
+
+    def _print_RoundDecimal(self, expr):
+        raise NotImplementedError(
+            f"_print_RoundDecimal not implemented for {type(self)}"
+        )
+
+    # NB: Some float operations are INTENTIONALLY not implemented for
+    # printers.  You can implement them as a quick unblock, but it is better
+    # to ask yourself why we haven't done this computation in the Tensor
+    # universe instead
+
+    def _print_TruncToFloat(self, expr):
+        raise NotImplementedError(
+            f"_print_TruncToFloat not implemented for {type(self)}"
+        )
 
     def doprint(self, expr, *, simplify: bool = True):
         # TODO: why are people passing strings to the printer here :think:
@@ -412,6 +485,10 @@ class ExprPrinter(Printer):
 
 
 class PythonPrinter(ExprPrinter):
+    def _print_ToFloat(self, expr):
+        assert len(expr.args) == 1
+        return f"float({self._print(expr.args[0])})"
+
     def _print_ModularIndexing(self, expr):
         x, div, mod = expr.args
         x = self.paren(self.doprint(x))
@@ -421,11 +498,28 @@ class PythonPrinter(ExprPrinter):
             x = f"({x} // {div})"
         return f"{x} % {mod}"
 
+    def _print_Infinity(self, expr):
+        return "math.inf"
+
+    def _print_NegativeInfinity(self, expr):
+        return "-math.inf"
+
+    # WARNING: this is dangerous for Triton, which has C-style modulus
+    def _print_PythonMod(self, expr):
+        return " % ".join(map(self.paren, map(self._print, expr.args)))
+
+    # WARNING: this is dangerous for Triton, which has C-style modulus
     def _print_FloorDiv(self, expr):
         x, div = expr.args
         x = self.paren(self.doprint(x))
         div = self.paren(self.doprint(div))
         return f"({x} // {div})"
+
+    # WARNING: this is dangerous for Triton, when lhs, rhs > 2**53, Python
+    # does a special algorithm
+    def _print_IntTrueDiv(self, expr):
+        lhs, rhs = expr.args
+        return f"{self.paren(self._print(lhs))} / {self.paren(self._print(rhs))}"
 
     def _helper_sqrt(self, expr):
         return f"math.sqrt({self._print(expr)})"
@@ -433,37 +527,33 @@ class PythonPrinter(ExprPrinter):
     def _print_OpaqueUnaryFn_sqrt(self, expr):
         return self._helper_sqrt(expr.args[0])
 
-    def _print_Pow(self, expr):
-        # Pow() confuses triton
+    def _print_FloatPow(self, expr):
         base, exp = expr.args
-        # NB: Remember this is sizevar computation!  You don't typically
-        # expect to have to do floating point computation including exponents
-        # in sizevar compute.  Instead of adding support for floating
-        # point pow, you should make upstream retranslate the Sympy expression
-        # into Tensor expressions earlier and do that instead.
-        if exp == 0.5:
-            return self._helper_sqrt(base)
-        elif exp == -0.5:
-            return "1/" + self._helper_sqrt(base)
-        base = self._print(base)
-        assert exp == int(exp), exp
-        exp = int(exp)
-        if exp > 0:
-            return "*".join([self.paren(base)] * exp)
-        elif exp < 0:
-            return "1/" + self.paren("*".join([self.paren(base)] * abs(exp)))
-        else:  # exp == 0
-            return "1"
+        return f"{self.paren(self._print(base))} ** {self.paren(self._print(exp))}"
+
+    # TODO: Not sure this works with Triton, even when base/exp are integral
+    def _print_PowByNatural(self, expr):
+        base, exp = expr.args
+        return f"{self.paren(self._print(base))} ** {self.paren(self._print(exp))}"
 
     def _print_floor(self, expr):
         assert len(expr.args) == 1
         return f"math.floor({self._print(expr.args[0])})"
 
-    def _print_Trunc(self, expr):
+    def _print_FloorToInt(self, expr):
         assert len(expr.args) == 1
+        return f"math.floor({self._print(expr.args[0])})"
+
+    def _print_TruncToInt(self, expr):
+        assert len(expr.args) == 1
+        # This also could have been int(), they'll do the same thing for float
         return f"math.trunc({self._print(expr.args[0])})"
 
     def _print_ceiling(self, expr):
+        assert len(expr.args) == 1
+        return f"math.ceil({self._print(expr.args[0])})"
+
+    def _print_CeilToInt(self, expr):
         assert len(expr.args) == 1
         return f"math.ceil({self._print(expr.args[0])})"
 
@@ -471,6 +561,9 @@ class PythonPrinter(ExprPrinter):
         assert len(expr.args) == 1
         return f"abs({self._print(expr.args[0])})"
 
+    # NB: It's expected that we've made explicit any promotion in the sympy
+    # expression, so it doesn't matter that Python max/min doesn't perform
+    # promotion
     def _print_Max(self, expr):
         assert len(expr.args) >= 2
         return f"max({', '.join(map(self._print, expr.args))})"
@@ -515,7 +608,7 @@ class PythonPrinter(ExprPrinter):
         assert len(expr.args) == 1
         return f"math.atan({self._print(expr.args[0])})"
 
-    def _print_Round(self, expr):
+    def _print_RoundToInt(self, expr):
         assert len(expr.args) == 1
         return f"round({self._print(expr.args[0])})"
 
@@ -653,6 +746,29 @@ class OpOverrides:
             ops.ne(ops.signbit(r), ops.signbit(b)),
         )
         return ops.where(cond, ops.add(r, b), r)
+
+    @staticmethod
+    def trunc_to_int(a, dtype):
+        return ops.to_dtype(ops.trunc(a), dtype)
+
+    @staticmethod
+    def floor_to_int(a, dtype):
+        return ops.to_dtype(ops.floor(a), dtype)
+
+    @staticmethod
+    def ceil_to_int(a, dtype):
+        return ops.to_dtype(ops.ceil(a), dtype)
+
+    @staticmethod
+    def round_to_int(a, dtype):
+        return ops.to_dtype(ops.round(a), dtype)
+
+    @staticmethod
+    def int_truediv(a, b):
+        # TODO: this is wrong
+        # TODO: an easy bandaid is to generate runtime asserts that it's
+        # <= 2**53, which is when this equation is correct
+        return ops.truediv(a, b)
 
     @staticmethod
     def load_seed(name, offset):
