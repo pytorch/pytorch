@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import functools
 import inspect
 import itertools
@@ -277,13 +278,7 @@ def record_shapeenv_event(*, save_tracked_fakes: bool = False) -> Callable:
                         raise
 
             except Exception:
-                log.error(  # noqa: G201
-                    "failed while running %s(*%s, **%s)",
-                    name,
-                    args[1:],
-                    kwargs,
-                    exc_info=log.isEnabledFor(logging.INFO),
-                )
+                log.error("failed while running %s(*%s, **%s)", name, args[1:], kwargs)
                 raise
 
         return wrapper

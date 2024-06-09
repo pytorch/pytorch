@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 """
 ``torch.autograd`` provides classes and functions implementing automatic
 differentiation of arbitrary scalar valued functions. It requires minimal

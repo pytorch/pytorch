@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 """
 This is a simple interpreter for Sympy expressions that dispatches to
 classes following the torch._inductor.virtualized calling convention.
@@ -15,23 +16,16 @@ from sympy.logic.boolalg import Boolean as SympyBoolean, BooleanAtom
 
 import torch
 from .functions import (
-    CeilToInt,
     CleanDiv,
-    FloatPow,
-    FloatTrueDiv,
     FloorDiv,
-    FloorToInt,
-    IntTrueDiv,
     IsNonOverlappingAndDenseIndicator,
     Mod,
     ModularIndexing,
-    PowByNatural,
-    PythonMod,
+    Pow,
+    Round,
     RoundDecimal,
-    RoundToInt,
-    ToFloat,
-    TruncToFloat,
-    TruncToInt,
+    TrueDiv,
+    Trunc,
     Where,
 )
 
@@ -56,39 +50,30 @@ def handlers():
         sympy.Le: "le",
         sympy.Ge: "ge",
         sympy.Not: "not_",
-        IntTrueDiv: "int_truediv",
-        FloatTrueDiv: "truediv",
+        TrueDiv: "truediv",
         FloorDiv: "floordiv",
-        CleanDiv: "floordiv",  # TODO: hmm?
-        TruncToFloat: "trunc",
+        CleanDiv: "div",
+        Trunc: "trunc",
         Where: "where",
         sympy.Add: "add",
         sympy.Mul: "mul",
-        FloatPow: "pow",
-        PowByNatural: "pow_by_natural",
-        # sympy simplifies x * x into Pow(x, 2), so we need to handle this.
-        # Do NOT use builtin Pow for floats
-        # TODO: There is a hazard here, if we have float * float it will
-        # also get turned into Pow(float, 2) but we don't want this because
-        # pow_by_natural is assumed to only be integers.  Probably the fix is
-        # to add a FloatMul to impede this optimization
-        sympy.Pow: "pow_by_natural",
+        Pow: "pow",
+        sympy.Pow: "pow",
         Mod: "mod",
-        PythonMod: "mod",  # TODO: this is wrong
-        # TODO: Inductor can generate these, but it's ill-specified which
-        # semantics were intended here.  Needs to be cleaned up along with
-        # FloorDiv in a bigger cleanup
         sympy.Mod: "mod",
         sympy.Abs: "abs",
         sympy.log: "log",
         sympy.exp: "exp",
+        sympy.floor: "floor",
+        sympy.ceiling: "ceil",
         sympy.Min: "minimum",
         sympy.Max: "maximum",
         ModularIndexing: "modular_indexing",
         sympy.functions.elementary.piecewise.ExprCondPair: "expr_cond_pair",
         sympy.Piecewise: "piecewise",
         IsNonOverlappingAndDenseIndicator: "is_non_overlapping_and_dense_indicator",
-        RoundDecimal: "round_decimal",
+        Round: "round",
+        RoundDecimal: "round",
     }
     for name in ["cos", "sin", "tan", "sinh", "cosh", "tanh", "asin", "acos", "atan"]:
         HANDLERS[getattr(sympy, name)] = name
@@ -100,11 +85,7 @@ ASSOCIATIVE_OPS = {"minimum", "maximum", "mul", "add", "and_", "or_"}
 
 
 def sympy_interp(
-    analysis,
-    env: Dict[sympy.Symbol, Any],
-    expr: Union[sympy.Expr, SympyBoolean],
-    *,
-    index_dtype=torch.int64,
+    analysis, env: Dict[sympy.Symbol, Any], expr: Union[sympy.Expr, SympyBoolean]
 ):
     # Handle base cases
     dtype = None
@@ -125,32 +106,9 @@ def sympy_interp(
         expr.args[1], sympy.core.numbers.Half
     ):
         return analysis.sqrt(sympy_interp(analysis, env, expr.args[0]))
-    if isinstance(expr, ToFloat):
-        return analysis.to_dtype(
-            sympy_interp(analysis, env, expr.args[0]), torch.float64
-        )
 
     # Recursive case
     args = [sympy_interp(analysis, env, arg) for arg in expr.args]  # type: ignore[arg-type]
-
-    # These handlers are special because they take an extra dtype argument
-    # specifying what they should convert to, and we need to appropriately set
-    # this up when we convert from Sympy.  A reasonable default when you
-    # are translating is to conservatively do int64, and then narrow these
-    # arguments later when you discover you can narrow the index range.  But
-    # if you already know that 32-bit indexing is OK, you can directly do the
-    # sympy translation with index_dtype=torch.int32
-    INDEX_DTYPE_HANDLERS = {
-        TruncToInt: "trunc_to_int",
-        sympy.floor: "floor_to_int",
-        sympy.ceiling: "ceil_to_int",
-        FloorToInt: "floor_to_int",
-        CeilToInt: "ceil_to_int",
-        RoundToInt: "round_to_int",
-    }
-    if (handler_name := INDEX_DTYPE_HANDLERS.get(expr.func)) is not None:
-        return getattr(analysis, handler_name)(*args, index_dtype)
-
     if hasattr(expr.func, "_torch_handler_name"):
         handler_name = expr.func._torch_handler_name
     else:
