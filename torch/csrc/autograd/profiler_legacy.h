@@ -335,7 +335,7 @@ TORCH_API void enableProfilerLegacy(
     const torch::profiler::impl::ProfilerConfig&);
 using thread_event_lists = std::vector<std::vector<LegacyEvent>>;
 TORCH_API thread_event_lists disableProfilerLegacy(
-    std::optional<ProfilerDisableOptions> profilerDisableOptions =
+    c10::optional<ProfilerDisableOptions> profilerDisableOptions =
         c10::nullopt);
 
 // adds profiledEvents to the current thread local recorded events. Each event
@@ -376,9 +376,9 @@ struct TORCH_API RecordProfile {
 struct TORCH_API TLSLegacyProfilerGuard {
   explicit TLSLegacyProfilerGuard(
       const torch::profiler::impl::ProfilerConfig& cfg,
-      std::optional<std::function<void(const thread_event_lists&)>>
+      c10::optional<std::function<void(const thread_event_lists&)>>
           resultCallback = c10::nullopt,
-      std::optional<ProfilerDisableOptions> profilerDisableOptions =
+      c10::optional<ProfilerDisableOptions> profilerDisableOptions =
           c10::nullopt)
       : cb_(std::move(resultCallback)),
         profilerDisableOptions_(profilerDisableOptions) {
@@ -397,9 +397,9 @@ struct TORCH_API TLSLegacyProfilerGuard {
   }
 
  private:
-  std::optional<std::function<void(const thread_event_lists&)>> cb_;
+  c10::optional<std::function<void(const thread_event_lists&)>> cb_;
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
-  const std::optional<ProfilerDisableOptions> profilerDisableOptions_;
+  const c10::optional<ProfilerDisableOptions> profilerDisableOptions_;
 };
 
 } // namespace profiler

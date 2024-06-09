@@ -46,7 +46,7 @@ enum class Backend {
   SparseCsrVE,
   SparseCsrXPU,
   SparseCsrPrivateUse1,
-  MAIA,
+  ORT,
   XLA,
   Vulkan,
   Metal,
@@ -65,7 +65,7 @@ enum class Backend {
   NumOptions
 };
 
-inline Backend dispatchKeyToBackend(DispatchKey t) {
+static inline Backend dispatchKeyToBackend(DispatchKey t) {
   if (t == DispatchKey::CPU || t == DispatchKey::AutogradCPU) {
     return Backend::CPU;
   } else if (t == DispatchKey::CUDA || t == DispatchKey::AutogradCUDA) {
@@ -76,8 +76,8 @@ inline Backend dispatchKeyToBackend(DispatchKey t) {
     return Backend::VE;
   } else if (t == DispatchKey::FPGA) {
     return Backend::FPGA;
-  } else if (t == DispatchKey::MAIA) {
-    return Backend::MAIA;
+  } else if (t == DispatchKey::ORT) {
+    return Backend::ORT;
   } else if (t == DispatchKey::XLA || t == DispatchKey::AutogradXLA) {
     return Backend::XLA;
   } else if (t == DispatchKey::Lazy || t == DispatchKey::AutogradLazy) {
@@ -142,7 +142,7 @@ inline Backend dispatchKeyToBackend(DispatchKey t) {
   }
 }
 
-inline DispatchKey backendToDispatchKey(Backend b) {
+static inline DispatchKey backendToDispatchKey(Backend b) {
   switch (b) {
     case Backend::CPU:
       return DispatchKey::CPU;
@@ -154,8 +154,8 @@ inline DispatchKey backendToDispatchKey(Backend b) {
       return DispatchKey::VE;
     case Backend::FPGA:
       return DispatchKey::FPGA;
-    case Backend::MAIA:
-      return DispatchKey::MAIA;
+    case Backend::ORT:
+      return DispatchKey::ORT;
     case Backend::XLA:
       return DispatchKey::XLA;
     case Backend::Lazy:
@@ -217,7 +217,7 @@ inline DispatchKey backendToDispatchKey(Backend b) {
   }
 }
 
-inline DeviceType backendToDeviceType(Backend b) {
+static inline DeviceType backendToDeviceType(Backend b) {
   switch (b) {
     case Backend::CPU:
     case Backend::MkldnnCPU:
@@ -236,8 +236,8 @@ inline DeviceType backendToDeviceType(Backend b) {
       return DeviceType::VE;
     case Backend::FPGA:
       return DeviceType::FPGA;
-    case Backend::MAIA:
-      return DeviceType::MAIA;
+    case Backend::ORT:
+      return DeviceType::ORT;
     case Backend::XLA:
       return DeviceType::XLA;
     case Backend::Lazy:
@@ -281,7 +281,8 @@ inline DeviceType backendToDeviceType(Backend b) {
   }
 }
 
-inline const char* toString(Backend b) {
+// TODO: This probably shouldn't actually be static inline
+static inline const char* toString(Backend b) {
   switch (b) {
     case Backend::CPU:
       return "CPU";
@@ -297,8 +298,8 @@ inline const char* toString(Backend b) {
       return "XPU";
     case Backend::IPU:
       return "IPU";
-    case Backend::MAIA:
-      return "MAIA";
+    case Backend::ORT:
+      return "ORT";
     case Backend::XLA:
       return "XLA";
     case Backend::Lazy:
@@ -356,7 +357,7 @@ inline const char* toString(Backend b) {
   }
 }
 
-inline bool isSparse(Backend b) {
+static inline bool isSparse(Backend b) {
   switch (b) {
     case Backend::SparseXPU:
     case Backend::SparseCPU:
@@ -370,7 +371,7 @@ inline bool isSparse(Backend b) {
   }
 }
 
-inline bool isSparseCsr(Backend b) {
+static inline bool isSparseCsr(Backend b) {
   switch (b) {
     case Backend::SparseCsrXPU:
     case Backend::SparseCsrCPU:

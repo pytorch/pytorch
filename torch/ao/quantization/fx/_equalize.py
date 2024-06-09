@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 import warnings
 
 from collections import namedtuple
@@ -20,7 +19,6 @@ from .utils import (
     maybe_get_next_module,
     node_arg_is_weight,
 )
-import operator
 
 CUSTOM_MODULE_SUPP_LIST: List[Any] = []
 
@@ -812,7 +810,7 @@ def get_equalization_qconfig_dict(
 
     # Sort the layer_sqnr_dictionary values and get the layers with the lowest
     # SQNR values (aka highest quantization errors)
-    layer_sqnr_sorted = sorted(layer_sqnr_dict.items(), key=operator.itemgetter(1))
+    layer_sqnr_sorted = sorted(layer_sqnr_dict.items(), key=lambda item: item[1])
     layers_to_equalize = layer_sqnr_sorted[:num_layers_to_equalize]
 
     # Constructs an equalization_qconfig_dict that specifies to only equalize

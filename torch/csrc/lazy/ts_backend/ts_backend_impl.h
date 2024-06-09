@@ -38,7 +38,7 @@ class TORCH_API TSData : public torch::lazy::BackendData {
     return data_;
   }
 
-  std::optional<at::Scalar> scalar;
+  c10::optional<at::Scalar> scalar;
 
  private:
   at::Tensor data_;

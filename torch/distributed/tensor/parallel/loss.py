@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 # Copyright (c) Meta Platforms, Inc. and affiliates
 import contextlib
 from typing import cast, Dict, Optional, Tuple
@@ -15,7 +14,7 @@ from torch.distributed._tensor.ops.math_ops import (
     Reduction,
     replicate_reduction_dims,
 )
-from torch.distributed._tensor.placement_types import DTensorSpec, Placement, TensorMeta
+from torch.distributed._tensor.placement_types import Placement, TensorMeta
 from torch.distributed.device_mesh import DeviceMesh
 
 aten = torch.ops.aten
@@ -165,16 +164,14 @@ def _log_softmax_handler(
 
     res = _log_softmax(x._local_tensor, dim, half_to_float, spec.mesh, mesh_dim)
 
-    res_spec = DTensorSpec(
-        spec.mesh,
-        spec.placements,
-        tensor_meta=output_tensor_meta,
-    )
-
     return DTensor(
         res,
-        res_spec,
+        spec.mesh,
+        spec.placements,
+        shape=output_tensor_meta.shape,
+        dtype=output_tensor_meta.dtype,
         requires_grad=res.requires_grad,
+        stride=output_tensor_meta.stride,
     )
 
 
@@ -320,13 +317,16 @@ def _nll_loss_forward_handler(
         spec.mesh,
         mesh_dim,
     )
-    out_spec = DTensorSpec(spec.mesh, output_placements, tensor_meta=output_tensor_meta)
 
     return (
         DTensor(
             result,
-            out_spec,
+            spec.mesh,
+            output_placements,
+            shape=output_tensor_meta.shape,
+            dtype=output_tensor_meta.dtype,
             requires_grad=result.requires_grad,
+            stride=output_tensor_meta.stride,
         ),
         total_weight,
     )
@@ -452,17 +452,16 @@ def _nll_loss_backward_handler(
         spec.mesh,
         mesh_dim,
     )
-    # the output sharding is the same as input sharding: Shard(channel_dim) on mesh_dim
-    out_spec = DTensorSpec(
-        spec.mesh,
-        spec.placements,
-        tensor_meta=output_tensor_meta,
-    )
 
     return DTensor(
         result,
-        out_spec,
+        spec.mesh,
+        # the output sharding is the same as input sharding: Shard(channel_dim) on mesh_dim
+        spec.placements,
+        shape=output_tensor_meta.shape,
+        dtype=output_tensor_meta.dtype,
         requires_grad=result.requires_grad,
+        stride=output_tensor_meta.stride,
     )
 
 

@@ -69,7 +69,7 @@ std::unordered_map<int64_t, ConvertedIndex> MergeSliceAndSelectToIndices(
     Node* index_put_node,
     const std::vector<Node*>& slice_and_select_nodes,
     Value* orig_data,
-    const py::dict& env) {
+    const std::unordered_map<Value*, Value*>& env) {
   std::unordered_map<int64_t, ConvertedIndex> dim_index_map;
 
   // Loop over fetched slice and select nodes and convert them to index tensors.
@@ -87,10 +87,7 @@ std::unordered_map<int64_t, ConvertedIndex> MergeSliceAndSelectToIndices(
     int64_t dim = node->inputs().at(1)->node()->t(attr::value).item().toLong();
 
     if (dim < 0) {
-      // auto input_type = env.at(orig_data)->type()->expect<TensorType>();
-      auto py_value = env[py::cast(orig_data)];
-      Value* value = py_value.cast<Value*>();
-      auto input_type = value->type()->expect<TensorType>();
+      auto input_type = env.at(orig_data)->type()->expect<TensorType>();
       if (input_type->dim().has_value()) {
         auto rank = static_cast<int64_t>(input_type->dim().value());
         // Rank of original tensor to index on.
@@ -286,8 +283,7 @@ std::vector<Value*> ReshapeToAdvancedIndexingFormat(
 std::vector<Value*> ConvertIndexPutToONNX(
     Block* new_block,
     Node* old_node,
-    py::dict& env,
-    py::set& values_in_env) {
+    std::unordered_map<Value*, Value*>& env) {
   if (old_node->kind() != Symbol::fromQualString("onnx::Placeholder") ||
       (old_node->s(attr::name) != "index_put" &&
        old_node->s(attr::name) != "index_put_")) {
@@ -351,20 +347,13 @@ std::vector<Value*> ConvertIndexPutToONNX(
       continue;
     }
 
-    NodeToONNX(
-        at_n,
-        new_block,
-        torch::onnx::OperatorExportTypes::ONNX,
-        env,
-        values_in_env);
+    NodeToONNX(at_n, new_block, torch::onnx::OperatorExportTypes::ONNX, env);
   }
 
   // Find onnx outputs corresponding to the aten outputs of index_put.
   std::vector<Value*> outs;
   for (auto o : subblock->return_node()->inputs()) {
-    auto py_value = env[py::cast(o)];
-    Value* value = py_value.cast<Value*>();
-    outs.emplace_back(value);
+    outs.emplace_back(env[o]);
   }
   return outs;
 }
@@ -374,8 +363,7 @@ std::vector<Value*> ConvertIndexPutToONNX(
 std::vector<Value*> ConvertPatternFromSubblock(
     Block* new_block,
     Node* old_node,
-    py::dict& env,
-    py::set& values_in_env) {
+    std::unordered_map<Value*, Value*>& env) {
   std::vector<Value*> res;
 
   if (old_node->kind() != Symbol::fromQualString("onnx::Placeholder")) {
@@ -386,7 +374,7 @@ std::vector<Value*> ConvertPatternFromSubblock(
   // subblock.
   auto op_name = old_node->s(attr::name);
   if (op_name == "index_put" || op_name == "index_put_") {
-    res = ConvertIndexPutToONNX(new_block, old_node, env, values_in_env);
+    res = ConvertIndexPutToONNX(new_block, old_node, env);
   }
 
   return res;

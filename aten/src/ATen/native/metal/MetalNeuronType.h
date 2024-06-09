@@ -6,7 +6,9 @@
 
 #include <ATen/ATen.h>
 
-namespace at::native::metal {
+namespace at {
+namespace native {
+namespace metal {
 
 enum class NeuronType {
   None,
@@ -18,8 +20,8 @@ enum class NeuronType {
 };
 
 static inline NeuronType neuronType(
-    std::optional<c10::Scalar> output_min,
-    std::optional<c10::Scalar> output_max) {
+    c10::optional<c10::Scalar> output_min,
+    c10::optional<c10::Scalar> output_max) {
   float inf_max = std::numeric_limits<float>::infinity();
   float inf_min = -std::numeric_limits<float>::infinity();
   float output_max_ =
@@ -64,6 +66,8 @@ static inline MPSNNNeuronDescriptor* neuronDescriptor(NeuronType type) {
   }
 }
 
-} // namespace at::native::metal
+}
+}
+}
 
 #endif /* MetalNeuronType_h */

@@ -1,28 +1,15 @@
-.. _torch-library-docs:
-
 torch.library
 ===================================
 .. py:module:: torch.library
 .. currentmodule:: torch.library
 
 torch.library is a collection of APIs for extending PyTorch's core library
-of operators. It contains utilities for testing custom operators, creating new
-custom operators, and extending operators defined with PyTorch's C++ operator
+of operators. It contains utilities for creating new custom operators as
+well as extending operators defined with PyTorch's C++ operator
 registration APIs (e.g. aten operators).
 
 For a detailed guide on effectively using these APIs, please see
-Please see :ref:`custom-ops-landing-page`
-for more details on how to effectively use these APIs.
-
-Testing custom ops
-------------------
-
-Use :func:`torch.library.opcheck` to test custom ops for incorrect usage of the
-Python torch.library and/or C++ TORCH_LIBRARY APIs. Also, if your operator supports
-training, use :func:`torch.autograd.gradcheck` to test that the gradients are
-mathematically correct.
-
-.. autofunction:: opcheck
+`this gdoc <https://docs.google.com/document/d/1W--T6wz8IY8fOI0Vm8BF44PdBgs283QvpelJZWieQWQ/edit>`_
 
 Creating new custom ops in Python
 ---------------------------------
@@ -31,17 +18,15 @@ Use :func:`torch.library.custom_op` to create new custom ops.
 
 .. autofunction:: custom_op
 
-Extending custom ops (created from Python or C++)
--------------------------------------------------
+Extending custom ops created from C++
+-------------------------------------
 
-Use the register.* methods, such as :func:`torch.library.register_kernel` and
-func:`torch.library.register_fake`, to add implementations
+Use the impl methods, such as :func:`torch.library.impl` and
+func:`torch.library.impl_abstract`, to add implementations
 for any operators (they may have been created using :func:`torch.library.custom_op` or
 via PyTorch's C++ operator registration APIs).
 
-.. autofunction:: register_kernel
-.. autofunction:: register_autograd
-.. autofunction:: register_fake
+.. autofunction:: impl
 .. autofunction:: impl_abstract
 .. autofunction:: get_ctx
 
@@ -66,5 +51,3 @@ A tutorial that walks you through some examples on how to use this API is availa
 .. autofunction:: fallthrough_kernel
 
 .. autofunction:: define
-
-.. autofunction:: impl

@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 import contextlib
 from typing import List, Tuple
 
@@ -66,7 +65,7 @@ def fuser(name):
         torch._C._jit_set_nvfuser_enabled(False)
         torch._C._jit_set_llga_enabled(False)
     else:
-        raise Exception(f"unrecognized fuser option (name: {name})")  # noqa: TRY002
+        raise Exception(f"unrecognized fuser option (name: {name})")
     try:
         yield
     finally:

@@ -5,10 +5,9 @@ import sys
 import tempfile
 import unittest
 
-from model import get_custom_op_library_path, Model
-
 import torch
-import torch._library.utils as utils
+
+from model import get_custom_op_library_path, Model
 from torch import ops
 from torch.testing._internal.common_utils import IS_WINDOWS, run_tests, TestCase
 
@@ -25,11 +24,7 @@ class TestCustomOperators(TestCase):
 
     def test_op_with_no_abstract_impl_pystub(self):
         x = torch.randn(3, device="meta")
-        if utils.requires_set_python_module():
-            with self.assertRaisesRegex(RuntimeError, "pointwise"):
-                torch.ops.custom.tan(x)
-        else:
-            # Smoketest
+        with self.assertRaisesRegex(RuntimeError, "pointwise"):
             torch.ops.custom.tan(x)
 
     def test_op_with_incorrect_abstract_impl_pystub(self):

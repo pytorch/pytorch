@@ -129,7 +129,7 @@ using qavg_pool2d_fn = void (*)(
     int padW,
     int padH,
     bool count_include_pad,
-    std::optional<int64_t> divisor_override);
+    c10::optional<int64_t> divisor_override);
 
 using qavg_pool3d_fn = void (*)(
     const Tensor& qx,
@@ -152,7 +152,7 @@ using qavg_pool3d_fn = void (*)(
     int padH,
     int padD,
     bool count_include_pad,
-    std::optional<int64_t> divisor_override);
+    c10::optional<int64_t> divisor_override);
 
 using qupsample_bilinear2d_fn = void (*)(
     Tensor& output,
@@ -164,8 +164,8 @@ using qupsample_bilinear2d_fn = void (*)(
     int64_t nbatch,
     int64_t channels,
     bool align_corners,
-    std::optional<double> scales_h,
-    std::optional<double> scales_w);
+    c10::optional<double> scales_h,
+    c10::optional<double> scales_w);
 
 using qcat_nhwc_fn = Tensor (*)(
     const MaterializedITensorListRef& qxs,
@@ -192,13 +192,13 @@ using qmean_inner_dim_fn = void (*)(
     const Tensor& /* X */,
     OptionalIntArrayRef /* opt_dim */,
     bool /* keepdim */,
-    std::optional<ScalarType> /* opt_dtype */,
+    c10::optional<ScalarType> /* opt_dtype */,
     Tensor& /* Y */);
 
 using qstd_inner_dim_fn = void (*)(
     const Tensor& /* X */,
     OptionalIntArrayRef /* dim */,
-    const std::optional<Scalar>& /* correction */,
+    const c10::optional<Scalar>& /* correction */,
     bool /* keepdim */,
     Tensor& /* Y */);
 

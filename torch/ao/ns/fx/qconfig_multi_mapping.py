@@ -1,15 +1,12 @@
-# mypy: allow-untyped-defs
 from __future__ import annotations
 
 import copy
-from typing import Any, Callable, Dict, List, Union, TYPE_CHECKING
+from typing import Any, Callable, Dict, List, Union
 
 import torch
 from torch.ao.quantization import QConfigMapping
 from torch.ao.quantization.qconfig_mapping import _QCONFIG_STYLE_ORDER
-
-if TYPE_CHECKING:
-    from torch.ao.quantization.qconfig import QConfigAny
+from torch.ao.quantization.qconfig import QConfigAny
 
 __all__ = ["QConfigMultiMapping"]
 

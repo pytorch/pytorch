@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 # Allows one to expose an API in a private submodule publicly as per the definition
 # in PyTorch's public api policy.
 #

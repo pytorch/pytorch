@@ -1,8 +1,7 @@
 # Owner(s): ["oncall: jit"]
 
-from typing import List, Tuple
-
 import torch
+from typing import List, Tuple
 
 
 class SubmoduleNoForwardInputs(torch.nn.Module):

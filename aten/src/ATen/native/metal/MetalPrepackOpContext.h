@@ -3,17 +3,19 @@
 #include <ATen/Tensor.h>
 #include <torch/custom_class.h>
 
-namespace at::native::metal {
+namespace at {
+namespace native {
+namespace metal {
 
 using SerializationTypeConv2dPrePack = std::tuple<
     Tensor,
-    std::optional<Tensor>,
+    c10::optional<Tensor>,
     std::vector<int64_t>,
     std::vector<int64_t>,
     std::vector<int64_t>,
     int64_t,
-    std::optional<Scalar>,
-    std::optional<Scalar>>;
+    c10::optional<Scalar>,
+    c10::optional<Scalar>>;
 
 class Conv2dOpContext : public torch::jit::CustomClassHolder {
  public:
@@ -31,13 +33,13 @@ class Conv2dOpContext : public torch::jit::CustomClassHolder {
   Conv2dOpContext() = delete;
   Conv2dOpContext(
       at::Tensor&& weight,
-      std::optional<at::Tensor>&& bias,
+      c10::optional<at::Tensor>&& bias,
       std::vector<int64_t> stride,
       std::vector<int64_t> padding,
       std::vector<int64_t> dilation,
       int64_t groups,
-      std::optional<Scalar> output_min,
-      std::optional<Scalar> output_max)
+      c10::optional<Scalar> output_min,
+      c10::optional<Scalar> output_max)
       : weight_(std::move(weight)),
         bias_(std::move(bias)),
         stride_(std::move(stride)),
@@ -63,7 +65,7 @@ class Conv2dOpContext : public torch::jit::CustomClassHolder {
     return weight_;
   }
 
-  const std::optional<Tensor>& get_bias() const {
+  const c10::optional<Tensor>& get_bias() const {
     return bias_;
   }
 
@@ -83,11 +85,11 @@ class Conv2dOpContext : public torch::jit::CustomClassHolder {
     return groups_;
   }
 
-  const std::optional<Scalar>& get_output_min() const {
+  const c10::optional<Scalar>& get_output_min() const {
     return output_min_;
   }
 
-  const std::optional<Scalar>& get_output_max() const {
+  const c10::optional<Scalar>& get_output_max() const {
     return output_max_;
   }
 
@@ -109,22 +111,22 @@ class Conv2dOpContext : public torch::jit::CustomClassHolder {
 
   private:
     Tensor weight_;
-    std::optional<Tensor> bias_;
+    c10::optional<Tensor> bias_;
     std::vector<int64_t> stride_;
     std::vector<int64_t> padding_;
     std::vector<int64_t> dilation_;
     int64_t groups_;
-    std::optional<Scalar> output_min_;
-    std::optional<Scalar> output_max_;
+    c10::optional<Scalar> output_min_;
+    c10::optional<Scalar> output_max_;
     std::function<void(void*)> releaseCallback_ = nullptr;
     void* conv2dOp_ = nullptr; // reserved to hold MPSCNNConv2dOp objects
 };
 
 using SerializationTypeLinearPrePack = std::tuple<
     Tensor,
-    std::optional<Tensor>,
-    std::optional<Scalar>,
-    std::optional<Scalar>>;
+    c10::optional<Tensor>,
+    c10::optional<Scalar>,
+    c10::optional<Scalar>>;
 
 class LinearOpContext : public torch::jit::CustomClassHolder {
  public:
@@ -134,9 +136,9 @@ class LinearOpContext : public torch::jit::CustomClassHolder {
   LinearOpContext() = delete;
   LinearOpContext(
       at::Tensor&& weight,
-      std::optional<at::Tensor>&& bias,
-      std::optional<Scalar> output_min,
-      std::optional<Scalar> output_max)
+      c10::optional<at::Tensor>&& bias,
+      c10::optional<Scalar> output_min,
+      c10::optional<Scalar> output_max)
       : weight_(std::move(weight)),
         bias_(std::move(bias)),
         output_min_(std::move(output_min)),
@@ -158,15 +160,15 @@ class LinearOpContext : public torch::jit::CustomClassHolder {
     return weight_;
   }
 
-  const std::optional<Tensor>& get_bias() const {
+  const c10::optional<Tensor>& get_bias() const {
     return bias_;
   }
 
-  const std::optional<Scalar>& get_output_min() const {
+  const c10::optional<Scalar>& get_output_min() const {
     return output_min_;
   }
 
-  const std::optional<Scalar>& get_output_max() const {
+  const c10::optional<Scalar>& get_output_max() const {
     return output_max_;
   }
 
@@ -188,11 +190,13 @@ class LinearOpContext : public torch::jit::CustomClassHolder {
 
  private:
   Tensor weight_;
-  std::optional<Tensor> bias_;
-  std::optional<Scalar> output_min_;
-  std::optional<Scalar> output_max_;
+  c10::optional<Tensor> bias_;
+  c10::optional<Scalar> output_min_;
+  c10::optional<Scalar> output_max_;
   void* opaqueOpPtr_ = nullptr; // reserved to hold MPSCNNFullyConnected objects
   std::function<void(void*)> releaseCallback_ = nullptr;
 };
 
-} // namespace at::native::metal
+} // namespace metal
+} // namespace native
+} // namespace at

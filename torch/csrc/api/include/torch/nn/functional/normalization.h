@@ -16,7 +16,7 @@ inline Tensor normalize(
     double p,
     int64_t dim,
     double eps,
-    std::optional<Tensor> out) {
+    c10::optional<Tensor> out) {
   if (out == c10::nullopt) {
     auto denom = input.norm(p, dim, true).clamp_min(eps).expand_as(input);
     return input / denom;

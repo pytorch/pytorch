@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 import logging
 from typing import List
 
@@ -9,7 +8,7 @@ from torch._dynamo.utils import counters
 from .. import config
 
 from ..pattern_matcher import Arg, CallFunction, Match, register_graph_pattern
-from .split_cat import construct_pattern_matcher_pass
+from .split_cat import construct_pattern_matcher_pass, get_config_flag
 
 aten = torch.ops.aten
 log = logging.getLogger(__name__)
@@ -31,12 +30,6 @@ if "decompose_mem_bound_mm" in config.post_grad_fusion_options:
 
 def check_device(a: Tensor, b: Tensor) -> bool:
     return a.is_cuda and b.is_cuda
-
-
-def realize_inputs(inputs: List[torch.fx.Node]):
-    for inp in inputs:
-        if isinstance(inp, torch.fx.node.Node):
-            inp.meta["inductor_realize_to_strides"] = True
 
 
 def should_decompose_bmm(mat1, mat2) -> bool:
@@ -95,6 +88,7 @@ def print_decompose_pattern(match: Match, inputs: List[torch.fx.Node]):
 @register_graph_pattern(
     CallFunction(aten.bmm, Arg(), Arg()),
     pass_dict=construct_pattern_matcher_pass("decompose_mm_pass"),
+    extra_check=get_config_flag("decompose_mm_pass", "decompose_mem_bound_mm"),
 )
 def decompose_bmm(match: Match, mat1: torch.fx.Node, mat2: torch.fx.Node):
     def repl(mat1, mat2):
@@ -104,13 +98,13 @@ def decompose_bmm(match: Match, mat1: torch.fx.Node, mat2: torch.fx.Node):
         counters["inductor"]["decompose_bmm"] += 1
         match.replace_by_example(repl, [mat1, mat2])
         print_decompose_pattern(match, [mat1, mat2])
-        realize_inputs([mat1, mat2])
     return
 
 
 @register_graph_pattern(
     CallFunction(aten.addmm, Arg(), Arg(), Arg()),
     pass_dict=construct_pattern_matcher_pass("decompose_mm_pass"),
+    extra_check=get_config_flag("decompose_mm_pass", "decompose_mem_bound_mm"),
 )
 def decompose_addmm(
     match: Match,
@@ -125,13 +119,13 @@ def decompose_addmm(
         counters["inductor"]["decompose_addmm"] += 1
         match.replace_by_example(repl, [mat1, mat2, mat3])
         print_decompose_pattern(match, [mat1, mat2, mat3])
-        realize_inputs([mat1, mat2, mat3])
     return
 
 
 @register_graph_pattern(
     CallFunction(aten.mm, Arg(), Arg()),
     pass_dict=construct_pattern_matcher_pass("decompose_mm_pass"),
+    extra_check=get_config_flag("decompose_mm_pass", "decompose_mem_bound_mm"),
 )
 def decompose_mm(
     match: Match,
@@ -145,5 +139,4 @@ def decompose_mm(
         counters["inductor"]["decompose_mm"] += 1
         match.replace_by_example(repl, [mat1, mat2])
         print_decompose_pattern(match, [mat1, mat2])
-        realize_inputs([mat1, mat2])
     return

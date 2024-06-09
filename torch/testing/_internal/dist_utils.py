@@ -131,8 +131,9 @@ def wait_until_pending_futures_and_users_flushed(timeout: int = 20) -> None:
         time.sleep(0.1)
         if time.time() - start > timeout:
             raise ValueError(
-                f"Timed out waiting to flush pending futures and users, "
-                f"had {num_pending_futures} pending futures and {num_pending_users} pending users"
+                "Timed out waiting to flush pending futures and users, had {} pending futures and {} pending users".format(
+                    num_pending_futures, num_pending_users
+                )
             )
 
 
@@ -166,8 +167,13 @@ def wait_until_owners_and_forks_on_rank(
         time.sleep(1)
         if time.time() - start > timeout:
             raise ValueError(
-                f"Timed out waiting {timeout} sec for {num_owners} owners and {num_forks} forks on rank,"
-                f" had {num_owners_on_rank} owners and {num_forks_on_rank} forks"
+                "Timed out waiting {} sec for {} owners and {} forks on rank, had {} owners and {} forks".format(
+                    timeout,
+                    num_owners,
+                    num_forks,
+                    num_owners_on_rank,
+                    num_forks_on_rank,
+                )
             )
 
 

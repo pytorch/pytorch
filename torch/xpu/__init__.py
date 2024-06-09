@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 r"""
 This package introduces support for the XPU backend, specifically tailored for
 Intel GPU optimization.
@@ -133,7 +132,7 @@ def _lazy_init():
                         f"XPU call failed lazily at initialization with error: {str(e)}\n\n"
                         f"XPU call was originally invoked at:\n\n{''.join(orig_traceback)}"
                     )
-                    raise Exception(msg) from e  # noqa: TRY002
+                    raise Exception(msg) from e
         finally:
             delattr(_tls, "is_initializing")
         _initialized = True

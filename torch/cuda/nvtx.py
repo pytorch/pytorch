@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 r"""This package adds support for NVIDIA Tools Extension (NVTX) used in profiling."""
 
 from contextlib import contextmanager

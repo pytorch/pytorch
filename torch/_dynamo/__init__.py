@@ -29,7 +29,6 @@ from .eval_frame import (
     reset_code,
 )
 from .external_utils import is_compiling
-from .mutation_guard import GenerationTracker
 from .utils import graph_break_reasons, guard_failures, orig_code_map, reset_frame_count
 
 __all__ = [
@@ -62,7 +61,7 @@ if torch.manual_seed is torch.random.manual_seed:
 
     # Wrap manual_seed with the disable decorator.
     # Can't do it at its implementation due to dependency issues.
-    torch.manual_seed = torch._disable_dynamo(torch.manual_seed)
+    torch.manual_seed = disable(torch.manual_seed)
     # Add the new manual_seed to the builtin registry.
     torch.jit._builtins._register_builtin(torch.manual_seed, "aten::manual_seed")
 
@@ -83,7 +82,6 @@ def reset() -> None:
         convert_frame.FRAME_COUNTER = 0
         convert_frame.FRAME_COMPILE_COUNTER.clear()
         callback_handler.clear()
-        GenerationTracker.clear()
 
 
 def reset_code_caches() -> None:

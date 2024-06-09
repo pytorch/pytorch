@@ -4,6 +4,7 @@ import torch
 import torch._dynamo.test_case
 import torch._dynamo.testing
 import torch.onnx.operators
+from torch._dynamo.testing import same
 
 
 def fn(a, b):
@@ -16,7 +17,7 @@ class InteropTests(torch._dynamo.test_case.TestCase):
         ref = fn(*inputs)
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         res = opt_fn(*inputs)
-        self.assertEqual(ref, res)
+        self.assertTrue(same(ref, res))
 
     def test_fx_fn(self):
         fx_fn = torch.fx.symbolic_trace(fn)

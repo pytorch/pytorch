@@ -13,6 +13,10 @@
 #include <ATen/core/ivalue_inl.h>
 #include <c10/util/Exception.h>
 #include <c10/util/irange.h>
+#include <torch/csrc/jit/serialization/import_export_helpers.h>
+#if !defined(C10_MOBILE) && !defined(C10_DISABLE_LEGACY_IMPORT)
+#include <torch/csrc/jit/serialization/import_legacy.h>
+#endif
 #include <torch/csrc/jit/frontend/script_type_parser.h>
 #include <torch/csrc/jit/ir/graph_utils.h>
 #include <torch/csrc/jit/ir/ir.h>
@@ -21,7 +25,6 @@
 #include <torch/csrc/jit/operator_upgraders/upgraders_entry.h>
 #include <torch/csrc/jit/passes/shape_analysis.h>
 #include <torch/csrc/jit/passes/subgraph_rewrite.h>
-#include <torch/csrc/jit/serialization/import_export_helpers.h>
 #include <torch/csrc/jit/serialization/import_read.h>
 #include <torch/csrc/jit/serialization/import_source.h>
 #include <torch/csrc/jit/serialization/source_range_serialization.h>
@@ -149,7 +152,7 @@ class ScriptModuleDeserializer final {
             reader_->version()) {}
 
   Module deserialize(
-      std::optional<at::Device> device,
+      c10::optional<at::Device> device,
       ExtraFilesMap& extra_files,
       bool restore_shapes = false);
 
@@ -159,7 +162,7 @@ class ScriptModuleDeserializer final {
   std::shared_ptr<CompilationUnit> compilation_unit_;
   std::shared_ptr<PyTorchStreamReader> reader_;
   std::shared_ptr<DeserializationStorageContext> storage_context_;
-  std::optional<at::Device> device_;
+  c10::optional<at::Device> device_;
   std::vector<at::IValue> constants_table_;
   std::string code_prefix_;
   std::string pickle_dir_prefix_;
@@ -245,13 +248,13 @@ graph(%x, %packed_params, %stride, %padding, %dilation, %groups, %r_scale, %r_ze
 }
 
 Module ScriptModuleDeserializer::deserialize(
-    std::optional<at::Device> device,
+    c10::optional<at::Device> device,
     ExtraFilesMap& extra_files,
     bool restore_shapes) {
   // we populate the upgraders map before any load starts
   populate_upgraders_graph_map();
 
-  C10_LOG_API_USAGE_ONCE("torch.jit.load");
+  C10_LOG_API_USAGE_ONCE("torch.script.load");
   device_ = device;
   // Load extra files.
   for (const auto& kv : extra_files) {
@@ -263,7 +266,11 @@ Module ScriptModuleDeserializer::deserialize(
     }
   }
   if (reader_->hasRecord("model.json") && code_prefix_ == "code/") {
+#if !defined(C10_MOBILE) && !defined(C10_DISABLE_LEGACY_IMPORT)
+    return torch::jit::LEGACY_deserialize(compilation_unit_, reader_, device_);
+#else
     AT_ERROR("Legacy model format is not supported on mobile.");
+#endif
   }
   auto tuple = readArchive("constants").toTuple();
   for (auto constant : tuple->elements()) {
@@ -304,7 +311,7 @@ Module ScriptModuleDeserializer::deserialize(
 Module import_ir_module(
     std::shared_ptr<CompilationUnit> cu,
     std::istream& in,
-    std::optional<at::Device> device,
+    c10::optional<at::Device> device,
     bool load_debug_files) {
   ExtraFilesMap extra_files;
   return import_ir_module(
@@ -315,7 +322,7 @@ static Module _load_jit_module_from_bytes(
     std::shared_ptr<char> data,
     size_t size,
     std::shared_ptr<CompilationUnit> cu,
-    std::optional<c10::Device> device,
+    c10::optional<c10::Device> device,
     ExtraFilesMap& extra_files,
     bool restore_shapes);
 
@@ -323,7 +330,7 @@ Module parse_and_initialize_jit_module(
     std::shared_ptr<char> data,
     size_t size,
     ExtraFilesMap& extra_files,
-    std::optional<at::Device> device) {
+    c10::optional<at::Device> device) {
   populate_upgraders_graph_map();
   ExtraFilesMap jit_files;
   std::vector<IValue> jit_constants;
@@ -342,7 +349,7 @@ Module parse_and_initialize_jit_module(
 Module load_jit_module_from_file(
     const std::string& filename,
     ExtraFilesMap& extra_files,
-    std::optional<at::Device> device) {
+    c10::optional<at::Device> device) {
   auto data = get_file_content(filename.c_str());
   return parse_and_initialize_jit_module(
       std::move(std::get<0>(data)), std::get<1>(data), extra_files, device);
@@ -351,7 +358,7 @@ Module load_jit_module_from_file(
 Module load_jit_module_from_stream(
     std::istream& in,
     ExtraFilesMap& extra_files,
-    std::optional<at::Device> device) {
+    c10::optional<at::Device> device) {
   auto data = get_stream_content(in);
   return parse_and_initialize_jit_module(
       std::move(std::get<0>(data)), std::get<1>(data), extra_files, device);
@@ -360,7 +367,7 @@ Module load_jit_module_from_stream(
 Module import_ir_module(
     std::shared_ptr<CompilationUnit> cu,
     std::istream& in,
-    std::optional<at::Device> device,
+    c10::optional<at::Device> device,
     ExtraFilesMap& extra_files,
     bool load_debug_files,
     bool restore_shapes) {
@@ -383,7 +390,7 @@ Module import_ir_module(
     std::shared_ptr<CompilationUnit> cu,
     std::shared_ptr<PyTorchStreamReader> reader,
     std::shared_ptr<DeserializationStorageContext> storage_context,
-    std::optional<at::Device> device,
+    c10::optional<at::Device> device,
     std::string ts_id) {
   ScriptModuleDeserializer deserializer(
       std::move(cu),
@@ -398,7 +405,7 @@ Module import_ir_module(
 Module import_ir_module(
     std::shared_ptr<CompilationUnit> cu,
     const std::string& filename,
-    std::optional<at::Device> device,
+    c10::optional<at::Device> device,
     bool load_debug_files) {
   ExtraFilesMap extra_files;
   return import_ir_module(
@@ -408,7 +415,7 @@ Module import_ir_module(
 Module import_ir_module(
     std::shared_ptr<CompilationUnit> cu,
     const std::string& filename,
-    std::optional<at::Device> device,
+    c10::optional<at::Device> device,
     ExtraFilesMap& extra_files,
     bool load_debug_files,
     bool restore_shapes) {
@@ -428,7 +435,7 @@ Module import_ir_module(
 Module import_ir_module(
     std::shared_ptr<CompilationUnit> cu,
     std::unique_ptr<ReadAdapterInterface> rai,
-    std::optional<at::Device> device,
+    c10::optional<at::Device> device,
     bool load_debug_files) {
   ExtraFilesMap extra_files;
   return import_ir_module(
@@ -438,7 +445,7 @@ Module import_ir_module(
 Module import_ir_module(
     std::shared_ptr<CompilationUnit> cu,
     std::unique_ptr<ReadAdapterInterface> rai,
-    std::optional<at::Device> device,
+    c10::optional<at::Device> device,
     ExtraFilesMap& extra_files,
     bool load_debug_files) {
   std::shared_ptr<ReadAdapterInterface> rai_shared = std::move(rai);
@@ -449,7 +456,7 @@ Module import_ir_module(
 Module import_ir_module(
     std::shared_ptr<CompilationUnit> cu,
     std::shared_ptr<ReadAdapterInterface> rai,
-    std::optional<at::Device> device,
+    c10::optional<at::Device> device,
     ExtraFilesMap& extra_files,
     bool load_debug_files) {
   auto reader = std::make_shared<PyTorchStreamReader>(std::move(rai));
@@ -460,7 +467,7 @@ Module import_ir_module(
 
 Module load(
     std::istream& in,
-    std::optional<at::Device> device,
+    c10::optional<at::Device> device,
     bool load_debug_files) {
   auto cu = std::make_shared<CompilationUnit>();
   return import_ir_module(std::move(cu), in, device, load_debug_files);
@@ -468,7 +475,7 @@ Module load(
 
 Module load(
     std::istream& in,
-    std::optional<at::Device> device,
+    c10::optional<at::Device> device,
     ExtraFilesMap& extra_files,
     bool load_debug_files) {
   auto cu = std::make_shared<CompilationUnit>();
@@ -478,7 +485,7 @@ Module load(
 
 Module load(
     const std::string& filename,
-    std::optional<at::Device> device,
+    c10::optional<at::Device> device,
     bool load_debug_files) {
   auto cu = std::make_shared<CompilationUnit>();
   return import_ir_module(std::move(cu), filename, device, load_debug_files);
@@ -486,7 +493,7 @@ Module load(
 
 Module load(
     const std::string& filename,
-    std::optional<at::Device> device,
+    c10::optional<at::Device> device,
     ExtraFilesMap& extra_files,
     bool load_debug_files) {
   auto cu = std::make_shared<CompilationUnit>();
@@ -496,7 +503,7 @@ Module load(
 
 Module load(
     std::shared_ptr<ReadAdapterInterface> rai,
-    std::optional<c10::Device> device,
+    c10::optional<c10::Device> device,
     bool load_debug_files) {
   auto cu = std::make_shared<CompilationUnit>();
   ExtraFilesMap extra_files;
@@ -506,7 +513,7 @@ Module load(
 
 Module load(
     std::shared_ptr<ReadAdapterInterface> rai,
-    std::optional<c10::Device> device,
+    c10::optional<c10::Device> device,
     ExtraFilesMap& extra_files,
     bool load_debug_files) {
   auto cu = std::make_shared<CompilationUnit>();
@@ -518,7 +525,7 @@ Module _load_jit_module_from_bytes(
     std::shared_ptr<char> data,
     size_t size,
     std::shared_ptr<CompilationUnit> cu,
-    std::optional<c10::Device> device,
+    c10::optional<c10::Device> device,
     ExtraFilesMap& extra_files,
     bool restore_shapes) {
   TORCH_CHECK(size >= kFileFormatHeaderSize, "Unrecognized data format");

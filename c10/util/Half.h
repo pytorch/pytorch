@@ -12,12 +12,11 @@
 #include <c10/macros/Export.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/TypeSafeSignMath.h>
-#include <c10/util/bit_cast.h>
 #include <c10/util/complex.h>
 #include <c10/util/floating_point_utils.h>
 #include <type_traits>
 
-#if defined(__cplusplus)
+#if defined(__cplusplus) && (__cplusplus >= 201103L)
 #include <cmath>
 #elif !defined(__OPENCL_VERSION__)
 #include <math.h>
@@ -31,7 +30,6 @@
 #include <cstring>
 #include <iosfwd>
 #include <limits>
-#include <ostream>
 
 #ifdef __CUDACC__
 #include <cuda_fp16.h>
@@ -331,12 +329,20 @@ inline uint16_t fp16_ieee_from_fp32_value(float f) {
 }
 
 #if defined(__aarch64__) && !defined(C10_MOBILE) && !defined(__CUDACC__)
-inline float16_t fp16_from_bits(uint16_t h) {
-  return c10::bit_cast<float16_t>(h);
+constexpr inline float16_t fp16_from_bits(uint16_t h) {
+  union {
+    uint16_t as_bits;
+    float16_t as_value;
+  } fp16 = {h};
+  return fp16.as_value;
 }
 
-inline uint16_t fp16_to_bits(float16_t f) {
-  return c10::bit_cast<uint16_t>(f);
+constexpr inline uint16_t fp16_to_bits(float16_t f) {
+  union {
+    float16_t as_value;
+    uint16_t as_bits;
+  } fp16 = {.as_value = f};
+  return fp16.as_bits;
 }
 
 // According to https://godbolt.org/z/8s14GvEjo it would translate to single
@@ -525,10 +531,7 @@ std::enable_if_t<is_complex<From>::value, bool> overflows(
              typename From::value_type>(f.imag());
 }
 
-C10_API inline std::ostream& operator<<(std::ostream& out, const Half& value) {
-  out << (float)value;
-  return out;
-}
+C10_API std::ostream& operator<<(std::ostream& out, const Half& value);
 
 } // namespace c10
 

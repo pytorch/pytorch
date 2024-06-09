@@ -366,7 +366,7 @@ class TORCH_API OwnerRRef final : public RRef {
       worker_id_t ownerId,
       const RRefId& rrefId,
       TypePtr type,
-      std::optional<IValue> value,
+      c10::optional<IValue> value,
       std::vector<c10::Device> devices);
 
   inline bool isOwner() const override {

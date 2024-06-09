@@ -47,7 +47,6 @@ _side_effectful_functions: Set[Callable] = {
     _ops.aten._assert_async.msg,
     _ops.aten._assert_scalar.default,
     _ops.aten.copy_.default,
-    _ops.aten.set_.source_Tensor,
     _ops.aten.index_put_.default,
     _ops.aten.sym_constrain_range.default,
     _ops.aten.sym_constrain_range_for_size.default,
@@ -60,7 +59,7 @@ _side_effectful_functions: Set[Callable] = {
 
 
 @compatibility(is_backward_compatible=False)
-def has_side_effect(fn: Callable) -> Callable:
+def has_side_effect(fn: Callable) -> None:
     _side_effectful_functions.add(fn)
     return fn
 
@@ -238,7 +237,7 @@ class Node:
         self._prev = self
         self._next = self
         self._erased = False
-        self._sort_key: Any = ()
+        self._sort_key = ()
 
         # If set, use this fn to print this node
         self._repr_fn : Optional[Callable[[Node], str]] = None
@@ -295,7 +294,6 @@ class Node:
         psk = x._prev._sort_key
         nsk = x._next._sort_key
         if len(psk) > len(nsk):
-            idx: int
             *prefix, idx = psk[:len(nsk) + 1]
             x._sort_key = (*prefix, idx + 1)
         elif len(psk) < len(nsk):
@@ -422,7 +420,7 @@ class Node:
 
         self._args = args_left + (arg,) + args_right
 
-        _new_input_nodes: Dict[Node, None] = {}
+        _new_input_nodes = {}
         map_arg(arg, _new_input_nodes.setdefault)
 
         for new_use in _new_input_nodes.keys():

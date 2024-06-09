@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 import functools
 import math
 import operator
@@ -60,7 +59,7 @@ def _wrap_jagged_dims(ndim, dims, op_name):
 
 def check_schema(schema_str: str, func, *args, **kwargs) -> None:
     named_arg_types = schema_str.split(", ")
-    num_optional_args = [x.endswith("?") for x in named_arg_types].count(True)
+    num_optional_args = sum([x.endswith("?") for x in named_arg_types])
     min_args = len(named_arg_types) - num_optional_args
 
     # special case: ellipses allows for any number of unchecked args at the end
@@ -202,7 +201,7 @@ def lookup_jagged(func, *args, **kwargs) -> Optional[Callable]:
     # Handle pointwise fallbacks
     if torch.Tag.pointwise in func.tags:
         # Assume there aren't additional tensors that aren't the "unary/binary" args
-        num_tensor_args = sum(isinstance(x, torch.Tensor) for x in args)
+        num_tensor_args = sum([isinstance(x, torch.Tensor) for x in args])
         if num_tensor_args == 1:
             check_schema("self: jt_all, ...", func, *args, **kwargs)
             return functools.partial(jagged_unary_pointwise, func)
@@ -330,7 +329,6 @@ def jagged_torch_function(func, *args, **kwargs):
         torch.ops.aten.is_non_overlapping_and_dense.default,
         torch.ops.aten.sym_size.default,
         torch.ops.aten.dim.default,
-        torch.ops.aten.numel.default,
         torch.ops.aten.sym_numel.default,
         torch.ops.aten.sym_stride.default,
         torch.ops.aten.sym_storage_offset.default,
@@ -347,7 +345,7 @@ def tensor_attr_supported_getter(func, *args, **kwargs):
     if func == torch.ops.aten.dim.default:
         return len(args[0]._size)
 
-    if func in (torch.ops.aten.sym_numel.default, torch.ops.aten.numel.default):
+    if func == torch.ops.aten.sym_numel.default:
         if args[0]._lengths is not None:
             return int(sum(args[0]._lengths) * math.prod(args[0]._size[2:]))
         return args[0]._values.numel()
@@ -617,23 +615,16 @@ def unbind_int(func, *args, **kwargs):
     values = inp.values()
     offsets = inp.offsets()
     lengths = inp.lengths()
-    ragged_idx = inp._ragged_idx
+
+    if inp._ragged_idx != 1:
+        raise RuntimeError(
+            "unbind(): only supported for NestedTensor when jagged dimension is 1"
+        )
 
     if lengths is None:
-        return torch.split(values, offsets.diff().tolist(), dim=(ragged_idx - 1))
-
-    if ragged_idx <= 0:
-        raise RuntimeError(
-            "unbind(): nested tensor ragged_idx out of bounds (should be >= 1)"
-        )
-    for i in range(lengths.shape[0]):
-        if offsets[i] + lengths[i] > values.shape[ragged_idx - 1]:
-            raise RuntimeError(
-                "unbind(): nested tensor offsets and lengths do not match ragged_idx dimension"
-            )
+        return torch.split(values, offsets.diff().tolist())
     return [
-        torch.narrow(values, dim=(ragged_idx - 1), start=offsets[i], length=lengths[i])
-        for i in range(lengths.shape[0])
+        values[offsets[i] : (offsets[i] + lengths[i])] for i in range(lengths.shape[0])
     ]
 
 

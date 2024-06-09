@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 r"""Signal handling for multiprocessing data loading.
 
 NOTE [ Signal handling in multiprocessing data loading ]

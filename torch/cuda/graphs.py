@@ -1,6 +1,5 @@
-# mypy: allow-untyped-defs
 import gc
-import typing
+from typing import Optional
 
 import torch
 from torch.utils import _pytree
@@ -143,7 +142,7 @@ class graph:
         https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__STREAM.html#group__CUDART__STREAM_1g9d0535d93a214cbf126835257b16ba85
     """  # noqa: B950
 
-    default_capture_stream: typing.Optional["torch.cuda.Stream"] = None
+    default_capture_stream: Optional["torch.cuda.Stream"] = None
 
     def __init__(
         self,

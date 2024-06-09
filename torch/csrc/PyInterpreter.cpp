@@ -60,11 +60,9 @@ struct ConcretePyInterpreterVTable final
   void python_op_registration_trampoline(
       const c10::OperatorHandle& op,
       c10::DispatchKey key,
-      c10::DispatchKeySet keyset,
-      torch::jit::Stack* stack,
-      bool with_keyset) const override {
+      torch::jit::Stack* stack) const override {
     torch::impl::dispatch::python_op_registration_trampoline_impl(
-        op, key, keyset, stack, with_keyset);
+        op, key, stack);
   }
   void throw_abstract_impl_not_imported_error(
       std::string opname,
@@ -592,7 +590,7 @@ static void set_tensor_attr_with_capsule(
     const c10::TensorImpl* tensor,
     py::capsule& capsule,
     const char* attr_name) {
-  std::optional<PyObject*> mb_obj = tensor->pyobj_slot()->check_pyobj(
+  c10::optional<PyObject*> mb_obj = tensor->pyobj_slot()->check_pyobj(
       getPyInterpreter(), /*ignore_hermetic_tls=*/false);
   TORCH_CHECK(
       mb_obj.has_value(), "Tensor subclass's PyInterpreter has no value");
@@ -620,7 +618,7 @@ static c10::ArrayRef<T> get_set_cached_attr(
     const c10::TensorImpl* tensor,
     const char* base_attr_name,
     const py::object& obj) {
-  std::optional<PyObject*> mb_obj =
+  c10::optional<PyObject*> mb_obj =
       tensor->pyobj_slot()->check_pyobj(getPyInterpreter());
   TORCH_CHECK(
       mb_obj.has_value(), "Tensor subclass's PyInterpreter has no value");
@@ -831,16 +829,12 @@ c10::Layout ConcretePyInterpreterVTable::layout(
       "torch.ops.prim");
 
   TORCH_CHECK(
-      THPLayout_Check(out.ptr()) || PyLong_Check(out.ptr()),
+      THPLayout_Check(out.ptr()),
       "layout returned invalid type ",
       py::detail::get_fully_qualified_tp_name(Py_TYPE(out.ptr())),
       ", expected Layout");
 
-  if (THPLayout_Check(out.ptr())) {
-    return toLayout(out.ptr());
-  } else {
-    return c10::Layout(py::cast<int64_t>(out));
-  }
+  return toLayout(out.ptr());
 }
 
 int64_t ConcretePyInterpreterVTable::numel(const c10::TensorImpl* self) const {

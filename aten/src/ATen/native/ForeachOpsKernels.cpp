@@ -35,7 +35,6 @@
 #include <ATen/ops/_foreach_log1p_native.h>
 #include <ATen/ops/_foreach_log2_native.h>
 #include <ATen/ops/_foreach_log_native.h>
-#include <ATen/ops/_foreach_max_native.h>
 #include <ATen/ops/_foreach_maximum_native.h>
 #include <ATen/ops/_foreach_minimum_native.h>
 #include <ATen/ops/_foreach_mul_native.h>
@@ -56,7 +55,6 @@
 #include <ATen/ops/_foreach_zero_native.h>
 #include <ATen/ops/copy.h>
 #include <ATen/ops/linalg_vector_norm.h>
-#include <ATen/ops/max.h>
 #include <ATen/ops/maximum.h>
 #include <ATen/ops/minimum.h>
 #include <ATen/ops/pow.h>
@@ -440,21 +438,11 @@ void foreach_tensor_zero_slow_(TensorList tensors) {
 
 std::vector<Tensor> foreach_tensor_norm_slow(
     TensorList tensors,
-    const Scalar& ord,
-    c10::optional<ScalarType> dtype) {
+    const Scalar& ord) {
   check_foreach_api_restrictions(tensors);
   std::vector<Tensor> result;
   for (const auto& t : tensors) {
-    result.emplace_back(at::linalg_vector_norm(t, ord, {}, false, dtype));
-  }
-  return result;
-}
-
-std::vector<Tensor> foreach_tensor_max_slow(TensorList tensors) {
-  check_foreach_api_restrictions(tensors);
-  std::vector<Tensor> result;
-  for (const auto& t : tensors) {
-    result.emplace_back(at::max(t));
+    result.emplace_back(at::linalg_vector_norm(t, ord));
   }
   return result;
 }

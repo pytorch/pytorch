@@ -104,15 +104,15 @@ std::ostream& operator<<(
 }
 
 /// A utility class that accepts either a container of `D`-many
-/// `std::optional<T>` values, or a single `std::optional<T>` value, which is
+/// `c10::optional<T>` values, or a single `c10::optional<T>` value, which is
 /// internally repeated `D` times. It has the additional ability to accept
 /// containers of the underlying type `T` and convert them to a container of
-/// `std::optional<T>`.
+/// `c10::optional<T>`.
 template <size_t D, typename T = int64_t>
 class ExpandingArrayWithOptionalElem
-    : public ExpandingArray<D, std::optional<T>> {
+    : public ExpandingArray<D, c10::optional<T>> {
  public:
-  using ExpandingArray<D, std::optional<T>>::ExpandingArray;
+  using ExpandingArray<D, c10::optional<T>>::ExpandingArray;
 
   /// Constructs an `ExpandingArrayWithOptionalElem` from an `initializer_list`
   /// of the underlying type `T`. The extent of the length is checked against
@@ -130,7 +130,7 @@ class ExpandingArrayWithOptionalElem
   /// the underlying type `T`. The extent of the length is checked against the
   /// `ExpandingArrayWithOptionalElem`'s extent parameter `D` at runtime.
   /*implicit*/ ExpandingArrayWithOptionalElem(at::ArrayRef<T> values)
-      : ExpandingArray<D, std::optional<T>>(0) {
+      : ExpandingArray<D, c10::optional<T>>(0) {
     // clang-format off
     TORCH_CHECK(
         values.size() == D,
@@ -145,7 +145,7 @@ class ExpandingArrayWithOptionalElem
   /// underlying type `T`, which is repeated `D` times (where `D` is the extent
   /// parameter of the `ExpandingArrayWithOptionalElem`).
   /*implicit*/ ExpandingArrayWithOptionalElem(T single_size)
-      : ExpandingArray<D, std::optional<T>>(0) {
+      : ExpandingArray<D, c10::optional<T>>(0) {
     for (const auto i : c10::irange(this->values_.size())) {
       this->values_[i] = single_size;
     }
@@ -154,7 +154,7 @@ class ExpandingArrayWithOptionalElem
   /// Constructs an `ExpandingArrayWithOptionalElem` from a correctly sized
   /// `std::array` of the underlying type `T`.
   /*implicit*/ ExpandingArrayWithOptionalElem(const std::array<T, D>& values)
-      : ExpandingArray<D, std::optional<T>>(0) {
+      : ExpandingArray<D, c10::optional<T>>(0) {
     for (const auto i : c10::irange(this->values_.size())) {
       this->values_[i] = values[i];
     }

@@ -1,7 +1,7 @@
 # mypy: ignore-errors
 
 import inspect
-from typing import Dict, List, TYPE_CHECKING
+from typing import Dict, List
 
 import torch.utils._pytree as pytree
 
@@ -10,13 +10,11 @@ from ..exc import unimplemented
 from ..guards import GuardBuilder, install_guard
 from ..source import AttrSource, GlobalSource
 from ..utils import has_torch_function, is_tensor_base_attr_getter
+from .base import VariableTracker
 from .constant import ConstantVariable
 from .lists import TupleVariable
 from .tensor import TensorSubclassVariable, TensorVariable
 from .user_defined import UserDefinedObjectVariable
-
-if TYPE_CHECKING:
-    from .base import VariableTracker
 
 
 # [Note: __torch_function__] This feature is a prototype and has some rough edges (contact mlazos with issues):
@@ -46,33 +44,6 @@ banned_attrs = [
     for fn in get_default_nowrap_functions()
     if is_tensor_base_attr_getter(fn)
 ]
-
-
-def _get_all_args(args, kwargs):
-    return _flatten_vts(pytree.arg_tree_leaves(*args, **kwargs))
-
-
-def _flatten_vts(vts):
-    from collections import deque
-
-    from .dicts import ConstDictVariable
-    from .lazy import LazyVariableTracker
-    from .lists import ListVariable
-
-    vts = deque(vts)
-    output = []
-
-    while vts:
-        vt = vts.pop()
-        LazyVariableTracker.realize_all(vt)
-        if isinstance(vt, ListVariable):
-            vts.extend(vt.items)
-        elif isinstance(vt, ConstDictVariable):
-            vts.extend(vt.items.values())
-        else:
-            output.append(vt)
-
-    return output
 
 
 def _get_subclass_type(var):
@@ -136,15 +107,17 @@ def build_torch_function_fn(tx, value, source):
 
 
 def can_dispatch_torch_function(tx, args, kwargs):
-    return tx.output.torch_function_enabled and any(
-        has_torch_function(arg) for arg in _get_all_args(args, kwargs)
-    )
+    if tx.output.torch_function_enabled:
+        all_args = pytree.arg_tree_leaves(*args, **kwargs)
+        return any(has_torch_function(arg) for arg in all_args)
+    else:
+        return False
 
 
 def dispatch_torch_function(tx, fn, args, kwargs):
     """Gathers all args that are TensorWithTFOverrideVariable and dispatches based on the ordering in _get_overloaded_args"""
 
-    all_args = _get_all_args(args, kwargs)
+    all_args = pytree.arg_tree_leaves(*args, **kwargs)
     overloaded_args = _get_overloaded_args(
         [arg for arg in all_args if has_torch_function(arg)],
         _get_subclass_type,

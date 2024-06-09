@@ -39,7 +39,7 @@ namespace torch {
 using namespace at; // NOLINT
 
 using c10::nullopt;
-using std::optional;
+using c10::optional;
 
 using Dtype = at::ScalarType;
 

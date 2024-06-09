@@ -84,54 +84,24 @@ class TestDTensorOptimizer(DTensorTestBase):
                 # Default 'rtol' and 'atol' for attr:`~torch.float32` are ``1.3e-6`` and ``1e-5``
                 self.assertEqual(p1, p2, atol=atol, rtol=rtol)
 
-    def test_optimizer_foreach_supported_types_include_DTensor(self):
-        from torch.optim.optimizer import _foreach_supported_types
-
-        self.assertTrue(DTensor in _foreach_supported_types)
-
     @with_comms
     def test_adam_1d_sharding(self):
         mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
 
-        # lr as a Tensor is not supported for capturable=False and foreach=True
-        adam_float_lr_configs = [
-            {"lr": 0.1, "foreach": False},
-            {"lr": 0.1, "weight_decay": 0.05, "foreach": False},
-            {"lr": 0.1, "weight_decay": 0.05},
-            {"lr": 0.1, "weight_decay": 0.05, "amsgrad": True},
-            {
-                "lr": 0.1,
-                "weight_decay": 0.05,
-                "maximize": True,
-                "amsgrad": True,
-            },
-        ]
-        fused_adam_float_lr_configs = [
-            {"lr": 0.1, "fused": True},
-            {"lr": 0.1, "weight_decay": 0.05, "amsgrad": True, "fused": True},
-            {
-                "lr": 0.1,
-                "weight_decay": 0.05,
-                "maximize": True,
-                "amsgrad": True,
-                "fused": True,
-            },
-        ]
-        # lr could be a Tensor or a float when fused=True for adam optimizer
-        fused_adam_tensor_lr_configs = [
-            {**config, "lr": torch.tensor(0.1)}
-            for config in fused_adam_float_lr_configs
-        ]
-        fused_adam_tensor_lr_configs.extend(
-            [
-                {**config, "lr": torch.tensor([0.1])}
-                for config in fused_adam_float_lr_configs
-            ]
-        )
+        # TODO: add fused_adam support
         adam_configs = [
-            *adam_float_lr_configs,
-            *fused_adam_float_lr_configs,
-            *fused_adam_tensor_lr_configs,
+            {"lr": 0.1},
+            {"lr": 0.1, "weight_decay": 0.05},
+            {"lr": 0.1, "foreach": True},
+            {"lr": 0.1, "weight_decay": 0.05, "foreach": True},
+            {"lr": 0.1, "weight_decay": 0.05, "amsgrad": True, "foreach": True},
+            {
+                "lr": 0.1,
+                "weight_decay": 0.05,
+                "maximize": True,
+                "amsgrad": True,
+                "foreach": True,
+            },
         ]
 
         for config in adam_configs:
@@ -152,62 +122,28 @@ class TestDTensorOptimizer(DTensorTestBase):
     def test_adamw_1d_sharding(self):
         mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
 
-        # lr as a Tensor is not supported for capturable=False and foreach=True
-        adamw_float_lr_configs = [
-            {"lr": 0.1, "foreach": False},
-            {"lr": 0.1, "weight_decay": 0.05, "foreach": False},
-            {"lr": 0.1, "weight_decay": 0.05},
-            {
-                "lr": 0.1,
-                "betas": (0.6, 0.66),
-                "eps": 1e-6,
-                "weight_decay": 0.05,
-                "amsgrad": True,
-            },
-            {
-                "lr": 0.1,
-                "betas": (0.6, 0.66),
-                "eps": 1e-6,
-                "weight_decay": 0.05,
-                "maximize": True,
-                "amsgrad": True,
-            },
-        ]
-        fused_adamw_float_lr_configs = [
-            {"lr": 0.1, "weight_decay": 0.05, "fused": True},
-            {
-                "lr": 0.1,
-                "betas": (0.6, 0.66),
-                "eps": 1e-6,
-                "weight_decay": 0.05,
-                "amsgrad": True,
-                "fused": True,
-            },
-            {
-                "lr": 0.1,
-                "betas": (0.6, 0.66),
-                "eps": 1e-6,
-                "weight_decay": 0.05,
-                "maximize": True,
-                "amsgrad": True,
-                "fused": True,
-            },
-        ]
-        # lr could be a Tensor or a float when fused=True for adamW optimizer
-        fused_adamw_tensor_lr_configs = [
-            {**config, "lr": torch.tensor(0.1)}
-            for config in fused_adamw_float_lr_configs
-        ]
-        fused_adamw_tensor_lr_configs.extend(
-            [
-                {**config, "lr": torch.tensor([0.1])}
-                for config in fused_adamw_float_lr_configs
-            ]
-        )
+        # TODO: add fused_adamw support
         adamw_configs = [
-            *adamw_float_lr_configs,
-            *fused_adamw_float_lr_configs,
-            *fused_adamw_tensor_lr_configs,
+            {"lr": 0.1},
+            {"lr": 0.1, "weight_decay": 0.05},
+            {"lr": 0.1, "weight_decay": 0.05, "foreach": True},
+            {
+                "lr": 0.1,
+                "betas": (0.6, 0.66),
+                "eps": 1e-6,
+                "weight_decay": 0.05,
+                "amsgrad": True,
+                "foreach": True,
+            },
+            {
+                "lr": 0.1,
+                "betas": (0.6, 0.66),
+                "eps": 1e-6,
+                "weight_decay": 0.05,
+                "maximize": True,
+                "amsgrad": True,
+                "foreach": True,
+            },
         ]
 
         for config in adamw_configs:
@@ -229,17 +165,16 @@ class TestDTensorOptimizer(DTensorTestBase):
         mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
 
         sgd_configs = [
-            {"lr": 0.1, "foreach": False},
-            {"lr": 0.1, "momentum": 0.05, "foreach": False},
+            {"lr": 0.1},
             {"lr": 0.1, "momentum": 0.05},
-            {"lr": 0.1, "momentum": 0.06, "dampening": 0.07},
+            {"lr": 0.1, "momentum": 0.05, "foreach": True},
+            {"lr": 0.1, "momentum": 0.06, "dampening": 0.07, "foreach": True},
             {
                 "lr": 0.1,
                 "momentum": 0.08,
                 "weight_decay": 0.05,
                 "nesterov": True,
                 "maximize": True,
-                "foreach": False,
             },
             {
                 "lr": 0.1,
@@ -247,6 +182,7 @@ class TestDTensorOptimizer(DTensorTestBase):
                 "weight_decay": 0.05,
                 "nesterov": True,
                 "maximize": True,
+                "foreach": True,
             },
         ]
 
@@ -269,15 +205,14 @@ class TestDTensorOptimizer(DTensorTestBase):
         mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
 
         adagrad_configs = [
-            {"lr": 0.1, "foreach": False},
-            {"lr": 0.1, "lr_decay": 0.05, "foreach": False},
-            {"lr": 0.1, "lr_decay": 0.02, "weight_decay": 0.05, "foreach": False},
+            {"lr": 0.1},
+            {"lr": 0.1, "lr_decay": 0.05},
+            {"lr": 0.1, "lr_decay": 0.02, "weight_decay": 0.05},
             {
                 "lr": 0.1,
                 "lr_decay": 0.02,
                 "weight_decay": 0.05,
                 "initial_accumulator_value": 0.03,
-                "foreach": False,
             },
             {
                 "lr": 0.1,
@@ -285,16 +220,6 @@ class TestDTensorOptimizer(DTensorTestBase):
                 "weight_decay": 0.05,
                 "initial_accumulator_value": 0.03,
                 "eps": 1e-6,
-                "foreach": False,
-            },
-            {
-                "lr": 0.1,
-                "lr_decay": 0.02,
-                "weight_decay": 0.05,
-                "initial_accumulator_value": 0.03,
-                "eps": 1e-6,
-                "maximize": True,
-                "foreach": False,
             },
             {
                 "lr": 0.1,
@@ -303,6 +228,15 @@ class TestDTensorOptimizer(DTensorTestBase):
                 "initial_accumulator_value": 0.03,
                 "eps": 1e-6,
                 "maximize": True,
+            },
+            {
+                "lr": 0.1,
+                "lr_decay": 0.02,
+                "weight_decay": 0.05,
+                "initial_accumulator_value": 0.03,
+                "eps": 1e-6,
+                "maximize": True,
+                "foreach": True,
             },
         ]
 
@@ -325,23 +259,16 @@ class TestDTensorOptimizer(DTensorTestBase):
         mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
 
         RMSprop_configs = [
-            {"lr": 0.1, "foreach": False},
-            {"lr": 0.1, "alpha": 0.85, "foreach": False},
-            {"lr": 0.1, "alpha": 0.88, "eps": 1e-6, "foreach": False},
-            {
-                "lr": 0.1,
-                "alpha": 0.88,
-                "eps": 1e-6,
-                "weight_decay": 0.05,
-                "foreach": False,
-            },
+            {"lr": 0.1},
+            {"lr": 0.1, "alpha": 0.85},
+            {"lr": 0.1, "alpha": 0.88, "eps": 1e-6},
+            {"lr": 0.1, "alpha": 0.88, "eps": 1e-6, "weight_decay": 0.05},
             {
                 "lr": 0.1,
                 "alpha": 0.88,
                 "eps": 1e-6,
                 "weight_decay": 0.05,
                 "momentum": 0.9,
-                "foreach": False,
             },
             {
                 "lr": 0.1,
@@ -350,7 +277,6 @@ class TestDTensorOptimizer(DTensorTestBase):
                 "weight_decay": 0.05,
                 "momentum": 0.9,
                 "centered": True,
-                "foreach": False,
             },
             {
                 "lr": 0.1,
@@ -360,7 +286,6 @@ class TestDTensorOptimizer(DTensorTestBase):
                 "momentum": 0.9,
                 "centered": True,
                 "maximize": True,
-                "foreach": False,
             },
             {
                 "lr": 0.1,
@@ -370,6 +295,7 @@ class TestDTensorOptimizer(DTensorTestBase):
                 "momentum": 0.9,
                 "centered": True,
                 "maximize": True,
+                "foreach": True,
             },
         ]
 
@@ -392,27 +318,23 @@ class TestDTensorOptimizer(DTensorTestBase):
         mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
 
         adadelta_configs = [
-            {"lr": 0.1, "foreach": False},
-            {"lr": 0.1, "rho": 0.85, "foreach": False},
-            {"lr": 0.1, "rho": 0.88, "eps": 1e-5, "foreach": False},
+            {"lr": 0.1},
+            {"lr": 0.1, "rho": 0.85},
+            {"lr": 0.1, "rho": 0.88, "eps": 1e-5},
+            {"lr": 0.1, "rho": 0.88, "eps": 1e-6, "weight_decay": 0.05},
             {
                 "lr": 0.1,
                 "rho": 0.88,
                 "eps": 1e-6,
                 "weight_decay": 0.05,
-                "foreach": False,
+                "foreach": True,
             },
             {
                 "lr": 0.1,
                 "rho": 0.88,
                 "eps": 1e-6,
                 "weight_decay": 0.05,
-            },
-            {
-                "lr": 0.1,
-                "rho": 0.88,
-                "eps": 1e-6,
-                "weight_decay": 0.05,
+                "foreach": True,
                 "maximize": True,
             },
         ]
@@ -436,14 +358,15 @@ class TestDTensorOptimizer(DTensorTestBase):
         mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
 
         nadam_configs = [
-            {"lr": 0.1, "foreach": False},
-            {"lr": 0.1, "weight_decay": 0.05, "foreach": False},
+            {"lr": 0.1},
             {"lr": 0.1, "weight_decay": 0.05},
+            {"lr": 0.1, "weight_decay": 0.05, "foreach": True},
             {
                 "lr": 0.1,
                 "betas": (0.6, 0.66),
                 "eps": 1e-6,
                 "weight_decay": 0.05,
+                "foreach": True,
             },
             {
                 "lr": 0.1,
@@ -451,6 +374,7 @@ class TestDTensorOptimizer(DTensorTestBase):
                 "eps": 1e-6,
                 "weight_decay": 0.05,
                 "decoupled_weight_decay": True,
+                "foreach": True,
             },
         ]
 
@@ -473,17 +397,15 @@ class TestDTensorOptimizer(DTensorTestBase):
         mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
 
         radam_configs = [
-            {"lr": 0.1, "foreach": False},
-            {"lr": 0.1, "weight_decay": 0.05, "foreach": False},
-            {
-                "lr": 0.1,
-                "weight_decay": 0.05,
-            },
+            {"lr": 0.1},
+            {"lr": 0.1, "weight_decay": 0.05},
+            {"lr": 0.1, "weight_decay": 0.05, "foreach": True},
             {
                 "lr": 0.1,
                 "betas": (0.6, 0.66),
                 "eps": 1e-6,
                 "weight_decay": 0.05,
+                "foreach": True,
             },
             {
                 "lr": 0.1,
@@ -491,6 +413,7 @@ class TestDTensorOptimizer(DTensorTestBase):
                 "eps": 1e-6,
                 "weight_decay": 0.05,
                 "decoupled_weight_decay": True,
+                "foreach": True,
             },
         ]
 
@@ -513,27 +436,23 @@ class TestDTensorOptimizer(DTensorTestBase):
         mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
 
         adamax_configs = [
-            {"lr": 0.1, "foreach": False},
-            {"lr": 0.1, "betas": (0.6, 0.66), "foreach": False},
-            {"lr": 0.1, "betas": (0.6, 0.66), "eps": 1e-6, "foreach": False},
+            {"lr": 0.1},
+            {"lr": 0.1, "betas": (0.6, 0.66)},
+            {"lr": 0.1, "betas": (0.6, 0.66), "eps": 1e-6},
+            {"lr": 0.1, "betas": (0.6, 0.66), "eps": 1e-6, "weight_decay": 0.05},
             {
                 "lr": 0.1,
                 "betas": (0.6, 0.66),
                 "eps": 1e-6,
                 "weight_decay": 0.05,
-                "foreach": False,
+                "foreach": True,
             },
             {
                 "lr": 0.1,
                 "betas": (0.6, 0.66),
                 "eps": 1e-6,
                 "weight_decay": 0.05,
-            },
-            {
-                "lr": 0.1,
-                "betas": (0.6, 0.66),
-                "eps": 1e-6,
-                "weight_decay": 0.05,
+                "foreach": True,
                 "maximize": True,
             },
         ]
@@ -557,18 +476,11 @@ class TestDTensorOptimizer(DTensorTestBase):
         mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
 
         asgd_configs = [
-            {"lr": 0.1, "foreach": False},
-            {"lr": 0.1, "lambd": 0.001, "foreach": False},
-            {"lr": 0.1, "lambd": 0.001, "alpha": 0.85, "foreach": False},
-            {"lr": 0.1, "lambd": 0.001, "alpha": 0.85, "t0": 1e5, "foreach": False},
-            {
-                "lr": 0.1,
-                "lambd": 0.001,
-                "alpha": 0.85,
-                "t0": 1e5,
-                "weight_decay": 0.05,
-                "foreach": False,
-            },
+            {"lr": 0.1},
+            {"lr": 0.1, "lambd": 0.001},
+            {"lr": 0.1, "lambd": 0.001, "alpha": 0.85},
+            {"lr": 0.1, "lambd": 0.001, "alpha": 0.85, "t0": 1e5},
+            {"lr": 0.1, "lambd": 0.001, "alpha": 0.85, "t0": 1e5, "weight_decay": 0.05},
             {
                 "lr": 0.1,
                 "lambd": 0.001,

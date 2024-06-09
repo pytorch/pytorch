@@ -55,7 +55,7 @@ class SourceRangeDeserializer {
 
 class SourceRangeUnpickler {
  public:
-  virtual std::optional<SourceRange> findSourceRangeThatGenerated(
+  virtual c10::optional<SourceRange> findSourceRangeThatGenerated(
       const SourceRange& range) = 0;
 
   virtual ~SourceRangeUnpickler() = default;

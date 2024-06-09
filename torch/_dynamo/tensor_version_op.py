@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 import torch
 from torch._prims import _make_prim, RETURN_TYPE
 from torch._subclasses import FakeTensorMode
@@ -14,13 +13,13 @@ _tensor_version = _make_prim(
 
 
 @_tensor_version.py_impl(FakeTensorMode)
-def _tensor_version_fake(fake_mode, self_tensor):
+def _tensor_version_fake(self):
     """
     The initial dynamo capture of _tensor_version + _unsafe_set_version_counter turns the
     `._version` into an unbacked SymInt so that we don't need to specialize on the `._version`
     of input tensors to the graph.
     """
-    return fake_mode.shape_env.create_unbacked_symint()
+    return self.fake_mode.shape_env.create_unbacked_symint()
 
 
 _unsafe_set_version_counter = _make_prim(
@@ -49,10 +48,10 @@ Note this is similar to how no_grad is handled.
 
 
 @_tensor_version.py_impl(FunctionalTensorMode)
-def _tensor_version_functional(mode, self):
+def _tensor_version_functional(self):
     return self._version
 
 
 @_unsafe_set_version_counter.py_impl(FunctionalTensorMode)
-def _unsafe_set_version_counter_functional(ctx, self, version):
+def _unsafe_set_version_counter_functional(self, version):
     torch._C._autograd._unsafe_set_version_counter(self, version)

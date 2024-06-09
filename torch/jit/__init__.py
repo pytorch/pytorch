@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 import warnings
 
 from contextlib import contextmanager
@@ -82,7 +81,6 @@ __all__ = [
     "export_opnames",
     "fork",
     "freeze",
-    "interface",
     "ignore",
     "isinstance",
     "load",
@@ -141,7 +139,7 @@ def annotate(the_type, the_value):
 
     Note that `annotate()` does not help in `__init__` method of `torch.nn.Module` subclasses because it
     is executed in eager mode. To annotate types of `torch.nn.Module` attributes,
-    use :meth:`~torch.jit.Attribute` instead.
+    use :meth:`~torch.jit.Annotate` instead.
 
     Example:
 

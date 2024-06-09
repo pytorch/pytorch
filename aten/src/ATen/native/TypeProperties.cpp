@@ -24,6 +24,10 @@
 
 namespace at::native {
 
+static bool is_cuda(const Tensor& self) {
+  return self.is_cuda();
+}
+
 bool is_distributed(const Tensor& self) {
   return false;
 }
@@ -54,6 +58,18 @@ bool is_conj(const Tensor& self) {
 
 bool is_neg(const Tensor& self) {
   return self.is_neg();
+}
+
+static bool is_sparse(const Tensor& self) {
+  return self.is_sparse();
+}
+
+static bool is_sparse_csr(const Tensor& self) {
+  return self.is_sparse_csr();
+}
+
+static bool is_quantized(const Tensor& self) {
+  return self.is_quantized();
 }
 
 // True if `self` and `from` have compatible tensor type so that `from`'s
@@ -175,8 +191,8 @@ ScalarType result_type(const Scalar& scalar1, const Scalar& scalar2) {
   return result_type(state);
 }
 
-bool can_cast(const at::ScalarType from_, const at::ScalarType to) {
-  return at::canCast(from_, to);
+bool can_cast(const at::ScalarType from, const at::ScalarType to) {
+  return at::canCast(from, to);
 }
 
 ScalarType promote_types(ScalarType type1, ScalarType type2) {

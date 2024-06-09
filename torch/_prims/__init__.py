@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 import contextlib
 import itertools
 import operator
@@ -13,7 +12,6 @@ import torch._prims_common as utils
 import torch.library
 from torch import sym_float, Tensor, TypedStorage
 from torch._C import _get_default_device
-from torch._library.utils import is_functional_schema
 from torch._prims.debug_prims import register_debug_prims
 from torch._prims.rng_prims import register_rng_prims
 from torch._prims_common import (
@@ -273,12 +271,13 @@ def _make_prim(
     impl_aten: Callable,
     doc: str,
     tags: Optional[Sequence[torch.Tag]] = None,
-    use_old_custom_ops_api: bool = False,
 ):
     """
     Creates a primitive operation.
 
     """
+
+    prim.define(schema, tags=torch.Tag.pt2_compliant_tag)
 
     def _prim_impl(*args, **kwargs):
         # always run the meta function because aten implementation will
@@ -303,27 +302,9 @@ def _make_prim(
             return _prim_impl(*args, **kwargs)
 
     name = schema.split("(")[0]
-    schema = schema[len(name) :]
-
-    # register non-functional ops with old custom ops API
-    cpp_schema = torch._C.parse_schema(name + schema)
-    if use_old_custom_ops_api or not is_functional_schema(cpp_schema):
-        prim.define(name + schema, tags=torch.Tag.pt2_compliant_tag)
-        prim_impl.impl(name, _prim_impl)
-        prim_autograd_impl.impl(name, _autograd_impl)
-        prim_meta_impl.impl(name, meta)
-    else:
-        mutates_args = []
-        for arg in cpp_schema.arguments:
-            if arg.alias_info is not None and arg.alias_info.is_write:
-                mutates_args.append(arg.name)
-        prim_def = torch.library.custom_op(
-            "prims::" + name,
-            _prim_impl,
-            mutates_args=tuple(mutates_args),
-            schema=schema,
-        )
-        prim_def.register_fake(meta)
+    prim_impl.impl(name, _prim_impl)
+    prim_autograd_impl.impl(name, _autograd_impl)
+    prim_meta_impl.impl(name, meta)
 
     _prim_packet = getattr(torch._ops.ops.prims, name)
     _prim = _prim_packet.default
@@ -771,7 +752,7 @@ floor = _make_elementwise_unary_prim(
 )
 
 imag = _make_prim(
-    schema="imag(Tensor(a) self) -> Tensor(a)",
+    schema="imag(Tensor self) -> Tensor",
     meta=partial(
         _complex_only_elementwise_meta,
         type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.COMPLEX_TO_FLOAT,
@@ -824,7 +805,7 @@ log10 = _make_elementwise_unary_prim(
 )
 
 real = _make_prim(
-    schema="real(Tensor(a) self) -> Tensor(a)",
+    schema="real(Tensor self) -> Tensor",
     meta=partial(
         _complex_only_elementwise_meta,
         type_promotion=ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.COMPLEX_TO_FLOAT,
@@ -1385,10 +1366,7 @@ def _collapse_view_helper(
             continue
 
         length = length * shape[idx]
-        if guard_size_oblivious(stride < strides[idx]):
-            stride = stride
-        else:
-            stride = strides[idx]
+        stride = min(stride, strides[idx])
 
         if (
             guard_size_oblivious(a.numel() > 0)
@@ -1687,9 +1665,8 @@ def _split_dim_meta(a: TensorLikeType, dim: int, outer_length: int) -> TensorLik
     inner_length = a.shape[dim] // outer_length
 
     if (a.shape[dim] % outer_length) != 0:
-        msg = (
-            f"Attempting to split dimension of length {a.shape[dim]}, "
-            f"but outer length of {outer_length} divides it with a remainder!"
+        msg = "Attempting to split dimension of length {}, but outer length of {} divides it with a remainder!".format(
+            a.shape[dim], outer_length
         )
         raise ValueError(msg)
 
@@ -1767,7 +1744,9 @@ squeeze = _make_prim(
 
 def _transpose_meta(a: TensorLikeType, permutation: DimsSequenceType) -> TensorLikeType:
     if a.ndim != len(permutation):
-        msg = f"Attempting to permute a tensor of rank {a.ndim}, but received a permutation of length {len(permutation)}!"
+        msg = "Attempting to permute a tensor of rank {}, but received a permutation of length {}!".format(
+            a.ndim, len(permutation)
+        )
         raise ValueError(msg)
 
     if not utils.is_valid_permutation(a.ndim, permutation):
@@ -1817,7 +1796,7 @@ _view_of_doc = """
     """
 
 view_of = _make_prim(
-    schema="view_of(Tensor(a) a) -> Tensor(a)",
+    schema="view_of(Tensor(a) a) -> Tensor",
     meta=_view_of_meta,
     impl_aten=_view_of_aten,
     return_type=RETURN_TYPE.VIEW,
@@ -1838,7 +1817,7 @@ _view_element_type_doc = """
     """
 
 view_element_type = _make_prim(
-    schema="view_of_dtype(Tensor(a) a, ScalarType dtype) -> Tensor(a)",
+    schema="view_of_dtype(Tensor(a) a, ScalarType dtype) -> Tensor",
     meta=_view_element_type_meta,
     impl_aten=_view_element_type_aten,
     return_type=RETURN_TYPE.VIEW,
@@ -2338,7 +2317,7 @@ def _reduction_meta(inp, dims, *, output_dtype=None):
     )
 
 
-def _var_reduction_meta(inp, dims, correction):
+def _var_reduction_meta(inp, dims, *, correction):
     if utils.is_complex_dtype(inp.dtype):
         output_dtype = utils.corresponding_real_dtype(inp.dtype)
     else:
@@ -2385,7 +2364,7 @@ def _make_reduction_prim(name: str, impl_aten, doc):
 def _make_var_reduction_prim(name: str, impl_aten, doc):
     """Creates a reduction prim."""
     return _make_prim(
-        schema=f"{name}(Tensor inp, int[]? dims, float? correction=1, *, ScalarType? output_dtype=None) -> Tensor",
+        schema=f"{name}(Tensor inp, int[]? dims, *, float correction, ScalarType? output_dtype=None) -> Tensor",
         meta=_var_reduction_meta,
         impl_aten=impl_aten,
         return_type=RETURN_TYPE.NEW,
@@ -2423,8 +2402,6 @@ def _prod_aten(
     dtype: Optional[torch.dtype] = None,
 ) -> Tensor:
     if dims is not None:
-        if len(dims) == 0:
-            return inp.clone()
         for d in sorted(dims, reverse=True):
             assert d >= 0
             inp = torch.prod(inp, d, dtype=dtype)
@@ -2439,15 +2416,9 @@ prod = _make_reduction_prim(
     doc=_prod_doc,
 )
 
-
-# torch.var, but correction is not kwarg-only
-def torch_var(input, dim=None, correction=1, **kwargs):
-    return torch.var(input, dim=dim, correction=correction, **kwargs)
-
-
 var = _make_var_reduction_prim(
     name="var",
-    impl_aten=torch_var,
+    impl_aten=torch.var,
     doc=_var_doc,
 )
 

@@ -96,18 +96,15 @@ class TestOptimizations(torch._dynamo.test_case.TestCase):
         self.assertTrue(same(r1, r2))
         self.assertTrue(same(r1, r3))
 
-    def _check_backend_works(self, backend, options=None):
+    def _check_backend_works(self, backend):
         model = Seq().eval()
         input = torch.randn(2, 10)
         r1 = model(input)
-        r2 = torch.compile(model, backend=backend, options=options)(input)
+        r2 = torch.compile(model, backend=backend)(input)
         self.assertTrue(same(r1, r2.float(), tol=0.01))
 
     def test_eager(self):
         self._check_backend_works("eager")
-
-    def test_eager_noexcept(self):
-        self._check_backend_works("eager_noexcept")
 
     @_force_skip_lazy_graph_module()
     def test_torchscript(self):
@@ -134,7 +131,6 @@ class TestOptimizations(torch._dynamo.test_case.TestCase):
     @unittest.skipIf(not has_tvm(), "requires tvm")
     def test_tvm(self):
         self._check_backend_works("tvm")
-        self._check_backend_works("tvm", options={"scheduler": None})
 
     def test_list_backends(self):
         self.assertIn("inductor", torch._dynamo.list_backends())

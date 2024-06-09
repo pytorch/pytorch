@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 from __future__ import annotations
 
 import os
@@ -57,10 +56,6 @@ class LoweringException(OperatorIssue):
         super().__init__(
             f"{type(exc).__name__}: {exc}\n{self.operator_str(target, args, kwargs)}"
         )
-
-
-class SubgraphLoweringException(RuntimeError):
-    pass
 
 
 class InvalidCxxCompiler(RuntimeError):

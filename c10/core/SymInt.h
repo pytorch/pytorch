@@ -229,7 +229,7 @@ class C10_API SymInt {
     return data_;
   }
 
-  std::optional<int64_t> maybe_as_int() const {
+  c10::optional<int64_t> maybe_as_int() const {
     if (!is_heap_allocated()) {
       return c10::make_optional(data_);
     }

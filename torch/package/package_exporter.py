@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 import collections
 import importlib.machinery
 import io
@@ -167,7 +166,7 @@ class PackagingError(Exception):
                 if debug:
                     module_path = dependency_graph.first_path(module_name)
                     message.write(
-                        f"      A path to {module_name}: {' -> '.join(module_path)}\n"
+                        f"      A path to {module_name}: {' -> '.join(module_path)}"
                     )
         if not debug:
             message.write("\n")
@@ -706,9 +705,9 @@ class PackageExporter:
                 """ If an object happens to come from a mocked module, then we collect these errors and spit them
                     out with the other errors found by package exporter.
                 """
-                if module_name in mocked_modules:
-                    assert isinstance(module_name, str)
-                    fields = mocked_modules[module_name]
+                if module in mocked_modules:
+                    assert isinstance(module, str)
+                    fields = mocked_modules[module]
                     self.dependency_graph.add_node(
                         module_name,
                         action=_ModuleProviderAction.MOCK,
@@ -950,7 +949,7 @@ class PackageExporter:
             if _gate_torchscript_serialization and isinstance(
                 obj, torch.jit.RecursiveScriptModule
             ):
-                raise Exception(  # noqa: TRY002
+                raise Exception(
                     "Serializing ScriptModules directly into a package is a beta feature. "
                     "To use, set global "
                     "`torch.package.package_exporter._gate_torchscript_serialization` to `False`."

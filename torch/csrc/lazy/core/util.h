@@ -89,7 +89,7 @@ class MaybeRef {
   }
 
  private:
-  std::optional<T> storage_;
+  c10::optional<T> storage_;
   const T& ref_;
 };
 
@@ -109,7 +109,7 @@ std::vector<T> ToVector(const S& input) {
 }
 
 template <typename T>
-std::optional<std::vector<T>> ToOptionalVector(
+c10::optional<std::vector<T>> ToOptionalVector(
     c10::OptionalArrayRef<T> arrayRef) {
   if (arrayRef) {
     return arrayRef->vec();

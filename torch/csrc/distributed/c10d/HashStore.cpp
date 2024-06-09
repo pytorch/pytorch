@@ -1,9 +1,12 @@
 #include <torch/csrc/distributed/c10d/HashStore.hpp>
 
 #include <unistd.h>
+#include <cerrno>
 #include <cstdint>
 
 #include <chrono>
+#include <cstdio>
+#include <system_error>
 
 #include <c10/util/Exception.h>
 
@@ -97,7 +100,7 @@ int64_t HashStore::add(const std::string& key, int64_t i) {
 
 int64_t HashStore::getNumKeys() {
   std::unique_lock<std::mutex> lock(m_);
-  return static_cast<int64_t>(map_.size());
+  return map_.size();
 }
 
 bool HashStore::deleteKey(const std::string& key) {

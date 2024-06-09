@@ -87,7 +87,7 @@ struct TORCH_API GraphExecutor {
   // current global fusion strategy settings.
   const ExecutionPlan& getPlanFor(
       Stack& inputs,
-      std::optional<size_t> remaining_bailout_depth = c10::nullopt);
+      c10::optional<size_t> remaining_bailout_depth = c10::nullopt);
   GraphExecutorState getDebugState();
 
   void debugFlushCompilationCache();

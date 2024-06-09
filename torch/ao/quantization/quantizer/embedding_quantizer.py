@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 from __future__ import annotations
 
 import copy
@@ -46,9 +45,9 @@ class EmbeddingQuantizer(Quantizer):
 
     @classmethod
     def get_supported_quantization_configs(cls) -> List[QuantizationConfig]:
-        op_configs: Set[QuantizationConfig] = {
-            spec for spec, _ in cls.get_supported_operators()
-        }
+        op_configs: Set[QuantizationConfig] = set({})
+        for spec, _ in cls.get_supported_operators():
+            op_configs.add(spec)
         return list(op_configs)
 
     @classmethod

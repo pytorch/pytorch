@@ -61,7 +61,7 @@ void buildParamsMapFromValueToParamsMap(
   }
 }
 
-std::optional<at::ScalarType> ONNXTypeToATenType(int32_t onnx_type) {
+c10::optional<at::ScalarType> ONNXTypeToATenType(int32_t onnx_type) {
   switch (onnx_type) {
     case ::ONNX_NAMESPACE::TensorProto_DataType_UNDEFINED:
       return at::ScalarType::Undefined;
@@ -104,7 +104,7 @@ std::optional<at::ScalarType> ONNXTypeToATenType(int32_t onnx_type) {
           onnx_type,
           " is an unexpected tensor scalar type");
   }
-  return std::optional<at::ScalarType>{};
+  return c10::optional<at::ScalarType>{};
 }
 
 Node* addNodeToBlock(Block* block, Symbol kind, ArrayRef<Value*> inputs) {

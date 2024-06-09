@@ -22,7 +22,6 @@ class LazyCache:
 
         tx = InstructionTranslator.current_tx()
         self.vt = VariableBuilder(tx, self.source)(self.value)
-
         del self.value
         del self.source
 

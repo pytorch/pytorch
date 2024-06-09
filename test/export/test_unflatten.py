@@ -1,6 +1,5 @@
 # Owner(s): ["oncall: export"]
 # flake8: noqa
-import copy
 import dataclasses
 import unittest
 from contextlib import contextmanager
@@ -10,7 +9,6 @@ from typing import Any, List
 
 import torch
 import torch._dynamo as torchdynamo
-
 from functorch.experimental.control_flow import cond, map
 from torch import Tensor
 from torch._export.utils import (
@@ -42,8 +40,6 @@ from torch.testing._internal.common_utils import (
     skipIfTorchDynamo,
     TestCase,
 )
-
-from torch.testing._internal.torchbind_impls import init_torchbind_implementations
 from torch.utils._pytree import (
     LeafSpec,
     tree_flatten,
@@ -565,20 +561,18 @@ class TestUnflatten(TestCase):
 
     @skipIfTorchDynamo("custom objects not supported in dynamo yet")
     def test_unflatten_constant_obj(self):
-        init_torchbind_implementations()
-
-        @torch._library.register_fake_class("_TorchScriptTesting::_Foo")
-        class FakeFoo:
-            def __init__(self, x: int, y: int):
-                self.x = x
-                self.y = y
-
-            @classmethod
-            def __obj_unflatten__(cls, flat_ctx):
-                return cls(**dict(flat_ctx))
-
-            def add_tensor(self, z):
-                return (self.x + self.y) * z
+        if IS_MACOS:
+            raise unittest.SkipTest("non-portable load_library call used in test")
+        elif IS_SANDCASTLE or IS_FBCODE:
+            torch.ops.load_library(
+                "//caffe2/test/cpp/jit:test_custom_class_registrations"
+            )
+        elif IS_WINDOWS:
+            lib_file_path = find_library_location("torchbind_test.dll")
+            torch.ops.load_library(str(lib_file_path))
+        else:
+            lib_file_path = find_library_location("libtorchbind_test.so")
+            torch.ops.load_library(str(lib_file_path))
 
         class SubMod(torch.nn.Module):
             def __init__(self):
@@ -676,98 +670,6 @@ class TestUnflatten(TestCase):
             [x for x, _ in mod.named_modules(remove_duplicate=False)],
             fqn_list,
         )
-
-    def test_duplicate_placeholder(self):
-        N, C, H, W = 1, 2, 2, 3
-
-        class MyModule(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                layer = torch.nn.LayerNorm([C, H, W])
-                self.norms = torch.nn.ModuleList(
-                    [
-                        layer,  # reuse layer norm
-                        layer,
-                        layer,
-                    ]
-                )
-
-            def forward(self, input_):
-                for i in range(len(self.norms)):
-                    output = self.norms[i](input_)
-                    input_ = output
-                return output
-
-        mod = MyModule()
-        input_ = torch.randn(N, C, H, W)
-
-        ep_strict = export(copy.deepcopy(mod), (input_,), strict=True)
-        umod = unflatten(ep_strict)
-        self.assertTrue(torch.allclose(umod(input_), mod(input_)))
-
-        ep_non_strict = export(copy.deepcopy(mod), (input_,), strict=False)
-        umod = unflatten(ep_non_strict)
-        self.assertTrue(torch.allclose(umod(input_), mod(input_)))
-
-    def test_simple_alias(self):
-        # handle weight sharing, check tensor ids after unflattening
-        class Foo(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                # alias param
-                self.bias = torch.nn.Parameter(torch.randn(4))
-                self.m = torch.nn.Linear(4, 4)
-                self.m.bias = self.bias
-
-            def forward(self, x):
-                return self.m(x) + self.bias
-
-        m = Foo()
-        inps = (torch.randn(4, 4),)
-        ep = export(m, inps)
-        unep = unflatten(ep)
-        self.assertTrue(id(unep.m.bias) == id(unep.bias))
-
-        # handle aliasing where one alias is unused
-        class Foo(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.bias = torch.nn.Parameter(torch.randn(4))
-                self.m = torch.nn.Linear(4, 4)
-                self.m.bias = (
-                    self.bias
-                )  # self.bias is unused, aliasing should be handled
-
-            def forward(self, x):
-                return self.m(x)
-
-        m = Foo()
-        inps = (torch.randn(4, 4),)
-        ep = export(m, inps)
-        unep = unflatten(ep)
-        self.assertTrue(torch.allclose(unep(*inps), m(*inps)))
-
-    def test_attr_as_submod_input(self):
-        class layer(torch.nn.Module):
-            def forward(self, x, const) -> torch.Tensor:
-                return x + const
-
-        class M(torch.nn.Module):
-            def __init__(self) -> None:
-                super().__init__()
-                self.register_buffer("const", torch.ones(4, 8))
-                self.layers = torch.nn.ModuleList([layer() for _ in range(2)])
-
-            def forward(self, x: torch.Tensor) -> torch.Tensor:
-                for layer in self.layers:
-                    x = layer(x, self.const)
-                return x
-
-        mod = M()
-        x = torch.randn(4, 8)
-        ep = export(mod, (x,))
-        unflattened = unflatten(ep)
-        torch.testing.assert_close(unflattened(x), mod(x))
 
 
 if __name__ == "__main__":

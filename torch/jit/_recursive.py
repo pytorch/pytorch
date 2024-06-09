@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 import collections
 import functools
 import inspect
@@ -825,12 +824,16 @@ def check_module_initialized(mod):
         for name, param in mod._parameters.items():
             if param is not None and torch.nn.parameter.is_lazy(param):
                 raise RuntimeError(
-                    f"'{torch.typename(type(mod))}' has uninitialized parameters {name}. Did you forget to run a forward pass?"
+                    "'{}' has uninitialized parameters {}. Did you forget to run a forward pass?".format(
+                        torch.typename(type(mod)), name
+                    )
                 )
         for name, buf in mod._buffers.items():
             if buf is not None and torch.nn.parameter.is_lazy(buf):
                 raise RuntimeError(
-                    f"'{torch.typename(type(mod))}' has uninitialized buffers {name}. Did you forget to run a forward pass?"
+                    "'{}' has uninitialized buffers {}. Did you forget to run a forward pass?".format(
+                        torch.typename(type(mod)), name
+                    )
                 )
 
 

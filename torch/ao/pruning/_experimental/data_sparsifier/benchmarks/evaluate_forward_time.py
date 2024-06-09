@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 from typing import Dict, List
 import torch
 from dlrm_s_pytorch import unpack_batch  # type: ignore[import]

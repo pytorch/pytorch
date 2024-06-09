@@ -1,8 +1,7 @@
 #pragma once
 
 #include <ATen/ATen.h>
-#include <chrono>
-#include <mutex>
+#include <stdexcept>
 #include <vector>
 
 constexpr auto kNoTimeout = std::chrono::milliseconds(0);
@@ -50,7 +49,7 @@ class TORCH_API Work : public torch::CustomClassHolder {
       int rank = -1,
       OpType opType = OpType::UNKNOWN,
       const char* profilingTitle = nullptr,
-      const std::optional<std::vector<at::Tensor>>& inputTensors =
+      const c10::optional<std::vector<at::Tensor>>& inputTensors =
           c10::nullopt);
 
   ~Work() override;

@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 # mypy: disable-error-code="method-assign"
 
 import copy
@@ -283,7 +282,7 @@ def helper_for_dump_minify(contents):
             fd.write(contents)
 
     except OSError as e:
-        log.exception("")
+        log.exception(e)
         raise NotImplementedError("Could not write to {minified_repro_path}") from e
 
 
@@ -361,7 +360,7 @@ def same_two_models(
             fp64_ref = run_fwd_maybe_bwd(fp64_model, fp64_examples, only_fwd)
         except Exception:
             if require_fp64:
-                raise RuntimeError("Could not generate fp64 outputs")  # noqa: B904
+                raise RuntimeError("Could not generate fp64 outputs")  # noqa: TRY200
             log.warning("Could not generate fp64 outputs")
 
     try:

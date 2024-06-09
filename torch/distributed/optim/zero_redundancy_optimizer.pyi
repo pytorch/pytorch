@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 import enum
 from typing import Any, Callable, Dict, List, Optional, overload, Set, Type
 

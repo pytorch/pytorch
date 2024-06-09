@@ -4,6 +4,11 @@ set -ex
 
 install_ubuntu() {
   apt-get update
+  apt-get install -y --no-install-recommends \
+          libhiredis-dev \
+          libleveldb-dev \
+          liblmdb-dev \
+          libsnappy-dev
 
   # Cleanup
   apt-get autoclean && apt-get clean
@@ -14,6 +19,12 @@ install_centos() {
   # Need EPEL for many packages we depend on.
   # See http://fedoraproject.org/wiki/EPEL
   yum --enablerepo=extras install -y epel-release
+
+  yum install -y \
+      hiredis-devel \
+      leveldb-devel \
+      lmdb-devel \
+      snappy-devel
 
   # Cleanup
   yum clean all

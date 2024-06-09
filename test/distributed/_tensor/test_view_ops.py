@@ -11,9 +11,9 @@ from torch.distributed._tensor import DeviceMesh, distribute_tensor, Replicate, 
 from torch.distributed._tensor.debug import CommDebugMode
 from torch.distributed._tensor.ops.view_ops import (
     Broadcast,
-    dim_maps,
     Flatten,
     InputDim,
+    ops,
     Repeat,
     Singleton,
     Split,
@@ -130,8 +130,8 @@ class TestViewOps(DTensorTestBase):
         return 6
 
     def call_dt_test(self, op, args, kwargs, device_mesh: DeviceMesh):
-        dim_map = dim_maps[op]
-        rules = dim_map(*args, **kwargs)
+        spec = ops[op]
+        rules = spec.dim_map(*args, **kwargs)
         outputs = op(*args, **kwargs)
         flat_args = pytree.arg_tree_leaves(*args)
         in_shape = flat_args[0].shape
@@ -163,6 +163,7 @@ class TestViewOps(DTensorTestBase):
         )
 
         for in_shard in all_sharding_choices:
+            # print(f'   |--- {in_shard}')
             in_dt = distribute_tensor(args[0], device_mesh, in_shard)
 
             comm_mode = CommDebugMode()
@@ -179,7 +180,7 @@ class TestViewOps(DTensorTestBase):
                 self.assertEqual(outputs, full_out)
 
     def dimmap_test(self, op, args, expected_rule_output):
-        rules = dim_maps[op](*args)
+        rules = ops[op].dim_map(*args)
         self.assertEqual(rules, expected_rule_output)
         self.call_dt_test(op, args, {}, self.device_mesh)
 
@@ -228,7 +229,7 @@ class TestViewOps(DTensorTestBase):
         )
 
         with self.assertRaises(AssertionError):
-            dim_maps[torch.broadcast_to](randn(24, 36), (1, 2, 4))
+            ops[torch.broadcast_to].dim_map(randn(24, 36), (1, 2, 4))
 
         self.dimmap_test(
             torch.broadcast_to,
@@ -494,14 +495,14 @@ class TestViewOps(DTensorTestBase):
             InputDim(0),
             Flatten((InputDim(1), InputDim(2))),
         )
-        view_as_complex_rule = dim_maps[torch.view_as_complex](inp)
+        view_as_complex_rule = ops[torch.view_as_complex].dim_map(inp)
         self.assertEqual(view_as_complex_rule, expected_view_as_complex_rule)
         expected_view_as_real_rule = (
             InputDim(0),
             Split(InputDim(1), (13, 2), 0),
             Split(InputDim(1), (13, 2), 1),
         )
-        view_as_real_rule = dim_maps[torch.view_as_real](intermediate)
+        view_as_real_rule = ops[torch.view_as_real].dim_map(intermediate)
         self.assertEqual(view_as_real_rule, expected_view_as_real_rule)
 
         # test sharded computation correctness

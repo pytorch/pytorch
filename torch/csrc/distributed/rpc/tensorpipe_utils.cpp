@@ -38,7 +38,7 @@ inline c10::Device indexToDevice(c10::DeviceIndex index) {
 
 class TensorpipeCpuConverter : public TensorpipeDeviceTypeConverter {
  public:
-  std::optional<std::vector<char>> prepareTensorForSending(
+  c10::optional<std::vector<char>> prepareTensorForSending(
       const c10::Storage& storage,
       const std::vector<c10::Stream>& /* streams */,
       tensorpipe::Message& message) const override {
@@ -192,7 +192,7 @@ std::tuple<tensorpipe::Message, TensorpipeWriteBuffers> tensorpipeSerialize(
         tensor.device());
 
     TORCH_INTERNAL_ASSERT(tpMessage.tensors.size() == i);
-    std::optional<std::vector<char>> maybeCopiedTensor =
+    c10::optional<std::vector<char>> maybeCopiedTensor =
         converter->prepareTensorForSending(
             tensor.storage(), streams, tpMessage);
     TORCH_INTERNAL_ASSERT(tpMessage.tensors.size() == i + 1);

@@ -86,7 +86,6 @@ TORCH_API void ONNXShapeTypeInference(
     const ParamMap& params_dict,
     int opset_version);
 
-bool AllGraphInputsStatic(const Graph* g);
 std::pair<bool, bool> AreInputsReliableOrStatic(Node* n);
 void UpdateReliable(
     torch::jit::Value* output,

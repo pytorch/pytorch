@@ -150,7 +150,7 @@ void CommTraceLogger::recordComms(
   // record the trace to kineto trace if applicable
   RECORD_PARAM_COMMS(
       static_cast<int64_t>(seqnum), // seq
-      std::make_tuple("0", ""), // pg_name tuple
+      0, // process group ptr
       rank,
       commName.c_str(),
       inNelems,

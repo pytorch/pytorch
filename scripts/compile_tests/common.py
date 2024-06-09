@@ -14,6 +14,7 @@ except ImportError:
     warnings.warn(
         "lxml was not found. `pip install lxml` to make this script run much faster"
     )
+from download_reports import download_reports
 
 
 def open_test_results(directory):

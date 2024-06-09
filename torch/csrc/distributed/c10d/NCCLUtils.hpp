@@ -173,16 +173,16 @@
 namespace c10d {
 
 TORCH_API size_t hashTensors(const std::vector<at::Tensor>& tensors);
-TORCH_API std::string getNcclVersion();
-TORCH_API std::string ncclGetErrorWithVersion(ncclResult_t error);
+std::string getNcclVersion();
+std::string ncclGetErrorWithVersion(ncclResult_t error);
 bool nccl_use_nonblocking();
 int nccl_nonblocking_timeout();
 
 // Provides additional detail into NCCL error codes based on when these are
 // thrown in the NCCL codebase.
-TORCH_API std::string getNcclErrorDetailStr(
+std::string getNcclErrorDetailStr(
     ncclResult_t error,
-    std::optional<std::string> processGroupFailureReason = c10::nullopt);
+    c10::optional<std::string> processGroupFailureReason = c10::nullopt);
 
 // Write NCCL debug info to local disk or any storage users define.
 // There are some constrains we set for the debug info writer:
@@ -286,14 +286,24 @@ class NCCLComm {
   }
 #endif
 
+#ifdef NCCL_HAS_COMM_SPLIT
   static std::shared_ptr<NCCLComm> split(
       NCCLComm* source,
       int color_id,
       int rank,
-      ncclConfig_t& config,
-      std::vector<uint64_t>& ranks_ull);
+      ncclConfig_t& config) {
+    auto comm = std::make_shared<NCCLComm>();
+    C10D_NCCL_CHECK(
+        ncclCommSplit(
+            source->ncclComm_, color_id, rank, &(comm->ncclComm_), &config),
+        c10::nullopt);
+    ++source->ncclCommSplitCounter_;
+    comm->rank_ = rank;
+    return comm;
+  }
+#endif
 
-#if defined(IS_NCCLX) && defined(NCCL_COMM_DUMP)
+#if defined(IS_NCCL_EXP) && defined(NCCL_COMM_DUMP)
   std::unordered_map<std::string, std::string> ncclCommDump() {
     std::unordered_map<std::string, std::string> dump;
     if (isAborted()) {
@@ -329,13 +339,13 @@ class NCCLComm {
 
   ncclComm_t getNcclComm();
 
-  std::optional<std::string> getNcclCommFailureReason() const {
+  c10::optional<std::string> getNcclCommFailureReason() const {
     std::unique_lock<std::mutex> lock(mutex_);
     return commFailureReason_;
   }
 
   void ncclCommAbort(
-      std::optional<std::string> commFailureReason = c10::nullopt) {
+      c10::optional<std::string> commFailureReason = c10::nullopt) {
     std::unique_lock<std::mutex> lock(mutex_);
 #ifdef ENABLE_NCCL_ERROR_CHECKING
     if (aborted_) {
@@ -481,7 +491,7 @@ class NCCLComm {
   int rank_;
   // Optional reason for communicator failure, provided by ProcessGroupNCCL for
   // better error messaging.
-  std::optional<std::string> commFailureReason_;
+  c10::optional<std::string> commFailureReason_;
   bool initialized_{false};
 #ifdef NCCL_HAS_COMM_REGISTER
   // Stores handlers for tensors registered by NCCL

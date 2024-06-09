@@ -48,8 +48,8 @@ static bool insertableIValue(const IValue& ivalue) {
 Value* insertConstant(
     Graph& g,
     const IValue& val,
-    std::optional<SourceRange> loc,
-    std::optional<ScopePtr> scope) {
+    c10::optional<SourceRange> loc,
+    c10::optional<ScopePtr> scope) {
   auto value = tryInsertConstant(g, val, std::move(loc), std::move(scope));
   if (value) {
     return *value;
@@ -59,11 +59,11 @@ Value* insertConstant(
 }
 
 // IValue -> Constant node
-std::optional<Value*> tryInsertConstant(
+c10::optional<Value*> tryInsertConstant(
     Graph& g,
     const IValue& val,
-    std::optional<SourceRange> loc,
-    std::optional<ScopePtr> scope) {
+    c10::optional<SourceRange> loc,
+    c10::optional<ScopePtr> scope) {
   Node* n = g.create(prim::Constant);
   if (val.isTensor()) {
     at::Tensor ref = val.toTensor();
@@ -153,7 +153,7 @@ std::optional<Value*> tryInsertConstant(
   return g.insertNode(n)->output();
 }
 
-std::optional<IValue> toIValue(const Value* v) {
+c10::optional<IValue> toIValue(const Value* v) {
   if (v->node()->kind() != prim::Constant || v->type()->cast<FunctionType>()) {
     return c10::nullopt;
   }

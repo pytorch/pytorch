@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 import dataclasses
 import itertools
 import operator
@@ -22,9 +21,8 @@ from torch.ao.quantization.quantizer import (
 from .utils import (
     _conv1d_bn_example_inputs,
     _conv2d_bn_example_inputs,
+    _is_conv_node,
     _is_bn_node,
-    _is_conv_or_conv_transpose_node,
-    _is_conv_transpose_fn,
     fold_bn_weights_into_conv_node,
     _get_aten_graph_module_for_pattern,
 )
@@ -59,7 +57,6 @@ _quantized_conv2d_bn_example_inputs = (
 def _get_quantized_conv_bn_example_inputs_kwargs(
     is_per_channel: bool,
     has_bias: bool,
-    bias_is_quantized: bool,
     is_cuda: bool,
 ) -> Dict[str, Any]:
     """
@@ -70,11 +67,8 @@ def _get_quantized_conv_bn_example_inputs_kwargs(
     # Per tensor quantization uses literals to represent scale and zero
     # point, so there is no need to include them here as kwargs
     if is_per_channel:
-        kwargs["weight_scale"] = torch.tensor([1], dtype=torch.float)
-        kwargs["weight_zero_point"] = torch.tensor([0], dtype=torch.int)
-        if has_bias and bias_is_quantized:
-            kwargs["bias_scale"] = torch.tensor([1], dtype=torch.float)
-            kwargs["bias_zero_point"] = torch.tensor([0], dtype=torch.int)
+        kwargs["scale"] = torch.tensor([1], dtype=torch.float)
+        kwargs["zero_point"] = torch.tensor([0], dtype=torch.int)
     if has_bias:
         kwargs["conv_bias"] = torch.randn(1)
     if is_cuda:
@@ -119,8 +113,7 @@ def _get_qat_conv_bn_pattern(conv_fn: Callable) -> Callable:
         running_std = torch.sqrt(bn_running_var + bn_eps)
         scale_factor = bn_weight / running_std
         weight_shape = [1] * len(conv_weight.shape)
-        weight_in_channel_axis = 1 if _is_conv_transpose_fn(conv_fn) else 0
-        weight_shape[weight_in_channel_axis] = -1
+        weight_shape[0] = -1
         bias_shape = [1] * len(conv_weight.shape)
         bias_shape[1] = -1
         scaled_weight = conv_weight * scale_factor.reshape(weight_shape)
@@ -151,8 +144,7 @@ def _get_qat_conv_bn_pattern_no_conv_bias(conv_fn: Callable) -> Callable:
         running_std = torch.sqrt(bn_running_var + bn_eps)
         scale_factor = bn_weight / running_std
         weight_shape = [1] * len(conv_weight.shape)
-        weight_in_channel_axis = 1 if _is_conv_transpose_fn(conv_fn) else 0
-        weight_shape[weight_in_channel_axis] = -1
+        weight_shape[0] = -1
         bias_shape = [1] * len(conv_weight.shape)
         bias_shape[1] = -1
         scaled_weight = conv_weight * scale_factor.reshape(weight_shape)
@@ -162,7 +154,7 @@ def _get_qat_conv_bn_pattern_no_conv_bias(conv_fn: Callable) -> Callable:
         return x
     return _WrapperModule(_qat_conv_bn_pattern_no_conv_bias)
 
-def _append_qdq(x, is_per_channel, is_bias, kwargs):
+def _append_qdq(x, is_per_channel, kwargs):
     """
     Helper function to append q-dq ops after `x`, using dummy values for the qparams
     and qmin/qmax. We use dummy values here because we match with `ignore_literals=True`
@@ -172,10 +164,8 @@ def _append_qdq(x, is_per_channel, is_bias, kwargs):
     """
     # Dummy args to be passed into q-dq ops
     per_channel_axis = 0
-    scale_key = "bias_scale" if is_bias else "weight_scale"
-    zp_key = "bias_zero_point" if is_bias else "weight_zero_point"
-    scale = kwargs[scale_key] if is_per_channel else 1.0
-    zp = kwargs[zp_key] if is_per_channel else 0
+    scale = kwargs["scale"] if is_per_channel else 1.0
+    zp = kwargs["zero_point"] if is_per_channel else 0
     qmin = -127
     qmax = 127
     dtype = torch.int8
@@ -222,15 +212,11 @@ def _get_quantized_qat_conv_bn_pattern(
         bias_shape = [1] * len(conv_weight.shape)
         bias_shape[1] = -1
         scaled_weight = conv_weight * scale_factor.reshape(weight_shape)
-        scaled_weight = _append_qdq(
-            scaled_weight, is_per_channel, is_bias=False, kwargs=kwargs,
-        )
+        scaled_weight = _append_qdq(scaled_weight, is_per_channel, kwargs)
         if has_bias:
             zero_bias = torch.zeros_like(kwargs["conv_bias"], dtype=x.dtype)
             if bias_is_quantized:
-                zero_bias = _append_qdq(
-                    zero_bias, is_per_channel, is_bias=True, kwargs=kwargs,
-                )
+                zero_bias = _append_qdq(zero_bias, is_per_channel, kwargs)
             x = conv_fn(x, scaled_weight, zero_bias)
         else:
             x = conv_fn(x, scaled_weight, None)
@@ -263,15 +249,11 @@ def _get_folded_quantized_qat_conv_bn_pattern(
         bn_running_var: torch.Tensor,
         **kwargs,
     ) -> torch.Tensor:
-        conv_weight = _append_qdq(
-            conv_weight, is_per_channel, is_bias=False, kwargs=kwargs,
-        )
+        conv_weight = _append_qdq(conv_weight, is_per_channel, kwargs)
         if has_bias:
             bias = kwargs["conv_bias"]
             if bias_is_quantized:
-                bias = _append_qdq(
-                    bias, is_per_channel, is_bias=True, kwargs=kwargs,
-                )
+                bias = _append_qdq(bias, is_per_channel, kwargs)
         else:
             bias = None
         x = conv_fn(x, conv_weight, bias)
@@ -289,7 +271,7 @@ def _has_conv_bias_filter(
     the original graph has bias.
     """
     for n in match.nodes_map.values():
-        if _is_conv_or_conv_transpose_node(n):
+        if _is_conv_node(n):
             return len(n.args) > 2 and n.args[2] is not None
     raise ValueError("Could not find conv node in matched conv + bn pattern")
 
@@ -343,7 +325,7 @@ def _get_conv_bn_pattern_nodes(r: ReplacedPatterns) -> Dict[str, Tuple[Node, Nod
         for n in nodes:
             if n.op != "call_function":
                 continue
-            if _is_conv_or_conv_transpose_node(n):
+            if _is_conv_node(n):
                 assert conv_node is None
                 conv_node = n
             if _is_bn_node(n):
@@ -458,8 +440,8 @@ def _copy_over_literal_conv_args(original_node: Node, new_node: Node):
     Note: Unlike other tensor args like conv weights and biases, literal args are
     preserved in the original nodes after replacement, so we can access them here.
     """
-    assert _is_conv_or_conv_transpose_node(original_node)
-    assert _is_conv_or_conv_transpose_node(new_node)
+    assert _is_conv_node(original_node)
+    assert _is_conv_node(new_node)
     # x, weight, bias, [stride, padding, dilation, transposed, output_padding, groups]
     new_args = list(new_node.args)
     if len(new_args) < 3:
@@ -475,8 +457,8 @@ def _update_conv_input_qspec_map_after_replacement(original_node: Node, replacem
     so the keys in the `input_qspec_map` will need to be updated to reflect
     the corresponding nodes in the replacement graph.
     """
-    assert _is_conv_or_conv_transpose_node(original_node)
-    assert _is_conv_or_conv_transpose_node(replacement_node)
+    assert _is_conv_node(original_node)
+    assert _is_conv_node(replacement_node)
     if "quantization_annotation" not in original_node.meta:
         return
     original_input_qspec_map = original_node.meta["quantization_annotation"].input_qspec_map
@@ -540,12 +522,11 @@ def _fuse_conv_bn_qat(m: GraphModule) -> GraphModule:
     has_bn = any(_is_bn_node(n) for n in m.graph.nodes)
     if not has_bn:
         return m
-    is_cuda_options = [True, False] if torch.cuda.is_available() else [False]
-    for is_cuda in is_cuda_options:
-        m = _fuse_conv_bn_qat_helper(m, F.conv1d, _conv1d_bn_example_inputs, is_cuda=is_cuda)
-        m = _fuse_conv_bn_qat_helper(m, F.conv2d, _conv2d_bn_example_inputs, is_cuda=is_cuda)
-        m = _fuse_conv_bn_qat_helper(m, F.conv_transpose1d, _conv1d_bn_example_inputs, is_cuda=is_cuda)
-        m = _fuse_conv_bn_qat_helper(m, F.conv_transpose2d, _conv2d_bn_example_inputs, is_cuda=is_cuda)
+    m = _fuse_conv_bn_qat_helper(m, F.conv1d, _conv1d_bn_example_inputs, is_cuda=False)
+    m = _fuse_conv_bn_qat_helper(m, F.conv2d, _conv2d_bn_example_inputs, is_cuda=False)
+    if torch.cuda.is_available():
+        m = _fuse_conv_bn_qat_helper(m, F.conv1d, _conv1d_bn_example_inputs, is_cuda=True)
+        m = _fuse_conv_bn_qat_helper(m, F.conv2d, _conv2d_bn_example_inputs, is_cuda=True)
     return m
 
 def _fuse_conv_bn_qat_helper(
@@ -628,7 +609,7 @@ def _fuse_conv_bn_qat_helper(
         for original_node, replacement_node in _get_conv_bn_pattern_nodes(r).values():
             # Step (3a): Copy over metadata for all nodes in [conv - bn - getitem]
             replacement_node.meta = original_node.meta
-            if _is_conv_or_conv_transpose_node(original_node):
+            if _is_conv_node(original_node):
                 # Step (3b): Copy over conv literal args
                 _copy_over_literal_conv_args(original_node, replacement_node)
                 # Step (3c): Update old references in the conv node's input_qspec_map
@@ -711,7 +692,7 @@ def _copy_over_q_dq_args(original_node: Node, replacement_node: Node):
         # Args: input, scale, zp, [axis, qmin, qmax, dtype]
         start_copy_arg_index = 3
     else:
-        raise ValueError(f"Expected quantize/dequantize nodes, got '{original_node.target}'")
+        raise ValueError("Expected quantize/dequantize nodes, got '%s'" % original_node.target)
     replacement_node.args = (
         replacement_node.args[:start_copy_arg_index] + original_node.args[start_copy_arg_index:]
     )
@@ -720,12 +701,11 @@ def _fold_conv_bn_qat(m: GraphModule) -> GraphModule:
     has_bn = any(_is_bn_node(n) for n in m.graph.nodes)
     if not has_bn:
         return m
-    is_cuda_options = [True, False] if torch.cuda.is_available() else [False]
-    for is_cuda in is_cuda_options:
-        m = _fold_conv_bn_qat_helper(m, F.conv1d, _quantized_conv1d_bn_example_inputs, is_cuda=is_cuda)
-        m = _fold_conv_bn_qat_helper(m, F.conv2d, _quantized_conv2d_bn_example_inputs, is_cuda=is_cuda)
-        m = _fold_conv_bn_qat_helper(m, F.conv_transpose1d, _quantized_conv1d_bn_example_inputs, is_cuda=is_cuda)
-        m = _fold_conv_bn_qat_helper(m, F.conv_transpose2d, _quantized_conv2d_bn_example_inputs, is_cuda=is_cuda)
+    m = _fold_conv_bn_qat_helper(m, F.conv1d, _quantized_conv1d_bn_example_inputs, is_cuda=False)
+    m = _fold_conv_bn_qat_helper(m, F.conv2d, _quantized_conv2d_bn_example_inputs, is_cuda=False)
+    if torch.cuda.is_available():
+        m = _fold_conv_bn_qat_helper(m, F.conv1d, _quantized_conv1d_bn_example_inputs, is_cuda=True)
+        m = _fold_conv_bn_qat_helper(m, F.conv2d, _quantized_conv2d_bn_example_inputs, is_cuda=True)
     return m
 
 def _fold_conv_bn_qat_helper(
@@ -754,7 +734,7 @@ def _fold_conv_bn_qat_helper(
         # filter out one of the values for this flag to avoid having duplicate patterns
         if not has_bias and bias_is_quantized:
             continue
-        kwargs = _get_quantized_conv_bn_example_inputs_kwargs(is_per_channel, has_bias, bias_is_quantized, is_cuda)
+        kwargs = _get_quantized_conv_bn_example_inputs_kwargs(is_per_channel, has_bias, is_cuda)
         match_pattern = _get_quantized_qat_conv_bn_pattern(
             is_per_channel, has_bias, bias_is_quantized, conv_fn, bn_is_training
         )
@@ -800,7 +780,7 @@ def _fold_conv_bn_qat_helper(
 
         # Copy over literal args for conv
         for original_node in _filter_nodes_map(r.nodes_map).values():
-            if _is_conv_or_conv_transpose_node(original_node):
+            if _is_conv_node(original_node):
                 _copy_over_literal_conv_args(original_node, conv_node)
 
     m.graph.eliminate_dead_code()

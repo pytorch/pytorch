@@ -24,8 +24,8 @@ namespace at::native {
 Tensor cov(
     const Tensor& self,
     int64_t correction,
-    const std::optional<Tensor>& fweights,
-    const std::optional<Tensor>& aweights) {
+    const c10::optional<Tensor>& fweights,
+    const c10::optional<Tensor>& aweights) {
   constexpr int64_t OBSERVATIONS_DIM = 1;
 
   TORCH_CHECK(

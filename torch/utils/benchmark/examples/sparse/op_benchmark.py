@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 """Example use of Timer and sparse op fuzzers to measure kernel performance.
 
 $ python -m examples.sparse.op_benchmark
@@ -10,7 +9,6 @@ import torch
 from torch.utils.benchmark import Timer
 from torch.utils.benchmark.op_fuzzers.sparse_unary import UnaryOpSparseFuzzer
 from torch.utils.benchmark.op_fuzzers.sparse_binary import BinaryOpSparseFuzzer
-import operator
 
 _MEASURE_TIME = 1.0
 
@@ -72,7 +70,7 @@ def run(n, stmt, fuzzer_cls):
             sparse_dim_len = max(sparse_dim_len, len(sparse_dim))
             is_coalesced_len = max(is_coalesced_len, len(is_coalesced))
 
-    parsed_results.sort(key=operator.itemgetter(2))
+    parsed_results.sort(key=lambda x: x[2])
 
     print(f"stmt: {stmt}")
     print(f" diff    faster{'':>17}{' ' * name_len} ", end="")

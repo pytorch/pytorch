@@ -2,12 +2,14 @@
 #import <ATen/native/metal/MetalPrepackOpContext.h>
 #include <c10/util/ArrayRef.h>
 
-namespace at::native::metal {
+namespace at {
+namespace native {
+namespace metal {
 
 Tensor conv2d(
     const Tensor& input,
     const Tensor& weight,
-    const std::optional<at::Tensor>& bias,
+    const c10::optional<at::Tensor>& bias,
     IntArrayRef stride,
     IntArrayRef padding,
     IntArrayRef dilation,
@@ -17,4 +19,6 @@ namespace prepack {
 Tensor conv2d(const Tensor& input, Conv2dOpContext& context);
 }
 
-} // namespace at::native::metal
+} // namespace metal
+} // namespace native
+} // namespace at

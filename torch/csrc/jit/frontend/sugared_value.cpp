@@ -145,7 +145,7 @@ std::shared_ptr<SugaredValue> SimpleValue::attr(
            {"H", "prim"},
            {"mT", "aten"},
            {"mH", "aten"},
-           {"is_maia", "prim"},
+           {"is_ort", "prim"},
            {"itemsize", "prim"},
            {"nbytes", "prim"},
            {"ndim", "prim"},
@@ -283,7 +283,7 @@ std::shared_ptr<SugaredValue> SimpleValue::attr(
 std::vector<std::shared_ptr<SugaredValue>> SimpleValue::asTuple(
     const SourceRange& loc,
     GraphFunction& m,
-    const std::optional<size_t>& size_hint) {
+    const c10::optional<size_t>& size_hint) {
   static const auto make_simple_value =
       [](Value* v) -> std::shared_ptr<SugaredValue> {
     return std::make_shared<SimpleValue>(v);
@@ -525,7 +525,7 @@ RangeValue::RangeValue(
     const SourceRange& loc,
     GraphFunction& m,
     std::vector<Value*> inputs,
-    std::optional<int64_t> static_len) {
+    c10::optional<int64_t> static_len) {
   for (const auto i : c10::irange(inputs.size())) {
     auto typ = inputs[i]->type();
     if (!typ->cast<IntType>()) {
@@ -645,7 +645,7 @@ void IterableTree::addChild(
     const SourceRange& range,
     GraphFunction& m,
     const SugaredValuePtr& iter_value) {
-  std::optional<int64_t> child_len = iter_value->staticLen();
+  c10::optional<int64_t> child_len = iter_value->staticLen();
   if (children_.empty()) {
     unroll_length_ = child_len;
   } else {
@@ -748,7 +748,7 @@ std::shared_ptr<SugaredValue> NamedTupleConstructor::call(
 
 std::shared_ptr<BuiltinFunction> BuiltinFunction::tryCreate(
     Symbol symbol,
-    std::optional<NamedValue> self) {
+    c10::optional<NamedValue> self) {
   for (const std::shared_ptr<Operator>& op : getAllOperatorsFor(symbol)) {
     if (!self) {
       return std::make_shared<BuiltinFunction>(symbol, nullptr);

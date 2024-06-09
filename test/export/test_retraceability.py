@@ -21,12 +21,14 @@ def mocked_retraceability_export(*args, **kwargs):
 
 
 def make_dynamic_cls(cls):
+    suffix = "_retraceability"
+
     cls_prefix = "RetraceExport"
 
     test_class = testing.make_test_cls_with_mocked_export(
         cls,
         cls_prefix,
-        test_export.RETRACEABILITY_SUFFIX,
+        suffix,
         mocked_retraceability_export,
         xfail_prop="_expected_failure_retrace",
     )

@@ -60,26 +60,21 @@ Tensor apply_loss_reduction(const Tensor& unreduced, int64_t reduction) {
   return unreduced;
 }
 
-static bool isDefined(const std::optional<Tensor>& t) {
+static bool isDefined(const c10::optional<Tensor>& t) {
   return t.has_value() && t->defined();
 }
 
-Tensor toNonOptTensor(const std::optional<Tensor>& t) {
+Tensor toNonOptTensor(const c10::optional<Tensor>& t) {
   return t.has_value() ? *t : Tensor();
 }
 
-Tensor toNonOptFwGrad(const std::optional<Tensor>& t) {
+Tensor toNonOptFwGrad(const c10::optional<Tensor>& t) {
   return (t.has_value() && t->defined()) ? t->_fw_grad(/*level */ 0) : Tensor();
 }
 
-Tensor toNonOptPrimal(const std::optional<Tensor>& t) {
-  if (t.has_value() && t->defined()) {
-    if (t->unsafeGetTensorImpl()->is_wrapped_number()) {
-      return *t;
-    }
-    return t->_fw_primal(/* level */ 0);
-  }
-  return Tensor();
+Tensor toNonOptPrimal(const c10::optional<Tensor>& t) {
+  return (t.has_value() && t->defined()) ? t->_fw_primal(/*level */ 0)
+                                         : Tensor();
 }
 
 void copy_range(variable_list& out, IndexRange range, const Tensor& t) {
@@ -605,7 +600,7 @@ Tensor div_tensor_self_backward(
     const Tensor& grad,
     T other,
     ScalarType self_st,
-    const std::optional<c10::string_view>& rounding_mode) {
+    const c10::optional<c10::string_view>& rounding_mode) {
   if (rounding_mode.has_value()) {
     return at::zeros_like(grad, grad.options().dtype(self_st));
   }
@@ -617,12 +612,12 @@ template Tensor div_tensor_self_backward(
     const Tensor&,
     Tensor,
     ScalarType,
-    const std::optional<c10::string_view>&);
+    const c10::optional<c10::string_view>&);
 template Tensor div_tensor_self_backward(
     const Tensor&,
     Scalar,
     ScalarType,
-    const std::optional<c10::string_view>&);
+    const c10::optional<c10::string_view>&);
 
 template <typename T>
 Tensor div_tensor_self_backward(
@@ -639,7 +634,7 @@ Tensor div_tensor_other_backward(
     const Tensor& grad,
     const Tensor& self,
     const Tensor& other,
-    const std::optional<c10::string_view>& rounding_mode) {
+    const c10::optional<c10::string_view>& rounding_mode) {
   if (rounding_mode.has_value()) {
     return at::zeros_like(grad, grad.options().dtype(other.scalar_type()));
   }
@@ -770,6 +765,12 @@ std::vector<int64_t> reverse_list(const IntArrayRef list) {
   return result;
 }
 
+Tensor reverse_dim(const Tensor& t, int64_t dim) {
+  Tensor index =
+      at::arange(t.sym_size(dim) - 1, -1, -1, t.options().dtype(at::kLong));
+  return t.index_select(dim, index);
+}
+
 Tensor prod_safe_zeros_backward(
     const Tensor& grad,
     const Tensor& inp,
@@ -793,10 +794,11 @@ Tensor prod_safe_zeros_backward(
   Tensor exclusive_normal = exclusive_normal_nocp.cumprod(dim);
 
   Tensor narrow_reverse =
-      inp.narrow_symint(dim, 1, inp.sym_size(dim) - 1).flip(dim);
+      reverse_dim(inp.narrow_symint(dim, 1, inp.sym_size(dim) - 1), dim);
   Tensor exclusive_reverse_nocp =
       at::cat({std::move(ones), std::move(narrow_reverse)}, dim);
-  Tensor exclusive_reverse = exclusive_reverse_nocp.cumprod(dim).flip(dim);
+  Tensor exclusive_reverse =
+      reverse_dim(exclusive_reverse_nocp.cumprod(dim), dim);
 
   return grad * (exclusive_normal * exclusive_reverse).conj();
 }
@@ -1282,7 +1284,7 @@ Tensor convolution_jvp(
     at::SymIntArrayRef output_padding,
     const c10::SymInt& groups) {
   auto bias_t_opt =
-      bias_t.defined() ? std::optional<at::Tensor>(bias_t) : c10::nullopt;
+      bias_t.defined() ? c10::optional<at::Tensor>(bias_t) : c10::nullopt;
   return (
       at::convolution_symint(
           input_t,
@@ -1324,7 +1326,7 @@ Tensor _convolution_jvp(
     bool cudnn_enabled,
     bool allow_tf32) {
   auto bias_t_opt =
-      bias_t.defined() ? std::optional<at::Tensor>(bias_t) : c10::nullopt;
+      bias_t.defined() ? c10::optional<at::Tensor>(bias_t) : c10::nullopt;
   return (
       at::_convolution_symint(
           input_t,
@@ -1513,8 +1515,8 @@ static Tensor sparse_mask_like_grad(
 std::tuple<Tensor, Tensor, Tensor> sparse_sampled_addmm_backward(
     const Tensor& grad,
     const Tensor& self,
-    const std::optional<Tensor>& mat1,
-    const std::optional<Tensor>& mat2,
+    const c10::optional<Tensor>& mat1,
+    const c10::optional<Tensor>& mat2,
     const Scalar& alpha,
     const Scalar& beta,
     const std::array<bool, 3>& grad_input_mask) {
@@ -1812,7 +1814,7 @@ Tensor var_backward(
     Tensor grad,
     const Tensor& self,
     at::OptionalIntArrayRef dim_opt,
-    const std::optional<at::Scalar>& correction_opt,
+    const c10::optional<at::Scalar>& correction_opt,
     bool keepdim) {
   const auto correction = correction_opt.value_or(1).toSymFloat();
   if (self.dim() == 0 || !dim_opt.has_value()) {
@@ -1845,7 +1847,7 @@ Tensor std_backward(
     const Tensor& grad,
     const Tensor& self,
     at::OptionalIntArrayRef dim,
-    const std::optional<c10::Scalar>& correction_opt,
+    const c10::optional<c10::Scalar>& correction_opt,
     bool keepdim) {
   auto grad_var = (grad / (result * 2)).masked_fill_(result == 0, 0);
   return var_backward(std::move(grad_var), self, dim, correction_opt, keepdim);
@@ -1856,7 +1858,7 @@ Tensor var_mean_backward(
     const Tensor& gmean,
     const Tensor& self,
     at::OptionalIntArrayRef dim_opt,
-    const std::optional<c10::Scalar>& correction_opt,
+    const c10::optional<c10::Scalar>& correction_opt,
     bool keepdim) {
   Tensor gself;
   if (gvar.defined()) {
@@ -1880,7 +1882,7 @@ Tensor std_mean_backward(
     const Tensor& self,
     const Tensor& std,
     at::OptionalIntArrayRef dim_opt,
-    const std::optional<c10::Scalar>& correction_opt,
+    const c10::optional<c10::Scalar>& correction_opt,
     bool keepdim) {
   Tensor gself;
   if (gstd.defined()) {
@@ -2234,7 +2236,7 @@ Tensor infinitely_differentiable_mish_backward(
 Tensor infinitely_differentiable_logit_backward(
     const Tensor& grad,
     const Tensor& self,
-    std::optional<double> eps) {
+    c10::optional<double> eps) {
   if (eps) {
     const double lo = eps.value();
     const double hi = 1.0 - lo;
@@ -2255,7 +2257,7 @@ Tensor binary_cross_entropy_target_backward(
     const Tensor& grad,
     const Tensor& self,
     const Tensor& target,
-    const std::optional<Tensor>& weight,
+    const c10::optional<Tensor>& weight,
     int64_t reduction) {
   auto grad_target = at::logit(self).neg_();
 
@@ -2288,7 +2290,7 @@ Tensor binary_cross_entropy_double_backward_target(
     const Tensor& grad_output,
     const Tensor& self,
     const Tensor& target,
-    const std::optional<Tensor>& weight,
+    const c10::optional<Tensor>& weight,
     int64_t reduction) {
   auto res = -grad * grad_output;
 
@@ -2325,8 +2327,8 @@ Tensor binary_cross_entropy_with_logits_backward(
     const Tensor& grad,
     const Tensor& input,
     const Tensor& target,
-    const std::optional<Tensor>& weight,
-    const std::optional<Tensor>& pos_weight,
+    const c10::optional<Tensor>& weight,
+    const c10::optional<Tensor>& pos_weight,
     int64_t reduction) {
   // Trivial case
   if (grad._is_zerotensor()) {
@@ -2380,8 +2382,8 @@ Tensor binary_cross_entropy_with_logits_target_backward(
     const Tensor& grad_output,
     const Tensor& self,
     const Tensor& target,
-    const std::optional<Tensor>& weight,
-    const std::optional<Tensor>& pos_weight,
+    const c10::optional<Tensor>& weight,
+    const c10::optional<Tensor>& pos_weight,
     int64_t reduction) {
   if (grad_output._is_zerotensor()) {
     return at::_efficientzerotensor(target.sizes(), target.options());
@@ -2472,7 +2474,7 @@ Tensor binary_cross_entropy_double_backward(
     const Tensor& grad,
     const Tensor& input,
     const Tensor& target,
-    const std::optional<Tensor>& weight,
+    const c10::optional<Tensor>& weight,
     int64_t reduction) {
   auto eps = 1e-12;
   auto inp_pl_eps = input + eps;
@@ -2507,7 +2509,7 @@ Tensor binary_cross_entropy_double_backward_grad_output(
     const Tensor& grad,
     const Tensor& input,
     const Tensor& target,
-    const std::optional<Tensor>& weight,
+    const c10::optional<Tensor>& weight,
     int64_t reduction) {
   auto eps = 1e-12;
   // gradient wrt grad_output
@@ -3179,7 +3181,7 @@ Tensor as_strided_backward(
   auto storage = grad.new_zeros_symint(c10::SymIntArrayRef(base_size));
 
   // prepare indices tensor if we will do index_add_ later
-  std::optional<at::Tensor> flatten_full_indices;
+  c10::optional<at::Tensor> flatten_full_indices;
   if (inp_maybe_overlap || out_maybe_overlap) {
     flatten_full_indices =
         // TODO: should we symint-ify arange? Need SymScalar.
@@ -3235,11 +3237,12 @@ Tensor as_strided_scatter_backward(
   // take the perf hit and contiguify grad for now.
   auto grad_ = grad.contiguous();
   auto grad_slice = grad_.as_strided_symint(sizes, strides, storage_offset);
-  auto result_buffer = grad_.new_zeros_symint(input_geometry.sym_sizes());
-  auto result = result_buffer.as_strided_symint(
-      input_geometry.sym_sizes(), input_geometry.sym_strides());
-  auto result_slice = result_buffer.as_strided_symint(
-      sizes, strides, std::move(storage_offset));
+  auto result =
+      grad_.new_zeros_symint(input_geometry.sym_sizes())
+          .as_strided_symint(
+              input_geometry.sym_sizes(), input_geometry.sym_strides());
+  auto result_slice =
+      result.as_strided_symint(sizes, strides, std::move(storage_offset));
   result_slice.copy_(grad_slice);
   return result;
 }
@@ -3327,8 +3330,8 @@ Tensor slice_backward_wrapper(
     const at::Tensor& grad,
     const c10::SymIntArrayRef& input_sizes,
     int64_t dim,
-    std::optional<c10::SymInt> start,
-    std::optional<c10::SymInt> end,
+    c10::optional<c10::SymInt> start,
+    c10::optional<c10::SymInt> end,
     c10::SymInt step) {
   auto start_val = start.has_value() ? start.value() : 0;
   auto end_val = end.has_value() ? end.value() : INT64_MAX;
@@ -4610,17 +4613,17 @@ static Tensor expand_as_dim1(const Tensor& src, const Tensor& target) {
 
 std::tuple<Tensor, Tensor, Tensor> batchnorm_double_backward(
     const Tensor& input,
-    const std::optional<Tensor>& gamma,
+    const c10::optional<Tensor>& gamma,
     const Tensor& ggI,
     const Tensor& ggG,
     const Tensor& ggB,
     const Tensor& gO,
-    const std::optional<Tensor>& running_mean,
-    const std::optional<Tensor>& running_var,
+    const c10::optional<Tensor>& running_mean,
+    const c10::optional<Tensor>& running_var,
     bool training,
     double eps,
-    const std::optional<Tensor>& save_mean,
-    const std::optional<Tensor>& save_invstd,
+    const c10::optional<Tensor>& save_mean,
+    const c10::optional<Tensor>& save_invstd,
     std::array<bool, 3> output_mask) {
   bool affine = isDefined(gamma);
   // TODO: Do we have a ScalarOrTensor type?  Would such a thing exist?
@@ -4749,7 +4752,7 @@ std::tuple<Tensor, Tensor, Tensor> batchnorm_double_backward(
 
 std::tuple<Tensor, Tensor, Tensor> layer_norm_double_backward(
     const Tensor& input_t,
-    const std::optional<Tensor>& gamma,
+    const c10::optional<Tensor>& gamma,
     const Tensor& ggI,
     const Tensor& ggG,
     const Tensor& ggB,
@@ -4898,7 +4901,7 @@ infinitely_differentiable_native_group_norm_backward(
     const Tensor& X,
     const Tensor& mean,
     const Tensor& rstd,
-    const std::optional<Tensor>& gamma,
+    const c10::optional<Tensor>& gamma,
     c10::SymInt N,
     const c10::SymInt& C,
     c10::SymInt HxW,
@@ -4980,9 +4983,9 @@ infinitely_differentiable_native_group_norm_backward(
 
 std::tuple<Tensor, Tensor, Tensor> _trilinear_backward(
     const Tensor& grad_out,
-    const std::optional<Tensor>& i1,
-    const std::optional<Tensor>& i2,
-    const std::optional<Tensor>& i3,
+    const c10::optional<Tensor>& i1,
+    const c10::optional<Tensor>& i2,
+    const c10::optional<Tensor>& i3,
     IntArrayRef expand1,
     IntArrayRef expand2,
     IntArrayRef expand3,
@@ -5076,7 +5079,7 @@ Tensor embedding_dense_double_backward_symint(
 
 Tensor index_backward(
     Tensor zeros_like_self,
-    const torch::List<std::optional<Tensor>>& indices,
+    const torch::List<c10::optional<Tensor>>& indices,
     const Tensor& grad) {
   return (areAnyTensorSubclassLike({zeros_like_self, grad}) ||
           areAnyOptionalTensorSubclassLike(indices))
@@ -6113,7 +6116,7 @@ static Tensor _norm_jvp(
 // Computes the jvp for `input * weight + bias` where weight and bias may be
 // undefined Possibly modifies the input inplace
 static Tensor _affine_jvp(
-    const std::optional<Tensor>& input_p,
+    const c10::optional<Tensor>& input_p,
     Tensor& input_t,
     const Tensor& weight_p,
     const Tensor& weight_t,
@@ -6154,8 +6157,8 @@ Tensor batch_norm_jvp(
     const Tensor& weight_t,
     const Tensor& bias_p,
     const Tensor& bias_t,
-    const std::optional<Tensor>& running_mean,
-    const std::optional<Tensor>& running_var,
+    const c10::optional<Tensor>& running_mean,
+    const c10::optional<Tensor>& running_var,
     const Tensor& saved_mean,
     const Tensor& saved_invstd,
     bool train,
@@ -6191,8 +6194,8 @@ Tensor batch_norm_jvp(
     result_t = input_t * invstd_p;
   }
 
-  std::optional<Tensor> result_p = weight_p.defined()
-      ? std::optional<Tensor>((input_p - mean_p) * invstd_p)
+  c10::optional<Tensor> result_p = weight_p.defined()
+      ? c10::optional<Tensor>((input_p - mean_p) * invstd_p)
       : c10::nullopt;
   return _affine_jvp(
       result_p,
@@ -6230,8 +6233,8 @@ Tensor layer_norm_jvp(
   auto invstd_p = saved_invstd.view(view_size);
   auto result_t = _norm_jvp(input_p, input_t, mean_p, invstd_p, dims, numel);
 
-  std::optional<Tensor> result_p = weight_p.defined()
-      ? std::optional<Tensor>((input_p - mean_p) * invstd_p)
+  c10::optional<Tensor> result_p = weight_p.defined()
+      ? c10::optional<Tensor>((input_p - mean_p) * invstd_p)
       : c10::nullopt;
   return _affine_jvp(
       result_p,
@@ -6273,7 +6276,7 @@ Tensor group_norm_jvp(
                       /*eps=*/0)
                       .view(input_shape);
 
-  std::optional<Tensor> result_p = c10::nullopt;
+  c10::optional<Tensor> result_p = c10::nullopt;
   if (weight_p.defined()) {
     std::vector<int64_t> view_size(input_t_reshaped.dim(), 1);
     view_size[1] = input_t_reshaped.size(1);
@@ -6976,9 +6979,9 @@ mkldnn_rnn_layer_differentiable_backward(
     const Tensor& output,
     const Tensor& hy_,
     const Tensor& cy_,
-    const std::optional<Tensor>& grad_output_r_opt,
-    const std::optional<Tensor>& grad_hy_r_opt,
-    const std::optional<Tensor>& grad_cy_r_opt,
+    const c10::optional<Tensor>& grad_output_r_opt,
+    const c10::optional<Tensor>& grad_hy_r_opt,
+    const c10::optional<Tensor>& grad_cy_r_opt,
     bool reverse,
     int64_t mode,
     int64_t hidden_size,

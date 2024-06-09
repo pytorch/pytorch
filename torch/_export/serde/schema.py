@@ -8,7 +8,7 @@ from typing import Dict, List, Optional, Tuple
 from torch._export.serde.union import _Union
 
 # NOTE: Please update this value if any modifications are made to the schema
-SCHEMA_VERSION = (5, 3)
+SCHEMA_VERSION = (5, 2)
 TREESPEC_VERSION = 1
 
 
@@ -215,21 +215,6 @@ class UserInputSpec:
     arg: Argument
 
 
-@dataclass(repr=False)
-class ConstantValue(_Union):
-    as_none: Tuple[()]
-    as_int: int
-    as_float: float
-    as_string: str
-    as_bool: bool
-
-
-@dataclass
-class ConstantInputSpec:
-    name: str
-    value: ConstantValue
-
-
 @dataclass
 class InputToParameterSpec:
     arg: TensorArgument
@@ -269,7 +254,6 @@ class InputSpec(_Union):
     tensor_constant: InputToTensorConstantSpec
     custom_obj: InputToCustomObjSpec
     token: InputTokenSpec
-    constant_input: ConstantInputSpec
 
 
 @dataclass

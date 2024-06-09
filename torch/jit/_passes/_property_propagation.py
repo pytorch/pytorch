@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 """
 Tools to help with tensor property propagation.
 

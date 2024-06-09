@@ -27,7 +27,7 @@ class TORCH_API PyTorchBackendDebugInfo : public torch::CustomClassHolder {
  public:
   PyTorchBackendDebugInfo() = default;
 
-  std::optional<BackendDebugInfoMapType>& getDebugInfoMap() {
+  c10::optional<BackendDebugInfoMapType>& getDebugInfoMap() {
     return debug_info_map_;
   }
 
@@ -36,7 +36,7 @@ class TORCH_API PyTorchBackendDebugInfo : public torch::CustomClassHolder {
   }
 
  private:
-  std::optional<BackendDebugInfoMapType> debug_info_map_;
+  c10::optional<BackendDebugInfoMapType> debug_info_map_;
 };
 
 #else

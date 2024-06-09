@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 r"""
 This package implements abstractions found in ``torch.cuda``
 to facilitate writing device-agnostic code.
@@ -11,7 +10,6 @@ import torch
 
 from .. import device as _device
 from . import amp
-
 
 __all__ = [
     "is_available",
@@ -27,16 +25,6 @@ __all__ = [
 ]
 
 _device_t = Union[_device, str, int, None]
-
-
-def _is_cpu_support_avx2() -> bool:
-    r"""Returns a bool indicating if CPU supports AVX2."""
-    return torch._C._cpu._is_cpu_support_avx2()
-
-
-def _is_cpu_support_avx512() -> bool:
-    r"""Returns a bool indicating if CPU supports AVX512."""
-    return torch._C._cpu._is_cpu_support_avx512()
 
 
 def _is_cpu_support_vnni() -> bool:
@@ -61,6 +49,7 @@ def synchronize(device: _device_t = None) -> None:
 
     N.B. This function only exists to facilitate device-agnostic code.
     """
+    pass
 
 
 class Stream:
@@ -68,7 +57,7 @@ class Stream:
     N.B. This class only exists to facilitate device-agnostic code
     """
 
-    def __init__(self, priority: int = -1) -> None:
+    def __init__(self, priority: int = -1):
         pass
 
     def wait_stream(self, stream) -> None:
@@ -79,13 +68,13 @@ class Event:
     def query(self) -> bool:
         return True
 
-    def record(self, stream=None) -> None:
+    def record(self, stream=None):
         pass
 
-    def synchronize(self) -> None:
+    def synchronize(self):
         pass
 
-    def wait(self, stream=None) -> None:
+    def wait(self, stream=None):
         pass
 
 
@@ -111,7 +100,6 @@ class StreamContext(AbstractContextManager):
     N.B. This class only exists to facilitate device-agnostic code
 
     """
-
     cur_stream: Optional[Stream]
 
     def __init__(self, stream):
@@ -127,7 +115,7 @@ class StreamContext(AbstractContextManager):
         self.prev_stream = _current_stream
         _current_stream = cur_stream
 
-    def __exit__(self, type: Any, value: Any, traceback: Any) -> None:
+    def __exit__(self, type: Any, value: Any, traceback: Any):
         cur_stream = self.stream
         if cur_stream is None:
             return
@@ -158,6 +146,7 @@ def set_device(device: _device_t) -> None:
 
     N.B. This function only exists to facilitate device-agnostic code
     """
+    pass
 
 
 def current_device() -> str:

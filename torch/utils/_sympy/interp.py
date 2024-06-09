@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 """
 This is a simple interpreter for Sympy expressions that dispatches to
 classes following the torch._inductor.virtualized calling convention.
@@ -25,7 +24,6 @@ from .functions import (
     Round,
     RoundDecimal,
     TrueDiv,
-    Trunc,
     Where,
 )
 
@@ -53,7 +51,6 @@ def handlers():
         TrueDiv: "truediv",
         FloorDiv: "floordiv",
         CleanDiv: "div",
-        Trunc: "trunc",
         Where: "where",
         sympy.Add: "add",
         sympy.Mul: "mul",

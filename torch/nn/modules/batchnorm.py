@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 from typing import Optional, Any
 
 import torch
@@ -22,7 +21,7 @@ class _NormBase(Module):
     __constants__ = ["track_running_stats", "momentum", "eps", "num_features", "affine"]
     num_features: int
     eps: float
-    momentum: Optional[float]
+    momentum: float
     affine: bool
     track_running_stats: bool
     # WARNING: weight and bias purposely not defined here.
@@ -32,7 +31,7 @@ class _NormBase(Module):
         self,
         num_features: int,
         eps: float = 1e-5,
-        momentum: Optional[float] = 0.1,
+        momentum: float = 0.1,
         affine: bool = True,
         track_running_stats: bool = True,
         device=None,
@@ -128,7 +127,7 @@ class _BatchNorm(_NormBase):
         self,
         num_features: int,
         eps: float = 1e-5,
-        momentum: Optional[float] = 0.1,
+        momentum: float = 0.1,
         affine: bool = True,
         track_running_stats: bool = True,
         device=None,
@@ -678,7 +677,7 @@ class SyncBatchNorm(_BatchNorm):
         self,
         num_features: int,
         eps: float = 1e-5,
-        momentum: Optional[float] = 0.1,
+        momentum: float = 0.1,
         affine: bool = True,
         track_running_stats: bool = True,
         process_group: Optional[Any] = None,

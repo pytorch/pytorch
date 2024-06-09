@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 import logging
 import operator
 from dataclasses import dataclass
@@ -15,8 +14,7 @@ from torch.distributed._spmd.graph_utils import OP
 from torch.distributed._spmd.log_utils import get_logger
 
 from torch.distributed._tensor import DeviceMesh, DTensor
-from torch.distributed._tensor._op_schema import OpSchema
-from torch.distributed._tensor._redistribute import redistribute_local_tensor
+from torch.distributed._tensor.op_schema import OpSchema
 from torch.distributed._tensor.placement_types import (
     _Partial,
     DTensorSpec,
@@ -25,6 +23,7 @@ from torch.distributed._tensor.placement_types import (
     Shard,
     TensorMeta,
 )
+from torch.distributed._tensor.redistribute import redistribute_local_tensor
 from torch.fx.experimental.proxy_tensor import make_fx, proxy_slot
 from torch.utils import _pytree as pytree
 from torch.utils._pytree import tree_flatten, tree_map, tree_map_only, tree_unflatten
@@ -351,7 +350,7 @@ FACTORY_SYM_INT_CONSUMERS: Dict[torch._ops.OpOverload, Callable] = {
 }
 
 
-# Dispatch override for factory ops, as DTensor cannot propagate sharding spec
+# Dispatch override for factory ops, as DTensor cannot propogate sharding spec
 # without DTensor inputs.
 FACTORY_OPS: Dict[torch._ops.OpOverload, Callable] = {
     aten.scalar_tensor.default: default_factory_op_rule,

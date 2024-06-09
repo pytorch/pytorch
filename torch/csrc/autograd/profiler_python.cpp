@@ -220,7 +220,7 @@ struct ExtendedPyCallConfig {
 
   struct Cache {
     // `nn.Module.forward` or `optim.Optimizer._optimizer_step_code`
-    std::optional<CodeLocation> location_;
+    c10::optional<CodeLocation> location_;
     ska::flat_hash_map<key_t, ClsAndParameters> cls_and_parameters_;
     ska::flat_hash_map<cls_t, at::StringView> cls_names_;
   };
@@ -300,7 +300,7 @@ class ValueCache {
         load<C>(callsite.value_)};
   }
 
-  std::optional<TensorMetadata> recordIfTensor(py::handle p);
+  c10::optional<TensorMetadata> recordIfTensor(py::handle p);
   std::vector<std::pair<std::string, TensorMetadata>> unpackTensorMap(
       const py::dict& tensor_map);
   void trimPrefixes();
@@ -348,9 +348,9 @@ TensorMetadata toTensorMetadata(PyObject* self) {
       m.layout_ == at::kStrided ? t.strides().vec() : std::vector<int64_t>()};
 }
 
-std::optional<TensorMetadata> ValueCache::recordIfTensor(py::handle p) {
+c10::optional<TensorMetadata> ValueCache::recordIfTensor(py::handle p) {
   return THPVariable_CheckExact(p.ptr())
-      ? std::optional<TensorMetadata>{toTensorMetadata(p.ptr())}
+      ? c10::optional<TensorMetadata>{toTensorMetadata(p.ptr())}
       : c10::nullopt;
 }
 

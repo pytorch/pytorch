@@ -149,14 +149,14 @@ TypePtr ConcreteModuleType::getJitType() const {
   return jitType_;
 }
 
-std::optional<py::object> ConcreteModuleType::getPyClass() const {
+c10::optional<py::object> ConcreteModuleType::getPyClass() const {
   if (!data_.pyClass_) {
     return c10::nullopt;
   }
   return data_.pyClass_;
 }
 
-std::optional<std::vector<std::string>> ConcreteModuleType::findOverloads(
+c10::optional<std::vector<std::string>> ConcreteModuleType::findOverloads(
     const std::string& name) const {
   const auto it = data_.overloads_.find(name);
   if (it != data_.overloads_.end()) {
@@ -165,7 +165,7 @@ std::optional<std::vector<std::string>> ConcreteModuleType::findOverloads(
   return c10::nullopt;
 }
 
-std::optional<Function*> ConcreteModuleType::findFunctionAttribute(
+c10::optional<Function*> ConcreteModuleType::findFunctionAttribute(
     const std::string& name) const {
   const auto it = data_.functionAttributes_.find(name);
   if (it != data_.functionAttributes_.end()) {
@@ -174,7 +174,7 @@ std::optional<Function*> ConcreteModuleType::findFunctionAttribute(
   return c10::nullopt;
 }
 
-std::optional<c10::Symbol> ConcreteModuleType::findBuiltinFunction(
+c10::optional<c10::Symbol> ConcreteModuleType::findBuiltinFunction(
     const std::string& name) const {
   const auto it = data_.builtinFunctions_.find(name);
   if (it != data_.builtinFunctions_.end()) {
@@ -183,7 +183,7 @@ std::optional<c10::Symbol> ConcreteModuleType::findBuiltinFunction(
   return c10::nullopt;
 }
 
-std::optional<std::string> ConcreteModuleType::findFailedAttribute(
+c10::optional<std::string> ConcreteModuleType::findFailedAttribute(
     const std::string& name) const {
   const auto it = data_.failedAttributes_.find(name);
   if (it != data_.failedAttributes_.end()) {

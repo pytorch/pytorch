@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 from typing import Any, Dict, List, Optional
 
 from torch.utils.data.datapipes._decorator import functional_datapipe
@@ -91,9 +90,9 @@ class Capture:
 
     def __getattr__(self, attrname):
         if attrname == 'kwarg' or attrname == 'kwargs':
-            raise Exception('no kwargs!')  # noqa: TRY002
+            raise Exception('no kwargs!')
         if attrname in ['__deepcopy__']:
-            raise AttributeError
+            raise AttributeError()
         result = CaptureGetAttr(self, attrname, ctx=self.ctx)
         return result
 
@@ -245,7 +244,7 @@ class CaptureVariable(Capture):
 
     def __init__(self, value, ctx):
         if CaptureControl.disabled:
-            raise Exception('Attempting to create capture variable with capture off')  # noqa: TRY002
+            raise Exception('Attempting to create capture variable with capture off')
         self.ctx = ctx
         self.value = value
         self.name = f'var_{CaptureVariable.names_idx}'
@@ -405,7 +404,7 @@ class CaptureDataFrameWithDataPipeOps(CaptureDataFrame):
         return self._dataframes_filter(*args, **kwargs)
 
     def collate(self, *args, **kwargs):
-        raise Exception("Can't collate unbatched DataFrames stream")  # noqa: TRY002
+        raise Exception("Can't collate unbatched DataFrames stream")
 
     def __getattr__(self, attrname):  # ?
         if attrname in UNIMPLEMENTED_ATTR:

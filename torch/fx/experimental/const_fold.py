@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 import re
 from typing import Callable, Dict, Optional, Set, Union
 
@@ -61,7 +60,7 @@ class FoldedGraphModule(torch.fx.GraphModule):
 
         def _create_param(i):
             return torch.nn.Parameter(
-                i.detach().clone()
+                i
                 if not isinstance(i, int)
                 else torch.Tensor([i]).to(device=self.device_for_folded_attrs),
                 requires_grad=i.requires_grad if isinstance(i, torch.Tensor) else False,

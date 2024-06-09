@@ -1,13 +1,12 @@
-# mypy: allow-untyped-defs
 from __future__ import annotations
 
 import functools
 import logging
-from typing import cast, List, Optional, Sequence, Tuple, TYPE_CHECKING, TypedDict
+from typing import cast, List, Optional, Sequence, Tuple, TypedDict
 
 import torch
-
 from .. import config, ir
+from ..ir import TensorBox
 
 from ..lowering import (
     add_layout_constraint,
@@ -30,9 +29,6 @@ from ..utils import (
 )
 from ..virtualized import V
 from .mm_common import filtered_configs
-
-if TYPE_CHECKING:
-    from ..ir import TensorBox
 
 log = logging.getLogger(__name__)
 
@@ -247,11 +243,11 @@ def conv_layout(
             ir.ir_node_to_tensor(x, guard_shape=True),
             ir.ir_node_to_tensor(weight, guard_shape=True),
             ir.ir_node_to_tensor(bias, guard_shape=True),
-            V.graph.sizevars.size_hints(stride),  # type: ignore[arg-type]
-            V.graph.sizevars.size_hints(padding),  # type: ignore[arg-type]
+            stride,
+            tuple(V.graph.sizevars.size_hint(p) for p in padding),  # type: ignore[arg-type]
             dilation,
             transposed,
-            V.graph.sizevars.size_hints(output_padding),  # type: ignore[arg-type]
+            tuple(V.graph.sizevars.size_hint(p) for p in output_padding),  # type: ignore[arg-type]
             groups,
         )
         sizes = ir.convert_shape_to_inductor(output.size())
@@ -364,7 +360,7 @@ def convolution(
         and not transposed
         and is_zeros(output_padding)
         and groups == 1
-        and V.graph.sizevars.statically_known_gt(sympy_product(x.get_size()), 0)
+        and sympy_product(x.get_size()) > 0
     ):
         return convert_1x1_conv_to_mm(x, weight, bias)
 

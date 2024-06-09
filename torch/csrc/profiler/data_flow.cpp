@@ -3,7 +3,9 @@
 #include <c10/util/overloaded.h>
 #include <torch/csrc/profiler/collection.h>
 
-namespace torch::profiler::impl {
+namespace torch {
+namespace profiler {
+namespace impl {
 
 namespace {
 static constexpr TensorImplAddress NoTensorImpl{nullptr};
@@ -16,8 +18,8 @@ struct RawTensorInfo {
   bool is_free_;
 
   // Used to assign back to the original structs.
-  std::reference_wrapper<std::optional<AllocationID>> allocation_id_ref_;
-  std::reference_wrapper<std::optional<TensorID>> id_ref_;
+  std::reference_wrapper<c10::optional<AllocationID>> allocation_id_ref_;
+  std::reference_wrapper<c10::optional<TensorID>> id_ref_;
 };
 
 struct RawTensors {
@@ -30,7 +32,7 @@ struct RawTensors {
         t.impl(), t.data_, t.device_, false, t.allocation_id_, t.id_});
   }
 
-  void operator()(std::optional<TensorMetadata>& t) {
+  void operator()(c10::optional<TensorMetadata>& t) {
     if (t.has_value()) {
       (*this)(*t);
     }
@@ -193,4 +195,6 @@ void calculateUniqueTensorIDs(
   }
 }
 
-} // namespace torch::profiler::impl
+} // namespace impl
+} // namespace profiler
+} // namespace torch

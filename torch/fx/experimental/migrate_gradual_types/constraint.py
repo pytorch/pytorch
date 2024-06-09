@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 from torch.fx.experimental.migrate_gradual_types.operation import op_add, op_sub, op_mul, op_div, \
     op_mod, op_gt, op_lt, op_neq, op_eq
 from torch.fx.tensor_type import TensorType, Dyn
@@ -153,7 +152,7 @@ class TGreatestUpperBound(Constraint):
         self.rhs2 = rhs2
 
     def __repr__(self):
-        return f'{self.res} = {self.rhs1}\u2294*{self.rhs2}'
+        return f'{self.res} = {self.rhs1}⊔*{self.rhs2}'
 
     def __eq__(self, other):
         if isinstance(other, TGreatestUpperBound):
@@ -181,7 +180,7 @@ class DGreatestUpperBound(Constraint):
         self.rhs2 = rhs2
 
     def __repr__(self):
-        return f'{self.res} = {self.rhs1}\u2294{self.rhs2}'
+        return f'{self.res} = {self.rhs1}⊔{self.rhs2}'
 
     def __eq__(self, other):
         if isinstance(other, DGreatestUpperBound):

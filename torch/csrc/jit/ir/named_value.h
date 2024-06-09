@@ -30,18 +30,18 @@ struct NamedValue {
 
   template <
       typename T,
-      typename = std::enable_if_t<
-          (!std::is_same_v<std::decay_t<T>, NamedValue> &&
-           !std::is_same_v<std::decay_t<T>, Value*> &&
-           !std::is_same_v<std::decay_t<T>, IValue>)>>
+      typename = enable_if_t<
+          (!std::is_same<decay_t<T>, NamedValue>::value &&
+           !std::is_same<decay_t<T>, Value*>::value &&
+           !std::is_same<decay_t<T>, IValue>::value)>>
   // NOLINTNEXTLINE(bugprone-forwarding-reference-overload)
   NamedValue(T&& t) : NamedValue(IValue(std::forward<T>(t))) {}
 
   template <
       typename T,
-      typename = std::enable_if_t<
-          (!std::is_same_v<std::decay_t<T>, Value*> &&
-           !std::is_same_v<std::decay_t<T>, IValue>)>>
+      typename = enable_if_t<
+          (!std::is_same<decay_t<T>, Value*>::value &&
+           !std::is_same<decay_t<T>, IValue>::value)>>
   NamedValue(const std::string& name, T&& t)
       : NamedValue(name, IValue(std::forward<T>(t))) {}
 
@@ -73,8 +73,8 @@ struct NamedValue {
   at::TypePtr type() const;
 
  private:
-  std::optional<SourceRange> loc_;
-  std::optional<std::string> name_;
+  c10::optional<SourceRange> loc_;
+  c10::optional<std::string> name_;
   Value* value_{nullptr};
   // only valid if value_ == nullptr;
   IValue ivalue_;

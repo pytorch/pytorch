@@ -1,9 +1,8 @@
 import os
 import sys
 
-from setuptools import setup
-
 import torch.cuda
+from setuptools import setup
 from torch.testing._internal.common_utils import IS_WINDOWS
 from torch.utils.cpp_extension import (
     BuildExtension,
@@ -29,8 +28,8 @@ ext_modules = [
         "torch_test_cpp_extension.cpp", ["extension.cpp"], extra_compile_args=CXX_FLAGS
     ),
     CppExtension(
-        "torch_test_cpp_extension.maia",
-        ["maia_extension.cpp"],
+        "torch_test_cpp_extension.ort",
+        ["ort_extension.cpp"],
         extra_compile_args=CXX_FLAGS,
     ),
     CppExtension(

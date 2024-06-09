@@ -13,19 +13,7 @@ requires_cuda = unittest.skipUnless(HAS_CUDA, "requires cuda")
 
 
 def patch(f):
-    f = torch._inductor.config.patch(
-        pre_grad_fusion_options={
-            "normalization_pass": {},
-            "remove_split_with_size_one_pass": {},
-            "merge_getitem_cat_pass": {},
-            "merge_stack_tahn_unbind_pass": {},
-            "merge_splits_pass": {},
-            "mutate_cat_pass": {},
-            "split_cat_pass": {},
-            "unbind_stack_pass": {},
-        },
-        post_grad_fusion_options={},
-    )(f)
+    f = torch._inductor.config.patch(split_cat_fx_passes=True)(f)
     return f
 
 
@@ -617,10 +605,7 @@ class TestSplitCatFxPasses(TestCase):
             )
             counters.clear()
 
-    @torch._inductor.config.patch(
-        pre_grad_fusion_options={},
-        post_grad_fusion_options={},
-    )
+    @torch._inductor.config.patch(split_cat_fx_passes=False)
     def test_config_flag_is_respected(self):
         def split_with_cat(x):
             fs = torch.split(x, [4, 4, 24], dim=-1)

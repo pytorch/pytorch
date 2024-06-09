@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 import abc
 import typing as t
 
@@ -32,7 +31,7 @@ class OperatorSupportBase(abc.ABC):
     def is_node_supported(
         self, submodules: t.Mapping[str, torch.nn.Module], node: torch.fx.Node
     ) -> bool:
-        raise NotImplementedError
+        raise NotImplementedError()
 
 
 @compatibility(is_backward_compatible=False)

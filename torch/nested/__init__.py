@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 from typing import List, Optional, Tuple, Union
 
 import torch
@@ -187,7 +186,7 @@ Example::
 
 def nested_tensor(tensor_list, *, dtype=None, layout=None, device=None, requires_grad=False, pin_memory=False) -> Tensor:
     r"""
-Constructs a nested tensor with no autograd history (also known as a "leaf tensor", see
+Constructs a nested tensor with no autograd history (also known as a “leaf tensor”, see
 :ref:`Autograd mechanics <autograd-mechanics>`) from :attr:`tensor_list` a list of tensors.
 
 Args:

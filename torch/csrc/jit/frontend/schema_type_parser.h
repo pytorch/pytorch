@@ -13,24 +13,19 @@ using TypePtr = c10::TypePtr;
 
 struct TORCH_API SchemaTypeParser {
   TypePtr parseBaseType();
-  std::optional<c10::AliasInfo> parseAliasAnnotation();
-  std::pair<TypePtr, std::optional<c10::AliasInfo>> parseType();
-  std::tuple</*fake*/ TypePtr, /*real*/ TypePtr, std::optional<c10::AliasInfo>>
+  c10::optional<c10::AliasInfo> parseAliasAnnotation();
+  std::pair<TypePtr, c10::optional<c10::AliasInfo>> parseType();
+  std::tuple</*fake*/ TypePtr, /*real*/ TypePtr, c10::optional<c10::AliasInfo>>
   parseFakeAndRealType();
-  std::optional<at::ScalarType> parseTensorDType(const std::string& dtype);
+  c10::optional<at::ScalarType> parseTensorDType(const std::string& dtype);
   TypePtr parseRefinedTensor();
 
-  SchemaTypeParser(
-      Lexer& L,
-      bool parse_complete_tensor_types,
-      bool allow_typevars)
-      : complete_tensor_types(parse_complete_tensor_types),
-        L(L),
-        allow_typevars_(allow_typevars) {}
+  SchemaTypeParser(Lexer& L, bool parse_complete_tensor_types)
+      : complete_tensor_types(parse_complete_tensor_types), L(L) {}
 
  private:
-  std::optional<bool> tryToParseRequiresGrad();
-  std::optional<c10::Device> tryToParseDeviceType();
+  c10::optional<bool> tryToParseRequiresGrad();
+  c10::optional<c10::Device> tryToParseDeviceType();
   void parseList(
       int begin,
       int sep,
@@ -40,7 +35,6 @@ struct TORCH_API SchemaTypeParser {
   bool complete_tensor_types;
   Lexer& L;
   size_t next_id = 0;
-  bool allow_typevars_;
 };
 } // namespace jit
 } // namespace torch

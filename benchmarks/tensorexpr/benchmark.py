@@ -4,7 +4,6 @@ import os
 import time
 
 import numpy as np
-
 import torch
 
 from . import tensor_engine
@@ -212,7 +211,7 @@ class Benchmark:
                 msg += f", compute {result_dict['compute_workload']:.2f} Gops/s"
             print(msg)
         else:
-            raise Exception("Unknown output_type " + self.output_type)  # noqa: TRY002
+            raise Exception("Unknown output_type " + self.output_type)
 
 
 @contextlib.contextmanager

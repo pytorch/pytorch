@@ -169,7 +169,7 @@ struct ProfilerLegacyThreadLocalState : public ProfilerStateBase {
   std::unordered_map<uint64_t, std::shared_ptr<RangeEventList>>
       event_lists_map_;
 
-  std::optional<std::vector<std::vector<LegacyEvent>>> remoteProfiledEvents_;
+  c10::optional<std::vector<std::vector<LegacyEvent>>> remoteProfiledEvents_;
 };
 
 thread_event_lists ProfilerLegacyThreadLocalState::consolidate() {
@@ -429,7 +429,7 @@ void enableProfilerLegacy(
 }
 
 thread_event_lists disableProfilerLegacy(
-    std::optional<ProfilerDisableOptions> profilerDisableOptions) {
+    c10::optional<ProfilerDisableOptions> profilerDisableOptions) {
   auto cleanupTLSState =
       profilerDisableOptions ? profilerDisableOptions->cleanupTLSState : true;
   auto consolidate =
