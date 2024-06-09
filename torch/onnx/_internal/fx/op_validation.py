@@ -365,7 +365,9 @@ def _convert_tensor_to_numpy(input: fx_type_utils.Argument) -> Any:
     try:
         import numpy as np
     except ModuleNotFoundError as exc:
-        raise ModuleNotFoundError(f"{__name__} needs numpy, but it's not installed.") from exc
+        raise ModuleNotFoundError(
+            f"{__name__} needs numpy, but it's not installed."
+        ) from exc
 
     if isinstance(input, torch.Tensor):
         if torch.is_complex(input):
