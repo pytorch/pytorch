@@ -33,7 +33,7 @@ c10::AliasAnalysisKind aliasAnalysisConservative() {
 
 void checkListInputType(const c10::TypePtr& elem_type, bool empty_list) {
   if (!elem_type->isSubtypeOf(*NumberType::get()) &&
-      !elem_type->isSubtypeOf(*BoolType::get())) {
+      elem_type != BoolType::get()) {
     std::stringstream error;
     error << "Input must be of ints, floats, or bools, "
           << "got " << elem_type->repr_str();
@@ -406,7 +406,7 @@ RegisterOperators reg({
           double a;
           // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
           double b;
-          std::optional<at::Generator> generator =
+          c10::optional<at::Generator> generator =
               pop(stack).toOptional<at::Generator>();
 
           pop(stack, tensor, a, b);
@@ -425,7 +425,7 @@ RegisterOperators reg({
           double mean;
           // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
           double std;
-          std::optional<at::Generator> generator =
+          c10::optional<at::Generator> generator =
               pop(stack).toOptional<at::Generator>();
 
           pop(stack, tensor, mean, std);

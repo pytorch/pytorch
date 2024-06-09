@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 # This file establishes the public comptime interface to Dynamo.
 # This allows Dynamo users to execute arbitrary Python code while
 # Dynamo is symbolically evaluating their original programs.
@@ -15,9 +14,7 @@ import torch
 from torch.fx.experimental.symbolic_shapes import free_symbols
 
 from .exc import unimplemented
-from .variables import NewCellVariable
 from .variables.constant import ConstantVariable
-from .variables.misc import ClosureVariable
 from .variables.tensor import SymNodeVariable
 
 
@@ -129,7 +126,8 @@ class ComptimeVar:
         return self.__variable
 
     def __repr__(self):
-        return self.__variable.debug_repr()
+        # TODO: The default repr is pretty bad, do better
+        return repr(self.__variable)
 
     # TODO: API for adding a custom guard
 
@@ -149,20 +147,7 @@ class ComptimeContext:
         Retrieve the compile-time known information about a local.
         """
         tx = self.__get_tx(stacklevel)
-
-        # This is analogous to LOAD_DEREF
-        if hasattr(tx, "closure_cells") and name in tx.closure_cells:
-            cell = tx.closure_cells[name]
-            if isinstance(cell, ClosureVariable):
-                return ComptimeVar(tx.output.root_tx.symbolic_locals[cell.name])
-            else:
-                return ComptimeVar(tx.output.side_effects.load_cell(cell))
-        else:
-            r = tx.symbolic_locals[name]
-            if isinstance(r, NewCellVariable):
-                return ComptimeVar(tx.output.side_effects.load_cell(r))
-            else:
-                return ComptimeVar(r)
+        return ComptimeVar(tx.symbolic_locals[name])
 
     def graph_break(self, msg="ComptimeContext.graph_break"):
         """
@@ -202,9 +187,6 @@ class ComptimeContext:
         for _ in range(stacklevel):
             tx = tx.parent
         return tx
-
-    def print(self, val, *, file=None):
-        print(repr(val), file=file)
 
     def print_disas(self, *, file=None, stacklevel=0):
         """
@@ -293,19 +275,15 @@ class ComptimeContext:
 
 class _Comptime:
     @staticmethod
-    def __call__(fn, fallback_fn=lambda: None):
-        """fn gets called at compile time in TorchDynamo, calls fallback_fn otherwise"""
-        fallback_fn()
+    def __call__(fn):
+        """fn gets called at compile time in TorchDynamo, does nothing otherwise"""
+        return
 
     # Convenience wrappers that are more compact to use
 
     @staticmethod
     def graph_break():
         comptime(lambda ctx: ctx.graph_break())
-
-    @staticmethod
-    def print(e):
-        comptime(lambda ctx: ctx.print(ctx.get_local("e")), lambda: print(e))
 
     @staticmethod
     def print_graph():

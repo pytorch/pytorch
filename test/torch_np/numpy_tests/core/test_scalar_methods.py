@@ -14,7 +14,6 @@ from unittest import skipIf as skipif, SkipTest
 import pytest
 
 from pytest import raises as assert_raises
-
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -133,7 +132,7 @@ class TestAsIntegerRatio(TestCase):
                 df = np.longdouble(d)
             except (OverflowError, RuntimeWarning):
                 # the values may not fit in any float type
-                raise SkipTest("longdouble too small on this platform")  # noqa: B904
+                raise SkipTest("longdouble too small on this platform")  # noqa: TRY200
 
             assert_equal(nf / df, f, f"{n}/{d}")
 

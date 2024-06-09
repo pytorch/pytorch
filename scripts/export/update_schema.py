@@ -1,9 +1,8 @@
 import argparse
 import os
 
-from yaml import dump, Dumper
-
 from torch._export.serde import schema_check
+from yaml import dump, Dumper
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(prog="update_schema")
@@ -48,7 +47,7 @@ if __name__ == "__main__":
     if next_version is not None and next_version != commit.result["SCHEMA_VERSION"]:
         raise RuntimeError(
             f"Schema version is not updated from {commit.base['SCHEMA_VERSION']} to {next_version}.\n"
-            + "Please either:\n"
+            + f"Please either:\n"
             + "    1. update schema.py to not break compatibility.\n"
             + "    or 2. bump the schema version to the expected value.\n"
             + "    or 3. use --force-unsafe to override schema.yaml (not recommended).\n "

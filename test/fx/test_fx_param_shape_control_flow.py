@@ -20,7 +20,7 @@ class MyModuleBase(torch.nn.Module):
         return self.param
 
     def no_relu(self):
-        raise Exception("not implemented")  # noqa: TRY002
+        raise Exception("not implemented")
 
 
 class MyModuleParamShape(MyModuleBase):

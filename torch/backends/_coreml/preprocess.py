@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 import hashlib
 import json
 from typing import Dict, Tuple

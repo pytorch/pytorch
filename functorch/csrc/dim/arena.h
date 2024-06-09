@@ -55,7 +55,7 @@ struct Slice {
     T& operator[](int i) const {
         return begin_[i];
     }
-    std::optional<int> index(const T& value) {
+    c10::optional<int> index(const T& value) {
         for (int i : enumerate()) {
             if (begin_[i] == value) {
                 return i;

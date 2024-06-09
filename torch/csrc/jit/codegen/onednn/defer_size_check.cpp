@@ -41,7 +41,7 @@ class SizeCheckMover {
           // tensorexpr_elementwise_set that's defined in
           // torch/csrc/jit/runtime/symbolic_shape_registry_util.cpp
           OperatorMap<std::string> schemaMap = get_tensorexpr_elementwise_set();
-          std::optional<std::string> mapping =
+          c10::optional<std::string> mapping =
               schemaMap.find(u.user->getOperator());
           return mapping == "unary";
         });

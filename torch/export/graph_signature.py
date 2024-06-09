@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 import dataclasses
 from enum import auto, Enum
 from typing import Collection, Dict, List, Mapping, Optional, Set, Tuple, Union
@@ -41,8 +40,7 @@ class CustomObjArgument:
 
 @dataclasses.dataclass
 class ConstantArgument:
-    name: str
-    value: Union[int, float, bool, str, None]
+    value: Union[int, float, bool, None]
 
 
 ArgumentSpec = Union[

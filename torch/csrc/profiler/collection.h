@@ -24,7 +24,9 @@
 #include <torch/csrc/profiler/util.h>
 #include <torch/csrc/utils/python_stub.h>
 
-namespace torch::profiler::impl {
+namespace torch {
+namespace profiler {
+namespace impl {
 
 enum class EventType : uint8_t {
   TorchOp = 0,
@@ -59,9 +61,9 @@ struct TORCH_API RawTensorMetadata : RawTensorMetadataBase {
   RawTensorMetadata& operator=(RawTensorMetadata&&) noexcept = default;
   explicit RawTensorMetadata(const at::Tensor& t);
 
-  // Wrap `weak_self_` in `std::optional` and split device into components to
+  // Wrap `weak_self_` in `c10::optional` and split device into components to
   // keep struct default constructable. (which the std::array initializer needs)
-  std::optional<WeakTensor> weak_self_;
+  c10::optional<WeakTensor> weak_self_;
   c10::DeviceType device_type_{c10::DeviceType::CPU};
   c10::DeviceIndex device_index_{-1};
 };
@@ -83,8 +85,8 @@ struct TORCH_API TensorMetadata : public RawTensorMetadataBase {
   std::vector<int64_t> strides_;
 
   // Set during `calculateUniqueTensorIDs`.
-  std::optional<TensorID> id_;
-  std::optional<AllocationID> allocation_id_;
+  c10::optional<TensorID> id_;
+  c10::optional<AllocationID> allocation_id_;
 };
 
 using op_input_t = std::variant<
@@ -205,8 +207,8 @@ struct ExtraFields<EventType::Allocation> : RawAllocation {
     return {device_type_, device_index_};
   }
 
-  std::optional<TensorID> id_;
-  std::optional<AllocationID> allocation_id_;
+  c10::optional<TensorID> id_;
+  c10::optional<AllocationID> allocation_id_;
 };
 
 template <>
@@ -244,7 +246,7 @@ struct NNModuleInfo {
   struct ParameterInfo {
     std::string name_;
     TensorMetadata metadata_;
-    std::optional<TensorMetadata> grad_metadata_;
+    c10::optional<TensorMetadata> grad_metadata_;
   };
 
   PyModuleSelf self_;
@@ -259,7 +261,7 @@ struct NNModuleInfo {
 struct OptimizerInfo {
   struct ParameterInfo {
     TensorMetadata metadata_;
-    std::optional<TensorMetadata> grad_metadata_;
+    c10::optional<TensorMetadata> grad_metadata_;
     std::vector<std::pair<std::string, TensorMetadata>> state_;
   };
 
@@ -291,8 +293,8 @@ template <>
 struct ExtraFields<EventType::PyCall> : public PyExtraFieldsBase {
   struct args_t {
     PyFrameState frame_state_;
-    std::optional<NNModuleInfo> module_info_;
-    std::optional<OptimizerInfo> optimizer_info_;
+    c10::optional<NNModuleInfo> module_info_;
+    c10::optional<OptimizerInfo> optimizer_info_;
   };
 
   ExtraFields(
@@ -306,8 +308,8 @@ struct ExtraFields<EventType::PyCall> : public PyExtraFieldsBase {
         optimizer_{std::move(args.optimizer_info_)} {}
 
   PyFrameState callsite_;
-  std::optional<NNModuleInfo> module_;
-  std::optional<OptimizerInfo> optimizer_;
+  c10::optional<NNModuleInfo> module_;
+  c10::optional<OptimizerInfo> optimizer_;
 };
 
 template <>
@@ -338,7 +340,7 @@ struct ExtraFields<EventType::Kineto> {
   };
 
   std::string name_;
-  int64_t duration_ns_{0};
+  int64_t duration_us_{0};
   uint64_t correlation_id_{0};
   libkineto::ActivityType activity_type_;
   Flow flow;
@@ -630,8 +632,8 @@ class TORCH_API RecordQueue {
       std::unique_ptr<torch::profiler::impl::kineto::ActivityTraceWrapper>>
   getRecords(
       std::function<c10::time_t(c10::approx_time_t)> time_converter,
-      uint64_t start_time_ns,
-      uint64_t end_time_ns);
+      uint64_t start_time_us,
+      uint64_t end_time_us);
 
  private:
   uint32_t id_;
@@ -655,4 +657,6 @@ TORCH_API bool get_cuda_sync_enabled();
 TORCH_API void set_cuda_sync_enabled_fn(std::function<bool()>);
 TORCH_API void set_cuda_sync_enabled_val(bool);
 
-} // namespace torch::profiler::impl
+} // namespace impl
+} // namespace profiler
+} // namespace torch

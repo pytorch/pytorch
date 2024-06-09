@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 """
 This module implements observers which are used to collect statistics about
 the values observed during calibration (PTQ) or training (QAT).
@@ -245,8 +244,6 @@ class UniformQuantizationObserverBase(ObserverBase):
             torch.uint8,
             torch.int16,
             torch.int32,
-            torch.float8_e5m2,
-            torch.float8_e4m3fn,
         )
 
         assert self.dtype in _ALLOWED_DTYPES, f"Default Observer only works for {_ALLOWED_DTYPES} data type"
@@ -1456,7 +1453,7 @@ class PlaceholderObserver(ObserverBase):
 
     @torch.jit.export
     def calculate_qparams(self):
-        raise Exception(  # noqa: TRY002
+        raise Exception(
             "calculate_qparams should not be called for PlaceholderObserver"
         )
 
@@ -1482,7 +1479,7 @@ class RecordingObserver(ObserverBase):
 
     @torch.jit.export
     def calculate_qparams(self):
-        raise Exception("calculate_qparams should not be called for RecordingObserver")  # noqa: TRY002
+        raise Exception("calculate_qparams should not be called for RecordingObserver")
 
     @torch.jit.export
     def get_tensor_value(self):
@@ -1513,7 +1510,7 @@ class NoopObserver(ObserverBase):
 
     @torch.jit.export
     def calculate_qparams(self):
-        raise Exception("calculate_qparams should not be called for NoopObserver")  # noqa: TRY002
+        raise Exception("calculate_qparams should not be called for NoopObserver")
 
 class ReuseInputObserver(ObserverBase):
     r""" This observer is used when we want to reuse the observer from the operator
@@ -1536,7 +1533,7 @@ class ReuseInputObserver(ObserverBase):
 
     @torch.jit.export
     def calculate_qparams(self):
-        raise Exception("calculate_qparams should not be called for ReuseInputObserver")  # noqa: TRY002
+        raise Exception("calculate_qparams should not be called for ReuseInputObserver")
 
 def _is_observer_script_module(mod, obs_type_name):
     """Returns true if given mod is an instance of Observer script module."""
@@ -1607,10 +1604,10 @@ def load_observer_state_dict(mod, obs_dict):
                 )
     for k in missing_keys:
         if "observer" in k or "activation_post_process" in k:
-            raise Exception(f"Missing keys for observer {k} in state_dict")  # noqa: TRY002
+            raise Exception(f"Missing keys for observer {k} in state_dict")
     for k in unexpected_keys:
         if "observer" in k or "activation_post_process" in k:
-            raise Exception(f"Unexpected keys for observer {k} in state_dict")  # noqa: TRY002
+            raise Exception(f"Unexpected keys for observer {k} in state_dict")
 
 
 # Restrict activations to be in the range (0,127)

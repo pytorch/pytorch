@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 import contextlib
 import functools
 import logging
@@ -1185,14 +1184,12 @@ class FlatParamHandle:
         flat_param._local_shard = flat_param.data
         if self._offload_params:
             # Pin the memory for faster H2D transfer
-            flat_param._local_shard = flat_param._local_shard.pin_memory(
-                device=self.device
-            )
+            flat_param._local_shard = flat_param._local_shard.pin_memory()
             # Pre-allocate the sharded gradient on CPU to enable non-blocking
             # D2H transfer during the backward pass
             flat_param._cpu_grad = torch.zeros_like(
                 flat_param._local_shard, device=cpu_device
-            ).pin_memory(device=self.device)
+            ).pin_memory()
         if self._uses_param_mixed_precision:
             # For parameter mixed precision, we maintain a low precision
             # sharded tensor on the compute device to be all-gathered (for
@@ -1397,7 +1394,7 @@ class FlatParamHandle:
             tensor_list = list(
                 torch.chunk(padded_unsharded_flat_param, dist.get_world_size(pg))
             )
-            dist.all_gather(tensor_list, sharded_flat_param, group=pg)
+            work = dist.all_gather(tensor_list, sharded_flat_param, group=pg)
         else:
             dist.all_gather_into_tensor(
                 padded_unsharded_flat_param,

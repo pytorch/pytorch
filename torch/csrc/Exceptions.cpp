@@ -60,15 +60,13 @@ could not be completed because the input matrix is singular.",
   // NOLINTNEXTLINE(bugprone-assignment-in-if-condition)
   ASSERT_TRUE(
       THPException_OutOfMemoryError = PyErr_NewExceptionWithDoc(
-          "torch.OutOfMemoryError",
-          "Exception raised when device is out of memory",
+          "torch.cuda.OutOfMemoryError",
+          "Exception raised when CUDA is out of memory",
           PyExc_RuntimeError,
           nullptr));
-  PyTypeObject* type = (PyTypeObject*)THPException_OutOfMemoryError;
-  type->tp_name = "torch.OutOfMemoryError";
   ASSERT_TRUE(
       PyModule_AddObject(
-          module, "OutOfMemoryError", THPException_OutOfMemoryError) == 0);
+          module, "_OutOfMemoryError", THPException_OutOfMemoryError) == 0);
 
   // NOLINTNEXTLINE(bugprone-assignment-in-if-condition)
   ASSERT_TRUE(

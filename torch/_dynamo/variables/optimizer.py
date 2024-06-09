@@ -1,7 +1,7 @@
 # mypy: ignore-errors
 
 import weakref
-from typing import Dict, List, TYPE_CHECKING
+from typing import Dict, List
 
 import torch
 from torch.utils._pytree import tree_map_only
@@ -16,14 +16,12 @@ from ..source import (
 )
 from ..utils import GLOBAL_KEY_PREFIX
 
+from .base import VariableTracker
 from .constant import ConstantVariable
 from .dicts import ConstDictVariable
 from .lists import ListVariable
 from .misc import GetAttrVariable
 from .user_defined import UserDefinedObjectVariable
-
-if TYPE_CHECKING:
-    from .base import VariableTracker
 
 
 class ArgMappingException(Exception):
@@ -50,7 +48,14 @@ class OptimizerVariable(UserDefinedObjectVariable):
         tensor_to_source=None,
         **kwargs,
     ):
+        from ..decorators import mark_static_address
+
         super().__init__(value, **kwargs)
+
+        for group in self.value.param_groups:
+            for p in group["params"]:
+                mark_static_address(p)
+
         self.grad_to_source = grad_to_source or {}
         self.tensor_to_source = tensor_to_source or {}
         self.static_tensor_names = static_tensor_names or set()
@@ -96,12 +101,6 @@ class OptimizerVariable(UserDefinedObjectVariable):
             return GetAttrVariable(self, name, source=AttrSource(self.source, name))
 
         if name == "param_groups":
-            from ..decorators import mark_static_address
-
-            for group in self.value.param_groups:
-                for p in group["params"]:
-                    mark_static_address(p)
-
             self._set_capturable(tx)
 
         return super().var_getattr(tx, name)
@@ -114,8 +113,9 @@ class OptimizerVariable(UserDefinedObjectVariable):
         for g in self.value.param_groups:
             for p in g["params"]:
                 side_effects = tx.output.side_effects
-                variable = side_effects.id_to_variable.get(id(p), None)
-                if variable and side_effects.has_pending_mutation(variable):
+                if side_effects.has_pending_mutation(
+                    side_effects.id_to_variable.get(id(p), None)
+                ):
                     from ..exc import Unsupported
 
                     raise Unsupported("Pending mutation on parameter")
@@ -124,23 +124,9 @@ class OptimizerVariable(UserDefinedObjectVariable):
         from . import LazyVariableTracker
         from .builder import VariableBuilder
 
-        # We only set capturable if params are on cuda
-        # and the state is not initialized
-        def safe_to_set_capturable(group):
-            all_uninitialized = True
-            all_cuda = True
-
-            for p in group.get("params", list()):
-                all_cuda &= p.is_cuda
-                all_uninitialized &= p not in self.value.state
-
-            return "capturable" in group and all_uninitialized and all_cuda
-
-        # track indices to not set so we don't need to
-        # in the variable tracker realize the whole state
-        # we handle guarding the state specially
-        for ind, group in enumerate(self.value.param_groups):
-            if safe_to_set_capturable(group):
+        # Set capturable to True
+        for group in self.value.param_groups:
+            if "capturable" in group:
                 group["capturable"] = True
 
         param_groups_vt = LazyVariableTracker.realize_all(
@@ -148,11 +134,12 @@ class OptimizerVariable(UserDefinedObjectVariable):
                 self.value.param_groups
             )
         )
-        for ind, param_group_vt in enumerate(param_groups_vt.items):
+        for param_group_vt in param_groups_vt.items:
             key = ConstDictVariable._HashableTracker(
                 ConstantVariable.create("capturable")
             )
-            param_group_vt.items[key] = ConstantVariable.create(True)
+            if key in param_group_vt.items:
+                param_group_vt.items[key] = ConstantVariable.create(True)
 
     def get_python_args(self, *args, **kwargs):
         """Get python values equivalent to the variable tracker args"""
@@ -170,7 +157,7 @@ class OptimizerVariable(UserDefinedObjectVariable):
             ):
                 return self.value.param_groups[arg.source.index]
 
-            raise ArgMappingException
+            raise ArgMappingException()
 
         new_args = [map_arg(arg) for arg in args]
         new_kwargs = {k: map_arg(v) for k, v in kwargs.items()}

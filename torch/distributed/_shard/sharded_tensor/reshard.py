@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 import copy
 from typing import List, Tuple
 

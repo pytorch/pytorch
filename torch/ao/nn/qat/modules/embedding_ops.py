@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 import torch
 from torch import Tensor
 import torch.nn as nn
@@ -43,7 +42,7 @@ class Embedding(nn.Embedding):
                            self.sparse)
 
     @classmethod
-    def from_float(cls, mod, use_precomputed_fake_quant=False):
+    def from_float(cls, mod):
         r"""Create a qat module from a float module
 
             Args: `mod` a float module, either produced by torch.ao.quantization utilities
@@ -113,7 +112,7 @@ class EmbeddingBag(nn.EmbeddingBag):
                                self.padding_idx)
 
     @classmethod
-    def from_float(cls, mod, use_precomputed_fake_quant=False):
+    def from_float(cls, mod):
         r"""Create a qat module from a float module
 
             Args: `mod` a float module, either produced by torch.ao.quantization utilities

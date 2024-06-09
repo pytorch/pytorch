@@ -5,9 +5,9 @@ import functools
 from importlib import import_module
 from typing import Any, List, Optional
 
-import torch
-
 from functorch.compile import min_cut_rematerialization_partition
+
+import torch
 from torch import _guards
 from torch._functorch import config as functorch_config
 from torch._functorch.compilers import ts_compile
@@ -21,22 +21,7 @@ This file contains TorchDynamo backends intended for debugging uses.
 
 @register_backend
 def eager(gm, fake_tensor_inputs):
-    return gm.forward
-
-
-@register_backend
-def eager_noexcept(gm, fake_tensor_inputs):
-    # This backend is intended to check that dynamo-generated GraphModules
-    # do not cause errors.
-    def inner(*args):
-        try:
-            return gm(*args)
-        except Exception as e:
-            raise torch._dynamo.exc.TorchDynamoException(
-                "Unexpected exception when running generated GraphModule"
-            ) from e
-
-    return inner
+    return gm
 
 
 @register_backend
@@ -83,15 +68,11 @@ def boxed_nop(fx_g, example_inputs):
 # Useful for debugging purpose
 # aot_eager uses AOT Autograd backend with nop compiler. It is helpful in debugging.
 aot_eager = aot_autograd(
-    fw_compiler=boxed_nop,
-    partition_fn=min_cut_rematerialization_partition,
-    keep_inference_input_mutations=True,
+    fw_compiler=boxed_nop, partition_fn=min_cut_rematerialization_partition
 )
 register_backend(name="aot_eager", compiler_fn=aot_eager)
 
-aot_eager_default_partitioner = aot_autograd(
-    fw_compiler=boxed_nop, keep_inference_input_mutations=True
-)
+aot_eager_default_partitioner = aot_autograd(fw_compiler=boxed_nop)
 register_backend(
     name="aot_eager_default_partitioner", compiler_fn=aot_eager_default_partitioner
 )
@@ -144,7 +125,7 @@ class TestingOnlyCompileError(Exception):
 def relu_compile_error_TESTING_ONLY(gm: torch.fx.GraphModule, example_inputs):
     for node in gm.graph.nodes:
         if node.target == torch.relu:
-            raise ReluCompileError
+            raise ReluCompileError()
     return gm
 
 
@@ -180,7 +161,7 @@ def non_leaf_compile_error_TESTING_ONLY(gm: torch.fx.GraphModule, example_inputs
         return gm
     for t in example_inputs:
         if not t.is_leaf:
-            raise TestingOnlyCompileError
+            raise TestingOnlyCompileError()
     return gm
 
 

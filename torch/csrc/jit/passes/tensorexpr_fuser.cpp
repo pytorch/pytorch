@@ -780,7 +780,7 @@ class TensorExprFuser {
     }
   }
 
-  std::optional<Node*> tryMerge(Node* fusion_group, Node* to_merge) {
+  c10::optional<Node*> tryMerge(Node* fusion_group, Node* to_merge) {
     if (!canMerge(fusion_group, to_merge)) {
       return c10::nullopt;
     }

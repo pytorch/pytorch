@@ -39,9 +39,6 @@ class VirtualGuardImpl final : public DeviceGuardImplInterface {
   Stream getStream(Device d) const noexcept override {
     return impl_->getStream(d);
   }
-  Stream getNewStream(Device d, int priority = 0) const override {
-    return impl_->getNewStream(d, priority);
-  }
   Stream getDefaultStream(Device d) const override {
     return impl_->getDefaultStream(d);
   }
@@ -85,15 +82,6 @@ class VirtualGuardImpl final : public DeviceGuardImplInterface {
   void recordDataPtrOnStream(const c10::DataPtr& data_ptr, const Stream& stream)
       const override {
     impl_->recordDataPtrOnStream(data_ptr, stream);
-  }
-
-  double elapsedTime(void* event1, void* event2, const DeviceIndex device_index)
-      const override {
-    return impl_->elapsedTime(event1, event2, device_index);
-  }
-
-  void synchronizeEvent(void* event) const override {
-    return impl_->synchronizeEvent(event);
   }
 
  private:

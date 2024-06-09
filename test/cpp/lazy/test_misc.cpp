@@ -63,10 +63,10 @@ TEST(HashTest, Sanity) {
   test_hash_repeatable_sensitive(c10::Scalar(true), c10::Scalar(false));
   test_hash_repeatable_sensitive(c10::Scalar(12345), c10::Scalar(12354));
 
-  // std::optional
+  // c10::optional
   test_hash_repeatable_sensitive(
-      std::optional<std::string>("I have value!"),
-      std::optional<std::string>(c10::nullopt));
+      c10::optional<std::string>("I have value!"),
+      c10::optional<std::string>(c10::nullopt));
 
   // Containers
   auto a = std::vector<int32_t>({0, 1, 1, 2, 3, 5, 8});

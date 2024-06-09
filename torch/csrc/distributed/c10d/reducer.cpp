@@ -20,7 +20,6 @@
 #include <torch/csrc/autograd/utils/lambda_post_hook.h>
 #include <torch/csrc/distributed/c10d/comm.hpp>
 #include <torch/csrc/distributed/c10d/logger.hpp>
-#include <utility>
 
 namespace c10d {
 namespace {
@@ -51,7 +50,7 @@ class CpuTimer : public Timer {
  public:
   explicit CpuTimer(c10::Device /* unused */) {}
 
-  std::optional<int64_t> measureDifference(Event start, Event end) override {
+  c10::optional<int64_t> measureDifference(Event start, Event end) override {
     int64_t start_time = getTimeRef(start);
     int64_t end_time = getTimeRef(end);
     // If cpu_end_time is not recorded in this iteration,
@@ -90,7 +89,7 @@ std::vector<at::Tensor> extractTensors(const c10::IValue& result) {
 Reducer::Reducer(
     std::vector<at::Tensor> params,
     std::vector<std::vector<size_t>> bucket_indices,
-    const std::vector<size_t>& per_bucket_size_limits,
+    std::vector<size_t> per_bucket_size_limits,
     c10::intrusive_ptr<c10d::ProcessGroup> process_group,
     std::vector<bool> expect_sparse_gradients,
     int64_t bucket_bytes_cap,
@@ -186,8 +185,7 @@ Reducer::Reducer(
       hooks_.emplace_back(
           grad_accumulator->add_post_hook(
               std::make_unique<torch::autograd::utils::LambdaPostHook>(
-                  [this, variable_index](
-                      const torch::autograd::variable_list& outputs,
+                  [=](const torch::autograd::variable_list& outputs,
                       const torch::autograd::variable_list& /* unused */) {
 #ifndef _WIN32
                     this->rpc_context_.set(
@@ -451,7 +449,7 @@ void Reducer::mark_variable_ready_sparse(size_t variable_index) {
     if (sparse_metadata_) {
       grad = grad.coalesce();
       REDUCER_CHECK(
-          !param_names_.empty(), logger_, "No parameter names were found");
+          param_names_.size() != 0, logger_, "No parameter names were found");
       std::string& param_name = param_names_[variable_index];
       auto iter = sparse_metadata_->find(param_name);
       REDUCER_CHECK(
@@ -530,7 +528,7 @@ void Reducer::push_rebuilt_params_for_all_indices() {
 
 void Reducer::push_rebuilt_params(const size_t& index) {
   rebuilt_params_.push_back(params_[index]);
-  rebuilt_param_indices_.push_back(static_cast<int64_t>(index));
+  rebuilt_param_indices_.push_back(index);
 }
 
 void Reducer::set_divide_factor() {
@@ -634,7 +632,7 @@ void Reducer::delay_all_reduce() {
 }
 
 void Reducer::set_logger(std::weak_ptr<c10d::Logger> logger) {
-  logger_ = std::move(logger);
+  logger_ = logger;
 }
 
 // The function `autograd_hook` is called after the gradient for a
@@ -646,6 +644,14 @@ void Reducer::autograd_hook(size_t index) {
     first_autograd_hook_called_ = true;
     num_bwd_calls_++;
   }
+  // Ignore if we don't expect to be called.
+  // This may be the case if the user wants to accumulate gradients
+  // for number of iterations before reducing them.
+  if (!expect_autograd_hooks_) {
+    return;
+  }
+
+  grad_ready_order_indices_.push_back(index);
 
   // See Note [Skip allreducing local_used_map_dev]
   if (dynamic_graph_find_unused() || static_graph_first_iteration()) {
@@ -660,7 +666,7 @@ void Reducer::autograd_hook(size_t index) {
     auto& variable = get_param_from_index(index);
     runGradCallbackForVariable(variable, [&](auto& grad) {
       if (grad.defined()) {
-        local_used_map_[static_cast<int64_t>(index)] = 1;
+        local_used_map_[index] = 1;
       }
       // The gradient is never modified.
       return false;
@@ -671,15 +677,6 @@ void Reducer::autograd_hook(size_t index) {
     numGradHooksTriggeredMap_[index] += 1;
     return;
   }
-
-  // Ignore if we don't expect to be called.
-  // This may be the case if the user wants to accumulate gradients
-  // for number of iterations before reducing them.
-  if (!expect_autograd_hooks_) {
-    return;
-  }
-
-  grad_ready_order_indices_.push_back(static_cast<int64_t>(index));
 
   // If `find_unused_parameters_` is true there may be model parameters that
   // went unused when computing the model output, they won't be part of the
@@ -913,7 +910,7 @@ void Reducer::mark_variable_ready(size_t variable_index) {
       all_reduce_local_used_map();
     }
 
-    torch::autograd::Engine::get_default_engine().queue_callback([this] {
+    torch::autograd::Engine::get_default_engine().queue_callback([=] {
       std::lock_guard<std::mutex> lock(this->mutex_);
       if (should_collect_runtime_stats()) {
         record_backward_compute_end_time();
@@ -967,9 +964,7 @@ void Reducer::all_reduce_bucket(Bucket& bucket) {
       const auto offset = bucket.offsets[i];
       const auto length = bucket.lengths[i];
       if (!bucket.bucket_views_in[i].is_alias_of(tensor)) {
-        tensor
-            .narrow(
-                0, static_cast<int64_t>(offset), static_cast<int64_t>(length))
+        tensor.narrow(0, offset, length)
             .copy_(bucket.bucket_views_in[i].flatten());
       }
     }
@@ -1246,10 +1241,7 @@ void Reducer::initialize_bucket_views(Reducer::Bucket& bucket) {
       // AccumulateGrad will do the same when stashing grads for non-dense
       // params.
       bucket.bucket_views_in.push_back(
-          gradients
-              .narrow(
-                  0, static_cast<int64_t>(offset), static_cast<int64_t>(length))
-              .view(v.sizes()));
+          gradients.narrow(0, offset, length).view(v.sizes()));
     }
     // By default `bucket_views_out` and `bucket_views_in` are
     // essentially the same thing.
@@ -1305,10 +1297,7 @@ void Reducer::populate_bucket_views_out(
       // AccumulateGrad will do the same when stashing grads for non-dense
       // params.
       bucket.bucket_views_out.push_back(
-          tensor
-              .narrow(
-                  0, static_cast<int64_t>(offset), static_cast<int64_t>(length))
-              .view(v.sizes()));
+          tensor.narrow(0, offset, length).view(v.sizes()));
     }
   }
 }
@@ -1525,8 +1514,7 @@ void Reducer::finalize_bucket_dense(Bucket& bucket) {
       // parameters are always used. Then we only pay the overhead cost if
       // there is indeed a parameter that is locally unused, because we need
       // to check if it's also globally unused.
-      int64_t variable_index =
-          static_cast<int64_t>(bucket.variable_indices[intra_bucket_index]);
+      size_t variable_index = bucket.variable_indices[intra_bucket_index];
       // Note: global_unused might not be global yet. As we lazily wait for
       // the reduction to complete, it becomes really global only if we get to
       // the point as below where we wait for the reduction work, make D2H
@@ -1726,7 +1714,7 @@ void Reducer::sync_bucket_indices(
   for (const auto i : c10::irange(num_buckets)) {
     auto bucket_size = bucket_indices.at(i).size();
     bucket_sizes.push_back(bucket_size);
-    total_size += static_cast<int64_t>(bucket_size);
+    total_size += bucket_size;
   }
 
   at::TensorOptions options;
@@ -1741,11 +1729,10 @@ void Reducer::sync_bucket_indices(
   for (const auto i : c10::irange(num_buckets)) {
     const auto& bucket_size = bucket_indices.at(i).size();
     for (const auto j : c10::irange(bucket_size)) {
-      indices_accessor[indices_accessor_Index++] =
-          static_cast<int>(bucket_indices[i][j]);
+      indices_accessor[indices_accessor_Index++] = bucket_indices[i][j];
     }
   }
-  indices_accessor[indices_accessor_Index] = static_cast<int>(num_buckets);
+  indices_accessor[indices_accessor_Index] = num_buckets;
 
   // Copy CPU tensor to device tensor, as the process_group_ could be NCCL and
   // it can only broadcast device tensors.
@@ -1781,7 +1768,7 @@ void Reducer::sync_bucket_indices(
   bucket_indices.reserve(num_buckets);
   indices_accessor_Index = 0;
   for (const auto i : c10::irange(num_buckets)) {
-    const auto& bucket_size = bucket_sizes_accessor[static_cast<int64_t>(i)];
+    const auto& bucket_size = bucket_sizes_accessor[i];
     std::vector<size_t> bucket;
     bucket.reserve(bucket_size);
     for (const auto j : c10::irange(bucket_size)) {
@@ -2073,9 +2060,7 @@ struct BucketKey {
   BucketKey(c10::ScalarType type, c10::Device device)
       : type(type), device(device) {}
 
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-const*)
   const c10::ScalarType type;
-  // NOLINTNEXTLINE(cppcoreguidelines-avoid-const*)
   const c10::Device device;
 
   // See torch/csrc/utils/hash.h for dispatch code.
@@ -2096,7 +2081,7 @@ compute_bucket_assignment_by_size(
     const std::vector<size_t>& bucket_size_limits,
     const std::vector<bool>& expect_sparse_gradient,
     const std::vector<int64_t>& tensor_indices,
-    const std::optional<std::weak_ptr<c10d::Logger>>& logger) {
+    const c10::optional<std::weak_ptr<c10d::Logger>>& logger) {
   // Either expect_sparse_gradient is not specified or it has as many elements
   // as the vector with tensors.
   TORCH_INTERNAL_ASSERT(
@@ -2221,7 +2206,7 @@ compute_bucket_assignment_by_size(
 void verify_params_across_processes(
     const c10::intrusive_ptr<c10d::ProcessGroup>& process_group,
     const std::vector<at::Tensor>& params,
-    const std::optional<std::weak_ptr<c10d::Logger>>& logger) {
+    const c10::optional<std::weak_ptr<c10d::Logger>>& logger) {
   // First verify number of parameters to avoid inconsistent inputs into
   // broadcast which can cause a crash.
   // See https://github.com/pytorch/pytorch/issues/73547
@@ -2277,10 +2262,10 @@ void verify_params_across_processes(
   i = 0;
   for (const auto& t : params) {
     for (const auto& sz : t.sizes()) {
-      metadata_accessor[static_cast<int64_t>(i++)] = sz;
+      metadata_accessor[i++] = sz;
     }
     for (const auto& str : t.strides()) {
-      metadata_accessor[static_cast<int64_t>(i++)] = str;
+      metadata_accessor[i++] = str;
     }
   }
 
@@ -2366,18 +2351,10 @@ void Reducer::reset_state() {
   // Ensure forward can run despite previous backward not succeeding.
   expect_autograd_hooks_ = false;
   require_finalize_ = false;
-  first_autograd_hook_called_ = false;
 
   // Unset allreduce division factor, as it may change in next backwards pass
   // when running with DDP join mode.
   div_factor_ = kUnsetDivFactor;
-
-  // Reset unused parameter accounting.
-  // See Note [local_used_map_ -> local_used_map_dev copying]
-  if (find_unused_parameters_) {
-    local_used_map_.zero_();
-    local_used_map_reduced_ = false;
-  }
 }
 
 } // namespace c10d

@@ -38,7 +38,6 @@ from collections import defaultdict
 from typing import Callable, Dict, Iterable, List, Optional, Sequence, Set, Tuple
 
 import yaml
-
 from torchgen.api import cpp
 from torchgen.api.python import (
     arg_parser_output_exprs,
@@ -136,7 +135,6 @@ _SKIP_PYTHON_BINDINGS = [
     "_reshape_copy_out",
     "copy_sparse_to_sparse_",
     "copy_",
-    "_foreach_copy",
     "numpy_T",
     "matrix_H",
     "mT",

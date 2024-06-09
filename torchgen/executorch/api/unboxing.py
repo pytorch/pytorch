@@ -57,7 +57,7 @@ class Unboxing:
         for arg in args:
             # expecting only Argument
             if not isinstance(arg.argument, Argument):
-                raise Exception(  # noqa: TRY002
+                raise Exception(
                     f"Unexpected argument type, expecting `Argument` but got {arg}"
                 )
             argument: Argument = arg.argument
@@ -99,9 +99,7 @@ class Unboxing:
                 arg_name=arg_name, out_name=out_name, t=t, ctype=ctype
             )
         else:
-            raise Exception(  # noqa: TRY002
-                f"Cannot handle type {t}. arg_name: {arg_name}"
-            )  # noqa: TRY002
+            raise Exception(f"Cannot handle type {t}. arg_name: {arg_name}")
         return out_name, ctype, code, decl
 
     def _gen_code_base_type(

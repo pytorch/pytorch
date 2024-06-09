@@ -116,8 +116,7 @@ class TestPrioritizations:
         """Divides list of tests into two based on the top n% of scores.  The
         first list is the top, and the second is the rest."""
         tests = [x[1] for x in self._traverse_scores()]
-        index = n * len(tests) // 100 + 1
-        return tests[:index], tests[index:]
+        return tests[: n * len(tests) // 100], tests[n * len(tests) // 100 :]
 
     def get_info_str(self, verbose: bool = True) -> str:
         info = ""

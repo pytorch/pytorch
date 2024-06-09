@@ -45,7 +45,7 @@ std::vector<StackEntry> _pythonCallstack() {
 
 SourceRange getPythonInterpreterSourceRange() {
   auto cs = pythonCallstack();
-  std::optional<std::string> source_filename;
+  c10::optional<std::string> source_filename;
   size_t source_line = 0;
   std::stringstream stack_trace;
   for (const auto& entry : cs) {

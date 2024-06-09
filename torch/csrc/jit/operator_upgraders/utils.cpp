@@ -10,7 +10,7 @@
 
 namespace torch::jit {
 
-std::optional<UpgraderEntry> findUpgrader(
+c10::optional<UpgraderEntry> findUpgrader(
     const std::vector<UpgraderEntry>& upgraders_for_schema,
     size_t current_version) {
   // we want to find the entry which satisfies following two conditions:
@@ -51,7 +51,7 @@ bool isOpSymbolCurrent(const std::string& name, size_t current_version) {
 
 std::vector<std::string> loadPossibleHistoricOps(
     const std::string& name,
-    std::optional<size_t> version) {
+    c10::optional<size_t> version) {
   std::vector<std::string> possibleSchemas;
 
   if (!version.has_value()) {

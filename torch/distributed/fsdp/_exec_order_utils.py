@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 import itertools
 import warnings
 from enum import auto, Enum

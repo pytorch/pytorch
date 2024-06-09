@@ -13,7 +13,7 @@ namespace jit {
 // Struct storing metadata of an operator that can be useful for versioning
 struct OperatorInfo {
   // The number of arguments within the schema of the op
-  std::optional<int> num_schema_args;
+  c10::optional<int> num_schema_args;
 };
 
 struct RuntimeCompatibilityInfo {

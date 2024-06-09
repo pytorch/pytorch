@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 r"""Definition of the DataLoader and associated iterators that subclass _BaseDataLoaderIter.
 
 To support these two classes, in `./_utils` we define many utility methods and
@@ -522,9 +521,11 @@ class DataLoader(Generic[T_co]):
                 "DataLoader is not able to compute a suggested max number of worker in current system.")
 
             warn_msg = (
-                f"This DataLoader will create {num_worker_created} worker processes in total. {suggested_max_worker_msg} "
+                "This DataLoader will create {} worker processes in total. {} "
                 "Please be aware that excessive worker creation might get DataLoader running slow or even freeze, "
-                "lower the worker number to avoid potential slowness/freeze if necessary.")
+                "lower the worker number to avoid potential slowness/freeze if necessary.").format(
+                    num_worker_created,
+                    suggested_max_worker_msg)
             return warn_msg
 
         if not self.num_workers or self.num_workers == 0:
@@ -632,8 +633,9 @@ class _BaseDataLoaderIter:
             if self._dataset_kind == _DatasetKind.Iterable and \
                     self._IterableDataset_len_called is not None and \
                     self._num_yielded > self._IterableDataset_len_called:
-                warn_msg = (f"Length of IterableDataset {self._dataset} was reported to be {self._IterableDataset_len_called}"
-                            f"(when accessing len(dataloader)), but {self._num_yielded} samples have been fetched. ")
+                warn_msg = ("Length of IterableDataset {} was reported to be {} (when accessing len(dataloader)), but {} "
+                            "samples have been fetched. ").format(self._dataset, self._IterableDataset_len_called,
+                                                                  self._num_yielded)
                 if self._num_workers > 0:
                     warn_msg += ("For multiprocessing data-loading, this could be caused by not properly configuring the "
                                  "IterableDataset replica at each worker. Please see "

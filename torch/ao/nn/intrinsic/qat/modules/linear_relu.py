@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 import torch
 import torch.ao.nn.qat as nnqat
 import torch.ao.nn.intrinsic as nni
@@ -37,8 +36,8 @@ class LinearReLU(nnqat.Linear, nni._FusedModule):
         return F.relu(F.linear(input, self.weight_fake_quant(self.weight), self.bias))
 
     @classmethod
-    def from_float(cls, mod, use_precomputed_fake_quant=False):
-        return super().from_float(mod, use_precomputed_fake_quant)
+    def from_float(cls, mod):
+        return super().from_float(mod)
 
     def to_float(self):
         linear = torch.nn.Linear(self.in_features, self.out_features, self.bias is not None)

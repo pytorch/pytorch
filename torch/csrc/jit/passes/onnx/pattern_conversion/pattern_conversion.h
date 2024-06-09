@@ -1,7 +1,6 @@
 #pragma once
 
 #include <torch/csrc/jit/ir/ir.h>
-#include <torch/csrc/utils/pybind.h>
 
 namespace torch {
 namespace jit {
@@ -39,8 +38,7 @@ namespace jit {
 TORCH_API std::vector<Value*> ConvertPatternFromSubblock(
     Block* new_block,
     Node* old_node,
-    py::dict& env,
-    py::set& values_in_env);
+    std::unordered_map<Value*, Value*>& env);
 
 } // namespace jit
 } // namespace torch

@@ -117,7 +117,7 @@ void SavedVariable::reset_data() {
 }
 
 SavedVariable::SavedVariable(
-    const std::optional<Variable>& variable,
+    const c10::optional<Variable>& variable,
     bool is_output,
     bool is_inplace_on_view)
     : SavedVariable(

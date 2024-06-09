@@ -13,7 +13,7 @@ ARTIFACTS = [
     "test-reports",
 ]
 ARTIFACT_REGEX = re.compile(
-    r"test-reports-test-(?P<name>[\w\-]+)-\d+-\d+-(?P<runner>[\w\.]+)_(?P<job>\d+).zip"
+    r"test-reports-test-(?P<name>\w+)-\d+-\d+-(?P<runner>[\w\.]+)_(?P<job>\d+).zip"
 )
 
 
@@ -22,9 +22,7 @@ def upload_dynamo_perf_stats_to_rockset(
     workflow_run_id: int,
     workflow_run_attempt: int,
     head_branch: str,
-    match_filename: str,
 ) -> List[Dict[str, Any]]:
-    match_filename_regex = re.compile(match_filename)
     perf_stats = []
     with TemporaryDirectory() as temp_dir:
         print("Using temporary directory:", temp_dir)
@@ -51,14 +49,17 @@ def upload_dynamo_perf_stats_to_rockset(
 
                 for csv_file in Path(".").glob("**/*.csv"):
                     filename = os.path.splitext(os.path.basename(csv_file))[0]
-                    if not re.match(match_filename_regex, filename):
-                        continue
                     print(f"Processing {filename} from {path}")
 
                     with open(csv_file) as csvfile:
                         reader = csv.DictReader(csvfile, delimiter=",")
 
                         for row in reader:
+                            # If the row doesn't have a dev and a name column, it's not
+                            # a torch dynamo perf stats csv file
+                            if "dev" not in row or "name" not in row:
+                                break
+
                             row.update(
                                 {
                                     "workflow_id": workflow_run_id,  # type: ignore[dict-item]
@@ -104,36 +105,14 @@ if __name__ == "__main__":
         "--head-branch",
         type=str,
         required=True,
-        help="head branch of the workflow",
-    )
-    parser.add_argument(
-        "--rockset-collection",
-        type=str,
-        required=True,
-        help="the name of the Rockset collection to store the stats",
-    )
-    parser.add_argument(
-        "--rockset-workspace",
-        type=str,
-        default="commons",
-        help="the name of the Rockset workspace to store the stats",
-    )
-    parser.add_argument(
-        "--match-filename",
-        type=str,
-        default="",
-        help="the regex to filter the list of CSV files containing the records to upload",
+        help="Head branch of the workflow",
     )
     args = parser.parse_args()
     perf_stats = upload_dynamo_perf_stats_to_rockset(
-        args.repo,
-        args.workflow_run_id,
-        args.workflow_run_attempt,
-        args.head_branch,
-        args.match_filename,
+        args.repo, args.workflow_run_id, args.workflow_run_attempt, args.head_branch
     )
     upload_to_rockset(
-        collection=args.rockset_collection,
+        collection="torch_dynamo_perf_stats",
         docs=perf_stats,
-        workspace=args.rockset_workspace,
+        workspace="inductor",
     )

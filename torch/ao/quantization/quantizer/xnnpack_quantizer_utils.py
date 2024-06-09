@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 import itertools
 import operator
 from dataclasses import dataclass
@@ -14,8 +13,6 @@ from torch.ao.quantization.pt2e.utils import (
     _conv1d_bn_example_inputs,
     _conv2d_bn_example_inputs,
     _get_aten_graph_module_for_pattern,
-    _is_conv_node,
-    _is_conv_transpose_node,
 )
 from torch.ao.quantization.quantizer import (
     QuantizationAnnotation,
@@ -347,9 +344,22 @@ def _do_annotate_conv_relu(
             continue
         relu_node = n
         maybe_conv_node = n.args[0]
-
-        is_conv_node = _is_conv_transpose_node if is_conv_transpose else _is_conv_node
-        if not isinstance(maybe_conv_node, Node) or not is_conv_node(maybe_conv_node):
+        # TODO: refactor with is_conv_node and is_conv_transpose_node
+        if is_conv_transpose:
+            conv_ops = [
+                torch.ops.aten.conv_transpose1d,
+                torch.ops.aten.conv_transpose2d.input,
+            ]
+        else:
+            conv_ops = [
+                torch.ops.aten.conv1d.default,
+                torch.ops.aten.conv2d.default,
+            ]
+        if (
+            not isinstance(maybe_conv_node, Node)
+            or maybe_conv_node.op != "call_function"
+            or maybe_conv_node.target not in conv_ops
+        ):
             continue
         conv_node = maybe_conv_node
 
@@ -972,7 +982,7 @@ def _annotate_cat(
 
         if cat_node.target != torch.ops.aten.cat.default:
             # TODO: change this to AnnotationException
-            raise Exception(  # noqa: TRY002
+            raise Exception(
                 f"Expected cat node: torch.ops.aten.cat.default, but found {cat_node.target}"
                 " please check if you are calling the correct capture API"
             )

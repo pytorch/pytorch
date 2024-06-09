@@ -1,10 +1,9 @@
 # Owner(s): ["module: onnx"]
-import pytorch_test_common
-
 import torch
 import torch._dynamo
 import torch.fx
 
+from torch._custom_op import impl as custom_op
 from torch.onnx._internal.fx.passes import _utils as pass_utils
 from torch.testing._internal import common_utils
 
@@ -59,25 +58,32 @@ class TestFxPasses(common_utils.TestCase):
         ), f"Expected all names to be unique, got {nodes}"
 
     def test_onnx_dynamo_export_raises_when_model_contains_unsupported_fx_nodes(self):
-        @torch.library.custom_op(
-            "mylibrary::foo_op", device_types="cpu", mutates_args=()
-        )
+        @custom_op.custom_op("mylibrary::foo_op")
         def foo_op(x: torch.Tensor) -> torch.Tensor:
+            ...
+
+        @custom_op.custom_op("mylibrary::bar_op")
+        def bar_op(x: torch.Tensor) -> torch.Tensor:
+            ...
+
+        @foo_op.impl_abstract()
+        def foo_op_impl_abstract(x):
+            return torch.empty_like(x)
+
+        @foo_op.impl("cpu")
+        def foo_op_impl(x):
             return x + 1
 
-        @torch.library.custom_op(
-            "mylibrary::bar_op", device_types="cpu", mutates_args=()
-        )
-        def bar_op(x: torch.Tensor) -> torch.Tensor:
+        @bar_op.impl_abstract()
+        def bar_op_impl_abstract(x):
+            return torch.empty_like(x)
+
+        @bar_op.impl("cpu")
+        def bar_op_impl(x):
             return x + 2
 
-        @foo_op.register_fake
-        def _(x):
-            return torch.empty_like(x)
-
-        @bar_op.register_fake
-        def _(x):
-            return torch.empty_like(x)
+        torch._dynamo.allow_in_graph(foo_op)
+        torch._dynamo.allow_in_graph(bar_op)
 
         def func(x, y, z):
             return foo_op(x) + bar_op(y) + z
@@ -98,10 +104,6 @@ class TestFxPasses(common_utils.TestCase):
 
 @common_utils.instantiate_parametrized_tests
 class TestModularizePass(common_utils.TestCase):
-    @pytorch_test_common.xfail(
-        error_message="'torch_nn_modules_activation_GELU_used_gelu_1' not found",
-        reason="optimizer",
-    )
     @common_utils.parametrize(
         "is_exported_program",
         [
@@ -152,10 +154,6 @@ class TestModularizePass(common_utils.TestCase):
         )
         self.assertFalse(any("ReLU" in name for name in function_proto_names))
 
-    @pytorch_test_common.xfail(
-        error_message="'torch_nn_modules_activation_ReLU_relu_1' not found",
-        reason="optimizer",
-    )
     @common_utils.parametrize(
         "is_exported_program",
         [
@@ -197,10 +195,6 @@ class TestModularizePass(common_utils.TestCase):
         self.assertIn("torch_nn_modules_activation_ReLU_relu_1", function_proto_names)
         self.assertIn("torch_nn_modules_activation_ReLU_relu_2", function_proto_names)
 
-    @pytorch_test_common.xfail(
-        error_message="'torch_nn_modules_activation_ReLU_inner_module_relu_1' not found",
-        reason="optimizer",
-    )
     @common_utils.parametrize(
         "is_exported_program",
         [

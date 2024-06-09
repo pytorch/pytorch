@@ -61,5 +61,6 @@ readability-simplify-subscript-expr,
 readability-string-compare,
 '
 HeaderFilterRegex: '^(aten/|c10/|torch/).*$'
+AnalyzeTemporaryDtors: false
 WarningsAsErrors: '*'
 ...

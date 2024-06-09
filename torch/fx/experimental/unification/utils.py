@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 __all__ = ["hashable", "transitive_get", "raises", "reverse_dict", "xfail", "freeze"]
 def hashable(x):
     try:
@@ -83,7 +82,7 @@ def reverse_dict(d):
 def xfail(func):
     try:
         func()
-        raise Exception("XFailed test passed")  # pragma:nocover  # noqa: TRY002
+        raise Exception("XFailed test passed")  # pragma:nocover
     except Exception:
         pass
 

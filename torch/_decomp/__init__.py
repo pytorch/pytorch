@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 import inspect
 from collections import defaultdict
 from functools import wraps
@@ -280,7 +279,6 @@ def core_aten_decompositions() -> Dict[torch._ops.OperatorBase, Callable]:
             aten.linalg_cross,
             aten.cudnn_batch_norm,
             aten.cudnn_batch_norm_backward,
-            aten.miopen_batch_norm_backward,
             aten.deg2rad,
             aten.deg2rad_,
             aten.detach,

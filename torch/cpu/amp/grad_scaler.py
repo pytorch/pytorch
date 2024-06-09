@@ -1,5 +1,3 @@
-from typing_extensions import deprecated
-
 import torch
 
 __all__ = ["GradScaler"]
@@ -8,14 +6,9 @@ __all__ = ["GradScaler"]
 class GradScaler(torch.amp.GradScaler):
     r"""
     See :class:`torch.amp.GradScaler`.
-    ``torch.cpu.amp.GradScaler(args...)`` is deprecated. Please use ``torch.amp.GradScaler("cpu", args...)`` instead.
+    ``torch.cpu.amp.GradScaler(args...)`` is equivalent to ``torch.amp.GradScaler("cpu", args...)``
     """
 
-    @deprecated(
-        "`torch.cpu.amp.GradScaler(args...)` is deprecated. "
-        "Please use `torch.amp.GradScaler('cpu', args...)` instead.",
-        category=FutureWarning,
-    )
     def __init__(
         self,
         init_scale: float = 2.0**16,

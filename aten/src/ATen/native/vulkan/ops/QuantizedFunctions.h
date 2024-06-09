@@ -52,7 +52,7 @@ Tensor quantized_div(
 Tensor quantized_conv2d(
     const Tensor& input_,
     const Tensor& weight,
-    const std::optional<Tensor>& bias_opt,
+    const c10::optional<Tensor>& bias_opt,
     IntArrayRef stride,
     IntArrayRef padding,
     IntArrayRef dilation,
@@ -63,8 +63,8 @@ Tensor quantized_conv2d(
 Tensor quantized_upsample_nearest2d(
     const Tensor& input_arg,
     const IntArrayRef output_sizes,
-    const std::optional<double> scales_h,
-    const std::optional<double> scales_w);
+    const c10::optional<double> scales_h,
+    const c10::optional<double> scales_w);
 
 } // namespace ops
 } // namespace vulkan

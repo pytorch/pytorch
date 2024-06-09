@@ -76,22 +76,18 @@ uint32_t get_dim(const vTensor& v_in) {
   return get_dim<N>(v_in.sizes());
 }
 
-inline std::optional<Tensor> get_optional_tensor(
+inline c10::optional<Tensor> get_optional_tensor(
     const c10::impl::GenericList& gen_list,
     const uint32_t idx) {
   return gen_list.get(idx).isTensor() ? gen_list.get(idx).toTensor()
-                                      : std::optional<Tensor>();
+                                      : c10::optional<Tensor>();
 }
 
-inline std::optional<Scalar> get_optional_scalar(
+inline c10::optional<Scalar> get_optional_scalar(
     const c10::impl::GenericList& gen_list,
     const uint32_t idx) {
   return gen_list.get(idx).isScalar() ? gen_list.get(idx).toScalar()
-                                      : std::optional<Scalar>();
-}
-
-inline float roundevenf(float v) {
-  return (float)nearbyint(v);
+                                      : c10::optional<Scalar>();
 }
 
 } // namespace ops

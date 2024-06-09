@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 """Example of Timer and Compare APIs:
 
 $ python -m examples.compare

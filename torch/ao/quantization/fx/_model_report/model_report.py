@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 from typing import Any, Dict, Set, Tuple, Callable
 from collections import OrderedDict
 import torch
@@ -270,11 +269,11 @@ class ModelReport:
         """
         # if we haven't prepped model for callibration, then we shouldn't generate report yet
         if not self._prepared_flag:
-            raise Exception("Cannot generate report without preparing model for callibration")  # noqa: TRY002
+            raise Exception("Cannot generate report without preparing model for callibration")
 
         # if we already removed the observers, we cannot generate report
         if self._removed_observers:
-            raise Exception("Cannot generate report on model you already removed observers from")  # noqa: TRY002
+            raise Exception("Cannot generate report on model you already removed observers from")
 
         # keep track of all the reports of interest and their outputs
         reports_of_interest = {}
@@ -417,7 +416,7 @@ class ModelReport:
         """
         # check if user has generated reports at least once
         if len(self._generated_reports) == 0:
-            raise Exception("Unable to generate visualizers without first generating reports")  # noqa: TRY002
+            raise Exception("Unable to generate visualizers without first generating reports")
 
         # get the ordered dict mapping modules to their full set of collected features / stats
         module_fqns_to_features: OrderedDict = self._reformat_reports_for_visualizer()
@@ -503,11 +502,11 @@ class ModelReport:
         """
         # if we haven't prepped model for callibration, then we shouldn't generate mapping yet
         if not self._prepared_flag:
-            raise Exception("Cannot generate report without preparing model for callibration")  # noqa: TRY002
+            raise Exception("Cannot generate report without preparing model for callibration")
 
         # if we already removed the observers, we cannot mapping
         if self._removed_observers:
-            raise Exception("Cannot generate report on model you already removed observers from")  # noqa: TRY002
+            raise Exception("Cannot generate report on model you already removed observers from")
 
         # keep track of qconfig info for each module across detectors
         detector_qconfig_info_combined: Dict[str, DetectorQConfigInfo] = {}

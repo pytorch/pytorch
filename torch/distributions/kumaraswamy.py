@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 import torch
 from torch import nan
 from torch.distributions import constraints

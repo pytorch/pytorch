@@ -97,7 +97,7 @@ static bool IsImplicitCastSupported(const NodeKind& nodeKind) {
       IsSelectorOp(nodeKind);
 }
 
-static std::optional<c10::ScalarType> PromoteScalarTypes(
+static c10::optional<c10::ScalarType> PromoteScalarTypes(
     const std::vector<c10::ScalarType>& types) {
   if (types.empty()) {
     return c10::nullopt;
@@ -112,7 +112,7 @@ static std::optional<c10::ScalarType> PromoteScalarTypes(
 // Type promotion between scalars and tensors
 // per logic here
 // https://pytorch.org/docs/main/tensor_attributes.html#tensor-attributes
-static std::optional<c10::ScalarType> PromoteScalarTypesWithCategory(
+static c10::optional<c10::ScalarType> PromoteScalarTypesWithCategory(
     const std::vector<c10::ScalarType>& typesFromTensors,
     const std::vector<c10::ScalarType>& typesFromScalars) {
   auto typeFromTensor = PromoteScalarTypes(typesFromTensors);
@@ -146,12 +146,12 @@ static std::optional<c10::ScalarType> PromoteScalarTypesWithCategory(
   return typeFromTensor;
 }
 
-static std::optional<c10::ScalarType> InferExpectedScalarType(const Node* n) {
+static c10::optional<c10::ScalarType> InferExpectedScalarType(const Node* n) {
   std::vector<c10::ScalarType> typesFromTensors;
   std::vector<c10::ScalarType> typesFromScalars;
 
   auto get_scalar_type =
-      [](const Value* input) -> std::optional<at::ScalarType> {
+      [](const Value* input) -> c10::optional<at::ScalarType> {
     if (auto* tensor_type = input->type()->castRaw<TensorType>()) {
       return tensor_type->scalarType();
     }
@@ -252,7 +252,7 @@ static std::optional<c10::ScalarType> InferExpectedScalarType(const Node* n) {
         }
       });
 
-  std::optional<c10::ScalarType> st = c10::nullopt;
+  c10::optional<c10::ScalarType> st = c10::nullopt;
   const auto output_st = get_scalar_type(n->output());
 
   if (IsComparisonOp(n->kind())) {
@@ -280,7 +280,7 @@ static std::optional<c10::ScalarType> InferExpectedScalarType(const Node* n) {
   return st;
 }
 
-static std::optional<c10::ScalarType> LowPrecisionCastForStandardOps(
+static c10::optional<c10::ScalarType> LowPrecisionCastForStandardOps(
     const Node* n,
     const c10::ScalarType& scalar_type) {
   // Some of standardOps do not support uint8\int8\int16 type for ONNX

@@ -76,7 +76,7 @@ class TORCH_API Module {
   c10::IValue forward(std::vector<c10::IValue> inputs) {
     return get_method("forward")(std::move(inputs));
   }
-  std::optional<Method> find_method(const std::string& basename) const;
+  c10::optional<Method> find_method(const std::string& basename) const;
 
   const std::string name() const {
     return object_->name();

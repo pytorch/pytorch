@@ -39,8 +39,10 @@ struct TORCH_CUDA_CPP_API CUDAGraph {
   void debug_dump(const std::string& debug_path);
 
  protected:
-  cudaGraph_t graph_ = nullptr;
-  cudaGraphExec_t graph_exec_ = nullptr;
+#if !defined(USE_ROCM) || ROCM_VERSION >= 50300
+  cudaGraph_t graph_ = NULL;
+  cudaGraphExec_t graph_exec_ = NULL;
+#endif
 
   static std::atomic<int> pending_event_queries;
 

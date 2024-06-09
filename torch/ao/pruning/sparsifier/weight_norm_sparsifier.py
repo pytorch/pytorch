@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 from functools import reduce
 from typing import Callable, Optional, Tuple, Union
 

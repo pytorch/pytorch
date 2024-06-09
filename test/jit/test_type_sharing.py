@@ -1,24 +1,21 @@
 # Owner(s): ["oncall: jit"]
 
-import io
 import os
 import sys
+import io
 
 import torch
 
 # Make the helper files in test/ importable
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.append(pytorch_test_dir)
-from torch.testing._internal.common_utils import suppress_warnings
 from torch.testing._internal.jit_utils import JitTestCase
+from torch.testing._internal.common_utils import suppress_warnings
 
-if __name__ == "__main__":
-    raise RuntimeError(
-        "This test file is not meant to be run directly, use:\n\n"
-        "\tpython test/test_jit.py TESTNAME\n\n"
-        "instead."
-    )
-
+if __name__ == '__main__':
+    raise RuntimeError("This test file is not meant to be run directly, use:\n\n"
+                       "\tpython test/test_jit.py TESTNAME\n\n"
+                       "instead.")
 
 class TestTypeSharing(JitTestCase):
     def assertSameType(self, m1, m2):
@@ -45,7 +42,6 @@ class TestTypeSharing(JitTestCase):
 
             def forward(self, x):
                 return x
-
         a = torch.rand(2, 3)
         b = torch.rand(2, 3)
         c = torch.rand(2, 3)
@@ -57,7 +53,6 @@ class TestTypeSharing(JitTestCase):
         """
         Types should be shared even if attribute values differ
         """
-
         class M(torch.nn.Module):
             def __init__(self, a, b, c):
                 super().__init__()
@@ -67,7 +62,6 @@ class TestTypeSharing(JitTestCase):
 
             def forward(self, x):
                 return x
-
         a = torch.rand(2, 3)
         b = torch.rand(2, 3)
         c = torch.rand(2, 3)
@@ -79,7 +73,6 @@ class TestTypeSharing(JitTestCase):
         """
         Types should be shared for identical constant values, and different for different constant values
         """
-
         class M(torch.nn.Module):
             __constants__ = ["const"]
 
@@ -118,7 +111,6 @@ class TestTypeSharing(JitTestCase):
         """
         If submodules differ, the types should differ.
         """
-
         class M(torch.nn.Module):
             def __init__(self, in1, out1, in2, out2):
                 super().__init__()
@@ -145,7 +137,6 @@ class TestTypeSharing(JitTestCase):
         The same module with an `foo` as a parameter vs. attribute shouldn't
         share types
         """
-
         class M(torch.nn.Module):
             def __init__(self, foo):
                 super().__init__()
@@ -165,7 +156,6 @@ class TestTypeSharing(JitTestCase):
         Even if everything about the module is the same, different originating
         classes should prevent type sharing.
         """
-
         class A(torch.nn.Module):
             __constants__ = ["const"]
 
@@ -202,7 +192,6 @@ class TestTypeSharing(JitTestCase):
         """
         Mutating the value of an attribute should not change type sharing
         """
-
         class M(torch.nn.Module):
             def __init__(self, in1, out1, in2, out2):
                 super().__init__()
@@ -225,7 +214,6 @@ class TestTypeSharing(JitTestCase):
         """
         Assigning a new (python-only) attribute should not change type sharing
         """
-
         class M(torch.nn.Module):
             def __init__(self, in1, out1, in2, out2):
                 super().__init__()
@@ -256,7 +244,6 @@ class TestTypeSharing(JitTestCase):
         """
         Attributes whose type cannot be inferred should fail cleanly with nice hints
         """
-
         class M(torch.nn.Module):
             def __init__(self):
                 super().__init__()
@@ -268,16 +255,15 @@ class TestTypeSharing(JitTestCase):
                 return self.foo
 
         m = M()
-        with self.assertRaisesRegexWithHighlight(
-            RuntimeError, "failed to convert Python type", "self.foo"
-        ):
+        with self.assertRaisesRegexWithHighlight(RuntimeError,
+                                                 "failed to convert Python type",
+                                                 "self.foo"):
             torch.jit.script(m)
 
     def test_script_function_attribute_different(self):
         """
         Different functions passed in should lead to different types
         """
-
         @torch.jit.script
         def fn1(x):
             return x + x
@@ -331,7 +317,6 @@ class TestTypeSharing(JitTestCase):
         """
         Same functions passed in should lead to same types
         """
-
         @torch.jit.script
         def fn(x):
             return x + x
@@ -353,7 +338,6 @@ class TestTypeSharing(JitTestCase):
         """
         Different functions passed in should lead to different types
         """
-
         def fn1(x):
             return x + x
 
@@ -377,7 +361,6 @@ class TestTypeSharing(JitTestCase):
         """
         Same functions passed in should lead to same types
         """
-
         def fn(x):
             return x + x
 
@@ -400,7 +383,6 @@ class TestTypeSharing(JitTestCase):
         Since we can't guarantee that methods are the same between different
         trace runs, tracing must always generate a unique type.
         """
-
         class M(torch.nn.Module):
             def forward(self, x, y):
                 if x.sum() > y.sum():
@@ -447,8 +429,8 @@ class TestTypeSharing(JitTestCase):
             def forward(self, x):
                 return self.traced(x)
 
-        a = M((torch.ones(1),))
-        b = M((torch.zeros(1),))
+        a = M((torch.ones(1), ))
+        b = M((torch.zeros(1), ))
         self.assertDifferentType(a, b)
 
     def test_loaded_modules_work(self):
@@ -483,6 +465,7 @@ class TestTypeSharing(JitTestCase):
             buffer.seek(0)
             return torch.jit.script(Wrapper(torch.jit.load(buffer)))
 
+
         a = package(AB())
         a()
         b = package(A())
@@ -493,7 +476,6 @@ class TestTypeSharing(JitTestCase):
         We should be able to differentiate between two ModuleDict instances
         that have different keys but the same value types.
         """
-
         class A(torch.nn.Module):
             def forward(self, x):
                 return x
@@ -506,9 +488,9 @@ class TestTypeSharing(JitTestCase):
             def forward(self, x):
                 return x
 
-        a = Foo({"foo": A()})
-        b = Foo({"bar": A()})
-        c = Foo({"bar": A()})
+        a = Foo({'foo': A()})
+        b = Foo({'bar': A()})
+        c = Foo({'bar': A()})
         self.assertDifferentType(a, b)
         self.assertSameType(b, c)
 
@@ -518,16 +500,13 @@ class TestTypeSharing(JitTestCase):
         subclass that defines methods in its __init__ are not
         shared.
         """
-
         class A(torch.jit.ScriptModule):
             def __init__(self, val):
                 super().__init__()
-                self.define(
-                    f"""
+                self.define(f"""
                 def forward(self) -> int:
                     return {val}
-                """
-                )
+                """)
 
         one = A(1)
         two = A(2)
@@ -539,7 +518,6 @@ class TestTypeSharing(JitTestCase):
         """
         Test that type sharing can be disabled.
         """
-
         class A(torch.nn.Module):
             def __init__(self, sub):
                 super().__init__()
@@ -577,7 +555,6 @@ class TestTypeSharing(JitTestCase):
         Test that types are shared if the exclusion of their
         ignored attributes makes them equal.
         """
-
         class A(torch.nn.Module):
             __jit_ignored_attributes__ = ["a"]
 
@@ -602,7 +579,6 @@ class TestTypeSharing(JitTestCase):
         Test that types are not shared if the exclusion of their
         ignored attributes makes them not equal.
         """
-
         class A(torch.nn.Module):
             __jit_ignored_attributes__ = ["a"]
 

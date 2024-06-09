@@ -22,7 +22,7 @@ using testing::Not;
 template <typename T>
 class OptionalTest : public ::testing::Test {
  public:
-  using optional = std::optional<T>;
+  using optional = c10::optional<T>;
 };
 
 template <typename T>
@@ -96,10 +96,10 @@ TYPED_TEST(OptionalTest, Initialized) {
   }
 }
 
-class SelfCompareTest : public testing::TestWithParam<std::optional<int>> {};
+class SelfCompareTest : public testing::TestWithParam<c10::optional<int>> {};
 
 TEST_P(SelfCompareTest, SelfCompare) {
-  std::optional<int> x = GetParam();
+  c10::optional<int> x = GetParam();
   EXPECT_THAT(x, Eq(x));
   EXPECT_THAT(x, Le(x));
   EXPECT_THAT(x, Ge(x));
@@ -118,7 +118,7 @@ INSTANTIATE_TEST_SUITE_P(
     testing::Values(c10::make_optional(2)));
 
 TEST(OptionalTest, Nullopt) {
-  std::optional<int> x = 2;
+  c10::optional<int> x = 2;
 
   EXPECT_THAT(c10::nullopt, Not(Eq(x)));
   EXPECT_THAT(x, Not(Eq(c10::nullopt)));
@@ -142,17 +142,17 @@ TEST(OptionalTest, Nullopt) {
 // Ensure comparisons work...
 using CmpTestTypes = testing::Types<
     // between two optionals
-    std::pair<std::optional<int>, std::optional<int>>,
+    std::pair<c10::optional<int>, c10::optional<int>>,
 
     // between an optional and a value
-    std::pair<std::optional<int>, int>,
+    std::pair<c10::optional<int>, int>,
     // between a value and an optional
-    std::pair<int, std::optional<int>>,
+    std::pair<int, c10::optional<int>>,
 
     // between an optional and a differently typed value
-    std::pair<std::optional<int>, long>,
+    std::pair<c10::optional<int>, long>,
     // between a differently typed value and an optional
-    std::pair<long, std::optional<int>>>;
+    std::pair<long, c10::optional<int>>>;
 template <typename T>
 class CmpTest : public testing::Test {};
 TYPED_TEST_SUITE(CmpTest, CmpTestTypes);

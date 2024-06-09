@@ -334,15 +334,14 @@ auto LazyGraphExecutor::DataCacheArena::GetDataCache(
   if (FLAGS_torch_lazy_enable_device_data_cache) {
     auto it = device_caches_.find(device);
     if (it == device_caches_.end()) {
-      it = device_caches_
-               .emplace(device, std::make_unique<DataCache>(max_cache_size_))
-               .first;
+      std::unique_ptr<DataCache> cache(new DataCache(max_cache_size_));
+      it = device_caches_.emplace(device, std::move(cache)).first;
     }
     return it->second.get();
   } else {
     // If cache is disabled then always return a zero size cache
-    static DataCache s_empty_cache(0);
-    return &s_empty_cache;
+    static std::unique_ptr<DataCache> s_empty_cache(new DataCache(0));
+    return s_empty_cache.get();
   }
 }
 
@@ -611,7 +610,7 @@ LazyGraphExecutor::SyncTensorCollection LazyGraphExecutor::CollectSyncTensors(
       } else if (config.force_ltc_data) {
         // The tensor only has at::Tensor data. We need to queue it for a
         // device upload.
-        std::optional<at::Tensor> tensor_data = tensors[i]->CurrentTensorData();
+        c10::optional<at::Tensor> tensor_data = tensors[i]->CurrentTensorData();
         TORCH_CHECK(tensor_data);
         at_tensors.push_back(*tensor_data);
         devices.push_back(tensors[i]->GetDevice());
@@ -997,7 +996,7 @@ std::vector<at::Tensor> LazyGraphExecutor::FetchTensors(
       ++literals_index;
       ++sync_index;
     } else {
-      std::optional<at::Tensor> tensor_data =
+      c10::optional<at::Tensor> tensor_data =
           (*tensors)[i]->CurrentTensorData();
       if (tensor_data) {
         results.push_back(*tensor_data);

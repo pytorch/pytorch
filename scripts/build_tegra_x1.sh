@@ -29,7 +29,10 @@ sudo apt-get install \
 # obtain optional dependencies that are usually useful to have.
 echo "Installing optional dependencies."
 sudo apt-get install \
+  libleveldb-dev \
+  liblmdb-dev \
   libpython-dev \
+  libsnappy-dev \
   python-numpy \
   python-pip \
   python-protobuf

@@ -54,7 +54,7 @@ c10::Device backendDeviceToAtenDevice(const BackendDevice& device) {
   return c10::Device(at::kLazy, device.ordinal());
 }
 
-std::optional<BackendDevice> GetBackendDevice(at::ITensorListRef tensors) {
+c10::optional<BackendDevice> GetBackendDevice(at::ITensorListRef tensors) {
   for (auto& tensor : tensors) {
     if (auto lt = TryGetLtcTensor(tensor)) {
       return lt->GetDevice();
@@ -63,26 +63,26 @@ std::optional<BackendDevice> GetBackendDevice(at::ITensorListRef tensors) {
   return c10::nullopt;
 }
 
-std::optional<BackendDevice> GetBackendDevice(at::TensorList tensors) {
+c10::optional<BackendDevice> GetBackendDevice(at::TensorList tensors) {
   return GetBackendDevice(at::ITensorListRef(tensors));
 }
 
-std::optional<BackendDevice> GetBackendDevice(const at::Tensor& tensor) {
+c10::optional<BackendDevice> GetBackendDevice(const at::Tensor& tensor) {
   if (auto lt = TryGetLtcTensor(tensor)) {
     return lt->GetDevice();
   }
   return c10::nullopt;
 }
 
-std::optional<BackendDevice> GetBackendDevice(
-    const std::optional<c10::Device>& device) {
+c10::optional<BackendDevice> GetBackendDevice(
+    const c10::optional<c10::Device>& device) {
   if (device) {
     return c10::make_optional(atenDeviceToBackendDevice(*device));
   }
   return c10::nullopt;
 }
 
-std::optional<BackendDevice> GetBackendDevice() {
+c10::optional<BackendDevice> GetBackendDevice() {
   return c10::nullopt;
 }
 

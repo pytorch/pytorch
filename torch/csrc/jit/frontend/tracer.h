@@ -236,37 +236,37 @@ TORCH_API void addInputs(Node* n, const char* name, c10::SymInt value);
 TORCH_API void addInputs(
     Node* n,
     const char* name,
-    std::optional<int64_t> value);
+    c10::optional<int64_t> value);
 TORCH_API void addInputs(Node* n, const char* name, bool value);
 TORCH_API void addInputs(
     Node* n,
     const char* name,
-    const std::optional<bool>& value);
+    const c10::optional<bool>& value);
 TORCH_API void addInputs(Node* n, const char* name, double value);
 TORCH_API void addInputs(
     Node* n,
     const char* name,
-    const std::optional<double>& value);
+    const c10::optional<double>& value);
 TORCH_API void addInputs(Node* n, const char* name, const at::Scalar& value);
 TORCH_API void addInputs(
     Node* n,
     const char* name,
-    const std::optional<at::Scalar>& value);
+    const c10::optional<at::Scalar>& value);
 TORCH_API void addInputs(Node* n, const char* name, const at::Tensor& value);
 TORCH_API void addInputs(
     Node* n,
     const char* name,
-    const std::optional<at::Tensor>& value);
+    const c10::optional<at::Tensor>& value);
 TORCH_API void addInputs(Node* n, const char* name, ArrayRef<int64_t> value);
 TORCH_API void addInputs(Node* n, const char* name, c10::SymIntArrayRef value);
 TORCH_API void addInputs(
     Node* n,
     const char* name,
-    std::optional<c10::SymInt> value);
+    c10::optional<c10::SymInt> value);
 TORCH_API void addInputs(
     Node* n,
     const char* name,
-    const std::optional<ArrayRef<int64_t>>& value);
+    const c10::optional<ArrayRef<int64_t>>& value);
 TORCH_API void addInputs(
     Node* n,
     const char* name,
@@ -293,7 +293,7 @@ TORCH_API void addInputs(
 TORCH_API void addInputs(
     Node* n,
     const char* name,
-    const List<std::optional<at::Tensor>>& value);
+    const List<c10::optional<at::Tensor>>& value);
 TORCH_API void addInputs(
     Node* n,
     const char* name,
@@ -303,7 +303,7 @@ TORCH_API void addInputs(Node* n, const char* name, ArrayRef<double> value);
 TORCH_API void addInputs(
     Node* n,
     const char* name,
-    const std::optional<ArrayRef<double>>& value);
+    const c10::optional<ArrayRef<double>>& value);
 TORCH_API void addInputs(
     Node* n,
     const char* name,
@@ -311,7 +311,7 @@ TORCH_API void addInputs(
 TORCH_API void addInputs(
     Node* n,
     const char* name,
-    const std::optional<c10::string_view>& value);
+    const c10::optional<c10::string_view>& value);
 TORCH_API void addInputs(Node* n, const char* name, at::Device value);
 TORCH_API void addInputs(Node* n, const char* name, c10::Stream stream);
 TORCH_API void addInputs(Node* n, const char* name, at::Layout value);
@@ -319,28 +319,28 @@ TORCH_API void addInputs(Node* n, const char* name, at::ScalarType value);
 TORCH_API void addInputs(
     Node* n,
     const char* name,
-    const std::optional<at::ScalarType>& value);
+    const c10::optional<at::ScalarType>& value);
 TORCH_API void addInputs(
     Node* n,
     const char* name,
-    const std::optional<at::Device>& value);
+    const c10::optional<at::Device>& value);
 TORCH_API void addInputs(
     Node* n,
     const char* name,
-    const std::optional<at::Layout>& value);
+    const c10::optional<at::Layout>& value);
 TORCH_API void addInputs(Node* n, const char* name, at::MemoryFormat value);
 TORCH_API void addInputs(
     Node* n,
     const char* name,
-    std::optional<at::DimnameList> value);
+    c10::optional<at::DimnameList> value);
 TORCH_API void addInputs(
     Node* n,
     const char* name,
-    const std::optional<at::MemoryFormat>& value);
+    const c10::optional<at::MemoryFormat>& value);
 TORCH_API void addInputs(
     Node* n,
     const char* name,
-    const std::optional<at::Generator>& value);
+    const c10::optional<at::Generator>& value);
 
 inline void addInputs(
     Node* n,
@@ -377,16 +377,16 @@ TORCH_API void ensureUniqueIfOutOfPlaced(
     const at::Tensor& tensor);
 TORCH_API void ensureUniqueIfOutOfPlaced(
     const char* name,
-    const std::optional<at::Tensor>& tensor);
+    const c10::optional<at::Tensor>& tensor);
 
 template <
     typename T,
-    typename = std::enable_if_t<
-        (!std::is_convertible_v<std::decay_t<T>, at::TensorList> &&
-         !std::is_convertible_v<std::decay_t<T>, c10::List<at::Tensor>> &&
-         !std::is_convertible_v<std::decay_t<T>, at::Tensor> &&
+    typename = torch::enable_if_t<
+        (!std::is_convertible_v<torch::decay_t<T>, at::TensorList> &&
+         !std::is_convertible_v<torch::decay_t<T>, c10::List<at::Tensor>> &&
+         !std::is_convertible_v<torch::decay_t<T>, at::Tensor> &&
          !std::is_convertible_v<
-             std::decay_t<T>,
+             torch::decay_t<T>,
              c10::intrusive_ptr<c10::ivalue::Object>>)>>
 void addOutput(Node* node, T&&) {
   AT_ERROR(

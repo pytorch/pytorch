@@ -9,7 +9,9 @@
 
 #import <ATen/ATen.h>
 
-namespace at::native::metal {
+namespace at {
+namespace native {
+namespace metal {
 
 using MetalTensorImpl = at::MetalTensorImpl<MetalTensorImplStorage>;
 Tensor conv2d(
@@ -95,7 +97,7 @@ Tensor conv2d(const Tensor& input, Conv2dOpContext& context) {
   return output;
 }
 
-static Tensor conv2d_prepack_run(
+Tensor conv2d_prepack_run(
     const Tensor& input,
     const c10::intrusive_ptr<Conv2dOpContext>& op_context) {
   return conv2d(input, *op_context);
@@ -113,4 +115,6 @@ TORCH_LIBRARY_IMPL(metal_prepack, Metal, m) {
   m.impl(TORCH_SELECTIVE_NAME("metal_prepack::conv2d_run"), prepack::conv2d_prepack_run);
 }
 
-} // namespace at::native::metal
+}
+}
+}

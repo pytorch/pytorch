@@ -31,7 +31,6 @@ std::tuple<at::Storage, at::ScalarType, bool> createStorageGetType(
     PyObject* obj);
 bool isStorage(PyObject* obj);
 
-// Both methods below return a borrowed reference!
 TORCH_PYTHON_API THPDtype* getTHPDtype(at::ScalarType scalarType);
 THPLayout* getTHPLayout(at::Layout layout);
 } // namespace torch

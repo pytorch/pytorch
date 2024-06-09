@@ -140,13 +140,27 @@ class ModuleHolder : torch::detail::ModuleHolderIndicator {
   }
 
  private:
-  template <typename T = Contained>
+  /// In C++17, the two methods below could be written as the following:
+  /// if constexpr (std::is_default_constructible_v<Contained>) {
+  ///   return std::make_shared<Contained>();
+  /// } else {
+  ///   return nullptr;
+  /// }
+  /// In C++11, we use SFINAE instead of `if constexpr`.
+
+  template <
+      typename T = Contained,
+      typename = torch::enable_if_t<std::is_default_constructible<T>::value>>
   std::shared_ptr<Contained> default_construct() {
-    if constexpr (std::is_default_constructible_v<T>) {
-      return std::make_shared<Contained>();
-    } else {
-      return nullptr;
-    }
+    return std::make_shared<Contained>();
+  }
+
+  template <typename T = Contained>
+  torch::disable_if_t<
+      std::is_default_constructible<T>::value,
+      std::shared_ptr<Contained>>
+  default_construct() {
+    return nullptr;
   }
 };
 

@@ -1393,7 +1393,7 @@ std::string generate_reduction_code(
 }
 
 // Acquires (possibly creating) the kernel cache directory
-std::optional<std::string> get_cache_dir() {
+c10::optional<std::string> get_cache_dir() {
   // If the environment variable USE_TORCH_KERNEL_CACHE is set to "0" then no persistent cache is used
   const char* uptkc = std::getenv("USE_PYTORCH_KERNEL_CACHE");
   const bool use_kernel_cache = (uptkc == nullptr) ? true : std::strcmp(uptkc, "0");
@@ -1483,7 +1483,7 @@ NvrtcFunction jit_pwise_function(
   NvrtcFunction compiled_kernel_;
   std::string name = kernel_name + "_kernel";
 
-  static const std::optional<std::string> cache_dir = get_cache_dir();
+  static const c10::optional<std::string> cache_dir = get_cache_dir();
 
   std::string file_path;
   if (cache_dir.has_value()) {
@@ -1569,9 +1569,11 @@ NvrtcFunction jit_pwise_function(
   if (compilation_result != NVRTC_SUCCESS) {
     size_t logsize;
     AT_CUDA_NVRTC_CHECK(nvrtc.nvrtcGetProgramLogSize(program, &logsize));
-    std::string log(logsize, '\0');
-    AT_CUDA_NVRTC_CHECK(nvrtc.nvrtcGetProgramLog(program, &log[0]));
-    throw std::runtime_error(code + log);
+    std::vector<char> log(logsize);
+    AT_CUDA_NVRTC_CHECK(nvrtc.nvrtcGetProgramLog(program, log.data()));
+    std::stringstream cu;
+    cu << log.data();
+    throw std::runtime_error(code + cu.str());
   }
 
   size_t ptx_size = 0;

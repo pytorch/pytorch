@@ -5,7 +5,8 @@ set -ex
 install_ubuntu() {
   apt-get update
   apt-get install -y --no-install-recommends \
-          libopencv-dev
+          libopencv-dev \
+          libavcodec-dev
 
   # Cleanup
   apt-get autoclean && apt-get clean
@@ -18,7 +19,8 @@ install_centos() {
   yum --enablerepo=extras install -y epel-release
 
   yum install -y \
-      opencv-devel
+      opencv-devel \
+      ffmpeg-devel
 
   # Cleanup
   yum clean all

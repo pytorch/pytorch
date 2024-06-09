@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 import gc
 import logging
 import os
@@ -150,8 +149,8 @@ def run_model(
             _ = pred_control[0].sum().backward(retain_graph=True)
             res = compare_gradients(model_base, model_control, precision)
             logger.info("compare param grad. Numerical result : %s", res)
-        except Exception:
-            logger.exception("Exception when comparing gradients")
+        except Exception as e:
+            logger.exception("Exception %s when compare gradients", e)
             traceback.print_exc()
 
         if config.fx_passes_numeric_check["requires_optimizer"]:
@@ -173,7 +172,7 @@ def run_model(
                 )
             except Exception as e:
                 logger.exception(
-                    "Exception when optimizer is added to check parameter names"
+                    "Exception %s when optimizer is added to check parameter names", e
                 )
                 traceback.print_exc()
         else:

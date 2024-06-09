@@ -6,8 +6,8 @@ struct TestValue {
   explicit TestValue(const int& x) : lvalue_(x) {}
   explicit TestValue(int&& x) : rvalue_(x) {}
 
-  std::optional<int> lvalue_;
-  std::optional<int> rvalue_;
+  c10::optional<int> lvalue_;
+  c10::optional<int> rvalue_;
 };
 
 TEST(MakeUniqueTest, ForwardRvaluesCorrectly) {

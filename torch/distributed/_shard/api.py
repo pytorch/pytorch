@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 from contextlib import contextmanager
 from typing import Optional
 import torch
@@ -67,7 +66,7 @@ def _shard_tensor(
                 f'sharding_spec={sharding_spec} on rank: {current_rank} does not '  # type: ignore[index]
                 f'match with sharding_spec={entry[1]} on rank: {idx}')
 
-    st = sharding_spec.shard(tensor, src_rank=src_rank, process_group=pg)
+    st = sharding_spec.shard(tensor, src_rank=src_rank, process_group=process_group)
 
     return st
 

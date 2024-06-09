@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 import torch
 import copy
 from typing import Dict, Any

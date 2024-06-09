@@ -9,12 +9,11 @@ from pprint import pprint
 from typing import List, Optional
 
 import numpy as np
-from prettytable import PrettyTable
-from tqdm import tqdm
-
 import torch
 import torch.utils.benchmark as benchmark
+from prettytable import PrettyTable
 from torch.backends.cuda import sdp_kernel
+from tqdm import tqdm
 
 warnings.filterwarnings("ignore")
 
@@ -82,10 +81,10 @@ class ExperimentResults:
     @classmethod
     def get_entry_names(cls) -> List[str]:
         return [
-            "nn_mha_time (\u00B5s)",
-            "compiled_nn_mha_time (\u00B5s)",
-            "composite_mha_time (\u00B5s)",
-            "compiled_composite_mha_time (\u00B5s)",
+            "nn_mha_time (μs)",
+            "compiled_nn_mha_time (μs)",
+            "composite_mha_time (μs)",
+            "compiled_composite_mha_time (μs)",
         ]
 
 

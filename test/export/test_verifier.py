@@ -2,7 +2,6 @@
 import unittest
 
 import torch
-
 from functorch.experimental import control_flow
 from torch import Tensor
 from torch._dynamo.eval_frame import is_dynamo_supported

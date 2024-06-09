@@ -11,10 +11,12 @@
 #include <ATen/TensorUtils.h>
 #include <torch/library.h>
 
-namespace at::native::metal {
+namespace at {
+namespace native {
+namespace metal {
 
 API_AVAILABLE(ios(11.0), macos(10.13))
-static Tensor view(const Tensor& input, c10::SymIntArrayRef sym_size) {
+Tensor view(const Tensor& input, c10::SymIntArrayRef sym_size) {
   auto size = C10_AS_INTARRAYREF_SLOW(sym_size);
   TORCH_CHECK(input.is_metal());
   auto inferred_size = at::infer_size(size, input.numel());
@@ -60,12 +62,12 @@ static Tensor view(const Tensor& input, c10::SymIntArrayRef sym_size) {
   return output;
 }
 
-static Tensor reshape(const Tensor& input, IntArrayRef shape) {
+Tensor reshape(const Tensor& input, IntArrayRef shape) {
   TORCH_CHECK(input.is_metal());
   return view(input, c10::fromIntArrayRefSlow(shape));
 }
 
-static Tensor flatten_using_ints(
+Tensor flatten_using_ints(
     const Tensor& input,
     int64_t start_dim,
     int64_t end_dim) {
@@ -95,7 +97,7 @@ static Tensor flatten_using_ints(
   return input.reshape(shape);
 }
 
-static Tensor detach(const Tensor& input) {
+Tensor detach(const Tensor& input) {
   TORCH_CHECK(input.is_metal());
   return input;
 }
@@ -105,6 +107,8 @@ TORCH_LIBRARY_IMPL(aten, Metal, m) {
   m.impl(TORCH_SELECTIVE_NAME("aten::view"), TORCH_FN(view));
   m.impl(TORCH_SELECTIVE_NAME("aten::reshape"), TORCH_FN(reshape));
   m.impl(TORCH_SELECTIVE_NAME("aten::flatten.using_ints"), TORCH_FN(flatten_using_ints));
-}
+};
 
-} // namespace at::native::metal
+}
+}
+}

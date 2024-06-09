@@ -5,6 +5,7 @@ import pathlib
 import subprocess
 
 from common import (
+    download_reports,
     get_testcases,
     is_failure,
     is_passing_skipped_test,
@@ -12,8 +13,6 @@ from common import (
     key,
     open_test_results,
 )
-
-from download_reports import download_reports
 
 """
 Usage: update_failures.py /path/to/dynamo_test_failures.py /path/to/test commit_sha
@@ -49,7 +48,7 @@ def patch_file(
 
     # These are hand written skips
     extra_dynamo_skips = set()
-    with open(filename) as f:
+    with open(filename, "r") as f:
         start = False
         for text in f.readlines():
             text = text.strip()

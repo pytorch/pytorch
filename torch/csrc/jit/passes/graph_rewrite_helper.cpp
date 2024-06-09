@@ -27,7 +27,7 @@ Value* getValue(
   return match_vmap.at(vmap.at(name));
 }
 
-std::optional<IValue> getIValue(
+c10::optional<IValue> getIValue(
     const std::string& name,
     const std::unordered_map<const Value*, Value*>& match_vmap,
     const std::unordered_map<std::string, Value*>& vmap) {

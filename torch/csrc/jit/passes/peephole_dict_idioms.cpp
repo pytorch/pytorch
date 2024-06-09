@@ -125,7 +125,7 @@ class DictNode {
     return 0;
   }
 
-  std::optional<Value*> getOrNullopt(const IValue& key) const {
+  c10::optional<Value*> getOrNullopt(const IValue& key) const {
     if (impl_ && impl_->contains(key)) {
       return impl_->get(key);
     }
@@ -181,7 +181,7 @@ class PeepholeOptimizeDictIdiomsImpl {
     return cached->second;
   }
 
-  std::optional<Value*> getValueFromDict(Node* dict_creation_node, Value* key) {
+  c10::optional<Value*> getValueFromDict(Node* dict_creation_node, Value* key) {
     const DictNode& dict_node = getDictNode(dict_creation_node);
     auto key_opt = toIValue(key);
     // Key is not constant if we cannot convert to IValue
@@ -195,7 +195,7 @@ class PeepholeOptimizeDictIdiomsImpl {
     return c10::nullopt;
   }
 
-  std::optional<int64_t> computeLen(Node* dict_creation_node) {
+  c10::optional<int64_t> computeLen(Node* dict_creation_node) {
     const DictNode& dict_node = getDictNode(dict_creation_node);
     if (dict_node.canOptimize()) {
       return static_cast<int64_t>(dict_node.size());

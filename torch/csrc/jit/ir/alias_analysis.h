@@ -203,7 +203,7 @@ class AliasDb {
    * Wildcard methods
    */
   // Register `v` as a wildcard value.
-  std::optional<Element*> setWildcard(const Value* v);
+  c10::optional<Element*> setWildcard(const Value* v);
 
   // Is this a value which will not alias?
   bool nonAliasingValue(const Value* elem) const;
@@ -274,7 +274,7 @@ class AliasDb {
   // All wildcard Elements (one for each unique mutable type)
   ska::flat_hash_map<TypePtr, Element*, HashType, EqualType> wildcardIndex_;
   Element* getWildcard(const TypePtr& type) const;
-  std::optional<Element*> tryGetOrCreateWildcard(const TypePtr& type);
+  c10::optional<Element*> tryGetOrCreateWildcard(const TypePtr& type);
   void addContainedTypesToFreshElement(
       Element* container_elem,
       const AliasTypeSet& mut_types);
@@ -301,9 +301,9 @@ class AliasDb {
 
   // Map of nodes to the memory locations that they write to
   using TWriteIndex = ska::flat_hash_map<Node*, MemoryLocations>;
-  std::optional<TWriteIndex> writeIndex_;
+  c10::optional<TWriteIndex> writeIndex_;
   // Collection of all memory locations that are written to.
-  std::optional<MemoryLocations> writtenToLocationsIndex_;
+  c10::optional<MemoryLocations> writtenToLocationsIndex_;
   void buildWrittenToLocationsIndex();
 
   std::unordered_set<const Value*> wildcards_;

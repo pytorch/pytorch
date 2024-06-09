@@ -12,8 +12,8 @@ using namespace api::utils;
 Tensor upsample_nearest2d(
     const Tensor& input_arg,
     const IntArrayRef output_sizes,
-    const std::optional<double> scales_h,
-    const std::optional<double> scales_w) {
+    const c10::optional<double> scales_h,
+    const c10::optional<double> scales_w) {
   api::Context* const context = api::context();
 
   TORCH_CHECK(
@@ -98,8 +98,8 @@ Tensor upsample_bilinear2d(
     const Tensor& input_arg,
     const IntArrayRef output_sizes,
     bool align_corners,
-    const std::optional<double> scales_h,
-    const std::optional<double> scales_w) {
+    const c10::optional<double> scales_h,
+    const c10::optional<double> scales_w) {
   api::Context* const context = api::context();
 
   TORCH_CHECK(

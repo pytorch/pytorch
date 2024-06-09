@@ -61,7 +61,7 @@ struct arg {
   // IValue's default constructor makes it None, which is not distinguishable
   // from an actual, user-provided default value that is None. This boolean
   // helps distinguish between the two cases.
-  std::optional<c10::IValue> value_;
+  c10::optional<c10::IValue> value_;
 };
 
 namespace detail {

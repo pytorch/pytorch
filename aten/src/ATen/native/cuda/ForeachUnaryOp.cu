@@ -388,10 +388,9 @@ void foreach_tensor_zero_cuda_(TensorList tensors) {
   std::vector<std::vector<at::Tensor>> tensor_lists;
   tensor_lists.emplace_back(tensors.vec());
 
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(
       ScalarType::Half,
       ScalarType::BFloat16,
-      ScalarType::Bool,
       tensors[0].scalar_type(),
       "foreach_zero_cuda_",
       [&]() {

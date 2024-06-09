@@ -1,0 +1,13 @@
+from typing import Optional, TypeVar, Type
+
+_T = TypeVar('_T')
+
+class Managed:
+    @classmethod
+    def current(cls: Type[_T], value: Optional[_T] = None, required: bool = True) -> _T: ...
+
+    def __call__(self, func: _T) -> _T: ...
+
+    def __enter__(self: _T) -> _T: ...
+
+class DefaultManaged(Managed): ...

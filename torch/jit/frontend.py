@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 import ast
 import dataclasses
 import inspect
@@ -1073,7 +1072,7 @@ class ExprBuilder(Builder):
                     sub_exprs.append(build_Index(ctx, base, expr))
                 elif sub_type is ast.Slice:
                     sub_exprs.append(build_SliceExpr(ctx, base, expr))
-                elif sub_type is ast.Constant and expr.value is Ellipsis:
+                elif sub_type is ast.Ellipsis:
                     sub_exprs.append(Dots(base.range()))
                 else:
                     raise NotSupportedError(
@@ -1207,8 +1206,8 @@ class ExprBuilder(Builder):
                     raise NotSupportedError(r, "Don't support formatting in JoinedStr")
                 s += "{}"
                 args.append(build_expr(ctx, value.value))
-            elif isinstance(value, ast.Constant):
-                s += value.value
+            elif isinstance(value, ast.Str):
+                s += value.s
             else:
                 raise NotSupportedError(r, "Unsupported value in JoinedStr")
 

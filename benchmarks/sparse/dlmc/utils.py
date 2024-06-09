@@ -1,9 +1,8 @@
 import math
 from pathlib import Path
 
-from scipy import sparse
-
 import torch
+from scipy import sparse
 
 
 def to_coo_scipy(x):

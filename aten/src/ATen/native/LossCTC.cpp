@@ -2,9 +2,9 @@
 // Licensed under the BSD-3-Clause license
 // This is the CPU implementation of the Connectionist Temporal Loss.
 // We mostly follow Graves.
-// 1. Graves et al.: http://www.cs.toronto.edu/~graves/icml_2006.pdf
+// 1. Graves et al: http://www.cs.toronto.edu/~graves/icml_2006.pdf
 // We use the equations from above link, but note that [1] has 1-based indexing and we (of course) use 0-based.
-// Graves et al. call the probabilities y, we use log_probs (also calling them inputs)
+// Graves et al call the probabilities y, we use log_probs (also calling them inputs)
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 
 #include <ATen/core/Tensor.h>
@@ -269,13 +269,13 @@ Tensor ctc_loss_backward_cpu_template(const Tensor& grad_out, const Tensor& log_
 
   Tensor log_beta = at::empty_like(log_alpha, LEGACY_CONTIGUOUS_MEMORY_FORMAT);  // could be optimized to use only 2 rows
   auto lpp  = log_probs.permute({1,0,2});
-  auto log_probs_a_global = lpp.accessor<const scalar_t, 3>();
-  auto log_alpha_a_global = log_alpha.accessor<const scalar_t, 3>();
+  auto log_probs_a_global = lpp.accessor<scalar_t, 3>();
+  auto log_alpha_a_global = log_alpha.accessor<scalar_t, 3>();
   auto log_beta_a_global = log_beta.accessor<scalar_t, 3>();
   auto gp = grad.permute({1,0,2});
   auto grad_a_global = gp.accessor<scalar_t, 3>();
-  auto targets_data = targets.const_data_ptr<target_t>();
-  auto grad_out_a = grad_out.accessor<const scalar_t, 1>();
+  auto targets_data = targets.data_ptr<target_t>();
+  auto grad_out_a = grad_out.accessor<scalar_t, 1>();
 
   auto create_fill_iterator = [](const Tensor& tensor, IntArrayRef squash_dims) {
     return TensorIteratorConfig()

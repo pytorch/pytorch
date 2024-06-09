@@ -3,17 +3,19 @@
 #include <ATen/native/metal/MetalPrepackOpContext.h>
 #include <c10/util/accumulate.h>
 
-namespace at::native::metal {
+namespace at {
+namespace native {
+namespace metal {
 
-static c10::intrusive_ptr<Conv2dOpContext> unpack(
+c10::intrusive_ptr<Conv2dOpContext> unpack(
     Tensor&& weight,
-    std::optional<Tensor>&& bias,
+    c10::optional<Tensor>&& bias,
     std::vector<int64_t>&& stride,
     std::vector<int64_t>&& padding,
     std::vector<int64_t>&& dilation,
     int64_t groups,
-    const std::optional<Scalar>& output_min,
-    const std::optional<Scalar>& output_max) {
+    const c10::optional<Scalar>& output_min,
+    const c10::optional<Scalar>& output_max) {
   auto packedWeight = weight.contiguous(MemoryFormat::ChannelsLast);
   return c10::make_intrusive<Conv2dOpContext>(
       std::move(packedWeight),
@@ -26,11 +28,11 @@ static c10::intrusive_ptr<Conv2dOpContext> unpack(
       output_max);
 }
 
-static c10::intrusive_ptr<LinearOpContext> unpack(
+c10::intrusive_ptr<LinearOpContext> unpack(
     Tensor&& weight,
-    std::optional<Tensor>&& bias,
-    const std::optional<Scalar>& output_min,
-    const std::optional<Scalar>& output_max) {
+    c10::optional<Tensor>&& bias,
+    const c10::optional<Scalar>& output_min,
+    const c10::optional<Scalar>& output_max) {
   TORCH_CHECK(weight.dim() == 2);
   // Don't need to do `weight.t()`
   auto packedWeight = weight.view({weight.size(0), weight.size(1), 1, 1})
@@ -92,15 +94,15 @@ TORCH_LIBRARY(metal_prepack, m) {
       TORCH_SELECTIVE_SCHEMA("metal_prepack::linear_run(Tensor X, __torch__.torch.classes.metal.LinearOpContext W_prepack) -> Tensor Y"));
 }
 
-static c10::intrusive_ptr<Conv2dOpContext> conv2d_prepack(
+c10::intrusive_ptr<Conv2dOpContext> conv2d_prepack(
     Tensor&& weight,
-    std::optional<Tensor>&& bias,
+    c10::optional<Tensor>&& bias,
     std::vector<int64_t>&& stride,
     std::vector<int64_t>&& padding,
     std::vector<int64_t>&& dilation,
     int64_t groups,
-    const std::optional<Scalar>& output_min,
-    const std::optional<Scalar>& output_max) {
+    const c10::optional<Scalar>& output_min,
+    const c10::optional<Scalar>& output_max) {
   TORCH_CHECK(weight.dim() == 4);
   return c10::make_intrusive<Conv2dOpContext>(
       std::move(weight),
@@ -113,11 +115,11 @@ static c10::intrusive_ptr<Conv2dOpContext> conv2d_prepack(
       output_max);
 }
 
-static c10::intrusive_ptr<LinearOpContext> linear_prepack(
+c10::intrusive_ptr<LinearOpContext> linear_prepack(
     Tensor&& weight,
-    std::optional<Tensor>&& bias,
-    const std::optional<Scalar>& output_min,
-    const std::optional<Scalar>& output_max) {
+    c10::optional<Tensor>&& bias,
+    const c10::optional<Scalar>& output_min,
+    const c10::optional<Scalar>& output_max) {
   return c10::make_intrusive<LinearOpContext>(
       std::move(weight), std::move(bias), output_min, output_max);
 }
@@ -127,4 +129,6 @@ TORCH_LIBRARY_IMPL(metal_prepack, CPU, m) {
   m.impl(TORCH_SELECTIVE_NAME("metal_prepack::linear_prepack"), TORCH_FN(linear_prepack));
 }
 
-} // namespace at::native::metal
+} // namespace metal
+} // namespace native
+} // namespace at

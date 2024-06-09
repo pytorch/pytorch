@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 """A context manager that disables the decomposition of certain ops during dynamo tracing.
 
 The approach is to temporarily hijack the operator callable with PT2 custom operator.
@@ -72,7 +71,7 @@ class DecompSkip(abc.ABC):
         new_op_qualname = f"{_NEW_OP_NAMESPACE}::{cls.new_op_name}"
         torch.library.define(new_op_qualname, cls.new_op_schema)
         torch.library.impl(new_op_qualname, "default", cls.replacement)
-        torch.library.register_fake(new_op_qualname, cls.abstract)
+        torch.library.impl_abstract(new_op_qualname, cls.abstract)
 
     @classmethod
     def replacement(cls, *args, **kwargs):

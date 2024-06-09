@@ -490,7 +490,7 @@ struct GraphFuser {
     return true;
   }
 
-  std::optional<Node*> findFusedChunk(Node* group, Value* input) {
+  c10::optional<Node*> findFusedChunk(Node* group, Value* input) {
     AT_ASSERT(group->kind() == prim::FusionGroup);
     auto it = std::find(group->inputs().begin(), group->inputs().end(), input);
     if (it == group->inputs().end()) {

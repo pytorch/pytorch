@@ -151,7 +151,7 @@ void warn_or_error_on_sync() {
   }
 }
 
-std::optional<DeviceIndex> getDeviceIndexWithPrimaryContext() {
+c10::optional<DeviceIndex> getDeviceIndexWithPrimaryContext() {
   // check current device first
   auto current_device_index = current_device();
   if (current_device_index >= 0) {

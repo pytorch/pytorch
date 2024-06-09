@@ -19,7 +19,7 @@ class TORCH_API Shape {
   Shape(
       at::ScalarType scalar_type,
       c10::ArrayRef<int64_t> sizes,
-      std::optional<std::vector<bool>> is_symbolic = c10::nullopt);
+      c10::optional<std::vector<bool>> is_symbolic = c10::nullopt);
 
   std::string to_string() const;
 
@@ -43,13 +43,13 @@ class TORCH_API Shape {
     sizes_.at(dim) = size;
   }
 
-  const std::optional<std::vector<bool>>& is_symbolic() const {
+  const c10::optional<std::vector<bool>>& is_symbolic() const {
     return is_symbolic_;
   }
 
   // Makes a copy with symbolic dims applied
   Shape with_symbolic_dims(
-      std::optional<std::vector<bool>> symbolic_dims) const;
+      c10::optional<std::vector<bool>> symbolic_dims) const;
 
   size_t numel() const;
   hash_t hash(bool bakeInSizes) const;
@@ -64,7 +64,7 @@ class TORCH_API Shape {
   // Stores which dimmensions are symbolic
   // If nullopt, either it hasn't been initialized or the symbolic
   // dimmensions are not calculatable
-  std::optional<std::vector<bool>> is_symbolic_ = c10::nullopt;
+  c10::optional<std::vector<bool>> is_symbolic_ = c10::nullopt;
 };
 
 TORCH_API std::ostream& operator<<(std::ostream& out, const Shape& shape);

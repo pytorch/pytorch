@@ -8,21 +8,19 @@ Anything here only deals with torch objects, e.g. "dtype" is a torch.dtype insta
 from __future__ import annotations
 
 import functools
-from typing import Optional, TYPE_CHECKING
+from typing import Optional
 
 import torch
 
 from . import _dtypes_impl, _util
-
-if TYPE_CHECKING:
-    from ._normalizations import (
-        ArrayLike,
-        AxisLike,
-        DTypeLike,
-        KeepDims,
-        NotImplementedType,
-        OutArray,
-    )
+from ._normalizations import (
+    ArrayLike,
+    AxisLike,
+    DTypeLike,
+    KeepDims,
+    NotImplementedType,
+    OutArray,
+)
 
 
 def _deco_axis_expand(func):

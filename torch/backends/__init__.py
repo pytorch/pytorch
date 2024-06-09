@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 import types
 from contextlib import contextmanager
 
@@ -42,8 +41,9 @@ class ContextProp:
             self.setter(val)
         else:
             raise RuntimeError(
-                f"not allowed to set {obj.__name__} flags "
+                "not allowed to set %s flags "
                 "after disable_global_flags; please use flags() context manager instead"
+                % obj.__name__
             )
 
 

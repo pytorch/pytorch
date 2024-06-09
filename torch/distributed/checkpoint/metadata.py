@@ -1,5 +1,3 @@
-# mypy: allow-untyped-defs
-import os
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Dict, List, Optional, Sequence, Union
@@ -14,7 +12,6 @@ __all__ = [
     "Metadata",
     "MetadataIndex",
     "TensorProperties",
-    "StorageMeta",
 ]
 
 
@@ -125,13 +122,6 @@ STATE_DICT_TYPE = Dict[str, Union[StatefulT, Any]]
 
 
 @dataclass
-class StorageMeta:
-    checkpoint_id: Union[str, os.PathLike, None] = None
-    save_id: Optional[str] = None
-    load_id: Optional[str] = None
-
-
-@dataclass
 class Metadata:
     """This class represents the metadata of the checkpoint."""
 
@@ -143,7 +133,6 @@ class Metadata:
     # the metadata of the built-in planner and storage plugins.
     planner_data: Any = None
     storage_data: Any = None
-    storage_meta: Optional[StorageMeta] = None
 
 
 @dataclass(frozen=True)

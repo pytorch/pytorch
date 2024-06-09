@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 import torch
 import torch.nn.functional as F
 from .expanded_weights_impl import implements_per_sample_grads

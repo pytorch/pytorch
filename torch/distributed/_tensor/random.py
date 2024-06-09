@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 # Copyright (c) Meta Platforms, Inc. and affiliates
 import contextlib
 import warnings
@@ -12,7 +11,7 @@ from torch.distributed._tensor.placement_types import DTensorSpec, Shard
 from torch.distributed.device_mesh import _get_device_handle, DeviceMesh
 
 
-_rng_tracker: Optional["_RNGStateTracker"] = None
+_rng_tracker: Optional["RNGStateTracker"] = None
 
 
 def is_rng_supported_mesh(device_mesh: DeviceMesh) -> bool:
@@ -34,7 +33,6 @@ def is_rng_supported_mesh(device_mesh: DeviceMesh) -> bool:
     if device_handle and hasattr(device_handle, "set_rng_state"):
         return True
     else:
-        # TODO: Logs way too much
         warnings.warn(
             f"DTensor random operators may not have complete support on {device_mesh.device_type} device mesh"
         )
@@ -92,9 +90,9 @@ def manual_seed(seed: int, device_mesh: DeviceMesh) -> None:
             )
 
 
-class _RNGStateTracker:
+class RNGStateTracker:
     """
-    _RNGStateTracker stores Random Number Generator (RNG) state (a ByteTensor object)
+    RNGStateTracker stores Random Number Generator (RNG) state (a ByteTensor object)
     in a dict, mapping from a corresponding tag to each state tensor. It also provides
     a set of convenient utility methods to help access/modify the state tensors. The most
     important interface is _distribute_region which will be used when DTensor executes
@@ -146,9 +144,9 @@ class _RNGStateTracker:
         pass
 
 
-class OffsetBasedRNGTracker(_RNGStateTracker):
+class OffsetBasedRNGTracker(RNGStateTracker):
     """
-    This subclass of `_RNGStateTracker` defines the default policy of how RNG states
+    This subclass of `RNGStateTracker` defines the default policy of how RNG states
     should be shared and synchronized among all ranks to respect the semantics of DTensor
     random operators.
     """
@@ -332,7 +330,7 @@ class OffsetBasedRNGTracker(_RNGStateTracker):
         return shard_linear_idx
 
 
-class TensorParallelRNGTracker(_RNGStateTracker):
+class TensorParallelRNGTracker(RNGStateTracker):
     def __init__(self, device_type: str = "cuda"):
         super().__init__(device_type)
         # copy the default RNG state

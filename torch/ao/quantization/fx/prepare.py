@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 import copy
 import torch
 import warnings
@@ -139,9 +138,7 @@ _OBS_DTYPE_LIST = [
     torch.uint8,
     torch.int8,
     torch.int16,
-    torch.int32,
-    torch.float8_e5m2,
-    torch.float8_e4m3fn,
+    torch.int32
 ]
 
 _DEFAULT_FP32_OBS_OR_FQ_CTR = PlaceholderObserver.with_args(dtype=torch.float)
@@ -1102,7 +1099,7 @@ def _maybe_insert_observers_before_graph_output(
         elif maybe_node is None:
             return None
         else:
-            raise Exception("Unhandled type for returned node:", maybe_node)  # noqa: TRY002
+            raise Exception("Unhandled type for returned node:", maybe_node)
 
     new_args = []
     for old_arg in graph_output_node.args:
@@ -1750,40 +1747,28 @@ def prepare(
     if _equalization_config is None:
         _equalization_config = QConfigMapping()
 
-    if isinstance(qconfig_mapping, dict):
+    if isinstance(qconfig_mapping, Dict):
         warnings.warn(
             "Passing a QConfig dictionary to prepare is deprecated and will not be supported "
-            "in a future version. Please pass in a QConfigMapping instead.",
-            FutureWarning,
-            stacklevel=2,
-        )
+            "in a future version. Please pass in a QConfigMapping instead.")
         qconfig_mapping = QConfigMapping.from_dict(qconfig_mapping)
 
-    if isinstance(_equalization_config, dict):
+    if isinstance(_equalization_config, Dict):
         warnings.warn(
             "Passing a QConfig dictionary to prepare for equalization is deprecated and will not "
-            "be supported in a future version. Please pass in a QConfigMapping instead.",
-            FutureWarning,
-            stacklevel=2,
-        )
+            "be supported in a future version. Please pass in a QConfigMapping instead.")
         _equalization_config = QConfigMapping.from_dict(_equalization_config)
 
-    if isinstance(prepare_custom_config, dict):
+    if isinstance(prepare_custom_config, Dict):
         warnings.warn(
             "Passing a prepare_custom_config_dict to prepare is deprecated and will not be supported "
-            "in a future version. Please pass in a PrepareCustomConfig instead.",
-            FutureWarning,
-            stacklevel=2,
-        )
+            "in a future version. Please pass in a PrepareCustomConfig instead.")
         prepare_custom_config = PrepareCustomConfig.from_dict(prepare_custom_config)
 
-    if isinstance(backend_config, dict):
+    if isinstance(backend_config, Dict):
         warnings.warn(
             "Passing a backend_config_dict to prepare is deprecated and will not be supported "
-            "in a future version. Please pass in a BackendConfig instead.",
-            FutureWarning,
-            stacklevel=2,
-        )
+            "in a future version. Please pass in a BackendConfig instead.")
         backend_config = BackendConfig.from_dict(backend_config)
 
     assert isinstance(qconfig_mapping, QConfigMapping)

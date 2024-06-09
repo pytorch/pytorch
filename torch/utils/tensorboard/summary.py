@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 import json
 import logging
 import os
@@ -143,8 +142,7 @@ def _draw_single_box(
     if display_str:
         text_bottom = bottom
         # Reverse list and print from bottom to top.
-        _left, _top, _right, _bottom = font.getbbox(display_str)
-        text_width, text_height = _right - _left, _bottom - _top
+        text_width, text_height = font.getsize(display_str)
         margin = np.ceil(0.05 * text_height)
         draw.rectangle(
             [
@@ -622,7 +620,10 @@ def make_image(tensor, rescale=1, rois=None, labels=None):
     image = Image.fromarray(tensor)
     if rois is not None:
         image = draw_boxes(image, rois, labels=labels)
-    ANTIALIAS = Image.Resampling.LANCZOS
+    try:
+        ANTIALIAS = Image.Resampling.LANCZOS
+    except AttributeError:
+        ANTIALIAS = Image.ANTIALIAS
     image = image.resize((scaled_width, scaled_height), ANTIALIAS)
     import io
 

@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 import torch
 import typing
 
@@ -20,7 +19,7 @@ class ReferenceQuantizedModule(torch.nn.Module):
         assert self.weight_qscheme in [
             None, torch.per_tensor_affine, torch.per_channel_affine,
             torch.per_channel_affine_float_qparams], \
-            f"qscheme: {self.weight_qscheme} is not support in reference quantized {self._get_name()}"
+            Exception(f"qscheme: {self.weight_qscheme} is not support in reference quantized {self._get_name()}")
         if self.weight_dtype in [torch.quint8, torch.qint8, torch.quint4x2, torch.qint32]:
             zero_point_dtype = weight_qparams["zero_point"].dtype if \
                 isinstance(weight_qparams["zero_point"], torch.Tensor) else \
@@ -177,7 +176,7 @@ def _quantize_weight_decomposed(
                 weight_quant_max,
                 weight_dtype_)  # type: ignore[arg-type]
             return weight
-    raise ValueError(f"Unsupported dtype and qscheme: {weight_dtype}, {weight_qscheme}")
+    raise Exception(f"Unsupported dtype and qscheme: {weight_dtype}, {weight_qscheme}")
 
 def _dequantize_weight_decomposed(
         weight: torch.Tensor,
@@ -227,7 +226,7 @@ def _dequantize_weight_decomposed(
                 weight_quant_max,
                 weight_dtype_)  # type: ignore[arg-type]
             return weight
-    raise ValueError(f"Unsupported dtype and qscheme: {weight_dtype}, {weight_qscheme}")
+    raise Exception(f"Unsupported dtype and qscheme: {weight_dtype}, {weight_qscheme}")
 
 def _quantize_weight(
         weight: torch.Tensor,
@@ -251,7 +250,7 @@ def _quantize_weight(
                 weight, weight_scale,
                 weight_zero_point, weight_axis_int, weight_dtype)  # type: ignore[arg-type]
             return weight
-    raise ValueError(f"Unsupported dtype and qscheme: {weight_dtype}, {weight_qscheme}")
+    raise Exception(f"Unsupported dtype and qscheme: {weight_dtype}, {weight_qscheme}")
 
 def _quantize_and_dequantize_weight_decomposed(
         weight: torch.Tensor,

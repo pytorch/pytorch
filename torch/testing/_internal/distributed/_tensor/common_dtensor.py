@@ -35,6 +35,7 @@ from torch.utils._pytree import tree_flatten, tree_unflatten, TreeSpec
 DEVICE_TYPE = (
     "cuda" if torch.cuda.is_available() and torch.cuda.device_count() > 1 else "cpu"
 )
+PG_BACKEND = "nccl" if DEVICE_TYPE == "cuda" else "gloo"
 
 NUM_DEVICES = 4
 
@@ -62,12 +63,12 @@ class RMSNormPython(torch.nn.Module):
 
 
 class MLPModule(nn.Module):
-    def __init__(self, device, bias: bool = True):
+    def __init__(self, device):
         super().__init__()
         torch.manual_seed(5)
-        self.net1 = nn.Linear(10, 16, bias=bias, device=device)
+        self.net1 = nn.Linear(10, 16, device=device)
         self.relu = nn.ReLU()
-        self.net2 = nn.Linear(16, 10, bias=bias, device=device)
+        self.net2 = nn.Linear(16, 10, device=device)
 
     def forward(self, x):
         return self.net2(self.relu(self.net1(x)))
@@ -91,9 +92,9 @@ class MLPStacked(nn.Module):
 @dataclass
 class ModelArgs:
     n_layers: int = 2
-    vocab_size: int = 8
+    vocab_size: int = 16
     max_seq_len: int = 16
-    dim: int = 16
+    dim: int = 8
     n_heads: int = 4
     dropout_p: float = 0.1
     use_attn_mask: bool = True
@@ -213,14 +214,14 @@ class Transformer(nn.Module):
         # Parallelize the root submodules.
         if use_seq_parallel:
             root_plan = {
-                "tok_embeddings": RowwiseParallel(input_layouts=Replicate(), output_layouts=Shard(1)),
-                "pos_embeddings": RowwiseParallel(input_layouts=Replicate(), output_layouts=Shard(0)),
+                "tok_embeddings": ColwiseParallel(output_layouts=Shard(1)),
+                "pos_embeddings": ColwiseParallel(output_layouts=Shard(0)),
                 "norm": SequenceParallel(),
             }
         else:
             root_plan = {
-                "tok_embeddings": RowwiseParallel(input_layouts=Replicate(), output_layouts=Replicate()),
-                "pos_embeddings": RowwiseParallel(input_layouts=Replicate(), output_layouts=Replicate()),
+                "tok_embeddings": ColwiseParallel(output_layouts=Replicate()),
+                "pos_embeddings": ColwiseParallel(output_layouts=Replicate()),
             }
 
         module_tp = parallelize_module(module, device_mesh, root_plan)
@@ -235,9 +236,9 @@ class Transformer(nn.Module):
                 # shard the RMSNorms
                 layer_parallelize_plan["attention_norm"] = SequenceParallel()
                 layer_parallelize_plan["ffn_norm"] = SequenceParallel()
-            layer_parallelize_plan["attention.wq"] = ColwiseParallel(use_local_output=False)
-            layer_parallelize_plan["attention.wk"] = ColwiseParallel(use_local_output=False)
-            layer_parallelize_plan["attention.wv"] = ColwiseParallel(use_local_output=False)
+            layer_parallelize_plan["attention.wq"] = ColwiseParallel()
+            layer_parallelize_plan["attention.wk"] = ColwiseParallel()
+            layer_parallelize_plan["attention.wv"] = ColwiseParallel()
             layer_parallelize_plan["attention.wo"] = (
                 RowwiseParallel(output_layouts=Shard(1))
                 if use_seq_parallel
@@ -260,15 +261,32 @@ class Transformer(nn.Module):
         # Parallelize the output submodule. If weight tying is enabled, we need to
         # make sure output.weight is sharded consistently as tok_embeddings.weight,
         # at the cost of the all_reduce operation using RowwiseParallel.
-        output_parallelize_plan = (
-            ColwiseParallel(
-                input_layouts=Shard(1),
-                output_layouts=Replicate(),
+        output_parallelize_plan = None
+        if not module_tp.model_args.weight_tying:
+            output_parallelize_plan = (
+                ColwiseParallel(
+                    input_layouts=Shard(1),
+                    output_layouts=Replicate(),
+                )
+                if use_seq_parallel
+                else ColwiseParallel(output_layouts=Replicate())
             )
-            if use_seq_parallel
-            else ColwiseParallel(output_layouts=Replicate())
-        )
+        else:
+            output_parallelize_plan = (
+                RowwiseParallel(
+                    input_layouts=Shard(1),
+                    output_layouts=Replicate(),
+                )
+                if use_seq_parallel
+                else RowwiseParallel(input_layouts=Replicate())
+            )
         parallelize_module(module_tp.output, device_mesh, output_parallelize_plan)
+
+        # Do manual setup on features that DTensor does not support yet.
+
+        # Manually adjust the number of heads after sharding the attention modules.
+        for layer in module_tp.layers:
+            layer.attention.n_heads = module_tp.model_args.n_heads // device_mesh.size()
 
         # Manually set output.weight so that parameters and gradients are shared.
         if module_tp.model_args.weight_tying:
@@ -297,11 +315,10 @@ class DTensorTestBase(MultiProcessTestCase):
 
     @property
     def backend(self) -> str:
-        backend = "nccl" if self.device_type == "cuda" else "gloo"
-        return backend
+        return PG_BACKEND
 
     def build_device_mesh(self) -> DeviceMesh:
-        return DeviceMesh(self.device_type, list(range(self.world_size)))
+        return DeviceMesh(DEVICE_TYPE, list(range(self.world_size)))
 
     def init_pg(self) -> None:
         if "nccl" in self.backend and torch.cuda.device_count() < self.world_size:
@@ -359,11 +376,11 @@ def with_comms(func: TestFunc) -> TestFunc:
     def wrapper(
         self, *args: Tuple[object], **kwargs: Dict[str, Any]  # type: ignore[misc]
     ) -> None:
-        # if enough GPU we can use GPU, otherwise we fallback to CPU
-        if not torch.cuda.is_available() or torch.cuda.device_count() < self.world_size:
-            self.device_type = "cpu"
+        # if backend not specified, and cuda available, then use nccl, else gloo
+        if torch.cuda.is_available() and torch.cuda.device_count() >= self.world_size:
+            self.device_type = "cuda"
         else:
-            self.device_type = DEVICE_TYPE
+            self.device_type = "cpu"
 
         self.init_pg()
         func(self, *args, **kwargs)  # type: ignore[misc]

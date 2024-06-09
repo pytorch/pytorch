@@ -1,5 +1,4 @@
 #include <torch/csrc/profiler/combined_traceback.h>
-#include <torch/csrc/utils/cpp_stacktraces.h>
 
 namespace torch {
 
@@ -78,7 +77,7 @@ SymbolizedTracebacks symbolize(
   }
   // gather symbol names for C++ frames
   if (!all_cpp_ips.empty()) {
-    r.all_frames = unwind::symbolize(all_cpp_ips, torch::get_symbolize_mode());
+    r.all_frames = unwind::symbolize(all_cpp_ips);
   }
 
   // batch symbolization requests so we dedup frame objects

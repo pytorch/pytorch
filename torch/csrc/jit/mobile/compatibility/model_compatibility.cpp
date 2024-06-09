@@ -31,7 +31,7 @@ using caffe2::serialize::ReadAdapterInterface;
 c10::IValue readArchive(
     const std::string& archive_name,
     PyTorchStreamReader& stream_reader) {
-  std::optional<at::Device> device;
+  c10::optional<at::Device> device;
   std::shared_ptr<CompilationUnit> compilation_unit =
       std::make_shared<CompilationUnit>();
 

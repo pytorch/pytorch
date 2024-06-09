@@ -49,7 +49,7 @@ class Socket {
     char* buffer = (char*)_buffer;
     size_t bytes_received = 0;
     ssize_t step_received;
-    struct pollfd pfd = {};
+    struct pollfd pfd = {0};
     pfd.fd = socket_fd;
     pfd.events = POLLIN;
     while (bytes_received < num_bytes) {

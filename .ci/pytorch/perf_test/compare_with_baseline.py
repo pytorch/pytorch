@@ -59,16 +59,16 @@ print("sample mean: ", sample_mean)
 print("sample sigma: ", sample_sigma)
 
 if math.isnan(sample_mean):
-    raise Exception("""Error: sample mean is NaN""")  # noqa: TRY002
+    raise Exception("""Error: sample mean is NaN""")
 elif math.isnan(sample_sigma):
-    raise Exception("""Error: sample sigma is NaN""")  # noqa: TRY002
+    raise Exception("""Error: sample sigma is NaN""")
 
 z_value = (sample_mean - mean) / sigma
 
 print("z-value: ", z_value)
 
 if z_value >= 3:
-    raise Exception(  # noqa: TRY002
+    raise Exception(
         f"""\n
 z-value >= 3, there is high chance of perf regression.\n
 To reproduce this regression, run

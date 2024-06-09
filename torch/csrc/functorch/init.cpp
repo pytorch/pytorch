@@ -6,7 +6,6 @@
 
 #include <ATen/FunctionalTensorWrapper.h>
 #include <ATen/WrapDimUtils.h>
-#include <torch/csrc/utils/python_raii.h>
 #include <torch/python.h>
 
 #include <ATen/functorch/BatchRulesHelper.h>
@@ -23,7 +22,9 @@
 
 // This file contains functorch's Python bindings.
 
-namespace torch::functorch::impl {
+namespace torch {
+namespace functorch {
+namespace impl {
 
 using namespace at::functorch;
 
@@ -373,10 +374,10 @@ static int64_t currentLevel() {
   return current_level;
 }
 
-static std::optional<int64_t> maybe_current_level() {
+static c10::optional<int64_t> maybe_current_level() {
   auto maybe_layer = maybeCurrentDynamicLayer();
   if (maybe_layer.has_value()) {
-    int64_t current_level = maybe_layer->layerId();
+    int current_level = maybe_layer->layerId();
     return current_level;
   }
   return nullopt;
@@ -401,35 +402,7 @@ static void dump_local_tls() {
   std::cout << "[Local Exclude] " << tls.excluded_ << std::endl;
 }
 
-namespace {
-
-// Pop the DynamicLayer stack until it's at the given depth.
-void popDynamicLayerStackToDepth(size_t depth) {
-  while (at::functorch::getDynamicLayerStack().size() > depth) {
-    const auto top = popDynamicLayer();
-    switch (top.key()) {
-      case at::functorch::TransformType::Vmap:
-        _vmap_decrement_nesting();
-        break;
-      case at::functorch::TransformType::Grad:
-        _grad_decrement_nesting();
-        break;
-      case at::functorch::TransformType::Jvp:
-        _jvp_decrement_nesting();
-        break;
-      case at::functorch::TransformType::Functionalize:
-        _func_decrement_nesting();
-        break;
-      case at::functorch::TransformType::Torch:
-        popDynamicLayerAndDeleteMetadata();
-        break;
-    }
-  }
-}
-
-} // anonymous namespace
-
-static std::tuple<Tensor, std::optional<int64_t>> unwrapBatched(
+static std::tuple<Tensor, c10::optional<int64_t>> unwrapBatched(
     const Tensor& tensor,
     int64_t level) {
   auto* batched = maybeGetBatchedImpl(tensor);
@@ -525,19 +498,18 @@ void initFuncTorchBindings(PyObject* module) {
     return maybe_get_level(tensor) != -1;
   });
   m.def(
-      "get_interpreter_stack", []() -> std::optional<std::vector<Interpreter>> {
+      "get_interpreter_stack", []() -> c10::optional<std::vector<Interpreter>> {
         const auto& stack = getDynamicLayerStack();
         if (stack.empty()) {
           return c10::nullopt;
         }
         std::vector<Interpreter> result;
-        result.reserve(stack.size());
         for (auto i : stack) {
           result.push_back(i.interpreter());
         }
         return result;
       });
-  m.def("peek_interpreter_stack", []() -> std::optional<Interpreter> {
+  m.def("peek_interpreter_stack", []() -> c10::optional<Interpreter> {
     const auto& stack = getDynamicLayerStack();
     if (stack.empty()) {
       return c10::nullopt;
@@ -545,12 +517,6 @@ void initFuncTorchBindings(PyObject* module) {
     auto result = stack.back().interpreter();
     return result;
   });
-  m.def("get_dynamic_layer_stack_depth", []() -> size_t {
-    return getDynamicLayerStack().size();
-  });
-  m.def(
-      "pop_dynamic_layer_stack_and_undo_to_depth",
-      &popDynamicLayerStackToDepth);
   m.def("pop_dynamic_layer_stack", &popDynamicLayer);
   m.def("push_dynamic_layer_stack", [](DynamicLayer layer) -> int64_t {
     return pushDynamicLayer(std::move(layer));
@@ -598,4 +564,6 @@ void initFuncTorchBindings(PyObject* module) {
           &FunctionalizeInterpreterPtr::functionalizeAddBackViews);
 }
 
-} // namespace torch::functorch::impl
+} // namespace impl
+} // namespace functorch
+} // namespace torch

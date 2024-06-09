@@ -1,13 +1,11 @@
-# mypy: allow-untyped-defs
 from collections import defaultdict
 from .node import Node, Argument, Target, map_arg, _type_repr, _get_qualified_name
 import torch.utils._pytree as pytree
 from . import _pytree as fx_pytree
 from ._compatibility import compatibility
 
-import os
 import contextlib
-from typing import TYPE_CHECKING, Callable, Any, List, Dict, NamedTuple, Optional, Tuple, Set, FrozenSet, Type, Iterable
+from typing import TYPE_CHECKING, Callable, Any, List, Dict, NamedTuple, Optional, Tuple, Set, FrozenSet, Type
 from dataclasses import dataclass
 from contextlib import contextmanager
 import copy
@@ -307,9 +305,6 @@ class _ParsedStackTrace:
     name: str
     code: str
 
-    def get_summary_str(self):
-        return f'File: {self.file}:{self.lineno} in {self.name}, code: {self.code}'
-
 # get File:lineno code from stack_trace
 def _parse_stack_trace(stack_trace: str):
     if stack_trace is None:
@@ -383,8 +378,7 @@ class CodeGen:
         return []
 
     def _gen_python_code(
-        self, nodes, root_module: str, namespace: _Namespace, *,
-        verbose: bool = False, include_stride: bool = False, include_device: bool = False
+        self, nodes, root_module: str, namespace: _Namespace, *, verbose: bool = False,
     ) -> PythonCode:
         free_vars: List[str] = []
         body: List[str] = []
@@ -393,8 +387,6 @@ class CodeGen:
 
         # Wrap string in list to pass by reference
         maybe_return_annotation : List[str] = ['']
-        include_stride = include_stride or (os.environ.get("FX_GRAPH_SHOW_STRIDE", "0") == "1")
-        include_device = include_device or (os.environ.get("FX_GRAPH_SHOW_DEVICE", "0") == "1")
 
         def add_global(name_hint: str, obj: Any):
             """Add an obj to be tracked as a global.
@@ -525,15 +517,20 @@ class CodeGen:
                         prev_stacktrace = node.stack_trace
                         summary_str = ""
 
-                        if parsed_stack_trace := _parse_stack_trace(node.stack_trace):
-                            summary_str = parsed_stack_trace.get_summary_str()
+                        parsed_stack_trace = _parse_stack_trace(node.stack_trace)
+
+                        if parsed_stack_trace is not None:
+                            lineno = parsed_stack_trace.lineno
+                            code = parsed_stack_trace.code
+                            name = parsed_stack_trace.name
+                            summary_str = f'File: {parsed_stack_trace.file}:{lineno} in {name}, code: {code}'
 
                         body.append(f'\n# {summary_str}\n')
                 elif prev_stacktrace != "":
                     prev_stacktrace = ""
                     body.append('\n# No stacktrace found for following nodes\n')
 
-        def stringify_shape(shape : Iterable) -> str:
+        def stringify_shape(shape : torch.Size) -> str:
             return f"[{', '.join(str(x) for x in shape)}]"
 
         def emit_node(node : Node):
@@ -545,14 +542,11 @@ class CodeGen:
                 from torch.fx.experimental.proxy_tensor import py_sym_types
                 from torch.fx.passes.shape_prop import TensorMetadata
 
-                meta_val = node.meta.get('val', node.meta.get('tensor_meta', node.meta.get('example_value', None)))
+                meta_val = node.meta.get('val', node.meta.get('tensor_meta', None))
+
                 # use string as annotation, to make it valid python code
                 if isinstance(meta_val, FakeTensor):
-                    stride_annotation = f"{stringify_shape(meta_val.stride())}" if include_stride else ""
-                    device_annotation = f"{meta_val.device}" if include_device else ""
-                    maybe_type_annotation = \
-                        f': "{dtype_abbrs[meta_val.dtype]}{stringify_shape(meta_val.shape)}' \
-                        f'{stride_annotation}{device_annotation}"'
+                    maybe_type_annotation = f': "{dtype_abbrs[meta_val.dtype]}{stringify_shape(meta_val.shape)}"'
                 elif isinstance(meta_val, py_sym_types):
                     maybe_type_annotation = f': "Sym({meta_val})"'
                 elif isinstance(meta_val, TensorMetadata):
@@ -985,10 +979,6 @@ class Graph:
         name = self._graph_namespace.create_name(candidate, None)
         n = Node(self, name, op, target, args, kwargs, type_expr)
 
-        if self.owning_module is not None and getattr(self.owning_module, "_create_node_hooks", None) is not None:
-            for f in self.owning_module._create_node_hooks:
-                f(n)
-
         self._graph_namespace.associate_name_with_obj(name, n)
 
         self._insert(n)
@@ -1026,10 +1016,6 @@ class Graph:
         if to_erase._erased:
             warnings.warn(f"erase_node({to_erase}) on an already erased node")
             return
-
-        if self.owning_module is not None and getattr(self.owning_module, "_erase_node_hooks", None) is not None:
-            for f in self.owning_module._erase_node_hooks:
-                f(to_erase)
 
         self._find_nodes_lookup_table.remove(to_erase)
         to_erase._remove_from_list()
@@ -1360,10 +1346,7 @@ class Graph:
         return op
 
     @compatibility(is_backward_compatible=True)
-    def python_code(
-        self, root_module: str, *,
-        verbose: bool = False, include_stride: bool = False, include_device: bool = False
-    ) -> PythonCode:
+    def python_code(self, root_module: str, *, verbose: bool = False) -> PythonCode:
         """
         Turn this ``Graph`` into valid Python code.
 
@@ -1422,19 +1405,10 @@ class Graph:
                     node._repr_fn = orig_repr_fns[node]
 
         with override_node_repr(self):
-            return self._python_code(
-                root_module, namespace,
-                verbose=verbose, include_stride=include_stride, include_device=include_device
-            )
+            return self._python_code(root_module, namespace, verbose=verbose)
 
-    def _python_code(
-        self, root_module: str, namespace: _Namespace, *,
-        verbose: bool = False, include_stride: bool = False, include_device: bool = False
-    ) -> PythonCode:
-        return self._codegen._gen_python_code(
-            self.nodes, root_module, namespace,
-            verbose=verbose, include_stride=include_stride, include_device=include_device
-        )
+    def _python_code(self, root_module: str, namespace: _Namespace, *, verbose: bool = False) -> PythonCode:
+        return self._codegen._gen_python_code(self.nodes, root_module, namespace, verbose=verbose)
 
 
     def __str__(self) -> str:
@@ -1505,7 +1479,7 @@ class Graph:
             if node.graph is not self:
                 raise RuntimeError(f'Node \'{node}\' does not belong to this Graph!')
             if node not in self._find_nodes_lookup_table:
-                raise RuntimeError(f"Node '{node}' is not added to the side table")
+                raise RuntimeError(f"Node \'{node}\' is not added to the side table")
             map_arg(node.args, lambda arg: check_arg(arg, node))
             map_arg(node.kwargs, lambda arg: check_arg(arg, node))
             seen_values.add(node)

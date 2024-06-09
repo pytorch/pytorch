@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 import torch
@@ -24,7 +23,7 @@ from torch.fx.experimental.proxy_tensor import (
 # op. First, when FakeTensor sees this op:
 # - If the schema says it returns nothing, we can generate a trivial
 #   FakeTensor rule for it (that returns nothing).
-# - Otherwise, the user needs to provide a FakeTensor impl (fake impl)
+# - Otherwise, the user needs to provide a FakeTensor rule (abstract impl)
 #
 # Next, when Python FunctionalTensor sees the op, it will functionalize
 # it by emitting a call to an auto_functionalize(op, ["x"], {"x": ...})

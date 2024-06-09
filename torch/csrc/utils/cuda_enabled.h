@@ -1,8 +1,9 @@
 #pragma once
 
-namespace torch::utils {
+namespace torch {
+namespace utils {
 
-inline constexpr bool cuda_enabled() {
+static inline bool cuda_enabled() {
 #ifdef USE_CUDA
   return true;
 #else
@@ -10,4 +11,5 @@ inline constexpr bool cuda_enabled() {
 #endif
 }
 
-} // namespace torch::utils
+} // namespace utils
+} // namespace torch
