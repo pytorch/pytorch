@@ -958,16 +958,11 @@ class CppTorchCudaOptions(CppTorchOptions):
 
 def get_name_and_dir_from_output_file_path(
     file_path: str,
-    aot_mode: bool = False,
-    use_absolute_path: bool = True,
 ):
     name_and_ext = os.path.basename(file_path)
     name, ext = os.path.splitext(name_and_ext)
     dir = os.path.dirname(file_path)
 
-    if config.is_fbcode():
-        if not (aot_mode and not use_absolute_path):
-            dir = "."
     return name, dir
 
 
