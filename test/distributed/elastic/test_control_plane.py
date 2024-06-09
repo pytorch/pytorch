@@ -109,6 +109,10 @@ class WorkerServerTest(TestCase):
             resp = pool.request(
                 "POST", "/handler/dump_nccl_trace_pickle?includecollectives=true"
             )
+            # good key and value
+            resp = pool.request(
+                "POST", "/handler/dump_nccl_trace_pickle?includestacktraces=true"
+            )
             self.assertEqual(resp.status, 200)
             # multiple good keys and values
             resp = pool.request(
