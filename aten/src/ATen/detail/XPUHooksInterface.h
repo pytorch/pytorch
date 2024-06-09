@@ -5,6 +5,10 @@
 #include <ATen/core/Generator.h>
 #include <c10/util/Registry.h>
 
+#include <cstddef>
+#include <functional>
+#include <memory>
+
 namespace at {
 
 constexpr const char* XPU_HELP =
@@ -15,7 +19,7 @@ constexpr const char* XPU_HELP =
     "be loaded, EVEN IF you don't directly use any symbols from that!";
 
 struct TORCH_API XPUHooksInterface {
-  virtual ~XPUHooksInterface() = default;
+  virtual ~XPUHooksInterface() {}
 
   virtual void initXPU() const {
     TORCH_CHECK(

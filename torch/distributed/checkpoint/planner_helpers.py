@@ -8,7 +8,6 @@ from torch.distributed._shard.metadata import ShardMetadata
 from torch.distributed._shard.sharded_tensor import ShardedTensor
 from torch.distributed._tensor import DTensor
 from torch.distributed._tensor._utils import compute_local_shape_and_global_offset
-from torch.distributed.checkpoint.planner import _Checkpointable
 
 from torch.utils._pytree import tree_map_only
 
@@ -218,12 +217,7 @@ def _create_default_metadata_only_plan(state_dict: STATE_DICT_TYPE) -> SavePlan:
 
 
 def _create_write_items(fqn: str, object: Any) -> List[WriteItem]:
-    if isinstance(object, _Checkpointable):
-        return object._create_write_items(fqn, object)
-    elif isinstance(object, DTensor):
-        # DTensor can contain a local tensor that is a tensor subclass
-        if isinstance(object.to_local(), _Checkpointable):
-            return object.to_local()._create_write_items(fqn, object)  # type: ignore[arg-type]
+    if isinstance(object, DTensor):
         return [_create_write_items_for_dtensor(fqn, object)]
     elif isinstance(object, ShardedTensor):
         return [
@@ -248,12 +242,7 @@ def _create_chunk_from_dtensor(tensor: DTensor) -> ChunkStorageMetadata:
 
 
 def _create_chunk_list(tensor: torch.Tensor) -> List[ChunkStorageMetadata]:
-    if isinstance(tensor, _Checkpointable):
-        local_chunks = tensor._create_chunk_list(tensor)
-    elif isinstance(tensor, DTensor):
-        # DTensor can contain a local tensor that is a tensor subclass
-        if isinstance(tensor.to_local(), _Checkpointable):
-            return tensor.to_local()._create_chunk_list(tensor)  # type: ignore[arg-type]
+    if isinstance(tensor, DTensor):
         local_chunks = [_create_chunk_from_dtensor(tensor)]
     elif isinstance(tensor, ShardedTensor):
         local_chunks = [

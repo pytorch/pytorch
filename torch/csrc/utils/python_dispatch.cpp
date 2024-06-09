@@ -255,7 +255,7 @@ void initDispatchBindings(PyObject* module) {
       .def("debug", &c10::OperatorHandle::debug)
       .def(
           "redispatch_boxed",
-          [](const py::object& self,
+          [](py::object self,
              c10::DispatchKeySet keyset,
              py::args args,
              const py::kwargs& kwargs) {
@@ -819,7 +819,7 @@ void initDispatchBindings(PyObject* module) {
         auto op_names =
             c10::Dispatcher::singleton().getRegistrationsForDispatchKey(k);
         for (auto& op : op_names) {
-          std::cout << op << '\n';
+          std::cout << op << std::endl;
         }
       },
       py::arg("dispatch_key") = static_cast<const char*>(""));

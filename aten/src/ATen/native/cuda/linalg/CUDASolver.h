@@ -18,7 +18,7 @@ namespace solver {
 
 template<class Dtype>
 void getrf(CUDASOLVER_GETRF_ARGTYPES(Dtype)) {
-  static_assert(false&&sizeof(Dtype), "at::cuda::solver::getrf: not implemented");
+  TORCH_CHECK(false, "at::cuda::solver::getrf: not implemented for ", typeid(Dtype).name());
 }
 template<>
 void getrf<float>(CUDASOLVER_GETRF_ARGTYPES(float));
@@ -35,7 +35,7 @@ void getrf<c10::complex<float>>(CUDASOLVER_GETRF_ARGTYPES(c10::complex<float>));
 
 template<class Dtype>
 void getrs(CUDASOLVER_GETRS_ARGTYPES(Dtype)) {
-  static_assert(false&&sizeof(Dtype), "at::cuda::solver::getrs: not implemented");
+  TORCH_CHECK(false, "at::cuda::solver::getrs: not implemented for ", typeid(Dtype).name());
 }
 template<>
 void getrs<float>(CUDASOLVER_GETRS_ARGTYPES(float));
@@ -51,8 +51,10 @@ void getrs<c10::complex<float>>(CUDASOLVER_GETRS_ARGTYPES(c10::complex<float>));
 
 template <class Dtype>
 void sytrf_bufferSize(CUDASOLVER_SYTRF_BUFFER_ARGTYPES(Dtype)) {
-  static_assert(false&&sizeof(Dtype),
-      "at::cuda::solver::sytrf_bufferSize: not implemented");
+  TORCH_CHECK(
+      false,
+      "at::cuda::solver::sytrf_bufferSize: not implemented for ",
+      typeid(Dtype).name());
 }
 template <>
 void sytrf_bufferSize<float>(CUDASOLVER_SYTRF_BUFFER_ARGTYPES(float));
@@ -71,8 +73,10 @@ void sytrf_bufferSize<c10::complex<float>>(
 
 template <class Dtype>
 void sytrf(CUDASOLVER_SYTRF_ARGTYPES(Dtype)) {
-  static_assert(false&&sizeof(Dtype),
-      "at::cuda::solver::sytrf: not implemented");
+  TORCH_CHECK(
+      false,
+      "at::cuda::solver::sytrf: not implemented for ",
+      typeid(Dtype).name());
 }
 template <>
 void sytrf<float>(CUDASOLVER_SYTRF_ARGTYPES(float));
@@ -89,7 +93,7 @@ void sytrf<c10::complex<float>>(CUDASOLVER_SYTRF_ARGTYPES(c10::complex<float>));
 
 template<class Dtype>
 void gesvd_buffersize(CUDASOLVER_GESVD_BUFFERSIZE_ARGTYPES()) {
-  static_assert(false&&sizeof(Dtype), "at::cuda::solver::gesvd_buffersize: not implemented");
+  TORCH_CHECK(false, "at::cuda::solver::gesvd_buffersize: not implemented for ", typeid(Dtype).name());
 }
 template<>
 void gesvd_buffersize<float>(CUDASOLVER_GESVD_BUFFERSIZE_ARGTYPES());
@@ -107,7 +111,7 @@ void gesvd_buffersize<c10::complex<double>>(CUDASOLVER_GESVD_BUFFERSIZE_ARGTYPES
 
 template<class Dtype, class Vtype>
 void gesvd(CUDASOLVER_GESVD_ARGTYPES(Dtype, Vtype)) {
-  static_assert(false&&sizeof(Dtype), "at::cuda::solver::gesvd: not implemented");
+  TORCH_CHECK(false, "at::cuda::solver::gesvd: not implemented for ", typeid(Dtype).name());
 }
 template<>
 void gesvd<float>(CUDASOLVER_GESVD_ARGTYPES(float, float));
@@ -125,7 +129,7 @@ void gesvd<c10::complex<double>>(CUDASOLVER_GESVD_ARGTYPES(c10::complex<double>,
 
 template<class Dtype, class Vtype>
 void gesvdj_buffersize(CUDASOLVER_GESVDJ_BUFFERSIZE_ARGTYPES(Dtype, Vtype)) {
-  static_assert(false&&sizeof(Dtype), "at::cuda::solver::gesvdj_buffersize: not implemented");
+  TORCH_INTERNAL_ASSERT(false, "at::cuda::solver::gesvdj_buffersize: not implemented for ", typeid(Dtype).name());
 }
 template<>
 void gesvdj_buffersize<float>(CUDASOLVER_GESVDJ_BUFFERSIZE_ARGTYPES(float, float));
@@ -143,7 +147,7 @@ void gesvdj_buffersize<c10::complex<double>>(CUDASOLVER_GESVDJ_BUFFERSIZE_ARGTYP
 
 template<class Dtype, class Vtype>
 void gesvdj(CUDASOLVER_GESVDJ_ARGTYPES(Dtype, Vtype)) {
-  static_assert(false&&sizeof(Dtype), "at::cuda::solver::gesvdj: not implemented");
+  TORCH_INTERNAL_ASSERT(false, "at::cuda::solver::gesvdj: not implemented for ", typeid(Dtype).name());
 }
 template<>
 void gesvdj<float>(CUDASOLVER_GESVDJ_ARGTYPES(float, float));
@@ -161,7 +165,7 @@ void gesvdj<c10::complex<double>>(CUDASOLVER_GESVDJ_ARGTYPES(c10::complex<double
 
 template<class Dtype, class Vtype>
 void gesvdjBatched(CUDASOLVER_GESVDJ_BATCHED_ARGTYPES(Dtype, Vtype)) {
-  static_assert(false&&sizeof(Dtype), "at::cuda::solver::gesvdj: not implemented");
+  TORCH_INTERNAL_ASSERT(false, "at::cuda::solver::gesvdj: not implemented for ", typeid(Dtype).name());
 }
 template<>
 void gesvdjBatched<float>(CUDASOLVER_GESVDJ_BATCHED_ARGTYPES(float, float));
@@ -179,7 +183,7 @@ void gesvdjBatched<c10::complex<double>>(CUDASOLVER_GESVDJ_BATCHED_ARGTYPES(c10:
 
 template<class Dtype, class Vtype>
 void gesvdaStridedBatched_buffersize(CUDASOLVER_GESVDA_STRIDED_BATCHED_BUFFERSIZE_ARGTYPES(Dtype, Vtype)) {
-  static_assert(false&&sizeof(Dtype), "at::cuda::solver::gesvdaStridedBatched_buffersize: not implemented");
+  TORCH_INTERNAL_ASSERT(false, "at::cuda::solver::gesvdaStridedBatched_buffersize: not implemented for ", typeid(Dtype).name());
 }
 template<>
 void gesvdaStridedBatched_buffersize<float>(CUDASOLVER_GESVDA_STRIDED_BATCHED_BUFFERSIZE_ARGTYPES(float, float));
@@ -199,7 +203,7 @@ void gesvdaStridedBatched_buffersize<c10::complex<double>>(CUDASOLVER_GESVDA_STR
 
 template<class Dtype, class Vtype>
 void gesvdaStridedBatched(CUDASOLVER_GESVDA_STRIDED_BATCHED_ARGTYPES(Dtype, Vtype)) {
-  static_assert(false&&sizeof(Dtype), "at::cuda::solver::gesvdaStridedBatched: not implemented");
+  TORCH_INTERNAL_ASSERT(false, "at::cuda::solver::gesvdaStridedBatched: not implemented for ", typeid(Dtype).name());
 }
 template<>
 void gesvdaStridedBatched<float>(CUDASOLVER_GESVDA_STRIDED_BATCHED_ARGTYPES(float, float));
@@ -216,7 +220,7 @@ void gesvdaStridedBatched<c10::complex<double>>(CUDASOLVER_GESVDA_STRIDED_BATCHE
 
 template<class Dtype>
 void potrf(CUDASOLVER_POTRF_ARGTYPES(Dtype)) {
-  static_assert(false&&sizeof(Dtype), "at::cuda::solver::potrf: not implemented");
+  TORCH_INTERNAL_ASSERT(false, "at::cuda::solver::potrf: not implemented for ", typeid(Dtype).name());
 }
 template<>
 void potrf<float>(CUDASOLVER_POTRF_ARGTYPES(float));
@@ -233,7 +237,7 @@ void potrf<c10::complex<double>>(CUDASOLVER_POTRF_ARGTYPES(c10::complex<double>)
 
 template<class Dtype>
 void potrf_buffersize(CUDASOLVER_POTRF_BUFFERSIZE_ARGTYPES(Dtype)) {
-  static_assert(false&&sizeof(Dtype), "at::cuda::solver::potrf_buffersize: not implemented");
+  TORCH_INTERNAL_ASSERT(false, "at::cuda::solver::potrf_buffersize: not implemented for ", typeid(Dtype).name());
 }
 template<>
 void potrf_buffersize<float>(CUDASOLVER_POTRF_BUFFERSIZE_ARGTYPES(float));
@@ -250,7 +254,7 @@ void potrf_buffersize<c10::complex<double>>(CUDASOLVER_POTRF_BUFFERSIZE_ARGTYPES
 
 template<class Dtype>
 void potrfBatched(CUDASOLVER_POTRF_BATCHED_ARGTYPES(Dtype)) {
-  static_assert(false&&sizeof(Dtype), "at::cuda::solver::potrfBatched: not implemented");
+  TORCH_INTERNAL_ASSERT(false, "at::cuda::solver::potrfBatched: not implemented for ", typeid(Dtype).name());
 }
 template<>
 void potrfBatched<float>(CUDASOLVER_POTRF_BATCHED_ARGTYPES(float));
@@ -266,8 +270,10 @@ void potrfBatched<c10::complex<double>>(CUDASOLVER_POTRF_BATCHED_ARGTYPES(c10::c
 
 template <class scalar_t>
 void geqrf_bufferSize(CUDASOLVER_GEQRF_BUFFERSIZE_ARGTYPES(scalar_t)) {
-  static_assert(false&&sizeof(scalar_t),
-      "at::cuda::solver::geqrf_bufferSize: not implemented");
+  TORCH_CHECK(
+      false,
+      "at::cuda::solver::geqrf_bufferSize: not implemented for ",
+      typeid(scalar_t).name());
 }
 template <>
 void geqrf_bufferSize<float>(CUDASOLVER_GEQRF_BUFFERSIZE_ARGTYPES(float));
@@ -286,8 +292,10 @@ void geqrf_bufferSize<c10::complex<double>>(
 
 template <class scalar_t>
 void geqrf(CUDASOLVER_GEQRF_ARGTYPES(scalar_t)) {
-  static_assert(false&&sizeof(scalar_t),
-      "at::cuda::solver::geqrf: not implemented");
+  TORCH_CHECK(
+      false,
+      "at::cuda::solver::geqrf: not implemented for ",
+      typeid(scalar_t).name());
 }
 template <>
 void geqrf<float>(CUDASOLVER_GEQRF_ARGTYPES(float));
@@ -304,7 +312,7 @@ void geqrf<c10::complex<double>>(
 
 template<class Dtype>
 void potrs(CUDASOLVER_POTRS_ARGTYPES(Dtype)) {
-  static_assert(false&&sizeof(Dtype), "at::cuda::solver::potrs: not implemented");
+  TORCH_INTERNAL_ASSERT(false, "at::cuda::solver::potrs: not implemented for ", typeid(Dtype).name());
 }
 template<>
 void potrs<float>(CUDASOLVER_POTRS_ARGTYPES(float));
@@ -321,7 +329,7 @@ void potrs<c10::complex<double>>(CUDASOLVER_POTRS_ARGTYPES(c10::complex<double>)
 
 template<class Dtype>
 void potrsBatched(CUDASOLVER_POTRS_BATCHED_ARGTYPES(Dtype)) {
-  static_assert(false&&sizeof(Dtype), "at::cuda::solver::potrsBatched: not implemented");
+  TORCH_INTERNAL_ASSERT(false, "at::cuda::solver::potrsBatched: not implemented for ", typeid(Dtype).name());
 }
 template<>
 void potrsBatched<float>(CUDASOLVER_POTRS_BATCHED_ARGTYPES(float));
@@ -339,7 +347,10 @@ void potrsBatched<c10::complex<double>>(CUDASOLVER_POTRS_BATCHED_ARGTYPES(c10::c
 
 template <class Dtype>
 void orgqr_buffersize(CUDASOLVER_ORGQR_BUFFERSIZE_ARGTYPES(Dtype)) {
-  static_assert(false&&sizeof(Dtype), "at::cuda::solver::orgqr_buffersize: not implemented");
+  TORCH_CHECK(
+      false,
+      "at::cuda::solver::orgqr_buffersize: not implemented for ",
+      typeid(Dtype).name());
 }
 template <>
 void orgqr_buffersize<float>(CUDASOLVER_ORGQR_BUFFERSIZE_ARGTYPES(float));
@@ -357,7 +368,10 @@ void orgqr_buffersize<c10::complex<double>>(CUDASOLVER_ORGQR_BUFFERSIZE_ARGTYPES
 
 template <class Dtype>
 void orgqr(CUDASOLVER_ORGQR_ARGTYPES(Dtype)) {
-  static_assert(false&&sizeof(Dtype), "at::cuda::solver::orgqr: not implemented");
+  TORCH_CHECK(
+      false,
+      "at::cuda::solver::orgqr: not implemented for ",
+      typeid(Dtype).name());
 }
 template <>
 void orgqr<float>(CUDASOLVER_ORGQR_ARGTYPES(float));
@@ -375,8 +389,10 @@ void orgqr<c10::complex<double>>(CUDASOLVER_ORGQR_ARGTYPES(c10::complex<double>)
 
 template <class Dtype>
 void ormqr_bufferSize(CUDASOLVER_ORMQR_BUFFERSIZE_ARGTYPES(Dtype)) {
-  static_assert(false&&sizeof(Dtype),
-      "at::cuda::solver::ormqr_bufferSize: not implemented");
+  TORCH_INTERNAL_ASSERT(
+      false,
+      "at::cuda::solver::ormqr_bufferSize: not implemented for ",
+      typeid(Dtype).name());
 }
 template <>
 void ormqr_bufferSize<float>(CUDASOLVER_ORMQR_BUFFERSIZE_ARGTYPES(float));
@@ -396,8 +412,10 @@ void ormqr_bufferSize<c10::complex<double>>(
 
 template <class Dtype>
 void ormqr(CUDASOLVER_ORMQR_ARGTYPES(Dtype)) {
-  static_assert(false&&sizeof(Dtype),
-      "at::cuda::solver::ormqr: not implemented");
+  TORCH_INTERNAL_ASSERT(
+      false,
+      "at::cuda::solver::ormqr: not implemented for ",
+      typeid(Dtype).name());
 }
 template <>
 void ormqr<float>(CUDASOLVER_ORMQR_ARGTYPES(float));
@@ -413,8 +431,7 @@ void ormqr<c10::complex<double>>(
 
 template<class Dtype>
 cudaDataType get_cusolver_datatype() {
-  static_assert(false&&sizeof(Dtype), "cusolver doesn't support data type");
-  return {};
+  TORCH_CHECK(false, "cusolver doesn't support data type ", typeid(Dtype).name());
 }
 template<> cudaDataType get_cusolver_datatype<float>();
 template<> cudaDataType get_cusolver_datatype<double>();
@@ -442,8 +459,10 @@ void xpotrs(
 
 template <class scalar_t, class value_t = scalar_t>
 void syevd_bufferSize(CUDASOLVER_SYEVD_BUFFERSIZE_ARGTYPES(scalar_t, value_t)) {
-  static_assert(false&&sizeof(scalar_t),
-      "at::cuda::solver::syevd_bufferSize: not implemented");
+  TORCH_INTERNAL_ASSERT(
+      false,
+      "at::cuda::solver::syevd_bufferSize: not implemented for ",
+      typeid(scalar_t).name());
 }
 
 template <>
@@ -466,8 +485,10 @@ void syevd_bufferSize<c10::complex<double>, double>(
 
 template <class scalar_t, class value_t = scalar_t>
 void syevd(CUDASOLVER_SYEVD_ARGTYPES(scalar_t, value_t)) {
-  static_assert(false&&sizeof(scalar_t),
-      "at::cuda::solver::syevd: not implemented");
+  TORCH_INTERNAL_ASSERT(
+      false,
+      "at::cuda::solver::syevd: not implemented for ",
+      typeid(scalar_t).name());
 }
 
 template <>
@@ -488,8 +509,10 @@ void syevd<c10::complex<double>, double>(
 
 template <class scalar_t, class value_t = scalar_t>
 void syevj_bufferSize(CUDASOLVER_SYEVJ_BUFFERSIZE_ARGTYPES(scalar_t, value_t)) {
-  static_assert(false&&sizeof(scalar_t),
-      "at::cuda::solver::syevj_bufferSize: not implemented");
+  TORCH_INTERNAL_ASSERT(
+      false,
+      "at::cuda::solver::syevj_bufferSize: not implemented for ",
+      typeid(scalar_t).name());
 }
 
 template <>
@@ -512,7 +535,10 @@ void syevj_bufferSize<c10::complex<double>, double>(
 
 template <class scalar_t, class value_t = scalar_t>
 void syevj(CUDASOLVER_SYEVJ_ARGTYPES(scalar_t, value_t)) {
-  static_assert(false&&sizeof(scalar_t), "at::cuda::solver::syevj: not implemented");
+  TORCH_INTERNAL_ASSERT(
+      false,
+      "at::cuda::solver::syevj: not implemented for ",
+      typeid(scalar_t).name());
 }
 
 template <>
@@ -534,8 +560,10 @@ void syevj<c10::complex<double>, double>(
 template <class scalar_t, class value_t = scalar_t>
 void syevjBatched_bufferSize(
     CUDASOLVER_SYEVJ_BATCHED_BUFFERSIZE_ARGTYPES(scalar_t, value_t)) {
-  static_assert(false&&sizeof(scalar_t),
-      "at::cuda::solver::syevjBatched_bufferSize: not implemented");
+  TORCH_INTERNAL_ASSERT(
+      false,
+      "at::cuda::solver::syevjBatched_bufferSize: not implemented for ",
+      typeid(scalar_t).name());
 }
 
 template <>
@@ -558,8 +586,10 @@ void syevjBatched_bufferSize<c10::complex<double>, double>(
 
 template <class scalar_t, class value_t = scalar_t>
 void syevjBatched(CUDASOLVER_SYEVJ_BATCHED_ARGTYPES(scalar_t, value_t)) {
-  static_assert(false&&sizeof(scalar_t),
-      "at::cuda::solver::syevjBatched: not implemented");
+  TORCH_INTERNAL_ASSERT(
+      false,
+      "at::cuda::solver::syevjBatched: not implemented for ",
+      typeid(scalar_t).name());
 }
 
 template <>
@@ -582,8 +612,10 @@ void syevjBatched<c10::complex<double>, double>(
 
 template <class scalar_t>
 void xgeqrf_bufferSize(CUDASOLVER_XGEQRF_BUFFERSIZE_ARGTYPES(scalar_t)) {
-  static_assert(false&&sizeof(scalar_t),
-      "at::cuda::solver::xgeqrf_bufferSize: not implemented");
+  TORCH_INTERNAL_ASSERT(
+      false,
+      "at::cuda::solver::xgeqrf_bufferSize: not implemented for ",
+      typeid(scalar_t).name());
 }
 
 template <>
@@ -605,7 +637,10 @@ void xgeqrf_bufferSize<c10::complex<double>>(
 
 template <class scalar_t>
 void xgeqrf(CUDASOLVER_XGEQRF_ARGTYPES(scalar_t)) {
-  static_assert(false&&sizeof(scalar_t), "at::cuda::solver::xgeqrf: not implemented");
+  TORCH_INTERNAL_ASSERT(
+      false,
+      "at::cuda::solver::xgeqrf: not implemented for ",
+      typeid(scalar_t).name());
 }
 
 template <>
@@ -628,8 +663,10 @@ void xgeqrf<c10::complex<double>>(
 template <class scalar_t, class value_t = scalar_t>
 void xsyevd_bufferSize(
     CUDASOLVER_XSYEVD_BUFFERSIZE_ARGTYPES(scalar_t, value_t)) {
-  static_assert(false&&sizeof(scalar_t),
-      "at::cuda::solver::xsyevd_bufferSize: not implemented");
+  TORCH_INTERNAL_ASSERT(
+      false,
+      "at::cuda::solver::xsyevd_bufferSize: not implemented for ",
+      typeid(scalar_t).name());
 }
 
 template <>
@@ -654,8 +691,10 @@ void xsyevd_bufferSize<c10::complex<double>, double>(
 
 template <class scalar_t, class value_t = scalar_t>
 void xsyevd(CUDASOLVER_XSYEVD_ARGTYPES(scalar_t, value_t)) {
-  static_assert(false&&sizeof(scalar_t),
-      "at::cuda::solver::xsyevd: not implemented");
+  TORCH_INTERNAL_ASSERT(
+      false,
+      "at::cuda::solver::xsyevd: not implemented for ",
+      typeid(scalar_t).name());
 }
 
 template <>

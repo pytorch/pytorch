@@ -48,7 +48,7 @@ bool get_p2p_access(int dev, int dev_to_access) {
     return cache;
   }
 
-  int result = 0;
+  int result;
   C10_CUDA_CHECK(cudaDeviceCanAccessPeer(&result, dev, dev_to_access));
   cache = result ? 1 : 0;
   if (cache) {

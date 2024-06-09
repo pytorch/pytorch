@@ -10,7 +10,8 @@
 
 using namespace at;
 
-namespace torch::utils {
+namespace torch {
+namespace utils {
 
 struct StridedData {
   StridedData(const Tensor& tensor)
@@ -128,4 +129,5 @@ const Tensor& map2_(
   return self;
 }
 
-} // namespace torch::utils
+} // namespace utils
+} // namespace torch

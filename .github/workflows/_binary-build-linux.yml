@@ -12,15 +12,10 @@ on:
         type: string
         description: The build environment
       runs_on:
-        required: false
-        default: linux.12xlarge
-        type: string
-        description: Hardware to run this "build"job on, linux.12xlarge or linux.arm64.2xlarge.
-      timeout-minutes:
-        required: false
-        default: 210
-        type: number
-        description: timeout for the job
+          required: false
+          default: linux.12xlarge
+          type: string
+          description: Hardware to run this "build"job on, linux.12xlarge or linux.arm64.2xlarge.
       ALPINE_IMAGE:
         required: false
         type: string
@@ -83,7 +78,7 @@ on:
 jobs:
   build:
     runs-on: ${{ inputs.runs_on }}
-    timeout-minutes: ${{ inputs.timeout-minutes }}
+    timeout-minutes: 210
     env:
       PYTORCH_ROOT: ${{ inputs.PYTORCH_ROOT }}
       BUILDER_ROOT: ${{ inputs.BUILDER_ROOT }}

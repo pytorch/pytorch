@@ -326,7 +326,6 @@ class TCPStoreTest(TestCase, StoreTestBase):
         )
 
         rpc.shutdown()
-        dist.destroy_process_group()
 
     @skip_if_win32()
     def test_take_over_listen_socket(self):
