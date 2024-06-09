@@ -219,6 +219,11 @@ EXPECTED_SKIPS_OR_FAILS_WITH_DTYPES: Tuple[onnx_test_common.DecorateMeta, ...] =
         reason=onnx_test_common.reason_dynamo_does_not_support("Addr", "complex64")
     ),
     xfail(
+        "alias_copy",
+        dtypes=(torch.bool, torch.float32, torch.complex64),
+        reason="OnnxExporterError: Failed to export model",
+    ),
+    xfail(
         "allclose",
         reason=onnx_test_common.reason_dynamo_does_not_support("Allclose")
     ),
@@ -276,11 +281,6 @@ EXPECTED_SKIPS_OR_FAILS_WITH_DTYPES: Tuple[onnx_test_common.DecorateMeta, ...] =
         "as_strided",
         variant_name="partial_views",
         reason="ONNX doesn't have partial view for tensor; [PostInline][ORT] segfaults",
-    ),
-    skip(
-        "as_strided_copy",
-        dtypes=(torch.bool, torch.float32, torch.complex64),
-        reason="OnnxExporterError: Failed to export model",
     ),
     xfail(
         "atan2",
