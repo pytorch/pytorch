@@ -32,6 +32,8 @@ static int NodeBase_init_fn(NodeBase* self, PyObject* args, PyObject* kwds) {
 }
 
 static void NodeBase_dealloc(NodeBase* self) {
+  Py_XDECREF(self->_prev);
+  Py_XDECREF(self->_next);
   Py_TYPE(self)->tp_free((PyObject*)self);
 }
 
@@ -138,6 +140,8 @@ static int NodeIter_init_fn(NodeIter* self, PyObject* args, PyObject* kwargs) {
 }
 
 static void NodeIter_dealloc(NodeIter* self) {
+  Py_XDECREF(self->_root);
+  Py_XDECREF(self->_cur);
   Py_TYPE(self)->tp_free((PyObject*)self);
 }
 
@@ -149,8 +153,12 @@ PyObject* NodeIter_iter(PyObject* self) {
 template <bool reversed>
 PyObject* NodeIter_iternext_helper(NodeIter* self) {
   if constexpr (reversed) {
+    Py_INCREF(self->_cur->_prev);
+    Py_XDECREF(self->_cur);
     self->_cur = self->_cur->_prev;
   } else {
+    Py_INCREF(self->_cur->_next);
+    Py_XDECREF(self->_cur);
     self->_cur = self->_cur->_next;
   }
   while (self->_cur != self->_root) {
@@ -159,8 +167,12 @@ PyObject* NodeIter_iternext_helper(NodeIter* self) {
       return (PyObject*)self->_cur;
     }
     if constexpr (reversed) {
+      Py_INCREF(self->_cur->_prev);
+      Py_XDECREF(self->_cur);
       self->_cur = self->_cur->_prev;
     } else {
+      Py_INCREF(self->_cur->_next);
+      Py_XDECREF(self->_cur);
       self->_cur = self->_cur->_next;
     }
   }
