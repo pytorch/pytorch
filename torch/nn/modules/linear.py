@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import math
 from typing import Any
 

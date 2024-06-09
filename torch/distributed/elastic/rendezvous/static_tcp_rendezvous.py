@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# mypy: allow-untyped-defs
 
 # Copyright (c) Facebook, Inc. and its affiliates.
 # All rights reserved.
@@ -42,7 +43,7 @@ class StaticTCPRendezvous(RendezvousHandler):
         world_size: int,
         run_id: str,
         timeout: int,
-        use_libuv: bool,
+        use_libuv: bool = True,
     ):
         self.master_addr = master_addr
         self.master_port = master_port

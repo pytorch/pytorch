@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import contextlib
 import dataclasses
 import functools
@@ -275,11 +276,11 @@ def simplify_index_in_vec_range(index: sympy.Expr, var: sympy.Expr, vec_length: 
 
     original_index = index
 
-    div = sympy.Wild("divisor", integer=True)
+    div = sympy.Wild("divisor")
     if index.has(FloorDiv):
         index = index.replace(FloorDiv(var, div), visit_indexing_div)
 
-    mod = sympy.Wild("modulus", integer=True)
+    mod = sympy.Wild("modulus")
     if index.has(ModularIndexing):
         index = index.replace(ModularIndexing(var, div, mod), visit_modular_indexing)
 

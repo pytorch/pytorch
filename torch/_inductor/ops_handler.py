@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import itertools
 from typing import (
     Any,
@@ -135,38 +136,6 @@ class OpsHandler(Protocol[T]):
         """
         Convert x to dtype.  src_dtype can be optionally set to specify what the original
         dtype of x was, which can improve code generation (used by torch to(dtype=dtype)).
-        """
-        ...
-
-    def trunc_to_int(self, x: T, dtype: torch.dtype) -> T:
-        """
-        Convert x to dtype with truncation semantics (similar to how the int
-        constructor works in Python).  In Inductor codegen, this just decays
-        to trunc and then to_dtype, but this composite operation helps
-        roundtrips for Sympy evaluation.
-
-        dtype is taken as an explicit parameter because the desired output
-        dtype is typically the index dtype, which may vary between int32 and
-        int64 depending on if we've shown that all the indexing operations can
-        be done in int32.
-        """
-        ...
-
-    def ceil_to_int(self, x: T, dtype: torch.dtype) -> T:
-        """
-        Convert x to dtype with ceiling semantics.  See also trunc_to_int.
-        """
-        ...
-
-    def floor_to_int(self, x: T, dtype: torch.dtype) -> T:
-        """
-        Convert x to dtype with ceiling semantics.  See also trunc_to_int.
-        """
-        ...
-
-    def round_to_int(self, x: T, dtype: torch.dtype) -> T:
-        """
-        Convert x to dtype with round-to-even semantics.  See also trunc_to_int.
         """
         ...
 
@@ -430,23 +399,21 @@ class OpsHandler(Protocol[T]):
     def isnan(self, x0: T) -> T:
         ...
 
-    # NB: this returns a float, like the torch operation
-    # This rounds half to even to break ties
     def round(self, x0: T) -> T:
         ...
 
-    # NB: this returns a float, like the torch operation
     def floor(self, x0: T) -> T:
         ...
 
     def sign(self, x0: T) -> T:
         ...
 
-    # NB: this returns a float, like the torch operation
+    def to_int(self, x0: T) -> T:
+        ...
+
     def trunc(self, x0: T) -> T:
         ...
 
-    # NB: this returns a float, like the torch operation
     def ceil(self, x0: T) -> T:
         ...
 
@@ -483,7 +450,6 @@ class OpsHandler(Protocol[T]):
     def mul(self, x0: T, x1: T) -> T:
         ...
 
-    # NB: this returns a float, like the torch operation
     def pow(self, x0: T, x1: T) -> T:
         ...
 
@@ -652,21 +618,14 @@ class OpsHandler(Protocol[T]):
 
     def floordiv(self, x0: T, x1: T) -> T:
         """Python-style floor division between integers only.  Computes the
-        true division of two numbers and floors the result.  If you want
-        floor division for floats, do regular truediv and floor the result.
+        true division of two numbers and floors the result.
         """
         ...
 
     def truediv(self, x0: T, x1: T) -> T:
-        """True division between floats.  Integer inputs are NOT valid.  To
-        do Python-style (int, int) -> float division, use int_truediv"""
-        ...
-
-    def int_truediv(self, x0: T, x1: T) -> T:
-        """True division between integers.  This is NOT the same as promoting
-        to float and doing integer division, there is a bespoke algorithm for
-        doing the division in higher precision than the above.
-        """
+        """True division between floats.  Integer inputs are NOT valid: to do
+        Python style (int, int) -> float division, promote the inputs to float
+        first."""
         ...
 
     def div(self, x0: T, x1: T) -> T:
@@ -680,10 +639,6 @@ class OpsHandler(Protocol[T]):
 
     def remainder(self, x0: T, x1: T) -> T:
         """Python-style modulus, take sign from RHS (x1)."""
-        ...
-
-    def round_decimal(self, x0: T, x1: T) -> T:
-        """Python-style round with decimal argument"""
         ...
 
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
