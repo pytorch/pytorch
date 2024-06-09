@@ -6,68 +6,111 @@ authors:
 url: https://pytorch.org
 preferred-citation:
   type: conference-paper
-  title: "PyTorch: An Imperative Style, High-Performance Deep Learning Library"
+  title: "PyTorch 2: Faster Machine Learning Through Dynamic Python Bytecode Transformation and Graph Compilation"
   authors:
-    - family-names: Paszke
-      given-names: Adam
-    - family-names: Gross
-      given-names: Sam
-    - family-names: Massa
-      given-names: Francisco
-    - family-names: Lerer
-      given-names: Adam
-    - family-names: Bradbury
-      given-names: James
-    - family-names: Chanan
-      given-names: Gregory
-    - family-names: Killeen
-      given-names: Trevor
-    - family-names: Lin
-      given-names: Zeming
-    - family-names: Gimelshein
-      given-names: Natalia
-    - family-names: Antiga
-      given-names: Luca
-    - family-names: Desmaison
-      given-names: Alban
-    - family-names: Kopf
-      given-names: Andreas
+    - family-names: Ansel
+      given-names: Jason
     - family-names: Yang
       given-names: Edward
+    - family-names: He
+      given-names: Horace
+    - family-names: Gimelshein
+      given-names: Natalia
+    - family-names: Jain
+      given-names: Animesh
+    - family-names: Voznesensky
+      given-names: Michael
+    - family-names: Bao
+      given-names: Bin
+    - family-names: Bell
+      given-names: Peter
+    - family-names: Berard
+      given-names: David
+    - family-names: Burovski
+      given-names: Evgeni
+    - family-names: Chauhan
+      given-names: Geeta
+    - family-names: Chourdia
+      given-names: Anjali
+    - family-names: Constable
+      given-names: Will
+    - family-names: Desmaison
+      given-names: Alban
     - family-names: DeVito
       given-names: Zachary
-    - family-names: Raison
-      given-names: Martin
-    - family-names: Tejani
-      given-names: Alykhan
-    - family-names: Chilamkurthy
-      given-names: Sasank
-    - family-names: Steiner
-      given-names: Benoit
-    - family-names: Fang
-      given-names: Lu
-    - family-names: Bai
-      given-names: Junjie
+    - family-names: Ellison
+      given-names: Elias
+    - family-names: Feng
+      given-names: Will
+    - family-names: Gong
+      given-names: Jiong
+    - family-names: Gschwind
+      given-names: Michael
+    - family-names: Hirsh
+      given-names: Brian
+    - family-names: Huang
+      given-names: Sherlock
+    - family-names: Kalambarkar
+      given-names: Kshiteej
+    - family-names: Kirsch
+      given-names: Laurent
+    - family-names: Lazos
+      given-names: Michael
+    - family-names: Lezcano
+      given-names: Mario
+    - family-names: Liang
+      given-names: Yanbo
+    - family-names: Liang
+      given-names: Jason
+    - family-names: Lu
+      given-names: Yinghai
+    - family-names: Luk
+      given-names: CK
+    - family-names: Maher
+      given-names: Bert
+    - family-names: Pan
+      given-names: Yunjie
+    - family-names: Puhrsch
+      given-names: Christian
+    - family-names: Reso
+      given-names: Matthias
+    - family-names: Saroufim
+      given-names: Mark
+    - family-names: Siraichi
+      given-names: Marcos Yukio
+    - family-names: Suk
+      given-names: Helen
+    - family-names: Suo
+      given-names: Michael
+    - family-names: Tillet
+      given-names: Phil
+    - family-names: Wang
+      given-names: Eikan
+    - family-names: Wang
+      given-names: Xiaodong
+    - family-names: Wen
+      given-names: William
+    - family-names: Zhang
+      given-names: Shunting
+    - family-names: Zhao
+      given-names: Xu
+    - family-names: Zhou
+      given-names: Keren
+    - family-names: Zou
+      given-names: Richard
+    - family-names: Mathews
+      given-names: Ajit
+    - family-names: Chanan
+      given-names: Gregory
+    - family-names: Wu
+      given-names: Peng
     - family-names: Chintala
       given-names: Soumith
-  collection-title: Advances in Neural Information Processing Systems 32
+  collection-title: "29th ACM International Conference on Architectural Support for Programming Languages and Operating Systems, Volume 2 (ASPLOS '24)"
   collection-type: proceedings
-  editors:
-    - family-names: Wallach
-      given-names: H.
-    - family-names: Larochelle
-      given-names: H.
-    - family-names: Beygelzimer
-      given-names: A.
-    - family-names: "d'Alché-Buc"
-      given-names: F.
-    - family-names: Fox
-      given-names: E.
-    - family-names: Garnett
-      given-names: R.
-  start: 8024
-  end: 8035
-  year: 2019
+  month: 4
+  year: 2024
   publisher:
-    name: Curran Associates, Inc.
-  url: http://papers.neurips.cc/paper/9015-pytorch-an-imperative-style-high-performance-deep-learning-library.pdf
+    name: ACM
+  doi: "10.1145/3620665.3640366"
+  url: "https://pytorch.org/assets/pytorch2-2.pdf"

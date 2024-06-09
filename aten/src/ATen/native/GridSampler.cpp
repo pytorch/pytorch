@@ -268,9 +268,9 @@ namespace {
     }
     int64_t gGrid_sN = grad_grid.stride(0);
     int64_t gGrid_sW = grad_grid.stride(3);
-    scalar_t *inp_ptr = input.data_ptr<scalar_t>();
-    scalar_t *grid_ptr = grid.data_ptr<scalar_t>();
-    scalar_t *gOut_ptr = grad_output.data_ptr<scalar_t>();
+    const scalar_t *inp_ptr = input.const_data_ptr<scalar_t>();
+    const scalar_t *grid_ptr = grid.const_data_ptr<scalar_t>();
+    const scalar_t *gOut_ptr = grad_output.const_data_ptr<scalar_t>();
     scalar_t *gInp_ptr = nullptr;
     if (input_requires_grad) {
       gInp_ptr = grad_input.mutable_data_ptr<scalar_t>();
@@ -279,14 +279,14 @@ namespace {
     // loop over each output pixel
     at::parallel_for(0, N, 0, [&](int64_t start, int64_t end) {
       for (const auto n : c10::irange(start, end)) {
-        scalar_t *grid_ptr_N = grid_ptr + n * grid_sN;
-        scalar_t *inp_ptr_N = inp_ptr + n * inp_sN;
+        const scalar_t *grid_ptr_N = grid_ptr + n * grid_sN;
+        const scalar_t *inp_ptr_N = inp_ptr + n * inp_sN;
         scalar_t *gGrid_ptr_NDHW = gGrid_ptr + n * gGrid_sN;
         for (const auto d : c10::irange(out_D)) {
           for (const auto h : c10::irange(out_H)) {
             for (int64_t w = 0; w < out_W; ++w, gGrid_ptr_NDHW += gGrid_sW /* grad_grid is contiguous */ ) {
               // get the corresponding input x, y, z co-ordinates from grid
-              scalar_t *grid_ptr_NDHW = grid_ptr_N + d * grid_sD + h * grid_sH + w * grid_sW;
+              const scalar_t *grid_ptr_NDHW = grid_ptr_N + d * grid_sD + h * grid_sH + w * grid_sW;
               scalar_t ix = *grid_ptr_NDHW;
               scalar_t iy = grid_ptr_NDHW[grid_sCoor];
               scalar_t iz = grid_ptr_NDHW[2 * grid_sCoor];
@@ -344,8 +344,8 @@ namespace {
                 scalar_t bse = (ix    - ix_tnw) * (iy    - iy_tnw) * (iz - iz_tnw);
 
                 scalar_t gix = static_cast<scalar_t>(0), giy = static_cast<scalar_t>(0), giz = static_cast<scalar_t>(0);
-                scalar_t *gOut_ptr_NCDHW = gOut_ptr + n * gOut_sN + d * gOut_sD + h * gOut_sH + w * gOut_sW;
-                scalar_t *inp_ptr_NC = inp_ptr_N;
+                const scalar_t *gOut_ptr_NCDHW = gOut_ptr + n * gOut_sN + d * gOut_sD + h * gOut_sH + w * gOut_sW;
+                const scalar_t *inp_ptr_NC = inp_ptr_N;
                 scalar_t *gInp_ptr_NC = gInp_ptr + n * gInp_sN;
                 // calculate bilinear weighted pixel value and set output pixel
                 for (int64_t c = 0; c < C; ++c, gOut_ptr_NCDHW += gOut_sC, gInp_ptr_NC += gInp_sC, inp_ptr_NC += inp_sC) {
@@ -423,7 +423,7 @@ namespace {
                 int64_t iz_nearest = static_cast<int64_t>(std::nearbyint(iz));
 
                 // assign nearest neighbour pixel value to output pixel
-                scalar_t *gOut_ptr_NCDHW = gOut_ptr + n * gOut_sN + d * gOut_sD + h * gOut_sH + w * gOut_sW;
+                const scalar_t *gOut_ptr_NCDHW = gOut_ptr + n * gOut_sN + d * gOut_sD + h * gOut_sH + w * gOut_sW;
                 if (input_requires_grad) {
                   scalar_t *gInp_ptr_NC = gInp_ptr + n * gInp_sN;
                   for (int64_t c = 0; c < C; ++c, gOut_ptr_NCDHW += gOut_sC, gInp_ptr_NC += gInp_sC) {
@@ -758,21 +758,21 @@ _grid_sampler_2d_cpu_fallback_backward(const Tensor& grad_output,
   int64_t gInp_sW = grad_input.stride(3);
   int64_t gGrid_sN = grad_grid.stride(0);
   int64_t gGrid_sW = grad_grid.stride(2);
-  scalar_t *inp_ptr = input.data_ptr<scalar_t>();
-  scalar_t *grid_ptr = grid.data_ptr<scalar_t>();
-  scalar_t *gOut_ptr = grad_output.data_ptr<scalar_t>();
+  const scalar_t *inp_ptr = input.const_data_ptr<scalar_t>();
+  const scalar_t *grid_ptr = grid.const_data_ptr<scalar_t>();
+  const scalar_t *gOut_ptr = grad_output.const_data_ptr<scalar_t>();
   scalar_t *gInp_ptr = grad_input.mutable_data_ptr<scalar_t>();
   scalar_t *gGrid_ptr = grad_grid.data_ptr<scalar_t>();
   // loop over each output pixel
   at::parallel_for(0, N, 0, [&](int64_t start, int64_t end) {
     for (const auto n : c10::irange(start, end)) {
-      scalar_t *grid_ptr_N = grid_ptr + n * grid_sN;
-      scalar_t *inp_ptr_N = inp_ptr + n * inp_sN;
+      const scalar_t *grid_ptr_N = grid_ptr + n * grid_sN;
+      const scalar_t *inp_ptr_N = inp_ptr + n * inp_sN;
       scalar_t *gGrid_ptr_NHW = gGrid_ptr + n * gGrid_sN;
       for (const auto h : c10::irange(out_H)) {
         for (int64_t w = 0; w < out_W; ++w, gGrid_ptr_NHW += gGrid_sW /* grad_grid is contiguous */ ) {
           // get the corresponding input x, y co-ordinates from grid
-          scalar_t *grid_ptr_NHW = grid_ptr_N + h * grid_sH + w * grid_sW;
+          const scalar_t *grid_ptr_NHW = grid_ptr_N + h * grid_sH + w * grid_sW;
           scalar_t x = *grid_ptr_NHW;
           scalar_t y = grid_ptr_NHW[grid_sCoor];
 
@@ -804,9 +804,9 @@ _grid_sampler_2d_cpu_fallback_backward(const Tensor& grad_output,
             scalar_t se = (ix    - ix_nw) * (iy    - iy_nw);
 
             scalar_t gix = static_cast<scalar_t>(0), giy = static_cast<scalar_t>(0);
-            scalar_t *gOut_ptr_NCHW = gOut_ptr + n * gOut_sN + h * gOut_sH + w * gOut_sW;
+            const scalar_t *gOut_ptr_NCHW = gOut_ptr + n * gOut_sN + h * gOut_sH + w * gOut_sW;
             scalar_t *gInp_ptr_NC = gInp_ptr + n * gInp_sN;
-            scalar_t *inp_ptr_NC = inp_ptr_N;
+            const scalar_t *inp_ptr_NC = inp_ptr_N;
             // calculate bilinear weighted pixel value and set output pixel
             for (int64_t c = 0; c < C; ++c, gOut_ptr_NCHW += gOut_sC, gInp_ptr_NC += gInp_sC, inp_ptr_NC += inp_sC) {
               scalar_t gOut = *gOut_ptr_NCHW;
@@ -848,7 +848,7 @@ _grid_sampler_2d_cpu_fallback_backward(const Tensor& grad_output,
             int64_t iy_nearest = static_cast<int64_t>(std::nearbyint(iy));
 
             // assign nearest neighbour pixel value to output pixel
-            scalar_t *gOut_ptr_NCHW = gOut_ptr + n * gOut_sN + h * gOut_sH + w * gOut_sW;
+            const scalar_t *gOut_ptr_NCHW = gOut_ptr + n * gOut_sN + h * gOut_sH + w * gOut_sW;
             scalar_t *gInp_ptr_NC = gInp_ptr + n * gInp_sN;
             for (int64_t c = 0; c < C; ++c, gOut_ptr_NCHW += gOut_sC, gInp_ptr_NC += gInp_sC) {
               // calculate and set grad_input
@@ -883,9 +883,9 @@ _grid_sampler_2d_cpu_fallback_backward(const Tensor& grad_output,
             scalar_t gix = static_cast<scalar_t>(0);
             scalar_t giy = static_cast<scalar_t>(0);
 
-            scalar_t *gOut_ptr_NCHW = gOut_ptr + n * gOut_sN + h * gOut_sH + w * gOut_sW;
+            const scalar_t *gOut_ptr_NCHW = gOut_ptr + n * gOut_sN + h * gOut_sH + w * gOut_sW;
             scalar_t *gInp_ptr_NC = gInp_ptr + n * gInp_sN;
-            scalar_t *inp_ptr_NC = inp_ptr_N;
+            const scalar_t *inp_ptr_NC = inp_ptr_N;
 
             for (int64_t c = 0; c < C; ++c, gOut_ptr_NCHW += gOut_sC, gInp_ptr_NC += gInp_sC, inp_ptr_NC+= inp_sC) {
               scalar_t gOut = *gOut_ptr_NCHW;

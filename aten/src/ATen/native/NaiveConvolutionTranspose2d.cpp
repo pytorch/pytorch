@@ -356,7 +356,7 @@ void slow_conv_transpose2d_out_cpu_template(
 
         // Unpack columns back into input:
         col2im<scalar_t>(
-            columns_n.data_ptr<scalar_t>(),
+            columns_n.const_data_ptr<scalar_t>(),
             n_output_plane,
             output_height,
             output_width,
@@ -511,7 +511,7 @@ static void slow_conv_transpose2d_backward_out_cpu_template(
           if (need_columns) {
             // Extract columns:
             im2col<scalar_t>(
-                  grad_output_n.data_ptr<scalar_t>(),
+                  grad_output_n.const_data_ptr<scalar_t>(),
                   n_output_plane,
                   output_height,
                   output_width,
@@ -529,8 +529,8 @@ static void slow_conv_transpose2d_backward_out_cpu_template(
                   use_channels_last);
           }
 
-          auto gemm_in_ptr = need_columns ? grad_columns.data_ptr<scalar_t>()
-              : grad_output_n.data_ptr<scalar_t>();
+          auto gemm_in_ptr = need_columns ? grad_columns.const_data_ptr<scalar_t>()
+              : grad_output_n.const_data_ptr<scalar_t>();
 
           if (use_channels_last) {
             int64_t m = n_input_plane;
@@ -709,7 +709,7 @@ void slow_conv_transpose2d_acc_grad_parameters_cpu(
             if (need_columns) {
               // Extract columns:
               im2col<scalar_t>(
-                  grad_output_n.data_ptr<scalar_t>(),
+                  grad_output_n.const_data_ptr<scalar_t>(),
                   n_output_plane,
                   output_height,
                   output_width,
@@ -727,8 +727,8 @@ void slow_conv_transpose2d_acc_grad_parameters_cpu(
                   use_channels_last);
             }
 
-            auto gemm_in_ptr = need_columns ? columns.data_ptr<scalar_t>()
-                : grad_output_n.data_ptr<scalar_t>();
+            auto gemm_in_ptr = need_columns ? columns.const_data_ptr<scalar_t>()
+                : grad_output_n.const_data_ptr<scalar_t>();
 
             if (use_channels_last) {
               int64_t m = kernel_height * kernel_width * n_output_plane;
@@ -801,55 +801,6 @@ TORCH_IMPL_FUNC(slow_conv_transpose2d_structured_cpu)
       output_padding,
       dilation);
  }
-
-static std::tuple<Tensor&, Tensor&, Tensor&> slow_conv_transpose2d_backward_out_cpu(const Tensor& grad_output,
-    const Tensor& input,
-    const Tensor& weight,
-    IntArrayRef kernel_size,
-    IntArrayRef stride,
-    IntArrayRef padding,
-    IntArrayRef output_padding,
-    IntArrayRef dilation,
-    Tensor& grad_input,
-    Tensor& grad_weight,
-    Tensor& grad_bias) {
-  if (grad_input.defined()) {
-    slow_conv_transpose2d_backward_out_cpu_template(
-        input,
-        grad_output,
-        grad_input,
-        weight,
-        kernel_size,
-        stride,
-        padding,
-        output_padding,
-        dilation);
-  }
-
-  if (grad_bias.defined()) {
-    at::sum_out(grad_bias, grad_output, IntArrayRef{0, 2, 3});
-  }
-
-  if (grad_weight.defined()) {
-    grad_weight.resize_(weight.sizes(), weight.suggest_memory_format());
-    grad_weight.zero_();
-    slow_conv_transpose2d_acc_grad_parameters_cpu(
-        input,
-        weight,
-        grad_output,
-        grad_weight,
-        grad_bias,
-        kernel_size,
-        stride,
-        padding,
-        output_padding,
-        dilation,
-        1);
-  }
-
-  return std::tuple<Tensor&, Tensor&, Tensor&>(
-      grad_input, grad_weight, grad_bias);
-}
 
 static std::tuple<Tensor, Tensor, Tensor> slow_conv_transpose2d_backward_cpu(
     const Tensor& grad_output,

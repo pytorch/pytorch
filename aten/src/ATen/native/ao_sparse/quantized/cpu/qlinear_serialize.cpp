@@ -160,7 +160,7 @@ BCSRSerializationType PackedLinearWeight::serialize() {
 BCSRSerializationType PackedLinearWeightQnnp::serialize() {
   at::Tensor w_scales_compact;
   at::Tensor w_zero_points_compact;
-  const float* w_scales_data_ptr = w_scales_.data_ptr<float>();
+  const float* w_scales_data_ptr = w_scales_.const_data_ptr<float>();
   std::function<int8_t(uint8_t)> subtract_128 = [](uint8_t v) {
     return static_cast<int8_t>(static_cast<int16_t>(v) - 128);
   };

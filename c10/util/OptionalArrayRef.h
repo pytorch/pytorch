@@ -1,11 +1,11 @@
 // This file defines OptionalArrayRef<T>, a class that has almost the same
-// exact functionality as c10::optional<ArrayRef<T>>, except that its
+// exact functionality as std::optional<ArrayRef<T>>, except that its
 // converting constructor fixes a dangling pointer issue.
 //
-// The implicit converting constructor of both c10::optional<ArrayRef<T>> and
+// The implicit converting constructor of both std::optional<ArrayRef<T>> and
 // std::optional<ArrayRef<T>> can cause the underlying ArrayRef<T> to store
 // a dangling pointer. OptionalArrayRef<T> prevents this by wrapping
-// a c10::optional<ArrayRef<T>> and fixing the constructor implementation.
+// a std::optional<ArrayRef<T>> and fixing the constructor implementation.
 //
 // See https://github.com/pytorch/pytorch/issues/63645 for more on this.
 

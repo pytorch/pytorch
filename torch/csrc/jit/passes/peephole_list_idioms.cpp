@@ -14,7 +14,7 @@
 namespace torch {
 namespace jit {
 
-static c10::optional<size_t> normalizeIndex(int64_t index, size_t len) {
+static std::optional<size_t> normalizeIndex(int64_t index, size_t len) {
   if (index < 0) {
     index = index + len;
   }
@@ -129,7 +129,7 @@ struct ListLenRefiner {
     return block_refinements;
   };
 
-  c10::optional<int64_t> tryFindRefinement(Value* v) {
+  std::optional<int64_t> tryFindRefinement(Value* v) {
     for (const auto& ref : active_refinements_) {
       auto maybe_refinement = ref->find(v);
       if (maybe_refinement != ref->end()) {

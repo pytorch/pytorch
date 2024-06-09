@@ -19,8 +19,8 @@ namespace vulkan {
 namespace ops {
 
 LayernormPackedContext::LayernormPackedContext(
-    const c10::optional<Tensor>& weight,
-    const c10::optional<Tensor>& bias,
+    const std::optional<Tensor>& weight,
+    const std::optional<Tensor>& bias,
     double eps)
     : unpacked_{c10::AnyType::get()} {
   packed_.reserve(ListArgs::kNumArgs);
@@ -48,8 +48,8 @@ LayernormPackedContext LayernormPackedContext::pack(
 }
 
 c10::intrusive_ptr<LayernormPackedContext> create_layernorm_context(
-    c10::optional<Tensor>&& weight,
-    c10::optional<Tensor>&& bias,
+    std::optional<Tensor>&& weight,
+    std::optional<Tensor>&& bias,
     double eps) {
   return c10::make_intrusive<LayernormPackedContext>(
       LayernormPackedContext(weight, bias, eps));
@@ -61,10 +61,10 @@ Tensor run_layernorm_context(
     const c10::intrusive_ptr<LayernormPackedContext>& layernorm_context) {
   const Tensor input = input_arg.is_vulkan() ? input_arg : input_arg.vulkan();
 
-  const c10::optional<Tensor>& weight_opt =
+  const std::optional<Tensor>& weight_opt =
       layernorm_context->get_val(LayernormPackedContext::ListArgs::kWeight)
           .toTensor();
-  const c10::optional<Tensor>& bias_opt =
+  const std::optional<Tensor>& bias_opt =
       layernorm_context->get_val(LayernormPackedContext::ListArgs::kBias)
           .toTensor();
   const float eps = api::utils::safe_downcast<float>(
@@ -81,8 +81,8 @@ Tensor run_layernorm_context(
 Tensor layer_norm(
     const at::Tensor& input_arg,
     IntArrayRef normalized_shape,
-    const c10::optional<Tensor>& weight_opt /* optional */,
-    const c10::optional<Tensor>& bias_opt /* optional */,
+    const std::optional<Tensor>& weight_opt /* optional */,
+    const std::optional<Tensor>& bias_opt /* optional */,
     double eps,
     bool /* cudnn_enable, deprecated */) {
   return run_layernorm_context(

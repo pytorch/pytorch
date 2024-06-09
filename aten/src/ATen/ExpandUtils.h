@@ -462,7 +462,8 @@ inline Tensor _sum_to(
     reduce_dims.push_back(i);
   }
   for (int64_t i = leading_dims; i < static_cast<int64_t>(sizes.size()); ++i) {
-    if (shape[i - leading_dims] == 1 && sizes[i] != 1) {
+    if (shape[i - leading_dims] == 1 &&
+        TORCH_GUARD_SIZE_OBLIVIOUS(sym_ne(sizes[i], 1))) {
       reduce_dims.push_back(i);
     }
   }

@@ -1,37 +1,37 @@
 # Owner(s): ["oncall: distributed"]
 
 import sys
+
 import torch
 import torch.distributed as dist
 
 from torch.distributed._shard import sharded_tensor
+from torch.distributed._shard.sharding_spec import ChunkShardingSpec
 from torch.distributed.distributed_c10d import _get_default_group
 
-from torch.testing._internal.common_distributed import (
-    requires_nccl,
-    skip_if_lt_x_gpu,
-)
-from torch.distributed._shard.sharding_spec import (
-    ChunkShardingSpec,
-)
+from torch.testing._internal.common_distributed import requires_nccl, skip_if_lt_x_gpu
+from torch.testing._internal.common_utils import run_tests, TEST_WITH_DEV_DBG_ASAN
 from torch.testing._internal.distributed._shard.sharded_tensor import (
     ShardedTensorTestBase,
     with_comms,
 )
-from torch.testing._internal.common_utils import (
-    TEST_WITH_DEV_DBG_ASAN,
-    run_tests,
-)
 
 if TEST_WITH_DEV_DBG_ASAN:
-    print("Skip dev-asan as torch + multiprocessing spawn have known issues", file=sys.stderr)
+    print(
+        "Skip dev-asan as torch + multiprocessing spawn have known issues",
+        file=sys.stderr,
+    )
     sys.exit(0)
 
+
 class TestShardedTensorBinaryOps(ShardedTensorTestBase):
-    """ Test base for binary comparison functions such as torch.equal, torch.allclose etc. for ShardedTensor """
+    """Test base for binary comparison functions such as torch.equal, torch.allclose etc. for ShardedTensor"""
+
     seed = 42
 
-    def get_random_tensors(self, spec1, spec2, *sizes, pg1=None, pg2=None, seed_offset=0):
+    def get_random_tensors(
+        self, spec1, spec2, *sizes, pg1=None, pg2=None, seed_offset=0
+    ):
         pg1 = _get_default_group() if pg1 is None else pg1
         pg2 = _get_default_group() if pg2 is None else pg2
         torch.manual_seed(TestShardedTensorBinaryOps.seed)
@@ -128,7 +128,7 @@ class TestShardedTensorBinaryOps(ShardedTensorTestBase):
     @skip_if_lt_x_gpu(4)
     @requires_nccl()
     def test_torch_equal(self):
-        """ Test torch.equal(ShardedTensor, ShardedTensor) """
+        """Test torch.equal(ShardedTensor, ShardedTensor)"""
 
         spec, alt_spec = self.get_gpu_specs()
         st1, st2 = self.get_random_tensors(spec, spec, 10, 10)
@@ -144,7 +144,7 @@ class TestShardedTensorBinaryOps(ShardedTensorTestBase):
     @skip_if_lt_x_gpu(4)
     @requires_nccl()
     def test_torch_allclose(self):
-        """ Test torch.allclose(ShardedTensor, ShardedTensor) """
+        """Test torch.allclose(ShardedTensor, ShardedTensor)"""
 
         spec, alt_spec = self.get_gpu_specs()
 
@@ -158,5 +158,6 @@ class TestShardedTensorBinaryOps(ShardedTensorTestBase):
         # sharded_tensor.rand produces uniform values in the [0,1] range.
         self.assertTrue(torch.allclose(st1, st2, atol=1))
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     run_tests()

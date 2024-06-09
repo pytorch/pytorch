@@ -71,9 +71,9 @@ Tensor& glu_backward_cpu_out(const Tensor& grad_output, const Tensor& input,
   // for second gradinput half, can get a better performance by fusion
   auto iter = at::TensorIteratorConfig()
     .add_output(gradInputsecondHalf)
-    .add_input(gradInputfirstHalf)
-    .add_input(firstHalf)
-    .add_input(grad_output)
+    .add_const_input(gradInputfirstHalf)
+    .add_const_input(firstHalf)
+    .add_const_input(grad_output)
     .build();
   glu_backward_stub(iter.device_type(), iter);
   gradInputfirstHalf.mul_(grad_output);
@@ -99,10 +99,10 @@ Tensor glu_jvp(
   auto dglu = at::empty_like(glu);
   auto iter = at::TensorIteratorConfig()
     .add_output(dglu)
-    .add_input(glu)
-    .add_input(b)
-    .add_input(da)
-    .add_input(db)
+    .add_const_input(glu)
+    .add_const_input(b)
+    .add_const_input(da)
+    .add_const_input(db)
     .build();
   glu_jvp_stub(iter.device_type(), iter);
   return dglu;

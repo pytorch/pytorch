@@ -172,6 +172,13 @@ class VariableTracker(metaclass=VariableTrackerMeta):
     def __repr__(self):
         return f"{self.__class__.__name__}()"
 
+    def debug_repr(self):
+        # Intended to be overridden to provide more info
+        try:
+            return repr(self.as_python_constant())
+        except NotImplementedError:
+            return repr(self)
+
     def python_type(self):
         """
         Abstract method to be implemented by subclasses of VariableTracker.
@@ -219,17 +226,17 @@ class VariableTracker(metaclass=VariableTrackerMeta):
     def make_guard(self, fn):
         if self.source:
             return self.source.make_guard(fn)
-        raise NotImplementedError()
+        raise NotImplementedError
 
     def const_getattr(self, tx, name: str) -> Any:
         """getattr(self, name) returning a python constant"""
-        raise NotImplementedError()
+        raise NotImplementedError
 
     def var_getattr(self, tx, name: str) -> "VariableTracker":
         """getattr(self, name) returning a new variable"""
         value = self.const_getattr(tx, name)
         if not variables.ConstantVariable.is_literal(value):
-            raise NotImplementedError()
+            raise NotImplementedError
         source = None
         if self.source:
             source = AttrSource(self.source, name)
@@ -257,7 +264,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             return None
 
     def reconstruct(self, codegen):
-        raise NotImplementedError()
+        raise NotImplementedError
 
     def can_reconstruct(self, tx):
         """If it is possible to reconstruct the Python object this
@@ -273,7 +280,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             return False
 
     def unpack_var_sequence(self, tx) -> List["VariableTracker"]:
-        raise NotImplementedError()
+        raise NotImplementedError
 
     def has_unpack_var_sequence(self, tx) -> bool:
         try:
@@ -329,6 +336,9 @@ class VariableTracker(metaclass=VariableTrackerMeta):
 
     def next_variable(self, tx):
         unimplemented(f"next({self})")
+
+    def is_strict_mode(self, tx):
+        return tx.strict_checks_fn and tx.strict_checks_fn(self)
 
     def __init__(
         self,

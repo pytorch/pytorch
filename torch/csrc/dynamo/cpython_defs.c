@@ -13,6 +13,17 @@
   } else {                                                              \
   }
 
+#if IS_PYTHON_3_13_PLUS
+// Gave up after fixing a few of these
+// pycore_opcode.h is gone (new is pycore_opcode_metadata.h ?)
+// f_code is gone (new is f_executable?)
+
+// Fake definitions for what we removed
+const uint8_t* THP_PyOpcode_Caches = NULL;
+const int THP_PyOpcode_Caches_size = 0;
+
+#else
+
 // NOTE: all `assert`s below are converted to `CHECK`s
 
 #if IS_PYTHON_3_11_PLUS
@@ -29,8 +40,8 @@
 #define NEED_OPCODE_TABLES // To get _PyOpcode_Deopt, _PyOpcode_Caches
 #include <internal/pycore_opcode.h>
 #undef NEED_OPCODE_TABLES
-#undef Py_BUILD_CORE
 #include <internal/pycore_frame.h>
+#undef Py_BUILD_CORE
 
 // As a simple way to reduce the impact of ABI changes on the CPython side, this check forces
 // us to manually re-check that the function didn't change on the next major version
@@ -68,8 +79,10 @@ THP_PyFrame_OpAlreadyRan(_PyInterpreterFrame *frame, int opcode, int oparg)
 
 // https://github.com/python/cpython/blob/0325a8a8cdba6c091bcbbb3c995f3bf1d1217012/Objects/frameobject.c#L1136
 // Initialize frame free variables if needed
+// free_vars_copied argument added in order to let caller know that the COPY_FREE_VARS
+// codepath occurred.
 static void
-frame_init_get_vars(_PyInterpreterFrame *frame)
+frame_init_get_vars(_PyInterpreterFrame *frame, int *free_vars_copied)
 {
     // COPY_FREE_VARS has no quickened forms, so no need to use _PyOpcode_Deopt
     // here:
@@ -91,6 +104,8 @@ frame_init_get_vars(_PyInterpreterFrame *frame)
     }
     // COPY_FREE_VARS doesn't have inline CACHEs, either:
     frame->prev_instr = _PyCode_CODE(frame->f_code);
+
+    *free_vars_copied = 1;
 }
 
 // https://github.com/python/cpython/blob/0325a8a8cdba6c091bcbbb3c995f3bf1d1217012/Objects/frameobject.c#L1162
@@ -146,7 +161,7 @@ frame_get_var(_PyInterpreterFrame *frame, PyCodeObject *co, int i,
 
 // https://github.com/python/cpython/blob/0325a8a8cdba6c091bcbbb3c995f3bf1d1217012/Objects/frameobject.c#L1213
 static PyObject *
-THP_PyFrame_GetLocals(_PyInterpreterFrame *frame, int include_hidden)
+THP_PyFrame_GetLocals(_PyInterpreterFrame *frame, int include_hidden, int *free_vars_copied)
 {
     /* Merge fast locals into f->f_locals */
     PyObject *locals = frame->f_locals;
@@ -169,7 +184,7 @@ THP_PyFrame_GetLocals(_PyInterpreterFrame *frame, int include_hidden)
         }
     }
 
-    frame_init_get_vars(frame);
+    frame_init_get_vars(frame, free_vars_copied);
 
     PyCodeObject *co = frame->f_code;
     for (int i = 0; i < co->co_nlocalsplus; i++) {
@@ -234,9 +249,9 @@ THP_PyFrame_GetLocals(_PyInterpreterFrame *frame, int include_hidden)
 
 // https://github.com/python/cpython/blob/0325a8a8cdba6c091bcbbb3c995f3bf1d1217012/Objects/frameobject.c#L1301
 int
-THP_PyFrame_FastToLocalsWithError(_PyInterpreterFrame *frame)
+THP_PyFrame_FastToLocalsWithError(_PyInterpreterFrame *frame, int *free_vars_copied)
 {
-    PyObject *locals = THP_PyFrame_GetLocals(frame, 0);
+    PyObject *locals = THP_PyFrame_GetLocals(frame, 0, free_vars_copied);
     if (locals == NULL) {
         return -1;
     }
@@ -247,8 +262,10 @@ THP_PyFrame_FastToLocalsWithError(_PyInterpreterFrame *frame)
 #else
 
 // https://github.com/python/cpython/blob/a7715ccfba5b86ab09f86ec56ac3755c93b46b48/Objects/frameobject.c#L1182
+// free_vars_copied argument added in order to let caller know that the COPY_FREE_VARS
+// codepath occurred.
 int
-THP_PyFrame_FastToLocalsWithError(_PyInterpreterFrame *frame) {
+THP_PyFrame_FastToLocalsWithError(_PyInterpreterFrame *frame, int *free_vars_copied) {
     /* Merge fast locals into f->f_locals */
     PyObject *locals = NULL;
     PyObject **fast = NULL;
@@ -267,13 +284,8 @@ THP_PyFrame_FastToLocalsWithError(_PyInterpreterFrame *frame) {
     if (lasti < 0 && _Py_OPCODE(_PyCode_CODE(co)[0]) == COPY_FREE_VARS) {
         /* Free vars have not been initialized -- Do that */
         PyCodeObject *co = frame->f_code;
-        #if IS_PYTHON_3_12_PLUS
-        PyObject *closure = ((PyFunctionObject *)frame->f_funcobj)->func_closure;
-        int offset = co->co_nlocals + co->co_ncellvars;
-        #else
         PyObject *closure = frame->f_func->func_closure;
         int offset = co->co_nlocals + co->co_nplaincellvars;
-        #endif
         for (int i = 0; i < co->co_nfreevars; ++i) {
             PyObject *o = PyTuple_GET_ITEM(closure, i);
             Py_INCREF(o);
@@ -281,6 +293,8 @@ THP_PyFrame_FastToLocalsWithError(_PyInterpreterFrame *frame) {
         }
         // COPY_FREE_VARS doesn't have inline CACHEs, either:
         frame->prev_instr = _PyCode_CODE(frame->f_code);
+
+        *free_vars_copied = 1;
     }
     for (int i = 0; i < co->co_nlocalsplus; i++) {
         _PyLocals_Kind kind = _PyLocals_GetKind(co->co_localspluskinds, i);
@@ -674,3 +688,5 @@ const uint8_t* THP_PyOpcode_Caches = NULL;
 const int THP_PyOpcode_Caches_size = 0;
 
 #endif
+
+#endif // CPython 3.13

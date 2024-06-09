@@ -21,7 +21,7 @@ enum BIN_SELECTION_ALGORITHM {
   BINARY_SEARCH,
 };
 
-static const char* METAL_HISTOGRAM = R"HISTOGRAM_METAL(
+static MetalShaderLibrary lib(R"HISTOGRAM_METAL(
 
 #include <metal_stdlib>
 using namespace metal;
@@ -157,42 +157,7 @@ kernel void kernel_index_offset(constant uint         * strides         [[buffer
         data_offsets[thread_index] += remainder * strides[reversed_dim];
     }
 }
-)HISTOGRAM_METAL";
-
-static id<MTLLibrary> compileHistogramOpLibrary(id<MTLDevice> device) {
-  static id<MTLLibrary> histogramLibrary = nil;
-  if (histogramLibrary) {
-    return histogramLibrary;
-  }
-
-  NSError* error = nil;
-  MTLCompileOptions* options = [[MTLCompileOptions new] autorelease];
-  [options setLanguageVersion:MTLLanguageVersion2_3];
-  histogramLibrary = [device newLibraryWithSource:[NSString stringWithCString:METAL_HISTOGRAM
-                                                                     encoding:NSASCIIStringEncoding]
-                                          options:options
-                                            error:&error];
-  TORCH_CHECK(histogramLibrary, "Failed to create metal histogram library, error: ", [[error description] UTF8String]);
-  return histogramLibrary;
-}
-
-static id<MTLComputePipelineState> histogramPipelineState(id<MTLDevice> device, const std::string& kernel) {
-  static std::unordered_map<std::string, id<MTLComputePipelineState>> psoCache;
-  id<MTLComputePipelineState> pso = psoCache[kernel];
-  if (pso) {
-    return pso;
-  }
-
-  NSError* error = nil;
-  id<MTLLibrary> crossLib = compileHistogramOpLibrary(device);
-  id<MTLFunction> crossFunc = [crossLib newFunctionWithName:[NSString stringWithUTF8String:kernel.c_str()]];
-  TORCH_CHECK(crossFunc, "Failed to create function state object for: ", kernel);
-  pso = [device newComputePipelineStateWithFunction:crossFunc error:&error];
-  TORCH_CHECK(pso, "Failed to created pipeline state object, error: ", [[error description] UTF8String]);
-
-  psoCache[kernel] = pso;
-  return pso;
-}
+)HISTOGRAM_METAL");
 
 template <typename input_t, BIN_SELECTION_ALGORITHM algorithm>
 void histogramdd_kernel_impl(Tensor& hist_output,
@@ -279,7 +244,7 @@ void histogramdd_kernel_impl(Tensor& hist_output,
 
       id<MTLBuffer> stridedIndicesBuffer = [[device newBufferWithLength:stridedIndicesNumThreads * sizeof(uint)
                                                                 options:0] autorelease];
-      id<MTLComputePipelineState> stridedIndicesPSO = histogramPipelineState(device, "kernel_index_offset");
+      id<MTLComputePipelineState> stridedIndicesPSO = lib.getPipelineStateForFunc("kernel_index_offset");
 
       [computeEncoder setComputePipelineState:stridedIndicesPSO];
       [computeEncoder setBytes:strides.data() length:sizeof(uint32_t) * nDim atIndex:0];
@@ -289,8 +254,8 @@ void histogramdd_kernel_impl(Tensor& hist_output,
 
       mtl_dispatch1DJob(computeEncoder, stridedIndicesPSO, stridedIndicesNumThreads);
 
-      const std::string kernel = "histogramdd_" + scalarToMetalTypeString(input.scalar_type());
-      id<MTLComputePipelineState> histogramPSO = histogramPipelineState(device, kernel);
+      const std::string kernel = "histogramdd_" + scalarToMetalTypeString(input);
+      id<MTLComputePipelineState> histogramPSO = lib.getPipelineStateForFunc(kernel);
 
       // this function call is a no-op if MPS Profiler is not enabled
       getMPSProfiler().beginProfileKernel(histogramPSO, "histogram", allTensorsList);

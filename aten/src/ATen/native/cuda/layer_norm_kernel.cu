@@ -1149,12 +1149,12 @@ void LayerNormBackwardKernelImplInternal(
   file a support request to support bigger batches");
   TORCH_CHECK(N <= std::numeric_limits<int>::max(), "Normalized shape should have less than INT_MAX elements, \
   file a support request to support bigger normalized shapes");
-  const T* dY_data = dY.template data_ptr<T>();
-  const T* X_data = X.template data_ptr<T>();
-  const T_ACC* mean_data = mean.template data_ptr<T_ACC>();
-  const T_ACC* rstd_data = rstd.template data_ptr<T_ACC>();
+  const T* dY_data = dY.template const_data_ptr<T>();
+  const T* X_data = X.template const_data_ptr<T>();
+  const T_ACC* mean_data = mean.template const_data_ptr<T_ACC>();
+  const T_ACC* rstd_data = rstd.template const_data_ptr<T_ACC>();
   const T* gamma_data =
-      gamma.defined() ? gamma.template data_ptr<T>() : nullptr;
+      gamma.defined() ? gamma.template const_data_ptr<T>() : nullptr;
   T* dX_data = dX->defined() ? dX->template data_ptr<T>() : nullptr;
   cudaStream_t cuda_stream = at::cuda::getCurrentCUDAStream();
   const int warp_size = at::cuda::warp_size();
@@ -1334,8 +1334,8 @@ void LayerNormBackwardKernelImpl(
 std::tuple<Tensor, Tensor, Tensor> layer_norm_cuda(
     const Tensor& input,
     IntArrayRef normalized_shape,
-    const c10::optional<Tensor>& weight_opt /* optional */,
-    const c10::optional<Tensor>& bias_opt /* optional */,
+    const std::optional<Tensor>& weight_opt /* optional */,
+    const std::optional<Tensor>& bias_opt /* optional */,
     double eps) {
   // See [Note: hacky wrapper removal for optional tensor]
   c10::MaybeOwned<Tensor> weight_maybe_owned =
@@ -1390,8 +1390,8 @@ std::tuple<Tensor, Tensor, Tensor> layer_norm_backward_cuda(
     IntArrayRef normalized_shape,
     const Tensor& mean,
     const Tensor& rstd,
-    const c10::optional<Tensor>& weight_opt /* optional */,
-    const c10::optional<Tensor>& bias_opt /* optional */,
+    const std::optional<Tensor>& weight_opt /* optional */,
+    const std::optional<Tensor>& bias_opt /* optional */,
     std::array<bool, 3> grad_input_mask) {
   // See [Note: hacky wrapper removal for optional tensor]
   c10::MaybeOwned<Tensor> weight_maybe_owned =

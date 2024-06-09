@@ -21,7 +21,7 @@
 #include <c10/util/TypeSafeSignMath.h>
 #include <c10/util/floating_point_utils.h>
 
-#if defined(__cplusplus) && (__cplusplus >= 201103L)
+#if defined(__cplusplus)
 #include <cstdint>
 #elif !defined(__OPENCL_VERSION__)
 #include <math.h>
@@ -126,9 +126,12 @@ struct alignas(1) Float8_e5m2fnuz {
   inline C10_HOST_DEVICE bool isinf() const;
 };
 
-C10_API std::ostream& operator<<(
+C10_API inline std::ostream& operator<<(
     std::ostream& out,
-    const Float8_e5m2fnuz& value);
+    const Float8_e5m2fnuz& value) {
+  out << (float)value;
+  return out;
+}
 
 } // namespace c10
 

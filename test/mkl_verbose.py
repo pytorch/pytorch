@@ -1,5 +1,7 @@
 import argparse
+
 import torch
+
 
 def run_model(level):
     m = torch.nn.Linear(20, 30)
@@ -7,7 +9,8 @@ def run_model(level):
     with torch.backends.mkl.verbose(level):
         m(input)
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--verbose-level", default=0, type=int)
     args = parser.parse_args()

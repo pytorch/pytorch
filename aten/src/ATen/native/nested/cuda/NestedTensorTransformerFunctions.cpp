@@ -28,7 +28,7 @@ namespace {
 int64_t padded_tensor_numel(const Tensor& sizes) {
   const auto sizes_num_rows = sizes.sizes()[0];
   const auto sizes_row_length = sizes.sizes()[1];
-  const auto* sizes_data = sizes.data_ptr<int64_t>();
+  const auto* sizes_data = sizes.const_data_ptr<int64_t>();
   int64_t numel = 0;
   for (const auto row_num : c10::irange(sizes_num_rows)) {
     const auto* row_ptr = sizes_data + row_num * sizes_row_length;
@@ -234,7 +234,7 @@ _scaled_dot_product_flash_attention_nestedtensor_cuda(
     double dropout_p,
     bool is_causal,
     bool return_debug_mask,
-    c10::optional<double> scale) {
+    std::optional<double> scale) {
   Tensor query_buffer_reshaped, key_buffer_reshaped, value_buffer_reshaped,
       cumulative_sequence_length_q, cumulative_sequence_length_kv, output_shape;
   int64_t max_seqlen_batch_q{0}, max_seqlen_batch_kv{0};
@@ -265,7 +265,9 @@ _scaled_dot_product_flash_attention_nestedtensor_cuda(
           dropout_p,
           is_causal,
           return_debug_mask,
-          scale);
+          scale,
+          c10::nullopt,
+          c10::nullopt);
   // Reshape output to convert nnz to batch_size and seq_len
   attention = wrap_buffer(attention.view(-1), output_shape).transpose(1, 2);
   return std::make_tuple(
@@ -285,11 +287,11 @@ _scaled_dot_product_efficient_attention_nestedtensor_cuda(
     const Tensor& query,
     const Tensor& key,
     const Tensor& value,
-    const c10::optional<at::Tensor>&  attn_bias,
+    const std::optional<at::Tensor>&  attn_bias,
     bool compute_log_sumexp,
     double dropout_p,
     bool is_causal,
-    c10::optional<double> scale) {
+    std::optional<double> scale) {
   Tensor query_buffer_reshaped, key_buffer_reshaped, value_buffer_reshaped,
       cumulative_sequence_length_q, cumulative_sequence_length_kv, output_shape;
   int64_t max_seqlen_batch_q{0};
@@ -344,7 +346,7 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor> _scaled_dot_product_flash_attenti
     bool is_causal,
     const at::Tensor& philox_seed,
     const at::Tensor& philox_offset,
-    c10::optional<double> scale){
+    std::optional<double> scale){
   if (!grad_out_.defined()) {
     return std::make_tuple(Tensor{}, Tensor{}, Tensor{});
   }

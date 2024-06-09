@@ -56,8 +56,8 @@ struct TORCH_API ReduceOp : torch::CustomClassHolder {
 
   ReduceOp(
       RedOpType op,
-      c10::intrusive_ptr<_SupplementBase> optional_supplement) {
-    if (optional_supplement.get()) {
+      const c10::intrusive_ptr<_SupplementBase>& optional_supplement) {
+    if (optional_supplement) {
       op_ = op;
     } else {
       supplement_ = optional_supplement;
@@ -66,14 +66,11 @@ struct TORCH_API ReduceOp : torch::CustomClassHolder {
 
   // The heap resource supplement_, if it exists, is managed by a
   // c10::intrusive_ptr, so constructors and operator= can be simple
-  ReduceOp(const ReduceOp& other)
-      : op_(other.op_), supplement_(other.supplement_) {}
+  ReduceOp(const ReduceOp& other) = default;
+  ReduceOp& operator=(const ReduceOp& other) = default;
 
-  const ReduceOp& operator=(const ReduceOp& other) {
-    op_ = other.op_;
-    supplement_ = other.supplement_;
-    return *this;
-  }
+  ReduceOp(ReduceOp&& other) = default;
+  ReduceOp& operator=(ReduceOp&& other) = default;
 
   operator RedOpType() const {
     return op_;
@@ -124,7 +121,7 @@ struct BroadcastOptions {
 struct AllreduceOptions {
   ReduceOp reduceOp = ReduceOp::SUM;
   std::chrono::milliseconds timeout = kUnsetTimeout;
-  c10::optional<at::Tensor> sparseIndices = c10::nullopt;
+  std::optional<at::Tensor> sparseIndices = c10::nullopt;
 };
 
 struct AllreduceCoalescedOptions : AllreduceOptions {};
@@ -165,7 +162,7 @@ struct AllToAllOptions {
 struct BarrierOptions {
   std::vector<int64_t> device_ids;
   std::chrono::milliseconds timeout = kUnsetTimeout;
-  c10::optional<at::Device> device;
+  std::optional<at::Device> device;
 };
 
 struct DistributedBackendOptions {

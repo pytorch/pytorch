@@ -360,7 +360,7 @@ Tensor _histc_cuda_template(
 
 namespace native {
 Tensor _bincount_cuda(
-    const Tensor& self, const c10::optional<Tensor>& weights_opt,
+    const Tensor& self, const std::optional<Tensor>& weights_opt,
     int64_t minlength) {
   // See [Note: hacky wrapper removal for optional tensor]
   c10::MaybeOwned<Tensor> weights_maybe_owned = at::borrow_from_optional_tensor(weights_opt);

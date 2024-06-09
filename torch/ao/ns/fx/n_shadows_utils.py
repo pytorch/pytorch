@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import torch
 import torch.fx
 from torch.fx import (
@@ -742,8 +743,7 @@ def create_add_loggers_graph(
         insert_submodule_copy = False
         if maybe_subgraph is not None:
             first_node, last_node = maybe_subgraph[0], maybe_subgraph[-1]
-            for node_to_skip in maybe_subgraph:
-                nodes_to_skip.add(node_to_skip)
+            nodes_to_skip.update(maybe_subgraph)
             qconfig = node_name_to_qconfig[first_node.name]
             if qconfig is not None:
                 insert_submodule_copy = True
@@ -873,8 +873,7 @@ def create_add_loggers_graph(
         maybe_subgraph = _get_subgraph_containing_node(n, subgraphs_dedup)
         if maybe_subgraph is not None:
             first_node, last_node = maybe_subgraph[0], maybe_subgraph[-1]
-            for node_to_skip in maybe_subgraph:
-                nodes_to_skip.add(node_to_skip)
+            nodes_to_skip.update(maybe_subgraph)
         else:
             first_node, last_node = n, n
 

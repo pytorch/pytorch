@@ -450,7 +450,7 @@ struct TORCH_API TripletMarginWithDistanceLossOptions {
   /// Specifies a nonnegative, real-valued function that quantifies the
   /// closeness of two tensors. If not specified, `F::pairwise_distance` will
   /// be used. Default: nullopt
-  TORCH_ARG(c10::optional<distance_function_t>, distance_function) =
+  TORCH_ARG(std::optional<distance_function_t>, distance_function) =
       c10::nullopt;
   /// Specifies a nonnegative margin representing the minimum difference
   /// between the positive and negative distances required for the loss to be 0.
@@ -548,7 +548,7 @@ struct TORCH_API SmoothL1LossOptions {
   /// Specifies the threshold at which to change between L1 and L2 loss.
   /// If beta is not specified, a value of 1.0 will be used.
   /// Default: nullopt
-  TORCH_ARG(c10::optional<double>, beta) = c10::nullopt;
+  TORCH_ARG(std::optional<double>, beta) = c10::nullopt;
 };
 
 namespace functional {
