@@ -1805,11 +1805,14 @@ class AotCodeCompiler:
                 use_mmap_weights=use_mmap_weights,
             )
             """
-            output_name, output_dir = get_name_and_dir_from_output_file_path(input_path)
+            (
+                object_output_name,
+                object_output_dir,
+            ) = get_name_and_dir_from_output_file_path(input_path)
             object_builder = CppBuilder(
-                name=output_name,
+                name=object_output_name,
                 sources=input_path,
-                output_dir=output_dir,
+                output_dir=object_output_dir,
                 BuildOption=CppTorchCudaOptions(
                     vec_isa=picked_vec_isa,
                     cuda=cuda,
@@ -1881,6 +1884,7 @@ class AotCodeCompiler:
                 "linux": _compile_consts_linux,
                 "darwin": _compile_consts_darwin,
             }[sys.platform](aot_constants)
+            """
             link_cmd = cpp_compile_command(
                 input=[output_o, consts_o],
                 output=output_so,
@@ -1889,6 +1893,22 @@ class AotCodeCompiler:
                 aot_mode=graph.aot_mode,
                 use_absolute_path=use_absolute_path,
             )
+            """
+            output_name, output_dir = get_name_and_dir_from_output_file_path(output_so)
+            so_builder = CppBuilder(
+                name=output_name,
+                sources=[output_o, consts_o],
+                output_dir=output_dir,
+                BuildOption=CppTorchCudaOptions(
+                    vec_isa=picked_vec_isa,
+                    cuda=cuda,
+                    aot_mode=graph.aot_mode,
+                    use_absolute_path=use_absolute_path,
+                ),
+            )
+            link_cmd = so_builder.get_command_line()
+            output_so = so_builder.get_target_file_path()
+            print("!!!! output_so: ", output_so)
             log.debug("aot linkage command: %s", link_cmd)
             if fbcode_aot_cpu_re:
                 compile_file([output_o, consts_o], output_so, link_cmd.split())
