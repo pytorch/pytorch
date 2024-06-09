@@ -3523,8 +3523,7 @@ class NCCLTraceTest(NCCLTraceTestBase):
     @requires_nccl()
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
     @parametrize("timing_enabled", [True, False])
-    @parametrize("include_collectives", [True, False])
-    def test_short(self, timing_enabled, include_collectives):
+    def test_short(self, timing_enabled):
         if self.rank == self.MAIN_PROCESS_RANK:
             return
         pg = self._create_process_group_nccl()
@@ -3539,16 +3538,10 @@ class NCCLTraceTest(NCCLTraceTestBase):
 
         # gah ok so now the duration_ms is populated best-effort since it can only happen outside "dump()" api
         time.sleep(1)
-        if include_collectives:
-            t = pickle.loads(torch._C._distributed_c10d._dump_nccl_trace())
-        else:
-            t = pickle.loads(
-                torch._C._distributed_c10d._dump_nccl_trace(
-                    includeCollectives=False, includeStackTraces=None, onlyActive=None
-                )
-            )
+
+        t = pickle.loads(torch._C._distributed_c10d._dump_nccl_trace())
         ver = t["version"]
-        self.assertEqual(ver, "2.2")
+        self.assertEqual(ver, "2.1")
         pg_config = t["pg_config"]
         self.assertEqual(len(pg_config), 1)
         default_pg_info = pg_config["0"]
@@ -3557,40 +3550,35 @@ class NCCLTraceTest(NCCLTraceTestBase):
         self.assertIn("ranks", default_pg_info)
         global_ranks = pg_config["0"]["ranks"]
         self.assertEqual(len(json.loads(global_ranks)), self.world_size)
-        if include_collectives:
-            self.assertEqual(len(t["entries"]), 2)
-            t = t["entries"]
-            self.assertEqual(len(t), 2)
-            last = t[-1]
-            self.assertEqual(last["process_group"], ("0", "default_pg"))
-            self.assertEqual(last["state"], "completed")
-            s = last["time_discovered_started_ns"]
-            f = last["time_discovered_completed_ns"]
-            self.assertEqual(last["record_id"], 1)
-            self.assertIsNotNone(f)
-            if timing_enabled:
-                self.assertIsNotNone(s)
-                self.assertTrue(s <= f)
-            self.assertIn("test_c10d_nccl.py", str(last["frames"]))
-            self.assertEqual(last["input_sizes"], ((3, 4),))
-            self.assertEqual(last["input_dtypes"], ["Float"])
-            self.assertEqual(last["output_sizes"], ((3, 4),))
-            self.assertEqual(last["output_dtypes"], ["Float"])
-            self.assertEqual(last["collective_seq_id"], 2)
-            self.assertEqual(last["timeout_ms"], 600000)
-            now = datetime.now()
-            event_created_time = datetime.fromtimestamp(
-                last["time_created_ns"] / 1000000000
-            )
-            before_test = now - timedelta(minutes=1)
-            self.assertTrue(before_test < event_created_time < now)
-            if timing_enabled:
-                # very loose bounds, measured 0.036 ms on devgpu
-                self.assertTrue(0 < last["duration_ms"] < 100)
-            else:
-                self.assertTrue("duration_ms" not in last)
+        t = t["entries"]
+        self.assertEqual(len(t), 2)
+        last = t[-1]
+        self.assertEqual(last["process_group"], ("0", "default_pg"))
+        self.assertEqual(last["state"], "completed")
+        s = last["time_discovered_started_ns"]
+        f = last["time_discovered_completed_ns"]
+        self.assertEqual(last["record_id"], 1)
+        self.assertIsNotNone(f)
+        if timing_enabled:
+            self.assertIsNotNone(s)
+            self.assertTrue(s <= f)
+        self.assertIn("test_c10d_nccl.py", str(last["frames"]))
+        self.assertEqual(last["input_sizes"], ((3, 4),))
+        self.assertEqual(last["input_dtypes"], ["Float"])
+        self.assertEqual(last["output_sizes"], ((3, 4),))
+        self.assertEqual(last["output_dtypes"], ["Float"])
+        self.assertEqual(last["collective_seq_id"], 2)
+        now = datetime.now()
+        event_created_time = datetime.fromtimestamp(
+            last["time_created_ns"] / 1000000000
+        )
+        before_test = now - timedelta(minutes=1)
+        self.assertTrue(before_test < event_created_time < now)
+        if timing_enabled:
+            # very loose bounds, measured 0.036 ms on devgpu
+            self.assertTrue(0 < last["duration_ms"] < 100)
         else:
-            self.assertTrue("entries" not in t)
+            self.assertTrue("duration_ms" not in last)
 
     @requires_nccl()
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
@@ -3662,7 +3650,6 @@ class NCCLTraceTest(NCCLTraceTestBase):
         self.assertEqual(last["input_dtypes"], ["Float"])
         self.assertEqual(last["output_sizes"], ((3, 4),))
         self.assertEqual(last["output_dtypes"], ["Float"])
-        self.assertEqual(last["timeout_ms"], 600000)
         self.assertEqual(last["collective_seq_id"] - first["collective_seq_id"], 9)
 
     @requires_nccl()
@@ -3867,7 +3854,6 @@ class NCCLTraceTest(NCCLTraceTestBase):
                 self.assertTrue(0.001 < duration < 10000, duration)
             else:
                 self.assertTrue("duration_ms" not in t["entries"][coalesced_op])
-            self.assertEqual(t["entries"][coalesced_op]["timeout_ms"], 600000)
 
     @requires_nccl()
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")

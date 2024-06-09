@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 """
 Functions in this module do most of the "work" of AOTAutograd.
 An aot_dispatch_* function:
@@ -247,11 +248,20 @@ def aot_dispatch_autograd(
 
     if aot_config.enable_log:
         aot_joint_log.info(
-            "%s", lazy_format_graph_code("Joint graph", fx_g, aot_config.aot_id)
+            "%s",
+            lazy_format_graph_code(
+                "Joint graph",
+                fx_g,
+                aot_config.aot_id,
+                include_stride=True,
+                include_device=True,
+            ),
         )
         trace_structured(
             "aot_joint_graph",
-            payload_fn=lambda: fx_g.print_readable(print_output=False),
+            payload_fn=lambda: fx_g.print_readable(
+                print_output=False, include_stride=True, include_device=True
+            ),
         )
 
     with torch.no_grad():
@@ -389,19 +399,35 @@ def aot_dispatch_autograd(
         if aot_config.enable_log:
             aot_graphs_log.info(
                 "%s",
-                lazy_format_graph_code("Forward graph", fw_module, aot_config.aot_id),
+                lazy_format_graph_code(
+                    "Forward graph",
+                    fw_module,
+                    aot_config.aot_id,
+                    include_stride=True,
+                    include_device=True,
+                ),
             )
             aot_graphs_log.info(
                 "%s",
-                lazy_format_graph_code("Backward graph", bw_module, aot_config.aot_id),
+                lazy_format_graph_code(
+                    "Backward graph",
+                    bw_module,
+                    aot_config.aot_id,
+                    include_stride=True,
+                    include_device=True,
+                ),
             )
             trace_structured(
                 "aot_forward_graph",
-                payload_fn=lambda: fw_module.print_readable(print_output=False),
+                payload_fn=lambda: fw_module.print_readable(
+                    print_output=False, include_stride=True, include_device=True
+                ),
             )
             trace_structured(
                 "aot_backward_graph",
-                payload_fn=lambda: bw_module.print_readable(print_output=False),
+                payload_fn=lambda: bw_module.print_readable(
+                    print_output=False, include_stride=True, include_device=True
+                ),
             )
 
         with track_graph_compiling(aot_config, "forward"):
