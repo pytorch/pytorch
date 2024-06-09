@@ -2900,6 +2900,24 @@ class CommonTemplate:
             check_lowp=True,
         )
 
+    @skipIfPy312  # segfaults
+    @config.patch(force_mixed_mm=True)
+    def test_mixed_mm3(self):
+        def fn(a, b):
+            return torch.mm(a, b.to(a.dtype))
+
+        # (256, 256) @ (256, 256) so different block sizes are tried out during autotuning
+        self.common(
+            fn,
+            (
+                torch.randn(256, 256),
+                torch.randint(-128, 127, (256, 256), dtype=torch.int8),
+            ),
+            check_lowp=True,
+            rtol=0.01,
+            atol=0.1,
+        )
+
     @with_tf32_off
     @config.patch(use_mixed_mm=True)
     def test_uint4x2_mixed_mm(self):
@@ -6642,6 +6660,11 @@ class CommonTemplate:
             )
 
         self.common(fn, [torch.randn(64, 64)])
+
+    def test_new_cpp_build_logical(self):
+        from torch._inductor.codecache import validate_new_cpp_commands
+
+        validate_new_cpp_commands()
 
     def test_as_strided(self):
         def fn(x):
@@ -10929,7 +10952,9 @@ if HAS_GPU and not TEST_WITH_ASAN:
                 ),
                 (
                     fn3,
-                    "triton_poi_fused_LayerNorm_ReLU",
+                    "triton_poi_fused_layer_norm_relu"
+                    if torch._dynamo.config.inline_inbuilt_nn_modules
+                    else "triton_poi_fused_LayerNorm_ReLU",
                     (torch.randn(4, 4, device=GPU_TYPE),),
                 ),
             ]
