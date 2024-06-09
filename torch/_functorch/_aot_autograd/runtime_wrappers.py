@@ -243,7 +243,7 @@ def make_output_handler(info, runtime_metadata, trace_joint):
     # TODO: handle the custom autograd function case here.
     # We need a way to check whether a tensor came from a custom autograd fn from python,
     # AND a way to replay that custom view fn.
-    assert False, f"Unhandled output type {info.output_type}"
+    raise AssertionError(f"Unhandled output type {info.output_type}")
 
 
 def _create_runtime_wrapper(
