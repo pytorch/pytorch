@@ -343,7 +343,10 @@ void cacheAllocatorDeregisterHook(
 }
 
 #if defined(IS_NCCLX) && defined(NCCL_COMM_DUMP)
-std::string dump_nccl_trace() {
+std::string dump_nccl_trace(
+    bool includeCollectives,
+    bool includeStackTraces,
+    bool onlyActive) {
   std::unordered_map<
       std::string /* ncclUniqueID */,
       std::unordered_map<std::string, std::string> /* dump from this comm */>
@@ -363,11 +366,17 @@ std::string dump_nccl_trace() {
     std::string ncclUniqueIDStr = buildNcclUniqueIdStr(ncclComm->getNcclId());
     ncclDumpMap[ncclUniqueIDStr] = ncclComm->ncclCommDump();
   }
-  return NCCLTraceBuffer::get()->dump(ncclDumpMap);
+  return NCCLTraceBuffer::get()->dump(
+      ncclDumpMap, includeCollectives, includeStackTraces, onlyActive);
 }
+
 #else
-std::string dump_nccl_trace() {
-  return NCCLTraceBuffer::get()->dump(c10::nullopt);
+std::string dump_nccl_trace(
+    bool includeCollectives,
+    bool includeStackTraces,
+    bool onlyActive) {
+  return NCCLTraceBuffer::get()->dump(
+      c10::nullopt, includeCollectives, includeStackTraces, onlyActive);
 }
 #endif
 
@@ -1260,7 +1269,7 @@ bool ProcessGroupNCCL::dumpDebuggingInfo() {
     // We dump nccl trace into local disk by default and users can register
     // their customized writer by inheriting `DebugInfoWriter` via
     // `registerDebugInfoWriter`.
-    auto ncclTrace = dump_nccl_trace();
+    auto ncclTrace = dump_nccl_trace(true, true, false);
     DebugInfoWriter& writer = DebugInfoWriter::getWriter(globalRank());
     LOG(INFO) << logPrefix() << "ProcessGroupNCCL dumping nccl trace to "
               << writer.getWriterTarget();
