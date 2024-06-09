@@ -2838,12 +2838,17 @@ def _do_validate_cpp_commands(
     temp_dir = tempfile.TemporaryDirectory()
     test_dir_path = temp_dir.name
     test_cuda = torch.cuda.is_available() and cuda
-    input_path = os.path.join(test_dir_path, "dummy_input.cpp")
-    output_path = os.path.join(test_dir_path, "dummy_output.so")
+    input_path = os.path.join(test_dir_path, "dummy_file.cpp")
+    output_path = os.path.join(test_dir_path, "dummy_file.so")
     extra_flags = ["-D TEST_EXTRA_FLAGS"]
     if compile_only:
-        output_path = os.path.join(test_dir_path, "dummy_output.o")
+        output_path = os.path.join(test_dir_path, "dummy_file.o")
     picked_isa = pick_vec_isa()
+
+    # Simulate fb_code env:
+    if not (aot_mode and not use_absolute_path):
+        input_path = os.path.basename(input_path)
+        output_path = os.path.basename(output_path)
 
     # Fix test_new_cpp_build_logical failed on MacOS
     if sys.platform != "linux":
@@ -2862,7 +2867,13 @@ def _do_validate_cpp_commands(
         extra_flags=extra_flags,
     ).split(" ")
 
-    from torch._inductor.cpp_builder import CppBuilder, CppTorchCudaOptions
+    from torch._inductor.cpp_builder import (
+        CppBuilder,
+        CppTorchCudaOptions,
+        get_name_and_dir_from_output_file_path,
+    )
+
+    name, dir = get_name_and_dir_from_output_file_path(input_path)
 
     dummy_build_option = CppTorchCudaOptions(
         vec_isa=picked_isa,
@@ -2876,10 +2887,10 @@ def _do_validate_cpp_commands(
     )
 
     dummy_builder = CppBuilder(
-        name="dummy_output",
+        name=name,
         sources=input_path,
+        output_dir=dir,
         BuildOption=dummy_build_option,
-        output_dir=test_dir_path,
     )
     new_cmd = dummy_builder.get_command_line().split(" ")
 
