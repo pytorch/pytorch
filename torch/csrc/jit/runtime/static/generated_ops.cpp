@@ -1338,28 +1338,6 @@ REGISTER_OPERATOR_FUNCTOR(aten::mm, aten_mm, [](Node* n) -> SROperator {
 });
 
 REGISTER_OPERATOR_FUNCTOR(
-    aten::_int_mm,
-    aten__int_mm,
-    [](Node* n) -> SROperator {
-      if (n->matches(torch::schema(
-              "aten::_int_mm(Tensor self, Tensor mat2) -> Tensor"))) {
-        return [](ProcessedNode* p_node) {
-          const auto& self = p_node->Input(0).toTensor();
-          const auto& mat2 = p_node->Input(1).toTensor();
-          if (p_node->Output(0).isNone()) {
-            p_node->Output(0) = at::native::_int_mm_cpu(self, mat2);
-            return;
-          }
-          auto& out = p_node->Output(0).toTensor();
-          fastResizeToZero(out);
-          at::native::_int_mm_out_cpu(self, mat2, out);
-        };
-      }
-      LogAndDumpSchema(n);
-      return nullptr;
-    });
-
-REGISTER_OPERATOR_FUNCTOR(
     aten::multiply,
     aten_multiply,
     [](Node* n) -> SROperator {
