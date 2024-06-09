@@ -1,3 +1,5 @@
+# mypy: allow-untyped-defs
+
 import copyreg
 import os.path as _osp
 import weakref
