@@ -1985,15 +1985,25 @@ class AotCodeCompiler:
         cuda: bool,
     ) -> str:
         picked_vec_isa = pick_vec_isa()
-        cpp_command = repr(
-            cpp_compile_command(
-                "i",
-                "o",
+
+        from torch._inductor.cpp_builder import CppBuilder, CppTorchCudaOptions
+
+        dummy_builder = CppBuilder(
+            name="o",
+            sources="i",
+            BuildOption=CppTorchCudaOptions(
                 vec_isa=picked_vec_isa,
                 cuda=cuda,
                 aot_mode=graph.aot_mode,
-            )
+            ),
         )
+        # write function will calc source_code hash, the same source code with different
+        # ISA level should be generate different hash.
+        # So we need get a command_line which contains isa related parameter as a part of hash key.
+        # And then pass the command_line to below write function as extra parameter to
+        # guarantee the source code hash contains ISA difference.
+        cpp_command = repr(dummy_builder.get_command_line())
+
         fbcode_aot_cpu_re = False
         use_absolute_path = False
         if config.is_fbcode():
@@ -2462,9 +2472,7 @@ class CppCodeCache:
             from filelock import FileLock
 
             lock_path = os.path.join(get_lock_dir(), key + ".lock")
-
             output_name, output_dir = get_name_and_dir_from_output_file_path(input_path)
-            print("!!!! debug: ", output_name, output_dir)
 
             output_path = input_path[:-3] + "so"
             future: Optional[Future[Any]] = None
@@ -2782,6 +2790,7 @@ def _do_validate_cpp_commands(
     compile_only: bool,
     mmap_weights: bool,
     use_absolute_path: bool,
+    aot_mode: bool,
 ):
     # PreCI will failed if test machine can't run cuda.
     temp_dir = tempfile.TemporaryDirectory()
@@ -2794,13 +2803,17 @@ def _do_validate_cpp_commands(
         output_path = os.path.join(test_dir_path, "dummy_output.o")
     picked_isa = pick_vec_isa()
 
+    # Fix test_new_cpp_build_logical failed on MacOS
+    if sys.platform != "linux":
+        aot_mode = False
+
     old_cmd = cpp_compile_command(
         input=input_path,
         output=output_path,
         include_pytorch=include_pytorch,
         vec_isa=picked_isa,
         cuda=test_cuda,
-        aot_mode=False,
+        aot_mode=aot_mode,
         compile_only=compile_only,
         use_absolute_path=use_absolute_path,
         use_mmap_weights=mmap_weights,
@@ -2813,6 +2826,7 @@ def _do_validate_cpp_commands(
         vec_isa=picked_isa,
         include_pytorch=include_pytorch,
         cuda=test_cuda,
+        aot_mode=aot_mode,
         compile_only=compile_only,
         use_absolute_path=use_absolute_path,
         use_mmap_weights=mmap_weights,
@@ -2840,22 +2854,26 @@ def validate_new_cpp_commands():
     compile_only = [True, False]
     include_pytorch = [True, False]
     use_absolute_path = [True, False]
+    aot_mode = [False, True]
 
     for x in cuda:
         for y in use_mmap_weights:
             for z in compile_only:
                 for m in include_pytorch:
                     for n in use_absolute_path:
-                        print(
-                            f"!!! cuda:{x}, use_mmap_weights:{y}, compile_only:{z}, include_pytorch:{m}， use_absolute_path:{n}"
-                        )
-                        _do_validate_cpp_commands(
-                            include_pytorch=m,
-                            cuda=x,
-                            mmap_weights=y,
-                            compile_only=z,
-                            use_absolute_path=n,
-                        )
+                        for o in aot_mode:
+                            print(
+                                f"!!! cuda:{x}, use_mmap_weights:{y}, compile_only:{z}, include_pytorch:{m},"
+                                f" use_absolute_path:{n}, aot_mode:{o}"
+                            )
+                            _do_validate_cpp_commands(
+                                include_pytorch=m,
+                                cuda=x,
+                                mmap_weights=y,
+                                compile_only=z,
+                                use_absolute_path=n,
+                                aot_mode=o,
+                            )
 
 
 @clear_on_fresh_inductor_cache

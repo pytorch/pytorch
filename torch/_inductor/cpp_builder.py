@@ -23,6 +23,7 @@ from torch._inductor.codecache import (
     _get_python_include_dirs,
     _LINKER_SCRIPT,
     _transform_cuda_paths,
+    cpp_prefix_path,
     get_lock_dir,
     invalid_vec_isa,
     LOCK_TIMEOUT,
@@ -519,20 +520,6 @@ def _setup_standard_sys_libs(
     return cflags, include_dirs, passthough_args
 
 
-@functools.lru_cache
-def _cpp_prefix_path() -> str:
-    from torch._inductor.codecache import write  # TODO
-
-    path = Path(Path(__file__).parent).parent / "codegen/cpp_prefix.h"
-    with path.open() as f:
-        content = f.read()
-        _, filename = write(
-            content,
-            "h",
-        )
-    return filename
-
-
 def _get_build_args_of_chosen_isa(vec_isa: VecISA):
     macros = []
     build_flags = []
@@ -879,8 +866,9 @@ def get_cpp_torch_cuda_options(cuda: bool, aot_mode: bool = False):
                     libraries += ["c10_cuda", "cuda", "torch_cuda"]
 
     if aot_mode:
-        cpp_prefix_include_dir = [f"{os.path.dirname(_cpp_prefix_path())}"]
-        include_dirs += cpp_prefix_include_dir
+        if config.is_fbcode():
+            cpp_prefix_include_dir = [f"{os.path.dirname(cpp_prefix_path())}"]
+            include_dirs += cpp_prefix_include_dir
 
         if cuda and torch.version.hip is None:
             _transform_cuda_paths(libraries_dirs)
