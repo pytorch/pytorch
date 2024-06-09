@@ -13,7 +13,9 @@ from typing import Optional, TYPE_CHECKING, Union
 
 import torch
 from torch._utils import ExceptionWrapper
+
 from . import HAS_NUMPY, IS_WINDOWS, MP_STATUS_CHECK_INTERVAL, signal_handling
+
 
 if TYPE_CHECKING:
     from torch.utils.data import Dataset
