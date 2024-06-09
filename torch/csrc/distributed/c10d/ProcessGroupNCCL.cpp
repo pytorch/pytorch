@@ -446,8 +446,7 @@ control_plane::RegisterHandler dumpHandler{
       res.setContent(
           dump_nccl_trace(includeCollectives, includeStackTraces, onlyActive),
           "application/octet-stream");
-    }
-  };
+    }};
 
 std::optional<std::function<void(std::function<void(const std::string&)>)>>&
 get_cpp_trace_dumper() {
