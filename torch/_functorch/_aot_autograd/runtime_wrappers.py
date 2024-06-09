@@ -423,13 +423,13 @@ def _create_runtime_wrapper(
         # compiling them.
         if runtime_metadata.num_outputs_aliased > 0:
             # The compiled forward also returned intermediate bases. We don't want to return them to the user.
-            expect_num_outputs = len(output_handlers) + runtime_metadata.num_intermediate_bases
+            expect_num_outputs = (
+                len(output_handlers) + runtime_metadata.num_intermediate_bases
+            )
             assert len(fw_outs) == expect_num_outputs
             ret_outs = [
                 handler(orig_inputs, fw_outs, out)
-                for out, handler in builtins.zip(
-                    fw_outs, output_handlers
-                )
+                for out, handler in builtins.zip(fw_outs, output_handlers)
             ]
         else:
             ret_outs = fw_outs
