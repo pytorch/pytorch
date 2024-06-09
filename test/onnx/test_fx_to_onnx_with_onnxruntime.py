@@ -158,12 +158,8 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
                     torch.tensor([operator.sub(x.item(), y.item())]),
                     torch.tensor([operator.mul(x.item(), y.item())]),
                     torch.tensor([operator.truediv(x.item(), y.item())]),
-                    # This requires torch.sym_float, probably easy to lower to
-                    # ONNX but I don't know where to put it
-                    # torch.tensor([operator.floordiv(x.item(), y.item())]),
-                    # NB: abs so that the base and exponent are provably
-                    # non-negative, so we don't generate runtime asserts
-                    torch.tensor([operator.pow(abs(x.item()), abs(y.item()))]),
+                    torch.tensor([operator.floordiv(x.item(), y.item())]),
+                    torch.tensor([operator.pow(x.item(), y.item())]),
                     torch.tensor([operator.abs(x.item())]),
                     torch.tensor([operator.neg(x.item())]),
                     torch.tensor([math.ceil(x.item())]),
@@ -1366,6 +1362,14 @@ class TestFxToOnnxFakeTensorWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             model_type=self.model_type,
         )
 
+    @pytorch_test_common.skip_dynamic_fx_test(
+        reason="Dynamic shape check is not expected for exported program in this test suite.",
+        model_type=pytorch_test_common.TorchModelType.TORCH_EXPORT_EXPORTEDPROGRAM,
+    )
+    @pytorch_test_common.xfail_dynamic_fx_test(
+        error_message="SymIntArrayRef expected to contain only concrete integers",
+        model_type=pytorch_test_common.TorchModelType.TORCH_NN_MODULE,
+    )
     @pytorch_test_common.xfail(
         error_message="aten::cumsum",
         reason="https://github.com/pytorch/pytorch/pull/127675",

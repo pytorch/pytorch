@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import itertools
 import logging
 import operator
@@ -854,10 +855,13 @@ class GraphLowering(torch.fx.Interpreter):
         """
         if self.constants[name].device == device_override or device_override is None:
             return name
-        return self.allocate_non_dup_const_name(
-            f"{name}_{device_override.type}{device_override.index or 0}",
-            self.constants[name].to(device_override),
-        )
+        with torch.utils._python_dispatch._disable_current_modes():
+            # caller might have set fake tensor mode which will create a fake tensor
+            # when calling .to, so unset modes here
+            return self.allocate_non_dup_const_name(
+                f"{name}_{device_override.type}{device_override.index or 0}",
+                self.constants[name].to(device_override),
+            )
 
     def placeholder(self, target: str, args, kwargs):
         example = super().placeholder(target, args, kwargs)
@@ -1193,11 +1197,8 @@ class GraphLowering(torch.fx.Interpreter):
             elif is_magic_method(n.target):
                 # TODO: this is sus, it probably should be handled in the
                 # lowerings themselves similarly to sym_size/sym-stride
-                # https://github.com/pytorch/pytorch/issues/127789
                 debug("is_magic_method")
-                if isinstance(
-                    n.meta["val"], (torch.SymInt, torch.SymFloat, torch.SymBool)
-                ):
+                if isinstance(n.meta["val"], torch.SymInt):
                     result = n.meta["val"].node.expr
                 else:
                     result = super().run_node(n)
