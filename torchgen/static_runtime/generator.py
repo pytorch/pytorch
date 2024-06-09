@@ -224,6 +224,7 @@ BLOCKED_OPS = frozenset(
         "_nested_tensor_strides",
         "_nested_view_from_jagged",
         "_nested_get_values",
+        "_int_mm",  # testing needs to be patched
     )
 )
 

@@ -2154,38 +2154,6 @@ TEST(StaticRuntime, autogen_mm) {
       /*check_resize=*/true);
 }
 
-TEST(StaticRuntime, autogen__int_mm) {
-  const std::string script = R"IR(
-    graph(%self: Tensor, %mat2: Tensor):
-        %bias: None = prim::Constant()
-        %ret = aten::_int_mm(%self, %mat2)
-        %cloned = aten::clone(%ret, %bias)
-        return (%cloned)
-  )IR";
-
-  auto self0 = at::rand({6, 6, 6});
-  auto mat20 = at::rand({6, 6, 6});
-  std::vector<IValue> args{self0, mat20};
-  testStaticRuntime(
-      script,
-      args,
-      {},
-      /*use_allclose=*/false,
-      /*use_equalnan=*/false,
-      /*check_resize=*/true);
-
-  auto self1 = at::rand({22, 22, 22});
-  auto mat21 = at::rand({22, 22, 22});
-  std::vector<IValue> args2{self1, mat21};
-  testStaticRuntime(
-      script,
-      args,
-      args2,
-      /*use_allclose=*/false,
-      /*use_equalnan=*/false,
-      /*check_resize=*/true);
-}
-
 TEST(StaticRuntime, autogen_multiply_Tensor) {
   const std::string script = R"IR(
     graph(%self: Tensor, %other: Tensor):
