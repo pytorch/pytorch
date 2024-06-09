@@ -856,19 +856,24 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 out = variables.UserMethodVariable(
                     getattr_fn, self, source=new_source
                 ).call_function(tx, [ConstantVariable.create(name)], {})
-                if getattr_fn is torch.nn.Module.__getattr__ and isinstance(
-                    out,
-                    (
-                        variables.UnspecializedNNModuleVariable,
-                        variables.NNModuleVariable,
-                    ),
-                ):
-                    # nn_module_stack source is BC surface area. Ensure that
-                    # mod._modules["linear"] is reflected as mod.linear for
-                    # nn_module_stack.
-                    out.set_nn_module_stack_source(
-                        AttrSource(self.nn_module_stack_source, name)
-                    )
+
+                if self.source and getattr_fn is torch.nn.Module.__getattr__:
+                    if isinstance(out, variables.LazyVariableTracker):
+                        out = out.realize()
+
+                    if isinstance(
+                        out,
+                        (
+                            variables.UnspecializedNNModuleVariable,
+                            variables.NNModuleVariable,
+                        ),
+                    ):
+                        # nn_module_stack source is BC surface area. Ensure that
+                        # mod._modules["linear"] is reflected as mod.linear for
+                        # nn_module_stack.
+                        out.nn_module_stack_source = AttrSource(
+                            self.nn_module_stack_source, name
+                        )
                 return out
 
             elif getattr_fn is not None:
