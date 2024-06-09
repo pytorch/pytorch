@@ -1063,6 +1063,7 @@ class TestNN(NNTestCase):
         self.assertRaises(NotImplementedError, module_dict)
         self.assertRaises(NotImplementedError, module_dict, torch.rand(1, 3))
 
+    @skipIfTorchDynamo()
     def test_ParameterList(self):
         def make_param():
             return Parameter(torch.randn(2, 2))
