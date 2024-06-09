@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import functools
 
 from typing import Any, cast, NoReturn, Optional, Union
@@ -180,6 +181,8 @@ class FSDPModule:
                 that has a :meth:`wait` method to wait on the unshard op. If
                 ``False``, then returns ``None`` and waits on the handle inside
                 this function.
+
+        .. warning:: This method is experimental and subject to change.
 
         .. note:: If ``async_op=True``, then the user does not have to call
             :meth:`wait` on the returned handle if waiting on the unshard op
