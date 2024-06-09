@@ -1124,7 +1124,10 @@ def _softmax(x: Tensor, dim: int, half_to_float: bool):
         x, type_promotion_kind=utils.ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
     )
     x = x.to(computation_dtype)
-    if x.numel() == 0:
+
+    from torch.fx.experimental.symbolic_shapes import guard_size_oblivious
+
+    if guard_size_oblivious(x.numel() == 0):
         unnormalized = torch.exp(x)
     else:
         x_max = torch.amax(x, dim, keepdim=True)
