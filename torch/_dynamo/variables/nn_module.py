@@ -126,10 +126,15 @@ class NNModuleVariable(VariableTracker):
         self.module_key = module_key
         self.module = module
         assert self.source
-        self.nn_module_stack_source = self.source
+        self._nn_module_stack_source = self.source
 
-    def set_nn_module_stack_source(self, source):
-        self.nn_module_stack_source = source
+    @property
+    def nn_module_stack_source(self):
+        return self._nn_module_stack_source or self.source
+
+    @nn_module_stack_source.setter
+    def nn_module_stack_source(self, source):
+        self._nn_module_stack_source = source
 
     def python_type(self):
         return self.module_type
@@ -234,6 +239,7 @@ class NNModuleVariable(VariableTracker):
         base_dict = object.__getattribute__(base, "__dict__")
         object_member = True
         all_class_attribute_names = set()
+        is_submodule = False
         for x in inspect.getmro(base.__class__):
             all_class_attribute_names.update(x.__dict__.keys())
 
@@ -251,6 +257,7 @@ class NNModuleVariable(VariableTracker):
             and name not in all_class_attribute_names
         ):
             subobj = base_dict["_modules"][name]
+            is_submodule = True
         elif "_parameters" in base_dict and name in base_dict["_parameters"]:
             subobj = base_dict["_parameters"][name]
         elif "_buffers" in base_dict and name in base_dict["_buffers"]:
@@ -277,12 +284,16 @@ class NNModuleVariable(VariableTracker):
 
         if object_member:
             out = VariableBuilder(tx, NNModuleSource(source))(subobj)
+
+            if is_submodule and isinstance(out, variables.LazyVariableTracker):
+                out = out.realize()
+
             if isinstance(out, (NNModuleVariable, UnspecializedNNModuleVariable)):
                 # nn_module_stack source is BC surface area. Ensure that
                 # mod._modules["linear"] is reflected as mod.linear for
                 # nn_module_stack.
-                out.set_nn_module_stack_source(
-                    AttrSource(self.nn_module_stack_source, name)
+                out.nn_module_stack_source = AttrSource(
+                    self.nn_module_stack_source, name
                 )
             return out
 
@@ -766,10 +777,15 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
 
         super().__init__(value=value, **kwargs)
         self.is_state_mutated = False
-        self.nn_module_stack_source = self.source
+        self._nn_module_stack_source = self.source
 
-    def set_nn_module_stack_source(self, source):
-        self.nn_module_stack_source = source
+    @property
+    def nn_module_stack_source(self):
+        return self._nn_module_stack_source or self.source
+
+    @nn_module_stack_source.setter
+    def nn_module_stack_source(self, source):
+        self._nn_module_stack_source = source
 
     @staticmethod
     @functools.lru_cache(None)
