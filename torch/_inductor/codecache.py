@@ -2177,7 +2177,6 @@ def _worker_compile_cpp_new(lock_path, name, source, output_dir, args: dict[str,
     )
 
     with FileLock(lock_path, timeout=LOCK_TIMEOUT):
-        print("!!! target path: ", cpp_builder.get_target_file_path())
         if not os.path.exists(cpp_builder.get_target_file_path()):
             # compile_file(input_path, output_path, shlex.split(cmd))
             cpp_builder.build()
