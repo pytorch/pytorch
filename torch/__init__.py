@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 
 r"""
 The torch package contains data structures for multi-dimensional
@@ -291,7 +292,7 @@ else:
 # Appease the type checker; ordinarily this binding is inserted by the
 # torch._C module initialization code in C
 if TYPE_CHECKING:
-    from . import _C as _C
+    from . import _C as _C  # noqa: TCH004
 
 class SymInt:
     """

@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import dataclasses
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
