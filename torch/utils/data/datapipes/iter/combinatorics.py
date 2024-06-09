@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import random
 from typing import Dict, Iterator, List, Optional, Sized, Tuple, Type, TypeVar
 

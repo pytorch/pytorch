@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import copy as copymodule
 import warnings
 from abc import ABC, abstractmethod
