@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 from torch.fx.passes.utils.fuser_utils import fuse_by_partitions
 import collections
 import itertools
