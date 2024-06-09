@@ -2964,12 +2964,20 @@ class HalideCodeCache(CppPythonBindingsCodeCache):
     @classmethod
     @functools.lru_cache(None)
     def config_hash(cls):
+        from torch._inductor.cpp_builder import CppBuilder, CppOptions
+
+        dummy_builder = CppBuilder(
+            name="O",
+            sources="I",
+            BuildOption=CppOptions(),
+        )
+        command_line = dummy_builder.get_command_line()
         return sha256_hash(
             "\n".join(
                 [
                     cls.glue_template,
                     f"{cls.cpu_cache_size()}",
-                    cpp_compile_command("I", "O"),
+                    command_line,
                 ]
             ).encode("utf-8")
         )
