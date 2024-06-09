@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 from torch.distributions import constraints
 from torch.distributions.gamma import Gamma
 

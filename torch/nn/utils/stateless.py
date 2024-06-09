@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 import contextlib
 from collections import defaultdict
 from typing import Any, Dict, Iterator, Optional, Set, Tuple, Union

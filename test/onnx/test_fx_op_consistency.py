@@ -65,7 +65,7 @@ from torch.testing._internal import (
     common_methods_invocations,
     common_utils,
 )
-from torch.testing._internal.opinfo import core as opinfo_core  # noqa: TCH001
+from torch.testing._internal.opinfo import core as opinfo_core
 
 
 # NOTE: For ATen signature modifications that will break ONNX export,
@@ -278,8 +278,8 @@ EXPECTED_SKIPS_OR_FAILS_WITH_DTYPES: Tuple[onnx_test_common.DecorateMeta, ...] =
         reason="ONNX doesn't have partial view for tensor; [PostInline][ORT] segfaults",
     ),
     skip(
-        "alias_copy",
-        dtypes=(torch.bool, torch.complex64),
+        "as_strided_copy",
+        dtypes=(torch.bool, torch.float32, torch.complex64),
         reason="OnnxExporterError: Failed to export model",
     ),
     xfail(

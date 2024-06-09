@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 """Tracing.
 
 This module contains functionality to support the JIT's tracing frontend, notably:

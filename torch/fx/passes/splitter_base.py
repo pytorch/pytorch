@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 import argparse
 import copy
 from collections import defaultdict

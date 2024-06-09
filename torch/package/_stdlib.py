@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 """List of Python standard library modules.
 
 Sadly, there is no reliable way to tell whether a module is part of the

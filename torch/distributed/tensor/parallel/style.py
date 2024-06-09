@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 # Copyright (c) Meta Platforms, Inc. and affiliates
 from abc import ABC, abstractmethod
 from typing import Optional, Union, Tuple, Dict

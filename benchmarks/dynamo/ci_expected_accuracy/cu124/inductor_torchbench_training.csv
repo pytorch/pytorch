@@ -182,7 +182,7 @@ phlippe_densenet,pass,6
 
 
 
-phlippe_resnet,pass,6
+phlippe_resnet,fail_accuracy,6
 
 
 

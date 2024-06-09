@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 """Adds docstrings to Storage functions"""
 
 import torch._C

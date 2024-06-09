@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 from .modules import *  # noqa: F403
 from .parameter import (
     Parameter as Parameter,

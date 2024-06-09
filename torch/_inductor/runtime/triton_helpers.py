@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 try:
     import triton
     import triton.language as tl

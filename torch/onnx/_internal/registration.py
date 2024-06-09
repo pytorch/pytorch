@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 """Module for handling symbolic function registration."""
 
 import warnings

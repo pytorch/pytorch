@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 """
 Note [ONNX operators that are added/updated from opset 7 to opset 8]
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

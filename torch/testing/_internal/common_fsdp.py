@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 # Owner(s): ["oncall: distributed"]
 
 import contextlib

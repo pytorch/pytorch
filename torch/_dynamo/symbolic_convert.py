@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 import collections
 import collections.abc
 import contextlib

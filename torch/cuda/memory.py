@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 r"""This package adds support for device memory management implemented in CUDA."""
 
 import collections

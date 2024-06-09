@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 # Owner(s): ["oncall: mobile"]
-# mypy: allow-untyped-defs
 
 import io
 import textwrap

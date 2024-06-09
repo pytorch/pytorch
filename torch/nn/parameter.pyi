@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 import builtins
 from typing import Optional, Tuple
 

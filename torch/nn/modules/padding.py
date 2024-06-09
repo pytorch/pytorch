@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 from .module import Module
 from .utils import _pair, _quadruple, _ntuple
 from .. import functional as F

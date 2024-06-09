@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 import cProfile
 import inspect
 import io

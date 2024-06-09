@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 import random
 
 from torch.utils.data.datapipes._decorator import functional_datapipe

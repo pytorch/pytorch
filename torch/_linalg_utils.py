@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 """Various linear algebra utility methods for internal use.
 
 """

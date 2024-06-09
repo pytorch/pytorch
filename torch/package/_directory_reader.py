@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 import os.path
 from glob import glob
 from typing import cast

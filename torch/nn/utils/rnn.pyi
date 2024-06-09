@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 from typing import Any, Iterable, NamedTuple, Optional, overload, Sequence, Tuple, Union
 
 from typing_extensions import Self

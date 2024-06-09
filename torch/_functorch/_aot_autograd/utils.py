@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 """
 Contains various utils for AOTAutograd, including those for handling collections.
 """

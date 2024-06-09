@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 from __future__ import annotations  # type: ignore[attr-defined]
 from dataclasses import dataclass
 from typing import (

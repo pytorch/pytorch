@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 r"""Weight Normalization from https://arxiv.org/abs/1602.07868."""
 from torch.nn.parameter import Parameter, UninitializedParameter
 from torch import _weight_norm, norm_except_dim

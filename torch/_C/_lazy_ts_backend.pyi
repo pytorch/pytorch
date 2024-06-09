@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 # defined in torch/csrc/lazy/python/init.cpp
 
 from typing import Any, List, Tuple

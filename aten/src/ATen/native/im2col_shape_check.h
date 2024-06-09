@@ -5,7 +5,7 @@
 
 namespace at::native {
 
-inline void col2im_shape_check(
+static inline void col2im_shape_check(
     const Tensor& input,
     const Tensor& grad_output,
     int64_t output_height,
@@ -135,7 +135,7 @@ inline void col2im_shape_check(
   }
 }
 
-inline void im2col_shape_check(
+static inline void im2col_shape_check(
     const Tensor& input,
     const Tensor& grad_output,
     int64_t kernel_height,

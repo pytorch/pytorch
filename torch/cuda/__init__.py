@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 r"""
 This package adds support for CUDA tensor types.
 

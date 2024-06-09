@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 import contextlib
 import functools
 from typing import Callable, Optional

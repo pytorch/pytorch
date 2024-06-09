@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 from collections import OrderedDict, abc as container_abcs
 from itertools import chain, islice
 import operator
