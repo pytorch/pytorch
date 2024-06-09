@@ -23,9 +23,6 @@ except ModuleNotFoundError:
 
 __all__ = ['FxGraphDrawer']
 
-
-__all__ = ['FxGraphDrawer']
-
 _COLOR_MAP = {
     "placeholder": '"AliceBlue"',
     "call_module": "LemonChiffon1",
