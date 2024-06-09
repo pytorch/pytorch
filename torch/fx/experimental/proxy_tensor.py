@@ -216,6 +216,19 @@ def track_tensor(tensor, proxy, *, constant, tracer):
     set_proxy_slot(tensor, tracer, _ProxyTensor(proxy, constant))
 
 def track_tensor_tree(inner_res, proxy_res, *, constant, tracer):
+    """
+    Recursively tracks tensors and sets proxies on them in a given tensor tree.
+
+    Args:
+        inner_res (torch.Tensor, torch.ScriptObject, FakeScriptObject, BackwardState, SymInt, SymFloat, SymBool, tuple, list, or dict): The input tensor tree to track.
+        proxy_res (torch.fx.Proxy, tuple, list, or dict): The proxy object tree to set bindings on.
+        constant (torch.Tensor or None): A constant to be set into a proxy for a torch.Tensor during tracking. If there is a dict in the given tree, None is assumed.
+        tracer (torch.fx.Tracer): The tracer object used to create or track a proxy.
+
+    Returns:
+        torch.Tensor, torch.ScriptObject, FakeScriptObject, BackwardState, SymInt, SymFloat, SymBool, tuple, list, or dict: The input tensor tree with proxies set.
+
+    """
     _set_unbacked_bindings(inner_res, proxy_res)
 
     def wrap_with_proxy(e, proxy, constant):
