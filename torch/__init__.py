@@ -505,22 +505,22 @@ class SymInt:
         raise NotImplementedError("type stub not overridden")
 
     def __pow_by_natural__(self, other) -> "SymInt":
-        raise AssertionError("type stub not overridden")
+        raise NotImplementedError("type stub not overridden")
 
     def __rpow_by_natural__(self, other) -> "SymInt":
-        raise AssertionError("type stub not overridden")
+        raise NotImplementedError("type stub not overridden")
 
     def __int_truediv__(self, other) -> "SymFloat":
-        raise AssertionError("type stub not overridden")
+        raise NotImplementedError("type stub not overridden")
 
     def __rint_truediv__(self, other) -> "SymFloat":
-        raise AssertionError("type stub not overridden")
+        raise NotImplementedError("type stub not overridden")
 
     def __int_floordiv__(self, other) -> "SymFloat":
-        raise AssertionError("type stub not overridden")
+        raise NotImplementedError("type stub not overridden")
 
     def __rint_floordiv__(self, other) -> "SymFloat":
-        raise AssertionError("type stub not overridden")
+        raise NotImplementedError("type stub not overridden")
 
     def __sym_max__(self, other):
         raise NotImplementedError("type stub not overridden")
@@ -612,16 +612,16 @@ class SymFloat:
         raise NotImplementedError("type stub not overridden")
 
     def __float_pow__(self, other) -> "SymFloat":
-        raise AssertionError("type stub not overridden")
+        raise NotImplementedError("type stub not overridden")
 
     def __rfloat_pow__(self, other) -> "SymFloat":
-        raise AssertionError("type stub not overridden")
+        raise NotImplementedError("type stub not overridden")
 
     def __float_truediv__(self, other) -> "SymFloat":
-        raise AssertionError("type stub not overridden")
+        raise NotImplementedError("type stub not overridden")
 
     def __rfloat_truediv__(self, other) -> "SymFloat":
-        raise AssertionError("type stub not overridden")
+        raise NotImplementedError("type stub not overridden")
 
     def __trunc__(self):
         raise NotImplementedError("type stub not overridden")
@@ -736,7 +736,7 @@ def sym_float(a):
         return a
     elif hasattr(a, "__sym_float__"):
         return a.__sym_float__()
-    return py_float(a)  # type: ignore[operator]
+    return builtins.float(a)  # type: ignore[operator]
 
 
 def sym_int(a):
@@ -751,7 +751,7 @@ def sym_int(a):
         return a
     elif isinstance(a, SymFloat):
         return math.trunc(a)
-    return py_int(a)  # type: ignore[operator]
+    return builtins.int(a)  # type: ignore[operator]
 
 
 def sym_max(a, b):
@@ -1866,11 +1866,6 @@ from torch._tensor_str import set_printoptions
 from torch.amp import autocast, GradScaler
 from torch.random import get_rng_state, initial_seed, manual_seed, seed, set_rng_state
 from torch.serialization import load, save
-
-# Initializing the extension shadows the built-in python float / int classes;
-# store them for later use by SymInt / SymFloat.
-py_float = float
-py_int = int
 
 ################################################################################
 # Initialize extension
