@@ -22,6 +22,7 @@ from torch.optim.rprop import Rprop
 from torch.optim.sgd import SGD
 from torch.optim.sparse_adam import SparseAdam
 
+
 del adadelta  # type: ignore[name-defined] # noqa: F821
 del adagrad  # type: ignore[name-defined] # noqa: F821
 del adam  # type: ignore[name-defined] # noqa: F821
