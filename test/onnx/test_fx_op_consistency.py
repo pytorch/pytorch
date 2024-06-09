@@ -281,7 +281,15 @@ EXPECTED_SKIPS_OR_FAILS_WITH_DTYPES: Tuple[onnx_test_common.DecorateMeta, ...] =
         "argwhere",
         reason="fixme: Assertion error: result mismatch",
     ),
-    xfail("alias_copy", reason="OnnxExporterError: Failed to export the model to ONNX"),
+    xfail(
+        "alias_copy",
+        reason="OnnxExporterError: Failed to export the model to ONNX",
+        dtypes=(
+            torch.bool,
+            torch.float32,
+            torch.complex64,
+        ),
+    ),
     skip(
         "as_strided",
         variant_name="partial_views",
