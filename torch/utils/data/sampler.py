@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import torch
 
 from typing import Iterator, Iterable, Optional, Sequence, List, TypeVar, Generic, Sized, Union
