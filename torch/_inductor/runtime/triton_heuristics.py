@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import builtins
 import copy
 import functools
@@ -748,7 +749,6 @@ class CachingAutotuner(KernelInterface):
             # User defined triton kernels will have arbitrary kwarg names
             "meta": launcher.config.kwargs,
         }
-
         from torch._inductor.codecache import CudaKernelParamCache
 
         binary = (

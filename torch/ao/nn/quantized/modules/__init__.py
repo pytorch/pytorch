@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import torch
 
 # The quantized modules use `torch.nn` and `torch.ao.nn.quantizable`

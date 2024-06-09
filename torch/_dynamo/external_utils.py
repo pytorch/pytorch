@@ -1,7 +1,9 @@
+# mypy: allow-untyped-defs
 # This module contains functions that *will be allowed* by dynamo
 
 import functools
 from typing import List
+from typing_extensions import deprecated
 
 import torch
 import torch.utils._pytree as pytree
@@ -12,6 +14,10 @@ except ModuleNotFoundError:
     np = None  # type: ignore[assignment]
 
 
+@deprecated(
+    "`torch._dynamo.external_utils.is_compiling` is deprecated. Use `torch.compiler.is_compiling` instead.",
+    category=FutureWarning,
+)
 def is_compiling() -> bool:
     """
     Indicates whether we are tracing/compiling with torch.compile() or torch.export().
