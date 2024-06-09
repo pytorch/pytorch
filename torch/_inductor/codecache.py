@@ -2073,9 +2073,7 @@ class CppCodeCache:
             from filelock import FileLock
 
             lock_path = os.path.join(get_lock_dir(), key + ".lock")
-
             output_name, output_dir = get_name_and_dir_from_output_file_path(input_path)
-            print("!!!! debug: ", output_name, output_dir)
 
             output_path = input_path[:-3] + "so"
             future: Optional[Future[Any]] = None
