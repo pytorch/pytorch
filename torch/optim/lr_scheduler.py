@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 import math
 import types
 import warnings
@@ -287,7 +286,7 @@ class LambdaLR(LRScheduler):
             factor given an integer parameter epoch, or a list of such
             functions, one for each group in optimizer.param_groups.
         last_epoch (int): The index of last epoch. Default: -1.
-        verbose (bool | str): If ``True``, prints a message to stdout for
+        verbose (bool): If ``True``, prints a message to stdout for
             each update. Default: ``False``.
 
             .. deprecated:: 2.2
@@ -389,7 +388,7 @@ class MultiplicativeLR(LRScheduler):
             factor given an integer parameter epoch, or a list of such
             functions, one for each group in optimizer.param_groups.
         last_epoch (int): The index of last epoch. Default: -1.
-        verbose (bool | str): If ``True``, prints a message to stdout for
+        verbose (bool): If ``True``, prints a message to stdout for
             each update. Default: ``False``.
 
             .. deprecated:: 2.2
@@ -488,7 +487,7 @@ class StepLR(LRScheduler):
         gamma (float): Multiplicative factor of learning rate decay.
             Default: 0.1.
         last_epoch (int): The index of last epoch. Default: -1.
-        verbose (bool | str): If ``True``, prints a message to stdout for
+        verbose (bool): If ``True``, prints a message to stdout for
             each update. Default: ``False``.
 
             .. deprecated:: 2.2
@@ -547,7 +546,7 @@ class MultiStepLR(LRScheduler):
         gamma (float): Multiplicative factor of learning rate decay.
             Default: 0.1.
         last_epoch (int): The index of last epoch. Default: -1.
-        verbose (bool | str): If ``True``, prints a message to stdout for
+        verbose (bool): If ``True``, prints a message to stdout for
             each update. Default: ``False``.
 
             .. deprecated:: 2.2
@@ -610,7 +609,7 @@ class ConstantLR(LRScheduler):
         total_iters (int): The number of steps that the scheduler multiplies the learning rate by the factor.
             Default: 5.
         last_epoch (int): The index of the last epoch. Default: -1.
-        verbose (bool | str): If ``True``, prints a message to stdout for
+        verbose (bool): If ``True``, prints a message to stdout for
             each update. Default: ``False``.
 
             .. deprecated:: 2.2
@@ -686,7 +685,7 @@ class LinearLR(LRScheduler):
         total_iters (int): The number of iterations that multiplicative factor reaches to 1.
             Default: 5.
         last_epoch (int): The index of the last epoch. Default: -1.
-        verbose (bool | str): If ``True``, prints a message to stdout for
+        verbose (bool): If ``True``, prints a message to stdout for
             each update. Default: ``False``.
 
             .. deprecated:: 2.2
@@ -777,7 +776,7 @@ class ExponentialLR(LRScheduler):
         optimizer (Optimizer): Wrapped optimizer.
         gamma (float): Multiplicative factor of learning rate decay.
         last_epoch (int): The index of last epoch. Default: -1.
-        verbose (bool | str): If ``True``, prints a message to stdout for
+        verbose (bool): If ``True``, prints a message to stdout for
             each update. Default: ``False``.
 
             .. deprecated:: 2.2
@@ -812,7 +811,7 @@ class SequentialLR(LRScheduler):
         schedulers (list): List of chained schedulers.
         milestones (list): List of integers that reflects milestone points.
         last_epoch (int): The index of last epoch. Default: -1.
-        verbose (bool | str): Does nothing.
+        verbose (bool): Does nothing.
 
             .. deprecated:: 2.2
                 ``verbose`` is deprecated. Please use ``get_last_lr()`` to access the
@@ -946,7 +945,7 @@ class PolynomialLR(LRScheduler):
         optimizer (Optimizer): Wrapped optimizer.
         total_iters (int): The number of steps that the scheduler decays the learning rate. Default: 5.
         power (float): The power of the polynomial. Default: 1.0.
-        verbose (bool | str): If ``True``, prints a message to stdout for
+        verbose (bool): If ``True``, prints a message to stdout for
             each update. Default: ``False``.
 
             .. deprecated:: 2.2
@@ -1036,7 +1035,7 @@ class CosineAnnealingLR(LRScheduler):
         T_max (int): Maximum number of iterations.
         eta_min (float): Minimum learning rate. Default: 0.
         last_epoch (int): The index of last epoch. Default: -1.
-        verbose (bool | str): If ``True``, prints a message to stdout for
+        verbose (bool): If ``True``, prints a message to stdout for
             each update. Default: ``False``.
 
             .. deprecated:: 2.2
@@ -1239,7 +1238,7 @@ class ReduceLROnPlateau(LRScheduler):
         eps (float): Minimal decay applied to lr. If the difference
             between new and old lr is smaller than eps, the update is
             ignored. Default: 1e-8.
-        verbose (bool | str): If ``True``, prints a message to stdout for
+        verbose (bool): If ``True``, prints a message to stdout for
             each update. Default: ``False``.
 
             .. deprecated:: 2.2
@@ -1469,7 +1468,7 @@ class CyclicLR(LRScheduler):
             number of *batches* computed, not the total number of epochs computed.
             When last_epoch=-1, the schedule is started from the beginning.
             Default: -1
-        verbose (bool | str): If ``True``, prints a message to stdout for
+        verbose (bool): If ``True``, prints a message to stdout for
             each update. Default: ``False``.
 
             .. deprecated:: 2.2
@@ -1693,7 +1692,7 @@ class CosineAnnealingWarmRestarts(LRScheduler):
         T_mult (int, optional): A factor by which :math:`T_{i}` increases after a restart. Default: 1.
         eta_min (float, optional): Minimum learning rate. Default: 0.
         last_epoch (int, optional): The index of the last epoch. Default: -1.
-        verbose (bool | str): If ``True``, prints a message to stdout for
+        verbose (bool): If ``True``, prints a message to stdout for
             each update. Default: ``False``.
 
             .. deprecated:: 2.2
@@ -1897,7 +1896,7 @@ class OneCycleLR(LRScheduler):
             number of *batches* computed, not the total number of epochs computed.
             When last_epoch=-1, the schedule is started from the beginning.
             Default: -1
-        verbose (bool | str): If ``True``, prints a message to stdout for
+        verbose (bool): If ``True``, prints a message to stdout for
             each update. Default: ``False``.
 
             .. deprecated:: 2.2

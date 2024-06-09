@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 from warnings import warn
 import inspect
 from typing_extensions import deprecated

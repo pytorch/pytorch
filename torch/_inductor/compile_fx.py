@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 import contextlib
 import functools
 import itertools
@@ -25,7 +24,6 @@ from torch._dynamo import (
     utils as dynamo_utils,
 )
 from torch._dynamo.utils import (
-    counters,
     detect_fake_mode,
     flatten_graph_inputs,
     lazy_format_graph_code,
@@ -536,8 +534,6 @@ def compile_fx_inner(
             log_cudagraph_skip_and_bump_counter(
                 f"skipping cudagraphs due to {compiled_graph.disabled_cudagraphs_reason}"
             )
-        else:
-            counters["inductor"]["cudagraph_skips"] += 1
         BoxedBool.disable(cudagraphs)
 
     # Return the output strides to the caller via TracingContext
@@ -745,17 +741,10 @@ def fx_codegen_and_compile(
         # has some issues with memory in training
         _recursive_post_grad_passes(gm, is_inference=is_inference)
         V.debug.fx_graph_transformed(gm, example_inputs)
-        post_grad_graphs_log.debug(
-            "%s",
-            lazy_format_graph_code(
-                "AFTER POST GRAD", gm, include_stride=True, include_device=True
-            ),
-        )
+        post_grad_graphs_log.debug("%s", lazy_format_graph_code("AFTER POST GRAD", gm))
         trace_structured(
             "inductor_post_grad_graph",
-            payload_fn=lambda: gm.print_readable(
-                print_output=False, include_stride=True, include_device=True
-            ),
+            payload_fn=lambda: gm.print_readable(print_output=False),
         )
         if config.is_fbcode():
             log_optimus_to_scuba(

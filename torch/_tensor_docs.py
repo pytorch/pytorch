@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 """Adds docstrings to Tensor functions"""
 
 import torch._C

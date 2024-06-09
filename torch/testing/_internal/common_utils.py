@@ -1500,31 +1500,31 @@ TestEnvironment.def_flag("TEST_CUDA_MEM_LEAK_CHECK", env_var="PYTORCH_TEST_CUDA_
 
 # Dict of NumPy dtype -> torch dtype (when the correspondence exists)
 numpy_to_torch_dtype_dict = {
-    np.bool_      : torch.bool,
-    np.uint8      : torch.uint8,
-    np.uint16     : torch.uint16,
-    np.uint32     : torch.uint32,
-    np.uint64     : torch.uint64,
-    np.int8       : torch.int8,
-    np.int16      : torch.int16,
-    np.int32      : torch.int32,
-    np.int64      : torch.int64,
-    np.float16    : torch.float16,
-    np.float32    : torch.float32,
-    np.float64    : torch.float64,
-    np.complex64  : torch.complex64,
-    np.complex128 : torch.complex128
+    np.dtype(np.bool_)     : torch.bool,
+    np.dtype(np.uint8)     : torch.uint8,
+    np.dtype(np.uint16)    : torch.uint16,
+    np.dtype(np.uint32)    : torch.uint32,
+    np.dtype(np.uint64)    : torch.uint64,
+    np.dtype(np.int8)      : torch.int8,
+    np.dtype(np.int16)     : torch.int16,
+    np.dtype(np.int32)     : torch.int32,
+    np.dtype(np.int64)     : torch.int64,
+    np.dtype(np.float16)   : torch.float16,
+    np.dtype(np.float32)   : torch.float32,
+    np.dtype(np.float64)   : torch.float64,
+    np.dtype(np.complex64) : torch.complex64,
+    np.dtype(np.complex128): torch.complex128
 }
 
 
-# numpy dtypes like np.float64 are not instances, but rather classes. This leads to rather absurd cases like
-# np.float64 != np.dtype("float64") but np.float64 == np.dtype("float64").type.
-# Especially when checking against a reference we can't be sure which variant we get, so we simply try both.
+# numpy dtypes like np.float64 are not instances, but rather classes. This leads
+# to rather absurd cases like np.float64 != np.dtype("float64") but
+# np.dtype(np.float64) == np.dtype("float64") and
+# np.dtype(np.dtype("float64")) == np.dtype("float64").  Especially when
+# checking against a reference we can't be sure which variant we get, so we
+# simply apply the conversion.
 def numpy_to_torch_dtype(np_dtype):
-    try:
-        return numpy_to_torch_dtype_dict[np_dtype]
-    except KeyError:
-        return numpy_to_torch_dtype_dict[np_dtype.type]
+    return numpy_to_torch_dtype_dict[np.dtype(np_dtype)]
 
 
 def has_corresponding_torch_dtype(np_dtype):
@@ -1548,31 +1548,6 @@ torch_to_numpy_dtype_dict.update({
     torch.bfloat16: np.float32,
     torch.complex32: np.complex64
 })
-
-def skipIfNNModuleInlined(
-    msg="test doesn't currently work with nn module inlining",
-    condition=torch._dynamo.config.inline_inbuilt_nn_modules,
-):  # noqa: F821
-    def decorator(fn):
-        if not isinstance(fn, type):
-
-            @wraps(fn)
-            def wrapper(*args, **kwargs):
-                if condition:
-                    raise unittest.SkipTest(msg)
-                else:
-                    fn(*args, **kwargs)
-
-            return wrapper
-
-        assert isinstance(fn, type)
-        if condition:
-            fn.__unittest_skip__ = True
-            fn.__unittest_skip_why__ = msg
-
-        return fn
-
-    return decorator
 
 def skipIfRocm(func=None, *, msg="test doesn't currently work on the ROCm stack"):
     def dec_fn(fn):

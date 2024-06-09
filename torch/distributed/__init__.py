@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 import os
 import sys
 from enum import Enum

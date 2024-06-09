@@ -422,10 +422,9 @@ class AOTInductorTestsTemplate:
                 def __init__(self, device):
                     super().__init__()
                     self.weight = torch.randn(10, 10, device=device).to(dtype)
-                    self.bias = torch.randn(10, device=device).to(dtype)
 
                 def forward(self, y):
-                    return torch.nn.functional.linear(y, self.weight, self.bias)
+                    return torch.nn.functional.linear(y, self.weight)
 
             example_inputs = (torch.randn(10, 10, device=self.device).to(dtype),)
 

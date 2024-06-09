@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 r"""
 This package enables an interface for accessing MTIA backend in python
 """

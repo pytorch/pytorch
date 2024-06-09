@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 r"""
 Module ``torch.distributed.launch``.
 

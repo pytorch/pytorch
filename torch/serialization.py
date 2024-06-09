@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 import difflib
 import functools
 import os

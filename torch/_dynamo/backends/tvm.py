@@ -4,7 +4,6 @@ import functools
 import importlib
 import logging
 import os
-import sys
 import tempfile
 from types import MappingProxyType
 from typing import Optional
@@ -181,10 +180,6 @@ def has_tvm():
 
 @functools.lru_cache(None)
 def llvm_target():
-    if sys.platform == "linux":
-        cpuinfo = open("/proc/cpuinfo").read()
-        if "avx512" in cpuinfo:
-            return "llvm -mcpu=skylake-avx512"
-        elif "avx2" in cpuinfo:
-            return "llvm -mcpu=core-avx2"
-    return "llvm"
+    if "avx512" in open("/proc/cpuinfo").read():
+        return "llvm -mcpu=skylake-avx512"
+    return "llvm -mcpu=core-avx2"

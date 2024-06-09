@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 import torch
 
 from torch.utils.hipify.hipify_python import PYTORCH_MAP, RE_PYTORCH_PREPROCESSOR

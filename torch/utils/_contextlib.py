@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 # Extra utilities for working with context managers that should have been
 # in the standard library but are not
 

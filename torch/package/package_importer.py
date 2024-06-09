@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 import builtins
 import importlib
 import importlib.machinery

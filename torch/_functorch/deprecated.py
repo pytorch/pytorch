@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 """
 The APIs in this file are exposed as `functorch.*`. They are thin wrappers
 around the torch.func.* APIs that have deprecation warnings -- we're trying

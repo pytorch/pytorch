@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 import torch
 import torch.utils._pytree as pytree
 from collections import namedtuple

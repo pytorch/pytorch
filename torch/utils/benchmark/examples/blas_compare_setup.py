@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 import collections
 import os
 import shutil

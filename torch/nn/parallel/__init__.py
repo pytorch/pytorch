@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 from typing_extensions import deprecated
 
 from .parallel_apply import parallel_apply

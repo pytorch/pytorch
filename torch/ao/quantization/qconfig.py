@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 from collections import namedtuple
 from typing import Optional, Any, Union, Type
 from typing_extensions import deprecated

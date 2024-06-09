@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 import copy
 import dataclasses
 import itertools

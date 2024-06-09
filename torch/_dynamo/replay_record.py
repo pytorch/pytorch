@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 import dataclasses
 from dataclasses import field
 from types import CodeType, ModuleType

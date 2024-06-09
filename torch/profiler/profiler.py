@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 import gzip
 import json
 import os

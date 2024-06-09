@@ -23,7 +23,7 @@ enum class GeluType {
   END
 };
 
-inline GeluType get_gelutype_enum(const c10::string_view approximate) {
+static GeluType get_gelutype_enum(const c10::string_view approximate) {
   if (approximate == "none") {
     return GeluType::None;
   } else if (approximate == "tanh") {
@@ -33,7 +33,7 @@ inline GeluType get_gelutype_enum(const c10::string_view approximate) {
   }
 }
 
-inline std::string gelutype_to_string(const GeluType type) {
+static std::string gelutype_to_string(const GeluType type) {
   switch(type) {
     case GeluType::None: return "none";
     case GeluType::Tanh: return "tanh";

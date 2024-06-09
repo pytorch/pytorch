@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 import copy
 from itertools import chain
 from typing import Any, Dict, List, Optional, Tuple

@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 import torch
 
 from torch._strobelight.cli_function_profiler import (

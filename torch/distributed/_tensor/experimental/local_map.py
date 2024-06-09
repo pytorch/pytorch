@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 # Copyright (c) Meta Platforms, Inc. and affiliates
 from typing import Callable, Optional, Sequence, Tuple, Union
 

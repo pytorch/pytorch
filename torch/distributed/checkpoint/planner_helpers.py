@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 from typing import Any, cast, List
 
 import torch

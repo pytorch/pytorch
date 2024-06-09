@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 import operator
 from collections import defaultdict
 from typing import Any, Callable, DefaultDict, Dict, Optional, Tuple, Type
