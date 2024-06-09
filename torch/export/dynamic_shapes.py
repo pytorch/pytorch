@@ -140,9 +140,10 @@ class _DerivedDim(_Dim):
         # assume that self.fn is an increasing function
         # TODO(avik): use sympy value range analysis instead?
         from sympy import Integer
+
         from torch.utils._sympy.numbers import int_oo
 
-        if self.root.min is -int_oo:
+        if self.root.min is -int_oo:  # type: ignore[attr-defined]
             return -int_oo  # fn not needed cuz increasing
 
         _min_symint = self.fn(Integer(self.root.min))  # type: ignore[attr-defined]
@@ -159,9 +160,10 @@ class _DerivedDim(_Dim):
         # assume that self.fn is an increasing function
         # TODO(avik): use sympy value range analysis instead?
         from sympy import Integer
+
         from torch.utils._sympy.numbers import int_oo
 
-        if self.root.max is int_oo:
+        if self.root.max is int_oo:  # type: ignore[attr-defined]
             return int_oo  # fn not needed cuz increasing
 
         _max_symint = self.fn(Integer(self.root.max))  # type: ignore[attr-defined]

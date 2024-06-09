@@ -201,6 +201,19 @@ class TestDynamismExpression(TestCase):
                 dynamic_shapes={"x": {0: dim_x}},
             )
 
+    def test_export_slice_maxsize(self):
+        class Slice(torch.nn.Module):
+            def forward(self, *args):
+                return torch.ops.aten.slice.Tensor(*args)
+
+        inp = (torch.rand((10, 3, 224, 224)), 0, 0, 9223372036854775807)
+        dynamic_shapes = (({0: Dim("dim")}, None, None, None),)
+        torch.export.export(
+            Slice(),
+            inp,
+            dynamic_shapes=dynamic_shapes,
+        )
+
     def test_export_constraints_error(self):
         class ConflictingConstraints(torch.nn.Module):
             def forward(self, x):
