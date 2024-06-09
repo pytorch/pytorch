@@ -1,3 +1,4 @@
+#include <algorithm>
 #ifdef USE_C10D_NCCL
 
 #include <exception>
@@ -342,10 +343,7 @@ void cacheAllocatorDeregisterHook(
 }
 
 #if defined(IS_NCCLX) && defined(NCCL_COMM_DUMP)
-std::string dump_nccl_trace(
-    bool includeCollectives,
-    bool includeStackTraces,
-    bool onlyActive) {
+std::string dump_nccl_trace() {
   std::unordered_map<
       std::string /* ncclUniqueID */,
       std::unordered_map<std::string, std::string> /* dump from this comm */>
@@ -365,17 +363,11 @@ std::string dump_nccl_trace(
     std::string ncclUniqueIDStr = buildNcclUniqueIdStr(ncclComm->getNcclId());
     ncclDumpMap[ncclUniqueIDStr] = ncclComm->ncclCommDump();
   }
-  return NCCLTraceBuffer::get()->dump(
-      ncclDumpMap, includeCollectives, includeStackTraces, onlyActive);
+  return NCCLTraceBuffer::get()->dump(ncclDumpMap);
 }
-
 #else
-std::string dump_nccl_trace(
-    bool includeCollectives,
-    bool includeStackTraces,
-    bool onlyActive) {
-  return NCCLTraceBuffer::get()->dump(
-      c10::nullopt, includeCollectives, includeStackTraces, onlyActive);
+std::string dump_nccl_trace() {
+  return NCCLTraceBuffer::get()->dump(c10::nullopt);
 }
 #endif
 
@@ -383,10 +375,70 @@ std::string dump_nccl_trace(
 control_plane::RegisterHandler dumpHandler{
     "dump_nccl_trace_pickle",
     [](const control_plane::Request& req, control_plane::Response& res) {
-      // TODO: c-p-i-o: params from the request need to go to dump_nccl_trace.
+      auto params = req.params();
+      auto includeCollectives = true;
+      auto includeStackTraces = true;
+      auto onlyActive = false;
+      size_t validParamCount = 0;
+
+      const auto& includeCollectivesIt = params.find("includecollectives");
+      if (includeCollectivesIt != params.end()) {
+        validParamCount++;
+        if (includeCollectivesIt->second == "false") {
+          std::cout << "includeCollectives: false" << std::endl;
+          includeCollectives = false;
+        } else if (includeCollectivesIt->second == "true") {
+          // do nothing since it's the default
+        } else {
+          res.setStatus(400);
+          res.setContent(
+              "Invalid value for " + includeCollectivesIt->first + ": " +
+                  includeCollectivesIt->second,
+              "text/plain");
+        }
+      }
+      const auto& includeStackTracesIt = params.find("includestacktraces");
+      if (includeStackTracesIt != params.end()) {
+        validParamCount++;
+        if (includeStackTracesIt->second == "false") {
+          includeStackTraces = false;
+        } else if (includeStackTracesIt->second == "true") {
+          // do nothing since it's the default
+        } else {
+          res.setStatus(400);
+          res.setContent(
+              "Invalid value for " + includeStackTracesIt->first + ": " +
+                  includeStackTracesIt->second,
+              "text/plain");
+          return;
+        }
+      }
+      const auto& onlyActiveIt = params.find("onlyactive");
+      if (onlyActiveIt != params.end()) {
+        validParamCount++;
+        if (onlyActiveIt->second == "true") {
+          onlyActive = true;
+        } else if (onlyActiveIt->second == "false") {
+          // do nothing since it's the default
+        } else {
+          res.setStatus(400);
+          res.setContent(
+              "Invalid value for " + onlyActiveIt->first + ": " +
+                  onlyActiveIt->second,
+              "text/plain");
+          return;
+        }
+      }
+      if (validParamCount < params.size()) {
+        res.setStatus(400);
+        res.setContent("Invalid parameters", "text/plain");
+        return;
+      }
       res.setContent(
-          dump_nccl_trace(true, true, false), "application/octet-stream");
-    }};
+          dump_nccl_trace(includeCollectives, includeStackTraces, onlyActive),
+          "application/octet-stream");
+    }
+  };
 
 std::optional<std::function<void(std::function<void(const std::string&)>)>>&
 get_cpp_trace_dumper() {
@@ -1208,7 +1260,7 @@ bool ProcessGroupNCCL::dumpDebuggingInfo() {
     // We dump nccl trace into local disk by default and users can register
     // their customized writer by inheriting `DebugInfoWriter` via
     // `registerDebugInfoWriter`.
-    auto ncclTrace = dump_nccl_trace(true, true, false);
+    auto ncclTrace = dump_nccl_trace();
     DebugInfoWriter& writer = DebugInfoWriter::getWriter(globalRank());
     LOG(INFO) << logPrefix() << "ProcessGroupNCCL dumping nccl trace to "
               << writer.getWriterTarget();
@@ -2356,7 +2408,6 @@ c10::intrusive_ptr<ProcessGroupNCCL::WorkNCCL> ProcessGroupNCCL::initWork(
         outputs,
         r->ncclStartEvent_.get(),
         r->ncclEndEvent_.get(),
-        options_->timeout,
         isP2P);
   }
   return r;
@@ -2967,7 +3018,6 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::pointToPoint(
         {tensor},
         nullptr,
         nullptr,
-        options_->timeout,
         /*isP2P=*/true);
     // TODO(whc) if we want to make the per-p2p-op flightrecorder entries get
     // their timings/states updated by proxy when the Work obj representing the
@@ -3001,7 +3051,6 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::pointToPoint(
         {tensor},
         work->ncclStartEvent_.get(),
         work->ncclEndEvent_.get(),
-        options_->timeout,
         /*isP2P=*/true);
   }
 

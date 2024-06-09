@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 """
 This module implements observers which are used to collect statistics about
 the values observed during calibration (PTQ) or training (QAT).
