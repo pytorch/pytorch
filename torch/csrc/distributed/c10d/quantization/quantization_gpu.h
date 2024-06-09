@@ -8,9 +8,15 @@
 #include <ATen/ATen.h>
 #include <vector>
 
-namespace torch::distributed::c10d::quantization {
+namespace torch {
+namespace distributed {
+namespace c10d {
+namespace quantization {
 
 at::Tensor _float_to_bfloat16_cuda(const at::Tensor& input);
 at::Tensor _bfloat16_to_float_cuda(const at::Tensor& input);
 
-} // namespace torch::distributed::c10d::quantization
+} // namespace quantization
+} // namespace c10d
+} // namespace distributed
+} // namespace torch

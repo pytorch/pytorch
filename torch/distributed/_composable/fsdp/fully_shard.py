@@ -1,6 +1,7 @@
 import functools
+from typing import Any, cast, Optional, Union
 
-from typing import Any, cast, NoReturn, Optional, Union
+import typing_extensions
 
 import torch
 import torch.nn as nn
@@ -128,10 +129,10 @@ def fully_shard(
             offload_policy,
         )
 
-    # For Dynamo
-    for managed_module in managed_modules:
-        managed_module._is_fsdp_managed_module = True  # type: ignore[assignment]
-        managed_module._fsdp_use_orig_params = True  # type: ignore[assignment]
+    # for dynamo
+    for module in managed_modules:
+        module._is_fsdp_managed_module = True  # type: ignore[assignment]
+        module._fsdp_use_orig_params = True  # type: ignore[assignment]
 
     # Place FSDP leftmost for highest priority in the method resolution order
     cls = module.__class__
@@ -141,7 +142,7 @@ def fully_shard(
     return module
 
 
-def unimplemented_deepcopy(*args: Any, **kwargs: Any) -> NoReturn:
+def unimplemented_deepcopy(*args: Any, **kwargs: Any) -> typing_extensions.Never:
     raise AssertionError(
         "FSDP does not support deepcopy. Please use state dict for serialization."
     )

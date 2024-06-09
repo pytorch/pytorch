@@ -6,7 +6,9 @@
 
 #include <ATen/ATen.h>
 
-namespace at::native::metal {
+namespace at {
+namespace native {
+namespace metal {
 
 enum class NeuronType {
   None,
@@ -64,6 +66,8 @@ static inline MPSNNNeuronDescriptor* neuronDescriptor(NeuronType type) {
   }
 }
 
-} // namespace at::native::metal
+}
+}
+}
 
 #endif /* MetalNeuronType_h */

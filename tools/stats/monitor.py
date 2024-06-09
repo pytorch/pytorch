@@ -62,12 +62,7 @@ def rocm_get_per_process_gpu_info(handle: Any) -> List[Dict[str, Any]]:
     processes = amdsmi.amdsmi_get_gpu_process_list(handle)
     per_process_info = []
     for p in processes:
-        try:
-            proc_info = amdsmi.amdsmi_get_gpu_process_info(handle, p)
-        except AttributeError:
-            # https://github.com/ROCm/amdsmi/commit/c551c3caedbd903ba828e7fdffa5b56d475a15e7
-            # BC-breaking change that removes amdsmi_get_gpu_process_info API from amdsmi
-            proc_info = p
+        proc_info = amdsmi.amdsmi_get_gpu_process_info(handle, p)
         info = {
             "pid": proc_info["pid"],
             "gpu_memory": proc_info["memory_usage"]["vram_mem"],

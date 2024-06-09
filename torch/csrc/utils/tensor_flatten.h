@@ -6,7 +6,8 @@
 #include <torch/csrc/Export.h>
 #include <utility>
 
-namespace torch::utils {
+namespace torch {
+namespace utils {
 
 /// Generate an ID for a combination of tensor backend + scalar type to be used
 /// when ordering tensors ('like' tensors are grouped by pulling out their
@@ -81,4 +82,5 @@ TORCH_API std::vector<at::Tensor> unflatten_sparse_tensors(
     const at::Tensor& flat_values,
     at::TensorList tensors);
 
-} // namespace torch::utils
+} // namespace utils
+} // namespace torch

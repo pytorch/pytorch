@@ -21,7 +21,6 @@ from torch.testing._internal.common_utils import (
     IS_WINDOWS,
     gradcheck,
     is_iterable_of_tensors,
-    xfailIfTorchDynamo,
 )
 from torch.testing._internal.common_methods_invocations import (
     unary_ufuncs,
@@ -184,7 +183,7 @@ class TestUnaryUfuncs(TestCase):
             expected, actual, msg, exact_dtype, equal_nan=True
         ):
             if not torch.can_cast(
-                numpy_to_torch_dtype_dict[expected.dtype], dtype
+                numpy_to_torch_dtype_dict[expected.dtype.type], dtype
             ):
                 exact_dtype = False
 
@@ -789,8 +788,6 @@ class TestUnaryUfuncs(TestCase):
                     _test(op, data[0:sz], data[1 : sz + 1])
 
     # TODO: run on non-native device types
-    # https://github.com/pytorch/pytorch/issues/126474
-    @xfailIfTorchDynamo
     @dtypes(torch.double)
     def test_unary_out_op_mem_overlap(self, device, dtype):
         sz = 3

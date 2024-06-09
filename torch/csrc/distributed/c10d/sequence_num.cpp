@@ -1,10 +1,11 @@
 #include <ATen/ThreadLocalState.h>
+#include <c10/util/Optional.h>
 #include <torch/csrc/distributed/c10d/sequence_num.hpp>
 
 #include <c10/util/Logging.h>
 
 namespace c10d {
-SequenceNum::SequenceNum() = default;
+SequenceNum::SequenceNum() : num_(c10::nullopt) {}
 
 SequenceNum::SequenceNum(const uint64_t num) : num_(num) {}
 
