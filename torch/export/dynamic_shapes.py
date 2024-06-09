@@ -159,6 +159,7 @@ class _DerivedDim(_Dim):
         # assume that self.fn is an increasing function
         # TODO(avik): use sympy value range analysis instead?
         from sympy import Integer
+        from torch.utils._sympy.numbers import int_oo
 
         if self.root.max is int_oo:
             return int_oo  # fn not needed cuz increasing
