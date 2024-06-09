@@ -407,7 +407,7 @@ class CppOptions(BuildOptionsBase):
 
     def __init__(
         self,
-        compile_only: bool,
+        compile_only: bool = False,
         warning_all: bool = True,
         extra_flags: Sequence[str] = (),
         use_absolute_path: bool = False,
