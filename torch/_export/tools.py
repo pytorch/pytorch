@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import logging
 import warnings
 from typing import Any, Dict, Iterable, Optional, Tuple
