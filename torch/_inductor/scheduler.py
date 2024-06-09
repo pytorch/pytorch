@@ -2743,9 +2743,6 @@ class Scheduler:
                 assert isinstance(node, NopKernelSchedulerNode)
                 node.allocate()
 
-            if config.debug_check_inf_and_nan:
-                V.graph.wrapper_code.generate_inf_and_nan_checker(node)
-
             if config.triton.debug_sync_kernel:
                 self.get_backend(device).codegen_sync()
 

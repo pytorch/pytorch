@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import base64
 import copy
 import copyreg
@@ -171,6 +172,7 @@ _SYM_INT_OPS = {
     operator.floordiv,
     operator.mod,
     torch.sym_int,
+    torch.sym_float,
     torch.sym_ite,
     torch.sym_max,
     torch.sym_min,
