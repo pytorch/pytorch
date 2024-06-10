@@ -3876,6 +3876,48 @@ class CPUReproTests(TestCase):
             exactly=True,
         ).run(code)
 
+    def test_repeated_exp(self):
+        def fn(arg70_1, mul_21, arg71_1, arg72_1):
+            permute_9 = torch.ops.aten.permute.default(arg70_1, [1, 0])
+            view_26 = torch.ops.aten.view.default(mul_21, [1, 4096])
+            unsqueeze_22 = torch.ops.aten.unsqueeze.default(view_26, 2)
+            unsqueeze_23 = torch.ops.aten.unsqueeze.default(permute_9, 0)
+            mul_22 = torch.ops.aten.mul.Tensor(unsqueeze_22, unsqueeze_23)
+            sum_8 = torch.ops.aten.sum.dim_IntList(mul_22, [1])
+            view_27 = torch.ops.aten.view.default(sum_8, [1, 1, 11008])
+            sigmoid = torch.ops.aten.sigmoid.default(view_27)
+            mul_23 = torch.ops.aten.mul.Tensor(view_27, sigmoid)
+            permute_10 = torch.ops.aten.permute.default(arg71_1, [1, 0])
+            view_28 = torch.ops.aten.view.default(mul_21, [1, 4096])
+            unsqueeze_24 = torch.ops.aten.unsqueeze.default(view_28, 2)
+            unsqueeze_25 = torch.ops.aten.unsqueeze.default(permute_10, 0)
+            mul_24 = torch.ops.aten.mul.Tensor(unsqueeze_24, unsqueeze_25)
+            sum_9 = torch.ops.aten.sum.dim_IntList(mul_24, [1])
+            view_29 = torch.ops.aten.view.default(sum_9, [1, 1, 11008])
+            mul_25 = torch.ops.aten.mul.Tensor(mul_23, view_29)
+            permute_11 = torch.ops.aten.permute.default(arg72_1, [1, 0])
+            view_30 = torch.ops.aten.view.default(mul_25, [1, 11008])
+            unsqueeze_26 = torch.ops.aten.unsqueeze.default(view_30, 2)
+            unsqueeze_27 = torch.ops.aten.unsqueeze.default(permute_11, 0)
+            mul_26 = torch.ops.aten.mul.Tensor(unsqueeze_26, unsqueeze_27)
+            sum_10 = torch.ops.aten.sum.dim_IntList(mul_26, [1])
+            view_31 = torch.ops.aten.view.default(sum_10, [1, 1, 4096])
+            return view_31
+
+        example_inputs = (
+            torch.randn(11008, 4096),
+            torch.randn(4096),
+            torch.randn(11008, 4096),
+            torch.randn(4096, 11008),
+        )
+        opt_fn = torch.compile(fn)
+        _, code = run_and_get_cpp_code(opt_fn, *example_inputs)
+        FileCheck().check_count(
+            "tmp4.store(in_out_ptr0 + static_cast<long>(x0));",
+            1,
+            exactly=True,
+        ).run(code)
+
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
