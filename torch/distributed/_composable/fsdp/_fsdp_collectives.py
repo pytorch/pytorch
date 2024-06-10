@@ -26,7 +26,7 @@ class AllGatherResult(NamedTuple):
     all_gather_input_split_sizes: List[int]
 
 
-lib = torch.library.Library("fsdp", "FRAGMENT")  # noqa: TOR901
+lib = torch.library.Library("fsdp", "FRAGMENT")
 
 lib.define(
     """
@@ -48,11 +48,11 @@ def all_gather_copy_in_meta(
     all_gather_input_numel: int,
     world_size: int,
     rank: int,
-    dtype: torch.dtype,
+    dtype: int,
     device: torch.device,
     inp_split_sizes: List[int],
     all_gather_inputs: List[torch.Tensor],
-) -> Tuple[torch.Tensor, torch.Tensor]:
+) -> (torch.Tensor, torch.Tensor):
     all_gather_output = torch.empty(
         (all_gather_input_numel * world_size,), dtype=dtype, device="meta"
     )
@@ -67,11 +67,11 @@ def all_gather_copy_in_cuda(
     all_gather_input_numel: int,
     world_size: int,
     rank: int,
-    dtype: torch.dtype,
+    dtype: int,
     device: torch.device,
     inp_split_sizes: List[int],
     all_gather_inputs: List[torch.Tensor],
-) -> Tuple[torch.Tensor, torch.Tensor]:
+):
     all_gather_output = torch.empty(
         (all_gather_input_numel * world_size,), dtype=dtype, device=device
     )
