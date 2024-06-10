@@ -2,6 +2,8 @@
 
 import contextlib
 
+import numpy as np
+
 import torch
 from torch._dynamo.testing import rand_strided
 from torch._dynamo.utils import same
@@ -26,28 +28,6 @@ class MockScheduler:
 
 class ImplDetailTest(TestCase):
     _exit_stack = None
-
-    @staticmethod
-    def _create_computed_buffer():
-        box_a = ir.TensorBox.create(
-            ir.Buffer(
-                "a",
-                ir.FixedLayout(torch.device("cuda"), torch.float32, [32, 64], [64, 1]),
-            )
-        )
-        box_a_loader = box_a.make_loader()
-
-        def inner_fn(index):
-            return box_a_loader(index) * 2
-
-        buf = ir.Pointwise.create(
-            device=box_a.get_device(),
-            dtype=box_a.get_dtype(),
-            inner_fn=inner_fn,
-            ranges=box_a.get_size(),
-        )
-        buf.realize()
-        return buf.data.data
 
     @classmethod
     def setUpClass(cls):
@@ -76,6 +56,35 @@ class ImplDetailTest(TestCase):
         assert prefix
         return prefix
 
+    @staticmethod
+    def _create_computed_buffer_ax2(sizes=(32, 64), strides=None):
+        """
+        Create a ComputedBuffer for 'a x 2'
+        """
+        if strides is None:
+            strides = ir.FlexibleLayout.contiguous_strides(sizes)
+
+        box_a = ir.TensorBox.create(
+            ir.Buffer(
+                "a", ir.FixedLayout(torch.device("cuda"), torch.float32, sizes, strides)
+            )
+        )
+        box_a_loader = box_a.make_loader()
+
+        def inner_fn(index):
+            return box_a_loader(index) * 2
+
+        buf = ir.Pointwise.create(
+            device=box_a.get_device(),
+            dtype=box_a.get_dtype(),
+            inner_fn=inner_fn,
+            ranges=box_a.get_size(),
+        )
+        buf.realize()
+        computed_buf = buf.data.data
+        computed_buf.decide_layout()
+        return computed_buf
+
     def test_reorder_twice(self):
         """
         This may happen in practice if we pick a order when fusing A and B.
@@ -83,15 +92,26 @@ class ImplDetailTest(TestCase):
 
         E.g. happens for BertForMaskedLM.
         """
-        buf = self._create_computed_buffer()
+
+        buf = self._create_computed_buffer_ax2()
         snode = SchedulerNode(V.graph.scheduler, buf)
-        prefix0 = self._get_snode_body_sym_prefix(snode)
         snode.apply_new_loop_order([1, 0])
         prefix1 = self._get_snode_body_sym_prefix(snode)
-        self.assertEqual(prefix0, prefix1, f"{prefix0} v.s. {prefix1}")
+        self.assertTrue(prefix1 == "z")
         snode.apply_new_loop_order([1, 0])
         prefix2 = self._get_snode_body_sym_prefix(snode)
-        self.assertEqual(prefix0, prefix2, f"{prefix0} v.s. {prefix2}")
+        self.assertTrue(prefix2 == "z")
+
+    def test_reorder_and_merge_loops(self):
+        sizes = (1024, 2048)
+        strides = (1, 1024)
+        buf = self._create_computed_buffer_ax2(sizes, strides)
+        old_sizes, old_body = buf.simplify_and_reorder()
+
+        # Make sure loop reordering happens here
+        self.assertTrue(tuple(old_sizes[0]) == tuple(reversed(sizes)), f"{old_sizes=}")
+        new_sizes, new_body = SchedulerNode._merge_loops(old_sizes, old_body)
+        self.assertTrue(tuple(new_sizes[0]) == (np.prod(sizes),), f"{new_sizes=}")
 
 
 @inductor_config.patch(

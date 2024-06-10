@@ -234,7 +234,13 @@ class CppTemplateKernel(Kernel):
                         node.data.make_loader()(new_args).value,
                     )
 
-                body = ir.LoopBody(fn, (list(var_ranges.keys()), ()), var_ranges)
+                body = ir.LoopBody(
+                    fn,
+                    (list(var_ranges.keys()), ()),
+                    var_ranges,
+                    list(var_ranges.keys()),
+                    tuple(),
+                )
                 bodies.append(body)
                 var_sizes_list.append(var_sizes)
 

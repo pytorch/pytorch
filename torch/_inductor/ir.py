@@ -3341,6 +3341,7 @@ class ComputedBuffer(Buffer):
                 self.get_store_function(),
                 (args if self.get_reduction_type() else args[:1]),
                 var_ranges,
+                *args,
             )
         index_vars = []
         reduce_vars: List[Any] = []
@@ -3450,7 +3451,11 @@ class ComputedBuffer(Buffer):
             iter_ranges, reduce_ranges, prefix="y"
         )
         body = LoopBody(
-            body, [iter_reindex(iter_vars), reduce_reindex(reduce_vars)], var_ranges
+            body,
+            [iter_reindex(iter_vars), reduce_reindex(reduce_vars)],
+            var_ranges,
+            iter_vars,
+            reduce_vars,
         )
         return (iter_ranges, reduce_ranges), body
 
@@ -7950,10 +7955,13 @@ class LoopBody:
     indexing simplifications and makes it easier to analyze loop bodies.
     """
 
-    def __init__(self, fn, args, var_ranges):
+    def __init__(self, fn, args, var_ranges, iter_vars, reduce_vars):
         super().__init__()
-        self.vars = args
+
+        self.iter_vars = iter_vars
+        self.reduce_vars = reduce_vars
         self.var_ranges = var_ranges
+
         self.indexing_exprs = {}
         self.indexing_exprs_name = {}
         self.reads = []
@@ -7966,6 +7974,12 @@ class LoopBody:
         self.indirect_vars = []
         self.root_block = LoopBodyBlock(self, fn, args)
         self.indexing = None
+
+    @property
+    def vars(self):
+        assert self.iter_vars is not None
+        assert self.reduce_vars is not None
+        return self.iter_vars, self.reduce_vars
 
     @cache_on_self
     def get_nodes(self):

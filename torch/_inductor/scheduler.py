@@ -786,6 +786,43 @@ class SchedulerNode(BaseSchedulerNode):
                 )
             )
 
+    @staticmethod
+    def _merge_loops(old_sizes: Any, old_body: ir.LoopBody) -> Tuple[Any, ir.LoopBody]:
+        assert isinstance(old_body, ir.LoopBody)
+        old_iter_vars, old_reduce_vars = old_body.vars
+        old_iter_sizes, old_reduce_sizes = old_sizes
+
+        index_exprs = [*old_body.indexing_exprs.values()]
+
+        iter_sizes, reindex, prune = V.graph.sizevars._simplify_loops(
+            old_iter_vars,
+            old_iter_sizes,
+            index_prevent_reordering(index_exprs, old_iter_vars, old_iter_sizes),
+        )
+        if iter_sizes == old_iter_sizes:
+            # no dimensions get merged.
+            return old_sizes, old_body
+
+        # Note: if no dimension get merges, the symbol prefix will
+        # remain 'y'. But if we merge dimensions, we change prefix to
+        # 'z'. If this is an issue, we can always retrace the LoopBody
+        # to change symbol prefix to 'z'.
+        (
+            iter_vars,
+            reduce_vars,
+        ), var_ranges = dependencies.index_vars_no_squeeze(
+            iter_sizes, old_reduce_sizes, prefix="z"
+        )
+        new_body = ir.LoopBody(
+            old_body,
+            [reindex(iter_vars), reduce_vars],
+            var_ranges,
+            iter_vars,
+            reduce_vars,
+        )
+        new_sizes = (iter_sizes, old_reduce_sizes)
+        return new_sizes, new_body
+
     def recompute_size_and_body(
         self, extra_indexing_constraints: Tuple[Dict[Any, Any], List[Any]]
     ) -> None:
@@ -838,13 +875,17 @@ class SchedulerNode(BaseSchedulerNode):
             iter_idx = [iter_idx[i] for i in inverse_order]
             return old_body(iter_idx, reduce_idx)
 
-        loop_body = ir.LoopBody(new_body, (iter_vars, reduce_vars), var_ranges)
+        loop_body = ir.LoopBody(
+            new_body, (iter_vars, reduce_vars), var_ranges, iter_vars, reduce_vars
+        )
 
         # use the original symbol prefix so we can do multiple round of reordering
         (iter_vars2, reduce_vars2), var_ranges2 = dependencies.index_vars_no_squeeze(
             *self._sizes, prefix="z"
         )
-        self._body = ir.LoopBody(loop_body, (iter_vars2, reduce_vars2), var_ranges2)
+        self._body = ir.LoopBody(
+            loop_body, (iter_vars2, reduce_vars2), var_ranges2, iter_vars2, reduce_vars2
+        )
 
         self.set_read_writes(
             dependencies.extract_read_writes(self._body, *self._sizes, normalize=True)
@@ -1916,43 +1957,13 @@ class Scheduler:
                 continue
             for snode in node.get_nodes():
                 # merge loops for the scheduler node
-                if not isinstance(snode, SchedulerNode):
+                if not isinstance(snode, SchedulerNode) or snode.is_template():
                     continue
 
-                old_body = snode._body
-                assert isinstance(old_body, ir.LoopBody)
-                old_iter_vars, old_reduce_vars = old_body.vars
-                old_iter_sizes, old_reduce_sizes = snode._sizes
-
-                index_exprs = [*old_body.indexing_exprs.values()]
-
-                iter_sizes, reindex, prune = V.graph.sizevars._simplify_loops(
-                    old_iter_vars,
-                    old_iter_sizes,
-                    index_prevent_reordering(
-                        index_exprs, old_iter_vars, old_iter_sizes
-                    ),
+                snode._sizes, snode._body = SchedulerNode._merge_loops(
+                    snode._sizes, snode._body
                 )
-                if iter_sizes == old_iter_sizes:
-                    # no dimensions get merged.
-                    continue
 
-                # Note: if no dimension get merges, the symbol prefix will
-                # remain 'y'. But if we merge dimensions, we change prefix to
-                # 'z'. If this is an issue, we can always retrace the LoopBody
-                # to change symbol prefix to 'z'.
-                (
-                    iter_vars,
-                    reduce_vars,
-                ), var_ranges = dependencies.index_vars_no_squeeze(
-                    iter_sizes, old_reduce_sizes, prefix="z"
-                )
-                snode._body = ir.LoopBody(
-                    old_body,
-                    [reindex(iter_vars), reduce_vars],
-                    var_ranges,
-                )
-                snode._sizes = (iter_sizes, old_reduce_sizes)
                 snode.set_read_writes(
                     dependencies.extract_read_writes(
                         snode._body, *snode._sizes, normalize=True
