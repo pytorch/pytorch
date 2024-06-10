@@ -162,9 +162,9 @@ class SizeVarAllocator:
         if expr.has(ModularIndexing):
             expr = expr.replace(
                 ModularIndexing(
-                    sympy.Wild("base"),
-                    sympy.Wild("divisor"),
-                    sympy.Wild("modulus"),
+                    sympy.Wild("base", integer=True),
+                    sympy.Wild("divisor", integer=True),
+                    sympy.Wild("modulus", integer=True),
                 ),
                 visit_modular_indexing,
             )
@@ -172,8 +172,8 @@ class SizeVarAllocator:
         if expr.has(FloorDiv):
             expr = expr.replace(
                 FloorDiv(
-                    sympy.Wild("base"),
-                    sympy.Wild("divisor"),
+                    sympy.Wild("base", integer=True),
+                    sympy.Wild("divisor", integer=True),
                 ),
                 visit_indexing_div,
             )
@@ -736,11 +736,11 @@ def _join_dimensions_cached(expr: Expr) -> Expr:
     """
     assert isinstance(expr, sympy.Add)
 
-    scale = sympy.Wild("scale", exclude=[0])
-    base = sympy.Wild("base")
-    divisor = sympy.Wild("divisor")
-    mod1 = sympy.Wild("modulus")
-    mod2 = sympy.Wild("modulus2")
+    scale = sympy.Wild("scale", exclude=[0], integer=True)
+    base = sympy.Wild("base", integer=True)
+    divisor = sympy.Wild("divisor", integer=True)
+    mod1 = sympy.Wild("modulus", integer=True)
+    mod2 = sympy.Wild("modulus2", integer=True)
     for term1 in expr.args:
         m1 = term1.match(scale * ModularIndexing(base, divisor, mod1))
         if m1:

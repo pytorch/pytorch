@@ -6,7 +6,9 @@ This file contains utilities related to functionalization in AOTAutograd:
 3. regenerating/replaying views from their base
 4. checking if a graph is functional i.e. whether it contains any mutation ops
 """
+from __future__ import annotations
 
+from typing import Optional
 
 import torch
 from torch import Tensor
@@ -220,10 +222,7 @@ def gen_alias_from_base(
     aliased_base_tensor,
     target_meta_tensor,
     target_requires_grad,
-    # Actual type: Optional[FunctionalTensorMetadataEq]
-    # Can't use it here because it lives inside schemas.py. Importing that class would lead
-    # to an error due to an import cycle.
-    target_functional_tensor=None,
+    target_functional_tensor: Optional[FunctionalTensorMetadataEq] = None,
 ):
     # Patch the correct requires_grad field of the output tensor, depending on whether:
     # (i) the reconstructed output (out) was came from a tensor that requires grad or not;
@@ -245,9 +244,6 @@ def gen_alias_from_base(
         and target_functional_tensor is not None
         and not torch._functionalize_is_symbolic(target_functional_tensor.tensor)
     ):
-        from .schemas import FunctionalTensorMetadataEq
-
-        assert isinstance(target_functional_tensor, FunctionalTensorMetadataEq)
         functional_tensor = target_functional_tensor.tensor
 
         out = torch._functionalize_apply_view_metas(
@@ -320,6 +316,27 @@ def has_same_metadata(t1, t2):
         and t1.is_conj() == t2.is_conj()
         and t1.is_neg() == t2.is_neg()
     )
+
+
+# Wrapper around a FunctionalTensorWrapper for comparing only the resulting metadata
+# after applying all the ViewMeta operations.
+class FunctionalTensorMetadataEq:
+    def __init__(self, tensor: torch.Tensor) -> None:
+        assert torch._is_functional_tensor(tensor)
+        self.tensor = tensor
+
+    def __eq__(self, other: object) -> bool:
+        # If other is None, then it probably means that we weren't able to recreate
+        # the FunctionalTensorMetadataEq. One of this cases is when we update the
+        # view metadata by calling: create_synthetic_base_metadata.
+        if other is None:
+            return True
+
+        # Comparison agains any other type is not implemented.
+        if not isinstance(other, FunctionalTensorMetadataEq):
+            return NotImplemented
+
+        return has_same_metadata(self.tensor, other.tensor)
 
 
 # new_arg and arg here are either:
