@@ -1,9 +1,9 @@
 import sys
 
-import caffe2.python.onnx.backend as c2
-
 import onnx
 import pytorch_test_common
+
+import caffe2.python.onnx.backend as c2
 import torch
 import torch.jit
 from torch.autograd import Variable

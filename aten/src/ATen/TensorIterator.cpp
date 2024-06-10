@@ -1310,7 +1310,7 @@ bool TensorIteratorBase::can_use_32bit_indexing() const {
 
 std::unique_ptr<TensorIterator> TensorIteratorBase::split(int dim) {
   TORCH_INTERNAL_ASSERT(dim >= 0 && dim < ndim() && shape()[dim] >= 2);
-  std::unique_ptr<TensorIterator> copy(new TensorIterator(*this));
+  auto copy = std::make_unique<TensorIterator>(*this);
 
   bool overlaps = is_dim_reduced(dim);
   auto copy_size = shape_[dim] / 2;

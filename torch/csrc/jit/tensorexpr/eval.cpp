@@ -1050,7 +1050,7 @@ class SimpleIREvaluatorImpl : public IRVisitor {
     auto int_count = (total_byte_size + sizeof(int) - 1) / sizeof(int);
     GRAPH_DEBUG(
         "ALLOCATE: buf=", v->buf()->name_hint(), ", size=", total_byte_size);
-    std::unique_ptr<std::vector<int>> buffer(new std::vector<int>(int_count));
+    auto buffer = std::make_unique<std::vector<int>>(int_count);
     auto iter = buffer_mapping_.find(b);
     if (iter != buffer_mapping_.end() && iter->second != nullptr) {
       throw std::runtime_error(
