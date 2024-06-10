@@ -1,5 +1,5 @@
-import math
 import functools
+import math
 from enum import IntEnum
 
 import sympy
