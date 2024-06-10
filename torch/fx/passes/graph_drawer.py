@@ -2,7 +2,7 @@
 
 import hashlib
 from itertools import chain
-from typing import TYPE_CHECKING, Any, Dict, Optional
+from typing import Any, Dict, Optional, TYPE_CHECKING
 
 import torch
 import torch.fx
@@ -21,7 +21,7 @@ except ModuleNotFoundError:
     pydot = None
 
 
-__all__ = ['FxGraphDrawer']
+__all__ = ["FxGraphDrawer"]
 
 _COLOR_MAP = {
     "placeholder": '"AliceBlue"',

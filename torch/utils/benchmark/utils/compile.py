@@ -1,5 +1,5 @@
 # mypy: allow-untyped-defs
-from typing import Any, Callable, List, Optional, Union, cast
+from typing import Any, Callable, cast, List, Optional, Union
 
 import torch
 import torch._dynamo
@@ -15,6 +15,7 @@ _default_float_32_precision = torch.get_float32_matmul_precision()
 
 try:
     from tabulate import tabulate
+
     HAS_TABULATE = True
 except ModuleNotFoundError:
     HAS_TABULATE = False
