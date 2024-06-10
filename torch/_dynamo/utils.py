@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import atexit
 import collections
 import contextlib
@@ -214,9 +215,6 @@ def _add_time_spent(key, phase_name, time_spent):
 
 def dynamo_timed(original_function=None, phase_name=None, fwd_only=True):
     def dynamo_timed_inner(func):
-        if config.cprofile:
-            return func
-
         @wraps(func)
         def time_wrapper(*args, **kwargs):
             key = func.__qualname__
@@ -2104,6 +2102,14 @@ state_dict_hook_names = [
     "_load_state_dict_post_hooks",
 ]
 all_hook_names = forward_hook_names + backward_hook_names + state_dict_hook_names
+
+
+def nn_module_has_global_hooks():
+    # This is limited to backward hooks for now because NNModuleVariable
+    # supports fwd hooks underneath.
+    return len(torch.nn.modules.module._global_backward_hooks) or len(
+        torch.nn.modules.module._global_backward_pre_hooks
+    )
 
 
 def nn_module_get_all_hooks(
