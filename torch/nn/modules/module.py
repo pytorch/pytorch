@@ -1957,7 +1957,7 @@ class Module:
                 module.state_dict(destination=destination, prefix=prefix + name + '.', keep_vars=keep_vars)
         for value in self._state_dict_hooks.values():
             # For BC reasons
-            if isinstance(value, Tuple):
+            if isinstance(value, tuple):
                 hook, from_private = value
             else:
                 hook, from_private = value, True
