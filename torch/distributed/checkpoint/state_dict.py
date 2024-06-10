@@ -1159,7 +1159,6 @@ def set_model_state_dict(
     model_state_dict: Dict[str, ValueType] = _unflatten_model_state_dict(
         model, model_state_dict
     )
-
     with gc_context():
         info = _verify_options(model, tuple(), optim_only=False, options=options)
 
