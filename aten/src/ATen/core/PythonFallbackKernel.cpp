@@ -14,7 +14,7 @@ namespace {
 // To achieve this, we ensure that the tls is empty by default and emptied again both when
 // we call into user torch_dispatch or returning back to python after this call.
 
-thread_local c10::optional<c10::impl::LocalDispatchKeySet> tls_on_entry;
+thread_local std::optional<c10::impl::LocalDispatchKeySet> tls_on_entry;
 
 c10::impl::LocalDispatchKeySet safe_get_tls_on_entry() {
   TORCH_CHECK(tls_on_entry.has_value(), "Accessing torch dispatch state outside of '__torch_dispatch__' "

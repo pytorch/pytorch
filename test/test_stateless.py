@@ -901,7 +901,7 @@ exit(len(w))
         m = torch.nn.Linear(1, 1)
         params = dict(m.named_parameters())
         x = torch.randn(3, 1)
-        with self.assertWarnsRegex(UserWarning, "Please use torch.func.functional_call"):
+        with self.assertWarnsRegex(FutureWarning, "Please use `torch.func.functional_call`"):
             stateless.functional_call(m, params, x)
 
 class TestPythonOptimizeMode(TestCase):

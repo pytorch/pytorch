@@ -64,7 +64,7 @@ inline double clip_grad_norm_(
   // synchronizing the CPU and the gradients' device until the very end to
   // preserve async execution on the device. When checking for finite-ness, this
   // optional ensures we only sync once.
-  c10::optional<double> total_norm = c10::nullopt;
+  std::optional<double> total_norm = c10::nullopt;
   if (error_if_nonfinite) {
     total_norm = total_norm_tensor.item().toDouble();
     TORCH_CHECK(

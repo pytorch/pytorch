@@ -121,7 +121,7 @@ int64_t TorchDispatchModeTLS::stack_len() {
   return stack_len + infra_modes_len;
 }
 
-const c10::optional<std::shared_ptr<PyObject_TorchDispatchMode>>
+const std::optional<std::shared_ptr<PyObject_TorchDispatchMode>>
 TorchDispatchModeTLS::get_mode(TorchDispatchModeKey mode_key) {
   return torchDispatchModeState.infra_modes_[static_cast<size_t>(mode_key)];
 }
@@ -145,7 +145,7 @@ void TorchDispatchModeTLS::set_mode(
   torchDispatchModeState.infra_modes_[static_cast<size_t>(mode_key)] = mode;
 }
 
-const c10::optional<std::shared_ptr<PyObject_TorchDispatchMode>>
+const std::optional<std::shared_ptr<PyObject_TorchDispatchMode>>
 TorchDispatchModeTLS::unset_mode(TorchDispatchModeKey mode_key) {
   auto out = torchDispatchModeState.infra_modes_[static_cast<size_t>(mode_key)];
   torchDispatchModeState.infra_modes_[static_cast<size_t>(mode_key)] =

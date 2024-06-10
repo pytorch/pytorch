@@ -41,7 +41,7 @@ namespace at::native {
 
 Tensor repeat_interleave_cpu(
     const Tensor& repeat,
-    c10::optional<int64_t> output_size) {
+    std::optional<int64_t> output_size) {
   Tensor output;
   AT_DISPATCH_INDEX_TYPES(repeat.scalar_type(), "repeat_interleave_cpu", [&]() {
     output = repeat_interleave_common<index_t, compute_cpu<index_t>>(
@@ -54,8 +54,8 @@ Tensor repeat_interleave_cpu(
 Tensor repeat_interleave_symint(
     const Tensor& self,
     const Tensor& repeats,
-    c10::optional<int64_t> dim,
-    c10::optional<SymInt> output_size) {
+    std::optional<int64_t> dim,
+    std::optional<SymInt> output_size) {
   Tensor input = self;
 
   // Store conj and neg bits
@@ -101,8 +101,8 @@ Tensor repeat_interleave_symint(
 Tensor repeat_interleave_symint(
     const Tensor& self,
     c10::SymInt repeats,
-    c10::optional<int64_t> dim_opt,
-    c10::optional<SymInt> output_size) {
+    std::optional<int64_t> dim_opt,
+    std::optional<SymInt> output_size) {
   Tensor input = dim_opt ? self : self.flatten();
   int64_t dim = c10::maybe_wrap_dim(dim_opt.value_or(0), self.dim());
   TORCH_CHECK(repeats >= 0, "Repeats must be non-negative");

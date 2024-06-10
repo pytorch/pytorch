@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 from collections import defaultdict
 
 from itertools import chain
@@ -11,13 +12,16 @@ from typing import (
     List,
     no_type_check,
     Sequence,
+    TYPE_CHECKING,
 )
 
 import torch
 import torch.nn as nn
-from torch.utils.hooks import RemovableHandle
 from torch.utils._python_dispatch import TorchDispatchMode
 import operator
+
+if TYPE_CHECKING:
+    from torch.utils.hooks import RemovableHandle
 
 
 BYTES_PER_MB = 1024 * 1024.0

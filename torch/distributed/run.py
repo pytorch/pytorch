@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# mypy: allow-untyped-defs
 
 # Copyright (c) Facebook, Inc. and its affiliates.
 # All rights reserved.
@@ -802,7 +803,7 @@ def config_from_args(args) -> Tuple[LaunchConfig, Union[Callable, str], List[str
             ranks = set(map(int, args.local_ranks_filter.split(",")))
             assert ranks
         except Exception as e:
-            raise Exception(  # noqa: TRY002
+            raise ValueError(
                 "--local_ranks_filter must be a comma-separated list of integers e.g. --local_ranks_filter=0,1,2"
             ) from e
 

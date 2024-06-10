@@ -8,6 +8,7 @@ REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(REPO_ROOT))
 
 from tools.stats.import_test_stats import (
+    copy_additional_previous_failures,
     copy_pytest_cache,
     get_td_heuristic_historial_edited_files_json,
     get_td_heuristic_profiling_json,
@@ -51,6 +52,7 @@ def main() -> None:
     get_td_heuristic_historial_edited_files_json()
     get_td_heuristic_profiling_json()
     copy_pytest_cache()
+    copy_additional_previous_failures()
 
     aggregated_heuristics = get_test_prioritizations(selected_tests)
 

@@ -1,10 +1,21 @@
+# mypy: allow-untyped-defs
 import copy
 import functools
 import itertools
 import operator
 import warnings
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, List, Optional, Sequence, Set, Tuple
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    List,
+    Optional,
+    Sequence,
+    Set,
+    Tuple,
+    TYPE_CHECKING,
+)
 
 import torch
 import torch.nn.functional as F
@@ -20,7 +31,6 @@ from torch.ao.quantization.observer import (
     PlaceholderObserver,
 )
 from torch.ao.quantization.pt2e.graph_utils import find_sequential_partitions
-from torch.ao.quantization.qconfig import _ObserverOrFakeQuantizeConstructor
 from torch.ao.quantization.quantizer.quantizer import (
     QuantizationAnnotation,
     QuantizationSpec,
@@ -42,6 +52,9 @@ from torch.fx.passes.utils.source_matcher_utils import (
     get_source_partitions,
     SourcePartition,
 )
+
+if TYPE_CHECKING:
+    from torch.ao.quantization.qconfig import _ObserverOrFakeQuantizeConstructor
 
 __all__ = [
     "X86InductorQuantizer",

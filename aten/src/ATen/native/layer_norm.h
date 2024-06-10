@@ -74,8 +74,8 @@ void layer_norm_cpu_out(
 Tensor rms_norm(
     const Tensor& input,
     IntArrayRef normalized_shape,
-    const c10::optional<Tensor>& weight_opt /* optional */,
-    c10::optional<double> eps);
+    const std::optional<Tensor>& weight_opt /* optional */,
+    std::optional<double> eps);
 
 using forward_fn = void (*)(
     const Tensor& /* X */,

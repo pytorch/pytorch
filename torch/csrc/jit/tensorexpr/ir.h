@@ -361,7 +361,7 @@ ExprPtr immLike(const ExprHandle& e, T v) {
   return immLike(e.node(), v);
 }
 
-inline c10::optional<int64_t> intValue(const ExprPtr& e) {
+inline std::optional<int64_t> intValue(const ExprPtr& e) {
 #define TYPE_CASE(Type, Name)      \
   if (auto v = to<Name##Imm>(e)) { \
     return v->value();             \
@@ -371,7 +371,7 @@ inline c10::optional<int64_t> intValue(const ExprPtr& e) {
   return c10::nullopt;
 }
 
-inline c10::optional<int64_t> intValue(const ExprHandle& e) {
+inline std::optional<int64_t> intValue(const ExprHandle& e) {
   return intValue(e.node());
 }
 

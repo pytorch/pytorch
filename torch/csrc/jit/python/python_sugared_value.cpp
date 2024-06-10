@@ -24,7 +24,7 @@ std::string typeString(py::handle h) {
   return py::str(h.get_type().attr("__name__"));
 }
 
-c10::optional<StrongFunctionPtr> as_function(const py::object& obj) {
+std::optional<StrongFunctionPtr> as_function(const py::object& obj) {
   if (py::isinstance<StrongFunctionPtr>(obj)) {
     return py::cast<StrongFunctionPtr>(obj);
   }
@@ -169,7 +169,7 @@ std::string PythonValue::kind() const {
 std::vector<std::shared_ptr<SugaredValue>> PythonValue::asTuple(
     const SourceRange& loc,
     GraphFunction& m,
-    const c10::optional<size_t>& size_hint) {
+    const std::optional<size_t>& size_hint) {
   const std::string type_str = typeString(self);
   std::stringstream ss;
   ss << kind() << " cannot be used as a tuple";
@@ -927,7 +927,7 @@ std::shared_ptr<SugaredValue> BooleanDispatchValue::call(
     at::ArrayRef<NamedValue> args,
     at::ArrayRef<NamedValue> kwargs,
     size_t n_binders) {
-  c10::optional<bool> result;
+  std::optional<bool> result;
   Graph& graph = *(caller.graph());
 
   auto index = py::cast<size_t>(dispatched_fn_["index"]);

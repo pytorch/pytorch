@@ -203,7 +203,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                     {
                         "benchmark_kernel": True,
                         "benchmark_fusion": True,
-                        "benchmark_multi_templates": True,
+                        "benchmark_epilogue_fusion": True,
                     }
                 )
             )
@@ -231,7 +231,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
 
             torch._dynamo.reset()
             with unittest.mock.patch.object(
-                torch._inductor.config, "benchmark_multi_templates", False
+                torch._inductor.config, "benchmark_epilogue_fusion", False
             ):
                 foo_c = torch.compile(mode="max-autotune-no-cudagraphs")(foo)
                 with torch.no_grad():
