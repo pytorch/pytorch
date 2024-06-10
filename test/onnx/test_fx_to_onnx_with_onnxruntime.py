@@ -158,8 +158,12 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
                     torch.tensor([operator.sub(x.item(), y.item())]),
                     torch.tensor([operator.mul(x.item(), y.item())]),
                     torch.tensor([operator.truediv(x.item(), y.item())]),
-                    torch.tensor([operator.floordiv(x.item(), y.item())]),
-                    torch.tensor([operator.pow(x.item(), y.item())]),
+                    # This requires torch.sym_float, probably easy to lower to
+                    # ONNX but I don't know where to put it
+                    # torch.tensor([operator.floordiv(x.item(), y.item())]),
+                    # NB: abs so that the base and exponent are provably
+                    # non-negative, so we don't generate runtime asserts
+                    torch.tensor([operator.pow(abs(x.item()), abs(y.item()))]),
                     torch.tensor([operator.abs(x.item())]),
                     torch.tensor([operator.neg(x.item())]),
                     torch.tensor([math.ceil(x.item())]),
@@ -629,10 +633,6 @@ class TestFxToOnnxWithOnnxRuntime(onnx_test_common._TestONNXRuntime):
             func, (torch.randn(3, 4),)
         )
 
-    @pytorch_test_common.xfail_if_model_type_is_exportedprogram(
-        error_message="Unsupported FX nodes: {'call_function': ['aten._assert_async.msg']}.",
-        reason="https://github.com/pytorch/pytorch/issues/112622",
-    )
     def test_operator_with_scalar_output(self):
         class Foo(torch.nn.Module):
             def forward(self, x, y):
