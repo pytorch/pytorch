@@ -764,8 +764,8 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> _scaled_dot_product_cudnn_attention_c
   const int64_t batch_size = query.size(0);
   const int64_t num_heads = query.size(1);
   const int64_t max_seqlen_batch_q = query.size(2);
-  const int64_t head_dim = query.size(3);
-
+  const int64_t head_dim_k = query.size(3);
+  const int64_t head_dim_v = value.size(3);
   const int64_t max_seqlen_batch_k = key.size(2);
   const int64_t max_seqlen_batch_v = value.size(2);
   TORCH_CHECK(
@@ -806,7 +806,8 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> _scaled_dot_product_cudnn_attention_c
                       num_heads/*int64_t h*/,
                       max_seqlen_batch_q/*int64_t s_q*/,
                       max_seqlen_batch_k/*int64_t s_kv*/,
-                      head_dim/*int64_t d*/,
+                      head_dim_k/*int64_t d_k*/,
+                      head_dim_v/*int64_t d_v*/,
                       softmax_scale/*float scaling_factor*/,
                       compute_logsumexp/* bool */,
                       is_causal/* bool */,
