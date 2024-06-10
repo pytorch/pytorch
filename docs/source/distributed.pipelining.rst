@@ -307,7 +307,7 @@ If we ``print(pipe)``, we can see::
 
 
 The "model partitions" are represented by submodules (``submod_0``,
-``submod_1``), each of which is reconstructed with original model operations, weigths
+``submod_1``), each of which is reconstructed with original model operations, weights
 and hierarchies.  In addition, a "root-level" ``forward`` function is
 reconstructed to capture the data flow between those partitions. Such data flow
 will be replayed by the pipeline runtime later, in a distributed fashion.
