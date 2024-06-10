@@ -31,7 +31,7 @@ class ActivationWrapper(torch.nn.Module):
         self._checkpoint_wrapped_module = mod
         # state_dict post hook to remove prefix to allow loading into a
         # non-checkpoint wrapped module.
-        self.register_state_dict_post_hook(self._post_state_dict_hook)
+        self._register_state_dict_hook(self._post_state_dict_hook)
         # load_state_dict pre-hook to allow loading back into
         # checkpoint-wrapped module.
         self.register_load_state_dict_pre_hook(
