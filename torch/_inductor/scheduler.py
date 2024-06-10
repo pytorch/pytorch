@@ -799,14 +799,17 @@ class SchedulerNode(BaseSchedulerNode):
             old_iter_sizes,
             index_prevent_reordering(index_exprs, old_iter_vars, old_iter_sizes),
         )
-        if iter_sizes == old_iter_sizes:
-            # no dimensions get merged.
-            return old_sizes, old_body
+        # if iter_sizes == old_iter_sizes:
+        #     # no dimensions get merged.
+        #     return old_sizes, old_body
 
         # Note: if no dimension get merges, the symbol prefix will
         # remain 'y'. But if we merge dimensions, we change prefix to
         # 'z'. If this is an issue, we can always retrace the LoopBody
         # to change symbol prefix to 'z'.
+        #
+        # There is indeed an issue due to symbol name conflicting.
+        # y0 maybe reused for the y dimension later.
         (
             iter_vars,
             reduce_vars,
@@ -881,7 +884,7 @@ class SchedulerNode(BaseSchedulerNode):
 
         # use the original symbol prefix so we can do multiple round of reordering
         (iter_vars2, reduce_vars2), var_ranges2 = dependencies.index_vars_no_squeeze(
-            *self._sizes, prefix="z"
+            *self._sizes, prefix="y"
         )
         self._body = ir.LoopBody(
             loop_body, (iter_vars2, reduce_vars2), var_ranges2, iter_vars2, reduce_vars2

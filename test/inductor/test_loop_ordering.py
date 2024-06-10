@@ -97,10 +97,10 @@ class ImplDetailTest(TestCase):
         snode = SchedulerNode(V.graph.scheduler, buf)
         snode.apply_new_loop_order([1, 0])
         prefix1 = self._get_snode_body_sym_prefix(snode)
-        self.assertTrue(prefix1 == "z")
+        self.assertTrue(prefix1 == "y")
         snode.apply_new_loop_order([1, 0])
         prefix2 = self._get_snode_body_sym_prefix(snode)
-        self.assertTrue(prefix2 == "z")
+        self.assertTrue(prefix2 == "y")
 
     def test_reorder_and_merge_loops(self):
         sizes = (1024, 2048)
