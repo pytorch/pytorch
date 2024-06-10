@@ -1190,8 +1190,7 @@ class TestOperators(TestCase):
             {
                 xfail("as_strided"),
                 xfail("as_strided", "partial_views"),
-                # xfail("as_strided_copy"),  YYYY
-            }
+             }
         ),
     )
     def test_vmapvjp(self, device, dtype, op):
