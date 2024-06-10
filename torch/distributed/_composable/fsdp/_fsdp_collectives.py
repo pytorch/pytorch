@@ -37,7 +37,7 @@ lib.define(
         SymInt world_size,
         SymInt rank,
         ScalarType dtype,
-        Device device,
+        Device device
     ) -> (Tensor, Tensor)
     """
 )
