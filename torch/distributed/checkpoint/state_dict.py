@@ -291,16 +291,18 @@ def _verify_options(
     options = options or StateDictOptions()
 
     fqn_param_mapping: Dict[
-        Union[str, torch.Tensor], Union[Set[str], torch.Tensor]
+        Union[str, torch.Tensor], Union[Set[str], torch.Tensor],
     ] = {}
-    all_fqns = set()
-    for name, param in _iterate_valid_model_state(model):
+    for name, param in chain(model.named_parameters(), model.named_buffers()):
         fqns = _get_fqns(model, name)
-        if not isinstance(param, _EXTRA_STATE):
-            fqn_param_mapping[param] = fqns
+        fqn_param_mapping[param] = fqns
         for fqn in fqns:
-            if not isinstance(param, _EXTRA_STATE):
-                fqn_param_mapping[fqn] = param
+            fqn_param_mapping[fqn] = param
+
+    all_fqns = set()
+    for name, _ in _iterate_valid_model_state(model):
+        fqns = _get_fqns(model, name)
+        for fqn in fqns:
             all_fqns.add(fqn)
 
     submodule_prefixes: Set[str] = set()
@@ -1157,6 +1159,7 @@ def set_model_state_dict(
     model_state_dict: Dict[str, ValueType] = _unflatten_model_state_dict(
         model, model_state_dict
     )
+
     with gc_context():
         info = _verify_options(model, tuple(), optim_only=False, options=options)
 
