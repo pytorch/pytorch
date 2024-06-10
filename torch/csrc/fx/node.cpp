@@ -148,11 +148,6 @@ static int NodeIter_init_fn(NodeIter* self, PyObject* args, PyObject* kwargs) {
   return 0;
 }
 
-PyObject* NodeIter_iter(PyObject* self) {
-  Py_INCREF(self);
-  return self;
-}
-
 template <bool reversed>
 PyObject* NodeIter_iternext_helper(NodeIter* self) {
   // It should be possible to relax the ref counting here
@@ -238,7 +233,7 @@ static PyTypeObject NodeIterType = {
     (inquiry)NodeIter_clear, /* tp_clear */
     nullptr, /* tp_richcompare */
     0, /* tp_weaklistoffset */
-    NodeIter_iter, /* tp_iter */
+    PyObject_SelfIter, /* tp_iter */
     NodeIter_iternext, /* tp_iternext */
     nullptr, /* tp_methods */
     nullptr, /* tp_members */
