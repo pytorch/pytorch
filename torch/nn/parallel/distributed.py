@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import copy
 import functools
 import inspect
@@ -791,11 +792,11 @@ class DistributedDataParallel(Module, Joinable):
         # reduction bucket size
         if bucket_cap_mb is None:
             # default case (bucket cap is 25 MiB)
+            bucket_cap_mb = 25
             self.bucket_bytes_cap_default = True
-            self.bucket_bytes_cap = int(25 * 1024 * 1024)
         else:
             self.bucket_bytes_cap_default = False
-            self.bucket_bytes_cap = int(bucket_cap_mb * 1024 * 1024)
+        self.bucket_bytes_cap = int(bucket_cap_mb * 1024 * 1024)
 
         # Whether to perform input tensor CPU to GPU copies on a side-stream
         self.use_side_stream_for_tensor_copies = (
