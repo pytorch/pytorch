@@ -1,6 +1,5 @@
 #ifdef USE_C10D_NCCL
 
-#include <algorithm>
 #include <exception>
 #include <fstream>
 #include <map>

@@ -6,6 +6,7 @@
 #include <c10/util/env.h>
 
 #ifdef USE_C10D_NCCL
+#include <unordered_map>
 #include <vector>
 
 #include <cuda_runtime.h>
@@ -243,13 +244,13 @@ std::string getNcclErrorDetailStr(
 control_plane::RegisterHandler dumpHandler{
     "dump_nccl_trace_pickle",
     [](const control_plane::Request& req, control_plane::Response& res) {
-      auto params = req.params();
+      const auto params = req.params();
       size_t validParamCount = 0;
 
       // valid params
-      std::string includeCollectivesStr = "includecollectives";
-      std::string includeStackTracesStr = "includestacktraces";
-      std::string onlyActiveStr = "onlyactive";
+      const std::string includeCollectivesStr = "includecollectives";
+      const std::string includeStackTracesStr = "includestacktraces";
+      const std::string onlyActiveStr = "onlyactive";
 
       std::unordered_map<std::string, bool> expectedParams = {
           {includeCollectivesStr, true},
