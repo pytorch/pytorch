@@ -20,8 +20,9 @@ import subprocess
 import sys
 
 import cuda_memcheck_common as cmc
-import torch
 import tqdm
+
+import torch
 
 ALL_TESTS = []
 GPUS = torch.cuda.device_count()

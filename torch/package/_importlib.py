@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import _warnings
 import os.path
 
