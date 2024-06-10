@@ -277,7 +277,6 @@ class FunctionalTensor(torch.Tensor):
 class FunctionalTensorMode(TorchDispatchMode):
     def __init__(self, pre_dispatch=False, export=False, _allow_token_discovery=False):
         self.export = export
-        self.export_inference = not pre_dispatch and export
         self.is_on_stack = False
         self.enter_stack = []
         # Indicates to our torch_dispatch dispatching infra that
@@ -355,7 +354,7 @@ class FunctionalTensorMode(TorchDispatchMode):
 
             # If we are here, it means we are seeing functional composite op.
             # For pre-dispatch IR or export inference IR, we wont' decompose them
-            if self.export_inference or self.pre_dispatch:
+            if self.export or self.pre_dispatch:
                 if func.namespace not in ["aten", "prim"]:
                     warnings.warn(
                         f"At pre-dispatch tracing, we assume that any custom op marked with "

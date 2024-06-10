@@ -330,6 +330,8 @@ def proxy_call(proxy_mode, func, pre_dispatch, args, kwargs):
     if r is not NotImplemented:
         return r
 
+    _can_decompose = not proxy_mode.pre_dispatch and not ()
+
     # For pre-autograd tracing, we do not want to run CompositeImplicit decomps.
     if func not in [
         torch.ops.aten.size.default,
@@ -337,7 +339,7 @@ def proxy_call(proxy_mode, func, pre_dispatch, args, kwargs):
         torch.ops.aten.storage_offset.default,
     ]:
         with proxy_mode:
-            if not proxy_mode.pre_dispatch and not proxy_mode.export_inference:
+            if not (proxy_mode.export or proxy_mode.pre_dispatch):
                 r = func.decompose(*args, **kwargs)
                 if r is not NotImplemented:
                     return r
@@ -735,7 +737,7 @@ class ProxyTorchDispatchMode(TorchDispatchMode):
         tracer,
         tracing_mode,
         pre_dispatch=False,
-        export_inference=False,
+        export=False,
         _allow_fake_constant=False,
         _error_on_data_dependent_ops=True
     ):
@@ -745,7 +747,7 @@ class ProxyTorchDispatchMode(TorchDispatchMode):
         self.tracing_mode = tracing_mode
         self.enable_tracing = True
         self.pre_dispatch = pre_dispatch
-        self.export_inference = export_inference
+        self.export = export
         self._allow_fake_constant = _allow_fake_constant
         self._error_on_data_dependent_ops = _error_on_data_dependent_ops
         self.sym_mode = ProxySymDispatchMode(tracer)
@@ -1162,7 +1164,7 @@ class _MakefxTracer:
         tracing_mode: str,
         _allow_non_fake_inputs: bool,
         pre_dispatch: bool,
-        export_inference: bool,
+        export: bool,
         record_module_stack: bool,
         _allow_fake_constant: bool,
         _error_on_data_dependent_ops: bool
@@ -1174,7 +1176,7 @@ class _MakefxTracer:
         self.tracing_mode: str = tracing_mode
         self._allow_non_fake_inputs: bool = _allow_non_fake_inputs
         self.pre_dispatch: bool = pre_dispatch
-        self.export_inference: bool = export_inference
+        self.export: bool = export
         self.record_module_stack: bool = record_module_stack
         self._allow_fake_constant: bool = _allow_fake_constant
         self._error_on_data_dependent_ops: bool = _error_on_data_dependent_ops
@@ -1268,7 +1270,7 @@ class _MakefxTracer:
             fx_tracer,
             self.tracing_mode,
             pre_dispatch=self.pre_dispatch,
-            export_inference=self.export_inference,
+            export=self.export,
             _allow_fake_constant=self._allow_fake_constant,
             _error_on_data_dependent_ops=self._error_on_data_dependent_ops
         )
@@ -1386,7 +1388,7 @@ class _MakefxTracer:
             self.tracing_mode,
             self._allow_non_fake_inputs,
             self.pre_dispatch,
-            self.export_inference,
+            self.export,
             self.record_module_stack,
             self._allow_fake_constant,
             self._error_on_data_dependent_ops
@@ -1413,7 +1415,7 @@ def make_fx(
         _allow_non_fake_inputs=False,
         *,
         pre_dispatch=False,
-        export_inference=False,  # See Note [Decomposition behaviour in export]
+        export=False,  # See Note [Decomposition behaviour in export]
         record_module_stack=False,
         _allow_fake_constant=False,
         _error_on_data_dependent_ops=True):
@@ -1426,7 +1428,7 @@ def make_fx(
         tracing_mode,
         _allow_non_fake_inputs,
         pre_dispatch,
-        export_inference,
+        export,
         record_module_stack,
         _allow_fake_constant,
         _error_on_data_dependent_ops

@@ -52,7 +52,7 @@ def _create_graph(f, args, *, aot_config: AOTConfig) -> torch.fx.GraphModule:
             # as the export inference IR we are targetting is different from torch.compile
             # where we get core aten IR. This is useful when the tracer tries to decompose ops
             # even under torch.inference_mode context manager
-            export_inference=aot_config.is_export and not aot_config.pre_dispatch,
+            export=aot_config.is_export,
         )(*args)
 
     return fx_g
