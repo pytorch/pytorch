@@ -865,7 +865,7 @@ void initPythonIRBindings(PyObject* module_) {
           })
       .def(
           "with_sizes",
-          [](Type& t, std::optional<std::vector<c10::optional<int64_t>>> sizes)
+          [](Type& t, std::optional<std::vector<std::optional<int64_t>>> sizes)
               -> py::object {
             auto ptt = t.expect<TensorType>();
             if (!ptt) {

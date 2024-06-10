@@ -19,6 +19,7 @@ import pytest
 
 from numpy.linalg.linalg import _multi_dot_matrix_chain_order
 from pytest import raises as assert_raises
+
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,

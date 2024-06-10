@@ -10,8 +10,9 @@ import warnings
 from collections import namedtuple
 from os.path import abspath, exists
 
-import torch
 import yaml
+
+import torch
 
 try:
     from .common import BenchmarkRunner, main
@@ -432,7 +433,7 @@ class TorchBenchmarkRunner(BenchmarkRunner):
         cloned_inputs = clone_inputs(inputs)
         self.optimizer_zero_grad(mod)
         with self.autocast(**self.autocast_arg):
-            if isinstance(clone_inputs, dict):
+            if isinstance(cloned_inputs, dict):
                 pred = mod(**cloned_inputs)
             else:
                 pred = mod(*cloned_inputs)

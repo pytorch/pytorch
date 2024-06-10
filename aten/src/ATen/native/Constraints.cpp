@@ -60,7 +60,7 @@ Tensor _functional_sym_constrain_range(
   return dep_token.clone();
 }
 
-void sym_constrain_range_for_size(const Scalar& size, std::optional<int64_t> min, c10::optional<int64_t> max) {
+void sym_constrain_range_for_size(const Scalar& size, std::optional<int64_t> min, std::optional<int64_t> max) {
   int64_t min_val = min.has_value() ? min.value() : 0;
   if (max.has_value() && max.value() <= 2) {
     TORCH_CHECK(false, "Max value to constrain_range_for_size must be greater than 2. got: ", max.value());

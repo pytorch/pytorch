@@ -43,7 +43,7 @@ Tensor one_hot(const Tensor &self, int64_t num_classes) {
 
     // non-empty tensor
     if (self.device().type() != at::kCUDA && self.device().type() != at::kMPS &&
-        self.device().type() != at::kPrivateUse1) {
+        self.device().type() != at::kPrivateUse1 && self.device().type() != at::kXLA) {
       // for cuda, rely on device assert thrown by scatter
       TORCH_CHECK(self.min().item().toLong() >= 0, "Class values must be non-negative.");
     }
@@ -51,7 +51,7 @@ Tensor one_hot(const Tensor &self, int64_t num_classes) {
         num_classes = self.max().item().toLong() + 1;
     } else {
         if (self.device().type() != at::kCUDA && self.device().type() != at::kMPS &&
-            self.device().type() != at::kPrivateUse1) {
+            self.device().type() != at::kPrivateUse1 && self.device().type() != at::kXLA) {
           // rely on device asserts from scatter to avoid sync here
           TORCH_CHECK(num_classes > self.max().item().toLong(), "Class values must be smaller than num_classes.");
         } else {
