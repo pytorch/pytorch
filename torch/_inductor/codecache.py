@@ -2221,13 +2221,18 @@ class CppCodeCache:
                 ),
             )
             """
+            cpp_build_option = CppTorchCudaOptions(**compile_command)
+            cpp_builder = CppBuilder(
+                name=output_name,
+                sources=input_path,
+                output_dir=output_dir,
+                BuildOption=cpp_build_option,
+            )
+
             worker_fn = functools.partial(
-                _worker_compile_cpp_new,
+                _worker_compile_cpp,
                 lock_path,
-                output_name,
-                input_path,
-                output_dir,
-                compile_command,
+                cpp_builder,
             )
 
             def load_fn():
@@ -2237,13 +2242,13 @@ class CppCodeCache:
                         future.result()
                     result = worker_fn()
                     assert result is None
-                    lib = cls._load_library(output_path, key)
+                    lib = cls._load_library(cpp_builder.get_target_file_path(), key)
                     assert lib is not None
                 return lib
 
             if submit_fn is not None:
                 with FileLock(lock_path, timeout=LOCK_TIMEOUT):
-                    if not os.path.exists(output_path):
+                    if not os.path.exists(cpp_builder.get_target_file_path()):
                         future = submit_fn(worker_fn)
 
             cls.cache[key] = load_fn
@@ -2255,29 +2260,13 @@ class CppCodeCache:
         return cls.load_async(source_code, cuda)()
 
 
-def _worker_compile_cpp_new(lock_path, name, source, output_dir, args: dict[str, Any]):
+def _worker_compile_cpp(lock_path, cpp_builder: CppBuilder):
     from filelock import FileLock
-
-    cpp_build_option = CppTorchCudaOptions(**args)
-    cpp_builder = CppBuilder(
-        name=name,
-        sources=source,
-        output_dir=output_dir,
-        BuildOption=cpp_build_option,
-    )
 
     with FileLock(lock_path, timeout=LOCK_TIMEOUT):
         if not os.path.exists(cpp_builder.get_target_file_path()):
             # compile_file(input_path, output_path, shlex.split(cmd))
             cpp_builder.build()
-
-
-def _worker_compile_cpp(lock_path, input_path, output_path, cmd):
-    from filelock import FileLock
-
-    with FileLock(lock_path, timeout=LOCK_TIMEOUT):
-        if not os.path.exists(output_path):
-            compile_file(input_path, output_path, shlex.split(cmd))
 
 
 # Customized Python binding for cpp kernels
