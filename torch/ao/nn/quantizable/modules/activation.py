@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import torch
 import torch.jit  # this is needed to avoid a circular import
 from torch import nn

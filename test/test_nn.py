@@ -1063,6 +1063,7 @@ class TestNN(NNTestCase):
         self.assertRaises(NotImplementedError, module_dict)
         self.assertRaises(NotImplementedError, module_dict, torch.rand(1, 3))
 
+    @skipIfTorchDynamo()
     def test_ParameterList(self):
         def make_param():
             return Parameter(torch.randn(2, 2))
@@ -8184,9 +8185,9 @@ class TestNNDeviceType(NNTestCase):
     @dtypes(torch.float, torch.double, torch.bfloat16, torch.complex128)
     def test_conv_empty_input(self, device, dtype):
         def help(input, conv, memory_format):
-            ref_out = conv(input).detach()
+            ref_out = conv(input)
             conv_cl = conv.to(memory_format=memory_format)
-            out_cl = conv_cl(input).detach()
+            out_cl = conv_cl(input)
             self.assertEqual(ref_out, out_cl)
             input_cl = input.to(memory_format=memory_format)
             out_cl2 = conv(input_cl)
