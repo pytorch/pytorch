@@ -579,7 +579,7 @@ class TestOperators(TestCase):
                 # AssertionError: Tensor-likes are not close!
                 xfail("as_strided"),
                 xfail("as_strided", "partial_views"),
-                # xfail("as_strided_copy"), XXXX
+                # xfail("as_strided_copy"), YYYYY
                 xfail("as_strided_scatter"),
                 decorate(
                     "linalg.det",
@@ -740,7 +740,7 @@ class TestOperators(TestCase):
                 # BUG
                 # AssertionError: Tensor-likes are not close!
                 xfail("as_strided"),
-                # xfail("as_strided_copy"), XXXXX
+                # xfail("as_strided_copy"), YYYYY
                 xfail("as_strided_scatter"),
                 xfail("_softmax_backward_data", device_type="cpu"),
                 xfail("as_strided", "partial_views"),
@@ -1154,7 +1154,7 @@ class TestOperators(TestCase):
             xfail("nn.functional.max_unpool2d", "grad"),
             xfail("sparse.sampled_addmm", ""),
             xfail("sparse.mm", "reduce"),
-            # xfail("as_strided_copy", ""),  # calls as_strided XXX
+            # xfail("as_strided_copy", ""),  # calls as_strided YYYYY
             xfail("as_strided_scatter", ""),  # calls as_strided
             xfail("index_reduce", "prod"),  # .item() call
             # ---------------------------------------------------------------------
@@ -1259,7 +1259,7 @@ class TestOperators(TestCase):
         xfail("quantile"),  # at::equal batching rule (cpu), also, in-place vmap (cuda)
         skip("as_strided"),  # Test runner cannot handle this
         # requires special handling, and does not yet have a batching rule. Feel free to file a github issue!
-        # xfail("as_strided_copy"),  XXX
+        xfail("as_strided_copy"),
         xfail("as_strided_scatter"),
         xfail(
             "nn.functional.gaussian_nll_loss"
