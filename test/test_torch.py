@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 # Owner(s): ["module: tests"]
 
 import torch
@@ -110,7 +111,7 @@ def assertNoLeakedLazyCloneWarnings():
         finally:
             assert len(w) == 0, (
                 'Expected no warnings related to lazy clone to leak, '
-                f'but got: {list(str(w_) for w_ in w)}')
+                f'but got: {[str(w_) for w_ in w]}')
 
 @contextlib.contextmanager
 def extraConditionalViewWarningsGuard(mode=False):

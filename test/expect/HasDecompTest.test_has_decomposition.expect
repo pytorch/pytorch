@@ -390,6 +390,7 @@ aten::_is_all_true
 aten::_is_any_true
 aten::_jagged_to_padded_dense_forward
 aten::_lazy_clone
+aten::_lazy_clone_copy
 aten::_linalg_check_errors
 aten::_linalg_det
 aten::_linalg_det.result
