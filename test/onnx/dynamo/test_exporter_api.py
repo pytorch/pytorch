@@ -3,8 +3,9 @@ import io
 import os
 
 import onnx
-import torch
 from beartype import roar
+
+import torch
 from torch.onnx import dynamo_export, ExportOptions, ONNXProgram
 from torch.onnx._internal import exporter, io_adapter
 from torch.onnx._internal.exporter import (
@@ -21,6 +22,13 @@ from torch.testing._internal import common_utils
 class SampleModel(torch.nn.Module):
     def forward(self, x):
         y = x + 1
+        z = y.relu()
+        return (y, z)
+
+
+class SampleModelTwoInputs(torch.nn.Module):
+    def forward(self, x, b):
+        y = x + b
         z = y.relu()
         return (y, z)
 
@@ -218,6 +226,102 @@ class TestLargeProtobufONNXProgramSerializerAPI(common_utils.TestCase):
             serializer = LargeProtobufONNXProgramSerializer(path)
             # `io.BytesIO()` is unused, but required by the Protocol interface.
             serializer.serialize(onnx_program, io.BytesIO())
+
+
+class TestONNXExportWithDynamo(common_utils.TestCase):
+    def test_args_normalization_with_no_kwargs(self):
+        onnx_program_from_new_exporter = torch.onnx.dynamo_export(
+            SampleModelTwoInputs(), torch.randn(1, 1, 2), torch.randn(1, 1, 2)
+        )
+        onnx_program_from_old_exporter = torch.onnx.export(
+            SampleModelTwoInputs(),
+            (torch.randn(1, 1, 2), torch.randn(1, 1, 2)),
+            dynamo=True,
+        )
+        self.assertEqual(
+            onnx_program_from_new_exporter.model_proto,
+            onnx_program_from_old_exporter.model_proto,
+        )
+
+    def test_args_normalization_with_kwargs(self):
+        onnx_program_from_new_exporter = torch.onnx.dynamo_export(
+            SampleModelTwoInputs(), torch.randn(1, 1, 2), b=torch.randn(1, 1, 2)
+        )
+        onnx_program_from_old_exporter = torch.onnx.export(
+            SampleModelTwoInputs(),
+            (torch.randn(1, 1, 2), {"b": torch.randn(1, 1, 2)}),
+            dynamo=True,
+        )
+        self.assertEqual(
+            onnx_program_from_new_exporter.model_proto,
+            onnx_program_from_old_exporter.model_proto,
+        )
+
+    def test_args_normalization_with_empty_dict_at_the_tail(self):
+        onnx_program_from_new_exporter = torch.onnx.dynamo_export(
+            SampleModelTwoInputs(), torch.randn(1, 1, 2), b=torch.randn(1, 1, 2)
+        )
+        onnx_program_from_old_exporter = torch.onnx.export(
+            SampleModelTwoInputs(),
+            (torch.randn(1, 1, 2), {"b": torch.randn(1, 1, 2)}, {}),
+            dynamo=True,
+        )
+        self.assertEqual(
+            onnx_program_from_new_exporter.model_proto,
+            onnx_program_from_old_exporter.model_proto,
+        )
+
+    def test_dynamic_axes_enable_dynamic_shape(self):
+        onnx_program_from_new_exporter = torch.onnx.dynamo_export(
+            SampleModelTwoInputs(),
+            torch.randn(1, 1, 2),
+            b=torch.randn(1, 1, 2),
+            export_options=ExportOptions(dynamic_shapes=True),
+        )
+        onnx_program_from_old_exporter = torch.onnx.export(
+            SampleModelTwoInputs(),
+            (torch.randn(1, 1, 2), {"b": torch.randn(1, 1, 2)}, {}),
+            dynamic_axes={"b": [0, 1, 2]},
+            dynamo=True,
+        )
+        self.assertEqual(
+            onnx_program_from_new_exporter.model_proto,
+            onnx_program_from_old_exporter.model_proto,
+        )
+
+    def test_raises_unrelated_parameters_warning(self):
+        message = (
+            "f, export_params, verbose, training, input_names, output_names, operator_export_type, opset_version, "
+            "do_constant_folding, keep_initializers_as_inputs, custom_opsets, export_modules_as_functions, and "
+            "autograd_inlining are not supported for dynamo export at the moment."
+        )
+
+        with self.assertWarnsOnceRegex(UserWarning, message):
+            _ = torch.onnx.export(
+                SampleModel(),
+                (torch.randn(1, 1, 2),),
+                dynamo=True,
+            )
+
+    def test_raises_unsupported_specific_dynamic_axes_warning(self):
+        message = (
+            "Specified dynamic axes is not supported for dynamo export at the moment."
+        )
+
+        with self.assertWarnsOnceRegex(UserWarning, message):
+            _ = torch.onnx.export(
+                SampleModel(),
+                (torch.randn(1, 1, 2),),
+                dynamic_axes={"input": [0, 1, 2]},
+                dynamo=True,
+            )
+
+    def test_saved_f_exists_after_export(self):
+        with common_utils.TemporaryFileName(suffix=".onnx") as path:
+            _ = torch.onnx.export(
+                SampleModel(), torch.randn(1, 1, 2), path, dynamo=True
+            )
+            self.assertTrue(os.path.exists(path))
 
 
 if __name__ == "__main__":

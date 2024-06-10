@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import functools
 import os
 from itertools import chain, count
@@ -76,7 +77,7 @@ class CppWrapperCuda(CppWrapperCpu):
             self.prefix.writeline("\n")
         return super().generate(is_inference)
 
-    @functools.lru_cache(None)
+    @functools.lru_cache(None)  # noqa: B019
     def generate_load_kernel_once(
         self,
         name: str,

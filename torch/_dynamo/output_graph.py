@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import collections
 import contextlib
 import copy
@@ -292,6 +293,8 @@ class OutputGraph:
             tracked_fakes=self.tracked_fakes,
             allow_scalar_outputs=config.capture_scalar_outputs,
             allow_dynamic_output_shape_ops=config.capture_dynamic_output_shape_ops,
+            prefer_deferred_runtime_asserts_over_guards=config.prefer_deferred_runtime_asserts_over_guards,
+            _allow_complex_guards_as_runtime_asserts=config._allow_complex_guards_as_runtime_asserts,
             co_fields=self.co_fields,
         )
 
@@ -1285,7 +1288,10 @@ class OutputGraph:
             "dynamo_flat_name_to_original_fqn"
         ] = self.dynamo_flat_name_to_original_fqn.copy()
 
-        graph_code_log.debug("%s", lazy_format_graph_code(name, gm))
+        graph_code_log.debug(
+            "%s",
+            lazy_format_graph_code(name, gm, include_stride=True, include_device=True),
+        )
         torch._logging.trace_structured(
             "dynamo_output_graph",
             lambda: {"sizes": self.get_graph_sizes_structured()},
@@ -1674,7 +1680,7 @@ err_epilogue = (
     "(and fall back to eager-mode PyTorch) on all ops "
     "that have do not have the 'pt2_compliant_tag'. "
     "Please see the following doc for how to mark this op as PT2 compliant "
-    "https://docs.google.com/document/d/1W--T6wz8IY8fOI0Vm8BF44PdBgs283QvpelJZWieQWQ"
+    "https://pytorch.org/docs/main/notes/custom_operators.html"
 )
 
 

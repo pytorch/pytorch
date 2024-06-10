@@ -576,11 +576,11 @@ std::tuple<Tensor, Tensor, Tensor> _new_batch_norm_backward_cuda(
   const Tensor& save_mean = c10::value_or_else(save_mean_opt, [] {return Tensor();});
   const Tensor& save_var = c10::value_or_else(save_var_opt, [] {return Tensor();});
 
-  BatchNormBackend backend = _select_batch_norm_backend(input, weight, dummy_bias, running_mean, running_var, /*training*/true, eps);
+  BatchNormBackend backend = _select_batch_norm_backend(input, weight, dummy_bias, running_mean, running_var, update, eps);
 
-  if (backend == BatchNormBackend::Cudnn) {
+  if (backend == BatchNormBackend::Cudnn && update) {
     return at::cudnn_batch_norm_backward(input, grad_output, weight, running_mean, running_var, save_mean, save_var, eps, reserve);
-  } else if (backend == BatchNormBackend::Miopen) {
+  } else if (backend == BatchNormBackend::Miopen && update) {
     return at::miopen_batch_norm_backward(input, grad_output, weight, running_mean, running_var, save_mean, save_var, eps);
   } else {
     return batch_norm_backward_cuda(grad_output, input, weight, running_mean, running_var, save_mean, save_var, update, eps, grad_input_mask);
