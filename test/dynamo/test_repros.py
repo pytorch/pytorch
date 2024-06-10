@@ -5055,7 +5055,7 @@ def forward(self, primals_1, primals_2):
         opt_fn = torch.compile(fn, backend="eager")
         self.assertEqual(fn(x, y), opt_fn(x, y))
 
-    def test_nn_module_stack1(self):
+    def test_nn_module_stack_bc(self):
         from torch._dynamo.mutation_guard import GenerationTracker
 
         def compiler(gm, *args):
