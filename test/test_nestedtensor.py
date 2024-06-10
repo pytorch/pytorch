@@ -57,7 +57,7 @@ from torch.nested._internal.nested_tensor import (
 
 from torch.utils.checkpoint import (
     checkpoint,
-    gen_selective_checkpoint_context_fn,
+    create_selective_checkpoint_contexts,
 )
 
 # Tests are ported from pytorch/nestedtensor.
@@ -4495,7 +4495,7 @@ class TestNestedTensorSubclass(TestCase):
         checkpoint(fn, values, offsets, use_reentrant=False).backward()
 
         context_fn = partial(
-            gen_selective_checkpoint_context_fn,
+            create_selective_checkpoint_contexts,
             [
                 torch.ops.aten.cumsum.default,
             ]

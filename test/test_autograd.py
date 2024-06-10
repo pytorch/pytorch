@@ -84,7 +84,7 @@ from torch.utils.checkpoint import (
     checkpoint,
     checkpoint_sequential,
     CheckpointPolicy,
-    gen_selective_checkpoint_context_fn,
+    create_selective_checkpoint_contexts,
 )
 from torch.utils.cpp_extension import load_inline
 from torch.utils.flop_counter import FlopCounterMode
@@ -13206,7 +13206,7 @@ class TestSelectiveActivationCheckpoint(TestCase):
 
         def fn_sac(x, y):
             context_fn = functools.partial(
-                gen_selective_checkpoint_context_fn,
+                create_selective_checkpoint_contexts,
                 [
                     torch.ops.aten.mm.default,
                 ],
@@ -13222,7 +13222,7 @@ class TestSelectiveActivationCheckpoint(TestCase):
 
         def fn_sac2(x, y):
             context_fn = functools.partial(
-                gen_selective_checkpoint_context_fn,
+                create_selective_checkpoint_contexts,
                 policy_fn,
             )
             out = checkpoint(fn, x, y, use_reentrant=False, context_fn=context_fn)
@@ -13258,17 +13258,17 @@ class TestSelectiveActivationCheckpoint(TestCase):
         with self.assertRaisesRegex(
             ValueError, "Expected op in `op_list` to be an OpOverload"
         ):
-            gen_selective_checkpoint_context_fn(bad_op_list1)
+            create_selective_checkpoint_contexts(bad_op_list1)
 
         bad_op_list2 = [torch.ops.aten.sin]
 
         with self.assertRaisesRegex(
             ValueError, "update the OpOverloadPacket to a specific OpOverload"
         ):
-            gen_selective_checkpoint_context_fn(bad_op_list2)
+            create_selective_checkpoint_contexts(bad_op_list2)
 
         with self.assertRaisesRegex(TypeError, "either a function or a list of ops."):
-            gen_selective_checkpoint_context_fn(2)
+            create_selective_checkpoint_contexts(2)
 
     # Dynamo fails for various reasons:
     # - some tests using custom op that does not implement Fake
@@ -13297,7 +13297,7 @@ class TestSelectiveActivationCheckpoint(TestCase):
 
         x = torch.randn(3, requires_grad=True)
         context_fn = functools.partial(
-            gen_selective_checkpoint_context_fn,
+            create_selective_checkpoint_contexts,
             Policy(),
             allow_cache_entry_mutation=True,
         )
@@ -13337,7 +13337,7 @@ class TestSelectiveActivationCheckpoint(TestCase):
             return out.cos()
 
         x = torch.randn(3, requires_grad=True)
-        context_fn = functools.partial(gen_selective_checkpoint_context_fn, policy_fn)
+        context_fn = functools.partial(create_selective_checkpoint_contexts, policy_fn)
         out = checkpoint(fn, x, use_reentrant=False, context_fn=context_fn)
         self.assertIsNotNone(ref())
         out.sum().backward()
@@ -13355,7 +13355,7 @@ class TestSelectiveActivationCheckpoint(TestCase):
             return x.sin().mul_(2).cos().exp()
 
         x = torch.randn(3, requires_grad=True)
-        context_fn = functools.partial(gen_selective_checkpoint_context_fn, policy_fn)
+        context_fn = functools.partial(create_selective_checkpoint_contexts, policy_fn)
         out = checkpoint(fn, x, use_reentrant=False, context_fn=context_fn)
 
         # 1) Error because the output of sin is saved and mutated by mul_
@@ -13364,7 +13364,7 @@ class TestSelectiveActivationCheckpoint(TestCase):
 
         x = torch.randn(3, requires_grad=True)
         context_fn = functools.partial(
-            gen_selective_checkpoint_context_fn,
+            create_selective_checkpoint_contexts,
             policy_fn,
             allow_cache_entry_mutation=True,
         )
@@ -13391,7 +13391,7 @@ class TestSelectiveActivationCheckpoint(TestCase):
             return a * b
 
         x = torch.randn(3, requires_grad=True)
-        context_fn = functools.partial(gen_selective_checkpoint_context_fn, policy_fn)
+        context_fn = functools.partial(create_selective_checkpoint_contexts, policy_fn)
         out = checkpoint(fn, x, use_reentrant=False, context_fn=context_fn)
         x_grad = torch.autograd.grad(out.sum(), (x,))
         x_grad_ref = torch.autograd.grad(fn(x).sum(), (x,))
@@ -13430,7 +13430,7 @@ class TestSelectiveActivationCheckpoint(TestCase):
 
             x = torch.randn(3, requires_grad=True)
             context_fn = functools.partial(
-                gen_selective_checkpoint_context_fn, ops_list
+                create_selective_checkpoint_contexts, ops_list
             )
             out = checkpoint(fn, x, use_reentrant=False, context_fn=context_fn)
             x_grad = torch.autograd.grad(out.sum(), (x,))
@@ -13453,7 +13453,7 @@ class TestSelectiveActivationCheckpoint(TestCase):
             return x.sin().cos().exp()
 
         x = torch.randn(3, requires_grad=True)
-        context_fn = functools.partial(gen_selective_checkpoint_context_fn, policy_fn)
+        context_fn = functools.partial(create_selective_checkpoint_contexts, policy_fn)
         out = checkpoint(fn, x, use_reentrant=False, context_fn=context_fn)
         out.sum().backward(retain_graph=True)
 
