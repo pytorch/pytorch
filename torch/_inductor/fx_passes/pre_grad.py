@@ -12,6 +12,7 @@ from torch.fx.experimental.optimization import (
     matches_module_pattern,
     replace_node_module,
 )
+from torch.fx.passes.graph_transform_observer import GraphTransformObserver
 from torch.fx.passes.shape_prop import ShapeProp
 from torch.nn import functional as F
 from torch.nn.utils.fusion import fuse_conv_bn_eval, fuse_conv_bn_weights
@@ -220,7 +221,10 @@ def pre_grad_passes(gm: torch.fx.GraphModule, example_inputs=None):
             efficient_conv_bn_eval_pass.apply(gm.graph)  # type: ignore[arg-type]
 
     if config.pre_grad_custom_pass is not None:
-        config.pre_grad_custom_pass(gm.graph)
+        with GraphTransformObserver(
+            gm, "pre_grad_custom_pass", config.trace.log_url_for_graph_xform
+        ):
+            config.pre_grad_custom_pass(gm.graph)
     stable_topological_sort(gm.graph)
 
     from .quantization import quant_lift_up
@@ -261,16 +265,31 @@ def fuse_fx(gm: torch.fx.GraphModule, example_inputs) -> torch.fx.GraphModule:
         # For linear permute fusion, we need to check input info to identify
         # and perform proper permutation/transpose
         ShapeProp(gm, fake_mode=fake_mode).propagate(*example_inputs)
-        gm = linear_permute_fusion(gm)
-        gm = permute_linear_fusion(gm)
-        gm = permute_matmul_fusion(gm)
+        with GraphTransformObserver(
+            gm, "linear_permute_fusion", config.trace.log_url_for_graph_xform
+        ):
+            gm = linear_permute_fusion(gm)
+        with GraphTransformObserver(
+            gm, "permute_linear_fusion", config.trace.log_url_for_graph_xform
+        ):
+            gm = permute_linear_fusion(gm)
+        with GraphTransformObserver(
+            gm, "permute_matmul_fusion", config.trace.log_url_for_graph_xform
+        ):
+            gm = permute_matmul_fusion(gm)
 
     # make sure the autograd is disabled.
     if torch.is_grad_enabled() or not is_cpu:
         return gm
     if config.freezing:
-        gm = remove_identity(gm)
-        gm = fuse_conv_bn(gm)
+        with GraphTransformObserver(
+            gm, "remove_identity", config.trace.log_url_for_graph_xform
+        ):
+            gm = remove_identity(gm)
+        with GraphTransformObserver(
+            gm, "fuse_conv_bn", config.trace.log_url_for_graph_xform
+        ):
+            gm = fuse_conv_bn(gm)
     return gm
 
 
