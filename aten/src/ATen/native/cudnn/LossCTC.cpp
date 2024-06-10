@@ -2,6 +2,7 @@
 #include <ATen/Config.h>
 #include <ATen/core/Tensor.h>
 #include <ATen/cuda/CUDAConfig.h>
+#include <ATen/cuda/CUDAGraphsUtils.cuh>
 #if AT_CUDNN_ENABLED()
 #include <ATen/cudnn/Descriptors.h>
 #endif
@@ -80,6 +81,11 @@ std::tuple<Tensor, Tensor> _cudnn_ctc_loss_tensor(
 namespace at {
 namespace native {
 
+namespace {
+  // "cache" whether we've previously failed the target lengths check
+  static bool tensor_failed_target_lengths_check = false;
+}
+
 bool _use_cudnn_ctc_loss(
     const Tensor& log_probs,
     const Tensor& targets,
@@ -91,7 +97,8 @@ bool _use_cudnn_ctc_loss(
   bool use_cudnn = ctx.userEnabledCuDNN() && (BLANK == 0) &&
       (targets.dim() == 1) && (log_probs.scalar_type() == at::kFloat) &&
       (targets.scalar_type() == at::kInt) &&
-      (log_probs.device().type() == at::kCUDA) && (targets.is_contiguous()) &&
+      (targets.device().type() == at::kCPU) && (targets.is_contiguous()) &&
+      (log_probs.device().type() == at::kCUDA) &&
       (log_probs.dim() == 3);
 
   if (use_cudnn) {
@@ -123,7 +130,34 @@ bool _use_cudnn_ctc_loss_tensor(
       (targets.dim() == 1) && (log_probs.scalar_type() == at::kFloat) &&
       (targets.scalar_type() == at::kInt) &&
       (log_probs.device().type() == at::kCUDA) && (targets.is_contiguous()) &&
-      (log_probs.dim() == 3);
+      (log_probs.dim() == 3) &&
+      (input_lengths.scalar_type() == at::kInt) && (target_lengths.scalar_type() == at::kInt);
+
+  if (at::cuda::currentStreamCaptureStatus() == at::cuda::CaptureStatus::None) {
+    Tensor tlc = target_lengths.to(Device(at::kCPU), at::kLong).contiguous();
+    IntArrayRef tl(tlc.data_ptr<int64_t>(), tlc.numel());
+    for (const auto b : c10::irange(tl.size())) {
+      // target length < 256 is documented, but we see illegal memory accesses
+      // when target lengths > input lengths for CuDNN
+      Tensor ilc = input_lengths.to(Device(at::kCPU), at::kLong).contiguous();
+      Tensor tlc = target_lengths.to(Device(at::kCPU), at::kLong).contiguous();
+      IntArrayRef il(ilc.data_ptr<int64_t>(), ilc.numel());
+      IntArrayRef tl(tlc.data_ptr<int64_t>(), tlc.numel());
+      use_cudnn = use_cudnn && (tl[b] < 256) &&
+          (tl[b] <= il[b]);
+      if (!use_cudnn) {
+        tensor_failed_target_lengths_check = true;
+	break;
+      }
+    }
+  } else {
+    use_cudnn = use_cudnn && !tensor_failed_target_lengths_check;
+    if (tensor_failed_target_lengths_check) {
+      TORCH_WARN("cuDNN max target length restriction < 256 cannot be checked during graph capture,"
+                 " but target length >= 256 was observed previously e.g., during warmup, so we"
+		 " presume it is unsafe to dispatch to cuDNN ctc_loss.");
+    }
+  }
 
   return use_cudnn;
 }
