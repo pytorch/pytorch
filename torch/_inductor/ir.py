@@ -8009,6 +8009,8 @@ class LoopBody:
         )
         return "\n".join(lines)
 
+    __repr__ = debug_str
+
     def add_index_expr(self, expr: sympy.Expr, category, buf_name):
         getattr(self, category).append(expr)
         if buf_name is not None:
