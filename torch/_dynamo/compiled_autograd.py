@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import contextlib
 import functools
 from typing import Dict, List, Optional, TYPE_CHECKING

@@ -1,6 +1,4 @@
-import threading
-from contextlib import contextmanager
-
+# mypy: allow-untyped-defs
 import torch
 
 doc = """
@@ -39,20 +37,3 @@ def new_parameter_placeholder(size, dtype, device, requires_grad):
     # Allocating a zero tensor would causes assert failures in autograd.
     result.untyped_storage().resize_(0)
     return result
-
-
-_TLS = threading.local()
-
-
-@contextmanager
-def do_not_convert_to_tracable_parameter():
-    old_flag = getattr(_TLS, "convert_tracable_parameter", True)
-    _TLS.convert_tracable_parameter = False
-    try:
-        yield False
-    finally:
-        _TLS.convert_tracable_parameter = old_flag
-
-
-def can_convert_to_tracable_parameter():
-    return getattr(_TLS, "convert_tracable_parameter", True)
