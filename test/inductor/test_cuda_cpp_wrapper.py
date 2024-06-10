@@ -198,6 +198,7 @@ if RUN_CUDA:
         BaseTest("test_adding_tensor_offsets"),
         BaseTest("test_index_tensor"),
         BaseTest("test_inductor_layout_optimization_input_mutations"),
+        BaseTest("test_insignificant_strides"),
         BaseTest("test_layer_norm"),
         BaseTest("test_linear1"),
         BaseTest("test_linear2"),
@@ -210,6 +211,7 @@ if RUN_CUDA:
         BaseTest("test_reduction1"),  # Reduction
         BaseTest("test_relu"),  # multiple inputs
         BaseTest("test_repeat_interleave_2"),
+        BaseTest("test_roi_align"),
         BaseTest("test_scalar_input"),
         BaseTest("test_scaled_dot_product_attention"),
         BaseTest("test_scaled_dot_product_efficient_attention"),

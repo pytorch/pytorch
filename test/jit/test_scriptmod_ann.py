@@ -2,6 +2,7 @@
 
 import os
 import sys
+import unittest
 import warnings
 from typing import Dict, List, Optional
 
@@ -150,6 +151,30 @@ class TestScriptModuleInstanceAttributeTypeAnnotation(JitTestCase):
             ):
                 torch.jit.script(M())
 
+    @unittest.skipIf(
+        sys.version_info[:2] < (3, 9), "Requires lowercase static typing (Python 3.9+)"
+    )
+    def test_annotated_empty_list_lowercase(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.x: list[int] = []
+
+            def forward(self, x: list[int]):
+                self.x = x
+                return 1
+
+        with self.assertRaisesRegexWithHighlight(
+            RuntimeError, "Tried to set nonexistent attribute", "self.x = x"
+        ):
+            with self.assertWarnsRegex(
+                UserWarning,
+                "doesn't support "
+                "instance-level annotations on "
+                "empty non-base types",
+            ):
+                torch.jit.script(M())
+
     def test_annotated_empty_dict(self):
         class M(torch.nn.Module):
             def __init__(self):
@@ -157,6 +182,30 @@ class TestScriptModuleInstanceAttributeTypeAnnotation(JitTestCase):
                 self.x: Dict[str, int] = {}
 
             def forward(self, x: Dict[str, int]):
+                self.x = x
+                return 1
+
+        with self.assertRaisesRegexWithHighlight(
+            RuntimeError, "Tried to set nonexistent attribute", "self.x = x"
+        ):
+            with self.assertWarnsRegex(
+                UserWarning,
+                "doesn't support "
+                "instance-level annotations on "
+                "empty non-base types",
+            ):
+                torch.jit.script(M())
+
+    @unittest.skipIf(
+        sys.version_info[:2] < (3, 9), "Requires lowercase static typing (Python 3.9+)"
+    )
+    def test_annotated_empty_dict_lowercase(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.x: dict[str, int] = {}
+
+            def forward(self, x: dict[str, int]):
                 self.x = x
                 return 1
 
@@ -213,6 +262,30 @@ class TestScriptModuleInstanceAttributeTypeAnnotation(JitTestCase):
             ):
                 torch.jit.script(M())
 
+    @unittest.skipIf(
+        sys.version_info[:2] < (3, 9), "Requires lowercase static typing (Python 3.9+)"
+    )
+    def test_annotated_with_jit_empty_list_lowercase(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.x = torch.jit.annotate(list[int], [])
+
+            def forward(self, x: list[int]):
+                self.x = x
+                return 1
+
+        with self.assertRaisesRegexWithHighlight(
+            RuntimeError, "Tried to set nonexistent attribute", "self.x = x"
+        ):
+            with self.assertWarnsRegex(
+                UserWarning,
+                "doesn't support "
+                "instance-level annotations on "
+                "empty non-base types",
+            ):
+                torch.jit.script(M())
+
     def test_annotated_with_jit_empty_dict(self):
         class M(torch.nn.Module):
             def __init__(self):
@@ -220,6 +293,30 @@ class TestScriptModuleInstanceAttributeTypeAnnotation(JitTestCase):
                 self.x = torch.jit.annotate(Dict[str, int], {})
 
             def forward(self, x: Dict[str, int]):
+                self.x = x
+                return 1
+
+        with self.assertRaisesRegexWithHighlight(
+            RuntimeError, "Tried to set nonexistent attribute", "self.x = x"
+        ):
+            with self.assertWarnsRegex(
+                UserWarning,
+                "doesn't support "
+                "instance-level annotations on "
+                "empty non-base types",
+            ):
+                torch.jit.script(M())
+
+    @unittest.skipIf(
+        sys.version_info[:2] < (3, 9), "Requires lowercase static typing (Python 3.9+)"
+    )
+    def test_annotated_with_jit_empty_dict_lowercase(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.x = torch.jit.annotate(dict[str, int], {})
+
+            def forward(self, x: dict[str, int]):
                 self.x = x
                 return 1
 
