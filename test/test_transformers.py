@@ -1980,7 +1980,7 @@ class TestSDPA(NNTestCase):
 class TestSDPACudaOnly(NNTestCase):
     """ Used to test CUDA only functionality of scaled_dot_product_attention
     Quarks:
-        There is some trickiness with this function. It's runtime behavior
+        There is some trickiness with this function. Its runtime behavior
         is dependent on the CUDA architecture you are testing it on. See
         `PLATFORM_SUPPORTS_FUSED_ATTENTION` at the top of the file.
         Summary:
@@ -2147,9 +2147,34 @@ class TestSDPACudaOnly(NNTestCase):
         S_converted = F.pad(S_converted, (0, seqlen_k_og - seqlen_k_rounded))
         return S_converted[:, :, :seqlen_q, :seqlen_k]
 
+    @skipIfRocm  # No cuDNN Attention
+    @unittest.skipIf(not PLATFORM_SUPPORTS_CUDNN_ATTENTION, "cuDNN Attention is not supported on this system")
+    def test_cudnn_attention_different_dk_dv(self, device):
+        dtype = torch.bfloat16
+        make_tensor = partial(torch.rand, device=device, dtype=dtype, requires_grad=True)
+        batch, num_heads, head_dim_k, head_dim_v = 32, 16, 128, 64
+        seq_len = 640
+        q_shape = SdpaShape(batch, num_heads, seq_len, head_dim_k)
+        k_shape = SdpaShape(batch, num_heads, seq_len, head_dim_k)
+        v_shape = SdpaShape(batch, num_heads, seq_len, head_dim_v)
+        query, key, value = make_tensor(q_shape), make_tensor(k_shape), make_tensor(v_shape)
+
+        with sdpa_kernel(backends=[SDPBackend.CUDNN_ATTENTION]):
+            actual = torch.nn.functional.scaled_dot_product_attention(
+                query, key, value, attn_mask=None, dropout_p=0.0, is_causal=False)
+        with sdpa_kernel(backends=[SDPBackend.MATH]):
+            math_ref = torch.nn.functional.scaled_dot_product_attention(
+                query.contiguous().to(torch.float32),
+                key.contiguous().to(torch.float32),
+                value.contiguous().to(torch.float32),
+                attn_mask=None, dropout_p=0.0, is_causal=False)
+
+        self.assertEqual(actual.contiguous(), math_ref.contiguous().to(dtype), atol=1e-3, rtol=1e-2)
+
+
     @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Fused SDPA was not built for this system")
     @parametrize("mask_dim", [1, 2, 3, 4])
-    def test_mem_efficient_attetntion_mask_variants(self, device, mask_dim: List[int]):
+    def test_mem_efficient_attention_mask_variants(self, device, mask_dim: List[int]):
         dtype = torch.float16
         make_tensor = partial(torch.rand, device=device, dtype=dtype, requires_grad=True)
         batch, num_heads, head_dim = 8, 8, 64

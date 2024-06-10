@@ -13,7 +13,8 @@ void run_cudnn_SDP_fprop(
     int64_t h,
     int64_t s_q,
     int64_t s_kv,
-    int64_t d,
+    int64_t d_k,
+    int64_t d_v,
     float scaling_factor,
     bool isTraining,
     bool is_causal,
@@ -34,7 +35,8 @@ void run_cudnn_SDP_bprop(
     int64_t h,
     int64_t s_q,
     int64_t s_kv,
-    int64_t d,
+    int64_t d_k,
+    int64_t d_v,
     float scaling_factor,
     bool is_causal,
     float dropout_probability,
@@ -128,7 +130,8 @@ struct MHAParams {
   int64_t h;
   int64_t s_q;
   int64_t s_kv;
-  int64_t d;
+  int64_t d_k;
+  int64_t d_v;
   double dropout_probability;
   bool is_causal;
   bool return_softmaxstats;
@@ -140,7 +143,8 @@ void setMHAParams(
     int64_t h,
     int64_t s_q,
     int64_t s_kv,
-    int64_t d,
+    int64_t d_k,
+    int64_t d_v,
     const Tensor& q,
     const Tensor& k,
     const Tensor& v,
@@ -155,7 +159,8 @@ void setMHAParams(
   }
   params.b = b;
   params.h = h;
-  params.d = d;
+  params.d_k = d_k;
+  params.d_v = d_v;
   params.s_q = s_q;
   params.s_kv = s_kv;
   params.dropout_probability = dropout_probability;
@@ -193,7 +198,8 @@ struct MHACacheKeyWrapper : ParamsWrapper<MHAParams> {
       int64_t h,
       int64_t s_q,
       int64_t s_kv,
-      int64_t d,
+      int64_t d_k,
+      int64_t d_v,
       const Tensor& q,
       const Tensor& k,
       const Tensor& v,
@@ -206,7 +212,8 @@ struct MHACacheKeyWrapper : ParamsWrapper<MHAParams> {
         h,
         s_q,
         s_kv,
-        d,
+        d_k,
+           d_v,
         q,
         k,
         v,
@@ -249,7 +256,8 @@ auto build_graph_and_tensors(
     int64_t h,
     int64_t s_q,
     int64_t s_kv,
-    int64_t d,
+    int64_t d_k,
+    int64_t d_v,
     float scaling_factor,
     bool return_softmaxstats,
     bool is_causal,
@@ -383,7 +391,8 @@ auto build_graph_and_tensors_backward(
     int64_t h,
     int64_t s_q,
     int64_t s_kv,
-    int64_t d,
+    int64_t d_k,
+    int64_t d_v,
     float scaling_factor,
     bool is_causal,
     float dropout_probability,
@@ -514,7 +523,8 @@ void run_cudnn_SDP_fprop(
     int64_t h,
     int64_t s_q,
     int64_t s_kv,
-    int64_t d,
+    int64_t d_k,
+    int64_t d_v,
     float scaling_factor,
     bool return_softmaxstats,
     bool is_causal,
@@ -528,7 +538,7 @@ void run_cudnn_SDP_fprop(
     Tensor& dropoutoffset) {
   cudnnHandle_t handle = getCudnnHandle();
   o = at::empty_strided(
-      {b, h, s_q, d}, {s_q * h * d, d, h * d, 1}, q.options());
+      {b, h, s_q, d_v}, {s_q * h * d_v, d_v, h * d_v, 1}, q.options());
   if (return_softmaxstats) {
     // TODO(eqy): verify that this is correct
     softmaxstats = at::empty({b, h, s_q}, q.options().dtype(kFloat));
@@ -539,7 +549,8 @@ void run_cudnn_SDP_fprop(
       h,
       s_q,
       s_kv,
-      d,
+      d_k,
+      d_v,
       q,
       k,
       v,
@@ -556,7 +567,9 @@ void run_cudnn_SDP_fprop(
         h,
         s_q,
         s_kv,
-        d,
+        d
+        ,
+    d_v,
         scaling_factor,
         return_softmaxstats,
         is_causal,
@@ -599,7 +612,8 @@ void run_cudnn_SDP_bprop(
     int64_t h,
     int64_t s_q,
     int64_t s_kv,
-    int64_t d,
+    int64_t d_k,
+    int64_t d_v,
     float scaling_factor,
     bool is_causal,
     float dropout_probability,
@@ -623,7 +637,7 @@ void run_cudnn_SDP_bprop(
   }
   cudnnHandle_t handle = getCudnnHandle();
   auto key = MHACacheKeyWrapper(
-      b, h, s_q, s_kv, d, q, k, v, dropout_probability, is_causal, true);
+      b, h, s_q, s_kv, d_k, d_v, q, k, v, dropout_probability, is_causal, true);
   auto graph_and_tensors_backward_ptr = mhagraphbackwardcache.find(key);
   graph_and_tensors_backward graph_and_tensors_backward_values;
   if (graph_and_tensors_backward_ptr) {
@@ -634,7 +648,8 @@ void run_cudnn_SDP_bprop(
         h,
         s_q,
         s_kv,
-        d,
+        d_k,
+        d_v,
         scaling_factor,
         is_causal,
         dropout_probability,
@@ -684,5 +699,3 @@ void run_cudnn_SDP_bprop(
 
 } // namespace native
 } // namespace at
-
-#endif
