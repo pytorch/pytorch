@@ -6,7 +6,7 @@
    - [Untrusted inputs](#untrusted-inputs)
    - [Data privacy](#data-privacy)
    - [Using distributed features](#using-distributed-features)
-
+- [**CI/CD security principles**](#cicd-security-principles)
 ## Reporting Security Issues
 
 Beware that none of the topics under [Using Pytorch Securely](#using-pytorch-securely) are considered vulnerabilities of Pytorch.
@@ -61,3 +61,26 @@ If applicable, prepare your model against bad inputs and prompt injections. Some
 PyTorch can be used for distributed computing, and as such there is a `torch.distributed` package. PyTorch Distributed features are intended for internal communication only. They are not built for use in untrusted environments or networks.
 
 For performance reasons, none of the PyTorch Distributed primitives (including c10d, RPC, and TCPStore) include any authorization protocol and will send messages unencrypted. They accept connections from anywhere, and execute the workload sent without performing any checks. Therefore, if you run a PyTorch Distributed program on your network, anybody with access to the network can execute arbitrary code with the privileges of the user running PyTorch.
+
+## CI/CD security principles
+
+PyTorch CI/CD security philosophy are based on an attempt to find balance between open and transparent CI pipelines, but at the same time keeping environment efficient and safe.
+
+PyTorch testing requirements are pretty complex and large part of the code base can only be tested on a specialized powerful hardware, such as GPU, which makes them a lucrative target for resource misuse. To prevent that, we requrie a workflow run approval for PR from non-member contributors. But to keep the volume of those approvals relavitvely low, we easily extend write permissions to the repository to regular contributors.
+
+More widespread write access to the repo presents set of challenges, when it comes to reviewing changes, merging code into trunk and creating releases. [Protected branches](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-protected-branches/about-protected-branches) are used to restrict ability to merge to the trunk/release branches only to the repository administators and merge bot, which is resposible for mechanistically merging the change as well as validating reviews against the path based rules defined in  [merge_rules.yml](https://github.com/pytorch/pytorch/blob/main/.github/merge_rules.yaml). One PR has been reviewed by persons mentioned in this rules, leaving `@pytorchbot merge` comment on the PR will initiate the merge process. To protect merge bot credentials from leaking, merge actions must be executed only on ephemeral runners (see definition below) using specialized deployment environment.
+
+To speed up CI system, build steps of the workflow rely on the distributed caching mechanism backed by [sccache](https://github.com/mozilla/sccache), which makes them succeptable from cache corruption compromise. For that reason, binary artifacts generated during CI should not be executed in an environment that contains an access to any sensitive/non-public information and also not supposed ot be published for use by general audicence. One should not have any expectation about the lifetime of those artifacts, although in practice they likely remiain accessible for about two weeks after PR has been closed.
+
+To speed up CI system setup, PyTorch relies heavily on docker to pre-build and pre-install the dependencies, but in order to prevent a potentially malitious PR from altering ones that were published in the past, ECR has been configured to use immutable tags.
+
+To improve runner availability and more efficient resource utilizaiton, some of the CI runners are non-ephemeral, i.e. workflow steps from completely unrelated PRs could be scheduled sequentially on the same runner, which makes them succeptable for the reverse shell attack. For that reason, PyTorch do not rely repository secrets mechanism, as those can easily be compromised in such attack.
+
+### Release pipelines security
+
+To assure safe binary releases PyTorch release pipelines are build on the following principles:
+ - All binary builds/upload jobs must be run on an ephemeral runners, i.e. on a machine that is allocated from the cloud to do the build and released back to the cloud after build is finished. This protects those builds from interference from external actors, who potentially can get an reverse shell access to a non-ephemeral runner and wait there for a binary build.
+ - All binary builds are cold-start builds, i.e. distribtued caching/incremental builds are not permitted. This renders builds much slower than incremental CI builds, but isolates them from a potential compromises of the intermediate artifacts caching systems.
+ - All upload jobs are executed in a [deployment environments](https://docs.github.com/en/actions/deployment/targeting-different-environments/using-environments-for-deployment) that are restricted to a protected branches
+ - Security credentials neeeded to upload binaries to PyPI/conda nor stable indexes `download.pytorch.org/whl` are never uploaded to repo secrets storage/environment. This requires an extra manual step to publish the release, but at the same time ensures that access to those would not be compromised by deliberate/accidental leaks of secrets store in the cloud.
+ - No binary artifacts should be published to github releases pages, as those are overwritable by anyone with write permission to the repo.
