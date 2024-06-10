@@ -75,8 +75,13 @@ def check_node_safe(node: Node):
     Checks that the node only uses supported operators. We are starting with very
     conservative cacheability constraints, and incrementally adding more support as we expand.
     """
+    SAFE_TORCH_MODULES = ("torch.functional", "torch.nn.functional", "torch")
 
     def is_torch_function(target):
+        if isinstance(target, torch._ops.OpOverload):
+            return True
+        if hasattr(target, "__module__") and target.__module__ in SAFE_TORCH_MODULES:
+            return True
         is_builtin_fun_or_type = type(target).__name__ == "builtin_function_or_method"
         # TODO: handle torch.nn.functional and other non inlined targets, which don't compile down to a builtin
         return is_builtin_fun_or_type
