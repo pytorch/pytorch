@@ -591,7 +591,7 @@ def _broadcast_state_dict(
         if missing_keys := (local_state_dict_keys - global_keys):
             for key in missing_keys:
                 local_state_dict.pop(key)
-                
+  
     if keys:
         _broadcast_tensors(ret, local_state_dict, keys, device, pg)
 
