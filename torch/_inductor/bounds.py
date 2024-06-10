@@ -1,4 +1,5 @@
 # mypy: allow-untyped-defs
+import logging
 import operator
 from functools import partial
 from typing import Any, Callable, Dict
@@ -10,6 +11,9 @@ from torch.utils._sympy.value_ranges import bound_sympy, ValueRangeAnalysis, Val
 from .ir import InterpreterShim, LoopBody, LoopBodyBlock
 from .utils import cache_on_self, dominated_nodes
 from .virtualized import V
+
+
+log = logging.getLogger(__name__)
 
 
 class BoundVars:
@@ -56,6 +60,7 @@ class BoundVars:
 
         with V.set_ops_handler(ValueRangeAnalysis()):
             interpreter = InterpreterShim(self.loop_body.root_block.graph, submodules)
+            log.debug("get_bounds:\n%s", self.loop_body.root_block.graph)
             interpreter.run(V.get_ops_handler(), initial_env=self._bounds)
         return self._bounds
 

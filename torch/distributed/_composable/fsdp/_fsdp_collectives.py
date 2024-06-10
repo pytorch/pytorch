@@ -1,6 +1,7 @@
 from typing import List, NamedTuple, Optional, Tuple, Union
 
 import torch
+import torch._dynamo.compiled_autograd as ca
 import torch.distributed as dist
 from torch.distributed._tensor import DTensor
 from torch.distributed.distributed_c10d import ReduceOp
@@ -102,10 +103,21 @@ def foreach_all_gather_copy_out(
     for all_gather_input_numels, all_gather_input_dtypes, fsdp_param in zip(
         param_all_gather_input_numels, param_all_gather_input_dtypes, fsdp_params
     ):
-        fsdp_param.init_all_gather_outputs(
-            all_gather_input_numels, all_gather_input_dtypes, world_size, device
-        )  # no-op after 1st call
-        fsdp_param.alloc_all_gather_outputs()
+        if ca.compiled_autograd_enabled:
+            fsdp_param.init_all_gather_outputs(
+                all_gather_input_numels,
+                all_gather_input_dtypes,
+                world_size,
+                device,
+                # NOTE: Under compile, make sure we always recreate all_gather_outputs
+                # per AllGather. See [Note: Invariants for torch.compile Traceable FSDP2].
+                force_recreate=True,
+            )
+        else:
+            fsdp_param.init_all_gather_outputs(
+                all_gather_input_numels, all_gather_input_dtypes, world_size, device
+            )  # no-op after 1st call
+            fsdp_param.alloc_all_gather_outputs()
     all_gather_output = all_gather_output.view(world_size, -1)
     gen = (t for fsdp_param in fsdp_params for t in fsdp_param.all_gather_outputs)
     if all_gather_output.dtype == torch.uint8:
