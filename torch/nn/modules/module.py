@@ -418,7 +418,9 @@ class Module:
     # As JIT does not support Set[int], this dict is used as a set, where all
     # hooks represented in this dict accept kwargs.
     _forward_pre_hooks_with_kwargs: Dict[int, bool]
-    _state_dict_hooks: Dict[int, Callable]
+    # The bool indicates whether the hook comes from the private method
+    # or the public method.
+    _state_dict_hooks: Dict[int, Tuple[Callable, bool]]
     _load_state_dict_pre_hooks: Dict[int, Callable]
     _state_dict_pre_hooks: Dict[int, Callable]
     _load_state_dict_post_hooks: Dict[int, Callable]
@@ -1799,12 +1801,6 @@ class Module:
             super().__delattr__(name)
 
     def _register_state_dict_hook(self, hook):
-        r"""See :meth:`~torch.nn.Module.register_state_dict_post_hook` for details."""
-        handle = hooks.RemovableHandle(self._state_dict_hooks)
-        self._state_dict_hooks[handle.id] = hook
-        return handle
-
-    def register_state_dict_post_hook(self, hook):
         r"""Register a post-hook for the :meth:`~torch.nn.Module.state_dict` method.
 
         It should have the following signature::
@@ -1814,7 +1810,23 @@ class Module:
         If a new ``state_dict`` is returned, it will only be respected if it is the root
         module that `:meth:~nn.Module.state_dict` is called from.
         """
-        return self._register_state_dict_hook(hook)
+        handle = hooks.RemovableHandle(self._state_dict_hooks)
+        # True indicates that the hook was registered via the private method
+        self._state_dict_hooks[handle.id] = (hook, True)
+        return handle
+
+    def register_state_dict_post_hook(self, hook):
+        r"""Register a post-hook for the :meth:`~torch.nn.Module.state_dict` method.
+
+        It should have the following signature::
+            hook(module, state_dict, prefix, local_metadata) -> None
+
+        The registered hooks can modify the ``state_dict`` inplace.
+        """
+        handle = hooks.RemovableHandle(self._state_dict_hooks)
+        # False indicates that the hook was registered via the private method
+        self._state_dict_hooks[handle.id] = (hook, False)
+        return handle
 
     def register_state_dict_pre_hook(self, hook):
         r"""Register a pre-hook for the :meth:`~torch.nn.Module.state_dict` method.
@@ -1943,9 +1955,9 @@ class Module:
         for name, module in self._modules.items():
             if module is not None:
                 module.state_dict(destination=destination, prefix=prefix + name + '.', keep_vars=keep_vars)
-        for hook in self._state_dict_hooks.values():
+        for (hook, from_private) in self._state_dict_hooks.values():
             hook_result = hook(self, destination, prefix, local_metadata)
-            if hook_result is not None:
+            if from_private and hook_result is not None:
                 destination = hook_result
         return destination
 
