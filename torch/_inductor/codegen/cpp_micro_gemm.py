@@ -7,7 +7,7 @@ import sympy
 import torch
 
 from .. import ir
-from ..codecache import pick_vec_isa, VecAVX2, VecAVX512
+from ..cpu_vec_isa import pick_vec_isa, VecAVX2, VecAVX512
 from ..utils import IndentedBuffer, parallel_num_threads
 from ..virtualized import V
 from .common import KernelTemplate
