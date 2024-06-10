@@ -24,7 +24,6 @@ import torch
 import torch.distributed as dist
 from torch.multiprocessing import current_process, get_context
 from torch.testing._internal.common_utils import (
-    FILE_SCHEMA,
     get_report_path,
     IS_CI,
     IS_MACOS,
@@ -745,14 +744,7 @@ def test_distributed(test_module, test_directory, options):
             old_environ = dict(os.environ)
             os.environ["TEMP_DIR"] = tmp_dir
             os.environ["BACKEND"] = backend
-            os.environ["INIT_METHOD"] = "env://"
             os.environ.update(env_vars)
-            if with_init_file:
-                if test_module.name == "test_distributed_spawn":
-                    init_method = f"{FILE_SCHEMA}{tmp_dir}/"
-                else:
-                    init_method = f"{FILE_SCHEMA}{tmp_dir}/shared_init_file"
-                os.environ["INIT_METHOD"] = init_method
             try:
                 os.mkdir(os.path.join(tmp_dir, "barrier"))
                 os.mkdir(os.path.join(tmp_dir, "test_dir"))
@@ -1188,22 +1180,15 @@ def parse_args():
             or (IS_WINDOWS and not TEST_CUDA)
             or TEST_CONFIG == "nogpu_AVX512"
             or TEST_CONFIG == "nogpu_NO_AVX2"
-            or (
-                "sm86" not in BUILD_ENVIRONMENT
-                and TEST_CONFIG == "default"
-                and TEST_CUDA
-            )
-            or (not TEST_CUDA and TEST_CONFIG == "default")
+            or TEST_CONFIG == "default"
         )
         and get_pr_number() is not None
         and not strtobool(os.environ.get("NO_TD", "False"))
-        and not IS_SLOW
         and not TEST_WITH_ROCM
         and not IS_MACOS
         and "xpu" not in BUILD_ENVIRONMENT
         and "onnx" not in BUILD_ENVIRONMENT
-        and "debug" not in BUILD_ENVIRONMENT
-        and "parallelnative" not in BUILD_ENVIRONMENT,
+        and os.environ.get("GITHUB_WORKFLOW", "slow") in ("trunk", "pull"),
     )
     parser.add_argument(
         "--shard",
