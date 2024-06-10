@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import types
 
 import torch._C
