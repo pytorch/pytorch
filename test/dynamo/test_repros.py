@@ -1609,7 +1609,10 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         opt_model(inp)
         opt_model(inp)
         self.assertEqual(cnt.frame_count, 1)
-        self.assertEqual(cnt.op_count, 12)
+
+        self.assertEqual(
+            18 if torch._dynamo.config.inline_inbuilt_nn_modules else 12, cnt.op_count
+        )
 
     def test_exec_import(self):
         def fn1():

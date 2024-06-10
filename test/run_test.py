@@ -1180,22 +1180,15 @@ def parse_args():
             or (IS_WINDOWS and not TEST_CUDA)
             or TEST_CONFIG == "nogpu_AVX512"
             or TEST_CONFIG == "nogpu_NO_AVX2"
-            or (
-                "sm86" not in BUILD_ENVIRONMENT
-                and TEST_CONFIG == "default"
-                and TEST_CUDA
-            )
-            or (not TEST_CUDA and TEST_CONFIG == "default")
+            or TEST_CONFIG == "default"
         )
         and get_pr_number() is not None
         and not strtobool(os.environ.get("NO_TD", "False"))
-        and not IS_SLOW
         and not TEST_WITH_ROCM
         and not IS_MACOS
         and "xpu" not in BUILD_ENVIRONMENT
         and "onnx" not in BUILD_ENVIRONMENT
-        and "debug" not in BUILD_ENVIRONMENT
-        and "parallelnative" not in BUILD_ENVIRONMENT,
+        and os.environ.get("GITHUB_WORKFLOW", "slow") in ("trunk", "pull"),
     )
     parser.add_argument(
         "--shard",

@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import collections
 import warnings
 from typing import Optional, Sequence, Union

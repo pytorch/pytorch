@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 from collections import OrderedDict, namedtuple
 import itertools
 import warnings
@@ -794,13 +795,6 @@ class Module:
 
         should_use_swap_tensors = torch.__future__.get_swap_module_params_on_conversion()
 
-        def compute_should_use_swap_tensors(tensor, tensor_applied):
-            return (should_use_swap_tensors
-                    # subclasses may have multiple child tensors so we need to use swap_tensors
-                    or is_traceable_wrapper_subclass(tensor_applied)
-                    or tensor.device.type == 'xla'
-                    or tensor_applied.device.type == 'xla')
-
         for key, param in self._parameters.items():
             if param is None:
                 continue
@@ -811,7 +805,8 @@ class Module:
                 param_applied = fn(param)
             p_should_use_set_data = compute_should_use_set_data(param, param_applied)
 
-            p_should_use_swap_tensors = compute_should_use_swap_tensors(param, param_applied)
+            # subclasses may have multiple child tensors so we need to use swap_tensors
+            p_should_use_swap_tensors = should_use_swap_tensors or is_traceable_wrapper_subclass(param_applied)
 
             param_grad = param.grad
             if p_should_use_swap_tensors:
