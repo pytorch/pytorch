@@ -41,7 +41,11 @@ from torch.testing._internal.common_utils import (
 )
 from torch.utils import _pytree as pytree
 from torch.utils._python_dispatch import TorchDispatchMode
-from torch.utils._sympy.functions import FloorDiv, Mod
+from torch.utils._sympy.functions import (
+    FloorDiv,
+    IsNonOverlappingAndDenseIndicator,
+    Mod,
+)
 
 aten = torch.ops.aten
 
@@ -776,6 +780,70 @@ def forward(self, x_1):
         a0 = create_symint(shape_env, 5)
         r = torch.empty_strided((a0, 7), (1, a0), device="meta")
         self.assertTrue(torch.ops.aten.is_non_overlapping_and_dense.default(r))
+
+    def test_non_overlapping_and_dense_unbacked(self):
+        shape_env = ShapeEnv()
+        u0 = shape_env.create_unbacked_symint()
+        torch._check_is_size(u0)
+        cf = torch.ops.aten.is_non_overlapping_and_dense.default
+
+        self.assertEqual(IsNonOverlappingAndDenseIndicator(u0.node.expr, 2, 2, 1), 1)
+        self.assertEqual(IsNonOverlappingAndDenseIndicator(2, u0.node.expr, 1, 2), 1)
+        self.assertTrue(cf(torch.empty_strided((u0, 2), (2, 1), device="meta")))
+        self.assertTrue(cf(torch.empty_strided((2, u0), (1, 2), device="meta")))
+
+        self.assertEqual(IsNonOverlappingAndDenseIndicator(u0.node.expr, 1), 1)
+        self.assertEqual(IsNonOverlappingAndDenseIndicator(1, u0.node.expr), 1)
+        self.assertTrue(cf(torch.empty_strided((u0,), (1,), device="meta")))
+        self.assertTrue(cf(torch.empty_strided((1,), (u0,), device="meta")))
+
+        Max = torch.sym_max
+        # NB: This only works because we're able to determine this tensor is
+        # contiguous. transpose(0, 1) makes it stop working
+        self.assertTrue(
+            cf(
+                torch.empty_strided(
+                    (
+                        2,
+                        3,
+                        1,
+                        u0,
+                    ),
+                    (3 * Max(1, u0), Max(1, u0), Max(1, u0), 1),
+                    device="meta",
+                )
+            )
+        )
+
+    def test_debug_has_internal_overlap_unbacked(self):
+        shape_env = ShapeEnv()
+        u0 = shape_env.create_unbacked_symint()
+        torch._check_is_size(u0)
+        cf = torch._debug_has_internal_overlap
+        self.assertEqual(cf(torch.empty_strided((u0, 2), (2, 1), device="meta")), 0)
+        self.assertEqual(cf(torch.empty_strided((2, u0), (1, 2), device="meta")), 0)
+        self.assertEqual(cf(torch.empty_strided((u0,), (1,), device="meta")), 0)
+        self.assertEqual(cf(torch.empty_strided((1,), (u0,), device="meta")), 0)
+        Max = torch.sym_max
+        self.assertEqual(
+            cf(
+                torch.empty_strided(
+                    (
+                        2,
+                        3,
+                        1,
+                        u0,
+                    ),
+                    (3 * Max(1, u0), Max(1, u0), Max(1, u0), 1),
+                    device="meta",
+                )
+            ),
+            0,
+        )
+
+        # Wobbling these to zero is OK too
+        self.assertEqual(cf(torch.empty_strided((u0, 2), (3, 1), device="meta")), 2)
+        self.assertEqual(cf(torch.empty_strided((2, u0), (1, 3), device="meta")), 2)
 
     def test_specialize_zero_one(self):
         shape_env = ShapeEnv(specialize_zero_one=True)
