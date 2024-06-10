@@ -147,7 +147,7 @@ bool _use_cudnn_ctc_loss_tensor(
           (tl[b] <= il[b]);
       if (!use_cudnn) {
         tensor_failed_target_lengths_check = true;
-	break;
+        break;
       }
     }
   } else {
@@ -155,7 +155,7 @@ bool _use_cudnn_ctc_loss_tensor(
     if (tensor_failed_target_lengths_check) {
       TORCH_WARN("cuDNN max target length restriction < 256 cannot be checked during graph capture,"
                  " but target length >= 256 was observed previously e.g., during warmup, so we"
-		 " presume it is unsafe to dispatch to cuDNN ctc_loss.");
+                 " presume it is unsafe to dispatch to cuDNN ctc_loss.");
     }
   }
 
