@@ -6,8 +6,8 @@ import math
 import os
 import sys
 import unittest
-from typing import List
 from functools import partial
+from typing import List
 
 import torch
 import torch.library
@@ -369,7 +369,9 @@ class TestInductorDynamic(TestCase):
         arg = torch.tensor(5, device=device)
         self.assertEqual(f(arg), cf(arg))
 
-    @torch._dynamo.config.patch(capture_scalar_outputs=True, capture_dynamic_output_shape_ops=True)
+    @torch._dynamo.config.patch(
+        capture_scalar_outputs=True, capture_dynamic_output_shape_ops=True
+    )
     @torch._inductor.config.patch(implicit_fallbacks=True)
     def test_unbacked_save_for_backwards(self, device) -> None:
         @torch.library.custom_op("_test::_cat", mutates_args=())
