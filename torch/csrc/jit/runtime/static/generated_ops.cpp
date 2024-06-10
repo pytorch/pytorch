@@ -1922,27 +1922,6 @@ REGISTER_OPERATOR_FUNCTOR(
       return nullptr;
     });
 
-REGISTER_OPERATOR_FUNCTOR(
-    aten::_nested_get_values_copy,
-    aten__nested_get_values_copy,
-    [](Node* n) -> SROperator {
-      if (n->matches(torch::schema(
-              "aten::_nested_get_values_copy(Tensor self) -> Tensor"))) {
-        return [](ProcessedNode* p_node) {
-          const auto& self = p_node->Input(0).toTensor();
-          if (p_node->Output(0).isNone()) {
-            p_node->Output(0) = at::native::_nested_get_values_copy(self);
-            return;
-          }
-          auto& out = p_node->Output(0).toTensor();
-          fastResizeToZero(out);
-          at::native::_nested_get_values_copy_out(self, out);
-        };
-      }
-      LogAndDumpSchema(n);
-      return nullptr;
-    });
-
 REGISTER_OPERATOR_FUNCTOR(aten::trunc, aten_trunc, [](Node* n) -> SROperator {
   if (n->matches(torch::schema("aten::trunc(Tensor self) -> Tensor"))) {
     return [](ProcessedNode* p_node) {
