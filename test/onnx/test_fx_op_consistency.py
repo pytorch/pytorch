@@ -522,11 +522,6 @@ EXPECTED_SKIPS_OR_FAILS_WITH_DTYPES: Tuple[onnx_test_common.DecorateMeta, ...] =
         reason=onnx_test_common.reason_dynamo_does_not_support("full_like", "complex64")
     ),
     xfail(
-        "gather",
-        reason="HandleNegativeAxis(int64_t, int64_t) IsAxisInRange(axis, tensor_rank) was \
-            false. axis 0 is not in valid range [-0,-1]"
-    ),
-    xfail(
         "geometric",
         reason=onnx_test_common.reason_dynamo_does_not_support("wrapper_set_seed"),
     ),
