@@ -1,7 +1,7 @@
 #include <torch/csrc/fx/node.h>
 
-#include <torch/csrc/utils/pythoncapi_compat.h>
 #include <structmember.h>
+#include <torch/csrc/utils/pythoncapi_compat.h>
 
 ////////////////////////////////
 // NodeBase
