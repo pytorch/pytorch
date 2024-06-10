@@ -136,7 +136,11 @@ class BinaryFoldingTemplate(TestCase):
                 nn.Conv2d,
                 pytorch_op,
                 False,
-                add_tensor=torch.rand(32, 1, 32).to(self.device),
+                add_tensor=torch.rand(
+                    32,
+                    1,
+                    32,
+                ).to(self.device),
                 expect_success=False,
             )
 
@@ -156,7 +160,7 @@ class BinaryFoldingTemplate(TestCase):
                 nn.Conv2d,
                 pytorch_op,
                 False,
-                add_tensor=torch.tensor([2]).to(torch.int).to(self.device),
+                add_tensor=torch.tensor([2]).to(torch.float64).to(self.device),
                 expect_success=False,
             )
 
