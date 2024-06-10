@@ -330,8 +330,6 @@ def proxy_call(proxy_mode, func, pre_dispatch, args, kwargs):
     if r is not NotImplemented:
         return r
 
-    _can_decompose = not proxy_mode.pre_dispatch and not ()
-
     # For pre-autograd tracing, we do not want to run CompositeImplicit decomps.
     if func not in [
         torch.ops.aten.size.default,
