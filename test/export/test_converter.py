@@ -260,6 +260,7 @@ class TestConverter(TestCase):
         class MUnpackList(torch.nn.Module):
             def forward(self, x):
                 x, y = torch.split(x, 2)
+                # print(x, y)
                 return x + y
 
         class MUnpackTuple(torch.nn.Module):
@@ -268,7 +269,7 @@ class TestConverter(TestCase):
                 x = x.cos()
                 return x + y
 
-        inp = torch.ones(1, 4)
+        inp = (torch.ones(4),)
         self._check_equal_ts_ep_converter(MUnpackList(), inp)
         inp = ((torch.zeros(1, 4), torch.ones(1, 4)),)
         self._check_equal_ts_ep_converter(MUnpackTuple(), inp)
