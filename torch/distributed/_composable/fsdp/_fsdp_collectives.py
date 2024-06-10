@@ -26,7 +26,7 @@ class AllGatherResult(NamedTuple):
     all_gather_input_split_sizes: List[int]
 
 
-lib = torch.library.Library("fsdp", "FRAGMENT")
+lib = torch.library.Library("fsdp", "FRAGMENT")  # noqa: TOR901
 
 lib.define(
     """
@@ -48,11 +48,11 @@ def all_gather_copy_in_meta(
     all_gather_input_numel: int,
     world_size: int,
     rank: int,
-    dtype: int,
+    dtype: torch.dtype,
     device: torch.device,
     inp_split_sizes: List[int],
     all_gather_inputs: List[torch.Tensor],
-) -> (torch.Tensor, torch.Tensor):
+) -> Tuple[torch.Tensor, torch.Tensor]:
     all_gather_output = torch.empty(
         (all_gather_input_numel * world_size,), dtype=dtype, device="meta"
     )
@@ -67,11 +67,11 @@ def all_gather_copy_in_cuda(
     all_gather_input_numel: int,
     world_size: int,
     rank: int,
-    dtype: int,
+    dtype: torch.dtype,
     device: torch.device,
     inp_split_sizes: List[int],
     all_gather_inputs: List[torch.Tensor],
-):
+) -> Tuple[torch.Tensor, torch.Tensor]:
     all_gather_output = torch.empty(
         (all_gather_input_numel * world_size,), dtype=dtype, device=device
     )
@@ -90,19 +90,8 @@ lib.define(
 
 
 @torch.library.impl(lib, "split_with_sizes_copy", "Meta")
-def split_with_sizes_copy_meta(
-    all_gather_output: torch.Tensor,
-    all_gather_input_split_sizes: List[int],
-    dim: int,
-    out: List[torch.Tensor],
-) -> None:
-    torch.split_with_sizes_copy(
-        all_gather_output, all_gather_input_split_sizes, dim=dim, out=out
-    )
-
-
 @torch.library.impl(lib, "split_with_sizes_copy", "CUDA")
-def split_with_sizes_copy_cuda(
+def split_with_sizes_copy(
     all_gather_output: torch.Tensor,
     all_gather_input_split_sizes: List[int],
     dim: int,
@@ -113,23 +102,8 @@ def split_with_sizes_copy_cuda(
     )
 
 
-lib.define(
-    "chunk_cat(Tensor[] tensors, int dim, int num_chunks, *, Tensor(a!) out) -> ()"
-)
-
-
-@torch.library.impl(lib, "chunk_cat", "Meta")
-def chunk_cat_meta(
-    tensors: List[torch.Tensor],
-    dim: int,
-    num_chunks: int,
-    out: torch.Tensor,
-) -> None:
-    torch._chunk_cat(tensors, dim, num_chunks, out=out)
-
-
-@torch.library.impl(lib, "chunk_cat", "CUDA")
-def chunk_cat_cuda(
+@torch.library.custom_op("fsdp::chunk_cat", mutates_args=("out",))
+def chunk_cat(
     tensors: List[torch.Tensor],
     dim: int,
     num_chunks: int,
