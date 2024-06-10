@@ -4392,8 +4392,6 @@ class TestTensorUnionFind(TestCase):
 
     @xfailIfTorchDynamo
     def test_lifetime(self):
-        # Tests the invariant that the canonical tensor is kept alive by the
-        # the tensors in its equiv set.
         uf = self._get_test_union_find()
         a = torch.tensor([1, 2, 3])
         b = a.clone()
@@ -4430,11 +4428,13 @@ class TestTensorUnionFind(TestCase):
         # mutate the canonical
         a.add_(1)
 
-        # When another tensor in the set tries to query for the canonical
+        # When the canonical is mutated, trying to do any operation on that
+        # union find set produces an error:
+        #
+        # 1) Querying for the canonical
         with self.assertRaisesRegex(RuntimeError, "has been mutated"):
             uf.find(b)
-
-        # What happens if we merge this new one with the old one? You can't!
+        # 2) Merging
         with self.assertRaisesRegex(RuntimeError, "has been mutated"):
             uf.merge(a, b)
 
@@ -4442,30 +4442,40 @@ class TestTensorUnionFind(TestCase):
         # to a new set where it is still canonical.
         self.assertIs(uf.find(a), a)
 
+    @xfailIfTorchDynamo
     def test_union_find_compile(self):
-        # TODO: improve how testing is done.
+        # Today, UnionFind APIs should not be used directly when compiling.
+
+        # During fakification, compiler is only aware of the state of the
+        # global union find. Alternatively, we could add a way to track which
+        # union find each tensor belongs to.
         uf = torch.nested._internal.union_find.get_union_find()
         from torch.nested._internal.union_find import merge, find
 
+        # You should NOT be calling `find(a) is find(b)` directly when using
+        # the union find in a compiled function. Checking whether two tensors
+        # are in the same set should only be done as part of testing whether
+        # two nested tensors have the same shape, as that would allow us to
+        # make use of ShapeEnv guards.
         def f(a, b, c, d):
             merge(b, c)
-            return find(a) is find(b)
+            return find(a) is find(d)
 
         a = torch.tensor([1.], requires_grad=True)
         b = torch.tensor([1.], requires_grad=True)
         c = torch.tensor([1.], requires_grad=True)
         d = torch.tensor([1.], requires_grad=True)
-        torch._dynamo.mark_dynamic(a, 0)
 
         uf.merge(a, b)
         uf.merge(c, d)
         compiled_f = torch.compile(f, fullgraph=True, backend="aot_eager")
-        # We know ahead of time the aliasing, so the idea is that
-
-        # Knowing the state of the union find and the aliasing properties
-        # of the inputs, the output is deterministic.
-        # How do I know the state of the union find?
         out1 = compiled_f(a, b, c, d)
+
+        # The state of the union find is properly reflected in the fake world
+        self.assertTrue(out1)
+
+        # This is wrong, we need side effects
+        self.assertFalse(find(a) is find(d))
 
         a = torch.tensor([1.], requires_grad=True)
         b = torch.tensor([1.], requires_grad=True)
@@ -4475,9 +4485,9 @@ class TestTensorUnionFind(TestCase):
         compiled_f(a, b, c, d)
         out2 = compiled_f(a, b, c, d)
 
-        # This should've triggered a recompute.
-        print(out1, out2)
-        # We need to guard on the state of the union find?
+        # This is not correct because we do NOT guard on the state of the union
+        # find.
+        self.assertTrue(out2)
 
 
 
