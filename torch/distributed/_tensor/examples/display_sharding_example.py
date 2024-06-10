@@ -16,7 +16,9 @@ from torch.distributed.tensor.parallel import (
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     MLPModule,
     MLPStacked,
+    ModelArgs,
     NUM_DEVICES,
+    Transformer,
 )
 
 
@@ -156,6 +158,73 @@ class DisplayShardingExample:
 
         comm_mode.print_sharding_info()
 
+    def test_MLP_module_tracing(self, is_seq_parallel=False):
+        """
+        Example code to demonstrate CommModeDebug's module level tracing using a MLP model.
+        Prints a table of module level collective tracing information
+        """
+
+        device_mesh = DeviceMesh(
+            self.device_type,
+            torch.arange(0, NUM_DEVICES),
+        )
+        inp_size = [8, 10]
+        rng_seed = self.rank if is_seq_parallel else 0
+        torch.manual_seed(rng_seed)
+        inp = torch.rand(*inp_size, device=self.device_type)
+        model = MLPModule(self.device_type)
+
+        LR = 0.25
+
+        parallelize_plan = {
+            "net1": ColwiseParallel(input_layouts=Shard(0))
+            if is_seq_parallel
+            else ColwiseParallel(),
+            "net2": RowwiseParallel(output_layouts=Shard(0))
+            if is_seq_parallel
+            else RowwiseParallel(),
+        }
+
+        model = parallelize_module(model, device_mesh, parallelize_plan)
+
+        comm_mode = CommDebugMode()
+
+        with comm_mode:
+            output_tp = model(inp)
+            output_tp.sum().backward()
+
+        # print the module level collective tracing information
+        comm_mode.generate_module_tracing_table()
+
+        print(comm_mode.get_comm_module_counts())
+
+    def test_transformer_module_tracing(self, is_seq_parallel=False):
+        """
+        Example code to demonstrate CommModeDebug's module level tracing using a distributed Transformer model.
+        Prints a table of module level collective tracing information
+        """
+        device_mesh = DeviceMesh(
+            self.device_type,
+            torch.arange(0, NUM_DEVICES),
+        )
+
+        model_args = ModelArgs()
+        model = Transformer(model_args).to(device=self.device_type)
+        model = Transformer.parallelize(model, device_mesh, is_seq_parallel)
+
+        LR = 0.25
+        inp_size = [8, 8]
+
+        torch.manual_seed(0)
+        inp = torch.randint(model_args.vocab_size, inp_size, device=self.device_type)
+
+        comm_mode = CommDebugMode()
+        with comm_mode:
+            output = model(inp)
+
+        # print the module level collective tracing information
+        comm_mode.generate_module_tracing_table()
+
 
 def run_example(world_size, rank):
     # set manual seed
@@ -164,6 +233,8 @@ def run_example(world_size, rank):
     # run the example
     instantiated_test = DisplayShardingExample(world_size, rank)
     instantiated_test.test_display_parameters_MLP_distributed()
+    instantiated_test.test_MLP_module_tracing()
+    instantiated_test.test_transformer_module_tracing()
 
 
 if __name__ == "__main__":
