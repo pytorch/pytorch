@@ -1,5 +1,6 @@
 #include <torch/csrc/fx/node.h>
 
+#include <torch/csrc/utils/pythoncapi_compat.h>
 #include <structmember.h>
 
 ////////////////////////////////
@@ -99,12 +100,7 @@ static PyTypeObject NodeBaseType = {
 };
 
 bool NodeBase_init(PyObject* module) {
-  // Swap to PyModule_AddType when 3.10 is minimum version
-  if (PyType_Ready(&NodeBaseType) < 0) {
-    return false;
-  }
-  Py_INCREF(&NodeBaseType);
-  if (PyModule_AddObject(module, "_NodeBase", (PyObject*)&NodeBaseType) != 0) {
+  if (PyModule_AddType(module, &NodeBaseType) < 0) {
     return false;
   }
   return true;
@@ -254,12 +250,7 @@ static PyTypeObject NodeIterType = {
 };
 
 bool NodeIter_init(PyObject* module) {
-  // Swap to PyModule_AddType when 3.10 is minimum version
-  if (PyType_Ready(&NodeIterType) < 0) {
-    return false;
-  }
-  Py_INCREF(&NodeIterType);
-  if (PyModule_AddObject(module, "_NodeIter", (PyObject*)&NodeIterType) != 0) {
+  if (PyModule_AddType(module, &NodeIterType) < 0) {
     return false;
   }
   return true;
