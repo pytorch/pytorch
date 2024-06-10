@@ -272,6 +272,7 @@ class _node_list:
         return self.graph._len
 
     def __iter__(self):
+        assert self.direction == "_prev" or self.direction == "_next"
         yield from _NodeIter(self.graph._root, self.direction == "_prev")
 
     def __reversed__(self):

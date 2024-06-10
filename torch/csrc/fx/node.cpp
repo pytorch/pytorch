@@ -99,11 +99,7 @@ static PyTypeObject NodeBaseType = {
 };
 
 bool NodeBase_init(PyObject* module) {
-  if (PyType_Ready(&NodeBaseType) < 0) {
-    return false;
-  }
-  Py_INCREF(&NodeBaseType);
-  if (PyModule_AddObject(module, "_NodeBase", (PyObject*)&NodeBaseType) != 0) {
+  if (PyModule_AddType(module, &NodeBaseType) < 0) {
     return false;
   }
   return true;
@@ -163,13 +159,13 @@ PyObject* NodeIter_iternext_helper(NodeIter* self) {
   // but in practice, we do not have that many _erased Nodes,
   // so probably not worth it.
   if constexpr (reversed) {
-    Py_INCREF(self->_cur->_prev);
+    NodeBase* prev = (NodeBase*)Py_NewRef(self->_cur->_prev);
     Py_XDECREF(self->_cur);
-    self->_cur = self->_cur->_prev;
+    self->_cur = prev;
   } else {
-    Py_INCREF(self->_cur->_next);
+    NodeBase* next = (NodeBase*)Py_NewRef(self->_cur->_next);
     Py_XDECREF(self->_cur);
-    self->_cur = self->_cur->_next;
+    self->_cur = next;
   }
   while (self->_cur != self->_root) {
     if (!self->_cur->_erased) {
@@ -177,13 +173,13 @@ PyObject* NodeIter_iternext_helper(NodeIter* self) {
       return (PyObject*)self->_cur;
     }
     if constexpr (reversed) {
-      Py_INCREF(self->_cur->_prev);
+      NodeBase* prev = (NodeBase*)Py_NewRef(self->_cur->_prev);
       Py_XDECREF(self->_cur);
-      self->_cur = self->_cur->_prev;
+      self->_cur = prev;
     } else {
-      Py_INCREF(self->_cur->_next);
+      NodeBase* next = (NodeBase*)Py_NewRef(self->_cur->_next);
       Py_XDECREF(self->_cur);
-      self->_cur = self->_cur->_next;
+      self->_cur = next;
     }
   }
   PyErr_SetNone(PyExc_StopIteration);
@@ -258,11 +254,7 @@ static PyTypeObject NodeIterType = {
 };
 
 bool NodeIter_init(PyObject* module) {
-  if (PyType_Ready(&NodeIterType) < 0) {
-    return false;
-  }
-  Py_INCREF(&NodeIterType);
-  if (PyModule_AddObject(module, "_NodeIter", (PyObject*)&NodeIterType) != 0) {
+  if (PyModule_AddType(module, &NodeIterType) < 0) {
     return false;
   }
   return true;
