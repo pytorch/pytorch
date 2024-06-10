@@ -1137,6 +1137,9 @@ class VariableBuilder:
                 for p in value.parameters():
                     mark_static_address(p)
 
+                for b in value.buffers():
+                    mark_static_address(b)
+
             result = UnspecializedNNModuleVariable(value, source=self.source)
             if not SideEffects.cls_supports_mutation_side_effects(type(value)):
                 # don't allow STORE_ATTR mutation with custom __setattr__
