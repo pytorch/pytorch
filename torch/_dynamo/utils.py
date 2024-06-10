@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import atexit
 import collections
 import contextlib
@@ -1905,7 +1906,7 @@ def run_node(tracer, node, args, kwargs, nnmodule):
                 assert nnmodule is not None
                 return nnmodule(*args, **kwargs)
             elif op == "get_attr":
-                return tracer.output_graph.get_submodule(node.target)
+                return tracer.get_submodule(node.target)
             elif op == "placeholder":
                 assert "example_value" in node.meta
                 return node.meta["example_value"]
@@ -1939,9 +1940,6 @@ def get_real_value(node, tracer):
         (node.args, node.kwargs),
         lambda n: get_real_value(n, tracer),
     )
-
-    if op == "placeholder" and "grapharg" in node.meta:
-        return node.meta["grapharg"].example
 
     if op == "call_module":
         nn_module = tracer.output_graph.nn_modules[node.target]
@@ -2018,12 +2016,12 @@ def object_has_getattribute(value: Any):
     return False
 
 
-def get_custom_getattr(value: Any, ignore_nn_module_getattr: bool = False):
+def get_custom_getattr(value: Any):
     try:
         getattr_fn = inspect.getattr_static(type(value), "__getattr__")
     except AttributeError:
         getattr_fn = None
-    if ignore_nn_module_getattr and getattr_fn is torch.nn.Module.__getattr__:
+    if getattr_fn is torch.nn.Module.__getattr__:
         # ignore this case of getattr
         getattr_fn = None
     return getattr_fn
