@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import torch
 from torch.overrides import (
     handle_torch_function,
