@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import collections
 from itertools import repeat
 from typing import List, Dict, Any
