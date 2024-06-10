@@ -372,7 +372,6 @@ class TestConverter(TestCase):
         class MUnpackList(torch.nn.Module):
             def forward(self, x):
                 x, y = torch.split(x, 2)
-                # print(x, y)
                 return x + y
 
         class MUnpackTuple(torch.nn.Module):
