@@ -193,6 +193,10 @@ class SizeVarAllocator:
         sizes = list(map(self.simplify, sizes))
 
         strides = [
+            # index_formulas may contain boolean expressions (e.g. s0 < 10),
+            # for which "strides" don't make sense so we ignore them here.
+            # NOTE: These expressions may still block merging dims in the sound
+            # substitution test performed in can_merge_dims.
             self.stride_vars(x, index_vars)
             if isinstance(x, sympy.Expr)
             else [0] * len(index_vars)
