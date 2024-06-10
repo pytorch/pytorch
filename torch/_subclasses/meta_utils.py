@@ -364,8 +364,8 @@ class MetaTensorDescriber:
             autograd_meta_from=autograd_meta_from,
             current_level=current_level,
             union_find_id=union_find_id,
-            mb_cached_max=mb_cached_max,
-            mb_cached_min=mb_cached_min,
+            cached_max=cached_max,
+            cached_min=cached_min,
         )
 
 
