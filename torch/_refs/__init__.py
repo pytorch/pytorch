@@ -233,7 +233,6 @@ __all__ = [
     # View & Shape Ops
     #
     "alias",
-    "alias_copy",
     "atleast_1d",
     "atleast_2d",
     "atleast_3d",
@@ -4461,9 +4460,6 @@ def T(a: TensorLikeType) -> TensorLikeType:
 @register_decomposition(aten.alias)
 def alias(a: TensorLikeType) -> TensorLikeType:
     return prims.view_of(a)
-
-
-alias_copy = _make_copy_from_view(alias)
 
 
 @register_decomposition(aten.transpose)
