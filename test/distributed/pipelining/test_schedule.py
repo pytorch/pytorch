@@ -19,10 +19,9 @@ from torch.distributed.pipelining import (
     ScheduleGPipe,
     ScheduleInterleaved1F1B,
     ScheduleLoopedBFS,
-    TracerPipelineStage,
 )
-from torch.distributed.pipelining.PipelineSchedule import _Action, _ComputationType
-from torch.distributed.pipelining.PipelineStage import _PipelineStageBase
+from torch.distributed.pipelining.schedules import _Action, _ComputationType
+from torch.distributed.pipelining.stage import _PipelineStageBase
 from torch.testing._internal.common_cuda import TEST_MULTIGPU
 from torch.testing._internal.common_distributed import (
     MultiProcContinousTest,
@@ -52,6 +51,12 @@ class MockPipelineStage(_PipelineStageBase):
 
     def _create_grad_recv_info(self, *args, **kwargs):
         return None
+
+    def _prepare_forward_infra(self, n_microbatches):
+        pass
+
+    def _prepare_backward_infra(self, n_microbatches):
+        pass
 
 
 class ScheduleTest(MultiProcContinousTest):
@@ -92,11 +97,9 @@ class ScheduleTest(MultiProcContinousTest):
             split_spec=split_spec,
         )
 
-        stage = TracerPipelineStage(
-            pipe,
+        stage = pipe.build_stage(
             self.rank,
             self.device,
-            chunks,  # to be cleaned
         )
 
         # Attach to a schedule
@@ -134,11 +137,9 @@ class ScheduleTest(MultiProcContinousTest):
             mb_kwargs={"y": y_mb},
         )
 
-        stage = TracerPipelineStage(
-            pipe,
+        stage = pipe.build_stage(
             self.rank,
             self.device,
-            chunks,  # to be cleaned
         )
 
         # Attach to a schedule
@@ -197,11 +198,9 @@ class ScheduleTest(MultiProcContinousTest):
             split_spec=split_spec,
         )
 
-        stage = TracerPipelineStage(
-            pipe,
+        stage = pipe.build_stage(
             self.rank,
             self.device,
-            chunks,  # to be cleaned
         )
 
         # Attach to a schedule
@@ -274,7 +273,6 @@ class ScheduleTest(MultiProcContinousTest):
             self.rank,
             self.world_size,
             self.device,
-            chunks,
             input_args=x.chunk(chunks)[0],
         )
 
@@ -358,7 +356,6 @@ class ScheduleTest(MultiProcContinousTest):
                 stage_idx,
                 n_stages,
                 self.device,
-                chunks,
                 input_args=input_args,
             )
             for stage_module, stage_idx in zip(stage_modules, stage_indices)
