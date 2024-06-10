@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 r"""
 This package implements abstractions found in ``torch.cuda``
 to facilitate writing device-agnostic code.

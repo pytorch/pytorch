@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import os  # noqa: C101
 import sys
 from typing import Any, Callable, Dict, List, Optional, TYPE_CHECKING, Union
@@ -805,8 +806,8 @@ class cuda:
     # Path to CUDA NVCC.
     # NVCC search order:
     # 1) cuda_cxx set in this config
-    # 2）CUDACXX environment variable
-    # 3）CUDA_HOME environment variable
+    # 2) CUDACXX environment variable
+    # 3) CUDA_HOME environment variable
     # 4) default system search PATH.
     cuda_cxx: Optional[str] = None
 
