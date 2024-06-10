@@ -772,6 +772,12 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
 
         super().__init__(value=value, **kwargs)
         self.is_state_mutated = False
+        # nn_module_stack_source is used to ensure BC for nn_module_stack.
+        # Downstream users prefer mod.linear instead of mod._modules['linear']
+        # as the module stack. When Dynamo inlines the __getattr__ method, we
+        # cannot use self.source for nn_module_stack because it will be similar
+        # to mod._modules['linear']. In these cases, we set the
+        # nn_module_stack_source appropriately to resemble mod.linear.
         self.nn_module_stack_source = self.source
 
     def get_nn_module_stack_source(self):
