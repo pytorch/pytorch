@@ -238,7 +238,6 @@ class NNModuleVariable(VariableTracker):
         base_dict = object.__getattribute__(base, "__dict__")
         object_member = True
         all_class_attribute_names = set()
-        is_submodule = False
         for x in inspect.getmro(base.__class__):
             all_class_attribute_names.update(x.__dict__.keys())
 
@@ -256,7 +255,6 @@ class NNModuleVariable(VariableTracker):
             and name not in all_class_attribute_names
         ):
             subobj = base_dict["_modules"][name]
-            is_submodule = True
         elif "_parameters" in base_dict and name in base_dict["_parameters"]:
             subobj = base_dict["_parameters"][name]
         elif "_buffers" in base_dict and name in base_dict["_buffers"]:
