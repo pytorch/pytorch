@@ -278,7 +278,7 @@ control_plane::RegisterHandler dumpHandler{
       if (validParamCount < params.size()) {
         res.setStatus(400);
         res.setContent(
-            "Invalid parameters - unexpected param in list", "text/plain");
+            "Invalid parameters - unexpected param passed in", "text/plain");
         return;
       }
       res.setContent(
