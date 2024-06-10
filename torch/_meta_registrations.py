@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import math
 from enum import Enum
 from typing import List, Optional, Sequence, Tuple, Union

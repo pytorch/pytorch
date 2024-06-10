@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import _collections_abc
 import _weakrefset
 import abc
@@ -3235,8 +3236,6 @@ MOD_INLINELIST = {
     "torch.cuda.amp.autocast_mode",
     "torch.distributions",
     "torch.fx._pytree",
-    "torch.fx._symbolic_trace",
-    "torch.fx.experimental.proxy_tensor",
     "torch.fx.passes.shape_prop",
     "torch.nn",
     "torch.random",
@@ -3525,7 +3524,11 @@ def lookup_inner(
     # The rules defined in `torch_name_rule_map` mainly includes two parts:
     # - Manually defined rules for any functions.
     # - The list of torch in graph functions.
-    if not hashable(obj):
+    try:
+        can_hash = hashable(obj)
+    except Exception:
+        can_hash = False
+    if not can_hash:
         if reasons is not None:
             reasons.add("obj is not hashable")
         return None
