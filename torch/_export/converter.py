@@ -888,10 +888,14 @@ class TS2EPConverter:
         ep = torch.export._trace._export(
             gm,
 <<<<<<< HEAD
+<<<<<<< HEAD
             self.sample_args,
 =======
             tuple(self.sample_args),
 >>>>>>> 3277b3504df (address comments)
+=======
+            self.sample_args,
+>>>>>>> cf3151edaf6 (fix)
             strict=False,
             pre_dispatch=True,
         )
