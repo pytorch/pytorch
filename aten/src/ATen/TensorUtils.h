@@ -171,17 +171,17 @@ TORCH_API void check_dim_size(
 namespace detail {
 TORCH_API std::vector<int64_t> defaultStrides(IntArrayRef sizes);
 
-TORCH_API c10::optional<std::vector<int64_t>> computeStride(
+TORCH_API std::optional<std::vector<int64_t>> computeStride(
     IntArrayRef oldshape,
     IntArrayRef oldstride,
     IntArrayRef newshape);
 
-TORCH_API c10::optional<SymDimVector> computeStride(
+TORCH_API std::optional<SymDimVector> computeStride(
     c10::SymIntArrayRef oldshape,
     c10::SymIntArrayRef oldstride,
     c10::SymIntArrayRef newshape);
 
-TORCH_API c10::optional<DimVector> computeStride(
+TORCH_API std::optional<DimVector> computeStride(
     IntArrayRef oldshape,
     IntArrayRef oldstride,
     const DimVector& newshape);

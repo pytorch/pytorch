@@ -346,7 +346,7 @@ inline Tensor smooth_l1_loss(
     const Tensor& input,
     const Tensor& target,
     SmoothL1LossFuncOptions::reduction_t reduction,
-    c10::optional<double> beta_opt = c10::nullopt) {
+    std::optional<double> beta_opt = c10::nullopt) {
   if (target.sizes() != input.sizes()) {
     TORCH_WARN(
         "Using a target size (",
@@ -656,7 +656,7 @@ inline Tensor triplet_margin_with_distance_loss(
     const Tensor& anchor,
     const Tensor& positive,
     const Tensor& negative,
-    c10::optional<TripletMarginWithDistanceLossFuncOptions::distance_function_t>
+    std::optional<TripletMarginWithDistanceLossFuncOptions::distance_function_t>
         distance_function,
     double margin,
     bool swap,
@@ -887,7 +887,7 @@ inline Tensor nll_loss(
     const Tensor& target,
     const Tensor& weight,
     int64_t ignore_index,
-    const NLLLossFuncOptions::reduction_t reduction) {
+    const NLLLossFuncOptions::reduction_t& reduction) {
   if (input.dim() < 2) {
     TORCH_CHECK(false, "Expected 2 or more dimensions (got ", input.dim(), ")");
   }

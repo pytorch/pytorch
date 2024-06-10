@@ -1615,6 +1615,58 @@ class TestQuantizedTensor(TestCase):
         out = x.div(s).add(zp).round()
         out.sum().backward()
 
+    def test_decomposed_quantize_per_channel_group(self):
+        # register the ops
+        import torch.ao.quantization.fx._decomposed
+        qmin, qmax = (-8, 7)
+        group_size = 128
+        x = torch.randn(100, 256)
+        s = torch.randn(100, 2)
+        zp = torch.randint(qmax, size=(100, 2), dtype=torch.int32)
+
+        # simulate fake quantize per channel group with qdq
+        q = torch.ops.quantized_decomposed.quantize_per_channel_group(
+            x, s, zp, qmin, qmax, torch.int8, group_size,
+        )
+        dq = torch.ops.quantized_decomposed.dequantize_per_channel_group(
+            q, s, zp, qmin, qmax, torch.int8, group_size, torch.float32
+        )
+
+        # express per group fake quant using `torch.fake_quantize_per_channel_affine`
+        x_grouped = x.reshape(-1, group_size)
+        s_flattened = s.flatten()
+        zp_flattened = zp.flatten()
+        fq = torch.fake_quantize_per_channel_affine(
+            x_grouped, s_flattened, zp_flattened, 0, qmin, qmax,
+        )
+        fq = fq.reshape_as(x)
+        torch.testing.assert_close(dq, fq, rtol=0, atol=0)
+
+    def test_decomposed_quantize_per_token(self):
+        # register the ops
+        import torch.ao.quantization.fx._decomposed
+        qmin, qmax = (-8, 7)
+        x = torch.randn(100, 256)
+        s = torch.randn(100, 1)
+        zp = torch.randint(qmax, size=(100, 1), dtype=torch.int32)
+
+        # simulate fake quantize per token with qdq
+        q = torch.ops.quantized_decomposed.quantize_per_token(
+            x, s, zp, qmin, qmax, torch.int8,
+        )
+        dq = torch.ops.quantized_decomposed.dequantize_per_token(
+            q, s, zp, qmin, qmax, torch.int8, torch.float32
+        )
+
+        # express per token fake quant using `torch.fake_quantize_per_channel_affine`
+        s_flattened = s.flatten()
+        zp_flattened = zp.flatten()
+        fq = torch.fake_quantize_per_channel_affine(
+            x, s_flattened, zp_flattened, 0, qmin, qmax,
+        )
+        torch.testing.assert_close(dq, fq, rtol=0, atol=0)
+
+
 if __name__ == '__main__':
     raise RuntimeError("This test file is not meant to be run directly, use:\n\n"
                        "\tpython test/test_quantization.py TESTNAME\n\n"

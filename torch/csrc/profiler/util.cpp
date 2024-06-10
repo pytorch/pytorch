@@ -10,20 +10,16 @@
 #include <libkineto.h>
 #endif
 #ifdef USE_DISTRIBUTED
-#ifdef USE_C10D
 #include <torch/csrc/distributed/c10d/ParamCommsUtils.hpp>
-#endif // USE_C10D
 #endif // USE_DISTRIBUTED
 
-namespace torch {
-namespace profiler {
-namespace impl {
+namespace torch::profiler::impl {
 
 namespace {
-c10::optional<bool> soft_assert_raises_;
+std::optional<bool> soft_assert_raises_;
 } // namespace
 
-void setSoftAssertRaises(c10::optional<bool> value) {
+void setSoftAssertRaises(std::optional<bool> value) {
   soft_assert_raises_ = value;
 }
 
@@ -336,30 +332,24 @@ std::vector<std::string> inputTypes(const at::RecordFunction& fn) {
 // ----------------------------------------------------------------------------
 // -- NCCL Metadata -----------------------------------------------------------
 // ----------------------------------------------------------------------------
-#ifdef USE_DISTRIBUTED
-#ifdef USE_C10D
-static constexpr auto kCommsName = "Collective name";
-static constexpr auto kDtype = "dtype";
-static constexpr auto kInMsgNelems = "In msg nelems";
-static constexpr auto kOutMsgNelems = "Out msg nelems";
-static constexpr auto kInSplit = "In split size";
-static constexpr auto kOutSplit = "Out split size";
-static constexpr auto kGlobalRankStart = "Global rank start";
-static constexpr auto kGlobalRankStride = "Global rank stride";
-static constexpr auto kGroupSize = "Group size";
-static constexpr auto kProcessGroupName = "Process Group Name";
-static constexpr auto kProcessGroupDesc = "Process Group Description";
-static constexpr auto kGroupRanks = "Process Group Ranks";
 
 static constexpr int32_t kTruncatLength = 30;
-#endif // USE_C10D
-#endif // USE_DISTRIBUTED
+
+template <typename ListLikeType>
+inline std::string format_list(ListLikeType list, bool truncate) {
+  if (truncate && list.size() > kTruncatLength) {
+    return fmt::format(
+        "\"[{}, ...]\"",
+        fmt::join(list.begin(), list.begin() + kTruncatLength, ", "));
+  }
+  return fmt::format("\"[{}]\"", fmt::join(list.begin(), list.end(), ", "));
+}
 
 std::unordered_map<std::string, std::string> saveNcclMeta(
-    const at::RecordFunction& fn) {
+    const at::RecordFunction& fn,
+    bool truncate) {
   std::unordered_map<std::string, std::string> map;
 #ifdef USE_DISTRIBUTED
-#ifdef USE_C10D
   auto debugInfo = dynamic_cast<ParamCommsDebugInfo*>(
       c10::ThreadLocalDebugInfo::get(c10::DebugInfoKind::PARAM_COMMS_INFO));
   if (debugInfo == nullptr) {
@@ -374,34 +364,13 @@ std::unordered_map<std::string, std::string> saveNcclMeta(
       kDtype, fmt::format("\"{}\"", c10::toString(debugInfo->getDType())));
   map.emplace(kInMsgNelems, std::to_string(debugInfo->getInMessageNelems()));
   map.emplace(kOutMsgNelems, std::to_string(debugInfo->getOutMessageNelems()));
+
   auto& inSplitSizes = debugInfo->getInputSplitSizes();
-  if (!inSplitSizes.empty() && inSplitSizes.size() <= kTruncatLength) {
-    map.emplace(
-        kInSplit, fmt::format("\"[{}]\"", fmt::join(inSplitSizes, ", ")));
-  } else if (inSplitSizes.size() > kTruncatLength) {
-    map.emplace(
-        kInSplit,
-        fmt::format(
-            "\"[{}, ...]\"",
-            fmt::join(
-                inSplitSizes.begin(),
-                inSplitSizes.begin() + kTruncatLength,
-                ", ")));
-  }
+  map.emplace(kInSplit, format_list(inSplitSizes, truncate));
+
   auto& outSplitSizes = debugInfo->getOutputSplitSizes();
-  if (!outSplitSizes.empty() && outSplitSizes.size() <= kTruncatLength) {
-    map.emplace(
-        kOutSplit, fmt::format("\"[{}]\"", fmt::join(outSplitSizes, ", ")));
-  } else if (outSplitSizes.size() > kTruncatLength) {
-    map.emplace(
-        kOutSplit,
-        fmt::format(
-            "\"[{}, ...]\"",
-            fmt::join(
-                outSplitSizes.begin(),
-                outSplitSizes.begin() + kTruncatLength,
-                ", ")));
-  }
+  map.emplace(kOutSplit, format_list(outSplitSizes, truncate));
+
   auto globalRankStart = debugInfo->getGlobalRankStart();
   if (globalRankStart >= 0) {
     map.emplace(kGlobalRankStart, std::to_string(globalRankStart));
@@ -420,21 +389,7 @@ std::unordered_map<std::string, std::string> saveNcclMeta(
     map.emplace(kProcessGroupDesc, fmt::format("\"{}\"", group_desc));
   }
   auto& groupRanks = debugInfo->getGroupRanks();
-  if (!groupRanks.empty() && groupRanks.size() <= kTruncatLength) {
-    map.emplace(
-        kGroupRanks, fmt::format("\"[{}]\"", fmt::join(groupRanks, ", ")));
-  } else if (groupRanks.size() > kTruncatLength) {
-    map.emplace(
-        kGroupRanks,
-        fmt::format(
-            "\"[{}, ..., {}]\"",
-            fmt::join(
-                groupRanks.begin(),
-                groupRanks.begin() + kTruncatLength - 1,
-                ", "),
-            groupRanks.back()));
-  }
-#endif // USE_C10D
+  map.emplace(kGroupRanks, format_list(groupRanks, truncate));
 #endif // USE_DISTRIBUTED
   return map;
 }
@@ -790,6 +745,4 @@ uint64_t computeFlops(
   return 0;
 }
 
-} // namespace impl
-} // namespace profiler
-} // namespace torch
+} // namespace torch::profiler::impl

@@ -30,7 +30,7 @@ using namespace ::c10::onnx;
 // we traverse up the graph to get the scale from its input until we hit a node
 // where scale is explicitly specified.
 double getScaleFromInput(Node* input_node) {
-  c10::optional<IValue> scale;
+  std::optional<IValue> scale;
   std::string input_name = input_node->kind().toQualString();
   std::unordered_set<std::string> noscale_ops = {
       "quantized::max_pool2d",
@@ -332,7 +332,7 @@ void unpackQuantizedWeightsHelper(
           "getValues: Quantized weight value not found amongst constant parameters.");
     }
     at::Tensor unpacked_weight;
-    c10::optional<at::Tensor> bias;
+    std::optional<at::Tensor> bias;
     constexpr int64_t stride_idx = 2;
     constexpr int64_t padding_idx = 3;
     int64_t output_padding_idx;
@@ -346,10 +346,10 @@ void unpackQuantizedWeightsHelper(
       dilation_idx = 4;
       groups_idx = 5;
     }
-    c10::optional<torch::List<int64_t>> stride, padding, dilation,
+    std::optional<torch::List<int64_t>> stride, padding, dilation,
         output_padding;
-    c10::optional<int64_t> groups;
-    c10::optional<int64_t> transpose;
+    std::optional<int64_t> groups;
+    std::optional<int64_t> transpose;
 
     torch::List<int64_t> stride_int, padding_int, dilation_int,
         output_padding_int;
@@ -371,9 +371,9 @@ void unpackQuantizedWeightsHelper(
         TORCH_INTERNAL_ASSERT(elements.size() == 3, "Wrong tuple size.");
 
         auto config_vals = elements[1].to<std::vector<int64_t>>();
-        auto tensors = elements[2].to<std::vector<c10::optional<at::Tensor>>>();
+        auto tensors = elements[2].to<std::vector<std::optional<at::Tensor>>>();
 
-        c10::optional<at::Tensor> weight = tensors[1];
+        std::optional<at::Tensor> weight = tensors[1];
         TORCH_INTERNAL_ASSERT(
             weight, "Weight should always be present in serialized qconv.");
         unpacked_weight = *weight;
@@ -534,7 +534,7 @@ void unpackQuantizedWeightsHelper(
       at::Tensor packed_weight = itr->second.toTensor();
       auto op = Dispatcher::singleton()
                     .findSchemaOrThrow(unpack_fn.c_str(), "")
-                    .typed<std::tuple<at::Tensor, c10::optional<at::Tensor>>(
+                    .typed<std::tuple<at::Tensor, std::optional<at::Tensor>>(
                         at::Tensor)>();
       std::tie(unpacked_weight, bias) = op.call(packed_weight);
     }
@@ -598,7 +598,7 @@ void unpackQuantizedWeightsHelper(
     if (stride.has_value() && padding.has_value() && dilation.has_value() &&
         groups.has_value() &&
         (!expect_output_padding || output_padding.has_value())) {
-      std::vector<c10::optional<torch::List<int64_t>>> conv_ints_args;
+      std::vector<std::optional<torch::List<int64_t>>> conv_ints_args;
       conv_ints_args.push_back(stride);
       conv_ints_args.push_back(padding);
       if (expect_output_padding) {

@@ -59,7 +59,7 @@ class TORCH_API Context {
     }
   }
   const AcceleratorHooksInterface& getAcceleratorHooksInterface(
-      c10::optional<c10::DeviceType> opt_device_type = c10::nullopt) {
+      std::optional<c10::DeviceType> opt_device_type = c10::nullopt) {
     c10::DeviceType device_type = opt_device_type.has_value()
         ? opt_device_type.value()
         : at::getAccelerator(true).value();
@@ -364,7 +364,7 @@ class TORCH_API Context {
   bool enabled_flashSDP = true;
   bool enabled_mem_efficientSDP = true;
   bool enabled_mathSDP = true;
-  bool enabled_cudnnSDP = false;
+  bool enabled_cudnnSDP = true;
 #ifdef USE_ROCM
   bool benchmark_cudnn = true;
 #else
@@ -395,7 +395,7 @@ class TORCH_API Context {
   bool release_original_weights = false;
 #endif
   bool display_vmap_fallback_warnings_ = false;
-  c10::optional<at::QEngine> quantized_engine = c10::nullopt;
+  std::optional<at::QEngine> quantized_engine = c10::nullopt;
   bool enable_sparse_tensor_invariant_checks = false;
   bool allow_fp16_reduction_cpu = false;
 

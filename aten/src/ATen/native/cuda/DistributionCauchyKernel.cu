@@ -5,7 +5,7 @@
 
 namespace at::native {
 
-void cauchy_kernel(TensorIteratorBase& iter, double median, double sigma, c10::optional<Generator> gen) {
+void cauchy_kernel(TensorIteratorBase& iter, double median, double sigma, std::optional<Generator> gen) {
   auto generator = get_generator_or_default<CUDAGeneratorImpl>(gen, cuda::detail::getDefaultCUDAGenerator());
   at::native::templates::cuda::cauchy_kernel(iter, median, sigma, generator);
 }
