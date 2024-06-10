@@ -10,17 +10,20 @@ on an NVIDIA GPU with compute capability >= 3.0.
 
 # mypy: allow-untyped-defs
 
-import math
-import os
-import sys
-import platform
-import textwrap
+import builtins
 import ctypes
-import inspect
-import threading
-import pdb
+import glob
 import importlib
 import importlib.util
+import inspect
+import math
+import os
+import platform
+import sys
+import textwrap
+import threading
+from typing import Any, Callable, Dict, Optional, Set, Tuple, Type, TYPE_CHECKING, Union
+
 
 # multipy/deploy is setting this import before importing torch, this is the most
 # reliable way we have to detect if we're running within deploy.
@@ -28,19 +31,25 @@ import importlib.util
 def _running_with_deploy():
     return sys.modules.get("torch._meta_registrations", None) is object
 
-from ._utils import _import_dotted_name, classproperty
-from ._utils import _functionalize_sync as _sync
-from ._utils_internal import get_file_path, prepare_multiprocessing_environment, \
-    USE_RTLD_GLOBAL_WITH_LIBTORCH, USE_GLOBAL_DEPS
+
+from torch._utils import (
+    _functionalize_sync as _sync,
+    _import_dotted_name,
+    classproperty,
+)
+from torch._utils_internal import (
+    get_file_path,
+    prepare_multiprocessing_environment,
+    USE_GLOBAL_DEPS,
+    USE_RTLD_GLOBAL_WITH_LIBTORCH,
+)
 
 # TODO(torch_deploy) figure out how to freeze version.py in fbcode build
 if _running_with_deploy():
     __version__ = "torch-deploy-1.8"
 else:
-    from .torch_version import __version__ as __version__
+    from torch.torch_version import __version__ as __version__
 
-from typing import Any, Callable, Dict, Optional, Set, Tuple, Type, TYPE_CHECKING, Union, List
-import builtins
 
 __all__ = [
     'typename', 'is_tensor', 'is_storage',
@@ -70,91 +79,97 @@ __all__ = [
 ################################################################################
 
 if sys.platform == 'win32':
-    import sysconfig
-    pfiles_path = os.getenv('ProgramFiles', 'C:\\Program Files')
-    py_dll_path = os.path.join(sys.exec_prefix, 'Library', 'bin')
-    th_dll_path = os.path.join(os.path.dirname(__file__), 'lib')
-    usebase_path = os.path.join(sysconfig.get_config_var("userbase"), 'Library', 'bin')
 
-    # When users create a virtualenv that inherits the base environment,
-    # we will need to add the corresponding library directory into
-    # DLL search directories. Otherwise, it will rely on `PATH` which
-    # is dependent on user settings.
-    if sys.exec_prefix != sys.base_exec_prefix:
-        base_py_dll_path = os.path.join(sys.base_exec_prefix, 'Library', 'bin')
-    else:
-        base_py_dll_path = ''
+    def _load_dll_libraries():
+        import sysconfig
 
-    dll_paths = list(filter(os.path.exists, [th_dll_path, py_dll_path, base_py_dll_path, usebase_path]))
+        from torch.version import cuda as cuda_version
 
-    if all(not os.path.exists(os.path.join(p, 'nvToolsExt64_1.dll')) for p in dll_paths):
-        nvtoolsext_dll_path = os.path.join(
-            os.getenv('NVTOOLSEXT_PATH', os.path.join(pfiles_path, 'NVIDIA Corporation', 'NvToolsExt')), 'bin', 'x64')
-    else:
-        nvtoolsext_dll_path = ''
+        pfiles_path = os.getenv('ProgramFiles', r'C:\Program Files')
+        py_dll_path = os.path.join(sys.exec_prefix, 'Library', 'bin')
+        th_dll_path = os.path.join(os.path.dirname(__file__), 'lib')
+        usebase_path = os.path.join(sysconfig.get_config_var("userbase"), 'Library', 'bin')
 
-    from .version import cuda as cuda_version
-    import glob
-    if cuda_version and all(not glob.glob(os.path.join(p, 'cudart64*.dll')) for p in dll_paths):
-        cuda_version_1 = cuda_version.replace('.', '_')
-        cuda_path_var = 'CUDA_PATH_V' + cuda_version_1
-        default_path = os.path.join(pfiles_path, 'NVIDIA GPU Computing Toolkit', 'CUDA', 'v' + cuda_version)
-        cuda_path = os.path.join(os.getenv(cuda_path_var, default_path), 'bin')
-    else:
-        cuda_path = ''
+        # When users create a virtualenv that inherits the base environment,
+        # we will need to add the corresponding library directory into
+        # DLL search directories. Otherwise, it will rely on `PATH` which
+        # is dependent on user settings.
+        if sys.exec_prefix != sys.base_exec_prefix:
+            base_py_dll_path = os.path.join(sys.base_exec_prefix, 'Library', 'bin')
+        else:
+            base_py_dll_path = ''
 
-    dll_paths.extend(filter(os.path.exists, [nvtoolsext_dll_path, cuda_path]))
+        dll_paths = [p for p in (th_dll_path, py_dll_path, base_py_dll_path, usebase_path) if os.path.exists(p)]
 
-    kernel32 = ctypes.WinDLL('kernel32.dll', use_last_error=True)
-    with_load_library_flags = hasattr(kernel32, 'AddDllDirectory')
-    prev_error_mode = kernel32.SetErrorMode(0x0001)
+        if not builtins.any(os.path.exists(os.path.join(p, 'nvToolsExt64_1.dll')) for p in dll_paths):
+            nvtoolsext_dll_path = os.path.join(
+                os.getenv('NVTOOLSEXT_PATH', os.path.join(pfiles_path, 'NVIDIA Corporation', 'NvToolsExt')), 'bin', 'x64')
+        else:
+            nvtoolsext_dll_path = ''
 
-    kernel32.LoadLibraryW.restype = ctypes.c_void_p
-    if with_load_library_flags:
-        kernel32.LoadLibraryExW.restype = ctypes.c_void_p
+        if cuda_version and builtins.all(not glob.glob(os.path.join(p, 'cudart64*.dll')) for p in dll_paths):
+            cuda_version_1 = cuda_version.replace('.', '_')
+            cuda_path_var = 'CUDA_PATH_V' + cuda_version_1
+            default_path = os.path.join(pfiles_path, 'NVIDIA GPU Computing Toolkit', 'CUDA', 'v' + cuda_version)
+            cuda_path = os.path.join(os.getenv(cuda_path_var, default_path), 'bin')
+        else:
+            cuda_path = ''
 
-    for dll_path in dll_paths:
-        os.add_dll_directory(dll_path)
+        dll_paths.extend(p for p in (nvtoolsext_dll_path, cuda_path) if os.path.exists(p))
 
-    try:
-        ctypes.CDLL('vcruntime140.dll')
-        ctypes.CDLL('msvcp140.dll')
-        ctypes.CDLL('vcruntime140_1.dll')
-    except OSError:
-        print('''Microsoft Visual C++ Redistributable is not installed, this may lead to the DLL load failure.
-                 It can be downloaded at https://aka.ms/vs/16/release/vc_redist.x64.exe''')
+        kernel32 = ctypes.WinDLL('kernel32.dll', use_last_error=True)
+        with_load_library_flags = hasattr(kernel32, 'AddDllDirectory')
+        prev_error_mode = kernel32.SetErrorMode(0x0001)
 
-    dlls = glob.glob(os.path.join(th_dll_path, '*.dll'))
-    path_patched = False
-    for dll in dlls:
-        is_loaded = False
+        kernel32.LoadLibraryW.restype = ctypes.c_void_p
         if with_load_library_flags:
-            res = kernel32.LoadLibraryExW(dll, None, 0x00001100)
-            last_error = ctypes.get_last_error()
-            if res is None and last_error != 126:
-                err = ctypes.WinError(last_error)
-                err.strerror += f' Error loading "{dll}" or one of its dependencies.'
-                raise err
-            elif res is not None:
-                is_loaded = True
-        if not is_loaded:
-            if not path_patched:
-                os.environ['PATH'] = ';'.join(dll_paths + [os.environ['PATH']])
-                path_patched = True
-            res = kernel32.LoadLibraryW(dll)
-            if res is None:
-                err = ctypes.WinError(ctypes.get_last_error())
-                err.strerror += f' Error loading "{dll}" or one of its dependencies.'
-                raise err
+            kernel32.LoadLibraryExW.restype = ctypes.c_void_p
 
-    kernel32.SetErrorMode(prev_error_mode)
+        for dll_path in dll_paths:
+            os.add_dll_directory(dll_path)
+
+        try:
+            ctypes.CDLL('vcruntime140.dll')
+            ctypes.CDLL('msvcp140.dll')
+            ctypes.CDLL('vcruntime140_1.dll')
+        except OSError:
+            print('''Microsoft Visual C++ Redistributable is not installed, this may lead to the DLL load failure.
+                    It can be downloaded at https://aka.ms/vs/16/release/vc_redist.x64.exe''')
+
+        dlls = glob.glob(os.path.join(th_dll_path, '*.dll'))
+        path_patched = False
+        for dll in dlls:
+            is_loaded = False
+            if with_load_library_flags:
+                res = kernel32.LoadLibraryExW(dll, None, 0x00001100)
+                last_error = ctypes.get_last_error()
+                if res is None and last_error != 126:
+                    err = ctypes.WinError(last_error)
+                    err.strerror += f' Error loading "{dll}" or one of its dependencies.'
+                    raise err
+                elif res is not None:
+                    is_loaded = True
+            if not is_loaded:
+                if not path_patched:
+                    os.environ['PATH'] = ';'.join(dll_paths + [os.environ['PATH']])
+                    path_patched = True
+                res = kernel32.LoadLibraryW(dll)
+                if res is None:
+                    err = ctypes.WinError(ctypes.get_last_error())
+                    err.strerror += f' Error loading "{dll}" or one of its dependencies.'
+                    raise err
+
+        kernel32.SetErrorMode(prev_error_mode)
+
+    _load_dll_libraries()
+    del _load_dll_libraries
 
 
 def _preload_cuda_deps(lib_folder, lib_name):
     """Preloads cuda deps if they could not be found otherwise."""
     # Should only be called on Linux if default path resolution have failed
     assert platform.system() == 'Linux', 'Should only be called on Linux'
-    import glob
+
     lib_path = None
     for path in sys.path:
         nvidia_path = os.path.join(path, 'nvidia')
@@ -1456,7 +1471,7 @@ def _check_tensor_all(cond, message=None):  # noqa: F811
 
 # For Python Array API (https://data-apis.org/array-api/latest/API_specification/constants.html) and
 # NumPy consistency (https://numpy.org/devdocs/reference/constants.html)
-from math import e, nan , inf , pi
+from math import e, inf, nan, pi
 newaxis: None = None
 __all__.extend(['e', 'pi', 'nan', 'inf', 'newaxis'])
 
@@ -1464,9 +1479,17 @@ __all__.extend(['e', 'pi', 'nan', 'inf', 'newaxis'])
 # Define Storage and Tensor classes
 ################################################################################
 
-from ._tensor import Tensor
-from torch import storage as storage
-from .storage import _StorageBase, TypedStorage, _LegacyStorage, UntypedStorage, _warn_typed_storage_removal
+from torch._tensor import Tensor  # usort: skip
+
+# needs to be after torch.Tensor is defined to avoid circular dependencies
+from torch import storage as storage  # usort: skip
+from torch.storage import (
+    _LegacyStorage,
+    _StorageBase,
+    _warn_typed_storage_removal,
+    TypedStorage,
+    UntypedStorage,
+)
 
 # NOTE: New <type>Storage classes should never be added. When adding a new
 # dtype, use torch.storage.TypedStorage directly.
@@ -1653,16 +1676,22 @@ _storage_classes = {
 _tensor_classes: Set[Type] = set()
 
 # If you edit these imports, please update torch/__init__.py.in as well
-from torch import random as random
-from .random import set_rng_state, get_rng_state, manual_seed, initial_seed, seed
-from torch import serialization as serialization
-from .serialization import save, load
-from ._tensor_str import set_printoptions
+from torch import amp as amp, random as random, serialization as serialization
+from torch._tensor_str import set_printoptions
+from torch.amp import autocast, GradScaler
+from torch.random import get_rng_state, initial_seed, manual_seed, seed, set_rng_state
+from torch.serialization import load, save
+
+# Initializing the extension shadows the built-in python float / int classes;
+# store them for later use by SymInt / SymFloat.
+py_float = float
+py_int = int
 
 ################################################################################
 # Initialize extension
 ################################################################################
 
+# Shared memory manager needs to know the exact location of manager executable
 def _manager_path():
     if _running_with_deploy() or platform.system() == 'Windows':
         return b""
@@ -1672,16 +1701,8 @@ def _manager_path():
         raise RuntimeError("Unable to find torch_shm_manager at " + path)
     return path.encode('utf-8')
 
-from torch import amp as amp
-from torch.amp import autocast, GradScaler
-
-# Initializing the extension shadows the built-in python float / int classes;
-# store them for later use by SymInt / SymFloat.
-py_float = float
-py_int = int
-
-# Shared memory manager needs to know the exact location of manager executable
 _C._initExtension(_manager_path())
+
 del _manager_path
 
 # Appease the type checker: it can't deal with direct setting of globals().
@@ -1734,17 +1755,16 @@ __all__.extend(
 # Import TorchDynamo's lazy APIs to avoid circular dependenices
 ################################################################################
 
-# needs to be before from .functional import * to avoid circular dependencies
-from ._compile import _disable_dynamo
+# needs to be before from torch.functional import * to avoid circular dependencies
+from torch._compile import _disable_dynamo  # usort: skip
 
 ################################################################################
 # Import interface functions defined in Python
 ################################################################################
 
 # needs to be after the above ATen bindings so we can overwrite from Python side
-from torch import functional as functional
-from .functional import *  # noqa: F403
-
+from torch import functional as functional  # usort: skip
+from torch.functional import *  # usort: skip # noqa: F403
 
 ################################################################################
 # Remove unnecessary members
@@ -1772,55 +1792,61 @@ def _assert(condition, message):
 # Use the redundant form so that type checkers know that these are a part of
 # the public API. The "regular" import lines are there solely for the runtime
 # side effect of adding to the imported module's members for other users.
-from torch import cuda as cuda
-from torch import cpu as cpu
-from torch import mps as mps
-from torch import xpu as xpu
-from torch import mtia as mtia
-from torch import autograd as autograd
-from torch.autograd import (
-    no_grad as no_grad,
+
+# needs to be before import torch.nn as nn to avoid circular dependencies
+from torch.autograd import (  # usort: skip
     enable_grad as enable_grad,
-    set_grad_enabled as set_grad_enabled,
     inference_mode as inference_mode,
+    no_grad as no_grad,
+    set_grad_enabled as set_grad_enabled,
 )
-from torch import fft as fft
-from torch import futures as futures
-from torch import _awaits as _awaits
-from torch import nested as nested
-from torch import nn as nn
-from torch.signal import windows as windows
-from torch import optim as optim
-from torch import multiprocessing as multiprocessing
-from torch import sparse as sparse
-from torch import special as special
+
 import torch.utils.backcompat
-from torch import jit as jit
-from torch import linalg as linalg
-from torch import hub as hub
-from torch import distributions as distributions
-from torch import testing as testing
-from torch import backends as backends
 import torch.utils.data
-from torch import __config__ as __config__
-from torch import __future__ as __future__
-from torch import profiler as profiler
-from torch import overrides as overrides
-from torch import types as types
+from torch import (
+    __config__ as __config__,
+    __future__ as __future__,
+    _awaits as _awaits,
+    autograd as autograd,
+    backends as backends,
+    cpu as cpu,
+    cuda as cuda,
+    distributions as distributions,
+    fft as fft,
+    futures as futures,
+    hub as hub,
+    jit as jit,
+    linalg as linalg,
+    mps as mps,
+    mtia as mtia,
+    multiprocessing as multiprocessing,
+    nested as nested,
+    nn as nn,
+    optim as optim,
+    overrides as overrides,
+    profiler as profiler,
+    sparse as sparse,
+    special as special,
+    testing as testing,
+    types as types,
+    xpu as xpu,
+)
+from torch.signal import windows as windows
 
 # Quantized, sparse, AO, etc. should be last to get imported, as nothing
 # is expected to depend on them.
-from torch import ao as ao
+from torch import ao as ao  # usort: skip
+
 # nn.quant* depends on ao -- so should be after those.
+import torch.nn.intrinsic
+import torch.nn.qat
 import torch.nn.quantizable
 import torch.nn.quantized
-import torch.nn.qat
-import torch.nn.intrinsic
 
 _C._init_names(list(_storage_classes))
 
 # attach docstrings to torch and tensor functions
-from . import _torch_docs, _tensor_docs, _storage_docs, _size_docs
+from torch import _size_docs, _storage_docs, _tensor_docs, _torch_docs
 del _torch_docs, _tensor_docs, _storage_docs, _size_docs
 
 
@@ -1829,17 +1855,18 @@ def compiled_with_cxx11_abi() -> builtins.bool:
     return _C._GLIBCXX_USE_CXX11_ABI
 
 
-# Import the ops "namespace"
-from torch._ops import ops
-from torch._classes import classes
 import torch._library
 
-# quantization depends on torch.fx
+# Import the ops "namespace"
+from torch._classes import classes as classes
+from torch._ops import ops as ops  # usort: skip
+
+# quantization depends on torch.fx and torch.ops
 # Import quantization
-from torch import quantization as quantization
+from torch import quantization as quantization  # usort: skip
 
 # Import the quasi random sampler
-from torch import quasirandom as quasirandom
+from torch import quasirandom as quasirandom  # usort: skip
 
 # If you are seeing this, it means that this call site was not checked if
 # the memory format could be preserved, and it was switched to old default
@@ -1853,15 +1880,13 @@ del register_after_fork
 
 # Import tools that require fully imported torch (for applying
 # torch.jit.script as a decorator, for instance):
-from ._lobpcg import lobpcg as lobpcg
+from torch._lobpcg import lobpcg as lobpcg
 
 # These were previously defined in native_functions.yaml and appeared on the
 # `torch` namespace, but we moved them to c10 dispatch to facilitate custom
 # class usage. We add these lines here to preserve backward compatibility.
-quantized_lstm = torch.ops.aten.quantized_lstm
-quantized_gru = torch.ops.aten.quantized_gru
-
-from torch.utils.dlpack import from_dlpack, to_dlpack
+quantized_lstm = ops.aten.quantized_lstm
+quantized_gru = ops.aten.quantized_gru
 
 # Import experimental masked operations support. See
 # [RFC-0016](https://github.com/pytorch/rfcs/pull/27) for more
@@ -1869,13 +1894,16 @@ from torch.utils.dlpack import from_dlpack, to_dlpack
 from torch import masked as masked
 
 # Import removed ops with error message about removal
-from ._linalg_utils import (  # type: ignore[misc]
-    matrix_rank,
+from torch._linalg_utils import (  # type: ignore[misc]
+    _symeig as symeig,
     eig,
-    solve,
     lstsq,
+    matrix_rank,
+    solve,
 )
-from ._linalg_utils import _symeig as symeig  # type: ignore[misc]
+
+from torch.utils.dlpack import from_dlpack, to_dlpack
+
 
 class _TorchCompileInductorWrapper:
     compiler_name = "inductor"
@@ -2106,7 +2134,8 @@ def compile(model: Optional[Callable] = None, *,
 
 from torch import export as export
 
-from torch._higher_order_ops import cond
+from torch._higher_order_ops import cond as cond
+
 
 def _register_device_module(device_type, module):
     r"""Register an external runtime module of the specific :attr:`device_type`
@@ -2126,10 +2155,10 @@ def _register_device_module(device_type, module):
     sys.modules[torch_module_name] = module
 
 # expose return_types
-from . import return_types
-from . import library
+from torch import library as library, return_types as return_types
+
 if not TYPE_CHECKING:
-    from . import _meta_registrations
+    from torch import _meta_registrations
 
 # Enable CUDA Sanitizer
 if 'TORCH_CUDA_SANITIZER' in os.environ:
@@ -2141,7 +2170,7 @@ if 'TORCH_CUDA_SANITIZER' in os.environ:
 import torch.fx.experimental.sym_node
 
 from torch import func as func
-from torch.func import vmap
+from torch.func import vmap as vmap
 
 
 # Register MPS specific decomps
@@ -2176,9 +2205,7 @@ if TYPE_CHECKING:
     # Import the following modules during type checking to enable code intelligence features,
     # such as auto-completion in tools like pylance, even when these modules are not explicitly
     # imported in user code.
-    from torch import _dynamo as _dynamo
-    from torch import _inductor as _inductor
-    from torch import onnx as onnx
+    from torch import _dynamo as _dynamo, _inductor as _inductor, onnx as onnx
 
 else:
     _lazy_modules = {
@@ -2199,7 +2226,6 @@ else:
 
         # Lazy modules
         if name in _lazy_modules:
-            import importlib
             return importlib.import_module(f".{name}", __name__)
 
         raise AttributeError(f"module '{__name__}' has no attribute '{name}'")
@@ -2248,5 +2274,5 @@ def _constrain_as_size(symbol, min: Optional[builtins.int] = None, max: Optional
     torch.sym_constrain_range_for_size(symbol, min=min, max=max)
 
 
-from . import _logging
+from torch import _logging
 _logging._init_logs()
