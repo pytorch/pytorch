@@ -1808,7 +1808,7 @@ class Module:
 
         The registered hooks can modify the ``state_dict`` inplace or return a new one.
         If a new ``state_dict`` is returned, it will only be respected if it is the root
-        module that `:meth:~nn.Module.state_dict` is called from.
+        module that :meth:`~nn.Module.state_dict` is called from.
         """
         handle = hooks.RemovableHandle(self._state_dict_hooks)
         # True indicates that the hook was registered via the private method
