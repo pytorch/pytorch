@@ -2685,6 +2685,12 @@ class DeviceCachingAllocator {
       decrease_stat(stats.reserved_bytes[stat_type], unmapped.size);
     });
 
+    if (block->pool->owner_PrivatePool) {
+      // The cudaFreed block belonged to a CUDA graph's PrivatePool.
+      TORCH_INTERNAL_ASSERT(block->pool->owner_PrivatePool->cudaMalloc_count > 0);
+      block->pool->owner_PrivatePool->cudaMalloc_count--;
+    }
+
     stats.num_device_free++;
     record_trace(
         TraceEntry::SEGMENT_UNMAP,
