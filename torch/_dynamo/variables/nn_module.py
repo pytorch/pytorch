@@ -115,6 +115,7 @@ class NNModuleVariable(VariableTracker):
         "module_type",
         "module_key",
         "module",
+        "nn_module_stack_source",
         *VariableTracker._nonvar_fields,
     }
 
@@ -126,15 +127,13 @@ class NNModuleVariable(VariableTracker):
         self.module_key = module_key
         self.module = module
         assert self.source
-        self._nn_module_stack_source = self.source
+        self.nn_module_stack_source = self.source
 
-    @property
-    def nn_module_stack_source(self):
-        return self._nn_module_stack_source or self.source
+    def get_nn_module_stack_source(self):
+        return self.nn_module_stack_source or self.source
 
-    @nn_module_stack_source.setter
-    def nn_module_stack_source(self, source):
-        self._nn_module_stack_source = source
+    def set_nn_module_stack_source(self, source):
+        self.nn_module_stack_source = source
 
     def python_type(self):
         return self.module_type
@@ -285,15 +284,12 @@ class NNModuleVariable(VariableTracker):
         if object_member:
             out = VariableBuilder(tx, NNModuleSource(source))(subobj)
 
-            if is_submodule and isinstance(out, variables.LazyVariableTracker):
-                out = out.realize()
-
             if isinstance(out, (NNModuleVariable, UnspecializedNNModuleVariable)):
                 # nn_module_stack source is BC surface area. Ensure that
                 # mod._modules["linear"] is reflected as mod.linear for
                 # nn_module_stack.
-                out.nn_module_stack_source = AttrSource(
-                    self.nn_module_stack_source, name
+                out.set_nn_module_stack_source(
+                    AttrSource(self.get_nn_module_stack_source(), name)
                 )
             return out
 
@@ -339,7 +335,7 @@ class NNModuleVariable(VariableTracker):
         mod = tx.output.get_submodule(self.module_key)
 
         with record_nn_module_stack(
-            self.module_key, self.nn_module_stack_source, tx, mod
+            self.module_key, self.get_nn_module_stack_source(), tx, mod
         ):
             is_lazy = is_lazy_module(mod)
             if (
@@ -485,7 +481,7 @@ class NNModuleVariable(VariableTracker):
             # This is used for explicit calling `forward` in a forward function.
             # Dynamo puts `call_method` node in FX, doesn't trigger hooks.
             with record_nn_module_stack(
-                self.module_key, self.nn_module_stack_source, tx, module
+                self.module_key, self.get_nn_module_stack_source(), tx, module
             ):
                 return generic_call_method_helper(name)
 
@@ -749,6 +745,7 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
     _nonvar_fields = {
         "value_type",
         "is_state_mutated",
+        "nn_module_stack_source",
         *UserDefinedObjectVariable._nonvar_fields,
     }
 
@@ -777,15 +774,13 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
 
         super().__init__(value=value, **kwargs)
         self.is_state_mutated = False
-        self._nn_module_stack_source = self.source
+        self.nn_module_stack_source = self.source
 
-    @property
-    def nn_module_stack_source(self):
-        return self._nn_module_stack_source or self.source
+    def get_nn_module_stack_source(self):
+        return self.nn_module_stack_source or self.source
 
-    @nn_module_stack_source.setter
-    def nn_module_stack_source(self, source):
-        self._nn_module_stack_source = source
+    def set_nn_module_stack_source(self, source):
+        self.nn_module_stack_source = source
 
     @staticmethod
     @functools.lru_cache(None)
@@ -838,7 +833,9 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
         guard_to_detect_forward_monkeypatching(self.source, mod)
 
         ctx = (
-            record_nn_module_stack(str(id(mod)), self.nn_module_stack_source, tx, mod)
+            record_nn_module_stack(
+                str(id(mod)), self.get_nn_module_stack_source(), tx, mod
+            )
             if self.source
             else nullcontext()
         )
