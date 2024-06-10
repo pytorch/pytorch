@@ -617,18 +617,12 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         # rank 0 hasn't split yet, but rank 1 did for the
         # nocolor... so split count matches rank count coincidentally
         # in each of the proceses this test spawned!
-        # when using ncclCommCreateFromRanks() in version 2.21+,
-        # unused ranks are not included in split
-        version = torch.cuda.nccl.version()
-        is_nccl_2_21 = version >= (2, 21)
-        exp_count = 0 if (is_nccl_2_21 or self.rank == 0) else 1
-        self.assertEqual(backend.comm_split_count(), exp_count)
+        self.assertEqual(backend.comm_split_count(), self.rank)
         if self.rank == 0:
             dist.broadcast(tensor, 0, group=ng)
 
         # now everyone has split because rank 0 has performed a comm
-        exp_count = 1 if not is_nccl_2_21 else (1 if self.rank == 0 else 0)
-        self.assertEqual(backend.comm_split_count(), exp_count)
+        self.assertEqual(backend.comm_split_count(), 1)
         self.assertEqual(tensor, original_tensor)
 
     @requires_nccl_version((2, 18), "Need NCCL 2.18+ for ncclCommSplit")
@@ -3548,7 +3542,7 @@ class NCCLTraceTest(NCCLTraceTestBase):
                 )
             )
         ver = t["version"]
-        self.assertEqual(ver, "2.1")
+        self.assertEqual(ver, "2.2")
         pg_config = t["pg_config"]
         self.assertEqual(len(pg_config), 1)
         default_pg_info = pg_config["0"]
@@ -3577,6 +3571,7 @@ class NCCLTraceTest(NCCLTraceTestBase):
             self.assertEqual(last["output_sizes"], ((3, 4),))
             self.assertEqual(last["output_dtypes"], ["Float"])
             self.assertEqual(last["collective_seq_id"], 2)
+            self.assertEqual(last["timeout_ms"], 600000)
             now = datetime.now()
             event_created_time = datetime.fromtimestamp(
                 last["time_created_ns"] / 1000000000
@@ -3661,6 +3656,7 @@ class NCCLTraceTest(NCCLTraceTestBase):
         self.assertEqual(last["input_dtypes"], ["Float"])
         self.assertEqual(last["output_sizes"], ((3, 4),))
         self.assertEqual(last["output_dtypes"], ["Float"])
+        self.assertEqual(last["timeout_ms"], 600000)
         self.assertEqual(last["collective_seq_id"] - first["collective_seq_id"], 9)
 
     @requires_nccl()
@@ -3875,6 +3871,7 @@ class NCCLTraceTest(NCCLTraceTestBase):
                 self.assertTrue(0.001 < duration < 10000, duration)
             else:
                 self.assertTrue("duration_ms" not in t["entries"][coalesced_op])
+            self.assertEqual(t["entries"][coalesced_op]["timeout_ms"], 600000)
 
     @requires_nccl()
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
