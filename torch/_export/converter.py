@@ -195,6 +195,10 @@ def get_block_to_lifted_attrs(graph: torch._C.Graph) -> Dict[torch._C.Block, Set
 =======
                 irv_name = node.output().debugName()
                 # Skip for intermediate GetAttr, which will anyway not result a FQN.
+                # E.g., node_to_parent_name: {"%3": "%2", "%2": "%1"}
+                #       node_to_attr_name: {"%3": "weight", "%2": "linear", "%1": "self"}
+                #       There is only one FQN %3-->%2-->%1: self.linear.weight
+                #       %2-->%1 is not a FQN: self.linear
                 if irv_name not in set(node_to_parent_map.values()):
                     arguments.add(
                         construct_fqn(irv_name, node_to_parent_map, node_to_attr_name)
