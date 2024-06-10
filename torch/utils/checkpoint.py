@@ -30,7 +30,7 @@ __all__ = [
     "set_checkpoint_debug_enabled",
     "CheckpointPolicy",
     "SelectiveCheckpointContext",
-    "gen_selective_checkpoint_context_fn",
+    "create_selective_checkpoint_contexts",
 ]
 
 _DEFAULT_DETERMINISM_MODE = "default"
@@ -1176,11 +1176,23 @@ def _maybe_detach(x):
 
 class SelectiveCheckpointContext:
     """
-    Context object for selective checkpointing.
+    Context passed to policy function during selective checkpointing.
 
     This class is used to pass relevant metadata to the policy function during
-    selective checkpointing. The metadata includes whether the current context
-    is for recomputation or not.
+    selective checkpointing. The metadata includes whether the current invocation
+    of the policy function is during recomputation or not.
+
+    Example:
+        >>> def policy_fn(ctx, op, *args, **kwargs):
+        >>>    print(ctx.is_recompute)
+        >>>
+        >>> context_fn = functools.partial(create_selective_checkpoint_contexts, policy_fn)
+        >>>
+        >>> out = torch.utils.checkpoint.checkpoint(
+        >>>     fn, x, y,
+        >>>     use_reentrant=False,
+        >>>     context_fn=context_fn,
+        >>> )
     """
     def __init__(self, *, is_recompute):
         self.is_recompute = is_recompute
@@ -1257,16 +1269,19 @@ class _CachedTorchDispatchMode(TorchDispatchMode):
         if policy in (CheckpointPolicy.MUST_SAVE, CheckpointPolicy.PREFER_SAVE) or is_compiling:
             storage = self.storage.get(func)
             if func is None:
-                raise RuntimeError("")
+                raise RuntimeError(f"{func} encountered during backward, but not found in storage")
             if len(storage) == 0:
-                raise RuntimeError("Trying to backward an extra time")
+                raise RuntimeError(
+                    "Trying to backward an extra time. You are only allowed to backward once "
+                    "on any region computed under selective activation checkpoint."
+                )
             out = tree_map(lambda x: x.get_val(self.allow_cache_entry_mutation), storage.pop(0))
         else:
             out = func(*args, **kwargs)
         return out
 
 
-def gen_selective_checkpoint_context_fn(policy_fn_or_list, allow_cache_entry_mutation=False):
+def create_selective_checkpoint_contexts(policy_fn_or_list, allow_cache_entry_mutation=False):
     """
     Helper to avoid recomputing certain ops during activation checkpointing.
 
@@ -1288,9 +1303,7 @@ def gen_selective_checkpoint_context_fn(policy_fn_or_list, allow_cache_entry_mut
             mutated in order to ensure correctness. If set to `True`, this check
             is disabled.
     Returns:
-        A callable returning a tuple of two context managers. This callable
-        should be passed to `torch.utils.checkpoint.checkpoint`'s `context_fn`
-        argument.
+        A tuple of two context managers.
 
     Example:
         >>> # xdoctest: +REQUIRES(LINUX)
@@ -1309,10 +1322,10 @@ def gen_selective_checkpoint_context_fn(policy_fn_or_list, allow_cache_entry_mut
         >>>    else:
         >>>        return CheckpointPolicy.PREFER_RECOMPUTE
         >>>
-        >>> context_fn = functools.partial(gen_selective_checkpoint_context_fn, policy_fn)
+        >>> context_fn = functools.partial(create_selective_checkpoint_contexts, policy_fn)
         >>>
         >>> # or equivalently
-        >>> context_fn = functools.partial(gen_selective_checkpoint_context_fn, ops_to_save)
+        >>> context_fn = functools.partial(create_selective_checkpoint_contexts, ops_to_save)
         >>>
         >>> def fn(x, y):
         >>>     return torch.sigmoid(torch.matmul(torch.matmul(x, y), y)) * y
