@@ -230,8 +230,15 @@ class TestLargeProtobufONNXProgramSerializerAPI(common_utils.TestCase):
 
 class TestONNXExportWithDynamo(common_utils.TestCase):
     def test_args_normalization_with_no_kwargs(self):
+        ep = torch.export.export(
+            SampleModelTwoInputs(),
+            (
+                torch.randn(1, 1, 2),
+                torch.randn(1, 1, 2),
+            ),
+        )
         onnx_program_from_new_exporter = torch.onnx.dynamo_export(
-            SampleModelTwoInputs(), torch.randn(1, 1, 2), torch.randn(1, 1, 2)
+            ep, torch.randn(1, 1, 2), torch.randn(1, 1, 2)
         )
         onnx_program_from_old_exporter = torch.onnx.export(
             SampleModelTwoInputs(),
@@ -244,8 +251,11 @@ class TestONNXExportWithDynamo(common_utils.TestCase):
         )
 
     def test_args_normalization_with_kwargs(self):
+        ep = torch.export.export(
+            SampleModelTwoInputs(), (torch.randn(1, 1, 2),), {"b": torch.randn(1, 1, 2)}
+        )
         onnx_program_from_new_exporter = torch.onnx.dynamo_export(
-            SampleModelTwoInputs(), torch.randn(1, 1, 2), b=torch.randn(1, 1, 2)
+            ep, torch.randn(1, 1, 2), b=torch.randn(1, 1, 2)
         )
         onnx_program_from_old_exporter = torch.onnx.export(
             SampleModelTwoInputs(),
@@ -258,8 +268,11 @@ class TestONNXExportWithDynamo(common_utils.TestCase):
         )
 
     def test_args_normalization_with_empty_dict_at_the_tail(self):
+        ep = torch.export.export(
+            SampleModelTwoInputs(), (torch.randn(1, 1, 2),), {"b": torch.randn(1, 1, 2)}
+        )
         onnx_program_from_new_exporter = torch.onnx.dynamo_export(
-            SampleModelTwoInputs(), torch.randn(1, 1, 2), b=torch.randn(1, 1, 2)
+            ep, torch.randn(1, 1, 2), b=torch.randn(1, 1, 2)
         )
         onnx_program_from_old_exporter = torch.onnx.export(
             SampleModelTwoInputs(),
@@ -272,16 +285,37 @@ class TestONNXExportWithDynamo(common_utils.TestCase):
         )
 
     def test_dynamic_axes_enable_dynamic_shape(self):
-        onnx_program_from_new_exporter = torch.onnx.dynamo_export(
+        ep = torch.export.export(
             SampleModelTwoInputs(),
-            torch.randn(1, 1, 2),
-            b=torch.randn(1, 1, 2),
-            export_options=ExportOptions(dynamic_shapes=True),
+            (
+                torch.randn(2, 2, 3),
+                torch.randn(2, 2, 3),
+            ),
+            dynamic_shapes={
+                "x": {
+                    0: torch.export.Dim("custom_dim_0"),
+                    1: torch.export.Dim("custom_dim_0"),
+                    2: torch.export.Dim("custom_dim_2"),
+                },
+                "b": {
+                    0: torch.export.Dim("custom_dim_0"),
+                    1: torch.export.Dim("custom_dim_0"),
+                    2: torch.export.Dim("custom_dim_2"),
+                },
+            },
+        )
+        onnx_program_from_new_exporter = torch.onnx.dynamo_export(
+            ep,
+            torch.randn(2, 2, 3),
+            b=torch.randn(2, 2, 3),
         )
         onnx_program_from_old_exporter = torch.onnx.export(
             SampleModelTwoInputs(),
-            (torch.randn(1, 1, 2), {"b": torch.randn(1, 1, 2)}, {}),
-            dynamic_axes={"b": [0, 1, 2]},
+            (torch.randn(2, 2, 3), {"b": torch.randn(2, 2, 3)}, {}),
+            dynamic_axes={
+                "x": {0: "custom_dim_0", 1: "custom_dim_0", 2: "custom_dim_2"},
+                "b": {0: "custom_dim_0", 1: "custom_dim_0", 2: "custom_dim_2"},
+            },
             dynamo=True,
         )
         self.assertEqual(
@@ -300,19 +334,6 @@ class TestONNXExportWithDynamo(common_utils.TestCase):
             _ = torch.onnx.export(
                 SampleModel(),
                 (torch.randn(1, 1, 2),),
-                dynamo=True,
-            )
-
-    def test_raises_unsupported_specific_dynamic_axes_warning(self):
-        message = (
-            "Specified dynamic axes is not supported for dynamo export at the moment."
-        )
-
-        with self.assertWarnsOnceRegex(UserWarning, message):
-            _ = torch.onnx.export(
-                SampleModel(),
-                (torch.randn(1, 1, 2),),
-                dynamic_axes={"input": [0, 1, 2]},
                 dynamo=True,
             )
 
