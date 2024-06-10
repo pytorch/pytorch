@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 """This file exports ONNX ops for opset 9.
 
 Opset 9 is supported by ONNX release 1.4.1
@@ -757,6 +758,16 @@ def atan2(g: jit_utils.GraphContext, self, other):
 @symbolic_helper.quantized_args(True, scale=1.0 / 256.0, zero_point=0)
 @_beartype.beartype
 def sigmoid(g: jit_utils.GraphContext, self):
+    """Converts the corresponding PyTorch function into ONNX operators.
+
+    It is not meant to be called directly by a user.
+
+    Args:
+        g (jit_utils.GraphContext): Graph context.
+        self (Tensor): the input tensor.
+    Returns:
+        ONNX operator
+    """
     return g.op("Sigmoid", self)
 
 

@@ -2044,8 +2044,7 @@ std::shared_ptr<NCCLComm> ProcessGroupNCCL::getNCCLComm(
     C10D_NCCL_CHECK(ncclGetUniqueId(&ncclID), c10::nullopt);
   }
 
-  // For point-to-point communication on the same process, don't need broadcast.
-  if (!isSendRecvSelf) {
+  if (shouldBroadcastNCCLUniqueID(isSendRecvSelf)) {
     // Broadcast so that each process can have a unique NCCL ID
     auto timeStarted = std::chrono::steady_clock::now();
     broadcastUniqueNCCLID(&ncclID, singleP2POp, deviceKey, p2pRank);
@@ -2356,6 +2355,7 @@ c10::intrusive_ptr<ProcessGroupNCCL::WorkNCCL> ProcessGroupNCCL::initWork(
         outputs,
         r->ncclStartEvent_.get(),
         r->ncclEndEvent_.get(),
+        options_->timeout,
         isP2P);
   }
   return r;
@@ -2966,6 +2966,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::pointToPoint(
         {tensor},
         nullptr,
         nullptr,
+        options_->timeout,
         /*isP2P=*/true);
     // TODO(whc) if we want to make the per-p2p-op flightrecorder entries get
     // their timings/states updated by proxy when the Work obj representing the
@@ -2999,6 +3000,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::pointToPoint(
         {tensor},
         work->ncclStartEvent_.get(),
         work->ncclEndEvent_.get(),
+        options_->timeout,
         /*isP2P=*/true);
   }
 
