@@ -4013,7 +4013,7 @@ at::Tensor clone_preserve_strides(const at::Tensor& self) {
 }
 
 
-at::Tensor slice_scatter(const at::Tensor& self, const at::Tensor& src, int64_t dim, std::optional<int64_t> start, c10::optional<int64_t> end, int64_t step) {
+at::Tensor slice_scatter(const at::Tensor& self, const at::Tensor& src, int64_t dim, std::optional<int64_t> start, std::optional<int64_t> end, int64_t step) {
     // See Note [*_scatter ops preserve strides]
     auto output = clone_preserve_strides(self);
     auto slice = output.slice(dim, start, end, step);

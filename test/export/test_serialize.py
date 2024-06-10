@@ -52,6 +52,52 @@ def get_filtered_export_db_tests():
 
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo doesn't support")
 class TestSerialize(TestCase):
+    def test_export_with_custom_op_serialization(self):
+        class TestModule(torch.nn.Module):
+            def forward(self, x):
+                return x + 1
+
+        class FooCustomOp(torch.nn.Module):
+            pass
+
+        class FooCustomOpHandler(torch._export.serde.serialize.CustomOpHandler):
+            def namespace(self):
+                return "Foo"
+
+            def op_name(self, op_type):
+                if op_type == FooCustomOp:
+                    return "FooCustomOp"
+                return None
+
+            def op_type(self, op_name):
+                if op_name == "FooCustomOp":
+                    return FooCustomOp
+                return None
+
+            def op_schema(self, op_type):
+                if op_type == FooCustomOp:
+                    return self.attached_schema
+                return None
+
+        inp = (torch.ones(10),)
+        ep = export(TestModule(), inp)
+
+        # Register the custom op handler.
+        foo_custom_op = FooCustomOp()
+        foo_custom_op_handler = FooCustomOpHandler()
+        torch._export.serde.serialize.register_custom_op_handler(
+            foo_custom_op_handler, type(foo_custom_op)
+        )
+
+        # Inject the custom operator.
+        for node in ep.graph.nodes:
+            if node.name == "add":
+                foo_custom_op_handler.attached_schema = node.target._schema
+                node.target = foo_custom_op
+
+        # Serialization.
+        serialize(ep)
+
     def test_predispatch_export_with_autograd_op(self):
         class Foo(torch.nn.Module):
             def __init__(self):
@@ -759,6 +805,49 @@ class TestDeserialize(TestCase):
 
         dynamic_shapes = {"x": {0: Dim("dim0"), 1: Dim("dim1")}}
         self.check_graph(Foo(), (torch.ones(4, 5),), dynamic_shapes=dynamic_shapes)
+
+    def test_multiple_getitem(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                a, b = torch.topk(x, 2)
+                a = a * 2
+                return a, b
+
+        ep = torch.export.export(M(), (torch.ones(3),))
+
+        # insert another getitem node
+        for node in ep.graph.nodes:
+            if node.op == "call_function" and node.target == torch.ops.aten.mul.Tensor:
+                getitem_0 = node.args[0]
+                with ep.graph.inserting_before(getitem_0):
+                    getitem_copy = ep.graph.node_copy(getitem_0)
+                    mul_node = ep.graph.call_function(
+                        torch.ops.aten.mul.Tensor, (getitem_copy, 2)
+                    )
+                    mul_node.meta = copy.copy(getitem_copy.meta)
+                    node.args = (getitem_0, mul_node)
+
+        deserialized_ep = deserialize(serialize(ep))
+
+        inp = (torch.randn(3),)
+        orig_res = ep.module()(*inp)
+        res = deserialized_ep.module()(*inp)
+        self.assertTrue(torch.allclose(orig_res[0], res[0]))
+        self.assertTrue(torch.allclose(orig_res[1], res[1]))
+
+        # The deserialized graph should have deduped getitem calls
+        self.assertExpectedInline(
+            deserialized_ep.graph_module.code.strip("\n"),
+            """\
+def forward(self, x):
+    topk_default = torch.ops.aten.topk.default(x, 2);  x = None
+    getitem = topk_default[0]
+    getitem_1 = topk_default[1];  topk_default = None
+    mul_tensor = torch.ops.aten.mul.Tensor(getitem, 2)
+    mul = torch.ops.aten.mul.Tensor(getitem, mul_tensor);  getitem = mul_tensor = None
+    return (mul, getitem_1)
+    """,
+        )
 
     @parametrize(
         "name,case",

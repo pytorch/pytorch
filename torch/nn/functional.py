@@ -1818,7 +1818,8 @@ See :class:`~torch.nn.Softplus` for more details.
 
 def _get_softmax_dim(name: str, ndim: int, stacklevel: int) -> int:
     warnings.warn(
-        f"Implicit dimension choice for {name} has been deprecated. Change the call to include dim=X as an argument.",
+        f"Implicit dimension choice for {name} has been deprecated. "
+        "Change the call to include dim=X as an argument.",
         stacklevel=stacklevel,
     )
     if ndim == 0 or ndim == 1 or ndim == 3:
@@ -3823,7 +3824,11 @@ def upsample(input, size=None, scale_factor=None, mode="nearest", align_corners=
         affects the outputs.
 
     """
-    warnings.warn("nn.functional.upsample is deprecated. Use nn.functional.interpolate instead.")
+    warnings.warn(
+        "`nn.functional.upsample` is deprecated. "
+        "Use `nn.functional.interpolate` instead.",
+        stacklevel=2,
+    )
     return interpolate(input, size, scale_factor, mode, align_corners)
 
 
@@ -4143,7 +4148,11 @@ def upsample_nearest(input, size=None, scale_factor=None):  # noqa: F811
         {backward_reproducibility_note}
     """
     # DeprecationWarning is ignored by default
-    warnings.warn("nn.functional.upsample_nearest is deprecated. Use nn.functional.interpolate instead.")
+    warnings.warn(
+        "`nn.functional.upsample_nearest` is deprecated. "
+        "Use `nn.functional.interpolate` instead.",
+        stacklevel=2,
+    )
     return interpolate(input, size, scale_factor, mode="nearest")
 
 
@@ -4199,7 +4208,11 @@ def upsample_bilinear(input, size=None, scale_factor=None):  # noqa: F811
         {backward_reproducibility_note}
     """
     # DeprecationWarning is ignored by default
-    warnings.warn("nn.functional.upsample_bilinear is deprecated. Use nn.functional.interpolate instead.")
+    warnings.warn(
+        "`nn.functional.upsample_bilinear` is deprecated. "
+        "Use `nn.functional.interpolate` instead.",
+        stacklevel=2,
+    )
     return interpolate(input, size, scale_factor, mode="bilinear", align_corners=True)
 
 
@@ -5078,8 +5091,10 @@ Args:
         A boolean mask where a value of True indicates that the element *should* take part in attention.
         A float mask of the same type as query, key, value that is added to the attention score.
     dropout_p (float): Dropout probability; if greater than 0.0, dropout is applied
-    is_causal (bool): If true, assumes upper left causal attention masking and errors if both attn_mask and is_causal
-        are set.
+    is_causal (bool): If set to true, the attention masking is a lower triangular matrix when the mask is a
+        square matrix. The attention masking has the form of the upper left causal bias due to the alignment
+        (see :class:`torch.nn.attention.bias.CausalBias`) when the mask is a non-square matrix.
+        An error is thrown if both attn_mask and is_causal are set.
     scale (optional float, keyword-only): Scaling factor applied prior to softmax. If None, the default value is set
         to :math:`\frac{1}{\sqrt{E}}`.
 
