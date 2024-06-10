@@ -176,6 +176,7 @@ class Verifier(metaclass=_VerifierMeta):
             _allowed_torch_functions = (
                 torch.autograd.grad_mode.set_grad_enabled,
                 torch.sym_int,
+                torch.sym_float,
                 torch.sym_ite,
                 torch.sym_max,
                 torch.sym_min,
