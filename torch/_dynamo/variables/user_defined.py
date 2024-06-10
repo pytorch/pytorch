@@ -858,9 +858,6 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 ).call_function(tx, [ConstantVariable.create(name)], {})
 
                 if self.source and getattr_fn is torch.nn.Module.__getattr__:
-                    if isinstance(out, variables.LazyVariableTracker):
-                        out = out.realize()
-
                     if isinstance(
                         out,
                         (
@@ -871,8 +868,8 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                         # nn_module_stack source is BC surface area. Ensure that
                         # mod._modules["linear"] is reflected as mod.linear for
                         # nn_module_stack.
-                        out.nn_module_stack_source = AttrSource(
-                            self.nn_module_stack_source, name
+                        out.set_nn_module_stack_source(
+                            AttrSource(self.get_nn_module_stack_source(), name)
                         )
                 return out
 
