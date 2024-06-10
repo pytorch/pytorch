@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import contextlib
 import dis
 import functools
@@ -343,6 +344,12 @@ def skipIfNotPy311(fn):
     return unittest.skip(fn)
 
 
+def skipIfNotPy312(fn):
+    if sys.version_info >= (3, 12):
+        return fn
+    return unittest.skip(fn)
+
+
 def xfailIfPy312(fn):
     if sys.version_info >= (3, 12):
         return unittest.expectedFailure(fn)
@@ -371,6 +378,12 @@ def expectedFailureCodegenDynamic(fn):
 # Controls test generated in test/inductor/test_cpp_wrapper.py
 def expectedFailureDynamicWrapper(fn):
     fn._expected_failure_dynamic_wrapper = True
+    return fn
+
+
+def expectedFailureScalar(fn):
+    if os.getenv("ATEN_CPU_CAPABILITY") == "default":
+        return unittest.expectedFailure(fn)
     return fn
 
 

@@ -521,7 +521,7 @@ class TestNNInit(TestCase):
             init.normal(x)
 
         with self.assertWarnsRegex(
-            UserWarning,
+            FutureWarning,
             "deprecated",
             msg="methods not suffixed with underscore should be deprecated",
         ):

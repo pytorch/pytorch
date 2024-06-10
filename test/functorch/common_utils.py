@@ -9,15 +9,16 @@ import os
 import unittest
 from collections import namedtuple
 
+from functorch_additional_op_db import additional_op_db
+
 import torch
 import torch.utils._pytree as pytree
-from functorch_additional_op_db import additional_op_db
+
+from functorch import vmap
 from torch.testing._internal.autograd_function_db import autograd_function_db
 from torch.testing._internal.common_device_type import toleranceOverride
 from torch.testing._internal.common_methods_invocations import DecorateInfo, op_db
 from torch.testing._internal.common_modules import module_db
-
-from functorch import vmap
 
 IS_FBCODE = os.getenv("FUNCTORCH_TEST_FBCODE") == "1"
 

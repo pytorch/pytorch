@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import inspect
 import math
 import operator
@@ -133,7 +134,8 @@ class Verifier(metaclass=_VerifierMeta):
         ]
 
     def allowed_op_types(self) -> Tuple[Type[Any], ...]:
-        return (OpOverload, HigherOrderOperator)
+        from torch._export.serde.serialize import allowed_registered_op_types  # Avoid circular import.
+        return (OpOverload, HigherOrderOperator, *allowed_registered_op_types())
 
     def allowed_getattr_types(self) -> Tuple[Type[Any], ...]:
         return (torch.fx.GraphModule,)
@@ -174,6 +176,7 @@ class Verifier(metaclass=_VerifierMeta):
             _allowed_torch_functions = (
                 torch.autograd.grad_mode.set_grad_enabled,
                 torch.sym_int,
+                torch.sym_float,
                 torch.sym_ite,
                 torch.sym_max,
                 torch.sym_min,
@@ -182,8 +185,7 @@ class Verifier(metaclass=_VerifierMeta):
                 # TODO (tmanlaibaatar)
                 # Predispatch export is able to contain autograd ops.
                 # These will be modeled as HOO later
-                torch._C._set_grad_enabled
-
+                torch._C._set_grad_enabled,
             )
 
             if not isinstance(op, _allowed_op_types()):
