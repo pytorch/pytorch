@@ -1824,7 +1824,7 @@ class Module:
         The registered hooks can modify the ``state_dict`` inplace.
         """
         handle = hooks.RemovableHandle(self._state_dict_hooks)
-        # False indicates that the hook was registered via the private method
+        # False indicates that the hook was registered via the public method
         self._state_dict_hooks[handle.id] = (hook, False)
         return handle
 
