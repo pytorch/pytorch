@@ -10,11 +10,25 @@
 
 namespace {
 
+// Forces all functional collectives to wait immediately.
+// Useful for debugging memory leaks with compile that surface
+// due to compile not properly waiting on functional collectives.
+bool force_synchronous_functional_collectives() {
+  static char const* temp = getenv("TORCH_FORCE_SYNCHRONOUS_COLLECTIVES");
+  return temp != nullptr;
+}
+
 class WorkRegistry {
  public:
   void register_work(
       const at::Tensor& tensor,
       const c10::intrusive_ptr<c10d::Work>& work) {
+    if (force_synchronous_functional_collectives()) {
+      if (work != nullptr) {
+        work->wait();
+      }
+      return;
+    }
     auto storage = tensor.storage().getWeakStorageImpl();
     std::unique_lock lock(lock_);
     auto [it, inserted] = registry_.try_emplace(std::move(storage), work);
