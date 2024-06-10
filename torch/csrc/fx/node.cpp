@@ -31,19 +31,31 @@ static int NodeBase_init_fn(NodeBase* self, PyObject* args, PyObject* kwds) {
   return 0;
 }
 
-static void NodeBase_dealloc(NodeBase* self) {
-  Py_XDECREF(self->_prev);
-  Py_XDECREF(self->_next);
-  Py_TYPE(self)->tp_free((PyObject*)self);
-}
-
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
 static struct PyMemberDef NodeBase_members[] = {
     {"_erased", T_BOOL, offsetof(NodeBase, _erased), 0, nullptr},
-    {"_prev", T_OBJECT, offsetof(NodeBase, _prev), 0, nullptr},
-    {"_next", T_OBJECT, offsetof(NodeBase, _next), 0, nullptr},
+    {"_prev", T_OBJECT_EX, offsetof(NodeBase, _prev), 0, nullptr},
+    {"_next", T_OBJECT_EX, offsetof(NodeBase, _next), 0, nullptr},
     {nullptr} /* Sentinel */
 };
+
+static int NodeBase_traverse(NodeBase* self, visitproc visit, void* arg) {
+  Py_VISIT(self->_prev);
+  Py_VISIT(self->_next);
+  return 0;
+}
+
+static int NodeBase_clear(NodeBase* self) {
+  Py_CLEAR(self->_prev);
+  Py_CLEAR(self->_next);
+  return 0;
+}
+
+static void NodeBase_dealloc(PyObject* self) {
+  PyObject_GC_UnTrack(self);
+  (void)NodeBase_clear((NodeBase*)self);
+  Py_TYPE(self)->tp_free(self);
+}
 
 static PyTypeObject NodeBaseType = {
     PyVarObject_HEAD_INIT(nullptr, 0) "torch._C._NodeBase", /* tp_name */
@@ -64,10 +76,11 @@ static PyTypeObject NodeBaseType = {
     nullptr, /* tp_getattro */
     nullptr, /* tp_setattro */
     nullptr, /* tp_as_buffer */
-    Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE, /* tp_flags */
+    Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE |
+        Py_TPFLAGS_HAVE_GC, /* tp_flags */
     nullptr, /* tp_doc */
-    nullptr, /* tp_traverse */
-    nullptr, /* tp_clear */
+    (traverseproc)NodeBase_traverse, /* tp_traverse */
+    (inquiry)NodeBase_clear, /* tp_clear */
     nullptr, /* tp_richcompare */
     0, /* tp_weaklistoffset */
     nullptr, /* tp_iter */
@@ -139,12 +152,6 @@ static int NodeIter_init_fn(NodeIter* self, PyObject* args, PyObject* kwargs) {
   return 0;
 }
 
-static void NodeIter_dealloc(NodeIter* self) {
-  Py_XDECREF(self->_root);
-  Py_XDECREF(self->_cur);
-  Py_TYPE(self)->tp_free((PyObject*)self);
-}
-
 PyObject* NodeIter_iter(PyObject* self) {
   Py_INCREF(self);
   return self;
@@ -152,6 +159,9 @@ PyObject* NodeIter_iter(PyObject* self) {
 
 template <bool reversed>
 PyObject* NodeIter_iternext_helper(NodeIter* self) {
+  // It should be possible to relax the ref counting here
+  // but in practice, we do not have that many _erased Nodes,
+  // so probably not worth it.
   if constexpr (reversed) {
     Py_INCREF(self->_cur->_prev);
     Py_XDECREF(self->_cur);
@@ -189,6 +199,24 @@ PyObject* NodeIter_iternext(PyObject* _self) {
   }
 }
 
+static int NodeIter_traverse(NodeIter* self, visitproc visit, void* arg) {
+  Py_VISIT(self->_root);
+  Py_VISIT(self->_cur);
+  return 0;
+}
+
+static int NodeIter_clear(NodeIter* self) {
+  Py_CLEAR(self->_root);
+  Py_CLEAR(self->_cur);
+  return 0;
+}
+
+static void NodeIter_dealloc(PyObject* self) {
+  PyObject_GC_UnTrack(self);
+  (void)NodeIter_clear((NodeIter*)self);
+  Py_TYPE(self)->tp_free(self);
+}
+
 static PyTypeObject NodeIterType = {
     PyVarObject_HEAD_INIT(nullptr, 0) "torch._C._NodeIter", /* tp_name */
     sizeof(NodeIter), /* tp_basicsize */
@@ -208,10 +236,10 @@ static PyTypeObject NodeIterType = {
     nullptr, /* tp_getattro */
     nullptr, /* tp_setattro */
     nullptr, /* tp_as_buffer */
-    Py_TPFLAGS_DEFAULT, /* tp_flags */
+    Py_TPFLAGS_DEFAULT | Py_TPFLAGS_HAVE_GC, /* tp_flags */
     nullptr, /* tp_doc */
-    nullptr, /* tp_traverse */
-    nullptr, /* tp_clear */
+    (traverseproc)NodeIter_traverse, /* tp_traverse */
+    (inquiry)NodeIter_clear, /* tp_clear */
     nullptr, /* tp_richcompare */
     0, /* tp_weaklistoffset */
     NodeIter_iter, /* tp_iter */
