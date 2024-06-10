@@ -9,7 +9,7 @@ import torch.nn as nn
 
 
 class UnitModule(nn.Module):
-    def __init__(self, device: torch.device):
+    def __init__(self, device: torch.device, tie_weight_embeddings: bool=True):
         super().__init__()
         self.l1 = nn.Linear(100, 100, device=device)
         self.seq = nn.Sequential(
@@ -17,7 +17,10 @@ class UnitModule(nn.Module):
             nn.Linear(100, 100, device=device),
             nn.ReLU(),
         )
-        self.l2 = nn.Linear(100, 100, device=device)
+        if tie_weight_embeddings:
+            self.l1 = self.l2 
+        else:
+            self.l2 = nn.Linear(100, 100, device=device)
 
     def forward(self, x):
         return self.l2(self.seq(self.l1(x)))
@@ -51,11 +54,11 @@ class UnitParamModule(nn.Module):
 
 
 class CompositeParamModel(nn.Module):
-    def __init__(self, device: torch.device):
+    def __init__(self, device: torch.device, tie_weight_embeddings: bool = True):
         super().__init__()
         self.l = nn.Linear(100, 100, device=device)
-        self.u1 = UnitModule(device)
-        self.u2 = UnitModule(device)
+        self.u1 = UnitModule(device, tie_weight_embeddings=tie_weight_embeddings)
+        self.u2 = UnitModule(device, tie_weight_embeddings=tie_weight_embeddings)
         self.p = nn.Parameter(torch.randn((100, 100), device=device))
         self.register_buffer(
             "buffer", torch.randn((100, 100), device=device), persistent=True
