@@ -19,14 +19,7 @@ from typing import List, Sequence, Tuple, Union
 
 import torch
 from torch._inductor import config, exc
-from torch._inductor.codecache import (
-    _get_python_include_dirs,
-    _LINKER_SCRIPT,
-    _transform_cuda_paths,
-    cpp_prefix_path,
-    get_lock_dir,
-    LOCK_TIMEOUT,
-)
+
 from torch._inductor.cpu_vec_isa import invalid_vec_isa, VecISA
 from torch._inductor.runtime.runtime_utils import cache_dir
 
@@ -62,6 +55,11 @@ _IS_LINUX = sys.platform.startswith("linux")
 _IS_MACOS = sys.platform.startswith("darwin")
 _IS_WINDOWS = sys.platform == "win32"
 
+_HERE = os.path.abspath(__file__)
+_TORCH_PATH = os.path.dirname(os.path.dirname(_HERE))
+_LINKER_SCRIPT = os.path.join(_TORCH_PATH, "_inductor/script.ld")
+
+LOCK_TIMEOUT = 600
 
 log = logging.getLogger(__name__)
 
@@ -79,6 +77,8 @@ def cpp_compiler_search(search: str) -> str:
                 if not os.getenv("TORCH_INDUCTOR_INSTALL_GXX"):
                     continue
                 from filelock import FileLock
+
+                from torch._inductor.codecache import get_lock_dir
 
                 lock_dir = get_lock_dir()
                 lock = FileLock(
@@ -567,6 +567,8 @@ def _get_torch_related_args(include_pytorch: bool, aot_mode: bool):
 
 
 def _get_python_related_args():
+    from torch._inductor.codecache import _get_python_include_dirs
+
     python_include_dirs = _get_python_include_dirs()
     python_include_path = sysconfig.get_path(
         "include", scheme="nt" if _IS_WINDOWS else "posix_prefix"
@@ -866,10 +868,14 @@ def get_cpp_torch_cuda_options(cuda: bool, aot_mode: bool = False):
 
     if aot_mode:
         if config.is_fbcode():
+            from torch._inductor.codecache import cpp_prefix_path
+
             cpp_prefix_include_dir = [f"{os.path.dirname(cpp_prefix_path())}"]
             include_dirs += cpp_prefix_include_dir
 
         if cuda and torch.version.hip is None:
+            from torch._inductor.codecache import _transform_cuda_paths
+
             _transform_cuda_paths(libraries_dirs)
 
     if config.is_fbcode():
