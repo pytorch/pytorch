@@ -612,7 +612,9 @@ def _export_to_aten_ir(
         elif isinstance(val, torch.ScriptObject):
             return CustomObjArgument(name=node.name, class_fqn=val._type().qualified_name())  # type: ignore[attr-defined]
         elif isinstance(val, FakeScriptObject):
-            return CustomObjArgument(name=node.name, class_fqn=val.script_class_name)
+            return CustomObjArgument(
+                name=node.name, class_fqn=val.script_class_name, fake_val=val
+            )
         elif isinstance(val, (int, bool, str, float, type(None))):
             return ConstantArgument(name=node.name, value=val)
         else:
