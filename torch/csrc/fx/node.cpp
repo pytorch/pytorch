@@ -99,7 +99,12 @@ static PyTypeObject NodeBaseType = {
 };
 
 bool NodeBase_init(PyObject* module) {
-  if (PyModule_AddType(module, &NodeBaseType) < 0) {
+  // Swap to PyModule_AddType when 3.10 is minimum version
+  if (PyType_Ready(&NodeBaseType) < 0) {
+    return false;
+  }
+  Py_INCREF(&NodeBaseType);
+  if (PyModule_AddObject(module, "_NodeBase", (PyObject*)&NodeBaseType) != 0) {
     return false;
   }
   return true;
@@ -155,11 +160,11 @@ PyObject* NodeIter_iternext_helper(NodeIter* self) {
   // so probably not worth it.
   if constexpr (reversed) {
     NodeBase* prev = (NodeBase*)Py_NewRef(self->_cur->_prev);
-    Py_XDECREF(self->_cur);
+    Py_CLEAR(self->_cur);
     self->_cur = prev;
   } else {
     NodeBase* next = (NodeBase*)Py_NewRef(self->_cur->_next);
-    Py_XDECREF(self->_cur);
+    Py_CLEAR(self->_cur);
     self->_cur = next;
   }
   while (self->_cur != self->_root) {
@@ -169,11 +174,11 @@ PyObject* NodeIter_iternext_helper(NodeIter* self) {
     }
     if constexpr (reversed) {
       NodeBase* prev = (NodeBase*)Py_NewRef(self->_cur->_prev);
-      Py_XDECREF(self->_cur);
+      Py_CLEAR(self->_cur);
       self->_cur = prev;
     } else {
       NodeBase* next = (NodeBase*)Py_NewRef(self->_cur->_next);
-      Py_XDECREF(self->_cur);
+      Py_CLEAR(self->_cur);
       self->_cur = next;
     }
   }
@@ -249,7 +254,12 @@ static PyTypeObject NodeIterType = {
 };
 
 bool NodeIter_init(PyObject* module) {
-  if (PyModule_AddType(module, &NodeIterType) < 0) {
+  // Swap to PyModule_AddType when 3.10 is minimum version
+  if (PyType_Ready(&NodeIterType) < 0) {
+    return false;
+  }
+  Py_INCREF(&NodeIterType);
+  if (PyModule_AddObject(module, "_NodeIter", (PyObject*)&NodeIterType) != 0) {
     return false;
   }
   return true;
