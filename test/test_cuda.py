@@ -2980,11 +2980,18 @@ exit(2)
                     stat = stat + pool_string + ".current"
                     current = postcapture_stats[stat] - precapture_stats[stat]
 
-                    # There will only ever be one expandable segment in each of the small and large pools. The way the bookeeping is done in the allocator means that we never increment the number of segments.
-                    if EXPANDABLE_SEGMENTS and 'segment' in stat:
+                    # There will only ever be one expandable segment in each of the small and large pools. The way the
+                    # bookeeping is done in the allocator means that we never increment the number of segments.
+                    if EXPANDABLE_SEGMENTS and "segment" in stat:
                         expected = 0
-                    # These two cases hit an edge case where the PyTorch allocator won't immediately unmap part of an expandable segment (and as a result reduce the number of reserved bytes) if the block to unmap is smaller than the page size
-                    if EXPANDABLE_SEGMENTS and 'reserved' in stat and (numel == cases[3][0] or numel == cases[4][0]):
+                    # These two cases hit an edge case where the PyTorch allocator won't immediately unmap part of an
+                    # expandable segment (and as a result reduce the number of reserved bytes) if the block to unmap is
+                    # smaller than the page size
+                    if (
+                        EXPANDABLE_SEGMENTS
+                        and "reserved" in stat
+                        and (numel == cases[3][0] or numel == cases[4][0])
+                    ):
                         expected = 2 * kLargeBuffer
 
                     self.assertEqual(
@@ -3014,13 +3021,16 @@ exit(2)
                 stat = stat + pool_string + ".current"
                 current = postdel_stats[stat] - precapture_stats[stat]
 
-                # There will only ever be one expandable segment in each of the small and large pools. The way the bookeeping is done in the allocator means that we never increment the number of segments.
-                if EXPANDABLE_SEGMENTS and 'segment' in stat:
+                # There will only ever be one expandable segment in each of the small and large pools. The way the
+                # bookeeping is done in the allocator means that we never increment the number of segments.
+                if EXPANDABLE_SEGMENTS and "segment" in stat:
                     expected = 0
-                # These two cases hit an edge case where the PyTorch allocator won't immediately unmap part of an expandable segment (and as a result reduce the number of reserved bytes) if the block to unmap is smaller than the page size
-                if EXPANDABLE_SEGMENTS and 'reserved' in stat and numel == cases[3][0]:
+                # These two cases hit an edge case where the PyTorch allocator won't immediately unmap part of an
+                # expandable segment (and as a result reduce the number of reserved bytes) if the block to unmap is
+                # smaller than the page size
+                if EXPANDABLE_SEGMENTS and "reserved" in stat and numel == cases[3][0]:
                     expected = 2 * kLargeBuffer
-                if EXPANDABLE_SEGMENTS and 'reserved' in stat and numel == cases[4][0]:
+                if EXPANDABLE_SEGMENTS and "reserved" in stat and numel == cases[4][0]:
                     expected = kLargeBuffer
 
                 self.assertEqual(
@@ -4941,7 +4951,9 @@ class TestBlockStateAbsorption(TestCase):
         graph_thread.join()
         no_graph_thread.join()
 
-        self.assertEqual(len(get_cudagraph_segments(pool)), 2 if EXPANDABLE_SEGMENTS else 4)
+        self.assertEqual(
+            len(get_cudagraph_segments(pool)), 2 if EXPANDABLE_SEGMENTS else 4
+        )
 
         del graph
 

@@ -1371,7 +1371,9 @@ def allocator_option_enabled_fn(allocator_config, _, option):
     else:
         return False
 
-TestEnvironment.def_flag("EXPANDABLE_SEGMENTS", env_var="PYTORCH_CUDA_ALLOC_CONF", enabled_fn=functools.partial(allocator_option_enabled_fn, option='expandable_segments'))
+TestEnvironment.def_flag("EXPANDABLE_SEGMENTS",
+                         env_var="PYTORCH_CUDA_ALLOC_CONF",
+                         enabled_fn=functools.partial(allocator_option_enabled_fn, option='expandable_segments'))
 
 if TEST_CUDA and 'NUM_PARALLEL_PROCS' in os.environ:
     num_procs = int(os.getenv("NUM_PARALLEL_PROCS", "2"))
