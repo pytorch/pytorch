@@ -82,9 +82,9 @@ namespace at {
 namespace native {
 
 namespace {
-  // "cache" whether we've previously failed the target lengths check
-  static bool tensor_failed_target_lengths_check = false;
-}
+// "cache" whether we've previously failed the target lengths check
+static bool tensor_failed_target_lengths_check = false;
+} // namespace
 
 bool _use_cudnn_ctc_loss(
     const Tensor& log_probs,
@@ -98,8 +98,7 @@ bool _use_cudnn_ctc_loss(
       (targets.dim() == 1) && (log_probs.scalar_type() == at::kFloat) &&
       (targets.scalar_type() == at::kInt) &&
       (targets.device().type() == at::kCPU) && (targets.is_contiguous()) &&
-      (log_probs.device().type() == at::kCUDA) &&
-      (log_probs.dim() == 3);
+      (log_probs.device().type() == at::kCUDA) && (log_probs.dim() == 3);
 
   if (use_cudnn) {
     // we don't know that input_lengths and target_lengths have the same size
@@ -130,8 +129,8 @@ bool _use_cudnn_ctc_loss_tensor(
       (targets.dim() == 1) && (log_probs.scalar_type() == at::kFloat) &&
       (targets.scalar_type() == at::kInt) &&
       (log_probs.device().type() == at::kCUDA) && (targets.is_contiguous()) &&
-      (log_probs.dim() == 3) &&
-      (input_lengths.scalar_type() == at::kInt) && (target_lengths.scalar_type() == at::kInt);
+      (log_probs.dim() == 3) && (input_lengths.scalar_type() == at::kInt) &&
+      (target_lengths.scalar_type() == at::kInt);
 
   if (at::cuda::currentStreamCaptureStatus() == at::cuda::CaptureStatus::None) {
     Tensor tlc = target_lengths.to(Device(at::kCPU), at::kLong).contiguous();
@@ -143,8 +142,7 @@ bool _use_cudnn_ctc_loss_tensor(
       Tensor tlc = target_lengths.to(Device(at::kCPU), at::kLong).contiguous();
       IntArrayRef il(ilc.data_ptr<int64_t>(), ilc.numel());
       IntArrayRef tl(tlc.data_ptr<int64_t>(), tlc.numel());
-      use_cudnn = use_cudnn && (tl[b] < 256) &&
-          (tl[b] <= il[b]);
+      use_cudnn = use_cudnn && (tl[b] < 256) && (tl[b] <= il[b]);
       if (!use_cudnn) {
         tensor_failed_target_lengths_check = true;
         break;
@@ -153,9 +151,10 @@ bool _use_cudnn_ctc_loss_tensor(
   } else {
     use_cudnn = use_cudnn && !tensor_failed_target_lengths_check;
     if (tensor_failed_target_lengths_check) {
-      TORCH_WARN("cuDNN max target length restriction < 256 cannot be checked during graph capture,"
-                 " but target length >= 256 was observed previously e.g., during warmup, so we"
-                 " presume it is unsafe to dispatch to cuDNN ctc_loss.");
+      TORCH_WARN(
+          "cuDNN max target length restriction < 256 cannot be checked during graph capture,"
+          " but target length >= 256 was observed previously e.g., during warmup, so we"
+          " presume it is unsafe to dispatch to cuDNN ctc_loss.");
     }
   }
 
@@ -270,8 +269,10 @@ std::tuple<Tensor, Tensor> _cudnn_ctc_loss_tensor(
   checkBackend(c, {*log_probs}, Backend::CUDA);
   checkBackend(c, {*targets}, Backend::CUDA);
   const auto batch_size = log_probs->size(1);
-  int64_t input_lengths_size = input_lengths.sizes().size() ? input_lengths.size(0) : 1;
-  int64_t target_lengths_size = target_lengths.sizes().size() ? target_lengths.size(0) : 1;
+  int64_t input_lengths_size =
+      input_lengths.sizes().size() ? input_lengths.size(0) : 1;
+  int64_t target_lengths_size =
+      target_lengths.sizes().size() ? target_lengths.size(0) : 1;
   TORCH_CHECK(
       input_lengths_size == batch_size,
       "input_lengths needs to have size to match batch_size");
