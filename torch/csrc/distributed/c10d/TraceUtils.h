@@ -18,8 +18,6 @@
 
 namespace c10d {
 
-/* Trace Utils Related to TORCH_NCCL_DESYNC_DEBUG */
-
 inline std::string getTraceStartKey(const std::string& pgName, int rank) {
   return pgName + "_" + std::to_string(rank) + "_trace_start";
 }
