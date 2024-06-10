@@ -247,16 +247,20 @@ class Node(_NodeBase):
         self.meta : Dict[str, Any] = {}
 
     def __getstate__(self):
-        self.__dict__["_erased"] = self._erased
-        self.__dict__["_prev"] = self._prev
-        self.__dict__["_next"] = self._next
-        return self.__dict__
+        state = self.__dict__.copy()
+        state["_erased"] = self._erased
+        state["_prev"] = self._prev
+        state["_next"] = self._next
+        return state
 
     def __setstate__(self, state):
-        self._erased = state.pop("_erased")
-        self._prev = state.pop("_prev")
-        self._next = state.pop("_next")
-        self.__dict__.update(d)
+        _erased = state.pop("_erased")
+        _prev = state.pop("_prev")
+        _next = state.pop("_next")
+        self.__dict__.update(state)
+        self._erased = _erased
+        self._prev = _prev
+        self._next = _next
 
     @property
     def next(self) -> 'Node':
