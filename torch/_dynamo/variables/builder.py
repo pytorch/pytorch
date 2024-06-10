@@ -462,7 +462,9 @@ class VariableBuilder:
 
         # Note - There are some nested values where types mismatch!
         # We want to get those out and wrap those.
-        value = inspect.getattr_static(value, "_torchdynamo_inline", value)
+        if inlined_value := inspect.getattr_static(value, "_torchdynamo_inline", None):
+            value = inlined_value
+            self.source = AttrSource(self.source, "_torchdynamo_inline")
 
         # Everything else (NB: order matters!)
         if is_traceable_wrapper_subclass(value) or istype(
