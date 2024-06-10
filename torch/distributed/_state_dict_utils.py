@@ -487,13 +487,10 @@ def _broadcast_tensors(
     keys: List[str],
     device: torch.device,
     pg: Optional[dist.ProcessGroup] = None,
-    broadcast_from_rank0: bool = True,
 ) -> None:
     tensors = []
     for key in keys:
-        if (
-            broadcast_from_rank0 is True and dist.get_rank() == 0
-        ) or broadcast_from_rank0 is False:
+        if dist.get_rank() == 0:
             full_state = full_state_dict[key]
             assert isinstance(full_state, torch.Tensor)
             full_tensor = full_state.detach().to(device)
@@ -522,6 +519,17 @@ def _broadcast_tensors(
     else:
         dist.broadcast(tensors[0], src=0, group=pg)
 
+    _distribute_tensors(local_state_dict, keys, device, pg)
+
+
+def _distribute_tensors(
+    local_state_dict: Dict[str, Any],
+    keys: List[str],
+    device: torch.device,
+    pg: Optional[dist.ProcessGroup] = None,
+) -> None:
+    if pg is None:
+        pg = dist.distributed_c10d._get_default_group()
     for key in keys:
         _local_state = local_state_dict.get(key, None)
         if _local_state is None or torch.is_tensor(_local_state):
@@ -540,15 +548,12 @@ def _broadcast_state_dict(
     device: torch.device,
     pg: Optional[dist.ProcessGroup] = None,
     strict: bool = False,
-    broadcast_from_rank0: bool = True,
 ) -> None:
-    # If broadcast_from_rank0 is True: Broadcast from rank0's `full_state_dict` to
-    # all ranks' `local_state_dict`, If strict is True, any keys in `local_state_dict`
-    # but not in `full_state_dict` will be removed from `local_state_dict`.
+    # Broadcast from rank0's `full_state_dict` to all ranks' `local_state_dict`.
+    # If strict is True, any keys in `local_state_dict` but not in `full_state_dict`
+    # will be removed from `local_state_dict`.
     ret = {}
-    if (
-        broadcast_from_rank0 is True and dist.get_rank() == 0
-    ) or broadcast_from_rank0 is False:
+    if dist.get_rank() == 0:
         for key, value in full_state_dict.items():
             if not torch.is_tensor(value):
                 ret[key] = value
@@ -572,17 +577,13 @@ def _broadcast_state_dict(
                 local_state_dict[key] = value
             continue
 
-        if (
-            broadcast_from_rank0 is True and dist.get_rank() == 0
-        ) or broadcast_from_rank0 is False:
+        if dist.get_rank() == 0:
             ret[key] = full_state_dict[key]
 
         keys.append(key)
         # Broadcast every tensor to avoid OOM for now.
         if len(keys) >= 1:
-            _broadcast_tensors(
-                ret, local_state_dict, keys, device, pg, broadcast_from_rank0
-            )
+            _broadcast_tensors(ret, local_state_dict, keys, device, pg)
             keys.clear()
 
     if strict:
@@ -590,9 +591,35 @@ def _broadcast_state_dict(
             for key in missing_keys:
                 local_state_dict.pop(key)
     if keys:
-        _broadcast_tensors(
-            ret, local_state_dict, keys, device, pg, broadcast_from_rank0
-        )
+        _broadcast_tensors(ret, local_state_dict, keys, device, pg)
+
+
+def _distribute_state_dict(
+    full_state_dict: Dict[str, Any],
+    local_state_dict: Dict[str, Any],
+    device: torch.device,
+    pg: Optional[dist.ProcessGroup] = None,
+) -> None:
+    # Distribute tensors in each rank
+    ret = {}
+    for key, value in full_state_dict.items():
+        if not torch.is_tensor(value) and key in local_state_dict:
+            local_state_dict[key] = value
+        elif value.dim() == 0 and key in local_state_dict:
+            local_state_dict[key] = value.cpu()
+        else:
+            ret[key] = _TensorInfo(value.size(), value.dtype)
+            assert isinstance(value, torch.Tensor)
+            full_tensor = value.detach().to(device)
+            local_state = local_state_dict.get(key, None)
+            if local_state is None:
+                continue
+            elif isinstance(local_state, DTensor):
+                local_state_dict[key] = (local_state, full_tensor)
+            else:
+                local_state_dict[key] = full_tensor
+
+            _distribute_tensors(local_state_dict, [key], device, pg)
 
 
 # These APIs are from torch.distributed.checkpoint.
