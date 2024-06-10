@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 from __future__ import annotations
 
 import dataclasses
@@ -126,6 +127,9 @@ class ValueRanges(Generic[_T]):
     is_bool: bool
     is_int: bool
     is_float: bool
+
+    def __repr__(self) -> str:
+        return f"VR[{self.lower}, {self.upper}]"
 
     @overload
     def __init__(self: ValueRanges[sympy.Expr], lower: ExprIn, upper: ExprIn) -> None:
@@ -680,7 +684,7 @@ class SymPyValueRangeAnalysis:
         if 0 in x:
             return ValueRanges.unknown()
         else:
-            return ValueRanges.decreasing_map(x, lambda y: FloatTrueDiv(1.0, y))
+            return ValueRanges.decreasing_map(x, lambda y: FloatTrueDiv(1.0, y))  # type: ignore[operator]
 
     @staticmethod
     def abs(x):
