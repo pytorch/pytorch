@@ -228,6 +228,7 @@ def _load_state_dict(
         return None
 
     read_data()
+    dist.barrier()
 
 
 def _load_state_dict_from_keys(
