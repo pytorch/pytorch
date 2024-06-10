@@ -1,4 +1,6 @@
 #include <torch/csrc/distributed/c10d/NCCLUtils.hpp>
+#include <torch/csrc/distributed/c10d/ProcessGroupNCCL.hpp>
+#include <torch/csrc/distributed/c10d/control_plane/Handlers.hpp>
 
 #include <c10/util/CallOnce.h>
 #include <c10/util/env.h>
@@ -237,6 +239,54 @@ std::string getNcclErrorDetailStr(
   }
   return interpret + err;
 }
+
+control_plane::RegisterHandler dumpHandler{
+    "dump_nccl_trace_pickle",
+    [](const control_plane::Request& req, control_plane::Response& res) {
+      auto params = req.params();
+      size_t validParamCount = 0;
+
+      // valid params
+      std::string includeCollectivesStr = "includecollectives";
+      std::string includeStackTracesStr = "includestacktraces";
+      std::string onlyActiveStr = "onlyactive";
+
+      std::unordered_map<std::string, bool> expectedParams = {
+          {includeCollectivesStr, true},
+          {includeStackTracesStr, true},
+          {onlyActiveStr, false}};
+
+      for (const auto& [paramName, paramValue] : params) {
+        auto it = expectedParams.find(paramName);
+        if (it != expectedParams.end()) {
+          validParamCount++;
+          if (paramValue == "true") {
+            it->second = true;
+          } else if (paramValue == "false") {
+            it->second = false;
+          } else {
+            res.setStatus(400);
+            res.setContent(
+                "Invalid value for " + paramName +
+                    " valid values are true or false",
+                "text/plain");
+            return;
+          }
+        }
+      }
+      if (validParamCount < params.size()) {
+        res.setStatus(400);
+        res.setContent(
+            "Invalid parameters - unexpected param in list", "text/plain");
+        return;
+      }
+      res.setContent(
+          dump_nccl_trace(
+              expectedParams[includeCollectivesStr],
+              expectedParams[includeStackTracesStr],
+              expectedParams[onlyActiveStr]),
+          "application/octet-stream");
+    }};
 
 } // namespace c10d
 

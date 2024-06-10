@@ -29,7 +29,6 @@
 #include <torch/csrc/distributed/c10d/ProcessGroupNCCL.hpp>
 #include <torch/csrc/distributed/c10d/TraceUtils.h>
 #include <torch/csrc/distributed/c10d/Utils.hpp>
-#include <torch/csrc/distributed/c10d/control_plane/Handlers.hpp>
 #include <torch/csrc/distributed/c10d/logger.hpp>
 #include <torch/torch.h>
 
@@ -379,52 +378,6 @@ std::string dump_nccl_trace(
       c10::nullopt, includeCollectives, includeStackTraces, onlyActive);
 }
 #endif
-
-// TODO(c-p-i-o): add a JSON endpoint.
-control_plane::RegisterHandler dumpHandler{
-    "dump_nccl_trace_pickle",
-    [](const control_plane::Request& req, control_plane::Response& res) {
-      auto params = req.params();
-      size_t validParamCount = 0;
-
-      // valid params
-      std::string includeCollectivesStr = "includecollectives";
-      std::string includeStackTracesStr = "includestacktraces";
-      std::string onlyActiveStr = "onlyactive";
-
-      std::unordered_map<std::string, bool> expectedParams = {
-          {includeCollectivesStr, true},
-          {includeStackTracesStr, true},
-          {onlyActiveStr, false}};
-
-      for (const auto& [paramName, paramValue] : params) {
-        auto it = expectedParams.find(paramName);
-        if (it != expectedParams.end()) {
-          validParamCount++;
-          if (paramValue == "true") {
-            it->second = true;
-          } else if (paramValue == "false") {
-            it->second = false;
-          } else {
-            res.setStatus(400);
-            res.setContent("Invalid value for " + paramName, "text/plain");
-            return;
-          }
-        }
-      }
-      if (validParamCount < params.size()) {
-        res.setStatus(400);
-        res.setContent(
-            "Invalid parameters - unexpected param in list", "text/plain");
-        return;
-      }
-      res.setContent(
-          dump_nccl_trace(
-              expectedParams[includeCollectivesStr],
-              expectedParams[includeStackTracesStr],
-              expectedParams[onlyActiveStr]),
-          "application/octet-stream");
-    }};
 
 std::optional<std::function<void(std::function<void(const std::string&)>)>>&
 get_cpp_trace_dumper() {
