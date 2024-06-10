@@ -512,6 +512,10 @@ def export(
     """
 
     if dynamo:
+        if isinstance(model, (torch.jit.ScriptModule, torch.jit.ScriptFunction)):
+            raise ValueError(
+                "Dynamo export does not supported ScriptModule or ScriptFunction."
+            )
         # Unsupported parameters for dynamo export
         # TODO: These are not supported AT THE TIME
         warnings.warn(
@@ -526,10 +530,11 @@ def export(
             args = args[:-1]
         # TODO: refactor this when we have migrated ExportedProgam and
         # needs users to specify dynamic_axes
-        dynamic_shapes = _from_dynamic_axes_to_dynamic_shapes(model, dynamic_axes)
-        print(f"dynamo export with dynamic_shapes: {dynamic_shapes}")
+        dynamic_shapes = _from_dynamic_axes_to_dynamic_shapes(
+            model, dynamic_axes, input_names
+        )
         exported_program = torch.export.export(
-            model, args=args, kwargs=kwargs, dynamic_shapes=dynamic_shapes
+            model, args=args, kwargs=kwargs, dynamic_shapes=dynamic_shapes  # type: ignore[arg-type]
         )
         # TODO: expose ExportOptions?
         onnx_program = torch.onnx.dynamo_export(exported_program, *args, **kwargs)
@@ -915,6 +920,7 @@ def _from_dynamic_axes_to_dynamic_shapes(
     dynamic_axes: Optional[
         Union[Mapping[str, Mapping[int, str]], Mapping[str, Sequence[int]]]
     ] = None,
+    input_names: Optional[Sequence[str]] = None,
 ) -> Optional[Union[Dict[str, Any], Tuple[Any], List[Any]]]:
     """
 
@@ -929,8 +935,14 @@ def _from_dynamic_axes_to_dynamic_shapes(
     """
     if dynamic_axes is None:
         return None
-    dynamic_shapes = {}
+    if input_names is None:
+        input_names = []
+    dynamic_shapes: Dict[str, Optional[Any]] = {}
     for input_name, axes in dynamic_axes.items():
+        if input_name in input_names:
+            raise ValueError(
+                "input names is not supported yet. Please use model forward signature."
+            )
         if isinstance(axes, dict):
             dynamic_shapes[input_name] = {
                 k: torch.export.Dim(v) for k, v in axes.items()
