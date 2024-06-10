@@ -14,7 +14,8 @@ from torch.testing._internal.common_utils import IS_LINUX, skipIfRocm
 from torch.testing._internal.inductor_utils import HAS_CUDA
 
 try:
-    import pydot  # noqa
+    import pydot  # noqa: F401
+
     HAS_PYDOT = True
 except ImportError:
     HAS_PYDOT = False
@@ -24,10 +25,11 @@ HAS_DOT = True if shutil.which("dot") is not None else False
 
 
 class TestGraphTransformObserver(TestCase):
-
     @skipIfRocm
     def test_sdpa_rewriter(self):
-        if not (HAS_CUDA and PLATFORM_SUPPORTS_FUSED_ATTENTION and HAS_PYDOT and HAS_DOT):
+        if not (
+            HAS_CUDA and PLATFORM_SUPPORTS_FUSED_ATTENTION and HAS_PYDOT and HAS_DOT
+        ):
             return
 
         def dot_prod_attention(
@@ -68,4 +70,3 @@ class TestGraphTransformObserver(TestCase):
 if __name__ == "__main__":
     if IS_LINUX:
         run_tests()
-
