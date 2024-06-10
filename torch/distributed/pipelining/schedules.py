@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 # Copyright (c) Meta Platforms, Inc. and affiliates
 
 import logging
@@ -11,7 +12,7 @@ import torch.distributed as dist
 from torch.profiler import record_function
 
 from .microbatch import merge_chunks, split_args_kwargs_into_chunks, TensorChunkSpec
-from .PipelineStage import _PipelineStageBase
+from .stage import _PipelineStageBase
 
 
 __all__ = [
