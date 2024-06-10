@@ -87,7 +87,10 @@ def sympy_generic_le(lower, upper):
         return lower <= upper
     else:
         # only negative condition is True > False
-        assert isinstance(lower, SympyBoolean) and isinstance(upper, SympyBoolean), (lower, upper)
+        assert isinstance(lower, SympyBoolean) and isinstance(upper, SympyBoolean), (
+            lower,
+            upper,
+        )
         return not (lower and not upper)
 
 
