@@ -1360,6 +1360,19 @@ TEST_CUDA_GRAPH = TEST_CUDA and (not TEST_SKIP_CUDAGRAPH) and (  # noqa: F821
     (torch.version.hip and float(".".join(torch.version.hip.split(".")[0:2])) >= 5.3)
 )
 
+def allocator_option_enabled_fn(allocator_config, _, option):
+    if allocator_config is None:
+        return False
+    allocator_config = allocator_config.split(',') if ',' in allocator_config else [allocator_config]
+    mapping = dict([var.split(':') for var in allocator_config])
+
+    if option in mapping and mapping[option] == 'True':
+        return True
+    else:
+        return False
+
+TestEnvironment.def_flag("EXPANDABLE_SEGMENTS", env_var="PYTORCH_CUDA_ALLOC_CONF", enabled_fn=functools.partial(allocator_option_enabled_fn, option='expandable_segments'))
+
 if TEST_CUDA and 'NUM_PARALLEL_PROCS' in os.environ:
     num_procs = int(os.getenv("NUM_PARALLEL_PROCS", "2"))
     gb_available = torch.cuda.mem_get_info()[1] / 2 ** 30
