@@ -5,6 +5,7 @@ input/output types, metadata, config, function signatures etc.
 """
 
 import collections
+import dataclasses
 import functools
 from dataclasses import dataclass, field
 from enum import Enum
@@ -466,6 +467,11 @@ class ViewAndMutationMeta:
         self.traced_tangent_metas = [extract_metadata(t) for t in self.traced_tangents]
         # Clear traced tangents at runtime
         self.traced_tangents = []
+        new_output_info = []
+        for out in self.output_info:
+            new_out = dataclasses.replace(out, functional_tensor=None)
+            new_output_info.append(new_out)
+        self.output_info = new_output_info
 
     @property
     def tensors_saved_for_backwards_slice(self):

@@ -186,6 +186,10 @@ def aot_dispatch_base(
     compiled_fw = functionalized_rng_wrapper.post_compile(
         compiled_fw, aot_config, runtime_metadata=fw_metadata
     )
+    fw_metadata.make_cache_safe()
+
+    if maybe_subclass_meta is not None:
+        maybe_subclass_meta.fw_metadata.make_cache_safe()
 
     if config.enable_autograd_cache and aot_config.cache_key:
         if fw_key := getattr(compiled_fw, "_fx_graph_cache_key", None):
@@ -608,6 +612,8 @@ def aot_dispatch_autograd(
     )
     # Convert metadata fields to be cache safe now that we're done tracing.
     fw_metadata.make_cache_safe()
+    if maybe_subclass_meta is not None:
+        maybe_subclass_meta.fw_metadata.make_cache_safe()
 
     try_save_cache_entry: Optional[Callable] = None
     if config.enable_autograd_cache:
