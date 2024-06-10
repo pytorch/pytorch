@@ -100,11 +100,13 @@ def get_block_to_lifted_attrs(graph: torch._C.Graph) -> Dict[torch._C.Block, Set
     # Reference map stores the input (i.e., src) and output (i.e., dest) IR of a
     # GetAttr node. By traversing this reference map, we can figure out the
     # full IR aliasing pass and figure out the FQN of an attribute.
+    # E.g., %2 = GetAttr(linear)[%1] --> node_to_parent_map["%2"] = "%1"
     node_to_parent_map: Dict[str, str] = dict()
 
     # Used for reconstructing the FQN of an attribute based on the reference map.
     # In nutshell, for each GetAttr call, GetAttr(input IR, attribute name) -> output IR
     # This name map stores which attribute name is called for a src IR --> dest IR action.
+    # E.g., %2 = GetAttr(linear)[%1] --> node_to_attr_name["%2"] = "linear"
     node_to_attr_name: Dict[str, str] = dict()
 
     def _dfs_get_attr_dependency(entry):
@@ -136,6 +138,10 @@ def get_block_to_lifted_attrs(graph: torch._C.Graph) -> Dict[torch._C.Block, Set
             if node.kind() == "prim::GetAttr":
                 irv_name = node.output().debugName()
                 # Skip for intermediate GetAttr, which will anyway not result a FQN.
+                # E.g., node_to_parent_name: {"%3": "%2", "%2": "%1"}
+                #       node_to_attr_name: {"%3": "weight", "%2": "linear", "%1": "self"}
+                #       There is only one FQN %3-->%2-->%1: self.linear.weight
+                #       %2-->%1 is not a FQN: self.linear
                 if irv_name not in set(node_to_parent_map.values()):
                     arguments.add(
                         construct_fqn(irv_name, node_to_parent_map, node_to_attr_name)
@@ -664,7 +670,7 @@ class TS2EPConverter:
     # TorchScript model to ExportedProgram converter
     def __init__(
         self,
-        ts_model,
+        ts_model: Union[torch.jit.ScriptModule, torch.jit.ScriptFunction],
         sample_args: Tuple[Any, ...],
         sample_kwargs: Optional[Dict[str, Any]] = None,
     ):
