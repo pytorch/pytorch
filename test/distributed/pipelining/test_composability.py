@@ -17,7 +17,7 @@ from torch.distributed._composable.fsdp.fully_shard import (
 from torch.distributed._tensor import DTensor
 from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.pipelining import PipelineStage
-from torch.distributed.pipelining.PipelineSchedule import (
+from torch.distributed.pipelining.schedules import (
     PipelineScheduleSingle,
     Schedule1F1B,
     ScheduleGPipe,
@@ -134,7 +134,6 @@ class ComposabilityTest(MultiProcContinousTest):
                 self.device,
                 group=pp_group,
                 input_args=input_mb[0],
-                num_microbatches=num_microbatches,
             )
             return stage, offset
 
