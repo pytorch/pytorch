@@ -6,7 +6,6 @@ from enum import auto, Enum
 from typing import Any, List, Tuple
 
 import torch
-from torch._prims_common import make_contiguous_strides_for
 from .. import config
 from ..ir import (
     ComputedBuffer,
@@ -390,7 +389,7 @@ def flex_attention(*args, **kwargs):
         query.get_device(),
         query.get_dtype(),
         query.get_size(),
-        make_contiguous_strides_for(query.get_size()),
+        FlexibleLayout.contiguous_strides(query.get_size()),
     )
     # see NOTE:[TritonTemplates with multiple outputs]
     logsumexp_shape = query.get_size()[:-1]  # [B, H, M]
@@ -746,7 +745,7 @@ def flex_attention_backward(*args, **kwargs):
         key.get_device(),
         key.get_dtype(),
         key.get_size(),
-        make_contiguous_strides_for(key.get_size()),
+        FlexibleLayout.contiguous_strides(key.get_size()),
     )
 
     # Create delta which will is needed for the bwd's kernel

@@ -1494,7 +1494,7 @@ def valid_vec_isa_list() -> List[VecISA]:
     isa_list = []
     _cpu_supported_isa = x86_isa_checker()
     for isa in supported_vec_isa_list:
-        if str(isa) in _cpu_supported_isa:
+        if str(isa) in _cpu_supported_isa and isa:
             isa_list.append(isa)
     return isa_list
 
