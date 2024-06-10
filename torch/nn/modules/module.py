@@ -2585,7 +2585,7 @@ class Module:
 
         # replicas do not have parameters themselves, the replicas reference the original
         # module.
-        replica._parameters = OrderedDict()
+        replica._parameters.clear()
         replica._is_replica = True
 
         return replica
