@@ -1,6 +1,6 @@
+# mypy: allow-untyped-defs
 import collections
 import contextlib
-import cProfile
 import dataclasses
 import functools
 import itertools
@@ -388,9 +388,6 @@ class DebugContext:
             self._setup_log_capture("debug.log", logging.DEBUG)
         if config.trace.info_log:
             self._setup_log_capture("info.log", logging.INFO)
-        if config.trace.compile_profile:
-            self._prof = cProfile.Profile()
-            self._prof.enable()
 
     def _setup_log_capture(self, filename: str, level: int):
         log = logging.getLogger("torch._inductor")
