@@ -2,18 +2,23 @@
 
 # Owner(s): ["module: numpy"]
 
-import torch
-import numpy as np
-
-from itertools import product
 import sys
 
-from torch.testing._internal.common_utils import \
-    (skipIfTorchDynamo, TestCase, run_tests)
-from torch.testing._internal.common_device_type import \
-    (instantiate_device_type_tests, onlyCPU, dtypes, skipMeta)
-from torch.testing._internal.common_dtype import all_types_and_complex_and
+from itertools import product
+
+import numpy as np
+
+import torch
 from torch.testing import make_tensor
+from torch.testing._internal.common_device_type import (
+    dtypes,
+    instantiate_device_type_tests,
+    onlyCPU,
+    skipMeta,
+)
+from torch.testing._internal.common_dtype import all_types_and_complex_and
+
+from torch.testing._internal.common_utils import run_tests, skipIfTorchDynamo, TestCase
 
 
 # For testing handling NumPy objects and sending tensors to / accepting
@@ -25,7 +30,7 @@ class TestNumPyInterop(TestCase):
     @onlyCPU
     def test_numpy_non_writeable(self, device):
         arr = np.zeros(5)
-        arr.flags['WRITEABLE'] = False
+        arr.flags["WRITEABLE"] = False
         self.assertWarns(UserWarning, lambda: torch.from_numpy(arr))
 
     @onlyCPU
@@ -103,7 +108,7 @@ class TestNumPyInterop(TestCase):
             x = get_castable_tensor((sz1, sz2), dtp)
             y = x.numpy()
             check2d(x, y)
-            self.assertTrue(y.flags['C_CONTIGUOUS'])
+            self.assertTrue(y.flags["C_CONTIGUOUS"])
 
             # with storage offset
             xm = get_castable_tensor((sz1 * 2, sz2), dtp)
@@ -111,13 +116,13 @@ class TestNumPyInterop(TestCase):
             y = x.numpy()
             self.assertTrue(x.storage_offset() > 0)
             check2d(x, y)
-            self.assertTrue(y.flags['C_CONTIGUOUS'])
+            self.assertTrue(y.flags["C_CONTIGUOUS"])
 
             # non-contiguous 2D
             x = get_castable_tensor((sz2, sz1), dtp).t()
             y = x.numpy()
             check2d(x, y)
-            self.assertFalse(y.flags['C_CONTIGUOUS'])
+            self.assertFalse(y.flags["C_CONTIGUOUS"])
 
             # with storage offset
             xm = get_castable_tensor((sz2 * 2, sz1), dtp)
@@ -168,7 +173,9 @@ class TestNumPyInterop(TestCase):
                 for sparse in [False, True]:
                     for conj in [False, True]:
                         data = [[1 + 2j, -2 + 3j], [-1 - 2j, 3 - 2j]]
-                        x = torch.tensor(data, requires_grad=requires_grad, device=device)
+                        x = torch.tensor(
+                            data, requires_grad=requires_grad, device=device
+                        )
                         y = x
                         if sparse:
                             if requires_grad:
@@ -177,13 +184,23 @@ class TestNumPyInterop(TestCase):
                         if conj:
                             x = x.conj()
                             y = x.resolve_conj()
-                        expect_error = requires_grad or sparse or conj or not device == 'cpu'
+                        expect_error = (
+                            requires_grad or sparse or conj or not device == "cpu"
+                        )
                         error_msg = r"Use (t|T)ensor\..*(\.numpy\(\))?"
                         if not force and expect_error:
-                            self.assertRaisesRegex((RuntimeError, TypeError), error_msg, lambda: x.numpy())
-                            self.assertRaisesRegex((RuntimeError, TypeError), error_msg, lambda: x.numpy(force=False))
+                            self.assertRaisesRegex(
+                                (RuntimeError, TypeError), error_msg, lambda: x.numpy()
+                            )
+                            self.assertRaisesRegex(
+                                (RuntimeError, TypeError),
+                                error_msg,
+                                lambda: x.numpy(force=False),
+                            )
                         elif force and sparse:
-                            self.assertRaisesRegex(TypeError, error_msg, lambda: x.numpy(force=True))
+                            self.assertRaisesRegex(
+                                TypeError, error_msg, lambda: x.numpy(force=True)
+                            )
                         else:
                             self.assertEqual(x.numpy(force=force), y)
 
@@ -224,7 +241,7 @@ class TestNumPyInterop(TestCase):
                     self.assertEqual(tensor_from_array2[i], array2[i])
 
         # Test unsupported type
-        array = np.array(['foo', 'bar'], dtype=np.dtype(np.str_))
+        array = np.array(["foo", "bar"], dtype=np.dtype(np.str_))
         with self.assertRaises(TypeError):
             tensor_from_array = torch.from_numpy(array)
 
@@ -255,7 +272,7 @@ class TestNumPyInterop(TestCase):
         self.assertEqual(torch.from_numpy(x).shape, (2, 0))
 
         # check ill-sized strides raise exception
-        x = np.array([3., 5., 8.])
+        x = np.array([3.0, 5.0, 8.0])
         x.strides = (3,)
         self.assertRaises(ValueError, lambda: torch.from_numpy(x))
 
@@ -263,7 +280,7 @@ class TestNumPyInterop(TestCase):
     def test_from_numpy_no_leak_on_invalid_dtype(self):
         # This used to leak memory as the `from_numpy` call raised an exception and didn't decref the temporary
         # object. See https://github.com/pytorch/pytorch/issues/121138
-        x = np.array("value".encode('ascii'))
+        x = np.array("value".encode("ascii"))
         for _ in range(1000):
             try:
                 torch.from_numpy(x)
@@ -273,31 +290,52 @@ class TestNumPyInterop(TestCase):
 
     @skipMeta
     def test_from_list_of_ndarray_warning(self, device):
-        warning_msg = r"Creating a tensor from a list of numpy.ndarrays is extremely slow"
+        warning_msg = (
+            r"Creating a tensor from a list of numpy.ndarrays is extremely slow"
+        )
         with self.assertWarnsOnceRegex(UserWarning, warning_msg):
             torch.tensor([np.array([0]), np.array([1])], device=device)
 
     def test_ctor_with_invalid_numpy_array_sequence(self, device):
         # Invalid list of numpy array
         with self.assertRaisesRegex(ValueError, "expected sequence of length"):
-            torch.tensor([np.random.random(size=(3, 3)), np.random.random(size=(3, 0))], device=device)
+            torch.tensor(
+                [np.random.random(size=(3, 3)), np.random.random(size=(3, 0))],
+                device=device,
+            )
 
         # Invalid list of list of numpy array
         with self.assertRaisesRegex(ValueError, "expected sequence of length"):
-            torch.tensor([[np.random.random(size=(3, 3)), np.random.random(size=(3, 2))]], device=device)
+            torch.tensor(
+                [[np.random.random(size=(3, 3)), np.random.random(size=(3, 2))]],
+                device=device,
+            )
 
         with self.assertRaisesRegex(ValueError, "expected sequence of length"):
-            torch.tensor([[np.random.random(size=(3, 3)), np.random.random(size=(3, 3))],
-                          [np.random.random(size=(3, 3)), np.random.random(size=(3, 2))]], device=device)
+            torch.tensor(
+                [
+                    [np.random.random(size=(3, 3)), np.random.random(size=(3, 3))],
+                    [np.random.random(size=(3, 3)), np.random.random(size=(3, 2))],
+                ],
+                device=device,
+            )
 
         # expected shape is `[1, 2, 3]`, hence we try to iterate over 0-D array
         # leading to type error : not a sequence.
         with self.assertRaisesRegex(TypeError, "not a sequence"):
-            torch.tensor([[np.random.random(size=(3)), np.random.random()]], device=device)
+            torch.tensor(
+                [[np.random.random(size=(3)), np.random.random()]], device=device
+            )
 
         # list of list or numpy array.
         with self.assertRaisesRegex(ValueError, "expected sequence of length"):
-            torch.tensor([[1, 2, 3], np.random.random(size=(2,)), ], device=device)
+            torch.tensor(
+                [
+                    [1, 2, 3],
+                    np.random.random(size=(2,)),
+                ],
+                device=device,
+            )
 
     @onlyCPU
     def test_ctor_with_numpy_scalar_ctor(self, device) -> None:
@@ -326,7 +364,7 @@ class TestNumPyInterop(TestCase):
     def test_numpy_index_multi(self, device):
         for dim_sz in [2, 8, 16, 32]:
             i = np.zeros((dim_sz, dim_sz, dim_sz), dtype=np.int32)
-            i[:dim_sz // 2, :, :] = 1
+            i[: dim_sz // 2, :, :] = 1
             x = torch.randn(dim_sz, dim_sz, dim_sz)
             self.assertTrue(x[i == 1].numel() == np.sum(i))
 
@@ -352,7 +390,7 @@ class TestNumPyInterop(TestCase):
         ]
         for tp, dtype in zip(types, dtypes):
             # Only concrete class can be given where "Type[number[_64Bit]]" is expected
-            if np.dtype(dtype).kind == 'u':  # type: ignore[misc]
+            if np.dtype(dtype).kind == "u":  # type: ignore[misc]
                 # .type expects a XxxTensor, which have no type hints on
                 # purpose, so ignore during mypy type checking
                 x = torch.tensor([1, 2, 3, 4]).type(tp)  # type: ignore[call-overload]
@@ -381,7 +419,7 @@ class TestNumPyInterop(TestCase):
             asarray = np.asarray(x, dtype=dtype)
             self.assertEqual(asarray.dtype, dtype)
             # Only concrete class can be given where "Type[number[_64Bit]]" is expected
-            if np.dtype(dtype).kind == 'u':  # type: ignore[misc]
+            if np.dtype(dtype).kind == "u":  # type: ignore[misc]
                 wrapped_x = np.array([1, -2, 3, -4], dtype=dtype)
                 for i in range(len(x)):
                     self.assertEqual(asarray[i], wrapped_x[i])
@@ -395,7 +433,7 @@ class TestNumPyInterop(TestCase):
         for tp, dtype in zip(float_types, float_dtypes):
             x = torch.tensor([1, 2, 3, 4]).type(tp)  # type: ignore[call-overload]
             array = np.array([1, 2, 3, 4], dtype=dtype)
-            for func in ['sin', 'sqrt', 'ceil']:
+            for func in ["sin", "sqrt", "ceil"]:
                 ufunc = getattr(np, func)
                 res_x = ufunc(x)
                 res_array = ufunc(array)
@@ -408,14 +446,21 @@ class TestNumPyInterop(TestCase):
             x = torch.tensor([1, 2, 3, 4]).type(tp)  # type: ignore[call-overload]
             array = np.array([1, 2, 3, 4], dtype=dtype)
             geq2_x = np.greater_equal(x, 2)
-            geq2_array = np.greater_equal(array, 2).astype('uint8')
+            geq2_array = np.greater_equal(array, 2).astype("uint8")
             self.assertIsInstance(geq2_x, torch.ByteTensor)
             for i in range(len(x)):
                 self.assertEqual(geq2_x[i], geq2_array[i])
 
     @onlyCPU
     def test_multiplication_numpy_scalar(self, device) -> None:
-        for np_dtype in [np.float32, np.float64, np.int32, np.int64, np.int16, np.uint8]:
+        for np_dtype in [
+            np.float32,
+            np.float64,
+            np.int32,
+            np.int64,
+            np.int16,
+            np.uint8,
+        ]:
             for t_dtype in [torch.float, torch.double]:
                 # mypy raises an error when np.floatXY(2.0) is called
                 # even though this is valid code
@@ -431,10 +476,18 @@ class TestNumPyInterop(TestCase):
                 self.assertTrue(r2.requires_grad)
 
     @onlyCPU
-    def test_parse_numpy_int(self, device):
+    @skipIfTorchDynamo()
+    def test_parse_numpy_int_overflow(self, device):
+        # assertRaises uses a try-except which dynamo has issues with
         # Only concrete class can be given where "Type[number[_64Bit]]" is expected
-        self.assertRaisesRegex(RuntimeError, "(Overflow|an integer is required)",
-                               lambda: torch.mean(torch.randn(1, 1), np.uint64(-1)))  # type: ignore[call-overload]
+        self.assertRaisesRegex(
+            RuntimeError,
+            "(Overflow|an integer is required)",
+            lambda: torch.mean(torch.randn(1, 1), np.uint64(-1)),
+        )  # type: ignore[call-overload]
+
+    @onlyCPU
+    def test_parse_numpy_int(self, device):
         # https://github.com/pytorch/pytorch/issues/29252
         for nptype in [np.int16, np.int8, np.uint8, np.int32, np.int64]:
             scalar = 3
@@ -444,7 +497,10 @@ class TestNumPyInterop(TestCase):
             # np integral type can be treated as a python int in native functions with
             # int parameters:
             self.assertEqual(torch.ones(5).diag(scalar), torch.ones(5).diag(np_val))
-            self.assertEqual(torch.ones([2, 2, 2, 2]).mean(scalar), torch.ones([2, 2, 2, 2]).mean(np_val))
+            self.assertEqual(
+                torch.ones([2, 2, 2, 2]).mean(scalar),
+                torch.ones([2, 2, 2, 2]).mean(np_val),
+            )
 
             # numpy integral type parses like a python int in custom python bindings:
             self.assertEqual(torch.Storage(np_val).size(), scalar)  # type: ignore[attr-defined]
@@ -461,25 +517,40 @@ class TestNumPyInterop(TestCase):
             self.assertEqual((np_val + t).dtype, t.dtype)
 
     def test_has_storage_numpy(self, device):
-        for dtype in [np.float32, np.float64, np.int64,
-                      np.int32, np.int16, np.uint8]:
+        for dtype in [np.float32, np.float64, np.int64, np.int32, np.int16, np.uint8]:
             arr = np.array([1], dtype=dtype)
-            self.assertIsNotNone(torch.tensor(arr, device=device, dtype=torch.float32).storage())
-            self.assertIsNotNone(torch.tensor(arr, device=device, dtype=torch.double).storage())
-            self.assertIsNotNone(torch.tensor(arr, device=device, dtype=torch.int).storage())
-            self.assertIsNotNone(torch.tensor(arr, device=device, dtype=torch.long).storage())
-            self.assertIsNotNone(torch.tensor(arr, device=device, dtype=torch.uint8).storage())
+            self.assertIsNotNone(
+                torch.tensor(arr, device=device, dtype=torch.float32).storage()
+            )
+            self.assertIsNotNone(
+                torch.tensor(arr, device=device, dtype=torch.double).storage()
+            )
+            self.assertIsNotNone(
+                torch.tensor(arr, device=device, dtype=torch.int).storage()
+            )
+            self.assertIsNotNone(
+                torch.tensor(arr, device=device, dtype=torch.long).storage()
+            )
+            self.assertIsNotNone(
+                torch.tensor(arr, device=device, dtype=torch.uint8).storage()
+            )
 
     @dtypes(*all_types_and_complex_and(torch.half, torch.bfloat16, torch.bool))
     def test_numpy_scalar_cmp(self, device, dtype):
         if dtype.is_complex:
-            tensors = (torch.tensor(complex(1, 3), dtype=dtype, device=device),
-                       torch.tensor([complex(1, 3), 0, 2j], dtype=dtype, device=device),
-                       torch.tensor([[complex(3, 1), 0], [-1j, 5]], dtype=dtype, device=device))
+            tensors = (
+                torch.tensor(complex(1, 3), dtype=dtype, device=device),
+                torch.tensor([complex(1, 3), 0, 2j], dtype=dtype, device=device),
+                torch.tensor(
+                    [[complex(3, 1), 0], [-1j, 5]], dtype=dtype, device=device
+                ),
+            )
         else:
-            tensors = (torch.tensor(3, dtype=dtype, device=device),
-                       torch.tensor([1, 0, -3], dtype=dtype, device=device),
-                       torch.tensor([[3, 0, -1], [3, 5, 4]], dtype=dtype, device=device))
+            tensors = (
+                torch.tensor(3, dtype=dtype, device=device),
+                torch.tensor([1, 0, -3], dtype=dtype, device=device),
+                torch.tensor([[3, 0, -1], [3, 5, 4]], dtype=dtype, device=device),
+            )
 
         for tensor in tensors:
             if dtype == torch.bfloat16:
@@ -488,10 +559,16 @@ class TestNumPyInterop(TestCase):
                 continue
 
             np_array = tensor.cpu().numpy()
-            for t, a in product((tensor.flatten()[0], tensor.flatten()[0].item()),
-                                (np_array.flatten()[0], np_array.flatten()[0].item())):
+            for t, a in product(
+                (tensor.flatten()[0], tensor.flatten()[0].item()),
+                (np_array.flatten()[0], np_array.flatten()[0].item()),
+            ):
                 self.assertEqual(t, a)
-                if dtype == torch.complex64 and torch.is_tensor(t) and type(a) == np.complex64:
+                if (
+                    dtype == torch.complex64
+                    and torch.is_tensor(t)
+                    and type(a) == np.complex64
+                ):
                     # TODO: Imaginary part is dropped in this case. Need fix.
                     # https://github.com/pytorch/pytorch/issues/43579
                     self.assertFalse(t == a)
@@ -553,10 +630,10 @@ class TestNumPyInterop(TestCase):
         # Regression test for https://github.com/pytorch/pytorch/issues/115066
         self.assertEqual(torch.mul(x, y).shape, y.shape)
         # Regression test for https://github.com/pytorch/pytorch/issues/113037
-        self.assertEqual(torch.div(x, y, rounding_mode='floor').shape, y.shape)
+        self.assertEqual(torch.div(x, y, rounding_mode="floor").shape, y.shape)
 
 
 instantiate_device_type_tests(TestNumPyInterop, globals())
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     run_tests()

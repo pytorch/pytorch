@@ -731,15 +731,14 @@ TEST(OperatorRegistrationTestLegacyLambdaBasedKernel, givenFallbackKernelWithout
 }
 
 TEST(OperatorRegistrationTestLegacyLambdaBasedKernel, givenKernelWithOptionalInputs_withoutOutput_whenRegistered_thenCanBeCalled) {
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  bool called;
+  bool called = false;
   std::optional<Tensor> called_arg2 = c10::nullopt;
   std::optional<int64_t> called_arg3 = c10::nullopt;
   std::optional<std::string> called_arg4 = c10::nullopt;
 
   auto registrar = RegisterOperators().op(
     "_test::opt_input(Tensor arg1, Tensor? arg2, int? arg3, str? arg4) -> ()",
-    [&] (Tensor arg1, const std::optional<Tensor>& arg2, c10::optional<int64_t> arg3, c10::optional<std::string> arg4) {
+    [&] (Tensor arg1, const std::optional<Tensor>& arg2, std::optional<int64_t> arg3, std::optional<std::string> arg4) {
       called = true;
       called_arg2 = arg2;
       called_arg3 = arg3;
@@ -771,15 +770,14 @@ TEST(OperatorRegistrationTestLegacyLambdaBasedKernel, givenKernelWithOptionalInp
 }
 
 TEST(OperatorRegistrationTestLegacyLambdaBasedKernel, givenKernelWithOptionalInputs_withOutput_whenRegistered_thenCanBeCalled) {
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  bool called;
+  bool called = false;
   std::optional<Tensor> called_arg2 = c10::nullopt;
   std::optional<int64_t> called_arg3 = c10::nullopt;
   std::optional<std::string> called_arg4 = c10::nullopt;
 
   auto registrar = RegisterOperators().op(
     "_test::opt_input(Tensor arg1, Tensor? arg2, int? arg3, str? arg4) -> Tensor?",
-    [&] (Tensor arg1, const std::optional<Tensor>& arg2, c10::optional<int64_t> arg3, c10::optional<std::string> arg4) {
+    [&] (Tensor arg1, const std::optional<Tensor>& arg2, std::optional<int64_t> arg3, std::optional<std::string> arg4) {
       called = true;
       called_arg2 = arg2;
       called_arg3 = arg3;
@@ -814,15 +812,9 @@ TEST(OperatorRegistrationTestLegacyLambdaBasedKernel, givenKernelWithOptionalInp
 }
 
 TEST(OperatorRegistrationTestLegacyLambdaBasedKernel, givenKernelWithOptionalInputs_withMultipleOutputs_whenRegistered_thenCanBeCalled) {
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  bool called;
-  std::optional<Tensor> called_arg2 = c10::nullopt;
-  std::optional<int64_t> called_arg3 = c10::nullopt;
-  std::optional<std::string> called_arg4 = c10::nullopt;
-
   auto registrar = RegisterOperators().op(
     "_test::opt_input(Tensor arg1, Tensor? arg2, int? arg3, str? arg4) -> (Tensor?, int?, str?)",
-    [] (Tensor arg1, const std::optional<Tensor>& arg2, c10::optional<int64_t> arg3, c10::optional<std::string> arg4) {
+    [] (Tensor arg1, const std::optional<Tensor>& arg2, std::optional<int64_t> arg3, std::optional<std::string> arg4) {
       return std::make_tuple(arg2, arg3, arg4);
     });
   auto op = c10::Dispatcher::singleton().findSchema({"_test::opt_input", ""});

@@ -8,9 +8,9 @@ import torch
 import torch._inductor.config as config
 import torch.autograd
 from torch._inductor import metrics
-from torch._inductor.compile_fx import compile_fx, count_bytes_inner
+from torch._inductor.compile_fx import compile_fx, compile_fx_inner
 from torch._inductor.test_case import TestCase as InductorTestCase
-from torch.testing._internal.common_utils import IS_WINDOWS, skipIfRocm
+from torch.testing._internal.common_utils import skipIfRocm
 
 ########################
 # Explanation of Tests #
@@ -36,21 +36,12 @@ if HAS_CUDA:
 aten = torch.ops.aten
 
 
-def count_bytes_inductor(gm, example_inputs):
-    return compile_fx(gm, example_inputs, inner_compile=count_bytes_inner)
+def compile_but_use_eager(gm, example_inputs):
+    def inner_compile(gm, *args, **kwargs):
+        compile_fx_inner(gm, *args, **kwargs)
+        return gm
 
-
-# We don't support torch.compile() on Windows
-if not IS_WINDOWS:
-
-    @torch._dynamo.optimize(count_bytes_inductor)
-    def f(x):
-        return torch.cat([x, x.cos()])
-
-else:
-
-    def f(x):
-        return torch.cat([x, x.cos()])
+    return compile_fx(gm, example_inputs, inner_compile=inner_compile)
 
 
 def count_numel(f, *args):
@@ -58,7 +49,7 @@ def count_numel(f, *args):
     Assumes all inputs are fp32
     """
     metrics.reset()
-    torch._dynamo.optimize(count_bytes_inductor)(f)(*args)
+    torch.compile(f, backend=compile_but_use_eager)(*args)
     print(metrics.nodes_num_elem)
     return str(metrics.num_bytes_accessed // 4)
 
@@ -69,7 +60,7 @@ def count_numel_train(f, *args):
     """
     metrics.reset()
 
-    f = torch._dynamo.optimize(count_bytes_inductor)(f)
+    f = torch.compile(f, backend=compile_but_use_eager)
     out = f(*args)
     res = 0
     for o in out:
