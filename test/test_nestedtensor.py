@@ -4414,15 +4414,19 @@ class TestNestedTensorSubclass(TestCase):
         # S: (constant) sequence length
         # D: embedding size
         query = random_nt_from_dims(
-            [4, None, 8, 10], device=device, dtype=dtype, layout=torch.jagged)
+            [4, None, 8, 10], device=device, dtype=dtype, layout=torch.jagged, requires_grad=True)
         key = random_nt_from_similar(query)
         value = random_nt_from_similar(query)
         output = F.scaled_dot_product_attention(query, key, value)
         self.assertTrue(isinstance(output, NestedTensor))
+        output.values().sum().backward()
 
+        query_dense = query.clone().detach().requires_grad_(True)
         # should be equivalent to just running the buffers through
-        output_dense = F.scaled_dot_product_attention(query._values, key._values, value._values)
+        output_dense = F.scaled_dot_product_attention(query_dense.values(), key.values(), value.values())
         self.assertEqual(output._values, output_dense)
+        output_dense.sum().backward()
+        self.assertEqual(query.grad, query_dense.grad)
 
     # Doesn't work until we have real views
     @xfailIfTorchDynamo
