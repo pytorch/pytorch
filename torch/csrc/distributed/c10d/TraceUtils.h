@@ -9,11 +9,6 @@
 #include <torch/csrc/jit/serialization/pickler.h>
 #include <torch/csrc/profiler/combined_traceback.h>
 
-#ifdef USE_C10D_NCCL
-#include <ATen/cuda/CUDAEvent.h>
-#include <torch/csrc/distributed/c10d/NCCLUtils.hpp>
-#endif
-
 #include <sys/types.h>
 #include <cstdlib>
 #include <fstream>
@@ -22,38 +17,6 @@
 #include <vector>
 
 namespace c10d {
-
-static c10::IValue entries_key = "entries";
-static c10::IValue nccl_comm_key = "nccl_comm_state";
-static c10::IValue version_key = "version";
-// Update whenever changing contents or formatting of the dump
-// (minor when adding fields, major when changing existing fields)
-static c10::IValue version_val = "2.1";
-static c10::IValue pg_config_key = "pg_config";
-static c10::IValue record_id_key = "record_id";
-static c10::IValue pg_id_key = "pg_id";
-static c10::IValue pg_name_key = "process_group";
-static c10::IValue collective_seq_id_key = "collective_seq_id";
-static c10::IValue p2p_seq_id_key = "p2p_seq_id";
-static c10::IValue is_p2p_key = "is_p2p";
-static c10::IValue op_id_key = "op_id";
-static c10::IValue profiling_name_key = "profiling_name";
-static c10::IValue input_sizes_key = "input_sizes";
-static c10::IValue input_dtypes_key = "input_dtypes";
-static c10::IValue output_sizes_key = "output_sizes";
-static c10::IValue output_dtypes_key = "output_dtypes";
-static c10::IValue time_created_key = "time_created_ns";
-static c10::IValue duration_key = "duration_ms";
-
-static c10::IValue frames_key = "frames";
-static c10::IValue state_key = "state";
-static c10::IValue line_key = "line";
-static c10::IValue name_key = "name";
-static c10::IValue filename_key = "filename";
-static c10::IValue retired_key = "retired";
-static c10::IValue time_discovered_started_key = "time_discovered_started_ns";
-static c10::IValue time_discovered_completed_key =
-    "time_discovered_completed_ns";
 
 /* Trace Utils Related to TORCH_NCCL_DESYNC_DEBUG */
 

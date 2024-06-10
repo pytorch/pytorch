@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import operator
 
 from typing import Any, Dict, List, Optional, Set, Tuple, Union
@@ -55,6 +56,7 @@ kind_to_standard_operators = {
     "aten::__is__": operator.is_,
     "aten::__isnot__": operator.is_not,
     "aten::__not__": operator.not_,
+    "aten::__contains__": operator.contains,
 }
 
 
@@ -64,11 +66,17 @@ def get_op_overload(node: torch._C.Node):
     ns, op_name = str(schema.name.name).split("::")
     override = schema.name.overload_name
 
-    op_overload_packet = getattr(torch.ops.aten, op_name)
-    if override:
-        op_overload = getattr(op_overload_packet, override)
-    else:
-        op_overload = op_overload_packet.default
+    try:
+        op_overload_mod = getattr(torch.ops, ns)
+        op_overload_packet = getattr(op_overload_mod, op_name)
+        if override:
+            op_overload = getattr(op_overload_packet, override)
+        else:
+            op_overload = op_overload_packet.default
+    except Exception as e:
+        raise RuntimeError(
+            f"Unable to find operator {node.kind()} with schema {node.schema}"
+        ) from e
 
     return op_overload
 
@@ -263,11 +271,8 @@ class TS2FXGraphConverter:
             f"{root_attr_name}.{attr_name}" if root_attr_name else attr_name
         )
 
-    def convert_aten_op(self, node: torch._C.Node):
-        try:
-            target = get_op_overload(node)
-        except Exception as e:
-            raise RuntimeError(f"Unsupported node {node.kind()}") from e
+    def convert_call_function_op(self, node: torch._C.Node):
+        target = get_op_overload(node)
 
         if target is torch.ops.aten.size.int:
             target = torch.ops.aten.sym_size.int
@@ -318,6 +323,20 @@ class TS2FXGraphConverter:
 
         output_name = node.output().debugName()
         self.name_to_node[output_name] = output_dict
+
+    def convert_prim_ListUnpack(self, node: torch._C.Node):
+        self._convert_prim_unpack_iterator(node)
+
+    def convert_prim_TupleUnpack(self, node: torch._C.Node):
+        self._convert_prim_unpack_iterator(node)
+
+    def _convert_prim_unpack_iterator(self, node: torch._C.Node):
+        # Single input and multiple outputs for unpacking.
+        for i, outp in enumerate(node.outputs()):
+            outp_name = outp.debugName()
+            inp = self.get_fx_value(node.input())
+            fx_node = self.fx_graph.call_function(operator.getitem, (inp, i))
+            self.name_to_node[outp_name] = fx_node
 
     def convert_aten_Int(self, node: torch._C.Node):
         # converts aten::Int as aten._to_copy + aten::_local_scalar_dense
@@ -389,7 +408,7 @@ class TS2FXGraphConverter:
                     self.name_to_node[output_name] = fx_node
                     return
 
-        self.convert_aten_op(node)
+        self.convert_call_function_op(node)
 
     def convert_aten___getitem__(self, node: torch._C.Node):
         input_container, index = tuple(
@@ -492,21 +511,13 @@ class TS2FXGraphConverter:
 
     def convert_node(self, node: torch._C.Node):
         node_kind = node.kind()
-        node_kind_split = node_kind.split("::")
 
         # Get handler based on namespace and operator name.
         # Provide a default node handler as well in case we don't find
         # matching converter for that.
         handler_func_name = ir_name_to_func_name(node_kind)
-        handler_func = getattr(self, handler_func_name, self.convert_default_node)
+        handler_func = getattr(self, handler_func_name, self.convert_call_function_op)
         handler_func(node)
-
-    def convert_default_node(self, node: torch._C.Node):
-        node_kind = node.kind()
-        if node_kind.startswith("aten::"):
-            self.convert_aten_op(node)
-        else:
-            raise ValueError(f"Unsupported node kind: {node_kind}")
 
     def convert_graph_outputs(self):
         args = []
