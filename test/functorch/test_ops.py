@@ -1259,7 +1259,7 @@ class TestOperators(TestCase):
         xfail("quantile"),  # at::equal batching rule (cpu), also, in-place vmap (cuda)
         skip("as_strided"),  # Test runner cannot handle this
         # requires special handling, and does not yet have a batching rule. Feel free to file a github issue!
-        xfail("as_strided_copy"),
+        # xfail("as_strided_copy"),  XXX
         xfail("as_strided_scatter"),
         xfail(
             "nn.functional.gaussian_nll_loss"

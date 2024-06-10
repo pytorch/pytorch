@@ -14449,6 +14449,7 @@ op_db: List[OpInfo] = [
                DecorateInfo(unittest.skip("Errors when storage_offset is included"), 'TestMathBits', 'test_neg_view'),
                DecorateInfo(unittest.skip("Numerous errors"), 'TestFwdGradients'),
                DecorateInfo(unittest.skip("Numerous errors"), 'TestBwdGradients'),
+               DecorateInfo(unittest.expectedFailure, 'TestDTensorOps', 'test_dtensor_op_db'),
            )),
     OpInfo('as_strided_scatter',
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16, torch.chalf),
