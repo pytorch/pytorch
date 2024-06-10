@@ -708,7 +708,7 @@ class TS2EPConverter:
         # TODO: adjust input orders to match GraphSignature convention
         ep = torch.export._trace._export(
             gm,
-            tuple(self.sample_args),
+            self.sample_args,
             strict=False,
             pre_dispatch=True,
         )
