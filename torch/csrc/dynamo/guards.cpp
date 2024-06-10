@@ -2,8 +2,11 @@
 #include <ATen/EmptyTensor.h>
 #include <c10/util/flat_hash_map.h>
 #include <torch/csrc/autograd/grad_mode.h>
+#include <torch/csrc/autograd/utils/wrap_outputs.h>
 #include <torch/csrc/dynamo/guards.h>
+#include <torch/csrc/inductor/inductor_ops.h>
 #include <torch/csrc/utils/disable_torch_function.h>
+#include <torch/csrc/utils/python_arg_parser.h>
 #include <torch/csrc/utils/python_compat.h>
 #include <torch/csrc/utils/python_numbers.h>
 #include <torch/csrc/utils/python_symnode.h>
@@ -742,6 +745,27 @@ static PyObject* _empty_strided_cuda(PyObject* dummy, PyObject* args) {
   END_HANDLE_TH_ERRORS;
 }
 
+static PyObject* _reinterpret_tensor(PyObject* dummy, PyObject* args) {
+  HANDLE_TH_ERRORS;
+  static PythonArgParser parser(
+      {"_reinterpret_tensor(Tensor base, IntArrayRef sizes, IntArrayRef strides, int64_t offset_increment=0)"},
+      /*traceable=*/true);
+
+  ParsedArgs<4> parsed_args;
+  auto r = parser.parse(args, /*kwargs=*/nullptr, parsed_args);
+
+  Tensor self = r.tensor(0);
+  auto sizes = r.intlist(1);
+  auto strides = r.intlist(2);
+  auto offset_increment = r.toInt64(3);
+
+  auto res = torch::inductor::_reinterpret_tensor(
+      self, sizes, strides, offset_increment);
+  return torch::autograd::utils::wrap(res);
+
+  END_HANDLE_TH_ERRORS;
+}
+
 // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
 static PyMethodDef _methods[] = {
     {"check_type_id", check_type_id, METH_VARARGS, nullptr},
@@ -750,6 +774,7 @@ static PyMethodDef _methods[] = {
     {"dict_version", dict_version, METH_VARARGS, nullptr},
     {"_empty_strided_cpu", _empty_strided_cpu, METH_VARARGS, nullptr},
     {"_empty_strided_cuda", _empty_strided_cuda, METH_VARARGS, nullptr},
+    {"_reinterpret_tensor", _reinterpret_tensor, METH_VARARGS, nullptr},
     {nullptr, nullptr, 0, nullptr}};
 
 static struct PyModuleDef _module = {
