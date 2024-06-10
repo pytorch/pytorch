@@ -57,8 +57,6 @@ if common_utils.TEST_WITH_ROCM:
     test_dtypes = [torch.float32]
 
 
-# --------- Useful score mod functions for testing ---------
-
 test_score_mods = [
     _identity,
     _causal,
@@ -467,7 +465,6 @@ class TestTemplatedSDPA(InductorTestCase):
             _flex_attention(query, key, value, _identity)
 
     @supported_platform
-    @skip("TODO: figure out autotuning w kernel buffers. ")
     @patch.object(torch._inductor.config, "max_autotune", True)
     def test_max_autotune(self):
         def score_mod(score, b, h, m, n):
@@ -476,7 +473,6 @@ class TestTemplatedSDPA(InductorTestCase):
         self.run_test(score_mod)
 
     @supported_platform
-    @skip("TODO: figure out autotuning w kernel buffers. ")
     @patch.object(torch._inductor.config, "max_autotune", True)
     def test_max_autotune_with_captured(self):
         head_scale = torch.randn(H, device="cuda")

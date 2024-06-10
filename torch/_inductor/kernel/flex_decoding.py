@@ -265,64 +265,56 @@ flex_decoding_template = TritonTemplate(
 
 # Config: (BLOCK_N, num_warp, num_stages)
 
-_h100_default_config_block = {
-    (torch.float32, 64): (128, 4, 3),
-    (torch.float32, 128): (64, 4, 3),
-    (torch.float32, 256): (32, 4, 3),
-    (torch.bfloat16, 64): (128, 4, 3),
-    (torch.bfloat16, 128): (64, 4, 3),
-    (torch.bfloat16, 256): (64, 4, 3),
-}
+MAX_SPLIT_KV = 64
 
 
-_a100_default_config = {
-    (torch.float32, 64): (128, 4, 3),
-    (torch.float32, 128): (128, 4, 3),
-    (torch.float32, 256): (64, 4, 3),
-    (torch.bfloat16, 64): (128, 4, 3),
-    (torch.bfloat16, 128): (128, 4, 3),
-    (torch.bfloat16, 256): (64, 4, 3),
-}
+
+def get_split_k(B: int, H: int, Mk: int, G = 1) -> int:
+    """Heuristic for the number of splits from xformer"""
+    bh = max(B * H, 1)  # NOTE: Handle B*h=0 case
+    if torch.version.hip:
+        split_k = max(Mk + bh - 1, 1024) // bh
+        max_chunk_size = 64
+        split_k_stop_val = 1024 / (B * G * H)
+        while split_k > 1 and Mk / (split_k - 1) < max_chunk_size:
+            split_k = split_k - 1
+
+        while split_k > split_k_stop_val:
+            split_k = split_k // 2
+
+        split_size = (Mk + split_k - 1) // split_k
+
+        chunk_size = split_size // max_chunk_size * max_chunk_size
+        if chunk_size < split_size:
+            split_k += 1
+
+        split_k_upper_bound = 512
+    else:
+        split_k = max(Mk, 1024) // bh
+        max_chunk_size = 64 if Mk <= 512 and bh <= 64 else 128
+        split_k_stop_val = Mk / max_chunk_size
+        split_k_upper_bound = 64
+
+        while split_k > split_k_stop_val:
+            split_k = split_k // 2
+
+    split_k = min(split_k, split_k_upper_bound)
+    split_k = max(split_k, 1)
+
+    return split_k
 
 
 def _get_decoding_default_config(key):
-    dtype = key.get_dtype()
-    b_h = key.get_size()[0] * key.get_size()[1]
+    B = key.get_size()[0]
+    H = key.get_size()[1]
+    Mk = key.get_size()[-2]
     head_dim = key.get_size()[-1]
-    key_len = key.get_size()[-2]
+    dtype = key.get_dtype()
     default_config = None
-    max_split = None
 
-    if head_dim <= 256 and torch.cuda.get_device_capability() >= (9, 0):  # H100
-        if dtype == torch.float32:
-            default_config = (128, 4, 3)
-        else:
-            default_config = (64, 4, 3)
-        default_config = _h100_default_config_block.get((dtype, head_dim), default_config)
-        max_split = 32
-    elif head_dim <= 256 and torch.cuda.get_device_capability() >= (8, 0):  # A100
-        if dtype == torch.float32:
-            default_config = (64, 4, 3)
-        else:
-            default_config = (128, 4, 3)
-        default_config = _a100_default_config.get((dtype, head_dim), default_config)
-        max_split = 32
-    else:  # modest hardware or extremely large head_dim
-        if dtype == torch.float32:
-            default_config = (32, 4, 3)
-        else:
-            default_config = (64, 4, 3)
-        max_split = 16
-    
-    default_split = None
-    if key_len >= default_config[0] * 4: 
-        default_split = key_len / (default_config[0] * 4)
-        if default_split > max_split: 
-            default_split = max_split
-    else: 
-        default_split = 1
 
-    default_config += (default_split, )
+
+    default_config = (64, 2, 1)
 
     return default_config
 
@@ -342,52 +334,51 @@ def create_flex_decoding_kernel(subgraph_buffer, layout, query, key, value, subg
     choices: List[Any] = []
     configs: List[Tuple[int, int, int, int]] = []
     configs.append(_get_decoding_default_config(key))
-    print("default config: ", configs[0])
-    # if config.max_autotune:
-    #     configs += [
-    #         (128, 4, 3),
-    #         (128, 2, 4, 3),
-    #         (128, 4, 8, 2),
-    #         (64, 4, 4, 3),
-    #         (64, 2, 4, 3),
-    #         (32, 4, 4, 3),
-    #         (32, 2, 4, 3),
-    #         (16, 4, 4, 3),
-    #         (16, 2, 4, 3),
-    #     ]
+    if config.max_autotune:
+        configs += [
+            (128, 2, 1),
+            (128, 2, 1),
+            (64, 2, 1),
+            (32, 2, 1),
+            (16, 2, 1),
+        ]
+
+    # create config dependent intermediate buffers
+    buf_ML_shape = query.get_size()[:-2] + [MAX_SPLIT_KV, query.get_size()[-2]]   # [B, H, SPLIT_KV, M]
+    buf_M = empty_strided(
+        buf_ML_shape,
+        None,
+        dtype=torch.float32,  # The rowmax is always stored in fp32 regardless of the input dtype
+        device=query.get_device(),
+    )
+    buf_L = empty_strided(
+        buf_ML_shape,
+        None,
+        dtype=torch.float32,  # The intermediate sumexp is always stored in fp32 regardless of the input dtype
+        device=query.get_device(),
+    )
+
+    buf_ACC_shape = query.get_size()[:-2] + [MAX_SPLIT_KV] + query.get_size()[-2:]   # [B, H, SPLIT_KV, M]
+    buf_ACC = empty_strided(
+        buf_ACC_shape,
+        None,
+        dtype=torch.float32,  # The intermediate acc is always stored in fp32 regardless of the input dtype
+        device=query.get_device(),
+    )
+
+
+    lock_RDCT = full(query.get_size()[:-2], fill_value=0, dtype=torch.int32, device=query.get_device())
+    lock_RDCT = as_strided(lock_RDCT, query.get_size()[:-2], (query.get_size()[-3], 1))
+
+    SPLIT_KV = get_split_k(key.get_size()[0], key.get_size()[1], key.get_size()[2])
+    assert(SPLIT_KV <= MAX_SPLIT_KV)
+
+    print("shape: ", key.get_size(), query.get_size(), "config: ", configs, SPLIT_KV)
 
     # Note, we don't need to pass in the captured buffers explicitly
     # because they're implicitly added by the score_mod function
     # We do need to explicitly pass it in for autotuning though.
-    for BLOCK_N, num_warps, num_stages, SPLIT_KV in configs:
-        # create config dependent intermediate buffers
-        buf_ML_shape = query.get_size()[:-2] + [SPLIT_KV, query.get_size()[-2]]   # [B, H, SPLIT_KV, M]
-        buf_M = empty_strided(
-            buf_ML_shape,
-            None,
-            dtype=torch.float32,  # The rowmax is always stored in fp32 regardless of the input dtype
-            device=query.get_device(),
-        )
-        buf_L = empty_strided(
-            buf_ML_shape,
-            None,
-            dtype=torch.float32,  # The intermediate sumexp is always stored in fp32 regardless of the input dtype
-            device=query.get_device(),
-        )
-
-        buf_ACC_shape = query.get_size()[:-2] + [SPLIT_KV] + query.get_size()[-2:]   # [B, H, SPLIT_KV, M]
-        buf_ACC = empty_strided(
-            buf_ACC_shape,
-            None,
-            dtype=torch.float32,  # The intermediate acc is always stored in fp32 regardless of the input dtype
-            device=query.get_device(),
-        )
-
-
-        lock_RDCT = full(query.get_size()[:-2], fill_value=0, dtype=torch.int32, device=query.get_device())
-        lock_RDCT = as_strided(lock_RDCT, query.get_size()[:-2], (query.get_size()[-3], 1))
-
-
+    for BLOCK_N, num_warps, num_stages in configs:
         flex_decoding_template.maybe_append_choice(
             choices=choices,
             input_nodes=[query, key, value, logsumexp, buf_M, buf_L, buf_ACC, lock_RDCT],

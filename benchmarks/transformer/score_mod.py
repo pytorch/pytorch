@@ -171,7 +171,8 @@ def calculate_bandwidth(config: ExperimentConfig, results: ExperimentResults, ty
     if type == "fwd":
         query_size = config.shape[0] * config.shape[1] * config.shape[2] * config.shape[3] * torch.finfo(config.dtype).bits / 8
         kv_size =config.shape[0] * config.shape[1] * config.shape[4] * config.shape[3] * torch.finfo(config.dtype).bits / 8 * 2
-        total_size = (query_size + kv_size) / 1024 / 1024 / 1024 # In GB 
+        output_size = config.shape[0] * config.shape[1] * config.shape[2] * config.shape[3] * torch.finfo(config.dtype).bits / 8
+        total_size = (query_size + kv_size + output_size) / 1024 / 1024 / 1024 # In GB 
         time_in_seconds = results.fwd_times.compiled_time / 10**6
         return total_size / time_in_seconds / 1024
     else:
@@ -272,30 +273,35 @@ def generate_score_mods() -> List[Callable]:
     def head_bias(score, b, h, m, n):
         return score + 2 * h
 
-    return [noop, causal_mask, relative_bias, head_bias]
+    # return [noop, causal_mask, relative_bias, head_bias]
+    return [noop]
 
 
 def generate_experiment_configs(calculate_bwd: bool) -> List[ExperimentConfig]:
-    kv_cache_sizes = [(2, 4096), (8, 1024), (16, 512), (1, 16384), (1, 65536)]
+    kv_cache_sizes = [(128, 512), (64, 1024), (32, 2048), (16, 4096), (8, 8192), (4, 16384), (2, 32768), (1, 65536), (1, 131072)]
     batch_sizes = [1, 2, 8, 16]
-    num_heads = [8]
-    q_seq_lens = [1]
-    head_dims = [64, 128, 256]
+    n_heads = [(16, 1), (16, 2)] # (Hq, Hkv)
+    # head_dims = [64, 128, 256]
+    head_dims = [128]
     dtypes = [
         torch.bfloat16,
+        torch.float16,
+        torch.float32
     ]
     score_mods = generate_score_mods()
     all_configs = []
     for (
-        q_seq_len,
-        n_heads,
         (bsz, kv_seq_len),
+        (Hq, Hkv),
         head_dim,
         score_mod,
         dtype,
     ) in itertools.product(
-        q_seq_lens, num_heads, kv_cache_sizes, head_dims, score_mods, dtypes
+        kv_cache_sizes, n_heads, head_dims, score_mods, dtypes
     ):
+        n_heads = Hkv
+        q_seq_len = Hq // Hkv
+        assert Hq % Hkv == 0
         all_configs.append(
             ExperimentConfig(
                 shape=(bsz, n_heads, q_seq_len, head_dim, kv_seq_len),
