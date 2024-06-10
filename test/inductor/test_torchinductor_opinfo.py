@@ -406,44 +406,36 @@ inductor_override_kwargs = {
 }
 
 
-# Always test with all sample for following ops
-inductor_all_samples = {
-    "arange",
-    "diagonal",
-    "diagonal_copy",
-    "diagonal_scatter",
-    "softmax.with_dtype",
-    "index_add",
-    "index_copy",
-    "index_reduce.prod",
-    "index_reduce.mean",
-    "index_reduce.amax",
-    "index_reduce.amin",
-    "scatter_reduce.sum",
-    "select_scatter",
-    "squeeze",
-    "unfold",
-    "unsqueeze",
-    "sum",
-    "amax",
-    "amin",
-    "all",
-    "T",
-    "H",
-    "isinf",
-    "isposinf",
-    "isneginf",
-    "nan_to_num",
-    "mT",
-    "mH",
-    "rsub",
-    "triu",
-    "cummax",
-    "cummin",
-    "nextafter",
-    "gather",
-    "_chunk_cat",
-    "constant_pad_nd",
+# Test with one sample only for following ops
+inductor_one_sample = {
+    "_segment_reduce_lengths": {f16},
+    "_segment_reduce_offsets": {f16},
+    "addmv": {f16},
+    "as_strided_partial_views": {f16},
+    "clamp_max": {b8},
+    "clamp_min": {b8},
+    "corrcoef": {f16},
+    "diff": {f16},
+    "einsum": {f16},
+    "gradient": {f16},
+    "histogram": {f32, f64},
+    "histogramdd": {f32, f64},
+    "index_put": {f16, f32, f64},
+    "linalg_eig": {f32, f64},
+    "linspace": {f16},
+    "linspace_tensor_overload": {f16, f32, f64, i32, i64},
+    "logspace": {f16},
+    "logspace_tensor_overload": {f16, f32, f64, i32, i64},
+    "masked_logsumexp": {i64},
+    "max_binary": {b8},
+    "max_pool2d_with_indices_backward": {f16, f32, f64},
+    "maximum": {b8},
+    "min_binary": {b8},
+    "minimum": {b8},
+    "put": {f16, f32, f64},
+    "rot90": {b8, f16, f32, f64, i32, i64},
+    "scatter": {b8, i64},
+    "take": {b8, f16, f32, f64, i32, i64},
 }
 
 
@@ -557,7 +549,7 @@ class TestInductorOpInfo(TestCase):
         )
         samples = op.sample_inputs(device, dtype, requires_grad=requires_grad)
 
-        if op_name not in inductor_all_samples and not ALL_SAMPLES:
+        if op_name in inductor_one_sample and not ALL_SAMPLES:
             if isinstance(samples, (list, tuple)):
                 samples = [samples[0]]
             else:
