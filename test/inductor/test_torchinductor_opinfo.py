@@ -549,7 +549,7 @@ class TestInductorOpInfo(TestCase):
         )
         samples = op.sample_inputs(device, dtype, requires_grad=requires_grad)
 
-        if op_name in inductor_one_sample and not ALL_SAMPLES:
+        if dtype in inductor_one_sample.get(op_name, {}) and not ALL_SAMPLES:
             if isinstance(samples, (list, tuple)):
                 samples = [samples[0]]
             else:
