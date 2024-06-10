@@ -895,9 +895,6 @@ def _get_sfdp_patterns():
                 "pass_dicts": patterns,
                 "extra_check": extra_check,
                 "scalar_workaround": workaround,
-                # with dropout turned into clone, we end up with a number of
-                # semantically identical graphs
-                "skip_duplicates": True,
             }
 
 
