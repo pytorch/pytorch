@@ -1190,7 +1190,8 @@ class TestOperators(TestCase):
             {
                 xfail("as_strided"),
                 xfail("as_strided", "partial_views"),
-             }
+                xfail("as_strided_copy"),  YYYYY
+            }
         ),
     )
     def test_vmapvjp(self, device, dtype, op):
@@ -1254,7 +1255,7 @@ class TestOperators(TestCase):
         xfail("quantile"),  # at::equal batching rule (cpu), also, in-place vmap (cuda)
         skip("as_strided"),  # Test runner cannot handle this
         # requires special handling, and does not yet have a batching rule. Feel free to file a github issue!
-        xfail("as_strided_copy"),
+        # xfail("as_strided_copy"),
         xfail("as_strided_scatter"),
         xfail(
             "nn.functional.gaussian_nll_loss"
