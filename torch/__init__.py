@@ -52,27 +52,79 @@ else:
 
 
 __all__ = [
-    'typename', 'is_tensor', 'is_storage',
-    'set_default_tensor_type', 'set_default_device', 'get_default_device',
-    'set_rng_state', 'get_rng_state', 'manual_seed', 'initial_seed', 'seed',
-    'save', 'load', 'set_printoptions', 'chunk', 'split', 'stack', 'matmul',
-    'no_grad', 'enable_grad', 'rand', 'randn', 'inference_mode',
-    'DoubleStorage', 'FloatStorage', 'LongStorage', 'IntStorage',
-    'ShortStorage', 'CharStorage', 'ByteStorage', 'BoolStorage',
-    'TypedStorage', 'UntypedStorage',
-    'DoubleTensor', 'FloatTensor', 'LongTensor', 'IntTensor',
-    'ShortTensor', 'CharTensor', 'ByteTensor', 'BoolTensor', 'Tensor',
-    'lobpcg', 'use_deterministic_algorithms',
-    'are_deterministic_algorithms_enabled',
-    'is_deterministic_algorithms_warn_only_enabled',
-    'set_deterministic_debug_mode', 'get_deterministic_debug_mode',
-    'set_float32_matmul_precision', 'get_float32_matmul_precision',
-    'set_warn_always', 'is_warn_always_enabled', 'SymInt', 'SymFloat',
-    'SymBool', 'sym_not', 'unravel_index',
-    'sym_int', 'sym_float', 'sym_max', 'sym_min', 'sym_ite', 'compile', 'vmap',
-    'export', 'autocast', 'cond', 'GradScaler',
-    'get_device_module',
+    "BoolStorage",
+    "BoolTensor",
+    "ByteStorage",
+    "ByteTensor",
+    "CharStorage",
+    "CharTensor",
+    "DoubleStorage",
+    "DoubleTensor",
+    "FloatStorage",
+    "FloatTensor",
+    "GradScaler",
+    "IntStorage",
+    "IntTensor",
+    "LongStorage",
+    "LongTensor",
+    "ShortStorage",
+    "ShortTensor",
+    "SymBool",
+    "SymFloat",
+    "SymInt",
+    "Tensor",
+    "TypedStorage",
+    "UntypedStorage",
+    "are_deterministic_algorithms_enabled",
+    "autocast",
+    "chunk",
+    "compile",
+    "cond",
+    "enable_grad",
+    "export",
+    "get_default_device",
+    "get_deterministic_debug_mode",
+    "get_device_module",
+    "get_float32_matmul_precision",
+    "get_rng_state",
+    "inference_mode",
+    "initial_seed",
+    "is_deterministic_algorithms_warn_only_enabled",
+    "is_storage",
+    "is_tensor",
+    "is_warn_always_enabled",
+    "load",
+    "lobpcg",
+    "manual_seed",
+    "matmul",
+    "no_grad",
+    "rand",
+    "randn",
+    "save",
+    "seed",
+    "set_default_device",
+    "set_default_tensor_type",
+    "set_deterministic_debug_mode",
+    "set_float32_matmul_precision",
+    "set_printoptions",
+    "set_rng_state",
+    "set_warn_always",
+    "split",
+    "stack",
+    "sym_float",
+    "sym_int",
+    "sym_ite",
+    "sym_max",
+    "sym_min",
+    "sym_not",
+    "typename",
+    "unravel_index",
+    "use_deterministic_algorithms",
+    "vmap",
 ]
+
+# Please keep this list sorted
+assert __all__ == sorted(__all__)
 
 ################################################################################
 # Load the extension module
@@ -133,8 +185,14 @@ if sys.platform == 'win32':
             ctypes.CDLL('msvcp140.dll')
             ctypes.CDLL('vcruntime140_1.dll')
         except OSError:
-            print('''Microsoft Visual C++ Redistributable is not installed, this may lead to the DLL load failure.
-                    It can be downloaded at https://aka.ms/vs/16/release/vc_redist.x64.exe''')
+            print(
+                textwrap.dedent(
+                    """
+                    Microsoft Visual C++ Redistributable is not installed, this may lead to the DLL load failure.
+                    It can be downloaded at https://aka.ms/vs/16/release/vc_redist.x64.exe
+                    """
+                ).strip()
+            )
 
         dlls = glob.glob(os.path.join(th_dll_path, '*.dll'))
         path_patched = False
@@ -398,55 +456,55 @@ class SymInt:
             return sym_float(self).__rpow__(sym_float(other))
 
     def __eq__(self, other: object) -> builtins.bool:
-        raise AssertionError("type stub not overridden")
+        raise TypeError("type stub not overridden")
 
     def __lt__(self, other) -> builtins.bool:
-        raise AssertionError("type stub not overridden")
+        raise TypeError("type stub not overridden")
 
     def __gt__(self, other) -> builtins.bool:
-        raise AssertionError("type stub not overridden")
+        raise TypeError("type stub not overridden")
 
     def __le__(self, other) -> builtins.bool:
-        raise AssertionError("type stub not overridden")
+        raise TypeError("type stub not overridden")
 
     def __ge__(self, other) -> builtins.bool:
-        raise AssertionError("type stub not overridden")
+        raise TypeError("type stub not overridden")
 
     def __add__(self, other) -> "SymInt":
-        raise AssertionError("type stub not overridden")
+        raise TypeError("type stub not overridden")
 
     def __mul__(self, other) -> "SymInt":
-        raise AssertionError("type stub not overridden")
+        raise TypeError("type stub not overridden")
 
     def __pow_by_natural__(self, other) -> "SymInt":
-        raise AssertionError("type stub not overridden")
+        raise TypeError("type stub not overridden")
 
     def __rpow_by_natural__(self, other) -> "SymInt":
-        raise AssertionError("type stub not overridden")
+        raise TypeError("type stub not overridden")
 
     def __int_truediv__(self, other) -> "SymFloat":
-        raise AssertionError("type stub not overridden")
+        raise TypeError("type stub not overridden")
 
     def __rint_truediv__(self, other) -> "SymFloat":
-        raise AssertionError("type stub not overridden")
+        raise TypeError("type stub not overridden")
 
     def __int_floordiv__(self, other) -> "SymFloat":
-        raise AssertionError("type stub not overridden")
+        raise TypeError("type stub not overridden")
 
     def __rint_floordiv__(self, other) -> "SymFloat":
-        raise AssertionError("type stub not overridden")
+        raise TypeError("type stub not overridden")
 
     def __sym_max__(self, other):
-        raise AssertionError("type stub not overridden")
+        raise TypeError("type stub not overridden")
 
     def __sym_min__(self, other):
-        raise AssertionError("type stub not overridden")
+        raise TypeError("type stub not overridden")
 
     def __sym_float__(self):
-        raise AssertionError("type stub not overridden")
+        raise TypeError("type stub not overridden")
 
     def __neg__(self):
-        raise AssertionError("type stub not overridden")
+        raise TypeError("type stub not overridden")
 
     def __repr__(self):
         return str(self.node)
@@ -510,47 +568,47 @@ class SymFloat:
     # Magic methods installed by torch.fx.experimental.sym_node
 
     def __eq__(self, other: object) -> builtins.bool:
-        raise AssertionError("type stub not overridden")
+        raise TypeError("type stub not overridden")
 
     def __lt__(self, other) -> builtins.bool:
-        raise AssertionError("type stub not overridden")
+        raise TypeError("type stub not overridden")
 
     def __gt__(self, other) -> builtins.bool:
-        raise AssertionError("type stub not overridden")
+        raise TypeError("type stub not overridden")
 
     def __le__(self, other) -> builtins.bool:
-        raise AssertionError("type stub not overridden")
+        raise TypeError("type stub not overridden")
 
     def __ge__(self, other) -> builtins.bool:
-        raise AssertionError("type stub not overridden")
+        raise TypeError("type stub not overridden")
 
     def __float_pow__(self, other) -> "SymFloat":
-        raise AssertionError("type stub not overridden")
+        raise TypeError("type stub not overridden")
 
     def __rfloat_pow__(self, other) -> "SymFloat":
-        raise AssertionError("type stub not overridden")
+        raise TypeError("type stub not overridden")
 
     def __float_truediv__(self, other) -> "SymFloat":
-        raise AssertionError("type stub not overridden")
+        raise TypeError("type stub not overridden")
 
     def __rfloat_truediv__(self, other) -> "SymFloat":
-        raise AssertionError("type stub not overridden")
+        raise TypeError("type stub not overridden")
 
     def __trunc__(self):
-        raise AssertionError("type stub not overridden")
+        raise TypeError("type stub not overridden")
 
     def __sym_max__(self, other):
-        raise AssertionError("type stub not overridden")
+        raise TypeError("type stub not overridden")
 
     def __sym_min__(self, other):
-        raise AssertionError("type stub not overridden")
+        raise TypeError("type stub not overridden")
 
     def __sym_int__(self):
-        raise AssertionError("type stub not overridden")
+        raise TypeError("type stub not overridden")
 
     def is_integer(self):
         """Return True if the float is an integer."""
-        raise AssertionError("type stub not overridden")
+        raise TypeError("type stub not overridden")
 
     def __repr__(self):
         return self.node.str()
@@ -578,10 +636,10 @@ class SymBool:
 
     # Magic methods installed by torch.fx.experimental.sym_node
     def __and__(self, other) -> "SymBool":
-        raise AssertionError("type stub not overridden")
+        raise TypeError("type stub not overridden")
 
     def __or__(self, other) -> "SymBool":
-        raise AssertionError("type stub not overridden")
+        raise TypeError("type stub not overridden")
 
     # We very carefully define __sym_not__, and not a number of other
     # plausible alternatives:
@@ -601,13 +659,13 @@ class SymBool:
     #     so we reuse the conventional operators there for readability.
     #
     def __sym_not__(self) -> "SymBool":
-        raise AssertionError("type stub not overridden")
+        raise TypeError("type stub not overridden")
 
     def __sym_ite__(self, then_val, else_val):
-        raise AssertionError("type stub not overridden")
+        raise TypeError("type stub not overridden")
 
     def __eq__(self, other) -> builtins.bool:
-        raise AssertionError("type stub not overridden")
+        raise TypeError("type stub not overridden")
 
     def __repr__(self):
         return str(self.node)
@@ -646,7 +704,7 @@ def sym_float(a):
         return a
     elif hasattr(a, '__sym_float__'):
         return a.__sym_float__()
-    return py_float(a)  # type: ignore[operator]
+    return builtins.float(a)  # type: ignore[operator]
 
 
 def sym_int(a):
@@ -661,7 +719,7 @@ def sym_int(a):
         return a
     elif isinstance(a, SymFloat):
         return math.trunc(a)
-    return py_int(a)  # type: ignore[operator]
+    return builtins.int(a)  # type: ignore[operator]
 
 def sym_max(a, b):
     """
@@ -744,18 +802,22 @@ except ImportError:
 
     # The __file__ check only works for Python 3.7 and above.
     if _C_for_compiled_check.__file__ is None:
-        raise ImportError(textwrap.dedent('''
-            Failed to load PyTorch C extensions:
-                It appears that PyTorch has loaded the `torch/_C` folder
-                of the PyTorch repository rather than the C extensions which
-                are expected in the `torch._C` namespace. This can occur when
-                using the `install` workflow. e.g.
-                    $ python setup.py install && python -c "import torch"
+        raise ImportError(
+            textwrap.dedent(
+                """
+                Failed to load PyTorch C extensions:
+                    It appears that PyTorch has loaded the `torch/_C` folder
+                    of the PyTorch repository rather than the C extensions which
+                    are expected in the `torch._C` namespace. This can occur when
+                    using the `install` workflow. e.g.
+                        $ python setup.py install && python -c "import torch"
 
-                This error can generally be solved using the `develop` workflow
-                    $ python setup.py develop && python -c "import torch"  # This should succeed
-                or by running Python from a different directory.
-            ''').strip()) from None
+                    This error can generally be solved using the `develop` workflow
+                        $ python setup.py develop && python -c "import torch"  # This should succeed
+                    or by running Python from a different directory.
+                """
+            ).strip()
+        ) from None
     raise  # If __file__ is not None the cause is unknown, so just re-raise.
 
 # The torch._C submodule is already loaded via `from torch._C import *` above
@@ -1681,11 +1743,6 @@ from torch._tensor_str import set_printoptions
 from torch.amp import autocast, GradScaler
 from torch.random import get_rng_state, initial_seed, manual_seed, seed, set_rng_state
 from torch.serialization import load, save
-
-# Initializing the extension shadows the built-in python float / int classes;
-# store them for later use by SymInt / SymFloat.
-py_float = float
-py_int = int
 
 ################################################################################
 # Initialize extension
