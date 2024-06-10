@@ -3100,80 +3100,6 @@ TEST(StaticRuntime, autogen_threshold_backward) {
       /*check_resize=*/true);
 }
 
-TEST(StaticRuntime, autogen__nested_view_from_buffer_copy) {
-  const std::string script = R"IR(
-    graph(%self: Tensor, %nested_size: Tensor, %nested_strides: Tensor, %offsets: Tensor):
-        %bias: None = prim::Constant()
-        %ret = aten::_nested_view_from_buffer_copy(%self, %nested_size, %nested_strides, %offsets)
-        %cloned = aten::clone(%ret, %bias)
-        return (%cloned)
-  )IR";
-
-  auto self0 = at::rand({6, 6, 6});
-  auto nested_size0 = at::rand({6, 6, 6});
-  auto nested_strides0 = at::rand({6, 6, 6});
-  auto offsets0 = at::rand({6, 6, 6});
-  std::vector<IValue> args{self0, nested_size0, nested_strides0, offsets0};
-  testStaticRuntime(
-      script,
-      args,
-      {},
-      /*use_allclose=*/false,
-      /*use_equalnan=*/false,
-      /*check_resize=*/true);
-
-  auto self1 = at::rand({22, 22, 22});
-  auto nested_size1 = at::rand({22, 22, 22});
-  auto nested_strides1 = at::rand({22, 22, 22});
-  auto offsets1 = at::rand({22, 22, 22});
-  std::vector<IValue> args2{self1, nested_size1, nested_strides1, offsets1};
-  testStaticRuntime(
-      script,
-      args,
-      args2,
-      /*use_allclose=*/false,
-      /*use_equalnan=*/false,
-      /*check_resize=*/true);
-}
-
-TEST(StaticRuntime, autogen__nested_view_from_jagged_copy) {
-  const std::string script = R"IR(
-    graph(%self: Tensor, %offsets: Tensor, %dummy: Tensor, %lengths: Tensor?, %ragged_idx: int):
-        %bias: None = prim::Constant()
-        %ret = aten::_nested_view_from_jagged_copy(%self, %offsets, %dummy, %lengths, %ragged_idx)
-        %cloned = aten::clone(%ret, %bias)
-        return (%cloned)
-  )IR";
-
-  auto self0 = at::rand({6, 6, 6});
-  auto offsets0 = at::rand({6, 6, 6});
-  auto dummy0 = at::rand({6, 6, 6});
-  auto lengths0 = at::rand({6, 6, 6});
-  auto ragged_idx0 = 1;
-  std::vector<IValue> args{self0, offsets0, dummy0, lengths0, ragged_idx0};
-  testStaticRuntime(
-      script,
-      args,
-      {},
-      /*use_allclose=*/false,
-      /*use_equalnan=*/false,
-      /*check_resize=*/true);
-
-  auto self1 = at::rand({22, 22, 22});
-  auto offsets1 = at::rand({22, 22, 22});
-  auto dummy1 = at::rand({22, 22, 22});
-  auto lengths1 = at::rand({22, 22, 22});
-  auto ragged_idx1 = 1;
-  std::vector<IValue> args2{self1, offsets1, dummy1, lengths1, ragged_idx1};
-  testStaticRuntime(
-      script,
-      args,
-      args2,
-      /*use_allclose=*/false,
-      /*use_equalnan=*/false,
-      /*check_resize=*/true);
-}
-
 TEST(StaticRuntime, autogen__nested_get_values_copy) {
   const std::string script = R"IR(
     graph(%self: Tensor):
@@ -3393,70 +3319,6 @@ TEST(StaticRuntime, autogen__addmm_activation) {
   auto alpha1 = 2;
   auto use_gelu1 = false;
   std::vector<IValue> args2{self1, mat11, mat21, beta1, alpha1, use_gelu1};
-  testStaticRuntime(
-      script,
-      args,
-      args2,
-      /*use_allclose=*/false,
-      /*use_equalnan=*/false,
-      /*check_resize=*/true);
-}
-
-TEST(StaticRuntime, autogen__to_sparse_csr) {
-  const std::string script = R"IR(
-    graph(%self: Tensor, %dense_dim: int?):
-        %bias: None = prim::Constant()
-        %ret = aten::_to_sparse_csr(%self, %dense_dim)
-        %cloned = aten::clone(%ret, %bias)
-        return (%cloned)
-  )IR";
-
-  auto self0 = at::rand({6, 6, 6});
-  auto dense_dim0 = 1;
-  std::vector<IValue> args{self0, dense_dim0};
-  testStaticRuntime(
-      script,
-      args,
-      {},
-      /*use_allclose=*/false,
-      /*use_equalnan=*/false,
-      /*check_resize=*/true);
-
-  auto self1 = at::rand({22, 22, 22});
-  auto dense_dim1 = 1;
-  std::vector<IValue> args2{self1, dense_dim1};
-  testStaticRuntime(
-      script,
-      args,
-      args2,
-      /*use_allclose=*/false,
-      /*use_equalnan=*/false,
-      /*check_resize=*/true);
-}
-
-TEST(StaticRuntime, autogen__to_sparse_csc) {
-  const std::string script = R"IR(
-    graph(%self: Tensor, %dense_dim: int?):
-        %bias: None = prim::Constant()
-        %ret = aten::_to_sparse_csc(%self, %dense_dim)
-        %cloned = aten::clone(%ret, %bias)
-        return (%cloned)
-  )IR";
-
-  auto self0 = at::rand({6, 6, 6});
-  auto dense_dim0 = 1;
-  std::vector<IValue> args{self0, dense_dim0};
-  testStaticRuntime(
-      script,
-      args,
-      {},
-      /*use_allclose=*/false,
-      /*use_equalnan=*/false,
-      /*check_resize=*/true);
-
-  auto self1 = at::rand({22, 22, 22});
-  auto dense_dim1 = 1;
-  std::vector<IValue> args2{self1, dense_dim1};
   testStaticRuntime(
       script,
       args,
@@ -7720,52 +7582,6 @@ TEST(StaticRuntime, autogen_linalg_matrix_power) {
       /*check_resize=*/true);
 }
 
-TEST(StaticRuntime, autogen_segment_reduce) {
-  const std::string script = R"IR(
-    graph(%data: Tensor, %reduce: str, %lengths: Tensor?, %indices: Tensor?, %offsets: Tensor?, %axis: int, %unsafe: bool, %initial: int?):
-        %bias: None = prim::Constant()
-        %ret = aten::segment_reduce(%data, %reduce, %lengths, %indices, %offsets, %axis, %unsafe, %initial)
-        %cloned = aten::clone(%ret, %bias)
-        return (%cloned)
-  )IR";
-
-  auto data0 = at::rand({6, 6, 6});
-  auto reduce0 = "floor";
-  auto lengths0 = at::rand({6, 6, 6});
-  auto indices0 = at::rand({6, 6, 6});
-  auto offsets0 = at::rand({6, 6, 6});
-  auto axis0 = 1;
-  auto unsafe0 = false;
-  auto initial0 = 2;
-  std::vector<IValue> args{
-      data0, reduce0, lengths0, indices0, offsets0, axis0, unsafe0, initial0};
-  testStaticRuntime(
-      script,
-      args,
-      {},
-      /*use_allclose=*/false,
-      /*use_equalnan=*/false,
-      /*check_resize=*/true);
-
-  auto data1 = at::rand({22, 22, 22});
-  auto reduce1 = "floor";
-  auto lengths1 = at::rand({22, 22, 22});
-  auto indices1 = at::rand({22, 22, 22});
-  auto offsets1 = at::rand({22, 22, 22});
-  auto axis1 = 1;
-  auto unsafe1 = false;
-  auto initial1 = 2;
-  std::vector<IValue> args2{
-      data1, reduce1, lengths1, indices1, offsets1, axis1, unsafe1, initial1};
-  testStaticRuntime(
-      script,
-      args,
-      args2,
-      /*use_allclose=*/false,
-      /*use_equalnan=*/false,
-      /*check_resize=*/true);
-}
-
 TEST(StaticRuntime, autogen_view_as_real) {
   const std::string script = R"IR(
     graph(%self: Tensor):
@@ -8053,23 +7869,6 @@ TEST(StaticRuntime, autogen_t) {
 
   auto self0 = at::rand({8, 8});
   std::vector<IValue> args{self0};
-  testStaticRuntime(script, args);
-}
-
-TEST(StaticRuntime, autogen__nested_view_from_buffer) {
-  const std::string script = R"IR(
-    graph(%self: Tensor, %nested_size: Tensor, %nested_strides: Tensor, %offsets: Tensor):
-        %bias: None = prim::Constant()
-        %ret = aten::_nested_view_from_buffer(%self, %nested_size, %nested_strides, %offsets)
-        %cloned = aten::clone(%ret, %bias)
-        return (%cloned)
-  )IR";
-
-  auto self0 = at::rand({6, 6, 6});
-  auto nested_size0 = at::rand({6, 6, 6});
-  auto nested_strides0 = at::rand({6, 6, 6});
-  auto offsets0 = at::rand({6, 6, 6});
-  std::vector<IValue> args{self0, nested_size0, nested_strides0, offsets0};
   testStaticRuntime(script, args);
 }
 
