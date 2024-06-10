@@ -538,6 +538,7 @@ def create_aot_dispatcher_function(
 
             return [convert(idx, x) for idx, x in enumerate(flat_args)]
 
+        fake_mode.shape_env.union_find_id_map = dict()
         fake_flat_args = process_inputs(flat_args)
 
         needs_autograd = (

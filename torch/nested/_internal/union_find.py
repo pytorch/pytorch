@@ -24,7 +24,7 @@ from typing import *  # noqa: F403
 # This situation can be problematic if someone does uf.find(b), i.e.,
 # uf.find((`b`, 0)). Since the canonical entry of the original set continues to
 # point to an older version of `a` i.e. (`a`, 0), there is no tensor for
-# find to retrn, and we raise an error in this case.
+# find to return, and we raise an error in this case.
 
 # Storing metadata on canonical entries
 # -------------------------------------
@@ -114,29 +114,46 @@ class TensorIntMap:
         return t in self._tensor_to_int_and_version
 
 
-@torch._dynamo.allow_in_graph
-def merge(a, b):
-    uf = get_union_find()
-    uf.merge(a, b)
+lib = torch.library.Library("nested", "FRAGMENT")
 
-@torch._dynamo.allow_in_graph
-def find(a):
+lib.define("find(Tensor x) -> Tensor")
+
+def find_impl(a):
     uf = get_union_find()
     return uf.find(a)
 
-lib = torch.library.Library("nested", "FRAGMENT")
+lib.impl("find", find_impl, "CPU")
+lib.impl("find", find_impl, "CUDA")
+lib.impl("find", find_impl, "Meta")
+
+def find(a):
+    return torch.ops.nested.find(a)
+
+lib.define("merge(Tensor x, Tensor x) -> ()")
+
+def merge_impl(a, b):
+    uf = get_union_find()
+    uf.merge(a, b)
+
+lib.impl("merge", merge_impl, "CPU")
+lib.impl("merge", merge_impl, "CUDA")
+lib.impl("merge", merge_impl, "Meta")
+
+def merge(a, b):
+    torch.ops.nested.merge(a, b)
+
 lib.define("get_max_seqlen(Tensor x) -> SymInt")
 
-def foo_impl(x):
+def get_max_seqlen_impl(x):
     uf = get_union_find()
     cached_metadata = uf.get_metadata(x)
     if not cached_metadata.get("_max_seqlen"):
-        cached_metadata["_max_seqlen"] = torch.max(x).item()
+        cached_metadata["_max_seqlen"] = torch.max(x.diff()).item()
     return cached_metadata["_max_seqlen"]
 
-lib.impl("get_max_seqlen", foo_impl, "CPU")
-lib.impl("get_max_seqlen", foo_impl, "CUDA")
-lib.impl("get_max_seqlen", foo_impl, "Meta")
+lib.impl("get_max_seqlen", get_max_seqlen_impl, "CPU")
+lib.impl("get_max_seqlen", get_max_seqlen_impl, "CUDA")
+lib.impl("get_max_seqlen", get_max_seqlen_impl, "Meta")
 
 def get_max_seqlen(x):
     return torch.ops.nested.get_max_seqlen(x)
@@ -223,6 +240,16 @@ class TensorUnionFind:
                 # Do we do anything here?
                 continue
             assert (self.find(mb_t) is mb_t) == (v is not self._INVALID_ENTRY)
+
+    def print_state(self):
+        # useful for debugging
+        for t_id in self._tensor_int_map._int_to_tensor.keys():
+            mb_t = self._tensor_int_map.get_opt_tensor(t_id)
+            if mb_t is None:
+                continue
+            def fn(t):
+                return f"{id(t)}:{str(t.__class__)}:{t.device}"
+            print(fn(mb_t), fn(self.find(mb_t)))
 
 _union_find = None
 def get_union_find():
