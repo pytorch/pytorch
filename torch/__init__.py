@@ -1795,13 +1795,14 @@ from torch import optim as optim
 from torch import multiprocessing as multiprocessing
 from torch import sparse as sparse
 from torch import special as special
+import torch.utils.backcompat
 from torch import jit as jit
 from torch import linalg as linalg
 from torch import hub as hub
 from torch import distributions as distributions
 from torch import testing as testing
 from torch import backends as backends
-from torch import utils as utils
+import torch.utils.data
 from torch import __config__ as __config__
 from torch import __future__ as __future__
 from torch import profiler as profiler
