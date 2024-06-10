@@ -337,7 +337,7 @@ def proxy_call(proxy_mode, func, pre_dispatch, args, kwargs):
         torch.ops.aten.storage_offset.default,
     ]:
         with proxy_mode:
-            if not proxy_mode.export_inference:
+            if not proxy_mode.pre_dispatch and not proxy_mode.export_inference:
                 r = func.decompose(*args, **kwargs)
                 if r is not NotImplemented:
                     return r

@@ -269,7 +269,7 @@ def override_composite_implicit_decomp():
                     ]:
                         if override_dispatch_key not in op_overload.py_kernels:
                             op_overload.py_impl(override_dispatch_key)(
-                                torch._C.DispatchKey.CompositeImplicitAutograd
+                                torch._C.DispatchKey.Autograd
                             )
 
     try:
