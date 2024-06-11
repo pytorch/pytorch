@@ -345,6 +345,11 @@ class AOTAutogradCacheEntry:
 
         if needs_autograd:
             assert self.compiled_bw is not None
+            # This function is run on both cache miss and cache hit, either here
+            # or in aot_dispatch_autograd. On a cache hit,
+            # 1. the bw is already compiled
+            # 2. we don't need to save to the cache again
+            # so those corresponding arguments are set to None.
             compiled_function = AOTDispatchAutograd.post_compile(
                 compiled_fw_func,
                 compiled_bw_func,
