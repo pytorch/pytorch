@@ -1036,6 +1036,7 @@ class _StopRecomputationError(Exception):
 class _recomputation_hook(torch.autograd.graph.saved_tensors_hooks):
     def __init__(self, target_frame_ref: ReferenceType, gid: int):
         def pack_hook(x):
+            x = x.detach() if x.requires_grad else x
             target_frame = target_frame_ref()
             assert target_frame is not None  # appease mypy
             recomp_idx = target_frame.recomp_counter[gid]
@@ -1050,7 +1051,7 @@ class _recomputation_hook(torch.autograd.graph.saved_tensors_hooks):
                     # we check if the number of tensors saved during forward and
                     # recomputation match.
                     target_frame.ignore_saved_mismatch = True
-                    return x.detach()
+                    return x
                 raise CheckpointError(
                     "torch.utils.checkpoint: trying to save more tensors during "
                     "recomputation than during the original forward pass."
@@ -1063,14 +1064,14 @@ class _recomputation_hook(torch.autograd.graph.saved_tensors_hooks):
             if holder is not None:
                 _internal_assert(holder.handles.get(gid, None) is None)
                 holder.handles[gid] = _Handle()
-                target_frame.recomputed[gid][holder.handles[gid]] = x.detach()
+                target_frame.recomputed[gid][holder.handles[gid]] = x
 
             if target_frame.early_stop and target_frame.recomp_counter[gid] == len(
                 target_frame.weak_holders
             ):
                 raise _StopRecomputationError
             # See Rule 6: [ retain_graph is True ] above
-            return x.detach()
+            return x
 
         def unpack_hook(x):
             # See Rule 6: [ retain_graph is True ] above for an example of when

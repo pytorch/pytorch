@@ -4518,6 +4518,7 @@ class TestNestedTensorSubclass(TestCase):
                 torch.ops.aten.cumsum.default,
             ]
         )
+
         def fn(values, offsets):
             offsets = F.pad(lengths, pad=(1, 0)).cumsum(dim=0)
             nt = convert_jagged_to_nested_tensor(values, offsets, max_length=4)
