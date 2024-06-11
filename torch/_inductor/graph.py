@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import itertools
 import logging
 import operator
@@ -41,6 +42,7 @@ from torch.fx.experimental.symbolic_shapes import (
     SymTypes,
 )
 from torch.utils._mode_utils import no_dispatch
+from torch.utils._sympy.numbers import int_oo
 
 from . import config, ir
 from .codegen.common import (
@@ -296,7 +298,6 @@ class GraphLowering(torch.fx.Interpreter):
         gm: torch.fx.GraphModule,
         example_inputs: Optional[List[torch.Tensor]] = None,
         shape_env=None,
-        num_static_inputs=None,
         graph_id=None,
         cpp_wrapper=False,
         aot_mode=False,
@@ -311,7 +312,6 @@ class GraphLowering(torch.fx.Interpreter):
         name=None,
     ):
         super().__init__(gm)
-
         self.example_inputs = example_inputs
         self.layout_opt = (
             layout_opt
@@ -374,7 +374,6 @@ class GraphLowering(torch.fx.Interpreter):
             Callable[[List[ir.ExternKernelNode]], Any]
         ] = extern_node_serializer
         self.current_node: torch.fx.Node = None  # type: ignore[assignment]
-        self.num_static_inputs = num_static_inputs
         self.lists: Dict[str, List[str]] = {}
         self.mutated_inputs: Set[str] = set()
         self.mutated_input_idxs: List[int] = []
@@ -857,10 +856,13 @@ class GraphLowering(torch.fx.Interpreter):
         """
         if self.constants[name].device == device_override or device_override is None:
             return name
-        return self.allocate_non_dup_const_name(
-            f"{name}_{device_override.type}{device_override.index or 0}",
-            self.constants[name].to(device_override),
-        )
+        with torch.utils._python_dispatch._disable_current_modes():
+            # caller might have set fake tensor mode which will create a fake tensor
+            # when calling .to, so unset modes here
+            return self.allocate_non_dup_const_name(
+                f"{name}_{device_override.type}{device_override.index or 0}",
+                self.constants[name].to(device_override),
+            )
 
     def placeholder(self, target: str, args, kwargs):
         example = super().placeholder(target, args, kwargs)
@@ -929,22 +931,7 @@ class GraphLowering(torch.fx.Interpreter):
             # which run through implicit fallback must constrain their
             # arguments' fx strides
             layout_constraint = None
-
-            def needs_fixed_stride_order(target):
-                if (
-                    torch._C.Tag.needs_fixed_stride_order in target.tags
-                    and torch._C.Tag.does_not_need_fixed_stride_order in target.tags
-                ):
-                    # If both tags were specified, pessimistically assume that we do need it.
-                    return True
-                if torch._library.utils.is_builtin(target):
-                    return torch._C.Tag.needs_fixed_stride_order in target.tags
-                else:
-                    return (
-                        torch._C.Tag.does_not_need_fixed_stride_order not in target.tags
-                    )
-
-            if needs_fixed_stride_order(target):
+            if torch._C.Tag.needs_fixed_stride_order in target.tags:
                 # We have to set the current args because call_function will immediately
                 # evaluate this lowering after creating the fallback, without evaluating
                 # the layout constraint
@@ -1211,8 +1198,11 @@ class GraphLowering(torch.fx.Interpreter):
             elif is_magic_method(n.target):
                 # TODO: this is sus, it probably should be handled in the
                 # lowerings themselves similarly to sym_size/sym-stride
+                # https://github.com/pytorch/pytorch/issues/127789
                 debug("is_magic_method")
-                if isinstance(n.meta["val"], torch.SymInt):
+                if isinstance(
+                    n.meta["val"], (torch.SymInt, torch.SymFloat, torch.SymBool)
+                ):
                     result = n.meta["val"].node.expr
                 else:
                     result = super().run_node(n)
@@ -1438,18 +1428,21 @@ class GraphLowering(torch.fx.Interpreter):
                 vr = shape_env.var_to_range[i0]
                 if not shape_env._default_unspecified_value_range().issubset(vr):
 
-                    def convert(s):
+                    def is_convertible(s):
+                        if s in (int_oo, -int_oo):
+                            return False
                         try:
-                            return int(s)
+                            int(s)
+                            return True
                         except TypeError:
-                            return None
+                            return False
 
-                    if (lower := convert(vr.lower)) is not None:
+                    if is_convertible(vr.lower):
                         self.register_buffer(
                             ir.AssertScalar(i0 >= vr.lower, f"{i0} >= {vr.lower}"),
                             set_name=True,
                         )
-                    if (upper := convert(vr.upper)) is not None:
+                    if is_convertible(vr.upper):
                         self.register_buffer(
                             ir.AssertScalar(i0 <= vr.upper, f"{i0} <= {vr.upper}"),
                             set_name=True,
@@ -1688,8 +1681,25 @@ class GraphLowering(torch.fx.Interpreter):
         code, linemap = (
             self.codegen_with_cpp_wrapper() if self.cpp_wrapper else self.codegen()
         )
-        linemap = [(line_no, node.stack_trace) for line_no, node in linemap]
-        key, path = PyCodeCache.write(code)
+
+        output_code_log.debug("Output code: \n%s", code)
+        try:
+            linemap = [(line_no, node.stack_trace) for line_no, node in linemap]
+            key, path = PyCodeCache.write(code)
+        except Exception:
+            trace_structured(
+                "inductor_output_code",
+                # Just omit the filename, I still want the code though!
+                payload_fn=lambda: code,
+            )
+            raise
+        else:
+            trace_structured(
+                "inductor_output_code",
+                lambda: {"filename": path},
+                payload_fn=lambda: code,
+            )
+
         mod = PyCodeCache.load_by_key_path(
             key,
             path,
@@ -1706,12 +1716,6 @@ class GraphLowering(torch.fx.Interpreter):
 
         log_module_code(mod.__file__)
         log.debug("Output code written to: %s", mod.__file__)
-        output_code_log.debug("Output code: \n%s", code)
-        trace_structured(
-            "inductor_output_code",
-            lambda: {"filename": mod.__file__},
-            payload_fn=lambda: code,
-        )
         output_code_log.info("Output code written to: %s", mod.__file__)
         if config.benchmark_kernel:
             print(f"Compiled module path: {mod.__file__}", file=sys.stderr)
