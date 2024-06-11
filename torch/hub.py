@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import contextlib
 import errno
 import hashlib
@@ -234,7 +235,7 @@ def _get_cache_or_reload(github, force_reload, trust_repo, calling_fn, verbose=T
 
         try:
             url = _git_archive_link(repo_owner, repo_name, ref)
-            sys.stderr.write(f'Downloading: \"{url}\" to {cached_file}\n')
+            sys.stderr.write(f'Downloading: "{url}" to {cached_file}\n')
             download_url_to_file(url, cached_file, progress=False)
         except HTTPError as err:
             if err.code == 300:
