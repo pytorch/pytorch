@@ -368,8 +368,14 @@ def meta_copy_(self, src, non_blocking=False):
     # which runs most of the meta checks that we care about.
     # In theory, we should make this more robust by carefully
     # auditing our C++ copy_() kernel and copying the checks here.
+    from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols
 
-    if torch._debug_has_internal_overlap(self) == 1:  # 1 == MemOverlap::Yes
+    # TODO: Ideally, we'd insert a deferred runtime assert here, but if we are
+    # calling an actual copy_, you'll get that automatically
+    # https://github.com/pytorch/pytorch/issues/122477
+    if (
+        not free_unbacked_symbols(self) and torch._debug_has_internal_overlap(self) == 1
+    ):  # 1 == MemOverlap::Yes
         raise RuntimeError(
             "more than one element of the written-to tensor refers to a single memory location"
         )
