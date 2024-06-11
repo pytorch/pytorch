@@ -45,7 +45,6 @@ from .functional_utils import (
 from .logging_utils import setup_stacktrace_preservation_hooks
 from .schemas import (
     AOTConfig,
-    InputJointAliasInfo,
     MutationType,
     OutputType,
     SubclassMeta,
@@ -413,13 +412,11 @@ def create_functionalized_fn(
             # Only look at mutations that happened to forward inputs (e.g. fw buffers that were saved for bw)
             primals_before = args[0]
             primals_after = pytree.tree_map(from_fun, f_args[0])
-            input_joint_info = []
-            for f_inpt, before, after, inpt_info in zip(
-                f_args[0], primals_before, primals_after, meta.input_info
+            for idx, (f_inpt, before, after, inpt_info) in enumerate(
+                zip(f_args[0], primals_before, primals_after, meta.input_info)
             ):
                 # Store information about mutations in joint(for backward analysis)
                 joint_mutates_data = has_data_mutation(f_inpt)
-                input_joint_info.append(InputJointAliasInfo(joint_mutates_data))
 
                 joint_mutates_metadata = has_metadata_mutation(
                     f_inpt, before, check_only_storage_mutation=False
@@ -447,7 +444,9 @@ def create_functionalized_fn(
                     # Not banning here mutations on inpt_info.requires_grad -
                     # we'll check at runtime and fail only when backward is under torch.is_grad_enabled (create_graph)
                     before.copy_(after)
-            meta.input_joint_info = input_joint_info
+                    meta.indices_of_inputs_that_requires_grad_with_mutations_in_bw.append(
+                        idx
+                    )
             # Now that we covered mutations to *forward* inputs during the backward,
             # we also need to cover mutations to *backward-only* inputs during the backward (e.g. mutation to a grad_out).
             # Today, we will just error in all cases of this happening unless someone needs us to support it.

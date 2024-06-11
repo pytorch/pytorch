@@ -2040,7 +2040,6 @@ def forward(self, primals_1, primals_2):
                 make_inputs_subclasses=True,
             )
 
-    # Mutations in the backward are allowed as long as the mutated object does not require grad
     def test_backward_mutation_data(self):
         class BwMutation(torch.autograd.Function):
             @staticmethod
@@ -2071,10 +2070,7 @@ def forward(self, primals_1, primals_2):
             torch.ones(3, 3, requires_grad=True),
             torch.ones(3, 3, requires_grad=True),
         ]
-        with self.assertRaisesRegex(
-            AssertionError, "input that requires_grad and was mutated in the backward"
-        ):
-            self.verify_aot_autograd(f, inp_grad, test_mutation=True)
+        self.verify_aot_autograd(f, inp_grad, test_mutation=True)
 
     def test_backward_mutation_metadata(self):
         class BwMutation(torch.autograd.Function):
