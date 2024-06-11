@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import copyreg
 import functools
 import logging
@@ -853,7 +854,7 @@ def classproperty(func):
 
 
 @deprecated(
-    "`is_compiling` is deprecated. Use `torch.compiler.is_compiling()` instead.",
+    "`torch._utils.is_compiling` is deprecated. Use `torch.compiler.is_compiling` instead.",
     category=FutureWarning,
 )
 def is_compiling() -> bool:
