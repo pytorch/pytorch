@@ -624,15 +624,6 @@ Tensor _sparse_softmax(const Tensor& self, Dimname dim, optional<ScalarType> dty
   return at::_sparse_softmax(self, dimname_to_position(self, dim), dtype);
 }
 
-static Tensor _sparse_log_softmax(const Tensor& input_, const int64_t dim_) {
-  auto result = [&]() {
-    NoNamesGuard guard;
-    return at::_sparse_log_softmax(input_, dim_, false);
-  }();
-  namedinference::propagate_names(result, input_);
-  return result;
-}
-
 Tensor _sparse_log_softmax(const Tensor& input_, const int64_t dim_, std::optional<ScalarType> dtype) {
   auto result = [&]() {
     NoNamesGuard guard;
