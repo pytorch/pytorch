@@ -33,7 +33,7 @@ aten = torch.ops.aten
 supported_ops = [aten.view.default, aten._to_copy.default]
 
 
-class DisplayShardingExample:
+class CommDebugModeExample:
     """
     Checks if the set of keys in ground truth dictionary and the set
     produced in advanced_module_tracker are in the same order
@@ -150,7 +150,7 @@ def run_example(world_size, rank):
     torch.manual_seed(0)
 
     # run the example
-    instantiated_test = DisplayShardingExample(world_size, rank)
+    instantiated_test = CommDebugModeExample(world_size, rank)
 
     instantiated_test.test_MLP_distributed_sharding_display()
     """

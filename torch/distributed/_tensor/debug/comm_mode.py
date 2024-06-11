@@ -51,7 +51,7 @@ c10d_collective_ops = {
 }
 
 
-class ModuleParamaterShardingTracker(ModuleTracker):
+class CommModeModuleTracker(ModuleTracker):
     """
     Inherits ModuleTracker and expands on its functionality to track the
     parameters and sharding information of a model at a module-level
@@ -140,7 +140,7 @@ class CommDebugMode(TorchDispatchMode):
             self.comm_registry.add(py_op)
 
         self.comm_registry.add(torch.ops._dtensor.shard_dim_alltoall)
-        self.advanced_module_tracker = ModuleParamaterShardingTracker()
+        self.advanced_module_tracker = CommModeModuleTracker()
 
     def generate_module_tracing_table(self):
         """
