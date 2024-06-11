@@ -1295,8 +1295,10 @@ class DeviceCachingAllocator {
       c10::reportMemoryUsageToProfiler(
           block->ptr,
           static_cast<int64_t>(block->size),
-          stats.allocated_bytes[static_cast<size_t>(StatType::AGGREGATE)].current,
-          stats.reserved_bytes[static_cast<size_t>(StatType::AGGREGATE)].current,
+          stats.allocated_bytes[static_cast<size_t>(StatType::AGGREGATE)]
+              .current,
+          stats.reserved_bytes[static_cast<size_t>(StatType::AGGREGATE)]
+              .current,
           c10::Device(c10::DeviceType::CUDA, device));
     }
 
@@ -1561,7 +1563,8 @@ class DeviceCachingAllocator {
       // splitting a block depends on `max_split_size`, which may have changed
       // between whe checkpoint was taken and now, so we make sure to recreate
       // the behavior from the checkpoint.
-      bool split = (i + 1) < segment.blocks.size() && should_split(curr_block, block_state.size);
+      bool split = (i + 1) < segment.blocks.size() &&
+          should_split(curr_block, block_state.size);
 
       // curr_block will become next pointer if it is split, so reassign with
       // the returned value
@@ -2433,8 +2436,7 @@ class DeviceCachingAllocator {
         total_allocated_memory + size > allowed_memory_maximum) {
       p.err = cudaErrorMemoryAllocation;
       return false;
-    } else if (
-        CUDAAllocatorConfig::expandable_segments()) {
+    } else if (CUDAAllocatorConfig::expandable_segments()) {
       p.block = try_allocate_expandable_block(
           p.device(), p.stream(), p.pool, p.size(), ctx);
       if (p.block) {
@@ -2687,7 +2689,8 @@ class DeviceCachingAllocator {
 
     if (block->pool->owner_PrivatePool) {
       // The cudaFreed block belonged to a CUDA graph's PrivatePool.
-      TORCH_INTERNAL_ASSERT(block->pool->owner_PrivatePool->cudaMalloc_count > 0);
+      TORCH_INTERNAL_ASSERT(
+          block->pool->owner_PrivatePool->cudaMalloc_count > 0);
       block->pool->owner_PrivatePool->cudaMalloc_count--;
     }
 
