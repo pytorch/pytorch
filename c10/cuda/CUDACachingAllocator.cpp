@@ -1564,7 +1564,7 @@ class DeviceCachingAllocator {
       // between whe checkpoint was taken and now, so we make sure to recreate
       // the behavior from the checkpoint.
       bool split = (i + 1) < segment.blocks.size() &&
-          should_split(curr_block, block_state.size);
+          curr_block->size - block_state.size > 0;
 
       // curr_block will become next pointer if it is split, so reassign with
       // the returned value
@@ -1590,8 +1590,13 @@ class DeviceCachingAllocator {
       auto& block_state = segment.blocks.at(i);
       TORCH_INTERNAL_ASSERT(curr_block != nullptr);
 
-      if (block_state.allocated || !curr_block->mapped) {
+      if (block_state.allocated) {
         rr.allocations_created.push_back(curr_block);
+        continue;
+      }
+
+      // unmapped blocks in the checkpoint state are already in the free pool
+      if (!curr_block->mapped) {
         continue;
       }
 

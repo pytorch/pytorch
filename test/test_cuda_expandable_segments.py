@@ -3,6 +3,7 @@
 
 import os
 import subprocess
+import sys
 
 import torch
 
@@ -22,6 +23,6 @@ if torch.cuda.is_available() and not IS_JETSON:
         current_dir, "inductor/test_cudagraph_trees.py"
     )
 
-    subprocess.run(["python", test_cuda_filepath, "TestCuda"], env=env, check=True)
-    subprocess.run(["python", test_cudagraphs_filepath], env=env, check=True)
-    subprocess.run(["python", test_cudagraph_trees_filepath], env=env, check=True)
+    subprocess.run([sys.executable, test_cuda_filepath], env=env, check=True)
+    subprocess.run([sys.executable, test_cudagraphs_filepath], env=env, check=True)
+    subprocess.run([sys.executable, test_cudagraph_trees_filepath], env=env, check=True)
