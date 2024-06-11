@@ -40,6 +40,7 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     IS_MACOS,
     parametrize,
+    skipIfRocm,
     slowTest,
 )
 from torch.utils._python_dispatch import TorchDispatchMode
