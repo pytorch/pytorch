@@ -52,6 +52,7 @@ from torch._dynamo.device_interface import get_interface_for_device
 from torch._dynamo.utils import detect_fake_mode
 from torch.autograd import DeviceType
 from torch.autograd.profiler_util import EventList
+from torch.fx.passes.graph_transform_observer import GraphTransformObserver
 from torch.fx.passes.shape_prop import ShapeProp
 from torch.utils._sympy.functions import CeilDiv, CleanDiv, FloorDiv, ModularIndexing
 from torch.utils._sympy.symbol import make_symbol, SymT
@@ -222,7 +223,7 @@ def ceildiv(
     numer: Union[int, sympy.Expr], denom: Union[int, sympy.Expr]
 ) -> Union[int, sympy.Expr]:
     if isinstance(numer, sympy.Expr) or isinstance(denom, sympy.Expr):
-        return CeilDiv(numer, denom)
+        return CeilDiv(sympy.sympify(numer), sympy.sympify(denom))
     # TODO: There is a bug in a call to this function, to repro:
     # python benchmarks/dynamo/huggingface.py --inductor -d cuda --accuracy
     # --amp --only YituTechConvBert --dynamic-shapes
@@ -1397,7 +1398,8 @@ def pass_execution_and_save(func, gm, inp, msg):
         print(f"Before:\n{gm.graph}", file=f)
         print(gm.graph, file=before_io)
         start_time = datetime.now()
-        func(gm.graph)
+        with GraphTransformObserver(gm, msg, config.trace.log_url_for_graph_xform):
+            func(gm.graph)
         time_elapsed = datetime.now() - start_time
         # recompile graph
         stable_topological_sort(gm.graph)

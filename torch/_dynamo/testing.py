@@ -381,6 +381,12 @@ def expectedFailureDynamicWrapper(fn):
     return fn
 
 
+def expectedFailureScalar(fn):
+    if os.getenv("ATEN_CPU_CAPABILITY") == "default":
+        return unittest.expectedFailure(fn)
+    return fn
+
+
 def reset_rng_state(use_xla=False):
     torch.manual_seed(1337)
     random.seed(1337)
