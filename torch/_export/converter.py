@@ -256,11 +256,11 @@ class TS2FXGraphConverter:
     def get_args_kwargs(self, node: torch._C.Node, schema):
         args = []
         kwargs = {}
-        for inp, schema_arg in zip(node.inputs(), schema.arguments):
+        for input, schema_arg in zip(node.inputs(), schema.arguments):
             if schema_arg.kwarg_only:
-                kwargs[schema_arg.name] = self.get_fx_value(inp)
+                kwargs[schema_arg.name] = self.get_fx_value(input)
             else:
-                args.append(self.get_fx_value(inp))
+                args.append(self.get_fx_value(input))
 
         return tuple(args), kwargs
 
