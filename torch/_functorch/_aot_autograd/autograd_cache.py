@@ -298,11 +298,6 @@ class AOTAutogradCacheEntry:
     # Used by RuntimeWrapepr
     indices_of_inps_to_detach: List[int]
 
-    def make_cache_safe(self):
-        self.runtime_metadata.make_cache_safe()
-        if self.maybe_subclass_meta is not None:
-            self.maybe_subclass_meta.fw_metadata.make_cache_safe()
-
     # Turn cache entry into the original callable
     def wrap_post_compile(
         self, args: List[torch.Tensor], aot_config: AOTConfig
