@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 from __future__ import annotations
 
 import collections
@@ -40,10 +39,10 @@ from typing import (
     Union,
     ValuesView,
 )
-from typing_extensions import Concatenate, ParamSpec
 from unittest import mock
 
 import sympy
+from typing_extensions import Concatenate, ParamSpec
 
 import torch
 import torch._export
@@ -52,15 +51,8 @@ from torch._dynamo.device_interface import get_interface_for_device
 from torch._dynamo.utils import detect_fake_mode
 from torch.autograd import DeviceType
 from torch.autograd.profiler_util import EventList
-from torch.fx.passes.graph_transform_observer import GraphTransformObserver
 from torch.fx.passes.shape_prop import ShapeProp
-from torch.utils._sympy.functions import (
-    CeilDiv,
-    CleanDiv,
-    FloorDiv,
-    Identity,
-    ModularIndexing,
-)
+from torch.utils._sympy.functions import CeilDiv, CleanDiv, FloorDiv, ModularIndexing
 from torch.utils._sympy.symbol import make_symbol, SymT
 from torch.utils._sympy.value_ranges import bound_sympy, ValueRanges
 from . import config
@@ -71,36 +63,7 @@ log = logging.getLogger(__name__)
 _T = TypeVar("_T")
 VarRanges = Dict[sympy.Expr, sympy.Expr]
 
-GPU_ALIGN_BYTES = 16
-
-ALIGN_BYTES = 64
-assert (ALIGN_BYTES & (ALIGN_BYTES - 1)) == 0 and ALIGN_BYTES >= 8, "must be power of 2"
-
-
-def _align(nbytes):
-    """Round up to the nearest multiple of ALIGN_BYTES"""
-    return (nbytes + ALIGN_BYTES - 1) & -ALIGN_BYTES
-
-
-def _is_aligned(v: sympy.Expr):
-    """v can be statically proven to be a multiple of ALIGN_BYTES"""
-    if isinstance(v, (sympy.Add, sympy.Max)):
-        return all(map(_is_aligned, v.args))
-    return isinstance(v, align) or sympy.gcd(v, ALIGN_BYTES) == ALIGN_BYTES
-
-
-class align(sympy.Function):
-    """Symbolically round up to the nearest multiple of ALIGN_BYTES"""
-
-    nargs = (1,)
-    is_integer = True
-
-    @classmethod
-    def eval(cls, value):
-        if isinstance(value, (int, sympy.Integer)):
-            return _align(int(value))
-        if _is_aligned(value):
-            return value
+ALIGNMENT = 16
 
 
 def do_bench_using_profiling(fn: Callable[[], Any], warmup=25, rep=100) -> float:
@@ -190,14 +153,10 @@ def has_torchvision_roi_align() -> bool:
     try:
         from torchvision.ops import roi_align  # noqa: F401
 
-        torch._C._dispatch_has_kernel_for_dispatch_key("torchvision::nms", "Meta")
         return roi_align is not None and hasattr(
             getattr(torch.ops, "torchvision", None), "roi_align"
         )
     except ImportError:
-        return False
-    except RuntimeError as e:
-        assert "torchvision::nms does not exist" in str(e)
         return False
 
 
@@ -229,7 +188,7 @@ def ceildiv(
     numer: Union[int, sympy.Expr], denom: Union[int, sympy.Expr]
 ) -> Union[int, sympy.Expr]:
     if isinstance(numer, sympy.Expr) or isinstance(denom, sympy.Expr):
-        return CeilDiv(sympy.sympify(numer), sympy.sympify(denom))
+        return CeilDiv(numer, denom)
     # TODO: There is a bug in a call to this function, to repro:
     # python benchmarks/dynamo/huggingface.py --inductor -d cuda --accuracy
     # --amp --only YituTechConvBert --dynamic-shapes
@@ -427,7 +386,7 @@ P = ParamSpec("P")
 RV = TypeVar("RV", covariant=True)
 
 
-class CachedMethod(Protocol, Generic[P, RV]):
+class CachedMethod(Generic[P, RV], Protocol):
     @staticmethod
     def clear_cache(self) -> None:
         ...
@@ -581,7 +540,7 @@ def sympy_str(expr: sympy.Expr) -> str:
     if isinstance(expr, sympy.Mul):
         return " * ".join(map(sympy_str, expr.args))
 
-    if isinstance(expr, (ModularIndexing, CleanDiv, FloorDiv, Identity)):
+    if isinstance(expr, (ModularIndexing, CleanDiv, FloorDiv)):
         return f"{expr.func.__name__}({', '.join(map(sympy_str, expr.args))})"
     return str(expr)
 
@@ -610,10 +569,6 @@ def sympy_index_symbol_with_prefix(prefix: SymT, idx: int) -> sympy.Symbol:
     # NOTE: shape symbols are positive (> 0), but index variables are only
     # non-negative (>= 0).
     return make_symbol(prefix, idx, integer=True, nonnegative=True)
-
-
-def generate_assert(check):
-    return (check or config.debug_index_asserts) and config.assert_indirect_indexing
 
 
 def sympy_index_symbol(name: str) -> sympy.Symbol:
@@ -920,21 +875,6 @@ class IndentedBuffer:
         return res
 
 
-class FakeIndentedBuffer(IndentedBuffer):
-    def __init__(self):
-        super().__init__()
-
-    def __getattribute__(self, name):
-        if name == "__class__":  # Allow access to the class attribute
-            return object.__getattribute__(self, name)
-        raise RuntimeError(
-            f"Tried to call self.{name} on FakeIndentedBuffer. This buffer"
-            "is currently used on TritonTemplateKernel to prevent actual"
-            "writes to the body without explicitly specifying the body with"
-            "`TritonTemplateKernel.set_subgraph_body(name)`"
-        )
-
-
 @contextlib.contextmanager
 def restore_stdout_stderr(initial_stdout, initial_stderr):
     try:
@@ -1045,42 +985,6 @@ def use_cutlass_template(layout, m, n, k):
             )
             return False
     return res
-
-
-def _use_template_for_cpu(layout):
-    return use_max_autotune() and layout.device.type == "cpu"
-
-
-def use_cpp_packed_gemm_template(layout, mat1, mat2):
-    from . import ir
-    from .codegen.cpp_micro_gemm import create_micro_gemm
-    from .kernel.mm_common import mm_args
-
-    if not _use_template_for_cpu(layout) or not _use_autotune_backend("CPP"):
-        return False
-
-    if not config.cpp.weight_prepack:
-        return False
-
-    layout_dtypes = [torch.float32]
-    m, n, k, layout, mat1, mat2 = mm_args(mat1, mat2)
-    # TODO(jgong5): support dynamic shapes for n or k
-    if has_free_symbols((n, k)):
-        return False
-    if isinstance(mat2, ir.BaseView):
-        mat2 = mat2.unwrap_view()
-    micro_gemm = create_micro_gemm(
-        "micro_gemm", m, n, k, layout.dtype, num_threads=parallel_num_threads()
-    )
-    # TODO(jgong5): support n % n_block_size != 0
-    return (
-        layout.dtype in layout_dtypes
-        and micro_gemm is not None
-        and n % micro_gemm.register_blocking[1] == 0
-        and mat1.get_stride()[-1] == 1  # TODO(jgong5): support transposed input
-        and isinstance(mat2, ir.StorageBox)
-        and mat2.is_module_buffer()
-    )
 
 
 def use_aten_gemm_kernels():
@@ -1404,8 +1308,7 @@ def pass_execution_and_save(func, gm, inp, msg):
         print(f"Before:\n{gm.graph}", file=f)
         print(gm.graph, file=before_io)
         start_time = datetime.now()
-        with GraphTransformObserver(gm, msg, config.trace.log_url_for_graph_xform):
-            func(gm.graph)
+        func(gm.graph)
         time_elapsed = datetime.now() - start_time
         # recompile graph
         stable_topological_sort(gm.graph)
@@ -1567,7 +1470,6 @@ def dump_node_schedule(node_schedule):
             is_red = node.is_reduction()
             print(f"{'red' if is_red else 'pw'} scheduler node")
             if is_red:
-                assert node.node is not None
                 print(f"original reduction hint {node.node.data.reduction_hint}")  # type: ignore[attr-defined]
             print("ReadDep:")
             for dep in node.read_writes.reads:
@@ -1586,9 +1488,7 @@ def tensor_is_aligned(tensor: torch.Tensor):
     # but symbolic storage_offsets are. For consistency, we suppress guard creation
     # upon performing this check: that ensures that we don't add recompiles when we
     # add this logic.
-    return (
-        tensor.storage_offset() * get_dtype_size(tensor.dtype)
-    ) % GPU_ALIGN_BYTES == 0
+    return (tensor.storage_offset() * get_dtype_size(tensor.dtype)) % ALIGNMENT == 0
 
 
 def should_assume_input_aligned(example_input: torch.Tensor):

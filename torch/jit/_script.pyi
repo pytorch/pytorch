@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 # mypy: disable-error-code="type-arg"
 from typing import (
     Any,
@@ -13,9 +12,9 @@ from typing import (
     TypeVar,
     Union,
 )
-from typing_extensions import Never, TypeAlias
 
 from _typeshed import Incomplete
+from typing_extensions import Never, TypeAlias
 
 import torch
 from torch._classes import classes as classes

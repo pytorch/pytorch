@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 import operator
 from collections import deque
 from typing import Dict, List, Set, NamedTuple, Tuple, Deque

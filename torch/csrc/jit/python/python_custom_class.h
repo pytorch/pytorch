@@ -1,5 +1,6 @@
 #pragma once
 
+#include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/utils/pybind.h>
 #include <torch/custom_class.h>
 

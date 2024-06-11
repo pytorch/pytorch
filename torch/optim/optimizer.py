@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 import functools
 import math
 import warnings
@@ -21,6 +20,7 @@ from typing import (
     TypeVar,
     Union,
 )
+
 from typing_extensions import ParamSpec, Self, TypeAlias
 
 import torch
@@ -349,10 +349,21 @@ class Optimizer:
         self._patch_step_function()
 
         if isinstance(params, torch.Tensor):
-            raise TypeError(
-                "params argument given to the optimizer should be "
-                "an iterable of Tensors or dicts, but got " + torch.typename(params)
-            )
+            if self.__class__.__name__ == "SparseAdam":
+                warnings.warn(
+                    (
+                        "Passing in a raw Tensor as ``params`` to SparseAdam "
+                        "is deprecated. In the future, this will raise an error. "
+                        "Please wrap your Tensor in an iterable instead."
+                    ),
+                    FutureWarning,
+                )
+                params = [params]
+            else:
+                raise TypeError(
+                    "params argument given to the optimizer should be "
+                    "an iterable of Tensors or dicts, but got " + torch.typename(params)
+                )
 
         self.state: DefaultDict[torch.Tensor, Any] = defaultdict(dict)
         self.param_groups: List[Dict[str, Any]] = []

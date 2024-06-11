@@ -6,13 +6,13 @@
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
 
-from typing import Any, cast, Dict, SupportsInt
+from typing import Any, cast, Dict, SupportsInt, Tuple
 from unittest import TestCase
 
+from torch.distributed import Store
 from torch.distributed.elastic.rendezvous import (
     RendezvousHandler,
     RendezvousHandlerRegistry,
-    RendezvousInfo,
     RendezvousParameters,
 )
 
@@ -196,7 +196,7 @@ class _DummyRendezvousHandler(RendezvousHandler):
     def get_backend(self) -> str:
         return "dummy_backend"
 
-    def next_rendezvous(self) -> RendezvousInfo:
+    def next_rendezvous(self) -> Tuple[Store, int, int]:
         raise NotImplementedError
 
     def is_closed(self) -> bool:

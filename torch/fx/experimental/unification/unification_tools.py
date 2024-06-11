@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 import collections
 import operator
 from functools import reduce

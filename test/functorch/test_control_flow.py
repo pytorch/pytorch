@@ -5,7 +5,6 @@ import unittest
 
 import torch
 import torch.utils._pytree as pytree
-
 from functorch.experimental import control_flow
 from functorch.experimental.control_flow import cond, UnsupportedAliasMutationException
 from torch._higher_order_ops.while_loop import while_loop
@@ -26,7 +25,6 @@ from torch.testing._internal.common_utils import (
     skipIfTorchDynamo,
     TEST_WITH_TORCHDYNAMO,
     TestCase,
-    xfailIfTorchDynamo,
 )
 
 
@@ -681,43 +679,9 @@ def forward(self, arg0_1):
         torch.compile(fn, backend=backend)(*inp)
         self.assertEqual(len(backend.graphs), 1)
         gm = backend.graphs[0]
-        if torch._dynamo.config.inline_inbuilt_nn_modules:
-            self.assertExpectedInline(
-                gm.code.strip(),
-                """\
-def forward(self, L_iter_ : torch.Tensor, L_x_ : torch.Tensor, L_self_buffers_dec_ : torch.Tensor, L_self_modules_linear_parameters_weight_ : torch.nn.parameter.Parameter, L_self_modules_linear_parameters_bias_ : torch.nn.parameter.Parameter):
-    l_iter_ = L_iter_
-    l_x_ = L_x_
-    l_self_buffers_dec_ = L_self_buffers_dec_
-    l_self_modules_linear_parameters_weight_ = L_self_modules_linear_parameters_weight_
-    l_self_modules_linear_parameters_bias_ = L_self_modules_linear_parameters_bias_
-    cond_fn_0 = self.cond_fn_0
-    body_fn_0 = self.body_fn_0
-    while_loop = torch.ops.higher_order.while_loop(cond_fn_0, body_fn_0, (l_iter_, l_x_), (l_self_buffers_dec_, l_self_modules_linear_parameters_bias_, l_self_modules_linear_parameters_weight_));  cond_fn_0 = body_fn_0 = l_iter_ = l_x_ = l_self_buffers_dec_ = l_self_modules_linear_parameters_bias_ = l_self_modules_linear_parameters_weight_ = None
-    getitem = while_loop[0]
-    getitem_1 = while_loop[1];  while_loop = None
-    return (getitem, getitem_1)""",  # noqa: B950
-            )
-            self.assertExpectedInline(
-                gm.cond_fn_0.code.strip(),
-                """\
-def forward(self, l_iter_, l_x_, l_self_buffers_dec__cond_fn, l_self_modules_linear_parameters_bias__body_fn, l_self_modules_linear_parameters_weight__body_fn):
-    sub = l_iter_ - l_self_buffers_dec__cond_fn;  l_iter_ = l_self_buffers_dec__cond_fn = None
-    gt = sub > 0;  sub = None
-    return gt""",  # noqa: B950
-            )
-            self.assertExpectedInline(
-                gm.body_fn_0.code.strip(),
-                """\
-def forward(self, l_iter_, l_x_, l_self_buffers_dec__cond_fn, l_self_modules_linear_parameters_bias__body_fn, l_self_modules_linear_parameters_weight__body_fn):
-    sub = l_iter_ - 1;  l_iter_ = None
-    linear = torch._C._nn.linear(l_x_, l_self_modules_linear_parameters_weight__body_fn, l_self_modules_linear_parameters_bias__body_fn);  l_x_ = l_self_modules_linear_parameters_weight__body_fn = l_self_modules_linear_parameters_bias__body_fn = None
-    return (sub, linear)""",  # noqa: B950
-            )
-        else:
-            self.assertExpectedInline(
-                gm.code.strip(),
-                """\
+        self.assertExpectedInline(
+            gm.code.strip(),
+            """\
 def forward(self, L_iter_ : torch.Tensor, L_x_ : torch.Tensor):
     l_iter_ = L_iter_
     l_x_ = L_x_
@@ -730,23 +694,23 @@ def forward(self, L_iter_ : torch.Tensor, L_x_ : torch.Tensor):
     getitem = while_loop[0]
     getitem_1 = while_loop[1];  while_loop = None
     return (getitem, getitem_1)""",  # noqa: B950
-            )
-            self.assertExpectedInline(
-                gm.cond_fn_0.code.strip(),
-                """\
+        )
+        self.assertExpectedInline(
+            gm.cond_fn_0.code.strip(),
+            """\
 def forward(self, l_iter_, l_x_, l__self___dec_cond_fn, l__self___linear_bias_body_fn, l__self___linear_weight_body_fn):
     sub = l_iter_ - l__self___dec_cond_fn;  l_iter_ = l__self___dec_cond_fn = None
     gt = sub > 0;  sub = None
     return gt""",  # noqa: B950
-            )
-            self.assertExpectedInline(
-                gm.body_fn_0.code.strip(),
-                """\
+        )
+        self.assertExpectedInline(
+            gm.body_fn_0.code.strip(),
+            """\
 def forward(self, l_iter_, l_x_, l__self___dec_cond_fn, l__self___linear_bias_body_fn, l__self___linear_weight_body_fn):
     sub = l_iter_ - 1;  l_iter_ = None
     linear = torch._C._nn.linear(l_x_, l__self___linear_weight_body_fn, l__self___linear_bias_body_fn);  l_x_ = l__self___linear_weight_body_fn = l__self___linear_bias_body_fn = None
     return (sub, linear)""",  # noqa: B950
-            )
+        )
 
     def test_while_loop_nested2_traced(self):
         fn, inp = WHILE_LOOP_TESTS["nested2"]
@@ -909,41 +873,6 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1):
         )
         self.assertEqual(graph_module(*example_inputs), f(*example_inputs))
 
-    def test_cond_accepts_torch_function_as_inputs(self):
-        a = torch.randn(3, 4)
-        b = torch.randn(3, 4)
-
-        def f(a, b):
-            return cond(a.sum() > 0, torch.add, torch.mul, (a, b))
-
-        gm = self._check_tracing(f, (a, b))["symbolic"]
-        self.assertExpectedInline(
-            gm.code.strip(),
-            """\
-def forward(self, a_1, b_1):
-    sum_1 = torch.ops.aten.sum.default(a_1)
-    gt = torch.ops.aten.gt.Scalar(sum_1, 0);  sum_1 = None
-    true_graph_0 = self.true_graph_0
-    false_graph_0 = self.false_graph_0
-    conditional = torch.ops.higher_order.cond(gt, true_graph_0, false_graph_0, [a_1, b_1]);  gt = true_graph_0 = false_graph_0 = a_1 = b_1 = None
-    getitem = conditional[0];  conditional = None
-    return getitem""",  # noqa: B950
-        )
-        self.assertExpectedInline(
-            gm.true_graph_0.code.strip(),
-            """\
-def forward(self, arg0_1, arg1_1):
-    add = torch.ops.aten.add.Tensor(arg0_1, arg1_1);  arg0_1 = arg1_1 = None
-    return (add,)""",
-        )
-        self.assertExpectedInline(
-            gm.false_graph_0.code.strip(),
-            """\
-def forward(self, arg0_1, arg1_1):
-    mul = torch.ops.aten.mul.Tensor(arg0_1, arg1_1);  arg0_1 = arg1_1 = None
-    return (mul,)""",
-        )
-
     def test_cond_retrace_functionalized(self):
         def true_fn(x):
             return x.sin()
@@ -1056,8 +985,6 @@ def forward(self, arg0_1, arg1_1):
         graph_module = make_fx(torch.func.functionalize(f))(*example_inputs)
         self.assertEqual(graph_module(*example_inputs), f(*example_inputs))
 
-    # https://github.com/pytorch/pytorch/issues/126988
-    @xfailIfTorchDynamo
     def test_cond_functionalized_input_mutation_on_true_branch(self):
         def true_fn(x):
             view_x = x.view(x.shape)
@@ -1083,8 +1010,6 @@ def forward(self, arg0_1, arg1_1):
         ):
             make_fx(torch.func.functionalize(f))(*example_inputs)
 
-    # https://github.com/pytorch/pytorch/issues/126988
-    @xfailIfTorchDynamo
     def test_cond_functionalized_input_mutation_on_false_branch(self):
         def true_fn(x):
             return x.sin().sum()
@@ -1110,8 +1035,6 @@ def forward(self, arg0_1, arg1_1):
         ):
             make_fx(torch.func.functionalize(f))(*example_inputs)
 
-    # https://github.com/pytorch/pytorch/issues/126988
-    @xfailIfTorchDynamo
     def test_cond_functionalized_output_alias_input(self):
         def true_fn(x):
             return x
@@ -1139,8 +1062,6 @@ def forward(self, arg0_1, arg1_1):
         ):
             make_fx(torch.func.functionalize(f))(*example_inputs)
 
-    # https://github.com/pytorch/pytorch/issues/126988
-    @xfailIfTorchDynamo
     def test_cond_functionalized_nested_input_mutation(self):
         def true_true_fn(x):
             x.add_(4)
@@ -1172,8 +1093,6 @@ def forward(self, arg0_1, arg1_1):
         ):
             make_fx(torch.func.functionalize(f))(*example_inputs)
 
-    # https://github.com/pytorch/pytorch/issues/126988
-    @xfailIfTorchDynamo
     def test_cond_functionalized_nested_input_mutation_with_aot_func(self):
         def true_true_fn(x):
             x.add_(4)
@@ -1225,8 +1144,6 @@ def forward(self, arg0_1, arg1_1):
         ):
             make_fx(f_wrapper(f))(example_input_func)
 
-    # https://github.com/pytorch/pytorch/issues/126988
-    @xfailIfTorchDynamo
     def test_cond_functionalized_input_aliasing_with_aot_func(self):
         def true_fn(x):
             return x
@@ -1857,8 +1774,6 @@ def forward(self, arg0_1):
 
         self.assertEqual(gm(*example_inputs), f(*example_inputs))
 
-    # https://github.com/pytorch/pytorch/issues/126988
-    @xfailIfTorchDynamo
     def test_map_functionalized_arg_mutation(self):
         def map_fn(x, y):
             y.add_(4)
@@ -1874,8 +1789,6 @@ def forward(self, arg0_1):
         ):
             functional_f(*example_inputs)
 
-    # https://github.com/pytorch/pytorch/issues/126988
-    @xfailIfTorchDynamo
     def test_map_functionalized_elem_mutation(self):
         def map_fn(x, y):
             x.add_(4)
@@ -1911,8 +1824,6 @@ def forward(self, arg0_1):
         # Ensure no error is thrown when not running backward
         f(*example_inputs)
 
-    # https://github.com/pytorch/pytorch/issues/126988
-    @xfailIfTorchDynamo
     def test_map_functionalized_elem_alias(self):
         def map_fn(x):
             x.view(x.shape)

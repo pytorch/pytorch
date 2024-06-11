@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 import collections
 import dataclasses
 import enum
@@ -16,6 +15,7 @@ from typing import (
     Tuple,
     Union,
 )
+
 from typing_extensions import Literal
 
 import torch

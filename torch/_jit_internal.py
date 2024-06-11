@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 """
 The weak_script annotation needs to be here instead of inside torch/jit/ so it
 can be used in other places in torch/ (namely torch.nn) without running into

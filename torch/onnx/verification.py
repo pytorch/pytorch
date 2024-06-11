@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 """Functions to verify exported ONNX model is functionally equivalent to original PyTorch model.
 
 ONNX Runtime is required, and is used as the ONNX backend for export verification.

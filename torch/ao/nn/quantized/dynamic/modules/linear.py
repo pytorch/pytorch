@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 import torch
 import torch.ao.nn.quantized as nnq
 from torch.ao.nn.quantized.modules.utils import _quantize_weight
@@ -78,7 +77,7 @@ class Linear(nnq.Linear):
                                       missing_keys, unexpected_keys, error_msgs)
 
     @classmethod
-    def from_float(cls, mod, use_precomputed_fake_quant=False):
+    def from_float(cls, mod):
         r"""Create a dynamic quantized module from a float module or qparams_dict
 
         Args:

@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 r"""Definition of the DataLoader and associated iterators that subclass _BaseDataLoaderIter.
 
 To support these two classes, in `./_utils` we define many utility methods and

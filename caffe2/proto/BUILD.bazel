@@ -1,0 +1,55 @@
+load("@rules_proto//proto:defs.bzl", "proto_library")
+load("@rules_cc//cc:defs.bzl", "cc_library", "cc_proto_library")
+
+cc_library(
+    name = "caffe2_pb",
+    hdrs = ["caffe2_pb.h"],
+    visibility = [
+        "//:__pkg__",
+    ],
+    deps = [
+        ":caffe2_cc_proto",
+        "//c10/core:base",
+        "//c10/util:base",
+    ],
+)
+
+cc_proto_library(
+    name = "caffe2_cc_proto",
+    deps = [":caffe2_proto"],
+)
+
+proto_library(
+    name = "caffe2_proto",
+    srcs = ["caffe2.proto"],
+)
+
+cc_proto_library(
+    name = "torch_cc_proto",
+    visibility = ["//:__pkg__"],  # used in torch
+    deps = [":torch_proto"],
+)
+
+proto_library(
+    name = "torch_proto",
+    srcs = ["torch.proto"],
+    deps = [":caffe2_proto"],
+)
+
+cc_proto_library(
+    name = "cc_proto",
+    visibility = ["//:__pkg__"],
+    deps = [":proto"],
+)
+
+proto_library(
+    name = "proto",
+    srcs = [
+        "caffe2_legacy.proto",
+        "hsm.proto",
+        "metanet.proto",
+        "predictor_consts.proto",
+        "prof_dag.proto",
+    ],
+    deps = [":caffe2_proto"],
+)

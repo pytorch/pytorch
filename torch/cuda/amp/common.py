@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 from importlib.util import find_spec
 
 import torch

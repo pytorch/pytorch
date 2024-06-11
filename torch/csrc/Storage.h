@@ -23,11 +23,11 @@ TORCH_PYTHON_API PyObject* THPStorage_NewWithStorage(
     bool allow_preexisting_pyobj = false);
 extern PyTypeObject* THPStorageClass;
 
-inline bool THPStorage_CheckTypeExact(PyTypeObject* tp) {
+static inline bool THPStorage_CheckTypeExact(PyTypeObject* tp) {
   return tp == THPStorageClass;
 }
 
-inline bool THPStorage_CheckExact(PyObject* obj) {
+static inline bool THPStorage_CheckExact(PyObject* obj) {
   return THPStorage_CheckTypeExact(Py_TYPE(obj));
 }
 

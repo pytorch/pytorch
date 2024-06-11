@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 from __future__ import annotations
 
 import operator
@@ -22,7 +21,8 @@ from typing import (
     TYPE_CHECKING,
     Union,
 )
-from typing_extensions import deprecated, TypeAlias
+
+from typing_extensions import TypeAlias
 
 
 if TYPE_CHECKING:
@@ -1790,11 +1790,6 @@ def check_in_bounds_for_storage(
 # NOTE: This function should ideally be removed, but some Meta internal models
 # packaged with `torch.package` are using it, so it will have to be removed
 # at some point in the future when those models no longer use this function.
-@deprecated(
-    "`torch._prims_common.check` is deprecated and will be removed in the future. "
-    "Please use `torch._check*` functions instead.",
-    category=FutureWarning,
-)
 def check(
     b: bool, s: Callable[[], str], exc_type: Type[Exception] = RuntimeError
 ) -> None:
@@ -1807,6 +1802,12 @@ def check(
     .. note:: This function is planned for removal in the future. Please use
         `torch._check*` functions instead.
     """
+    warnings.warn(
+        DeprecationWarning(
+            "'torch._prims_common.check' will be removed in the future. Please use "
+            "'torch._check*' functions instead"
+        )
+    )
     torch._check_with(exc_type, b, s)
 
 

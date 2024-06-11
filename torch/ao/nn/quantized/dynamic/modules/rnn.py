@@ -1,7 +1,5 @@
-# mypy: allow-untyped-defs
 import numbers
 import warnings
-from typing_extensions import deprecated
 
 import torch
 import torch.nn as nn
@@ -18,11 +16,8 @@ def _apply_permutation(tensor: Tensor, permutation: Tensor, dim: int = 1) -> Ten
     return tensor.index_select(dim, permutation)
 
 
-@deprecated(
-    "`apply_permutation` is deprecated, please use `tensor.index_select(dim, permutation)` instead",
-    category=FutureWarning,
-)
 def apply_permutation(tensor: Tensor, permutation: Tensor, dim: int = 1) -> Tensor:
+    warnings.warn("apply_permutation is deprecated, please use tensor.index_select(dim, permutation) instead")
     return _apply_permutation(tensor, permutation, dim)
 
 
@@ -269,7 +264,7 @@ class RNNBase(torch.nn.Module):
         self._all_weight_values = torch.nn.ModuleList(_all_weight_values)
 
     @classmethod
-    def from_float(cls, mod, use_precomputed_fake_quant=False):
+    def from_float(cls, mod):
         assert type(mod) in {torch.nn.LSTM,
                              torch.nn.GRU}, 'nn.quantized.dynamic.RNNBase.from_float only works for nn.LSTM and nn.GRU'
         assert hasattr(
@@ -496,8 +491,8 @@ class LSTM(RNNBase):
             return self.forward_tensor(input, hx)
 
     @classmethod
-    def from_float(cls, mod, use_precomputed_fake_quant=False):
-        return super().from_float(mod, use_precomputed_fake_quant=use_precomputed_fake_quant)
+    def from_float(cls, mod):
+        return super().from_float(mod)
 
     @classmethod
     def from_reference(cls, ref_mod):
@@ -748,8 +743,8 @@ class GRU(RNNBase):
             return self.forward_tensor(input, hx)
 
     @classmethod
-    def from_float(cls, mod, use_precomputed_fake_quant=False):
-        return super().from_float(mod, use_precomputed_fake_quant=use_precomputed_fake_quant)
+    def from_float(cls, mod):
+        return super().from_float(mod)
 
     @classmethod
     def from_reference(cls, ref_mod):
@@ -840,7 +835,7 @@ class RNNCellBase(torch.nn.Module):
                 f"hidden{hidden_label} has inconsistent hidden_size: got {hx.size(1)}, expected {self.hidden_size}")
 
     @classmethod
-    def from_float(cls, mod, use_precomputed_fake_quant=False):
+    def from_float(cls, mod):
         assert type(mod) in {torch.nn.LSTMCell,
                              torch.nn.GRUCell,
                              torch.nn.RNNCell}, 'nn.quantized.dynamic.RNNCellBase.from_float \
@@ -1013,8 +1008,8 @@ class RNNCell(RNNCellBase):
         return ret
 
     @classmethod
-    def from_float(cls, mod, use_precomputed_fake_quant=False):
-        return super().from_float(mod, use_precomputed_fake_quant=use_precomputed_fake_quant)
+    def from_float(cls, mod):
+        return super().from_float(mod)
 
 
 class LSTMCell(RNNCellBase):
@@ -1056,8 +1051,8 @@ class LSTMCell(RNNCellBase):
             self.bias_ih, self.bias_hh)
 
     @classmethod
-    def from_float(cls, mod, use_precomputed_fake_quant=False):
-        return super().from_float(mod, use_precomputed_fake_quant=use_precomputed_fake_quant)
+    def from_float(cls, mod):
+        return super().from_float(mod)
 
 
 class GRUCell(RNNCellBase):
@@ -1097,5 +1092,5 @@ class GRUCell(RNNCellBase):
         )
 
     @classmethod
-    def from_float(cls, mod, use_precomputed_fake_quant=False):
-        return super().from_float(mod, use_precomputed_fake_quant=use_precomputed_fake_quant)
+    def from_float(cls, mod):
+        return super().from_float(mod)

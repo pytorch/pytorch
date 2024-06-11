@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 # The Tensor classes are added to this module by python_tensor.cpp
 from typing import Optional, Tuple, List, Union, Any
 

@@ -1,7 +1,9 @@
 #pragma once
 
-namespace torch::utils {
+namespace torch {
+namespace utils {
 
 void initializeLayouts();
 
 }
+} // namespace torch

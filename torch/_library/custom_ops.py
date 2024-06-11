@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 import inspect
 import weakref
 from typing import (
@@ -26,7 +25,6 @@ device_types_t = Optional[Union[str, Sequence[str]]]
 @exposed_in("torch.library")
 def custom_op(
     name: str,
-    fn: Optional[Callable] = None,
     /,
     *,
     mutates_args: Iterable[str],
@@ -137,9 +135,7 @@ def custom_op(
         result.register_kernel(device_types)(fn)
         return result
 
-    if fn is None:
-        return inner
-    return inner(fn)
+    return inner
 
 
 class CustomOpDef:

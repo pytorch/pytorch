@@ -5,7 +5,9 @@
 
 #include <string>
 
-namespace at::native::metal {
+namespace at {
+namespace native {
+namespace metal {
 
 struct MetalDeviceInfo {
   std::string name;
@@ -40,6 +42,8 @@ static inline MetalDeviceInfo createDeviceInfo(id<MTLDevice> device) {
   return device_info;
 }
 
-} // namespace at::native::metal
+}
+}
+}
 
 #endif

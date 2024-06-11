@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 import contextlib
 import dis
 import functools
@@ -340,12 +339,6 @@ def make_test_cls_with_patches(
 # test Python 3.11+ specific features
 def skipIfNotPy311(fn):
     if sys.version_info >= (3, 11):
-        return fn
-    return unittest.skip(fn)
-
-
-def skipIfNotPy312(fn):
-    if sys.version_info >= (3, 12):
         return fn
     return unittest.skip(fn)
 

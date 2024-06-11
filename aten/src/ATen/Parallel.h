@@ -153,6 +153,8 @@ TORCH_API int intraop_default_num_threads();
 #include <ATen/ParallelOpenMP.h> // IWYU pragma: keep
 #elif AT_PARALLEL_NATIVE
 #include <ATen/ParallelNative.h> // IWYU pragma: keep
+#elif AT_PARALLEL_NATIVE_TBB
+#include <ATen/ParallelNativeTBB.h> // IWYU pragma: keep
 #endif
 
 #include <ATen/Parallel-inl.h> // IWYU pragma: keep

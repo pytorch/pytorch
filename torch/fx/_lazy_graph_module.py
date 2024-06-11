@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 from contextlib import contextmanager
 
 from torch.fx import GraphModule

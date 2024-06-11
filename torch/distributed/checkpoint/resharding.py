@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 from typing import List, Tuple
 
 from torch.distributed.checkpoint.metadata import ChunkStorageMetadata

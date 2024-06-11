@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 import math
 import os
 import torch

@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 """
 This file contains canonical definitions for our symbol naming conventions,
 across torch.fx.experimental.symbolic_shapes and torch._inductor.  The

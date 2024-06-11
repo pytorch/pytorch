@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 import functools
 import itertools
 from typing import Callable, List

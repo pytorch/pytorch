@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 from typing import Optional, Tuple, Union
 from numbers import Number
 import torch

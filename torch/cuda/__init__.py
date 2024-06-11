@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 r"""
 This package adds support for CUDA tensor types.
 
@@ -421,7 +420,7 @@ def get_device_name(device: Optional[_device_t] = None) -> str:
     r"""Get the name of a device.
 
     Args:
-        device (torch.device or int or str, optional): device for which to return the
+        device (torch.device or int, optional): device for which to return the
             name. This function is a no-op if this argument is a negative
             integer. It uses the current device, given by :func:`~torch.cuda.current_device`,
             if :attr:`device` is ``None`` (default).
@@ -436,7 +435,7 @@ def get_device_capability(device: Optional[_device_t] = None) -> Tuple[int, int]
     r"""Get the cuda capability of a device.
 
     Args:
-        device (torch.device or int or str, optional): device for which to return the
+        device (torch.device or int, optional): device for which to return the
             device capability. This function is a no-op if this argument is
             a negative integer. It uses the current device, given by
             :func:`~torch.cuda.current_device`, if :attr:`device` is ``None``
@@ -630,8 +629,6 @@ def _parse_visible_devices() -> Union[List[int], List[str]]:
 
 
 def _raw_device_count_amdsmi() -> int:
-    if not _HAS_PYNVML:  # If amdsmi is not available
-        return -1
     try:
         amdsmi.amdsmi_init()
     except amdsmi.AmdSmiException as e:
@@ -662,8 +659,6 @@ def _raw_device_count_nvml() -> int:
 def _raw_device_uuid_amdsmi() -> Optional[List[str]]:
     from ctypes import byref, c_int, c_void_p, CDLL, create_string_buffer
 
-    if not _HAS_PYNVML:  # If amdsmi is not available
-        return None
     try:
         amdsmi.amdsmi_init()
     except amdsmi.AmdSmiException:
@@ -1048,7 +1043,7 @@ def _get_amdsmi_temperature(device: Optional[Union[Device, int]] = None) -> int:
 
 def _get_amdsmi_power_draw(device: Optional[Union[Device, int]] = None) -> int:
     handle = _get_amdsmi_handler(device)
-    return amdsmi.amdsmi_get_power_info(handle)["current_socket_power"]
+    return amdsmi.amdsmi_get_power_info(handle)["average_socket_power"]
 
 
 def _get_amdsmi_clock_rate(device: Optional[Union[Device, int]] = None) -> int:
@@ -1467,7 +1462,7 @@ def _register_triton_kernels():
 _lazy_call(_register_triton_kernels)
 
 
-from . import amp, jiterator, nvtx, profiler, sparse, tunable
+from . import amp, jiterator, nvtx, profiler, sparse
 
 __all__ = [
     # Typed storage and tensors
@@ -1580,6 +1575,5 @@ __all__ = [
     "stream",
     "streams",
     "synchronize",
-    "tunable",
     "utilization",
 ]

@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 import threading
 from typing import Any, Dict
 

@@ -1,8 +1,8 @@
 from typing import List
 
-import operator_benchmark as op_bench
-
 import torch
+
+import operator_benchmark as op_bench
 
 
 """Microbenchmarks for as_strided operator"""

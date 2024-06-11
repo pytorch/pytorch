@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 # This module contains functions that *will be allowed* by dynamo
 
 import functools

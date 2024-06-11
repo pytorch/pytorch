@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 import torch.nn as nn
 import torch.nn.functional as F
 from torch import Tensor
@@ -77,7 +76,7 @@ class EmbeddingBag(nn.EmbeddingBag, ReferenceQuantizedModule):
                                self.padding_idx)
 
     @classmethod
-    def from_float(cls, mod, weight_qparams, use_precomputed_fake_quant=False):
+    def from_float(cls, mod, weight_qparams):
         return cls(
             mod.num_embeddings,
             mod.embedding_dim,

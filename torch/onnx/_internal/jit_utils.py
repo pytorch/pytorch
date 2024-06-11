@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 """Utilities for manipulating the torch.Graph object and the torchscript."""
 from __future__ import annotations
 

@@ -2,7 +2,6 @@
 
 import onnx_test_common
 import pytorch_test_common
-
 import torch
 import torch.utils.cpp_extension
 from torch.onnx import symbolic_helper

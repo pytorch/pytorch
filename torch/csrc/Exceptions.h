@@ -19,7 +19,7 @@
 #include <torch/csrc/distributed/c10d/exception.h>
 #endif
 
-inline void PyErr_SetString(PyObject* type, const std::string& message) {
+static inline void PyErr_SetString(PyObject* type, const std::string& message) {
   PyErr_SetString(type, message.c_str());
 }
 /// NOTE [ Conversion Cpp Python Warning ]

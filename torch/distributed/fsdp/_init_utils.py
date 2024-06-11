@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 import collections
 import itertools
 import os
@@ -167,7 +166,8 @@ def _init_process_group_state_for_hybrid_shard(
             state.process_group = device_mesh.get_group(mesh_dim=1)
         else:
             raise ValueError(
-                f"Expected device_mesh to have ndim=2 but got {device_mesh.ndim}"
+                "Expected device_mesh to have ndim=2 "
+                f"but got {len(device_mesh.get_group())}"
             )
     elif process_group is None:
         default_group = _get_default_group()
@@ -446,8 +446,7 @@ def _init_core_state(
     elif sharding_strategy == ShardingStrategy.NO_SHARD:
         warnings.warn(
             "The `NO_SHARD` sharding strategy is deprecated. If having issues, "
-            "please use `DistributedDataParallel` instead.",
-            FutureWarning,
+            "please use DistributedDataParallel instead.",
             # Level 1 is here, level 2 is from `FullyShardedDataParallel`, and
             # level 3 is from the true caller
             stacklevel=3,
@@ -1094,6 +1093,25 @@ def _sync_module_params_and_buffers(
     _sync_params_and_buffers(
         process_group,
         module_states,
+        PARAM_BROADCAST_BUCKET_SIZE,
+        src=0,
+    )
+
+
+def _sync_module_states(
+    params: List[nn.Parameter],
+    buffers: List[torch.Tensor],
+    process_group: dist.ProcessGroup,
+) -> None:
+    # Assumes that each call to this method passes in disjoint `params` and
+    # and `buffers` across calls, so there is no chance of re-synchronizing
+    params_and_buffers = [param.detach() for param in params] + [
+        buffer.detach() for buffer in buffers
+    ]
+    _check_module_states_for_sync_module_states(params_and_buffers)
+    _sync_params_and_buffers(
+        process_group,
+        params_and_buffers,
         PARAM_BROADCAST_BUCKET_SIZE,
         src=0,
     )

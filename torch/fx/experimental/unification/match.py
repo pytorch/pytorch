@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 from .core import unify, reify  # type: ignore[attr-defined]
 from .variable import isvar
 from .utils import _toposort, freeze

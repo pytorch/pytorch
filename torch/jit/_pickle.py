@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 # These functions are referenced from the pickle archives produced by
 # ScriptModule.save()
 

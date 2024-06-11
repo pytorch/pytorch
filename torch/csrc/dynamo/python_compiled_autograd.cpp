@@ -186,7 +186,6 @@ struct CacheNode {
     next.clear();
     key_storage.clear();
     expected_sizes.clear();
-    runtime_wrapper = nullptr;
     compiled_fn = nullptr;
   }
 
@@ -194,12 +193,10 @@ struct CacheNode {
     return next.empty() && !compiled_fn;
   }
 
-  CacheNode() : runtime_wrapper(nullptr), compiled_fn(nullptr) {}
+  CacheNode() : compiled_fn(nullptr) {}
   ~CacheNode() {
     if (!Py_IsInitialized()) {
-      // leak on shutdown
-      runtime_wrapper.release();
-      compiled_fn.release();
+      compiled_fn.release(); // leak on shutdown
     }
   }
   CacheNode(CacheNode&&) = delete;
@@ -253,7 +250,6 @@ struct CacheNode {
     if (!cache_hit) {
       // we missed cache because static size inputs didn't match; force
       // recompilation with the varying size input as dynamic
-      runtime_wrapper = nullptr;
       compiled_fn = nullptr;
     }
     return cache_hit;
@@ -302,7 +298,6 @@ struct CacheNode {
   std::vector<CacheKeyBuffer> key_storage;
   std::vector<SizeInput> expected_sizes;
 
-  THPObjectPtr runtime_wrapper;
   THPObjectPtr compiled_fn;
 };
 
@@ -596,22 +591,12 @@ CacheNode* _compiled_autograd_impl(
       }
     }
 
-    PyObject* res = check(call_end_capture(py_compiler, state.outputs));
-    TORCH_CHECK(PyTuple_Check(res), "Expected end_capture to return tuple");
-    TORCH_CHECK(
-        PyTuple_Size(res) == 2,
-        "Expected end_capture to return tuple of size 2");
-    cache->runtime_wrapper = Py_NewRef(PyTuple_GetItem(res, 0));
-    TORCH_CHECK(
-        PyCallable_Check(cache->runtime_wrapper),
-        "Expected end_capture to return runtime_wrapper");
-    cache->compiled_fn = Py_NewRef(PyTuple_GetItem(res, 1));
-    TORCH_CHECK(
-        PyCallable_Check(cache->compiled_fn),
-        "Expected end_capture to return compiled_fn");
+    cache->compiled_fn = check(call_end_capture(py_compiler, state.outputs));
     state.debug_asserts();
   } // End cache miss region
 
+  // TODO(jansel): we should release all the variables and then use a
+  //               boxed calling convention so activation memory can be freed
   // TODO(jansel): clear grads we will overwrite below
   if (!graph_task.keep_graph_) {
     for (auto& call : calls) {
@@ -630,6 +615,9 @@ variable_list compiled_autograd(
     GraphTask& graph_task,
     bool accumulate_grad,
     const edge_list& output_edges) {
+  TORCH_CHECK(
+      output_edges.empty() || !accumulate_grad,
+      "specifying inputs= with .backward() not yet implemented for compiled autograd")
   TORCH_CHECK(
       c10::impl::TorchDispatchModeTLS::stack_len() == 0,
       "TorchDispatchMode not yet implemented for compiled autograd")
@@ -651,12 +639,7 @@ variable_list compiled_autograd(
       &hooks);
 
   THPObjectPtr pyresult(check(PyObject_CallFunctionObjArgs(
-      cache->runtime_wrapper.get(),
-      cache->compiled_fn.get(),
-      inputs.get(),
-      sizes.get(),
-      hooks.get(),
-      NULL)));
+      cache->compiled_fn.get(), inputs.get(), sizes.get(), hooks.get(), NULL)));
   variable_list outputs = THPVariable_UnpackList(pyresult);
   TORCH_INTERNAL_ASSERT(outputs.size() == output_edges.size());
   return outputs;
