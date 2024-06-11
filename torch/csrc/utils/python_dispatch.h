@@ -1,7 +1,9 @@
 #include <pybind11/pybind11.h>
 #include <torch/csrc/utils/pybind.h>
 
-namespace torch::impl::dispatch {
+namespace torch {
+namespace impl {
+namespace dispatch {
 
 void initDispatchBindings(PyObject* module);
 
@@ -12,4 +14,6 @@ void python_op_registration_trampoline_impl(
     torch::jit::Stack* stack,
     bool with_keyset);
 
-} // namespace torch::impl::dispatch
+} // namespace dispatch
+} // namespace impl
+} // namespace torch

@@ -1,13 +1,12 @@
 import time
 
-import torchvision.models as models
-from opacus import PrivacyEngine
-from opacus.utils.module_modification import convert_batchnorm_modules
-
 import torch
 import torch.nn as nn
+import torchvision.models as models
 
 from functorch import grad, make_functional, vmap
+from opacus import PrivacyEngine
+from opacus.utils.module_modification import convert_batchnorm_modules
 
 device = "cuda"
 batch_size = 128

@@ -8,9 +8,11 @@
 #import <ATen/native/metal/mpscnn/MPSImageUtils.h>
 #include <torch/library.h>
 
-namespace at::native::metal {
+namespace at {
+namespace native {
+namespace metal {
 
-static Tensor& hardtanh_(Tensor& input, const Scalar& min_val, const Scalar& max_val) {
+Tensor& hardtanh_(Tensor& input, const Scalar& min_val, const Scalar& max_val) {
   TORCH_CHECK(input.is_metal());
   MPSImage* X = imageFromTensor(input);
   MetalCommandBuffer* commandBuffer = getCommandBuffer(input);
@@ -27,7 +29,7 @@ static Tensor& hardtanh_(Tensor& input, const Scalar& min_val, const Scalar& max
   return input;
 }
 
-static Tensor hardtanh(
+Tensor hardtanh(
     const Tensor& input,
     const Scalar& min_val,
     const Scalar& max_val) {
@@ -50,7 +52,7 @@ static Tensor hardtanh(
   return output;
 }
 
-static at::Tensor clamp(
+at::Tensor clamp(
     const at::Tensor& input,
     const c10::optional<at::Scalar>& min,
     const c10::optional<at::Scalar>& max) {
@@ -62,6 +64,8 @@ TORCH_LIBRARY_IMPL(aten, Metal, m) {
   m.impl(TORCH_SELECTIVE_NAME("aten::hardtanh_"), TORCH_FN(hardtanh_));
   m.impl(TORCH_SELECTIVE_NAME("aten::hardtanh"), TORCH_FN(hardtanh));
   m.impl(TORCH_SELECTIVE_NAME("aten::clamp"), TORCH_FN(clamp));
-}
+};
 
-} // namespace at::native::metal
+}
+}
+}

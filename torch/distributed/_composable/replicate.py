@@ -1,5 +1,7 @@
 import weakref
-from typing import Any, cast, Dict, Iterable, List, NoReturn, Optional, Set, Tuple
+from typing import Any, cast, Dict, Iterable, List, Optional, Set, Tuple
+
+import typing_extensions
 
 import torch
 import torch.nn as nn
@@ -136,7 +138,7 @@ class _ReplicateState(_State):
         return self._ddp._post_forward(output)
 
 
-def unimplemented_deepcopy(*args: Any, **kwargs: Any) -> NoReturn:
+def unimplemented_deepcopy(*args: Any, **kwargs: Any) -> typing_extensions.Never:
     raise AssertionError(
         "DDP does not support deepcopy. Please use state dict for serialization."
     )

@@ -1,7 +1,9 @@
 #include <ATen/Tensor.h>
 #include <c10/util/ArrayRef.h>
 
-namespace at::native::metal {
+namespace at {
+namespace native {
+namespace metal {
 
 class MPSImageWrapper;
 class MetalTensorImplStorage final {
@@ -40,4 +42,6 @@ class MetalTensorImplStorage final {
   std::shared_ptr<Impl> _impl;
 };
 
-} // namespace at::native::metal
+} // namespace metal
+} // namespace native
+} // namespace at

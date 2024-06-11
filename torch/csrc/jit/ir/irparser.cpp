@@ -35,10 +35,7 @@ class IRParser {
       : L(std::make_shared<Source>(str)),
         g(graph),
         vmap(vmap),
-        type_parser(
-            L,
-            /*parse_complete_tensor_types*/ true,
-            /*allow_type_vars*/ true),
+        type_parser(L, /*parse_complete_tensor_types*/ true),
         parse_tensor_constants_(parse_tensor_constants) {}
 
   std::string parseVar();

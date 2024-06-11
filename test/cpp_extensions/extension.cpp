@@ -2,7 +2,6 @@
 
 // test include_dirs in setuptools.setup with relative path
 #include <tmp.h>
-#include <ATen/OpMathType.h>
 
 torch::Tensor sigmoid_add(torch::Tensor x, torch::Tensor y) {
   return x.sigmoid() + y.sigmoid();
@@ -32,10 +31,6 @@ torch::Tensor random_tensor() {
   return torch::randn({1});
 }
 
-at::ScalarType get_math_type(at::ScalarType other) {
-  return at::toOpMathType(other);
-}
-
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
   m.def("sigmoid_add", &sigmoid_add, "sigmoid(x) + sigmoid(y)");
   m.def(
@@ -57,5 +52,4 @@ PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
   m.def("get_symint", []() { return c10::SymInt(1); });
   m.def("get_symintarrayref", []() { return at::SymIntArrayRef({1, 2, 3}); });
   m.def("get_tensor", []() { return random_tensor(); });
-  m.def("get_math_type", &get_math_type);
 }

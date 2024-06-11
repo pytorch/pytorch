@@ -17,7 +17,6 @@ import torch
 import torch._dynamo
 import torch._dynamo.test_case
 import torch._dynamo.testing
-
 from functorch.experimental.control_flow import cond
 from torch._dynamo import config
 from torch._dynamo.exc import UserError
@@ -2385,7 +2384,8 @@ def forward(self, x):
         with self.assertRaisesRegex(
             torch._dynamo.exc.UserError,
             "Constraints violated .*!(.*\n)*.*"
-            "Not all values of dim0 .* satisfy the generated guard 4 <= .* and .* <= 10(.*\n)*.*",
+            "by dim0 = 2\\*dim1(.*\n)*.*"
+            "Not all values of dim1 .* satisfy the generated guard 2 <= .* and .* <= 5(.*\n)*.*",
         ):
             torch.export.export(foo, (t,), dynamic_shapes=dynamic_shapes)
 

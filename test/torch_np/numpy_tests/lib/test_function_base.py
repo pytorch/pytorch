@@ -3259,7 +3259,7 @@ class TestPercentile(TestCase):
             subtest(
                 [1, 7],
                 decorators=[
-                    skip(reason="Keepdims wrapper incorrect for multiple q"),
+                    xpassIfTorchDynamo,
                 ],
             ),
         ],
@@ -3273,13 +3273,13 @@ class TestPercentile(TestCase):
             subtest(
                 (0, 1),
                 decorators=[
-                    skip(reason="Tuple axes"),
+                    xpassIfTorchDynamo,
                 ],
             ),
             subtest(
                 (-3, -1),
                 decorators=[
-                    skip(reason="Tuple axes"),
+                    xpassIfTorchDynamo,
                 ],
             ),
         ],
@@ -3839,13 +3839,13 @@ class TestMedian(TestCase):
             subtest(
                 (0, 1),
                 decorators=[
-                    skip(reason="Tuple axes"),
+                    xpassIfTorchDynamo,
                 ],
             ),
             subtest(
                 (-3, -1),
                 decorators=[
-                    skip(reason="Tuple axes"),
+                    xpassIfTorchDynamo,
                 ],
             ),
         ],

@@ -1,8 +1,8 @@
 import math
 
-import operator_benchmark as op_bench
-
 import torch
+
+import operator_benchmark as op_bench
 
 
 """Microbenchmarks for torch.nan_to_num / nan_to_num_ operators"""

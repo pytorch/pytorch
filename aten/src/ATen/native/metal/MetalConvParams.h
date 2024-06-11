@@ -3,7 +3,9 @@
 
 #include <c10/util/ArrayRef.h>
 
-namespace at::native::metal {
+namespace at {
+namespace native {
+namespace metal {
 
 struct Conv2DParams final {
   Conv2DParams() {}
@@ -44,6 +46,8 @@ struct Conv2DParams final {
   int64_t OH; // output height
 };
 
-} // namespace at::native::metal
+} // namespace metal
+} // namespace native
+} // namespace at
 
 #endif /* MetalConvParams_h */

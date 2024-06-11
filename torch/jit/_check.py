@@ -156,7 +156,7 @@ class AttributeTypeIsSupportedChecker(ast.NodeVisitor):
         # cannot be reassigned later to a non-empty tuple. Same
         # deal with `NamedTuple`
 
-        containers = {"List", "list", "Dict", "dict", "Optional"}
+        containers = {"List", "Dict", "Optional"}
 
         # If we're not evaluating one of the specified problem types
         try:

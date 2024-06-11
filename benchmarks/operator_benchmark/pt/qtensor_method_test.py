@@ -1,5 +1,6 @@
-import operator_benchmark as op_bench
 import torch
+
+import operator_benchmark as op_bench
 
 # Configs for pointwise and reduction unary ops
 qmethods_configs_short = op_bench.config_list(

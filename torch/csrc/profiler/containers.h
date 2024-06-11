@@ -12,7 +12,9 @@
 #include <c10/util/ArrayRef.h>
 #include <c10/util/Exception.h>
 
-namespace torch::profiler::impl {
+namespace torch {
+namespace profiler {
+namespace impl {
 
 // ============================================================================
 // == AppendOnlyList ==========================================================
@@ -72,7 +74,8 @@ class AppendOnlyList {
   }
 
   template <typename T0>
-  std::enable_if_t<std::is_same_v<T0, T> && std::is_trivially_copyable_v<T>>
+  typename std::enable_if<
+      std::is_same<T0, T>::value && std::is_trivially_copyable<T>::value>::type
   copy(c10::ArrayRef<T0> src) {
     size_t n = src.size();
     if (C10_UNLIKELY(n == 0)) {
@@ -198,4 +201,6 @@ class AppendOnlyList {
   typename std::forward_list<array_t>::iterator buffer_last_;
 };
 
-} // namespace torch::profiler::impl
+} // namespace impl
+} // namespace profiler
+} // namespace torch

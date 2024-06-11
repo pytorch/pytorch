@@ -5,8 +5,8 @@
 #include <torch/csrc/utils/numpy_stub.h>
 
 #ifndef USE_NUMPY
-
-namespace torch::utils {
+namespace torch {
+namespace utils {
 PyObject* tensor_to_numpy(const at::Tensor&, bool) {
   throw std::runtime_error("PyTorch was compiled without NumPy support");
 }
@@ -40,8 +40,8 @@ void validate_numpy_for_dlpack_deleter_bug() {}
 bool is_numpy_dlpack_deleter_bugged() {
   return false;
 }
-} // namespace torch::utils
-
+} // namespace utils
+} // namespace torch
 #else
 
 #include <torch/csrc/DynamicTypes.h>
