@@ -112,8 +112,8 @@ DispatchResult DispatchStubImpl::try_get_call_ptr(
         c10::DeviceType::CUDA,
         c10::DeviceType::HIP,
         c10::DeviceType::MPS,
-        c10::DeviceType::PrivateUse1,
-        c10::DeviceType::XPU
+        c10::DeviceType::XPU,
+        c10::DeviceType::PrivateUse1
     );
     // Check if the device type is supported.
     if (std::find(supported_devices.begin(), supported_devices.end(), device_type) == supported_devices.end()) {
