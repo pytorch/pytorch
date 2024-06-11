@@ -6099,6 +6099,6 @@ from . import mkldnn_lowerings
 
 mkldnn_lowerings.register_onednn_fusion_ops()
 
-from . import fbgemm_lowerings
+from . import jagged_lowerings
 
-fbgemm_lowerings.register_jagged_ops()
+jagged_lowerings.register_jagged_ops()
