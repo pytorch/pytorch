@@ -1249,6 +1249,30 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(torch._dynamo.testing.same(out2, out4))
         self.assertEqual(cnt.frame_count, 3)
 
+    def test_no_recompilation_on_counter_increment(self):
+        class Mod(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.counter = 0
+                self.linear = torch.nn.Linear(1, 1)
+
+            def forward(self, x):
+                self.counter += 1
+                return self.linear(x)
+
+        def helper():
+            mod = Mod()
+            opt_mod = torch.compile(mod, backend="eager")
+            opt_mod(torch.randn(1, 1))
+
+            with unittest.mock.patch("torch._dynamo.config.error_on_recompile", True):
+                for _ in range(10):
+                    opt_mod(torch.randn(1, 1))
+
+        helper()
+        with torch._dynamo.config.patch(inline_inbuilt_nn_modules=True):
+            helper()
+
     @patch.object(torch._dynamo.config, "raise_on_ctx_manager_usage", False)
     def test_generation_tag(self):
         cnt = torch._dynamo.testing.CompileCounter()

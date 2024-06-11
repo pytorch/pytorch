@@ -37,7 +37,13 @@ from .. import variables
 from ..create_parameter_op import do_not_convert_to_tracable_parameter
 from ..exc import ObservedException, unimplemented
 from ..guards import GuardBuilder, install_guard
-from ..source import AttrSource, GetItemSource, ODictGetItemSource, RandomValueSource
+from ..source import (
+    AttrSource,
+    GetItemSource,
+    ODictGetItemSource,
+    RandomValueSource,
+    UnspecializedNNModuleSource,
+)
 from ..utils import (
     all_hook_names,
     build_checkpoint_variable,
@@ -824,6 +830,8 @@ class UserDefinedObjectVariable(UserDefinedVariable):
 
         value = self.value
         source = AttrSource(self.source, name) if self.source else None
+        if source and isinstance(self, variables.UnspecializedNNModuleVariable):
+            source = UnspecializedNNModuleSource(source)
         self._check_for_getattribute()
 
         if tx.output.side_effects.has_pending_mutation_of_attr(self, name):

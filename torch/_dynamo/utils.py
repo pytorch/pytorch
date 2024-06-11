@@ -2016,6 +2016,14 @@ def object_has_getattribute(value: Any):
     return False
 
 
+def is_nn_module_int_attribute(source):
+    from .source import AttrSource, NNModuleSource, UnspecializedNNModuleSource
+
+    return isinstance(
+        source, (UnspecializedNNModuleSource, NNModuleSource)
+    ) and isinstance(source.base, AttrSource)
+
+
 def get_custom_getattr(value: Any, ignore_nn_module_getattr: bool = False):
     try:
         getattr_fn = inspect.getattr_static(type(value), "__getattr__")

@@ -91,6 +91,7 @@ from .source import (
     ShapeEnvSource,
     TupleIteratorGetItemSource,
     TypeSource,
+    UnspecializedNNModuleSource,
 )
 from .types import CacheEntry, ExtraState, GuardedCode, GuardFail, GuardFn  # noqa: F401
 from .utils import (
@@ -829,7 +830,13 @@ class GuardBuilder(GuardBuilderBase):
             )
         elif istype(
             source,
-            (OptimizerSource, NNModuleSource, NotNNModuleSource, FSDPNNModuleSource),
+            (
+                OptimizerSource,
+                NNModuleSource,
+                NotNNModuleSource,
+                FSDPNNModuleSource,
+                UnspecializedNNModuleSource,
+            ),
         ):
             assert base_guard_manager  # to make mypy happy
             out = base_guard_manager
@@ -1084,7 +1091,7 @@ class GuardBuilder(GuardBuilderBase):
     # Note: the order of the guards in this file matters since we sort guards on the same object by lineno
     def HASATTR(self, guard: Guard):
         source = guard.originating_source
-        if isinstance(source, NNModuleSource):
+        if isinstance(source, (NNModuleSource, UnspecializedNNModuleSource)):
             source = source.base
         assert isinstance(source, AttrSource), f"invalid source {guard.name}"
         base_source = source.base
