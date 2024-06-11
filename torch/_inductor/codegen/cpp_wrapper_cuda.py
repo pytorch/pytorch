@@ -165,7 +165,7 @@ class CppWrapperCuda(CppWrapperCpu):
         self,
         name,
         call_args,
-        grid=None,
+        grid_args=None,
         device_index=None,
         cuda=True,
         triton=True,
@@ -180,7 +180,7 @@ class CppWrapperCuda(CppWrapperCpu):
         if not cuda:
             # Even in CppWrapperCuda, we may see cpp kernels
             return super().generate_kernel_call(
-                name, call_args, grid, device_index, cuda, triton, arg_types
+                name, call_args, grid_args, device_index, cuda, triton, arg_types
             )
 
         params = CudaKernelParamCache.get(name)
@@ -221,15 +221,13 @@ class CppWrapperCuda(CppWrapperCpu):
         )
         grid_name = f"{name}_grid_{next(self.grid_id)}"
         assert isinstance(
-            grid, (list, tuple)
-        ), f"expected grid to be a list or tuple but got: {grid=}"
+            grid_args, (list, tuple)
+        ), f"expected grid_args to be a list or tuple but got: {grid_args=}"
 
-        grid = [V.graph.sizevars.simplify(item) for item in grid]
-        grid_uses_symbolic_shapes = any(item.free_symbols for item in grid)
-        grid_args = [self.grid_expr_printer(item) for item in grid]
-        grid_args_str = ", ".join(grid_args)
+        grid_args = [V.graph.sizevars.simplify(item) for item in grid_args]
+        grid_uses_symbolic_shapes = any(item.free_symbols for item in grid_args)
+        grid_args_str = ", ".join([self.grid_expr_printer(item) for item in grid_args])
         self.writeline(f"Grid {grid_name} = Grid({grid_args_str});")
-
         if grid_uses_symbolic_shapes:
             self.writeline(f"if ({grid_name}.is_non_zero()) {{")
         kernel_var_name = f"kernels.{name}" if V.graph.aot_mode else name

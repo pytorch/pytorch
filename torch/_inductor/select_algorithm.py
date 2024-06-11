@@ -522,14 +522,12 @@ class TritonTemplateKernel(TritonKernel):
             grid_args = [V.graph.sizevars.simplify(s) for s in self.call_sizes] + [
                 self.meta
             ]
-            grid = self.grid_fn(*grid_args)
-
             wrapper.generate_kernel_call(
                 name,
                 call_args,
+                grid_args=self.grid_fn(*grid_args),
                 device_index=current_device.index,
                 arg_types=arg_types,
-                grid=grid,
                 triton_meta=self.triton_meta,
             )
         else:
@@ -537,13 +535,16 @@ class TritonTemplateKernel(TritonKernel):
 
             wrapper.add_import_once(f"import {self.grid_fn.__module__}")
             meta = wrapper.add_meta_once(self.meta)
-
-            grid_call = [
+            grid_args = [
                 pexpr(V.graph.sizevars.simplify(s)) for s in self.call_sizes
             ] + [meta]
-            grid_call = f"{self.grid_fn.__module__}.{self.grid_fn.__name__}({', '.join(grid_call)})"
-            wrapper.writeline(
-                f"{name}.run({', '.join(call_args)}, grid={grid_call}, stream={stream_name})"
+            wrapper.generate_kernel_call(
+                name,
+                call_args,
+                grid_args,
+                current_device.index,
+                grid_fn=f"{self.grid_fn.__module__}.{self.grid_fn.__name__}",
+                triton_meta=self.triton_meta,
             )
 
 

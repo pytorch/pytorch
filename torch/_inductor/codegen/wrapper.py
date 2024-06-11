@@ -1367,7 +1367,7 @@ class WrapperCodeGen(CodeGen):
         self,
         name,
         call_args,
-        grid=None,
+        grid_args=None,
         device_index=None,
         cuda=True,
         triton=True,
@@ -1389,7 +1389,7 @@ class WrapperCodeGen(CodeGen):
             current_device = V.graph.scheduler.get_current_device_or_throw()
             stream_name = self.write_get_raw_stream(current_device.index, V.graph)
             if triton:
-                grid_str = ", ".join(pexpr(item) for item in grid)
+                grid_str = ", ".join(pexpr(item) for item in grid_args)
                 grid_str = f"{grid_fn}({grid_str})"
                 self.writeline(
                     f"{name}.run({call_args_str}, grid={grid_str}, stream={stream_name})"
