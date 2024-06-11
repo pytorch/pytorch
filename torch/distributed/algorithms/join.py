@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import warnings
 from abc import ABC, abstractmethod
 from types import TracebackType

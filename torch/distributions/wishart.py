@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import math
 import warnings
 from numbers import Number
