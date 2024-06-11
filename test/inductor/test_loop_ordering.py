@@ -17,6 +17,9 @@ from torch._inductor.test_operators import realize
 from torch._inductor.virtualized import V
 from torch.testing._internal.inductor_utils import HAS_CUDA
 
+if HAS_CUDA:
+    torch.set_default_device("cuda")
+
 
 class MockScheduler:
     available_buffer_names = ()
@@ -110,7 +113,7 @@ class ImplDetailTest(TestCase):
 
         # Make sure loop reordering happens here
         self.assertTrue(tuple(old_sizes[0]) == tuple(reversed(sizes)), f"{old_sizes=}")
-        new_body = old_body.merge_iter_loops()
+        new_body = old_body.merge_loops()
         new_sizes = new_body.sizes
         self.assertTrue(tuple(new_sizes[0]) == (np.prod(sizes),), f"{new_sizes=}")
 
@@ -190,8 +193,17 @@ class LoopOrderingTest(TestCase):
         self.do_acc_test(f, x)
         self.assertEqual(1, metrics.generated_kernel_count)
 
+    def test_pw_outer_red(self):
+        def f(x):
+            x = realize(x + 1)
+            return x.sum(dim=[0, 1])
+
+        # make the first 2 dimension small so we don't split the reduction
+        x = torch.randn(2, 4, 512)
+        self.do_acc_test(f, x)
+        self.assertEqual(1, metrics.generated_kernel_count)
+
 
 if __name__ == "__main__":
     if HAS_CUDA:
-        torch.set_default_device("cuda")
         run_tests()

@@ -3048,6 +3048,15 @@ class TestNestedTensorSubclass(TestCase):
                 _make_tensor(5, 5, 6),
                 _make_tensor(6, 5, 6),
             ],
+            # (B, *, D_0, D_1, D_2) with B=6
+            [
+                _make_tensor(2, 5, 6, 7),
+                _make_tensor(3, 5, 6, 7),
+                _make_tensor(4, 5, 6, 7, requires_grad=False),
+                _make_tensor(5, 5, 6, 7),
+                _make_tensor(6, 5, 6, 7),
+                _make_tensor(7, 5, 6, 7),
+            ],
         ]
 
         if include_list_of_lists:
@@ -3786,11 +3795,157 @@ class TestNestedTensorSubclass(TestCase):
             nt = torch.nested.nested_tensor(
                 tensor_list,
                 layout=torch.jagged,
-                device=device)
+                device=device)  # ragged_idx = 1
             out = nt.unbind()
             self.assertEqual(len(out), len(tensor_list))
             for i, t in enumerate(out):
                 self.assertEqual(t, tensor_list[i])
+
+    @parametrize("ragged_idx", [2, 3])
+    def test_unbind_transpose(self, device, ragged_idx):
+        for tensor_list in self._get_example_tensor_lists():
+            nt = torch.nested.nested_tensor(
+                tensor_list,
+                layout=torch.jagged,
+                device=device)
+            if ragged_idx < nt.dim():
+                nt = nt.transpose(1, ragged_idx)  # set ragged_idx
+                out = nt.unbind()
+                self.assertEqual(len(out), len(tensor_list))
+                for i, t in enumerate(out):
+                    self.assertEqual(t.transpose(0, ragged_idx - 1), tensor_list[i])  # transpose back each element of result
+
+    def test_unbind_transpose_ragged_idx_last_dim(self, device):
+        for tensor_list in self._get_example_tensor_lists():
+            nt = torch.nested.nested_tensor(
+                tensor_list,
+                layout=torch.jagged,
+                device=device).transpose(1, -1)  # set ragged_idx = last dimension
+            out = nt.unbind()
+            self.assertEqual(len(out), len(tensor_list))
+            for i, t in enumerate(out):
+                self.assertEqual(t.transpose(0, -1), tensor_list[i])  # transpose back each element of result
+
+    def test_unbind_lengths(self, device):
+        values = torch.randn(16, 128, device=device)
+        offsets = torch.tensor([0, 8, 12, 13, 16], device=device)
+        lengths = torch.tensor([6, 2, 1, 2], device=device)
+        nt = torch.nested.nested_tensor_from_jagged(
+            values,
+            offsets=offsets,
+            lengths=lengths)  # 3D nested tensor
+
+        tensor_list = []
+        for i in range(offsets.shape[0] - 1):
+            tensor_list.append(values[offsets[i] : (offsets[i] + lengths[i])])
+
+        out = nt.unbind()
+        self.assertEqual(len(out), len(tensor_list))
+        for i, t in enumerate(out):
+            self.assertEqual(t, tensor_list[i])
+
+    def test_unbind_lengths_ragged_idx_1(self, device):
+        values = torch.randn(16, 8, 128, device=device)
+        offsets = torch.tensor([0, 8, 12, 13, 16], device=device)
+        lengths = torch.tensor([6, 2, 1, 2], device=device)
+        ragged_idx = 1
+        nt = torch.nested._internal.nested_tensor.NestedTensor(
+            values,
+            offsets=offsets,
+            lengths=lengths,
+            _ragged_idx=ragged_idx)  # 4D nested tensor
+
+        tensor_list = []
+        for i in range(offsets.shape[0] - 1):
+            tensor_list.append(values[offsets[i] : (offsets[i] + lengths[i]), :, :])
+
+        out = nt.unbind()
+
+        self.assertEqual(len(out), len(tensor_list))
+        for i, t in enumerate(out):
+            self.assertEqual(t, tensor_list[i])
+
+    def test_unbind_lengths_ragged_idx_equals_2_bad_dim(self, device):
+        values = torch.randn(16, 8, 128, device=device)
+        offsets = torch.tensor([0, 8, 12, 13, 16], device=device)
+        lengths = torch.tensor([6, 2, 1, 2], device=device)
+        ragged_idx = 2
+        nt = torch.nested._internal.nested_tensor.NestedTensor(
+            values,
+            offsets=offsets,
+            lengths=lengths,
+            _ragged_idx=ragged_idx)  # 4D nested tensor
+
+        self.assertRaisesRegex(
+            RuntimeError,
+            r"unbind\(\): nested tensor offsets and lengths.*",
+            lambda: nt.unbind()
+        )
+
+
+    def test_unbind_lengths_ragged_idx_2(self, device):
+        values = torch.randn(16, 8, 128, device=device)
+        offsets = torch.tensor([0, 2, 4, 8], device=device)
+        lengths = torch.tensor([2, 1, 3], device=device)
+        ragged_idx = 2
+        nt = torch.nested._internal.nested_tensor.NestedTensor(
+            values,
+            offsets=offsets,
+            lengths=lengths,
+            _ragged_idx=ragged_idx)  # 4D nested tensor
+
+        tensor_list = []
+        for i in range(offsets.shape[0] - 1):
+            tensor_list.append(values[:, offsets[i] : (offsets[i] + lengths[i]), :])
+
+        out = nt.unbind()
+
+        self.assertEqual(len(out), len(tensor_list))
+        for i, t in enumerate(out):
+            self.assertEqual(t, tensor_list[i])
+
+    def test_unbind_lengths_ragged_idx_3(self, device):
+        values = torch.randn(16, 8, 128, device=device)
+        offsets = torch.tensor([0, 100, 128], device=device)
+        lengths = torch.tensor([50, 28], device=device)
+        ragged_idx = 3
+        nt = torch.nested._internal.nested_tensor.NestedTensor(
+            values,
+            offsets=offsets,
+            lengths=lengths,
+            _ragged_idx=ragged_idx)  # 4D nested tensor
+
+        tensor_list = []
+        for i in range(offsets.shape[0] - 1):
+            tensor_list.append(values[:, :, offsets[i] : (offsets[i] + lengths[i])])
+
+        out = nt.unbind()
+
+        self.assertEqual(len(out), len(tensor_list))
+        for i, t in enumerate(out):
+            self.assertEqual(t, tensor_list[i])
+
+    @skipIfTorchDynamo("TorchDynamo raises an error for ragged_idx == 0 earlier than Torch")
+    def test_unbind_lengths_ragged_idx_0(self, device):
+        values = torch.randn(16, 8, 128, device=device)
+        offsets = torch.tensor([0, 100, 128], device=device)
+        lengths = torch.tensor([50, 28], device=device)
+        ragged_idx = 0
+        nt = torch.nested._internal.nested_tensor.NestedTensor(
+            values,
+            offsets=offsets,
+            lengths=lengths,
+            _ragged_idx=ragged_idx)  # 4D nested tensor
+
+        tensor_list = []
+        for i in range(offsets.shape[0] - 1):
+            tensor_list.append(values[:, :, offsets[i] : (offsets[i] + lengths[i])])
+
+        self.assertRaisesRegex(
+            RuntimeError,
+            r"unbind\(\): nested tensor.*out of bounds",
+            lambda: nt.unbind()
+        )
 
     @xfailIfTorchDynamo
     def test_layer_norm_2(self, device):
@@ -4414,6 +4569,31 @@ class TestNestedTensorSubclass(TestCase):
         self.assertTrue(torch.allclose(attn_output_eager, attn_output))
         self.assertTrue(torch.allclose(value_grad, value.grad))
 
+    @dtypes(torch.float64, torch.float32, torch.half)
+    @onlyCUDA
+    def test_fbgemm_jagged_to_padded_dense_kernels(self, device, dtype):
+        values = torch.randn(10, 5, device=device, dtype=dtype)
+        offsets = torch.tensor([0, 1, 3, 8, 10], device=device, dtype=torch.int64)
+        max_length = offsets.diff().max().item()
+        padding_value = 1.3
+
+        # convert jagged -> padded dense
+        padded = torch.ops.aten._jagged_to_padded_dense_forward(
+            values, [offsets], [max_length], padding_value
+        )
+
+        batch_size = offsets.shape[0] - 1
+        expected_padded_shape = (batch_size, max_length, values.shape[-1])
+        self.assertEqual(padded.shape, expected_padded_shape)
+
+        # convert padded dense -> jagged
+        total_L = values.shape[0]
+        output_jagged = torch.ops.aten._padded_dense_to_jagged_forward(
+            padded, [offsets], total_L
+        )
+
+        # should be equivalent to the original values
+        self.assertEqual(values, output_jagged)
 
 instantiate_parametrized_tests(TestNestedTensor)
 instantiate_device_type_tests(TestNestedTensorDeviceType, globals())

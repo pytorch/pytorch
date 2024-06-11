@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import collections
 import contextlib
 import dataclasses
@@ -44,7 +45,6 @@ from torch._prims_common import (
     is_boolean_dtype,
     is_float_dtype,
     make_channels_last_strides_for,
-    make_contiguous_strides_for,
     StrideType,
 )
 from torch._subclasses.fake_tensor import get_schema_info
@@ -236,7 +236,7 @@ def ir_node_to_tensor(x, guard_shape=True):
     if is_storage_and_layout(x):
         stride = [shape_fn(s) for s in x.get_layout().stride]  # type: ignore[misc]
     else:
-        stride = make_contiguous_strides_for(size)  # type: ignore[arg-type]
+        stride = FlexibleLayout.contiguous_strides(size)  # type: ignore[arg-type]
     dtype = x.get_dtype()
     device = x.get_device()
     size = convert_shape_to_symint(size)
@@ -2766,6 +2766,7 @@ class FlexibleLayout(Layout):
 
     allow_indexing = False
 
+    # WARNING!  This doesn't handle zero size tensors correctly
     @staticmethod
     def contiguous_strides(sizes):
         if len(sizes) == 0:
@@ -3416,7 +3417,7 @@ class ComputedBuffer(Buffer):
             *body.writes_name2expr.values(),
         ]
 
-        def simplify_and_reorder(x_vars, support_vars, sizes, simplify_loops=True):
+        def simplify_and_reorder(x_vars, support_vars, sizes, simplify_loops):
             sizes, reindex0, reindex1 = self._apply_loop_reordering(
                 x_vars, support_vars, sizes, memory_addrs
             )
@@ -3436,14 +3437,22 @@ class ComputedBuffer(Buffer):
             return sizes, reindex, reindex1
 
         support_vars = index_vars + reduce_vars
+        should_merge_loops = (
+            self.get_device().type != "cuda" or not config.loop_ordering_after_fusion
+        )
         iter_ranges, iter_reindex, _ = simplify_and_reorder(
             index_vars,
             support_vars,
             index_size,
-            self.get_device().type != "cuda" or not config.loop_ordering_after_fusion,
+            should_merge_loops,
         )
+
+        # Like iteration dimensions, we may also want to delay merging reduction dimensions.
+        # E.g., if we reduce a tensor [M, N, K] for its M and N dimensions followed by a pointwise
+        # kernel, merging M and N dimension too early makes it hard to decide what loop order
+        # we should pick for the piontwise kernel so that it is fusible with the reduction.
         reduce_ranges, reduce_reindex, _ = simplify_and_reorder(
-            reduce_vars, support_vars, reduce_size
+            reduce_vars, support_vars, reduce_size, should_merge_loops
         )
 
         # retrace the loop body with simplification and reordering applied
@@ -5924,7 +5933,7 @@ def _prepare_convolution_fusion_create(
     # To align the behavior of the Conv kernel, we set the output_stride in such case to be contiguous instead of channels last.
     dynamic_shapes = not all(isinstance(i, int) for i in (output_size))
     if dynamic_shapes and is_contiguous_storage_and_layout(x):
-        output_stride = make_contiguous_strides_for(output_size)
+        output_stride = FlexibleLayout.contiguous_strides(output_size)
     else:
         output_stride = make_channels_last_strides_for(output_size)
 
@@ -5976,7 +5985,7 @@ def _prepare_linear_fusion_create(
     assert x.get_device().type == "cpu" and weight.get_device().type == "cpu"
     inputs = [x, weight]
 
-    output_stride = make_contiguous_strides_for(output_size)
+    output_stride = FlexibleLayout.contiguous_strides(output_size)
     kernel_layout = FixedLayout(
         x.get_device(),
         x.get_dtype(),
@@ -6292,7 +6301,7 @@ class MKLPackedLinear(ExternKernelAlloc):
         *m, _ = x.get_size()
         oc, _ = orig_w.get_size()
         output_size = list(m) + [oc]
-        output_stride = make_contiguous_strides_for(output_size)
+        output_stride = FlexibleLayout.contiguous_strides(output_size)
         inputs = [x, packed_w, orig_w]
         constant_args = [batch_size]
         if B is not None:
@@ -6610,13 +6619,13 @@ class MkldnnRnnLayer(ExternKernelAlloc):
 
         def get_strides_of_lstm_output(output_shape, batch_first):
             assert len(output_shape) == 3, "Expect output_shape to be 3D"
-            return make_contiguous_strides_for(output_shape)
+            return FlexibleLayout.contiguous_strides(output_shape)
 
         output_sizes = [output_shape, hy_shape, cy_shape]
         output_strides = [
             get_strides_of_lstm_output(output_shape, batch_first),
-            make_contiguous_strides_for(hy_shape),
-            make_contiguous_strides_for(cy_shape),
+            FlexibleLayout.contiguous_strides(hy_shape),
+            FlexibleLayout.contiguous_strides(cy_shape),
         ]
         output_ir = [
             MultiOutput(
@@ -7983,9 +7992,9 @@ class LoopBody:
         self.root_block = LoopBodyBlock(self, fn, args)
         self.indexing = None
 
-    def merge_iter_loops(self) -> "LoopBody":
+    def merge_loops(self) -> "LoopBody":
         """
-        Merge iteration loops and return a new LoopBody.
+        Merge both iteration and reduction loops and return a new LoopBody.
         """
         old_body = self
         old_sizes = self.sizes
@@ -7994,11 +8003,18 @@ class LoopBody:
 
         index_exprs = [*old_body.indexing_exprs.values()]
 
-        iter_sizes, reindex, prune = V.graph.sizevars._simplify_loops(
+        iter_sizes, iter_reindex, _ = V.graph.sizevars._simplify_loops(
             old_iter_vars,
             old_iter_sizes,
             index_prevent_reordering(index_exprs, old_iter_vars, old_iter_sizes),
         )
+
+        reduce_sizes, reduce_reindex, _ = V.graph.sizevars._simplify_loops(
+            old_reduce_vars,
+            old_reduce_sizes,
+            index_prevent_reordering(index_exprs, old_reduce_vars, old_reduce_sizes),
+        )
+
         # if iter_sizes == old_iter_sizes:
         #     # no dimensions get merged.
         #     return old_sizes, old_body
@@ -8014,11 +8030,11 @@ class LoopBody:
             iter_vars,
             reduce_vars,
         ), var_ranges = dependencies.index_vars_no_squeeze(
-            iter_sizes, old_reduce_sizes, prefix="z"
+            iter_sizes, reduce_sizes, prefix="z"
         )
         new_body = LoopBody(
             old_body,
-            [reindex(iter_vars), reduce_vars],
+            [iter_reindex(iter_vars), reduce_reindex(reduce_vars)],
             var_ranges,
             iter_vars,
             reduce_vars,
