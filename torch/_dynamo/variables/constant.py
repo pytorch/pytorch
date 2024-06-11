@@ -10,7 +10,7 @@ from .. import variables
 from ..exc import unimplemented, UserError, UserErrorType
 from ..guards import GuardBuilder, install_guard
 from ..utils import common_constant_types, istype, np
-from .base import typestr, VariableTracker, MutableLocal
+from .base import typestr, VariableTracker
 
 _type_to_assert_reason = {
     # NB - We CAN have ConstantVariable.create(set) because of how sets interact with guards.
