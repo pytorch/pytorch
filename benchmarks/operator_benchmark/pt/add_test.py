@@ -1,5 +1,6 @@
-import operator_benchmark as op_bench
 import torch
+
+import operator_benchmark as op_bench
 
 """Microbenchmarks for add_ operator. Supports both Caffe2/PyTorch."""
 

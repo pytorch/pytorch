@@ -398,14 +398,6 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
             ``ignored_modules`` soon. For backward compatibility, we keep both
             ``ignored_states`` and `ignored_modules``, but FSDP only allows one
             of them to be specified as not ``None``.
-        device_mesh (Optional[DeviceMesh]): DeviceMesh can be used as an altenative to
-            process_group. When device_mesh is passed, FSDP will use the underlying process
-            groups for all-gather and reduce-scatter collective communications. Therefore,
-            these two args need to be mutually exclusive. For hybrid sharding strategies such as
-            ``ShardingStrategy.HYBRID_SHARD``, users can pass in a 2D DeviceMesh instead
-            of a tuple of process groups. For 2D FSDP + TP, users are required to pass in
-            device_mesh instead of process_group. For more DeviceMesh info, please visit:
-            https://pytorch.org/tutorials/recipes/distributed_device_mesh.html
     """
 
     def __init__(
@@ -433,12 +425,6 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
     ):
         torch._C._log_api_usage_once("torch.distributed.fsdp")
         super().__init__()
-        if isinstance(module, (nn.ModuleList, nn.ModuleDict)):
-            warnings.warn(
-                "FSDP will not all-gather parameters for containers that do "
-                f"not implement forward: {module}",
-                stacklevel=2,
-            )
         _init_ignored_module_states(self, module, ignored_modules, ignored_states)
         _init_device_handle(self, module, self._ignored_params, device_id)
 
@@ -686,15 +672,6 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
             A StateDictSettings that include the previous state_dict type and
             configuration for the module.
         """
-        warnings.warn(
-            "FSDP.state_dict_type() and FSDP.set_state_dict_type() are being "
-            "deprecated. Please use APIs, get_state_dict() and set_state_dict(), "
-            "which can support different parallelisms, FSDP1, FSDP2, DDP. "
-            "API doc: https://pytorch.org/docs/stable/distributed.checkpoint.html"
-            "#torch.distributed.checkpoint.state_dict.get_state_dict ."
-            "Tutorial: https://pytorch.org/tutorials/recipes/distributed_checkpoint_recipe.html .",
-            FutureWarning,
-        )
         _state_dict_type_to_config = {
             StateDictType.FULL_STATE_DICT: FullStateDictConfig,
             StateDictType.LOCAL_STATE_DICT: LocalStateDictConfig,
@@ -1207,13 +1184,11 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
         return total_norm.to(total_norm_dtype)
 
     @staticmethod
-    def _warn_optim_input(optim_input, *, stacklevel: int = 1):
+    def _warn_optim_input(optim_input):
         if optim_input is not None:
             warnings.warn(
-                "The `optim_input` argument is deprecated and will be removed after PyTorch 1.13. "
-                "You may remove it from your code without changing its functionality.",
-                FutureWarning,
-                stacklevel=stacklevel + 1,
+                "The `optim_input` argument is deprecated and will be removed after PyTorch 1.13. You may remove it "
+                "from your code without changing its functionality."
             )
 
     @staticmethod
@@ -1228,13 +1203,11 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
         return False
 
     @staticmethod
-    def _warn_legacy_optim_state_dict(curr: str, new: str, *, stacklevel: int = 1):
+    def _warn_legacy_optim_state_dict(curr: str, new: str):
         warnings.warn(
             f"``FullyShardedDataParallel.{curr}``is being deprecated and is "
             f"replaced by ``FullyShardedDataParallel.{new}``. "
-            f"``FullyShardedDataParallel.{curr}`` may be removed after PyTorch 2.2.",
-            FutureWarning,
-            stacklevel=stacklevel + 1,
+            f"``FullyShardedDataParallel.{curr}`` may be removed after PyTorch 2.2."
         )
 
     @staticmethod
@@ -1252,8 +1225,6 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
         full_state_dict: bool = True,
         group: Optional[dist.ProcessGroup] = None,
         cpu_offload: bool = True,
-        *,
-        _stacklevel: int = 1,
     ) -> Dict[str, Any]:
         """Transform the state-dict of an optimizer corresponding to a sharded model.
 
@@ -1262,9 +1233,7 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
         FSDP internal information and internal sharding from the optim_state_dict.
         """
         if full_state_dict:
-            FullyShardedDataParallel._warn_optim_input(
-                optim_input, stacklevel=_stacklevel + 1
-            )
+            FullyShardedDataParallel._warn_optim_input(optim_input)
             using_optim_input = FullyShardedDataParallel._is_using_optim_input(
                 optim_input,
                 optim,
@@ -1415,9 +1384,7 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
             then nonzero ranks return an empty :class:`dict`.
         """
         FullyShardedDataParallel._warn_legacy_optim_state_dict(
-            "full_optim_state_dict",
-            "optim_state_dict",
-            stacklevel=2,
+            "full_optim_state_dict", "optim_state_dict"
         )
         return FullyShardedDataParallel._optim_state_dict_impl(
             model=model,
@@ -1427,7 +1394,6 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
             rank0_only=rank0_only,
             group=group,
             full_state_dict=True,
-            _stacklevel=2,
         )
 
     @staticmethod
@@ -1449,9 +1415,7 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
             cannot be directly used by the regular ``optim.load_state_dict``.
         """
         FullyShardedDataParallel._warn_legacy_optim_state_dict(
-            "sharded_optim_state_dict",
-            "optim_state_dict",
-            stacklevel=2,
+            "sharded_optim_state_dict", "optim_state_dict"
         )
         return FullyShardedDataParallel._optim_state_dict_impl(
             model=model,
@@ -1461,7 +1425,6 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
             rank0_only=False,
             full_state_dict=False,
             group=group,
-            _stacklevel=2,
         )
 
     @staticmethod
@@ -1530,9 +1493,7 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
             restricted to only include this rank's part of the optimizer state.
         """
         FullyShardedDataParallel._warn_legacy_optim_state_dict(
-            "shard_full_optim_state_dict",
-            "optim_state_dict_to_load",
-            stacklevel=2,
+            "shard_full_optim_state_dict", "optim_state_dict_to_load"
         )
         return FullyShardedDataParallel._optim_state_dict_to_load_impl(
             optim_state_dict=full_optim_state_dict,
@@ -1569,9 +1530,7 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
             Refer to :meth:`shard_full_optim_state_dict`.
         """
         FullyShardedDataParallel._warn_legacy_optim_state_dict(
-            "flatten_sharded_optim_state_dict",
-            "optim_state_dict_to_load",
-            stacklevel=2,
+            "flatten_sharded_optim_state_dict", "optim_state_dict_to_load"
         )
         return FullyShardedDataParallel._optim_state_dict_to_load_impl(
             optim_state_dict=sharded_optim_state_dict,
@@ -1651,9 +1610,7 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
             restricted to only include this rank's part of the optimizer state.
         """
         FullyShardedDataParallel._warn_legacy_optim_state_dict(
-            "scatter_full_optim_state_dict",
-            "optim_state_dict_to_load",
-            stacklevel=2,
+            "scatter_full_optim_state_dict", "optim_state_dict_to_load"
         )
         return FullyShardedDataParallel._optim_state_dict_to_load_impl(
             optim_state_dict=full_optim_state_dict,
@@ -1884,7 +1841,6 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
             cpu_offload=getattr(
                 state_dict_settings.optim_state_dict_config, "offload_to_cpu", True
             ),
-            _stacklevel=2,
         )
 
     @staticmethod

@@ -590,7 +590,8 @@ void Graph::lint() const {
       anticipated_uses[n] = -1; // we saw the anticipated user!
       scope->insert(n);
       for (auto block : n->blocks()) {
-        scope = std::make_unique<LintScope>(std::move(scope));
+        std::unique_ptr<LintScope> new_scope(new LintScope(std::move(scope)));
+        scope = std::move(new_scope);
         check_block(block);
         scope = std::move(scope->parent);
       }

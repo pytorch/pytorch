@@ -27,7 +27,7 @@ class ConstantValueMap {
   static std::optional<size_t> GetRank(const std::string& tensorName);
 
   static void SetAllGraphInputsStatic(bool all_static);
-  static std::optional<bool> GetAllGraphInputsStatic();
+  static c10::optional<bool> GetAllGraphInputsStatic();
 
   static void SetAllGraphInputsReliableComputed(bool computed);
   static bool GetAllGraphInputsReliableComputed();
@@ -110,7 +110,7 @@ class ConstantValueMap {
   SymbolDimMap symbolDimMap;
   DimSymbolMap dimSymbolMap;
   // Stores if all graph-level inputs have static shape
-  std::optional<bool> allGraphInputsStatic;
+  c10::optional<bool> allGraphInputsStatic;
   // True if reliable has been computed for all graph inputs
   bool allGraphInputsReliableComputed;
 };

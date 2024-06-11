@@ -2,6 +2,7 @@
 
 #include <c10/util/CallOnce.h>
 
+#include <cstddef>
 #include <memory>
 
 namespace at {

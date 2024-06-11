@@ -9,9 +9,11 @@
 
 #include <torch/library.h>
 
-namespace at::native::metal {
+namespace at {
+namespace native {
+namespace metal {
 
-static Tensor copy_to_host(const Tensor& input) {
+Tensor copy_to_host(const Tensor& input) {
   TORCH_CHECK(input.is_metal());
   MPSImage* X = imageFromTensor(input);
   if (X && !X.isTemporaryImage) {
@@ -50,6 +52,8 @@ static Tensor copy_to_host(const Tensor& input) {
 
 TORCH_LIBRARY_IMPL(metal, Metal, m) {
   m.impl(TORCH_SELECTIVE_NAME("metal::copy_to_host"), TORCH_FN(copy_to_host));
-}
+};
 
-} // namespace at::native::metal
+}
+}
+}

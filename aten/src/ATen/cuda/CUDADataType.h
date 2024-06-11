@@ -9,8 +9,7 @@ namespace at::cuda {
 
 template <typename scalar_t>
 cudaDataType getCudaDataType() {
-  static_assert(false && sizeof(scalar_t), "Cannot convert type to cudaDataType.");
-  return {};
+  TORCH_INTERNAL_ASSERT(false, "Cannot convert type ", typeid(scalar_t).name(), " to cudaDataType.")
 }
 
 template<> inline cudaDataType getCudaDataType<at::Half>() {

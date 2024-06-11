@@ -16,7 +16,7 @@ batch_size = 256
 torch.manual_seed(0)
 
 
-class ModelWithKwargs(torch.nn.Module):
+class ExampleCode(torch.nn.Module):
     def __init__(self):
         super().__init__()
         self.mm_param0 = torch.nn.Parameter(torch.randn(d_hid, d_hid))
@@ -44,7 +44,7 @@ class ModelWithKwargs(torch.nn.Module):
 
 class ChunkSpecTests(TestCase):
     def test_chunk_spec(self):
-        mod = ModelWithKwargs()
+        mod = ExampleCode()
 
         x = torch.randn(batch_size, d_hid)
         y = torch.randn(batch_size, d_hid)

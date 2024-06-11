@@ -66,7 +66,7 @@ namespace c10d {
 namespace {
 
 template <typename F>
-auto syscall(F fn) {
+typename c10::invoke_result_t<F> syscall(F fn) {
   while (true) {
     auto rv = fn();
     if (rv == -1) {
@@ -76,7 +76,6 @@ auto syscall(F fn) {
     }
     return rv;
   }
-  return typename std::invoke_result_t<F>{-1};
 }
 
 // For a comprehensive overview of file locking methods,

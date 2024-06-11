@@ -10,7 +10,6 @@ from typing import List
 from unittest.mock import patch
 
 import numpy as np
-
 import torch
 import torch._dynamo
 import torch._dynamo.logging
