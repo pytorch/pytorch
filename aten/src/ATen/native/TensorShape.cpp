@@ -1181,14 +1181,6 @@ Tensor as_strided_tensorimpl(const Tensor& self, IntArrayRef size, IntArrayRef s
   return result;
 }
 
-static Tensor as_strided_tensorimpl_meta(const Tensor& self, IntArrayRef size, IntArrayRef stride, optional<int64_t> storage_offset_) {
-  auto storage_offset = storage_offset_.value_or(self.storage_offset());
-  auto result = at::detail::make_tensor<TensorImpl>(
-      c10::TensorImpl::VIEW, Storage(self.storage()), self.key_set(), self.dtype());
-  setStrided(result, size, stride, storage_offset);
-  return result;
-}
-
 template <typename T>
 inline void setStridedUnchecked(
     const Tensor& self,
@@ -1247,10 +1239,6 @@ const Tensor &as_strided__symint(const Tensor& self, SymIntArrayRef size, SymInt
   auto storage_offset = storage_offset_.value_or(self.sym_storage_offset());
   setStrided(self, size, stride, std::move(storage_offset));
   return self;
-}
-
-static Tensor narrow_copy_dense(const Tensor& self, int64_t dim, int64_t start, int64_t length) {
-  return self.narrow(dim, start, length).clone(at::MemoryFormat::Contiguous);
 }
 
 // Should just use narrow_copy_out, but this API is used internally at Meta:
@@ -3585,10 +3573,6 @@ Tensor unflatten_dimname_symint(const Tensor& self, Dimname dim, SymIntArrayRef 
 
 Tensor view_as(const Tensor& self, const Tensor& other) {
   return self.view_symint(other.sym_sizes());
-}
-
-static int64_t numel(const Tensor& self) {
-  return self.unsafeGetTensorImpl()->numel();
 }
 
 std::vector<Tensor> unbind(const Tensor &self, int64_t dim) {
