@@ -12,8 +12,8 @@ import torch
 from torch._dynamo import reset
 from torch._dynamo.utils import counters
 from torch._inductor import config, metrics
+from torch._inductor.async_compile import AsyncCompile
 from torch._inductor.codecache import (
-    AsyncCompile,
     cuda_compile_command,
     CUDACodeCache,
     FxGraphCachePickler,
@@ -195,7 +195,7 @@ class TestFxGraphCache(TestCase):
                 num_put += 1
 
         cache_module = (
-            "triton.runtime.fb_memcache.FbMemcacheRemoteFxGraphCacheBackend"
+            "triton.fb.fb_memcache.FbMemcacheRemoteFxGraphCacheBackend"
             if config.is_fbcode()
             else "torch._inductor.remote_cache.RedisRemoteCacheBackend"
         )
@@ -464,6 +464,81 @@ class TestFxGraphCache(TestCase):
         self.assertEqual(fn(a, b), compiled_fn(a, b))
         self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 1)
         self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 0)
+
+    @config.patch({"fx_graph_cache": True})
+    def test_cache_with_nt(self):
+        def gen_nt(r):
+            values = torch.randn(r, 16)
+            offsets = torch.tensor([0, 2, 3, 6, 13, r])
+            return torch.nested.nested_tensor_from_jagged(values, offsets)
+
+        def fn(nt):
+            if nt.values().size(0) % 16 == 0:
+                return nt.sin()
+            return nt.cos()
+
+        inp1 = gen_nt(19)
+        inp2 = gen_nt(20)
+
+        counters.clear()
+        torch.compile(fn)(inp1)
+        torch.compile(fn)(inp2)
+        self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 1)
+        self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 0)
+
+        self.reset()
+        counters.clear()
+        torch.compile(fn)(inp1)
+        torch.compile(fn)(inp2)
+        # TODO(oulgen): This doesnt actually produce a cache hit.
+        # Despite pickling the exact same object, pickle produces different
+        # results.
+        # self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 0)
+        # self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
+
+    @config.patch({"fx_graph_cache": True})
+    def test_cache_with_symint_non_arg_guard(self):
+        def fn(x, ref_id):
+            self_id = 22
+            if self_id == ref_id:
+                x = torch.mul(x, 1.0)
+            else:
+                x = torch.mul(x, 0)
+            return x
+
+        x = torch.ones(2)
+
+        counters.clear()
+        torch.compile(fn, fullgraph=True, dynamic=True)(x, 2)
+        self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 1)
+        self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 0)
+
+        self.reset()
+        counters.clear()
+        torch.compile(fn, fullgraph=True, dynamic=True)(x, 2)
+        self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 0)
+        self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
+
+    @config.patch({"fx_graph_cache": True})
+    def test_cache_guard(self):
+        def f(x, val):
+            if val > 5:
+                return x.sin()
+            else:
+                return x.cos()
+
+        x = torch.ones(2)
+        a = torch.compile(f, dynamic=True)(x, 6)
+        self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 1)
+        self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 0)
+
+        self.reset()
+        counters.clear()
+        b = torch.compile(f, dynamic=True)(x, 4)
+        self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 1)
+        self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 0)
+
+        self.assertNotEqual(a, b)
 
 
 class TestFxGraphCacheHashing(TestCase):
