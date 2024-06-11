@@ -636,7 +636,7 @@ def forward(self, x_1):
         self.assertTrue(expect_true(i0 < s0))
         self.assertExpectedInline(
             str([ra.expr for ra in shape_env.deferred_runtime_asserts[i0.node.expr]]),
-            """[-s0 + u0 < 0]""",
+            """[u0 < s0]""",
         )
         self.assertTrue(i0 < s0)
         self.assertTrue(i0 != s0)

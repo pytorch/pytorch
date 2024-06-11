@@ -371,17 +371,24 @@ def _canonicalize_bool_expr_impl(expr: SympyBoolean) -> SympyBoolean:
         assert isinstance(expr, (sympy.Lt, sympy.Le, sympy.Eq, sympy.Ne))
         rhs = expr.rhs - expr.lhs
         t = type(expr)
+
+    def is_neg(t):
+        return t.is_negative or (isinstance(t, sympy.Mul) and t.args[0].is_negative)
+
     lhs = 0
-    if isinstance(lhs, sympy.Add):
+    if isinstance(rhs, sympy.Add):
         pos = []
         neg = []
-        for term in lhs.args:
-            if isinstance(term, sympy.Mul) and term.args[0].is_negative:
+        for term in rhs.args:
+            if is_neg(term):
                 neg.append(-term)
             else:
                 pos.append(term)
-        lhs = sympy.Add(neg)
-        rhs = sympy.Add(pos)
+        lhs = sympy.Add(*neg)
+        rhs = sympy.Add(*pos)
+    elif is_neg(rhs):
+        # lhs == 0
+        lhs, rhs = -rhs, 0
     return t(lhs, rhs)
 
 def is_concrete_bool(a: Union[bool, SymBool]) -> bool:
