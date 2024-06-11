@@ -12,9 +12,7 @@ from torch.backends import __allow_nonbracketed_mutation, ContextProp, PropModul
 def set_flags(
     _deterministic=None,
 ):
-    orig_flags = (
-        torch._C._get_onednn_deterministic(),
-    )
+    orig_flags = (torch._C._get_onednn_deterministic())
     if _deterministic is not None:
         torch._C._set_onednn_deterministic(_deterministic)
     return orig_flags
@@ -25,9 +23,7 @@ def flags(
     deterministic=False,
 ):
     with __allow_nonbracketed_mutation():
-        orig_flags = set_flags(
-            deterministic, 
-        )
+        orig_flags = set_flags(deterministic)
     try:
         yield
     finally:
