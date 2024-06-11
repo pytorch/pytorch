@@ -1188,7 +1188,7 @@ class VariableBuilder:
             # unspecializing int by default, but still
             # specialize for the following conditions
 
-            force_symint = self.is_force_symint()
+            force_symint = self.is_force_symint(value)
             if (
                 not TracingContext.get().force_unspec_int_unbacked_size_like
                 and not force_symint
