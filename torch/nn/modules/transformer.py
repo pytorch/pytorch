@@ -819,7 +819,7 @@ class TransformerEncoderLayer(Module):
             why_not_sparsity_fast_path = "num_head is odd"
         elif torch.is_autocast_enabled():
             why_not_sparsity_fast_path = "autocast is enabled"
-        elif sum([len(m._forward_hooks) + len(m._forward_pre_hooks) for m in self.modules()]) > 0:
+        elif any([len(m._forward_hooks) + len(m._forward_pre_hooks) for m in self.modules()]):
             why_not_sparsity_fast_path = "forward pre-/hooks are attached to the module"
         if not why_not_sparsity_fast_path:
             tensor_args = (
