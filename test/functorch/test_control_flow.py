@@ -2599,6 +2599,24 @@ def forward(self, arg0_1):
         res = torch.vmap(wrapper)(a)
         self.assertEqual(res, a + 1)
 
+    def test_cond_trace_set__and_mutation_with_graph_break(self):
+        def f(a, tmp):
+            a_view = a.view(-1)
+            with torch.no_grad():
+                a.set_(tmp)
+                a_view.mul_(2)
+            return a + tmp
+
+        inp = torch.ones(3, 3, requires_grad=True)
+        tmp = torch.ones(3, 3, requires_grad=True)
+        # graph break: torch._dynamo.exc.Unsupported: call_function DelayGraphBreakVariable() [TensorVariable()] {}
+        # due to set_
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.UncapturedHigherOrderOpError,
+            "Cond doesn't work unless it is captured completely with torch.compile",
+        ):
+            torch.cond(inp.sum() > 0, f, f, (inp, tmp))
+
 
 instantiate_parametrized_tests(TestControlFlowTraced)
 
