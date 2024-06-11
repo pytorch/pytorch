@@ -117,6 +117,11 @@ class InputAliasInfo:
     mutates_storage_metadata: bool
     requires_grad: bool
     keep_input_mutations: bool
+    # JointFn Mutation Info, is filled only after jointFn tracing.
+    joint_mutates_data: Optional[bool] = None
+    joint_mutates_metadata: Optional[bool] = None
+    joint_mutates_storage_metadata: Optional[bool] = None
+    joint_mutation_inductor_storage_resize: Optional[bool] = None
 
     def __post_init__(self):
         if self.mutates_storage_metadata:
