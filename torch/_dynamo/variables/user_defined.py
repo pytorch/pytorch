@@ -650,7 +650,6 @@ class UserDefinedObjectVariable(UserDefinedVariable):
 
     def method_setattr_standard(self, tx, name, value):
         try:
-            # if not isinstance(name, str):
             name = name.as_python_constant()
         except NotImplementedError:
             unimplemented(f"non-const setattr name: {name}")
