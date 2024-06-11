@@ -1824,7 +1824,6 @@ class AotCodeCompiler:
             )
             compile_cmd = object_builder.get_command_line()
             output_o = object_builder.get_target_file_path()
-            print("!!!! output_o: ", output_o)
             log.debug("aot compilation command: %s", compile_cmd)
             if fbcode_aot_cpu_re:
                 compile_file(input_path, output_o, compile_cmd.split())
@@ -1908,7 +1907,6 @@ class AotCodeCompiler:
             )
             link_cmd = so_builder.get_command_line()
             output_so = so_builder.get_target_file_path()
-            print("!!!! output_so: ", output_so)
             log.debug("aot linkage command: %s", link_cmd)
             if fbcode_aot_cpu_re:
                 compile_file([output_o, consts_o], output_so, link_cmd.split())
@@ -2115,6 +2113,11 @@ class CppCodeCache:
             lock_path = os.path.join(get_lock_dir(), key + ".lock")
             output_name, output_dir = get_name_and_dir_from_output_file_path(input_path)
 
+            """
+            TODO: remove output_path hard code path, after optimize circle import issue.
+            _worker_compile_cpp will use 'CppBuilder' as arg, and CppBuilder can calc output
+            path according Windows/Linux OS.
+            """
             output_path = input_path[:-3] + "so"
             future: Optional[Future[Any]] = None
             lib = None
@@ -2180,6 +2183,11 @@ def _worker_compile_cpp_new(lock_path, name, source, output_dir, args: dict[str,
         if not os.path.exists(cpp_builder.get_target_file_path()):
             # compile_file(input_path, output_path, shlex.split(cmd))
             cpp_builder.build()
+
+
+"""
+TODO: remove the below code, after new cpp_builder stable.
+"""
 
 
 def _worker_compile_cpp(lock_path, input_path, output_path, cmd):

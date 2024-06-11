@@ -224,7 +224,6 @@ def _remove_dir(path_dir):
 
 def run_command_line(cmd_line, cwd=None):
     cmd = shlex.split(cmd_line)
-    print("!!!! cmd: ", cmd)
     try:
         status = subprocess.check_output(args=cmd, cwd=cwd, stderr=subprocess.STDOUT)
     except subprocess.CalledProcessError as e:
