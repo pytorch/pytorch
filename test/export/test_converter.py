@@ -743,10 +743,8 @@ class TestConverter(TestCase):
         self._check_equal_ts_ep_converter(M2(), inp)
 
         self._check_equal_ts_ep_converter(func5, ())
-        # TODO: NumToTensor now returns a tensor based on dtype of input
-        # tensor, but it should always be Long.
-        # inp = (torch.randn([2, 3, 4]),)
-        # self._check_equal_ts_ep_converter(func6, inp)
+        inp = (torch.randn([2, 3, 4]),)
+        self._check_equal_ts_ep_converter(func6, inp)
 
     def test_prim_tolist(self):
         class Module(torch.nn.Module):
