@@ -1184,6 +1184,8 @@ class SelectiveCheckpointContext:
     of the policy function is during recomputation or not.
 
     Example:
+        >>> # xdoctest: +SKIP(stub)
+        >>>
         >>> def policy_fn(ctx, op, *args, **kwargs):
         >>>    print(ctx.is_recompute)
         >>>
@@ -1269,7 +1271,7 @@ class _CachedTorchDispatchMode(TorchDispatchMode):
 
         if policy in (CheckpointPolicy.MUST_SAVE, CheckpointPolicy.PREFER_SAVE) or is_compiling:
             storage = self.storage.get(func)
-            if func is None:
+            if storage is None:
                 raise RuntimeError(f"{func} encountered during backward, but not found in storage")
             if len(storage) == 0:
                 raise RuntimeError(
