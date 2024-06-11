@@ -3251,7 +3251,6 @@ MOD_INLINELIST = {
     "torch._higher_order_ops.strict_mode",
     "torch._higher_order_ops.while_loop",
     "torch._higher_order_ops.associative_scan",
-    "torch.distributed._composable.fsdp._fsdp_param_group",
 }
 
 
@@ -3259,6 +3258,7 @@ if torch.distributed.is_available():
     MOD_INLINELIST.add("torch.distributed")
     MOD_INLINELIST.add("torch.distributed._functional_collectives")
     MOD_INLINELIST.add("torch.distributed._composable.replicate")
+
 
 @functools.lru_cache(None)
 def get_legacy_mod_inlinelist():
@@ -3269,13 +3269,12 @@ def get_legacy_mod_inlinelist():
     return inlinelist
 
 
-# @functools.lru_cache(None)
+@functools.lru_cache(None)
 def get_mod_inlinelist():
     inlinelist = {
         _module_dir(torch) + m[len("torch.") :].replace(".", "/")
         for m in MOD_INLINELIST
     }
-    print(f"inlinelist: {inlinelist}")
     return inlinelist
 
 
@@ -3361,9 +3360,6 @@ def check_file(filename, is_inlined_call=False):
             False,
             "LEGACY_MOD_INLINELIST",
         )
-    import logging
-    torch_log = logging.getLogger("torch")
-    torch_log.warning(f"check_file: {filename}")
     if is_inlined_call and is_torch_inline_allowed(filename):
         return SkipResult(
             False,
@@ -3463,11 +3459,7 @@ def check_verbose(obj, is_inlined_call=False):
 
 
 def check(obj, is_inlined_call=False):
-    ret = check_verbose(obj, is_inlined_call)
-    import logging
-    torch_log = logging.getLogger("torch")
-    torch_log.warning(f"ret.reason: {ret.reason}")
-    return ret.skipped
+    return check_verbose(obj, is_inlined_call).skipped
 
 
 # skip common third party libs
@@ -3603,5 +3595,5 @@ def clear_lru_cache():
     torch._dynamo.trace_rules.get_torch_obj_rule_map.cache_clear()
     torch._dynamo.trace_rules.get_tensor_method.cache_clear()
     torch._dynamo.trace_rules.get_legacy_mod_inlinelist.cache_clear()
-    # torch._dynamo.trace_rules.get_mod_inlinelist.cache_clear()
+    torch._dynamo.trace_rules.get_mod_inlinelist.cache_clear()
     torch._dynamo.trace_rules.dynamo_dir.cache_clear()
