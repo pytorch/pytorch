@@ -304,12 +304,13 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnt.frame_count, 0)
 
     def test_torch_guards_stack_frame_register_inlining_disable(self):
+        y = torch.nn.Parameter(torch.tensor([0.25, 0.25]))
         x = torch.tensor([0.5, 0.5])
 
         class encoder(torch.nn.Module):
             def __init__(self, y):
                 super().__init__()
-                self.a = y
+                self.register_parameter("param", y)
 
             @torch._dynamo.disable
             def helper(self, x, y):
@@ -317,9 +318,9 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
 
             def forward(self, a, *args):
                 x = a + a
-                return self.helper(x, self.a)
+                return self.helper(x, self.param)
 
-        e = encoder(2.0)
+        e = encoder(y)
 
         seen_frames = []
         import contextlib

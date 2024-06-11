@@ -71,9 +71,9 @@ class Indestructible final {
   template <
       typename U = T,
       std::enable_if_t<std::is_constructible<T, U&&>::value>* = nullptr,
-      std::enable_if_t<
-          !std::is_same<Indestructible<T>, std::remove_cv_t<std::remove_reference<U>>>::value>* =
-          nullptr,
+      std::enable_if_t<!std::is_same<
+          Indestructible<T>,
+          std::remove_cv_t<std::remove_reference<U>>>::value>* = nullptr,
       std::enable_if_t<!std::is_convertible<U&&, T>::value>* = nullptr>
   explicit constexpr Indestructible(U&& u) noexcept(
       noexcept(T(std::declval<U>())))
@@ -81,9 +81,9 @@ class Indestructible final {
   template <
       typename U = T,
       std::enable_if_t<std::is_constructible<T, U&&>::value>* = nullptr,
-      std::enable_if_t<
-          !std::is_same<Indestructible<T>, std::remove_cv_t<std::remove_reference<U>>>::value>* =
-          nullptr,
+      std::enable_if_t<!std::is_same<
+          Indestructible<T>,
+          std::remove_cv_t<std::remove_reference<U>>>::value>* = nullptr,
       std::enable_if_t<std::is_convertible<U&&, T>::value>* = nullptr>
   /* implicit */ constexpr Indestructible(U&& u) noexcept(
       noexcept(T(std::declval<U>())))
@@ -97,10 +97,12 @@ class Indestructible final {
       typename U,
       typename... Args,
       typename = decltype(T(
-          std::declval<std::initializer_list<U>&>(), std::declval<Args>()...))>
+          std::declval<std::initializer_list<U>&>(),
+          std::declval<Args>()...))>
   explicit constexpr Indestructible(std::initializer_list<U> il, Args... args) noexcept(
-      noexcept(T(
-          std::declval<std::initializer_list<U>&>(), std::declval<Args>()...)))
+      noexcept(
+          T(std::declval<std::initializer_list<U>&>(),
+            std::declval<Args>()...)))
       : storage_{std::in_place, il, std::forward<Args>(args)...} {}
 
   template <typename Factory>
@@ -111,17 +113,31 @@ class Indestructible final {
   Indestructible(Indestructible const&) = delete;
   Indestructible& operator=(Indestructible const&) = delete;
 
-  T* get() noexcept { return reinterpret_cast<T*>(&storage_.bytes); }
+  T* get() noexcept {
+    return reinterpret_cast<T*>(&storage_.bytes);
+  }
   T const* get() const noexcept {
     return reinterpret_cast<T const*>(&storage_.bytes);
   }
-  T& operator*() noexcept { return *get(); }
-  T const& operator*() const noexcept { return *get(); }
-  T* operator->() noexcept { return get(); }
-  T const* operator->() const noexcept { return get(); }
+  T& operator*() noexcept {
+    return *get();
+  }
+  T const& operator*() const noexcept {
+    return *get();
+  }
+  T* operator->() noexcept {
+    return get();
+  }
+  T const* operator->() const noexcept {
+    return get();
+  }
 
-  /* implicit */ operator T&() noexcept { return *get(); }
-  /* implicit */ operator T const&() const noexcept { return *get(); }
+  /* implicit */ operator T&() noexcept {
+    return *get();
+  }
+  /* implicit */ operator T const&() const noexcept {
+    return *get();
+  }
 
  private:
   struct Storage {
