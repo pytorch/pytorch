@@ -17,6 +17,7 @@ from torch._prims_common import is_boolean_dtype, is_expandable_to, is_integer_d
 
 from torch._utils_internal import upload_graph
 from torch.fx.experimental.symbolic_shapes import statically_known_true, sym_eq
+from torch.fx.passes.graph_transform_observer import GraphTransformObserver
 
 from .. import config, ir, pattern_matcher
 from ..fx_utils import FakeTensorUpdater, get_fake_args_kwargs, get_node_storage
@@ -82,7 +83,10 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
     fake_tensor_updater = FakeTensorUpdater(gm.graph)
 
     if config.post_grad_custom_pre_pass is not None:
-        config.post_grad_custom_pre_pass(gm.graph)
+        with GraphTransformObserver(
+            gm, "post_grad_custom_pre_pass", config.trace.log_url_for_graph_xform
+        ):
+            config.post_grad_custom_pre_pass(gm.graph)
 
     if config.pattern_matcher:
         lazy_init()
@@ -116,7 +120,10 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
         )
 
     if config.post_grad_custom_post_pass is not None:
-        config.post_grad_custom_post_pass(gm.graph)
+        with GraphTransformObserver(
+            gm, "post_grad_custom_post_pass", config.trace.log_url_for_graph_xform
+        ):
+            config.post_grad_custom_post_pass(gm.graph)
 
     stable_topological_sort(gm.graph)
 
