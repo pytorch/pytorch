@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 # This module contains functions that *will be allowed* by dynamo
 
 import functools
@@ -14,7 +15,7 @@ except ModuleNotFoundError:
 
 
 @deprecated(
-    "`is_compiling` is deprecated. Use `torch.compiler.is_compiling()` instead.",
+    "`torch._dynamo.external_utils.is_compiling` is deprecated. Use `torch.compiler.is_compiling` instead.",
     category=FutureWarning,
 )
 def is_compiling() -> bool:

@@ -643,7 +643,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   uint64_t getSequenceNumberForGroup() override;
 
   // Return the total number of splits the communicators held by this process
-  // group have performed.
+  // group have performed.  Counts ncclCommCreateFromRanks() for ncclx v2.21.5+
   uint64_t getCommSplitCounter() const;
 
   void registerOnCompletionHook(
@@ -908,6 +908,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // communication, the key will be "1:2" on both processes. Note: this is for
   // the scenario where there is only 1 GPU per process. When it comes to
   // multiple GPUs per process, this part may need to redesigned.
+  // TODO: we probably need a separte map for P2P comms
   std::unordered_map<std::string, std::shared_ptr<NCCLComm>> devNCCLCommMap_;
 
   // The NCCL communicators currently in process of being initialized.
@@ -1113,11 +1114,16 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   ProcessGroupStatus pgStatus_;
 };
 
-TORCH_API std::string dump_nccl_trace();
+// Dumps the NCCL comm traces and additional information about the Process
+// Group.
+TORCH_API std::string dump_nccl_trace(
+    bool includeCollectives,
+    bool includeStackTraces,
+    bool onlyActive);
 
-// Gets a mutable reference to a global optional function.  Heartbeat Monitor
-// will use this function to dump traces, if available. Inside fbcode, we store
-// a function here that uses an internal tool for process tracing
+// Gets a mutable reference to a global optional function.Heartbeat Monitor
+// will use this function to dump traces, if available. Inside fbcode, we
+// store a function here that uses an internal tool for process tracing
 TORCH_API std::optional<
     std::function<void(std::function<void(const std::string&)>)>>&
 get_cpp_trace_dumper();
