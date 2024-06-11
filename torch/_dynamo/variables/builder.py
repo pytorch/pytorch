@@ -70,7 +70,12 @@ from ..source import (
     Source,
     TupleIteratorGetItemSource,
 )
-from ..trace_rules import is_callable_allowed, is_numpy
+from ..trace_rules import (
+    is_callable_allowed,
+    is_numpy,
+    is_numpy_dtype,
+    is_numpy_type_info,
+)
 from ..utils import (
     build_checkpoint_variable,
     clone_input,
@@ -151,6 +156,8 @@ from .misc import (
     LambdaVariable,
     LoggingLoggerVariable,
     MethodWrapperVariable,
+    NumpyDTypeVariable,
+    NumpyTypeInfoVariable,
     NumpyVariable,
     PythonModuleVariable,
     RegexPatternVariable,
@@ -625,6 +632,17 @@ class VariableBuilder:
                 else GuardBuilder.TYPE_MATCH
             )
             return NumpyVariable(value, source=self.source)
+        elif is_numpy_dtype(value):
+            self.install_guards(GuardBuilder.ID_MATCH)
+            return NumpyDTypeVariable(value, source=self.source)
+        elif is_numpy_type_info(value):
+            if isinstance(value, np.iinfo):
+                self.install_guards(GuardBuilder.TYPE_MATCH)
+                dt_source = AttrSource(self.source, "dtype")
+                install_guard(dt_source.make_guard(GuardBuilder.ID_MATCH))
+            else:
+                self.install_guards(GuardBuilder.ID_MATCH)
+            return NumpyTypeInfoVariable(value, source=self.source)
         # NB: These can't be put in type_dispatch, they have to run later
         elif CollectiveFunctionRewriteVariable.can_rewrite(value):
             self.install_guards(GuardBuilder.FUNCTION_MATCH)
@@ -1107,9 +1125,26 @@ class VariableBuilder:
             and not config.allow_rnn
         ):
             unimplemented("TorchDynamo purposely graph breaks on RNN, GRU, LSTMs")
-        if mutation_guard.is_dynamic_nn_module(value, self.tx.export):
+
+        # Dont take this path for FSDP
+        if not getattr(
+            value, "_is_fsdp_managed_module", None
+        ) and mutation_guard.is_dynamic_nn_module(value, self.tx.export):
             # created dynamically, don't specialize on it
             self.install_guards(GuardBuilder.TYPE_MATCH)
+            if (
+                torch._dynamo.config.inline_inbuilt_nn_modules
+                and torch._inductor.config.freezing
+                and not torch.is_grad_enabled()
+            ):
+                from ..decorators import mark_static_address
+
+                for p in value.parameters():
+                    mark_static_address(p)
+
+                for b in value.buffers():
+                    mark_static_address(b)
+
             result = UnspecializedNNModuleVariable(value, source=self.source)
             if not SideEffects.cls_supports_mutation_side_effects(type(value)):
                 # don't allow STORE_ATTR mutation with custom __setattr__
@@ -1119,7 +1154,7 @@ class VariableBuilder:
             value.__class__, torch.nn.parallel.distributed.DistributedDataParallel
         ):
             self.install_guards(GuardBuilder.TYPE_MATCH)
-            return UnspecializedNNModuleVariable(value)
+            return UnspecializedNNModuleVariable(value, source=self.get_source())
         elif getattr(value, "_is_fsdp_managed_module", False):
             # See note [Dynamo treats FSDP wrapped modules as UnspecializedNNModule]
             # in fully_sharded_data_parallel.py for more information
@@ -1275,7 +1310,9 @@ class VariableBuilder:
         ):
             unimplemented("torch.compile does not support strided NestedTensor")
 
-        if is_sparse_any(value):
+        # Reject sparse, but not coo.
+        # TODO: remove this altogether when non-coo sparsity propagation is ready
+        if is_sparse_any(value) and not value.is_sparse:
             unimplemented(
                 f"torch.compile does not support sparse Tensor with {value.layout} layout"
             )
@@ -1940,7 +1977,6 @@ def wrap_fx_proxy_cls(
         getattr(torch.distributed, "get_world_size", _missing),
         # This always wants to be in the graph, even if the constraint
         # results in a constant int
-        torch._constrain_as_value,
         torch._constrain_as_size,
     ]:
         set_example_value(proxy.node, example_value)
@@ -2284,10 +2320,23 @@ def wrap_to_fake_tensor_and_record(
                 )
 
         tx.output.tracing_context.tensor_to_context[e] = symbolic_context
-        tx.output.input_source_to_sizes_strides[source] = {
-            "size": fake_e.size(),
-            "stride": fake_e.stride(),
-        }
+        if is_sparse_any(fake_e):
+            # TODO: for TensorGuards, this eventually may need more
+            #       fields for the size/stride of any other constituents
+            values = fake_e._values() if fake_e.is_sparse else fake_e.values()
+            tx.output.input_source_to_sizes_strides[source] = {
+                "size": fake_e.size(),
+                # TODO: revise this, but for now this stride instead of ()
+                #       avoids SegFault with PYTORCH_TEST_WITH_DYNAMO=1
+                "stride": (1,) * fake_e.ndim,
+                "values_size": values.size(),
+                "values_stride": values.stride(),
+            }
+        else:
+            tx.output.input_source_to_sizes_strides[source] = {
+                "size": fake_e.size(),
+                "stride": fake_e.stride(),
+            }
 
         if (
             is_tensor

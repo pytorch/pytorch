@@ -62,12 +62,12 @@ class RMSNormPython(torch.nn.Module):
 
 
 class MLPModule(nn.Module):
-    def __init__(self, device):
+    def __init__(self, device, bias: bool = True):
         super().__init__()
         torch.manual_seed(5)
-        self.net1 = nn.Linear(10, 16, device=device)
+        self.net1 = nn.Linear(10, 16, bias=bias, device=device)
         self.relu = nn.ReLU()
-        self.net2 = nn.Linear(16, 10, device=device)
+        self.net2 = nn.Linear(16, 10, bias=bias, device=device)
 
     def forward(self, x):
         return self.net2(self.relu(self.net1(x)))

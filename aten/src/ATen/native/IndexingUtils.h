@@ -78,7 +78,7 @@ inline torch::List<std::optional<Tensor>> toListOfOptionalTensors(ArrayRef<IValu
   torch::List<std::optional<Tensor>> result;
   result.reserve(list.size());
   for (const IValue& a : list) {
-    result.push_back(a.isTensor() ? std::optional<Tensor>(a.toTensor()) : c10::optional<Tensor>());
+    result.push_back(a.isTensor() ? std::optional<Tensor>(a.toTensor()) : std::optional<Tensor>());
   }
   return result;
 }

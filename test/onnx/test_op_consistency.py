@@ -30,10 +30,10 @@ from typing import Optional, Tuple
 import onnx_test_common
 import parameterized
 
-import torch
-
 # For readability, these two are allowed to be imported as function
 from onnx_test_common import skip, xfail
+
+import torch
 from torch.testing._internal import (
     common_device_type,
     common_methods_invocations,
