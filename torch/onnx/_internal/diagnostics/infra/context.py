@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 """A diagnostic context based on SARIF."""
 
 from __future__ import annotations
