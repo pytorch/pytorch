@@ -2214,6 +2214,13 @@ class LocalRankTest(MultiProcessTestCase):
         with self.assertRaisesRegex(RuntimeError, "LOCAL_RANK"):
             dist.get_node_local_rank()
 
+    def testWithoutEnvWithFallback(self):
+        self.assertEqual(dist.get_node_local_rank(fallback_rank=2), 2)
+
+    def testNodeLocalRankOverridesFallback(self):
+        os.environ["LOCAL_RANK"] = str(self.rank)
+        self.assertEqual(dist.get_node_local_rank(fallback_rank=123), self.rank)
+
     def testNodeLocalRank(self):
         os.environ["LOCAL_RANK"] = str(self.rank)
         self.assertEqual(dist.get_node_local_rank(), self.rank)

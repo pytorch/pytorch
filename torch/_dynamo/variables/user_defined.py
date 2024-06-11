@@ -441,6 +441,9 @@ class UserDefinedClassVariable(UserDefinedVariable):
             )
 
             return tensor_variable
+        elif issubclass(self.value, enum.Enum) and len(args) == 1 and not kwargs:
+            options = {"mutable_local": MutableLocal()}
+            return variables.EnumVariable.create(self.value, args[0], options)
 
         return super().call_function(tx, args, kwargs)
 
@@ -815,6 +818,14 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             subobj = inspect.getattr_static(self.value, name)
         return subobj
 
+    def has_key_in_generic_dict(self, tx, key):
+        self._check_for_getattribute()
+        if tx.output.side_effects.has_pending_mutation_of_attr(self, key):
+            mutated_attr = tx.output.side_effects.load_attr(self, key, deleted_ok=True)
+            return not isinstance(mutated_attr, variables.DeletedVariable)
+
+        return key in self.value.__dict__
+
     def var_getattr(self, tx, name):
         from .. import trace_rules
         from . import ConstantVariable
@@ -827,6 +838,10 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         if tx.output.side_effects.has_pending_mutation_of_attr(self, name):
             return tx.output.side_effects.load_attr(self, name)
 
+        if name == "__dict__":
+            options = {"source": source}
+            return variables.GetAttrVariable(self, name, **options)
+
         try:
             subobj = self._getattr_static(name)
         except AttributeError:
@@ -838,9 +853,26 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 new_source = None
                 if self.source:
                     new_source = AttrSource(self.source, "__getattr__")
-                return variables.UserMethodVariable(
+                out = variables.UserMethodVariable(
                     getattr_fn, self, source=new_source
                 ).call_function(tx, [ConstantVariable.create(name)], {})
+
+                if self.source and getattr_fn is torch.nn.Module.__getattr__:
+                    if isinstance(
+                        out,
+                        (
+                            variables.UnspecializedNNModuleVariable,
+                            variables.NNModuleVariable,
+                        ),
+                    ):
+                        # nn_module_stack source is BC surface area. Ensure that
+                        # mod._modules["linear"] is reflected as mod.linear for
+                        # nn_module_stack.
+                        out.set_nn_module_stack_source(
+                            AttrSource(self.get_nn_module_stack_source(), name)
+                        )
+                return out
+
             elif getattr_fn is not None:
                 unimplemented("UserDefined with non-function __getattr__")
 

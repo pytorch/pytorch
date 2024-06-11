@@ -62,9 +62,10 @@ def gen_additional_test_failures_file(tests: List[str]) -> None:
     # (ex doctests).  In these cases, there will be no entry in the pytest
     # cache, so we should generate a separate file for them and upload it to s3
     # along with the pytest cache
-    with open(
-        REPO_ROOT / ".pytest_cache" / TD_HEURISTIC_PREVIOUSLY_FAILED_ADDITIONAL, "w"
-    ) as f:
+    pytest_cache_dir = REPO_ROOT / ".pytest_cache"
+    if not os.path.exists(pytest_cache_dir):
+        os.makedirs(pytest_cache_dir)
+    with open(pytest_cache_dir / TD_HEURISTIC_PREVIOUSLY_FAILED_ADDITIONAL, "w") as f:
         json.dump(tests, f, indent=2)
 
 

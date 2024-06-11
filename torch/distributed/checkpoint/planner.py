@@ -426,3 +426,39 @@ class LoadPlanner:
         The contents of tensor will follow its device synchronization model.
         """
         pass
+
+
+class _Checkpointable:
+    """
+    Interface for checkpointable objects.
+    This is to allow arbitrary objects/tensor subclasses to hook into DCP seamlessly through implementing the interface.
+    """
+
+    @abc.abstractmethod
+    def _create_write_items(self, fqn: str, object: Any) -> List[WriteItem]:
+        """
+        Return a list of WriteItems based on object's contents.
+        """
+        raise NotImplementedError(
+            "_Checkpointable._create_write_items is not implemented"
+        )
+
+    @abc.abstractmethod
+    def _create_chunk_list(self, tensor: torch.Tensor) -> List[ChunkStorageMetadata]:
+        """
+        Return a list of `ChunkStorageMetadata` based on object's contents.
+        """
+        raise NotImplementedError(
+            "_Checkpointable._create_chunk_list is not implemented"
+        )
+
+    @abc.abstractmethod
+    def _get_tensor_shard(
+        self, tensor: torch.Tensor, index: MetadataIndex
+    ) -> torch.Tensor:
+        """
+        Return a 'torch.Tensor' shard based on 'MetadataIndex'.
+        """
+        raise NotImplementedError(
+            "_Checkpointable._get_tensor_shard is not implemented"
+        )

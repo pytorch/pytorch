@@ -1,8 +1,10 @@
+# mypy: allow-untyped-defs
 from collections import defaultdict
 from .node import Node, Argument, Target, map_arg, _type_repr, _get_qualified_name
 import torch.utils._pytree as pytree
 from . import _pytree as fx_pytree
 from ._compatibility import compatibility
+from torch._C import _NodeIter
 
 import os
 import contextlib
@@ -270,20 +272,8 @@ class _node_list:
         return self.graph._len
 
     def __iter__(self):
-        root = self.graph._root
-        if self.direction == "_next":
-            cur = root._next
-            while cur is not root:
-                if not cur._erased:
-                    yield cur
-                cur = cur._next
-        else:
-            assert self.direction == "_prev"
-            cur = root._prev
-            while cur is not root:
-                if not cur._erased:
-                    yield cur
-                cur = cur._prev
+        assert self.direction == "_prev" or self.direction == "_next"
+        yield from _NodeIter(self.graph._root, self.direction == "_prev")
 
     def __reversed__(self):
         return _node_list(self.graph, '_next' if self.direction == '_prev' else '_prev')
@@ -984,8 +974,9 @@ class Graph:
         name = self._graph_namespace.create_name(candidate, None)
         n = Node(self, name, op, target, args, kwargs, type_expr)
 
-        if self.owning_module is not None and getattr(self.owning_module, "_create_node_hook", None) is not None:
-            self.owning_module._create_node_hook(n)
+        if self.owning_module is not None and getattr(self.owning_module, "_create_node_hooks", None) is not None:
+            for f in self.owning_module._create_node_hooks:
+                f(n)
 
         self._graph_namespace.associate_name_with_obj(name, n)
 
@@ -1024,6 +1015,10 @@ class Graph:
         if to_erase._erased:
             warnings.warn(f"erase_node({to_erase}) on an already erased node")
             return
+
+        if self.owning_module is not None and getattr(self.owning_module, "_erase_node_hooks", None) is not None:
+            for f in self.owning_module._erase_node_hooks:
+                f(to_erase)
 
         self._find_nodes_lookup_table.remove(to_erase)
         to_erase._remove_from_list()
@@ -1499,7 +1494,7 @@ class Graph:
             if node.graph is not self:
                 raise RuntimeError(f'Node \'{node}\' does not belong to this Graph!')
             if node not in self._find_nodes_lookup_table:
-                raise RuntimeError(f"Node \'{node}\' is not added to the side table")
+                raise RuntimeError(f"Node '{node}' is not added to the side table")
             map_arg(node.args, lambda arg: check_arg(arg, node))
             map_arg(node.kwargs, lambda arg: check_arg(arg, node))
             seen_values.add(node)
