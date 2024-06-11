@@ -365,23 +365,23 @@ def _canonicalize_bool_expr_impl(expr: SympyBoolean) -> SympyBoolean:
 
     opposite = {sympy.Gt: sympy.Lt, sympy.Ge: sympy.Le}
     if isinstance(expr, tuple(opposite.keys())):
-        lhs = expr.rhs - expr.lhs
+        rhs = expr.lhs - expr.rhs
         t = opposite[type(expr)]
     else:
         assert isinstance(expr, (sympy.Lt, sympy.Le, sympy.Eq, sympy.Ne))
-        lhs = expr.lhs - expr.rhs
+        rhs = expr.rhs - expr.lhs
         t = type(expr)
-    rhs = 0
+    lhs = 0
     if isinstance(lhs, sympy.Add):
-        cts = []
-        variables = []
+        pos = []
+        neg = []
         for term in lhs.args:
-            if term.is_number:
-                cts.append(term)
+            if isinstance(term, sympy.Mul) and term.args[0].is_negative:
+                neg.append(-term)
             else:
-                variables.append(term)
-        lhs = sympy.Add(*variables)
-        rhs = -sympy.Add(*cts)
+                pos.append(term)
+        lhs = sympy.Add(neg)
+        rhs = sympy.Add(pos)
     return t(lhs, rhs)
 
 def is_concrete_bool(a: Union[bool, SymBool]) -> bool:
