@@ -1823,18 +1823,18 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                     )
                     return tuple(out)
 
+                # Backward with forward inputs mutations is not supported in double backward.
+                if torch.is_grad_enabled() and any(
+                    i.joint_mutates_data and not i.mutates_data
+                    for i in CompiledFunction.metadata.input_info
+                ):
+                    raise RuntimeError(
+                        "aot_autograd does not currently support mutations of inputs in backward for create_graph=True"
+                    )
+
                 if torch.is_grad_enabled() and any(
                     t.requires_grad for t in all_args if isinstance(t, torch.Tensor)
                 ):
-                    # Backward with forward inputs mutations is not supported in double backward.
-                    if any(
-                        i.joint_mutates_data and not i.mutates_data
-                        for i in CompiledFunction.metadata.input_info
-                    ):
-                        raise RuntimeError(
-                            "torch.compile with aot_autograd does not currently support mutations in backward in create_graph mode."
-                        )
-
                     # Ensure that the graph is connected, and error if double backward is performed.
                     # See comment for why once_differentiable is not sufficient:
                     # https://github.com/pytorch/pytorch/pull/92348/files#r1072962107

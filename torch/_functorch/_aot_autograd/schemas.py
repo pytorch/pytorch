@@ -106,7 +106,7 @@ class MutationType(Enum):
 
 
 # This class tells us info about user inputs.
-@dataclass(frozen=True)
+@dataclass
 class InputAliasInfo:
     is_leaf: bool
     mutates_data: bool

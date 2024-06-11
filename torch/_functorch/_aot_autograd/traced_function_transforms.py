@@ -40,6 +40,7 @@ from .functional_utils import (
     is_fun,
     sync_functional_tensor,
     to_fun,
+    was_inductor_storage_resized,
 )
 from .logging_utils import setup_stacktrace_preservation_hooks
 from .schemas import (
@@ -414,15 +415,27 @@ def create_functionalized_fn(
             for f_inpt, before, after, inpt_info in zip(
                 f_args[0], primals_before, primals_after, meta.input_info
             ):
+                # Store information about mutations in joint(for backward analysis)
+                inpt_info.joint_mutates_data = has_data_mutation(f_inpt)
+                inpt_info.joint_mutates_storage_metadata = has_metadata_mutation(
+                    f_inpt, before, check_only_storage_mutation=True
+                )
+                inpt_info.joint_mutates_metadata = has_metadata_mutation(
+                    f_inpt, before, check_only_storage_mutation=False
+                )
+                inpt_info.joint_mutation_inductor_storage_resize = (
+                    was_inductor_storage_resized(f_inpt)
+                )
+
                 # Ban metadata mutations on fw inputs during the bw
                 if not inpt_info.mutates_metadata:
-                    assert not has_metadata_mutation(
-                        f_inpt, before, check_only_storage_mutation=False
+                    assert (
+                        not inpt_info.joint_mutates_metadata
                     ), "Found a graph input that had its metadata mutated in the backward. This is not supported"
                 # Allow data mutations on fw inputs during the bw, but only if they do not require grad
                 # So we can guarantee that we can keep the mutations in the graph
                 if (
-                    has_data_mutation(f_inpt)
+                    inpt_info.joint_mutates_data
                     and not inpt_info.mutates_data
                     and not inpt_info.mutates_storage_metadata
                 ):
