@@ -177,7 +177,8 @@ class SubclassCreationMeta:
     # This is needed because we need the autograd metadata on the original subclass
     # (this is guaranteed to be a wrapper subclass that holds a fake tensor,
     #  so holding onto this at runtime shouldn't leak memory)
-    original_subclass: torch.Tensor
+    original_subclass: Optional[torch.Tensor]
+
     # meta and inner_keys are produced by the subclass's __tensor_flatten__.
     # We need to keep them around along with outer_size / outer_stride to plumb them
     # into __tensor_unflatten__.
@@ -186,6 +187,9 @@ class SubclassCreationMeta:
     outer_size: Tuple[int, ...]
     outer_stride: Tuple[int, ...]
 
+    # Used at runtime to determine the subclass type, so we don't need to save the original subclass
+    original_subclass_type: Optional[type] = None
+
     def creation_fn(self, all_args, *, is_runtime: bool):
         curr_args = all_args[
             self.flat_tensor_start_idx : self.flat_tensor_start_idx + self.arg_count
@@ -193,9 +197,16 @@ class SubclassCreationMeta:
         assert len(curr_args) == len(
             self.inner_keys
         ), f"inner_keys: {str(self.inner_keys)}. len(curr_args): {len(curr_args)}"
+
+        if is_runtime:
+            assert self.original_subclass_type is not None
+            original_subclass_type = self.original_subclass_type
+        else:
+            original_subclass_type = type(self.original_subclass)
+
         # NB: Sometimes we have real inner tensors and symbolic metadata.
         # TODO: Resolve this so we always have matching real / symbolic tensors / metadata.
-        out = type(self.original_subclass).__tensor_unflatten__(  # type: ignore[attr-defined]
+        out = original_subclass_type.__tensor_unflatten__(  # type: ignore[attr-defined]
             dict(zip(self.inner_keys, curr_args)),
             self.meta,
             self.outer_size,
@@ -209,6 +220,11 @@ class SubclassCreationMeta:
             torch._mirror_autograd_meta_to(self.original_subclass, out)  # type: ignore[attr-defined]
 
         return out
+
+    def make_runtime_safe(self):
+        assert self.original_subclass is not None
+        self.original_subclass_type = type(self.original_subclass)
+        self.original_subclass = None
 
     def __post_init__(self):
         # sanity assert to make sure we don't leak memory
@@ -278,7 +294,7 @@ class ViewAndMutationMeta:
     #        + (# intermediate bases)
     # At runtime, we don't keep the traced_tangents around since they're not serializable.
     # Instead, we keep any necessary subclass metadata necessary about each traced_tangent.
-    # This list is generated after calling make_cache_safe().
+    # This list is generated after calling make_runtime_safe().
     traced_tangent_metas: Optional[List[Any]] = None
 
     num_symints_saved_for_bw: Optional[int] = None
@@ -440,7 +456,7 @@ class ViewAndMutationMeta:
         # this information.
         self.num_forward = self.num_forward_returns + self.num_outputs_rng_offset
 
-    def make_cache_safe(self):
+    def make_runtime_safe(self):
         """
         There are various fields in ViewAndMutationMeta that aren't serializable. This function is called after all tracing
         is completed to simplify certain fields in the metadata so that they can be safely cached.
@@ -472,6 +488,15 @@ class ViewAndMutationMeta:
             new_out = dataclasses.replace(out, functional_tensor=None)
             new_output_info.append(new_out)
         self.output_info = new_output_info
+        for inp_meta in self.subclass_inp_meta:
+            if isinstance(inp_meta, SubclassCreationMeta):
+                inp_meta.make_runtime_safe()
+        for inp_meta in self.subclass_fw_graph_out_meta:
+            if isinstance(inp_meta, SubclassCreationMeta):
+                inp_meta.make_runtime_safe()
+        for inp_meta in self.subclass_tangent_meta:
+            if isinstance(inp_meta, SubclassCreationMeta):
+                inp_meta.make_runtime_safe()
 
     @property
     def tensors_saved_for_backwards_slice(self):
