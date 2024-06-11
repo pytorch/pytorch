@@ -1,3 +1,4 @@
+#include <c10/util/FbcodeMaps.h>
 #include <torch/csrc/jit/ir/ir.h>
 
 namespace torch::jit {
@@ -8,7 +9,14 @@ TORCH_API void FuseInferenceOpsForSparseNN(
 TORCH_API void EliminateTrivialEquallySplit(
     std::shared_ptr<torch::jit::Graph>& graph);
 
-TORCH_API void FuseListUnpack(std::shared_ptr<torch::jit::Graph>& graph);
+TORCH_API void FuseUnpack(std::shared_ptr<torch::jit::Graph>& graph);
+
+TORCH_API void FuseListUnpack(
+    std::shared_ptr<torch::jit::Graph>& graph,
+    const c10::FastMap<c10::Symbol, c10::Symbol>& unfused_to_fused);
+
+TORCH_API void FuseEquallySplitGetItemUnpack(
+    std::shared_ptr<torch::jit::Graph>& graph);
 
 // If outputs_are_immutable is set to false, don't replace the view ops that
 // produce aliases of graph outputs with the copy version.
