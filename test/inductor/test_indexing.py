@@ -18,7 +18,7 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
 )
-from torch.testing._internal.inductor_utils import HAS_CPU, HAS_GPU, GPU_TYPE
+from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CPU, HAS_GPU
 from torch.utils._sympy.functions import (
     FloorDiv,
     ModularIndexing,
