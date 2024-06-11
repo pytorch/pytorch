@@ -551,6 +551,7 @@ inductor_all_samples = {
     "cummax",
     "cummin",
     "nextafter",
+    "gather",
     "_chunk_cat",
     "constant_pad_nd",
 }

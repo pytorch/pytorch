@@ -1,10 +1,18 @@
+# mypy: allow-untyped-defs
 # Copyright (c) Meta Platforms, Inc. and affiliates
 import logging
 from typing import Any, Dict, List, Optional, Tuple
 
 import torch
+from torch.fx.node import map_aggregate
 from torch.utils._pytree import tree_flatten, tree_unflatten
 
+
+__all__ = [
+    "TensorChunkSpec",
+    "split_args_kwargs_into_chunks",
+    "merge_chunks",
+]
 
 logger = logging.getLogger(__name__)
 
@@ -45,8 +53,11 @@ sum_reducer = _LossReducer(torch.tensor(0.0), lambda a, b: a + b)
 DEFAULT_CHUNK_DIM = 0
 
 
-# Class used to specify chunking of inputs
 class TensorChunkSpec:
+    """
+    Class used to specify chunking of inputs
+    """
+
     def __init__(self, split_dim):
         self.split_dim = split_dim
 
@@ -59,6 +70,43 @@ class TensorChunkSpec:
 
     def __str__(self):
         return f"TensorChunkSpec({self.split_dim})"
+
+    @staticmethod
+    def from_tuple(
+        chunk_dims: Tuple[int, ...],
+    ):
+        """
+        A helper for creating a tuple of `TensorChunkSpec` from a tuple of chunk
+        dimensions (int's).
+        Example:
+            >>> # xdoctest: +SKIP
+            >>> # There are three positional arguments to the model, and
+            >>> # we are chunking them along dimension 0, 0 and 1, respectively
+            >>> args_chunk_spec = TensorChunkSpec.from_tuple((0, 0, 1))
+        """
+        args_chunk_spec = map_aggregate(
+            chunk_dims,
+            lambda dim: TensorChunkSpec(dim),
+        )
+        return args_chunk_spec
+
+    @staticmethod
+    def from_dict(
+        chunk_dims: Dict[str, int],
+    ):
+        """
+        A helper for creating a dictionary of `TensorChunkSpec` from a
+        dictionary of chunk dimensions (int's).
+        Example:
+            >>> # xdoctest: +SKIP
+            >>> # Chunk dimension 0 for the "id" argument, 1 for the "mask" argument
+            >>> kwargs_chunk_spec = TensorChunkSpec.from_dict({"id": 0, "mask": 1})
+        """
+        kwargs_chunk_spec = map_aggregate(
+            chunk_dims,
+            lambda dim: TensorChunkSpec(dim),
+        )
+        return kwargs_chunk_spec
 
 
 # Class used to specify replication of inputs

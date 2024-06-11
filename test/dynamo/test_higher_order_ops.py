@@ -2746,6 +2746,26 @@ class FuncTorchHigherOrderOpTests(torch._dynamo.test_case.TestCase):
         wrapped_gm = backend.graphs[graph_idx]
         return wrapped_gm
 
+    def test_hessian_graph_break(self):
+        counters.clear()
+
+        def wrapper_fn(x):
+            return torch.func.hessian(torch.sin)(x)
+
+        x = torch.randn(4, 3)
+        expected = wrapper_fn(x)
+        got = torch.compile(wrapper_fn, backend="aot_eager", fullgraph=False)(x)
+        self.assertEqual(expected, got)
+        self.assertEqual(len(counters["graph_break"]), 2)
+        self.assertEqual(
+            {
+                "'skip function disable in file _dynamo/decorators.py'": 1,
+                "call torch._dynamo.disable() wrapped function <function jacfwd.<locals>.wrapper_fn at  0xN>": 1,
+            },
+            {munge_exc(k): v for k, v in counters["graph_break"].items()},
+        )
+
+    @unittest.expectedFailure
     def test_hessian(self):
         counters.clear()
 
@@ -2880,6 +2900,7 @@ class GraphModule(torch.nn.Module):
 """,
         )
 
+    @unittest.expectedFailure
     def test_hessian_argnums(self):
         counters.clear()
 
@@ -3032,6 +3053,7 @@ class GraphModule(torch.nn.Module):
                 """        return (unflatten, child_3, child_2, _wrap_for_grad_1, child_4, o)""",
             )
 
+    @unittest.expectedFailure
     def test_hessian_disable_capture(self):
         counters.clear()
 
@@ -3058,6 +3080,26 @@ class GraphModule(torch.nn.Module):
             )
             self.assertEqual(actual, expected)
 
+    def test_jacrev_graph_break(self):
+        counters.clear()
+
+        def wrapper_fn(x):
+            return torch.func.jacrev(torch.sin)(x)
+
+        x = torch.randn(4, 3)
+        expected = wrapper_fn(x)
+        got = torch.compile(wrapper_fn, backend="aot_eager", fullgraph=False)(x)
+        self.assertEqual(expected, got)
+        self.assertEqual(len(counters["graph_break"]), 2)
+        self.assertEqual(
+            {
+                "'skip function disable in file _dynamo/decorators.py'": 1,
+                "call torch._dynamo.disable() wrapped function <function jacrev.<locals>.wrapper_fn at  0xN>": 1,
+            },
+            {munge_exc(k): v for k, v in counters["graph_break"].items()},
+        )
+
+    @unittest.expectedFailure
     def test_jacrev(self):
         counters.clear()
 
@@ -3134,6 +3176,7 @@ class GraphModule(torch.nn.Module):
 """,
         )
 
+    @unittest.expectedFailure
     def test_jacrev_two_tensors_argnums(self):
         counters.clear()
 
@@ -3216,6 +3259,7 @@ class GraphModule(torch.nn.Module):
 """,
         )
 
+    @unittest.expectedFailure
     def test_jacrev_has_aux(self):
         counters.clear()
 
@@ -3300,6 +3344,7 @@ class GraphModule(torch.nn.Module):
 """,
         )
 
+    @unittest.expectedFailure
     def test_jacrev_disable_capture(self):
         counters.clear()
 
@@ -4246,6 +4291,26 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(len(counters["graph_break"]), 0)
         self.assertEqual(actual, expected)
 
+    def test_jacfwd_graph_break(self):
+        counters.clear()
+
+        def wrapper_fn(x):
+            return torch.func.jacfwd(torch.sin)(x)
+
+        x = torch.randn(4, 3)
+        expected = wrapper_fn(x)
+        got = torch.compile(wrapper_fn, backend="aot_eager", fullgraph=False)(x)
+        self.assertEqual(expected, got)
+        self.assertEqual(len(counters["graph_break"]), 2)
+        self.assertEqual(
+            {
+                "'skip function disable in file _dynamo/decorators.py'": 1,
+                "call torch._dynamo.disable() wrapped function <function jacfwd.<locals>.wrapper_fn at  0xN>": 1,
+            },
+            {munge_exc(k): v for k, v in counters["graph_break"].items()},
+        )
+
+    @unittest.expectedFailure
     def test_jacfwd(self):
         counters.clear()
 
@@ -4329,6 +4394,7 @@ class GraphModule(torch.nn.Module):
 """,
         )
 
+    @unittest.expectedFailure
     def test_jacfwd_two_tensors_argnums(self):
         counters.clear()
 
@@ -4418,6 +4484,7 @@ class GraphModule(torch.nn.Module):
 """,
         )
 
+    @unittest.expectedFailure
     def test_jacfwd_has_aux(self):
         counters.clear()
 
@@ -4512,6 +4579,7 @@ class GraphModule(torch.nn.Module):
 """,
         )
 
+    @unittest.expectedFailure
     def test_jacfwd_randomness(self):
         counters.clear()
 
@@ -4615,6 +4683,7 @@ class GraphModule(torch.nn.Module):
 """,
         )
 
+    @unittest.expectedFailure
     def test_jacfwd_disable_capture(self):
         counters.clear()
 

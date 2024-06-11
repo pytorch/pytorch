@@ -80,10 +80,12 @@ import torch.fx
 import torch.utils._pytree as pytree
 from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo.utils import counters
+from torch._inductor.config import trace as trace_config
 from torch._prims_common import is_integer_dtype
 from torch.fx.experimental.proxy_tensor import make_fx, maybe_disable_fake_tensor_mode
 from torch.fx.experimental.symbolic_shapes import guard_size_oblivious
 from torch.fx.immutable_collections import immutable_dict, immutable_list
+from torch.fx.passes.graph_transform_observer import GraphTransformObserver
 
 from .._functorch import config as functorch_config
 from .._functorch.aot_autograd import aot_function, make_boxed_func
@@ -906,6 +908,7 @@ class PatternPrettyPrinter:
         self.memoized_objs_pp: Dict[PatternExpr, str] = {}
 
     @staticmethod
+    @functools.lru_cache(None)
     def run(obj: PatternExpr, output_name: str = "output") -> str:
         """
         Serializes obj to python code with obj written out to `output_name`
@@ -1463,6 +1466,7 @@ def gen_register_replacement(
     extra_check: Callable[[Match], bool] = _return_true,
     scalar_workaround: Union[Dict[str, Union[float, int]], None] = None,
     exclusive_arg_names: Sequence[str] = (),
+    skip_duplicates: bool = False,
 ) -> None:
     # Make sure the example_inputs is materialized.
     example_inputs = tuple(example_inputs)
@@ -1491,6 +1495,8 @@ def gen_register_replacement(
             # Since this is just an optimization we can clear it out.
             arg.constant = None
 
+    if PatternPrettyPrinter.run(pat) in _seen_patterns and skip_duplicates:
+        return
     _known_precompiled_patterns.append(
         (search_fn, example_inputs, trace_fn, scalar_workaround, pat)
     )
@@ -1645,11 +1651,18 @@ class PatternMatcherPass:
     def __getitem__(self, item: Tuple[str, torch.fx.node.Target]) -> List[PatternEntry]:
         return self.patterns[item]
 
-    def apply(self, graph: torch.fx.GraphModule) -> int:
+    def apply(self, gm: torch.fx.GraphModule) -> int:
         if not self.patterns:
             return 0
-        if isinstance(graph, torch.fx.GraphModule):
-            graph = graph.graph
+        if isinstance(gm, torch.fx.GraphModule):
+            graph = gm.graph
+        elif isinstance(gm, torch.fx.Graph):
+            graph = gm
+            gm = graph.owning_module
+        else:
+            raise RuntimeError(
+                f"The input to PatternMatcherPass must be a GraphModule or a Graph, but got {type(gm)}"
+            )
         if self.prevent_match_across_mutations:
             if should_compute_mutation_region_ids(graph):
                 compute_mutation_region_ids(graph)
@@ -1666,36 +1679,40 @@ class PatternMatcherPass:
                 nodes.append(graph.find_nodes(op=op, target=target, sort=False))
         if has_call_module:
             nodes.append(graph.find_nodes(op="call_module", sort=False))
-        for node in sorted(itertools.chain.from_iterable(nodes), reverse=True):
-            target = extract_target(node)
-            if node.op == "call_module":
-                if (node.op, target) not in self.patterns:
+        pass_name = self.pass_name if self.pass_name is not None else "pattern_matcher"
+        with GraphTransformObserver(
+            gm, pass_name, trace_config.log_url_for_graph_xform
+        ):
+            for node in sorted(itertools.chain.from_iterable(nodes), reverse=True):
+                target = extract_target(node)
+                if node.op == "call_module":
+                    if (node.op, target) not in self.patterns:
+                        continue
+
+                # conservatively not applying pattern for cpu input,
+                # since some of the patterns induce codegen and split nodes.
+                # Note: we will only skip cpu compute if disable_cpp_codegen=True
+                if fallback_node_due_to_unsupported_type(node, allow_cpu_inputs=False):
                     continue
 
-            # conservatively not applying pattern for cpu input,
-            # since some of the patterns induce codegen and split nodes.
-            # Note: we will only skip cpu compute if disable_cpp_codegen=True
-            if fallback_node_due_to_unsupported_type(node, allow_cpu_inputs=False):
-                continue
-
-            for entry in self.patterns[(node.op, target)]:
-                if node._erased:
-                    break
-                m = entry.pattern.match(node)
-                # pattern match crosses mutation barrier - discard
-                if (
-                    self.prevent_match_across_mutations
-                    and is_match(m)
-                    and len(set(map(get_mutation_region_id_partial, m.nodes))) != 1  # type: ignore[possibly-undefined]
-                ):
-                    continue
-                if os.environ.get("TORCHINDUCTOR_PATTERN_MATCH_DEBUG") == node.name:
-                    log.warning("%s%s %s %s", node, node.args, m, entry.pattern)
-                if is_match(m) and entry.extra_check(m):
-                    count += 1
-                    entry.apply(m, graph, node)  # type: ignore[arg-type]
-                    counters["inductor"]["pattern_matcher_count"] += 1
-                    counters["inductor"]["pattern_matcher_nodes"] += len(m.nodes)
+                for entry in self.patterns[(node.op, target)]:
+                    if node._erased:
+                        break
+                    m = entry.pattern.match(node)
+                    # pattern match crosses mutation barrier - discard
+                    if (
+                        self.prevent_match_across_mutations
+                        and is_match(m)
+                        and len(set(map(get_mutation_region_id_partial, m.nodes))) != 1  # type: ignore[possibly-undefined]
+                    ):
+                        continue
+                    if os.environ.get("TORCHINDUCTOR_PATTERN_MATCH_DEBUG") == node.name:
+                        log.warning("%s%s %s %s", node, node.args, m, entry.pattern)
+                    if is_match(m) and entry.extra_check(m):
+                        count += 1
+                        entry.apply(m, graph, node)  # type: ignore[arg-type]
+                        counters["inductor"]["pattern_matcher_count"] += 1
+                        counters["inductor"]["pattern_matcher_nodes"] += len(m.nodes)
         return count
 
     def clear(self) -> None:
@@ -1790,6 +1807,11 @@ def fwd_only(
     # TODO - look into using aot autograd, asserting no mutating ops here
     with enable_python_dispatcher():
         gm = make_fx(fn, select_decomp_table(), tracing_mode="real")(*args)
+
+    from .fx_passes.post_grad import remove_noop_ops
+
+    remove_noop_ops(gm.graph)
+
     if run_dce:
         gm.graph.eliminate_dead_code()
     gm.recompile()
@@ -1819,6 +1841,10 @@ def joint_fwd_bwd(fn: Callable[..., Any], args: Sequence[Any]) -> torch.fx.Graph
             enable_log=False,
         )(*args)
     assert gm
+
+    from .fx_passes.post_grad import remove_noop_ops
+
+    remove_noop_ops(gm.graph)
 
     from .fx_passes.joint_graph import pointless_view
 

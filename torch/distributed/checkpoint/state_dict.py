@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import contextlib
 import functools
 import gc
@@ -53,19 +54,12 @@ from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils._pytree import tree_map_only
 
 __all__ = [
-    "FLAT_PARAM",
-    "PG",
-    "PG_PREFIX",
-    "STATE",
-    "STATE_PREFIX",
-    "PARAMS",
     "FQNS_T",
     "PrimitiveType",
     "ValueType",
     "DictValueType",
     "ListDictValueType",
     "OptimizerStateType",
-    "gc_context",
     "StateDictOptions",
     "get_model_state_dict",
     "get_optimizer_state_dict",
@@ -75,17 +69,13 @@ __all__ = [
     "set_state_dict",
 ]
 
-FLAT_PARAM = "_flat_param"
-PG = "param_groups"
-PG_PREFIX = f"{PG}."
-STATE = "state"
-STATE_PREFIX = f"{STATE}."
-PARAMS = "params"
+
+_FLAT_PARAM = "_flat_param"
+_PG = "param_groups"
+_PARAMS = "params"
+_STATE = "state"
+
 FQNS_T = Set[str]
-
-_patched_state_dict: Set[Callable] = set()
-
-
 PrimitiveType = Union[DTensor, ShardedTensor, torch.Tensor, int, float, str]
 ValueType = Union[
     PrimitiveType, List[PrimitiveType], Tuple[PrimitiveType], Dict[str, "ValueType"]
@@ -95,14 +85,16 @@ ListDictValueType = List[DictValueType]
 OptimizerStateType = Dict[str, Union[DictValueType, ListDictValueType]]
 
 
+_patched_state_dict: Set[Callable] = set()
+
+
 @contextlib.contextmanager
-def gc_context():
+def _gc_context():
     is_enabled = gc.isenabled()
     gc.disable()
     try:
         yield
     finally:
-        # TODO: add logging for the gc details/time
         if is_enabled:
             gc.enable()
 
@@ -159,7 +151,6 @@ class _StateDictInfo(StateDictOptions):
     fqn_param_mapping: Dict[
         Union[str, torch.Tensor], Union[FQNS_T, torch.Tensor]
     ] = field(default_factory=dict)
-    all_fqns: Set[str] = field(default_factory=set)
     submodule_prefixes: Set[str] = field(default_factory=set)
     handle_model: bool = True
     handle_optim: bool = True
@@ -204,9 +195,9 @@ def _get_fqns(
             if not skip_ddp_prefix:
                 fqn_obj_names.append(curr_obj_name)
         elif isinstance(curr_obj, FSDP):
-            if i < len(obj_names) - 1 and obj_names[i + 1] == FLAT_PARAM:
+            if i < len(obj_names) - 1 and obj_names[i + 1] == _FLAT_PARAM:
                 prefix = ".".join(fqn_obj_names)
-                flat_param = getattr(curr_obj, FLAT_PARAM)
+                flat_param = getattr(curr_obj, _FLAT_PARAM)
                 if prefix:
                     prefix = f"{prefix}."
                 return {f"{prefix}{fqn}" for fqn in flat_param._fqns}
@@ -293,7 +284,6 @@ def _verify_options(
     fqn_param_mapping: Dict[
         Union[str, torch.Tensor], Union[Set[str], torch.Tensor]
     ] = {}
-    all_fqns = set()
     for name, param in _iterate_valid_model_state(model):
         fqns = _get_fqns(model, name)
         if not isinstance(param, _EXTRA_STATE):
@@ -301,7 +291,6 @@ def _verify_options(
         for fqn in fqns:
             if not isinstance(param, _EXTRA_STATE):
                 fqn_param_mapping[fqn] = param
-            all_fqns.add(fqn)
 
     submodule_prefixes: Set[str] = set()
     if submodules:
@@ -370,7 +359,6 @@ def _verify_options(
     return _StateDictInfo(
         **asdict(options),
         fqn_param_mapping=fqn_param_mapping,
-        all_fqns=all_fqns,
         submodule_prefixes=submodule_prefixes,
         fsdp_context=fsdp_context,
         fsdp_modules=cast(List[nn.Module], fsdp_modules),
@@ -417,9 +405,9 @@ def _verify_state_dict(
             )
 
     for key in model_state_dict.keys():
-        if FLAT_PARAM in key:
+        if _FLAT_PARAM in key:
             raise RuntimeError(
-                f"{key} contains {FLAT_PARAM}. This can happen if the model "
+                f"{key} contains {_FLAT_PARAM}. This can happen if the model "
                 "is not the root module."
             )
 
@@ -571,7 +559,7 @@ def _init_optim_state(optim: torch.optim.Optimizer) -> None:
         return
 
     for param_group in optim.param_groups:
-        for param in param_group[PARAMS]:
+        for param in param_group[_PARAMS]:
             if param.grad is not None:
                 raise RuntimeError(
                     "state_dict can only be used if the optimizer "
@@ -651,16 +639,16 @@ def _flatten_optim_state_dict(state_dict: OptimizerStateType) -> Dict[str, Value
             )
 
     ret: Dict[str, ValueType] = {}
-    for fqn, state in cast(DictValueType, state_dict[STATE]).items():
+    for fqn, state in cast(DictValueType, state_dict[_STATE]).items():
         for k, v in cast(DictValueType, state).items():
             _raise_if_type_not_supported(v)
-            ret[f"{STATE}.{fqn}.{k}"] = v
+            ret[f"{_STATE}.{fqn}.{k}"] = v
 
-    for param_group in cast(ListDictValueType, state_dict[PG]):
-        fqns = param_group.pop(PARAMS)
+    for param_group in cast(ListDictValueType, state_dict[_PG]):
+        fqns = param_group.pop(_PARAMS)
         for fqn in cast(List[str], fqns):
             for k, v in param_group.items():
-                ret[f"{PG}.{fqn}.{k}"] = v
+                ret[f"{_PG}.{fqn}.{k}"] = v
     return ret
 
 
@@ -675,13 +663,13 @@ def _unflatten_optim_state_dict(
     """
     state: DictValueType = {}
     pg_state: ListDictValueType = []
-    return_osd: OptimizerStateType = {STATE: state, PG: pg_state}
+    return_osd: OptimizerStateType = {_STATE: state, _PG: pg_state}
 
     for param_group in optim.param_groups:
-        pg_state.append({PARAMS: []})
-        for param in param_group[PARAMS]:
+        pg_state.append({_PARAMS: []})
+        for param in param_group[_PARAMS]:
             for fqn in info.fqn_param_mapping[param]:
-                params = pg_state[-1][PARAMS]
+                params = pg_state[-1][_PARAMS]
                 assert isinstance(params, list)  # typing
                 params.append(fqn)
                 if not param.requires_grad:
@@ -689,14 +677,14 @@ def _unflatten_optim_state_dict(
                 state[fqn] = {}
                 for state_name in optim.state[param].keys():
                     cast(DictValueType, state[fqn])[state_name] = state_dict[
-                        f"{STATE}.{fqn}.{state_name}"
+                        f"{_STATE}.{fqn}.{state_name}"
                     ]
 
-        first_param_fqn = cast(List[str], pg_state[-1][PARAMS])[0]
+        first_param_fqn = cast(List[str], pg_state[-1][_PARAMS])[0]
         for k in param_group.keys():
-            if k == PARAMS:
+            if k == _PARAMS:
                 continue
-            value = state_dict[f"{PG}.{first_param_fqn}.{k}"]
+            value = state_dict[f"{_PG}.{first_param_fqn}.{k}"]
             if k not in pg_state[-1]:
                 pg_state[-1][k] = value
             elif pg_state[-1][k] != value:
@@ -717,7 +705,7 @@ def _get_optim_state_dict(
     if not info.handle_optim:
         return {}
 
-    optim_state_dict: OptimizerStateType = {STATE: {}, PG: []}
+    optim_state_dict: OptimizerStateType = {_STATE: {}, _PG: []}
     for optim in optimizers:
         _init_optim_state(optim)
         osd = _state_dict_fn(optim, "state_dict")()
@@ -731,14 +719,14 @@ def _get_optim_state_dict(
             # We can only use a string replacment without correctness check.
             if not osd:
                 continue
-            for k in list(osd[STATE].keys()):
+            for k in list(osd[_STATE].keys()):
                 if "_orig_mod" in k:
-                    osd[STATE][k.replace("_orig_mod.", "")] = osd[STATE].pop(k)
-            for g in osd[PG]:
-                params = [k.replace("_orig_mod.", "") for k in g[PARAMS]]
-                g[PARAMS] = params
+                    osd[_STATE][k.replace("_orig_mod.", "")] = osd[_STATE].pop(k)
+            for g in osd[_PG]:
+                params = [k.replace("_orig_mod.", "") for k in g[_PARAMS]]
+                g[_PARAMS] = params
         else:
-            params = list(chain.from_iterable(g[PARAMS] for g in optim.param_groups))
+            params = list(chain.from_iterable(g[_PARAMS] for g in optim.param_groups))
             param_pid_mapping = dict(zip(params, range(len(params))))
             fqn_pid_mapping = {}
             for key, param in model.named_parameters():
@@ -751,18 +739,18 @@ def _get_optim_state_dict(
                 fqn_pid_mapping[fqn] = pid
                 fqn_pid_mapping[pid] = fqn
 
-            for key in list(osd[STATE].keys()):
+            for key in list(osd[_STATE].keys()):
                 fqn = fqn_pid_mapping[key]
-                osd[STATE][fqn] = osd[STATE].pop(key)
+                osd[_STATE][fqn] = osd[_STATE].pop(key)
 
-            for group in osd[PG]:
-                group[PARAMS] = [fqn_pid_mapping[pid] for pid in group[PARAMS]]
+            for group in osd[_PG]:
+                group[_PARAMS] = [fqn_pid_mapping[pid] for pid in group[_PARAMS]]
 
         if not osd:
             continue
 
-        cast(DictValueType, optim_state_dict[STATE]).update(osd[STATE])
-        cast(ListDictValueType, optim_state_dict[PG]).extend(osd[PG])
+        cast(DictValueType, optim_state_dict[_STATE]).update(osd[_STATE])
+        cast(ListDictValueType, optim_state_dict[_PG]).extend(osd[_PG])
 
     if info.flatten_optimizer_state_dict:
         optim_state_dict = cast(
@@ -795,35 +783,37 @@ def _split_optim_state_dict(
 
     state: DictValueType = {}
     pg_state: ListDictValueType = []
-    return_osd: OptimizerStateType = {STATE: state, PG: pg_state}
+    return_osd: OptimizerStateType = {_STATE: state, _PG: pg_state}
     pg_mapping: Dict[int, int] = {}
 
     if all(
-        isinstance(k, int) for k in cast(DictValueType, optim_state_dict[STATE]).keys()
+        isinstance(k, int) for k in cast(DictValueType, optim_state_dict[_STATE]).keys()
     ):
         return optim_state_dict
 
     for param_group in optim.param_groups:
-        pg_state.append({PARAMS: []})
-        for param in param_group[PARAMS]:
+        pg_state.append({_PARAMS: []})
+        for param in param_group[_PARAMS]:
             for fqn in info.fqn_param_mapping[param]:
-                params = pg_state[-1][PARAMS]
+                params = pg_state[-1][_PARAMS]
                 assert isinstance(params, list)
                 params.append(fqn)
                 if param.requires_grad:
-                    state[fqn] = cast(DictValueType, optim_state_dict[STATE])[fqn]
-                for loaded_param_group in cast(ListDictValueType, optim_state_dict[PG]):
-                    params = loaded_param_group[PARAMS]
+                    state[fqn] = cast(DictValueType, optim_state_dict[_STATE])[fqn]
+                for loaded_param_group in cast(
+                    ListDictValueType, optim_state_dict[_PG]
+                ):
+                    params = loaded_param_group[_PARAMS]
                     assert isinstance(params, list)
                     if fqn in params:
-                        pg_mapping[id(loaded_param_group)] = len(return_osd[PG]) - 1
+                        pg_mapping[id(loaded_param_group)] = len(return_osd[_PG]) - 1
 
-    for param_group in cast(ListDictValueType, optim_state_dict[PG]):
+    for param_group in cast(ListDictValueType, optim_state_dict[_PG]):
         idx = pg_mapping.get(id(param_group), -1)
         if idx == -1:
             continue
         for key, value in param_group.items():
-            if key == PARAMS:
+            if key == _PARAMS:
                 continue
             # TODO: check if value is the same if exists.
             pg_state[idx][key] = value
@@ -843,7 +833,7 @@ def _load_optim_state_dict(
     for optim in optimizers:
         _init_optim_state(optim)
         if state_dict:
-            if STATE in state_dict:
+            if _STATE in state_dict:
                 optim_state_dict = _split_optim_state_dict(
                     model, optim, state_dict, info
                 )
@@ -867,13 +857,13 @@ def _load_optim_state_dict(
                 assert len(fqns) == 1
                 fqn = fqns.pop()
                 fqn_with_compiler = fqns_with_compiler.pop()
-                for g in optim_state_dict[PG]:
+                for g in optim_state_dict[_PG]:
                     val = cast(Dict[str, Any], g)
                     params = [
-                        key.replace(fqn, fqn_with_compiler) for key in val[PARAMS]
+                        key.replace(fqn, fqn_with_compiler) for key in val[_PARAMS]
                     ]
-                    val[PARAMS] = params
-                osd_state = cast(DictValueType, optim_state_dict[STATE])
+                    val[_PARAMS] = params
+                osd_state = cast(DictValueType, optim_state_dict[_STATE])
                 for k in list(osd_state.keys()):
                     if fqn in k:
                         osd_state[k.replace(fqn, fqn_with_compiler)] = osd_state.pop(k)
@@ -916,8 +906,8 @@ def _load_optim_state_dict(
             )
 
         # Note that we do not have to convert the FQN back to param id here if
-        # order in optim.param_groups[idx][PARAMS] is the same as the one in
-        # optim_state_dict[PG][idx][PARAMS].
+        # order in optim.param_groups[idx][_PARAMS] is the same as the one in
+        # optim_state_dict[_PG][idx][_PARAMS].
         _state_dict_fn(optim, "load_state_dict")(state_dict=optim_state_dict)
 
 
@@ -945,7 +935,7 @@ def get_model_state_dict(
 
     :rtype: typing.Dict[str, ValueType]
     """
-    with gc_context():
+    with _gc_context():
         info = _verify_options(
             model,
             tuple(),
@@ -985,7 +975,7 @@ def get_optimizer_state_dict(
 
     :rtype: OptimizerStateType
     """
-    with gc_context():
+    with _gc_context():
         optimizers = (
             (optimizers,)
             if isinstance(optimizers, torch.optim.Optimizer)
@@ -1073,7 +1063,7 @@ def get_state_dict(
     :rtype: typing.Tuple[typing.Dict[str, ValueType], OptimizerStateType]
     """
 
-    with gc_context():
+    with _gc_context():
         optimizers = (
             (optimizers,)
             if isinstance(optimizers, torch.optim.Optimizer)
@@ -1157,7 +1147,7 @@ def set_model_state_dict(
     model_state_dict: Dict[str, ValueType] = _unflatten_model_state_dict(
         model, model_state_dict
     )
-    with gc_context():
+    with _gc_context():
         info = _verify_options(model, tuple(), optim_only=False, options=options)
 
         _verify_state_dict(model_state_dict, {}, info)
@@ -1191,7 +1181,7 @@ def set_optimizer_state_dict(
 
     :type optim_state_dict: typing.OptimizerStateType
     """
-    with gc_context():
+    with _gc_context():
         optimizers = (
             (optimizers,)
             if isinstance(optimizers, torch.optim.Optimizer)
@@ -1248,7 +1238,7 @@ def set_state_dict(
     model_state_dict: Dict[str, ValueType] = _unflatten_model_state_dict(
         model, model_state_dict
     )
-    with gc_context():
+    with _gc_context():
         optimizers = (
             (optimizers,)
             if isinstance(optimizers, torch.optim.Optimizer)
