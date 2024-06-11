@@ -1733,7 +1733,6 @@ class TritonKernel(SIMDKernel):
                         helper,
                         getattr(overrides, name)(*args, **kwargs),
                     )
-                    return self.inner(*args, **kwargs)
 
                 return inner
 
