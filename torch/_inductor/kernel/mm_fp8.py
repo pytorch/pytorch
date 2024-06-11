@@ -15,6 +15,7 @@ from ..select_algorithm import (
     autotune_select_algorithm,
     ExternKernelChoice,
     TritonTemplate,
+    realize_inputs,
 )
 from ..utils import use_aten_gemm_kernels, use_triton_template  # use_max_autotune,
 from .mm import _is_static_problem  # TODO(yangsiyu) move to mm_common
@@ -191,6 +192,12 @@ fp8_mm_bias_template = TritonTemplate(
 # how to refer to the blas.cpp namespace?
 aten__fp8_mm = ExternKernelChoice(torch._fp8_mm, "at::_fp8_mm", has_out_variant=False)
 
+# def dummy_python_kernel():
+#     pass
+
+
+# aten__fp8_mm = ExternKernelChoice(dummy_python_kernel, "at::cuda::blas::_fp8_mm_cuda", name="_fp8_mm_cuda", has_out_variant=False)
+
 
 def fp8_mm_options(
     config,
@@ -248,20 +255,19 @@ def tuned_fp8_mm(
     layout=None,
 ):
     add_layout_constraint(aten._fp8_mm.default, constrain_to_fx_strides)
+    m, n, k, layout, mat_a, mat_b = mm_args(
+        mat_a, mat_b, layout=layout, out_dtype=out_dtype
+    )
 
     # low-precision output case  TODO error on non-tensorwise scaling
     if out_dtype is torch.float8_e4m3fn:  # list all fp8 types
-        m, n, k, layout, mat_a, mat_b = mm_args(
-            mat_a, mat_b, layout=layout, out_dtype=out_dtype
-        )
         log.info(f"Siyu DEBUG low-precision case. scale_a dtype {scale_a.dtype}, shape {scale_a.get_size()}")
         return fallback_handler(aten._scaled_mm.default)(mat_a, mat_b, bias, scale_a, scale_b, scale_result, out_dtype=out_dtype, use_fast_accum=use_fast_accum)
 
     # high-precision output case
     log.info("Siyu DEBUG high-precision case")
-    m, n, k, layout, mat_a, mat_b, scale_a, scale_b = mm_args(
-        mat_a, mat_b, scale_a, scale_b, layout=layout, out_dtype=out_dtype
-    )
+    scale_a = realize_inputs(scale_a)
+    scale_b = realize_inputs(scale_b)
     is_scaling = not (scale_a is None and scale_b is None)
     is_scaling_rowwise = is_scaling and len(scale_a.get_size()) != 0
 
