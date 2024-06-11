@@ -65,6 +65,11 @@ class ModuleParamaterShardingTracker(ModuleTracker):
         self.name = ""
 
     def _fw_pre_hook(self, mod, input):
+        """
+        This function is called before the forward pass of a module. It
+        collects the parameters and sharding information of a module and
+        stores it in a dictionary.
+        """
         self.name = super()._get_mod_name(mod)
 
         # contains information about module ordering and depth in the module tree

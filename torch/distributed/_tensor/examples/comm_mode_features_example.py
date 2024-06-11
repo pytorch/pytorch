@@ -1,11 +1,9 @@
 import os
-from typing import Any, Dict
 
 import torch
 
 from torch.distributed._tensor import DeviceMesh, Shard
 from torch.distributed._tensor.debug import CommDebugMode
-from torch.distributed._tensor.debug.comm_mode import ModuleParamaterShardingTracker
 
 from torch.distributed.tensor.parallel import (
     ColwiseParallel,
@@ -15,7 +13,6 @@ from torch.distributed.tensor.parallel import (
 
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     MLPModule,
-    MLPStacked,
     ModelArgs,
     NUM_DEVICES,
     Transformer,
@@ -47,77 +44,7 @@ class DisplayShardingExample:
         self.rank = rank
         self.device_type = get_device_type()
 
-    def same_set_of_keys(self, dict1, dict2):
-        dict1_keys = []
-        dict2_keys = []
-
-        for key in dict1:
-            for nested_key in dict1[key]:
-                dict1_keys.append((key, nested_key))
-
-        for key in dict2:
-            for nested_key in dict2[key]:
-                dict2_keys.append((key, nested_key))
-
-        if len(dict1_keys) != len(dict2_keys):
-            return False
-
-        for i in range(len(dict1_keys)):
-            if dict1_keys[i] != dict2_keys[i]:
-                return False
-
-        return True
-
-    def ground_truth(self, model):
-        module_parameters_dict: Dict[str, Any] = {}
-
-        for name, parameters in model.named_parameters():
-            module_name = model.__class__.__name__ + "." + name.rsplit(".", 1)[0]
-            parameter_name = name.rsplit(".", 1)[1]
-
-            if module_name not in module_parameters_dict:
-                module_parameters_dict[module_name] = {}
-
-            module_parameters_dict[module_name][parameter_name] = parameters.data
-
-        return module_parameters_dict
-
-    def test_display_parameters_MLP(self):
-        """Example of obtaining all module's FQN and parameters for a given model"""
-
-        inp_size = [8, 10]
-
-        rng_seed = 0
-        torch.manual_seed(rng_seed)
-        inp = torch.rand(*inp_size)
-        model = MLPModule(None)
-
-        LR = 0.25
-
-        comm_mode = CommDebugMode()
-        module_tracker = ModuleParamaterShardingTracker()
-
-        with comm_mode, module_tracker:
-            output = model(inp)
-            output.sum().backward()
-
-        print(
-            self.same_set_of_keys(
-                self.ground_truth(model), module_tracker.module_parameters_dict
-            )
-        )
-
-        model2 = MLPStacked(None)
-        with comm_mode, module_tracker:
-            output = model2(inp)
-
-        print(
-            self.same_set_of_keys(
-                self.ground_truth(model2), module_tracker.module_parameters_dict
-            )
-        )
-
-    def test_display_parameters_MLP_distributed(
+    def test_MLP_distributed_sharding_display(
         self, is_seq_parallel=False, recompute_activation=False
     ):
         "Example of obtaining all module's FQN and parameters for a given distributed model and printing the sharding info"
@@ -149,12 +76,6 @@ class DisplayShardingExample:
         with comm_mode:
             output_tp = model(inp)
             output_tp.sum().backward()
-
-        print(
-            self.same_set_of_keys(
-                self.ground_truth(model), comm_mode.get_parameter_info()
-            )
-        )
 
         comm_mode.print_sharding_info()
 
@@ -196,8 +117,6 @@ class DisplayShardingExample:
         # print the module level collective tracing information
         comm_mode.generate_module_tracing_table()
 
-        print(comm_mode.get_comm_module_counts())
-
     def test_transformer_module_tracing(self, is_seq_parallel=False):
         """
         Example code to demonstrate CommModeDebug's module level tracing using a distributed Transformer model.
@@ -232,9 +151,82 @@ def run_example(world_size, rank):
 
     # run the example
     instantiated_test = DisplayShardingExample(world_size, rank)
-    instantiated_test.test_display_parameters_MLP_distributed()
+
+    instantiated_test.test_MLP_distributed_sharding_display()
+    """
+    MLPModule.net1.weight: (Shard(dim=0),)
+    MLPModule.net1.bias: (Shard(dim=0),)
+    MLPModule.net2.weight: (Shard(dim=1),)
+    MLPModule.net2.bias: (Replicate(),)
+    """
+
     instantiated_test.test_MLP_module_tracing()
+    """
+    Global
+    c10d_functional.all_reduce: 1
+    MLPModule
+        c10d_functional.all_reduce: 1
+        MLPModule.net1
+        MLPModule.relu
+        MLPModule.net2
+        c10d_functional.all_reduce: 1
+    """
+
     instantiated_test.test_transformer_module_tracing()
+    """
+    Global
+    c10d_functional.all_reduce: 6
+    c10d_functional.all_gather_into_tensor: 1
+    Transformer
+        c10d_functional.all_reduce: 6
+        c10d_functional.all_gather_into_tensor: 1
+        Transformer.tok_embeddings
+        c10d_functional.all_reduce: 1
+        Transformer.pos_embeddings
+        c10d_functional.all_reduce: 1
+        Transformer.dropout
+        Transformer.layers.0
+        c10d_functional.all_reduce: 2
+        Transformer.layers.0.attention_norm
+        Transformer.layers.0.attention
+            c10d_functional.all_reduce: 1
+            Transformer.layers.0.attention.wq
+            Transformer.layers.0.attention.wk
+            Transformer.layers.0.attention.wv
+            Transformer.layers.0.attention.wo
+            c10d_functional.all_reduce: 1
+            Transformer.layers.0.attention.resid_dropout
+        Transformer.layers.0.ffn_norm
+        Transformer.layers.0.feed_forward
+            c10d_functional.all_reduce: 1
+            Transformer.layers.0.feed_forward.w1
+            Transformer.layers.0.feed_forward.gelu
+            Transformer.layers.0.feed_forward.w2
+            c10d_functional.all_reduce: 1
+            Transformer.layers.0.feed_forward.resid_dropout
+        Transformer.layers.1
+        c10d_functional.all_reduce: 2
+        Transformer.layers.1.attention_norm
+        Transformer.layers.1.attention
+            c10d_functional.all_reduce: 1
+            Transformer.layers.1.attention.wq
+            Transformer.layers.1.attention.wk
+            Transformer.layers.1.attention.wv
+            Transformer.layers.1.attention.wo
+            c10d_functional.all_reduce: 1
+            Transformer.layers.1.attention.resid_dropout
+        Transformer.layers.1.ffn_norm
+        Transformer.layers.1.feed_forward
+            c10d_functional.all_reduce: 1
+            Transformer.layers.1.feed_forward.w1
+            Transformer.layers.1.feed_forward.gelu
+            Transformer.layers.1.feed_forward.w2
+            c10d_functional.all_reduce: 1
+            Transformer.layers.1.feed_forward.resid_dropout
+        Transformer.norm
+        Transformer.output
+        c10d_functional.all_gather_into_tensor: 1
+    """
 
 
 if __name__ == "__main__":
