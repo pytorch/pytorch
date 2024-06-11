@@ -401,19 +401,9 @@ def _is_sm7x_or_older_gpu(index: Optional[int]) -> bool:
     return props.major <= 7
 
 
-def mixed_mm_use_heuristic(choices, mat1, mat2, mat2_dtype, layout, m, n, k, config):
-    b_prologue_cast_type = f"tl.{mat2_dtype}".replace("torch.", "")
-    mm_template.maybe_append_choice(
-        choices,
-        input_nodes=(mat1, mat2),
-        layout=layout,
-        **mm_options(config, m, n, k, layout, b_prologue_cast_type),
-    )
-
-
 def try_heuristic(m, n, k, choices, mat1, mat2, mat2_dtype, layout):
     if mat1.dtype != torch.float16:
-        return
+        return None
 
     # only use heuristic if we are running on an A100
     # torch.cuda.get_device_capability() >= (8, 0) returns true for A10G
@@ -421,44 +411,36 @@ def try_heuristic(m, n, k, choices, mat1, mat2, mat2_dtype, layout):
     if (
         not torch.cuda.get_device_capability() >= (8, 0)
     ) or get_gpu_shared_memory() != 166912:
-        return
+        return None
 
     if m == 1 and (n % 16 != 0 or k % 16 != 0):
-        return
+        return None
 
     if m <= 16 and n >= 4096 and k >= 4096:
-        heuristic_config = triton_config(
+        return triton_config(
             BLOCK_M=16,
             BLOCK_N=64,
             BLOCK_K=128,
             num_stages=5,
             num_warps=4,
         )
-        mixed_mm_use_heuristic(
-            choices, mat1, mat2, mat2_dtype, layout, m, n, k, heuristic_config
-        )
     elif m > 16 and m <= 32 and n >= 4096 and k >= 4096:
-        heuristic_config = triton_config(
+        return triton_config(
             BLOCK_M=32,
             BLOCK_N=32,
             BLOCK_K=128,
             num_stages=5,
             num_warps=4,
         )
-        mixed_mm_use_heuristic(
-            choices, mat1, mat2, mat2_dtype, layout, m, n, k, heuristic_config
-        )
     elif m > 32 and m <= 64 and n >= 4096 and k >= 4096:
-        heuristic_config = triton_config(
+        return triton_config(
             BLOCK_M=64,
             BLOCK_N=32,
             BLOCK_K=128,
             num_stages=5,
             num_warps=4,
         )
-        mixed_mm_use_heuristic(
-            choices, mat1, mat2, mat2_dtype, layout, m, n, k, heuristic_config
-        )
+    return None
 
 
 def tuned_mixed_mm(mat1, mat2, mat2_dtype):
@@ -483,12 +465,19 @@ def tuned_mixed_mm(mat1, mat2, mat2_dtype):
         choices = []
 
     if not skip_triton:
+        b_prologue_cast_type = f"tl.{mat2_dtype}".replace("torch.", "")
         if inductor_config.force_mixed_mm == "heuristic":
             choices = []
-            # if heuristic is triggered, it will add its choice to choices
-            try_heuristic(m, n, k, choices, mat1, mat2, mat2_dtype, layout)
+            config = try_heuristic(m, n, k, choices, mat1, mat2, mat2_dtype, layout)
+            if config is not None:
+                mm_template.maybe_append_choice(
+                    choices,
+                    input_nodes=(mat1, mat2),
+                    layout=layout,
+                    **mm_options(config, m, n, k, layout, b_prologue_cast_type),
+                )
             choices.append(fallback)
-        b_prologue_cast_type = f"tl.{mat2_dtype}".replace("torch.", "")
+
         has_int8_tensor = _is_int8_mat(mat1) or _is_int8_mat(mat2)
         for config in mixed_mm_configs(m, n, k, has_int8_tensor=has_int8_tensor):
             mm_template.maybe_append_choice(
