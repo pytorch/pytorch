@@ -40,22 +40,28 @@ kernel void erfinv_kernel( device {0} *output [[buffer(0)]],
 kernel void exp_kernel( device {0} *output [[buffer(0)]],
                         device {1} *input [[ buffer(1)]],
                         uint index [[thread_position_in_grid]]) {{
-  output[index] = precise::exp(input[index]);
+  output[index] = {0}(precise::exp(input[index]));
 }}
 
 kernel void exp_complex_kernel( device {0}2 *output [[buffer(0)]],
                                 device {0}2 *input [[ buffer(1)]],
                                 uint index [[thread_position_in_grid]]) {{
-  output[index].x = precise::exp(input[index].x)*precise::cos(input[index].y);
-  output[index].y = precise::exp(input[index].x)*precise::sin(input[index].y);
+  output[index].x = {0}(precise::exp(input[index].x)*precise::cos(input[index].y));
+  output[index].y = {0}(precise::exp(input[index].x)*precise::sin(input[index].y));
 }}
 
 kernel void tanh_kernel( device {0} *output [[buffer(0)]],
                         device {1} *input [[ buffer(1)]],
                         uint index [[thread_position_in_grid]]) {{
-  output[index] = precise::tanh(input[index]);
+  output[index] = {0}(precise::tanh(input[index]));
 }}
 
+
+#if __METAL_VERSION__ >= 310
+bfloat dot(bfloat2 a, bfloat2 b) {{
+  return a.x * b.x + a.y * b.y;
+}}
+#endif
 
 template<typename T>
 T complex_div(T a, T b) {{
@@ -67,8 +73,8 @@ kernel void tanh_complex_kernel( device {0}2 *output [[buffer(0)]],
                                  device {0}2 *input [[ buffer(1)]],
                                  uint index [[thread_position_in_grid]]) {{
   //tanh(x+iy)=(tanh(x)+itan(y))/(1+itahnh(x)*tan(y));
-  auto tanh_x = precise::tanh(input[index].x);
-  auto tan_y = precise::tan(input[index].y);
+  auto tanh_x = {0}(precise::tanh(input[index].x));
+  auto tan_y = {0}(precise::tan(input[index].y));
   output[index] = complex_div({0}2(tanh_x, tan_y), {0}2({0}(1), tanh_x * tan_y));
 }}
 )METAL";
