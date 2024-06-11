@@ -3440,7 +3440,7 @@ class ComputedBuffer(Buffer):
             index_vars,
             support_vars,
             index_size,
-            self.get_device().type == "cpu" or not config.loop_ordering_after_fusion,
+            self.get_device().type != "cuda" or not config.loop_ordering_after_fusion,
         )
         reduce_ranges, reduce_reindex, _ = simplify_and_reorder(
             reduce_vars, support_vars, reduce_size

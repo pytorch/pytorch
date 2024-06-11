@@ -1885,7 +1885,12 @@ class Scheduler:
 
     def merge_loops(self) -> None:
         for node in self.nodes:
-            if node.get_device().type == "cpu" or not config.loop_ordering_after_fusion:
+            if not config.loop_ordering_after_fusion:
+                continue
+            if (
+                not isinstance(node, (SchedulerNode, FusedSchedulerNode))
+                or node.get_device().type != "cuda"
+            ):
                 continue
             for snode in node.get_nodes():
                 # merge loops for the scheduler node
