@@ -46,6 +46,7 @@ from .runtime_wrappers import (
     DebugAssertWrapper,
     FakifiedOutWrapper,
     FunctionalizedRngRuntimeWrapper,
+    make_runtime_safe,
     post_compile,
     pre_compile,
     RuntimeWrapper,
@@ -176,6 +177,8 @@ def aot_dispatch_base(
         if fakified_out_wrapper.needs_post_compile:
             fakified_out_wrapper.set_fwd_output_strides(fwd_output_strides)
 
+    make_runtime_safe(fw_metadata, maybe_subclass_meta)
+
     # However, RuntimeWrapper does not expect the rng offsets in the
     # output. So, we have to create another wrapper and take out the offset. As
     # a result, we have to account for not boxed_call compilers as well.
@@ -198,7 +201,6 @@ def aot_dispatch_base(
                 num_fw_outs_saved_for_bw=None,
                 indices_of_inps_to_detach=[],
             )
-            entry.make_cache_safe()
             AOTAutogradCache.save(aot_config.cache_key, entry)
 
     compiled_fw = fakified_out_wrapper.post_compile(
@@ -608,6 +610,8 @@ def aot_dispatch_autograd(
         saved_compile_context,
     )
 
+    make_runtime_safe(fw_metadata, maybe_subclass_meta)
+
     try_save_cache_entry: Optional[Callable] = None
     if config.enable_autograd_cache:
 
@@ -626,7 +630,6 @@ def aot_dispatch_autograd(
                     num_fw_outs_saved_for_bw,
                     _indices_of_inps_to_detach,
                 )
-                entry.make_cache_safe()
                 AOTAutogradCache.save(aot_config.cache_key, entry)
 
         if compiled_bw_func is not None:
