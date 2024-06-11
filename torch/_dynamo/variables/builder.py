@@ -1128,6 +1128,19 @@ class VariableBuilder:
         if mutation_guard.is_dynamic_nn_module(value, self.tx.export):
             # created dynamically, don't specialize on it
             self.install_guards(GuardBuilder.TYPE_MATCH)
+            if (
+                torch._dynamo.config.inline_inbuilt_nn_modules
+                and torch._inductor.config.freezing
+                and not torch.is_grad_enabled()
+            ):
+                from ..decorators import mark_static_address
+
+                for p in value.parameters():
+                    mark_static_address(p)
+
+                for b in value.buffers():
+                    mark_static_address(b)
+
             result = UnspecializedNNModuleVariable(value, source=self.source)
             if not SideEffects.cls_supports_mutation_side_effects(type(value)):
                 # don't allow STORE_ATTR mutation with custom __setattr__
@@ -1137,7 +1150,7 @@ class VariableBuilder:
             value.__class__, torch.nn.parallel.distributed.DistributedDataParallel
         ):
             self.install_guards(GuardBuilder.TYPE_MATCH)
-            return UnspecializedNNModuleVariable(value)
+            return UnspecializedNNModuleVariable(value, source=self.get_source())
         elif getattr(value, "_is_fsdp_managed_module", False):
             # See note [Dynamo treats FSDP wrapped modules as UnspecializedNNModule]
             # in fully_sharded_data_parallel.py for more information
