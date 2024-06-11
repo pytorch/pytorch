@@ -1207,10 +1207,11 @@ class CheckpointPolicy(enum.Enum):
     Enum for specifying the policy for checkpointing during backpropagation.
 
     The following policies are supported:
+
     - ``{MUST,PREFER}_SAVE``: The operation's output will be saved during the forward
-        pass and will not be recomputed during the backward pass
+      pass and will not be recomputed during the backward pass
     - ``{MUST,PREFER}_RECOMPUTE``: The operation's output will not be saved during the
-        forward pass and will be recomputed during the backward pass
+      forward pass and will be recomputed during the backward pass
 
     Use ``MUST_*`` over ``PREFER_*`` to indicate that the policy should not be overridden
     by other subsystems like `torch.compile`.
