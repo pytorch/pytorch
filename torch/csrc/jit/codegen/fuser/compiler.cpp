@@ -281,7 +281,7 @@ std::shared_ptr<FusedKernel> compileKernel(
   }
 
   const bool use_cuda = device.is_cuda();
-  const std::string name = "kernel_" + c10::to_string(next_kernel_id++);
+  const std::string name = "kernel_" + std::to_string(next_kernel_id++);
   std::string code =
       generateKernel(name, *graph, flat_inputs, flat_outputs, use_cuda);
   const FusedKernelConstructor& kernel_ctor =
