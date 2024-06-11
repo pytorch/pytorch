@@ -872,17 +872,13 @@ class TritonKernelOverrides(TritonOverrides):
     @staticmethod
     def masked(mask, body, other):
         handler = V.get_ops_handler()
-        found_non_load = False
-        load_count = 0
+        last_op_is_load = False
 
         class FindLoad:
             def __getattr__(self, name: str) -> Callable[..., CSEVariable]:
                 def inner(*args, **kwargs):
-                    nonlocal found_non_load, load_count
-                    if name != "load":
-                        found_non_load = True
-                    else:
-                        load_count += 1
+                    nonlocal last_op_is_load
+                    last_op_is_load = name == "load"
                     return getattr(handler, name)(*args, **kwargs)
 
                 return inner
@@ -892,7 +888,7 @@ class TritonKernelOverrides(TritonOverrides):
         ):
             result = body()
 
-        if not found_non_load and load_count == 1:
+        if last_op_is_load:
             return result
 
         # Remove once CSEVariables track the dtype
