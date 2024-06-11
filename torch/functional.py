@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 from typing import (
     List, Tuple, Optional, Union, Any, Sequence, TYPE_CHECKING
 )
