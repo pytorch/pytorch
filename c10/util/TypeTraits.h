@@ -148,4 +148,20 @@ struct is_type_condition<
  */
 template <class T>
 struct is_fundamental : std::is_fundamental<T> {};
+
+/**
+ * A type trait to remove all const volatile and reference qualifiers on a
+ * type T
+ */
+template <typename T>
+struct remove_cvref {
+  using type =
+      typename std::remove_cv<typename std::remove_reference<T>::type>::type;
+};
+template <typename T>
+using remove_cvref_t = typename remove_cvref<T>::type;
+
+template <typename T>
+using aligned_storage_for_t =
+    typename std::aligned_storage<sizeof(T), alignof(T)>::type;
 } // namespace c10::guts
