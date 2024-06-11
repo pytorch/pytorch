@@ -1604,6 +1604,15 @@ class Kernel(CodeGen):
     ) -> Tuple[CSEVariable, ...]:
         raise NotImplementedError
 
+    def sort(
+        self,
+        dtypes: Tuple[torch.dtype, ...],
+        values: Tuple[CSEVariable, ...],
+        stable: bool,
+        descending: bool,
+    ) -> Tuple[CSEVariable, ...]:
+        raise NotImplementedError
+
     def var_ranges(self):
         raise NotImplementedError
 
@@ -1842,6 +1851,15 @@ class Kernel(CodeGen):
                 values: Tuple[CSEVariable, ...],
             ) -> Tuple[CSEVariable, ...]:
                 return self.scan(dtypes, combine_fn, values)
+
+            @staticmethod
+            def sort(
+                dtypes: Tuple[torch.dtype, ...],
+                values: Tuple[CSEVariable, ...],
+                stable: bool,
+                descending: bool,
+            ) -> Tuple[CSEVariable, ...]:
+                return self.sort(dtypes, values, stable, descending)
 
             @staticmethod
             def bucketize(

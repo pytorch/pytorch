@@ -425,6 +425,7 @@ inductor_all_samples = {
     "unfold",
     "unsqueeze",
     "sum",
+    "sort",
     "amax",
     "amin",
     "all",

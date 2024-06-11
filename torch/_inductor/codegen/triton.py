@@ -1880,6 +1880,69 @@ class TritonKernel(SIMDKernel):
 
         return tuple(result_vars)
 
+    def sort(
+        self,
+        dtypes: Tuple[torch.dtype, ...],
+        values: Tuple[CSEVariable, ...],
+        stable: bool,
+        descending: bool,
+    ) -> Tuple[CSEVariable, ...]:
+        assert self.inside_reduction
+        masks = {f"{tree.prefix}mask" for tree in self.range_trees}
+        self.filter_masks(masks)
+        masks = sorted(masks)
+        assert not self._load_mask, "ops.sort not supported inside ops.masked"
+        assert (
+            self.persistent_reduction
+        ), "ops.sort is only supported in persistent reductions"
+        reduction_range_prefix = self.range_trees[-1].prefix
+
+        broadcasted_values = []
+
+        cse_compute = functools.partial(self.cse.generate, self.compute)
+        dim = self.triton_tensor_ndim() - 1
+
+        for value, dtype in zip(values, dtypes):
+            acc_type = triton_acc_type(dtype)
+            cond = " & ".join(masks)
+
+            value = self.cse.generate(
+                self.compute,
+                f"tl.broadcast_to({value}, {self.dense_size_str()})",
+            )
+            broadcasted_values.append(value)
+
+        def csv(values):
+            return " ".join(f"{value}," for value in values)
+
+        def cse_multiple(line, n, masks):
+            cache_keys = [f"{line}, {i}, {masks}" for i in range(n)]
+            if all(cache_key in self.cse.cache for cache_key in cache_keys):
+                return [self.cse.cache[cache_key] for cache_key in cache_keys]
+            result_vars = [self.cse.newvar() for _ in range(n)]
+            self.compute.writeline(
+                f"{csv(result_vars)} = {line}",
+            )
+            for result_var, cache_key in zip(result_vars, cache_keys):
+                if masks:
+                    result_var.mask_vars = masks  # type: ignore[attr-defined]
+                self.cse.cache[cache_key] = result_var
+            return tuple(result_vars)
+
+        if len(values) == 2:
+            result_vars = cse_multiple(
+                f"triton_helpers.sort_with_index({broadcasted_values[0]}, {broadcasted_values[1]}, rmask, {dim}, stable={stable}, descending={descending})",
+                len(values),
+                masks,
+            )
+        else:
+            raise AssertionError("Unhandled sort")
+
+        for result_var in result_vars:
+            result_var.mask_vars = masks  # type: ignore[attr-defined]
+
+        return tuple(result_vars)
+
     def codegen_body(self):
         """
         Concat output code from index_code, loads, compute, stores,

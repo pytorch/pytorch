@@ -33,6 +33,8 @@ except ImportError:
         libdevice = tl.math
         math = tl
 
+from triton.language.standard import _log2
+
 
 @triton.jit
 def promote_to_tensor(x):
@@ -384,3 +386,140 @@ def frexp(x):
     exponent = tl.where(x == 0, 0, y)
     mantissa = tl.where(x == 0, 0, libdevice.ldexp(x, -y))
     return mantissa, exponent
+
+
+@triton.jit
+def _compare_and_swap_with_index(
+    x,
+    idxs,
+    valid_mask,
+    flip,
+    i: tl.constexpr,
+    n_dims: tl.constexpr,
+    stable: tl.constexpr,
+    descending: tl.constexpr,
+):
+    n_outer: tl.constexpr = x.numel >> n_dims
+    shape: tl.constexpr = [n_outer * 2**i, 2, 2 ** (n_dims - i - 1)]
+    y = tl.reshape(x, shape)
+    # slice left/right with 'stride' 2**(n_dims - i - 1)
+    right_mask = tl.arange(0, 2)[None, :, None]
+    left_mask = 1 - right_mask
+    left = tl.broadcast_to(tl.sum(y * left_mask, 1)[:, None, :], shape)
+    right = tl.broadcast_to(tl.sum(y * right_mask, 1)[:, None, :], shape)
+    left = tl.reshape(left, x.shape)
+    right = tl.reshape(right, x.shape)
+
+    # idx
+    y_idx = tl.reshape(idxs, shape)
+    left_idx = tl.broadcast_to(tl.sum(y_idx * left_mask, 1)[:, None, :], shape)
+    right_idx = tl.broadcast_to(tl.sum(y_idx * right_mask, 1)[:, None, :], shape)
+    left_idx = tl.reshape(left_idx, x.shape)
+    right_idx = tl.reshape(right_idx, x.shape)
+
+    # valid
+    y_valid_mask = tl.reshape(valid_mask, shape)
+    left_valid_mask = tl.broadcast_to(
+        tl.sum(y_valid_mask * left_mask, 1)[:, None, :], shape
+    ).to(tl.int1)
+    right_valid_mask = tl.broadcast_to(
+        tl.sum(y_valid_mask * right_mask, 1)[:, None, :], shape
+    ).to(tl.int1)
+    left_valid_mask = tl.reshape(left_valid_mask, x.shape)
+    right_valid_mask = tl.reshape(right_valid_mask, x.shape)
+
+    # actual compare-and-swap
+    idtype = tl.core.get_int_dtype(bitwidth=x.dtype.primitive_bitwidth, signed=True)
+    ileft = left.to(idtype, bitcast=True)
+    iright = right.to(idtype, bitcast=True)
+    ix = x.to(idtype, bitcast=True)
+
+    if descending:
+        cond = left < right
+    else:
+        cond = left > right
+
+    if stable:
+        # When stable sorting, tie break by index
+        cond = cond | ((left == right) & (left_idx > right_idx))
+
+    cond = (right_valid_mask > left_valid_mask) | (
+        (right_valid_mask == left_valid_mask) & cond
+    )
+    cond = cond ^ flip
+    ret = ix ^ tl.where(cond, ileft ^ iright, tl.zeros_like(ix))
+    new_idxs = idxs ^ tl.where(cond, left_idx ^ right_idx, tl.zeros_like(idxs))
+    new_valid_mask = valid_mask ^ tl.where(
+        cond, left_valid_mask ^ right_valid_mask, tl.zeros_like(valid_mask)
+    )
+
+    return ret.to(x.dtype, bitcast=True), new_idxs, new_valid_mask
+
+
+@triton.jit
+def _bitonic_merge_with_index(
+    x,
+    idxs,
+    mask,
+    stage: tl.constexpr,
+    alternating: tl.constexpr,
+    n_dims: tl.constexpr,
+    stable: tl.constexpr,
+    descending: tl.constexpr,
+):
+    """
+    order_type 0 == ascending
+    order_type 1 == descending
+    order_type 2 == alternating
+    """
+    n_outer: tl.constexpr = x.numel >> n_dims
+    tl.static_assert(stage <= n_dims)
+    # flip denotes whether to re-arrange sub-sequences of elements in ascending or
+    # descending order.
+    # if flip = 00000000... then all elements will be re-arranged ascendingly at this stage
+    # if flip = 00110011... then all the elements will be re-arranged alternatingly (with
+    # a stride of 2) at this stage
+    if alternating:
+        shape: tl.constexpr = [n_outer * 2 ** (n_dims - 1 - stage), 2, 2**stage]
+        flip = tl.reshape(
+            tl.broadcast_to(tl.arange(0, 2)[None, :, None], shape), x.shape
+        )
+    else:
+        flip = False
+    # perform `stage` rounds of `compare-and-swap`
+    for i in tl.static_range(stage):
+        x, idxs, mask = _compare_and_swap_with_index(
+            x, idxs, mask, flip, i + (n_dims - stage), n_dims, stable, descending
+        )
+    return x, idxs, mask
+
+
+@triton.jit
+def sort_with_index(
+    x,  # value
+    idxs,  # index
+    mask,  # mask if current value is valid (invalid values sort to the end)
+    dim: tl.constexpr = None,
+    stable: tl.constexpr = tl.constexpr(False),
+    descending: tl.constexpr = tl.constexpr(False),
+):
+    # handle default dimension or check that it is the most minor dim
+    _dim: tl.constexpr = len(x.shape) - 1 if dim is None else dim
+    tl.static_assert(
+        _dim == len(x.shape) - 1, "only minor dimension is currently supported"
+    )
+    # iteratively run bitonic merge-sort steps
+    n_dims: tl.constexpr = _log2(x.shape[_dim])
+
+    for i in tl.static_range(1, n_dims + 1):
+        x, idxs, mask = _bitonic_merge_with_index(
+            x,
+            idxs,
+            mask,
+            i,
+            alternating=i < n_dims,
+            n_dims=n_dims,
+            stable=stable,
+            descending=descending,
+        )
+    return x, idxs

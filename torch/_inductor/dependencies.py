@@ -608,6 +608,9 @@ class FreeUnbackedSymbolsOpsHandler:
     def scan(self, dtypes, combine_fn, values):
         return (None,) * len(values)
 
+    def sort(self, dtypes, values, stable, descending):
+        return (None,) * len(values)
+
     def reduction(
         self,
         dtype: torch.dtype,

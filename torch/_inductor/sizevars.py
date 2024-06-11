@@ -273,7 +273,7 @@ class SizeVarAllocator:
 
     # See Note - [On Statically Known]
 
-    def is_expr_static_and_true(self, expr: Union[Expr, int]) -> bool:
+    def is_expr_static_and_true(self, expr: Union[sympy.Basic, bool]) -> bool:
         if expr in (True, False):
             return bool(expr)
 
