@@ -598,7 +598,7 @@ Tensor to_mkldnn_backward(const Tensor& grad, const Tensor& input_) {
   return grad.to_dense(input_.scalar_type());
 }
 
-Tensor to_dense(const Tensor& tensor, std::optional<c10::ScalarType> dtype, c10::optional<bool> masked_grad) {
+Tensor to_dense(const Tensor& tensor, std::optional<c10::ScalarType> dtype, std::optional<bool> masked_grad) {
   if (tensor.layout() == c10::kSparse) {
     return tensor._to_dense(dtype, masked_grad);
   }
@@ -621,7 +621,7 @@ Tensor to_dense(const Tensor& tensor, std::optional<c10::ScalarType> dtype, c10:
   return tensor;
 }
 
-Tensor sparse_to_dense(const Tensor& self, std::optional<ScalarType> dtype, c10::optional<bool> masked) {
+Tensor sparse_to_dense(const Tensor& self, std::optional<ScalarType> dtype, std::optional<bool> masked) {
   TORCH_CHECK(
       !dtype.has_value(), "dtype argument is not supported by sparse_to_dense");
   Tensor dst = at::zeros(self.sizes(), self.options().layout(kStrided));
@@ -954,7 +954,7 @@ void _to_sparse_check_arguments(const std::string& funcname, const Tensor& self,
 }
 
 static inline
-void _to_sparse_check_arguments(const std::string& funcname, const Tensor& self, std::optional<c10::Layout> layout, OptionalIntArrayRef blocksize, c10::optional<int64_t> dense_dim_opt) {
+void _to_sparse_check_arguments(const std::string& funcname, const Tensor& self, std::optional<c10::Layout> layout, OptionalIntArrayRef blocksize, std::optional<int64_t> dense_dim_opt) {
   auto layout_from = self.layout();
   auto layout_to = layout.value_or(kSparse);
 
@@ -1109,7 +1109,7 @@ static Tensor dense_to_sparse_compressed(const Tensor& self, const Tensor& self_
         self.options().layout(target_layout));
 }
 
-Tensor dense_to_sparse_with_mask(const Tensor& self, const Tensor& mask, std::optional<c10::Layout> layout, OptionalIntArrayRef blocksize, c10::optional<int64_t> dense_dim_opt) {
+Tensor dense_to_sparse_with_mask(const Tensor& self, const Tensor& mask, std::optional<c10::Layout> layout, OptionalIntArrayRef blocksize, std::optional<int64_t> dense_dim_opt) {
   auto layout_to = layout.value_or(kSparse);
   TORCH_INTERNAL_ASSERT(self.layout() != layout_to, "dense_to_sparse: unexpected same input and output layout");
   TORCH_INTERNAL_ASSERT(self.layout() == mask.layout(),
@@ -1165,7 +1165,7 @@ Tensor dense_to_sparse_bsc(const Tensor& self, IntArrayRef blocksize, std::optio
   return dense_to_sparse_compressed<Layout::SparseBsc>(self, self != 0, blocksize, dense_dim_opt);
 }
 
-Tensor dense_to_sparse(const Tensor& self, std::optional<c10::Layout> layout, OptionalIntArrayRef blocksize, c10::optional<int64_t> dense_dim_opt) {
+Tensor dense_to_sparse(const Tensor& self, std::optional<c10::Layout> layout, OptionalIntArrayRef blocksize, std::optional<int64_t> dense_dim_opt) {
   auto layout_to = layout.value_or(kSparse);
   TORCH_INTERNAL_ASSERT(self.layout() != layout_to, "dense_to_sparse: unexpected same input and output layout");
   _to_sparse_check_arguments("dense_to_sparse", self, layout, blocksize, dense_dim_opt);
@@ -1909,7 +1909,7 @@ Tensor sparse_compressed_to_sparse(const Tensor& self, const int64_t sparse_dim)
   return at::native::_sparse_coo_tensor_unsafe(indices, values, self.sizes())._coalesced_(coalesced);
 }
 
-Tensor sparse_compressed_to_sparse(const Tensor& self, std::optional<c10::Layout> layout, OptionalIntArrayRef blocksize, c10::optional<int64_t> dense_dim_opt) {
+Tensor sparse_compressed_to_sparse(const Tensor& self, std::optional<c10::Layout> layout, OptionalIntArrayRef blocksize, std::optional<int64_t> dense_dim_opt) {
   auto layout_to = layout.value_or(kSparse);
   TORCH_INTERNAL_ASSERT(self.layout() != layout_to, "sparse_compressed_to_sparse: unexpected same input and output layout");
   _to_sparse_check_arguments("sparse_compressed_to_sparse", self, layout_to, blocksize, dense_dim_opt);
@@ -1936,7 +1936,7 @@ Tensor sparse_compressed_to_sparse(const Tensor& self, std::optional<c10::Layout
   return Tensor{};
 }
 
-Tensor sparse_coo_to_sparse(const Tensor& self, std::optional<c10::Layout> layout, OptionalIntArrayRef blocksize, c10::optional<int64_t> dense_dim_opt) {
+Tensor sparse_coo_to_sparse(const Tensor& self, std::optional<c10::Layout> layout, OptionalIntArrayRef blocksize, std::optional<int64_t> dense_dim_opt) {
   auto layout_to = layout.value_or(kSparse);
   TORCH_INTERNAL_ASSERT(self.layout() != layout_to, "sparse_coo_to_sparse: unexpected same input and output layout");
   _to_sparse_check_arguments("sparse_coo_to_sparse", self, layout_to, blocksize, dense_dim_opt);
@@ -1969,7 +1969,7 @@ Tensor to_sparse(const Tensor& self, const int64_t sparse_dim) {
   return self._to_sparse(sparse_dim);
 }
 
-Tensor to_sparse(const Tensor& self, std::optional<c10::Layout> layout, OptionalIntArrayRef blocksize, c10::optional<int64_t> dense_dim_opt) {
+Tensor to_sparse(const Tensor& self, std::optional<c10::Layout> layout, OptionalIntArrayRef blocksize, std::optional<int64_t> dense_dim_opt) {
   auto layout_to = layout.value_or(kSparse);
   if (self.layout() == layout_to) {
     _to_sparse_check_arguments("to_sparse", self, layout, blocksize, dense_dim_opt);
@@ -2026,7 +2026,7 @@ Tensor to_meta(const Tensor& tensor) {
   }
   return out;
 }
-std::optional<Tensor> to_meta(const c10::optional<Tensor>& tensor) {
+std::optional<Tensor> to_meta(const std::optional<Tensor>& tensor) {
   if (tensor.has_value()) {
     return to_meta(*tensor);
   }

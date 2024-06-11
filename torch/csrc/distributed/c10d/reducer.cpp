@@ -2366,10 +2366,18 @@ void Reducer::reset_state() {
   // Ensure forward can run despite previous backward not succeeding.
   expect_autograd_hooks_ = false;
   require_finalize_ = false;
+  first_autograd_hook_called_ = false;
 
   // Unset allreduce division factor, as it may change in next backwards pass
   // when running with DDP join mode.
   div_factor_ = kUnsetDivFactor;
+
+  // Reset unused parameter accounting.
+  // See Note [local_used_map_ -> local_used_map_dev copying]
+  if (find_unused_parameters_) {
+    local_used_map_.zero_();
+    local_used_map_reduced_ = false;
+  }
 }
 
 } // namespace c10d

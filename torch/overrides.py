@@ -357,6 +357,7 @@ def get_ignored_functions() -> Set[Callable]:
         Tensor._is_any_true,
         Tensor._addmm_activation,
         Tensor.to_padded_tensor,
+        Tensor._use_count,
     }
 
 

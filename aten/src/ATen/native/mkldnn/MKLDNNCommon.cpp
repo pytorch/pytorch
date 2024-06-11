@@ -1,6 +1,7 @@
 #include <ATen/native/mkldnn/MKLDNNCommon.h>
 #include <ATen/OpaqueTensorImpl.h>
 #include <c10/core/Allocator.h>
+#include <torch/library.h>
 
 #if AT_MKLDNN_ENABLED()
 
@@ -61,7 +62,34 @@ ideep::tensor::data_type get_mkldnn_dtype(ScalarType type) {
   }
 }
 
-Tensor new_with_itensor_mkldnn(ideep::tensor&& it, std::optional<ScalarType> dtype, c10::optional<Device> device) {
+int64_t data_ptr_from_mkldnn(const Tensor& mkldnn_tensor) {
+  MKLDNNTensorImpl *mklimpl = static_cast<MKLDNNTensorImpl *>(mkldnn_tensor.unsafeGetTensorImpl());
+  void* data_ptr = mklimpl->unsafe_opaque_handle()->get_target().get_data_handle();
+  return reinterpret_cast<int64_t>(data_ptr);
+}
+
+at::Tensor mkldnn_tensor_from_data_ptr(
+    void* data_ptr,
+    at::IntArrayRef dims,
+    at::ScalarType dtype,
+    at::Device device,
+    const uint8_t* opaque_metadata,
+    int64_t opaque_metadata_size) {
+  std::vector<uint8_t> vector_serialized_md{
+      opaque_metadata, opaque_metadata + opaque_metadata_size};
+  ideep::tensor::desc deserialized_ideep_desc;
+#if IDEEP_PREREQ(3, 4, 1, 2)
+  // groups is needed for grouped conv
+  deserialized_ideep_desc = ideep::tensor::desc(vector_serialized_md);
+#else
+  TORCH_CHECK(false, "Unexpected IDeep version to do weight deserialization.");
+#endif
+
+  auto a = ideep::tensor(deserialized_ideep_desc, data_ptr);
+  return at::native::new_with_itensor_mkldnn(std::move(a), dtype, device);
+}
+
+Tensor new_with_itensor_mkldnn(ideep::tensor&& it, std::optional<ScalarType> dtype, std::optional<Device> device) {
   // NOTE: int32_t dims from ideep::tensor but sizes needs int64_t
   // TODO: support int64_t dims in ideep::tensor to avoid extra conversion
   auto dims = it.get_dims();
@@ -79,6 +107,11 @@ ideep::tensor& itensor_from_mkldnn(const MKLDNNTensor& mkldnn_tensor) {
              "itensor_from_mkldnn expects MKL-DNN tensor input");
   MKLDNNTensorImpl *mklimpl = static_cast<MKLDNNTensorImpl *>(mkldnn_tensor.unsafeGetTensorImpl());
   return mklimpl->unsafe_opaque_handle()->get_target();
+}
+
+int64_t nbytes_from_mkldnn(const Tensor& mkldnn_tensor) {
+  ideep::tensor t = itensor_from_mkldnn(mkldnn_tensor);
+  return t.get_desc().get_size();
 }
 
 ideep::tensor itensor_view_from_dense(const Tensor& tensor, bool from_const_data_ptr) {
@@ -165,6 +198,15 @@ ideep::tensor itensor_from_tensor(const Tensor& tensor, bool from_const_data_ptr
 
 int set_verbose(int level) {
     return ideep::utils::set_verbose(level);
+}
+
+TORCH_LIBRARY_IMPL(mkldnn, MkldnnCPU, m) {
+  m.impl(
+      TORCH_SELECTIVE_NAME("mkldnn::data_ptr"),
+      TORCH_FN(data_ptr_from_mkldnn));
+  m.impl(
+      TORCH_SELECTIVE_NAME("mkldnn::_nbytes"),
+      TORCH_FN(nbytes_from_mkldnn));
 }
 
 }}
