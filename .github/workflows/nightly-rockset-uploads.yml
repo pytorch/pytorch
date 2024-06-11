@@ -1,0 +1,53 @@
+name: Nightly Upload to rockset
+
+on:
+  schedule:
+    # Choose a random time near midnight PST because it may be delayed if there are high loads
+    - cron:  37 7 * * *
+  pull_request:
+    paths:
+      - 'tools/stats/upload_external_contrib_stats.py'
+      - 'tools/stats/upload_test_stat_aggregates.py'
+      - '.github/workflows/nightly-rockset-uploads.yml'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
+  cancel-in-progress: true
+
+jobs:
+
+  upload-stats-to-rockset:
+    runs-on: ubuntu-22.04
+    environment: upload-stats
+    steps:
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
+        with:
+          fetch-depth: 1
+          submodules: false
+
+      - uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+          cache: pip
+
+      - run: |
+          pip3 install requests==2.32.2 rockset==1.0.3 boto3==1.19.12
+
+      - name: Upload external contribution stats
+        uses: nick-fields/retry@v2.8.2
+        env:
+          ROCKSET_API_KEY: ${{ secrets.ROCKSET_API_KEY }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        if: ${{ env.ROCKSET_API_KEY != '' }}
+        with:
+          timeout_minutes: 10
+          max_attempts: 10
+          retry_wait_seconds: 90
+          command: |
+            echo "Uploading external contribution stats for 10 days starting on" "$(date -d '10 days ago' '+%Y-%m-%d')"
+            python3 -m tools.stats.upload_external_contrib_stats --startDate "$(date -d '10 days ago' '+%Y-%m-%d')" --length 10
+            echo "Uploading testing aggregate data" "$(date -d yesterday '+%Y-%m-%d')"
+            python3 -m tools.stats.upload_test_stat_aggregates --date "$(date -d yesterday '+%Y-%m-%d')"
