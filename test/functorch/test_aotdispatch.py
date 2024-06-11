@@ -6004,7 +6004,7 @@ class MockFXGraphCache:
             gm._fx_graph_cache_key = key
             return gm
 
-    def _lookup_graph(self, key, inputs, _local, _remote):
+    def _lookup_graph(self, key, inputs, local, remote_cache):
         gm = self.cache.get(key)
         if gm is not None:
             gm = make_boxed_func(gm)
