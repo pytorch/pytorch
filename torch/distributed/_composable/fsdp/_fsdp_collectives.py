@@ -102,7 +102,13 @@ def split_with_sizes_copy(
     )
 
 
-@torch.library.custom_op("fsdp::chunk_cat", mutates_args=("out",))
+lib.define(
+    "chunk_cat(Tensor[] tensors, int dim, int num_chunks, *, Tensor(a!) out) -> ()"
+)
+
+
+@torch.library.impl(lib, "chunk_cat", "Meta")
+@torch.library.impl(lib, "chunk_cat", "CUDA")
 def chunk_cat(
     tensors: List[torch.Tensor],
     dim: int,
