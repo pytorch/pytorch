@@ -5551,15 +5551,20 @@ class FallbackKernel(ExternKernelAlloc):
             # Aten Fallback Ops
             assert isinstance(kernel, torch._ops.OpOverload)
             if V.graph.cpp_wrapper:
+                from torchgen.aoti.fallback_ops import inductor_fallback_ops
+
                 if (
                     config.is_fbcode()
                     and kernel not in has_c_shim
                     # C shim v2 is torchgen-ed, which should cover all aten ops.
                     # If you do hit a missed op, please update gen_aoti_c_shim.py.
                     and config.c_shim_version == "1"
+                ) or (
+                    str(kernel) not in inductor_fallback_ops
+                    and config.c_shim_version == "2"
                 ):
                     log.warning(
-                        "%s is missing a c-shim implementation, using proxy executor as fallback",
+                        "%s is missing a c-shim implementation, using runtime executor as fallback",
                         kernel,
                     )
                     self.use_runtime_dispatch = True
