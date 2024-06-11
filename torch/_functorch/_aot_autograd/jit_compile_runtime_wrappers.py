@@ -202,6 +202,7 @@ def aot_dispatch_base(
                 num_fw_outs_saved_for_bw=None,
                 indices_of_inps_to_detach=[],
             )
+            entry.make_cache_safe()
             AOTAutogradCache.save(aot_config.cache_key, entry)
 
     compiled_fw = fakified_out_wrapper.post_compile(
@@ -610,10 +611,6 @@ def aot_dispatch_autograd(
         saved_context,
         saved_compile_context,
     )
-    # Convert metadata fields to be cache safe now that we're done tracing.
-    fw_metadata.make_cache_safe()
-    if maybe_subclass_meta is not None:
-        maybe_subclass_meta.fw_metadata.make_cache_safe()
 
     try_save_cache_entry: Optional[Callable] = None
     if config.enable_autograd_cache:
@@ -633,6 +630,7 @@ def aot_dispatch_autograd(
                     num_fw_outs_saved_for_bw,
                     _indices_of_inps_to_detach,
                 )
+                entry.make_cache_safe()
                 AOTAutogradCache.save(aot_config.cache_key, entry)
 
         if compiled_bw_func is not None:
