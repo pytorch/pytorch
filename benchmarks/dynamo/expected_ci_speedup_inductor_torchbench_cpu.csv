@@ -4,12 +4,11 @@ phlippe_densenet,float32,static,default,1.3988316
 basic_gnn_gcn,float32,dynamic,default,1.074576405
 llama_v2_7b_16h,float32,dynamic,default,1.211740245
 resnet50,float32,dynamic,default,1.65984261
-timm_efficientnet,float32,static,cpp,2.271561735
+#timm_efficientnet,float32,static,cpp,2.1938112
 mobilenet_v3_large,float32,static,cpp,2.63375628
 timm_resnest,float32,dynamic,cpp,1.67998548
 pyhpc_turbulent_kinetic_energy,float32,dynamic,cpp,1.59968463
-#hf_GPT2,float32,dynamic,cpp,
-hf_GPT2,float32,dynamic,cpp,1.379885175
+#hf_GPT2,float32,dynamic,cpp,1.292704418
 resnext50_32x4d,amp,static,default,1.461687045
 vgg16,amp,static,default,1.267194285
 hf_Longformer,amp,dynamic,default,0.997006035
@@ -17,6 +16,6 @@ hf_Bert_large,amp,dynamic,default,0.99391146
 llama,amp,static,default,1.32950568
 timm_regnet,amp,static,cpp,1.157188305
 lennard_jones,amp,static,cpp,2.240104485
-hf_T5_generate,amp,dynamic,cpp,1.447656135
+#hf_T5_generate,amp,dynamic,cpp,1.29339502
 timm_vovnet,amp,dynamic,cpp,1.07856471
 mobilenet_v2,amp,dynamic,cpp,2.27774577
