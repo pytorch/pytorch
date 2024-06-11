@@ -271,7 +271,7 @@ class MiscTests(torch._inductor.test_case.TestCase):
 
         torch._dynamo.reset()
 
-        # Test that the warning only happens once
+        # Test that each warning only happens once
         @torch.compile(backend="eager")
         def f(x):
             module2.baz(x)
@@ -284,6 +284,7 @@ class MiscTests(torch._inductor.test_case.TestCase):
 
         with warnings.catch_warnings(record=True) as ws:
             warnings.simplefilter("always")
+            f(x)
             f(x)
         self.assertEqual(len(ws), 2)
 
