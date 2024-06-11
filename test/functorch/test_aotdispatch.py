@@ -733,7 +733,45 @@ def forward(self, primals_1):
         self.assertTrue(isinstance(aaaa.grad.a, TwoTensor))
         self.assertTrue(isinstance(aaaa.grad.b, TwoTensor))
 
-    def test_nested_subclasses_harder(self):
+    def test_nested_subclasses_non_nested_grad(self):
+        @torch.compile(backend="aot_eager")
+        def f(x):
+            return x.sin().cos()
+
+        a = torch.ones(4, requires_grad=True)
+        a2 = a.clone().detach().requires_grad_()
+        a3 = a.clone().detach().requires_grad_()
+        a4 = a.clone().detach().requires_grad_()
+        new_aa = TwoTensor(a3, a4)
+        aa = TwoTensor(a, a2)
+
+        aa2 = aa.clone().detach().requires_grad_()
+        aaaa = TwoTensor(aa, aa2)
+        out = f(new_aa)
+        new_out = out + aaaa
+        new_out.sum().backward()
+
+    def test_custom_tensor_metadata(self):
+        @torch.compile
+        def f(x):
+            x_elem = x.elem
+            x_elem_elem = x_elem.elem
+            x_elem_metadata = x_elem.constant_attribute
+            return x * x_elem * x_elem_elem * x_elem_metadata
+
+        a = torch.ones(4, requires_grad=True)
+        custom_a = CustomTensor(a)
+        custom_a.constant_attribute = 6
+        custom_aa = CustomTensor(custom_a)
+        custom_aa.constant_attribute = 4
+        out = f(custom_aa)
+        
+        out.sum().backward()
+
+        self.assertTrue(isinstance(custom_aa.grad, CustomTensor))
+        self.assertTrue(isinstance(custom_aa.grad.elem, CustomTensor))
+
+    def test_nested_subclasses_custom_meta(self):
         @torch.compile(backend="aot_eager")
         def f(x, y):
             x.add_constant(4)
@@ -751,6 +789,39 @@ def forward(self, primals_1):
         # compiled_f = torch.compile(f, backend="aot_eager")
         # compiled_out = compiled_f(aaaa, plain_a, aaaa2)
         # self.assertTrue((compiled_out - out).sum().item() == 0)
+
+    def test_nested_subclasses_complicated_inps(self):
+        @torch.compile(backend="aot_eager")
+        def f(x, y, z):
+            temp = x + y 
+            temp_plain = x.a + y.b 
+            res = temp.sum() + temp_plain.sum()
+            return x.sin().cos() + res
+
+        x = torch.ones(4, requires_grad=True)
+        x2 = x.clone().detach().requires_grad_()
+        xx = TwoTensor(x, x2)
+        xx2 = xx.clone().detach().requires_grad_()
+        x_nested = TwoTensor(xx, xx2)
+        y_nested = x_nested.clone().detach().requires_grad_()
+        z = x.clone().detach().requires_grad_()
+        out = f(x_nested, y_nested, z)
+        self.assertTrue(isinstance(out, TwoTensor))
+        self.assertTrue(isinstance(out.a, TwoTensor))
+        self.assertTrue(isinstance(out.b, TwoTensor))
+        self.assertTrue(isinstance(out.a.a, torch.Tensor))
+        self.assertTrue(isinstance(out.a.b, torch.Tensor))
+        self.assertTrue(isinstance(out.b.a, torch.Tensor))
+        self.assertTrue(isinstance(out.b.b, torch.Tensor))
+
+        out.sum().backward()
+        self.assertTrue(isinstance(x_nested.grad, TwoTensor))
+        self.assertTrue(isinstance(x_nested.grad.a, TwoTensor))
+        self.assertTrue(isinstance(x_nested.grad.b, TwoTensor))
+
+        self.assertTrue(isinstance(y_nested.grad, TwoTensor))
+        self.assertTrue(isinstance(y_nested.grad.a, TwoTensor))
+        self.assertTrue(isinstance(y_nested.grad.b, TwoTensor))
 
     def test_outputs_are_aliased(self):
         # Tensor, None, int
