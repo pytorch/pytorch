@@ -4774,14 +4774,9 @@ class MutationOutput(ExternKernel):
 
     def __init__(self, layout, mutated_node, node_doing_mutating):
         # NB: Do not directly construct this - use `mark_node_as_mutating`
-        super().__init__(None, layout, [mutated_node], ())
+        super().__init__(None, layout, [mutated_node, node_doing_mutating], ())
         self.node_doing_mutating = node_doing_mutating
         self.name = V.graph.register_buffer(self)
-
-    def get_read_writes(self):
-        read_writes = super().get_read_writes()
-        read_writes.reads.add(dependencies.WeakDep(self.node_doing_mutating.get_name()))
-        return read_writes
 
     def should_allocate(self):
         return False
@@ -7196,7 +7191,6 @@ class QLinearPointwiseBinaryPT2E(ExternKernelAlloc):
         constant_args=(),
         has_bias=True,
         x_scale_zp_are_tensors=False,
-        has_mutation=False,
     ):
         """
         if bias is not None
@@ -7209,9 +7203,7 @@ class QLinearPointwiseBinaryPT2E(ExternKernelAlloc):
               fp32_output, binary_attr, aplha, unary_attr, unary_scalars, unary_algorithm]
         """
         self.has_bias = has_bias
-        self.idx_for_inplace_sum = -1
         self.x_scale_zp_are_tensors = x_scale_zp_are_tensors
-        self.has_mutation = has_mutation
         super().__init__(
             layout,
             inputs,
@@ -7328,16 +7320,6 @@ class QLinearPointwiseBinaryPT2E(ExternKernelAlloc):
         if isinstance(self.layout, Layout):
             self.codegen_size_asserts(wrapper)
 
-    def get_mutation_names(self):
-        return (
-            [self.inputs[self.idx_for_inplace_sum].get_name()]
-            if self.has_mutation
-            else []
-        )
-
-    def get_unbacked_symbol_defs(self) -> Set[sympy.Symbol]:
-        return set()
-
     @classmethod
     def create(
         cls,
@@ -7407,7 +7389,6 @@ class QLinearPointwiseBinaryPT2E(ExternKernelAlloc):
                 constant_args=constant_args,
                 has_bias=(bias is not None),
                 x_scale_zp_are_tensors=x_scale_zp_are_tensors,
-                has_mutation=True,
             )
             mark_node_as_mutating(packed, other)
             # Return other since it has been inplace changed.
