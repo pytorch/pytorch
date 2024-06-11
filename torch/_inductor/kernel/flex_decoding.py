@@ -29,11 +29,11 @@ flex_decoding_template = TritonTemplate(
     name="flex_decoding",
     grid=flex_decoding_grid,
     source=r"""
-{{def_kernel("Q", "K", "V", "LSE", "M", "L", "ACC", "LOCK_RDCT")}}
+    {{def_kernel("Q", "K", "V", "M", "L")}}
     # Sub notation for this kernel:
     # Q: Query, K: Key, V: Value
-    # reduction buffers: M rowmax, L sumexp, ACC accumulated output
-    # reduction lock: LOCK_RDCT. 
+    # reduction buffers: M rowmax, L sumexp
+    # output: ACC accumulated output
     # M: Number of queries, N: Number of keys/values, D: Model dimension
     # BLOCK_MMODLE, BLOCK_DMODEL: M, and D dimemsion are always assigned to the same block
     # z: Batch size, h: Number of heads, m: Number of queries per head, k: Number of keys per head t: Number of tiles per query
@@ -71,12 +71,6 @@ flex_decoding_template = TritonTemplate(
     stride_lh = {{stride("L", 1)}}
     stride_lt = {{stride("L", 2)}}
     stride_lm = {{stride("L", 3)}}
-    # Define ACC Strides
-    stride_accz = {{stride("ACC", 0)}}
-    stride_acch = {{stride("ACC", 1)}}
-    stride_acct = {{stride("ACC", 2)}}
-    stride_accm = {{stride("ACC", 3)}}
-    stride_accd = {{stride("ACC", 4)}}
 
 
     Z = {{size("Q", 0)}}
@@ -139,15 +133,6 @@ flex_decoding_template = TritonTemplate(
         order=(1, 0)
     )
 
-    acc_offset = off_hz * stride_acch
-    ACC_block_ptr = tl.make_block_ptr(
-        base=ACC + acc_offset,
-        shape=(SPLIT_KV, Q_CTX, BLOCK_DMODEL),          # (T, M, D)
-        strides=(stride_acct, stride_accm, stride_accd),
-        offsets=(off_t, 0, 0),
-        block_shape=(1, BLOCK_MMODEL, BLOCK_DMODEL),
-        order=(2, 1, 0)
-    )
 
     # initialize offsets
     offs_m = tl.arange(0, BLOCK_MMODEL)      
@@ -179,7 +164,7 @@ flex_decoding_template = TritonTemplate(
             qk = tl.sum(q[:, :, None]*k.to(MATMUL_PRECISION)[None, :, :], axis=-2).to(tl.float32)
             # This fails with Triton IR error Assertion `floatAttr.getType() == eltType && "expected float attribute type to equal element type"'. Use tl.dot to access tensor core instead. 
         
- # ~~~~~~~~~~~~~~~~~~~ Apply score modification  ~~~~~~~~~~~~~~~~~~~
+        # ~~~~~~~~~~~~~~~~~~~ Apply score modification  ~~~~~~~~~~~~~~~~~~~
         m = offs_m[:, None]
         n = start_n + offs_n[None, :]
         {{ modification(
@@ -225,48 +210,142 @@ flex_decoding_template = TritonTemplate(
     # Store output, logsumexp and rowmax for cross CTA reduction. (all in float32, even when input data are in fp16)
     tl.store(M_block_ptr, m_i[None, :])
     tl.store(L_block_ptr, l_i[None, :])
-    tl.store(ACC_block_ptr, acc[None, :, :])
+
+    # -- store output
+    idx_z = off_hz // H
+    idx_h = off_hz % H
+    idx_t = off_t
+    idx_m = offs_m[:, None]
+    idx_d = offs_d
+    # TODO generalize and add proper mask support
+    mask = (idx_m != -1) & (idx_d != -1)
+    {{store_output(("idx_z", "idx_h", "idx_t", "idx_m", "idx_d"), "acc", "mask")}} 
+ """,
+)
+
+
+def flex_decoding_reduction_grid(batch_size, num_heads, split_k, m_model, D, meta):
+    """How is this kernel parallelized?
+    We create a grid of (batch_size * num_heads, ceil_div(n_querys, MODEL_M), ceil_div(D, MODEL_D))
+    Each block is responsible for calculating its own blocks of accumulated output
+    """
+    import triton
+
+    return (batch_size * num_heads, triton.cdiv(m_model, meta["BLOCK_M"]), triton.cdiv(D, meta["BLOCK_D"]))
+
+
+flex_decoding_reduction_template = TritonTemplate(
+    name="flex_decoding_reduction",
+    grid=flex_decoding_reduction_grid,
+    source=r"""
+    {{def_kernel("LSE", "M", "L", "ACC")}}
+    # Sub notation for this kernel:
+    # reduction buffers: M rowmax, L sumexp, ACC accumulated output
+    # M: Number of queries, N: Number of keys/values, D: Model dimension
+    # z: Batch size, h: Number of heads, m: Number of queries per head, k: Number of keys per head t: Number of tiles per query
+    # SPLIT_KV: number of blocks K & V are split into
+    # (Modifiable) Config options:
+    # BLOCK_D: number of columns assigned to each CTA
+    # BLOCK_M: number of rows assigned to each CTA
+    # SCORE_MOD_IS_LINEAR: Is the score modifier linear? If so, we can lift the
+    # change of base out of the loop
+    # ROWS_GUARANTEED_SAFE: Is it guaranteed that at least one value in each row
+    # is not masked out? If so, we can skip an extra safety check
+    # OUTPUT_LOGSUMEXP: We only need to store the logsumexp if we require grad
+
+    # Define M Strides
+    stride_mz = {{stride("M", 0)}}
+    stride_mh = {{stride("M", 1)}}
+    stride_mt = {{stride("M", 2)}}
+    stride_mm = {{stride("M", 3)}}
+    # Define L Strides
+    stride_lz = {{stride("L", 0)}}
+    stride_lh = {{stride("L", 1)}}
+    stride_lt = {{stride("L", 2)}}
+    stride_lm = {{stride("L", 3)}}
+    # Define ACC Strides
+    stride_accz = {{stride("ACC", 0)}}
+    stride_acch = {{stride("ACC", 1)}}
+    stride_acct = {{stride("ACC", 2)}}
+    stride_accm = {{stride("ACC", 3)}}
+    stride_accd = {{stride("ACC", 4)}}
+
+    Q_CTX = {{size("ACC", 3)}} # M
+    MODEL_D = {{size("ACC", 4)}} # D 
+    H = {{size("ACC", 1)}}
+
+    off_hz = tl.program_id(0)
+    off_m = tl.program_id(1) * BLOCK_M
+    off_d = tl.program_id(2) * BLOCK_D
+
+    ml_offset = off_hz * stride_mh  
+    M_block_ptr = tl.make_block_ptr(
+        base=M + ml_offset,
+        shape=(SPLIT_KV, Q_CTX),                     
+        strides=(stride_mt, stride_mm),              
+        offsets=(0, off_m),
+        block_shape=(SPLIT_KV, BLOCK_M),           # (T, BLOCK_M)
+        order=(1, 0)
+    )
+    L_block_ptr = tl.make_block_ptr(
+        base=L + ml_offset,
+        shape=(SPLIT_KV, Q_CTX),                      # (T, BLOCK_M)
+        strides=(stride_lt, stride_lm),
+        offsets=(0, off_m),
+        block_shape=(SPLIT_KV, BLOCK_M),
+        order=(1, 0)
+    )
+
+    acc_offset = off_hz * stride_acch
+    ACC_block_ptr = tl.make_block_ptr(
+        base=ACC + acc_offset,
+        shape=(SPLIT_KV, Q_CTX, MODEL_D),               # (T, M, BLOCK_D)
+        strides=(stride_acct, stride_accm, stride_accd),
+        offsets=(0, off_m, off_d),
+        block_shape=(SPLIT_KV, BLOCK_M, BLOCK_D),
+        order=(2, 1, 0)
+    )
+
+    offs_m = tl.arange(0, BLOCK_M) + off_m
 
     # Reduce over T for M, L and ACC
-    my_ticket = tl.atomic_add(LOCK_RDCT + off_hz, 1)
-    if my_ticket >= SPLIT_KV - 1: # Last CTA is responsible for the reduction
-        offs_t = tl.arange(0, SPLIT_KV)
-        index_ml = offs_t[:, None] * BLOCK_MMODEL + offs_m[None, :] # [T, M]
-        index_acc = offs_t[:, None, None] *BLOCK_DMODEL*BLOCK_MMODEL + offs_m[None, :, None]*BLOCK_DMODEL + offs_d[None, None, :] #[T, M, D]
-        t_m_i = tl.load(M+ml_offset+(index_ml))
-        t_l_i = tl.load(L+ml_offset+(index_ml))
-        t_acc = tl.load(ACC+acc_offset+(index_acc))
-
-        # find global rowmax
-        g_m = tl.max(t_m_i, 0) # [M]
-
-        # rebase to new global rowmax
-        alpha = tl.exp2(t_m_i - g_m[None, :]) # [T, M]
-        t_l_i = t_l_i * alpha
-        t_acc *= alpha[:, :, None]  
-
-        # reduction for acc and l_i 
-        g_acc = tl.zeros([BLOCK_MMODEL, BLOCK_DMODEL], dtype=tl.float32)
-        g_l = tl.zeros([BLOCK_MMODEL], dtype=tl.float32)
-        g_acc = tl.sum(t_acc, 0)
-        g_l = tl.sum(t_l_i, 0)
-        g_acc = g_acc / g_l[:, None]
-
-        idx_z = off_hz // H
-        idx_h = off_hz % H
-        idx_m = offs_m[:, None]
-        idx_d = tl.arange(0, BLOCK_DMODEL)[None, :]
-        # TODO generalize and add proper mask support
-        mask = (idx_m != -1) & (idx_d != -1)
-        {{store_output(("idx_z", "idx_h", "idx_m", "idx_d"), "g_acc", "mask", indent_width=8)}} 
-        # indentation hack https://github.com/pytorch/pytorch/pull/125515
+    # load M and L
+    m = tl.load(M_block_ptr)
+    l = tl.load(L_block_ptr)
 
 
-        # TODO dont want to write this if we dont require grad
-        if OUTPUT_LOGSUMEXP:
-            l_ptrs = LSE + off_hz * Q_CTX + offs_m
-            lse = g_m + tl.math.log2(g_l)
-            tl.store(l_ptrs, lse)
+    # find global rowmax
+    g_m = tl.max(m, 0) # [BLOCK_M]
+
+    # cal rebase factor alpha
+    alpha = tl.exp2(m - g_m[None, :]) # [T, BLOCK_M]
+
+    # reduction on LSE
+    l = l * alpha
+    g_l = tl.sum(l, 0)
+    if OUTPUT_LOGSUMEXP:
+        l_ptrs = LSE + off_hz * Q_CTX + offs_m
+        lse = g_m + tl.math.log2(g_l)
+        tl.store(l_ptrs, lse)
+    
+    # load acc and calculate global output
+    offs_d = off_d + tl.arange(0, BLOCK_D) 
+    # -- load acc
+    acc = tl.load(ACC_block_ptr)
+    acc *= alpha[:, :, None]
+    g_acc= tl.sum(acc, 0)
+    g_acc = g_acc / g_l[:, None]
+
+    # -- store output
+    idx_z = off_hz // H
+    idx_h = off_hz % H
+    idx_m = offs_m[:, None]
+    idx_d = offs_d
+    # TODO generalize and add proper mask support
+    mask = (idx_m != -1) & (idx_d != -1)
+    {{store_output(("idx_z", "idx_h", "idx_m", "idx_d"), "g_acc", "mask")}} 
+    # indentation hack https://github.com/pytorch/pytorch/pull/125515
+
  """,
 )
 
@@ -325,6 +404,19 @@ def _get_decoding_default_config(key):
 
     return default_config
 
+# config: [BLOCK_M, BLOCK_D, num_stages, num_warps]
+def _get_reduction_default_config(buf_ACC, dtype):
+    B = buf_ACC.get_size()[0]
+    H = buf_ACC.get_size()[1]
+    SPLIT_KV = buf_ACC.get_size()[2]
+    Mq = buf_ACC.get_size()[-2]
+    head_dim = buf_ACC.get_size()[-1]
+    default_config = None
+
+    default_config = (1, 32, 2, 1)
+
+    return default_config
+
 
 from torch._inductor.kernel.flex_attention import create_placeholder, build_subgraph_buffer, SubgraphType
 
@@ -366,20 +458,16 @@ def create_flex_decoding_kernel(subgraph_buffer, layout, query, key, value, subg
     )
 
     buf_ACC_shape = query.get_size()[:-2] + [MAX_SPLIT_KV] + query.get_size()[-2:]   # [B, H, SPLIT_KV, M]
-    buf_ACC = empty_strided(
-        buf_ACC_shape,
-        None,
-        dtype=torch.float32,  # The intermediate acc is always stored in fp32 regardless of the input dtype
-        device=query.get_device(),
-    )
-
-
-    lock_RDCT = full(query.get_size()[:-2], fill_value=0, dtype=torch.int32, device=query.get_device())
-    lock_RDCT = as_strided(lock_RDCT, query.get_size()[:-2], (query.get_size()[-3], 1))
 
     SPLIT_KV = get_split_k(key.get_size()[0], key.get_size()[1], key.get_size()[2])
     assert(SPLIT_KV <= MAX_SPLIT_KV)
 
+    layout_acc = FixedLayout(
+        query.get_device(),
+        torch.float32, 
+        buf_ACC_shape,
+        FlexibleLayout.contiguous_strides(buf_ACC_shape),
+    )
 
     # Note, we don't need to pass in the captured buffers explicitly
     # because they're implicitly added by the score_mod function
@@ -387,13 +475,13 @@ def create_flex_decoding_kernel(subgraph_buffer, layout, query, key, value, subg
     for BLOCK_N, num_warps, num_stages in configs:
         flex_decoding_template.maybe_append_choice(
             choices=choices,
-            input_nodes=[query, key, value, logsumexp, buf_M, buf_L, buf_ACC, lock_RDCT],
-            layout=layout,
+            input_nodes=[query, key, value, buf_M, buf_L],
+            layout=layout_acc,
             subgraphs=[
                 subgraph_buffer,
             ],
             mutated_inputs=[
-                logsumexp,
+                buf_M, buf_L
             ],
             num_stages=num_stages,
             num_warps=num_warps,
@@ -407,10 +495,42 @@ def create_flex_decoding_kernel(subgraph_buffer, layout, query, key, value, subg
             ROWS_GUARANTEED_SAFE=False,
             OUTPUT_LOGSUMEXP=True,
         )
-    inputs_for_autotuning = [query, key, value, logsumexp, buf_M, buf_L, buf_ACC, lock_RDCT] + list(other_buffers)
+
+    # print("config: ", configs, "split_k: ", SPLIT_KV)
+
+    inputs_for_flex_decoding = [query, key, value, buf_M, buf_L] + list(other_buffers)
+    buf_ACC = autotune_select_algorithm( "flex_decoding", choices, inputs_for_flex_decoding, layout_acc)
+    
+    reduction_choices: List[Any] = []
+    reduction_configs: List[Tuple[int, int, int, int]] = []
+    reduction_configs.append(_get_reduction_default_config(buf_ACC, key.get_dtype()))
+    
+
+    for BLOCK_M, BLOCK_D, num_warps, num_stages in reduction_configs:
+        flex_decoding_reduction_template.maybe_append_choice(
+            choices=reduction_choices,
+            input_nodes=[logsumexp, buf_M, buf_L, buf_ACC],
+            layout=layout,
+            mutated_inputs=[
+                logsumexp,
+            ],
+            num_stages=num_stages,
+            num_warps=num_warps,
+            call_sizes=buf_ACC.get_size(),
+            BLOCK_M=BLOCK_M,
+            BLOCK_D=BLOCK_D,
+            SPLIT_KV=SPLIT_KV,
+            # For now, we always assume the "sound" option
+            SCORE_MOD_IS_LINEAR=False,
+            ROWS_GUARANTEED_SAFE=False,
+            OUTPUT_LOGSUMEXP=True,
+        )
+
+    
+    inputs_for_flex_decoding_reduction = [logsumexp, buf_M, buf_L, buf_ACC]
+    output = autotune_select_algorithm( "flex_decoding_reduction", reduction_choices, inputs_for_flex_decoding_reduction ,layout)
+    
     return (
-        autotune_select_algorithm(
-            "flex_decoding", choices, inputs_for_autotuning, layout
-        ),
+        output,
         logsumexp,
     )

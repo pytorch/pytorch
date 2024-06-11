@@ -12,7 +12,7 @@ from torch._inductor.utils import maybe_profile
 from torch._inductor.codegen.memory_planning import _align as align
 
 from torch import device, empty_strided
-from torch._inductor.codecache import AsyncCompile
+from torch._inductor.async_compile import AsyncCompile
 from torch._inductor.select_algorithm import extern_kernels
 from torch._inductor.codegen.multi_kernel import MultiKernelCall
 
@@ -110,7 +110,7 @@ def triton_(arg_Q, arg_K, arg_V, arg_LSE, out_ptr0, arg_m, arg_l, arg_acc, arg_r
     tl.device_assert(Q_CTX == BLOCK_MMODEL, "Query len must match static kernel parameter BLOCK_MMODEL")
 
     qk_scale = 1.0
-    MATMUL_PRECISION = Q.dtype.element_ty
+    MATMUL_PRECISION = tl.float16
 
     off_hz = tl.program_id(0)           
     off_t = tl.program_id(1) 
@@ -197,7 +197,8 @@ def triton_(arg_Q, arg_K, arg_V, arg_LSE, out_ptr0, arg_m, arg_l, arg_acc, arg_r
         v = tl.load(V_block_ptr)
         # -- compute qk ---
         qk = tl.zeros([BLOCK_MMODEL, BLOCK_N], dtype=tl.float32)
-        qk = tl.sum(q[:, :, None]*k[None, :, :], axis=-2)
+        qk = tl.sum((q[:, :, None].to(MATMUL_PRECISION))*(k[None, :, :].to(MATMUL_PRECISION)), axis=-2).to(tl.float32)
+        tl.static_print("qk type", qk.dtype)
 
         # ~~~~~~~~~~~~~~~~~~~ Apply score modification  ~~~~~~~~~~~~~~~~~~~
         m = offs_m[:, None]
@@ -234,9 +235,9 @@ def triton_(arg_Q, arg_K, arg_V, arg_LSE, out_ptr0, arg_m, arg_l, arg_acc, arg_r
 
         # -- scale and update acc --
         acc *= alpha[:, None]
-        p_ = p.to(MATMUL_PRECISION)[:, :, None] # dependent on this triton fix: https://github.com/htyu/triton/commit/c36c24c3cd5e872cb113f1cc56a46fb962ac4e27
-        delta_acc = tl.sum(p_ * v.to(MATMUL_PRECISION), axis=-2)
-        acc += delta_acc 
+        # p_ = p.to(MATMUL_PRECISION)[:, :, None] # dependent on this triton fix: https://github.com/htyu/triton/commit/c36c24c3cd5e872cb113f1cc56a46fb962ac4e27
+        # delta_acc = tl.sum(p_ * v, axis=-2)
+        # acc += delta_acc 
 
         # -- update m_i and l_i --
         l_i = l_i * alpha + tl.sum(p, 1)
@@ -315,7 +316,7 @@ def call(args):
 
     with torch.cuda._DeviceGuard(0):
         torch.cuda.set_device(0)
-        buf1 = torch.full((2, 8, 2, 64), float('nan'), device='cuda', dtype=torch.float32) # output
+        buf1 = torch.full((2, 8, 2, 64), float('nan'), device='cuda', dtype=torch.float16) # output
         # Source Nodes: [flex_attention], Original ATen: []
         grid=sdpa_decoding_grid(2, 8, 4096, 64, meta0)
         print(grid)
@@ -341,9 +342,9 @@ def checkerboard(score, batch, head, token_q, token_kv):
 
 def run_module(times=10, repeat=10):
     from torch._dynamo.testing import rand_strided
-    arg0_1 = torch.rand((2, 8, 2, 64), device='cuda', dtype=torch.float32) # Q
-    arg1_1 = torch.rand((2, 8, 4096, 64), device='cuda:0', dtype=torch.float32) # K
-    arg2_1 = torch.rand((2, 8, 4096, 64), device='cuda:0', dtype=torch.float32) # V
+    arg0_1 = torch.rand((2, 8, 2, 64), device='cuda', dtype=torch.float16) # Q
+    arg1_1 = torch.rand((2, 8, 4096, 64), device='cuda:0', dtype=torch.float16) # K
+    arg2_1 = torch.rand((2, 8, 4096, 64), device='cuda:0', dtype=torch.float16) # V
     fn = lambda: call([arg0_1, arg1_1, arg2_1])
 
 

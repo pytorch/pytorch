@@ -77,9 +77,9 @@ if __name__ == "__main__":
     # Lets create some input tensors
     # The input tensor has shape (batch_size, num_heads, seq_len, head_dim)
     # Assume a batch size of 2 for inference.
-    query = torch.randn(2, 8, 2, 64, device="cuda", dtype=torch.float32)
-    key = torch.randn(2, 8, 4096, 64, device="cuda", dtype=torch.float32)
-    value = torch.randn(2, 8, 4096, 64, device="cuda", dtype=torch.float32)
+    query = torch.randn(2, 8, 16, 64, device="cuda", dtype=torch.float16)
+    key = torch.randn(2, 8, 4096, 64, device="cuda", dtype=torch.float16)
+    value = torch.randn(2, 8, 4096, 64, device="cuda", dtype=torch.float16)
 
 
     # Lets create a fun new score_modification! I will call this

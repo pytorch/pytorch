@@ -20,6 +20,9 @@ torch._dynamo.config.cache_size_limit = 1000
 
 from triton.testing import do_bench
 
+from joy_dev.parse_xformer_results import get_xformer_results
+xformer_performance = get_xformer_results()
+
 
 def benchmark_torch_function_in_microseconds(func: Callable, *args, **kwargs) -> float:
     # warmup
@@ -34,6 +37,7 @@ class ExperimentConfig:
     score_mod: Callable
     dtype: torch.dtype
     calculate_bwd_time: bool
+    baseline_time: Optional[float]
 
     def __post_init__(self):
         assert len(self.shape) == 5, "Shape must be of length 5" #[B, H, Q, D, KV]
@@ -173,10 +177,23 @@ def calculate_bandwidth(config: ExperimentConfig, results: ExperimentResults, ty
         kv_size =config.shape[0] * config.shape[1] * config.shape[4] * config.shape[3] * torch.finfo(config.dtype).bits / 8 * 2
         output_size = config.shape[0] * config.shape[1] * config.shape[2] * config.shape[3] * torch.finfo(config.dtype).bits / 8
         total_size = (query_size + kv_size + output_size) / 1024 / 1024 / 1024 # In GB 
-        time_in_seconds = results.fwd_times.compiled_time / 10**6
+        time_in_seconds = results.fwd_times.compiled_time / 1e6
         return total_size / time_in_seconds / 1024
     else:
         raise ValueError(f"Invalid type {type}")
+
+def calculate_gflops(config: ExperimentConfig, results: ExperimentResults) -> float:
+    B = config.shape[0]
+    H = config.shape[1]
+    M = config.shape[2]
+    D = config.shape[3]
+    N = config.shape[4]
+    qk_flops = M * N * D * 2
+    softmax_flops = M * N * 2 # Not counting online softmax overhead
+    o_flops = M * D * N * 2
+    # Not counting split k overhead
+    total_flops = B * H * (qk_flops + softmax_flops + o_flops)
+    return total_flops/ results.fwd_times.compiled_time / 1e3 # in GFLOPs/s
 
 
 def get_func_name(func):
@@ -187,6 +204,7 @@ def get_average_speedups(results: List[Experiment], type: str):
     # Calculate speedups
     speedups = [calculate_speedup(r.results, type) for r in results]
     bw = [calculate_bandwidth(r.config, r.results, type) for r in results]
+    gflops = [calculate_gflops(r.config, r.results) for r in results]
 
     # Find indices of max and min speedups
     max_speedup_index = np.argmax(speedups)
@@ -211,8 +229,8 @@ def get_average_speedups(results: List[Experiment], type: str):
             "Speedup": np.mean(speedups),
             **dict.fromkeys(max_config_dict),
         },
-        {"Type": "Max", "Speedup": speedups[max_speedup_index], "BandWidth (TB/s)":  bw[max_speedup_index],  **max_config_dict},
-        {"Type": "Min", "Speedup": speedups[min_speedup_index], "BandWidth (TB/s)": bw[min_speedup_index], **min_config_dict},
+        {"Type": "Max", "Speedup": speedups[max_speedup_index], "BandWidth (TB/s)":  bw[max_speedup_index], "GFlops/s": gflops[max_speedup_index],  **max_config_dict},
+        {"Type": "Min", "Speedup": speedups[min_speedup_index], "BandWidth (TB/s)": bw[min_speedup_index], "GFlops/s": gflops[min_speedup_index], **min_config_dict},
     ]
 
     return table_data
@@ -242,7 +260,9 @@ def print_results(results: List[Experiment]):
     # calculate theoretical bandwidth
     fwd_bandwidth = [calculate_bandwidth(r.config, r.results, type="fwd") for r in results]
     table_data["fwd_bw (TB/s)"] = fwd_bandwidth
-
+    fwd_gflops = [calculate_gflops(r.config, r.results) for r in results]
+    table_data["GFlops/s"] = fwd_gflops
+ 
     table_data["score_mod"] = [get_func_name(func) for func in table_data["score_mod"]]
     print(tabulate(table_data, headers="keys", tablefmt="github", floatfmt=".3f"))
 
@@ -303,14 +323,15 @@ def generate_experiment_configs(calculate_bwd: bool) -> List[ExperimentConfig]:
     score_mods = generate_score_mods()
     all_configs = []
     for (
-        (bsz, kv_seq_len),
         (Hq, Hkv),
+        (bsz, kv_seq_len),
         head_dim,
         score_mod,
         dtype,
     ) in itertools.product(
-        kv_cache_sizes, n_heads, head_dims, score_mods, dtypes
+        n_heads, kv_cache_sizes, head_dims, score_mods, dtypes
     ):
+        baseline_time = xformer_performance[(bsz, kv_seq_len, Hq, Hkv, head_dim, dtype)] # (B, Mkv, Hq, Hkv, K, dtype)
         n_heads = Hkv
         q_seq_len = Hq // Hkv
         assert Hq % Hkv == 0
@@ -320,6 +341,7 @@ def generate_experiment_configs(calculate_bwd: bool) -> List[ExperimentConfig]:
                 score_mod=score_mod,
                 dtype=dtype,
                 calculate_bwd_time=calculate_bwd,
+                baseline_time=baseline_time,
             )
         )
 
