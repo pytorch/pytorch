@@ -278,9 +278,21 @@ def generate_score_mods() -> List[Callable]:
 
 
 def generate_experiment_configs(calculate_bwd: bool) -> List[ExperimentConfig]:
-    kv_cache_sizes = [(128, 512), (64, 1024), (32, 2048), (16, 4096), (8, 8192), (4, 16384), (2, 32768), (1, 65536), (1, 131072)]
-    batch_sizes = [1, 2, 8, 16]
-    n_heads = [(16, 1), (16, 2)] # (Hq, Hkv)
+    kv_cache_sizes = [
+        (128, 512), 
+        (64, 1024), 
+        (32, 2048), 
+        (16, 4096), 
+        (8, 8192), 
+        (4, 16384), 
+        (2, 32768), 
+        (1, 65536), 
+        (1, 131072)
+    ]
+    n_heads = [
+        (16, 1), 
+        (16, 2)
+    ] # (Hq, Hkv)
     # head_dims = [64, 128, 256]
     head_dims = [128]
     dtypes = [

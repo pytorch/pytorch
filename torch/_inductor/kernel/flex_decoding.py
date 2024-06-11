@@ -87,7 +87,7 @@ flex_decoding_template = TritonTemplate(
 
 
     qk_scale = 1.0
-    MATMUL_PRECISION = Q.dtype.element_ty if Q.dtype.element_ty == tl.float64 else tl.float32
+    MATMUL_PRECISION = Q.dtype.element_ty
 
     off_hz = tl.program_id(0)           
     off_t = tl.program_id(1) 
@@ -169,11 +169,16 @@ flex_decoding_template = TritonTemplate(
     for start_n in range(lo, hi, BLOCK_N):
         start_n = tl.multiple_of(start_n, BLOCK_N)
         # -- load k, v --
-        k = tl.load(K_block_ptr)
+        k = tl.load(K_block_ptr).to(MATMUL_PRECISION)
         v = tl.load(V_block_ptr)
         # -- compute qk ---
         qk = tl.zeros([BLOCK_MMODEL, BLOCK_N], dtype=tl.float32)
-        qk = tl.sum(q[:, :, None]*k.to(MATMUL_PRECISION)[None, :, :], axis=-2)
+        if BLOCK_MMODEL >= 16: 
+            qk = tl.dot(q, k, acc=qk)
+        else: 
+            qk = tl.sum(q[:, :, None]*k.to(MATMUL_PRECISION)[None, :, :], axis=-2).to(tl.float32)
+            # This fails with Triton IR error Assertion `floatAttr.getType() == eltType && "expected float attribute type to equal element type"'. Use tl.dot to access tensor core instead. 
+        
  # ~~~~~~~~~~~~~~~~~~~ Apply score modification  ~~~~~~~~~~~~~~~~~~~
         m = offs_m[:, None]
         n = start_n + offs_n[None, :]
@@ -205,9 +210,10 @@ flex_decoding_template = TritonTemplate(
 
         # -- scale and update acc --
         acc *= alpha[:, None]
-        p_ = p.to(MATMUL_PRECISION)[:, :, None] # dependent on this triton fix: https://github.com/triton-lang/triton/pull/4061
-        delta_acc = tl.sum(p_ * v.to(MATMUL_PRECISION), axis=-2) 
-        acc += delta_acc 
+        if BLOCK_MMODEL >= 16:
+            acc = tl.dot(p.to(MATMUL_PRECISION), v.to(MATMUL_PRECISION), acc=acc)
+        else:
+            acc += tl.sum(p.to(MATMUL_PRECISION)[:, :, None] * v.to(MATMUL_PRECISION), axis=-2).to(tl.float32)
 
         # -- update m_i and l_i --
         l_i = l_i * alpha + tl.sum(p, 1)
@@ -216,7 +222,7 @@ flex_decoding_template = TritonTemplate(
         K_block_ptr = tl.advance(K_block_ptr, (0, BLOCK_N))
         V_block_ptr = tl.advance(V_block_ptr, (BLOCK_N, 0))
 
-    # Store output, logsumexp and rowmax for cross CTA reduction
+    # Store output, logsumexp and rowmax for cross CTA reduction. (all in float32, even when input data are in fp16)
     tl.store(M_block_ptr, m_i[None, :])
     tl.store(L_block_ptr, l_i[None, :])
     tl.store(ACC_block_ptr, acc[None, :, :])
@@ -241,6 +247,7 @@ flex_decoding_template = TritonTemplate(
 
         # reduction for acc and l_i 
         g_acc = tl.zeros([BLOCK_MMODEL, BLOCK_DMODEL], dtype=tl.float32)
+        g_l = tl.zeros([BLOCK_MMODEL], dtype=tl.float32)
         g_acc = tl.sum(t_acc, 0)
         g_l = tl.sum(t_l_i, 0)
         g_acc = g_acc / g_l[:, None]
@@ -373,7 +380,6 @@ def create_flex_decoding_kernel(subgraph_buffer, layout, query, key, value, subg
     SPLIT_KV = get_split_k(key.get_size()[0], key.get_size()[1], key.get_size()[2])
     assert(SPLIT_KV <= MAX_SPLIT_KV)
 
-    print("shape: ", key.get_size(), query.get_size(), "config: ", configs, SPLIT_KV)
 
     # Note, we don't need to pass in the captured buffers explicitly
     # because they're implicitly added by the score_mod function
