@@ -4,13 +4,13 @@
 import unittest
 
 import torch
+import torch._dynamo.testing
 from torch.distributed._composable.fsdp import fully_shard
 from torch.distributed._composable.fsdp._fsdp_common import TrainingState
 from torch.distributed._composable.fsdp._fsdp_param_group import FSDPParamGroup
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import FSDPTest, MLP
 from torch.testing._internal.common_utils import run_tests
-import torch._dynamo.testing
 from torch.utils._triton import has_triton
 
 
@@ -96,7 +96,7 @@ class TestFullyShardCompile(FSDPTest):
         self.assertEqual(param_group._training_state, TrainingState.IDLE)
         self.assertEqual(eager_out, inp + 1)
         self.assertEqual(eager_out, compiled_out)
-        
+
         self.assertEqual(cnt.frame_count, 1)
         self.assertEqual(cnt.op_count, 1)
         self.assertEqual(len(cnt.graphs), 1)

@@ -881,7 +881,15 @@ class FSDPParamGroupUseTrainingStateVariable(ContextWrappingVariable):
         assert len(values) == 1
         value = values[0]
         if self.param_group_var.value._training_state != value:
-            self.param_group_var.call_method(tx, "__setattr__", (variables.ConstantVariable.create("_training_state"), variables.EnumVariable(value)), {})
+            self.param_group_var.call_method(
+                tx,
+                "__setattr__",
+                (
+                    variables.ConstantVariable.create("_training_state"),
+                    variables.EnumVariable(value),
+                ),
+                {},
+            )
             self.param_group_var.value._training_state = value
 
     def module_name(self):
