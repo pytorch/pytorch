@@ -2868,6 +2868,8 @@ def get_torch_obj_rule_map():
                 obj = load_object(k)
             else:
                 obj = _module_dir(torch) + k[len("torch/") :]
+            if isinstance(obj, str) and "fsdp" in obj:
+                print(f"obj: {obj}")
             if obj is not None:
                 if obj in d and d[obj] != v:
                     raise AssertionError(
@@ -2894,11 +2896,14 @@ def load_object(name):
         if len(x) == 2:
             obj = _load_obj_from_str(x[0])
             val = getattr(obj, x[1])
+            print(f"here1: obj: {obj}, val: {val}")
         else:
             assert len(x) == 1, f"Invalid obj name {name}"
             val = _load_obj_from_str(x[0])
+            print(f"here2: val: {val}")
         val = unwrap_if_wrapper(val)
-    except (AttributeError, ImportError):
+    except (AttributeError, ImportError) as e:
+        print(f"here3: Failed to load {name}: {e}")
         val = None
     return val
 
@@ -3258,6 +3263,7 @@ if torch.distributed.is_available():
     MOD_INLINELIST.add("torch.distributed")
     MOD_INLINELIST.add("torch.distributed._functional_collectives")
     MOD_INLINELIST.add("torch.distributed._composable.replicate")
+    MOD_INLINELIST.add("torch.distributed._composable.fsdp")
 
 
 @functools.lru_cache(None)
@@ -3360,6 +3366,8 @@ def check_file(filename, is_inlined_call=False):
             False,
             "LEGACY_MOD_INLINELIST",
         )
+    if "fsdp" in filename:
+        print(f"filename: {filename}")
     if is_inlined_call and is_torch_inline_allowed(filename):
         return SkipResult(
             False,
@@ -3375,7 +3383,9 @@ def check_file(filename, is_inlined_call=False):
             "FBCODE_SKIP_DIRS",
         )
     if bool(SKIP_DIRS_RE.match(filename)):
-        return SkipResult(True, "SKIP_DIRS")
+        print(f"is_inlined_call: {is_inlined_call}")
+        print(f"is_torch_inline_allowed(filename): {is_torch_inline_allowed(filename)}")
+        return SkipResult(True, f"SKIP_DIRS here123 filename: {filename}")
     else:
         return SkipResult(False, "inlined by default")
 
@@ -3531,6 +3541,7 @@ def lookup_inner(
     if obj is not None:
         if is_aten_op_or_tensor_method(obj):
             return TorchInGraphFunctionVariable
+        print(f"obj to check: {obj}")
         rule = get_torch_obj_rule_map().get(obj, None)
         if rule is not None:
             if reasons is not None:
@@ -3581,6 +3592,7 @@ def lookup_inner(
     # Step 3: lookup obj's tracing rule by filename.
     if filename is None:
         filename = getfile(obj)
+    print(f"obj: {obj}, filename: {filename}")
 
     skip_result = check_file(filename, is_direct_call)
     if reasons is not None:

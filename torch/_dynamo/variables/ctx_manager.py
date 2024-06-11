@@ -109,7 +109,7 @@ class ContextWrappingVariable(VariableTracker):
         assert len(args) == 1
         if isinstance(args[0], NestedUserFunctionVariable):
             args[0] = UserFunctionVariable(args[0].get_function())
-        assert isinstance(args[0], (UserMethodVariable, UserFunctionVariable))
+        assert isinstance(args[0], (UserMethodVariable, UserFunctionVariable)), f"args[0]: {args[0]}, type(args[0]): {type(args[0])}, args: {args}, kwargs: {kwargs}"
 
         if isinstance(args[0], UserMethodVariable):
             return WrappedUserMethodVariable(args[0], self)
@@ -841,6 +841,55 @@ class PreserveVersionContextVariable(ContextWrappingVariable):
         unimplemented(
             "torch.autograd._unsafe_preserve_version_counter with graph break"
         )
+
+
+class FSDPParamGroupUseTrainingStateVariable(ContextWrappingVariable):
+    _guards_singleton = Guard(GlobalStateSource(), GuardBuilder.FSDP_TRAINING_STATE)
+
+    @staticmethod
+    def create(tx, param_group_var, target_value, **kwargs):
+        var = FSDPParamGroupUseTrainingStateVariable(
+            param_group_var=param_group_var,
+            target_values=[target_value],
+            initial_values=[param_group_var.value._training_state],
+            **kwargs,
+        )
+        var._call_func(tx, var.target_values)
+        return var
+
+    def __init__(self, param_group_var, target_values, initial_values=None, **kwargs):
+        super().__init__(
+            target_values=target_values, initial_values=initial_values, **kwargs
+        )
+        self.param_group_var = param_group_var
+        install_guard(self._guards_singleton)
+
+    def enter(self, tx):
+        self._call_func(tx, self.target_values)
+        return variables.ConstantVariable.create(None)
+
+    def exit(self, tx, *args):
+        self._call_func(tx, self.initial_values)
+        return variables.ConstantVariable.create(None)
+
+    def call_function(
+        self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
+    ):
+        self._call_func(tx, self.initial_values)  # undo eager initialization
+        return super().call_function(tx, args, kwargs)
+
+    def _call_func(self, tx, values):
+        assert len(values) == 1
+        value = values[0]
+        if self.param_group_var.value._training_state != value:
+            self.param_group_var._training_state = value
+            self.param_group_var.value._training_state = value
+
+    def module_name(self):
+        return "torch.distributed._composable.fsdp._fsdp_param_group.FSDPParamGroup"
+
+    def fn_name(self):
+        return "use_training_state"
 
 
 class StreamVariable(VariableTracker):

@@ -184,6 +184,10 @@ class TorchCtxManagerClassVariable(BaseTorchVariable):
         # We can't do isinstance(value, type) check because some ctx managers
         # are implemented as a function decorated by contextlib.contextmanager,
         # E.g., torch._functorch.vmap.vmap_increment_nesting.
+        import logging
+
+        torch_log = logging.getLogger("torch")
+        torch_log.warning(f"value: {value}")
         return (
             # Context manager type or function with @contextmanager is callable
             callable(value)
@@ -199,6 +203,7 @@ class TorchCtxManagerClassVariable(BaseTorchVariable):
         from . import (
             DisabledSavedTensorsHooksVariable,
             DualLevelContextManager,
+            FSDPParamGroupUseTrainingStateVariable,
             GradIncrementNestingCtxManagerVariable,
             GradInplaceRequiresGradCtxManagerVariable,
             GradModeVariable,
@@ -296,7 +301,6 @@ class TorchCtxManagerClassVariable(BaseTorchVariable):
             return DisabledSavedTensorsHooksVariable.create(
                 tx, args[0].as_python_constant()
             )
-
         return super().call_function(tx, args, kwargs)
 
 

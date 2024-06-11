@@ -290,7 +290,9 @@ class UserFunctionVariable(BaseUserFunctionVariable):
             return invoke_and_store_as_constant(
                 tx, self.fn, self.get_name(), args, kwargs
             )
-
+        import logging
+        torch_log = logging.getLogger("torch")
+        torch_log.warning(f"UserFunctionVariable: self.fn: {self.fn}, args: {args}, kwargs: {kwargs}")
         return super().call_function(tx, args, kwargs)
 
 
@@ -339,6 +341,17 @@ class UserMethodVariable(UserFunctionVariable):
                 return self.obj.call_method(
                     tx, self.fn.__name__, args, kwargs, constant=self.is_constant
                 )
+        elif self.fn == torch.distributed._composable.fsdp._fsdp_param_group.FSDPParamGroup.use_training_state:
+            import logging
+            torch_log = logging.getLogger("torch")
+            target_fn = torch.distributed._composable.fsdp._fsdp_param_group.FSDPParamGroup.use_training_state
+            torch_log.warning(f"UserMethodVariable: self.obj: {self.obj}, self.fn: {self.fn}, args: {args}, kwargs: {kwargs}")
+            torch_log.warning(f"target_fn: {target_fn}")
+            torch_log.warning(f"self.fn == target_fn: {self.fn == target_fn}")    
+            ctx = torch._dynamo.variables.ctx_manager.FSDPParamGroupUseTrainingStateVariable.create(
+                tx, self.obj, args[0].as_python_constant()
+            )
+            return ctx.call_function(tx, args, kwargs)
         if self.is_constant:
             fn = getattr(self.obj.value, self.fn.__name__)
             return invoke_and_store_as_constant(tx, fn, self.get_name(), args, kwargs)
