@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import functools
 
 from typing import Optional, Set
@@ -74,7 +75,7 @@ class TritonSplitScanKernel(TritonKernel):
                 )
             )
         for tree in self.range_trees:
-            tree.codegen_header(self.body)
+            self.iteration_ranges_codegen_header(tree, self.body)
 
     def reduction(self, dtype, src_dtype, reduction_type, value):
         raise NotImplementedError("NYI TritonSplitDimKernel reductions")
@@ -133,7 +134,7 @@ class TritonSplitScanKernel(TritonKernel):
                 {exclusive_prefix} = triton_helpers.exclusive_scan_decoupled_lookback_64(
                     {scratch_base},
                     {block_sum},
-                    {self.range_trees[-1].get_pid()},
+                    {self.iteration_ranges_get_pid(self.range_trees[-1])},
                     {combine_helper_fn},
                 )
                 """,
@@ -149,7 +150,7 @@ class TritonSplitScanKernel(TritonKernel):
                 {exclusive_prefix} = triton_helpers.exclusive_scan_decoupled_lookback(
                     {scratch_base},
                     {block_sum},
-                    {self.range_trees[-1].get_pid()},
+                    {self.iteration_ranges_get_pid(self.range_trees[-1])},
                     {combine_helper_fn},
                     DTYPE_VALUE_AS_UINT={value_as_uint_dtype},
                     DTYPE_PACK={scratch_type},

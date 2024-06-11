@@ -7,7 +7,7 @@ eval "$(command conda 'shell.bash' 'hook' 2> /dev/null)"
 conda activate "${CONDA_ENV}"
 
 # Use uv to speed up lintrunner init
-python3 -m pip install uv
+python3 -m pip install uv==0.1.45
 
 CACHE_DIRECTORY="/tmp/.lintbin"
 # Try to recover the cached binaries
