@@ -4518,7 +4518,10 @@ class ShapeEnv:
             self.counter["sympy_recursion_error"] += 1
             return None
 
-        new_expr = safe_expand(new_expr)
+        # We need to canonicalize, as after expand we may have something like `a + b = a` and
+        # sympy will not simplify the a. The two appeareances of the a will then make value ranges
+        # analysis give lose bounds
+        new_expr = canonicalize_bool_expr(safe_expand(new_expr))
         if new_expr.is_number:
             return new_expr
 
