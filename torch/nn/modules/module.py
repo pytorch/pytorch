@@ -1955,7 +1955,12 @@ class Module:
         for name, module in self._modules.items():
             if module is not None:
                 module.state_dict(destination=destination, prefix=prefix + name + '.', keep_vars=keep_vars)
-        for (hook, from_private) in self._state_dict_hooks.values():
+        for value in self._state_dict_hooks.values():
+            # For BC reasons
+            if isinstance(value, tuple):
+                hook, from_private = value
+            else:
+                hook, from_private = value, True
             hook_result = hook(self, destination, prefix, local_metadata)
             if from_private and hook_result is not None:
                 destination = hook_result
