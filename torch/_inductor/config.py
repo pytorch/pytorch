@@ -171,7 +171,7 @@ force_fuse_int_mm_with_mul = False
 # for pattern torch.mm(a, b.to(dtype)) with cuda tensors,
 # enable torch._inductor.kernel.mm.tuned_mixed_mm fused kernel.
 # Autotune will compare perf with normal cast->then->mm option
-use_mixed_mm = False
+use_mixed_mm = True
 
 # enable runtime numeric check for pre/post grad fx passes
 # floating point provides limited accuracy (about 7 decimal digits for single precision
@@ -198,7 +198,7 @@ fx_passes_numeric_check: Dict[str, Any] = {
 # - If autotune is disabled, this config will always be chosen.
 # - If autotune is enabled, it will also compare with fallback aten implementation and fused kernel.
 # The use_mixed_mm flag will be ignored if forced_mixed_mm != "no".
-force_mixed_mm = "no"
+force_mixed_mm = "heuristic"
 
 # enable reordering pass for increasing overlap between compute and communication
 reorder_for_compute_comm_overlap = False
