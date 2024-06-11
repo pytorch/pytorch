@@ -312,6 +312,11 @@ instantiate_device_type_tests(TestXpu, globals(), only_for="xpu")
 
 
 class TestXpuAutocast(TestCase):
+    # These operators are not implemented on XPU backend and we can NOT fall back
+    # them to CPU. So we have to skip them at this moment.
+    # TODO: remove these operators from skip list when they are implemented on XPU backend.
+    skip_list = ["gru_cell"]
+
     def setUp(self):
         super().setUp()
         self.autocast_lists = AutocastTestLists(torch.device("xpu"))
@@ -407,6 +412,8 @@ class TestXpuAutocast(TestCase):
         for op_with_args in self.autocast_lists.torch_fp16:
             skip_test = False
             op, args = op_with_args[0], op_with_args[1]
+            if op in self.skip_list:
+                skip_test = True  # skip unsupported op
             if len(op_with_args) == 3:
                 skip_test = True  # skip cudnn op
             if not skip_test:
@@ -416,6 +423,8 @@ class TestXpuAutocast(TestCase):
         for op_with_args in self.autocast_lists.torch_fp16:
             skip_test = False
             op, args = op_with_args[0], op_with_args[1]
+            if op in self.skip_list:
+                skip_test = True  # skip unsupported op
             if len(op_with_args) == 3:
                 skip_test = True  # skip cudnn op
             if not skip_test:
