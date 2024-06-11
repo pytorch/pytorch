@@ -55,7 +55,7 @@ class ConstantVariable(VariableTracker):
                 return variables.BaseListVariable.cls_for(type(value))(items, **kwargs)
             else:
                 assert isinstance(value, (set, frozenset)), type(value)
-                return variables.SetVariable(items, mutable_local=MutableLocal())
+                return variables.SetVariable(items)
 
         return ConstantVariable(value, **kwargs)
 
