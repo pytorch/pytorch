@@ -1131,6 +1131,7 @@ class VariableBuilder:
             if (
                 torch._dynamo.config.inline_inbuilt_nn_modules
                 and torch._inductor.config.freezing
+                and not torch.is_grad_enabled()
             ):
                 from ..decorators import mark_static_address
 
