@@ -90,13 +90,12 @@ class TestFullyShardCompile(FSDPTest):
 
         eager_out = f(inp)
         self.assertEqual(param_group._training_state, TrainingState.IDLE)
+        self.assertEqual(eager_out, inp + 1)
 
         cnt = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
         compiled_out = torch.compile(f, backend=cnt, fullgraph=True)(inp)
         self.assertEqual(param_group._training_state, TrainingState.IDLE)
-        self.assertEqual(eager_out, inp + 1)
         self.assertEqual(eager_out, compiled_out)
-
         self.assertEqual(cnt.frame_count, 1)
         self.assertEqual(cnt.op_count, 1)
         self.assertEqual(len(cnt.graphs), 1)
