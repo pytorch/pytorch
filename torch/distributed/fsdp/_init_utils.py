@@ -807,26 +807,22 @@ def _get_device_from_device_id(
     device = (
         device_id if isinstance(device_id, torch.device) else torch.device(device_id)
     )
-    if device == torch.device("cuda"):
-        warnings.warn(
-            f"FSDP got the argument `device_id` {device_id} on rank "
-            f"{rank}, which does not have an explicit index. "
-            f"FSDP will use the current device {torch.cuda.current_device()}. "
-            "If this is incorrect, please explicitly call `torch.cuda.set_device()` "
-            "before FSDP initialization or pass in the explicit device "
-            "index as the `device_id` argument."
-        )
-        device = torch.device("cuda", torch.cuda.current_device())
-    if device == torch.device("hpu"):
-        warnings.warn(
-            f"FSDP got the argument `device_id` {device_id} on rank "
-            f"{rank}, which does not have an explicit index. "
-            f"FSDP will use the current device {torch.hpu.current_device()}. "
-            "If this is incorrect, please explicitly call `torch.hpu.set_device()` "
-            "before FSDP initialization or pass in the explicit device "
-            "index as the `device_id` argument."
-        )
-        device = torch.device("hpu", torch.hpu.current_device())
+    backend_devices = [
+        ("cuda", lambda: torch.cuda.current_device()),
+        ("hpu", lambda: torch.hpu.current_device()),
+    ]
+
+    for device_type, device_idx in backend_devices:
+        if device == torch.device(device_type):
+            warnings.warn(
+                f"FSDP got the argument `device_id` {device_id} on rank "
+                f"{rank}, which does not have an explicit index. "
+                f"FSDP will use the current device {device_idx()}. "
+                "If this is incorrect, please explicitly call torch.{device_type}.set_device() "
+                "before FSDP initialization or pass in the explicit device "
+                "index as the `device_id` argument."
+            )
+            device = torch.device(f"{device_type}:{device_idx()}")
     return device
 
 
