@@ -902,10 +902,13 @@ def extract_tensor_metadata(t: torch.Tensor) -> "TensorMetadata":
             convert_to_sym_hash(x) for x in stride_
         )
         storage_bytes: Optional[int] = None
+        storage_offset = 0
     else:
         shape = tuple(cast(Sequence[int], t.shape))
         stride = stride_
+        # Only set storage_bytes for tensors that have storage (not sparse)
         storage_bytes = t.untyped_storage().nbytes() if not t.is_sparse else None
+        storage_offset = t.storage_offset()
 
     return TensorMetadata(
         dtype=t.dtype,
@@ -914,8 +917,7 @@ def extract_tensor_metadata(t: torch.Tensor) -> "TensorMetadata":
         device=t.device,
         layout=t.layout,
         memory_format=memory_format,
-        storage_offset=t.storage_offset(),
-        # Only set storage_bytes for tensors that have storage (not sparse)
+        storage_offset=storage_offset,
         storage_bytes=storage_bytes,
         requires_grad=t.requires_grad,
         is_quantized=t.is_quantized,
@@ -942,7 +944,11 @@ class _DispatchCacheKey(list):
         self, tup: Tuple[object, ...], hash: Callable[[object], int] = hash
     ) -> None:
         self[:] = tup
-        self.hashvalue = hash(tup)
+        try:
+            self.hashvalue = hash(tup)
+        except TypeError as e:
+            breakpoint()
+            raise
 
     def __hash__(self) -> int:  # type: ignore[override]
         return self.hashvalue
@@ -1498,11 +1504,11 @@ class FakeTensorMode(TorchDispatchMode):
             if not t._has_symbolic_sizes_strides:
                 storage = t.untyped_storage()
                 with in_kernel_invocation_manager(self), maybe_suppress():
-                    empty.set_(storage, metadata.storage_offset, shape, metadata.stride)
+                    empty.set_(storage, metadata.storage_offset, shape, stride)
         elif metadata.storage_offset != 0:
             storage = empty.untyped_storage()
             with in_kernel_invocation_manager(self), maybe_suppress():
-                empty.set_(storage, metadata.storage_offset, shape, metadata.stride)
+                empty.set_(storage, metadata.storage_offset, shape, stride)
         if storage_bytes == 0:
             empty.untyped_storage().resize_(0)
 
