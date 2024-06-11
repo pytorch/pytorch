@@ -24,10 +24,7 @@ from torch._inductor.pattern_matcher import (
     stable_topological_sort,
 )
 from torch._inductor.test_case import run_tests, TestCase
-from torch._inductor.utils import (
-    get_gpu_shared_memory,
-    run_and_get_code
-)
+from torch._inductor.utils import get_gpu_shared_memory, run_and_get_code
 from torch._inductor.virtualized import V
 from torch.testing import FileCheck
 from torch.testing._internal.common_cuda import SM80OrLater
@@ -37,6 +34,7 @@ from torch.utils import _pytree as pytree
 
 
 is_A100 = LazyVal(lambda: get_gpu_shared_memory() == 166912)
+
 
 class TestPatternMatcher(TestCase):
     def common(

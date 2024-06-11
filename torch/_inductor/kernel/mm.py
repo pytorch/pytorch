@@ -416,9 +416,11 @@ def try_heuristic(m, n, k, choices, mat1, mat2, mat2_dtype, layout):
         return
 
     # only use heuristic if we are running on an A100
-    # torch.cuda.get_device_capability() >= (8, 0) returns true for A10G 
+    # torch.cuda.get_device_capability() >= (8, 0) returns true for A10G
     # which does not have enough shared memory for one of the configs
-    if (not torch.cuda.get_device_capability() >= (8, 0)) or get_gpu_shared_memory() != 166912:
+    if (
+        not torch.cuda.get_device_capability() >= (8, 0)
+    ) or get_gpu_shared_memory() != 166912:
         return
 
     if m == 1 and (n % 16 != 0 or k % 16 != 0):
