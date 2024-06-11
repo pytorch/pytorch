@@ -788,8 +788,8 @@ class FxGraphCache:
     def _lookup_graph(
         key: str,
         example_inputs: List[torch.Tensor],
-        local,
-        remote_cache,
+        local: bool,
+        remote_cache: Optional[Any],
     ) -> Optional[CompiledFxGraph]:
         """
         Lookup a compiled graph in the cache by key. On a hit, return the

@@ -610,6 +610,7 @@ def aot_dispatch_autograd(
     if config.enable_autograd_cache and aot_config.cache_key:
         fw_key = getattr(compiled_fw_func, "_fx_graph_cache_key", None)
         bw_key = getattr(compiled_bw_func, "_fx_graph_cache_key", None)
+
         if fw_key and bw_key:
             entry = AOTAutogradCacheEntry(
                 CompiledForward(fw_key),
