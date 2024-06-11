@@ -1238,6 +1238,46 @@ def triton_(in_ptr0, in_ptr1, out_ptr0, xnumel, XBLOCK : tl.constexpr):
     tl.store(out_ptr0 + (x3), tmp2, xmask)""",  # noqa: B950
         )
 
+    def test_int64_index_intermediate(self):
+        def foo(inp):
+            view_23 = torch.ops.aten.view.default(inp, [-1, 8192, 8192])
+            split_1 = torch.ops.aten.split.Tensor(view_23, 1024, 1)
+            view_23 = None
+            getitem_17 = split_1[0]
+            getitem_18 = split_1[1]
+            getitem_19 = split_1[2]
+            getitem_20 = split_1[3]
+            getitem_21 = split_1[4]
+            getitem_22 = split_1[5]
+            getitem_23 = split_1[6]
+            getitem_24 = split_1[7]
+            split_1 = None
+            cat_1 = torch.ops.aten.cat.default(
+                [
+                    getitem_17,
+                    getitem_18,
+                    getitem_19,
+                    getitem_20,
+                    getitem_21,
+                    getitem_22,
+                    getitem_23,
+                    getitem_24,
+                ]
+            )
+            getitem_17 = (
+                getitem_18
+            ) = (
+                getitem_19
+            ) = getitem_20 = getitem_21 = getitem_22 = getitem_23 = getitem_24 = None
+            return cat_1
+
+        for mark_dynamic in [False, True]:
+            inp = torch.rand((65536, 8192), dtype=torch.bfloat16, device="cuda")
+            if mark_dynamic:
+                torch._dynamo.mark_dynamic(inp, 0)
+            foo_c = torch.compile(foo)
+            torch.testing.assert_allclose(foo(inp), foo_c(inp))
+
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
