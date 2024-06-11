@@ -34,7 +34,6 @@ from torch._dynamo.debug_utils import aot_graph_input_parser
 from torch._dynamo.testing import (
     CompileCounterWithBackend,
     expectedFailureCodegenDynamic,
-    expectedFailureScalar,
     rand_strided,
     same,
     skipIfPy312,
@@ -81,6 +80,7 @@ from torch.testing._internal.common_utils import (
     IS_X86,
     parametrize,
     serialTest,
+    skipIfNNModuleInlined,
     skipIfRocm,
     skipIfXpu,
     subtest,
@@ -231,6 +231,23 @@ def run_fw_bw_and_get_code(fn):
         return result
 
     return run_and_get_code(run_with_backward)
+
+
+def register_ops_with_aoti_compile(ns, op_set, dispatch_key, torch_compile_op_lib_impl):
+    for _op_name in op_set:
+        qualified_op_name = f"{ns}::{_op_name}"
+        _, overload_names = torch._C._jit_get_operation(qualified_op_name)
+        for overload_name in overload_names:
+            try:
+                reg_op_name = qualified_op_name
+                schema = torch._C._get_schema(qualified_op_name, overload_name)
+                if schema.overload_name:
+                    reg_op_name = f"{qualified_op_name}.{schema.overload_name}"
+                torch_compile_op_lib_impl._impl_with_aoti_compile(  # noqa: F821
+                    reg_op_name, dispatch_key
+                )
+            except Exception as e:
+                continue
 
 
 class TestCase(InductorTestCase):
@@ -752,6 +769,58 @@ class CommonTemplate:
         )
 
     @skipCUDAIf(not SM80OrLater, "Requires sm80")
+    def test_eager_aoti_support_out(self):
+        ns = "aten"
+        op_name = "clamp"
+        dispatch_key = "CPU"
+        device = "cpu"
+        if self.device.lower() == "cuda":
+            dispatch_key = "CUDA"
+            device = "cuda"
+
+        inp_tensor = torch.randn(128, dtype=torch.float, device=device).fill_(1.0)
+        min_tensor = inp_tensor - 0.05
+        max_tensor = inp_tensor + 0.05
+        with _scoped_library("aten", "IMPL") as torch_compile_op_lib_impl:
+            ref_out_tensor = torch.randn(128, dtype=torch.float, device=device).fill_(
+                -1
+            )
+            ref_tensor = torch.clamp(
+                max=max_tensor, min=min_tensor, input=inp_tensor, out=ref_out_tensor
+            )
+
+            ref_out_tensor1 = torch.randn(128, dtype=torch.float, device=device).fill_(
+                -1
+            )
+            ref_tensor1 = torch.clamp(
+                max=max_tensor, out=ref_out_tensor1, min=min_tensor, input=inp_tensor
+            )
+
+            register_ops_with_aoti_compile(
+                ns, [op_name], dispatch_key, torch_compile_op_lib_impl
+            )
+
+            res_out_tensor = torch.randn(128, dtype=torch.float, device=device).fill_(
+                -1
+            )
+            res_tensor = torch.clamp(
+                max=max_tensor, min=min_tensor, input=inp_tensor, out=res_out_tensor
+            )
+
+            self.assertEqual(ref_tensor, res_tensor)
+            self.assertEqual(ref_out_tensor, res_out_tensor)
+
+            res_out_tensor1 = torch.randn(128, dtype=torch.float, device=device).fill_(
+                -1
+            )
+            res_tensor1 = torch.clamp(
+                max=max_tensor, out=res_out_tensor1, min=min_tensor, input=inp_tensor
+            )
+
+            self.assertEqual(ref_tensor1, res_tensor1)
+            self.assertEqual(ref_out_tensor1, res_out_tensor1)
+
+    @skipCUDAIf(not SM80OrLater, "Requires sm80")
     def test_eager_aoti_cache_hit(self):
         ns = "aten"
         op_name = "abs"
@@ -779,24 +848,13 @@ class CommonTemplate:
         with mock.patch(
             "torch._inductor.utils.aoti_compile_with_persistent_cache", None
         ):
-            qualified_op_name = f"{ns}::{op_name}"
-            _, overload_names = torch._C._jit_get_operation(qualified_op_name)
-
             with _scoped_library("aten", "IMPL") as torch_compile_op_lib_impl:
                 # Get ref result from eager
                 ref_value = getattr(torch.ops.aten, op_name)(input_tensor)
 
-                for overload_name in overload_names:
-                    try:
-                        reg_op_name = qualified_op_name
-                        schema = torch._C._get_schema(qualified_op_name, overload_name)
-                        if schema.overload_name:
-                            reg_op_name = f"{qualified_op_name}.{schema.overload_name}"
-                        torch_compile_op_lib_impl._impl_with_aoti_compile(  # noqa: F821
-                            reg_op_name, dispatch_key
-                        )
-                    except Exception as e:
-                        continue
+                register_ops_with_aoti_compile(
+                    ns, [op_name], dispatch_key, torch_compile_op_lib_impl
+                )
 
                 # Invoke the pre-compiled kernel and get result.
                 res_value = getattr(torch.ops.aten, op_name)(input_tensor)
@@ -804,7 +862,7 @@ class CommonTemplate:
                 self.assertEqual(ref_value, res_value)
 
     @skipCUDAIf(not SM80OrLater, "Requires sm80")
-    def test_aoti_compile_with_persistent_cache(self):
+    def test_eager_aoti_with_persistent_cache(self):
         def fn(a):
             return torch.abs(a)
 
@@ -906,19 +964,9 @@ class CommonTemplate:
             for scalar_value in scalar_values:
                 ref_values.append(torch.add(a, b, alpha=scalar_value))
 
-            qualified_op_name = f"{namespace_name}::{op_name}"
-            _, overload_names = torch._C._jit_get_operation(qualified_op_name)
-            for overload_name in overload_names:
-                try:
-                    reg_op_name = qualified_op_name
-                    schema = torch._C._get_schema(reg_op_name, overload_name)
-                    if schema.overload_name:
-                        reg_op_name = f"{reg_op_name}.{schema.overload_name}"
-                    torch_compile_op_lib_impl._impl_with_aoti_compile(  # noqa: F821
-                        reg_op_name, dispatch_key
-                    )
-                except Exception as e:
-                    continue
+            register_ops_with_aoti_compile(
+                namespace_name, [op_name], dispatch_key, torch_compile_op_lib_impl
+            )
 
             res_values = []
             for scalar_value in scalar_values:
@@ -928,8 +976,7 @@ class CommonTemplate:
             self.assertEqual(ref_values, res_values)
 
     @skipCUDAIf(not SM80OrLater, "Requires sm80")
-    def test_torch_compile_override_registration(self):
-        dynamic = False
+    def test_eager_aoti_override_registration(self):
         namespace_name = "aten"
         dispatch_key = "CPU"
         device = torch.device("cpu")
@@ -951,24 +998,10 @@ class CommonTemplate:
             ref = opt_fn(x)
             ref_array.append(ref)
 
-        def register_ops(op_set, dispatch_key, torch_compile_op_lib_impl):
-            for _op_name in op_set:
-                qualified_op_name = f"{namespace_name}::{_op_name}"
-                _, overload_names = torch._C._jit_get_operation(qualified_op_name)
-                for overload_name in overload_names:
-                    try:
-                        reg_op_name = qualified_op_name
-                        schema = torch._C._get_schema(qualified_op_name, overload_name)
-                        if schema.overload_name:
-                            reg_op_name = f"{qualified_op_name}.{schema.overload_name}"
-                        torch_compile_op_lib_impl._impl_with_aoti_compile(  # noqa: F821
-                            reg_op_name, dispatch_key
-                        )
-                    except Exception as e:
-                        continue
-
         with _scoped_library("aten", "IMPL") as torch_compile_op_lib_impl:
-            register_ops(unary_op_set, dispatch_key, torch_compile_op_lib_impl)
+            register_ops_with_aoti_compile(
+                namespace_name, unary_op_set, dispatch_key, torch_compile_op_lib_impl
+            )
 
             res_array = []
             for unary_op_name in unary_op_set:
@@ -985,7 +1018,9 @@ class CommonTemplate:
         ref_with_min_max = torch.ops.aten.clamp(a, min_tensor, max_tensor)
 
         with _scoped_library("aten", "IMPL") as torch_compile_op_lib_impl:
-            register_ops(["clamp"], dispatch_key, torch_compile_op_lib_impl)
+            register_ops_with_aoti_compile(
+                namespace_name, ["clamp"], dispatch_key, torch_compile_op_lib_impl
+            )
             res_with_min = torch.ops.aten.clamp(a, min_tensor)
             res_with_min_max = torch.ops.aten.clamp(a, min_tensor, max_tensor)
             self.assertEqual(ref_with_min, res_with_min)
@@ -1316,9 +1351,6 @@ class CommonTemplate:
 
         self.common(fn, (torch.randn(1024),))
 
-    # Fails when testing the scalar version
-    # See https://github.com/pytorch/pytorch/issues/128029.
-    @expectedFailureScalar
     @skipIfRocm
     @config.patch(debug_index_asserts=False)
     def test_neg_index(self):
@@ -1581,40 +1613,16 @@ class CommonTemplate:
         def fn(a):
             return torch.var(a)
 
-        atol = None
-        rtol = None
-        if self.device == "cpu" and os.getenv("ATEN_CPU_CAPABILITY") == "default":
-            atol = 1e-4
-            rtol = 1e-4
-        self.common(
-            fn,
-            ((torch.rand((10, 3, 352, 352), dtype=torch.float32),)),
-            rtol=rtol,
-            atol=atol,
-        )
-        self.common(
-            fn, ((torch.rand((14923), dtype=torch.float32),)), rtol=rtol, atol=atol
-        )
+        self.common(fn, ((torch.rand((10, 3, 352, 352), dtype=torch.float32),)))
+        self.common(fn, ((torch.rand((14923), dtype=torch.float32),)))
 
     @skipCPUIf(IS_MACOS, "fails on macos")
     def test_multilayer_var_lowp(self):
         def fn(a):
             return torch.var(a)
 
-        atol = None
-        rtol = None
-        if self.device == "cpu" and os.getenv("ATEN_CPU_CAPABILITY") == "default":
-            atol = 1e-3
-            rtol = 1e-3
-        self.common(
-            fn,
-            (torch.rand((16, 16, 352, 352), dtype=torch.float16),),
-            rtol=rtol,
-            atol=atol,
-        )
-        self.common(
-            fn, (torch.rand((14923), dtype=torch.float16),), rtol=rtol, atol=atol
-        )
+        self.common(fn, (torch.rand((16, 16, 352, 352), dtype=torch.float16),))
+        self.common(fn, (torch.rand((14923), dtype=torch.float16),))
 
     def test_split_cumsum(self):
         def fn(a):
@@ -4000,6 +4008,7 @@ class CommonTemplate:
 
         self.assertEqual(eager_delta, compile_delta)
 
+    @skipIfNNModuleInlined("https://github.com/pytorch/pytorch/issues/128198")
     def test_buffer_batch_norm(self):
         class MyModel(torch.nn.Module):
             def __init__(self):
@@ -5527,6 +5536,14 @@ class CommonTemplate:
 
         for dtype in all_types():
             self.common(fn, (make_tensor(8, dtype=dtype, device=self.device),))
+
+    def test_full_boolean(self):
+        def fn(n):
+            x = torch.full((1,), n >= 1024, device=self.device)
+            return x, x + 1
+
+        self.common(fn, (1024,))
+        self.common(fn, (1023,))
 
     def test_index1(self):
         def fn(a, b, c):
@@ -7842,6 +7859,95 @@ class CommonTemplate:
         )
         assertGeneratedKernelCountEqual(self, 0)
 
+    def test_avg_pool3d_backward(self):
+        def fn(a, b):
+            return aten.avg_pool3d_backward(
+                a,
+                b,
+                [2, 2, 2],
+                [2, 2, 2],
+                [0, 0, 0],
+                True,
+                False,
+                None,
+            )
+
+        self.common(
+            fn,
+            [
+                torch.randn([2, 4, 7, 7, 7]),
+                torch.randn([2, 4, 14, 14, 14]),
+            ],
+        )
+
+    def test_avg_pool3d_backward2(self):
+        def fn(a, b):
+            return aten.avg_pool3d_backward(
+                a,
+                b,
+                [3, 3, 3],
+                [1, 1, 1],
+                [1, 1, 1],
+                True,
+                False,
+                None,
+            )
+
+        self.common(
+            fn,
+            [
+                torch.randn([1, 1, 20, 20, 15]),
+                torch.randn([1, 1, 20, 20, 15]),
+            ],
+        )
+
+    def test_avg_pool3d_backward3(self):
+        def fn(a, b):
+            return aten.avg_pool3d_backward(
+                a,
+                b,
+                [1, 1, 1],
+                [2, 2, 2],
+                [0, 0, 0],
+                False,
+                False,
+                None,
+            )
+
+        torch._inductor.metrics.generated_kernel_count = 0
+        self.common(
+            fn,
+            [
+                torch.randn([1, 2016, 11, 11, 11]),
+                torch.randn([1, 2016, 21, 21, 21]),
+            ],
+        )
+        assertGeneratedKernelCountEqual(self, 1)
+
+    def test_avg_pool3d_backward4(self):
+        def fn(a, b):
+            return aten.avg_pool3d_backward(
+                a,
+                b,
+                [13, 13, 13],
+                [1, 1, 1],
+                [0, 0, 0],
+                True,
+                False,
+                None,
+            )
+
+        torch._inductor.metrics.generated_kernel_count = 0
+        self.common(
+            fn,
+            [
+                torch.randn([1, 16, 12, 12, 12]),
+                torch.randn([1, 16, 24, 24, 24]),
+            ],
+            check_lowp=False,
+        )
+        assertGeneratedKernelCountEqual(self, 0)
+
     @config.patch(search_autotune_cache=False)
     def test_mm_views(self):
         def fn(a, b):
@@ -8227,7 +8333,7 @@ class CommonTemplate:
             rand_strided(shape, stride, dtype).requires_grad_(True).add(1)
             for shape, stride, dtype in args
         ]
-        self.common(forward, args, atol=1e-05, rtol=1e-05)
+        self.common(forward, args)
 
     @requires_gpu()
     def test_tmp_not_defined_issue3(self):
@@ -9309,7 +9415,6 @@ class CommonTemplate:
     # To support this behavior, we need to allow const-propping tensors that store symint data.
     # For now, dynamo will explicitly graph break when it encounters user code with this behavior.
     @expectedFailureCodegenDynamic
-    @expectedFailureScalar
     def test_AllenaiLongformerBase_repro(self):
         def fn(query, scores, window_overlap):
             batch_size, seq_len, num_heads, _ = query.size()
@@ -9345,9 +9450,6 @@ class CommonTemplate:
             opt_fn = torch._dynamo.optimize("inductor")(fn)
             _, code = run_and_get_cpp_code(opt_fn, *args)
             print(code)
-            # When testing the scalar version, i.e., ATEN_CPU_CAPABILITY=default,
-            # static_cast<int>(256) is not found, but static_cast<int64_t>(256).
-            # See https://github.com/pytorch/pytorch/issues/126262.
             FileCheck().check_count(
                 "static_cast<int32_t>(256)",
                 1,
