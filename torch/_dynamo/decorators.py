@@ -1,6 +1,7 @@
+# mypy: allow-untyped-defs
 # ruff: noqa: TCH004
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import cast, TYPE_CHECKING
 
 import torch
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
@@ -8,7 +9,6 @@ from . import trace_rules, variables
 from .comptime import comptime
 from .eval_frame import DisableContext, innermost_fn, RunOnlyContext
 from .exc import IncorrectUsage
-from .external_utils import is_compiling
 
 if TYPE_CHECKING:
     from torch._C._dynamo.eval_frame import (  # noqa: F401
@@ -164,6 +164,7 @@ def _apply_func_to_inner_tensors_of_same_dim(func, t, *args, **kwargs):
     assert is_traceable_wrapper_subclass(t)
 
     attrs, ctx = t.__tensor_flatten__()
+    t = cast(torch.Tensor, t)
     for attr in attrs:
         inner = getattr(t, attr)
         if inner.dim() == t.dim():
@@ -264,7 +265,7 @@ def mark_static(t, index=None):
     Unlike mark_dynamic, this can be done inside a graph, in which case it
     induces specialization on the tensor.
     """
-    if is_compiling():
+    if torch.compiler.is_compiling():
         if index is None:
             for s in t.size():
                 comptime.force_static(s)

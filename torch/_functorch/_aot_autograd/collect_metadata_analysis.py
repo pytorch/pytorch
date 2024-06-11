@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 """
 This module is one of the analysis modules - it takes as input a function or graph
 and some preexisting properties, and returns some data that is useful for deciding
@@ -85,7 +86,7 @@ def coerce_tangent(x):
     if is_traceable_wrapper_subclass(out) and hasattr(
         out, "__coerce_tangent_metadata__"
     ):
-        out = out.__coerce_tangent_metadata__()
+        out = out.__coerce_tangent_metadata__()  # type: ignore[attr-defined]
     # It's possible to have a subclass that advertises as contiguous,
     # but has noncontiguous inner tensors.
     # Force these to be conntiguous too
