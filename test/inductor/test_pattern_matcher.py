@@ -33,7 +33,9 @@ from torch.testing._internal.inductor_utils import HAS_CUDA
 from torch.utils import _pytree as pytree
 
 
-is_A100 = LazyVal(lambda: get_gpu_shared_memory() == 166912)
+is_A100 = LazyVal(
+    lambda: torch.cuda.is_available() and get_gpu_shared_memory() == 166912
+)
 
 
 class TestPatternMatcher(TestCase):
@@ -528,6 +530,7 @@ class TestPatternMatcher(TestCase):
             torch.testing.assert_close(ref, test)
             self.assertFalse("uint4x2_mixed_mm" in code)
 
+    @inductor_config.patch(force_mixed_mm="no")
     @inductor_config.patch(use_mixed_mm=False)
     def test_uint4x2_mixed_mm_gating_works(self):
         def fn(a, b):
