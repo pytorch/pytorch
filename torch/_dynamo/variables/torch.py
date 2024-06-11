@@ -179,15 +179,14 @@ class TorchCtxManagerClassVariable(BaseTorchVariable):
 
     @staticmethod
     def is_matching_cls(value):
+        supported_ctx_manager_classes.update(dict.fromkeys([
+            torch.distributed._composable.fsdp._fsdp_param_group.FSDPParamGroup.use_training_state,
+        ]))
         # Unwrap if it's a functools.lru_cache wrapper
         value = unwrap_if_wrapper(value)
         # We can't do isinstance(value, type) check because some ctx managers
         # are implemented as a function decorated by contextlib.contextmanager,
         # E.g., torch._functorch.vmap.vmap_increment_nesting.
-        import logging
-
-        torch_log = logging.getLogger("torch")
-        torch_log.warning(f"value: {value}")
         return (
             # Context manager type or function with @contextmanager is callable
             callable(value)
@@ -203,7 +202,6 @@ class TorchCtxManagerClassVariable(BaseTorchVariable):
         from . import (
             DisabledSavedTensorsHooksVariable,
             DualLevelContextManager,
-            FSDPParamGroupUseTrainingStateVariable,
             GradIncrementNestingCtxManagerVariable,
             GradInplaceRequiresGradCtxManagerVariable,
             GradModeVariable,
@@ -212,6 +210,7 @@ class TorchCtxManagerClassVariable(BaseTorchVariable):
             SetFwdGradEnabledContextManager,
             StreamVariable,
             VmapIncrementNestingCtxManagerVariable,
+            FSDPParamGroupUseTrainingStateVariable,
         )
 
         if self.value is torch.no_grad:
@@ -301,6 +300,12 @@ class TorchCtxManagerClassVariable(BaseTorchVariable):
             return DisabledSavedTensorsHooksVariable.create(
                 tx, args[0].as_python_constant()
             )
+        elif self.value is torch.distributed._composable.fsdp._fsdp_param_group.FSDPParamGroup.use_training_state:
+            assert len(args) == 2
+            return FSDPParamGroupUseTrainingStateVariable.create(
+                tx, args[0], args[1].as_python_constant()
+            )
+
         return super().call_function(tx, args, kwargs)
 
 

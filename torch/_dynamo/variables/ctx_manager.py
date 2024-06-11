@@ -109,7 +109,7 @@ class ContextWrappingVariable(VariableTracker):
         assert len(args) == 1
         if isinstance(args[0], NestedUserFunctionVariable):
             args[0] = UserFunctionVariable(args[0].get_function())
-        assert isinstance(args[0], (UserMethodVariable, UserFunctionVariable)), f"args[0]: {args[0]}, type(args[0]): {type(args[0])}, args: {args}, kwargs: {kwargs}"
+        assert isinstance(args[0], (UserMethodVariable, UserFunctionVariable))
 
         if isinstance(args[0], UserMethodVariable):
             return WrappedUserMethodVariable(args[0], self)
@@ -854,7 +854,6 @@ class FSDPParamGroupUseTrainingStateVariable(ContextWrappingVariable):
             initial_values=[param_group_var.value._training_state],
             **kwargs,
         )
-        var._call_func(tx, var.target_values)
         return var
 
     def __init__(self, param_group_var, target_values, initial_values=None, **kwargs):
@@ -882,7 +881,7 @@ class FSDPParamGroupUseTrainingStateVariable(ContextWrappingVariable):
         assert len(values) == 1
         value = values[0]
         if self.param_group_var.value._training_state != value:
-            self.param_group_var._training_state = value
+            self.param_group_var.call_method(tx, "__setattr__", (variables.ConstantVariable.create("_training_state"), variables.EnumVariable(value)), {})
             self.param_group_var.value._training_state = value
 
     def module_name(self):

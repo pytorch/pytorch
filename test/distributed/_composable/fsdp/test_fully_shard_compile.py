@@ -10,6 +10,7 @@ from torch.distributed._composable.fsdp._fsdp_param_group import FSDPParamGroup
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import FSDPTest, MLP
 from torch.testing._internal.common_utils import run_tests
+import torch._dynamo.testing
 from torch.utils._triton import has_triton
 
 
@@ -63,8 +64,6 @@ class TestFullyShardCompileCompute(FSDPTest):
 
 
 class TestFullyShardCompile(FSDPTest):
-    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
-    @skip_if_lt_x_gpu(2)
     def test_dynamo_trace_use_training_state(self):
         torch._dynamo.reset()
         # Construct a dummy FSDPParamGroup, since we just want to test the `use_training_state` ctx manager.
@@ -90,10 +89,14 @@ class TestFullyShardCompile(FSDPTest):
         self.assertEqual(param_group._training_state, TrainingState.IDLE)
         eager_out = f(inp)
         self.assertEqual(param_group._training_state, TrainingState.IDLE)
-        compiled_out = torch.compile(f, backend="aot_eager", fullgraph=True)(inp)
+        cnt = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
+        compiled_out = torch.compile(f, backend=cnt, fullgraph=True)(inp)
         self.assertEqual(param_group._training_state, TrainingState.IDLE)
         self.assertEqual(eager_out, inp + 1)
         self.assertEqual(eager_out, compiled_out)
+        self.assertEqual(cnt.frame_count, 1)
+        self.assertEqual(cnt.op_count, 1)
+        self.assertEqual(len(cnt.graphs), 1)
 
 
 if __name__ == "__main__":

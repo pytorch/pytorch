@@ -2868,8 +2868,6 @@ def get_torch_obj_rule_map():
                 obj = load_object(k)
             else:
                 obj = _module_dir(torch) + k[len("torch/") :]
-            if isinstance(obj, str) and "fsdp" in obj:
-                print(f"obj: {obj}")
             if obj is not None:
                 if obj in d and d[obj] != v:
                     raise AssertionError(
@@ -2896,14 +2894,11 @@ def load_object(name):
         if len(x) == 2:
             obj = _load_obj_from_str(x[0])
             val = getattr(obj, x[1])
-            print(f"here1: obj: {obj}, val: {val}")
         else:
             assert len(x) == 1, f"Invalid obj name {name}"
             val = _load_obj_from_str(x[0])
-            print(f"here2: val: {val}")
         val = unwrap_if_wrapper(val)
-    except (AttributeError, ImportError) as e:
-        print(f"here3: Failed to load {name}: {e}")
+    except (AttributeError, ImportError):
         val = None
     return val
 
@@ -3256,6 +3251,7 @@ MOD_INLINELIST = {
     "torch._higher_order_ops.strict_mode",
     "torch._higher_order_ops.while_loop",
     "torch._higher_order_ops.associative_scan",
+    "torch.distributed._composable.fsdp._fsdp_param_group",
 }
 
 
@@ -3263,8 +3259,6 @@ if torch.distributed.is_available():
     MOD_INLINELIST.add("torch.distributed")
     MOD_INLINELIST.add("torch.distributed._functional_collectives")
     MOD_INLINELIST.add("torch.distributed._composable.replicate")
-    MOD_INLINELIST.add("torch.distributed._composable.fsdp")
-
 
 @functools.lru_cache(None)
 def get_legacy_mod_inlinelist():
@@ -3275,12 +3269,13 @@ def get_legacy_mod_inlinelist():
     return inlinelist
 
 
-@functools.lru_cache(None)
+# @functools.lru_cache(None)
 def get_mod_inlinelist():
     inlinelist = {
         _module_dir(torch) + m[len("torch.") :].replace(".", "/")
         for m in MOD_INLINELIST
     }
+    print(f"inlinelist: {inlinelist}")
     return inlinelist
 
 
@@ -3366,8 +3361,9 @@ def check_file(filename, is_inlined_call=False):
             False,
             "LEGACY_MOD_INLINELIST",
         )
-    if "fsdp" in filename:
-        print(f"filename: {filename}")
+    import logging
+    torch_log = logging.getLogger("torch")
+    torch_log.warning(f"check_file: {filename}")
     if is_inlined_call and is_torch_inline_allowed(filename):
         return SkipResult(
             False,
@@ -3383,9 +3379,7 @@ def check_file(filename, is_inlined_call=False):
             "FBCODE_SKIP_DIRS",
         )
     if bool(SKIP_DIRS_RE.match(filename)):
-        print(f"is_inlined_call: {is_inlined_call}")
-        print(f"is_torch_inline_allowed(filename): {is_torch_inline_allowed(filename)}")
-        return SkipResult(True, f"SKIP_DIRS here123 filename: {filename}")
+        return SkipResult(True, "SKIP_DIRS")
     else:
         return SkipResult(False, "inlined by default")
 
@@ -3469,7 +3463,11 @@ def check_verbose(obj, is_inlined_call=False):
 
 
 def check(obj, is_inlined_call=False):
-    return check_verbose(obj, is_inlined_call).skipped
+    ret = check_verbose(obj, is_inlined_call)
+    import logging
+    torch_log = logging.getLogger("torch")
+    torch_log.warning(f"ret.reason: {ret.reason}")
+    return ret.skipped
 
 
 # skip common third party libs
@@ -3541,7 +3539,6 @@ def lookup_inner(
     if obj is not None:
         if is_aten_op_or_tensor_method(obj):
             return TorchInGraphFunctionVariable
-        print(f"obj to check: {obj}")
         rule = get_torch_obj_rule_map().get(obj, None)
         if rule is not None:
             if reasons is not None:
@@ -3592,7 +3589,6 @@ def lookup_inner(
     # Step 3: lookup obj's tracing rule by filename.
     if filename is None:
         filename = getfile(obj)
-    print(f"obj: {obj}, filename: {filename}")
 
     skip_result = check_file(filename, is_direct_call)
     if reasons is not None:
@@ -3607,5 +3603,5 @@ def clear_lru_cache():
     torch._dynamo.trace_rules.get_torch_obj_rule_map.cache_clear()
     torch._dynamo.trace_rules.get_tensor_method.cache_clear()
     torch._dynamo.trace_rules.get_legacy_mod_inlinelist.cache_clear()
-    torch._dynamo.trace_rules.get_mod_inlinelist.cache_clear()
+    # torch._dynamo.trace_rules.get_mod_inlinelist.cache_clear()
     torch._dynamo.trace_rules.dynamo_dir.cache_clear()
