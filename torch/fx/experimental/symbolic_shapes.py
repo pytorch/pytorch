@@ -4431,9 +4431,12 @@ class ShapeEnv:
             axioms = self.get_axioms(symbols)
         subst = {}
         for e in axioms:
-            subst.update(dict(self.get_implications(e, compute_hint=compute_hint)))
+            if e.free_symbols.issubset(expr.free_symbols):
+                subst.update(dict(self.get_implications(e, compute_hint=compute_hint)))
 
         expr = expr.xreplace(subst)
+
+        symbols = tuple(expr.free_symbols)
 
         # Simplify making use of value range lower bound
         new_shape_env = {}
@@ -4501,11 +4504,8 @@ class ShapeEnv:
             new_shape_env[k] = s + offset
             new_range_env[s] = SymPyValueRangeAnalysis.add(vr, -offset)
 
-        def replace(expr, repl):
-            return expr.xreplace(repl)
-
         try:
-            new_expr = replace(expr, new_shape_env)
+            new_expr = expr.xreplace(new_shape_env)
         except RecursionError:
             log.warning("RecursionError in sympy.xreplace(%s, %s)", expr, new_shape_env)
             self.counter["sympy_recursion_error"] += 1
