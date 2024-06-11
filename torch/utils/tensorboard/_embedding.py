@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 import math
 import numpy as np
 from ._convert_np import make_np

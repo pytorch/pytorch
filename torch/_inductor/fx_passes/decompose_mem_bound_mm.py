@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 import logging
 from typing import List
 
@@ -20,12 +19,12 @@ MAX_OTHER_DIMENSION_DECOMPOSITION = 32
 
 min_first_dimension_decomposition = MIN_FIRST_DIMENSION_DECOMPOSITION
 max_other_dimention_decomposition = MAX_OTHER_DIMENSION_DECOMPOSITION
-if "decompose_mm_pass" in config.post_grad_fusion_options:
+if "decompose_mem_bound_mm" in config.post_grad_fusion_options:
     min_first_dimension_decomposition = config.post_grad_fusion_options[
-        "decompose_mm_pass"
+        "decompose_mem_bound_mm"
     ].get("min_first_dimension_decomposition", MIN_FIRST_DIMENSION_DECOMPOSITION)
     max_other_dimention_decomposition = config.post_grad_fusion_options[
-        "decompose_mm_pass"
+        "decompose_mem_bound_mm"
     ].get("max_other_dimention_decomposition", MAX_OTHER_DIMENSION_DECOMPOSITION)
 
 

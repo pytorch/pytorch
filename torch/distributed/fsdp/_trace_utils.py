@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 import functools
 from contextlib import contextmanager
 from dataclasses import dataclass, field

@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 from .core import unify, reify  # type: ignore[attr-defined]
 from .dispatch import dispatch
 

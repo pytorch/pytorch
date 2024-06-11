@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 import functools
 import numbers
 import operator
@@ -331,8 +330,8 @@ def rrelu_with_noise(
 def rrelu_with_noise_(
     self: Tensor,
     noise: Tensor,
-    lower: float = 0.125,
-    upper: float = 0.3333333333333333,
+    lower: float,
+    upper: float,
     training: bool = False,
     generator: Optional[torch.Generator] = None,
 ) -> Tensor:
@@ -734,11 +733,6 @@ def slice_forward(
     end: Optional[int] = None,
     step: int = 1,
 ):
-    from torch.fx.experimental.symbolic_shapes import (
-        guard_size_oblivious,
-        statically_known_true,
-    )
-
     ndim = self.dim()
     if ndim == 0:
         raise RuntimeError("slice() cannot be applied to a 0-dim tensor.")
@@ -765,9 +759,7 @@ def slice_forward(
 
     if end_val < start_val:
         end_val = start_val
-    elif statically_known_true(end_val == sys.maxsize) or guard_size_oblivious(
-        end_val > sizes[dim]
-    ):
+    elif end_val > sizes[dim]:
         end_val = sizes[dim]
 
     storage_offset = self.storage_offset() + start_val * strides[dim]
@@ -2155,7 +2147,7 @@ def cudnn_batch_norm(
 
 def _broadcast_batch_norm_backward(x, broadcast_mask):
     for axis, mask in enumerate(broadcast_mask):
-        if mask == 1 and not (axis < x.ndim and x.shape[axis] == mask):
+        if mask == 1 and not (axis < x.ndim and x.shape[axis] == broadcast_mask[axis]):
             x = x.unsqueeze(axis)
     return x
 

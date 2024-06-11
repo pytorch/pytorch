@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 import math
 import torch
 import torch.nn as nn
@@ -290,7 +289,7 @@ class _ConvBnNd(nn.modules.conv._ConvNd, nni._FusedModule):
                                       missing_keys, unexpected_keys, error_msgs)
 
     @classmethod
-    def from_float(cls, mod, use_precomputed_fake_quant=False):
+    def from_float(cls, mod):
         r"""Create a qat module from a float module or qparams_dict
 
             Args: `mod` a float module, either produced by torch.ao.quantization utilities
@@ -454,8 +453,8 @@ class ConvBnReLU1d(ConvBn1d):
         return F.relu(ConvBn1d._forward(self, input))
 
     @classmethod
-    def from_float(cls, mod, use_precomputed_fake_quant=False):
-        return super().from_float(mod, use_precomputed_fake_quant)
+    def from_float(cls, mod):
+        return super().from_float(mod)
 
 class ConvReLU1d(nnqat.Conv1d, nni._FusedModule):
     r"""A ConvReLU1d module is a fused module of Conv1d and ReLU, attached with
@@ -491,8 +490,8 @@ class ConvReLU1d(nnqat.Conv1d, nni._FusedModule):
             self._conv_forward(input, self.weight_fake_quant(self.weight), self.bias))
 
     @classmethod
-    def from_float(cls, mod, use_precomputed_fake_quant=False):
-        return super().from_float(mod, use_precomputed_fake_quant=use_precomputed_fake_quant)
+    def from_float(cls, mod):
+        return super().from_float(mod)
 
 class ConvBn2d(_ConvBnNd, nn.Conv2d):
     r"""
@@ -586,8 +585,8 @@ class ConvBnReLU2d(ConvBn2d):
         return F.relu(ConvBn2d._forward(self, input))
 
     @classmethod
-    def from_float(cls, mod, use_precomputed_fake_quant=False):
-        return super().from_float(mod, use_precomputed_fake_quant)
+    def from_float(cls, mod):
+        return super().from_float(mod)
 
 class ConvReLU2d(nnqat.Conv2d, nni._FusedModule):
     r"""A ConvReLU2d module is a fused module of Conv2d and ReLU, attached with
@@ -623,8 +622,8 @@ class ConvReLU2d(nnqat.Conv2d, nni._FusedModule):
             self._conv_forward(input, self.weight_fake_quant(self.weight), self.bias))
 
     @classmethod
-    def from_float(cls, mod, use_precomputed_fake_quant=False):
-        return super().from_float(mod, use_precomputed_fake_quant=use_precomputed_fake_quant)
+    def from_float(cls, mod):
+        return super().from_float(mod)
 
 class ConvBn3d(_ConvBnNd, nn.Conv3d):
     r"""
@@ -759,8 +758,8 @@ class ConvBnReLU3d(ConvBn3d):
         return F.relu(ConvBn3d._forward(self, input))
 
     @classmethod
-    def from_float(cls, mod, use_precomputed_fake_quant=False):
-        return super().from_float(mod, use_precomputed_fake_quant=use_precomputed_fake_quant)
+    def from_float(cls, mod):
+        return super().from_float(mod)
 
 class ConvReLU3d(nnqat.Conv3d, nni._FusedModule):
     r"""A ConvReLU3d module is a fused module of Conv3d and ReLU, attached with
@@ -814,8 +813,8 @@ class ConvReLU3d(nnqat.Conv3d, nni._FusedModule):
         )
 
     @classmethod
-    def from_float(cls, mod, use_precomputed_fake_quant=False):
-        return super().from_float(mod, use_precomputed_fake_quant=use_precomputed_fake_quant)
+    def from_float(cls, mod):
+        return super().from_float(mod)
 
 def update_bn_stats(mod):
     if type(mod) in {ConvBnReLU1d, ConvBnReLU2d, ConvBnReLU3d, ConvBn1d, ConvBn2d, ConvBn3d}:

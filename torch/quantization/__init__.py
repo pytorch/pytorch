@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 from .quantize import *  # noqa: F403
 from .observer import *  # noqa: F403
 from .qconfig import *  # noqa: F403

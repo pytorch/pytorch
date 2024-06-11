@@ -10,7 +10,6 @@ from gen_op_registration_allowlist import (
     gen_transitive_closure,
     load_op_dep_graph,
 )
-
 from torchgen.selective_build.operator import (
     merge_operator_dicts,
     SelectiveBuildOperator,

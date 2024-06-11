@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 import abc
 import copy
 from collections import defaultdict

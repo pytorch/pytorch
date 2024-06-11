@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 import torch
 from torch.fx import map_arg, Node
 from torch.fx.graph import Graph
@@ -442,7 +441,7 @@ def fold_weight(
 
     quantized_model = GraphModule(quantized_model, folded_graph)
     quantized_model._register_state_dict_hook(_save_packed_weight)
-    quantized_model.register_load_state_dict_pre_hook(_load_packed_weight)
+    quantized_model._register_load_state_dict_pre_hook(_load_packed_weight, with_module=True)
     return quantized_model
 
 def _get_module(node: Node, modules: Dict[str, nn.Module]) -> Optional[nn.Module]:

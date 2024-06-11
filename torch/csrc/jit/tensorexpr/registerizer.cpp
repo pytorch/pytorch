@@ -732,7 +732,7 @@ void RegisterizerReplacer::buildReplacements() {
   for (auto& info : infoSet_) {
     VarPtr v = alloc<Var>(
         info->buf()->name_hint() + "_" +
-            std::to_string(getBufferAccessCount(info->buf())),
+            c10::to_string(getBufferAccessCount(info->buf())),
         info->buf()->dtype());
 
     info->replacement().var = v;

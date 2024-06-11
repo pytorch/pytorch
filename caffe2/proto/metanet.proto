@@ -1,0 +1,50 @@
+syntax = "proto2";
+
+import "caffe2/proto/caffe2.proto";
+
+package caffe2;
+
+message ModelInfo {
+  optional string project = 1;
+  optional string modelClass = 2;
+  optional string version = 3;
+  optional string predictorType = 4 [ default = "SINGLE_PREDICTOR" ];
+  optional string modelId = 5;
+}
+
+message BlobsMap {
+  required string key = 1;
+  repeated string value = 2;
+}
+
+message NetsMap {
+  required string key = 1;
+  required NetDef value = 2;
+}
+
+message PlansMap {
+  required string key = 1;
+  required PlanDef value = 2;
+}
+
+message StringMap {
+  required string key = 1;
+  required string value = 2;
+}
+
+message MetaNetDef {
+  repeated BlobsMap blobs = 1;
+  // Text-format serialized NetDefs.
+  repeated NetsMap nets = 2;
+  // Info about where the model comes from. Possible use cases:
+  // 1) sanity check or diagnose
+  // 2) provide info for evaluation.
+  optional ModelInfo modelInfo = 3;
+  repeated PlansMap plans = 4;
+  repeated StringMap applicationSpecificInfo = 5;
+  repeated string blobsOrder = 6;
+  repeated string preLoadBlobs = 7;
+  optional TensorBoundShapes tensorBoundShapes = 8;
+  repeated string requestOnlyEmbeddings = 9;
+  optional AOTConfig aotConfig = 10;
+}

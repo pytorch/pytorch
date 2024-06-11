@@ -3,7 +3,6 @@ import io
 import onnx
 
 import torch.onnx
-
 from caffe2.python.core import BlobReference, Net
 from caffe2.python.onnx.backend import Caffe2Backend
 

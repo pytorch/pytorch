@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 from collections import OrderedDict
 import contextlib
 from typing import Dict, Any

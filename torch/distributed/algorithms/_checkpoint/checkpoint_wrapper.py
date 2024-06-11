@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 import warnings
 from enum import auto, Enum
 from functools import partial
@@ -34,8 +33,8 @@ class ActivationWrapper(torch.nn.Module):
         self._register_state_dict_hook(self._post_state_dict_hook)
         # load_state_dict pre-hook to allow loading back into
         # checkpoint-wrapped module.
-        self.register_load_state_dict_pre_hook(
-            self._pre_load_state_dict_hook
+        self._register_load_state_dict_pre_hook(
+            self._pre_load_state_dict_hook, with_module=True
         )
 
     def forward(self, *args, **kwargs):
@@ -234,8 +233,7 @@ def checkpoint_wrapper(
             f"Please specify {CheckpointImpl.NO_REENTRANT} as "
             f"{CheckpointImpl.REENTRANT} will soon be removed as "
             "the default and eventually deprecated.",
-            FutureWarning,
-            stacklevel=2,
+            stacklevel=1,
         )
     return CheckpointWrapper(
         module,

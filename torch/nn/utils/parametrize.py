@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 import torch
 from torch.__future__ import get_swap_module_params_on_conversion
 from torch.nn.modules.container import ModuleList, ModuleDict, Module

@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 import torch
 from warnings import warn
 __all__ = [
@@ -47,7 +46,7 @@ class ReLU6(torch.nn.ReLU):
         return 'QuantizedReLU6'
 
     @staticmethod
-    def from_float(mod, use_precomputed_fake_quant=False):
+    def from_float(mod):
         return ReLU6(mod.inplace)
 
 class Hardswish(torch.nn.Hardswish):
@@ -70,7 +69,7 @@ class Hardswish(torch.nn.Hardswish):
         return 'QuantizedHardswish'
 
     @staticmethod
-    def from_float(mod, use_precomputed_fake_quant=False):
+    def from_float(mod):
         scale, zero_point = mod.activation_post_process.calculate_qparams()
         return Hardswish(float(scale), int(zero_point))
 
@@ -99,7 +98,7 @@ class ELU(torch.nn.ELU):
         return 'QuantizedELU'
 
     @staticmethod
-    def from_float(mod, use_precomputed_fake_quant=False):
+    def from_float(mod):
         scale, zero_point = mod.activation_post_process.calculate_qparams()
         return ELU(float(scale), int(zero_point), mod.alpha)
 
@@ -130,7 +129,7 @@ class LeakyReLU(torch.nn.LeakyReLU):
         return 'QuantizedLeakyReLU'
 
     @classmethod
-    def from_float(cls, mod, use_precomputed_fake_quant=False):
+    def from_float(cls, mod):
         scale, zero_point = mod.activation_post_process.calculate_qparams()
         return cls(float(scale), int(zero_point), mod.negative_slope, mod.inplace)
 
@@ -155,7 +154,7 @@ class Sigmoid(torch.nn.Sigmoid):
         return torch.ops.quantized.sigmoid(input, self.output_scale, self.output_zero_point)
 
     @classmethod
-    def from_float(cls, mod, use_precomputed_fake_quant=False):
+    def from_float(cls, mod):
         output_scale, output_zero_point = mod.activation_post_process.calculate_qparams()
         return cls(float(output_scale), int(output_zero_point))
 
@@ -188,7 +187,7 @@ class Softmax(torch.nn.Softmax):
         return 'QuantizedSoftmax'
 
     @staticmethod
-    def from_float(mod, use_precomputed_fake_quant=False):
+    def from_float(mod):
         scale, zero_point = mod.activation_post_process.calculate_qparams()
         return Softmax(mod.dim, float(scale), int(zero_point))
 
@@ -270,7 +269,7 @@ class PReLU(torch.nn.Module):
         return 'QuantizedPReLU'
 
     @classmethod
-    def from_float(cls, mod, use_precomputed_fake_quant=False):
+    def from_float(cls, mod):
         scale, zero_point = mod.activation_post_process.calculate_qparams()
         qprelu = cls(float(scale), int(zero_point), mod.num_parameters)
         float_wt = mod.weight.float()

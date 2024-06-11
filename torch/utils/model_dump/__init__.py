@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# mypy: allow-untyped-defs
 """
 model_dump: a one-stop shop for TorchScript model inspection.
 

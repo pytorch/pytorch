@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 import io
 import multiprocessing.queues
 import pickle

@@ -1,6 +1,5 @@
-# mypy: allow-untyped-defs
 import logging
-from typing import cast, Sequence
+from typing import cast, List
 
 from ...._dynamo.utils import counters
 
@@ -74,9 +73,7 @@ class CUDACPPScheduling(BaseScheduling):
         return kernel_name
 
     def codegen_template(
-        self,
-        template_node: BaseSchedulerNode,
-        epilogue_nodes: Sequence[BaseSchedulerNode],
+        self, template_node: BaseSchedulerNode, epilogue_nodes: List[SchedulerNode]
     ):
         """
         Codegen a CUDA template, possibly with fused epilogues

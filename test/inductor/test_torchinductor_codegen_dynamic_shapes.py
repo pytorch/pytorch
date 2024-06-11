@@ -135,7 +135,6 @@ test_failures = {
     "test_zeros_dynamic_shapes": TestFailure(("cpu",)),
     "test_uint_dynamic_shapes": TestFailure(("cpu",)),
     "test_issue102546_dynamic_shapes": TestFailure(("cpu",)),
-    "test_repeat_as_strided_dynamic_shapes": TestFailure(("cpu",)),
     #
     # Failed to find for loop/triton kernel:
     #
@@ -146,7 +145,6 @@ test_failures = {
     "test_argmax_to_float_dynamic_shapes": TestFailure(("cpu", "cuda")),
     "test_avg_pool2d7_dynamic_shapes": TestFailure(("cpu", "cuda")),
     "test_avg_pool2d_backward4_dynamic_shapes": TestFailure(("cpu", "cuda")),
-    "test_avg_pool3d_backward4_dynamic_shapes": TestFailure(("cpu", "cuda")),
     "test_baddbmm_dynamic_shapes": TestFailure(("cpu", "cuda")),
     "test_bmm2_dynamic_shapes": TestFailure(("cpu", "cuda")),
     "test_both_scalars_dynamic_shapes": TestFailure(("cpu", "cuda")),

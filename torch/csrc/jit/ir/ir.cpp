@@ -128,6 +128,12 @@ static std::ostream& operator<<(
   return printValueRefs(out, nodes);
 }
 
+static std::ostream& operator<<(
+    std::ostream& out,
+    const at::ArrayRef<Value*> nodes) {
+  return printValueRefs(out, nodes);
+}
+
 struct const_value_list_with_types {
   const ArrayRef<const Value*> values;
   std::string delim;
@@ -584,7 +590,8 @@ void Graph::lint() const {
       anticipated_uses[n] = -1; // we saw the anticipated user!
       scope->insert(n);
       for (auto block : n->blocks()) {
-        scope = std::make_unique<LintScope>(std::move(scope));
+        std::unique_ptr<LintScope> new_scope(new LintScope(std::move(scope)));
+        scope = std::move(new_scope);
         check_block(block);
         scope = std::move(scope->parent);
       }

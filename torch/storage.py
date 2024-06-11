@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 import io
 
 import torch
@@ -40,7 +39,7 @@ class _StorageBase:
 
     def type(self, dtype: _Optional[str] = None, non_blocking: bool = False) -> T: ...  # type: ignore[empty-body, misc, type-var] # noqa: E704
 
-    def cuda(self, device=None, non_blocking=False) -> T:  # type: ignore[type-var, misc] # noqa: E704
+    def cuda(self, device=None, non_blocking=False) -> T:  # type: ignore[type-var] # noqa: E704
         """Returns a copy of this object in CUDA memory.
 
         If this object is already in CUDA memory and on the correct device, then
@@ -55,7 +54,7 @@ class _StorageBase:
         device2 = torch.device('cuda', device) if device else torch.device('cuda')
         return self.to(device=device2, non_blocking=non_blocking)
 
-    def hpu(self, device=None, non_blocking=False) -> T:  # type: ignore[type-var, misc] # noqa: E704
+    def hpu(self, device=None, non_blocking=False) -> T:  # type: ignore[type-var] # noqa: E704
         """Returns a copy of this object in HPU memory.
 
         If this object is already in HPU memory and on the correct device, then
@@ -183,7 +182,7 @@ class _StorageBase:
             storage = storage.clone()
         return storage
 
-    def to(self, *, device: torch.device, non_blocking: bool = False) -> T:  # type: ignore[type-var, misc] # noqa: E704
+    def to(self, *, device: torch.device, non_blocking: bool = False) -> T:  # type: ignore[type-var] # noqa: E704
         return _to(self, device, non_blocking)
 
     def double(self):
@@ -857,7 +856,7 @@ class TypedStorage:
         hpu_storage: torch.UntypedStorage = self._untyped_storage.hpu(device, non_blocking)
         return self._new_wrapped_storage(hpu_storage)
 
-    def to(self, *, device: torch.device, non_blocking: bool = False) -> T:  # type: ignore[type-var, misc]
+    def to(self, *, device: torch.device, non_blocking: bool = False) -> T:  # type: ignore[type-var]
         _warn_typed_storage_removal()
         if self.dtype in [torch.quint8, torch.quint4x2, torch.quint2x4, torch.qint32, torch.qint8]:
             raise RuntimeError(f"Cannot create {device.type.upper()} storage with quantized dtype")

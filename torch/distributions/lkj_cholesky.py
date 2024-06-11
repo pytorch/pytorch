@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 """
 This closely follows the implementation in NumPyro (https://github.com/pyro-ppl/numpyro).
 

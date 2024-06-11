@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 import dataclasses
 import importlib
 import logging
@@ -17,6 +16,7 @@ from typing import (
     Tuple,
     Union,
 )
+
 from typing_extensions import TypeAlias
 
 import torch

@@ -13,8 +13,8 @@
 #endif
 
 namespace torch {
-
-namespace profiler::impl {
+namespace profiler {
+namespace impl {
 
 namespace {
 
@@ -69,7 +69,8 @@ class LibKinetoClient : public libkineto::ClientInterface {
 
 } // namespace
 
-} // namespace profiler::impl
+} // namespace impl
+} // namespace profiler
 
 #if ENABLE_GLOBAL_OBSERVER
 namespace {

@@ -5,9 +5,8 @@ import io
 import numpy as np
 import onnx
 import pytorch_test_common
-from pytorch_test_common import skipIfUnsupportedMinOpsetVersion
-
 import torch
+from pytorch_test_common import skipIfUnsupportedMinOpsetVersion
 from torch.onnx import _constants, utils
 from torch.onnx._globals import GLOBALS
 from torch.onnx._internal import jit_utils

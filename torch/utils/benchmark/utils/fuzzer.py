@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 import functools
 import itertools as it
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union

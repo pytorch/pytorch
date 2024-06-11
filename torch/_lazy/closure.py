@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 import os
 import threading
 from queue import Empty as EmptyQueue, Queue

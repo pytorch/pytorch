@@ -1,10 +1,10 @@
 import numpy
-from pt import configs
-
-import operator_benchmark as op_bench
 import torch
 import torch.ao.nn.qat as nnqat
+from pt import configs
 from torch.ao.quantization import default_embedding_qat_qconfig
+
+import operator_benchmark as op_bench
 
 """
 Microbenchmarks for QAT Embedding + EmbeddingBag operators.
