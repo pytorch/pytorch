@@ -1403,6 +1403,76 @@ def make_fx(
         _allow_fake_constant=False,
         _error_on_data_dependent_ops=True):
 
+    r"""Creates a traced graph representation of the given function `f`.
+
+    This function wraps the input function `f` with a tracer that records the
+    operations performed by `f` intro a graph. The tracer uses the specified
+    options to control the tracing behavior, such as the decomposition table and
+    tracing mode.
+
+    Args:
+        f (callable): The function to be traced. This function would perform
+            tensor operations that the user wants to capture in the graph.
+        decomposition_table (Optional[Dict[Callable, Callable]]): A table of
+            decompositions to use during tracing.
+        tracing_mode (str): The mode of tracing. Must be one of "real", "fake",
+            or "symbolic".
+        _allow_non_fake_inputs (bool): If True, allows non-fake inputs during tracing.
+            Default is False. Useful if tracing with real tensors but still
+            want to leverage fake tensor functionalities.
+        pre_dispatch (bool): If True, enables pre-dispatch tracing to capture
+            operations before they are dispatched to the actual backend.
+            Default is False.
+        record_module_stack (bool): If True, records the module stack during tracing.
+            Default is False.
+        _allow_fake_constant (bool): If True, allows fake constants during tracing.
+            Default is False.
+        _error_on_data_dependent_ops (bool): If True, raises an error on
+            data-dependent operations. Default is True.
+
+    Returns:
+        callable: A wrapped function that traces the operations of `f`
+        according to the specified options. When called returns a
+        `torch.fx.graph_module.GraphModule`.
+
+    Raises:
+        AssertionError: If `tracing_mode` is not one of "real", "fake",
+            or "symbolic".
+
+    Example 1:
+        >>> import torch
+        >>> from torch.fx.experimental.proxy_tensor import make_fx
+
+        >>> def my_function(x):
+        ...     return torch.mul(x, 2)
+
+        >>> traced_function = make_fx(my_function, tracing_mode="real")
+        >>> x = torch.tensor([1.0, 2.0, 3.0])
+        >>> traced_x = traced_function(x)
+        >>> print(traced_x)
+            my_function()
+            def forward(self, x_1):
+                mul = torch.ops.aten.mul.Tensor(x_1, 2);  x_1 = None
+                return mul
+            # To see more debug info, please use `graph_module.print_readable()`
+        >>> print(print(traced_x.forward(x)))
+            tensor([2., 4., 6.])
+
+    Example 2:
+        >>> from torch.func import functionalize
+        >>> y = torch.randn(1, 1)
+        >>> def f(x):
+        ...     return torch.matmul(x, y)
+        >>> traced_function = make_fx(
+        ...     functionalize(f),
+        ...     tracing_mode='symbolic',
+        ...     _allow_non_fake_inputs=True,
+        ... )(torch.randn(1, 1, 1))
+        >>> print(type(traced_function))
+            <class 'torch.fx.graph_module.GraphModule'>
+
+    """
+
     assert tracing_mode in ["real", "fake", "symbolic"]
 
 
