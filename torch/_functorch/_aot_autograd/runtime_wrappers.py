@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 """
 This module defines runtime wrappers, which, based on previous analysis attempts to:
 1. process the inputs and outputs
@@ -10,7 +11,7 @@ import pprint
 from contextlib import nullcontext
 from dataclasses import dataclass, field
 from functools import wraps
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+from typing import Any, Callable, cast, Dict, List, Optional, Tuple, Union
 
 import torch
 import torch.utils.dlpack
@@ -204,19 +205,21 @@ def _create_runtime_wrapper(
                     compiled_fn, args_, disable_amp=disable_amp, steal_args=True
                 )
         else:
-            # When we have an inference graph, we run with torch.no_grad.
+            # When we have an inference graph, we run with grad disabled.
             # It's possible to get an inference graph with inputs that require grad,
             # in which case we want to make sure autograd is disabled
             # (since e.g., inductor will generate aten.addmm.out calls which autograd will complain on)
-            if torch.is_grad_enabled():
-                with torch.no_grad():
-                    all_outs = call_func_at_runtime_with_args(
-                        compiled_fn, args, disable_amp=disable_amp, steal_args=True
-                    )
-            else:
+            # NOTE: We use _set_grad_enabled directly to reduce runtime overhead
+            grad_enabled = torch.is_grad_enabled()
+            try:
+                if grad_enabled:
+                    torch._C._set_grad_enabled(False)
                 all_outs = call_func_at_runtime_with_args(
                     compiled_fn, args, disable_amp=disable_amp, steal_args=True
                 )
+            finally:
+                if grad_enabled:
+                    torch._C._set_grad_enabled(True)
         del args
 
         num_mutated_runtime_inps = runtime_metadata.num_mutated_inp_runtime_indices
@@ -389,7 +392,7 @@ def _create_runtime_wrapper(
                 else:
                     t._dynamo_weak_dynamic_indices = o.dynamic_dims.copy()
         if runtime_metadata.grad_enabled_mutation is not None:
-            torch.set_grad_enabled(runtime_metadata.grad_enabled_mutation)
+            torch._C._set_grad_enabled(runtime_metadata.grad_enabled_mutation)
         return ret_outs
 
     return runtime_wrapper
@@ -1393,7 +1396,7 @@ Expected metadata: {str(expected_tangent_metadata)}
 
 Runtime metadata: {str(runtime_tangent_metadata)}
 
-shape: {str(x.shape)}
+shape: {str(cast(torch.Tensor, x).shape)}
 To fix this, your tensor subclass must implement the dunder method __force_to_same_metadata__.
 """
             )

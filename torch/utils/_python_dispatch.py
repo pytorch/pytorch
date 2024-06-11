@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import contextlib
 
 import warnings
@@ -273,6 +274,10 @@ class TensorWithFlatten(Protocol):
     @staticmethod
     def __tensor_unflatten__(inner_tensors: int, flatten_spec: int, outer_size: int, outer_stride: int) -> torch.Tensor:
         ...
+
+    # It would be really nice to be able to say that the return of
+    # is_traceable_wrapper_subclass() is Intersection[torch.Tensor,
+    # TensorWithFlatten] - but that doesn't exist.
 
 
 def is_traceable_wrapper_subclass(t: object) -> TypeGuard[TensorWithFlatten]:

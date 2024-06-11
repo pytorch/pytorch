@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 """
 This module is responsible for transforming functions to be traced into a form
 that is easier for the downstream infra (e.g. Autograd, FX, AOTAutograd analysis)
