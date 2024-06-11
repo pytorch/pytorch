@@ -89,10 +89,7 @@ def sympy_generic_le(lower, upper):
         return lower <= upper
     else:
         # only negative condition is True > False
-        assert isinstance(lower, SympyBoolean) and isinstance(upper, SympyBoolean), (
-            lower,
-            upper,
-        )
+        assert isinstance(lower, SympyBoolean) and isinstance(upper, SympyBoolean)
         return not (lower and not upper)
 
 
@@ -472,10 +469,6 @@ class SymPyValueRangeAnalysis:
     @classmethod
     def ne(cls, a, b):
         return cls.not_(cls.eq(a, b))
-
-    @classmethod
-    def identity(cls, a):
-        return ValueRanges.wrap(a)
 
     @classmethod
     def lt(cls, a, b):
@@ -948,8 +941,6 @@ class ValueRangeAnalysis(SymPyValueRangeAnalysis):
         if dtype == torch.bool:
             if x.is_singleton():
                 return ValueRanges.wrap(x.lower != 0)
-            elif x.is_bool:
-                return x
             elif 0 not in x:
                 return ValueRanges.wrap(sympy.true)
             else:
