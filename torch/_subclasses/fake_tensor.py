@@ -1225,6 +1225,7 @@ class FakeTensorMode(TorchDispatchMode):
                     self._crosscheck_cache_output(output, func, types, args, kwargs)
             else:
                 self._validate_cache_key(func, args, kwargs)
+                # Caution: This function can recursively call _cached_dispatch_impl()!
                 output = self._dispatch_impl(func, types, args, kwargs)
                 entry = self._make_cache_entry(key, func, args, kwargs, output)
                 FakeTensorMode.cache[key] = entry
@@ -1233,6 +1234,7 @@ class FakeTensorMode(TorchDispatchMode):
             FakeTensorMode.cache_bypasses[e.reason] += 1
 
         if output is _UNASSIGNED:
+            # Caution: This function can recursively call _cached_dispatch_impl()!
             output = self._dispatch_impl(func, types, args, kwargs)
 
         return output
