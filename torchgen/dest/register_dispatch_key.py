@@ -60,6 +60,7 @@ def gen_registration_headers(
     elif backend_index.dispatch_key == DispatchKey.MPS:
         headers.append("#include <ATen/mps/EmptyTensor.h>")
     elif backend_index.dispatch_key == DispatchKey.XPU:
+        # XPU specific, this header resides in third_party/torch-xpu-ops
         headers.append("#include <aten/EmptyTensor.h>")
     elif per_operator_headers:
         headers += [

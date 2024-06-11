@@ -1982,9 +1982,6 @@ def gen_per_operator_headers(
     ]:
         if (whitelist_keys is not None) and (len(whitelist_keys) == 1):
             dispatch_namespace = list(whitelist_keys)[0].lower()
-        #     includes = f"#include <ATen/{dispatch_namespace}/ops/{name}{suffix}.h>"
-        # else:
-        #     includes = f"#include <ATen/ops/{name}{suffix}.h>"
         cpu_fm.write(
             f"{category}.h",
             lambda: {
