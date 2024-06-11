@@ -9,9 +9,9 @@ constant float b[4] = {{-2.118377725, 1.442710462, -0.329097515, 0.012229801}};
 constant float c[4] = {{-1.970840454, -1.624906493, 3.429567803, 1.641345311}};
 constant float d[2] = {{3.543889200, 1.637067800}};
 
-kernel void erfinv_mps_kernel( device {0} *output [[buffer(0)]],
-                            device {1} *input [[buffer(1)]],
-                            uint index [[thread_position_in_grid]]) {{
+kernel void erfinv_kernel( device {0} *output [[buffer(0)]],
+                           device {1} *input [[buffer(1)]],
+                           uint index [[thread_position_in_grid]]) {{
 
   float y = input[index];
   float x, z, num, dem; /*working variables */
@@ -35,4 +35,18 @@ kernel void erfinv_mps_kernel( device {0} *output [[buffer(0)]],
   }}
 
   output[index] = {0}(x);
-}})METAL";
+}}
+
+kernel void exp_kernel( device {0} *output [[buffer(0)]],
+                        device {1} *input [[ buffer(1)]],
+                        uint index [[thread_position_in_grid]]) {{
+  output[index] = precise::exp(input[index]);
+}}
+
+kernel void exp_complex_kernel( device {0}2 *output [[buffer(0)]],
+                                device {0}2 *input [[ buffer(1)]],
+                                uint index [[thread_position_in_grid]]) {{
+  output[index].x = precise::exp(input[index].x)*cos(input[index].y);
+  output[index].y = precise::exp(input[index].x)*sin(input[index].y);
+}}
+)METAL";
