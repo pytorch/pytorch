@@ -12,7 +12,7 @@
 
 namespace at::native::onednn {
 
-TORCH_API dnnl::memory make_onednn_memory(
+TORCH_XPU_API dnnl::memory make_onednn_memory(
     dnnl::memory::desc md,
     dnnl::engine& engine,
     void* ptr);
@@ -21,7 +21,7 @@ TORCH_API dnnl::memory make_onednn_memory(
 bool set_onednn_verbose(int level);
 
 // GpuEngineManager singleton
-struct TORCH_API GpuEngineManager {
+struct TORCH_XPU_API GpuEngineManager {
   static GpuEngineManager& Instance(); // Singleton
 
   dnnl::engine& get_engine(const Device& device) {
@@ -51,7 +51,7 @@ struct TORCH_API GpuEngineManager {
 };
 
 // GpuStreamManager singleton
-struct TORCH_API GpuStreamManager {
+struct TORCH_XPU_API GpuStreamManager {
   static GpuStreamManager& Instance(); // Singleton
 
   dnnl::stream get_stream() {
