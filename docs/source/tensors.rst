@@ -779,5 +779,4 @@ Tensor class reference
     Tensor.where
     Tensor.xlogy
     Tensor.xlogy_
-    Tensor.xpu
     Tensor.zero_

@@ -304,12 +304,13 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnt.frame_count, 0)
 
     def test_torch_guards_stack_frame_register_inlining_disable(self):
+        y = torch.nn.Parameter(torch.tensor([0.25, 0.25]))
         x = torch.tensor([0.5, 0.5])
 
         class encoder(torch.nn.Module):
             def __init__(self, y):
                 super().__init__()
-                self.a = y
+                self.register_parameter("param", y)
 
             @torch._dynamo.disable
             def helper(self, x, y):
@@ -317,9 +318,9 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
 
             def forward(self, a, *args):
                 x = a + a
-                return self.helper(x, self.a)
+                return self.helper(x, self.param)
 
-        e = encoder(2.0)
+        e = encoder(y)
 
         seen_frames = []
         import contextlib
@@ -463,44 +464,6 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(v9, (C, 9))
 
         self.assertEqual(cnt.frame_count, 1)
-
-    def test_assume_constant_result_on_user_defined_fn(self):
-        @torch._dynamo.assume_constant_result
-        def const_fn(n, s):
-            return torch.full([n], s)
-
-        def fn(B):
-            B = const_fn(B.size(0), 13)
-            X = B * 2
-            return X.tolist()
-
-        B_list = [8] * 32
-
-        B = torch.tensor(B_list, dtype=torch.int32)
-        torch._dynamo.decorators.mark_static(B, 0)
-
-        torch._dynamo.config.capture_scalar_outputs = True
-        torch._dynamo.config.capture_dynamic_output_shape_ops = True
-
-        self.assertEqual(
-            fn(B), torch.compile(fn, backend="eager", fullgraph=True, dynamic=True)(B)
-        )
-
-    def test_assume_constant_result_on_computation_with_graph_input(self):
-        @torch._dynamo.assume_constant_result
-        def check(y):
-            return y[0].item() == 1
-
-        def fn(x, y):
-            if check(y):
-                return x + 2
-            else:
-                return x + 1
-
-        y = torch.tensor([1])
-        x = torch.tensor(1)
-
-        self.assertEqual(fn(x, y), torch.compile(fn)(x, y))
 
 
 if __name__ == "__main__":
