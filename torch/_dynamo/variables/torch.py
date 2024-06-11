@@ -18,7 +18,11 @@ from torch._streambase import _StreamBase
 from ..._guards import TracingContext
 from .. import config, polyfill, variables
 from ..codegen import PyCodegen
-from ..create_parameter_op import new_parameter_placeholder, tracable_create_parameter
+from ..create_parameter_op import (
+    can_convert_to_tracable_parameter,
+    new_parameter_placeholder,
+    tracable_create_parameter,
+)
 from ..device_interface import get_registered_device_interfaces
 from ..exc import unimplemented
 from ..guards import GuardBuilder, install_guard
@@ -870,6 +874,9 @@ Either create the tensor outside the compiled region, or do not set the tensor t
         # this results in cleaner graphs, but only works for inputs
         if data.source:
             return cls._nn_param_via_prefix_insert(tx, data, requires_grad)
+
+        if not can_convert_to_tracable_parameter():
+            unimplemented("Workaround for issues with nn_parameter construction")
 
         try:
             shape = tuple(data.var_getattr(tx, "shape").as_python_constant())
