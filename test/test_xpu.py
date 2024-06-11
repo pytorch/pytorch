@@ -335,15 +335,17 @@ class TestXpuAutocast(TestCase):
         if add_kwargs is None:
             add_kwargs = {}
         fast_dtype = torch.bfloat16 if run_as_type == torch.bfloat16 else torch.float16
-        self.assertFalse(torch.is_autocast_enabled())
+        self.assertFalse(torch.is_autocast_enabled("xpu"))
         with torch.amp.autocast("xpu", dtype=fast_dtype):
-            self.assertTrue(torch.is_autocast_enabled())
+            self.assertTrue(torch.is_autocast_enabled("xpu"))
 
             out_type = out_type if out_type is not None else run_as_type
             output = output_method = None
 
             # Try module.* variant, if requested:
             if module is not None and hasattr(module, op):
+                print(*args)
+                print(**add_kwargs)
                 output = getattr(module, op)(*args, **add_kwargs)
                 if isinstance(output, torch.Tensor):
                     self.assertTrue(
@@ -387,7 +389,7 @@ class TestXpuAutocast(TestCase):
             # as the C++-side autocasting, and should be bitwise accurate.
             output_to_compare = output if output is not None else output_method
             with torch.amp.autocast("xpu", enabled=False):
-                self.assertFalse(torch.is_autocast_enabled())
+                self.assertFalse(torch.is_autocast_enabled("xpu"))
 
                 if module is not None and hasattr(module, op):
                     control = getattr(module, op)(
@@ -400,8 +402,8 @@ class TestXpuAutocast(TestCase):
                 self.assertTrue(type(output_to_compare) == type(control))
                 comparison = compare(output_to_compare, control)
                 self.assertTrue(comparison, f"torch.{op} result did not match control")
-            self.assertTrue(torch.is_autocast_enabled())
-        self.assertFalse(torch.is_autocast_enabled())
+            self.assertTrue(torch.is_autocast_enabled("xpu"))
+        self.assertFalse(torch.is_autocast_enabled("xpu"))
 
     def test_autocast_torch_fp16(self):
         for op_with_args in self.autocast_lists.torch_fp16:
