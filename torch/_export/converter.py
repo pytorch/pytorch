@@ -80,6 +80,14 @@ def construct_fqn(ir, ref_map, name_map):
     return ".".join(reversed(name_list))
 
 
+def is_valid_for_codegen(name):
+    if len(name) == 0:
+        return False
+    if name[0].isdigit():
+        return False
+    return True
+
+
 def get_block_to_lifted_attrs(graph: torch._C.Graph) -> Dict[torch._C.Block, Set[str]]:
     """
     Perform two passes to get a mapping of blocks to a set of FQNs of its lifted attributes.
@@ -185,6 +193,7 @@ class TS2FXGraphConverter:
         name_to_param_map: Dict[str, torch.Tensor],
         name_to_buffer_map: Dict[str, torch.Tensor],
         blocks_to_lifted_attrs: Dict[torch._C.Block, Set[str]],
+        renaming_map: Dict[str, str],
     ):
         self.ts_graph = ts_graph
         self.name_to_param_map = name_to_param_map
@@ -204,6 +213,7 @@ class TS2FXGraphConverter:
         self.subgraphs: Dict[str, torch.fx.GraphModule] = {}
 
         self.blocks_to_lifted_attrs = blocks_to_lifted_attrs
+        self.renaming_map = renaming_map
 
         # Populate methods for the standard operators.
         for k in kind_to_standard_operators.keys():
@@ -218,21 +228,6 @@ class TS2FXGraphConverter:
 
     def is_top_level_graph(self):
         return isinstance(self.ts_graph, torch._C.Graph)
-
-        self.block_to_arguments = block_to_arguments
-
-        self.renaming_map = renaming_map
-
-        # Populate methods for the standard operators.
-        for k in kind_to_standard_operators.keys():
-            handler_func_name = ir_name_to_func_name(k)
-            # Create an indirect function call:
-            # convert_<namespace>_<opname> --> lambda node: _convert_standard_operator(node)
-            setattr(
-                self,
-                handler_func_name,
-                lambda node: self._convert_standard_operators(node),
-            )
 
     def add_subgraph(self, subgraph) -> str:
         name = f"subgraph_{len(self.subgraphs)}"
@@ -554,11 +549,16 @@ class TS2FXGraphConverter:
         assert len(inputs) == 1
         predicate = self.get_fx_value(inputs[0])
 
-        def _dfs_build_lifted_arguments_for_input(entry):
+        def _identify_inputs_as_arguments(entry):
             """
-            Bottom-up finding inputs that should be lifted. This is needed
+            Identify inputs from the innermost sub-block. This is needed
             for nested sub-blocks when the input is hidden in the nested sub-block.
-            We need a DFS to extrapolate the hidden input arguments.
+            E.g., example IR of input is hidden in the nested sub-block.
+            Graph[x.1]
+            %1 = ...
+                Block[]
+                    Block[x.1]
+                        %2 = x.1 ...
             """
             arguments: Set[str] = set()
             for block in entry.blocks():
@@ -571,7 +571,12 @@ class TS2FXGraphConverter:
                             # will cause error when it is embedded into a codegen function
                             # (invalid argument name). We rename if the name is not valid for
                             # code generation.
-                            if not is_legal_for_codegen(debug_name):
+                            # E.g.,
+                            #     Graph[x.1]                 Graph[x.1]
+                            #     %1 = ...          -->      %1 = ... // name_to_node["n_1"] = name_to_node["1"]
+                            #         Block[%1]                  Block[%n_1]
+                            #         %2 = %1 ...                %2 = %1 ... // renaming_map["1"] = "n_1"
+                            if not is_valid_for_codegen(debug_name):
                                 prefix = self.name_to_node[
                                     debug_name
                                 ].name  # type: ignore[union-attr]
@@ -586,12 +591,12 @@ class TS2FXGraphConverter:
 
                             arguments.add(debug_name)
                     arguments = arguments.union(
-                        _dfs_build_lifted_arguments_for_input(block_node)
+                        _identify_inputs_as_arguments(block_node)
                     )
             return arguments
 
         # Find inputs.
-        arguments = _dfs_build_lifted_arguments_for_input(node)
+        arguments = _identify_inputs_as_arguments(node)
 
         # Lift parameters as inputs.
         for block in node.blocks():
@@ -603,7 +608,7 @@ class TS2FXGraphConverter:
         subgraph_nodes = []
         for block in node.blocks():
             subgraph_converter = TS2FXGraphConverter(
-                block, dict(), dict(), self.blocks_to_lifted_attrs
+                block, dict(), dict(), self.blocks_to_lifted_attrs, self.renaming_map
             )
             subgraph_converter.constant_map = self.constant_map
             subgraph_converter.attribute_map = self.attribute_map
@@ -737,13 +742,6 @@ class TS2EPConverter:
             else dict()
         )
 
-        # Populate nn module parameters and buffers.
-        self.mod_param_and_buffer_map: Dict[str, Any] = dict()
-        for name, param in ts_model.named_parameters():
-            self.mod_param_and_buffer_map[normalize_name(name)] = param
-        for name, buffer in ts_model.named_buffers():
-            self.mod_param_and_buffer_map[normalize_name(name)] = buffer
-
     def convert(self) -> ExportedProgram:
         blocks_to_lifted_attrs = get_block_to_lifted_attrs(self.ts_graph)
 
@@ -752,6 +750,7 @@ class TS2EPConverter:
             self.name_to_param_map,
             self.name_to_buffer_map,
             blocks_to_lifted_attrs,
+            dict(),
         )
         gm = graph_converter.convert()
         ep = self.retrace_as_exported_program(gm, graph_converter.tensor_constants)
