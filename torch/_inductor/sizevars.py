@@ -350,7 +350,7 @@ class SizeVarAllocator:
         """
         Returns a bool indicating if x is known to be a power of 2.
         """
-        return expr.is_Integer and is_power_of_2(int(expr))
+        return isinstance(expr, sympy.Integer) and is_power_of_2(int(expr))
 
     # The guard functions require you to ALREADY KNOW that a particular
     # condition holds.  If you don't know (you want to guard on an expression
