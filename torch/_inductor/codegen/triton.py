@@ -878,7 +878,7 @@ class TritonKernelOverrides(TritonOverrides):
             def __getattr__(self, name: str) -> Callable[..., CSEVariable]:
                 def inner(*args, **kwargs):
                     nonlocal last_op_is_load
-                    last_op_is_load = name == "load"
+                    last_op_is_load = (name == "load" and not V.graph.is_unspec_arg(args[0]))
                     return getattr(handler, name)(*args, **kwargs)
 
                 return inner
@@ -889,6 +889,7 @@ class TritonKernelOverrides(TritonOverrides):
             result = body()
 
         if last_op_is_load:
+            result.mask_vars.discard(new_mask)
             return result
 
         # Remove once CSEVariables track the dtype
@@ -1310,7 +1311,7 @@ class TritonKernel(SIMDKernel):
             ep = ""
 
         if self._other_val:
-            other = f", other={self._other_val}"
+            other = f", other={constant_repr(self._other_val)}"
         elif (has_tmpmask or has_rindex) and indexing.has_mask():
             other = ", other=0.0"
         else:
