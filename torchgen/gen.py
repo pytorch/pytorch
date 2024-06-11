@@ -2436,8 +2436,11 @@ codegen to generate the correct cpp call for this op. Contact AOTInductor team f
                 extra_cuda_headers if is_cuda_dispatch_key(dispatch_key) else ""
             )
 
+            device = dispatch_key.lower()
+            if rocm and device == "cuda":
+                device = "hip"
             aoti_fm.write(
-                f"c_shim_{dispatch_key.lower()}.cpp",
+                f"c_shim_{device}.cpp",
                 lambda: gen_aoti_c_shim(
                     fallback_native_functions,
                     structured_func_group_dict,
