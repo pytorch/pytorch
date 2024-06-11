@@ -2,7 +2,7 @@ import os
 
 import torch
 
-from torch.distributed._tensor import DeviceMesh, Shard
+from torch.distributed._tensor import DeviceMesh
 from torch.distributed._tensor.debug import CommDebugMode
 
 from torch.distributed.tensor.parallel import (
@@ -13,6 +13,7 @@ from torch.distributed.tensor.parallel import (
 
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     MLPModule,
+    MLPStacked,
     ModelArgs,
     NUM_DEVICES,
     Transformer,
@@ -44,16 +45,14 @@ class CommDebugModeExample:
         self.rank = rank
         self.device_type = get_device_type()
 
-    def test_MLP_distributed_sharding_display(
-        self, is_seq_parallel=False, recompute_activation=False
-    ):
+    def test_MLP_distributed_sharding_display(self):
         "Example of obtaining all module's FQN and parameters for a given distributed model and printing the sharding info"
         device_mesh = DeviceMesh(
             self.device_type,
             torch.arange(0, NUM_DEVICES),
         )
         inp_size = [8, 10]
-        rng_seed = self.rank if is_seq_parallel else 0
+        rng_seed = 0
         torch.manual_seed(rng_seed)
         inp = torch.rand(*inp_size, device=self.device_type)
         model = MLPModule(self.device_type)
@@ -61,12 +60,8 @@ class CommDebugModeExample:
         LR = 0.25
 
         parallelize_plan = {
-            "net1": ColwiseParallel(input_layouts=Shard(0))
-            if is_seq_parallel
-            else ColwiseParallel(),
-            "net2": RowwiseParallel(output_layouts=Shard(0))
-            if is_seq_parallel
-            else RowwiseParallel(),
+            "net1": ColwiseParallel(),
+            "net2": RowwiseParallel(),
         }
 
         model = parallelize_module(model, device_mesh, parallelize_plan)
@@ -79,7 +74,41 @@ class CommDebugModeExample:
 
         comm_mode.print_sharding_info()
 
-    def test_MLP_module_tracing(self, is_seq_parallel=False):
+    def test_MLPStacked_distributed_sharding_display(self):
+        """
+        Example of obtaining all module's FQN and parameters for a given
+        distributed model with nested modules and printing the sharding info
+        """
+        device_mesh = DeviceMesh(
+            self.device_type,
+            torch.arange(0, NUM_DEVICES),
+        )
+        inp_size = [8, 10]
+        rng_seed = 0
+        torch.manual_seed(rng_seed)
+        inp = torch.rand(*inp_size, device=self.device_type)
+        model = MLPStacked(self.device_type)
+
+        LR = 0.25
+
+        parallelize_plan = {
+            "MLPStacked.layers.0.net1": ColwiseParallel(),
+            "MLPStacked.layers.0.net2": RowwiseParallel(),
+            "MLPStacked.layers.1.net1": ColwiseParallel(),
+            "MLPStacked.layers.1.net2": RowwiseParallel(),
+        }
+
+        model = parallelize_module(model, device_mesh, parallelize_plan)
+
+        comm_mode = CommDebugMode()
+
+        with comm_mode:
+            output_tp = model(inp)
+            output_tp.sum().backward()
+
+        comm_mode.print_sharding_info()
+
+    def test_MLP_module_tracing(self):
         """
         Example code to demonstrate CommModeDebug's module level tracing using a MLP model.
         Prints a table of module level collective tracing information
@@ -90,7 +119,7 @@ class CommDebugModeExample:
             torch.arange(0, NUM_DEVICES),
         )
         inp_size = [8, 10]
-        rng_seed = self.rank if is_seq_parallel else 0
+        rng_seed = 0
         torch.manual_seed(rng_seed)
         inp = torch.rand(*inp_size, device=self.device_type)
         model = MLPModule(self.device_type)
@@ -98,12 +127,8 @@ class CommDebugModeExample:
         LR = 0.25
 
         parallelize_plan = {
-            "net1": ColwiseParallel(input_layouts=Shard(0))
-            if is_seq_parallel
-            else ColwiseParallel(),
-            "net2": RowwiseParallel(output_layouts=Shard(0))
-            if is_seq_parallel
-            else RowwiseParallel(),
+            "net1": ColwiseParallel(),
+            "net2": RowwiseParallel(),
         }
 
         model = parallelize_module(model, device_mesh, parallelize_plan)
@@ -158,6 +183,18 @@ def run_example(world_size, rank):
     MLPModule.net1.bias: (Shard(dim=0),)
     MLPModule.net2.weight: (Shard(dim=1),)
     MLPModule.net2.bias: (Replicate(),)
+    """
+
+    instantiated_test.test_MLPStacked_distributed_sharding_display()
+    """
+    MLPStacked.layers.0.net1.weight: (Shard(dim=0),)
+    MLPStacked.layers.0.net1.bias: (Shard(dim=0),)
+    MLPStacked.layers.0.net2.weight: (Shard(dim=1),)
+    MLPStacked.layers.0.net2.bias: (Replicate(),)
+    MLPStacked.layers.1.net1.weight: (Shard(dim=0),)
+    MLPStacked.layers.1.net1.bias: (Shard(dim=0),)
+    MLPStacked.layers.1.net2.weight: (Shard(dim=1),)
+    MLPStacked.layers.1.net2.bias: (Replicate(),)
     """
 
     instantiated_test.test_MLP_module_tracing()
