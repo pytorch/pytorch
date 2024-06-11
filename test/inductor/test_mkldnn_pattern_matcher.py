@@ -1782,17 +1782,32 @@ class TestPatternMatcher(TestPatternMatcherBase):
                     matcher_check_fn=matcher_check_fn,
                     is_qat=is_qat,
                 )
-                self._test_code_common(
-                    mod,
-                    (v,),
-                    [
-                        "torch.ops.onednn.qlinear_pointwise.default",
-                        "torch.ops.onednn.qlinear_pointwise.binary",
-                    ],
-                    [],
-                    check_quantization=True,
-                    num_include_ops=[2, 2],
-                )
+                try:
+                    # For python wrapper
+                    self._test_code_common(
+                        mod,
+                        (v,),
+                        [
+                            "torch.ops.onednn.qlinear_pointwise.default",
+                            "torch.ops.onednn.qlinear_pointwise.binary",
+                        ],
+                        [],
+                        check_quantization=True,
+                        num_include_ops=[2, 2],
+                    )
+                except AssertionError:
+                    # For CPP wrapper
+                    self._test_code_common(
+                        mod,
+                        (v,),
+                        [
+                            "op_qlinear_pointwise.call",
+                            "op_qlinear_pointwise_binary.call",
+                        ],
+                        [],
+                        check_quantization=True,
+                        num_include_ops=[2, 2],
+                    )
 
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN
