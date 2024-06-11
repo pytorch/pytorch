@@ -636,7 +636,18 @@ void run_cudnn_SDP_bprop(
   }
   cudnnHandle_t handle = getCudnnHandle();
   auto key = MHACacheKeyWrapper(
-      b, h, s_q, s_kv, d_qk, d_v, q, k, v, dropout_probability, is_causal, true);
+      b,
+      h,
+      s_q,
+      s_kv,
+      d_qk,
+      d_v,
+      q,
+      k,
+      v,
+      dropout_probability,
+      is_causal,
+      true);
   auto graph_and_tensors_backward_ptr = mhagraphbackwardcache.find(key);
   graph_and_tensors_backward graph_and_tensors_backward_values;
   if (graph_and_tensors_backward_ptr) {
