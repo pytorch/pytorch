@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 """
 Utils for caching the outputs of AOTAutograd
 """
@@ -6,6 +7,7 @@ from __future__ import annotations
 import functools
 import logging
 import os
+from typing import TYPE_CHECKING
 
 import torch
 from torch._functorch import config
@@ -16,9 +18,11 @@ from torch._inductor.codecache import (
     FxGraphHashDetails,
     get_code_hash,
 )
-from torch.fx.node import Node
 
 from .schemas import AOTConfig  # noqa: F401
+
+if TYPE_CHECKING:
+    from torch.fx.node import Node
 
 log = logging.getLogger(__name__)
 
