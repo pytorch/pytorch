@@ -14,6 +14,7 @@
 #include <ATen/ops/native_batch_norm_backward_native.h>
 #include <ATen/ops/native_batch_norm_native.h>
 #endif
+#include <ATen/native/mkldnn/Utils.h>
 
 #if !AT_MKLDNN_ENABLED()
 
@@ -37,7 +38,7 @@ std::tuple<Tensor, Tensor, Tensor> mkldnn_batch_norm_backward(
   TORCH_CHECK(false, "mkldnn_batch_norm_backward: ATen not compiled with MKLDNN support");
 }
 
-static std::tuple<Tensor, Tensor, Tensor> mkldnn_layer_norm_last_index_weight_bias_f32(
+std::tuple<Tensor, Tensor, Tensor> mkldnn_layer_norm_last_index_weight_bias_f32(
     const Tensor& input,
     IntArrayRef normalized_shape, const Tensor& weight, const Tensor& bias,
     double eps, bool inplace) {
@@ -81,7 +82,6 @@ std::tuple<Tensor, Tensor, Tensor> _new_batch_norm_backward_mkldnn(
 #else // AT_MKLDNN_ENABLED
 
 #include <ATen/native/mkldnn/MKLDNNCommon.h>
-#include <ATen/native/mkldnn/Utils.h>
 #include <ATen/native/layer_norm.h>
 #include <ideep/abstract_types.hpp>
 
