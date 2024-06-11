@@ -1208,8 +1208,12 @@ class TestForeach(TestCase):
 
     @onlyCUDA
     def test_div_reciprocal(self):
-        expect_m, expect_e = torch.frexp(torch.div(torch.tensor(0.1, device="cuda"), 10.0))
-        actual_m, actual_e = torch.frexp(torch._foreach_div([torch.tensor(0.1, device="cuda")], [10.0]))
+        expect_m, expect_e = torch.frexp(
+            torch.div(torch.tensor(0.1, device="cuda"), 10.0)
+        )
+        actual_m, actual_e = torch.frexp(
+            torch._foreach_div([torch.tensor(0.1, device="cuda")], [10.0])[0]
+        )
         self.assertEqual(expect_m, actual_m)
         self.assertEqual(expect_e, actual_e)
 
