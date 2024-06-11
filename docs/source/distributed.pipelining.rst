@@ -62,8 +62,8 @@ Overall, the ``pipelining`` package provides the following features:
   application on the Llama model.
 
 
-Step 1: build ``PipelineStage`` for execution
-*********************************************
+Step 1: build ``PipelineStage``
+*******************************
 
 Before we can use a ``PipelineSchedule``, we need to create ``PipelineStage``
 objects that wrap the part of the model running in that stage.  The
