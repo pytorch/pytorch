@@ -36,7 +36,7 @@ from torch.utils._triton import has_triton
 
 from . import comms, config, dependencies, ir, metrics
 from .codecache import write_text
-from .codegen.common import get_scheduling_for_device, index_prevent_reordering, Kernel
+from .codegen.common import get_scheduling_for_device, Kernel
 from .comm_analysis import estimate_nccl_collective_runtime
 from .dependencies import Dep, MemoryDep, StarDep, WeakDep
 from .ir import ComputedBuffer, MultiOutput, MultiOutputLayout
@@ -786,89 +786,6 @@ class SchedulerNode(BaseSchedulerNode):
                 )
             )
 
-    @staticmethod
-    def _merge_loops(old_sizes: Any, old_body: ir.LoopBody) -> Tuple[Any, ir.LoopBody]:
-        assert isinstance(old_body, ir.LoopBody)
-        old_iter_vars, old_reduce_vars = old_body.vars
-        old_iter_sizes, old_reduce_sizes = old_sizes
-
-        index_exprs = [*old_body.indexing_exprs.values()]
-
-        iter_sizes, reindex, prune = V.graph.sizevars._simplify_loops(
-            old_iter_vars,
-            old_iter_sizes,
-            index_prevent_reordering(index_exprs, old_iter_vars, old_iter_sizes),
-        )
-        # if iter_sizes == old_iter_sizes:
-        #     # no dimensions get merged.
-        #     return old_sizes, old_body
-
-        # Note: if no dimension get merges, the symbol prefix will
-        # remain 'y'. But if we merge dimensions, we change prefix to
-        # 'z'. If this is an issue, we can always retrace the LoopBody
-        # to change symbol prefix to 'z'.
-        #
-        # There is indeed an issue due to symbol name conflicting.
-        # y0 maybe reused for the y dimension later.
-        (
-            iter_vars,
-            reduce_vars,
-        ), var_ranges = dependencies.index_vars_no_squeeze(
-            iter_sizes, old_reduce_sizes, prefix="z"
-        )
-        new_body = ir.LoopBody(
-            old_body,
-            [reindex(iter_vars), reduce_vars],
-            var_ranges,
-            iter_vars,
-            reduce_vars,
-        )
-        new_sizes = (iter_sizes, old_reduce_sizes)
-        return new_sizes, new_body
-
-    @staticmethod
-    def _reorder_loops(
-        old_sizes: Any, old_body: ir.LoopBody, new_order: Sequence[int]
-    ) -> Tuple[Any, ir.LoopBody]:
-        """
-        Reorder the iteration dimensions. Reduction dimensions are not changed.
-        """
-        assert len(old_sizes[0]) == len(new_order)
-        reorder_fn = ir.same_reorder(new_order)
-
-        iter_size, reduce_size = old_sizes
-        new_iter_size = reorder_fn(iter_size)
-
-        new_sizes = (new_iter_size, reduce_size)
-
-        (iter_vars, reduce_vars), var_ranges = dependencies.index_vars_no_squeeze(
-            *old_sizes, prefix="t"
-        )
-
-        inverse_order = {b: a for a, b in enumerate(new_order)}
-        inverse_order = [inverse_order[i] for i in range(len(new_order))]
-
-        def new_body(*indices: Sequence[sympy.Expr]) -> Any:
-            index = list(itertools.chain(*indices))
-            assert len(index) == len(iter_size) + len(reduce_size)
-            iter_idx = index[: len(iter_size)]
-            reduce_idx = index[len(iter_size) :]
-            iter_idx = [iter_idx[i] for i in inverse_order]
-            return old_body(iter_idx, reduce_idx)
-
-        loop_body = ir.LoopBody(
-            new_body, (iter_vars, reduce_vars), var_ranges, iter_vars, reduce_vars
-        )
-
-        # use the original symbol prefix so we can do multiple round of reordering
-        (iter_vars2, reduce_vars2), var_ranges2 = dependencies.index_vars_no_squeeze(
-            *new_sizes, prefix="y"
-        )
-        new_body = ir.LoopBody(
-            loop_body, (iter_vars2, reduce_vars2), var_ranges2, iter_vars2, reduce_vars2
-        )
-        return new_sizes, new_body
-
     def recompute_size_and_body(
         self, extra_indexing_constraints: Tuple[Dict[Any, Any], List[Any]]
     ) -> None:
@@ -897,11 +814,10 @@ class SchedulerNode(BaseSchedulerNode):
             "Reorder loops for %s with order %s", self.get_name(), new_order
         )
 
-        self._sizes, self._body = self._reorder_loops(
-            self._sizes,
-            self._body,
+        self._body = self._body.reorder_iter_loops(
             new_order,
         )
+        self._sizes = self._body.sizes
 
         self.set_read_writes(
             dependencies.extract_read_writes(self._body, *self._sizes, normalize=True)
@@ -1976,9 +1892,8 @@ class Scheduler:
                 if not isinstance(snode, SchedulerNode) or snode.is_template():
                     continue
 
-                snode._sizes, snode._body = SchedulerNode._merge_loops(
-                    snode._sizes, snode._body
-                )
+                snode._body = snode._body.merge_iter_loops()
+                snode._sizes = snode._body.sizes
 
                 snode.set_read_writes(
                     dependencies.extract_read_writes(

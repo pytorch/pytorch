@@ -110,7 +110,8 @@ class ImplDetailTest(TestCase):
 
         # Make sure loop reordering happens here
         self.assertTrue(tuple(old_sizes[0]) == tuple(reversed(sizes)), f"{old_sizes=}")
-        new_sizes, new_body = SchedulerNode._merge_loops(old_sizes, old_body)
+        new_body = old_body.merge_iter_loops()
+        new_sizes = new_body.sizes
         self.assertTrue(tuple(new_sizes[0]) == (np.prod(sizes),), f"{new_sizes=}")
 
 
@@ -185,7 +186,7 @@ class LoopOrderingTest(TestCase):
         def f(x):
             return x.sum(dim=-1), x.t().contiguous()
 
-        x = torch.randn(N, N)
+        x = torch.randn(N, N * 2)
         self.do_acc_test(f, x)
         self.assertEqual(1, metrics.generated_kernel_count)
 

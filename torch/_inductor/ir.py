@@ -3448,7 +3448,9 @@ class ComputedBuffer(Buffer):
 
         # retrace the loop body with simplification and reordering applied
         (iter_vars, reduce_vars), var_ranges = dependencies.index_vars_no_squeeze(
-            iter_ranges, reduce_ranges, prefix="y"
+            iter_ranges,
+            reduce_ranges,
+            prefix="y" if config.loop_ordering_after_fusion else "z",
         )
         body = LoopBody(
             body,
@@ -7958,6 +7960,12 @@ class LoopBody:
     def __init__(self, fn, args, var_ranges, iter_vars, reduce_vars):
         super().__init__()
 
+        _flat_sizes = tuple(var_ranges.values())
+        self.sizes = (
+            _flat_sizes[: len(iter_vars)],
+            _flat_sizes[len(iter_vars) :],
+        )
+
         self.iter_vars = iter_vars
         self.reduce_vars = reduce_vars
         self.var_ranges = var_ranges
@@ -7974,6 +7982,90 @@ class LoopBody:
         self.indirect_vars = []
         self.root_block = LoopBodyBlock(self, fn, args)
         self.indexing = None
+
+    def merge_iter_loops(self) -> "LoopBody":
+        """
+        Merge iteration loops and return a new LoopBody.
+        """
+        old_body = self
+        old_sizes = self.sizes
+        old_iter_vars, old_reduce_vars = old_body.vars
+        old_iter_sizes, old_reduce_sizes = old_sizes
+
+        index_exprs = [*old_body.indexing_exprs.values()]
+
+        iter_sizes, reindex, prune = V.graph.sizevars._simplify_loops(
+            old_iter_vars,
+            old_iter_sizes,
+            index_prevent_reordering(index_exprs, old_iter_vars, old_iter_sizes),
+        )
+        # if iter_sizes == old_iter_sizes:
+        #     # no dimensions get merged.
+        #     return old_sizes, old_body
+
+        # Note: if no dimension get merges, the symbol prefix will
+        # remain 'y'. But if we merge dimensions, we change prefix to
+        # 'z'. If this is an issue, we can always retrace the LoopBody
+        # to change symbol prefix to 'z'.
+        #
+        # There is indeed an issue due to symbol name conflicting.
+        # y0 maybe reused for the y dimension later.
+        (
+            iter_vars,
+            reduce_vars,
+        ), var_ranges = dependencies.index_vars_no_squeeze(
+            iter_sizes, old_reduce_sizes, prefix="z"
+        )
+        new_body = LoopBody(
+            old_body,
+            [reindex(iter_vars), reduce_vars],
+            var_ranges,
+            iter_vars,
+            reduce_vars,
+        )
+        return new_body
+
+    def reorder_iter_loops(self, new_order) -> "LoopBody":
+        """
+        Reorder iteration loops and return a new LoopBody.
+        """
+        old_body = self
+        old_sizes = self.sizes
+        assert len(old_sizes[0]) == len(new_order)
+        reorder_fn = same_reorder(new_order)
+
+        iter_size, reduce_size = old_sizes
+        new_iter_size = reorder_fn(iter_size)
+
+        new_sizes = (new_iter_size, reduce_size)
+
+        (iter_vars, reduce_vars), var_ranges = dependencies.index_vars_no_squeeze(
+            *old_sizes, prefix="t"
+        )
+
+        inverse_order = {b: a for a, b in enumerate(new_order)}
+        inverse_order = [inverse_order[i] for i in range(len(new_order))]
+
+        def new_body(*indices: Sequence[sympy.Expr]) -> Any:
+            index = list(itertools.chain(*indices))
+            assert len(index) == len(iter_size) + len(reduce_size)
+            iter_idx = index[: len(iter_size)]
+            reduce_idx = index[len(iter_size) :]
+            iter_idx = [iter_idx[i] for i in inverse_order]
+            return old_body(iter_idx, reduce_idx)
+
+        loop_body = LoopBody(
+            new_body, (iter_vars, reduce_vars), var_ranges, iter_vars, reduce_vars
+        )
+
+        # use the original symbol prefix so we can do multiple round of reordering
+        (iter_vars2, reduce_vars2), var_ranges2 = dependencies.index_vars_no_squeeze(
+            *new_sizes, prefix="y"
+        )
+        new_body = LoopBody(
+            loop_body, (iter_vars2, reduce_vars2), var_ranges2, iter_vars2, reduce_vars2
+        )
+        return new_body
 
     @property
     def vars(self):
