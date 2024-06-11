@@ -602,15 +602,17 @@ def _distribute_state_dict(
     device: torch.device,
     pg: Optional[dist.ProcessGroup] = None,
 ) -> None:
-    # Distribute tensors in each rank
-    ret = {}
+    # Full_state_dict = True, broadcast_from_rank0 = False here. Each rank has
+    # full_state_dict. Skip the broadcast in ``_broadcast_state_dict`` and
+    # distribute tensors in each rank
     for key, value in full_state_dict.items():
-        if not torch.is_tensor(value) and key in local_state_dict:
+        if key not in full_state_dict:
+            continue
+        if not torch.is_tensor(value):
             local_state_dict[key] = value
-        elif value.dim() == 0 and key in local_state_dict:
+        elif value.dim() == 0:
             local_state_dict[key] = value.cpu()
         else:
-            ret[key] = _TensorInfo(value.size(), value.dtype)
             assert isinstance(value, torch.Tensor)
             full_tensor = value.detach().to(device)
             local_state = local_state_dict.get(key, None)
