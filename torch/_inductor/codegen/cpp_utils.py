@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import math
 
 from collections import namedtuple
@@ -100,6 +101,11 @@ class CppPrinter(ExprPrinter):
         r = f"std::floor({self._print(expr.args[0])})"
         return f"static_cast<{INDEX_TYPE}>({r})" if expr.is_integer else r
 
+    def _print_FloorToInt(self, expr):
+        assert len(expr.args) == 1
+        r = f"std::floor({self._print(expr.args[0])})"
+        return f"static_cast<{INDEX_TYPE}>({r})" if expr.is_integer else r
+
     def _print_TruncToInt(self, expr):
         assert len(expr.args) == 1
         r = f"std::trunc({self._print(expr.args[0])})"
@@ -173,6 +179,11 @@ class CppPrinter(ExprPrinter):
         return f"static_cast<{INDEX_TYPE}>({r})" if expr.is_integer else r
 
     def _print_ceiling(self, expr):
+        assert len(expr.args) == 1
+        r = f"std::ceil({self._print(expr.args[0])})"
+        return f"static_cast<{INDEX_TYPE}>({r})" if expr.is_integer else r
+
+    def _print_CeilToInt(self, expr):
         assert len(expr.args) == 1
         r = f"std::ceil({self._print(expr.args[0])})"
         return f"static_cast<{INDEX_TYPE}>({r})" if expr.is_integer else r

@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import operator
 
 from typing import Any, Dict, List, Optional, Set, Tuple, Union
@@ -47,6 +48,12 @@ def ir_name_to_func_name(name: str) -> str:
     return "convert_" + "_".join(name_list)
 
 
+def get_node_for_param_and_buffer(fx_graph, name, is_top_level_graph):
+    if is_top_level_graph:
+        return fx_graph.get_attr(name)
+    return fx_graph.placeholder(name)
+
+
 # Those operators will be automatically populated to a instance method
 # of TS2FXGraphConverter with name convert_<namespace>_<opname>().
 # Please check __init__ for method population implementations.
@@ -55,7 +62,99 @@ kind_to_standard_operators = {
     "aten::__is__": operator.is_,
     "aten::__isnot__": operator.is_not,
     "aten::__not__": operator.not_,
+    "aten::__contains__": operator.contains,
 }
+
+
+def get_ir_value_parent_name_and_attr_name(node):
+    irv_parent_name, irv_name = node.input().debugName(), node.output().debugName()
+    attr_name = node.s("name")
+    return irv_name, irv_parent_name, attr_name
+
+
+def construct_fqn(ir, ref_map, name_map):
+    name_list = []
+    while ir in ref_map:
+        name_list.append(name_map[ir])
+        ir = ref_map[ir]
+    return ".".join(reversed(name_list))
+
+
+def get_block_to_lifted_attrs(graph: torch._C.Graph) -> Dict[torch._C.Block, Set[str]]:
+    """
+    Perform two passes to get a mapping of blocks to a set of FQNs of its lifted attributes.
+    When a graph has control flow, the graph will be divided into multiple blocks. We want to convert
+    each block to a graph which will be passed into torch.cond. A restriction for torch.cond is that model
+    parameters/buffers are expected to be lifted as inputs to the subgraphs. Before converting the model,
+    we will run this pass which will:
+        1. Figure out which params/buffers are used within blocks through tracing the GetAttr calls.
+        2. Process the graph bottom up to find the lifted attributes of each block by taking the union
+        of the attributes used in the current block, and the lifted attributes of all its child blocks.
+
+    Returns:
+        A mapping of blocks to a set of FQNs of its lifted attributes.
+    """
+
+    # A map from a block to its expected to be lifted arguments.
+    blocks_to_lifted_attrs: Dict[torch._C.Block, Set[str]] = dict()
+
+    # Reference map stores the input (i.e., src) and output (i.e., dest) IR of a
+    # GetAttr node. By traversing this reference map, we can figure out the
+    # full IR aliasing pass and figure out the FQN of an attribute.
+    # E.g., %2 = GetAttr(linear)[%1] --> node_to_parent_map["%2"] = "%1"
+    node_to_parent_map: Dict[str, str] = dict()
+
+    # Used for reconstructing the FQN of an attribute based on the reference map.
+    # In nutshell, for each GetAttr call, GetAttr(input IR, attribute name) -> output IR
+    # This name map stores which attribute name is called for a src IR --> dest IR action.
+    # E.g., %2 = GetAttr(linear)[%1] --> node_to_attr_name["%2"] = "linear"
+    node_to_attr_name: Dict[str, str] = dict()
+
+    def _dfs_get_attr_dependency(entry):
+        """
+        First DFS path to construct reference map and name map.
+        """
+        for node in entry.nodes():
+            if node.kind() == "prim::GetAttr":
+                (
+                    irv_name,
+                    irv_parent_name,
+                    attr_name,
+                ) = get_ir_value_parent_name_and_attr_name(node)
+                node_to_parent_map[irv_name] = irv_parent_name
+                node_to_attr_name[irv_name] = attr_name
+            for block in node.blocks():
+                _dfs_get_attr_dependency(block)
+
+    def _map_blocks_to_lifted_attrs(entry):
+        """
+        Walk the graph in a bottom-up fashion to build the expected to be
+        lifted arguments for each block.
+        """
+        arguments: Set[str] = set()
+        for node in entry.nodes():
+            for block in node.blocks():
+                # Recursively build.
+                arguments = arguments.union(_map_blocks_to_lifted_attrs(block))
+            if node.kind() == "prim::GetAttr":
+                irv_name = node.output().debugName()
+                # Skip for intermediate GetAttr, which will anyway not result a FQN.
+                # E.g., node_to_parent_name: {"%3": "%2", "%2": "%1"}
+                #       node_to_attr_name: {"%3": "weight", "%2": "linear", "%1": "self"}
+                #       There is only one FQN %3-->%2-->%1: self.linear.weight
+                #       %2-->%1 is not a FQN: self.linear
+                if irv_name not in set(node_to_parent_map.values()):
+                    arguments.add(
+                        construct_fqn(irv_name, node_to_parent_map, node_to_attr_name)
+                    )
+        if not isinstance(entry, torch._C.Graph):  # Skip the top level.
+            blocks_to_lifted_attrs[entry] = arguments
+        return arguments
+
+    _dfs_get_attr_dependency(graph)
+    _map_blocks_to_lifted_attrs(graph)
+
+    return blocks_to_lifted_attrs
 
 
 def get_op_overload(node: torch._C.Node):
@@ -64,11 +163,17 @@ def get_op_overload(node: torch._C.Node):
     ns, op_name = str(schema.name.name).split("::")
     override = schema.name.overload_name
 
-    op_overload_packet = getattr(torch.ops.aten, op_name)
-    if override:
-        op_overload = getattr(op_overload_packet, override)
-    else:
-        op_overload = op_overload_packet.default
+    try:
+        op_overload_mod = getattr(torch.ops, ns)
+        op_overload_packet = getattr(op_overload_mod, op_name)
+        if override:
+            op_overload = getattr(op_overload_packet, override)
+        else:
+            op_overload = op_overload_packet.default
+    except Exception as e:
+        raise RuntimeError(
+            f"Unable to find operator {node.kind()} with schema {node.schema}"
+        ) from e
 
     return op_overload
 
@@ -77,12 +182,13 @@ class TS2FXGraphConverter:
     def __init__(
         self,
         ts_graph: Union[torch._C.Graph, torch._C.Block],
-        param_names: Set[str],
-        buffer_names: Set[str],
+        name_to_param_map: Dict[str, torch.Tensor],
+        name_to_buffer_map: Dict[str, torch.Tensor],
+        blocks_to_lifted_attrs: Dict[torch._C.Block, Set[str]],
     ):
         self.ts_graph = ts_graph
-        self.param_names = param_names
-        self.buffer_names = buffer_names
+        self.name_to_param_map = name_to_param_map
+        self.name_to_buffer_map = name_to_buffer_map
 
         self.fx_graph: torch.fx.Graph = torch.fx.Graph()
         self.input_specs: List[InputSpec] = []
@@ -97,6 +203,8 @@ class TS2FXGraphConverter:
 
         self.subgraphs: Dict[str, torch.fx.GraphModule] = {}
 
+        self.blocks_to_lifted_attrs = blocks_to_lifted_attrs
+
         # Populate methods for the standard operators.
         for k in kind_to_standard_operators.keys():
             handler_func_name = ir_name_to_func_name(k)
@@ -107,6 +215,9 @@ class TS2FXGraphConverter:
                 handler_func_name,
                 lambda node: self._convert_standard_operators(node),
             )
+
+    def is_top_level_graph(self):
+        return isinstance(self.ts_graph, torch._C.Graph)
 
     def add_subgraph(self, subgraph) -> str:
         name = f"subgraph_{len(self.subgraphs)}"
@@ -149,7 +260,11 @@ class TS2FXGraphConverter:
 
         self.convert_graph_outputs()
 
-        gm = torch.fx.GraphModule(self.subgraphs, self.fx_graph)
+        # Pass parameter and buffer to the root for lookup.
+        gm = torch.fx.GraphModule(
+            {**self.subgraphs, **self.name_to_param_map, **self.name_to_buffer_map},
+            self.fx_graph,
+        )
 
         inplace_optimize_sym_size_div(gm)
 
@@ -162,14 +277,7 @@ class TS2FXGraphConverter:
             name = graph_input.debugName()
             normalized_name = normalize_name(name)
 
-            fx_node = self.fx_graph.placeholder(normalized_name)
-
-            # fx_node.meta["val"] = FakeTensor()
-            # TODO: set fx_node.meta["val"]
-
-            self.name_to_node[name] = fx_node
-
-            if name in self.param_names:
+            if name in self.name_to_param_map:
                 self.input_specs.append(
                     InputSpec(
                         InputKind.PARAMETER,
@@ -177,7 +285,10 @@ class TS2FXGraphConverter:
                         target=name,
                     )
                 )
-            elif name in self.buffer_names:
+                fx_node = get_node_for_param_and_buffer(
+                    self.fx_graph, name, self.is_top_level_graph()
+                )
+            elif name in self.name_to_buffer_map:
                 self.input_specs.append(
                     InputSpec(
                         InputKind.BUFFER,
@@ -185,6 +296,9 @@ class TS2FXGraphConverter:
                         target=name,
                         persistent=True,
                     )
+                )
+                fx_node = get_node_for_param_and_buffer(
+                    self.fx_graph, name, self.is_top_level_graph()
                 )
             else:
                 self.input_specs.append(
@@ -194,6 +308,9 @@ class TS2FXGraphConverter:
                         target=name,
                     )
                 )
+                fx_node = self.fx_graph.placeholder(normalized_name)
+
+            self.name_to_node[name] = fx_node
 
     def convert_prim_Constant(self, node: torch._C.Node):
         name = node.output().debugName()
@@ -263,11 +380,8 @@ class TS2FXGraphConverter:
             f"{root_attr_name}.{attr_name}" if root_attr_name else attr_name
         )
 
-    def convert_aten_op(self, node: torch._C.Node):
-        try:
-            target = get_op_overload(node)
-        except Exception as e:
-            raise RuntimeError(f"Unsupported node {node.kind()}") from e
+    def convert_call_function_op(self, node: torch._C.Node):
+        target = get_op_overload(node)
 
         if target is torch.ops.aten.size.int:
             target = torch.ops.aten.sym_size.int
@@ -318,6 +432,20 @@ class TS2FXGraphConverter:
 
         output_name = node.output().debugName()
         self.name_to_node[output_name] = output_dict
+
+    def convert_prim_ListUnpack(self, node: torch._C.Node):
+        self._convert_prim_unpack_iterator(node)
+
+    def convert_prim_TupleUnpack(self, node: torch._C.Node):
+        self._convert_prim_unpack_iterator(node)
+
+    def _convert_prim_unpack_iterator(self, node: torch._C.Node):
+        # Single input and multiple outputs for unpacking.
+        for i, outp in enumerate(node.outputs()):
+            outp_name = outp.debugName()
+            inp = self.get_fx_value(node.input())
+            fx_node = self.fx_graph.call_function(operator.getitem, (inp, i))
+            self.name_to_node[outp_name] = fx_node
 
     def convert_aten_Int(self, node: torch._C.Node):
         # converts aten::Int as aten._to_copy + aten::_local_scalar_dense
@@ -389,7 +517,7 @@ class TS2FXGraphConverter:
                     self.name_to_node[output_name] = fx_node
                     return
 
-        self.convert_aten_op(node)
+        self.convert_call_function_op(node)
 
     def convert_aten___getitem__(self, node: torch._C.Node):
         input_container, index = tuple(
@@ -420,13 +548,20 @@ class TS2FXGraphConverter:
 
             arguments.update(block_args)
 
+        # Lift parameters as inputs.
+        for block in node.blocks():
+            arguments = arguments.union(self.blocks_to_lifted_attrs[block])
+
         arguments = list(arguments)
 
         # Convert blocks to subgraphs
         subgraph_nodes = []
         for block in node.blocks():
-            subgraph_converter = TS2FXGraphConverter(block, set(), set())
+            subgraph_converter = TS2FXGraphConverter(
+                block, dict(), dict(), self.blocks_to_lifted_attrs
+            )
             subgraph_converter.constant_map = self.constant_map
+            subgraph_converter.attribute_map = self.attribute_map
 
             for block_arg in arguments:
                 normalized_block_arg_name = normalize_name(block_arg)
@@ -492,21 +627,13 @@ class TS2FXGraphConverter:
 
     def convert_node(self, node: torch._C.Node):
         node_kind = node.kind()
-        node_kind_split = node_kind.split("::")
 
         # Get handler based on namespace and operator name.
         # Provide a default node handler as well in case we don't find
         # matching converter for that.
         handler_func_name = ir_name_to_func_name(node_kind)
-        handler_func = getattr(self, handler_func_name, self.convert_default_node)
+        handler_func = getattr(self, handler_func_name, self.convert_call_function_op)
         handler_func(node)
-
-    def convert_default_node(self, node: torch._C.Node):
-        node_kind = node.kind()
-        if node_kind.startswith("aten::"):
-            self.convert_aten_op(node)
-        else:
-            raise ValueError(f"Unsupported node kind: {node_kind}")
 
     def convert_graph_outputs(self):
         args = []
@@ -544,7 +671,7 @@ class TS2EPConverter:
     # TorchScript model to ExportedProgram converter
     def __init__(
         self,
-        ts_model,
+        ts_model: Union[torch.jit.ScriptModule, torch.jit.ScriptFunction],
         sample_args: Tuple[Any, ...],
         sample_kwargs: Optional[Dict[str, Any]] = None,
     ):
@@ -554,12 +681,25 @@ class TS2EPConverter:
         self.sample_args = sample_args
         self.sample_kwargs = sample_kwargs
 
-        self.param_names: Set[str] = {name for name, _ in ts_model.named_parameters()}
-        self.buffer_names: Set[str] = {name for name, _ in ts_model.named_buffers()}
+        self.name_to_param_map: Dict[str, torch.Tensor] = (
+            dict(ts_model.named_parameters())
+            if isinstance(ts_model, torch.jit.ScriptModule)
+            else dict()
+        )
+        self.name_to_buffer_map: Dict[str, torch.Tensor] = (
+            dict(ts_model.named_buffers())
+            if isinstance(ts_model, torch.jit.ScriptModule)
+            else dict()
+        )
 
     def convert(self) -> ExportedProgram:
+        blocks_to_lifted_attrs = get_block_to_lifted_attrs(self.ts_graph)
+
         graph_converter = TS2FXGraphConverter(
-            self.ts_graph, self.param_names, self.buffer_names
+            self.ts_graph,
+            self.name_to_param_map,
+            self.name_to_buffer_map,
+            blocks_to_lifted_attrs,
         )
         gm = graph_converter.convert()
         ep = self.retrace_as_exported_program(gm, graph_converter.tensor_constants)
@@ -567,11 +707,9 @@ class TS2EPConverter:
 
     def retrace_as_exported_program(self, gm: torch.fx.GraphModule, tensor_constants):
         # TODO: adjust input orders to match GraphSignature convention
-        inputs = [*self.sample_args, *self.params, *tensor_constants.values()]
-
         ep = torch.export._trace._export(
             gm,
-            tuple(inputs),
+            self.sample_args,
             strict=False,
             pre_dispatch=True,
         )

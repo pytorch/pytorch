@@ -1,21 +1,25 @@
 #pragma once
 
 #include <chrono>
+#include <memory>
 #include <string>
 #include <string_view>
+
+#include <c10/macros/Macros.h>
 
 namespace torch {
 namespace monitor {
 
-// This counter is useful to measure how much time is spent waiting on certain
-// operation kind. Note that it only tracks the overall wait time rather than
-// individual wait events.
-// The wait time is tracked as long as there is at least one waiter.
-// The implementation is thread-safe.
-class WaitCounterUs {
+
+class WaitCounterImpl {
+
+};
+
+// A handle to a wait counter.
+class WaitCounterHandle {
  public:
-  explicit WaitCounterUs(std::string_view key);
-  ~WaitCounterUs();
+  explicit WaitCounterHandle(std::string_view key);
+  ~WaitCounterHandle();
 
   // Starts a waiter
   void start(
@@ -27,10 +31,25 @@ class WaitCounterUs {
       std::chrono::steady_clock::time_point now =
           std::chrono::steady_clock::now());
 
-  struct State;
-
  private:
   const std::string key_;
+  std::shared_ptr<WaitCounterImpl> impl_;
 };
 } // namespace monitor
 } // namespace torch
+
+#define WAIT_COUNTER(_key)                                                  \
+  []() {                                                                    \
+    static torch::monitor::WaitCounterHandle handle(#_key);                 \
+    return handle;                                                          \
+  }()
+
+#define SCOPED_WAIT_COUNTER(_name)                                          \
+  auto C10_ANONYMOUS_VARIABLE(SCOPED_WAIT_COUNTER) =                        \
+      WAIT_COUNTER(_name)                                                   \
+  WAIT_COUNTER_US(_name).start();                                           \
+  auto guard = c10::make_scope_exit(                                        \
+    [&]() {                                                                 \
+      WAIT_COUNTER_US(_name).stop();                                        \
+    }                                                                       \
+  );

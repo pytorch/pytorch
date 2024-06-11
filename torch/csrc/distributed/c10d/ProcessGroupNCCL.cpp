@@ -343,7 +343,10 @@ void cacheAllocatorDeregisterHook(
 }
 
 #if defined(IS_NCCLX) && defined(NCCL_COMM_DUMP)
-std::string dump_nccl_trace() {
+std::string dump_nccl_trace(
+    bool includeCollectives,
+    bool includeStackTraces,
+    bool onlyActive) {
   std::unordered_map<
       std::string /* ncclUniqueID */,
       std::unordered_map<std::string, std::string> /* dump from this comm */>
@@ -363,19 +366,27 @@ std::string dump_nccl_trace() {
     std::string ncclUniqueIDStr = buildNcclUniqueIdStr(ncclComm->getNcclId());
     ncclDumpMap[ncclUniqueIDStr] = ncclComm->ncclCommDump();
   }
-  return NCCLTraceBuffer::get()->dump(ncclDumpMap);
+  return NCCLTraceBuffer::get()->dump(
+      ncclDumpMap, includeCollectives, includeStackTraces, onlyActive);
 }
+
 #else
-std::string dump_nccl_trace() {
-  return NCCLTraceBuffer::get()->dump(c10::nullopt);
+std::string dump_nccl_trace(
+    bool includeCollectives,
+    bool includeStackTraces,
+    bool onlyActive) {
+  return NCCLTraceBuffer::get()->dump(
+      c10::nullopt, includeCollectives, includeStackTraces, onlyActive);
 }
 #endif
 
 // TODO(c-p-i-o): add a JSON endpoint.
 control_plane::RegisterHandler dumpHandler{
     "dump_nccl_trace_pickle",
-    [](const control_plane::Request&, control_plane::Response& res) {
-      res.setContent(dump_nccl_trace(), "application/octet-stream");
+    [](const control_plane::Request& req, control_plane::Response& res) {
+      // TODO: c-p-i-o: params from the request need to go to dump_nccl_trace.
+      res.setContent(
+          dump_nccl_trace(true, true, false), "application/octet-stream");
     }};
 
 std::optional<std::function<void(std::function<void(const std::string&)>)>>&
@@ -572,12 +583,7 @@ bool ProcessGroupNCCL::WorkNCCL::finishedGPUExecutionInternal() const {
 
 bool ProcessGroupNCCL::WorkNCCL::checkTimeout(
     std::optional<std::chrono::milliseconds> timeout) {
-  static folly::Indestructible<WaitCounterUs> checkTimeoutWaitCounter{
-      "pytorch.logging.wait_counter.ProcessGroupNCCL::WorkNCCL::checkTimeout"};
-  checkTimeoutWaitCounter->start();
-  SCOPE_EXIT {
-    checkTimeoutWaitCounter->stop();
-  };
+  SCOPED_WAIT_COUNTER_US("pytorch.logging.wait_counter.ProcessGroupNCCL::WorkNCCL::checkTimeout");
   auto currentTimepoint = std::chrono::steady_clock::now();
   auto timeElapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
       currentTimepoint - workStartTime_);
@@ -940,7 +946,12 @@ void ProcessGroupNCCL::performNocolorSplit(at::Device device) {
   LOG(INFO) << logPrefix() << "Performing nocolor split on backend device "
             << device << ", key " << key << ", i am " << this;
   auto comm = getNCCLComm(key, device, OpType::ALLREDUCE);
-  NCCLComm::split(comm.get(), NCCL_SPLIT_NOCOLOR, rank_, options_->config);
+  NCCLComm::split(
+      comm.get(),
+      NCCL_SPLIT_NOCOLOR,
+      rank_,
+      options_->config,
+      options_->global_ranks_in_group);
 #endif
 }
 
@@ -1199,7 +1210,7 @@ bool ProcessGroupNCCL::dumpDebuggingInfo() {
     // We dump nccl trace into local disk by default and users can register
     // their customized writer by inheriting `DebugInfoWriter` via
     // `registerDebugInfoWriter`.
-    auto ncclTrace = dump_nccl_trace();
+    auto ncclTrace = dump_nccl_trace(true, true, false);
     DebugInfoWriter& writer = DebugInfoWriter::getWriter(globalRank());
     LOG(INFO) << logPrefix() << "ProcessGroupNCCL dumping nccl trace to "
               << writer.getWriterTarget();
@@ -2035,8 +2046,7 @@ std::shared_ptr<NCCLComm> ProcessGroupNCCL::getNCCLComm(
     C10D_NCCL_CHECK(ncclGetUniqueId(&ncclID), c10::nullopt);
   }
 
-  // For point-to-point communication on the same process, don't need broadcast.
-  if (!isSendRecvSelf) {
+  if (shouldBroadcastNCCLUniqueID(isSendRecvSelf)) {
     // Broadcast so that each process can have a unique NCCL ID
     auto timeStarted = std::chrono::steady_clock::now();
     broadcastUniqueNCCLID(&ncclID, singleP2POp, deviceKey, p2pRank);
@@ -2089,6 +2099,7 @@ std::shared_ptr<NCCLComm> ProcessGroupNCCL::getNCCLComm(
     numRanks = 2;
     rank = p2pRank;
   }
+
   // Get the device index
   auto deviceIndex = device.index();
   gpuGuard.set_index(deviceIndex);
@@ -2105,13 +2116,17 @@ std::shared_ptr<NCCLComm> ProcessGroupNCCL::getNCCLComm(
       auto& parentComm = dit->second;
       if (parentComm != nullptr && !parentComm->isAborted()) {
         ncclComm = NCCLComm::split(
-            parentComm.get(), options_->split_color, rank, options_->config);
+            parentComm.get(),
+            options_->split_color,
+            rank,
+            options_->config,
+            options_->global_ranks_in_group);
       }
     }
   }
 #endif
 
-  // To simplify conditioonal nesting, just create the ncclComms[i]
+  // To simplify conditional nesting, just create the ncclComms[i]
   // entry if it hasn't been yet rather than untangling the
   // conditions that might have resulted in a split above.
   if (!ncclComm) {
@@ -2342,6 +2357,7 @@ c10::intrusive_ptr<ProcessGroupNCCL::WorkNCCL> ProcessGroupNCCL::initWork(
         outputs,
         r->ncclStartEvent_.get(),
         r->ncclEndEvent_.get(),
+        options_->timeout,
         isP2P);
   }
   return r;
@@ -2952,6 +2968,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::pointToPoint(
         {tensor},
         nullptr,
         nullptr,
+        options_->timeout,
         /*isP2P=*/true);
     // TODO(whc) if we want to make the per-p2p-op flightrecorder entries get
     // their timings/states updated by proxy when the Work obj representing the
@@ -2985,6 +3002,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::pointToPoint(
         {tensor},
         work->ncclStartEvent_.get(),
         work->ncclEndEvent_.get(),
+        options_->timeout,
         /*isP2P=*/true);
   }
 

@@ -6,19 +6,19 @@
 namespace torch {
 namespace monitor {
 
-WaitCounterUs::WaitCounterUs(std::string_view key) : key_(key) {
+WaitCounterHandle::WaitCounterHandle(std::string_view key) : key_(key), impl_() {
   // implement
 }
 
-WaitCounterUs::~WaitCounterUs() {
+WaitCounterHandle::~WaitCounterHandle() {
   // implement
 }
 
-void WaitCounterUs::start(std::chrono::steady_clock::time_point now) {
+void WaitCounterHandle::start(std::chrono::steady_clock::time_point now) {
   // implement
 }
 
-void WaitCounterUs::stop(std::chrono::steady_clock::time_point now) {
+void WaitCounterHandle::stop(std::chrono::steady_clock::time_point now) {
   // implement
 }
 
