@@ -106,7 +106,7 @@ class MutationType(Enum):
 
 
 # This class tells us info about user inputs.
-@dataclass
+@dataclass(frozen=True)
 class InputAliasInfo:
     is_leaf: bool
     mutates_data: bool
@@ -119,9 +119,6 @@ class InputAliasInfo:
     keep_input_mutations: bool
     # JointFn Mutation Info, is filled only after jointFn tracing.
     joint_mutates_data: Optional[bool] = None
-    joint_mutates_metadata: Optional[bool] = None
-    joint_mutates_storage_metadata: Optional[bool] = None
-    joint_mutation_inductor_storage_resize: Optional[bool] = None
 
     def __post_init__(self):
         if self.mutates_storage_metadata:

@@ -2209,7 +2209,7 @@ def forward(self, primals_1, primals_2):
         loss = y.sum()
         with self.assertRaisesRegex(
             RuntimeError,
-            "torch.compile with aot_autograd does not currently support mutations of inputs in backward for create_graph=True",
+            "aot_autograd does not support input mutations with requires_grad in backward for create_graph=True",
         ):
             torch.autograd.grad(loss, inp_x, create_graph=True)
 

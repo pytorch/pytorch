@@ -11,6 +11,7 @@ It does so by:
 4. dispatching subclasses
 """
 
+import dataclasses
 import warnings
 from contextlib import nullcontext
 from functools import wraps
@@ -416,22 +417,26 @@ def create_functionalized_fn(
                 f_args[0], primals_before, primals_after, meta.input_info
             ):
                 # Store information about mutations in joint(for backward analysis)
-                inpt_info.joint_mutates_data = has_data_mutation(f_inpt)
-                inpt_info.joint_mutates_storage_metadata = has_metadata_mutation(
-                    f_inpt, before, check_only_storage_mutation=True
+                dataclasses.replace(
+                    inpt_info, joint_mutates_data=has_data_mutation(f_inpt)
                 )
-                inpt_info.joint_mutates_metadata = has_metadata_mutation(
+
+                joint_mutates_metadata = has_metadata_mutation(
                     f_inpt, before, check_only_storage_mutation=False
-                )
-                inpt_info.joint_mutation_inductor_storage_resize = (
-                    was_inductor_storage_resized(f_inpt)
                 )
 
                 # Ban metadata mutations on fw inputs during the bw
                 if not inpt_info.mutates_metadata:
                     assert (
-                        not inpt_info.joint_mutates_metadata
+                        not joint_mutates_metadata
                     ), "Found a graph input that had its metadata mutated in the backward. This is not supported"
+
+                # Ban storage resizing on fw inputs during the bw
+                if not inpt_info.mutation_inductor_storage_resize:
+                    assert not was_inductor_storage_resized(
+                        f_inpt
+                    ), "Found a graph input that had storage resizing in the backward. This is not supported"
+
                 # Allow data mutations on fw inputs during the bw, but only if they do not require grad
                 # So we can guarantee that we can keep the mutations in the graph
                 if (
