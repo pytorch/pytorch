@@ -1870,8 +1870,8 @@ bool BlockRunner::check_for_memory_leak(
         // `BlockRunner::deallocateOutputTensors`.
         continue;
       }
-      const std::string error_msg = "Output " + c10::to_string(i) + ", %" +
-          val->debugName() + " of node " + c10::to_string(n) +
+      const std::string error_msg = "Output " + std::to_string(i) + ", %" +
+          val->debugName() + " of node " + std::to_string(n) +
           " which has kind " + pnode.node()->kind().toQualString() +
           " was not cleaned up";
       if (output_ivalues.count(ival) == 0) {
@@ -1947,8 +1947,8 @@ bool BlockRunner::checkOutputTensorMemoryLeaks() {
       const auto& t = ival->toTensor();
       if (t.defined()) {
         auto* storage_impl = t.storage().unsafeGetStorageImpl();
-        const std::string error_msg = "Output " + c10::to_string(i) + ", %" +
-            val->debugName() + " of node " + c10::to_string(n) +
+        const std::string error_msg = "Output " + std::to_string(i) + ", %" +
+            val->debugName() + " of node " + std::to_string(n) +
             " was not cleaned up";
         TORCH_CHECK(storage_impl->data() == nullptr, error_msg);
       }
