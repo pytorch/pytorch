@@ -4337,7 +4337,7 @@ class ShapeEnv:
         return bound_sympy(expr, var_to_range)
 
     @_lru_cache
-    def get_axioms(self, symbols: Optional[Tuple["sympy.Symbol"]] = None) -> Tuple["sympy.Expr"]:
+    def get_axioms(self, symbols: Optional[Tuple["sympy.Symbol"]] = None, compute_hint: bool = False) -> Tuple["sympy.Expr"]:
         """
         Given the symbols in an expression, it returns all the runtime asserts that have those symbols
         concatenated with all the guards.
@@ -4352,12 +4352,14 @@ class ShapeEnv:
                                for s in symbols if s not in self.var_to_val
                                for r in self.deferred_runtime_asserts.get(s, ()))
         guards = (g.expr for g in self.guards)
-        return tuple(itertools.chain(guards, runtime_asserts))
+        axioms = itertools.chain(guards, runtime_asserts)
+        if compute_hint:
+            axioms = (canonicalize_bool_expr(a.xreplace(self.var_to_val)) for a in axioms)
+        return tuple(dict.fromkeys(axioms).keys())
 
     @_lru_cache
     def get_implications(self,
-                         e: "sympy.Expr",
-                         compute_hint: bool) -> Tuple[Tuple["sympy.Expr", 'sympy.logic.boolalg.BooleanAtom']]:
+                         e: "sympy.Expr") -> Tuple[Tuple["sympy.Expr", 'sympy.logic.boolalg.BooleanAtom']]:
         """ Given a expression, it returns a list of predicates that follow from it """
         equiv = {}
 
@@ -4375,8 +4377,6 @@ class ShapeEnv:
                 equiv[canonicalize_bool_expr(dual)] = sympy.true
                 equiv[canonicalize_bool_expr(sympy.Not(dual))] = sympy.false
 
-        if compute_hint:
-            e = canonicalize_bool_expr(e.xreplace(self.var_to_val))
         add_expr(e)
         # Other relational expressions this expression implies
         if isinstance(e, sympy.Eq):
@@ -4428,11 +4428,11 @@ class ShapeEnv:
         # Pattern matching
         symbols = tuple(expr.free_symbols)
         if axioms is None:
-            axioms = self.get_axioms(symbols)
+            axioms = self.get_axioms(symbols, compute_hint=compute_hint)
         subst = {}
         for e in axioms:
             if e.free_symbols.issubset(expr.free_symbols):
-                subst.update(dict(self.get_implications(e, compute_hint=compute_hint)))
+                subst.update(dict(self.get_implications(e)))
 
         expr = expr.xreplace(subst)
 
