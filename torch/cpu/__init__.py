@@ -39,8 +39,9 @@ def _is_cpu_support_avx512() -> bool:
     return torch._C._cpu._is_cpu_support_avx512()
 
 
-def _is_cpu_support_avx512_vnni() -> bool:
+def _is_cpu_support_vnni() -> bool:
     r"""Returns a bool indicating if CPU supports VNNI."""
+    # Note: Currently, it only check avx512_vnni, Maybe need to support avx2_vnni later.
     return torch._C._cpu._is_cpu_support_avx512_vnni()
 
 
