@@ -9,6 +9,7 @@
 #else
 #include <ATen/ops/erfinv_native.h>
 #include <ATen/ops/exp_native.h>
+#include <ATen/ops/tanh_native.h>
 #endif
 
 #include <fmt/format.h>
@@ -69,5 +70,8 @@ TORCH_IMPL_FUNC(erfinv_out_mps)(const Tensor& self, const Tensor& output_) {
 
 TORCH_IMPL_FUNC(exp_out_mps)(const Tensor& self, const Tensor& output_) {
   exec_unary_kernel(self, output_, "exp");
+}
+TORCH_IMPL_FUNC(tanh_out_mps)(const Tensor& self, const Tensor& output_) {
+  exec_unary_kernel(self, output_, "tanh");
 }
 } // namespace at::native

@@ -49,4 +49,26 @@ kernel void exp_complex_kernel( device {0}2 *output [[buffer(0)]],
   output[index].x = precise::exp(input[index].x)*precise::cos(input[index].y);
   output[index].y = precise::exp(input[index].x)*precise::sin(input[index].y);
 }}
+
+kernel void tanh_kernel( device {0} *output [[buffer(0)]],
+                        device {1} *input [[ buffer(1)]],
+                        uint index [[thread_position_in_grid]]) {{
+  output[index] = precise::tanh(input[index]);
+}}
+
+
+template<typename T>
+T complex_div(T a, T b) {{
+  auto denom = dot(b, b);
+  return T(dot(a, b), a.y * b.x - a.x * b.y)/denom;
+}}
+
+kernel void tanh_complex_kernel( device {0}2 *output [[buffer(0)]],
+                                 device {0}2 *input [[ buffer(1)]],
+                                 uint index [[thread_position_in_grid]]) {{
+  //tanh(x+iy)=(tanh(x)+itan(y))/(1+itahnh(x)*tan(y));
+  auto tanh_x = precise::tanh(input[index].x);
+  auto tan_y = precise::tan(input[index].y);
+  output[index] = complex_div({0}2(tanh_x, tan_y), {0}2({0}(1), tanh_x * tan_y));
+}}
 )METAL";
