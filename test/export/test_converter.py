@@ -16,8 +16,11 @@ requires_cuda = unittest.skipUnless(torch.cuda.is_available(), "requires cuda")
 
 
 class TestConverter(TestCase):
-    def _check_equal_ts_ep_converter(self, mod, inp) -> ExportedProgram:
-        ts_model = torch.jit.script(mod)
+    def _check_equal_ts_ep_converter(self, mod, inp, jit_trace=False) -> ExportedProgram:
+        if not jit_trace:
+            ts_model = torch.jit.script(mod)
+        else:
+            ts_model = torch.jit.trace(mod, inp)
         ep = TS2EPConverter(ts_model, inp).convert()
         ep_out, _ = pytree.tree_flatten(ep.module()(*inp))
         orig_out, _ = pytree.tree_flatten(mod(*inp))
@@ -570,6 +573,23 @@ class TestConverter(TestCase):
             ep.module()(*inp),
             func2(*inp),
         )
+
+    def test_implicit_constant_to_tensor_handling(self):
+        def func1(x):
+            return x + 2
+
+        def func2(x, y):
+            return x * y / (x - 2 * y) + y
+
+        def func3(x):
+            return x + torch.Tensor([3])
+
+        inp = (torch.randn([2, 2]),)
+        self._check_equal_ts_ep_converter(func1, inp, jit_trace=True)
+        inp = (torch.randn([2, 2]),torch.randn([2, 2]))
+        self._check_equal_ts_ep_converter(func2, inp, jit_trace=True)
+        inp = (torch.randn([2, 2]),)
+        self._check_equal_ts_ep_converter(func3, inp, jit_trace=True)
 
 
 if __name__ == "__main__":

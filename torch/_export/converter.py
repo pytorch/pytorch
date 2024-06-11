@@ -316,11 +316,11 @@ class TS2FXGraphConverter:
     def get_args_kwargs(self, node: torch._C.Node, schema):
         args = []
         kwargs = {}
-        for input, schema_arg in zip(node.inputs(), schema.arguments):
+        for inp, schema_arg in zip(node.inputs(), schema.arguments):
             if schema_arg.kwarg_only:
-                kwargs[schema_arg.name] = self.get_fx_value(input)
+                kwargs[schema_arg.name] = self.get_fx_value(inp)
             else:
-                args.append(self.get_fx_value(input))
+                args.append(self.get_fx_value(inp))
 
         return tuple(args), kwargs
 
@@ -452,21 +452,7 @@ class TS2FXGraphConverter:
             elif constant_kind == "s":
                 value = node.s("value")
             elif constant_kind == "t":
-                # lift tensor constant as a placeholder
-                placeholder_name = f"constant_{name}"
-                fx_node = self.fx_graph.placeholder(placeholder_name)
-                self.name_to_node[name] = fx_node
-                self.tensor_constants[placeholder_name] = node.t("value")
-
-                self.input_specs.append(
-                    InputSpec(
-                        InputKind.CONSTANT_TENSOR,
-                        arg=TensorArgument(name=placeholder_name),
-                        target=placeholder_name,
-                    )
-                )
-
-                value = fx_node
+                value = node.t("value")
             elif constant_kind == "ival":
                 value = node.ival("value")
             else:
@@ -860,10 +846,10 @@ class TS2EPConverter:
             blocks_to_lifted_attrs,
         )
         gm = graph_converter.convert()
-        ep = self.retrace_as_exported_program(gm, graph_converter.tensor_constants)
+        ep = self.retrace_as_exported_program(gm)
         return ep
 
-    def retrace_as_exported_program(self, gm: torch.fx.GraphModule, tensor_constants):
+    def retrace_as_exported_program(self, gm: torch.fx.GraphModule):
         # TODO: adjust input orders to match GraphSignature convention
         ep = torch.export._trace._export(
             gm,
