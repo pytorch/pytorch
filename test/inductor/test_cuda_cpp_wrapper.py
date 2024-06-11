@@ -9,10 +9,7 @@ from torch._inductor.test_case import TestCase as InductorTestCase
 from torch.testing._internal.common_device_type import (
     get_desired_device_type_test_bases,
 )
-from torch.testing._internal.common_utils import (
-    slowTest,
-    TEST_WITH_ASAN,
-)
+from torch.testing._internal.common_utils import slowTest, TEST_WITH_ASAN
 from torch.testing._internal.inductor_utils import HAS_CUDA
 
 

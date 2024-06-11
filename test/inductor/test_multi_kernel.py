@@ -131,7 +131,9 @@ class MultiKernelTest(TestCase):
     def test_softmax_warn_mixed_layout(self):
         self.test_softmax()
 
-    test_softmax_cpp_wrapper = make_cpp_wrapper_test(test_softmax, expect_multi_kernel=False)
+    test_softmax_cpp_wrapper = make_cpp_wrapper_test(
+        test_softmax, expect_multi_kernel=False
+    )
 
     def test_layernorm(self):
         ln = nn.LayerNorm(1024).cuda()
