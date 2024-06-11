@@ -124,6 +124,14 @@ def construct_fqn(ir, ref_map, name_map):
     return ".".join(reversed(name_list))
 
 
+def is_valid_for_codegen(name):
+    if len(name) == 0:
+        return False
+    if name[0].isdigit():
+        return False
+    return True
+
+
 def get_block_to_lifted_attrs(graph: torch._C.Graph) -> Dict[torch._C.Block, Set[str]]:
     """
     Perform two passes to get a mapping of blocks to a set of FQNs of its lifted attributes.
@@ -292,6 +300,7 @@ class TS2FXGraphConverter:
         self.subgraphs: Dict[str, torch.fx.GraphModule] = {}
 
         self.blocks_to_lifted_attrs = blocks_to_lifted_attrs
+        self.renaming_map = renaming_map
 
         # Populate methods for the standard operators.
         for k in kind_to_standard_operators.keys():
@@ -951,13 +960,6 @@ DEBUG: (TORCH_LOGS="+export" <cmd>), additionaly
         self.name_to_non_tensor_attributes: Dict[str, Any] = {}
 
         self.lift_tensor_constants_to_buffer()
-
-        # Populate nn module parameters and buffers.
-        self.mod_param_and_buffer_map: Dict[str, Any] = dict()
-        for name, param in ts_model.named_parameters():
-            self.mod_param_and_buffer_map[normalize_name(name)] = param
-        for name, buffer in ts_model.named_buffers():
-            self.mod_param_and_buffer_map[normalize_name(name)] = buffer
 
     def convert(self) -> ExportedProgram:
         blocks_to_lifted_attrs = get_block_to_lifted_attrs(self.ts_graph)
