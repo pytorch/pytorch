@@ -1528,11 +1528,20 @@ class GraphModule(torch.nn.Module):
             self.assertEqual(out_ref, out_test)
 
     def _compile_check(
-        self, fn, inps, *, backend="aot_eager", dynamic=True, fullgraph=True
+        self,
+        fn,
+        inps,
+        *,
+        backend="aot_eager",
+        dynamic=True,
+        fullgraph=True,
+        call_backward=False,
     ):
         fw_compiler = EagerRecordGraphAndInputs()
+        bw_compiler = EagerRecordGraphAndInputs()
         compiler_fn = aot_autograd(
             fw_compiler=fw_compiler,
+            bw_compiler=bw_compiler,
             partition_fn=min_cut_rematerialization_partition,
             keep_inference_input_mutations=True,
         )
@@ -1545,27 +1554,51 @@ class GraphModule(torch.nn.Module):
             e_shape = pytree.tree_map_only(torch.Tensor, lambda x: x.shape, expected)
             g_shape = pytree.tree_map_only(torch.Tensor, lambda x: x.shape, got)
             self.assertEqual(e_shape, g_shape)
-        return fw_compiler.graphs
+
+            if call_backward:
+                re = pytree.tree_map_only(
+                    torch.Tensor,
+                    lambda x: x.sum().backward(retain_graph=True),
+                    expected,
+                )
+                rg = pytree.tree_map_only(
+                    torch.Tensor, lambda x: x.sum().backward(retain_graph=True), got
+                )
+                self.assertEqual(re, rg)
+
+        if call_backward:
+            return fw_compiler.graphs, bw_compiler.graphs
+        return fw_compiler.graphs, None
 
     def test_tensor_subclass_TwoTensor_simple(self):
         def f(tt):
             return tt * tt.size()[0]
 
-        a = torch.ones(3, 4)
-        b = a.clone()
+        a = torch.ones(3, 4, requires_grad=True)
+        b = a.clone().requires_grad_(True)
         tt = AnotherTwoTensor(a, b)
 
-        wrapped_gms = self._compile_check(f, [(tt,)], dynamic=True)
-        actual = normalize_gm(wrapped_gms[0].print_readable(print_output=False))
+        fw, bw = self._compile_check(f, [(tt,)], dynamic=True, call_backward=True)
 
         self.assertExpectedInline(
-            actual,
+            normalize_gm(fw[0].print_readable(print_output=False)),
             """\
-class <lambda>(torch.nn.Module):
-    def forward(self, arg0_1: "f32[s0, s1]", arg1_1: "f32[s0, s1]", arg2_1: "Sym(s0)", arg3_1: "Sym(s1)", arg4_1: "Sym(s0)", arg5_1: "Sym(s1)"):
-        mul: "f32[s0, s1]" = torch.ops.aten.mul.Tensor(arg0_1, arg4_1);  arg0_1 = None
-        mul_1: "f32[s0, s1]" = torch.ops.aten.mul.Tensor(arg1_1, arg4_1);  arg1_1 = None
-        return [mul, mul_1, arg4_1, arg5_1]
+class GraphModule(torch.nn.Module):
+    def forward(self, primals_1: "f32[s0, s1]", primals_2: "f32[s0, s1]", primals_3: "Sym(s0)", primals_4: "Sym(s1)", primals_5: "Sym(s0)", primals_6: "Sym(s1)"):
+        mul: "f32[s0, s1]" = torch.ops.aten.mul.Tensor(primals_1, primals_5);  primals_1 = None
+        mul_1: "f32[s0, s1]" = torch.ops.aten.mul.Tensor(primals_2, primals_5);  primals_2 = None
+        return [mul, mul_1, primals_5, primals_6]
+""",  # noqa: B950
+        )
+
+        self.assertExpectedInline(
+            normalize_gm(bw[0].print_readable(print_output=False)),
+            """\
+class GraphModule(torch.nn.Module):
+    def forward(self, primals_5: "Sym(3)", primals_6: "Sym(4)", tangents_1: "f32[3, 4]", tangents_2: "f32[3, 4]"):
+        mul_2: "f32[3, 4]" = torch.ops.aten.mul.Tensor(tangents_1, primals_5);  tangents_1 = None
+        mul_3: "f32[3, 4]" = torch.ops.aten.mul.Tensor(tangents_2, primals_5);  tangents_2 = primals_5 = None
+        return [mul_2, mul_3, None, None]
 """,  # noqa: B950
         )
 
@@ -1578,11 +1611,10 @@ class <lambda>(torch.nn.Module):
         b = a.clone()
         tt = AnotherTwoTensor(a, b)
 
-        wrapped_gms = self._compile_check(f, [(tt,)], dynamic=True)
-        actual = normalize_gm(wrapped_gms[0].print_readable(print_output=False))
+        fw, bw = self._compile_check(f, [(tt,)], dynamic=True)
 
         self.assertExpectedInline(
-            actual,
+            normalize_gm(fw[0].print_readable(print_output=False)),
             """\
 class <lambda>(torch.nn.Module):
     def forward(self, arg0_1: "f32[s0, s1]", arg1_1: "f32[s0, s1]", arg2_1: "Sym(s0)", arg3_1: "Sym(s1)", arg4_1: "Sym(s0)", arg5_1: "Sym(s1)"):
@@ -1605,11 +1637,10 @@ class <lambda>(torch.nn.Module):
         b = a.clone()
         tt = AnotherTwoTensor(a, b)
 
-        wrapped_gms = self._compile_check(f, [(tt, a, b)], dynamic=True)
-        actual = normalize_gm(wrapped_gms[0].print_readable(print_output=False))
+        fw, bw = self._compile_check(f, [(tt, a, b)], dynamic=True)
 
         self.assertExpectedInline(
-            actual,
+            normalize_gm(fw[0].print_readable(print_output=False)),
             """\
 class <lambda>(torch.nn.Module):
     def forward(self, arg0_1: "Sym(s0)", arg1_1: "Sym(s1)", arg2_1: "f32[s0, s1]", arg3_1: "f32[s0, s1]", arg4_1: "f32[s0, s1]", arg5_1: "f32[s0, s1]", arg6_1: "Sym(s0)", arg7_1: "Sym(s1)"):
@@ -1634,11 +1665,10 @@ class <lambda>(torch.nn.Module):
         b = a.clone()
         tt = AnotherTwoTensor(a, b)
 
-        wrapped_gms = self._compile_check(f, [(tt,)], dynamic=True)
-        actual = normalize_gm(wrapped_gms[0].print_readable(print_output=False))
+        fw, bw = self._compile_check(f, [(tt,)], dynamic=True)
 
         self.assertExpectedInline(
-            actual,
+            normalize_gm(fw[0].print_readable(print_output=False)),
             """\
 class <lambda>(torch.nn.Module):
     def forward(self, arg0_1: "f32[s0, s1]", arg1_1: "f32[s0, s1]", arg2_1: "Sym(s0)", arg3_1: "Sym(s1)", arg4_1: "Sym(s0)", arg5_1: "Sym(s1)"):
@@ -1660,11 +1690,10 @@ class <lambda>(torch.nn.Module):
         b = a.clone()
         tt = AnotherTwoTensor(a, b)
 
-        wrapped_gms = self._compile_check(f, [(tt,)], dynamic=True)
-        actual = normalize_gm(wrapped_gms[0].print_readable(print_output=False))
+        fw, bw = self._compile_check(f, [(tt,)], dynamic=True)
 
         self.assertExpectedInline(
-            actual,
+            normalize_gm(fw[0].print_readable(print_output=False)),
             """\
 class <lambda>(torch.nn.Module):
     def forward(self, arg0_1: "f32[s0, s1]", arg1_1: "f32[s0, s1]", arg2_1: "Sym(s0)", arg3_1: "Sym(s1)", arg4_1: "Sym(s0)", arg5_1: "Sym(s1)"):
@@ -1687,11 +1716,10 @@ class <lambda>(torch.nn.Module):
         b = a.clone()
         tt = AnotherTwoTensor(a, b)
 
-        wrapped_gms = self._compile_check(f, [(tt,)], dynamic=True)
-        actual = normalize_gm(wrapped_gms[0].print_readable(print_output=False))
+        fw, bw = self._compile_check(f, [(tt,)], dynamic=True)
 
         self.assertExpectedInline(
-            actual,
+            normalize_gm(fw[0].print_readable(print_output=False)),
             """\
 class <lambda>(torch.nn.Module):
     def forward(self, arg0_1: "f32[s0, s1]", arg1_1: "f32[s0, s1]", arg2_1: "Sym(s0)", arg3_1: "Sym(s1)", arg4_1: "Sym(s0)", arg5_1: "Sym(s1)"):
@@ -1720,11 +1748,10 @@ class <lambda>(torch.nn.Module):
         b = a.clone()
         tt2 = TwoTensor(a, b)
 
-        wrapped_gms = self._compile_check(f, [(tt1,), (tt2,)], dynamic=None)
-        actual = normalize_gm(wrapped_gms[0].print_readable(print_output=False))
+        fw, bw = self._compile_check(f, [(tt1,), (tt2,)], dynamic=None)
 
         self.assertExpectedInline(
-            actual,
+            normalize_gm(fw[0].print_readable(print_output=False)),
             """\
 class <lambda>(torch.nn.Module):
     def forward(self, arg0_1: "f32[3, 4]", arg1_1: "f32[3, 4]"):
@@ -1737,10 +1764,8 @@ class <lambda>(torch.nn.Module):
 """,  # noqa: B950
         )
 
-        actual = normalize_gm(wrapped_gms[1].print_readable(print_output=False))
-
         self.assertExpectedInline(
-            actual,
+            normalize_gm(fw[1].print_readable(print_output=False)),
             """\
 class <lambda>(torch.nn.Module):
     def forward(self, arg0_1: "f32[3, s0]", arg1_1: "f32[3, s0]", arg2_1: "Sym(s0)", arg3_1: "Sym(s0)"):
@@ -1765,17 +1790,16 @@ class <lambda>(torch.nn.Module):
         tt = TwoTensor(a, b)
         torch._dynamo.mark_dynamic(tt, 1)
 
-        wrapped_gms = self._compile_check(
+        fw, bw = self._compile_check(
             f,
             [
                 (tt,),
             ],
             dynamic=None,
         )
-        actual = normalize_gm(wrapped_gms[0].print_readable(print_output=False))
 
         self.assertExpectedInline(
-            actual,
+            normalize_gm(fw[0].print_readable(print_output=False)),
             """\
 class <lambda>(torch.nn.Module):
     def forward(self, arg0_1: "f32[3, s0]", arg1_1: "f32[3, s0]", arg2_1: "Sym(s0)", arg3_1: "Sym(s0)"):
@@ -1809,11 +1833,10 @@ class <lambda>(torch.nn.Module):
         a = torch.ones(3, 4)
         t = DoubleTensor(a)
 
-        wrapped_gms = self._compile_check(f, [(t,)], dynamic=True)
-        actual = normalize_gm(wrapped_gms[0].print_readable(print_output=False))
+        fw, bw = self._compile_check(f, [(t,)], dynamic=True)
 
         self.assertExpectedInline(
-            actual,
+            normalize_gm(fw[0].print_readable(print_output=False)),
             """\
 class <lambda>(torch.nn.Module):
     def forward(self, arg0_1: "f32[s3, s4]", arg1_1: "Sym(s0)", arg2_1: "Sym(s1)", arg3_1: "Sym(s2)", arg4_1: "Sym(s0)", arg5_1: "Sym(s1)"):
@@ -1838,11 +1861,10 @@ class <lambda>(torch.nn.Module):
         a = torch.ones(5)
         t2 = DoubleTensor(a)
 
-        wrapped_gms = self._compile_check(f, [(t1,), (t2,)], dynamic=None)
-        actual = normalize_gm(wrapped_gms[0].print_readable(print_output=False))
+        fw, bw = self._compile_check(f, [(t1,), (t2,)], dynamic=None)
 
         self.assertExpectedInline(
-            actual,
+            normalize_gm(fw[0].print_readable(print_output=False)),
             """\
 class <lambda>(torch.nn.Module):
     def forward(self, arg0_1: "f32[3]"):
@@ -1854,10 +1876,8 @@ class <lambda>(torch.nn.Module):
 """,  # noqa: B950
         )
 
-        actual = normalize_gm(wrapped_gms[1].print_readable(print_output=False))
-
         self.assertExpectedInline(
-            actual,
+            normalize_gm(fw[1].print_readable(print_output=False)),
             """\
 class <lambda>(torch.nn.Module):
     def forward(self, arg0_1: "f32[s2]", arg1_1: "Sym(s0)", arg2_1: "Sym(s1)", arg3_1: "Sym(s0)"):
@@ -1872,6 +1892,22 @@ class <lambda>(torch.nn.Module):
 """,  # noqa: B950
         )
 
+#         self.assertExpectedInline(
+#             normalize_gm(bw[0].print_readable(print_output=False)),
+#             """\
+# class <lambda>(torch.nn.Module):
+#     def forward(self, arg0_1: "f32[s2]", arg1_1: "Sym(s0)", arg2_1: "Sym(s1)", arg3_1: "Sym(s0)"):
+#         clone: "f32[s2]" = torch.ops.aten.clone.default(arg0_1)
+
+#         view: "f32[s2]" = torch.ops.aten.view.default(clone, [-1])
+#         mul: "f32[s2]" = torch.ops.aten.mul.Tensor(clone, 10)
+
+#         sym_size_int: "Sym(s2)" = torch.ops.aten.sym_size.int(arg0_1, 0);  arg0_1 = None
+#         mul_1: "Sym(2*s2)" = sym_size_int * 2;  sym_size_int = None
+#         return [clone, view, mul, mul_1]
+# """,  # noqa: B950
+#         )
+
     def test_tensor_subclass_DoubleTensor_mark_dynamic_shapes(self):
         def f(t):
             y = t.clone()
@@ -1881,17 +1917,16 @@ class <lambda>(torch.nn.Module):
         t = DoubleTensor(a)
         torch._dynamo.mark_dynamic(t, 0)
 
-        wrapped_gms = self._compile_check(
+        fw, bw = self._compile_check(
             f,
             [
                 (t,),
             ],
             dynamic=None,
         )
-        actual = normalize_gm(wrapped_gms[0].print_readable(print_output=False))
 
         self.assertExpectedInline(
-            actual,
+            normalize_gm(fw[0].print_readable(print_output=False)),
             """\
 class <lambda>(torch.nn.Module):
     def forward(self, arg0_1: "f32[s3, 4]", arg1_1: "Sym(s3)", arg2_1: "Sym(s0)", arg3_1: "Sym(s2)", arg4_1: "Sym(s1)", arg5_1: "f32[s3, 4]", arg6_1: "Sym(s0)"):
