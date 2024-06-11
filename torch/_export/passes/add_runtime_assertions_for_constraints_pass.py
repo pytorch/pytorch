@@ -201,6 +201,9 @@ def _get_existing_inline_assertions(
             lhs = maybe_get_symint(lhs)
             rhs = maybe_get_symint(rhs)
 
+            if compare_op == operator.ge:
+                lhs, rhs = rhs, lhs
+
             if isinstance(lhs, sympy.Symbol) and isinstance(rhs, int):
                 symint = lhs
                 scalar = rhs
@@ -213,15 +216,12 @@ def _get_existing_inline_assertions(
             if symint not in range_constraints:
                 raise RuntimeError(f"Unable to find symint {symint} in {range_constraints}")
 
-            found_range = existing_inline_assertions.get(symint, ValueRanges(-math.inf, math.inf))
+            previous_range = existing_inline_assertions.get(symint, ValueRanges(-math.inf, math.inf))
 
-            if compare_arg.target == operator.le:
-                existing_inline_assertions[symint] = ValueRanges(
-                    lower=found_range.lower, upper=scalar
-                )
-            elif compare_arg.target == operator.ge:
-                existing_inline_assertions[symint] = ValueRanges(
-                    lower=scalar, upper=found_range.upper
-                )
+            if symint is lhs:
+                bounds = ValueRanges(-math.inf, scalar)
+            else:
+                bounds = ValueRanges(scalar, math.inf)
+            existing_inline_assertions[symint] = previous_range & bounds
 
     return existing_inline_assertions
