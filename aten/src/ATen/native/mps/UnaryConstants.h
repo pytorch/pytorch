@@ -46,7 +46,7 @@ kernel void exp_kernel( device {0} *output [[buffer(0)]],
 kernel void exp_complex_kernel( device {0}2 *output [[buffer(0)]],
                                 device {0}2 *input [[ buffer(1)]],
                                 uint index [[thread_position_in_grid]]) {{
-  output[index].x = precise::exp(input[index].x)*cos(input[index].y);
-  output[index].y = precise::exp(input[index].x)*sin(input[index].y);
+  output[index].x = precise::exp(input[index].x)*precise::cos(input[index].y);
+  output[index].y = precise::exp(input[index].x)*precise::sin(input[index].y);
 }}
 )METAL";
