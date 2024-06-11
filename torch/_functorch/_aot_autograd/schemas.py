@@ -277,7 +277,7 @@ class ViewAndMutationMeta:
     #        + (# intermediate bases)
     # At runtime, we don't keep the traced_tangents around since they're not serializable.
     # Instead, we keep any necessary subclass metadata necessary about each traced_tangent.
-    # This list is generated after calling make_cache_safe().
+    # This list is generated after calling make_runtime_safe().
     traced_tangent_metas: Optional[List[Any]] = None
 
     num_symints_saved_for_bw: Optional[int] = None
@@ -439,7 +439,7 @@ class ViewAndMutationMeta:
         # this information.
         self.num_forward = self.num_forward_returns + self.num_outputs_rng_offset
 
-    def make_cache_safe(self):
+    def make_runtime_safe(self):
         """
         There are various fields in ViewAndMutationMeta that aren't serializable. This function is called after all tracing
         is completed to simplify certain fields in the metadata so that they can be safely cached.
