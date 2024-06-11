@@ -11,7 +11,6 @@ It does so by:
 4. dispatching subclasses
 """
 
-import dataclasses
 import warnings
 from contextlib import nullcontext
 from functools import wraps
@@ -46,6 +45,7 @@ from .functional_utils import (
 from .logging_utils import setup_stacktrace_preservation_hooks
 from .schemas import (
     AOTConfig,
+    InputJointAliasInfo,
     MutationType,
     OutputType,
     SubclassMeta,
@@ -413,13 +413,13 @@ def create_functionalized_fn(
             # Only look at mutations that happened to forward inputs (e.g. fw buffers that were saved for bw)
             primals_before = args[0]
             primals_after = pytree.tree_map(from_fun, f_args[0])
+            input_joint_info = []
             for f_inpt, before, after, inpt_info in zip(
                 f_args[0], primals_before, primals_after, meta.input_info
             ):
                 # Store information about mutations in joint(for backward analysis)
-                dataclasses.replace(
-                    inpt_info, joint_mutates_data=has_data_mutation(f_inpt)
-                )
+                joint_mutates_data = has_data_mutation(f_inpt)
+                input_joint_info.append(InputJointAliasInfo(joint_mutates_data))
 
                 joint_mutates_metadata = has_metadata_mutation(
                     f_inpt, before, check_only_storage_mutation=False
@@ -440,15 +440,14 @@ def create_functionalized_fn(
                 # Allow data mutations on fw inputs during the bw, but only if they do not require grad
                 # So we can guarantee that we can keep the mutations in the graph
                 if (
-                    inpt_info.joint_mutates_data
+                    joint_mutates_data
                     and not inpt_info.mutates_data
                     and not inpt_info.mutates_storage_metadata
                 ):
-                    assert (
-                        not inpt_info.requires_grad
-                    ), "Found a graph input that requires_grad and was mutated in the backward. This is not supported"
-                    # Otherwise, put the mutation in the graph
+                    # Not banning here mutations on inpt_info.requires_grad -
+                    # we'll check at runtime and fail only when backward is under torch.is_grad_enabled (create_graph)
                     before.copy_(after)
+            meta.input_joint_info = input_joint_info
             # Now that we covered mutations to *forward* inputs during the backward,
             # we also need to cover mutations to *backward-only* inputs during the backward (e.g. mutation to a grad_out).
             # Today, we will just error in all cases of this happening unless someone needs us to support it.

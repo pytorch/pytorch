@@ -2197,7 +2197,7 @@ def forward(self, primals_1, primals_2):
             return torch.ops._test._clone_create_graph(x, x1)
 
         inp_x, inp_x1 = torch.randn(3, requires_grad=True), torch.randn(
-            3, requires_grad=False
+            3, requires_grad=True
         )
 
         ref_x, ref_x1 = inp_x.clone(), inp_x1.clone()

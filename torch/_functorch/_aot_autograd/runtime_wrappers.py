@@ -1825,8 +1825,11 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
 
                 # Backward with forward inputs mutations is not supported in double backward.
                 if torch.is_grad_enabled() and any(
-                    i.joint_mutates_data and not i.mutates_data and i.requires_grad
-                    for i in CompiledFunction.metadata.input_info
+                    ji.mutates_data and not i.mutates_data and i.requires_grad
+                    for i, ji in zip(
+                        CompiledFunction.metadata.input_info,
+                        CompiledFunction.metadata.input_joint_info,
+                    )
                 ):
                     raise RuntimeError(
                         "aot_autograd does not support input mutations with requires_grad in backward for create_graph=True"
