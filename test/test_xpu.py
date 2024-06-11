@@ -413,7 +413,7 @@ class TestXpuAutocast(TestCase):
             skip_test = False
             op, args = op_with_args[0], op_with_args[1]
             if op in self.skip_list:
-                skip_test = True  # skip unsupported op
+                skip_test = True  # skip unimplemented op
             if len(op_with_args) == 3:
                 skip_test = True  # skip cudnn op
             if not skip_test:
@@ -424,7 +424,7 @@ class TestXpuAutocast(TestCase):
             skip_test = False
             op, args = op_with_args[0], op_with_args[1]
             if op in self.skip_list:
-                skip_test = True  # skip unsupported op
+                skip_test = True  # skip unimplemented op
             if len(op_with_args) == 3:
                 skip_test = True  # skip cudnn op
             if not skip_test:
