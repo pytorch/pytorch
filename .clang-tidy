@@ -62,4 +62,6 @@ readability-string-compare,
 '
 HeaderFilterRegex: '^(aten/|c10/|torch/).*$'
 WarningsAsErrors: '*'
+CheckOptions:
+  misc-header-include-cycle.IgnoredFilesList: 'format.h;ivalue.h;custom_class.h;Dict.h;List.h'
 ...

@@ -29,7 +29,7 @@ _dtype = torch.dtype
 _device = torch.device
 _qscheme = torch.qscheme
 _size = Union[torch.Size, List[_int], Tuple[_int, ...]]
-_symsize = Union[torch.Size, List[Union[_int, SymInt]], Tuple[Union[_int, SymInt], ...]]
+_symsize = Union[torch.Size, Sequence[Union[_int, SymInt]]]
 _layout = torch.layout
 _dispatchkey = Union[str, torch._C.DispatchKey]
 
