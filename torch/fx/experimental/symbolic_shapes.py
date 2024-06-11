@@ -4420,11 +4420,7 @@ class ShapeEnv:
                 # Skip var_ranges logic for SingletonInt which is only used
                 # for jagged layout NestedTensors today
                 continue
-            try:
-                vr = var_ranges[k]
-            except KeyError:
-                log.warning("%s is not in var_ranges, defaulting to unknown range.", k)
-                vr = self._default_unspecified_value_range()
+            vr = var_ranges[k]
             if size_oblivious and k in self.size_like:
                 lower = max(2, vr.lower)
                 # This is a bit dodgy: what this means is that there was a
