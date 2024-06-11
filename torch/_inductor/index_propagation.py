@@ -29,8 +29,8 @@ import sympy
 import torch
 from torch._prims_common import dtype_to_type, is_integer_dtype
 from torch.utils._sympy.functions import FloorDiv, ModularIndexing, Where
-from torch.utils._sympy.value_ranges import bound_sympy, ValueRanges
 from torch.utils._sympy.symbol import free_symbol_is_type, SymT
+from torch.utils._sympy.value_ranges import bound_sympy, ValueRanges
 from .utils import generate_assert
 
 from .virtualized import V
@@ -345,7 +345,6 @@ class IndexPropagation:
                 -size <= expr
             )
             can_prove_upper = self.statically_true(expr < size)
-
             expr = wrap_expr(expr)
             if generate_assert(check):
                 self.fallback(
