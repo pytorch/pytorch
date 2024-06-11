@@ -1,13 +1,11 @@
-from random import gauss, shuffle
-from typing import Callable, List, Optional, Tuple, Union
+from typing import List, Optional, Tuple, Union
 
 import sympy
 
 import torch
-from .ir import Buffer, Pointwise, TensorBox
+from .ir import Pointwise, TensorBox
 from .lowering import fallback_handler, is_integer_type, register_lowering
-from .runtime.runtime_utils import next_power_of_2
-from .virtualized import ops, V
+from .virtualized import ops
 
 
 # pyre-ignore[2,3]
@@ -101,85 +99,6 @@ def jagged_idx_to_dense_idx(
     # check=False because there may be sequences longer than max_seq_len
     seq_idx = ops.indirect_indexing(seq, max_seq_len, check=False)
     return batch_idx, seq_idx
-
-
-# pyre-ignore[3]
-def jagged_filtered_configs(
-    k: int,
-    n: int,
-    configs: List[Tuple[int, int, int, int]],
-):
-    from torch._inductor.kernel.mm_common import triton_config
-
-    # pyre-fixme[6]: For 1st argument expected `Expr` but got `int`.
-    k = max(next_power_of_2(V.graph.sizevars.size_hint(k)), 16)  # type: ignore[arg-type]
-    # pyre-fixme[6]: For 1st argument expected `Expr` but got `int`.
-    n = max(next_power_of_2(V.graph.sizevars.size_hint(n)), 16)  # type: ignore[arg-type]
-    used = set()
-    for block_k, block_n, num_stages, num_warps in configs:
-        # shrink configs for small sizes
-        block_k = min(block_k, k)
-        block_n = min(block_n, n)
-        if (block_k, block_n, num_stages, num_warps) not in used:
-            used.add((block_k, block_n, num_stages, num_warps))
-            yield triton_config(
-                BLOCK_K=block_k,
-                BLOCK_N=block_n,
-                num_stages=num_stages,
-                num_warps=num_warps,
-            )
-
-
-# pyre-ignore[2,3]
-def jagged_mm_options(config, layout):
-    from torch._inductor.kernel.mm_common import acc_type
-
-    return dict(
-        ACC_TYPE=acc_type(layout.dtype),
-        num_stages=config.num_stages,
-        num_warps=config.num_warps,
-        **config.kwargs,
-    )
-
-
-def make_offset_generator(
-    total_length: int,
-    batch_size: int,
-    max_seq_len: int,
-) -> Callable[[Buffer], torch.Tensor]:
-    def generate_offsets(node: Buffer) -> torch.Tensor:
-        avg_length = total_length // batch_size
-        std = avg_length // 3  # rather arbitrary, but likely reasonable
-        lengths = [gauss(avg_length, std) for _ in range(batch_size)]
-        lengths = [int(min(max_seq_len, max(L, 0))) for L in lengths]
-
-        diff = sum(lengths) - total_length
-        idx_and_lengths = list(enumerate(lengths))
-        shuffle(idx_and_lengths)
-
-        for i, length in idx_and_lengths:
-            if diff == 0:
-                break
-            elif diff > 0:
-                delta = min(length, diff)
-                lengths[i] -= delta
-                diff -= delta
-            else:
-                delta = min(max_seq_len - length, -diff)
-                lengths[i] += delta
-                diff += delta
-
-        offsets = [0]
-        for length in lengths:
-            offsets.append(offsets[-1] + length)
-
-        return torch.tensor(
-            offsets,
-            device=node.get_device(),
-            dtype=node.get_dtype(),
-        )
-
-    return generate_offsets
 
 
 def register_jagged_ops():
