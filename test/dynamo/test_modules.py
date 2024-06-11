@@ -3,6 +3,8 @@
 import collections
 import copy
 import itertools
+import os
+import tempfile
 import traceback
 import types
 import unittest
@@ -16,9 +18,11 @@ import torch
 import torch._dynamo.test_case
 import torch._dynamo.testing
 import torch.nn.functional as F
+from torch._dynamo.debug_utils import same_two_models
 from torch._dynamo.eval_frame import unsupported
 from torch._dynamo.mutation_guard import GenerationTracker
 from torch._dynamo.testing import expectedFailureDynamic, same
+from torch._dynamo.utils import ifdynstaticdefault
 from torch.nn.modules.lazy import LazyModuleMixin
 from torch.nn.parameter import Parameter, UninitializedParameter
 
@@ -1104,6 +1108,37 @@ class UnspecNonInlinableToplevelModule(torch.nn.Module):
         return self.m(x)
 
 
+class ModuleWithIntAttr(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.layer = torch.nn.Linear(4, 4)
+        self.step = 10
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        x = x + 1
+        self.step += 1
+        return self.layer(x) + self.step
+
+
+class UnspecInlinableModule(torch.nn.Module):
+    torchdynamo_force_dynamic = True  # forced to be a UnspecializedNNModule
+
+    def forward(self, x):
+        return torch.sin(x)
+
+
+class UnspecModuleWithIntAttr(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.layer = UnspecInlinableModule()
+        self.step = 10
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        x = x + 1
+        self.step += 1
+        return self.layer(x) + self.step
+
+
 def make_test(fn, expected_ops=None):
     def test_fn(self):
         return torch._dynamo.testing.standard_test(
@@ -1356,6 +1391,31 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnt.op_count, 1)
         self.assertTrue(torch._dynamo.testing.same(pre, opt_pre))
         self.assertTrue(torch._dynamo.testing.same(out1, out_post))
+
+    def test_nn_module_unspec_int_attr(self):
+        for module_class in [ModuleWithIntAttr, UnspecModuleWithIntAttr]:
+            mod = module_class()
+            cnt = torch._dynamo.testing.CompileCounter()
+            opt_mod = torch.compile(backend=cnt)(copy.deepcopy(mod))
+            x = torch.randn(3, 4)
+
+            # Compiling self.step as static.
+            ref1 = mod(x)
+            res1 = opt_mod(x)
+            self.assertTrue(torch.allclose(ref1, res1))
+            self.assertEqual(cnt.frame_count, 1)
+
+            # Compiling self.step as dynamic.
+            ref2 = mod(x)
+            res2 = opt_mod(x)
+            self.assertTrue(torch.allclose(ref2, res2))
+            self.assertEqual(cnt.frame_count, ifdynstaticdefault(2, 1))
+
+            # No re-compilation!
+            ref3 = mod(x)
+            res3 = opt_mod(x)
+            self.assertTrue(torch.allclose(ref3, res3))
+            self.assertEqual(cnt.frame_count, ifdynstaticdefault(2, 1))
 
     # RuntimeError: SymIntArrayRef expected to contain only concrete integers
     @expectedFailureDynamic
@@ -2681,6 +2741,49 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         # other file.
         self.assertEqual(test_functions._variable, 1)
         self.assertEqual(res, 3 * torch.ones(10))
+
+    @unittest.skipIf(
+        "inductor" not in torch._dynamo.list_backends(),
+        "inductor backend is not available",
+    )
+    def test_save_and_load_inductor(self):
+        mod = MockModule()
+        opt_mod = torch.compile(mod, backend="inductor")
+        inp = torch.randn(10, 10)
+        opt_mod(inp)
+
+        with tempfile.TemporaryDirectory() as tmpdirname:
+            torch.save(opt_mod, os.path.join(tmpdirname, "model.pt"))
+            loaded_model = torch.load(os.path.join(tmpdirname, "model.pt"))
+        loaded_model(inp)
+        self.assertTrue(same_two_models(loaded_model, mod, [inp]))
+        self.assertTrue(same_two_models(loaded_model, opt_mod, [inp]))
+
+        torch._dynamo.reset()  # force recompiles
+        torch._inductor.metrics.generated_kernel_count = 0
+        loaded_model(inp)
+        self.assertGreater(torch._inductor.metrics.generated_kernel_count, 0)
+
+    def test_save_and_load_all_backends(self):
+        mod = MockModule()
+        inp = torch.randn(10, 10)
+        for backend in torch._dynamo.list_backends():
+            try:
+                opt_mod = torch.compile(mod, backend=backend)
+                with tempfile.TemporaryDirectory() as tmpdirname:
+                    torch.save(opt_mod, os.path.join(tmpdirname, "model.pt"))
+                    loaded_model = torch.load(os.path.join(tmpdirname, "model.pt"))
+                torch._dynamo.reset()  # force recompiles
+                torch._inductor.metrics.generated_kernel_count = 0
+                opt_mod(inp)
+                opt_success = torch._inductor.metrics.generated_kernel_count == 0
+                torch._dynamo.reset()  # force recompiles
+                torch._inductor.metrics.generated_kernel_count = 0
+                loaded_model(inp)
+                loaded_success = torch._inductor.metrics.generated_kernel_count == 0
+                self.assertEqual(opt_success, loaded_success)
+            except torch._dynamo.exc.BackendCompilerFailed:
+                pass
 
     def test_monkeypatching_forward(self):
         class FakeModule(torch.nn.Module):

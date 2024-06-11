@@ -15,7 +15,7 @@ import os
 import torch
 from torch.testing._internal.common_utils import TestCase, TEST_WITH_ROCM, TEST_MKL, \
     skipCUDANonDefaultStreamIf, TEST_WITH_ASAN, TEST_WITH_UBSAN, TEST_WITH_TSAN, \
-    IS_SANDCASTLE, IS_FBCODE, IS_REMOTE_GPU, IS_WINDOWS, TEST_MPS, TEST_XPU, \
+    IS_SANDCASTLE, IS_FBCODE, IS_REMOTE_GPU, IS_WINDOWS, TEST_MPS, TEST_XPU, TEST_HPU, \
     _TestParametrizer, compose_parametrize_fns, dtype_name, \
     TEST_WITH_MIOPEN_SUGGEST_NHWC, NATIVE_DEVICES, skipIfTorchDynamo, \
     get_tracked_input, clear_tracked_input, PRINT_REPRO_ON_FAILURE, \
@@ -590,6 +590,18 @@ class XPUTestBase(DeviceTypeTestBase):
     def _should_stop_test_suite(self):
         return False
 
+class HPUTestBase(DeviceTypeTestBase):
+    device_type = 'hpu'
+    primary_device: ClassVar[str]
+
+    @classmethod
+    def get_primary_device(cls):
+        return cls.primary_device
+
+    @classmethod
+    def setUpClass(cls):
+        cls.primary_device = 'hpu:0'
+
 class PrivateUse1TestBase(DeviceTypeTestBase):
     primary_device: ClassVar[str]
     device_mod = None
@@ -701,6 +713,8 @@ def get_desired_device_type_test_bases(except_for=None, only_for=None, include_l
         test_bases.append(MPSTestBase)
     if only_for == 'xpu' and TEST_XPU and XPUTestBase not in test_bases:
         test_bases.append(XPUTestBase)
+    if TEST_HPU and HPUTestBase not in test_bases:
+        test_bases.append(HPUTestBase)
     # Filter out the device types based on user inputs
     desired_device_type_test_bases = filter_desired_device_types(test_bases, except_for, only_for)
     if include_lazy:
@@ -1060,6 +1074,10 @@ class skipMPSIf(skipIf):
     def __init__(self, dep, reason):
         super().__init__(dep, reason, device_type='mps')
 
+class skipHPUIf(skipIf):
+    def __init__(self, dep, reason):
+        super().__init__(dep, reason, device_type='hpu')
+
 # Skips a test on XLA if the condition is true.
 class skipXLAIf(skipIf):
 
@@ -1343,6 +1361,9 @@ def onlyMPS(fn):
 def onlyXPU(fn):
     return onlyOn('xpu')(fn)
 
+def onlyHPU(fn):
+    return onlyOn('hpu')(fn)
+
 def onlyPRIVATEUSE1(fn):
     device_type = torch._C._get_privateuse1_backend_name()
     device_mod = getattr(torch, device_type, None)
@@ -1400,6 +1421,9 @@ def expectedFailureMeta(fn):
 
 def expectedFailureXLA(fn):
     return expectedFailure('xla')(fn)
+
+def expectedFailureHPU(fn):
+    return expectedFailure('hpu')(fn)
 
 # Skips a test on CPU if LAPACK is not available.
 def skipCPUIfNoLapack(fn):
@@ -1577,6 +1601,9 @@ def skipXLA(fn):
 
 def skipMPS(fn):
     return skipMPSIf(True, "test doesn't work on MPS backend")(fn)
+
+def skipHPU(fn):
+    return skipHPUIf(True, "test doesn't work on HPU backend")(fn)
 
 def skipPRIVATEUSE1(fn):
     return skipPRIVATEUSE1If(True, "test doesn't work on privateuse1 backend")(fn)

@@ -39,7 +39,7 @@ namespace at { namespace native {
 
     std::tuple<Tensor, Tensor, Tensor, std::vector<Tensor>> miopen_rnn_backward(
             const Tensor& input, TensorList weight, int64_t weight_stride0, const Tensor& weight_buf, const Tensor& hx, const std::optional<Tensor>& cx_opt,
-            const Tensor& output, const std::optional<Tensor>& grad_output_r_opt, const c10::optional<Tensor>& grad_hy_r_opt, const c10::optional<Tensor>& grad_cy_r_opt, int64_t mode, int64_t hidden_size, int64_t num_layers, bool batch_first,
+            const Tensor& output, const std::optional<Tensor>& grad_output_r_opt, const std::optional<Tensor>& grad_hy_r_opt, const std::optional<Tensor>& grad_cy_r_opt, int64_t mode, int64_t hidden_size, int64_t num_layers, bool batch_first,
             double dropout, bool train, bool bidirectional, IntArrayRef batch_sizes, const std::optional<Tensor>& dropout_state_opt,
             const Tensor& reserve, std::array<bool, 4> output_mask
             ) {
@@ -759,7 +759,7 @@ std::vector<Tensor> miopen_rnn_backward_weight(
 
 std::tuple<Tensor, Tensor, Tensor, std::vector<Tensor>> miopen_rnn_backward(
         const Tensor& input, TensorList weight, int64_t weight_stride0, const Tensor& weight_buf, const Tensor& hx, const std::optional<Tensor>& cx_opt,
-        const Tensor& output, const std::optional<Tensor>& grad_output_r_opt, const c10::optional<Tensor>& grad_hy_r_opt, const c10::optional<Tensor>& grad_cy_r_opt, int64_t mode, int64_t hidden_size, int64_t num_layers, bool batch_first,
+        const Tensor& output, const std::optional<Tensor>& grad_output_r_opt, const std::optional<Tensor>& grad_hy_r_opt, const std::optional<Tensor>& grad_cy_r_opt, int64_t mode, int64_t hidden_size, int64_t num_layers, bool batch_first,
         double dropout, bool train, bool bidirectional, IntArrayRef batch_sizes, const std::optional<Tensor>& dropout_state_opt,
         const Tensor& reserve, std::array<bool, 4> output_mask
         ) {

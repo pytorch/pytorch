@@ -1,6 +1,7 @@
 # Owner(s): ["module: inductor"]
 
 from sympy import Symbol
+
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import sympy_subs
 

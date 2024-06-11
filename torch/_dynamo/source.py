@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import collections
 import dataclasses
 import enum
@@ -566,6 +567,15 @@ class NumpyTensorSource(ChainedSource):
 class FloatTensorSource(ChainedSource):
     def name(self) -> str:
         return f"___as_tensor({self.base.name()})"
+
+    def guard_source(self):
+        return self.base.guard_source()
+
+
+@dataclasses.dataclass(frozen=True)
+class CallMethodItemSource(ChainedSource):
+    def name(self) -> str:
+        return f"{self.base.name()}.item()"
 
     def guard_source(self):
         return self.base.guard_source()

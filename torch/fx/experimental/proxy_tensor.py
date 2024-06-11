@@ -922,7 +922,7 @@ def disable_autocast_cache():
         torch.set_autocast_cache_enabled(old_value)
 
 
-class ModuleNotInstalledAsSubmoduleError(NameError):
+class _ModuleNotInstalledAsSubmoduleError(NameError):
     pass
 
 
@@ -1006,7 +1006,7 @@ class _ModuleStackTracer(PythonKeyTracer):
         try:
             return Tracer.path_of_module(self, mod)
         except NameError as e:
-            raise ModuleNotInstalledAsSubmoduleError from e
+            raise _ModuleNotInstalledAsSubmoduleError from e
 
     def getattr(self, attr, attr_val, parameter_proxy_cache):
         if not isinstance(attr_val, torch.nn.Module) or isinstance(attr_val, torch.fx.GraphModule):
@@ -1081,7 +1081,7 @@ class _ModuleStackTracer(PythonKeyTracer):
 
         try:
             return Tracer.call_module(self, m, forward, args, kwargs)
-        except ModuleNotInstalledAsSubmoduleError as e:
+        except _ModuleNotInstalledAsSubmoduleError as e:
             warnings.warn(
                 f"Unable to find the path of the module {m}. "
                 "This might be because the module was not properly registered "

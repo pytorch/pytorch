@@ -19,10 +19,11 @@ from typing import Callable, cast, Optional, Tuple
 from unittest import TestCase
 from unittest.mock import call, MagicMock, Mock, patch
 
-from torch.distributed import Store
+from torch.distributed import HashStore, Store
 from torch.distributed.elastic.rendezvous import (
     RendezvousClosedError,
     RendezvousError,
+    RendezvousInfo,
     RendezvousParameters,
     RendezvousStateError,
     RendezvousTimeoutError,
@@ -1154,9 +1155,11 @@ class DynamicRendezvousHandlerTest(TestCase):
 
         self._store = DummyStore()
 
-        self._mock_store_get = MagicMock(return_value=b"dummy_value")
+        self._mock_store_get = MagicMock(return_value=b"123")
+        self._mock_store_set = MagicMock()
 
         setattr(self._store, "get", self._mock_store_get)  # noqa: B010
+        setattr(self._store, "set", self._mock_store_set)  # noqa: B010
 
         self._state_holder = FakeRendezvousStateHolder()
 
@@ -1208,14 +1211,14 @@ class DynamicRendezvousHandlerTest(TestCase):
 
         handler = self._create_handler()
 
-        store, rank, world_size = handler.next_rendezvous()
+        rdzv_info = handler.next_rendezvous()
 
-        self.assertEqual(rank, 2)
-        self.assertEqual(world_size, 3)
+        self.assertEqual(rdzv_info.rank, 2)
+        self.assertEqual(rdzv_info.world_size, 3)
 
-        _ = store.get("dummy_key")
+        _ = rdzv_info.store.get("dummy_key")
 
-        self._mock_store_get.assert_called_once_with(
+        self._mock_store_get.assert_called_with(
             "torch.rendezvous.dummy_run_id.0/dummy_key"
         )
 
@@ -1595,7 +1598,7 @@ class _CapturingThread(threading.Thread):
 
 class IntegrationTest(TestCase):
     def setUp(self) -> None:
-        self._store = DummyStore()
+        self._store = HashStore()
         self._handlers = []
         self._backend = _InMemoryRendezvousBackend()
 
@@ -1631,15 +1634,15 @@ class IntegrationTest(TestCase):
         handler1_thread.start()
         handler2_thread.start()
 
-        store1, rank1, world_size1 = handler1_thread.join()
-        store2, rank2, world_size2 = handler2_thread.join()
-        self.assertEqual(store1.underlying_store, self._store)
-        self.assertEqual(store2.underlying_store, self._store)
+        rdzv_info1: RendezvousInfo = handler1_thread.join()
+        rdzv_info2: RendezvousInfo = handler2_thread.join()
+        self.assertEqual(rdzv_info1.store.underlying_store, self._store)
+        self.assertEqual(rdzv_info2.store.underlying_store, self._store)
 
-        self.assertNotEqual(rank1, rank2)
+        self.assertNotEqual(rdzv_info1.rank, rdzv_info2.rank)
 
-        self.assertEqual(world_size1, 2)
-        self.assertEqual(world_size2, 2)
+        self.assertEqual(rdzv_info1.world_size, 2)
+        self.assertEqual(rdzv_info2.world_size, 2)
 
     def test_redundancy_list(self) -> None:
         handler1 = self._create_handler(min_nodes=2, max_nodes=2)
