@@ -45,6 +45,15 @@ class BoundVars:
         # To access this variable call `get_bounds()`
         self._bounds: Dict[torch.fx.Node, ValueRanges[Expr]] = {}
 
+    def __repr__(self):
+        return (
+            f"{self.__class__.__name__}("
+            f"loop_body={self.loop_body},\n "
+            f"replacement_vals={self.replacement_vals}, \n"
+            f"unbounded_vars={self.unbounded_vars}, \n"
+            f"_bounds={self._bounds})"
+        )
+
     @cache_on_self
     def get_bounds(self) -> Dict[torch.fx.Node, ValueRanges[Expr]]:
         submodules = self.swap_submodules(self.loop_body.submodules)

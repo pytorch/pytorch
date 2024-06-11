@@ -2,6 +2,7 @@
 import os
 from typing import Optional
 
+from torch.fx._compatibility import compatibility
 from torch.fx.graph_module import GraphModule
 
 from .graph_drawer import FxGraphDrawer
@@ -9,6 +10,7 @@ from .graph_drawer import FxGraphDrawer
 __all__ = ["GraphTransformObserver"]
 
 
+@compatibility(is_backward_compatible=False)
 class GraphTransformObserver:
     __pass_count = 0
 
