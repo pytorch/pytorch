@@ -1491,6 +1491,7 @@ def valid_vec_isa_list() -> List[VecISA]:
                     for group in featuresmatch.groups():
                         if re.search(r"[\^ ]+vxe[\$ ]+", group):
                             isa_list.append(VecZVECTOR())
+                            break
         return isa_list
 
     if arch == "x86_64" or arch == "AMD64":
