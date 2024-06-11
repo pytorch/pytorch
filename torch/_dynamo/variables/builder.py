@@ -85,6 +85,7 @@ from ..utils import (
     get_static_address_type,
     is_function_or_wrapper,
     is_namedtuple,
+    is_nn_module_int_attribute,
     is_typing,
     is_utils_checkpoint,
     istype,
@@ -1174,21 +1175,35 @@ class VariableBuilder:
                 # Guards are added inside register_attr_or_module
             )
 
+    def is_force_symint(self, value):
+        # For nn module int attributes, force them to be symints. Don't even try
+        # the 0/1 specialization. This prevents recompilation in cases where
+        # forward increments a counter in every invocation.
+        if type(value) is int:
+            return is_nn_module_int_attribute(self.source)
+        return False
+
     def wrap_literal(self, value):
         if not config.specialize_int and type(value) is int:
             # unspecializing int by default, but still
             # specialize for the following conditions
-            if not TracingContext.get().force_unspec_int_unbacked_size_like and (
-                value in self._common_constants()
-                # Assume integers from global variables want to be specialized
-                or not self.source.guard_source().is_local()
-                or is_from_defaults(self.source)
-                or is_cell_contents(self.source)
+
+            force_symint = self.is_force_symint(value)
+            if (
+                not TracingContext.get().force_unspec_int_unbacked_size_like
+                and not force_symint
+                and (
+                    value in self._common_constants()
+                    # Assume integers from global variables want to be specialized
+                    or not self.source.guard_source().is_local()
+                    or is_from_defaults(self.source)
+                    or is_cell_contents(self.source)
+                )
             ):
                 self.install_guards(GuardBuilder.CONSTANT_MATCH)
                 return ConstantVariable.create(value=value, source=self.source)
             else:
-                return self.wrap_symint(value)
+                return self.wrap_symint(value, force_symint)
         elif not config.specialize_float and type(value) is float:
             return self.wrap_symfloat(value)
         else:
@@ -1411,7 +1426,7 @@ class VariableBuilder:
 
         return numpy_ndarray_variable
 
-    def wrap_symint(self, value):
+    def wrap_symint(self, value, force_symint=False):
         assert type(value) is int
 
         if self.name in self.tx.output.unspec_variable_map:
@@ -1462,8 +1477,10 @@ class VariableBuilder:
             # and it is inappropriate to eagerly duck size them with
             # real sizevars
             if (
-                config.automatic_dynamic_shapes and frame_state_entry.scalar is None
-            ) or not config.assume_static_by_default:
+                (config.automatic_dynamic_shapes and frame_state_entry.scalar is None)
+                or not config.assume_static_by_default
+                or force_symint
+            ):
                 dynamic_dim = DimDynamic.DYNAMIC
             else:  # assume_static_by_default
                 # TODO: dynamic_dim = DimDynamic.STATIC should work but

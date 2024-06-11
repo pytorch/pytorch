@@ -507,6 +507,20 @@ class NNModuleSource(ChainedSource):
         return self.base.name()
 
 
+# Source similar to NNModuleSource, but for UnspecializedNNModuleVariable. This
+# is useful to detect if we are looking at a nn-module attribute.
+@dataclasses.dataclass(frozen=True)
+class UnspecializedNNModuleSource(ChainedSource):
+    def reconstruct(self, codegen):
+        self.base.reconstruct(codegen)
+
+    def guard_source(self):
+        return self.base.guard_source()
+
+    def name(self):
+        return self.base.name()
+
+
 @dataclasses.dataclass(frozen=True)
 class NotNNModuleSource(NNModuleSource):
     def guard_source(self):
