@@ -2391,7 +2391,7 @@ class SliceView(View):
     @classmethod
     def create(cls, x, dim, start, end, step=1, clamp=True):
         step = sympy.expand(step)
-        assert step > 0
+        assert isinstance(step, sympy.Expr) or step > 0
         try:
             if start == 0 and end >= 2**63 - 1 and step == 1:
                 return x
