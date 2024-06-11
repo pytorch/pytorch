@@ -344,8 +344,6 @@ class TestXpuAutocast(TestCase):
 
             # Try module.* variant, if requested:
             if module is not None and hasattr(module, op):
-                print(*args)
-                print(**add_kwargs)
                 output = getattr(module, op)(*args, **add_kwargs)
                 if isinstance(output, torch.Tensor):
                     self.assertTrue(
