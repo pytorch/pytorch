@@ -35,7 +35,13 @@ from torch._prims_common import (
     Number,
 )
 from torch.fx.experimental.sym_node import magic_methods, method_to_operator
-from torch.utils._sympy.functions import CeilDiv, FloorDiv, IntTrueDiv, ModularIndexing
+from torch.utils._sympy.functions import (
+    CeilDiv,
+    FloorDiv,
+    Identity,
+    IntTrueDiv,
+    ModularIndexing,
+)
 from .._dynamo.utils import import_submodule
 
 from . import config, inductor_prims, ir, test_operators  # NOQA: F401
@@ -1016,7 +1022,9 @@ def pointwise_cat(inputs, dim=0):
 
             # if we're concatting [4], [2]
             # when we index the second tensor for 5 we want to index 5 - 4
-            idx_load[dim] -= inputs_ranges[i][0]
+            # Use Identity to prevent expansion of index * stride to keep expression
+            # in same int bitwidth as shape
+            idx_load[dim] = Identity(idx_load[dim] - inputs_ranges[i][0])
 
             masked_loads.append(
                 ops.masked(
@@ -2781,18 +2789,29 @@ def gather(x, dim, index, sparse_grad=False):
     # sparse_grad doesn't affect forward computation,
     # and backward tracing is taken care of by AOT Autograd
     assert isinstance(x, TensorBox)
+    if index.get_numel() == 0:
+        # Empty index case. Return an empty array with the same shape
+        return new_empty(x, index.get_size())
+
     assert index.get_dtype() == torch.int64
     size = x.get_size()
     offset = len(size) == 0
     dim = _validate_dim(x, dim, offset)
+
+    if offset:
+        x = expand(x, [1])
+        size = [1]
 
     x_loader = x.make_loader()
     index_loader = index.make_loader()
 
     def fn(idx):
         idx = list(idx)
-        if len(idx) != 0:
-            idx[dim] = ops.indirect_indexing(index_loader(idx), size[dim])
+        gather_idx = ops.indirect_indexing(index_loader(idx), size[dim])
+        if len(idx) == 0:
+            idx = [gather_idx]
+        else:
+            idx[dim] = gather_idx
         return x_loader(idx)
 
     return Pointwise.create(
@@ -3271,6 +3290,9 @@ def scatter_reduce_(self, dim: int, index, src, reduce, *, include_self: bool = 
 
     if isinstance(index, TensorBox) and len(index.get_size()) == 0:
         index = view(index, [1])
+
+    if index.get_numel() == 0:
+        return self
 
     dim = _validate_dim(self, dim)
 

@@ -8,6 +8,7 @@
 #include <torch/csrc/distributed/c10d/Utils.hpp>
 #include <torch/csrc/jit/serialization/pickler.h>
 #include <torch/csrc/profiler/combined_traceback.h>
+#include <chrono>
 
 #include <sys/types.h>
 #include <cstdlib>
