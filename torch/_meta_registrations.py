@@ -6064,7 +6064,7 @@ def meta__padded_dense_to_jagged_forward(
         assert shape_env is not None
         total_L = shape_env.create_unbacked_symint()
         torch.fx.experimental.symbolic_shapes._constrain_range_for_size(
-            total_L, min=1, max=None
+            total_L, min=0, max=None
         )
 
     output_shape = (total_L, *padded.shape[2:])
