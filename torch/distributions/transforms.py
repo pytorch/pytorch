@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import functools
 import math
 import numbers

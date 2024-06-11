@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import logging
 import os
 from typing import Any, List
