@@ -30,6 +30,7 @@
 #include <torch/csrc/distributed/c10d/Utils.hpp>
 #include <torch/csrc/distributed/c10d/control_plane/Handlers.hpp>
 #include <torch/csrc/distributed/c10d/logger.hpp>
+#include <torch/csrc/monitor/instrumentation.h>
 #include <torch/torch.h>
 
 namespace c10d {
@@ -582,6 +583,7 @@ bool ProcessGroupNCCL::WorkNCCL::finishedGPUExecutionInternal() const {
 
 bool ProcessGroupNCCL::WorkNCCL::checkTimeout(
     std::optional<std::chrono::milliseconds> timeout) {
+  SCOPED_WAIT_COUNTER_US("pytorch.logging.wait_counter.ProcessGroupNCCL::WorkNCCL::checkTimeout");
   auto currentTimepoint = std::chrono::steady_clock::now();
   auto timeElapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
       currentTimepoint - workStartTime_);
