@@ -24,14 +24,19 @@ from torch._inductor.pattern_matcher import (
     stable_topological_sort,
 )
 from torch._inductor.test_case import run_tests, TestCase
-from torch._inductor.utils import run_and_get_code
+from torch._inductor.utils import (
+    get_gpu_shared_memory,
+    run_and_get_code
+)
 from torch._inductor.virtualized import V
 from torch.testing import FileCheck
 from torch.testing._internal.common_cuda import SM80OrLater
-from torch.testing._internal.common_utils import IS_LINUX, skipIfRocm
+from torch.testing._internal.common_utils import IS_LINUX, LazyVal, skipIfRocm
 from torch.testing._internal.inductor_utils import HAS_CUDA
 from torch.utils import _pytree as pytree
 
+
+is_A100 = LazyVal(lambda: get_gpu_shared_memory() == 166912)
 
 class TestPatternMatcher(TestCase):
     def common(
@@ -276,40 +281,46 @@ class TestPatternMatcher(TestCase):
             self._test_mixed_impl(fn, args, True, False)
 
     @unittest.skipIf(not SM80OrLater, "need sm_80")
+    @unittest.skipIf(not is_A100, "heuristic only run on A100")
     @inductor_config.patch(force_mixed_mm="heuristic")
     def test_mixed_mm_heuristic_no(self):
         def fn(a, b):
             return torch.mm(a, b.to(a.dtype))
 
         # examples that should not be selected by heuristic
+        mat1_dtype = torch.float16
         args_list = [
             (
-                torch.randn(1, 4097, device="cuda"),
+                torch.randn(1, 4097, dtype=mat1_dtype, device="cuda"),
                 torch.randint(-128, 127, (4097, 4096), dtype=torch.int8, device="cuda"),
             ),
             (
-                torch.randn(1, 4096, device="cuda"),
+                torch.randn(1, 4096, dtype=mat1_dtype, device="cuda"),
                 torch.randint(-128, 127, (4096, 4097), dtype=torch.int8, device="cuda"),
             ),
             (
-                torch.randn(8, 8, device="cuda"),
+                torch.randn(8, 8, dtype=mat1_dtype, device="cuda"),
                 torch.randint(-128, 127, (8, 8), dtype=torch.int8, device="cuda"),
             ),
             (
-                torch.randn(8, 2048, device="cuda"),
+                torch.randn(8, 2048, dtype=mat1_dtype, device="cuda"),
                 torch.randint(-128, 127, (2048, 2048), dtype=torch.int8, device="cuda"),
             ),
             (
-                torch.randn(8, 2048, device="cuda"),
+                torch.randn(8, 2048, dtype=mat1_dtype, device="cuda"),
                 torch.randint(
                     -128, 127, (2048, 2048), dtype=torch.int8, device="cuda"
                 ).t(),
             ),
             (
-                torch.randn(8, 4096, device="cuda"),
+                torch.randn(8, 4096, dtype=mat1_dtype, device="cuda"),
                 torch.randint(-128, 127, (4096, 4096), dtype=torch.int8, device="cuda")[
                     :, ::2
                 ],
+            ),
+            (
+                torch.randn(1, 4096, dtype=torch.float32, device="cuda"),
+                torch.randint(-128, 127, (4096, 4096), dtype=torch.int8, device="cuda"),
             ),
         ]
 
@@ -317,47 +328,45 @@ class TestPatternMatcher(TestCase):
             self._test_mixed_impl(fn, args, True, True)
 
     @unittest.skipIf(not SM80OrLater, "need sm_80")
+    @unittest.skipIf(not is_A100, "heuristic only run on A100")
     @inductor_config.patch(force_mixed_mm="heuristic")
     def test_mixed_mm_heuristic_yes(self):
         def fn(a, b):
             return torch.mm(a, b.to(a.dtype))
 
+        mat1_dtype = torch.float16
         # examples that should be selected by heuristic
         args_list = [
             (
-                torch.randn(1, 4096, device="cuda"),
+                torch.randn(1, 4096, dtype=mat1_dtype, device="cuda"),
                 torch.randint(-128, 127, (4096, 4096), dtype=torch.int8, device="cuda"),
             ),
             (
-                torch.randn(4, 4096, device="cuda"),
+                torch.randn(4, 4096, dtype=mat1_dtype, device="cuda"),
                 torch.randint(-128, 127, (4096, 4096), dtype=torch.int8, device="cuda"),
             ),
             (
-                torch.randn(8, 4096, device="cuda"),
+                torch.randn(8, 4096, dtype=mat1_dtype, device="cuda"),
                 torch.randint(-128, 127, (4096, 4096), dtype=torch.int8, device="cuda"),
             ),
             (
-                torch.randn(8, 4096, device="cuda"),
+                torch.randn(8, 4096, dtype=mat1_dtype, device="cuda"),
                 torch.randint(
                     -128, 127, (4096, 4096), dtype=torch.int8, device="cuda"
                 ).t(),
             ),
             (
-                torch.randn(16, 4096, device="cuda"),
+                torch.randn(16, 4096, dtype=mat1_dtype, device="cuda"),
                 torch.randint(
                     -128, 127, (8192, 4096), dtype=torch.int8, device="cuda"
                 ).t(),
             ),
             (
-                torch.randn(16, 8192, device="cuda"),
-                torch.randint(-128, 127, (8192, 4096), dtype=torch.int8, device="cuda"),
-            ),
-            (
-                torch.randn(32, 4096, device="cuda"),
+                torch.randn(32, 4096, dtype=mat1_dtype, device="cuda"),
                 torch.randint(-128, 127, (4096, 8192), dtype=torch.int8, device="cuda"),
             ),
             (
-                torch.randn(64, 4096, device="cuda"),
+                torch.randn(64, 4096, dtype=mat1_dtype, device="cuda"),
                 torch.randint(-128, 127, (4096, 4096), dtype=torch.int8, device="cuda"),
             ),
         ]

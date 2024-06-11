@@ -18,6 +18,7 @@ from ..select_algorithm import (
     TritonTemplate,
 )
 from ..utils import (
+    get_gpu_shared_memory,
     use_aten_gemm_kernels,
     use_cpp_packed_gemm_template,
     use_cutlass_template,
@@ -411,8 +412,13 @@ def mixed_mm_use_heuristic(choices, mat1, mat2, mat2_dtype, layout, m, n, k, con
 
 
 def try_heuristic(m, n, k, choices, mat1, mat2, mat2_dtype, layout):
+    if mat1.dtype != torch.float16:
+        return
+
     # only use heuristic if we are running on an A100
-    if not torch.cuda.get_device_capability() >= (8, 0):
+    # torch.cuda.get_device_capability() >= (8, 0) returns true for A10G 
+    # which does not have enough shared memory for one of the configs
+    if (not torch.cuda.get_device_capability() >= (8, 0)) or get_gpu_shared_memory() != 166912:
         return
 
     if m == 1 and (n % 16 != 0 or k % 16 != 0):
