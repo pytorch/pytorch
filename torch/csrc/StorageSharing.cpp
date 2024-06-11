@@ -404,9 +404,9 @@ static PyObject* THPStorage_shareDevice(PyObject* self, PyObject* noargs) {
                           ipc_event_handle_size);
 
     ptrdiff_t offset_bytes;
-    char* new_memory_handle = new char[ipc_memory_handle_size];
-    char* new_event_handle = new char[ipc_event_handle_size];
-    char* new_ref_counter = new char[sizeof(std::string)];
+    auto new_memory_handle = std::make_unique<char[]>(ipc_memory_handle_size);
+    auto new_event_handle = std::make_unique<char[]>(ipc_event_handle_size);
+    auto new_ref_counter = std::make_unique<char[]>(sizeof(std::string));
     uint64_t new_ref_counter_offset;
     bool new_event_sync_required;
     at::globalContext()
@@ -419,16 +419,12 @@ static PyObject* THPStorage_shareDevice(PyObject* self, PyObject* noargs) {
                             new_ref_counter_offset,
                             new_event_sync_required);
 
-    _handle = PyBytes_FromStringAndSize(new_memory_handle, ipc_memory_handle_size);
+    _handle = PyBytes_FromStringAndSize(new_memory_handle.get(), ipc_memory_handle_size);
     _offset_bytes = PyLong_FromSsize_t((Py_ssize_t)offset_bytes);
-    _ref_counter = PyBytes_FromString(new_ref_counter);
+    _ref_counter = PyBytes_FromString(new_ref_counter.get());
     _ref_counter_offset = THPUtils_packUInt64(new_ref_counter_offset);
-    _event_handle = PyBytes_FromStringAndSize(new_event_handle, ipc_event_handle_size);
+    _event_handle = PyBytes_FromStringAndSize(new_event_handle.get(), ipc_event_handle_size);
     _event_sync_required = PyBool_FromLong(new_event_sync_required);
-
-    delete[] new_memory_handle;
-    delete[] new_event_handle;
-    delete[] new_ref_counter;
   }
 
   if (!tuple || !device || !_handle || !size_bytes || !_offset_bytes ||

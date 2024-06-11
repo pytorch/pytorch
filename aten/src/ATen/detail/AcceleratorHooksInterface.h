@@ -49,9 +49,9 @@ struct TORCH_API AcceleratorHooksInterface {
 
   virtual void StorageShareDevice(const c10::Storage& storage,
                                   ptrdiff_t& offset_bytes,
-                                  char*& new_memory_handle,
-                                  char*& new_event_handle,
-                                  char*& new_ref_counter,
+                                  std::unique_ptr<char[]>& new_memory_handle,
+                                  std::unique_ptr<char[]>& new_event_handle,
+                                  std::unique_ptr<char[]>& new_ref_counter,
                                   uint64_t& new_ref_counter_offset,
                                   bool& new_event_sync_required) const {
   TORCH_CHECK(false, "Backend doesn't support StorageShareDevice");

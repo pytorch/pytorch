@@ -54,9 +54,9 @@ struct CUDAHooks : public at::CUDAHooksInterface {
                         size_t& ipc_event_handle_size) const override;
   void StorageShareDevice(const c10::Storage& storage,
                           ptrdiff_t& offset_bytes,
-                          char*& new_memory_handle,
-                          char*& new_event_handle,
-                          char*& new_ref_counter,
+                          std::unique_ptr<char[]>& new_memory_handle,
+                          std::unique_ptr<char[]>& new_event_handle,
+                          std::unique_ptr<char[]>& new_ref_counter,
                           uint64_t& new_ref_counter_offset,
                           bool& new_event_sync_required) const override;
   void StorageNewSharedDevice(const c10::DeviceIndex& device,

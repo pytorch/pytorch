@@ -456,9 +456,9 @@ void CUDAHooks::getIpcHandleSize(size_t& ipc_memory_handle_size,
 
 void CUDAHooks::StorageShareDevice(const c10::Storage& storage,
                                    ptrdiff_t& offset_bytes,
-                                   char*& new_memory_handle,
-                                   char*& new_event_handle,
-                                   char*& new_ref_counter,
+                                   std::unique_ptr<char[]>& new_memory_handle,
+                                   std::unique_ptr<char[]>& new_event_handle,
+                                   std::unique_ptr<char[]>& new_ref_counter,
                                    uint64_t& new_ref_counter_offset,
                                    bool& new_event_sync_required) const {
 
@@ -471,7 +471,7 @@ void CUDAHooks::StorageShareDevice(const c10::Storage& storage,
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   cudaIpcMemHandle_t handle;
   C10_CUDA_CHECK(cudaIpcGetMemHandle(&handle, base_ptr));
-  std::memcpy(new_memory_handle, (char*)&handle, sizeof(cudaIpcMemHandle_t));
+  std::memcpy(new_memory_handle.get(), (char*)&handle, sizeof(cudaIpcMemHandle_t));
 
   // Put Storage Data behind new ref counting context
   // See Note [CUDA IPC Refcounting implementation explained]
@@ -481,7 +481,7 @@ void CUDAHooks::StorageShareDevice(const c10::Storage& storage,
   auto sent_data =
       static_cast<torch::CudaIPCSentData*>(storage.data_ptr().get_context());
   sent_data->set_original_ptr(std::move(old_data_ptr));
-  std::memcpy(new_ref_counter, (sent_data->handle()).c_str(), sizeof(sent_data->handle()));
+  std::memcpy(new_ref_counter.get(), (sent_data->handle()).c_str(), sizeof(sent_data->handle()));
   new_ref_counter_offset = sent_data->offset();
 
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
@@ -490,7 +490,7 @@ void CUDAHooks::StorageShareDevice(const c10::Storage& storage,
     C10_CUDA_CHECK(
         cudaIpcGetEventHandle(&ipc_event_handle, sent_data->event_));
   }
-  std::memcpy(new_event_handle, (char*)&ipc_event_handle, sizeof(cudaIpcEventHandle_t));
+  std::memcpy(new_event_handle.get(), (char*)&ipc_event_handle, sizeof(cudaIpcEventHandle_t));
   new_event_sync_required = sent_data->event_sync_required_;
 }
 
