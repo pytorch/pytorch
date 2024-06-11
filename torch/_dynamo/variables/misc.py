@@ -171,6 +171,12 @@ class SuperVariable(VariableTracker):
             return super(variables.CustomizedDictVariable, self.objvar).call_method(
                 tx, "__setitem__", args, kwargs
             )
+        elif inner_fn is collections.OrderedDict.__getitem__ and isinstance(
+            self.objvar, variables.CustomizedDictVariable
+        ):
+            return super(variables.CustomizedDictVariable, self.objvar).call_method(
+                tx, "__getitem__", args, kwargs
+            )
         elif is_standard_setattr(inner_fn) and isinstance(
             self.objvar, UserDefinedObjectVariable
         ):
