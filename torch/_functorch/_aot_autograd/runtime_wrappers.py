@@ -1966,3 +1966,17 @@ def post_compile(
             compiled_fn, aot_config, runtime_metadata=runtime_metadata
         )
     return compiled_fn, runtime_metadata
+
+
+def make_runtime_safe(
+    fw_metadata: ViewAndMutationMeta,
+    maybe_subclass_meta: Optional[SubclassMeta],
+):
+    """
+    Calls make_runtime_safe on all ViewAndMutationMetas.
+    Modifies both arguments. Allows ViewAndMutationMetas to
+    be safely cached in AOTAutogradCache.
+    """
+    fw_metadata.make_runtime_safe()
+    if maybe_subclass_meta is not None:
+        maybe_subclass_meta.fw_metadata.make_runtime_safe()
