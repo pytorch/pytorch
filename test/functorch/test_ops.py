@@ -399,6 +399,7 @@ aliasing_ops_list_return = {
 
 skip_noncontig = {
     "_batch_norm_with_update",
+    "as_strided_copy",
 }
 
 
@@ -915,6 +916,7 @@ class TestOperators(TestCase):
                 skip("ormqr"),  # Takes too long
                 xfail("as_strided"),  # incorrect output
                 xfail("as_strided", "partial_views"),  # incorrect output
+                xfail("as_strided_copy"),  # incorrect output
                 xfail("as_strided_scatter"),  # incorrect output
                 skip("bernoulli"),  # calls random op
                 xfail("bfloat16"),  # rank 4 tensor for channels_last
@@ -1188,6 +1190,7 @@ class TestOperators(TestCase):
             {
                 xfail("as_strided"),
                 xfail("as_strided", "partial_views"),
+                xfail("as_strided_copy"),
             }
         ),
     )
@@ -1252,6 +1255,7 @@ class TestOperators(TestCase):
         xfail("quantile"),  # at::equal batching rule (cpu), also, in-place vmap (cuda)
         skip("as_strided"),  # Test runner cannot handle this
         # requires special handling, and does not yet have a batching rule. Feel free to file a github issue!
+        xfail("as_strided_copy"),
         xfail("as_strided_scatter"),
         xfail(
             "nn.functional.gaussian_nll_loss"
@@ -1889,6 +1893,7 @@ class TestOperators(TestCase):
                 xfail(
                     "as_strided", "partial_views"
                 ),  # AssertionError: Tensor-likes are not close!
+                xfail("as_strided_copy"),
                 xfail(
                     "as_strided_scatter"
                 ),  # AssertionError: Tensor-likes are not close!
