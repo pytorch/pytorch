@@ -39,7 +39,7 @@ def inplace_optimize_sym_size_div(gm: torch.fx.GraphModule):
 
 
 def normalize_name(name: str) -> str:
-    return name.replace(".", "_")
+    return name.replace(".", "_").replace(":", "_").replace("|", "_").replace("-", "_")
 
 
 def ir_name_to_func_name(name: str) -> str:
