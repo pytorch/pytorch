@@ -1,4 +1,3 @@
-#include "c10/core/ScalarType.h"
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/mps/MPSProfiler.h>
 #include <ATen/native/UnaryOps.h>
@@ -18,7 +17,7 @@ namespace at::native {
 static mps::MetalShaderLibrary lib(UNARY_KERNEL_TEMPLATE, 2);
 
 static void exec_unary_kernel(const Tensor& self, const Tensor& output_, const std::string& name) {
-  Tensor inputTensor = self;
+  Tensor inputTensor = self.contiguous();
   Tensor outputTensor = output_;
   bool needs_output_copy = false;
   uint32_t length = output_.numel();
@@ -36,8 +35,7 @@ static void exec_unary_kernel(const Tensor& self, const Tensor& output_, const s
                                              {scalarToMetalTypeString(outputTensor), scalarToMetalTypeString(self)});
     }
 
-    if (!self.is_contiguous()) {
-      inputTensor = inputTensor.contiguous();
+    if (!outputTensor.is_contiguous()) {
       outputTensor = outputTensor.contiguous();
       needs_output_copy = true;
     }
@@ -46,7 +44,7 @@ static void exec_unary_kernel(const Tensor& self, const Tensor& output_, const s
     dispatch_sync(mpsStream->queue(), ^() {
       id<MTLComputeCommandEncoder> computeEncoder = mpsStream->commandEncoder();
 
-      getMPSProfiler().beginProfileKernel(cplState, name, {inputTensor});
+      getMPSProfiler().beginProfileKernel(cplState, name, {self});
 
       [computeEncoder setComputePipelineState:cplState];
       mtl_setBuffer(computeEncoder, outputTensor, 0);
