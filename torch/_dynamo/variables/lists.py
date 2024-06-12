@@ -91,6 +91,8 @@ class BaseListVariable(VariableTracker):
             index = arg.as_python_constant()
 
         if isinstance(index, slice):
+            # This code might not be the right for generic lists, but instead only for range but putting it here for n
+            # This is wrong applying slicing on top of range is not correct here !
             if self.source is not None:
                 return self.clone(
                     items=self.items[index],
@@ -178,11 +180,16 @@ class RangeVariable(BaseListVariable):
 
     def as_python_constant(self):
         return range(*[x.as_python_constant() for x in self.items])
+   
+    def getitem_const(self, arg: VariableTracker):
+        return BaseListVariable(self.unpack_var_sequence()).getitem_const(arg)
 
     def as_proxy(self):
         return self.python_type()(*self._as_proxy())
-
     def unpack_var_sequence(self, tx):
+        return [variables.ConstantVariable.create(x) for x in self.as_python_constant()]
+        
+    def unpack_var_sequence(self, tx=None):
         return [variables.ConstantVariable.create(x) for x in self.as_python_constant()]
 
     def reconstruct(self, codegen):
