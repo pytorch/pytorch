@@ -1290,7 +1290,7 @@ def create_selective_checkpoint_contexts(policy_fn_or_list, allow_cache_entry_mu
     """
     Helper to avoid recomputing certain ops during activation checkpointing.
 
-    It can be used with `torch.utils.checkpoint.checkpoint` to control which
+    Use this with `torch.utils.checkpoint.checkpoint` to control which
     operations are recomputed during the backward pass.
 
     Args:
