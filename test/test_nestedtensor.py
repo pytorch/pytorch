@@ -5342,13 +5342,20 @@ class TestNestedTensorSubclass(TestCase):
     @dtypes(torch.float32)
     def test_apply_(self, device, dtype):
         nt = random_nt_from_dims(
-            [5, None, 10], device=device, dtype=dtype, layout=torch.jagged, requires_grad=True)
+            [5, None, 10],
+            device=device,
+            dtype=dtype,
+            layout=torch.jagged,
+            requires_grad=True,
+        )
 
         def f(x):
             return x * 2
 
         if device != "cpu":
-            with self.assertRaisesRegex(TypeError, "apply_ is only implemented on CPU tensors"):
+            with self.assertRaisesRegex(
+                TypeError, "apply_ is only implemented on CPU tensors"
+            ):
                 nt.apply_(f)
             return
 
