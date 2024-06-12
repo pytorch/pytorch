@@ -16,12 +16,13 @@
 #include <ATen/ops/native_group_norm_backward_native.h>
 #include <ATen/ops/native_group_norm_native.h>
 #endif
+#include <cassert>
 
 #include <array>
 #include <functional>
 #include <tuple>
 #include <vector>
-
+#include <iostream> 
 namespace at::native {
 
 template <typename T>
@@ -194,7 +195,6 @@ Tensor group_norm(
   const auto input_shape = input.sym_sizes();
   const auto HxW =
       c10::multiply_integers(input_shape.slice(2));
-
   const Tensor kEmpty;
   auto memory_format = input.suggest_memory_format();
 
@@ -225,7 +225,7 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor> math_group_norm(
       at::borrow_from_optional_tensor(weight_opt);
   const Tensor& weight = *weight_maybe_owned;
   const Tensor& bias = c10::value_or_else(bias_opt, [] { return Tensor(); });
-
+  std::cout << "Inside of here \n";
   auto input_shape = input.sizes();
   at::Tensor input_reshaped = input.view({1, N * group, N ? -1 : 1});
   auto outputs = at::native_batch_norm(

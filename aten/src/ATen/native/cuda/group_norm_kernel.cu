@@ -1,19 +1,19 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/native/group_norm.h>
 
-#include <type_traits>
-
-#include <thrust/tuple.h>
-#include <ATen/core/Tensor.h>
 #include <ATen/AccumulateType.h>
 #include <ATen/Dispatch.h>
+#include <ATen/core/Tensor.h>
 #include <ATen/native/SharedReduceOps.h>
 #include <ATen/native/TensorIterator.h>
 #include <c10/core/MemoryFormat.h>
 #include <c10/cuda/CUDAMathCompat.h>
+#include <thrust/tuple.h>
 #include <ATen/cuda/detail/IndexUtils.cuh>
 #include <ATen/native/cuda/Loops.cuh>
 #include <ATen/native/cuda/block_reduce.cuh>
+#include <iostream>
+#include <type_traits>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -29,41 +29,43 @@ constexpr int kCUDANumThreads = 256;
 constexpr int kReduceTileSize = 32;
 
 template <typename T>
-__global__ void ApplyScaleBiasNHWCKernel(const T* X,
-  T* Y,
-  int64_t N,
-  int64_t H,
-  int64_t W,
-  int64_t C,
-  int64_t group_span,
-  acc_type<T, true>* a,
-  acc_type<T, true>* b) {
+__global__ void ApplyScaleBiasNHWCKernel(
+    const T* X,
+    T* Y,
+    int64_t N,
+    int64_t H,
+    int64_t W,
+    int64_t C,
+    acc_type<T, true>* a,
+    acc_type<T, true>* b) {
   using T_ACC = acc_type<T, true>;
-  const int64_t i = blockIdx.x;
-  const int64_t tx = threadIdx.x;
+  const int tid = blockIdx.x * blockDim.x + threadIdx.x;
+  const int grid_stride = blockDim.x * gridDim.x;
+  const int num_el = N * H * W * C;
 
-  for(int j = tx; j < group_span; j += blockDim.x) {
-    const int64_t index = i * group_span + j;
-    const int64_t cur_sample = index / (H*W*C);
-    int64_t remainder = index % (H*W*C);
-    const int64_t cur_h = remainder / (W*C);
+  for (int j = tid; j < num_el; j += grid_stride) {
+    const int64_t index = j;
+    const int64_t cur_sample = index / (H * W * C);
+    int64_t remainder = index % (H * W * C);
+    const int64_t cur_h = remainder / (W * C);
     remainder = remainder % (W * C);
     const int64_t cur_w = remainder / (C);
     const int64_t cur_channel = remainder % C;
 
-    auto cur_a = a[cur_sample * C + cur_channel];
-    auto cur_b = b[cur_sample * C + cur_channel];
-    Y[index] = (static_cast<T_ACC>(X[index]) + cur_b) * cur_a;
+    const int64_t cur_a_index = cur_sample * C + cur_channel;
+    T_ACC cur_a = a[cur_a_index];
+    T_ACC cur_b = b[cur_a_index];
+    Y[index] = cur_a * static_cast<T_ACC>(X[index]) + cur_b;
   }
 }
 
 template <typename T>
-__global__ void RowWiseNHWC(
-    int64_t group_span,
+__global__ void RowwiseMomentsCUDAKernelNHWC(
+    int64_t N,
     int64_t H,
     int64_t W,
     int64_t C,
-    int64_t num_ch_group,
+    int64_t G, 
     T eps,
     const T* X,
     T* mean,
@@ -73,27 +75,22 @@ __global__ void RowWiseNHWC(
   using WelfordOp =
       WelfordOps<T_ACC, T_ACC, int64_t, thrust::pair<T_ACC, T_ACC>>;
 
-  const int G = C / num_ch_group;
-
-  const int64_t i = blockIdx.x;
-  const int64_t group_channels = C / G;
-  const int64_t group_idx = i % G;
-  const int64_t group_offset = group_idx * group_channels;
-  const int64_t batch_idx = i / G;
-
-  const int64_t batch_offset = batch_idx * H * W * C;
+  const int64_t channels_per_group = C / G;
+  const int64_t batch_index = blockIdx.x / G;
+  const int64_t ng = blockIdx.x % G;
+  const int64_t batch_offset = batch_index * H * W * C;
+  const int64_t group_offset = ng * channels_per_group;
+  const int64_t start = batch_offset + group_offset;
 
   WelfordOp welford_op = {/*correction=*/0, /*take_sqrt=*/false};
   WelfordType val(0, 0, 0, 0);
-  for (int64_t j = threadIdx.x; j < group_span; j += blockDim.x) {
-    const int64_t hw_idx = j;
-    const int64_t hw_offset = hw_idx * C;
-    const int64_t index = batch_offset + hw_offset + group_offset;
-
-    for (int64_t c = 0; c < group_channels; c++) {
-      val = welford_op.reduce(val, static_cast<T_ACC>(X[index + c]), index + c);
+  for (int64_t j = threadIdx.x; j < H * W; j += blockDim.x) {
+    for (int64_t c = 0; c < channels_per_group; ++c) {
+      const int64_t index = start + j * C + c;
+      val = welford_op.reduce(val, static_cast<T_ACC>(X[index]), index);
     }
   }
+
   if (blockDim.x <= C10_WARP_SIZE) {
     val = cuda_utils::WarpReduce(val, welford_op);
   } else {
@@ -107,12 +104,13 @@ __global__ void RowWiseNHWC(
         /*identity_element=*/WelfordType(0, 0, 0, 0),
         val_shared_ptr);
   }
+
   if (threadIdx.x == 0) {
     T_ACC m1;
     T_ACC m2;
     thrust::tie(m2, m1) = welford_op.project(val);
-    mean[i] = m1;
-    rstd[i] = c10::cuda::compat::rsqrt(m2 + static_cast<T_ACC>(eps));
+    mean[blockIdx.x] = m1;
+    rstd[blockIdx.x] = c10::cuda::compat::rsqrt(m2 + static_cast<T_ACC>(eps));
   }
 }
 
@@ -123,8 +121,6 @@ __global__ void RowwiseMomentsCUDAKernel(
     const T* X,
     T* mean,
     T* rstd,
-    int64_t H,
-    int64_t W,
     int64_t C) {
   using T_ACC = acc_type<T, true>;
   using WelfordType = WelfordData<T_ACC, int64_t>;
@@ -136,7 +132,6 @@ __global__ void RowwiseMomentsCUDAKernel(
   WelfordType val(0, 0, 0, 0);
   for (int64_t j = threadIdx.x; j < group_span; j += blockDim.x) {
     const int64_t index = i * group_span + j;
-
     val = welford_op.reduce(val, static_cast<T_ACC>(X[index]), index);
   }
   if (blockDim.x <= C10_WARP_SIZE) {
@@ -671,6 +666,7 @@ void GroupNormKernelImplInternal(
   T* rstd_data = rstd.mutable_data_ptr<T>();
 
   at::MemoryFormat x_format = X.suggest_memory_format();
+  Y.is_contiguous(x_format);
 
   cudaStream_t cuda_stream = at::cuda::getCurrentCUDAStream();
   const int64_t num_threads = D * HxW < cuda_utils::kCUDABlockReduceNumThreads
@@ -679,19 +675,20 @@ void GroupNormKernelImplInternal(
 
   int height;
   int width;
-  switch(x_format) {
+
+  switch (x_format) {
     case MemoryFormat::Contiguous: {
-      height = X.size(2);
-      width = X.size(3);
       RowwiseMomentsCUDAKernel<T><<<N * G, num_threads, 0, cuda_stream>>>(
-          D * HxW, eps, X_data, mean_data, rstd_data, height, width, C);
+          D * HxW, eps, X_data, mean_data, rstd_data, C);
       break;
     }
     case MemoryFormat::ChannelsLast: {
-      height = X.size(1);
-      width = X.size(2);
-      RowWiseNHWC<T><<<N * G, num_threads, 0, cuda_stream>>>(
-      HxW, height, width, C, D, eps, X_data, mean_data, rstd_data);
+      height = X.size(2);
+      width = X.size(3);
+
+      RowwiseMomentsCUDAKernelNHWC<T><<<N * G, num_threads, 0, cuda_stream>>>(
+          N, height, width, C, G, eps, X_data, mean_data, rstd_data);
+
       break;
     }
     default: {
@@ -736,31 +733,39 @@ void GroupNormKernelImplInternal(
         N, C, G, mean_data, rstd_data, gamma_data, beta_data, a_data, b_data);
     C10_CUDA_KERNEL_LAUNCH_CHECK();
 
-    switch(x_format) {
+    switch (x_format) {
       case MemoryFormat::Contiguous: {
-          TensorIterator iter = TensorIteratorConfig()
-                      .check_all_same_dtype(std::is_same<T, T_ACC>::value)
-                      .resize_outputs(false)
-                      .add_owned_output(Y.view({N * C, HxW}))
-                      .add_owned_const_input(X.view({N * C, HxW}))
-                      .add_owned_input(a.view({N * C, 1}))
-                      .add_owned_input(b.view({N * C, 1}))
-                      .build();
-          gpu_kernel(iter, [] GPU_LAMBDA(T x, T_ACC a, T_ACC b) -> T {
-            return a * static_cast<T_ACC>(x) + b;
-          });
-          break;
+        TensorIterator iter =
+            TensorIteratorConfig()
+                .check_all_same_dtype(std::is_same<T, T_ACC>::value)
+                .resize_outputs(false)
+                .add_owned_output(Y.view({N * C, HxW}))
+                .add_owned_const_input(X.view({N * C, HxW}))
+                .add_owned_input(a.view({N * C, 1}))
+                .add_owned_input(b.view({N * C, 1}))
+                .build();
+        gpu_kernel(iter, [] GPU_LAMBDA(T x, T_ACC a, T_ACC b) -> T {
+          return a * static_cast<T_ACC>(x) + b;
+        });
+
+        break;
       }
       case MemoryFormat::ChannelsLast: {
-            ApplyScaleBiasNHWCKernel<T><<<N * G, num_threads, 0, cuda_stream>>>(X_data, Y_data, N, height, width, C, D*HxW, a_data, b_data);
-            C10_CUDA_KERNEL_LAUNCH_CHECK();
-            break;
+        int num_blocks =
+            (N * height * width * C + kCUDANumThreads - 1) / kCUDANumThreads;
+
+        ApplyScaleBiasNHWCKernel<T>
+            <<<num_blocks, kCUDANumThreads, 0, cuda_stream>>>(
+                X_data, Y_data, N, height, width, C, a_data, b_data);
+        C10_CUDA_KERNEL_LAUNCH_CHECK();
+
+        break;
       }
       default:
-          break; // shouldn't hit this
+        break; // shouldn't hit this
     }
-
   }
+
   AT_CUDA_CHECK(cudaGetLastError());
 }
 
