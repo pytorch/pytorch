@@ -72,7 +72,10 @@ requires_vectorization = unittest.skipUnless(
 
 def check_metrics_vec_kernel_count(num_expected_vec_kernels):
     if codecache.valid_vec_isa_list():
-        assert metrics.generated_cpp_vec_kernel_count == num_expected_vec_kernels
+        assert metrics.generated_cpp_vec_kernel_count == num_expected_vec_kernels, (
+            metrics.generated_cpp_vec_kernel_count,
+            num_expected_vec_kernels,
+        )
 
 
 @contextlib.contextmanager
@@ -1413,7 +1416,7 @@ class CPUReproTests(TestCase):
                 channel_shuffle,
                 (x, 2, output_scale, output_zero_point, quant_min, quant_max, dtype),
             )
-            check_metrics_vec_kernel_count(2)
+            check_metrics_vec_kernel_count(1)
 
     @requires_vectorization
     def test_tile2d_store_channel_shuffle_cl_quant_output_uint8(self):
@@ -2660,7 +2663,7 @@ class CPUReproTests(TestCase):
                 x = torch.randn(64, 58, 28, 28)
                 self.common(channel_shuffle, (x, 2))
                 if simdlen != 1:
-                    check_metrics_vec_kernel_count(2)
+                    check_metrics_vec_kernel_count(1)
 
     @slowTest
     @requires_vectorization

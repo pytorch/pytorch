@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import itertools
 import logging
 import operator
@@ -41,6 +42,7 @@ from torch.fx.experimental.symbolic_shapes import (
     SymTypes,
 )
 from torch.utils._mode_utils import no_dispatch
+from torch.utils._sympy.numbers import int_oo
 
 from . import config, ir
 from .codegen.common import (
@@ -1196,8 +1198,11 @@ class GraphLowering(torch.fx.Interpreter):
             elif is_magic_method(n.target):
                 # TODO: this is sus, it probably should be handled in the
                 # lowerings themselves similarly to sym_size/sym-stride
+                # https://github.com/pytorch/pytorch/issues/127789
                 debug("is_magic_method")
-                if isinstance(n.meta["val"], torch.SymInt):
+                if isinstance(
+                    n.meta["val"], (torch.SymInt, torch.SymFloat, torch.SymBool)
+                ):
                     result = n.meta["val"].node.expr
                 else:
                     result = super().run_node(n)
@@ -1423,18 +1428,21 @@ class GraphLowering(torch.fx.Interpreter):
                 vr = shape_env.var_to_range[i0]
                 if not shape_env._default_unspecified_value_range().issubset(vr):
 
-                    def convert(s):
+                    def is_convertible(s):
+                        if s in (int_oo, -int_oo):
+                            return False
                         try:
-                            return int(s)
+                            int(s)
+                            return True
                         except TypeError:
-                            return None
+                            return False
 
-                    if (lower := convert(vr.lower)) is not None:
+                    if is_convertible(vr.lower):
                         self.register_buffer(
                             ir.AssertScalar(i0 >= vr.lower, f"{i0} >= {vr.lower}"),
                             set_name=True,
                         )
-                    if (upper := convert(vr.upper)) is not None:
+                    if is_convertible(vr.upper):
                         self.register_buffer(
                             ir.AssertScalar(i0 <= vr.upper, f"{i0} <= {vr.upper}"),
                             set_name=True,
