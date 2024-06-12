@@ -44,12 +44,14 @@ from .schemas import (
     InputAliasInfo,
     MutationType,
     OutputType,
+    SubclassCreationMeta,
     SubclassMeta,
     TensorAlias,
     ViewAndMutationMeta,
 )
 
 from .subclass_utils import (
+    compare_subclass_metadata_creation,
     create_subclass_meta,
     requires_subclass_dispatch,
     unwrap_tensor_subclasses,
@@ -1731,13 +1733,24 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                     runtime_subclass_tangent_meta = create_subclass_meta(
                         tangents, is_runtime=True
                     )
-                    if (
-                        runtime_subclass_tangent_meta
-                        != CompiledFunction.metadata.subclass_tangent_meta
+                    if len(runtime_subclass_tangent_meta) != len(
+                        CompiledFunction.metadata.subclass_tangent_meta
                     ):
                         raise RuntimeError(
-                            "The grad inputs should be same tensor subclass type as forward output"
+                            "The grad inputs should be same number as forward output tangents"
                         )
+                    for a, b in zip(
+                        runtime_subclass_tangent_meta,
+                        CompiledFunction.metadata.subclass_tangent_meta,
+                    ):
+                        if isinstance(a, SubclassCreationMeta) and isinstance(
+                            b, SubclassCreationMeta
+                        ):
+                            if not compare_subclass_metadata_creation(a, b):
+                                raise RuntimeError(
+                                    "The grad inputs should be same tensor subclass type as forward output"
+                                )
+
                     # Get the number of tangents after unwrapping
                     len_tangents = len(
                         unwrap_tensor_subclasses(

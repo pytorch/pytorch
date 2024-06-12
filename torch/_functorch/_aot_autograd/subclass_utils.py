@@ -62,6 +62,35 @@ def create_subclass_metadata(a, start_idx, *, is_runtime: bool = False):
     )
 
 
+def compare_subclass_metadata_creation(
+    subclass_meta1: Optional[SubclassCreationMeta],
+    subclass_meta2: Optional[SubclassCreationMeta],
+):
+    if type(subclass_meta1) == type(subclass_meta2):
+        return False
+
+    assert isinstance(subclass_meta1, SubclassCreationMeta)
+    assert isinstance(subclass_meta2, SubclassCreationMeta)
+
+    if type(subclass_meta1.original_subclass) != type(subclass_meta2.original_subclass):
+        return False
+
+    if subclass_meta1.meta != subclass_meta2.meta:
+        return False
+
+    if subclass_meta1.outer_stride != subclass_meta2.outer_stride:
+        return False
+
+    for attr in subclass_meta1.attrs:
+        if attr not in subclass_meta2.attrs:
+            return False
+        if not compare_subclass_metadata_creation(
+            subclass_meta1.attrs[attr], subclass_meta2.attrs[attr]
+        ):
+            return False
+    return True
+
+
 # Given a flat list of arguments, some of which may be tensor subclasses,
 # computes metadata about "how to reconstruct the current list of subclasses,
 # if we were given their flattened dense tensors instead"
