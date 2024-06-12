@@ -709,9 +709,6 @@ class AOTConfig:
     # this is always false outside of export.
     pre_dispatch: bool = False
 
-    # Key to use for AOTAutogradCache
-    cache_key: Optional[str] = None
-
     def __post_init__(self):
         if self.pre_dispatch:
             assert self.is_export, "Can only have pre_dispatch IR for export."
