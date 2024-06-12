@@ -249,7 +249,6 @@ def register_run_with_rng_state_op():
 
     @run_with_rng_state.py_impl(FunctionalTensorMode)
     def impl_functional_tensor_mode(mode, rng_state, op, *args, **kwargs):
-        # TODO(yf225): is this the right thing to do? it seems to run through at least.
         with mode:
             return op(*args, **kwargs)
 
