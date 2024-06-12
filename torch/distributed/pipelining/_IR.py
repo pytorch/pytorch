@@ -1,9 +1,9 @@
+# mypy: allow-untyped-defs
 # Copyright (c) Meta Platforms, Inc. and affiliates
 import copy
 import logging
 import operator
 from collections import defaultdict
-from dataclasses import dataclass
 from enum import Enum
 from inspect import Parameter, signature, Signature
 from types import MethodType
@@ -11,6 +11,7 @@ from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
 
 import torch
 import torch.fx as fx
+from torch.distributed import ProcessGroup
 from torch.export import ExportedProgram
 from torch.export.unflatten import (
     _assign_attr,
@@ -20,10 +21,10 @@ from torch.export.unflatten import (
 )
 from torch.fx.node import map_aggregate
 from torch.fx.passes.split_module import split_module
-
 from ._backward import _null_coalesce_accumulate, stage_backward
 from ._unflatten import _outline_submodules
-from .microbatch import split_args_kwargs_into_chunks, TensorChunkSpec
+from ._utils import PipeInfo
+from .stage import _PipelineStage
 
 
 logger = logging.getLogger(__name__)
@@ -485,30 +486,42 @@ def _direct_serialization_reduce(self):
     )
 
 
+def _modify_graph_op_device(
+    gm: torch.fx.GraphModule,
+    new_device: torch.device,
+):
+    """
+    Modify the device argument of all "call_function" nodes in the graph.  This
+    is useful for moving the graph to a different device. In particular for
+    generator ops, like torch.ones.
+    """
+    modified = False
+    for node in gm.graph.nodes:
+        if node.op == "call_function":
+            if "device" in node.kwargs and node.kwargs["device"] != new_device:
+                logger.debug(
+                    f"Changing device of Node {node.name} from {node.kwargs['device']} to {new_device}"  # noqa: G004
+                )
+                node.update_kwarg("device", new_device)
+                modified = True
+        elif node.op == "call_module":
+            # Recursively modify "device" in submodules
+            submod = gm.get_submodule(node.target)
+            if isinstance(submod, torch.fx.GraphModule):
+                _modify_graph_op_device(submod, new_device)
+            elif isinstance(submod, InterpreterModule):
+                # If unflattening has been performed, we need to access its graph module by `.graph_module`
+                _modify_graph_op_device(submod.graph_module, new_device)
+            else:
+                logger.warning(
+                    f"Skipping device modification for submodule {node.target} because it is a {type(submod)}"  # noqa: G004
+                )
+
+    if modified:
+        gm.recompile()
+
+
 class Pipe(torch.nn.Module):
-    # Class variables
-    """
-    args_chunk_spec:
-        Chunking specification for positional inputs. (default: `None`)
-    kwargs_chunk_spec:
-        Chunking specification for keyword inputs. (default: `None`)
-    """
-    # args_chunk_spec and kwargs_chunk_spec are used to specify how to chunk
-    # inputs. They are used to create microbatched examples before tracing.
-    # See context managers `ArgsChunkSpec` and `KwargsChunkSpec`.
-    # TODO: Do we need to support `_Replicate`? It's unclear, dropping for now.
-    args_chunk_spec: Optional[Tuple[TensorChunkSpec, ...]] = None
-    kwargs_chunk_spec: Optional[Dict[str, TensorChunkSpec]] = None
-
-    @dataclass
-    class PipeInfo:
-        graph: fx.Graph
-        num_stages: int
-        num_chunks: int
-        has_loss_and_backward: bool
-        args_chunk_spec: Optional[Tuple[Any, ...]] = None
-        kwargs_chunk_spec: Optional[Dict[str, Any]] = None
-
     def __init__(
         self,
         split_gm: fx.GraphModule,
@@ -523,7 +536,6 @@ class Pipe(torch.nn.Module):
         self.num_stages: int = num_stages
         self.has_loss_and_backward = has_loss_and_backward
         self.loss_spec = loss_spec
-        self.pipe_info: Optional[Pipe.PipeInfo] = None
 
         for node in split_gm.graph.nodes:
             assert (
@@ -622,6 +634,9 @@ class Pipe(torch.nn.Module):
         return res
 
     def get_stage_module(self, stage_idx: int) -> torch.nn.Module:
+        """
+        Return a stage module corresponding to `stage_idx` of the `pipe`.
+        """
         if stage_idx < 0 or stage_idx >= self.num_stages:
             raise ValueError(f"Invalid stage index {stage_idx}!")
         return getattr(self.split_gm, f"submod_{stage_idx}")
@@ -865,7 +880,11 @@ class Pipe(torch.nn.Module):
         inputs_to_state: Dict[str, List[str]] = {}
         for attr in attr_nodes:
             _, tensor = _recursive_getattr_with_parent(mod, attr.target)
-            inputs_to_state[attr.name] = list(id_to_fqns[id(tensor)])
+            fqns = list(id_to_fqns[id(tensor)])
+            if fqns:
+                inputs_to_state[attr.name] = fqns
+            elif attr.target in exported_program.constants:  # lifted constants
+                inputs_to_state[attr.name] = [attr.target]
 
         # [aliasing] for each submodule split, assign attributes on FQNs that may be used.
         # We determine this based on whether or not the FQN attribute parent exists.
@@ -983,17 +1002,26 @@ class Pipe(torch.nn.Module):
         example_kwargs: Optional[Dict[str, Any]] = None,
     ) -> ExportedProgram:
         logger.info("Tracing model ...")
-        ep = torch.export.export(
-            mod,
-            example_args,
-            example_kwargs,
-        )
+        try:
+            ep = torch.export.export(
+                mod,
+                example_args,
+                example_kwargs,
+            )
+        except Exception as e:
+            raise RuntimeError(
+                "It seems that we cannot capture your model as a full graph. "
+                "Typical reasons include graph breaks, data/shape-dependent "
+                "control flow, or missing meta kernels for custom operators. "
+                "You can use our manual pipeline interfaces, or try to fix the "
+                "graph breaks, see https://pytorch.org/docs/stable/export.html"
+            ) from e
+
         return ep
 
     @staticmethod
     def from_tracing(
         mod: torch.nn.Module,
-        num_chunks: int,
         example_args: Tuple[Any, ...],
         example_kwargs: Optional[Dict[str, Any]] = None,
         split_policy: Optional[Callable[[fx.GraphModule], fx.GraphModule]] = None,
@@ -1012,19 +1040,11 @@ class Pipe(torch.nn.Module):
             )
         """
 
-        args_split, kwargs_split = split_args_kwargs_into_chunks(
-            example_args,
-            example_kwargs,
-            num_chunks,
-            Pipe.args_chunk_spec,
-            Pipe.kwargs_chunk_spec,
-        )
-
         # Trace with export
         exported_program = Pipe._trace_with_export(
             mod,
-            example_args=args_split[0],
-            example_kwargs=kwargs_split[0],
+            example_args,
+            example_kwargs,
         )
 
         pipe = Pipe._from_traced(
@@ -1064,15 +1084,6 @@ class Pipe(torch.nn.Module):
             )
             submod0.recompile()
 
-        # Create pipe info
-        pipe.pipe_info = Pipe.PipeInfo(
-            graph=pipe.split_gm.graph,
-            num_stages=pipe.num_stages,
-            num_chunks=num_chunks,
-            has_loss_and_backward=pipe.has_loss_and_backward,
-            args_chunk_spec=Pipe.args_chunk_spec,
-            kwargs_chunk_spec=Pipe.kwargs_chunk_spec,
-        )
         return pipe
 
     def __str__(self):
@@ -1082,11 +1093,53 @@ class Pipe(torch.nn.Module):
         return self.split_gm.__repr__()
 
     def info(self) -> PipeInfo:
-        if self.pipe_info is None:
-            raise RuntimeError(
-                "Pipe info is not available. Please use the `pipeline` method to create the `Pipe` object."
+        """
+        Get information about the pipe.
+
+        Returns
+        -------
+        PipeInfo
+            A dataclass containing information about the pipe.
+        """
+        return PipeInfo(
+            graph=self.split_gm.graph,
+            num_stages=self.num_stages,
+            has_loss_and_backward=self.has_loss_and_backward,
+        )
+
+    def build_stage(
+        self,
+        stage_index: int,
+        device: torch.device,
+        group: Optional[ProcessGroup] = None,
+    ) -> _PipelineStage:
+        """
+        Create a `PipelineStage` given a stage index and distributed group.
+        The `PipelineStage` can run with `PipelineSchedule`s.
+        """
+        # Find stage module
+        stage_module = self.get_stage_module(stage_index)
+
+        # Move ops argument to device
+        # Today PT2 tracer does not treat `x.device` as a symbolic device;
+        # instead, the device of tracing time got burned into the generated
+        # code.  Here we provide a workaround for users to manually modify the
+        # "device" kwarg of operations. Such operation may include:
+        # `torch.ones`, `torch.zeros`, `torch.rand`, etc.
+        if isinstance(stage_module, torch.fx.GraphModule):
+            _modify_graph_op_device(stage_module, device)
+        else:
+            logger.warning(
+                f"Expected a `torch.fx.GraphModule` but got {type(stage_module)}"  # noqa: G004
             )
-        return self.pipe_info
+
+        # Detach pipe info
+        # Note: be careful what's included in `pipe_info`. We don't want to keep
+        # a reference to `Pipe` or `Pipe.split_gm` which stops python from
+        # recycling them. When python recycles them, other stage modules (which
+        # are irrelevant to current rank) can be automatically freed.
+        pipe_info = self.info()
+        return _PipelineStage(stage_module, stage_index, pipe_info, device, group)
 
 
 class SplitPoint(Enum):
@@ -1138,29 +1191,26 @@ def annotate_split_points(mod: torch.nn.Module, spec: Dict[str, SplitPoint]):
 
 def pipeline(
     module: torch.nn.Module,
-    num_chunks: int,
-    example_args: Tuple[Any, ...],
-    example_kwargs: Optional[Dict[str, Any]] = None,
+    mb_args: Tuple[Any, ...],
+    mb_kwargs: Optional[Dict[str, Any]] = None,
     split_spec: Optional[Dict[str, SplitPoint]] = None,
     split_policy: Optional[Callable[[fx.GraphModule], fx.GraphModule]] = None,
 ) -> Pipe:
     """
-    Creates a pipeline representation for the provided module.
+    Split a module based on a specification.
 
     See `Pipe` for more details.
 
     Arguments
     ---------
     module:
-        The module to be transformed into a `Pipe`.
-    num_chunks:
-        The number of microbatches to be run with this pipeline.
-    example_args:
-        Example positional inputs to be used with this pipeline.
-    example_kwargs:
-        Example keyword inputs to be used with this pipeline. (default: `None`)
+        The module to be splitted.
+    mb_args:
+        Example positional inputs, in micro-batch form.
+    mb_kwargs:
+        Example keyword inputs, in micro-batch form. (default: `None`)
     split_spec:
-        A dictionary mapping module names to `SplitPoint`s. (default: `None`)
+        A dictionary using submodule names as split marker. (default: `None`)
     split_policy:
         The policy to use for splitting the module. (default: `None`)
 
@@ -1178,77 +1228,14 @@ def pipeline(
         annotate_split_points(module, split_spec)
         return Pipe.from_tracing(
             mod=module,
-            num_chunks=num_chunks,
-            example_args=example_args,
-            example_kwargs=example_kwargs,
+            example_args=mb_args,
+            example_kwargs=mb_kwargs,
         )
     else:
         # Use split policy
         return Pipe.from_tracing(
             mod=module,
-            num_chunks=num_chunks,
-            example_args=example_args,
-            example_kwargs=example_kwargs,
+            example_args=mb_args,
+            example_kwargs=mb_kwargs,
             split_policy=split_policy,
         )
-
-
-class ArgsChunkSpec:
-    """
-    Context manager for setting `args_chunk_spec` during creation of Pipe
-
-    Example:
-        >>> # xdoctest: +SKIP
-        >>> # There are three positional arguments to the model, and
-        >>> # we are chunking them along dimension 0, 0 and 1, respectively
-        >>> with ArgsChunkSpec((0, 0, 1)):
-        >>>     pipe = pipeline(model, num_chunks, example_args)
-    """
-
-    def __init__(
-        self,
-        chunk_dims: Tuple[int, ...],
-    ):
-        self.args_chunk_spec = map_aggregate(
-            chunk_dims,
-            lambda dim: TensorChunkSpec(dim),
-        )
-
-    def __enter__(self):
-        # Inject into the Pipe class
-        Pipe.args_chunk_spec = self.args_chunk_spec
-        return self.args_chunk_spec
-
-    def __exit__(self, exc_type, exc_val, traceback):
-        # Remove from the Pipe class
-        Pipe.args_chunk_spec = None
-
-
-class KwargsChunkSpec:
-    """
-    Context manager for setting `kwargs_chunk_spec` during creation of Pipe
-
-    Example:
-        >>> # xdoctest: +SKIP
-        >>> # Chunk dimension 0 for the "id" argument, 1 for the "mask" argument
-        >>> with KwargsChunkSpec({"id": 0, "mask": 1}):
-        >>>     pipe = pipeline(model, num_chunks, (), example_kwargs)
-    """
-
-    def __init__(
-        self,
-        chunk_dims: Dict[str, int],
-    ):
-        self.kwargs_chunk_spec = map_aggregate(
-            chunk_dims,
-            lambda dim: TensorChunkSpec(dim),
-        )
-
-    def __enter__(self):
-        # Inject into the Pipe class
-        Pipe.kwargs_chunk_spec = self.kwargs_chunk_spec
-        return self.kwargs_chunk_spec
-
-    def __exit__(self, exc_type, exc_val, traceback):
-        # Remove from the Pipe class
-        Pipe.kwargs_chunk_spec = None
