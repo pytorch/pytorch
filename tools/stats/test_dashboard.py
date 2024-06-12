@@ -1,12 +1,13 @@
 import json
 import os
 import re
+import subprocess
 import time
 from collections import defaultdict
 from functools import lru_cache
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from typing import Any, cast, Dict, List
+from typing import Any, Optional, cast, Dict, List
 
 import requests
 
@@ -14,6 +15,8 @@ from tools.stats.upload_stats_lib import (
     _get_request_headers,
     download_s3_artifacts,
     get_job_id,
+    get_job_ids_for_paths,
+    get_tests,
     unzip,
     upload_workflow_stats_to_s3,
 )
@@ -59,6 +62,7 @@ def get_td_exclusions(
 ) -> Dict[str, Any]:
     with TemporaryDirectory() as temp_dir:
         print("Using temporary directory:", temp_dir)
+        current_dir = os.getcwd()
         os.chdir(temp_dir)
 
         # Download and extract all the reports (both GHA and S3)
@@ -69,7 +73,11 @@ def get_td_exclusions(
             unzip(path)
 
         grouped_tests: Dict[str, Any] = defaultdict(lambda: defaultdict(set))
-        for td_exclusions in Path(".").glob("**/td_exclusions*.json"):
+        for td_exclusions, job_id in get_job_ids_for_paths(
+            [x for x in Path(".").glob("**/td_exclusions*.json")],
+            workflow_run_id,
+            workflow_run_attempt,
+        ):
             with open(td_exclusions) as f:
                 exclusions = json.load(f)
                 for exclusion in exclusions["excluded"]:
@@ -82,6 +90,7 @@ def get_td_exclusions(
         for build_name, build in grouped_tests.items():
             for test_config, test_files in build.items():
                 grouped_tests[build_name][test_config] = sorted(test_files)
+        os.chdir(current_dir)
         return grouped_tests
 
 
@@ -156,29 +165,127 @@ def get_invoking_file_summary(grouped_tests: Dict[str, Any]) -> Dict[str, Any]:
     return invoking_file_summary
 
 
+def get_new_removed_tests(grouped, base_grouped):
+    def get_a_minus_b(a, b):
+        if any(isinstance(a[key], list) for key in a):
+            diff = {
+                "count": 0,
+                "nodes": [],
+                "total": len(a),
+            }
+            for key in a:
+                if key not in b:
+                    diff["nodes"].append(key)
+                    diff["count"] += 1
+            diff["nodes"] = diff["nodes"][:10]
+            return diff
+        diff = {
+            "count": 0,
+            "nodes": {},
+        }
+        for key in a:
+            small_diff = get_a_minus_b(a[key], b.get(key, {}))
+            if small_diff["count"] == small_diff["total"]:
+                small_diff["nodes"] = []
+            if small_diff["count"] > 0:
+                diff["nodes"][key] = small_diff
+        diff["count"] = sum(diff["nodes"][key]["count"] for key in diff["nodes"])
+        diff["total"] = sum(diff["nodes"][key]["total"] for key in diff["nodes"])
+        return diff
+
+    return get_a_minus_b(grouped, base_grouped), get_a_minus_b(base_grouped, grouped)
+
+
+def compare(job_summary, base_job_summary, base_job_id):
+    # Compare the two summaries
+    start = time.time()
+    new, removed = get_new_removed_tests(job_summary, base_job_summary)
+    print(f"Time taken to compare tests: {time.time() - start}")
+    return {
+        "base_job_id": base_job_id,
+        "new": new,
+        "removed": removed,
+    }
+
+
+def get_base_id(sha: str, workflow_id: int) -> Optional[int]:
+    try:
+        if sha is None:
+            return None
+        base_sha = subprocess.check_output(
+            ["git", "merge-base", "origin/main", sha]
+        ).decode("utf-8").strip()
+        if base_sha == sha:
+            base_sha = subprocess.check_output(
+                ["git", "rev-parse", f"{sha}^"]
+            ).decode("utf-8").strip()
+        return cast(
+            int,
+            requests.get(
+                f"https://hud.pytorch.org/api/corresponding_workflow_id",
+                params={"sha": base_sha, "workflowId": workflow_id},
+            ).json()[0]["id"],
+        )
+    except Exception as e:
+        print(f"Failed to get base id for head sha {sha} and workflow id {workflow_id}: {e}")
+        return None
+
+def upload_wrapper(workflow_run_id: int, workflow_run_attempt: int, name: str, data: Any) -> None:
+    as_string = json.dumps(data)
+    if len(as_string) > 1000000:
+        # data = [{"info": "Data too large to upload"}]
+        print("Data too large to upload")
+    print("uploaded")
+    with open("test/test-reports/" + name.replace("/", ".") + ".json", "w+") as f:
+        json.dump(data, f)
+    if False:
+        upload_workflow_stats_to_s3(
+            workflow_run_id,
+            workflow_run_attempt,
+            name,
+            [data],
+        )
+
 def upload_additional_info(
-    workflow_run_id: int, workflow_run_attempt: int, test_cases: List[Dict[str, Any]]
+    workflow_run_id: int, workflow_run_attempt: int, head_sha: str, test_cases: List[Dict[str, Any]]
 ) -> None:
     grouped_tests = group_test_cases(test_cases)
     reruns = get_reruns(grouped_tests)
     exclusions = get_td_exclusions(workflow_run_id, workflow_run_attempt)
     invoking_file_summary = get_invoking_file_summary(grouped_tests)
 
-    upload_workflow_stats_to_s3(
+    base_id = get_base_id(head_sha, workflow_run_id)
+    if base_id is not None:
+        base_grouped_tests = group_test_cases(get_tests(base_id, 1))
+        new_removed_tests = compare(grouped_tests, base_grouped_tests, base_id)
+    else:
+        new_removed_tests = {
+            "base_job_id": None,
+            "new": {"count": 0, "nodes": []},
+            "removed": {"count": 0, "nodes": []},
+        }
+
+    upload_wrapper(
         workflow_run_id,
         workflow_run_attempt,
         "additional_info/reruns",
         [reruns],
     )
-    upload_workflow_stats_to_s3(
+    upload_wrapper(
         workflow_run_id,
         workflow_run_attempt,
         "additional_info/td_exclusions",
         [exclusions],
     )
-    upload_workflow_stats_to_s3(
+    upload_wrapper(
         workflow_run_id,
         workflow_run_attempt,
         "additional_info/invoking_file_summary",
         [invoking_file_summary],
+    )
+    upload_wrapper(
+        workflow_run_id,
+        workflow_run_attempt,
+        "additional_info/new_removed_tests",
+        [new_removed_tests],
     )

@@ -1,11 +1,16 @@
+from functools import lru_cache
 import gzip
 import io
 import json
+from multiprocessing import Pool, cpu_count
 import os
+import re
+from tempfile import TemporaryDirectory
 import zipfile
 
+import xml.etree.ElementTree as ET
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import boto3  # type: ignore[import]
 import requests
@@ -231,6 +236,83 @@ def is_rerun_disabled_tests(tests: Dict[str, Dict[str, int]]) -> bool:
     )
 
 
+@lru_cache(maxsize=None)
+def get_jobs_for_workflow(
+    workflow_id: int, workflow_run_attempt: int
+) -> List[Dict[str, Any]]:
+    # Returns all workflow jobs for a given workflow + its run attempt
+    page = 1
+    total_count = None
+    all_jobs = []
+
+    while True:
+        workflow_info = requests.get(
+            f"https://api.github.com/repos/pytorch/pytorch/actions/runs/{workflow_id}/attempts/{workflow_run_attempt}/jobs",
+            params={"per_page": 100, "page": page},
+        ).json()
+        jobs = workflow_info["jobs"]
+        if total_count is None:
+            total_count = workflow_info["total_count"]
+        elif total_count != workflow_info["total_count"]:
+            return None
+        all_jobs.extend(jobs)
+        if len(all_jobs) == total_count:
+            break
+        page += 1
+    return all_jobs
+
+
+def get_job_ids_for_paths(
+    reports: List[Path], workflow_id: int, workflow_run_attempt: int
+) -> List[Tuple[Path, int]]:
+    # Returns a list of tuples of (report, job_id) for each report in `reports`.
+    # If a report doesn't have the job id in the name, it attempts to find the
+    # job id by matching the report name with the job name.
+    existing_ids = []
+    missing = []
+
+    for report in reports:
+        job_id = get_job_id(report)
+        if job_id is not None:
+            existing_ids.append((report, job_id))
+        else:
+            missing.append(report)
+    if not missing:
+        return existing_ids
+
+    while True:
+        workflow_info = get_jobs_for_workflow(workflow_id, workflow_run_attempt)
+        if workflow_info is not None:
+            break
+
+    possible_jobs = [
+        job
+        for job in workflow_info
+        if job["id"] not in [job_id for _, job_id in existing_ids]
+    ]
+    if len(missing) == 1 and len(possible_jobs) == 1:
+        return existing_ids + [(missing[0], possible_jobs[0]["id"])]
+
+    regex = r"^unzipped-([\w-]+)-(\w+)-(\d+)-(\d+)-([\w.]+)_"
+    for report in missing:
+        match = re.match(regex, report.parts[0])
+        if not match:
+            existing_ids.append((report, None))
+            continue
+
+        config = match.group(2)
+        shard = match.group(3)
+        num_shards = match.group(4)
+        runner = match.group(5)
+        name = f"{config}, {shard}, {num_shards}, {runner}"
+        candidates = [job for job in possible_jobs if name in job["name"]]
+        if len(candidates) == 1:
+            existing_ids.append((report, candidates[0]["id"]))
+        else:
+            existing_ids.append((report, job_id))
+    return existing_ids
+
+
 def get_job_id(report: Path) -> Optional[int]:
     # [Job id in artifacts]
     # Retrieve the job id from the report path. In our GHA workflows, we append
@@ -241,3 +323,136 @@ def get_job_id(report: Path) -> Optional[int]:
         return int(report.parts[0].rpartition("_")[2])
     except ValueError:
         return None
+
+
+def parse_xml_report(
+    tag: str,
+    report: Path,
+    workflow_id: int,
+    workflow_run_attempt: int,
+    job_id: int,
+) -> List[Dict[str, Any]]:
+    """Convert a test report xml file into a JSON-serializable list of test cases."""
+    test_cases: List[Dict[str, Any]] = []
+
+    root = ET.parse(report)
+    for test_case in root.iter(tag):
+        case = process_xml_element(test_case)
+        case["workflow_id"] = workflow_id
+        case["workflow_run_attempt"] = workflow_run_attempt
+        case["job_id"] = job_id
+
+        # [invoking file]
+        # The name of the file that the test is located in is not necessarily
+        # the same as the name of the file that invoked the test.
+        # For example, `test_jit.py` calls into multiple other test files (e.g.
+        # jit/test_dce.py). For sharding/test selection purposes, we want to
+        # record the file that invoked the test.
+        #
+        # To do this, we leverage an implementation detail of how we write out
+        # tests (https://bit.ly/3ajEV1M), which is that reports are created
+        # under a folder with the same name as the invoking file.
+        case["invoking_file"] = report.parent.name
+        test_cases.append(case)
+
+    return test_cases
+
+
+def process_xml_element(element: ET.Element) -> Dict[str, Any]:
+    """Convert a test suite element into a JSON-serializable dict."""
+    ret: Dict[str, Any] = {}
+
+    # Convert attributes directly into dict elements.
+    # e.g.
+    #     <testcase name="test_foo" classname="test_bar"></testcase>
+    # becomes:
+    #     {"name": "test_foo", "classname": "test_bar"}
+    ret.update(element.attrib)
+
+    # The XML format encodes all values as strings. Convert to ints/floats if
+    # possible to make aggregation possible in Rockset.
+    for k, v in ret.items():
+        try:
+            ret[k] = int(v)
+        except ValueError:
+            pass
+        try:
+            ret[k] = float(v)
+        except ValueError:
+            pass
+
+    # Convert inner and outer text into special dict elements.
+    # e.g.
+    #     <testcase>my_inner_text</testcase> my_tail
+    # becomes:
+    #     {"text": "my_inner_text", "tail": " my_tail"}
+    if element.text and element.text.strip():
+        ret["text"] = element.text
+    if element.tail and element.tail.strip():
+        ret["tail"] = element.tail
+
+    # Convert child elements recursively, placing them at a key:
+    # e.g.
+    #     <testcase>
+    #       <foo>hello</foo>
+    #       <foo>world</foo>
+    #       <bar>another</bar>
+    #     </testcase>
+    # becomes
+    #    {
+    #       "foo": [{"text": "hello"}, {"text": "world"}],
+    #       "bar": {"text": "another"}
+    #    }
+    for child in element:
+        if child.tag not in ret:
+            ret[child.tag] = process_xml_element(child)
+        else:
+            # If there are multiple tags with the same name, they should be
+            # coalesced into a list.
+            if not isinstance(ret[child.tag], list):
+                ret[child.tag] = [ret[child.tag]]
+            ret[child.tag].append(process_xml_element(child))
+    return ret
+
+
+
+def get_tests(workflow_run_id: int, workflow_run_attempt: int) -> List[Dict[str, Any]]:
+    with TemporaryDirectory() as temp_dir:
+        print("Using temporary directory:", temp_dir)
+        current_dir = os.getcwd()
+        os.chdir(temp_dir)
+
+        # Download and extract all the reports (both GHA and S3)
+        s3_paths = download_s3_artifacts(
+            "test-report", workflow_run_id, workflow_run_attempt
+        )
+        for path in s3_paths:
+            unzip(path)
+
+        # Parse the reports and transform them to JSON
+        test_cases = []
+        mp = Pool(cpu_count())
+
+        for xml_report, job_id in get_job_ids_for_paths(
+            [x for x in Path(".").glob("**/*.xml")],
+            workflow_run_id,
+            workflow_run_attempt,
+        ):
+            test_cases.append(
+                mp.apply_async(
+                    parse_xml_report,
+                    args=(
+                        "testcase",
+                        xml_report,
+                        workflow_run_id,
+                        workflow_run_attempt,
+                        job_id,
+                    ),
+                )
+            )
+        mp.close()
+        mp.join()
+        test_cases = [tc.get() for tc in test_cases]
+        flattened = [item for sublist in test_cases for item in sublist]
+        os.chdir(current_dir)
+        return flattened
