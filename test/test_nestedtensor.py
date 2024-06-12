@@ -3262,15 +3262,19 @@ class TestNestedTensorSubclass(TestCase):
 
         # operate on dim=2
         output = nt.softmax(dim=2)
-        for in_component, out_component in zip(nt.unbind(), output.unbind()):
-            # dim=2 -> dim=1 after unbind
-            self.assertEqual(in_component.softmax(dim=1), out_component)
+
+        @torch._dynamo.disable
+        def _compare_to_ref(nt, output, dim):
+            for in_component, out_component in zip(nt.unbind(), output.unbind()):
+                self.assertEqual(in_component.softmax(dim=dim), out_component)
+
+        # dim=2 -> dim=1 after unbind
+        _compare_to_ref(nt, output, dim=1)
 
         # operate on dim=-1
         output2 = nt.softmax(dim=-1)
-        self.assertEqual(output, output2)
-        for in_component, out_component in zip(nt.unbind(), output2.unbind()):
-            self.assertEqual(in_component.softmax(dim=-1), out_component)
+        torch._dynamo.disable(self.assertEqual)(output, output2)
+        _compare_to_ref(nt, output2, dim=-1)
 
     def test_views_inherit_ragged_dim(self, device):
         # view
