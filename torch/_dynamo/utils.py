@@ -2751,7 +2751,7 @@ class Lit:
         return self.s
 
 
-warn_once_cache: Set[str] = set({})
+warn_once_cache: Set[str] = set()
 
 
 def warn_once(msg, stacklevel=1):
