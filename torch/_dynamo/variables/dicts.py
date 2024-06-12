@@ -174,7 +174,11 @@ class ConstDictVariable(VariableTracker):
     def __contains__(self, vt):
         assert isinstance(vt, VariableTracker)
         Hashable = ConstDictVariable._HashableTracker
-        return is_hashable(vt) and Hashable(vt) in self.items
+        return (
+            is_hashable(vt)
+            and Hashable(vt) in self.items
+            and not isinstance(self.items[Hashable(vt)], variables.DeletedVariable)
+        )
 
     def reconstruct(self, codegen):
         # instructions to load collections.OrderedDict if necessary

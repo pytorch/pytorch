@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import warnings
 import torch
 from torch.cuda import nccl
