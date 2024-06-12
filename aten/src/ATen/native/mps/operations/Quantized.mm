@@ -207,6 +207,22 @@ INSTANTIATE_INT8MM(bfloat);
 #endif
 
 // ------------------------------ For M >= 4 ------------------------------------
+/**
+ * The following code is heavily inspired by llama.cpp (https://github.com/ggerganov/llama.cpp).
+ * The original code is under MIT License: https://github.com/ggerganov/llama.cpp/blob/master/LICENSE
+ *
+ * Matrix Multiplication Algorithm:
+ * 1. Load A and B blocks (32x32 and 64x32 respectively) into shared memory.
+ * 2. In 4 simdgroups, calculate the outer product of the loaded blocks. Each simdgroup produces a 2x4 8x8 result.
+ * 3. Repeat 1 & 2 along K axis, with K block size 32, accumulate the result in the 2x4 8x8 block.
+ * 4. Dequantize the final result and store it in the output matrix.
+ *
+ * Variable names are changed to adapt to PyTorch convention such as M, N, K, etc.
+ * Assuming row major order.
+ * For more details please see inline comments.
+ */
+#include <metal_stdlib>
+using namespace metal;
 template <typename T> struct BlockType {};
 
 template <> struct BlockType<float> {
@@ -236,23 +252,23 @@ float2 get_scale_zero_q8(constant T * scalesAndZeros, uint2 index) {
     return float2(scale, 0.0);
 }
 
-#define BLOCK_SIZE_M 64 // 8 simdgroup matrices from matrix A
-#define BLOCK_SIZE_N 32 // 4 simdgroup matrices from matrix B
+#define BLOCK_SIZE_M 32 // each block takes 32 rows in matrix A
+#define BLOCK_SIZE_N 64 // each block takes 64 rows in matrix B
 #define BLOCK_SIZE_K 32
-#define THREAD_MAT_M 4 // each thread take 4 simdgroup matrices from matrix A
-#define THREAD_MAT_N 2 // each thread take 2 simdgroup matrices from matrix B
-#define THREAD_PER_ROW 2 // 2 thread for each row in matrix A to load numbers
-#define THREAD_PER_COL 4 // 4 thread for each row in matrix B to load numbers
+#define THREAD_MAT_M 2 // in data loading stage, each thread load 2 simdgroup matrices from matrix A
+#define THREAD_MAT_N 4 // in data loading stage, each thread load 4 simdgroup matrices from matrix B
+#define THREAD_PER_ROW_A 4 // 4 thread for each row in matrix A to load numbers
+#define THREAD_PER_ROW_B 2 // 2 thread for each row in matrix B to load numbers
 #define SG_MAT_SIZE 64 // simdgroup matrix is of shape 8x8
 #define SG_MAT_ROW 8
 
 // T: input type, W: weight type
 template<typename T, typename W, float2 (*get_scale_zero_func)(constant T *, uint2)>
 kernel void kernel_mul_mm(
-    constant T                 * A              [[buffer(0)]],  // 2 x 4096
-    constant char              * B              [[buffer(1)]],  // 1024 x 4096
+    constant T                 * A              [[buffer(0)]],
+    constant char              * B              [[buffer(1)]],
     constant T                 * scalesAndZeros [[buffer(2)]],
-    device T                   * outputData     [[buffer(3)]],  // 2 x 1024
+    device T                   * outputData     [[buffer(3)]],
     constant uint3             & sizes          [[buffer(4)]],
     threadgroup char           * shared_memory  [[threadgroup(0)]], // threadgroup buffer at index 0
     uint3                        tgpig          [[threadgroup_position_in_grid]], // 3d coordinates
@@ -264,90 +280,134 @@ kernel void kernel_mul_mm(
     // sizes: x = M, y = K, z = N
     // pytorch: M x K @ N x K -> M x N
     // ggml: K x N @ K x M -> N x M
-    uint32_t ne00 = sizes.y; // K
+    uint32_t M = sizes.x; // M
+    uint32_t K = sizes.y; // K
+    uint32_t N = sizes.z; // N
     uint32_t nb00 = sizeof(W);
-    uint32_t nb01 = nb00 * ne00;
-    uint32_t ne10 = sizes.y; // K
+    uint32_t nb01 = nb00 * K;
     uint32_t nb10 = sizeof(T);
-    uint32_t nb11 = nb10 * ne10;
-    uint32_t ne0 = sizes.z; // N
-    uint32_t ne1 = sizes.x; // M
-    constant char * src0 = (constant char *)B;
-    constant char * src1 = (constant char *)A;
+    uint32_t nb11 = nb10 * K;
 
     // 8192 for sa, 4096 for sb
-    threadgroup bfloat * sa = (threadgroup bfloat *)(shared_memory);
-    threadgroup T      * sb = (threadgroup T      *)(shared_memory + 8192);
+    threadgroup T      * sa = (threadgroup T      *)(shared_memory);
+    threadgroup bfloat * sb = (threadgroup bfloat *)(shared_memory + 8192);
 
     const uint r0 = tgpig.y;
     const uint r1 = tgpig.x;
 
     // if this block is of 64x32 shape or smaller
-    short n_rows = (ne0 - r0 * BLOCK_SIZE_M < BLOCK_SIZE_M) ? (ne0 - r0 * BLOCK_SIZE_M) : BLOCK_SIZE_M;
-    short n_cols = (ne1 - r1 * BLOCK_SIZE_N < BLOCK_SIZE_N) ? (ne1 - r1 * BLOCK_SIZE_N) : BLOCK_SIZE_N;
+    short n_rows_A = (M - r1 * BLOCK_SIZE_M < BLOCK_SIZE_M) ? (M - r1 * BLOCK_SIZE_M) : BLOCK_SIZE_M;
+    short n_rows_B = (N - r0 * BLOCK_SIZE_N < BLOCK_SIZE_N) ? (N - r0 * BLOCK_SIZE_N) : BLOCK_SIZE_N;
 
     // a thread shouldn't load data outside of the matrix
-    short thread_row = ((short)tiitg/THREAD_PER_ROW) < n_rows ? ((short)tiitg/THREAD_PER_ROW) : n_rows - 1;
-    short thread_col = ((short)tiitg/THREAD_PER_COL) < n_cols ? ((short)tiitg/THREAD_PER_COL) : n_cols - 1;
+    short thread_row_A = ((short)tiitg/THREAD_PER_ROW_A) < n_rows_A
+        ? ((short)tiitg/THREAD_PER_ROW_A)
+        : n_rows_A - 1;
+    short thread_row_B = ((short)tiitg/THREAD_PER_ROW_B) < n_rows_B
+        ? ((short)tiitg/THREAD_PER_ROW_B)
+        : n_rows_B - 1;
 
-    simdgroup_bfloat8x8 ma[4]; // dequantized weight
-    Tsimd8x8 mb[2]; // input
+    Tsimd8x8 ma[2]; // input
+    simdgroup_bfloat8x8 mb[4]; // weight
     simdgroup_float8x8 c_res[8]; // outer product result
     for (short i = 0; i < 8; i++){
         c_res[i] = make_filled_simdgroup_matrix<float, 8>(0.f);
     }
 
-    constant W * x = (constant W *)(src0
-        + nb01 * (r0 * BLOCK_SIZE_M + thread_row)
-        + nb00 * (BLOCK_SIZE_K / THREAD_PER_ROW * (tiitg % THREAD_PER_ROW)));
-    constant T * y = (constant T *)(src1
-        + nb11 * (r1 * BLOCK_SIZE_N + thread_col)
-        + nb10 * (BLOCK_SIZE_K / THREAD_PER_COL * (tiitg % THREAD_PER_COL)));
+    constant T * a_ptr = (constant T *)((constant char *)A
+        + nb11 * (r1 * BLOCK_SIZE_M + thread_row_A)
+        + nb10 * (BLOCK_SIZE_K / THREAD_PER_ROW_A * (tiitg % THREAD_PER_ROW_A)));
 
-    for (short loop_k = 0; loop_k < ne00; loop_k += BLOCK_SIZE_K) {
+    constant W * b_ptr = (constant W *)(B
+        + nb01 * (r0 * BLOCK_SIZE_N + thread_row_B)
+        + nb00 * (BLOCK_SIZE_K / THREAD_PER_ROW_B * (tiitg % THREAD_PER_ROW_B)));
+/**
+Load weight and input into shared memory:
+
+             K
+  ┌────────────────────────┐              8192 (A)           4096 (B)
+  │                        │   ┌────────────────────────┬────────────┐
+  │                        │   │++++++++++++++++++++++++│++++++++++++│
+  │                        │   └────────────────────────┴────────────┘
+  │                        │
+  │32                      │
+  ├──┬──┬──────────────────┤                    K
+  │++│  │                  │        ┌────────────────────────┐
+64│++│  │  ...             │        │                        │
+  │++│  │                  │        │                        │
+  ├──┴──┴──────────────────┤        │                        │
+  │                        │        │                        │
+  │      ───────────►      │        │32                      │
+  │       for loop         │        ├──┬──┬──────────────────┤
+  │                        │      32│++│  │ ...              │
+  │                        │        ├──┴──┴──────────────────┤
+  │                        │        │         ─────────────► │
+  │                        │        │            for loop    │
+  └────────────────────────┘        └────────────────────────┘
+              B                                 A
+ */
+    for (uint32_t loop_k = 0; loop_k < K; loop_k += BLOCK_SIZE_K) {
         // load data and store to threadgroup memory
         threadgroup_barrier(mem_flags::mem_threadgroup);
 
         #pragma unroll(16)
         for (short i = 0; i < 16; i++) {
-            bfloat weight = *(x + i);
+            bfloat weight = *(b_ptr + i);
             // for example, tiitg 32, i 12 -> 0 + 1 = 1, it needs to work on sg mat grid row 1
-            short sg_mat_grid_row_index = (tiitg % THREAD_PER_ROW) * THREAD_PER_ROW + i / 8;
+            short sg_mat_grid_row_index = (tiitg % THREAD_PER_ROW_B) * THREAD_PER_ROW_B + i / 8;
             // same example, sg mat grid col index: 32 / 2 / 8 = 2, so currently need to work with sg mat at (1, 2)
-            short sg_mat_grid_col_index = tiitg / THREAD_PER_ROW / 8;
+            short sg_mat_grid_col_index = tiitg / THREAD_PER_ROW_B / 8;
             // now inside sg mat, which index to write to? starting point is SG_MAT_SIZE * sg_mat_offset
             short row_offset = i & 7;
-            short col_offset = (tiitg / THREAD_PER_ROW) % 8;
-            // now calculates the overall offset for sa
-            short sa_offset = (sg_mat_grid_row_index * 8 + sg_mat_grid_col_index) * 64 + (row_offset * 8 + col_offset);
-            *(sa + sa_offset) = weight;
+            short col_offset = (tiitg / THREAD_PER_ROW_B) % 8;
+            // now calculates the overall offset for sb
+            short sb_offset = (sg_mat_grid_row_index * 8 + sg_mat_grid_col_index) * 64 + (row_offset * 8 + col_offset);
+            *(sb + sb_offset) = weight;
         }
         // read 8 values for input matrix
 
-        #pragma unroll(8)
-        for (short i = 0; i < 8; i++) {
-            *((threadgroup T *)(sb + (tiitg % THREAD_PER_COL) * 8 * 32 + 8 * (tiitg / THREAD_PER_COL)) + i) = *(y + i);
+        #pragma unroll(2)
+        for (short i = 0; i < 2; i++) {
+            *((threadgroup T4 *)(sa + (tiitg % THREAD_PER_ROW_A) * 8 * 32 + 8 * (tiitg / THREAD_PER_ROW_A)) + i) = *((constant T4 *)a_ptr + i);
         }
 
-        x += BLOCK_SIZE_K;
-        y += BLOCK_SIZE_K;
+        a_ptr += BLOCK_SIZE_K;
+        b_ptr += BLOCK_SIZE_K;
 
         threadgroup_barrier(mem_flags::mem_threadgroup);
 
         // load matrices from threadgroup memory and conduct outer products
-        threadgroup bfloat * lsma = (sa + THREAD_MAT_M * SG_MAT_SIZE * (sgitg % 2));
-        threadgroup T      * lsmb = (sb + THREAD_MAT_N * SG_MAT_SIZE * (sgitg / 2));
+        threadgroup T      * lsma = (sa + THREAD_MAT_M * SG_MAT_SIZE * (sgitg / 2));
+        threadgroup bfloat * lsmb = (sb + THREAD_MAT_N * SG_MAT_SIZE * (sgitg % 2));
 
+/**
+Outer product:
+              K
+       ────────────►
+     8    for loop              8   8
+   ┌───┬───┬───┬───┐          ┌───┬───┬───┬───┬───┬───┬───┬───┐
+ 8 │+++│   │   │   │      │  8│+++│+++│+++│+++│###│###│###│###│
+   ├───┼───┼───┼───┤      │   ├───┼───┼───┼───┼───┼───┼───┼───┤
+   │+++│   │   │   │      │   │   │   │   │   │   │   │   │   │
+   ├───┼───┼───┼───┤      │ K ├───┼───┼───┼───┼───┼───┼───┼───┤
+   │###│   │   │   │      │   │   │   │   │   │   │   │   │   │
+   ├───┼───┼───┼───┤      │   ├───┼───┼───┼───┼───┼───┼───┼───┤
+   │###│   │   │   │      │   │   │   │   │   │   │   │   │   │
+   └───┴───┴───┴───┘      ▼   └───┴───┴───┴───┴───┴───┴───┴───┘
+                       for loop
+    + simdgroup 0,1                + simdgroup 0,2
+    # simdgroup 2,3                # simdgroup 1,3
+ */
         #pragma unroll(4)
         for (short ik = 0; ik < BLOCK_SIZE_K / 8; ik++) {
             #pragma unroll(4)
             for (short i = 0; i < 4; i++) {
-                simdgroup_load(ma[i],lsma + SG_MAT_SIZE * i);
+                simdgroup_load(mb[i], lsmb + SG_MAT_SIZE * i);
             }
             simdgroup_barrier(mem_flags::mem_none);
             #pragma unroll(2)
             for (short i = 0; i < 2; i++) {
-                simdgroup_load(mb[i],lsmb + SG_MAT_SIZE * i);
+                simdgroup_load(ma[i], lsma + SG_MAT_SIZE * i);
             }
 
             lsma += BLOCK_SIZE_M / SG_MAT_ROW * SG_MAT_SIZE;
@@ -355,7 +415,7 @@ kernel void kernel_mul_mm(
 
             #pragma unroll(8)
             for (short i = 0; i < 8; i++){
-                simdgroup_multiply_accumulate(c_res[i], mb[i/4], ma[i%4], c_res[i]);
+                simdgroup_multiply_accumulate(c_res[i], ma[i/4], mb[i%4], c_res[i]);
             }
         }
     }
@@ -373,7 +433,7 @@ kernel void kernel_mul_mm(
   │ 2 │ 2 │ 2 │ 2 │ 3 │ 3 │ 3 │ 3 │
   └───┴───┴───┴───┴───┴───┴───┴───┘
 
-   scale: 8 x BLOCK_SIZE_M, starting from sb. Each sgitg handles 4 8x8 diagonal matrix.
+   scale: 8 x BLOCK_SIZE_N, starting from sa. Each sgitg handles 4 8x8 diagonal matrix.
     8   8
   ┌───┬───┬───┬───┬───┬───┬───┬───┐
  8│   │   │   │   │   │   │   │   │
@@ -381,7 +441,7 @@ kernel void kernel_mul_mm(
  */
 
     threadgroup float * temp_str = ((threadgroup float *)shared_memory) \
-                                  + 32 * (sgitg&1) + (16 * (sgitg>>1)) * BLOCK_SIZE_M;
+                                  + 32 * (sgitg&1) + (16 * (sgitg>>1)) * BLOCK_SIZE_N;
     for (int i = 0; i < 8; i++) {
         int block_start = 4 * 8 * (sgitg & 1) + (i % 4) * 8;
         threadgroup float * temp_scale = (threadgroup float *)sb + block_start;
@@ -391,26 +451,26 @@ kernel void kernel_mul_mm(
             // clear next 8 values of scale_itr
             *((threadgroup float2x4 *)scale_itr) = float2x4(0.f);
             // find scale
-            int scale_index = r0 * BLOCK_SIZE_M + block_start + j;
+            int scale_index = r0 * BLOCK_SIZE_N + block_start + j;
             float2 scale_zero = get_scale_zero_func(scalesAndZeros, uint2(scale_index, 0));
             // create diagonal matrix of scales
             *(scale_itr + j) = scale_zero[0];
             // go to next row
-            scale_itr += BLOCK_SIZE_M;
+            scale_itr += BLOCK_SIZE_N;
         }
         threadgroup_barrier(mem_flags::mem_threadgroup);
         simdgroup_float8x8 simd_scale;
-        simdgroup_load(simd_scale, temp_scale, BLOCK_SIZE_M);
+        simdgroup_load(simd_scale, temp_scale, BLOCK_SIZE_N);
         simdgroup_multiply(c_res[i], c_res[i], simd_scale);
-        simdgroup_store(c_res[i], temp_str + 8 * (i%4) + 8 * BLOCK_SIZE_M * (i/4), BLOCK_SIZE_M);
+        simdgroup_store(c_res[i], temp_str + 8 * (i%4) + 8 * BLOCK_SIZE_N * (i/4), BLOCK_SIZE_N);
     }
 
-    device T * C = outputData + (BLOCK_SIZE_M * r0) + (BLOCK_SIZE_N * r1) * ne0;
+    device T * C = outputData + (BLOCK_SIZE_N * r0) + (BLOCK_SIZE_M * r1) * N;
     if (sgitg == 0) {
-        for (int i = 0; i < n_rows; i++) {
-            for (int j = tiitg; j < n_cols; j += BLOCK_SIZE_N) {
-                float temp = *(temp_str + i + j * BLOCK_SIZE_M);
-                *(C + i + j * ne0) = (device T)(temp);
+        for (int i = 0; i < n_rows_B; i++) {
+            for (int j = tiitg; j < n_rows_A; j += BLOCK_SIZE_M) {
+                float temp = *(temp_str + i + j * BLOCK_SIZE_N);
+                *(C + i + j * N) = (device T)(temp);
             }
         }
     }
@@ -418,7 +478,7 @@ kernel void kernel_mul_mm(
 
 #define INSTANTIATE_MM(DTYPE, WDTYPE, DEQUANT_FUNC)                      \
 template                                                                 \
-[[host_name("large_m_int8pack_mm_" #DTYPE)]]                                     \
+[[host_name("large_m_int8pack_mm_" #DTYPE)]]                             \
 kernel void kernel_mul_mm<DTYPE, WDTYPE, DEQUANT_FUNC>(                  \
     constant DTYPE             * A              [[buffer(0)]],           \
     constant char              * B              [[buffer(1)]],           \
