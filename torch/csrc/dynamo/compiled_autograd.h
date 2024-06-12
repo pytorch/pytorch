@@ -232,7 +232,7 @@ class CompiledNodeArgs {
     collect(t.list);
   }
   template <typename T>
-  void collect(const c10::optional<T>& t) {
+  void collect(const std::optional<T>& t) {
     if (cond(t.has_value())) {
       collect(*t);
     }
@@ -520,20 +520,20 @@ class CompiledNodeArgs {
 
 struct TraceState {
   TraceState(
-      const std::vector<c10::optional<c10::SymInt>>& ss,
+      const std::vector<std::optional<c10::SymInt>>& ss,
       size_t num_outputs)
       : sym_sizes(ss), outputs(num_outputs) {}
 
   void debug_asserts() {
     TORCH_INTERNAL_ASSERT(sym_sizes_index == sym_sizes.size());
   }
-  c10::optional<c10::SymInt> next_sym_size() {
+  std::optional<c10::SymInt> next_sym_size() {
     TORCH_INTERNAL_ASSERT(sym_sizes_index < sym_sizes.size());
     return sym_sizes[sym_sizes_index++];
   }
 
   size_t sym_sizes_index{0};
-  std::vector<c10::optional<c10::SymInt>> sym_sizes;
+  std::vector<std::optional<c10::SymInt>> sym_sizes;
   variable_list outputs;
 };
 
@@ -664,13 +664,13 @@ class SwapSavedVariables {
   }
 
   template <typename T>
-  void before(c10::optional<T>& t) {
+  void before(std::optional<T>& t) {
     if (t.has_value()) {
       before(*t);
     }
   }
   template <typename T>
-  void after(c10::optional<T>& t) {
+  void after(std::optional<T>& t) {
     if (t.has_value()) {
       after(*t);
     }

@@ -84,8 +84,8 @@ struct LargestValuesGreedy {
       for (int j = 0; j < 4; ++j) {
         TileValueOrdered& v = values_ordered[i * 4 + j];
         v.parts.value = values.at(i, j).get();
-        v.parts.col = j;
-        v.parts.row = i;
+        v.parts.col = uint2b_t(j);
+        v.parts.row = uint2b_t(i);
       }
     }
     // Use a sorting network (aka without branches) to avoid
@@ -149,7 +149,7 @@ struct Causal1122 {
       for (int col = 0; col < 4; ++col) {
         TileValueOrdered& v = values_ordered[col];
         v.parts.value = values.at(row, col).get();
-        v.parts.col = col;
+        v.parts.col = uint2b_t(col);
       }
       // Use a sorting network (aka without branches) to avoid
       // warp divergence

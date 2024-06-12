@@ -101,7 +101,7 @@ std::vector<size_t> getBroadcastPositions(Node* node) {
 // Determine whether `from` can broadcast to `to`, and if so at which
 // position. `from` must be a suffix of `to`, except that any
 // occurrences of 1 in `from` are treated as wildcards.
-c10::optional<size_t> fusibleExpandTo(
+std::optional<size_t> fusibleExpandTo(
     at::IntArrayRef from,
     at::IntArrayRef to) {
   if (from.size() > to.size()) {
@@ -156,7 +156,7 @@ void fuseBroadcast(Block* b) {
       }
 
       // Not all broadcasts are supported by ONNX broadcast.
-      c10::optional<size_t> axis = fusibleExpandTo(
+      std::optional<size_t> axis = fusibleExpandTo(
           unexpanded_input->type()
               ->expectRef<TensorType>()
               .sizes()
@@ -710,7 +710,7 @@ static void eraseListUnpack(Node* n, int opset_version) {
       // onnx::SequenceAt was introduced in onnx opset version 11
       throw std::runtime_error(
           "Unsupported: ONNX export of prim::ListUnpack in opset " +
-          c10::to_string(opset_version) + ". Please try opset version 11.");
+          std::to_string(opset_version) + ". Please try opset version 11.");
     }
 
     auto g = n->owningGraph();

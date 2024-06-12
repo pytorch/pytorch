@@ -18,8 +18,8 @@ struct TORCH_API RegisterOperators {
   /// Registers a vector of already created `Operator`s.
   /// The operator element is now optional to filter null ops. It's backward
   /// compatible and works for selective operator registration.
-  explicit RegisterOperators(std::vector<c10::optional<Operator>> operators) {
-    for (c10::optional<Operator>& o : operators) {
+  explicit RegisterOperators(std::vector<std::optional<Operator>> operators) {
+    for (std::optional<Operator>& o : operators) {
       if (o) {
         registerOperator(std::move(o.value()));
       }

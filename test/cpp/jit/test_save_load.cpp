@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 
 #include <test/cpp/jit/test_utils.h>
+#include <cstdlib>
 #include <iostream>
 #include <sstream>
 
@@ -262,6 +263,37 @@ TEST(SerializationTest, ParentDirNotExist) {
       },
       "Parent directory ./doesnotexist does not exist.");
 }
+
+#ifdef WIN32
+TEST(SerializationTest, WindowsDrivePathTest) {
+  // "ZZZ" is typically not a valid drive letter.
+  // We expect to see "ZZZ:\\" or "ZZZ:/" in the error message.
+  // Note: slash should be included for the drive letter parent in Windows.
+  expectThrowsEq(
+      []() {
+        auto t = torch::nn::Linear(5, 5);
+        torch::save(t, "ZZZ:\\file.pt");
+      },
+      "Parent directory ZZZ:\\ does not exist.");
+  expectThrowsEq(
+      []() {
+        auto t = torch::nn::Linear(5, 5);
+        torch::save(t, "ZZZ:/file.pt");
+      },
+      "Parent directory ZZZ:/ does not exist.");
+}
+
+TEST(SerializationTest, WindowsTempPathTest) {
+  // Test for verifying file saving and loading in the temporary folder
+  std::string temp_dir = std::getenv("TEMP");
+  std::string file_path = temp_dir + "/file.pt";
+  auto t1 = torch::tensor(1.0);
+  torch::save(t1, file_path);
+  torch::Tensor t2;
+  torch::load(t2, file_path);
+  ASSERT_TRUE(t1.allclose(t2, 0.0, 0.0));
+}
+#endif
 
 TEST(SerializationTest, CalculateNecessaryArgsTest) {
   auto schema = torch::schema(

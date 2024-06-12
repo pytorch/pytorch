@@ -52,8 +52,8 @@ typename std::enable_if<
       grad_vec2 = grad_vec2 * fVec(opmath_t(-1.0));
     }
     if (weight_decay != 0.0){
-      grad_vec1 += param_vec1 * fVec(scalar_t(weight_decay));
-      grad_vec2 += param_vec2 * fVec(scalar_t(weight_decay));
+      grad_vec1 = vec::fmadd(param_vec1, fVec(scalar_t(weight_decay)), grad_vec1);
+      grad_vec2 = vec::fmadd(param_vec2, fVec(scalar_t(weight_decay)), grad_vec2);
     }
     if (momentum != 0.0) {
       fVec momentum_vec1, momentum_vec2;
@@ -61,17 +61,16 @@ typename std::enable_if<
         momentum_vec1 = grad_vec1;
         momentum_vec2 = grad_vec2;
       } else {
-        momentum_vec1 =
-            fVec::loadu(momentum_buf_ptr + d) * fVec(scalar_t(momentum)) +
-            grad_vec1 * fVec(scalar_t(1 - dampening));
-        momentum_vec2 =
-            fVec::loadu(momentum_buf_ptr + d + fVec::size()) * fVec(scalar_t(momentum)) +
-            grad_vec2 * fVec(scalar_t(1 - dampening));
+
+        momentum_vec1 = fVec::loadu(momentum_buf_ptr + d) * fVec(scalar_t(momentum));
+        momentum_vec2 = fVec::loadu(momentum_buf_ptr + d + fVec::size()) * fVec(scalar_t(momentum));
+        momentum_vec1 = vec::fmadd(fVec(scalar_t(1 - dampening)), grad_vec1, momentum_vec1);
+        momentum_vec2 = vec::fmadd(fVec(scalar_t(1 - dampening)), grad_vec2, momentum_vec2);
       }
       vec::convert_from_float<scalar_t>(momentum_vec1, momentum_vec2).store(momentum_buf_ptr + d);;
       if (nesterov) {
-        grad_vec1 += momentum_vec1 * fVec(scalar_t(momentum));
-        grad_vec2 += momentum_vec2 * fVec(scalar_t(momentum));
+        grad_vec1 = vec::fmadd(momentum_vec1, fVec(scalar_t(momentum)), grad_vec1);
+        grad_vec2 = vec::fmadd(momentum_vec2, fVec(scalar_t(momentum)), grad_vec2);
       } else {
         grad_vec1 = momentum_vec1;
         grad_vec2 = momentum_vec2;
@@ -142,7 +141,7 @@ typename std::enable_if<
     }
     if (maximize) grad_vec = grad_vec * Vec(scalar_t(-1.0));
     if (weight_decay != 0.0){
-      grad_vec += param_vec * Vec(scalar_t(weight_decay));
+      grad_vec = vec::fmadd(param_vec, Vec(scalar_t(weight_decay)), grad_vec);
     }
     if (momentum != 0.0) {
       Vec momentum_vec;
@@ -150,12 +149,12 @@ typename std::enable_if<
         momentum_vec = grad_vec;
       } else {
         momentum_vec =
-            Vec::loadu(momentum_buf_ptr + d) * Vec(scalar_t(momentum)) +
-            grad_vec * Vec(scalar_t(1 - dampening));
+            Vec::loadu(momentum_buf_ptr + d) * Vec(scalar_t(momentum));
+        momentum_vec = vec::fmadd(Vec(scalar_t(1 - dampening)), grad_vec, momentum_vec);
       }
       momentum_vec.store(momentum_buf_ptr + d);
       if (nesterov) {
-        grad_vec += momentum_vec * Vec(scalar_t(momentum));
+        grad_vec =  vec::fmadd(momentum_vec, Vec(scalar_t(momentum)), grad_vec);
       } else {
         grad_vec = momentum_vec;
       }

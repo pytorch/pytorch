@@ -24,7 +24,7 @@
 namespace at::native {
 namespace mps {
 
-static const char* METAL_BINARY = R"BINARY_METAL(
+static MetalShaderLibrary lib(R"BINARY_METAL(
 
 #include <metal_stdlib>
 using namespace metal;
@@ -252,44 +252,7 @@ kernel void complex_kernel<DTYPE>(       \
 REGISTER_COMPLEX_OUT_OP(float);
 REGISTER_COMPLEX_OUT_OP(half);
 
-)BINARY_METAL";
-
-using namespace mps;
-
-static id<MTLLibrary> compileBinaryOpsLibrary(id<MTLDevice> device) {
-  static id<MTLLibrary> binaryLibrary = nil;
-  if (binaryLibrary) {
-    return binaryLibrary;
-  }
-
-  NSError* error = nil;
-  MTLCompileOptions* options = [[MTLCompileOptions new] autorelease];
-  [options setLanguageVersion:is_macos_13_or_newer(MacOSVersion::MACOS_VER_14_0_PLUS) ? MTLLanguageVersion3_1
-                                                                                      : MTLLanguageVersion2_3];
-  binaryLibrary = [device newLibraryWithSource:[NSString stringWithCString:METAL_BINARY encoding:NSASCIIStringEncoding]
-                                       options:options
-                                         error:&error];
-  TORCH_CHECK(binaryLibrary, "Failed to create metal binary library, error: ", [[error description] UTF8String]);
-  return binaryLibrary;
-}
-
-static id<MTLComputePipelineState> binaryPipelineState(id<MTLDevice> device, const std::string& kernel) {
-  static std::unordered_map<std::string, id<MTLComputePipelineState>> psoCache;
-  id<MTLComputePipelineState> pso = psoCache[kernel];
-  if (pso) {
-    return pso;
-  }
-
-  NSError* error = nil;
-  id<MTLLibrary> binaryLib = compileBinaryOpsLibrary(device);
-  id<MTLFunction> binaryFunc = [binaryLib newFunctionWithName:[NSString stringWithUTF8String:kernel.c_str()]];
-  TORCH_CHECK(binaryFunc, "Failed to create function state object for: ", kernel);
-  pso = [device newComputePipelineStateWithFunction:binaryFunc error:&error];
-  TORCH_CHECK(pso, "Failed to created pipeline state object, error: ", [[error description] UTF8String]);
-
-  psoCache[kernel] = pso;
-  return pso;
-}
+)BINARY_METAL");
 
 static void binary_mps_impl(TensorIteratorBase& iter, const std::string func_name) {
   TORCH_CHECK(iter.common_dtype() != at::kDouble, "float64 is not supported on MPS");
@@ -306,10 +269,10 @@ static void binary_mps_impl(TensorIteratorBase& iter, const std::string func_nam
   dispatch_sync_with_rethrow(mpsStream->queue(), ^() {
     @autoreleasepool {
       id<MTLComputeCommandEncoder> computeEncoder = mpsStream->commandEncoder();
-      const std::string kernel = func_name + "_" + scalarToMetalTypeString(input.scalar_type());
+      const std::string kernel = func_name + "_" + scalarToMetalTypeString(input);
       auto kernelDataOffsets = generateKernelDataOffsets(computeEncoder, iter);
 
-      id<MTLComputePipelineState> binaryPSO = binaryPipelineState(device, kernel);
+      id<MTLComputePipelineState> binaryPSO = lib.getPipelineStateForFunc(kernel);
 
       // this function call is a no-op if MPS Profiler is not enabled
       getMPSProfiler().beginProfileKernel(binaryPSO, kernel, {input, other});
