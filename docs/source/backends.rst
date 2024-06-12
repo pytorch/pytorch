@@ -135,7 +135,7 @@ torch.backends.cudnn
 .. py:module:: torch.backends.cudnn.rnn
 
 torch.backends.cusparselt
-^^^^^^^^^^^^^^^^^^^^
+^^^^^^^^^^^^^^^^^^^^^^^^^
 .. automodule:: torch.backends.cusparselt
 
 .. autofunction:: torch.backends.cusparselt.version

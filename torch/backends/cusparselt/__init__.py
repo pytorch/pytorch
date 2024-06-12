@@ -3,6 +3,11 @@ from typing import Optional
 
 import torch
 
+__all__ = [
+    "version",
+    "is_available",
+]
+
 try:
     from torch._C import _cusparselt
 except ImportError:
