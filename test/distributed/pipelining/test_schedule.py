@@ -273,7 +273,6 @@ class ScheduleTest(MultiProcContinousTest):
             self.rank,
             self.world_size,
             self.device,
-            input_args=x.chunk(chunks)[0],
         )
 
         # Attach to a schedule
@@ -356,7 +355,6 @@ class ScheduleTest(MultiProcContinousTest):
                 stage_idx,
                 n_stages,
                 self.device,
-                input_args=input_args,
             )
             for stage_module, stage_idx in zip(stage_modules, stage_indices)
         ]

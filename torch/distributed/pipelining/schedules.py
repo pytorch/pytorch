@@ -292,11 +292,6 @@ class PipelineScheduleSingle(_PipelineSchedule):
         # Set the same has_backward flag for stage object
         self._stage.has_backward = self._has_backward
 
-        # TODO: later replace this with lazy shape inference during forward
-        # Prepare forward send/recv infrastructure for stage
-        stage._prepare_forward_infra(n_microbatches)
-        if self._has_backward:
-            stage._prepare_backward_infra(n_microbatches)
 
     def step(self, *args, target=None, losses: Optional[List] = None, **kwargs):
         """
@@ -315,6 +310,10 @@ class PipelineScheduleSingle(_PipelineSchedule):
 
         # Split inputs into microbatches
         args_split, kwargs_split = self._split_inputs(args, kwargs)
+
+        # Check if buffers initialized for communication
+        if not self._stage.buffers_initialized:
+            self._stage.init_buffers(self._n_microbatches, args_split[0], kwargs_split[0])
 
         # Split target into microbatches
         if target is not None:
@@ -594,12 +593,6 @@ class PipelineScheduleMulti(_PipelineSchedule):
         # This will be set during init of derived schedules
         self.pipeline_order: Dict[int, List[Optional[_Action]]] = {}
 
-        # TODO: later replace this with lazy shape inference during forward
-        # Prepare forward send/recv infrastructure for stage
-        for stage in self._stages:
-            stage._prepare_forward_infra(n_microbatches)
-            if self._has_backward:
-                stage._prepare_backward_infra(n_microbatches)
 
     def step(self, *args, target=None, losses: Optional[List] = None, **kwargs):
         """
@@ -619,6 +612,11 @@ class PipelineScheduleMulti(_PipelineSchedule):
 
         # Split inputs into microbatches
         args_split, kwargs_split = self._split_inputs(args, kwargs)
+
+        # Check if buffers initialized for communication
+        for stage in self._stages:
+            if not stage.buffers_initialized:
+                stage.init_buffers(self._n_microbatches, args_split[0], kwargs_split[0])
 
         # Split target into microbatches
         if target is not None:
