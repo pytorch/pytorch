@@ -464,18 +464,6 @@ static void BatchMMSide(Block* block, AliasDb& alias_db) {
   }
 }
 
-static bool hasMutableOperators(Block* block) {
-  for (auto n : block->nodes()) {
-    if (n->kind().is_aten() && n->schema().is_mutable())
-      return true;
-    for (auto b : n->blocks()) {
-      if (hasMutableOperators(b))
-        return true;
-    }
-  }
-  return false;
-}
-
 static bool hasMMOperators(std::shared_ptr<Graph>& graph) {
   DepthFirstGraphNodeIterator it(graph);
   Node* n = nullptr;
