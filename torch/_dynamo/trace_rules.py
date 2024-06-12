@@ -941,6 +941,7 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch._C._mps_currentAllocatedMemory",
         "torch._C._mps_deviceSynchronize",
         "torch._C._mps_driverAllocatedMemory",
+        "torch._C._mps_recommendedMaxMemory",
         "torch._C._mps_elapsedTimeOfEvents",
         "torch._C._mps_emptyCache",
         "torch._C._mps_get_default_generator",
