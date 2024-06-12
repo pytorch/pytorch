@@ -1,6 +1,5 @@
-import torch
-
 import operator_benchmark as op_bench
+import torch
 
 embeddingbag_conversion_short_configs = op_bench.cross_product_configs(
     num_embeddings=(80,), embedding_dim=(128, 256, 512), tags=("short",)

@@ -1435,7 +1435,7 @@ class TestVectorize(TestCase):
         try:
             vectorize(random.randrange)  # Should succeed
         except Exception:
-            raise AssertionError  # noqa: TRY200
+            raise AssertionError  # noqa: B904
 
     def test_keywords2_ticket_2100(self):
         # Test kwarg support: enhancement ticket 2100
@@ -3259,7 +3259,7 @@ class TestPercentile(TestCase):
             subtest(
                 [1, 7],
                 decorators=[
-                    xpassIfTorchDynamo,
+                    skip(reason="Keepdims wrapper incorrect for multiple q"),
                 ],
             ),
         ],
@@ -3273,13 +3273,13 @@ class TestPercentile(TestCase):
             subtest(
                 (0, 1),
                 decorators=[
-                    xpassIfTorchDynamo,
+                    skip(reason="Tuple axes"),
                 ],
             ),
             subtest(
                 (-3, -1),
                 decorators=[
-                    xpassIfTorchDynamo,
+                    skip(reason="Tuple axes"),
                 ],
             ),
         ],
@@ -3839,13 +3839,13 @@ class TestMedian(TestCase):
             subtest(
                 (0, 1),
                 decorators=[
-                    xpassIfTorchDynamo,
+                    skip(reason="Tuple axes"),
                 ],
             ),
             subtest(
                 (-3, -1),
                 decorators=[
-                    xpassIfTorchDynamo,
+                    skip(reason="Tuple axes"),
                 ],
             ),
         ],

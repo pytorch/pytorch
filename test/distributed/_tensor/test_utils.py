@@ -10,7 +10,12 @@ from torch.distributed._tensor._utils import (
 )
 
 from torch.distributed._tensor.debug import CommDebugMode
-from torch.distributed._tensor.placement_types import Replicate, Shard
+from torch.distributed._tensor.placement_types import (
+    DTensorSpec,
+    Replicate,
+    Shard,
+    TensorMeta,
+)
 from torch.distributed.device_mesh import DeviceMesh, init_device_mesh
 
 from torch.testing._internal.common_utils import run_tests
@@ -185,14 +190,20 @@ class Test2DStridedLocalShard(DTensorTestBase):
             chunks = list(torch.chunk(dtensor_tp.to_local(), 2, dim=0))
             shard_rank = 0 if self.rank // 2 == 0 else 1
             sharded_param = chunks[shard_rank]
+            spec_2d = DTensorSpec(
+                mesh=mesh_2d,
+                placements=(Shard(0), Shard(0)),
+                tensor_meta=TensorMeta(
+                    global_tensor.size(),
+                    global_tensor.stride(),
+                    global_tensor.dtype,
+                ),
+            )
+
             dtensor_2d = DTensor(
                 sharded_param,
-                mesh_2d,
-                [Shard(0), Shard(0)],
-                shape=global_tensor.size(),
-                dtype=global_tensor.dtype,
+                spec_2d,
                 requires_grad=False,
-                stride=global_tensor.stride(),
             )
 
             self.assertEqual(

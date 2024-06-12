@@ -1,7 +1,9 @@
 from typing import List, NamedTuple, Optional, Tuple, Union
 
 import torch
+import torch._dynamo.compiled_autograd as ca
 import torch.distributed as dist
+from torch.distributed._tensor import DTensor
 from torch.distributed.distributed_c10d import ReduceOp
 from ._fsdp_common import (
     _get_dim0_padded_size,
@@ -101,10 +103,21 @@ def foreach_all_gather_copy_out(
     for all_gather_input_numels, all_gather_input_dtypes, fsdp_param in zip(
         param_all_gather_input_numels, param_all_gather_input_dtypes, fsdp_params
     ):
-        fsdp_param.init_all_gather_outputs(
-            all_gather_input_numels, all_gather_input_dtypes, world_size, device
-        )  # no-op after 1st call
-        fsdp_param.alloc_all_gather_outputs()
+        if ca.compiled_autograd_enabled:
+            fsdp_param.init_all_gather_outputs(
+                all_gather_input_numels,
+                all_gather_input_dtypes,
+                world_size,
+                device,
+                # NOTE: Under compile, make sure we always recreate all_gather_outputs
+                # per AllGather. See [Note: Invariants for torch.compile Traceable FSDP2].
+                force_recreate=True,
+            )
+        else:
+            fsdp_param.init_all_gather_outputs(
+                all_gather_input_numels, all_gather_input_dtypes, world_size, device
+            )  # no-op after 1st call
+            fsdp_param.alloc_all_gather_outputs()
     all_gather_output = all_gather_output.view(world_size, -1)
     gen = (t for fsdp_param in fsdp_params for t in fsdp_param.all_gather_outputs)
     if all_gather_output.dtype == torch.uint8:
@@ -125,9 +138,11 @@ def foreach_reduce(
     orig_dtype: torch.dtype,
     reduce_dtype: Optional[torch.dtype],
     device: torch.device,
-    all_reduce_group: Optional[dist.ProcessGroup],
+    all_reduce_group: Optional[dist.ProcessGroup],  # not `None` iff HSDP
     all_reduce_stream: torch.cuda.Stream,
-) -> torch.cuda.Event:
+    all_reduce_grads: bool,
+    partial_reduce_output: Optional[torch.Tensor],  # only used for HSDP
+) -> Tuple[torch.cuda.Event, Optional[torch.Tensor]]:
     """
     ``unsharded_grads`` owns the references to the gradients computed by
     autograd, so clearing the list frees the gradients.
@@ -163,36 +178,43 @@ def foreach_reduce(
         # computed in the default stream
         current_stream.wait_stream(reduce_scatter_stream)
         unsharded_grads.clear()
-        post_reduce_output = reduce_scatter_input.new_empty(
-            (reduce_scatter_output_numel,)
-        )
+        reduce_output = reduce_scatter_input.new_empty((reduce_scatter_output_numel,))
         _div_if_needed(reduce_scatter_input, predivide_factor)
         dist.reduce_scatter_tensor(
-            output=post_reduce_output,
+            output=reduce_output,
             input=reduce_scatter_input,
             group=reduce_scatter_group,
             op=ReduceOp.AVG if predivide_factor is None else ReduceOp.SUM,
         )
-    view_out_stream = reduce_scatter_stream
-    if all_reduce_group is not None:
-        view_out_stream = all_reduce_stream
-        all_reduce_stream.wait_stream(reduce_scatter_stream)
-        with torch.cuda.stream(all_reduce_stream):
-            dist.all_reduce(
-                post_reduce_output,
-                group=all_reduce_group,
-                op=ReduceOp.AVG if predivide_factor is None else ReduceOp.SUM,
-            )
-    with torch.cuda.stream(view_out_stream):
-        _div_if_needed(post_reduce_output, postdivide_factor)
-        post_reduce_output = _to_dtype_if_needed(post_reduce_output, orig_dtype)
-        # - View out and accumulate
+        post_reduce_stream = reduce_scatter_stream
+        if all_reduce_group is not None:  # HSDP
+            # Accumulations must run in the reduce-scatter stream
+            if not all_reduce_grads:
+                if partial_reduce_output is not None:
+                    partial_reduce_output += reduce_output
+                else:
+                    partial_reduce_output = reduce_output
+                return post_reduce_stream.record_event(), partial_reduce_output
+            if partial_reduce_output is not None:
+                reduce_output += partial_reduce_output
+            post_reduce_stream = all_reduce_stream
+            all_reduce_stream.wait_stream(reduce_scatter_stream)
+            with torch.cuda.stream(all_reduce_stream):
+                dist.all_reduce(
+                    reduce_output,
+                    group=all_reduce_group,
+                    op=ReduceOp.AVG if predivide_factor is None else ReduceOp.SUM,
+                )
+    with torch.cuda.stream(post_reduce_stream):
+        _div_if_needed(reduce_output, postdivide_factor)
+        reduce_output = _to_dtype_if_needed(reduce_output, orig_dtype)
+        # View out and accumulate sharded gradients
         flat_grad_offset = 0  # [0, reduce_scatter_output_numel - 1]
         for padded_unsharded_size, fsdp_param in zip(
             padded_unsharded_sizes, fsdp_params
         ):
             new_sharded_grad = torch.as_strided(
-                post_reduce_output,
+                reduce_output,
                 size=fsdp_param.sharded_size,
                 stride=fsdp_param.contiguous_sharded_stride,
                 storage_offset=flat_grad_offset,
@@ -213,19 +235,22 @@ def foreach_reduce(
                     # Record an event on which to block the CPU thread to
                     # ensure that the D2H copy finishes before the optimizer
                     fsdp_param.grad_offload_event = reduce_scatter_stream.record_event()
-            new_sharded_dtensor_grad = fsdp_param.to_sharded_dtensor(new_sharded_grad)
             if to_accumulate_grad:
-                fsdp_param.sharded_param.grad += new_sharded_dtensor_grad
+                assert isinstance(fsdp_param.sharded_param.grad, DTensor)
+                fsdp_param.sharded_param.grad._local_tensor += new_sharded_grad
             else:
+                new_sharded_dtensor_grad = fsdp_param.to_sharded_dtensor(
+                    new_sharded_grad
+                )
                 fsdp_param.sharded_param.grad = new_sharded_dtensor_grad
             padded_sharded_numel = padded_unsharded_size.numel() // world_size
             flat_grad_offset += padded_sharded_numel
-        post_reduce_view_out_event = view_out_stream.record_event()
+        post_reduce_event = post_reduce_stream.record_event()
     # The RS output is allocated in the RS stream and used in the default
     # stream (for optimizer). To ensure its memory is not reused for later
     # RSs, we do not need extra synchronization since the sharded parameters
     # hold refs through the end of backward.
-    return post_reduce_view_out_event
+    return post_reduce_event, None
 
 
 def foreach_reduce_scatter_copy_in(

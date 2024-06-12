@@ -122,7 +122,7 @@ std::tuple<at::Tensor,at::Tensor,at::Tensor> miopen_depthwise_convolution_backwa
 
 at::Tensor miopen_convolution_add_relu(
     const at::Tensor& input, const at::Tensor& weight, const at::Tensor& z,
-    const std::optional<Scalar>& alpha, const c10::optional<Tensor>& bias, IntArrayRef stride,
+    const std::optional<Scalar>& alpha, const std::optional<Tensor>& bias, IntArrayRef stride,
     IntArrayRef padding, IntArrayRef dilation, int64_t groups) {
   AT_ERROR("miopen_convolution_add_relu: ATen not compiled with MIOpen support");
 }

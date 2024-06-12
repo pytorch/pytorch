@@ -237,7 +237,7 @@ jobs:
     uses: ./.github/workflows/_linux-build-label.yml
     with:
       build-environment: linux-focal-cuda11.8-py3.10-gcc9
-      docker-image-name: pytorch-linux-focal-cuda11.8-cudnn8-py3-gcc9
+      docker-image-name: pytorch-linux-focal-cuda11.8-cudnn9-py3-gcc9
       test-matrix: |
         { include: [
           { config: "distributed", shard: 1, num_shards: 3, runner: "linux.8xlarge.nvidia.gpu" },
@@ -262,7 +262,7 @@ jobs:
     uses: ./.github/workflows/_linux-build-label.yml
     with:
       build-environment: linux-focal-cuda12.1-py3.10-gcc9
-      docker-image-name: pytorch-linux-focal-cuda12.1-cudnn8-py3-gcc9
+      docker-image-name: pytorch-linux-focal-cuda12.1-cudnn9-py3-gcc9
       test-matrix: |
         { include: [
           { config: "default", shard: 1, num_shards: 5, runner: "linux.4xlarge.nvidia.gpu" },
@@ -297,12 +297,12 @@ jobs:
           { config: "default", shard: 1, num_shards: 1 },
         ]}
 
-  linux-jammy-cuda-11_8-cudnn8-py3_8-clang12-build:
-    name: linux-jammy-cuda11.8-cudnn8-py3.8-clang12
+  linux-jammy-cuda-11_8-cudnn9-py3_8-clang12-build:
+    name: linux-jammy-cuda11.8-cudnn9-py3.8-clang12
     uses: ./.github/workflows/_linux-build-label.yml
     with:
-      build-environment: linux-jammy-cuda11.8-cudnn8-py3.8-clang12
-      docker-image-name: pytorch-linux-jammy-cuda11.8-cudnn8-py3.8-clang12
+      build-environment: linux-jammy-cuda11.8-cudnn9-py3.8-clang12
+      docker-image-name: pytorch-linux-jammy-cuda11.8-cudnn9-py3.8-clang12
       test-matrix: |
         { include: [
           { config: "default", shard: 1, num_shards: 1 },
@@ -361,7 +361,7 @@ jobs:
     uses: ./.github/workflows/_bazel-build-test.yml
     with:
       build-environment: linux-focal-cuda12.1-py3.10-gcc9-bazel-test
-      docker-image-name: pytorch-linux-focal-cuda12.1-cudnn8-py3-gcc9
+      docker-image-name: pytorch-linux-focal-cuda12.1-cudnn9-py3-gcc9
       cuda-version: cpu
       test-matrix: |
         { include: [
@@ -373,8 +373,20 @@ jobs:
     uses: ./.github/workflows/_bazel-build-test.yml
     with:
       build-environment: linux-focal-cuda12.1-py3.10-gcc9-bazel-test
-      docker-image-name: pytorch-linux-focal-cuda12.1-cudnn8-py3-gcc9
+      docker-image-name: pytorch-linux-focal-cuda12.1-cudnn9-py3-gcc9
       cuda-version: "12.1"
+      test-matrix: |
+        { include: [
+          { config: "default", shard: 1, num_shards: 1, runner: "linux.4xlarge.nvidia.gpu" },
+        ]}
+
+  linux-focal-cuda12_4-py3_10-gcc9-bazel-test:
+    name: linux-focal-cuda12.4-py3.10-gcc9-bazel-test
+    uses: ./.github/workflows/_bazel-build-test.yml
+    with:
+      build-environment: linux-focal-cuda12.4-py3.10-gcc9-bazel-test
+      docker-image-name: pytorch-linux-focal-cuda12.4-cudnn9-py3-gcc9
+      cuda-version: "12.4"
       test-matrix: |
         { include: [
           { config: "default", shard: 1, num_shards: 1, runner: "linux.4xlarge.nvidia.gpu" },
@@ -435,7 +447,7 @@ jobs:
     uses: ./.github/workflows/_linux-build-label.yml
     with:
       build-environment: linux-focal-cuda12.1-py3.10-gcc9-sm86
-      docker-image-name: pytorch-linux-focal-cuda12.1-cudnn8-py3-gcc9
+      docker-image-name: pytorch-linux-focal-cuda12.1-cudnn9-py3-gcc9
       cuda-arch-list: 8.6
       test-matrix: |
         { include: [

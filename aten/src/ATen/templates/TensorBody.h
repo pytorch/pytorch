@@ -398,7 +398,7 @@ class TORCH_API Tensor: public TensorBase {
   /// // f requires grad, has no operation creating it
   /// @endcode
 
-  /// \fn void backward(const Tensor & gradient={}, std::optional<bool> retain_graph=c10::nullopt, bool create_graph=false, c10::optional<TensorList> inputs=c10::nullopt) const;
+  /// \fn void backward(const Tensor & gradient={}, std::optional<bool> retain_graph=c10::nullopt, bool create_graph=false, std::optional<TensorList> inputs=c10::nullopt) const;
   ///
   /// Computes the gradient of current tensor with respect to graph leaves.
   ///
@@ -433,7 +433,7 @@ class TORCH_API Tensor: public TensorBase {
   ///     the current implementation will call its grad_fn (even though it is not strictly needed to get this gradients).
   ///     It is an implementation detail on which the user should not rely.
   ///     See https://github.com/pytorch/pytorch/pull/60521#issuecomment-867061780 for more details.
-  void backward(const Tensor & gradient={}, std::optional<bool> retain_graph=c10::nullopt, bool create_graph=false, c10::optional<TensorList> inputs=c10::nullopt) const {
+  void backward(const Tensor & gradient={}, std::optional<bool> retain_graph=c10::nullopt, bool create_graph=false, std::optional<TensorList> inputs=c10::nullopt) const {
     // NB: Adding this wrapper to _backward here because we'd like our
     // 'backwards' api to accept the 'inputs' argument optionally. Since code gen
     // currently does not support optional of TensorList our approach is to replace
@@ -580,9 +580,9 @@ class TORCH_API Tensor: public TensorBase {
   //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
   template <typename T>
-  using hook_return_void_t = std::enable_if_t<std::is_void<typename c10::invoke_result_t<T&, Tensor>>::value, unsigned>;
+  using hook_return_void_t = std::enable_if_t<std::is_void<typename std::invoke_result_t<T&, Tensor>>::value, unsigned>;
   template <typename T>
-  using hook_return_var_t = std::enable_if_t<std::is_same<typename c10::invoke_result_t<T&, Tensor>, Tensor>::value, unsigned>;
+  using hook_return_var_t = std::enable_if_t<std::is_same<typename std::invoke_result_t<T&, Tensor>, Tensor>::value, unsigned>;
 
   /// Registers a backward hook.
   ///
@@ -626,7 +626,7 @@ class TORCH_API Tensor: public TensorBase {
     return TensorBase::data();
   }
 
-  void _backward(TensorList inputs, const std::optional<Tensor>& gradient, c10::optional<bool> keep_graph, bool create_graph) const;
+  void _backward(TensorList inputs, const std::optional<Tensor>& gradient, std::optional<bool> keep_graph, bool create_graph) const;
 
   const Tensor& requires_grad_(bool _requires_grad=true) const {
     TensorBase::requires_grad_(_requires_grad);

@@ -21,6 +21,8 @@ IS_64BIT = struct.calcsize("P") == 8
 
 BUILD_DIR = "build"
 
+LIBTORCH_PKG_NAME = "libtorchsplit"
+
 
 def check_env_flag(name: str, default: str = "") -> bool:
     return os.getenv(name, default).upper() in ["ON", "1", "YES", "TRUE", "Y"]

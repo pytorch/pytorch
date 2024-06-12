@@ -17,10 +17,11 @@ from torch.distributed._tensor import (
     DeviceMesh,
     DTensor,
     init_device_mesh,
+    Partial,
     Replicate,
     Shard,
 )
-from torch.distributed._tensor.placement_types import _Partial
+from torch.distributed._tensor.placement_types import DTensorSpec, TensorMeta
 from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
     checkpoint_wrapper,
     CheckpointImpl,
@@ -121,7 +122,7 @@ class TestDTensorCompile(torch._dynamo.test_case.TestCase):
 
         compiled_fn = torch.compile(backend="aot_eager", fullgraph=True)(fn)
 
-        for x in [Shard(0), Replicate(), _Partial()]:
+        for x in [Shard(0), Replicate(), Partial()]:
             opt_fn = fn(x)
             compiled_out = compiled_fn(x)
             self.assertEqual(opt_fn, compiled_out)
@@ -193,41 +194,45 @@ class TestDTensorCompile(torch._dynamo.test_case.TestCase):
 
     def test_dtensor_constructor_w_graph_break(self):
         mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
+        x = torch.randn(64, 32, requires_grad=True)
+        spec = DTensorSpec(
+            mesh,
+            (Replicate(), Shard(0)),
+            tensor_meta=TensorMeta(
+                shape=torch.Size([128, 32]), stride=(32, 1), dtype=x.dtype
+            ),
+        )
 
         # test passing in DTensor as inputs/outputs and run some tensor computation
         def fn(x):
             print("graph break!")
             return DTensor(
                 x,
-                mesh,
-                (Replicate(), Shard(0)),
-                shape=[128, 32],
-                dtype=x.dtype,
+                spec,
                 requires_grad=x.requires_grad,
-                stride=[32, 1],
             )
 
-        x = torch.randn(64, 32, requires_grad=True)
         out = fn(x)
         out2 = torch.compile(fn, backend="eager")(x)
 
     def test_dtensor_constructor_w_dynamo_disable(self):
         mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
+        x = torch.randn(32, requires_grad=True)
+        spec = DTensorSpec(
+            mesh,
+            (Replicate(),),
+            tensor_meta=TensorMeta(shape=torch.Size([32]), stride=(1,), dtype=x.dtype),
+        )
 
         @torch._dynamo.disable(recursive=False)
         def fn(x):
             print("foo")
             return DTensor(
                 x,
-                mesh,
-                (Replicate(),),
-                shape=torch.Size([32]),
-                dtype=x.dtype,
+                spec,
                 requires_grad=x.requires_grad,
-                stride=(1,),
             )
 
-        x = torch.randn(32, requires_grad=True)
         out = fn(x)
         out2 = torch.compile(fn, backend="eager")(x)
         self.assertEqual(out, out2)
@@ -313,7 +318,7 @@ class TestDTensorCompile(torch._dynamo.test_case.TestCase):
         x_dt = DTensor.from_local(
             x,
             mesh,
-            [_Partial()],
+            [Partial()],
             run_check=False,
             shape=(10, 257, 160),
             stride=(41120, 160, 1),
@@ -354,7 +359,7 @@ class TestDTensorCompile(torch._dynamo.test_case.TestCase):
         x_dt = DTensor.from_local(
             x,
             mesh,
-            [_Partial()],
+            [Partial()],
             run_check=False,
             shape=(10, 257, 160),
             stride=(41120, 160, 1),
@@ -515,7 +520,7 @@ def forward(self, primals_1):
             return x + x
 
         x = torch.randn(4, 4, requires_grad=True)
-        x_dt = DTensor.from_local(x, mesh, [_Partial()], run_check=False)
+        x_dt = DTensor.from_local(x, mesh, [Partial()], run_check=False)
 
         y = torch.randn(4, 4, requires_grad=True)
         y_dt = DTensor.from_local(y, mesh, [Replicate()], run_check=False)
