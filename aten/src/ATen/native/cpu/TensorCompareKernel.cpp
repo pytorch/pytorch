@@ -179,8 +179,7 @@ static void aminmax_kernel(
     " but got ", min_result.scalar_type(), " and ", max_result.scalar_type());
 
   if (self.numel() == 1 && self.ndimension() == 0) {
-    TORCH_CHECK(!self.is_complex(), "Complex dtype not supported by aminmax.");
-    TORCH_CHECK(self.scalar_type() != ScalarType::Bool, "Boolean dtype not supported by aminmax.");
+    TORCH_CHECK(!self.is_complex() && self.scalar_type() != ScalarType::Bool, self.scalar_type(), " dtype not supported by aminmax.");
     min_result.resize_({});
     max_result.resize_({});
     min_result.fill_(self);
