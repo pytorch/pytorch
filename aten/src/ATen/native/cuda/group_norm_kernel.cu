@@ -691,7 +691,10 @@ void GroupNormKernelImplInternal(
       break;
     }
     default: {
-      TORCH_CHECK(false, "Unsupported memory format for group normalization: ", x_format);
+      TORCH_CHECK(
+          false,
+          "Unsupported memory format for group normalization: ",
+          x_format);
     }
   }
   C10_CUDA_KERNEL_LAUNCH_CHECK();
