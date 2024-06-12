@@ -225,7 +225,7 @@ std::vector<Tensor> foreach_tensor_div_scalar_kernel_cuda(
     const Scalar& scalar) {
   check_foreach_api_restrictions(tensors);
   if (!can_use_fast_route(tensors, scalar, true)) {
-    return at::native::foreach_tensor_div_scalar_kernel_slow(
+    return at::native::foreach_tensor_mul_scalar_kernel_slow(
         tensors, scalar_reciprocal(scalar));
   }
 
