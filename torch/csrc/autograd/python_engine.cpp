@@ -114,7 +114,7 @@ void PythonEngine::thread_on_exception(
 }
 
 std::unique_ptr<AnomalyMetadata> PythonEngine::make_anomaly_metadata() {
-  return std::unique_ptr<AnomalyMetadata>(new PyAnomalyMetadata());
+  return std::make_unique<PyAnomalyMetadata>();
 }
 
 std::unique_ptr<SavedVariableHooks> PythonEngine::

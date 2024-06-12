@@ -494,7 +494,7 @@ static at::Tensor _quantized_convolution_onednn(
     std::optional<c10::string_view> binary_attr=c10::nullopt,
     std::optional<at::Scalar> binary_alpha=c10::nullopt,
     std::optional<c10::string_view> unary_attr=c10::nullopt,
-    torch::List<std::optional<at::Scalar>> unary_scalars=torch::List<c10::optional<at::Scalar>>(),
+    torch::List<std::optional<at::Scalar>> unary_scalars=torch::List<std::optional<at::Scalar>>(),
     std::optional<c10::string_view> unary_algorithm=c10::nullopt);
 
 #endif // #if AT_MKLDNN_ENABLED()

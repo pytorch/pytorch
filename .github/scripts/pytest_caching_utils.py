@@ -18,6 +18,7 @@ PYTEST_CACHE_KEY_PREFIX = "pytest_cache"
 PYTEST_CACHE_DIR_NAME = ".pytest_cache"
 BUCKET = "gha-artifacts"
 LASTFAILED_FILE_PATH = Path("v/cache/lastfailed")
+TD_HEURISTIC_PREVIOUSLY_FAILED_ADDITIONAL = "previous_failures_additional.json"
 
 # Temp folders
 ZIP_UPLOAD = "zip-upload"
@@ -191,6 +192,10 @@ def _merge_pytest_caches(
         pytest_cache_dir_to_merge_from, pytest_cache_dir_to_merge_into
     )
 
+    _merge_additional_failures_files(
+        pytest_cache_dir_to_merge_from, pytest_cache_dir_to_merge_into
+    )
+
 
 def _merge_lastfailed_files(source_pytest_cache: Path, dest_pytest_cache: Path) -> None:
     # Simple cases where one of the files doesn't exist
@@ -232,3 +237,27 @@ def _merged_lastfailed_content(
             del to_lastfailed[""]
 
     return to_lastfailed
+
+
+def _merge_additional_failures_files(
+    source_pytest_cache: Path, dest_pytest_cache: Path
+) -> None:
+    # Simple cases where one of the files doesn't exist
+    source_lastfailed_file = (
+        source_pytest_cache / TD_HEURISTIC_PREVIOUSLY_FAILED_ADDITIONAL
+    )
+    dest_lastfailed_file = dest_pytest_cache / TD_HEURISTIC_PREVIOUSLY_FAILED_ADDITIONAL
+
+    if not source_lastfailed_file.exists():
+        return
+    if not dest_lastfailed_file.exists():
+        copy_file(source_lastfailed_file, dest_lastfailed_file)
+        return
+
+    # Both files exist, so we need to merge them
+    from_lastfailed = load_json_file(source_lastfailed_file)
+    to_lastfailed = load_json_file(dest_lastfailed_file)
+    merged_content = list(set(from_lastfailed + to_lastfailed))
+
+    # Save the results
+    write_json_file(dest_lastfailed_file, merged_content)

@@ -88,7 +88,7 @@ namespace detail {
 
 TORCH_CUDA_CPP_API void throw_nccl_error(ncclResult status);
 
-static inline void NCCL_CHECK(ncclResult status) {
+inline void NCCL_CHECK(ncclResult status) {
   if (status != ncclResult::Success) {
     throw_nccl_error(status);
   }

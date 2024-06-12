@@ -24,7 +24,6 @@ from torch.nested._internal.nested_tensor import (
     jagged_from_list,
     jagged_from_tensor_and_lengths,
     nested_view_from_values_offsets,
-    NestedTensor,
 )
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -433,6 +432,43 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
 
             res = fn(input)
             self.assertIsInstance(res, LocalSubclass)
+
+    def test_torch_function_list_args(self):
+        HANDLED_FUNCTIONS = {}
+
+        class MyClass:
+            def __init__(self, foo):
+                self.foo = foo
+
+            @classmethod
+            def __torch_function__(
+                cls,
+                func,
+                types,
+                args=(),
+                kwargs=None,
+            ):
+                if kwargs is None:
+                    kwargs = {}
+                if func not in HANDLED_FUNCTIONS or not all(  # noqa: C419
+                    [  # noqa: C419
+                        issubclass(t, (torch.Tensor, MyClass)) for t in types
+                    ]
+                ):
+                    return NotImplemented
+                return HANDLED_FUNCTIONS[func](*args, **kwargs)
+
+        def _stack(input, dim=0, *, out=None):
+            return MyClass(sum([x.foo for x in input]))
+
+        HANDLED_FUNCTIONS[torch.stack] = _stack
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(v0, v1):
+            return torch.stack([v0, v1])
+
+        ret = fn(MyClass(1), MyClass(1))
+        self.assertEqual(ret.foo, 2)
 
     @parametrize(
         "comparison",
@@ -1558,13 +1594,31 @@ class TestNestedTensor(torch._dynamo.test_case.TestCase):
 
             # varies based on the type of view
             guard_str = "\n".join(guards)
-            if (
-                isinstance(nt_view._base, NestedTensor)
-                or nt_view_name == "subclass_dense"
-            ):
+            if nt_view_name == "subclass_dense":
                 self.assertExpectedInline(guard_str, """Eq(s3 - 1, s0)""")
+            elif nt_view_name == "dense_subclass_dense_subclass":
+                self.assertExpectedInline(
+                    guard_str,
+                    """\
+Eq(s5 - 1, s2)
+Eq(s11 - 1, s6)
+Eq(s10, s8)""",
+                )
+            elif nt_view_name.startswith("base_is_nt_True"):
+                self.assertExpectedInline(
+                    guard_str,
+                    """\
+Eq(s3 - 1, s0)
+Eq(zf1, zf4)""",
+                )
             else:
-                self.assertExpectedInline(guard_str, """""")
+                self.assertExpectedInline(
+                    guard_str,
+                    """\
+Eq(s4 - 1, s1)
+Eq(s10 - 1, s5)
+Eq(s9, s7)""",
+                )
             return gm
 
         torch._dynamo.reset()

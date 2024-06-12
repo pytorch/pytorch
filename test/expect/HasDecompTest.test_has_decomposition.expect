@@ -18,6 +18,10 @@ aten::_add_relu.Tensor
 aten::_add_relu.out
 aten::_add_relu_.Scalar
 aten::_add_relu_.Tensor
+aten::_aminmax
+aten::_aminmax.dim
+aten::_aminmax.dim_out
+aten::_aminmax.out
 aten::_amp_foreach_non_finite_check_and_unscale
 aten::_amp_foreach_non_finite_check_and_unscale.out
 aten::_amp_foreach_non_finite_check_and_unscale_
@@ -244,6 +248,8 @@ aten::_foreach_log2
 aten::_foreach_log2.out
 aten::_foreach_log2_
 aten::_foreach_log_
+aten::_foreach_max
+aten::_foreach_max.out
 aten::_foreach_maximum.List
 aten::_foreach_maximum.List_out
 aten::_foreach_maximum.Scalar
@@ -335,6 +341,9 @@ aten::_functional_assert_async.msg
 aten::_functional_assert_scalar
 aten::_functional_sym_constrain_range
 aten::_functional_sym_constrain_range_for_size
+aten::_fused_adagrad
+aten::_fused_adagrad.out
+aten::_fused_adagrad_
 aten::_fused_adam
 aten::_fused_adam.out
 aten::_fused_adam.tensor_lr
@@ -379,6 +388,7 @@ aten::_int_mm
 aten::_int_mm.out
 aten::_is_all_true
 aten::_is_any_true
+aten::_jagged_to_padded_dense_forward
 aten::_lazy_clone
 aten::_linalg_check_errors
 aten::_linalg_det
@@ -468,6 +478,7 @@ aten::_nnpack_spatial_convolution.out
 aten::_nnz
 aten::_pack_padded_sequence
 aten::_pack_padded_sequence.out
+aten::_padded_dense_to_jagged_forward
 aten::_pdist_backward
 aten::_pdist_backward.out
 aten::_pdist_forward

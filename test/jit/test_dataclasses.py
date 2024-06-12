@@ -7,8 +7,9 @@ from dataclasses import dataclass, field, InitVar
 from enum import Enum
 from typing import List, Optional
 
-import torch
 from hypothesis import given, settings, strategies as st
+
+import torch
 from torch.testing._internal.jit_utils import JitTestCase
 
 

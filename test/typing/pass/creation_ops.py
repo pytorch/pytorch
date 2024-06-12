@@ -1,9 +1,9 @@
 # mypy: disable-error-code="possibly-undefined"
 # flake8: noqa
+from typing_extensions import assert_type
+
 import torch
 from torch.testing._internal.common_utils import TEST_NUMPY
-
-from typing_extensions import assert_type
 
 
 if TEST_NUMPY:
@@ -15,28 +15,26 @@ if TEST_NUMPY:
 # torch.tensor()
 torch.tensor([[0.1, 1.2], [2.2, 3.1], [4.9, 5.2]])
 torch.tensor([0, 1])
-torch.tensor([[0.11111, 0.222222, 0.3333333]],
-             dtype=torch.float64,
-             device=torch.device('cuda:0'))
+torch.tensor(
+    [[0.11111, 0.222222, 0.3333333]], dtype=torch.float64, device=torch.device("cuda:0")
+)
 torch.tensor(3.14159)
 
 # torch.sparse_coo_tensor
-i = torch.tensor([[0, 1, 1],
-                  [2, 0, 2]])
+i = torch.tensor([[0, 1, 1], [2, 0, 2]])
 v = torch.tensor([3, 4, 5], dtype=torch.float32)
 torch.sparse_coo_tensor(i, v, [2, 4])
 torch.sparse_coo_tensor(i, v)
-torch.sparse_coo_tensor(i, v, [2, 4],
-                        dtype=torch.float64,
-                        device=torch.device('cuda:0'))
+torch.sparse_coo_tensor(
+    i, v, [2, 4], dtype=torch.float64, device=torch.device("cuda:0")
+)
 torch.sparse_coo_tensor(torch.empty([1, 0]), [], [1])
-torch.sparse_coo_tensor(torch.empty([1, 0]),
-                        torch.empty([0, 2]), [1, 2])
+torch.sparse_coo_tensor(torch.empty([1, 0]), torch.empty([0, 2]), [1, 2])
 
 # torch.as_tensor
 a = [1, 2, 3]
 torch.as_tensor(a)
-torch.as_tensor(a, device=torch.device('cuda'))
+torch.as_tensor(a, device=torch.device("cuda"))
 
 # torch.as_strided
 x = torch.randn(3, 3)
@@ -101,7 +99,9 @@ torch.quantize_per_tensor(torch.tensor([-1.0, 0.0, 1.0, 2.0]), 0.1, 10, torch.qu
 
 # torch.quantize_per_channel
 x = torch.tensor([[-1.0, 0.0], [1.0, 2.0]])
-quant = torch.quantize_per_channel(x, torch.tensor([0.1, 0.01]), torch.tensor([10, 0]), 0, torch.quint8)
+quant = torch.quantize_per_channel(
+    x, torch.tensor([0.1, 0.01]), torch.tensor([10, 0]), 0, torch.quint8
+)
 
 # torch.dequantize
 torch.dequantize(x)

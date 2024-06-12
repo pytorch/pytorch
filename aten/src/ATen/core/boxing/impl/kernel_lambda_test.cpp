@@ -473,7 +473,7 @@ std::optional<std::string> called_arg4 = c10::nullopt;
 TEST(OperatorRegistrationTestLambdaBasedKernel, givenKernelWithOptionalInputs_withoutOutput_whenRegistered_thenCanBeCalled) {
   auto registrar = RegisterOperators().op(
     "_test::opt_input(Tensor arg1, Tensor? arg2, int? arg3, str? arg4) -> ()",
-    RegisterOperators::options().kernel(DispatchKey::CPU, [] (Tensor arg1, const std::optional<Tensor>& arg2, c10::optional<int64_t> arg3, c10::optional<std::string> arg4) {
+    RegisterOperators::options().kernel(DispatchKey::CPU, [] (Tensor arg1, const std::optional<Tensor>& arg2, std::optional<int64_t> arg3, std::optional<std::string> arg4) {
       called = true;
       called_arg2 = arg2;
       called_arg3 = arg3;
@@ -507,7 +507,7 @@ TEST(OperatorRegistrationTestLambdaBasedKernel, givenKernelWithOptionalInputs_wi
 TEST(OperatorRegistrationTestLambdaBasedKernel, givenKernelWithOptionalInputs_withOutput_whenRegistered_thenCanBeCalled) {
   auto registrar = RegisterOperators().op(
     "_test::opt_input(Tensor arg1, Tensor? arg2, int? arg3, str? arg4) -> Tensor?",
-    RegisterOperators::options().kernel(DispatchKey::CPU, [] (Tensor arg1, const std::optional<Tensor>& arg2, c10::optional<int64_t> arg3, c10::optional<std::string> arg4) {
+    RegisterOperators::options().kernel(DispatchKey::CPU, [] (Tensor arg1, const std::optional<Tensor>& arg2, std::optional<int64_t> arg3, std::optional<std::string> arg4) {
       called = true;
       called_arg2 = arg2;
       called_arg3 = arg3;
@@ -544,7 +544,7 @@ TEST(OperatorRegistrationTestLambdaBasedKernel, givenKernelWithOptionalInputs_wi
 TEST(OperatorRegistrationTestLambdaBasedKernel, givenKernelWithOptionalInputs_withMultipleOutputs_whenRegistered_thenCanBeCalled) {
   auto registrar = RegisterOperators().op(
     "_test::opt_input(Tensor arg1, Tensor? arg2, int? arg3, str? arg4) -> (Tensor?, int?, str?)",
-    RegisterOperators::options().kernel(DispatchKey::CPU, [] (Tensor arg1, const std::optional<Tensor>& arg2, c10::optional<int64_t> arg3, c10::optional<std::string> arg4) {
+    RegisterOperators::options().kernel(DispatchKey::CPU, [] (Tensor arg1, const std::optional<Tensor>& arg2, std::optional<int64_t> arg3, std::optional<std::string> arg4) {
       return std::make_tuple(arg2, arg3, arg4);
     }));
   auto op = c10::Dispatcher::singleton().findSchema({"_test::opt_input", ""});
