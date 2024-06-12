@@ -61,7 +61,9 @@ from torch._logging import trace_structured, structured
 from torch import SymBool, SymFloat, SymInt
 from torch._guards import ShapeGuard, Source, TracingContext
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
-from torch.utils._sympy.functions import FloorDiv, Mod, PythonMod, IsNonOverlappingAndDenseIndicator, CleanDiv
+from torch.utils._sympy.functions import (
+    FloorDiv, Mod, PythonMod, IsNonOverlappingAndDenseIndicator, CleanDiv, FloorToInt, CeilToInt
+)
 from torch.utils._sympy.solve import try_solve
 from torch.utils._sympy.value_ranges import bound_sympy, SymPyValueRangeAnalysis, ValueRanges, ValueRangeError
 from torch.utils._sympy.singleton_int import SingletonInt
@@ -450,20 +452,21 @@ def free_unbacked_symbols(x):
 # setup!
 def is_symbol_binding_fx_node(node) -> Optional[sympy.Symbol]:
     if (
-        node.op == "placeholder" and
         "val" in node.meta and
         isinstance(node.meta["val"], torch.SymInt) and
-        isinstance(node.meta["val"].node.expr, sympy.Symbol)
+        isinstance(node.meta["val"].node.expr, sympy.Symbol) and
+        (node.op == "placeholder" or free_unbacked_symbols(node.meta["val"].node.expr))
     ):
         return node.meta["val"].node.expr
     return None
 
 def find_symbol_binding_fx_nodes(graph):
-    return {
-        node.meta["val"].node.expr: node
-        for node in graph.nodes
-        if is_symbol_binding_fx_node(node)
-    }
+    r = {}
+    # NB: Prefer first occurrence of symbol
+    for node in graph.nodes:
+        if is_symbol_binding_fx_node(node) and node.meta["val"].node.expr not in r:
+            r[node.meta["val"].node.expr] = node
+    return r
 
 
 # Analogous to ConvertIntSource
@@ -1383,11 +1386,15 @@ SYMPY_INTERP = {
     'IsNonOverlappingAndDenseIndicator': eval_is_non_overlapping_and_dense,
     'floor': math.floor,
     'ceiling': math.ceil,
+    'FloorToInt': math.floor,
+    'CeilToInt': math.ceil,
     'cast_symbool_to_symint_guardless': cast_symbool_to_symint_guardless,
     'RoundToInt': builtins.round,
     'RoundDecimal': builtins.round,
     'TruncToInt': math.trunc,
     'IntTrueDiv': operator.truediv,
+    'FloatTrueDiv': operator.truediv,
+    'ToFloat': builtins.float,
 }
 
 
@@ -1986,7 +1993,10 @@ class DimConstraints:
             return (
                 self._is_dim(dim)
                 and ("min" in c or "max" in c)
-                and (dim.min < 2 or dim.min == c.get("min", 2))  # let pass if min < 2
+                and (
+                    (dim.min < 2 and c.get("min", 2) == 2)
+                    or dim.min == c.get("min", 2)
+                )  # let pass if analysis min = 2 and specified min = 0/1
                 and dim.max == c.get("max", sys.maxsize - 1)
             )
 
@@ -2114,6 +2124,7 @@ class DimConstraints:
         forced_specializations=None,
     ):
         """Format a message for constraint violation erros"""
+        from torch.export.dynamic_shapes import _get_dim_name_mapping
         if self._dcp.source_name_to_debug_name:
 
             def transform(s, inverse=False):
@@ -2151,16 +2162,7 @@ class DimConstraints:
                     results[expr]["eq"] = digit
 
             # retrieve dynamic shapes
-            name_to_dim = {}
-            for dim in pytree.tree_flatten(
-                dynamic_shapes,
-                is_leaf=lambda x: self._is_derived_dim(x) or self._is_dim(x),
-            )[0]:
-                if dim is None or isinstance(dim, int):
-                    continue
-                name_to_dim[dim.__name__] = dim
-                if self._is_derived_dim(dim):
-                    name_to_dim[dim.root.__name__] = dim.root
+            name_to_dim = _get_dim_name_mapping(dynamic_shapes)
 
             for s in self._static_results.union(self._dynamic_results):
                 t = transform(s)
@@ -3610,6 +3612,7 @@ class ShapeEnv:
         sources,
         source_ref=lambda n: n.name(),
         *,
+        guards: List[ShapeGuard] = None,
         input_contexts: Optional[DimList[SymbolicContext]] = None,
         # Encodes user-specified input shape equations of the form s = s' and s = fn(s').
         # (See docs on EqualityConstraint for details of the encoding.)
@@ -4078,7 +4081,7 @@ class ShapeEnv:
         # First, issue all guards.
         # This removes all the checks that follow from bounds
         # We could simply emit those and also the bounds 2 <= size when necessary
-        for guard in self.guards:
+        for guard in (guards if guards is not None else self.guards):
             if self._maybe_evaluate_static(guard.expr, axioms=()) is not None:
                 continue
             issue_guard(guard)
@@ -4206,10 +4209,18 @@ class ShapeEnv:
             with fx_traceback.preserve_node_meta():
                 PopulateValidator(self.graph, self.validator).run()
 
-        self._check_translation_validate()
+        # Only run translation validation when we are not passing custom guards
+        if guards is None:
+            self._check_translation_validate()
         return exprs
 
-    def produce_guards_expression(self, placeholders, ignore_static=True):
+    def produce_guards_expression(
+        self,
+        placeholders,
+        *,
+        guards: Optional[List[ShapeGuard]] = None,
+        ignore_static=True
+    ):
         """
         Expected to be used with evaluate_guards_expression(). Produces the guards
         for the given placeholders and returns a string expression to be evaluated
@@ -4217,9 +4228,14 @@ class ShapeEnv:
         """
         from torch._dynamo.source import LocalSource
         arg_names = [f"t{i}" for i in range(len(placeholders))]
-        guards = self.produce_guards(placeholders, [LocalSource(a) for a in arg_names], ignore_static=ignore_static)
-        if guards:
-            return " and ".join(guards)
+        produced_guards = self.produce_guards(
+            placeholders,
+            [LocalSource(a) for a in arg_names],
+            guards=guards,
+            ignore_static=ignore_static,
+        )
+        if produced_guards:
+            return " and ".join(produced_guards)
         return None
 
     def evaluate_guards_expression(self, code, args):
@@ -4237,6 +4253,18 @@ class ShapeEnv:
         if code:
             return self.evaluate_guards_expression(code, args)
         return True
+
+    def get_pruned_guards(self, symints):
+        """
+        Get a list of guards, but pruned so it only provides guards that
+        reference symints from the passed in input
+        """
+        symints = {s.node.expr for s in symints if isinstance(s.node.expr, sympy.Symbol)}
+        guards = []
+        for g in self.guards:
+            if all(s in symints for s in g.expr.free_symbols):
+                guards.append(g)
+        return guards
 
     def bind_symbols(self, placeholders, args):
         """
@@ -4661,9 +4689,15 @@ class ShapeEnv:
 
         # Updates the range and the guards corresponding to each bound of the symbol.
         if symbol not in self.var_to_range:
-            self.var_to_range[symbol] = ValueRanges(lower, upper)
+            r = ValueRanges(lower, upper)
+            self.log.debug("_update_var_to_range %s = %s (new)", symbol, r)
+            self.var_to_range[symbol] = r
         else:
-            self.var_to_range[symbol] &= ValueRanges(lower, upper)
+            old = self.var_to_range[symbol]
+            new = old & ValueRanges(lower, upper)
+            if new != old:
+                self.var_to_range[symbol] = new
+                self.log.debug("_update_var_to_range %s = %s (update)", symbol, new)
 
     def _set_replacement(self, a: "sympy.Symbol", tgt: "sympy.Expr", msg: str) -> None:
         """
@@ -4717,9 +4751,16 @@ class ShapeEnv:
                 b = next(iter(tgt.free_symbols))
                 # Try to invert the equality
                 r = try_solve(sympy.Eq(a, tgt), b, floordiv_inequality=False)
-                if r is not None and all(t.is_integer for t in sympy.preorder_traversal(r[1])):
-                    b_bound = self.bound_sympy(r[1])
-                    self.var_to_range[b] = b_bound & self.var_to_range[b]
+                if r is not None:
+                    self.log.debug("set_replacement: solve for %s in %s == %s gives %s", b, a, tgt, r)
+                    # The solution here can be non-integral, for example, if
+                    # we have s0 = 2*s1, then s1 = s0/2.  What we would like
+                    # to do is calculated the bounds in arbitrary precision,
+                    # and then requantize the bound to integers when we are
+                    # done.
+                    rat_b_bound = self.bound_sympy(r[1])
+                    b_bound = ValueRanges(CeilToInt(rat_b_bound.lower), FloorToInt(rat_b_bound.upper))
+                    self._update_var_to_range(b, b_bound)
                     tgt_bound = self.bound_sympy(tgt)
                     assert issubset(tgt_bound, src_bound)
 
