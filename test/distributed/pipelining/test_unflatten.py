@@ -48,7 +48,6 @@ class UnflattenTests(TestCase):
 
         pipe = pipeline(
             mod,
-            1,
             (x,),
             {"constant": constant},
         )
