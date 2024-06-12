@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import difflib
 import functools
 import os
@@ -390,6 +391,25 @@ def location_tag(storage: Union[Storage, torch.storage.TypedStorage, torch.Untyp
 
 
 def default_restore_location(storage, location):
+    """
+    Restores `storage` using a deserializer function registered for the `location`.
+
+    This function looks in the registry for deserializer functions that match the `location`.
+    If found, it attempts to use them, in priority order, to restore `storage` until one
+    returns a not `None` result. If no deserializer can be found in the registry, or all found fail
+    to bear a result, it raises a `RuntimeError`.
+
+    Args:
+        storage (STORAGE): the storage object to restore
+        location (str): the location tag associated with the storage object
+
+    Returns:
+        storage: Optional[STORAGE]
+
+    Raises:
+        RuntimeError: If no deserializer matching `location` is found in the registry or if
+           all matching ones return `None`.
+    """
     for _, _, fn in _package_registry:
         result = fn(storage, location)
         if result is not None:
@@ -921,7 +941,7 @@ def load(
         pickle_module: module used for unpickling metadata and objects (has to
             match the :attr:`pickle_module` used to serialize file)
         weights_only: Indicates whether unpickler should be restricted to
-            loading only tensors, tensor subclasses, primitive types, dictionaries
+            loading only tensors, primitive types, dictionaries
             and any types added via :func:`torch.serialization.add_safe_globals`.
         mmap: Indicates whether the file should be mmaped rather than loading all the storages into memory.
             Typically, tensor storages in the file will first be moved from disk to CPU memory, after which they
