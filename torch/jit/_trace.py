@@ -656,6 +656,8 @@ def analyze_ts_result_with_export_result(export, trace):
             return False
 
         if isinstance(orig, torch.Tensor):
+            if orig.dtype != loaded.dtype:
+                return False
             if not torch.allclose(orig, loaded):
                 return False
         else:
