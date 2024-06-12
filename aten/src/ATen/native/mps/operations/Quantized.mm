@@ -11,7 +11,6 @@
 #include <ATen/mps/MPSProfiler.h>
 #include <ATen/native/mps/OperationUtils.h>
 #include <fmt/format.h>
-#include <iostream>
 
 // #define _CAPTURE_KERNEL 1
 
@@ -581,8 +580,8 @@ kernel void kernel_mul_mv(
     const uint offset0 = first_row * ne00;
 
     // x: weight, y: input
-    constant char * x = (constant char *) src0 + offset0;
-    constant T    * y = (constant T    *) src1 + r1*ne10;
+    constant char * x = (constant char *) B + offset0;
+    constant T    * y = (constant T    *) A + r1*ne10;
 
     // Load data to shared memory
     threadgroup T * shared_scale = (threadgroup T *)(shared_memory); // length 8 * sizeof(float)
