@@ -27,7 +27,7 @@ def _no_hook(module: nn.Module):
 
 
 @contract()
-def checkpoint(module: nn.Module) -> nn.Module:
+def checkpoint(module: nn.Module, preserve_rng_state: bool = True) -> nn.Module:
     r"""
     This is a composable activation checkpointing API. Unlike functional
     activation checkpointing APIs, this one does not require changing model
@@ -40,6 +40,8 @@ def checkpoint(module: nn.Module) -> nn.Module:
     Args:
         module (nn.Module): the target model or sub-module to apply activation
             checkpointing.
+        preserve_rng_state (bool): whether to preserve the RNG state during
+            activation checkpointing.
 
     Example::
         >>> # xdoctest: +SKIP
@@ -67,10 +69,15 @@ def checkpoint(module: nn.Module) -> nn.Module:
             def context_fns():
                 return nullcontext(), _no_hook(module)
 
-            checkpoint.state(
-                module
-            )._ac_generator = _checkpoint_without_reentrant_generator(
-                module, True, context_fns, _DEFAULT_DETERMINISM_MODE, False, *inputs
+            checkpoint.state(module)._ac_generator = (
+                _checkpoint_without_reentrant_generator(
+                    module,
+                    preserve_rng_state,
+                    context_fns,
+                    _DEFAULT_DETERMINISM_MODE,
+                    False,
+                    *inputs,
+                )
             )
             next(checkpoint.state(module)._ac_generator)
 
