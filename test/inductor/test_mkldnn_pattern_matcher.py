@@ -233,6 +233,7 @@ class TestPatternMatcherBase(TestCase):
         rtol=1.3e-6,
         check_quantization=False,
         check_dynamic=None,
+        num_include_ops=None,
     ):
         with torch.no_grad():
             clone_inputs = self._clone_inputs(inputs)
@@ -245,6 +246,12 @@ class TestPatternMatcherBase(TestCase):
             )
             for op in include_ops:
                 self.assertIn(op, source_code)
+            if num_include_ops is not None:
+                assert len(include_ops) == len(num_include_ops)
+                for i in range(len(include_ops)):
+                    self.assertEqual(
+                        source_code.count(include_ops[i]), num_include_ops[i]
+                    )
             for op in exclude_ops:
                 self.assertNotIn(op, source_code)
             if check_dynamic is not None:
@@ -1808,6 +1815,32 @@ class TestPatternMatcher(TestPatternMatcherBase):
                     matcher_check_fn=matcher_check_fn,
                     is_qat=is_qat,
                 )
+                if torch._inductor.config.cpp_wrapper:
+                    # For CPP wrapper
+                    self._test_code_common(
+                        mod,
+                        (v,),
+                        [
+                            "op_qlinear_pointwise.call",
+                            "op_qlinear_pointwise_binary.call",
+                        ],
+                        [],
+                        check_quantization=True,
+                        num_include_ops=[2, 2],
+                    )
+                else:
+                    # For python wrapper
+                    self._test_code_common(
+                        mod,
+                        (v,),
+                        [
+                            "torch.ops.onednn.qlinear_pointwise.default",
+                            "torch.ops.onednn.qlinear_pointwise.binary",
+                        ],
+                        [],
+                        check_quantization=True,
+                        num_include_ops=[2, 2],
+                    )
 
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN
