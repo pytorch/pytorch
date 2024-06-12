@@ -2380,23 +2380,15 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(opt_fn(x), fn(x))
 
     def test_rand_inlined(self):
-        @torch.compile()
-        def func():
-            modules = [nn.ReLU(), nn.Linear(5, 5)]
-            module_list = nn.ModuleList(modules)
+        @torch.compile(backend="eager", dynamic=True)
+        def fn():
+            idx_size = [10]
+            idx_size[random.randint(0, 0)] = random.randint(1, 8)
+            t = tuple(idx_size)
+            src_size = [random.randint(1, 5) + s for s in idx_size]
+            idx = torch.empty(t)
 
-            del module_list[-1]
-
-            print("module_list is", module_list)
-            # THIS FAILS ONLY IF THE TWO STATEMEMTS AFTER THIS EXISITS
-
-            self.assertEqual(module_list, nn.ModuleList(modules[:-1]))
-
-            # THE BELLOW TWO STATEMENTS EFFECT THE RESULT OF THE PREVIOUS STATEMENT!
-            del module_list[1::2]
-            self.assertEqual(module_list, nn.ModuleList(modules[:-1][0::2]))
-
-        func()
+        fn()
 
     def test_rand_tensor_partial(self):
         from collections import namedtuple
