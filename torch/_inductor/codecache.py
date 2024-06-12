@@ -1021,7 +1021,7 @@ class FxGraphCache:
                 cache_id = "fx-graph-v1"
                 try:
                     if config.is_fbcode():
-                        from triton.runtime.fb_memcache import (
+                        from triton.fb.fb_memcache import (
                             FbMemcacheRemoteFxGraphCacheBackend,
                         )
 
