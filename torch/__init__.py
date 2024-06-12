@@ -809,7 +809,7 @@ def typename(o):
         str: the type of the object `o`
     Example:
         >>> x = torch.tensor([1,2,3])
-        >>> typename(x)
+        >>> torch.typename(x)
         'torch.LongTensor'
     """
     if isinstance(o, torch.Tensor):
