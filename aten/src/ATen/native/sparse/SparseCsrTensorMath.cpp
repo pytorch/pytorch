@@ -314,14 +314,6 @@ inline Tensor get_result_tensor_for_unary_op(F op, const Tensor& input) {
 }
 } // namespace
 
-// Only accept squares sparse matrices or dense input as a vector
-// TODO: Check what happens with MKL, the output error reported with non square
-// matrices tends to be high See:
-// https://github.com/pytorch/pytorch/issues/58770
-static bool is_square_or_vec(int64_t dim_i, int64_t dim_j, int64_t dim_k) {
-  return (dim_i == dim_k && dim_k == dim_j) || (dim_i == dim_j && dim_k == 1);
-}
-
 Tensor& normal_sparse_csr_(
     Tensor& self,
     double mean,
