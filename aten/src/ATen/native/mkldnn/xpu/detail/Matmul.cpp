@@ -177,7 +177,7 @@ sycl::event matmul(
   pattr.set_post_ops(po);
 
   #if ONEDNN_SUPPORT_DETERMINISTIC
-    if(at::globalContext().deterministicAlgorithms() || at::globalContext().deterministicOneDNN())
+    if(at::globalContext().deterministicAlgorithms() || at::globalContext().deterministicMklDNN())
         pattr.set_deterministic(true);
   #endif
 
