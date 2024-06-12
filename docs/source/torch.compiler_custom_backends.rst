@@ -94,8 +94,8 @@ It is possible to define custom backends that are called by AOTAutograd rather t
 This is useful for 2 main reasons:
 
 * Users can define backends that support model training, as AOTAutograd can generate the backward graph for compilation.
-* AOTAutograd produces FX graphs consisting of `canonical Aten ops <https://pytorch.org/docs/main/ir.html#canonical-aten-ir>`__. As a result,
-  custom backends only need to support the canonical Aten opset, which is a significantly smaller opset than the entire torch/Aten opset.
+* AOTAutograd produces FX graphs consisting of `core Aten ops <https://pytorch.org/docs/main/torch.compiler_ir.html#core-aten-ir>`__. As a result,
+  custom backends only need to support the core Aten opset, which is a significantly smaller opset than the entire torch/Aten opset.
 
 Wrap your backend with
 ``torch._dynamo.backends.common.aot_autograd`` and use ``torch.compile`` with the ``backend`` kwarg as before.

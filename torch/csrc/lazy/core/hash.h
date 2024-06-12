@@ -135,6 +135,12 @@ static inline hash_t TensorHash(const at::Tensor& tensor) {
       return DataHash(ctensor.const_data_ptr<c10::complex<float>>(), size);
     case at::ScalarType::ComplexDouble:
       return DataHash(ctensor.const_data_ptr<c10::complex<double>>(), size);
+    case at::ScalarType::UInt16:
+      return DataHash(ctensor.const_data_ptr<uint16_t>(), size);
+    case at::ScalarType::UInt32:
+      return DataHash(ctensor.const_data_ptr<uint32_t>(), size);
+    case at::ScalarType::UInt64:
+      return DataHash(ctensor.const_data_ptr<uint64_t>(), size);
     default:
       TORCH_INTERNAL_ASSERT(
           false, "Unsupported scalar type:", ctensor.scalar_type());

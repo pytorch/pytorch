@@ -26,7 +26,7 @@ from torch.ao.quantization.quantizer import (  # noqa: F401
 from torch.fx.passes.infra.pass_manager import PassManager
 from torch.ao.quantization.pt2e.duplicate_dq_pass import DuplicateDQPass
 from torch.ao.quantization.pt2e.port_metadata_pass import PortNodeMetaForQDQ
-from torch._inductor.constant_folding import constant_fold
+from torch._export.passes.constant_folding import constant_fold
 
 __all__ = [
     "prepare_pt2e",

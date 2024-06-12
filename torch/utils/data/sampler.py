@@ -1,5 +1,5 @@
+# mypy: allow-untyped-defs
 import torch
-from torch import Tensor
 
 from typing import Iterator, Iterable, Optional, Sequence, List, TypeVar, Generic, Sized, Union
 
@@ -19,8 +19,8 @@ class Sampler(Generic[T_co]):
     r"""Base class for all Samplers.
 
     Every Sampler subclass has to provide an :meth:`__iter__` method, providing a
-    way to iterate over indices or lists of indices (batches) of dataset elements, and a :meth:`__len__` method
-    that returns the length of the returned iterators.
+    way to iterate over indices or lists of indices (batches) of dataset elements,
+    and may provide a :meth:`__len__` method that returns the length of the returned iterators.
 
     Args:
         data_source (Dataset): This argument is not used and will be removed in 2.2.0.
@@ -212,7 +212,7 @@ class WeightedRandomSampler(Sampler[int]):
         [0, 1, 4, 3, 2]
     """
 
-    weights: Tensor
+    weights: torch.Tensor
     num_samples: int
     replacement: bool
 

@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import logging
 import time
 from collections import defaultdict
@@ -57,7 +58,7 @@ class SimpleProfiler:
         # This cannot be combined with DETAIL distributed log
         # as the profiling will be very incorrect.
         if dist.get_rank() == 0 and dist.get_debug_level() == dist.DebugLevel.INFO:
-            logger.warning("%s %s", msg, cls.results)
+            logger.info("%s %s", msg, cls.results)
         cls.reset()
 
 

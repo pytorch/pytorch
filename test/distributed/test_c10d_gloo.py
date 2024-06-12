@@ -20,9 +20,6 @@ if not c10d.is_available() or not c10d.is_gloo_available():
     sys.exit(0)
 
 import test_c10d_common
-import torch.distributed as dist
-import torch.nn.functional as F
-import torch.testing._internal.common_utils as common
 from test_c10d_common import (
     gpus_for_rank,
     LOOPBACK,
@@ -30,6 +27,10 @@ from test_c10d_common import (
     SparseGradientModule,
     Task,
 )
+
+import torch.distributed as dist
+import torch.nn.functional as F
+import torch.testing._internal.common_utils as common
 from torch import nn
 from torch.distributed._shard.sharded_tensor import (
     init_from_local_shards,

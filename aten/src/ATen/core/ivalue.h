@@ -1117,6 +1117,23 @@ struct TORCH_API IValue final {
   using HashAliasedIValueMap =
       std::unordered_map<IValue, IValue, HashAliasedIValue, CompAliasedIValues>;
 
+  struct HashIdentityIValue {
+    size_t operator()(const IValue& val) const {
+      return val.payload.u.as_int;
+    }
+  };
+
+  struct CompIdentityIValues {
+    bool operator()(const IValue& lhs, const IValue& rhs) const {
+      return lhs.is(rhs);
+    }
+  };
+
+  using HashIdentityIValues =
+      std::unordered_set<IValue, HashIdentityIValue, CompIdentityIValues>;
+  using HashIdentityIValueMap =
+      std::unordered_map<IValue, IValue, HashIdentityIValue, CompIdentityIValues>;
+
   // Chechs if this and rhs has a subvalues in common.
   // [t1,t2] and [t2, t3] returns true.
   bool overlaps(const IValue& rhs) const;
@@ -1130,7 +1147,7 @@ struct TORCH_API IValue final {
   void visit(const std::function<bool(const IValue&)>& visitor) const;
   IValue deepcopy(std::optional<at::Device> device = c10::nullopt) const;
   IValue deepcopy(
-      HashAliasedIValueMap& memo,
+      HashIdentityIValueMap& memo,
       std::optional<at::Device> device = c10::nullopt) const;
 
  private:
