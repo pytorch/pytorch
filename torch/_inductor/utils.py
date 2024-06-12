@@ -46,7 +46,6 @@ from unittest import mock
 import sympy
 
 import torch
-import torch._export
 import torch.utils._pytree as pytree
 from torch._dynamo.device_interface import get_interface_for_device
 from torch._dynamo.utils import detect_fake_mode
@@ -1679,6 +1678,8 @@ def aoti_compile_with_persistent_cache(
     Compile the given function with persistent cache for AOTI eager mode.
     """
     assert not dynamic, "Only support static shape for now"
+    from torch._export import aot_compile
+
     type_to_torch_dtype = {int: torch.int32, float: torch.float, bool: torch.bool}
     supported_scalar_types = tuple(type_to_torch_dtype.keys())
     flattened_inputs = pytree.arg_tree_leaves(*args, **kwargs)
@@ -1701,7 +1702,7 @@ def aoti_compile_with_persistent_cache(
         {"TORCHINDUCTOR_CACHE_DIR": persistent_cache_lib.absolute().as_posix()},
     ):
         try:
-            kernel_lib_path = torch._export.aot_compile(
+            kernel_lib_path = aot_compile(
                 f,
                 args,
                 kwargs,
