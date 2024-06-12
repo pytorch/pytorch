@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 """Defines bias subclasses that work with scaled_dot_product_attention"""
 from enum import auto, IntEnum
 from typing import Optional
@@ -249,7 +250,6 @@ class CausalBias(torch.Tensor):
                     custom_mask_type=int(attn_mask.variant),
                     compute_log_sumexp=compute_log_sumexp,
                     scale=scale,
-                    causal_diagonal=None,
                     seqlen_k=None,
                 )[0].transpose(1, 2)
             else:
