@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 from torch.utils.data.datapipes.utils.common import _check_unpickable_fn
 from typing import Callable, TypeVar
 from torch.utils.data.datapipes._decorator import functional_datapipe
