@@ -4696,6 +4696,29 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
         self.assertEqual(ref, res)
         self.assertEqual(cnt.frame_count, 2)
 
+    def test_weakref_del(self):
+        def fn(x_weak, y):
+            if x_weak is not None:
+                x = x_weak()
+                if x is not None:
+                    return torch.sin(y)
+            return torch.cos(y)
+
+        weight = torch.randn(4)
+        x_weak = weakref.ref(weight)
+        y = torch.randn(4)
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+
+        ref = fn(x_weak, y)
+        res = opt_fn(x_weak, y)
+        self.assertEqual(ref, res)
+
+        del weight
+        ref = fn(x_weak, y)
+        res = opt_fn(x_weak, y)
+        self.assertEqual(ref, res)
+
     def test_storage_resize_forward_full_graph(self):
         class TestModule(torch.nn.Module):
             def __init__(self):
