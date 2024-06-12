@@ -1477,10 +1477,15 @@ def main() -> None:
         help="path to deprecated.yaml",
     )
     parser.add_argument(
+        "--template-dir",
+        default=".",
+        help="path to template directory",
+    )
+    parser.add_argument(
         "--out", metavar="OUT", default=".", help="path to output directory"
     )
     args = parser.parse_args()
-    fm = FileManager(install_dir=args.out, template_dir=".", dry_run=False)
+    fm = FileManager(install_dir=args.out, template_dir=args.template_dir, dry_run=False)
     gen_pyi(
         args.native_functions_path, args.tags_path, args.deprecated_functions_path, fm
     )
