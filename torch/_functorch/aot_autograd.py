@@ -472,10 +472,6 @@ def create_aot_dispatcher_function(
     else:
         shape_env = fake_mode.shape_env
 
-    maybe_suppress: Callable[[], Any] = nullcontext
-    if shape_env is not None:
-        maybe_suppress = shape_env.suppress_guards
-
     python_dispatcher_mode = (
         enable_python_dispatcher() if shape_env is not None else nullcontext()
     )
