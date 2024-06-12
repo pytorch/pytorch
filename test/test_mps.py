@@ -7894,7 +7894,7 @@ class TestMPS(TestCaseMPS):
 
     def test_mps_allocator_stats(self):
         max_memory = torch.mps.recommended_max_memory()
-        print ("Recommended Max Memory : ", (max_memory/(1024*1024*1024)), "GB")
+        print(f"Recommended Max Memory : {max_memory/ 1024 ** 3} GB")
         self.assertTrue(max_memory > 0)
 
     # to verify this test, run XCode Instruments "Metal System Trace" or "Logging" tool,
