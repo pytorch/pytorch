@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 from __future__ import annotations
 
 import dataclasses
@@ -7,7 +8,18 @@ import logging
 import os
 import textwrap
 from functools import lru_cache
-from typing import Any, Callable, cast, Dict, List, Optional, Set, Tuple, Union
+from typing import (
+    Any,
+    Callable,
+    cast,
+    Dict,
+    List,
+    Optional,
+    Set,
+    Tuple,
+    TYPE_CHECKING,
+    Union,
+)
 
 import sympy
 
@@ -23,7 +35,6 @@ from ...utils._sympy.value_ranges import ValueRanges
 
 from .. import config, ir
 from ..codecache import code_hash, get_path, PyCodeCache
-from ..ir import IRNode
 from ..metrics import is_metric_table_enabled, log_kernel_metadata
 from ..runtime.hints import ReductionHint, TRITON_MAX_BLOCK
 from ..runtime.runtime_utils import do_bench_gpu, get_max_y_grid, next_power_of_2
@@ -51,6 +62,9 @@ from .common import (
 )
 from .simd import constant_repr, IterationRangesEntry, pexpr, SIMDKernel, SIMDScheduling
 from .triton_utils import config_of, signature_of, signature_to_meta
+
+if TYPE_CHECKING:
+    from ..ir import IRNode
 
 log = logging.getLogger(__name__)
 perf_hint_log = torch._logging.getArtifactLogger(__name__, "perf_hints")
@@ -272,20 +286,65 @@ def triton_reshape(value: str, old_shape: List[str], new_shape: List[str]):
     return f"{value}[{', '.join(expand)}]"
 
 
+# NB: Inheriting from PythonPrinter is somewhat dangerous, because there are a
+# number of operators which Triton "implements", but in a way that is
+# inconsistent with Python semantics (and consistent with C semantics).  We
+# must override all of these, or it is potential silent correctness problem
 class TritonPrinter(PythonPrinter):
+    def _print_TruncToInt(self, expr):
+        assert len(expr.args) == 1
+        return (
+            f"libdevice.trunc({self._print(expr.args[0])}).to({V.kernel.index_dtype})"
+        )
+
+    def _print_ToFloat(self, expr):
+        assert len(expr.args) == 1
+        return f"{self.paren(self._print(expr.args[0]))}.to(tl.float64)"
+
+    # TODO: This is wrong if one of the inputs is negative.  This is hard to
+    # tickle though, as the inputs are typically positive (and if we can prove
+    # they are positive, we will have used Mod instead, for which this codegen
+    # is right).  If you are trying to hit this, maybe try something like
+    # torch.arange(n, device="cuda") - 1 and then do a modulus on it
+    def _print_PythonMod(self, expr):
+        return " % ".join(map(self.paren, map(self._print, expr.args)))
+
+    # TODO: This is wrong, see
+    # https://github.com/triton-lang/triton/issues/955
+    # But for Sympy expressions, things will /mostly/ work out because we
+    # don't usually deal with negative numbers in the division
+    def _print_FloorDiv(self, expr):
+        assert expr.is_integer
+        x, div = expr.args
+        x = self.paren(self.doprint(x))
+        div = self.paren(self.doprint(div))
+        return f"({x} // {div})"
+
+    # TODO: This is wrong, when lhs, rhs > 2**53, Python does a higher
+    # precision algorithm, which we would need to replicate here
+    def _print_IntTrueDiv(self, expr):
+        lhs, rhs = expr.args
+        return f"{self.paren(self._print(lhs))} / {self.paren(self._print(rhs))}"
+
+    # NB: sympy.floor/ceiling produce integers, so we have to do the
+    # conversion to index dtype
     def _print_floor(self, expr):
         assert len(expr.args) == 1
         return (
             f"libdevice.floor({self._print(expr.args[0])}).to({V.kernel.index_dtype})"
         )
 
-    def _print_Trunc(self, expr):
+    def _print_FloorToInt(self, expr):
         assert len(expr.args) == 1
         return (
-            f"libdevice.trunc({self._print(expr.args[0])}).to({V.kernel.index_dtype})"
+            f"libdevice.floor({self._print(expr.args[0])}).to({V.kernel.index_dtype})"
         )
 
     def _print_ceiling(self, expr):
+        assert len(expr.args) == 1
+        return f"libdevice.ceil({self._print(expr.args[0])}).to({V.kernel.index_dtype})"
+
+    def _print_CeilToInt(self, expr):
         assert len(expr.args) == 1
         return f"libdevice.ceil({self._print(expr.args[0])}).to({V.kernel.index_dtype})"
 
@@ -359,20 +418,9 @@ class TritonPrinter(PythonPrinter):
         assert len(expr.args) == 1
         return f"libdevice.atan(({self._print(expr.args[0])}).to(tl.float32))"
 
-    def _print_FloorDiv(self, expr):
-        if expr.is_integer:
-            return super()._print_FloorDiv(expr)
-
-        x, div = expr.args
-        x = self.paren(self.doprint(x))
-        div = self.paren(self.doprint(div))
-        return f"libdevice.floor({x} / {div}).to({V.kernel.index_dtype})"
-
-    def _print_Round(self, expr):
+    def _print_RoundToInt(self, expr):
         assert len(expr.args) == 1
-        return (
-            f"libdevice.llrint({self._print(expr.args[0])}).to({V.kernel.index_dtype})"
-        )
+        return f"libdevice.llrint({self._print(expr.args[0])})"
 
     def _print_RoundDecimal(self, expr):
         assert len(expr.args) == 2
@@ -2302,10 +2350,18 @@ class TritonKernel(SIMDKernel):
         _, call_args, arg_types, _ = self.args.python_argdefs()
         for arg, arg_type in zip(call_args, arg_types):
             if isinstance(arg_type, TensorArg):
-                line = f"assert not {arg}.isnan().any().item()"
-                wrapper.writeline(line)
-                line = f"assert not {arg}.isinf().any().item()"
-                wrapper.writeline(line)
+                if V.graph.cpp_wrapper:
+                    if config.abi_compatible:
+                        wrapper.writeline(
+                            f'AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_check_inf_and_nan("{arg}", {arg}));'
+                        )
+                    else:
+                        wrapper.writeline(f'assert_inf_and_nan("{arg}", {arg});')
+                else:
+                    line = f"assert not {arg}.isnan().any().item()"
+                    wrapper.writeline(line)
+                    line = f"assert not {arg}.isinf().any().item()"
+                    wrapper.writeline(line)
 
     def create_cse_var(self, *args, **kwargs):
         return TritonCSEVariable(*args, **kwargs)
