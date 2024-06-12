@@ -47,18 +47,27 @@ def get_snode_runtime_for_reorder_compute_test(snode):
 
 def create_grouped_node_for_allreduce_and_its_deps(snodes):
     name_to_snode = {snode.get_name(): snode for snode in snodes}
-    
+
     for snode in snodes:
         print(f"before: snode: {snode}, snode.node: {snode.node}")
 
-    all_reduce_snodes = [snode for snode in snodes if isinstance(snode.node, ir._CollectiveKernel) and snode.node.op_overload == torch.ops._c10d_functional.all_reduce_.default]
+    all_reduce_snodes = [
+        snode
+        for snode in snodes
+        if isinstance(snode.node, ir._CollectiveKernel)
+        and snode.node.op_overload == torch.ops._c10d_functional.all_reduce_.default
+    ]
     assert len(all_reduce_snodes) == 1
     all_reduce_snode = all_reduce_snodes[0]
-    all_reduce_dep_snodes = [name_to_snode[node.name] for node in all_reduce_snode.node.inputs]
+    all_reduce_dep_snodes = [
+        name_to_snode[node.name] for node in all_reduce_snode.node.inputs
+    ]
     assert len(all_reduce_dep_snodes) == 1
     all_reduce_dep_snode = all_reduce_dep_snodes[0]
 
-    grouped_snode = scheduler.GroupedSchedulerNode.create([all_reduce_dep_snode, all_reduce_snode])
+    grouped_snode = scheduler.GroupedSchedulerNode.create(
+        [all_reduce_dep_snode, all_reduce_snode]
+    )
     new_snode_order = []
     new_snode_order.append(grouped_snode)
     for snode in snodes:
@@ -324,11 +333,9 @@ class TestComputeCommReorderingMultiProc(DynamoDistributedMultiProcTestCase):
             inputs = torch.ones(4, 4, dtype=torch.float, device="cuda") + self.rank
             compiled = torch.compile(func)
             code = run_and_get_triton_code(compiled, inputs, **self.get_world_trs())
-            FileCheck().check("triton_poi_fused_add").check("_c10d_functional.all_reduce_").check(
-                "triton_poi_fused_mul"
-            ).run(
-                code
-            )
+            FileCheck().check("triton_poi_fused_add").check(
+                "_c10d_functional.all_reduce_"
+            ).check("triton_poi_fused_mul").run(code)
             out = compiled(inputs, **self.get_world_trs())
             correct = func(inputs, **self.get_world_trs())
             self.assertTrue(same(out, correct))

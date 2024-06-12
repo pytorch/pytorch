@@ -1285,8 +1285,10 @@ class GroupedSchedulerNode(BaseSchedulerNode):
         self, scheduler: "Scheduler", snodes: Sequence[BaseSchedulerNode]
     ) -> None:
         # NB: No need to call super().__init__() because we don't need to re-use any of its logic.
-        
-        assert not any(isinstance(x, FusedSchedulerNode) for x in snodes), "NYI: FusedSchedulerNode within GroupedSchedulerNode"
+
+        assert not any(
+            isinstance(x, FusedSchedulerNode) for x in snodes
+        ), "NYI: FusedSchedulerNode within GroupedSchedulerNode"
         self.snodes = snodes
         self.scheduler = scheduler
         self.node = None
@@ -1316,7 +1318,7 @@ class GroupedSchedulerNode(BaseSchedulerNode):
         return False
 
     def add_fake_dep(self, name: Dep) -> None:
-        self.set_read_writes(self.read_writes.with_read(dep))
+        self.set_read_writes(self.read_writes.with_read(name))
 
     # None of these need to be implemented, as a GroupedSchedulerNode is always unpacked
     # and its constituent nodes are used for last usage calculation purpose.
