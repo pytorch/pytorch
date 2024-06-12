@@ -2,11 +2,12 @@ import contextlib
 
 import warnings
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Set, Union
+from typing import Any, Dict, List, Optional, Set, Union, Callable
 
 import torch
 import torchgen
 import torchgen.model
+from torch._guards import detect_fake_mode
 from torch._C import (
     _get_dispatch_stack_at,
     _len_torch_dispatch_stack,
@@ -423,7 +424,12 @@ and output of type {type(ret)}. But expected types to match."""
             if is_read_only_alias_match(
                 schema_info.args[arg_idx], schema_info.outs[return_idx]
             ):
-                alias_non_inplace_storage(args[arg_idx], outs[return_idx])
+                fake_mode = detect_fake_mode()
+                maybe_suppress: Callable[[], Any] = contextlib.nullcontext
+                if fake_mode is not None and (shape_env := fake_mode.shape_env) is not None:
+                    maybe_suppress = shape_env.suppress_guards
+                with maybe_suppress():
+                    alias_non_inplace_storage(args[arg_idx], outs[return_idx])
 
 
 # This abstracts over the fact that in return_and_correct_aliasing,
