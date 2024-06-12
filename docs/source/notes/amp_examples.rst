@@ -13,7 +13,7 @@ Autocasting automatically chooses the precision for GPU operations to improve pe
 while maintaining accuracy.
 
 Instances of :class:`torch.amp.GradScaler` help perform the steps of
-gradient scaling conveniently.  Gradient scaling improves convergence for networks with ``float16`` (by default on CUDA)
+gradient scaling conveniently.  Gradient scaling improves convergence for networks with ``float16`` (by default on CUDA and XPU)
 gradients by minimizing gradient underflow, as explained :ref:`here<gradient-scaling>`.
 
 :class:`torch.autocast` and :class:`torch.amp.GradScaler` are modular.
