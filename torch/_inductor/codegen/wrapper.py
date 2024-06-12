@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 import collections
 import contextlib
 import dataclasses
@@ -440,7 +439,7 @@ class WrapperCodeGen(CodeGen):
         self.stride = "stride()"
         self.last_seen_device_guard_index: Optional[int] = None
         self.supports_intermediate_hooks = True
-        self.expr_printer: Callable[[Any], str] = pexpr
+        self.expr_printer = pexpr
         self.user_defined_kernel_cache: Dict[Tuple[Any, ...], Tuple[str, Any]] = {}
         self.unbacked_symbol_decls: Set[str] = set()  # str of sympy.Symbol
         self.allow_stack_allocation: Optional[bool] = None
@@ -726,6 +725,10 @@ class WrapperCodeGen(CodeGen):
     ):
         self.writeline(f"{buf_name} = {python_kernel_name}({', '.join(codegen_args)})")
 
+    def generate_inf_and_nan_checker(self, node):
+        # TODO: Add check for python too.
+        pass
+
     @dynamo_timed
     def generate(self, is_inference):
         if config.profile_bandwidth:
@@ -903,7 +906,10 @@ class WrapperCodeGen(CodeGen):
         pass
 
     def codegen_python_sizevar(self, x: Expr, *, simplify: bool = True) -> str:
-        return pexpr(x, simplify=simplify)
+        if simplify:
+            return pexpr(V.graph.sizevars.simplify(x))
+        else:
+            return pexpr(x)
 
     def codegen_sizevar(self, x: Expr) -> str:
         return self.codegen_python_sizevar(x)
@@ -1204,9 +1210,7 @@ class WrapperCodeGen(CodeGen):
 
         # Also include any possible kernel being called indirectly
         from triton import JITFunction
-        from triton.language import constexpr
 
-        # global constexpr vars handled above
         symbols_included = {original_name}
 
         def traverse(cur_kernel):
@@ -1219,7 +1223,6 @@ class WrapperCodeGen(CodeGen):
                 for inst in dis.Bytecode(cur_kernel.fn)
                 if inst.opname == "LOAD_GLOBAL"
             }
-            global_annotations = cur_kernel.fn.__globals__.get("__annotations__", {})
             for symbol_name in cur_kernel.fn.__code__.co_names:
                 if symbol_name in symbols_included:
                     continue
@@ -1231,25 +1234,9 @@ class WrapperCodeGen(CodeGen):
                         compile_wrapper.splice(symbol.src, strip=True)
                         symbols_included.add(symbol_name)
                         traverse(symbol)
-                    elif isinstance(symbol, (int, str, bool, constexpr)):
+                    elif isinstance(symbol, (int, str, bool)):
                         compile_wrapper.newline()
-                        if isinstance(symbol, constexpr):
-                            symbol_str = f"tl.constexpr({symbol.value!r})"
-                        else:
-                            symbol_str = f"{symbol!r}"
-                        if annotation := global_annotations.get(symbol_name):
-                            annotion_code = ""
-                            if isinstance(annotation, type):
-                                annotation_code = (
-                                    f": {annotation.__module__}.{annotation.__name__}"
-                                )
-                            else:
-                                annotation_code = f": {annotation!r}"
-                            compile_wrapper.writeline(
-                                f"{symbol_name}{annotation_code} = {symbol_str}"
-                            )
-                        else:
-                            compile_wrapper.writeline(f"{symbol_name} = {symbol!r}")
+                        compile_wrapper.writeline(f"{symbol_name} = {symbol!r}")
                         symbols_included.add(symbol_name)
                     elif (
                         symbol_name in unqualified_loads

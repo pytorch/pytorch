@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 from typing import List
 
 from torch._C import _compile_graph_to_code_table, _generate_upgraders_graph

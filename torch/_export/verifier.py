@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 import inspect
 import math
 import operator

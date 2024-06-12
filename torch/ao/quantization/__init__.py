@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 # flake8: noqa: F403
 
 from .fake_quantize import *  # noqa: F403

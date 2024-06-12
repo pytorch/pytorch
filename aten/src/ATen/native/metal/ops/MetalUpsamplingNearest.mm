@@ -11,9 +11,11 @@
 #include <ATen/native/UpSample.h>
 #include <torch/library.h>
 
-namespace at::native::metal {
+namespace at {
+namespace native {
+namespace metal {
 
-static Tensor upsample_nearest2d_vec(
+Tensor upsample_nearest2d_vec(
     const Tensor& input,
     at::OptionalIntArrayRef output_size,
     c10::optional<ArrayRef<double>> scale_factors) {
@@ -68,4 +70,6 @@ TORCH_LIBRARY_IMPL(aten, Metal, m) {
   m.impl(TORCH_SELECTIVE_NAME("aten::upsample_nearest2d.vec"), TORCH_FN(upsample_nearest2d_vec));
 };
 
-} // namespace at::native::metal
+}
+}
+}

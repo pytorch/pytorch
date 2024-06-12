@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# mypy: allow-untyped-defs
 
 import torch.distributed as dist
 import torch.distributed.rpc as rpc

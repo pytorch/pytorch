@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 import torch
 from warnings import warn
 __all__ = [

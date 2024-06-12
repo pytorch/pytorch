@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 """Async API.
 
 This module contains the API for parallelism in TorchScript, notably:

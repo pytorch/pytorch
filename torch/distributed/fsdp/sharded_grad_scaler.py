@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 import logging
 from collections import abc, defaultdict
 from typing import Any, Dict, Iterable, List, Optional, overload, Sequence, Tuple, Union

@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 from functools import lru_cache
 from itertools import chain
 from typing import Callable, cast, Dict, List, Optional, Sequence, Tuple, Union
@@ -89,7 +88,7 @@ class ShardingPropagator:
         if schema_info is not None:
             self.op_to_schema_info[op_overload] = schema_info
 
-    @lru_cache  # noqa: B019
+    @lru_cache
     def _propagate_tensor_meta(
         self, op_schema: OpSchema
     ) -> Union[None, TensorMeta, Sequence[Optional[TensorMeta]]]:

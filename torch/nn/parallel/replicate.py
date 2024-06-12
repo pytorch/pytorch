@@ -7,8 +7,8 @@ from torch._utils import _get_device_index
 from collections import OrderedDict
 
 if TYPE_CHECKING:
-    from torch.jit import ScriptModule
-    from torch.jit._state import EnabledProxy
+    import torch.jit
+    import torch.jit._state
 
 __all__ = ['replicate']
 
@@ -22,12 +22,12 @@ def _is_script_method(module: Module) -> bool:
     return isinstance(module, torch._C.ScriptMethod)
 
 
-def _init_script_module() -> "ScriptModule":
+def _init_script_module() -> "torch.jit.ScriptModule":
     import torch.jit
     return torch.jit.ScriptModule()
 
 
-def _is_jit_enabled() -> "EnabledProxy":
+def _is_jit_enabled() -> "torch.jit._state.EnabledProxy":
     import torch.jit._state
     return torch.jit._state._enabled
 

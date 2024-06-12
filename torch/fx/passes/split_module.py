@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 import inspect
 from typing import Any, Callable, Dict, List, Optional, Set
 from collections import OrderedDict

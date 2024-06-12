@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 import itertools
 from typing import Protocol, Optional, Type, Any
 

@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 # Copyright (c) Meta Platforms, Inc. and its affiliates.
 # All rights reserved.
 #

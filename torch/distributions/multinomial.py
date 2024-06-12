@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 import torch
 from torch import inf
 from torch.distributions import Categorical, constraints

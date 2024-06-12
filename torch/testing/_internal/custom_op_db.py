@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 import torch
 import functools
 from torch.testing import make_tensor

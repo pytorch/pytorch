@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 import json
 import logging
 import os

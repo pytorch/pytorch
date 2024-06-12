@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 from collections.abc import Iterable
 import torch
 

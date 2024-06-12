@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 from collections import defaultdict
 import logging
 import math

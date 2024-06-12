@@ -138,7 +138,3 @@ class RedirectsTest(unittest.TestCase):
             libc.printf(bytes(f"c:{i}\n", "utf-8"))
 
         self._redirect_large_buffer(c_print)
-
-
-if __name__ == "__main__":
-    unittest.main()

@@ -1,5 +1,6 @@
 #include "caffe2/utils/threadpool/ThreadPool.h"
 #include "WorkersPool.h"
+#include "caffe2/core/logging.h"
 
 #if !defined(__s390x__) && !defined(__powerpc__)
 #include <cpuinfo.h>

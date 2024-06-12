@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 import functools
 
 from typing import Dict, Set, Tuple

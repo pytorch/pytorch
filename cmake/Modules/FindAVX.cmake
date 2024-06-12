@@ -1,5 +1,4 @@
 INCLUDE(CheckCSourceRuns)
-INCLUDE(CheckCSourceCompiles)
 INCLUDE(CheckCXXSourceRuns)
 
 SET(AVX_CODE "

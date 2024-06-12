@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 from functools import partial
 import torch
 import torch.nn.functional as F
