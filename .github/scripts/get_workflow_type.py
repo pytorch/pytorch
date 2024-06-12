@@ -8,6 +8,7 @@ from github.Issue import Issue
 
 WORKFLOW_LABEL_META = ""  # use meta runners
 WORKFLOW_LABEL_LF = "lf."  # use runners from the linux foundation
+LABEL_TYPE_KEY = "label_type"
 
 
 def parse_args() -> Any:
@@ -49,11 +50,11 @@ def is_exception_branch(branch: str) -> bool:
 
 def get_workflow_type(issue: Issue, username: str) -> str:
     try:
-        user_list = issue.get_comments()[0].body.split("\r\n")
+        user_list = issue.get_comments()[0].body.split()
 
         if user_list[0] == "!":
             return WORKFLOW_LABEL_META
-        elif user_list[1] == "*":
+        elif user_list[0] == "*":
             return WORKFLOW_LABEL_LF
         elif username in user_list:
             return WORKFLOW_LABEL_LF
@@ -67,16 +68,16 @@ def main() -> None:
     args = parse_args()
 
     if is_exception_branch(args.github_branch):
-        output = {"label_type": WORKFLOW_LABEL_META}
+        output = {LABEL_TYPE_KEY: WORKFLOW_LABEL_META}
     else:
         try:
             gh = get_gh_client(args.github_token)
             # The default issue we use - https://github.com/pytorch/test-infra/issues/5132
             issue = get_issue(gh, args.github_repo, args.github_issue)
 
-            output = {"label_type": get_workflow_type(issue, args.github_user)}
+            output = {LABEL_TYPE_KEY: get_workflow_type(issue, args.github_user)}
         except Exception as e:
-            output = {"label_type": WORKFLOW_LABEL_META}
+            output = {LABEL_TYPE_KEY: WORKFLOW_LABEL_META}
 
     json_output = json.dumps(output)
     print(json_output)
