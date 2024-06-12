@@ -3,7 +3,7 @@ from __future__ import annotations
 import itertools
 import logging
 import re
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple, TYPE_CHECKING, Union
 
 import sympy
 
@@ -15,7 +15,6 @@ from ...utils._sympy.value_ranges import ValueRanges
 from .. import config, ir
 from ..codecache import HalideCodeCache
 from ..metrics import is_metric_table_enabled, log_kernel_metadata
-from ..ops_handler import ReductionType, StoreMode
 
 from ..runtime.hints import HalideInputSpec, HalideMeta, ReductionHint
 from ..utils import (
@@ -39,6 +38,9 @@ from .common import (
 from .cpp import DTYPE_TO_CPP
 from .cpp_utils import cexpr
 from .simd import constant_repr, IterationRangesEntry, SIMDKernel, SIMDScheduling
+
+if TYPE_CHECKING:
+    from ..ops_handler import ReductionType, StoreMode
 
 log = logging.getLogger(__name__)
 
@@ -1079,30 +1081,15 @@ class HalideScheduling(SIMDScheduling):
     # TODO(jansel): Halide doesn't actually support 64 bit indexing...
     int64_type = "hl.Int(64)"
     kernel_type = HalideKernel
-    backend_features = dict.fromkeys(
-        [
-            BackendFeature.SCAN,
-            BackendFeature.TUPLE_REDUCTION,
-        ]
-    )
-    backend_features_cpu = dict.fromkeys(
-        [
-            *backend_features,
-        ]
-    )
-    backend_features_cuda = dict.fromkeys(
-        [
-            *backend_features,
-        ]
-    )
 
     @classmethod
     def get_backend_features(cls, device: torch.device):
-        if device.type == "cpu":
-            return cls.backend_features_cpu
-        if device.type == "cuda":
-            return cls.backend_features_cuda
-        raise NotImplementedError(device.type)
+        result = dict.fromkeys(
+            [
+                BackendFeature.TUPLE_REDUCTION,
+            ]
+        )
+        return result
 
     def define_kernel(self, src_code, node_schedule, kernel):
         """Codegen kernel definition to go in output wrapper code"""

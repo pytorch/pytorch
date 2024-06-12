@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 from __future__ import annotations
 
 import base64
@@ -1020,7 +1021,7 @@ class FxGraphCache:
                 cache_id = "fx-graph-v1"
                 try:
                     if config.is_fbcode():
-                        from triton.runtime.fb_memcache import (
+                        from triton.fb.fb_memcache import (
                             FbMemcacheRemoteFxGraphCacheBackend,
                         )
 
@@ -1493,7 +1494,7 @@ def valid_vec_isa_list() -> List[VecISA]:
     isa_list = []
     _cpu_supported_isa = x86_isa_checker()
     for isa in supported_vec_isa_list:
-        if str(isa) in _cpu_supported_isa:
+        if str(isa) in _cpu_supported_isa and isa:
             isa_list.append(isa)
     return isa_list
 
