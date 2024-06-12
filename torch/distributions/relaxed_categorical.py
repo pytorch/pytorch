@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import torch
 from torch.distributions import constraints
 from torch.distributions.categorical import Categorical
@@ -26,10 +27,10 @@ class ExpRelaxedCategorical(Distribution):
         logits (Tensor): unnormalized log probability for each event
 
     [1] The Concrete Distribution: A Continuous Relaxation of Discrete Random Variables
-    (Maddison et al, 2017)
+    (Maddison et al., 2017)
 
     [2] Categorical Reparametrization with Gumbel-Softmax
-    (Jang et al, 2017)
+    (Jang et al., 2017)
     """
     arg_constraints = {"probs": constraints.simplex, "logits": constraints.real_vector}
     support = (

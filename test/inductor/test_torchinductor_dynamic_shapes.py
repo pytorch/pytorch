@@ -3,10 +3,12 @@ import contextlib
 import importlib
 
 import math
+import operator
 import os
 import sys
 import unittest
 from functools import partial
+from typing import List
 
 import torch
 import torch.library
@@ -30,7 +32,7 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_ASAN,
     TEST_WITH_ROCM,
 )
-from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CPU, HAS_GPU
+from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CPU, HAS_CUDA, HAS_GPU
 
 if IS_WINDOWS and IS_CI:
     sys.stderr.write(
@@ -96,7 +98,7 @@ if HAS_CPU:
     copy_tests(DynamicShapesCommonTemplate, DynamicShapesCpuTests, "cpu", test_failures)
 
 
-if HAS_GPU and not TEST_WITH_ASAN:
+if HAS_CUDA and not TEST_WITH_ASAN:
 
     class DynamicShapesGPUTests(TestCase):
         common = check_model_gpu
@@ -116,7 +118,7 @@ class TestInductorDynamic(TestCase):
         if not HAS_GPU:
             self.skipTest("Triton not available")
         torch._dynamo.reset()
-        super(TestCase, self).setUp()
+        TestCase.setUp(self)
         # this should be in setUpClass, but device-generic tests
         # don't work with setUpClass well (non-deterministically the wrong setUpClass is resolved),
         # so put it in test setUp, it's cheap
@@ -134,7 +136,7 @@ class TestInductorDynamic(TestCase):
 
     def tearDown(self):
         self._stack.close()
-        super(TestCase, self).tearDown()
+        TestCase.tearDown(self)
         torch._dynamo.reset()
 
     def test_arange_dynamic(self, device):
@@ -315,6 +317,7 @@ class TestInductorDynamic(TestCase):
 
         f(torch.tensor([3], device=device), torch.randn(10, device=device))
 
+    @unittest.expectedFailure
     @torch._dynamo.config.patch(
         capture_scalar_outputs=True, capture_dynamic_output_shape_ops=True
     )
@@ -366,6 +369,47 @@ class TestInductorDynamic(TestCase):
         cf = torch.compile(fullgraph=True)(f)
         arg = torch.tensor(5, device=device)
         self.assertEqual(f(arg), cf(arg))
+
+    @torch._dynamo.config.patch(
+        capture_scalar_outputs=True, capture_dynamic_output_shape_ops=True
+    )
+    @torch._inductor.config.patch(implicit_fallbacks=True)
+    def test_unbacked_save_for_backwards(self, device) -> None:
+        @torch.library.custom_op("_test::_cat", mutates_args=())
+        def _cat(t: torch.Tensor, ds: List[int]) -> torch.Tensor:
+            return t * t.new_ones([sum(ds)])
+
+        @torch.library.register_fake("_test::_cat")
+        def _cat_fake(t: torch.Tensor, ds: List[int]) -> torch.Tensor:
+            [torch._check_is_size(d) for d in ds]
+            return t.new_empty([sum(ds)])
+
+        def _cat_setup_context(ctx, inputs, output):
+            pass
+
+        def _cat_backward(ctx, grad):
+            return grad.sum(), None
+
+        torch.library.register_autograd(
+            "_test::_cat",
+            _cat_backward,
+            setup_context=_cat_setup_context,
+        )
+
+        def fn(t, sizes):
+            r = torch.ops._test._cat(t, sizes.tolist())
+            return r * t
+
+        t = torch.randn((), requires_grad=True, device=device)
+        sizes = torch.tensor([4, 8], dtype=torch.int64, device="cpu")
+        out = fn(t, sizes)
+        out.sum().backward()
+        expect = t.grad
+        t.grad = None
+        torch.compile(fn, backend="inductor", fullgraph=True, dynamic=True)(
+            t, sizes
+        ).sum().backward()
+        self.assertEqual(t.grad, expect)
 
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_unbacked_reduction(self, device):
@@ -648,6 +692,33 @@ class TestInductorDynamic(TestCase):
         actual = cfn(5)
         self.assertEqual(expect, actual)
 
+    def test_interpolate_ceil_eq(self, device):
+        ceiling = math.ceil
+        IntTrueDiv = operator.truediv
+
+        def fn(t):
+            s0, s2, s3 = t.size()
+            x = torch.zeros(
+                (
+                    s0,
+                    2048,
+                    ceiling(IntTrueDiv(2 * ((s2 - 1) // 8) + 2, 1)),
+                    ceiling(IntTrueDiv(2 * ((s3 - 1) // 8) + 2, 1)),
+                ),
+                dtype=torch.bfloat16,
+            )
+            return torch.nn.functional.interpolate(
+                x,
+                scale_factor=2,
+                mode="nearest",
+            )
+
+        cfn = self.compile_fn(fn)
+        arg = torch.randn(4, 16, 18)
+        expect = fn(arg)
+        actual = cfn(arg)
+        self.assertEqual(expect, actual)
+
     def test_full_recompiles(self, device):
         def fn(x):
             _, L = x.shape
@@ -780,7 +851,9 @@ class TestInductorDynamic(TestCase):
         @torch.compile(fullgraph=True, dynamic=True)
         def f(x):
             a = x.item()
-            torch._constrain_as_size(a, min=1, max=10)
+            torch._check_is_size(a)
+            torch._check(a >= 1)
+            torch._check(a <= 10)
             return torch.ones(a, a)
 
         f(torch.tensor([5], device=device))
@@ -792,5 +865,5 @@ if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
 
     # Slow on ASAN after https://github.com/pytorch/pytorch/pull/94068
-    if (HAS_CPU or HAS_GPU) and not TEST_WITH_ASAN:
+    if (HAS_CPU or HAS_CUDA) and not TEST_WITH_ASAN:
         run_tests(needs="filelock")

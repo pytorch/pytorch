@@ -667,7 +667,6 @@ only interested in a specific component.
 - Working on a test binary? Run `(cd build && ninja bin/test_binary_name)` to
   rebuild only that test binary (without rerunning cmake). (Replace `ninja` with
   `make` if you don't have ninja installed).
-- Don't need Caffe2?  Pass `BUILD_CAFFE2=0` to disable Caffe2 build.
 
 On the initial build, you can also speed things up with the environment
 variables `DEBUG`, `USE_DISTRIBUTED`, `USE_MKLDNN`, `USE_CUDA`, `USE_FLASH_ATTENTION`, `USE_MEM_EFF_ATTENTION`, `BUILD_TEST`, `USE_FBGEMM`, `USE_NNPACK` and `USE_QNNPACK`.
@@ -790,7 +789,7 @@ USE_PRECOMPILED_HEADERS=1 python setup.py develop
 ```
 
 This adds a build step where the compiler takes `<ATen/ATen.h>` and essentially
-dumps it's internal AST to a file so the compiler can avoid repeating itself for
+dumps its internal AST to a file so the compiler can avoid repeating itself for
 every `.cpp` file.
 
 One caveat is that when enabled, this header gets included in every file by default.
@@ -1196,7 +1195,7 @@ build_with_asan()
   LDFLAGS="-stdlib=libstdc++" \
   CFLAGS="-fsanitize=address -fno-sanitize-recover=all -shared-libasan -pthread" \
   CXX_FLAGS="-pthread" \
-  USE_CUDA=0 USE_OPENMP=0 BUILD_CAFFE2_OPS=0 USE_DISTRIBUTED=0 DEBUG=1 \
+  USE_CUDA=0 USE_OPENMP=0 USE_DISTRIBUTED=0 DEBUG=1 \
   python setup.py develop
 }
 
@@ -1321,7 +1320,7 @@ There are two possible choices for which commit to use:
 1. Checkout commit `B`, the head of the PR (manually committed by the PR
    author).
 2. Checkout commit `C`, the hypothetical result of what would happen if the PR
-   were merged into it's destination (usually `main`).
+   were merged into its destination (usually `main`).
 
 For all practical purposes, most people can think of the commit being used as
 commit `B` (choice **1**).

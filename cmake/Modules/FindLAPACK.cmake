@@ -26,6 +26,7 @@ ENDIF(LAPACK_FIND_QUIETLY OR NOT LAPACK_FIND_REQUIRED)
 
 # Old search lapack script
 include(CheckFortranFunctionExists)
+include(CheckFunctionExists)
 
 macro(Check_Lapack_Libraries LIBRARIES _prefix _name _flags _list _blas)
   # This macro checks for the existence of the combination of fortran libraries
@@ -93,6 +94,13 @@ if(BLAS_FOUND)
     ENDIF(MKL_LAPACK_LIBRARIES)
     SET(LAPACK_INCLUDE_DIR ${MKL_INCLUDE_DIR})
     SET(LAPACK_INFO "mkl")
+  ENDIF()
+
+  # NVPL
+  IF((NOT LAPACK_INFO) AND (BLAS_INFO STREQUAL "nvpl"))
+    FIND_PACKAGE(NVPL_LAPACK REQUIRED)
+    SET(LAPACK_LIBRARIES nvpl::lapack_lp64_omp)
+    SET(LAPACK_INFO "nvpl")
   ENDIF()
 
   # Accelerate

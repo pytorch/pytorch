@@ -1,10 +1,12 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 import dataclasses
 import logging
-from typing import Dict, List
+from typing import Dict, List, TYPE_CHECKING
 
-from torch.distributed.checkpoint.metadata import MetadataIndex
 from torch.distributed.checkpoint.planner import SavePlan
+
+if TYPE_CHECKING:
+    from torch.distributed.checkpoint.metadata import MetadataIndex
 
 __all__ = ["dedup_tensors"]
 

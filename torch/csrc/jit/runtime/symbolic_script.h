@@ -12,7 +12,7 @@ struct GradientPair {
   std::shared_ptr<Graph> backward;
 };
 
-TORCH_API c10::optional<GradientPair> gradientInfoForSchema(
+TORCH_API std::optional<GradientPair> gradientInfoForSchema(
     const FunctionSchema& schema);
 TORCH_API bool hasGradientInfoForSchema(const FunctionSchema& schema);
 } // namespace torch::jit

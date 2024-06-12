@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import copy
 import itertools
 import logging
@@ -11,6 +12,7 @@ from torch.fx.experimental.optimization import (
     matches_module_pattern,
     replace_node_module,
 )
+from torch.fx.passes.graph_transform_observer import GraphTransformObserver
 from torch.fx.passes.shape_prop import ShapeProp
 from torch.nn import functional as F
 from torch.nn.utils.fusion import fuse_conv_bn_eval, fuse_conv_bn_weights
@@ -24,7 +26,7 @@ from ..pattern_matcher import (
     stable_topological_sort,
 )
 from ..utils import is_cpu_device, pass_execution_and_save
-from .group_batch_fusion import group_batch_fusion_passes
+from .group_batch_fusion import group_batch_fusion_passes, PRE_GRAD_FUSIONS
 from .misc_patterns import numpy_compat_normalization
 from .split_cat import PRE_GRAD_PATTERNS
 
@@ -85,12 +87,6 @@ def remove_split_ops(graph, shape_prop):
     return None
 
 
-# split_cat related fusions
-pattern_matcher_passes = list(PRE_GRAD_PATTERNS.values())
-# non-split_cat related fusions
-# TODO: move them to the fusions dict too.
-pattern_matcher_passes.append(efficient_conv_bn_eval_pass)
-
 pattern_matcher_passes_aten: List[PatternMatcherPass] = [
     remove_split_with_size_one_pass_aten,
     merge_getitem_cat_pass_aten,
@@ -134,6 +130,7 @@ def pre_grad_passes(gm: torch.fx.GraphModule, example_inputs=None):
             def shape_prop(mod) -> None:
                 ShapeProp(
                     gm=mod,
+                    # pyre-fixme[16]: Module `torch._dynamo.utils` has no attribute `detect_fake_mode`
                     fake_mode=detect_fake_mode(example_inputs),
                 ).propagate(*example_inputs)
 
@@ -202,21 +199,32 @@ def pre_grad_passes(gm: torch.fx.GraphModule, example_inputs=None):
             if example_inputs is not None:
                 gm = fuse_fx(gm, example_inputs)
             numpy_compat_normalization(gm.graph)
-
             optimus_scuba_log["before_recompile_pre_grad"] = upload_graph(gm.graph)
             group_batch_fusion_passes(gm.graph, pre_grad=True)
-            for pattern_matcher_pass in pattern_matcher_passes:
+            for pass_name in config.pre_grad_fusion_options:
+                # skip all patterns for group batch fusions
+                if pass_name in PRE_GRAD_FUSIONS:
+                    continue
+                pattern_matcher_pass = PRE_GRAD_PATTERNS[pass_name]
                 inductor_before_change = save_inductor_dict(
                     [pattern_matcher_pass.pass_name]
                 )
-                pattern_matcher_pass.apply(gm.graph)  # type: ignore[arg-type]
+                # we support run same pattern multiple times, the default is to run only once
+                counter = config.pre_grad_fusion_options[pass_name].get("counter", 1)
+                for _ in range(counter):
+                    pattern_matcher_pass.apply(gm.graph)  # type: ignore[arg-type]
                 if not is_same_dict(counters["inductor"], inductor_before_change):
                     optimus_scuba_log[
                         f"{pattern_matcher_pass.pass_name}_pre_grad"
                     ] = upload_graph(gm.graph)
+            # TODO: move efficient_conv_bn_eval_pass to the fusions dict too.
+            efficient_conv_bn_eval_pass.apply(gm.graph)  # type: ignore[arg-type]
 
     if config.pre_grad_custom_pass is not None:
-        config.pre_grad_custom_pass(gm.graph)
+        with GraphTransformObserver(
+            gm, "pre_grad_custom_pass", config.trace.log_url_for_graph_xform
+        ):
+            config.pre_grad_custom_pass(gm.graph)
     stable_topological_sort(gm.graph)
 
     from .quantization import quant_lift_up
@@ -249,7 +257,7 @@ def pre_grad_passes(gm: torch.fx.GraphModule, example_inputs=None):
 
 def fuse_fx(gm: torch.fx.GraphModule, example_inputs) -> torch.fx.GraphModule:
     is_cpu = is_cpu_device(example_inputs)
-
+    # pyre-fixme[16]: Module `torch._dynamo.utils` has no attribute `detect_fake_mode`
     fake_mode = detect_fake_mode(example_inputs)
 
     gm = sink_cat_after_pointwise(gm)
@@ -257,16 +265,31 @@ def fuse_fx(gm: torch.fx.GraphModule, example_inputs) -> torch.fx.GraphModule:
         # For linear permute fusion, we need to check input info to identify
         # and perform proper permutation/transpose
         ShapeProp(gm, fake_mode=fake_mode).propagate(*example_inputs)
-        gm = linear_permute_fusion(gm)
-        gm = permute_linear_fusion(gm)
-        gm = permute_matmul_fusion(gm)
+        with GraphTransformObserver(
+            gm, "linear_permute_fusion", config.trace.log_url_for_graph_xform
+        ):
+            gm = linear_permute_fusion(gm)
+        with GraphTransformObserver(
+            gm, "permute_linear_fusion", config.trace.log_url_for_graph_xform
+        ):
+            gm = permute_linear_fusion(gm)
+        with GraphTransformObserver(
+            gm, "permute_matmul_fusion", config.trace.log_url_for_graph_xform
+        ):
+            gm = permute_matmul_fusion(gm)
 
     # make sure the autograd is disabled.
     if torch.is_grad_enabled() or not is_cpu:
         return gm
     if config.freezing:
-        gm = remove_identity(gm)
-        gm = fuse_conv_bn(gm)
+        with GraphTransformObserver(
+            gm, "remove_identity", config.trace.log_url_for_graph_xform
+        ):
+            gm = remove_identity(gm)
+        with GraphTransformObserver(
+            gm, "fuse_conv_bn", config.trace.log_url_for_graph_xform
+        ):
+            gm = fuse_conv_bn(gm)
     return gm
 
 

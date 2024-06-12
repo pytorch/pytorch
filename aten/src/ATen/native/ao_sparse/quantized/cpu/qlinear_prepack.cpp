@@ -53,7 +53,7 @@ void calc_col_offsets_transpose(
 c10::intrusive_ptr<LinearPackedParamsBase> PackedLinearWeight::
     prepack(
         const at::Tensor& weight,
-        const c10::optional<at::Tensor>& bias,
+        const std::optional<at::Tensor>& bias,
         const int64_t out_features_block_size,
         const int64_t in_features_block_size) {
   TORCH_CHECK(
@@ -110,7 +110,7 @@ c10::intrusive_ptr<LinearPackedParamsBase> PackedLinearWeight::
       /*col_offsets=*/col_offsets.data(),
       /*qtype=*/qtype);
 
-  c10::optional<at::Tensor> bias_contig;
+  std::optional<at::Tensor> bias_contig;
   if (bias.has_value()) {
     const at::Tensor& bias_vec = bias.value();
     TORCH_CHECK(bias_vec.dim() == 1, "bias should be a vector (1D Tensor)");
@@ -139,7 +139,7 @@ c10::intrusive_ptr<LinearPackedParamsBase> PackedLinearWeight::
 c10::intrusive_ptr<LinearPackedParamsBase> PackedLinearWeightQnnp::
     prepack(
         const at::Tensor& weight,
-        const c10::optional<at::Tensor>& bias,
+        const std::optional<at::Tensor>& bias,
         const int64_t out_features_block_size,
         const int64_t in_features_block_size) {
   at::native::initQNNPACK();
@@ -150,7 +150,7 @@ c10::intrusive_ptr<LinearPackedParamsBase> PackedLinearWeightQnnp::
 // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 PackedLinearWeightQnnp::PackedLinearWeightQnnp(
     const at::Tensor& weight,
-    const c10::optional<at::Tensor>& bias,
+    const std::optional<at::Tensor>& bias,
     const int64_t out_features_block_size,
     const int64_t in_features_block_size)
     : LinearPackedParamsBase(out_features_block_size, in_features_block_size),
@@ -215,7 +215,7 @@ class QLinearPackWeightInt8 final {
  public:
   static c10::intrusive_ptr<LinearPackedParamsBase> run(
       const at::Tensor& weight,
-      const c10::optional<at::Tensor>& bias,
+      const std::optional<at::Tensor>& bias,
       const int64_t out_features_block_size,
       const int64_t in_features_block_size) {
     auto& ctx = at::globalContext();

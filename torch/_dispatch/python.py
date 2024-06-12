@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import itertools
 import unittest.mock
 from contextlib import contextmanager

@@ -314,21 +314,21 @@ class TestInputAttrTracking(torch._dynamo.test_case.TestCase):
             actual,
             """\
 class GraphModule(torch.nn.Module):
-    def forward(self, L_y_ : torch.Tensor, L_x_ : torch.Tensor):
+    def forward(self, L_y_: "f32[2, 2]", L_x_: "f32[2, 2]"):
         l_y_ = L_y_
         l_x_ = L_x_
 
-        detach = l_y_.detach()
+        detach: "f32[2, 2]" = l_y_.detach()
 
         _set_grad_enabled = torch._C._set_grad_enabled(False)
 
-        set_ = torch_Tensor_set_(l_x_, detach);  detach = None
+        set_: "f32[2, 2]" = torch_Tensor_set_(l_x_, detach);  detach = None
 
         _set_grad_enabled_1 = torch._C._set_grad_enabled(True)
 
         _lower_version_count_by_1 = torch__dynamo_variables_builtin__lower_version_count_by_1(set_);  set_ = None
 
-        mul = l_x_ * l_y_;  l_x_ = l_y_ = None
+        mul: "f32[2, 2]" = l_x_ * l_y_;  l_x_ = l_y_ = None
         return (mul,)
 """,
         )
