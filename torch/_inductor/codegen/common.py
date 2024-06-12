@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import contextlib
 import dataclasses
 import functools
@@ -402,6 +403,12 @@ class ExprPrinter(Printer):
     def _print_align(self, expr):
         assert len(expr.args) == 1
         return f"align({self._print(expr.args[0])})"
+
+    def doprint(self, expr, *, simplify: bool = True):
+        # TODO: why are people passing strings to the printer here :think:
+        if simplify and isinstance(expr, sympy.Expr) and hasattr(V.graph, "sizevars"):
+            expr = V.graph.sizevars.simplify(expr)
+        return super().doprint(expr)
 
 
 class PythonPrinter(ExprPrinter):
