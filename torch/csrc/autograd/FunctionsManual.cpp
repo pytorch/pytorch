@@ -879,14 +879,21 @@ static Tensor generic_solve_jvp(
 }
 
 Tensor cumsum_backward(const Tensor& grad, int64_t dim, bool prepend) {
-  // Trivial case
+  Tensor grad_view;
   if (prepend) {
-    TORCH_INTERNAL_ASSERT(false, "TODO: implement support for prepend");
+    TORCH_INTERNAL_ASSERT(
+        grad.sym_size(dim) > 0,
+        "When cumsum_backward is called with prepend=True, the gradient "
+        "tensor is expected to have size of at least 1 along the reduction "
+        "dimension.");
+    grad_view = grad.slice(dim, /*start*/ 1);
+  } else {
+    grad_view = grad;
   }
-  if (grad.sym_numel() <= 1 || grad.sym_size(dim) == 1) {
-    return grad;
+  if (grad_view.sym_numel() <= 1 || grad_view.sym_size(dim) == 1) {
+    return grad_view;
   }
-  return grad.flip(dim).cumsum(dim).flip(dim);
+  return grad_view.flip(dim).cumsum(dim).flip(dim);
 }
 
 Tensor logsumexp_backward(

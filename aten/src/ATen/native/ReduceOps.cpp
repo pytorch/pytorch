@@ -1,3 +1,4 @@
+#include "c10/core/SymInt.h"
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/native/ReduceOps.h>
 
@@ -248,7 +249,7 @@ static void meta_func_cum_ops(
     std::optional<ScalarType> dtype,
     bool prepend) {
   // Checking whether 'dim' is valid.
-  int64_t wrapped_dim = maybe_wrap_dim(dim, self.dim());
+  maybe_wrap_dim(dim, self.dim());
 
   const auto& result = meta.maybe_get_output();
   ScalarType out_dtype;
@@ -260,12 +261,9 @@ static void meta_func_cum_ops(
     out_dtype = dtype.value_or(is_integral ? ScalarType::Long : self.scalar_type());
   }
 
-  std::vector<int64_t> new_sizes(self.sizes().begin(), self.sizes().end());
-  if (prepend) {
-    new_sizes[wrapped_dim] += 1;
-  }
+  std::vector<int64_t> output_sizes = ::at::native::get_cum_fn_output_size(self.sizes(), dim, prepend);
 
-  meta.set_output_raw_strided(0, new_sizes, {}, self.options().dtype(out_dtype));
+  meta.set_output_raw_strided(0, output_sizes, {}, self.options().dtype(out_dtype));
   namedinference::propagate_names(result, self);
 }
 
@@ -511,9 +509,6 @@ TORCH_IMPL_FUNC(cumsum_out)
  std::optional<ScalarType> dtype,
  bool prepend,
  const Tensor& result) {
-  if (prepend) {
-    TORCH_INTERNAL_ASSERT(false, "TODO: implement support for prepend=True");
-  }
   impl_func_cum_ops(self, dim, prepend, result, cumsum_stub);
 }
 
@@ -2374,6 +2369,27 @@ Tensor sum_sparse_compressed(
       "Currently the only compressed sparse format supported for sum.dim_IntList is CSR, but got layout ",
       layout)
   return at::_sparse_csr_sum(self, *dim, keepdim, dtype);
+}
+
+namespace {
+template<typename T, typename U>
+std::vector<T> get_cum_fn_output_size_impl(U input_size, int64_t dim, bool prepend) {
+  std::vector<T> output_size(input_size.begin(), input_size.end());
+  if (prepend) {
+    TORCH_CHECK(input_size.size() > 0, "prepend=True requires input.dim() to be at least one");
+    auto dim_ = maybe_wrap_dim(dim, input_size.size());
+    output_size[dim_] += 1;
+  }
+  return output_size;
+}
+} // namespace
+
+TORCH_API std::vector<SymInt> get_cum_fn_output_size(SymIntArrayRef input_size, int64_t dim, bool prepend) {
+  return get_cum_fn_output_size_impl<SymInt, SymIntArrayRef>(input_size, dim, prepend);
+}
+
+TORCH_API std::vector<int64_t> get_cum_fn_output_size(IntArrayRef input_size, int64_t dim, bool prepend) {
+  return get_cum_fn_output_size_impl<int64_t, IntArrayRef>(input_size, dim, prepend);
 }
 
 } // namespace at::native

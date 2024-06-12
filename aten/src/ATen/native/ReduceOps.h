@@ -1,6 +1,7 @@
 #pragma once
 
 #include <ATen/native/DispatchStub.h>
+#include <c10/core/SymIntArrayRef.h>
 #include <c10/util/ArrayRef.h>
 #include <c10/util/Optional.h>
 
@@ -52,5 +53,8 @@ DECLARE_DISPATCH(void (*)(const Tensor&, Tensor&, Tensor&), aminmax_allreduce_st
 TORCH_API std::tuple<Tensor&,Tensor&> var_mean_out(
     Tensor &result1, Tensor &result2, const Tensor &self, IntArrayRef dim,
     int64_t correction, bool keepdim);
+
+TORCH_API std::vector<SymInt> get_cum_fn_output_size(SymIntArrayRef input_size, int64_t dim, bool prepend);
+TORCH_API std::vector<int64_t> get_cum_fn_output_size(IntArrayRef input_size, int64_t dim, bool prepend);
 
 } // namespace at::native

@@ -32,10 +32,12 @@ template <typename scalar_t, typename func_t>
 static inline void cpu_cum_base_kernel(const Tensor& result,
     const Tensor& self,
     int64_t dim,
+    bool prepend,
     const func_t& f,
     scalar_t init_val) {
-  if (result.sizes() != self.sizes()) {
-    at::native::resize_output(result, self.sizes());
+  auto expected_sizes = get_cum_fn_output_size(self.sizes(), dim, prepend);
+  if (result.sizes() != expected_sizes) {
+    at::native::resize_output(result, expected_sizes);
   }
   if (self.numel() == 0) {
     return;
@@ -78,14 +80,11 @@ static inline void cpu_cum_base_kernel(const Tensor& result,
 }
 
 static void cumsum_cpu_kernel(const Tensor& result, const Tensor& self, int64_t dim, bool prepend) {
-  if (prepend) {
-    TORCH_INTERNAL_ASSERT(false, "TODO implement support for prepend=True");
-  }
   auto wrap_dim = maybe_wrap_dim(dim, self.dim());
   int64_t self_dim_size = ensure_nonempty_size(self, wrap_dim);
 
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(kBFloat16, kHalf, self.scalar_type(), "cumsum_out_cpu", [&] {
-    cpu_cum_base_kernel<scalar_t>(result, self, wrap_dim, [&] (
+    cpu_cum_base_kernel<scalar_t>(result, self, wrap_dim, prepend, [&] (
       scalar_t* result_data, auto result_dim_stride,
       const scalar_t* self_data, auto self_dim_stride, scalar_t init_val) {
         // NOLINTNEXTLINE(bugprone-signed-char-misuse)
@@ -114,7 +113,7 @@ static void cumprod_cpu_kernel(const Tensor& result, const Tensor& self, int64_t
   int64_t self_dim_size = ensure_nonempty_size(self, wrap_dim);
 
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(kBFloat16, kHalf, self.scalar_type(), "cumprod_out_cpu", [&] {
-    cpu_cum_base_kernel<scalar_t>(result, self, wrap_dim, [&] (
+    cpu_cum_base_kernel<scalar_t>(result, self, wrap_dim, prepend, [&] (
       scalar_t* result_data, auto result_dim_stride,
       const scalar_t* self_data, auto self_dim_stride, scalar_t init_val) {
         // NOLINTNEXTLINE(bugprone-signed-char-misuse)
@@ -133,7 +132,7 @@ static void logcumsumexp_cpu_kernel(Tensor& result, const Tensor& self, int64_t 
   int64_t self_dim_size = ensure_nonempty_size(self, wrap_dim);
 
   AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(kBFloat16, kHalf, self.scalar_type(), "logcumsumexp_out_cpu", [&] {
-    cpu_cum_base_kernel<scalar_t>(result, self, wrap_dim, [&] (
+    cpu_cum_base_kernel<scalar_t>(result, self, wrap_dim, false, [&] (
       scalar_t* result_data, auto result_dim_stride,
       const scalar_t* self_data, auto self_dim_stride, scalar_t init_val) {
         using accscalar_t = at::acc_type<scalar_t, false>;
