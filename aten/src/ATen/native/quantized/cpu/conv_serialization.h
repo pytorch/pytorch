@@ -73,7 +73,7 @@ using ConvParamsSerializationTypeV2 = std::tuple<
   // non-optional tensors
   std::vector<at::Tensor>,
   // optional tensors
-  std::vector<c10::optional<at::Tensor>>>;
+  std::vector<std::optional<at::Tensor>>>;
 
 using ConvParamsSerializationTypeV3 = std::tuple<
   // version, int for versions 3 and up
@@ -81,7 +81,7 @@ using ConvParamsSerializationTypeV3 = std::tuple<
   // configuration values
   std::vector<int64_t>,
   // optional tensors
-  std::vector<c10::optional<at::Tensor>>>;
+  std::vector<std::optional<at::Tensor>>>;
 
 // Parses any historical conv packed params format into
 // the current format.
@@ -119,7 +119,7 @@ ConvParamsSerializationTypeV3 parse_conv_serialized_state(c10::IValue v) {
     const auto& elements = v.toTupleRef().elements();
 
     at::Tensor weight = elements[0].toTensor();
-    c10::optional<at::Tensor> bias = elements[1].toOptional<at::Tensor>();
+    std::optional<at::Tensor> bias = elements[1].toOptional<at::Tensor>();
     torch::List<at::Tensor> stride_x_kSpatialDim = elements[2].toTensorList();
     torch::List<at::Tensor> padding_x_kSpatialDim = elements[3].toTensorList();
     torch::List<at::Tensor> dilation_x_kSpatialDim = elements[4].toTensorList();
@@ -150,7 +150,7 @@ ConvParamsSerializationTypeV3 parse_conv_serialized_state(c10::IValue v) {
     // transpose does not exist in v1, so we fill in a default value
     config_vals.push_back(0);
 
-    std::vector<c10::optional<at::Tensor>> tensors;
+    std::vector<std::optional<at::Tensor>> tensors;
     tensors.emplace_back();
     tensors.emplace_back(weight);
     tensors.emplace_back(bias);
@@ -161,7 +161,7 @@ ConvParamsSerializationTypeV3 parse_conv_serialized_state(c10::IValue v) {
     // version 2
     const auto& elements = v.toTupleRef().elements();
     std::vector<at::Tensor> non_optional = elements[1].toTensorList().vec();
-    std::vector<c10::optional<at::Tensor>> optional;
+    std::vector<std::optional<at::Tensor>> optional;
 
     if (elements[2].isTensorList()) {
       for (const auto& elem : elements[2].toTensorList()) {
@@ -187,7 +187,7 @@ ConvParamsSerializationTypeV3 parse_conv_serialized_state(c10::IValue v) {
     auto weight = non_optional[1];
     auto bias = optional[0];
 
-    std::vector<c10::optional<at::Tensor>> tensors;
+    std::vector<std::optional<at::Tensor>> tensors;
     tensors.emplace_back();
     tensors.emplace_back(weight);
     tensors.emplace_back(bias);
@@ -213,7 +213,7 @@ ConvParamsSerializationTypeV2 serialize_conv(
 
   std::string version = "2";
   std::vector<at::Tensor> non_optional;
-  std::vector<c10::optional<at::Tensor>> optional;
+  std::vector<std::optional<at::Tensor>> optional;
 
   // create a packed int8_t tensor for conv params
   std::vector<int16_t> params_vec;
@@ -267,7 +267,7 @@ ConvParamsSerializationTypeV3 serialize_conv(
 
   auto [weight, bias] = params->unpack();
 
-  std::vector<c10::optional<at::Tensor>> tensors;
+  std::vector<std::optional<at::Tensor>> tensors;
   tensors.emplace_back();
   tensors.emplace_back(weight);
   tensors.emplace_back(bias);
@@ -287,8 +287,8 @@ c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> deserialize_conv(
   TORCH_INTERNAL_ASSERT(version == 3, "Unexpected serialized qconv version: ", version);
 
   TORCH_CHECK(tensors.size() == 3, "Wrong number of tensors", tensors.size());
-  c10::optional<at::Tensor> weight = tensors[1];
-  c10::optional<at::Tensor> bias = tensors[2];
+  std::optional<at::Tensor> weight = tensors[1];
+  std::optional<at::Tensor> bias = tensors[2];
   TORCH_INTERNAL_ASSERT(weight, "Weight should always be present in serialized qconv.");
 
   torch::List<int64_t> stride, padding, output_padding, dilation;

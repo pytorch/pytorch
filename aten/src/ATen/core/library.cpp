@@ -42,7 +42,7 @@ namespace {
   constexpr auto CatchAll = c10::DispatchKey::CatchAll;
 } // anonymous namespace
 
-CppFunction::CppFunction(c10::KernelFunction func, c10::optional<c10::impl::CppSignature> cpp_signature, std::unique_ptr<c10::FunctionSchema> schema)
+CppFunction::CppFunction(c10::KernelFunction func, std::optional<c10::impl::CppSignature> cpp_signature, std::unique_ptr<c10::FunctionSchema> schema)
   : func_(std::move(func))
   , cpp_signature_(cpp_signature)
   , schema_(std::move(schema))
@@ -57,10 +57,10 @@ void Library::reset() {
 
 #define ERROR_CONTEXT "(Error occurred while processing ", toString(kind_), " block at ", file_, ":", line_, ")"
 
-Library::Library(Kind kind, std::string ns, c10::optional<c10::DispatchKey> k, const char* file, uint32_t line)
+Library::Library(Kind kind, std::string ns, std::optional<c10::DispatchKey> k, const char* file, uint32_t line)
   : kind_(kind)
   , ns_(ns == "_" ? c10::nullopt : c10::make_optional(std::move(ns)))
-  , dispatch_key_(k.value_or(CatchAll) == CatchAll ? c10::optional<c10::DispatchKey>() : k)
+  , dispatch_key_(k.value_or(CatchAll) == CatchAll ? std::optional<c10::DispatchKey>() : k)
   , file_(file)
   , line_(line)
   {

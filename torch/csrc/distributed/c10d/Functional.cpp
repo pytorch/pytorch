@@ -196,6 +196,19 @@ at::Tensor all_gather_into_tensor(
       inputs, group_size, std::move(group_name))[0];
 }
 
+at::Tensor& all_gather_into_tensor_out(
+    at::Tensor& input,
+    int64_t group_size,
+    const std::string& group_name,
+    at::Tensor& output) {
+  c10d::AllgatherOptions opts;
+
+  auto group = c10d::resolve_process_group(group_name);
+  auto work = group->_allgather_base(output, input, opts);
+  c10d::RankLocal<WorkRegistry>::get().register_work(output, work);
+  return output;
+}
+
 at::Tensor allocate_reduce_scatter_output(
     const at::Tensor& input,
     const int64_t group_size) {
@@ -322,6 +335,13 @@ TORCH_LIBRARY(_c10d_functional, m) {
       {at::Tag::pt2_compliant_tag});
 
   m.def(
+      "all_gather_into_tensor_out(Tensor input, int group_size, str group_name, *, Tensor(a!) out) -> Tensor(a!)",
+      torch::dispatch(
+          c10::DispatchKey::CompositeExplicitAutograd,
+          ::all_gather_into_tensor_out),
+      {at::Tag::pt2_compliant_tag});
+
+  m.def(
       "all_gather_into_tensor(Tensor input, int group_size, str group_name) -> Tensor",
       torch::dispatch(
           c10::DispatchKey::CompositeExplicitAutograd,
@@ -443,9 +463,9 @@ class ReduceScatterTensor
   static torch::autograd::Variable forward(
       torch::autograd::AutogradContext* ctx,
       const at::Tensor& input,
-      std::string reduce_op,
+      const std::string& reduce_op,
       int64_t group_size,
-      std::string group_name) {
+      const std::string& group_name) {
     TORCH_CHECK(reduce_op == "sum", "Only sum reduce op is supported");
 
     ctx->saved_data["group_size"] = group_size;
@@ -490,9 +510,9 @@ class ReduceScatterTensor
 
 at::Tensor reduce_scatter_tensor_autograd(
     const at::Tensor& input,
-    std::string reduce_op,
+    const std::string& reduce_op,
     int64_t group_size,
-    std::string group_name) {
+    const std::string& group_name) {
   return ReduceScatterTensor::apply(input, reduce_op, group_size, group_name);
 }
 
@@ -503,7 +523,7 @@ class AllGatherIntoTensor
       torch::autograd::AutogradContext* ctx,
       const at::Tensor& input,
       int64_t group_size,
-      std::string group_name) {
+      const std::string& group_name) {
     ctx->saved_data["group_size"] = group_size;
     ctx->saved_data["group_name"] = group_name;
 
@@ -546,7 +566,7 @@ class AllGatherIntoTensor
 at::Tensor all_gather_into_tensor_autograd(
     const at::Tensor& input,
     int64_t group_size,
-    std::string group_name) {
+    const std::string& group_name) {
   return AllGatherIntoTensor::apply(input, group_size, group_name);
 }
 
@@ -577,5 +597,54 @@ TORCH_LIBRARY(_c10d_functional_autograd, m) {
       "str group_name) -> Tensor",
       torch::dispatch(
           c10::DispatchKey::Autograd, ::all_gather_into_tensor_autograd),
+      {at::Tag::pt2_compliant_tag});
+}
+
+namespace {
+// DTensor related comm operations, sharing code with functional collective for
+// now
+at::Tensor shard_dim_alltoall(
+    const at::Tensor& input,
+    int64_t gather_dim,
+    int64_t shard_dim,
+    const std::string& group_name) {
+  auto group = c10d::resolve_process_group(group_name);
+  auto group_size = group->getSize();
+  std::vector<int64_t> output_sizes = input.sizes().vec();
+  if (output_sizes[shard_dim] % group_size != 0) {
+    LOG(WARNING) << "The first dimension of the shard_dim_alltoall input ("
+                 << output_sizes[shard_dim]
+                 << ") is not divisible by the group size (" << group_size
+                 << ").";
+  }
+  output_sizes[shard_dim] = output_sizes[shard_dim] / group_size;
+  std::vector<at::Tensor> inputs;
+  inputs.reserve(group_size);
+  auto length = output_sizes[shard_dim];
+  for (int i = 0; i < group_size; i++) {
+    inputs.push_back(input.narrow(shard_dim, i * length, length).contiguous());
+  }
+  // allocate outputs
+  std::vector<at::Tensor> outputs;
+  outputs.reserve(group_size);
+  for (int i = 0; i < group_size; i++) {
+    outputs.push_back(input.new_empty(output_sizes).contiguous());
+  }
+  auto work = group->alltoall(outputs, inputs);
+
+  work->wait();
+  // TODO: it's very tricky to get the current async behavior work for shard dim
+  // alltoall so for now we just keep this comm op to be synchronous. We can
+  // revisit later how to support the async case with the Work registry.
+  return at::cat(outputs, gather_dim);
+}
+} // namespace
+
+// DTensor comm op registry
+TORCH_LIBRARY(_dtensor, m) {
+  m.def(
+      "shard_dim_alltoall(Tensor input, int gather_dim, int shard_dim, str group_name) -> Tensor",
+      torch::dispatch(
+          c10::DispatchKey::CompositeExplicitAutograd, ::shard_dim_alltoall),
       {at::Tag::pt2_compliant_tag});
 }

@@ -1,4 +1,5 @@
-from typing import List, Optional
+# mypy: allow-untyped-defs
+from typing import Any, Dict, List, Optional
 
 import torch
 from torch import Tensor
@@ -7,12 +8,15 @@ from .optimizer import (
     _capturable_doc,
     _default_to_fused_or_foreach,
     _differentiable_doc,
+    _disable_dynamo_if_unsupported,
     _foreach_doc,
+    _get_capturable_supported_devices,
     _get_scalar_dtype,
     _maximize_doc,
     _use_grad_for_differentiable,
     _view_as_real,
     Optimizer,
+    ParamsT,
 )
 
 __all__ = ["Adadelta", "adadelta"]
@@ -21,11 +25,11 @@ __all__ = ["Adadelta", "adadelta"]
 class Adadelta(Optimizer):
     def __init__(
         self,
-        params,
-        lr=1.0,
-        rho=0.9,
-        eps=1e-6,
-        weight_decay=0,
+        params: ParamsT,
+        lr: float = 1.0,
+        rho: float = 0.9,
+        eps: float = 1e-6,
+        weight_decay: float = 0,
         foreach: Optional[bool] = None,
         *,
         capturable: bool = False,
@@ -73,9 +77,16 @@ class Adadelta(Optimizer):
                     )
 
     def _init_group(
-        self, group, params_with_grad, grads, square_avgs, acc_deltas, state_steps
+        self,
+        group: Dict[str, Any],
+        params_with_grad: List[Tensor],
+        grads: List[Tensor],
+        square_avgs: List[Tensor],
+        acc_deltas: List[Tensor],
+        state_steps: List[Tensor],
     ):
         has_complex = False
+        p: Tensor
         for p in group["params"]:
             if p.grad is None:
                 continue
@@ -124,11 +135,11 @@ class Adadelta(Optimizer):
                 loss = closure()
 
         for group in self.param_groups:
-            params_with_grad = []
-            grads = []
-            square_avgs = []
-            acc_deltas = []
-            state_steps = []
+            params_with_grad: List[Tensor] = []
+            grads: List[Tensor] = []
+            square_avgs: List[Tensor] = []
+            acc_deltas: List[Tensor] = []
+            state_steps: List[Tensor] = []
             (
                 lr,
                 rho,
@@ -227,6 +238,156 @@ Adadelta.__doc__ = (
 )
 
 
+def _single_tensor_adadelta(
+    params: List[Tensor],
+    grads: List[Tensor],
+    square_avgs: List[Tensor],
+    acc_deltas: List[Tensor],
+    state_steps: List[Tensor],
+    *,
+    lr: float,
+    rho: float,
+    eps: float,
+    weight_decay: float,
+    maximize: bool,
+    differentiable: bool,
+    capturable: bool,
+    has_complex: bool,
+):
+    # If compiling, the compiler will handle cudagraph checks, see note [torch.compile x capturable]
+    if not torch._utils.is_compiling() and capturable:
+        capturable_supported_devices = _get_capturable_supported_devices(
+            supports_xla=False
+        )
+        assert all(
+            p.device.type == step.device.type
+            and p.device.type in capturable_supported_devices
+            for p, step in zip(params, state_steps)
+        ), f"If capturable=True, params and state_steps must be on supported devices: {capturable_supported_devices}."
+
+    for param, grad, square_avg, acc_delta, step in zip(
+        params, grads, square_avgs, acc_deltas, state_steps
+    ):
+        step += 1
+        grad = grad if not maximize else -grad
+
+        if weight_decay != 0:
+            grad = grad.add(param, alpha=weight_decay)
+
+        if torch.is_complex(param):
+            square_avg = torch.view_as_real(square_avg)
+            acc_delta = torch.view_as_real(acc_delta)
+            grad = torch.view_as_real(grad)
+
+        square_avg.mul_(rho).addcmul_(grad, grad, value=1 - rho)
+        std = square_avg.add(eps).sqrt_()
+        delta = acc_delta.add(eps).sqrt_()
+        if differentiable:
+            delta = delta.clone()
+        delta.div_(std).mul_(grad)
+        acc_delta.mul_(rho).addcmul_(delta, delta, value=1 - rho)
+
+        if torch.is_complex(param):
+            delta = torch.view_as_complex(delta)
+        param.add_(delta, alpha=-lr)
+
+
+def _multi_tensor_adadelta(
+    params: List[Tensor],
+    grads: List[Tensor],
+    square_avgs: List[Tensor],
+    acc_deltas: List[Tensor],
+    state_steps: List[Tensor],
+    *,
+    lr: float,
+    rho: float,
+    eps: float,
+    weight_decay: float,
+    maximize: bool,
+    differentiable: bool,
+    capturable: bool,
+    has_complex: bool,
+):
+    assert not differentiable, "_foreach ops don't support autograd"
+
+    # If compiling, the compiler will handle cudagraph checks, see note [torch.compile x capturable]
+    if not torch._utils.is_compiling() and capturable:
+        capturable_supported_devices = _get_capturable_supported_devices(
+            supports_xla=False
+        )
+        assert all(
+            p.device.type == step.device.type
+            and p.device.type in capturable_supported_devices
+            for p, step in zip(params, state_steps)
+        ), f"If capturable=True, params and state_steps must be on supported devices: {capturable_supported_devices}."
+
+    if len(params) == 0:
+        return
+
+    grouped_tensors = Optimizer._group_tensors_by_device_and_dtype(
+        [params, grads, square_avgs, acc_deltas, state_steps]
+    )
+    for (
+        device_params,
+        device_grads,
+        device_square_avgs,
+        device_acc_deltas,
+        device_state_steps,
+    ), _ in grouped_tensors.values():
+        if has_complex:
+            _view_as_real(
+                device_params, device_grads, device_square_avgs, device_acc_deltas
+            )
+
+        # Update steps
+        # If steps are on CPU, foreach will fall back to the slow path, which is a for-loop calling t.add(1) over
+        # and over. 1 will then be wrapped into a Tensor over and over again, which is slower than if we just
+        # wrapped it once now. The alpha is required to assure we go to the right overload.
+        if device_state_steps[0].is_cpu:
+            torch._foreach_add_(
+                device_state_steps, torch.tensor(1.0, device="cpu"), alpha=1.0
+            )
+        else:
+            torch._foreach_add_(device_state_steps, 1)
+
+        if maximize:
+            device_grads = torch._foreach_neg(device_grads)  # type: ignore[assignment]
+
+        if weight_decay != 0:
+            # Re-use the intermediate memory (device_grads) already allocated for maximize
+            if maximize:
+                torch._foreach_add_(device_grads, device_params, alpha=weight_decay)
+            else:
+                device_grads = torch._foreach_add(  # type: ignore[assignment]
+                    device_grads, device_params, alpha=weight_decay
+                )
+
+        torch._foreach_mul_(device_square_avgs, rho)
+        torch._foreach_addcmul_(
+            device_square_avgs, device_grads, device_grads, value=1 - rho
+        )
+
+        std = torch._foreach_add(device_square_avgs, eps)
+        torch._foreach_sqrt_(std)
+
+        deltas = torch._foreach_add(device_acc_deltas, eps)
+        torch._foreach_sqrt_(deltas)
+        torch._foreach_div_(deltas, std)
+        torch._foreach_mul_(deltas, device_grads)
+
+        torch._foreach_mul_(device_acc_deltas, rho)
+        torch._foreach_addcmul_(device_acc_deltas, deltas, deltas, value=1 - rho)
+
+        # If LR is a tensor, the else branch will internally call item()
+        # which will cause silent incorrectness if we are capturing
+        if capturable and isinstance(lr, torch.Tensor):
+            torch._foreach_mul_(deltas, -lr)
+            torch._foreach_add_(device_params, deltas)
+        else:
+            torch._foreach_add_(device_params, deltas, alpha=-lr)
+
+
+@_disable_dynamo_if_unsupported(single_tensor_fn=_single_tensor_adadelta)
 def adadelta(
     params: List[Tensor],
     grads: List[Tensor],
@@ -289,142 +450,3 @@ def adadelta(
         capturable=capturable,
         has_complex=has_complex,
     )
-
-
-def _single_tensor_adadelta(
-    params: List[Tensor],
-    grads: List[Tensor],
-    square_avgs: List[Tensor],
-    acc_deltas: List[Tensor],
-    state_steps: List[Tensor],
-    *,
-    lr: float,
-    rho: float,
-    eps: float,
-    weight_decay: float,
-    maximize: bool,
-    differentiable: bool,
-    capturable: bool,
-    has_complex: bool,
-):
-    # If compiling, the compiler will handle cudagraph checks, see note [torch.compile x capturable]
-    if not torch._utils.is_compiling() and capturable:
-        assert all(
-            p.is_cuda and step.is_cuda for p, step in zip(params, state_steps)
-        ), "If capturable=True, params and state_steps must be CUDA tensors."
-
-    for param, grad, square_avg, acc_delta, step in zip(
-        params, grads, square_avgs, acc_deltas, state_steps
-    ):
-        step += 1
-        grad = grad if not maximize else -grad
-
-        if weight_decay != 0:
-            grad = grad.add(param, alpha=weight_decay)
-
-        if torch.is_complex(param):
-            square_avg = torch.view_as_real(square_avg)
-            acc_delta = torch.view_as_real(acc_delta)
-            grad = torch.view_as_real(grad)
-
-        square_avg.mul_(rho).addcmul_(grad, grad, value=1 - rho)
-        std = square_avg.add(eps).sqrt_()
-        delta = acc_delta.add(eps).sqrt_()
-        if differentiable:
-            delta = delta.clone()
-        delta.div_(std).mul_(grad)
-        acc_delta.mul_(rho).addcmul_(delta, delta, value=1 - rho)
-
-        if torch.is_complex(param):
-            delta = torch.view_as_complex(delta)
-        param.add_(delta, alpha=-lr)
-
-
-def _multi_tensor_adadelta(
-    params: List[Tensor],
-    grads: List[Tensor],
-    square_avgs: List[Tensor],
-    acc_deltas: List[Tensor],
-    state_steps: List[Tensor],
-    *,
-    lr: float,
-    weight_decay: float,
-    rho: float,
-    eps: float,
-    maximize: bool,
-    differentiable: bool,
-    capturable: bool,
-    has_complex: bool,
-):
-    assert not differentiable, "_foreach ops don't support autograd"
-
-    # If compiling, the compiler will handle cudagraph checks, see note [torch.compile x capturable]
-    if not torch._utils.is_compiling() and capturable:
-        assert all(
-            p.is_cuda and step.is_cuda for p, step in zip(params, state_steps)
-        ), "If capturable=True, params and state_steps must be CUDA tensors."
-
-    if len(params) == 0:
-        return
-
-    grouped_tensors = Optimizer._group_tensors_by_device_and_dtype(
-        [params, grads, square_avgs, acc_deltas, state_steps]
-    )
-    for (
-        device_params,
-        device_grads,
-        device_square_avgs,
-        device_acc_deltas,
-        device_state_steps,
-    ), _ in grouped_tensors.values():
-        if has_complex:
-            _view_as_real(
-                device_params, device_grads, device_square_avgs, device_acc_deltas
-            )
-
-        # Update steps
-        # If steps are on CPU, foreach will fall back to the slow path, which is a for-loop calling t.add(1) over
-        # and over. 1 will then be wrapped into a Tensor over and over again, which is slower than if we just
-        # wrapped it once now. The alpha is required to assure we go to the right overload.
-        if device_state_steps[0].is_cpu:
-            torch._foreach_add_(
-                device_state_steps, torch.tensor(1.0, device="cpu"), alpha=1.0
-            )
-        else:
-            torch._foreach_add_(device_state_steps, 1)
-
-        if maximize:
-            device_grads = torch._foreach_neg(device_grads)
-
-        if weight_decay != 0:
-            # Re-use the intermediate memory (device_grads) already allocated for maximize
-            if maximize:
-                torch._foreach_add_(device_grads, device_params, alpha=weight_decay)
-            else:
-                device_grads = torch._foreach_add(
-                    device_grads, device_params, alpha=weight_decay
-                )
-
-        torch._foreach_mul_(device_square_avgs, rho)
-        torch._foreach_addcmul_(
-            device_square_avgs, device_grads, device_grads, value=1 - rho
-        )
-
-        std = torch._foreach_add(device_square_avgs, eps)
-        torch._foreach_sqrt_(std)
-
-        deltas = torch._foreach_add(device_acc_deltas, eps)
-        torch._foreach_sqrt_(deltas)
-        torch._foreach_div_(deltas, std)
-        torch._foreach_mul_(deltas, device_grads)
-
-        torch._foreach_mul_(device_acc_deltas, rho)
-        torch._foreach_addcmul_(device_acc_deltas, deltas, deltas, value=1 - rho)
-
-        # If LR is a tensor, the else branch will internally call item()
-        # which will cause silent incorrectness if we are capturing
-        if capturable and isinstance(lr, torch.Tensor):
-            torch._foreach_mul_(deltas, -lr)
-            torch._foreach_add_(device_params, deltas)
-        else:
-            torch._foreach_add_(device_params, deltas, alpha=-lr)

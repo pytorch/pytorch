@@ -24,7 +24,7 @@ void raiseException(Stack& stack) {
 void raiseExceptionWithMessage(Stack& stack) {
   // this kernel supports RaiseException with only two arguments: the error and
   // the message Please make changes only to this kernel
-  c10::optional<std::string> qualified_class_name =
+  std::optional<std::string> qualified_class_name =
       pop(stack).toOptional<std::string>();
   std::string message;
   pop(stack, message);
@@ -116,9 +116,9 @@ void toPrimDType(Stack& stack) {
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   bool copy;
   pop(stack, non_blocking, copy);
-  c10::optional<at::ScalarType> scalarType =
+  std::optional<at::ScalarType> scalarType =
       pop(stack).toOptional<at::ScalarType>();
-  c10::optional<c10::Device> device = c10::nullopt;
+  std::optional<c10::Device> device = c10::nullopt;
   at::Tensor self = pop(stack).toTensor();
   push(stack, to_dispatch(self, device, scalarType, non_blocking, copy));
 }

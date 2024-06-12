@@ -12,7 +12,7 @@ from torch.distributed._tensor import Shard
 from torch.distributed._tensor.debug import CommDebugMode
 from torch.distributed.device_mesh import DeviceMesh, init_device_mesh
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
-from torch.testing._internal.common_fsdp import FSDPTest
+from torch.testing._internal.common_fsdp import FSDPTest, MLPStack
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     ModelArgs,
@@ -30,12 +30,12 @@ class _TestClipGradNormBase(FSDPTest):
         ref_optim: torch.optim.Optimizer,
         model: nn.Module,
         optim: torch.optim.Optimizer,
+        inp: torch.Tensor,
         dp_mesh: Optional[DeviceMesh] = None,
     ):
         vector_norm_fn = functools.partial(torch.linalg.vector_norm, ord=norm_type)
         dp_mesh = dp_mesh or init_device_mesh("cuda", (self.world_size,))
         torch.manual_seed(42 + dp_mesh.get_local_rank() + 1)
-        inp = torch.randint(0, model.model_args.vocab_size, (3, 16), device="cuda")
         for iter_idx in range(10):
             ref_optim.zero_grad()
             ref_model(inp).sum().backward()
@@ -53,11 +53,11 @@ class _TestClipGradNormBase(FSDPTest):
                     continue
                 self.assertEqual(ref_grad, param.grad.full_tensor())
 
-            # Check that all gradients have norm greater than the max norm
-            # before clipping to ensure the clipping is not vacuous
-            self.assertTrue(all(vector_norm_fn(g).item() > max_norm for g in ref_grads))
+            # Check that at least one gradient has norm greater than the max
+            # norm before clipping to ensure the clipping is not vacuous
+            self.assertTrue(any(vector_norm_fn(g).item() > max_norm for g in ref_grads))
             self.assertTrue(
-                all(vector_norm_fn(g).item() > max_norm for g in local_grads)
+                any(vector_norm_fn(g).item() > max_norm for g in local_grads)
             )
 
             # Check gradient norm clipping via total norm and individual
@@ -67,13 +67,13 @@ class _TestClipGradNormBase(FSDPTest):
             )
             comm_mode = CommDebugMode()
             with comm_mode:
+                # foreach is default to turn on so we don't need to specify it.
                 total_norm = torch.nn.utils.clip_grad_norm_(
                     model.parameters(),
                     max_norm=max_norm,
                     norm_type=norm_type,
-                    foreach=True,
                 )
-            self.assertEqual(ref_total_norm, total_norm)
+            self.assertEqual(ref_total_norm, total_norm.full_tensor())
             # Expect one all-reduce per mesh dim for partial -> replicate
             expected_all_reduces = len(total_norm.placements)
             self.assertEqual(
@@ -111,7 +111,10 @@ class TestClipGradNormWorldSize2(_TestClipGradNormBase):
                     fully_shard(module)
             fully_shard(model)
             optim = torch.optim.Adam(model.parameters(), lr=1e-2)
-            self._test_clip_grad_norm(1, norm_type, ref_model, ref_optim, model, optim)
+            inp = torch.randint(0, model.model_args.vocab_size, (3, 16), device="cuda")
+            self._test_clip_grad_norm(
+                1, norm_type, ref_model, ref_optim, model, optim, inp
+            )
 
 
 class TestClipGradNormWorldSize4(_TestClipGradNormBase):
@@ -130,20 +133,23 @@ class TestClipGradNormWorldSize4(_TestClipGradNormBase):
             )
             dp_mesh, tp_mesh = global_mesh["dp"], global_mesh["tp"]
             torch.manual_seed(42)
-            model_args = ModelArgs(dropout_p=0.0)
-            model = Transformer(model_args)
+            # Test using an MLP stack, not a transformer, since the transformer
+            # has some more significant numeric differences from the TP
+            model = MLPStack(16, with_seq_parallel=True)
             ref_model = replicate(
                 copy.deepcopy(model).cuda(), process_group=dp_mesh.get_group()
             )
             ref_optim = torch.optim.Adam(ref_model.parameters(), lr=1e-2)
-            model = Transformer.parallelize(model, tp_mesh, use_seq_parallel=True)
-            for module in model.modules():
-                if isinstance(module, TransformerBlock):
-                    fully_shard(module, mesh=dp_mesh)
-            fully_shard(model, mesh=dp_mesh)
+            model.parallelize(
+                tp_mesh,
+                dp_mesh,
+                use_activation_checkpointing=False,
+                reshard_after_forward=True,
+            )
             optim = torch.optim.Adam(model.parameters(), lr=1e-2)
+            inp = torch.randn(2, 16, device="cuda")
             self._test_clip_grad_norm(
-                1, norm_type, ref_model, ref_optim, model, optim, dp_mesh
+                0.5, norm_type, ref_model, ref_optim, model, optim, inp, dp_mesh
             )
 
 

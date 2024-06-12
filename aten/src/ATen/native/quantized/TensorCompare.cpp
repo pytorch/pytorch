@@ -47,7 +47,7 @@ Tensor& min_quantized_unary_out(const Tensor& self, Tensor& out) {
 
 std::tuple<Tensor, Tensor> sort_quantized_cpu_stable(
     const Tensor& self,
-    c10::optional<bool> stable,
+    std::optional<bool> stable,
     int64_t dim,
     bool descending) {
   auto [sort_int, sort_indicies] =

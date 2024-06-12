@@ -1,6 +1,7 @@
 # Owner(s): ["oncall: pt2"]
 import dataclasses
 import functools
+from unittest.mock import patch
 
 import torch
 from torch import nn
@@ -10,14 +11,12 @@ from torch._dynamo.testing import CompileCounter
 from torch.testing._internal.common_utils import IS_MACOS
 from torch.testing._internal.inductor_utils import HAS_CPU
 
+# Fake distributed
+WORLD_SIZE = 2
+RESIZE = True
+
 
 def init_fake_distributed():
-    # Fake distributed
-    WORLD_SIZE = 2
-
-    # TODO(jansel): fix support for this
-    RESIZE = False
-
     @torch.no_grad
     def all_gather(t):
         return torch.cat([t] * WORLD_SIZE, 0)
@@ -30,6 +29,13 @@ def init_fake_distributed():
         with torch.no_grad():
             mod.og_weight = mod.weight
             mod.weight = nn.Parameter(all_gather(mod.weight))
+
+    # Forward:
+    #   Before:
+    #     mod.weight = local_shard
+    #   After:
+    #     mod.weight = local_shard
+    #     mod.empty_weight  =zero-sized allgather
 
     def fw_post_hook(mod, inp, out):
         if RESIZE:
@@ -52,6 +58,13 @@ def init_fake_distributed():
             mod.empty_weight.copy_(full_weight)
         mod.weight = mod.empty_weight
         del mod.empty_weight
+
+    # Backward:
+    #   Before:
+    #     mod.weight = local_shard
+    #     mod.empty_weight = zero-sized allgather
+    #   After:
+    #     mod.weight = local_shard
 
     def bw_post_hook(mod, gI, gO):
         grad = mod.weight.grad
@@ -431,7 +444,40 @@ class DistributedPatternTests(TestCase):
         # Recompile on grad==None/grad!=None
         self.assertEqual(bw_cnt.frame_count, 2)
 
-    def test_fake_distributed_inductor(self):
+    def test_fake_distributed_inductor_resize(self):
+        m1, inp1 = init_fake_distributed()
+        out1 = steps(m1, inp1)
+
+        m2, inp2 = init_fake_distributed()
+        m2 = torch.compile(m2, fullgraph=True)
+        # The forward runs successfully, but functionalizing the backward errors today.
+        # See bullet (8) of the description at https://github.com/pytorch/pytorch/pull/120971 for more  details.
+        # TLDR: we see the parameter as two separate inputs in the bw graph:
+        # (a) one from a saved activation (potential the weight.t())
+        # (b) one from the pre-backward hook closing over the parameter
+        # The second is what actually sees the resize_() / copy in,
+        # while the first is used in the actual compute.
+        # The easiest way to handle this would be to figure out how to de-duplicate the parameter
+        # before we functionalize the backward.
+        # This can be done either as:
+        # (1) a custom FX pass (Will F. has pass for it, although it is not guaranteed to be safe)
+        # (2) Detecting when input aliases an safely be deduplicated and regenerated inside of the graph.
+        #     This is likely safer but will be a reasonable amount of work
+        with compiled_autograd.enable(torch.compile(fullgraph=True)):
+            # out2 = steps(m2, inp2)  # Add back when backward works
+            out = m2(inp2)
+            with self.assertRaisesRegex(
+                RuntimeError, "requiring a storage size of 800 are out of bounds"
+            ):
+                out.sum().backward()
+
+                self._assert_same_grad(m1.weight, m2.weight)
+                self._assert_same_grad(inp1, inp2)
+                # self._assert_same_grad(out1, out2)
+
+    # We can kill this test once we fix resizing in the backward, see previous test
+    @patch(f"{__name__}.RESIZE", False)
+    def test_fake_distributed_inductor_no_resize(self):
         m1, inp1 = init_fake_distributed()
         out1 = steps(m1, inp1)
 

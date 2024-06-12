@@ -1714,7 +1714,7 @@ static std::vector<IValue> traverseIValueAndGetObjects(IValue ivalue) {
   return result;
 }
 
-static c10::optional<std::string> printType(
+static std::optional<std::string> printType(
     const c10::Type& type,
     torch::jit::TypeNameUniquer& type_name_uniquer) {
   if (auto dyn = type.castRaw<c10::DynamicType>()) {
