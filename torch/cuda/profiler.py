@@ -60,9 +60,8 @@ def profile():
     Context Manager to enabling profile collection by the active profiling tool from CUDA backend.
     Example:
         >>> import torch
-        >>> import torchvision.models as models
-        >>> model = models.resnet18().cuda()
-        >>> inputs = torch.randn(5, 3, 224, 224).cuda()
+        >>> model = torch.nn.Linear(20, 30).cuda()
+        >>> inputs = torch.randn(128, 20).cuda()
         >>> with torch.cuda.profiler.profile() as prof:
         ...     model(inputs)
     """
