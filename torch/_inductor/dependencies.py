@@ -91,7 +91,12 @@ class MemoryDep(Dep):
         other_strides = V.graph.sizevars.stride_hints(other.index, other.var_names)
         assert len(set(self_strides)) == len(self_strides)
         assert len(set(other_strides)) == len(other_strides)
-        assert set(self_strides) == set(other_strides)
+
+        # May hanppen if self and other are as follows
+        # MemoryDep('addmm_6', 393216*d0 + 768*d1 + d2, {d0: 16, d1: 512, d2: 768}, None)
+        # MemoryDep('addmm_6', 98304*d0 + d1 + 768*d2, {d0: 64, d1: 768, d2: 128}, None)
+        if set(self_strides) != set(other_strides):
+            return None
 
         stride_to_index = {s: i for i, s in enumerate(self_strides)}
         order = []

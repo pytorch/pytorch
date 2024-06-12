@@ -2400,7 +2400,7 @@ class Scheduler:
             node2.reorder_loops_by_dep_pair(rhs_dep, lhs_dep)
         else:
             loop_ordering_log.debug(
-                "Don't reorder loops since both ndoes are reductions: %s v.s. %s",
+                "Don't reorder loops since both nodes are reductions: %s v.s. %s",
                 node1.get_name(),
                 node2.get_name(),
             )
