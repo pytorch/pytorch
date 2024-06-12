@@ -31,6 +31,7 @@ Our trunk health (Continuous Integration signals) can be found at [hud.pytorch.o
     - [Get the PyTorch Source](#get-the-pytorch-source)
     - [Install PyTorch](#install-pytorch)
       - [Adjust Build Options (Optional)](#adjust-build-options-optional)
+      - [Installation Issue](#installation-issue)
   - [Docker Image](#docker-image)
     - [Using pre-built images](#using-pre-built-images)
     - [Building the image yourself](#building-the-image-yourself)
@@ -361,6 +362,27 @@ export CMAKE_PREFIX_PATH=${CONDA_PREFIX:-"$(dirname $(which conda))/../"}
 MACOSX_DEPLOYMENT_TARGET=10.9 CC=clang CXX=clang++ python setup.py build --cmake-only
 ccmake build  # or cmake-gui build
 ```
+
+##### Installation Issue
+
+Sometimes you would encounter PyTorch local source is not being detected by Python interpreter after building PyTorch above.
+To resolve this, you may try the following steps:
+
+1. Remove the previously installed package:
+
+    ```bash
+    python setup.py develop --uninstall
+    ```
+
+2. Change directory to the root of the PyTorch project directory.
+
+3. Install the package in editable (develop) mode again by running:
+
+    ```bash
+    python -m pip install -e .
+    ```
+
+By following the steps above, this would create a link to your local source and ensure that it is detected by Python interpreter.
 
 ### Docker Image
 
