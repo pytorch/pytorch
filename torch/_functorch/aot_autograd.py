@@ -561,7 +561,7 @@ def create_aot_dispatcher_function(
                     ctx = _detect_attribute_assignment(mod)
                 else:
                     ctx = nullcontext()
-                with ctx, maybe_suppress():
+                with ctx:
                     fw_metadata = run_functionalized_fw_and_collect_metadata(
                         flat_fn,
                         keep_input_mutations=aot_config.keep_inference_input_mutations,
@@ -687,10 +687,9 @@ or otherwise set torch._functorch.config.functionalize_rng_ops = False."""
 
         compiler_fn = choose_dispatcher(needs_autograd, aot_config)
 
-        with maybe_suppress():
-            compiled_fn, fw_metadata = compiler_fn(
-                flat_fn, fake_flat_args, aot_config, fw_metadata=fw_metadata
-            )
+        compiled_fn, fw_metadata = compiler_fn(
+            flat_fn, fake_flat_args, aot_config, fw_metadata=fw_metadata
+        )
         return compiled_fn, fw_metadata
 
 
