@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 """
 The following example demonstrates how to represent torchrec's embedding
 sharding with the DTensor API.

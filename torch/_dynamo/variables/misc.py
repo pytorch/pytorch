@@ -171,6 +171,12 @@ class SuperVariable(VariableTracker):
             return super(variables.CustomizedDictVariable, self.objvar).call_method(
                 tx, "__setitem__", args, kwargs
             )
+        elif inner_fn is collections.OrderedDict.__getitem__ and isinstance(
+            self.objvar, variables.CustomizedDictVariable
+        ):
+            return super(variables.CustomizedDictVariable, self.objvar).call_method(
+                tx, "__getitem__", args, kwargs
+            )
         elif is_standard_setattr(inner_fn) and isinstance(
             self.objvar, UserDefinedObjectVariable
         ):
@@ -1188,11 +1194,6 @@ class NumpyTypeInfoVariable(ConstantLikeVariable):
 
 class NumpyDTypeVariable(ConstantLikeVariable):
     _error_prefix = "np.dtype[...]"
-
-    def __init__(self, value, **kwargs):
-        if isinstance(value, tnp.DType):
-            value = ConstantLikeVariable.np_dtype(value.name)
-        super().__init__(value, **kwargs)
 
     def as_proxy(self):
         """Similar to how numpy dtype descriptors (e.g. np.float32 ) are handled by NumpyVariable:
