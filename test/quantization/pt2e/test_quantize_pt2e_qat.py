@@ -855,6 +855,60 @@ class TestQuantizePT2EQAT_ConvBn_Base(PT2EQATTestCase):
     def test_qat_conv_transpose_bn_relu(self):
         self._do_test_qat_conv_transpose_bn(has_relu=True)
 
+    def test_qat_conv_bn_per_channel_weight_bias(self):
+        m = self._get_conv_bn_model()
+        example_inputs = self.example_inputs
+        m = capture_pre_autograd_graph(m, example_inputs)
+        quantizer = ConvBnDerivedBiasQuantizer(is_per_channel=True)
+        m = prepare_qat_pt2e(m, quantizer)
+        m(*example_inputs)
+        m = convert_pt2e(m)
+        m(*example_inputs)
+
+        # Expected graph:
+        #      x -> q_tensor -> dq_tensor -> conv -> q_tensor -> dq_tensor -> output
+        #  weight -> q_channel -> dq_channel /
+        #    bias -> q_channel -> dq_channel /
+
+        (conv_node, _, _) = _get_conv_bn_getitem_nodes(m)
+        conv_op = conv_node.target
+        conv_weight_dq_op = (
+            torch.ops.quantized_decomposed.dequantize_per_channel.default
+        )
+        node_occurrence = {
+            ns.call_function(
+                torch.ops.quantized_decomposed.quantize_per_tensor.default
+            ): 2,
+            ns.call_function(
+                torch.ops.quantized_decomposed.dequantize_per_tensor.default
+            ): 2,
+            ns.call_function(
+                torch.ops.quantized_decomposed.dequantize_per_channel.default
+            ): 2,
+        }
+        node_list = [
+            ns.call_function(
+                torch.ops.quantized_decomposed.quantize_per_tensor.default
+            ),
+            ns.call_function(
+                torch.ops.quantized_decomposed.dequantize_per_tensor.default
+            ),
+            ns.call_function(conv_weight_dq_op),
+            ns.call_function(conv_weight_dq_op),
+            ns.call_function(conv_op),
+            ns.call_function(
+                torch.ops.quantized_decomposed.quantize_per_tensor.default
+            ),
+            ns.call_function(
+                torch.ops.quantized_decomposed.dequantize_per_tensor.default
+            ),
+        ]
+        self.checkGraphModuleNodes(
+            m,
+            expected_node_list=node_list,
+            expected_node_occurrence=node_occurrence,
+        )
+
 
 @skipIfNoQNNPACK
 class TestQuantizePT2EQAT_ConvBn1d(TestQuantizePT2EQAT_ConvBn_Base):
@@ -952,21 +1006,44 @@ class ConvBnDerivedBiasQuantizer(Quantizer):
     derived from the conv input activation and weight qparams.
     """
 
+    def __init__(self, is_per_channel: bool = False):
+        super().__init__()
+        self.is_per_channel = is_per_channel
+
     def _derive_bias_qparams_from_act_and_weight_qparams(self, obs_or_fqs):
         act_scale, _ = obs_or_fqs[0].calculate_qparams()
         weight_scale, _ = obs_or_fqs[1].calculate_qparams()
-        bias_scale = torch.tensor([act_scale * weight_scale], dtype=torch.float32)
-        bias_zero_point = torch.tensor([0], dtype=torch.int32)
+        if self.is_per_channel:
+            bias_scale = act_scale * weight_scale
+            bias_zero_point = torch.zeros_like(bias_scale, dtype=torch.int32)
+        else:
+            bias_scale = torch.tensor([act_scale * weight_scale], dtype=torch.float32)
+            bias_zero_point = torch.tensor([0], dtype=torch.int32)
         return bias_scale, bias_zero_point
 
     def annotate(self, model: torch.fx.GraphModule) -> torch.fx.GraphModule:
+        if self.is_per_channel:
+            weight_qscheme = torch.per_channel_symmetric
+            weight_fq = FusedMovingAvgObsFakeQuantize.with_args(
+                observer=MovingAveragePerChannelMinMaxObserver,
+            )
+        else:
+            weight_qscheme = torch.per_tensor_affine
+            weight_fq = default_fake_quant
         conv_node, _, getitem_node = _get_conv_bn_getitem_nodes(model)
-        act_and_weight_qspec = QuantizationSpec(
+        act_qspec = QuantizationSpec(
             dtype=torch.uint8,
             quant_min=0,
             quant_max=255,
             qscheme=torch.per_tensor_affine,
             observer_or_fake_quant_ctr=default_fake_quant,
+        )
+        weight_qspec = QuantizationSpec(
+            dtype=torch.uint8,
+            quant_min=0,
+            quant_max=255,
+            qscheme=weight_qscheme,
+            observer_or_fake_quant_ctr=weight_fq,
         )
         bias_qspec = DerivedQuantizationSpec(
             derived_from=[
@@ -977,18 +1054,19 @@ class ConvBnDerivedBiasQuantizer(Quantizer):
             dtype=torch.int32,
             quant_min=-(2**31),
             quant_max=2**31 - 1,
-            qscheme=torch.per_tensor_affine,
+            qscheme=weight_qscheme,
+            ch_axis=0 if self.is_per_channel else None,
         )
         conv_node.meta["quantization_annotation"] = QuantizationAnnotation(
             input_qspec_map={
-                conv_node.args[0]: act_and_weight_qspec,
-                conv_node.args[1]: act_and_weight_qspec,
+                conv_node.args[0]: act_qspec,
+                conv_node.args[1]: weight_qspec,
                 conv_node.args[2]: bias_qspec,
             },
             _annotated=True,
         )
         getitem_node.meta["quantization_annotation"] = QuantizationAnnotation(
-            output_qspec=act_and_weight_qspec,
+            output_qspec=act_qspec,
             _annotated=True,
         )
         return model

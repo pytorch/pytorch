@@ -10,10 +10,6 @@
 #include <ATen/ops/repeat_native.h>
 #include <fmt/format.h>
 
-#ifdef __OBJC__
-#include <MetalPerformanceShaders/MetalPerformanceShaders.h>
-#endif
-
 namespace at::native {
 
 Tensor permute_mps(const Tensor& self, IntArrayRef dims) {
@@ -97,7 +93,7 @@ Tensor repeat_mps(const Tensor& self, IntArrayRef repeats) {
   return result;
 }
 
-static const char* METAL_REPEAT_INTERLEAVE = R"METAL_REPEAT(
+static mps::MetalShaderLibrary lib(R"METAL_REPEAT(
 kernel void repeat_interleave(constant {0}     * repeat_ptr                [[buffer(0)]],
                               constant int64_t * cumsum_ptr                [[buffer(1)]],
                               device {0}       * result_ptr                [[buffer(2)]],
@@ -110,45 +106,8 @@ kernel void repeat_interleave(constant {0}     * repeat_ptr                [[buf
     result_ptr[j] = tid;
   }}
 }}
-)METAL_REPEAT";
-
-static id<MTLLibrary> compileRepeatInterleaveLib(id<MTLDevice> device, const std::string& t1) {
-  auto key = t1;
-  static std::unordered_map<std::string, id<MTLLibrary>> libMap;
-  auto it = libMap.find(key);
-  if (it != libMap.end()) {
-    return it->second;
-  }
-  NSError* error = nil;
-  MTLCompileOptions* options = [[MTLCompileOptions new] autorelease];
-  [options setLanguageVersion:MTLLanguageVersion2_3];
-  auto rc =
-      [device newLibraryWithSource:[NSString stringWithUTF8String:fmt::format(METAL_REPEAT_INTERLEAVE, t1).c_str()]
-                           options:options
-                             error:&error];
-  TORCH_CHECK(rc != nil && error == nil, "Failed to compile library: ", [[error localizedDescription] UTF8String]);
-  libMap[key] = rc;
-  return rc;
-}
-
-static id<MTLComputePipelineState> getPipelineState(id<MTLDevice> device, const std::string& t1) {
-  static std::string kernel = "repeat_interleave";
-  auto key = kernel + t1;
-  static std::unordered_map<std::string, id<MTLComputePipelineState>> cplMap;
-  auto it = cplMap.find(key);
-  if (it != cplMap.end()) {
-    return it->second;
-  }
-  NSError* error = nil;
-  auto library = compileRepeatInterleaveLib(device, t1);
-  id<MTLFunction> func = [library newFunctionWithName:[NSString stringWithUTF8String:kernel.c_str()]];
-  TORCH_CHECK(func != nil, "Can't get kernel ", kernel);
-  auto rc = [device newComputePipelineStateWithFunction:func error:&error];
-  TORCH_CHECK(
-      rc != nil && error == nil, "Failed to construct pipeline state: ", [[error localizedDescription] UTF8String]);
-  cplMap[key] = rc;
-  return rc;
-}
+)METAL_REPEAT",
+                                   1);
 
 template <typename index_t>
 void computeRepeatIndices(const index_t* repeat_ptr,
@@ -174,7 +133,7 @@ void computeRepeatIndices(const index_t* repeat_ptr,
   dispatch_sync(mpsStream->queue(), ^() {
     @autoreleasepool {
       id<MTLComputeCommandEncoder> computeEncoder = mpsStream->commandEncoder();
-      id<MTLComputePipelineState> pipelineState = getPipelineState(MPSDevice::getInstance()->device(), scalar_type);
+      id<MTLComputePipelineState> pipelineState = lib.getPipelineStateForFunc("repeat_interleave", {scalar_type});
 
       // this function call is a no-op if MPS Profiler is not enabled
       getMPSProfiler().beginProfileKernel(pipelineState, "repeat_interleave:" + scalar_type, false);

@@ -2,62 +2,63 @@
 
 import copy
 import math
+
 import torch
-import torch.nn as nn
-import torch.backends.mkldnn
-from torch.nn import Conv2d, BatchNorm2d, ReLU, init
-from torch.ao.nn.intrinsic.qat import ConvBn2d, ConvBnReLU2d
-from torch.nn.modules.utils import _pair
+import torch.ao.nn.intrinsic.qat as nniqat
+import torch.ao.nn.qat as nnqat
+import torch.ao.nn.qat.dynamic as nnqatd
 import torch.ao.nn.quantized as nnq
 import torch.ao.nn.quantized.dynamic as nnqd
-import torch.ao.nn.qat as nnqat
-import torch.ao.nn.intrinsic.qat as nniqat
-import torch.ao.nn.qat.dynamic as nnqatd
+import torch.backends.mkldnn
+import torch.nn as nn
+import torch.testing._internal.hypothesis_utils as hu
+
+from hypothesis import given, strategies as st
+from torch.ao.nn.intrinsic.qat import ConvBn2d, ConvBnReLU2d
 from torch.ao.quantization import (
-    prepare,
     convert,
-    prepare_qat,
-    quantize_qat,
-    QuantStub,
-    DeQuantStub,
-    default_qconfig,
-    default_qat_qconfig,
     default_embedding_qat_qconfig,
+    default_qat_qconfig,
+    default_qconfig,
     default_symmetric_qnnpack_qat_qconfig,
-    get_default_qat_qconfig,
+    DeQuantStub,
     FixedQParamsFakeQuantize,
     FusedMovingAvgObsFakeQuantize,
+    get_default_qat_qconfig,
     get_embedding_qat_module_mappings,
     get_embedding_static_quant_module_mappings,
     NoopObserver,
+    prepare,
+    prepare_qat,
+    quantize_qat,
+    QuantStub,
 )
 from torch.ao.quantization.qconfig import qconfig_equals
+from torch.nn import BatchNorm2d, Conv2d, init, ReLU
+from torch.nn.modules.utils import _pair
 from torch.testing._internal.common_quantization import (
     DeFusedEmbeddingBagLinear,
-    QuantizationTestCase,
-    QuantStubModel,
-    ManualLinearQATModel,
-    ManualDropoutQATModel,
-    ManualLinearDynamicQATModel,
     ManualConvLinearQATModel,
     ManualConvLinearSymmQATModel,
+    ManualDropoutQATModel,
     ManualEmbeddingBagLinear,
-    TwoLayerLinearModel,
+    ManualLinearDynamicQATModel,
+    ManualLinearQATModel,
+    QuantizationTestCase,
+    QuantStubModel,
     test_only_eval_fn,
     test_only_train_fn,
+    TwoLayerLinearModel,
 )
 
 from torch.testing._internal.common_quantized import (
+    override_qengines,
     override_quantized_engine,
     supported_qengines,
-    override_qengines,
 )
 
 from torch.testing._internal.common_utils import skipIfNoXNNPACK
 
-from hypothesis import given
-from hypothesis import strategies as st
-import torch.testing._internal.hypothesis_utils as hu
 hu.assert_deadline_disabled()
 from functools import reduce
 
@@ -1098,6 +1099,33 @@ class TestQuantizeEagerQATNumerics(QuantizationTestCase):
         mq = convert(mp)
         self.assertTrue(type(mq[1]) == nnq.Linear)
         self.assertTrue(type(mq[2]) == nn.Identity)
+
+
+    @skipIfNoXNNPACK
+    @override_qengines
+    def test_linear_precomputed_fake_quant(self):
+        qengine = torch.backends.quantized.engine
+        if qengine != "qnnpack":
+            return  # Only qnnpack support symmetric quantization
+        m_ref = nn.Linear(4, 4)
+
+        m_ref_copy = copy.deepcopy(m_ref)
+        qconfig = default_qconfig
+        m_ref_copy.qconfig = qconfig
+        weight_post_process = copy.deepcopy(qconfig.weight())
+        activation = copy.deepcopy(qconfig.activation())
+        activation(torch.randn(4, 4))
+        m_ref_copy.activation_post_process = activation
+        m_ref_copy = nnq.Linear.from_float(m_ref_copy)
+        weight_post_process = qconfig.weight()
+        weight_post_process.min_val = torch.tensor(-1)
+        weight_post_process.max_val = torch.tensor(1)
+        m_ref.weight_post_process = weight_post_process
+        m_ref.activation_post_process = activation
+        m_ref.qconfig = qconfig
+        m_ref = nnq.Linear.from_float(m_ref, use_precomputed_fake_quant=True)
+        self.assertTrue(m_ref._weight_bias()[0].q_scale != m_ref_copy._weight_bias()[0].q_scale)
+
 
 if __name__ == '__main__':
     raise RuntimeError("This test file is not meant to be run directly, use:\n\n"

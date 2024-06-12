@@ -30,6 +30,7 @@ from torch.testing._internal.common_utils import (
     IS_SANDCASTLE,
     NoTest,
     run_tests,
+    serialTest,
     skipCUDANonDefaultStreamIf,
     skipIfRocm,
     TEST_CUDA,
@@ -280,6 +281,7 @@ class TestCudaMultiGPU(TestCase):
         assert_change(0, reset_peak=True)
 
     @unittest.skipIf(TEST_CUDAMALLOCASYNC, "temporarily disabled")
+    @serialTest()
     def test_memory_stats(self):
         gc.collect()
         torch.cuda.empty_cache()
@@ -1157,7 +1159,7 @@ t2.start()
 
     @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
     def test_grad_scaling_scale(self):
-        scaler = torch.cuda.amp.GradScaler(init_scale=2.0)
+        scaler = torch.amp.GradScaler(device="cuda", init_scale=2.0)
         t0 = torch.full((1,), 4.0, dtype=torch.float32, device="cuda:0")
         t1 = torch.full((1,), 4.0, dtype=torch.float32, device="cuda:1")
         # Create some nested iterables of tensors on different devices.
@@ -1203,8 +1205,12 @@ t2.start()
                 opt_scaling1,
             ) = _create_scaling_models_optimizers(device=dev1)
 
-            scaler = torch.cuda.amp.GradScaler(
-                init_scale=128.0, growth_factor=2.0, enabled=enabled, growth_interval=1
+            scaler = torch.amp.GradScaler(
+                device="cuda",
+                init_scale=128.0,
+                growth_factor=2.0,
+                enabled=enabled,
+                growth_interval=1,
             )
 
             def run(model0, model1, optimizer0, optimizer1, try_scaling_api):

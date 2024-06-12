@@ -252,7 +252,7 @@ struct TORCH_API SoftmaxFuncOptions {
   /// If specified, the input tensor is casted to `dtype` before the operation
   /// is performed. This is useful for preventing data type overflows. Default:
   /// None.
-  TORCH_ARG(c10::optional<torch::Dtype>, dtype) = c10::nullopt;
+  TORCH_ARG(std::optional<torch::Dtype>, dtype) = c10::nullopt;
 };
 
 } // namespace functional
@@ -293,7 +293,7 @@ struct TORCH_API SoftminFuncOptions {
   /// If specified, the input tensor is casted to `dtype` before the operation
   /// is performed. This is useful for preventing data type overflows. Default:
   /// None.
-  TORCH_ARG(c10::optional<torch::Dtype>, dtype) = c10::nullopt;
+  TORCH_ARG(std::optional<torch::Dtype>, dtype) = c10::nullopt;
 };
 
 } // namespace functional
@@ -334,7 +334,7 @@ struct TORCH_API LogSoftmaxFuncOptions {
   /// If specified, the input tensor is casted to `dtype` before the operation
   /// is performed. This is useful for preventing data type overflows. Default:
   /// None.
-  TORCH_ARG(c10::optional<torch::Dtype>, dtype) = c10::nullopt;
+  TORCH_ARG(std::optional<torch::Dtype>, dtype) = c10::nullopt;
 };
 
 } // namespace functional

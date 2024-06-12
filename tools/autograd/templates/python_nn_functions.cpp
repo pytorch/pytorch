@@ -60,14 +60,14 @@ static PyObject * THPVariable__parse_to(PyObject* module, PyObject* args, PyObje
     PyTuple_SET_ITEM(tuple.get(), 0, Py_None);
   }
   if (scalarType) {
-    PyTuple_SET_ITEM(tuple.get(), 1, torch::autograd::utils::wrap(torch::getTHPDtype(*scalarType)));
+    PyTuple_SET_ITEM(tuple.get(), 1, Py_NewRef(torch::getTHPDtype(*scalarType)));
   } else {
     Py_INCREF(Py_None);
     PyTuple_SET_ITEM(tuple.get(), 1, Py_None);
   }
   PyTuple_SET_ITEM(tuple.get(), 2, torch::autograd::utils::wrap(non_blocking));
   if (opt_memory_format.has_value()) {
-    PyTuple_SET_ITEM(tuple.get(), 3, torch::utils::getTHPMemoryFormat(opt_memory_format.value()));
+    PyTuple_SET_ITEM(tuple.get(), 3, Py_NewRef(torch::utils::getTHPMemoryFormat(opt_memory_format.value())));
   } else {
     Py_INCREF(Py_None);
     PyTuple_SET_ITEM(tuple.get(), 3, Py_None);

@@ -25,6 +25,10 @@ typedef NS_ENUM(NSUInteger, MPSGraphFFTScalingMode)
 -(MPSGraphTensor * _Nonnull) conjugateWithTensor:(MPSGraphTensor * _Nonnull) tensor
                                             name:(NSString * _Nullable) name;
 
+-(MPSGraphTensor * _Nonnull) realPartOfTensor:(MPSGraphTensor * _Nonnull) tensor
+                                         name:(NSString * _Nullable) name;
+
+
 -(MPSGraphTensor * _Nonnull) fastFourierTransformWithTensor:(MPSGraphTensor * _Nonnull) tensor
                                                        axes:(NSArray<NSNumber *> * _Nonnull) axes
                                                  descriptor:(MPSGraphFFTDescriptor * _Nonnull) descriptor

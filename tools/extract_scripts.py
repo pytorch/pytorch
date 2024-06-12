@@ -5,9 +5,9 @@ import re
 import sys
 from pathlib import Path
 from typing import Any, Dict, Optional
+from typing_extensions import TypedDict  # Python 3.11+
 
 import yaml
-from typing_extensions import TypedDict  # Python 3.11+
 
 Step = Dict[str, Any]
 
