@@ -22,6 +22,10 @@ class RequestImpl : public Request {
     return req_.body;
   }
 
+  const std::multimap<std::string, std::string>& params() const override {
+    return req_.params;
+  }
+
  private:
   const httplib::Request& req_;
 };

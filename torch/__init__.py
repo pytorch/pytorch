@@ -1097,7 +1097,6 @@ def set_default_dtype(d):
 
     Args:
         d (:class:`torch.dtype`): the floating point dtype to make the default.
-                                  Either torch.float32 or torch.float64.
 
     Example:
         >>> # xdoctest: +SKIP("Other tests may have changed the default type. Can we reset it?")
@@ -1987,8 +1986,6 @@ from torch.autograd import (  # usort: skip
     set_grad_enabled as set_grad_enabled,
 )
 
-import torch.utils.backcompat
-import torch.utils.data
 from torch import (
     __config__ as __config__,
     __future__ as __future__,
@@ -2015,6 +2012,7 @@ from torch import (
     special as special,
     testing as testing,
     types as types,
+    utils as utils,
     xpu as xpu,
 )
 from torch.signal import windows as windows

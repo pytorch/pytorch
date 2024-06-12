@@ -9,6 +9,7 @@ import torch
 import torch._guards
 from torch._inductor.constant_folding import ConstantFolder
 from torch.fx.experimental.symbolic_shapes import statically_known_true
+from torch.fx.passes.graph_transform_observer import GraphTransformObserver
 from torch.multiprocessing.reductions import StorageWeakRef
 
 from .. import config
@@ -311,15 +312,21 @@ def joint_graph_passes(graph: torch.fx.GraphModule):
     lazy_init()
     count = 0
     if config.joint_custom_pre_pass is not None:
-        config.joint_custom_pre_pass(graph.graph)
-        count += 1
+        with GraphTransformObserver(
+            graph, "joint_custom_pre_pass", config.trace.log_url_for_graph_xform
+        ):
+            config.joint_custom_pre_pass(graph.graph)
+            count += 1
 
     from .post_grad import remove_noop_ops
 
     remove_noop_ops(graph.graph)
 
     if config.joint_graph_constant_folding:
-        constant_fold_uniform_value(graph)
+        with GraphTransformObserver(
+            graph, "constant_fold_uniform_value", config.trace.log_url_for_graph_xform
+        ):
+            constant_fold_uniform_value(graph)
 
     if config.pattern_matcher:
         for patterns in pass_patterns:
@@ -329,8 +336,11 @@ def joint_graph_passes(graph: torch.fx.GraphModule):
         count += replace_random_passes(graph)
 
     if config.joint_custom_post_pass is not None:
-        config.joint_custom_post_pass(graph.graph)
-        count += 1
+        with GraphTransformObserver(
+            graph, "joint_custom_post_pass", config.trace.log_url_for_graph_xform
+        ):
+            config.joint_custom_post_pass(graph.graph)
+            count += 1
 
     if count:
         stable_topological_sort(graph.graph)

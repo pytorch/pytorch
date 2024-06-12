@@ -200,24 +200,31 @@ def _create_runtime_wrapper(
             for idx in indices_of_inps_to_detach:
                 if isinstance(args_[idx], torch.Tensor):
                     args_[idx] = args_[idx].detach()
-            with torch.autograd._force_original_view_tracking(True):
+            # It's possible to have trace_joint inside user specified with no_grad() region,
+            # if there is a nested with enable_grad(), that forces some outputs to require gradients.
+            # Therefore, we unconditionally turn on enable_grad() for compiled_fn execution.
+            with torch.autograd._force_original_view_tracking(
+                True
+            ), torch.enable_grad():
                 all_outs = call_func_at_runtime_with_args(
                     compiled_fn, args_, disable_amp=disable_amp, steal_args=True
                 )
         else:
-            # When we have an inference graph, we run with torch.no_grad.
+            # When we have an inference graph, we run with grad disabled.
             # It's possible to get an inference graph with inputs that require grad,
             # in which case we want to make sure autograd is disabled
             # (since e.g., inductor will generate aten.addmm.out calls which autograd will complain on)
-            if torch.is_grad_enabled():
-                with torch.no_grad():
-                    all_outs = call_func_at_runtime_with_args(
-                        compiled_fn, args, disable_amp=disable_amp, steal_args=True
-                    )
-            else:
+            # NOTE: We use _set_grad_enabled directly to reduce runtime overhead
+            grad_enabled = torch.is_grad_enabled()
+            try:
+                if grad_enabled:
+                    torch._C._set_grad_enabled(False)
                 all_outs = call_func_at_runtime_with_args(
                     compiled_fn, args, disable_amp=disable_amp, steal_args=True
                 )
+            finally:
+                if grad_enabled:
+                    torch._C._set_grad_enabled(True)
         del args
 
         num_mutated_runtime_inps = runtime_metadata.num_mutated_inp_runtime_indices
@@ -390,7 +397,7 @@ def _create_runtime_wrapper(
                 else:
                     t._dynamo_weak_dynamic_indices = o.dynamic_dims.copy()
         if runtime_metadata.grad_enabled_mutation is not None:
-            torch.set_grad_enabled(runtime_metadata.grad_enabled_mutation)
+            torch._C._set_grad_enabled(runtime_metadata.grad_enabled_mutation)
         return ret_outs
 
     return runtime_wrapper
