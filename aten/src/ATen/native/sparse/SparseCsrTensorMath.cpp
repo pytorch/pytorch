@@ -14,6 +14,7 @@
 #include <ATen/native/mkl/SparseBlasImpl.h>
 #include <ATen/native/sparse/SparseBlasImpl.h>
 #include <ATen/native/sparse/SparseCsrTensorMath.h>
+#include <c10/macros/Macros.h>
 #include <c10/util/irange.h>
 #include <ATen/AccumulateType.h>
 
@@ -465,7 +466,10 @@ CREATE_UNARY_UFUNC(tan);
 CREATE_UNARY_UFUNC(tanh);
 CREATE_UNARY_UFUNC(trunc);
 CREATE_UNARY_UFUNC(conj_physical);
-CREATE_UNARY_UFUNC(relu);
+
+C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wunused-function")
+static CREATE_UNARY_UFUNC(relu);
+C10_DIAGNOSTIC_POP()
 
 // With addition of `round.decimals` overload, using CREATE_UNARY_UFUNC leads
 // to unresolved overload.

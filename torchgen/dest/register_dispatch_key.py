@@ -695,6 +695,8 @@ resize_out(out, sizes, strides, options);
             output_type = "std::reference_wrapper<Tensor>"
             output_value = "proxy_outputs_[output_idx].has_value() ? *proxy_outputs_[output_idx] : outputs_[output_idx].get()"
             proxy_field = f"std::array<::std::optional<Tensor>, {len(f.func.returns)}> proxy_outputs_;"
+        else:
+            raise RuntimeError(f"Unsupported SchemaKind {k}")
 
         if self.backend_index.dispatch_key == DispatchKey.CUDA:
             if self.rocm:
