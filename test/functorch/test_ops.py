@@ -1401,7 +1401,7 @@ class TestOperators(TestCase):
                 # as_strided_copy fails test_vmapvjp, succeeds here
                 xfail("as_strided_copy", ""),
             }
-        )
+        ),
     )
     @toleranceOverride({torch.float32: tol(atol=1e-04, rtol=1e-04)})
     def test_vmapjvpall_has_batch_rule(self, device, dtype, op):
