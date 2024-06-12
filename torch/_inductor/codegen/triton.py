@@ -1310,8 +1310,8 @@ class TritonKernel(SIMDKernel):
         else:
             ep = ""
 
-        if self._other_val:
-            other = f", other={constant_repr(self._other_val)}"
+        if self._load_other:
+            other = f", other={constant_repr(self._load_other)}"
         elif (has_tmpmask or has_rindex) and indexing.has_mask():
             other = ", other=0.0"
         else:

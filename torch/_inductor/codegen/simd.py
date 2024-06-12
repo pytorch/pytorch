@@ -708,19 +708,19 @@ class SIMDKernel(Kernel):
     def mask_loads(self, mask, value):
         """Context manager to add an additional mask to tl.load/store"""
         prior = self._load_mask
-        prior_val = self._other_val
+        prior_val = self._load_other
         if prior:
             mask = ops.logical_and(mask, prior)
 
         mask = OpsWrapper._unwrap(mask)
         self._load_mask = mask
-        self._other_val = value
+        self._load_other = value
         try:
             # TODO(jansel): do we need a reshape here?
             yield mask
         finally:
             self._load_mask = prior
-            self._other_val = prior_val
+            self._load_other = prior_val
 
     def get_strides_of_load(self, index: sympy.Expr):
         """
