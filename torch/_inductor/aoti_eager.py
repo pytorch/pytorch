@@ -279,7 +279,6 @@ def aoti_compile_with_persistent_cache(
     """
     Compile the given function with persistent cache for AOTI eager mode.
     """
-    assert not dynamic, "Only support static shape for now"
     flattened_inputs = list(args) + list(kwargs.values())
     if not all(
         isinstance(
