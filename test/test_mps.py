@@ -7893,6 +7893,11 @@ class TestMPS(TestCaseMPS):
         self.assertTrue(current_alloc_after > current_alloc_before)
         self.assertTrue(driver_alloc_after > driver_alloc_before)
 
+    def test_mps_allocator_stats(self):
+        max_memory = torch.mps.recommended_max_memory()
+        print(f"Recommended Max Memory : {max_memory/ 1024 ** 3} GB")
+        self.assertTrue(max_memory > 0)
+
     # to verify this test, run XCode Instruments "Metal System Trace" or "Logging" tool,
     # press record, then run this python test, and press stop. Next expand
     # the os_signposts->PyTorchMPS and check if events or intervals are logged
