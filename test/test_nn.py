@@ -1063,6 +1063,7 @@ class TestNN(NNTestCase):
         self.assertRaises(NotImplementedError, module_dict)
         self.assertRaises(NotImplementedError, module_dict, torch.rand(1, 3))
 
+    @skipIfTorchDynamo()
     def test_ParameterList(self):
         def make_param():
             return Parameter(torch.randn(2, 2))
@@ -2280,58 +2281,6 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
 
         # Reference https://github.com/pytorch/pytorch/pull/75507#issuecomment-1110291545
         self.assertNotWarn(lambda: l.state_dict(destination=dict()), "Should not warn kwarg destination w/o _metadata")
-
-    def _test_register_state_dict_pre_hook(self, model, submodule):
-        _state_dict_prefix = "foo."
-        state_dict_pre_hook_count = 0
-        keep_var_setting = False
-
-        def my_state_dict_pre_hook(module, prefix, keep_vars):
-            self.assertEqual(keep_vars, keep_var_setting)
-            nonlocal state_dict_pre_hook_count
-            state_dict_pre_hook_count += 1
-            self.assertTrue(prefix.startswith(_state_dict_prefix))
-
-        model.register_state_dict_pre_hook(my_state_dict_pre_hook)
-        # Test to ensure submodules run the hook as well.
-        submodule.register_state_dict_pre_hook(my_state_dict_pre_hook)
-
-        def check_results(model):
-            nonlocal state_dict_pre_hook_count, keep_var_setting
-            for keep_var_setting in [True, False]:
-                _ = model.state_dict(prefix=_state_dict_prefix, keep_vars=keep_var_setting)
-                self.assertEqual(2, state_dict_pre_hook_count)
-                state_dict_pre_hook_count = 0
-        # Test state dict works as expected after model construction
-        check_results(model)
-        # Test state dict works as expected after forward
-        model(torch.ones(10, 3))
-        check_results(model)
-
-    def test_register_state_dict_pre_hook(self):
-        class MyModule(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.a = nn.Sequential(nn.Linear(3, 3), nn.Linear(3, 3), nn.Linear(3, 3))
-
-            def forward(self, x):
-                return self.a(x)
-
-        mod = MyModule()
-        self._test_register_state_dict_pre_hook(mod, mod.a)
-
-    def test_register_state_dict_pre_hook_lazy_module(self):
-        class MyLazyModule(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.layer1 = nn.LazyLinear(8)
-                self.layer2 = nn.LazyLinear(5)
-
-            def forward(self, x):
-                return self.layer2(self.layer1(x))
-
-        mod = MyLazyModule()
-        self._test_register_state_dict_pre_hook(mod, mod.layer1)
 
     def test_extra_state(self):
 

@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 
 import warnings
 from torch import Tensor

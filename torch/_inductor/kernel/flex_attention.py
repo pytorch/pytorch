@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 """ Triton Implementation of the flex_attention Kernel"""
 
 import logging
@@ -5,7 +6,6 @@ from enum import auto, Enum
 from typing import Any, List, Tuple
 
 import torch
-from torch._prims_common import make_contiguous_strides_for
 from .. import config
 from ..ir import (
     ComputedBuffer,
@@ -189,6 +189,7 @@ flex_attention_template = TritonTemplate(
     Z = {{size("Q", 0)}}
     H = {{size("Q", 1)}}
     Q_LEN = {{size("Q", 2)}}
+    KV_LEN = {{size("K", 2)}}
 
     qk_scale = 1.0
     MATMUL_PRECISION = Q.dtype.element_ty
@@ -196,9 +197,10 @@ flex_attention_template = TritonTemplate(
     start_m = tl.program_id(0)
     off_hz = tl.program_id(1)
 
-    qkv_offset = off_hz * stride_qh
+    q_offset = off_hz * stride_qh
+    kv_offset = off_hz * stride_kh
     Q_block_ptr = tl.make_block_ptr(
-        base=Q + qkv_offset,
+        base=Q + q_offset,
         shape=(Q_LEN, BLOCK_DMODEL),
         strides=(stride_qm, stride_qk),
         offsets=(start_m * BLOCK_M, 0),
@@ -206,16 +208,16 @@ flex_attention_template = TritonTemplate(
         order=(1, 0)
     )
     K_block_ptr = tl.make_block_ptr(
-        base=K + qkv_offset,
-        shape=(BLOCK_DMODEL, Q_LEN),
+        base=K + kv_offset,
+        shape=(BLOCK_DMODEL, KV_LEN),
         strides=(stride_kk, stride_kn),
         offsets=(0, 0),
         block_shape=(BLOCK_DMODEL, BLOCK_N),
         order=(0, 1)
     )
     V_block_ptr = tl.make_block_ptr(
-        base=V + qkv_offset,
-        shape=(Q_LEN, BLOCK_DMODEL),
+        base=V + kv_offset,
+        shape=(KV_LEN, BLOCK_DMODEL),
         strides=(stride_vk, stride_vn),
         offsets=(0, 0),
         block_shape=(BLOCK_N, BLOCK_DMODEL),
@@ -235,7 +237,7 @@ flex_attention_template = TritonTemplate(
     q = (q * qk_scale).to(MATMUL_PRECISION)
     # loop over k, v and update accumulator
     lo = 0
-    hi = Q_LEN
+    hi = KV_LEN
     for start_n in range(lo, hi, BLOCK_N):
         start_n = tl.multiple_of(start_n, BLOCK_N)
         # -- load k, v --
@@ -387,7 +389,7 @@ def flex_attention(*args, **kwargs):
         query.get_device(),
         query.get_dtype(),
         query.get_size(),
-        make_contiguous_strides_for(query.get_size()),
+        FlexibleLayout.contiguous_strides(query.get_size()),
     )
     # see NOTE:[TritonTemplates with multiple outputs]
     logsumexp_shape = query.get_size()[:-1]  # [B, H, M]
@@ -425,6 +427,7 @@ def flex_attention(*args, **kwargs):
             ],
             num_stages=num_stages,
             num_warps=num_warps,
+            call_sizes=query.get_size(),
             BLOCK_M=BLOCK_M,
             BLOCK_N=BLOCK_N,
             BLOCK_DMODEL=query.get_size()[-1],
@@ -445,7 +448,9 @@ def flex_attention(*args, **kwargs):
 # ---------------------------- Backward HOP Implementation ----------------------------
 
 
-def flex_attention_backward_grid(batch_size, num_heads, num_queries, d_model, meta):
+def flex_attention_backward_grid(
+    batch_size, num_heads, num_queries, d_model, num_key_value, meta
+):
     """How is this kernel parallelized?
     Currently this is only parallelizing over batch * num_heads, but we can, and want to
     parallelize over ceil_div(num_key_value, key_value_block_size). To do this will either require
@@ -453,8 +458,6 @@ def flex_attention_backward_grid(batch_size, num_heads, num_queries, d_model, me
     """
     import triton
 
-    # TODO: support different seqlen for Query and Key/Value.
-    num_key_value = num_queries
     return (
         triton.cdiv(num_queries, meta["BLOCK_M2"])
         + triton.cdiv(num_key_value, meta["BLOCK_N1"]),
@@ -476,7 +479,7 @@ flex_attention_backward_template = TritonTemplate(
     # DK: Derivative of Key, is the written to via the store_output call due to some limitations with
     # inductor codegen
     # M: Number of queries, N: Number of keys/values, D: Model dimension
-    # z: Batch size, h: Number of heads, m: Number of queries per head, k: Number of keys per head
+    # z: Batch size, h: Number of heads, m: Number of queries or keys/values, d: Head dim
     # (Modifiable) Config options:
     # BLOCK_M1: when calculating DK & DV, iterate over BLOCK_M1 across the seqlen dim of Q in each thread block.
     # BLOCK_N1: when calculating DK & DV, the thread block size across the seqlen dim of K/V.
@@ -486,10 +489,20 @@ flex_attention_backward_template = TritonTemplate(
     # change of base out of the loop
 
     # Define Q Strides
-    stride_z = {{stride("Q", 0)}}
-    stride_h = {{stride("Q", 1)}}
-    stride_tok = {{stride("Q", 2)}}
-    stride_d = {{stride("Q", 3)}}
+    stride_qz = {{stride("Q", 0)}}
+    stride_qh = {{stride("Q", 1)}}
+    stride_qm = {{stride("Q", 2)}}
+    stride_qd = {{stride("Q", 3)}}
+    # Define K Strides
+    stride_kz = {{stride("K", 0)}}
+    stride_kh = {{stride("K", 1)}}
+    stride_km = {{stride("K", 2)}}
+    stride_kd = {{stride("K", 3)}}
+    # Define V Strides
+    stride_vz = {{stride("V", 0)}}
+    stride_vh = {{stride("V", 1)}}
+    stride_vm = {{stride("V", 2)}}
+    stride_vd = {{stride("V", 3)}}
 
     Z = {{size("Q", 0)}}
     H = {{size("Q", 1)}}
@@ -501,21 +514,22 @@ flex_attention_backward_template = TritonTemplate(
     pid = tl.program_id(0)
     NUM_KV_BLOCKS = KV_LEN // BLOCK_N1
 
-    bhid = tl.program_id(2)
-    off_chz = (bhid * Q_LEN).to(tl.int64)
-    adj = (stride_h * (bhid % H) + stride_z * (bhid // H)).to(tl.int64)
-
     off_hz = tl.program_id(2)
     off_z = off_hz // H # batch idx
     off_h = off_hz % H # head idx
 
+    off_chz = (off_hz * Q_LEN).to(tl.int64)
+    q_adj = (stride_qh * (off_hz % H) + stride_qz * (off_hz // H)).to(tl.int64)
+    k_adj = (stride_kh * (off_hz % H) + stride_kz * (off_hz // H)).to(tl.int64)
+    v_adj = (stride_vh * (off_hz % H) + stride_vz * (off_hz // H)).to(tl.int64)
+
     # offset pointers for batch/head
-    Q += adj
-    K += adj
-    V += adj
-    DO += adj
-    DQ += adj
-    DV += adj
+    Q += q_adj
+    K += k_adj
+    V += v_adj
+    DO += q_adj
+    DQ += q_adj
+    DV += v_adj
     LSE += off_chz
     DELTA += off_chz
 
@@ -528,9 +542,9 @@ flex_attention_backward_template = TritonTemplate(
 
         offs_m2 = start_m2 + tl.arange(0, BLOCK_M2)
 
-        q = tl.load(Q + offs_m2[:, None] * stride_tok + offs_k[None, :] * stride_d)
+        q = tl.load(Q + offs_m2[:, None] * stride_qm + offs_k[None, :] * stride_qd)
         dq = tl.zeros([BLOCK_M2, BLOCK_DMODEL], dtype=tl.float32)
-        do = tl.load(DO + offs_m2[:, None] * stride_tok + offs_k[None, :] * stride_d)
+        do = tl.load(DO + offs_m2[:, None] * stride_qm + offs_k[None, :] * stride_qd)
 
         lse = tl.load(LSE + offs_m2)
         lse = lse[:, None]
@@ -538,8 +552,8 @@ flex_attention_backward_template = TritonTemplate(
         start_n2 = 0
         offs_m2 = start_m2 + tl.arange(0, BLOCK_M2)
         offs_n2 = start_n2 + tl.arange(0, BLOCK_N2)
-        kT_ptrs = K + offs_n2[None, :] * stride_tok + offs_k[:, None] * stride_d
-        vT_ptrs = V + offs_n2[None, :] * stride_tok + offs_k[:, None] * stride_d
+        kT_ptrs = K + offs_n2[None, :] * stride_km + offs_k[:, None] * stride_kd
+        vT_ptrs = V + offs_n2[None, :] * stride_vm + offs_k[:, None] * stride_vd
         Di = tl.load(DELTA + offs_m2)
         # BLOCK_M2 must be a multiple of BLOCK_N2, otherwise the code wouldn't work.
         tl.static_assert(BLOCK_M2 % BLOCK_N2 == 0)
@@ -590,10 +604,10 @@ flex_attention_backward_template = TritonTemplate(
             dq += tl.dot(ds, tl.trans(kT))
             # Increment pointers.
             curr_n += BLOCK_N2
-            kT_ptrs += BLOCK_N2 * stride_tok
-            vT_ptrs += BLOCK_N2 * stride_tok
+            kT_ptrs += BLOCK_N2 * stride_km
+            vT_ptrs += BLOCK_N2 * stride_km
         # Write back dQ.
-        dq_ptrs = DQ + offs_m2[:, None] * stride_tok + offs_k[None, :] * stride_d
+        dq_ptrs = DQ + offs_m2[:, None] * stride_qm + offs_k[None, :] * stride_qd
         tl.store(dq_ptrs, dq)
     else:
         # THIS BLOCK DOES DK & DV
@@ -606,13 +620,13 @@ flex_attention_backward_template = TritonTemplate(
         dk = tl.zeros([BLOCK_N1, BLOCK_DMODEL], dtype=tl.float32)
 
         # load K and V: they stay in SRAM throughout the inner loop.
-        k = tl.load(K + offs_n1[:, None] * stride_tok + offs_k[None, :] * stride_d)
-        v = tl.load(V + offs_n1[:, None] * stride_tok + offs_k[None, :] * stride_d)
+        k = tl.load(K + offs_n1[:, None] * stride_km + offs_k[None, :] * stride_kd)
+        v = tl.load(V + offs_n1[:, None] * stride_vm + offs_k[None, :] * stride_vd)
 
         offs_m1 = start_m1 + tl.arange(0, BLOCK_M1)
         offs_n1 = start_n1 + tl.arange(0, BLOCK_N1)
-        qT_ptrs = Q + offs_m1[None, :] * stride_tok + offs_k[:, None] * stride_d
-        do_ptrs = DO + offs_m1[:, None] * stride_tok + offs_k[None, :] * stride_d
+        qT_ptrs = Q + offs_m1[None, :] * stride_qm + offs_k[:, None] * stride_qd
+        do_ptrs = DO + offs_m1[:, None] * stride_qm + offs_k[None, :] * stride_qd
         # BLOCK_N1 must be a multiple of BLOCK_M1, otherwise the code wouldn't work.
         tl.static_assert(BLOCK_N1 % BLOCK_M1 == 0)
 
@@ -668,10 +682,10 @@ flex_attention_backward_template = TritonTemplate(
             dk += tl.dot(dsT.to(MATMUL_PRECISION), tl.trans(qT))
             # Increment pointers.
             curr_m += BLOCK_M1
-            qT_ptrs += BLOCK_M1 * stride_tok
-            do_ptrs += BLOCK_M1 * stride_tok
+            qT_ptrs += BLOCK_M1 * stride_qm
+            do_ptrs += BLOCK_M1 * stride_qm
 
-        dv_ptrs = DV + offs_n1[:, None] * stride_tok + offs_k[None, :] * stride_d
+        dv_ptrs = DV + offs_n1[:, None] * stride_vm + offs_k[None, :] * stride_vd
         tl.store(dv_ptrs, dv)
 
         # Write back dK.
@@ -731,7 +745,7 @@ def flex_attention_backward(*args, **kwargs):
         key.get_device(),
         key.get_dtype(),
         key.get_size(),
-        make_contiguous_strides_for(key.get_size()),
+        FlexibleLayout.contiguous_strides(key.get_size()),
     )
 
     # Create delta which will is needed for the bwd's kernel
@@ -773,6 +787,7 @@ def flex_attention_backward(*args, **kwargs):
             layout=layout_k,  # We use store_output only for grad_key
             subgraphs=[fw_subgraph_buffer, joint_subgraph_buffer],
             mutated_inputs=[grad_query, grad_value],
+            call_sizes=query.get_size() + [key.get_size()[2]],
             num_stages=num_stages,
             num_warps=num_warps,
             BLOCK_M1=BLOCK_M,
