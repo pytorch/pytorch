@@ -3657,6 +3657,37 @@ class CPUReproTests(TestCase):
         self.common(fn, (x,))
         assert metrics.generated_cpp_vec_kernel_count == 1
 
+    def test_issue_128263(self):
+        # Fix issue: https://github.com/pytorch/pytorch/issues/128263
+        input = torch.randn(5, 128, dtype=torch.float32)
+        input2 = torch.randint(0, 10, (5, 128), dtype=torch.int8)
+        input3 = torch.randn(128, 128, dtype=torch.float32)
+
+        from torch._inductor import test_operators
+        realize = test_operators.realize
+
+        class Model1(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x, x2, x3):
+                x2 = x2.to(torch.int32)
+                temp = realize(x2.to(torch.float16))
+                temp2 = temp.to(torch.float32)
+                temp2 = temp2 * x
+                return torch.mm(temp, x3.to(torch.float16)), temp2
+
+        metrics.reset()
+        m = Model1()
+        self.common(
+            m,
+            (
+                input,
+                input2,
+                input3,
+            ),
+        )
+
     def test_reduction_float_to_int64(self):
         # https://github.com/pytorch/pytorch/issues/124821
         def fn(x):

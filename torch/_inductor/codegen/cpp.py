@@ -186,12 +186,12 @@ def is_to_lowp_dtype(expr):
     return any(to_expr in expr for to_expr in to_exprs)
 
 
-def get_lowp_to_fp32_expr(lowp_var, kernel):
+def get_lowp_to_fp32_expr(lowp_var, dtype, kernel):
     if isinstance(kernel, CppVecKernel):
-        return f"at::vec::convert<float>({lowp_var})"
+        return f"at::vec::convert<{DTYPE_TO_CPP[dtype]}>({lowp_var})"
     else:
         assert isinstance(kernel, CppKernel)
-        return f"c10::convert<float>({lowp_var})"
+        return f"c10::convert<{DTYPE_TO_CPP[dtype]}>({lowp_var})"
 
 
 index_value_name_counter = 1
@@ -1668,7 +1668,8 @@ class CppKernel(Kernel):
 
         fp32_var = find_fp32_var(var_to_store, self.cse.cache)
         if fp32_var:
-            self.cse.cache[get_lowp_to_fp32_expr(var_to_store, self)] = fp32_var
+            self.cse.cache[get_lowp_to_fp32_expr(var_to_store, fp32_var.dtype, self)] = fp32_var
+            # self.cse.cache[get_lowp_to_fp32_expr(var_to_store, self)] = fp32_var
 
     def scale_index_with_offset(
         self, index: sympy.Expr, scale=1, itervar_idx=-1, offset=0
