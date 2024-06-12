@@ -3663,28 +3663,22 @@ class CPUReproTests(TestCase):
         input2 = torch.randint(0, 10, (5, 128), dtype=torch.int8)
         input3 = torch.randn(128, 128, dtype=torch.float32)
 
-        realize = test_operators.realize
-
-        class Model1(torch.nn.Module):
+        class Model(torch.nn.Module):
             def __init__(self):
                 super().__init__()
 
             def forward(self, x, x2, x3):
                 x2 = x2.to(torch.int32)
-                temp = realize(x2.to(torch.float16))
+                temp = test_operators.realize(x2.to(torch.float16))
                 temp2 = temp.to(torch.float32)
                 temp2 = temp2 * x
                 return torch.mm(temp, x3.to(torch.float16)), temp2
 
         metrics.reset()
-        m = Model1()
+        m = Model()
         self.common(
             m,
-            (
-                input,
-                input2,
-                input3,
-            ),
+            (input, input2, input3),
         )
 
     def test_reduction_float_to_int64(self):
