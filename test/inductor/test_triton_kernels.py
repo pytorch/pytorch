@@ -31,11 +31,10 @@ if HAS_CUDA:
             fast_dividef as my_fast_dividef,
         )
 
-
-# Define shared triton constants here.
-CONSTANT_C = 4
-STRING_CONSTANT_C = "CONSTANT_C"
-BOOL_CONSTANT_C = True
+    # Define shared triton constants here.
+    CONSTANT_C: tl.constexpr = 4
+    STRING_CONSTANT_C: tl.constexpr = "CONSTANT_C"
+    BOOL_CONSTANT_C: tl.constexpr = True
 
 
 class KernelTests(torch._inductor.test_case.TestCase):
@@ -586,6 +585,7 @@ def forward(self, x_1, output_1):
         self.assertEqual(int_result, resulti)
 
     @requires_cuda
+    @skipIfRocm
     def test_triton_kernel_constants(self):
         @triton.jit
         def mulC_kernel(
@@ -600,7 +600,7 @@ def forward(self, x_1, output_1):
             offsets = block_start + tl.arange(0, BLOCK_SIZE)
             mask = offsets < n_elements
             x = tl.load(in_ptr0 + offsets, mask=mask)
-            if CONSTANT_NAME.value == STRING_CONSTANT_C:
+            if CONSTANT_NAME == STRING_CONSTANT_C:
                 output = CONSTANT_C * x
             if BOOL_CONSTANT_C:
                 output *= CONSTANT_C
@@ -1549,6 +1549,23 @@ class MutationTests(torch._inductor.test_case.TestCase):
             kwargs,
             expected,
         )
+
+    @requires_cuda
+    @skipIfRocm
+    def test_triton_kernel_inference_mode(self):
+        def f(x, y, out):
+            n_elements = x.numel()
+            grid = lambda meta: (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
+            add_kernel[grid](x, y, out, n_elements, BLOCK_SIZE=4)
+
+        with torch.inference_mode():
+            x = torch.ones(32, device="cuda")
+            y = torch.ones(32, device="cuda")
+            out_ref = torch.zeros_like(x)
+            out_test = torch.zeros_like(x)
+            f(x, y, out_ref)
+            torch.compile(f)(x, y, out_test)
+            self.assertEqual(out_ref, out_test)
 
     @make_mutation_test
     def test_cumsum():
