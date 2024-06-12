@@ -1,9 +1,9 @@
 # flake8: noqa: E266, C417, B950
+from mixtral_moe_model import ConditionalFeedForward
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-
-from mixtral_moe_model import ConditionalFeedForward
 
 ##### Quantization Primitives ######
 

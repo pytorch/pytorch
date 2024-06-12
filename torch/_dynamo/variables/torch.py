@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import functools
 import inspect
 import logging
@@ -17,7 +18,11 @@ from torch._streambase import _StreamBase
 from ..._guards import TracingContext
 from .. import config, polyfill, variables
 from ..codegen import PyCodegen
-from ..create_parameter_op import new_parameter_placeholder, tracable_create_parameter
+from ..create_parameter_op import (
+    can_convert_to_tracable_parameter,
+    new_parameter_placeholder,
+    tracable_create_parameter,
+)
 from ..device_interface import get_registered_device_interfaces
 from ..exc import unimplemented
 from ..guards import GuardBuilder, install_guard
@@ -870,6 +875,9 @@ Either create the tensor outside the compiled region, or do not set the tensor t
         if data.source:
             return cls._nn_param_via_prefix_insert(tx, data, requires_grad)
 
+        if not can_convert_to_tracable_parameter():
+            unimplemented("Workaround for issues with nn_parameter construction")
+
         try:
             shape = tuple(data.var_getattr(tx, "shape").as_python_constant())
             dtype = data.var_getattr(tx, "dtype").as_python_constant()
@@ -896,6 +904,13 @@ Either create the tensor outside the compiled region, or do not set the tensor t
         )
         assert isinstance(result, variables.TensorVariable)
         result.class_type = torch.nn.Parameter
+
+        # TODO(jansel/bdhirsh) - There is some issue with
+        # tracable_create_paramter. It does not seem to use the right
+        # grad_enabled. Since this is parameter, we can just override the
+        # has_grad_fn field to False to workaround the issue.
+        result.has_grad_fn = False
+
         # In reconstruct() should use the original parameter.  The one returned by the graph will be an alias.
         result.source = placeholder.source
 
@@ -918,6 +933,12 @@ Either create the tensor outside the compiled region, or do not set the tensor t
         cg.call_function(2, True)
         cg.store(varname)
         tx.output.pregraph_bytecode.extend(cg.get_instructions())
+
+        data_node = data.as_proxy().node
+        if data_node.op not in ("placeholder", "get_attr"):
+            unimplemented(
+                "Unexpected type of data placeholder op for parameter construction"
+            )
 
         # add the newly constructed nn.Parameter as a graph input
         source = SyntheticLocalSource(varname)
