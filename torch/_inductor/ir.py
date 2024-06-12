@@ -6337,7 +6337,7 @@ class LinearUnary(ExternKernelAlloc):
         )
 
     @classmethod
-    def create(cls, x, w, b, attr, scalars, algorithm):
+    def create(cls, x, w, B, attr, scalars, algorithm):
         x = cls.require_contiguous(cls.realize_input(x))
         w = cls.require_contiguous(cls.realize_input(w))
 
@@ -6345,9 +6345,9 @@ class LinearUnary(ExternKernelAlloc):
         oc, ic = w.get_size()
         inputs = [x, w]
         constant_args = [attr, scalars if scalars else [-1], algorithm]
-        if b is not None:
-            b = cls.require_contiguous(cls.realize_input(b))
-            inputs.append(b)
+        if B is not None:
+            B = cls.require_contiguous(cls.realize_input(B))
+            inputs.append(B)
         else:
             constant_args.insert(0, None)
 
@@ -7547,7 +7547,7 @@ class StorageBox(MutableBox):
             """
             The heuristic for realizing reused result of heavy ops on cpu
             """
-            heavy_ops = ["exp"]  # a list of heavy ops
+            heavy_ops = ["exp", "sigmoid"]  # a list of heavy ops
             fn_str = loops.inner_fn_str()
             return any((op + "(") in fn_str for op in heavy_ops)
 

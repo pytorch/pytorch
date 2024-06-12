@@ -807,6 +807,7 @@ struct ReduceOp {
     bool is_last_block_done = mark_block_finished();
 
     if (is_last_block_done) {
+      __threadfence(); // complete the acquire pattern after atomic
       value = ident;
       if (config.should_block_x_reduce()) {
         index_t input_offset = threadIdx.x + threadIdx.y * blockDim.x;

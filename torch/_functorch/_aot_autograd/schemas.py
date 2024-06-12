@@ -295,8 +295,12 @@ class ViewAndMutationMeta:
     # dictionary telling us how many tokens we will need during tracing.
     tokens: Dict[Any, torch.Tensor] = field(default_factory=dict)
 
-    # Filled after jointFn tracing.
-    # Kept for runtime checks when those mutations are allowed.
+    # Only filled in if/when we trace the joint function
+    # If an input requires grad and is mutated in the backward, it is only safe to keep the mutation
+    # in the graph if gradients are disabled while the backward runs
+    # (grad mode is disabled by default when users run the backward, but can be turned on with create_graph=True)
+    # At runtime during the backward, we use this list of indices to error properly if we find out
+    # that it was not safe to include a backward mutation in the graph.
     indices_of_inputs_that_requires_grad_with_mutations_in_bw: List[int] = field(
         default_factory=list
     )
