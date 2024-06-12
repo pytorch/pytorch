@@ -1860,8 +1860,11 @@ class Sort(Loops):
         sizevars = V.graph.sizevars
         sort_numel = sizevars.simplify(sympy_product(sort_ranges))
 
-        is_persistent_kernel = sizevars.is_expr_static_and_true(
-            sympy.Le(sort_numel, 1024)
+        # Heuristic, smallest rblock where triton usually outperforms aten.sort
+        max_rblock = 256
+        is_persistent_kernel = (
+            config.triton.persistent_reductions and
+            sizevars.is_expr_static_and_true(sympy.Le(sort_numel, max_rblock))
         )
         if not is_persistent_kernel:
             # We only support persistent triton kernels

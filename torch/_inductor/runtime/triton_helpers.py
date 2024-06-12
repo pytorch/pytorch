@@ -405,19 +405,25 @@ def _compare_and_swap_with_index(
 ):
     n_outer: tl.constexpr = x.numel >> n_dims
     shape: tl.constexpr = [n_outer * 2**i, 2, 2 ** (n_dims - i - 1)]
+
+    idtype = tl.core.get_int_dtype(bitwidth=x.dtype.primitive_bitwidth, signed=True)
+
     y = tl.reshape(x, shape)
+    iy = y.to(idtype, bitcast=True)
     # slice left/right with 'stride' 2**(n_dims - i - 1)
-    right_mask = tl.arange(0, 2)[None, :, None]
-    left_mask = 1 - right_mask
-    left = tl.broadcast_to(tl.sum(y * left_mask, 1)[:, None, :], shape)
-    right = tl.broadcast_to(tl.sum(y * right_mask, 1)[:, None, :], shape)
-    left = tl.reshape(left, x.shape)
-    right = tl.reshape(right, x.shape)
+    right_mask = tl.arange(0, 2)[None, :, None].to(idtype)
+    left_mask = (1 - right_mask).to(idtype)
+    ileft = tl.broadcast_to(tl.sum(iy * left_mask, 1)[:, None, :], shape)
+    iright = tl.broadcast_to(tl.sum(iy * right_mask, 1)[:, None, :], shape)
+    ileft = tl.reshape(ileft, x.shape)
+    iright = tl.reshape(iright, x.shape)
+    left = ileft.to(x.dtype, bitcast=True)
+    right = iright.to(x.dtype, bitcast=True)
 
     # idx
     y_idx = tl.reshape(idxs, shape)
-    left_idx = tl.broadcast_to(tl.sum(y_idx * left_mask, 1)[:, None, :], shape)
-    right_idx = tl.broadcast_to(tl.sum(y_idx * right_mask, 1)[:, None, :], shape)
+    left_idx = tl.broadcast_to(tl.sum(y_idx * left_mask.to(y_idx.dtype), 1)[:, None, :], shape)
+    right_idx = tl.broadcast_to(tl.sum(y_idx * right_mask.to(y_idx.dtype), 1)[:, None, :], shape)
     left_idx = tl.reshape(left_idx, x.shape)
     right_idx = tl.reshape(right_idx, x.shape)
 
@@ -437,9 +443,6 @@ def _compare_and_swap_with_index(
         right_valid_mask = tl.reshape(right_valid_mask, x.shape)
 
     # actual compare-and-swap
-    idtype = tl.core.get_int_dtype(bitwidth=x.dtype.primitive_bitwidth, signed=True)
-    ileft = left.to(idtype, bitcast=True)
-    iright = right.to(idtype, bitcast=True)
     ix = x.to(idtype, bitcast=True)
 
     if descending:
