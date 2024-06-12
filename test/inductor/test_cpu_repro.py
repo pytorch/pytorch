@@ -2232,7 +2232,6 @@ class CPUReproTests(TestCase):
         graph_lowering = GraphLowering(
             torch.fx.GraphModule(submodules, _graph),
             shape_env=None,
-            num_static_inputs=0,
         )
 
         def set_opt_dtype(graph):
@@ -2343,7 +2342,6 @@ class CPUReproTests(TestCase):
         graph_lowering = GraphLowering(
             torch.fx.GraphModule(submodules, _graph),
             shape_env=None,
-            num_static_inputs=0,
         )
         with patch.object(graph_lowering, "wrapper_code", ""), V.set_graph_handler(
             graph_lowering
@@ -3760,6 +3758,20 @@ class CPUReproTests(TestCase):
         FileCheck().check_count(
             "return at::vec::VectorizedN<int64_t,2>::loadu(tmpbuf.data(),",
             4,
+            exactly=True,
+        ).run(code)
+
+    def test_repeated_exp(self):
+        def fn(x):
+            y = x.sigmoid()
+            return y + 1, y.sum(-1)
+
+        x = torch.randn(1000, 1000)
+        opt_fn = torch.compile(fn)
+        _, code = run_and_get_cpp_code(opt_fn, x)
+        FileCheck().check_count(
+            ".exp()",
+            1,
             exactly=True,
         ).run(code)
 

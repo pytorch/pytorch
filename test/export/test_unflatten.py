@@ -312,6 +312,31 @@ class TestUnflatten(TestCase):
             export_module.module(), unflattened, (torch.randn((2, 3)),)
         )
 
+    @unittest.skipIf(IS_WINDOWS, "Windows not supported for this test")
+    def test_unflatten_preserve_with_unused_input(self):
+        class M1(torch.nn.Module):
+            def forward(self, x, a, b):
+                return x + a, b
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.m1 = M1()
+
+            def forward(self, x, y):
+                a, b = torch.topk(y, 2)
+                return self.m1(x, a, b)[0]
+
+        ep = torch.export.export(
+            M(),
+            (torch.randn(2), torch.randn(5)),
+            preserve_module_call_signature=("m1",),
+            strict=False,
+        )
+        ep.graph.eliminate_dead_code()
+        unflattened = unflatten(ep)
+        self.compare_outputs(ep.module(), unflattened, (torch.randn(2), torch.randn(5)))
+
     def test_unflatten_wrong_input(self):
         class Mod(torch.nn.Module):
             def __init__(self):
