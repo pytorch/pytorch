@@ -229,14 +229,10 @@ class ForeachKernel(Kernel):
 
     def call_kernel(self, code, name: str):
         _, call_args, _, arg_types = self.args.python_argdefs()
-        # dynamo wraps unspec variable as 0d CPU tensor, need convert to scalar
-        for i in range(len(call_args)):
-            if V.graph.is_unspec_arg(call_args[i]):
-                call_args[i] = call_args[i] + ".item()"
         V.graph.wrapper_code.generate_kernel_call(
             name,
             call_args,
-            grid_args=self.grid(),
+            grid=self.grid(),
             arg_types=arg_types,
             grid_fn="",
         )

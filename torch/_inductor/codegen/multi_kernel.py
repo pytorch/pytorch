@@ -222,11 +222,11 @@ class MultiKernel:
             kernel_name, final_call_args, arg_types, grid
         )
 
-        grid_args = V.graph.wrapper_code.generate_default_grid(kernel_name, grid)
+        grid = V.graph.wrapper_code.generate_default_grid(kernel_name, grid)
         V.graph.wrapper_code.generate_kernel_call(
             kernel_name,
             final_call_args,
-            grid_args,
+            grid,
             arg_types=arg_types,
         )
 

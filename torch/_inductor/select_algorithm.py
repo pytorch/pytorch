@@ -513,22 +513,22 @@ class TritonTemplateKernel(TritonKernel):
             # of the grid function to generate those grid configs, which may contain
             # symbolic values. The wrapper will use cexpr to print out C++ code
             # appropriately for the grid configs.
-            grid_args = self.call_sizes + [self.meta]
+            grid = self.call_sizes + [self.meta]
             wrapper.generate_kernel_call(
                 name,
                 call_args,
-                grid_args=self.grid_fn(*grid_args),
+                grid=self.grid_fn(*grid),
                 arg_types=arg_types,
                 triton_meta=self.triton_meta,
             )
         else:
             wrapper.add_import_once(f"import {self.grid_fn.__module__}")
             meta = wrapper.add_meta_once(self.meta)
-            grid_args = self.call_sizes + [meta]
+            grid = self.call_sizes + [meta]
             wrapper.generate_kernel_call(
                 name,
                 call_args,
-                grid_args=grid_args,
+                grid=grid,
                 grid_fn=f"{self.grid_fn.__module__}.{self.grid_fn.__name__}",
                 triton_meta=self.triton_meta,
             )
