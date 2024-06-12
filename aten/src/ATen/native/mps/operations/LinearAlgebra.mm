@@ -131,7 +131,7 @@ static Tensor& mm_out_mps_impl(const Tensor& self, const Tensor& other, Tensor& 
   using namespace mps;
   using CachedGraph = MPSBinaryCachedGraph;
   TORCH_CHECK(self.dim() == 2 && other.dim() == 2, "tensors must be 2-D");
-  TORCH_CHECK(supportedFloatingType(self), "MPS device does not support mm for non-float inputs");
+  TORCH_CHECK(supportedFloatingOrComplexType(self), "MPS device does not support mm for non-float inputs");
 
   TensorArg args[]{{output, "out", 0}, {self, "mat1", 1}, {other, "mat2", 2}};
   checkAllSameGPU("mm", args);
@@ -185,7 +185,8 @@ static Tensor& addbmm_or_baddbmm_out_mps_impl(const Tensor& input,
   TORCH_CHECK(batch2.is_mps());
   TORCH_CHECK(result.is_mps());
 
-  TORCH_CHECK(supportedFloatingType(batch1), "MPS device does not support addbmm or baddbmm for non-float inputs");
+  TORCH_CHECK(supportedFloatingOrComplexType(batch1),
+              "MPS device does not support addbmm or baddbmm for non-float inputs");
 
   TORCH_CHECK(batch1.dim() == 3, "batch1 must be a 3D tensor");
   TORCH_CHECK(batch2.dim() == 3, "batch2 must be a 3D tensor");
@@ -228,8 +229,8 @@ static Tensor& addbmm_or_baddbmm_out_mps_impl(const Tensor& input,
 
   @autoreleasepool {
     string key = (opType == ADDBMM_OP_TYPE) ? ("addbmm_out_mps_impl") : ("baddbmm_out_mps_impl");
-    key += getTensorsStringKey({batch1, batch2, input}) + ":" + to_string(beta.toDouble()) + ":" +
-        to_string(alpha.toDouble());
+    key += getTensorsStringKey({batch1, batch2, input}) + ":" + std::to_string(beta.toDouble()) + ":" +
+        std::to_string(alpha.toDouble());
 
     auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
       MPSGraphTensor* inputTensor = mps::mpsGraphRankedPlaceHolder(mpsGraph, input);
@@ -292,7 +293,7 @@ static Tensor& addmm_out_mps_impl(const Tensor& bias,
 
   TORCH_CHECK(output.is_mps());
   TORCH_CHECK(self.dim() == 2 && other.dim() == 2, "tensors must be 2-D");
-  TORCH_CHECK(supportedFloatingType(self), "MPS device does not support addmm for non-float input");
+  TORCH_CHECK(supportedFloatingOrComplexType(self), "MPS device does not support addmm for non-float input");
 
   TensorArg args[]{{output, "out", 0}, {bias, "self", 1}, {self, "mat1", 2}, {other, "mat2", 3}};
   checkAllSameGPU(__func__, args);
@@ -330,8 +331,8 @@ static Tensor& addmm_out_mps_impl(const Tensor& bias,
   };
 
   @autoreleasepool {
-    string key = "addmm_out_mps_impl" + getTensorsStringKey({self, other, *bias_}) + ":" + to_string(beta.toDouble()) +
-        ":" + to_string(alpha.toDouble());
+    string key = "addmm_out_mps_impl" + getTensorsStringKey({self, other, *bias_}) + ":" +
+        std::to_string(beta.toDouble()) + ":" + std::to_string(alpha.toDouble());
     auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
       MPSGraphTensor* selfTensor = nil;
       MPSGraphTensor* otherTensor = nil;
@@ -387,7 +388,7 @@ static Tensor& addmm_out_mps_impl(const Tensor& bias,
 static Tensor& bmm_out_mps_impl(const Tensor& batch1, const Tensor& batch2, Tensor& result) {
   using namespace mps;
 
-  TORCH_CHECK(supportedFloatingType(batch1), "MPS device does not support bmm for non-float inputs");
+  TORCH_CHECK(supportedFloatingOrComplexType(batch1), "MPS device does not support bmm for non-float inputs");
 
   if (batch1.numel() == 0 || batch2.numel() == 0) {
     result.zero_();
@@ -567,7 +568,7 @@ Tensor& addr_out_mps(const Tensor& self,
 
   TORCH_CHECK(result.is_mps());
   TORCH_CHECK(vec1.dim() == 1 && vec2.dim() == 1, "tensors must be 1-D");
-  TORCH_CHECK(supportedFloatingType(vec1), "MPS device does not support addr for non-float input");
+  TORCH_CHECK(supportedFloatingOrComplexType(vec1), "MPS device does not support addr for non-float input");
 
   TensorArg args[]{{result, "out", 0}, {self, "self", 1}, {vec1, "vec1", 2}, {vec2, "vec2", 3}};
   checkAllSameGPU(__func__, args);
@@ -614,8 +615,8 @@ Tensor& addr_out_mps(const Tensor& self,
   };
 
   @autoreleasepool {
-    string key = "addr_out_mps_impl" + getTensorsStringKey({vec1, vec2, *self_}) + ":" + to_string(beta.toDouble()) +
-        ":" + to_string(alpha.toDouble());
+    string key = "addr_out_mps_impl" + getTensorsStringKey({vec1, vec2, *self_}) + ":" +
+        std::to_string(beta.toDouble()) + ":" + std::to_string(alpha.toDouble());
     auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
       MPSGraphTensor* t1 = mps::mpsGraphRankedPlaceHolder(mpsGraph, getMPSDataType(vec1), inputShape);
       MPSGraphTensor* t2 = mps::mpsGraphRankedPlaceHolder(mpsGraph, getMPSDataType(vec2), otherShape);
