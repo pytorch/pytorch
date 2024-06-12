@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import functools
 import itertools
 import logging
@@ -90,13 +91,16 @@ class SubprocPool:
         self.write_lock = threading.Lock()
         self.read_pipe: Pipe = typing.cast(Pipe, self.process.stdout)
         self.read_thread = threading.Thread(target=self._read_thread, daemon=True)
-        self.read_thread.start()
 
         self.futures_lock = threading.Lock()
         self.pending_futures: Dict[int, Future[Any]] = {}
         self.job_id_count = itertools.count()
 
         self.running = True
+
+        # Start thread last to ensure all member variables are initialized
+        # before any access.
+        self.read_thread.start()
 
     def submit(self, job_fn: Callable[..., Any], *args):
         if args:
@@ -106,11 +110,11 @@ class SubprocPool:
         with self.futures_lock:
             job_id = next(self.job_id_count)
             self.pending_futures[job_id] = future = Future()
+        future.set_running_or_notify_cancel()
         with self.write_lock:
             if not self.running:
                 raise RuntimeError("submit() on closed pool")
             _send_msg(self.write_pipe, job_id, job_data)
-        future.set_running_or_notify_cancel()
         return future
 
     def _read_thread(self):
