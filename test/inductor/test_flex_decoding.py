@@ -67,9 +67,10 @@ test_score_mods = [
 
 test_query_len = [
     1, 
-    2, 
-    32,
-    1024
+    8, 
+    16,
+    32, 
+    64
 ]
 
 

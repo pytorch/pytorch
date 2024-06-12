@@ -20,9 +20,6 @@ torch._dynamo.config.cache_size_limit = 1000
 
 from triton.testing import do_bench
 
-from joy_dev.parse_xformer_results import get_xformer_results
-xformer_performance = get_xformer_results()
-
 
 def benchmark_torch_function_in_microseconds(func: Callable, *args, **kwargs) -> float:
     # warmup
@@ -162,9 +159,12 @@ def run_single_experiment(config: ExperimentConfig, dynamic=False) -> Experiment
         )
 
 
-def calculate_speedup(results: ExperimentResults, type: str) -> float:
+def calculate_speedup(config: ExperimentConfig, results: ExperimentResults, type: str) -> float:
     if type == "fwd":
-        return results.fwd_times.eager_time / results.fwd_times.compiled_time
+        if config.baseline_time is None:
+            return results.fwd_times.compiled_time / results.fwd_times.compiled_time
+        else:
+            return config.baseline_time / results.fwd_times.compiled_time
     elif type == "bwd":
         assert results.bwd_times is not None
         return results.bwd_times.eager_time / results.bwd_times.compiled_time
@@ -202,7 +202,7 @@ def get_func_name(func):
 
 def get_average_speedups(results: List[Experiment], type: str):
     # Calculate speedups
-    speedups = [calculate_speedup(r.results, type) for r in results]
+    speedups = [calculate_speedup(r.config, r.results, type) for r in results]
     bw = [calculate_bandwidth(r.config, r.results, type) for r in results]
     gflops = [calculate_gflops(r.config, r.results) for r in results]
 
@@ -251,10 +251,10 @@ def print_results(results: List[Experiment]):
                 table_data[key].append(value)
 
     # Calculate speedups
-    fwd_speedups = [calculate_speedup(r.results, type="fwd") for r in results]
+    fwd_speedups = [calculate_speedup(r.config, r.results, type="fwd") for r in results]
     table_data["fwd_speedup"] = fwd_speedups
     if results[0].config.calculate_bwd_time:
-        bwd_speedups = [calculate_speedup(r.results, type="bwd") for r in results]
+        bwd_speedups = [calculate_speedup(r.config, r.results, type="bwd") for r in results]
         table_data["bwd_speedup"] = bwd_speedups
     
     # calculate theoretical bandwidth
@@ -297,7 +297,7 @@ def generate_score_mods() -> List[Callable]:
     return [noop]
 
 
-def generate_experiment_configs(calculate_bwd: bool) -> List[ExperimentConfig]:
+def generate_experiment_configs(calculate_bwd: bool, baseline_performance) -> List[ExperimentConfig]:
     kv_cache_sizes = [
         (128, 512), 
         (64, 1024), 
@@ -331,36 +331,57 @@ def generate_experiment_configs(calculate_bwd: bool) -> List[ExperimentConfig]:
     ) in itertools.product(
         n_heads, kv_cache_sizes, head_dims, score_mods, dtypes
     ):
-        baseline_time = xformer_performance[(bsz, kv_seq_len, Hq, Hkv, head_dim, dtype)] # (B, Mkv, Hq, Hkv, K, dtype)
+       
         n_heads = Hkv
         q_seq_len = Hq // Hkv
         assert Hq % Hkv == 0
-        all_configs.append(
-            ExperimentConfig(
-                shape=(bsz, n_heads, q_seq_len, head_dim, kv_seq_len),
-                score_mod=score_mod,
-                dtype=dtype,
-                calculate_bwd_time=calculate_bwd,
-                baseline_time=baseline_time,
+        if baseline_performance is None: 
+            all_configs.append(
+                ExperimentConfig(
+                    shape=(bsz, n_heads, q_seq_len, head_dim, kv_seq_len),
+                    score_mod=score_mod,
+                    dtype=dtype,
+                    calculate_bwd_time=calculate_bwd,
+                    baseline_time=None,
+                )
             )
-        )
+        else: 
+            baseline_time = baseline_performance[(bsz, kv_seq_len, Hq, Hkv, head_dim, dtype)] # (B, Mkv, Hq, Hkv, K, dtype)
+            if not baseline_time: 
+                baseline_time = float('nan')
+            all_configs.append(
+                ExperimentConfig(
+                    shape=(bsz, n_heads, q_seq_len, head_dim, kv_seq_len),
+                    score_mod=score_mod,
+                    dtype=dtype,
+                    calculate_bwd_time=calculate_bwd,
+                    baseline_time=baseline_time,
+                )
+            )
 
     return all_configs
 
+
+
+from joy_dev.parse_xformer_results import get_xformer_results
 
 def main(dynamic: bool, calculate_bwd: bool):
     seed = 123
     np.random.seed(seed)
     torch.manual_seed(seed)
+    xformer_performance = get_xformer_results()
     results = []
-    for config in tqdm(generate_experiment_configs(calculate_bwd)):
+    for config in tqdm(generate_experiment_configs(calculate_bwd, xformer_performance)):
         results.append(
             Experiment(config, run_single_experiment(config, dynamic=dynamic))
         )
-    for config in tqdm(generate_experiment_configs(calculate_bwd)):
+    for config in tqdm(generate_experiment_configs(calculate_bwd, xformer_performance)):
         results.append(Experiment(config, run_single_experiment(config)))
 
     print_results(results)
+
+
+
 
 
 if __name__ == "__main__":

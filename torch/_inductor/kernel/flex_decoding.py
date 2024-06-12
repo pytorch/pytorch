@@ -35,7 +35,7 @@ flex_decoding_template = TritonTemplate(
     # reduction buffers: M rowmax, L sumexp
     # output: ACC accumulated output
     # M: Number of queries, N: Number of keys/values, D: Model dimension
-    # BLOCK_MMODLE, BLOCK_DMODEL: M, and D dimemsion are always assigned to the same block
+    # BLOCK_M, BLOCK_DMODEL: M, and D dimemsion are always assigned to the same block
     # z: Batch size, h: Number of heads, m: Number of queries per head, k: Number of keys per head t: Number of tiles per query
     # (Modifiable) Config options:
     # SPLIT_KV: number of blocks K & V are split into
@@ -93,7 +93,7 @@ flex_decoding_template = TritonTemplate(
         shape=(Q_CTX, BLOCK_DMODEL),        # (M, d)
         strides=(stride_qm, stride_qk),
         offsets=(0, 0),                     # No offset: one CTA per query
-        block_shape=(BLOCK_MMODEL, BLOCK_DMODEL),
+        block_shape=(BLOCK_M, BLOCK_DMODEL),
         order=(1, 0)
     )
 
@@ -121,7 +121,7 @@ flex_decoding_template = TritonTemplate(
         shape=(SPLIT_KV, Q_CTX),                      # (T, M) 
         strides=(stride_mt, stride_mm),
         offsets=(off_t, 0),
-        block_shape=(1, BLOCK_MMODEL),
+        block_shape=(1, BLOCK_M),
         order=(1, 0)
     )
     L_block_ptr = tl.make_block_ptr(
@@ -129,20 +129,20 @@ flex_decoding_template = TritonTemplate(
         shape=(SPLIT_KV, Q_CTX),                      # (T, M)
         strides=(stride_lt, stride_lm),
         offsets=(off_t, 0),
-        block_shape=(1, BLOCK_MMODEL),
+        block_shape=(1, BLOCK_M),
         order=(1, 0)
     )
 
 
     # initialize offsets
-    offs_m = tl.arange(0, BLOCK_MMODEL)      
+    offs_m = tl.arange(0, BLOCK_M)      
     offs_n = tl.arange(0, BLOCK_N)           
     offs_d = tl.arange(0, BLOCK_DMODEL)
 
     # initialize pointer to m and l
-    m_i = tl.zeros([BLOCK_MMODEL], dtype=tl.float32) - float("inf")
-    l_i = tl.zeros([BLOCK_MMODEL], dtype=tl.float32)
-    acc = tl.zeros([BLOCK_MMODEL, BLOCK_DMODEL], dtype=tl.float32)
+    m_i = tl.zeros([BLOCK_M], dtype=tl.float32) - float("inf")
+    l_i = tl.zeros([BLOCK_M], dtype=tl.float32)
+    acc = tl.zeros([BLOCK_M, BLOCK_DMODEL], dtype=tl.float32)
 
     q = tl.load(Q_block_ptr)
     if SCORE_MOD_IS_LINEAR:
@@ -157,8 +157,8 @@ flex_decoding_template = TritonTemplate(
         k = tl.load(K_block_ptr).to(MATMUL_PRECISION)
         v = tl.load(V_block_ptr)
         # -- compute qk ---
-        qk = tl.zeros([BLOCK_MMODEL, BLOCK_N], dtype=tl.float32)
-        if BLOCK_MMODEL >= 16: 
+        qk = tl.zeros([BLOCK_M, BLOCK_N], dtype=tl.float32)
+        if BLOCK_M >= 16: 
             qk = tl.dot(q, k, acc=qk)
         else: 
             qk = tl.sum(q[:, :, None]*k.to(MATMUL_PRECISION)[None, :, :], axis=-2).to(tl.float32)
@@ -195,7 +195,7 @@ flex_decoding_template = TritonTemplate(
 
         # -- scale and update acc --
         acc *= alpha[:, None]
-        if BLOCK_MMODEL >= 16:
+        if BLOCK_M >= 16:
             acc = tl.dot(p.to(MATMUL_PRECISION), v.to(MATMUL_PRECISION), acc=acc)
         else:
             acc += tl.sum(p.to(MATMUL_PRECISION)[:, :, None] * v.to(MATMUL_PRECISION), axis=-2).to(tl.float32)
@@ -208,8 +208,8 @@ flex_decoding_template = TritonTemplate(
         V_block_ptr = tl.advance(V_block_ptr, (BLOCK_N, 0))
 
     # Store output, logsumexp and rowmax for cross CTA reduction. (all in float32, even when input data are in fp16)
-    tl.store(M_block_ptr, m_i[None, :])
-    tl.store(L_block_ptr, l_i[None, :])
+    tl.store(M_block_ptr, m_i[None, :], boundary_check=(0, 1))
+    tl.store(L_block_ptr, l_i[None, :], boundary_check=(0, 1))
 
     # -- store output
     idx_z = off_hz // H
@@ -218,7 +218,7 @@ flex_decoding_template = TritonTemplate(
     idx_m = offs_m[:, None]
     idx_d = offs_d
     # TODO generalize and add proper mask support
-    mask = (idx_m != -1) & (idx_d != -1)
+    mask = (idx_m < Q_CTX) & (idx_d != -1)
     {{store_output(("idx_z", "idx_h", "idx_t", "idx_m", "idx_d"), "acc", "mask")}} 
  """,
 )
@@ -457,7 +457,7 @@ def create_flex_decoding_kernel(subgraph_buffer, layout, query, key, value, subg
         device=query.get_device(),
     )
 
-    buf_ACC_shape = query.get_size()[:-2] + [MAX_SPLIT_KV] + query.get_size()[-2:]   # [B, H, SPLIT_KV, M]
+    buf_ACC_shape = query.get_size()[:-2] + [MAX_SPLIT_KV] + query.get_size()[-2:]   # [B, H, SPLIT_KV, M, D]
 
     SPLIT_KV = get_split_k(key.get_size()[0], key.get_size()[1], key.get_size()[2])
     assert(SPLIT_KV <= MAX_SPLIT_KV)
@@ -468,6 +468,8 @@ def create_flex_decoding_kernel(subgraph_buffer, layout, query, key, value, subg
         buf_ACC_shape,
         FlexibleLayout.contiguous_strides(buf_ACC_shape),
     )
+
+    BLOCK_M = query.get_size()[-2] if query.get_size()[-2] <= 2 else 16 if query.get_size()[-2] <= 16 else 32
 
     # Note, we don't need to pass in the captured buffers explicitly
     # because they're implicitly added by the score_mod function
@@ -487,8 +489,8 @@ def create_flex_decoding_kernel(subgraph_buffer, layout, query, key, value, subg
             num_warps=num_warps,
             call_sizes=query.get_size(),
             BLOCK_N=BLOCK_N,
+            BLOCK_M=BLOCK_M,
             SPLIT_KV=SPLIT_KV,
-            BLOCK_MMODEL=query.get_size()[-2],
             BLOCK_DMODEL=query.get_size()[-1],
             # For now, we always assume the "sound" option
             SCORE_MOD_IS_LINEAR=False,
