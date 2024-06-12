@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 r"""Contains definitions of the methods used by the _BaseDataLoaderIter workers.
 
 These methods are used to collate samples fetched from dataset into Tensor(s).

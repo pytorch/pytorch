@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 from itertools import chain
 from operator import getitem
 import torch

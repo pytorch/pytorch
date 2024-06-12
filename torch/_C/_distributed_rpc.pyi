@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 # mypy: disable-error-code="type-arg"
 from datetime import timedelta
 from typing import Any, Dict, Generic, List, Optional, overload, Tuple, Type, TypeVar

@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 """Display class to aggregate and print the results of many measurements."""
 import collections
 import enum

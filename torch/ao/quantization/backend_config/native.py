@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 import torch
 from ._common_operator_config_utils import (
     _get_binary_op_configs,

@@ -8,7 +8,8 @@
 #include <torch/csrc/python_headers.h>
 #include <torch/csrc/utils/object_ptr.h>
 
-namespace torch::utils {
+namespace torch {
+namespace utils {
 
 namespace {
 // Intentionally leaked
@@ -49,4 +50,5 @@ void initializeMemoryFormats() {
   add_memory_format(at::MemoryFormat::ChannelsLast3d, "channels_last_3d");
 }
 
-} // namespace torch::utils
+} // namespace utils
+} // namespace torch

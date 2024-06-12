@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 from collections import defaultdict
 from dataclasses import dataclass
 from time import perf_counter_ns
@@ -214,10 +213,7 @@ class profile:
         self.use_cuda = use_cuda
         if self.use_cuda:
             warn(
-                "The attribute `use_cuda` will be deprecated soon, "
-                "please use ``use_device = 'cuda'`` instead.",
-                FutureWarning,
-                stacklevel=2,
+                "The attribute `use_cuda` will be deprecated soon, please use ``use_device = 'cuda'`` instead."
             )
             self.use_device: Optional[str] = "cuda"
         else:

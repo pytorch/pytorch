@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 
 r"""
 The torch package contains data structures for multi-dimensional
@@ -212,18 +211,17 @@ def _load_global_deps() -> None:
 
     if _running_with_deploy() or platform.system() == 'Windows':
         return
+    split_build_lib_name = LIBTORCH_PKG_NAME
+    library_path = find_package_path(split_build_lib_name)
+    if library_path:
+        load_shared_libraries(library_path)
 
     lib_name = 'libtorch_global_deps' + ('.dylib' if platform.system() == 'Darwin' else '.so')
     here = os.path.abspath(__file__)
-    global_deps_lib_path = os.path.join(os.path.dirname(here), 'lib', lib_name)
+    lib_path = os.path.join(os.path.dirname(here), 'lib', lib_name)
 
-    split_build_lib_name = LIBTORCH_PKG_NAME
-    library_path = find_package_path(split_build_lib_name)
-
-    if library_path:
-        global_deps_lib_path = os.path.join(library_path, 'lib', lib_name)
     try:
-        ctypes.CDLL(global_deps_lib_path, mode=ctypes.RTLD_GLOBAL)
+        ctypes.CDLL(lib_path, mode=ctypes.RTLD_GLOBAL)
     except OSError as err:
         # Can only happen for wheel with cuda libs as PYPI deps
         # As PyTorch is not purelib, but nvidia-*-cu12 is
@@ -245,11 +243,8 @@ def _load_global_deps() -> None:
             raise err
         for lib_folder, lib_name in cuda_libs.items():
             _preload_cuda_deps(lib_folder, lib_name)
-        ctypes.CDLL(global_deps_lib_path, mode=ctypes.RTLD_GLOBAL)
+        ctypes.CDLL(lib_path, mode=ctypes.RTLD_GLOBAL)
 
-    if library_path:
-        # loading libtorch_global_deps first due its special logic
-        load_shared_libraries(library_path)
 
 if (USE_RTLD_GLOBAL_WITH_LIBTORCH or os.getenv('TORCH_USE_RTLD_GLOBAL')) and \
         (_running_with_deploy() or platform.system() != 'Windows'):
@@ -292,7 +287,7 @@ else:
 # Appease the type checker; ordinarily this binding is inserted by the
 # torch._C module initialization code in C
 if TYPE_CHECKING:
-    from . import _C as _C  # noqa: TCH004
+    from . import _C as _C
 
 class SymInt:
     """
@@ -552,6 +547,8 @@ def sym_min(a, b):
     return builtins.min(a, b)  # type: ignore[operator]
 
 # Drop in replacement for math.sqrt, math.sin, math.cos etc
+current_module = sys.modules[__name__]
+
 def _get_sym_math_fn(name):
     def fn(a):
         from .overrides import has_torch_function_unary, handle_torch_function
@@ -564,18 +561,17 @@ def _get_sym_math_fn(name):
 
     return fn
 
-__fn, __name, __sym_name = None, '', ''
-for __name in ("sqrt", "cos", "cosh", "sin", "sinh", "tan", "tanh", "asin", "acos", "atan"):
-    __sym_name = f"_sym_{__name}"
-    __fn = _get_sym_math_fn(__name)
-    __fn.__qualname__ = __fn.__name__ = __sym_name
-    globals()[__sym_name] = __fn
-
-del __fn, __name, __sym_name, _get_sym_math_fn
+for name in ("sqrt", "cos", "cosh", "sin", "sinh", "tan", "tanh", "asin", "acos", "atan"):
+    sym_name = f"_sym_{name}"
+    fn = _get_sym_math_fn(name)
+    fn.__qualname__ = fn.__name__ = sym_name
+    setattr(current_module, sym_name, fn)
 
 # Adding temporary shortcut
-sym_sqrt = globals()["_sym_sqrt"]
+sym_sqrt = current_module._sym_sqrt
 __all__.append("sym_sqrt")
+
+del fn, name, sym_name, current_module  # type: ignore[possibly-undefined]
 
 
 def sym_ite(b, t, f):
@@ -612,35 +608,30 @@ except ImportError:
             ''').strip()) from None
     raise  # If __file__ is not None the cause is unknown, so just re-raise.
 
-__name, __obj = '', None
-for __name in dir(_C):
-    if __name[0] != '_' and not __name.endswith('Base'):
-        __all__.append(__name)
-        __obj = getattr(_C, __name)
-        if callable(__obj) or inspect.isclass(__obj):
-            if __obj.__module__ != __name__:
+for name in dir(_C):
+    if name[0] != '_' and not name.endswith('Base'):
+        __all__.append(name)
+        obj = getattr(_C, name)
+        if (isinstance(obj, Callable) or inspect.isclass(obj)):  # type: ignore[arg-type]
+            if (obj.__module__ != 'torch'):
                 # TODO: fix their module from C++ side
-                if __name not in ['DisableTorchFunctionSubclass', 'DisableTorchFunction', 'Generator']:
-                    __obj.__module__ = __name__
-    elif __name == 'TensorBase':
+                if name not in ['DisableTorchFunctionSubclass', 'DisableTorchFunction', 'Generator']:
+                    obj.__module__ = 'torch'
+    elif name == 'TensorBase':
         # issue 109438 / pr 109940. Prevent TensorBase from being copied into torch.
-        delattr(sys.modules[__name__], __name)
-
-del __name, __obj
+        delattr(sys.modules[__name__], name)
 
 if not TYPE_CHECKING:
     # issue 38137 and python issue 43367. Submodules of a C extension are
     # non-standard, and attributes of those submodules cannot be pickled since
     # pickle expect to be able to import them as "from _C.sub import attr"
     # which fails with "_C is not a package
-    __name, __candidate = '', None
-    for __name in dir(_C):
-        __candidate = getattr(_C, __name)
-        if type(__candidate) is type(_C):
+    for attr in dir(_C):
+        candidate = getattr(_C, attr)
+        if type(candidate) is type(_C):
             # submodule
-            sys.modules.setdefault(f"{__name__}._C.{__name}", __candidate)
-
-    del __name, __candidate
+            if f'torch._C.{attr}' not in sys.modules:
+                sys.modules[f'torch._C.{attr}'] = candidate
 
 
 ################################################################################
@@ -1526,7 +1517,7 @@ from ._tensor_str import set_printoptions
 # Initialize extension
 ################################################################################
 
-def _manager_path():
+def manager_path():
     if _running_with_deploy() or platform.system() == 'Windows':
         return b""
     path = get_file_path('torch', 'bin', 'torch_shm_manager')
@@ -1543,8 +1534,8 @@ py_float = float
 py_int = int
 
 # Shared memory manager needs to know the exact location of manager executable
-_C._initExtension(_manager_path())
-del _manager_path
+_C._initExtension(manager_path())
+del manager_path
 
 # Appease the type checker: it can't deal with direct setting of globals().
 # Note that we will see "too many" functions when reexporting this way; there
@@ -1565,22 +1556,20 @@ PRIVATE_OPS = (
     'unique_dim',
 )
 
-__name, __obj = '', None
-for __name in dir(_C._VariableFunctions):
-    if __name.startswith('__') or __name in PRIVATE_OPS:
+for name in dir(_C._VariableFunctions):
+    if name.startswith('__') or name in PRIVATE_OPS:
         continue
-    __obj = getattr(_C._VariableFunctions, __name)
-    __obj.__module__ = __name__
+    obj = getattr(_C._VariableFunctions, name)
+    obj.__module__ = 'torch'
     # Hide some APIs that should not be public
-    if __name == "segment_reduce":
+    if name == "segment_reduce":
         # TODO: Once the undocumented FC window is passed, remove the line bellow
-        globals()[__name] = __obj
-        __name = "_" + __name
-    globals()[__name] = __obj
-    if not __name.startswith("_"):
-        __all__.append(__name)
+        globals()[name] = obj
+        name = "_" + name
+    globals()[name] = obj
+    if not name.startswith("_"):
+        __all__.append(name)
 
-del __name, __obj
 
 ################################################################################
 # Add torch.dtype instances to the public API
@@ -1588,9 +1577,9 @@ del __name, __obj
 
 import torch
 
-__all__.extend(
-    name for name in dir(torch) if isinstance(getattr(torch, name), torch.dtype)
-)
+for attribute in dir(torch):
+    if isinstance(getattr(torch, attribute), torch.dtype):
+        __all__.append(attribute)
 
 ################################################################################
 # Import TorchDynamo's lazy APIs to avoid circular dependenices
@@ -2006,6 +1995,17 @@ import torch.fx.experimental.sym_node
 from torch import func as func
 from torch.func import vmap
 
+
+# The function _sparse_coo_tensor_unsafe is removed from PyTorch
+# Python API (v. 1.13), here we temporarily provide its replacement
+# with a deprecation warning.
+# TODO: remove the function for PyTorch v 1.15.
+def _sparse_coo_tensor_unsafe(*args, **kwargs):
+    import warnings
+    warnings.warn('torch._sparse_coo_tensor_unsafe is deprecated, '
+                  'use torch.sparse_coo_tensor(..., check_invariants=False) instead.')
+    kwargs['check_invariants'] = False
+    return torch.sparse_coo_tensor(*args, **kwargs)
 
 # Register MPS specific decomps
 torch.backends.mps._init()

@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 from typing import Iterable, List, Union
 
 import torch

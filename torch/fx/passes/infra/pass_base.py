@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 import abc
 from collections import namedtuple
 from typing import Optional

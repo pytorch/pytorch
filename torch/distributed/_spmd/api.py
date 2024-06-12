@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 from abc import ABC, abstractmethod
 from contextlib import contextmanager, nullcontext
 from copy import copy

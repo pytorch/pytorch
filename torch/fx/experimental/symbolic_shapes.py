@@ -1986,10 +1986,7 @@ class DimConstraints:
             return (
                 self._is_dim(dim)
                 and ("min" in c or "max" in c)
-                and (
-                    (dim.min < 2 and c.get("min", 2) == 2)
-                    or dim.min == c.get("min", 2)
-                )  # let pass if analysis min = 2 and specified min = 0/1
+                and (dim.min < 2 or dim.min == c.get("min", 2))  # let pass if min < 2
                 and dim.max == c.get("max", sys.maxsize - 1)
             )
 
@@ -2117,7 +2114,6 @@ class DimConstraints:
         forced_specializations=None,
     ):
         """Format a message for constraint violation erros"""
-        from torch.export.dynamic_shapes import _get_dim_name_mapping
         if self._dcp.source_name_to_debug_name:
 
             def transform(s, inverse=False):
@@ -2155,7 +2151,16 @@ class DimConstraints:
                     results[expr]["eq"] = digit
 
             # retrieve dynamic shapes
-            name_to_dim = _get_dim_name_mapping(dynamic_shapes)
+            name_to_dim = {}
+            for dim in pytree.tree_flatten(
+                dynamic_shapes,
+                is_leaf=lambda x: self._is_derived_dim(x) or self._is_dim(x),
+            )[0]:
+                if dim is None or isinstance(dim, int):
+                    continue
+                name_to_dim[dim.__name__] = dim
+                if self._is_derived_dim(dim):
+                    name_to_dim[dim.root.__name__] = dim.root
 
             for s in self._static_results.union(self._dynamic_results):
                 t = transform(s)
@@ -2194,7 +2199,7 @@ class DimConstraints:
 
                 buf += (
                     f"Specializations unexpectedly required ({', '.join(sorted(debug_names))})! "
-                    'For more information, run with TORCH_LOGS="+dynamic".\n'
+                    "For more information, run with TORCH_LOGS=\"+dynamic\".\n"
                 )
                 for s, val in forced_specializations.items():
                     buf += f"  - {s} must be specialized to {val} because the guards generated for it are too complex.\n"
@@ -3534,7 +3539,7 @@ class ShapeEnv:
             if not is_debug:
                 maybe_more_info = (
                     ", for more info run with "
-                    f'TORCHDYNAMO_EXTENDED_DEBUG_CREATE_SYMBOL="{sympy_expr}"'
+                    f"TORCHDYNAMO_EXTENDED_DEBUG_CREATE_SYMBOL=\"{sympy_expr}\""
                 )
             fsummary, maybe_user_loc, maybe_extra_debug = self._get_stack_summary(is_debug)
             self.log.info(
@@ -3599,7 +3604,6 @@ class ShapeEnv:
         sources,
         source_ref=lambda n: n.name(),
         *,
-        guards: List[ShapeGuard] = None,
         input_contexts: Optional[DimList[SymbolicContext]] = None,
         # Encodes user-specified input shape equations of the form s = s' and s = fn(s').
         # (See docs on EqualityConstraint for details of the encoding.)
@@ -4068,7 +4072,7 @@ class ShapeEnv:
         # First, issue all guards.
         # This removes all the checks that follow from bounds
         # We could simply emit those and also the bounds 2 <= size when necessary
-        for guard in (guards if guards is not None else self.guards):
+        for guard in self.guards:
             if self._maybe_evaluate_static(guard.expr, axioms=()) is not None:
                 continue
             issue_guard(guard)
@@ -4152,7 +4156,7 @@ class ShapeEnv:
                 err = '\n'.join(error_msgs)
                 raise ConstraintViolationError(
                     f"Constraints violated ({debug_names})! "
-                    'For more information, run with TORCH_LOGS="+dynamic".\n'
+                    "For more information, run with TORCH_LOGS=\"+dynamic\".\n"
                     f"{err}"
                 )
             elif len(warn_msgs) > 0:
@@ -4196,18 +4200,10 @@ class ShapeEnv:
             with fx_traceback.preserve_node_meta():
                 PopulateValidator(self.graph, self.validator).run()
 
-        # Only run translation validation when we are not passing custom guards
-        if guards is None:
-            self._check_translation_validate()
+        self._check_translation_validate()
         return exprs
 
-    def produce_guards_expression(
-        self,
-        placeholders,
-        *,
-        guards: Optional[List[ShapeGuard]] = None,
-        ignore_static=True
-    ):
+    def produce_guards_expression(self, placeholders, ignore_static=True):
         """
         Expected to be used with evaluate_guards_expression(). Produces the guards
         for the given placeholders and returns a string expression to be evaluated
@@ -4215,14 +4211,9 @@ class ShapeEnv:
         """
         from torch._dynamo.source import LocalSource
         arg_names = [f"t{i}" for i in range(len(placeholders))]
-        produced_guards = self.produce_guards(
-            placeholders,
-            [LocalSource(a) for a in arg_names],
-            guards=guards,
-            ignore_static=ignore_static,
-        )
-        if produced_guards:
-            return " and ".join(produced_guards)
+        guards = self.produce_guards(placeholders, [LocalSource(a) for a in arg_names], ignore_static=ignore_static)
+        if guards:
+            return " and ".join(guards)
         return None
 
     def evaluate_guards_expression(self, code, args):
@@ -4240,18 +4231,6 @@ class ShapeEnv:
         if code:
             return self.evaluate_guards_expression(code, args)
         return True
-
-    def get_pruned_guards(self, symints):
-        """
-        Get a list of guards, but pruned so it only provides guards that
-        reference symints from the passed in input
-        """
-        symints = {s.node.expr for s in symints if isinstance(s.node.expr, sympy.Symbol)}
-        guards = []
-        for g in self.guards:
-            if all(s in symints for s in g.expr.free_symbols):
-                guards.append(g)
-        return guards
 
     def bind_symbols(self, placeholders, args):
         """
@@ -4432,11 +4411,7 @@ class ShapeEnv:
                 # Skip var_ranges logic for SingletonInt which is only used
                 # for jagged layout NestedTensors today
                 continue
-            try:
-                vr = var_ranges[k]
-            except KeyError:
-                log.warning("%s is not in var_ranges, defaulting to unknown range.", k)
-                vr = self._default_unspecified_value_range()
+            vr = var_ranges[k]
             if size_oblivious and k in self.size_like:
                 lower = max(2, vr.lower)
             else:
@@ -4630,7 +4605,7 @@ class ShapeEnv:
             f"{size_oblivious_result_msg}"
             "Potential framework code culprit (scroll up for full backtrace):\n"
             f"{''.join(traceback.StackSummary.from_list([fsummary]).format())}\n"
-            'For more information, run with TORCH_LOGS="dynamic"\n'
+            "For more information, run with TORCH_LOGS=\"dynamic\"\n"
             "For extended logs when we create symbols, also add "
             f"TORCHDYNAMO_EXTENDED_DEBUG_CREATE_SYMBOL=\"{','.join(map(str, expr.free_symbols))}\"\n"
             "If you suspect the guard was triggered from C++, add TORCHDYNAMO_EXTENDED_DEBUG_CPP=1\n"
@@ -5031,7 +5006,7 @@ class ShapeEnv:
             if not is_debug:
                 maybe_more_info = (
                     ", for more info run with "
-                    f'TORCHDYNAMO_EXTENDED_DEBUG_GUARD_ADDED="{str_g}"'
+                    f"TORCHDYNAMO_EXTENDED_DEBUG_GUARD_ADDED=\"{str_g}\""
                 )
             self.log.info(
                 "%s %s [guard added]%s (%s)%s%s",

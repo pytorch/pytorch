@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 import torch
 import torch._dynamo as torchdynamo
 

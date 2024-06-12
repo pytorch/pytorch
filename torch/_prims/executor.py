@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 from typing import Callable, Optional
 
 from torch._prims.context import TorchRefsMode

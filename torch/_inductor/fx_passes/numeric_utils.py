@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 import gc
 import logging
 import os
