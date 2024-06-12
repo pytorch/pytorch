@@ -417,7 +417,7 @@ inductor_one_sample = {
     "clamp_min": {b8},
     "corrcoef": {f16},
     "diff": {f16},
-    "einsum": {f16},
+    "einsum": {f16, i32},
     "gradient": {f16},
     "histogram": {f32, f64},
     "histogramdd": {f32, f64},
@@ -454,6 +454,82 @@ inductor_one_sample = {
     "rot90": {b8, f16, f32, f64, i32, i64},
     "scatter": {b8, i64},
     "take": {b8, f16, f32, f64, i32, i64},
+    ("__rdiv__", "cuda"): {f16},
+    ("__rmod__", "cuda"): {f16, i64},
+    ("__rmul__", "cuda"): {f16},
+    ("__rpow__", "cuda"): {f16},
+    ("addcdiv", "cuda"): {f16},
+    ("addcmul", "cuda"): {f16},
+    ("atan2", "cuda"): {f16},
+    ("cumsum", "cuda"): {f16},
+    ("cumulative_trapezoid", "cuda"): {f16},
+    ("dist", "cuda"): {f16},
+    ("div.no_rounding_mode", "cuda"): {f16},
+    ("fmod", "cuda"): {f16},
+    ("grid_sampler_2d", "cuda"): {f16},
+    ("index_fill", "cuda"): {f16, f32, f64},
+    ("ldexp", "cuda"): {f16},
+    ("lerp", "cuda"): {f16},
+    ("linalg.household_product", "cuda"): {f32},
+    ("linalg.matrix_norm", "cuda"): {f16},
+    ("linalg.vector_norm", "cuda"): {f16},
+    ("logspace", "cuda"): {i32, i64},
+    ("masked_cumsum", "cuda"): {f16},
+    ("masked_logsumexp", "cuda"): {f16},
+    ("masked_mean", "cuda"): {b8},
+    ("masked_normalize", "cuda"): {f16},
+    ("masked_prod", "cuda"): {f16},
+    ("masked_std", "cuda"): {f16},
+    ("masked_var", "cuda"): {f16},
+    ("mul", "cuda"): {f16},
+    ("nn.functional.alpha_dropout", "cuda"): {f16, f32, f64},
+    ("nn.functional.avg_pool1d", "cuda"): {f16, f32, f64},
+    ("nn.functional.avg_pool2d", "cuda"): {f16, f32, f64},
+    ("nn.functional.binary_cross_entropy", "cuda"): {f16},
+    ("nn.functional.binary_cross_entropy_with_logits", "cuda"): {f16},
+    ("nn.functional.conv2d", "cuda"): {f16},
+    ("nn.functional.cosine_embedding_loss", "cuda"): {f16},
+    ("nn.functional.dropout2d", "cuda"): {f16, f32, f64},
+    ("nn.functional.dropout3d", "cuda"): {f16, f32, f64},
+    ("nn.functional.dropout", "cuda"): {f16, f32, f64},
+    ("nn.functional.feature_alpha_dropout_with_train", "cuda"): {f16, f32, f64},
+    ("nn.functional.fractional_max_pool2d", "cuda"): {f16, f32, f64},
+    ("nn.functional.fractional_max_pool3d", "cuda"): {f16, f32, f64},
+    ("nn.functional.grid_sample", "cuda"): {f16},
+    ("nn.functional.group_norm", "cuda"): {f16},
+    ("nn.functional.hinge_embedding_loss", "cuda"): {f16},
+    ("nn.functional.interpolate_bicubic", "cuda"): {f16},
+    ("nn.functional.interpolate_bilinear", "cuda"): {f16},
+    ("nn.functional.interpolate_trilinear", "cuda"): {f16},
+    ("nn.functional.kl_div", "cuda"): {f16},
+    ("nn.functional.margin_ranking_loss", "cuda"): {f16},
+    ("nn.functional.max_pool1d", "cuda"): {f16, f32, f64},
+    ("nn.functional.max_pool3d", "cuda"): {f16},
+    ("nn.functional.mse_loss", "cuda"): {f16},
+    ("nn.functional.multi_margin_loss", "cuda"): {f16},
+    ("nn.functional.multilabel_margin_loss", "cuda"): {f16},
+    ("nn.functional.multilabel_soft_margin_loss", "cuda"): {f16},
+    ("nn.functional.normalize", "cuda"): {f16},
+    ("nn.functional.pad_replicate", "cuda"): {f16, f32, f64},
+    ("nn.functional.pairwise_distance", "cuda"): {f16},
+    ("nn.functional.poisson_nll_loss", "cuda"): {f16},
+    ("nn.functional.rms_norm", "cuda"): {f16},
+    ("norm", "cuda"): {f16},
+    ("pow", "cuda"): {f16},
+    ("prod", "cuda"): {f16},
+    ("scatter.reduce_amax", "cuda"): {f16, f32, f64},
+    ("scatter.reduce_amin", "cuda"): {f16, f32, f64},
+    ("scatter.reduce_mean", "cuda"): {f16, f32, f64},
+    ("special_xlog1py", "cuda"): {f16},
+    ("std", "cuda"): {f16},
+    ("std_mean", "cuda"): {f16},
+    ("svd_lowrank", "cuda"): {f32, f64},
+    ("trapezoid", "cuda"): {f16},
+    ("trapz", "cuda"): {f16},
+    ("true_divide", "cuda"): {f16},
+    ("var", "cuda"): {f16},
+    ("var_mean", "cuda"): {f16},
+    ("xlogy", "cuda"): {f16},
 }
 
 
@@ -499,10 +575,14 @@ class TestInductorOpInfo(TestCase):
     )
     @collection_decorator
     def test_comprehensive(self, device, dtype, op):
+        device_type = torch.device(device).type
+
+        assert device_type in (GPU_TYPE, "cpu")
+
         torch._dynamo.reset()
         with torch.no_grad():
             # TODO: should we move empty_cache to the common device interface
-            if device == "cuda":
+            if device_type == "cuda":
                 torch.cuda.empty_cache()
         op_name = op.name
         if op.variant_test_name:
@@ -518,10 +598,6 @@ class TestInductorOpInfo(TestCase):
         ):
             if dtype not in allowed_dtypes:
                 raise unittest.SkipTest("Skipped!")
-
-        device_type = torch.device(device).type
-
-        assert device_type in (GPU_TYPE, "cpu")
 
         # with open("test_output.txt", "a") as f:
         #     print(f"CONSIDERING OP {op_name} on {device_type} with {dtype} |
@@ -567,7 +643,10 @@ class TestInductorOpInfo(TestCase):
         )
         samples = op.sample_inputs(device, dtype, requires_grad=requires_grad)
 
-        if dtype in inductor_one_sample.get(op_name, {}) and not ALL_SAMPLES:
+        if (
+            dtype in inductor_one_sample.get(op_name, {})
+            or dtype in inductor_one_sample.get((op_name, device_type), {})
+        ) and not ALL_SAMPLES:
             if isinstance(samples, (list, tuple)):
                 samples = [samples[0]]
             else:
