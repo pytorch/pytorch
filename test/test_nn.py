@@ -7751,8 +7751,6 @@ class TestNNDeviceType(NNTestCase):
             gn = nn.GroupNorm(g, c, eps=0).to(device, dtype)
             gn.weight.data.fill_(1)
             gn.bias.data.fill_(0)
-            sentinel = x.is_contiguous(memory_format=torch.channels_last)
-            print(f"${sentinel} sentinel")
             output = gn(x)
             out_reshaped = output.view(b, g, -1)
             mean = out_reshaped.mean(-1)
@@ -8386,6 +8384,7 @@ class TestNNDeviceType(NNTestCase):
             helper(self, (2, 30, 50, 50), 3, torch.channels_last, is_mixed)
             helper(self, (2, 60, 50, 50), 3, torch.channels_last, is_mixed)
 
+            # channels_last_3d is currently not supported for cuda
             if device == 'cpu':
                 helper(self, (2, 9, 7, 11, 15), 3, torch.channels_last_3d, is_mixed)
                 helper(self, (2, 9, 7, 200, 15), 3, torch.channels_last_3d, is_mixed)

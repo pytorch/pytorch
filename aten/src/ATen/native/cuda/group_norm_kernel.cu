@@ -691,7 +691,7 @@ void GroupNormKernelImplInternal(
       break;
     }
     default: {
-      break; // is this okay?
+      TORCH_CHECK(false, "Unsupported memory format for group normalization: ", x_format);
     }
   }
   C10_CUDA_KERNEL_LAUNCH_CHECK();
