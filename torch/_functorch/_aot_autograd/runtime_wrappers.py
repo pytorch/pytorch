@@ -1769,7 +1769,11 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
 
                 def call_compiled_backward():
                     if ctx._is_compiled_autograd_tracing():
-                        assert lazy_backward_info is not None
+                        if lazy_backward_info is None:
+                            raise RuntimeError(
+                                """This compiled backward function was saved by AOTAutogradCache, which does not support
+                            compiled autograd. Please turn off AOTAutogradCache using `ENABLE_AOT_AUTOGRAD_CACHE=0` to continue."""
+                            )
                         bw_module = lazy_backward_info.bw_module
                         # For compiled autograd, run raw FX graph so that it can be inlined into the larger graph
                         symints = ctx._get_compiled_autograd_symints()
