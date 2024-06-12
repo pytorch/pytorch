@@ -698,7 +698,7 @@ class MiscTests(torch._inductor.test_case.TestCase):
                 self.assertExpectedInline(
                     post_grad_graphs,
                     """\
-def forward(self, arg0_1: "f32[3]", arg1_1: "f32[3]", arg2_1: "f32[3]", arg3_1: "f32[3]", arg4_1: "f32[3]"):
+def forward(self, arg0_1: "f32[3][1]cpu", arg1_1: "f32[3][1]cpu", arg2_1: "f32[3][1]cpu", arg3_1: "f32[3][1]cpu", arg4_1: "f32[3][1]cpu"):
         # No stacktrace found for following nodes
         foo_default = torch.ops.mylib.foo.default(arg4_1, [arg2_1, arg3_1], arg1_1, 2, arg0_1);  arg4_1 = arg2_1 = arg3_1 = arg1_1 = arg0_1 = None
         return ()""",
@@ -757,11 +757,11 @@ def forward(self, arg0_1: "f32[3]", arg1_1: "f32[3]", arg2_1: "f32[3]", arg3_1: 
                 self.assertExpectedInline(
                     post_grad_graphs,
                     """\
-def forward(self, arg0_1: "f32[3]", arg1_1: "f32[3]", arg2_1: "f32[3]", arg3_1: "f32[3]", arg4_1: "f32[3]"):
+def forward(self, arg0_1: "f32[3][1]cpu", arg1_1: "f32[3][1]cpu", arg2_1: "f32[3][1]cpu", arg3_1: "f32[3][1]cpu", arg4_1: "f32[3][1]cpu"):
         # No stacktrace found for following nodes
         foo_default = torch.ops.mylib.foo.default(arg4_1, [arg2_1, arg3_1], arg1_1, 2, arg0_1);  arg4_1 = arg2_1 = arg3_1 = arg1_1 = arg0_1 = None
-        getitem_4: "f32[3]" = foo_default[0]
-        getitem_5: "f32[3]" = foo_default[1];  foo_default = None
+        getitem_4: "f32[3][1]cpu" = foo_default[0]
+        getitem_5: "f32[3][1]cpu" = foo_default[1];  foo_default = None
         return (getitem_4, getitem_5)""",
                 )
 
@@ -849,7 +849,7 @@ def forward(self, arg0_1: "f32[3]", arg1_1: "f32[3]", arg2_1: "f32[3]", arg3_1: 
                 self.assertExpectedInline(
                     post_grad_graphs,
                     """\
-def forward(self, arg0_1: "f32[3]", arg1_1: "f32[3]", arg2_1: "f32[3]", arg3_1: "f32[3]"):
+def forward(self, arg0_1: "f32[3][1]cpu", arg1_1: "f32[3][1]cpu", arg2_1: "f32[3][1]cpu", arg3_1: "f32[3][1]cpu"):
         # No stacktrace found for following nodes
         foo_default = torch.ops.mylib.foo.default(None, [arg2_1, arg3_1], arg1_1, 2, arg0_1);  arg2_1 = arg3_1 = arg1_1 = arg0_1 = None
         return ()""",
@@ -9343,7 +9343,7 @@ ShapeEnv not equal: field values don't match:
   >  Left: {0: 0, 1: 1, 2: s1, 3: s0}
   > Right: {0: 0, 1: 1}
 ==> var_to_range: values don't match.
-  >  Left: {s0: VR[2, 9223372036854775806], s1: VR[2, 9223372036854775806]}
+  >  Left: {s0: VR[2, int_oo], s1: VR[2, int_oo]}
   > Right: {}
 ==> var_to_sources: values don't match.
   >  Left: {s0: [TensorPropertySource(base=ConstantSource(source_name='x'), prop=<TensorProperty.SIZE: 0>, idx=0)], s1: [TensorPropertySource(base=ConstantSource(source_name='x'), prop=<TensorProperty.SIZE: 0>, idx=1)]}
@@ -9377,7 +9377,7 @@ ShapeEnv not equal: field values don't match:
   >  Left: 2
   > Right: 0
 ==> var_to_range: values don't match.
-  >  Left: {u0: VR[-9223372036854775808, 9223372036854775807], u1: VR[0, 1], zuf0: VR[-oo, oo]}
+  >  Left: {u0: VR[-int_oo, int_oo], u1: VR[0, 1], zuf0: VR[-oo, oo]}
   > Right: {}
 """,
         )
@@ -9454,8 +9454,8 @@ ShapeEnv not equal: field values don't match:
   >  Left: {s0: 3}
   > Right: {}
 ==> var_to_range: values don't match.
-  >  Left: {s0: VR[3, 3], s1: VR[2, 9223372036854775806]}
-  > Right: {s0: VR[2, 9223372036854775806], s1: VR[2, 9223372036854775806]}
+  >  Left: {s0: VR[3, 3], s1: VR[2, int_oo]}
+  > Right: {s0: VR[2, int_oo], s1: VR[2, int_oo]}
 """,
         )
         self._replay_and_check(main)
@@ -9492,8 +9492,8 @@ ShapeEnv not equal: field values don't match:
   >  Left: {_assert, ge, x_size_0_, x_size_1_, x_storage_offset, x_stride_0_, x_stride_1_}
   > Right: {x_size_0_, x_size_1_, x_storage_offset, x_stride_0_, x_stride_1_}
 ==> var_to_range: values don't match.
-  >  Left: {s0: VR[3, 9223372036854775806], s1: VR[2, 9223372036854775806]}
-  > Right: {s0: VR[2, 9223372036854775806], s1: VR[2, 9223372036854775806]}
+  >  Left: {s0: VR[3, int_oo], s1: VR[2, int_oo]}
+  > Right: {s0: VR[2, int_oo], s1: VR[2, int_oo]}
 """,
         )
         self._replay_and_check(main)
