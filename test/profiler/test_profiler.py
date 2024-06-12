@@ -1,5 +1,18 @@
 # Owner(s): ["oncall: profiler"]
 
+# if tqdm is not shutdown properly, it will leave the monitor thread alive.
+# This causes an issue in the multithreading test because we check all events
+# in that test with their tids. The events that correspond to these lingering
+# threads all have TID of (uint64_t)(-1) which is invalid.
+# The work around is turnning off monitoring thread when tqdm is loaded.
+# Since these are unit tests, it is safe to turn off monitor thread.
+try:
+    import tqdm
+
+    tqdm.tqdm.monitor_interval = 0
+except ImportError:
+    pass
+
 import collections
 import gc
 import json
@@ -24,7 +37,6 @@ import torch
 import torch.nn as nn
 import torch.optim
 import torch.utils.data
-from torch._C._profiler import _ExperimentalConfig, _ExtraFields_PyCall
 from torch.autograd.profiler import KinetoStepTracker, profile as _profile
 from torch.autograd.profiler_legacy import profile as _profile_legacy
 from torch.profiler import (
@@ -50,7 +62,9 @@ from torch.profiler._pattern_matcher import (
     report_all_anti_patterns,
     SynchronizedDataLoaderPattern,
 )
+
 from torch.testing._internal.common_cuda import TEST_MULTIGPU
+
 from torch.testing._internal.common_device_type import skipCUDAVersionIn
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -70,27 +84,15 @@ from torch.testing._internal.common_utils import (
     TestCase,
 )
 
-
-# if tqdm is not shutdown properly, it will leave the monitor thread alive.
-# This causes an issue in the multithreading test because we check all events
-# in that test with their tids. The events that correspond to these lingering
-# threads all have TID of (uint64_t)(-1) which is invalid.
-# The work around is turnning off monitoring thread when tqdm is loaded.
-# Since these are unit tests, it is safe to turn off monitor thread.
-try:
-    import tqdm
-
-    tqdm.tqdm.monitor_interval = 0
-except ImportError:
-    pass
-
 try:
     import psutil
 
     HAS_PSUTIL = True
-except ModuleNotFoundError:
+except ImportError:
     HAS_PSUTIL = False
-    psutil = None
+
+
+from torch._C._profiler import _ExperimentalConfig, _ExtraFields_PyCall
 
 
 @unittest.skipIf(not HAS_PSUTIL, "Requires psutil to run")
@@ -1721,9 +1723,12 @@ assert KinetoStepTracker.current_step() == initial_step + 2 * niters
             gpu_value = traceEvent.get("args", {}).get("labels", None)
             if gpu_value and "GPU" in gpu_value:
                 gpu_dict[gpu_value] += 1
+                # Max PID offset is 5M, based from pytorch/kineto include header:
+                # https://github.com/pytorch/kineto/blob/8681ff11e1fa54da39023076c5c43eddd87b7a8a/libkineto/include/output_base.h#L35
+                kExceedMaxPid = 5000000
                 self.assertTrue(
                     traceEvents[i + 1]["args"]["sort_index"]
-                    == 0x1000000 + int(gpu_value.split()[1])
+                    == kExceedMaxPid + int(gpu_value.split()[1])
                 )
 
         # TODO add checking gpu count if cpuOnly_ is true or not
@@ -2406,6 +2411,7 @@ aten::mm""",
             num_matched.append(len(pattern.matched_events()))
         self.assertEqual(num_matched, [i for i, _ in cases])
 
+    @skipIfTorchDynamo("profiler gets ignored if dynamo activated")
     def test_profiler_pattern_matcher_json_report(self):
         x = torch.ones((100, 100))
         model = nn.Sequential(
