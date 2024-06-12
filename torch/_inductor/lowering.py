@@ -526,7 +526,11 @@ def make_foreach_pointwise(pw_fn, allow_alpha=False):
 
                 outputs[output_ind] = output
 
-                if is_gpu(device.type) and use_foreach and realize_outputs:
+                if (
+                    V.graph.has_feature(device, BackendFeature.FOREACH)
+                    and use_foreach
+                    and realize_outputs
+                ):
                     buffer_list.append(output.realize())
 
             if buffer_list:
