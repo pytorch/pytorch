@@ -60,7 +60,14 @@ from .common import (
     SizeArg,
     TensorArg,
 )
-from .simd import constant_repr, IterationRangesEntry, pexpr, SIMDKernel, SIMDScheduling
+from .simd import (
+    constant_repr,
+    IterationRangesEntry,
+    IterationRangesRoot,
+    pexpr,
+    SIMDKernel,
+    SIMDScheduling,
+)
 from .triton_utils import config_of, signature_of, signature_to_meta
 
 if TYPE_CHECKING:
@@ -2406,7 +2413,7 @@ class TritonKernel(SIMDKernel):
             return f"{pid}.to({self.index_dtype})"
         return pid
 
-    def _has_constant_mask(self, tree: IterationRangesEntry):
+    def _has_constant_mask(self, tree: IterationRangesRoot):
         if V.graph.sizevars.statically_known_equals(tree.numel, 1):  # type: ignore[arg-type]
             return True
         # Masks are superfluous if numel is a multiple of BLOCK
