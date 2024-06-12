@@ -3761,6 +3761,20 @@ class CPUReproTests(TestCase):
             exactly=True,
         ).run(code)
 
+    def test_repeated_exp(self):
+        def fn(x):
+            y = x.sigmoid()
+            return y + 1, y.sum(-1)
+
+        x = torch.randn(1000, 1000)
+        opt_fn = torch.compile(fn)
+        _, code = run_and_get_cpp_code(opt_fn, x)
+        FileCheck().check_count(
+            ".exp()",
+            1,
+            exactly=True,
+        ).run(code)
+
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
