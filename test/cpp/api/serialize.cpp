@@ -806,7 +806,6 @@ TEST(SerializeTest, Optim_RMSprop) {
   for (const auto i : c10::irange(params1_2_.size())) {
     if (i != (params1_2_.size() - 1)) {
       auto key_ = params_[i].unsafeGetTensorImpl();
-      auto key1_2_ = params1_2_[i].unsafeGetTensorImpl();
       const RMSpropParamState& curr_state_ =
           static_cast<const RMSpropParamState&>(*(optim1_state.at(key_).get()));
       RMSpropParamState& curr_state1_2_ =
