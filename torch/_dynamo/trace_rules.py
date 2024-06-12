@@ -2765,11 +2765,6 @@ torch_non_c_binding_in_graph_functions = dict.fromkeys(
         "torch.nn.grad.conv2d_weight",
         "torch.nn.grad.conv3d_input",
         "torch.nn.grad.conv3d_weight",
-        "torch.nn.modules.activation._is_make_fx_tracing",
-        "torch.nn.modules.utils._list_with_default",
-        "torch.nn.modules.utils._ntuple",
-        "torch.nn.modules.utils._quadruple",
-        "torch.nn.modules.utils._reverse_repeat_tuple",
         "torch.nn.modules.utils.consume_prefix_in_state_dict_if_present",
         "torch.nn.parameter.is_lazy",
         "torch.norm",
@@ -3190,6 +3185,7 @@ if torch.distributed.is_available():
 # We are using python module name instead of file or directory object to avoid circular dependency.
 # Please keep this sorted alphabetically.
 MOD_INLINELIST = {
+    "torch.utils._python_dispatch",
     "torch._refs",
     "torch._prims",
     "torch._decomp",
