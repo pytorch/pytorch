@@ -345,11 +345,11 @@ jobs:
   #     test-matrix: ${{ needs.linux-focal-cuda12_1-py3_10-gcc9-build.outputs.test-matrix }}
 
   # linux-focal-cuda12_4-py3_10-gcc9-build:
-  #   name: linux-focal-cuda12.4-py3.10-gcc9
+  #   name: linux-focal-cuda12.1-py3.10-gcc9
   #   uses: ./.github/workflows/_linux-build-label.yml
   #   with:
-  #     build-environment: linux-focal-cuda12.4-py3.10-gcc9
-  #     docker-image-name: pytorch-linux-focal-cuda12.4-cudnn8-py3-gcc9
+  #     build-environment: linux-focal-cuda12.1-py3.10-gcc9
+  #     docker-image-name: pytorch-linux-focal-cuda12.1-cudnn8-py3-gcc9
   #     test-matrix: |
   #       { include: [
   #         { config: "default", shard: 1, num_shards: 5, runner: "linux.4xlarge.nvidia.gpu" },
@@ -360,12 +360,12 @@ jobs:
   #         { config: "deploy", shard: 1, num_shards: 1, runner: "linux.4xlarge.nvidia.gpu" },
   #       ]}
   linux-focal-cuda12_4-py3_10-gcc9-experimental-split-build-build:
-    name: linux-focal-cuda12.4-py3.10-gcc9-experimental-split-build
+    name: linux-focal-cuda12.1-py3.10-gcc9-experimental-split-build
     uses: ./.github/workflows/_linux-build-label.yml
     with:
       use_split_build: true
-      build-environment: linux-focal-cuda12.4-py3.10-gcc9
-      docker-image-name: pytorch-linux-focal-cuda12.4-cudnn8-py3-gcc9
+      build-environment: linux-focal-cuda12.1-py3.10-gcc9
+      docker-image-name: pytorch-linux-focal-cuda12.1-cudnn9-py3-gcc9
       test-matrix: |
         { include: [
           { config: "default", shard: 1, num_shards: 5, runner: "linux.4xlarge.nvidia.gpu" },
@@ -412,14 +412,14 @@ jobs:
   #       ]}
 
   linux-focal-cuda12_4-py3_10-gcc9-experimental-split-build-test:
-    name: linux-focal-cuda12.4-py3.10-gcc9-experimental-split-build
+    name: linux-focal-cuda12.1-py3.10-gcc9-experimental-split-build
     uses: ./.github/workflows/_linux-test.yml
     needs:
       - linux-focal-cuda12_4-py3_10-gcc9-experimental-split-build-build
       - target-determination
     with:
       timeout-minutes: 360
-      build-environment: linux-focal-cuda12.4-py3.10-gcc9-experimental-split-build
+      build-environment: linux-focal-cuda12.1-py3.10-gcc9-experimental-split-build
       docker-image: ${{ needs.linux-focal-cuda12_4-py3_10-gcc9-experimental-split-build-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-focal-cuda12_4-py3_10-gcc9-experimental-split-build-build.outputs.test-matrix }}
 
@@ -496,10 +496,10 @@ jobs:
   #       ]}
 
   # linux-focal-cuda12_4-py3_10-gcc9-bazel-test:
-  #   name: linux-focal-cuda12.4-py3.10-gcc9-bazel-test
+  #   name: linux-focal-cuda12.1-py3.10-gcc9-bazel-test
   #   uses: ./.github/workflows/_bazel-build-test.yml
   #   with:
-  #     build-environment: linux-focal-cuda12.4-py3.10-gcc9-bazel-test
+  #     build-environment: linux-focal-cuda12.1-py3.10-gcc9-bazel-test
   #     docker-image-name: pytorch-linux-focal-cuda12.4-cudnn9-py3-gcc9
   #     cuda-version: "12.4"
   #     test-matrix: |
