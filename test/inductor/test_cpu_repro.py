@@ -1884,6 +1884,14 @@ class CPUReproTests(TestCase):
         self.assertEqual(res_aten_eager, res)
         check_metrics_vec_kernel_count(1)
 
+    def test_bitwise_right_shift(self):
+        x = torch.randint(-1, 0, (1, 1, 1), device="cpu", dtype=torch.int64)
+        bit_num = 31
+        res_aten_eager = torch.bitwise_right_shift(x, bit_num)
+        cfn = torch.compile(torch.bitwise_right_shift)
+        res = cfn(x, bit_num)
+        self.assertEqual(res_aten_eager, res)
+
     @patch("torch.cuda.is_available", lambda: False)
     def test_scatter_using_atomic_add(self):
         def fn(a, dim, index, b):
@@ -2224,7 +2232,6 @@ class CPUReproTests(TestCase):
         graph_lowering = GraphLowering(
             torch.fx.GraphModule(submodules, _graph),
             shape_env=None,
-            num_static_inputs=0,
         )
 
         def set_opt_dtype(graph):
@@ -2335,7 +2342,6 @@ class CPUReproTests(TestCase):
         graph_lowering = GraphLowering(
             torch.fx.GraphModule(submodules, _graph),
             shape_env=None,
-            num_static_inputs=0,
         )
         with patch.object(graph_lowering, "wrapper_code", ""), V.set_graph_handler(
             graph_lowering
@@ -3752,6 +3758,20 @@ class CPUReproTests(TestCase):
         FileCheck().check_count(
             "return at::vec::VectorizedN<int64_t,2>::loadu(tmpbuf.data(),",
             4,
+            exactly=True,
+        ).run(code)
+
+    def test_repeated_exp(self):
+        def fn(x):
+            y = x.sigmoid()
+            return y + 1, y.sum(-1)
+
+        x = torch.randn(1000, 1000)
+        opt_fn = torch.compile(fn)
+        _, code = run_and_get_cpp_code(opt_fn, x)
+        FileCheck().check_count(
+            ".exp()",
+            1,
             exactly=True,
         ).run(code)
 

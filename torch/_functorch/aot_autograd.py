@@ -493,6 +493,12 @@ def create_aot_dispatcher_function(
                         return shape_env.create_symintnode(
                             shape_env.create_symbol(x, source), hint=x, source=source
                         )
+                if isinstance(
+                    x, torch.ScriptObject
+                ) and torch._library.fake_class_registry.has_fake_class(
+                    x._type().qualified_name()
+                ):
+                    return torch._library.fake_class_registry.to_fake_obj(fake_mode, x)
                 if not isinstance(x, torch.Tensor):
                     return x
                 if isinstance(x, FakeTensor):
@@ -538,9 +544,8 @@ def create_aot_dispatcher_function(
 
         fake_flat_args = process_inputs(flat_args)
 
-        needs_autograd = (
-            any(x.requires_grad for x in fake_flat_args if isinstance(x, Tensor))
-            and torch.is_grad_enabled()
+        needs_autograd = any(
+            x.requires_grad for x in fake_flat_args if isinstance(x, Tensor)
         )
 
         with enable_python_dispatcher():
@@ -564,10 +569,19 @@ def create_aot_dispatcher_function(
                     fake_flat_args, fw_metadata
                 )
 
-                if needs_autograd and not any(
+                output_and_mutation_safe = not any(
                     x.requires_grad for x in fw_metadata.output_info
-                ):
+                ) and not any(
+                    x.requires_grad
+                    and x.mutates_data
+                    and not x.mutations_under_no_grad_or_inference_mode
+                    and not x.mutations_hidden_from_autograd
+                    for x in fw_metadata.input_info
+                )
+
+                if needs_autograd and output_and_mutation_safe:
                     # We realized that none of the outputs require grad,
+                    # and none of the inputs that require grad are mutated.
                     # so we actually have an inference graph.
                     needs_autograd = False
                     # A bit silly: right now in the subclass codepath, our ViewAndMutationMeta
