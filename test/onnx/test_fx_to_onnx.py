@@ -10,13 +10,14 @@ from typing import Mapping, Tuple
 import onnx
 import onnx.inliner
 import pytorch_test_common
-import torch
 import transformers  # type: ignore[import]
+
+import torch
 from torch import nn
 from torch._subclasses import fake_tensor
 from torch.nn import functional as F
 from torch.onnx import dynamo_export, ExportOptions
-from torch.onnx._internal.diagnostics import infra
+from torch.onnx._internal.diagnostics import infra  # noqa: TCH001
 from torch.onnx._internal.fx import diagnostics, registration
 from torch.testing._internal import common_utils
 
@@ -170,9 +171,13 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
                     torch.argmax(input, dim=1, keepdim=True),
                 )
 
-        _ = dynamo_export(
-            ArgminArgmaxModel(), model_input, export_options=self.export_options
-        )
+        # NOTE: KeyError: dim raised in optimizer
+        with self.assertWarnsOnceRegex(
+            UserWarning, "ONNXScript optimizer failed. Skipping optimization."
+        ):
+            _ = dynamo_export(
+                ArgminArgmaxModel(), model_input, export_options=self.export_options
+            )
 
     def test_multiple_outputs_op_with_evaluator(self):
         class TopKModel(torch.nn.Module):
@@ -181,7 +186,8 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
                 return torch.sum(values)
 
         x = torch.arange(1.0, 6.0, requires_grad=True)
-        onnx_program = dynamo_export(TopKModel(), x, export_options=self.export_options)
+
+        _ = dynamo_export(TopKModel(), x, export_options=self.export_options)
 
     def test_unsupported_indices_fake_tensor_generated_with_op_level_debug(self):
         class EmbedModelWithoutPaddingIdx(torch.nn.Module):
@@ -363,11 +369,13 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
             node: onnx.NodeProto,
             value_infos: Mapping[str, onnx.ValueInfoProto],
             local_functions: Mapping[Tuple[str, str], onnx.FunctionProto],
+            exclude_names_in_value_info,
             function_id: str = "",
         ):
             for output in node.output:
                 name = f"{function_id}/{output}" if function_id else output
-                self.assertIn(name, value_infos)
+                if name not in exclude_names_in_value_info:
+                    self.assertIn(name, value_infos)
             if node.domain.startswith("pkg.onnxscript.torch_lib"):
                 # No shape info available for values inside torchlib functions.
                 return
@@ -377,13 +385,25 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
                 for node in function.node:
                     function_id = f"{function.domain}::{function.name}"
                     _assert_node_outputs_has_value_info(
-                        node, value_infos, local_functions, function_id
+                        node,
+                        value_infos,
+                        local_functions,
+                        exclude_names_in_value_info,
+                        function_id,
                     )
 
         type_infos = {vi.name: vi for vi in model_proto.graph.value_info}
         functions = {(f.domain, f.name): f for f in model_proto.functions}
+        # NOTE: inputs, outputs, and initializers are not included in value_info spec
+        exclude_names_in_value_info = (
+            [input.name for input in model_proto.graph.input]
+            + [output.name for output in model_proto.graph.output]
+            + [init.name for init in model_proto.graph.initializer]
+        )
         for node in model_proto.graph.node:
-            _assert_node_outputs_has_value_info(node, type_infos, functions)
+            _assert_node_outputs_has_value_info(
+                node, type_infos, functions, exclude_names_in_value_info
+            )
 
     def test_dynamo_export_retains_readable_parameter_and_buffer_names(self):
         class SubModule(torch.nn.Module):
@@ -423,10 +443,11 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
         model = MNISTModel()
         onnx_program = torch.onnx.dynamo_export(model, tensor_x)
         model_proto = onnx_program.model_proto
-        self.assertEqual(
-            {initializer.name for initializer in model_proto.graph.initializer},
-            {*model.state_dict().keys()},
-        )
+
+        # NOTE: initializers could be optimized away by onnx optimizer
+        onnx_initilizers = {init.name for init in model_proto.graph.initializer}
+        torch_weights = {*model.state_dict().keys()}
+        self.assertTrue(onnx_initilizers.issubset(torch_weights))
 
     @common_utils.parametrize(
         "checkpoint_type",
@@ -707,7 +728,11 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
                 input = input.to(float8_type)
                 return input + torch.tensor(1.0, dtype=float8_type)
 
-        _ = torch.onnx.dynamo_export(Float8Module(), torch.randn(1, 2, 3, 4))
+        # NOTE: shape inference error raised in optimizer due to unsupported dtype
+        with self.assertWarnsOnceRegex(
+            UserWarning, "ONNXScript optimizer failed. Skipping optimization."
+        ):
+            _ = torch.onnx.dynamo_export(Float8Module(), torch.randn(1, 2, 3, 4))
 
     def test_export_with_logging_logger(self):
         logger = logging.getLogger(__name__)

@@ -40,7 +40,7 @@ struct TORCH_API MTIAHooksInterface : AcceleratorHooksInterface {
     return false;
   }
 
-  virtual DeviceIndex deviceCount() const override {
+  DeviceIndex deviceCount() const override {
     return 0;
   }
 
@@ -56,21 +56,21 @@ struct TORCH_API MTIAHooksInterface : AcceleratorHooksInterface {
     return false;
   }
 
-  virtual void setCurrentDevice(DeviceIndex device) const override {
+  void setCurrentDevice(DeviceIndex device) const override {
     FAIL_MTIAHOOKS_FUNC(__func__);
   }
 
-  virtual DeviceIndex getCurrentDevice() const override {
-    FAIL_MTIAHOOKS_FUNC(__func__);
-    return -1;
-  }
-
-  virtual DeviceIndex exchangeDevice(DeviceIndex device) const override {
+  DeviceIndex getCurrentDevice() const override {
     FAIL_MTIAHOOKS_FUNC(__func__);
     return -1;
   }
 
-  virtual DeviceIndex maybeExchangeDevice(DeviceIndex device) const override {
+  DeviceIndex exchangeDevice(DeviceIndex device) const override {
+    FAIL_MTIAHOOKS_FUNC(__func__);
+    return -1;
+  }
+
+  DeviceIndex maybeExchangeDevice(DeviceIndex device) const override {
     FAIL_MTIAHOOKS_FUNC(__func__);
     return -1;
   }

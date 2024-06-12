@@ -1,6 +1,5 @@
 # mypy: disallow-untyped-defs
 
-import distutils.spawn
 import logging
 import os
 
@@ -57,7 +56,9 @@ class StrobelightCompileTimeProfiler:
         logger.info("compile time strobelight profiling enabled")
 
         if profiler_class is StrobelightCLIFunctionProfiler:
-            if not distutils.spawn.find_executable("strobeclient"):
+            import shutil
+
+            if not shutil.which("strobeclient"):
                 logger.info(
                     "strobeclient not found, cant enable compile time strobelight profiling, seems"
                     "like you are not on a FB machine."
