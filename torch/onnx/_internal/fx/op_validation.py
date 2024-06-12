@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 """Module for handling op-level validation during exporting."""
 
 from __future__ import annotations
