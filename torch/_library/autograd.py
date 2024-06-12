@@ -114,7 +114,7 @@ def supports_tensorlist(cls: Any) -> Any:
 
     @dataclass
     class Metadata:
-        input_spec: Optional[spec_t] = None
+        input_spec: spec_t
         output_spec: Optional[spec_t] = None
         result_is_tuple: Optional[bool] = None
 
@@ -189,8 +189,7 @@ def supports_tensorlist(cls: Any) -> Any:
 
     def new_apply(*args):
         flat_args, input_spec = flatten(args, is_leaf=not_list_of_tensor)
-        metadata = Metadata()
-        metadata.input_spec = input_spec
+        metadata = Metadata(input_spec)
         result = orig_apply(*flat_args, metadata)  # type: ignore[misc]
         assert metadata.output_spec is not None
         result = unflatten(list(result), metadata.output_spec)
