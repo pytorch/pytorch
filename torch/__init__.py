@@ -130,47 +130,67 @@ assert __all__ == sorted(__all__)
 # Load the extension module
 ################################################################################
 
-if sys.platform == 'win32':
+if sys.platform == "win32":
 
     def _load_dll_libraries():
         import sysconfig
 
         from torch.version import cuda as cuda_version
 
-        pfiles_path = os.getenv('ProgramFiles', r'C:\Program Files')
-        py_dll_path = os.path.join(sys.exec_prefix, 'Library', 'bin')
-        th_dll_path = os.path.join(os.path.dirname(__file__), 'lib')
-        usebase_path = os.path.join(sysconfig.get_config_var("userbase"), 'Library', 'bin')
+        pfiles_path = os.getenv("ProgramFiles", r"C:\Program Files")
+        py_dll_path = os.path.join(sys.exec_prefix, "Library", "bin")
+        th_dll_path = os.path.join(os.path.dirname(__file__), "lib")
+        usebase_path = os.path.join(
+            sysconfig.get_config_var("userbase"), "Library", "bin"
+        )
 
         # When users create a virtualenv that inherits the base environment,
         # we will need to add the corresponding library directory into
         # DLL search directories. Otherwise, it will rely on `PATH` which
         # is dependent on user settings.
         if sys.exec_prefix != sys.base_exec_prefix:
-            base_py_dll_path = os.path.join(sys.base_exec_prefix, 'Library', 'bin')
+            base_py_dll_path = os.path.join(sys.base_exec_prefix, "Library", "bin")
         else:
-            base_py_dll_path = ''
+            base_py_dll_path = ""
 
-        dll_paths = [p for p in (th_dll_path, py_dll_path, base_py_dll_path, usebase_path) if os.path.exists(p)]
+        dll_paths = [
+            p
+            for p in (th_dll_path, py_dll_path, base_py_dll_path, usebase_path)
+            if os.path.exists(p)
+        ]
 
-        if not builtins.any(os.path.exists(os.path.join(p, 'nvToolsExt64_1.dll')) for p in dll_paths):
+        if not builtins.any(
+            os.path.exists(os.path.join(p, "nvToolsExt64_1.dll")) for p in dll_paths
+        ):
             nvtoolsext_dll_path = os.path.join(
-                os.getenv('NVTOOLSEXT_PATH', os.path.join(pfiles_path, 'NVIDIA Corporation', 'NvToolsExt')), 'bin', 'x64')
+                os.getenv(
+                    "NVTOOLSEXT_PATH",
+                    os.path.join(pfiles_path, "NVIDIA Corporation", "NvToolsExt"),
+                ),
+                "bin",
+                "x64",
+            )
         else:
-            nvtoolsext_dll_path = ''
+            nvtoolsext_dll_path = ""
 
-        if cuda_version and builtins.all(not glob.glob(os.path.join(p, 'cudart64*.dll')) for p in dll_paths):
-            cuda_version_1 = cuda_version.replace('.', '_')
-            cuda_path_var = 'CUDA_PATH_V' + cuda_version_1
-            default_path = os.path.join(pfiles_path, 'NVIDIA GPU Computing Toolkit', 'CUDA', 'v' + cuda_version)
-            cuda_path = os.path.join(os.getenv(cuda_path_var, default_path), 'bin')
+        if cuda_version and builtins.all(
+            not glob.glob(os.path.join(p, "cudart64*.dll")) for p in dll_paths
+        ):
+            cuda_version_1 = cuda_version.replace(".", "_")
+            cuda_path_var = "CUDA_PATH_V" + cuda_version_1
+            default_path = os.path.join(
+                pfiles_path, "NVIDIA GPU Computing Toolkit", "CUDA", f"v{cuda_version}"
+            )
+            cuda_path = os.path.join(os.getenv(cuda_path_var, default_path), "bin")
         else:
-            cuda_path = ''
+            cuda_path = ""
 
-        dll_paths.extend(p for p in (nvtoolsext_dll_path, cuda_path) if os.path.exists(p))
+        dll_paths.extend(
+            p for p in (nvtoolsext_dll_path, cuda_path) if os.path.exists(p)
+        )
 
-        kernel32 = ctypes.WinDLL('kernel32.dll', use_last_error=True)
-        with_load_library_flags = hasattr(kernel32, 'AddDllDirectory')
+        kernel32 = ctypes.WinDLL("kernel32.dll", use_last_error=True)
+        with_load_library_flags = hasattr(kernel32, "AddDllDirectory")
         prev_error_mode = kernel32.SetErrorMode(0x0001)
 
         kernel32.LoadLibraryW.restype = ctypes.c_void_p
@@ -181,9 +201,9 @@ if sys.platform == 'win32':
             os.add_dll_directory(dll_path)
 
         try:
-            ctypes.CDLL('vcruntime140.dll')
-            ctypes.CDLL('msvcp140.dll')
-            ctypes.CDLL('vcruntime140_1.dll')
+            ctypes.CDLL("vcruntime140.dll")
+            ctypes.CDLL("msvcp140.dll")
+            ctypes.CDLL("vcruntime140_1.dll")
         except OSError:
             print(
                 textwrap.dedent(
@@ -194,7 +214,7 @@ if sys.platform == 'win32':
                 ).strip()
             )
 
-        dlls = glob.glob(os.path.join(th_dll_path, '*.dll'))
+        dlls = glob.glob(os.path.join(th_dll_path, "*.dll"))
         path_patched = False
         for dll in dlls:
             is_loaded = False
@@ -203,18 +223,22 @@ if sys.platform == 'win32':
                 last_error = ctypes.get_last_error()
                 if res is None and last_error != 126:
                     err = ctypes.WinError(last_error)
-                    err.strerror += f' Error loading "{dll}" or one of its dependencies.'
+                    err.strerror += (
+                        f' Error loading "{dll}" or one of its dependencies.'
+                    )
                     raise err
                 elif res is not None:
                     is_loaded = True
             if not is_loaded:
                 if not path_patched:
-                    os.environ['PATH'] = ';'.join(dll_paths + [os.environ['PATH']])
+                    os.environ["PATH"] = ";".join(dll_paths + [os.environ["PATH"]])
                     path_patched = True
                 res = kernel32.LoadLibraryW(dll)
                 if res is None:
                     err = ctypes.WinError(ctypes.get_last_error())
-                    err.strerror += f' Error loading "{dll}" or one of its dependencies.'
+                    err.strerror += (
+                        f' Error loading "{dll}" or one of its dependencies.'
+                    )
                     raise err
 
         kernel32.SetErrorMode(prev_error_mode)
@@ -226,14 +250,16 @@ if sys.platform == 'win32':
 def _preload_cuda_deps(lib_folder, lib_name):
     """Preloads cuda deps if they could not be found otherwise."""
     # Should only be called on Linux if default path resolution have failed
-    assert platform.system() == 'Linux', 'Should only be called on Linux'
+    assert platform.system() == "Linux", "Should only be called on Linux"
 
     lib_path = None
     for path in sys.path:
-        nvidia_path = os.path.join(path, 'nvidia')
+        nvidia_path = os.path.join(path, "nvidia")
         if not os.path.exists(nvidia_path):
             continue
-        candidate_lib_paths = glob.glob(os.path.join(nvidia_path, lib_folder, 'lib', lib_name))
+        candidate_lib_paths = glob.glob(
+            os.path.join(nvidia_path, lib_folder, "lib", lib_name)
+        )
         if candidate_lib_paths and not lib_path:
             lib_path = candidate_lib_paths[0]
         if lib_path:
@@ -242,9 +268,9 @@ def _preload_cuda_deps(lib_folder, lib_name):
         raise ValueError(f"{lib_name} not found in the system path {sys.path}")
     ctypes.CDLL(lib_path)
 
+
 # See Note [Global dependencies]
 def _load_global_deps() -> None:
-
     LIBTORCH_PKG_NAME = "libtorchsplit"
 
     def find_package_path(package_name):
@@ -261,15 +287,9 @@ def _load_global_deps() -> None:
         return None
 
     def load_shared_libraries(library_path):
-        lib_dir = os.path.join(library_path, 'lib')
+        lib_dir = os.path.join(library_path, "lib")
         if not os.path.exists(lib_dir):
             return
-
-        # Determine the file extension based on the platform
-        if platform.system() == 'Darwin':
-            lib_ext = '.dylib'
-        else:
-            lib_ext = '.so'
 
         # Find all shared library files with the appropriate extension
         library_files = [f for f in os.listdir(lib_dir) if f.endswith(lib_ext)]
@@ -283,37 +303,41 @@ def _load_global_deps() -> None:
             except OSError as err:
                 print(f"Failed to load {lib_path}: {err}")
 
-    if _running_with_deploy() or platform.system() == 'Windows':
+    if _running_with_deploy() or platform.system() == "Windows":
         return
 
-    lib_name = 'libtorch_global_deps' + ('.dylib' if platform.system() == 'Darwin' else '.so')
+    # Determine the file extension based on the platform
+    lib_ext = ".dylib" if platform.system() == "Darwin" else ".so"
+    lib_name = f"libtorch_global_deps{lib_ext}"
     here = os.path.abspath(__file__)
-    global_deps_lib_path = os.path.join(os.path.dirname(here), 'lib', lib_name)
+    global_deps_lib_path = os.path.join(os.path.dirname(here), "lib", lib_name)
 
     split_build_lib_name = LIBTORCH_PKG_NAME
     library_path = find_package_path(split_build_lib_name)
 
     if library_path:
-        global_deps_lib_path = os.path.join(library_path, 'lib', lib_name)
+        global_deps_lib_path = os.path.join(library_path, "lib", lib_name)
     try:
         ctypes.CDLL(global_deps_lib_path, mode=ctypes.RTLD_GLOBAL)
     except OSError as err:
         # Can only happen for wheel with cuda libs as PYPI deps
         # As PyTorch is not purelib, but nvidia-*-cu12 is
         cuda_libs: Dict[str, str] = {
-            'cublas': 'libcublas.so.*[0-9]',
-            'cudnn': 'libcudnn.so.*[0-9]',
-            'cuda_nvrtc': 'libnvrtc.so.*[0-9]',
-            'cuda_runtime': 'libcudart.so.*[0-9]',
-            'cuda_cupti': 'libcupti.so.*[0-9]',
-            'cufft': 'libcufft.so.*[0-9]',
-            'curand': 'libcurand.so.*[0-9]',
-            'cusolver': 'libcusolver.so.*[0-9]',
-            'cusparse': 'libcusparse.so.*[0-9]',
-            'nccl': 'libnccl.so.*[0-9]',
-            'nvtx': 'libnvToolsExt.so.*[0-9]',
+            "cublas": "libcublas.so.*[0-9]",
+            "cudnn": "libcudnn.so.*[0-9]",
+            "cuda_nvrtc": "libnvrtc.so.*[0-9]",
+            "cuda_runtime": "libcudart.so.*[0-9]",
+            "cuda_cupti": "libcupti.so.*[0-9]",
+            "cufft": "libcufft.so.*[0-9]",
+            "curand": "libcurand.so.*[0-9]",
+            "cusolver": "libcusolver.so.*[0-9]",
+            "cusparse": "libcusparse.so.*[0-9]",
+            "nccl": "libnccl.so.*[0-9]",
+            "nvtx": "libnvToolsExt.so.*[0-9]",
         }
-        is_cuda_lib_err = [lib for lib in cuda_libs.values() if lib.split('.')[0] in err.args[0]]
+        is_cuda_lib_err = [
+            lib for lib in cuda_libs.values() if lib.split(".")[0] in err.args[0]
+        ]
         if not is_cuda_lib_err:
             raise err
         for lib_folder, lib_name in cuda_libs.items():
@@ -324,8 +348,10 @@ def _load_global_deps() -> None:
         # loading libtorch_global_deps first due its special logic
         load_shared_libraries(library_path)
 
-if (USE_RTLD_GLOBAL_WITH_LIBTORCH or os.getenv('TORCH_USE_RTLD_GLOBAL')) and \
-        (_running_with_deploy() or platform.system() != 'Windows'):
+
+if (USE_RTLD_GLOBAL_WITH_LIBTORCH or os.getenv("TORCH_USE_RTLD_GLOBAL")) and (
+    _running_with_deploy() or platform.system() != "Windows"
+):
     # Do it the hard way.  You might want to load libtorch with RTLD_GLOBAL in a
     # few circumstances:
     #
@@ -344,7 +370,9 @@ if (USE_RTLD_GLOBAL_WITH_LIBTORCH or os.getenv('TORCH_USE_RTLD_GLOBAL')) and \
     #
     old_flags = sys.getdlopenflags()
     sys.setdlopenflags(os.RTLD_GLOBAL | os.RTLD_LAZY)
+
     from torch._C import *  # noqa: F403
+
     sys.setdlopenflags(old_flags)
     del old_flags
 
@@ -516,6 +544,7 @@ class SymInt:
             # We could support constant SymInts as well, but not doing it for now
             raise TypeError("unhashable type: non-nested SymInt")
 
+
 class SymFloat:
     """
     Like an float (including magic methods), but redirects all operations on the
@@ -613,6 +642,7 @@ class SymFloat:
     def __repr__(self):
         return self.node.str()
 
+
 class SymBool:
     """
     Like an bool (including magic methods), but redirects all operations on the
@@ -676,8 +706,9 @@ class SymBool:
         else:
             raise TypeError("unhashable type: SymBool")
 
+
 def sym_not(a):
-    r""" SymInt-aware utility for logical negation.
+    r"""SymInt-aware utility for logical negation.
 
     Args:
         a (SymBool or bool): Object to negate
@@ -686,14 +717,15 @@ def sym_not(a):
 
     if overrides.has_torch_function_unary(a):
         return overrides.handle_torch_function(sym_not, (a,), a)
-    if hasattr(a, '__sym_not__'):
+    if hasattr(a, "__sym_not__"):
         return a.__sym_not__()
     if isinstance(a, sympy.Basic):
         return ~a  # type: ignore[operator]
     return not a
 
+
 def sym_float(a):
-    r""" SymInt-aware utility for float casting.
+    r"""SymInt-aware utility for float casting.
 
     Args:
         a (SymInt, SymFloat, or object): Object to cast
@@ -702,13 +734,13 @@ def sym_float(a):
         return overrides.handle_torch_function(sym_float, (a,), a)
     if isinstance(a, SymFloat):
         return a
-    elif hasattr(a, '__sym_float__'):
+    elif hasattr(a, "__sym_float__"):
         return a.__sym_float__()
     return builtins.float(a)  # type: ignore[operator]
 
 
 def sym_int(a):
-    r""" SymInt-aware utility for int casting.
+    r"""SymInt-aware utility for int casting.
 
     Args:
         a (SymInt, SymFloat, or object): Object to cast
@@ -720,6 +752,7 @@ def sym_int(a):
     elif isinstance(a, SymFloat):
         return math.trunc(a)
     return builtins.int(a)  # type: ignore[operator]
+
 
 def sym_max(a, b):
     """
@@ -744,6 +777,7 @@ def sym_max(a, b):
     else:
         return builtins.max(a, b)
 
+
 def sym_min(a, b):
     """SymInt-aware utility for min()."""
     if overrides.has_torch_function((a, b)):
@@ -759,6 +793,7 @@ def sym_min(a, b):
     else:
         return builtins.min(a, b)
 
+
 # Drop in replacement for math.sqrt, math.sin, math.cos etc
 def _get_sym_math_fn(name):
     def fn(a):
@@ -770,8 +805,20 @@ def _get_sym_math_fn(name):
 
     return fn
 
-__fn, __name, __sym_name = None, '', ''
-for __name in ("sqrt", "cos", "cosh", "sin", "sinh", "tan", "tanh", "asin", "acos", "atan"):
+
+__fn, __name, __sym_name = None, "", ""
+for __name in (
+    "sqrt",
+    "cos",
+    "cosh",
+    "sin",
+    "sinh",
+    "tan",
+    "tanh",
+    "asin",
+    "acos",
+    "atan",
+):
     __sym_name = f"_sym_{__name}"
     __fn = _get_sym_math_fn(__name)
     __fn.__qualname__ = __fn.__name__ = __sym_name
@@ -791,6 +838,7 @@ def sym_ite(b, t, f):
     if isinstance(b, SymBool):
         return b.__sym_ite__(t, f)
     return t if b else f
+
 
 # Check to see if we can load C extensions, and if not provide some guidance
 # on what the problem might be.
@@ -824,17 +872,21 @@ except ImportError:
 # Make an explicit reference to the _C submodule to appease linters
 from torch import _C as _C
 
-__name, __obj = '', None
+__name, __obj = "", None
 for __name in dir(_C):
-    if __name[0] != '_' and not __name.endswith('Base'):
+    if __name[0] != "_" and not __name.endswith("Base"):
         __all__.append(__name)
         __obj = getattr(_C, __name)
         if callable(__obj) or inspect.isclass(__obj):
             if __obj.__module__ != __name__:  # "torch"
                 # TODO: fix their module from C++ side
-                if __name not in ['DisableTorchFunctionSubclass', 'DisableTorchFunction', 'Generator']:
+                if __name not in {
+                    "DisableTorchFunctionSubclass",
+                    "DisableTorchFunction",
+                    "Generator",
+                }:
                     __obj.__module__ = __name__  # "torch"
-    elif __name == 'TensorBase':
+    elif __name == "TensorBase":
         # issue 109438 / pr 109940. Prevent TensorBase from being copied into torch.
         delattr(sys.modules[__name__], __name)
 
@@ -845,7 +897,7 @@ if not TYPE_CHECKING:
     # non-standard, and attributes of those submodules cannot be pickled since
     # pickle expect to be able to import them as "from _C.sub import attr"
     # which fails with "_C is not a package
-    __name, __candidate = '', None
+    __name, __candidate = "", None
     for __name in dir(_C):
         __candidate = getattr(_C, __name)
         if type(__candidate) is type(_C):
@@ -864,15 +916,19 @@ def typename(o):
     if isinstance(o, torch.Tensor):
         return o.type()
 
-    module = ''
-    class_name = ''
-    if hasattr(o, '__module__') and o.__module__ != 'builtins' \
-            and o.__module__ != '__builtin__' and o.__module__ is not None:
-        module = o.__module__ + '.'
+    module = ""
+    class_name = ""
+    if (
+        hasattr(o, "__module__")
+        and o.__module__ != "builtins"
+        and o.__module__ != "__builtin__"
+        and o.__module__ is not None
+    ):
+        module = o.__module__ + "."
 
-    if hasattr(o, '__qualname__'):
+    if hasattr(o, "__qualname__"):
         class_name = o.__qualname__
-    elif hasattr(o, '__name__'):
+    elif hasattr(o, "__name__"):
         class_name = o.__name__
     else:
         class_name = o.__class__.__name__
@@ -983,6 +1039,7 @@ def set_default_device(device):
         device_context = None
     else:
         from torch.utils._device import DeviceContext
+
         device_context = DeviceContext(device)
         device_context.__enter__()
     _GLOBAL_DEVICE_CONTEXT.device_context = device_context
@@ -1071,8 +1128,13 @@ def set_default_dtype(d):
     """
     _C._set_default_dtype(d)
 
-def use_deterministic_algorithms(mode: builtins.bool, *, warn_only: builtins.bool = False) -> None:
-    r""" Sets whether PyTorch operations must use "deterministic"
+
+def use_deterministic_algorithms(
+    mode: builtins.bool,
+    *,
+    warn_only: builtins.bool = False,
+) -> None:
+    r"""Sets whether PyTorch operations must use "deterministic"
     algorithms. That is, algorithms which, given the same input, and when
     run on the same software and hardware, always produce the same output.
     When enabled, operations will use deterministic algorithms when available,
@@ -1208,11 +1270,13 @@ def use_deterministic_algorithms(mode: builtins.bool, *, warn_only: builtins.boo
     """
     _C._set_deterministic_algorithms(mode, warn_only=warn_only)
 
+
 def are_deterministic_algorithms_enabled() -> builtins.bool:
     r"""Returns True if the global deterministic flag is turned on. Refer to
     :func:`torch.use_deterministic_algorithms` documentation for more details.
     """
     return _C._get_deterministic_algorithms()
+
 
 def is_deterministic_algorithms_warn_only_enabled() -> builtins.bool:
     r"""Returns True if the global deterministic flag is set to warn only.
@@ -1220,6 +1284,7 @@ def is_deterministic_algorithms_warn_only_enabled() -> builtins.bool:
     details.
     """
     return _C._get_deterministic_algorithms_warn_only()
+
 
 def set_deterministic_debug_mode(debug_mode: Union[builtins.int, str]) -> None:
     r"""Sets the debug mode for deterministic operations.
@@ -1238,19 +1303,20 @@ def set_deterministic_debug_mode(debug_mode: Union[builtins.int, str]) -> None:
     # NOTE: builtins.int is used here because int in this scope resolves
     # to torch.int
     if not isinstance(debug_mode, (builtins.int, str)):
-        raise TypeError(f'debug_mode must be str or int, but got {type(debug_mode)}')
+        raise TypeError(f"debug_mode must be str or int, but got {type(debug_mode)}")
 
     if isinstance(debug_mode, str):
-        if debug_mode == 'default':
+        if debug_mode == "default":
             debug_mode = 0
-        elif debug_mode == 'warn':
+        elif debug_mode == "warn":
             debug_mode = 1
-        elif debug_mode == 'error':
+        elif debug_mode == "error":
             debug_mode = 2
         else:
             raise RuntimeError(
-                'invalid value of debug_mode, expected one of `default`, '
-                f'`warn`, `error`, but got {debug_mode}')
+                "invalid value of debug_mode, expected one of `default`, "
+                f"`warn`, `error`, but got {debug_mode}"
+            )
 
     if debug_mode == 0:
         _C._set_deterministic_algorithms(False)
@@ -1260,8 +1326,9 @@ def set_deterministic_debug_mode(debug_mode: Union[builtins.int, str]) -> None:
         _C._set_deterministic_algorithms(True)
     else:
         raise RuntimeError(
-            'invalid value of debug_mode, expected 0, 1, or 2, '
-            f'but got {debug_mode}')
+            "invalid value of debug_mode, expected 0, 1, or 2, " f"but got {debug_mode}"
+        )
+
 
 def get_deterministic_debug_mode() -> builtins.int:
     r"""Returns the current value of the debug mode for deterministic
@@ -1277,11 +1344,13 @@ def get_deterministic_debug_mode() -> builtins.int:
     else:
         return 0
 
+
 def get_float32_matmul_precision() -> builtins.str:
     r"""Returns the current value of float32 matrix multiplication precision. Refer to
     :func:`torch.set_float32_matmul_precision` documentation for more details.
     """
     return _C._get_float32_matmul_precision()
+
 
 def set_float32_matmul_precision(precision: str) -> None:
     r"""Sets the internal precision of float32 matrix multiplications.
@@ -1348,6 +1417,7 @@ def set_float32_matmul_precision(precision: str) -> None:
     """
     _C._set_float32_matmul_precision(precision)
 
+
 def set_warn_always(b: builtins.bool) -> None:
     r"""When this flag is False (default) then some PyTorch warnings may only
     appear once per process. This helps avoid excessive warning information.
@@ -1360,11 +1430,13 @@ def set_warn_always(b: builtins.bool) -> None:
     """
     _C._set_warnAlways(b)
 
+
 def is_warn_always_enabled() -> builtins.bool:
     r"""Returns True if the global warn_always flag is turned on. Refer to
     :func:`torch.set_warn_always` documentation for more details.
     """
     return _C._get_warnAlways()
+
 
 ################################################################################
 # Define error checking functions
@@ -1373,11 +1445,17 @@ def is_warn_always_enabled() -> builtins.bool:
 # These error checking functions must be kept consistent with their C++
 # equivalents. Their C++ equivalents are mentioned where applicable.
 
-def _check_with(error_type, cond: Union[builtins.bool, SymBool], message: Callable[[], str]):  # noqa: F811
+
+def _check_with(
+    error_type,
+    cond: Union[builtins.bool, SymBool],
+    message: Callable[[], str],
+):  # noqa: F811
     if not isinstance(cond, (builtins.bool, torch.SymBool)):
-        raise TypeError(f'cond must be a bool, but got {type(cond)}')
+        raise TypeError(f"cond must be a bool, but got {type(cond)}")
 
     from torch.fx.experimental.symbolic_shapes import expect_true
+
     if expect_true(cond):
         return
 
@@ -1386,17 +1464,19 @@ def _check_with(error_type, cond: Union[builtins.bool, SymBool], message: Callab
 
     if message is None:
         message_evaluated = (
-            'Expected cond to be True, but got False. (Could this error '
-            'message be improved? If so, please report an enhancement request '
-            'to PyTorch.)')
+            "Expected cond to be True, but got False. (Could this error "
+            "message be improved? If so, please report an enhancement request "
+            "to PyTorch.)"
+        )
 
     else:
         if not callable(message):
-            raise TypeError('message must be a callable')
+            raise TypeError("message must be a callable")
 
         message_evaluated = str(message())
 
     raise error_type(message_evaluated)
+
 
 def _check(cond, message=None):  # noqa: F811
     r"""Throws error containing an optional message if the specified condition
@@ -1415,6 +1495,7 @@ def _check(cond, message=None):  # noqa: F811
     """
     _check_with(RuntimeError, cond, message)
 
+
 def _check_is_size(i, message=None):
     """Checks that a given integer is a valid size (i.e., is non-negative).
     You should use this over _check(i >= 0) because we can use the semantic
@@ -1428,7 +1509,9 @@ def _check_is_size(i, message=None):
     # This is responsible for the expect_true
     _check(i >= 0, message)
     from torch.fx.experimental.symbolic_shapes import _advise_is_size
+
     _advise_is_size(i)
+
 
 def _check_index(cond, message=None):  # noqa: F811
     r"""Throws error containing an optional message if the specified condition
@@ -1447,6 +1530,7 @@ def _check_index(cond, message=None):  # noqa: F811
     """
     _check_with(IndexError, cond, message)
 
+
 def _check_value(cond, message=None):  # noqa: F811
     r"""Throws error containing an optional message if the specified condition
     is False.
@@ -1463,6 +1547,7 @@ def _check_value(cond, message=None):  # noqa: F811
             message. Default: ``None``
     """
     _check_with(ValueError, cond, message)
+
 
 def _check_type(cond, message=None):  # noqa: F811
     r"""Throws error containing an optional message if the specified condition
@@ -1481,6 +1566,7 @@ def _check_type(cond, message=None):  # noqa: F811
     """
     _check_with(TypeError, cond, message)
 
+
 def _check_not_implemented(cond, message=None):  # noqa: F811
     r"""Throws error containing an optional message if the specified condition
     is False.
@@ -1498,15 +1584,16 @@ def _check_not_implemented(cond, message=None):  # noqa: F811
     """
     _check_with(NotImplementedError, cond, message)
 
+
 def _check_tensor_all_with(error_type, cond, message=None):  # noqa: F811
     if not torch.is_tensor(cond):
-        raise TypeError(f'cond must be a tensor, but got {type(cond)}')
+        raise TypeError(f"cond must be a tensor, but got {type(cond)}")
 
     if not cond.dtype == torch.bool:
-        raise TypeError(
-            f'cond tensor must have dtype torch.bool, but got {cond.dtype}')
+        raise TypeError(f"cond tensor must have dtype torch.bool, but got {cond.dtype}")
 
     _check_with(error_type, cond._is_all_true().item(), message)
+
 
 # C++ equivalent: `TORCH_CHECK_TENSOR_ALL`
 def _check_tensor_all(cond, message=None):  # noqa: F811
@@ -1527,6 +1614,7 @@ def _check_tensor_all(cond, message=None):  # noqa: F811
     """
     _check_tensor_all_with(RuntimeError, cond, message)
 
+
 ################################################################################
 # Define numeric constants
 ################################################################################
@@ -1534,8 +1622,10 @@ def _check_tensor_all(cond, message=None):  # noqa: F811
 # For Python Array API (https://data-apis.org/array-api/latest/API_specification/constants.html) and
 # NumPy consistency (https://numpy.org/devdocs/reference/constants.html)
 from math import e, inf, nan, pi
+
 newaxis: None = None
-__all__.extend(['e', 'pi', 'nan', 'inf', 'newaxis'])
+
+__all__.extend(["e", "pi", "nan", "inf", "newaxis"])
 
 ################################################################################
 # Define Storage and Tensor classes
@@ -1556,6 +1646,7 @@ from torch.storage import (
 # NOTE: New <type>Storage classes should never be added. When adding a new
 # dtype, use torch.storage.TypedStorage directly.
 
+
 class ByteStorage(_LegacyStorage):
     @classproperty
     def dtype(self):
@@ -1565,6 +1656,7 @@ class ByteStorage(_LegacyStorage):
     @classproperty
     def _dtype(self):
         return torch.uint8
+
 
 class DoubleStorage(_LegacyStorage):
     @classproperty
@@ -1576,6 +1668,7 @@ class DoubleStorage(_LegacyStorage):
     def _dtype(self):
         return torch.double
 
+
 class FloatStorage(_LegacyStorage):
     @classproperty
     def dtype(self):
@@ -1585,6 +1678,7 @@ class FloatStorage(_LegacyStorage):
     @classproperty
     def _dtype(self):
         return torch.float
+
 
 class HalfStorage(_LegacyStorage):
     @classproperty
@@ -1596,6 +1690,7 @@ class HalfStorage(_LegacyStorage):
     def _dtype(self):
         return torch.half
 
+
 class LongStorage(_LegacyStorage):
     @classproperty
     def dtype(self):
@@ -1605,6 +1700,7 @@ class LongStorage(_LegacyStorage):
     @classproperty
     def _dtype(self):
         return torch.long
+
 
 class IntStorage(_LegacyStorage):
     @classproperty
@@ -1616,6 +1712,7 @@ class IntStorage(_LegacyStorage):
     def _dtype(self):
         return torch.int
 
+
 class ShortStorage(_LegacyStorage):
     @classproperty
     def dtype(self):
@@ -1625,6 +1722,7 @@ class ShortStorage(_LegacyStorage):
     @classproperty
     def _dtype(self):
         return torch.short
+
 
 class CharStorage(_LegacyStorage):
     @classproperty
@@ -1636,6 +1734,7 @@ class CharStorage(_LegacyStorage):
     def _dtype(self):
         return torch.int8
 
+
 class BoolStorage(_LegacyStorage):
     @classproperty
     def dtype(self):
@@ -1645,6 +1744,7 @@ class BoolStorage(_LegacyStorage):
     @classproperty
     def _dtype(self):
         return torch.bool
+
 
 class BFloat16Storage(_LegacyStorage):
     @classproperty
@@ -1656,6 +1756,7 @@ class BFloat16Storage(_LegacyStorage):
     def _dtype(self):
         return torch.bfloat16
 
+
 class ComplexDoubleStorage(_LegacyStorage):
     @classproperty
     def dtype(self):
@@ -1665,6 +1766,7 @@ class ComplexDoubleStorage(_LegacyStorage):
     @classproperty
     def _dtype(self):
         return torch.cdouble
+
 
 class ComplexFloatStorage(_LegacyStorage):
     @classproperty
@@ -1676,6 +1778,7 @@ class ComplexFloatStorage(_LegacyStorage):
     def _dtype(self):
         return torch.cfloat
 
+
 class QUInt8Storage(_LegacyStorage):
     @classproperty
     def dtype(self):
@@ -1685,6 +1788,7 @@ class QUInt8Storage(_LegacyStorage):
     @classproperty
     def _dtype(self):
         return torch.quint8
+
 
 class QInt8Storage(_LegacyStorage):
     @classproperty
@@ -1696,6 +1800,7 @@ class QInt8Storage(_LegacyStorage):
     def _dtype(self):
         return torch.qint8
 
+
 class QInt32Storage(_LegacyStorage):
     @classproperty
     def dtype(self):
@@ -1705,6 +1810,7 @@ class QInt32Storage(_LegacyStorage):
     @classproperty
     def _dtype(self):
         return torch.qint32
+
 
 class QUInt4x2Storage(_LegacyStorage):
     @classproperty
@@ -1716,6 +1822,7 @@ class QUInt4x2Storage(_LegacyStorage):
     def _dtype(self):
         return torch.quint4x2
 
+
 class QUInt2x4Storage(_LegacyStorage):
     @classproperty
     def dtype(self):
@@ -1726,12 +1833,27 @@ class QUInt2x4Storage(_LegacyStorage):
     def _dtype(self):
         return torch.quint2x4
 
+
 _storage_classes = {
-    UntypedStorage, DoubleStorage, FloatStorage, LongStorage, IntStorage,
-    ShortStorage, CharStorage, ByteStorage, HalfStorage, BoolStorage,
-    QUInt8Storage, QInt8Storage, QInt32Storage, BFloat16Storage,
-    ComplexFloatStorage, ComplexDoubleStorage, QUInt4x2Storage, QUInt2x4Storage,
-    TypedStorage
+    UntypedStorage,
+    DoubleStorage,
+    FloatStorage,
+    LongStorage,
+    IntStorage,
+    ShortStorage,
+    CharStorage,
+    ByteStorage,
+    HalfStorage,
+    BoolStorage,
+    QUInt8Storage,
+    QInt8Storage,
+    QInt32Storage,
+    BFloat16Storage,
+    ComplexFloatStorage,
+    ComplexDoubleStorage,
+    QUInt4x2Storage,
+    QUInt2x4Storage,
+    TypedStorage,
 }
 
 # The _tensor_classes set is initialized by the call to initialize_python_bindings.
@@ -1748,15 +1870,17 @@ from torch.serialization import load, save
 # Initialize extension
 ################################################################################
 
+
 # Shared memory manager needs to know the exact location of manager executable
 def _manager_path():
-    if _running_with_deploy() or platform.system() == 'Windows':
+    if _running_with_deploy() or platform.system() == "Windows":
         return b""
-    path = get_file_path('torch', 'bin', 'torch_shm_manager')
-    prepare_multiprocessing_environment(get_file_path('torch'))
+    path = get_file_path("torch", "bin", "torch_shm_manager")
+    prepare_multiprocessing_environment(get_file_path("torch"))
     if not os.path.exists(path):
         raise RuntimeError("Unable to find torch_shm_manager at " + path)
-    return path.encode('utf-8')
+    return path.encode("utf-8")
+
 
 _C._initExtension(_manager_path())
 
@@ -1771,19 +1895,18 @@ if TYPE_CHECKING:
     # signatures already imported. For now these clashes are ignored; see
     # PR #43339 for details.
     from torch._C._VariableFunctions import *  # type: ignore[assignment, misc] # noqa: F403
+
     # Fixup segment_reduce visibility
     _segment_reduce = segment_reduce
     del segment_reduce  # noqa: F821
 
 # Ops not to be exposed in `torch` namespace,
 # mostly helper ops.
-PRIVATE_OPS = (
-    'unique_dim',
-)
+PRIVATE_OPS = ("unique_dim",)
 
-__name, __obj = '', None
+__name, __obj = "", None
 for __name in dir(_C._VariableFunctions):
-    if __name.startswith('__') or __name in PRIVATE_OPS:
+    if __name.startswith("__") or __name in PRIVATE_OPS:
         continue
     __obj = getattr(_C._VariableFunctions, __name)
     __obj.__module__ = __name__  # "torch"
@@ -1834,13 +1957,18 @@ del _LegacyStorage
 # Define _assert
 ################################################################################
 
+
 # needs to be before the submodule imports to avoid circular dependencies
 def _assert(condition, message):
-    r"""A wrapper around Python's assert which is symbolically traceable.
-    """
-    if type(condition) is not torch.Tensor and overrides.has_torch_function((condition,)):
-        return overrides.handle_torch_function(_assert, (condition,), condition, message)
+    r"""A wrapper around Python's assert which is symbolically traceable."""
+    if type(condition) is not torch.Tensor and overrides.has_torch_function(
+        (condition,)
+    ):
+        return overrides.handle_torch_function(
+            _assert, (condition,), condition, message
+        )
     assert condition, message
+
 
 ################################################################################
 # Import most common subpackages
@@ -1904,6 +2032,7 @@ _C._init_names(list(_storage_classes))
 
 # attach docstrings to torch and tensor functions
 from torch import _size_docs, _storage_docs, _tensor_docs, _torch_docs
+
 del _torch_docs, _tensor_docs, _storage_docs, _size_docs
 
 
@@ -1932,6 +2061,7 @@ legacy_contiguous_format = contiguous_format  # defined by _C._initExtension()
 
 # Register fork handler to initialize OpenMP in child processes (see gh-28389)
 from torch.multiprocessing._atfork import register_after_fork
+
 register_after_fork(torch.get_num_threads)
 del register_after_fork
 
@@ -1973,6 +2103,7 @@ class _TorchCompileInductorWrapper:
 
         # Stash the compiler_fn to be used for backend match guard.
         from torch._inductor.compile_fx import compile_fx
+
         self.compiler_fn = compile_fx
         if self.config.get("triton.cudagraphs", False):
             os.environ["DISABLE_CUPTI_LAZY_REINIT"] = "1"
@@ -1983,15 +2114,18 @@ class _TorchCompileInductorWrapper:
             os.environ["TEARDOWN_CUPTI"] = "0"
 
     def __eq__(self, other):
-        return (isinstance(other, _TorchCompileInductorWrapper) and
-                self.config == other.config and
-                self.dynamic == other.dynamic)
+        return (
+            isinstance(other, _TorchCompileInductorWrapper)
+            and self.config == other.config
+            and self.dynamic == other.dynamic
+        )
 
     def apply_mode(self, mode: Optional[str]):
         if mode is None or mode == "default":
             pass
-        elif mode in ("reduce-overhead", "max-autotune", "max-autotune-no-cudagraphs"):
+        elif mode in {"reduce-overhead", "max-autotune", "max-autotune-no-cudagraphs"}:
             from torch._inductor import list_mode_options
+
             self.apply_options(list_mode_options(mode, self.dynamic))
         else:
             raise RuntimeError(
@@ -2003,6 +2137,7 @@ class _TorchCompileInductorWrapper:
             return
 
         from torch._inductor import config
+
         current_config: Dict[str, Any] = config.shallow_copy_dict()
 
         for key, val in options.items():
@@ -2026,14 +2161,18 @@ class _TorchCompileInductorWrapper:
 
     def get_compiler_config(self):
         from torch._inductor.compile_fx import get_patched_config_dict
+
         return get_patched_config_dict(config_patches=self.config)
 
     def reset(self):
         from torch._inductor import config
+
         if "triton.cudagraphs" in self.config or config.triton.cudagraphs:
             if self.config.get("triton.cudagraphs", True):
                 from torch._inductor.cudagraph_trees import reset_cudagraph_trees
+
                 reset_cudagraph_trees()
+
 
 class _TorchCompileWrapper:
     def __init__(self, backend, mode, options, dynamic):
@@ -2055,10 +2194,12 @@ class _TorchCompileWrapper:
             self.kwargs["options"] = options
 
     def __eq__(self, other):
-        return (isinstance(other, _TorchCompileWrapper) and
-                self.compiler_fn == other.compiler_fn and
-                self.kwargs == other.kwargs and
-                self.dynamic == other.dynamic)
+        return (
+            isinstance(other, _TorchCompileWrapper)
+            and self.compiler_fn == other.compiler_fn
+            and self.kwargs == other.kwargs
+            and self.dynamic == other.dynamic
+        )
 
     def __call__(self, model_, inputs_):
         return self.compiler_fn(model_, inputs_, **self.kwargs)
@@ -2068,13 +2209,16 @@ class _TorchCompileWrapper:
             self.compiler_fn.reset()
 
 
-def compile(model: Optional[Callable] = None, *,
-            fullgraph: builtins.bool = False,
-            dynamic: Optional[builtins.bool] = None,
-            backend: Union[str, Callable] = "inductor",
-            mode: Union[str, None] = None,
-            options: Optional[Dict[str, Union[str, builtins.int, builtins.bool]]] = None,
-            disable: builtins.bool = False) -> Callable:
+def compile(
+    model: Optional[Callable] = None,
+    *,
+    fullgraph: builtins.bool = False,
+    dynamic: Optional[builtins.bool] = None,
+    backend: Union[str, Callable] = "inductor",
+    mode: Union[str, None] = None,
+    options: Optional[Dict[str, Union[str, builtins.int, builtins.bool]]] = None,
+    disable: builtins.bool = False,
+) -> Callable:
     """
     Optimizes given model/function using TorchDynamo and specified backend.
     If you are compiling an :class:`torch.nn.Module`, you can also use :meth:`torch.nn.Module.compile`
@@ -2165,20 +2309,26 @@ def compile(model: Optional[Callable] = None, *,
 
     # Decorator mode
     if model is None:
+
         def fn(model: Callable):
             if model is None:
                 raise RuntimeError("Model can't be None")
-            return compile(model,
-                           fullgraph=fullgraph,
-                           dynamic=dynamic,
-                           backend=backend,
-                           mode=mode,
-                           options=options,
-                           disable=disable)
+            return compile(
+                model,
+                fullgraph=fullgraph,
+                dynamic=dynamic,
+                backend=backend,
+                mode=mode,
+                options=options,
+                disable=disable,
+            )
+
         return fn
 
     if mode is not None and options is not None:
-        raise RuntimeError("Either mode or options can be specified, but both can't be specified at the same time.")
+        raise RuntimeError(
+            "Either mode or options can be specified, but both can't be specified at the same time."
+        )
     if mode is None and options is None:
         mode = "default"
     if backend == "inductor":
@@ -2186,7 +2336,12 @@ def compile(model: Optional[Callable] = None, *,
     else:
         backend = _TorchCompileWrapper(backend, mode, options, dynamic)
 
-    return torch._dynamo.optimize(backend=backend, nopython=fullgraph, dynamic=dynamic, disable=disable)(model)
+    return torch._dynamo.optimize(
+        backend=backend,
+        nopython=fullgraph,
+        dynamic=dynamic,
+        disable=disable,
+    )(model)
 
 
 from torch import export as export
@@ -2205,11 +2360,14 @@ def _register_device_module(device_type, module):
     device_type = torch.device(device_type).type
     m = sys.modules[__name__]
     if hasattr(m, device_type):
-        raise RuntimeError(f"The runtime module of '{device_type}' has already "
-                           f"been registered with '{getattr(m, device_type)}'")
+        raise RuntimeError(
+            f"The runtime module of '{device_type}' has already "
+            f"been registered with '{getattr(m, device_type)}'"
+        )
     setattr(m, device_type, module)
-    torch_module_name = '.'.join([__name__, device_type])
+    torch_module_name = ".".join([__name__, device_type])
     sys.modules[torch_module_name] = module
+
 
 # expose return_types
 from torch import library as library, return_types as return_types
@@ -2218,7 +2376,7 @@ if not TYPE_CHECKING:
     from torch import _meta_registrations
 
 # Enable CUDA Sanitizer
-if 'TORCH_CUDA_SANITIZER' in os.environ:
+if "TORCH_CUDA_SANITIZER" in os.environ:
     import torch.cuda._sanitizer as csan
 
     csan.enable_cuda_sanitizer()
@@ -2278,7 +2436,11 @@ else:
         replacement = _deprecated_attrs.get(name)
         if replacement is not None:
             import warnings
-            warnings.warn(f"'{name}' is deprecated, please use '{replacement.__module__}.{replacement.__name__}()'", stacklevel=2)
+
+            warnings.warn(
+                f"'{name}' is deprecated, please use '{replacement.__module__}.{replacement.__name__}()'",
+                stacklevel=2,
+            )
             return replacement()
 
         # Lazy modules
@@ -2286,6 +2448,7 @@ else:
             return importlib.import_module(f".{name}", __name__)
 
         raise AttributeError(f"module '{__name__}' has no attribute '{name}'")
+
 
 def get_device_module(device: Optional[Union[torch.device, str]] = None):
     """
@@ -2300,7 +2463,9 @@ def get_device_module(device: Optional[Union[torch.device, str]] = None):
         # Using default accelerator type. If no accelerator is available, it automatically returns CPU device.
         device_module_name = torch._C._get_accelerator().type
     else:
-        raise RuntimeError(f"Invalid value of device '{device}', expect torch.device, str, or None")
+        raise RuntimeError(
+            f"Invalid value of device '{device}', expect torch.device, str, or None"
+        )
     device_module = getattr(torch, device_module_name, None)
     if device_module is None:
         raise RuntimeError(
@@ -2309,7 +2474,11 @@ def get_device_module(device: Optional[Union[torch.device, str]] = None):
     return device_module
 
 
-def _constrain_as_size(symbol, min: Optional[builtins.int] = None, max: Optional[builtins.int] = None):
+def _constrain_as_size(
+    symbol,
+    min: Optional[builtins.int] = None,
+    max: Optional[builtins.int] = None,
+):
     """
     This indicates that a given int is size-like, and can be used in any context where a size is expected.
     You will typically use this when reading out integers from Tensors, e.g., max.item() or lengths.tolist()
@@ -2332,4 +2501,5 @@ def _constrain_as_size(symbol, min: Optional[builtins.int] = None, max: Optional
 
 
 from torch import _logging
+
 _logging._init_logs()
