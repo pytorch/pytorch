@@ -2644,7 +2644,44 @@ def forward(self, arg0_1):
         ):
             out = torch.compile(Mod(), backend="inductor")(inp, tmp)
 
-        out = torch.compile(Mod(), backend="eager")(inp, tmp)
+        from torch._dynamo.testing import EagerAndRecordGraphs
+
+        backend = EagerAndRecordGraphs()
+        out = torch.compile(Mod(), backend=backend)(inp, tmp)
+        self.assertExpectedInline(
+            backend.graphs[0].cond_true_0.print_readable(print_output=False),
+            """\
+class GraphModule(torch.nn.Module):
+    def forward(self, l_inp_, l_tmp_):
+        l_inp__1 = l_inp_
+        l_tmp__1 = l_tmp_
+
+        # File: /data/users/yidi/pytorch/test/functorch/test_control_flow.py:2622 in f, code: a = a.clone()
+        clone: "f32[3, 3]" = l_inp__1.clone();  l_inp__1 = None
+
+        # File: /data/users/yidi/pytorch/test/functorch/test_control_flow.py:2623 in f, code: a_view = a.view(-1)
+        view: "f32[9]" = clone.view(-1)
+
+        # File: /data/users/yidi/pytorch/test/functorch/test_control_flow.py:2624 in f, code: tmp = tmp.clone()
+        clone_1: "f32[3, 3]" = l_tmp__1.clone();  l_tmp__1 = None
+
+        # No stacktrace found for following nodes
+        _set_grad_enabled = torch._C._set_grad_enabled(False)
+
+        # File: /data/users/yidi/pytorch/test/functorch/test_control_flow.py:2626 in f, code: a.set_(tmp)
+        set_: "f32[3, 3]" = clone.set_(clone_1)
+
+        # File: /data/users/yidi/pytorch/test/functorch/test_control_flow.py:2627 in f, code: a_view.mul_(2)
+        mul_: "f32[9]" = view.mul_(2);  view = None
+
+        # No stacktrace found for following nodes
+        _set_grad_enabled_1 = torch._C._set_grad_enabled(True)
+
+        # File: /data/users/yidi/pytorch/test/functorch/test_control_flow.py:2628 in f, code: return a + tmp
+        add: "f32[3, 3]" = clone + clone_1;  clone = clone_1 = None
+        return (add,)
+        """,
+        )
         self.assertEqual(out, f(inp, tmp))
 
 
