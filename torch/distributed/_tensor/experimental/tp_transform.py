@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import copy
 import operator
 from typing import Any, cast, Dict, List, Optional, Sequence, Tuple
