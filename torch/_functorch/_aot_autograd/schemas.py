@@ -13,6 +13,7 @@ import torch
 import torch.utils._pytree as pytree
 from torch._guards import Source
 from torch._subclasses import FakeTensor
+from torch._subclasses.fake_tensor import is_fake
 
 from .. import config
 
@@ -187,10 +188,17 @@ class SubclassCreationMeta:
     flat_tensor_start_idx: int
     # The number of tensors that live in this subclass wrapper
     arg_count: int
+    # meta and inner_keys are produced by the subclass's __tensor_flatten__.
+    # We need to keep them around along with outer_size / outer_stride to plumb them
+    # into __tensor_unflatten__
     attrs: Dict[str, Union["SubclassCreationMeta", None]]
     outer_size: List[int]
     outer_stride: List[int]
     meta: Any
+    # Stores the original subclass itself.
+    # This is needed because we need the autograd metadata on the original subclass
+    # (this is guaranteed to be a wrapper subclass that holds a fake tensor,
+    #  so holding onto this at runtime shouldn't leak memory)
     original_subclass: Any
 
     def creation_fn(self, all_args, *, is_runtime: bool):
@@ -217,6 +225,10 @@ class SubclassCreationMeta:
             torch._mirror_autograd_meta_to(self.original_subclass, rebuilt)  # type: ignore[attr-defined]
 
         return rebuilt
+
+    def __post_init__(self):
+        # sanity assert to make sure we don't leak memory
+        assert is_fake(self.original_subclass)
 
 
 # This class encapsulates all aliasing + mutation info we need about the forward graph
