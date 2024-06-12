@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import os
 import pathlib
 from collections import defaultdict
