@@ -21,7 +21,6 @@ from torchgen.api.types import (
     NativeSignature,
     tensorT,
 )
-
 from torchgen.context import method_with_native_function, native_function_manager
 from torchgen.model import (
     Argument,
@@ -68,6 +67,7 @@ def gen_registration_headers(
     else:
         headers.append("#include <ATen/Functions.h>")
 
+    headers.append("#include <c10/macros/Macros.h>")
     return headers
 
 
@@ -193,10 +193,12 @@ void check_inplace(const Tensor &self, IntArrayRef sizes, const TensorOptions &o
 
 def gen_registration_helpers(backend_index: BackendIndex) -> List[str]:
     return [
+        'C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wunused-function")',
         *gen_create_out_helper(backend_index),
         *gen_resize_out_helper(backend_index),
         *gen_check_inplace_helper(backend_index),
         *gen_maybe_create_proxy_helper(backend_index),
+        "C10_DIAGNOSTIC_POP()",
     ]
 
 
@@ -719,7 +721,8 @@ resize_out(out, sizes, strides, options);
             "    const Tensor& maybe_get_output(int64_t output_idx) override {",
             f"      return {output_value};\n",  # type: ignore[possibly-undefined]  # TODO: audit
             "    }",
-            f"    std::array<{output_type}, {len(f.func.returns)}> outputs_;",  # type: ignore[possibly-undefined]  # TODO: audit
+            # type: ignore[possibly-undefined]  # TODO: audit
+            f"    std::array<{output_type}, {len(f.func.returns)}> outputs_;",
             f"{textwrap.indent(proxy_field, indent)}",  # type: ignore[possibly-undefined]  # TODO: audit
             f"{textwrap.indent(guard_field, indent)}",
             "};",
