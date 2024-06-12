@@ -347,10 +347,6 @@ def generate_wheels_matrix(
     for python_version in python_versions:
         for arch_version in arches:
             gpu_arch_type = arch_type(arch_version)
-            # Disable py3.12 builds for ROCm because of triton dependency
-            # on llnl-hatchet, which doesn't have py3.12 wheels available
-            if gpu_arch_type == "rocm" and python_version == "3.12":
-                continue
             gpu_arch_version = (
                 ""
                 if arch_version == "cpu"
