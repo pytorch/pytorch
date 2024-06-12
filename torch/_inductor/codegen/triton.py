@@ -7,7 +7,18 @@ import logging
 import os
 import textwrap
 from functools import lru_cache
-from typing import Any, Callable, cast, Dict, List, Optional, Set, Tuple, Union
+from typing import (
+    Any,
+    Callable,
+    cast,
+    Dict,
+    Iterable,
+    List,
+    Optional,
+    Set,
+    Tuple,
+    Union,
+)
 
 import sympy
 
@@ -147,14 +158,27 @@ class IndexingOptions:
 
 @dataclasses.dataclass
 class BlockPtrOptions:
+    params: BlockParameters
     constant_offset: sympy.Expr
-    shape: List[sympy.Expr]
-    strides: List[sympy.Expr]
-    block_shape: List[sympy.Expr]
     order: List[int]
-    offsets: List[sympy.Expr]
     mask_vars: Set[str]
     reshape_suffix: List[str]
+
+    @property
+    def shape(self) -> List[sympy.Expr]:
+        return self.params.shape
+
+    @property
+    def block_shape(self) -> List[sympy.Expr]:
+        return self.params.block_shape
+
+    @property
+    def strides(self) -> List[sympy.Expr]:
+        return self.params.strides
+
+    @property
+    def offsets(self) -> List[sympy.Expr]:
+        return self.params.offsets
 
     @staticmethod
     def create(
@@ -198,17 +222,22 @@ class BlockPtrOptions:
                 if not is_broadcasting or not drop_broadcasts
             ]
 
+        # Drop broadcasting dimensions from the input.
+        params = BlockParameters(
+            **{key: filter(val) for key, val in dataclasses.asdict(params).items()}
+        )
+
+        def lookup_size(exprs: Iterable[sympy.Expr]) -> List[sympy.Expr]:
+            return [V.graph.sizevars.lookup_precomputed_size(expr) for expr in exprs]
+
+        # Look up precomputed sizes
+        params.shape = lookup_size(params.shape)
+        params.strides = lookup_size(params.strides)
+
         return BlockPtrOptions(
+            params=params,
             constant_offset=V.graph.sizevars.lookup_precomputed_size(constant_offset),
-            shape=filter(
-                [V.graph.sizevars.lookup_precomputed_size(dim) for dim in params.shape]
-            ),
-            strides=[
-                *map(V.graph.sizevars.lookup_precomputed_size, filter(params.strides))
-            ],
-            block_shape=filter(params.block_shape),
-            order=V.graph.sizevars.guarded_order(filter(params.strides)),
-            offsets=filter(params.offsets),
+            order=V.graph.sizevars.guarded_order(params.strides),
             mask_vars=mask_vars,
             reshape_suffix=reshape_suffix,
         )
@@ -252,27 +281,22 @@ class BlockPtrOptions:
     @cache_on_self
     def boundary_check(self) -> List[int]:
         """List of indices to pass to tl.load(boundary_check=...)"""
-        check = []
-        for i in range(len(self.shape)):
-            # Look up the relevant block size.
-            # If the shape is a sympy expression, skip this check.
-            block_dim = self.block_shape[i]
-            block_prefix = str(block_dim)[0]
-            block_size = TRITON_MAX_BLOCK.get(block_prefix)
+        return [
+            idx
+            for idx in range(len(self.shape))
             if (
-                self.block_shape[i] != "1"
-                and not V.graph.sizevars.statically_known_equals(self.strides[i], 0)  # type: ignore[arg-type]
-                and (
-                    block_size is None
-                    or not V.graph.sizevars.statically_known_multiple_of(
-                        self.shape[i],
-                        block_size,  # type: ignore[arg-type]
-                    )
+                not V.graph.sizevars.statically_known_equals(
+                    self.strides[idx], sympy.Integer(0)
                 )
-                and not (V.kernel.no_x_dim and self.block_shape[i] == "XBLOCK")
-            ):
-                check.append(i)
-        return check
+                and not V.graph.sizevars.statically_known_multiple_of(
+                    self.shape[idx], self.block_shape[idx]
+                )
+                and not (
+                    V.kernel.no_x_dim
+                    and self.block_shape[idx] == block_sizes[SymT.XBLOCK]
+                )
+            )
+        ]
 
     def advance_roffset(self):
         """
