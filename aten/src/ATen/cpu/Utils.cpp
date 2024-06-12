@@ -32,14 +32,18 @@ bool is_cpu_support_vnni() {
 #endif
 }
 
-bool init_amx() {
+bool is_cpu_support_amx_tile() {
 #if !defined(__s390x__) && !defined(__powerpc__)
-  if (!cpuinfo_initialize() || !cpuinfo_has_x86_amx_tile()) {
-    return false;
-  }
+  return cpuinfo_initialize() && cpuinfo_has_x86_amx_tile();
 #else
   return false;
 #endif
+}
+
+bool init_amx() {
+  if (!is_cpu_support_amx_tile()) {
+    return false;
+  }
 
 #if defined(__linux__) && !defined(__ANDROID__)
 #define XFEATURE_XTILECFG 17

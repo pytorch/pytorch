@@ -1427,7 +1427,7 @@ extern "C" void __amx_chk_kernel() {
         if super().__bool__():
             if config.is_fbcode():
                 return False
-            if self.check_build(VecAMX._amx_code) and torch._C._cpu._init_amx():
+            if self.check_build(VecAMX._amx_code) and torch.cpu._init_amx():
                 return True
         return False
 
@@ -1497,9 +1497,11 @@ def x86_isa_checker() -> List[str]:
 
     avx2 = torch.cpu._is_cpu_support_avx2()
     avx512 = torch.cpu._is_cpu_support_avx512()
+    amx_tile = torch.cpu._is_cpu_support_amx_tile()
 
     _check_and_append_supported_isa(supported_isa, avx2, "avx2")
     _check_and_append_supported_isa(supported_isa, avx512, "avx512")
+    _check_and_append_supported_isa(supported_isa, amx_tile, "amx_tile")
 
     return supported_isa
 
