@@ -237,24 +237,5 @@ Tensor std_quantized_cpu(
   return result;
 }
 
-static Tensor std_quantized_cpu(
-    const Tensor& self,
-    DimnameList dim,
-    const std::optional<Scalar>& correction,
-    bool keepdim) {
-  return std_quantized_cpu(
-      self, dimnames_to_positions(self, dim), correction, keepdim);
-}
-
-static Tensor& std_out_quantized_cpu(
-    Tensor& result,
-    const Tensor& self,
-    DimnameList dim,
-    const std::optional<Scalar>& correction,
-    bool keepdim) {
-  return std_out_quantized_cpu(
-      self, dimnames_to_positions(self, dim), correction, keepdim, result);
-}
-
 } // namespace native
 } // namespace at

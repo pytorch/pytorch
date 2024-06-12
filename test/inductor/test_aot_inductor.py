@@ -12,6 +12,7 @@ from unittest import skip
 import torch
 import torch._export
 import torch._inductor
+import torch._inductor.config
 import torch.nn as nn
 from torch._dynamo.testing import rand_strided, same
 from torch._dynamo.utils import counters
@@ -421,9 +422,10 @@ class AOTInductorTestsTemplate:
                 def __init__(self, device):
                     super().__init__()
                     self.weight = torch.randn(10, 10, device=device).to(dtype)
+                    self.bias = torch.randn(10, device=device).to(dtype)
 
                 def forward(self, y):
-                    return torch.nn.functional.linear(y, self.weight)
+                    return torch.nn.functional.linear(y, self.weight, self.bias)
 
             example_inputs = (torch.randn(10, 10, device=self.device).to(dtype),)
 
@@ -1301,7 +1303,6 @@ class AOTInductorTestsTemplate:
                 return self.foo + x
 
         example_inputs = (torch.rand(4, 4, device=self.device),)
-        torch._export.aot_compile(Model(self.device), example_inputs)
         self.check_model(Model(self.device), example_inputs)
 
     def test_non_tensor_input(self):
@@ -1313,14 +1314,19 @@ class AOTInductorTestsTemplate:
         with self.assertRaises(RuntimeError):
             torch._export.aot_compile(fn, args=(a, b), kwargs={"alpha": 2.0})
 
-        so_path = torch._export.aot_compile(
-            torch.ops.aten.add, args=(a, b), kwargs={"alpha": 2.0}, same_signature=False
-        )
-        kernel_runner = AOTIRunnerUtil.load_runner(self.device, so_path)
-        res = kernel_runner.run([a, b])
-        self.assertTrue(isinstance(res, list))
-        self.assertTrue(len(res) == 1)
-        self.assertEqual(fn(a, b, alpha=2.0), res[0])
+        for simdlen in [0, None]:
+            with torch._inductor.config.patch({"cpp.simdlen": simdlen}):
+                so_path = torch._export.aot_compile(
+                    torch.ops.aten.add,
+                    args=(a, b),
+                    kwargs={"alpha": 2.0},
+                    same_signature=False,
+                )
+                kernel_runner = AOTIRunnerUtil.load_runner(self.device, so_path)
+                res = kernel_runner.run([a, b])
+                self.assertTrue(isinstance(res, list))
+                self.assertTrue(len(res) == 1)
+                self.assertEqual(fn(a, b, alpha=2.0), res[0])
 
     def test_buffer_mutation_2(self):
         class Model(torch.nn.Module):
@@ -1378,6 +1384,26 @@ class AOTInductorTestsTemplate:
         model = Model(self.device)
         self.check_model(model, example_inputs)
         self.code_check_count(model, example_inputs, "empty_strided", 2)
+
+    def test_buffer_mutation_4(self):
+        if self.device != "cuda":
+            raise unittest.SkipTest("requires CUDA")
+
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.register_buffer(
+                    "_tensor_constant0",
+                    torch.randint(1, size=[38], dtype=torch.int64, device="cpu"),
+                )
+
+            def forward(self, x):
+                return x + self._tensor_constant0.to(torch.device(type="cuda", index=0))
+
+        example_inputs = (
+            torch.randint(1, size=[38], dtype=torch.int64, device="cuda"),
+        )
+        torch._export.aot_compile(Model(), example_inputs)
 
     @requires_multigpu()
     def test_replicate_on_devices(self):
