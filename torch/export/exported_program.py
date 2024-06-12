@@ -538,9 +538,6 @@ class ExportedProgram:
             ConstantAttrMap,
             lift_constants_pass,
         )
-        from torch._export.passes.replace_sym_size_ops_pass import (
-            _replace_sym_size_ops_pass,
-        )
         from torch._functorch.aot_autograd import aot_export_module
 
         def _get_placeholders(gm):
@@ -661,8 +658,6 @@ class ExportedProgram:
         for k, v in constants.items():
             assert k not in self.constants
             self.constants[k] = v
-
-        _replace_sym_size_ops_pass(gm)
 
         from torch._dynamo import config as _dynamo_config
         from torch._export.passes._node_metadata_hook import (
