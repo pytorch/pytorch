@@ -770,17 +770,13 @@ AOTITorchError aoti_torch_repeat_interleave_Tensor(
 }
 
 // Function to check existence of inf and NaN
-AOTITorchError aoti_check_inf_and_nan(AtenTensorHandle tensor) {
+AOTITorchError aoti_torch_check_inf_and_nan(
+    const char* tensor_name,
+    AtenTensorHandle tensor) {
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
     at::Tensor* check_tensor = tensor_handle_to_tensor_pointer(tensor);
-    auto flattened = check_tensor->view({-1});
 
-    for (int64_t i = 0; i < flattened.numel(); i++) {
-      auto value = flattened[i].item<float>();
-      if (std::isinf(value) || std::isnan(value)) {
-        assert(false);
-      }
-    }
+    assert_inf_and_nan(tensor_name, *check_tensor);
   });
 }
 
