@@ -191,7 +191,7 @@ hop_db = [
         check_batched_gradgrad=False,
         check_batched_forward_grad=False,
         check_inplace_batched_forward_grad=False,
-        supports_autograd=False,
+        supports_autograd=True,
     ),
     OpInfo(
         name="while_loop",
