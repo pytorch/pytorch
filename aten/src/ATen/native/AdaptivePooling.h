@@ -28,15 +28,15 @@ using adaptive_max_pooling3d_backward_fn = void(*)(const Tensor& grad_input, con
 DECLARE_DISPATCH(adaptive_max_pooling3d_fn, adaptive_max_pool3d_kernel);
 DECLARE_DISPATCH(adaptive_max_pooling3d_backward_fn, adaptive_max_pool3d_backward_kernel);
 
-static inline int64_t start_index(int64_t a, int64_t b, int64_t c) {
+inline int64_t start_index(int64_t a, int64_t b, int64_t c) {
   return (a / b) * c + ((a % b) * c) / b;
 }
 
-static inline int64_t end_index(int64_t a, int64_t b, int64_t c) {
+inline int64_t end_index(int64_t a, int64_t b, int64_t c) {
   return 1 + ((a + 1) * c - 1) / b;
 }
 
-static inline void adaptive_pool_empty_output_check(const Tensor& gradOutput_, const char* arg_name) {
+inline void adaptive_pool_empty_output_check(const Tensor& gradOutput_, const char* arg_name) {
   int64_t ndim = gradOutput_.ndimension();
   for (const auto i : c10::irange(1, ndim)) {
     TORCH_CHECK(gradOutput_.size(i) > 0,
