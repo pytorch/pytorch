@@ -185,20 +185,20 @@ fx_passes_numeric_check: Dict[str, Any] = {
     "requires_optimizer": True,
 }
 
-# force_mixed_mm can be used to control the behaviour for pattern torch.mm(a, b.to(dtype)) with cuda tensors.
+# mixed_mm_choice can be used to control the behaviour for pattern torch.mm(a, b.to(dtype)) with cuda tensors.
 # The fallback aten implementation is normal cast->then->mm option.
-# If force_mixed_mm is "no": this flag will be ignored.
-# If forced_mixed_mm is "triton":
+# If mixed_mm_choice is "default": this flag will be ignored.
+# If mixed_mm_choice is "triton":
 # - Always use torch._inductor.kernel.mm.tuned_mixed_mm's fused kernel.
 # - Autotune will not compare with fallback.
-# If force_mixed_mm is "aten": always use the fallback aten implementation.
-# If force_mixed_mm is "heuristic":
+# If mixed_mm_choice is "aten": always use the fallback aten implementation.
+# If mixed_mm_choice is "heuristic":
 # - Enables the heuristic.
 # - If the heuristic decides to add a config, it will add the config as the first choice.
 # - If autotune is disabled, this config will always be chosen.
 # - If autotune is enabled, it will also compare with fallback aten implementation and fused kernel.
-# The use_mixed_mm flag will be ignored if forced_mixed_mm != "no".
-force_mixed_mm = "heuristic"
+# The use_mixed_mm flag will be ignored if mixed_mm_choice != "default".
+mixed_mm_choice = "heuristic"
 
 # enable reordering pass for increasing overlap between compute and communication
 reorder_for_compute_comm_overlap = False

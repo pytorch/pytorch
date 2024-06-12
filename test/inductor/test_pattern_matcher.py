@@ -198,7 +198,7 @@ class TestPatternMatcher(TestCase):
         self.assertEqual("fallback_mixed_mm" in code, fallback_mixed_mm_expected)
 
     @unittest.skipIf(not SM80OrLater, "need sm_80")
-    @inductor_config.patch(force_mixed_mm="triton")
+    @inductor_config.patch(mixed_mm_choice="triton")
     def test_mixed_mm(self):
         def fn(a, b):
             return torch.mm(a, b.to(a.dtype))
@@ -226,7 +226,7 @@ class TestPatternMatcher(TestCase):
             self._test_mixed_impl(fn, args, True, False)
 
     @unittest.skipIf(not SM80OrLater, "need sm_80")
-    @inductor_config.patch(force_mixed_mm="triton")
+    @inductor_config.patch(mixed_mm_choice="triton")
     def test_mixed_mm_bad_cases(self):
         def fn(a, b):
             return torch.mm(a, b.to(a.dtype))
@@ -251,7 +251,7 @@ class TestPatternMatcher(TestCase):
             self._test_mixed_impl(fn, args, True, True)
 
     @unittest.skipIf(not SM80OrLater, "need sm_80")
-    @inductor_config.patch(force_mixed_mm="triton", max_autotune_gemm=True)
+    @inductor_config.patch(mixed_mm_choice="triton", max_autotune_gemm=True)
     def test_mixed_mm_epi_works(self):
         def fn(a, b, c, d):
             return torch.mm(a, b.to(a.dtype)) * c + d
@@ -282,7 +282,7 @@ class TestPatternMatcher(TestCase):
 
     @unittest.skipIf(not SM80OrLater, "need sm_80")
     @unittest.skipIf(not is_A100, "heuristic only run on A100")
-    @inductor_config.patch(force_mixed_mm="heuristic")
+    @inductor_config.patch(mixed_mm_choice="heuristic")
     def test_mixed_mm_heuristic_no(self):
         def fn(a, b):
             return torch.mm(a, b.to(a.dtype))
@@ -329,7 +329,7 @@ class TestPatternMatcher(TestCase):
 
     @unittest.skipIf(not SM80OrLater, "need sm_80")
     @unittest.skipIf(not is_A100, "heuristic only run on A100")
-    @inductor_config.patch(force_mixed_mm="heuristic")
+    @inductor_config.patch(mixed_mm_choice="heuristic")
     def test_mixed_mm_heuristic_yes(self):
         def fn(a, b):
             return torch.mm(a, b.to(a.dtype))
@@ -384,32 +384,38 @@ class TestPatternMatcher(TestCase):
             torch.randint(-128, 127, (8, 8), dtype=torch.int8, device="cuda"),
         )
         # will ignore the mixed_mm code (including fallback)
-        with inductor_config.patch({"force_mixed_mm": "no", "use_mixed_mm": False}):
+        with inductor_config.patch(
+            {"mixed_mm_choice": "default", "use_mixed_mm": False}
+        ):
             self._test_mixed_impl(fn, args, False, False)
 
         # will use fallback_mixed_mm kernel due to no gemm_autotune
-        with inductor_config.patch({"force_mixed_mm": "no", "use_mixed_mm": True}):
+        with inductor_config.patch(
+            {"mixed_mm_choice": "default", "use_mixed_mm": True}
+        ):
             self._test_mixed_impl(fn, args, True, True)
 
         # will use mixed_mm kernel
-        with inductor_config.patch({"force_mixed_mm": "triton", "use_mixed_mm": False}):
+        with inductor_config.patch(
+            {"mixed_mm_choice": "triton", "use_mixed_mm": False}
+        ):
             self._test_mixed_impl(fn, args, True, False)
 
         # shows that use_mixed_mm doesn't do anything if foce_mixed_mm is set
-        with inductor_config.patch({"force_mixed_mm": "triton", "use_mixed_mm": True}):
+        with inductor_config.patch({"mixed_mm_choice": "triton", "use_mixed_mm": True}):
             self._test_mixed_impl(fn, args, True, False)
 
         # will use fallback_mixed_mm kernel
-        with inductor_config.patch({"force_mixed_mm": "aten", "use_mixed_mm": False}):
+        with inductor_config.patch({"mixed_mm_choice": "aten", "use_mixed_mm": False}):
             self._test_mixed_impl(fn, args, True, True)
 
         # will use fallback_mixed_mm kernel
-        with inductor_config.patch({"force_mixed_mm": "aten", "use_mixed_mm": True}):
+        with inductor_config.patch({"mixed_mm_choice": "aten", "use_mixed_mm": True}):
             self._test_mixed_impl(fn, args, True, True)
 
         # will use fallback_mixed_mm kernel because fallback is the only choice
         with inductor_config.patch(
-            {"force_mixed_mm": "aten", "use_mixed_mm": True, "max_autotune_gemm": True}
+            {"mixed_mm_choice": "aten", "use_mixed_mm": True, "max_autotune_gemm": True}
         ):
             self._test_mixed_impl(fn, args, True, True)
 
@@ -530,7 +536,7 @@ class TestPatternMatcher(TestCase):
             torch.testing.assert_close(ref, test)
             self.assertFalse("uint4x2_mixed_mm" in code)
 
-    @inductor_config.patch(force_mixed_mm="no")
+    @inductor_config.patch(mixed_mm_choice="default")
     @inductor_config.patch(use_mixed_mm=False)
     def test_uint4x2_mixed_mm_gating_works(self):
         def fn(a, b):

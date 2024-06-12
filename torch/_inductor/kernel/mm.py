@@ -458,15 +458,15 @@ def tuned_mixed_mm(mat1, mat2, mat2_dtype):
             and not (mat2.layout.is_contiguous() or mat2.layout.is_transposed())
         )
         or _is_sm7x_or_older_gpu(layout.device.index)
-        or inductor_config.force_mixed_mm == "aten"
+        or inductor_config.mixed_mm_choice == "aten"
     )
 
-    if inductor_config.force_mixed_mm == "triton":
+    if inductor_config.mixed_mm_choice == "triton":
         choices = []
 
     if not skip_triton:
         b_prologue_cast_type = f"tl.{mat2_dtype}".replace("torch.", "")
-        if inductor_config.force_mixed_mm == "heuristic":
+        if inductor_config.mixed_mm_choice == "heuristic":
             choices = []
             config = try_heuristic(m, n, k, choices, mat1, mat2, mat2_dtype, layout)
             if config is not None:
