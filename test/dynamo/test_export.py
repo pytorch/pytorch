@@ -17,6 +17,7 @@ import torch
 import torch._dynamo
 import torch._dynamo.test_case
 import torch._dynamo.testing
+
 from functorch.experimental.control_flow import cond
 from torch._dynamo import config
 from torch._dynamo.exc import UserError
@@ -1506,6 +1507,30 @@ class ExportTests(torch._dynamo.test_case.TestCase):
         model = Bob(0.5, 0.3)
         inp = torch.ones(3, 4)
         graph, guards = torch._dynamo.export(model)(inp)
+        self.assertEqual(model(inp), graph(inp))
+
+    def test_export_with_constant_in_unspecialized_nn_module(self):
+        class Module(torch.nn.Module):
+            def __init__(self, y):
+                super().__init__()
+                self.y = y
+
+            @torch._dynamo.assume_constant_result
+            def check(self):
+                return self.y[0].item() == 1
+
+            def forward(self, x):
+                # This line leads to module obj being tracked as UnspecializedNNModuleVariable in dynamo
+                self.device = x.device
+
+                if self.check():
+                    return x + 1
+                else:
+                    return x + 2
+
+        model = Module(torch.tensor([1]))
+        inp = torch.ones(3, 4)
+        graph, _ = torch._dynamo.export(model)(inp)
         self.assertEqual(model(inp), graph(inp))
 
     def test_export_decomp(self):

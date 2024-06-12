@@ -36,20 +36,21 @@ from typing import (
     Type,
     TYPE_CHECKING,
 )
-
 from typing_extensions import Self
 from unittest.mock import MagicMock
 
 import numpy as np
 import pandas as pd
 import psutil
+from scipy.stats import gmean, ttest_ind
+from tqdm.auto import tqdm, trange
+
 import torch
 import torch._dynamo
 import torch._dynamo.utils
 import torch._export
 import torch.distributed
 import torch.multiprocessing as mp
-from scipy.stats import gmean, ttest_ind
 from torch._C import _has_cuda as HAS_CUDA, _has_xpu as HAS_XPU
 from torch._dynamo.profiler import fx_insert_profiling, Profiler
 from torch._dynamo.testing import (
@@ -58,8 +59,6 @@ from torch._dynamo.testing import (
     reset_rng_state,
     same,
 )
-
-from tqdm.auto import tqdm, trange
 
 try:
     from torch._dynamo.utils import (
@@ -74,14 +73,13 @@ except ImportError:
         graph_break_reasons,
         maybe_enable_compiled_autograd,
     )
+
 import torch._functorch.config
 from torch._functorch.aot_autograd import set_model_name
 from torch._inductor import config as inductor_config, metrics
 from torch._subclasses.fake_tensor import FakeTensorMode
-
 from torch.utils import _pytree as pytree
 from torch.utils._pytree import tree_map, tree_map_only
-
 
 try:
     import torch_xla
@@ -145,6 +143,7 @@ CI_SKIP_DYNAMIC_BATCH_ONLY = {
     "pyhpc_equation_of_state",
     "pyhpc_turbulent_kinetic_energy",
     "detectron2_fcos_r_50_fpn",
+    "hf_T5_generate",
 }
 
 # These models currently fail accuracy with eager Adam optimizer
@@ -1185,12 +1184,14 @@ class AOTInductorModelCache:
             else:
                 _register_dataclass_output_as_pytree(example_outputs)
 
-            gm = torch.export._trace._export(
+            # TODO(angelayi): change this to predispatch
+            # https://github.com/pytorch/pytorch/issues/127513 needs to be fixed before changing
+            # to predispatch to avoid performance regressions
+            gm = torch.export._trace._export_to_torch_ir(
                 model,
                 example_args,
                 example_kwargs,
-                pre_dispatch=True,
-            ).module()
+            )
             with torch.no_grad():
                 so_path = torch._inductor.aot_compile(
                     gm, example_args, example_kwargs
@@ -2343,16 +2344,16 @@ class BenchmarkRunner:
 
     def get_fsdp_auto_wrap_policy(self, model_name: str):
         from diffusers.models.transformer_2d import Transformer2DModel
-
-        from torch.distributed.fsdp.wrap import (
-            ModuleWrapPolicy,
-            size_based_auto_wrap_policy,
-        )
         from torchbenchmark.models.nanogpt.model import Block
         from transformers.models.llama.modeling_llama import LlamaDecoderLayer
 
         from transformers.models.t5.modeling_t5 import T5Block
         from transformers.models.whisper.modeling_whisper import WhisperEncoderLayer
+
+        from torch.distributed.fsdp.wrap import (
+            ModuleWrapPolicy,
+            size_based_auto_wrap_policy,
+        )
 
         # handcrafted wrap policy
         MODEL_FSDP_WRAP = {
@@ -2416,9 +2417,6 @@ class BenchmarkRunner:
                 limit_all_gathers=True,
                 auto_wrap_policy=self.get_fsdp_auto_wrap_policy(self.args.only),
             )
-            if torch._inductor.config.triton.cudagraphs:
-                log.warning("Disabling cudagraphs for FSDP compatibility")
-                torch._inductor.config.triton.cudagraphs = False
         return model
 
     def check_accuracy(
@@ -3171,7 +3169,7 @@ def parse_args(args=None):
     parser.add_argument(
         "--fsdp",
         action="store_true",
-        help="""Wraps model in FSDP before running it. Disables cudagraphs by default.
+        help="""Wraps model in FSDP before running it.
         Doesn't recursively wrap, mainly useful for checking dynamo UnspecNNModule compatibility
     """,
     )
@@ -3979,9 +3977,12 @@ def run(runner, args, original_dir=None):
             assert "cuda" in args.devices, "Quantization requires CUDA device."
             assert args.bfloat16, "Quantization requires dtype bfloat16."
             try:
-                from .torchao_backend import setup_baseline, torchao_optimize_ctx
-            except ImportError:
                 from torchao_backend import setup_baseline, torchao_optimize_ctx
+            except ImportError:
+                from userbenchmark.dynamo.dynamobench.torchao_backend import (
+                    setup_baseline,
+                    torchao_optimize_ctx,
+                )
 
             setup_baseline()
             baseline_ctx = functools.partial(
