@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 __all__ = ["shutdown", "get_worker_info", "remote", "rpc_sync",
            "rpc_async", "RRef", "AllGatherStates", "method_factory", "new_method"]
 
