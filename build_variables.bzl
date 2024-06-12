@@ -515,6 +515,8 @@ libtorch_distributed_base_sources = [
     "torch/csrc/distributed/c10d/sequence_num.cpp",
     "torch/csrc/distributed/c10d/socket.cpp",
     "torch/csrc/distributed/c10d/Work.cpp",
+    "torch/csrc/distributed/c10d/control_plane/Handlers.cpp",
+    "torch/csrc/distributed/c10d/control_plane/WorkerServer.cpp",
 ]
 
 # These files are only supported on Linux (and others) but not on Windows.
@@ -825,6 +827,7 @@ libtorch_python_core_sources = [
     "torch/csrc/dynamo/guards.cpp",
     "torch/csrc/dynamo/init.cpp",
     "torch/csrc/functorch/init.cpp",
+    "torch/csrc/fx/node.cpp",
     "torch/csrc/mps/Module.cpp",
     "torch/csrc/mtia/Module.cpp",
     "torch/csrc/inductor/aoti_runner/pybind.cpp",
