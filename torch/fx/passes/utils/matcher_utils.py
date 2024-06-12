@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 from dataclasses import dataclass, field
 from collections import defaultdict
 import copy

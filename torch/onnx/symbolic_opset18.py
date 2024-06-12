@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 """This file exports ONNX ops for opset 18.
 
 Note [ONNX Operators that are added/updated in opset 18]

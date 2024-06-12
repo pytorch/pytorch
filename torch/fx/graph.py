@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 from collections import defaultdict
 from .node import Node, Argument, Target, map_arg, _type_repr, _get_qualified_name
 import torch.utils._pytree as pytree
@@ -1505,7 +1504,7 @@ class Graph:
             if node.graph is not self:
                 raise RuntimeError(f'Node \'{node}\' does not belong to this Graph!')
             if node not in self._find_nodes_lookup_table:
-                raise RuntimeError(f"Node '{node}' is not added to the side table")
+                raise RuntimeError(f"Node \'{node}\' is not added to the side table")
             map_arg(node.args, lambda arg: check_arg(arg, node))
             map_arg(node.kwargs, lambda arg: check_arg(arg, node))
             seen_values.add(node)

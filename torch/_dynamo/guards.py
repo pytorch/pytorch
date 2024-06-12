@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 from __future__ import annotations
 
 import ast
@@ -1653,9 +1652,6 @@ class GuardBuilder(GuardBuilderBase):
         pass  # we always guard on this via GlobalStateGuard()
 
     def TORCH_FUNCTION_STATE(self, guard: Guard):
-        pass  # we always guard on this via GlobalStateGuard()
-
-    def FSDP_TRAINING_STATE(self, guard: Guard):
         pass  # we always guard on this via GlobalStateGuard()
 
     def DEFAULT_DEVICE(self, guard: Guard):

@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 """Adds docstrings to functions defined in the torch._C module."""
 
 import re

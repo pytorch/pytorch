@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 import copy
 import torch
 from torch.distributed._shard.sharded_tensor import (

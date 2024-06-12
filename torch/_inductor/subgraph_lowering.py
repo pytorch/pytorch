@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 """Utilities for lowering subgraphs used by higher order operators
 
 """

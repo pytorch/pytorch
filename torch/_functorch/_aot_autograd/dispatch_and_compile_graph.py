@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 """
 This module dispatches the graphs to either the forward-only or joint compilation
 pathways, taking into account the AOTConfig and the collected ViewAndMutationMetadata.
@@ -187,20 +186,11 @@ def aot_dispatch_base_graph(
 
     if aot_config.enable_log:
         aot_graphs_log.info(
-            "%s",
-            lazy_format_graph_code(
-                "Forward graph",
-                fw_module,
-                aot_config.aot_id,
-                include_stride=True,
-                include_device=True,
-            ),
+            "%s", lazy_format_graph_code("Forward graph", fw_module, aot_config.aot_id)
         )
         trace_structured(
             "aot_forward_graph",
-            payload_fn=lambda: fw_module.print_readable(
-                print_output=False, include_stride=True, include_device=True
-            ),
+            payload_fn=lambda: fw_module.print_readable(print_output=False),
         )
 
     # TODO: should factor this into a separate function for export that always only returns just the graph.

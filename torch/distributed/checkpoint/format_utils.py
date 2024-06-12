@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 import argparse
 import os
 from enum import Enum

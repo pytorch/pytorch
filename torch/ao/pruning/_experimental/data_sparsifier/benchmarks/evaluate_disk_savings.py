@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 from typing import Dict, List
 import torch
 import time

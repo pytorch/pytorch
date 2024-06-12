@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 import copy
 from typing import Any, cast, List, Optional, Tuple
 
@@ -113,7 +112,9 @@ def _create_sharded_tensor_md_from_dt(
 def _get_dt_pg(dt: DTensor) -> c10d.ProcessGroup:
     mesh = dt.device_mesh
     assert mesh.ndim == 1, "Only 1D DeviceMeshes currently handled"
-    return mesh.get_group()
+    dim_groups = mesh.get_group()
+    assert isinstance(dim_groups, list)
+    return dim_groups[0]
 
 
 def _rewrite_spec_if_needed(

@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 from .utils import _toposort, groupby
 from .variadic import isvariadic
 import operator

@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 from torch.utils.data.datapipes._hook_iterator import _SnapshotState
 from torch.utils.data.datapipes.datapipe import IterDataPipe
 from torch.utils.data.graph_settings import apply_random_seed

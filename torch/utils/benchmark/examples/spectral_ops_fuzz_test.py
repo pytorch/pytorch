@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 """Microbenchmarks for the torch.fft module"""
 from argparse import ArgumentParser
 from collections import namedtuple

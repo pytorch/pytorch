@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 from functools import partial
 
 from typing import List, Optional, Tuple, Union

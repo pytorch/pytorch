@@ -219,7 +219,7 @@ class SequentialImpl : public Cloneable<SequentialImpl> {
   /// and letting the container deal with the boxing.
   template <typename M, typename = torch::detail::enable_if_module_t<M>>
   void push_back(std::string name, M&& module) {
-    using Type = typename std::remove_reference_t<M>;
+    using Type = typename std::remove_reference<M>::type;
     push_back(std::move(name), std::make_shared<Type>(std::forward<M>(module)));
   }
 
@@ -348,10 +348,12 @@ class SequentialImpl : public Cloneable<SequentialImpl> {
       typename First,
       typename Second,
       typename... Rest,
-      typename = std::enable_if_t<
-          !std::is_same_v<First, std::string> &&
+      typename = torch::disable_if_t<
+          std::is_same<First, std::string>::value ||
           // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
-          !std::is_same_v<std::decay_t<First>, std::decay_t<const char (&)[]>>>>
+          std::is_same<
+              typename std::decay<First>::type,
+              std::decay<const char (&)[]>::type>::value>>
   void push_back(First&& first, Second&& second, Rest&&... rest) {
     push_back(std::forward<First>(first));
     // Recursively calls this method, until the parameter pack only thas this

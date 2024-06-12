@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 import torch
 
 __all__ = ["bench_all", "benchmark_compile"]

@@ -1,18 +1,16 @@
-# mypy: allow-untyped-defs
 import itertools
 from dataclasses import dataclass, field
 from enum import auto, Enum
 from typing import Any, cast, List, Optional, Sequence, Tuple
 
 import torch
-import torch._dynamo.compiled_autograd as ca
 import torch.nn as nn
 
 from torch._prims_common import make_contiguous_strides_for
 from torch.distributed._functional_collectives import AsyncCollectiveTensor
-from torch.distributed._tensor import DTensor, Replicate, Shard
+from torch.distributed._tensor import DTensor, Placement, Replicate, Shard
 from torch.distributed._tensor.device_mesh import _mesh_resources
-from torch.distributed._tensor.placement_types import DTensorSpec, Placement, TensorMeta
+from torch.distributed._tensor.placement_types import DTensorSpec
 from ._fsdp_api import CPUOffloadPolicy, MixedPrecisionPolicy, OffloadPolicy
 from ._fsdp_common import (
     _chunk_with_empty,
@@ -129,10 +127,12 @@ class FSDPParam:
     _sharded_post_forward_param: Optional[nn.Parameter]  # ND
     _unsharded_param: nn.Parameter  # ND
     unsharded_accumulated_grad: Optional[torch.Tensor]  # ND
-    _sharding_spec: DTensorSpec
+    _global_placements: Tuple[Placement, ...]
+    _global_size: torch.Size
+    _global_stride: Tuple[int, ...]
+    all_gather_outputs: List[torch.Tensor]  # 1D
     # DTensor attributes (only defined for DTensor `param`):
     _tp_spec: DTensorSpec
-    all_gather_outputs: List[torch.Tensor]  # 1D
     # All-gather extension attributes
     _extensions_data: ExtensionsData
     _unsharded_inner_tensors: List[torch.Tensor]
@@ -199,45 +199,39 @@ class FSDPParam:
                     "FSDP requires the DP and TP mesh to have the same parent mesh but got: \n"
                     f"DP's global mesh: {dp_global_mesh}\nTP's global mesh: {tp_global_mesh}"
                 )
-
-            name_dims_error = "FSDP requires named DeviceMesh dims for ND parallelism"
-            assert dp_mesh.mesh_dim_names is not None, name_dims_error
-            assert tp_mesh.mesh_dim_names is not None, name_dims_error
-
-            submesh_names = dp_mesh.mesh_dim_names + tp_mesh.mesh_dim_names
-            self._spmd_mesh = dp_global_mesh[submesh_names]
+            self._global_mesh = dp_global_mesh
             if len(self._tp_spec.placements) != 1:
                 raise NotImplementedError(
                     f"FSDP only supports 1D TP, not {self._tp_spec.placements}"
                 )
+            global_placements: List[Placement] = [Replicate(), Replicate()]
+            global_dp_mesh_dim = _mesh_resources.get_parent_mesh_dim(dp_mesh)
+            global_tp_mesh_dim = _mesh_resources.get_parent_mesh_dim(tp_mesh)
+            assert global_dp_mesh_dim is not None  # mypy
+            assert global_tp_mesh_dim is not None  # mypy
+            # for PP, DP, TP case, dp mesh dim would be 1, tp mesh dim would be 2
+            # DP/TP would only live in the inner most 2-3 dims (HSDP + TP would be 3)
+            dp_tp_mesh_ndim = dp_mesh.ndim + tp_mesh.ndim
+            outer_mesh_ndim = self._global_mesh.ndim - dp_tp_mesh_ndim
+            if self._global_mesh.ndim > dp_tp_mesh_ndim:
+                global_dp_mesh_dim = global_dp_mesh_dim - outer_mesh_ndim
+                global_tp_mesh_dim = global_tp_mesh_dim - outer_mesh_ndim
 
             # TODO: Hard code FSDP + TP; need to support HSDP + TP
-            self._spmd_placements: Tuple[Placement, ...] = (
-                Shard(0),
-                self._tp_spec.placements[0],
-            )
-
-            self._sharding_spec = DTensorSpec(
-                self._spmd_mesh,
-                self._spmd_placements,
-                tensor_meta=self._tp_spec.tensor_meta,
-            )
+            global_placements[global_dp_mesh_dim] = Shard(0)
+            global_placements[global_tp_mesh_dim] = self._tp_spec.placements[0]
+            self._global_placements = tuple(global_placements)
+            self._global_size = param.size()
+            self._global_stride = param.stride()
             param_data = cast(DTensor, param)._local_tensor
         else:
-            self._spmd_mesh = self.mesh_info.mesh
+            self._global_mesh = self.mesh_info.mesh
             if isinstance(self.mesh_info, HSDPMeshInfo):
-                self._spmd_placements = (Replicate(), Shard(0))
+                self._global_placements = (Replicate(), Shard(0))
             else:
-                self._spmd_placements = (Shard(0),)
-            self._sharding_spec = DTensorSpec(
-                self._spmd_mesh,
-                self._spmd_placements,
-                tensor_meta=TensorMeta(
-                    param.size(),
-                    param.stride(),
-                    param.dtype,
-                ),
-            )
+                self._global_placements = (Shard(0),)
+            self._global_size = param.size()
+            self._global_stride = param.stride()
             param_data = param
         self._orig_size = param_data.size()
         shard_rank = self.mesh_info.shard_mesh_rank
@@ -336,9 +330,7 @@ class FSDPParam:
             self._extensions_data.clear()
             return
         inner_tensor = self._sharded_local_tensor
-        if not ca.compiled_autograd_enabled and hasattr(
-            inner_tensor, "fsdp_post_all_gather"
-        ):
+        if hasattr(inner_tensor, "fsdp_post_all_gather"):
             all_gather_outputs = self._unflatten_all_gather_outputs()
             (
                 unsharded_tensor,
@@ -361,7 +353,13 @@ class FSDPParam:
             storage_offset=0,
         )
         if self.is_dtensor:
-            unsharded_param = _from_local_no_grad(unsharded_param, self._tp_spec)
+            unsharded_param = _from_local_no_grad(
+                unsharded_param,
+                self._tp_spec.mesh,
+                self._tp_spec.placements,
+                self._global_size,
+                self._global_stride,
+            )
         self._unsharded_param = nn.Parameter(unsharded_param)
         self._unsharded_param.requires_grad_(self.sharded_param.requires_grad)
 
@@ -445,7 +443,10 @@ class FSDPParam:
             )
         return _from_local_no_grad(
             tensor,
-            self._sharding_spec,
+            self._global_mesh,
+            self._global_placements,
+            self._global_size,
+            self._global_stride,
         )
 
     def to_sharded_post_forward_dtensor(self, tensor: torch.Tensor) -> DTensor:
@@ -456,12 +457,13 @@ class FSDPParam:
         assert isinstance(self.post_forward_mesh_info, HSDPMeshInfo)
         # TODO: Prefer this DTensor to be read-only and generalize the
         # placement once we support TP.
-        post_forward_sharding_spec = DTensorSpec(
+        return _from_local_no_grad(
+            tensor,
             self.post_forward_mesh_info.mesh,
             (Replicate(), Shard(0)),
-            tensor_meta=self._sharding_spec.tensor_meta,
+            self._global_size,
+            self._global_stride,
         )
-        return _from_local_no_grad(tensor, post_forward_sharding_spec)
 
     def to_accumulated_grad_if_needed(self) -> None:
         # Access `_unsharded_param` to bypass the sharded state check since we
@@ -498,9 +500,7 @@ class FSDPParam:
     def all_gather_inputs(self) -> List[torch.Tensor]:  # 1D
         self._assert_in_states(ShardedState.SHARDED, ShardedState.SHARDED_POST_FORWARD)
         if self.sharded_state == ShardedState.SHARDED:
-            if not ca.compiled_autograd_enabled and hasattr(
-                self._sharded_local_tensor, "fsdp_pre_all_gather"
-            ):
+            if hasattr(self._sharded_local_tensor, "fsdp_pre_all_gather"):
                 sharded_local_tensor = self._sharded_local_tensor
                 if self.offload_to_cpu:
                     sharded_local_tensor = sharded_local_tensor.to(
@@ -521,9 +521,7 @@ class FSDPParam:
                 )
             return [_to_dtype_if_needed(sharded_param_data, self.param_dtype)]
         elif self.sharded_state == ShardedState.SHARDED_POST_FORWARD:
-            if not ca.compiled_autograd_enabled and hasattr(
-                self._sharded_local_tensor, "fsdp_pre_all_gather"
-            ):
+            if hasattr(self._sharded_local_tensor, "fsdp_pre_all_gather"):
                 raise NotImplementedError
             all_gather_input = _to_dtype_if_needed(
                 cast(torch.Tensor, self._sharded_post_forward_param_data),

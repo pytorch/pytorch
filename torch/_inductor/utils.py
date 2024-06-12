@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 from __future__ import annotations
 
 import collections
@@ -64,36 +63,7 @@ log = logging.getLogger(__name__)
 _T = TypeVar("_T")
 VarRanges = Dict[sympy.Expr, sympy.Expr]
 
-GPU_ALIGN_BYTES = 16
-
-ALIGN_BYTES = 64
-assert (ALIGN_BYTES & (ALIGN_BYTES - 1)) == 0 and ALIGN_BYTES >= 8, "must be power of 2"
-
-
-def _align(nbytes):
-    """Round up to the nearest multiple of ALIGN_BYTES"""
-    return (nbytes + ALIGN_BYTES - 1) & -ALIGN_BYTES
-
-
-def _is_aligned(v: sympy.Expr):
-    """v can be statically proven to be a multiple of ALIGN_BYTES"""
-    if isinstance(v, (sympy.Add, sympy.Max)):
-        return all(map(_is_aligned, v.args))
-    return isinstance(v, align) or sympy.gcd(v, ALIGN_BYTES) == ALIGN_BYTES
-
-
-class align(sympy.Function):
-    """Symbolically round up to the nearest multiple of ALIGN_BYTES"""
-
-    nargs = (1,)
-    is_integer = True
-
-    @classmethod
-    def eval(cls, value):
-        if isinstance(value, (int, sympy.Integer)):
-            return _align(int(value))
-        if _is_aligned(value):
-            return value
+ALIGNMENT = 16
 
 
 def do_bench_using_profiling(fn: Callable[[], Any], warmup=25, rep=100) -> float:
@@ -420,7 +390,7 @@ P = ParamSpec("P")
 RV = TypeVar("RV", covariant=True)
 
 
-class CachedMethod(Protocol, Generic[P, RV]):
+class CachedMethod(Generic[P, RV], Protocol):
     @staticmethod
     def clear_cache(self) -> None:
         ...
@@ -1578,9 +1548,7 @@ def tensor_is_aligned(tensor: torch.Tensor):
     # but symbolic storage_offsets are. For consistency, we suppress guard creation
     # upon performing this check: that ensures that we don't add recompiles when we
     # add this logic.
-    return (
-        tensor.storage_offset() * get_dtype_size(tensor.dtype)
-    ) % GPU_ALIGN_BYTES == 0
+    return (tensor.storage_offset() * get_dtype_size(tensor.dtype)) % ALIGNMENT == 0
 
 
 def should_assume_input_aligned(example_input: torch.Tensor):

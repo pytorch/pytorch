@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 import torch
 from torch import Tensor
 from torch.ao.quantization.experimental.observer import APoTObserver

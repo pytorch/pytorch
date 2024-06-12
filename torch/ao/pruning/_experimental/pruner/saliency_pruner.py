@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 from .base_structured_sparsifier import BaseStructuredSparsifier
 
 

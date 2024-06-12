@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 import math
 from functools import wraps
 from typing import Callable, Optional, Union

@@ -4,6 +4,8 @@
 #include <ATen/core/Variadic.h>
 #include <torch/csrc/autograd/variable.h>
 
+#include <cstdint>
+#include <tuple>
 #include <type_traits>
 #include <utility>
 
