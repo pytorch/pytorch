@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 import copy
 
 import torch.nn as nn

@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 import torch
 from torch.fx.passes.infra.partitioner import CapabilityBasedPartitioner
 from torch.fx.passes.operator_support import OperatorSupport

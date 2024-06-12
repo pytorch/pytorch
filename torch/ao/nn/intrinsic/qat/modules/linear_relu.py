@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 import torch
 import torch.ao.nn.qat as nnqat
 import torch.ao.nn.intrinsic as nni

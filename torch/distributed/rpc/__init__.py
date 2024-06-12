@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 from datetime import timedelta
 import logging
 import os

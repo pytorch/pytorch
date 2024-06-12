@@ -65,7 +65,7 @@ from torch.testing._internal import (
     common_methods_invocations,
     common_utils,
 )
-from torch.testing._internal.opinfo import core as opinfo_core  # noqa: TCH001
+from torch.testing._internal.opinfo import core as opinfo_core
 
 
 # NOTE: For ATen signature modifications that will break ONNX export,

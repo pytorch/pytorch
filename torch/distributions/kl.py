@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 import math
 import warnings
 from functools import total_ordering

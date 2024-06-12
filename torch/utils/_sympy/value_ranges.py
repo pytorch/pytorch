@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 from __future__ import annotations
 
 import dataclasses
@@ -587,7 +586,7 @@ class SymPyValueRangeAnalysis:
         if 0 in x:
             return ValueRanges.unknown()
         else:
-            return ValueRanges.decreasing_map(x, lambda y: 1 / y)  # type: ignore[operator]
+            return ValueRanges.decreasing_map(x, lambda y: 1 / y)
 
     @staticmethod
     def abs(x):

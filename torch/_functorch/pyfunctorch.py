@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 import contextlib
 from abc import ABC, abstractmethod
 from typing import Any, List, Tuple

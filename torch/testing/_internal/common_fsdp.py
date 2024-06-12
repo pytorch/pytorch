@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 # Owner(s): ["oncall: distributed"]
 
 import contextlib
@@ -10,7 +9,7 @@ from abc import ABC, abstractmethod
 from contextlib import nullcontext
 from copy import deepcopy
 from enum import auto, Enum
-from functools import wraps
+from functools import partial, wraps
 from typing import (
     Any,
     Callable,
@@ -1087,12 +1086,6 @@ class FSDPTestMultiThread(MultiThreadedTestCase):
     def run_subtests(self, *args, **kwargs):
         return run_subtests(self, *args, **kwargs)
 
-    def perThreadSetUp(self):
-        torch._dynamo.reset()
-
-    def perThreadTearDown(self):
-        torch._dynamo.reset()
-
 
 class FSDPTest(MultiProcessTestCase):
     def setUp(self):
@@ -1163,9 +1156,7 @@ class FSDPTest(MultiProcessTestCase):
         # immediately exiting due to a skip doesn't cause flakiness.
         dist.barrier(device_ids=device_ids)
 
-        torch._dynamo.reset()
         self.run_test(test_name, pipe)
-        torch._dynamo.reset()
 
         dist.barrier(device_ids=device_ids)
 
@@ -1425,49 +1416,45 @@ class FSDPTest(MultiProcessTestCase):
 
 def test_compiled_fsdp(compile_compute_on_module: Optional[type] = None):
     def fully_shard_with_compiled_compute(*args, **kwargs):
-        torch.distributed._composable.fsdp.fully_shard(*args, **kwargs)  # type: ignore[operator]
+        # compile ``module._call_impl``
+        # to showcase how to include user-registered hooks
         if compile_compute_on_module is None or isinstance(
             args[0], compile_compute_on_module
         ):
             args[0].compile()
+        return torch.distributed._composable.fsdp.fully_shard(*args, **kwargs)  # type: ignore[operator]
 
-    class FullyShardMode(Enum):
-        EAGER = auto()
-        COMPILED_COMPUTE = auto()
+    class FullyShardPatch(Enum):
+        # apply ``partial`` in order to use ``Enum.value``
+        EAGER = partial(torch.distributed._composable.fsdp.fully_shard)  # type: ignore[var-annotated, arg-type]
+        COMPILED_COMPUTE = partial(fully_shard_with_compiled_compute)  # type: ignore[arg-type]
+        # add FULL for tracing FSDP
 
     def decorator(func):
         @wraps(func)
         def wrapper(*args, **kwargs):
             original_fully_shard = torch.distributed._composable.fsdp.fully_shard
-            for mode in FullyShardMode:
-                if mode != FullyShardMode.EAGER and not has_triton():
+            for fully_shard_patch in FullyShardPatch:
+                if fully_shard_patch != FullyShardPatch.EAGER and not has_triton():
                     warnings.warn("Inductor on GPU needs Triton and recent GPU arch")
                     continue
-                # barrier to ensure thread reading the same value
-                original_skip_fsdp_hooks = torch._dynamo.config.skip_fsdp_hooks
-                original_compile_threads = torch._inductor.config.compile_threads
-                torch.distributed.barrier()
-
-                if mode == FullyShardMode.EAGER:
-                    fully_shard_patch = original_fully_shard
-                elif mode == FullyShardMode.COMPILED_COMPUTE:
-                    torch._dynamo.config.skip_fsdp_hooks = True
-                    torch._inductor.config.compile_threads = 1
-                    fully_shard_patch = fully_shard_with_compiled_compute  # type: ignore[assignment]
-                else:
-                    raise NotImplementedError(
-                        f"Need to implement FullyShardMode={mode}"
-                    )
-
-                # fully_shard is imported as a global
-                # through `from ... import fully_shard`
-                func.__globals__[original_fully_shard.__name__] = fully_shard_patch
-                func(*args, **kwargs)
-                # other threads use patched func before this thread restores
-                torch.distributed.barrier()
-                func.__globals__[original_fully_shard.__name__] = original_fully_shard
-                torch._dynamo.config.skip_fsdp_hooks = original_skip_fsdp_hooks
-                torch._inductor.config.compile_threads = original_compile_threads
+                imported_fully_shard = (
+                    f"{func.__module__}.{original_fully_shard.__name__}"
+                )
+                with mock.patch(
+                    imported_fully_shard,
+                    fully_shard_patch.value,
+                ):
+                    func(*args, **kwargs)
+                    torch.distributed.barrier()
+                # mock.patch.__exit__ does not work with multi-thread
+                # thread 1 set {func.__module__}.fully_shard
+                # thread 2 read {func.__module__}.fully_shard and thought it is original
+                # hence we manually reset them after __exit__
+                import_path, _ = mock._get_target(imported_fully_shard)  # type: ignore[attr-defined]
+                setattr(
+                    import_path(), original_fully_shard.__name__, original_fully_shard
+                )
 
         return wrapper
 

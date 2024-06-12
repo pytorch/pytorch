@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 import builtins
 import contextlib
 import functools
@@ -41,7 +40,6 @@ from .codegen.triton import (
 )
 
 from .codegen.triton_utils import config_of, signature_to_meta
-from .codegen.wrapper import pexpr
 from .exc import CUDACompileError
 from .ir import ChoiceCaller, PrimitiveInfoType
 from .runtime.hints import DeviceProperties
@@ -539,7 +537,7 @@ class TritonTemplateKernel(TritonKernel):
             meta = wrapper.add_meta_once(self.meta)
 
             grid_call = [
-                pexpr(V.graph.sizevars.simplify(s)) for s in self.call_sizes
+                texpr(V.graph.sizevars.simplify(s)) for s in self.call_sizes
             ] + [meta]
             grid_call = f"{self.grid_fn.__module__}.{self.grid_fn.__name__}({', '.join(grid_call)})"
             wrapper.writeline(
@@ -582,7 +580,6 @@ class TritonTemplate(KernelTemplate):
         epilogue_fn=identity,
         subgraphs=None,
         mutated_inputs=None,
-        call_sizes=None,
         **kwargs,
     ):
         """This function generates a TritonTemplateCaller
@@ -617,9 +614,6 @@ class TritonTemplate(KernelTemplate):
                 "64-bit indexing is not yet implemented for triton templates"
             )
 
-        if call_sizes is None:
-            call_sizes = layout.size
-
         kernel_options = dict(
             input_nodes=input_nodes,
             defines=defines,
@@ -627,14 +621,13 @@ class TritonTemplate(KernelTemplate):
             num_warps=num_warps,
             grid_fn=self.grid,
             meta=kwargs,
-            call_sizes=call_sizes,
+            call_sizes=layout.size,
             prefix_args=prefix_args,
             suffix_args=suffix_args,
             epilogue_fn=epilogue_fn,
             index_dtype="tl.int32",
             subgraphs=subgraphs,
         )
-
         with patch.object(
             V.graph, "get_dtype", self._fake_get_dtype(fake_out)
         ), TritonTemplateKernel(
@@ -708,7 +701,7 @@ class TritonTemplate(KernelTemplate):
         assert mod.__file__ is not None
         grid = self.grid(
             *V.graph.sizevars.size_hints(
-                call_sizes,
+                layout.size,
                 fallback=config.unbacked_symint_fallback,
             ),
             kwargs,
@@ -780,7 +773,7 @@ class ExternKernelChoice:
     def call_name(self):
         return f"extern_kernels.{self.name}"
 
-    @functools.lru_cache(None)  # noqa: B019
+    @functools.lru_cache(None)
     def hash_key(self):
         fn = self.to_callable()
         parts = [

@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 import types
 from typing import List, NewType, Optional
 

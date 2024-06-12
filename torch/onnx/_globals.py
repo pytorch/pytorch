@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 """Globals used internally by the ONNX exporter.
 
 Do not use this module outside of `torch.onnx` and its tests.

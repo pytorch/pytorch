@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 from .abstract_impl import AbstractImplHolder
 
 __all__ = ["SimpleLibraryRegistry", "SimpleOperatorEntry", "singleton"]

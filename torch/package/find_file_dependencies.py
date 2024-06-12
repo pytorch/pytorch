@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 import ast
 from typing import List, Optional, Tuple
 

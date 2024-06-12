@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 from typing import Any, Dict, Optional, Type
 from torch.nn.utils.parametrize import type_before_parametrizations, is_parametrized
 from itertools import chain

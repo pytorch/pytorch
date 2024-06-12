@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 import contextlib
 import warnings
 from typing import cast, Generator
