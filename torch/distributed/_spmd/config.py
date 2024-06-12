@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import logging
 import sys
 from types import ModuleType

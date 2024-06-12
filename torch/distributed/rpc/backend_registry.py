@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 __all__ = ["init_backend", "backend_registered", "construct_rpc_backend_options", "register_backend", "BackendType", "BackendValue"]
 
 import collections

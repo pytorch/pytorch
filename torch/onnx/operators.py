@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 r"""This file provides a location for operators that help exporting models via onnx.
 
 E.g. `shape_as_tensor` and `reshape_from_tensor_shape`
