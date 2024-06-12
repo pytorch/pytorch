@@ -62,7 +62,7 @@ if torch.manual_seed is torch.random.manual_seed:
 
     # Wrap manual_seed with the disable decorator.
     # Can't do it at its implementation due to dependency issues.
-    torch.manual_seed = disable(torch.manual_seed)
+    torch.manual_seed = torch._disable_dynamo(torch.manual_seed)
     # Add the new manual_seed to the builtin registry.
     torch.jit._builtins._register_builtin(torch.manual_seed, "aten::manual_seed")
 

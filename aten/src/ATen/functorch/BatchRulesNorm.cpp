@@ -850,13 +850,13 @@ static std::tuple<at::Tensor,at::Tensor,at::Tensor> miopen_batch_norm_backward_w
 // work with dynamo anyway so we gain some buffer room to do wrong things here. The (reasonable) hope is that we will
 // make native_batch_norm composite implicit within a few weeks and we can fix this before vmap works with dynamo.
 static std::tuple<at::Tensor,at::Tensor,at::Tensor> _native_batch_norm_legit_batch(
-  const Tensor& self, const std::optional<Tensor>& weight_opt, const c10::optional<Tensor>& bias_opt,
+  const Tensor& self, const std::optional<Tensor>& weight_opt, const std::optional<Tensor>& bias_opt,
   Tensor& running_mean, Tensor& running_var, bool train, double momentum, double eps) {
     return at::native_batch_norm(self, weight_opt, bias_opt, running_mean, running_var, train, momentum, eps);
 }
 
 static std::tuple<at::Tensor,at::Tensor,at::Tensor> _native_batch_norm_legit_no_stats_batch(
-  const Tensor& self, const std::optional<Tensor>& weight_opt, const c10::optional<Tensor>& bias_opt,
+  const Tensor& self, const std::optional<Tensor>& weight_opt, const std::optional<Tensor>& bias_opt,
   bool train, double momentum, double eps) {
     return at::native_batch_norm(self, weight_opt, bias_opt, Tensor(), Tensor(), train, momentum, eps);
 }

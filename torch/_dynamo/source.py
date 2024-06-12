@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import collections
 import dataclasses
 import enum
@@ -571,6 +572,15 @@ class FloatTensorSource(ChainedSource):
         return self.base.guard_source()
 
 
+@dataclasses.dataclass(frozen=True)
+class CallMethodItemSource(ChainedSource):
+    def name(self) -> str:
+        return f"{self.base.name()}.item()"
+
+    def guard_source(self):
+        return self.base.guard_source()
+
+
 # This is a synthetic source that is associated with the singleton
 # shape env guard we always register for all frames.  We get the actual
 # guard contents from the ambient ShapeEnv
@@ -628,3 +638,7 @@ def is_from_defaults(source: Source):
     if isinstance(source, ChainedSource):
         return is_from_defaults(source.base)
     return False
+
+
+def is_cell_contents(source: Source):
+    return isinstance(source, AttrSource) and source.member == "cell_contents"

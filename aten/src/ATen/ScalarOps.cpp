@@ -23,7 +23,7 @@ Tensor& scalar_fill(Tensor& self, const Scalar& value) {
   return self;
 }
 
-Tensor scalar_tensor_static(const Scalar& s, std::optional<ScalarType> dtype_opt, c10::optional<Device> device_opt) {
+Tensor scalar_tensor_static(const Scalar& s, std::optional<ScalarType> dtype_opt, std::optional<Device> device_opt) {
   at::tracer::impl::NoTracerDispatchMode tracer_guard;
   at::AutoDispatchBelowAutograd mode;
   Tensor result = at::detail::empty_cpu(
