@@ -16,8 +16,8 @@ from torch.distributed._composable.fsdp.fully_shard import (
 )
 from torch.distributed._tensor import DTensor
 from torch.distributed.device_mesh import init_device_mesh
-from torch.distributed.pipelining import ManualPipelineStage
-from torch.distributed.pipelining.PipelineSchedule import (
+from torch.distributed.pipelining import PipelineStage
+from torch.distributed.pipelining.schedules import (
     PipelineScheduleSingle,
     Schedule1F1B,
     ScheduleGPipe,
@@ -127,14 +127,13 @@ class ComposabilityTest(MultiProcContinousTest):
         def build_stage(stage_idx, num_stages):
             partial_model, offset = get_stage_module(stage_idx, num_stages)
             dp_model = apply_dp(partial_model, dp_type)
-            stage = ManualPipelineStage(
+            stage = PipelineStage(
                 dp_model,
                 stage_idx,
                 num_stages,
                 self.device,
                 group=pp_group,
                 input_args=input_mb[0],
-                num_microbatches=num_microbatches,
             )
             return stage, offset
 
