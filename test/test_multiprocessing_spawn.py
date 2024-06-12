@@ -34,9 +34,7 @@ def _test_exception_all_func(i):
 
 def _test_terminate_signal_func(i):
     if i == 0:
-        # If SIGABRT is used the llvm stacktrace handler used by triton will
-        # swallow the exit code
-        os.kill(os.getpid(), signal.SIGTERM)
+        os.kill(os.getpid(), signal.SIGABRT)
     time.sleep(1.0)
 
 
@@ -126,7 +124,8 @@ class _TestMultiProcessing:
             mp.start_processes(_test_exception_all_func, nprocs=2, start_method=self.start_method)
 
     def test_terminate_signal(self):
-        message = "process 0 terminated with signal SIGTERM"
+        # SIGABRT is aliased with SIGIOT
+        message = "process 0 terminated with signal (SIGABRT|SIGIOT)"
 
         # Termination through with signal is expressed as a negative exit code
         # in multiprocessing, so we know it was a signal that caused the exit.
