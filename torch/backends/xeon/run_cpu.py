@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 """
 This is a script for launching PyTorch inference on Intel(R) Xeon(R) Scalable Processors with optimal configurations.
 
@@ -134,7 +135,7 @@ from os.path import expanduser
 from typing import Dict, List
 
 from torch.distributed.elastic.multiprocessing import (
-    DefaultLogsSpecs,
+    DefaultLogsSpecs as _DefaultLogsSpecs,
     start_processes,
     Std,
 )
@@ -682,7 +683,7 @@ won't take effect even if it is set explicitly."
             entrypoint=entrypoint,
             args=launch_args,
             envs=launch_envs,
-            logs_specs=DefaultLogsSpecs(log_dir=args.log_path, tee=launch_tee),
+            logs_specs=_DefaultLogsSpecs(log_dir=args.log_path, tee=launch_tee),
         )
         ctx.wait()
 

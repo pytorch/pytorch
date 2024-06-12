@@ -1048,6 +1048,7 @@ uncovered_ops:
   aten::__is__: 83
   aten::__isnot__: 81
   aten::__not__: 32
+  aten::_aminmax: 4
   aten::_convolution: 12
   aten::_convolution.deprecated: 3
   aten::_make_per_tensor_quantized_tensor: 2

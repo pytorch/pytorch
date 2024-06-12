@@ -325,7 +325,7 @@ Tensor copy(const Tensor& self, const Tensor& src, bool non_blocking) {
   // Instead, generate an empty tensor with the right sizes/strides, since we should be able to assume
   // that copy_() will fully overwrite all data with that of src
   if (self_storage->nbytes() == 0) {
-    r = at::empty_strided(self.sizes(), self.strides());
+    r = at::empty_strided(self.sizes(), self.strides(), self.options());
   } else {
     r = clone_preserve_strides(self);
   }

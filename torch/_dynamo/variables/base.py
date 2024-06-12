@@ -172,6 +172,13 @@ class VariableTracker(metaclass=VariableTrackerMeta):
     def __repr__(self):
         return f"{self.__class__.__name__}()"
 
+    def debug_repr(self):
+        # Intended to be overridden to provide more info
+        try:
+            return repr(self.as_python_constant())
+        except NotImplementedError:
+            return repr(self)
+
     def python_type(self):
         """
         Abstract method to be implemented by subclasses of VariableTracker.

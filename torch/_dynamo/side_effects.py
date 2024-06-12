@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import inspect
 import warnings
 from typing import Any, Dict, List, Optional, Union
@@ -6,6 +7,7 @@ import torch.nn
 
 from . import utils, variables
 from .bytecode_transformation import (
+    bytecode_from_template,
     create_call_function,
     create_call_method,
     create_instruction,
@@ -56,6 +58,11 @@ class AttributeMutationNew(AttributeMutation):
     def __init__(self, source: Optional[Source], cls_source: Optional[Source]):
         super().__init__(MutableLocalSource.Local, source)
         self.cls_source = cls_source
+
+
+def _manual_update_dict(dict_from, dict_to):
+    for k, v in dict_from.items():
+        dict_to[k] = v
 
 
 class SideEffects:
@@ -346,13 +353,7 @@ class SideEffects:
             elif isinstance(var.mutable_local, AttributeMutationNew):
                 if isinstance(var, variables.AutogradFunctionContextVariable):
                     unimplemented("AutogradFunctionContextVariable escaped")
-                if "__call_nn_module_init" in self.store_attr_mutations.get(
-                    var.mutable_local, {}
-                ):
-                    assert isinstance(var, variables.UnspecializedNNModuleVariable)
-                    cg.load_import_from(utils.__name__, "nn_module_new")
-                else:
-                    cg.load_import_from(utils.__name__, "object_new")
+                cg.load_import_from(utils.__name__, "object_new")
                 cg(var.mutable_local.cls_source)
                 cg.extend_output(create_call_function(1, True))
                 cg.add_cache(var)
@@ -459,6 +460,39 @@ class SideEffects:
                     ]
                 )
                 suffixes.append([create_instruction("STORE_SUBSCR")])
+            elif isinstance(var, variables.CustomizedDictVariable):
+                # need to update the dict manually since update method may be invalid
+                varname_map = {}
+                for name in _manual_update_dict.__code__.co_varnames:
+                    varname_map[name] = cg.tx.output.new_var()
+
+                cg(var.mutable_local.source)  # type: ignore[attr-defined]
+                cg.extend_output(
+                    [create_instruction("STORE_FAST", argval=varname_map["dict_to"])]
+                )
+
+                cg(var, allow_cache=False)
+                cg.extend_output(
+                    [create_instruction("STORE_FAST", argval=varname_map["dict_from"])]
+                )
+
+                cg(var.mutable_local.source)  # type: ignore[attr-defined]
+                cg.extend_output([create_load_method("clear")])
+
+                # unfortunately can't just use DICT_MERGE due to possible custom behaviors
+                dict_update_insts = bytecode_from_template(
+                    _manual_update_dict, varname_map=varname_map
+                )
+
+                suffixes.append(
+                    [
+                        *create_call_method(0),  # clear
+                        create_instruction("POP_TOP"),
+                        *dict_update_insts,
+                        create_instruction("POP_TOP"),
+                    ]
+                )
+
             elif isinstance(var, variables.ConstDictVariable):
                 cg.tx.output.update_co_names("clear")
                 cg.tx.output.update_co_names("update")
@@ -479,9 +513,25 @@ class SideEffects:
                     ]
                 )
             elif self.is_attribute_mutation(var):
-                for name, value in self.store_attr_mutations.get(
-                    var.mutable_local, {}
-                ).items():
+                # Applying mutations involves two steps: 1) Push all
+                # reconstructed objects onto the stack.  2) Call STORE_ATTR to
+                # apply the mutations.
+                #
+                # Dynamo must ensure that mutations are applied in the same
+                # order as in the original program. Therefore, two reverse
+                # operations occur below.
+                #
+                # The first reverse operation concerns `suffixes`. We apply
+                # suffixes in reverse order due to the way Python handles the
+                # stack. In Step 1, we push all reconstructed objects onto the
+                # stack, but the item at the top of the stack refers to the last
+                # attribute in the mutation order. If not fixed, this will apply
+                # the mutations of attributes in the reverse order.  To account
+                # for this reversal, we iterate through the mutable attributes
+                # in reverse order.
+                for name, value in reversed(
+                    self.store_attr_mutations.get(var.mutable_local, {}).items()
+                ):
                     if isinstance(var, variables.NewGlobalVariable):
                         cg.tx.output.update_co_names(name)
                         cg(value)
@@ -489,8 +539,6 @@ class SideEffects:
                         suffixes.append(
                             [create_instruction("STORE_GLOBAL", argval=name)]
                         )
-                    elif name == "__call_nn_module_init":
-                        pass  # handled in codegen_save_tempvars
                     elif isinstance(value, variables.DeletedVariable):
                         if isinstance(
                             var.mutable_local, AttributeMutationExisting

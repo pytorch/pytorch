@@ -13,7 +13,7 @@ namespace c10d {
 // callback function will be given arguments (optional<string> oldValue,
 // optional<string> newValue)
 using WatchKeyCallback =
-    std::function<void(std::optional<std::string>, c10::optional<std::string>)>;
+    std::function<void(std::optional<std::string>, std::optional<std::string>)>;
 
 class TORCH_API Store : public torch::CustomClassHolder {
  public:
@@ -95,6 +95,34 @@ class TORCH_API Store : public torch::CustomClassHolder {
 
  protected:
   std::chrono::milliseconds timeout_;
+};
+
+/*
+StoreTimeoutGuard is a RAII guard that will set the store timeout and restore it
+when it returns.
+*/
+class StoreTimeoutGuard {
+ public:
+  explicit StoreTimeoutGuard(
+      Store& store,
+      const std::chrono::milliseconds& timeout)
+      : store_(store), oldTimeout_(store.getTimeout()) {
+    store.setTimeout(timeout);
+  }
+
+  ~StoreTimeoutGuard() {
+    store_.setTimeout(oldTimeout_);
+  }
+
+  /* Disabling copy and move semantics */
+  StoreTimeoutGuard(const StoreTimeoutGuard&) = delete;
+  StoreTimeoutGuard& operator=(const StoreTimeoutGuard&) = delete;
+  StoreTimeoutGuard(StoreTimeoutGuard&&) = delete;
+  StoreTimeoutGuard& operator=(StoreTimeoutGuard&&) = delete;
+
+ private:
+  Store& store_;
+  std::chrono::milliseconds oldTimeout_{};
 };
 
 } // namespace c10d

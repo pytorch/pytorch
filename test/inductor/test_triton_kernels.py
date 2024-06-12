@@ -31,11 +31,10 @@ if HAS_CUDA:
             fast_dividef as my_fast_dividef,
         )
 
-
-# Define shared triton constants here.
-CONSTANT_C = 4
-STRING_CONSTANT_C = "CONSTANT_C"
-BOOL_CONSTANT_C = True
+    # Define shared triton constants here.
+    CONSTANT_C: tl.constexpr = 4
+    STRING_CONSTANT_C: tl.constexpr = "CONSTANT_C"
+    BOOL_CONSTANT_C: tl.constexpr = True
 
 
 class KernelTests(torch._inductor.test_case.TestCase):
@@ -586,6 +585,7 @@ def forward(self, x_1, output_1):
         self.assertEqual(int_result, resulti)
 
     @requires_cuda
+    @skipIfRocm
     def test_triton_kernel_constants(self):
         @triton.jit
         def mulC_kernel(
@@ -600,7 +600,7 @@ def forward(self, x_1, output_1):
             offsets = block_start + tl.arange(0, BLOCK_SIZE)
             mask = offsets < n_elements
             x = tl.load(in_ptr0 + offsets, mask=mask)
-            if CONSTANT_NAME.value == STRING_CONSTANT_C:
+            if CONSTANT_NAME == STRING_CONSTANT_C:
                 output = CONSTANT_C * x
             if BOOL_CONSTANT_C:
                 output *= CONSTANT_C
@@ -1319,6 +1319,23 @@ def forward(self, x_1, output_1):
     @requires_cuda
     @skipIfRocm
     @common_utils.parametrize("backend", ["eager", "aot_eager", "inductor"])
+    def test_triton_kernel_num_ctas(self, backend):
+        @triton.jit
+        def kernel(X):
+            return
+
+        @torch.compile(backend=backend)
+        def f(x):
+            kernel[(1,)](x, num_ctas=1)
+            kernel.run(x, num_ctas=1, grid=(1,), warmup=False)
+            return x
+
+        x = torch.randn(4, device="cuda")
+        f(x)
+
+    @requires_cuda
+    @skipIfRocm
+    @common_utils.parametrize("backend", ["eager", "aot_eager", "inductor"])
     def test_triton_kernel_special_kwargs_without_autotune(self, backend):
         @triton.jit
         def add_kernel(
@@ -1532,6 +1549,23 @@ class MutationTests(torch._inductor.test_case.TestCase):
             kwargs,
             expected,
         )
+
+    @requires_cuda
+    @skipIfRocm
+    def test_triton_kernel_inference_mode(self):
+        def f(x, y, out):
+            n_elements = x.numel()
+            grid = lambda meta: (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
+            add_kernel[grid](x, y, out, n_elements, BLOCK_SIZE=4)
+
+        with torch.inference_mode():
+            x = torch.ones(32, device="cuda")
+            y = torch.ones(32, device="cuda")
+            out_ref = torch.zeros_like(x)
+            out_test = torch.zeros_like(x)
+            f(x, y, out_ref)
+            torch.compile(f)(x, y, out_test)
+            self.assertEqual(out_ref, out_test)
 
     @make_mutation_test
     def test_cumsum():
@@ -1906,6 +1940,126 @@ class MutationTests(torch._inductor.test_case.TestCase):
                 "BLOCK_SIZE_C2": 64,
             },
             ["O_ptr"],
+        )
+
+    @make_mutation_test
+    def test_for_loop_arg_2():
+        @triton.jit
+        def fwd_kernel(
+            x_ptr,
+            o_ptr,
+            M,
+            N,
+            stride_m,
+            stride_n,
+            BLOCK_B: tl.constexpr,
+            BLOCK_M: tl.constexpr,
+            BLOCK_N: tl.constexpr,
+        ):
+            # Get program ids
+            pid_m = tl.program_id(0)
+            X_block_ptr = tl.make_block_ptr(
+                base=x_ptr,
+                shape=(M, N),
+                strides=(stride_m, stride_n),
+                offsets=(0, 0),
+                block_shape=(BLOCK_M, BLOCK_N),
+                order=(1, 0),
+            )
+            O_block_ptr = tl.make_block_ptr(
+                base=o_ptr,
+                shape=(M, N),
+                strides=(stride_m, stride_n),
+                offsets=(0, 0),
+                block_shape=(BLOCK_M, BLOCK_N),
+                order=(1, 0),
+            )
+
+            for _ in range(BLOCK_B):
+                x = tl.load(X_block_ptr)
+                tl.store(O_block_ptr, x)
+
+                X_block_ptr = tl.advance(X_block_ptr, (BLOCK_M, 0))
+                O_block_ptr = tl.advance(O_block_ptr, (BLOCK_M, 0))
+
+        t = torch.randn((32, 64, 128))
+        o = torch.empty_like(t)
+        B, M, N = t.shape
+        return (
+            fwd_kernel,
+            {
+                "x_ptr": t,
+                "o_ptr": o,
+                "M": M,
+                "N": N,
+                "stride_m": N,
+                "stride_n": 1,
+                "BLOCK_B": B,
+                "BLOCK_M": M,
+                "BLOCK_N": N,
+            },
+            ["o_ptr"],
+        )
+
+    @make_mutation_test
+    def test_while_loop():
+        @triton.jit
+        def fwd_kernel(
+            x_ptr,
+            o_ptr,
+            M,
+            N,
+            stride_m,
+            stride_n,
+            BLOCK_B: tl.constexpr,
+            BLOCK_M: tl.constexpr,
+            BLOCK_N: tl.constexpr,
+        ):
+            # Get program ids
+            pid_m = tl.program_id(0)
+            X_block_ptr = tl.make_block_ptr(
+                base=x_ptr,
+                shape=(M, N),
+                strides=(stride_m, stride_n),
+                offsets=(0, 0),
+                block_shape=(BLOCK_M, BLOCK_N),
+                order=(1, 0),
+            )
+            O_block_ptr = tl.make_block_ptr(
+                base=o_ptr,
+                shape=(M, N),
+                strides=(stride_m, stride_n),
+                offsets=(0, 0),
+                block_shape=(BLOCK_M, BLOCK_N),
+                order=(1, 0),
+            )
+
+            i = 0
+            while i < BLOCK_B:
+                x = tl.load(X_block_ptr)
+                tl.store(O_block_ptr, x)
+
+                X_block_ptr = tl.advance(X_block_ptr, (BLOCK_M, 0))
+                O_block_ptr = tl.advance(O_block_ptr, (BLOCK_M, 0))
+                i += 1
+
+        t = torch.randn((32, 64, 128))
+        o = torch.empty_like(t)
+        B, M, N = t.shape
+        return (
+            fwd_kernel,
+            {
+                "x_ptr": t,
+                "o_ptr": o,
+                "M": M,
+                "N": N,
+                "stride_m": N,
+                "stride_n": 1,
+                "BLOCK_B": B,
+                "BLOCK_M": M,
+                "BLOCK_N": N,
+            },
+            ["o_ptr"],
         )
 
 

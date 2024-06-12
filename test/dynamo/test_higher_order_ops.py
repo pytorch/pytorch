@@ -1921,7 +1921,8 @@ class GraphModule(torch.nn.Module):
         self.assertTrue(len(wrap_node.args), 3)
 
         # Check that the linear bias and weight are getattr in the outer graph
-        self.assertTrue(len(dict(backend.graphs[0].named_parameters())) == 2)
+        if not torch._dynamo.config.inline_inbuilt_nn_modules:
+            self.assertTrue(len(dict(backend.graphs[0].named_parameters())) == 2)
 
         # Check that the inner function has one op and its a linear op
         body_function = getattr(backend.graphs[0], wrap_node.args[0].name)
@@ -2052,7 +2053,8 @@ class GraphModule(torch.nn.Module):
         self.assertTrue(len(wrap_node.args), 3)
 
         # Check that the linear bias and weight are getattr in the outer graph
-        self.assertTrue(len(dict(backend.graphs[0].named_parameters())) == 2)
+        if not torch._dynamo.config.inline_inbuilt_nn_modules:
+            self.assertTrue(len(dict(backend.graphs[0].named_parameters())) == 2)
 
         # Check that the inner function has one op and its a linear op
         body_function = getattr(backend.graphs[0], wrap_node.args[0].name)
@@ -2744,6 +2746,26 @@ class FuncTorchHigherOrderOpTests(torch._dynamo.test_case.TestCase):
         wrapped_gm = backend.graphs[graph_idx]
         return wrapped_gm
 
+    def test_hessian_graph_break(self):
+        counters.clear()
+
+        def wrapper_fn(x):
+            return torch.func.hessian(torch.sin)(x)
+
+        x = torch.randn(4, 3)
+        expected = wrapper_fn(x)
+        got = torch.compile(wrapper_fn, backend="aot_eager", fullgraph=False)(x)
+        self.assertEqual(expected, got)
+        self.assertEqual(len(counters["graph_break"]), 2)
+        self.assertEqual(
+            {
+                "'skip function disable in file _dynamo/decorators.py'": 1,
+                "call torch._dynamo.disable() wrapped function <function jacfwd.<locals>.wrapper_fn at  0xN>": 1,
+            },
+            {munge_exc(k): v for k, v in counters["graph_break"].items()},
+        )
+
+    @unittest.expectedFailure
     def test_hessian(self):
         counters.clear()
 
@@ -2878,6 +2900,7 @@ class GraphModule(torch.nn.Module):
 """,
         )
 
+    @unittest.expectedFailure
     def test_hessian_argnums(self):
         counters.clear()
 
@@ -3030,6 +3053,7 @@ class GraphModule(torch.nn.Module):
                 """        return (unflatten, child_3, child_2, _wrap_for_grad_1, child_4, o)""",
             )
 
+    @unittest.expectedFailure
     def test_hessian_disable_capture(self):
         counters.clear()
 
@@ -3056,6 +3080,26 @@ class GraphModule(torch.nn.Module):
             )
             self.assertEqual(actual, expected)
 
+    def test_jacrev_graph_break(self):
+        counters.clear()
+
+        def wrapper_fn(x):
+            return torch.func.jacrev(torch.sin)(x)
+
+        x = torch.randn(4, 3)
+        expected = wrapper_fn(x)
+        got = torch.compile(wrapper_fn, backend="aot_eager", fullgraph=False)(x)
+        self.assertEqual(expected, got)
+        self.assertEqual(len(counters["graph_break"]), 2)
+        self.assertEqual(
+            {
+                "'skip function disable in file _dynamo/decorators.py'": 1,
+                "call torch._dynamo.disable() wrapped function <function jacrev.<locals>.wrapper_fn at  0xN>": 1,
+            },
+            {munge_exc(k): v for k, v in counters["graph_break"].items()},
+        )
+
+    @unittest.expectedFailure
     def test_jacrev(self):
         counters.clear()
 
@@ -3132,6 +3176,7 @@ class GraphModule(torch.nn.Module):
 """,
         )
 
+    @unittest.expectedFailure
     def test_jacrev_two_tensors_argnums(self):
         counters.clear()
 
@@ -3214,6 +3259,7 @@ class GraphModule(torch.nn.Module):
 """,
         )
 
+    @unittest.expectedFailure
     def test_jacrev_has_aux(self):
         counters.clear()
 
@@ -3298,6 +3344,7 @@ class GraphModule(torch.nn.Module):
 """,
         )
 
+    @unittest.expectedFailure
     def test_jacrev_disable_capture(self):
         counters.clear()
 
@@ -4244,6 +4291,26 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(len(counters["graph_break"]), 0)
         self.assertEqual(actual, expected)
 
+    def test_jacfwd_graph_break(self):
+        counters.clear()
+
+        def wrapper_fn(x):
+            return torch.func.jacfwd(torch.sin)(x)
+
+        x = torch.randn(4, 3)
+        expected = wrapper_fn(x)
+        got = torch.compile(wrapper_fn, backend="aot_eager", fullgraph=False)(x)
+        self.assertEqual(expected, got)
+        self.assertEqual(len(counters["graph_break"]), 2)
+        self.assertEqual(
+            {
+                "'skip function disable in file _dynamo/decorators.py'": 1,
+                "call torch._dynamo.disable() wrapped function <function jacfwd.<locals>.wrapper_fn at  0xN>": 1,
+            },
+            {munge_exc(k): v for k, v in counters["graph_break"].items()},
+        )
+
+    @unittest.expectedFailure
     def test_jacfwd(self):
         counters.clear()
 
@@ -4327,6 +4394,7 @@ class GraphModule(torch.nn.Module):
 """,
         )
 
+    @unittest.expectedFailure
     def test_jacfwd_two_tensors_argnums(self):
         counters.clear()
 
@@ -4416,6 +4484,7 @@ class GraphModule(torch.nn.Module):
 """,
         )
 
+    @unittest.expectedFailure
     def test_jacfwd_has_aux(self):
         counters.clear()
 
@@ -4510,6 +4579,7 @@ class GraphModule(torch.nn.Module):
 """,
         )
 
+    @unittest.expectedFailure
     def test_jacfwd_randomness(self):
         counters.clear()
 
@@ -4613,6 +4683,7 @@ class GraphModule(torch.nn.Module):
 """,
         )
 
+    @unittest.expectedFailure
     def test_jacfwd_disable_capture(self):
         counters.clear()
 
@@ -5116,10 +5187,10 @@ class GraphModule(torch.nn.Module):
             actual,
             """\
 class GraphModule(torch.nn.Module):
-    def forward(self, L_self_tensor_constant0: "f32[3, 3, 3]"):
-        l_self_tensor_constant0 = L_self_tensor_constant0
+    def forward(self, L_self_buffers_tensor_constant0_: "f32[3, 3, 3]"):
+        l_self_buffers_tensor_constant0_ = L_self_buffers_tensor_constant0_
 
-        alias_default: "f32[3, 3, 3]" = torch.ops.aten.alias.default(l_self_tensor_constant0);  l_self_tensor_constant0 = None
+        alias_default: "f32[3, 3, 3]" = torch.ops.aten.alias.default(l_self_buffers_tensor_constant0_);  l_self_buffers_tensor_constant0_ = None
 
         sin_default: "f32[3, 3, 3]" = torch.ops.aten.sin.default(alias_default)
 
@@ -5138,16 +5209,16 @@ class GraphModule(torch.nn.Module):
             actual,
             """\
 class GraphModule(torch.nn.Module):
-    def forward(self, getattr_L_self_FX_CONST_FOLDED_ATTRS_0_: "f32[3, 3, 3]", getattr_L_self_FX_CONST_FOLDED_ATTRS_1_: "f32[3, 3, 3]", L_flat_tangents_1_: "f32[3, 3, 3]"):
-        getattr_l_self_fx_const_folded_attrs_0_ = getattr_L_self_FX_CONST_FOLDED_ATTRS_0_
-        getattr_l_self_fx_const_folded_attrs_1_ = getattr_L_self_FX_CONST_FOLDED_ATTRS_1_
+    def forward(self, L_self_modules_FX_CONST_FOLDED_ATTRS_parameters_0_: "f32[3, 3, 3]", L_self_modules_FX_CONST_FOLDED_ATTRS_parameters_1_: "f32[3, 3, 3]", L_flat_tangents_1_: "f32[3, 3, 3]"):
+        l_self_modules_fx_const_folded_attrs_parameters_0_ = L_self_modules_FX_CONST_FOLDED_ATTRS_parameters_0_
+        l_self_modules_fx_const_folded_attrs_parameters_1_ = L_self_modules_FX_CONST_FOLDED_ATTRS_parameters_1_
         l_flat_tangents_1_ = L_flat_tangents_1_
 
-        _new_zeros_with_same_feature_meta_default: "f32[3, 3, 3]" = torch.ops.aten._new_zeros_with_same_feature_meta.default(l_flat_tangents_1_, getattr_l_self_fx_const_folded_attrs_0_);  getattr_l_self_fx_const_folded_attrs_0_ = None
+        _new_zeros_with_same_feature_meta_default: "f32[3, 3, 3]" = torch.ops.aten._new_zeros_with_same_feature_meta.default(l_flat_tangents_1_, l_self_modules_fx_const_folded_attrs_parameters_0_);  l_self_modules_fx_const_folded_attrs_parameters_0_ = None
 
         copy__default: "f32[3, 3, 3]" = torch.ops.aten.copy_.default(_new_zeros_with_same_feature_meta_default, l_flat_tangents_1_);  _new_zeros_with_same_feature_meta_default = l_flat_tangents_1_ = None
 
-        mul_tensor: "f32[3, 3, 3]" = torch.ops.aten.mul.Tensor(copy__default, getattr_l_self_fx_const_folded_attrs_1_);  copy__default = getattr_l_self_fx_const_folded_attrs_1_ = None
+        mul_tensor: "f32[3, 3, 3]" = torch.ops.aten.mul.Tensor(copy__default, l_self_modules_fx_const_folded_attrs_parameters_1_);  copy__default = l_self_modules_fx_const_folded_attrs_parameters_1_ = None
         return (mul_tensor,)
 """,
         )

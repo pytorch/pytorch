@@ -9,10 +9,10 @@ import gc
 
 from unittest import skip, skipIf
 
-import torch
-
 from attn_ft import BertSelfAttention as BertSelfAttentionA, Linear
 from attn_positional import BertSelfAttention as BertSelfAttentionB
+
+import torch
 
 from functorch._C import dim as _C
 from functorch.dim import (
