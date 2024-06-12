@@ -1,5 +1,4 @@
 # mypy: allow-untyped-defs
-import os
 from typing import Any, Dict
 
 import torch
@@ -169,6 +168,8 @@ def run_example(world_size, rank):
 
 if __name__ == "__main__":
     # this script is launched via torchrun which automatically manages ProcessGroup
+    import os
+
     rank = int(os.environ["RANK"])
     world_size = int(os.environ["WORLD_SIZE"])
     assert world_size == 4  # our example uses 4 worker ranks
