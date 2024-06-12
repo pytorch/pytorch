@@ -400,7 +400,13 @@ class PrepareModuleInput(ParallelStyle):
             assert len(self.input_kwarg_layouts) == len(self.desired_input_kwarg_layouts), \
                 "input_kwarg_layouts and desired_input_kwarg_layouts should have same length!"
 
-    def _prepare_input_arg(self, input: Any, mesh: DeviceMesh, input_layout: Placement, desired_layout: Placement):
+    def _prepare_input_arg(
+        self,
+        input: Any,
+        mesh: DeviceMesh,
+        input_layout: Optional[Placement],
+        desired_layout: Placement
+    ):
         if input_layout is not None:
             if isinstance(input, DTensor):
                 # TODO: re-enable the check once we fix the compile path
