@@ -1226,7 +1226,7 @@ main()
                 requires_grad=True,
                 device="cpu",
             )
-            # `run_with_rng_state` op only shows up when forward is compiled
+            # `run_with_rng_state` op only shows up when `F.scaled_dot_product_attention`'s forward is compiled
             out = torch.compile(h, fullgraph=True)(xq, xk)
             out.sum().backward()
             return out, xq.grad, xk.grad
