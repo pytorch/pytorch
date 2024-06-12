@@ -4176,7 +4176,6 @@ def _new_group_with_tag(
 
     # checks the input ranks
     if ranks is not None:
-        ranks = sorted(ranks)
         group_world_size = len(ranks)
         if group_world_size > global_world_size:
             raise ValueError(
