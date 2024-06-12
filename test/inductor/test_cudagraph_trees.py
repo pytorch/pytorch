@@ -1438,6 +1438,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             node = self.get_manager().current_node
             self.assertEqual(len(list(node.path_live_weakrefs())), 1)
 
+        @torch._dynamo.config.patch("inline_inbuilt_nn_modules", False)
         def test_unstable_ptr(self):
             import torch
 
