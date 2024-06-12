@@ -485,13 +485,20 @@ void impl_func_cum_ops(
     const Tensor& result,
     Stub& stub) {
   NoNamesGuard guard;
-  if (prepend) {
-    TORCH_INTERNAL_ASSERT(false, "TODO implement prepend=True");
-  }
   if (self.dim() == 0) {
+    TORCH_CHECK(
+        !prepend,
+        "cumsum(prepend=True) is only supported on tensors"
+        "with dimension > 0");
     result.fill_(self);
   } else if (self.numel() == 0) {
-    result.zero_();
+    if (!prepend) {
+      result.zero_();
+    } else {
+      TORCH_INTERNAL_ASSERT(
+          false,
+          "prepend=True not implemented for zero-element tensors");
+    }
   } else {
     dim = maybe_wrap_dim(dim, self.dim());
     stub(self.device().type(), result, self.to(result.scalar_type()), dim, prepend);
