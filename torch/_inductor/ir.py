@@ -7547,7 +7547,7 @@ class StorageBox(MutableBox):
             """
             The heuristic for realizing reused result of heavy ops on cpu
             """
-            heavy_ops = ["exp"]  # a list of heavy ops
+            heavy_ops = ["exp", "sigmoid"]  # a list of heavy ops
             fn_str = loops.inner_fn_str()
             return any((op + "(") in fn_str for op in heavy_ops)
 
