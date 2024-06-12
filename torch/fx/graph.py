@@ -466,7 +466,9 @@ class CodeGen:
         }
         def make_wrapper_func(name):
             def f(s):
-                return f"{codes[name]}{s}{codes['reset']}"
+                if verbose:
+                    return f"{codes[name]}{s}{codes['reset']}"
+                return s
             return f
 
         yellow = make_wrapper_func("yellow")
@@ -492,7 +494,11 @@ class CodeGen:
                 cls = arg.__class__
                 clsname = add_global(cls.__name__, cls)
                 return f"{clsname}.{arg.name}"
-            return f"repr(arg)"
+            elif isinstance(arg, Node):
+                return repr(arg)
+            else:
+                return blue(repr(arg))
+            
 
         def _format_args(args: Tuple[Argument, ...], kwargs: Dict[str, Argument]) -> str:
             args_s = ', '.join(_get_repr(a) for a in args)
