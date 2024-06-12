@@ -42,7 +42,7 @@ static std::string getStridedKey(const ScalarType& self_dtype,
   }
 
   return (is_scatter ? "scatter:" : "gather:") + dtype_key + "[" + getArrayRefString(base_shape) + "]:[" +
-      getArrayRefString(new_shape) + "]:[" + getArrayRefString(stride) + "]:[" + to_string(storage_offset) + "]";
+      getArrayRefString(new_shape) + "]:[" + getArrayRefString(stride) + "]:[" + std::to_string(storage_offset) + "]";
 }
 
 // initializes the MTLBuffers for tensor data and runs the MPSGraph for the view op
