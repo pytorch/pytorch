@@ -1420,6 +1420,7 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
         aot_config: AOTConfig,
         *,
         fw_metadata: ViewAndMutationMeta,  # runtime metadata
+        try_save_cache_entry: Optional[Callable],  # Save cache entry after compilation
     ):
         class CompiledFunction(torch.autograd.Function):
             compiled_fw = compiled_fw_func
@@ -1769,7 +1770,11 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
 
                 def call_compiled_backward():
                     if ctx._is_compiled_autograd_tracing():
-                        assert lazy_backward_info is not None
+                        if lazy_backward_info is None:
+                            raise RuntimeError(
+                                """This compiled backward function was saved by AOTAutogradCache, which does not support
+                            compiled autograd. Please turn off AOTAutogradCache using `ENABLE_AOT_AUTOGRAD_CACHE=0` to continue."""
+                            )
                         bw_module = lazy_backward_info.bw_module
                         # For compiled autograd, run raw FX graph so that it can be inlined into the larger graph
                         symints = ctx._get_compiled_autograd_symints()
@@ -1810,6 +1815,9 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                             CompiledFunction.compiled_bw = aot_config.bw_compiler(
                                 bw_module, placeholder_list
                             )
+                            # Maybe save cache entry
+                            if try_save_cache_entry is not None:
+                                try_save_cache_entry(CompiledFunction.compiled_bw)
 
                     out = call_func_at_runtime_with_args(
                         CompiledFunction.compiled_bw,
