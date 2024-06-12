@@ -81,7 +81,7 @@ from torch.utils._mode_utils import no_dispatch
 from torch.utils._python_dispatch import TorchDispatchMode
 from torch.utils.checkpoint import checkpoint, checkpoint_sequential
 from torch.utils.cpp_extension import load_inline
-from torch.utils.hooks import RemovableHandle
+from torch.utils.hooks import RemovableHandle  # noqa: TCH001
 
 
 def graph_desc(fn):
@@ -1341,6 +1341,23 @@ class TestAutograd(TestCase):
         a.register_hook(tensor_prehook)
 
         b.backward()
+
+    def test_accumulate_grad_posthooks_should_not_execute(self):
+        def tensor_prehook(g):
+            raise RuntimeError
+
+        def posthook(gO, gI):
+            raise RuntimeError
+
+        a = torch.tensor(1.0, requires_grad=True)
+        a.register_hook(tensor_prehook)
+        b = torch.tensor(1.0, requires_grad=True)
+        c = a.clone()
+        acc = c.grad_fn.next_functions[0][0]
+        acc.register_hook(posthook)
+
+        out = a + b + c
+        out.sum().backward(inputs=[b])
 
     def test_hook_edge_case_when_called_with_grad(self):
         # grad executes the tensor hooks of the next node but not
@@ -9507,6 +9524,13 @@ for shape in [(1,), ()]:
             y = f(a)
             memory_with_hooks = torch.cuda.memory_allocated()
             self.assertEqual(memory_with_hooks, memory_without_grad)
+
+    @unittest.skipIf(not TEST_CUDA, "test requires CUDA")
+    def test_scalar_grad_mixed_device(self):
+        x = torch.tensor(1.0, requires_grad=True)
+        y = torch.randn(2, 2, device="cuda")
+        out = x * y
+        out.sum().backward()
 
     def test_multi_grad_all_hooks(self):
         t1 = torch.rand(2, requires_grad=True)
