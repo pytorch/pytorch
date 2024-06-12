@@ -865,12 +865,13 @@ cmake_dependent_option(
 # Suspect users building from source will need this
 add_definitions(-DFLASHATTENTION_DISABLE_ALIBI)
 
-# CAVEAT: Again, do not check USE_ROCM here Flash Attention2 will error while
-# building for sm52 while Mem Eff Attention won't
+# CAVEAT: Again, Flash Attention2 will error while building for sm52 while Mem
+# Eff Attention won't
 cmake_dependent_option(
   USE_MEM_EFF_ATTENTION
   "Enable memory-efficient attention for scaled dot product attention.\
-  Will be disabled if not supported by the platform" ON "USE_CUDA" OFF)
+  Will be disabled if not supported by the platform" ON
+  "USE_CUDA OR USE_ROCM" OFF)
 
 if(DEBUG_CUDA)
   string(APPEND CMAKE_CUDA_FLAGS_DEBUG " -lineinfo")

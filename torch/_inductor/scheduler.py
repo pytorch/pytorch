@@ -2771,7 +2771,7 @@ class BaseScheduling:
     @classmethod
     def get_backend_features(cls, device: torch.device) -> Sequence[BackendFeature]:
         """Return a set of .codegen.common.BackendFeature()"""
-        raise NotImplementedError
+        return ()
 
     def can_fuse_vertical(
         self, node1: BaseSchedulerNode, node2: BaseSchedulerNode
