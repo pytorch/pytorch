@@ -197,7 +197,9 @@ def _register_attrs_to_new_gm(
 ) -> None:
     non_persistent_buffers = set(graph_signature.non_persistent_buffers)
     for name in graph_signature.buffers:
-        if name in non_persistent_buffers:
+        if name in non_persistent_buffers or name in constants: 
+            # Buffer name is in constants because converter converts the tensor constant
+            # to a GetAttr, which is treated as a buffer during retracing.
             persistent = False
             value = constants[name]
         else:
@@ -330,11 +332,4 @@ def _unlift_exported_program_lifted_states(ep: ExportedProgram) -> torch.nn.Modu
         new_gm, ep.range_constraints, ep.graph_signature
     )
     unlift_gm.meta.update(ep.graph_module.meta)
-
-    # Remove lifted tensor constants from _buffer but set
-    # as simple attributes.
-    for k, tv in ep.constants.items():
-        delattr(unlift_gm, k)
-        setattr(unlift_gm, k, tv)
-
     return unlift_gm
