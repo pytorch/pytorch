@@ -710,7 +710,7 @@ static void eraseListUnpack(Node* n, int opset_version) {
       // onnx::SequenceAt was introduced in onnx opset version 11
       throw std::runtime_error(
           "Unsupported: ONNX export of prim::ListUnpack in opset " +
-          c10::to_string(opset_version) + ". Please try opset version 11.");
+          std::to_string(opset_version) + ". Please try opset version 11.");
     }
 
     auto g = n->owningGraph();
