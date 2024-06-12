@@ -257,7 +257,9 @@ def mm_options(config, sym_m, sym_n, sym_k, layout, b_prologue_cast_type=None):
     )
     is_hip = torch.version.hip is not None
     if not allow_tf32:
-        if is_hip:
+        # b_proglogue_cast_type is used when we have a mixed mm
+        # using 'tf32x3' with mixed dtypes causes triton to segfault
+        if is_hip or b_prologue_cast_type is not None:
             input_precision = '"ieee"'
         else:
             input_precision = '"tf32x3"'
