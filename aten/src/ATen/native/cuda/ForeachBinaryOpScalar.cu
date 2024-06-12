@@ -192,7 +192,8 @@ std::vector<Tensor> foreach_scalar_pow_list_kernel_cuda(
 // Currently multi tensor apply can only return result of the same type as
 // input.
 //
-// Implement via multiply with reciprocal as it's faster.  Loses one bit of
+// Implement via multiply with reciprocal as it's faster and makes it match
+// the behavior of regular Tensor div by scalar.  Loses one bit of
 // precision.
 Scalar scalar_reciprocal(const Scalar& scalar) {
   if (scalar.isFloatingPoint()) {
