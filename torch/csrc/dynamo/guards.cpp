@@ -2,8 +2,11 @@
 #include <ATen/EmptyTensor.h>
 #include <c10/util/flat_hash_map.h>
 #include <torch/csrc/autograd/grad_mode.h>
+#include <torch/csrc/autograd/utils/wrap_outputs.h>
 #include <torch/csrc/dynamo/guards.h>
+#include <torch/csrc/inductor/inductor_ops.h>
 #include <torch/csrc/utils/disable_torch_function.h>
+#include <torch/csrc/utils/python_arg_parser.h>
 #include <torch/csrc/utils/python_compat.h>
 #include <torch/csrc/utils/python_numbers.h>
 #include <torch/csrc/utils/python_symnode.h>
@@ -742,6 +745,27 @@ static PyObject* _empty_strided_cuda(PyObject* dummy, PyObject* args) {
   END_HANDLE_TH_ERRORS;
 }
 
+static PyObject* _reinterpret_tensor(PyObject* dummy, PyObject* args) {
+  HANDLE_TH_ERRORS;
+  static PythonArgParser parser(
+      {"_reinterpret_tensor(Tensor base, IntArrayRef sizes, IntArrayRef strides, int64_t offset_increment=0)"},
+      /*traceable=*/true);
+
+  ParsedArgs<4> parsed_args;
+  auto r = parser.parse(args, /*kwargs=*/nullptr, parsed_args);
+
+  Tensor self = r.tensor(0);
+  auto sizes = r.intlist(1);
+  auto strides = r.intlist(2);
+  auto offset_increment = r.toInt64(3);
+
+  auto res = torch::inductor::_reinterpret_tensor(
+      self, sizes, strides, offset_increment);
+  return torch::autograd::utils::wrap(res);
+
+  END_HANDLE_TH_ERRORS;
+}
+
 // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays)
 static PyMethodDef _methods[] = {
     {"check_type_id", check_type_id, METH_VARARGS, nullptr},
@@ -750,6 +774,7 @@ static PyMethodDef _methods[] = {
     {"dict_version", dict_version, METH_VARARGS, nullptr},
     {"_empty_strided_cpu", _empty_strided_cpu, METH_VARARGS, nullptr},
     {"_empty_strided_cuda", _empty_strided_cuda, METH_VARARGS, nullptr},
+    {"_reinterpret_tensor", _reinterpret_tensor, METH_VARARGS, nullptr},
     {nullptr, nullptr, 0, nullptr}};
 
 static struct PyModuleDef _module = {
@@ -3222,13 +3247,13 @@ void install_tensor_aliasing_guard(
 
 void install_no_tensor_aliasing_guard(
     const py::list& guard_managers,
-    py::list tensor_names,
+    const py::list& tensor_names,
     py::object verbose_code_parts) {
   // Adds a guard that checks none of tensors alias. This is a an example of
   // relational guard. There is one guard object that is shared between multiple
   // guard managers.
   std::shared_ptr<RelationalGuard> guard = std::make_shared<NO_TENSOR_ALIASING>(
-      std::move(tensor_names), std::move(verbose_code_parts));
+      tensor_names, std::move(verbose_code_parts));
 
   // Register the resetter on the toor guard mananger, so that it can reset
   // the newly added relational guard when the guard eval fails.
@@ -3981,7 +4006,15 @@ PyObject* torch_c_dynamo_guards_init() {
       DictSubclassGuardManager,
       DictGuardManager,
       std::unique_ptr<DictSubclassGuardManager>>(
-      py_m, "DictSubclassGuardManager"); // NOLINT
+      py_m, "DictSubclassGuardManager") // NOLINT
+      .def(
+          "add_no_hasattr_guard",
+          [](DictSubclassGuardManager& self,
+             py::object attr_name,
+             py::object verbose_code_parts) -> void {
+            self.add_permitted_leaf_guard(std::make_shared<NO_HASATTR>(
+                std::move(attr_name), std::move(verbose_code_parts)));
+          });
 
   py_m.def("install_tensor_aliasing_guard", install_tensor_aliasing_guard);
   py_m.def(

@@ -11,24 +11,30 @@
 #include <torch/csrc/utils/python_numbers.h>
 #include <torch/csrc/utils/python_strings.h>
 
+#ifndef WIN32
 #include <pthread.h>
+#endif
 
 using namespace torch;
 
 static bool in_bad_fork = false; // True for children forked after xpu init
 
+#ifndef WIN32
 // Called in the forked child if xpu has already been initialized
 static void forked_child() {
   in_bad_fork = true;
   torch::utils::set_requires_device_init(at::kXPU, true);
 }
+#endif
 
 // Should be called before the first xpu call. It is mainly called in lazy_init.
 // Note: This is distinct from initExtension because a stub xpu implementation
 // has some working functions (e.g. device_count) but cannot fully initialize.
 static void poison_fork() {
+#ifndef WIN32
   static c10::once_flag flag;
   c10::call_once(flag, [] { pthread_atfork(nullptr, nullptr, forked_child); });
+#endif
 }
 
 // XPU management methods
