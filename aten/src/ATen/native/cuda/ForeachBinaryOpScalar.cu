@@ -197,8 +197,10 @@ std::vector<Tensor> foreach_scalar_pow_list_kernel_cuda(
 Scalar scalar_reciprocal(const Scalar& scalar) {
   if (scalar.isFloatingPoint()) {
     return Scalar(1. / scalar.toDouble());
-  } else if (scalar.isIntegral(/*includeBool*/ false)) {
-    return Scalar(1. / static_cast<double>(scalar.toInt()));
+  } else if (scalar.isIntegral(/*includeBool*/ true)) {
+    return Scalar(1. / static_cast<double>(scalar.toLong()));
+  } else if (scalar.isComplex()) {
+    return Scalar(1. / scalar.toComplexDouble());
   }
   TORCH_INTERNAL_ASSERT(
       false, "divison with ", scalar.type(), " not supported");
