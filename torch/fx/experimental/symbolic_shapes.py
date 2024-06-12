@@ -61,7 +61,9 @@ from torch._logging import trace_structured, structured
 from torch import SymBool, SymFloat, SymInt
 from torch._guards import ShapeGuard, Source, TracingContext
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
-from torch.utils._sympy.functions import FloorDiv, Mod, IsNonOverlappingAndDenseIndicator
+from torch.utils._sympy.functions import (
+    FloorDiv, Mod, PythonMod, IsNonOverlappingAndDenseIndicator, CleanDiv, FloorToInt, CeilToInt
+)
 from torch.utils._sympy.solve import try_solve
 from torch.utils._sympy.value_ranges import bound_sympy, SymPyValueRangeAnalysis, ValueRanges, ValueRangeError
 from torch.utils._sympy.singleton_int import SingletonInt
@@ -450,20 +452,21 @@ def free_unbacked_symbols(x):
 # setup!
 def is_symbol_binding_fx_node(node) -> Optional[sympy.Symbol]:
     if (
-        node.op == "placeholder" and
         "val" in node.meta and
         isinstance(node.meta["val"], torch.SymInt) and
-        isinstance(node.meta["val"].node.expr, sympy.Symbol)
+        isinstance(node.meta["val"].node.expr, sympy.Symbol) and
+        (node.op == "placeholder" or free_unbacked_symbols(node.meta["val"].node.expr))
     ):
         return node.meta["val"].node.expr
     return None
 
 def find_symbol_binding_fx_nodes(graph):
-    return {
-        node.meta["val"].node.expr: node
-        for node in graph.nodes
-        if is_symbol_binding_fx_node(node)
-    }
+    r = {}
+    # NB: Prefer first occurrence of symbol
+    for node in graph.nodes:
+        if is_symbol_binding_fx_node(node) and node.meta["val"].node.expr not in r:
+            r[node.meta["val"].node.expr] = node
+    return r
 
 
 # Analogous to ConvertIntSource
@@ -869,9 +872,9 @@ def constrain_range(a, *, min: Optional[int], max: Optional[int] = None):
     for N=1.
     """
     if min is None:
-        min = -sympy.oo
+        min = -sys.maxsize - 1
     if max is None:
-        max = sympy.oo
+        max = sys.maxsize - 1
 
     if max < min:
         raise ValueError(
@@ -978,16 +981,6 @@ def eval_guards(gm, *args, ignore_static=True):
 
 def bind_symbols(gm, *args):
     return gm.shape_env.bind_symbols(fx_placeholder_vals(gm), args)
-
-def _assert_bound_is_rational(expr: sympy.Expr, bound: ValueRanges):
-    """
-    We assert that the bounds are either Boolean, or not finite, or can be computed
-    in exact prevision via rational arithmetic.
-    The only exception to this is the rare case when the user calls `sqrt(s0)`
-    sqrt is turned into sympy.Pow so we just match for that (it matches more things, but still)
-    """
-    assert bound.lower.is_rational or bound.lower.is_Boolean or not bound.lower.is_finite or expr.has(sympy.Pow), (bound, expr)
-    assert bound.upper.is_rational or bound.upper.is_Boolean or not bound.upper.is_finite or expr.has(sympy.Pow), (bound, expr)
 
 class DimDynamic(Enum):
     """
@@ -1387,14 +1380,21 @@ SYMPY_INTERP = {
     'Min': min,
     'Max': max,
     'Mod': operator.mod,
+    'PythonMod': operator.mod,
     'FloorDiv': operator.floordiv,
     'TrueDiv': operator.truediv,
     'IsNonOverlappingAndDenseIndicator': eval_is_non_overlapping_and_dense,
     'floor': math.floor,
     'ceiling': math.ceil,
+    'FloorToInt': math.floor,
+    'CeilToInt': math.ceil,
     'cast_symbool_to_symint_guardless': cast_symbool_to_symint_guardless,
-    'Round': builtins.round,
+    'RoundToInt': builtins.round,
     'RoundDecimal': builtins.round,
+    'TruncToInt': math.trunc,
+    'IntTrueDiv': operator.truediv,
+    'FloatTrueDiv': operator.truediv,
+    'ToFloat': builtins.float,
 }
 
 
@@ -1642,10 +1642,17 @@ class DimConstraints:
             congruence = (base - mod_reduced) % divisor
             if congruence != 0:
                 self._congruences[s].add(congruence)
+            # NB: Must not be CleanDiv, it needs to be regular sympy division
+            # so inequality solver works.  This is sort of problematic for
+            # is_integer tests though haha
             return (base - mod_reduced) / divisor
 
         if expr.has(Mod):
             expr = expr.replace(Mod, mod_handler)
+        # 7 // -3 is -3, 7 % -3 is -2, and 7 - (-2) / -3 is -3.0 so negative
+        # arguments should be OK.
+        if expr.has(PythonMod):
+            expr = expr.replace(PythonMod, mod_handler)
         if expr.has(FloorDiv):
             expr = expr.replace(FloorDiv, floor_div_handler)
         return expr
@@ -3325,6 +3332,7 @@ class ShapeEnv:
             self.pending_fresh_unbacked_symbols.append(symbol)
         self.var_to_stack[symbol] = CapturedTraceback.extract(skip=1)
         vr = self.var_to_range[symbol] = ValueRanges.unknown()
+        assert vr.is_float
 
         # Create a new FX placeholder and Z3 variable for 'symbol'.
         fx_node = self._create_fx_placeholder_and_z3var(symbol, float)
@@ -3343,6 +3351,7 @@ class ShapeEnv:
         self.counter["create_unbacked_symbol"] += 1
         self.var_to_stack[symbol] = CapturedTraceback.extract(skip=1)
         vr = self.var_to_range[symbol] = self._default_unspecified_value_range()
+        assert vr.is_int
 
         # Create a new FX placeholder and Z3 variable for 'symbol'.
         fx_node = self._create_fx_placeholder_and_z3var(symbol, int)
@@ -3366,6 +3375,7 @@ class ShapeEnv:
         self.counter["create_unbacked_symbol"] += 1
         self.var_to_stack[symbol] = CapturedTraceback.extract(skip=1)
         vr = self.var_to_range[symbol] = ValueRanges(0, 1)
+        assert vr.is_int
 
         # Create a new FX placeholder and Z3 variable for 'symbol'.
         fx_node = self._create_fx_placeholder_and_z3var(symbol, bool)
@@ -3511,6 +3521,7 @@ class ShapeEnv:
                     self.var_to_range[sympy_expr] &= constraint_dim.vr
 
                 vr = self.var_to_range[sympy_expr]
+                assert vr.is_int
 
                 if val not in vr:
                     raise ConstraintViolationError(f"{val} not in range [{vr.lower}, {vr.upper}]")
@@ -3519,6 +3530,7 @@ class ShapeEnv:
             elif isinstance(val, float):
                 self.var_to_range[sympy_expr] = vr = ValueRanges(-sympy.oo, sympy.oo)
                 range_str = f"[{vr.lower}, {vr.upper}]"
+                assert vr.is_float
             else:
                 # Skip var_range logic for SingletonInt
                 # Only used for jagged layout nested tensors
@@ -3568,6 +3580,7 @@ class ShapeEnv:
 
     def add_var_to_val(self, expr: sympy.Symbol, val: int):
         """ Adds a new symbol to the symbolic environment. """
+        log.debug("add_var_to_val %s %s", expr, val, stack_info=True)
         assert expr not in self.var_to_val, f"{expr} already exists"
         self.var_to_val[expr] = sympy.Integer(val)
 
@@ -4322,7 +4335,8 @@ class ShapeEnv:
             # Clamp values of size-like variables
             for x in self.size_like & var_to_range.keys():
                 if var_to_range[x] is not None:
-                    var_to_range[x] = ValueRanges(2, sympy.oo)
+                    var_to_range[x] = ValueRanges(2, sys.maxsize - 1)
+                    assert var_to_range[x].is_int
         return bound_sympy(expr, var_to_range)
 
     @_lru_cache
@@ -4439,6 +4453,11 @@ class ShapeEnv:
                 vr = self._default_unspecified_value_range()
             if size_oblivious and k in self.size_like:
                 lower = max(2, vr.lower)
+                # This is a bit dodgy: what this means is that there was a
+                # size-like unbacked symbol whose upper bound < 2.  This
+                # causes... problems.
+                if lower <= vr.upper:
+                    vr = ValueRanges(lower, vr.upper)
             else:
                 lower = vr.lower
             # Don't do anything if we don't have a nontrivial lower bound
@@ -4446,10 +4465,17 @@ class ShapeEnv:
             # SymInt
             if (
                 lower < (-sys.maxsize - 1) // 2 or
-                (unbacked_only and k in self.var_to_val)
+                (unbacked_only and k in self.var_to_val) or
+                not vr.is_int
             ):
                 new_range_env[k] = vr
                 continue
+            # The goal is to take our symbols which have various lower bounds
+            # and reallocate them into new symbols which are exactly positive;
+            # e.g., if we have s0 in [2, inf], we want to turn it into ess0 in
+            # [1, inf], where s0 = ess0 + 1.  This gives the most information
+            # to sympy for subsequent simplifications.
+            #
             # Positive means >= 1
             # Positive - 1 means >= 0
             # Positive + lower - 1 means >= lower
@@ -4481,6 +4507,14 @@ class ShapeEnv:
             self.counter["sympy_recursion_error"] += 1
             return None
 
+        new_expr = safe_expand(new_expr)
+        if new_expr.is_number:
+            return new_expr
+
+        # This is bad to do, the replacement with division leaves us with
+        # rationals when atom.args[0] is addition, e.g., sympy will happily
+        # turn (s0 + s1) // 2 into s0 / 2 + s1 / 2.  Needless complication!
+        """
         floor_div_replace = {}
         for atom in new_expr.atoms(FloorDiv):
             floor_div_replace[atom] = sympy.floor(atom.args[0] / atom.args[1])
@@ -4489,13 +4523,12 @@ class ShapeEnv:
         # are still free symbols
         if new_expr.is_number:
             return new_expr
+        """
 
         # Check if the range can solve it statically
         out = bound_sympy(new_expr, new_range_env)
-        if expect_rational:
-            _assert_bound_is_rational(new_expr, out)
-            if out.is_singleton():
-                return out.lower
+        if out.is_singleton():
+            return out.lower
 
         return new_expr if unbacked_only else None
 
@@ -4547,7 +4580,7 @@ class ShapeEnv:
             for fd in expr.atoms(FloorDiv):
                 base, divisor = fd.args
                 if self.replace(Mod(base, divisor)) in self.divisible:
-                    div_replacements[fd] = base / divisor
+                    div_replacements[fd] = CleanDiv(base, divisor)
             new_expr = expr.xreplace(div_replacements)
             new_expr = safe_expand(new_expr)
             new_pows = new_expr.atoms(sympy.Pow)
@@ -4656,9 +4689,15 @@ class ShapeEnv:
 
         # Updates the range and the guards corresponding to each bound of the symbol.
         if symbol not in self.var_to_range:
-            self.var_to_range[symbol] = ValueRanges(lower, upper)
+            r = ValueRanges(lower, upper)
+            self.log.debug("_update_var_to_range %s = %s (new)", symbol, r)
+            self.var_to_range[symbol] = r
         else:
-            self.var_to_range[symbol] &= ValueRanges(lower, upper)
+            old = self.var_to_range[symbol]
+            new = old & ValueRanges(lower, upper)
+            if new != old:
+                self.var_to_range[symbol] = new
+                self.log.debug("_update_var_to_range %s = %s (update)", symbol, new)
 
     def _set_replacement(self, a: "sympy.Symbol", tgt: "sympy.Expr", msg: str) -> None:
         """
@@ -4691,7 +4730,10 @@ class ShapeEnv:
             int_range = ValueRanges(-sys.maxsize - 1, sys.maxsize - 1)
 
             def issubset(x, y):
-                return (x & int_range).issubset(y & int_range)
+                if x.is_int and y.is_int:
+                    return (x & int_range).issubset(y & int_range)
+                else:
+                    return x.issubset(y)
 
             # First, refine the value range of a based on the computed value range
             # of tgt.  This is always OK to do, even if we decide not to do the
@@ -4710,8 +4752,15 @@ class ShapeEnv:
                 # Try to invert the equality
                 r = try_solve(sympy.Eq(a, tgt), b, floordiv_inequality=False)
                 if r is not None:
-                    b_bound = self.bound_sympy(r[1])
-                    self.var_to_range[b] = b_bound & self.var_to_range[b]
+                    self.log.debug("set_replacement: solve for %s in %s == %s gives %s", b, a, tgt, r)
+                    # The solution here can be non-integral, for example, if
+                    # we have s0 = 2*s1, then s1 = s0/2.  What we would like
+                    # to do is calculated the bounds in arbitrary precision,
+                    # and then requantize the bound to integers when we are
+                    # done.
+                    rat_b_bound = self.bound_sympy(r[1])
+                    b_bound = ValueRanges(CeilToInt(rat_b_bound.lower), FloorToInt(rat_b_bound.upper))
+                    self._update_var_to_range(b, b_bound)
                     tgt_bound = self.bound_sympy(tgt)
                     assert issubset(tgt_bound, src_bound)
 
@@ -4920,12 +4969,12 @@ class ShapeEnv:
                         ):
                             # We have Mod(i0, q / c) == 0, which means we can
                             # rewrite i0 as (q / gcd(q, c)) * i1
-                            d = q / sympy.gcd(q, c)
+                            d = q / sympy.gcd(q, c)  # TODO: CleanDiv?
                             i1 = self.create_unbacked_symint().node.expr
                             # Propagate the value ranges.  It doesn't really
                             # matter if we use truediv or floordiv, because we
                             # have established divisibility.
-                            self._update_var_to_range(i1, SymPyValueRangeAnalysis.truediv(
+                            self._update_var_to_range(i1, SymPyValueRangeAnalysis.floordiv(
                                 self.var_to_range[i0], ValueRanges.wrap(d)
                             ))
                             # Propagate size-like-ness
@@ -5362,7 +5411,6 @@ class ShapeEnv:
             lower, upper = vr.lower, vr.upper
 
             rhs_vr = bound_sympy(rhs, self.var_to_range)
-            _assert_bound_is_rational(rhs, rhs_vr)
 
             # Let's suppose that we have a preexisting range for x [0, 100].
             # Now, we issue a guard x > y, where the range for y is [50, 150].
