@@ -52,13 +52,9 @@ if torch.cuda.is_available():
     _IS_SM8X = torch.cuda.get_device_capability(0)[0] == 8
     SEMI_STRUCTURED_SUPPORTED_BACKENDS["cutlass"] = SparseSemiStructuredTensorCUTLASS
 
-    # check if cslt is available for now using this:
-    # TODO when we add cusparselt as a backend, we can update this to be use torch.cusparselt.is_available()
-    try:
-        torch._cslt_compress(torch.ones(128, 256).cuda())
+    # add cuSPASRELt tests if available
+    if torch.backends.cusparselt.is_available():
         SEMI_STRUCTURED_SUPPORTED_BACKENDS["cusparselt"] = SparseSemiStructuredTensorCUSPARSELT
-    except Exception:
-        pass
 
 inference_dtypes = dtypes(torch.float16, torch.bfloat16, torch.float32, torch.int8)
 training_dtypes = dtypes(torch.float16, torch.bfloat16)

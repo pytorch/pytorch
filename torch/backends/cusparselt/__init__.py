@@ -23,12 +23,15 @@ else:
         return False
 
 
-def version():
+def version() -> int:
     """Return the version of cuSPARSELt"""
     if not _init():
         return None
     return __cusparselt_version
 
-def is_available():
+def is_available() -> bool:
     r"""Return a bool indicating if cuSPARSELt is currently available."""
     return torch._C._has_cusparselt
+
+# enable by default if available
+enabled = is_available()
