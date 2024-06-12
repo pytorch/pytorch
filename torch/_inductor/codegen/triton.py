@@ -60,7 +60,14 @@ from .common import (
     SizeArg,
     TensorArg,
 )
-from .simd import constant_repr, IterationRangesEntry, pexpr, SIMDKernel, SIMDScheduling
+from .simd import (
+    constant_repr,
+    IterationRangesEntry,
+    IterationRangesRoot,
+    pexpr,
+    SIMDKernel,
+    SIMDScheduling,
+)
 from .triton_utils import config_of, signature_of, signature_to_meta
 
 if TYPE_CHECKING:
@@ -1933,11 +1940,11 @@ class TritonKernel(SIMDKernel):
         rmask = "None" if self._has_constant_mask(self.range_trees[-1]) else "rmask"
 
         if len(values) == 2:
-            result_vars = cse_multiple(
-                f"triton_helpers.sort_with_index({broadcasted_values[0]}, {broadcasted_values[1]}, {rmask}, {dim}, stable={stable}, descending={descending})",
-                len(values),
-                masks,
+            line = (
+                f"triton_helpers.sort_with_index({broadcasted_values[0]}, {broadcasted_values[1]},"
+                f" {rmask}, {dim}, stable={stable}, descending={descending})"
             )
+            result_vars = cse_multiple(line, len(values), masks)
         else:
             raise AssertionError("Unhandled sort")
 
@@ -2472,7 +2479,7 @@ class TritonKernel(SIMDKernel):
             return f"{pid}.to({self.index_dtype})"
         return pid
 
-    def _has_constant_mask(self, tree: IterationRangesEntry):
+    def _has_constant_mask(self, tree: IterationRangesRoot):
         if V.graph.sizevars.statically_known_equals(tree.numel, 1):  # type: ignore[arg-type]
             return True
         # Masks are superfluous if numel is a multiple of BLOCK

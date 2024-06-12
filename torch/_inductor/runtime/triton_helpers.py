@@ -33,7 +33,11 @@ except ImportError:
         libdevice = tl.math
         math = tl
 
-from triton.language.standard import _log2
+
+try:
+    from triton.language.standard import _log2
+except ImportError:
+    _log2 = None  # type: ignore[var-annotated]
 
 
 @triton.jit
