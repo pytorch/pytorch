@@ -98,10 +98,7 @@ def unwrap_tensor_subclasses(
     is_runtime: bool,
     append_extra: bool,
 ):
-    if is_runtime:
-        assert subclass_metas is not None
-
-    def concat_inner_tensors_from_subclasses(xs, is_forward: bool):
+    def concat_inner_tensors_from_subclasses(xs, is_primals: bool):
         xs_inner = []
 
         for x in xs:
@@ -120,6 +117,8 @@ def unwrap_tensor_subclasses(
             return xs_inner
 
         if is_runtime:
+            assert subclass_metas is not None
+
             for x, meta in zip(xs, subclass_metas):
                 if isinstance(meta, SubclassCreationMeta):
                     assert isinstance(meta, SubclassCreationMeta)
@@ -136,7 +135,7 @@ def unwrap_tensor_subclasses(
                 if (
                     isinstance(x, Tensor)
                     and is_traceable_wrapper_subclass(x)
-                    and is_forward
+                    and is_primals
                 ):
                     # x.size() can have both ints ans SymInts: `Size([3, sz1, 5])`
                     xs_inner += [sz for sz in x.size() if isinstance(sz, SymInt)]
@@ -149,16 +148,16 @@ def unwrap_tensor_subclasses(
             wrapped_args[1], (tuple, list)
         )
         unwrapped_args_fw = concat_inner_tensors_from_subclasses(
-            wrapped_args[0], is_forward=True
+            wrapped_args[0], is_primals=True
         )
         unwrapped_args_tangents = concat_inner_tensors_from_subclasses(
-            wrapped_args[1], is_forward=False
+            wrapped_args[1], is_primals=False
         )
         unwrapped_args = (unwrapped_args_fw, unwrapped_args_tangents)
     else:
         assert isinstance(wrapped_args, (list, tuple))
         unwrapped_args_fw = concat_inner_tensors_from_subclasses(
-            wrapped_args, is_forward=True
+            wrapped_args, is_primals=True
         )
         unwrapped_args = unwrapped_args_fw
     return unwrapped_args
@@ -179,7 +178,6 @@ def wrap_tensor_subclasses(
         1 if isinstance(meta, int) else meta.arg_count for meta in subclass_metas
     )
     count_extra = len(unwrapped_args) > num_args
-    extra_args = 0
     for subclass_meta in subclass_metas:
         if isinstance(subclass_meta, int):
             wrapped_args.append(unwrapped_args[subclass_meta])
@@ -189,11 +187,11 @@ def wrap_tensor_subclasses(
             wrapped_args.append(
                 subclass_meta.creation_fn(unwrapped_args, is_runtime=is_runtime)
             )
-            num_args_tallied += subclass_meta.arg_count
-            if count_extra:
-                extra_args += len(
-                    [x for x in subclass_meta.outer_size if isinstance(x, SymInt)]
-                )
+            num_args_tallied += subclass_meta.arg_count + sum(
+                bool(count_extra)
+                for sz in subclass_meta.original_subclass.size()
+                if isinstance(sz, SymInt)
+            )
 
     # Note: [Partitioner handling for Subclasses, Part 2]
     # At the beginning of AOTAutograd, we collect metadata on the inputs and outputs of the user fw,
@@ -229,7 +227,7 @@ def wrap_tensor_subclasses(
             return wrapped_args + activations
         return tuple(list(wrapped_args) + list(activations))
     else:
-        assert len(unwrapped_args) == num_args_tallied + extra_args
+        assert len(unwrapped_args) == num_args_tallied
         return tuple(wrapped_args)
 
 
@@ -341,7 +339,6 @@ def compute_inner_mutated_inp_indices_from_subclass_meta(
         # Sometimes we don't have subclass info, e.g. synthetic_base codepaths
         return inner_metadata.mutated_inp_runtime_indices
     assert len(fw_metadata.subclass_inp_meta) == len(fw_metadata.input_info)
-    int_imp_meta = None
     num_extra_symints = 0
     for outer_idx, inp_meta in enumerate(fw_metadata.subclass_inp_meta):
         if isinstance(inp_meta, int):
@@ -352,24 +349,26 @@ def compute_inner_mutated_inp_indices_from_subclass_meta(
                     inner_metadata.input_info[inner_idx]
                     == fw_metadata.input_info[outer_idx]
                 )
-            int_imp_meta = fw_metadata.input_info[outer_idx]
-            updated_input_info.append(int_imp_meta)
+            updated_input_info.append(fw_metadata.input_info[outer_idx])
             inner_idx += 1
         else:
-            num_extra_symints += sum(
+            num_extra_symints = sum(
                 1 for s in inp_meta.original_subclass.size() if isinstance(s, SymInt)
             )
             for _ in range(inp_meta.arg_count):
                 updated_input_info.append(fw_metadata.input_info[outer_idx])
                 inner_idx += 1
 
-    # duplicates one of the non-class inp metas for the extra SymInts
-    if num_extra_symints > 0:
-        assert int_imp_meta is not None
-        updated_input_info += [int_imp_meta] * num_extra_symints
+            # append extra symints
+            offset = inp_meta.flat_tensor_extra_sizes_offset
+            length = len(inner_metadata.subclass_inp_meta)
+            start = length - offset
+            end = length - offset + num_extra_symints
+            updated_input_info += inner_metadata.input_info[start:end]
 
     if inner_metadata is not None:
         assert len(inner_metadata.input_info) == len(updated_input_info)
+
     return [
         i
         for i, inp in enumerate(updated_input_info)

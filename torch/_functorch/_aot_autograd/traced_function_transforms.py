@@ -644,7 +644,7 @@ def aot_dispatch_subclass(
     # directly on the joint, but this would hurt compile time (adding yet another pass through the joint).
     subclass_meta = SubclassMeta()
 
-    def inner_fn(fn, args, *, use_trace_joint: bool, append_extra: bool):
+    def inner_fn(fn, args, *, use_trace_joint: bool):
         # Step 1: wrap tensor inputs into subclasses if necessary
         all_args = wrap_tensor_subclasses_maybe_joint(
             args, is_joint_structure=use_trace_joint, meta=meta
@@ -668,7 +668,7 @@ def aot_dispatch_subclass(
             subclass_metas=None,
             is_joint_structure=use_trace_joint,
             is_runtime=False,
-            append_extra=append_extra,
+            append_extra=True,
         )
         return unwrapped_outs
 
@@ -677,16 +677,13 @@ def aot_dispatch_subclass(
             flat_fn_maybe_joint,
             (primals, tangents),
             use_trace_joint=True,
-            append_extra=False,
         )
 
     def fw_fn(*primals):
-        return inner_fn(
-            flat_fn_maybe_joint, primals, use_trace_joint=False, append_extra=True
-        )
+        return inner_fn(flat_fn_maybe_joint, primals, use_trace_joint=False)
 
     def metadata_fn(*primals):
-        return inner_fn(fw_only, primals, use_trace_joint=False, append_extra=False)
+        return inner_fn(fw_only, primals, use_trace_joint=False)
 
     args_unwrapped = unwrap_tensor_subclasses(
         args,

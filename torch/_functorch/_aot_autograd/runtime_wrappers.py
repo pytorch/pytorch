@@ -1736,7 +1736,8 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                             all_args[tangents_start_idx:tangents_end_idx],
                             subclass_metas=None,
                             is_joint_structure=False,
-                            is_runtime=False,
+                            is_runtime=True,
+                            # don't append extra args for the bwd graph
                             append_extra=False,
                         )
                     )
@@ -1755,7 +1756,8 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                         all_args,
                         subclass_metas=None,
                         is_joint_structure=False,
-                        is_runtime=False,
+                        is_runtime=True,
+                        # don't append any extra arg when running the backward graph
                         append_extra=False,
                     )
                     tangents_start_idx = len(all_args) - len_tangents - len(rng_args)
