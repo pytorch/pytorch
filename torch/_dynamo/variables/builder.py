@@ -14,6 +14,7 @@ import operator
 import re
 import sys
 import types
+import weakref
 from typing import Any, List, NamedTuple, Optional, Union
 
 from torch.utils._sympy.value_ranges import ValueRanges
@@ -184,6 +185,7 @@ from .user_defined import (
     SourcelessGraphModuleVariable,
     UserDefinedClassVariable,
     UserDefinedObjectVariable,
+    WeakRefVariable,
 )
 
 
@@ -383,6 +385,7 @@ class VariableBuilder:
             ((slice, range), cls.wrap_slice_range),
             (tuple(common_constant_types), cls.wrap_literal),
             (re.Pattern, cls.wrap_regex_pattern),
+            (weakref.ReferenceType, cls.wrap_weakref),
         ]
 
         if config.trace_numpy and np:
@@ -400,6 +403,10 @@ class VariableBuilder:
         # TODO(jansel): something like a REPR_MATCH might be more robust here
         self.install_guards(GuardBuilder.ID_MATCH)
         return RegexPatternVariable(value)
+
+    def wrap_weakref(self, value: weakref.ReferenceType):
+        self.install_guards(GuardBuilder.TYPE_MATCH)
+        return WeakRefVariable(value, source=self.source)
 
     @classmethod
     @functools.lru_cache(None)
