@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import torch
 from torch.ao.quantization.backend_config import BackendConfig
 from torch.fx.graph import Node, Graph
