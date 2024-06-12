@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import dataclasses
 import traceback
 from typing import (

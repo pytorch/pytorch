@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import torch
 import torch.distributed as dist
 import torch.distributed.distributed_c10d as distributed_c10d
