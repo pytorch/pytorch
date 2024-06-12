@@ -79,8 +79,8 @@
 #define C10_STRINGIZE(x) C10_STRINGIZE_IMPL(x)
 
 /**
- * C10_ANONYMOUS_VARIABLE(str) introduces an identifier starting with
- * str and ending with a number that varies with the line.
+ * C10_ANONYMOUS_VARIABLE(str) introduces a new identifier which starts with
+ * str and ends with a unique number.
  */
 #ifdef __COUNTER__
 #define C10_UID __COUNTER__

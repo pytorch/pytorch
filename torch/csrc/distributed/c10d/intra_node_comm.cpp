@@ -211,9 +211,8 @@ IntraNodeComm::IntraNodeComm(
     : store_(std::move(store)),
       rank_(rank),
       worldSize_(worldSize),
-      bufferSize_(bufferSize.has_value() ? *bufferSize : kDefaultBufferSize) {
-  rendezvous();
-}
+      bufferSize_(bufferSize.has_value() ? *bufferSize : kDefaultBufferSize),
+      barrierReady_(at::cuda::CUDAEvent()) {}
 
 IntraNodeComm::~IntraNodeComm() {
   if (!isInitialized_) {
@@ -289,7 +288,7 @@ bool IntraNodeComm::rendezvous() {
     return true;
   }
 #if !defined(USE_ROCM) && defined(PYTORCH_C10_DRIVER_API_SUPPORTED)
-  if (!isIntraNodeCommSupported() || !isEnabled() || worldSize_ < 2 ||
+  if (!isIntraNodeCommSupported() || worldSize_ < 2 ||
       worldSize_ > kMaxDevices) {
     return false;
   }

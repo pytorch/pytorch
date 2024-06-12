@@ -18,6 +18,7 @@
 #include <torch/csrc/profiler/perf.h>
 #include <torch/csrc/profiler/standalone/itt_observer.h>
 #include <torch/csrc/profiler/standalone/nvtx_observer.h>
+#include <torch/csrc/profiler/standalone/privateuse1_observer.h>
 #include <torch/csrc/profiler/util.h>
 
 #include <ATen/Context.h>
@@ -638,6 +639,9 @@ void enableProfiler(
   } else if (config.state == ProfilerState::ITT) {
     torch::profiler::impl::pushITTCallbacks(config, scopes);
     return;
+  } else if (config.state == ProfilerState::PRIVATEUSE1) {
+    torch::profiler::impl::pushPRIVATEUSE1CallbacksStub(config, scopes);
+    return;
   }
 
   TORCH_CHECK(
@@ -673,7 +677,8 @@ std::unique_ptr<ProfilerResult> disableProfiler() {
            config.state == ProfilerState::KINETO_PRIVATEUSE1_FALLBACK ||
            config.state == ProfilerState::KINETO_ONDEMAND ||
            config.state == ProfilerState::NVTX ||
-           config.state == ProfilerState::ITT),
+           config.state == ProfilerState::ITT ||
+           config.state == ProfilerState::PRIVATEUSE1),
       "Can't disable Kineto profiler when it's not running");
 
   state_ptr->removeCallback();
@@ -685,9 +690,11 @@ std::unique_ptr<ProfilerResult> disableProfiler() {
     return std::make_unique<ProfilerResult>();
   }
 
-  // Shared among NVTX, KINETO, KINETO_GPU_FALLBACK, KINETO_PRIVATEUSE1_FALLBACK
+  // Shared among NVTX, PRIVATEUSE1, KINETO, KINETO_GPU_FALLBACK,
+  // KINETO_PRIVATEUSE1_FALLBACK
   std::unique_ptr<ProfilerResult> result;
-  if (state_ptr->config().state == ProfilerState::NVTX) {
+  if (state_ptr->config().state == ProfilerState::NVTX ||
+      state_ptr->config().state == ProfilerState::PRIVATEUSE1) {
     result = std::make_unique<ProfilerResult>();
   }
 

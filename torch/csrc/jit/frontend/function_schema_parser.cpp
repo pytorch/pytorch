@@ -3,7 +3,6 @@
 #include <ATen/core/Reduction.h>
 #include <ATen/core/type_factory.h>
 #include <c10/util/Optional.h>
-#include <c10/util/string_utils.h>
 #include <torch/csrc/jit/frontend/lexer.h>
 #include <torch/csrc/jit/frontend/parse_string_literal.h>
 #include <torch/csrc/jit/frontend/schema_type_parser.h>
@@ -23,14 +22,14 @@ namespace torch::jit {
 
 namespace {
 struct SchemaParser {
-  explicit SchemaParser(const std::string& str)
+  explicit SchemaParser(const std::string& str, bool allow_typevars)
       : L(std::make_shared<Source>(
             c10::string_view(str),
             c10::nullopt,
             0,
             nullptr,
             Source::DONT_COPY)),
-        type_parser(L, /*parse_complete_tensor_types*/ false) {}
+        type_parser(L, /*parse_complete_tensor_types*/ false, allow_typevars) {}
 
   std::variant<OperatorName, FunctionSchema> parseDeclaration() {
     OperatorName name = parseName();
@@ -157,7 +156,7 @@ struct SchemaParser {
       // note: an array with a size hint can only occur at the Argument level
       fake_type = ListType::create(std::move(fake_type));
       real_type = ListType::create(std::move(real_type));
-      N = c10::stoll(L.expect(TK_NUMBER).text());
+      N = std::stoll(L.expect(TK_NUMBER).text());
       L.expect(']');
       auto container = type_parser.parseAliasAnnotation();
       if (alias_info) {
@@ -244,14 +243,14 @@ struct SchemaParser {
           n = L.expect(TK_NUMBER).text();
 
         if (kind == TypeKind::ComplexType || n.find('j') != std::string::npos) {
-          auto imag = c10::stod(n.substr(0, n.size() - 1));
+          auto imag = std::stod(n.substr(0, n.size() - 1));
           return c10::complex<double>(0, imag);
         } else if (
             kind == TypeKind::FloatType || n.find('.') != std::string::npos ||
             n.find('e') != std::string::npos) {
-          return c10::stod(n);
+          return std::stod(n);
         } else {
-          int64_t v = c10::stoll(n);
+          int64_t v = std::stoll(n);
           return v;
         }
     }
@@ -361,16 +360,24 @@ struct SchemaParser {
   }
   Lexer L;
   SchemaTypeParser type_parser;
+  bool allow_typevars_;
 };
 } // namespace
 
 std::variant<OperatorName, FunctionSchema> parseSchemaOrName(
-    const std::string& schemaOrName) {
-  return SchemaParser(schemaOrName).parseExactlyOneDeclaration();
+    const std::string& schemaOrName,
+    bool allow_typevars) {
+  // We're ignoring aten and prim for BC reasons
+  if (schemaOrName.rfind("aten::", 0) == 0 ||
+      schemaOrName.rfind("prim::", 0) == 0) {
+    allow_typevars = true;
+  }
+  return SchemaParser(schemaOrName, allow_typevars)
+      .parseExactlyOneDeclaration();
 }
 
-FunctionSchema parseSchema(const std::string& schema) {
-  auto parsed = parseSchemaOrName(schema);
+FunctionSchema parseSchema(const std::string& schema, bool allow_typevars) {
+  auto parsed = parseSchemaOrName(schema, allow_typevars);
   TORCH_CHECK(
       std::holds_alternative<FunctionSchema>(parsed),
       "Tried to parse a function schema but only the operator name was given");

@@ -1,9 +1,8 @@
-import torch
-import torch.nn as nn
-
 from pt import configs
 
 import operator_benchmark as op_bench
+import torch
+import torch.nn as nn
 
 """
 Microbenchmarks for Conv1d and ConvTranspose1d operators.
@@ -38,7 +37,9 @@ op_bench.generate_pt_test(
     configs.conv_1d_configs_short + configs.conv_1d_configs_long, Conv1dBenchmark
 )
 op_bench.generate_pt_test(
-    configs.conv_1d_configs_short + configs.conv_1d_configs_long,
+    configs.convtranspose_1d_configs_short
+    + configs.conv_1d_configs_short
+    + configs.conv_1d_configs_long,
     ConvTranspose1dBenchmark,
 )
 
