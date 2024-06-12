@@ -5600,7 +5600,8 @@ def masked_fill(a: TensorLikeType, mask: TensorLikeType, value: TensorOrNumberLi
         )
         # `masked_fill` allows cpu scalar to be moved to hpu, cuda and xpu but not otherwise.
         is_cpu_scalar = (
-            a.device.type in ["hpu", "cuda", "xpu", torch._C._get_privateuse1_backend_name()]
+            a.device.type
+            in ["hpu", "cuda", "xpu", torch._C._get_privateuse1_backend_name()]
             and value.device.type == "cpu"
         )
         torch._check(
