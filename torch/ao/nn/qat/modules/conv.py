@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import torch
 import torch.nn as nn
 from torch.nn.modules.utils import _single, _pair, _triple
