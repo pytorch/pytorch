@@ -1612,7 +1612,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnt.frame_count, 1)
 
         self.assertEqual(
-            18 if torch._dynamo.config.inline_inbuilt_nn_modules else 12, cnt.op_count
+            15 if torch._dynamo.config.inline_inbuilt_nn_modules else 12, cnt.op_count
         )
 
     def test_exec_import(self):
@@ -4695,6 +4695,29 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
         res = opt_fn(x_weak, weight, y)
         self.assertEqual(ref, res)
         self.assertEqual(cnt.frame_count, 2)
+
+    def test_weakref_del(self):
+        def fn(x_weak, y):
+            if x_weak is not None:
+                x = x_weak()
+                if x is not None:
+                    return torch.sin(y)
+            return torch.cos(y)
+
+        weight = torch.randn(4)
+        x_weak = weakref.ref(weight)
+        y = torch.randn(4)
+
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+
+        ref = fn(x_weak, y)
+        res = opt_fn(x_weak, y)
+        self.assertEqual(ref, res)
+
+        del weight
+        ref = fn(x_weak, y)
+        res = opt_fn(x_weak, y)
+        self.assertEqual(ref, res)
 
     def test_storage_resize_forward_full_graph(self):
         class TestModule(torch.nn.Module):
