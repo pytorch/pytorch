@@ -243,7 +243,6 @@ def mps_ops_modifier(ops):
         '__getitem__',
         'abs',
         'add',
-        'alias_copy',
         'argwhere',
         'atleast_1d',
         'atleast_2d',

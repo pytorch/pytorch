@@ -13,6 +13,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import unittest
 import uuid
 from contextlib import closing
 from unittest import mock
@@ -22,13 +23,12 @@ import torch.distributed.run as launch
 from torch.distributed.elastic.agent.server.api import RunResult, WorkerState
 from torch.distributed.elastic.multiprocessing import DefaultLogsSpecs
 from torch.distributed.elastic.multiprocessing.errors import ChildFailedError
+from torch.distributed.elastic.rendezvous.etcd_server import EtcdServer
 from torch.distributed.elastic.utils import get_socket_with_port
 from torch.distributed.elastic.utils.distributed import get_free_port
 from torch.testing._internal.common_utils import (
-    run_tests,
     skip_but_pass_in_sandcastle_if,
     TEST_WITH_DEV_DBG_ASAN,
-    TestCase,
 )
 
 
@@ -63,7 +63,19 @@ class MockException(Exception):
     pass
 
 
-class ElasticLaunchTest(TestCase):
+class ElasticLaunchTest(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        # start a standalone, single process etcd server to use for all tests
+        cls._etcd_server = EtcdServer()
+        cls._etcd_server.start()
+        cls._etcd_endpoint = cls._etcd_server.get_endpoint()
+
+    @classmethod
+    def tearDownClass(cls):
+        # stop the standalone etcd server
+        cls._etcd_server.stop()
+
     def setUp(self):
         self.test_dir = tempfile.mkdtemp()
 
@@ -91,6 +103,8 @@ class ElasticLaunchTest(TestCase):
         args = [
             f"--nnodes={nnodes}",
             f"--nproc-per-node={nproc_per_node}",
+            "--rdzv-backend=etcd",
+            f"--rdzv-endpoint={self._etcd_endpoint}",
             f"--rdzv-id={run_id}",
             "--monitor-interval=1",
             "--start-method=spawn",
@@ -142,6 +156,8 @@ class ElasticLaunchTest(TestCase):
         args = [
             f"--nnodes={nnodes}",
             f"--nproc-per-node={nproc_per_node}",
+            "--rdzv-backend=etcd",
+            f"--rdzv-endpoint={self._etcd_endpoint}",
             f"--rdzv-id={run_id}",
             "--monitor-interval=1",
             "--start-method=spawn",
@@ -171,6 +187,8 @@ class ElasticLaunchTest(TestCase):
         world_size = 1
         args = [
             f"--nnodes={nnodes}",
+            "--rdzv-backend=etcd",
+            f"--rdzv-endpoint={self._etcd_endpoint}",
             f"--rdzv-id={run_id}",
             "--monitor-interval=1",
             "--start-method=spawn",
@@ -202,6 +220,8 @@ class ElasticLaunchTest(TestCase):
 
         os.environ["PET_NNODES"] = str(nnodes)
         os.environ["PET_NPROC_PER_NODE"] = str(nproc_per_node)
+        os.environ["PET_RDZV_BACKEND"] = "etcd"
+        os.environ["PET_RDZV_ENDPOINT"] = self._etcd_endpoint
         os.environ["PET_RDZV_ID"] = run_id
         os.environ["PET_MONITOR_INTERVAL"] = "1"
         os.environ["PET_START_METHOD"] = "spawn"
@@ -230,6 +250,8 @@ class ElasticLaunchTest(TestCase):
         args = [
             f"--nnodes={nnodes}",
             f"--nproc-per-node={nproc_type}",
+            "--rdzv-backend=etcd",
+            f"--rdzv-endpoint={self._etcd_endpoint}",
             f"--rdzv-id={run_id}",
             "--monitor-interval=1",
             "--start-method=spawn",
@@ -250,8 +272,7 @@ class ElasticLaunchTest(TestCase):
     @skip_but_pass_in_sandcastle_if(
         TEST_WITH_DEV_DBG_ASAN, "test incompatible with dev/dbg asan"
     )
-    @patch("torch.cuda.is_available", return_value=False)
-    def test_nproc_launch_auto_configurations(self, _mock1):
+    def test_nproc_launch_auto_configurations(self):
         self._test_nproc_launch_configuration("auto", os.cpu_count())
 
     @skip_but_pass_in_sandcastle_if(
@@ -289,9 +310,8 @@ class ElasticLaunchTest(TestCase):
         args = [
             f"--nnodes={min_nodes}:{max_nodes}",
             f"--nproc-per-node={nproc_per_node}",
-            "--rdzv-backend=c10d",
-            f"--rdzv-endpoint=localhost:{get_free_port()}",
-            "--rdzv-conf='join_timeout=5,last_call_timeout=1,timeout=5'",
+            "--rdzv-backend=etcd",
+            f"--rdzv-endpoint={self._etcd_endpoint}",
             f"--rdzv-id={run_id}",
             "--monitor-interval=1",
             "--start-method=spawn",
@@ -323,9 +343,8 @@ class ElasticLaunchTest(TestCase):
         args = [
             f"--nnodes={min_nodes}:{max_nodes}",
             f"--nproc-per-node={nproc_per_node}",
-            "--rdzv-backend=c10d",
-            f"--rdzv-endpoint=localhost:{get_free_port()}",
-            "--rdzv-conf='join_timeout=5,last_call_timeout=1,timeout=5'",
+            "--rdzv-backend=etcd",
+            f"--rdzv-endpoint={self._etcd_endpoint}",
             f"--rdzv-id={run_id}",
             "--monitor-interval=1",
             "--max-restarts=0",
@@ -357,9 +376,8 @@ class ElasticLaunchTest(TestCase):
         args = [
             f"--nnodes={min_nodes}:{max_nodes}",
             f"--nproc-per-node={nproc_per_node}",
-            "--rdzv-backend=c10d",
-            f"--rdzv-endpoint=localhost:{get_free_port()}",
-            "--rdzv_conf=timeout=5",
+            "--rdzv-backend=etcd",
+            f"--rdzv-endpoint={self._etcd_endpoint}",
             f"--rdzv-id={run_id}",
             "--monitor-interval=1",
             "--max-restarts=0",
@@ -434,9 +452,8 @@ class ElasticLaunchTest(TestCase):
         args = [
             f"--nnodes={min_nodes}:{max_nodes}",
             f"--nproc-per-node={nproc_per_node}",
-            "--rdzv-backend=c10d",
-            f"--rdzv-endpoint=localhost:{get_free_port()}",
-            "--rdzv_conf=timeout=5",
+            "--rdzv-backend=etcd",
+            f"--rdzv-endpoint={self._etcd_endpoint}",
             f"--rdzv-id={run_id}",
             "--monitor-interval=1",
             "--start-method=spawn",
@@ -591,6 +608,21 @@ class ElasticLaunchTest(TestCase):
                 is_torchelastic_launched = fp.readline()
                 self.assertEqual("False", is_torchelastic_launched)
 
+    def test_init_method_tcp(self):
+        port = get_free_port()
+        with patch.object(
+            sys,
+            "argv",
+            [
+                path("bin/test_script_init_method.py"),
+                f"--init-method=tcp://localhost:{port}",
+                "--rank=0",
+                "--world-size=1",
+            ],
+        ):
+            runpy.run_path(sys.argv[0], run_name="__main__")
+            # nothing to validate, just make sure it runs
+
     @skip_but_pass_in_sandcastle_if(
         TEST_WITH_DEV_DBG_ASAN, "test incompatible with dev/dbg asan"
     )
@@ -610,6 +642,27 @@ class ElasticLaunchTest(TestCase):
         )
         # nothing to validate, just make sure it runs
 
+    def test_init_method_env(self):
+        port = get_free_port()
+        with patch.dict(
+            os.environ,
+            {
+                "RANK": "0",
+                "WORLD_SIZE": "1",
+                "MASTER_ADDR": "localhost",
+                "MASTER_PORT": str(port),
+            },
+        ), patch.object(
+            sys,
+            "argv",
+            [
+                path("bin/test_script_init_method.py"),
+                "--init-method=env://",
+            ],
+        ):
+            runpy.run_path(sys.argv[0], run_name="__main__")
+            # nothing to validate, just make sure it runs
+
     @skip_but_pass_in_sandcastle_if(
         TEST_WITH_DEV_DBG_ASAN, "test incompatible with dev/dbg asan"
     )
@@ -628,7 +681,3 @@ class ElasticLaunchTest(TestCase):
             ]
         )
         # nothing to validate, just make sure it runs
-
-
-if __name__ == "__main__":
-    run_tests()

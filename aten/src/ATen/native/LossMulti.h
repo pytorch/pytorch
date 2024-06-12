@@ -5,7 +5,8 @@
 #include <ATen/TensorUtils.h>
 
 namespace at::native {
-  inline void multilabel_margin_loss_shape_check(
+namespace {
+  static C10_UNUSED void multilabel_margin_loss_shape_check(
     int64_t& nframe,
     int64_t& dim,
     const int64_t& ndims,
@@ -34,7 +35,7 @@ namespace at::native {
     }
   }
 
-  inline void multi_margin_loss_shape_check(
+  static C10_UNUSED void multi_margin_loss_shape_check(
     int64_t& nframe,
     int64_t& dim,
     const int64_t& ndims,
@@ -66,4 +67,6 @@ namespace at::native {
     }
 }
 
+
+}  // anonymous namespace
 } // namespace at::native

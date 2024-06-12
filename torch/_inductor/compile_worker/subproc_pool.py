@@ -13,7 +13,6 @@ import typing
 from concurrent.futures import Future, ProcessPoolExecutor
 from typing import Any, Callable, Dict
 
-from torch._inductor import config
 from torch._inductor.compile_worker.watchdog import _async_compile_initializer
 
 log = logging.getLogger(__name__)
@@ -60,19 +59,6 @@ def _recv_msg(read_pipe):
     return job_id, data
 
 
-def _get_ld_library_path():
-    path = os.environ.get("LD_LIBRARY_PATH", "")
-    if config.is_fbcode():
-        from libfb.py.parutil import get_runtime_path
-
-        runtime_path = get_runtime_path()
-        if runtime_path:
-            lib_path = os.path.join(runtime_path, "runtime", "lib")
-            path = os.pathsep.join([lib_path, path]) if path else lib_path
-
-    return path
-
-
 class SubprocPool:
     """
     Mimic a concurrent.futures.ProcessPoolExecutor, but wrap it in
@@ -99,8 +85,6 @@ class SubprocPool:
                 # torch._inductor.codecache since the warming process is what
                 # creates the SubprocPool in the first place.
                 "TORCH_WARM_POOL": "0",
-                # Some internal usages need a modified LD_LIBRARY_PATH.
-                "LD_LIBRARY_PATH": _get_ld_library_path(),
             },
         )
         self.write_pipe: Pipe = typing.cast(Pipe, self.process.stdin)
