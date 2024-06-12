@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import copy
 import dataclasses
 import functools
@@ -663,26 +664,28 @@ class ExportedProgram:
 
         _replace_sym_size_ops_pass(gm)
 
+        from torch._dynamo import config as _dynamo_config
         from torch._export.passes._node_metadata_hook import (
             _node_metadata_hook,
             _set_node_metadata_hook,
         )
 
-        stack_trace = (
-            'File "torch/fx/passes/runtime_assert.py", line 24, '
-            "in insert_deferred_runtime_asserts"
-        )
-        shape_env = _get_shape_env(gm)
-        if shape_env is not None:
-            with _set_node_metadata_hook(
-                gm, functools.partial(_node_metadata_hook, stack_trace=stack_trace)
-            ):
-                insert_deferred_runtime_asserts(
-                    gm,
-                    shape_env,
-                    f"exported program: {first_call_function_nn_module_stack(gm.graph)}",
-                    export=True,
-                )
+        if not _dynamo_config.do_not_emit_runtime_asserts:
+            stack_trace = (
+                'File "torch/fx/passes/runtime_assert.py", line 24, '
+                "in insert_deferred_runtime_asserts"
+            )
+            shape_env = _get_shape_env(gm)
+            if shape_env is not None:
+                with _set_node_metadata_hook(
+                    gm, functools.partial(_node_metadata_hook, stack_trace=stack_trace)
+                ):
+                    insert_deferred_runtime_asserts(
+                        gm,
+                        shape_env,
+                        f"exported program: {first_call_function_nn_module_stack(gm.graph)}",
+                        export=True,
+                    )
 
         exported_program = ExportedProgram(
             root=gm,
