@@ -1667,7 +1667,7 @@ class CppKernel(Kernel):
             return high_prec_cse_var
 
         high_prec_var = find_high_prec_var(var_to_store, self.cse.cache)
-        if high_prec_var:
+        if high_prec_var and high_prec_var.dtype in DTYPE_TO_CPP:
             cache_key = get_lowp_to_high_prec_expr(
                 var_to_store, high_prec_var.dtype, self
             )
