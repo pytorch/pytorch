@@ -1,0 +1,148 @@
+################################################################################
+# Primary project setup.                                                       #
+################################################################################
+PROJECT_NAME           = "PyTorch"
+# Parent directory of where Doxygen should output files.  Cannot be for example
+# `../build/doxygen` because if `../build` does not exist Doxygen will error.
+OUTPUT_DIRECTORY       = ../build
+# XML output stored in ${OUTPUT_DIRECTORY}/${XML_OUTPUT}.  Must agree
+# with what is specified to `breathe_projects` in `conf.py`.
+XML_OUTPUT             = xml
+# HTML output stored in ${OUTPUT_DIRECTORY}/${HTML_OUTPUT}.
+# NOTE: it can be useful to have Doxygen generate HTML to verify what sphinx is
+#       creating, or to generate HTML documentation to check a docstring you are
+#       writing without needing to wait for Sphinx.
+#
+#       # Must run from this directory (see relative paths below...)
+#       $ cd /path/to/pytorch/docs/cpp/source
+#
+#       # Send configs in this file plus `GENERATE_HTML=YES` to doxygen on stdin
+#       $ (cat Doxyfile; echo 'GENERATE_HTML = YES') | doxygen -
+#
+#       # View the doxygen results.
+#       $ open ../build/doxygen_html/index.html
+#
+#       This sends everything in this file plus `GENERATE_HTML = YES` to doxygen
+#       on stdin.  Without needing to edit this `Doxyfile` directly.
+HTML_OUTPUT            = doxygen_html
+# Strip the path prefix.  *MUST* agree with `exhale_args` in conf.py.
+# {repo_root}/docs/cpp/source/../../.. -> {repo_root}
+STRIP_FROM_PATH        = ../../..
+# What folders / files Doxygen should process.
+INPUT                  = ../../../aten/src/ATen/ATen.h \
+                         ../../../aten/src/ATen/Backend.h \
+                         ../../../aten/src/ATen/core/ivalue.h \
+                         ../../../aten/src/ATen/core/ScalarType.h \
+                         ../../../aten/src/ATen/cuda/CUDAContext.h \
+                         ../../../aten/src/ATen/cudnn/Descriptors.h \
+                         ../../../aten/src/ATen/cudnn/Handles.h \
+                         ../../../aten/src/ATen/cudnn/Types.h \
+                         ../../../aten/src/ATen/cudnn/Utils.h \
+                         ../../../aten/src/ATen/DeviceGuard.h \
+                         ../../../aten/src/ATen/Layout.h \
+                         ../../../aten/src/ATen/mkl/Descriptors.h \
+                         ../../../aten/src/ATen/Scalar.h \
+                         ../../../aten/src/ATen/TensorOptions.h \
+                         ../../../aten/src/ATen/core/Tensor.h \
+                         ../../../aten/src/ATen/native/TensorShape.h \
+                         ../../../build/aten/src/ATen/Functions.h \
+                         ../../../build/aten/src/ATen/core/TensorBody.h \
+                         ../../../c10/core/Device.h \
+                         ../../../c10/core/DeviceType.h \
+                         ../../../c10/util/Half.h \
+                         ../../../c10/util/ArrayRef.h \
+                         ../../../c10/util/OptionalArrayRef.h \
+                         ../../../c10/util/Exception.h \
+                         ../../../c10/util/Optional.h \
+                         ../../../c10/cuda/CUDAGuard.h \
+                         ../../../c10/cuda/CUDAStream.h \
+                         ../../../c10/xpu/XPUStream.h \
+                         ../../../torch/csrc/api/include \
+                         ../../../torch/csrc/api/src \
+                         ../../../torch/csrc/autograd/autograd.h \
+                         ../../../torch/csrc/autograd/custom_function.h \
+                         ../../../torch/csrc/autograd/function.h \
+                         ../../../torch/csrc/autograd/variable.h \
+                         ../../../torch/csrc/autograd/generated/variable_factories.h \
+                         ../../../torch/csrc/jit/runtime/custom_operator.h \
+                         ../../../torch/csrc/jit/serialization/import.h \
+                         ../../../torch/csrc/jit/api/module.h \
+                         ../../../torch/library.h \
+                         ../../../torch/custom_class.h
+# Don't include .cpp files!
+FILE_PATTERNS          = *.h
+# If you need this to be YES, exhale will probably break.
+CREATE_SUBDIRS         = NO
+# So that Doxygen does not trim paths, which affects the file hierarchy
+FULL_PATH_NAMES        = YES
+# Nested folders will be ignored without this.
+RECURSIVE              = YES
+# Exclude certain file patterns from the INPUT section.
+EXCLUDE = ../../../torch/csrc/api/include/torch/nn/pimpl-inl.h \
+          ../../../torch/csrc/api/include/torch/detail
+# Increase the max node size for our large files
+DOT_GRAPH_MAX_NODES    = 100
+################################################################################
+# Output formats for Doxygen to create.                                        #
+################################################################################
+# Set to YES if you are debugging or want to compare.
+GENERATE_HTML          = NO
+# Unless you want it...
+GENERATE_LATEX         = NO
+# Both breathe and exhale need the xml.
+GENERATE_XML           = YES
+# Set to NO if you do not want the Doxygen program listing included.
+# NOTE: setting to NO may result in unrecovered file relationships
+#       (which file defined which compound)
+XML_PROGRAMLISTING     = YES
+################################################################################
+# Doxygen preprocessor / parser control.                                       #
+################################################################################
+ENABLE_PREPROCESSING   = YES
+MACRO_EXPANSION        = YES
+EXPAND_ONLY_PREDEF     = NO
+SKIP_FUNCTION_MACROS   = NO
+# Extra defs for to help with building the _right_ version of the docs
+PREDEFINED             = DOXYGEN_DOCUMENTATION_BUILD
+PREDEFINED            += DOXYGEN_SHOULD_SKIP_THIS
+# Symbol expansion to follow for #include statements (not input)
+SEARCH_INCLUDES        = YES
+INCLUDE_PATH           = ../../.. \
+                         ../../../torch/csrc/api/include \
+                         ../../../build/aten/src
+################################################################################
+# Compound extraction control.                                                 #
+################################################################################
+EXTRACT_ALL            = YES
+EXTRACT_PACKAGE        = YES
+EXTRACT_STATIC         = YES
+CASE_SENSE_NAMES       = NO
+EXCLUDE_SYMBOLS        = caffe2::* cereal* DL* TH* cudnn* std::*
+# EXCLUDE_SYMBOLS        = c10::* caffe2::* cereal* DL* TH* cudnn* std::*
+################################################################################
+# Docstring control / customization.                                           #
+################################################################################
+# First line of /** comment */ treated as \brief
+JAVADOC_AUTOBRIEF      = YES
+# Allow for rst directives and advanced functions e.g. grid tables
+# Example:
+#     /**
+#      * \rst
+#      * .. code-block:: cpp
+#      *
+#      *     int main() {
+#      *         return 0;
+#      *     }
+#      *
+#      * \endrst
+#      */
+# NOTE:
+#     1. \rst and \endrst must be on their own line.
+#     2. leading-asterisk required.
+ALIASES                = "rst=\verbatim embed:rst:leading-asterisk"
+ALIASES               += "endrst=\endverbatim"
+################################################################################
+# Warning suppression.                                                         #
+################################################################################
+QUIET                  = YES
+WARN_IF_UNDOCUMENTED   = NO
