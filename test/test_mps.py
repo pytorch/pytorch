@@ -3277,6 +3277,36 @@ class TestMPS(TestCaseMPS):
         helper((2, 8, 4, 5), 0.2)
         helper((2, 3, 4, 5), 1.0)  # value of 1 should be ignored internally
 
+    def test_addcdiv_transpose(self):
+        # Regression test for issue https://github.com/pytorch/pytorch/issues/118115
+        # Testing continuity of all input tensors
+
+        def helper(shape, value):
+            shape_t = shape[::-1]
+            for i in range(2):
+                for j in range(2):
+                    for k in range(2):
+                        x = torch.rand(shape, device="cpu") if i == 0 else torch.rand(shape_t, device="cpu").t()
+                        y = torch.rand(shape, device="cpu") if j == 0 else torch.rand(shape_t, device="cpu").t()
+                        z = torch.rand(shape, device="cpu") if k == 0 else torch.rand(shape_t, device="cpu").t()
+
+                        x_mps = x.detach().clone().to(device="mps")
+                        y_mps = y.detach().clone().to(device="mps")
+                        z_mps = z.detach().clone().to(device="mps")
+
+                        result_cpu = x.addcdiv_(y, z, value=value)
+                        result_mps = x_mps.addcdiv(y_mps, z_mps, value=value)
+                        result_mps_out = result_cpu.detach().clone().to('mps')
+                        torch.addcdiv(x_mps, y_mps, z_mps, out=result_mps_out, value=value)
+
+                        self.assertEqual(result_cpu, result_mps)
+                        self.assertEqual(result_cpu, result_mps_out)
+
+        helper((2, 3), 1.0)
+        helper((2, 3), 0.2)
+        helper((100, 300), 1.0)
+        helper((100, 300), 0.2)
+
     def test_buffer_size_match(self):
         # this test shouldn't cause any crash
         size = 16
