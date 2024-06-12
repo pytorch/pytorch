@@ -1,8 +1,10 @@
+# mypy: allow-untyped-defs
 import contextlib
 
 from typing import Any, cast, Dict, List, NamedTuple, Optional, Set, Tuple
 
 import torch
+import torch._dynamo.compiled_autograd as ca
 import torch.distributed as dist
 import torch.nn as nn
 from torch.distributed.fsdp._common_utils import _named_parameters_with_duplicates
@@ -339,7 +341,6 @@ class FSDPParamGroup:
             if fsdp_param.grad_offload_event is not None:
                 fsdp_param.grad_offload_event.synchronize()
                 fsdp_param.grad_offload_event = None
-            fsdp_param._unsharded_param = None
         self._post_forward_indices.clear()
 
     def _prefetch_unshard(self):
@@ -356,15 +357,8 @@ class FSDPParamGroup:
             target_fsdp_param_group = self.comm_ctx.post_forward_order[target_index]
             with torch.profiler.record_function(
                 "FSDP::backward_prefetch"
-            ):
-                # NOTE: Dynamo doesn't support custom context manager at the moment,
-                # so we can't use `with use_training_state(X)`.
-                old_training_state = target_fsdp_param_group._training_state
-                self._training_state = TrainingState.PRE_BACKWARD
-                try:
-                    target_fsdp_param_group.unshard()
-                finally:
-                    target_fsdp_param_group._training_state = old_training_state
+            ), target_fsdp_param_group.use_training_state(TrainingState.PRE_BACKWARD):
+                target_fsdp_param_group.unshard()
 
     # Utilities #
     def _to_sharded(self):
@@ -410,8 +404,8 @@ class FSDPParamGroup:
     def _register_post_backward_hook(
         self, args: Tuple[Any, ...], kwargs: Dict[str, Any]
     ) -> Tuple[Tuple[Any, ...], Dict[str, Any]]:
-        # Compile relies on `root_post_backward_callback` to call each ParamGroup's post_backward.
-        if torch._dynamo.compiled_autograd.compiled_autograd_enabled:
+        # Compile relies on `root_post_backward_callback` to call each `FSDPParamGroup.post_backward`
+        if ca.compiled_autograd_enabled:
             return args, kwargs
         if not torch.is_grad_enabled():
             return args, kwargs

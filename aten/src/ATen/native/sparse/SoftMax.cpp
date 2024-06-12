@@ -606,15 +606,6 @@ Tensor log_softmax_backward_sparse_cpu(
   return grad_input;
 }
 
-static Tensor _sparse_softmax(const Tensor& input_, const int64_t dim_) {
-  auto result = [&]() {
-    NoNamesGuard guard;
-    return at::_sparse_softmax(input_, dim_, false);
-  }();
-  namedinference::propagate_names(result, input_);
-  return result;
-}
-
 Tensor _sparse_softmax(const Tensor& input_, const int64_t dim_, std::optional<ScalarType> dtype) {
   auto result = [&]() {
     NoNamesGuard guard;
