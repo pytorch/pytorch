@@ -43,7 +43,6 @@ def gen_registration_headers(
     backend_index: BackendIndex,
     per_operator_headers: bool,
     rocm: bool,
-    backend_only: bool = False,
 ) -> List[str]:
     if per_operator_headers:
         headers = ["#include <ATen/ops/as_strided_native.h>"]

@@ -1466,7 +1466,6 @@ def get_ns_grouped_kernels(
         for dispatch_key, backend_idx in backend_indices.items():
             if (
                 whitelist_keys
-                and len(whitelist_keys) > 0
                 and (dispatch_key not in whitelist_keys)
             ):
                 continue
@@ -1982,11 +1981,11 @@ def gen_per_operator_headers(
     ]:
         if (
             (whitelist_keys is not None)
-            and len(whitelist_keys) > 1
+            and len(whitelist_keys) >= 1
             and (category == "NativeFunctions")
         ):
             # {name}_native.h is backend specific for whitelist mode
-            # here, we generate into {dispatch_key}/op/{name}_native.h separately.
+            # here, we generate them into {dispatch_key}/op/{name}_native.h separately.
             for white_key in whitelist_keys:
                 dispatch_namespace = white_key.lower()
                 cpu_fm.write(
@@ -2293,9 +2292,7 @@ def gen_source_files(
                     if not is_registered:
                         continue
 
-                    if (whitelist_keys is not None) and (
-                        dispatch_key in whitelist_keys
-                    ):
+                    if whitelist_keys and (dispatch_key in whitelist_keys):
                         headers.append(
                             f"#include <ATen/{dispatch_namespace}/ops/{g.root_name}_native.h>"
                         )
@@ -2307,9 +2304,7 @@ def gen_source_files(
                     ):
                         headers.append(f"#include <ATen/ops/{g.root_name}.h>")
                     if dispatch_key in functions_keys:
-                        if (
-                            whitelist_keys is not None
-                        ) and dispatch_key in whitelist_keys:
+                        if whitelist_keys and dispatch_key in whitelist_keys:
                             headers.append(
                                 f"#include <ATen/{dispatch_namespace}/ops/{g.root_name}_{dispatch_namespace}_dispatch.h>"
                             )
@@ -2371,8 +2366,6 @@ def gen_source_files(
                     backend_index,
                     per_operator_headers,
                     rocm,
-                    backend_only=(whitelist_keys is not None)
-                    and dispatch_key in whitelist_keys,
                 ),
                 "ops_headers": operator_headers(),
                 "dispatch_helpers": "",
@@ -2516,9 +2509,8 @@ codegen to generate the correct cpp call for this op. Contact AOTInductor team f
 
         del fm
 
-    if (whitelist_keys is not None) and (
-        not len(whitelist_keys) == 0
-    ):  # Only generate backend required source files
+    if whitelist_keys and len(whitelist_keys) > 0:
+        # Only generate backend required source files
         return
 
     # BackendSelect is generated specially
@@ -2897,11 +2889,6 @@ def main() -> None:
         help="Generate only a subset of files",
     )
     parser.add_argument(
-        "--only_backend",
-        action="store_true",
-        help="Mode that no general dispatchkey code generation",
-    )
-    parser.add_argument(
         "--update-aoti-c-shim",
         action="store_true",
         help="Update AOTInductor C shim after adding an entry to inductor_fallback_ops in torchgen/aoti/fallback_ops.py. "
@@ -2928,7 +2915,6 @@ def main() -> None:
         if DispatchKey.MPS in dispatch_keys:
             del dispatch_keys[dispatch_keys.index(DispatchKey.MPS)]
 
-    parsed_yaml = parse_native_yaml(native_yaml_path, tags_yaml_path, ignore_keys)
     whitelist_keys = set()
     if options.backend_whitelist:
         whitelist_keys = {
@@ -3001,7 +2987,7 @@ def main() -> None:
         dispatch_keys = [
             k
             for k in dispatch_keys
-            if (is_generic_dispatch_key(k) or str(k) in options.backend_whitelist)
+            if is_generic_dispatch_key(k) or str(k) in options.backend_whitelist
         ]
 
     static_dispatch_idx: List[BackendIndex] = []
