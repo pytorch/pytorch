@@ -463,10 +463,6 @@ class SymPyValueRangeAnalysis:
         return cls.not_(cls.eq(a, b))
 
     @classmethod
-    def identity(cls, a):
-        return ValueRanges.wrap(a)
-
-    @classmethod
     def lt(cls, a, b):
         a = ValueRanges.wrap(a)
         b = ValueRanges.wrap(b)
