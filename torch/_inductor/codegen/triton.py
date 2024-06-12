@@ -871,19 +871,15 @@ class TritonKernelOverrides(TritonOverrides):
 
     @staticmethod
     def masked(mask, body, other):
-        nodes = list(body.graph.nodes)
-        last_node = nodes[-1]
+        nodes = body.graph.find_nodes(op="output")
 
-        if last_node.op == "output":
-            need_where = False
-            for output in last_node.args:
-                if output.op != "load" or V.graph.is_unspec_arg(output.args[0]):
+        need_where = False
+        for node in nodes:
+            for arg in node.args:
+                if arg.target != "load" or V.graph.is_unspec_arg(arg.args[0]):
                     need_where = True
-                    break
-        else:
-            need_where = True
 
-        if not need_where:
+        if nodes and not need_where:
             with V.kernel.mask_loads(mask, value=other) as new_mask:
                 result = body()
                 result.mask_vars.discard(new_mask)
@@ -1310,10 +1306,11 @@ class TritonKernel(SIMDKernel):
         else:
             ep = ""
 
-        if self._load_other:
-            other = f", other={constant_repr(self._load_other)}"
-        elif (has_tmpmask or has_rindex) and indexing.has_mask():
-            other = ", other=0.0"
+        if (has_tmpmask or has_rindex) and indexing.has_mask():
+            if self._load_other:
+                other = f", other={constant_repr(self._load_other)}"
+            else:
+                other = ", other=0.0"
         else:
             other = ""
 
