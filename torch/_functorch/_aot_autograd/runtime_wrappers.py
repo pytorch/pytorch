@@ -1728,7 +1728,9 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                 # so I can use aot_dispatch_subclass_wrapper() here.
                 if CompiledFunction.maybe_subclass_metadata is not None:
                     tangents = all_args[tangents_start_idx:tangents_end_idx]
-                    runtime_subclass_tangent_meta = create_subclass_meta(tangents)
+                    runtime_subclass_tangent_meta = create_subclass_meta(
+                        tangents, is_runtime=True
+                    )
                     if (
                         runtime_subclass_tangent_meta
                         != CompiledFunction.metadata.subclass_tangent_meta

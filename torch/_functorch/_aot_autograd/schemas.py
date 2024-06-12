@@ -200,6 +200,8 @@ class SubclassCreationMeta:
     # (this is guaranteed to be a wrapper subclass that holds a fake tensor,
     #  so holding onto this at runtime shouldn't leak memory)
     original_subclass: Any
+    # If True, then we are constructing metadata at runtime
+    is_runtime: bool
 
     def creation_fn(self, all_args, *, is_runtime: bool):
         inner_tensors = {}
@@ -208,6 +210,7 @@ class SubclassCreationMeta:
         for attr, creation_meta in self.attrs.items():
             if creation_meta is None:
                 subclass = all_args[curr_start_idx]
+                curr_start_idx += 1
             else:
                 subclass = creation_meta.creation_fn(all_args, is_runtime=is_runtime)
                 curr_start_idx += creation_meta.arg_count
@@ -228,7 +231,8 @@ class SubclassCreationMeta:
 
     def __post_init__(self):
         # sanity assert to make sure we don't leak memory
-        assert is_fake(self.original_subclass)
+        if not self.is_runtime:
+            assert is_fake(self.original_subclass)
 
 
 # This class encapsulates all aliasing + mutation info we need about the forward graph

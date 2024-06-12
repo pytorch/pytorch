@@ -9,6 +9,7 @@ from typing import Any, List, Optional, Tuple, Union
 import torch.utils._pytree as pytree
 
 from torch import Tensor
+from torch._subclasses.fake_tensor import get_plain_tensors
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 
 from .schemas import MutationType, SubclassCreationMeta, ViewAndMutationMeta
@@ -33,7 +34,7 @@ def requires_subclass_dispatch(args, fw_metadata: ViewAndMutationMeta) -> bool:
     return any_subclass_args or any_subclass_outputs
 
 
-def create_subclass_metadata(a, start_idx):
+def create_subclass_metadata(a, start_idx, *, is_runtime: bool = False):
     if not is_traceable_wrapper_subclass(a):
         return None, start_idx + 1
 
@@ -42,7 +43,7 @@ def create_subclass_metadata(a, start_idx):
     attrs = {}
     for key in inner_keys:
         new_subclass_meta, new_start_idx = create_subclass_metadata(
-            getattr(a, key), new_start_idx
+            getattr(a, key), new_start_idx, is_runtime=is_runtime
         )
         attrs[key] = new_subclass_meta
 
@@ -55,6 +56,7 @@ def create_subclass_metadata(a, start_idx):
             outer_size=a.size(),
             outer_stride=a.stride(),
             original_subclass=a,
+            is_runtime=is_runtime,
         ),
         new_start_idx,
     )
@@ -64,14 +66,16 @@ def create_subclass_metadata(a, start_idx):
 # computes metadata about "how to reconstruct the current list of subclasses,
 # if we were given their flattened dense tensors instead"
 def create_subclass_meta(
-    curr_args: Union[List[Any], Tuple[Any, ...]],
+    curr_args: Union[List[Any], Tuple[Any, ...]], *, is_runtime: bool = False
 ) -> List[Union[int, SubclassCreationMeta]]:
     idx = 0
     infos: List[Union[int, SubclassCreationMeta]] = []
     for a in curr_args:
         if isinstance(a, Tensor) and is_traceable_wrapper_subclass(a):
             start_idx = idx
-            subclass_meta, _ = create_subclass_metadata(a, start_idx)
+            subclass_meta, _ = create_subclass_metadata(
+                a, start_idx, is_runtime=is_runtime
+            )
             infos.append(subclass_meta)
             cnt = subclass_meta.arg_count
         else:
@@ -79,23 +83,6 @@ def create_subclass_meta(
             cnt = 1
         idx += cnt
     return infos
-
-
-def get_plain_tensors(subclass):
-    assert is_traceable_wrapper_subclass(subclass)
-
-    plain_tensors = []
-    todo = [subclass]
-    while todo:
-        curr = todo.pop()
-        inner_keys, _ = curr.__tensor_flatten__()
-        for key in inner_keys:
-            val = getattr(curr, key)
-            if not is_traceable_wrapper_subclass(val):
-                plain_tensors.append(val)
-            else:
-                todo.append(val)
-    return plain_tensors
 
 
 # Output structure:
