@@ -1682,7 +1682,7 @@ PyObject* initModule() {
 #endif
   ASSERT_TRUE(set_module_attr("_has_cudnn", has_cudnn));
 
-#if defined(USE_CUSPARSELT) 
+#if defined(USE_CUSPARSELT)
   PyObject* has_cusparselt = Py_True;
 #else
   PyObject* has_cusparselt = Py_False;
