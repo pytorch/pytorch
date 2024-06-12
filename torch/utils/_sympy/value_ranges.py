@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 from __future__ import annotations
 
 import dataclasses
@@ -87,7 +88,10 @@ def sympy_generic_le(lower, upper):
         return lower <= upper
     else:
         # only negative condition is True > False
-        assert isinstance(lower, SympyBoolean) and isinstance(upper, SympyBoolean)
+        assert isinstance(lower, SympyBoolean) and isinstance(upper, SympyBoolean), (
+            lower,
+            upper,
+        )
         return not (lower and not upper)
 
 
@@ -126,6 +130,9 @@ class ValueRanges(Generic[_T]):
     is_bool: bool
     is_int: bool
     is_float: bool
+
+    def __repr__(self) -> str:
+        return f"VR[{self.lower}, {self.upper}]"
 
     @overload
     def __init__(self: ValueRanges[sympy.Expr], lower: ExprIn, upper: ExprIn) -> None:
@@ -456,6 +463,10 @@ class SymPyValueRangeAnalysis:
         return cls.not_(cls.eq(a, b))
 
     @classmethod
+    def identity(cls, a):
+        return ValueRanges.wrap(a)
+
+    @classmethod
     def lt(cls, a, b):
         a = ValueRanges.wrap(a)
         b = ValueRanges.wrap(b)
@@ -680,7 +691,7 @@ class SymPyValueRangeAnalysis:
         if 0 in x:
             return ValueRanges.unknown()
         else:
-            return ValueRanges.decreasing_map(x, lambda y: FloatTrueDiv(1.0, y))
+            return ValueRanges.decreasing_map(x, lambda y: FloatTrueDiv(1.0, y))  # type: ignore[operator]
 
     @staticmethod
     def abs(x):
@@ -925,6 +936,8 @@ class ValueRangeAnalysis(SymPyValueRangeAnalysis):
         if dtype == torch.bool:
             if x.is_singleton():
                 return ValueRanges.wrap(x.lower != 0)
+            elif x.is_bool:
+                return x
             elif 0 not in x:
                 return ValueRanges.wrap(sympy.true)
             else:
