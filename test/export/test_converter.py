@@ -16,7 +16,9 @@ requires_cuda = unittest.skipUnless(torch.cuda.is_available(), "requires cuda")
 
 
 class TestConverter(TestCase):
-    def _check_equal_ts_ep_converter(self, mod, inp, jit_trace=False) -> ExportedProgram:
+    def _check_equal_ts_ep_converter(
+        self, mod, inp, jit_trace=False
+    ) -> ExportedProgram:
         if not jit_trace:
             ts_model = torch.jit.script(mod)
         else:
@@ -582,14 +584,28 @@ class TestConverter(TestCase):
             return x * y / (x - 2 * y) + y
 
         def func3(x):
-            return x + torch.Tensor([3])
+            return x + torch.tensor([3])
+
+        def func4():
+            val = torch.tensor(float("inf"))
+            return torch.full((10, 10), val)
+
+        class M1(torch.nn.Module):
+            def __init__(self, value):
+                super().__init__()
+                self.x = torch.tensor(value)
+
+            def forward(self):
+                return self.x.clone()
 
         inp = (torch.randn([2, 2]),)
         self._check_equal_ts_ep_converter(func1, inp, jit_trace=True)
-        inp = (torch.randn([2, 2]),torch.randn([2, 2]))
+        inp = (torch.randn([2, 2]), torch.randn([2, 2]))
         self._check_equal_ts_ep_converter(func2, inp, jit_trace=True)
         inp = (torch.randn([2, 2]),)
         self._check_equal_ts_ep_converter(func3, inp, jit_trace=True)
+        self._check_equal_ts_ep_converter(func4, (), jit_trace=True)
+        self._check_equal_ts_ep_converter(M1(5), (), jit_trace=True)
 
 
 if __name__ == "__main__":

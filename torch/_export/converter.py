@@ -292,7 +292,12 @@ class TS2FXGraphConverter:
 
         # Pass parameter and buffer to the root for lookup.
         gm = torch.fx.GraphModule(
-            {**self.subgraphs, **self.name_to_param_map, **self.name_to_buffer_map},
+            {
+                **self.subgraphs,
+                **self.name_to_param_map,
+                **self.name_to_buffer_map,
+                **self.tensor_constants,
+            },
             self.fx_graph,
         )
 
@@ -355,7 +360,13 @@ class TS2FXGraphConverter:
             elif constant_kind == "s":
                 value = node.s("value")
             elif constant_kind == "t":
-                value = node.t("value")
+                alias_name = (
+                    f"lifted_tensor_{name}"  # Follow naming convention from EP tracing.
+                )
+                fx_node = self.fx_graph.get_attr(alias_name)
+                self.tensor_constants[alias_name] = node.t("value")
+                self.attribute_map[alias_name] = ""
+                value = fx_node
             elif constant_kind == "ival":
                 value = node.ival("value")
             else:
@@ -713,10 +724,12 @@ class TS2EPConverter:
             blocks_to_lifted_attrs,
         )
         gm = graph_converter.convert()
-        ep = self.retrace_as_exported_program(gm)
+        ep = self.retrace_as_exported_program(gm, graph_converter.tensor_constants)
         return ep
 
-    def retrace_as_exported_program(self, gm: torch.fx.GraphModule):
+    def retrace_as_exported_program(
+        self, gm: torch.fx.GraphModule, tensor_constants: Dict[str, torch.Tensor]
+    ):
         # TODO: adjust input orders to match GraphSignature convention
         ep = torch.export._trace._export(
             gm,
@@ -724,4 +737,12 @@ class TS2EPConverter:
             strict=False,
             pre_dispatch=True,
         )
+
+        # Because during conversion, we set tensor constants as GetAttr,
+        # retracing cannot recognize them as tensor constants but instead
+        # treat them as buffers. We need to set them again here. The goal
+        # is to allow module() to populate unnecessary variables from _buffer
+        # in ep.module().
+        ep._constants = tensor_constants
+
         return ep

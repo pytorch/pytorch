@@ -330,4 +330,11 @@ def _unlift_exported_program_lifted_states(ep: ExportedProgram) -> torch.nn.Modu
         new_gm, ep.range_constraints, ep.graph_signature
     )
     unlift_gm.meta.update(ep.graph_module.meta)
+
+    # Remove lifted tensor constants from _buffer but set
+    # as simple attributes.
+    for k, tv in ep.constants.items():
+        delattr(unlift_gm, k)
+        setattr(unlift_gm, k, tv)
+
     return unlift_gm
