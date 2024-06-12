@@ -1,6 +1,7 @@
 #include <caffe2/utils/threadpool/pthreadpool-cpp.h>
 #include <caffe2/utils/threadpool/thread_pool_guard.h>
 #include <c10/util/Exception.h>
+#include <c10/util/thread_name.h>
 
 #include <atomic>
 
@@ -15,12 +16,19 @@ void child_atfork() {
   leak_corrupted_threadpool = true;
 }
 
+struct pthreadpool* namedPthreadpoolCreate(size_t thread_count) {
+  auto callerThreadName = c10::getThreadName();
+  c10::setThreadName("c10pthreadpool");
+  pthreadpool* pool = pthreadpool_create(thread_count);
+  c10::setThreadName(std::move(callerThreadName));
+  return pool;
+}
 } // namespace
 
 namespace caffe2 {
 
 PThreadPool::PThreadPool(const size_t thread_count)
-    : threadpool_(pthreadpool_create(thread_count), pthreadpool_destroy) {}
+    : threadpool_(namedPthreadpoolCreate(thread_count), pthreadpool_destroy) {}
 
 size_t PThreadPool::get_thread_count() const {
   std::lock_guard<std::mutex> lock{mutex_};
@@ -43,7 +51,7 @@ void PThreadPool::set_thread_count(const size_t thread_count) {
   // user of the API, which means re-initializing the library, without the
   // need to wait on any pending tasks, is all one needs to do to re-adjust
   // the thread count.
-  threadpool_.reset(pthreadpool_create(thread_count));
+  threadpool_.reset(namedPthreadpoolCreate(thread_count));
 }
 
 void PThreadPool::run(
