@@ -819,7 +819,7 @@ PyObject* THPModule_setDeterministicMklDNN(PyObject* _unused, PyObject* arg) {
   HANDLE_TH_ERRORS
   TORCH_CHECK(
       PyBool_Check(arg),
-      "set_deterministic_onednn expects a bool, "
+      "set_deterministic_mkldnn expects a bool, "
       "but got ",
       THPUtils_typename(arg));
   at::globalContext().setDeterministicMklDNN(arg == Py_True);
@@ -1366,11 +1366,11 @@ static PyMethodDef TorchMethods[] = { // NOLINT
      THPModule_setDeterministicCuDNN,
      METH_O,
      nullptr},
-    {"_get_onednn_deterministic",
+    {"_get_mkldnn_deterministic",
      THPModule_deterministicMklDNN,
      METH_NOARGS,
      nullptr},
-    {"_set_onednn_deterministic",
+    {"_set_mkldnn_deterministic",
      THPModule_setDeterministicMklDNN,
      METH_O,
      nullptr},

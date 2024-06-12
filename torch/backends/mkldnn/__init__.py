@@ -70,11 +70,11 @@ def set_flags(
         ):
     orig_flags = (
             torch._C._get_mkldnn_enabled(),
-            torch._C._get_onednn_deterministic()
+            torch._C._get_mkldnn_deterministic()
             )
     torch._C._set_mkldnn_enabled(_enabled)
     if _deterministic is not None:
-        torch._C._set_onednn_deterministic(_deterministic)
+        torch._C._set_mkldnn_deterministic(_deterministic)
     return orig_flags
 
 @contextmanager
@@ -96,7 +96,7 @@ class MkldnnModule(PropModule):
 
     enabled = ContextProp(torch._C._get_mkldnn_enabled, torch._C._set_mkldnn_enabled)
     deterministic = ContextProp(
-        torch._C._get_onednn_deterministic, torch._C._set_onednn_deterministic
+        torch._C._get_mkldnn_deterministic, torch._C._set_mkldnn_deterministic
     )
 
 
