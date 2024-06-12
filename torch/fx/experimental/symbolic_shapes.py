@@ -4364,13 +4364,14 @@ class ShapeEnv:
             axioms = (canonicalize_bool_expr(a.xreplace(self.var_to_val)) for a in axioms)
         return tuple(dict.fromkeys(axioms).keys())
 
-    @_lru_cache
+    @lru_cache(None)
     def get_implications(self,
                          e: "sympy.Expr") -> Tuple[Tuple["sympy.Expr", 'sympy.logic.boolalg.BooleanAtom']]:
         """ Given a expression, it returns a list of predicates that follow from it """
         equiv = {}
 
         def add_expr(expr):
+            expr = canonicalize_bool_expr(expr)
             if isinstance(expr, (sympy.Eq, sympy.Ne)):
                 # No need to canonicalize
                 # TODO We could further canonicalize Eq ordering the lhs and rhs somehow
@@ -4383,7 +4384,7 @@ class ShapeEnv:
                 equiv[opposite(expr.rhs, expr.lhs)] = sympy.false
             else:
                 # Expr and negation
-                equiv[canonicalize_bool_expr(expr)] = sympy.true
+                equiv[expr] = sympy.true
                 equiv[canonicalize_bool_expr(sympy.Not(expr))] = sympy.false
 
         add_expr(e)
