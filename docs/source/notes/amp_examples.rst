@@ -382,8 +382,9 @@ Functions that need a particular ``dtype``
 Consider a custom function that requires ``torch.float32`` inputs.
 Apply :func:`custom_fwd(device_type='cuda', cast_inputs=torch.float32)<custom_fwd>` to ``forward``
 and :func:`custom_bwd(device_type='cuda')<custom_bwd>` to ``backward``.
-If ``forward`` runs in an autocast-enabled region, the decorators cast floating-point CUDA Tensor
-inputs to ``float32``, and locally disable autocast during ``forward`` and ``backward``::
+If ``forward`` runs in an autocast-enabled region, the decorators cast floating-point Tensor
+inputs to ``float32`` on designated device assigned by the argument `device_type <../amp.html>`_, 
+`CUDA` in this example, and locally disable autocast during ``forward`` and ``backward``::
 
     class MyFloat32Func(torch.autograd.Function):
         @staticmethod
