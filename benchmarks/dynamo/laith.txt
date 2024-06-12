@@ -1,0 +1,457 @@
+
+
+
+
+loading model: 0it [02:26, ?it/s]
+cpu  eval  torch_multimodal_clip
+WARNING:common:Trying to call the empty_gpu_cache for device: cpu, which is not in list [cuda, xpu]
+
+
+WARNING:common:Trying to call the empty_gpu_cache for device: cpu, which is not in list [cuda, xpu]
+WARNING:common:Trying to call the empty_gpu_cache for device: cpu, which is not in list [cuda, xpu]
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks] Graph break: from user code at:
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]   File "/home/lsakka/pytorch/benchmarks/dynamo/common.py", line 2324, in run_n_iterations
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]     self.model_iter_fn(mod, inputs, collect_outputs=False)
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]   File "/home/lsakka/pytorch/benchmarks/dynamo/torchbench.py", line 439, in forward_pass
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]     return mod(*inputs)
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]   File "/home/lsakka/pytorch/torch/nn/modules/module.py", line 1564, in _call_impl
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]     return forward_call(*args, **kwargs)
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]   File "/home/lsakka/.conda/envs/pytorch-dev/lib/python3.11/site-packages/torchmultimodal/models/clip/model.py", line 72, in forward
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]     embeddings_a = self.encoder_a(features_a)
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]   File "/home/lsakka/pytorch/torch/nn/modules/module.py", line 1564, in _call_impl
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]     return forward_call(*args, **kwargs)
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]   File "/home/lsakka/.conda/envs/pytorch-dev/lib/python3.11/site-packages/torchmultimodal/models/clip/image_encoder.py", line 109, in forward
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]     x = self.encoder(x)
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]   File "/home/lsakka/pytorch/torch/nn/modules/module.py", line 1564, in _call_impl
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]     return forward_call(*args, **kwargs)
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]   File "/home/lsakka/pytorch/torch/nn/modules/transformer.py", line 416, in forward
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]     output = mod(output, src_mask=mask, is_causal=is_causal, src_key_padding_mask=src_key_padding_mask_for_layers)
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]   File "/home/lsakka/pytorch/torch/nn/modules/module.py", line 1564, in _call_impl
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]     return forward_call(*args, **kwargs)
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]   File "/home/lsakka/pytorch/torch/nn/modules/transformer.py", line 746, in forward
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]     x = x + self._sa_block(self.norm1(x), src_mask, src_key_padding_mask, is_causal=is_causal)
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]   File "/home/lsakka/pytorch/torch/nn/modules/transformer.py", line 757, in _sa_block
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]     x = self.self_attn(x, x, x,
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]   File "/home/lsakka/pytorch/torch/nn/modules/module.py", line 1564, in _call_impl
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]     return forward_call(*args, **kwargs)
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]   File "/home/lsakka/pytorch/torch/nn/modules/activation.py", line 1218, in forward
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]     elif _is_make_fx_tracing():
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]   File "/home/lsakka/pytorch/torch/nn/modules/activation.py", line 929, in _is_make_fx_tracing
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]     torch_dispatch_mode_stack = torch.utils._python_dispatch._get_current_dispatch_mode_stack()
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks] Traceback (most recent call last):
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]   File "/home/lsakka/pytorch/torch/_dynamo/symbolic_convert.py", line 510, in wrapper
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]     return inner_fn(self, inst)
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]            ^^^^^^^^^^^^^^^^^^^^
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]   File "/home/lsakka/pytorch/torch/_dynamo/symbolic_convert.py", line 2070, in CALL
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]     self.call_function(fn, args, kwargs)
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]   File "/home/lsakka/pytorch/torch/_dynamo/symbolic_convert.py", line 754, in call_function
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]     self.push(fn.call_function(self, args, kwargs))
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]   File "/home/lsakka/pytorch/torch/_dynamo/variables/user_defined.py", line 741, in call_function
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]     return func_var.call_function(tx, [obj_var] + args, kwargs)
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]   File "/home/lsakka/pytorch/torch/_dynamo/variables/functions.py", line 294, in call_function
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]     return super().call_function(tx, args, kwargs)
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]   File "/home/lsakka/pytorch/torch/_dynamo/variables/functions.py", line 91, in call_function
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]     return tx.inline_user_function_return(self, [*self.self_args(), *args], kwargs)
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]   File "/home/lsakka/pytorch/torch/_dynamo/symbolic_convert.py", line 760, in inline_user_function_return
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]     return InliningInstructionTranslator.inline_call(self, fn, args, kwargs)
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]   File "/home/lsakka/pytorch/torch/_dynamo/symbolic_convert.py", line 2677, in inline_call
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]     return cls.inline_call_(parent, func, args, kwargs)
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]   File "/home/lsakka/pytorch/torch/_dynamo/symbolic_convert.py", line 2793, in inline_call_
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]     tracer.run()
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]   File "/home/lsakka/pytorch/torch/_dynamo/symbolic_convert.py", line 904, in run
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]     while self.step():
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]           ^^^^^^^^^^^
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]   File "/home/lsakka/pytorch/torch/_dynamo/symbolic_convert.py", line 816, in step
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]     self.dispatch_table[inst.opcode](self, inst)
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]   File "/home/lsakka/pytorch/torch/_dynamo/symbolic_convert.py", line 510, in wrapper
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]     return inner_fn(self, inst)
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]            ^^^^^^^^^^^^^^^^^^^^
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]   File "/home/lsakka/pytorch/torch/_dynamo/symbolic_convert.py", line 1511, in CALL_FUNCTION_EX
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]     self.call_function(fn, argsvars.items, kwargsvars)
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]   File "/home/lsakka/pytorch/torch/_dynamo/symbolic_convert.py", line 754, in call_function
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]     self.push(fn.call_function(self, args, kwargs))
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]   File "/home/lsakka/pytorch/torch/_dynamo/variables/lazy.py", line 132, in realize_and_forward
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]     return getattr(self.realize(), name)(*args, **kwargs)
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]   File "/home/lsakka/pytorch/torch/_dynamo/variables/nn_module.py", line 850, in call_function
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]     return variables.UserFunctionVariable(fn, source=source).call_function(
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]   File "/home/lsakka/pytorch/torch/_dynamo/variables/functions.py", line 294, in call_function
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]     return super().call_function(tx, args, kwargs)
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]   File "/home/lsakka/pytorch/torch/_dynamo/variables/functions.py", line 91, in call_function
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]     return tx.inline_user_function_return(self, [*self.self_args(), *args], kwargs)
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]   File "/home/lsakka/pytorch/torch/_dynamo/symbolic_convert.py", line 760, in inline_user_function_return
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]     return InliningInstructionTranslator.inline_call(self, fn, args, kwargs)
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]   File "/home/lsakka/pytorch/torch/_dynamo/symbolic_convert.py", line 2677, in inline_call
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]     return cls.inline_call_(parent, func, args, kwargs)
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]   File "/home/lsakka/pytorch/torch/_dynamo/symbolic_convert.py", line 2793, in inline_call_
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]     tracer.run()
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]   File "/home/lsakka/pytorch/torch/_dynamo/symbolic_convert.py", line 904, in run
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]     while self.step():
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]           ^^^^^^^^^^^
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]   File "/home/lsakka/pytorch/torch/_dynamo/symbolic_convert.py", line 816, in step
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]     self.dispatch_table[inst.opcode](self, inst)
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]   File "/home/lsakka/pytorch/torch/_dynamo/symbolic_convert.py", line 510, in wrapper
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]     return inner_fn(self, inst)
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]            ^^^^^^^^^^^^^^^^^^^^
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]   File "/home/lsakka/pytorch/torch/_dynamo/symbolic_convert.py", line 1511, in CALL_FUNCTION_EX
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]     self.call_function(fn, argsvars.items, kwargsvars)
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]   File "/home/lsakka/pytorch/torch/_dynamo/symbolic_convert.py", line 754, in call_function
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]     self.push(fn.call_function(self, args, kwargs))
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]   File "/home/lsakka/pytorch/torch/_dynamo/variables/functions.py", line 345, in call_function
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]     return super().call_function(tx, args, kwargs)
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]   File "/home/lsakka/pytorch/torch/_dynamo/variables/functions.py", line 294, in call_function
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]     return super().call_function(tx, args, kwargs)
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]   File "/home/lsakka/pytorch/torch/_dynamo/variables/functions.py", line 91, in call_function
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]     return tx.inline_user_function_return(self, [*self.self_args(), *args], kwargs)
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]   File "/home/lsakka/pytorch/torch/_dynamo/symbolic_convert.py", line 760, in inline_user_function_return
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]     return InliningInstructionTranslator.inline_call(self, fn, args, kwargs)
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]   File "/home/lsakka/pytorch/torch/_dynamo/symbolic_convert.py", line 2677, in inline_call
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]     return cls.inline_call_(parent, func, args, kwargs)
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]   File "/home/lsakka/pytorch/torch/_dynamo/symbolic_convert.py", line 2793, in inline_call_
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]     tracer.run()
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]   File "/home/lsakka/pytorch/torch/_dynamo/symbolic_convert.py", line 904, in run
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]     while self.step():
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]           ^^^^^^^^^^^
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]   File "/home/lsakka/pytorch/torch/_dynamo/symbolic_convert.py", line 816, in step
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]     self.dispatch_table[inst.opcode](self, inst)
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]   File "/home/lsakka/pytorch/torch/_dynamo/symbolic_convert.py", line 510, in wrapper
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]     return inner_fn(self, inst)
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]            ^^^^^^^^^^^^^^^^^^^^
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]   File "/home/lsakka/pytorch/torch/_dynamo/symbolic_convert.py", line 2070, in CALL
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]     self.call_function(fn, args, kwargs)
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]   File "/home/lsakka/pytorch/torch/_dynamo/symbolic_convert.py", line 754, in call_function
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]     self.push(fn.call_function(self, args, kwargs))
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]   File "/home/lsakka/pytorch/torch/_dynamo/variables/lazy.py", line 132, in realize_and_forward
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]     return getattr(self.realize(), name)(*args, **kwargs)
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]   File "/home/lsakka/pytorch/torch/_dynamo/variables/nn_module.py", line 850, in call_function
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]     return variables.UserFunctionVariable(fn, source=source).call_function(
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]   File "/home/lsakka/pytorch/torch/_dynamo/variables/functions.py", line 294, in call_function
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]     return super().call_function(tx, args, kwargs)
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]   File "/home/lsakka/pytorch/torch/_dynamo/variables/functions.py", line 91, in call_function
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]     return tx.inline_user_function_return(self, [*self.self_args(), *args], kwargs)
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]   File "/home/lsakka/pytorch/torch/_dynamo/symbolic_convert.py", line 760, in inline_user_function_return
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]     return InliningInstructionTranslator.inline_call(self, fn, args, kwargs)
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]   File "/home/lsakka/pytorch/torch/_dynamo/symbolic_convert.py", line 2677, in inline_call
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]     return cls.inline_call_(parent, func, args, kwargs)
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]   File "/home/lsakka/pytorch/torch/_dynamo/symbolic_convert.py", line 2793, in inline_call_
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]     tracer.run()
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]   File "/home/lsakka/pytorch/torch/_dynamo/symbolic_convert.py", line 904, in run
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]     while self.step():
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]           ^^^^^^^^^^^
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]   File "/home/lsakka/pytorch/torch/_dynamo/symbolic_convert.py", line 816, in step
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]     self.dispatch_table[inst.opcode](self, inst)
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]   File "/home/lsakka/pytorch/torch/_dynamo/symbolic_convert.py", line 510, in wrapper
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]     return inner_fn(self, inst)
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]            ^^^^^^^^^^^^^^^^^^^^
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]   File "/home/lsakka/pytorch/torch/_dynamo/symbolic_convert.py", line 1511, in CALL_FUNCTION_EX
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]     self.call_function(fn, argsvars.items, kwargsvars)
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]   File "/home/lsakka/pytorch/torch/_dynamo/symbolic_convert.py", line 754, in call_function
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]     self.push(fn.call_function(self, args, kwargs))
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]   File "/home/lsakka/pytorch/torch/_dynamo/variables/functions.py", line 345, in call_function
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]     return super().call_function(tx, args, kwargs)
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]   File "/home/lsakka/pytorch/torch/_dynamo/variables/functions.py", line 294, in call_function
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]     return super().call_function(tx, args, kwargs)
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]   File "/home/lsakka/pytorch/torch/_dynamo/variables/functions.py", line 91, in call_function
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]     return tx.inline_user_function_return(self, [*self.self_args(), *args], kwargs)
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]   File "/home/lsakka/pytorch/torch/_dynamo/symbolic_convert.py", line 760, in inline_user_function_return
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]     return InliningInstructionTranslator.inline_call(self, fn, args, kwargs)
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]   File "/home/lsakka/pytorch/torch/_dynamo/symbolic_convert.py", line 2677, in inline_call
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]     return cls.inline_call_(parent, func, args, kwargs)
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]   File "/home/lsakka/pytorch/torch/_dynamo/symbolic_convert.py", line 2793, in inline_call_
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]     tracer.run()
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]   File "/home/lsakka/pytorch/torch/_dynamo/symbolic_convert.py", line 904, in run
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]     while self.step():
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]           ^^^^^^^^^^^
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]   File "/home/lsakka/pytorch/torch/_dynamo/symbolic_convert.py", line 816, in step
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]     self.dispatch_table[inst.opcode](self, inst)
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]   File "/home/lsakka/pytorch/torch/_dynamo/symbolic_convert.py", line 510, in wrapper
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]     return inner_fn(self, inst)
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]            ^^^^^^^^^^^^^^^^^^^^
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]   File "/home/lsakka/pytorch/torch/_dynamo/symbolic_convert.py", line 2070, in CALL
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]     self.call_function(fn, args, kwargs)
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]   File "/home/lsakka/pytorch/torch/_dynamo/symbolic_convert.py", line 754, in call_function
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]     self.push(fn.call_function(self, args, kwargs))
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]   File "/home/lsakka/pytorch/torch/_dynamo/variables/lazy.py", line 132, in realize_and_forward
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]     return getattr(self.realize(), name)(*args, **kwargs)
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]   File "/home/lsakka/pytorch/torch/_dynamo/variables/nn_module.py", line 850, in call_function
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]     return variables.UserFunctionVariable(fn, source=source).call_function(
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]   File "/home/lsakka/pytorch/torch/_dynamo/variables/functions.py", line 294, in call_function
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]     return super().call_function(tx, args, kwargs)
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]   File "/home/lsakka/pytorch/torch/_dynamo/variables/functions.py", line 91, in call_function
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]     return tx.inline_user_function_return(self, [*self.self_args(), *args], kwargs)
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]   File "/home/lsakka/pytorch/torch/_dynamo/symbolic_convert.py", line 760, in inline_user_function_return
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]     return InliningInstructionTranslator.inline_call(self, fn, args, kwargs)
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]   File "/home/lsakka/pytorch/torch/_dynamo/symbolic_convert.py", line 2677, in inline_call
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]     return cls.inline_call_(parent, func, args, kwargs)
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]   File "/home/lsakka/pytorch/torch/_dynamo/symbolic_convert.py", line 2793, in inline_call_
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]     tracer.run()
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]   File "/home/lsakka/pytorch/torch/_dynamo/symbolic_convert.py", line 904, in run
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]     while self.step():
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]           ^^^^^^^^^^^
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]   File "/home/lsakka/pytorch/torch/_dynamo/symbolic_convert.py", line 816, in step
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]     self.dispatch_table[inst.opcode](self, inst)
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]   File "/home/lsakka/pytorch/torch/_dynamo/symbolic_convert.py", line 510, in wrapper
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]     return inner_fn(self, inst)
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]            ^^^^^^^^^^^^^^^^^^^^
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]   File "/home/lsakka/pytorch/torch/_dynamo/symbolic_convert.py", line 1511, in CALL_FUNCTION_EX
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]     self.call_function(fn, argsvars.items, kwargsvars)
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]   File "/home/lsakka/pytorch/torch/_dynamo/symbolic_convert.py", line 754, in call_function
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]     self.push(fn.call_function(self, args, kwargs))
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]   File "/home/lsakka/pytorch/torch/_dynamo/variables/functions.py", line 345, in call_function
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]     return super().call_function(tx, args, kwargs)
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]   File "/home/lsakka/pytorch/torch/_dynamo/variables/functions.py", line 294, in call_function
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]     return super().call_function(tx, args, kwargs)
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]   File "/home/lsakka/pytorch/torch/_dynamo/variables/functions.py", line 91, in call_function
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]     return tx.inline_user_function_return(self, [*self.self_args(), *args], kwargs)
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]   File "/home/lsakka/pytorch/torch/_dynamo/symbolic_convert.py", line 760, in inline_user_function_return
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]     return InliningInstructionTranslator.inline_call(self, fn, args, kwargs)
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]   File "/home/lsakka/pytorch/torch/_dynamo/symbolic_convert.py", line 2677, in inline_call
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]     return cls.inline_call_(parent, func, args, kwargs)
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]   File "/home/lsakka/pytorch/torch/_dynamo/symbolic_convert.py", line 2793, in inline_call_
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]     tracer.run()
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]   File "/home/lsakka/pytorch/torch/_dynamo/symbolic_convert.py", line 904, in run
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]     while self.step():
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]           ^^^^^^^^^^^
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]   File "/home/lsakka/pytorch/torch/_dynamo/symbolic_convert.py", line 816, in step
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]     self.dispatch_table[inst.opcode](self, inst)
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]   File "/home/lsakka/pytorch/torch/_dynamo/symbolic_convert.py", line 510, in wrapper
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]     return inner_fn(self, inst)
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]            ^^^^^^^^^^^^^^^^^^^^
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]   File "/home/lsakka/pytorch/torch/_dynamo/symbolic_convert.py", line 2070, in CALL
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]     self.call_function(fn, args, kwargs)
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]   File "/home/lsakka/pytorch/torch/_dynamo/symbolic_convert.py", line 754, in call_function
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]     self.push(fn.call_function(self, args, kwargs))
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]   File "/home/lsakka/pytorch/torch/_dynamo/variables/nn_module.py", line 850, in call_function
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]     return variables.UserFunctionVariable(fn, source=source).call_function(
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]   File "/home/lsakka/pytorch/torch/_dynamo/variables/functions.py", line 294, in call_function
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]     return super().call_function(tx, args, kwargs)
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]   File "/home/lsakka/pytorch/torch/_dynamo/variables/functions.py", line 91, in call_function
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]     return tx.inline_user_function_return(self, [*self.self_args(), *args], kwargs)
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]   File "/home/lsakka/pytorch/torch/_dynamo/symbolic_convert.py", line 760, in inline_user_function_return
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]     return InliningInstructionTranslator.inline_call(self, fn, args, kwargs)
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]   File "/home/lsakka/pytorch/torch/_dynamo/symbolic_convert.py", line 2677, in inline_call
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]     return cls.inline_call_(parent, func, args, kwargs)
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]   File "/home/lsakka/pytorch/torch/_dynamo/symbolic_convert.py", line 2793, in inline_call_
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]     tracer.run()
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]   File "/home/lsakka/pytorch/torch/_dynamo/symbolic_convert.py", line 904, in run
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]     while self.step():
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]           ^^^^^^^^^^^
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]   File "/home/lsakka/pytorch/torch/_dynamo/symbolic_convert.py", line 816, in step
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]     self.dispatch_table[inst.opcode](self, inst)
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]   File "/home/lsakka/pytorch/torch/_dynamo/symbolic_convert.py", line 510, in wrapper
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]     return inner_fn(self, inst)
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]            ^^^^^^^^^^^^^^^^^^^^
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]   File "/home/lsakka/pytorch/torch/_dynamo/symbolic_convert.py", line 1511, in CALL_FUNCTION_EX
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]     self.call_function(fn, argsvars.items, kwargsvars)
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]   File "/home/lsakka/pytorch/torch/_dynamo/symbolic_convert.py", line 754, in call_function
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]     self.push(fn.call_function(self, args, kwargs))
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]   File "/home/lsakka/pytorch/torch/_dynamo/variables/functions.py", line 345, in call_function
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]     return super().call_function(tx, args, kwargs)
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]   File "/home/lsakka/pytorch/torch/_dynamo/variables/functions.py", line 294, in call_function
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]     return super().call_function(tx, args, kwargs)
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]   File "/home/lsakka/pytorch/torch/_dynamo/variables/functions.py", line 91, in call_function
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]     return tx.inline_user_function_return(self, [*self.self_args(), *args], kwargs)
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]   File "/home/lsakka/pytorch/torch/_dynamo/symbolic_convert.py", line 760, in inline_user_function_return
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]     return InliningInstructionTranslator.inline_call(self, fn, args, kwargs)
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]   File "/home/lsakka/pytorch/torch/_dynamo/symbolic_convert.py", line 2677, in inline_call
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]     return cls.inline_call_(parent, func, args, kwargs)
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]   File "/home/lsakka/pytorch/torch/_dynamo/symbolic_convert.py", line 2793, in inline_call_
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]     tracer.run()
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]   File "/home/lsakka/pytorch/torch/_dynamo/symbolic_convert.py", line 904, in run
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]     while self.step():
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]           ^^^^^^^^^^^
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]   File "/home/lsakka/pytorch/torch/_dynamo/symbolic_convert.py", line 816, in step
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]     self.dispatch_table[inst.opcode](self, inst)
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]   File "/home/lsakka/pytorch/torch/_dynamo/symbolic_convert.py", line 510, in wrapper
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]     return inner_fn(self, inst)
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]            ^^^^^^^^^^^^^^^^^^^^
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]   File "/home/lsakka/pytorch/torch/_dynamo/symbolic_convert.py", line 2070, in CALL
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]     self.call_function(fn, args, kwargs)
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]   File "/home/lsakka/pytorch/torch/_dynamo/symbolic_convert.py", line 754, in call_function
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]     self.push(fn.call_function(self, args, kwargs))
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]   File "/home/lsakka/pytorch/torch/_dynamo/variables/functions.py", line 345, in call_function
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]     return super().call_function(tx, args, kwargs)
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]   File "/home/lsakka/pytorch/torch/_dynamo/variables/functions.py", line 294, in call_function
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]     return super().call_function(tx, args, kwargs)
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]   File "/home/lsakka/pytorch/torch/_dynamo/variables/functions.py", line 91, in call_function
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]     return tx.inline_user_function_return(self, [*self.self_args(), *args], kwargs)
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]   File "/home/lsakka/pytorch/torch/_dynamo/symbolic_convert.py", line 760, in inline_user_function_return
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]     return InliningInstructionTranslator.inline_call(self, fn, args, kwargs)
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]   File "/home/lsakka/pytorch/torch/_dynamo/symbolic_convert.py", line 2677, in inline_call
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]     return cls.inline_call_(parent, func, args, kwargs)
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]   File "/home/lsakka/pytorch/torch/_dynamo/symbolic_convert.py", line 2793, in inline_call_
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]     tracer.run()
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]   File "/home/lsakka/pytorch/torch/_dynamo/symbolic_convert.py", line 904, in run
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]     while self.step():
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]           ^^^^^^^^^^^
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]   File "/home/lsakka/pytorch/torch/_dynamo/symbolic_convert.py", line 816, in step
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]     self.dispatch_table[inst.opcode](self, inst)
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]   File "/home/lsakka/pytorch/torch/_dynamo/symbolic_convert.py", line 510, in wrapper
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]     return inner_fn(self, inst)
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]            ^^^^^^^^^^^^^^^^^^^^
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]   File "/home/lsakka/pytorch/torch/_dynamo/symbolic_convert.py", line 2070, in CALL
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]     self.call_function(fn, args, kwargs)
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]   File "/home/lsakka/pytorch/torch/_dynamo/symbolic_convert.py", line 754, in call_function
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]     self.push(fn.call_function(self, args, kwargs))
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]   File "/home/lsakka/pytorch/torch/_dynamo/variables/lazy.py", line 132, in realize_and_forward
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]     return getattr(self.realize(), name)(*args, **kwargs)
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]   File "/home/lsakka/pytorch/torch/_dynamo/variables/nn_module.py", line 850, in call_function
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]     return variables.UserFunctionVariable(fn, source=source).call_function(
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]   File "/home/lsakka/pytorch/torch/_dynamo/variables/functions.py", line 294, in call_function
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]     return super().call_function(tx, args, kwargs)
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]   File "/home/lsakka/pytorch/torch/_dynamo/variables/functions.py", line 91, in call_function
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]     return tx.inline_user_function_return(self, [*self.self_args(), *args], kwargs)
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]   File "/home/lsakka/pytorch/torch/_dynamo/symbolic_convert.py", line 760, in inline_user_function_return
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]     return InliningInstructionTranslator.inline_call(self, fn, args, kwargs)
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]   File "/home/lsakka/pytorch/torch/_dynamo/symbolic_convert.py", line 2677, in inline_call
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]     return cls.inline_call_(parent, func, args, kwargs)
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]   File "/home/lsakka/pytorch/torch/_dynamo/symbolic_convert.py", line 2793, in inline_call_
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]     tracer.run()
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]   File "/home/lsakka/pytorch/torch/_dynamo/symbolic_convert.py", line 904, in run
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]     while self.step():
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]           ^^^^^^^^^^^
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]   File "/home/lsakka/pytorch/torch/_dynamo/symbolic_convert.py", line 816, in step
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]     self.dispatch_table[inst.opcode](self, inst)
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]   File "/home/lsakka/pytorch/torch/_dynamo/symbolic_convert.py", line 510, in wrapper
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]     return inner_fn(self, inst)
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]            ^^^^^^^^^^^^^^^^^^^^
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]   File "/home/lsakka/pytorch/torch/_dynamo/symbolic_convert.py", line 1511, in CALL_FUNCTION_EX
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]     self.call_function(fn, argsvars.items, kwargsvars)
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]   File "/home/lsakka/pytorch/torch/_dynamo/symbolic_convert.py", line 754, in call_function
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]     self.push(fn.call_function(self, args, kwargs))
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]   File "/home/lsakka/pytorch/torch/_dynamo/variables/functions.py", line 345, in call_function
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]     return super().call_function(tx, args, kwargs)
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]   File "/home/lsakka/pytorch/torch/_dynamo/variables/functions.py", line 294, in call_function
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]     return super().call_function(tx, args, kwargs)
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]   File "/home/lsakka/pytorch/torch/_dynamo/variables/functions.py", line 91, in call_function
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]     return tx.inline_user_function_return(self, [*self.self_args(), *args], kwargs)
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]   File "/home/lsakka/pytorch/torch/_dynamo/symbolic_convert.py", line 760, in inline_user_function_return
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]     return InliningInstructionTranslator.inline_call(self, fn, args, kwargs)
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]   File "/home/lsakka/pytorch/torch/_dynamo/symbolic_convert.py", line 2677, in inline_call
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]     return cls.inline_call_(parent, func, args, kwargs)
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]   File "/home/lsakka/pytorch/torch/_dynamo/symbolic_convert.py", line 2793, in inline_call_
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]     tracer.run()
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]   File "/home/lsakka/pytorch/torch/_dynamo/symbolic_convert.py", line 904, in run
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]     while self.step():
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]           ^^^^^^^^^^^
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]   File "/home/lsakka/pytorch/torch/_dynamo/symbolic_convert.py", line 816, in step
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]     self.dispatch_table[inst.opcode](self, inst)
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]   File "/home/lsakka/pytorch/torch/_dynamo/symbolic_convert.py", line 510, in wrapper
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]     return inner_fn(self, inst)
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]            ^^^^^^^^^^^^^^^^^^^^
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]   File "/home/lsakka/pytorch/torch/_dynamo/symbolic_convert.py", line 2070, in CALL
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]     self.call_function(fn, args, kwargs)
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]   File "/home/lsakka/pytorch/torch/_dynamo/symbolic_convert.py", line 754, in call_function
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]     self.push(fn.call_function(self, args, kwargs))
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]   File "/home/lsakka/pytorch/torch/_dynamo/variables/functions.py", line 294, in call_function
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]     return super().call_function(tx, args, kwargs)
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]   File "/home/lsakka/pytorch/torch/_dynamo/variables/functions.py", line 91, in call_function
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]     return tx.inline_user_function_return(self, [*self.self_args(), *args], kwargs)
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]   File "/home/lsakka/pytorch/torch/_dynamo/symbolic_convert.py", line 760, in inline_user_function_return
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]     return InliningInstructionTranslator.inline_call(self, fn, args, kwargs)
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]   File "/home/lsakka/pytorch/torch/_dynamo/symbolic_convert.py", line 2677, in inline_call
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]     return cls.inline_call_(parent, func, args, kwargs)
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]   File "/home/lsakka/pytorch/torch/_dynamo/symbolic_convert.py", line 2793, in inline_call_
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]     tracer.run()
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]   File "/home/lsakka/pytorch/torch/_dynamo/symbolic_convert.py", line 904, in run
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]     while self.step():
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]           ^^^^^^^^^^^
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]   File "/home/lsakka/pytorch/torch/_dynamo/symbolic_convert.py", line 816, in step
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]     self.dispatch_table[inst.opcode](self, inst)
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]   File "/home/lsakka/pytorch/torch/_dynamo/symbolic_convert.py", line 510, in wrapper
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]     return inner_fn(self, inst)
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]            ^^^^^^^^^^^^^^^^^^^^
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]   File "/home/lsakka/pytorch/torch/_dynamo/symbolic_convert.py", line 2070, in CALL
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]     self.call_function(fn, args, kwargs)
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]   File "/home/lsakka/pytorch/torch/_dynamo/symbolic_convert.py", line 754, in call_function
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]     self.push(fn.call_function(self, args, kwargs))
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]   File "/home/lsakka/pytorch/torch/_dynamo/variables/functions.py", line 666, in call_function
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]     unimplemented(msg)
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]   File "/home/lsakka/pytorch/torch/_dynamo/exc.py", line 221, in unimplemented
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks]     raise Unsupported(msg)
+V0611 14:22:58.103000 140328379787072 torch/_dynamo/symbolic_convert.py:545] [0/0] [__graph_breaks] torch._dynamo.exc.Unsupported: 'skip function _get_current_dispatch_mode_stack in file /home/lsakka/pytorch/torch/utils/_python_dispatch.py'
+pass
+WARNING:common:Trying to call the empty_gpu_cache for device: cpu, which is not in list [cuda, xpu]
+TIMING: entire_frame_compile:6.31634 backend_compile:0.00069
+STATS: call_* op count: 242 | FakeTensorMode.__torch_dispatch__:1320 | Fa

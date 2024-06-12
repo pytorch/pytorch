@@ -1,0 +1,7 @@
+dev,name,batch_size,accuracy,calls_captured,unique_graphs,graph_breaks,unique_graph_breaks,autograd_captures,autograd_compiles,cudagraph_skips
+cpu,torch_multimodal_clip,4,fail_to_run,0,0,0,0,0,0,0
+cpu,torch_multimodal_clip,4,pass,242,4,3,1,0,0,0
+cpu,torch_multimodal_clip,4,pass,242,4,3,1,0,0,0
+cpu,torch_multimodal_clip,4,pass,242,4,3,1,0,0,0
+cpu,torch_multimodal_clip,4,fail_to_run,0,0,0,0,0,0,0
+cpu,torch_multimodal_clip,4,pass,242,4,3,1,0,0,0

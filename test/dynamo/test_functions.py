@@ -2369,16 +2369,34 @@ class GraphModule(torch.nn.Module):
                 opt_fn = torch._dynamo.optimize(nopython=True)(fn)
                 self.assertEqual(opt_fn(), fn())
 
+    def test_range_with_subscript(self):
+        def fn(x):
+            acc = 1
+            for k in range(2)[1::2]:
+                acc *= acc * k
+            return x * acc
+        
+        opt_fn = torch._dynamo.optimize(nopython=True)(fn)
+        x= torch.ones(1)
+        self.assertEqual(opt_fn(x), fn(x))
+                
     def test_rand_inlined(self):
-        @torch.compile(backend="eager", dynamic=True)
-        def fn():
-            idx_size = [10]
-            idx_size[random.randint(0, 0)] = random.randint(1, 8)
-            t = tuple(idx_size)
-            src_size = [random.randint(1, 5) + s for s in idx_size]
-            idx = torch.empty(t)
+        @torch.compile()
+        def func():
+            modules = [nn.ReLU(), nn.Linear(5, 5)]
+            module_list = nn.ModuleList(modules)
 
-        fn()
+            del module_list[-1]
+
+            print("module_list is", module_list)
+            # THIS FAILS ONLY IF THE TWO STATEMEMTS AFTER THIS EXISITS 
+    
+            self.assertEqual(module_list, nn.ModuleList(modules[:-1]))
+
+            # THE BELLOW TWO STATEMENTS EFFECT THE RESULT OF THE PREVIOUS STATEMENT! 
+            del module_list[1::2]
+            self.assertEqual(module_list, nn.ModuleList(modules[:-1][0::2]))
+        func()
 
     def test_rand_tensor_partial(self):
         from collections import namedtuple

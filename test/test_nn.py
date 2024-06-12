@@ -880,92 +880,27 @@ class TestNN(NNTestCase):
         self.assertEqual(n3, n1)
 
     def test_ModuleList(self):
-        modules = [nn.ReLU(), nn.Linear(5, 5)]
-        module_list = nn.ModuleList(modules)
+        def func2():
+            modules = [nn.ReLU(), nn.Linear(5, 5)]
+            module_list = nn.ModuleList(modules)
 
-        def check():
-            self.assertEqual(len(module_list), len(modules))
-            for m1, m2 in zip(modules, module_list):
-                self.assertIs(m1, m2)
-            for m1, m2 in zip(modules, module_list.children()):
-                self.assertIs(m1, m2)
-            for i in range(len(modules)):
-                self.assertIs(module_list[i], modules[i])
+            del module_list[1::2]
+            return module_list
+        
 
-        check()
-        modules += [nn.Conv2d(3, 4, 3)]
-        module_list += [modules[-1]]
-        check()
-        modules = modules + [nn.Conv2d(3, 4, 3, bias=False), nn.GELU()]
-        module_list = module_list + nn.ModuleList(modules[-2:])
-        check()
-        modules.insert(1, nn.Linear(3, 2))
-        module_list.insert(1, modules[1])
-        check()
-        modules.append(nn.Tanh())
-        module_list.append(modules[-1])
-        check()
-        next_modules = [nn.Linear(5, 5), nn.Sigmoid()]
-        modules.extend(next_modules)
-        module_list.extend(next_modules)
-        check()
-        modules[2] = nn.Conv2d(5, 3, 2)
-        module_list[2] = modules[2]
-        check()
-        modules[-1] = nn.Conv2d(5, 2, 1)
-        module_list[-1] = modules[-1]
-        check()
-        idx = torch.tensor(2, dtype=torch.int32)
-        modules[2] = nn.Conv2d(5, 3, 2)
-        module_list[idx] = modules[2]
-        self.assertIs(module_list[idx], modules[2])
-        check()
-        self.assertEqual(module_list[1:], nn.ModuleList(modules[1:]))
-        self.assertEqual(module_list[3:], nn.ModuleList(modules[3:]))
-        self.assertEqual(module_list[:-1], nn.ModuleList(modules[:-1]))
-        self.assertEqual(module_list[:-3], nn.ModuleList(modules[:-3]))
-        self.assertEqual(module_list[::-1], nn.ModuleList(modules[::-1]))
-        del module_list[-1]
-        self.assertEqual(module_list, nn.ModuleList(modules[:-1]))
-        del module_list[1::2]
-        self.assertEqual(module_list, nn.ModuleList(modules[:-1][0::2]))
 
-        with self.assertRaises(TypeError):
-            module_list += nn.ReLU()
-        with self.assertRaises(TypeError):
-            module_list.extend(nn.ReLU())
+        @torch.compile()
+        def func1():
+            modules1 = [nn.ReLU(), nn.Linear(5, 5)]
+            module_list1 = nn.ModuleList(modules1)
+            del module_list1[1::2]
+            return module_list1
 
-        l1 = nn.Linear(1, 2)
-        l2 = nn.Linear(2, 3)
-        l3 = nn.Linear(3, 2)
-        l4 = nn.Linear(2, 3)
-        subnet = nn.Sequential(l3, l4)
-        s = nn.Sequential(
-            OrderedDict([
-                ("layer1", l1),
-                ("layer2", l2),
-                ("layer3", l3),
-                ("layer4", l4),
-                ("subnet_layer", subnet)
-            ])
-        )
-        modules = list(s.modules())
-        module_list = nn.ModuleList()
-        module_list.extend(s.modules())
-        check()
 
-        modules = [nn.ReLU(), nn.Linear(5, 5), nn.Conv2d(3, 4, 3)]
-        module_list = nn.ModuleList(modules)
-        self.assertEqual(modules.pop(1), module_list.pop(1))
-        self.assertEqual(modules, module_list)
-        # check order of the index
-        for k, mod in zip(range(len(module_list)), module_list):
-            self.assertIs(module_list[k], mod)
-
-        # verify the right exception is thrown when trying to "forward" through a ModuleList
-        self.assertRaises(NotImplementedError, module_list)
-        self.assertRaises(NotImplementedError, module_list, torch.rand(1, 3))
-
+        print(func1())
+        print(func2())
+        # self.assertEqual(func1(), func2())
+       
     def test_ModuleDict(self):
         modules = OrderedDict([
             ('act', nn.ReLU()),

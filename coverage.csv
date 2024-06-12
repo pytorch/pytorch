@@ -1,0 +1,2 @@
+dev,name,batch_size,accuracy
+cpu,torch_multimodal_clip,0,eager_fail_to_run

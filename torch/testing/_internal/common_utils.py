@@ -3574,6 +3574,8 @@ This message can be suppressed by setting PYTORCH_PRINT_REPRO_ON_FAILURE=0"""
             exact_stride=False,
             exact_is_coalesced=False
     ):
+        print("x bf is :",x)
+        print("y bf is :",y)
         # Hide this function from `pytest`'s traceback
         __tracebackhide__ = True
 
@@ -3597,12 +3599,16 @@ This message can be suppressed by setting PYTORCH_PRINT_REPRO_ON_FAILURE=0"""
         elif isinstance(x, Sequence) and isinstance(y, torch.Tensor):
             x = torch.as_tensor(x, dtype=y.dtype, device=y.device)
 
+
         # If x or y are tensors and nested then we unbind them to a list of tensors this should allow us to compare
         # a nested tensor to a nested tensor and a nested tensor to a list of expected tensors
         if isinstance(x, torch.Tensor) and x.is_nested:
             x = x.unbind()
         if isinstance(y, torch.Tensor) and y.is_nested:
             y = y.unbind()
+        # breakpoint()
+        # print("x is :",x)
+        # print("y is :",y)
 
         error_metas = not_close_error_metas(
             x,
