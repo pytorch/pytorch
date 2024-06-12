@@ -225,7 +225,7 @@ std::shared_ptr<FusedKernel> compileKernel(
 
   // Creates chunk and flattened input descriptions
   std::vector<PartitionDesc> chunk_desc;
-  std::vector<std::pair<const Value*, const c10::optional<TensorDesc>>>
+  std::vector<std::pair<const Value*, const std::optional<TensorDesc>>>
       flat_inputs;
   {
     size_t input_index = 0;
@@ -281,7 +281,7 @@ std::shared_ptr<FusedKernel> compileKernel(
   }
 
   const bool use_cuda = device.is_cuda();
-  const std::string name = "kernel_" + c10::to_string(next_kernel_id++);
+  const std::string name = "kernel_" + std::to_string(next_kernel_id++);
   std::string code =
       generateKernel(name, *graph, flat_inputs, flat_outputs, use_cuda);
   const FusedKernelConstructor& kernel_ctor =

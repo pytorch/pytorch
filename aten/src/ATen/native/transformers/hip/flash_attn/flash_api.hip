@@ -54,16 +54,15 @@
 #include <ATen/ops/pad.h>
 #endif
 
+#include <ATen/native/transformers/hip/aotriton_adapter.h>
 #include <ATen/native/transformers/hip/flash_attn/flash_api.h>
 
 #include <c10/util/Exception.h>
 #include <c10/util/CallOnce.h>
 
 // AOTriton headers
-#include <aotriton/dtypes.h>
 #include <aotriton/flash.h>
 #include <aotriton/runtime.h>
-#include <aotriton/util.h>
 
 namespace pytorch_flash {
 
@@ -73,88 +72,8 @@ void check_gpu_arch(hipStream_t stream) {
   auto ret = aotriton::v2::flash::check_gpu(stream);
   if (hipSuccess != ret) {
       TORCH_CHECK(false,
-                  "FlashAttention only supports MI200/MI300X GPUs (gfx90a:sramecc+:xnack- or gfx94a:sramecc+:xnack-)")
+                  "FlashAttention only supports MI200/MI300X GPUs (gfx90a:sramecc+:xnack- or gfx942:sramecc+:xnack-)")
   }
-}
-
-aotriton::DType cast_dtype(caffe2::TypeMeta t_dtype)
-{
-#define CAST_TYPE(aname, dtname) if (t_dtype == at::aname) return aotriton::DType::dtname
-  CAST_TYPE(kByte, kUInt8);
-  CAST_TYPE(kUInt16, kUInt16);
-  CAST_TYPE(kUInt32, kUInt32);
-  CAST_TYPE(kUInt64, kUInt64);
-  CAST_TYPE(kChar, kInt8);
-  CAST_TYPE(kShort, kInt16);
-  CAST_TYPE(kInt, kInt32);
-  CAST_TYPE(kLong, kInt64);
-  CAST_TYPE(kHalf, kFloat16);
-  CAST_TYPE(kFloat, kFloat32);
-  CAST_TYPE(kBFloat16, kBFloat16);
-  return aotriton::DType::kUnknown;
-#undef CAST_TYPE
-}
-
-template<typename TargetType, int Rank>
-struct IntArrayRefCaster {
-  // std::array<TargetType, Rank> cast(IntArrayRef);
-};
-
-template<typename TargetType>
-struct IntArrayRefCaster<TargetType, 1> {
-  static auto cast(at::IntArrayRef ref) {
-    return std::array<TargetType, 1>{{ static_cast<TargetType>(ref.at(0)) }};
-  }
-};
-
-template<typename TargetType>
-struct IntArrayRefCaster<TargetType, 2> {
-  static auto cast(at::IntArrayRef ref) {
-    return std::array<TargetType, 2>{{
-      static_cast<TargetType>(ref.at(0)),
-      static_cast<TargetType>(ref.at(1))
-    }};
-  }
-};
-
-template<typename TargetType>
-struct IntArrayRefCaster<TargetType, 3> {
-  static auto cast(at::IntArrayRef ref) {
-    return std::array<TargetType, 3>{{
-      static_cast<TargetType>(ref.at(0)),
-      static_cast<TargetType>(ref.at(1)),
-      static_cast<TargetType>(ref.at(2))
-    }};
-  }
-};
-
-template<typename TargetType>
-struct IntArrayRefCaster<TargetType, 4> {
-  static auto cast(at::IntArrayRef ref) {
-    return std::array<TargetType, 4>{{
-      static_cast<TargetType>(ref.at(0)),
-      static_cast<TargetType>(ref.at(1)),
-      static_cast<TargetType>(ref.at(2)),
-      static_cast<TargetType>(ref.at(3))
-    }};
-  }
-};
-
-
-template<int Rank = 4>
-aotriton::TensorView<Rank> mk_aotensor(const at::Tensor& q, c10::string_view tensor_name)
-{
-  const auto strides = q.strides();
-  int real_rank = strides.size();
-  if (real_rank != Rank) {  // Lazy convertion of tensor_name
-    TORCH_CHECK(false,
-                std::string(tensor_name) + "'s rank should be " + std::to_string(Rank)
-                + " but is " + std::to_string(real_rank));
-  }
-  return aotriton::TensorView<Rank>(reinterpret_cast<intptr_t>(q.data_ptr()),
-                                    IntArrayRefCaster<uint64_t, Rank>::cast(q.sizes()),
-                                    IntArrayRefCaster<uint64_t, Rank>::cast(strides),
-                                    cast_dtype(q.dtype()));
 }
 
 }
@@ -300,9 +219,13 @@ mha_fwd(const at::Tensor &q,         // batch_size x seqlen_q x num_heads x head
 
   hipError_t err; // TODO: Error handling
   using aotriton::v2::flash::attn_fwd;
+  using sdp::aotriton_adapter::mk_aotensor;
+  using sdp::aotriton_adapter::cast_dtype;
+  aotriton::TensorView<4> empty_bias(0, {0,0,0,0}, {0,0,0,0}, cast_dtype(q.dtype()));
   err = attn_fwd(mk_aotensor(q_t, "q"),
                  mk_aotensor(k_t, "k"),
                  mk_aotensor(v_t, "v"),
+                 empty_bias,
                  softmax_scale,
                  mk_aotensor<2>(M, "M"),
                  mk_aotensor(output_t, "Out"),
@@ -495,15 +418,20 @@ mha_bwd(const at::Tensor &dout,  // batch_size x seqlen_q x num_heads, x head_si
   hipError_t err; // TODO: Error handling
   {
     using aotriton::v2::flash::attn_bwd;
+    using sdp::aotriton_adapter::mk_aotensor;
+    using sdp::aotriton_adapter::cast_dtype;
+    aotriton::TensorView<4> empty_bias(0, {0,0,0,0}, {0,0,0,0}, cast_dtype(q.dtype()));
     err = attn_bwd(mk_aotensor(q_t, "q"),
                    mk_aotensor(k_t, "k"),
                    mk_aotensor(v_t, "v"),
+                   empty_bias,
                    softmax_scale,
                    mk_aotensor(out_t, "out"),
                    mk_aotensor(dout_t, "dout"),
                    mk_aotensor(dq_t, "dq"),
                    mk_aotensor(dk_t, "dk"),
                    mk_aotensor(dv_t, "dv"),
+                   empty_bias,
                    mk_aotensor<2>(softmax_lse_cont, "L"),
                    mk_aotensor<2>(delta, "delta"),
                    p_dropout,

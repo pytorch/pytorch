@@ -21,7 +21,7 @@ namespace {
 
 class QLinearUnpackWeightInt8 final {
  public:
-  static std::tuple<at::Tensor, c10::optional<Tensor>> run(
+  static std::tuple<at::Tensor, std::optional<Tensor>> run(
       const c10::intrusive_ptr<LinearPackedParamsBase>& packed_weight) {
     return packed_weight->unpack();
   }
@@ -29,7 +29,7 @@ class QLinearUnpackWeightInt8 final {
 
 class QLinearUnpackWeightFp16 final {
  public:
-  static std::tuple<at::Tensor, c10::optional<Tensor>> run(
+  static std::tuple<at::Tensor, std::optional<Tensor>> run(
       const c10::intrusive_ptr<LinearPackedParamsBase>& packed_weight) {
     auto& ctx = at::globalContext();
 
@@ -44,7 +44,7 @@ class QLinearUnpackWeightFp16 final {
 
 class QLinearUnpackWeightInt8Legacy final {
  public:
-  static std::tuple<at::Tensor, c10::optional<Tensor>> run(
+  static std::tuple<at::Tensor, std::optional<Tensor>> run(
       const at::Tensor& packed_weight) {
     TORCH_CHECK(false,
         "quantized.linear_unpack(Tensor) is unsupported! Please "
@@ -55,7 +55,7 @@ class QLinearUnpackWeightInt8Legacy final {
 
 class QLinearUnpackWeightFp16Legacy final {
  public:
-  static std::tuple<at::Tensor, c10::optional<Tensor>> run(
+  static std::tuple<at::Tensor, std::optional<Tensor>> run(
       const at::Tensor& packed_weight) {
     TORCH_CHECK(false,
         "quantized.linear_unpack(Tensor) is unsupported! Please "

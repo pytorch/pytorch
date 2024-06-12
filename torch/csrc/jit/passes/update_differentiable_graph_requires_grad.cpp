@@ -8,7 +8,7 @@ namespace jit {
 
 static void UpdateDifferentiableGraphRequiresGrad(
     Block* block,
-    c10::optional<bool> new_requires_grad) {
+    std::optional<bool> new_requires_grad) {
   for (Node* n : block->nodes()) {
     for (Value* v : n->inputs()) {
       auto ty = v->type()->cast<TensorType>();
@@ -31,7 +31,7 @@ static void UpdateDifferentiableGraphRequiresGrad(
 
 void UpdateDifferentiableGraphRequiresGrad(
     std::shared_ptr<Graph>& diff_forward_graph,
-    c10::optional<bool> new_requires_grad) {
+    std::optional<bool> new_requires_grad) {
   UpdateDifferentiableGraphRequiresGrad(
       diff_forward_graph->block(), new_requires_grad);
 }

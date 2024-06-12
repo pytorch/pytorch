@@ -397,7 +397,7 @@ static PyObject * THPVariable_invert(PyObject* self, PyObject* args) {
   END_HANDLE_TH_ERRORS
 }
 
-static Tensor dispatch_to(const Tensor & self, Device device, bool non_blocking, bool copy, c10::optional<c10::MemoryFormat> optional_memory_format) {
+static Tensor dispatch_to(const Tensor & self, Device device, bool non_blocking, bool copy, std::optional<c10::MemoryFormat> optional_memory_format) {
   pybind11::gil_scoped_release no_gil;
   // NOTE: this is where we record aten::to in the graph during tracing. However, the behavior of aten::to
   // is different with respect to TensorOptions fields that are not present: aten::to inherits fields that
@@ -407,18 +407,18 @@ static Tensor dispatch_to(const Tensor & self, Device device, bool non_blocking,
   return self.to(self.options().device(device).memory_format(optional_memory_format), non_blocking, copy);
 }
 
-static Tensor dispatch_to(const Tensor & self, bool non_blocking, bool copy, c10::optional<c10::MemoryFormat> optional_memory_format) {
+static Tensor dispatch_to(const Tensor & self, bool non_blocking, bool copy, std::optional<c10::MemoryFormat> optional_memory_format) {
   pybind11::gil_scoped_release no_gil;
   return self.to(self.options().memory_format(optional_memory_format), non_blocking, copy);
 }
 
-static Tensor dispatch_to(const Tensor & self, ScalarType dtype, bool non_blocking, bool copy, c10::optional<c10::MemoryFormat> optional_memory_format) {
+static Tensor dispatch_to(const Tensor & self, ScalarType dtype, bool non_blocking, bool copy, std::optional<c10::MemoryFormat> optional_memory_format) {
   pybind11::gil_scoped_release no_gil;
   // TODO: Make this call the TensorOptions version, maybe?
   return self.to(dtype, non_blocking, copy, optional_memory_format);
 }
 
-static Tensor dispatch_to(const Tensor & self, Device device, ScalarType dtype, bool non_blocking, bool copy, c10::optional<c10::MemoryFormat> optional_memory_format) {
+static Tensor dispatch_to(const Tensor & self, Device device, ScalarType dtype, bool non_blocking, bool copy, std::optional<c10::MemoryFormat> optional_memory_format) {
   pybind11::gil_scoped_release no_gil;
   // TODO: Make this call the TensorOptions version, maybe?
   return self.to(device, dtype, non_blocking, copy, optional_memory_format);
@@ -546,7 +546,7 @@ static PyObject * THPVariable_ipu(PyObject* self, PyObject* args, PyObject* kwar
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject * THPVariable_to_type(PyObject* self, ScalarType scalarType, c10::optional<c10::MemoryFormat> optional_memory_format) {
+static PyObject * THPVariable_to_type(PyObject* self, ScalarType scalarType, std::optional<c10::MemoryFormat> optional_memory_format) {
   HANDLE_TH_ERRORS
   auto& self_ = THPVariable_Unpack(self);
   return THPVariable_Wrap(dispatch_to(self_, scalarType, false, false, optional_memory_format));

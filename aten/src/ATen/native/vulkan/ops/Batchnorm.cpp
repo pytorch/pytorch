@@ -73,10 +73,10 @@ using namespace api::utils;
 
 Tensor batch_norm(
     const at::Tensor& input_arg,
-    const c10::optional<Tensor>& weight_opt /* optional */,
-    const c10::optional<Tensor>& bias_opt /* optional */,
-    const c10::optional<Tensor>& running_mean_opt /* optional */,
-    const c10::optional<Tensor>& running_var_opt /* optional */,
+    const std::optional<Tensor>& weight_opt /* optional */,
+    const std::optional<Tensor>& bias_opt /* optional */,
+    const std::optional<Tensor>& running_mean_opt /* optional */,
+    const std::optional<Tensor>& running_var_opt /* optional */,
     bool training,
     double /* momentum, not used in eval mode */,
     double eps,
@@ -104,10 +104,10 @@ TORCH_LIBRARY_IMPL(aten, Vulkan, m) {
 } // namespace
 
 BatchNormPackedContext::BatchNormPackedContext(
-    const c10::optional<Tensor>& weight_opt,
-    const c10::optional<Tensor>& bias_opt,
-    const c10::optional<Tensor>& running_mean_opt,
-    const c10::optional<Tensor>& running_var_opt,
+    const std::optional<Tensor>& weight_opt,
+    const std::optional<Tensor>& bias_opt,
+    const std::optional<Tensor>& running_mean_opt,
+    const std::optional<Tensor>& running_var_opt,
     double eps)
     : unpacked_{c10::AnyType::get()} {
   packed_.reserve(ListArgs::kNumArgs);
@@ -181,10 +181,10 @@ BatchNormPackedContext BatchNormPackedContext::pack(
 }
 
 c10::intrusive_ptr<BatchNormPackedContext> create_batchnorm_context(
-    c10::optional<Tensor>&& weight_opt,
-    c10::optional<Tensor>&& bias_opt,
-    c10::optional<Tensor>&& running_mean_opt,
-    c10::optional<Tensor>&& running_var_opt,
+    std::optional<Tensor>&& weight_opt,
+    std::optional<Tensor>&& bias_opt,
+    std::optional<Tensor>&& running_mean_opt,
+    std::optional<Tensor>&& running_var_opt,
     bool training,
     double /* momentum */,
     double eps,

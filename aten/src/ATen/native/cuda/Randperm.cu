@@ -55,7 +55,7 @@ namespace {
 template <int N> struct alignas(N) OpaqueType { char data[N]; };
 }
 
-Tensor& randperm_out_cuda(int64_t n, c10::optional<Generator> generator, Tensor& result) {
+Tensor& randperm_out_cuda(int64_t n, std::optional<Generator> generator, Tensor& result) {
   TORCH_CHECK(n >= 0, "n must be non-negative, got", n);
 
   check_supported_max_int_with_precision(n, result);

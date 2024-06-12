@@ -253,7 +253,6 @@ Target Expressions:
   ==> (>= 0 s1)
   ==> (>= 0 s2)
   ==> (>= 0 s3)
-  ==> (>= 9223372036854775806 s0)
 
 Failed Source Expressions:
   ==> (== (+ L['shape'][0] L['shape'][1] L['shape'][2]) L['x'].size()[0])""",
@@ -287,14 +286,14 @@ Failure occurred while running node:
 Model:
   ==> L['shape'][0]: 1
   ==> L['shape'][1]: 1
-  ==> L['shape'][2]: 2
+  ==> L['shape'][2]: 0
   ==> L['x'].size()[0]: 3
   ==> L['x'].storage_offset(): 0
   ==> L['x'].stride()[0]: 1
   ==> s0: 3
   ==> s1: 1
   ==> s2: 1
-  ==> s3: 2
+  ==> s3: 0
 
 Assertions:
   ==> (== 0 L['x'].storage_offset())
@@ -318,10 +317,6 @@ Target Expressions:
   ==> (== L['shape'][2] s3)
   ==> (== L['x'].size()[0] s0)
   ==> (> s0 0)
-  ==> (>= 9223372036854775806 s0)
-  ==> (>= 9223372036854775807 s1)
-  ==> (>= 9223372036854775807 s2)
-  ==> (>= 9223372036854775807 s3)
 
 Failed Source Expressions:
   ==> (== (+ L['shape'][0] L['shape'][1] L['shape'][2]) L['x'].size()[0])""",
