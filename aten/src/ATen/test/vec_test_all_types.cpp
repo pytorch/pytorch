@@ -978,26 +978,6 @@ namespace {
             b[i] = b[i - 1] + (T)(1.0);
         }
     }
-    template<>
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
-    void blend_init<Complex<float>, 4>(Complex<float>(&a)[4], Complex<float>(&b)[4]) {
-        auto add = Complex<float>(1., 100.);
-        a[0] = Complex<float>(1., 100.);
-        b[0] = Complex<float>(5., 1000.);
-        for (const auto i : c10::irange(1, 4)) {
-            a[i] = a[i - 1] + add;
-            b[i] = b[i - 1] + add;
-        }
-    }
-    template<>
-    // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
-    void blend_init<Complex<double>, 2>(Complex<double>(&a)[2], Complex<double>(&b)[2]) {
-        auto add = Complex<double>(1.0, 100.0);
-        a[0] = Complex<double>(1.0, 100.0);
-        b[0] = Complex<double>(3.0, 1000.0);
-        a[1] = a[0] + add;
-        b[1] = b[0] + add;
-    }
     TYPED_TEST(BitwiseFloatsAdditional, Blendv) {
         using vec = TypeParam;
         using VT = ValueType<TypeParam>;
