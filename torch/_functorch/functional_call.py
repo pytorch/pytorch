@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 from collections import Counter
 from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
 

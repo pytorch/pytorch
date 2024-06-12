@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 import os  # noqa: C101
 import sys
 from typing import Any, Callable, Dict, List, Optional, TYPE_CHECKING, Union
@@ -12,6 +11,9 @@ def is_fbcode():
 
 # add some debug printouts
 debug = False
+
+# add inf and NaN checkers
+debug_check_inf_and_nan = False
 
 # Whether to disable a progress bar for autotuning
 disable_progress = True
@@ -385,9 +387,7 @@ developer_warnings = is_fbcode() or is_nightly_or_source
 # The multiprocessing start method to use for inductor workers in the codecache.
 # "subprocess", "fork", or "spawn"
 def decide_worker_start_method():
-    start_method = os.environ.get(
-        "TORCHINDUCTOR_WORKER_START", "fork" if is_fbcode() else "subprocess"
-    )
+    start_method = os.environ.get("TORCHINDUCTOR_WORKER_START", "fork")
     assert start_method in [
         "subprocess",
         "fork",
@@ -420,8 +420,6 @@ _fuse_ddp_communication_passes: List[Union[Callable[..., None], str]] = [
     "fuse_ddp_with_concat_op",
     "schedule_comm_wait",
 ]
-
-_micro_pipeline_tp: bool = False
 
 
 def decide_compile_threads():
@@ -806,8 +804,8 @@ class cuda:
     # Path to CUDA NVCC.
     # NVCC search order:
     # 1) cuda_cxx set in this config
-    # 2) CUDACXX environment variable
-    # 3) CUDA_HOME environment variable
+    # 2）CUDACXX environment variable
+    # 3）CUDA_HOME environment variable
     # 4) default system search PATH.
     cuda_cxx: Optional[str] = None
 
@@ -881,12 +879,6 @@ class trace:
     # INDUCTOR_DOT_GRAPH_SHAPE_SVG = "none" would let us generate HTML-like lables
     # to workaround the above failure.
     dot_graph_shape = os.environ.get("INDUCTOR_DOT_GRAPH_SHAPE_SVG", None)
-
-    # If not None, this is the URL that saves the SVG files of the input/output
-    # graph of each pass that changed the graph
-    # The nodes that are being transformed in each pass will be colored in yellow
-    # URL only supports local directory for now
-    log_url_for_graph_xform = os.environ.get("INDUCTOR_LOG_URL_FOR_GRAPH_XFORM", None)
 
     # Store cProfile (see snakeviz to view)
     compile_profile = False

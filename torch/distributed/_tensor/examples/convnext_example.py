@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 """
 The following example demonstrates how to train a ConvNeXt model
 with intermediate activations sharded across mutliple GPUs via DTensor

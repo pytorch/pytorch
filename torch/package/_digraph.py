@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 from collections import deque
 from typing import List, Set
 

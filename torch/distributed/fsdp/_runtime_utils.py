@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 import functools
 import logging
 from enum import auto, Enum

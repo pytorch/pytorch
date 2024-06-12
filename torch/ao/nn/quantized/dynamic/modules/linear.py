@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 import torch
 import torch.ao.nn.quantized as nnq
 from torch.ao.nn.quantized.modules.utils import _quantize_weight

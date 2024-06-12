@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 """This file exports ONNX ops for opset 17.
 
 Note [ONNX Operators that are added/updated in opset 17]
@@ -27,7 +26,7 @@ from torch.onnx._internal import _beartype, jit_utils, registration
 # EDITING THIS FILE? READ THIS FIRST!
 # see Note [Edit Symbolic Files] in README.md
 
-__all__ = ["layer_norm", "stft", "quantized_layer_norm"]
+__all__ = ["layer_norm", "stft"]
 
 _onnx_symbolic = functools.partial(registration.onnx_symbolic, opset=17)
 
@@ -66,24 +65,6 @@ def layer_norm(
         epsilon_f=eps,
         axis_i=axis,
     )
-
-
-@_onnx_symbolic("quantized::layer_norm")
-def quantized_layer_norm(
-    g: jit_utils.GraphContext,
-    x,
-    normalized_shape,
-    weight,
-    bias,
-    eps,
-    op_scale,
-    op_zero_point,
-):
-    x, _, _, _ = symbolic_helper.dequantize_helper(g, x)
-
-    output = layer_norm(g, x, normalized_shape, weight, bias, eps, False)
-
-    return symbolic_helper.quantize_helper(g, output, op_scale, op_zero_point)
 
 
 def _compute_edge_sizes(n_fft, window_size):

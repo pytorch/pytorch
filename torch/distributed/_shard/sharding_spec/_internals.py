@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 from typing import List, Optional, Tuple
 
 from torch.distributed._shard.metadata import ShardMetadata

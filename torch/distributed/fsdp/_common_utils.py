@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 """
 This file includes private common utilities for FSDP.
 """

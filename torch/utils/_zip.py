@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 import argparse
 import glob
 import os

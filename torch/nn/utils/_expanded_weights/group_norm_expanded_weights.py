@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 from functools import reduce
 import operator
 import torch

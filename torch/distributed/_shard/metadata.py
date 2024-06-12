@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 from dataclasses import dataclass
 from typing import List, Union, Optional
 from functools import reduce

@@ -24,6 +24,10 @@
 
 namespace at::native {
 
+static bool is_cuda(const Tensor& self) {
+  return self.is_cuda();
+}
+
 bool is_distributed(const Tensor& self) {
   return false;
 }
@@ -54,6 +58,18 @@ bool is_conj(const Tensor& self) {
 
 bool is_neg(const Tensor& self) {
   return self.is_neg();
+}
+
+static bool is_sparse(const Tensor& self) {
+  return self.is_sparse();
+}
+
+static bool is_sparse_csr(const Tensor& self) {
+  return self.is_sparse_csr();
+}
+
+static bool is_quantized(const Tensor& self) {
+  return self.is_quantized();
 }
 
 // True if `self` and `from` have compatible tensor type so that `from`'s

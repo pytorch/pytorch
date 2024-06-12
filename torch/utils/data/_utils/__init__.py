@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 r"""Utility classes & functions for data loading. Code in this folder is mostly used by ../dataloder.py.
 
 A lot of multiprocessing is used in data loading, which only supports running

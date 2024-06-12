@@ -8,17 +8,14 @@ import warnings
 
 # from numpy.core.getlimits import _discovered_machar, _float_ma
 
-from unittest import expectedFailure as xfail, skipIf
+from unittest import skipIf
 
 import numpy
 
 from pytest import raises as assert_raises
 
 from torch.testing._internal.common_utils import (
-    instantiate_parametrized_tests,
-    parametrize,
     run_tests,
-    subtest,
     TEST_WITH_TORCHDYNAMO,
     TestCase,
     xpassIfTorchDynamo,
@@ -112,7 +109,6 @@ class TestFinfo(TestCase):
             getattr(finfo(dt), attr)
 
 
-@instantiate_parametrized_tests
 class TestIinfo(TestCase):
     def test_basic(self):
         dts = list(
@@ -133,19 +129,11 @@ class TestIinfo(TestCase):
         with assert_raises((TypeError, ValueError)):
             iinfo("f4")
 
-    @parametrize(
-        "T",
-        [
-            np.uint8,
-            # xfail: unsupported add (uint[16,32,64])
-            subtest(np.uint16, decorators=[xfail]),
-            subtest(np.uint32, decorators=[xfail]),
-            subtest(np.uint64, decorators=[xfail]),
-        ],
-    )
-    def test_unsigned_max(self, T):
-        max_calculated = T(0) - T(1)
-        assert_equal(iinfo(T).max, max_calculated)
+    def test_unsigned_max(self):
+        types = np.sctypes["uint"]
+        for T in types:
+            max_calculated = T(0) - T(1)
+            assert_equal(iinfo(T).max, max_calculated)
 
 
 class TestRepr(TestCase):

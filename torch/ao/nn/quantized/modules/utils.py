@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 import abc
 import torch
 import itertools

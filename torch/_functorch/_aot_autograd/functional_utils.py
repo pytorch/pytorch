@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 """
 This file contains utilities related to functionalization in AOTAutograd:
 1. converting to/from functional tensors

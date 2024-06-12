@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 import functools
 import logging
 from typing import Any, Dict, List, Optional
@@ -27,7 +26,6 @@ from ..utils import (
 from .mm_common import (
     addmm_epilogue,
     int8_mm_configs,
-    mixed_mm_configs,
     mm_args,
     mm_configs,
     mm_grid,
@@ -409,8 +407,7 @@ def tuned_mixed_mm(mat1, mat2, mat2_dtype):
 
     # can't use triton kernel unless one of these is true or if running on v100 (numerical issues)
     skip_triton = (
-        mat1.layout.dtype != torch.float32
-        and not (mat2.layout.is_contiguous() or mat2.layout.is_transposed())
+        mat1.layout.dtype != torch.float32 and not mat2.layout.is_contiguous()
     ) or _is_sm7x_or_older_gpu(layout.device.index)
 
     if inductor_config.force_mixed_mm:
@@ -418,7 +415,7 @@ def tuned_mixed_mm(mat1, mat2, mat2_dtype):
     if not skip_triton:
         b_prologue_cast_type = f"tl.{mat2_dtype}".replace("torch.", "")
         has_int8_tensor = _is_int8_mat(mat1) or _is_int8_mat(mat2)
-        for config in mixed_mm_configs(m, n, k, has_int8_tensor=has_int8_tensor):
+        for config in mm_configs(m, n, k, has_int8_tensor=has_int8_tensor):
             mm_template.maybe_append_choice(
                 choices,
                 input_nodes=(mat1, mat2),
