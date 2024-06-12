@@ -11,12 +11,7 @@ import torch.utils._pytree as pytree
 from torch import Tensor
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 
-from .schemas import (
-    FlattenedSubclassMetadata,
-    MutationType,
-    SubclassCreationMeta,
-    ViewAndMutationMeta,
-)
+from .schemas import MutationType, SubclassCreationMeta, ViewAndMutationMeta
 from .utils import strict_zip
 
 zip = strict_zip
@@ -38,31 +33,31 @@ def requires_subclass_dispatch(args, fw_metadata: ViewAndMutationMeta) -> bool:
     return any_subclass_args or any_subclass_outputs
 
 
-def create_flattened_subclass_metadata(a):
-    assert type(a) is not Tensor
-    rebuild_stack = []
-    plain_tensors = []
-    todo = [a]
-    while todo:
-        obj = todo.pop()
-        inner_keys, metadata = obj.__tensor_flatten__()
-        result = FlattenedSubclassMetadata(
-            original_subclass_obj=obj,
-            metadata=metadata,
-            inner_keys=inner_keys,
-            outer_size=obj.size(),
-            outer_strides=obj.stride(),
-        )
-        rebuild_stack.append(result)
-        for attr_name in inner_keys:
-            val = getattr(obj, attr_name)
-            if not is_traceable_wrapper_subclass(val):
-                plain_tensors.append(val)
-            else:
-                assert isinstance(val, Tensor)
-                todo.append(val)
+def create_subclass_metadata(a, start_idx):
+    if not is_traceable_wrapper_subclass(a):
+        return None, start_idx + 1
 
-    return plain_tensors, rebuild_stack
+    inner_keys, metadata = a.__tensor_flatten__()
+    new_start_idx = start_idx
+    attrs = {}
+    for key in inner_keys:
+        new_subclass_meta, new_start_idx = create_subclass_metadata(
+            getattr(a, key), new_start_idx
+        )
+        attrs[key] = new_subclass_meta
+
+    return (
+        SubclassCreationMeta(
+            flat_tensor_start_idx=start_idx,
+            arg_count=new_start_idx - start_idx,
+            attrs=attrs,
+            meta=metadata,
+            outer_size=a.size(),
+            outer_stride=a.stride(),
+            original_subclass=a,
+        ),
+        new_start_idx,
+    )
 
 
 # Given a flat list of arguments, some of which may be tensor subclasses,
@@ -76,24 +71,31 @@ def create_subclass_meta(
     for a in curr_args:
         if isinstance(a, Tensor) and is_traceable_wrapper_subclass(a):
             start_idx = idx
-            (
-                plain_tensors,
-                flattened_subclass_metadata,
-            ) = create_flattened_subclass_metadata(a)
-            cnt = len(plain_tensors)
-            curr_cnt = cnt
-            infos.append(
-                SubclassCreationMeta(
-                    flat_tensor_start_idx=start_idx,
-                    arg_count=curr_cnt,
-                    flattened_subclass_metadata=flattened_subclass_metadata,
-                )
-            )
+            subclass_meta, _ = create_subclass_metadata(a, start_idx)
+            infos.append(subclass_meta)
+            cnt = subclass_meta.arg_count
         else:
             infos.append(idx)
             cnt = 1
         idx += cnt
     return infos
+
+
+def get_plain_tensors(subclass):
+    assert is_traceable_wrapper_subclass(subclass)
+
+    plain_tensors = []
+    todo = [subclass]
+    while todo:
+        curr = todo.pop()
+        inner_keys, _ = curr.__tensor_flatten__()
+        for key in inner_keys:
+            val = getattr(curr, key)
+            if not is_traceable_wrapper_subclass(val):
+                plain_tensors.append(val)
+            else:
+                todo.append(val)
+    return plain_tensors
 
 
 # Output structure:
@@ -112,7 +114,7 @@ def unwrap_tensor_subclasses(wrapped_args, *, is_joint_structure: bool):
         xs_inner = []
         for x in xs:
             if is_traceable_wrapper_subclass(x):
-                xs_inner.extend(create_flattened_subclass_metadata(x)[0])
+                xs_inner.extend(get_plain_tensors(x))
             else:
                 xs_inner.append(x)
         return xs_inner

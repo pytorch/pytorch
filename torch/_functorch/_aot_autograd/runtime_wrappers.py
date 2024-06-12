@@ -50,6 +50,7 @@ from .schemas import (
 )
 
 from .subclass_utils import (
+    create_subclass_meta,
     requires_subclass_dispatch,
     unwrap_tensor_subclasses,
     wrap_tensor_subclasses,
@@ -1726,10 +1727,19 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                 # TODO: figure out how to refactor the backward properly
                 # so I can use aot_dispatch_subclass_wrapper() here.
                 if CompiledFunction.maybe_subclass_metadata is not None:
+                    tangents = all_args[tangents_start_idx:tangents_end_idx]
+                    runtime_subclass_tangent_meta = create_subclass_meta(tangents)
+                    if (
+                        runtime_subclass_tangent_meta
+                        != CompiledFunction.metadata.subclass_tangent_meta
+                    ):
+                        raise RuntimeError(
+                            "The grad inputs should be same tensor subclass type as forward output"
+                        )
                     # Get the number of tangents after unwrapping
                     len_tangents = len(
                         unwrap_tensor_subclasses(
-                            all_args[tangents_start_idx:tangents_end_idx],
+                            tangents,
                             is_joint_structure=False,
                         )
                     )

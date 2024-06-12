@@ -166,42 +166,6 @@ class InputAliasInfo:
         return MutationType.MUTATED_OUT_GRAPH
 
 
-def _construct_tensor_subclass(args, rebuild_stack):
-    """
-    Given the metadata on how subclass desugars, it builds
-    up the original tensor subclass in iterative fashion.
-    """
-    todo = list(args)
-    for current_metadata in reversed(rebuild_stack):
-        subclass_type = type(current_metadata.original_subclass_obj)
-        meta = current_metadata.metadata
-        inner_keys = current_metadata.inner_keys
-        outer_size = current_metadata.outer_size
-        outer_strides = current_metadata.outer_strides
-
-        inner_tensors = {a: b for a, b in zip(inner_keys, todo[: len(inner_keys)])}
-        todo = todo[len(inner_keys) :]
-        rebuilt = subclass_type.__tensor_unflatten__(
-            inner_tensors, meta, outer_size, outer_strides
-        )
-        todo.append(rebuilt)
-    assert len(todo) == 1
-    return todo[0]
-
-
-@dataclass
-class FlattenedSubclassMetadata:
-    """
-    Used for unflattening/flattening tensor subclasses
-    """
-
-    original_subclass_obj: torch.Tensor
-    metadata: Any
-    inner_keys: List[str]
-    outer_size: List[int]
-    outer_strides: List[int]
-
-
 @dataclass
 class SubclassCreationMeta:
     """
@@ -223,23 +187,36 @@ class SubclassCreationMeta:
     flat_tensor_start_idx: int
     # The number of tensors that live in this subclass wrapper
     arg_count: int
-    flattened_subclass_metadata: List[FlattenedSubclassMetadata]
+    attrs: Dict[str, Union["SubclassCreationMeta", None]]
+    outer_size: List[int]
+    outer_stride: List[int]
+    meta: Any
+    original_subclass: Any
 
     def creation_fn(self, all_args, *, is_runtime: bool):
-        curr_args = all_args[
-            self.flat_tensor_start_idx : self.flat_tensor_start_idx + self.arg_count
-        ]
-        # NB: Sometimes we have real inner tensors and symbolic metadata.
-        # TODO: Resolve this so we always have matching real / symbolic tensors / metadata.
-        out = _construct_tensor_subclass(curr_args, self.flattened_subclass_metadata)
+        inner_tensors = {}
+
+        curr_start_idx = self.flat_tensor_start_idx
+        for attr, creation_meta in self.attrs.items():
+            if creation_meta is None:
+                subclass = all_args[curr_start_idx]
+            else:
+                subclass = creation_meta.creation_fn(all_args, is_runtime=is_runtime)
+                curr_start_idx += creation_meta.arg_count
+            inner_tensors[attr] = subclass
+
+        rebuilt = type(self.original_subclass).__tensor_unflatten__(
+            inner_tensors, self.meta, self.outer_size, self.outer_stride
+        )
+
         if not is_runtime:
             # After wrapping up the inner dense tensors into a subclass, we need to make sure that our new wrapper
             # has correct autograd metadata, since we'll be tracing through the autograd engine with the subclass.
             # We don't trace through the autograd engine at runtime though, so no need
             # to compute this extra metadata then!
-            torch._mirror_autograd_meta_to(self.flattened_subclass_metadata[0].original_subclass_obj, out)  # type: ignore[attr-defined]
+            torch._mirror_autograd_meta_to(self.original_subclass, rebuilt)  # type: ignore[attr-defined]
 
-        return out
+        return rebuilt
 
 
 # This class encapsulates all aliasing + mutation info we need about the forward graph

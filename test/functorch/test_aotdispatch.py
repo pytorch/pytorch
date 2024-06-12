@@ -73,13 +73,13 @@ from torch.testing._internal.common_utils import (
     TestCase,
     xfailIfTorchDynamo,
 )
+from torch.testing._internal.custom_tensor import CustomTensor
 from torch.testing._internal.hop_db import hop_db
 from torch.testing._internal.optests import (
     _test_aot_autograd_forwards_backwards_helper,
     aot_autograd_check,
 )
 from torch.testing._internal.two_tensor import TwoTensor, TwoTensorMode
-from torch.testing._internal.custom_tensor import CustomTensor
 
 USE_TORCHVISION = False
 try:
@@ -709,6 +709,7 @@ def forward(self, primals_1):
         self.assertEqual(x_ref.grad, x_test.grad)
         self.assertEqual(x_ref_view.grad, x_test_view.grad)
 
+    @skipIfTorchDynamo("https://github.com/pytorch/pytorch/issues/127470")
     def test_nested_subclasses(self):
         @torch.compile(backend="aot_eager")
         def f(x):
@@ -733,6 +734,7 @@ def forward(self, primals_1):
         self.assertTrue(isinstance(aaaa.grad.a, TwoTensor))
         self.assertTrue(isinstance(aaaa.grad.b, TwoTensor))
 
+    @skipIfTorchDynamo("https://github.com/pytorch/pytorch/issues/127470")
     def test_nested_subclasses_non_nested_grad(self):
         @torch.compile(backend="aot_eager")
         def f(x):
@@ -749,8 +751,13 @@ def forward(self, primals_1):
         aaaa = TwoTensor(aa, aa2)
         out = f(new_aa)
         new_out = out + aaaa
-        new_out.sum().backward()
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "The grad inputs should be same tensor subclass type as forward output",
+        ):
+            new_out.sum().backward()
 
+    @skipIfTorchDynamo("https://github.com/pytorch/pytorch/issues/127470")
     def test_custom_tensor_metadata(self):
         @torch.compile
         def f(x):
@@ -765,36 +772,18 @@ def forward(self, primals_1):
         custom_aa = CustomTensor(custom_a)
         custom_aa.constant_attribute = 4
         out = f(custom_aa)
-        
+
         out.sum().backward()
 
         self.assertTrue(isinstance(custom_aa.grad, CustomTensor))
         self.assertTrue(isinstance(custom_aa.grad.elem, CustomTensor))
 
-    def test_nested_subclasses_custom_meta(self):
-        @torch.compile(backend="aot_eager")
-        def f(x, y):
-            x.add_constant(4)
-            #x.elem.add_constant(3)
-            return x.cos() + y.cos()
-
-        a = torch.ones(4, requires_grad=True)
-        b = torch.ones(4, requires_grad=True)
-        custom_a = CustomTensor(a)
-        #custom_aa = CustomTensor(custom_a)
-
-        out = f(custom_a, b)
-        print("A", custom_a.constant_attribute)
-        #print("B", custom_aa.elem.constant_attribute)
-        # compiled_f = torch.compile(f, backend="aot_eager")
-        # compiled_out = compiled_f(aaaa, plain_a, aaaa2)
-        # self.assertTrue((compiled_out - out).sum().item() == 0)
-
+    @skipIfTorchDynamo("https://github.com/pytorch/pytorch/issues/127470")
     def test_nested_subclasses_complicated_inps(self):
         @torch.compile(backend="aot_eager")
         def f(x, y, z):
-            temp = x + y 
-            temp_plain = x.a + y.b 
+            temp = x + y
+            temp_plain = x.a + y.b
             res = temp.sum() + temp_plain.sum()
             return x.sin().cos() + res
 
