@@ -122,13 +122,8 @@ def do_bench_gpu(
     # mess with memory compression calculations during benchmarking
     del cache
 
-    timings = torch.tensor(
-        [event_pair[0].elapsed_time(event_pair[1]) for event_pair in event_pairs],
-        dtype=torch.float,
-    )
-
+    timings = [event_pair[0].elapsed_time(event_pair[1]) for event_pair in event_pairs]
     timing = min(timings)
-
     return timing
 
 
