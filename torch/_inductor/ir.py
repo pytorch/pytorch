@@ -3867,7 +3867,9 @@ class ConcatKernel(NopKernel):
             ):
                 buffer_names.append(input_buffer.get_name())
 
-        if len(buffer_names) > 1:
+        if len(buffer_names) > 1 and V.graph.has_feature(
+            device, BackendFeature.FOREACH
+        ):
             V.graph.register_list(buffer_names)
 
         concat_kernel.name = V.graph.register_buffer(concat_kernel)
