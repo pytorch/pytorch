@@ -29,6 +29,11 @@ from torch._dynamo.testing import rand_strided
 from torch._dynamo.utils import counters, identity, preserve_rng_state
 
 from . import config, ir
+from .autotune_process import (
+    GroupedTritonBenchmarkRequest,
+    TensorMeta,
+    TritonBenchmarkRequest,
+)
 from .autotune_process import TensorMeta, TritonBenchmarkRequest
 from .codecache import code_hash, PersistentCache, PyCodeCache
 from .codegen.common import IndentedBuffer, KernelTemplate
@@ -848,6 +853,7 @@ class TritonTemplateCaller(ir.TritonTemplateCallerBase):
             }
         )
         self.mutated_inputs = mutated_inputs
+        self.valid = True
 
     def benchmark(self, *args, out):
         assert self.bmreq is not None
@@ -855,7 +861,10 @@ class TritonTemplateCaller(ir.TritonTemplateCallerBase):
 
     def precompile(self):
         assert self.bmreq is not None
-        self.bmreq.precompile()
+        try:
+            self.bmreq.precompile()
+        except Exception:
+            self.valid = False
 
     def __str__(self):
         return f"TritonTemplateCaller({self.bmreq.module_path}, {self.debug_extra})"
@@ -1439,12 +1448,34 @@ class AlgorithmSelectorCache(PersistentCache):
             if torch.cuda.is_available():
                 torch.cuda.synchronize()  # shake out any CUDA errors
             return result
+        
+        def benchmark_grouped_triton_choices(
+            choices,
+            example_inputs,
+            out,
+            target,
+        ):
+            grouped_bmreq = GroupedTritonBenchmarkRequest(choices)
+            timings = grouped_bmreq.benchmark(
+                *example_inputs, output_tensor=out, target=target
+            )
+            return timings
 
         def benchmark_in_current_process(choices):
             inputs = get_inputs()
             example_inputs, _, out, _, _ = inputs
+
+            triton_choices = [
+                choice for choice in choices if isinstance(choice, TritonTemplateCaller)
+            ]
+            other_choices = [
+                choice
+                for choice in choices
+                if not isinstance(choice, TritonTemplateCaller)
+            ]
+
             timings = {}
-            for choice in choices:
+            for choice in other_choices:
                 try:
                     timing = benchmark_choice_in_current_process(choice, *inputs)
                 except CUDACompileError as e:
@@ -1485,6 +1516,17 @@ class AlgorithmSelectorCache(PersistentCache):
                         raise e from None
 
                 timings[choice] = timing
+            
+            target = (
+                timings[min(timings, key=timings.__getitem__)]
+                if timings
+                else float("inf")
+            )
+            timings.update(
+                benchmark_grouped_triton_choices(
+                    triton_choices, example_inputs, out, target
+                )
+            )
 
             return timings
 
