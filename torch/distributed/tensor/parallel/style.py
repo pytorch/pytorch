@@ -432,6 +432,7 @@ class PrepareModuleInput(ParallelStyle):
         if len(inputs) != len(self.input_layouts):
             raise ValueError("module inputs and input_layouts should have same length!")
 
+        assert self.desired_input_layouts is not None, "desired module inputs should not be None!"
         for inp, input_layout, desired_layout in zip(inputs, self.input_layouts, self.desired_input_layouts):
             prepared_inputs.append(self._prepare_input_arg(inp, device_mesh, input_layout, desired_layout))
         return tuple(prepared_inputs)
