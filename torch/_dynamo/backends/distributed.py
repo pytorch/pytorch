@@ -550,15 +550,14 @@ class DDPOptimizer:
                     try:
                         target_mod = gm.get_submodule(node.args[0].target)
                     except AttributeError:
-                        # This handles situations like  tmp = torch.mm(x, self.weight.t())
-                        # t: "f32[512, 512]" = l_self_seq_2_weight.t();  l_self_seq_2_weight = None
-                        # tmp: "f32[512, 512]" = torch.mm(input_2, t);  input_2 = t = None
                         pass
                     if target_mod is not None and target_mod not in processed_modules:
                         self.add_module_params_to_bucket(
                             target_mod, buckets[0], processed_modules, node.target
                         )
-
+                    # This handles situations like  tmp = torch.mm(x, self.weight.t())
+                    # t: "f32[512, 512]" = l_self_seq_2_weight.t();  l_self_seq_2_weight = None
+                    # tmp: "f32[512, 512]" = torch.mm(input_2, t);  input_2 = t = None
                     self.add_param_args(buckets[0], node)
 
             elif node.op == "get_attr":
