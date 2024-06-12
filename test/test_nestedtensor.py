@@ -5348,43 +5348,58 @@ class TestNestedTensorSubclass(TestCase):
         # specific to CPU impls
         if device == "cpu":
             # error case: multiple offsets on cpu since CPU kernels don't support more now
-            with self.assertRaisesRegex(RuntimeError, "only a single jagged dim is supported"):
+            with self.assertRaisesRegex(
+                RuntimeError, "only a single jagged dim is supported"
+            ):
                 torch.ops.aten._jagged_to_padded_dense_forward(
-                    values, [offsets, offsets], [max_length, max_length], padding_value)
+                    values, [offsets, offsets], [max_length, max_length], padding_value
+                )
 
-            with self.assertRaisesRegex(RuntimeError, "only a single jagged dim is supported"):
+            with self.assertRaisesRegex(
+                RuntimeError, "only a single jagged dim is supported"
+            ):
                 torch.ops.aten._padded_dense_to_jagged_forward(
-                    padded, [offsets, offsets], total_L)
+                    padded, [offsets, offsets], total_L
+                )
 
             # error case: > 1D offsets
             offsets2d = offsets.unsqueeze(-1)
             with self.assertRaisesRegex(RuntimeError, "expected 1D offsets"):
                 torch.ops.aten._jagged_to_padded_dense_forward(
-                    values, [offsets2d], [max_length], padding_value)
+                    values, [offsets2d], [max_length], padding_value
+                )
 
             with self.assertRaisesRegex(RuntimeError, "expected 1D offsets"):
                 torch.ops.aten._padded_dense_to_jagged_forward(
-                    padded, [offsets2d], total_L)
+                    padded, [offsets2d], total_L
+                )
 
             # error case: final offset != total_L
             offsets_wrong = offsets.clone().detach()
             offsets_wrong[-1] = total_L + 1
-            with self.assertRaisesRegex(RuntimeError, "final offset should match total_L value"):
+            with self.assertRaisesRegex(
+                RuntimeError, "final offset should match total_L value"
+            ):
                 torch.ops.aten._padded_dense_to_jagged_forward(
-                    padded, [offsets_wrong], total_L)
+                    padded, [offsets_wrong], total_L
+                )
 
             # error case: 1D padded input
             padded_wrong = padded.flatten().clone().detach()
             with self.assertRaisesRegex(RuntimeError, "expected padded dim >= 2"):
                 torch.ops.aten._padded_dense_to_jagged_forward(
-                    padded_wrong, [offsets], total_L)
+                    padded_wrong, [offsets], total_L
+                )
 
             # error case: batch item has length > max length
             # max_length is 5 above; 7 here
-            offsets_wrong = torch.tensor([0, 1, 8, 9, 10], device=device, dtype=torch.int64)
+            offsets_wrong = torch.tensor(
+                [0, 1, 8, 9, 10], device=device, dtype=torch.int64
+            )
             with self.assertRaisesRegex(RuntimeError, "found batch item of length"):
                 torch.ops.aten._padded_dense_to_jagged_forward(
-                    padded, [offsets_wrong], total_L)
+                    padded, [offsets_wrong], total_L
+                )
 
 
 instantiate_parametrized_tests(TestNestedTensor)
