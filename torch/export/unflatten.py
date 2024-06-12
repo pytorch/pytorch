@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import abc
 import copy
 import operator

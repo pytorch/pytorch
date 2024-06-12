@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import functools
 import pickle
 from typing import Dict, Callable, Optional, TypeVar, Generic, Iterator

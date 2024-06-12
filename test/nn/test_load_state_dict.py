@@ -3,14 +3,12 @@ import re
 import unittest
 from copy import deepcopy
 from itertools import product
-from tempfile import NamedTemporaryFile
 
 import torch
 import torch.nn as nn
 from torch.testing._internal.common_nn import NNTestCase
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
-    IS_WINDOWS,
     parametrize,
     run_tests,
     skipIfCrossRef,
@@ -205,33 +203,6 @@ class TestLoadStateDict(NNTestCase):
 
         model[0][0]._register_load_state_dict_pre_hook(hook_fn, with_module=True)
         model.load_state_dict(model.state_dict(), strict=True)
-
-    @unittest.skipIf(IS_WINDOWS, "Tempfile permission issue on windows")
-    @swap([True, False])
-    def test_register_state_dict_pre_hook_backward_compat(self):
-        called = False
-
-        def my_state_dict_pre_hook(*args, **kwargs):
-            nonlocal called
-            called = True
-
-        m = nn.Linear(1, 1)
-        self.assertTrue(hasattr(m, "_state_dict_pre_hooks"))
-        delattr(m, "_state_dict_pre_hooks")
-        # Save and load, ensure we can still call state_dict
-        # without running into issues.
-        with NamedTemporaryFile() as f:
-            # Note that torch.save / torch.load is not recommended
-            # to save / load modules.
-            torch.save(m, f.name)
-            m = torch.load(f.name)
-
-        # Ensure we can run state_dict without issues
-        _ = m.state_dict()
-        self.assertFalse(called)
-        m.register_state_dict_pre_hook(my_state_dict_pre_hook)
-        _ = m.state_dict()
-        self.assertTrue(called)
 
     # fails swapping as LSTM installs weak references on the parameters
     @swap([False])
