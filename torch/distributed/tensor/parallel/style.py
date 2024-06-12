@@ -405,7 +405,7 @@ class PrepareModuleInput(ParallelStyle):
         input: Any,
         mesh: DeviceMesh,
         input_layout: Optional[Placement],
-        desired_layout: Placement
+        desired_layout: Optional[Placement]
     ):
         if input_layout is not None:
             if isinstance(input, DTensor):
