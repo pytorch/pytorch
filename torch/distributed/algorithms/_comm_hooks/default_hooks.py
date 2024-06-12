@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 import functools
 import torch
 import torch.distributed as dist

@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 """
 Contains various utils for AOTAutograd, including those for handling collections.
 """
@@ -26,7 +25,6 @@ KNOWN_TYPES = [
     type(None),
     *py_sym_types,
     FakeScriptObject,
-    torch.ScriptObject,
 ]
 
 original_zip = zip

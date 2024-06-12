@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 """
 APIs related to torch.compile which lazily import torch._dynamo to avoid
 circular dependencies.

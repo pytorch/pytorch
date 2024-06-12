@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 from collections import defaultdict
 from copy import deepcopy
 from typing import Any, Optional, Dict, TYPE_CHECKING

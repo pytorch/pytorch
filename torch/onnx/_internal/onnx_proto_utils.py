@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 """Utilities for manipulating the onnx and onnx-script dependencies and ONNX proto."""
 
 from __future__ import annotations

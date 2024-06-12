@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 """Utilities for converting and operating on ONNX, JIT and torch types."""
 from __future__ import annotations
 
@@ -23,7 +22,7 @@ import torch
 from torch._subclasses import fake_tensor
 
 if TYPE_CHECKING:
-    import onnx.defs.OpSchema.AttrType  # type: ignore[import]  # noqa: TCH004
+    import onnx.defs.OpSchema.AttrType  # type: ignore[import]
 
 
 # Enable both TorchScriptTensor and torch.Tensor to be tested

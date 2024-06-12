@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 import warnings
 from collections import defaultdict
 from typing import Any, Callable, DefaultDict, Iterator, List, Optional, Sized, TypeVar

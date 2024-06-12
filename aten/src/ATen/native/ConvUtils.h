@@ -75,7 +75,7 @@ namespace {
   }
 }
 
-inline bool cudnnv8_enabled_check_debug() {
+static inline bool cudnnv8_enabled_check_debug() {
   static bool cudnnv8_flag = c10::utils::check_env("TORCH_CUDNN_V8_API_DISABLED") != true;
   static bool cudnnv8_debug = c10::utils::check_env("TORCH_CUDNN_V8_API_DEBUG") == true;
   static uint8_t cudnnv8_debugcount = 0;
@@ -86,7 +86,7 @@ inline bool cudnnv8_enabled_check_debug() {
   return cudnnv8_flag == 1;
 }
 
-inline bool cudnnv8_use_heur_mode_b() {
+static inline bool cudnnv8_use_heur_mode_b() {
   return is_cudnnv8_heuristic_mode_b();
 }
 
@@ -186,7 +186,7 @@ static void check_args(CheckedFrom c, IntArrayRef args, size_t expected_size, co
 // (which the user can change) and computed inputs (which the user can
 // only indirectly affect).  It would be an interesting exercise to
 // come up with a general framework to handle such situations.)
-inline void convolution_shape_check(
+static void convolution_shape_check(
     CheckedFrom c,
     const TensorGeometryArg& input, const TensorGeometryArg& weight, const TensorGeometryArg& output,
     IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups)
@@ -212,7 +212,7 @@ inline void convolution_shape_check(
 // takes an extra output_padding argument to resolve the ambiguity.
 
 template <typename T>
-inline std::vector<T> _conv_output_size(
+static inline std::vector<T> _conv_output_size(
     ArrayRef<T> input_size, ArrayRef<T> weight_size,
     ArrayRef<T> padding, ArrayRef<T> stride, ArrayRef<T> dilation = ArrayRef<T>()
 ) {
@@ -231,14 +231,14 @@ inline std::vector<T> _conv_output_size(
   return output_size;
 }
 
-inline std::vector<int64_t> conv_output_size(
+static inline std::vector<int64_t> conv_output_size(
     IntArrayRef input_size, IntArrayRef weight_size,
     IntArrayRef padding, IntArrayRef stride, IntArrayRef dilation = IntArrayRef()
 ) {
   return _conv_output_size(input_size, weight_size, padding, stride, dilation);
 }
 
-inline std::vector<c10::SymInt> conv_output_size(
+static inline std::vector<c10::SymInt> conv_output_size(
     SymIntArrayRef input_size, SymIntArrayRef weight_size,
     SymIntArrayRef padding, SymIntArrayRef stride, SymIntArrayRef dilation = SymIntArrayRef()
 ) {
@@ -264,14 +264,14 @@ std::vector<T> _conv_input_size(
   return input_size;
 }
 
-inline std::vector<c10::SymInt> conv_input_size(
+static inline std::vector<c10::SymInt> conv_input_size(
     SymIntArrayRef output_size, SymIntArrayRef weight_size,
     SymIntArrayRef padding, SymIntArrayRef output_padding, SymIntArrayRef stride, SymIntArrayRef dilation, c10::SymInt groups
 ) {
   return _conv_input_size(output_size, weight_size, padding, output_padding, stride, dilation, groups);
 }
 
-inline std::vector<int64_t> conv_input_size(
+static inline std::vector<int64_t> conv_input_size(
     IntArrayRef output_size, IntArrayRef weight_size,
     IntArrayRef padding, IntArrayRef output_padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups
 ) {
@@ -295,27 +295,27 @@ std::vector<T> _conv_weight_size(
   return weight_size;
 }
 
-inline std::vector<c10::SymInt> conv_weight_size(
+static inline std::vector<c10::SymInt> conv_weight_size(
     SymIntArrayRef input_size, SymIntArrayRef output_size,
     SymIntArrayRef padding, SymIntArrayRef output_padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups
 ) {
   return _conv_weight_size(input_size, output_size, padding, output_padding, stride, dilation, groups);
 }
 
-inline std::vector<int64_t> conv_weight_size(
+static inline std::vector<int64_t> conv_weight_size(
     IntArrayRef input_size, IntArrayRef output_size,
     IntArrayRef padding, IntArrayRef output_padding, IntArrayRef stride, IntArrayRef dilation, int64_t groups
 ) {
   return _conv_weight_size(input_size, output_size, padding, output_padding, stride, dilation, groups);
 }
 
-inline Tensor reshape_bias(int64_t dim, const Tensor& bias) {
+static inline Tensor reshape_bias(int64_t dim, const Tensor& bias) {
   std::vector<int64_t> shape(dim, 1);
   shape[1] = -1;
   return bias.reshape(shape);
 }
 
-inline at::MemoryFormat cudnn_conv_suggest_memory_format(const at::Tensor& input, const at::Tensor& weight) {
+static inline at::MemoryFormat cudnn_conv_suggest_memory_format(const at::Tensor& input, const at::Tensor& weight) {
   // disable NHWC for float64 input.
   if (!at::detail::getCUDAHooks().compiledWithCuDNN() ||
       input.scalar_type() == at::kDouble ||
@@ -351,7 +351,7 @@ TORCH_API void _cudnn_set_conv_benchmark_empty_cache(bool enable);
 TORCH_API bool _cudnn_get_conv_benchmark_empty_cache();
 
 
-inline bool miopen_conv_use_channels_last(const at::Tensor& input, const at::Tensor& weight) {
+static inline bool miopen_conv_use_channels_last(const at::Tensor& input, const at::Tensor& weight) {
 
   // disable NHWC for float64 input.
   if (!at::detail::getCUDAHooks().compiledWithMIOpen() ||
@@ -378,7 +378,7 @@ inline bool miopen_conv_use_channels_last(const at::Tensor& input, const at::Ten
   return can_use_miopen_channels_last_2d || can_use_miopen_channels_last_3d;
 }
 
-inline bool mkldnn_conv_use_channels_last(const at::Tensor& input, const at::Tensor& weight) {
+static inline bool mkldnn_conv_use_channels_last(const at::Tensor& input, const at::Tensor& weight) {
 
   // disable NHWC for float64 input.
   if (input.scalar_type() == at::kDouble ||
@@ -405,7 +405,7 @@ inline bool mkldnn_conv_use_channels_last(const at::Tensor& input, const at::Ten
   return can_use_mkldnn_channels_last_2d || can_use_mkldnn_channels_last_3d;
 }
 
-inline bool thnn_conv_use_channels_last(const at::Tensor& input, const at::Tensor& weight) {
+static inline bool thnn_conv_use_channels_last(const at::Tensor& input, const at::Tensor& weight) {
 
   auto input_memory_format = input.suggest_memory_format();
   auto weight_memory_format = weight.suggest_memory_format();
@@ -417,7 +417,7 @@ inline bool thnn_conv_use_channels_last(const at::Tensor& input, const at::Tenso
   return can_use_thnn_channels_last_2d;
 }
 
-inline bool xpu_conv_use_channels_last(const at::Tensor& input, const at::Tensor& weight) {
+static inline bool xpu_conv_use_channels_last(const at::Tensor& input, const at::Tensor& weight) {
 
   // check layout only for xpu tensor.
   if (!input.is_xpu() || !weight.is_xpu()) {

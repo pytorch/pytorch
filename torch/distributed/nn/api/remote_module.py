@@ -1,5 +1,4 @@
 #!/usr/bin/python3
-# mypy: allow-untyped-defs
 import collections
 import io
 import sys

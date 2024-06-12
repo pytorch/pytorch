@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 # This file takes partial of the implementation from NVIDIA's webdataset at here:
 # https://github.com/tmbdev/webdataset/blob/master/webdataset/autodecode.py
 

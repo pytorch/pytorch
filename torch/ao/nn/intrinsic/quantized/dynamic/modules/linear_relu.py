@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 import torch
 import torch.ao.nn.quantized.dynamic as nnqd
 import torch.ao.nn.intrinsic as nni

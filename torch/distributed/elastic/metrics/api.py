@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# mypy: allow-untyped-defs
 
 # Copyright (c) Facebook, Inc. and its affiliates.
 # All rights reserved.
@@ -9,10 +8,10 @@
 
 import abc
 import time
+import warnings
 from collections import namedtuple
 from functools import wraps
 from typing import Dict, Optional
-from typing_extensions import deprecated
 
 __all__ = ['MetricsConfig', 'MetricHandler', 'ConsoleMetricHandler', 'NullMetricHandler', 'MetricStream',
            'configure', 'getStream', 'prof', 'profile', 'put_metric', 'publish_metric', 'get_elapsed_time_ms',
@@ -138,7 +137,6 @@ def prof(fn=None, group: str = "torchelastic"):
         return wrap
 
 
-@deprecated("Deprecated, use `@prof` instead", category=FutureWarning)
 def profile(group=None):
     """
     @profile decorator adds latency and success/failure metrics to any given function.
@@ -150,6 +148,8 @@ def profile(group=None):
      @metrics.profile("my_metric_group")
      def some_function(<arguments>):
     """
+    warnings.warn("Deprecated, use @prof instead", DeprecationWarning)
+
     def wrap(func):
         @wraps(func)
         def wrapper(*args, **kwargs):
@@ -187,11 +187,10 @@ def put_metric(metric_name: str, metric_value: int, metric_group: str = "torchel
     getStream(metric_group).add_value(metric_name, metric_value)
 
 
-@deprecated(
-    "Deprecated, use `put_metric(metric_group)(metric_name, metric_value)` instead",
-    category=FutureWarning,
-)
 def publish_metric(metric_group: str, metric_name: str, metric_value: int):
+    warnings.warn(
+        "Deprecated, use put_metric(metric_group)(metric_name, metric_value) instead"
+    )
     metric_stream = getStream(metric_group)
     metric_stream.add_value(metric_name, metric_value)
 

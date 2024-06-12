@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 r"""
 This module introduces CUDA Sanitizer, a tool for detecting synchronization errors between kernels ran on different streams.
 

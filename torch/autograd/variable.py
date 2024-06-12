@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 import torch
 from torch._C import _ImperativeEngine as ImperativeEngine
 

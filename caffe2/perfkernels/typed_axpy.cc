@@ -1,6 +1,7 @@
-#include <c10/util/Half.h>
 #include "caffe2/perfkernels/typed_axpy.h"
+#include "caffe2/core/types.h"
 #include "caffe2/perfkernels/common.h"
+#include "caffe2/utils/cpuid.h"
 
 namespace caffe2 {
 

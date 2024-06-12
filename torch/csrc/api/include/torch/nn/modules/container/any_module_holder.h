@@ -40,10 +40,10 @@ struct AnyModuleHolder : public AnyModulePlaceholder {
   /// \internal
   struct CheckedGetter {
     template <typename T>
-    std::decay_t<T>&& operator()(size_t index) {
+    decay_t<T>&& operator()(size_t index) {
       AT_ASSERT(index < arguments_.size());
       auto& value = arguments_[index];
-      if (auto* maybe_value = value.template try_get<std::decay_t<T>>()) {
+      if (auto* maybe_value = value.template try_get<decay_t<T>>()) {
         return std::move(*maybe_value);
       }
       AT_ERROR(

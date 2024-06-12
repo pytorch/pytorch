@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 import os
 from dataclasses import dataclass, field
 from enum import Enum

@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 """Functionality for Python <-> C++ frontend inter-op."""
 
 from torch import nn
