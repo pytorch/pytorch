@@ -177,11 +177,9 @@ class CUDATemplateKernel(CUDAKernel):
         else:
             call_args.append("None")
 
-        current_device = V.graph.scheduler.get_current_device_or_throw()
         wrapper.generate_kernel_call(
             name,
             call_args,
-            device_index=current_device.index,
             cuda=True,
             triton=False,
             arg_types=arg_types,

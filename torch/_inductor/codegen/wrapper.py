@@ -1385,9 +1385,13 @@ class WrapperCodeGen(CodeGen):
                 Only valid when cuda == True.
         """
         if cuda:
-            call_args_str = ", ".join(pexpr(item) for item in call_args)
-            current_device = V.graph.scheduler.get_current_device_or_throw()
-            stream_name = self.write_get_raw_stream(current_device.index, V.graph)
+            if device_index is None:
+                current_device = V.graph.scheduler.get_current_device_or_throw()
+                device_index = current_device.index
+            call_args_str = ", ".join(
+                pexpr(V.graph.sizevars.simplify(item)) for item in call_args
+            )
+            stream_name = self.write_get_raw_stream(device_index, V.graph)
             if triton:
                 grid_str = ", ".join(pexpr(item) for item in grid_args)
                 grid_str = f"{grid_fn}({grid_str})"

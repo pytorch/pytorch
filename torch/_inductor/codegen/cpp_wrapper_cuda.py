@@ -183,6 +183,10 @@ class CppWrapperCuda(CppWrapperCpu):
                 name, call_args, grid_args, device_index, cuda, triton, arg_types
             )
 
+        if device_index is None:
+            current_device = V.graph.scheduler.get_current_device_or_throw()
+            device_index = current_device.index
+
         params = CudaKernelParamCache.get(name)
         assert (
             params is not None
