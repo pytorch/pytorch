@@ -185,7 +185,11 @@ def wrap_tensor_subclasses(
         else:
             assert isinstance(subclass_meta, SubclassCreationMeta)
             wrapped_args.append(
-                subclass_meta.creation_fn(unwrapped_args, is_runtime=is_runtime)
+                subclass_meta.creation_fn(
+                    unwrapped_args,
+                    is_runtime=is_runtime,
+                    num_fw_outs_saved_for_bw=num_fw_outs_saved_for_bw,
+                )
             )
             num_args_tallied += subclass_meta.arg_count + sum(
                 bool(count_extra)

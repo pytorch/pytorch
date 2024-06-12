@@ -203,7 +203,13 @@ class SubclassCreationMeta:
     outer_size: Tuple[int, ...]  # todo: this can be Tuple[SymInt, ...] as well
     outer_stride: Tuple[int, ...]  # same thing here
 
-    def creation_fn(self, all_args, *, is_runtime: bool):
+    def creation_fn(
+        self,
+        all_args,
+        *,
+        num_fw_outs_saved_for_bw: Optional[int] = None,
+        is_runtime: bool,
+    ):
         def is_symbolic(xs):
             return pytree.tree_any(lambda x: isinstance(x, torch.SymInt), xs)
 
@@ -215,12 +221,12 @@ class SubclassCreationMeta:
         ), f"inner_keys: {str(self.inner_keys)}. len(curr_args): {len(curr_args)}"
         # Sometimes we have real inner tensors and symbolic metadata.
         if is_runtime and is_symbolic(self.outer_size):
-            outer_size = all_args[
-                len(all_args)
-                - self.flat_tensor_extra_sizes_offset : len(all_args)
-                - self.flat_tensor_extra_sizes_offset
-                + len(self.outer_size)
-            ]
+            start = len(all_args) - self.flat_tensor_extra_sizes_offset
+            end = start + len(self.outer_size)
+            if num_fw_outs_saved_for_bw:
+                start -= num_fw_outs_saved_for_bw
+                end -= num_fw_outs_saved_for_bw
+            outer_size = all_args[start:end]
         else:
             outer_size = self.outer_size
         out = type(self.original_subclass).__tensor_unflatten__(  # type: ignore[attr-defined]
