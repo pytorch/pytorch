@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 from collections import namedtuple
 from typing import Any, Callable, Dict, List, NamedTuple, Optional, Tuple, Type
 

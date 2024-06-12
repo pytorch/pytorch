@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 from __future__ import annotations
 from collections import OrderedDict
 from typing import Any, Callable, Dict, Tuple, Union, List

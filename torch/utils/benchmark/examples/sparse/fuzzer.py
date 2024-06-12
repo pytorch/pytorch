@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 """Example of the Timer and Sparse Fuzzer APIs:
 
 $ python -m examples.sparse.fuzzer

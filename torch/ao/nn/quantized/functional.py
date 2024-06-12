@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 r""" Functional interface (quantized)."""
 from typing import List, Optional
 import warnings

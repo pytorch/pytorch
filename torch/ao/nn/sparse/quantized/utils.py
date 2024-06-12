@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 import threading
 
 __all__ = [

@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 import copy
 from typing import Optional, Any, Union, Callable
 

@@ -7,7 +7,8 @@
 #include <torch/csrc/Exceptions.h>
 #include <torch/csrc/utils/python_numbers.h>
 
-namespace torch::utils {
+namespace torch {
+namespace utils {
 
 template <typename T>
 inline T unpackIntegral(PyObject* obj, const char* type) {
@@ -158,4 +159,5 @@ inline PyObject* load_scalar(const void* data, at::ScalarType scalarType) {
   }
 }
 
-} // namespace torch::utils
+} // namespace utils
+} // namespace torch

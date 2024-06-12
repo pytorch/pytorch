@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 import torch
 import numbers
 from torch.nn.parameter import Parameter

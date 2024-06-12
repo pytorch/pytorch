@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 # flake8: noqa C101
 import itertools
 from typing import Union, Iterable, Dict, Iterator

@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 import torch
 import torch.nn as nn
 from torch.ao.pruning.sparsifier.utils import module_to_fqn, fqn_to_module

@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 r"""
 PyTorch Profiler is a tool that allows the collection of performance metrics during training and inference.
 Profiler's context manager API can be used to better understand what model operators are the most expensive,

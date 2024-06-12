@@ -3,7 +3,8 @@
 #include <torch/csrc/jit/frontend/function_schema_parser.h>
 #include <unordered_set>
 
-namespace torch::utils {
+namespace torch {
+namespace utils {
 
 using SchemaSpecialCasePair =
     std::pair<c10::FunctionSchema, std::unordered_set<std::string>>;
@@ -112,4 +113,5 @@ struct TORCH_API SchemaInfo {
 
   bool has_init_;
 };
-} // namespace torch::utils
+} // namespace utils
+} // namespace torch

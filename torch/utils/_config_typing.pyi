@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 from typing import Any, Dict, Optional, TYPE_CHECKING, Union
 
 """

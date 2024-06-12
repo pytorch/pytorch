@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 from io import IOBase
 from typing import Iterable, Tuple, Optional
 

@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 """This module converts objects into numpy array."""
 
 import numpy as np

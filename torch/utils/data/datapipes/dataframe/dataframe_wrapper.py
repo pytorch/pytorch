@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 from typing import Any, Optional
 
 _pandas: Any = None

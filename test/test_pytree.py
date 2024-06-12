@@ -723,7 +723,7 @@ class TestPythonPytree(TestCase):
                 self.y = y
 
         with self.assertWarnsRegex(
-            FutureWarning, "torch.utils._pytree._register_pytree_node"
+            UserWarning, "torch.utils._pytree._register_pytree_node"
         ):
             py_pytree._register_pytree_node(
                 DummyType,
