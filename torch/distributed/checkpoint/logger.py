@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import functools
 import time
 from typing import Any, Callable, Dict, List, TypeVar
