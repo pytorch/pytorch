@@ -155,4 +155,5 @@ __all__ = [
     "driver_allocated_memory",
     "Event",
     "profiler",
+    "recommended_max_memory",
 ]
