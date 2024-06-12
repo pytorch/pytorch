@@ -14,7 +14,7 @@ from ..utils import sympy_index_symbol
 from ..virtualized import V
 from .common import Kernel, OpOverrides
 from .cpp import CppKernelProxy, KernelGroup
-from .cpp_utils import cexpr_index, DTYPE_TO_CPP
+from .cpp_utils import cexpr_index, DTYPE_TO_CPP, LocalBufferScope
 
 
 def parse_expr_with_index_symbols(expr):
@@ -111,7 +111,13 @@ class CppTemplateKernel(Kernel):
         indexer = node.layout.as_fixed().make_indexer()
         index = indexer(parse_expr_with_index_symbols(indices))
         index = self.rename_indexing(index)
-        return f"{self.args.input(node.get_name())}[{cexpr_index(index)}]"
+        outer_name = node.get_name()
+        inner_name = (
+            outer_name
+            if outer_name in self.local_buffers
+            else self.args.input(node.get_name())
+        )
+        return f"{inner_name}[{cexpr_index(index)}]"
 
     def slice_nd(self, node, ranges: List[Tuple[Any, Any]]) -> ir.ReinterpretView:
         """
@@ -170,6 +176,50 @@ class CppTemplateKernel(Kernel):
         numel = f"{cexpr_index(buf.get_numel())}"
         return f"auto _{name} = std::make_unique<{ctype}[]>({numel}); auto {name} = _{name}.get();"
 
+    def store_pointwise_nodes(
+        self,
+        dst: ir.Buffer,
+        nodes: List[ir.IRNode],
+        offsets: Optional[List[sympy.Expr]] = None,
+        reindexer: Optional[Callable[[List[Any]], List[Any]]] = None,
+    ) -> str:
+        var_sizes = (tuple(dst.get_size()), ())
+        var_ranges = {sympy.Symbol(f"z{i}"): sz for i, sz in enumerate(var_sizes[0])}
+        if not offsets:
+            offsets = [sympy.Integer(0)] * len(var_sizes[0])
+        assert len(offsets) == len(var_sizes[0])
+        output_index = dst.get_layout().make_indexer()(var_ranges.keys())
+        kernel_group = KernelGroup()
+        kernel_group.args = self.args
+        cpp_kernel_proxy = CppKernelProxy(kernel_group)
+        bodies = []
+        var_sizes_list = []
+        for i, node in enumerate(nodes):
+            output_name = node.get_name() if i < len(nodes) - 1 else dst.get_name()
+            node = node.data if isinstance(node, ir.ComputedBuffer) else node
+            assert isinstance(node, ir.Pointwise), node
+
+            def fn(*args):
+                assert len(args) == 2
+                assert len(args[0]) == len(var_sizes[0])
+                assert len(args[1]) == 0
+                new_args = [arg + offset for arg, offset in zip(args[0], offsets)]  # type: ignore[arg-type]
+                if reindexer is not None:
+                    new_args = reindexer(new_args)
+                V.ops.store(
+                    output_name,
+                    output_index,
+                    node.make_loader()(new_args).value,
+                )
+
+            body = ir.LoopBody(fn, (list(var_ranges.keys()), ()), var_ranges)
+            bodies.append(body)
+            var_sizes_list.append(var_sizes)
+
+        cpp_kernel_proxy.codegen_loop_bodies(bodies, var_sizes_list)
+        kernel_group.finalize_kernel(cpp_kernel_proxy, [])
+        return kernel_group.loops_code.getvalue()
+
     def store_output(
         self,
         dst: ir.Buffer,
@@ -197,55 +247,20 @@ class CppTemplateKernel(Kernel):
               needed on the indices to `epilogue_nodes` to match the indexing of `dst`.
         """
         assert dst.get_size() == src.get_size()
-        if epilogue_nodes:
-            var_sizes = (tuple(dst.get_size()), ())
-            var_ranges = {
-                sympy.Symbol(f"z{i}"): sz for i, sz in enumerate(var_sizes[0])
-            }
-
-            # epilogues are all pointwises, hence all indexed the same way as dst
-            output_index = dst.get_layout().make_indexer()(var_ranges.keys())
-
-            if not offsets:
-                offsets = [0] * len(var_sizes[0])
-            assert len(offsets) == len(var_sizes[0])
+        if offsets:
             offsets = parse_expr_with_index_symbols(offsets)
-
-            kernel_group = KernelGroup()
-            kernel_group.args = self.args
-            cpp_kernel_proxy = CppKernelProxy(kernel_group)
-            bodies = []
-            var_sizes_list = []
-            for i, node in enumerate(epilogue_nodes):
-                assert isinstance(node, ir.ComputedBuffer)
-                output_name = (
-                    node.get_name() if i < len(epilogue_nodes) - 1 else dst.get_name()
-                )
-
-                def fn(*args):
-                    assert len(args) == 2
-                    assert len(args[0]) == len(var_sizes[0])
-                    assert len(args[1]) == 0
-                    new_args = [arg + offset for arg, offset in zip(args[0], offsets)]  # type: ignore[arg-type]
-                    if reindexer is not None:
-                        new_args = reindexer(new_args)
-                    V.ops.store(
-                        output_name,
-                        output_index,
-                        node.data.make_loader()(new_args).value,
-                    )
-
-                body = ir.LoopBody(fn, (list(var_ranges.keys()), ()), var_ranges)
-                bodies.append(body)
-                var_sizes_list.append(var_sizes)
-
-            cpp_kernel_proxy.codegen_loop_bodies(bodies, var_sizes_list)
-            kernel_group.finalize_kernel(cpp_kernel_proxy, [])
-            return kernel_group.loops_code.getvalue()
+        if epilogue_nodes:
+            return self.store_pointwise_nodes(dst, epilogue_nodes, offsets, reindexer)
         else:
-            # TODO(jgong5): support local acc buffer to avoid assertion below
-            assert dst.get_name() == src.get_name() and dst.layout == src.layout
-            return ""
+            if dst.get_name() != src.get_name():
+                # src is local
+                copy = L.copy(dst, src).data.data
+                with LocalBufferScope(self) as scope:
+                    scope.add_local_buffer(src)
+                    return self.store_pointwise_nodes(dst, [copy])
+            else:
+                assert dst.layout == src.layout
+                return ""
 
 
 class CppTemplateCaller(ir.ChoiceCaller):
