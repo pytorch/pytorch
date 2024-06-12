@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import copyreg
 import enum
 import functools
