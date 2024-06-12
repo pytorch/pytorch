@@ -871,26 +871,26 @@ class TritonKernelOverrides(TritonOverrides):
 
     @staticmethod
     def masked(mask, body, other):
-        handler = V.get_ops_handler()
-        last_op_is_load = False
+        nodes = list(body.graph.nodes)
+        last_node = nodes[-1]
 
-        class FindLoad:
-            def __getattr__(self, name: str) -> Callable[..., CSEVariable]:
-                def inner(*args, **kwargs):
-                    nonlocal last_op_is_load
-                    last_op_is_load = (name == "load" and not V.graph.is_unspec_arg(args[0]))
-                    return getattr(handler, name)(*args, **kwargs)
+        if last_node.op == "output":
+            need_where = False
+            for output in last_node.args:
+                if output.op != "load" or V.graph.is_unspec_arg(output.args[0]):
+                    need_where = True
+                    break
+        else:
+            need_where = True
 
-                return inner
+        if not need_where:
+            with V.kernel.mask_loads(mask, value=other) as new_mask:
+                result = body()
+                result.mask_vars.discard(new_mask)
+                return result
 
-        with V.kernel.mask_loads(mask, value=other) as new_mask, V.set_ops_handler(
-            FindLoad()
-        ):
+        with V.kernel.mask_loads(mask, value=None) as new_mask:
             result = body()
-
-        if last_op_is_load:
-            result.mask_vars.discard(new_mask)
-            return result
 
         # Remove once CSEVariables track the dtype
         if result.bounds.is_bool:
