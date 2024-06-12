@@ -358,7 +358,7 @@ Load weight and input into shared memory:
             // same example, sg mat grid col index: 32 / 2 / 8 = 2, so currently need to work with sg mat at (1, 2)
             short sg_mat_grid_col_index = tiitg / THREAD_PER_ROW_B / 8;
             // now inside sg mat, which index to write to? starting point is SG_MAT_SIZE * sg_mat_offset
-            short row_offset = i & 7;
+            short row_offset = i % 8;
             short col_offset = (tiitg / THREAD_PER_ROW_B) % 8;
             // now calculates the overall offset for shared_memory_B
             short sb_offset = (sg_mat_grid_row_index * 8 + sg_mat_grid_col_index) * 64 + (row_offset * 8 + col_offset);
@@ -539,7 +539,6 @@ K │                  ├──┼──┼──┼──┤  Group 1  │    
 #define N_DST 4        // each SIMD group works on 4 rows
 #define N_SIMDGROUP 2  // number of SIMD groups in a thread group
 #define N_SIMDWIDTH 32 // assuming SIMD group size is 32
-#define QK8_0 32       // 32 weights in each packed weight in ggml block_q8_0 type.
 
 template<typename T>
 kernel void kernel_mul_mv(
@@ -565,7 +564,7 @@ kernel void kernel_mul_mv(
     uint32_t K = sizes.y; // K
     uint32_t N = sizes.z; // N
 
-    const int nb = K/QK8_0;
+    const int nb = K/N_SIMDWIDTH; // number of blocks of 32 elements along K axis
     const int threadgroup_N = tgpig.x; // threadgroup index along N axis.
     const int threadgroup_M = tgpig.y; // threadgroup index along M axis. For matvec multiplication this will always be 0 but keep it for future usage.
     /*
@@ -598,9 +597,9 @@ kernel void kernel_mul_mv(
     const int ix = tiisg/4;
     const int il = tiisg%4;
 
-    // QK8_0 = 32 means we have 32 weights in 1 block_q8_0.
+    // N_SIMDWIDTH = 32 means we have 32 weights in 1 simdgroup.
     // Find the starting point of input that this thread need to work on, load yb into yl.
-    constant T * yb = y + ix * QK8_0 + NB_Q8_0*il;
+    constant T * yb = y + ix * N_SIMDWIDTH + NB_Q8_0*il;
 
     // each thread in a SIMD group deals with NB_Q8_0 quants at a time
     for (short ib = ix; ib < nb; ib += nw/4) {
@@ -613,9 +612,9 @@ kernel void kernel_mul_mv(
         for (short row = 0; row < nr; row++) {
             // Locate where x should be.
             // row offset: row * K
-            // col offset: ib * QK8_0 + il * NB_Q8_0
-            // x index: row * K + ib * QK8_0 + il * NB_Q8_0
-            constant int8_t * qs = (constant int8_t *)(x + row * K + ib * QK8_0 + il * NB_Q8_0);
+            // col offset: ib * N_SIMDWIDTH + il * NB_Q8_0
+            // x index: row * K + ib * N_SIMDWIDTH + il * NB_Q8_0
+            constant int8_t * qs = (constant int8_t *)(x + row * K + ib * N_SIMDWIDTH + il * NB_Q8_0);
             for (short batch = 0; batch < 2; batch++) {
                 short offset = batch * 4;
                 xl[batch][row] = {(float)qs[offset], (float)qs[offset+1], (float)qs[offset+2], (float)qs[offset+3]};
