@@ -3,7 +3,7 @@ from __future__ import annotations
 import itertools
 import logging
 import re
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple, TYPE_CHECKING, Union
 
 import sympy
 
@@ -15,7 +15,7 @@ from ...utils._sympy.value_ranges import ValueRanges
 from .. import config, ir
 from ..codecache import HalideCodeCache
 from ..metrics import is_metric_table_enabled, log_kernel_metadata
-from ..ops_handler import MockHandler, ReductionType, StoreMode
+from ..ops_handler import MockHandler
 
 from ..runtime.hints import HalideInputSpec, HalideMeta, ReductionHint
 from ..utils import (
@@ -39,6 +39,9 @@ from .common import (
 from .cpp import DTYPE_TO_CPP
 from .cpp_utils import cexpr
 from .simd import constant_repr, IterationRangesEntry, SIMDKernel, SIMDScheduling
+
+if TYPE_CHECKING:
+    from ..ops_handler import ReductionType, StoreMode
 
 log = logging.getLogger(__name__)
 
@@ -259,7 +262,7 @@ class HalideOverrides(OpOverrides):
 
     @staticmethod
     def where(a, b, c):
-        return f"hl.select({a}, {b}, {c})"
+        return f"hl.select({a}, {b}, hl.cast({b.name}.type(), {c}))"
 
     @staticmethod
     def cos(x):
@@ -667,12 +670,18 @@ class HalideKernel(SIMDKernel):
             result = self.newfunc(
                 [tree.name for tree in self.range_trees if tree.name in all_dims]
             )
-            self.body.writeline(f"{result.name}_mask = hl.RDom([hl.Range(0, 1)])")
-            self.body.writeline(f"{result.name}_mask.where({self._load_mask})")
-            self.body.writeline(f"{result} = hl.cast({halide_type(dtype)}, 0)")
-            self.body.writeline(
-                f"{result} = {line} + hl.cast({halide_type(dtype)}, {result.name}_mask)"
-            )
+            if result.used_dims:
+                self.body.writeline(f"{result.name}_mask = hl.RDom([hl.Range(0, 1)])")
+                self.body.writeline(f"{result.name}_mask.where({self._load_mask})")
+                self.body.writeline(f"{result} = hl.cast({halide_type(dtype)}, 0)")
+                self.body.writeline(
+                    f"{result} = {line} + hl.cast({halide_type(dtype)}, {result.name}_mask)"
+                )
+            else:
+                # scalar case
+                self.body.writeline(
+                    f"{result} = hl.select({self._load_mask}, {line}, hl.cast({halide_type(dtype)}, 0))"
+                )
             return result
         else:
             return self.genfunc(line, self.used_dims_from_index(index))
@@ -1281,30 +1290,18 @@ class HalideScheduling(SIMDScheduling):
     # TODO(jansel): Halide doesn't actually support 64 bit indexing...
     int64_type = "hl.Int(64)"
     kernel_type = HalideKernel
-    backend_features = dict.fromkeys(
-        [
-            BackendFeature.SCAN,
-            BackendFeature.TUPLE_REDUCTION,
-        ]
-    )
-    backend_features_cpu = dict.fromkeys(
-        [
-            *backend_features,
-        ]
-    )
-    backend_features_cuda = dict.fromkeys(
-        [
-            *backend_features,
-        ]
-    )
 
     @classmethod
     def get_backend_features(cls, device: torch.device):
-        if device.type == "cpu":
-            return cls.backend_features_cpu
-        if device.type == "cuda":
-            return cls.backend_features_cuda
-        raise NotImplementedError(device.type)
+        result = dict.fromkeys(
+            [
+                BackendFeature.TUPLE_REDUCTION,
+                BackendFeature.PREFER_STORE_LOOP_ORDER,
+            ]
+        )
+        if config.halide.scan_kernels:
+            result[BackendFeature.SCAN] = None
+        return result
 
     def define_kernel(self, src_code, node_schedule, kernel):
         """Codegen kernel definition to go in output wrapper code"""

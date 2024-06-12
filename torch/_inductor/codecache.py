@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 from __future__ import annotations
 
 import base64
@@ -1020,7 +1021,7 @@ class FxGraphCache:
                 cache_id = "fx-graph-v1"
                 try:
                     if config.is_fbcode():
-                        from triton.runtime.fb_memcache import (
+                        from triton.fb.fb_memcache import (
                             FbMemcacheRemoteFxGraphCacheBackend,
                         )
 
@@ -1493,7 +1494,7 @@ def valid_vec_isa_list() -> List[VecISA]:
     isa_list = []
     _cpu_supported_isa = x86_isa_checker()
     for isa in supported_vec_isa_list:
-        if str(isa) in _cpu_supported_isa:
+        if str(isa) in _cpu_supported_isa and isa:
             isa_list.append(isa)
     return isa_list
 
@@ -2830,13 +2831,27 @@ class HalideCodeCache(CppPythonBindingsCodeCache):
     cache: Dict[str, Callable[[], Union[ModuleType, CDLL]]] = {}
     cache_clear = staticmethod(cache.clear)
     _standalone_runtime_path: Optional[str] = None
-    glue_template_cpp = textwrap.dedent(
+    prefix = textwrap.dedent(
         """
         #include "{halideruntime_h}"
         #include "{headerfile}"
         #include <stdexcept>
         #include <cmath>
 
+        namespace c10 {{
+            inline long div_floor_integer(long a, long b) {{
+                if ((a<0) != (b<0)) {{
+                    const auto quot = a / b;
+                    const auto rem = a % b;
+                    return rem ? quot - 1 : quot;
+                }}
+                return a / b;
+            }}
+        }}
+        """
+    )
+    glue_template_cpp = prefix + textwrap.dedent(
+        """
         void kernel({argdefs}) {{
             {buffers}
             int err = halide_kernel({buffer_names});
@@ -2844,12 +2859,8 @@ class HalideCodeCache(CppPythonBindingsCodeCache):
         }}
         """
     )
-    glue_template_cuda = textwrap.dedent(
+    glue_template_cuda = prefix + textwrap.dedent(
         """
-        #include "{halideruntime_h}"
-        #include "{headerfile}"
-        #include <stdexcept>
-        #include <cmath>
         #include <cuda.h>
         struct UserContext {{ int device_id; CUcontext *cuda_context; CUstream *stream; }};
 
