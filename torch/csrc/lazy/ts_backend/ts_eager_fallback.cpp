@@ -69,16 +69,16 @@ std::vector<at::Tensor> to_eager(
   return eager_tensors;
 }
 
-std::vector<c10::optional<at::Tensor>> to_eager(
-    const std::vector<c10::optional<at::Tensor>>& tensors,
+std::vector<std::optional<at::Tensor>> to_eager(
+    const std::vector<std::optional<at::Tensor>>& tensors,
     c10::DeviceType device_type) {
   // We can't just call _to_eager() on the entire list of Tensors because it
   // will break on undefined tensors. Separate out undefined tensors first.
-  std::vector<c10::optional<at::Tensor>> eager_tensors(tensors.size());
+  std::vector<std::optional<at::Tensor>> eager_tensors(tensors.size());
   std::vector<at::Tensor> valid_tensors;
   std::vector<bool> to_translate(tensors.size());
   for (size_t i = 0; i < tensors.size(); ++i) {
-    const c10::optional<at::Tensor>& tensor = tensors[i];
+    const std::optional<at::Tensor>& tensor = tensors[i];
     // Explicitly handling undefined tensors here instead of letting `_to_eager`
     // handle it. Otherwise, we'd need to require all backends with their own
     // implementation of _to_eager to properly handle undefined tensors.
@@ -112,10 +112,10 @@ c10::DispatchKey dispatch_key(c10::DeviceType device_type) {
   }
 }
 
-c10::optional<c10::Device> compute_target_device(
+std::optional<c10::Device> compute_target_device(
     std::vector<at::Tensor>& t_args,
     std::vector<c10::List<at::Tensor>> tlist_args,
-    std::vector<c10::List<c10::optional<at::Tensor>>> opt_tlist_args) {
+    std::vector<c10::List<std::optional<at::Tensor>>> opt_tlist_args) {
   // Decide what device to move the output tensor(s) to.
   // The current convention is that we use the first tensor arg to pick the
   // device Barring that, we take the first tensor from a TensorList arg.
@@ -217,7 +217,7 @@ void ts_eager_fallback(
   std::vector<int> tensor_args_indices;
 
   std::vector<c10::List<at::Tensor>> tensorlist_args;
-  std::vector<c10::List<c10::optional<at::Tensor>>> opt_tensorlist_args;
+  std::vector<c10::List<std::optional<at::Tensor>>> opt_tensorlist_args;
 
   // Step 1: Convert all non-eager tensor inputs into eager tensors and put them
   // on the stack at the correct indices.
@@ -236,7 +236,7 @@ void ts_eager_fallback(
       (*stack)[arguments_begin + idx] = std::move(eager_ivalue);
       tensorlist_args.push_back(ivalue.toTensorList());
     } else if (ivalue.isOptionalTensorList()) {
-      auto eager_ivalue = c10::IValue(c10::List<c10::optional<at::Tensor>>(
+      auto eager_ivalue = c10::IValue(c10::List<std::optional<at::Tensor>>(
           to_eager(ivalue.toOptionalTensorVector(), device_type)));
       (*stack)[arguments_begin + idx] = std::move(eager_ivalue);
       opt_tensorlist_args.push_back(ivalue.toOptionalTensorList());
@@ -323,7 +323,7 @@ void ts_eager_fallback(
               "mutable alias: ",
               schema_returns[idx]);
         } else {
-          c10::optional<c10::Device> tgt_device = compute_target_device(
+          std::optional<c10::Device> tgt_device = compute_target_device(
               tensor_args, tensorlist_args, opt_tensorlist_args);
           if (alias_info != nullptr && !alias_info->isWrite()) {
             // immutable alias (view) case: Warn here, since we're copying and

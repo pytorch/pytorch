@@ -16,7 +16,7 @@ try:
 except ImportError:
     if __name__ == "__main__":
         sys.exit(0)
-    raise unittest.SkipTest("requires triton")  # noqa: TRY200
+    raise unittest.SkipTest("requires triton")  # noqa: B904
 
 from torch._inductor import config
 from torch._inductor.runtime.coordinate_descent_tuner import CoordescTuner

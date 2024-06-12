@@ -814,7 +814,7 @@ static void elu_variants_out_mps(const Tensor& self,
   auto resultMemFormat = result.suggest_memory_format();
   bool executeGatherOp = !(self.is_contiguous(resultMemFormat) && result.is_contiguous(resultMemFormat));
   Tensor out;
-  if (executeGatherOp && resultMemFormat == MemoryFormat::ChannelsLast) {
+  if (executeGatherOp) {
     out = at::empty_like(result, MemoryFormat::Contiguous);
   }
 

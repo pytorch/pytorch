@@ -29,6 +29,7 @@ from .eval_frame import (
     reset_code,
 )
 from .external_utils import is_compiling
+from .mutation_guard import GenerationTracker
 from .utils import graph_break_reasons, guard_failures, orig_code_map, reset_frame_count
 
 __all__ = [
@@ -82,6 +83,7 @@ def reset() -> None:
         convert_frame.FRAME_COUNTER = 0
         convert_frame.FRAME_COMPILE_COUNTER.clear()
         callback_handler.clear()
+        GenerationTracker.clear()
 
 
 def reset_code_caches() -> None:

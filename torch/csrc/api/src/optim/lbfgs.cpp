@@ -67,7 +67,7 @@ bool if_container_equal(T lhs, T rhs) {
 }
 
 bool operator==(const LBFGSParamState& lhs, const LBFGSParamState& rhs) {
-  auto isNull = [](const c10::optional<std::vector<Tensor>>& val) {
+  auto isNull = [](const std::optional<std::vector<Tensor>>& val) {
     return val == c10::nullopt;
   };
   return (lhs.func_evals() == rhs.func_evals()) &&
@@ -194,7 +194,7 @@ static double _cubic_interpolate(
     double x2,
     double f2,
     double g2,
-    c10::optional<std::tuple<double, double>> bounds = c10::nullopt) {
+    std::optional<std::tuple<double, double>> bounds = c10::nullopt) {
   // ported from https://github.com/torch/optim/blob/master/polyinterp.lua
   // Compute bounds of interpolation area
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)

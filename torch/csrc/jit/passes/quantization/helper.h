@@ -32,7 +32,7 @@ TORCH_API bool isBiasOfConvOrLinear(Value* v);
 TORCH_API bool isEmbeddingBagNonInput(Value* v);
 
 // Get the use as scalar input of clamp ops for the input value
-c10::optional<Use> getClampScalarInputUse(Value* v);
+std::optional<Use> getClampScalarInputUse(Value* v);
 
 // For a given value `v`, get the list of values that we need to check
 // if they are observed/quantized or not, if so, we can say the
@@ -59,7 +59,7 @@ TORCH_API bool hitGraphInput(Value* value);
 TORCH_API std::string removeTorchMangle(const std::string& orig_name);
 
 // Return the module name that corresponds to the value.
-TORCH_API c10::optional<std::string> getModuleName(Value* value);
+TORCH_API std::optional<std::string> getModuleName(Value* value);
 
 // =========== helper functions for Node =========
 TORCH_API bool isSingleInputGeneralShapeAtenFunction(Node* n);
@@ -91,7 +91,7 @@ TORCH_API bool isPropagateQuantOp(Node* n);
 // quantized::{op}_scalar
 TORCH_API bool isBinaryOpWithScalarInput(Node* n);
 
-TORCH_API c10::optional<std::tuple<c10::QScheme, QParamVector>> getFixedQParams(
+TORCH_API std::optional<std::tuple<c10::QScheme, QParamVector>> getFixedQParams(
     Node* n);
 
 // We don't want to analyze the graph for some `builtin` CallFunctions
@@ -121,14 +121,14 @@ TORCH_API std::shared_ptr<Graph> getCallFunctionGraph(Node* n);
 bool matchCallFuncToUse(
     const Use& use,
     const std::string& func_name,
-    c10::optional<int> nth_arg);
+    std::optional<int> nth_arg);
 
 // Check if `use` is a AtenFunction of name `func_name` and if value
 // `v` is the nth argument (if provided) of the function
 bool matchAtenFuncToUse(
     const Use& use,
     const std::string& func_name,
-    c10::optional<int> nth_arg);
+    std::optional<int> nth_arg);
 
 // =========== helper functions for Block =========
 // checks if a block will always raise an Exception
@@ -151,7 +151,7 @@ TORCH_API Module getInvokedModule(Module& module, Node* n, Value* self);
 // Given an CallMethod node, get the module instance corresponding
 // to the instance Value if the instance is a module, otherwise return
 // c10::nullopt
-c10::optional<Module> getInvokedModuleOpt(
+std::optional<Module> getInvokedModuleOpt(
     const Module& module,
     Node* n,
     Value* self);

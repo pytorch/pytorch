@@ -536,7 +536,7 @@ static PyObject* get_autocast_dtype(
   auto r = parser.parse(args, kwargs, parsed_args);
   auto device_type = at::Device(r.string(0)).type();
   at::ScalarType current_dtype = at::autocast::get_autocast_dtype(device_type);
-  return Py_NewRef(torch::getTHPDtype(current_dtype));
+  return utils::wrap(current_dtype);
   END_HANDLE_TH_ERRORS
 }
 
@@ -733,7 +733,7 @@ static PyObject* get_autocast_gpu_dtype(PyObject* _unused, PyObject* arg) {
   TORCH_WARN_DEPRECATION(
       "torch.get_autocast_gpu_dtype() is deprecated. Please use torch.get_autocast_dtype('cuda') instead.")
   at::ScalarType current_dtype = at::autocast::get_autocast_dtype(at::kCUDA);
-  return Py_NewRef(torch::getTHPDtype(current_dtype));
+  return utils::wrap(current_dtype);
   END_HANDLE_TH_ERRORS
 }
 
@@ -742,7 +742,7 @@ static PyObject* get_autocast_cpu_dtype(PyObject* _unused, PyObject* arg) {
   TORCH_WARN_DEPRECATION(
       "torch.get_autocast_cpu_dtype() is deprecated. Please use torch.get_autocast_dtype('cpu') instead.")
   at::ScalarType current_dtype = at::autocast::get_autocast_dtype(at::kCPU);
-  return Py_NewRef(torch::getTHPDtype(current_dtype));
+  return utils::wrap(current_dtype);
   END_HANDLE_TH_ERRORS
 }
 
@@ -751,7 +751,7 @@ static PyObject* get_autocast_ipu_dtype(PyObject* _unused, PyObject* arg) {
   TORCH_WARN_DEPRECATION(
       "torch.get_autocast_ipu_dtype() is deprecated. Please use torch.get_autocast_dtype('ipu') instead.")
   at::ScalarType current_dtype = at::autocast::get_autocast_dtype(at::kIPU);
-  return Py_NewRef(torch::getTHPDtype(current_dtype));
+  return utils::wrap(current_dtype);
   END_HANDLE_TH_ERRORS
 }
 
@@ -760,7 +760,7 @@ static PyObject* get_autocast_xla_dtype(PyObject* _unused, PyObject* arg) {
   TORCH_WARN_DEPRECATION(
       "torch.get_autocast_xla_dtype() is deprecated. Please use torch.get_autocast_dtype('xla') instead.")
   at::ScalarType current_dtype = at::autocast::get_autocast_dtype(at::kXLA);
-  return Py_NewRef(torch::getTHPDtype(current_dtype));
+  return utils::wrap(current_dtype);
   END_HANDLE_TH_ERRORS
 }
 
@@ -1081,7 +1081,7 @@ static PyObject* push_on_torch_dispatch_stack(
     using c10::impl::TorchDispatchModeKey;
     // When we push a mode onto the mode stack, we need to
     // check if it's an "infra" mode, by checking its _mode_key attribute.
-    c10::optional<c10::impl::TorchDispatchModeKey> mode_key = c10::nullopt;
+    std::optional<c10::impl::TorchDispatchModeKey> mode_key = c10::nullopt;
     py::object maybe_mode_key_obj =
         PyObject_FastGetAttrString(arg, "_mode_key");
     if (maybe_mode_key_obj) {
@@ -1105,7 +1105,7 @@ static PyObject* pop_torch_dispatch_stack(
     PyObject* _unused,
     PyObject* maybe_mode_key) {
   HANDLE_TH_ERRORS
-  c10::optional<c10::impl::TorchDispatchModeKey> mode_key = c10::nullopt;
+  std::optional<c10::impl::TorchDispatchModeKey> mode_key = c10::nullopt;
   PyObject* r = nullptr;
   if (maybe_mode_key != Py_None) {
     mode_key = py::cast<c10::impl::TorchDispatchModeKey>(maybe_mode_key);

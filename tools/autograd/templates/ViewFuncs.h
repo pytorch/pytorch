@@ -20,7 +20,7 @@ using at::IntArrayRef;
 using at::ArrayRef;
 using at::Type;
 using at::ScalarType;
-using c10::optional;
+using std::optional;
 using c10::fmap;
 
 ${view_func_declarations}
