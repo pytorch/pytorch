@@ -27,15 +27,11 @@ from torch.fx.experimental.symbolic_shapes import (
     guard_float,
     guard_int,
     GuardOnDataDependentSymNode,
+    hint_int,
     is_symbolic,
     ShapeEnv,
     StatelessSymbolicContext,
     statically_known_true,
-)
-from torch.testing._internal.common_symbolic_shapes import (
-    create_symbool,
-    create_symfloat,
-    create_symint,
 )
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -192,6 +188,38 @@ def create_symbolic_tensor(name, arg, shape_env, source=None, dynamic_dims=None)
         arg.device,
         sym_storage_offset,
     )
+
+
+def create_symtype(cls, pytype, shape_env, val, duck=True):
+    from torch._dynamo.source import ConstantSource
+
+    symbol = shape_env.create_symbol(
+        val,
+        source=ConstantSource(f"__testing_only{len(shape_env.var_to_val)}"),
+        dynamic_dim=DimDynamic.DUCK if duck else DimDynamic.DYNAMIC,
+        constraint_dim=None,
+    )
+    return cls(
+        SymNode(
+            symbol,
+            shape_env,
+            pytype,
+            hint=val,
+        )
+    )
+
+
+# TODO: default duck to False
+def create_symint(shape_env, i: int, duck=True) -> SymInt:
+    return create_symtype(SymInt, int, shape_env, i, duck=duck)
+
+
+def create_symbool(shape_env, b: bool) -> SymBool:
+    return create_symtype(SymBool, bool, shape_env, b)
+
+
+def create_symfloat(shape_env, f: float) -> SymFloat:
+    return create_symtype(SymFloat, float, shape_env, f)
 
 
 @skipIfTorchDynamo(
@@ -2438,6 +2466,40 @@ def specify_constraints(a, b, c, d, e, f):
 
         self.assertEqual(static_code, expected_static)
         self.assertEqual(dynamic_code, expected_dynamic)
+
+
+class TestGuardsExpressions(TestCase):
+    """
+    Tests the guards-related methods used by the inductor FX graph cache.
+    """
+
+    def test_guards_gt_lt(self):
+        shape_env = ShapeEnv()
+        s0 = create_symint(shape_env, 6)
+        s1 = create_symint(shape_env, 7)
+        s2 = create_symint(shape_env, 5)
+
+        guard_int(sym_int(s0 > 5))
+        guard_int(sym_int(s0 < 7))
+
+        guards = shape_env.produce_guards_expression([s0])
+
+        self.assertTrue(shape_env.evaluate_guards_expression(guards, [hint_int(s0)]))
+        self.assertFalse(shape_env.evaluate_guards_expression(guards, [hint_int(s1)]))
+        self.assertFalse(shape_env.evaluate_guards_expression(guards, [hint_int(s2)]))
+
+    def test_guards_float_div(self):
+        shape_env = ShapeEnv()
+        s0 = create_symint(shape_env, 8)
+        s1 = create_symint(shape_env, 7)
+
+        guard_int(sym_int(s0 / 2.0))
+        guards = shape_env.produce_guards_expression([s0])
+
+        self.assertIn("ToFloat", guards)
+        self.assertIn("FloatTrueDiv", guards)
+        self.assertTrue(shape_env.evaluate_guards_expression(guards, [hint_int(s0)]))
+        self.assertFalse(shape_env.evaluate_guards_expression(guards, [hint_int(s1)]))
 
 
 if __name__ == "__main__":
