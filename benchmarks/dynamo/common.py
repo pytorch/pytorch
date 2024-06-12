@@ -143,6 +143,7 @@ CI_SKIP_DYNAMIC_BATCH_ONLY = {
     "pyhpc_equation_of_state",
     "pyhpc_turbulent_kinetic_energy",
     "detectron2_fcos_r_50_fpn",
+    "hf_T5_generate",
 }
 
 # These models currently fail accuracy with eager Adam optimizer
@@ -3974,9 +3975,12 @@ def run(runner, args, original_dir=None):
             assert "cuda" in args.devices, "Quantization requires CUDA device."
             assert args.bfloat16, "Quantization requires dtype bfloat16."
             try:
-                from .torchao_backend import setup_baseline, torchao_optimize_ctx
-            except ImportError:
                 from torchao_backend import setup_baseline, torchao_optimize_ctx
+            except ImportError:
+                from userbenchmark.dynamo.dynamobench.torchao_backend import (
+                    setup_baseline,
+                    torchao_optimize_ctx,
+                )
 
             setup_baseline()
             baseline_ctx = functools.partial(

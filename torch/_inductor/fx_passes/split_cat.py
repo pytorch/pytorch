@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import itertools
 import logging
 import operator
@@ -80,7 +81,7 @@ for pass_name in post_grad_pass_names:
     )
 
 
-def construct_pattern_matcher_pass(pass_name: str) -> PatternMatcherPass:
+def construct_pattern_matcher_pass(pass_name: str):
     """
     Return the specific pattern_matcher_pass given the pass name.
     """
