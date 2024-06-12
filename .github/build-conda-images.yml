@@ -1,0 +1,47 @@
+name: Build conda docker images
+
+on:
+  push:
+    branches:
+      - main
+      - release/*
+    tags:
+      # NOTE: Binary build pipelines should only get triggered on release candidate or nightly builds
+      # Release candidate tags look like: v1.11.0-rc1
+      - v[0-9]+.[0-9]+.[0-9]+-rc[0-9]+
+    paths:
+      - conda/Dockerfile
+      - 'common/*'
+      - .github/workflows/build-conda-images.yml
+  pull_request:
+    paths:
+      - conda/Dockerfile
+      - 'common/*'
+      - .github/workflows/build-conda-images.yml
+
+env:
+  DOCKER_REGISTRY: "docker.io"
+  DOCKER_BUILDKIT: 1
+  DOCKER_ID: ${{ secrets.DOCKER_ID }}
+  DOCKER_TOKEN: ${{ secrets.DOCKER_TOKEN }}
+  WITH_PUSH: ${{ github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release')) }}
+
+jobs:
+  build-docker:
+    runs-on: linux.12xlarge
+    strategy:
+      matrix:
+        cuda_version: ["11.8", "12.1", "12.4", "cpu"]
+    env:
+      CUDA_VERSION: ${{ matrix.cuda_version }}
+    steps:
+      - name: Checkout PyTorch builder
+        uses: actions/checkout@v3
+      - name: Authenticate if WITH_PUSH
+        run: |
+          if [[ "${WITH_PUSH}" == true ]]; then
+            echo "${DOCKER_TOKEN}" | docker login -u "${DOCKER_ID}" --password-stdin
+          fi
+      - name: Build Docker Image
+        run: |
+          scripts/docker/build_docker.sh
