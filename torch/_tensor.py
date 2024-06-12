@@ -761,22 +761,22 @@ class Tensor(torch._C.TensorBase):
         return torch.norm(self, p, dim, keepdim, dtype=dtype)
 
     def solve(self, other):
-        from ._linalg_utils import solve
+        from torch._linalg_utils import solve
 
         return solve(self, other)
 
     def lstsq(self, other):
-        from ._linalg_utils import lstsq
+        from torch._linalg_utils import lstsq
 
         return lstsq(self, other)
 
     def eig(self, eigenvectors=False):
-        from ._linalg_utils import eig
+        from torch._linalg_utils import eig
 
         return eig(self, eigenvectors=eigenvectors)
 
     def symeig(self, eigenvectors=False):
-        from ._linalg_utils import _symeig
+        from torch._linalg_utils import _symeig
 
         return _symeig(self, eigenvectors=eigenvectors)
 
