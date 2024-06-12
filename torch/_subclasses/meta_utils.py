@@ -778,10 +778,6 @@ class MetaConverter:
             # NB: t.ctx could be None if the subclass in question has no
             # meaningful context
 
-            assert symbolic_context is None or isinstance(
-                symbolic_context, SubclassSymbolicContext
-            )
-
             # Note: transform_subclass will use __tensor_unflatten__ to generate
             # a fresh subclass wrapper with outer sizes / strides according to the
             # outer symbolic context (passed in to this function). Inner size / stride
@@ -791,101 +787,62 @@ class MetaConverter:
             #
             # Morally, the code here is same as transform_subclass, but we've
             # written it from scratch to read EmptyCreateSubclass
-
             outer_size = outer_size if outer_size is not None else t.size
             outer_stride = outer_stride if outer_stride is not None else t.stride
 
-            def transform(attr, inner_t, prefix):
-                if is_traceable_wrapper_subclass(inner_t):
-                    return inner_t
+            assert symbolic_context is None or isinstance(
+                symbolic_context, SubclassSymbolicContext
+            )
 
-                attr_fqn = prefix + "." + attr if prefix != "" else attr
-                attr_list = attr_fqn.split(".")
-                attr_source = None
-                current_source = source
-                for a in attr_list:
-                    attr_source = AttrSource(current_source, a)
-                    current_source = attr_source
-
-                context = None
-                if symbolic_context is not None:
-                    current_context = symbolic_context
-                    for a in attr_list:
-                        context = current_context.inner_contexts[a]
-                        current_context = context
-
-                r = callback(
-                    lambda: empty_create(
-                        inner_t,
-                        attr_source,
-                        symbolic_context=context,
-                    )
-                )
-                if self.copy_data:
-                    with torch.no_grad(), no_dispatch():
-                        r.real_tensor = torch.empty_strided(
-                            inner_t.size,
-                            inner_t.stride,
-                            dtype=inner_t.dtype,
-                            device=inner_t.device,
-                        )
-                        assert inner_t.data is not None
-                        _safe_copy(r.real_tensor, inner_t.data)
-                return r
-
-            def _get_size(obj):
-                if obj is not t:
-                    return obj.size
-                return outer_size if outer_size is not None else obj.size
-
-            def _get_strides(obj):
-                if obj is not t:
-                    return obj.stride
-                return outer_stride if outer_stride is not None else obj.stride
-
-            rebuild_stack = []
-            plain_meta_tensors = []
-            todo = [(t, "")]
-            while todo:
-                obj, prefix = todo.pop()
-                rebuild_stack.append(
-                    (
-                        obj,
-                        obj.ctx,
-                        prefix,
-                        list(obj.attrs.keys()),
-                        _get_size(obj),
-                        _get_strides(obj),
-                    )
-                )
-                for attr_name, inner_meta in obj.attrs.items():
-                    if inner_meta.attrs is None:
-                        plain_meta_tensors.append(inner_meta)
-                    else:
-                        todo.append(
-                            (
-                                inner_meta,
-                                prefix + "." + attr_name if prefix != "" else attr_name,
-                            )
-                        )
-
-            todo = plain_meta_tensors
-            for ts, meta, prefix, inner_keys, outer_size, outer_strides in reversed(
-                rebuild_stack
+            def _empty_create_subclass(
+                t, outer_size, outer_stride, symbolic_context, callback, source
             ):
-                nb_tensor = len(inner_keys)
-                inner_tensors = {
-                    a: transform(a, b, prefix)
-                    for a, b in zip(inner_keys, todo[:nb_tensor])
-                }
-                todo = todo[nb_tensor:]
-                rebuilt = ts.type.__tensor_unflatten__(
-                    inner_tensors, meta, outer_size, outer_strides
-                )
-                todo.append(rebuilt)
-            assert len(todo) == 1
+                # We are hitting plain meta_desc tensor so actually
+                # create a tensor here.
+                if t.attrs is None:
+                    r = callback(
+                        lambda: empty_create(
+                            t,
+                            source,
+                            symbolic_context,
+                        )
+                    )
+                    if self.copy_data:
+                        with torch.no_grad(), no_dispatch():
+                            r.real_tensor = torch.empty_strided(
+                                t.size,
+                                t.stride,
+                                dtype=t.dtype,
+                                device=t.device,
+                            )
+                            assert t.data is not None
+                            _safe_copy(r.real_tensor, t.data)
+                    return r
 
-            sub = todo[0]
+                inner_tensors = {}
+                for attr, meta_tensor_desc in t.attrs.items():
+                    current_context = None
+                    if symbolic_context is not None:
+                        current_context = symbolic_context.inner_contexts[attr]
+
+                    current_source = AttrSource(source, attr)
+                    new_empty_tensor = _empty_create_subclass(
+                        meta_tensor_desc,
+                        meta_tensor_desc.size,
+                        meta_tensor_desc.stride,
+                        current_context,
+                        callback,
+                        current_source,
+                    )
+                    inner_tensors[attr] = new_empty_tensor
+
+                return t.type.__tensor_unflatten__(
+                    inner_tensors, t.ctx, outer_size, outer_stride
+                )
+
+            sub = _empty_create_subclass(
+                t, outer_size, outer_stride, symbolic_context, callback, source
+            )
 
             # NB: Purposefully guard here to simplify the inner / outer symbols.
             # Using sym_eq() for symbolic comparison can result in an expression that's too

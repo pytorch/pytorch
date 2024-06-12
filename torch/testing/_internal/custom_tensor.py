@@ -18,7 +18,7 @@ class CustomTensor(torch.Tensor):
         kwargs["requires_grad"] = elem.requires_grad
         kwargs["dtype"] = elem.dtype
         return torch.Tensor._make_wrapper_subclass(cls, shape, **kwargs)
-        
+
     def __init__(self, elem):
         self.elem = elem
         self.constant_attribute = 4
