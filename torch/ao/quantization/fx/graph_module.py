@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 import torch
 import copy
 from torch.fx import GraphModule

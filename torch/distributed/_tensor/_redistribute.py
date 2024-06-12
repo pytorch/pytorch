@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 # Copyright (c) Meta Platforms, Inc. and affiliates
 from functools import lru_cache
 from typing import cast, Dict, List, NamedTuple, Tuple
@@ -13,7 +12,6 @@ from torch.distributed._tensor.placement_types import (
     Placement,
     Replicate,
     Shard,
-    TensorMeta,
 )
 
 
@@ -285,12 +283,15 @@ class Redistribute(torch.autograd.Function):
         else:
             # use the same local tensor if placements are the same.
             output = input._local_tensor
-            target_spec = current_spec
 
         return dtensor.DTensor(
             output,
-            target_spec,
+            device_mesh,
+            placements,
+            shape=input.shape,
+            dtype=input.dtype,
             requires_grad=input.requires_grad,
+            stride=input.stride(),
         )
 
     @staticmethod
@@ -315,20 +316,14 @@ class Redistribute(torch.autograd.Function):
                 normalized_placements.append(Replicate())
             else:
                 normalized_placements.append(previous_placement)
-
-        spec = DTensorSpec(
-            previous_spec.device_mesh,
-            tuple(normalized_placements),
-            tensor_meta=TensorMeta(
-                shape=grad_output.shape,
-                stride=grad_output.stride(),
-                dtype=grad_output.dtype,
-            ),
-        )
         output_dtensor = dtensor.DTensor(
             output,
-            spec,
+            previous_spec.mesh,
+            tuple(normalized_placements),
+            shape=grad_output.shape,
+            dtype=grad_output.dtype,
             requires_grad=grad_output.requires_grad,
+            stride=grad_output.stride(),
         )
 
         return (

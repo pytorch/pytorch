@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 import logging
 import operator
 from dataclasses import dataclass

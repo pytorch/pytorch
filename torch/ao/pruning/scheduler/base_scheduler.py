@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 
 from torch.ao.pruning import BaseSparsifier
 

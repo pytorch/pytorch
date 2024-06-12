@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 import torch
 
 from torch.fx.node import Node

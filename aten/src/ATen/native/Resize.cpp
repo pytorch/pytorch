@@ -231,6 +231,14 @@ TensorImpl* resize_impl_cpu_(
   return _resize_impl_(self, size, stride, resize_storage);
 }
 
+static TensorImpl* resize_impl_meta_(
+    TensorImpl* self,
+    c10::SymIntArrayRef size,
+    at::OptionalSymIntArrayRef stride,
+    bool resize_storage = true) {
+  return _resize_impl_(self, size, stride, resize_storage);
+}
+
 template <typename T>
 const Tensor& _resize_(
     const Tensor& self,

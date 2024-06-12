@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 import sys
 from typing import Any, Callable, Iterable, List, Tuple
 

@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 # mypy: disable-error-code="method-assign"
 
 import functools
@@ -8,7 +7,7 @@ import torch.nn
 from torch.nn import Module
 from . import config
 
-from .utils import ExactWeakKeyDictionary, is_lazy_module, nn_module_has_global_hooks
+from .utils import ExactWeakKeyDictionary, is_lazy_module
 
 
 class MutationTracker:
@@ -109,9 +108,6 @@ def is_dynamic_nn_module(obj, is_export):
         and config.inline_inbuilt_nn_modules
         and not is_export
     ):
-        return True
-
-    if isinstance(obj, torch.nn.Module) and nn_module_has_global_hooks():
         return True
     dyn = GenerationTracker.dynamic_classes.get(type(obj)) or GenerationTracker.check(
         obj

@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 import dataclasses
 import tempfile
 from collections import defaultdict

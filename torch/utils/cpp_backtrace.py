@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 from torch._C import _get_cpp_backtrace
 
 def get_cpp_backtrace(frames_to_skip=0, maximum_number_of_frames=64) -> str:

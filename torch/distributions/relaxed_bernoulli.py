@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 from numbers import Number
 
 import torch
@@ -31,10 +30,10 @@ class LogitRelaxedBernoulli(Distribution):
         logits (Number, Tensor): the log-odds of sampling `1`
 
     [1] The Concrete Distribution: A Continuous Relaxation of Discrete Random
-    Variables (Maddison et al., 2017)
+    Variables (Maddison et al, 2017)
 
     [2] Categorical Reparametrization with Gumbel-Softmax
-    (Jang et al., 2017)
+    (Jang et al, 2017)
     """
     arg_constraints = {"probs": constraints.unit_interval, "logits": constraints.real}
     support = constraints.real

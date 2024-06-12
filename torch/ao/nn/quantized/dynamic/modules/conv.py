@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 r"""Dynamically quantized convolution modules."""
 
 import torch

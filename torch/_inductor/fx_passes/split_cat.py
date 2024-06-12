@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 import itertools
 import logging
 import operator
@@ -1708,10 +1707,6 @@ def merge_unbind_stack_aten(match: Match, *args, **kwargs):
     if get_arg_value(select_nodes[0], 2, "index") != 0 or not is_sorted_and_consecutive(
         [get_arg_value(select_node, 2, "index") for select_node in select_nodes]
     ):
-        return
-    # check the users of parent of select node only from unsqueeze nodes that go to the cat node
-    # we simply check the number of users of the parent of select node
-    if len(parent_of_select_node.users.keys()) != len(node.args[0]):  # type: ignore[arg-type]
         return
     node.replace_all_uses_with(parent_of_select_node)
     graph.erase_node(node)

@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 import logging
 from torch.ao.pruning._experimental.data_sparsifier.base_data_sparsifier import SUPPORTED_TYPES
 

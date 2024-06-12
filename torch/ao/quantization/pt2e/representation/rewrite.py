@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 import torch
 from torch.fx import GraphModule
 from ..export_utils import _WrapperModule

@@ -2,7 +2,8 @@
 
 #include <c10/core/impl/TorchDispatchModeTLS.h>
 
-namespace torch::torch_dispatch_mode {
+namespace torch {
+namespace torch_dispatch_mode {
 
 struct StashTorchDispatchModeGuard {
  public:
@@ -53,4 +54,5 @@ struct StashTorchDispatchStackGuard {
   c10::impl::TorchDispatchModeTLS saved_state_;
 };
 
-} // namespace torch::torch_dispatch_mode
+} // namespace torch_dispatch_mode
+} // namespace torch
