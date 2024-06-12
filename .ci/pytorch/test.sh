@@ -1175,6 +1175,10 @@ test_executorch() {
   source .ci/scripts/utils.sh
   build_executorch_runner "cmake"
 
+  echo "Run ExecuTorch unit tests"
+  pytest -v -n auto
+  source test/run_oss_cpp_tests.sh
+
   echo "Run ExecuTorch regression tests for some models"
   # NB: This is a sample model, more can be added here
   export PYTHON_EXECUTABLE=python
