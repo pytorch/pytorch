@@ -128,6 +128,7 @@ def driver_allocated_memory() -> int:
     """
     return torch._C._mps_driverAllocatedMemory()
 
+
 def recommended_max_memory() -> int:
     r"""Returns recommended max Working set size for GPU memory in bytes.
 
