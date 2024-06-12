@@ -1732,6 +1732,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             with self.assertRaisesRegex(Exception, "custom error msg"):
                 device = x.untyped_storage()
 
+        @torch._dynamo.config.patch("inline_inbuilt_nn_modules", False)
         def test_static_inputs_address_mutation_log(self):
             class Goo(torch.nn.Module):
                 def __init__(self) -> None:
