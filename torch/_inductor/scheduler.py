@@ -801,6 +801,7 @@ class SchedulerNode(BaseSchedulerNode):
     ) -> None:
         new_order = self.decide_new_loop_order(self_dep, other_dep)
         if new_order:
+            metrics.num_loop_reordering += 1
             loop_ordering_log.debug(
                 "Reorder loops for %s with order %s", self.get_name(), new_order
             )
@@ -2398,7 +2399,11 @@ class Scheduler:
         elif not node2.is_reduction():
             node2.reorder_loops_by_dep_pair(rhs_dep, lhs_dep)
         else:
-            # we don't reorder loops if both nodes are reductions
+            loop_ordering_log.debug(
+                "Don't reorder loops since both ndoes are reductions: %s v.s. %s",
+                node1.get_name(),
+                node2.get_name(),
+            )
             pass
 
         return self.score_fusion_memory(node1, node2) > 0

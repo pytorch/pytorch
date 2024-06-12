@@ -203,6 +203,21 @@ class LoopOrderingTest(TestCase):
         self.do_acc_test(f, x)
         self.assertEqual(1, metrics.generated_kernel_count)
 
+    @inductor_config.patch(split_reductions=False)
+    def test_different_reduction_order(self):
+        """
+        We should not reorder loops in this case. Since reordering loops does
+        not help!
+        """
+
+        def f(x):
+            return x.sum(dim=0), x.sum(dim=1)
+
+        x = torch.randn(1024, 2048)
+        self.do_acc_test(f, x)
+        self.assertEqual(2, metrics.generated_kernel_count)
+        self.assertEqual(0, metrics.num_loop_reordering)
+
 
 if __name__ == "__main__":
     if HAS_CUDA:

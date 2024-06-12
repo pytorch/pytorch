@@ -399,6 +399,9 @@ class _RecordLoadStoreInner(V.MockHandler):  # type: ignore[name-defined]
             Reduction has last (reduced) dim in its sizes, but
             downstream users won't.  Normalize this away.
             """
+            if not isinstance(index, sympy.Expr):
+                # index can be an int
+                return
             free_symbols = index.free_symbols
             while var_names and var_names[-1] not in free_symbols:
                 var_names.pop()
