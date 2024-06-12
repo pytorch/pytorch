@@ -86,7 +86,7 @@ def scatter_kwargs(
 def gather(outputs: Any, target_device: Union[int, torch.device], dim: int = 0) -> Any:
     r"""Gather tensors from different GPUs on a specified device.
 
-    This function is useful for collecting the results of a distributed computation.
+    This function is useful for gathering the results of a distributed computation.
     It takes a sequence of objects, one for each GPU, and returns a single object
     on the specified device.
 
@@ -120,4 +120,4 @@ def gather(outputs: Any, target_device: Union[int, torch.device], dim: int = 0) 
         res = gather_map(outputs)
     finally:
         gather_map = None  # type: ignore[assignment]
-    return res	
+    return res
