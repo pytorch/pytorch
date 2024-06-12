@@ -472,7 +472,7 @@ class DDPOptimizer:
         processed_modules.add(mod)
         for name, param in mod.named_parameters():
             if param.requires_grad and not self._ignore_parameter(param):
-                self.add_param(bucket, param, f"{prefix}.{name}")
+                self.add_param(bucket, param, f"{prefix}_{name}")
 
     def add_param_args(self, bucket, node):
         for arg in node.args:
@@ -480,12 +480,12 @@ class DDPOptimizer:
                 continue
             if arg.op != "placeholder":
                 continue
-            # DELETE COMMET BEFORE LANDONG:
-            # I am assuming that Params should have example values associated, is that a correct assumption?
             param = arg.meta["example_value"]
-            if not isinstance(param, torch.nn.Parameter):
-                continue
-            if param.requires_grad and not self._ignore_parameter(param):
+            if (
+                isinstance(param, torch.nn.Parameter)
+                and param.requires_grad
+                and not self._ignore_parameter(param)
+            ):
                 self.add_param(bucket, param, arg.target)
 
     def compile_fn(self, gm: fx.GraphModule, example_inputs: List[torch.Tensor]):
@@ -553,14 +553,13 @@ class DDPOptimizer:
                         # This handles situations like  tmp = torch.mm(x, self.weight.t())
                         # t: "f32[512, 512]" = l_self_seq_2_weight.t();  l_self_seq_2_weight = None
                         # tmp: "f32[512, 512]" = torch.mm(input_2, t);  input_2 = t = None
-
-                        # DELETE THIS COMMENT BEFORE LANDING SHALL WE ONLY HANDLE .t()
-                        self.add_param_args(buckets[0], node)
                         pass
                     if target_mod is not None and target_mod not in processed_modules:
                         self.add_module_params_to_bucket(
                             target_mod, buckets[0], processed_modules, node.target
                         )
+
+                    self.add_param_args(buckets[0], node)
 
             elif node.op == "get_attr":
                 maybe_param = getattr(gm, node.target)
