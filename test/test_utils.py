@@ -1178,11 +1178,11 @@ class TestDeviceUtils(TestCase):
             kwargs.pop("device", None)
             with torch.device("meta"):
                 r = func(sample.input, *sample.args, **kwargs)
+
             def is_meta_device(x: torch.Tensor) -> bool:
                 return x.device.type == "meta"
-            self.assertTrue(
-                tree_all_only(torch.Tensor, is_meta_device, r)
-            )
+
+            self.assertTrue(tree_all_only(torch.Tensor, is_meta_device, r))
 
 
 instantiate_device_type_tests(TestDeviceUtils, globals())
