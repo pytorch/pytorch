@@ -13,10 +13,6 @@
 #if AT_CUDNN_ENABLED()
 
 #endif
-
-#if AT_CUSPARSELT_ENABLED()
-
-#endif
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/CUDAGeneratorImpl.h>
 #include <ATen/cuda/CachingHostAllocator.h>
@@ -1943,7 +1939,7 @@ void initModule(PyObject* module) {
 #if defined(USE_CUSPARSELT)
   shared::initCusparseltBindings(module);
 #endif
-
+  registerCudaDeviceProperties(module);
   registerCudaPluggableAllocator(module);
 }
 
