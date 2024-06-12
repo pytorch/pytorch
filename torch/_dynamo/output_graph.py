@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import collections
 import contextlib
 import copy
@@ -751,7 +752,13 @@ class OutputGraph:
         **options,
     ):
         if is_dynamic_nn_module(target, self.root_tx.export):
-            return variables.UnspecializedNNModuleVariable(target, **options)
+            result = variables.UnspecializedNNModuleVariable(target, **options)
+            if not SideEffects.cls_supports_mutation_side_effects(type(target)):
+                # don't allow STORE_ATTR mutation with custom __setattr__
+                return result
+            return self.root_tx.output.side_effects.track_object_existing(
+                target, result
+            )
 
         options = dict(options)
         assert "source" in options
@@ -1287,7 +1294,10 @@ class OutputGraph:
             "dynamo_flat_name_to_original_fqn"
         ] = self.dynamo_flat_name_to_original_fqn.copy()
 
-        graph_code_log.debug("%s", lazy_format_graph_code(name, gm))
+        graph_code_log.debug(
+            "%s",
+            lazy_format_graph_code(name, gm, include_stride=True, include_device=True),
+        )
         torch._logging.trace_structured(
             "dynamo_output_graph",
             lambda: {"sizes": self.get_graph_sizes_structured()},
