@@ -18,7 +18,7 @@ from torch import nn
 from torch._C import FileCheck
 from torch._dynamo.testing import rand_strided
 from torch._dynamo.utils import same
-from torch._inductor import codecache, config, metrics
+from torch._inductor import codecache, config, metrics, test_operators
 from torch._inductor.codegen.common import OptimizationContext
 from torch._inductor.codegen.cpp import (
     CppOverrides,
@@ -3663,7 +3663,6 @@ class CPUReproTests(TestCase):
         input2 = torch.randint(0, 10, (5, 128), dtype=torch.int8)
         input3 = torch.randn(128, 128, dtype=torch.float32)
 
-        from torch._inductor import test_operators
         realize = test_operators.realize
 
         class Model1(torch.nn.Module):
