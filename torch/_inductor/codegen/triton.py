@@ -2436,6 +2436,7 @@ class TritonScheduling(SIMDScheduling):
     kernel_type = TritonKernel
     backend_features = dict.fromkeys(  # dict for deterministic order
         [
+            BackendFeature.FOREACH,
             BackendFeature.BUCKETIZE,
             BackendFeature.INPLACE_BUFFERS,
             BackendFeature.MASKED_SCATTER_WITH_INDEX,

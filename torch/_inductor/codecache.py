@@ -2862,18 +2862,45 @@ class HalideCodeCache(CppPythonBindingsCodeCache):
     glue_template_cuda = prefix + textwrap.dedent(
         """
         #include <cuda.h>
-        struct UserContext {{ int device_id; CUcontext *cuda_context; CUstream *stream; }};
+        static const halide_device_interface_t* cuda_interface = halide_cuda_device_interface();
 
         void kernel({argdefs}, uintptr_t stream) {{
-            const halide_device_interface_t* cuda_interface = halide_cuda_device_interface();
-            CUcontext _ctx = 0;
-            if(cuCtxGetCurrent(&_ctx) != 0) throw std::runtime_error("Could not acquire CUDA context");
-            CUstream _stream = reinterpret_cast<CUstream>(stream);
-            UserContext user_context = {{{cuda_device}, &_ctx, &_stream}};
             {buffers}
-            int err = halide_kernel(&user_context, {buffer_names});
+            int err = halide_kernel(reinterpret_cast<void*>(stream), {buffer_names});
             if(err != 0) throw std::runtime_error("halide_kernel failed");
         }}
+        """
+    )
+    standalone_runtime_cuda_init = textwrap.dedent(
+        """
+        #include "{}"
+        #include <cuda.h>
+
+        static int acquire_context(void* user_context,
+                                   void** cuda_context_out,
+                                   bool create) {{
+            return cuCtxGetCurrent(reinterpret_cast<CUcontext*>(cuda_context_out));
+        }}
+
+        static int release_context(void* user_context) {{
+            return 0;
+        }}
+
+        static int get_stream(void* user_context,
+                              void* cuda_context,
+                              void** stream_out) {{
+            *stream_out = user_context;
+            return 0;
+        }}
+
+        static int register_halide_hooks() {{
+            halide_set_cuda_acquire_context(&acquire_context);
+            halide_set_cuda_release_context(&release_context);
+            halide_set_cuda_get_stream(&get_stream);
+            return 0;
+        }}
+
+        int inductor_register_halide_hooks_result = register_halide_hooks();
         """
     )
 
@@ -2947,6 +2974,7 @@ class HalideCodeCache(CppPythonBindingsCodeCache):
                 [
                     cls.glue_template_cpp,
                     cls.glue_template_cuda,
+                    cls.standalone_runtime_cuda_init,
                     f"{cls.cpu_cache_size()}",
                     cpp_compile_command("I", "O"),
                 ]
@@ -2970,10 +2998,11 @@ class HalideCodeCache(CppPythonBindingsCodeCache):
 
     @staticmethod
     def _search_for_file(suffix, errmsg):
+        spec = importlib.machinery.PathFinder.find_spec("halide")
+        if spec is None or not spec.submodule_search_locations:
+            raise RuntimeError("halide python bindings not installed")
         try:
-            search, *_ = importlib.machinery.PathFinder.find_spec(  # type: ignore[union-attr,misc]
-                "halide"
-            ).submodule_search_locations
+            search = spec.submodule_search_locations[0]
             for file in os.listdir(search):
                 if file.endswith(".so"):
                     try:
@@ -3113,10 +3142,11 @@ class HalideCodeCache(CppPythonBindingsCodeCache):
             base = default_cache_dir()
         else:
             base = cache_dir()
-        dirpath = Path(base) / f"halide-runtime-{target}"
+        dirpath = Path(base) / f"halide-runtime-{target}-{cls.config_hash()}"
         os.makedirs(dirpath, exist_ok=True)
         donefile = str(dirpath / "done")
         lockfile = str(dirpath / "lock")
+        hookfile = str(dirpath / "hooks.cpp")
         afile = str(dirpath / "standalone_halide_runtime.a")
         sofile = str(dirpath / libname)
         if not os.path.exists(donefile):
@@ -3125,9 +3155,18 @@ class HalideCodeCache(CppPythonBindingsCodeCache):
 
             with filelock.FileLock(lockfile, LOCK_TIMEOUT):
                 if not os.path.exists(donefile):
+                    with open(hookfile, "w") as f:
+                        if is_cuda:
+                            f.write(
+                                cls.standalone_runtime_cuda_init.format(
+                                    cls.find_header("HalideRuntimeCuda.h")
+                                )
+                            )
                     hl.compile_standalone_runtime(afile, hl.Target(target))
                     subprocess.check_call(
-                        shlex.split(cpp_compile_command(afile, sofile, cuda=is_cuda))
+                        shlex.split(
+                            cpp_compile_command([hookfile, afile], sofile, cuda=is_cuda)
+                        )
                     )
                     touch(donefile)
         assert os.path.exists(sofile)

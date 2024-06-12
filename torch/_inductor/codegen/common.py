@@ -140,6 +140,7 @@ def register_backend_for_device(
 
 
 class BackendFeature(Enum):
+    FOREACH = auto()
     BUCKETIZE = auto()
     INPLACE_BUFFERS = auto()
     MASKED_SCATTER_WITH_INDEX = auto()
