@@ -9,6 +9,7 @@ from typing import List
 from unittest import mock
 
 import torch
+from torch import sym_int
 from torch._dynamo import reset
 from torch._dynamo.utils import counters
 from torch._inductor import config, metrics
@@ -25,8 +26,10 @@ from torch._inductor.codecache import (
 from torch._inductor.runtime.runtime_utils import cache_dir
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import clear_inductor_caches, fresh_inductor_cache
+from torch.fx.experimental.symbolic_shapes import guard_int, hint_int, ShapeEnv
 from torch.testing._internal.common_cuda import SM80OrLater
 from torch.testing._internal.common_device_type import largeTensorTest
+from torch.testing._internal.common_symbolic_shapes import create_symint
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -765,6 +768,36 @@ class TestUtils(TestCase):
 
         self.assertEqual(res1, res2)
         self.assertNotEqual(cache_dir1, cache_dir2)
+
+
+class TestGuardsExpressions(TestCase):
+    def test_guards_gt_lt(self):
+        shape_env = ShapeEnv()
+        s0 = create_symint(shape_env, 6)
+        s1 = create_symint(shape_env, 7)
+        s2 = create_symint(shape_env, 5)
+
+        guard_int(sym_int(s0 > 5))
+        guard_int(sym_int(s0 < 7))
+
+        guards = shape_env.produce_guards_expression([s0])
+
+        self.assertTrue(shape_env.evaluate_guards_expression(guards, [hint_int(s0)]))
+        self.assertFalse(shape_env.evaluate_guards_expression(guards, [hint_int(s1)]))
+        self.assertFalse(shape_env.evaluate_guards_expression(guards, [hint_int(s2)]))
+
+    def test_guards_float_div(self):
+        shape_env = ShapeEnv()
+        s0 = create_symint(shape_env, 8)
+        s1 = create_symint(shape_env, 7)
+
+        guard_int(sym_int(s0 / 2.0))
+        guards = shape_env.produce_guards_expression([s0])
+
+        self.assertIn("ToFloat", guards)
+        self.assertIn("FloatTrueDiv", guards)
+        self.assertTrue(shape_env.evaluate_guards_expression(guards, [hint_int(s0)]))
+        self.assertFalse(shape_env.evaluate_guards_expression(guards, [hint_int(s1)]))
 
 
 if __name__ == "__main__":
