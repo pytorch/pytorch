@@ -2,7 +2,7 @@
 import contextlib
 import importlib
 import unittest
-from typing import Any, Callable, Iterable, Optional, Tuple
+from typing import Any, Callable, Optional, Tuple
 
 import torch
 import torch.utils._pytree as pytree
@@ -34,9 +34,6 @@ max_block: int = TRITON_MAX_BLOCK["X"]
 @config.patch("triton.use_block_ptr", True)
 @instantiate_parametrized_tests
 class TritonBlockPointerTest(InductorTestCase):
-    def count_block_pointers(self, code: Iterable[str]) -> int:
-        return sum(prog.count("tl.make_block_ptr") for prog in code)
-
     def run_and_compare(
         self,
         func: Callable[..., Any],
@@ -109,6 +106,7 @@ class TritonBlockPointerTest(InductorTestCase):
         [
             ((64, 32, 32), (32, 16, 8), None, None, True),
             ((16, 8, 8, 8), (8, 8, 4, 2), None, None, True),
+            ((8, 8, 8, 8), (4, 4, 4, 4), None, None, True),
             ((8, 8), (4, 4), None, 10, True),  # Storage offset
             ((8, 8), (4, 4), (16, 2), None, True),  # Non-default strides
             ((8, 8), (4, 4), (1, 8), None, True),  # Transposed strides
@@ -141,21 +139,22 @@ class TritonBlockPointerTest(InductorTestCase):
         block pointer analysis does not break these cases.
         """
 
-        def view(full: torch.Tensor):
+        def get_input() -> torch.Tensor:
+            device = torch.device(GPU_TYPE)
+            full = torch.randn(full_size).to(device)
+
             # Use the original tensor's stride by default
             view_stride = full.stride() if stride is None else stride
+
             return torch.as_strided(full, view_size, view_stride, storage_offset=offset)
 
-        def foo(x, y):
-            x, y = tuple(view(tensor) for tensor in (x, y))
-            return x + y
-
-        device = torch.device(GPU_TYPE)
-        args = [torch.randn(full_size).to(device) for arg_idx in range(2)]
+        args = [get_input() for arg_idx in range(2)]
 
         # Expect 3 block pointers: 2 inputs 1 output
         self.run_and_compare(
-            foo, *args, expected_num_block_pointers=3 if require_block_ptr else None
+            torch.add,
+            *args,
+            expected_num_block_pointers=3 if require_block_ptr else None,
         )
 
     @parametrize(
@@ -167,6 +166,10 @@ class TritonBlockPointerTest(InductorTestCase):
                 (4, 1, 4),
                 (1, 4, 1),
             ),  # Very important case: index variables are disjoint!
+            (
+                (1, 1, 1, 4),
+                (4, 4, 4, 4),
+            ),  # Unmatched dims for first operand.
         ],
     )
     def test_broadcast(self, x_size: Tuple[int], y_size: Tuple[int]):
@@ -227,7 +230,8 @@ class TritonBlockPointerTest(InductorTestCase):
         full = torch.randn(full_size).to(device)
         view = torch.as_strided(full, view_size, full.stride())
 
-        # Expect 1 block pointer: input
+        # Expect at least 1 block pointer for the input.
+        # Add 2 more if we generate 2 kernels.
         result, (code,) = self.run_and_compare(
             torch.sum,
             view,
@@ -306,16 +310,13 @@ class TritonBlockPointerTest(InductorTestCase):
         expected. This only checks that the analysis doesn't break this case.
         """
 
-        def foo(x, y):
-            return x / y
-
         device = torch.device(GPU_TYPE)
         full_size = (8, 8)
         view_size = (4, 4)
         full = torch.randn(full_size).to(device)
         view = torch.as_strided(full, view_size, full.stride())
 
-        self.run_and_compare(foo, view, view, compile_kwargs={"dynamic": True})
+        self.run_and_compare(torch.div, view, view, compile_kwargs={"dynamic": True})
 
     @unittest.skip(reason="Dynamo tracing error")
     def test_dynamic_shapes_multiple_max_block(self):

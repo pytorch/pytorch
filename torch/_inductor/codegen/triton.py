@@ -1253,7 +1253,7 @@ class TritonKernel(SIMDKernel):
                    sN * ((rindex//(d1 * ... * d(N-1))))
                        + s1 * ModularIndexing(rindex, 1, d1)
                        + ...
-                       + s(N-1) * ModularIndexing(rindex, d(N-2), d(N-1))
+                       + s(N-1) * ModularIndexing(rindex, d1 * ... * d(N-2), d(N-1))
 
                 This iterates over a block of shape (dN, ..., d1, xsize) and stride
                 (sN, ..., s1, xstride). (d1,...,d(N-1)) and (s1,...,sN, xstride) are
@@ -1270,8 +1270,8 @@ class TritonKernel(SIMDKernel):
 
                 # Bound the possible number of dims. We use the following heuristics:
                 # - At least one dim for each range tree node.
-                # - We have at least one dim for every FloorDiv or ModularIndexing op.
-                # - We need to try at least 2 dims to pattern match.
+                # - At least one dim for every FloorDiv or ModularIndexing op.
+                # - At least 2 dims to pattern match.
                 num_dims = max(
                     2,
                     len(self.range_tree_nodes),
@@ -1299,23 +1299,28 @@ class TritonKernel(SIMDKernel):
                     return numels
 
                 # The first dimension's index is computed by division.
+                # The remaining are computed by modulo.
                 slice_numels = get_slice_numels(dims[:num_dims])
-                block_index_exprs = [FloorDiv(index_var, slice_numels[0])]
-
-                # The remaining dimensions' indices are computed by modulo.
-                for dim_idx in range(1, num_dims):
-                    cur_dim = dims[dim_idx]
-                    next_dim = dims[dim_idx + 1] if dim_idx < num_dims - 1 else 1
-                    block_index_exprs.append(
-                        ModularIndexing(index_var, next_dim, cur_dim)
-                    )
+                block_index_exprs = [FloorDiv(index_var, slice_numels[0])] + [
+                    ModularIndexing(index_var, numel, dim)
+                    for dim, numel in zip(dims[1:], slice_numels[1:])
+                ]
 
                 # Calculate a linear index from block indices.
                 match_expr = sympy_dot(strides, block_index_exprs)
 
+                # Pattern match.
                 match = index.match(match_expr)
                 if match is None:
                     return None
+
+                # Provide default values for unmatched dims and strides.
+                for dim in dims[1:]:
+                    if dim not in match:
+                        match[dim] = sympy.Integer(1)
+                for stride in strides[1:]:
+                    if stride not in match:
+                        match[stride] = sympy.Integer(0)
 
                 sizevars = V.graph.sizevars
 
