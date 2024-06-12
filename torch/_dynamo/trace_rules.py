@@ -3524,7 +3524,11 @@ def lookup_inner(
     # The rules defined in `torch_name_rule_map` mainly includes two parts:
     # - Manually defined rules for any functions.
     # - The list of torch in graph functions.
-    if not hashable(obj):
+    try:
+        can_hash = hashable(obj)
+    except Exception:
+        can_hash = False
+    if not can_hash:
         if reasons is not None:
             reasons.add("obj is not hashable")
         return None

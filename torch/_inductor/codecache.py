@@ -1021,7 +1021,7 @@ class FxGraphCache:
                 cache_id = "fx-graph-v1"
                 try:
                     if config.is_fbcode():
-                        from triton.runtime.fb_memcache import (
+                        from triton.fb.fb_memcache import (
                             FbMemcacheRemoteFxGraphCacheBackend,
                         )
 
@@ -1394,7 +1394,7 @@ class VecAVX2(VecISA):
     _bit_width = 256
     _macro = ["CPU_CAPABILITY_AVX2"]
     _arch_flags = (
-        "-mavx2 -mfma" if not _IS_WINDOWS else "/arch:AVX2"
+        "-mavx2 -mfma -mf16c" if not _IS_WINDOWS else "/arch:AVX2"
     )  # TODO: use cflags
     _dtype_nelements = {torch.float: 8, torch.bfloat16: 16, torch.float16: 16}
 
@@ -1494,7 +1494,7 @@ def valid_vec_isa_list() -> List[VecISA]:
     isa_list = []
     _cpu_supported_isa = x86_isa_checker()
     for isa in supported_vec_isa_list:
-        if str(isa) in _cpu_supported_isa:
+        if str(isa) in _cpu_supported_isa and isa:
             isa_list.append(isa)
     return isa_list
 
