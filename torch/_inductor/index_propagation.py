@@ -28,9 +28,7 @@ import sympy
 
 import torch
 from torch._prims_common import dtype_to_type, is_integer_dtype
-from torch.fx.experimental.symbolic_shapes import free_symbols
 from torch.utils._sympy.functions import FloorDiv, ModularIndexing, Where
-from torch.utils._sympy.symbol import symbol_is_type, SymT
 from torch.utils._sympy.value_ranges import bound_sympy, ValueRanges
 from .utils import generate_assert
 
@@ -44,6 +42,10 @@ def _is_constant(val: _ExprType):
     if isinstance(val, sympy.Basic):
         return val.is_number
     return isinstance(val, (int, float, bool))
+
+
+def upper_bound(val: _ExprType):
+    return bound_sympy(val).upper if isinstance(val, sympy.Expr) else val
 
 
 @dataclass
@@ -190,9 +192,6 @@ class IndexPropagation:
         self._inner = inner
         self.shape_env = V.graph.sizevars.shape_env
 
-        def upper_bound(v):
-            return bound_sympy(v).upper if isinstance(v, sympy.Expr) else v
-
         var_to_range = {
             k: ValueRanges(0, upper_bound(v) - 1) for k, v in iter_ranges.items()
         }
@@ -324,18 +323,6 @@ class IndexPropagation:
 
             expr = sympy.sympify(index.value.expr)
 
-            # Handle nested indirect indexing, by providing a default
-            # range for indirect symbols. A nested example is:
-            # a = ops.indirect_indexing(...)
-            # b = ops.index_expr(a, ...)
-            # c = ops.indirect_indexing(b, ...)
-            indirect_var_to_default_range = tuple(
-                (sym, self.shape_env._default_unspecified_value_range())
-                for sym in free_symbols(expr)
-                if symbol_is_type(sym, SymT.INDIRECT)
-            )
-            self.var_to_range = self.var_to_range + indirect_var_to_default_range
-
             # TODO Perhaps move this logic to the simplify indexing pass
             def wrap_expr(expr):
                 # Positive, negative, mixed
@@ -359,4 +346,12 @@ class IndexPropagation:
                     dict(lower=not can_prove_lower, upper=not can_prove_upper),
                 )
             return expr
-        return self.fallback("indirect_indexing", (index, size, check), {}).value
+
+        indirect_var = self.fallback(
+            "indirect_indexing", (index, size, check), {}
+        ).value
+        if indirect_var not in self.var_to_range:
+            lower, upper = -upper_bound(size), upper_bound(size) - 1
+            indirect_var_to_default_range = (indirect_var, ValueRanges(lower, upper))
+            self.var_to_range = self.var_to_range + (indirect_var_to_default_range,)
+        return indirect_var
