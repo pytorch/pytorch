@@ -541,6 +541,9 @@ class FxGraphCachePickler(pickle.Pickler):
                 return str(extract_tensor_metadata_for_cache_key(obj))
             elif isinstance(obj, bytes):
                 return "<bytes>"
+            elif type(obj) in cls.dispatch_table:
+                # Run the reducer on the object
+                return str(cls.dispatch_table[type(obj)](obj)[1])
             else:
                 return str(obj)
 
@@ -785,8 +788,8 @@ class FxGraphCache:
     def _lookup_graph(
         key: str,
         example_inputs: List[torch.Tensor],
-        local,
-        remote_cache,
+        local: bool,
+        remote_cache: Optional[Any],
     ) -> Optional[CompiledFxGraph]:
         """
         Lookup a compiled graph in the cache by key. On a hit, return the
@@ -1037,6 +1040,7 @@ class FxGraphCache:
             compiled_graph = FxGraphCache._lookup_graph(
                 key, example_inputs, local, remote_cache
             )
+
             if compiled_graph is None:
                 log.debug("fx graph cache miss for key %s", key)
                 counters["inductor"]["fxgraph_cache_miss"] += 1
@@ -1054,6 +1058,7 @@ class FxGraphCache:
             else:
                 log.debug("fx graph cache hit for key %s", key)
                 counters["inductor"]["fxgraph_cache_hit"] += 1
+            compiled_graph._fx_graph_cache_key = key
         except BypassFxGraphCache:
             counters["inductor"]["fxgraph_cache_bypass"] += 1
             if not compiled_graph:
@@ -1100,6 +1105,7 @@ class CompiledFxGraph:
     guards_expr: Optional[str]
 
     _boxed_call: Optional[bool] = None
+    _fx_graph_cache_key: Optional[str] = None
 
     def __init__(
         self,
