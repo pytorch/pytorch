@@ -2599,7 +2599,7 @@ def forward(self, arg0_1):
         res = torch.vmap(wrapper)(a)
         self.assertEqual(res, a + 1)
 
-    def test_cond_trace_set__and_mutation_with_graph_break(self):
+    def test_cond_trace_set__and_mutate_input(self):
         def f(a, tmp):
             a_view = a.view(-1)
             with torch.no_grad():
@@ -2616,6 +2616,36 @@ def forward(self, arg0_1):
             "Cond doesn't work unless it is captured completely with torch.compile",
         ):
             torch.cond(inp.sum() > 0, f, f, (inp, tmp))
+
+    def test_cond_trace_set__and_mutate_intermediate(self):
+        def f(a, tmp):
+            a = a.clone()
+            a_view = a.view(-1)
+            tmp = tmp.clone()
+            with torch.no_grad():
+                a.set_(tmp)
+                a_view.mul_(2)
+            return a + tmp
+
+        inp = torch.ones(3, 3, requires_grad=True)
+        tmp = torch.ones(3, 3, requires_grad=True)
+
+        class Mod(torch.nn.Module):
+            def forward(self, inp: torch.Tensor, tmp: torch.Tensor) -> torch.Tensor:
+                return torch.cond(inp.sum() > 0, f, f, (inp, tmp))
+
+        with self.assertRaisesRegex(
+            RuntimeError, "cannot mutate tensors with frozen storage"
+        ):
+            out = torch.compile(Mod(), backend="aot_eager")(inp, tmp)
+
+        with self.assertRaisesRegex(
+            RuntimeError, "cannot mutate tensors with frozen storage"
+        ):
+            out = torch.compile(Mod(), backend="inductor")(inp, tmp)
+
+        out = torch.compile(Mod(), backend="eager")(inp, tmp)
+        self.assertEqual(out, f(inp, tmp))
 
 
 instantiate_parametrized_tests(TestControlFlowTraced)
