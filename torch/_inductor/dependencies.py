@@ -65,6 +65,42 @@ class MemoryDep(Dep):
     def __repr__(self):
         return f"MemoryDep({self.name!r}, {self.index}, {self.ranges}, {self.mode})"
 
+    @property
+    def num_vars(self):
+        return len(self.var_names)
+
+    def decide_loop_order_to_match(self, other):
+        """
+        Can return None if not able to decide loop orders.
+        """
+        assert self.num_vars == other.num_vars
+
+        # bail out if any size is 0 or 1
+        # For size == 0, it's an empty tensor, any strides for that dimension
+        # are equivalent. Skip for simplicity and it may not matter that much.
+        #
+        # For size == 1, it cause cause tie for strides of different dimensions.
+        # Also when we first time create LoopBody in ComputedBuffer.simplify_and_reorder
+        # we can dependencies.index_vars_squeeze which should already sqeeuze
+        # the size == 1 dimensions.
+        if any(s == 0 or s == 1 for s in itertools.chain(self.size, other.size)):
+            return None
+
+        # Extract strides for both expression
+        self_strides = V.graph.sizevars.stride_hints(self.index, self.var_names)
+        other_strides = V.graph.sizevars.stride_hints(other.index, other.var_names)
+        assert len(set(self_strides)) == len(self_strides)
+        assert len(set(other_strides)) == len(other_strides)
+        assert set(self_strides) == set(other_strides)
+
+        stride_to_index = {s: i for i, s in enumerate(self_strides)}
+        order = []
+        for s in other_strides:
+            order.append(stride_to_index[s])
+
+        assert set(order) == set(range(0, self.num_vars))
+        return order
+
     def get_offset(self):
         """
         Return the offset by setting every variable to be 0.
@@ -358,13 +394,24 @@ class _RecordLoadStoreInner(V.MockHandler):  # type: ignore[name-defined]
     def canonicalize(
         self, index: sympy.Expr
     ) -> Tuple[sympy.Expr, Tuple[sympy.Symbol, ...], Tuple[sympy.Expr, ...]]:
+        def drop_unused_symbols(index, var_names, sizes):
+            """
+            Reduction has last (reduced) dim in its sizes, but
+            downstream users won't.  Normalize this away.
+            """
+            free_symbols = index.free_symbols
+            while var_names and var_names[-1] not in free_symbols:
+                var_names.pop()
+                sizes.pop()
+
         if not self._normalize:
             sizes = [V.graph.sizevars.simplify(x) for x in self._var_ranges.values()]
-            var_names = tuple(
-                k for k, v in zip(self._var_ranges.keys(), sizes) if v != 1
-            )
-            sizes = tuple(v for v in sizes if v != 1)
-            return index, var_names, sizes  # type: ignore[return-value]
+            var_names = [k for k, v in zip(self._var_ranges.keys(), sizes) if v != 1]
+            sizes = [v for v in sizes if v != 1]
+
+            drop_unused_symbols(index, var_names, sizes)
+
+            return index, tuple(var_names), tuple(sizes)  # type: ignore[return-value, arg-type]
 
         # Try to further simplify the indexes even if simplify_loops didn't
         # convert it to the simplest form because of the interference from
@@ -377,7 +424,7 @@ class _RecordLoadStoreInner(V.MockHandler):  # type: ignore[name-defined]
             # if k in free_symbols
         }
         index_vars = [*var_ranges.keys()]
-        sizes = tuple(var_ranges.values())
+        sizes = tuple(var_ranges.values())  # type: ignore[assignment]
         new_sizes, reindex, prune = V.graph.sizevars._simplify_loops(
             index_vars,
             sizes,
@@ -392,12 +439,7 @@ class _RecordLoadStoreInner(V.MockHandler):  # type: ignore[name-defined]
 
         new_vars = [*new_vars.keys()]
         new_sizes = [*new_sizes]
-        free_symbols = index.free_symbols
-        while new_vars and new_vars[-1] not in free_symbols:
-            # Reduction has last (reduced) dim in its sizes, but
-            # downstream users won't.  Normalize this away.
-            new_vars.pop()
-            new_sizes.pop()
+        drop_unused_symbols(index, new_vars, new_sizes)
         return index, tuple(new_vars), tuple(new_sizes)  # type: ignore[arg-type]
 
     def load(self, name: str, index: sympy.Expr) -> str:

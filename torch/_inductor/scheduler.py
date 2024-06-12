@@ -751,9 +751,15 @@ class SchedulerNode(BaseSchedulerNode):
         if isinstance(self.node, ir.TemplateBuffer):
             self.set_read_writes(self.node.normalized_read_writes())
         else:
+            # Don't normalize since normalization will merge loops which
+            # makes it hard to decide new loop orders.
+            should_normalize = (
+                not config.loop_ordering_after_fusion
+                or self.node.get_device().type != "cuda"
+            )
             self.set_read_writes(
                 dependencies.extract_read_writes(
-                    self._body, *self._sizes, normalize=True
+                    self._body, *self._sizes, normalize=should_normalize
                 )
             )
 
@@ -772,13 +778,11 @@ class SchedulerNode(BaseSchedulerNode):
             self_dep=MemoryDep('buf1', c0, {c0: 2097152}) other_dep=MemoryDep('buf1', c0 + 1024*c1, {c0: 1024, c1: 2048})
         as an example.
         """
-        # TODO: only a very simple rule so far, but can be improved
         self_sizes = self._sizes[0]
-        if len(self_sizes) == 2:
-            if len(self_dep.size) != len(other_dep.size):
-                return [1, 0]
+        if not (len(self_sizes) == self_dep.num_vars == other_dep.num_vars):
+            return None
 
-        return None
+        return self_dep.decide_loop_order_to_match(other_dep)
 
     def apply_new_loop_order(self, new_order: Sequence[int]) -> None:
         self._body = self._body.reorder_iter_loops(
@@ -786,8 +790,10 @@ class SchedulerNode(BaseSchedulerNode):
         )
         self._sizes = self._body.sizes
 
+        # don't normalize since the loop order may need to be further changed
+        # later
         self.set_read_writes(
-            dependencies.extract_read_writes(self._body, *self._sizes, normalize=True)
+            dependencies.extract_read_writes(self._body, *self._sizes, normalize=False)
         )
 
     def reorder_loops_by_dep_pair(
@@ -2386,11 +2392,14 @@ class Scheduler:
             0
         ]
 
-        # Reorder loops for pointwise if the other node is reduction
-        if node1.is_reduction() and not node2.is_reduction():
+        # Only reorder loops for pointwise for now
+        if not node1.is_reduction():
+            node1.reorder_loops_by_dep_pair(lhs_dep, rhs_dep)
+        elif not node2.is_reduction():
             node2.reorder_loops_by_dep_pair(rhs_dep, lhs_dep)
         else:
-            node1.reorder_loops_by_dep_pair(lhs_dep, rhs_dep)
+            # we don't reorder loops if both nodes are reductions
+            pass
 
         return self.score_fusion_memory(node1, node2) > 0
 
