@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 # Copyright (c) Meta Platforms, Inc. and affiliates
 import inspect
 import warnings
@@ -240,7 +241,7 @@ class DTensor(torch.Tensor):  # pyre-ignore[13]: pyre is bad at __new__
             cls,
             spec.tensor_meta.shape,
             strides=spec.tensor_meta.stride,
-            dtype=spec.tensor_meta.dtype,
+            dtype=local_tensor.dtype,
             device=local_tensor.device,
             layout=local_tensor.layout,
             requires_grad=requires_grad,
@@ -418,6 +419,9 @@ class DTensor(torch.Tensor):  # pyre-ignore[13]: pyre is bad at __new__
         .. note:: `to_local` is differentiable, the `requires_grad` of the local tensor returned
             will depend on if the `DTensor` requires_grad or not.
         """
+        if not torch.is_grad_enabled():
+            return self._local_tensor
+
         if grad_placements is not None and not isinstance(grad_placements, tuple):
             grad_placements = tuple(grad_placements)
         return _ToTorchTensor.apply(
