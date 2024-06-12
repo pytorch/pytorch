@@ -1815,20 +1815,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
                     matcher_check_fn=matcher_check_fn,
                     is_qat=is_qat,
                 )
-                try:
-                    # For python wrapper
-                    self._test_code_common(
-                        mod,
-                        (v,),
-                        [
-                            "torch.ops.onednn.qlinear_pointwise.default",
-                            "torch.ops.onednn.qlinear_pointwise.binary",
-                        ],
-                        [],
-                        check_quantization=True,
-                        num_include_ops=[2, 2],
-                    )
-                except AssertionError:
+                if torch._inductor.config.cpp_wrapper:
                     # For CPP wrapper
                     self._test_code_common(
                         mod,
@@ -1836,6 +1823,19 @@ class TestPatternMatcher(TestPatternMatcherBase):
                         [
                             "op_qlinear_pointwise.call",
                             "op_qlinear_pointwise_binary.call",
+                        ],
+                        [],
+                        check_quantization=True,
+                        num_include_ops=[2, 2],
+                    )
+                else:
+                    # For python wrapper
+                    self._test_code_common(
+                        mod,
+                        (v,),
+                        [
+                            "torch.ops.onednn.qlinear_pointwise.default",
+                            "torch.ops.onednn.qlinear_pointwise.binary",
                         ],
                         [],
                         check_quantization=True,
