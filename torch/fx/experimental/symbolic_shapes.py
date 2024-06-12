@@ -4371,9 +4371,20 @@ class ShapeEnv:
         equiv = {}
 
         def add_expr(expr):
-            # Expr and negation
-            equiv[canonicalize_bool_expr(expr)] = sympy.true
-            equiv[canonicalize_bool_expr(sympy.Not(expr))] = sympy.false
+            if isinstance(expr, (sympy.Eq, sympy.Ne)):
+                # No need to canonicalize
+                # TODO We could further canonicalize Eq ordering the lhs and rhs somehow
+                # With this, we could remove the need for the commutativity part
+                opposite = sympy.Eq if isinstance(expr, sympy.Ne) else sympy.Ne
+                # Commutativity of == and !=
+                equiv[type(expr)(expr.lhs, expr.rhs)] = sympy.true
+                equiv[type(expr)(expr.rhs, expr.lhs)] = sympy.true
+                equiv[opposite(expr.lhs, expr.rhs)] = sympy.false
+                equiv[opposite(expr.rhs, expr.lhs)] = sympy.false
+            else:
+                # Expr and negation
+                equiv[canonicalize_bool_expr(expr)] = sympy.true
+                equiv[canonicalize_bool_expr(sympy.Not(expr))] = sympy.false
 
         add_expr(e)
         # Other relational expressions this expression implies
