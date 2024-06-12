@@ -1,5 +1,6 @@
 #include <ATen/native/SpectralOpsUtils.h>
 #include <ATen/native/mps/MPSGraphSonomaOps.h>
+#include <ATen/native/mps/MPSGraphVenturaOps.h>
 #include <ATen/native/mps/OperationUtils.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -136,6 +137,8 @@ Tensor& _fft_c2r_mps_out(const Tensor& self,
       auto inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, self);
       auto descriptor = [MPSGraphFFTDescriptor descriptor];
       descriptor.scalingMode = normalization_to_ScalingMode(normalization);
+      descriptor.inverse = YES;
+      descriptor.roundToOddHermitean = ((last_dim_size % 2) == 1) ? YES : NO;
       auto outputTensor = [mpsGraph HermiteanToRealFFTWithTensor:inputTensor
                                                             axes:IntArrayToNSArray(dim)
                                                       descriptor:descriptor
