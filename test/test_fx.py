@@ -4078,7 +4078,7 @@ class TestFXAPIBackwardCompatibility(JitTestCase):
                   f"unintended, please revert it. If it was intended, check with the FX " \
                   f"team to ensure that the proper deprecation protocols have been followed " \
                   f"and subsequently --accept the change."
-            raise AssertionError(msg)  # noqa: TRY200
+            raise AssertionError(msg)  # noqa: B904
 
     def test_class_member_back_compat(self):
         """

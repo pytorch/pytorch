@@ -1200,8 +1200,13 @@ void initJITBindings(PyObject* module) {
       SYMNODE_BINARY(sub)
       SYMNODE_BINARY(mul)
       SYMNODE_BINARY(truediv)
+      SYMNODE_BINARY(int_truediv)
+      SYMNODE_BINARY(float_truediv)
       SYMNODE_BINARY(pow)
+      SYMNODE_BINARY(float_pow)
+      SYMNODE_BINARY(pow_by_natural)
       SYMNODE_BINARY(floordiv)
+      SYMNODE_BINARY(int_floordiv)
       SYMNODE_BINARY(mod)
       SYMNODE_BINARY(eq)
       SYMNODE_BINARY(ne)
@@ -1389,14 +1394,36 @@ void initJITBindings(PyObject* module) {
             return size;
           }
           py::gil_scoped_acquire acquire;
-          auto memory_view = py::memoryview::from_memory(
-              reinterpret_cast<const char*>(data), size);
-          buffer.attr("write")(std::move(memory_view));
+          if (!data) {
+            // See [Note: write_record_metadata]
+            buffer.attr("seek")(
+                size, py::module::import("os").attr("SEEK_CUR"));
+          } else {
+            auto memory_view = py::memoryview::from_memory(
+                reinterpret_cast<const char*>(data), size);
+            buffer.attr("write")(std::move(memory_view));
+          }
           return size;
         };
         return std::make_unique<PyTorchStreamWriter>(std::move(writer_func));
       }))
       .def(py::init<const std::function<size_t(const void*, size_t)>&>())
+      // [Note: write_record_metadata]
+      // The write_record_metadata function is intended to write metadata (i.e.
+      // the zipfile header and end of central directory record) for a file
+      // while reserving nbytes of space for the file for the bytes of the
+      // actual file to be added in later. This functionality is achieved by
+      // defining `m_pWrite` to seek instead of write if the buffer passed is a
+      // nullptr. This has implications on CRC-32 which will not be written at
+      // write_record_metadata time, and will not be combined with the hash in
+      // combined_uncomp_crc32_. We define this in `m_pWrite` rather than
+      // extending the interface of miniz to have an `m_pSeek` since different
+      // versions of miniz are used in fbcode/oss.
+      .def(
+          "write_record_metadata",
+          [](PyTorchStreamWriter& self, const std::string& name, size_t size) {
+            return self.writeRecord(name, nullptr, size);
+          })
       .def(
           "write_record",
           [](PyTorchStreamWriter& self,
@@ -1752,13 +1779,18 @@ void initJITBindings(PyObject* module) {
       [](py::handle op_overload_packet, py::args args, py::kwargs kwargs) {
         py::list ns_method =
             op_overload_packet.attr("_qualified_op_name").attr("split")("::");
-        return _maybe_handle_torch_function(
+        auto res = _maybe_handle_torch_function(
             py::cast<std::string>(ns_method[0]),
             py::cast<std::string>(ns_method[1]),
             "",
             false,
             args,
             kwargs);
+        if (res) {
+          return py::make_tuple(true, *res);
+        } else {
+          return py::make_tuple(false, py::none());
+        }
       });
 
   m.def(
@@ -1770,7 +1802,11 @@ void initJITBindings(PyObject* module) {
       },
       py::arg("input"),
       py::arg("parse_tensor_constants") = false);
-  m.def("parse_schema", parseSchema);
+  m.def(
+      "parse_schema",
+      &parseSchema,
+      py::arg("schema"),
+      py::arg("allow_typevars") = true);
   m.def("unify_type_list", [](const std::vector<TypePtr>& types) {
     std::ostringstream s;
     auto type = unifyTypeList(types, s);

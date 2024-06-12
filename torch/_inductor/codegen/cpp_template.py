@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import functools
 import itertools
 import logging
@@ -39,8 +40,8 @@ class CppTemplate(KernelTemplate):
         ), CppTemplateKernel(
             kernel_name=kernel_name,
         ) as kernel:
-            code = self.render(kernel=kernel, **kwargs)
-            _, call_args, _ = kernel.args.python_argdefs()
+            code = kernel.render(self, **kwargs)
+            _, call_args, _, _ = kernel.args.python_argdefs()
             log.debug("Generated Code:\n%s", code)
             log.debug(
                 "Args: cpp_argdefs: %s, python_argdefs: %s",
@@ -79,8 +80,8 @@ class CppTemplate(KernelTemplate):
                 kernel_name=str(Placeholder.KERNEL_NAME),
             )
             render = functools.partial(
-                self.render,
-                kernel=kernel,
+                kernel.render,
+                self,
                 template_buffer_node=template_node,
                 epilogue_nodes=epilogue_nodes,
                 **kwargs,

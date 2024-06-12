@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# mypy: allow-untyped-defs
 
 # Copyright (c) Facebook, Inc. and its affiliates.
 # All rights reserved.
@@ -50,6 +51,8 @@ __all__ = [
     "get_std_cm",
     "MultiprocessContext",
     "SubprocessContext",
+    "LogsDest",
+    "LogsSpecs",
 ]
 
 class SignalException(Exception):
@@ -244,7 +247,7 @@ class DefaultLogsSpecs(LogsSpecs):
             if not log_dir:
                 log_dir = tempfile.mkdtemp(prefix="torchelastic_")
             elif not os.path.exists(log_dir):
-                os.makedirs(log_dir)
+                os.makedirs(log_dir, exist_ok=True)
             else:
                 if os.path.isfile(log_dir):
                     raise NotADirectoryError(f"log_dir: {log_dir} is a file")
@@ -670,9 +673,13 @@ class MultiprocessContext(PContext):
             if self._is_done():
                 # we should ALWAYS have ALL the return values when all the processes are done
                 self._worker_finished_event.set()
-                # Wait untill all processes are finished. At this point workers finished executing
-                # user function
-                self._pc.join()
+
+                # At this point workers finished running the user function
+                # But the child process might still have not exited. Wait for them.
+                # pc.join() blocks [forever] until "a" proc exits. Loop until all of them exits.
+                while not self._pc.join():
+                    logger.debug("entrypoint fn finished, waiting for all child procs to exit...")
+
                 _validate_full_rank(
                     self._return_values, self.nprocs, "return_value queue"
                 )

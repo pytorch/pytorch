@@ -201,6 +201,14 @@ class EnumVariable(VariableTracker):
         super().__init__(**kwargs)
         self.value = value
 
+    @classmethod
+    def create(cls, cls_type, value_vt, options):
+        if isinstance(value_vt, variables.ConstantVariable):
+            for member in list(cls_type):
+                if member.value == value_vt.as_python_constant():
+                    return cls(member, **options)
+        unimplemented("Enum variable is constructed with non constant values")
+
     def as_proxy(self):
         return self.value
 
