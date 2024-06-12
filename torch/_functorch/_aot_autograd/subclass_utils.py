@@ -66,8 +66,11 @@ def compare_subclass_metadata_creation(
     subclass_meta1: Optional[SubclassCreationMeta],
     subclass_meta2: Optional[SubclassCreationMeta],
 ):
-    if type(subclass_meta1) == type(subclass_meta2):
+    if type(subclass_meta1) != type(subclass_meta2):
         return False
+
+    if subclass_meta1 is None:
+        return True
 
     assert isinstance(subclass_meta1, SubclassCreationMeta)
     assert isinstance(subclass_meta2, SubclassCreationMeta)
@@ -76,9 +79,6 @@ def compare_subclass_metadata_creation(
         return False
 
     if subclass_meta1.meta != subclass_meta2.meta:
-        return False
-
-    if subclass_meta1.outer_stride != subclass_meta2.outer_stride:
         return False
 
     for attr in subclass_meta1.attrs:
