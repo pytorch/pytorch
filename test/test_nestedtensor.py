@@ -3728,6 +3728,26 @@ class TestNestedTensorSubclass(TestCase):
         ):
             torch.split(nt, [1, 2], 1)
 
+    def test_softmax(self, device):
+        nt = random_nt_from_dims(
+            [3, None, 5], device=device, dtype=torch.float32, layout=torch.jagged)
+
+        # operate on dim=2
+        output = nt.softmax(dim=2)
+
+        @torch._dynamo.disable
+        def _compare_to_ref(nt, output, dim):
+            for in_component, out_component in zip(nt.unbind(), output.unbind()):
+                self.assertEqual(in_component.softmax(dim=dim), out_component)
+
+        # dim=2 -> dim=1 after unbind
+        _compare_to_ref(nt, output, dim=1)
+
+        # operate on dim=-1
+        output2 = nt.softmax(dim=-1)
+        torch._dynamo.disable(self.assertEqual)(output, output2)
+        _compare_to_ref(nt, output2, dim=-1)
+
     def test_views_inherit_ragged_dim(self, device):
         # view
         nt = random_nt_from_dims(
