@@ -774,6 +774,7 @@ libtorch_python_cuda_core_sources = [
 libtorch_python_cuda_sources = libtorch_python_cuda_core_sources + [
     "torch/csrc/cuda/python_nccl.cpp",
     "torch/csrc/cuda/shared/cudnn.cpp",
+    "torch/csrc/cuda/shared/cusparselt.cpp",
     "torch/csrc/cuda/Tensor.cpp",
 ]
 

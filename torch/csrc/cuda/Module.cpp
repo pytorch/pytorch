@@ -13,6 +13,10 @@
 #if AT_CUDNN_ENABLED()
 
 #endif
+
+#if AT_CUSPARSELT_ENABLED()
+
+#endif
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/CUDAGeneratorImpl.h>
 #include <ATen/cuda/CachingHostAllocator.h>
@@ -1921,6 +1925,9 @@ void initNvtxBindings(PyObject* module);
 #if defined(USE_CUDNN) || defined(USE_ROCM)
 void initCudnnBindings(PyObject* module);
 #endif
+#if defined(USE_CUSPARSELT)
+  void initCusparseltBindings(PyObject* module);
+#endif
 
 } // namespace shared
 
@@ -1933,7 +1940,10 @@ void initModule(PyObject* module) {
 #if defined(USE_CUDNN) || defined(USE_ROCM)
   shared::initCudnnBindings(module);
 #endif
-  registerCudaDeviceProperties(module);
+#if defined(USE_CUSPARSELT)
+  shared::initCusparseltBindings(module);
+#endif
+
   registerCudaPluggableAllocator(module);
 }
 
