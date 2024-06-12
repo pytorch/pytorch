@@ -1922,7 +1922,7 @@ void initNvtxBindings(PyObject* module);
 void initCudnnBindings(PyObject* module);
 #endif
 #if defined(USE_CUSPARSELT)
-  void initCusparseltBindings(PyObject* module);
+void initCusparseltBindings(PyObject* module);
 #endif
 
 } // namespace shared

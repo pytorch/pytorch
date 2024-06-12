@@ -1,12 +1,7 @@
 # mypy: allow-untyped-defs
-import os
-import sys
-import warnings
-from contextlib import contextmanager
 from typing import Optional
 
 import torch
-from torch.backends import __allow_nonbracketed_mutation, ContextProp, PropModule
 
 try:
     from torch._C import _cusparselt
@@ -21,9 +16,7 @@ if _cusparselt is not None:
         global __cusparselt_version
         if __cusparselt_version is None:
             __cusparselt_version = _cusparselt.getVersionInt()
-
         return True
-
 else:
 
     def _init():
@@ -31,7 +24,7 @@ else:
 
 
 def version():
-    """Return the version of cuSPARSELt."""
+    """Return the version of cuSPARSELt"""
     if not _init():
         return None
     return __cusparselt_version

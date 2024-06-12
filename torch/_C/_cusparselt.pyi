@@ -1,3 +1,1 @@
-from torch.types import _bool, Tuple
-
 def getVersionInt() -> int: ...
