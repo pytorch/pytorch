@@ -7802,7 +7802,7 @@ class TestNNDeviceType(NNTestCase):
             gn = nn.GroupNorm(g, c, eps=0).to(device, dtype)
             gn.weight.data.fill_(1)
             gn.bias.data.fill_(0)
-            sentinel = x.is_contiguous(memory_format=torch.channels_last);
+            sentinel = x.is_contiguous(memory_format=torch.channels_last)
             print(f"${sentinel} sentinel")
             output = gn(x)
             out_reshaped = output.view(b, g, -1)
@@ -8388,7 +8388,6 @@ class TestNNDeviceType(NNTestCase):
             with torch.backends.cudnn.flags(enabled=False):
                 _test_module_empty_input(self, mod, inp)
 
-    #@onlyCPU
     @dtypesIfCUDA(torch.float, torch.double)
     @dtypes(torch.float, torch.double, torch.bfloat16, torch.half)
     def test_groupnorm_nhwc(self, device, dtype):
@@ -8417,13 +8416,10 @@ class TestNNDeviceType(NNTestCase):
             out.backward(grad)
             ref_out = ref_gn(ref_input)
             ref_out.backward(ref_grad)
-           
+
             self.assertTrue(out.is_contiguous(memory_format=memory_format))
             self.assertTrue(ref_out.is_contiguous(memory_format=torch.contiguous_format))
-            
-            # for i, (a, b) in enumerate(zip(out.flatten(), ref_out.flatten())):
-            #     if not torch.isclose(a, b, rtol=8e-3, atol=5e-4):
-            #      #   print(f"Index {i}: out = {a.item()}, ref_out = {b.item()}")
+
             self.assertEqual(out, ref_out)
             # parameters in bfloat16/Half is not recommended
             atol = 5e-4

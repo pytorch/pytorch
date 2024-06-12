@@ -22,7 +22,6 @@
 #include <functional>
 #include <tuple>
 #include <vector>
-#include <iostream> 
 namespace at::native {
 
 template <typename T>

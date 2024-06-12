@@ -12,7 +12,6 @@
 #include <ATen/cuda/detail/IndexUtils.cuh>
 #include <ATen/native/cuda/Loops.cuh>
 #include <ATen/native/cuda/block_reduce.cuh>
-#include <iostream>
 #include <type_traits>
 
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -65,7 +64,7 @@ __global__ void RowwiseMomentsCUDAKernelNHWC(
     int64_t H,
     int64_t W,
     int64_t C,
-    int64_t G, 
+    int64_t G,
     T eps,
     const T* X,
     T* mean,
