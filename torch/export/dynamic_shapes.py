@@ -1,4 +1,5 @@
 # mypy: allow-untyped-defs
+import builtins
 import dataclasses
 import inspect
 import sys
@@ -40,11 +41,9 @@ class _Dim(type):
 
     @staticmethod
     def readable(name, min_, max_):
-        from torch.utils._sympy.numbers import int_oo
-
         if min_ == 2:
             min_ = None
-        if max_ == int_oo:
+        if max_ == sys.maxsize - 1:
             max_ = None
         if min_ is None and max_ is None:
             return f"Dim('{name}')"
@@ -141,11 +140,6 @@ class _DerivedDim(_Dim):
         # TODO(avik): use sympy value range analysis instead?
         from sympy import Integer
 
-        from torch.utils._sympy.numbers import int_oo
-
-        if self.root.min is -int_oo:  # type: ignore[attr-defined]
-            return -int_oo  # fn not needed cuz increasing
-
         _min_symint = self.fn(Integer(self.root.min))  # type: ignore[attr-defined]
         root = self.root  # type: ignore[attr-defined]
         assert _min_symint >= 0, (
@@ -160,11 +154,6 @@ class _DerivedDim(_Dim):
         # assume that self.fn is an increasing function
         # TODO(avik): use sympy value range analysis instead?
         from sympy import Integer
-
-        from torch.utils._sympy.numbers import int_oo
-
-        if self.root.max is int_oo:  # type: ignore[attr-defined]
-            return int_oo  # fn not needed cuz increasing
 
         _max_symint = self.fn(Integer(self.root.max))  # type: ignore[attr-defined]
         root = self.root  # type: ignore[attr-defined]
@@ -201,10 +190,8 @@ def Dim(name: str, *, min: Optional[int] = None, max: Optional[int] = None):
     Returns:
         A type that can be used in dynamic shape specifications for tensors.
     """
-    from torch.utils._sympy.numbers import int_oo
-
     _min = 0 if min is None else min
-    _max = int_oo if max is None else max
+    _max = sys.maxsize - 1 if max is None else builtins.min(max, sys.maxsize - 1)
     assert _max > _min, f"Cannot create Dim with inconsistent min={min}, max={max}"
     dim = _Dim(name, (int,), {"min": _min, "max": _max})
     dim.__module__ = getattr(
@@ -282,11 +269,10 @@ class _Constraint(_ConstraintTarget, metaclass=_ConstraintFactory):
     def _clone_with_range(self, lower=0, upper=None):
         # Import sympy locally
         from torch.fx.experimental.symbolic_shapes import StrictMinMaxConstraint
-        from torch.utils._sympy.numbers import int_oo
         from torch.utils._sympy.value_ranges import ValueRanges
 
         if upper is None:
-            upper = int_oo
+            upper = sys.maxsize - 1
 
         constraint_range = StrictMinMaxConstraint(
             vr=self.constraint_range.vr & ValueRanges(lower=lower, upper=upper),
@@ -517,14 +503,15 @@ def dynamic_dim(t: torch.Tensor, index: int, debug_name: Optional[str] = None):
     # Import sympy locally
 
     from torch.fx.experimental.symbolic_shapes import StrictMinMaxConstraint
-    from torch.utils._sympy.numbers import int_oo
     from torch.utils._sympy.value_ranges import ValueRanges
 
     return _create_constraint(
         weakref.ref(t),
         id(t),
         index,
-        StrictMinMaxConstraint(vr=ValueRanges(lower=0, upper=int_oo), warn_only=False),
+        StrictMinMaxConstraint(
+            vr=ValueRanges(lower=0, upper=sys.maxsize - 1), warn_only=False
+        ),
         debug_name=debug_name,
     )
 
@@ -738,7 +725,6 @@ def _process_dynamic_shapes(
         import sympy
 
         from torch.fx.experimental.symbolic_shapes import StrictMinMaxConstraint
-        from torch.utils._sympy.numbers import int_oo
         from torch.utils._sympy.solve import try_solve
         from torch.utils._sympy.value_ranges import ValueRanges
 
@@ -813,7 +799,7 @@ def _process_dynamic_shapes(
             constraint = dynamic_dim(tensor, i, debug_name=dim.__name__)
             if dim.min != 0:
                 constraint = constraint >= dim.min
-            if dim.max != int_oo:
+            if dim.max != sys.maxsize - 1:
                 constraint = constraint <= dim.max
         return constraint
 
