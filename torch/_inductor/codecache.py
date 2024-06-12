@@ -1394,7 +1394,7 @@ class VecAVX2(VecISA):
     _bit_width = 256
     _macro = ["CPU_CAPABILITY_AVX2"]
     _arch_flags = (
-        "-mavx2 -mfma" if not _IS_WINDOWS else "/arch:AVX2"
+        "-mavx2 -mfma -mf16c" if not _IS_WINDOWS else "/arch:AVX2"
     )  # TODO: use cflags
     _dtype_nelements = {torch.float: 8, torch.bfloat16: 16, torch.float16: 16}
 
