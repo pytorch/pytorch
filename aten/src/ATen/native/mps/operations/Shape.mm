@@ -108,8 +108,8 @@ TORCH_IMPL_FUNC(topk_out_mps)
     // Input as placeholders
     MPSShape* input_shape = getMPSShape(self);
     NSString* ns_shape_key = [[input_shape valueForKey:@"description"] componentsJoinedByString:@","];
-    string key = string("topk:") + [ns_shape_key UTF8String] + ":" + getMPSTypeString(self) + ":k" + to_string(k) +
-        ":dim" + to_string(dim_) + ":largest" + to_string(largest);
+    string key = string("topk:") + [ns_shape_key UTF8String] + ":" + getMPSTypeString(self) + ":k" + std::to_string(k) +
+        ":dim" + std::to_string(dim_) + ":largest" + std::to_string(largest);
     auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
       newCachedGraph->selfTensor = mpsGraphRankedPlaceHolder(mpsGraph, getMPSDataType(self), input_shape);
 
@@ -320,12 +320,12 @@ TORCH_IMPL_FUNC(cat_out_mps)
   };
 
   @autoreleasepool {
-    string key =
-        "cat_out_mps:" + to_string(dimension) + ":" + (memory_format == MemoryFormat::ChannelsLast ? "NHWC" : "NCHW");
+    string key = "cat_out_mps:" + std::to_string(dimension) + ":" +
+        (memory_format == MemoryFormat::ChannelsLast ? "NHWC" : "NCHW");
     if (!all_same_dtype) {
       key += getTensorsStringKey(input_tensors, true, all_same_sizes_and_stride);
     } else {
-      key += ":" + getMPSTypeString(input_tensors[0].scalar_type(), true) + ":" + to_string(inputs.size());
+      key += ":" + getMPSTypeString(input_tensors[0].scalar_type(), true) + ":" + std::to_string(inputs.size());
     }
     for (auto idx : skipped_tensor_indices) {
       key += "," + std::to_string(idx);

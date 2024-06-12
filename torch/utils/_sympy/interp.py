@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 """
 This is a simple interpreter for Sympy expressions that dispatches to
 classes following the torch._inductor.virtualized calling convention.
@@ -15,10 +16,13 @@ from sympy.logic.boolalg import Boolean as SympyBoolean, BooleanAtom
 
 import torch
 from .functions import (
+    CeilToInt,
     CleanDiv,
     FloatPow,
     FloatTrueDiv,
     FloorDiv,
+    FloorToInt,
+    Identity,
     IntTrueDiv,
     IsNonOverlappingAndDenseIndicator,
     Mod,
@@ -85,6 +89,7 @@ def handlers():
         ModularIndexing: "modular_indexing",
         sympy.functions.elementary.piecewise.ExprCondPair: "expr_cond_pair",
         sympy.Piecewise: "piecewise",
+        Identity: "identity",
         IsNonOverlappingAndDenseIndicator: "is_non_overlapping_and_dense_indicator",
         RoundDecimal: "round_decimal",
     }
@@ -142,6 +147,8 @@ def sympy_interp(
         TruncToInt: "trunc_to_int",
         sympy.floor: "floor_to_int",
         sympy.ceiling: "ceil_to_int",
+        FloorToInt: "floor_to_int",
+        CeilToInt: "ceil_to_int",
         RoundToInt: "round_to_int",
     }
     if (handler_name := INDEX_DTYPE_HANDLERS.get(expr.func)) is not None:
