@@ -36,6 +36,6 @@ def get_xformer_results():
 
             if algorithm != 'triton_splitK':
                 continue          
-            data[(B, Mkv, Hq, Hkv, K, dtype)] = runtime_us
+            data[(B, Mkv, Hq, Hkv, K, dtype)] = int(runtime_us)
 
     return data
