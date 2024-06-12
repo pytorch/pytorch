@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 """An internal wrapper for the beartype library.
 
 The module returns a no-op decorator when the beartype library is not installed.
