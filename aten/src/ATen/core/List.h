@@ -8,7 +8,7 @@
 #include <c10/util/TypeList.h>
 #include <c10/util/intrusive_ptr.h>
 #include <c10/util/ArrayRef.h>
-#include <c10/util/Optional.h>
+#include <optional>
 #include <vector>
 
 namespace at {
@@ -16,7 +16,7 @@ class Tensor;
 }
 namespace c10 {
 struct IValue;
-template<class T> class List;
+template<class T> class TORCH_API List;
 struct Type;
 
 namespace detail {
@@ -65,7 +65,7 @@ struct ListElementConstReferenceTraits<std::optional<std::string>> {
 };
 
 template<class T, class Iterator>
-class ListElementReference final {
+class TORCH_API ListElementReference final {
 public:
   operator std::conditional_t<
       std::is_reference_v<typename c10::detail::
@@ -109,7 +109,7 @@ private:
 // this wraps vector::iterator to make sure user code can't rely
 // on it being the type of the underlying vector.
 template <class T, class Iterator>
-class ListIterator final {
+class TORCH_API ListIterator final {
  public:
    // C++17 friendly std::iterator implementation
   using iterator_category = std::random_access_iterator_tag;
@@ -234,7 +234,7 @@ const IValue* ptr_to_first_element(const List<IValue>& list);
  * breaking backwards compatibility for the kernel API.
  */
 template<class T>
-class List final {
+class TORCH_API List final {
 private:
   // This is an intrusive_ptr because List is a pointer type.
   // Invariant: This will never be a nullptr, there will always be a valid

@@ -8,6 +8,7 @@ namespace c10 {
 template<class T> decltype(auto) getTypePtr();
 std::string toString(const Type& type);
 
+#if !defined(_MSC_VER) || defined(CAFFE2_BUILD_MAIN_LIB) || defined(C10_BUILD_MAIN_LIB)
 template<class T>
 List<T>::List(c10::intrusive_ptr<c10::detail::ListImpl>&& elements)
 : impl_(std::move(elements)) {}
@@ -50,6 +51,7 @@ List<T>::List(TypePtr elementType)
   static_assert(std::is_same<T, IValue>::value || std::is_same<T, c10::intrusive_ptr<ivalue::Future>>::value,
                 "This constructor is only valid for c10::impl::GenericList or List<Future>.");
 }
+#endif
 
 namespace impl {
 template<class T>
@@ -78,10 +80,12 @@ impl::GenericList toList(const List<T>& list) {
 }
 }
 
+#if !defined(_MSC_VER) || defined(CAFFE2_BUILD_MAIN_LIB) || defined(C10_BUILD_MAIN_LIB)
 template<class T>
 List<T> List<T>::copy() const {
   return List<T>(impl_->copy());
 }
+#endif
 
 namespace detail {
   template<class T>
@@ -174,6 +178,8 @@ list_element_to_const_ref<std::optional<std::string>>(const IValue& element) {
 }
 
 } // namespace impl
+
+#if !defined(_MSC_VER) || defined(CAFFE2_BUILD_MAIN_LIB) || defined(C10_BUILD_MAIN_LIB)
 
 template<class T>
 void List<T>::set(size_type pos, const value_type& value) const {
@@ -350,4 +356,5 @@ void List<T>::unsafeSetElementType(TypePtr t) {
   impl_->elementType = std::move(t);
 }
 
+#endif
 }
