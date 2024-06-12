@@ -44,8 +44,7 @@ SavedVariable::SavedVariable(
         "you can make a clone to get a normal tensor and use it in autograd.")
 
     was_default_constructed_ = false;
-    const auto& version_counter = impl::version_counter(variable);
-    saved_version_ = version_counter.current_version();
+    saved_version_ = variable._version();
     is_leaf_ = variable.is_leaf();
     is_output_ = is_output;
     is_inplace_on_view_ = is_inplace_on_view;
@@ -212,6 +211,7 @@ Variable SavedVariable::unpack(std::shared_ptr<Node> saved_for) const {
   }
 
   impl::set_grad_accumulator(var, grad_accumulator_);
+  impl::set_version_counter(var, impl::version_counter(data));
 
   // NB: var here is never a view so there is no need to make anything special
   // for the case where the saved Tensor was a view. This whole argument relies
