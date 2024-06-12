@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import math
 from enum import Enum
 from typing import List, Optional, Sequence, Tuple, Union
@@ -367,8 +368,14 @@ def meta_copy_(self, src, non_blocking=False):
     # which runs most of the meta checks that we care about.
     # In theory, we should make this more robust by carefully
     # auditing our C++ copy_() kernel and copying the checks here.
+    from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols
 
-    if torch._debug_has_internal_overlap(self) == 1:  # 1 == MemOverlap::Yes
+    # TODO: Ideally, we'd insert a deferred runtime assert here, but if we are
+    # calling an actual copy_, you'll get that automatically
+    # https://github.com/pytorch/pytorch/issues/122477
+    if (
+        not free_unbacked_symbols(self) and torch._debug_has_internal_overlap(self) == 1
+    ):  # 1 == MemOverlap::Yes
         raise RuntimeError(
             "more than one element of the written-to tensor refers to a single memory location"
         )
@@ -3622,6 +3629,14 @@ def meta_masked_fill_(self, mask, value):
     return self
 
 
+@register_meta(aten._masked_scale.default)
+def meta__masked_scale(self, mask, scale):
+    masked_scale = self.new_empty(self.size()).to(
+        memory_format=utils.suggest_memory_format(self)
+    )
+    return masked_scale
+
+
 @register_meta(aten.masked_scatter_)
 def meta_masked_scatter_(self, mask, source):
     torch._check(
@@ -5228,10 +5243,29 @@ def meta__efficient_attention_backward(
     bias_requires_grad: bool,
     scale: Optional[float] = None,
     num_splits_key: Optional[int] = None,
+    shared_storage_dqdkdv: bool = False,
 ):
-    grad_query = torch.empty_like(query)
-    grad_key = torch.empty_like(key)
-    grad_value = torch.empty_like(value)
+    if shared_storage_dqdkdv:
+        torch._check(
+            query.shape[1] == key.shape[1],
+            lambda: "seqlen must match for `shared_storage_dqdkdv",
+        )
+        torch._check(
+            query.shape[3] == key.shape[3],
+            lambda: "embedding dim must match for `shared_storage_dqdkdv",
+        )
+        chunk = torch.empty(
+            (*query.shape[0:-2], 3, query.shape[-2], query.shape[-1]),
+            dtype=query.dtype,
+            device=query.device,
+        )
+        grad_query = chunk.select(-3, 0)
+        grad_key = chunk.select(-3, 1)
+        grad_value = chunk.select(-3, 2)
+    else:
+        grad_query = torch.empty_like(query)
+        grad_key = torch.empty_like(key)
+        grad_value = torch.empty_like(value)
 
     if bias is not None:
         lastDim = bias.size(-1)
@@ -6024,6 +6058,43 @@ def meta_channel_shuffle(input, groups):
 @register_meta(aten._local_scalar_dense)
 def meta_local_scalar_dense(self: Tensor):
     raise RuntimeError("Tensor.item() cannot be called on meta tensors")
+
+
+@register_meta(aten._jagged_to_padded_dense_forward.default)
+def meta__jagged_to_padded_dense_forward(
+    values: Tensor,
+    offsets: List[Tensor],
+    max_lengths: List[int],
+    padding_value: float = 0.0,
+):
+    # only one jagged dim is supported for now
+    assert len(offsets) == 1
+    assert len(max_lengths) == 1
+
+    B = offsets[0].shape[0] - 1
+    S = max_lengths[0]
+    output_shape = (B, S, *values.shape[1:])
+    return values.new_empty(output_shape)
+
+
+@register_meta(aten._padded_dense_to_jagged_forward.default)
+def meta__padded_dense_to_jagged_forward(
+    padded: Tensor, offsets: List[Tensor], total_L: Optional[int] = None
+):
+    # only one jagged dim is supported for now
+    assert len(offsets) == 1
+
+    if not total_L:
+        assert isinstance(padded, torch._subclasses.FakeTensor)
+        shape_env = padded.fake_mode.shape_env
+        assert shape_env is not None
+        total_L = shape_env.create_unbacked_symint()
+        torch.fx.experimental.symbolic_shapes._constrain_range_for_size(
+            total_L, min=0, max=None
+        )
+
+    output_shape = (total_L, *padded.shape[2:])
+    return padded.new_empty(output_shape)
 
 
 def _create_unary_float_meta_func(func):
