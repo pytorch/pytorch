@@ -738,11 +738,12 @@ class TS2EPConverter:
             pre_dispatch=True,
         )
 
+        # Post-processing to make sure the ExportedProgram states are correct.
         # Because during conversion, we set tensor constants as GetAttr,
         # retracing cannot recognize them as tensor constants but instead
-        # treat them as buffers. We need to set them again here. The goal
-        # is to allow module() to populate unnecessary variables from _buffer
-        # in ep.module().
+        # treat them as buffers. We need to set them again here.
         ep._constants = tensor_constants
+        for k in tensor_constants:
+            ep.state_dict.pop(k, None)
 
         return ep

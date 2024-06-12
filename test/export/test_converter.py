@@ -30,7 +30,7 @@ class TestConverter(TestCase):
         # Check module.
         if isinstance(mod, torch.nn.Module):
             self.assertEqual(
-                ep.module().state_dict().keys(),
+                ep.state_dict.keys(),
                 mod.state_dict().keys(),
             )
 
