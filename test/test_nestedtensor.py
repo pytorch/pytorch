@@ -4519,7 +4519,7 @@ class TestNestedTensorSubclass(TestCase):
             ]
         )
 
-        def fn(values, offsets):
+        def fn(values, lengths):
             offsets = F.pad(lengths, pad=(1, 0)).cumsum(dim=0)
             nt = convert_jagged_to_nested_tensor(values, offsets, max_length=4)
             return convert_nt_to_jagged(nt).sum()
