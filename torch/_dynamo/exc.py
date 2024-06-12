@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import os
 import textwrap
 from enum import auto, Enum
@@ -180,6 +181,10 @@ class UncapturedHigherOrderOpError(TorchDynamoException):
 
 
 class IncorrectUsage(Exception):
+    pass
+
+
+class ObservedException(TorchDynamoException):
     pass
 
 

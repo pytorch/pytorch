@@ -1347,7 +1347,8 @@ bool isNoOpSlice(Node* node) {
 void EliminateNoOpSlice(std::shared_ptr<Graph>& graph) {
   DepthFirstGraphNodeIterator it(graph);
   auto schema = torch::schema(
-      "aten::slice.t(t[] l, int? start=None, int? end=None, int step=1) -> t[]");
+      "aten::slice.t(t[] l, int? start=None, int? end=None, int step=1) -> t[]",
+      /*allow_typevars*/ true);
   Node* node = nullptr;
   std::vector<Node*> to_delete;
   while ((node = it.next()) != nullptr) {

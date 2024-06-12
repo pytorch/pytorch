@@ -1615,6 +1615,13 @@ int THPVariable_set_imag(PyObject* self, PyObject* imag, void* unused) {
   END_HANDLE_TH_ERRORS_RET(-1)
 }
 
+PyObject* THPVariable__use_count(PyObject* self, PyObject* noargs) {
+  HANDLE_TH_ERRORS
+  const auto& t = THPVariable_Unpack(self);
+  return THPUtils_packUInt64(t.use_count());
+  END_HANDLE_TH_ERRORS
+}
+
 // properties are registered here because we are currently only able to bind
 // them manually. TODO: make declarable in native_functions
 // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays,cppcoreguidelines-avoid-non-const-global-variables)
@@ -1766,6 +1773,7 @@ static PyMethodDef extra_methods[] = {
      THPVariable_rev_view_func_unsafe,
      METH_O,
      nullptr},
+    {"_use_count", THPVariable__use_count, METH_NOARGS, nullptr},
     {nullptr}};
 
 struct THPVariableMeta {
