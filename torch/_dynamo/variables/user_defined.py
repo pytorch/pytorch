@@ -384,9 +384,6 @@ class UserDefinedClassVariable(UserDefinedVariable):
             return variables.CustomizedDictVariable.create(
                 self.value, args, kwargs, options
             )
-        elif variables.DataClassVariable.is_matching_cls(self.value):
-            options = {"mutable_local": MutableLocal()}
-            return variables.DataClassVariable.create(self.value, args, kwargs, options)
         elif (
             variables.RestrictedListSubclassVariable.is_matching_cls(self.value)
             and self.source
@@ -844,9 +841,26 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 new_source = None
                 if self.source:
                     new_source = AttrSource(self.source, "__getattr__")
-                return variables.UserMethodVariable(
+                out = variables.UserMethodVariable(
                     getattr_fn, self, source=new_source
                 ).call_function(tx, [ConstantVariable.create(name)], {})
+
+                if self.source and getattr_fn is torch.nn.Module.__getattr__:
+                    if isinstance(
+                        out,
+                        (
+                            variables.UnspecializedNNModuleVariable,
+                            variables.NNModuleVariable,
+                        ),
+                    ):
+                        # nn_module_stack source is BC surface area. Ensure that
+                        # mod._modules["linear"] is reflected as mod.linear for
+                        # nn_module_stack.
+                        out.set_nn_module_stack_source(
+                            AttrSource(self.get_nn_module_stack_source(), name)
+                        )
+                return out
+
             elif getattr_fn is not None:
                 unimplemented("UserDefined with non-function __getattr__")
 
