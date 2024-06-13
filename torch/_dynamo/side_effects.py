@@ -7,6 +7,7 @@ import torch.nn
 
 from . import utils, variables
 from .bytecode_transformation import (
+    bytecode_from_template,
     create_call_function,
     create_call_method,
     create_instruction,
@@ -57,6 +58,11 @@ class AttributeMutationNew(AttributeMutation):
     def __init__(self, source: Optional[Source], cls_source: Optional[Source]):
         super().__init__(MutableLocalSource.Local, source)
         self.cls_source = cls_source
+
+
+def _manual_update_dict(dict_from, dict_to):
+    for k, v in dict_from.items():
+        dict_to[k] = v
 
 
 class SideEffects:
@@ -301,19 +307,22 @@ class SideEffects:
         visited: Any = set({})
 
         def visit(var: VariableTracker):
-            if isinstance(var.mutable_local, AttributeMutationNew):
-                if var in visited:
-                    return
-                visited.add(var)
-                # Object may have been mutated, store this mutation.
-                live_new_objects.add(var.mutable_local)
-                # It's possible that we have mutated the value of this variable
-                # to be another one. The new value is in store_attr_mutations.
-                # Also recurse through the new value to detect alive AttributeMutationNew.
-                if var.mutable_local in self.store_attr_mutations:
-                    VariableTracker.visit(
-                        visit, self.store_attr_mutations[var.mutable_local]
-                    )
+            mutable_local = var.mutable_local
+            if mutable_local is None:
+                return
+            if mutable_local in visited:
+                return
+            visited.add(mutable_local)
+            # Object may have been mutated, store this mutation.
+            if isinstance(mutable_local, AttributeMutationNew):
+                live_new_objects.add(mutable_local)
+            # It's possible that we have mutated the value of this variable
+            # to be another one. The new value is in store_attr_mutations.
+            # Also recurse through the new value to detect alive AttributeMutationNew.
+            if var.mutable_local in self.store_attr_mutations:
+                VariableTracker.visit(
+                    visit, self.store_attr_mutations[var.mutable_local]
+                )
 
         def is_live(var: Union[MutableLocalBase, VariableTracker]):
             if isinstance(var, AttributeMutationNew):
@@ -474,6 +483,39 @@ class SideEffects:
                     ]
                 )
                 suffixes.append([create_instruction("STORE_SUBSCR")])
+            elif isinstance(var, variables.CustomizedDictVariable):
+                # need to update the dict manually since update method may be invalid
+                varname_map = {}
+                for name in _manual_update_dict.__code__.co_varnames:
+                    varname_map[name] = cg.tx.output.new_var()
+
+                cg(var.mutable_local.source)  # type: ignore[attr-defined]
+                cg.extend_output(
+                    [create_instruction("STORE_FAST", argval=varname_map["dict_to"])]
+                )
+
+                cg(var, allow_cache=False)
+                cg.extend_output(
+                    [create_instruction("STORE_FAST", argval=varname_map["dict_from"])]
+                )
+
+                cg(var.mutable_local.source)  # type: ignore[attr-defined]
+                cg.extend_output([create_load_method("clear")])
+
+                # unfortunately can't just use DICT_MERGE due to possible custom behaviors
+                dict_update_insts = bytecode_from_template(
+                    _manual_update_dict, varname_map=varname_map
+                )
+
+                suffixes.append(
+                    [
+                        *create_call_method(0),  # clear
+                        create_instruction("POP_TOP"),
+                        *dict_update_insts,
+                        create_instruction("POP_TOP"),
+                    ]
+                )
+
             elif isinstance(var, variables.ConstDictVariable):
                 cg.tx.output.update_co_names("clear")
                 cg.tx.output.update_co_names("update")
