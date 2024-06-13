@@ -146,7 +146,7 @@ INSTANTIATE_INT4MM(bfloat, 128);
 INSTANTIATE_INT4MM(bfloat, 256);
 #endif
 
-// ------------------------------ int8 MM For M > 10 ------------------------------------
+// ------------------------------ int8 MM For M >= 12 ------------------------------------
 /**
  * The following code is heavily inspired by llama.cpp (https://github.com/ggerganov/llama.cpp).
  * The original code is under MIT License: https://github.com/ggerganov/llama.cpp/blob/master/LICENSE
@@ -440,7 +440,7 @@ INSTANTIATE_MM(half, char, get_scale_zero_q8);
 #if __METAL_VERSION__ >= 310
 INSTANTIATE_MM(bfloat, char, get_scale_zero_q8);
 #endif
-// ------------------------------ int8 MM For M <= 10 ------------------------------------
+// ------------------------------ int8 MM For M < 12 ------------------------------------
 /* Matrix vector multiplication, used for small M size for matrix multiplication as well.
 
                       for loop ->
@@ -692,7 +692,7 @@ Tensor _weight_int8pack_mm_mps(const Tensor& A, const Tensor& B, const Tensor& s
       id<MTLComputeCommandEncoder> computeEncoder = mpsStream->commandEncoder();
       std::string kernel;
       // heuristic, to use mv kernel for mm with small M. M = 10 is the performance tipping point.
-      if (M < 11) {
+      if (M < 12) {
         kernel = fmt::format("int8pack_mv_{}", scalarToMetalTypeString(A));
       } else {
         kernel = fmt::format("large_m_int8pack_mm_{}", scalarToMetalTypeString(A));
@@ -704,7 +704,7 @@ Tensor _weight_int8pack_mm_mps(const Tensor& A, const Tensor& B, const Tensor& s
       mtl_setBuffer(computeEncoder, scales, 2);
       mtl_setBuffer(computeEncoder, C, 3);
       [computeEncoder setBytes:sizes.data() length:sizeof(uint32_t) * sizes.size() atIndex:4];
-      if (M < 11) {
+      if (M < 12) {
         [computeEncoder setThreadgroupMemoryLength:32 atIndex:0];
         [computeEncoder dispatchThreadgroups:MTLSizeMake((N + 7) / 8, M, 1)
                        threadsPerThreadgroup:MTLSizeMake(64, 1, 1)];
