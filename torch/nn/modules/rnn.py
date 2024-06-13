@@ -991,9 +991,9 @@ class LSTM(RNNBase):
     # In the future, we should prevent mypy from applying contravariance rules here.
     # See torch/nn/modules/module.py::_forward_unimplemented
     def check_forward_args(
-        self,  # type: ignore[override]
+        self,
         input: Tensor,
-        hidden: Tuple[Tensor, Tensor],
+        hidden: Tuple[Tensor, Tensor],  # type: ignore[override]
         batch_sizes: Optional[Tensor],
     ):
         self.check_input(input, batch_sizes)
@@ -1010,8 +1010,8 @@ class LSTM(RNNBase):
 
     # Same as above, see torch/nn/modules/module.py::_forward_unimplemented
     def permute_hidden(
-        self,  # type: ignore[override]
-        hx: Tuple[Tensor, Tensor],
+        self,
+        hx: Tuple[Tensor, Tensor],  # type: ignore[override]
         permutation: Optional[Tensor],
     ) -> Tuple[Tensor, Tensor]:
         if permutation is None:

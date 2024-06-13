@@ -256,12 +256,12 @@ class _LazyNormBase(LazyModuleMixin, _NormBase):
                 self.weight.materialize((self.num_features,))
                 self.bias.materialize((self.num_features,))
             if self.track_running_stats:
-                self.running_mean.materialize(
+                self.running_mean.materialize(  # type:ignore[union-attr]
                     (self.num_features,)
-                )  # type:ignore[union-attr]
-                self.running_var.materialize(
+                )
+                self.running_var.materialize(  # type:ignore[union-attr]
                     (self.num_features,)
-                )  # type:ignore[union-attr]
+                )
             self.reset_parameters()
 
 
