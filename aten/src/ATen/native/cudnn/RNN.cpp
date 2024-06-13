@@ -745,7 +745,7 @@ get_parameters(
                 linear_id,
                 lin_layer_mat_desc.mut_desc(),
                 &matrix_pointer,
-                NULL,
+                nullptr,
                 nullptr));
           } else { // bias
             AT_CUDNN_CHECK(cudnnGetRNNWeightParams(
