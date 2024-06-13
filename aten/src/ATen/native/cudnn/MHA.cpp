@@ -537,8 +537,7 @@ void run_cudnn_SDP_fprop(
     Tensor& dropoutseed,
     Tensor& dropoutoffset) {
   cudnnHandle_t handle = getCudnnHandle();
-  o = at::empty_strided(
-      {b, h, s_q, d_v}, {s_q * h * d_v, d_v, h * d_v, 1}, q.options());
+  o = at::empty({b, h, s_q, d_v}, q.options());
   if (return_softmaxstats) {
     // TODO(eqy): verify that this is correct
     softmaxstats = at::empty({b, h, s_q}, q.options().dtype(kFloat));
