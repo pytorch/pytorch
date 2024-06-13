@@ -146,7 +146,7 @@ INSTANTIATE_INT4MM(bfloat, 128);
 INSTANTIATE_INT4MM(bfloat, 256);
 #endif
 
-// ------------------------------ For M >= 4 ------------------------------------
+// ------------------------------ int8 MM For M >= 10 ------------------------------------
 /**
  * The following code is heavily inspired by llama.cpp (https://github.com/ggerganov/llama.cpp).
  * The original code is under MIT License: https://github.com/ggerganov/llama.cpp/blob/master/LICENSE
@@ -440,6 +440,7 @@ INSTANTIATE_MM(half, char, get_scale_zero_q8);
 #if __METAL_VERSION__ >= 310
 INSTANTIATE_MM(bfloat, char, get_scale_zero_q8);
 #endif
+// ------------------------------ int8 MM For M < 10 ------------------------------------
 /* Matrix vector multiplication, used for small M size for matrix multiplication as well.
 
                       for loop ->
