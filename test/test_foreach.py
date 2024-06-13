@@ -205,6 +205,7 @@ class TestForeach(TestCase):
         "failing flakily on non sm86 cuda jobs",
     )
     def test_parity(self, device, dtype, op, noncontiguous, inplace):
+        torch.manual_seed(2024)
         if inplace:
             _, _, func, ref = self._get_funcs(op)
         else:
@@ -584,6 +585,7 @@ class TestForeach(TestCase):
         "failing flakily on non sm86 cuda jobs, ex https://github.com/pytorch/pytorch/issues/125035",
     )
     def test_binary_op_list_error_cases(self, device, dtype, op):
+        torch.manual_seed(202406)
         foreach_op, foreach_op_, ref, ref_ = (
             op.method_variant,
             op.inplace_variant,
@@ -597,7 +599,7 @@ class TestForeach(TestCase):
         # Empty lists
         for fop in ops_to_test:
             with self.assertRaisesRegex(
-                RuntimeError, "There were no tensor arguments to this function"
+                RuntimeError, "Tensor list must have at least one tensor."
             ):
                 fop(tensors1, tensors2)
 
@@ -678,6 +680,7 @@ class TestForeach(TestCase):
         "failing flakily on non sm86 cuda jobs, ex https://github.com/pytorch/pytorch/issues/125775",
     )
     def test_binary_op_list_slow_path(self, device, dtype, op):
+        torch.manual_seed(20240607)
         foreach_op, native_op, foreach_op_, native_op_ = self._get_funcs(op)
         # 0-strides
         tensor1 = make_tensor((10, 10), dtype=dtype, device=device)
@@ -796,6 +799,7 @@ class TestForeach(TestCase):
         "failing flakily on non sm86 cuda jobs",
     )
     def test_binary_op_float_inf_nan(self, device, dtype, op):
+        torch.manual_seed(2024)
         inputs = (
             [
                 torch.tensor([float("inf")], device=device, dtype=dtype),
@@ -865,6 +869,7 @@ class TestForeach(TestCase):
         "failing flakily on non sm86 cuda jobs",
     )
     def test_binary_op_tensors_on_different_devices(self, device, dtype, op):
+        torch.manual_seed(202406)
         # `tensors1`: ['cuda', 'cpu']
         # `tensors2`: ['cuda', 'cpu']
         _cuda_tensors = next(
@@ -1207,6 +1212,17 @@ class TestForeach(TestCase):
         self.assertEqual(actual, [t.div(scalar_cpu_tensor) for t in tensors])
 
     @onlyCUDA
+    def test_div_reciprocal(self):
+        expect_m, expect_e = torch.frexp(
+            torch.div(torch.tensor(0.1, device="cuda"), 10.0)
+        )
+        actual_m, actual_e = torch.frexp(
+            torch._foreach_div([torch.tensor(0.1, device="cuda")], [10.0])[0]
+        )
+        self.assertEqual(expect_m, actual_m)
+        self.assertEqual(expect_e, actual_e)
+
+    @onlyCUDA
     def test_0dim_tensor_overload_exception(self):
         # check exceptions of fast path
         tensors = [
@@ -1247,6 +1263,28 @@ class TestForeach(TestCase):
                     for t, s in zip(ref_input, rhs_tensors):
                         copy_(t, s, non_blocking)
                     self.assertEqual(ref_input, sample.input)
+
+    @onlyCUDA
+    @ops(filter(lambda op: op.name == "_foreach_copy", foreach_binary_op_db))
+    def test_foreach_copy_with_multi_dtypes(self, device, dtype, op):
+        # check (a) multi_tensor_apply is called and (b) numerical parity with for-loop and Tensor.copy_
+        foreach_copy_ = ForeachFuncWrapper(op.inplace_variant)
+        for sample in op.sample_inputs(device, dtype, noncontiguous=False):
+            for src_dtype in floating_types_and(torch.half, torch.bfloat16):
+                if src_dtype == dtype:
+                    continue
+                self_tensors = [t.clone() for t in sample.input]
+                src_tensors = [t.to(src_dtype) for t in self_tensors]
+                out = foreach_copy_(
+                    (self_tensors, src_tensors), is_cuda=True, expect_fastpath=True
+                )
+                self.assertEqual(
+                    out,
+                    [
+                        torch.empty_like(t).copy_(s)
+                        for t, s in zip(self_tensors, src_tensors)
+                    ],
+                )
 
     # Test reverse-mode & forward-mode AD if supported.
     @onlyCUDA

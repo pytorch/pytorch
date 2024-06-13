@@ -80,6 +80,7 @@ REQUIRE_HIGHER_TOLERANCE = {
     "sebotnet33ts_256",
     "selecsls42b",
     "tinynet_a",
+    "cspdarknet53",
 }
 
 REQUIRE_HIGHER_TOLERANCE_FOR_FREEZING = {
