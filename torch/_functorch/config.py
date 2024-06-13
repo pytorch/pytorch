@@ -61,7 +61,7 @@ from torch._inductor.config import is_fbcode
 
 enable_autograd_cache = os.environ.get("ENABLE_AOT_AUTOGRAD_CACHE", "0") == "1"
 
-view_replay_for_aliased_outputs = not is_fbcode() and not enable_autograd_cache
+view_replay_for_aliased_outputs = (not is_fbcode()) and (not enable_autograd_cache)
 
 # Restricts the amount of computation AOTAutograd can do.
 # NB: We have essentially disabled this heuristic now. However, this is kept

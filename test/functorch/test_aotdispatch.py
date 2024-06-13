@@ -6056,7 +6056,7 @@ class TestAOTAutogradWithCache(TestAOTAutogradWithDynamo):
         )
 
     @torch._functorch.config.patch(
-        {"enable_autograd_cache": True, "strict_autograd_cache": True}
+        {"enable_autograd_cache": True, "strict_autograd_cache": True, "view_replay_for_aliased_outputs": False}
     )
     @torch._inductor.config.patch("fx_graph_cache", True)
     def verify_aot_autograd(
