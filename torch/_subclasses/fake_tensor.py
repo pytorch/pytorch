@@ -907,7 +907,7 @@ def extract_tensor_metadata(t: torch.Tensor) -> "TensorMetadata":
         shape = tuple(cast(Sequence[int], t.shape))
         stride = stride_
         # Only set storage_bytes for tensors that have storage (not sparse)
-        storage_bytes = t.untyped_storage().nbytes() if not t.is_sparse else None
+        storage_bytes = convert_to_sym_hash(t.untyped_storage().nbytes() if not t.is_sparse else None)
         storage_offset = t.storage_offset()
 
     return TensorMetadata(
@@ -944,11 +944,11 @@ class _DispatchCacheKey(list):
         self, tup: Tuple[object, ...], hash: Callable[[object], int] = hash
     ) -> None:
         self[:] = tup
-        try:
-            self.hashvalue = hash(tup)
-        except TypeError as e:
-            breakpoint()
-            raise
+        #try:
+        self.hashvalue = hash(tup)
+        #except TypeError as e:
+        #    breakpoint()
+        #    raise
 
     def __hash__(self) -> int:  # type: ignore[override]
         return self.hashvalue
