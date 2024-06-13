@@ -11,7 +11,7 @@ import torch._dynamo.test_case
 import torch.distributed._functional_collectives as _functional_collectives
 from torch._C import FileCheck
 from torch._dynamo.utils import same
-from torch._inductor import ir
+from torch._inductor import ir, scheduler
 from torch._inductor.comm_analysis import (
     baseLat,
     hwLat,
@@ -43,6 +43,41 @@ def get_snode_runtime_for_reorder_compute_test(snode):
         return 5
     # All other kernels
     return 1
+
+
+def create_grouped_node_for_allreduce_and_its_deps(snodes):
+    name_to_snode = {snode.get_name(): snode for snode in snodes}
+
+    for snode in snodes:
+        print(f"before: snode: {snode}, snode.node: {snode.node}")
+
+    all_reduce_snodes = [
+        snode
+        for snode in snodes
+        if isinstance(snode.node, ir._CollectiveKernel)
+        and snode.node.op_overload == torch.ops._c10d_functional.all_reduce_.default
+    ]
+    assert len(all_reduce_snodes) == 1
+    all_reduce_snode = all_reduce_snodes[0]
+    all_reduce_dep_snodes = [
+        name_to_snode[node.name] for node in all_reduce_snode.node.inputs
+    ]
+    assert len(all_reduce_dep_snodes) == 1
+    all_reduce_dep_snode = all_reduce_dep_snodes[0]
+
+    grouped_snode = scheduler.GroupedSchedulerNode.create(
+        [all_reduce_dep_snode, all_reduce_snode]
+    )
+    new_snode_order = []
+    new_snode_order.append(grouped_snode)
+    for snode in snodes:
+        if snode in grouped_snode.snodes:
+            continue
+        new_snode_order.append(snode)
+
+    for snode in new_snode_order:
+        print(f"after: snode: {snode}, snode.node: {snode.node}")
+    return new_snode_order
 
 
 @requires_nccl()
@@ -270,6 +305,37 @@ class TestComputeCommReorderingMultiProc(DynamoDistributedMultiProcTestCase):
             ).run(
                 code
             )
+            out = compiled(inputs, **self.get_world_trs())
+            correct = func(inputs, **self.get_world_trs())
+            self.assertTrue(same(out, correct))
+
+    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
+    @skip_if_lt_x_gpu(2)
+    # TODO: somehow inductor bg compile threads are causing hangs at exit with distributed work dtor
+    @patch.object(torch._inductor.config, "compile_threads", 1)
+    @patch.object(
+        torch._inductor.config,
+        "pre_fusion_custom_pass",
+        create_grouped_node_for_allreduce_and_its_deps,
+    )
+    def test_grouped_scheduler_node(self):
+        def func(a, *, tag, ranks, group_size):
+            b = a + a
+            br = _functional_collectives.all_reduce(b, "sum", ranks, tag)
+            # Normally, we would fuse this into `b = a + a`,
+            # but here in this unit test, we intentionally put `b` and `br` computation into a GroupedSchedulerNode,
+            # which prevents them from being fused with any other ops.
+            c = a * a
+            d = torch.matmul(c, br)
+            return (d,)
+
+        with _dynamo_dist_per_rank_init(self.rank, self.world_size):
+            inputs = torch.ones(4, 4, dtype=torch.float, device="cuda") + self.rank
+            compiled = torch.compile(func)
+            code = run_and_get_triton_code(compiled, inputs, **self.get_world_trs())
+            FileCheck().check("triton_poi_fused_add").check(
+                "_c10d_functional.all_reduce_"
+            ).check("triton_poi_fused_mul").run(code)
             out = compiled(inputs, **self.get_world_trs())
             correct = func(inputs, **self.get_world_trs())
             self.assertTrue(same(out, correct))

@@ -8,6 +8,7 @@ import math
 import operator
 import os
 import pprint
+import sys
 import textwrap
 import typing
 from typing import (
@@ -510,6 +511,9 @@ class BaseSchedulerNode:
         """
         Returns estimated op runtime in nanoseconds (ns)
         """
+        if isinstance(self, GroupedSchedulerNode):
+            return sum([node.get_estimated_runtime() for node in self.snodes])
+
         layout = None
         dtype = None
         if not hasattr(self, "node") or not self.node:
@@ -1263,6 +1267,174 @@ class ForeachKernelSchedulerNode(FusedSchedulerNode):
             node.prune_redundant_deps(name_to_fused_node)
 
 
+class GroupedSchedulerNode(BaseSchedulerNode):
+    """
+    This is a "fake" scheduler node that represents a group of scheduler nodes
+    that are meant to be *grouped* together (it does not allow another node to be scheduled
+    in between its constituent nodes, nor does it allow another node to fuse into any of its constituent nodes).
+    The way it does this is by maintaining its unmet dependencies as the union of its constituent nodes.
+    At codegen time, this scheduler node will be unpacked and codegen is called on each constituent node.
+    """
+
+    @classmethod
+    def create(cls, snodes: List[BaseSchedulerNode]) -> "GroupedSchedulerNode":
+        scheduler = snodes[0].scheduler
+        assert all(node.scheduler is scheduler for node in snodes)
+        return cls(scheduler, snodes)  # type: ignore[arg-type]
+
+    def __init__(
+        self, scheduler: "Scheduler", snodes: Sequence[BaseSchedulerNode]
+    ) -> None:
+        # NB: No need to call super().__init__() because we don't need to re-use any of its logic.
+
+        assert not any(
+            isinstance(x, FusedSchedulerNode) for x in snodes
+        ), "NYI: FusedSchedulerNode within GroupedSchedulerNode"
+        self.snodes = snodes
+        self.scheduler = scheduler
+        self.node = None
+        self.users: List[NodeUser] = []
+        self.inverse_users = []
+        self.node_users = []
+        self.ancestors = set.union(
+            *[x.ancestors for x in snodes if x.ancestors is not None]
+        )
+
+        self.set_read_writes(
+            dependencies.ReadWrites.merge_list([x.read_writes for x in snodes])
+        )
+
+        self.unmet_dependencies = {
+            dep
+            for dep in set.union(*[x.unmet_dependencies for x in snodes])
+            if dep.name not in self.get_names()
+        } - self.read_writes.writes
+
+        self.min_order = sys.maxsize
+        self.max_order = -sys.maxsize
+
+    # GroupedSchedulerNode specific methods
+    @classmethod
+    def can_fuse(cls, producer: BaseSchedulerNode, consumer: BaseSchedulerNode) -> bool:
+        return False
+
+    def add_fake_dep(self, name: Dep) -> None:
+        self.set_read_writes(self.read_writes.with_read(name))
+
+    # None of these need to be implemented, as a GroupedSchedulerNode is always unpacked
+    # and its constituent nodes are used for last usage calculation purpose.
+    @property
+    def last_usage(self) -> Set[str]:  # type: ignore[override]
+        raise NotImplementedError
+
+    def set_last_usage(
+        self, future_used_buffers: Set[str], mutation_real_name: Dict[str, str]
+    ) -> None:
+        raise NotImplementedError
+
+    # None of these need to be implemented, as a GroupedSchedulerNode is just an
+    # abstraction for scheduling purposes
+    def update_mutated_names(self, renames: Dict[str, str]) -> None:
+        raise NotImplementedError
+
+    def set_users(self, users: List["NodeUser"]) -> None:
+        raise NotImplementedError
+
+    def get_aliases(self) -> Sequence[str]:
+        raise NotImplementedError
+
+    def get_mutations(self) -> List[str]:
+        raise NotImplementedError
+
+    def can_inplace(self, read_dep: dependencies.Dep) -> bool:
+        raise NotImplementedError
+
+    def allocate(self) -> None:
+        raise NotImplementedError
+
+    def can_free(self) -> bool:
+        raise NotImplementedError
+
+    # Common methods
+    @cache_on_self
+    def get_name(self) -> str:
+        return "_".join([x.get_name() for x in self.snodes])
+
+    def get_first_name(self) -> str:
+        return self.snodes[0].get_name()
+
+    @cache_on_self
+    def get_names(self) -> Set[str]:
+        return set.union(*[x.get_names() for x in self.snodes])
+
+    @cache_on_self
+    def used_buffer_names(self) -> Set[str]:
+        return set.union(*[x.used_buffer_names() for x in self.snodes])
+
+    @cache_on_self
+    def used_or_aliased_buffer_names(self) -> Set[str]:
+        return set.union(*[x.used_or_aliased_buffer_names() for x in self.snodes])
+
+    def get_nodes(self) -> Sequence[BaseSchedulerNode]:
+        return self.snodes
+
+    def __repr__(self) -> str:
+        return f"{type(self).__name__}(nodes={self.get_name()})"
+
+    @cache_on_self
+    def is_reduction(self) -> bool:
+        return any(x.is_reduction() for x in self.snodes)
+
+    @cache_on_self
+    def is_split_scan(self) -> bool:
+        return any(x.is_split_scan() for x in self.snodes)
+
+    @cache_on_self
+    def is_template(self) -> bool:
+        return any(x.is_template() for x in self.snodes)
+
+    @cache_on_self
+    def get_template_node(self) -> Optional[ir.TemplateBuffer]:
+        for node in self.snodes:
+            if node.is_template():
+                return node.get_template_node()
+        return None
+
+    def get_device(self) -> torch.device:
+        return self.snodes[0].get_device()
+
+    @cache_on_self
+    def has_aliasing_or_mutation(self) -> bool:
+        return any(x.has_aliasing_or_mutation() for x in self.snodes)
+
+    @cache_on_self
+    def op_counts(self) -> Counter[str]:
+        op_counts: Counter[str] = collections.Counter()
+        for node in self.snodes:
+            op_counts.update(node.op_counts())
+        return op_counts
+
+    def debug_str(self) -> str:
+        """Longer form printout for trace logs"""
+        name = self.get_name()
+        node_typestr = ",".join(type(n).__name__ for n in self.snodes)
+        lines = [
+            f"{name}: {type(self).__name__}({node_typestr})",
+            f"{name}.writes = {pformat(self.read_writes.writes)}",
+            f"{name}.unmet_dependencies = {pformat(self.unmet_dependencies)}",
+            f"{name}.met_dependencies = {pformat(self.read_writes.reads - self.unmet_dependencies)}",
+            f"{name}.users = {self.users}",
+        ]
+        try:
+            lines += [
+                self.debug_str_extra(),
+            ]
+        except Exception:
+            log.warning("Ignoring error in debug_str()", exc_info=True)
+
+        return "\n".join(lines).rstrip()
+
+
 def pick_loop_order(
     stride_lengths: List[List[int]],
     sizes: List[sympy.Expr],
@@ -1406,6 +1578,8 @@ class Scheduler:
         self.create_foreach_nodes()
         self.topological_sort_schedule()
         self.logged_slow_fusion: Set[Tuple[str, str]] = set()
+        if config.pre_fusion_custom_pass is not None:
+            self.nodes = config.pre_fusion_custom_pass(self.nodes)
         self.fuse_nodes()
         self.finalize_multi_template_buffers()
         if config.reorder_for_compute_comm_overlap:
@@ -2529,14 +2703,23 @@ class Scheduler:
         node1, node2 = nodes
         return self.score_fusion(node1, node2)
 
+    def _unpack_nodes(self) -> List[BaseSchedulerNode]:
+        new_nodes: List[BaseSchedulerNode] = []
+        for node in self.nodes:
+            if isinstance(node, GroupedSchedulerNode):
+                new_nodes.extend(node.get_nodes())
+            else:
+                new_nodes.append(node)
+        return new_nodes
+
     def compute_last_usage(self) -> None:
         """
-        Populate node.last_usage recursively (also for the nodes within a FusedSchedulerNode)
+        Populate node.last_usage recursively (also for the nodes within a FusedSchedulerNode or GroupedSchedulerNode)
         """
 
         future_used_buffers = set(V.graph.get_output_names())
 
-        for node in reversed(self.nodes):
+        for node in reversed(self._unpack_nodes()):
             node.set_last_usage(future_used_buffers, self.mutation_real_name)
             future_used_buffers.update(node.last_usage)
 
@@ -2683,7 +2866,7 @@ class Scheduler:
 
     @dynamo_timed
     def codegen(self) -> None:
-        for node in self.nodes:
+        for node in self._unpack_nodes():
             try:
                 log.debug(
                     "Generating code for node %s with estimated runtime %f",
