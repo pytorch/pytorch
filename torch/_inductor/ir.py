@@ -291,17 +291,21 @@ class IRNode:
     def get_traceback(self):
         return self.traceback
 
-    def common_repr(self):
+    def common_repr(self, shorten=True):
         origins = f"origins={getattr(self, 'origins', '')}"
-        if len(origins) > 64:
+        if shorten and len(origins) > 64:
             # this can get *very* long
             origins = f"{origins[:61]}..."
         return [origins]
 
-    def str_helper(self, lines):
-        lines = lines + self.common_repr()
-        lines = indent(",\n".join(map(str, lines)))
-        return f"{type(self).__name__}(\n{lines}\n)"
+    def str_helper(self, lines, shorten=True, multiline=True):
+        lines = lines + self.common_repr(shorten)
+        lines = list(map(str, lines))
+        if multiline:
+            new_lines = indent(",\n".join(lines))
+            return f"{type(self).__name__}(\n{new_lines}\n)"
+        else:
+            return f"{type(self).__name__}({lines})"
 
     def is_user_of(self, name):
         return name in self.get_read_names()
