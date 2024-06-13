@@ -97,7 +97,6 @@ from .user_defined import (
     RemovableHandleVariable,
     UserDefinedClassVariable,
     UserDefinedObjectVariable,
-    WeakRefVariable,
 )
 
 __all__ = [
