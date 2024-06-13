@@ -9,7 +9,6 @@ import operator
 import random
 import sys
 import unittest
-from builtins import slice as slice_builtin
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, NamedTuple
 from unittest.mock import patch
