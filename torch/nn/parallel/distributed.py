@@ -20,6 +20,7 @@ from torch.autograd import Function, Variable
 from torch.distributed.algorithms.join import Join, Joinable, JoinHook
 from torch.utils._pytree import tree_flatten, tree_unflatten
 
+
 RPC_AVAILABLE = False
 if dist.is_available():
     from torch.distributed.distributed_c10d import (
@@ -43,6 +44,7 @@ from torch._utils import _get_device_index
 
 from ..modules import Module
 from .scatter_gather import gather, scatter_kwargs  # noqa: F401
+
 
 if TYPE_CHECKING:
     from torch.utils.hooks import RemovableHandle
