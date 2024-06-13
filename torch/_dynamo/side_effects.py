@@ -219,10 +219,12 @@ class SideEffects:
     ):
         """Start tracking a new variable for mutation"""
         assert variable.source is not None
+        if id(item) in self.id_to_variable:
+            # If the object is already tracked, do not create a new variable
+            variable.mutable_local = self.id_to_variable[id(item)].mutable_local
+            return variable
+
         variable.mutable_local = mutable_cls(variable.source)
-        # TODO (anijain2305) - Right way is to check if it already exists in
-        # self.id_to_variable and return. But doing this to test for other
-        # places where we could probably replace with VariableBuilder.
         assert id(item) not in self.id_to_variable
         self.id_to_variable[id(item)] = variable
         self.keepalive.append(item)
