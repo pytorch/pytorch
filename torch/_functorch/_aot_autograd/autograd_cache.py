@@ -171,9 +171,6 @@ class AOTAutogradCacheDetails(FxGraphHashDetails):
             # Sometimes inductor configs are unpickleable and can fail
             raise BypassAOTAutogradCache from e
 
-    def __reduce__(self):
-        return (_ident, (sorted(self.__dict__),))
-
     def debug_str(self) -> str:
         return AOTAutogradCachePickler.debug_str(self)
 

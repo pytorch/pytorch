@@ -510,6 +510,8 @@ class FxGraphCachePickler(pickle.Pickler):
         """
         with io.BytesIO() as stream:
             pickler = cls(stream)
+            # TODO: pickler.fast is technically deprecated. Will this work on new python versions?
+            pickler.fast = True  # Run with pickler.fast so it doesn't intern strings, making the hash result more predictable
             try:
                 pickler.dump(obj)
             except (TypeError, AttributeError) as e:
@@ -691,13 +693,6 @@ class FxGraphHashDetails:
         to a different value than another.
         """
         return FxGraphCachePickler.debug_str(self)
-
-    def __reduce__(self):
-        # This is necessary to make sure that every element of our hash is pickled
-        # in the same order, which makes sure that serialization is deterministic
-        # with respect to dictionaries. Otherwise, the same object can pickle
-        # to different bytes depending on the order they are hashed by the reducer.
-        return (_ident, (sorted(self.__dict__),))
 
 
 def compiled_fx_graph_hash(
