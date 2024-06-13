@@ -125,7 +125,7 @@ class UvTcpSocket : public UvHandle {
       try {
         uv_socket->processBuf(buf, nread);
       } catch (std::exception& ex) {
-        C10D_INFO("Error processing client message: {}", ex.what());
+        C10D_WARNING("Error processing client message: {}", ex.what());
         uv_socket->close();
       }
     }
@@ -139,7 +139,7 @@ class UvTcpSocket : public UvHandle {
   void startRead() {
     int res = uv_read_start((uv_stream_t*)&client, alloc_buffer, read_callback);
     if (res) {
-      C10D_INFO(
+      C10D_WARNING(
           "Failed to setup read callback. client:{} code:{} name:{} desc:{}.",
           (void*)this,
           res,
@@ -357,7 +357,7 @@ class WriterPayload : public c10::intrusive_ptr_target {
     auto handle = wp->handle;
 
     if (status) {
-      C10D_INFO(
+      C10D_WARNING(
           "Write to client failed. code:{} name:{} desc:{}.",
           status,
           uv_err_name(status),
@@ -387,7 +387,7 @@ class WriterPayload : public c10::intrusive_ptr_target {
         &req, (uv_stream_t*)handle->unsafeGetHandle(), &buf, 1, write_done);
 
     if (res) {
-      C10D_INFO(
+      C10D_WARNING(
           "Write setup to client failed. code:{} name:{} desc:{}.",
           res,
           uv_err_name(res),
@@ -994,7 +994,7 @@ void LibUVStoreDaemon::onConnect(int status) {
     tcpServer->accept(client);
     client->startRead();
   } catch (std::exception& e) {
-    C10D_INFO("Failed to accept client due to {}", e.what());
+    C10D_WARNING("Failed to accept client due to {}", e.what());
     client->close();
   }
 }
@@ -1111,7 +1111,7 @@ void LibUVStoreDaemon::run() {
 void LibUVStoreDaemon::stop() {
   int res = uv_async_send(&exit_handle);
   if (res) {
-    C10D_INFO(
+    C10D_WARNING(
         "uv_async_send failed with:{} errn:{} desc:{}\n",
         res,
         uv_err_name(res),

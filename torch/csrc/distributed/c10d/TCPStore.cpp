@@ -155,16 +155,31 @@ class TCPClient {
       const TCPStoreOptions& opts);
 
   void sendRaw(uint8_t* data, size_t lenght) {
-    tcputil::sendBytes(socket_.handle(), data, lenght);
+    try {
+      tcputil::sendBytes(socket_.handle(), data, lenght);
+    } catch (const std::exception& e) {
+      C10D_WARNING("sendBytes failed on {}: {}", socket_.repr(), e.what());
+      throw;
+    }
   }
 
   std::vector<std::uint8_t> receiveBits() {
-    return tcputil::recvVector<std::uint8_t>(socket_.handle());
+    try {
+      return tcputil::recvVector<std::uint8_t>(socket_.handle());
+    } catch (const std::exception& e) {
+      C10D_WARNING("recvVector failed on {}: {}", socket_.repr(), e.what());
+      throw;
+    }
   }
 
   template <typename T>
   T receiveValue() {
-    return tcputil::recvValue<T>(socket_.handle());
+    try {
+      return tcputil::recvValue<T>(socket_.handle());
+    } catch (const std::exception& e) {
+      C10D_WARNING("recvValue failed on {}: {}", socket_.repr(), e.what());
+      throw;
+    }
   }
   template <typename T>
   bool receiveValueWithTimeout(T& t, std::chrono::milliseconds timeout) {
