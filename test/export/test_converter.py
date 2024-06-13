@@ -68,8 +68,8 @@ class TestConverter(TestCase):
                 return x, y
 
         inp = (torch.ones(1, 3), torch.ones(1, 3))
-        self._check_equal_ts_ep_converter(MSingle(), inp)
-        self._check_equal_ts_ep_converter(MMulti(), inp)
+        self._check_equal_ts_ep_converter(MSingle(), inp, ["trace", "script"])
+        self._check_equal_ts_ep_converter(MMulti(), inp, ["trace", "script"])
 
     def test_ts2ep_converter_container_output(self):
         # Output is a List.
@@ -107,7 +107,7 @@ class TestConverter(TestCase):
                 return torch.ones(num_dim)
 
         inp = (torch.ones(1, 3),)
-        self._check_equal_ts_ep_converter(Module(), inp)
+        self._check_equal_ts_ep_converter(Module(), inp, ["trace", "script"])
 
     def test_aten_len(self):
         class Module(torch.nn.Module):
@@ -117,7 +117,7 @@ class TestConverter(TestCase):
 
         # aten::len.Tensor
         inp = (torch.ones(2, 3),)
-        self._check_equal_ts_ep_converter(Module(), inp)
+        self._check_equal_ts_ep_converter(Module(), inp, ["trace", "script"])
 
         class Module(torch.nn.Module):
             def forward(self, x: List[int]):
@@ -214,7 +214,7 @@ class TestConverter(TestCase):
                 return y[0]
 
         inp = (torch.rand((3, 2)),)
-        self._check_equal_ts_ep_converter(Module(), inp)
+        self._check_equal_ts_ep_converter(Module(), inp, ["trace", "script"])
 
     def test_aten___getitem___dict(self):
         class Module(torch.nn.Module):
@@ -227,7 +227,7 @@ class TestConverter(TestCase):
                 return d_int[0], d_str["0"], d_bool[True], d_float[0.1]
 
         inp = (torch.rand((3, 2)),)
-        self._check_equal_ts_ep_converter(Module(), inp)
+        self._check_equal_ts_ep_converter(Module(), inp, ["trace", "script"])
 
     def test_prim_device(self):
         class Module(torch.nn.Module):
@@ -236,7 +236,7 @@ class TestConverter(TestCase):
                 return torch.ones(2, 3, device=device)
 
         inp = (torch.rand(3, 4),)
-        self._check_equal_ts_ep_converter(Module(), inp)
+        self._check_equal_ts_ep_converter(Module(), inp, ["trace", "script"])
 
     @requires_cuda
     def test_prim_device_cuda(self):
@@ -246,7 +246,7 @@ class TestConverter(TestCase):
                 return torch.ones(2, 3, device=device)
 
         inp = (torch.rand((3, 4), device="cuda:0"),)
-        self._check_equal_ts_ep_converter(Module(), inp)
+        self._check_equal_ts_ep_converter(Module(), inp, ["trace", "script"])
 
     def test_prim_dtype(self):
         class Module(torch.nn.Module):
@@ -259,7 +259,7 @@ class TestConverter(TestCase):
             torch.double,
         ]:
             inp = (torch.rand((3, 4), dtype=dtype),)
-            self._check_equal_ts_ep_converter(Module(), inp)
+            self._check_equal_ts_ep_converter(Module(), inp, ["trace", "script"])
 
         for dtype in [
             torch.uint8,
@@ -267,7 +267,7 @@ class TestConverter(TestCase):
             torch.int32,
         ]:
             inp = (torch.randint(high=128, size=(3, 4), dtype=dtype),)
-            self._check_equal_ts_ep_converter(Module(), inp)
+            self._check_equal_ts_ep_converter(Module(), inp, ["trace", "script"])
 
     def test_convert_if_basic(self):
         class M(torch.nn.Module):
@@ -322,7 +322,7 @@ class TestConverter(TestCase):
                 return y
 
         x = torch.randn(10, 10)
-        self._check_equal_ts_ep_converter(Module(), (x,))
+        self._check_equal_ts_ep_converter(Module(), (x,), ["trace", "script"])
 
     def test_aten_floordiv(self):
         class Module(torch.nn.Module):
@@ -330,7 +330,7 @@ class TestConverter(TestCase):
                 return x // 2
 
         x = torch.randn(10, 10)
-        self._check_equal_ts_ep_converter(Module(), (x,))
+        self._check_equal_ts_ep_converter(Module(), (x,), ["trace", "script"])
 
     def test_aten___is__(self):
         class Module(torch.nn.Module):
@@ -381,9 +381,9 @@ class TestConverter(TestCase):
                 return x + y
 
         inp = (torch.ones(4),)
-        self._check_equal_ts_ep_converter(MUnpackList(), inp)
+        self._check_equal_ts_ep_converter(MUnpackList(), inp, ["trace", "script"])
         inp = ((torch.zeros(1, 4), torch.ones(1, 4)),)
-        self._check_equal_ts_ep_converter(MUnpackTuple(), inp)
+        self._check_equal_ts_ep_converter(MUnpackTuple(), inp, ["trace", "script"])
 
     def test_convert_nn_module_with_nested_param(self):
         class M(torch.nn.Module):
@@ -665,7 +665,7 @@ class TestConverter(TestCase):
 
             inp = (torch.randn(3, 3),)
             m = M()
-            self._check_equal_ts_ep_converter(m, inp)
+            self._check_equal_ts_ep_converter(m, inp, ["trace", "script"])
 
     def test_convert_func_without_param(self):
         def func1(x, y):
@@ -681,7 +681,7 @@ class TestConverter(TestCase):
             torch.tensor(1),
             torch.tensor(1),
         )
-        self._check_equal_ts_ep_converter(func1, inp)
+        self._check_equal_ts_ep_converter(func1, inp, ["trace", "script"])
 
         ep_list = self._check_equal_ts_ep_converter(func2, inp)
 
