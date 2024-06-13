@@ -9,6 +9,7 @@ from typing import Dict, List, Optional
 
 import torch
 import torch.fx
+
 from ..._guards import Source
 
 from .. import polyfill, variables
@@ -209,7 +210,7 @@ class RangeVariable(BaseListVariable):
         step_is_negative = 0
 
         # Convert step to an integer; raise for zero step.
-        if slice.step == None:
+        if slice.step is None:
             step = 1
             step_is_negative = False
         else:
@@ -225,7 +226,7 @@ class RangeVariable(BaseListVariable):
             upper = length
 
         # Compute start
-        if slice.start == None:
+        if slice.start is None:
             start = upper if step_is_negative else lower
 
         else:
@@ -758,15 +759,6 @@ class SliceVariable(BaseListVariable):
             unimplemented("Dynamic slicing on data-dependent value is not supported")
 
         super().__init__([start, stop, step], **kwargs)
-
-    def start(self):
-        return self.items[0].as_python_constant()
-
-    def stop(self):
-        return self.items[1].as_python_constant()
-
-    def step(self):
-        return self.items[2].as_python_constant()
 
     def debug_repr(self):
         return self.debug_repr_helper("slice(", ")")
