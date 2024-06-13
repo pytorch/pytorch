@@ -277,6 +277,7 @@ static std::ofstream openOutputFile(const std::string& name) {
   return stream;
 }
 
+#ifdef USE_DISTRIBUTED
 static inline std::string getAttrJson(
     const std::string& name,
     const std::string& type,
@@ -289,6 +290,7 @@ static inline std::string getAttrJson(
       type,
       value);
 }
+#endif
 
 static void writeJsonNode(
     std::ofstream& out,
