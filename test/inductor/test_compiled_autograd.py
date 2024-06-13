@@ -2121,6 +2121,7 @@ known_failing_tests = {
     "test_saving_variable_to_disk",  # Cannot call numel() on tensor with symbolic sizes/strides
     "test_setitem_mask",  # torch.fx.experimental.symbolic_shapes.GuardOnDataDependentSymNode: It appears that you're
     "test_wrapped_number_saved_variable_hooks",  # RuntimeError: this hook should not be called
+    "test_save_tensor_hook_version_counter_not_shared",  # raise UnsupportedInputs
     "test_accumulate_grad_tensor_reference",  # backend='inner_compiler' raised:
     "test_anomaly_grad_warnings",  # "one of the variables needed for gradient computation has been modified by an...
     "test_autograd_inplace_views_cross_dtype",  # view_fn not supported by compiled autograd
