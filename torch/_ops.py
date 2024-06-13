@@ -10,6 +10,7 @@ from typing import Any, Callable, Dict, List, Set, Type, Union
 import torch._C
 import torch.utils._pytree as pytree
 from torch import _utils_internal
+from torch._functorch.pyfunctorch import dispatch_functorch
 from torch.utils._python_dispatch import TorchDispatchMode
 
 # Query `hasattr` only once.
@@ -288,7 +289,6 @@ class HigherOrderOperator(OperatorBase):
         self.non_fallthrough_keys = self.non_fallthrough_keys.remove(dispatch_key)
 
     def dispatch(self, dispatch_key, *args, **kwargs):
-        from torch._functorch.pyfunctorch import dispatch_functorch
         from torch.utils._python_dispatch import _get_current_dispatch_mode
 
         if dispatch_key in self._dispatch_cache:
