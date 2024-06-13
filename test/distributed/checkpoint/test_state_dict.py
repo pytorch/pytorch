@@ -13,7 +13,10 @@ from torch.distributed._composable import fully_shard, replicate
 
 # importing fully_shard as FSDP2 since the original fully_shard is used in this test.
 # TODO: remove old composable fully_shard so that we don't have to import new fully_shard as FSDP2
-from torch.distributed._composable.fsdp import fully_shard as FSDP2
+from torch.distributed._composable.fsdp import (
+    fully_shard as FSDP2,
+    fully_shard as fsdp_fully_shard,
+)
 from torch.distributed._shard.sharded_tensor import ShardedTensor
 from torch.distributed._tensor import DTensor, init_device_mesh
 from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
@@ -710,6 +713,41 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
         )
         if dist.get_rank() == 0:
             self.assertTrue("initial_lr" in optim.param_groups[0])
+
+    @with_comms
+    @skip_if_lt_x_gpu(2)
+    def test_optim_state_dict_tensor_matching(self) -> None:
+        device = "cuda"
+        torch.manual_seed(0)
+        model = nn.Sequential(
+            *[nn.Linear(4, 4, device=device, bias=False) for _ in range(2)]
+        )
+        for layer in model:
+            fsdp_fully_shard(layer)
+        fsdp_fully_shard(model)
+        optim = torch.optim.Adam(model.parameters(), lr=1e-2)
+        x = torch.randn((4, 4), device=device)
+        model(x).sum().backward()
+        optim.step()
+        optim.zero_grad()
+        self.assertIsInstance(
+            list(optim.state.values())[0]["exp_avg"], DTensor  # noqa: RUF015
+        )
+        opt_state_dict = ptd_state_dict.get_optimizer_state_dict(
+            model,
+            optim,
+            options=ptd_state_dict.StateDictOptions(full_state_dict=True),
+        )
+        optim = torch.optim.Adam(model.parameters(), lr=1e-2)
+        ptd_state_dict.set_optimizer_state_dict(
+            model,
+            optim,
+            optim_state_dict=opt_state_dict,
+            options=ptd_state_dict.StateDictOptions(full_state_dict=True),
+        )
+        self.assertIsInstance(
+            list(optim.state.values())[0]["exp_avg"], DTensor  # noqa: RUF015
+        )
 
     @with_comms
     @skip_if_lt_x_gpu(2)
