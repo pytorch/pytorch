@@ -454,29 +454,4 @@ at::Tensor _qconv_prepack_onednn(
     int64_t groups,
     std::optional<torch::List<int64_t>> input_shape=c10::nullopt);
 
-static at::Tensor _quantized_convolution_onednn(
-    at::Tensor act, // contains quantized values but not QTensor
-    double act_scale,
-    int64_t act_zero_point,
-    at::Tensor weight, // MKLDNN tensor with quantized values
-    at::Tensor weight_scales,
-    at::Tensor weight_zero_points,
-    std::optional<at::Tensor> bias, // Bias is packed if not None
-    torch::List<int64_t> stride,
-    torch::List<int64_t> padding,
-    torch::List<int64_t> dilation,
-    bool transposed,
-    int64_t groups,
-    double output_scale,
-    int64_t output_zero_point,
-    std::optional<at::Tensor> accum=c10::nullopt, // accum to fused with conv add
-    double accum_scale=1.0,
-    int64_t accum_zero_point=0,
-    bool fp32_output=false,
-    std::optional<c10::string_view> binary_attr=c10::nullopt,
-    std::optional<at::Scalar> binary_alpha=c10::nullopt,
-    std::optional<c10::string_view> unary_attr=c10::nullopt,
-    torch::List<std::optional<at::Scalar>> unary_scalars=torch::List<std::optional<at::Scalar>>(),
-    std::optional<c10::string_view> unary_algorithm=c10::nullopt);
-
 #endif // #if AT_MKLDNN_ENABLED()
