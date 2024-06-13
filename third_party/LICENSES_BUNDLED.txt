@@ -420,7 +420,7 @@ Files: third_party/python-peachpy
   For details, see: third_party/python-peachpy/LICENSE.rst
 
 Name: sigslot
-License: Apache-2.0
+License: Public Domain
 Files: third_party/opentelemetry-cpp/tools/vcpkg/ports/sigslot
   For details, see: third_party/opentelemetry-cpp/tools/vcpkg/ports/sigslot/LICENSE
 
