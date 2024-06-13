@@ -11,7 +11,6 @@ import os
 import queue
 from dataclasses import dataclass
 from torch._utils import ExceptionWrapper
-import torch.multiprocessing
 from typing import Optional, Union, TYPE_CHECKING
 from . import signal_handling, MP_STATUS_CHECK_INTERVAL, IS_WINDOWS, HAS_NUMPY
 if TYPE_CHECKING:
@@ -220,8 +219,6 @@ def _worker_loop(dataset_kind, dataset, index_queue, data_queue, done_event,
         # again.
         # https://docs.python.org/3/library/signal.html#execution-of-python-signal-handlers
         signal_handling._set_worker_signal_handlers()
-
-        torch.multiprocessing._set_thread_name("pt_data_worker")
 
         torch.set_num_threads(1)
         seed = base_seed + worker_id

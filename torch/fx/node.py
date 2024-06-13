@@ -11,7 +11,6 @@ import inspect
 import warnings
 from torch.fx.operator_schemas import normalize_function, normalize_module, ArgsKwargsPair
 from .._ops import ops as _ops
-from torch._C import _NodeBase
 
 if TYPE_CHECKING:
     from .graph import Graph
@@ -140,7 +139,7 @@ def _format_arg(arg, max_list_len=float('inf')) -> str:
         return str(arg)
 
 @compatibility(is_backward_compatible=True)
-class Node(_NodeBase):
+class Node:
     """
     ``Node`` is the data structure that represents individual operations within
     a ``Graph``. For the most part, Nodes represent callsites to various entities,
@@ -198,7 +197,6 @@ class Node(_NodeBase):
                 annotation of values in the generated code or for other types
                 of analyses.
         """
-        super().__init__()
         self.graph = graph
         self.name = name  # unique name of value being created
         assert op in ['placeholder', 'call_method', 'call_module', 'call_function', 'get_attr', 'output', 'root']
@@ -237,6 +235,9 @@ class Node(_NodeBase):
         # does not produce a value, it's more of a notation. Thus, this value
         # describes the type of args[0] in the ``return`` node.
         self.type : Optional[Any] = return_type
+        self._prev = self
+        self._next = self
+        self._erased = False
         self._sort_key: Any = ()
 
         # If set, use this fn to print this node
@@ -245,22 +246,6 @@ class Node(_NodeBase):
         # Dictionary to store metadata passes need to do their
         # transformations. This metadata is preserved across node copies
         self.meta : Dict[str, Any] = {}
-
-    def __getstate__(self):
-        state = self.__dict__.copy()
-        state["_erased"] = self._erased
-        state["_prev"] = self._prev
-        state["_next"] = self._next
-        return state
-
-    def __setstate__(self, state):
-        _erased = state.pop("_erased")
-        _prev = state.pop("_prev")
-        _next = state.pop("_next")
-        self.__dict__.update(state)
-        self._erased = _erased
-        self._prev = _prev
-        self._next = _next
 
     @property
     def next(self) -> 'Node':

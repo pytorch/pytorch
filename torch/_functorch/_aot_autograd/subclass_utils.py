@@ -79,9 +79,6 @@ def compare_subclass_metadata_creation(
     if type(subclass_meta1.original_subclass) != type(subclass_meta2.original_subclass):
         return False
 
-    if subclass_meta1.meta != subclass_meta2.meta:
-        return False
-
     for attr in subclass_meta1.attrs:
         if attr not in subclass_meta2.attrs:
             return False

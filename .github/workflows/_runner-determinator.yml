@@ -17,15 +17,15 @@ on:
         default: "5132"
 
     outputs:
-      label-type:
+      workflow-type:
         description: Type of runners to use
-        value: ${{ jobs.runner-determinator.outputs.label-type }}
+        value: ${{ jobs.runner-determinator.outputs.workflow-type }}
 
 jobs:
   runner-determinator:
     runs-on: linux.4xlarge
     outputs:
-      label-type: ${{ steps.set-condition.outputs.label-type }}
+      workflow-type: ${{ steps.set-condition.outputs.workflow-type }}
     env:
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       ISSUE_NUMBER: ${{ inputs.issue_number }}
@@ -54,5 +54,5 @@ jobs:
 
           echo "Output: '${output}'"
 
-          LABEL_TYPE=$(echo "${output}" | jq -r '.label_type')
-          echo "label-type=$LABEL_TYPE" >> "$GITHUB_OUTPUT"
+          WORKFLOW_TYPE=$(echo "${output}" | jq -r '.workflow_type')
+          echo "workflow-type=$WORKFLOW_TYPE" >> "$GITHUB_OUTPUT"

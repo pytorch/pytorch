@@ -6,6 +6,7 @@ import functools
 import inspect
 import itertools
 import types
+import warnings
 from typing import Dict, List, Optional, TYPE_CHECKING, Union
 
 import torch
@@ -660,7 +661,7 @@ class SkipFunctionVariable(VariableTracker):
                         f"torch.compiler.allow_in_graph."
                     )
                     # also warn on it because most users won't see the graph break message
-                    torch._dynamo.utils.warn_once(msg)
+                    warnings.warn(msg)
             msg += f"', {self.reason}'" if self.reason else ""
             unimplemented(msg)
 

@@ -6,7 +6,8 @@
 #include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/utils/python_numbers.h>
 
-namespace pybind11::detail {
+namespace pybind11 {
+namespace detail {
 // Strong typedefs don't make much sense in Python since everything is duck
 // typed. So instead we simply extract the underlying value and let the caller
 // handle correctness.
@@ -45,4 +46,5 @@ struct strong_uint_type_caster {
 
   PYBIND11_TYPE_CASTER(T, _("strong_uint"));
 };
-} // namespace pybind11::detail
+} // namespace detail
+} // namespace pybind11

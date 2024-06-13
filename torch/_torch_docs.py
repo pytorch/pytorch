@@ -7010,7 +7010,6 @@ add_docstr(
 nanmean(input, dim=None, keepdim=False, *, dtype=None, out=None) -> Tensor
 
 Computes the mean of all `non-NaN` elements along the specified dimensions.
-Input must be floating point or complex.
 
 This function is identical to :func:`torch.mean` when there are no `NaN` values
 in the :attr:`input` tensor. In the presence of `NaN`, :func:`torch.mean` will
@@ -7020,7 +7019,7 @@ propagate the `NaN` to the output whereas :func:`torch.nanmean` will ignore the
 {keepdim_details}
 
 Args:
-    input (Tensor): the input tensor, either of floating point or complex dtype
+    {input}
     {opt_dim}
     {keepdim}
 

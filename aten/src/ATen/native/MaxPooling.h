@@ -7,7 +7,7 @@
 
 namespace at::native {
 
-inline void check_max_pool1d(
+static void check_max_pool1d(
     const Tensor& self,
     IntArrayRef kernel_size,
     IntArrayRef stride,

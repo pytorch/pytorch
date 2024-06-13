@@ -541,9 +541,6 @@ class FxGraphCachePickler(pickle.Pickler):
                 return str(extract_tensor_metadata_for_cache_key(obj))
             elif isinstance(obj, bytes):
                 return "<bytes>"
-            elif type(obj) in cls.dispatch_table:
-                # Run the reducer on the object
-                return str(cls.dispatch_table[type(obj)](obj)[1])
             else:
                 return str(obj)
 
@@ -788,8 +785,8 @@ class FxGraphCache:
     def _lookup_graph(
         key: str,
         example_inputs: List[torch.Tensor],
-        local: bool,
-        remote_cache: Optional[Any],
+        local,
+        remote_cache,
     ) -> Optional[CompiledFxGraph]:
         """
         Lookup a compiled graph in the cache by key. On a hit, return the
@@ -858,10 +855,10 @@ class FxGraphCache:
         # See _save_graph(); we don't store the callable in the cache entry so
         # recreate it here from the PyCodeCache disk cache.
         artifact_path = get_path(graph.cache_key, "py")[2]
-        code = graph.source_code
         if not os.path.exists(artifact_path):
             counters["inductor"]["fxgraph_lookup_write_file"] += 1
             Path(os.path.dirname(artifact_path)).mkdir(parents=True, exist_ok=True)
+            code = graph.source_code
             cpp_pp = cpp_prefix_path()
             if os.path.basename(cpp_pp) in code:
                 if cpp_pp in code:
@@ -901,11 +898,6 @@ class FxGraphCache:
         # graph was compiled for this cache entry. Pretending these counters
         # were incremented normally is useful for testing with the cache enabled.
         metrics.CachedMetricsHelper.apply_deltas(graph.metrics_deltas)
-
-        from .graph import GraphLowering
-
-        GraphLowering.save_output_code(code)
-        output_code_log.debug("Output code: \n%s", code)
 
         return graph
 
@@ -1029,7 +1021,7 @@ class FxGraphCache:
                 cache_id = "fx-graph-v1"
                 try:
                     if config.is_fbcode():
-                        from triton.fb.fb_memcache import (
+                        from triton.runtime.fb_memcache import (
                             FbMemcacheRemoteFxGraphCacheBackend,
                         )
 
@@ -1045,7 +1037,6 @@ class FxGraphCache:
             compiled_graph = FxGraphCache._lookup_graph(
                 key, example_inputs, local, remote_cache
             )
-
             if compiled_graph is None:
                 log.debug("fx graph cache miss for key %s", key)
                 counters["inductor"]["fxgraph_cache_miss"] += 1
@@ -1063,7 +1054,6 @@ class FxGraphCache:
             else:
                 log.debug("fx graph cache hit for key %s", key)
                 counters["inductor"]["fxgraph_cache_hit"] += 1
-            compiled_graph._fx_graph_cache_key = key
         except BypassFxGraphCache:
             counters["inductor"]["fxgraph_cache_bypass"] += 1
             if not compiled_graph:
@@ -1110,7 +1100,6 @@ class CompiledFxGraph:
     guards_expr: Optional[str]
 
     _boxed_call: Optional[bool] = None
-    _fx_graph_cache_key: Optional[str] = None
 
     def __init__(
         self,
@@ -1405,7 +1394,7 @@ class VecAVX2(VecISA):
     _bit_width = 256
     _macro = ["CPU_CAPABILITY_AVX2"]
     _arch_flags = (
-        "-mavx2 -mfma -mf16c" if not _IS_WINDOWS else "/arch:AVX2"
+        "-mavx2 -mfma" if not _IS_WINDOWS else "/arch:AVX2"
     )  # TODO: use cflags
     _dtype_nelements = {torch.float: 8, torch.bfloat16: 16, torch.float16: 16}
 
@@ -1484,13 +1473,11 @@ def valid_vec_isa_list() -> List[VecISA]:
     if sys.platform == "darwin" and platform.processor() == "arm":
         return [VecNEON()]
 
-    isa_list: List[VecISA] = []
     cur_os = sys.platform
     if cur_os != "linux" and cur_os != "win32":
-        return isa_list
+        return []
 
-    arch = platform.machine()
-    if arch == "s390x":
+    if platform.machine() == "s390x":
         with open("/proc/cpuinfo") as _cpu_info:
             while True:
                 line = _cpu_info.readline()
@@ -1501,20 +1488,14 @@ def valid_vec_isa_list() -> List[VecISA]:
                 if featuresmatch:
                     for group in featuresmatch.groups():
                         if re.search(r"[\^ ]+vxe[\$ ]+", group):
-                            isa_list.append(VecZVECTOR())
-                            break
-        return isa_list
+                            return [VecZVECTOR()]
+        return []
 
-    if arch == "x86_64" or arch == "AMD64":
-        """
-        arch value is x86_64 on Linux, and the value is AMD64 on Windows.
-        """
-        _cpu_supported_x86_isa = x86_isa_checker()
-        for isa in supported_vec_isa_list:
-            if str(isa) in _cpu_supported_x86_isa and isa:
-                isa_list.append(isa)
-        return isa_list
-
+    isa_list = []
+    _cpu_supported_isa = x86_isa_checker()
+    for isa in supported_vec_isa_list:
+        if str(isa) in _cpu_supported_isa and isa:
+            isa_list.append(isa)
     return isa_list
 
 

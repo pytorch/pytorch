@@ -3,7 +3,9 @@
 #include <torch/csrc/profiler/stubs/base.h>
 #include <torch/csrc/profiler/util.h>
 
-namespace torch::profiler::impl {
+namespace torch {
+namespace profiler {
+namespace impl {
 
 struct ITTThreadLocalState : ProfilerStateBase {
   explicit ITTThreadLocalState(const ProfilerConfig& config)
@@ -66,4 +68,6 @@ void pushITTCallbacks(
   state_ptr->setCallbackHandle(handle);
 }
 
-} // namespace torch::profiler::impl
+} // namespace impl
+} // namespace profiler
+} // namespace torch

@@ -10,6 +10,7 @@ import torch
 import torch._dynamo.test_case
 import torch._dynamo.testing
 import torch._dynamo.utils
+from torch.testing._internal.common_utils import skipIfRocm
 from torch.testing._internal.triton_utils import HAS_CUDA, requires_cuda
 
 if HAS_CUDA:
@@ -1104,6 +1105,7 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(cnt.op_count, 2)
 
     @requires_cuda
+    @skipIfRocm
     def test_triton_kernel_basic(self):
         class Add(torch.autograd.Function):
             @staticmethod
@@ -1135,6 +1137,7 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(x + y, z)
 
     @requires_cuda
+    @skipIfRocm
     def test_triton_kernel_multiple_out(self):
         class Add(torch.autograd.Function):
             @staticmethod

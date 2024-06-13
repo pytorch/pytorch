@@ -80,10 +80,6 @@ size_t MPSHooks::getDriverAllocatedMemory() const {
   return at::mps::getIMPSAllocator()->getDriverAllocatedMemory();
 }
 
-size_t MPSHooks::getRecommendedMaxMemory() const {
-  return at::mps::getIMPSAllocator()->getRecommendedMaxMemory();
-}
-
 void MPSHooks::setMemoryFraction(double ratio) const {
   at::mps::getIMPSAllocator()->setHighWatermarkRatio(ratio);
 }
