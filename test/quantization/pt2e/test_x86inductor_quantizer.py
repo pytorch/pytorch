@@ -2220,7 +2220,7 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
     def test_set_module_name_and_module_type_with_mixed_configs(self):
         """Test that set `module_name_qconfig` and `module_type_qconfig` at the same time with mixed the configs.
 
-        Expect that all linear layers are quantized with static quantization except the last one.
+        Expect that that only the last linear(`sub`) is quantized using static quantization.
         """
 
         class M(torch.nn.Module):
