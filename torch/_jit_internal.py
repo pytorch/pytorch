@@ -482,7 +482,13 @@ def createResolutionCallbackForClassMethods(cls):
 
 
 def boolean_dispatch(
-    arg_name, arg_index, default, if_true, if_false, module_name, func_name
+    arg_name,
+    arg_index,
+    default,
+    if_true,
+    if_false,
+    module_name,
+    func_name,
 ):
     """
     Dispatches to either of 2 script functions based on a boolean argument.
@@ -1227,7 +1233,9 @@ def _try_get_dispatched_fn(fn):
 
 
 def _get_named_tuple_properties(
-    obj, loc: Optional[torch._C._jit_tree_views.SourceRange] = None, rcb=None
+    obj,
+    loc: Optional[torch._C._jit_tree_views.SourceRange] = None,
+    rcb=None,
 ):
     if loc is None:
         loc = fake_range()
@@ -1307,7 +1315,10 @@ def _get_named_tuple_properties(
 
 
 def _create_named_tuple(
-    t, unqual_name: str, field_names: List[str], defaults: Tuple[Any, ...]
+    t,
+    unqual_name: str,
+    field_names: List[str],
+    defaults: Tuple[Any, ...],
 ):
     TupleType = collections.namedtuple(unqual_name, field_names, defaults=defaults)  # type: ignore[call-arg, no-redef, misc]
     return TupleType(*t)
