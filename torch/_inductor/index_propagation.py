@@ -350,8 +350,11 @@ class IndexPropagation:
         indirect_var = self.fallback(
             "indirect_indexing", (index, size, check), {}
         ).value
-        if indirect_var not in self.var_to_range:
-            lower, upper = -upper_bound(size), upper_bound(size) - 1
-            indirect_range = (indirect_var, ValueRanges(lower, upper))
-            self.var_to_range = self.var_to_range + (indirect_range,)
+        assert (
+            indirect_var not in self.var_to_range
+        ), f"{indirect_var} should've been created in the fallback."
+
+        lower, upper = -upper_bound(size), upper_bound(size) - 1
+        indirect_range = (indirect_var, ValueRanges(lower, upper))
+        self.var_to_range = self.var_to_range + (indirect_range,)
         return indirect_var

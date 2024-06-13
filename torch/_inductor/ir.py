@@ -8012,10 +8012,7 @@ class LoopBody:
         return name
 
     def add_indirect(self, size):
-        from torch.utils._sympy.symbol import make_symbol
-
-        # Note: indirect index variables can be negative, positive or 0.
-        var = make_symbol(SymT.INDIRECT, len(self.indirect_vars), integer=True)
+        var = sympy_index_symbol_with_prefix(SymT.INDIRECT, len(self.indirect_vars))
         self.indirect_vars.append(var)
         return var
 
