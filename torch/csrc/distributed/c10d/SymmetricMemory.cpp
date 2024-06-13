@@ -73,8 +73,11 @@ void set_group_info(
     int rank,
     int world_size,
     c10::intrusive_ptr<Store> store) {
-  auto group_info =
-      GroupInfo{.rank = rank, .world_size = world_size, .store = store};
+  TORCH_CHECK(group_info_map.find(group_name) == group_info_map.end());
+  GroupInfo group_info;
+  group_info.rank = rank;
+  group_info.world_size = world_size;
+  group_info.store = std::move(store);
   group_info_map.emplace(group_name, std::move(group_info));
 }
 

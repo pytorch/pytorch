@@ -517,9 +517,6 @@ c10::intrusive_ptr<Block> CUDASymmetricMemoryAllocator::find_block(void* ptr) {
   return it->second;
 }
 
-// TODO:
-// - let's have a lock
-
 struct RegisterCUDASymmetricMemoryAllocator {
   RegisterCUDASymmetricMemoryAllocator() {
     register_allocator(

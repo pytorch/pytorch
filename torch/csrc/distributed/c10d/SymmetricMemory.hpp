@@ -74,11 +74,11 @@ class SymmetricMemoryAllocator : public c10::intrusive_ptr_target {
   virtual bool is_rendezvous_completed(void* ptr) = 0;
 };
 
-void register_allocator(
+C10_EXPORT void register_allocator(
     c10::DeviceType device_type,
     c10::intrusive_ptr<SymmetricMemoryAllocator> allocator);
 
-c10::intrusive_ptr<SymmetricMemoryAllocator> get_allocator(
+C10_EXPORT c10::intrusive_ptr<SymmetricMemoryAllocator> get_allocator(
     c10::DeviceType device_type);
 
 // Assign a store to `group_name` for rendezvous
@@ -96,7 +96,7 @@ struct GroupInfo {
   c10::intrusive_ptr<c10d::Store> store;
 };
 
-const GroupInfo& get_group_info(const std::string& group_name);
+C10_EXPORT const GroupInfo& get_group_info(const std::string& group_name);
 
 // Allocate a tensor using SymmetricMemoryAllocator::alloc()
 TORCH_API at::Tensor empty_strided_p2p(
