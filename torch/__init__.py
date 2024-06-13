@@ -22,8 +22,9 @@ import platform
 import sys
 import textwrap
 import threading
-from typing import Any, Callable, Dict, Optional, Set, Tuple, Type, TYPE_CHECKING, Union
 from dataclasses import dataclass
+from typing import Any, Callable, Dict, Optional, Set, Tuple, Type, TYPE_CHECKING, Union
+
 
 # multipy/deploy is setting this import before importing torch, this is the most
 # reliable way we have to detect if we're running within deploy.
@@ -716,14 +717,22 @@ class _SymExprHash:
     sym_obj: Union[SymInt, SymFloat, SymBool]
 
     def __hash__(self) -> builtins.int:
-        return hash((type(self.sym_obj), self.sym_obj.node.expr, id(self.sym_obj.node.shape_env)))
+        return hash(
+            (
+                type(self.sym_obj),
+                self.sym_obj.node.expr,
+                id(self.sym_obj.node.shape_env),
+            )
+        )
 
     def __eq__(self, value) -> builtins.bool:
         if not isinstance(value, _SymExprHash):
             return False
         self_node = self.sym_obj.node
         value_node = value.sym_obj.node
-        return self_node.expr == value_node.expr and id(self_node.shape_env) == id(value_node.shape_env)
+        return self_node.expr == value_node.expr and id(self_node.shape_env) == id(
+            value_node.shape_env
+        )
 
 
 def sym_not(a):

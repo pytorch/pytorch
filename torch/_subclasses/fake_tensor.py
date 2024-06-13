@@ -907,7 +907,9 @@ def extract_tensor_metadata(t: torch.Tensor) -> "TensorMetadata":
         shape = tuple(cast(Sequence[int], t.shape))
         stride = stride_
         # Only set storage_bytes for tensors that have storage (not sparse)
-        storage_bytes = convert_to_sym_hash(t.untyped_storage().nbytes() if not t.is_sparse else None)
+        storage_bytes = convert_to_sym_hash(
+            t.untyped_storage().nbytes() if not t.is_sparse else None
+        )
         storage_offset = t.storage_offset()
 
     return TensorMetadata(
@@ -944,9 +946,9 @@ class _DispatchCacheKey(list):
         self, tup: Tuple[object, ...], hash: Callable[[object], int] = hash
     ) -> None:
         self[:] = tup
-        #try:
+        # try:
         self.hashvalue = hash(tup)
-        #except TypeError as e:
+        # except TypeError as e:
         #    breakpoint()
         #    raise
 
@@ -1452,14 +1454,15 @@ class FakeTensorMode(TorchDispatchMode):
         Create a new FakeTensor from the cache entry.
         """
         metadata = entry.metadata
-        if metadata is None:
-            return None
-
         if entry.inplace_idx is not None:
             # This is an in-place op; return the aliased arg.
             inplace_arg = args[entry.inplace_idx]
             assert isinstance(inplace_arg, FakeTensor)
             return inplace_arg
+
+        if metadata is None:
+            print("fake_tensor - no metadata")
+            return None
 
         # Synthesize a new FakeTensor with the cached metadata.
         assert not metadata.is_sparse
@@ -1540,7 +1543,7 @@ class FakeTensorMode(TorchDispatchMode):
                 f"args={args}, kwargs={kwargs}: Dispatch raised={e}"
             ) from e
         try:
-            assert true_output is not None == output is not None
+            assert (true_output is None) == (output is None)
             assert_metadata_eq(assert_eq, true_output, output)
         except Exception as e:
             raise RuntimeError(
