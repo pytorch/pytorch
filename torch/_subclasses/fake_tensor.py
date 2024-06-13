@@ -1543,13 +1543,11 @@ class FakeTensorMode(TorchDispatchMode):
                 f"args={args}, kwargs={kwargs}: Dispatch raised={e}"
             ) from e
         try:
-            if true_output or output:
-                assert true_output
-                assert output
+            if (true_output is not None) and (output is not None):
                 assert_metadata_eq(assert_eq, true_output, output)
             else:
-                assert not true_output
-                assert not output
+                assert true_output is None
+                assert output is None
         except Exception as e:
             raise RuntimeError(
                 f"FakeTensor cache crosscheck failure: func={func}, "

@@ -98,6 +98,17 @@ TensorOrNumberLikeType: TypeAlias = Union[TensorLikeType, NumberType]
 CustomOutParamAnnotation = "__custom_out_param__"
 
 
+def is_symbolic(a: object) -> bool:
+    if isinstance(a, (torch.SymInt, torch.SymFloat, torch.SymBool)):
+        return True
+    elif isinstance(a, (list, tuple)):
+        return any(is_symbolic(x) for x in a)
+    elif isinstance(a, dict):
+        return any(is_symbolic(x) for x in a.values())
+    else:
+        return False
+
+
 def same_shape(a: ShapeType, b: ShapeType, *, allow_rhs_unbacked=False) -> bool:
     from torch.fx.experimental.symbolic_shapes import guard_size_oblivious
 
@@ -1854,7 +1865,7 @@ def suggest_memory_format(x: TensorLikeType) -> torch.memory_format:
     if x.layout != torch.strided:
         return torch.contiguous_format
 
-    if are_strides_like_channels_last(x.shape, x.stride()):
+    if not is_symbolic(x.shape) and are_strides_like_channels_last(x.shape, x.stride()):
         return torch.channels_last if x.ndim == 4 else torch.channels_last_3d
 
     return torch.contiguous_format
