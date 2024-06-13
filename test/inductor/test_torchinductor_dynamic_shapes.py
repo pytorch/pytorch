@@ -65,15 +65,13 @@ test_failures = {
 
 if TEST_WITH_ROCM:
     # Tensor-likes are not close
-    test_failures["test_convolution1_dynamic_shapes"] = TestFailure(
+    test_failures["test_dynamic_stride_nobreak"] = TestFailure(
         ("cpu", "cuda"), is_skip=True
     )
-    test_failures["test_convolution3_dynamic_shapes"] = TestFailure(
-        ("cuda"), is_skip=True
+    test_failures["test_item_to_inputs_kernel_nobreak"] = TestFailure(
+        ("cpu", "cuda"), is_skip=True
     )
-    test_failures["test_expanded_reduction_dynamic_shapes"] = TestFailure(
-        ("cuda"), is_skip=True
-    )
+    test_failures["test_unbacked_reduction"] = TestFailure(("cpu"), is_skip=True)
 
 
 def make_dynamic_cls(cls, xfail_prop="_expected_failure_dynamic"):
