@@ -159,6 +159,7 @@ def _create_tcp_store(params: RendezvousParameters) -> TCPStore:
                 host,
                 port,
                 is_master=is_server,
+                multi_tenant=True,
                 timeout=timedelta(seconds=read_timeout),
                 use_libuv=use_libuv,
             )
