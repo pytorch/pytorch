@@ -306,8 +306,11 @@ class RNNBase(Module):
 
     def _update_flat_weights(self):
         if not torch.jit.is_scripting():
-            if self._weights_have_changed():
-                self._init_flat_weights()
+            # Dynamo does not support tracing weakref and causes graph break
+            # https://github.com/pytorch/pytorch/issues/125720
+            if not torch._dynamo.is_compiling():
+                if self._weights_have_changed():
+                    self._init_flat_weights()
 
     def __getstate__(self):
         # If weights have been changed, update the _flat_weights in __getstate__ here.
