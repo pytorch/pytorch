@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 """
 ``torch.autograd`` provides classes and functions implementing automatic
 differentiation of arbitrary scalar valued functions. It requires minimal
@@ -31,7 +32,24 @@ from .graph import _engine_run_backward
 
 from .variable import Variable
 
-__all__ = ["Variable", "Function", "backward", "grad_mode"]
+__all__ = [
+    "Variable",
+    "Function",
+    "backward",
+    "grad_mode",
+    "NestedIOFunction",
+    "detect_anomaly",
+    "enable_grad",
+    "grad",
+    "gradcheck",
+    "gradgradcheck",
+    "inference_mode",
+    "no_grad",
+    "set_detect_anomaly",
+    "set_grad_enabled",
+    "set_multithreading_enabled",
+    "variable",
+]
 
 _OptionalTensor = Optional[torch.Tensor]
 _ShapeorNestedShape = Union[_size, Sequence[_size], torch.Tensor]
@@ -235,17 +253,21 @@ def backward(
         )
 
     if grad_variables is not None:
-        warnings.warn("'grad_variables' is deprecated. Use 'grad_tensors' instead.")
+        warnings.warn(
+            "`grad_variables` is deprecated. Use `grad_tensors` instead.",
+            FutureWarning,
+            stacklevel=2,
+        )
         if grad_tensors is None:
             grad_tensors = grad_variables
         else:
             raise RuntimeError(
-                "'grad_tensors' and 'grad_variables' (deprecated) "
-                "arguments both passed to backward(). Please only "
-                "use 'grad_tensors'."
+                "`grad_tensors` and `grad_variables` (deprecated) "
+                "arguments both passed to `backward()`. Please only "
+                "use `grad_tensors`."
             )
     if inputs is not None and len(inputs) == 0:
-        raise RuntimeError("'inputs' argument to backward() cannot be empty.")
+        raise RuntimeError("`inputs` argument to `backward()` cannot be empty.")
 
     tensors = (tensors,) if isinstance(tensors, torch.Tensor) else tuple(tensors)
     inputs = (
@@ -378,7 +400,9 @@ def grad(
         warnings.warn(
             "only_inputs argument is deprecated and is ignored now "
             "(defaults to True). To accumulate gradient for other "
-            "parts of the graph, please use torch.autograd.backward."
+            "parts of the graph, please use torch.autograd.backward.",
+            FutureWarning,
+            stacklevel=2,
         )
 
     grad_outputs_ = _tensor_or_tensors_to_tuple(grad_outputs, len(t_outputs))

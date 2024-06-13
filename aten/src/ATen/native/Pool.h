@@ -19,12 +19,25 @@ DECLARE_DISPATCH(max_pool2d_backward_fn, max_pool2d_backward_kernel);
 
 // averge pooling has same signature for forward and backward
 using avg_pool2d_fn = void(*)(const Tensor& output, const Tensor& input, int64_t kW, int64_t kH,
-    int64_t dW, int64_t dH, int64_t padW, int64_t padH, bool count_include_pad, c10::optional<int64_t> divisor_override);
+    int64_t dW, int64_t dH, int64_t padW, int64_t padH, bool count_include_pad, std::optional<int64_t> divisor_override);
 using avg_pool2d_backward_fn = void(*)(const Tensor& output, const Tensor& input, int kW, int kH,
-    int dW, int dH, int padW, int padH, bool count_include_pad, c10::optional<int64_t> divisor_override);
+    int dW, int dH, int padW, int padH, bool count_include_pad, std::optional<int64_t> divisor_override);
 
 DECLARE_DISPATCH(avg_pool2d_fn, avg_pool2d_kernel);
 DECLARE_DISPATCH(avg_pool2d_backward_fn, avg_pool2d_backward_kernel);
+
+// averge pooling has same signature for forward and backward
+using avg_pool3d_fn = void(*)(const Tensor& output, const Tensor& input,
+    int64_t kW, int64_t kH, int64_t kD, int64_t dW, int64_t dH, int64_t dD,
+    int64_t padW, int64_t padH, int64_t padD, bool count_include_pad,
+    std::optional<int64_t> divisor_override);
+using avg_pool3d_backward_fn = void(*)(const Tensor& output, const Tensor& input,
+    int kW, int kH, int kD, int dW, int dH, int dD,
+    int padW, int padH, int padD, bool count_include_pad,
+    std::optional<int64_t> divisor_override);
+
+DECLARE_DISPATCH(avg_pool3d_fn, avg_pool3d_kernel);
+DECLARE_DISPATCH(avg_pool3d_backward_fn, avg_pool3d_backward_kernel);
 
 using max_pool3d_fn = void(*)(Tensor& output, Tensor& indices, const Tensor& input,
     int kW, int kH, int kD, int dW, int dH, int dD, int pW, int pH, int pD, int dilationW, int dilationH, int dilationD);
@@ -35,7 +48,7 @@ DECLARE_DISPATCH(max_pool3d_backward_fn, max_pool3d_backward_kernel);
 namespace {
 
 template <typename dest_t, typename src_t>
-static inline dest_t
+inline dest_t
 safe_downcast(src_t v)
 {
   TORCH_CHECK(std::numeric_limits<dest_t>::min() <= v && v <= std::numeric_limits<dest_t>::max(),
@@ -45,7 +58,7 @@ safe_downcast(src_t v)
 }
 
 template<typename T>
-static inline T pooling_output_shape_pad_lr(
+inline T pooling_output_shape_pad_lr(
         T inputSize, T kernelSize, T pad_l, T pad_r, T stride, T dilation,
         bool ceil_mode) {
     T outputSize = div_rtn<T>(
@@ -62,7 +75,7 @@ static inline T pooling_output_shape_pad_lr(
 }
 
 template<typename T>
-static inline T pooling_output_shape(
+inline T pooling_output_shape(
       T inputSize, T kernelSize, T pad, T stride, T dilation, bool ceil_mode) {
     TORCH_CHECK(stride != 0, "stride should not be zero");
     TORCH_CHECK(pad >= 0,
@@ -104,7 +117,7 @@ inline std::pair<c10::SymInt, c10::SymInt> pooling_same_mode_padding_lr(
 }
 
 // AveragePool2d/DilatedMaxPool2d (forward)
-static inline void
+inline void
 pool2d_shape_check(
   const Tensor& input,
   int kH, int kW, int dH, int dW, int padH, int padW, int dilationH, int dilationW,
@@ -151,7 +164,7 @@ pool2d_shape_check(
 }
 
 // DilatedMaxPool2d (backward)
-static inline void
+inline void
 max_pool2d_backward_shape_check(
   const Tensor& input,
   const Tensor& gradOutput,
@@ -179,7 +192,7 @@ max_pool2d_backward_shape_check(
 }
 
 // AveragePool2d (backward)
-static inline void
+inline void
 avg_pool2d_backward_shape_check(
   const Tensor& input,
   const Tensor& gradOutput,
@@ -205,7 +218,7 @@ avg_pool2d_backward_shape_check(
 }
 
 // AveragePool3d/DilatedMaxPool3d (forward)
-static inline void
+inline void
 pool3d_shape_check(
   const Tensor& input,
   int64_t nslices,
@@ -267,7 +280,7 @@ pool3d_shape_check(
               "Output size is too small");
 }
 
-static inline void
+inline void
 max_pool3d_backward_shape_check(
   const Tensor& input,
   const Tensor& gradOutput,
@@ -304,7 +317,7 @@ max_pool3d_backward_shape_check(
   check_dim_size(indices, ndim, ndim-1, owidth);
 }
 
-static inline void
+inline void
 avg_pool3d_backward_shape_check(
   const Tensor& input,
   const Tensor& gradOutput,

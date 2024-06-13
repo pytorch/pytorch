@@ -9,7 +9,6 @@
 
 #include <c10/macros/Macros.h>
 #include <c10/util/Logging.h>
-#include <c10/util/string_utils.h>
 #include <torch/csrc/jit/tensorexpr/codegen.h>
 #include <torch/csrc/jit/tensorexpr/exceptions.h>
 #include <torch/csrc/jit/tensorexpr/ir.h>
@@ -307,7 +306,7 @@ class ExprEval {
 
 // Evaluates the given expression and returns an int64_t value if the result of
 // the given expression is int64_t.
-c10::optional<int64_t> evalInt(ExprPtr e);
+std::optional<int64_t> evalInt(ExprPtr e);
 
 // Substitutes the given vars with their corresponding expressions in the input
 // expression.

@@ -167,7 +167,7 @@ struct CUDAValueSelectionIntersectionKernel {
   }
 };
 
-using OptTensor = c10::optional<Tensor>;
+using OptTensor = std::optional<Tensor>;
 
 void mul_sparse_sparse_out_cuda_kernel(
     Tensor& result,

@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import contextlib
 
 import warnings
@@ -6,6 +7,7 @@ from typing import Any, Dict, List, Optional, Set, Union
 
 import torch
 import torchgen
+import torchgen.model
 from torch._C import (
     _get_dispatch_stack_at,
     _len_torch_dispatch_stack,
@@ -67,7 +69,7 @@ class TorchDispatchMode:
         self.old_dispatch_mode_flag = False
 
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
-        raise NotImplementedError()
+        raise NotImplementedError
 
     def __enter__(self):
         global _is_in_torch_dispatch_mode
@@ -103,24 +105,25 @@ def _get_current_dispatch_mode():
     return None
 
 
-def _detect_functional_mode():
+def _detect_infra_mode(key):
+    assert key in [torch._C._TorchDispatchModeKey.FUNCTIONAL, torch._C._TorchDispatchModeKey.PROXY]
     from torch._ops import _get_dispatch_mode_pre_dispatch
 
-    pre_dispatch_functional_mode = _get_dispatch_mode_pre_dispatch(
-        torch._C._TorchDispatchModeKey.FUNCTIONAL
+    pre_dispatch_mode = _get_dispatch_mode_pre_dispatch(
+        key
     )
-    post_dispatch_functional_mode = torch._C._get_dispatch_mode(
-        torch._C._TorchDispatchModeKey.FUNCTIONAL
-    )
-
-    assert (pre_dispatch_functional_mode is None) or (
-        post_dispatch_functional_mode is None
+    post_dispatch_mode = torch._C._get_dispatch_mode(
+        key
     )
 
-    if pre_dispatch_functional_mode is None:
-        return post_dispatch_functional_mode
+    assert (pre_dispatch_mode is None) or (
+        post_dispatch_mode is None
+    )
 
-    return pre_dispatch_functional_mode
+    if pre_dispatch_mode is None:
+        return post_dispatch_mode
+
+    return pre_dispatch_mode
 
 
 def _unset_infra_mode(key):
@@ -158,7 +161,7 @@ def _get_current_dispatch_mode_stack():
     return [_get_dispatch_stack_at(i) for i in range(stack_len)]
 
 
-def _push_mode(mode):
+def _push_mode(mode: TorchDispatchMode):
     k = mode._dispatch_key if hasattr(mode, "_dispatch_key") else None
     assert k is None or k == torch._C.DispatchKey.PreDispatch
     if k is None:
@@ -203,6 +206,7 @@ def _disable_current_modes():
     )
     from torch._subclasses.functional_tensor import FunctionalTensorMode
     from torch.fx.experimental.proxy_tensor import ProxyTorchDispatchMode
+    from torch._subclasses.schema_check_mode import SchemaCheckMode
 
     mode_len_pre_dispatch = _len_torch_dispatch_stack_pre_dispatch()
     old_pre_dispatch_modes = [
@@ -211,12 +215,15 @@ def _disable_current_modes():
 
     has_proxy_mode_in_pre_dispatch = False
     has_functional_mode_in_pre_dispatch = False
+    has_schema_check_mode_in_pre_dispatch = False
 
     for i in old_pre_dispatch_modes:
         if isinstance(i, ProxyTorchDispatchMode):
             has_proxy_mode_in_pre_dispatch = True
         if isinstance(i, FunctionalTensorMode):
             has_functional_mode_in_pre_dispatch = True
+        if isinstance(i, SchemaCheckMode):
+            has_schema_check_mode_in_pre_dispatch = True
 
     mode_len = _len_torch_dispatch_stack()
     old_modes = [_pop_mode() for _ in range(mode_len)]
@@ -232,6 +239,13 @@ def _disable_current_modes():
         if isinstance(old, ProxyTorchDispatchMode) and has_proxy_mode_in_pre_dispatch:
             raise AssertionError(
                 "Can't have ProxyTorchDispatchMode available both in PreDispatch and Python Key"
+            )
+        if (
+            isinstance(old, SchemaCheckMode)
+            and has_schema_check_mode_in_pre_dispatch
+        ):
+            raise AssertionError(
+                "Can't have SchemaCheckMode available both in PreDispatch and Python Key"
             )
 
     # Manually disable proxy and fake modes, if any are active

@@ -103,7 +103,12 @@ class MultiUserConvOp(nn.Module):
 class EfficientConvBNEvalTemplate(TestCase):
     @inductor_config.patch({"efficient_conv_bn_eval_fx_passes": True})
     def test_basic(self):
-        def test_conv_bn_eval(test_class, use_bias, module, sync_bn):
+        def test_conv_bn_eval(
+            test_class, use_bias, module, sync_bn, decompose_nn_module
+        ):
+            from functorch import make_fx
+            from torch._dispatch.python import enable_python_dispatcher
+
             kwargs = {"kernel_size": 3, "stride": 2} if module[0] != nn.Linear else {}
             mod_eager = test_class(
                 module[0],
@@ -122,7 +127,6 @@ class EfficientConvBNEvalTemplate(TestCase):
                     mod_optimized
                 ).eval()
             torch._dynamo.reset()
-            mod_optimized = torch.compile(mod_optimized)
 
             inps = [4, 3]
             # Conv shape goes from big to small, and ConvTranspose shape goes from small to big
@@ -137,6 +141,11 @@ class EfficientConvBNEvalTemplate(TestCase):
                 inps += [spatial_d] * 3
             inp = torch.rand(inps).to(self.device)
 
+            if decompose_nn_module:
+                with enable_python_dispatcher():
+                    mod_optimized = make_fx(mod_optimized, pre_dispatch=True)(inp)
+            mod_optimized = torch.compile(mod_optimized)
+
             original_value = counters["inductor"]["efficient_conv_bn_eval"]
 
             optim_eager = torch.optim.SGD(mod_eager.parameters(), lr=1e-3)
@@ -149,7 +158,7 @@ class EfficientConvBNEvalTemplate(TestCase):
             out_eager = mod_eager(inp)
             out_optimized = mod_optimized(inp)
 
-            self.assertEqual(out_optimized, out_eager, atol=2e-04, rtol=1e-5)
+            self.assertEqual(out_optimized, out_eager, atol=3e-04, rtol=1e-5)
 
             out_eager.mean().backward()
             out_optimized.mean().backward()
@@ -161,7 +170,7 @@ class EfficientConvBNEvalTemplate(TestCase):
             out_eager_bw = mod_eager(inp_bw)
             out_optimized_bw = mod_optimized(inp_bw)
 
-            self.assertEqual(out_eager_bw, out_optimized_bw, atol=2e-04, rtol=1e-5)
+            self.assertEqual(out_eager_bw, out_optimized_bw, atol=3e-04, rtol=1e-5)
             current_value = counters["inductor"]["efficient_conv_bn_eval"]
             self.assertEqual(
                 current_value - original_value, test_class.expected_optimization_count
@@ -179,10 +188,23 @@ class EfficientConvBNEvalTemplate(TestCase):
         ]
         test_classes = [ConvOp, MultiUserConvOp]
         sync_bns = [False, True]
-        for test_class, use_bias, module, sync_bn in itertools.product(
-            test_classes, conv_bias, modules, sync_bns
+        decompose_nn_modules = [False, True]
+        for (
+            test_class,
+            use_bias,
+            module,
+            sync_bn,
+            decompose_nn_module,
+        ) in itertools.product(
+            test_classes,
+            conv_bias,
+            modules,
+            sync_bns,
+            decompose_nn_modules,
         ):
-            test_conv_bn_eval(test_class, use_bias, module, sync_bn)
+            test_conv_bn_eval(
+                test_class, use_bias, module, sync_bn, decompose_nn_module
+            )
 
 
 if HAS_CPU and not torch.backends.mps.is_available():

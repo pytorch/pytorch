@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 """Utilities for manipulating the onnx and onnx-script dependencies and ONNX proto."""
 
 from __future__ import annotations
@@ -26,13 +27,13 @@ def export_as_test_case(
     is as follows:
 
     dir
-    ├── test_<name>
-    │   ├── model.onnx
-    │   └── test_data_set_0
-    │       ├── input_0.pb
-    │       ├── input_1.pb
-    │       ├── output_0.pb
-    │       └── output_1.pb
+    \u251c\u2500\u2500 test_<name>
+    \u2502   \u251c\u2500\u2500 model.onnx
+    \u2502   \u2514\u2500\u2500 test_data_set_0
+    \u2502       \u251c\u2500\u2500 input_0.pb
+    \u2502       \u251c\u2500\u2500 input_1.pb
+    \u2502       \u251c\u2500\u2500 output_0.pb
+    \u2502       \u2514\u2500\u2500 output_1.pb
 
     Args:
         model_bytes: The ONNX model in bytes.
@@ -80,13 +81,13 @@ def load_test_case(dir: str) -> Tuple[bytes, Any, Any]:
     should be as follows:
 
     dir
-    ├── test_<name>
-    │   ├── model.onnx
-    │   └── test_data_set_0
-    │       ├── input_0.pb
-    │       ├── input_1.pb
-    │       ├── output_0.pb
-    │       └── output_1.pb
+    \u251c\u2500\u2500 test_<name>
+    \u2502   \u251c\u2500\u2500 model.onnx
+    \u2502   \u2514\u2500\u2500 test_data_set_0
+    \u2502       \u251c\u2500\u2500 input_0.pb
+    \u2502       \u251c\u2500\u2500 input_1.pb
+    \u2502       \u251c\u2500\u2500 output_0.pb
+    \u2502       \u2514\u2500\u2500 output_1.pb
 
     Args:
         dir: The directory containing the test case.
@@ -98,7 +99,7 @@ def load_test_case(dir: str) -> Tuple[bytes, Any, Any]:
     """
     try:
         import onnx
-        from onnx import numpy_helper
+        from onnx import numpy_helper  # type: ignore[attr-defined]
     except ImportError as exc:
         raise ImportError(
             "Load test case from ONNX format failed: Please install ONNX."
@@ -134,7 +135,7 @@ def export_data(data, value_info_proto, f: str) -> None:
         f: The file to write the data to.
     """
     try:
-        from onnx import numpy_helper
+        from onnx import numpy_helper  # type: ignore[attr-defined]
     except ImportError as exc:
         raise ImportError(
             "Export data to ONNX format failed: Please install ONNX."

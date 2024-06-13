@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 
 r"""
 The torch package contains data structures for multi-dimensional
@@ -17,6 +18,9 @@ import textwrap
 import ctypes
 import inspect
 import threading
+import pdb
+import importlib
+import importlib.util
 
 # multipy/deploy is setting this import before importing torch, this is the most
 # reliable way we have to detect if we're running within deploy.
@@ -58,6 +62,7 @@ __all__ = [
     'SymBool', 'sym_not', 'unravel_index',
     'sym_int', 'sym_float', 'sym_max', 'sym_min', 'sym_ite', 'compile', 'vmap',
     'export', 'autocast', 'cond', 'GradScaler',
+    'get_device_module',
 ]
 
 ################################################################################
@@ -65,9 +70,11 @@ __all__ = [
 ################################################################################
 
 if sys.platform == 'win32':
+    import sysconfig
     pfiles_path = os.getenv('ProgramFiles', 'C:\\Program Files')
     py_dll_path = os.path.join(sys.exec_prefix, 'Library', 'bin')
     th_dll_path = os.path.join(os.path.dirname(__file__), 'lib')
+    usebase_path = os.path.join(sysconfig.get_config_var("userbase"), 'Library', 'bin')
 
     # When users create a virtualenv that inherits the base environment,
     # we will need to add the corresponding library directory into
@@ -78,7 +85,7 @@ if sys.platform == 'win32':
     else:
         base_py_dll_path = ''
 
-    dll_paths = list(filter(os.path.exists, [th_dll_path, py_dll_path, base_py_dll_path]))
+    dll_paths = list(filter(os.path.exists, [th_dll_path, py_dll_path, base_py_dll_path, usebase_path]))
 
     if all(not os.path.exists(os.path.join(p, 'nvToolsExt64_1.dll')) for p in dll_paths):
         nvtoolsext_dll_path = os.path.join(
@@ -162,18 +169,61 @@ def _preload_cuda_deps(lib_folder, lib_name):
         raise ValueError(f"{lib_name} not found in the system path {sys.path}")
     ctypes.CDLL(lib_path)
 
-
 # See Note [Global dependencies]
 def _load_global_deps() -> None:
+
+    LIBTORCH_PKG_NAME = "libtorchsplit"
+
+    def find_package_path(package_name):
+        spec = importlib.util.find_spec(package_name)
+        if spec:
+            # The package might be a namespace package, so get_data may fail
+            try:
+                loader = spec.loader
+                if loader is not None:
+                    file_path = loader.get_filename()  # type: ignore[attr-defined]
+                    return os.path.dirname(file_path)
+            except AttributeError:
+                pass
+        return None
+
+    def load_shared_libraries(library_path):
+        lib_dir = os.path.join(library_path, 'lib')
+        if not os.path.exists(lib_dir):
+            return
+
+        # Determine the file extension based on the platform
+        if platform.system() == 'Darwin':
+            lib_ext = '.dylib'
+        else:
+            lib_ext = '.so'
+
+        # Find all shared library files with the appropriate extension
+        library_files = [f for f in os.listdir(lib_dir) if f.endswith(lib_ext)]
+        if not library_files:
+            return
+
+        for lib_file in library_files:
+            lib_path = os.path.join(lib_dir, lib_file)
+            try:
+                ctypes.CDLL(lib_path, mode=ctypes.RTLD_GLOBAL)
+            except OSError as err:
+                print(f"Failed to load {lib_path}: {err}")
+
     if _running_with_deploy() or platform.system() == 'Windows':
         return
 
     lib_name = 'libtorch_global_deps' + ('.dylib' if platform.system() == 'Darwin' else '.so')
     here = os.path.abspath(__file__)
-    lib_path = os.path.join(os.path.dirname(here), 'lib', lib_name)
+    global_deps_lib_path = os.path.join(os.path.dirname(here), 'lib', lib_name)
 
+    split_build_lib_name = LIBTORCH_PKG_NAME
+    library_path = find_package_path(split_build_lib_name)
+
+    if library_path:
+        global_deps_lib_path = os.path.join(library_path, 'lib', lib_name)
     try:
-        ctypes.CDLL(lib_path, mode=ctypes.RTLD_GLOBAL)
+        ctypes.CDLL(global_deps_lib_path, mode=ctypes.RTLD_GLOBAL)
     except OSError as err:
         # Can only happen for wheel with cuda libs as PYPI deps
         # As PyTorch is not purelib, but nvidia-*-cu12 is
@@ -195,8 +245,11 @@ def _load_global_deps() -> None:
             raise err
         for lib_folder, lib_name in cuda_libs.items():
             _preload_cuda_deps(lib_folder, lib_name)
-        ctypes.CDLL(lib_path, mode=ctypes.RTLD_GLOBAL)
+        ctypes.CDLL(global_deps_lib_path, mode=ctypes.RTLD_GLOBAL)
 
+    if library_path:
+        # loading libtorch_global_deps first due its special logic
+        load_shared_libraries(library_path)
 
 if (USE_RTLD_GLOBAL_WITH_LIBTORCH or os.getenv('TORCH_USE_RTLD_GLOBAL')) and \
         (_running_with_deploy() or platform.system() != 'Windows'):
@@ -239,7 +292,7 @@ else:
 # Appease the type checker; ordinarily this binding is inserted by the
 # torch._C module initialization code in C
 if TYPE_CHECKING:
-    from . import _C as _C
+    from . import _C as _C  # noqa: TCH004
 
 class SymInt:
     """
@@ -264,6 +317,75 @@ class SymInt:
 
     # Magic methods installed by torch.fx.experimental.sym_node
 
+    def __round__(self, ndigits=None):
+        return self
+
+    def __truediv__(self, other):
+        if isinstance(other, (builtins.float, SymFloat)):
+            return sym_float(self).__float_truediv__(other)
+        if not isinstance(other, (builtins.int, SymInt)):
+            return NotImplemented
+        return self.__int_truediv__(other)
+
+    def __rtruediv__(self, other):
+        if isinstance(other, (builtins.float, SymFloat)):
+            return sym_float(self).__rfloat_truediv__(other)
+        if not isinstance(other, (builtins.int, SymInt)):
+            return NotImplemented
+        return self.__rint_truediv__(other)
+
+    def __floordiv__(self, other):
+        if isinstance(other, (builtins.float, SymFloat)):
+            return torch.sym_float(math.floor(sym_float(self) / other))
+        if not isinstance(other, (builtins.int, SymInt)):
+            return NotImplemented
+        return self.__int_floordiv__(other)
+
+    def __rfloordiv__(self, other):
+        if isinstance(other, (builtins.float, SymFloat)):
+            return torch.sym_float(math.floor(other / sym_float(self)))
+        if not isinstance(other, (builtins.int, SymInt)):
+            return NotImplemented
+        return self.__rint_floordiv__(other)
+
+    # nb: complex is impossible to handle correctly lol, with
+    # negative base and integral float need to diverge semantics and
+    # just always return complex.  Neener neener pretend this problem
+    # doesn't exist
+    def __pow__(self, other):
+        if isinstance(other, (builtins.float, SymFloat)):
+            return sym_float(self).__pow__(other)
+        if not isinstance(other, (builtins.int, SymInt)):
+            return NotImplemented
+        # Guards!  This guard is necessary because we need to know it to
+        # determine the output type of this operation
+        if other >= 0:
+            return self.__pow_by_natural__(other)
+        else:
+            # Mercifully, when the exponent is negative, Python just promotes
+            # to doubles and does a float pow:
+            #
+            #   if (Py_SIZE(b) < 0 && c == NULL) {
+            #       /* if exponent is negative and there's no modulus:
+            #              return a float.  This works because we know
+            #              that this calls float_pow() which converts its
+            #              arguments to double. */
+            #       Py_DECREF(a);
+            #       Py_DECREF(b);
+            #       return PyFloat_Type.tp_as_number->nb_power(v, w, x);
+            #   }
+            return sym_float(self).__pow__(sym_float(other))
+
+    def __rpow__(self, other):
+        if isinstance(other, (builtins.float, SymFloat)):
+            return sym_float(self).__rpow__(other)
+        if not isinstance(other, (builtins.int, SymInt)):
+            return NotImplemented
+        if self >= 0:  # self is exponent
+            return self.__rpow_by_natural__(other)
+        else:
+            return sym_float(self).__rpow__(sym_float(other))
+
     def __eq__(self, other: object) -> builtins.bool:
         raise AssertionError("type stub not overridden")
 
@@ -283,6 +405,24 @@ class SymInt:
         raise AssertionError("type stub not overridden")
 
     def __mul__(self, other) -> "SymInt":
+        raise AssertionError("type stub not overridden")
+
+    def __pow_by_natural__(self, other) -> "SymInt":
+        raise AssertionError("type stub not overridden")
+
+    def __rpow_by_natural__(self, other) -> "SymInt":
+        raise AssertionError("type stub not overridden")
+
+    def __int_truediv__(self, other) -> "SymFloat":
+        raise AssertionError("type stub not overridden")
+
+    def __rint_truediv__(self, other) -> "SymFloat":
+        raise AssertionError("type stub not overridden")
+
+    def __int_floordiv__(self, other) -> "SymFloat":
+        raise AssertionError("type stub not overridden")
+
+    def __rint_floordiv__(self, other) -> "SymFloat":
         raise AssertionError("type stub not overridden")
 
     def __sym_max__(self, other):
@@ -319,8 +459,42 @@ class SymFloat:
         # class has a field named node that stores SymNode
         self.node = node
 
+    def __truediv__(self, other):
+        if not isinstance(other, (builtins.int, builtins.float, SymInt, SymFloat)):
+            return NotImplemented
+        return self.__float_truediv__(sym_float(other))
+
+    def __rtruediv__(self, other):
+        if not isinstance(other, (builtins.int, builtins.float, SymInt, SymFloat)):
+            return NotImplemented
+        return self.__rfloat_truediv__(sym_float(other))
+
+    def __floordiv__(self, other):
+        if not isinstance(other, (builtins.int, builtins.float, SymInt, SymFloat)):
+            return NotImplemented
+        return torch.sym_float(math.floor(self / sym_float(other)))
+
+    def __rfloordiv__(self, other):
+        if not isinstance(other, (builtins.int, builtins.float, SymInt, SymFloat)):
+            return NotImplemented
+        return torch.sym_float(math.floor(sym_float(other) / self))
+
     def __bool__(self):
         return self.node.bool_()
+
+    # Symbolic power does NOT work with negative base, this is to avoid
+    # potential complex outputs
+    def __pow__(self, other):
+        if not isinstance(other, (builtins.int, builtins.float, SymInt, SymFloat)):
+            return NotImplemented
+        torch._check(self >= 0)
+        return self.__float_pow__(other)
+
+    def __rpow__(self, other):
+        if not isinstance(other, (builtins.int, builtins.float, SymInt, SymFloat)):
+            return NotImplemented
+        torch._check(other >= 0)
+        return self.__rfloat_pow__(other)
 
     # Magic methods installed by torch.fx.experimental.sym_node
 
@@ -337,6 +511,21 @@ class SymFloat:
         raise AssertionError("type stub not overridden")
 
     def __ge__(self, other) -> builtins.bool:
+        raise AssertionError("type stub not overridden")
+
+    def __float_pow__(self, other) -> "SymFloat":
+        raise AssertionError("type stub not overridden")
+
+    def __rfloat_pow__(self, other) -> "SymFloat":
+        raise AssertionError("type stub not overridden")
+
+    def __float_truediv__(self, other) -> "SymFloat":
+        raise AssertionError("type stub not overridden")
+
+    def __rfloat_truediv__(self, other) -> "SymFloat":
+        raise AssertionError("type stub not overridden")
+
+    def __trunc__(self):
         raise AssertionError("type stub not overridden")
 
     def __sym_max__(self, other):
@@ -465,11 +654,16 @@ def sym_int(a):
     if isinstance(a, SymInt):
         return a
     elif isinstance(a, SymFloat):
-        return math.floor(a) if a >= 0 else math.ceil(a)  # type: ignore[arg-type, call-overload]
+        return math.trunc(a)
     return py_int(a)  # type: ignore[operator]
 
 def sym_max(a, b):
-    """ SymInt-aware utility for max()."""
+    """
+    SymInt-aware utility for max which avoids branching on a < b.
+    Unlike builtins.max(), this only works for int/float, and it always
+    promotes to float if any argument is float (unlike builtins.max, which
+    will faithfully preserve the type of the input argument).
+    """
     from .overrides import has_torch_function, handle_torch_function
 
     if has_torch_function((a, b)):
@@ -477,14 +671,19 @@ def sym_max(a, b):
     if isinstance(a, (SymInt, SymFloat)):
         return a.__sym_max__(b)
     elif isinstance(b, (SymInt, SymFloat)):
-        # NB: If you actually care about preserving output type exactly
-        # if you do something like max(0, 0.0), it is NOT sound to treat
-        # min/max as commutative
+        # Due to promotion semantics, this is operator is commutative:
+        # max(1, 1.0) === max(1.0, 1) === 1.0
         return b.__sym_max__(a)
-    return builtins.max(a, b)  # type: ignore[operator]
+    # TODO: Probably can make bool work too, just lazy
+    assert isinstance(a, (builtins.int, builtins.float)), type(a)
+    assert isinstance(b, (builtins.int, builtins.float)), type(b)
+    if isinstance(a, builtins.float) or isinstance(b, builtins.float):
+        return builtins.float(builtins.max(a, b))
+    else:
+        return builtins.max(a, b)
 
 def sym_min(a, b):
-    """ SymInt-aware utility for max()."""
+    """ SymInt-aware utility for min()."""
     from .overrides import has_torch_function, handle_torch_function
 
     if has_torch_function((a, b)):
@@ -493,11 +692,14 @@ def sym_min(a, b):
         return a.__sym_min__(b)
     elif isinstance(b, (SymInt, SymFloat)):
         return b.__sym_min__(a)
-    return builtins.min(a, b)  # type: ignore[operator]
+    assert isinstance(a, (builtins.int, builtins.float)), type(a)
+    assert isinstance(b, (builtins.int, builtins.float)), type(b)
+    if isinstance(a, builtins.float) or isinstance(b, builtins.float):
+        return builtins.float(builtins.min(a, b))
+    else:
+        return builtins.min(a, b)
 
 # Drop in replacement for math.sqrt, math.sin, math.cos etc
-current_module = sys.modules[__name__]
-
 def _get_sym_math_fn(name):
     def fn(a):
         from .overrides import has_torch_function_unary, handle_torch_function
@@ -510,17 +712,18 @@ def _get_sym_math_fn(name):
 
     return fn
 
-for name in ("sqrt", "cos", "cosh", "sin", "sinh", "tan", "tanh", "asin", "acos", "atan"):
-    sym_name = f"_sym_{name}"
-    fn = _get_sym_math_fn(name)
-    fn.__qualname__ = fn.__name__ = sym_name
-    setattr(current_module, sym_name, fn)
+__fn, __name, __sym_name = None, '', ''
+for __name in ("sqrt", "cos", "cosh", "sin", "sinh", "tan", "tanh", "asin", "acos", "atan"):
+    __sym_name = f"_sym_{__name}"
+    __fn = _get_sym_math_fn(__name)
+    __fn.__qualname__ = __fn.__name__ = __sym_name
+    globals()[__sym_name] = __fn
+
+del __fn, __name, __sym_name, _get_sym_math_fn
 
 # Adding temporary shortcut
-sym_sqrt = current_module._sym_sqrt
+sym_sqrt = globals()["_sym_sqrt"]
 __all__.append("sym_sqrt")
-
-del fn, name, sym_name, current_module  # type: ignore[possibly-undefined]
 
 
 def sym_ite(b, t, f):
@@ -557,30 +760,35 @@ except ImportError:
             ''').strip()) from None
     raise  # If __file__ is not None the cause is unknown, so just re-raise.
 
-for name in dir(_C):
-    if name[0] != '_' and not name.endswith('Base'):
-        __all__.append(name)
-        obj = getattr(_C, name)
-        if (isinstance(obj, Callable) or inspect.isclass(obj)):  # type: ignore[arg-type]
-            if (obj.__module__ != 'torch'):
+__name, __obj = '', None
+for __name in dir(_C):
+    if __name[0] != '_' and not __name.endswith('Base'):
+        __all__.append(__name)
+        __obj = getattr(_C, __name)
+        if callable(__obj) or inspect.isclass(__obj):
+            if __obj.__module__ != __name__:
                 # TODO: fix their module from C++ side
-                if name not in ['DisableTorchFunctionSubclass', 'DisableTorchFunction', 'Generator']:
-                    obj.__module__ = 'torch'
-    elif name == 'TensorBase':
+                if __name not in ['DisableTorchFunctionSubclass', 'DisableTorchFunction', 'Generator']:
+                    __obj.__module__ = __name__
+    elif __name == 'TensorBase':
         # issue 109438 / pr 109940. Prevent TensorBase from being copied into torch.
-        delattr(sys.modules[__name__], name)
+        delattr(sys.modules[__name__], __name)
+
+del __name, __obj
 
 if not TYPE_CHECKING:
     # issue 38137 and python issue 43367. Submodules of a C extension are
     # non-standard, and attributes of those submodules cannot be pickled since
     # pickle expect to be able to import them as "from _C.sub import attr"
     # which fails with "_C is not a package
-    for attr in dir(_C):
-        candidate = getattr(_C, attr)
-        if type(candidate) is type(_C):
+    __name, __candidate = '', None
+    for __name in dir(_C):
+        __candidate = getattr(_C, __name)
+        if type(__candidate) is type(_C):
             # submodule
-            if f'torch._C.{attr}' not in sys.modules:
-                sys.modules[f'torch._C.{attr}'] = candidate
+            sys.modules.setdefault(f"{__name__}._C.{__name}", __candidate)
+
+    del __name, __candidate
 
 
 ################################################################################
@@ -1262,8 +1470,9 @@ def _check_tensor_all(cond, message=None):  # noqa: F811
 
 # For Python Array API (https://data-apis.org/array-api/latest/API_specification/constants.html) and
 # NumPy consistency (https://numpy.org/devdocs/reference/constants.html)
-from math import e , nan , inf , pi
-__all__.extend(['e', 'pi', 'nan', 'inf'])
+from math import e, nan , inf , pi
+newaxis: None = None
+__all__.extend(['e', 'pi', 'nan', 'inf', 'newaxis'])
 
 ################################################################################
 # Define Storage and Tensor classes
@@ -1465,7 +1674,7 @@ from ._tensor_str import set_printoptions
 # Initialize extension
 ################################################################################
 
-def manager_path():
+def _manager_path():
     if _running_with_deploy() or platform.system() == 'Windows':
         return b""
     path = get_file_path('torch', 'bin', 'torch_shm_manager')
@@ -1482,8 +1691,8 @@ py_float = float
 py_int = int
 
 # Shared memory manager needs to know the exact location of manager executable
-_C._initExtension(manager_path())
-del manager_path
+_C._initExtension(_manager_path())
+del _manager_path
 
 # Appease the type checker: it can't deal with direct setting of globals().
 # Note that we will see "too many" functions when reexporting this way; there
@@ -1504,20 +1713,22 @@ PRIVATE_OPS = (
     'unique_dim',
 )
 
-for name in dir(_C._VariableFunctions):
-    if name.startswith('__') or name in PRIVATE_OPS:
+__name, __obj = '', None
+for __name in dir(_C._VariableFunctions):
+    if __name.startswith('__') or __name in PRIVATE_OPS:
         continue
-    obj = getattr(_C._VariableFunctions, name)
-    obj.__module__ = 'torch'
+    __obj = getattr(_C._VariableFunctions, __name)
+    __obj.__module__ = __name__
     # Hide some APIs that should not be public
-    if name == "segment_reduce":
+    if __name == "segment_reduce":
         # TODO: Once the undocumented FC window is passed, remove the line bellow
-        globals()[name] = obj
-        name = "_" + name
-    globals()[name] = obj
-    if not name.startswith("_"):
-        __all__.append(name)
+        globals()[__name] = __obj
+        __name = "_" + __name
+    globals()[__name] = __obj
+    if not __name.startswith("_"):
+        __all__.append(__name)
 
+del __name, __obj
 
 ################################################################################
 # Add torch.dtype instances to the public API
@@ -1525,9 +1736,9 @@ for name in dir(_C._VariableFunctions):
 
 import torch
 
-for attribute in dir(torch):
-    if isinstance(getattr(torch, attribute), torch.dtype):
-        __all__.append(attribute)
+__all__.extend(
+    name for name in dir(torch) if isinstance(getattr(torch, name), torch.dtype)
+)
 
 ################################################################################
 # Import TorchDynamo's lazy APIs to avoid circular dependenices
@@ -1576,6 +1787,7 @@ from torch import cuda as cuda
 from torch import cpu as cpu
 from torch import mps as mps
 from torch import xpu as xpu
+from torch import mtia as mtia
 from torch import autograd as autograd
 from torch.autograd import (
     no_grad as no_grad,
@@ -1619,8 +1831,8 @@ import torch.nn.intrinsic
 _C._init_names(list(torch._storage_classes))
 
 # attach docstrings to torch and tensor functions
-from . import _torch_docs, _tensor_docs, _storage_docs
-del _torch_docs, _tensor_docs, _storage_docs
+from . import _torch_docs, _tensor_docs, _storage_docs, _size_docs
+del _torch_docs, _tensor_docs, _storage_docs, _size_docs
 
 
 def compiled_with_cxx11_abi() -> builtins.bool:
@@ -1791,6 +2003,8 @@ def compile(model: Optional[Callable] = None, *,
             disable: builtins.bool = False) -> Callable:
     """
     Optimizes given model/function using TorchDynamo and specified backend.
+    If you are compiling an :class:`torch.nn.Module`, you can also use :meth:`torch.nn.Module.compile`
+    to compile the module inplace without changing its structure.
 
     Concretely, for every frame executed within the compiled region, we will attempt
     to compile it and cache the compiled result on the code object for future
@@ -1798,7 +2012,7 @@ def compile(model: Optional[Callable] = None, *,
     results are not applicable for subsequent calls (this is called a "guard
     failure), you can use TORCH_LOGS=guards to debug these situations.
     Multiple compiled results can be associated with a frame up to
-    ``torch._dynamo.config.cache_size_limit``, which defaults to 64; at which
+    ``torch._dynamo.config.cache_size_limit``, which defaults to 8; at which
     point we will fall back to eager.  Note that compile caches are per
     *code object*, not frame; if you dynamically create multiple copies of a
     function, they will all share the same code cache.
@@ -1824,7 +2038,8 @@ def compile(model: Optional[Callable] = None, *,
 
         - Experimental or debug in-tree backends can be seen with `torch._dynamo.list_backends(None)`
 
-        - To register an out-of-tree custom backend: https://pytorch.org/docs/main/torch.compiler_custom_backends.html
+        - To register an out-of-tree custom backend:
+       https://pytorch.org/docs/main/torch.compiler_custom_backends.html#registering-custom-backends
        mode (str): Can be either "default", "reduce-overhead", "max-autotune" or "max-autotune-no-cudagraphs"
 
         - "default" is the default mode, which is a good balance between performance and overhead
@@ -1940,17 +2155,6 @@ from torch import func as func
 from torch.func import vmap
 
 
-# The function _sparse_coo_tensor_unsafe is removed from PyTorch
-# Python API (v. 1.13), here we temporarily provide its replacement
-# with a deprecation warning.
-# TODO: remove the function for PyTorch v 1.15.
-def _sparse_coo_tensor_unsafe(*args, **kwargs):
-    import warnings
-    warnings.warn('torch._sparse_coo_tensor_unsafe is deprecated, '
-                  'use torch.sparse_coo_tensor(..., check_invariants=False) instead.')
-    kwargs['check_invariants'] = False
-    return torch.sparse_coo_tensor(*args, **kwargs)
-
 # Register MPS specific decomps
 torch.backends.mps._init()
 
@@ -2011,13 +2215,26 @@ else:
 
         raise AttributeError(f"module '{__name__}' has no attribute '{name}'")
 
-
-def _constrain_as_value(symbol, min: Optional[builtins.int] = None, max: Optional[builtins.int] = None):
+def get_device_module(device: Optional[Union[torch.device, str]] = None):
     """
-    Add min/max constraint on the intermediate symbol at tracing time. If called in eager mode,
-    it will still check if the input value is within the specified range.
+    Returns the module associated with a given device(e.g., torch.device('cuda'), "mtia:0", "xpu", ...).
+    If no device is given, return the module for the current accelerator or CPU if none is present.
     """
-    torch.sym_constrain_range(symbol, min=min, max=max)
+    if isinstance(device, torch.device):
+        device_module_name = device.type
+    elif isinstance(device, str):
+        device_module_name = torch.device(device).type
+    elif device is None:
+        # Using default accelerator type. If no accelerator is available, it automatically returns CPU device.
+        device_module_name = torch._C._get_accelerator().type
+    else:
+        raise RuntimeError(f"Invalid value of device '{device}', expect torch.device, str, or None")
+    device_module = getattr(torch, device_module_name, None)
+    if device_module is None:
+        raise RuntimeError(
+            f"Device '{device_module_name}' does not have a corresponding module registered as 'torch.{device_module_name}'."
+        )
+    return device_module
 
 
 def _constrain_as_size(symbol, min: Optional[builtins.int] = None, max: Optional[builtins.int] = None):
@@ -2027,11 +2244,10 @@ def _constrain_as_size(symbol, min: Optional[builtins.int] = None, max: Optional
     which then need to be used as tensor constructors. Providing these assertions to PyTorch can help resolve
       GuardOnDataDependentSymNode errors upon export, since we cannot guard on unbacked SymInts.
 
-    This function has unusual semantics which distinguish it from
-    constrain_as_value.  Specifically, in some circumstances in framework
+    This function has unusual semantics in some circumstances in framework
     code, we will treat this int as >= 2 (when we do a size-oblivious guard).
-    This makes it easier to This makes it easier to use the unbacked int in
-    size contexts, as we will often attempt to guard on a size being zero/one
+    This makes it easier to use the unbacked int in size contexts,
+    as we will often attempt to guard on a size being zero/one
     (e.g., when computing the contiguity of a tensor, or testing if
     broadcasting can occur), which will not work on unbacked SymInts.
     However, if we conservatively assume that the size is not zero/one, we will

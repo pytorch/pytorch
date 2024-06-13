@@ -1,3 +1,5 @@
+# mypy: allow-untyped-defs
+import functools
 from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import Any, Callable
@@ -76,28 +78,39 @@ def _maybe_run_with_interpreter(fn):
     return maybe_interpreted_fn
 
 
-# We'll use the current decomposition table to make sure operators in subgraphs are
-# decomposed properly.
-# We also need to maybe run with interpreter for propagating stack_trace
-def reenter_make_fx(fn, pre_dispatch=False):
-    decomp_table = torch.fx.experimental.proxy_tensor.CURRENT_DECOMPOSITION_TABLE
-    return make_fx(
-        _maybe_run_with_interpreter(fn),
-        decomposition_table=decomp_table,
-        pre_dispatch=pre_dispatch,
-    )
+def reenter_make_fx(fn):
+    from torch.fx.experimental.proxy_tensor import _CURRENT_MAKE_FX_TRACER
+
+    @functools.wraps(fn)
+    def wrapped(*args):
+        assert (
+            _CURRENT_MAKE_FX_TRACER is not None
+        ), "Cannot reenter make_fx when we're not under a make_fx tracing session"
+        return _CURRENT_MAKE_FX_TRACER.trace_subgraph(
+            _maybe_run_with_interpreter(fn), *args
+        )
+
+    return wrapped
 
 
 @contextmanager
 def _set_compilation_env():
     _old_is_tracing = torch.fx._symbolic_trace._is_fx_tracing_flag
+    _old_is_inlining = torch._dynamo.config.inline_inbuilt_nn_modules
     try:
         # We need to turn off the is_fx_tracing_flag. Remove this flag check from dyanmo
         # once we are confident fx tracing works with dynamo.
         torch.fx._symbolic_trace._is_fx_tracing_flag = False
+
+        # TODO(anijain2305, export-team) For non-strict export with module
+        # stack info, the codepatch forces the nn module __getattr__ to
+        # ProxyAttr __getattr__ downstream. To circumvent the issue for now,
+        # skip inlining inbuilt nn modules for cond.
+        torch._dynamo.config.inline_inbuilt_nn_modules = False
         yield
     finally:
         torch.fx._symbolic_trace._is_fx_tracing_flag = _old_is_tracing
+        torch._dynamo.config.inline_inbuilt_nn_modules = _old_is_inlining
 
 
 def _has_potential_branch_input_mutation(branch, inputs, pre_dispatch=False):
@@ -181,3 +194,19 @@ def _has_potential_branch_input_alias(branch, inputs, pre_dispatch=False):
         return False
 
     return _detect_input_alias(gm)
+
+
+def unique_graph_id(proxy_mode, prefix):
+    """Returns a unique name and id for a graph to be added to a proxy_mode tracer"""
+    # There are probably better ways - I know that create_arg has some self incrementing name
+    # magic to it, but since we explicitly have to get the name for register_module,
+    # I was not sure how to do that. This kinda simulates it.
+    next_name = None
+    i = 0
+    while not next_name:
+        candidate = f"{prefix}_{i}"
+        if hasattr(proxy_mode.tracer.root, candidate):
+            i += 1
+        else:
+            next_name = candidate
+    return i, next_name

@@ -1,8 +1,8 @@
 from enum import Enum
 from typing import Any, Dict, List, Literal, Optional, Tuple, Union
+from typing_extensions import TypeAlias
 
 from torch._C import device, dtype, layout
-from typing_extensions import TypeAlias
 
 # defined in torch/csrc/profiler/python/init.cpp
 
@@ -39,6 +39,7 @@ class ActiveProfilerType(Enum):
 class ProfilerActivity(Enum):
     CPU = ...
     CUDA = ...
+    XPU = ...
     MTIA = ...
     PrivateUse1 = ...
 
@@ -234,7 +235,10 @@ def symbolize_tracebacks(
 
 class _RecordFunctionFast:
     def __init__(
-        self, name: str, args: Optional[Union[list, tuple]] = None
+        self,
+        name: str,
+        input_values: Optional[Union[list, tuple]] = None,
+        keyword_values: Optional[dict] = None,
     ) -> None: ...
     def __enter__(self) -> None: ...
     def __exit__(self, exc_type: Any, exc_value: Any, traceback: Any) -> None: ...

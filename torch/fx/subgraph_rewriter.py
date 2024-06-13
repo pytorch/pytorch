@@ -70,8 +70,8 @@ def _replace_attributes(gm: GraphModule, replacement: torch.nn.Module) -> None:
             # CASE 3: The target doesn't exist as an attribute in `gm`
             # or `replacement`
             else:
-                raise RuntimeError("Attempted to create a \"", node.op,
-                                   "\" node during subgraph rewriting "
+                raise RuntimeError('Attempted to create a "', node.op,
+                                   '" node during subgraph rewriting '
                                    f"with target {node.target}, but "
                                    "the referenced attribute does not "
                                    "exist in the replacement GraphModule")
@@ -294,8 +294,7 @@ def _replace_pattern(
         # Copy the replacement graph over
         user_nodes: Set[Node] = set()
         for n in match.returning_nodes:
-            for user in n.users:
-                user_nodes.add(user)
+            user_nodes.update(n.users)
         assert user_nodes, "The returning_nodes should have at least one user node"
 
         if len(user_nodes) == 1:

@@ -5,6 +5,10 @@
 
 include(../../cmake/public/utils.cmake)
 
+if(BUILD_LIBTORCHLESS)
+  find_library(C10_HIP_LIB c10_hip PATHS $ENV{LIBTORCH_LIB_PATH} NO_DEFAULT_PATH)
+endif()
+
 # ---[ Configure macro file.
 set(C10_HIP_BUILD_SHARED_LIBS ${BUILD_SHARED_LIBS}) # used in cmake_macros.h.in
 configure_file(
@@ -26,36 +30,40 @@ file(GLOB __c10_hip_srcs_cpp *.cc impl/*.cc)
 set_source_files_properties(${__c10_hip_srcs_cpp} PROPERTIES HIP_SOURCE_PROPERTY_FORMAT 1)
 
 file(GLOB_RECURSE C10_HIP_HEADERS *.h)
-hip_add_library(c10_hip ${C10_HIP_SRCS} ${C10_HIP_HEADERS})
 
-# Propagate HIP_CXX_FLAGS that were set from Dependencies.cmake
-target_compile_options(c10_hip PRIVATE ${HIP_CXX_FLAGS})
+if(NOT BUILD_LIBTORCHLESS)
+  hip_add_library(c10_hip ${C10_HIP_SRCS} ${C10_HIP_HEADERS})
 
-# caffe2_hip adds a bunch of dependencies like rocsparse, but c10/hip is supposed to be
-# minimal.  I'm not sure if we need hip_hcc or not; for now leave it out
+  # Propagate HIP_CXX_FLAGS that were set from Dependencies.cmake
+  target_compile_options(c10_hip PRIVATE ${HIP_CXX_FLAGS})
 
-# If building shared library, set dllimport/dllexport proper.
-target_compile_options(c10_hip PRIVATE "-DC10_HIP_BUILD_MAIN_LIB")
-# Enable hidden visibility if compiler supports it.
-if(${COMPILER_SUPPORTS_HIDDEN_VISIBILITY})
-  target_compile_options(c10_hip PRIVATE "-fvisibility=hidden")
+  # caffe2_hip adds a bunch of dependencies like rocsparse, but c10/hip is supposed to be
+  # minimal.  I'm not sure if we need hip_hcc or not; for now leave it out
+
+  # If building shared library, set dllimport/dllexport proper.
+  target_compile_options(c10_hip PRIVATE "-DC10_HIP_BUILD_MAIN_LIB")
+  # Enable hidden visibility if compiler supports it.
+  if(${COMPILER_SUPPORTS_HIDDEN_VISIBILITY})
+    target_compile_options(c10_hip PRIVATE "-fvisibility=hidden")
+  endif()
+
+  # ---[ Dependency of c10_hip
+  target_link_libraries(c10_hip PUBLIC c10)
+
+  target_link_libraries(c10_hip PUBLIC ${PYTORCH_HIP_LIBRARIES})
+
+  target_include_directories(
+      c10_hip PUBLIC
+      $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../..>
+      $<BUILD_INTERFACE:${CMAKE_BINARY_DIR}>
+      $<INSTALL_INTERFACE:include>)
+  install(TARGETS c10_hip EXPORT Caffe2Targets DESTINATION lib)
+  set(C10_HIP_LIB c10_hip)
 endif()
-
-# ---[ Dependency of c10_hip
-target_link_libraries(c10_hip PUBLIC c10)
-
-target_link_libraries(c10_hip PUBLIC ${PYTORCH_HIP_LIBRARIES})
-
-target_include_directories(
-    c10_hip PUBLIC
-    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../..>
-    $<BUILD_INTERFACE:${CMAKE_BINARY_DIR}>
-    $<INSTALL_INTERFACE:include>)
 
 add_subdirectory(test)
 
 # ---[ Installation
-install(TARGETS c10_hip EXPORT Caffe2Targets DESTINATION lib)
 install(DIRECTORY ${CMAKE_CURRENT_LIST_DIR}
         DESTINATION include
         FILES_MATCHING PATTERN "*.h")

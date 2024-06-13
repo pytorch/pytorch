@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 from .fake_impl import FakeImplHolder
 
 __all__ = ["SimpleLibraryRegistry", "SimpleOperatorEntry", "singleton"]
@@ -41,3 +42,8 @@ class SimpleOperatorEntry:
     def __init__(self, qualname: str):
         self.qualname: str = qualname
         self.fake_impl: FakeImplHolder = FakeImplHolder(qualname)
+
+    # For compatibility reasons. We can delete this soon.
+    @property
+    def abstract_impl(self):
+        return self.fake_impl

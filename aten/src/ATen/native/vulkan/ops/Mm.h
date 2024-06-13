@@ -26,7 +26,7 @@ void stage_pack_weights(
   const int64_t src_matrix_sz = src_kw_sz * src_kh_sz;
   const int64_t dst_plane_sz = dst_kw_sz * dst_kh_sz;
   const int64_t dst_matrix_sz = dst_plane_sz * 4;
-  const T* const src_weight_ptr = weight.data_ptr<T>();
+  const T* const src_weight_ptr = weight.const_data_ptr<T>();
   api::StorageBuffer staging(context, api::kFloat, v_weight.gpu_numel());
   {
     api::MemoryMap mapping(staging.buffer(), api::MemoryAccessType::WRITE);
@@ -61,7 +61,7 @@ class LinearPackedContext final : virtual public VulkanPackedContext,
  public:
   LinearPackedContext(
       const Tensor& weight,
-      const c10::optional<Tensor>& bias,
+      const std::optional<Tensor>& bias,
       const bool use_batch = false);
 
   /*
@@ -97,7 +97,7 @@ class LinearPackedContext final : virtual public VulkanPackedContext,
 
 c10::intrusive_ptr<LinearPackedContext> create_linear_context(
     Tensor&& weight,
-    c10::optional<Tensor>&& bias);
+    std::optional<Tensor>&& bias);
 
 Tensor run_linear_context(
     const Tensor& input,

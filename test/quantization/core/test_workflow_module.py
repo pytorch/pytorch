@@ -137,16 +137,17 @@ class TestObserver(QuantizationTestCase):
             state_dict = myobs.state_dict()
             b = io.BytesIO()
             torch.save(state_dict, b)
-            b.seek(0)
-            loaded_dict = torch.load(b)
-            for key in state_dict:
-                self.assertEqual(state_dict[key], loaded_dict[key])
-            loaded_obs = MinMaxObserver(dtype=qdtype, qscheme=qscheme, reduce_range=reduce_range)
-            loaded_obs.load_state_dict(loaded_dict)
-            loaded_qparams = loaded_obs.calculate_qparams()
-            self.assertEqual(myobs.min_val, loaded_obs.min_val)
-            self.assertEqual(myobs.max_val, loaded_obs.max_val)
-            self.assertEqual(myobs.calculate_qparams(), loaded_obs.calculate_qparams())
+            for weights_only in [True, False]:
+                b.seek(0)
+                loaded_dict = torch.load(b, weights_only=weights_only)
+                for key in state_dict:
+                    self.assertEqual(state_dict[key], loaded_dict[key])
+                loaded_obs = MinMaxObserver(dtype=qdtype, qscheme=qscheme, reduce_range=reduce_range)
+                loaded_obs.load_state_dict(loaded_dict)
+                loaded_qparams = loaded_obs.calculate_qparams()
+                self.assertEqual(myobs.min_val, loaded_obs.min_val)
+                self.assertEqual(myobs.max_val, loaded_obs.max_val)
+                self.assertEqual(myobs.calculate_qparams(), loaded_obs.calculate_qparams())
 
 
     @given(qdtype=st.sampled_from((torch.qint8, torch.quint8)),

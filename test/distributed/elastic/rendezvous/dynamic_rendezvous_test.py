@@ -19,10 +19,11 @@ from typing import Callable, cast, Optional, Tuple
 from unittest import TestCase
 from unittest.mock import call, MagicMock, Mock, patch
 
-from torch.distributed import Store
+from torch.distributed import HashStore, Store
 from torch.distributed.elastic.rendezvous import (
     RendezvousClosedError,
     RendezvousError,
+    RendezvousInfo,
     RendezvousParameters,
     RendezvousStateError,
     RendezvousTimeoutError,
@@ -52,7 +53,9 @@ from torch.distributed.elastic.rendezvous.dynamic_rendezvous import (
 class CustomAssertMixin:
     assertDictEqual: Callable
 
-    def assert_state_equal(self, actual: _RendezvousState, expected: _RendezvousState) -> None:
+    def assert_state_equal(
+        self, actual: _RendezvousState, expected: _RendezvousState
+    ) -> None:
         self.assertDictEqual(vars(actual), vars(expected))
 
     def assert_state_empty(self, actual: _RendezvousState) -> None:
@@ -87,7 +90,8 @@ class RendezvousTimeoutTest(TestCase):
         for join_timeout in join_timeouts:
             with self.subTest(join_timeout=join_timeout):
                 with self.assertRaisesRegex(
-                    ValueError, rf"^The join timeout \({join_timeout}\) must be positive.$"
+                    ValueError,
+                    rf"^The join timeout \({join_timeout}\) must be positive.$",
                 ):
                     timeout = RendezvousTimeout(join_timeout)
 
@@ -143,8 +147,12 @@ class RendezvousStateTest(TestCase):
         for num_nodes, max_byte_size in expected_max_sizes:
             with self.subTest(num_nodes=num_nodes, max_byte_size=max_byte_size):
                 for i in range(num_nodes):
-                    node_running = _NodeDesc(f"dummy{i}.dummy1-dummy1-dummy1-dummy1.com", 12345, i)
-                    node_waiting = _NodeDesc(f"dummy{i}.dummy2-dummy2-dummy2-dummy2.com", 67890, i)
+                    node_running = _NodeDesc(
+                        f"dummy{i}.dummy1-dummy1-dummy1-dummy1.com", 12345, i
+                    )
+                    node_waiting = _NodeDesc(
+                        f"dummy{i}.dummy2-dummy2-dummy2-dummy2.com", 67890, i
+                    )
 
                     state.participants[node_running] = i
 
@@ -269,7 +277,9 @@ class BackendRendezvousStateHolderTest(TestCase, CustomAssertMixin):
         return state
 
     def _create_state_holder(self) -> _BackendRendezvousStateHolder:
-        return _BackendRendezvousStateHolder(self._backend, self._settings, self._cache_duration)
+        return _BackendRendezvousStateHolder(
+            self._backend, self._settings, self._cache_duration
+        )
 
     def test_init_initializes_state_holder(self) -> None:
         state_holder = self._create_state_holder()
@@ -361,7 +371,9 @@ class BackendRendezvousStateHolderTest(TestCase, CustomAssertMixin):
 
         self._backend.set_state_internal(state)
 
-        with patch("torch.distributed.elastic.rendezvous.dynamic_rendezvous.time") as mock_time:
+        with patch(
+            "torch.distributed.elastic.rendezvous.dynamic_rendezvous.time"
+        ) as mock_time:
             for cache_duration in [1, 5, 10]:
                 with self.subTest(cache_duration=cache_duration):
                     self._cache_duration = cache_duration
@@ -397,7 +409,9 @@ class BackendRendezvousStateHolderTest(TestCase, CustomAssertMixin):
 
         self._backend.set_state_internal(state)
 
-        with patch("torch.distributed.elastic.rendezvous.dynamic_rendezvous.time") as mock_time:
+        with patch(
+            "torch.distributed.elastic.rendezvous.dynamic_rendezvous.time"
+        ) as mock_time:
             self._cache_duration = 1
 
             state_holder = self._create_state_holder()
@@ -568,7 +582,9 @@ class DistributedRendezvousOpExecutorTest(TestCase, CustomAssertMixin):
         if settings is None:
             settings = self._create_settings()
 
-        return _DistributedRendezvousOpExecutor(self._node, self._state_holder, settings)
+        return _DistributedRendezvousOpExecutor(
+            self._node, self._state_holder, settings
+        )
 
     def _run_action(self, action: _Action) -> None:
         op_executor = self._create_op_executor()
@@ -644,14 +660,18 @@ class DistributedRendezvousOpExecutorTest(TestCase, CustomAssertMixin):
                 node = _NodeDesc(f"dummy{i}", 1, 1)
                 rank = i
             else:
-                node = _NodeDesc(f"dummy{num_participants - i - 1}", 1, 1)  # Add in reverse.
+                node = _NodeDesc(
+                    f"dummy{num_participants - i - 1}", 1, 1
+                )  # Add in reverse.
                 rank = 0
 
             state.participants[node] = rank
 
             state.last_heartbeats[node] = self._now
 
-    def test_run_adds_to_participants_and_starts_last_call_if_min_nodes_is_reached(self) -> None:
+    def test_run_adds_to_participants_and_starts_last_call_if_min_nodes_is_reached(
+        self,
+    ) -> None:
         for num_participants in range(3):
             self._state = _RendezvousState()
 
@@ -817,12 +837,16 @@ class DistributedRendezvousOpExecutorTest(TestCase, CustomAssertMixin):
         self.assertListEqual(self._mock_state_holder.mock_calls, [call.sync()])
 
     def test_run_delays_execution_if_sync_requested(self) -> None:
-        with patch("torch.distributed.elastic.rendezvous.dynamic_rendezvous._delay") as mock_delay:
+        with patch(
+            "torch.distributed.elastic.rendezvous.dynamic_rendezvous._delay"
+        ) as mock_delay:
             self._run_action(_Action.SYNC)
 
             mock_delay.assert_called_once_with(seconds=1)
 
-        self.assertListEqual(self._mock_state_holder.mock_calls, [call.sync(), call.sync()])
+        self.assertListEqual(
+            self._mock_state_holder.mock_calls, [call.sync(), call.sync()]
+        )
 
 
 class AbstractTestRendezvousOp(ABC):
@@ -850,7 +874,9 @@ class AbstractTestRendezvousOp(ABC):
         mock_datetime = self._datetime_patch.start()
         mock_datetime.utcnow.return_value = self._now
 
-        self._time_patch = patch("torch.distributed.elastic.rendezvous.dynamic_rendezvous.time")
+        self._time_patch = patch(
+            "torch.distributed.elastic.rendezvous.dynamic_rendezvous.time"
+        )
 
         mock_time = self._time_patch.start()
         mock_time.monotonic.return_value = self._deadline
@@ -932,14 +958,18 @@ class TestRendezvousJoinOp(AbstractTestRendezvousOp, TestCase):
 
             self._assert_action(expected_action)
 
-    def test_treat_as_redundancy_for_next_rendezvous_if_rendezvous_is_complete(self) -> None:
+    def test_treat_as_redundancy_for_next_rendezvous_if_rendezvous_is_complete(
+        self,
+    ) -> None:
         self._max_nodes = 1
 
         self._state.complete = True
 
         self._assert_action(_Action.ADD_TO_REDUNDANCY_LIST)
 
-    def test_waits_next_round_if_rendezvous_is_complete_and_node_is_redundant(self) -> None:
+    def test_waits_next_round_if_rendezvous_is_complete_and_node_is_redundant(
+        self,
+    ) -> None:
         self._state.redundancy_list.add(self._node)
 
         self._max_nodes = 1
@@ -957,7 +987,9 @@ class TestRendezvousJoinOp(AbstractTestRendezvousOp, TestCase):
 
         self._assert_action(_Action.REMOVE_FROM_REDUNDANCY_LIST)
 
-    def test_waits_next_round_if_rendezvous_is_complete_and_node_is_in_wait_list(self) -> None:
+    def test_waits_next_round_if_rendezvous_is_complete_and_node_is_in_wait_list(
+        self,
+    ) -> None:
         self._state.wait_list.add(self._node)
 
         self._state.complete = True
@@ -999,14 +1031,18 @@ class TestRendezvousJoinOp(AbstractTestRendezvousOp, TestCase):
 
         self._assert_action(_Action.ERROR_TIMEOUT)
 
-    def test_raises_timeout_if_rollback_deadline_exceeded_and_node_is_participant(self) -> None:
+    def test_raises_timeout_if_rollback_deadline_exceeded_and_node_is_participant(
+        self,
+    ) -> None:
         self._deadline = 0
 
         self._state.participants[self._node] = 0
 
         self._assert_action(_Action.ERROR_TIMEOUT)
 
-    def test_raises_timeout_if_rollback_deadline_exceeded_and_node_is_in_wait_list(self) -> None:
+    def test_raises_timeout_if_rollback_deadline_exceeded_and_node_is_in_wait_list(
+        self,
+    ) -> None:
         self._deadline = 0
 
         self._state.wait_list.add(self._node)
@@ -1022,7 +1058,9 @@ class TestRendezvousJoinOp(AbstractTestRendezvousOp, TestCase):
 
         self._assert_action(_Action.REMOVE_FROM_PARTICIPANTS)
 
-    def test_removes_from_wait_list_if_timed_out_but_rollback_deadline_is_not_reached(self) -> None:
+    def test_removes_from_wait_list_if_timed_out_but_rollback_deadline_is_not_reached(
+        self,
+    ) -> None:
         self._deadline = 5
 
         self._state.wait_list.add(self._node)
@@ -1091,7 +1129,9 @@ class TestRendezvousKeepAliveOp(AbstractTestRendezvousOp, TestCase):
     def test_finishes_if_no_keep_alive_update_is_needed(self) -> None:
         delta = timedelta(seconds=1)
 
-        self._state.last_heartbeats[self._node] = self._now - self._keep_alive_interval + delta
+        self._state.last_heartbeats[self._node] = (
+            self._now - self._keep_alive_interval + delta
+        )
 
         self._assert_action(_Action.FINISH)
 
@@ -1115,9 +1155,11 @@ class DynamicRendezvousHandlerTest(TestCase):
 
         self._store = DummyStore()
 
-        self._mock_store_get = MagicMock(return_value=b"dummy_value")
+        self._mock_store_get = MagicMock(return_value=b"123")
+        self._mock_store_set = MagicMock()
 
         setattr(self._store, "get", self._mock_store_get)  # noqa: B010
+        setattr(self._store, "set", self._mock_store_set)  # noqa: B010
 
         self._state_holder = FakeRendezvousStateHolder()
 
@@ -1169,14 +1211,16 @@ class DynamicRendezvousHandlerTest(TestCase):
 
         handler = self._create_handler()
 
-        store, rank, world_size = handler.next_rendezvous()
+        rdzv_info = handler.next_rendezvous()
 
-        self.assertEqual(rank, 2)
-        self.assertEqual(world_size, 3)
+        self.assertEqual(rdzv_info.rank, 2)
+        self.assertEqual(rdzv_info.world_size, 3)
 
-        _ = store.get("dummy_key")
+        _ = rdzv_info.store.get("dummy_key")
 
-        self._mock_store_get.assert_called_once_with("torch.rendezvous.dummy_run_id.0/dummy_key")
+        self._mock_store_get.assert_called_with(
+            "torch.rendezvous.dummy_run_id.0/dummy_key"
+        )
 
     def test_next_rendezvous_respects_the_requested_timeout(self) -> None:
         self._mock_sync.side_effect = lambda: time.sleep(0.3)
@@ -1489,7 +1533,9 @@ class CreateHandlerTest(TestCase):
         self.assertEqual(handler.settings.min_nodes, self._params.min_nodes)
         self.assertEqual(handler.settings.max_nodes, self._params.max_nodes)
         self.assertEqual(handler.settings.timeout.join, self._expected_timeout.join)
-        self.assertEqual(handler.settings.timeout.last_call, self._expected_timeout.last_call)
+        self.assertEqual(
+            handler.settings.timeout.last_call, self._expected_timeout.last_call
+        )
         self.assertEqual(handler.settings.timeout.close, self._expected_timeout.close)
 
     def test_create_handler_returns_handler_if_timeout_is_not_specified(self) -> None:
@@ -1516,6 +1562,7 @@ def _ignore_exception(exception_type: Exception, fn: Callable):
     except exception_type as e:
         pass
 
+
 def _wait_for(condition, timeout=10, interval=1, name=None):
     def _wait_while():
         while True:
@@ -1523,18 +1570,21 @@ def _wait_for(condition, timeout=10, interval=1, name=None):
                 break
             else:
                 time.sleep(interval)
+
     wait_thread = threading.Thread(target=_wait_while, name=name)
     wait_thread.start()
     wait_thread.join(timeout=timeout)
 
-class _CapturingThread(threading.Thread):
 
+class _CapturingThread(threading.Thread):
     def __init__(self, target=None, name=None, args=None, kwargs=None):
         if args is None:
             args = ()
         if kwargs is None:
             kwargs = {}
-        threading.Thread.__init__(self, target=target, args=args, kwargs=kwargs, name=name)
+        threading.Thread.__init__(
+            self, target=target, args=args, kwargs=kwargs, name=name
+        )
         self._result = None
 
     def run(self):
@@ -1545,9 +1595,10 @@ class _CapturingThread(threading.Thread):
         threading.Thread.join(self, *args)
         return self._result
 
+
 class IntegrationTest(TestCase):
     def setUp(self) -> None:
-        self._store = DummyStore()
+        self._store = HashStore()
         self._handlers = []
         self._backend = _InMemoryRendezvousBackend()
 
@@ -1583,15 +1634,15 @@ class IntegrationTest(TestCase):
         handler1_thread.start()
         handler2_thread.start()
 
-        store1, rank1, world_size1 = handler1_thread.join()
-        store2, rank2, world_size2 = handler2_thread.join()
-        self.assertEqual(store1.underlying_store, self._store)
-        self.assertEqual(store2.underlying_store, self._store)
+        rdzv_info1: RendezvousInfo = handler1_thread.join()
+        rdzv_info2: RendezvousInfo = handler2_thread.join()
+        self.assertEqual(rdzv_info1.store.underlying_store, self._store)
+        self.assertEqual(rdzv_info2.store.underlying_store, self._store)
 
-        self.assertNotEqual(rank1, rank2)
+        self.assertNotEqual(rdzv_info1.rank, rdzv_info2.rank)
 
-        self.assertEqual(world_size1, 2)
-        self.assertEqual(world_size2, 2)
+        self.assertEqual(rdzv_info1.world_size, 2)
+        self.assertEqual(rdzv_info2.world_size, 2)
 
     def test_redundancy_list(self) -> None:
         handler1 = self._create_handler(min_nodes=2, max_nodes=2)
@@ -1602,7 +1653,8 @@ class IntegrationTest(TestCase):
         handler2_thread = _CapturingThread(target=handler2.next_rendezvous)
         handler3_thread = _CapturingThread(
             target=_ignore_exception,
-            args=(RendezvousTimeoutError, lambda: handler3.next_rendezvous()))
+            args=(RendezvousTimeoutError, lambda: handler3.next_rendezvous()),
+        )
 
         handler1_thread.start()
         handler2_thread.start()
@@ -1642,7 +1694,8 @@ class IntegrationTest(TestCase):
 
         handler3_thread = _CapturingThread(
             target=_ignore_exception,
-            args=(RendezvousTimeoutError, lambda: handler3.next_rendezvous()))
+            args=(RendezvousTimeoutError, lambda: handler3.next_rendezvous()),
+        )
 
         handler1_thread.start()
         handler2_thread.start()
@@ -1657,8 +1710,12 @@ class IntegrationTest(TestCase):
 
         handler2._stop_heartbeats()
 
-        _wait_for(lambda: len(pickle.loads(self._backend.get_state()[0]).participants) == 1)
-        _wait_for(lambda: len(pickle.loads(self._backend.get_state()[0]).wait_list) == 1)
+        _wait_for(
+            lambda: len(pickle.loads(self._backend.get_state()[0]).participants) == 1
+        )
+        _wait_for(
+            lambda: len(pickle.loads(self._backend.get_state()[0]).wait_list) == 1
+        )
 
 
 class _InMemoryRendezvousBackend(RendezvousBackend):

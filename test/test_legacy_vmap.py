@@ -1,18 +1,20 @@
 # Owner(s): ["module: vmap"]
 
-from torch.testing._internal.common_utils import TestCase, run_tests, skipIfTorchDynamo
+import functools
+import itertools
+import types
+import warnings
+
 import torch
 import torch.nn.functional as F
 from torch import Tensor
 from torch._vmap_internals import vmap
-import functools
-import itertools
-import warnings
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
-import types
+from torch.testing._internal.common_utils import run_tests, skipIfTorchDynamo, TestCase
 
 
-FALLBACK_REGEX = r'There is a performance drop'
+FALLBACK_REGEX = r"There is a performance drop"
+
 
 class EnableVmapFallbackWarnings:
     def __enter__(self):
@@ -22,9 +24,12 @@ class EnableVmapFallbackWarnings:
     def __exit__(self, *ignored):
         torch._C._debug_only_display_vmap_fallback_warnings(self.prev_state)
 
+
 class TestVmapAPILegacy(TestCase):
     def test_non_tensor_output_raises(self):
-        with self.assertRaisesRegex(ValueError, "got type <class 'float'> as the return"):
+        with self.assertRaisesRegex(
+            ValueError, "got type <class 'float'> as the return"
+        ):
             output = vmap(lambda x: 3.14)(torch.ones(3))
 
         def multiple_outputs(x):
@@ -36,16 +41,20 @@ class TestVmapAPILegacy(TestCase):
     def test_different_map_dim_size_raises(self):
         x = torch.randn(2)
         y = torch.randn(3)
-        expected_msg = 'Expected all tensors to have the same size in the mapped dimension'
+        expected_msg = (
+            "Expected all tensors to have the same size in the mapped dimension"
+        )
         with self.assertRaisesRegex(ValueError, expected_msg):
             vmap(torch.mul)(x, y)
         with self.assertRaisesRegex(ValueError, expected_msg):
             vmap(lambda z: z[0] + z[1], in_dims=((0, 0),))((x, y))
         with self.assertRaisesRegex(ValueError, expected_msg):
-            vmap(lambda z: z['x'] + z['y'], in_dims=({'x': 0, 'y': 0},))({'x': x, 'y': y})
+            vmap(lambda z: z["x"] + z["y"], in_dims=({"x": 0, "y": 0},))(
+                {"x": x, "y": y}
+            )
 
     def test_func_with_no_inputs(self):
-        expected_msg = 'got no inputs'
+        expected_msg = "got no inputs"
 
         def foo():
             return torch.randn(3)
@@ -157,12 +166,12 @@ class TestVmapAPILegacy(TestCase):
 
         tensor = torch.randn(2)
         # The fallback doesn't support TensorList
-        with self.assertRaisesRegex(RuntimeError, 'Batching rule not implemented'):
+        with self.assertRaisesRegex(RuntimeError, "Batching rule not implemented"):
             vmap(lambda t: torch.atleast_1d([t]))(tensor)
 
         # Don't support non-tensor returns. This is a limitation of vmap;
         # functions that don't return tensors must be special cased
-        with self.assertRaisesRegex(RuntimeError, 'Batching rule not implemented'):
+        with self.assertRaisesRegex(RuntimeError, "Batching rule not implemented"):
             vmap(torch.Tensor.item)(tensor)
 
     def test_nonzero_out_dims(self):
@@ -188,7 +197,9 @@ class TestVmapAPILegacy(TestCase):
         tensor = torch.randn(2, 3, 5, 7)
         other = torch.randn(2, 3, 5, 7)
         result = vmap(lambda x, y: (x, y), out_dims=2)(tensor, other)
-        self.assertEqual(result, (tensor.permute(1, 2, 0, 3), other.permute(1, 2, 0, 3)))
+        self.assertEqual(
+            result, (tensor.permute(1, 2, 0, 3), other.permute(1, 2, 0, 3))
+        )
 
         # use out_dims with the maximum vmap-able tensor dims (64 dims)
         ndims = 64
@@ -201,12 +212,18 @@ class TestVmapAPILegacy(TestCase):
         # test something that is not the identity function
         def foo(x, y):
             return x, x * y, x * y * y
+
         x = torch.randn(2, 3, 5)
         y = torch.randn(2, 3, 5)
         result = vmap(foo, out_dims=1)(x, y)
         self.assertEqual(
             result,
-            (x.permute(1, 0, 2), (x * y).permute(1, 0, 2), (x * y * y).permute(1, 0, 2)))
+            (
+                x.permute(1, 0, 2),
+                (x * y).permute(1, 0, 2),
+                (x * y * y).permute(1, 0, 2),
+            ),
+        )
 
     def test_multiple_out_dims(self):
         def foo(x):
@@ -265,19 +282,19 @@ class TestVmapAPILegacy(TestCase):
         self.assertEqual(result, expected)
 
     def test_out_dims_must_be_int_or_tuple_of_int_err_msg(self):
-        msg = '`out_dims` must be an int or a tuple of int'
+        msg = "`out_dims` must be an int or a tuple of int"
         tensor = torch.randn(2, 3)
         with self.assertRaisesRegex(ValueError, msg):
-            vmap(lambda x: x, out_dims='lol')(tensor)
+            vmap(lambda x: x, out_dims="lol")(tensor)
         with self.assertRaisesRegex(ValueError, msg):
-            vmap(lambda x: x, out_dims=('lol',))(tensor)
+            vmap(lambda x: x, out_dims=("lol",))(tensor)
         with self.assertRaisesRegex(ValueError, msg):
             vmap(lambda x: x, out_dims=None)(tensor)
         with self.assertRaisesRegex(ValueError, msg):
             vmap(lambda x: x, out_dims=(None,))(tensor)
 
     def test_out_dims_and_num_outputs_mismatch_err_msg(self):
-        msg = '`out_dims` must have one dim per output'
+        msg = "`out_dims` must have one dim per output"
         x = torch.randn(2, 3, 5)
 
         # Too many out_dims
@@ -296,7 +313,7 @@ class TestVmapAPILegacy(TestCase):
         # TODO(rzou): This error message isn't that great. It comes straight
         # from maybe_wrap_dim. Consider doing a try-catch-(add some context) to
         # the error message in the future in C++
-        msg = 'Dimension out of range'
+        msg = "Dimension out of range"
         x = torch.randn(2, 3, 5)
         with self.assertRaisesRegex(IndexError, msg):
             vmap(lambda x: x, out_dims=3)(x)
@@ -387,28 +404,30 @@ class TestVmapAPILegacy(TestCase):
         out = vmap(lambda z: z[0] + z[1], in_dims=([0, 0],))([x, y])
         self.assertEqual(out, x + y)
 
-        out = vmap(lambda z: z['x'] + z['y'])({'x': x, 'y': y})
+        out = vmap(lambda z: z["x"] + z["y"])({"x": x, "y": y})
         self.assertEqual(out, x + y)
-        out = vmap(lambda z: z['x'] + z['y'], in_dims=(0,))({'x': x, 'y': y})
+        out = vmap(lambda z: z["x"] + z["y"], in_dims=(0,))({"x": x, "y": y})
         self.assertEqual(out, x + y)
-        out = vmap(lambda z: z['x'] + z['y'], in_dims=({'x': 0, 'y': 0},))({'x': x, 'y': y})
+        out = vmap(lambda z: z["x"] + z["y"], in_dims=({"x": 0, "y": 0},))(
+            {"x": x, "y": y}
+        )
         self.assertEqual(out, x + y)
 
         # Multiple layers of nesting
-        out_fn = vmap(lambda z: z['x'][0] + z['x'][1][0] + z['y'][0] + z['y'][1])
-        out = out_fn({'x': [x, (x,)], 'y': [y, y]})
+        out_fn = vmap(lambda z: z["x"][0] + z["x"][1][0] + z["y"][0] + z["y"][1])
+        out = out_fn({"x": [x, (x,)], "y": [y, y]})
         self.assertEqual(out, x + x + y + y)
 
     def test_in_dims_wrong_type_err_msg(self):
         x = torch.randn(3)
         y = torch.randn(3)
-        msg = r'expected `in_dims` to be int or a \(potentially nested\) tuple'
+        msg = r"expected `in_dims` to be int or a \(potentially nested\) tuple"
         with self.assertRaisesRegex(ValueError, msg):
             vmap(torch.mul, [0, 0])(x, y)
         with self.assertRaisesRegex(ValueError, msg):
             vmap(torch.mul, set({0}))(x, y)
         with self.assertRaisesRegex(ValueError, msg):
-            vmap(torch.mul, 'lol')(x, y)
+            vmap(torch.mul, "lol")(x, y)
         with self.assertRaisesRegex(ValueError, msg):
             vmap(lambda z: z[0] + z[1], in_dims=[0, 0])([x, y])
         # The following should not throw
@@ -417,7 +436,7 @@ class TestVmapAPILegacy(TestCase):
     def test_not_enough_in_dims_err_msg(self):
         x = torch.randn(3)
         y = torch.randn(3)
-        msg = r'in_dims is not compatible with the structure of `inputs`'
+        msg = r"in_dims is not compatible with the structure of `inputs`"
 
         with self.assertRaisesRegex(ValueError, msg):
             vmap(torch.mul, (0,))(x, y)
@@ -441,7 +460,7 @@ class TestVmapAPILegacy(TestCase):
         y = torch.randn(2, 3)
 
         # the following are errors in jax (and will always be errors)
-        msg = 'Got in_dim=0 for an input but the input is of type'
+        msg = "Got in_dim=0 for an input but the input is of type"
         with self.assertRaisesRegex(ValueError, msg):
             vmap(torch.sum)(x, 0)
         with self.assertRaisesRegex(ValueError, msg):
@@ -458,7 +477,7 @@ class TestVmapAPILegacy(TestCase):
         x = torch.randn(2, 3)
         y = torch.randn(2, 3)
 
-        msg = r'Got in_dim=-?\w for some input, but that input is a Tensor of dimensionality \w'
+        msg = r"Got in_dim=-?\w for some input, but that input is a Tensor of dimensionality \w"
         with self.assertRaisesRegex(ValueError, msg):
             vmap(foo)(torch.randn([]))
         with self.assertRaisesRegex(ValueError, msg):
@@ -519,7 +538,7 @@ class TestVmapAPILegacy(TestCase):
         x = torch.randn(B0, 11)
         y = torch.randn(11)
 
-        msg = 'The fallback path does not support vmap over dims of size 0'
+        msg = "The fallback path does not support vmap over dims of size 0"
 
         with self.assertRaisesRegex(RuntimeError, msg):
             vmap(op, (0, None))(x, y)
@@ -577,11 +596,12 @@ class TestVmapAPILegacy(TestCase):
             index = torch.tensor([0, 4, 2])
             values = torch.randn(B0, 3, 11, 13)
 
-            self._assert_uses_vmap_fallback((torch.index_add, (0, None, None, 0)), (x, dim, index, values))
+            self._assert_uses_vmap_fallback(
+                (torch.index_add, (0, None, None, 0)), (x, dim, index, values)
+            )
 
             result = vmap(torch.index_add, (0, None, None, 0))(x, dim, index, values)
-            expected = torch.index_add(
-                x, dim + 1, index, values.view(B0, 3, 11, 13))
+            expected = torch.index_add(x, dim + 1, index, values.view(B0, 3, 11, 13))
             self.assertEqual(result, expected)
 
         run_test(batch_size=5)
@@ -714,7 +734,7 @@ class TestVmapAPILegacy(TestCase):
         self.assertEqual(x, outplace_op(x_orig, y.view(B0, 1, 7)))
 
         # op(left, right): Some of the levels in right are not found in left
-        msg = r'vmap: aten::atan2_\(self, \*extra_args\) is not possible'
+        msg = r"vmap: aten::atan2_\(self, \*extra_args\) is not possible"
         x = torch.rand(7)
         y = torch.rand(B0, 7)
         with self.assertRaisesRegex(RuntimeError, msg):
@@ -739,7 +759,7 @@ class TestVmapAPILegacy(TestCase):
         x = torch.randn(3, requires_grad=True)
         y = torch.randn(5)
         grad = torch.randn_like(x)
-        err_msg = r'backward\(\) called inside torch.vmap'
+        err_msg = r"backward\(\) called inside torch.vmap"
 
         def backward_on_vmapped_tensor(x):
             x.sum().backward()
@@ -761,7 +781,7 @@ class TestVmapAPILegacy(TestCase):
 
     def test_grad_unsupported_interaction(self):
         input_tensor = torch.randn(3, requires_grad=True)
-        err_msg = 'autograd.grad.* called inside torch.vmap'
+        err_msg = "autograd.grad.* called inside torch.vmap"
 
         captured = torch.randn(3, requires_grad=True)
 
@@ -772,7 +792,7 @@ class TestVmapAPILegacy(TestCase):
         with self.assertRaisesRegex(RuntimeError, err_msg):
             vmap(output_to_grad_is_vmapped)(input_tensor)
 
-        output = (input_tensor ** 2).sum()
+        output = (input_tensor**2).sum()
 
         def input_to_grad_is_vmapped(input_tensor):
             return torch.autograd.grad([output], [input_tensor])[0]
@@ -812,7 +832,7 @@ class TestVmapAPILegacy(TestCase):
 
         def get_vjp(v):
             result = torch.nn.functional.conv2d(x, weight)
-            grad_x, = torch.autograd.grad(result, x, v)
+            (grad_x,) = torch.autograd.grad(result, x, v)
             return grad_x
 
         # Runs vmap(get_vjp)(v), which should not error out.
@@ -823,6 +843,7 @@ class TestVmapAPILegacy(TestCase):
         # backward. When this happens, we should modify this test to use a
         # different op (and/or create and use a dummy operator) to avoid bitrot.
         self._assert_uses_vmap_fallback([get_vjp], [v])
+
 
 def slice_inputs(inputs, bdims, i):
     result = []
@@ -855,30 +876,40 @@ def reference_vmap(op, inputs, in_dims=0, out_dims=0):
     assert all(len(result) == num_returns for result in results)
     if isinstance(out_dims, int):
         out_dims = (out_dims,) * num_returns
-    return tuple(torch.stack(result_shards, out_dim)
-                 for result_shards, out_dim in zip(zip(*results), out_dims))
+    return tuple(
+        torch.stack(result_shards, out_dim)
+        for result_shards, out_dim in zip(zip(*results), out_dims)
+    )
 
 
 class TensorFactory:
     @staticmethod
-    def rand(size, device='cpu', dtype=torch.float):
+    def rand(size, device="cpu", dtype=torch.float):
         return torch.rand(size, device=device, dtype=dtype)
 
     @staticmethod
-    def randn(size, device='cpu', dtype=torch.float):
+    def randn(size, device="cpu", dtype=torch.float):
         return torch.randn(size, device=device, dtype=dtype)
 
     @staticmethod
-    def randp1(size, device='cpu', dtype=torch.float):
+    def randp1(size, device="cpu", dtype=torch.float):
         return torch.rand(size, device=device, dtype=dtype) + 1
+
 
 # Tests vmap(op, in_dims, out_dims)(*inputs) by comparing the output to a
 # (slow) sequential map+stack fallback.
 #
 # check_view: Test if the first returned output is a view of the first input
 # check_propagates_grad: Test if the operation propagates gradients.
-def _vmap_test(self, op, inputs, in_dims=0, out_dims=0,
-               check_view=False, check_propagates_grad=True):
+def _vmap_test(
+    self,
+    op,
+    inputs,
+    in_dims=0,
+    out_dims=0,
+    check_view=False,
+    check_propagates_grad=True,
+):
     result = vmap(op, in_dims, out_dims)(*inputs)
     reference_result = reference_vmap(op, inputs, in_dims, out_dims)
     self.assertEqual(result, reference_result)
@@ -888,8 +919,10 @@ def _vmap_test(self, op, inputs, in_dims=0, out_dims=0,
         result_as_tuple = (result,) if op_has_single_return else result
         for output in result_as_tuple:
             input0_base = inputs[0] if inputs[0]._base is None else inputs[0]._base
-            self.assertTrue(output._base is input0_base,
-                            msg="result was not a view of the first input!")
+            self.assertTrue(
+                output._base is input0_base,
+                msg="result was not a view of the first input!",
+            )
 
     if not check_propagates_grad:
         return
@@ -905,12 +938,15 @@ def _vmap_test(self, op, inputs, in_dims=0, out_dims=0,
     result_as_tuple = (result,) if op_has_single_return else result
     self.assertTrue(result[0].requires_grad)
 
+
 def should_allow_vmap_fallback_usage(fn):
-    return getattr(fn, '_allow_vmap_fallback_usage', False)
+    return getattr(fn, "_allow_vmap_fallback_usage", False)
+
 
 def allowVmapFallbackUsage(fn):
     fn._allow_vmap_fallback_usage = True
     return fn
+
 
 # All tests of TestVmapBaseLegacy check that the slow vmap fallback is never invoked.
 # This is so that we can incrementally add batching rules for operators to
@@ -924,7 +960,7 @@ def allowVmapFallbackUsage(fn):
 # it up and running it.
 class Namespace:
     class TestVmapBaseLegacy(TestCase):
-        def __init__(self, method_name='runTest'):
+        def __init__(self, method_name="runTest"):
             super().__init__(method_name)
 
             test_method = getattr(self, method_name, None)
@@ -932,27 +968,33 @@ class Namespace:
                 return
 
             if not should_allow_vmap_fallback_usage(test_method):
-                setattr(self, method_name,
-                        self._wrap_method_with_vmap_fallback_check(test_method))
+                setattr(
+                    self,
+                    method_name,
+                    self._wrap_method_with_vmap_fallback_check(test_method),
+                )
 
         def _wrap_method_with_vmap_fallback_check(self, method):
             msg = (
-                'Expected the test to not invoke the vmap fallback path, i.e., '
-                'all of the operators being tested in this test should have batching '
-                'rules implemented. If you are intentionally testing something to '
-                'do with the fallback path, use allowVmapFallbackUsage. Otherwise, '
-                'please make sure that batching rules are implemented for the '
-                'operator(s) being tested.'
+                "Expected the test to not invoke the vmap fallback path, i.e., "
+                "all of the operators being tested in this test should have batching "
+                "rules implemented. If you are intentionally testing something to "
+                "do with the fallback path, use allowVmapFallbackUsage. Otherwise, "
+                "please make sure that batching rules are implemented for the "
+                "operator(s) being tested."
             )
 
             @functools.wraps(method)
             def wrapper(self, *args, **kwargs):
                 with warnings.catch_warnings(record=True) as wa:
-                    warnings.simplefilter('always')
+                    warnings.simplefilter("always")
                     with EnableVmapFallbackWarnings():
                         method(*args, **kwargs)
                     for captured_warning in wa:
-                        self.assertNotRegex(str(captured_warning.message), FALLBACK_REGEX, msg)
+                        self.assertNotRegex(
+                            str(captured_warning.message), FALLBACK_REGEX, msg
+                        )
+
             return types.MethodType(wrapper, self)
 
         @allowVmapFallbackUsage
@@ -1002,8 +1044,12 @@ class TestVmapOperatorsLegacy(Namespace.TestVmapBaseLegacy):
         # Doubly nested vmap
         test(vmap(op), [getter([B0, B1], device)])
         test(vmap(op), [getter([B1, 2, 5, B0, 3], device)], in_dims=2)
-        test(vmap(op, in_dims=2), [getter([2, 5, B0, B1, 3], device)],
-             in_dims=2, out_dims=2)
+        test(
+            vmap(op, in_dims=2),
+            [getter([2, 5, B0, B1, 3], device)],
+            in_dims=2,
+            out_dims=2,
+        )
 
     def test_unary_pointwise_ops(self):
         cases = [
@@ -1039,15 +1085,21 @@ class TestVmapOperatorsLegacy(Namespace.TestVmapBaseLegacy):
             (torch.trunc, TensorFactory.randn),
         ]
         for op, getter in cases:
-            self._test_unary(op, getter, 'cpu')
+            self._test_unary(op, getter, "cpu")
 
     def test_clone(self):
         # Some basic tests
-        self._test_unary(lambda x: x.clone(), TensorFactory.randn, 'cpu')
-        self._test_unary(lambda x: x.clone(memory_format=torch.preserve_format),
-                         TensorFactory.randn, 'cpu')
-        self._test_unary(lambda x: x.clone(memory_format=torch.contiguous_format),
-                         TensorFactory.randn, 'cpu')
+        self._test_unary(lambda x: x.clone(), TensorFactory.randn, "cpu")
+        self._test_unary(
+            lambda x: x.clone(memory_format=torch.preserve_format),
+            TensorFactory.randn,
+            "cpu",
+        )
+        self._test_unary(
+            lambda x: x.clone(memory_format=torch.contiguous_format),
+            TensorFactory.randn,
+            "cpu",
+        )
 
         # Test that the per-examples are contiguous when using torch.contiguous_format
         def clone_contiguous(x):
@@ -1064,12 +1116,13 @@ class TestVmapOperatorsLegacy(Namespace.TestVmapBaseLegacy):
         self.assertTrue(y.is_contiguous())
         self.assertTrue(y[0][0].is_contiguous())
 
-
-        msg = r'only supported with memory_format torch.preserve_format or torch.contiguous_format'
+        msg = r"only supported with memory_format torch.preserve_format or torch.contiguous_format"
         with self.assertRaisesRegex(RuntimeError, msg):
             vmap(lambda x: x.clone(memory_format=torch.channels_last))(torch.randn(B0))
         with self.assertRaisesRegex(RuntimeError, msg):
-            vmap(lambda x: x.clone(memory_format=torch.channels_last_3d))(torch.randn(B0))
+            vmap(lambda x: x.clone(memory_format=torch.channels_last_3d))(
+                torch.randn(B0)
+            )
 
     def test_binary_pointwise_ops(self):
         def get_number(getter):
@@ -1089,27 +1142,38 @@ class TestVmapOperatorsLegacy(Namespace.TestVmapBaseLegacy):
             make_case(torch.div, input_getter=TensorFactory.randp1),
             make_case(lambda x, y: x / y, input_getter=TensorFactory.randp1),
             make_case(torch.pow, input_getter=TensorFactory.randp1),
-            make_case(lambda x, y: x ** y, input_getter=TensorFactory.randp1),
+            make_case(lambda x, y: x**y, input_getter=TensorFactory.randp1),
         ]
         test = self._vmap_test
 
         for op, getter in cases:
-            device = 'cpu'
+            device = "cpu"
             B0, B1 = 7, 11
 
             # Single vmap: op(Tensor, Tensor)
             test(op, (getter([B0, 3], device), getter([B0, 3], device)))
             test(op, (getter([B0], device), getter([B0, 2, 3], device)))
             test(op, (getter([B0], device), getter([2, B0, 3], device)), in_dims=(0, 1))
-            test(op, (getter([B0], device), getter([2, B0, 3], device)),
-                 in_dims=(0, 1), out_dims=1)
+            test(
+                op,
+                (getter([B0], device), getter([2, B0, 3], device)),
+                in_dims=(0, 1),
+                out_dims=1,
+            )
             test(op, (getter([B0], device), getter([2, 3], device)), in_dims=(0, None))
-            test(op, (getter([2, 3], device), getter([B0, 3], device)), in_dims=(0, None))
+            test(
+                op, (getter([2, 3], device), getter([B0, 3], device)), in_dims=(0, None)
+            )
 
             # Nested vmap: op(Tensor, Tensor)
-            test(vmap(op), (getter([B0, B1, 2, 3], device), getter([B0, B1, 3], device)))
-            test(vmap(op, in_dims=(None, 0)),
-                 (getter([B0, 2, 3], device), getter([B1, 3], device)), in_dims=(0, None))
+            test(
+                vmap(op), (getter([B0, B1, 2, 3], device), getter([B0, B1, 3], device))
+            )
+            test(
+                vmap(op, in_dims=(None, 0)),
+                (getter([B0, 2, 3], device), getter([B1, 3], device)),
+                in_dims=(0, None),
+            )
 
             # Python number overload: op(Tensor, Number) (and vice-versa)
             number = get_number(getter)
@@ -1163,7 +1227,9 @@ class TestVmapOperatorsLegacy(Namespace.TestVmapBaseLegacy):
             offset = x.storage_offset()
 
             # Broadcast
-            _test([5, 5, 2, 3], [0, 0, S0, S1], offset, x, lambda x: x.expand(5, 5, 2, 3))
+            _test(
+                [5, 5, 2, 3], [0, 0, S0, S1], offset, x, lambda x: x.expand(5, 5, 2, 3)
+            )
             # transpose
             _test([3, 2], [S1, S0], offset, x, lambda x: x.transpose(0, 1))
             # select
@@ -1173,19 +1239,23 @@ class TestVmapOperatorsLegacy(Namespace.TestVmapBaseLegacy):
         B1 = 7
         x = torch.randn(B1, B0, 2, 3)
         S0, S1 = x.stride()[2:]
-        result = vmap(vmap(lambda t: t.as_strided([5, 5, 2, 3], [0, 0, S0, S1])), in_dims=1)(x)
+        result = vmap(
+            vmap(lambda t: t.as_strided([5, 5, 2, 3], [0, 0, S0, S1])), in_dims=1
+        )(x)
         expected = vmap(vmap(lambda t: t.expand(5, 5, 2, 3)), in_dims=1)(x)
         self.assertTrue(result._base is expected._base)
         self.assertEqual(result, expected)
 
         # Check that mal-formatted size/strides doesn't crash
-        with self.assertRaisesRegex(RuntimeError, 'size and stride must have the same length'):
+        with self.assertRaisesRegex(
+            RuntimeError, "size and stride must have the same length"
+        ):
             x = torch.randn(B0, 2, 3).transpose(0, 1)
             vmap(lambda x: x.as_strided([1, 1, 1], [1, 1]))(x)
 
         # Sanity check #1: we require the batch dims to be at the front of the
         # tensor (in memory layout).
-        msg = 'batch dims being vmapped over are at the front of the tensor'
+        msg = "batch dims being vmapped over are at the front of the tensor"
         with self.assertRaisesRegex(RuntimeError, msg):
             x = torch.randn(2, B0, 3).transpose(0, 1)
             vmap(lambda x: x.as_strided([2, 3], [B0 * 3, 1]))(x)
@@ -1202,7 +1272,7 @@ class TestVmapOperatorsLegacy(Namespace.TestVmapBaseLegacy):
         # Sanity check #2a: The maximum indexable location of
         # xs[i].as_strided(sizes, strides, offset + xs[i].offset() - xs.offset())
         # is less than or equal to the maximum indexable location of xs[i].
-        msg = 'This is not supported inside of vmap'
+        msg = "This is not supported inside of vmap"
         with self.assertRaisesRegex(RuntimeError, msg):
             x = torch.randn(B0, 3)
             vmap(lambda x: x.as_strided([3], [1], 1))(x)
@@ -1244,19 +1314,32 @@ class TestVmapOperatorsLegacy(Namespace.TestVmapBaseLegacy):
 
         # left arg is vmapped
         test(op, (torch.rand(B0, 2, 3, 5), torch.rand(2, 5, 3)), in_dims=(0, None))
-        test(vmap(op, in_dims=(0, None)), (torch.rand(B1, B0, 2, 3, 5), torch.rand(2, 5, 3)),
-             in_dims=(1, None))
+        test(
+            vmap(op, in_dims=(0, None)),
+            (torch.rand(B1, B0, 2, 3, 5), torch.rand(2, 5, 3)),
+            in_dims=(1, None),
+        )
 
         # right arg is vmapped
         test(op, (torch.rand(2, 5, 3), torch.rand(B0, 2, 3, 5)), in_dims=(None, 0))
-        test(vmap(op, in_dims=(None, 0)), (torch.rand(2, 5, 3), torch.rand(B1, B0, 2, 3, 5)),
-             in_dims=(None, 1))
+        test(
+            vmap(op, in_dims=(None, 0)),
+            (torch.rand(2, 5, 3), torch.rand(B1, B0, 2, 3, 5)),
+            in_dims=(None, 1),
+        )
 
         # both args are vmapped
         test(op, (torch.rand(B0, 2, 3, 5), torch.rand(B0, 2, 5, 3)))
-        test(vmap(op), (torch.rand(B1, B0, 2, 3, 5), torch.rand(B0, B1, 2, 5, 3)), in_dims=(1, 0))
-        test(vmap(op, in_dims=(0, None)),
-             (torch.rand(B1, 2, 3, 5), torch.rand(B0, 2, 5, 3)), in_dims=(None, 0))
+        test(
+            vmap(op),
+            (torch.rand(B1, B0, 2, 3, 5), torch.rand(B0, B1, 2, 5, 3)),
+            in_dims=(1, 0),
+        )
+        test(
+            vmap(op, in_dims=(0, None)),
+            (torch.rand(B1, 2, 3, 5), torch.rand(B0, 2, 5, 3)),
+            in_dims=(None, 0),
+        )
 
     def test_cat(self):
         test = self._vmap_test
@@ -1266,16 +1349,23 @@ class TestVmapOperatorsLegacy(Namespace.TestVmapBaseLegacy):
         def get_op(dim):
             def op(*tensors):
                 return torch.cat(tensors, dim=dim)
+
             return op
 
         test(get_op(0), (torch.rand(B0, 2), torch.rand(B0, 3)))
         test(get_op(0), (torch.rand(2), torch.rand(B0, 3)), in_dims=(None, 0))
         test(get_op(0), (torch.rand(2, 17), torch.rand(3, 17, B0)), in_dims=(None, 2))
         test(get_op(-1), (torch.rand(17, 2), torch.rand(17, 3, B0)), in_dims=(None, 2))
-        test(vmap(get_op(0), in_dims=(0, None)),
-             (torch.rand(B1, 2), torch.rand(B0, 3)), in_dims=(None, 0))
-        test(vmap(get_op(0), in_dims=(0, 0)),
-             (torch.rand(B1, 2), torch.rand(B0, B1, 3)), in_dims=(None, 0))
+        test(
+            vmap(get_op(0), in_dims=(0, None)),
+            (torch.rand(B1, 2), torch.rand(B0, 3)),
+            in_dims=(None, 0),
+        )
+        test(
+            vmap(get_op(0), in_dims=(0, 0)),
+            (torch.rand(B1, 2), torch.rand(B0, B1, 3)),
+            in_dims=(None, 0),
+        )
 
     def test_conj(self):
         op = torch.conj
@@ -1283,6 +1373,7 @@ class TestVmapOperatorsLegacy(Namespace.TestVmapBaseLegacy):
         def run_test(dtype):
             def get(shape):
                 return torch.randn(shape, dtype=dtype)
+
             B0, B1 = 7, 11
             test = self._vmap_test
 
@@ -1294,8 +1385,7 @@ class TestVmapOperatorsLegacy(Namespace.TestVmapBaseLegacy):
             # Doubly nested vmap
             test(vmap(op), [get([B0, B1])])
             test(vmap(op), [get([B1, 2, 5, B0, 3])], in_dims=2)
-            test(vmap(op, in_dims=2), [get([2, 5, B0, B1, 3])],
-                 in_dims=2, out_dims=2)
+            test(vmap(op, in_dims=2), [get([2, 5, B0, B1, 3])], in_dims=2, out_dims=2)
 
         # correctness tests
         run_test(torch.float)
@@ -1309,7 +1399,7 @@ class TestVmapOperatorsLegacy(Namespace.TestVmapBaseLegacy):
     def test_contiguous(self):
         op = Tensor.contiguous
 
-        self._test_unary(op, TensorFactory.randn, 'cpu')
+        self._test_unary(op, TensorFactory.randn, "cpu")
 
         # check that contiguous returns the original tensor if the per-examples
         # are already contiguous
@@ -1319,7 +1409,7 @@ class TestVmapOperatorsLegacy(Namespace.TestVmapBaseLegacy):
         result = vmap(Tensor.contiguous, in_dims=2, out_dims=2)(x)
         self.assertTrue(result is x)
 
-        msg = 'NYI: querying is_contiguous inside of vmap for memory_format'
+        msg = "NYI: querying is_contiguous inside of vmap for memory_format"
         tensor = torch.randn(B0, 3)
         with self.assertRaisesRegex(RuntimeError, msg):
             vmap(functools.partial(op, memory_format=torch.channels_last))(tensor)
@@ -1353,10 +1443,16 @@ class TestVmapOperatorsLegacy(Namespace.TestVmapBaseLegacy):
         # tests for torch.split(self, split_size: int, dim)
         test(op, (torch.rand(B0, 2, 1024), 15, -1), in_dims=(0, None, None))
         test(op, (torch.rand(2, B0, 1024), 9, 1), in_dims=(1, None, None))
-        test(vmap(op, in_dims=(0, None, None)), (torch.rand(B1, 1023, B0, 5), 4, 0),
-             in_dims=(2, None, None))
-        test(vmap(vmap(lambda t: op(t, 4, 1), in_dims=2)),
-             (torch.rand(B1, 2, B0, 64, B2),), in_dims=2)
+        test(
+            vmap(op, in_dims=(0, None, None)),
+            (torch.rand(B1, 1023, B0, 5), 4, 0),
+            in_dims=(2, None, None),
+        )
+        test(
+            vmap(vmap(lambda t: op(t, 4, 1), in_dims=2)),
+            (torch.rand(B1, 2, B0, 64, B2),),
+            in_dims=2,
+        )
 
     def test_clamp(self):
         clamp_cases = (
@@ -1367,7 +1463,7 @@ class TestVmapOperatorsLegacy(Namespace.TestVmapBaseLegacy):
             (lambda t: t.clamp_max(max=0.5), TensorFactory.randn),
         )
         for op, getter in clamp_cases:
-            self._test_unary(op, getter, 'cpu')
+            self._test_unary(op, getter, "cpu")
 
     def test_comparison_ops(self):
         test = functools.partial(self._vmap_test, check_propagates_grad=False)
@@ -1376,12 +1472,18 @@ class TestVmapOperatorsLegacy(Namespace.TestVmapBaseLegacy):
         B0, B1 = 7, 11
 
         ops = (
-            torch.eq, lambda x, y: x == y,
-            torch.gt, lambda x, y: x > y,
-            torch.ge, lambda x, y: x >= y,
-            torch.le, lambda x, y: x <= y,
-            torch.lt, lambda x, y: x < y,
-            torch.ne, lambda x, y: x != y,
+            torch.eq,
+            lambda x, y: x == y,
+            torch.gt,
+            lambda x, y: x > y,
+            torch.ge,
+            lambda x, y: x >= y,
+            torch.le,
+            lambda x, y: x <= y,
+            torch.lt,
+            lambda x, y: x < y,
+            torch.ne,
+            lambda x, y: x != y,
         )
 
         for op in ops:
@@ -1395,12 +1497,17 @@ class TestVmapOperatorsLegacy(Namespace.TestVmapBaseLegacy):
 
             # Nested vmap: op(Tensor, Tensor)
             test(vmap(op), (getter([B0, B1, 2, 3]), getter([B0, B1, 3])))
-            test(vmap(op, in_dims=(None, 0)),
-                 (getter([B0, 2, 3]), getter([B1, 3])), in_dims=(0, None))
+            test(
+                vmap(op, in_dims=(None, 0)),
+                (getter([B0, 2, 3]), getter([B1, 3])),
+                in_dims=(0, None),
+            )
 
             # test number as inputs
             number = getter([]).item()
-            self._test_unary(lambda t: op(t, number), getter, 'cpu', check_propagates_grad=False)
+            self._test_unary(
+                lambda t: op(t, number), getter, "cpu", check_propagates_grad=False
+            )
 
     def test_diagonal(self):
         tensor = torch.randn(3, 5, 7, 11, 13)
@@ -1411,8 +1518,12 @@ class TestVmapOperatorsLegacy(Namespace.TestVmapBaseLegacy):
         test(op, (tensor, 2, 1, 2), in_dims=(1, None, None, None))
         test(op, (tensor, 0, -2, -1), in_dims=(1, None, None, None), out_dims=1)
         test(vmap(lambda t: op(t, 0, 0, -1)), (tensor,), in_dims=1, out_dims=1)
-        test(vmap(vmap(lambda t: op(t, 0, 0, 1), in_dims=1), in_dims=3),
-             (tensor,), in_dims=1, out_dims=1)
+        test(
+            vmap(vmap(lambda t: op(t, 0, 0, 1), in_dims=1), in_dims=3),
+            (tensor,),
+            in_dims=1,
+            out_dims=1,
+        )
 
     def test_dot(self):
         op = torch.dot
@@ -1430,19 +1541,28 @@ class TestVmapOperatorsLegacy(Namespace.TestVmapBaseLegacy):
 
         # left arg is vmapped
         test(op, (torch.rand(B0, 5), torch.rand(5)), in_dims=(0, None))
-        test(vmap(op, in_dims=(0, None)), (torch.rand(B1, B0, 5), torch.rand(5)),
-             in_dims=(1, None))
+        test(
+            vmap(op, in_dims=(0, None)),
+            (torch.rand(B1, B0, 5), torch.rand(5)),
+            in_dims=(1, None),
+        )
 
         # right arg is vmapped
         test(op, (torch.rand(5), torch.rand(B0, 5)), in_dims=(None, 0))
-        test(vmap(op, in_dims=(None, 0)), (torch.rand(5), torch.rand(B1, B0, 5)),
-             in_dims=(None, 1))
+        test(
+            vmap(op, in_dims=(None, 0)),
+            (torch.rand(5), torch.rand(B1, B0, 5)),
+            in_dims=(None, 1),
+        )
 
         # both args are vmapped
         test(op, (torch.rand(B0, 5), torch.rand(B0, 5)))
         test(vmap(op), (torch.rand(B1, B0, 5), torch.rand(B0, B1, 5)), in_dims=(1, 0))
-        test(vmap(op, in_dims=(0, None)),
-             (torch.rand(B1, 5), torch.rand(B0, 5)), in_dims=(None, 0))
+        test(
+            vmap(op, in_dims=(0, None)),
+            (torch.rand(B1, 5), torch.rand(B0, 5)),
+            in_dims=(None, 0),
+        )
 
     def test_expand_as(self):
         op = torch.Tensor.expand_as
@@ -1452,7 +1572,11 @@ class TestVmapOperatorsLegacy(Namespace.TestVmapBaseLegacy):
         test(op, (torch.rand(B0, 1, 5), torch.rand(2, 3, 5)), in_dims=(0, None))
         test(op, (torch.rand(1, 5), torch.rand(B0, 2, 3, 5)), in_dims=(None, 0))
         test(vmap(op), (torch.rand(B0, B1, 1, 5), torch.rand(B0, B1, 2, 3, 5)))
-        test(vmap(op), (torch.rand(B0, B1, 1, 5), torch.rand(B1, B0, 2, 3, 5)), in_dims=(0, 1))
+        test(
+            vmap(op),
+            (torch.rand(B0, B1, 1, 5), torch.rand(B1, B0, 2, 3, 5)),
+            in_dims=(0, 1),
+        )
         test(vmap(op), (torch.rand(B0, B1), torch.rand(B1, 2, 3, 5)), in_dims=(0, None))
         test(vmap(vmap(op)), (torch.rand(B0, B1, B2), torch.rand(B0, B1, B2, 2, 3, 5)))
 
@@ -1474,18 +1598,24 @@ class TestVmapOperatorsLegacy(Namespace.TestVmapBaseLegacy):
             # Doubly nested vmap
             test(vmap(op), [TensorFactory.randn([B0, B1])])
             test(vmap(op), [TensorFactory.randn([B1, 2, 5, B0, 3])], in_dims=2)
-            test(vmap(op, in_dims=2), [TensorFactory.randn([2, 5, B0, B1, 3])],
-                 in_dims=2, out_dims=2)
+            test(
+                vmap(op, in_dims=2),
+                [TensorFactory.randn([2, 5, B0, B1, 3])],
+                in_dims=2,
+                out_dims=2,
+            )
 
         # test when value is a batched tensor for fill_ operator
         B0, B1 = 3, 5
         test(Tensor.fill_, [TensorFactory.randn([B0, B1]), TensorFactory.randn(B0)])
 
-        with self.assertRaisesRegex(RuntimeError,
-                                    r"output with shape .+ doesn't match the broadcast shape"):
+        with self.assertRaisesRegex(
+            RuntimeError, r"output with shape .+ doesn't match the broadcast shape"
+        ):
             # Runtime Error is thrown when the tensor being written to isn't being vmapped over
-            vmap(Tensor.fill_, (None, 0))(TensorFactory.randn([B0, B1]),
-                                          TensorFactory.randn([B0]))
+            vmap(Tensor.fill_, (None, 0))(
+                TensorFactory.randn([B0, B1]), TensorFactory.randn([B0])
+            )
 
     def _test_complex_views(self, op, dtypes):
         test = self._vmap_view_test
@@ -1505,8 +1635,7 @@ class TestVmapOperatorsLegacy(Namespace.TestVmapBaseLegacy):
             # Doubly nested vmap
             test(vmap(op), [get([B0, B1])])
             test(vmap(op), [get([B1, 2, 5, 3, B0])], in_dims=4)
-            test(vmap(op, in_dims=2), [get([2, 5, B0, B1, 3])],
-                 in_dims=2, out_dims=2)
+            test(vmap(op, in_dims=2), [get([2, 5, B0, B1, 3])], in_dims=2, out_dims=2)
 
         for dtype in dtypes:
             run_test(op, dtype)
@@ -1518,7 +1647,9 @@ class TestVmapOperatorsLegacy(Namespace.TestVmapBaseLegacy):
         self._test_complex_views(torch.imag, dtypes=[torch.cfloat, torch.cdouble])
 
     def test_view_as_real(self):
-        self._test_complex_views(torch.view_as_real, dtypes=[torch.cfloat, torch.cdouble])
+        self._test_complex_views(
+            torch.view_as_real, dtypes=[torch.cfloat, torch.cdouble]
+        )
 
     def test_view_as_complex(self):
         def run_test(dtype):
@@ -1537,8 +1668,9 @@ class TestVmapOperatorsLegacy(Namespace.TestVmapBaseLegacy):
             # Doubly nested vmap
             test(vmap(op), [get([B0, B1, 2])])
             test(vmap(op), [get([B1, 2, 5, B0, 3, 2])], in_dims=2)
-            test(vmap(op, in_dims=2), [get([2, 5, B0, B1, 3, 2])],
-                 in_dims=2, out_dims=2)
+            test(
+                vmap(op, in_dims=2), [get([2, 5, B0, B1, 3, 2])], in_dims=2, out_dims=2
+            )
 
             # Interesting case #1: Batch dim directly before dim of size 2
             test(op, [get([3, B0, 2])], in_dims=1)
@@ -1559,7 +1691,7 @@ class TestVmapOperatorsLegacy(Namespace.TestVmapBaseLegacy):
                 vmap(vmap(op, in_dims=1), in_dims=1)(get([2, B0, B1]))
 
             # Invalid input: no dimension of size 2
-            msg = 'Input tensor must have one or more dimensions'
+            msg = "Input tensor must have one or more dimensions"
             with self.assertRaisesRegex(RuntimeError, msg):
                 vmap(op)(get([B0]))
             with self.assertRaisesRegex(RuntimeError, msg):
@@ -1567,7 +1699,7 @@ class TestVmapOperatorsLegacy(Namespace.TestVmapBaseLegacy):
 
             # Invalid input: Batch dim has size 2, but the logical last dim does
             # not have size 2
-            msg = 'Tensor must have a last dimension of size 2'
+            msg = "Tensor must have a last dimension of size 2"
             with self.assertRaisesRegex(RuntimeError, msg):
                 vmap(op, in_dims=1)(get([3, 2]))
 
@@ -1588,7 +1720,7 @@ class TestVmapOperatorsLegacy(Namespace.TestVmapBaseLegacy):
         self.assertEqual(vmap(foo)(tensor), torch.tensor([0, 0, 0]))
 
     def test_is_floating_point(self):
-        float_tensor = torch.tensor([1., 2., 3.])
+        float_tensor = torch.tensor([1.0, 2.0, 3.0])
         long_tensor = torch.tensor([1, 2, 3])
 
         def foo(x):
@@ -1603,9 +1735,9 @@ class TestVmapOperatorsLegacy(Namespace.TestVmapBaseLegacy):
     def test_is_contiguous(self):
         def foo(x):
             if x.is_contiguous():
-                return torch.tensor(1.)
+                return torch.tensor(1.0)
             else:
-                return torch.tensor(0.)
+                return torch.tensor(0.0)
 
         B0, B1 = 3, 5
 
@@ -1649,7 +1781,7 @@ class TestVmapOperatorsLegacy(Namespace.TestVmapBaseLegacy):
             x.is_contiguous(memory_format=memory_format)
             return x
 
-        msg = 'NYI: querying is_contiguous inside of vmap for memory_format'
+        msg = "NYI: querying is_contiguous inside of vmap for memory_format"
         tensor = torch.randn(B0, 2, 7, 3)
         with self.assertRaisesRegex(RuntimeError, msg):
             vmap(functools.partial(baz, memory_format=torch.channels_last))(tensor)
@@ -1664,17 +1796,30 @@ class TestVmapOperatorsLegacy(Namespace.TestVmapBaseLegacy):
         # movedim(tensor, int, int) variant
         test(op, (torch.rand(B0, 2, 5), 0, 1), in_dims=(0, None, None))
         test(op, (torch.rand(2, B0, 5), 0, 1), in_dims=(1, None, None))
-        test(vmap(op, in_dims=(0, None, None)), (torch.rand(B1, 2, B0, 5), 0, 1), in_dims=(2, None, None))
-        test(vmap(vmap(op, in_dims=(2, None, None)), in_dims=(0, None, None)),
-             (torch.rand(B1, 2, B0, 5, B2), 0, 1), in_dims=(2, None, None))
+        test(
+            vmap(op, in_dims=(0, None, None)),
+            (torch.rand(B1, 2, B0, 5), 0, 1),
+            in_dims=(2, None, None),
+        )
+        test(
+            vmap(vmap(op, in_dims=(2, None, None)), in_dims=(0, None, None)),
+            (torch.rand(B1, 2, B0, 5, B2), 0, 1),
+            in_dims=(2, None, None),
+        )
 
         # movedim(tensor, intlist, intlist) variant
         test(op, (torch.rand(B0, 2, 3, 5), [1, 0], [0, 2]), in_dims=(0, None, None))
         test(op, (torch.rand(2, 3, B0, 5), [1, 0], [0, 2]), in_dims=(1, None, None))
-        test(vmap(op, in_dims=(0, None, None)),
-             (torch.rand(B1, 2, B0, 5), [0, 1], [1, 0]), in_dims=(2, None, None))
-        test(vmap(vmap(op, in_dims=(2, None, None)), in_dims=(0, None, None)),
-             (torch.rand(B1, 2, B0, 5, B2), [0, 1], [1, 0]), in_dims=(2, None, None))
+        test(
+            vmap(op, in_dims=(0, None, None)),
+            (torch.rand(B1, 2, B0, 5), [0, 1], [1, 0]),
+            in_dims=(2, None, None),
+        )
+        test(
+            vmap(vmap(op, in_dims=(2, None, None)), in_dims=(0, None, None)),
+            (torch.rand(B1, 2, B0, 5, B2), [0, 1], [1, 0]),
+            in_dims=(2, None, None),
+        )
 
     def test_mm(self):
         op = torch.mm
@@ -1692,19 +1837,32 @@ class TestVmapOperatorsLegacy(Namespace.TestVmapBaseLegacy):
 
         # left arg is vmapped
         test(op, (torch.rand(B0, 2, 5), torch.rand(5, 2)), in_dims=(0, None))
-        test(vmap(op, in_dims=(0, None)), (torch.rand(B1, B0, 2, 5), torch.rand(5, 2)),
-             in_dims=(1, None))
+        test(
+            vmap(op, in_dims=(0, None)),
+            (torch.rand(B1, B0, 2, 5), torch.rand(5, 2)),
+            in_dims=(1, None),
+        )
 
         # right arg is vmapped
         test(op, (torch.rand(2, 5), torch.rand(B0, 5, 2)), in_dims=(None, 0))
-        test(vmap(op, in_dims=(None, 0)), (torch.rand(2, 5), torch.rand(B1, B0, 5, 2)),
-             in_dims=(None, 1))
+        test(
+            vmap(op, in_dims=(None, 0)),
+            (torch.rand(2, 5), torch.rand(B1, B0, 5, 2)),
+            in_dims=(None, 1),
+        )
 
         # both args are vmapped
         test(op, (torch.rand(B0, 2, 5), torch.rand(B0, 5, 2)))
-        test(vmap(op), (torch.rand(B1, B0, 2, 5), torch.rand(B0, B1, 5, 2)), in_dims=(1, 0))
-        test(vmap(op, in_dims=(0, None)),
-             (torch.rand(B1, 2, 5), torch.rand(B0, 5, 2)), in_dims=(None, 0))
+        test(
+            vmap(op),
+            (torch.rand(B1, B0, 2, 5), torch.rand(B0, B1, 5, 2)),
+            in_dims=(1, 0),
+        )
+        test(
+            vmap(op, in_dims=(0, None)),
+            (torch.rand(B1, 2, 5), torch.rand(B0, 5, 2)),
+            in_dims=(None, 0),
+        )
 
     def test_mv(self):
         op = torch.mv
@@ -1722,19 +1880,30 @@ class TestVmapOperatorsLegacy(Namespace.TestVmapBaseLegacy):
 
         # left arg is vmapped
         test(op, (torch.rand(B0, 2, 5), torch.rand(5)), in_dims=(0, None))
-        test(vmap(op, in_dims=(0, None)), (torch.rand(B1, B0, 2, 5), torch.rand(5)),
-             in_dims=(1, None))
+        test(
+            vmap(op, in_dims=(0, None)),
+            (torch.rand(B1, B0, 2, 5), torch.rand(5)),
+            in_dims=(1, None),
+        )
 
         # right arg is vmapped
         test(op, (torch.rand(2, 5), torch.rand(B0, 5)), in_dims=(None, 0))
-        test(vmap(op, in_dims=(None, 0)), (torch.rand(2, 5), torch.rand(B1, B0, 5)),
-             in_dims=(None, 1))
+        test(
+            vmap(op, in_dims=(None, 0)),
+            (torch.rand(2, 5), torch.rand(B1, B0, 5)),
+            in_dims=(None, 1),
+        )
 
         # both args are vmapped
         test(op, (torch.rand(B0, 2, 5), torch.rand(B0, 5)))
-        test(vmap(op), (torch.rand(B1, B0, 2, 5), torch.rand(B0, B1, 5)), in_dims=(1, 0))
-        test(vmap(op, in_dims=(0, None)),
-             (torch.rand(B1, 2, 5), torch.rand(B0, 5)), in_dims=(None, 0))
+        test(
+            vmap(op), (torch.rand(B1, B0, 2, 5), torch.rand(B0, B1, 5)), in_dims=(1, 0)
+        )
+        test(
+            vmap(op, in_dims=(0, None)),
+            (torch.rand(B1, 2, 5), torch.rand(B0, 5)),
+            in_dims=(None, 0),
+        )
 
     def test_narrow(self):
         op = torch.narrow
@@ -1743,10 +1912,18 @@ class TestVmapOperatorsLegacy(Namespace.TestVmapBaseLegacy):
 
         test(op, (torch.rand(B0, 2, 5), -1, 1, 3), in_dims=(0, None, None, None))
         test(op, (torch.rand(2, B0, 5), 1, 1, 3), in_dims=(1, None, None, None))
-        test(vmap(op, in_dims=(0, None, None, None)),
-             (torch.rand(B1, 2, B0, 5), 1, 0, 0), in_dims=(2, None, None, None))
-        test(vmap(vmap(op, in_dims=(2, None, None, None)), in_dims=(0, None, None, None)),
-             (torch.rand(B1, 2, B0, 5, B2), -1, 2, 3), in_dims=(2, None, None, None))
+        test(
+            vmap(op, in_dims=(0, None, None, None)),
+            (torch.rand(B1, 2, B0, 5), 1, 0, 0),
+            in_dims=(2, None, None, None),
+        )
+        test(
+            vmap(
+                vmap(op, in_dims=(2, None, None, None)), in_dims=(0, None, None, None)
+            ),
+            (torch.rand(B1, 2, B0, 5, B2), -1, 2, 3),
+            in_dims=(2, None, None, None),
+        )
 
     def test_new_empty(self):
         # Empty is non-deterministic so we just check that the shape of the
@@ -1784,7 +1961,9 @@ class TestVmapOperatorsLegacy(Namespace.TestVmapBaseLegacy):
             self.assertEqual(result.stride(), [B1 * S, S] + stride)
 
             x = torch.randn(B1, B0)
-            result = vmap(vmap(lambda x: x.new_empty_strided(size, stride)), in_dims=1)(x)
+            result = vmap(vmap(lambda x: x.new_empty_strided(size, stride)), in_dims=1)(
+                x
+            )
             S = x.new_empty_strided(size, stride).storage().size()
             self.assertEqual(result.shape, [B0, B1] + size)
             self.assertEqual(result.stride(), [B1 * S, S] + stride)
@@ -1821,7 +2000,11 @@ class TestVmapOperatorsLegacy(Namespace.TestVmapBaseLegacy):
         test(op, (torch.rand(B0, 2, 5), 0, 0), in_dims=(0, None, None))
         test(op, (torch.rand(2, B0, 5), 1, 1), in_dims=(1, None, None))
         test(vmap(lambda t: op(t, 1, 1)), (torch.rand(B1, 2, B0, 5),), in_dims=2)
-        test(vmap(vmap(lambda t: op(t, 1, 1), in_dims=1)), (torch.rand(B1, 2, B0, B2, 5),), in_dims=2)
+        test(
+            vmap(vmap(lambda t: op(t, 1, 1), in_dims=1)),
+            (torch.rand(B1, 2, B0, B2, 5),),
+            in_dims=2,
+        )
 
     def test_stack(self):
         test = self._vmap_test
@@ -1831,26 +2014,37 @@ class TestVmapOperatorsLegacy(Namespace.TestVmapBaseLegacy):
         def get_op(dim):
             def op(*tensors):
                 return torch.stack(tensors, dim=dim)
+
             return op
 
         test(get_op(0), (torch.rand(B0, 3), torch.rand(B0, 3)))
         test(get_op(0), (torch.rand(3), torch.rand(B0, 3)), in_dims=(None, 0))
         test(get_op(0), (torch.rand(2, 17), torch.rand(2, 17, B0)), in_dims=(None, 2))
         test(get_op(-1), (torch.rand(2, 17), torch.rand(2, 17, B0)), in_dims=(None, 2))
-        test(vmap(get_op(0), in_dims=(0, None)),
-             (torch.rand(B1, 2), torch.rand(B0, 2)), in_dims=(None, 0))
-        test(vmap(get_op(0), in_dims=(0, 0)),
-             (torch.rand(B1, 2), torch.rand(B0, B1, 2)), in_dims=(None, 0))
-
+        test(
+            vmap(get_op(0), in_dims=(0, None)),
+            (torch.rand(B1, 2), torch.rand(B0, 2)),
+            in_dims=(None, 0),
+        )
+        test(
+            vmap(get_op(0), in_dims=(0, 0)),
+            (torch.rand(B1, 2), torch.rand(B0, B1, 2)),
+            in_dims=(None, 0),
+        )
 
     def test_slice(self):
         test = self._vmap_view_test
         B0, B1, B2 = 7, 11, 13
         test(lambda t: t[0:1], (torch.rand(B0, 3, 5),))
         test(lambda t: t[:, 1:3], (torch.rand(3, 5, B0),), in_dims=2)
-        test(vmap(lambda t: t[:, 0:1], in_dims=2), (torch.rand(3, 5, B0, B1),), in_dims=2)
-        test(vmap(vmap(lambda t: t[0:1], in_dims=2), in_dims=2),
-             (torch.rand(3, 5, B0, B1, B2),), in_dims=2)
+        test(
+            vmap(lambda t: t[:, 0:1], in_dims=2), (torch.rand(3, 5, B0, B1),), in_dims=2
+        )
+        test(
+            vmap(vmap(lambda t: t[0:1], in_dims=2), in_dims=2),
+            (torch.rand(3, 5, B0, B1, B2),),
+            in_dims=2,
+        )
 
     def test_squeeze(self):
         test = self._vmap_view_test
@@ -1882,39 +2076,76 @@ class TestVmapOperatorsLegacy(Namespace.TestVmapBaseLegacy):
         test(vmap(lambda x: x.sum(0)), [torch.randn([B0, B1])])
         test(vmap(lambda x: x.sum(-1)), [torch.randn([B0, B1])])
         test(vmap(lambda x: x.sum(-2)), [torch.randn([B1, 2, 5, B0, 3])], in_dims=2)
-        test(vmap(lambda x: x.sum(2), in_dims=2), [torch.randn([2, 5, B0, B1, 3])],
-             in_dims=2, out_dims=2)
+        test(
+            vmap(lambda x: x.sum(2), in_dims=2),
+            [torch.randn([2, 5, B0, B1, 3])],
+            in_dims=2,
+            out_dims=2,
+        )
 
     def test_reshape(self):
         test = self._vmap_test
         B0, B1, B2 = 7, 11, 13
         op = torch.reshape
         test(op, (torch.rand(B0, 2 * 5), [2, 5]), in_dims=(0, None), check_view=True)
-        test(op, (torch.rand(2, B0, 5), [1, 1, 10]), in_dims=(1, None), check_view=False)
-        test(vmap(lambda t: t.reshape([-1])), (torch.rand(B0, B1, 2, 5),), check_view=True)
-        test(vmap(vmap(lambda t: t.reshape([-1]), in_dims=2), in_dims=1),
-             (torch.rand(3, B1, 2, B2, 5, B0),), in_dims=5, check_view=False)
+        test(
+            op, (torch.rand(2, B0, 5), [1, 1, 10]), in_dims=(1, None), check_view=False
+        )
+        test(
+            vmap(lambda t: t.reshape([-1])),
+            (torch.rand(B0, B1, 2, 5),),
+            check_view=True,
+        )
+        test(
+            vmap(vmap(lambda t: t.reshape([-1]), in_dims=2), in_dims=1),
+            (torch.rand(3, B1, 2, B2, 5, B0),),
+            in_dims=5,
+            check_view=False,
+        )
 
     def test_reshape_as(self):
         test = self._vmap_test
         B0, B1, B2 = 7, 11, 13
         op = torch.Tensor.reshape_as
         test(op, (torch.rand(B0, 2 * 5), torch.rand(B0, 2, 5)), check_view=True)
-        test(op, (torch.rand(2 * 5), torch.rand(B0, 2, 5)), in_dims=(None, 0), check_view=True)
-        test(op, (torch.rand(B0, 2 * 5), torch.rand(2, 5)), in_dims=(0, None), check_view=True)
+        test(
+            op,
+            (torch.rand(2 * 5), torch.rand(B0, 2, 5)),
+            in_dims=(None, 0),
+            check_view=True,
+        )
+        test(
+            op,
+            (torch.rand(B0, 2 * 5), torch.rand(2, 5)),
+            in_dims=(0, None),
+            check_view=True,
+        )
 
-        test(op, (torch.rand(2, B0, 5), torch.rand(1, 1, 10)), in_dims=(1, None), check_view=False)
+        test(
+            op,
+            (torch.rand(2, B0, 5), torch.rand(1, 1, 10)),
+            in_dims=(1, None),
+            check_view=False,
+        )
 
-        test(vmap(op), (torch.rand(B0, B1, 2, 5), torch.randn(B0, B1, 10)), check_view=True)
-        test(vmap(vmap(op, in_dims=(2, None)), in_dims=(1, None)),
-             (torch.rand(3, B1, 2, B2, 5, B0), torch.rand(B0, 3 * 2 * 5)),
-             in_dims=(5, 0), check_view=False)
+        test(
+            vmap(op),
+            (torch.rand(B0, B1, 2, 5), torch.randn(B0, B1, 10)),
+            check_view=True,
+        )
+        test(
+            vmap(vmap(op, in_dims=(2, None)), in_dims=(1, None)),
+            (torch.rand(3, B1, 2, B2, 5, B0), torch.rand(B0, 3 * 2 * 5)),
+            in_dims=(5, 0),
+            check_view=False,
+        )
 
     def test_result_type(self):
         def scalar_tensor_with_dtype(op):
             def wrapped(*args, **kwargs):
                 dtype = op(*args, **kwargs)
                 return torch.ones([], dtype=dtype)
+
             return wrapped
 
         test = self._vmap_test
@@ -1922,36 +2153,66 @@ class TestVmapOperatorsLegacy(Namespace.TestVmapBaseLegacy):
 
         B0 = 2
 
-        test(op, (torch.randn(B0), torch.randn(B0, dtype=torch.float64)),
-             check_propagates_grad=False)
-        test(op, (torch.randn(B0), torch.randint(10, [B0], dtype=torch.int64)),
-             check_propagates_grad=False)
+        test(
+            op,
+            (torch.randn(B0), torch.randn(B0, dtype=torch.float64)),
+            check_propagates_grad=False,
+        )
+        test(
+            op,
+            (torch.randn(B0), torch.randint(10, [B0], dtype=torch.int64)),
+            check_propagates_grad=False,
+        )
 
         test(lambda x: op(x, 1), (torch.randn(B0),), check_propagates_grad=False)
         test(lambda x: op(x, 1.6), (torch.randn(B0),), check_propagates_grad=False)
 
-        test(lambda x: op(x, torch.tensor(1)), (torch.randn(B0),),
-             check_propagates_grad=False)
-        test(lambda x: op(x, torch.tensor(1.6, dtype=torch.double)),
-             (torch.randn(B0),), check_propagates_grad=False)
+        test(
+            lambda x: op(x, torch.tensor(1)),
+            (torch.randn(B0),),
+            check_propagates_grad=False,
+        )
+        test(
+            lambda x: op(x, torch.tensor(1.6, dtype=torch.double)),
+            (torch.randn(B0),),
+            check_propagates_grad=False,
+        )
 
-        test(op, (torch.randn(B0, 2), torch.randn(B0, 2, dtype=torch.float64)),
-             check_propagates_grad=False)
-        test(op, (torch.randn(B0, 2), torch.randint(10, [B0, 2], dtype=torch.int64)),
-             check_propagates_grad=False)
+        test(
+            op,
+            (torch.randn(B0, 2), torch.randn(B0, 2, dtype=torch.float64)),
+            check_propagates_grad=False,
+        )
+        test(
+            op,
+            (torch.randn(B0, 2), torch.randint(10, [B0, 2], dtype=torch.int64)),
+            check_propagates_grad=False,
+        )
 
         test(lambda x: op(x, 1), (torch.randn(B0, 2),), check_propagates_grad=False)
         test(lambda x: op(x, 1.6), (torch.randn(B0, 2),), check_propagates_grad=False)
 
-        test(lambda x: op(x, torch.tensor(1)), (torch.randn(B0, 2),),
-             check_propagates_grad=False)
-        test(lambda x: op(x, torch.tensor(1.6, dtype=torch.double)),
-             (torch.randn(B0, 2),), check_propagates_grad=False)
+        test(
+            lambda x: op(x, torch.tensor(1)),
+            (torch.randn(B0, 2),),
+            check_propagates_grad=False,
+        )
+        test(
+            lambda x: op(x, torch.tensor(1.6, dtype=torch.double)),
+            (torch.randn(B0, 2),),
+            check_propagates_grad=False,
+        )
 
-        test(op, (torch.randn(B0, 2), torch.randn(B0, dtype=torch.float64)),
-             check_propagates_grad=False)
-        test(op, (torch.randn(B0, 2), torch.randint(10, [B0], dtype=torch.int64)),
-             check_propagates_grad=False)
+        test(
+            op,
+            (torch.randn(B0, 2), torch.randn(B0, dtype=torch.float64)),
+            check_propagates_grad=False,
+        )
+        test(
+            op,
+            (torch.randn(B0, 2), torch.randint(10, [B0], dtype=torch.int64)),
+            check_propagates_grad=False,
+        )
 
     @skipIfTorchDynamo("too slow")
     def test_tensor_split(self):
@@ -1962,18 +2223,38 @@ class TestVmapOperatorsLegacy(Namespace.TestVmapBaseLegacy):
         # tests for torch.tensor_split(self, indices_or_sections: int, dim)
         test(op, (torch.rand(B0, 2, 1024), 5, -1), in_dims=(0, None, None))
         test(op, (torch.rand(2, B0, 1024), 150, 1), in_dims=(1, None, None))
-        test(vmap(op, in_dims=(0, None, None)), (torch.rand(B1, 1023, B0, 5), 256, 0),
-             in_dims=(2, None, None))
-        test(vmap(vmap(lambda t: op(t, 4, 1), in_dims=2)),
-             (torch.rand(B1, 2, B0, 64, B2),), in_dims=2)
+        test(
+            vmap(op, in_dims=(0, None, None)),
+            (torch.rand(B1, 1023, B0, 5), 256, 0),
+            in_dims=(2, None, None),
+        )
+        test(
+            vmap(vmap(lambda t: op(t, 4, 1), in_dims=2)),
+            (torch.rand(B1, 2, B0, 64, B2),),
+            in_dims=2,
+        )
 
         # tests for torch.tensor_split(self, indices_or_sections: List[int], dim)
-        test(op, (torch.rand(B0, 2, 1024), [50, 100, 378, 890], -1), in_dims=(0, None, None))
-        test(op, (torch.rand(2, B0, 1024), [50, 100, 212, 345, 0, 378, 890], 1), in_dims=(1, None, None))
-        test(vmap(op, in_dims=(0, None, None)), (torch.rand(B1, 1023, B0, 5), [50, 100, 212, 345, 0, 378, 890], 0),
-             in_dims=(2, None, None))
-        test(vmap(vmap(lambda t: op(t, [4, 8, 9, 34, 29], 1), in_dims=2)),
-             (torch.rand(B1, 2, B0, 64, B2),), in_dims=2)
+        test(
+            op,
+            (torch.rand(B0, 2, 1024), [50, 100, 378, 890], -1),
+            in_dims=(0, None, None),
+        )
+        test(
+            op,
+            (torch.rand(2, B0, 1024), [50, 100, 212, 345, 0, 378, 890], 1),
+            in_dims=(1, None, None),
+        )
+        test(
+            vmap(op, in_dims=(0, None, None)),
+            (torch.rand(B1, 1023, B0, 5), [50, 100, 212, 345, 0, 378, 890], 0),
+            in_dims=(2, None, None),
+        )
+        test(
+            vmap(vmap(lambda t: op(t, [4, 8, 9, 34, 29], 1), in_dims=2)),
+            (torch.rand(B1, 2, B0, 64, B2),),
+            in_dims=2,
+        )
 
     def test_split(self):
         test = self._vmap_view_test
@@ -1983,18 +2264,32 @@ class TestVmapOperatorsLegacy(Namespace.TestVmapBaseLegacy):
         # tests for torch.split(self, split_size: int, dim)
         test(op, (torch.rand(B0, 2, 1024), 101, -1), in_dims=(0, None, None))
         test(op, (torch.rand(2, B0, 1024), 130, 1), in_dims=(1, None, None))
-        test(vmap(op, in_dims=(0, None, None)), (torch.rand(B1, 1023, B0, 5), 256, 0),
-             in_dims=(2, None, None))
-        test(vmap(vmap(lambda t: op(t, 4, 1), in_dims=2)),
-             (torch.rand(B1, 2, B0, 64, B2),), in_dims=2)
+        test(
+            vmap(op, in_dims=(0, None, None)),
+            (torch.rand(B1, 1023, B0, 5), 256, 0),
+            in_dims=(2, None, None),
+        )
+        test(
+            vmap(vmap(lambda t: op(t, 4, 1), in_dims=2)),
+            (torch.rand(B1, 2, B0, 64, B2),),
+            in_dims=2,
+        )
 
         # tests for torch.split(self, split_size: List[int], dim)
         test(op, (torch.rand(B0, 2, 1024), [1, 1020, 3], -1), in_dims=(0, None, None))
-        test(op, (torch.rand(2, B0, 1024), [100] * 10 + [24], 1), in_dims=(1, None, None))
-        test(vmap(op, in_dims=(0, None, None)), (torch.rand(B1, 1023, B0, 5), [256] * 3 + [255], 0),
-             in_dims=(2, None, None))
-        test(vmap(vmap(lambda t: op(t, [4] * 8 + [8] * 4, 1), in_dims=2)),
-             (torch.rand(B1, 2, B0, 64, B2),), in_dims=2)
+        test(
+            op, (torch.rand(2, B0, 1024), [100] * 10 + [24], 1), in_dims=(1, None, None)
+        )
+        test(
+            vmap(op, in_dims=(0, None, None)),
+            (torch.rand(B1, 1023, B0, 5), [256] * 3 + [255], 0),
+            in_dims=(2, None, None),
+        )
+        test(
+            vmap(vmap(lambda t: op(t, [4] * 8 + [8] * 4, 1), in_dims=2)),
+            (torch.rand(B1, 2, B0, 64, B2),),
+            in_dims=2,
+        )
 
     def test_trace(self):
         op = torch.trace
@@ -2016,8 +2311,11 @@ class TestVmapOperatorsLegacy(Namespace.TestVmapBaseLegacy):
         test(lambda x: op(x, 3, 1), (torch.rand(B0, 2, 5, 4, 6),))
         test(lambda x: op(x, 1, 0), (torch.rand(2, B0, 5),), in_dims=1)
         test(vmap(lambda x: op(x, 0, 1)), (torch.rand(B1, 2, B0, 5),), in_dims=2)
-        test(vmap(vmap(lambda x: op(x, 0, 1), in_dims=2)),
-             (torch.rand(B1, 2, B0, 5, B2),), in_dims=2)
+        test(
+            vmap(vmap(lambda x: op(x, 0, 1), in_dims=2)),
+            (torch.rand(B1, 2, B0, 5, B2),),
+            in_dims=2,
+        )
 
         # Special case: scalar tensor
         for dim1, dim2 in itertools.product([0, -1], [0, -1]):
@@ -2050,12 +2348,16 @@ class TestVmapOperatorsLegacy(Namespace.TestVmapBaseLegacy):
         test = self._vmap_test
         B0, B1 = 7, 11
 
-        test(lambda t: t.to('cpu'), (torch.rand(B0),))
+        test(lambda t: t.to("cpu"), (torch.rand(B0),))
         test(lambda t: t.to(torch.double), (torch.rand(B0),))
-        test(lambda t, o: t.to(o), (torch.rand(B0), torch.randn(B0, dtype=torch.float64)))
-        test(lambda t, o: t.to(o),
-             (torch.rand(B0), torch.randn(B0, dtype=torch.float64)),
-             in_dims=(0, None))
+        test(
+            lambda t, o: t.to(o), (torch.rand(B0), torch.randn(B0, dtype=torch.float64))
+        )
+        test(
+            lambda t, o: t.to(o),
+            (torch.rand(B0), torch.randn(B0, dtype=torch.float64)),
+            in_dims=(0, None),
+        )
         test(vmap(lambda t: t.to(torch.double)), (torch.rand(B0, B1, 3),))
 
         # also test some casting methods
@@ -2071,10 +2373,18 @@ class TestVmapOperatorsLegacy(Namespace.TestVmapBaseLegacy):
 
         test(op, (torch.rand(B0, 7, 11), 0, 2, 1), in_dims=(0, None, None, None))
         test(op, (torch.rand(7, B0, 11), 1, 4, 2), in_dims=(1, None, None, None))
-        test(vmap(op, in_dims=(0, None, None, None)),
-             (torch.rand(B1, 7, B0, 11), 1, 5, 1), in_dims=(2, None, None, None))
-        test(vmap(vmap(op, in_dims=(2, None, None, None)), in_dims=(0, None, None, None)),
-             (torch.rand(B1, 7, B0, 11, B2), -1, 2, 4), in_dims=(2, None, None, None))
+        test(
+            vmap(op, in_dims=(0, None, None, None)),
+            (torch.rand(B1, 7, B0, 11), 1, 5, 1),
+            in_dims=(2, None, None, None),
+        )
+        test(
+            vmap(
+                vmap(op, in_dims=(2, None, None, None)), in_dims=(0, None, None, None)
+            ),
+            (torch.rand(B1, 7, B0, 11, B2), -1, 2, 4),
+            in_dims=(2, None, None, None),
+        )
 
     def test_unbind(self):
         test = self._vmap_view_test
@@ -2084,10 +2394,16 @@ class TestVmapOperatorsLegacy(Namespace.TestVmapBaseLegacy):
         test(op, (torch.rand(B0, 2, 1024), -1), in_dims=(0, None))
         test(op, (torch.rand(B0, 2, 0),))
         test(op, (torch.rand(2, B0, 7), 0), in_dims=(1, None))
-        test(vmap(op, in_dims=(0, None)), (torch.rand(B1, 1023, B0, 5), 1),
-             in_dims=(2, None))
-        test(vmap(vmap(lambda t: op(t, dim=1), in_dims=2)),
-             (torch.rand(B1, 2, B0, 32, B2),), in_dims=2)
+        test(
+            vmap(op, in_dims=(0, None)),
+            (torch.rand(B1, 1023, B0, 5), 1),
+            in_dims=(2, None),
+        )
+        test(
+            vmap(vmap(lambda t: op(t, dim=1), in_dims=2)),
+            (torch.rand(B1, 2, B0, 32, B2),),
+            in_dims=2,
+        )
 
     def test_view(self):
         test = self._vmap_view_test
@@ -2101,8 +2417,11 @@ class TestVmapOperatorsLegacy(Namespace.TestVmapBaseLegacy):
         test(op, (torch.rand(B0, 2 * 5), [2, 5]), in_dims=(0, None))
         test(op, (torch.rand(B0, 4, 5), [1, 2, 1, 10]), in_dims=(0, None))
         test(vmap(lambda t: t.view([-1])), (torch.rand(B0, B1, 2, 5, 3),))
-        test(vmap(vmap(lambda t: t.reshape([-1])), in_dims=1),
-             (torch.rand(B2, B0, B1, 3, 2, 5),), in_dims=1)
+        test(
+            vmap(vmap(lambda t: t.reshape([-1])), in_dims=1),
+            (torch.rand(B2, B0, B1, 3, 2, 5),),
+            in_dims=1,
+        )
 
     def test_view_as(self):
         test = self._vmap_view_test
@@ -2120,9 +2439,11 @@ class TestVmapOperatorsLegacy(Namespace.TestVmapBaseLegacy):
         test(op, (torch.rand(B0, 4, 5), torch.rand(2, 1, 1, 10)), in_dims=(0, None))
 
         test(vmap(op), (torch.rand(B0, B1, 2, 5), torch.randn(B0, B1, 10)))
-        test(vmap(vmap(op, in_dims=(0, None)), in_dims=(0, None)),
-             (torch.rand(B1, B2, B0, 3, 2, 5), torch.rand(B0, 3 * 2 * 5)),
-             in_dims=(2, 0))
+        test(
+            vmap(vmap(op, in_dims=(0, None)), in_dims=(0, None)),
+            (torch.rand(B1, B2, B0, 3, 2, 5), torch.rand(B0, 3 * 2 * 5)),
+            in_dims=(2, 0),
+        )
 
     def test_no_random_op_support(self):
         B0 = 2
@@ -2135,27 +2456,25 @@ class TestVmapOperatorsLegacy(Namespace.TestVmapBaseLegacy):
             (lambda t: torch.bernoulli(t, p=0.5), (torch.rand(B0, 1),)),
             (lambda t: torch.multinomial(t, 2), (torch.rand(B0, 3),)),
             (torch.normal, (torch.randn(B0, 1), torch.randn(B0, 1))),
-            (lambda t: torch.normal(t, 1.), (torch.randn(B0, 1),)),
-            (lambda t: torch.normal(0., t), (torch.randn(B0, 1),)),
+            (lambda t: torch.normal(t, 1.0), (torch.randn(B0, 1),)),
+            (lambda t: torch.normal(0.0, t), (torch.randn(B0, 1),)),
             (torch.poisson, (torch.rand(B0, 1),)),
             (torch.rand_like, (torch.rand(B0, 1),)),
             (torch.randn_like, (torch.rand(B0, 1),)),
             (lambda t: torch.randint_like(t, 2), (torch.rand(B0, 1),)),
             (lambda t: torch.randint_like(t, 0, 2), (torch.rand(B0, 1),)),
-
             # out-of-place on captured tensor
             (lambda t: torch.bernoulli(captured), (torch.rand(B0),)),
             (lambda t: torch.bernoulli(captured, p=0.5), (torch.rand(B0),)),
             (lambda t: torch.multinomial(captured, 2), (torch.rand(B0),)),
             (lambda t: torch.normal(captured, captured), (torch.randn(B0),)),
-            (lambda t: torch.normal(captured, 1.), (torch.randn(B0),)),
-            (lambda t: torch.normal(0., captured), (torch.randn(B0),)),
+            (lambda t: torch.normal(captured, 1.0), (torch.randn(B0),)),
+            (lambda t: torch.normal(0.0, captured), (torch.randn(B0),)),
             (lambda t: torch.poisson(captured), (torch.rand(B0),)),
             (lambda t: torch.rand_like(captured), (torch.rand(B0),)),
-            (lambda t: torch.randn_like(captured) , (torch.rand(B0),)),
+            (lambda t: torch.randn_like(captured), (torch.rand(B0),)),
             (lambda t: torch.randint_like(captured, 2), (torch.rand(B0),)),
             (lambda t: torch.randint_like(captured, 0, 2), (torch.rand(B0),)),
-
             # in-place on BatchedTensor
             (lambda t: t.bernoulli_(), (torch.randn(B0, 1),)),
             (lambda t: t.cauchy_(), (torch.randn(B0, 1),)),
@@ -2167,7 +2486,6 @@ class TestVmapOperatorsLegacy(Namespace.TestVmapBaseLegacy):
             (lambda t: t.random_(0, 2), (torch.randn(B0, 1),)),
             (lambda t: t.random_(2), (torch.randn(B0, 1),)),
             (lambda t: t.uniform_(), (torch.randn(B0, 1),)),
-
             # in-place on captured tensor
             (lambda t: captured.bernoulli_(), (torch.randn(B0),)),
             (lambda t: captured.cauchy_(), (torch.randn(B0),)),
@@ -2179,7 +2497,6 @@ class TestVmapOperatorsLegacy(Namespace.TestVmapBaseLegacy):
             (lambda t: captured.random_(0, 2), (torch.randn(B0),)),
             (lambda t: captured.random_(2), (torch.randn(B0),)),
             (lambda t: captured.uniform_(), (torch.randn(B0),)),
-
             # factory functions
             (lambda t: torch.rand(1), (torch.randn(B0),)),
             (lambda t: torch.randn(1), (torch.randn(B0),)),
@@ -2187,13 +2504,17 @@ class TestVmapOperatorsLegacy(Namespace.TestVmapBaseLegacy):
             (lambda t: torch.randperm(5), (torch.randn(B0),)),
         ]
         for op, args in random_ops:
-            with self.assertRaisesRegex(RuntimeError,
-                                        'vmap: We do not yet support calling random operations'):
+            with self.assertRaisesRegex(
+                RuntimeError, "vmap: We do not yet support calling random operations"
+            ):
                 vmap(op)(*args)
 
+
 def construct_v(output, batch_size):
-    return torch.randn(batch_size, *output.shape,
-                       dtype=output.dtype, device=output.device)
+    return torch.randn(
+        batch_size, *output.shape, dtype=output.dtype, device=output.device
+    )
+
 
 def as_tuple(x):
     if isinstance(x, tuple):
@@ -2201,18 +2522,24 @@ def as_tuple(x):
     elif isinstance(x, list):
         return tuple(x)
     else:
-        return x,
+        return (x,)
+
 
 def differentiable(args):
-    return tuple(arg for arg in as_tuple(args)
-                 if isinstance(arg, torch.Tensor) and arg.requires_grad)
+    return tuple(
+        arg
+        for arg in as_tuple(args)
+        if isinstance(arg, torch.Tensor) and arg.requires_grad
+    )
+
 
 def _get_rand_no_zeros(*args, **kwargs):
-    requires_grad = kwargs.get('requires_grad', False)
+    requires_grad = kwargs.get("requires_grad", False)
     kwargs_without_requires_grad = kwargs.copy()
-    kwargs_without_requires_grad['requires_grad'] = False
+    kwargs_without_requires_grad["requires_grad"] = False
     result = torch.rand(*args, **kwargs_without_requires_grad)
     return result.clamp_min_(0.1).requires_grad_(requires_grad)
+
 
 class TestVmapBatchedGradientLegacy(Namespace.TestVmapBaseLegacy):
     def _vmap_test(self, *args, **kwargs):
@@ -2224,7 +2551,9 @@ class TestVmapBatchedGradientLegacy(Namespace.TestVmapBaseLegacy):
     # output_process_fn: a function that maps the outputs to the part
     #       that should be differentiated.
     # batch_size: the batch dim size for the batched grad
-    def _batched_grad_test(self, op, args, kwargs=None, output_process_fn=lambda x: x, batch_size=3):
+    def _batched_grad_test(
+        self, op, args, kwargs=None, output_process_fn=lambda x: x, batch_size=3
+    ):
         if kwargs is None:
             kwargs = {}
         outputs = op(*args, **kwargs)
@@ -2232,10 +2561,13 @@ class TestVmapBatchedGradientLegacy(Namespace.TestVmapBaseLegacy):
         batched_vectors = tuple(construct_v(out, batch_size) for out in outputs)
 
         def vector_jacobian_product(*vectors):
-            return torch.autograd.grad(outputs, differentiable(args), vectors,
-                                       retain_graph=True)
-        self._vmap_test(vector_jacobian_product, batched_vectors,
-                        check_propagates_grad=False)
+            return torch.autograd.grad(
+                outputs, differentiable(args), vectors, retain_graph=True
+            )
+
+        self._vmap_test(
+            vector_jacobian_product, batched_vectors, check_propagates_grad=False
+        )
 
     # Tests batched second grad computation of outputs = op(*args, **kwargs).
     # by comparing it to a sequential map+stack fallback.
@@ -2250,30 +2582,40 @@ class TestVmapBatchedGradientLegacy(Namespace.TestVmapBaseLegacy):
     # Regression.
     # It might be useful to have a test that computes batched first gradients and
     # then uses those to compute batched second gradients in the future.
-    def _batched_grad_grad_test(self, op, args, kwargs=None, output_process_fn=lambda x: x, batch_size=3):
+    def _batched_grad_grad_test(
+        self, op, args, kwargs=None, output_process_fn=lambda x: x, batch_size=3
+    ):
         if kwargs is None:
             kwargs = {}
         outputs = op(*args, **kwargs)
         outputs = differentiable(output_process_fn(outputs))
         ones = tuple(torch.ones_like(out) for out in outputs)
         # Same thing as summing together all of the outputs and calling .backward()
-        first_grads = torch.autograd.grad(outputs, differentiable(args), ones,
-                                          create_graph=True)
+        first_grads = torch.autograd.grad(
+            outputs, differentiable(args), ones, create_graph=True
+        )
         first_grads = differentiable(first_grads)
         self.assertNotEqual(
-            len(first_grads), 0, "None of the first grads depend on the input!")
+            len(first_grads), 0, "None of the first grads depend on the input!"
+        )
 
         batched_vectors = tuple(construct_v(grad, batch_size) for grad in first_grads)
 
         def vector_hessian_product(*vectors):
-            outputs = torch.autograd.grad(first_grads, differentiable(args), vectors,
-                                          retain_graph=True, allow_unused=True)
+            outputs = torch.autograd.grad(
+                first_grads,
+                differentiable(args),
+                vectors,
+                retain_graph=True,
+                allow_unused=True,
+            )
             outputs = tuple(out for out in outputs if out is not None)
             assert len(outputs) > 0
             return outputs
 
-        self._vmap_test(vector_hessian_product, batched_vectors,
-                        check_propagates_grad=False)
+        self._vmap_test(
+            vector_hessian_product, batched_vectors, check_propagates_grad=False
+        )
 
     def _test_arithmetic(self, op, device, test_grad_grad=True):
         x = torch.randn(2, 3, requires_grad=True, device=device)
@@ -2317,6 +2659,7 @@ class TestVmapBatchedGradientLegacy(Namespace.TestVmapBaseLegacy):
 
         def op(x):
             return x.expand(5, 5, 2, 3)
+
         self._batched_grad_test(op, (x,))
 
     @allowVmapFallbackUsage
@@ -2397,6 +2740,7 @@ class TestVmapBatchedGradientLegacy(Namespace.TestVmapBaseLegacy):
 
         def op(x, y):
             return torch.stack([x, y])
+
         self._batched_grad_test(op, (x, y))
 
     def test_select(self, device):
@@ -2418,7 +2762,6 @@ class TestVmapBatchedGradientLegacy(Namespace.TestVmapBaseLegacy):
     def test_threshold(self, device):
         x = torch.randn(2, 3, device=device, requires_grad=True)
         self._batched_grad_test(lambda x: F.threshold(x, 0.5, 0.0), (x,))
-
 
     @allowVmapFallbackUsage
     def test_inplace_on_view(self, device):
@@ -2466,7 +2809,7 @@ class TestVmapBatchedGradientLegacy(Namespace.TestVmapBaseLegacy):
         gy = torch.randn(B0, requires_grad=True)
 
         def vjp(v):
-            res, = torch.autograd.grad(y, x, v, allow_unused=True)
+            (res,) = torch.autograd.grad(y, x, v, allow_unused=True)
             return torch.zeros_like(x) if res is None else res
 
         result = vmap(vjp)(gy)
@@ -2480,12 +2823,13 @@ class TestVmapBatchedGradientLegacy(Namespace.TestVmapBaseLegacy):
         gy = torch.randn(B0, requires_grad=True)
 
         def vjp(v):
-            res, = torch.autograd.grad(y, x, v, allow_unused=True)
+            (res,) = torch.autograd.grad(y, x, v, allow_unused=True)
             return torch.zeros_like(x) if res is None else res
 
         _ = vjp(gy[0])
         result = vmap(vjp)(gy)
         self.assertEqual(result, torch.zeros(B0, *x.shape, device=device))
+
 
 instantiate_device_type_tests(
     TestVmapBatchedGradientLegacy,
@@ -2493,5 +2837,5 @@ instantiate_device_type_tests(
     None,
 )
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     run_tests()

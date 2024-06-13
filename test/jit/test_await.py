@@ -1,18 +1,19 @@
 # Owner(s): ["oncall: jit"]
 
 import io
-import torch
-from torch.testing._internal.jit_utils import JitTestCase
-from torch.testing._internal.jit_utils import make_global
 from typing import List, Optional, Tuple
+
+import torch
 from torch import Tensor
 from torch._awaits import _Await as Await
+from torch.testing._internal.jit_utils import JitTestCase, make_global
 
 
 class TestAwait(JitTestCase):
     def test_await_python(self):
         def foo(x: int) -> int:
             return x + 13
+
         aw: Await[int] = torch.jit._awaitable(foo, 13)
         self.assertTrue(aw.fn()(*aw.args()) == torch.jit._awaitable_wait(aw))
         nw = torch.jit._awaitable_nowait(33)
@@ -22,6 +23,7 @@ class TestAwait(JitTestCase):
     def test_await_type_python(self):
         def foo() -> Tensor:
             return torch.randn()
+
         awaits = torch.jit.annotate(List[Await[Tensor]], [])
         awaits.append(torch.jit._awaitable(foo))
 
@@ -82,9 +84,7 @@ class TestAwait(JitTestCase):
         self.assertTrue(torch.allclose(torch.eye(2), script_out))
         self.assertTrue(torch.allclose(script_out, out))
 
-
     def test_await_class_arg(self):
-
         class C:
             def __init__(self, a: Tensor, b: Tensor):
                 self.__a = a
@@ -104,6 +104,7 @@ class TestAwait(JitTestCase):
             _a = torch.eye(2)
             c2_t = torch.jit._awaitable_wait(aw)
             return _a + c2_t + x
+
         inp = torch.zeros(2)
 
         sm = torch.jit.script(fn)
@@ -119,7 +120,6 @@ class TestAwait(JitTestCase):
             def __init__(self, a: Tensor, b: Tensor):
                 self._a = a
                 self._b = b
-
 
         make_global(C)
 
@@ -143,14 +143,12 @@ class TestAwait(JitTestCase):
         self.assertTrue(torch.allclose(script_out, out))
 
     def test_await_class_return(self):
-
         class C:
             __slots__ = ["a", "b"]
 
             def __init__(self, a: Tensor, b: Tensor):
                 self.a = a
                 self.b = b
-
 
         make_global(C)
 
@@ -175,7 +173,9 @@ class TestAwait(JitTestCase):
         script_out = sm(inp)
         self.assertTrue(torch.allclose(torch.eye(2) + 6 * torch.ones(2), script_out))
         self.assertTrue(torch.allclose(script_out, out))
-        self.assertGraphContainsExactly(sm.graph, kind='prim::awaitable_wait', num_kind_nodes=1)
+        self.assertGraphContainsExactly(
+            sm.graph, kind="prim::awaitable_wait", num_kind_nodes=1
+        )
 
     def test_await_getattr_implicit_convertion(self):
         class C:
@@ -185,7 +185,6 @@ class TestAwait(JitTestCase):
 
             def b(self):
                 return self._b
-
 
         make_global(C)
 
@@ -212,10 +211,11 @@ class TestAwait(JitTestCase):
         script_out = sm(inp)
         self.assertTrue(torch.allclose(torch.eye(2) + 7 * torch.ones(2), script_out))
         self.assertTrue(torch.allclose(script_out, out))
-        self.assertGraphContainsExactly(sm.graph, kind='prim::awaitable_wait', num_kind_nodes=2)
+        self.assertGraphContainsExactly(
+            sm.graph, kind="prim::awaitable_wait", num_kind_nodes=2
+        )
 
     def test_await_nested(self):
-
         class C:
             def __init__(self, a: Tensor, b: Tensor):
                 self.__a = a
@@ -250,6 +250,7 @@ class TestAwait(JitTestCase):
             def __init__(self, v):
                 self.parent = torch.jit.annotate(Optional[Tree], None)
                 self.v = v
+
         make_global(Tree)
 
         def delayed(t: Tree):
@@ -275,12 +276,15 @@ class TestAwait(JitTestCase):
         sm = torch.jit.script(main)
         out = main(inp)
         script_out = sm(inp)
-        self.assertTrue(torch.allclose(2 * torch.eye(2) + 2 * torch.ones(2), script_out))
+        self.assertTrue(
+            torch.allclose(2 * torch.eye(2) + 2 * torch.ones(2), script_out)
+        )
         self.assertTrue(torch.allclose(script_out, out))
 
     def test_await_eager_lazy(self):
         def delayed(x: Tensor) -> Tensor:
             return 2 * (x + 1)
+
         t = torch.ones(2, dtype=torch.int64)
         aw = torch.jit._awaitable(delayed, t)
         self.assertTrue(isinstance(aw, torch._C._Await))
@@ -302,7 +306,9 @@ class TestAwait(JitTestCase):
 
         script_out_aw = sm(inp)
         script_out = torch.jit._awaitable_wait(script_out_aw)
-        self.assertTrue(torch.allclose(2 * torch.eye(2) + 2 * torch.ones(2), script_out))
+        self.assertTrue(
+            torch.allclose(2 * torch.eye(2) + 2 * torch.ones(2), script_out)
+        )
         self.assertTrue(torch.allclose(script_out, out))
 
     def test_jit_trace(self):

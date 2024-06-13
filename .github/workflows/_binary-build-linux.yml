@@ -12,10 +12,15 @@ on:
         type: string
         description: The build environment
       runs_on:
-          required: false
-          default: linux.12xlarge
-          type: string
-          description: Hardware to run this "build"job on, linux.12xlarge or linux.arm64.2xlarge.
+        required: false
+        default: linux.12xlarge
+        type: string
+        description: Hardware to run this "build"job on, linux.12xlarge or linux.arm64.2xlarge.
+      timeout-minutes:
+        required: false
+        default: 210
+        type: number
+        description: timeout for the job
       ALPINE_IMAGE:
         required: false
         type: string
@@ -78,7 +83,7 @@ on:
 jobs:
   build:
     runs-on: ${{ inputs.runs_on }}
-    timeout-minutes: 180
+    timeout-minutes: ${{ inputs.timeout-minutes }}
     env:
       PYTORCH_ROOT: ${{ inputs.PYTORCH_ROOT }}
       BUILDER_ROOT: ${{ inputs.BUILDER_ROOT }}
@@ -139,6 +144,7 @@ jobs:
         run: env
 
       - name: "[FB EMPLOYEES] Enable SSH (Click me for login details)"
+        if: inputs.build_environment != 'linux-s390x-binary-manywheel'
         uses: pytorch/test-infra/.github/actions/setup-ssh@main
         continue-on-error: true
         with:
@@ -147,12 +153,14 @@ jobs:
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
         with:
-          no-sudo: ${{ inputs.build_environment == 'linux-aarch64-binary-manywheel' }}
+          no-sudo: ${{ inputs.build_environment == 'linux-aarch64-binary-manywheel' || inputs.build_environment == 'linux-s390x-binary-manywheel' }}
 
       - name: Setup Linux
+        if: inputs.build_environment != 'linux-s390x-binary-manywheel'
         uses: ./.github/actions/setup-linux
 
       - name: Chown workspace
+        if: inputs.build_environment != 'linux-s390x-binary-manywheel'
         uses: ./.github/actions/chown-workspace
         with:
           ALPINE_IMAGE: ${{ inputs.ALPINE_IMAGE }}
@@ -165,7 +173,7 @@ jobs:
           rm -rf "${GITHUB_WORKSPACE}"
           mkdir "${GITHUB_WORKSPACE}"
 
-          if [[ ${{ inputs.build_environment }} == 'linux-aarch64-binary-manywheel' ]]; then
+          if [[ ${{ inputs.build_environment }} == 'linux-aarch64-binary-manywheel' ]] || [[ ${{ inputs.build_environment }} == 'linux-s390x-binary-manywheel' ]] ; then
             rm -rf "${RUNNER_TEMP}/artifacts"
             mkdir "${RUNNER_TEMP}/artifacts"
           fi
@@ -212,7 +220,7 @@ jobs:
             ]}
 
       - name: Pull Docker image
-        if: ${{ steps.filter.outputs.is-test-matrix-empty == 'False' }}
+        if: ${{ steps.filter.outputs.is-test-matrix-empty == 'False' && inputs.build_environment != 'linux-s390x-binary-manywheel' }}
         uses: pytorch/test-infra/.github/actions/pull-docker-image@main
         with:
           docker-image: ${{ inputs.DOCKER_IMAGE }}
@@ -254,7 +262,7 @@ jobs:
           fi
 
       - name: Chown artifacts
-        if: ${{ steps.filter.outputs.is-test-matrix-empty == 'False' }}
+        if: ${{ steps.filter.outputs.is-test-matrix-empty == 'False' && inputs.build_environment != 'linux-s390x-binary-manywheel' }}
         shell: bash
         run: |
           # Ensure the working directory gets chowned back to the current user
@@ -269,11 +277,20 @@ jobs:
             ${{ runner.temp }}/artifacts/*
 
       - name: Teardown Linux
-        if: always()
+        if: always() && inputs.build_environment != 'linux-s390x-binary-manywheel'
         uses: pytorch/test-infra/.github/actions/teardown-linux@main
 
       - name: Chown workspace
-        if: always()
+        if: always() && inputs.build_environment != 'linux-s390x-binary-manywheel'
         uses: ./pytorch/.github/actions/chown-workspace
         with:
           ALPINE_IMAGE: ${{ inputs.ALPINE_IMAGE }}
+
+      - name: Cleanup docker
+        if: always() && inputs.build_environment == 'linux-s390x-binary-manywheel'
+        shell: bash
+        run: |
+          # on s390x stop the container for clean worker stop
+          # ignore expansion of "docker ps -q" since it could be empty
+          # shellcheck disable=SC2046
+          docker stop $(docker ps -q) || true

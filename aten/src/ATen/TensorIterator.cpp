@@ -22,7 +22,6 @@
 #endif
 
 #include <c10/util/irange.h>
-#include <c10/util/string_utils.h>
 #include <c10/util/SmallBuffer.h>
 
 #include <array>
@@ -1310,7 +1309,7 @@ bool TensorIteratorBase::can_use_32bit_indexing() const {
 
 std::unique_ptr<TensorIterator> TensorIteratorBase::split(int dim) {
   TORCH_INTERNAL_ASSERT(dim >= 0 && dim < ndim() && shape()[dim] >= 2);
-  std::unique_ptr<TensorIterator> copy(new TensorIterator(*this));
+  auto copy = std::make_unique<TensorIterator>(*this);
 
   bool overlaps = is_dim_reduced(dim);
   auto copy_size = shape_[dim] / 2;
@@ -1398,7 +1397,7 @@ bool TensorIteratorBase::fast_set_up(const TensorIteratorConfig& config) {
         break;
       }
     default:
-      TORCH_INTERNAL_ASSERT(false, "Unsupported fast setup type", c10::to_string((int)setup_type));
+      TORCH_INTERNAL_ASSERT(false, "Unsupported fast setup type", std::to_string((int)setup_type));
   }
   //coalescing dimensions consists of collapsing dimensions to 1 (we are limited to contiguous no-broadcast cases here)
   if (ndim() > 1){
@@ -1530,13 +1529,13 @@ void TensorIteratorBase::build(TensorIteratorConfig& config) {
 
   // XLA and lazy tensors don't have storage, so they don't have an underlying data pointer.
   // Nothing beyond this point is important for meta functions, so it's fine to exit early here.
-  // Extend the condition to ORT tesnors as ORT tensors also don't have storage.
+  // Extend the condition to MAIA tesnors as MAIA tensors also don't have storage.
   if (privateuse1_without_storage  ||
       common_device_.type() == DeviceType::MTIA ||
       common_device_.type() == DeviceType::XLA  ||
       common_device_.type() == DeviceType::IPU  ||
       common_device_.type() == DeviceType::Lazy ||
-      common_device_.type() == DeviceType::ORT  ||
+      common_device_.type() == DeviceType::MAIA  ||
       common_device_.type() == DeviceType::HPU) return;
 
   for (auto& op : operands_) {

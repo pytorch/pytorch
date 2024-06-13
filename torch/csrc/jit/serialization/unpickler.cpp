@@ -822,7 +822,7 @@ void Unpickler::readGlobal(
     // like the other branches here because no REDUCE or BUILD will
     // be called on this value. Instead, we just put it on the stack
     // and return early
-    c10::optional<c10::ScalarType> scalar_type;
+    std::optional<c10::ScalarType> scalar_type;
 #define CHECK_SCALAR(_, name)          \
   if (class_name == #name "Storage") { \
     scalar_type = c10::k##name;        \
@@ -834,7 +834,7 @@ void Unpickler::readGlobal(
       return;
     }
 
-    c10::optional<at::QScheme> qscheme;
+    std::optional<at::QScheme> qscheme;
     for (int i = 0; i < at::COMPILE_TIME_NUM_QSCHEMES; ++i) {
       if (class_name == toString(static_cast<at::QScheme>(i))) {
         qscheme = static_cast<at::QScheme>(i);

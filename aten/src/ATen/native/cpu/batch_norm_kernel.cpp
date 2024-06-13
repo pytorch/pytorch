@@ -416,8 +416,8 @@ batch_norm_cpu_backward_contiguous_impl(Tensor& grad_input, Tensor& grad_weight,
   int64_t image_size = input.numel() / n_batch / n_channel;
   int64_t N = input.numel() / n_channel;
 
-  const scalar_t* grad_output_data = grad_output.data_ptr<scalar_t>();
-  const scalar_t* input_data = input.data_ptr<scalar_t>();
+  const scalar_t* grad_output_data = grad_output.const_data_ptr<scalar_t>();
+  const scalar_t* input_data = input.const_data_ptr<scalar_t>();
 
   scalar_t* grad_input_data = grad_input.defined() ? grad_input.mutable_data_ptr<scalar_t>() : nullptr;
   scalar_t* grad_weight_data = grad_weight.defined() ? grad_weight.data_ptr<scalar_t>() : nullptr;
@@ -426,11 +426,11 @@ batch_norm_cpu_backward_contiguous_impl(Tensor& grad_input, Tensor& grad_weight,
   const bool grad_weight_null = grad_weight_data == nullptr;
   const bool grad_bias_null = grad_bias_data == nullptr;
 
-  auto weight_a = conditional_accessor_1d<scalar_t>(weight);
-  auto save_mean_a = conditional_accessor_1d<scalar_t>(save_mean);
-  auto save_invstd_a = conditional_accessor_1d<scalar_t>(save_invstd);
-  auto running_mean_a = conditional_accessor_1d<scalar_t>(running_mean);
-  auto running_var_a = conditional_accessor_1d<scalar_t>(running_var);
+  auto weight_a = conditional_accessor_1d<const scalar_t>(weight);
+  auto save_mean_a = conditional_accessor_1d<const scalar_t>(save_mean);
+  auto save_invstd_a = conditional_accessor_1d<const scalar_t>(save_invstd);
+  auto running_mean_a = conditional_accessor_1d<const scalar_t>(running_mean);
+  auto running_var_a = conditional_accessor_1d<const scalar_t>(running_var);
 
   // parallel dim reduce on 'channel'
   at::parallel_for(0, n_channel, 1, [&](int64_t begin, int64_t end) {
@@ -537,22 +537,22 @@ batch_norm_cpu_backward_channels_last_impl(Tensor& grad_input, Tensor& grad_weig
   int64_t n_channel = input.size(1);
   int64_t N = input.numel() / n_channel;
 
-  const scalar_t* grad_output_data = grad_output.data_ptr<scalar_t>();
-  const scalar_t* input_data = input.data_ptr<scalar_t>();
+  const scalar_t* grad_output_data = grad_output.const_data_ptr<scalar_t>();
+  const scalar_t* input_data = input.const_data_ptr<scalar_t>();
 
   scalar_t* grad_input_data = grad_input.defined() ? grad_input.mutable_data_ptr<scalar_t>() : nullptr;
   scalar_t* grad_weight_data = grad_weight.defined() ? grad_weight.data_ptr<scalar_t>() : nullptr;
   scalar_t* grad_bias_data = grad_bias.defined() ? grad_bias.data_ptr<scalar_t>() : nullptr;
 
-  scalar_t* save_mean_data = conditional_data_ptr<scalar_t>(save_mean);
+  const scalar_t* save_mean_data = conditional_data_ptr<const scalar_t>(save_mean);
   scalar_t* save_invstd_data = conditional_data_ptr<scalar_t>(save_invstd);
-  scalar_t* running_mean_data = conditional_data_ptr<scalar_t>(running_mean);
-  scalar_t* running_var_data = conditional_data_ptr<scalar_t>(running_var);
+  const scalar_t* running_mean_data = conditional_data_ptr<const scalar_t>(running_mean);
+  const scalar_t* running_var_data = conditional_data_ptr<const scalar_t>(running_var);
 
   Tensor weight_ = weight.defined() ? weight : at::ones({n_channel}, input.options());
-  const scalar_t* weight_data = weight_.data_ptr<scalar_t>();
+  const scalar_t* weight_data = weight_.const_data_ptr<scalar_t>();
 
-  scalar_t* mean_ptr = nullptr;
+  const scalar_t* mean_ptr = nullptr;
   scalar_t* invstd_ptr = nullptr;
   Tensor invstd = at::empty({0}, input.options());
   if (train) {
@@ -735,7 +735,7 @@ batch_norm_cpu_contiguous_impl(Tensor& output, const Tensor& input,
   }
 
   scalar_t* output_data = output.data_ptr<scalar_t>();
-  const scalar_t* input_data = input.data_ptr<scalar_t>();
+  const scalar_t* input_data = input.const_data_ptr<scalar_t>();
 
   const int64_t loop_size = image_size - (image_size % bVec::size());
   at::parallel_for(0, n_batch * n_channel, 1, [&](int64_t begin, int64_t end) {
@@ -798,7 +798,7 @@ batch_norm_cpu_channels_last_impl(Tensor& output, const Tensor& input,
   }
 
   scalar_t* output_data = output.data_ptr<scalar_t>();
-  const scalar_t* input_data = input.data_ptr<scalar_t>();
+  const scalar_t* input_data = input.const_data_ptr<scalar_t>();
 
   const int64_t loop_size = n_channel - (n_channel % bVec::size());
   at::parallel_for(0, n_batch * image_size, 1, [&](int64_t begin, int64_t end) {
@@ -837,7 +837,7 @@ inline void batch_norm_cpu_collect_stats_contiguous_internal(
   int64_t image_size = input.numel() / n_batch / n_channel;
   int64_t N = input.numel() / n_channel;
 
-  const scalar_t* input_data = input.data_ptr<scalar_t>();
+  const scalar_t* input_data = input.const_data_ptr<scalar_t>();
   param_t* mean_data = mean.data_ptr<param_t>();
   param_t* var_sum_data = var_sum.data_ptr<param_t>();
 
@@ -908,7 +908,7 @@ inline void batch_norm_cpu_collect_stats_channels_last_internal(
   int64_t n_channel = input.size(1);
   int64_t N = input.numel() / n_channel;
 
-  const scalar_t* input_data = input.data_ptr<scalar_t>();
+  const scalar_t* input_data = input.const_data_ptr<scalar_t>();
   param_t* mean_data = mean.data_ptr<param_t>();
   param_t* var_sum_data = var_sum.data_ptr<param_t>();
 
@@ -1006,8 +1006,8 @@ void batch_norm_cpu_backward_contiguous_internal(Tensor& grad_input, Tensor& gra
   int64_t image_size = input.numel() / n_batch / n_channel;
   int64_t N = input.numel() / n_channel;
 
-  const scalar_t* grad_output_data = grad_output.data_ptr<scalar_t>();
-  const scalar_t* input_data = input.data_ptr<scalar_t>();
+  const scalar_t* grad_output_data = grad_output.const_data_ptr<scalar_t>();
+  const scalar_t* input_data = input.const_data_ptr<scalar_t>();
 
   scalar_t* grad_input_data = grad_input.defined() ? grad_input.mutable_data_ptr<scalar_t>() : nullptr;
   param_t* grad_weight_data = grad_weight.defined() ? grad_weight.data_ptr<param_t>() : nullptr;
@@ -1016,11 +1016,11 @@ void batch_norm_cpu_backward_contiguous_internal(Tensor& grad_input, Tensor& gra
   const bool grad_weight_null = grad_weight_data == nullptr;
   const bool grad_bias_null = grad_bias_data == nullptr;
 
-  auto weight_a = conditional_accessor_1d<param_t>(weight);
-  auto save_mean_a = conditional_accessor_1d<param_t>(save_mean);
-  auto save_invstd_a = conditional_accessor_1d<param_t>(save_invstd);
-  auto running_mean_a = conditional_accessor_1d<param_t>(running_mean);
-  auto running_var_a = conditional_accessor_1d<param_t>(running_var);
+  auto weight_a = conditional_accessor_1d<const param_t>(weight);
+  auto save_mean_a = conditional_accessor_1d<const param_t>(save_mean);
+  auto save_invstd_a = conditional_accessor_1d<const param_t>(save_invstd);
+  auto running_mean_a = conditional_accessor_1d<const param_t>(running_mean);
+  auto running_var_a = conditional_accessor_1d<const param_t>(running_var);
 
   // parallel dim reduce on 'channel'
   at::parallel_for(0, n_channel, 1, [&](int64_t begin, int64_t end) {
@@ -1128,18 +1128,18 @@ void batch_norm_cpu_backward_channels_last_internal(Tensor& grad_input, Tensor& 
   int64_t n_channel = input.size(1);
   int64_t N = input.numel() / n_channel;
 
-  const scalar_t* grad_output_data = grad_output.data_ptr<scalar_t>();
-  const scalar_t* input_data = input.data_ptr<scalar_t>();
+  const scalar_t* grad_output_data = grad_output.const_data_ptr<scalar_t>();
+  const scalar_t* input_data = input.const_data_ptr<scalar_t>();
 
   scalar_t* grad_input_data = grad_input.defined() ? grad_input.mutable_data_ptr<scalar_t>() : nullptr;
   param_t* grad_weight_data = grad_weight.defined() ? grad_weight.data_ptr<param_t>() : nullptr;
   param_t* grad_bias_data = grad_bias.defined() ? grad_bias.data_ptr<param_t>() : nullptr;
 
-  auto weight_a = conditional_accessor_1d<param_t>(weight);
-  auto save_mean_a = conditional_accessor_1d<param_t>(save_mean);
-  auto save_invstd_a = conditional_accessor_1d<param_t>(save_invstd);
-  auto running_mean_a = conditional_accessor_1d<param_t>(running_mean);
-  auto running_var_a = conditional_accessor_1d<param_t>(running_var);
+  auto weight_a = conditional_accessor_1d<const param_t>(weight);
+  auto save_mean_a = conditional_accessor_1d<const param_t>(save_mean);
+  auto save_invstd_a = conditional_accessor_1d<const param_t>(save_invstd);
+  auto running_mean_a = conditional_accessor_1d<const param_t>(running_mean);
+  auto running_var_a = conditional_accessor_1d<const param_t>(running_var);
 
   // use float as acc type
   bool weight_defined = weight.defined();

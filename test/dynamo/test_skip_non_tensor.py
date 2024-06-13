@@ -147,10 +147,10 @@ class SkipNonTensorTests(torch._dynamo.test_case.TestCase):
 
         class Foo(list):
             def __iter__(self):
-                raise Exception()
+                raise Exception  # noqa: TRY002
 
             def __len__(self):
-                raise Exception()
+                raise Exception  # noqa: TRY002
 
         x = Foo()
         x.append(torch.randn(4))
@@ -170,6 +170,8 @@ class SkipNonTensorTests(torch._dynamo.test_case.TestCase):
         global _variable, _variable_2
 
         for mode in range(1, 7):
+            torch._dynamo.reset()
+
             _variable = 0
             _variable_2 = 0
 
