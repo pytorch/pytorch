@@ -408,7 +408,7 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch._C._conv_determine_backend_memory_format",
         "torch._C._cpu._is_cpu_support_avx2",
         "torch._C._cpu._is_cpu_support_avx512",
-        "torch._C._cpu._is_cpu_support_vnni",
+        "torch._C._cpu._is_cpu_support_avx512_vnni",
         "torch._C._crash_if_aten_asan",
         "torch._C._crash_if_csrc_asan",
         "torch._C._crash_if_csrc_ubsan",
@@ -941,6 +941,7 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch._C._mps_currentAllocatedMemory",
         "torch._C._mps_deviceSynchronize",
         "torch._C._mps_driverAllocatedMemory",
+        "torch._C._mps_recommendedMaxMemory",
         "torch._C._mps_elapsedTimeOfEvents",
         "torch._C._mps_emptyCache",
         "torch._C._mps_get_default_generator",
@@ -2421,7 +2422,7 @@ torch_non_c_binding_in_graph_functions = dict.fromkeys(
         "torch.compiled_with_cxx11_abi",
         "torch.cpu._is_cpu_support_avx2",
         "torch.cpu._is_cpu_support_avx512",
-        "torch.cpu._is_cpu_support_vnni",
+        "torch.cpu._is_cpu_support_avx512_vnni",
         "torch.cpu.current_device",
         "torch.cpu.current_stream",
         "torch.cpu.device_count",
@@ -3524,7 +3525,11 @@ def lookup_inner(
     # The rules defined in `torch_name_rule_map` mainly includes two parts:
     # - Manually defined rules for any functions.
     # - The list of torch in graph functions.
-    if not hashable(obj):
+    try:
+        can_hash = hashable(obj)
+    except Exception:
+        can_hash = False
+    if not can_hash:
         if reasons is not None:
             reasons.add("obj is not hashable")
         return None

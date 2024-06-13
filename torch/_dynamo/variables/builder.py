@@ -111,7 +111,7 @@ from .ctx_manager import (
 )
 from .dicts import (
     ConstDictVariable,
-    DataClassVariable,
+    CustomizedDictVariable,
     DefaultDictVariable,
     HFPretrainedConfigVariable,
     PythonSysModulesVariable,
@@ -493,6 +493,11 @@ class VariableBuilder:
         elif value is sys.modules:
             self.install_guards(GuardBuilder.FUNCTION_MATCH)
             return PythonSysModulesVariable(source=self.source)
+        elif CustomizedDictVariable.is_matching_cls_hf(type(value)):
+            self.install_guards(GuardBuilder.TYPE_MATCH)
+            result = CustomizedDictVariable.wrap(self, value)
+            result.source = self.source
+            return self.tx.output.side_effects.track_object_existing(value, result)
         elif istype(value, (dict, collections.defaultdict, collections.OrderedDict)):
             if not value and self.get_source().is_nn_module():
                 # It is faster to guard on 'false' property than to guard
@@ -711,9 +716,6 @@ class VariableBuilder:
             )
         elif np and isinstance(value, np.number):
             return self.wrap_unspecialized_primitive(value)
-        elif DataClassVariable.is_matching_object(value):
-            self.install_guards(GuardBuilder.TYPE_MATCH)
-            return DataClassVariable.wrap(self, value)
         elif HFPretrainedConfigVariable.is_matching_object(value):
             self.install_guards(GuardBuilder.TYPE_MATCH)
             return HFPretrainedConfigVariable(value)
@@ -1125,9 +1127,26 @@ class VariableBuilder:
             and not config.allow_rnn
         ):
             unimplemented("TorchDynamo purposely graph breaks on RNN, GRU, LSTMs")
-        if mutation_guard.is_dynamic_nn_module(value, self.tx.export):
+
+        # Dont take this path for FSDP
+        if not getattr(
+            value, "_is_fsdp_managed_module", None
+        ) and mutation_guard.is_dynamic_nn_module(value, self.tx.export):
             # created dynamically, don't specialize on it
             self.install_guards(GuardBuilder.TYPE_MATCH)
+            if (
+                torch._dynamo.config.inline_inbuilt_nn_modules
+                and torch._inductor.config.freezing
+                and not torch.is_grad_enabled()
+            ):
+                from ..decorators import mark_static_address
+
+                for p in value.parameters():
+                    mark_static_address(p)
+
+                for b in value.buffers():
+                    mark_static_address(b)
+
             result = UnspecializedNNModuleVariable(value, source=self.source)
             if not SideEffects.cls_supports_mutation_side_effects(type(value)):
                 # don't allow STORE_ATTR mutation with custom __setattr__
@@ -1137,7 +1156,7 @@ class VariableBuilder:
             value.__class__, torch.nn.parallel.distributed.DistributedDataParallel
         ):
             self.install_guards(GuardBuilder.TYPE_MATCH)
-            return UnspecializedNNModuleVariable(value)
+            return UnspecializedNNModuleVariable(value, source=self.get_source())
         elif getattr(value, "_is_fsdp_managed_module", False):
             # See note [Dynamo treats FSDP wrapped modules as UnspecializedNNModule]
             # in fully_sharded_data_parallel.py for more information
@@ -1182,6 +1201,10 @@ class VariableBuilder:
                 value in self._common_constants()
                 # Assume integers from global variables want to be specialized
                 or not self.source.guard_source().is_local()
+                # Assume that integers that came from NN modules want to be
+                # specialized (as we don't expect users to be changing the
+                # NN modules on the fly)
+                or self.source.guard_source().is_nn_module()
                 or is_from_defaults(self.source)
                 or is_cell_contents(self.source)
             ):
@@ -1684,7 +1707,7 @@ class VariableBuilder:
 def _dataclasses_fields_lambda(obj):
     if isinstance(obj, UserDefinedObjectVariable):
         value = obj.value
-    elif isinstance(obj, DataClassVariable):
+    elif isinstance(obj, CustomizedDictVariable):
         value = obj.user_cls
     else:
         unimplemented(f"Dataclass fields handling fails for type {obj}")

@@ -189,7 +189,7 @@ def vmap(
         vmap does not provide general autobatching or handle variable-length
         sequences out of the box.
     """
-    from torch.compiler import is_compiling
+    from torch._dynamo import is_compiling
 
     _check_randomness_arg(randomness)
     if not (chunk_size is None or chunk_size > 0):
@@ -391,7 +391,7 @@ def grad(func: Callable, argnums: argnums_t = 0, has_aux: bool = False) -> Calla
     """
     # To avoid cyclical dependency.
     import torch._functorch.eager_transforms as eager_transforms
-    from torch.compiler import is_compiling
+    from torch._dynamo import is_compiling
 
     def wrapper(*args, **kwargs):
         return eager_transforms.grad_impl(func, argnums, has_aux, args, kwargs)
@@ -433,8 +433,8 @@ def grad_and_value(
 
     See :func:`grad` for examples
     """
+    from torch._dynamo import is_compiling
     from torch._functorch import eager_transforms
-    from torch.compiler import is_compiling
 
     def wrapper(*args, **kwargs):
         return eager_transforms.grad_and_value_impl(
