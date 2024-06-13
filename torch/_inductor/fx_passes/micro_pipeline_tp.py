@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import operator
 from dataclasses import dataclass
 from typing import cast, List, Set, Tuple, Union
