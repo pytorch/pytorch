@@ -323,6 +323,10 @@ class IRNode:
     def get_size(self):
         raise NotImplementedError(f"get_size() is not implemented by {type(self)}!")
 
+    @property
+    def shape(self):
+        return self.get_size()
+
     def get_numel(self):
         return sympy_product(self.get_size())
 
@@ -3195,7 +3199,11 @@ class NoneAsConstantBuffer(IRNode):
 class ShapeAsConstantBuffer(IRNode):
     def __init__(self, shape):
         super().__init__()
-        self.shape = shape
+        self._shape = shape
+
+    @property
+    def shape(self):
+        return self._shape
 
     def get_unbacked_symbol_uses(self) -> Set[sympy.Symbol]:
         return free_unbacked_symbols(self.shape)
