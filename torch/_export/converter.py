@@ -615,11 +615,13 @@ class TS2FXGraphConverter:
     def convert_aten_Bool(self, node: torch._C.Node):
         self._convert_as_noop(node)
 
-    # def convert_prim_Enter(self, node: torch._C.Node):
-    #     self._convert_as_noop(node)
+    def convert_prim_Enter(self, node: torch._C.Node):
+        # export treat prim::Enter as noop
+        return
 
-    # def convert_prim_Exit(self, node: torch._C.Node):
-    #     self._convert_as_noop(node)
+    def convert_prim_Exit(self, node: torch._C.Node):
+        # export treat prim::Exit as noop
+        return
 
     def _convert_as_noop(self, node: torch._C.Node):
         # Converts the node as a no-op by mapping its output node as arg[0]

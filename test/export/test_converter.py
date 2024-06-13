@@ -591,16 +591,17 @@ class TestConverter(TestCase):
     def test_context_manager(self):
         class ContextManager:
             def __init__(self):
-                return
+                # TODO: enable this once we supporot prim::SetAttr
                 # self.count = 0
+                return
 
             def __enter__(self):
-                return
                 # self.count += 1
+                return
 
             def __exit__(self, exc_type: Any, exc_value: Any, traceback: Any) -> None:
-                return
                 # self.count -= 1
+                return
 
         class M(torch.nn.Module):
             def forward(self, x, y):
@@ -637,6 +638,7 @@ class TestConverter(TestCase):
 
         inp = (torch.randn(3), 1)
         self._check_equal_ts_ep_converter(Module(), inp)
+
 
 if __name__ == "__main__":
     run_tests()
