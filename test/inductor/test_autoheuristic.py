@@ -57,7 +57,9 @@ class AutoHeuristicTest(TestCase):
     @inductor_config.patch(autoheuristic_mode="COLLECT_DATA")
     def test_autoheuristic(self):
         # test basic functionality of autoheuristic
-        fallback = "fallback"
+        def fallback():
+            return "fallback"
+
         choices = ["a", "b", "c"]
 
         def feedback_fn(choice):
@@ -77,7 +79,7 @@ class AutoHeuristicTest(TestCase):
         autoheuristic = AutoHeuristic(fallback, choices, feedback, context, name)
 
         # when autoheuristic_mode is COLLECT_DATA, we always return fallback
-        self.assertEqual(autoheuristic.get_choice(), fallback)
+        self.assertEqual(autoheuristic.get_choice(), "fallback")
         path = self.get_path_to_autoheuristic_log(name)
         self.assertTrue(os.path.exists(path))
         num_lines = self.count_lines_in_file(path)

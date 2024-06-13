@@ -582,7 +582,9 @@ def run_autoheuristic(
     ori_time = None
     pad_time = None
 
-    fallback = "autotune"
+    def fallback():
+        return "autotune"
+
     choices = ["orig", "pad"]
     feedback = LocalFeedback(feedback_fn)
     context = get_context(mat1, mat2)
@@ -595,12 +597,8 @@ def run_autoheuristic(
         name=name,
     )
     choice = autoheuristic.get_choice()
-    ah_should_pad = None
-    if choice == "orig":
-        ah_should_pad = False
-    elif choice == "pad":
-        ah_should_pad = True
-
+    choice2should_pad = {"orig": False, "pad": True, "autotune": None}
+    ah_should_pad = choice2should_pad.get(choice, None)
     return (ah_should_pad, ori_time, pad_time)
 
 

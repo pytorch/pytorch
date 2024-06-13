@@ -58,7 +58,7 @@ class InconsistentMetadata(Exception):
 class AutoHeuristic:
     def __init__(
         self,
-        fallback: Choice,
+        fallback: Callable[[], Choice],
         choices: List[Choice],
         feedback: Union[LocalFeedback, GlobalFeedback],
         context: AHContext,
@@ -79,7 +79,7 @@ class AutoHeuristic:
                 self.save_data(choice, feedback_val)
 
     def get_choice(self) -> Choice:
-        return self.fallback
+        return self.fallback()
 
     @staticmethod
     def get_device_identifier() -> str:
