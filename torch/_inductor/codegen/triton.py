@@ -879,25 +879,24 @@ class TritonKernelOverrides(TritonOverrides):
                 if arg.target != "load" or V.graph.is_unspec_arg(arg.args[0]):
                     need_where = True
 
-        if nodes and not need_where:
-            with V.kernel.mask_loads(mask, value=other) as new_mask:
-                result = body()
-                result.mask_vars.discard(new_mask)
-                return result
-
-        with V.kernel.mask_loads(mask, value=None) as new_mask:
+        value = None if need_where else other
+        with V.kernel.mask_loads(mask, value=value) as new_mask:
             result = body()
 
-        # Remove once CSEVariables track the dtype
-        if result.bounds.is_bool:
-            other = bool(other)
-        # Take dtype from result to prevent accidental promotion
-        other = V.kernel.cse.generate(
-            V.kernel.compute,
-            f"tl.full({result}.shape, {constant_repr(other)}, {result}.dtype)",
-            bounds=ValueRanges.wrap(other),
-        )
-        ret = ops.where(new_mask, result, other)
+        if need_where:
+            # Remove once CSEVariables track the dtype
+            if result.bounds.is_bool:
+                other = bool(other)
+            # Take dtype from result to prevent accidental promotion
+            other = V.kernel.cse.generate(
+                V.kernel.compute,
+                f"tl.full({result}.shape, {constant_repr(other)}, {result}.dtype)",
+                bounds=ValueRanges.wrap(other),
+            )
+            ret = ops.where(new_mask, result, other)
+        else:
+            ret = result
+
         ret.mask_vars.discard(new_mask)
         return ret
 
