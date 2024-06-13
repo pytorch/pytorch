@@ -1391,7 +1391,7 @@ class GraphModule(torch.nn.Module):
             yield t.unsqueeze(-1).expand(4, 15, 10), False
             yield t.select(-1, 6), False
             # https://github.com/pytorch/pytorch/issues/128649
-            yield t[2:3, 5:9], dynamic == True
+            yield t[2:3, 5:9], dynamic
 
         def f(x):
             return x * 2
