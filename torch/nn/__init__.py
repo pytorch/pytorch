@@ -4,6 +4,8 @@ from torch.nn import (
     functional as functional,
     init as init,
     modules as modules,
+    parallel as parallel,
+    parameter as parameter,
     utils as utils,
 )
 from torch.nn.modules import *  # noqa: F403
