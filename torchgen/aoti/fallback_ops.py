@@ -115,6 +115,8 @@ inductor_fallback_ops = {
     "aten._scaled_dot_product_efficient_attention.default",
     "aten._scaled_dot_product_flash_attention_backward.default",
     "aten._scaled_dot_product_flash_attention.default",
+    "aten._scaled_dot_product_cudnn_attention_backward.default",
+    "aten._scaled_dot_product_cudnn_attention.default",
     "aten._scaled_dot_product_flash_attention_for_cpu_backward.default",
     "aten._scaled_dot_product_flash_attention_for_cpu.default",
     "aten._scaled_mm.default",
