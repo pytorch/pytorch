@@ -102,7 +102,7 @@ from .variables.misc import (
     PythonModuleVariable,
     UnknownVariable,
 )
-from .variables.nn_module import NNModuleVariable, UnspecializedNNModuleVariable
+from .variables.nn_module import NNModuleVariable
 from .variables.tensor import supported_comparison_ops, SymNodeVariable, TensorVariable
 from .variables.user_defined import (
     RemovableHandleVariable,
@@ -415,22 +415,11 @@ def generic_jump(truth_fn: typing.Callable[[object], bool], push: bool):
                 if push:
                     self.push(value)
                 self.jump(inst)
-        elif isinstance(value, UnspecializedNNModuleVariable):
-            mod = value.value
-            if truth_fn(mod):
-                if push:
-                    self.push(value)
-                self.jump(inst)
         elif isinstance(value, UserDefinedObjectVariable):
-            try:
-                x = value.var_getattr(self, "__bool__")
-            except exc.ObservedException:
-                # if __bool__ is missing, trying __len__ to infer a truth value.
+            x = value.var_getattr(self, "__bool__")
+            # if __bool__ is missing, trying __len__ to infer a truth value.
+            if isinstance(x, GetAttrVariable):
                 x = value.var_getattr(self, "__len__")
-            else:
-                if isinstance(x, GetAttrVariable):
-                    # if __bool__ is missing, trying __len__ to infer a truth value.
-                    x = value.var_getattr(self, "__len__")
 
             # __bool__ or __len__ is function
             if isinstance(x, UserMethodVariable):
