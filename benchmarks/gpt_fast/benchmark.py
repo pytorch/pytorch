@@ -162,8 +162,8 @@ def run_gather_gemv():
 @torch._inductor.config.patch(coordinate_descent_tuning=True)
 def run_gemv():
     dtype_memory_bandwidth_map = {
-        torch.int8: "1964",
-        torch.bfloat16: "2272",
+        torch.int8: "990",
+        torch.bfloat16: "1137",
     }
     input_shapes = [1024, 4096, 8192, 16384]
     results = []
@@ -183,7 +183,7 @@ def run_gemv():
                 compiled_fn(W, x)
 
             us_per_iter = do_bench(lambda: compiled_fn(W, x)) * 1000
-            memory_bandwidth += (1e6 / us_per_iter) * 2 * D * D * dtype.itemsize / 1e9
+            memory_bandwidth += (1e6 / us_per_iter) * D * D * dtype.itemsize / 1e9
 
         memory_bandwidth = memory_bandwidth / len(input_shapes)
         dtype_str = str(dtype).replace("torch.", "")
