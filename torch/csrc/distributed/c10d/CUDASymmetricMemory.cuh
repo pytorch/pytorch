@@ -44,6 +44,9 @@ class CUDASymmetricMemory : public SymmetricMemory {
   void put_signal(int dst_rank, int channel) override;
   void wait_signal(int src_rank, int channel) override;
 
+  int get_rank() override;
+  int get_world_size() override;
+
  private:
   std::vector<HandleType> handles_;
   size_t block_size_;

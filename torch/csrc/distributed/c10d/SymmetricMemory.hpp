@@ -57,6 +57,9 @@ class TORCH_API SymmetricMemory : public c10::intrusive_ptr_target {
   virtual void barrier(int channel) = 0;
   virtual void put_signal(int dst_rank, int channel) = 0;
   virtual void wait_signal(int src_rank, int channel) = 0;
+
+  virtual int get_rank() = 0;
+  virtual int get_world_size() = 0;
 };
 
 class SymmetricMemoryAllocator : public c10::intrusive_ptr_target {
@@ -81,9 +84,12 @@ C10_EXPORT void register_allocator(
 C10_EXPORT c10::intrusive_ptr<SymmetricMemoryAllocator> get_allocator(
     c10::DeviceType device_type);
 
-// Assign a store to `group_name` for rendezvous
-// A SymmetricMemoryAllocator backend might establish a more efficient
-// communication channel and only use the store for bootstrapping purpose.
+// Set a store for rendezvousing symmetric allocations on a group of devices
+// identified by `group_name`. The concept of groups is logical; users can
+// utilize predefined groups (e.g., a group of device identified by a
+// ProcessGroup) or create custom ones. Note that a SymmetricMemoryAllocator
+// backends might employ a more efficient communication channel for the actual
+// rendezvous process and only use the store for bootstrapping purposes.
 TORCH_API void set_group_info(
     const std::string& group_name,
     int rank,
@@ -98,7 +104,10 @@ struct GroupInfo {
 
 C10_EXPORT const GroupInfo& get_group_info(const std::string& group_name);
 
-// Allocate a tensor using SymmetricMemoryAllocator::alloc()
+// Identical to empty_strided, but allows symmetric memory access to be
+// established for the allocated tensor via SymmetricMemory::rendezvous(). This
+// function itself is not a collective operation. It invokes
+// SymmetricMemoryAllocator::alloc() for the right device under the hood.
 TORCH_API at::Tensor empty_strided_p2p(
     c10::IntArrayRef size,
     c10::IntArrayRef stride,
@@ -119,12 +128,13 @@ TORCH_API at::Tensor empty_strided_p2p_persistent(
     const std::string& group_name,
     uint64_t alloc_id);
 
-// Performs a rendezvous on tensors allocated via empty_strided_p2p() and
-// empty_strided_p2p_persistent(). The rendezvous is a one-time process, and
-// the mapping between a local memory region and the associated SymmetricMemory
-// object is unique. Subsequent calls to rendezvous() with the same tensor, or
-// tensors allocated with empty_strided_p2p_persistent() using the same
-// alloc_id, will return the same cached SymmetricMemory object.
+// Establishes symmetric memory access on tensors allocated via
+// empty_strided_p2p() and empty_strided_p2p_persistent(). rendezvous() is a
+// one-time process, and the mapping between a local memory region and the
+// associated SymmetricMemory object is unique. Subsequent calls to
+// rendezvous() with the same tensor, or tensors allocated with
+// empty_strided_p2p_persistent() using the same alloc_id, will receive the
+// cached SymmetricMemory object.
 //
 // The function has a collective semantic and must be invoked simultaneously
 // from all rendezvous participants.

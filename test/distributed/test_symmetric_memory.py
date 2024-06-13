@@ -1,6 +1,4 @@
 # Owner(s): ["module: c10d"]
-import os
-from typing import List
 
 import torch
 
@@ -50,9 +48,9 @@ class SymmetricMemoryTest(MultiProcessTestCase):
     def world_size(self) -> int:
         return 2
 
-    @property
-    def ranks(self) -> List[int]:
-        return list(range(self.world_size))
+    # @property
+    # def ranks(self) -> List[int]:
+    #     return list(range(self.world_size))
 
     @property
     def device(self) -> torch.device:
@@ -75,10 +73,10 @@ class SymmetricMemoryTest(MultiProcessTestCase):
         )
 
     def _verify_symmetric_memory(self, symm_mem):
-        self.assertEqual(self.world_size, 2)
+        self.assertEqual(symm_mem.world_size, 2)
 
         buf = symm_mem.get_buffer(0, (64, 64), torch.float32)
-        if self.rank == 0:
+        if symm_mem.rank == 0:
             symm_mem.wait_signal(src_rank=1)
             self.assertTrue(buf.eq(42).all())
         else:
@@ -87,7 +85,7 @@ class SymmetricMemoryTest(MultiProcessTestCase):
 
         symm_mem.barrier()
 
-        if self.rank == 0:
+        if symm_mem.rank == 0:
             symm_mem.barrier()
             self.assertTrue(buf.eq(43).all())
         else:
@@ -100,7 +98,6 @@ class SymmetricMemoryTest(MultiProcessTestCase):
     @skip_if_lt_x_gpu(2)
     def test_empty_strided_p2p(self) -> None:
         self._init_process()
-        print(os.getpid())
 
         shape = (64, 64)
         stride = (64, 1)
