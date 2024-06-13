@@ -177,6 +177,7 @@ TORCH_API std::string getNcclVersion();
 TORCH_API std::string ncclGetErrorWithVersion(ncclResult_t error);
 bool nccl_use_nonblocking();
 int nccl_nonblocking_timeout();
+bool shouldBroadcastNCCLUniqueID(bool isSendRecvSelf);
 
 // Provides additional detail into NCCL error codes based on when these are
 // thrown in the NCCL codebase.
@@ -286,22 +287,12 @@ class NCCLComm {
   }
 #endif
 
-#ifdef NCCL_HAS_COMM_SPLIT
   static std::shared_ptr<NCCLComm> split(
       NCCLComm* source,
       int color_id,
       int rank,
-      ncclConfig_t& config) {
-    auto comm = std::make_shared<NCCLComm>();
-    C10D_NCCL_CHECK(
-        ncclCommSplit(
-            source->ncclComm_, color_id, rank, &(comm->ncclComm_), &config),
-        c10::nullopt);
-    ++source->ncclCommSplitCounter_;
-    comm->rank_ = rank;
-    return comm;
-  }
-#endif
+      ncclConfig_t& config,
+      std::vector<uint64_t>& ranks_ull);
 
 #if defined(IS_NCCLX) && defined(NCCL_COMM_DUMP)
   std::unordered_map<std::string, std::string> ncclCommDump() {
