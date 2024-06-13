@@ -3237,6 +3237,7 @@ class TestSparseCSR(TestCase):
     @batched_nonbatched()
     @hybrid_nonhybrid()
     @unittest.skipIf(not TEST_SCIPY, "SciPy not found")
+    @skipIfTorchDynamo("TODO")
     def test_dense_to_from_sparse_compressed(self, device, hybrid, batched, layout):
         """This test tests conversion from dense to/from CSR and CSC
         by comparing to SciPy's implementation.

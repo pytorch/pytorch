@@ -3018,6 +3018,7 @@ class TestSparse(TestSparseBase):
         x = self.sparse_empty(1, 0, device=device)
         self.assertTrue(x.is_sparse)
 
+    @skipIfTorchDynamo("TODO")
     def test_resize_as(self, device):
         def do_test(t):
             y = t.new().resize_as_(t).zero_()

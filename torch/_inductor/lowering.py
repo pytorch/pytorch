@@ -753,6 +753,7 @@ def squeeze(x, dim=None):
     if dim is None:
         return TensorBox(SqueezeView.create(x.data))
 
+    dim = int(V.graph.sizevars.shape_env.evaluate_expr(sympy.sympify(dim)))
     dim = canonicalize_dims(len(x.get_size()), dim)
     dims = set((dim,) if not isinstance(dim, tuple) else dim)
 

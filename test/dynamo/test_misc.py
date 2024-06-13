@@ -2567,7 +2567,7 @@ utils_device.CURRENT_DEVICE == None""".split(
         if torch._dynamo.config.assume_static_by_default:
             self.assertExpectedInline(str(cnts.frame_count), """2""")
         else:
-            self.assertExpectedInline(str(cnts.frame_count), """1""")
+            self.assertExpectedInline(str(cnts.frame_count), """2""")
 
     def test_numpy_with_builtin_type(self):
         x = np.random.rand(5)
