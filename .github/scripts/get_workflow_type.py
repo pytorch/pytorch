@@ -6,9 +6,9 @@ from github import Auth, Github
 from github.Issue import Issue
 
 
-WORKFLOW_TYPE_LABEL = "label"
-WORKFLOW_TYPE_RG = "rg"
-WORKFLOW_TYPE_BOTH = "both"
+WORKFLOW_LABEL_META = ""  # use meta runners
+WORKFLOW_LABEL_LF = "lf."  # use runners from the linux foundation
+LABEL_TYPE_KEY = "label_type"
 
 
 def parse_args() -> Any:
@@ -49,47 +49,35 @@ def is_exception_branch(branch: str) -> bool:
 
 
 def get_workflow_type(issue: Issue, username: str) -> str:
-    user_list = issue.get_comments()[0].body.split("\r\n")
     try:
-        run_option = issue.get_comments()[1].body.split("\r\n")[0]
-    except Exception as e:
-        run_option = "single"
+        user_list = issue.get_comments()[0].body.split()
 
-    if user_list[0] == "!":
-        # Use old runners for everyone
-        return WORKFLOW_TYPE_LABEL
-    elif user_list[1] == "*":
-        if run_option == WORKFLOW_TYPE_BOTH:
-            # Use ARC runners and old runners for everyone
-            return WORKFLOW_TYPE_BOTH
+        if user_list[0] == "!":
+            return WORKFLOW_LABEL_META
+        elif user_list[0] == "*":
+            return WORKFLOW_LABEL_LF
+        elif username in user_list:
+            return WORKFLOW_LABEL_LF
         else:
-            # Use only ARC runners for everyone
-            return WORKFLOW_TYPE_RG
-    elif username in user_list:
-        if run_option == WORKFLOW_TYPE_BOTH:
-            # Use ARC runners and old runners for a specific user
-            return WORKFLOW_TYPE_BOTH
-        else:
-            # Use only ARC runners for a specific user
-            return WORKFLOW_TYPE_RG
-    else:
-        # Use old runners by default
-        return WORKFLOW_TYPE_LABEL
+            return WORKFLOW_LABEL_META
+    except Exception as e:
+        return WORKFLOW_LABEL_META
 
 
 def main() -> None:
     args = parse_args()
 
     if is_exception_branch(args.github_branch):
-        output = {"workflow_type": WORKFLOW_TYPE_LABEL}
+        output = {LABEL_TYPE_KEY: WORKFLOW_LABEL_META}
     else:
         try:
             gh = get_gh_client(args.github_token)
+            # The default issue we use - https://github.com/pytorch/test-infra/issues/5132
             issue = get_issue(gh, args.github_repo, args.github_issue)
 
-            output = {"workflow_type": get_workflow_type(issue, args.github_user)}
+            output = {LABEL_TYPE_KEY: get_workflow_type(issue, args.github_user)}
         except Exception as e:
-            output = {"workflow_type": WORKFLOW_TYPE_LABEL}
+            output = {LABEL_TYPE_KEY: WORKFLOW_LABEL_META}
 
     json_output = json.dumps(output)
     print(json_output)
