@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import functools
 from inspect import signature
 from .common_op_utils import _basic_validation

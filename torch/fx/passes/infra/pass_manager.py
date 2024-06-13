@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import inspect
 import logging
 from queue import Queue
