@@ -49,6 +49,7 @@ from ..utils import (
 
 from ..virtualized import NullKernelHandler, ops, OpsValue, V
 from .common import (
+    BackendFeature,
     BracesBuffer,
     CppWrapperKernelArgs,
     CSE,
@@ -3148,25 +3149,21 @@ class CppKernelProxy(CppKernel):
                             value,
                         )
                 elif _node.target == "to_dtype" and _node.args[-1] in DTYPE_LOWP_FP:
-                    if all(user.target == "store" for user in _node.users):
-                        continue
-                    (ops, _, _) = _node.args
+                    (ops, x, _) = _node.args
                     # The legalization always loads the BF16/FP16 tensor as FP32 for computation
                     # and converts back to BF16/FP16 after the computation.
                     # Hence, there should be no computation w/ BF16/FP16.
-                    # Therefore, we should insert a to_dtype to torch.float after it. In case, the
-                    # inserted to_dtype is redundant, it will be eliminated by eliminate_to_dtype
-                    # later.
-                    with sub_graph.inserting_after(_node):
-                        to_type_node = sub_graph.call_method(
-                            "to_dtype", (ops, _node, torch.float)
-                        )
-                        to_type_node_args = to_type_node.args
-                        _node.replace_all_uses_with(
-                            to_type_node, lambda user: user.target != "store"
-                        )
-                        to_type_node.args = to_type_node_args
-                        to_lowp_fp_legalized_nodes.append(to_type_node)
+                    # Therefore, we update the to_dtype by replacing the bf16/fp16 dtype with fp32.
+                    # Save the legalized to_dtype node for the elimination(eliminate_to_dtype step):
+                    #  1) Eliminate the redundant to_dtype node if we have a pattern as follows:
+                    #     graph():
+                    #       %lowp_fp_legalized = call_method[target=to_dtype](args = (%ops, %input, torch.float))
+                    #       %to_dtype2 = call_method[target=to_dtype](args = (%ops, %lowp_fp_legalized, torch.bfloat16/float16))
+                    # Regarding the first to_dtype, it is redundant because
+                    # the second to_type also converts to the torch.bfloat16/torch.float16.
+                    # Hence, we remove the first to_type.
+                    to_lowp_fp_legalized_nodes.append(_node)
+                    _node.args = (ops, x, torch.float)
                 else:
                     pass
 
@@ -3496,10 +3493,21 @@ class CppScheduling(BaseScheduling):
     # https://github.com/python/cpython/commit/a285af7e626d1b81cf09f8b2bf7656f100bc1237
     # We set a conservative threshold here.
     MAX_FUSED_KERNEL_ARGS_NUM = 500
+    backend_features = dict.fromkeys(
+        [
+            BackendFeature.INPLACE_BUFFERS,
+        ]
+    )
+
+    @classmethod
+    def get_backend_features(cls, device: torch.device):
+        return cls.backend_features
 
     def __init__(self, scheduler):
+        super().__init__()
         self.scheduler = scheduler
-        self.reset_kernel_group()
+        if scheduler:
+            self.reset_kernel_group()
         self._ready_to_flush = False
 
     def _set_flush_status(self, status: bool):

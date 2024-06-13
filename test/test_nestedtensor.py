@@ -3730,7 +3730,8 @@ class TestNestedTensorSubclass(TestCase):
 
     def test_softmax(self, device):
         nt = random_nt_from_dims(
-            [3, None, 5], device=device, dtype=torch.float32, layout=torch.jagged)
+            [3, None, 5], device=device, dtype=torch.float32, layout=torch.jagged
+        )
 
         # operate on dim=2
         output = nt.softmax(dim=2)
