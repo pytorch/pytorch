@@ -8,22 +8,20 @@ clone_executorch() {
   EXECUTORCH_PINNED_COMMIT=$(get_pinned_commit executorch)
 
   # Clone the Executorch
-  git clone https://github.com/pytorch/executorch.git
+  as_jenkins git clone https://github.com/pytorch/executorch.git
 
   # and fetch the target commit
   pushd executorch
-  git checkout "${EXECUTORCH_PINNED_COMMIT}"
-  git submodule update --init
+  as_jenkins git checkout "${EXECUTORCH_PINNED_COMMIT}"
+  as_jenkins git submodule update --init
   popd
-
-  chown -R jenkins executorch
 }
 
 install_buck2() {
   pushd executorch/.ci/docker
 
   BUCK2_VERSION=$(cat ci_commit_pins/buck2.txt)
-  source common/install_buck.sh
+  as_jenkins bash common/install_buck.sh
 
   popd
 }
@@ -44,13 +42,14 @@ install_pip_dependencies() {
 
 setup_executorch() {
   pushd executorch
-  source .ci/scripts/utils.sh
+  # Setup swiftshader and Vulkan SDK which are required to build the Vulkan delegate
+  as_jenkins bash .ci/scripts/setup-vulkan-linux-deps.sh
 
-  install_flatc_from_source
-  pip_install .
+  export PYTHON_EXECUTABLE=python
+  export EXECUTORCH_BUILD_PYBIND=ON
+  export CMAKE_ARGS="-DEXECUTORCH_BUILD_XNNPACK=ON -DEXECUTORCH_BUILD_KERNELS_QUANTIZED=ON"
 
-  # Make sure that all the newly generate files are owned by Jenkins
-  chown -R jenkins .
+  as_jenkins .ci/scripts/setup-linux.sh cmake
   popd
 }
 

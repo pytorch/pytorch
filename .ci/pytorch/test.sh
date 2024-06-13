@@ -1180,8 +1180,6 @@ test_executorch() {
   source test/run_oss_cpp_tests.sh
 
   echo "Run ExecuTorch regression tests for some models"
-  # NB: This is a sample model, more can be added here
-  export PYTHON_EXECUTABLE=python
   # TODO(huydhn): Add more coverage here using ExecuTorch's gather models script
   # shellcheck disable=SC1091
   source .ci/scripts/test.sh mv3 cmake xnnpack-quantization-delegation ''
