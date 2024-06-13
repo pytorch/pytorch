@@ -276,11 +276,11 @@ def simplify_index_in_vec_range(index: sympy.Expr, var: sympy.Expr, vec_length: 
 
     original_index = index
 
-    div = sympy.Wild("divisor")
+    div = sympy.Wild("divisor", integer=True)
     if index.has(FloorDiv):
         index = index.replace(FloorDiv(var, div), visit_indexing_div)
 
-    mod = sympy.Wild("modulus")
+    mod = sympy.Wild("modulus", integer=True)
     if index.has(ModularIndexing):
         index = index.replace(ModularIndexing(var, div, mod), visit_modular_indexing)
 
@@ -2850,9 +2850,8 @@ class CppVecKernelChecker(CppVecKernel):
         return self.simd_vec
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        assert self._orig_wrapper_code is not None
         # Restore the wrapper_code
-        V.graph.wrapper_code = self._orig_wrapper_code
+        V.graph.wrapper_code = self._orig_wrapper_code  # type: ignore[assignment]
         self.exit_stack.__exit__(exc_type, exc_val, exc_tb)
 
     def __enter__(self):

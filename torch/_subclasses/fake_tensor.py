@@ -1728,7 +1728,7 @@ class FakeTensorMode(TorchDispatchMode):
         for run_impl_check, op_impl in op_implementations_checks:
             if run_impl_check(func):
                 op_impl_out = op_impl(self, func, *args, **kwargs)
-                if op_impl_out != NotImplemented:
+                if op_impl_out is not NotImplemented:
                     return maybe_propagate_real_tensors(op_impl_out)
 
         def maybe_run_unsafe_fallback(error=None):

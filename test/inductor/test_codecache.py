@@ -30,7 +30,6 @@ from torch.testing._internal.common_device_type import largeTensorTest
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
-    skipIfRocm,
 )
 from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
@@ -195,7 +194,7 @@ class TestFxGraphCache(TestCase):
                 num_put += 1
 
         cache_module = (
-            "triton.runtime.fb_memcache.FbMemcacheRemoteFxGraphCacheBackend"
+            "triton.fb.fb_memcache.FbMemcacheRemoteFxGraphCacheBackend"
             if config.is_fbcode()
             else "torch._inductor.remote_cache.RedisRemoteCacheBackend"
         )
@@ -715,7 +714,6 @@ class TestFxGraphCacheHashing(TestCase):
             FxGraphCachePickler.dumps(details3),
         )
 
-    @skipIfRocm
     @unittest.skipIf(not HAS_CUDA, "Requires CUDA")
     @unittest.skipIf(config.is_fbcode(), "fbcode requires different CUTLASS path setup")
     def test_cuda_compile_command(self):

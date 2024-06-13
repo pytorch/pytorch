@@ -256,6 +256,38 @@ class MiscTests(torch._inductor.test_case.TestCase):
             """Graph break due to unsupported builtin mylib.PyCapsule.foobar. This function is either a Python builtin (e.g. _warnings.warn) or a third-party C/C++ Python extension (perhaps created with pybind). If it is a Python builtin, please file an issue on GitHub so the PyTorch team can add support for it and see the next case for a workaround. If it is a third-party C/C++ Python extension, please either wrap it into a PyTorch-understood custom operator (see https://pytorch.org/docs/main/notes/custom_operators.html for more details) or, if it is traceable, use torch.compiler.allow_in_graph.""",
         )
 
+        cpp_source = """
+        #include <torch/extension.h>
+        at::Tensor baz(const at::Tensor& x) {
+            return x.clone();
+        }
+        """
+        module2 = torch.utils.cpp_extension.load_inline(
+            name="mylib2",
+            cpp_sources=cpp_source,
+            functions="baz",
+            verbose=True,
+        )
+
+        torch._dynamo.reset()
+
+        # Test that each warning only happens once
+        @torch.compile(backend="eager")
+        def f(x):
+            module2.baz(x)
+            module.foobar(x)
+            module.foobar(x)
+            module2.baz(x)
+            module.foobar(x)
+            module2.baz(x)
+            return x.clone()
+
+        with warnings.catch_warnings(record=True) as ws:
+            warnings.simplefilter("always")
+            f(x)
+            f(x)
+        self.assertEqual(len(ws), 2)
+
     def test_callpacked(self):
         def call_packed(args):
             a, b, c = args
@@ -9309,7 +9341,7 @@ ShapeEnv not equal: field values don't match:
   >  Left: {0: 0, 1: 1, 2: s1, 3: s0}
   > Right: {0: 0, 1: 1}
 ==> var_to_range: values don't match.
-  >  Left: {s0: ValueRanges(lower=2, upper=9223372036854775806, is_bool=False), s1: ValueRanges(lower=2, upper=9223372036854775806, is_bool=False)}
+  >  Left: {s0: VR[2, 9223372036854775806], s1: VR[2, 9223372036854775806]}
   > Right: {}
 ==> var_to_sources: values don't match.
   >  Left: {s0: [TensorPropertySource(base=ConstantSource(source_name='x'), prop=<TensorProperty.SIZE: 0>, idx=0)], s1: [TensorPropertySource(base=ConstantSource(source_name='x'), prop=<TensorProperty.SIZE: 0>, idx=1)]}
@@ -9343,7 +9375,7 @@ ShapeEnv not equal: field values don't match:
   >  Left: 2
   > Right: 0
 ==> var_to_range: values don't match.
-  >  Left: {u0: ValueRanges(lower=-9223372036854775808, upper=9223372036854775807, is_bool=False), u1: ValueRanges(lower=0, upper=1, is_bool=False), zuf0: ValueRanges(lower=-oo, upper=oo, is_bool=False)}
+  >  Left: {u0: VR[-9223372036854775808, 9223372036854775807], u1: VR[0, 1], zuf0: VR[-oo, oo]}
   > Right: {}
 """,
         )
@@ -9420,8 +9452,8 @@ ShapeEnv not equal: field values don't match:
   >  Left: {s0: 3}
   > Right: {}
 ==> var_to_range: values don't match.
-  >  Left: {s0: ValueRanges(lower=3, upper=3, is_bool=False), s1: ValueRanges(lower=2, upper=9223372036854775806, is_bool=False)}
-  > Right: {s0: ValueRanges(lower=2, upper=9223372036854775806, is_bool=False), s1: ValueRanges(lower=2, upper=9223372036854775806, is_bool=False)}
+  >  Left: {s0: VR[3, 3], s1: VR[2, 9223372036854775806]}
+  > Right: {s0: VR[2, 9223372036854775806], s1: VR[2, 9223372036854775806]}
 """,
         )
         self._replay_and_check(main)
@@ -9458,8 +9490,8 @@ ShapeEnv not equal: field values don't match:
   >  Left: {_assert, ge, x_size_0_, x_size_1_, x_storage_offset, x_stride_0_, x_stride_1_}
   > Right: {x_size_0_, x_size_1_, x_storage_offset, x_stride_0_, x_stride_1_}
 ==> var_to_range: values don't match.
-  >  Left: {s0: ValueRanges(lower=3, upper=9223372036854775806, is_bool=False), s1: ValueRanges(lower=2, upper=9223372036854775806, is_bool=False)}
-  > Right: {s0: ValueRanges(lower=2, upper=9223372036854775806, is_bool=False), s1: ValueRanges(lower=2, upper=9223372036854775806, is_bool=False)}
+  >  Left: {s0: VR[3, 9223372036854775806], s1: VR[2, 9223372036854775806]}
+  > Right: {s0: VR[2, 9223372036854775806], s1: VR[2, 9223372036854775806]}
 """,
         )
         self._replay_and_check(main)
@@ -9484,10 +9516,7 @@ ShapeEnv not equal: field values don't match:
 ShapeEnv not equal: field values don't match:
 
 ==> deferred_runtime_asserts: values don't match.
-  >  Left: {u0: [Eq(Mod(u0, 3), 0)]}
-  > Right: {}
-==> divisible: values don't match.
-  >  Left: {Mod(u0, 3)}
+  >  Left: {u0: [Eq(PythonMod(u0, 3), 0)]}
   > Right: {}
 ==> name_to_node: values don't match.
   >  Left: {_assert, eq, mod, u0}
