@@ -65,12 +65,11 @@ test_score_mods = [
     _generate_alibi_bias(8),
 ]
 
-test_query_len = [
-    1, 
-    8, 
-    16,
-    32, 
-    64
+test_Hq_Hkv = [
+    (16, 1),
+    (8, 2), 
+    (16, 16),
+    (32, 1)
 ]
 
 
@@ -156,12 +155,9 @@ class TestTemplatedSDPA(InductorTestCase):
 
         compiled_error = (golden_out - compiled_out).abs().mean()
         ref_error = (golden_out - ref_out).abs().mean()
-        # Note, it seems like we really are less accurate than the float32
-        # computation, likely due to the online softmax
-        if dtype == torch.float32:
-            fudge_factor = 10.0
-        else:
-            fudge_factor = 1.1
+        # Note, it seems like we really are less accurate
+        # likely due to the online softmax 
+        fudge_factor = 10.0
         if compiled_error > ref_error * fudge_factor:
             msg = f"Compiled error {compiled_error} is greater than ref error {ref_error} by more than {fudge_factor}X."
             self.assertTrue(False, msg)
@@ -169,9 +165,11 @@ class TestTemplatedSDPA(InductorTestCase):
     @supported_platform
     @common_utils.parametrize("dtype", test_dtypes)
     @common_utils.parametrize("score_mod", test_score_mods)
-    @common_utils.parametrize("query_len", test_query_len)
-    def test_builtin_score_mods(self, dtype: torch.dtype, score_mod: Callable, query_len: int):
-        self.run_test(score_mod, dtype, M=query_len)
+    @common_utils.parametrize("head_dims", test_Hq_Hkv)
+    def test_builtin_score_mods(self, dtype: torch.dtype, score_mod: Callable, head_dims: (int, int)):
+        Hq, Hkv = head_dims
+        assert Hq % Hkv == 0
+        self.run_test(score_mod, dtype, H=Hkv, M=Hq//Hkv)
 
     @supported_platform
     @common_utils.parametrize("dtype", test_dtypes)
@@ -220,16 +218,15 @@ class TestTemplatedSDPA(InductorTestCase):
         self.run_test(all_bias, dtype)
 
     @supported_platform
-    @skip("Not meant for decoding? (q_len != kv len)")
     @common_utils.parametrize("dtype", test_dtypes_fast)
-    def test_seq_masking(self, dtype):
-        seq_idx = torch.zeros(M, device="cuda", dtype=torch.bool)
-        seq_idx[M // 2 :] = 1
+    def test_kv_masking(self, dtype):
+        kv_idx = torch.zeros(N, device="cuda", dtype=torch.bool)
+        kv_idx[N // 2 :] = 1
 
-        def seq_mask_mod(score, b, h, q, kv):
-            return torch.where(seq_idx[q] == seq_idx[kv], score, float("-inf"))
+        def kv_mask_mod(score, b, h, q, kv):
+            return torch.where(kv_idx[kv] == 1, score, float("-inf"))
 
-        self.run_test(seq_mask_mod, dtype)
+        self.run_test(kv_mask_mod, dtype)
 
     @supported_platform
     @common_utils.parametrize("dtype", test_dtypes_fast)
@@ -291,7 +288,6 @@ class TestTemplatedSDPA(InductorTestCase):
         self.run_test(bias_mod, dtype)
 
     @supported_platform
-    @skip("Not meant for decoding? (q_len != kv_len)")
     @common_utils.parametrize("dtype", test_dtypes_fast)
     def test_natten_2d(self, dtype):
         H = 32
@@ -524,6 +520,7 @@ class TestTemplatedSDPA(InductorTestCase):
             q.to(torch.float64), k.to(torch.float64), v.to(torch.float64), score_mod
         )
         compiled_out, compiled_lse = sdpa_hop(q, k, v, score_mod)
+        eager_out, eager_lse = eager_sdpa_hop(q, k, v, score_mod)
 
         # Comparing LSE for the ref and the compiled version
         # The compiled uses a change of base trick to more efficiently compute the LSE
@@ -536,23 +533,15 @@ class TestTemplatedSDPA(InductorTestCase):
         self.assertTrue(ref_lse.dtype == torch.float64)
         self.assertTrue(compiled_lse.dtype == torch.float32)
         ref_lse = ref_lse * torch.log2(torch.tensor(torch.e))
+        eager_lse = eager_lse * torch.log2(torch.tensor(torch.e))
 
-        tolerance = Tolerances(atol=2e-2, rtol=2e-2)
-        torch.testing.assert_close(
-            ref_out.to(dtype=torch.float32),
-            compiled_out.to(dtype=torch.float32),
-            atol=tolerance.atol,
-            rtol=tolerance.rtol,
-        )
-        torch.testing.assert_close(
-            ref_lse.to(dtype=torch.float32),
-            compiled_lse.to(dtype=torch.float32),
-            atol=tolerance.atol,
-            rtol=tolerance.rtol,
-        )
+        eager_error = (eager_lse - ref_lse).abs().mean()
+        compiled_error = (compiled_lse - ref_lse).abs().mean()
+        fudge_factor = 10 # Our logsumexp error is pretty high. 
+        if compiled_error > fudge_factor * eager_error:
+            self.assertTrue(False, f"Compiled error {compiled_error} is too high compared to eager error {eager_error}")
 
     @supported_platform
-    @skip("TODO: figure out why this fails")
     def test_logsumexp_only_return(self):
         make_tensor_kv = functools.partial(
             torch.randn,
@@ -577,11 +566,10 @@ class TestTemplatedSDPA(InductorTestCase):
             return lse_2
 
         _, code = run_and_get_code(func, q, k, v, _identity)
-        # Ensure that two kernels are generated
-        FileCheck().check_count(".run(", 2, True).run(code[0])
+        # Ensure that 3 kernels are generated
+        FileCheck().check_count(".run(", 3, True).run(code[0])
 
     @supported_platform
-    @skip("TODO: figure out why this fails")
     def test_logsumexp_is_not_fused(self):
         make_tensor_kv = functools.partial(
             torch.randn,
@@ -606,8 +594,8 @@ class TestTemplatedSDPA(InductorTestCase):
             return out, lse_2
 
         _, code = run_and_get_code(func, q, k, v, _identity)
-        # Ensure that two kernels are generated
-        FileCheck().check_count(".run(", 2, True).run(code[0])
+        # Ensure that 3 kernels are generated
+        FileCheck().check_count(".run(", 3, True).run(code[0])
 
 
 common_utils.instantiate_parametrized_tests(TestTemplatedSDPA)

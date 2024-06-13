@@ -111,13 +111,13 @@ def run_single_experiment(config: ExperimentConfig, dynamic=False) -> Experiment
     device = torch.device("cuda")
     batch_size, num_heads, q_seq_len, head_dim, kv_seq_len = config.shape
     query, key, value = generate_inputs(
-        batch_size,
-        num_heads,
-        q_seq_len,
-        kv_seq_len,
-        head_dim,
-        config.dtype,
-        device,
+        batch_size = batch_size,
+        num_heads = num_heads,
+        q_sequence_length = q_seq_len,
+        kv_sequence_length = kv_seq_len,
+        head_dim = head_dim,
+        dtype = config.dtype,
+        device = device,
         requires_grad=config.calculate_bwd_time,
     )
 
@@ -207,8 +207,8 @@ def get_average_speedups(results: List[Experiment], type: str):
     gflops = [calculate_gflops(r.config, r.results) for r in results]
 
     # Find indices of max and min speedups
-    max_speedup_index = np.argmax(speedups)
-    min_speedup_index = np.argmin(speedups)
+    max_speedup_index = np.nanargmax(speedups)
+    min_speedup_index = np.nanargmin(speedups)
 
     # Get the config dictionaries
     max_config_dict = results[max_speedup_index].config.asdict()
@@ -226,7 +226,7 @@ def get_average_speedups(results: List[Experiment], type: str):
     table_data = [
         {
             "Type": "Average",
-            "Speedup": np.mean(speedups),
+            "Speedup": np.nanmean(speedups),
             **dict.fromkeys(max_config_dict),
         },
         {"Type": "Max", "Speedup": speedups[max_speedup_index], "BandWidth (TB/s)":  bw[max_speedup_index], "GFlops/s": gflops[max_speedup_index],  **max_config_dict},
@@ -311,7 +311,8 @@ def generate_experiment_configs(calculate_bwd: bool, baseline_performance) -> Li
     ]
     n_heads = [
         (16, 1), 
-        (16, 2)
+        (16, 2),
+        (16, 16)
     ] # (Hq, Hkv)
     # head_dims = [64, 128, 256]
     head_dims = [128]

@@ -144,7 +144,7 @@ flex_decoding_template = TritonTemplate(
     l_i = tl.zeros([BLOCK_M], dtype=tl.float32)
     acc = tl.zeros([BLOCK_M, BLOCK_DMODEL], dtype=tl.float32)
 
-    q = tl.load(Q_block_ptr)
+    q = tl.load(Q_block_ptr, boundary_check=(0, 1))
     if SCORE_MOD_IS_LINEAR:
         qk_scale *= 1.44269504
     q = (q * qk_scale).to(MATMUL_PRECISION)
@@ -154,8 +154,8 @@ flex_decoding_template = TritonTemplate(
     for start_n in range(lo, hi, BLOCK_N):
         start_n = tl.multiple_of(start_n, BLOCK_N)
         # -- load k, v --
-        k = tl.load(K_block_ptr).to(MATMUL_PRECISION)
-        v = tl.load(V_block_ptr)
+        k = tl.load(K_block_ptr, boundary_check=(0, 1)).to(MATMUL_PRECISION)
+        v = tl.load(V_block_ptr, boundary_check=(0, 1))
         # -- compute qk ---
         qk = tl.zeros([BLOCK_M, BLOCK_N], dtype=tl.float32)
         if BLOCK_M >= 16: 
@@ -269,6 +269,10 @@ flex_decoding_reduction_template = TritonTemplate(
     stride_acct = {{stride("ACC", 2)}}
     stride_accm = {{stride("ACC", 3)}}
     stride_accd = {{stride("ACC", 4)}}
+    # Define LSE strides
+    stride_lsez = {{stride("LSE", 0)}}
+    stride_lseh = {{stride("LSE", 1)}}
+    stride_lsem = {{stride("LSE", 2)}}
 
     Q_CTX = {{size("ACC", 3)}} # M
     MODEL_D = {{size("ACC", 4)}} # D 
@@ -306,6 +310,16 @@ flex_decoding_reduction_template = TritonTemplate(
         order=(2, 1, 0)
     )
 
+    lse_offset = off_hz * stride_lseh
+    LSE_block_ptr = tl.make_block_ptr(
+        base=LSE + lse_offset,
+        shape=(Q_CTX,),
+        strides=(stride_lsem,),
+        offsets=(off_m,),
+        block_shape=(BLOCK_M,),
+        order=(0,)
+    )
+
     offs_m = tl.arange(0, BLOCK_M) + off_m
 
     # Reduce over T for M, L and ACC
@@ -324,9 +338,8 @@ flex_decoding_reduction_template = TritonTemplate(
     l = l * alpha
     g_l = tl.sum(l, 0)
     if OUTPUT_LOGSUMEXP:
-        l_ptrs = LSE + off_hz * Q_CTX + offs_m
         lse = g_m + tl.math.log2(g_l)
-        tl.store(l_ptrs, lse)
+        tl.store(LSE_block_ptr, lse)
     
     # load acc and calculate global output
     offs_d = off_d + tl.arange(0, BLOCK_D) 
