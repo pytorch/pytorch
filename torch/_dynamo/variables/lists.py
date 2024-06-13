@@ -209,7 +209,6 @@ class RangeVariable(BaseListVariable):
 
         step_is_negative = 0
 
-        # Convert step to an integer; raise for zero step.
         if slice.step is None:
             step = 1
             step_is_negative = False
