@@ -97,19 +97,14 @@ def do_bench_gpu(
 
     cache = torch.empty(int(get_cache_size() // 4), dtype=torch.int, device="cuda")
 
-    warmup_iters = 1
-    repeat_iters = 20
-
+    benchmarking_iters = 20
     event_pairs = [
         (
             torch.cuda.Event(enable_timing=True),
             torch.cuda.Event(enable_timing=True),
         )
-        for _ in range(repeat_iters)
+        for _ in range(benchmarking_iters)
     ]
-
-    for _ in range(warmup_iters):
-        fn()
 
     for start_event, end_event in event_pairs:
         cache.zero_()

@@ -690,7 +690,8 @@ class GroupedTritonBenchmarkRequest:
     ) -> Dict[TritonTemplateCaller, float]:
         timings: Dict[TritonTemplateCaller, float] = {}
 
-        for choice, _callable in choice_to_callable.items():
+        to_estimate = []
+        for choice, callable in choice_to_callable.items():
             # backout of invalid choices. this covers choices
             # that crash during ptx generation, or choices that
             # are not supported on the current device.
@@ -701,9 +702,12 @@ class GroupedTritonBenchmarkRequest:
             # initialize the choices before benchmarking, and
             # backout of choices that crash during compile time
             try:
-                _ = _callable()
+                callable()
             except Exception:
                 timings[choice] = float("inf")
+                continue
+            
+            to_estimate.append(choice)
         
         @functools.lru_cache(None)
         def get_cache_size():
@@ -713,80 +717,56 @@ class GroupedTritonBenchmarkRequest:
 
         cache = torch.empty(int(get_cache_size() // 4), dtype=torch.int, device="cuda")
 
-        # estimate the runtime of each choice
-        estimations = {}
-        estimation_iterations = 5
-        for choice, _callable in choice_to_callable.items():
-            if choice in timings:
-                continue
+        def interleaved_timing(choices, iters):
+            choice_event_pairs = {
+                choice: [
+                    (
+                        torch.cuda.Event(enable_timing=True),
+                        torch.cuda.Event(enable_timing=True),
+                    )
+                    for _ in range(iters)
+                ]
+                for choice in choices
+            }
 
-            event_pairs = [
-                (
-                    torch.cuda.Event(enable_timing=True),
-                    torch.cuda.Event(enable_timing=True),
-                )
-                for _ in range(estimation_iterations)
-            ]
-
-            for idx in range(5):
-                cache.zero_()
-                event_pairs[idx][0].record()
-                _ = _callable()
-                event_pairs[idx][1].record()
+            for iter in iters:
+                for choice, event_pairs in choice_event_pairs.items():
+                    start_event, end_event = event_pairs[iter]
+                    callable = choice_to_callable[choice]
+                    cache.zero_()
+                    start_event.record()
+                    callable()
+                    end_event.record()
             torch.cuda.synchronize()
 
-            estimate = min(
-                [
-                    start_event.elapsed_time(end_event)
-                    for start_event, end_event in event_pairs
-                ]
-            )
-            estimations[choice] = estimate
-
-        # backout of choices that are more than 2.5% slower than the
-        # fastest choice available. testing shows that this is a large
-        # enough margin of error to prevent performance regression
-        target = min(target, estimations[min(estimations, key=estimations.__getitem__)])
-        for choice, estimate in estimations.items():
-            if estimate * 0.975 > target:
-                timings[choice] = estimate
-
-        # benchmark the choices. run 5ms of warmup and 15ms of benchmarking.
-        # testing shows that this reduction in warmup/benchmarking iterations
-        # does not cause performance regression
-        warmup_iters = 1
-        repeat_iters = 20
-        for choice, _callable in choice_to_callable.items():
-            if choice in timings:
-                continue
-
-            event_pairs = [
-                (
-                    torch.cuda.Event(enable_timing=True),
-                    torch.cuda.Event(enable_timing=True),
+            return {
+                choice: min(
+                    [
+                        start_event.elapsed_time(end_event)
+                        for start_event, end_event in event_pairs
+                    ]
                 )
-                for _ in range(repeat_iters)
-            ]
+                for choice, event_pairs in choice_event_pairs.items()
+            }
 
-            for _ in range(warmup_iters):
-                _ = _callable()
+        estimation_iters = 5
+        estimates = interleaved_timing(to_estimate, estimation_iters)
+        timings.update(estimates)
 
-            for idx in range(repeat_iters):
-                cache.zero_()
-                event_pairs[idx][0].record()
-                _ = _callable()
-                event_pairs[idx][1].record()
-            torch.cuda.synchronize()
+        to_benchmark = []
+        target = min(target, estimates[min(estimates, key=estimates.__getitem__)])
+        for choice, estimate in estimates.items():
+            if estimate * 0.975 <= target:
+                to_benchmark.append(choice)
+        
+        benchmarking_iters = 20
+        benchmarks = interleaved_timing(to_benchmark, benchmarking_iters)
+        timings.update(benchmarks)
 
-            timing = min(
-                [
-                    start_event.elapsed_time(end_event)
-                    for start_event, end_event in event_pairs
-                ]
-            )
-            timings[choice] = timing
+        del cache
 
         return timings
+
 
     def benchmark(
         self,
