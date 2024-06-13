@@ -132,9 +132,9 @@ class NamedMemberAccessor:
         if not name:
             return self.module
 
-        try:
+        if name in self.memo:
             return self.memo[name]
-        except KeyError:
+        else:
             prefix, dot, attr = name.rpartition(".")
             if dot:
                 module = self.get_submodule(prefix)

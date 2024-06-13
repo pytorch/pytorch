@@ -274,6 +274,12 @@ manual_torch_name_rule_map = {
     "torch._functorch.eager_transforms.safe_unflatten": UserFunctionVariable,
     # functorch/hessian
     "torch._functorch.eager_transforms.hessian": FunctorchHigherOrderVariable,
+    # functional_call
+    "torch._functorch.functional_call.functional_call": FunctorchHigherOrderVariable,
+    "torch._functorch.functional_call.construct_stacked_leaf": UserFunctionVariable,
+    "torch._functorch.functional_call.stack_module_state": UserFunctionVariable,
+    "torch.nn.utils.stateless._untie_named_tensors_map": UserFunctionVariable,
+    "torch.nn.utils.stateless._groupby_tensor": TorchInGraphFunctionVariable,
     # functorch/deprecated
     "torch._functorch.deprecated.jvp": UserFunctionVariable,
     "torch._functorch.deprecated.hessian": UserFunctionVariable,
@@ -2256,9 +2262,9 @@ torch_non_c_binding_in_graph_functions = dict.fromkeys(
         "torch._functorch.eager_transforms.functionalize",
         "torch._functorch.eager_transforms.lazy_dynamo_disable",
         "torch._functorch.eager_transforms.noop",
-        "torch._functorch.functional_call.construct_stacked_leaf",
-        "torch._functorch.functional_call.functional_call",
-        "torch._functorch.functional_call.stack_module_state",
+        # "torch._functorch.functional_call.construct_stacked_leaf",
+        # "torch._functorch.functional_call.functional_call",
+        # "torch._functorch.functional_call.stack_module_state",
         "torch._functorch.pyfunctorch.coerce_cinterpreter",
         "torch._functorch.pyfunctorch.dispatch_functorch",
         "torch._functorch.pyfunctorch.nested",

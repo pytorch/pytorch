@@ -3596,6 +3596,71 @@ class GraphModule(torch.nn.Module):
             )
             self.assertEqual(actual, expected)
 
+    def test_functional_call(self):
+        def wrapper_fn(model, params, inputs, targets):
+            prediction = torch.func.functional_call(model, params, (inputs,))
+            return torch.nn.functional.mse_loss(prediction, targets)
+
+        model = torch.nn.Linear(3, 3)
+        params = dict(model.named_parameters())
+        inputs = torch.randn(64, 3)
+        targets = torch.randn(64, 3)
+
+        wrapped_gm = self._compile_check(wrapper_fn, (model, params, inputs, targets))
+        # Dynamic shapes produce a slightly different graph.
+        if check_dynamic_shape_capture():
+            return
+
+        actual = normalize_gm(wrapped_gm.print_readable(print_output=False))
+        self.assertExpectedInline(
+            actual,
+            """\
+class GraphModule(torch.nn.Module):
+    def forward(self, L_inputs_: "f32[64, 3]", L_targets_: "f32[64, 3]"):
+        l_inputs_ = L_inputs_
+        l_targets_ = L_targets_
+
+        tensor: "f32[3, 3]" = self.model_weight
+        tensor_1: "f32[3]" = self.model_bias
+
+        _groupby_tensor = torch.nn.utils.stateless._groupby_tensor({'weight': tensor, 'bias': tensor_1}, {'weight': tensor, 'bias': tensor_1}, {'weight': tensor, 'bias': tensor_1});  tensor = tensor_1 = None
+
+        r: "f32[64, 3]" = self.model(l_inputs_);  l_inputs_ = None
+
+        mse_loss: "f32[]" = torch.nn.functional.mse_loss(r, l_targets_);  r = l_targets_ = None
+        return (mse_loss,)
+""",
+        )
+
+    def test_functional_call_disable_capture(self):
+        counters.clear()
+
+        with config.patch(capture_func_transforms=False):
+            # We have verified above that this
+            # function compiles
+            def wrapper_fn(model, params, inputs, targets):
+                prediction = torch.func.functional_call(model, params, (inputs,))
+                return torch.nn.functional.mse_loss(prediction, targets)
+
+            model = torch.nn.Linear(3, 3)
+            params = dict(model.named_parameters())
+            inputs = torch.randn(64, 3)
+            targets = torch.randn(64, 3)
+
+            actual = wrapper_fn(model, params, inputs, targets)
+            expected = torch.compile(wrapper_fn, backend="aot_eager", fullgraph=False)(
+                model, params, inputs, targets
+            )
+            self.assertEqual(len(counters["graph_break"]), 1)
+            self.assertEqual(
+                {
+                    "torch.func.functional_call capture is disabled, it can be "
+                    "turned on by setting `torch._dynamo.config.capture_func_transforms=True`": 1,
+                },
+                dict(counters["graph_break"]),
+            )
+            self.assertEqual(actual, expected)
+
     def test_grad(self):
         counters.clear()
 

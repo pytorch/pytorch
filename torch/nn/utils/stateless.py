@@ -11,6 +11,53 @@ from torch.nn.utils._named_member_accessor import NamedMemberAccessor
 __all__ = ["functional_call"]
 
 
+def _groupby_tensor(
+    all_named_tensors,
+    parameters_and_buffers: Dict[str, Tensor],
+    untied_parameters_and_buffers,
+):
+    # A map of {tensor: set(all_tied_names)} for all tensor names in the module.
+    tensor_to_tied_names_map: Dict[Tensor, Set[str]] = defaultdict(set)
+    for name, tensor in all_named_tensors.items():
+        tensor_to_tied_names_map[tensor].add(name)
+
+    # A map of {tied_name: set(all_tied_names)} for all tensor names in the module.
+    # If a name is not tied, it will not be in this map.
+    tied_names_map: Dict[str, Set[str]] = {}
+    for tied_names in tensor_to_tied_names_map.values():
+        if len(tied_names) > 1:
+            for tied_name in tied_names:
+                tied_names_map[tied_name] = tied_names
+
+    # Make sure the user didn't pass multiple values for the same tied tensor.
+    given_names = set(parameters_and_buffers.keys())
+    given_names_for_tied_tensors = given_names.intersection(tied_names_map.keys())
+    for given_name in given_names_for_tied_tensors:
+        tied_names = tied_names_map[given_name]
+        if (
+            # Detect if there are multiple keys present for the same tied tensor.
+            len(tied_names.intersection(given_names_for_tied_tensors)) > 1
+            # Only raise an error if the user passed multiple values for the same tied tensor.
+            # If all given values are the same, don't raise.
+            and len({parameters_and_buffers[tied_name] for tied_name in tied_names})
+            != 1
+        ):
+            raise ValueError(
+                f"functional_call got multiple values for keys {sorted(tied_names)}, "
+                f"which are tied. Consider using tie_weights=False"
+            )
+
+    # Untie the given named tensor map
+    # Make a copy for not modifying the original dict
+    # untied_parameters_and_buffers = parameters_and_buffers.copy()
+    for given_name in given_names_for_tied_tensors:
+        for tied_name in tied_names_map[given_name]:
+            untied_parameters_and_buffers[tied_name] = parameters_and_buffers[
+                given_name
+            ]
+    # return untied_parameters_and_buffers
+
+
 def _untie_named_tensors_map(
     module: "torch.nn.Module",
     parameters_and_buffers: Dict[str, Tensor],
@@ -45,57 +92,58 @@ def _untie_named_tensors_map(
     all_named_tensors.update(module.named_parameters(remove_duplicate=False))
     all_named_tensors.update(module.named_buffers(remove_duplicate=False))
 
-    # A map of {tensor: set(all_tied_names)} for all tensor names in the module.
-    tensor_to_tied_names_map: Dict[Tensor, Set[str]] = defaultdict(set)
-    for name, tensor in all_named_tensors.items():
-        tensor_to_tied_names_map[tensor].add(name)
+    # # A map of {tensor: set(all_tied_names)} for all tensor names in the module.
+    # tensor_to_tied_names_map: Dict[Tensor, Set[str]] = defaultdict(set)
+    # for name, tensor in all_named_tensors.items():
+    #     tensor_to_tied_names_map[tensor].add(name)
 
-    # A map of {tied_name: set(all_tied_names)} for all tensor names in the module.
-    # If a name is not tied, it will not be in this map.
-    tied_names_map: Dict[str, Set[str]] = {}
-    for tied_names in tensor_to_tied_names_map.values():
-        if len(tied_names) > 1:
-            for tied_name in tied_names:
-                tied_names_map[tied_name] = tied_names
+    # # A map of {tied_name: set(all_tied_names)} for all tensor names in the module.
+    # # If a name is not tied, it will not be in this map.
+    # tied_names_map: Dict[str, Set[str]] = {}
+    # for tied_names in tensor_to_tied_names_map.values():
+    #     if len(tied_names) > 1:
+    #         for tied_name in tied_names:
+    #             tied_names_map[tied_name] = tied_names
 
-    # Make sure the user didn't pass multiple values for the same tied tensor.
-    given_names = set(parameters_and_buffers.keys())
-    given_names_for_tied_tensors = given_names.intersection(tied_names_map.keys())
-    for given_name in given_names_for_tied_tensors:
-        tied_names = tied_names_map[given_name]
-        if (
-            # Detect if there are multiple keys present for the same tied tensor.
-            len(tied_names.intersection(given_names_for_tied_tensors)) > 1
-            # Only raise an error if the user passed multiple values for the same tied tensor.
-            # If all given values are the same, don't raise.
-            and len({parameters_and_buffers[tied_name] for tied_name in tied_names})
-            != 1
-        ):
-            raise ValueError(
-                f"functional_call got multiple values for keys {sorted(tied_names)}, "
-                f"which are tied. Consider using tie_weights=False"
-            )
+    # # Make sure the user didn't pass multiple values for the same tied tensor.
+    # given_names = set(parameters_and_buffers.keys())
+    # given_names_for_tied_tensors = given_names.intersection(tied_names_map.keys())
+    # for given_name in given_names_for_tied_tensors:
+    #     tied_names = tied_names_map[given_name]
+    #     if (
+    #         # Detect if there are multiple keys present for the same tied tensor.
+    #         len(tied_names.intersection(given_names_for_tied_tensors)) > 1
+    #         # Only raise an error if the user passed multiple values for the same tied tensor.
+    #         # If all given values are the same, don't raise.
+    #         and len({parameters_and_buffers[tied_name] for tied_name in tied_names})
+    #         != 1
+    #     ):
+    #         raise ValueError(
+    #             f"functional_call got multiple values for keys {sorted(tied_names)}, "
+    #             f"which are tied. Consider using tie_weights=False"
+    #         )
 
-    # Untie the given named tensor map
-    # Make a copy for not modifying the original dict
+    # # Untie the given named tensor map
+    # # Make a copy for not modifying the original dict
     untied_parameters_and_buffers = parameters_and_buffers.copy()
-    for given_name in given_names_for_tied_tensors:
-        for tied_name in tied_names_map[given_name]:
-            untied_parameters_and_buffers[tied_name] = parameters_and_buffers[
-                given_name
-            ]
+    _groupby_tensor(
+        all_named_tensors, parameters_and_buffers, untied_parameters_and_buffers
+    )
+    # for given_name in given_names_for_tied_tensors:
+    #     for tied_name in tied_names_map[given_name]:
+    #         untied_parameters_and_buffers[tied_name] = parameters_and_buffers[
+    #             given_name
+    #         ]
     return untied_parameters_and_buffers
 
 
-@contextlib.contextmanager
-def _reparametrize_module(
+def _reparametrize_module_prepare(
     module: "torch.nn.Module",
     parameters_and_buffers: Dict[str, Tensor],
     *,
     tie_weights: bool = False,
     strict: bool = False,
-    stack_weights: bool = False,
-) -> Iterator[None]:
+):
     if tie_weights:
         untied_parameters_and_buffers = _untie_named_tensors_map(
             module, parameters_and_buffers
@@ -121,6 +169,48 @@ def _reparametrize_module(
                     module._get_name(), "\n\t".join(error_msgs)
                 )
             )
+    return accessor, untied_parameters_and_buffers
+
+
+def _reparametrize_module_undo(
+    accessor: Any,
+    parameters_and_buffers: Dict[str, Tensor],
+    orig_parameters_and_buffers: Dict[str, Tensor],
+    *,
+    stack_weights: bool = False,
+):
+    if stack_weights:
+        # When stacking is enabled, we will restore the weights in LIFO order.
+        orig_parameters_and_buffers = dict(
+            reversed(orig_parameters_and_buffers.items())
+        )
+    new_parameters_and_buffers, _ = accessor.swap_tensors_dict(
+        orig_parameters_and_buffers, allow_missing=True
+    )
+    # Sometimes the module is not completely stateless and has some in-place modifications on
+    # the _parameters and _buffers dictionaries.
+    # Write the changed parameters and buffers back to the original dict.
+    parameters_and_buffers.update(
+        {
+            k: new_parameters_and_buffers[k]
+            for k in parameters_and_buffers
+            if k in new_parameters_and_buffers
+        }
+    )
+
+
+@contextlib.contextmanager
+def _reparametrize_module(
+    module: "torch.nn.Module",
+    parameters_and_buffers: Dict[str, Tensor],
+    *,
+    tie_weights: bool = False,
+    strict: bool = False,
+    stack_weights: bool = False,
+) -> Iterator[None]:
+    accessor, untied_parameters_and_buffers = _reparametrize_module_prepare(
+        module, parameters_and_buffers, tie_weights=tie_weights, strict=strict
+    )
 
     orig_parameters_and_buffers: Dict[str, Tensor] = {}
     try:
@@ -129,23 +219,11 @@ def _reparametrize_module(
         )
         yield
     finally:
-        if stack_weights:
-            # When stacking is enabled, we will restore the weights in LIFO order.
-            orig_parameters_and_buffers = dict(
-                reversed(orig_parameters_and_buffers.items())
-            )
-        new_parameters_and_buffers, _ = accessor.swap_tensors_dict(
-            orig_parameters_and_buffers, allow_missing=True
-        )
-        # Sometimes the module is not completely stateless and has some in-place modifications on
-        # the _parameters and _buffers dictionaries.
-        # Write the changed parameters and buffers back to the original dict.
-        parameters_and_buffers.update(
-            {
-                k: new_parameters_and_buffers[k]
-                for k in parameters_and_buffers
-                if k in new_parameters_and_buffers
-            }
+        _reparametrize_module_undo(
+            accessor,
+            parameters_and_buffers,
+            orig_parameters_and_buffers,
+            stack_weights=stack_weights,
         )
 
 
@@ -264,7 +342,33 @@ def _functional_call(
         kwargs = {}
     if not isinstance(args, tuple):
         args = (args,)
-    with _reparametrize_module(
-        module, parameters_and_buffers, tie_weights=tie_weights, strict=strict
-    ):
-        return module(*args, **kwargs)
+
+    if torch._dynamo.is_compiling():
+        accessor, untied_parameters_and_buffers = _reparametrize_module_prepare(
+            module, parameters_and_buffers, tie_weights=tie_weights, strict=strict
+        )
+
+        orig_parameters_and_buffers: Dict[str, Tensor] = {}
+
+        orig_parameters_and_buffers, _ = accessor.swap_tensors_dict(
+            untied_parameters_and_buffers, allow_missing=True
+        )
+
+        r = module(*args, **kwargs)
+
+        _reparametrize_module_undo(
+            accessor,
+            parameters_and_buffers,
+            orig_parameters_and_buffers,
+            stack_weights=False,
+        )
+
+        return r
+    else:
+        with _reparametrize_module(
+            module,
+            parameters_and_buffers,
+            tie_weights=tie_weights,
+            strict=strict,
+        ):
+            return module(*args, **kwargs)
