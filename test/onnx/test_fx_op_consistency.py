@@ -2038,7 +2038,9 @@ class TestOnnxModelOutputConsistency(onnx_test_common._TestONNXRuntime):
 for opset in onnx_test_common.FX_TESTED_OPSETS:
     for model_type in pytorch_test_common.TorchModelType:
         # The name needs to match the parameterized_class name.
-        test_class_name = f"TestOnnxModelOutputConsistency_opset_version_{opset}_model_type_TorchModelType.{model_type.name}"
+        test_class_name = (
+            f"TestOnnxModelOutputConsistency_opset_{opset}_model_type_{model_type.name}"
+        )
         onnx_test_common.add_decorate_info(
             OPS_DB,
             test_class_name,
