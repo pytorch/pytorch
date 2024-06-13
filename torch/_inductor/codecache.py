@@ -1479,11 +1479,13 @@ def valid_vec_isa_list() -> List[VecISA]:
     if sys.platform == "darwin" and platform.processor() == "arm":
         return [VecNEON()]
 
+    isa_list: List[VecISA] = []
     cur_os = sys.platform
     if cur_os != "linux" and cur_os != "win32":
-        return []
+        return isa_list
 
-    if platform.machine() == "s390x":
+    arch = platform.machine()
+    if arch == "s390x":
         with open("/proc/cpuinfo") as _cpu_info:
             while True:
                 line = _cpu_info.readline()
@@ -1494,14 +1496,20 @@ def valid_vec_isa_list() -> List[VecISA]:
                 if featuresmatch:
                     for group in featuresmatch.groups():
                         if re.search(r"[\^ ]+vxe[\$ ]+", group):
-                            return [VecZVECTOR()]
-        return []
+                            isa_list.append(VecZVECTOR())
+                            break
+        return isa_list
 
-    isa_list = []
-    _cpu_supported_isa = x86_isa_checker()
-    for isa in supported_vec_isa_list:
-        if str(isa) in _cpu_supported_isa and isa:
-            isa_list.append(isa)
+    if arch == "x86_64" or arch == "AMD64":
+        """
+        arch value is x86_64 on Linux, and the value is AMD64 on Windows.
+        """
+        _cpu_supported_x86_isa = x86_isa_checker()
+        for isa in supported_vec_isa_list:
+            if str(isa) in _cpu_supported_x86_isa and isa:
+                isa_list.append(isa)
+        return isa_list
+
     return isa_list
 
 
