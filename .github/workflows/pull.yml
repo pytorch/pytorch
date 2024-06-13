@@ -315,7 +315,9 @@ jobs:
   linux-jammy-py3-clang12-mobile-build:
     name: linux-jammy-py3-clang12-mobile-build
     uses: ./.github/workflows/_linux-build-label.yml
+    needs: get-label-type
     with:
+      runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge"
       build-environment: linux-jammy-py3-clang12-mobile-build
       docker-image-name: pytorch-linux-jammy-py3-clang15-asan
       build-generates-artifacts: false
