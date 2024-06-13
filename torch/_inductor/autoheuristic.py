@@ -74,6 +74,8 @@ class AutoHeuristic:
         self.features = context.features
         self.collected_feedback = {}
 
+        # TODO(AlnisM): Allow something like AUTOHEURISTIC_MODE="collect:pad_mm,foo,bar"
+        # to be able to collect data only for specific heuristics
         if torch._inductor.config.autoheuristic_mode == "COLLECT_DATA" and isinstance(
             self.feedback, LocalFeedback
         ):
@@ -92,7 +94,7 @@ class AutoHeuristic:
         # a heuristic might work well for one GPU, but not for another
         # we store the collected data per GPU model and learn a heuristic per GPU model
 
-        # TODO: just using the device name for now, but the same GPU model can have different names
+        # TODO(AlnisM): just using the device name for now, but the same GPU model can have different names
         device_name = torch.cuda.get_device_name().replace(" ", "_")
         return device_name
 
