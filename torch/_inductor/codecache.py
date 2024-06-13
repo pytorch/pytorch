@@ -692,6 +692,13 @@ class FxGraphHashDetails:
         """
         return FxGraphCachePickler.debug_str(self)
 
+    def __reduce__(self):
+        # This is necessary to make sure that every element of our hash is pickled
+        # in the same order, which makes sure that serialization is deterministic
+        # with respect to dictionaries. Otherwise, the same object can pickle
+        # to different bytes depending on the order they are hashed by the reducer.
+        return (_ident, (sorted(self.__dict__),))
+
 
 def compiled_fx_graph_hash(
     gm: torch.fx.GraphModule,
