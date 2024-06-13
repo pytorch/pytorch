@@ -1,14 +1,22 @@
 # mypy: allow-untyped-defs
 from typing_extensions import deprecated
 
+from .data_parallel import data_parallel, DataParallel
+from .distributed import DistributedDataParallel
 from .parallel_apply import parallel_apply
 from .replicate import replicate
-from .data_parallel import DataParallel, data_parallel
 from .scatter_gather import gather, scatter
-from .distributed import DistributedDataParallel
 
-__all__ = ['replicate', 'scatter', 'parallel_apply', 'gather', 'data_parallel',
-           'DataParallel', 'DistributedDataParallel']
+
+__all__ = [
+    "replicate",
+    "scatter",
+    "parallel_apply",
+    "gather",
+    "data_parallel",
+    "DataParallel",
+    "DistributedDataParallel",
+]
 
 
 @deprecated(
