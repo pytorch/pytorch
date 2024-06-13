@@ -2728,6 +2728,16 @@ def forward(self, x):
             )
         )
 
+    def test_sym_bool_export(self):
+        class Module(torch.nn.Module):
+            def forward(self, x, y):
+                assert x.size(0) in y
+                assert x.size(0) in torch.ones(2)
+                return x + y
+
+        f = Module()
+        ep = export(f, (torch.ones(1), torch.ones(3)))
+
     def test_automatic_constrain_size(self):
         class M(torch.nn.Module):
             def forward(self, x, y):
@@ -5413,6 +5423,181 @@ def forward(self, x, y):
         ):
             ep.module()(torch.randn(400, 20, 16))
         ep.module()(torch.randn(42, 20, 16))
+
+    @unittest.expectedFailure
+    def test_mixed_comp(self):
+        class Foo(torch.nn.Module):
+            def forward(self, x, y):
+                n = y.item()
+                z = torch.cat([x, x], dim=0)
+                torch._check_is_size(n)
+                torch._check(n < z.shape[0])
+                return z[n:].shape[0] + 2
+
+        inputs = (torch.randn(9), torch.tensor([3]))
+        shapes = {
+            "x": (Dim("dx", max=2048),),
+            "y": None,
+        }
+        ep = export(
+            Foo(),
+            inputs,
+            dynamic_shapes=shapes,
+        )
+
+    def test_intermediate_shape_comp(self):
+        class Foo(torch.nn.Module):
+            def forward(self, x, y):
+                z = torch.cat([x, x], dim=0)
+                w = z.repeat(y.shape[0])
+                return w.shape[0] + y
+
+        inputs = (torch.randn(6), torch.randn(4))
+        shapes = {
+            "x": (Dim("dx"),),
+            "y": (Dim("dy"),),
+        }
+        ep = export(
+            Foo(),
+            inputs,
+            dynamic_shapes=shapes,
+        )
+
+    def test_overlap_ranges(self):
+        class Foo(torch.nn.Module):
+            def forward(self, x, y):
+                val = x.shape[0] ** 2 - y.shape[0]
+                if val >= 14:
+                    if val >= 16:
+                        if val <= 100:
+                            if val <= 98:
+                                # if val != 98:
+                                if True:
+                                # if val == 60:
+                                    return x*2, y*2
+        inputs = (torch.randn(8), torch.randn(4))
+        shapes = {"x": (Dim("dx", max=100),), "y": (Dim("dy", max=100),)}
+        ep = torch.export._trace._export(
+            Foo(),
+            inputs,
+            dynamic_shapes=shapes,
+            _allow_complex_guards_as_runtime_asserts=True,
+        )
+
+    def test_check_is_size(self):
+        class Foo(torch.nn.Module):
+            def forward(self, x, y):
+                n = y.item()
+                torch._check_is_size(n)
+                torch._check(n < x.shape[0])
+                return x[n]
+        inputs = (torch.randn(128), torch.tensor(6))
+        shapes = {"x": (Dim("dx"),), "y": None}
+        ep = torch.export._trace._export(
+            Foo(),
+            inputs,
+            dynamic_shapes=shapes,
+        )
+
+    def test_crazy_checks(self):
+        class Foo(torch.nn.Module):
+            def forward(self, x, y):
+                n = y.item()
+                m = y.item()
+                _x, _y = n ** 2 + n, m ** 2 + m
+                torch._check(_x >= 4)
+                torch._check(_x >= 6)
+                torch._check(_x <= 100)
+                torch._check(_y <= 88)
+                torch._check(_y >= 4)
+                torch._check(_y >= 6)
+                torch._check(_y != 2)
+                torch._check(_y != 6)
+                # torch._check(_y == 42)
+                torch._check(n == 6)
+                return n + m
+        inputs = (torch.randn(5), torch.tensor(6))
+        shapes = {"x": (Dim("dx"),), "y": None}
+        ep = torch.export._trace._export(
+            Foo(),
+            inputs,
+            dynamic_shapes=shapes,
+            _allow_complex_guards_as_runtime_asserts=True,
+        )
+
+    def test_cse_constrain(self):
+        class Foo(torch.nn.Module):
+            def forward(self, x, y):
+                n = y.item()
+                m = y.item()
+                torch.sym_constrain_range_for_size(n, min=1)
+                torch.sym_constrain_range_for_size(n, min=2)
+                torch.sym_constrain_range_for_size(m, min=3)
+                torch.sym_constrain_range_for_size(n, max=16)
+                torch.sym_constrain_range_for_size(m, min=5, max=20)
+                torch._check(m == 6)
+                return x + n + m
+        inputs = (torch.randn(5), torch.tensor(6))
+        shapes = {"x": (Dim("dx"),), "y": None}
+        ep = torch.export._trace._export(
+            Foo(),
+            inputs,
+            dynamic_shapes=shapes,
+            _allow_complex_guards_as_runtime_asserts=True,
+        )
+
+    def test_live_cse(self):
+        class Foo(torch.nn.Module):
+            def forward(self, x, y):
+                n = y.item()
+                m = y.item()
+                torch._check(n >= 0)
+                torch._check(n >= 0)
+                torch._check(n >= 1)
+                torch._check(-n <= 1)
+                torch._check(m >= 0)
+                torch._check(m >= 1)
+                torch._check(-m <= 0)
+                _x = x.shape[0] + n
+                if x.shape[0] ** 2 != 16:
+                    if -(x.shape[0] ** 2) != -16:
+                        if x.shape[0] ** 2 - 4 >= 4:
+                            if -x.shape[0] ** 2 + 4 <= -4:
+                                _z = x.shape[0] ** 2 + x.shape[0] * 3 + x.shape[0] + 4
+                                return x.shape[0] + m + _z
+        inputs = (torch.randn(5), torch.tensor(3))
+        shapes = {"x": (Dim("dx"),), "y": None}
+        ep = torch.export._trace._export(
+            Foo(),
+            inputs,
+            dynamic_shapes=shapes,
+            _allow_complex_guards_as_runtime_asserts=True,
+        )
+    
+    def test_shape_comp(self):
+        class Foo(torch.nn.Module):
+            def forward(self, x, y):
+                x0, x1 = x.shape
+                _x = x0 + x1 * 2
+                y0 = y.shape[0]
+                _y = y0 + x1
+                y1 = y.shape[0]
+                _z = _x + _y
+                return _z
+
+        inputs = (
+            torch.randn(6, 6),
+            torch.randn(6, 6),
+        )
+        shapes = {
+            "x": (Dim("dx0"), Dim("dx1")),
+            "y": (Dim("dy0"), Dim("dy1")),
+        }
+        ep = export(
+            Foo(),
+            inputs,
+            dynamic_shapes=shapes,
+        )
 
     def test_allow_explicit_guards_as_runtime_asserts(self):
         # check that explicit guards are treated as runtime assertions

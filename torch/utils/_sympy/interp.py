@@ -8,8 +8,10 @@ handler; only those with corresponding Sympy expressions.  To see an example
 of a full handler, see torch.utils._sympy.value_ranges.ValueRangeAnalysis.
 """
 
+import contextlib
 import functools
-from typing import Any, Dict, Union
+import sys
+from typing import Any, Dict, List, Optional, Union
 
 import sympy
 from sympy.logic.boolalg import Boolean as SympyBoolean, BooleanAtom
@@ -35,6 +37,7 @@ from .functions import (
     TruncToInt,
     Where,
 )
+from torch import fx
 
 
 # TODO: Dedupe this with SYMPY_INTERP
@@ -104,9 +107,14 @@ def sympy_interp(
     analysis,
     env: Dict[sympy.Symbol, Any],
     expr: Union[sympy.Expr, SympyBoolean],
+    hash_cons: Optional[Dict[sympy.Expr, fx.Node]] = None,
     *,
     index_dtype=torch.int64,
 ):
+    # hash cons
+    if hash_cons and expr in hash_cons:
+        return hash_cons[expr]
+
     # Handle base cases
     dtype = None
     if isinstance(expr, BooleanAtom):
@@ -125,43 +133,60 @@ def sympy_interp(
     if isinstance(expr, sympy.Pow) and isinstance(
         expr.args[1], sympy.core.numbers.Half
     ):
-        return analysis.sqrt(sympy_interp(analysis, env, expr.args[0]))
+        return analysis.sqrt(sympy_interp(analysis, env, expr.args[0], hash_cons))
     if isinstance(expr, ToFloat):
         return analysis.to_dtype(
-            sympy_interp(analysis, env, expr.args[0]), torch.float64
+            sympy_interp(analysis, env, expr.args[0], hash_cons), torch.float64
         )
 
     # Recursive case
-    args = [sympy_interp(analysis, env, arg) for arg in expr.args]  # type: ignore[arg-type]
+    args = [sympy_interp(analysis, env, arg, hash_cons) for arg in expr.args]  # type: ignore[arg-type]
 
-    # These handlers are special because they take an extra dtype argument
-    # specifying what they should convert to, and we need to appropriately set
-    # this up when we convert from Sympy.  A reasonable default when you
-    # are translating is to conservatively do int64, and then narrow these
-    # arguments later when you discover you can narrow the index range.  But
-    # if you already know that 32-bit indexing is OK, you can directly do the
-    # sympy translation with index_dtype=torch.int32
-    INDEX_DTYPE_HANDLERS = {
-        TruncToInt: "trunc_to_int",
-        sympy.floor: "floor_to_int",
-        sympy.ceiling: "ceil_to_int",
-        FloorToInt: "floor_to_int",
-        CeilToInt: "ceil_to_int",
-        RoundToInt: "round_to_int",
-    }
-    if (handler_name := INDEX_DTYPE_HANDLERS.get(expr.func)) is not None:
-        return getattr(analysis, handler_name)(*args, index_dtype)
+    def insert_after_last_node(args):
+        # Watch where we insert
+        node_args = [n.node for n in args if isinstance(n, fx.Proxy)]
+        if not node_args:
+            return contextlib.nullcontext()
+        last_node = max(node_args)
+        return last_node.graph.inserting_before(last_node.next)
 
-    if hasattr(expr.func, "_torch_handler_name"):
-        handler_name = expr.func._torch_handler_name
-    else:
-        handler_name = handlers()[expr.func]
-    handler = getattr(analysis, handler_name)
-    if handler_name in ASSOCIATIVE_OPS:
-        assert len(args) > 1
-        acc = handler(args[0], args[1])
-        for i in range(2, len(args)):
-            acc = handler(acc, args[i])
-        return acc
-    else:
-        return handler(*args)
+    # Watch where we insert
+    with insert_after_last_node(args):
+        # These handlers are special because they take an extra dtype argument
+        # specifying what they should convert to, and we need to appropriately set
+        # this up when we convert from Sympy.  A reasonable default when you
+        # are translating is to conservatively do int64, and then narrow these
+        # arguments later when you discover you can narrow the index range.  But
+        # if you already know that 32-bit indexing is OK, you can directly do the
+        # sympy translation with index_dtype=torch.int32
+        INDEX_DTYPE_HANDLERS = {
+            TruncToInt: "trunc_to_int",
+            sympy.floor: "floor_to_int",
+            sympy.ceiling: "ceil_to_int",
+            FloorToInt: "floor_to_int",
+            CeilToInt: "ceil_to_int",
+            RoundToInt: "round_to_int",
+        }
+        if (handler_name := INDEX_DTYPE_HANDLERS.get(expr.func)) is not None:
+            result = getattr(analysis, handler_name)(*args, index_dtype)
+            if hash_cons:
+                hash_cons[expr] = result
+            return result
+
+        if hasattr(expr.func, "_torch_handler_name"):
+            handler_name = expr.func._torch_handler_name
+        else:
+            handler_name = handlers()[expr.func]
+        handler = getattr(analysis, handler_name)
+        if handler_name in ASSOCIATIVE_OPS:
+            assert len(args) > 1
+            acc = handler(args[0], args[1])
+            for i in range(2, len(args)):
+                acc = handler(acc, args[i])
+            result = acc
+        else:
+            result = handler(*args)
+        
+        if hash_cons:
+            hash_cons[expr] = result
+        return result
