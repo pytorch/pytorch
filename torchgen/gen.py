@@ -1464,10 +1464,7 @@ def get_ns_grouped_kernels(
         native_function_namespaces = set()
         dispatch_keys = set()
         for dispatch_key, backend_idx in backend_indices.items():
-            if (
-                whitelist_keys
-                and (dispatch_key not in whitelist_keys)
-            ):
+            if whitelist_keys and (dispatch_key not in whitelist_keys):
                 continue
             backend_metadata = backend_idx.get_kernel(f)
             if backend_metadata:
@@ -1979,36 +1976,25 @@ def gen_per_operator_headers(
         ("NativeMetaFunctions", "_meta"),
         ("NativeFunctions", "_native"),
     ]:
-        if (
-            (whitelist_keys is not None)
-            and len(whitelist_keys) >= 1
-            and (category == "NativeFunctions")
-        ):
-            # {name}_native.h is backend specific for whitelist mode
-            # here, we generate them into {dispatch_key}/op/{name}_native.h separately.
-            for white_key in whitelist_keys:
-                dispatch_namespace = white_key.lower()
-                cpu_fm.write(
-                    f"{category}.h",
-                    lambda: {
-                        f"{category}_includes": [
-                            f"#include <ATen/{dispatch_namespace}/ops/{name}{suffix}.h>"
-                            for name in sorted(functions_by_root_name.keys())
-                        ],
-                        f"{category}_declarations": [],
-                    },
-                )
-        else:
-            cpu_fm.write(
-                f"{category}.h",
-                lambda: {
-                    f"{category}_includes": [
-                        f"#include <ATen/ops/{name}{suffix}.h>"
-                        for name in sorted(functions_by_root_name.keys())
-                    ],
-                    f"{category}_declarations": [],
-                },
-            )
+        # codegen for whitelist keys generation only suuport single key currently
+        assert not whitelist_keys or len(whitelist_keys) == 1
+        if whitelist_keys:
+            dispatch_namespace = next(iter(whitelist_keys)).lower()
+
+        # {name}_native.h is backend specific for whitelist mode
+        # here, we generate them into {dispatch_key}/op/{name}_native.h separately.
+        cpu_fm.write(
+            f"{category}.h",
+            lambda: {
+                f"{category}_includes": [
+                    f"#include <ATen/{dispatch_namespace}/ops/{name}{suffix}.h>"
+                    if whitelist_keys and (category == "NativeFunctions")
+                    else f"#include <ATen/ops/{name}{suffix}.h>"
+                    for name in sorted(functions_by_root_name.keys())
+                ],
+                f"{category}_declarations": [],
+            },
+        )
 
     for dispatch_key in dispatch_keys:
         if dispatch_key not in functions_keys:
@@ -2915,7 +2901,7 @@ def main() -> None:
         if DispatchKey.MPS in dispatch_keys:
             del dispatch_keys[dispatch_keys.index(DispatchKey.MPS)]
 
-    whitelist_keys = set()
+    whitelist_keys = None
     if options.backend_whitelist:
         whitelist_keys = {
             k for k in dispatch_keys if str(k) in options.backend_whitelist
