@@ -13,7 +13,6 @@ supported_ops:
     - add
     - sub
     - abs
-    - bernoulli
     - bitwise_and
     - bitwise_not
     - bitwise_or
