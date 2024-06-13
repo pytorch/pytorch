@@ -18,8 +18,6 @@ from torch.export.graph_signature import (
 from torch.fx import subgraph_rewriter
 from torch.onnx.utils import _create_jit_graph
 
-from torchgen.model import FunctionSchema
-
 
 def inplace_optimize_sym_size_div(gm: torch.fx.GraphModule):
     def pattern(im, dim, scale):
@@ -189,9 +187,9 @@ def get_block_to_lifted_attrs(graph: torch._C.Graph) -> Dict[torch._C.Block, Set
 
 def get_op_overload(node: torch._C.Node):
     schema_str = node.schema()
-    schema = FunctionSchema.parse(schema_str)
-    ns, op_name = str(schema.name.name).split("::")
-    override = schema.name.overload_name
+    schema = torch._C.parse_schema(schema_str)
+    ns, op_name = str(schema.name).split("::")
+    override = schema.overload_name
 
     try:
         op_overload_mod = getattr(torch.ops, ns)
@@ -346,6 +344,20 @@ class TS2FXGraphConverter:
                 fx_node = self.fx_graph.placeholder(normalized_name)
 
             self.name_to_node[name] = fx_node
+
+    def convert_aten_tensor(self, node: torch._C.Node):
+        """aten::tensor creates a constant tensor ad-hoc --> GetAttr"""
+        args, kwargs = self.get_args_kwargs(node, torch.ops.aten.tensor.default._schema)
+        for k in kwargs:
+            if k == "requires_grad":
+                kwargs[k] = bool(kwargs[k])  # 0 -> False, 1 -> True
+        tensor = torch.tensor(*args, **kwargs)
+
+        output_name = node.output().debugName()
+        alias_name = f"lifted_tensor_{output_name}"
+        fx_node = self.fx_graph.get_attr(alias_name)
+        self.name_to_node[output_name] = fx_node
+        self.tensor_constants[alias_name] = tensor
 
     def convert_prim_Constant(self, node: torch._C.Node):
         name = node.output().debugName()
