@@ -1,10 +1,8 @@
 # mypy: allow-untyped-defs
 from typing import Any, Iterable, NamedTuple, Optional, overload, Sequence, Tuple, Union
-
 from typing_extensions import Self
 
 from torch import Tensor
-
 from torch._prims_common import DeviceLikeType
 from torch.types import _dtype
 
