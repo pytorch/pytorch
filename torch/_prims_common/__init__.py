@@ -1830,6 +1830,9 @@ def are_strides_like_channels_last(
     else:
         return False
 
+    assert isinstance(strides, (List, Tuple))
+    for x in strides:
+        assert isinstance(x, int), f"type is {type(x)}"
     if strides[1] == 0:
         return False
 
