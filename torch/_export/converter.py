@@ -616,11 +616,11 @@ class TS2FXGraphConverter:
         self._convert_as_noop(node)
 
     def convert_prim_Enter(self, node: torch._C.Node):
-        # export treat prim::Enter as noop
+        # export treats prim::Enter as noop
         return
 
     def convert_prim_Exit(self, node: torch._C.Node):
-        # export treat prim::Exit as noop
+        # export treats prim::Exit as noop
         return
 
     def _convert_as_noop(self, node: torch._C.Node):
