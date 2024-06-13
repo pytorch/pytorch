@@ -244,6 +244,7 @@ class TestUnbackedSymints(InductorTestCase):
         )
         with inductor_config.patch(
             {
+                # coordinate_descent_tuning has its own path during decomp
                 "coordinate_descent_tuning": coordinate_descent_tuning,
             }
         ):

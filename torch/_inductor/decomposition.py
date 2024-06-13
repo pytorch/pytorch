@@ -28,7 +28,7 @@ from torch._prims_common import (
     ELEMENTWISE_TYPE_PROMOTION_KIND,
     type_to_dtype,
 )
-from torch.fx.experimental.symbolic_shapes import guard_size_oblivious
+from torch.fx.experimental.symbolic_shapes import definitely_true, guard_size_oblivious
 
 from . import config, inductor_prims
 from .utils import (
@@ -233,8 +233,8 @@ def addmm(self, mat1, mat2, beta=1, alpha=1):
             return alpha * out + beta * self
         if (
             guard_size_oblivious(mat1.size(0) == 1)
-            and mat2.size(0) <= 16
-            and mat2.size(1) <= 16
+            and definitely_true(mat2.size(0) <= 16)
+            and definitely_true(mat2.size(1) <= 16)
         ):
             counters["inductor"]["decompose_addmm"] += 1
             out = (mat1.T * mat2).sum(dim=0, keepdim=True)
@@ -245,11 +245,6 @@ def addmm(self, mat1, mat2, beta=1, alpha=1):
 @register_decomposition([aten.mm])
 @pw_cast_for_opmath
 def mm(self, input2):
-    from torch.fx.experimental.symbolic_shapes import (
-        definitely_true,
-        guard_size_oblivious,
-    )
-
     # Our matrix vector multiplies only achieve peak bandwidth with coordinate descent tuning.
     # todo: Look into why and fix it (hopefully)
     if config.coordinate_descent_tuning:
