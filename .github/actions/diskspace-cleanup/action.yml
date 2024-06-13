@@ -15,7 +15,6 @@ runs:
       shell: bash
       run: |
         set -ex
-        
         diskspace_cutoff=${{ inputs.diskspace-cutoff }}
         diskspace=$(docker info -f '{{.DockerRootDir}}' | xargs df -H --output=pcent | sed -n 2p | sed 's/%//' | sed 's/ //')
         msg="Please file an issue on pytorch/pytorch reporting the faulty runner. Include a link to the runner logs so the runner can be identified"
