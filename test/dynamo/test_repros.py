@@ -1122,6 +1122,24 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             out_test = f_compiled(x, y)
             out_test.sum().backward()
 
+    # https://github.com/pytorch/pytorch/issues/113263
+    def test_disabling_unpack_hooks_within_compiled_region(self):
+        def g(z):
+            with torch.autograd.graph.disable_saved_tensors_hooks("hooks are disabled"):
+                return z + 5
+
+        def f(x, y):
+            z = x * y
+            return g(z)
+
+        f_compiled = torch.compile(f, backend="aot_eager")
+
+        x = torch.ones(4, requires_grad=True)
+        y = torch.ones(4, requires_grad=False)
+        # with torch.autograd.graph.disable_saved_tensors_hooks("hooks are disabled"):
+        out_test = f_compiled(x, y)
+        out_test.sum().backward()
+
     # See https://github.com/pytorch/pytorch/issues/97745
     def test_gan_repro_trying_to_backward_through_the_graph_a_second_time(self):
         def f(a, b):
