@@ -2053,7 +2053,7 @@ def compiled_with_cxx11_abi() -> builtins.bool:
     return _C._GLIBCXX_USE_CXX11_ABI
 
 
-import torch._library
+from torch import _library as _library, _ops as _ops
 
 # Import the ops "namespace"
 from torch._classes import classes as classes
