@@ -14,8 +14,6 @@ WARMUP_ITER = 5
 
 A100_80G_BF16_TFLOPS = 312
 
-torch._inductor.config.coordinate_descent_tuning = True
-
 
 @dataclasses.dataclass
 class Experiment:
