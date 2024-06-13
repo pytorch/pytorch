@@ -17,7 +17,6 @@ from torch._jit_internal import (
 )
 from torch._torch_docs import reproducibility_notes, sparse_support_notes, tf32_notes
 from torch.nn import _reduction as _Reduction, grad  # noqa: F401
-from torch.nn.modules import utils
 from torch.nn.modules.utils import _list_with_default, _pair, _single, _triple
 from torch.overrides import (
     handle_torch_function,
@@ -1099,7 +1098,7 @@ def lp_pool3d(
             stride=stride,
             ceil_mode=ceil_mode,
         )
-    kd, kw, kh = utils._triple(kernel_size)
+    kd, kw, kh = _triple(kernel_size)
     if stride is not None:
         out = avg_pool3d(input.pow(norm_type), kernel_size, stride, 0, ceil_mode)
     else:
@@ -1137,7 +1136,7 @@ def lp_pool2d(
             stride=stride,
             ceil_mode=ceil_mode,
         )
-    kw, kh = utils._pair(kernel_size)
+    kw, kh = _pair(kernel_size)
     if stride is not None:
         out = avg_pool2d(input.pow(norm_type), kernel_size, stride, 0, ceil_mode)
     else:
