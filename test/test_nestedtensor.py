@@ -4524,7 +4524,7 @@ class TestNestedTensorSubclass(TestCase):
             nt = convert_jagged_to_nested_tensor(values, offsets, max_length=4)
             return convert_nt_to_jagged(nt).sum()
 
-        checkpoint(fn, values, lengths, use_reentrant=False).backward()
+        checkpoint(fn, values, lengths, use_reentrant=False, context_fn=context_fn).backward()
 
     # Internally-defined NT use cases are lifted to here for maximum test realism.
     # TODO: Remove these when ViewNestedFromBuffer, etc. are deprecated.

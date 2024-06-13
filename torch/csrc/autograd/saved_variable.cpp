@@ -12,8 +12,7 @@
 #include <memory>
 #include <sstream>
 
-namespace torch {
-namespace autograd {
+namespace torch::autograd {
 
 SavedVariable::SavedVariable(
     const Variable& variable,
@@ -198,9 +197,10 @@ Variable SavedVariable::unpack(std::shared_ptr<Node> saved_for) const {
     return data_;
   }
 
-  const auto data = hooks_ ? hooks_->call_unpack_hook() : data_;
+  auto data = hooks_ ? hooks_->call_unpack_hook() : data_;
 
-  if (!grad_fn && !requires_grad_ && !data.requires_grad() && !(fw_grad_ && !fw_grad_->empty())) {
+  if (!grad_fn && !requires_grad_ && !data.requires_grad() &&
+      !(fw_grad_ && !fw_grad_->empty())) {
     // Avoid detaching if we don't need to.
     return data;
   }
@@ -284,5 +284,4 @@ const char* ERR_BACKWARD_TWICE =
     "retain_graph=True if you need to backward through the graph a second time or "
     "if you need to access saved tensors after calling backward.";
 
-} // namespace autograd
-} // namespace torch
+} // namespace torch::autograd
