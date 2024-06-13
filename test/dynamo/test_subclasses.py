@@ -1386,11 +1386,12 @@ class GraphModule(torch.nn.Module):
         def _get_views(t):
             # Note that any closed-over SymInts will be symbolicized during fake-ification.
             yield t.narrow(dim=-1, start=3, length=8)
-            yield t.split(5, -1)
-            yield t.split_with_sizes([9, 6], -1)
+            yield t.split(5, -1)[2]
+            yield t.split_with_sizes([9, 6], -1)[1]
             yield t.unsqueeze(-1).expand(4, 15, 10)
             yield t.select(-1, 6)
-            yield t[2:3, 5:9]
+            if not dynamic:  # https://github.com/pytorch/pytorch/issues/128649
+                yield t[2:3, 5:9]
 
         def f(x):
             return x * 2
@@ -1402,6 +1403,7 @@ class GraphModule(torch.nn.Module):
         # Take a view of a subclass to pass as input.
         t = TwoTensor(torch.randn(4, 15), torch.randn(4, 15))
         for view in _get_views(t):
+            torch._dynamo.reset()
             out_ref = f(view)
             out_test = compiled_f(view)
             self.assertEqual(out_ref, out_test)
