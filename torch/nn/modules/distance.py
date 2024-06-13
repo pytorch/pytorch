@@ -1,11 +1,9 @@
-import torch.nn.functional as F
+from .module import Module
+from .. import functional as F
+
 from torch import Tensor
 
-from .module import Module
-
-
-__all__ = ["PairwiseDistance", "CosineSimilarity"]
-
+__all__ = ['PairwiseDistance', 'CosineSimilarity']
 
 class PairwiseDistance(Module):
     r"""
@@ -41,14 +39,12 @@ class PairwiseDistance(Module):
         >>> output = pdist(input1, input2)
     """
 
-    __constants__ = ["norm", "eps", "keepdim"]
+    __constants__ = ['norm', 'eps', 'keepdim']
     norm: float
     eps: float
     keepdim: bool
 
-    def __init__(
-        self, p: float = 2.0, eps: float = 1e-6, keepdim: bool = False
-    ) -> None:
+    def __init__(self, p: float = 2., eps: float = 1e-6, keepdim: bool = False) -> None:
         super().__init__()
         self.norm = p
         self.eps = eps
@@ -80,7 +76,7 @@ class CosineSimilarity(Module):
         >>> output = cos(input1, input2)
     """
 
-    __constants__ = ["dim", "eps"]
+    __constants__ = ['dim', 'eps']
     dim: int
     eps: float
 
