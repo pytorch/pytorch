@@ -96,8 +96,8 @@ class FSDPState(_State):
                     )  # same as DDP
                 args, kwargs = args_tuple[0], kwargs_tuple[0]
         logger.debug(
-            f"[Rank{dist.get_rank()}]FSDP::root_pre_forward",
-            )
+            f"[Rank{dist.get_rank()}]FSDP::root_pre_forward",  # noqa: G004
+        )
         return args, kwargs
 
     def _lazy_init(self) -> None:
@@ -136,7 +136,8 @@ class FSDPState(_State):
                 state._fsdp_param_group.lazy_init()
                 for param in state._fsdp_param_group.fsdp_params:
                     logger.debug(
-                        f"[Rank{dist.get_rank()}]FSDP::lazy_init, fqn={param._param_fqn}, dtype={param.sharded_param.dtype}, shape={param._orig_size}",
+                        f"[Rank{dist.get_rank()}]FSDP::lazy_init, fqn={param._param_fqn}",  # noqa: G004
+                        f", dtype={param.sharded_param.dtype}, shape={param._orig_size}",  # noqa: G004
                     )
 
     def _init_shared_state(self) -> None:
@@ -236,7 +237,7 @@ class FSDPState(_State):
                 self._comm_ctx.post_forward_order.clear()
             self._state_ctx.post_backward_final_callback_queued = False
             logger.debug(
-                f"[Rank{dist.get_rank()}]FSDP::root_post_backward",
+                f"[Rank{dist.get_rank()}]FSDP::root_post_backward",  # noqa: G004
             )
 
     def _finalize_backward(self) -> None:
