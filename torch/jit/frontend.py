@@ -600,8 +600,8 @@ def get_default_args(fn):
     Args:
         fn: Callable - The function to inspect for default arguments.
     Returns:
-        A Dict[str, Any] mapping argument names to their default values. 
-        Returns empty dictionary if the input is None.
+        (Dict[str, Any]): mapping argument names to their default values if
+        :attr:`fn` is not None, else empty dictionary.
     """
     if fn is None:
         return {}
