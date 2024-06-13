@@ -533,7 +533,7 @@ class TritonTemplateKernel(TritonKernel):
                 triton_meta=self.triton_meta,
             )
         else:
-            stream_name = wrapper.write_get_raw_stream(current_device.index)
+            stream_name = wrapper.write_get_raw_stream(current_device.index, V.graph)
 
             wrapper.add_import_once(f"import {self.grid_fn.__module__}")
             meta = wrapper.add_meta_once(self.meta)
