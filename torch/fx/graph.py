@@ -384,7 +384,7 @@ class CodeGen:
 
     def _gen_python_code(
         self, nodes, root_module: str, namespace: _Namespace, *,
-        verbose: bool = False, include_stride: bool = False, include_device: bool = False
+        verbose: bool = False, include_stride: bool = False, include_device: bool = False, colored: bool = False
     ) -> PythonCode:
         free_vars: List[str] = []
         body: List[str] = []
@@ -466,7 +466,7 @@ class CodeGen:
         }
         def make_wrapper_func(name):
             def f(s):
-                if verbose:
+                if colored:
                     return f"{codes[name]}{s}{codes['reset']}"
                 return s
             return f
@@ -498,7 +498,7 @@ class CodeGen:
                 return repr(arg)
             else:
                 return blue(repr(arg))
-            
+
 
         def _format_args(args: Tuple[Argument, ...], kwargs: Dict[str, Argument]) -> str:
             args_s = ', '.join(_get_repr(a) for a in args)
@@ -537,7 +537,7 @@ class CodeGen:
             nodes_to_delete = user_to_last_uses.get(user, [])
             if len(nodes_to_delete):
                 to_delete_str = ' = '.join([repr(n) for n in nodes_to_delete] + ['None'])
-                body.append(f';  {to_delete_str}\n')
+                body.append(f'; {dim(to_delete_str)}\n')
             else:
                 body.append('\n')
 
@@ -1462,11 +1462,11 @@ class Graph:
 
     def _python_code(
         self, root_module: str, namespace: _Namespace, *,
-        verbose: bool = False, include_stride: bool = False, include_device: bool = False
+        verbose: bool = False, include_stride: bool = False, include_device: bool = False, colored: bool = False,
     ) -> PythonCode:
         return self._codegen._gen_python_code(
             self.nodes, root_module, namespace,
-            verbose=verbose, include_stride=include_stride, include_device=include_device
+            verbose=verbose, include_stride=include_stride, include_device=include_device, colored=colored
         )
 
 

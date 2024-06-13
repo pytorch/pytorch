@@ -482,9 +482,9 @@ class ExportedProgram:
         return res
 
     def __str__(self) -> str:
-        graph_module = self.graph_module.print_readable(print_output=False).replace(
-            "\n", "\n    "
-        )
+        graph_module = self.graph_module.print_readable(
+            print_output=False, colored=True
+        ).replace("\n", "\n    ")
         string = (
             "ExportedProgram:\n"
             f"    {graph_module}\n"

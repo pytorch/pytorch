@@ -100,7 +100,7 @@ ban_recompute_reductions = True
 # It solves a 0-1 knapsack to find the minimum recompute necessary to stay below
 # the activation memory budget.
 # NOTE: This *cannot* be treated as
-activation_memory_budget = 1.0
+activation_memory_budget = 0.5
 
 # This controls how we estimate the runtime when deciding what the cheapest
 # operators to recompute are. The 3 options are
