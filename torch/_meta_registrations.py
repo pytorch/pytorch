@@ -311,7 +311,12 @@ def meta_randperm(n, *, generator=None, out):
 
 @register_meta(aten.randperm.default)
 def meta_randperm_default(
-    n, *, dtype=torch.long, layout=None, device=None, pin_memory=None
+    n,
+    *,
+    dtype=torch.long,
+    layout=None,
+    device=None,
+    pin_memory=None,
 ):
     return torch.empty(
         n, dtype=dtype, layout=layout, device=device, pin_memory=pin_memory
@@ -321,7 +326,13 @@ def meta_randperm_default(
 @register_meta([aten.randint.default, aten.randint.out])
 @out_wrapper()
 def meta_randint(
-    high, size, *, dtype=torch.long, layout=None, device=None, pin_memory=None
+    high,
+    size,
+    *,
+    dtype=torch.long,
+    layout=None,
+    device=None,
+    pin_memory=None,
 ):
     return torch.empty(
         size, dtype=dtype, layout=layout, device=device, pin_memory=pin_memory
@@ -775,7 +786,9 @@ def linearSolveCheckInputs(
 
 # From aten/src/ATen/native/LinearAlgebraUtils.h
 def checkFloatingOrComplex(
-    t: Tensor, f_name: str, allow_low_precision_dtypes: bool = True
+    t: Tensor,
+    f_name: str,
+    allow_low_precision_dtypes: bool = True,
 ):
     dtype = t.dtype
     torch._check(
@@ -816,7 +829,10 @@ def checkInputsSolver(
 
 
 def checkSameDevice(
-    fn_name: str, result: Tensor, input: Tensor, result_name: str = "result"
+    fn_name: str,
+    result: Tensor,
+    input: Tensor,
+    result_name: str = "result",
 ):
     torch._check(
         result.device == input.device,
@@ -1036,7 +1052,11 @@ def linalg_ldl_factor_ex_meta(
 @register_meta([aten.linalg_ldl_solve.default, aten.linalg_ldl_solve.out])
 @out_wrapper()
 def linalg_ldl_solve_meta(
-    LD: Tensor, pivots: Tensor, B: Tensor, *, hermitian: bool = False
+    LD: Tensor,
+    pivots: Tensor,
+    B: Tensor,
+    *,
+    hermitian: bool = False,
 ) -> Tensor:
     squareCheckInputs(LD, "torch.linalg.ldl_solve")
     checkFloatingOrComplex(LD, "torch.linalg.ldl_solve")
@@ -1104,7 +1124,10 @@ def linalg_lu_meta(A: Tensor, *, pivot: bool = True) -> Tuple[Tensor, Tensor, Te
 @register_meta([aten.linalg_lu_factor_ex.default, aten.linalg_lu_factor_ex.out])
 @out_wrapper("LU", "pivots", "info")
 def linalg_lu_factor_ex_meta(
-    A: Tensor, *, pivot: bool = True, check_errors: bool = False
+    A: Tensor,
+    *,
+    pivot: bool = True,
+    check_errors: bool = False,
 ) -> Tuple[Tensor, Tensor, Tensor]:
     torch._check(
         A.ndim >= 2,
@@ -1344,7 +1367,8 @@ def _linalg_svd_meta(
 
 
 def _linalg_broadcast_batch_dims(
-    arg1: Tensor, arg2: Tensor
+    arg1: Tensor,
+    arg2: Tensor,
 ) -> Tuple[List[int], List[int]]:
     # broadcast the batch dimensions of arg1 and arg2.
     arg1_batch_sizes = arg1.shape[:-2]
@@ -1360,7 +1384,9 @@ def _linalg_broadcast_batch_dims(
 
 
 def _linalg_broadcast_batch_dims_name(
-    arg1: Tensor, arg2: Tensor, name: Optional[str]
+    arg1: Tensor,
+    arg2: Tensor,
+    name: Optional[str],
 ) -> Tuple[Tensor, Tensor]:
     # If there's no name we assume we don't want to check the errors
     if name:
@@ -3722,7 +3748,13 @@ def div_rtn(x, y):
 
 
 def pooling_output_shape_pad_lr(
-    inputSize, kernelSize, pad_l, pad_r, stride, dilation, ceil_mode
+    inputSize,
+    kernelSize,
+    pad_l,
+    pad_r,
+    stride,
+    dilation,
+    ceil_mode,
 ):
     outputSize = (
         div_rtn(
@@ -4029,7 +4061,12 @@ def avg_pool3d_backward_shape_check(
 
 
 def max_pool2d_checks_and_compute_shape(
-    input, kernel_size, stride, padding, dilation, ceil_mode
+    input,
+    kernel_size,
+    stride,
+    padding,
+    dilation,
+    ceil_mode,
 ):
     # Reference: aten/src/ATen/native/DilatedMaxPool2d.cpp
     def unpack(name, val):
@@ -4145,7 +4182,12 @@ def meta_max_pool2d_with_indices_backward(
 
 @register_meta(aten.max_pool2d_with_indices.default)
 def meta_max_pool2d_with_indices(
-    input, kernel_size, stride=(), padding=(0,), dilation=(1,), ceil_mode=False
+    input,
+    kernel_size,
+    stride=(),
+    padding=(0,),
+    dilation=(1,),
+    ceil_mode=False,
 ):
     (
         nInputPlane,
@@ -5516,7 +5558,12 @@ def meta_argsort(self, *, stable, dim=-1, descending=False):
 
 
 def rnn_cell_checkSizes(
-    input_gates, hidden_gates, input_bias, hidden_bias, factor, prev_hidden
+    input_gates,
+    hidden_gates,
+    input_bias,
+    hidden_bias,
+    factor,
+    prev_hidden,
 ):
     torch._check(input_gates.ndim == 2, lambda: f"{input_gates.ndim} != 2")
     torch._check(
@@ -5551,7 +5598,11 @@ def rnn_cell_checkSizes(
 
 @register_meta(aten._thnn_fused_lstm_cell.default)
 def _thnn_fused_lstm_cell_meta(
-    input_gates, hidden_gates, cx, input_bias=None, hidden_bias=None
+    input_gates,
+    hidden_gates,
+    cx,
+    input_bias=None,
+    hidden_bias=None,
 ):
     rnn_cell_checkSizes(input_gates, hidden_gates, input_bias, hidden_bias, 4, cx)
     workspace = torch.empty_like(input_gates, memory_format=torch.contiguous_format)
@@ -5862,7 +5913,11 @@ def meta_histc(input, bins=100, min=0, max=0):
     [aten._upsample_bilinear2d_aa.default, aten._upsample_bicubic2d_aa.default]
 )
 def meta_upsample_bimode2d_aa(
-    input, output_size, align_corners, scales_h=None, scales_w=None
+    input,
+    output_size,
+    align_corners,
+    scales_h=None,
+    scales_w=None,
 ):
     full_output_size = upsample_common_check(
         input.size(), output_size, num_spatial_dims=2
@@ -5951,7 +6006,13 @@ def t_(self):
 @register_meta(aten.searchsorted)
 @out_wrapper()
 def meta_searchsorted(
-    sorted_sequence, self, *, out_int32=False, right=False, side=None, sorter=None
+    sorted_sequence,
+    self,
+    *,
+    out_int32=False,
+    right=False,
+    side=None,
+    sorter=None,
 ):
     dtype = torch.int32 if out_int32 else torch.int64
     if isinstance(self, torch.Tensor):
@@ -5993,7 +6054,13 @@ def meta_embedding_bag_dense_backward(
 
 @register_meta(aten._embedding_bag_per_sample_weights_backward)
 def meta_embedding_bag_per_sample_weights_backward(
-    grad, weight, indices, offsets, offset2bag, mode, padding_idx=-1
+    grad,
+    weight,
+    indices,
+    offsets,
+    offset2bag,
+    mode,
+    padding_idx=-1,
 ):
     MODE_SUM, MODE_MEAN, MODE_MAX = range(3)
     embedding_features = grad.size(1)
@@ -6079,7 +6146,9 @@ def meta__jagged_to_padded_dense_forward(
 
 @register_meta(aten._padded_dense_to_jagged_forward.default)
 def meta__padded_dense_to_jagged_forward(
-    padded: Tensor, offsets: List[Tensor], total_L: Optional[int] = None
+    padded: Tensor,
+    offsets: List[Tensor],
+    total_L: Optional[int] = None,
 ):
     # only one jagged dim is supported for now
     assert len(offsets) == 1
