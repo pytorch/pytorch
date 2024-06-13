@@ -246,7 +246,7 @@ def tune_gemm_in_file(filename: Optional[str] = None) -> None:
     r"""tune gemm in file."""
 
     assert is_enabled()
-    assert tuning_is_enabled() == False
+    assert tuning_is_enabled()
 
     if filename is None:
         print(f'must have filename ')

@@ -125,6 +125,7 @@ All python APIs exist in the `torch.cuda.tunable` module.
 | write_file_on_exit(val: bool) -> None | Default is True. |
 | write_file(filename: Optional[str] = None) -> None | If filename not given, it will call get_filename(). |
 | read_file(filename: Optional[str] = None) -> None | If filename not given, it will call get_filename(). |
+| tune_gemm_in_file(filename: str) -> None | read a untuned file and tune GEMMs in it. |
 
 ### C++ Interface
 Example:
