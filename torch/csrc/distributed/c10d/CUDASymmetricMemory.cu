@@ -138,8 +138,6 @@ CUDASymmetricMemory::CUDASymmetricMemory(
 
 CUDASymmetricMemory::~CUDASymmetricMemory() {
 #if !defined(USE_ROCM) && defined(PYTORCH_C10_DRIVER_API_SUPPORTED)
-  // TODO
-  return;
   c10::cuda::CUDAGuard guard(local_device_idx_);
   C10_CUDA_CHECK(cudaDeviceSynchronize());
 
@@ -204,6 +202,23 @@ at::Tensor CUDASymmetricMemory::get_buffer(
       .options(options)
       .target_device(device)
       .make_tensor();
+}
+
+void check_channel(int channel, int world_size) {
+  TORCH_CHECK(
+      channel >= 0,
+      "channel for barrier(), put_signal() and wait_signal() ",
+      "must be greater than 0 (got ",
+      channel,
+      ")");
+  const size_t num_channels = signal_pad_size / sizeof(uint32_t) * world_size;
+  TORCH_CHECK(
+      static_cast<size_t>(channel) < num_channels,
+      "The maximum supported channel for barrier(), put_signal() and wait_signal() is ",
+      num_channels - 1,
+      " (got ",
+      channel,
+      ")");
 }
 
 __device__ __forceinline__ void release_signal(uint32_t* addr) {
@@ -300,12 +315,6 @@ void CUDASymmetricMemory::wait_signal(int src_rank, int channel) {
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
-CUDASymmetricMemoryAllocator::~CUDASymmetricMemoryAllocator() {
-  for (auto& it : ptr_to_block_) {
-    it.second.release();
-  }
-}
-
 void* CUDASymmetricMemoryAllocator::alloc(
     size_t size,
     int device_idx,
@@ -340,7 +349,10 @@ void* CUDASymmetricMemoryAllocator::alloc(
 
   auto block = c10::make_intrusive<Block>(
       handle, device_idx, block_size, size, signal_pad_offset, group_name);
-  ptr_to_block_.emplace(ptr, std::move(block));
+  {
+    std::unique_lock lock(mutex_);
+    ptr_to_block_.emplace(ptr, std::move(block));
+  }
   return ptr;
 #else
   TORCH_CHECK(
@@ -362,7 +374,10 @@ void CUDASymmetricMemoryAllocator::free(void* ptr) {
         reinterpret_cast<CUdeviceptr>(ptr), block->block_size));
     C10_CUDA_DRIVER_CHECK(driver_api->cuMemRelease_(block->handle));
   }
-  ptr_to_block_.erase(ptr);
+  {
+    std::unique_lock lock(mutex_);
+    ptr_to_block_.erase(ptr);
+  }
 #else
   TORCH_CHECK(
       false, "CUDASymmetricMemory requires PYTORCH_C10_DRIVER_API_SUPPORTED");
@@ -494,6 +509,7 @@ bool CUDASymmetricMemoryAllocator::is_rendezvous_completed(void* ptr) {
 }
 
 c10::intrusive_ptr<Block> CUDASymmetricMemoryAllocator::find_block(void* ptr) {
+  std::shared_lock lock(mutex_);
   auto it = ptr_to_block_.find(ptr);
   if (it == ptr_to_block_.end()) {
     return nullptr;

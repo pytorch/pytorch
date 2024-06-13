@@ -77,26 +77,24 @@ class SymmetricMemoryTest(MultiProcessTestCase):
     def _verify_symmetric_memory(self, symm_mem):
         self.assertEqual(self.world_size, 2)
 
-        buf = symm_mem.get_buffer(0, (64, 64), torch.float32, 0)
+        buf = symm_mem.get_buffer(0, (64, 64), torch.float32)
         if self.rank == 0:
-            symm_mem.wait_signal(1, 0)
+            symm_mem.wait_signal(src_rank=1)
             self.assertTrue(buf.eq(42).all())
         else:
             buf.fill_(42)
-            symm_mem.put_signal(0, 0)
+            symm_mem.put_signal(dst_rank=0)
 
-        symm_mem.barrier(1)
+        symm_mem.barrier()
 
         if self.rank == 0:
-            symm_mem.barrier(0)
-            hey = buf.eq(43)
-            # self.assertTrue(buf.eq(43).all())
-            assert hey.all(), hey
+            symm_mem.barrier()
+            self.assertTrue(buf.eq(43).all())
         else:
             buf.fill_(43)
-            symm_mem.barrier(0)
+            symm_mem.barrier()
 
-        symm_mem.barrier(1)
+        symm_mem.barrier()
 
     @skipIfRocm
     @skip_if_lt_x_gpu(2)

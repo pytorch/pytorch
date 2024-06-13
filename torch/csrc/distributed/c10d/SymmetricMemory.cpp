@@ -4,13 +4,45 @@ namespace {
 
 using namespace c10d::symmetric_memory;
 
-auto& get_allocator_map() {
-  static std::unordered_map<
+class AllocatorMap {
+ public:
+  static AllocatorMap& get() {
+    static AllocatorMap instance;
+    return instance;
+  }
+
+  void register_allocator(
+      c10::DeviceType device_type,
+      c10::intrusive_ptr<SymmetricMemoryAllocator> allocator) {
+    map_[device_type] = std::move(allocator);
+  }
+
+  c10::intrusive_ptr<SymmetricMemoryAllocator> get_allocator(
+      c10::DeviceType device_type) {
+    auto it = map_.find(device_type);
+    TORCH_CHECK(
+        it != map_.end(),
+        "SymmetricMemory does not support device type ",
+        device_type);
+    return it->second;
+  }
+
+  ~AllocatorMap() {
+    for (auto& it : map_) {
+      it.second.release();
+    }
+  }
+
+ private:
+  AllocatorMap() = default;
+  AllocatorMap(const AllocatorMap&) = delete;
+  AllocatorMap& operator=(const AllocatorMap&) = delete;
+
+  std::unordered_map<
       c10::DeviceType,
       c10::intrusive_ptr<SymmetricMemoryAllocator>>
-      allocator_map;
-  return allocator_map;
-}
+      map_;
+};
 
 // Data structures for tracking persistent allocations
 static std::unordered_map<uint64_t, void*> alloc_id_to_dev_ptr{};
@@ -27,18 +59,13 @@ namespace symmetric_memory {
 void register_allocator(
     c10::DeviceType device_type,
     c10::intrusive_ptr<SymmetricMemoryAllocator> allocator) {
-  get_allocator_map().emplace(device_type, std::move(allocator));
+  return AllocatorMap::get().register_allocator(
+      device_type, std::move(allocator));
 }
 
 c10::intrusive_ptr<SymmetricMemoryAllocator> get_allocator(
     c10::DeviceType device_type) {
-  auto allocator_map = get_allocator_map();
-  auto it = allocator_map.find(device_type);
-  TORCH_CHECK(
-      it != allocator_map.end(),
-      "SymmetricMemory does not support device type ",
-      device_type);
-  return it->second;
+  return AllocatorMap::get().get_allocator(device_type);
 }
 
 void set_group_info(

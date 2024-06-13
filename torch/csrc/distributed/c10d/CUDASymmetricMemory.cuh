@@ -85,8 +85,6 @@ struct Block : public c10::intrusive_ptr_target {
 
 class CUDASymmetricMemoryAllocator : public SymmetricMemoryAllocator {
  public:
-  ~CUDASymmetricMemoryAllocator() override;
-
   void* alloc(
       size_t size,
       int device_idx,
@@ -100,6 +98,7 @@ class CUDASymmetricMemoryAllocator : public SymmetricMemoryAllocator {
  private:
   c10::intrusive_ptr<Block> find_block(void* ptr);
 
+  std::shared_mutex mutex_;
   std::unordered_map<void*, c10::intrusive_ptr<Block>> ptr_to_block_;
 };
 
