@@ -755,7 +755,6 @@ class OutputGraph:
             # Instead of returning UnspecializedNNModuleVariable, call
             # VariableBuilder so that it is tracked for mutation.
             return VariableBuilder(self.current_tx, **options)(target)
-            result = variables.UnspecializedNNModuleVariable(target, **options)
 
         options = dict(options)
         assert "source" in options
