@@ -312,6 +312,31 @@ class TestUnflatten(TestCase):
             export_module.module(), unflattened, (torch.randn((2, 3)),)
         )
 
+    @unittest.skipIf(IS_WINDOWS, "Windows not supported for this test")
+    def test_unflatten_preserve_with_unused_input(self):
+        class M1(torch.nn.Module):
+            def forward(self, x, a, b):
+                return x + a, b
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.m1 = M1()
+
+            def forward(self, x, y):
+                a, b = torch.topk(y, 2)
+                return self.m1(x, a, b)[0]
+
+        ep = torch.export.export(
+            M(),
+            (torch.randn(2), torch.randn(5)),
+            preserve_module_call_signature=("m1",),
+            strict=False,
+        )
+        ep.graph.eliminate_dead_code()
+        unflattened = unflatten(ep)
+        self.compare_outputs(ep.module(), unflattened, (torch.randn(2), torch.randn(5)))
+
     def test_unflatten_wrong_input(self):
         class Mod(torch.nn.Module):
             def __init__(self):
@@ -746,6 +771,28 @@ class TestUnflatten(TestCase):
         ep = export(m, inps)
         unep = unflatten(ep)
         self.assertTrue(torch.allclose(unep(*inps), m(*inps)))
+
+    def test_attr_as_submod_input(self):
+        class layer(torch.nn.Module):
+            def forward(self, x, const) -> torch.Tensor:
+                return x + const
+
+        class M(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.register_buffer("const", torch.ones(4, 8))
+                self.layers = torch.nn.ModuleList([layer() for _ in range(2)])
+
+            def forward(self, x: torch.Tensor) -> torch.Tensor:
+                for layer in self.layers:
+                    x = layer(x, self.const)
+                return x
+
+        mod = M()
+        x = torch.randn(4, 8)
+        ep = export(mod, (x,))
+        unflattened = unflatten(ep)
+        torch.testing.assert_close(unflattened(x), mod(x))
 
 
 if __name__ == "__main__":
