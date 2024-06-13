@@ -1383,7 +1383,7 @@ class GraphModule(torch.nn.Module):
 
     @parametrize("dynamic", [False, True])
     def test_subclass_views(self, dynamic):
-        def _get_views(t): # returns (view: Tensor, expects_raises_false)
+        def _get_views(t):  # returns (view: Tensor, expects_raises_false)
             # Note that any closed-over SymInts will be symbolicized during fake-ification.
             yield t.narrow(dim=-1, start=3, length=8), False
             yield t.split(5, -1)[2], False
