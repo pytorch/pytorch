@@ -23,7 +23,7 @@ install_buck2() {
   pushd executorch/.ci/docker
 
   BUCK2_VERSION=$(cat ci_commit_pins/buck2.txt)
-  as_jenkins bash common/install_buck.sh
+  source common/install_buck.sh
 
   popd
 }
