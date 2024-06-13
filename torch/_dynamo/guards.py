@@ -91,7 +91,6 @@ from .source import (
     ShapeEnvSource,
     TupleIteratorGetItemSource,
     TypeSource,
-    WeakRefCallSource,
 )
 from .types import CacheEntry, ExtraState, GuardedCode, GuardFail, GuardFn  # noqa: F401
 from .utils import (
@@ -1003,13 +1002,6 @@ class GuardBuilder(GuardBuilderBase):
                 )
             out = base_guard_manager.get_key_manager(
                 index=source.index,
-                source=source_name,
-                example_value=example_value,
-                guard_manager_enum=guard_manager_enum,
-            )
-        elif isinstance(source, WeakRefCallSource):
-            assert base_guard_manager  # to make mypy happy
-            out = base_guard_manager.weakref_call_manager(
                 source=source_name,
                 example_value=example_value,
                 guard_manager_enum=guard_manager_enum,
