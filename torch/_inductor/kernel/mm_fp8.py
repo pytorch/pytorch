@@ -3,6 +3,7 @@ import logging
 import sympy
 
 import torch
+from torch.utils.cpp_extension import load
 from .. import config as inductor_config
 from ..lowering import (
     add_layout_constraint,
@@ -190,7 +191,7 @@ fp8_mm_bias_template = TritonTemplate(
 
 
 # how to refer to the blas.cpp namespace?
-aten__fp8_mm = ExternKernelChoice(torch._fp8_mm, "at::_fp8_mm", has_out_variant=False)
+# aten__fp8_mm = ExternKernelChoice(torch._fp8_mm, "at::_fp8_mm", has_out_variant=False)
 
 # def dummy_python_kernel():
 #     pass
@@ -254,6 +255,19 @@ def tuned_fp8_mm(
     use_fast_accum=True,
     layout=None,
 ):
+
+    module = load(
+        name='mm_fp8',
+        sources=["/data/users/yangsiyu/pytorch/torch/_inductor/kernel/mm_fp8/mm_fp8.cpp"],
+        verbose=True,
+        with_cuda=True,
+    )
+    log.info("Siyu DEBUG loaded as extension")
+    aten__fp8_mm = ExternKernelChoice(module._fp8_mm_cuda, "at::_fp8_mm", has_out_variant=False)
+
+    # torch.ops.load_library("/home/yangsiyu/.cache/torch_extensions/py310_cu120/mm_fp8/mm_fp8.so")
+    # aten__fp8_mm = ExternKernelChoice(torch.ops.mm_fp8._fp8_mm_cuda, "at::_fp8_mm", has_out_variant=False)
+
     add_layout_constraint(aten._fp8_mm.default, constrain_to_fx_strides)
     m, n, k, layout, mat_a, mat_b = mm_args(
         mat_a, mat_b, layout=layout, out_dtype=out_dtype
