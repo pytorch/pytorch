@@ -492,11 +492,14 @@ class _SpectralNorm(Module):
                 torch.mv(weight_mat, self._v),  # type: ignore[has-type]
                 dim=0,
                 eps=self.eps,
-                out=self._u,
-            )  # type: ignore[has-type]
+                out=self._u,  # type: ignore[has-type]
+            )
             self._v = F.normalize(
-                torch.mv(weight_mat.H, self._u), dim=0, eps=self.eps, out=self._v
-            )  # type: ignore[has-type]
+                torch.mv(weight_mat.H, self._u),  # type: ignore[has-type]
+                dim=0,
+                eps=self.eps,
+                out=self._v,  # type: ignore[has-type]
+            )
 
     def forward(self, weight: torch.Tensor) -> torch.Tensor:
         if weight.ndim == 1:
