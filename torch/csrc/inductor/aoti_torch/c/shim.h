@@ -558,6 +558,13 @@ AOTI_TORCH_EXPORT AOTITorchError aoti_torch_proxy_executor_call_function(
     int num_tensors,
     AtenTensorHandle* flatten_tensor_args);
 
+AOTI_TORCH_EXPORT void aoti_torch_check(
+    bool cond,
+    const char* func,
+    const char* file,
+    uint32_t line,
+    const char* msg);
+
 #ifdef STRIP_ERROR_MESSAGES
 #define AOTI_TORCH_CHECK(cond, ...)              \
   if (!(cond)) {                                 \

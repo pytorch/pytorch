@@ -18,7 +18,10 @@ from torch._subclasses.fake_tensor import is_fake
 
 from .. import config
 
-from .functional_utils import _check_if_mutation_can_be_in_graph, has_same_metadata
+from .functional_utils import (
+    _check_if_mutation_can_be_in_graph,
+    FunctionalTensorMetadataEq,
+)
 from .utils import strict_zip
 
 zip = strict_zip
@@ -53,27 +56,6 @@ OutputType = Enum(
         "custom_function_view",
     ),
 )
-
-
-# Wrapper around a FunctionalTensorWrapper for comparing only the resulting metadata
-# after applying all the ViewMeta operations.
-class FunctionalTensorMetadataEq:
-    def __init__(self, tensor: torch.Tensor) -> None:
-        assert torch._is_functional_tensor(tensor)
-        self.tensor = tensor
-
-    def __eq__(self, other: object) -> bool:
-        # If other is None, then it probably means that we weren't able to recreate
-        # the FunctionalTensorMetadataEq. One of this cases is when we update the
-        # view metadata by calling: create_synthetic_base_metadata.
-        if other is None:
-            return True
-
-        # Comparison agains any other type is not implemented.
-        if not isinstance(other, FunctionalTensorMetadataEq):
-            return NotImplemented
-
-        return has_same_metadata(self.tensor, other.tensor)
 
 
 # This class stores info about every user output.
@@ -726,6 +708,9 @@ class AOTConfig:
     enable_log: bool = True
     # this is always false outside of export.
     pre_dispatch: bool = False
+
+    # Key to use for AOTAutogradCache
+    cache_key: Optional[str] = None
 
     def __post_init__(self):
         if self.pre_dispatch:
