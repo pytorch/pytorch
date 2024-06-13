@@ -65,7 +65,7 @@ from torch.testing._internal import (
     common_methods_invocations,
     common_utils,
 )
-from torch.testing._internal.opinfo import core as opinfo_core
+from torch.testing._internal.opinfo import core as opinfo_core  # noqa: TCH001
 
 
 # NOTE: For ATen signature modifications that will break ONNX export,
@@ -217,6 +217,10 @@ EXPECTED_SKIPS_OR_FAILS_WITH_DTYPES: Tuple[onnx_test_common.DecorateMeta, ...] =
         "addr",
         dtypes=onnx_test_common.COMPLEX_TYPES,
         reason=onnx_test_common.reason_dynamo_does_not_support("Addr", "complex64")
+    ),
+    xfail(
+        "alias_copy",
+        reason="OnnxExporterError: Failed to export model",
     ),
     xfail(
         "allclose",
