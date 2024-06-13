@@ -1,20 +1,33 @@
 # mypy: allow-untyped-defs
-from collections import OrderedDict, namedtuple
+
+import functools
 import itertools
 import warnings
-import functools
 import weakref
+from collections import namedtuple, OrderedDict
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    Iterator,
+    List,
+    Mapping,
+    Optional,
+    overload,
+    Set,
+    Tuple,
+    TypeVar,
+    Union,
+)
+from typing_extensions import Self
 
 import torch
+from torch import device, dtype, Tensor
 from torch._prims_common import DeviceLikeType
-from ..parameter import Parameter
-import torch.utils.hooks as hooks
-
-from torch import Tensor, device, dtype
-from typing import Union, Tuple, Any, Callable, Iterator, Set, Optional, overload, TypeVar, Mapping, Dict, List
-from typing_extensions import Self
-from ...utils.hooks import RemovableHandle
+from torch.nn.parameter import Parameter
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
+from torch.utils.hooks import BackwardHook, RemovableHandle
+
 
 __all__ = ['register_module_forward_pre_hook', 'register_module_forward_hook',
            'register_module_full_backward_pre_hook', 'register_module_backward_hook',
@@ -122,7 +135,7 @@ def register_module_buffer_registration_hook(hook: Callable[..., None]) -> Remov
             a handle that can be used to remove the added hook by calling
             ``handle.remove()``
     """
-    handle = hooks.RemovableHandle(_global_buffer_registration_hooks)
+    handle = RemovableHandle(_global_buffer_registration_hooks)
     _global_buffer_registration_hooks[handle.id] = hook
     return handle
 
@@ -146,7 +159,7 @@ def register_module_module_registration_hook(hook: Callable[..., None]) -> Remov
             a handle that can be used to remove the added hook by calling
             ``handle.remove()``
     """
-    handle = hooks.RemovableHandle(_global_module_registration_hooks)
+    handle = RemovableHandle(_global_module_registration_hooks)
     _global_module_registration_hooks[handle.id] = hook
     return handle
 
@@ -170,7 +183,7 @@ def register_module_parameter_registration_hook(hook: Callable[..., None]) -> Re
             a handle that can be used to remove the added hook by calling
             ``handle.remove()``
     """
-    handle = hooks.RemovableHandle(_global_parameter_registration_hooks)
+    handle = RemovableHandle(_global_parameter_registration_hooks)
     _global_parameter_registration_hooks[handle.id] = hook
     return handle
 
@@ -202,7 +215,7 @@ def register_module_forward_pre_hook(hook: Callable[..., None]) -> RemovableHand
             a handle that can be used to remove the added hook by calling
             ``handle.remove()``
     """
-    handle = hooks.RemovableHandle(_global_forward_pre_hooks)
+    handle = RemovableHandle(_global_forward_pre_hooks)
     _global_forward_pre_hooks[handle.id] = hook
     return handle
 
@@ -239,8 +252,8 @@ def register_module_forward_hook(hook: Callable[..., None], *, always_call: bool
     This hook will be executed before specific module hooks registered with
     ``register_forward_hook``.
     """
-    handle = hooks.RemovableHandle(_global_forward_hooks,
-                                   extra_dict=_global_forward_hooks_always_called)
+    handle = RemovableHandle(_global_forward_hooks,
+                             extra_dict=_global_forward_hooks_always_called)
     _global_forward_hooks[handle.id] = hook
     if always_call:
         _global_forward_hooks_always_called[handle.id] = True
@@ -269,7 +282,7 @@ def register_module_backward_hook(
 
     _global_is_full_backward_hook = False
 
-    handle = hooks.RemovableHandle(_global_backward_hooks)
+    handle = RemovableHandle(_global_backward_hooks)
     _global_backward_hooks[handle.id] = hook
     return handle
 
@@ -296,7 +309,7 @@ def register_module_full_backward_pre_hook(
             ``handle.remove()``
 
     """
-    handle = hooks.RemovableHandle(_global_backward_pre_hooks)
+    handle = RemovableHandle(_global_backward_pre_hooks)
     _global_backward_pre_hooks[handle.id] = hook
     return handle
 
@@ -330,7 +343,7 @@ def register_module_full_backward_hook(
 
     _global_is_full_backward_hook = True
 
-    handle = hooks.RemovableHandle(_global_backward_hooks)
+    handle = RemovableHandle(_global_backward_hooks)
     _global_backward_hooks[handle.id] = hook
     return handle
 
@@ -1216,7 +1229,7 @@ class Module:
                 ``handle.remove()``
 
         """
-        handle = hooks.RemovableHandle(self._backward_pre_hooks)
+        handle = RemovableHandle(self._backward_pre_hooks)
         self._backward_pre_hooks[handle.id] = hook
         if prepend:
             self._backward_pre_hooks.move_to_end(handle.id, last=False)  # type: ignore[attr-defined]
@@ -1242,7 +1255,7 @@ class Module:
 
         self._is_full_backward_hook = False
 
-        handle = hooks.RemovableHandle(self._backward_hooks)
+        handle = RemovableHandle(self._backward_hooks)
         self._backward_hooks[handle.id] = hook
         return handle
 
@@ -1300,7 +1313,7 @@ class Module:
 
         self._is_full_backward_hook = True
 
-        handle = hooks.RemovableHandle(self._backward_hooks)
+        handle = RemovableHandle(self._backward_hooks)
         self._backward_hooks[handle.id] = hook
         if prepend:
             self._backward_hooks.move_to_end(handle.id, last=False)  # type: ignore[attr-defined]
@@ -1448,7 +1461,7 @@ class Module:
                 a handle that can be used to remove the added hook by calling
                 ``handle.remove()``
         """
-        handle = hooks.RemovableHandle(
+        handle = RemovableHandle(
             self._forward_pre_hooks,
             extra_dict=self._forward_pre_hooks_with_kwargs
         )
@@ -1513,7 +1526,7 @@ class Module:
                 a handle that can be used to remove the added hook by calling
                 ``handle.remove()``
         """
-        handle = hooks.RemovableHandle(
+        handle = RemovableHandle(
             self._forward_hooks,
             extra_dict=[self._forward_hooks_with_kwargs, self._forward_hooks_always_called],
         )
@@ -1597,7 +1610,7 @@ class Module:
 
             bw_hook = None
             if full_backward_hooks or backward_pre_hooks:
-                bw_hook = hooks.BackwardHook(self, full_backward_hooks, backward_pre_hooks)
+                bw_hook = BackwardHook(self, full_backward_hooks, backward_pre_hooks)
                 args = bw_hook.setup_input_hook(args)
 
             result = forward_call(*args, **kwargs)
@@ -1807,7 +1820,7 @@ class Module:
         guaranteed to exist in `state_dict`. The hooks may modify `state_dict`
         inplace or return a new one.
         """
-        handle = hooks.RemovableHandle(self._state_dict_hooks)
+        handle = RemovableHandle(self._state_dict_hooks)
         self._state_dict_hooks[handle.id] = hook
         return handle
 
@@ -1819,7 +1832,7 @@ class Module:
         hooks can be used to perform pre-processing before the ``state_dict``
         call is made.
         """
-        handle = hooks.RemovableHandle(self._state_dict_pre_hooks)
+        handle = RemovableHandle(self._state_dict_pre_hooks)
         self._state_dict_pre_hooks[handle.id] = hook
         return handle
 
@@ -1960,7 +1973,7 @@ class Module:
             with_module (bool, optional): Whether or not to pass the module
                 instance to the hook as the first parameter.
         """
-        handle = hooks.RemovableHandle(self._load_state_dict_pre_hooks)
+        handle = RemovableHandle(self._load_state_dict_pre_hooks)
         self._load_state_dict_pre_hooks[handle.id] = _WrappedHook(hook, self if with_module else None)
         return handle
 
@@ -1989,7 +2002,7 @@ class Module:
                 a handle that can be used to remove the added hook by calling
                 ``handle.remove()``
         """
-        handle = hooks.RemovableHandle(self._load_state_dict_post_hooks)
+        handle = RemovableHandle(self._load_state_dict_post_hooks)
         self._load_state_dict_post_hooks[handle.id] = hook
         return handle
 

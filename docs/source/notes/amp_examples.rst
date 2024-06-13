@@ -1,22 +1,22 @@
 .. _amp-examples:
 
-CUDA Automatic Mixed Precision examples
+Automatic Mixed Precision examples
 =======================================
 
-.. currentmodule:: torch.cuda.amp
+.. currentmodule:: torch.amp
 
 Ordinarily, "automatic mixed precision training" means training with
-:class:`torch.autocast` and :class:`torch.cuda.amp.GradScaler` together.
+:class:`torch.autocast` and :class:`torch.amp.GradScaler` together.
 
 Instances of :class:`torch.autocast` enable autocasting for chosen regions.
 Autocasting automatically chooses the precision for GPU operations to improve performance
 while maintaining accuracy.
 
-Instances of :class:`torch.cuda.amp.GradScaler` help perform the steps of
-gradient scaling conveniently.  Gradient scaling improves convergence for networks with ``float16``
+Instances of :class:`torch.amp.GradScaler` help perform the steps of
+gradient scaling conveniently.  Gradient scaling improves convergence for networks with ``float16`` (by default on CUDA and XPU)
 gradients by minimizing gradient underflow, as explained :ref:`here<gradient-scaling>`.
 
-:class:`torch.autocast` and :class:`torch.cuda.amp.GradScaler` are modular.
+:class:`torch.autocast` and :class:`torch.amp.GradScaler` are modular.
 In the samples below, each is used as its individual documentation suggests.
 
 (Samples here are illustrative.  See the
@@ -109,7 +109,7 @@ Calling ``scaler.unscale_(optimizer)`` before clipping enables you to clip unsca
 this iteration, so ``scaler.step(optimizer)`` knows not to redundantly unscale gradients before
 (internally) calling ``optimizer.step()``.
 
-.. currentmodule:: torch.cuda.amp.GradScaler
+.. currentmodule:: torch.amp.GradScaler
 
 .. warning::
     :meth:`unscale_<unscale_>` should only be called once per optimizer per :meth:`step<step>` call,
@@ -155,7 +155,7 @@ where you called :meth:`step<step>` for a full effective batch::
                 scaler.update()
                 optimizer.zero_grad()
 
-.. currentmodule:: torch.cuda.amp
+.. currentmodule:: torch.amp
 
 Gradient penalty
 ----------------
@@ -241,7 +241,7 @@ Here's how that looks for the same L2 penalty::
 Working with Multiple Models, Losses, and Optimizers
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-.. currentmodule:: torch.cuda.amp.GradScaler
+.. currentmodule:: torch.amp.GradScaler
 
 If your network has multiple losses, you must call :meth:`scaler.scale<scale>` on each of them individually.
 If your network has multiple optimizers, you may call :meth:`scaler.unscale_<unscale_>` on any of them individually,
@@ -250,7 +250,7 @@ and you must call :meth:`scaler.step<step>` on each of them individually.
 However, :meth:`scaler.update<update>` should only be called once,
 after all optimizers used this iteration have been stepped::
 
-    scaler = torch.cuda.amp.GradScaler()
+    scaler = torch.amp.GradScaler()
 
     for epoch in epochs:
         for input, target in data:
@@ -282,7 +282,7 @@ while the other one does not.  Since step skipping occurs rarely (every several 
 this should not impede convergence.  If you observe poor convergence after adding gradient scaling
 to a multiple-optimizer model, please report a bug.
 
-.. currentmodule:: torch.cuda.amp
+.. currentmodule:: torch.amp
 
 .. _amp-multigpu:
 
@@ -347,7 +347,7 @@ is to disable autocast and force execution in ``float32`` ( or ``dtype``) at any
             output = imported_function(input1.float(), input2.float())
 
 If you're the function's author (or can alter its definition) a better solution is to use the
-:func:`torch.cuda.amp.custom_fwd` and :func:`torch.cuda.amp.custom_bwd` decorators as shown in
+:func:`torch.amp.custom_fwd` and :func:`torch.amp.custom_bwd` decorators as shown in
 the relevant case below.
 
 Functions with multiple inputs or autocastable ops
@@ -380,20 +380,21 @@ Functions that need a particular ``dtype``
 ------------------------------------------
 
 Consider a custom function that requires ``torch.float32`` inputs.
-Apply :func:`custom_fwd(cast_inputs=torch.float32)<custom_fwd>` to ``forward``
-and :func:`custom_bwd<custom_bwd>` (with no arguments) to ``backward``.
-If ``forward`` runs in an autocast-enabled region, the decorators cast floating-point CUDA Tensor
-inputs to ``float32``, and locally disable autocast during ``forward`` and ``backward``::
+Apply :func:`custom_fwd(device_type='cuda', cast_inputs=torch.float32)<custom_fwd>` to ``forward``
+and :func:`custom_bwd(device_type='cuda')<custom_bwd>` to ``backward``.
+If ``forward`` runs in an autocast-enabled region, the decorators cast floating-point Tensor
+inputs to ``float32`` on designated device assigned by the argument `device_type <../amp.html>`_,
+`CUDA` in this example, and locally disable autocast during ``forward`` and ``backward``::
 
     class MyFloat32Func(torch.autograd.Function):
         @staticmethod
-        @custom_fwd(cast_inputs=torch.float32)
+        @custom_fwd(device_type='cuda', cast_inputs=torch.float32)
         def forward(ctx, input):
             ctx.save_for_backward(input)
             ...
             return fwd_output
         @staticmethod
-        @custom_bwd
+        @custom_bwd(device_type='cuda')
         def backward(ctx, grad):
             ...
 
