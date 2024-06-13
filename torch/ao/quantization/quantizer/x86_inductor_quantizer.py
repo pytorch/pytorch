@@ -420,16 +420,17 @@ class _CurrentQuantizationMode:
 
     All possible current quantization modes are listed below:
     ----------------------------------------------------------------------------------------------------------
-                |                                       is_dynamic
-        is_qat  |---------------------------------------------------------------------------------------------
+                |                                       dynamic_state
+     qat_state  |---------------------------------------------------------------------------------------------
                 |                           None                              |    True       |  False
     ----------------------------------------------------------------------------------------------------------
         None    | quantizer does not receive a non-None `quantization_config` | \             | \
         False   | quantizer will not do QAT                                   | dynamic       | static
         True    | quantizer will do QAT                                       | QAT + dynamic | QAT + static
     """
-    is_qat: Optional[bool]
-    is_dynamic: Optional[bool]
+
+    qat_state: Optional[bool]
+    dynamic_state: Optional[bool]
 
 
 class X86InductorQuantizer(Quantizer):
@@ -468,20 +469,39 @@ class X86InductorQuantizer(Quantizer):
 
     def _get_current_quantization_mode(self) -> _CurrentQuantizationMode:
         """Retrieves the current quantization mode based on all configurations."""
-        is_qat = None
-        is_dynamic = None
+        qat_state = None
+        dynamic_state = None
 
+        # As we use `_need_skip_config` to skip all invalid configurations,
+        # we can safely assume that the all existing non-None configurations
+        # have the same quantization mode.
         for qconfig in (
             list(self.module_name_qconfig.values())
             + list(self.operator_type_qconfig.values())
             + [self.global_config]
         ):
             if qconfig is not None:
-                is_qat = qconfig.is_qat
+                # Query the `is_qat` state
+                if qat_state is None:
+                    qat_state = qconfig.is_qat
+                else:
+                    assert qat_state == qconfig.is_qat, (
+                        f"All non-None quantization configs should have the same `is_qat`,"
+                        f"but got {qat_state} and {qconfig.is_qat}."
+                    )
+                # Query the `is_dynamic` state
                 input_activation_spec = qconfig.input_activation
                 if input_activation_spec is not None:
-                    is_dynamic = input_activation_spec.is_dynamic
-        return _CurrentQuantizationMode(is_qat=is_qat, is_dynamic=is_dynamic)
+                    if dynamic_state is None:
+                        dynamic_state = input_activation_spec.is_dynamic
+                    else:
+                        assert dynamic_state == input_activation_spec.is_dynamic, (
+                            f"All non-None `input_activation_spec` should have the same `is_dynamic`,"
+                            f"but got {dynamic_state} and {input_activation_spec.is_dynamic}."
+                        )
+        return _CurrentQuantizationMode(
+            qat_state=qat_state, dynamic_state=dynamic_state
+        )
 
     def _need_skip_config(
         self, quantization_config: Optional[QuantizationConfig]
@@ -498,16 +518,16 @@ class X86InductorQuantizer(Quantizer):
         need_skip = False
         current_mode = self._get_current_quantization_mode()
         if (
-            current_mode.is_qat is not None
-            and current_mode.is_qat != quantization_config.is_qat
+            current_mode.qat_state is not None
+            and current_mode.qat_state != quantization_config.is_qat
         ):
             warnings.warn("Mixed QAT and Non-QAT quantization config is not supported.")
             need_skip = True
-        if current_mode.is_dynamic is not None:
+        if current_mode.dynamic_state is not None:
             input_activation_spec = quantization_config.input_activation
             if (
                 input_activation_spec is not None
-                and current_mode.is_dynamic != input_activation_spec.is_dynamic
+                and current_mode.dynamic_state != input_activation_spec.is_dynamic
             ):
                 warnings.warn(
                     "Mixed dynamic and static quantization config is not supported."
@@ -844,19 +864,19 @@ class X86InductorQuantizer(Quantizer):
                 binary_node_input_qspec_map[extra_input_node] = get_input_act_qspec(
                     quantization_config
                 )
-                binary_node.meta[
-                    QUANT_ANNOTATION_KEY
-                ] = _X86InductorQuantizationAnnotation(
-                    input_qspec_map=binary_node_input_qspec_map,
-                    _annotated=True,
+                binary_node.meta[QUANT_ANNOTATION_KEY] = (
+                    _X86InductorQuantizationAnnotation(
+                        input_qspec_map=binary_node_input_qspec_map,
+                        _annotated=True,
+                    )
                 )
-                unary_node.meta[
-                    QUANT_ANNOTATION_KEY
-                ] = _X86InductorQuantizationAnnotation(
-                    # TODO<leslie> Remove the annotate of output in QAT when qat util support pattern matcher.
-                    output_qspec=get_output_act_qspec(quantization_config),  # type: ignore[arg-type]
-                    _annotated=True,
-                    _is_output_of_quantized_pattern=True,
+                unary_node.meta[QUANT_ANNOTATION_KEY] = (
+                    _X86InductorQuantizationAnnotation(
+                        # TODO<leslie> Remove the annotate of output in QAT when qat util support pattern matcher.
+                        output_qspec=get_output_act_qspec(quantization_config),  # type: ignore[arg-type]
+                        _annotated=True,
+                        _is_output_of_quantized_pattern=True,
+                    )
                 )
             else:
                 _annotate_nodes_not_quantize([binary_node, unary_node])
@@ -914,14 +934,14 @@ class X86InductorQuantizer(Quantizer):
                 binary_node_input_qspec_map[extra_input_node] = get_input_act_qspec(
                     quantization_config
                 )
-                binary_node.meta[
-                    QUANT_ANNOTATION_KEY
-                ] = _X86InductorQuantizationAnnotation(
-                    input_qspec_map=binary_node_input_qspec_map,
-                    # TODO<leslie> Remove the annotate of output in QAT when qat util support pattern matcher.
-                    output_qspec=get_output_act_qspec(quantization_config),  # type: ignore[arg-type]
-                    _annotated=True,
-                    _is_output_of_quantized_pattern=True,
+                binary_node.meta[QUANT_ANNOTATION_KEY] = (
+                    _X86InductorQuantizationAnnotation(
+                        input_qspec_map=binary_node_input_qspec_map,
+                        # TODO<leslie> Remove the annotate of output in QAT when qat util support pattern matcher.
+                        output_qspec=get_output_act_qspec(quantization_config),  # type: ignore[arg-type]
+                        _annotated=True,
+                        _is_output_of_quantized_pattern=True,
+                    )
                 )
             else:
                 _annotate_nodes_not_quantize(binary_node)
@@ -971,13 +991,13 @@ class X86InductorQuantizer(Quantizer):
 
             self._annotate_conv_node_helper(conv_node, False, quantization_config)
             if quantization_config is not None:
-                unary_node.meta[
-                    QUANT_ANNOTATION_KEY
-                ] = _X86InductorQuantizationAnnotation(
-                    # TODO<leslie> Remove the annotate of output in QAT when qat util support pattern matcher.
-                    output_qspec=get_output_act_qspec(quantization_config),  # type: ignore[arg-type]
-                    _annotated=True,
-                    _is_output_of_quantized_pattern=True,
+                unary_node.meta[QUANT_ANNOTATION_KEY] = (
+                    _X86InductorQuantizationAnnotation(
+                        # TODO<leslie> Remove the annotate of output in QAT when qat util support pattern matcher.
+                        output_qspec=get_output_act_qspec(quantization_config),  # type: ignore[arg-type]
+                        _annotated=True,
+                        _is_output_of_quantized_pattern=True,
+                    )
                 )
             else:
                 _annotate_nodes_not_quantize(unary_node)
@@ -1012,13 +1032,13 @@ class X86InductorQuantizer(Quantizer):
 
             self._annotate_conv_node_helper(conv_node, False, quantization_config)
             if quantization_config is not None:
-                bn_output_node.meta[
-                    QUANT_ANNOTATION_KEY
-                ] = _X86InductorQuantizationAnnotation(
-                    # TODO<leslie> Remove the annotate of output in QAT when qat util support pattern matcher.
-                    output_qspec=get_output_act_qspec(quantization_config),  # type: ignore[arg-type]
-                    _annotated=True,
-                    _is_output_of_quantized_pattern=True,
+                bn_output_node.meta[QUANT_ANNOTATION_KEY] = (
+                    _X86InductorQuantizationAnnotation(
+                        # TODO<leslie> Remove the annotate of output in QAT when qat util support pattern matcher.
+                        output_qspec=get_output_act_qspec(quantization_config),  # type: ignore[arg-type]
+                        _annotated=True,
+                        _is_output_of_quantized_pattern=True,
+                    )
                 )
             else:
                 _annotate_nodes_not_quantize(bn_output_node)
@@ -1588,19 +1608,19 @@ class X86InductorQuantizer(Quantizer):
                     linear_node, False, quantization_config
                 )
                 # We don't insert q-dq before the binary input node due to accuracy issues
-                binary_node.meta[
-                    QUANT_ANNOTATION_KEY
-                ] = _X86InductorQuantizationAnnotation(
-                    input_qspec_map={},
-                    _annotated=True,
-                    _is_output_of_quantized_pattern=(not has_unary),
+                binary_node.meta[QUANT_ANNOTATION_KEY] = (
+                    _X86InductorQuantizationAnnotation(
+                        input_qspec_map={},
+                        _annotated=True,
+                        _is_output_of_quantized_pattern=(not has_unary),
+                    )
                 )
                 if unary_node is not None:
-                    unary_node.meta[
-                        QUANT_ANNOTATION_KEY
-                    ] = _X86InductorQuantizationAnnotation(
-                        _annotated=True,
-                        _is_output_of_quantized_pattern=True,
+                    unary_node.meta[QUANT_ANNOTATION_KEY] = (
+                        _X86InductorQuantizationAnnotation(
+                            _annotated=True,
+                            _is_output_of_quantized_pattern=True,
+                        )
                     )
 
     def validate(self, model: torch.fx.GraphModule) -> None:
