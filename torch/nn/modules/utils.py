@@ -3,10 +3,10 @@ import collections
 from itertools import repeat
 from typing import List, Dict, Any
 
-__all__ = ['consume_prefix_in_state_dict_if_present']
+__all__ = ['consume_prefix_in_state_dict_if_present', 'ntuple', 'single', 'pair', 'triple', 'quadruple']
 
 
-def _ntuple(n, name="parse"):
+def ntuple(n, name="parse"):
     def parse(x):
         if isinstance(x, collections.abc.Iterable):
             return tuple(x)
@@ -16,6 +16,13 @@ def _ntuple(n, name="parse"):
     return parse
 
 
+single = ntuple(1, "single")
+pair = ntuple(2, "pair")
+triple = ntuple(3, "triple")
+quadruple = ntuple(4, "quadruple")
+
+# TODO(kit1980): get rid of these after updating user code to use public names
+_ntuple = ntuple
 _single = _ntuple(1, "_single")
 _pair = _ntuple(2, "_pair")
 _triple = _ntuple(3, "_triple")
