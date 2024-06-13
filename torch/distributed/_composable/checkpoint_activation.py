@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 from contextlib import contextmanager, nullcontext
-from typing import Any, Tuple
+from typing import Any, ContextManager, Dict, Tuple
 
 import torch
 import torch.nn as nn
@@ -13,21 +13,22 @@ from .contract import contract
 
 
 @contextmanager
-def _no_hook(module: nn.Module):
+def _no_hook(module: nn.Module, user_ctx: ContextManager = nullcontext()):
     r"""
     Disable hooks installed by checkpoint to avoid unintentional recursion
     during backward recomputation.
     """
-    orig_enable_hook = checkpoint.state(module).enable_hook
-    checkpoint.state(module).enable_hook = False
-    try:
-        yield
-    finally:
-        checkpoint.state(module).enable_hook = orig_enable_hook
+    with user_ctx:
+        orig_enable_hook = checkpoint.state(module).enable_hook
+        checkpoint.state(module).enable_hook = False
+        try:
+            yield
+        finally:
+            checkpoint.state(module).enable_hook = orig_enable_hook
 
 
 @contract()
-def checkpoint(module: nn.Module, preserve_rng_state: bool = True) -> nn.Module:
+def checkpoint(module: nn.Module, **kwargs) -> nn.Module:
     r"""
     This is a composable activation checkpointing API. Unlike functional
     activation checkpointing APIs, this one does not require changing model
@@ -40,8 +41,6 @@ def checkpoint(module: nn.Module, preserve_rng_state: bool = True) -> nn.Module:
     Args:
         module (nn.Module): the target model or sub-module to apply activation
             checkpointing.
-        preserve_rng_state (bool): whether to preserve the RNG state during
-            activation checkpointing.
 
     Example::
         >>> # xdoctest: +SKIP
@@ -63,20 +62,44 @@ def checkpoint(module: nn.Module, preserve_rng_state: bool = True) -> nn.Module:
     """
     torch._C._log_api_usage_once("torch.distributed.checkpoint")
 
-    def forward_pre_hook(module: nn.Module, inputs: Tuple[Any, ...]) -> None:
+    kwargs = kwargs or {}
+    use_reentrant = kwargs.pop("use_reentrant", False)
+    if use_reentrant:
+        raise NotImplementedError(
+            "use_reentrant=True is not supported in composable checkpoint. "
+            "Please use torch.utils.checkpoint.checkpoint instead."
+        )
+    preserve_rng_state = kwargs.pop("preserve_rng_state", True)
+    user_context_fns = kwargs.pop("context_fn", None)
+    determinism_check = kwargs.pop("determinism_check", _DEFAULT_DETERMINISM_MODE)
+    debug = kwargs.pop("debug", False)
+
+    if kwargs:
+        raise ValueError(
+            "Unexpected keyword arguments: " + ",".join(arg for arg in kwargs)
+        )
+
+    def forward_pre_hook(
+        module: nn.Module, args: Tuple[Any, ...], kwargs: Dict[str, Any]
+    ) -> None:
         if checkpoint.state(module).enable_hook:
 
             def context_fns():
-                return nullcontext(), _no_hook(module)
+                if user_context_fns is not None:
+                    ctx1, ctx2 = user_context_fns()
+                    return ctx1, _no_hook(module, ctx2)
+                else:
+                    return nullcontext(), _no_hook(module)
 
             checkpoint.state(module)._ac_generator = (
                 _checkpoint_without_reentrant_generator(
                     module,
                     preserve_rng_state,
                     context_fns,
-                    _DEFAULT_DETERMINISM_MODE,
-                    False,
-                    *inputs,
+                    determinism_check,
+                    debug,
+                    *args,
+                    **kwargs,
                 )
             )
             next(checkpoint.state(module)._ac_generator)
@@ -97,6 +120,6 @@ def checkpoint(module: nn.Module, preserve_rng_state: bool = True) -> nn.Module:
         checkpoint.state(module)._ac_generator = None
 
     checkpoint.state(module).enable_hook = True
-    module.register_forward_pre_hook(forward_pre_hook)
+    module.register_forward_pre_hook(forward_pre_hook, with_kwargs=True)
     module.register_forward_hook(forward_hook, prepend=True, always_call=True)
     return module
