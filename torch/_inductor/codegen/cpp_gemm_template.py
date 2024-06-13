@@ -148,6 +148,7 @@ class CppPackedGemmTemplate(CppTemplate):
         beta=1,
         alpha=1,
     ):
+        assert layout.dtype in [torch.float, torch.bfloat16, torch.half]
         super().__init__("packed_gemm", input_nodes, layout)
         self.beta = beta
         self.alpha = alpha
@@ -213,7 +214,13 @@ class CppPackedGemmTemplate(CppTemplate):
 
     @staticmethod
     def add_choices(
-        choices, layout, input_nodes, beta=1, alpha=1, trans_w=False, input_indices=None
+        choices,
+        layout,
+        input_nodes,
+        beta=1,
+        alpha=1,
+        trans_w=False,
+        input_indices=None,
     ):
         if input_indices is None:
             input_indices = list(range(len(input_nodes)))
@@ -233,28 +240,58 @@ class CppPackedGemmTemplate(CppTemplate):
                 w_idx = input_indices[2]
                 return [inputs[x_idx], inputs[w_idx], inputs[inp_idx]], layout_or_out
 
-        def transpose_weight(inputs, layout_or_out):
+        def maybe_to_dense(inputs, layout_or_out):
+            new_inputs = list(inputs)
+            if isinstance(inputs[1], torch.Tensor):
+                W = inputs[1]
+                new_inputs[1] = W.to_dense() if W.is_mkldnn else W
+            return new_inputs, layout_or_out
+
+        def normalize_shapes(inputs, layout_or_out):
             if not trans_w:
                 return inputs, layout_or_out
 
             new_inputs = list(inputs)
+            X = inputs[0]
             W = inputs[1]
+            B = inputs[2] if len(inputs) > 2 else None
             if isinstance(W, ir.IRNode):
-                if not isinstance(W, ir.TensorBox):
-                    W = ir.TensorBox(W)
-                new_inputs[1] = L.permute(W, [1, 0])
-                return new_inputs, layout_or_out
+                if trans_w:
+                    if not isinstance(W, ir.TensorBox):
+                        W = ir.TensorBox(W)
+                    W = L.permute(W, [1, 0])
             else:
-                assert isinstance(W, torch.Tensor)
-                new_inputs[1] = W.transpose(0, 1)
+                if trans_w:
+                    assert isinstance(W, torch.Tensor)
+                    W = W.transpose(0, 1)
+            if B is not None:
+                if isinstance(B, ir.IRNode):
+                    if not isinstance(B, ir.TensorBox):
+                        B = ir.TensorBox(B)
+                    B = L.expand(B, (X.get_size()[0], B.get_size()[-1]))
+                else:
+                    assert isinstance(B, torch.Tensor)
+                    B = B.expand(X.shape[0], B.shape[-1])
+            new_inputs[1] = W
+            if B is not None:
+                new_inputs[2] = B
             return new_inputs, layout_or_out
 
         # TODO(jgong5): decide proper number of threads per problem size
         num_threads = parallel_num_threads()
-        new_inputs, _ = transpose_weight(*reorder_and_filter(input_nodes, layout))
+        new_inputs, _ = normalize_shapes(
+            *maybe_to_dense(*reorder_and_filter(input_nodes, layout))
+        )
         m, n, k, *_ = mm_args(new_inputs[0], new_inputs[1])
         micro_gemm = create_micro_gemm(
-            "micro_gemm", m, n, k, layout.dtype, alpha=alpha, num_threads=num_threads
+            "micro_gemm",
+            m,
+            n,
+            k,
+            input_dtype=layout.dtype,
+            output_dtype=torch.float,
+            alpha=alpha,
+            num_threads=num_threads,
         )
         assert micro_gemm is not None
         _, block_n, _ = micro_gemm.register_blocking
@@ -301,7 +338,9 @@ class CppPackedGemmTemplate(CppTemplate):
             return new_inputs, layout_or_out
 
         def preprocessor(inputs, layout):
-            return pack_weight(*transpose_weight(*reorder_and_filter(inputs, layout)))
+            return pack_weight(
+                *normalize_shapes(*maybe_to_dense(*reorder_and_filter(inputs, layout)))
+            )
 
         def postprocessor(output):
             if isinstance(output, ir.TensorBox):
@@ -316,7 +355,7 @@ class CppPackedGemmTemplate(CppTemplate):
                 W = V.graph.constants[W_node.get_name()]
                 new_input_nodes[1] = W
                 new_input_nodes, _ = pack_weight(
-                    *transpose_weight(new_input_nodes, layout)
+                    *normalize_shapes(*maybe_to_dense(new_input_nodes, layout))
                 )
                 W_packed = new_input_nodes[1]
                 W_packed_constant = V.graph.add_tensor_constant(W_packed)
@@ -359,8 +398,7 @@ class CppPackedGemmTemplate(CppTemplate):
 
         template_buffer = Y
         Y_is_transposed = False
-        # TODO(jgong5): support local accumulation
-        use_local_acc = False
+        use_local_acc = self.layout.dtype != torch.float
         if epilogue_nodes:
             Y = cast(ir.Buffer, epilogue_nodes[-1])
             assert Y.get_name() in V.kernel.inplace_update_buffers
@@ -374,7 +412,8 @@ class CppPackedGemmTemplate(CppTemplate):
             self.m,
             self.n,
             self.k,
-            self.layout.dtype,
+            input_dtype=self.layout.dtype,
+            output_dtype=torch.float,
             alpha=self.alpha,
             num_threads=self.num_threads,
         )
