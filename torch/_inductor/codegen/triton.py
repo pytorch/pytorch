@@ -114,17 +114,6 @@ def gen_common_triton_imports():
     return imports.getvalue()
 
 
-class ConstExprMin(sympy.Min):
-    """
-    Variant of sympy.Min that propagates triton constexprs.
-    While the sympy.Min maps to tl.minimum, this maps to an arithmetic macro.
-    https://github.com/triton-lang/triton/issues/3815
-    """
-
-    def macro(self, a: str, b: str) -> str:
-        return f"({a} * ({a} <= {b}) + {b} * ({b} < {a}))"
-
-
 block_offsets = {
     symt: sympy.Symbol(f"{prefix_str[symt]}offset", integer=True)
     for symt in [SymT.XBLOCK, SymT.YBLOCK, SymT.RINDEX]
@@ -430,38 +419,30 @@ class TritonPrinter(PythonPrinter):
         q = self.doprint(expr.args[2])
         return f"tl.where({c}, {p}, {q})"
 
-    def _print_Min(self, expr: sympy.Expr) -> str:
+    def _print_min_max_helper(self, expr: sympy.Expr, cmp: str) -> str:
         """
-        Prints subclasses of sympy.Min. This also handles ConstExprMin.
+        Helper for max/min code genereration.
+        cmp: > or <
         """
-
-        def tl_minimum_macro(a: str, b: str) -> str:
-            return f"tl.minimum({a}, {b})"
-
-        # Get the macro. This is overridden by ConstExprMin.
-        macro = getattr(expr, "macro", tl_minimum_macro)
-        cls = type(expr)
-
         nargs = len(expr.args)
         if len(expr.args) == 1:
             return self._print(expr.args[0])
 
         mid = len(expr.args) // 2
+        cls = type(expr)
         a = self._print(cls(*expr.args[:mid]))
         b = self._print(cls(*expr.args[mid:]))
 
-        return macro(a, b)
+        # Use a macro so we can propagate constexprs.
+        # https://github.com/triton-lang/triton/issues/3815
+        assert cmp in {">", "<"}, f"Unexpected comparator: '{cmp}'"
+        return f"({a} * ({a} {cmp}= {b}) + {b} * ({b} {cmp} {a}))"
+
+    def _print_Min(self, expr):
+        return self._print_min_max_helper(expr, "<")
 
     def _print_Max(self, expr):
-        nargs = len(expr.args)
-        if len(expr.args) == 1:
-            return self._print(expr.args[0])
-
-        mid = len(expr.args) // 2
-        a = self._print(sympy.Max(*expr.args[:mid]))
-        b = self._print(sympy.Max(*expr.args[mid:]))
-
-        return f"tl.maximum({a}, {b})"
+        return self._print_min_max_helper(expr, ">")
 
     def _print_Abs(self, expr):
         assert len(expr.args) == 1
@@ -1431,7 +1412,7 @@ class TritonKernel(SIMDKernel):
                 # Use CielDiv to round leading dimensions up to 1.
                 linear_block_size = self._get_block_size(range_tree)
                 block_shape: List[sympy.Expr] = [
-                    ConstExprMin(CeilDiv(linear_block_size, numel), dim)
+                    sympy.Min(CeilDiv(linear_block_size, numel), dim)
                     for numel, dim in zip(slice_numels, dims)
                 ]
 
