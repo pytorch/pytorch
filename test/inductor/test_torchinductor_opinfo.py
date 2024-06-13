@@ -521,7 +521,7 @@ inductor_one_sample = {
     ("scatter_reduce.amax", "cuda"): {f16, f32, f64},
     ("scatter_reduce.amin", "cuda"): {f16, f32, f64},
     ("scatter_reduce.mean", "cuda"): {f16, f32, f64},
-    ("special_xlog1py", "cuda"): {f16},
+    ("special.xlog1py", "cuda"): {f16},
     ("std", "cuda"): {f16},
     ("std_mean", "cuda"): {f16},
     ("svd_lowrank", "cuda"): {f32, f64},
