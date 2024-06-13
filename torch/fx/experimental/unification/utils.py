@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 __all__ = ["hashable", "transitive_get", "raises", "reverse_dict", "xfail", "freeze"]
 def hashable(x):
     try:

@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import warnings
 from enum import auto, Enum
 from functools import partial
