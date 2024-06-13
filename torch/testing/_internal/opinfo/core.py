@@ -727,11 +727,10 @@ class OpInfo:
     # dtypes this function is expected to work with on ROCM
     dtypesIfROCM: _dispatch_dtypes = None
 
+    dtypesIfHpu: _dispatch_dtypes = None
+
     # dtypes this function is expected to work with on XPU
     dtypesIfXPU: _dispatch_dtypes = None
-
-    # dtypes this function is expected to work with on HPU
-    dtypesIfHpu: _dispatch_dtypes = None
 
     # backward dtypes this function is expected to work with
     backward_dtypes: _dispatch_dtypes = None
