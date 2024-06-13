@@ -256,6 +256,38 @@ class MiscTests(torch._inductor.test_case.TestCase):
             """Graph break due to unsupported builtin mylib.PyCapsule.foobar. This function is either a Python builtin (e.g. _warnings.warn) or a third-party C/C++ Python extension (perhaps created with pybind). If it is a Python builtin, please file an issue on GitHub so the PyTorch team can add support for it and see the next case for a workaround. If it is a third-party C/C++ Python extension, please either wrap it into a PyTorch-understood custom operator (see https://pytorch.org/docs/main/notes/custom_operators.html for more details) or, if it is traceable, use torch.compiler.allow_in_graph.""",
         )
 
+        cpp_source = """
+        #include <torch/extension.h>
+        at::Tensor baz(const at::Tensor& x) {
+            return x.clone();
+        }
+        """
+        module2 = torch.utils.cpp_extension.load_inline(
+            name="mylib2",
+            cpp_sources=cpp_source,
+            functions="baz",
+            verbose=True,
+        )
+
+        torch._dynamo.reset()
+
+        # Test that each warning only happens once
+        @torch.compile(backend="eager")
+        def f(x):
+            module2.baz(x)
+            module.foobar(x)
+            module.foobar(x)
+            module2.baz(x)
+            module.foobar(x)
+            module2.baz(x)
+            return x.clone()
+
+        with warnings.catch_warnings(record=True) as ws:
+            warnings.simplefilter("always")
+            f(x)
+            f(x)
+        self.assertEqual(len(ws), 2)
+
     def test_callpacked(self):
         def call_packed(args):
             a, b, c = args
