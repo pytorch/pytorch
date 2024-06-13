@@ -12,7 +12,7 @@ import sys
 from typing import TYPE_CHECKING
 
 # Hacky pass to force FWD graph to return primal instead of primal alias. Important for Traceable FSDP2.
-return_primal_instead_of_view = True
+return_primal_instead_of_view = False
 
 # Converts torch rng ops to their functional philox rng equivalents. Note that
 # we functionalize only CUDA rng ops today.
