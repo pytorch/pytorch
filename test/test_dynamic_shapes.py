@@ -386,6 +386,17 @@ class TestPySymInt(TestCase):
         self.assertTrue(str(expand_x.shape[1]), str(x.shape[0]))
         self.assertTrue(str(expand_x.shape[1]), str(result.shape[0]))
 
+    def test_floordiv_static(self):
+        shape_env = ShapeEnv()
+        s0 = create_symint(shape_env, 8)
+        # This was extracted from
+        # python test/inductor/test_cuda_cpp_wrapper.py -k
+        # DynamicShapesCudaWrapperCudaTests.test_insignificant_strides_cuda_dynamic_shapes_cuda_wrapper
+        bool(s0 % 2 == 0)
+        bool(s0 % (s0 // 2) == 0)
+        bool(2 * (s0 // 2) == s0)
+        self.assertTrue(statically_known_true(s0 // (s0 // 2) == 2))
+
     def test_numel(self):
         shape_env = ShapeEnv()
         x = create_symbolic_tensor("x", torch.randn(5), shape_env)
@@ -626,7 +637,7 @@ def forward(self, x_1):
         self.assertTrue(expect_true(i0 < s0))
         self.assertExpectedInline(
             str([ra.expr for ra in shape_env.deferred_runtime_asserts[i0.node.expr]]),
-            """[-s0 + u0 < 0]""",
+            """[u0 < s0]""",
         )
         self.assertTrue(i0 < s0)
         self.assertTrue(i0 != s0)

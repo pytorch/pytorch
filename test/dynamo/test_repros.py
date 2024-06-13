@@ -1612,7 +1612,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnt.frame_count, 1)
 
         self.assertEqual(
-            18 if torch._dynamo.config.inline_inbuilt_nn_modules else 12, cnt.op_count
+            15 if torch._dynamo.config.inline_inbuilt_nn_modules else 12, cnt.op_count
         )
 
     def test_exec_import(self):
@@ -5101,23 +5101,6 @@ def forward(self, primals_1, primals_2):
         mod = Mod()
         opt_mod = torch.compile(mod, backend=compiler)
         opt_mod(torch.randn(2, 2))
-
-    # https://github.com/pytorch/pytorch/issues/127970
-    @torch._inductor.config.patch(fx_graph_cache=True)
-    def test_inductor_codecache_subclass_input_inner_tensor_symint(self):
-        def gen_nt(r):
-            values = torch.randn(r, 16)
-            offsets = torch.tensor([0, 2, 3, 6, 13, r])
-            return torch.nested.nested_tensor_from_jagged(values, offsets)
-
-        def fn(nt):
-            if nt.values().size(0) % 16 == 0:
-                return nt.sin()
-            return nt.cos()
-
-        torch.compile(fn)(gen_nt(19))
-        # should not error
-        torch.compile(fn)(gen_nt(20))
 
 
 instantiate_parametrized_tests(ReproTests)

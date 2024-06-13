@@ -858,10 +858,10 @@ class FxGraphCache:
         # See _save_graph(); we don't store the callable in the cache entry so
         # recreate it here from the PyCodeCache disk cache.
         artifact_path = get_path(graph.cache_key, "py")[2]
+        code = graph.source_code
         if not os.path.exists(artifact_path):
             counters["inductor"]["fxgraph_lookup_write_file"] += 1
             Path(os.path.dirname(artifact_path)).mkdir(parents=True, exist_ok=True)
-            code = graph.source_code
             cpp_pp = cpp_prefix_path()
             if os.path.basename(cpp_pp) in code:
                 if cpp_pp in code:
@@ -901,6 +901,11 @@ class FxGraphCache:
         # graph was compiled for this cache entry. Pretending these counters
         # were incremented normally is useful for testing with the cache enabled.
         metrics.CachedMetricsHelper.apply_deltas(graph.metrics_deltas)
+
+        from .graph import GraphLowering
+
+        GraphLowering.save_output_code(code)
+        output_code_log.debug("Output code: \n%s", code)
 
         return graph
 
@@ -1479,11 +1484,13 @@ def valid_vec_isa_list() -> List[VecISA]:
     if sys.platform == "darwin" and platform.processor() == "arm":
         return [VecNEON()]
 
+    isa_list: List[VecISA] = []
     cur_os = sys.platform
     if cur_os != "linux" and cur_os != "win32":
-        return []
+        return isa_list
 
-    if platform.machine() == "s390x":
+    arch = platform.machine()
+    if arch == "s390x":
         with open("/proc/cpuinfo") as _cpu_info:
             while True:
                 line = _cpu_info.readline()
@@ -1494,14 +1501,20 @@ def valid_vec_isa_list() -> List[VecISA]:
                 if featuresmatch:
                     for group in featuresmatch.groups():
                         if re.search(r"[\^ ]+vxe[\$ ]+", group):
-                            return [VecZVECTOR()]
-        return []
+                            isa_list.append(VecZVECTOR())
+                            break
+        return isa_list
 
-    isa_list = []
-    _cpu_supported_isa = x86_isa_checker()
-    for isa in supported_vec_isa_list:
-        if str(isa) in _cpu_supported_isa and isa:
-            isa_list.append(isa)
+    if arch == "x86_64" or arch == "AMD64":
+        """
+        arch value is x86_64 on Linux, and the value is AMD64 on Windows.
+        """
+        _cpu_supported_x86_isa = x86_isa_checker()
+        for isa in supported_vec_isa_list:
+            if str(isa) in _cpu_supported_x86_isa and isa:
+                isa_list.append(isa)
+        return isa_list
+
     return isa_list
 
 
