@@ -4,6 +4,7 @@ from typing import List, Optional, Tuple
 
 import torch
 from torch import fx
+from torch.utils._sympy.numbers import int_oo
 
 
 class SymRel(enum.Enum):
@@ -134,5 +135,5 @@ class SymExprRange:
 
     def set_is_size(self):
         self.gt(0, False)
-        self.lt(sys.maxsize - 1, False)
+        self.lt(int_oo, False)
         self._is_size = True

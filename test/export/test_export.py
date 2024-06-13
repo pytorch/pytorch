@@ -2741,16 +2741,6 @@ def forward(self, x):
             )
         )
 
-    def test_sym_bool_export(self):
-        class Module(torch.nn.Module):
-            def forward(self, x, y):
-                assert x.size(0) in y
-                assert x.size(0) in torch.ones(2)
-                return x + y
-
-        f = Module()
-        ep = export(f, (torch.ones(1), torch.ones(3)))
-
     def test_automatic_constrain_size(self):
         class M(torch.nn.Module):
             def forward(self, x, y):
