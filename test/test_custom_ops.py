@@ -2153,6 +2153,41 @@ class TestCustomOpAPI(TestCase):
         self.assertTrue(cpu_called)
 
     @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
+    def test_no_grad_skips_autograd(self):
+        @torch.library.custom_op("_torch_testing::add", mutates_args=())
+        def add(x: Tensor, y: float) -> Tensor:
+            x_np = x.numpy(force=True)
+            out_np = x_np + y
+            return torch.from_numpy(out_np).to(x.device)
+
+        called = 0
+
+        def setup_context(ctx, inputs, output):
+            nonlocal called
+            called += 1
+
+        def backward(ctx, grad):
+            raise AssertionError("should not be reached")
+
+        add.register_autograd(backward, setup_context=setup_context)
+
+        x = torch.randn(3, requires_grad=True)
+        with torch.no_grad():
+            y = add(x, 2.0)
+        self.assertEqual(called, 0)
+        self.assertEqual(y, x + 2.0)
+
+        x.requires_grad_(False)
+        y = add(x, 2.0)
+        self.assertEqual(called, 0)
+        self.assertEqual(y, x + 2.0)
+
+        x = torch.randn(3, requires_grad=True)
+        y = add(x, 2.0)
+        self.assertEqual(called, 1)
+        self.assertEqual(y, x + 2.0)
+
+    @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
     def test_manual_schema(self):
         @torch.library.custom_op(
             "_torch_testing::add",
