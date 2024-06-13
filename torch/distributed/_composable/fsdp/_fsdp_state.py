@@ -1,9 +1,11 @@
 # mypy: allow-untyped-defs
 import functools
+import logging
 
 from typing import Any, Dict, List, Optional, Tuple, TYPE_CHECKING
 
 import torch
+import torch.distributed as dist
 import torch.nn as nn
 from torch.autograd import Variable
 from torch.distributed._composable_state import (
@@ -13,12 +15,15 @@ from torch.distributed._composable_state import (
 )
 from torch.distributed.utils import _to_kwargs
 from torch.utils._pytree import tree_flatten, tree_map
+
 from ._fsdp_api import MixedPrecisionPolicy
 from ._fsdp_common import _cast_fp_tensor, TrainingState
 from ._fsdp_param_group import FSDPCommContext, FSDPParamGroup
 
 if TYPE_CHECKING:
     from ._fsdp_param import FSDPParam
+
+logger = logging.getLogger(__name__)
 
 
 class FSDPStateContext:
@@ -90,6 +95,9 @@ class FSDPState(_State):
                         args, kwargs, self._device, False
                     )  # same as DDP
                 args, kwargs = args_tuple[0], kwargs_tuple[0]
+        logger.debug(
+            f"[Rank{dist.get_rank()}]FSDP::root_pre_forward",
+            )
         return args, kwargs
 
     def _lazy_init(self) -> None:
@@ -126,6 +134,10 @@ class FSDPState(_State):
         for state in self._state_ctx.all_states:
             if state._fsdp_param_group:
                 state._fsdp_param_group.lazy_init()
+                for param in state._fsdp_param_group.fsdp_params:
+                    logger.debug(
+                        f"[Rank{dist.get_rank()}]FSDP::lazy_init, fqn={param._param_fqn}, dtype={param.sharded_param.dtype}, shape={param._orig_size}",
+                    )
 
     def _init_shared_state(self) -> None:
         self._comm_ctx.init()
@@ -223,6 +235,9 @@ class FSDPState(_State):
             if self._state_ctx.is_last_backward:
                 self._comm_ctx.post_forward_order.clear()
             self._state_ctx.post_backward_final_callback_queued = False
+            logger.debug(
+                f"[Rank{dist.get_rank()}]FSDP::root_post_backward",
+            )
 
     def _finalize_backward(self) -> None:
         if self._fsdp_param_group:

@@ -1,5 +1,6 @@
 # mypy: allow-untyped-defs
 import contextlib
+import logging
 
 from typing import Any, cast, Dict, List, NamedTuple, Optional, Set, Tuple
 
@@ -11,6 +12,7 @@ from torch.distributed.fsdp._common_utils import _named_parameters_with_duplicat
 from torch.profiler import record_function
 from torch.utils._pytree import tree_flatten, tree_unflatten
 from torch.utils.hooks import RemovableHandle
+
 from ._fsdp_api import MixedPrecisionPolicy, OffloadPolicy
 from ._fsdp_collectives import (
     AllGatherResult,
@@ -20,6 +22,8 @@ from ._fsdp_collectives import (
 )
 from ._fsdp_common import FSDPMeshInfo, HSDPMeshInfo, TrainingState
 from ._fsdp_param import FSDPParam, ParamModuleInfo, ShardedState
+
+logger = logging.getLogger(__name__)
 
 _ModuleToHandleDict = Dict[nn.Module, RemovableHandle]  # for state dict
 
@@ -267,6 +271,9 @@ class FSDPParamGroup:
             self.unshard()
             self.wait_for_unshard()
             args, kwargs = self._register_post_backward_hook(args, kwargs)
+            logger.debug(
+                f"[Rank{dist.get_rank()}]{self._with_fqn('FSDP::pre_forward')}",
+            )
             return args, kwargs
 
     def post_forward(self, module: nn.Module, input: Any, output: Any):
@@ -274,6 +281,9 @@ class FSDPParamGroup:
             self.reshard()
             self._record_post_forward()
             self._training_state = TrainingState.IDLE
+            logger.debug(
+                f"[Rank{dist.get_rank()}]{self._with_fqn('FSDP::post_forward')}",
+            )
             return output
 
     def _record_post_forward(self) -> None:
@@ -291,6 +301,9 @@ class FSDPParamGroup:
             self.unshard()  # no-op if prefetched
             self.wait_for_unshard()
             self._prefetch_unshard()
+            logger.debug(
+                f"[Rank{dist.get_rank()}]{self._with_fqn('FSDP::pre_backward')}",
+            )
 
     def post_backward(self, *unused: Any):
         self._training_state = TrainingState.POST_BACKWARD
@@ -336,6 +349,9 @@ class FSDPParamGroup:
                 self.comm_ctx.all_reduce_stream,
                 self.all_reduce_grads,
                 self._partial_reduce_output,
+            )
+            logger.debug(
+                f"[Rank{dist.get_rank()}]{self._with_fqn('FSDP::post_backward')}",
             )
 
     def finalize_backward(self):
