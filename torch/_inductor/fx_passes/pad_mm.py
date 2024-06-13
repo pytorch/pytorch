@@ -553,7 +553,6 @@ def run_autoheuristic(
         mat1_strides = mat1.stride()
         mat2_strides = mat2.stride()
         context.add_feature("mat1_stride_0", mat1_strides[0])
-        context.add_feature("mat1_stride_0", mat1_strides[0])
         context.add_feature("mat1_stride_1", mat1_strides[1])
         context.add_feature("mat2_stride_0", mat2_strides[0])
         context.add_feature("mat2_stride_1", mat2_strides[1])
