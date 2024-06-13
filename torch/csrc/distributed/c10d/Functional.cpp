@@ -10,25 +10,11 @@
 
 namespace {
 
-// Forces all functional collectives to wait immediately.
-// Useful for debugging memory leaks with compile that surface
-// due to compile not properly waiting on functional collectives.
-bool force_synchronous_functional_collectives() {
-  static char const* temp = getenv("TORCH_FORCE_SYNCHRONOUS_COLLECTIVES");
-  return temp != nullptr;
-}
-
 class WorkRegistry {
  public:
   void register_work(
       const at::Tensor& tensor,
       const c10::intrusive_ptr<c10d::Work>& work) {
-    if (force_synchronous_functional_collectives()) {
-      if (work != nullptr) {
-        work->wait();
-      }
-      return;
-    }
     auto storage = tensor.storage().getWeakStorageImpl();
     std::unique_lock lock(lock_);
     auto [it, inserted] = registry_.try_emplace(std::move(storage), work);
@@ -78,24 +64,6 @@ class WorkRegistry {
 };
 
 static WorkRegistry process_registry;
-
-void register_work(
-    const at::Tensor& tensor,
-    const c10::intrusive_ptr<c10d::Work>& work) {
-  if (c10d::get_thread_isolation_mode()) {
-    c10d::RankLocal<WorkRegistry>::get().register_work(tensor, work);
-  } else {
-    process_registry.register_work(tensor, work);
-  }
-}
-
-c10::intrusive_ptr<c10d::Work> pop_work(const at::Tensor& tensor) {
-  if (c10d::get_thread_isolation_mode()) {
-    return c10d::RankLocal<WorkRegistry>::get().pop_work(tensor);
-  } else {
-    return process_registry.pop_work(tensor);
-  }
-}
 
 const std::unordered_map<std::string, c10d::ReduceOp> str_to_reduce_op = {
     {"sum", c10d::ReduceOp(c10d::ReduceOp::RedOpType::SUM)},
