@@ -9,6 +9,7 @@ of a full handler, see torch.utils._sympy.value_ranges.ValueRangeAnalysis.
 """
 
 import functools
+import logging
 from typing import Any, Dict, Union
 
 import sympy
@@ -22,7 +23,6 @@ from .functions import (
     FloatTrueDiv,
     FloorDiv,
     FloorToInt,
-    Identity,
     IntTrueDiv,
     IsNonOverlappingAndDenseIndicator,
     Mod,
@@ -36,6 +36,9 @@ from .functions import (
     TruncToInt,
     Where,
 )
+
+
+log = logging.getLogger(__name__)
 
 
 # TODO: Dedupe this with SYMPY_INTERP
@@ -89,7 +92,6 @@ def handlers():
         ModularIndexing: "modular_indexing",
         sympy.functions.elementary.piecewise.ExprCondPair: "expr_cond_pair",
         sympy.Piecewise: "piecewise",
-        Identity: "identity",
         IsNonOverlappingAndDenseIndicator: "is_non_overlapping_and_dense_indicator",
         RoundDecimal: "round_decimal",
     }
@@ -159,11 +161,18 @@ def sympy_interp(
     else:
         handler_name = handlers()[expr.func]
     handler = getattr(analysis, handler_name)
-    if handler_name in ASSOCIATIVE_OPS:
-        assert len(args) > 1
-        acc = handler(args[0], args[1])
-        for i in range(2, len(args)):
-            acc = handler(acc, args[i])
-        return acc
-    else:
-        return handler(*args)
+    try:
+        if handler_name in ASSOCIATIVE_OPS:
+            assert len(args) > 1
+            acc = handler(args[0], args[1])
+            for i in range(2, len(args)):
+                acc = handler(acc, args[i])
+            log.debug("%s(%s) -> %s", handler_name, args, acc)
+            return acc
+        else:
+            r = handler(*args)
+            log.debug("%s(%s) -> %s", handler_name, args, r)
+            return r
+    except Exception:
+        log.warning("failed while executing %s(%s)", handler_name, args)
+        raise
