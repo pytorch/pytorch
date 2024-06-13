@@ -1650,7 +1650,6 @@ exclude_patterns = [
     'torch/nn/backends/thnn.py',
     'torch/nn/common_types.py',
     'torch/nn/cpp.py',
-    'torch/nn/functional.py',
     'torch/nn/grad.py',
     'torch/nn/init.py',
     'torch/nn/intrinsic/__init__.py',
