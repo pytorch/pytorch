@@ -872,6 +872,7 @@ class TritonKernelOverrides(TritonOverrides):
     @staticmethod
     def masked(mask, body, other):
         nodes = body.graph.find_nodes(op="output")
+        assert nodes, "graph for body does not contain an output"
 
         need_where = False
         for node in nodes:
