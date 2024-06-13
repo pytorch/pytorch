@@ -14,7 +14,6 @@ import operator
 import re
 import sys
 import types
-import weakref
 from typing import Any, List, NamedTuple, Optional, Union
 
 from torch.utils._sympy.value_ranges import ValueRanges
@@ -185,7 +184,6 @@ from .user_defined import (
     SourcelessGraphModuleVariable,
     UserDefinedClassVariable,
     UserDefinedObjectVariable,
-    WeakRefVariable,
 )
 
 
@@ -385,8 +383,6 @@ class VariableBuilder:
             ((slice, range), cls.wrap_slice_range),
             (tuple(common_constant_types), cls.wrap_literal),
             (re.Pattern, cls.wrap_regex_pattern),
-            (weakref.ReferenceType, cls.wrap_weakref),
-            (torch.utils.hooks.RemovableHandle, cls.wrap_removable_handle),
         ]
 
         if config.trace_numpy and np:
@@ -404,17 +400,6 @@ class VariableBuilder:
         # TODO(jansel): something like a REPR_MATCH might be more robust here
         self.install_guards(GuardBuilder.ID_MATCH)
         return RegexPatternVariable(value)
-
-    def wrap_weakref(self, value: weakref.ReferenceType):
-        self.install_guards(GuardBuilder.TYPE_MATCH)
-        return WeakRefVariable(value, source=self.source)
-
-    def wrap_removable_handle(self, value):
-        # This means that the removable handle was created in some other frame.
-        # Our current infra requires the hook to be registered and removed in
-        # the same frame. So graph break.
-        # Related test - PYTORCH_TEST_WITH_DYNAMO=1 python test/test_autograd.py -k TestAutograd.test_hooks
-        unimplemented("unregistered hook removable handle")
 
     @classmethod
     @functools.lru_cache(None)
