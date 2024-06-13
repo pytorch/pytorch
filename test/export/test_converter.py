@@ -5,7 +5,6 @@ import unittest
 from collections import OrderedDict
 from typing import Any, Dict, List, Tuple
 
-
 import torch
 
 import torch.utils._pytree as pytree
@@ -621,7 +620,6 @@ class TestConverter(TestCase):
         inp = (torch.randn(3), torch.randn(3))
         self._check_equal_ts_ep_converter(Module(), inp)
 
-
         # aten:::tensor.float
         class Module(torch.nn.Module):
             def forward(self, x: torch.Tensor, y: float) -> torch.Tensor:
@@ -629,7 +627,6 @@ class TestConverter(TestCase):
 
         inp = (torch.randn(3), 1.0)
         self._check_equal_ts_ep_converter(Module(), inp)
-
 
         # aten::tensor.int
         class Module(torch.nn.Module):
