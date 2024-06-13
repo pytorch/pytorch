@@ -794,6 +794,9 @@ struct TORCH_API MPSAllocator final : public IMPSAllocator {
   size_t getDriverAllocatedMemory() const override {
     return _getAllocImpl().getDriverAllocatedMemory();
   }
+  size_t getRecommendedMaxMemory() const override {
+    return _getAllocImpl().getRecommendedMaxMemory();
+  }
   ssize_t getLowWatermarkValue() const override {
     return _getAllocImpl().getLowWatermarkValue();
   }
