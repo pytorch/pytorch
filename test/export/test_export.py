@@ -2551,8 +2551,8 @@ def forward(self, x):
     bn_running_mean = self.bn.running_mean
     bn_running_var = self.bn.running_var
     conv2d = torch.ops.aten.conv2d.default(x, conv_weight, conv_bias);  x = conv_weight = conv_bias = None
-    _native_batch_norm_legit_no_training = torch.ops.aten._native_batch_norm_legit_no_training.default(conv2d, bn_weight, bn_bias, bn_running_mean, bn_running_var, 0.1, 1e-05);  conv2d = bn_weight = bn_bias = bn_running_mean = bn_running_var = None
-    getitem = _native_batch_norm_legit_no_training[0];  _native_batch_norm_legit_no_training = None
+    _batch_norm_no_update = torch.ops.aten._batch_norm_no_update.default(conv2d, bn_weight, bn_bias, bn_running_mean, bn_running_var, 0.1, 1e-05);  conv2d = bn_weight = bn_bias = bn_running_mean = bn_running_var = None
+    getitem = _batch_norm_no_update[0];  _batch_norm_no_update = None
     return pytree.tree_unflatten((getitem,), self._out_spec)""",
         )
 
@@ -2572,12 +2572,12 @@ def forward(self, x):
     bn_num_batches_tracked = self.bn.num_batches_tracked
     conv2d = torch.ops.aten.conv2d.default(x, conv_weight, conv_bias);  x = conv_weight = conv_bias = None
     add = torch.ops.aten.add.Tensor(bn_num_batches_tracked, 1)
-    _native_batch_norm_legit_functional = torch.ops.aten._native_batch_norm_legit_functional.default(conv2d, bn_weight, bn_bias, bn_running_mean, bn_running_var, True, 0.1, 1e-05);  conv2d = bn_weight = bn_bias = None
-    getitem = _native_batch_norm_legit_functional[0]
-    getitem_3 = _native_batch_norm_legit_functional[3]
-    getitem_4 = _native_batch_norm_legit_functional[4];  _native_batch_norm_legit_functional = None
-    copy__default = torch.ops.aten.copy_.default(bn_running_mean, getitem_3);  bn_running_mean = getitem_3 = None
-    copy__default_1 = torch.ops.aten.copy_.default(bn_running_var, getitem_4);  bn_running_var = getitem_4 = None
+    _batch_norm_with_update_functional = torch.ops.aten._batch_norm_with_update_functional.default(conv2d, bn_weight, bn_bias, bn_running_mean, bn_running_var, 0.1, 1e-05);  conv2d = bn_weight = bn_bias = None
+    getitem = _batch_norm_with_update_functional[0]
+    getitem_4 = _batch_norm_with_update_functional[4]
+    getitem_5 = _batch_norm_with_update_functional[5];  _batch_norm_with_update_functional = None
+    copy__default = torch.ops.aten.copy_.default(bn_running_mean, getitem_4);  bn_running_mean = getitem_4 = None
+    copy__default_1 = torch.ops.aten.copy_.default(bn_running_var, getitem_5);  bn_running_var = getitem_5 = None
     copy__default_2 = torch.ops.aten.copy_.default(bn_num_batches_tracked, add);  bn_num_batches_tracked = add = None
     return pytree.tree_unflatten((getitem,), self._out_spec)""",
         )

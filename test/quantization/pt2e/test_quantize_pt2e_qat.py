@@ -258,13 +258,7 @@ class PT2EQATTestCase(QuantizationTestCase):
             relu_node = None
             getitem_node = output_fq_node.args[0]
         bn_node = getitem_node.args[0]
-        if is_cuda:
-            if torch.version.cuda is not None:
-                expected_bn_op = torch.ops.aten.cudnn_batch_norm.default
-            elif torch.version.hip is not None:
-                expected_bn_op = torch.ops.aten.miopen_batch_norm.default
-        else:
-            expected_bn_op = torch.ops.aten._native_batch_norm_legit.default
+        expected_bn_op = torch.ops.aten._batch_norm_with_update.default
         self.assertEqual(getitem_node.target, operator.getitem)
         self.assertEqual(bn_node.target, expected_bn_op)
 

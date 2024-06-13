@@ -198,7 +198,10 @@ def _is_conv_transpose_fn(conv_fn: Callable):
     return conv_fn in [F.conv_transpose1d, F.conv_transpose2d]
 
 def _is_bn_node(n: Node):
-    return _is_supported_batch_norm_for_training(n) or n.target == torch.ops.aten._native_batch_norm_legit_no_training.default
+    return n.target in [
+        torch.ops.aten._batch_norm_no_update.default,
+        torch.ops.aten._batch_norm_with_update.default,
+    ]
 
 def fold_bn_weights_into_conv_node(
     conv_node: Node,
@@ -220,13 +223,7 @@ def fold_bn_weights_into_conv_node(
     bn_b = _get_tensor_constant_from_node(bn_args[2], m)
     bn_rm = _get_tensor_constant_from_node(bn_args[3], m)
     bn_rv = _get_tensor_constant_from_node(bn_args[4], m)
-    if bn_node.target == torch.ops.aten._native_batch_norm_legit_no_training.default:
-        eps_arg_index = 6
-    elif _is_supported_batch_norm_for_training(bn_node):
-        eps_arg_index = 7
-    else:
-        raise ValueError("BN node target is unexpected ", bn_node.target)
-    bn_eps = bn_args[eps_arg_index]
+    bn_eps = bn_args[6]
 
     fused_weight, fused_bias = fuse_conv_bn_weights(conv_w, conv_b, bn_rm, bn_rv, bn_eps, bn_w, bn_b, transpose=transpose)
 

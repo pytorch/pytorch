@@ -2192,14 +2192,22 @@ Call this whenever a new thread is created in order to propagate values from
   py_module.def(
       "_select_batch_norm_backend",
       [](const at::Tensor& input,
-         const at::Tensor& weight,
-         const at::Tensor& bias,
+         const c10::optional<at::Tensor>& weight,
+         const c10::optional<at::Tensor>& bias,
          const at::Tensor& running_mean,
          const at::Tensor& running_var,
          bool training,
          double eps) {
+        auto weight_opt = weight.has_value() ? weight.value() : at::empty({});
+        auto bias_opt = bias.has_value() ? bias.value() : at::empty({});
         return at::native::_select_batch_norm_backend(
-            input, weight, bias, running_mean, running_var, training, eps);
+            input,
+            weight_opt,
+            bias_opt,
+            running_mean,
+            running_var,
+            training,
+            eps);
       },
       py::arg("input"),
       py::arg("weight"),

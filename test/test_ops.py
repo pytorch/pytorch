@@ -2662,6 +2662,29 @@ class TestFakeTensor(TestCase):
             self.assertEqual(strided_result.layout, torch.strided)
 
 
+class TestBatchNorm(TestCase):
+    def test_batch_norm_undefined_stats(self):
+        x = torch.randn(1, 3, 2, 1)
+        weight = torch.randn(3)
+        bias = torch.randn(3)
+        rm = torch.randn(3)
+        rv = torch.randn(3)
+
+        # train=True, passes
+        aten.batch_norm(x, weight, bias, None, None, True, 0.5, 0.6, True)
+        aten.batch_norm(x, weight, bias, rm, None, True, 0.5, 0.6, True)
+        aten.batch_norm(x, weight, bias, None, rv, True, 0.5, 0.6, True)
+
+        # train=False, expected RuntimeError
+        error_str = "must be defined in evaluation mode"
+        with self.assertRaisesRegex(RuntimeError, error_str):
+            aten.batch_norm(x, weight, bias, None, None, False, 0.5, 0.6, True)
+        with self.assertRaisesRegex(RuntimeError, error_str):
+            aten.batch_norm(x, weight, bias, rm, None, False, 0.5, 0.6, True)
+        with self.assertRaisesRegex(RuntimeError, error_str):
+            aten.batch_norm(x, weight, bias, None, rv, False, 0.5, 0.6, True)
+
+
 instantiate_device_type_tests(TestCommon, globals())
 instantiate_device_type_tests(TestCompositeCompliance, globals())
 instantiate_device_type_tests(TestMathBits, globals())

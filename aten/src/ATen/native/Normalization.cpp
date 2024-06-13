@@ -669,36 +669,41 @@ Tensor batch_norm(
     const Tensor& input, const std::optional<Tensor>& weight_opt, const std::optional<Tensor>& bias_opt,
     const std::optional<Tensor>& running_mean_opt, const std::optional<Tensor>& running_var_opt,
     bool training, double momentum, double eps, bool cudnn_enabled) {
-  const Tensor& weight = c10::value_or_else(weight_opt, [] {return Tensor();});
+  // See [Note: hacky wrapper removal for optional tensor]
+  c10::MaybeOwned<Tensor> weight_maybe_owned = at::borrow_from_optional_tensor(weight_opt);
+  const Tensor& weight = *weight_maybe_owned;
   const Tensor& bias = c10::value_or_else(bias_opt, [] {return Tensor();});
   const Tensor& running_mean = c10::value_or_else(running_mean_opt, [] {return Tensor();});
   const Tensor& running_var = c10::value_or_else(running_var_opt, [] {return Tensor();});
-  return std::get<0>(at::_batch_norm_impl_index(input, weight, bias, running_mean, running_var,
-                                                training, momentum, eps, cudnn_enabled));
-  // TODO: switch to the new stack after the 2 week FC window
-  // if (training) {
-  //   BatchNormBackend backend = _select_batch_norm_backend(input, weight, bias, running_mean, running_var, training, eps);
-  //   if (backend == BatchNormBackend::Cudnn || backend == BatchNormBackend::Miopen) {
-  //     auto input_c = input;
-  //     if (backend == BatchNormBackend::Cudnn) {
-  //         input_c = input.contiguous(input.suggest_memory_format());
-  //     } else {
-  //         input_c = input.contiguous();
-  //     }
-  //     auto weight_c = weight.contiguous();
-  //     auto bias_c = bias.contiguous();
-  //     auto rmean_c = running_mean.defined() ? running_mean.contiguous() : running_mean;
-  //     auto rvar_c = running_var.defined() ? running_var.contiguous() : running_var;
-  //     return std::get<0>(at::_batch_norm_with_update(input_c, weight_c, bias_c, const_cast<Tensor&>(rmean_c),
-  //                                                   const_cast<Tensor&>(rvar_c), momentum, eps));
-  //   } else {
-  //     return std::get<0>(at::_batch_norm_with_update(input, weight, bias, const_cast<Tensor&>(running_mean),
-  //                                                   const_cast<Tensor&>(running_var), momentum, eps));
-  //   }
-  // } else {
-  //   return std::get<0>(at::_batch_norm_no_update(input, weight, bias, running_mean, running_var,
-  //                                               momentum, eps));
-  // }
+  const bool running_stats_defined = running_mean.defined() && running_var.defined();
+
+  if (!training && !running_stats_defined) {
+    AT_ERROR("running_mean and running_var must be defined in evaluation mode");
+  }
+
+  if (training && running_stats_defined) {
+    BatchNormBackend backend = _select_batch_norm_backend(input, weight, bias, running_mean, running_var, training, eps);
+    if (backend == BatchNormBackend::Cudnn || backend == BatchNormBackend::Miopen) {
+      auto input_c = input;
+      if (backend == BatchNormBackend::Cudnn) {
+          input_c = input.contiguous(input.suggest_memory_format());
+      } else {
+          input_c = input.contiguous();
+      }
+      auto weight_c = weight.contiguous();
+      auto bias_c = bias.contiguous();
+      auto rmean_c = running_mean.contiguous();
+      auto rvar_c = running_var.contiguous();
+      return std::get<0>(at::_batch_norm_with_update(input_c, weight_c, bias_c, const_cast<Tensor&>(rmean_c),
+                                                    const_cast<Tensor&>(rvar_c), momentum, eps));
+    } else {
+      return std::get<0>(at::_batch_norm_with_update(input, weight, bias, const_cast<Tensor&>(running_mean),
+                                                    const_cast<Tensor&>(running_var), momentum, eps));
+    }
+  } else {
+    return std::get<0>(at::_batch_norm_no_update(input, weight, bias, running_mean, running_var,
+                                                momentum, eps));
+  }
 }
 
 Tensor instance_norm(
@@ -870,15 +875,17 @@ std::tuple<Tensor&, Tensor&, Tensor&, Tensor&> _batch_norm_with_update_cpu_out(
 }
 
 
-std::tuple<Tensor, Tensor, Tensor, Tensor> _batch_norm_no_update(
+std::tuple<Tensor, Tensor, Tensor, Tensor> _batch_norm_no_update_cpu(
     const Tensor& input, const std::optional<Tensor>& weight_opt, const std::optional<Tensor>& bias_opt,
     const std::optional<Tensor>& running_mean_opt, const std::optional<Tensor>& running_var_opt,
     double momentum, double eps) {
-  const Tensor& running_mean = c10::value_or_else(running_mean_opt, [] {return Tensor();});
-  const Tensor& running_var = c10::value_or_else(running_var_opt, [] {return Tensor();});
+  // Passing in undefined Tensors to `batch_norm_cpu` in eval mode leads to seg fault
+  const bool has_running_mean = running_mean_opt.has_value() && running_mean_opt->defined();
+  const bool has_running_var = running_var_opt.has_value() && running_var_opt->defined();
+  const bool update = !has_running_mean || !has_running_var;
   Tensor output, save_mean, save_var;
   std::tie(output, save_mean, save_var) =
-    batch_norm_cpu(input, weight_opt, bias_opt, const_cast<Tensor&>(running_mean), const_cast<Tensor&>(running_var), /*update*/false, momentum, eps);
+    batch_norm_cpu(input, weight_opt, bias_opt, running_mean_opt, running_var_opt, update, momentum, eps);
   Tensor reserve = at::empty({0}, input.options().dtype(kByte));
   return std::tuple<Tensor, Tensor, Tensor, Tensor>(output, save_mean, save_var, reserve);
 }
@@ -911,11 +918,11 @@ std::tuple<Tensor&, Tensor&, Tensor&> _batch_norm_legit_no_stats_cpu_out(const T
 }
 
 std::tuple<Tensor, Tensor, Tensor> _new_batch_norm_backward_cpu(
-    const Tensor& grad_output, const Tensor& input, const Tensor& weight,
+    const Tensor& grad_output, const Tensor& input, const std::optional<Tensor>& weight_opt,
     const std::optional<Tensor>& running_mean_opt, const std::optional<Tensor>& running_var_opt,
     const std::optional<Tensor>& save_mean_opt, const std::optional<Tensor>& save_var_opt,
     bool update, double eps, std::array<bool,3> grad_input_mask, const Tensor& reserve) {
-  return batch_norm_backward_cpu(grad_output, input, weight, running_mean_opt, running_var_opt, save_mean_opt, save_var_opt, update, eps, grad_input_mask);
+  return batch_norm_backward_cpu(grad_output, input, weight_opt, running_mean_opt, running_var_opt, save_mean_opt, save_var_opt, update, eps, grad_input_mask);
 }
 
 std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_cpu(const Tensor& grad_out, const Tensor& self, const std::optional<Tensor>& weight_opt, const std::optional<Tensor>& running_mean_opt, const std::optional<Tensor>& running_var_opt, const std::optional<Tensor>& save_mean_opt, const std::optional<Tensor>& save_invstd_opt,

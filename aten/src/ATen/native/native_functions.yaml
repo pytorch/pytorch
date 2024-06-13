@@ -6595,10 +6595,13 @@
 
 - func: _batch_norm_no_update(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, float momentum, float eps) -> (Tensor, Tensor, Tensor, Tensor)
   dispatch:
-    CompositeExplicitAutograd: _batch_norm_no_update
+    CPU: _batch_norm_no_update_cpu
+    CUDA: _batch_norm_no_update_cuda
+    MPS: _batch_norm_no_update_mps
+    MkldnnCPU: _batch_norm_no_update_mkldnn
   autogen: _batch_norm_no_update.out
 
-- func: batch_norm_backward(Tensor grad_out, Tensor input, Tensor weight, Tensor? running_mean, Tensor? running_var, Tensor? save_mean, Tensor? save_var, bool update, float eps, bool[3] output_mask, Tensor reserve) -> (Tensor, Tensor, Tensor)
+- func: batch_norm_backward(Tensor grad_out, Tensor input, Tensor? weight, Tensor? running_mean, Tensor? running_var, Tensor? save_mean, Tensor? save_var, bool update, float eps, bool[3] output_mask, Tensor reserve) -> (Tensor, Tensor, Tensor)
   dispatch:
     CPU: _new_batch_norm_backward_cpu
     CUDA: _new_batch_norm_backward_cuda
