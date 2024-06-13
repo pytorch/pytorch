@@ -3,8 +3,6 @@ import os
 
 from typing import Any, Callable, List, Tuple, Union
 
-import pandas as pd  # type: ignore[import-untyped]
-
 import torch
 
 from torch._inductor.runtime.runtime_utils import cache_dir
@@ -149,5 +147,8 @@ class AutoHeuristic:
         log_path = self.get_log_path()
         json_string = self.get_metadata_str_from_log()
         metadata = self.deserialize_metadata(json_string)
+
+        import pandas as pd  # type: ignore[import-untyped]
+
         df = pd.read_csv(log_path, skiprows=1)
         return (df, metadata)
