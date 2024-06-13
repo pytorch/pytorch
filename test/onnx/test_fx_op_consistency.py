@@ -526,6 +526,10 @@ EXPECTED_SKIPS_OR_FAILS_WITH_DTYPES: Tuple[onnx_test_common.DecorateMeta, ...] =
         reason=onnx_test_common.reason_dynamo_does_not_support("full_like", "complex64")
     ),
     xfail(
+        "gather",
+        reason="GatherElements op: Rank of input 'data' needs to be equal to rank of input 'indices'"
+    ),
+    xfail(
         "geometric",
         reason=onnx_test_common.reason_dynamo_does_not_support("wrapper_set_seed"),
     ),
@@ -1512,7 +1516,6 @@ SKIP_XFAIL_SUBTESTS_WITH_MATCHER_AND_MODEL_TYPE: tuple[
         "nn.functional.batch_norm",
         matcher=lambda sample: sample.kwargs.get("training") is True
         and any(arg is not None for arg in sample.args[2:4]),
-        model_type=pytorch_test_common.TorchModelType.TORCH_EXPORT_EXPORTEDPROGRAM,
         reason="Flaky failure: https://github.com/pytorch/pytorch/issues/115106",
     ),
     xfail(
@@ -1895,6 +1898,9 @@ def _run_test_output_match(
                         )
                     else:
                         raise e
+                onnx_program.save_diagnostics(
+                    f"{test_suite.id()}_sample_{i}_op_{op.name}.sarif"
+                )
                 _compare_onnx_and_torch_exported_program(
                     model,
                     onnx_program,
