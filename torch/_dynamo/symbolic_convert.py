@@ -102,7 +102,7 @@ from .variables.misc import (
     PythonModuleVariable,
     UnknownVariable,
 )
-from .variables.nn_module import NNModuleVariable
+from .variables.nn_module import NNModuleVariable, UnspecializedNNModuleVariable
 from .variables.tensor import supported_comparison_ops, SymNodeVariable, TensorVariable
 from .variables.user_defined import (
     RemovableHandleVariable,
@@ -415,36 +415,22 @@ def generic_jump(truth_fn: typing.Callable[[object], bool], push: bool):
                 if push:
                     self.push(value)
                 self.jump(inst)
+        elif isinstance(value, UnspecializedNNModuleVariable):
+            mod = value.value
+            if truth_fn(mod):
+                if push:
+                    self.push(value)
+                self.jump(inst)
         elif isinstance(value, UserDefinedObjectVariable):
-            """
-            NOTE(yf225): this throws "torch._dynamo.exc.InternalTorchDynamoError: 'FSDPParamGroup' object has no attribute '__bool__'"
-            ```
-            Error while creating guard:
-            Name: "G['torch__dynamo__trace_wrapped_higher_order_op_self_invoke'].__closure__[0].cell_contents.args[0]._fsdp_param_group.__bool__"
-                Source: global
-                Create Function: ID_MATCH
-                Guard Types: None
-                Code List: None
-                Object Weakref: None
-                Guarded Class Weakref: None
-            Created at:
-            File "/data/users/willfeng/pytorch_yf225/torch/_dynamo/symbolic_convert.py", line 402, in inner
+            try:
                 x = value.var_getattr(self, "__bool__")
-            File "/data/users/willfeng/pytorch_yf225/torch/_dynamo/variables/user_defined.py", line 819, in var_getattr
-                return VariableBuilder(tx, source)(subobj)
-            File "/data/users/willfeng/pytorch_yf225/torch/_dynamo/variables/builder.py", line 246, in __call__
-                vt = self._wrap(value)
-            File "/data/users/willfeng/pytorch_yf225/torch/_dynamo/variables/builder.py", line 761, in _wrap
-                self.install_guards(GuardBuilder.ID_MATCH)
-            ```
-            So I changed it to check hasattr before doing getattr, to avoid installing this unnecessary guard.
-            """
-            x = None
-            if hasattr(value, "__bool__"):
-                x = value.var_getattr(self, "__bool__")
-            # if __bool__ is missing, trying __len__ to infer a truth value.
-            if (x is None or isinstance(x, GetAttrVariable)) and hasattr(value, "__len__"):
+            except exc.ObservedException:
+                # if __bool__ is missing, trying __len__ to infer a truth value.
                 x = value.var_getattr(self, "__len__")
+            else:
+                if isinstance(x, GetAttrVariable):
+                    # if __bool__ is missing, trying __len__ to infer a truth value.
+                    x = value.var_getattr(self, "__len__")
 
             # __bool__ or __len__ is function
             if isinstance(x, UserMethodVariable):
