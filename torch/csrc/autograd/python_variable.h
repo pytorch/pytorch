@@ -39,7 +39,7 @@ TORCH_PYTHON_API extern PyObject* ParameterClass;
 bool THPVariable_initModule(PyObject* module);
 TORCH_PYTHON_API PyObject* THPVariable_Wrap(at::TensorBase var);
 
-static inline bool THPVariable_CheckTypeExact(PyTypeObject* tp) {
+inline bool THPVariable_CheckTypeExact(PyTypeObject* tp) {
   // Check that a python object is a `Tensor`, but not a `Tensor` subclass.
   // (A subclass could have different semantics.) The one exception is
   // Parameter, which is used for Python bookkeeping but is equivalent to
@@ -49,7 +49,7 @@ static inline bool THPVariable_CheckTypeExact(PyTypeObject* tp) {
       tp == (PyTypeObject*)ParameterClass);
 }
 
-static inline bool THPVariable_CheckExact(PyObject* obj) {
+inline bool THPVariable_CheckExact(PyObject* obj) {
   return THPVariable_CheckTypeExact(Py_TYPE(obj));
 }
 
