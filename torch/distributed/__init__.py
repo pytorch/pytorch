@@ -141,7 +141,7 @@ else:
     class _ProcessGroupStub:
         pass
 
-    ProcessGroup = _ProcessGroupStub  # type: ignore[attr-defined]
+    ProcessGroup = _ProcessGroupStub  # type: ignore[misc,assignment]
 
 
 from torch.distributed import rpc as rpc
