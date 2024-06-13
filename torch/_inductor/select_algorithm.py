@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import builtins
 import contextlib
 import functools
@@ -40,6 +41,7 @@ from .codegen.triton import (
 )
 
 from .codegen.triton_utils import config_of, signature_to_meta
+from .codegen.wrapper import pexpr
 from .exc import CUDACompileError
 from .ir import ChoiceCaller, PrimitiveInfoType
 from .runtime.hints import DeviceProperties
@@ -531,13 +533,13 @@ class TritonTemplateKernel(TritonKernel):
                 triton_meta=self.triton_meta,
             )
         else:
-            stream_name = wrapper.write_get_raw_stream(current_device.index)
+            stream_name = wrapper.write_get_raw_stream(current_device.index, V.graph)
 
             wrapper.add_import_once(f"import {self.grid_fn.__module__}")
             meta = wrapper.add_meta_once(self.meta)
 
             grid_call = [
-                texpr(V.graph.sizevars.simplify(s)) for s in self.call_sizes
+                pexpr(V.graph.sizevars.simplify(s)) for s in self.call_sizes
             ] + [meta]
             grid_call = f"{self.grid_fn.__module__}.{self.grid_fn.__name__}({', '.join(grid_call)})"
             wrapper.writeline(

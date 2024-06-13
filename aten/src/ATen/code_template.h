@@ -31,7 +31,7 @@ struct TemplateEnv {
   // Add a number 'v' to the map at key 'k'
   template <typename T>
   void d(const std::string& k, const T& v) {
-    strings_[k] = c10::to_string(v);
+    strings_[k] = std::to_string(v);
     lists_.erase(k);
   }
 
