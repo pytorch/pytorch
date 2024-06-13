@@ -10,13 +10,9 @@ of a full handler, see torch.utils._sympy.value_ranges.ValueRangeAnalysis.
 
 import contextlib
 import functools
-<<<<<<< HEAD
+import logging
 import sys
 from typing import Any, Dict, List, Optional, Union
-=======
-import logging
-from typing import Any, Dict, Union
->>>>>>> c897651392798663c7b7261150e42d1197ae2f94
 
 import sympy
 from sympy.logic.boolalg import Boolean as SympyBoolean, BooleanAtom
