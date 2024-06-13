@@ -184,6 +184,17 @@ def get_signature_for_torch_op(op : Callable, return_schemas : bool = False):
 
 @compatibility(is_backward_compatible=False)
 def create_type_hint(x):
+    """
+    Produces a type hint for the given argument.
+
+    The :func:`create_type_hint` looks for a type hint compatible with the input argument `x`.
+
+    If `x` is a `list` or `tuple`, it looks for an object in the list whose type is a superclass
+    of the rest, and uses that as `base_type` for the `List` or `Tuple` to be returned.
+    If no such object is found, it defaults to `List[Any]`.
+
+    If `x` is neither a `list` nor a `tuple`, it returns `x`.
+    """
     try:
         if isinstance(x, (list, tuple)):
             # todo(chilli): Figure out the right way for mypy to handle this

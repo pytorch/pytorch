@@ -1,9 +1,14 @@
 # mypy: allow-untyped-defs
 import builtins
-from typing import Any, List, Optional, Sequence, Tuple, Union
+from typing import Any, List, Optional, Sequence, Tuple, TYPE_CHECKING, Union
 
 import torch
 from torch import SymInt
+
+
+if TYPE_CHECKING:
+    from torch.autograd.graph import GradientEdge
+
 
 # Convenience aliases for common composite types that we need
 # to talk about in PyTorch
@@ -12,8 +17,8 @@ _TensorOrTensors = Union[torch.Tensor, Sequence[torch.Tensor]]
 _TensorOrTensorsOrGradEdge = Union[
     torch.Tensor,
     Sequence[torch.Tensor],
-    "torch.autograd.graph.GradientEdge",
-    Sequence["torch.autograd.graph.GradientEdge"],
+    "GradientEdge",
+    Sequence["GradientEdge"],
 ]
 
 # In some cases, these basic types are shadowed by corresponding

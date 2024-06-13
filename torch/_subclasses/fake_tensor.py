@@ -1345,13 +1345,16 @@ class FakeTensorMode(TorchDispatchMode):
         func: OpOverload,
         args: Sequence[object],
         kwargs: Mapping[str, object],
-        output: FakeTensor,
+        output: Optional[FakeTensor],
     ) -> _DispatchCacheEntry:
         """
         Make a cache entry object for the given 'output' Tensor. Raises
         _BypassDispatchCache if the output tensor has characteristics that
         prevent caching it.
         """
+        if output is None:
+            return _DispatchCacheEntry(inplace_idx=None, metadata=None, view_idx=None)
+
         # Some ops return tuples of Tensors, but it's rare, so avoid
         # the complexity of caching other types.
         if not isinstance(output, FakeTensor):
@@ -1412,10 +1415,14 @@ class FakeTensorMode(TorchDispatchMode):
 
     def _output_from_cache_entry(
         self, entry: _DispatchCacheEntry, func: OpOverload, args: Sequence[object]
-    ) -> FakeTensor:
+    ) -> Optional[FakeTensor]:
         """
         Create a new FakeTensor from the cache entry.
         """
+        metadata = entry.metadata
+        if metadata is None:
+            return None
+
         if entry.inplace_idx is not None:
             # This is an in-place op; return the aliased arg.
             inplace_arg = args[entry.inplace_idx]
@@ -1423,8 +1430,7 @@ class FakeTensorMode(TorchDispatchMode):
             return inplace_arg
 
         # Synthesize a new FakeTensor with the cached metadata.
-        metadata = entry.metadata
-        assert metadata and not metadata.is_sparse
+        assert not metadata.is_sparse
 
         empty = torch.empty_strided(
             metadata.shape,
@@ -1466,7 +1472,7 @@ class FakeTensorMode(TorchDispatchMode):
 
     def _crosscheck_cache_output(
         self,
-        output: FakeTensor,
+        output: Optional[FakeTensor],
         func: OpOverload,
         types: Sequence[Type],
         args: Sequence[object],
@@ -1484,6 +1490,7 @@ class FakeTensorMode(TorchDispatchMode):
                 f"args={args}, kwargs={kwargs}: Dispatch raised={e}"
             ) from e
         try:
+            assert true_output is not None == output is not None
             assert_metadata_eq(assert_eq, true_output, output)
         except Exception as e:
             raise RuntimeError(
@@ -1530,7 +1537,7 @@ class FakeTensorMode(TorchDispatchMode):
         types: Sequence[Type],
         args: Sequence[object],
         kwargs: Mapping[str, object],
-    ) -> FakeTensor:
+    ) -> Optional[FakeTensor]:
         flat_args, args_spec = pytree.tree_flatten((args, kwargs))
 
         flat_arg_fake_tensors = [t for t in flat_args if self.is_our_fake(t)]
@@ -1832,7 +1839,6 @@ class FakeTensorMode(TorchDispatchMode):
         # amount of time to catch the NotImplementedError, so we check it here.
         if not has_meta(func):
             fallback = maybe_run_unsafe_fallback()
-            assert fallback is not None
             return maybe_propagate_real_tensors(fallback)
 
         # run kernel registered to meta for func, which include
@@ -1842,9 +1848,7 @@ class FakeTensorMode(TorchDispatchMode):
             with in_kernel_invocation_manager(self):
                 r = func(*args, **kwargs)
         except NotImplementedError as not_implemented_error:
-            fallback = maybe_run_unsafe_fallback(not_implemented_error)
-            assert fallback is not None
-            return fallback
+            return maybe_run_unsafe_fallback(not_implemented_error)
         except Exception:
             log.exception("failed while attempting to run meta for %s", func)
             raise

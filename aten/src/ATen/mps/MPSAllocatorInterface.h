@@ -33,6 +33,7 @@ public:
   virtual size_t getTotalAllocatedMemory() const = 0;
   virtual size_t getCurrentAllocatedMemory() const = 0;
   virtual size_t getDriverAllocatedMemory() const = 0;
+  virtual size_t getRecommendedMaxMemory() const = 0;
   virtual std::pair<const void*, uint32_t> getSharedBufferPtr(const void* ptr) const = 0;
   virtual bool recordEvents(c10::ArrayRef<const void*> buffers) const = 0;
   virtual bool waitForEvents(c10::ArrayRef<const void*> buffers) const = 0;
