@@ -65,24 +65,6 @@ class WorkRegistry {
 
 static WorkRegistry process_registry;
 
-void register_work(
-    const at::Tensor& tensor,
-    const c10::intrusive_ptr<c10d::Work>& work) {
-  if (c10d::get_thread_isolation_mode()) {
-    c10d::RankLocal<WorkRegistry>::get().register_work(tensor, work);
-  } else {
-    process_registry.register_work(tensor, work);
-  }
-}
-
-c10::intrusive_ptr<c10d::Work> pop_work(const at::Tensor& tensor) {
-  if (c10d::get_thread_isolation_mode()) {
-    return c10d::RankLocal<WorkRegistry>::get().pop_work(tensor);
-  } else {
-    return process_registry.pop_work(tensor);
-  }
-}
-
 const std::unordered_map<std::string, c10d::ReduceOp> str_to_reduce_op = {
     {"sum", c10d::ReduceOp(c10d::ReduceOp::RedOpType::SUM)},
     {"avg", c10d::ReduceOp(c10d::ReduceOp::RedOpType::AVG)},

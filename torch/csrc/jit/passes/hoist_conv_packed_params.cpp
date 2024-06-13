@@ -64,10 +64,10 @@ static void hoistConvPackedParams(
   }
   std::string newNameBase = prefix + "." + suffix + "_packed_params";
   nameUniqueCounter++;
-  std::string newName = newNameBase + "." + c10::to_string(nameUniqueCounter);
+  std::string newName = newNameBase + "." + std::to_string(nameUniqueCounter);
   while (rootModule.hasattr(newName)) {
     nameUniqueCounter++;
-    newName = newNameBase + "." + c10::to_string(nameUniqueCounter);
+    newName = newNameBase + "." + std::to_string(nameUniqueCounter);
   }
 
   // copy the packed params
