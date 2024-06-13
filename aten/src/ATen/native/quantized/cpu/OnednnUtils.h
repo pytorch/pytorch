@@ -309,7 +309,7 @@ struct PackedConvWeightsOnednn : public ConvPackedParamsBase<kSpatialDim> {
 
 namespace onednn_utils {
 
-static ideep::attr_t create_attr_by_post_op(
+inline ideep::attr_t create_attr_by_post_op(
     const c10::string_view& binary_post_op,
     double binary_alpha,
     double input1_scale,
@@ -389,27 +389,9 @@ static ideep::attr_t create_attr_by_post_op(
   return ideep::attr_t();
 }
 
-// Try to reorder tensor to expected desc at runtime
-// Do it in a `try...catch...` manner to avoid oneDNN's errors
-// TODO: Move it to third_party/ideep
-static void try_reorder(
-    ideep::tensor& t,
-    const ideep::tensor::desc&& desc,
-    ideep::scale_t scales) {
-  if (t.get_desc() != desc) {
-    try {
-      t = t.reorder_if_differ_in(desc);
-    } catch (...) {
-      ideep::tensor&& plain = t.to_public(nullptr, t.get_data_type());
-      t = plain.reorder_if_differ_in(desc);
-    }
-    t.set_scale(scales);
-  }
-}
-
 // ONEDNN requires symmetric quantization of weight
 // Use this util function to check.
-static bool is_weight_symmetric_quant(
+inline bool is_weight_symmetric_quant(
       const at::Tensor& weight,
       bool is_transposed_conv) {
   bool is_symmetric = true;
@@ -438,7 +420,7 @@ static bool is_weight_symmetric_quant(
 
 // When qengine is x86, use this util func to check if onednn kernel
 // is preferred than fbgemm's to get better performance.
-static bool should_use_onednn_quant(
+inline bool should_use_onednn_quant(
     const at::Tensor& weight,
     bool is_transposed_conv,
     int groups,
