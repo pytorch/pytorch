@@ -3728,6 +3728,27 @@ class TestNestedTensorSubclass(TestCase):
         ):
             torch.split(nt, [1, 2], 1)
 
+    def test_softmax(self, device):
+        nt = random_nt_from_dims(
+            [3, None, 5], device=device, dtype=torch.float32, layout=torch.jagged
+        )
+
+        # operate on dim=2
+        output = nt.softmax(dim=2)
+
+        @torch._dynamo.disable
+        def _compare_to_ref(nt, output, dim):
+            for in_component, out_component in zip(nt.unbind(), output.unbind()):
+                self.assertEqual(in_component.softmax(dim=dim), out_component)
+
+        # dim=2 -> dim=1 after unbind
+        _compare_to_ref(nt, output, dim=1)
+
+        # operate on dim=-1
+        output2 = nt.softmax(dim=-1)
+        torch._dynamo.disable(self.assertEqual)(output, output2)
+        _compare_to_ref(nt, output2, dim=-1)
+
     def test_views_inherit_ragged_dim(self, device):
         # view
         nt = random_nt_from_dims(
@@ -5312,6 +5333,35 @@ class TestNestedTensorSubclass(TestCase):
         attn_output_eager.sum().backward()
         self.assertTrue(torch.allclose(attn_output_eager, attn_output))
         self.assertTrue(torch.allclose(value_grad, value.grad))
+
+    @dtypes(torch.float32)
+    def test_apply_(self, device, dtype):
+        nt = random_nt_from_dims(
+            [5, None, 10],
+            device=device,
+            dtype=dtype,
+            layout=torch.jagged,
+            requires_grad=True,
+        )
+
+        def f(x):
+            return x * 2
+
+        if device != "cpu":
+            with self.assertRaisesRegex(
+                TypeError, "apply_ is only implemented on CPU tensors"
+            ):
+                nt.apply_(f)
+            return
+
+        before = nt._values.clone().detach()
+
+        nt.apply_(f)
+        expected = f(before)
+        self.assertEqual(expected, nt._values)
+        # apply_ should swap values in-place without appending to autograd graph
+        self.assertIsNone(nt.grad)
+        self.assertIsNone(nt._values.grad_fn)
 
     @dtypes(torch.float64, torch.float32, torch.half)
     def test_jagged_padded_dense_conversion_kernels(self, device, dtype):

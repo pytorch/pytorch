@@ -3092,36 +3092,6 @@ CUDA_TEST_FAILURES = {
     "test_quantized_linear": fail_cuda(is_skip=True),
 }
 
-if TEST_WITH_ROCM:
-    CUDA_TEST_FAILURES.update(
-        {
-            "test_addmm_multiple_dynamic": fail_cuda(is_skip=True),
-            "test_bmm_multiple_dynamic": fail_cuda(is_skip=True),
-            "test_convolution": fail_cuda(is_skip=True),
-            "test_large_weight": fail_cuda(is_skip=True),
-            "test_large_mmaped_weights": fail_cuda(is_skip=True),
-            "test_missing_cubin": fail_cuda(is_skip=True),
-            "test_multi_device": fail_cuda(is_skip=True),
-            "test_poi_multiple_dynamic": fail_cuda(is_skip=True),
-            "test_sdpa": fail_cuda(is_skip=True),
-            "test_sdpa_2": fail_cuda(is_skip=True),
-            "test_dynamic_smem_above_default_limit": fail_cuda(is_skip=True),
-            "test_foreach_multiple_dynamic": fail_cuda(is_skip=True),
-            "test_reuse_kernel": fail_cuda(is_skip=True),
-            "test_zero_grid_with_unbacked_symbols": fail_cuda(is_skip=True),
-            "test_zero_grid_with_backed_symbols": fail_cuda(is_skip=True),
-            "test_reuse_kernel_dynamic": fail_cuda(is_skip=True),
-            "test_duplicate_constant_folding": fail_cuda(is_skip=True),
-            "test_cond_simple": fail_cuda(is_skip=True),
-            "test_cond_nested": fail_cuda(is_skip=True),
-            "test_cond_with_parameters": fail_cuda(is_skip=True),
-            "test_cond_with_reinterpret_view_inputs_outputs": fail_cuda(is_skip=True),
-            "test_cond_with_multiple_outputs": fail_cuda(is_skip=True),
-            "test_cond_with_outer_code_before_after": fail_cuda(is_skip=True),
-            "test_cond_use_buffers_from_outer_scope": fail_cuda(is_skip=True),
-            "test_index_put_with_none_index": fail_cuda(is_skip=True),
-        }
-    )
 
 if not IS_FBCODE:
     # The following tests look like they pass in both pytest and unittest (xml
