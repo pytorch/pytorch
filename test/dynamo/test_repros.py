@@ -1136,7 +1136,6 @@ class ReproTests(torch._dynamo.test_case.TestCase):
 
         x = torch.ones(4, requires_grad=True)
         y = torch.ones(4, requires_grad=False)
-        # with torch.autograd.graph.disable_saved_tensors_hooks("hooks are disabled"):
         out_test = f_compiled(x, y)
         out_test.sum().backward()
 
