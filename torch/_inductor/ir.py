@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import collections
 import contextlib
 import dataclasses
@@ -44,7 +45,6 @@ from torch._prims_common import (
     is_boolean_dtype,
     is_float_dtype,
     make_channels_last_strides_for,
-    make_contiguous_strides_for,
     StrideType,
 )
 from torch._subclasses.fake_tensor import get_schema_info
@@ -236,7 +236,7 @@ def ir_node_to_tensor(x, guard_shape=True):
     if is_storage_and_layout(x):
         stride = [shape_fn(s) for s in x.get_layout().stride]  # type: ignore[misc]
     else:
-        stride = make_contiguous_strides_for(size)  # type: ignore[arg-type]
+        stride = FlexibleLayout.contiguous_strides(size)  # type: ignore[arg-type]
     dtype = x.get_dtype()
     device = x.get_device()
     size = convert_shape_to_symint(size)
@@ -2395,7 +2395,7 @@ class SliceView(View):
     @classmethod
     def create(cls, x, dim, start, end, step=1, clamp=True):
         step = sympy.expand(step)
-        assert step > 0
+        assert isinstance(step, sympy.Expr) or step > 0
         try:
             if start == 0 and end >= 2**63 - 1 and step == 1:
                 return x
@@ -2770,6 +2770,7 @@ class FlexibleLayout(Layout):
 
     allow_indexing = False
 
+    # WARNING!  This doesn't handle zero size tensors correctly
     @staticmethod
     def contiguous_strides(sizes):
         if len(sizes) == 0:
@@ -4782,14 +4783,9 @@ class MutationOutput(ExternKernel):
 
     def __init__(self, layout, mutated_node, node_doing_mutating):
         # NB: Do not directly construct this - use `mark_node_as_mutating`
-        super().__init__(None, layout, [mutated_node], ())
+        super().__init__(None, layout, [mutated_node, node_doing_mutating], ())
         self.node_doing_mutating = node_doing_mutating
         self.name = V.graph.register_buffer(self)
-
-    def get_read_writes(self):
-        read_writes = super().get_read_writes()
-        read_writes.reads.add(dependencies.WeakDep(self.node_doing_mutating.get_name()))
-        return read_writes
 
     def should_allocate(self):
         return False
@@ -5923,7 +5919,7 @@ def _prepare_convolution_fusion_create(
     # To align the behavior of the Conv kernel, we set the output_stride in such case to be contiguous instead of channels last.
     dynamic_shapes = not all(isinstance(i, int) for i in (output_size))
     if dynamic_shapes and is_contiguous_storage_and_layout(x):
-        output_stride = make_contiguous_strides_for(output_size)
+        output_stride = FlexibleLayout.contiguous_strides(output_size)
     else:
         output_stride = make_channels_last_strides_for(output_size)
 
@@ -5975,7 +5971,7 @@ def _prepare_linear_fusion_create(
     assert x.get_device().type == "cpu" and weight.get_device().type == "cpu"
     inputs = [x, weight]
 
-    output_stride = make_contiguous_strides_for(output_size)
+    output_stride = FlexibleLayout.contiguous_strides(output_size)
     kernel_layout = FixedLayout(
         x.get_device(),
         x.get_dtype(),
@@ -6291,7 +6287,7 @@ class MKLPackedLinear(ExternKernelAlloc):
         *m, _ = x.get_size()
         oc, _ = orig_w.get_size()
         output_size = list(m) + [oc]
-        output_stride = make_contiguous_strides_for(output_size)
+        output_stride = FlexibleLayout.contiguous_strides(output_size)
         inputs = [x, packed_w, orig_w]
         constant_args = [batch_size]
         if B is not None:
@@ -6344,7 +6340,7 @@ class LinearUnary(ExternKernelAlloc):
         )
 
     @classmethod
-    def create(cls, x, w, b, attr, scalars, algorithm):
+    def create(cls, x, w, B, attr, scalars, algorithm):
         x = cls.require_contiguous(cls.realize_input(x))
         w = cls.require_contiguous(cls.realize_input(w))
 
@@ -6352,9 +6348,9 @@ class LinearUnary(ExternKernelAlloc):
         oc, ic = w.get_size()
         inputs = [x, w]
         constant_args = [attr, scalars if scalars else [-1], algorithm]
-        if b is not None:
-            b = cls.require_contiguous(cls.realize_input(b))
-            inputs.append(b)
+        if B is not None:
+            B = cls.require_contiguous(cls.realize_input(B))
+            inputs.append(B)
         else:
             constant_args.insert(0, None)
 
@@ -6609,13 +6605,13 @@ class MkldnnRnnLayer(ExternKernelAlloc):
 
         def get_strides_of_lstm_output(output_shape, batch_first):
             assert len(output_shape) == 3, "Expect output_shape to be 3D"
-            return make_contiguous_strides_for(output_shape)
+            return FlexibleLayout.contiguous_strides(output_shape)
 
         output_sizes = [output_shape, hy_shape, cy_shape]
         output_strides = [
             get_strides_of_lstm_output(output_shape, batch_first),
-            make_contiguous_strides_for(hy_shape),
-            make_contiguous_strides_for(cy_shape),
+            FlexibleLayout.contiguous_strides(hy_shape),
+            FlexibleLayout.contiguous_strides(cy_shape),
         ]
         output_ir = [
             MultiOutput(
@@ -7554,7 +7550,7 @@ class StorageBox(MutableBox):
             """
             The heuristic for realizing reused result of heavy ops on cpu
             """
-            heavy_ops = ["exp"]  # a list of heavy ops
+            heavy_ops = ["exp", "sigmoid"]  # a list of heavy ops
             fn_str = loops.inner_fn_str()
             return any((op + "(") in fn_str for op in heavy_ops)
 
