@@ -754,9 +754,11 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
                     torch.ops.quantized_decomposed.dequantize_per_tensor.default,
                     torch.ops.aten.conv2d.default,
                     torch.ops.quantized_decomposed.quantize_per_tensor.default,
-                    torch.ops.aten.add_.Tensor
-                    if inplace_add
-                    else torch.ops.aten.add.Tensor,
+                    (
+                        torch.ops.aten.add_.Tensor
+                        if inplace_add
+                        else torch.ops.aten.add.Tensor
+                    ),
                 ]
                 self._test_quantizer(
                     m,
@@ -1349,9 +1351,11 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
                     torch.ops.quantized_decomposed.quantize_per_tensor.default,
                     torch.ops.quantized_decomposed.dequantize_per_tensor.default,
                     torch.ops.aten.linear.default,
-                    torch.ops.aten.add_.Tensor
-                    if inplace_add
-                    else torch.ops.aten.add.Tensor,
+                    (
+                        torch.ops.aten.add_.Tensor
+                        if inplace_add
+                        else torch.ops.aten.add.Tensor
+                    ),
                 ]
                 fq_m = self._test_quantizer(
                     m,
@@ -1404,9 +1408,11 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
                     torch.ops.quantized_decomposed.dequantize_per_tensor.default,
                     torch.ops.aten.linear.default,
                     torch.ops.quantized_decomposed.quantize_per_tensor.default,
-                    torch.ops.aten.add_.Tensor
-                    if inplace_add
-                    else torch.ops.aten.add.Tensor,
+                    (
+                        torch.ops.aten.add_.Tensor
+                        if inplace_add
+                        else torch.ops.aten.add.Tensor
+                    ),
                 ]
                 fq_m = self._test_quantizer(
                     m,
@@ -1475,9 +1481,11 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
                     torch.ops.quantized_decomposed.quantize_per_tensor.default,
                     torch.ops.quantized_decomposed.dequantize_per_tensor.default,
                     torch.ops.aten.linear.default,
-                    torch.ops.aten.add_.Tensor
-                    if inplace_add
-                    else torch.ops.aten.add.Tensor,
+                    (
+                        torch.ops.aten.add_.Tensor
+                        if inplace_add
+                        else torch.ops.aten.add.Tensor
+                    ),
                 ]
                 fq_m = self._test_quantizer(
                     m,
@@ -1697,9 +1705,11 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
                     torch.ops.quantized_decomposed.quantize_per_tensor.default,
                     torch.ops.quantized_decomposed.dequantize_per_tensor.default,
                     torch.ops.aten.conv2d.default,
-                    torch.ops.aten.add_.Tensor
-                    if inplace_add
-                    else torch.ops.aten.add.Tensor,
+                    (
+                        torch.ops.aten.add_.Tensor
+                        if inplace_add
+                        else torch.ops.aten.add.Tensor
+                    ),
                     torch.ops.quantized_decomposed.quantize_per_tensor.default,
                     torch.ops.quantized_decomposed.dequantize_per_tensor.default,
                 ]
@@ -1744,9 +1754,11 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
                     torch.ops.quantized_decomposed.dequantize_per_tensor.default,
                     torch.ops.aten.conv2d.default,
                     torch.ops.quantized_decomposed.quantize_per_tensor.default,
-                    torch.ops.aten.add_.Tensor
-                    if inplace_add
-                    else torch.ops.aten.add.Tensor,
+                    (
+                        torch.ops.aten.add_.Tensor
+                        if inplace_add
+                        else torch.ops.aten.add.Tensor
+                    ),
                 ]
                 self._test_quantizer(
                     m,
@@ -2401,12 +2413,12 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
                     )
 
                 node_occurrence = {
-                    torch.ops.quantized_decomposed.quantize_per_tensor.default: 5
-                    if annotate_matmul
-                    else 1,
-                    torch.ops.quantized_decomposed.dequantize_per_tensor.default: 7
-                    if annotate_matmul
-                    else 3,
+                    torch.ops.quantized_decomposed.quantize_per_tensor.default: (
+                        5 if annotate_matmul else 1
+                    ),
+                    torch.ops.quantized_decomposed.dequantize_per_tensor.default: (
+                        7 if annotate_matmul else 3
+                    ),
                     # quantize_per_channel for weights are const propagated
                     torch.ops.quantized_decomposed.quantize_per_channel.default: 0,
                     torch.ops.quantized_decomposed.dequantize_per_channel.default: 3,
