@@ -28,37 +28,6 @@ constexpr int kCUDANumThreads = 256;
 constexpr int kReduceTileSize = 32;
 
 template <typename T>
-__global__ void ApplyScaleBiasNHWCKernel(
-    const T* X,
-    T* Y,
-    int64_t N,
-    int64_t H,
-    int64_t W,
-    int64_t C,
-    acc_type<T, true>* a,
-    acc_type<T, true>* b) {
-  using T_ACC = acc_type<T, true>;
-  const int tid = blockIdx.x * blockDim.x + threadIdx.x;
-  const int grid_stride = blockDim.x * gridDim.x;
-  const int num_el = N * H * W * C;
-
-  for (int j = tid; j < num_el; j += grid_stride) {
-    const int64_t index = j;
-    const int64_t cur_sample = index / (H * W * C);
-    int64_t remainder = index % (H * W * C);
-    const int64_t cur_h = remainder / (W * C);
-    remainder = remainder % (W * C);
-    const int64_t cur_w = remainder / (C);
-    const int64_t cur_channel = remainder % C;
-
-    const int64_t cur_a_index = cur_sample * C + cur_channel;
-    T_ACC cur_a = a[cur_a_index];
-    T_ACC cur_b = b[cur_a_index];
-    Y[index] = cur_a * static_cast<T_ACC>(X[index]) + cur_b;
-  }
-}
-
-template <typename T>
 __global__ void RowwiseMomentsCUDAKernelNHWC(
     int64_t N,
     int64_t H,
@@ -753,13 +722,18 @@ void GroupNormKernelImplInternal(
         break;
       }
       case MemoryFormat::ChannelsLast: {
-        int num_blocks =
-            (N * height * width * C + kCUDANumThreads - 1) / kCUDANumThreads;
-
-        ApplyScaleBiasNHWCKernel<T>
-            <<<num_blocks, kCUDANumThreads, 0, cuda_stream>>>(
-                X_data, Y_data, N, height, width, C, a_data, b_data);
-        C10_CUDA_KERNEL_LAUNCH_CHECK();
+        TensorIterator iter =
+            TensorIteratorConfig()
+                .check_all_same_dtype(std::is_same<T, T_ACC>::value)
+                .resize_outputs(false)
+                .add_owned_output(Y)
+                .add_owned_const_input(X)
+                .add_owned_input(a.view({N, C, 1, 1}))
+                .add_owned_input(b.view({N, C, 1, 1}))
+                .build();
+        gpu_kernel(iter, [] GPU_LAMBDA(T x, T_ACC a, T_ACC b) -> T {
+          return a * static_cast<T_ACC>(x) + b;
+        });
 
         break;
       }
