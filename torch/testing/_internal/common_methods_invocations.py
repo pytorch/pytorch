@@ -12275,11 +12275,12 @@ op_db: List[OpInfo] = [
            reference_inputs_func=partial(
                reference_inputs_elementwise_ternary, sample_inputs_func=reference_inputs_addcmul_addcdiv)),
     UnaryUfuncInfo('alias_copy',
-           dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
-           dtypesIfCUDA=all_types_and_complex_and(torch.chalf, torch.bool, torch.half, torch.bfloat16),
-           supports_forward_ad=True,
-           supports_fwgrad_bwgrad=True,
-           supports_out=True,),
+                   dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
+                   dtypesIfCUDA=all_types_and_complex_and(torch.chalf, torch.bool, torch.half, torch.bfloat16),
+                   supports_forward_ad=True,
+                   supports_fwgrad_bwgrad=True,
+                   sample_inputs_func=sample_inputs_alias_copy,
+                   supports_out=True),
     UnaryUfuncInfo('asin',
                    aliases=('arcsin', ),
                    ref=np.arcsin,
@@ -13052,6 +13053,17 @@ op_db: List[OpInfo] = [
            skips=(
                DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
            )),
+    OpInfo('expand_copy',
+           op=lambda self, shape: self.expand(shape),
+           dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
+           sample_inputs_func=sample_inputs_expand,
+           supports_forward_ad=True,
+           supports_fwgrad_bwgrad=True,
+           assert_jit_shape_analysis=True,
+           supports_out=True,
+           skips=(
+               DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
+           )),
     OpInfo('expand_as',
            op=lambda self, other: self.expand_as(other),
            dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
@@ -13103,11 +13115,6 @@ op_db: List[OpInfo] = [
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            sample_inputs_func=sample_inputs_diagonal_scatter),
-    OpInfo('alias_copy',
-           dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16, torch.chalf),
-           sample_inputs_func=sample_inputs_alias_copy,
-           supports_forward_ad=True,
-           supports_fwgrad_bwgrad=True),
     BinaryUfuncInfo('eq',
                     ref=np.equal,
                     dtypes=all_types_and_complex_and(torch.bool, torch.bfloat16, torch.float16, torch.chalf),
@@ -21273,10 +21280,6 @@ python_ref_db = [
         torch_opinfo_name="lerp",
     ),
     PythonRefInfo(
-        "_refs.alias_copy",
-        torch_opinfo_name="alias_copy",
-    ),
-    PythonRefInfo(
         "_refs.view_copy",
         torch_opinfo_name="view_copy",
     ),
@@ -23345,18 +23348,6 @@ python_ref_db = [
         ),
     ),
     PythonRefInfo(
-        "_refs.as_strided_copy",
-        torch_opinfo_name="as_strided_copy",
-        # FIXME: doesn't support chalf
-        dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
-        skips=(
-            # cloned_mutable_input.is_same(returned_output) INTERNAL ASSERT FAILED
-            DecorateInfo(unittest.skip("Errors when storage_offset is included"), 'TestMathBits', 'test_neg_view'),
-            DecorateInfo(unittest.skip("Errors when storage_offset is included"), 'TestMathBits', 'test_conj_view'),
-            DecorateInfo(unittest.skip("Errors when storage_offset is included"), 'TestMathBits', 'test_neg_conj_view'),
-        ),
-    ),
-    PythonRefInfo(
         "_refs.as_strided_scatter",
         torch_opinfo_name="as_strided_scatter",
         # returns a view of an intermediate tensor (as_strided)
@@ -23454,6 +23445,10 @@ python_ref_db = [
     PythonRefInfo(
         "_refs.expand_as",
         torch_opinfo_name="expand_as",
+    ),
+    PythonRefInfo(
+        "_refs.expand_copy",
+        torch_opinfo_name="expand_copy",
     ),
     PythonRefInfo(
         "_refs.flatten",

@@ -2669,9 +2669,6 @@ def as_strided(
     return prims.as_strided(a, size, stride, storage_offset_int)
 
 
-as_strided_copy = _make_copy_from_view(as_strided)
-
-
 @register_decomposition(aten.as_strided_scatter)
 @out_wrapper()
 def as_strided_scatter(
@@ -4475,9 +4472,6 @@ def T(a: TensorLikeType) -> TensorLikeType:
 @register_decomposition(aten.alias)
 def alias(a: TensorLikeType) -> TensorLikeType:
     return prims.view_of(a)
-
-
-alias_copy = _make_copy_from_view(alias)
 
 
 @register_decomposition(aten.transpose)

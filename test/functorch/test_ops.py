@@ -1151,6 +1151,7 @@ class TestOperators(TestCase):
             xfail("nn.functional.max_unpool2d", "grad"),
             xfail("sparse.sampled_addmm", ""),
             xfail("sparse.mm", "reduce"),
+            xfail("as_strided_copy", ""),  # calls as_strided
             xfail("as_strided_scatter", ""),  # calls as_strided
             xfail("index_reduce", "prod"),  # .item() call
             # ---------------------------------------------------------------------
@@ -1395,6 +1396,11 @@ class TestOperators(TestCase):
                 xfail("masked.cumprod", ""),
                 xfail("renorm"),  # hit vmap fallback, which is disabled
             }
+        ).difference(
+            {
+                # as_strided_copy fails test_vmapvjp, succeeds here
+                xfail("as_strided_copy", ""),
+            }
         ),
     )
     @toleranceOverride({torch.float32: tol(atol=1e-04, rtol=1e-04)})
@@ -1530,6 +1536,11 @@ class TestOperators(TestCase):
                 xfail(
                     "index_fill"
                 ),  # aten::_unique hit the vmap fallback which is currently disabled
+            }
+        ).difference(
+            {
+                # as_strided_copy fails test_vmapvjp, succeeds here
+                xfail("as_strided_copy", ""),
             }
         ),
     )
@@ -1893,7 +1904,7 @@ class TestOperators(TestCase):
                 xfail(
                     "as_strided", "partial_views"
                 ),  # AssertionError: Tensor-likes are not close!
-                xfail("as_strided_copy"),
+                xfail("as_strided_copy"),  # AssertionError: Tensor-likes are not close!
                 xfail(
                     "as_strided_scatter"
                 ),  # AssertionError: Tensor-likes are not close!
