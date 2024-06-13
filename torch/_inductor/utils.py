@@ -46,7 +46,6 @@ from unittest import mock
 import sympy
 
 import torch
-import torch._export
 import torch.utils._pytree as pytree
 from torch._dynamo.device_interface import get_interface_for_device
 from torch._dynamo.utils import detect_fake_mode
@@ -54,13 +53,7 @@ from torch.autograd import DeviceType
 from torch.autograd.profiler_util import EventList
 from torch.fx.passes.graph_transform_observer import GraphTransformObserver
 from torch.fx.passes.shape_prop import ShapeProp
-from torch.utils._sympy.functions import (
-    CeilDiv,
-    CleanDiv,
-    FloorDiv,
-    Identity,
-    ModularIndexing,
-)
+from torch.utils._sympy.functions import CeilDiv, CleanDiv, FloorDiv, ModularIndexing
 from torch.utils._sympy.symbol import make_symbol, SymT
 from torch.utils._sympy.value_ranges import bound_sympy, ValueRanges
 from . import config
@@ -581,7 +574,7 @@ def sympy_str(expr: sympy.Expr) -> str:
     if isinstance(expr, sympy.Mul):
         return " * ".join(map(sympy_str, expr.args))
 
-    if isinstance(expr, (ModularIndexing, CleanDiv, FloorDiv, Identity)):
+    if isinstance(expr, (ModularIndexing, CleanDiv, FloorDiv)):
         return f"{expr.func.__name__}({', '.join(map(sympy_str, expr.args))})"
     return str(expr)
 
@@ -1509,6 +1502,7 @@ def get_cloned_parameter_buffer_name(name: str):
 
 
 def is_gpu(device: str):
+    assert isinstance(device, str) or device is None, device
     return device in ["cuda", "xpu"]
 
 
@@ -1685,6 +1679,8 @@ def aoti_compile_with_persistent_cache(
     Compile the given function with persistent cache for AOTI eager mode.
     """
     assert not dynamic, "Only support static shape for now"
+    from torch._export import aot_compile
+
     type_to_torch_dtype = {int: torch.int32, float: torch.float, bool: torch.bool}
     supported_scalar_types = tuple(type_to_torch_dtype.keys())
     flattened_inputs = pytree.arg_tree_leaves(*args, **kwargs)
@@ -1707,7 +1703,7 @@ def aoti_compile_with_persistent_cache(
         {"TORCHINDUCTOR_CACHE_DIR": persistent_cache_lib.absolute().as_posix()},
     ):
         try:
-            kernel_lib_path = torch._export.aot_compile(
+            kernel_lib_path = aot_compile(
                 f,
                 args,
                 kwargs,
