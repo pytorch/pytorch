@@ -56,6 +56,8 @@ class InconsistentMetadata(Exception):
 
 
 class AutoHeuristic:
+    collected_feedback: Dict[Choice, Feedback]
+
     def __init__(
         self,
         fallback: Callable[[], Choice],
@@ -70,6 +72,7 @@ class AutoHeuristic:
         self.context = context
         self.name = name
         self.features = context.features
+        self.collected_feedback = {}
 
         if torch._inductor.config.autoheuristic_mode == "COLLECT_DATA" and isinstance(
             self.feedback, LocalFeedback
@@ -80,6 +83,9 @@ class AutoHeuristic:
 
     def get_choice(self) -> Choice:
         return self.fallback()
+
+    def get_collected_feedback(self, choice: Choice) -> Any:
+        return self.collected_feedback.get(choice, None)
 
     @staticmethod
     def get_device_identifier() -> str:
@@ -111,6 +117,7 @@ class AutoHeuristic:
         return json.loads(json_string)
 
     def save_data(self, choice: Choice, feedback_val: Feedback) -> None:
+        self.collected_feedback[choice] = feedback_val
         log_path = self.get_log_path()
 
         lines = []

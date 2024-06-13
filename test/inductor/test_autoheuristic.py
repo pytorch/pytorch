@@ -80,6 +80,10 @@ class AutoHeuristicTest(TestCase):
 
         # when autoheuristic_mode is COLLECT_DATA, we always return fallback
         self.assertEqual(autoheuristic.get_choice(), "fallback")
+        self.assertEqual(autoheuristic.get_collected_feedback("a"), 1)
+        self.assertEqual(autoheuristic.get_collected_feedback("b"), 2)
+        self.assertEqual(autoheuristic.get_collected_feedback("c"), 3)
+
         path = self.get_path_to_autoheuristic_log(name)
         self.assertTrue(os.path.exists(path))
         num_lines = self.count_lines_in_file(path)

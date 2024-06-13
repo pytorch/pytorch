@@ -570,22 +570,18 @@ def run_autoheuristic(
         return context
 
     def feedback_fn(choice):
-        # storing ori_time and pad_time to avoid benchmarking twice while collecting data
-        if choice == "orig":
-            ori_time = do_bench(orig_bench_fn)
-            return ori_time
-        elif choice == "pad":
-            pad_time = do_bench(pad_bench_fn)
-            return pad_time
+        if choice == orig_choice:
+            return do_bench(orig_bench_fn)
+        elif choice == pad_choice:
+            return do_bench(pad_bench_fn)
         return None
-
-    ori_time = None
-    pad_time = None
 
     def fallback():
         return "autotune"
 
-    choices = ["orig", "pad"]
+    orig_choice = "orig"
+    pad_choice = "pad"
+    choices = [orig_choice, pad_choice]
     feedback = LocalFeedback(feedback_fn)
     context = get_context(mat1, mat2)
     name = "pad_mm"
@@ -597,8 +593,12 @@ def run_autoheuristic(
         name=name,
     )
     choice = autoheuristic.get_choice()
-    choice2should_pad = {"orig": False, "pad": True, "autotune": None}
+    choice2should_pad = {orig_choice: False, pad_choice: True, "autotune": None}
     ah_should_pad = choice2should_pad.get(choice, None)
+
+    # get benchmarking times to avoid benchmarking again
+    ori_time = autoheuristic.get_collected_feedback(orig_choice)
+    pad_time = autoheuristic.get_collected_feedback(pad_choice)
     return (ah_should_pad, ori_time, pad_time)
 
 
