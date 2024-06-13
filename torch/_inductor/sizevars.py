@@ -162,9 +162,9 @@ class SizeVarAllocator:
         if expr.has(ModularIndexing):
             expr = expr.replace(
                 ModularIndexing(
-                    sympy.Wild("base"),
-                    sympy.Wild("divisor"),
-                    sympy.Wild("modulus"),
+                    sympy.Wild("base", integer=True),
+                    sympy.Wild("divisor", integer=True),
+                    sympy.Wild("modulus", integer=True),
                 ),
                 visit_modular_indexing,
             )
@@ -172,8 +172,8 @@ class SizeVarAllocator:
         if expr.has(FloorDiv):
             expr = expr.replace(
                 FloorDiv(
-                    sympy.Wild("base"),
-                    sympy.Wild("divisor"),
+                    sympy.Wild("base", integer=True),
+                    sympy.Wild("divisor", integer=True),
                 ),
                 visit_indexing_div,
             )
@@ -193,7 +193,16 @@ class SizeVarAllocator:
         """
         sizes = list(map(self.simplify, sizes))
 
-        strides = [self.stride_vars(x, index_vars) for x in index_formulas]
+        strides = [
+            # index_formulas may contain boolean expressions (e.g. s0 < 10),
+            # for which "strides" don't make sense so we ignore them here.
+            # NOTE: These expressions may still block merging dims in the sound
+            # substitution test performed in can_merge_dims.
+            self.stride_vars(x, index_vars)
+            if isinstance(x, sympy.Expr)
+            else [0] * len(index_vars)
+            for x in index_formulas
+        ]
         assert len(sizes) == len(strides[0]), (len(sizes), len(strides[0]))
 
         for i in range(len(sizes)):
@@ -736,11 +745,11 @@ def _join_dimensions_cached(expr: Expr) -> Expr:
     """
     assert isinstance(expr, sympy.Add)
 
-    scale = sympy.Wild("scale", exclude=[0])
-    base = sympy.Wild("base")
-    divisor = sympy.Wild("divisor")
-    mod1 = sympy.Wild("modulus")
-    mod2 = sympy.Wild("modulus2")
+    scale = sympy.Wild("scale", exclude=[0], integer=True)
+    base = sympy.Wild("base", integer=True)
+    divisor = sympy.Wild("divisor", integer=True)
+    mod1 = sympy.Wild("modulus", integer=True)
+    mod2 = sympy.Wild("modulus2", integer=True)
     for term1 in expr.args:
         m1 = term1.match(scale * ModularIndexing(base, divisor, mod1))
         if m1:

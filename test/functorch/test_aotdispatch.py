@@ -68,6 +68,7 @@ from torch.testing._internal.common_utils import (
     skipIfRocm,
     skipIfTorchDynamo,
     TestCase,
+    xfail_inherited_tests,
     xfailIfTorchDynamo,
 )
 from torch.testing._internal.hop_db import hop_db
@@ -285,7 +286,7 @@ def is_in_base(t, maybe_tensors):
     return False
 
 
-def skipIfDynamoInput(reason, xfail=False):
+def skipIfDynamoInput(reason):
     """
     Skip TestAOTAutograd if running with dynamo input
     """
@@ -293,16 +294,12 @@ def skipIfDynamoInput(reason, xfail=False):
     def decorator(func):
         @wraps(func)
         def wrapper(self, *args, **kwargs):
-            fn = func
             if isinstance(self, TestAOTAutogradWithDynamo):
-                if xfail:
-                    fn = unittest.expectedFailure(fn)
-                else:
-                    self.skipTest(
-                        f"Skipping {self._testMethodName} in TestAOTAutogradWithDynamo because {reason}"
-                    )
+                self.skipTest(
+                    f"Skipping {self._testMethodName} in TestAOTAutogradWithDynamo because {reason}"
+                )
             else:
-                fn(self, *args, **kwargs)
+                func(self, *args, **kwargs)
 
         return wrapper
 
@@ -620,7 +617,6 @@ def forward(self, primals_1, primals_2):
     # https://github.com/pytorch/pytorch/issues/126236
     # https://github.com/pytorch/pytorch/pull/126113
     @xfailIfTorchDynamo
-    @skipIfDynamoInput("Not supported by dynamo", xfail=True)
     def test_set__and_data_mutation_bad(self):
         def f(a):
             a_view = a.view(-1)
@@ -1851,7 +1847,6 @@ def forward(self, primals_1):
         )
 
     @parametrize("req_grad", [False, True])
-    @skipIfDynamoInput("Runtime error not raised with dynamo", xfail=True)
     def test_subclass_metadata_mutation(self, req_grad):
         def f(a):
             a.transpose_(1, 0)
@@ -1925,7 +1920,6 @@ def forward(self, primals_1, primals_2):
     return [t, view_1, view_2]""",
         )
 
-    @skipIfDynamoInput("https://github.com/pytorch/pytorch/issues/128035", xfail=True)
     def test_view_detach(self):
         def f(a):
             tmp = a.detach()
@@ -2644,7 +2638,6 @@ def forward(self, primals_1, primals_2, primals_3):
 
         self.verify_aot_autograd(f, inp_callable, test_mutation=True)
 
-    @skipIfDynamoInput("https://github.com/pytorch/pytorch/issues/128035", xfail=True)
     def test_input_mutation_alias_everything(self):
         # Mondo test that tests a combination of:
         # input is mutated, that aliases another input (so we make a synthetic base)
@@ -5338,6 +5331,34 @@ def forward(self, tangents_1, tangents_2):
         self.assertEqual(a_ref_base.grad.a, a_test_base.grad.a)
         self.assertEqual(a_ref_base.grad.b, a_test_base.grad.b)
 
+    def test_aot_dispatch_output_requires_grad_in_no_grad(self):
+        def fn(x):
+            out1 = x.sin()
+            with torch.enable_grad():
+                out2 = x.cos()
+            return out1, out2
+
+        inp_fns = [
+            lambda: torch.ones(10, requires_grad=True),
+            lambda: torch.ones(10, requires_grad=False),
+        ]
+
+        compiled_f = aot_function(fn, nop)
+        for inp_fn in inp_fns:
+            with torch.no_grad():
+                ref_x = inp_fn()
+                ref_out = fn(ref_x)
+                x = inp_fn()
+                out = compiled_f(x)
+                for r, o in zip(ref_out, out):
+                    self.assertEqual(r.requires_grad, o.requires_grad)
+            if ref_x.requires_grad:
+                with torch.enable_grad():
+                    (ref_out[0] + ref_out[1]).sum().backward()
+                    (out[0] + out[1]).sum().backward()
+                    self.assertEqual(ref_x.grad, x.grad)
+                    assert torch.allclose(ref_x.grad, x.grad, atol=1e-3, rtol=1e-3)
+
 
 class TestAOTModuleSimplified(AOTTestCase):
     def test_aot_module_simplified(self):
@@ -5868,6 +5889,13 @@ instantiate_device_type_tests(TestEagerFusionOpInfo, globals(), only_for=only_fo
 instantiate_device_type_tests(TestEagerFusionModuleInfo, globals(), only_for=only_for)
 
 
+@xfail_inherited_tests(
+    [
+        "test_set__and_data_mutation_bad",
+        "test_subclass_metadata_mutation_req_grad_True",
+        "test_subclass_metadata_mutation_req_grad_False",
+    ]
+)
 @skipIfTorchDynamo("This test suite already uses dynamo")
 class TestAOTAutogradWithDynamo(TestAOTAutograd):
     """

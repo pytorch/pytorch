@@ -26,18 +26,18 @@ class AllGatherResult(NamedTuple):
     all_gather_input_split_sizes: List[int]
 
 
-lib = torch.library.Library("fsdp", "FRAGMENT")
+lib = torch.library.Library("fsdp", "FRAGMENT")  # noqa: TOR901
 
 lib.define(
     """
     all_gather_copy_in(
+        Tensor[] all_gather_inputs,
+        SymInt[] inp_split_sizes,
         SymInt all_gather_input_numel,
         SymInt world_size,
         SymInt rank,
         ScalarType dtype,
-        Device device,
-        SymInt[] inp_split_sizes,
-        Tensor[] all_gather_inputs
+        Device device
     ) -> (Tensor, Tensor)
     """
 )
@@ -45,14 +45,14 @@ lib.define(
 
 @torch.library.impl(lib, "all_gather_copy_in", "Meta")
 def all_gather_copy_in_meta(
+    all_gather_inputs: List[torch.Tensor],
+    inp_split_sizes: List[int],
     all_gather_input_numel: int,
     world_size: int,
     rank: int,
-    dtype: int,
+    dtype: torch.dtype,
     device: torch.device,
-    inp_split_sizes: List[int],
-    all_gather_inputs: List[torch.Tensor],
-) -> (torch.Tensor, torch.Tensor):
+) -> Tuple[torch.Tensor, torch.Tensor]:
     all_gather_output = torch.empty(
         (all_gather_input_numel * world_size,), dtype=dtype, device="meta"
     )
@@ -64,14 +64,14 @@ def all_gather_copy_in_meta(
 
 @torch.library.impl(lib, "all_gather_copy_in", "CUDA")
 def all_gather_copy_in_cuda(
+    all_gather_inputs: List[torch.Tensor],
+    inp_split_sizes: List[int],
     all_gather_input_numel: int,
     world_size: int,
     rank: int,
-    dtype: int,
+    dtype: torch.dtype,
     device: torch.device,
-    inp_split_sizes: List[int],
-    all_gather_inputs: List[torch.Tensor],
-):
+) -> Tuple[torch.Tensor, torch.Tensor]:
     all_gather_output = torch.empty(
         (all_gather_input_numel * world_size,), dtype=dtype, device=device
     )
@@ -90,19 +90,8 @@ lib.define(
 
 
 @torch.library.impl(lib, "split_with_sizes_copy", "Meta")
-def split_with_sizes_copy_meta(
-    all_gather_output: torch.Tensor,
-    all_gather_input_split_sizes: List[int],
-    dim: int,
-    out: List[torch.Tensor],
-) -> None:
-    torch.split_with_sizes_copy(
-        all_gather_output, all_gather_input_split_sizes, dim=dim, out=out
-    )
-
-
 @torch.library.impl(lib, "split_with_sizes_copy", "CUDA")
-def split_with_sizes_copy_cuda(
+def split_with_sizes_copy(
     all_gather_output: torch.Tensor,
     all_gather_input_split_sizes: List[int],
     dim: int,
@@ -119,17 +108,8 @@ lib.define(
 
 
 @torch.library.impl(lib, "chunk_cat", "Meta")
-def chunk_cat_meta(
-    tensors: List[torch.Tensor],
-    dim: int,
-    num_chunks: int,
-    out: torch.Tensor,
-) -> None:
-    torch._chunk_cat(tensors, dim, num_chunks, out=out)
-
-
 @torch.library.impl(lib, "chunk_cat", "CUDA")
-def chunk_cat_cuda(
+def chunk_cat(
     tensors: List[torch.Tensor],
     dim: int,
     num_chunks: int,
@@ -166,13 +146,13 @@ def foreach_all_gather(
         inp_split_sizes = [t.numel() for t in all_gather_inputs]
         all_gather_input_numel = sum(inp_split_sizes)
         all_gather_input, all_gather_output = torch.ops.fsdp.all_gather_copy_in(
+            all_gather_inputs,
+            inp_split_sizes,
             all_gather_input_numel,
             world_size,
             rank,
             dtype,
             device,
-            inp_split_sizes,
-            all_gather_inputs,
         )
         del param_all_gather_inputs
     all_gather_stream.wait_stream(all_gather_copy_in_stream)
