@@ -1,7 +1,10 @@
 # Owner(s): ["oncall: export"]
 
 import unittest
-from typing import Dict, Tuple
+
+from collections import OrderedDict
+from typing import Any, Dict, List, Tuple
+
 
 import torch
 
@@ -25,7 +28,7 @@ class TestConverter(TestCase):
         # Check module.
         if isinstance(mod, torch.nn.Module):
             self.assertEqual(
-                ep.module().state_dict().keys(),
+                self._remove_lifted_tensor(ep.module().state_dict()).keys(),
                 mod.state_dict().keys(),
             )
 
@@ -38,6 +41,20 @@ class TestConverter(TestCase):
             else:
                 self.assertEqual(ep_t, orig_t)
         return ep
+
+    def _remove_lifted_tensor(self, state_dict):
+        """
+        Remove lifted tensors from state_dict when comparing state_dict between
+        exported module and eager module. Export may add lifted tensors which
+        cannot be found from the eager module.
+        """
+        out = OrderedDict()
+        for key, value in state_dict.items():
+            if key.startswith("lifted_tensor"):
+                continue
+            else:
+                out[key] = value
+        return out
 
     def test_ts2ep_converter_basic(self):
         class MSingle(torch.nn.Module):
@@ -572,8 +589,7 @@ class TestConverter(TestCase):
         )
 
     def test_context_manager(self):
-        from typing import Any
-        class ContextManager():
+        class ContextManager:
             def __init__(self):
                 return
                 # self.count = 0
@@ -594,6 +610,22 @@ class TestConverter(TestCase):
 
         inp = (torch.ones(3, 3), torch.ones(3, 3))
         self._check_equal_ts_ep_converter(M(), inp)
+
+    def test_aten_tensor(self):
+        class Module(torch.nn.Module):
+            def forward(self, x: torch.Tensor, y: List[int]) -> torch.Tensor:
+                return torch.tensor(y) + x + 5
+
+        inp = (torch.randn(3), torch.randn(3))
+        self._check_equal_ts_ep_converter(Module(), inp)
+
+    def test_aten_tensor_from_list(self):
+        class Module(torch.nn.Module):
+            def forward(self, x: torch.Tensor, y: List[int]) -> torch.Tensor:
+                return torch.tensor([y]) + x + 5
+
+        inp = (torch.randn(3), [1, 2, 3])
+        self._check_equal_ts_ep_converter(Module(), inp)
 
 
 if __name__ == "__main__":

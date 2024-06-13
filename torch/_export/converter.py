@@ -18,8 +18,6 @@ from torch.export.graph_signature import (
 from torch.fx import subgraph_rewriter
 from torch.onnx.utils import _create_jit_graph
 
-from torchgen.model import FunctionSchema
-
 
 def inplace_optimize_sym_size_div(gm: torch.fx.GraphModule):
     def pattern(im, dim, scale):
@@ -93,6 +91,7 @@ kind_to_standard_operators = {
     "aten::__not__": operator.not_,
     "aten::__contains__": operator.contains,
     "prim::dtype": get_dtype_as_int,
+    # "profiler::_record_function_enter_new": torch.ops.profiler._record_function_enter_new,
 }
 
 
@@ -189,11 +188,9 @@ def get_block_to_lifted_attrs(graph: torch._C.Graph) -> Dict[torch._C.Block, Set
 
 def get_op_overload(node: torch._C.Node):
     schema_str = node.schema()
-    breakpoint()
     schema: torch._C.FunctionSchema = torch._C.parse_schema(schema_str)
-    breakpoint()
-    ns, op_name = str(schema.name.name).split("::")
-    override = schema.name.overload_name
+    ns, op_name = str(schema.name).split("::")
+    override = schema.overload_name
 
     try:
         op_overload_mod = getattr(torch.ops, ns)
@@ -651,6 +648,27 @@ class TS2FXGraphConverter:
         args = tuple(self.get_fx_value(input) for input in node.inputs())
         self.fx_graph.call_function(target, args)
 
+    def convert_aten_tensor(self, node: torch._C.Node):
+        """
+        aten::tensor takes 1 positional argument and 3 keyword argument.
+        aten::tensor cannot be handled by _convert_standard_operators since
+        the function only supports positional arguments. We also cannot
+        extend _convert_standard_operators to support keyword arguments
+        since ops in kind_to_standard_operators usually do not have schema.
+        """
+        target = torch.tensor
+
+        schema_str = node.schema()
+        schema = torch._C.parse_schema(schema_str)
+        args, kwargs = self.get_args_kwargs(node, schema)
+        # kwargs["requires_grad"] is int but torch.tensor requires bool
+        kwargs["requires_grad"] = bool(kwargs["requires_grad"])
+
+        fx_node = self.fx_graph.call_function(target, args, kwargs)
+
+        output_name = node.output().debugName()
+        self.name_to_node[output_name] = fx_node
+
     def _convert_standard_operators(self, node: torch._C.Node):
         target = kind_to_standard_operators[node.kind()]
         args = tuple(self.get_fx_value(input) for input in node.inputs())
@@ -665,7 +683,6 @@ class TS2FXGraphConverter:
         # Provide a default node handler as well in case we don't find
         # matching converter for that.
         handler_func_name = ir_name_to_func_name(node_kind)
-        print(f"handler_func_name:{handler_func_name}")
         handler_func = getattr(self, handler_func_name, self.convert_call_function_op)
         handler_func(node)
 
