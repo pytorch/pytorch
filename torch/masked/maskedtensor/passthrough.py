@@ -34,6 +34,7 @@ PASSTHROUGH_FNS = [
     torch.ops.aten.unfold_backward,
     torch.ops.aten.im2col,
     torch.ops.aten.col2im,
+    torch.ops.aten.stack,
 ]
 
 
