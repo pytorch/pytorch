@@ -1,15 +1,17 @@
 # mypy: allow-untyped-defs
 import inspect
+import itertools
 import logging
 
 import torch
 from torch._ops import HigherOrderOperator
-from torch.utils.checkpoint import checkpoint, uid
+from torch.utils.checkpoint import checkpoint
+
 import torch._dynamo.config
 
 log = logging.getLogger(__name__)
 
-
+uid = itertools.count(1)
 
 # Used for testing the HigherOrderOperator mechanism
 class Wrap(HigherOrderOperator):

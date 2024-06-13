@@ -4,7 +4,7 @@ import itertools
 import logging
 
 import sys
-from typing import List, Optional
+from typing import Callable, List, Optional
 from unittest.mock import patch
 
 import sympy
@@ -27,17 +27,19 @@ class CppTemplate(KernelTemplate):
         name: str,
         input_nodes,
         layout: ir.Layout,
+        epilogue_creator: Optional[Callable[[ir.Buffer], ir.Pointwise]] = None,
     ):
         super().__init__(name)
         self.input_nodes = input_nodes
         self.output_node: ir.Buffer = ir.Buffer("buf_out", layout)
         self.layout = layout
+        self.epilogue_creator = epilogue_creator
 
     def generate(self, **kwargs):
         kernel_name = f"cpp_{self.name}"
         with patch.object(
             V.graph, "get_dtype", self._fake_get_dtype(self.output_node)
-        ), CppTemplateKernel(
+        ), patch.object(ir.FlexibleLayout, "allow_indexing", True), CppTemplateKernel(
             kernel_name=kernel_name,
         ) as kernel:
             code = kernel.render(self, **kwargs)
