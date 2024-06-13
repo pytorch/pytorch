@@ -394,7 +394,9 @@ jobs:
   linux-focal-cpu-py3_10-gcc9-bazel-test:
     name: linux-focal-cpu-py3.10-gcc9-bazel-test
     uses: ./.github/workflows/_bazel-build-test.yml
+    needs: get-label-type
     with:
+      runner: "${{ needs.get-label-type.outputs.label-type }}linux.large"
       build-environment: linux-focal-cuda12.1-py3.10-gcc9-bazel-test
       docker-image-name: pytorch-linux-focal-cuda12.1-cudnn9-py3-gcc9
       cuda-version: cpu
@@ -406,7 +408,9 @@ jobs:
   linux-focal-cuda12_1-py3_10-gcc9-bazel-test:
     name: linux-focal-cuda12.1-py3.10-gcc9-bazel-test
     uses: ./.github/workflows/_bazel-build-test.yml
+    needs: get-label-type
     with:
+      runner: "${{ needs.get-label-type.outputs.label-type }}linux.large"
       build-environment: linux-focal-cuda12.1-py3.10-gcc9-bazel-test
       docker-image-name: pytorch-linux-focal-cuda12.1-cudnn9-py3-gcc9
       cuda-version: "12.1"
@@ -418,7 +422,9 @@ jobs:
   linux-focal-cuda12_4-py3_10-gcc9-bazel-test:
     name: linux-focal-cuda12.4-py3.10-gcc9-bazel-test
     uses: ./.github/workflows/_bazel-build-test.yml
+    needs: get-label-type
     with:
+      runner: "${{ needs.get-label-type.outputs.label-type }}linux.large"
       build-environment: linux-focal-cuda12.4-py3.10-gcc9-bazel-test
       docker-image-name: pytorch-linux-focal-cuda12.4-cudnn9-py3-gcc9
       cuda-version: "12.4"
