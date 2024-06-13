@@ -238,6 +238,7 @@ __all__ = [
     "atleast_2d",
     "atleast_3d",
     "as_strided",
+    "as_strided_copy",
     "as_strided_scatter",
     "block_diag",
     "broadcast_shapes",
@@ -2653,6 +2654,9 @@ def as_strided(
         storage_offset if storage_offset is not None else a.storage_offset()
     )
     return prims.as_strided(a, size, stride, storage_offset_int)
+
+
+as_strided_copy = _make_copy_from_view(as_strided)
 
 
 @register_decomposition(aten.as_strided_scatter)
