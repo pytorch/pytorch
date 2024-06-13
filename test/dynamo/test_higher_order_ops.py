@@ -6051,7 +6051,7 @@ class ActivationCheckpointingTests(torch._dynamo.test_case.TestCase):
 
         fw_compiler = functools.partial(count_ops, freq=1, op=torch.ops.aten.mm.default)
         bw_compiler = functools.partial(
-            count_ops, freq=3, op=torch.ops.aten.mm.default
+            count_ops, freq=2, op=torch.ops.aten.mm.default
         )  # mm recomputed in the bwd
         backend = aot_autograd(fw_compiler=fw_compiler, bw_compiler=bw_compiler)
         self._validate(fn, backend, x, y)
