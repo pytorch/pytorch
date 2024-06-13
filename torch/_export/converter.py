@@ -189,7 +189,9 @@ def get_block_to_lifted_attrs(graph: torch._C.Graph) -> Dict[torch._C.Block, Set
 
 def get_op_overload(node: torch._C.Node):
     schema_str = node.schema()
-    schema = FunctionSchema.parse(schema_str)
+    breakpoint()
+    schema: torch._C.FunctionSchema = torch._C.parse_schema(schema_str)
+    breakpoint()
     ns, op_name = str(schema.name.name).split("::")
     override = schema.name.overload_name
 
@@ -617,6 +619,12 @@ class TS2FXGraphConverter:
     def convert_aten_Bool(self, node: torch._C.Node):
         self._convert_as_noop(node)
 
+    # def convert_prim_Enter(self, node: torch._C.Node):
+    #     self._convert_as_noop(node)
+
+    # def convert_prim_Exit(self, node: torch._C.Node):
+    #     self._convert_as_noop(node)
+
     def _convert_as_noop(self, node: torch._C.Node):
         # Converts the node as a no-op by mapping its output node as arg[0]
 
@@ -657,6 +665,7 @@ class TS2FXGraphConverter:
         # Provide a default node handler as well in case we don't find
         # matching converter for that.
         handler_func_name = ir_name_to_func_name(node_kind)
+        print(f"handler_func_name:{handler_func_name}")
         handler_func = getattr(self, handler_func_name, self.convert_call_function_op)
         handler_func(node)
 

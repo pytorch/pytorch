@@ -571,6 +571,30 @@ class TestConverter(TestCase):
             func2(*inp),
         )
 
+    def test_context_manager(self):
+        from typing import Any
+        class ContextManager():
+            def __init__(self):
+                return
+                # self.count = 0
+
+            def __enter__(self):
+                return
+                # self.count += 1
+
+            def __exit__(self, exc_type: Any, exc_value: Any, traceback: Any) -> None:
+                return
+                # self.count -= 1
+
+        class M(torch.nn.Module):
+            def forward(self, x, y):
+                with ContextManager():
+                    res = x + y
+                return res
+
+        inp = (torch.ones(3, 3), torch.ones(3, 3))
+        self._check_equal_ts_ep_converter(M(), inp)
+
 
 if __name__ == "__main__":
     run_tests()
