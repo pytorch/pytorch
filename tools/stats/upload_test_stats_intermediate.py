@@ -1,8 +1,8 @@
 import argparse
 import sys
 
-from tools.stats.test_dashboard import get_base_id, upload_additional_info
-from tools.stats.upload_test_stats import get_tests
+from tools.stats.test_dashboard import upload_additional_info
+from tools.stats.upload_stats_lib import get_tests
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Upload test stats to Rockset")
@@ -32,4 +32,6 @@ if __name__ == "__main__":
     # Flush stdout so that any errors in Rockset upload show up last in the logs.
     sys.stdout.flush()
 
-    upload_additional_info(args.workflow_run_id, args.workflow_run_attempt, args.head_sha, test_cases)
+    upload_additional_info(
+        args.workflow_run_id, args.workflow_run_attempt, args.head_sha, test_cases
+    )

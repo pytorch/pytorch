@@ -1,32 +1,9 @@
 import argparse
-import os
 import sys
-from multiprocessing import cpu_count, Pool
-from pathlib import Path
-from tempfile import TemporaryDirectory
 from typing import Any, Dict, List
 
 from tools.stats.test_dashboard import upload_additional_info
-from tools.stats.upload_stats_lib import (
-    get_tests,
-    upload_workflow_stats_to_s3,
-    parse_xml_report,
-)
-
-
-def get_tests_for_circleci(
-    workflow_run_id: int, workflow_run_attempt: int
-) -> List[Dict[str, Any]]:
-    # Parse the reports and transform them to JSON
-    test_cases = []
-    for xml_report in Path(".").glob("**/test/test-reports/**/*.xml"):
-        test_cases.extend(
-            parse_xml_report(
-                "testcase", xml_report, workflow_run_id, workflow_run_attempt
-            )
-        )
-
-    return test_cases
+from tools.stats.upload_stats_lib import get_tests, upload_workflow_stats_to_s3
 
 
 def summarize_test_cases(test_cases: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -108,11 +85,6 @@ if __name__ == "__main__":
         help="Head repository of the workflow",
     )
     parser.add_argument(
-        "--circleci",
-        action="store_true",
-        help="If this is being run through circleci",
-    )
-    parser.add_argument(
         "--head-sha",
         required=False,
         help="Head sha of the workflow",
@@ -121,12 +93,7 @@ if __name__ == "__main__":
 
     print(f"Workflow id is: {args.workflow_run_id}")
 
-    if args.circleci:
-        test_cases = get_tests_for_circleci(
-            args.workflow_run_id, args.workflow_run_attempt
-        )
-    else:
-        test_cases = get_tests(args.workflow_run_id, args.workflow_run_attempt)
+    test_cases = get_tests(args.workflow_run_id, args.workflow_run_attempt)
 
     # Flush stdout so that any errors in Rockset upload show up last in the logs.
     sys.stdout.flush()
@@ -163,4 +130,6 @@ if __name__ == "__main__":
             args.workflow_run_id, args.workflow_run_attempt, "test_run", test_cases
         )
 
-    upload_additional_info(args.workflow_run_id, args.workflow_run_attempt, args.head_sha, test_cases)
+    upload_additional_info(
+        args.workflow_run_id, args.workflow_run_attempt, args.head_sha, test_cases
+    )

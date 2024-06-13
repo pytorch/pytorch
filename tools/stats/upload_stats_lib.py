@@ -1,15 +1,15 @@
-from functools import lru_cache
 import gzip
 import io
 import json
-from multiprocessing import Pool, cpu_count
 import os
 import re
-from tempfile import TemporaryDirectory
-import zipfile
 
 import xml.etree.ElementTree as ET
+import zipfile
+from functools import lru_cache
+from multiprocessing import cpu_count, Pool
 from pathlib import Path
+from tempfile import TemporaryDirectory
 from typing import Any, Dict, List, Optional, Tuple
 
 import boto3  # type: ignore[import]
@@ -264,11 +264,11 @@ def get_jobs_for_workflow(
 
 def get_job_ids_for_paths(
     reports: List[Path], workflow_id: int, workflow_run_attempt: int
-) -> List[Tuple[Path, int]]:
+) -> List[Tuple[Path, Optional[int]]]:
     # Returns a list of tuples of (report, job_id) for each report in `reports`.
     # If a report doesn't have the job id in the name, it attempts to find the
     # job id by matching the report name with the job name.
-    existing_ids = []
+    existing_ids: List[Tuple[Path, Optional[int]]] = []
     missing = []
 
     for report in reports:
@@ -415,7 +415,6 @@ def process_xml_element(element: ET.Element) -> Dict[str, Any]:
     return ret
 
 
-
 def get_tests(workflow_run_id: int, workflow_run_attempt: int) -> List[Dict[str, Any]]:
     with TemporaryDirectory() as temp_dir:
         print("Using temporary directory:", temp_dir)
@@ -434,7 +433,7 @@ def get_tests(workflow_run_id: int, workflow_run_attempt: int) -> List[Dict[str,
         mp = Pool(cpu_count())
 
         for xml_report, job_id in get_job_ids_for_paths(
-            [x for x in Path(".").glob("**/*.xml")],
+            list(Path(".").glob("**/*.xml")),
             workflow_run_id,
             workflow_run_attempt,
         ):

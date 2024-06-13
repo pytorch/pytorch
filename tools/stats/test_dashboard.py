@@ -7,7 +7,7 @@ from collections import defaultdict
 from functools import lru_cache
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from typing import Any, Optional, cast, Dict, List
+from typing import Any, cast, Dict, List, Optional, Tuple
 
 import requests
 
@@ -74,7 +74,7 @@ def get_td_exclusions(
 
         grouped_tests: Dict[str, Any] = defaultdict(lambda: defaultdict(set))
         for td_exclusions, job_id in get_job_ids_for_paths(
-            [x for x in Path(".").glob("**/td_exclusions*.json")],
+            list(Path(".").glob("**/td_exclusions*.json")),
             workflow_run_id,
             workflow_run_attempt,
         ):
@@ -165,10 +165,12 @@ def get_invoking_file_summary(grouped_tests: Dict[str, Any]) -> Dict[str, Any]:
     return invoking_file_summary
 
 
-def get_new_removed_tests(grouped, base_grouped):
-    def get_a_minus_b(a, b):
+def get_new_removed_tests(
+    grouped: Dict[str, Any], base_grouped: Dict[str, Any]
+) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+    def get_a_minus_b(a: Dict[str, Any], b: Dict[str, Any]) -> Dict[str, Any]:
         if any(isinstance(a[key], list) for key in a):
-            diff = {
+            diff: Dict[str, Any] = {
                 "count": 0,
                 "nodes": [],
                 "total": len(a),
@@ -196,7 +198,9 @@ def get_new_removed_tests(grouped, base_grouped):
     return get_a_minus_b(grouped, base_grouped), get_a_minus_b(base_grouped, grouped)
 
 
-def compare(job_summary, base_job_summary, base_job_id):
+def compare(
+    job_summary: Dict[str, Any], base_job_summary: Dict[str, Any], base_job_id: int
+) -> Dict[str, Any]:
     # Compare the two summaries
     start = time.time()
     new, removed = get_new_removed_tests(job_summary, base_job_summary)
@@ -212,25 +216,34 @@ def get_base_id(sha: str, workflow_id: int) -> Optional[int]:
     try:
         if sha is None:
             return None
-        base_sha = subprocess.check_output(
-            ["git", "merge-base", "origin/main", sha]
-        ).decode("utf-8").strip()
+        base_sha = (
+            subprocess.check_output(["git", "merge-base", "origin/main", sha])
+            .decode("utf-8")
+            .strip()
+        )
         if base_sha == sha:
-            base_sha = subprocess.check_output(
-                ["git", "rev-parse", f"{sha}^"]
-            ).decode("utf-8").strip()
+            base_sha = (
+                subprocess.check_output(["git", "rev-parse", f"{sha}^"])
+                .decode("utf-8")
+                .strip()
+            )
         return cast(
             int,
             requests.get(
-                f"https://hud.pytorch.org/api/corresponding_workflow_id",
-                params={"sha": base_sha, "workflowId": workflow_id},
+                "https://hud.pytorch.org/api/corresponding_workflow_id",
+                params={"sha": base_sha, "workflowId": workflow_id},  # type: ignore[arg-type]
             ).json()[0]["id"],
         )
     except Exception as e:
-        print(f"Failed to get base id for head sha {sha} and workflow id {workflow_id}: {e}")
+        print(
+            f"Failed to get base id for head sha {sha} and workflow id {workflow_id}: {e}"
+        )
         return None
 
-def upload_wrapper(workflow_run_id: int, workflow_run_attempt: int, name: str, data: Any) -> None:
+
+def upload_wrapper(
+    workflow_run_id: int, workflow_run_attempt: int, name: str, data: Any
+) -> None:
     as_string = json.dumps(data)
     if len(as_string) > 1000000:
         # data = [{"info": "Data too large to upload"}]
@@ -246,8 +259,12 @@ def upload_wrapper(workflow_run_id: int, workflow_run_attempt: int, name: str, d
             [data],
         )
 
+
 def upload_additional_info(
-    workflow_run_id: int, workflow_run_attempt: int, head_sha: str, test_cases: List[Dict[str, Any]]
+    workflow_run_id: int,
+    workflow_run_attempt: int,
+    head_sha: str,
+    test_cases: List[Dict[str, Any]],
 ) -> None:
     grouped_tests = group_test_cases(test_cases)
     reruns = get_reruns(grouped_tests)
