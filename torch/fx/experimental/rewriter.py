@@ -61,7 +61,7 @@ class AST_Rewriter(ast.NodeTransformer):
                 closure=f.__closure__,
             )
             g = functools.update_wrapper(g, f)
-            g.__kwdefaults__ = copy.copy(f.__kwdefaults__)
+            g.__kwdefaults__ = copy.copy(f.__kwdefaults__)  # type:ignore[attr-defined]
             return g
         # Return the correct FunctionType object
         return change_func_globals(fn_compiled, globals=fn.__globals__)
