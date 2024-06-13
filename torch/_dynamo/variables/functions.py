@@ -6,7 +6,6 @@ import functools
 import inspect
 import itertools
 import types
-import warnings
 from typing import Dict, List, Optional, TYPE_CHECKING, Union
 
 import torch
@@ -339,6 +338,9 @@ class UserMethodVariable(UserFunctionVariable):
                 return self.obj.call_method(
                     tx, self.fn.__name__, args, kwargs, constant=self.is_constant
                 )
+        if self.is_constant:
+            fn = getattr(self.obj.value, self.fn.__name__)
+            return invoke_and_store_as_constant(tx, fn, self.get_name(), args, kwargs)
         return super().call_function(tx, args, kwargs)
 
     def inspect_parameter_names(self):
@@ -658,7 +660,7 @@ class SkipFunctionVariable(VariableTracker):
                         f"torch.compiler.allow_in_graph."
                     )
                     # also warn on it because most users won't see the graph break message
-                    warnings.warn(msg)
+                    torch._dynamo.utils.warn_once(msg)
             msg += f"', {self.reason}'" if self.reason else ""
             unimplemented(msg)
 
