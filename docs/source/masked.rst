@@ -287,6 +287,7 @@ The following ops are currently supported:
     ravel
     select
     split
+    stack
     t
     transpose
     vsplit

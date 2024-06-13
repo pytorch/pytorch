@@ -207,6 +207,25 @@ class TestBasics(TestCase):
         mask = torch.rand(2, 5, 3, 4, device=device) > 0.5
         _compare_forward_backward(data, mask, lambda t: torch.nn.functional.unfold(t, kernel_size=(2, 3)))
 
+    def test_stack(self, device):
+        masked_tensors = [
+            masked_tensor(
+                torch.rand(2, 5, 3, 4, device=device),
+                torch.rand(2, 5, 3, 4, device=device) > 0.5,
+                requires_grad=True,
+            ) for _ in range(3)
+        ]
+
+        data_tensors = [mt.get_data().detach().clone().requires_grad_() for mt in masked_tensors]
+        masked_res = torch.stack(masked_tensors)
+        tensor_res = torch.stack(data_tensors)
+
+        masked_res.sum().backward()
+        tensor_res.sum().backward()
+        _compare_mt_t(masked_res, tensor_res)
+        for mt, t in zip(masked_tensors, data_tensors):
+            _compare_mt_t(mt.grad, t.grad, atol=1e-06)
+
     def test_to_sparse(self, device):
         for sample in _generate_sample_data(device=device):
             data = sample.input
