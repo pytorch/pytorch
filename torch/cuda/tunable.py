@@ -242,14 +242,11 @@ def read_file(filename: Optional[str] = None) -> bool:
         filename = get_filename()
     return torch._C._cuda_tunableop_read_file(filename)
 
-def tune_gemm_in_file(filename: Optional[str] = None) -> None:
-    r"""tune gemm in file."""
+def tune_gemm_in_file(filename: str) -> None:
+    r"""tune GEMM in file."""
 
     assert is_enabled()
     assert tuning_is_enabled()
-
-    if filename is None:
-        print(f'must have filename ')
 
     with open(filename, 'r') as file:
         for line in file:
