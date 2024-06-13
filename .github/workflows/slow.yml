@@ -36,6 +36,13 @@ jobs:
       id-token: write
       contents: read
 
+  get-label-type:
+    name: get-label-type
+    uses: ./.github/workflows/_runner-determinator.yml
+    with:
+      user_name: ${{ github.actor }}
+      curr_branch: ${{ github.head_ref || github.ref_name }}
+
   linux-focal-cuda12_1-py3-gcc9-slow-gradcheck-build:
     name: linux-focal-cuda12.1-py3-gcc9-slow-gradcheck
     uses: ./.github/workflows/_linux-build.yml
@@ -139,14 +146,16 @@ jobs:
   linux-jammy-py3_10-clang15-asan-build:
     name: linux-jammy-py3.10-clang15-asan
     uses: ./.github/workflows/_linux-build-label.yml
+    needs: get-label-type
     with:
+      runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge"
       build-environment: linux-jammy-py3.10-clang15-asan
       docker-image-name: pytorch-linux-jammy-py3-clang15-asan
       test-matrix: |
         { include: [
-          { config: "slow", shard: 1, num_shards: 3, runner: "linux.4xlarge" },
-          { config: "slow", shard: 2, num_shards: 3, runner: "linux.4xlarge" },
-          { config: "slow", shard: 3, num_shards: 3, runner: "linux.4xlarge" },
+          { config: "slow", shard: 1, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge" },
+          { config: "slow", shard: 2, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge" },
+          { config: "slow", shard: 3, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge" },
         ]}
       sync-tag: asan-build
 
