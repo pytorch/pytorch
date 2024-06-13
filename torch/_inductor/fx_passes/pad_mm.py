@@ -10,6 +10,7 @@ import torch._inductor.runtime.runtime_utils
 from torch import Tensor
 from torch._dynamo.utils import counters
 from torch._inductor import utils
+from torch._inductor.autoheuristic import AHContext, AutoHeuristic, LocalFeedback
 from torch._subclasses.fake_tensor import FakeTensor
 from torch.utils._mode_utils import no_dispatch
 
@@ -391,19 +392,9 @@ def should_pad_bench(
             match, mat1, mat2, op, input, is_base_time_key=True
         )
         ori_time = get_cached_base_mm_benchmark_time(ori_time_key)
-        if ori_time is None:
-            if op is torch.ops.aten.bmm or op is torch.ops.aten.mm:
-                ori_time = do_bench(
-                    lambda: op(mat1, mat2),
-                )
-            else:
-                if input is not None:
-                    # realize bias for addmm
-                    input = realize_tensor(input)
-                ori_time = do_bench(
-                    lambda: op(input, mat1, mat2),
-                )
-            set_cached_base_mm_benchmark_time(ori_time_key, ori_time)
+        if ori_time is None and op is torch.ops.aten.addmm and input is not None:
+            # realize bias for addmm
+            input = realize_tensor(input)
 
         mat1_pad = mat1
         mat2_pad = mat2
@@ -485,7 +476,45 @@ def should_pad_bench(
                 )
             )
 
-        pad_time = do_bench(lambda: [fn() for fn in fns])
+        def orig_bench_fn():
+            if op is torch.ops.aten.bmm or op is torch.ops.aten.mm:
+                op(mat1, mat2)
+            else:
+                op(input, mat1, mat2)
+
+        def pad_bench_fn():
+            for fn in fns:
+                fn()
+
+        pad_time = None
+        if (
+            torch._inductor.config.autoheuristic_mode != "OFF"
+            and op is torch.ops.aten.mm
+        ):
+            (ah_should_pad, ah_ori_time, ah_pad_time) = run_autoheuristic(
+                mat1,
+                mat2,
+                orig_bench_fn,
+                pad_bench_fn,
+                m_padded_length,
+                k_padded_length,
+                n_padded_length,
+                do_bench,
+            )
+            if ori_time is None and ah_ori_time is not None:
+                ori_time = ah_ori_time
+                set_cached_base_mm_benchmark_time(ori_time_key, ori_time)
+            pad_time = ah_pad_time
+            if ah_should_pad is not None:
+                set_cached_should_pad(key, ah_should_pad)
+                return ah_should_pad
+
+        if ori_time is None:
+            ori_time = do_bench(orig_bench_fn)
+            set_cached_base_mm_benchmark_time(ori_time_key, ori_time)
+
+        if pad_time is None:
+            pad_time = do_bench(pad_bench_fn)
 
         # Shape padding introduces additional memory ops. Based on microbenchmarks, 1.1x represents a reasonable
         # tradeoff between performance improvement from shape padding and overhead from additional memory ops
@@ -502,6 +531,78 @@ def should_pad_bench(
         should_pad = _skip_do_bench_times or ori_time > pad_time * multiplier
         set_cached_should_pad(key, should_pad)
         return should_pad
+
+
+def run_autoheuristic(
+    mat1,
+    mat2,
+    orig_bench_fn,
+    pad_bench_fn,
+    m_padded_length,
+    k_padded_length,
+    n_padded_length,
+    do_bench,
+):
+    def get_context(mat1, mat2):
+        context = AHContext()
+
+        context.add_feature("m", mat1.shape[0])
+        context.add_feature("k", mat1.shape[1])
+        context.add_feature("n", mat2.shape[1])
+
+        mat1_strides = mat1.stride()
+        mat2_strides = mat2.stride()
+        context.add_feature("mat1_stride_0", mat1_strides[0])
+        context.add_feature("mat1_stride_0", mat1_strides[0])
+        context.add_feature("mat1_stride_1", mat1_strides[1])
+        context.add_feature("mat2_stride_0", mat2_strides[0])
+        context.add_feature("mat2_stride_1", mat2_strides[1])
+
+        context.add_feature("m_padded_length", m_padded_length)
+        context.add_feature("k_padded_length", k_padded_length)
+        context.add_feature("n_padded_length", n_padded_length)
+
+        context.add_feature("mat1_iscontig", mat1.is_contiguous(), is_categorical=True)
+        context.add_feature("mat2_iscontig", mat2.is_contiguous(), is_categorical=True)
+
+        context.add_feature("mat1_align_size", get_alignment_size(mat1))
+        context.add_feature("mat2_align_size", get_alignment_size(mat2))
+
+        return context
+
+    def feedback_fn(choice):
+        # storing ori_time and pad_time to avoid benchmarking twice while collecting data
+        if choice == "orig":
+            ori_time = do_bench(orig_bench_fn)
+            return ori_time
+        elif choice == "pad":
+            pad_time = do_bench(pad_bench_fn)
+            return pad_time
+        return None
+
+    ori_time = None
+    pad_time = None
+
+    fallback = "autotune"
+    choices = ["orig", "pad"]
+    feedback = LocalFeedback(feedback_fn)
+    context = get_context(mat1, mat2)
+    name = "pad_mm"
+    autoheuristic = AutoHeuristic(
+        fallback=fallback,
+        choices=choices,
+        feedback=feedback,
+        context=context,
+        name=name,
+    )
+    choice = autoheuristic.get_choice()
+    ah_should_pad = None
+    if choice == "orig":
+        ah_should_pad = False
+    elif choice == "pad":
+        ah_should_pad = True
+
+    return (ah_should_pad, ori_time, pad_time)
 
 
 def mm_pattern(mat1: Tensor, mat2: Tensor) -> Tensor:

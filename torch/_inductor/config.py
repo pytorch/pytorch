@@ -308,6 +308,8 @@ coordinate_descent_search_radius = int(
     os.environ.get("TORCHINDUCTOR_COORDINATE_DESCENT_RADIUS", "1")
 )
 
+autoheuristic_mode = os.environ.get("TORCHINDUCTOR_AUTOHEURISTIC_MODE", "OFF")
+
 # Disabled by default on ROCm, opt-in if model utilises NHWC convolutions
 layout_opt_default = "1" if not torch.version.hip else "0"
 layout_optimization = (
