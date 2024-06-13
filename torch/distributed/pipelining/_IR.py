@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 # Copyright (c) Meta Platforms, Inc. and affiliates
 import copy
 import logging
@@ -23,8 +24,7 @@ from torch.fx.passes.split_module import split_module
 from ._backward import _null_coalesce_accumulate, stage_backward
 from ._unflatten import _outline_submodules
 from ._utils import PipeInfo
-
-from .PipelineStage import _PipelineStage
+from .stage import _PipelineStage
 
 
 logger = logging.getLogger(__name__)
@@ -1002,11 +1002,21 @@ class Pipe(torch.nn.Module):
         example_kwargs: Optional[Dict[str, Any]] = None,
     ) -> ExportedProgram:
         logger.info("Tracing model ...")
-        ep = torch.export.export(
-            mod,
-            example_args,
-            example_kwargs,
-        )
+        try:
+            ep = torch.export.export(
+                mod,
+                example_args,
+                example_kwargs,
+            )
+        except Exception as e:
+            raise RuntimeError(
+                "It seems that we cannot capture your model as a full graph. "
+                "Typical reasons include graph breaks, data/shape-dependent "
+                "control flow, or missing meta kernels for custom operators. "
+                "You can use our manual pipeline interfaces, or try to fix the "
+                "graph breaks, see https://pytorch.org/docs/stable/export.html"
+            ) from e
+
         return ep
 
     @staticmethod
@@ -1082,7 +1092,15 @@ class Pipe(torch.nn.Module):
     def __repr__(self):
         return self.split_gm.__repr__()
 
-    def _info(self) -> PipeInfo:
+    def info(self) -> PipeInfo:
+        """
+        Get information about the pipe.
+
+        Returns
+        -------
+        PipeInfo
+            A dataclass containing information about the pipe.
+        """
         return PipeInfo(
             graph=self.split_gm.graph,
             num_stages=self.num_stages,
@@ -1096,7 +1114,8 @@ class Pipe(torch.nn.Module):
         group: Optional[ProcessGroup] = None,
     ) -> _PipelineStage:
         """
-        Create a `PipelineStage` given a stage index and distributed context.
+        Create a `PipelineStage` given a stage index and distributed group.
+        The `PipelineStage` can run with `PipelineSchedule`s.
         """
         # Find stage module
         stage_module = self.get_stage_module(stage_index)
@@ -1119,7 +1138,7 @@ class Pipe(torch.nn.Module):
         # a reference to `Pipe` or `Pipe.split_gm` which stops python from
         # recycling them. When python recycles them, other stage modules (which
         # are irrelevant to current rank) can be automatically freed.
-        pipe_info = self._info()
+        pipe_info = self.info()
         return _PipelineStage(stage_module, stage_index, pipe_info, device, group)
 
 

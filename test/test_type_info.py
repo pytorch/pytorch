@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 # Owner(s): ["module: typing"]
 
 from torch.testing._internal.common_utils import (
