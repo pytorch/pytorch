@@ -4493,9 +4493,19 @@ class ShapeEnv:
             #       shape_0 = sympy.Symbol("shape_0", positive=True, integer=True)
             #       expr = sympy.Eq(shape_0 - 1/3, 4)
             #       expr.xreplace({}) # False
-            offset = int(lower - 1)
+
+            # Compute the greatest integer smaller than lower
+            if lower >= 0:
+                lower_integral = int(lower)
+            else:
+                lower_integral = int(lower) - 1
+            # k_vr is the value range we wish for k
+            k_vr = ValueRanges(lower_integral, vr.upper)
+            # to express the value range of k in terms of that for s
+            # find offset such that 1 + offset = lower_integral
+            offset = lower_integral - 1
             new_shape_env[k] = s + offset
-            new_range_env[s] = SymPyValueRangeAnalysis.add(vr, -offset)
+            new_range_env[s] = SymPyValueRangeAnalysis.add(k_vr, -offset)
 
         def replace(expr, repl):
             return expr.xreplace(repl)
