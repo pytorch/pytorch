@@ -1958,7 +1958,7 @@ from torch._compile import _disable_dynamo  # usort: skip
 # torch.nn.paramter is imported by torch._C._autograd_init() in torch.autograd.__init__
 import torch.nn.parameter  # usort: skip
 
-# # needs to be after import torch.nn.parameter to avoid circular dependencies
+# needs to be after import torch.nn.parameter to avoid circular dependencies
 from torch import autograd as autograd  # usort: skip
 
 # needs to be before import torch.nn as nn to avoid circular dependencies
