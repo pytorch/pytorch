@@ -1,7 +1,7 @@
 import json
 import os
 
-from typing import Any, Callable, List, Tuple, Union
+from typing import Any, Callable, Dict, List, Tuple, Union
 
 import torch
 
@@ -107,7 +107,7 @@ class AutoHeuristic:
         }
         return json.dumps(metadata)
 
-    def deserialize_metadata(self, json_string: str) -> dict[str, Any]:
+    def deserialize_metadata(self, json_string: str) -> Dict[str, Any]:
         return json.loads(json_string)
 
     def save_data(self, choice: Choice, feedback_val: Feedback) -> None:
@@ -143,7 +143,7 @@ class AutoHeuristic:
             json_string = file.readline().strip()
             return json_string
 
-    def deserialize_data(self) -> Tuple[Any, dict[str, Any]]:
+    def deserialize_data(self) -> Tuple[Any, Dict[str, Any]]:
         log_path = self.get_log_path()
         json_string = self.get_metadata_str_from_log()
         metadata = self.deserialize_metadata(json_string)
