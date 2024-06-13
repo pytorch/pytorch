@@ -1,5 +1,7 @@
 # mypy: allow-untyped-defs
 import torch
+import copy
+import functools
 import inspect
 import numbers
 import types
@@ -366,6 +368,87 @@ def normalize_function(
                                        f'the normalize_arguments() call. Available schemas:\n{schema_printouts}')
 
     return new_args_and_kwargs
+
+def get_normalizer_function_signature(
+        target: Callable, args: Tuple[Any], kwargs : Optional[Dict[str, Any]] = None) -> Optional[ArgsKwargsPair]:
+    if kwargs is None:
+        kwargs = {}
+    new_args_and_kwargs = None
+    assert (isinstance(target, types.BuiltinFunctionType) or
+        isinstance(target, (OpOverloadPacket, OpOverload))
+    )
+    assert callable(target)
+    torch_op_schemas = get_signature_for_torch_op(target)
+    matched_schemas = []
+    if torch_op_schemas:
+        # Iterate through all of the schema until we find one that matches
+        # If one matches, populate `new_args_and_kwargs` with the new args/kwargs
+        # values. If none matches, `new_args_and_kwargs` will be None
+        for candidate_signature in torch_op_schemas:
+            try:
+                candidate_signature.bind(*args, **kwargs)
+                matched_schemas.append(candidate_signature)
+            except TypeError as e:
+                continue
+
+        if len(matched_schemas) == 0:
+            # Did not match any schema. Cannot normalize
+            return None
+        elif len(matched_schemas) == 1:
+            # Matched exactly one schema, unambiguous
+            return matched_schemas[0]
+        else:
+            # Matched more than one schema. In this situation, the caller must provide the types of
+            # the arguments of the overload they expect.
+            schema_printouts = '\n'.join(str(schema) for schema in matched_schemas)
+            raise RuntimeError(f'Tried to normalize arguments to {torch.typename(target)} but '
+                                f'the schema match was ambiguous! Please provide argument types to '
+                                f'the normalize_arguments() call. Available schemas:\n{schema_printouts}')
+
+class PlaceholderInput:
+    def __init__(self, x):
+        self.val = x
+
+@functools.cache
+def get_normalizer_function_cached(
+    target: Callable,
+    args_count: int,
+    kwargs_keys: List[str],
+):
+    kwargs_count = len(kwargs_keys)
+
+    placeholder_args = tuple(PlaceholderInput(x) for x in range(args_count))
+    placeholder_kwargs = {k: PlaceholderInput(v) for k, v in zip(kwargs_keys, range(args_count, args_count + kwargs_count))}
+
+    candidate_signature = get_normalizer_function_signature(target, placeholder_args, placeholder_kwargs)
+
+    _, all_placeholder_kwargs = _args_kwargs_to_normalized_args_kwargs(candidate_signature, placeholder_args, placeholder_kwargs, True)
+
+    def normalizer_fn(args, kwargs):
+        assert len(args) == args_count
+        assert len(kwargs) == kwargs_count
+        all_kwargs = copy.copy(kwargs)
+        for k, v in all_placeholder_kwargs.items():
+            if isinstance(v, PlaceholderInput) and v.val < args_count:
+                all_kwargs[k] = args[v.val]
+            elif not isinstance(v, PlaceholderInput):
+                all_kwargs[k] = v
+        return (), all_kwargs
+
+    return normalizer_fn
+
+
+def get_normalizer_function(
+    target: Callable,
+    args: Tuple[Any],
+    kwargs : Optional[Dict[str, Any]] = None
+) -> Callable:
+    return get_normalizer_function_cached(
+        target,
+        len(args),
+        tuple(kwargs.keys()),
+    )
+
 
 @compatibility(is_backward_compatible=False)
 def normalize_module(

@@ -9,7 +9,15 @@ from torch.nested._internal.sdpa import jagged_scaled_dot_product_attention
 from .nested_tensor import NestedTensor
 from typing import *  # noqa: F403
 import torch.nn.functional as F
-from torch.fx.operator_schemas import normalize_function
+from torch.fx.operator_schemas import get_normalizer_function
+
+# from torch.fx.operator_schemas import normalize_function
+
+
+def normalize_function(func, args, kwargs, normalize_to_only_use_kwargs):
+    assert normalize_to_only_use_kwargs
+    return get_normalizer_function(func, args, kwargs)(args, kwargs)
+
 
 __all__: List[Any] = []
 
