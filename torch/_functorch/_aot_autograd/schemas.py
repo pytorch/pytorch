@@ -467,6 +467,7 @@ class ViewAndMutationMeta:
         # (i.e., there's no guarantee that tensor_flatten() returns a serializable result), or that
         # SubclassCreationMeta is cache safe.
         assert self.traced_tangent_metas is None
+
         def extract_metadata(t):
             if isinstance(t, torch.Tensor) and is_traceable_wrapper_subclass(t):
                 (inner_tensors, flatten_spec) = t.__tensor_flatten__()  # type: ignore[attr-defined]
@@ -488,7 +489,7 @@ class ViewAndMutationMeta:
                 new_out = out
             else:
                 # If we're not using view_replay, remove the functional tensor.
-                # Functional tensors are unfortunately not serializable, 
+                # Functional tensors are unfortunately not serializable,
                 # so doing this is required for AOTAutograd caching.
                 new_out = dataclasses.replace(out, functional_tensor=None)
             new_output_info.append(new_out)
