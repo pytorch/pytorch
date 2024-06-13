@@ -4,8 +4,8 @@ from collections import namedtuple
 from typing import List, Sequence
 
 import torch
+import torch.nn.functional as F
 from torch import Tensor
-from torch.nn.functional import log_softmax
 
 from .container import ModuleList, Sequential
 from .linear import Linear
@@ -235,7 +235,7 @@ class AdaptiveLogSoftmaxWithLoss(Module):
                 cluster_index = self.shortlist_size + i - 1
 
                 gather_inds.index_fill_(0, row_indices, cluster_index)
-                cluster_logprob = log_softmax(cluster_output, dim=1)
+                cluster_logprob = F.log_softmax(cluster_output, dim=1)
                 local_logprob = cluster_logprob.gather(1, relative_target.unsqueeze(1))
                 output.index_copy_(0, row_indices, local_logprob.squeeze(1))
 
@@ -249,7 +249,7 @@ class AdaptiveLogSoftmaxWithLoss(Module):
             )
 
         head_output = self.head(input)
-        head_logprob = log_softmax(head_output, dim=1)
+        head_logprob = F.log_softmax(head_output, dim=1)
         output += head_logprob.gather(1, gather_inds.unsqueeze(1)).squeeze()
         loss = (-output).mean()
 
@@ -261,13 +261,13 @@ class AdaptiveLogSoftmaxWithLoss(Module):
     def _get_full_log_prob(self, input, head_output):
         """Given input tensor, and output of ``self.head``, compute the log of the full distribution."""
         out = input.new_empty((head_output.size(0), self.n_classes))
-        head_logprob = log_softmax(head_output, dim=1)
+        head_logprob = F.log_softmax(head_output, dim=1)
 
         out[:, : self.shortlist_size] = head_logprob[:, : self.shortlist_size]
 
         for i, (start_idx, stop_idx) in enumerate(zip(self.cutoffs, self.cutoffs[1:])):
             cluster_output = self.tail[i](input)
-            cluster_logprob = log_softmax(cluster_output, dim=1)
+            cluster_logprob = F.log_softmax(cluster_output, dim=1)
             output_logprob = cluster_logprob + head_logprob[
                 :, self.shortlist_size + i
             ].unsqueeze(1)

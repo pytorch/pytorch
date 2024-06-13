@@ -1956,7 +1956,7 @@ from torch._compile import _disable_dynamo  # usort: skip
 ################################################################################
 
 # needs to be after the above ATen bindings so we can overwrite from Python side
-from torch import functional as functional  # usort: skip
+from torch import _VF as _VF, functional as functional  # usort: skip
 from torch.functional import *  # usort: skip # noqa: F403
 
 ################################################################################
@@ -2007,6 +2007,7 @@ from torch import (
     backends as backends,
     cpu as cpu,
     cuda as cuda,
+    distributed as distributed,
     distributions as distributions,
     fft as fft,
     futures as futures,

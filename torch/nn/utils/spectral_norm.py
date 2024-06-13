@@ -3,7 +3,7 @@
 from typing import Any, Optional, TypeVar
 
 import torch
-from torch.nn.functional import normalize
+import torch.nn.functional as F
 from torch.nn.modules import Module
 
 
@@ -164,8 +164,8 @@ class SpectralNorm:
 
             h, w = weight_mat.size()
             # randomly initialize `u` and `v`
-            u = normalize(weight.new_empty(h).normal_(0, 1), dim=0, eps=fn.eps)
-            v = normalize(weight.new_empty(w).normal_(0, 1), dim=0, eps=fn.eps)
+            u = F.normalize(weight.new_empty(h).normal_(0, 1), dim=0, eps=fn.eps)
+            v = F.normalize(weight.new_empty(w).normal_(0, 1), dim=0, eps=fn.eps)
 
         delattr(module, fn.name)
         module.register_parameter(fn.name + "_orig", weight)

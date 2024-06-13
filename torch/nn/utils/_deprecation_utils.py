@@ -5,7 +5,7 @@ from typing import Callable, List
 
 
 _MESSAGE_TEMPLATE = (
-    r"Usage of '{old_location}' is deprecated; please use '{new_location}' instead.",
+    r"Usage of '{old_location}' is deprecated; please use '{new_location}' instead."
 )
 
 
