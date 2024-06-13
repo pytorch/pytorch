@@ -1,20 +1,33 @@
 # mypy: allow-untyped-defs
-from collections import OrderedDict, namedtuple
+
+import functools
 import itertools
 import warnings
-import functools
 import weakref
+from collections import namedtuple, OrderedDict
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    Iterator,
+    List,
+    Mapping,
+    Optional,
+    overload,
+    Set,
+    Tuple,
+    TypeVar,
+    Union,
+)
+from typing_extensions import Self
 
 import torch
+from torch import device, dtype, Tensor
 from torch._prims_common import DeviceLikeType
-from ..parameter import Parameter
-import torch.utils.hooks as hooks
-
-from torch import Tensor, device, dtype
-from typing import Union, Tuple, Any, Callable, Iterator, Set, Optional, overload, TypeVar, Mapping, Dict, List
-from typing_extensions import Self
-from ...utils.hooks import RemovableHandle
+from torch.nn.parameter import Parameter
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
+from torch.utils.hooks import BackwardHook, RemovableHandle
+
 
 __all__ = ['register_module_forward_pre_hook', 'register_module_forward_hook',
            'register_module_full_backward_pre_hook', 'register_module_backward_hook',
@@ -122,7 +135,7 @@ def register_module_buffer_registration_hook(hook: Callable[..., None]) -> Remov
             a handle that can be used to remove the added hook by calling
             ``handle.remove()``
     """
-    handle = hooks.RemovableHandle(_global_buffer_registration_hooks)
+    handle = RemovableHandle(_global_buffer_registration_hooks)
     _global_buffer_registration_hooks[handle.id] = hook
     return handle
 
@@ -146,7 +159,7 @@ def register_module_module_registration_hook(hook: Callable[..., None]) -> Remov
             a handle that can be used to remove the added hook by calling
             ``handle.remove()``
     """
-    handle = hooks.RemovableHandle(_global_module_registration_hooks)
+    handle = RemovableHandle(_global_module_registration_hooks)
     _global_module_registration_hooks[handle.id] = hook
     return handle
 
@@ -170,7 +183,7 @@ def register_module_parameter_registration_hook(hook: Callable[..., None]) -> Re
             a handle that can be used to remove the added hook by calling
             ``handle.remove()``
     """
-    handle = hooks.RemovableHandle(_global_parameter_registration_hooks)
+    handle = RemovableHandle(_global_parameter_registration_hooks)
     _global_parameter_registration_hooks[handle.id] = hook
     return handle
 
@@ -202,7 +215,7 @@ def register_module_forward_pre_hook(hook: Callable[..., None]) -> RemovableHand
             a handle that can be used to remove the added hook by calling
             ``handle.remove()``
     """
-    handle = hooks.RemovableHandle(_global_forward_pre_hooks)
+    handle = RemovableHandle(_global_forward_pre_hooks)
     _global_forward_pre_hooks[handle.id] = hook
     return handle
 
@@ -239,8 +252,8 @@ def register_module_forward_hook(hook: Callable[..., None], *, always_call: bool
     This hook will be executed before specific module hooks registered with
     ``register_forward_hook``.
     """
-    handle = hooks.RemovableHandle(_global_forward_hooks,
-                                   extra_dict=_global_forward_hooks_always_called)
+    handle = RemovableHandle(_global_forward_hooks,
+                             extra_dict=_global_forward_hooks_always_called)
     _global_forward_hooks[handle.id] = hook
     if always_call:
         _global_forward_hooks_always_called[handle.id] = True
@@ -269,7 +282,7 @@ def register_module_backward_hook(
 
     _global_is_full_backward_hook = False
 
-    handle = hooks.RemovableHandle(_global_backward_hooks)
+    handle = RemovableHandle(_global_backward_hooks)
     _global_backward_hooks[handle.id] = hook
     return handle
 
@@ -296,7 +309,7 @@ def register_module_full_backward_pre_hook(
             ``handle.remove()``
 
     """
-    handle = hooks.RemovableHandle(_global_backward_pre_hooks)
+    handle = RemovableHandle(_global_backward_pre_hooks)
     _global_backward_pre_hooks[handle.id] = hook
     return handle
 
@@ -330,7 +343,7 @@ def register_module_full_backward_hook(
 
     _global_is_full_backward_hook = True
 
-    handle = hooks.RemovableHandle(_global_backward_hooks)
+    handle = RemovableHandle(_global_backward_hooks)
     _global_backward_hooks[handle.id] = hook
     return handle
 
@@ -418,9 +431,7 @@ class Module:
     # As JIT does not support Set[int], this dict is used as a set, where all
     # hooks represented in this dict accept kwargs.
     _forward_pre_hooks_with_kwargs: Dict[int, bool]
-    # The bool indicates whether the hook comes from the private method
-    # or the public method.
-    _state_dict_hooks: Dict[int, Tuple[Callable, bool]]
+    _state_dict_hooks: Dict[int, Callable]
     _load_state_dict_pre_hooks: Dict[int, Callable]
     _state_dict_pre_hooks: Dict[int, Callable]
     _load_state_dict_post_hooks: Dict[int, Callable]
@@ -1218,7 +1229,7 @@ class Module:
                 ``handle.remove()``
 
         """
-        handle = hooks.RemovableHandle(self._backward_pre_hooks)
+        handle = RemovableHandle(self._backward_pre_hooks)
         self._backward_pre_hooks[handle.id] = hook
         if prepend:
             self._backward_pre_hooks.move_to_end(handle.id, last=False)  # type: ignore[attr-defined]
@@ -1244,7 +1255,7 @@ class Module:
 
         self._is_full_backward_hook = False
 
-        handle = hooks.RemovableHandle(self._backward_hooks)
+        handle = RemovableHandle(self._backward_hooks)
         self._backward_hooks[handle.id] = hook
         return handle
 
@@ -1302,7 +1313,7 @@ class Module:
 
         self._is_full_backward_hook = True
 
-        handle = hooks.RemovableHandle(self._backward_hooks)
+        handle = RemovableHandle(self._backward_hooks)
         self._backward_hooks[handle.id] = hook
         if prepend:
             self._backward_hooks.move_to_end(handle.id, last=False)  # type: ignore[attr-defined]
@@ -1450,7 +1461,7 @@ class Module:
                 a handle that can be used to remove the added hook by calling
                 ``handle.remove()``
         """
-        handle = hooks.RemovableHandle(
+        handle = RemovableHandle(
             self._forward_pre_hooks,
             extra_dict=self._forward_pre_hooks_with_kwargs
         )
@@ -1515,7 +1526,7 @@ class Module:
                 a handle that can be used to remove the added hook by calling
                 ``handle.remove()``
         """
-        handle = hooks.RemovableHandle(
+        handle = RemovableHandle(
             self._forward_hooks,
             extra_dict=[self._forward_hooks_with_kwargs, self._forward_hooks_always_called],
         )
@@ -1599,7 +1610,7 @@ class Module:
 
             bw_hook = None
             if full_backward_hooks or backward_pre_hooks:
-                bw_hook = hooks.BackwardHook(self, full_backward_hooks, backward_pre_hooks)
+                bw_hook = BackwardHook(self, full_backward_hooks, backward_pre_hooks)
                 args = bw_hook.setup_input_hook(args)
 
             result = forward_call(*args, **kwargs)
@@ -1801,43 +1812,27 @@ class Module:
             super().__delattr__(name)
 
     def _register_state_dict_hook(self, hook):
-        r"""Register a post-hook for the :meth:`~torch.nn.Module.state_dict` method.
+        r"""Register a state-dict hook.
 
-        It should have the following signature::
-            hook(module, state_dict, prefix, local_metadata) -> None or state_dict
-
-        The registered hooks can modify the ``state_dict`` inplace or return a new one.
-        If a new ``state_dict`` is returned, it will only be respected if it is the root
-        module that :meth:`~nn.Module.state_dict` is called from.
+        These hooks will be called with arguments: `self`, `state_dict`,
+        `prefix`, `local_metadata`, after the `state_dict` of `self` is set.
+        Note that only parameters and buffers of `self` or its children are
+        guaranteed to exist in `state_dict`. The hooks may modify `state_dict`
+        inplace or return a new one.
         """
-        handle = hooks.RemovableHandle(self._state_dict_hooks)
-        # True indicates that the hook was registered via the private method
-        self._state_dict_hooks[handle.id] = (hook, True)
-        return handle
-
-    def register_state_dict_post_hook(self, hook):
-        r"""Register a post-hook for the :meth:`~torch.nn.Module.state_dict` method.
-
-        It should have the following signature::
-            hook(module, state_dict, prefix, local_metadata) -> None
-
-        The registered hooks can modify the ``state_dict`` inplace.
-        """
-        handle = hooks.RemovableHandle(self._state_dict_hooks)
-        # False indicates that the hook was registered via the public method
-        self._state_dict_hooks[handle.id] = (hook, False)
+        handle = RemovableHandle(self._state_dict_hooks)
+        self._state_dict_hooks[handle.id] = hook
         return handle
 
     def register_state_dict_pre_hook(self, hook):
         r"""Register a pre-hook for the :meth:`~torch.nn.Module.state_dict` method.
 
-        It should have the following signature::
-            hook(module, prefix, keep_vars) -> None
-
-        The registered hooks can be used to perform pre-processing before the ``state_dict``
+        These hooks will be called with arguments: ``self``, ``prefix``,
+        and ``keep_vars`` before calling ``state_dict`` on ``self``. The registered
+        hooks can be used to perform pre-processing before the ``state_dict``
         call is made.
         """
-        handle = hooks.RemovableHandle(self._state_dict_pre_hooks)
+        handle = RemovableHandle(self._state_dict_pre_hooks)
         self._state_dict_pre_hooks[handle.id] = hook
         return handle
 
@@ -1955,19 +1950,22 @@ class Module:
         for name, module in self._modules.items():
             if module is not None:
                 module.state_dict(destination=destination, prefix=prefix + name + '.', keep_vars=keep_vars)
-        for (hook, from_private) in self._state_dict_hooks.values():
+        for hook in self._state_dict_hooks.values():
             hook_result = hook(self, destination, prefix, local_metadata)
-            if from_private and hook_result is not None:
+            if hook_result is not None:
                 destination = hook_result
         return destination
 
     def _register_load_state_dict_pre_hook(self, hook, with_module=False):
-        r"""See :meth:`~torch.nn.Module.register_load_state_dict_pre_hook` for details.
+        r"""Register a pre-hook for the :meth:`~torch.nn.Module.load_state_dict` method.
 
-        A subtle difference is that if ``with_module`` is set to ``False``, then the
-        hook will not take the ``module`` as the first argument whereas
-        :meth:`~torch.nn.Module.register_load_state_dict_pre_hook` always takes the
-        ``module`` as the first argument.
+        These hooks will be called with arguments: `state_dict`, `prefix`,
+        `local_metadata`, `strict`, `missing_keys`, `unexpected_keys`,
+        `error_msgs`, before loading `state_dict` into `self`. These arguments
+        are exactly the same as those of `_load_from_state_dict`.
+
+        If ``with_module`` is ``True``, then the first argument to the hook is
+        an instance of the module.
 
         Arguments:
             hook (Callable): Callable hook that will be invoked before
@@ -1975,24 +1973,12 @@ class Module:
             with_module (bool, optional): Whether or not to pass the module
                 instance to the hook as the first parameter.
         """
-        handle = hooks.RemovableHandle(self._load_state_dict_pre_hooks)
+        handle = RemovableHandle(self._load_state_dict_pre_hooks)
         self._load_state_dict_pre_hooks[handle.id] = _WrappedHook(hook, self if with_module else None)
         return handle
 
-    def register_load_state_dict_pre_hook(self, hook):
-        r"""Register a pre-hook to be run before module's :meth:`~nn.Module.load_state_dict` is called.
-
-        It should have the following signature::
-            hook(module, state_dict, prefix, local_metadata, strict, missing_keys, unexpected_keys, error_msgs) -> None  # noqa: B950
-
-        Arguments:
-            hook (Callable): Callable hook that will be invoked before
-                loading the state dict.
-        """
-        return self._register_load_state_dict_pre_hook(hook, with_module=True)
-
     def register_load_state_dict_post_hook(self, hook):
-        r"""Register a post-hook to be run after module's :meth:`~nn.Module.load_state_dict` is called.
+        r"""Register a post hook to be run after module's ``load_state_dict`` is called.
 
         It should have the following signature::
             hook(module, incompatible_keys) -> None
@@ -2016,7 +2002,7 @@ class Module:
                 a handle that can be used to remove the added hook by calling
                 ``handle.remove()``
         """
-        handle = hooks.RemovableHandle(self._load_state_dict_post_hooks)
+        handle = RemovableHandle(self._load_state_dict_post_hooks)
         self._load_state_dict_post_hooks[handle.id] = hook
         return handle
 
