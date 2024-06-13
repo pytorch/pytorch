@@ -75,7 +75,9 @@ def cuda_kernel_driver() -> str:
     if torch.version.hip is not None:
         # Adjusting the warp size to GPU supported wavefront size on AMD GPU
         prop = torch.cuda.get_device_properties(torch.cuda.current_device())
-        source_codes = source_codes.replace("32*numWarps", str(prop.warp_size)+"*numWarps")
+        source_codes = source_codes.replace(
+            "32*numWarps", str(prop.warp_size) + "*numWarps"
+        )        
     return source_codes
 
 
