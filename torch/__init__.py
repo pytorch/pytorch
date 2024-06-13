@@ -356,8 +356,8 @@ class SymInt:
         if self.node.is_nested_int():
             return hash(self.node.nested_int())
         else:
-            # We could support constant SymInts as well, but not doing it for now
-            raise TypeError("unhashable type: non-nested SymInt")
+            # Force specialization
+            return hash(builtins.int(self))
 
 class SymFloat:
     """

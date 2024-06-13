@@ -1576,7 +1576,7 @@ def unsqueeze_(x, dim):
 
 
 def _validate_dim(x, dim, offset=0):
-    assert isinstance(dim, int)
+    dim = V.graph.sizevars.shape_env.evaluate_expr(sympy.sympify(dim))
     ndim = len(x.get_size())
     if dim < 0:
         dim += ndim + offset
