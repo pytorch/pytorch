@@ -1,0 +1,67 @@
+---
+# NOTE there must be no spaces before the '-', so put the comma last.
+# The check bugprone-unchecked-optional-access is also turned off atm
+# because it causes clang-tidy to hang randomly. The tracking issue
+# can be found at https://github.com/llvm/llvm-project/issues/69369.
+InheritParentConfig: true
+Checks: '
+bugprone-*,
+-bugprone-easily-swappable-parameters,
+-bugprone-forward-declaration-namespace,
+-bugprone-macro-parentheses,
+-bugprone-lambda-function-name,
+-bugprone-reserved-identifier,
+-bugprone-swapped-arguments,
+-bugprone-unchecked-optional-access,
+clang-diagnostic-missing-prototypes,
+cppcoreguidelines-*,
+-cppcoreguidelines-avoid-do-while,
+-cppcoreguidelines-avoid-magic-numbers,
+-cppcoreguidelines-avoid-non-const-global-variables,
+-cppcoreguidelines-interfaces-global-init,
+-cppcoreguidelines-macro-usage,
+-cppcoreguidelines-owning-memory,
+-cppcoreguidelines-pro-bounds-array-to-pointer-decay,
+-cppcoreguidelines-pro-bounds-constant-array-index,
+-cppcoreguidelines-pro-bounds-pointer-arithmetic,
+-cppcoreguidelines-pro-type-cstyle-cast,
+-cppcoreguidelines-pro-type-reinterpret-cast,
+-cppcoreguidelines-pro-type-static-cast-downcast,
+-cppcoreguidelines-pro-type-union-access,
+-cppcoreguidelines-pro-type-vararg,
+-cppcoreguidelines-special-member-functions,
+-cppcoreguidelines-non-private-member-variables-in-classes,
+-facebook-hte-RelativeInclude,
+hicpp-exception-baseclass,
+hicpp-avoid-goto,
+misc-*,
+-misc-const-correctness,
+-misc-include-cleaner,
+-misc-use-anonymous-namespace,
+-misc-unused-parameters,
+-misc-no-recursion,
+-misc-non-private-member-variables-in-classes,
+-misc-confusable-identifiers,
+modernize-*,
+-modernize-macro-to-enum,
+-modernize-return-braced-init-list,
+-modernize-use-auto,
+-modernize-use-default-member-init,
+-modernize-use-using,
+-modernize-use-trailing-return-type,
+-modernize-use-nodiscard,
+performance-*,
+readability-container-size-empty,
+readability-delete-null-pointer,
+readability-duplicate-include
+readability-misplaced-array-index,
+readability-redundant-function-ptr-dereference,
+readability-redundant-smartptr-get,
+readability-simplify-subscript-expr,
+readability-string-compare,
+'
+HeaderFilterRegex: '^(aten/|c10/|torch/).*$'
+WarningsAsErrors: '*'
+CheckOptions:
+  misc-header-include-cycle.IgnoredFilesList: 'format.h;ivalue.h;custom_class.h;Dict.h;List.h'
+...
