@@ -999,7 +999,6 @@ command = [
 ]
 exclude_patterns = [
     'tools/gen_vulkan_spv.py',
-    'torch/__init__.py',  # Skip this file to format because it's part of the public API
     # We don't care too much about files in this directory, don't enforce
     # formatting on them
     'caffe2/**/*.py',
@@ -1099,7 +1098,6 @@ exclude_patterns = [
     'test/test_namedtuple_return_api.py',
     'test/test_native_functions.py',
     'test/test_native_mha.py',
-    'test/test_nestedtensor.py',
     'test/test_nn.py',
     'test/test_out_dtype_op.py',
     'test/test_overrides.py',
@@ -1558,7 +1556,6 @@ exclude_patterns = [
     'torch/distributed/tensor/parallel/style.py',
     'torch/fft/__init__.py',
     'torch/func/__init__.py',
-    'torch/functional.py',
     'torch/futures/__init__.py',
     'torch/fx/__init__.py',
     'torch/fx/_compatibility.py',
@@ -1644,8 +1641,6 @@ exclude_patterns = [
     'torch/fx/subgraph_rewriter.py',
     'torch/fx/tensor_type.py',
     'torch/fx/traceback.py',
-    'torch/hub.py',
-    'torch/library.py',
     'torch/linalg/__init__.py',
     'torch/monitor/__init__.py',
     'torch/nested/__init__.py',
@@ -1769,11 +1764,6 @@ exclude_patterns = [
     'torch/nn/utils/rnn.py',
     'torch/nn/utils/spectral_norm.py',
     'torch/nn/utils/weight_norm.py',
-    'torch/overrides.py',
-    'torch/quasirandom.py',
-    'torch/random.py',
-    'torch/return_types.py',
-    'torch/serialization.py',
     'torch/signal/__init__.py',
     'torch/signal/windows/__init__.py',
     'torch/signal/windows/windows.py',
