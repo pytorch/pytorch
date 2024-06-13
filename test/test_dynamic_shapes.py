@@ -27,6 +27,7 @@ from torch.fx.experimental.symbolic_shapes import (
     guard_float,
     guard_int,
     GuardOnDataDependentSymNode,
+    hint_int,
     is_symbolic,
     ShapeEnv,
     StatelessSymbolicContext,
@@ -41,7 +42,11 @@ from torch.testing._internal.common_utils import (
 )
 from torch.utils import _pytree as pytree
 from torch.utils._python_dispatch import TorchDispatchMode
-from torch.utils._sympy.functions import FloorDiv, Mod
+from torch.utils._sympy.functions import (
+    FloorDiv,
+    IsNonOverlappingAndDenseIndicator,
+    Mod,
+)
 
 aten = torch.ops.aten
 
@@ -381,6 +386,17 @@ class TestPySymInt(TestCase):
         self.assertTrue(str(expand_x.shape[1]), str(x.shape[0]))
         self.assertTrue(str(expand_x.shape[1]), str(result.shape[0]))
 
+    def test_floordiv_static(self):
+        shape_env = ShapeEnv()
+        s0 = create_symint(shape_env, 8)
+        # This was extracted from
+        # python test/inductor/test_cuda_cpp_wrapper.py -k
+        # DynamicShapesCudaWrapperCudaTests.test_insignificant_strides_cuda_dynamic_shapes_cuda_wrapper
+        bool(s0 % 2 == 0)
+        bool(s0 % (s0 // 2) == 0)
+        bool(2 * (s0 // 2) == s0)
+        self.assertTrue(statically_known_true(s0 // (s0 // 2) == 2))
+
     def test_numel(self):
         shape_env = ShapeEnv()
         x = create_symbolic_tensor("x", torch.randn(5), shape_env)
@@ -487,14 +503,14 @@ class TestPySymInt(TestCase):
         self.assertIsInstance(r, torch.SymInt, msg=type(r))
         self.assertExpectedInline(
             str(shape_env.guards[0][0]),
-            """Eq(floor(IntTrueDiv(s0, 2)), 2)""",
+            """Eq(FloorToInt(IntTrueDiv(s0, 2)), 2)""",
         )
         r = math.floor(3.0 * a0)
         self.assertEqual(r, 15)
         self.assertIsInstance(r, torch.SymInt, msg=type(r))
         self.assertExpectedInline(
             str(shape_env.guards[1][0]),
-            """Eq(floor(3.0*ToFloat(s0)), 15)""",
+            """Eq(FloorToInt(3.0*ToFloat(s0)), 15)""",
         )
 
     def test_sym_trunc(self):
@@ -521,7 +537,7 @@ class TestPySymInt(TestCase):
         self.assertIsInstance(r, torch.SymInt, msg=type(r))
         self.assertExpectedInline(
             str(shape_env.guards[0][0]),
-            """Eq(ceiling(IntTrueDiv(s0, 2)), 3)""",
+            """Eq(CeilToInt(IntTrueDiv(s0, 2)), 3)""",
         )
         r1 = 3.0 * a0
         r = math.floor(r1)
@@ -529,7 +545,7 @@ class TestPySymInt(TestCase):
         self.assertIsInstance(r, torch.SymInt, msg=type(r))
         self.assertExpectedInline(
             str(shape_env.guards[1][0]),
-            """Eq(floor(3.0*ToFloat(s0)), 15)""",
+            """Eq(FloorToInt(3.0*ToFloat(s0)), 15)""",
         )
 
     def test_sym_ite(self):
@@ -621,7 +637,7 @@ def forward(self, x_1):
         self.assertTrue(expect_true(i0 < s0))
         self.assertExpectedInline(
             str([ra.expr for ra in shape_env.deferred_runtime_asserts[i0.node.expr]]),
-            """[-s0 + u0 < 0]""",
+            """[u0 < s0]""",
         )
         self.assertTrue(i0 < s0)
         self.assertTrue(i0 != s0)
@@ -765,6 +781,70 @@ def forward(self, x_1):
         a0 = create_symint(shape_env, 5)
         r = torch.empty_strided((a0, 7), (1, a0), device="meta")
         self.assertTrue(torch.ops.aten.is_non_overlapping_and_dense.default(r))
+
+    def test_non_overlapping_and_dense_unbacked(self):
+        shape_env = ShapeEnv()
+        u0 = shape_env.create_unbacked_symint()
+        torch._check_is_size(u0)
+        cf = torch.ops.aten.is_non_overlapping_and_dense.default
+
+        self.assertEqual(IsNonOverlappingAndDenseIndicator(u0.node.expr, 2, 2, 1), 1)
+        self.assertEqual(IsNonOverlappingAndDenseIndicator(2, u0.node.expr, 1, 2), 1)
+        self.assertTrue(cf(torch.empty_strided((u0, 2), (2, 1), device="meta")))
+        self.assertTrue(cf(torch.empty_strided((2, u0), (1, 2), device="meta")))
+
+        self.assertEqual(IsNonOverlappingAndDenseIndicator(u0.node.expr, 1), 1)
+        self.assertEqual(IsNonOverlappingAndDenseIndicator(1, u0.node.expr), 1)
+        self.assertTrue(cf(torch.empty_strided((u0,), (1,), device="meta")))
+        self.assertTrue(cf(torch.empty_strided((1,), (u0,), device="meta")))
+
+        Max = torch.sym_max
+        # NB: This only works because we're able to determine this tensor is
+        # contiguous. transpose(0, 1) makes it stop working
+        self.assertTrue(
+            cf(
+                torch.empty_strided(
+                    (
+                        2,
+                        3,
+                        1,
+                        u0,
+                    ),
+                    (3 * Max(1, u0), Max(1, u0), Max(1, u0), 1),
+                    device="meta",
+                )
+            )
+        )
+
+    def test_debug_has_internal_overlap_unbacked(self):
+        shape_env = ShapeEnv()
+        u0 = shape_env.create_unbacked_symint()
+        torch._check_is_size(u0)
+        cf = torch._debug_has_internal_overlap
+        self.assertEqual(cf(torch.empty_strided((u0, 2), (2, 1), device="meta")), 0)
+        self.assertEqual(cf(torch.empty_strided((2, u0), (1, 2), device="meta")), 0)
+        self.assertEqual(cf(torch.empty_strided((u0,), (1,), device="meta")), 0)
+        self.assertEqual(cf(torch.empty_strided((1,), (u0,), device="meta")), 0)
+        Max = torch.sym_max
+        self.assertEqual(
+            cf(
+                torch.empty_strided(
+                    (
+                        2,
+                        3,
+                        1,
+                        u0,
+                    ),
+                    (3 * Max(1, u0), Max(1, u0), Max(1, u0), 1),
+                    device="meta",
+                )
+            ),
+            0,
+        )
+
+        # Wobbling these to zero is OK too
+        self.assertEqual(cf(torch.empty_strided((u0, 2), (3, 1), device="meta")), 2)
+        self.assertEqual(cf(torch.empty_strided((2, u0), (1, 3), device="meta")), 2)
 
     def test_specialize_zero_one(self):
         shape_env = ShapeEnv(specialize_zero_one=True)
@@ -2386,6 +2466,40 @@ def specify_constraints(a, b, c, d, e, f):
 
         self.assertEqual(static_code, expected_static)
         self.assertEqual(dynamic_code, expected_dynamic)
+
+
+class TestGuardsExpressions(TestCase):
+    """
+    Tests the guards-related methods used by the inductor FX graph cache.
+    """
+
+    def test_guards_gt_lt(self):
+        shape_env = ShapeEnv()
+        s0 = create_symint(shape_env, 6)
+        s1 = create_symint(shape_env, 7)
+        s2 = create_symint(shape_env, 5)
+
+        guard_int(sym_int(s0 > 5))
+        guard_int(sym_int(s0 < 7))
+
+        guards = shape_env.produce_guards_expression([s0])
+
+        self.assertTrue(shape_env.evaluate_guards_expression(guards, [hint_int(s0)]))
+        self.assertFalse(shape_env.evaluate_guards_expression(guards, [hint_int(s1)]))
+        self.assertFalse(shape_env.evaluate_guards_expression(guards, [hint_int(s2)]))
+
+    def test_guards_float_div(self):
+        shape_env = ShapeEnv()
+        s0 = create_symint(shape_env, 8)
+        s1 = create_symint(shape_env, 7)
+
+        guard_int(sym_int(s0 / 2.0))
+        guards = shape_env.produce_guards_expression([s0])
+
+        self.assertIn("ToFloat", guards)
+        self.assertIn("FloatTrueDiv", guards)
+        self.assertTrue(shape_env.evaluate_guards_expression(guards, [hint_int(s0)]))
+        self.assertFalse(shape_env.evaluate_guards_expression(guards, [hint_int(s1)]))
 
 
 if __name__ == "__main__":

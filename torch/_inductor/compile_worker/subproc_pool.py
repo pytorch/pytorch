@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import functools
 import itertools
 import logging
@@ -12,6 +13,7 @@ import typing
 from concurrent.futures import Future, ProcessPoolExecutor
 from typing import Any, Callable, Dict
 
+from torch._inductor import config
 from torch._inductor.compile_worker.watchdog import _async_compile_initializer
 
 log = logging.getLogger(__name__)
@@ -58,6 +60,19 @@ def _recv_msg(read_pipe):
     return job_id, data
 
 
+def _get_ld_library_path():
+    path = os.environ.get("LD_LIBRARY_PATH", "")
+    if config.is_fbcode():
+        from libfb.py.parutil import get_runtime_path
+
+        runtime_path = get_runtime_path()
+        if runtime_path:
+            lib_path = os.path.join(runtime_path, "runtime", "lib")
+            path = os.pathsep.join([lib_path, path]) if path else lib_path
+
+    return path
+
+
 class SubprocPool:
     """
     Mimic a concurrent.futures.ProcessPoolExecutor, but wrap it in
@@ -84,19 +99,24 @@ class SubprocPool:
                 # torch._inductor.codecache since the warming process is what
                 # creates the SubprocPool in the first place.
                 "TORCH_WARM_POOL": "0",
+                # Some internal usages need a modified LD_LIBRARY_PATH.
+                "LD_LIBRARY_PATH": _get_ld_library_path(),
             },
         )
         self.write_pipe: Pipe = typing.cast(Pipe, self.process.stdin)
         self.write_lock = threading.Lock()
         self.read_pipe: Pipe = typing.cast(Pipe, self.process.stdout)
         self.read_thread = threading.Thread(target=self._read_thread, daemon=True)
-        self.read_thread.start()
 
         self.futures_lock = threading.Lock()
         self.pending_futures: Dict[int, Future[Any]] = {}
         self.job_id_count = itertools.count()
 
         self.running = True
+
+        # Start thread last to ensure all member variables are initialized
+        # before any access.
+        self.read_thread.start()
 
     def submit(self, job_fn: Callable[..., Any], *args):
         if args:
@@ -106,11 +126,11 @@ class SubprocPool:
         with self.futures_lock:
             job_id = next(self.job_id_count)
             self.pending_futures[job_id] = future = Future()
+        future.set_running_or_notify_cancel()
         with self.write_lock:
             if not self.running:
                 raise RuntimeError("submit() on closed pool")
             _send_msg(self.write_pipe, job_id, job_data)
-        future.set_running_or_notify_cancel()
         return future
 
     def _read_thread(self):

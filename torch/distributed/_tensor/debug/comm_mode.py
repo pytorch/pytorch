@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 from collections import defaultdict
 from typing import Any, Dict
 
@@ -69,7 +70,7 @@ class ModuleParamaterShardingTracker(ModuleTracker):
 
         # contains information about module ordering and depth in the module tree
         self.module_depth_dict[self.name] = len(self.parents)
-
+        # adds current sub-module to module tracker parent class
         super()._get_append_fn(self.name, False)()
 
         args, _ = tree_flatten(input)
@@ -157,7 +158,7 @@ class CommDebugMode(TorchDispatchMode):
                         f"\033[1;33m{collective_indent}{collective}: {count}\033[0m\n"
                     )
 
-        print(table)
+        return table
 
     def get_total_counts(self) -> int:
         return sum(self.comm_counts.values())

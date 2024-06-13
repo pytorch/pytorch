@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import operator
 from contextlib import contextmanager
 from enum import Enum
