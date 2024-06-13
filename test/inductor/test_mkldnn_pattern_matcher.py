@@ -233,6 +233,7 @@ class TestPatternMatcherBase(TestCase):
         rtol=1.3e-6,
         check_quantization=False,
         check_dynamic=None,
+        num_include_ops=None,
     ):
         with torch.no_grad():
             clone_inputs = self._clone_inputs(inputs)
@@ -245,6 +246,12 @@ class TestPatternMatcherBase(TestCase):
             )
             for op in include_ops:
                 self.assertIn(op, source_code)
+            if num_include_ops is not None:
+                assert len(include_ops) == len(num_include_ops)
+                for i in range(len(include_ops)):
+                    self.assertEqual(
+                        source_code.count(include_ops[i]), num_include_ops[i]
+                    )
             for op in exclude_ops:
                 self.assertNotIn(op, source_code)
             if check_dynamic is not None:
@@ -400,13 +407,16 @@ class TestPatternMatcher(TestPatternMatcherBase):
         class M(torch.nn.Module):
             def __init__(self, dtype, unary_fn):
                 super().__init__()
-                self.linear = torch.nn.Linear(10, 64, bias=False)
-                self.bias = torch.randn(64).to(dtype=dtype)
+                self.linear1 = torch.nn.Linear(10, 64, bias=False)
+                self.bias1 = torch.randn(64).to(dtype=dtype)
+                self.linear2 = torch.nn.Linear(10, 64, bias=False)
+                self.bias2 = torch.randn(64).to(dtype=dtype)
                 self.unary_fn = unary_fn
 
             def forward(self, x):
-                x = self.linear(x) + self.bias
-                return self.unary_fn(x)
+                a = self.linear1(x) + self.bias1
+                b = self.linear2(x) + self.bias2
+                return self.unary_fn(a), self.unary_fn(b)
 
         dtypes = []
         if torch.ops.mkldnn._is_mkldnn_bf16_supported():
@@ -419,13 +429,14 @@ class TestPatternMatcher(TestPatternMatcherBase):
             mod = M(dtype, unary_fn).eval()
             v = torch.randn(2, 10)
             matcher_count = 3
-            # Add 1 for weight packing pass, add 2 for bias folding pass.
+            # Add 1 for weight packing pass, add 2 for bias folding pass per linear.
             matcher_nodes = unary_list[unary_fn] + 3
             if self._check_unary_is_decomposed(unary_fn):
                 # Has extra dtype conversion nodes for autocast.
                 matcher_nodes += 2
+            # we have 2 linears, so we double the matcher_count/nodes
             self._test_common(
-                mod, (v,), matcher_count, matcher_nodes, check_autocast=dtype
+                mod, (v,), matcher_count * 2, matcher_nodes * 2, check_autocast=dtype
             )
             self.assertEqual(metrics.generated_kernel_count, 1)
 
@@ -1808,6 +1819,32 @@ class TestPatternMatcher(TestPatternMatcherBase):
                     matcher_check_fn=matcher_check_fn,
                     is_qat=is_qat,
                 )
+                if torch._inductor.config.cpp_wrapper:
+                    # For CPP wrapper
+                    self._test_code_common(
+                        mod,
+                        (v,),
+                        [
+                            "op_qlinear_pointwise.call",
+                            "op_qlinear_pointwise_binary.call",
+                        ],
+                        [],
+                        check_quantization=True,
+                        num_include_ops=[2, 2],
+                    )
+                else:
+                    # For python wrapper
+                    self._test_code_common(
+                        mod,
+                        (v,),
+                        [
+                            "torch.ops.onednn.qlinear_pointwise.default",
+                            "torch.ops.onednn.qlinear_pointwise.binary",
+                        ],
+                        [],
+                        check_quantization=True,
+                        num_include_ops=[2, 2],
+                    )
 
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN
