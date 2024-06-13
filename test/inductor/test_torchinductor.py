@@ -34,7 +34,6 @@ from torch._dynamo.debug_utils import aot_graph_input_parser
 from torch._dynamo.testing import (
     CompileCounterWithBackend,
     expectedFailureCodegenDynamic,
-    expectedFailureScalar,
     rand_strided,
     same,
     skipIfPy312,
@@ -81,6 +80,7 @@ from torch.testing._internal.common_utils import (
     IS_X86,
     parametrize,
     serialTest,
+    skipIfNNModuleInlined,
     skipIfRocm,
     skipIfXpu,
     subtest,
@@ -1316,9 +1316,6 @@ class CommonTemplate:
 
         self.common(fn, (torch.randn(1024),))
 
-    # Fails when testing the scalar version
-    # See https://github.com/pytorch/pytorch/issues/128029.
-    @expectedFailureScalar
     @skipIfRocm
     @config.patch(debug_index_asserts=False)
     def test_neg_index(self):
@@ -1581,40 +1578,16 @@ class CommonTemplate:
         def fn(a):
             return torch.var(a)
 
-        atol = None
-        rtol = None
-        if self.device == "cpu" and os.getenv("ATEN_CPU_CAPABILITY") == "default":
-            atol = 1e-4
-            rtol = 1e-4
-        self.common(
-            fn,
-            ((torch.rand((10, 3, 352, 352), dtype=torch.float32),)),
-            rtol=rtol,
-            atol=atol,
-        )
-        self.common(
-            fn, ((torch.rand((14923), dtype=torch.float32),)), rtol=rtol, atol=atol
-        )
+        self.common(fn, ((torch.rand((10, 3, 352, 352), dtype=torch.float32),)))
+        self.common(fn, ((torch.rand((14923), dtype=torch.float32),)))
 
     @skipCPUIf(IS_MACOS, "fails on macos")
     def test_multilayer_var_lowp(self):
         def fn(a):
             return torch.var(a)
 
-        atol = None
-        rtol = None
-        if self.device == "cpu" and os.getenv("ATEN_CPU_CAPABILITY") == "default":
-            atol = 1e-3
-            rtol = 1e-3
-        self.common(
-            fn,
-            (torch.rand((16, 16, 352, 352), dtype=torch.float16),),
-            rtol=rtol,
-            atol=atol,
-        )
-        self.common(
-            fn, (torch.rand((14923), dtype=torch.float16),), rtol=rtol, atol=atol
-        )
+        self.common(fn, (torch.rand((16, 16, 352, 352), dtype=torch.float16),))
+        self.common(fn, (torch.rand((14923), dtype=torch.float16),))
 
     def test_split_cumsum(self):
         def fn(a):
@@ -4000,6 +3973,7 @@ class CommonTemplate:
 
         self.assertEqual(eager_delta, compile_delta)
 
+    @skipIfNNModuleInlined("https://github.com/pytorch/pytorch/issues/128198")
     def test_buffer_batch_norm(self):
         class MyModel(torch.nn.Module):
             def __init__(self):
@@ -5527,6 +5501,14 @@ class CommonTemplate:
 
         for dtype in all_types():
             self.common(fn, (make_tensor(8, dtype=dtype, device=self.device),))
+
+    def test_full_boolean(self):
+        def fn(n):
+            x = torch.full((1,), n >= 1024, device=self.device)
+            return x, x + 1
+
+        self.common(fn, (1024,))
+        self.common(fn, (1023,))
 
     def test_index1(self):
         def fn(a, b, c):
@@ -7842,6 +7824,95 @@ class CommonTemplate:
         )
         assertGeneratedKernelCountEqual(self, 0)
 
+    def test_avg_pool3d_backward(self):
+        def fn(a, b):
+            return aten.avg_pool3d_backward(
+                a,
+                b,
+                [2, 2, 2],
+                [2, 2, 2],
+                [0, 0, 0],
+                True,
+                False,
+                None,
+            )
+
+        self.common(
+            fn,
+            [
+                torch.randn([2, 4, 7, 7, 7]),
+                torch.randn([2, 4, 14, 14, 14]),
+            ],
+        )
+
+    def test_avg_pool3d_backward2(self):
+        def fn(a, b):
+            return aten.avg_pool3d_backward(
+                a,
+                b,
+                [3, 3, 3],
+                [1, 1, 1],
+                [1, 1, 1],
+                True,
+                False,
+                None,
+            )
+
+        self.common(
+            fn,
+            [
+                torch.randn([1, 1, 20, 20, 15]),
+                torch.randn([1, 1, 20, 20, 15]),
+            ],
+        )
+
+    def test_avg_pool3d_backward3(self):
+        def fn(a, b):
+            return aten.avg_pool3d_backward(
+                a,
+                b,
+                [1, 1, 1],
+                [2, 2, 2],
+                [0, 0, 0],
+                False,
+                False,
+                None,
+            )
+
+        torch._inductor.metrics.generated_kernel_count = 0
+        self.common(
+            fn,
+            [
+                torch.randn([1, 2016, 11, 11, 11]),
+                torch.randn([1, 2016, 21, 21, 21]),
+            ],
+        )
+        assertGeneratedKernelCountEqual(self, 1)
+
+    def test_avg_pool3d_backward4(self):
+        def fn(a, b):
+            return aten.avg_pool3d_backward(
+                a,
+                b,
+                [13, 13, 13],
+                [1, 1, 1],
+                [0, 0, 0],
+                True,
+                False,
+                None,
+            )
+
+        torch._inductor.metrics.generated_kernel_count = 0
+        self.common(
+            fn,
+            [
+                torch.randn([1, 16, 12, 12, 12]),
+                torch.randn([1, 16, 24, 24, 24]),
+            ],
+            check_lowp=False,
+        )
+        assertGeneratedKernelCountEqual(self, 0)
+
     @config.patch(search_autotune_cache=False)
     def test_mm_views(self):
         def fn(a, b):
@@ -8227,7 +8298,7 @@ class CommonTemplate:
             rand_strided(shape, stride, dtype).requires_grad_(True).add(1)
             for shape, stride, dtype in args
         ]
-        self.common(forward, args, atol=1e-05, rtol=1e-05)
+        self.common(forward, args)
 
     @requires_gpu()
     def test_tmp_not_defined_issue3(self):
@@ -9309,7 +9380,6 @@ class CommonTemplate:
     # To support this behavior, we need to allow const-propping tensors that store symint data.
     # For now, dynamo will explicitly graph break when it encounters user code with this behavior.
     @expectedFailureCodegenDynamic
-    @expectedFailureScalar
     def test_AllenaiLongformerBase_repro(self):
         def fn(query, scores, window_overlap):
             batch_size, seq_len, num_heads, _ = query.size()
@@ -9345,9 +9415,6 @@ class CommonTemplate:
             opt_fn = torch._dynamo.optimize("inductor")(fn)
             _, code = run_and_get_cpp_code(opt_fn, *args)
             print(code)
-            # When testing the scalar version, i.e., ATEN_CPU_CAPABILITY=default,
-            # static_cast<int>(256) is not found, but static_cast<int64_t>(256).
-            # See https://github.com/pytorch/pytorch/issues/126262.
             FileCheck().check_count(
                 "static_cast<int32_t>(256)",
                 1,
