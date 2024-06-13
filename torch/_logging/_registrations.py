@@ -95,6 +95,10 @@ register_artifact(
     "Only relevant for compiling DDP. DDP splits into multiple graphs to trigger comms early. This will print each individual graph here.",
 )
 register_artifact(
+    "split_graphs",
+    "TODO.",
+)
+register_artifact(
     "recompiles",
     "Prints the reason why we recompiled a graph. Very, very useful.",
     visible=True,

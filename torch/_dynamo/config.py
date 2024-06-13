@@ -271,6 +271,8 @@ enforce_cond_guards_match = True
 # no optimization.
 optimize_ddp: Union[bool, str] = True
 
+preserve_allow_in_graph_via_splitting = True
+
 # By default, Dynamo emits runtime asserts (e.g. torch._check, torch._check_is_size) in the graph.
 # In some cases those asserts could be performance costly
 # E.g. torch._check(tensor[0].item() > 2) for tensor on cuda will require cuda sync.

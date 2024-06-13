@@ -18,6 +18,7 @@ from torch.fx.node import Node
 # See docs/source/logging.rst for more info.
 log = logging.getLogger(__name__)
 ddp_graph_log = torch._logging.getArtifactLogger(__name__, "ddp_graphs")
+split_graph_log = torch._logging.getArtifactLogger(__name__, "split_graphs")
 
 
 def args_str(args):
@@ -202,13 +203,16 @@ class SubmoduleReplacer(torch.fx.interpreter.Interpreter):
             ddp_graph_log.debug("\n---%s graph---\n%s", n.target, real_mod.graph)
 
             assert len(n.kwargs) == 0, "We assume only args for these modules"
-            lazily_compiled_submod = self.lazily_compiled_submod(real_mod)
 
-            # We update the original (outer) graph with a call into the compiled module
-            # instead of the uncompiled one.
-            self.module.delete_submodule(n.target)
-            n.target = "compiled_" + n.target
-            self.module.add_submodule(n.target, lazily_compiled_submod)
+            if any(hasattr(n.target, '_dynamo_split_before_autograd') for n in real_mod.graph.nodes):
+                pass
+            else:
+                lazily_compiled_submod = self.lazily_compiled_submod(real_mod)
+                # We update the original (outer) graph with a call into the compiled module
+                # instead of the uncompiled one.
+                self.module.delete_submodule(n.target)
+                n.target = "compiled_" + n.target
+                self.module.add_submodule(n.target, lazily_compiled_submod)
 
 
 # 3 (no lazy compile): compile each of the partitioned submodules using the user-provided compiler
@@ -627,6 +631,66 @@ class DDPOptimizer:
         split_gm.recompile()
 
         ddp_graph_log.debug(
+            "\n---final graph---\n%s\n---------------\n", split_gm.graph
+        )
+        return split_gm
+
+
+class AllowInGraphSplitter:
+    def __init__(
+        self,
+        backend_compile_fn,
+    ):
+        self.backend_compile_fn = backend_compile_fn
+
+    def compile_fn(self, gm: fx.GraphModule, example_inputs: List[torch.Tensor]):
+        if has_higher_order_op(gm):
+            raise NotImplementedError(
+                "https://github.com/pytorch/pytorch/issues/104674"
+            )
+
+        partition_map = {}
+        idx = 0
+        for node in gm.graph.nodes:
+            if node.op == "call_function" and hasattr(node.target, '_dynamo_split_before_autograd'):
+                idx += 1
+                partition_map[node] = idx
+                idx += 1
+            else:
+                partition_map[node] = idx
+
+        split_gm = fx.passes.split_module.split_module(
+            gm, None, lambda node: partition_map[node]
+        )
+
+        debug_str = (
+            f"\n---orig graph---\n{gm.graph}\n"
+            + f"\n---split graph---\n{split_gm.graph}\n"
+        )
+        for name, module in split_gm.named_modules():
+            if "." not in name and len(name):
+                # only print the submod graphs, not their children
+                debug_str += f"\n---{name} graph---\n{module.graph}\n"
+        debug_str += "\n---------------\n"
+        split_graph_log.debug(debug_str)
+
+        trace_structured(
+            "allow_in_graph_split_graph",
+            payload_fn=lambda: split_gm.print_readable(print_output=False),
+        )
+        for name, module in split_gm.named_modules():
+            if "." not in name and len(name):
+                trace_structured(
+                    "allow_in_graph_split_child",
+                    lambda: {"name": name},
+                    payload_fn=lambda: module.print_readable(print_output=False),
+                )
+
+        submod_compiler = SubmoduleReplacer(split_gm, self.backend_compile_fn)
+        submod_compiler.run(*example_inputs)
+        split_gm.recompile()
+
+        split_graph_log.debug(
             "\n---final graph---\n%s\n---------------\n", split_gm.graph
         )
         return split_gm

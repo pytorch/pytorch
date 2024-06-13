@@ -1111,6 +1111,25 @@ class CatchErrorsWrapper:
                         frame, cache_entry, self.hooks, frame_state
                     )
 
+        if config.preserve_allow_in_graph_via_splitting:
+            with compile_lock:
+                from torch._dynamo.backends.distributed import AllowInGraphSplitter
+
+                assert hasattr(
+                    self._torchdynamo_orig_callable, "_clone_with_backend"
+                ), "preserve_allow_in_graph_via_splitting only supports callback fns that know how to clone themselves."
+                allow_in_graph_splitter = AllowInGraphSplitter(
+                    backend_compile_fn=self._torchdynamo_orig_callable._torchdynamo_orig_callable,
+                )
+                hijacked_callback = (
+                    self._torchdynamo_orig_callable._clone_with_backend(
+                        allow_in_graph_splitter.compile_fn,
+                    )
+                )
+                return hijacked_callback(
+                    frame, cache_entry, self.hooks, frame_state
+                )
+
         with compile_lock, _disable_current_modes():
             # skip=1: skip this frame
             return self._torchdynamo_orig_callable(
