@@ -4498,7 +4498,8 @@ class ShapeEnv:
             offset = lower - 1
             # Compute offset_integral as the greatest integer smaller than offset
             offset_integral = int(offset)
-            if offset < 0 and offset != offset_integral: # int(-1.5) == -1 but we want -2
+            # int(-1.5) == -1 but we want -2
+            if offset < 0 and offset != offset_integral:
                 offset -= 1
             new_shape_env[k] = s + offset_integral
             new_range_env[s] = SymPyValueRangeAnalysis.add(vr, -offset_integral)
