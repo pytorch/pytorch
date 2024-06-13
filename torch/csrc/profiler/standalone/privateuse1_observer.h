@@ -1,9 +1,7 @@
 #pragma once
 #include <torch/csrc/profiler/api.h>
 
-namespace torch {
-namespace profiler {
-namespace impl {
+namespace torch::profiler::impl {
 
 using CallBackFnPtr = void (*)(
     const ProfilerConfig& config,
@@ -41,6 +39,4 @@ struct RegisterPRIVATEUSE1Observer {
 
 #define REGISTER_PRIVATEUSE1_OBSERVER(name, fn) \
   static RegisterPRIVATEUSE1Observer name##__register(name, fn);
-} // namespace impl
-} // namespace profiler
-} // namespace torch
+} // namespace torch::profiler::impl
