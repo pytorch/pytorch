@@ -858,10 +858,10 @@ class FxGraphCache:
         # See _save_graph(); we don't store the callable in the cache entry so
         # recreate it here from the PyCodeCache disk cache.
         artifact_path = get_path(graph.cache_key, "py")[2]
+        code = graph.source_code
         if not os.path.exists(artifact_path):
             counters["inductor"]["fxgraph_lookup_write_file"] += 1
             Path(os.path.dirname(artifact_path)).mkdir(parents=True, exist_ok=True)
-            code = graph.source_code
             cpp_pp = cpp_prefix_path()
             if os.path.basename(cpp_pp) in code:
                 if cpp_pp in code:
@@ -901,6 +901,11 @@ class FxGraphCache:
         # graph was compiled for this cache entry. Pretending these counters
         # were incremented normally is useful for testing with the cache enabled.
         metrics.CachedMetricsHelper.apply_deltas(graph.metrics_deltas)
+
+        from .graph import GraphLowering
+
+        GraphLowering.save_output_code(code)
+        output_code_log.debug("Output code: \n%s", code)
 
         return graph
 
