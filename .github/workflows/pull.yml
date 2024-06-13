@@ -402,7 +402,7 @@ jobs:
       cuda-version: cpu
       test-matrix: |
         { include: [
-          { config: "default", shard: 1, num_shards: 1, runner: "linux.4xlarge" },
+          { config: "default", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge" },
         ]}
 
   linux-focal-cuda12_1-py3_10-gcc9-bazel-test:
@@ -416,7 +416,7 @@ jobs:
       cuda-version: "12.1"
       test-matrix: |
         { include: [
-          { config: "default", shard: 1, num_shards: 1, runner: "linux.4xlarge.nvidia.gpu" },
+          { config: "default", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge.nvidia.gpu" },
         ]}
 
   linux-focal-cuda12_4-py3_10-gcc9-bazel-test:
@@ -436,23 +436,27 @@ jobs:
   linux-focal-py3-clang9-android-ndk-r21e-gradle-custom-build-single:
     name: linux-focal-py3-clang9-android-ndk-r21e-gradle-custom-build-single
     uses: ./.github/workflows/_android-build-test.yml
+    needs: get-label-type
     with:
+      runner: "${{ needs.get-label-type.outputs.label-type }}linux.large"
       build-environment: linux-focal-py3-clang9-android-ndk-r21e-gradle-custom-build-single
       docker-image-name: pytorch-linux-focal-py3-clang9-android-ndk-r21e
       test-matrix: |
         { include: [
-          { config: "default", shard: 1, num_shards: 1, runner: "linux.2xlarge" },
+          { config: "default", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
         ]}
 
   linux-focal-py3-clang9-android-ndk-r21e-gradle-custom-build-single-full-jit:
     name: linux-focal-py3-clang9-android-ndk-r21e-gradle-custom-build-single-full-jit
     uses: ./.github/workflows/_android-build-test.yml
+    needs: get-label-type
     with:
+      runner: "${{ needs.get-label-type.outputs.label-type }}linux.large"
       build-environment: linux-focal-py3-clang9-android-ndk-r21e-gradle-custom-build-single-full-jit
       docker-image-name: pytorch-linux-focal-py3-clang9-android-ndk-r21e
       test-matrix: |
         { include: [
-          { config: "default", shard: 1, num_shards: 1, runner: "linux.2xlarge" },
+          { config: "default", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge" },
         ]}
 
   linux-jammy-py3_8-gcc11-mobile-lightweight-dispatch-build:
