@@ -2381,11 +2381,10 @@ class GraphModule(torch.nn.Module):
     def test_range_length(self):
         def test(*args, expected=None):
             r = range(*args)
-
-            range_variable_input = [ConstantVariable.create(v) for v in args]
-            range_variable = RangeVariable(range_variable_input)
+            range_variable = RangeVariable([ConstantVariable.create(v) for v in args])
 
             self.assertEqual(len(r), range_variable.range_length())
+
             if expected is not None:
                 self.assertEqual(len(r), expected)
 
