@@ -113,8 +113,36 @@ class TestConverter(TestCase):
                 length = len(x)
                 return torch.ones(length)
 
+        # aten::len.t
+        inp = ([1, 2, 3],)
+        self._check_equal_ts_ep_converter(Module(), inp)
+
+        # aten::len.Tensor
         inp = (torch.ones(2, 3),)
         self._check_equal_ts_ep_converter(Module(), inp)
+
+        # aten::len.Dict_int
+        inp = ({1: "a", 2: "b", 3: "c"},)
+        self._check_equal_ts_ep_converter(Module(), inp)
+
+        # aten::len.Dict_bool
+        inp = ({True: "a", False: "b"},)
+        self._check_equal_ts_ep_converter(Module(), inp)
+
+        # aten::len.Dict_float
+        inp = ({1.2: "a", 3.4: "b"},)
+        self._check_equal_ts_ep_converter(Module(), inp)
+
+        # aten::len.Dict_Tensor
+        inp = ({torch.zeros(2, 3): "a", torch.ones(2, 3): "b"},)
+        self._check_equal_ts_ep_converter(Module(), inp)
+
+        # aten::len.str and aten::len.Dict_str are not supported
+        # since torch._C._jit_flatten does not support str
+        # inp = ("abcdefg",)
+        # self._check_equal_ts_ep_converter(Module(), inp)
+        # inp = ({"a": 1, "b": 2},)
+        # self._check_equal_ts_ep_converter(Module(), inp)
 
     def test_aten___getitem___list(self):
         class Module(torch.nn.Module):
