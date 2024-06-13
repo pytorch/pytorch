@@ -61,6 +61,10 @@ enable_autograd_cache = os.environ.get("ENABLE_AOT_AUTOGRAD_CACHE", "0") == "1"
 # once XLA pin update works,
 # or default config to true and fix relevant bugs
 from torch._inductor.config import is_fbcode
+
+# View replay is currently not compatible with AOTAutogradCache, since
+# FunctionalTensors are not serializable. We'll need to make them
+# serializable before enabling warm cache with this config turned on.
 view_replay_for_aliased_outputs = (not is_fbcode()) and (not enable_autograd_cache)
 
 # Restricts the amount of computation AOTAutograd can do.
