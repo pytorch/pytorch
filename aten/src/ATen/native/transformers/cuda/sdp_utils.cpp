@@ -215,6 +215,17 @@ bool check_mem_efficient_hardware_support(sdp_params const& params, bool debug) 
   // Mem Efficient attention supports hardware in the range [sm_50, sm_90]
   using sm50 = SMVersion<5, 0>;
   using sm90 = SMVersion<9, 0>;
+#if USE_ROCM
+  auto stream = at::cuda::getCurrentCUDAStream().stream();
+  if (hipSuccess != aotriton::v2::flash::check_gpu(stream)) {
+      auto dprops = at::cuda::getCurrentDeviceProperties();
+      if (debug) {
+          TORCH_WARN(
+                  "Mem Efficient attention was not compiled for current AMD GPU architecture. Attempting to run on architecture ", dprops->gcnArchName);
+      }
+      return false;
+  }
+#else
   auto dprops = at::cuda::getCurrentDeviceProperties();
   if (!check_sm_version<sm50, sm90>(dprops)) {
     if (debug) {
@@ -227,6 +238,7 @@ bool check_mem_efficient_hardware_support(sdp_params const& params, bool debug) 
     }
     return false;
   }
+#endif
   return true;
 }
 
@@ -597,6 +609,10 @@ bool can_use_mem_efficient_attention(sdp_params const& params, bool debug) {
       array_of<at::ScalarType>(at::kHalf, at::kFloat, at::kBFloat16);
   constexpr auto less_than_sm80_mem_efficient_dtypes =
       array_of<at::ScalarType>(at::kHalf, at::kFloat);
+#ifdef USE_ROCM
+  constexpr auto aotriton_mem_efficient_dtypes =
+      array_of<at::ScalarType>(at::kHalf, at::kFloat, at::kBFloat16);
+#endif
 
   //  Define gate functions that determine if a mem efficient kernel can be ran
   constexpr auto general_constraints = array_of<bool (*)(sdp_params const&, bool)>(
@@ -612,6 +628,10 @@ bool can_use_mem_efficient_attention(sdp_params const& params, bool debug) {
   }
 
   if (has_for_nested_inputs(params)) {
+#ifdef USE_ROCM
+    TORCH_WARN_ONCE(false, "[ROCM] no support for nested tensors in memory efficient attention.");
+    return false;
+#endif
     constexpr auto nested_constraints = array_of<bool (*)(sdp_params const&, bool)>(
         check_requires_grad_and_nested,
         check_batch_size_nested,
@@ -634,10 +654,14 @@ bool can_use_mem_efficient_attention(sdp_params const& params, bool debug) {
     }
   }
 
+#ifdef USE_ROCM
+  return check_tensor_dtype(params, aotriton_mem_efficient_dtypes, debug);
+#else
   auto dprop = at::cuda::getCurrentDeviceProperties();
   if (dprop->major >= 8) {
     return check_tensor_dtype(params, greater_than_or_equal_sm80_mem_efficient_dtypes, debug);
   }
+#endif
   return check_tensor_dtype(params, less_than_sm80_mem_efficient_dtypes, debug);
 }
 
