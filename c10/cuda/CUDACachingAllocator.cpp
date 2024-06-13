@@ -383,19 +383,15 @@ struct ExpandableSegment {
   ExpandableSegment(
       c10::DeviceIndex device,
       cudaStream_t stream,
-      size_t size,
+      size_t address_space_size,
+      size_t segment_size,
       std::vector<c10::DeviceIndex> peers)
       : device_(device),
         stream_(stream),
         // 2MB for small pool, 20MB for large pool
-        segment_size_(size),
+        segment_size_(segment_size),
+        max_handles_(numSegments(address_space_size)),
         peers_(std::move(peers)) {
-    cudaDeviceProp prop{};
-    C10_CUDA_CHECK(cudaGetDeviceProperties(&prop, device_));
-    // we allocate enough address space for 1 1/8 the total memory on the GPU.
-    // This allows for some cases where we have to unmap pages earlier in the
-    // segment to put them at the end.
-    max_handles_ = numSegments(prop.totalGlobalMem + prop.totalGlobalMem / 8);
     C10_CUDA_DRIVER_CHECK(DriverAPI::get()->cuMemAddressReserve_(
         &ptr_, segment_size_ * max_handles_, 0ULL, 0, 0ULL));
   }
@@ -548,8 +544,8 @@ struct ExpandableSegment {
   c10::DeviceIndex device_;
   cudaStream_t stream_;
   CUdeviceptr ptr_{};
-  size_t max_handles_{0};
   size_t segment_size_;
+  size_t max_handles_;
   std::vector<std::optional<CUmemGenericAllocationHandle>> handles_;
   // devices on which this memory should be mapped in addition
   // to the device where the physical memory lives (device_).
@@ -1987,9 +1983,26 @@ class DeviceCachingAllocator {
         return c;
       }
     }
+
     auto segment_size = pool->is_small ? kSmallBuffer : kLargeBuffer;
+    cudaDeviceProp prop{};
+    C10_CUDA_CHECK(cudaGetDeviceProperties(&prop, device));
+    // we allocate enough address space for 1 1/8 the total memory on the GPU.
+    // This allows for some cases where we have to unmap pages earlier in the
+    // segment to put them at the end.
+    size_t address_space_size = prop.totalGlobalMem + prop.totalGlobalMem / 8;
+
+    if (CUDAAllocatorConfig::experimental_direct_rdma()) {
+      segment_size = get_allocation_size(size);
+      address_space_size = segment_size;
+    }
+
     expandable_segments_.emplace_back(new ExpandableSegment(
-        device, stream, segment_size, devices_with_peer_access_));
+        device,
+        stream,
+        address_space_size,
+        segment_size,
+        devices_with_peer_access_));
 
     ExpandableSegment* es = expandable_segments_.back();
     Block* candidate = new Block(device, stream, es->size(), pool, es->ptr());
