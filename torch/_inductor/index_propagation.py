@@ -353,8 +353,6 @@ class IndexPropagation:
         assert (
             indirect_var not in self.var_to_range
         ), f"{indirect_var} should've been created in the fallback."
-
-        lower, upper = -upper_bound(size), upper_bound(size) - 1
-        indirect_range = (indirect_var, ValueRanges(lower, upper))
+        indirect_range = (indirect_var, ValueRanges(0, upper_bound(size) - 1))
         self.var_to_range = self.var_to_range + (indirect_range,)
         return indirect_var
