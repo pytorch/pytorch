@@ -191,11 +191,47 @@ std::vector<Tensor> foreach_scalar_pow_list_kernel_cuda(
 // In the case of division, integer inputs will result in float.
 // Currently multi tensor apply can only return result of the same type as
 // input.
-FOREACH_BINARY_OP_SCALAR(
-    all_types_complex_bool_half_bfloat16,
-    div,
-    std::divides,
-    /*div_op*/ true);
+//
+// Implement via multiply with reciprocal as it's faster and makes it match
+// the behavior of regular Tensor div by scalar.  Loses one bit of
+// precision.
+Scalar scalar_reciprocal(const Scalar& scalar) {
+  if (scalar.isFloatingPoint()) {
+    return Scalar(1. / scalar.toDouble());
+  } else if (scalar.isIntegral(/*includeBool*/ true)) {
+    return Scalar(1. / static_cast<double>(scalar.toLong()));
+  } else if (scalar.isComplex()) {
+    return Scalar(1. / scalar.toComplexDouble());
+  }
+  TORCH_INTERNAL_ASSERT(
+      false, "divison with ", scalar.type(), " not supported");
+}
+
+void foreach_tensor_div_scalar_kernel_cuda_(
+    TensorList tensors,
+    const Scalar& scalar) {
+  check_foreach_api_restrictions(tensors);
+  if (!can_use_fast_route(tensors, scalar, true)) {
+    return at::native::foreach_tensor_mul_scalar_kernel_slow_(
+        tensors, scalar_reciprocal(scalar));
+  }
+
+  all_types_complex_bool_half_bfloat16_<std::multiplies>(
+      tensors, scalar_reciprocal(scalar));
+}
+
+std::vector<Tensor> foreach_tensor_div_scalar_kernel_cuda(
+    TensorList tensors,
+    const Scalar& scalar) {
+  check_foreach_api_restrictions(tensors);
+  if (!can_use_fast_route(tensors, scalar, true)) {
+    return at::native::foreach_tensor_mul_scalar_kernel_slow(
+        tensors, scalar_reciprocal(scalar));
+  }
+
+  return all_types_complex_bool_half_bfloat16<std::multiplies>(
+      tensors, scalar_reciprocal(scalar));
+}
 
 // In the case of subtraction, we dont allow scalar to be boolean following the
 // torch.sub logic

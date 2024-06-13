@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 from __future__ import annotations  # type: ignore[attr-defined]
 from dataclasses import dataclass
 from typing import (
@@ -397,7 +398,11 @@ class ShardedTensor(ShardedTensorBase):
             return reduce(operator.mul, shard_md.shard_sizes)  # type: ignore[attr-defined]
 
         if enforce_dtype:
-            warnings.warn("`enforce_dtype` is deprecated. Please use `dtype` instead.", FutureWarning)
+            warnings.warn(
+                "`enforce_dtype` is deprecated. Please use `dtype` instead.",
+                FutureWarning,
+                stacklevel=2,
+            )
 
         rank = dist.get_rank(self._process_group)
         full_size = self.metadata().size

@@ -315,7 +315,7 @@ AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_AND_QINTS(SPECIALIZE_CppTypeToScalarType)
 AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_AND_QINTS(DEFINE_CONSTANT)
 #undef DEFINE_CONSTANT
 
-static inline const char* toString(ScalarType t) {
+inline const char* toString(ScalarType t) {
 #define DEFINE_CASE(_, name) \
   case ScalarType::name:     \
     return #name;
@@ -328,7 +328,7 @@ static inline const char* toString(ScalarType t) {
 #undef DEFINE_CASE
 }
 
-static inline size_t elementSize(ScalarType t) {
+inline size_t elementSize(ScalarType t) {
 #define CASE_ELEMENTSIZE_CASE(ctype, name) \
   case ScalarType::name:                   \
     return sizeof(ctype);
@@ -341,7 +341,7 @@ static inline size_t elementSize(ScalarType t) {
 #undef CASE_ELEMENTSIZE_CASE
 }
 
-static inline bool isIntegralType(ScalarType t, bool includeBool) {
+inline bool isIntegralType(ScalarType t, bool includeBool) {
   bool isIntegral =
       (t == ScalarType::Byte || t == ScalarType::Char || t == ScalarType::Int ||
        t == ScalarType::Long || t == ScalarType::Short ||
@@ -353,44 +353,44 @@ static inline bool isIntegralType(ScalarType t, bool includeBool) {
 
 C10_DEPRECATED_MESSAGE(
     "isIntegralType is deprecated. Please use the overload with 'includeBool' parameter instead.")
-static inline bool isIntegralType(ScalarType t) {
+inline bool isIntegralType(ScalarType t) {
   return isIntegralType(t, /*includeBool=*/false);
 }
 
-static inline bool isFloat8Type(ScalarType t) {
+inline bool isFloat8Type(ScalarType t) {
   return t == ScalarType::Float8_e5m2 || t == ScalarType::Float8_e5m2fnuz ||
       t == ScalarType::Float8_e4m3fn || t == ScalarType::Float8_e4m3fnuz;
 }
 
-static inline bool isReducedFloatingType(ScalarType t) {
+inline bool isReducedFloatingType(ScalarType t) {
   return t == ScalarType::Half || t == ScalarType::BFloat16 || isFloat8Type(t);
 }
 
-static inline bool isFloatingType(ScalarType t) {
+inline bool isFloatingType(ScalarType t) {
   return t == ScalarType::Double || t == ScalarType::Float ||
       isReducedFloatingType(t);
 }
 
-static inline bool isComplexType(ScalarType t) {
+inline bool isComplexType(ScalarType t) {
   return (
       t == ScalarType::ComplexHalf || t == ScalarType::ComplexFloat ||
       t == ScalarType::ComplexDouble);
 }
 
-static inline bool isQIntType(ScalarType t) {
+inline bool isQIntType(ScalarType t) {
   // Don't forget to extend this when adding new QInt types
   return t == ScalarType::QInt8 || t == ScalarType::QUInt8 ||
       t == ScalarType::QInt32 || t == ScalarType::QUInt4x2 ||
       t == ScalarType::QUInt2x4;
 }
 
-static inline bool isBitsType(ScalarType t) {
+inline bool isBitsType(ScalarType t) {
   return t == ScalarType::Bits1x8 || t == ScalarType::Bits2x4 ||
       t == ScalarType::Bits4x2 || t == ScalarType::Bits8 ||
       t == ScalarType::Bits16;
 }
 
-static inline bool isBarebonesUnsignedType(ScalarType t) {
+inline bool isBarebonesUnsignedType(ScalarType t) {
   return t == ScalarType::UInt1 || t == ScalarType::UInt2 ||
       t == ScalarType::UInt3 || t == ScalarType::UInt4 ||
       t == ScalarType::UInt5 || t == ScalarType::UInt6 ||
@@ -398,7 +398,7 @@ static inline bool isBarebonesUnsignedType(ScalarType t) {
       t == ScalarType::UInt32 || t == ScalarType::UInt64;
 }
 
-static inline ScalarType toQIntType(ScalarType t) {
+inline ScalarType toQIntType(ScalarType t) {
   switch (t) {
     case ScalarType::Byte:
       return ScalarType::QUInt8;
@@ -411,7 +411,7 @@ static inline ScalarType toQIntType(ScalarType t) {
   }
 }
 
-static inline ScalarType toUnderlying(ScalarType t) {
+inline ScalarType toUnderlying(ScalarType t) {
   switch (t) {
     case ScalarType::QUInt8:
     case ScalarType::QUInt4x2:
@@ -427,7 +427,7 @@ static inline ScalarType toUnderlying(ScalarType t) {
   }
 }
 
-static inline bool isSignedType(ScalarType t) {
+inline bool isSignedType(ScalarType t) {
 #define CASE_ISSIGNED(name)     \
   case ScalarType::name:        \
     return std::numeric_limits< \
@@ -484,11 +484,11 @@ static inline bool isSignedType(ScalarType t) {
 #undef CASE_ISSIGNED
 }
 
-static inline bool isUnderlying(ScalarType type, ScalarType qtype) {
+inline bool isUnderlying(ScalarType type, ScalarType qtype) {
   return type == toUnderlying(qtype);
 }
 
-static inline ScalarType toRealValueType(ScalarType t) {
+inline ScalarType toRealValueType(ScalarType t) {
   switch (t) {
     case ScalarType::ComplexHalf:
       return ScalarType::Half;
@@ -501,7 +501,7 @@ static inline ScalarType toRealValueType(ScalarType t) {
   }
 }
 
-static inline ScalarType toComplexType(ScalarType t) {
+inline ScalarType toComplexType(ScalarType t) {
   switch (t) {
     case ScalarType::BFloat16:
       // BFloat16 has range equivalent to Float,
@@ -526,7 +526,7 @@ static inline ScalarType toComplexType(ScalarType t) {
 
 // see tensor_attributes.rst for detailed explanation and examples
 // of casting rules.
-static inline bool canCast(const ScalarType from, const ScalarType to) {
+inline bool canCast(const ScalarType from, const ScalarType to) {
   // We disallow complex -> non complex, e.g., float_tensor *= complex is
   // disallowed.
   if (isComplexType(from) && !isComplexType(to)) {

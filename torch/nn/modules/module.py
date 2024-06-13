@@ -1,19 +1,33 @@
-from collections import OrderedDict, namedtuple
+# mypy: allow-untyped-defs
+
+import functools
 import itertools
 import warnings
-import functools
 import weakref
+from collections import namedtuple, OrderedDict
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    Iterator,
+    List,
+    Mapping,
+    Optional,
+    overload,
+    Set,
+    Tuple,
+    TypeVar,
+    Union,
+)
+from typing_extensions import Self
 
 import torch
+from torch import device, dtype, Tensor
 from torch._prims_common import DeviceLikeType
-from ..parameter import Parameter
-import torch.utils.hooks as hooks
-
-from torch import Tensor, device, dtype
-from typing import Union, Tuple, Any, Callable, Iterator, Set, Optional, overload, TypeVar, Mapping, Dict, List
-from typing_extensions import Self
-from ...utils.hooks import RemovableHandle
+from torch.nn.parameter import Parameter
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
+from torch.utils.hooks import BackwardHook, RemovableHandle
+
 
 __all__ = ['register_module_forward_pre_hook', 'register_module_forward_hook',
            'register_module_full_backward_pre_hook', 'register_module_backward_hook',
@@ -121,7 +135,7 @@ def register_module_buffer_registration_hook(hook: Callable[..., None]) -> Remov
             a handle that can be used to remove the added hook by calling
             ``handle.remove()``
     """
-    handle = hooks.RemovableHandle(_global_buffer_registration_hooks)
+    handle = RemovableHandle(_global_buffer_registration_hooks)
     _global_buffer_registration_hooks[handle.id] = hook
     return handle
 
@@ -145,7 +159,7 @@ def register_module_module_registration_hook(hook: Callable[..., None]) -> Remov
             a handle that can be used to remove the added hook by calling
             ``handle.remove()``
     """
-    handle = hooks.RemovableHandle(_global_module_registration_hooks)
+    handle = RemovableHandle(_global_module_registration_hooks)
     _global_module_registration_hooks[handle.id] = hook
     return handle
 
@@ -169,7 +183,7 @@ def register_module_parameter_registration_hook(hook: Callable[..., None]) -> Re
             a handle that can be used to remove the added hook by calling
             ``handle.remove()``
     """
-    handle = hooks.RemovableHandle(_global_parameter_registration_hooks)
+    handle = RemovableHandle(_global_parameter_registration_hooks)
     _global_parameter_registration_hooks[handle.id] = hook
     return handle
 
@@ -201,7 +215,7 @@ def register_module_forward_pre_hook(hook: Callable[..., None]) -> RemovableHand
             a handle that can be used to remove the added hook by calling
             ``handle.remove()``
     """
-    handle = hooks.RemovableHandle(_global_forward_pre_hooks)
+    handle = RemovableHandle(_global_forward_pre_hooks)
     _global_forward_pre_hooks[handle.id] = hook
     return handle
 
@@ -238,8 +252,8 @@ def register_module_forward_hook(hook: Callable[..., None], *, always_call: bool
     This hook will be executed before specific module hooks registered with
     ``register_forward_hook``.
     """
-    handle = hooks.RemovableHandle(_global_forward_hooks,
-                                   extra_dict=_global_forward_hooks_always_called)
+    handle = RemovableHandle(_global_forward_hooks,
+                             extra_dict=_global_forward_hooks_always_called)
     _global_forward_hooks[handle.id] = hook
     if always_call:
         _global_forward_hooks_always_called[handle.id] = True
@@ -268,7 +282,7 @@ def register_module_backward_hook(
 
     _global_is_full_backward_hook = False
 
-    handle = hooks.RemovableHandle(_global_backward_hooks)
+    handle = RemovableHandle(_global_backward_hooks)
     _global_backward_hooks[handle.id] = hook
     return handle
 
@@ -295,7 +309,7 @@ def register_module_full_backward_pre_hook(
             ``handle.remove()``
 
     """
-    handle = hooks.RemovableHandle(_global_backward_pre_hooks)
+    handle = RemovableHandle(_global_backward_pre_hooks)
     _global_backward_pre_hooks[handle.id] = hook
     return handle
 
@@ -329,7 +343,7 @@ def register_module_full_backward_hook(
 
     _global_is_full_backward_hook = True
 
-    handle = hooks.RemovableHandle(_global_backward_hooks)
+    handle = RemovableHandle(_global_backward_hooks)
     _global_backward_hooks[handle.id] = hook
     return handle
 
@@ -348,7 +362,7 @@ def _forward_unimplemented(self, *input: Any) -> None:
         instead of this since the former takes care of running the
         registered hooks while the latter silently ignores them.
     """
-    raise NotImplementedError(f"Module [{type(self).__name__}] is missing the required \"forward\" function")
+    raise NotImplementedError(f'Module [{type(self).__name__}] is missing the required "forward" function')
 
 
 class Module:
@@ -794,15 +808,6 @@ class Module:
 
         should_use_swap_tensors = torch.__future__.get_swap_module_params_on_conversion()
 
-        def compute_should_use_swap_tensors(tensor, tensor_applied):
-            return (should_use_swap_tensors
-                    # subclasses may have multiple child tensors so we need to use swap_tensors
-                    or is_traceable_wrapper_subclass(tensor_applied)
-                    or tensor.device.type == 'meta'
-                    or tensor_applied.device.type == 'meta'
-                    or tensor.device.type == 'xla'
-                    or tensor_applied.device.type == 'xla')
-
         for key, param in self._parameters.items():
             if param is None:
                 continue
@@ -813,7 +818,8 @@ class Module:
                 param_applied = fn(param)
             p_should_use_set_data = compute_should_use_set_data(param, param_applied)
 
-            p_should_use_swap_tensors = compute_should_use_swap_tensors(param, param_applied)
+            # subclasses may have multiple child tensors so we need to use swap_tensors
+            p_should_use_swap_tensors = should_use_swap_tensors or is_traceable_wrapper_subclass(param_applied)
 
             param_grad = param.grad
             if p_should_use_swap_tensors:
@@ -1223,7 +1229,7 @@ class Module:
                 ``handle.remove()``
 
         """
-        handle = hooks.RemovableHandle(self._backward_pre_hooks)
+        handle = RemovableHandle(self._backward_pre_hooks)
         self._backward_pre_hooks[handle.id] = hook
         if prepend:
             self._backward_pre_hooks.move_to_end(handle.id, last=False)  # type: ignore[attr-defined]
@@ -1249,7 +1255,7 @@ class Module:
 
         self._is_full_backward_hook = False
 
-        handle = hooks.RemovableHandle(self._backward_hooks)
+        handle = RemovableHandle(self._backward_hooks)
         self._backward_hooks[handle.id] = hook
         return handle
 
@@ -1307,7 +1313,7 @@ class Module:
 
         self._is_full_backward_hook = True
 
-        handle = hooks.RemovableHandle(self._backward_hooks)
+        handle = RemovableHandle(self._backward_hooks)
         self._backward_hooks[handle.id] = hook
         if prepend:
             self._backward_hooks.move_to_end(handle.id, last=False)  # type: ignore[attr-defined]
@@ -1343,22 +1349,28 @@ class Module:
     def _maybe_warn_non_full_backward_hook(self, inputs, result, grad_fn):
         if not isinstance(result, torch.Tensor):
             if not (isinstance(result, tuple) and all(isinstance(r, torch.Tensor) for r in result)):
-                warnings.warn("Using non-full backward hooks on a Module that does not return a "
-                              "single Tensor or a tuple of Tensors is deprecated and will be removed "
-                              "in future versions. This hook will be missing some of the grad_output. "
-                              "Please use register_full_backward_hook to get the documented behavior.",
-                              FutureWarning)
+                warnings.warn(
+                    "Using non-full backward hooks on a Module that does not return a "
+                    "single Tensor or a tuple of Tensors is deprecated and will be removed "
+                    "in future versions. This hook will be missing some of the grad_output. "
+                    "Please use register_full_backward_hook to get the documented behavior.",
+                    FutureWarning,
+                    stacklevel=2,
+                )
                 return
         else:
             result = (result,)
 
         if not isinstance(inputs, torch.Tensor):
             if not (isinstance(inputs, tuple) and all(isinstance(i, torch.Tensor) for i in inputs)):
-                warnings.warn("Using non-full backward hooks on a Module that does not take as input a "
-                              "single Tensor or a tuple of Tensors is deprecated and will be removed "
-                              "in future versions. This hook will be missing some of the grad_input. "
-                              "Please use register_full_backward_hook to get the documented behavior.",
-                              FutureWarning)
+                warnings.warn(
+                    "Using non-full backward hooks on a Module that does not take as input a "
+                    "single Tensor or a tuple of Tensors is deprecated and will be removed "
+                    "in future versions. This hook will be missing some of the grad_input. "
+                    "Please use register_full_backward_hook to get the documented behavior.",
+                    FutureWarning,
+                    stacklevel=2,
+                )
                 return
         else:
             inputs = (inputs,)
@@ -1366,15 +1378,21 @@ class Module:
         # At this point we are sure that inputs and result are tuple of Tensors
         out_grad_fn = {r.grad_fn for r in result if r.grad_fn is not None}
         if len(out_grad_fn) == 0 or (len(out_grad_fn) == 1 and grad_fn not in out_grad_fn):
-            warnings.warn("Using a non-full backward hook when outputs are nested in python data structure "
-                          "is deprecated and will be removed in future versions. This hook will be missing "
-                          "some grad_output.",
-                          FutureWarning)
+            warnings.warn(
+                "Using a non-full backward hook when outputs are nested in python data structure "
+                "is deprecated and will be removed in future versions. This hook will be missing "
+                "some grad_output.",
+                FutureWarning,
+                stacklevel=2,
+            )
         elif len(out_grad_fn) > 1:
-            warnings.warn("Using a non-full backward hook when outputs are generated by different autograd Nodes "
-                          "is deprecated and will be removed in future versions. This hook will be missing "
-                          "some grad_output. Please use register_full_backward_hook to get the documented behavior.",
-                          FutureWarning)
+            warnings.warn(
+                "Using a non-full backward hook when outputs are generated by different autograd Nodes "
+                "is deprecated and will be removed in future versions. This hook will be missing "
+                "some grad_output. Please use register_full_backward_hook to get the documented behavior.",
+                FutureWarning,
+                stacklevel=2,
+            )
         else:
             # At this point the grad_output part of the hook will most likely be correct
             inputs_grad_fn = {i.grad_fn for i in inputs if i.grad_fn is not None}
@@ -1382,11 +1400,14 @@ class Module:
             next_functions = {n[0] for n in grad_fn.next_functions}
 
             if inputs_grad_fn != next_functions:
-                warnings.warn("Using a non-full backward hook when the forward contains multiple autograd Nodes "
-                              "is deprecated and will be removed in future versions. This hook will be missing "
-                              "some grad_input. Please use register_full_backward_hook to get the documented "
-                              "behavior.",
-                              FutureWarning)
+                warnings.warn(
+                    "Using a non-full backward hook when the forward contains multiple autograd Nodes "
+                    "is deprecated and will be removed in future versions. This hook will be missing "
+                    "some grad_input. Please use register_full_backward_hook to get the documented "
+                    "behavior.",
+                    FutureWarning,
+                    stacklevel=2,
+                )
 
     def register_forward_pre_hook(
         self,
@@ -1440,7 +1461,7 @@ class Module:
                 a handle that can be used to remove the added hook by calling
                 ``handle.remove()``
         """
-        handle = hooks.RemovableHandle(
+        handle = RemovableHandle(
             self._forward_pre_hooks,
             extra_dict=self._forward_pre_hooks_with_kwargs
         )
@@ -1505,7 +1526,7 @@ class Module:
                 a handle that can be used to remove the added hook by calling
                 ``handle.remove()``
         """
-        handle = hooks.RemovableHandle(
+        handle = RemovableHandle(
             self._forward_hooks,
             extra_dict=[self._forward_hooks_with_kwargs, self._forward_hooks_always_called],
         )
@@ -1589,7 +1610,7 @@ class Module:
 
             bw_hook = None
             if full_backward_hooks or backward_pre_hooks:
-                bw_hook = hooks.BackwardHook(self, full_backward_hooks, backward_pre_hooks)
+                bw_hook = BackwardHook(self, full_backward_hooks, backward_pre_hooks)
                 args = bw_hook.setup_input_hook(args)
 
             result = forward_call(*args, **kwargs)
@@ -1799,7 +1820,7 @@ class Module:
         guaranteed to exist in `state_dict`. The hooks may modify `state_dict`
         inplace or return a new one.
         """
-        handle = hooks.RemovableHandle(self._state_dict_hooks)
+        handle = RemovableHandle(self._state_dict_hooks)
         self._state_dict_hooks[handle.id] = hook
         return handle
 
@@ -1811,7 +1832,7 @@ class Module:
         hooks can be used to perform pre-processing before the ``state_dict``
         call is made.
         """
-        handle = hooks.RemovableHandle(self._state_dict_pre_hooks)
+        handle = RemovableHandle(self._state_dict_pre_hooks)
         self._state_dict_pre_hooks[handle.id] = hook
         return handle
 
@@ -1900,19 +1921,20 @@ class Module:
         """
         # TODO: Remove `args` and the parsing logic when BC allows.
         if len(args) > 0:
-            if destination is None:
-                destination = args[0]
-            if len(args) > 1 and prefix == '':
-                prefix = args[1]
-            if len(args) > 2 and keep_vars is False:
-                keep_vars = args[2]
             # DeprecationWarning is ignored by default
             warnings.warn(
                 "Positional args are being deprecated, use kwargs instead. Refer to "
                 "https://pytorch.org/docs/main/generated/torch.nn.Module.html#torch.nn.Module.state_dict"
                 " for details.",
                 FutureWarning,
+                stacklevel=2,
             )
+            if destination is None:
+                destination = args[0]
+            if len(args) > 1 and prefix == '':
+                prefix = args[1]
+            if len(args) > 2 and keep_vars is False:
+                keep_vars = args[2]
 
         if destination is None:
             destination = OrderedDict()
@@ -1951,7 +1973,7 @@ class Module:
             with_module (bool, optional): Whether or not to pass the module
                 instance to the hook as the first parameter.
         """
-        handle = hooks.RemovableHandle(self._load_state_dict_pre_hooks)
+        handle = RemovableHandle(self._load_state_dict_pre_hooks)
         self._load_state_dict_pre_hooks[handle.id] = _WrappedHook(hook, self if with_module else None)
         return handle
 
@@ -1980,7 +2002,7 @@ class Module:
                 a handle that can be used to remove the added hook by calling
                 ``handle.remove()``
         """
-        handle = hooks.RemovableHandle(self._load_state_dict_post_hooks)
+        handle = RemovableHandle(self._load_state_dict_post_hooks)
         self._load_state_dict_post_hooks[handle.id] = hook
         return handle
 

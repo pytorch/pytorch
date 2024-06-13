@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 """A diagnostic context based on SARIF."""
 
 from __future__ import annotations
@@ -20,6 +21,8 @@ from typing import (
     Type,
     TypeVar,
 )
+
+from typing_extensions import Self
 
 from torch.onnx._internal.diagnostics import infra
 from torch.onnx._internal.diagnostics.infra import formatter, sarif, utils
@@ -92,24 +95,24 @@ class Diagnostic:
         )
         return sarif_result
 
-    def with_location(self: _Diagnostic, location: infra.Location) -> _Diagnostic:
+    def with_location(self: Self, location: infra.Location) -> Self:
         """Adds a location to the diagnostic."""
         self.locations.append(location)
         return self
 
     def with_thread_flow_location(
-        self: _Diagnostic, location: infra.ThreadFlowLocation
-    ) -> _Diagnostic:
+        self: Self, location: infra.ThreadFlowLocation
+    ) -> Self:
         """Adds a thread flow location to the diagnostic."""
         self.thread_flow_locations.append(location)
         return self
 
-    def with_stack(self: _Diagnostic, stack: infra.Stack) -> _Diagnostic:
+    def with_stack(self: Self, stack: infra.Stack) -> Self:
         """Adds a stack to the diagnostic."""
         self.stacks.append(stack)
         return self
 
-    def with_graph(self: _Diagnostic, graph: infra.Graph) -> _Diagnostic:
+    def with_graph(self: Self, graph: infra.Graph) -> Self:
         """Adds a graph to the diagnostic."""
         self.graphs.append(graph)
         return self
