@@ -24,5 +24,5 @@ __all__ = [
     "please use `torch.nn.parallel.DistributedDataParallel` instead.",
     category=FutureWarning,
 )
-def DistributedDataParallelCPU(*args, **kwargs):
-    return DistributedDataParallel(*args, **kwargs)
+class DistributedDataParallelCPU(DistributedDataParallel):
+    pass
