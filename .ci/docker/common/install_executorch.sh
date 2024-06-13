@@ -8,13 +8,15 @@ clone_executorch() {
   EXECUTORCH_PINNED_COMMIT=$(get_pinned_commit executorch)
 
   # Clone the Executorch
-  as_jenkins git clone https://github.com/pytorch/executorch.git
+  git clone https://github.com/pytorch/executorch.git
 
   # and fetch the target commit
   pushd executorch
-  as_jenkins git checkout "${EXECUTORCH_PINNED_COMMIT}"
-  as_jenkins git submodule update --init
+  git checkout "${EXECUTORCH_PINNED_COMMIT}"
+  git submodule update --init
   popd
+
+  chown -R jenkins executorch
 }
 
 install_buck2() {
