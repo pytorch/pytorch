@@ -10,8 +10,13 @@ of a full handler, see torch.utils._sympy.value_ranges.ValueRangeAnalysis.
 
 import contextlib
 import functools
+<<<<<<< HEAD
 import sys
 from typing import Any, Dict, List, Optional, Union
+=======
+import logging
+from typing import Any, Dict, Union
+>>>>>>> c897651392798663c7b7261150e42d1197ae2f94
 
 import sympy
 from sympy.logic.boolalg import Boolean as SympyBoolean, BooleanAtom
@@ -38,6 +43,9 @@ from .functions import (
     Where,
 )
 from torch import fx
+
+
+log = logging.getLogger(__name__)
 
 
 # TODO: Dedupe this with SYMPY_INTERP
@@ -178,15 +186,19 @@ def sympy_interp(
         else:
             handler_name = handlers()[expr.func]
         handler = getattr(analysis, handler_name)
-        if handler_name in ASSOCIATIVE_OPS:
-            assert len(args) > 1
-            acc = handler(args[0], args[1])
-            for i in range(2, len(args)):
-                acc = handler(acc, args[i])
-            result = acc
-        else:
-            result = handler(*args)
-        
+        try:
+            if handler_name in ASSOCIATIVE_OPS:
+                assert len(args) > 1
+                acc = handler(args[0], args[1])
+                for i in range(2, len(args)):
+                    acc = handler(acc, args[i])
+                result = acc
+            else:
+                result = handler(*args)
+        except Exception:
+            log.warning("failed while executing %s(%s)", handler_name, args)
+            raise
+            
         if hash_cons:
             hash_cons[expr] = result
         return result

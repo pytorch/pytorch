@@ -49,6 +49,7 @@ from ..utils import (
 
 from ..virtualized import NullKernelHandler, ops, OpsValue, V
 from .common import (
+    BackendFeature,
     BracesBuffer,
     CppWrapperKernelArgs,
     CSE,
@@ -2850,9 +2851,8 @@ class CppVecKernelChecker(CppVecKernel):
         return self.simd_vec
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        assert self._orig_wrapper_code is not None
         # Restore the wrapper_code
-        V.graph.wrapper_code = self._orig_wrapper_code
+        V.graph.wrapper_code = self._orig_wrapper_code  # type: ignore[assignment]
         self.exit_stack.__exit__(exc_type, exc_val, exc_tb)
 
     def __enter__(self):
@@ -3493,10 +3493,21 @@ class CppScheduling(BaseScheduling):
     # https://github.com/python/cpython/commit/a285af7e626d1b81cf09f8b2bf7656f100bc1237
     # We set a conservative threshold here.
     MAX_FUSED_KERNEL_ARGS_NUM = 500
+    backend_features = dict.fromkeys(
+        [
+            BackendFeature.INPLACE_BUFFERS,
+        ]
+    )
+
+    @classmethod
+    def get_backend_features(cls, device: torch.device):
+        return cls.backend_features
 
     def __init__(self, scheduler):
+        super().__init__()
         self.scheduler = scheduler
-        self.reset_kernel_group()
+        if scheduler:
+            self.reset_kernel_group()
         self._ready_to_flush = False
 
     def _set_flush_status(self, status: bool):
