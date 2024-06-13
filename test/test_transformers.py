@@ -347,7 +347,6 @@ class TestTransformers(NNTestCase):
         # remove hook
         handle.remove()
 
-    @tf32_on_and_off(0.001)
     @parametrize("use_torchscript", [False])
     @parametrize("enable_nested_tensor", [True, False])
     @parametrize("use_autocast", [True, False])
