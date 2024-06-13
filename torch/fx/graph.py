@@ -1396,7 +1396,7 @@ class Graph:
     @compatibility(is_backward_compatible=True)
     def python_code(
         self, root_module: str, *,
-        verbose: bool = False, include_stride: bool = False, include_device: bool = False
+        verbose: bool = False, include_stride: bool = False, include_device: bool = False, colored: bool = False
     ) -> PythonCode:
         """
         Turn this ``Graph`` into valid Python code.
@@ -1458,7 +1458,7 @@ class Graph:
         with override_node_repr(self):
             return self._python_code(
                 root_module, namespace,
-                verbose=verbose, include_stride=include_stride, include_device=include_device
+                verbose=verbose, include_stride=include_stride, include_device=include_device, colored=colored
             )
 
     def _python_code(
