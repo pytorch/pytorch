@@ -19,7 +19,6 @@ import torch
 
 import torch._dynamo.test_case
 import torch._dynamo.testing
-
 from torch import sub
 from torch._dynamo.testing import (
     CompileCounterWithBackend,
@@ -2381,10 +2380,9 @@ class GraphModule(torch.nn.Module):
 
     def test_range_length(self):
         def test(*args, expected=None):
-            range_params = [v for v in args if v is not None]
-            r = range(*range_params)
+            r = range(*args)
 
-            range_variable_input = [ConstantVariable.create(v) for v in range_params]
+            range_variable_input = [ConstantVariable.create(v) for v in args]
             range_variable = RangeVariable(range_variable_input)
 
             self.assertEqual(len(r), range_variable.range_length())
