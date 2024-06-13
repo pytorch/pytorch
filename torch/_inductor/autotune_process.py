@@ -729,7 +729,7 @@ class GroupedTritonBenchmarkRequest:
                 for choice in choices
             }
 
-            for iter in iters:
+            for iter in range(iters):
                 for choice, event_pairs in choice_event_pairs.items():
                     start_event, end_event = event_pairs[iter]
                     callable = choice_to_callable[choice]
@@ -759,9 +759,10 @@ class GroupedTritonBenchmarkRequest:
             if estimate * 0.975 <= target:
                 to_benchmark.append(choice)
         
-        benchmarking_iters = 20
+        benchmarking_iters = 15
         benchmarks = interleaved_timing(to_benchmark, benchmarking_iters)
-        timings.update(benchmarks)
+        for choice, benchmark in benchmarks.items():
+            timings[choice] = min(timings[choice], benchmark)
 
         del cache
 
