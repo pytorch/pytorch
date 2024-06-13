@@ -11,15 +11,20 @@ from typing import (
     OrderedDict,
     overload,
     Tuple,
+    TYPE_CHECKING,
     TypeVar,
 )
 
 import torch
 import torch.distributed as dist
-from torch import nn
 from torch.nn.parallel._functions import _get_stream
 from torch.nn.parallel.scatter_gather import _is_namedtuple
 from torch.nn.utils.rnn import PackedSequence
+
+
+if TYPE_CHECKING:
+    from torch.nn import Module
+
 
 __all__ = []  # type: ignore[var-annotated]
 
@@ -287,7 +292,7 @@ def _verify_param_shape_across_processes(
 
 
 def _sync_module_states(
-    module: nn.Module,
+    module: "Module",
     process_group: dist.ProcessGroup,
     broadcast_bucket_size: int,
     src: int,

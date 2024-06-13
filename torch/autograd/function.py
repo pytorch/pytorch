@@ -12,7 +12,7 @@ import torch._C as _C
 import torch._functorch as _functorch
 import torch.utils.hooks as hooks
 from torch._C import _functions
-from torch._functorch.autograd_function import custom_function_call
+
 
 __all__ = [
     "FunctionCtx",
@@ -580,6 +580,8 @@ class Function(_SingleLevelFunction):
                 "staticmethod. For more details, please see "
                 "https://pytorch.org/docs/main/notes/extending.func.html"
             )
+
+        from torch._functorch.autograd_function import custom_function_call
 
         return custom_function_call(cls, *args, **kwargs)
 

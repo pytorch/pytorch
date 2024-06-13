@@ -1,7 +1,6 @@
 # mypy: allow-untyped-defs
 import torch
-import torch.distributed as dist
-from torch.autograd.function import Function
+from torch.autograd import Function
 
 
 class SyncBatchNorm(Function):
@@ -18,6 +17,8 @@ class SyncBatchNorm(Function):
         process_group,
         world_size,
     ):
+        import torch.distributed as dist
+
         if not (
             input.is_contiguous(memory_format=torch.channels_last)
             or input.is_contiguous(memory_format=torch.channels_last_3d)
@@ -308,7 +309,7 @@ class CrossMapLRN2d(Function):
         return grad_input, None, None, None, None
 
 
-class BackwardHookFunction(torch.autograd.Function):
+class BackwardHookFunction(Function):
     @staticmethod
     def forward(ctx, *args):
         ctx.mark_non_differentiable(*[arg for arg in args if not arg.requires_grad])

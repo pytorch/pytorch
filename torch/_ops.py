@@ -8,13 +8,12 @@ import types
 from typing import Any, Callable, Dict, List, Set, Type, Union
 
 import torch._C
-import torch.utils._pytree as pytree
 from torch import _utils_internal
 from torch._functorch.pyfunctorch import dispatch_functorch
 from torch.utils._python_dispatch import TorchDispatchMode
 
-# Query `hasattr` only once.
 
+# Query `hasattr` only once.
 _SET_GLOBAL_FLAGS = hasattr(sys, "getdlopenflags") and hasattr(sys, "setdlopenflags")
 
 
@@ -387,7 +386,7 @@ class HigherOrderOperator(OperatorBase):
 
 
 def _to_flat_tuple(args, kwargs):
-    return pytree.arg_tree_leaves(*args, **kwargs)
+    return torch.utils._pytree.arg_tree_leaves(*args, **kwargs)
 
 
 def _compute_keyset(args, kwargs, non_fallthrough_keys):
@@ -941,7 +940,7 @@ class TorchBindOpOverload(OpOverload):
 
 
 def _must_dispatch_in_python(args, kwargs):
-    return pytree.tree_any(
+    return torch.utils._pytree.tree_any(
         lambda obj: isinstance(
             obj, torch._library.fake_class_registry.FakeScriptObject
         ),

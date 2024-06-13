@@ -4,7 +4,7 @@ from functools import lru_cache as _lru_cache
 from typing import Optional
 
 import torch
-from ...library import Library as _Library
+
 
 __all__ = ["is_built", "is_available", "is_macos13_or_newer", "is_macos_or_newer"]
 
@@ -37,7 +37,7 @@ def is_macos13_or_newer(minor: int = 0) -> bool:
     return torch._C._mps_is_on_macos_or_newer(13, minor)
 
 
-_lib: Optional[_Library] = None
+_lib: Optional["torch.library.Library"] = None
 
 
 def _init():
@@ -50,6 +50,6 @@ def _init():
     )
     from ..._refs import native_group_norm as _native_group_norm
 
-    _lib = _Library("aten", "IMPL")
+    _lib = torch.library.Library("aten", "IMPL")
     _lib.impl("native_group_norm", _native_group_norm, "MPS")
     _lib.impl("native_group_norm_backward", _native_group_norm_backward, "MPS")

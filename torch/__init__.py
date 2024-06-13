@@ -1952,6 +1952,24 @@ __all__.extend(
 from torch._compile import _disable_dynamo  # usort: skip
 
 ################################################################################
+# Initialize AutoGrad to avoid circular dependenices
+################################################################################
+
+# torch.nn.paramter is imported by torch._C._autograd_init() in torch.autograd.__init__
+import torch.nn.parameter  # usort: skip
+
+# # needs to be after import torch.nn.parameter to avoid circular dependencies
+from torch import autograd as autograd  # usort: skip
+
+# needs to be before import torch.nn as nn to avoid circular dependencies
+from torch.autograd import (  # usort: skip
+    enable_grad as enable_grad,
+    inference_mode as inference_mode,
+    no_grad as no_grad,
+    set_grad_enabled as set_grad_enabled,
+)
+
+################################################################################
 # Import interface functions defined in Python
 ################################################################################
 
@@ -1991,19 +2009,10 @@ def _assert(condition, message):
 # the public API. The "regular" import lines are there solely for the runtime
 # side effect of adding to the imported module's members for other users.
 
-# needs to be before import torch.nn as nn to avoid circular dependencies
-from torch.autograd import (  # usort: skip
-    enable_grad as enable_grad,
-    inference_mode as inference_mode,
-    no_grad as no_grad,
-    set_grad_enabled as set_grad_enabled,
-)
-
 from torch import (
     __config__ as __config__,
     __future__ as __future__,
     _awaits as _awaits,
-    autograd as autograd,
     backends as backends,
     cpu as cpu,
     cuda as cuda,
@@ -2013,6 +2022,7 @@ from torch import (
     futures as futures,
     hub as hub,
     jit as jit,
+    library as library,
     linalg as linalg,
     mps as mps,
     mtia as mtia,
@@ -2022,6 +2032,7 @@ from torch import (
     optim as optim,
     overrides as overrides,
     profiler as profiler,
+    return_types as return_types,
     sparse as sparse,
     special as special,
     testing as testing,
@@ -2381,9 +2392,6 @@ def _register_device_module(device_type, module):
     torch_module_name = ".".join([__name__, device_type])
     sys.modules[torch_module_name] = module
 
-
-# expose return_types
-from torch import library as library, return_types as return_types
 
 if not TYPE_CHECKING:
     from torch import _meta_registrations

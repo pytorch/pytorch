@@ -8,16 +8,7 @@ from typing import Callable, List, Optional, Tuple, TYPE_CHECKING, Union
 import torch
 from torch import _VF, sym_int as _sym_int, Tensor
 from torch._C import _add_docstr, _infer_size
-from torch._jit_internal import (
-    _overload,
-    boolean_dispatch,
-    BroadcastingList1,
-    BroadcastingList2,
-    BroadcastingList3,
-)
 from torch._torch_docs import reproducibility_notes, sparse_support_notes, tf32_notes
-from torch.nn import _reduction as _Reduction, grad  # noqa: F401
-from torch.nn.modules.utils import _list_with_default, _pair, _single, _triple
 from torch.overrides import (
     handle_torch_function,
     has_torch_function,
@@ -36,6 +27,658 @@ try:
     import numpy as np
 except ModuleNotFoundError:
     np = None
+
+
+def _threshold(
+    input: Tensor,
+    threshold: float,
+    value: float,
+    inplace: bool = False,
+) -> Tensor:
+    r"""Apply a threshold to each element of the input Tensor.
+
+    See :class:`~torch.nn.Threshold` for more details.
+    """
+    if has_torch_function_unary(input):
+        return handle_torch_function(
+            _threshold, (input,), input, threshold, value, inplace=inplace
+        )
+    if inplace:
+        result = _VF.threshold_(input, threshold, value)
+    else:
+        result = _VF.threshold(input, threshold, value)
+    return result
+
+
+# We define this function as _threshold because it takes an argument
+# named threshold, which clobbers the recursive reference to the
+# function needed for __torch_function__ support
+threshold = _threshold
+
+threshold_ = _add_docstr(
+    _VF.threshold_,
+    r"""
+threshold_(input, threshold, value) -> Tensor
+
+In-place version of :func:`~threshold`.
+""",
+)
+
+
+def relu(input: Tensor, inplace: bool = False) -> Tensor:  # noqa: D400,D402
+    r"""relu(input, inplace=False) -> Tensor
+
+    Applies the rectified linear unit function element-wise. See
+    :class:`~torch.nn.ReLU` for more details.
+    """
+    if has_torch_function_unary(input):
+        return handle_torch_function(relu, (input,), input, inplace=inplace)
+    if inplace:
+        result = torch.relu_(input)
+    else:
+        result = torch.relu(input)
+    return result
+
+
+relu_ = _add_docstr(
+    torch.relu_,
+    r"""
+relu_(input) -> Tensor
+
+In-place version of :func:`~relu`.
+""",
+)
+
+
+def glu(input: Tensor, dim: int = -1) -> Tensor:  # noqa: D400,D402
+    r"""
+    glu(input, dim=-1) -> Tensor
+
+    The gated linear unit. Computes:
+
+    .. math ::
+        \text{GLU}(a, b) = a \otimes \sigma(b)
+
+    where `input` is split in half along `dim` to form `a` and `b`, :math:`\sigma`
+    is the sigmoid function and :math:`\otimes` is the element-wise product between matrices.
+
+    See `Language Modeling with Gated Convolutional Networks <https://arxiv.org/abs/1612.08083>`_.
+
+    Args:
+        input (Tensor): input tensor
+        dim (int): dimension on which to split the input. Default: -1
+    """
+    if has_torch_function_unary(input):
+        return handle_torch_function(glu, (input,), input, dim=dim)
+    if input.dim() == 0:
+        raise RuntimeError(
+            "glu does not support scalars because halving size must be even"
+        )
+    return torch._C._nn.glu(input, dim)
+
+
+def hardtanh(
+    input: Tensor,
+    min_val: float = -1.0,
+    max_val: float = 1.0,
+    inplace: bool = False,
+) -> Tensor:  # noqa: D400,D402
+    r"""
+    hardtanh(input, min_val=-1., max_val=1., inplace=False) -> Tensor
+
+    Applies the HardTanh function element-wise. See :class:`~torch.nn.Hardtanh` for more
+    details.
+    """
+    if has_torch_function_unary(input):
+        return handle_torch_function(
+            hardtanh, (input,), input, min_val=min_val, max_val=max_val, inplace=inplace
+        )
+    if min_val > max_val:
+        raise ValueError("min_val cannot be greater than max_val")
+    if inplace:
+        result = torch._C._nn.hardtanh_(input, min_val, max_val)
+    else:
+        result = torch._C._nn.hardtanh(input, min_val, max_val)
+    return result
+
+
+hardtanh_ = _add_docstr(
+    torch._C._nn.hardtanh_,
+    r"""
+hardtanh_(input, min_val=-1., max_val=1.) -> Tensor
+
+In-place version of :func:`~hardtanh`.
+""",
+)
+
+
+def relu6(input: Tensor, inplace: bool = False) -> Tensor:  # noqa: D400,D402
+    r"""relu6(input, inplace=False) -> Tensor
+
+    Applies the element-wise function :math:`\text{ReLU6}(x) = \min(\max(0,x), 6)`.
+
+    See :class:`~torch.nn.ReLU6` for more details.
+    """
+    if has_torch_function_unary(input):
+        return handle_torch_function(relu6, (input,), input, inplace=inplace)
+    if inplace:
+        result = torch._C._nn.relu6_(input)
+    else:
+        result = torch._C._nn.relu6(input)
+    return result
+
+
+def elu(input: Tensor, alpha: float = 1.0, inplace: bool = False) -> Tensor:
+    r"""Apply the Exponential Linear Unit (ELU) function element-wise.
+
+    See :class:`~torch.nn.ELU` for more details.
+    """
+    if has_torch_function_unary(input):
+        return handle_torch_function(elu, (input,), input, alpha=alpha, inplace=inplace)
+    if inplace:
+        result = torch._C._nn.elu_(input, alpha)
+    else:
+        result = torch._C._nn.elu(input, alpha)
+    return result
+
+
+elu_ = _add_docstr(
+    torch._C._nn.elu_,
+    r"""
+elu_(input, alpha=1.) -> Tensor
+
+In-place version of :func:`~elu`.
+""",
+)
+
+
+def selu(input: Tensor, inplace: bool = False) -> Tensor:  # noqa: D400,D402
+    r"""selu(input, inplace=False) -> Tensor
+
+    Applies element-wise,
+    :math:`\text{SELU}(x) = scale * (\max(0,x) + \min(0, \alpha * (\exp(x) - 1)))`,
+    with :math:`\alpha=1.6732632423543772848170429916717` and
+    :math:`scale=1.0507009873554804934193349852946`.
+
+    See :class:`~torch.nn.SELU` for more details.
+    """
+    if has_torch_function_unary(input):
+        return handle_torch_function(selu, (input,), input, inplace=inplace)
+    if inplace:
+        result = torch.selu_(input)
+    else:
+        result = torch.selu(input)
+    return result
+
+
+selu_ = _add_docstr(
+    torch.selu_,
+    r"""
+selu_(input) -> Tensor
+
+In-place version of :func:`~selu`.
+""",
+)
+
+
+def celu(
+    input: Tensor,
+    alpha: float = 1.0,
+    inplace: bool = False,
+) -> Tensor:  # noqa: D400,D402
+    r"""celu(input, alpha=1., inplace=False) -> Tensor
+
+    Applies element-wise,
+    :math:`\text{CELU}(x) = \max(0,x) + \min(0, \alpha * (\exp(x/\alpha) - 1))`.
+
+    See :class:`~torch.nn.CELU` for more details.
+    """
+    if has_torch_function_unary(input):
+        return handle_torch_function(
+            celu, (input,), input, alpha=alpha, inplace=inplace
+        )
+    if inplace:
+        result = torch.celu_(input, alpha)
+    else:
+        result = torch.celu(input, alpha)
+    return result
+
+
+celu_ = _add_docstr(
+    torch.celu_,
+    r"""
+celu_(input, alpha=1.) -> Tensor
+
+In-place version of :func:`~celu`.
+""",
+)
+
+
+def leaky_relu(
+    input: Tensor,
+    negative_slope: float = 0.01,
+    inplace: bool = False,
+) -> Tensor:  # noqa: D400,D402
+    r"""
+    leaky_relu(input, negative_slope=0.01, inplace=False) -> Tensor
+
+    Applies element-wise,
+    :math:`\text{LeakyReLU}(x) = \max(0, x) + \text{negative\_slope} * \min(0, x)`
+
+    See :class:`~torch.nn.LeakyReLU` for more details.
+    """
+    if has_torch_function_unary(input):
+        return handle_torch_function(
+            leaky_relu, (input,), input, negative_slope=negative_slope, inplace=inplace
+        )
+    if inplace:
+        result = torch._C._nn.leaky_relu_(input, negative_slope)
+    else:
+        result = torch._C._nn.leaky_relu(input, negative_slope)
+    return result
+
+
+leaky_relu_ = _add_docstr(
+    torch._C._nn.leaky_relu_,
+    r"""
+leaky_relu_(input, negative_slope=0.01) -> Tensor
+
+In-place version of :func:`~leaky_relu`.
+""",
+)
+
+
+prelu = _add_docstr(
+    torch.prelu,
+    r"""prelu(input, weight) -> Tensor
+
+Applies element-wise the function
+:math:`\text{PReLU}(x) = \max(0,x) + \text{weight} * \min(0,x)` where weight is a
+learnable parameter.
+
+.. note::
+    `weight` is expected to be a scalar or 1-D tensor. If `weight` is 1-D,
+    its size must match the number of input channels, determined by
+    `input.size(1)` when `input.dim() >= 2`, otherwise 1.
+    In the 1-D case, note that when `input` has dim > 2, `weight` can be expanded
+    to the shape of `input` in a way that is not possible using normal
+    :ref:`broadcasting semantics<broadcasting-semantics>`.
+
+See :class:`~torch.nn.PReLU` for more details.
+""",
+)
+
+
+def rrelu(
+    input: Tensor,
+    lower: float = 1.0 / 8,
+    upper: float = 1.0 / 3,
+    training: bool = False,
+    inplace: bool = False,
+) -> Tensor:  # noqa: D400,D402
+    r"""rrelu(input, lower=1./8, upper=1./3, training=False, inplace=False) -> Tensor
+
+    Randomized leaky ReLU.
+
+    See :class:`~torch.nn.RReLU` for more details.
+    """
+    if has_torch_function_unary(input):
+        return handle_torch_function(
+            rrelu,
+            (input,),
+            input,
+            lower=lower,
+            upper=upper,
+            training=training,
+            inplace=inplace,
+        )
+    if inplace:
+        result = torch.rrelu_(input, lower, upper, training)
+    else:
+        result = torch.rrelu(input, lower, upper, training)
+    return result
+
+
+rrelu_ = _add_docstr(
+    torch.rrelu_,
+    r"""
+rrelu_(input, lower=1./8, upper=1./3, training=False) -> Tensor
+
+In-place version of :func:`~rrelu`.
+""",
+)
+
+logsigmoid = _add_docstr(
+    torch._C._nn.log_sigmoid,
+    r"""
+logsigmoid(input) -> Tensor
+
+Applies element-wise :math:`\text{LogSigmoid}(x_i) = \log \left(\frac{1}{1 + \exp(-x_i)}\right)`
+
+See :class:`~torch.nn.LogSigmoid` for more details.
+""",
+)
+
+gelu = _add_docstr(
+    torch._C._nn.gelu,
+    r"""
+gelu(input, approximate = 'none') -> Tensor
+
+When the approximate argument is 'none', it applies element-wise the function
+:math:`\text{GELU}(x) = x * \Phi(x)`
+
+where :math:`\Phi(x)` is the Cumulative Distribution Function for Gaussian Distribution.
+
+When the approximate argument is 'tanh', Gelu is estimated with
+
+.. math::
+    \text{GELU}(x) = 0.5 * x * (1 + \text{Tanh}(\sqrt{2 / \pi} * (x + 0.044715 * x^3)))
+
+See `Gaussian Error Linear Units (GELUs) <https://arxiv.org/abs/1606.08415>`_.
+""",
+)
+
+hardshrink = _add_docstr(
+    torch.hardshrink,
+    r"""
+hardshrink(input, lambd=0.5) -> Tensor
+
+Applies the hard shrinkage function element-wise
+
+See :class:`~torch.nn.Hardshrink` for more details.
+""",
+)
+
+
+def tanhshrink(input):  # noqa: D400,D402
+    r"""tanhshrink(input) -> Tensor
+
+    Applies element-wise, :math:`\text{Tanhshrink}(x) = x - \text{Tanh}(x)`
+
+    See :class:`~torch.nn.Tanhshrink` for more details.
+    """
+    if has_torch_function_unary(input):
+        return handle_torch_function(tanhshrink, (input,), input)
+    return input - input.tanh()
+
+
+def softsign(input):  # noqa: D400,D402
+    r"""softsign(input) -> Tensor
+
+    Applies element-wise, the function :math:`\text{SoftSign}(x) = \frac{x}{1 + |x|}`
+
+    See :class:`~torch.nn.Softsign` for more details.
+    """
+    if has_torch_function_unary(input):
+        return handle_torch_function(softsign, (input,), input)
+    return input / (input.abs() + 1)
+
+
+softplus = _add_docstr(
+    torch._C._nn.softplus,
+    r"""
+softplus(input, beta=1, threshold=20) -> Tensor
+
+Applies element-wise, the function :math:`\text{Softplus}(x) = \frac{1}{\beta} * \log(1 + \exp(\beta * x))`.
+
+For numerical stability the implementation reverts to the linear function
+when :math:`input \times \beta > threshold`.
+
+See :class:`~torch.nn.Softplus` for more details.
+""",
+)
+
+
+def _get_softmax_dim(name: str, ndim: int, stacklevel: int) -> int:
+    warnings.warn(
+        f"Implicit dimension choice for {name} has been deprecated. "
+        "Change the call to include dim=X as an argument.",
+        stacklevel=stacklevel,
+    )
+    if ndim == 0 or ndim == 1 or ndim == 3:
+        ret = 0
+    else:
+        ret = 1
+    return ret
+
+
+def softmin(
+    input: Tensor,
+    dim: Optional[int] = None,
+    _stacklevel: int = 3,
+    dtype: Optional[DType] = None,
+) -> Tensor:
+    r"""Apply a softmin function.
+
+    Note that :math:`\text{Softmin}(x) = \text{Softmax}(-x)`. See softmax definition for mathematical formula.
+
+    See :class:`~torch.nn.Softmin` for more details.
+
+    Args:
+        input (Tensor): input
+        dim (int): A dimension along which softmin will be computed (so every slice
+            along dim will sum to 1).
+        dtype (:class:`torch.dtype`, optional): the desired data type of returned tensor.
+          If specified, the input tensor is casted to :attr:`dtype` before the operation
+          is performed. This is useful for preventing data type overflows. Default: None.
+    """
+    if has_torch_function_unary(input):
+        return handle_torch_function(
+            softmin, (input,), input, dim=dim, _stacklevel=_stacklevel, dtype=dtype
+        )
+    if dim is None:
+        dim = _get_softmax_dim("softmin", input.dim(), _stacklevel)
+    if dtype is None:
+        ret = (-input).softmax(dim)
+    else:
+        ret = (-input).softmax(dim, dtype=dtype)
+    return ret
+
+
+def softmax(
+    input: Tensor,
+    dim: Optional[int] = None,
+    _stacklevel: int = 3,
+    dtype: Optional[DType] = None,
+) -> Tensor:
+    r"""Apply a softmax function.
+
+    Softmax is defined as:
+
+    :math:`\text{Softmax}(x_{i}) = \frac{\exp(x_i)}{\sum_j \exp(x_j)}`
+
+    It is applied to all slices along dim, and will re-scale them so that the elements
+    lie in the range `[0, 1]` and sum to 1.
+
+    See :class:`~torch.nn.Softmax` for more details.
+
+    Args:
+        input (Tensor): input
+        dim (int): A dimension along which softmax will be computed.
+        dtype (:class:`torch.dtype`, optional): the desired data type of returned tensor.
+          If specified, the input tensor is casted to :attr:`dtype` before the operation
+          is performed. This is useful for preventing data type overflows. Default: None.
+
+    .. note::
+        This function doesn't work directly with NLLLoss,
+        which expects the Log to be computed between the Softmax and itself.
+        Use log_softmax instead (it's faster and has better numerical properties).
+
+    """
+    if has_torch_function_unary(input):
+        return handle_torch_function(
+            softmax, (input,), input, dim=dim, _stacklevel=_stacklevel, dtype=dtype
+        )
+    if dim is None:
+        dim = _get_softmax_dim("softmax", input.dim(), _stacklevel)
+    if dtype is None:
+        ret = input.softmax(dim)
+    else:
+        ret = input.softmax(dim, dtype=dtype)
+    return ret
+
+
+def gumbel_softmax(
+    logits: Tensor,
+    tau: float = 1,
+    hard: bool = False,
+    eps: float = 1e-10,
+    dim: int = -1,
+) -> Tensor:
+    r"""
+    Sample from the Gumbel-Softmax distribution (`Link 1`_  `Link 2`_) and optionally discretize.
+
+    Args:
+      logits: `[..., num_features]` unnormalized log probabilities
+      tau: non-negative scalar temperature
+      hard: if ``True``, the returned samples will be discretized as one-hot vectors,
+            but will be differentiated as if it is the soft sample in autograd
+      dim (int): A dimension along which softmax will be computed. Default: -1.
+
+    Returns:
+      Sampled tensor of same shape as `logits` from the Gumbel-Softmax distribution.
+      If ``hard=True``, the returned samples will be one-hot, otherwise they will
+      be probability distributions that sum to 1 across `dim`.
+
+    .. note::
+      This function is here for legacy reasons, may be removed from nn.Functional in the future.
+
+    .. note::
+      The main trick for `hard` is to do  `y_hard - y_soft.detach() + y_soft`
+
+      It achieves two things:
+      - makes the output value exactly one-hot
+      (since we add then subtract y_soft value)
+      - makes the gradient equal to y_soft gradient
+      (since we strip all other gradients)
+
+    Examples::
+        >>> logits = torch.randn(20, 32)
+        >>> # Sample soft categorical using reparametrization trick:
+        >>> F.gumbel_softmax(logits, tau=1, hard=False)
+        >>> # Sample hard categorical using "Straight-through" trick:
+        >>> F.gumbel_softmax(logits, tau=1, hard=True)
+
+    .. _Link 1:
+        https://arxiv.org/abs/1611.00712
+    .. _Link 2:
+        https://arxiv.org/abs/1611.01144
+    """
+    if has_torch_function_unary(logits):
+        return handle_torch_function(
+            gumbel_softmax, (logits,), logits, tau=tau, hard=hard, eps=eps, dim=dim
+        )
+    if eps != 1e-10:
+        warnings.warn("`eps` parameter is deprecated and has no effect.")
+
+    gumbels = (
+        -torch.empty_like(logits, memory_format=torch.legacy_contiguous_format)
+        .exponential_()
+        .log()
+    )  # ~Gumbel(0,1)
+    gumbels = (logits + gumbels) / tau  # ~Gumbel(logits,tau)
+    y_soft = gumbels.softmax(dim)
+
+    if hard:
+        # Straight through.
+        index = y_soft.max(dim, keepdim=True)[1]
+        y_hard = torch.zeros_like(
+            logits, memory_format=torch.legacy_contiguous_format
+        ).scatter_(dim, index, 1.0)
+        ret = y_hard - y_soft.detach() + y_soft
+    else:
+        # Reparametrization trick.
+        ret = y_soft
+    return ret
+
+
+def log_softmax(
+    input: Tensor,
+    dim: Optional[int] = None,
+    _stacklevel: int = 3,
+    dtype: Optional[DType] = None,
+) -> Tensor:
+    r"""Apply a softmax followed by a logarithm.
+
+    While mathematically equivalent to log(softmax(x)), doing these two
+    operations separately is slower and numerically unstable. This function
+    uses an alternative formulation to compute the output and gradient correctly.
+
+    See :class:`~torch.nn.LogSoftmax` for more details.
+
+    Args:
+        input (Tensor): input
+        dim (int): A dimension along which log_softmax will be computed.
+        dtype (:class:`torch.dtype`, optional): the desired data type of returned tensor.
+          If specified, the input tensor is cast to :attr:`dtype` before the operation
+          is performed. This is useful for preventing data type overflows. Default: None.
+    """
+    if has_torch_function_unary(input):
+        return handle_torch_function(
+            log_softmax, (input,), input, dim=dim, _stacklevel=_stacklevel, dtype=dtype
+        )
+    if dim is None:
+        dim = _get_softmax_dim("log_softmax", input.dim(), _stacklevel)
+    if dtype is None:
+        ret = input.log_softmax(dim)
+    else:
+        ret = input.log_softmax(dim, dtype=dtype)
+    return ret
+
+
+softshrink = _add_docstr(
+    torch._C._nn.softshrink,
+    r"""
+softshrink(input, lambd=0.5) -> Tensor
+
+Applies the soft shrinkage function elementwise
+
+See :class:`~torch.nn.Softshrink` for more details.
+""",
+)
+
+
+def tanh(input):  # noqa: D400,D402
+    r"""tanh(input) -> Tensor
+
+    Applies element-wise,
+    :math:`\text{Tanh}(x) = \tanh(x) = \frac{\exp(x) - \exp(-x)}{\exp(x) + \exp(-x)}`
+
+    See :class:`~torch.nn.Tanh` for more details.
+    """
+    return input.tanh()
+
+
+def sigmoid(input):  # noqa: D400,D402
+    r"""sigmoid(input) -> Tensor
+
+    Applies the element-wise function :math:`\text{Sigmoid}(x) = \frac{1}{1 + \exp(-x)}`
+
+    See :class:`~torch.nn.Sigmoid` for more details.
+    """
+    return input.sigmoid()
+
+
+def hardsigmoid(input: Tensor, inplace: bool = False) -> Tensor:
+    r"""Apply the Hardsigmoid function element-wise.
+
+    .. math::
+        \text{Hardsigmoid}(x) = \begin{cases}
+            0 & \text{if~} x \le -3, \\
+            1 & \text{if~} x \ge +3, \\
+            x / 6 + 1 / 2 & \text{otherwise}
+        \end{cases}
+
+    Args:
+        inplace: If set to ``True``, will do this operation in-place. Default: ``False``
+
+    See :class:`~torch.nn.Hardsigmoid` for more details.
+    """
+    if has_torch_function_unary(input):
+        return handle_torch_function(hardsigmoid, (input,), input, inplace=inplace)
+    if inplace:
+        return torch._C._nn.hardsigmoid_(input)
+    return torch._C._nn.hardsigmoid(input)
 
 
 conv1d = _add_docstr(
@@ -431,6 +1074,18 @@ Args:
         size of the pooling region will be used. Default: None
 """,
 )
+
+
+# Put the import here to avoid circular imports
+from torch._jit_internal import (
+    _overload,
+    boolean_dispatch,
+    BroadcastingList1,
+    BroadcastingList2,
+    BroadcastingList3,
+)
+from torch.nn import grad  # noqa: F401
+from torch.nn.modules.utils import _list_with_default, _pair, _single, _triple
 
 
 def fractional_max_pool2d_with_indices(
@@ -1654,658 +2309,6 @@ def feature_alpha_dropout(
     )
 
 
-def _threshold(
-    input: Tensor,
-    threshold: float,
-    value: float,
-    inplace: bool = False,
-) -> Tensor:
-    r"""Apply a threshold to each element of the input Tensor.
-
-    See :class:`~torch.nn.Threshold` for more details.
-    """
-    if has_torch_function_unary(input):
-        return handle_torch_function(
-            _threshold, (input,), input, threshold, value, inplace=inplace
-        )
-    if inplace:
-        result = _VF.threshold_(input, threshold, value)
-    else:
-        result = _VF.threshold(input, threshold, value)
-    return result
-
-
-# We define this function as _threshold because it takes an argument
-# named threshold, which clobbers the recursive reference to the
-# function needed for __torch_function__ support
-threshold = _threshold
-
-threshold_ = _add_docstr(
-    _VF.threshold_,
-    r"""
-threshold_(input, threshold, value) -> Tensor
-
-In-place version of :func:`~threshold`.
-""",
-)
-
-
-def relu(input: Tensor, inplace: bool = False) -> Tensor:  # noqa: D400,D402
-    r"""relu(input, inplace=False) -> Tensor
-
-    Applies the rectified linear unit function element-wise. See
-    :class:`~torch.nn.ReLU` for more details.
-    """
-    if has_torch_function_unary(input):
-        return handle_torch_function(relu, (input,), input, inplace=inplace)
-    if inplace:
-        result = torch.relu_(input)
-    else:
-        result = torch.relu(input)
-    return result
-
-
-relu_ = _add_docstr(
-    torch.relu_,
-    r"""
-relu_(input) -> Tensor
-
-In-place version of :func:`~relu`.
-""",
-)
-
-
-def glu(input: Tensor, dim: int = -1) -> Tensor:  # noqa: D400,D402
-    r"""
-    glu(input, dim=-1) -> Tensor
-
-    The gated linear unit. Computes:
-
-    .. math ::
-        \text{GLU}(a, b) = a \otimes \sigma(b)
-
-    where `input` is split in half along `dim` to form `a` and `b`, :math:`\sigma`
-    is the sigmoid function and :math:`\otimes` is the element-wise product between matrices.
-
-    See `Language Modeling with Gated Convolutional Networks <https://arxiv.org/abs/1612.08083>`_.
-
-    Args:
-        input (Tensor): input tensor
-        dim (int): dimension on which to split the input. Default: -1
-    """
-    if has_torch_function_unary(input):
-        return handle_torch_function(glu, (input,), input, dim=dim)
-    if input.dim() == 0:
-        raise RuntimeError(
-            "glu does not support scalars because halving size must be even"
-        )
-    return torch._C._nn.glu(input, dim)
-
-
-def hardtanh(
-    input: Tensor,
-    min_val: float = -1.0,
-    max_val: float = 1.0,
-    inplace: bool = False,
-) -> Tensor:  # noqa: D400,D402
-    r"""
-    hardtanh(input, min_val=-1., max_val=1., inplace=False) -> Tensor
-
-    Applies the HardTanh function element-wise. See :class:`~torch.nn.Hardtanh` for more
-    details.
-    """
-    if has_torch_function_unary(input):
-        return handle_torch_function(
-            hardtanh, (input,), input, min_val=min_val, max_val=max_val, inplace=inplace
-        )
-    if min_val > max_val:
-        raise ValueError("min_val cannot be greater than max_val")
-    if inplace:
-        result = torch._C._nn.hardtanh_(input, min_val, max_val)
-    else:
-        result = torch._C._nn.hardtanh(input, min_val, max_val)
-    return result
-
-
-hardtanh_ = _add_docstr(
-    torch._C._nn.hardtanh_,
-    r"""
-hardtanh_(input, min_val=-1., max_val=1.) -> Tensor
-
-In-place version of :func:`~hardtanh`.
-""",
-)
-
-
-def relu6(input: Tensor, inplace: bool = False) -> Tensor:  # noqa: D400,D402
-    r"""relu6(input, inplace=False) -> Tensor
-
-    Applies the element-wise function :math:`\text{ReLU6}(x) = \min(\max(0,x), 6)`.
-
-    See :class:`~torch.nn.ReLU6` for more details.
-    """
-    if has_torch_function_unary(input):
-        return handle_torch_function(relu6, (input,), input, inplace=inplace)
-    if inplace:
-        result = torch._C._nn.relu6_(input)
-    else:
-        result = torch._C._nn.relu6(input)
-    return result
-
-
-def elu(input: Tensor, alpha: float = 1.0, inplace: bool = False) -> Tensor:
-    r"""Apply the Exponential Linear Unit (ELU) function element-wise.
-
-    See :class:`~torch.nn.ELU` for more details.
-    """
-    if has_torch_function_unary(input):
-        return handle_torch_function(elu, (input,), input, alpha=alpha, inplace=inplace)
-    if inplace:
-        result = torch._C._nn.elu_(input, alpha)
-    else:
-        result = torch._C._nn.elu(input, alpha)
-    return result
-
-
-elu_ = _add_docstr(
-    torch._C._nn.elu_,
-    r"""
-elu_(input, alpha=1.) -> Tensor
-
-In-place version of :func:`~elu`.
-""",
-)
-
-
-def selu(input: Tensor, inplace: bool = False) -> Tensor:  # noqa: D400,D402
-    r"""selu(input, inplace=False) -> Tensor
-
-    Applies element-wise,
-    :math:`\text{SELU}(x) = scale * (\max(0,x) + \min(0, \alpha * (\exp(x) - 1)))`,
-    with :math:`\alpha=1.6732632423543772848170429916717` and
-    :math:`scale=1.0507009873554804934193349852946`.
-
-    See :class:`~torch.nn.SELU` for more details.
-    """
-    if has_torch_function_unary(input):
-        return handle_torch_function(selu, (input,), input, inplace=inplace)
-    if inplace:
-        result = torch.selu_(input)
-    else:
-        result = torch.selu(input)
-    return result
-
-
-selu_ = _add_docstr(
-    torch.selu_,
-    r"""
-selu_(input) -> Tensor
-
-In-place version of :func:`~selu`.
-""",
-)
-
-
-def celu(
-    input: Tensor,
-    alpha: float = 1.0,
-    inplace: bool = False,
-) -> Tensor:  # noqa: D400,D402
-    r"""celu(input, alpha=1., inplace=False) -> Tensor
-
-    Applies element-wise,
-    :math:`\text{CELU}(x) = \max(0,x) + \min(0, \alpha * (\exp(x/\alpha) - 1))`.
-
-    See :class:`~torch.nn.CELU` for more details.
-    """
-    if has_torch_function_unary(input):
-        return handle_torch_function(
-            celu, (input,), input, alpha=alpha, inplace=inplace
-        )
-    if inplace:
-        result = torch.celu_(input, alpha)
-    else:
-        result = torch.celu(input, alpha)
-    return result
-
-
-celu_ = _add_docstr(
-    torch.celu_,
-    r"""
-celu_(input, alpha=1.) -> Tensor
-
-In-place version of :func:`~celu`.
-""",
-)
-
-
-def leaky_relu(
-    input: Tensor,
-    negative_slope: float = 0.01,
-    inplace: bool = False,
-) -> Tensor:  # noqa: D400,D402
-    r"""
-    leaky_relu(input, negative_slope=0.01, inplace=False) -> Tensor
-
-    Applies element-wise,
-    :math:`\text{LeakyReLU}(x) = \max(0, x) + \text{negative\_slope} * \min(0, x)`
-
-    See :class:`~torch.nn.LeakyReLU` for more details.
-    """
-    if has_torch_function_unary(input):
-        return handle_torch_function(
-            leaky_relu, (input,), input, negative_slope=negative_slope, inplace=inplace
-        )
-    if inplace:
-        result = torch._C._nn.leaky_relu_(input, negative_slope)
-    else:
-        result = torch._C._nn.leaky_relu(input, negative_slope)
-    return result
-
-
-leaky_relu_ = _add_docstr(
-    torch._C._nn.leaky_relu_,
-    r"""
-leaky_relu_(input, negative_slope=0.01) -> Tensor
-
-In-place version of :func:`~leaky_relu`.
-""",
-)
-
-
-prelu = _add_docstr(
-    torch.prelu,
-    r"""prelu(input, weight) -> Tensor
-
-Applies element-wise the function
-:math:`\text{PReLU}(x) = \max(0,x) + \text{weight} * \min(0,x)` where weight is a
-learnable parameter.
-
-.. note::
-    `weight` is expected to be a scalar or 1-D tensor. If `weight` is 1-D,
-    its size must match the number of input channels, determined by
-    `input.size(1)` when `input.dim() >= 2`, otherwise 1.
-    In the 1-D case, note that when `input` has dim > 2, `weight` can be expanded
-    to the shape of `input` in a way that is not possible using normal
-    :ref:`broadcasting semantics<broadcasting-semantics>`.
-
-See :class:`~torch.nn.PReLU` for more details.
-""",
-)
-
-
-def rrelu(
-    input: Tensor,
-    lower: float = 1.0 / 8,
-    upper: float = 1.0 / 3,
-    training: bool = False,
-    inplace: bool = False,
-) -> Tensor:  # noqa: D400,D402
-    r"""rrelu(input, lower=1./8, upper=1./3, training=False, inplace=False) -> Tensor
-
-    Randomized leaky ReLU.
-
-    See :class:`~torch.nn.RReLU` for more details.
-    """
-    if has_torch_function_unary(input):
-        return handle_torch_function(
-            rrelu,
-            (input,),
-            input,
-            lower=lower,
-            upper=upper,
-            training=training,
-            inplace=inplace,
-        )
-    if inplace:
-        result = torch.rrelu_(input, lower, upper, training)
-    else:
-        result = torch.rrelu(input, lower, upper, training)
-    return result
-
-
-rrelu_ = _add_docstr(
-    torch.rrelu_,
-    r"""
-rrelu_(input, lower=1./8, upper=1./3, training=False) -> Tensor
-
-In-place version of :func:`~rrelu`.
-""",
-)
-
-logsigmoid = _add_docstr(
-    torch._C._nn.log_sigmoid,
-    r"""
-logsigmoid(input) -> Tensor
-
-Applies element-wise :math:`\text{LogSigmoid}(x_i) = \log \left(\frac{1}{1 + \exp(-x_i)}\right)`
-
-See :class:`~torch.nn.LogSigmoid` for more details.
-""",
-)
-
-gelu = _add_docstr(
-    torch._C._nn.gelu,
-    r"""
-gelu(input, approximate = 'none') -> Tensor
-
-When the approximate argument is 'none', it applies element-wise the function
-:math:`\text{GELU}(x) = x * \Phi(x)`
-
-where :math:`\Phi(x)` is the Cumulative Distribution Function for Gaussian Distribution.
-
-When the approximate argument is 'tanh', Gelu is estimated with
-
-.. math::
-    \text{GELU}(x) = 0.5 * x * (1 + \text{Tanh}(\sqrt{2 / \pi} * (x + 0.044715 * x^3)))
-
-See `Gaussian Error Linear Units (GELUs) <https://arxiv.org/abs/1606.08415>`_.
-""",
-)
-
-hardshrink = _add_docstr(
-    torch.hardshrink,
-    r"""
-hardshrink(input, lambd=0.5) -> Tensor
-
-Applies the hard shrinkage function element-wise
-
-See :class:`~torch.nn.Hardshrink` for more details.
-""",
-)
-
-
-def tanhshrink(input):  # noqa: D400,D402
-    r"""tanhshrink(input) -> Tensor
-
-    Applies element-wise, :math:`\text{Tanhshrink}(x) = x - \text{Tanh}(x)`
-
-    See :class:`~torch.nn.Tanhshrink` for more details.
-    """
-    if has_torch_function_unary(input):
-        return handle_torch_function(tanhshrink, (input,), input)
-    return input - input.tanh()
-
-
-def softsign(input):  # noqa: D400,D402
-    r"""softsign(input) -> Tensor
-
-    Applies element-wise, the function :math:`\text{SoftSign}(x) = \frac{x}{1 + |x|}`
-
-    See :class:`~torch.nn.Softsign` for more details.
-    """
-    if has_torch_function_unary(input):
-        return handle_torch_function(softsign, (input,), input)
-    return input / (input.abs() + 1)
-
-
-softplus = _add_docstr(
-    torch._C._nn.softplus,
-    r"""
-softplus(input, beta=1, threshold=20) -> Tensor
-
-Applies element-wise, the function :math:`\text{Softplus}(x) = \frac{1}{\beta} * \log(1 + \exp(\beta * x))`.
-
-For numerical stability the implementation reverts to the linear function
-when :math:`input \times \beta > threshold`.
-
-See :class:`~torch.nn.Softplus` for more details.
-""",
-)
-
-
-def _get_softmax_dim(name: str, ndim: int, stacklevel: int) -> int:
-    warnings.warn(
-        f"Implicit dimension choice for {name} has been deprecated. "
-        "Change the call to include dim=X as an argument.",
-        stacklevel=stacklevel,
-    )
-    if ndim == 0 or ndim == 1 or ndim == 3:
-        ret = 0
-    else:
-        ret = 1
-    return ret
-
-
-def softmin(
-    input: Tensor,
-    dim: Optional[int] = None,
-    _stacklevel: int = 3,
-    dtype: Optional[DType] = None,
-) -> Tensor:
-    r"""Apply a softmin function.
-
-    Note that :math:`\text{Softmin}(x) = \text{Softmax}(-x)`. See softmax definition for mathematical formula.
-
-    See :class:`~torch.nn.Softmin` for more details.
-
-    Args:
-        input (Tensor): input
-        dim (int): A dimension along which softmin will be computed (so every slice
-            along dim will sum to 1).
-        dtype (:class:`torch.dtype`, optional): the desired data type of returned tensor.
-          If specified, the input tensor is casted to :attr:`dtype` before the operation
-          is performed. This is useful for preventing data type overflows. Default: None.
-    """
-    if has_torch_function_unary(input):
-        return handle_torch_function(
-            softmin, (input,), input, dim=dim, _stacklevel=_stacklevel, dtype=dtype
-        )
-    if dim is None:
-        dim = _get_softmax_dim("softmin", input.dim(), _stacklevel)
-    if dtype is None:
-        ret = (-input).softmax(dim)
-    else:
-        ret = (-input).softmax(dim, dtype=dtype)
-    return ret
-
-
-def softmax(
-    input: Tensor,
-    dim: Optional[int] = None,
-    _stacklevel: int = 3,
-    dtype: Optional[DType] = None,
-) -> Tensor:
-    r"""Apply a softmax function.
-
-    Softmax is defined as:
-
-    :math:`\text{Softmax}(x_{i}) = \frac{\exp(x_i)}{\sum_j \exp(x_j)}`
-
-    It is applied to all slices along dim, and will re-scale them so that the elements
-    lie in the range `[0, 1]` and sum to 1.
-
-    See :class:`~torch.nn.Softmax` for more details.
-
-    Args:
-        input (Tensor): input
-        dim (int): A dimension along which softmax will be computed.
-        dtype (:class:`torch.dtype`, optional): the desired data type of returned tensor.
-          If specified, the input tensor is casted to :attr:`dtype` before the operation
-          is performed. This is useful for preventing data type overflows. Default: None.
-
-    .. note::
-        This function doesn't work directly with NLLLoss,
-        which expects the Log to be computed between the Softmax and itself.
-        Use log_softmax instead (it's faster and has better numerical properties).
-
-    """
-    if has_torch_function_unary(input):
-        return handle_torch_function(
-            softmax, (input,), input, dim=dim, _stacklevel=_stacklevel, dtype=dtype
-        )
-    if dim is None:
-        dim = _get_softmax_dim("softmax", input.dim(), _stacklevel)
-    if dtype is None:
-        ret = input.softmax(dim)
-    else:
-        ret = input.softmax(dim, dtype=dtype)
-    return ret
-
-
-def gumbel_softmax(
-    logits: Tensor,
-    tau: float = 1,
-    hard: bool = False,
-    eps: float = 1e-10,
-    dim: int = -1,
-) -> Tensor:
-    r"""
-    Sample from the Gumbel-Softmax distribution (`Link 1`_  `Link 2`_) and optionally discretize.
-
-    Args:
-      logits: `[..., num_features]` unnormalized log probabilities
-      tau: non-negative scalar temperature
-      hard: if ``True``, the returned samples will be discretized as one-hot vectors,
-            but will be differentiated as if it is the soft sample in autograd
-      dim (int): A dimension along which softmax will be computed. Default: -1.
-
-    Returns:
-      Sampled tensor of same shape as `logits` from the Gumbel-Softmax distribution.
-      If ``hard=True``, the returned samples will be one-hot, otherwise they will
-      be probability distributions that sum to 1 across `dim`.
-
-    .. note::
-      This function is here for legacy reasons, may be removed from nn.Functional in the future.
-
-    .. note::
-      The main trick for `hard` is to do  `y_hard - y_soft.detach() + y_soft`
-
-      It achieves two things:
-      - makes the output value exactly one-hot
-      (since we add then subtract y_soft value)
-      - makes the gradient equal to y_soft gradient
-      (since we strip all other gradients)
-
-    Examples::
-        >>> logits = torch.randn(20, 32)
-        >>> # Sample soft categorical using reparametrization trick:
-        >>> F.gumbel_softmax(logits, tau=1, hard=False)
-        >>> # Sample hard categorical using "Straight-through" trick:
-        >>> F.gumbel_softmax(logits, tau=1, hard=True)
-
-    .. _Link 1:
-        https://arxiv.org/abs/1611.00712
-    .. _Link 2:
-        https://arxiv.org/abs/1611.01144
-    """
-    if has_torch_function_unary(logits):
-        return handle_torch_function(
-            gumbel_softmax, (logits,), logits, tau=tau, hard=hard, eps=eps, dim=dim
-        )
-    if eps != 1e-10:
-        warnings.warn("`eps` parameter is deprecated and has no effect.")
-
-    gumbels = (
-        -torch.empty_like(logits, memory_format=torch.legacy_contiguous_format)
-        .exponential_()
-        .log()
-    )  # ~Gumbel(0,1)
-    gumbels = (logits + gumbels) / tau  # ~Gumbel(logits,tau)
-    y_soft = gumbels.softmax(dim)
-
-    if hard:
-        # Straight through.
-        index = y_soft.max(dim, keepdim=True)[1]
-        y_hard = torch.zeros_like(
-            logits, memory_format=torch.legacy_contiguous_format
-        ).scatter_(dim, index, 1.0)
-        ret = y_hard - y_soft.detach() + y_soft
-    else:
-        # Reparametrization trick.
-        ret = y_soft
-    return ret
-
-
-def log_softmax(
-    input: Tensor,
-    dim: Optional[int] = None,
-    _stacklevel: int = 3,
-    dtype: Optional[DType] = None,
-) -> Tensor:
-    r"""Apply a softmax followed by a logarithm.
-
-    While mathematically equivalent to log(softmax(x)), doing these two
-    operations separately is slower and numerically unstable. This function
-    uses an alternative formulation to compute the output and gradient correctly.
-
-    See :class:`~torch.nn.LogSoftmax` for more details.
-
-    Args:
-        input (Tensor): input
-        dim (int): A dimension along which log_softmax will be computed.
-        dtype (:class:`torch.dtype`, optional): the desired data type of returned tensor.
-          If specified, the input tensor is cast to :attr:`dtype` before the operation
-          is performed. This is useful for preventing data type overflows. Default: None.
-    """
-    if has_torch_function_unary(input):
-        return handle_torch_function(
-            log_softmax, (input,), input, dim=dim, _stacklevel=_stacklevel, dtype=dtype
-        )
-    if dim is None:
-        dim = _get_softmax_dim("log_softmax", input.dim(), _stacklevel)
-    if dtype is None:
-        ret = input.log_softmax(dim)
-    else:
-        ret = input.log_softmax(dim, dtype=dtype)
-    return ret
-
-
-softshrink = _add_docstr(
-    torch._C._nn.softshrink,
-    r"""
-softshrink(input, lambd=0.5) -> Tensor
-
-Applies the soft shrinkage function elementwise
-
-See :class:`~torch.nn.Softshrink` for more details.
-""",
-)
-
-
-def tanh(input):  # noqa: D400,D402
-    r"""tanh(input) -> Tensor
-
-    Applies element-wise,
-    :math:`\text{Tanh}(x) = \tanh(x) = \frac{\exp(x) - \exp(-x)}{\exp(x) + \exp(-x)}`
-
-    See :class:`~torch.nn.Tanh` for more details.
-    """
-    return input.tanh()
-
-
-def sigmoid(input):  # noqa: D400,D402
-    r"""sigmoid(input) -> Tensor
-
-    Applies the element-wise function :math:`\text{Sigmoid}(x) = \frac{1}{1 + \exp(-x)}`
-
-    See :class:`~torch.nn.Sigmoid` for more details.
-    """
-    return input.sigmoid()
-
-
-def hardsigmoid(input: Tensor, inplace: bool = False) -> Tensor:
-    r"""Apply the Hardsigmoid function element-wise.
-
-    .. math::
-        \text{Hardsigmoid}(x) = \begin{cases}
-            0 & \text{if~} x \le -3, \\
-            1 & \text{if~} x \ge +3, \\
-            x / 6 + 1 / 2 & \text{otherwise}
-        \end{cases}
-
-    Args:
-        inplace: If set to ``True``, will do this operation in-place. Default: ``False``
-
-    See :class:`~torch.nn.Hardsigmoid` for more details.
-    """
-    if has_torch_function_unary(input):
-        return handle_torch_function(hardsigmoid, (input,), input, inplace=inplace)
-    if inplace:
-        return torch._C._nn.hardsigmoid_(input)
-    return torch._C._nn.hardsigmoid(input)
-
-
 linear = _add_docstr(
     torch._C._nn.linear,
     r"""
@@ -3000,6 +3003,10 @@ def local_response_norm(
 
 
 # loss
+
+
+# Put the import here to avoid circular imports
+from torch.nn import _reduction as _Reduction
 
 
 def ctc_loss(

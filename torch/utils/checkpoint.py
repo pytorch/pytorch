@@ -1105,7 +1105,7 @@ class _checkpoint_hook(torch.autograd.graph.saved_tensors_hooks):
                 try:
                     with _recomputation_hook(
                         weakref.ref(frame), gid
-                    ), torch.autograd.enable_grad():
+                    ), torch.enable_grad():
                         frame.recompute_fn(*args)
                 except _StopRecomputationError:
                     pass
