@@ -602,7 +602,7 @@ class TestConverter(TestCase):
         self._check_equal_ts_ep_converter(func1, inp, jit_trace=True)
         inp = (torch.randn([2, 2]), torch.randn([2, 2]))
 
-        # TODO: JIT scipt runs into unrecognized type t issue.
+        # TODO: JIT script runs into unrecognized type t issue.
         self._check_equal_ts_ep_converter(func2, inp, jit_trace=True)
         inp = (torch.randn([2, 2]),)
 
