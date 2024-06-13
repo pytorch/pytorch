@@ -453,21 +453,20 @@ def free_unbacked_symbols(x):
 # setup!
 def is_symbol_binding_fx_node(node) -> Optional[sympy.Symbol]:
     if (
+        node.op == "placeholder" and
         "val" in node.meta and
         isinstance(node.meta["val"], torch.SymInt) and
-        isinstance(node.meta["val"].node.expr, sympy.Symbol) and
-        (node.op == "placeholder" or free_unbacked_symbols(node.meta["val"].node.expr))
+        isinstance(node.meta["val"].node.expr, sympy.Symbol)
     ):
         return node.meta["val"].node.expr
     return None
 
 def find_symbol_binding_fx_nodes(graph):
-    r = {}
-    # NB: Prefer first occurrence of symbol
-    for node in graph.nodes:
-        if is_symbol_binding_fx_node(node) and node.meta["val"].node.expr not in r:
-            r[node.meta["val"].node.expr] = node
-    return r
+    return {
+        node.meta["val"].node.expr: node
+        for node in graph.nodes
+        if is_symbol_binding_fx_node(node)
+    }
 
 
 # Analogous to ConvertIntSource
@@ -1395,8 +1394,6 @@ SYMPY_INTERP = {
     'RoundDecimal': builtins.round,
     'TruncToInt': math.trunc,
     'IntTrueDiv': operator.truediv,
-    'FloatTrueDiv': operator.truediv,
-    'ToFloat': builtins.float,
 }
 
 

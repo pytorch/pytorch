@@ -919,7 +919,6 @@ class SIMDScheduling(BaseScheduling):
     int64_type = "torch.int64"
 
     def __init__(self, scheduler):
-        super().__init__()
         self.scheduler = scheduler
 
     def group_fn(self, sizes):
@@ -1299,9 +1298,7 @@ class SIMDScheduling(BaseScheduling):
             isinstance(node, BaseSchedulerNode) and node.is_split_scan()
             for node in node_schedule
         )
-        kernel_type: type = self.kernel_type
-        if is_split_scan and issubclass(TritonSplitScanKernel, kernel_type):
-            kernel_type = TritonSplitScanKernel
+        kernel_type = TritonSplitScanKernel if is_split_scan else self.kernel_type
         kernel_args = tiled_groups
         kernel_kwargs = {
             "reduction_hint": reduction_hint_val,

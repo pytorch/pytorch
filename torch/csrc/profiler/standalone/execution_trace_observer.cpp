@@ -49,7 +49,9 @@ constexpr auto kETProcessGroupName = "pg_name";
 constexpr auto kETProcessGroupDesc = "pg_desc";
 #endif // USE_DISTRIBUTED
 
-namespace torch::profiler::impl {
+namespace torch {
+namespace profiler {
+namespace impl {
 
 //******************************************************************************
 // JSON output utility functions. To be merged with PyTorch profiler.
@@ -565,7 +567,7 @@ inline std::string getCommsNodeAttrs(const RecordFunction& fn) {
 #endif // USE_DISTRIBUTED
 
   // XXX consider using as string stream?
-  return attrs.empty() ? "" : fmt::format(", {}", fmt::join(attrs, ", "));
+  return attrs.size() == 0 ? "" : fmt::format(", {}", fmt::join(attrs, ", "));
 }
 
 static void recordOperatorStart(
@@ -599,7 +601,7 @@ static void recordOperatorStart(
     auto num_inputs = fn.num_inputs();
     const auto inputs = fn.inputs();
 
-    VLOG(2) << "inputs: " << num_inputs << " " << inputs.size() << '\n';
+    VLOG(2) << "inputs: " << num_inputs << " " << inputs.size() << std::endl;
     // We have two cases: for unboxed kernel, we have num_inputs ==
     // inputs.size() for boxed kernel using stack, there could be more elements
     // on the stack from previous ops.
@@ -697,7 +699,7 @@ static void onFunctionExit(const RecordFunction& fn, ObserverContext* ctx_ptr) {
     // We have two cases: for unboxed kernel, we have num_outputs ==
     // outputs.size() for boxed kernel using stack, there could be more elements
     // on the stack from previous ops.
-    VLOG(2) << "outputs: " << num_outputs << " " << outputs.size() << '\n';
+    VLOG(2) << "outputs: " << num_outputs << " " << outputs.size() << std::endl;
     // TORCH_INTERNAL_ASSERT(num_outputs <= outputs.size());
     if (num_outputs > outputs.size()) {
       LOG(WARNING) << "RecordFunction " << fc.name
@@ -835,4 +837,6 @@ void disableExecutionTraceObserver() {
         << "Trying to disable Execution Trace Observer when it's already disabled.";
   }
 }
-} // namespace torch::profiler::impl
+} // namespace impl
+} // namespace profiler
+} // namespace torch

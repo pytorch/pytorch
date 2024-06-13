@@ -491,11 +491,11 @@ class TestConverter(TestCase):
     def test_ts2ep_converter_contains(self):
         class MIn(torch.nn.Module):
             def forward(self, x: torch.Tensor):
-                return x.dtype in [torch.float32, torch.float64]
+                return x.dtype in [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
 
         class MNotIn(torch.nn.Module):
             def forward(self, x: torch.Tensor):
-                return x.dtype in [torch.int8]
+                return x.dtype in [-1]
 
         class MTensorIn(torch.nn.Module):
             def forward(self, x: torch.Tensor, x_dict: Dict[torch.Tensor, str]):

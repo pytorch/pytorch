@@ -15,7 +15,6 @@
 #include <unistd.h>
 #endif
 
-#include <c10/util/thread_name.h>
 #include <torch/csrc/distributed/c10d/TCPStoreBackend.hpp>
 
 #ifdef _WIN32
@@ -546,8 +545,6 @@ void TCPStoreMasterDaemon::run() {
 }
 #else
 void TCPStoreMasterDaemon::run() {
-  c10::setThreadName("pt_tcpstore");
-
   std::vector<struct pollfd> fds;
   tcputil::addPollfd(fds, storeListenSocket_.handle(), POLLIN);
   // Although we haven't found any documentation or literature describing this,

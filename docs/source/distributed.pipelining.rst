@@ -62,8 +62,8 @@ Overall, the ``pipelining`` package provides the following features:
   application on the Llama model.
 
 
-Step 1: build ``PipelineStage``
-*******************************
+Step 1: build ``PipelineStage`` for execution
+*********************************************
 
 Before we can use a ``PipelineSchedule``, we need to create ``PipelineStage``
 objects that wrap the part of the model running in that stage.  The
@@ -261,12 +261,11 @@ Let us see how the ``pipeline`` API works:
 
   from torch.distributed.pipelining import pipeline, SplitPoint
 
-  # An example micro-batch input
   x = torch.LongTensor([1, 2, 4, 5])
-
   pipe = pipeline(
       module=mod,
-      mb_args=(x,),
+      num_chunks=1,
+      example_args=(x,),
       split_spec={
           "layers.1": SplitPoint.BEGINNING,
       }
@@ -307,7 +306,7 @@ If we ``print(pipe)``, we can see::
 
 
 The "model partitions" are represented by submodules (``submod_0``,
-``submod_1``), each of which is reconstructed with original model operations, weights
+``submod_1``), each of which is reconstructed with original model operations
 and hierarchies.  In addition, a "root-level" ``forward`` function is
 reconstructed to capture the data flow between those partitions. Such data flow
 will be replayed by the pipeline runtime later, in a distributed fashion.
@@ -318,28 +317,11 @@ The ``Pipe`` object provides a method for retrieving the "model partitions":
 
   stage_mod : nn.Module = pipe.get_stage_module(stage_idx)
 
-The returned ``stage_mod`` is a ``nn.Module``, with which you can create an
-optimizer, save or load checkpoints, or apply other parallelisms.
-
-``Pipe`` also allows you to create a distributed stage runtime on a device given
-a ``ProcessGroup``:
+You can also create a distributed stage runtime on a device using ``Pipe``:
 
 .. code-block:: python
 
   stage = pipe.build_stage(stage_idx, device, group)
-
-Alternatively, if you would like to build the stage runtime later after some
-modification to the ``stage_mod``, you can use a functional version of the
-``build_stage`` API. For example:
-
-.. code-block:: python
-
-  from torch.distributed.pipelining import build_stage
-  from torch.nn.parallel import DistributedDataParallel
-
-  dp_mod = DistributedDataParallel(stage_mod)
-  info = pipe.info()
-  stage = build_stage(dp_mod, stage_idx, info, device, group)
 
 .. note::
   The ``pipeline`` frontend uses a tracer (``torch.export``) to capture your

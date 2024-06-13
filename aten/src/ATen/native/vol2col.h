@@ -5,7 +5,7 @@
 namespace at::native {
 
 template <typename T>
-void vol2col(
+static void vol2col(
     const T* data_vol,
     const int64_t channels,
     const int64_t depth,
@@ -56,7 +56,7 @@ void vol2col(
 }
 
 template <typename T>
-void col2vol(
+static void col2vol(
     const T* data_col,
     const int64_t channels,
     const int64_t depth,

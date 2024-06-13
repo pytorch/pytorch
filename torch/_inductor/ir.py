@@ -61,7 +61,7 @@ from torch.utils._sympy.functions import CleanDiv, FloorDiv, ModularIndexing
 from torch.utils._sympy.symbol import SymT
 
 from . import config, dependencies
-from .codegen.common import BackendFeature, index_prevent_reordering
+from .codegen.common import index_prevent_reordering
 from .dependencies import (
     extract_free_unbacked_symbols,
     extract_input_node_reduction_ranges,
@@ -1662,12 +1662,12 @@ class Scan(Loops):
         pointwise_ranges = [*size[:axis], *size[axis + 1 :]]
         scan_ranges = [size[axis]]
 
-        if not V.graph.has_feature(device, BackendFeature.SCAN):
+        if not is_gpu(device.type):
+            # TODO: CPU support
             return [None] * len(dtypes)
 
-        if len(dtypes) > 1 and not V.graph.has_feature(
-            device, BackendFeature.TUPLE_REDUCTION
-        ):
+        if torch.version.hip is not None and len(dtypes) > 1:
+            # TODO: Remove this when ROCm triton adds support for multiple inputs
             return [None] * len(dtypes)
 
         sizevars = V.graph.sizevars
@@ -2391,7 +2391,7 @@ class SliceView(View):
     @classmethod
     def create(cls, x, dim, start, end, step=1, clamp=True):
         step = sympy.expand(step)
-        assert isinstance(step, sympy.Expr) or step > 0
+        assert step > 0
         try:
             if start == 0 and end >= 2**63 - 1 and step == 1:
                 return x
@@ -3867,9 +3867,7 @@ class ConcatKernel(NopKernel):
             ):
                 buffer_names.append(input_buffer.get_name())
 
-        if len(buffer_names) > 1 and V.graph.has_feature(
-            device, BackendFeature.FOREACH
-        ):
+        if len(buffer_names) > 1:
             V.graph.register_list(buffer_names)
 
         concat_kernel.name = V.graph.register_buffer(concat_kernel)
@@ -4777,9 +4775,14 @@ class MutationOutput(ExternKernel):
 
     def __init__(self, layout, mutated_node, node_doing_mutating):
         # NB: Do not directly construct this - use `mark_node_as_mutating`
-        super().__init__(None, layout, [mutated_node, node_doing_mutating], ())
+        super().__init__(None, layout, [mutated_node], ())
         self.node_doing_mutating = node_doing_mutating
         self.name = V.graph.register_buffer(self)
+
+    def get_read_writes(self):
+        read_writes = super().get_read_writes()
+        read_writes.reads.add(dependencies.WeakDep(self.node_doing_mutating.get_name()))
+        return read_writes
 
     def should_allocate(self):
         return False
@@ -6334,7 +6337,7 @@ class LinearUnary(ExternKernelAlloc):
         )
 
     @classmethod
-    def create(cls, x, w, B, attr, scalars, algorithm):
+    def create(cls, x, w, b, attr, scalars, algorithm):
         x = cls.require_contiguous(cls.realize_input(x))
         w = cls.require_contiguous(cls.realize_input(w))
 
@@ -6342,9 +6345,9 @@ class LinearUnary(ExternKernelAlloc):
         oc, ic = w.get_size()
         inputs = [x, w]
         constant_args = [attr, scalars if scalars else [-1], algorithm]
-        if B is not None:
-            B = cls.require_contiguous(cls.realize_input(B))
-            inputs.append(B)
+        if b is not None:
+            b = cls.require_contiguous(cls.realize_input(b))
+            inputs.append(b)
         else:
             constant_args.insert(0, None)
 
@@ -7544,7 +7547,7 @@ class StorageBox(MutableBox):
             """
             The heuristic for realizing reused result of heavy ops on cpu
             """
-            heavy_ops = ["exp", "sigmoid"]  # a list of heavy ops
+            heavy_ops = ["exp"]  # a list of heavy ops
             fn_str = loops.inner_fn_str()
             return any((op + "(") in fn_str for op in heavy_ops)
 

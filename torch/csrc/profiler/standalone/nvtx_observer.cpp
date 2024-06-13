@@ -3,7 +3,9 @@
 #include <torch/csrc/profiler/stubs/base.h>
 #include <torch/csrc/profiler/util.h>
 
-namespace torch::profiler::impl {
+namespace torch {
+namespace profiler {
+namespace impl {
 
 struct NVTXThreadLocalState : ProfilerStateBase {
   explicit NVTXThreadLocalState(const ProfilerConfig& config)
@@ -172,4 +174,6 @@ void pushNVTXCallbacks(
   state_ptr->setCallbackHandle(handle);
 }
 
-} // namespace torch::profiler::impl
+} // namespace impl
+} // namespace profiler
+} // namespace torch
