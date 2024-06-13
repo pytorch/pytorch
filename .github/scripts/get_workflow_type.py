@@ -65,7 +65,9 @@ def get_workflow_type(issue: Issue, username: str) -> str:
             print(f"LF Workflows are disabled for {username}. Using meta runners.")
             return WORKFLOW_LABEL_META
     except Exception as e:
-        print(f"Failed to get determine workflow type. Falling back to meta runners. Exception: {e}")
+        print(
+            f"Failed to get determine workflow type. Falling back to meta runners. Exception: {e}"
+        )
         return WORKFLOW_LABEL_META
 
 
