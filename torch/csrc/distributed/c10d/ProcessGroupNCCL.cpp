@@ -583,7 +583,7 @@ bool ProcessGroupNCCL::WorkNCCL::finishedGPUExecutionInternal() const {
 
 bool ProcessGroupNCCL::WorkNCCL::checkTimeout(
     std::optional<std::chrono::milliseconds> timeout) {
-  SCOPED_WAIT_COUNTER_US("pytorch.logging.wait_counter.ProcessGroupNCCL::WorkNCCL::checkTimeout");
+  STATIC_SCOPED_WAIT_COUNTER(pytorch_logging.ProcessGroupNCCL_checkTimeout);
   auto currentTimepoint = std::chrono::steady_clock::now();
   auto timeElapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
       currentTimepoint - workStartTime_);

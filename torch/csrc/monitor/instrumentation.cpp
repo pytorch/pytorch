@@ -6,11 +6,8 @@
 namespace torch {
 namespace monitor {
 
-WaitCounterHandle::WaitCounterHandle(std::string_view key) : key_(key), impl_() {
-  // implement
-}
-
-WaitCounterHandle::~WaitCounterHandle() {
+WaitCounterHandle::WaitCounterHandle(std::string_view key)
+    : impl_(nullptr) {
   // implement
 }
 

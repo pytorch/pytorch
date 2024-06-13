@@ -6,20 +6,18 @@
 #include <string_view>
 
 #include <c10/macros/Macros.h>
+#include <c10/util/ScopeExit.h>
 
 namespace torch {
 namespace monitor {
-
-
-class WaitCounterImpl {
-
-};
+namespace detail {
+  class WaitCounterImpl;
+}
 
 // A handle to a wait counter.
 class WaitCounterHandle {
  public:
   explicit WaitCounterHandle(std::string_view key);
-  ~WaitCounterHandle();
 
   // Starts a waiter
   void start(
@@ -32,24 +30,23 @@ class WaitCounterHandle {
           std::chrono::steady_clock::now());
 
  private:
-  const std::string key_;
-  std::shared_ptr<WaitCounterImpl> impl_;
+  std::shared_ptr<detail::WaitCounterImpl> impl_;
 };
 } // namespace monitor
 } // namespace torch
 
-#define WAIT_COUNTER(_key)                                                  \
+#define STATIC_WAIT_COUNTER(_key)                                           \
   []() {                                                                    \
     static torch::monitor::WaitCounterHandle handle(#_key);                 \
     return handle;                                                          \
   }()
 
-#define SCOPED_WAIT_COUNTER(_name)                                          \
+#define STATIC_SCOPED_WAIT_COUNTER(_name)                                   \
   auto C10_ANONYMOUS_VARIABLE(SCOPED_WAIT_COUNTER) =                        \
-      WAIT_COUNTER(_name)                                                   \
-  WAIT_COUNTER_US(_name).start();                                           \
+      STATIC_WAIT_COUNTER(_name);                                           \
+  STATIC_WAIT_COUNTER(_name).start();                                       \
   auto guard = c10::make_scope_exit(                                        \
     [&]() {                                                                 \
-      WAIT_COUNTER_US(_name).stop();                                        \
+      STATIC_WAIT_COUNTER(_name).stop();                                    \
     }                                                                       \
   );
