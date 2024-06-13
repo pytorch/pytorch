@@ -984,7 +984,8 @@ class FxGraphCache:
         to bypass in case caching is not possible.
         """
         # Freezing can embed constants that wouldn't be static across runs.
-        if config.freezing or config.aot_inductor.use_runtime_constant_folding:
+        #if config.freezing or config.aot_inductor.use_runtime_constant_folding:
+        if config.aot_inductor.use_runtime_constant_folding:
             raise BypassFxGraphCache
 
         # The treatment of guards in the caching implementation requires that
