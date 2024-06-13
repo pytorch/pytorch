@@ -197,7 +197,7 @@ sys.excepthook = handle_exception
 # NOTE: copied from TorchTrain
 from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import checkpoint_wrapper as ptd_checkpoint_wrapper
 from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import CheckpointImpl
-from torch.utils.checkpoint import checkpoint, _pt2_selective_checkpoint_context_fn_gen
+from torch.utils.checkpoint import checkpoint
 
 class ACConfigClass:
     mode: str = "selective"
@@ -225,7 +225,8 @@ def checkpoint_wrapper(module, config):
 
         def selective_checkpointing_context_fn():
             meta = {}
-            return _pt2_selective_checkpoint_context_fn_gen(_get_custom_policy(meta))
+            raise NotImplementedError("NYI need to use latest create_selective_checkpoint_contexts API")
+            # return _pt2_selective_checkpoint_context_fn_gen(_get_custom_policy(meta))
 
         return ptd_checkpoint_wrapper(
             module,
