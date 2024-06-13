@@ -346,6 +346,11 @@ def _fused_all_gather_matmul(
     communication:
 
         all_gather_tensor(A_shard, gather_dim, group_name) @ B
+
+    Optimal stride order for A_shard - if A_shard.movedim(scatter_dim, 0) is
+    contiguous, no extra copy is required for input layout transformation.
+    Otherwise A_shard needs to be copied once.
+
     """
     if A_shard.dim() < 2:
         raise ValueError("A_shard must be a matrix")
@@ -407,6 +412,32 @@ def _fused_all_gather_matmul(
     return unflatten(ag_out), [unflatten(output) for output in outputs]
 
 
+def make_contiguous_for_perm(
+    t: torch.Tensor,
+    perm: List[int],
+) -> torch.Tensor:
+    """
+    Restride `t` such that `t.permute(perm)` is contiguous.
+    """
+    inv_perm = [0] * len(perm)
+    for i, p in enumerate(perm):
+        inv_perm[p] = i
+    return t.permute(perm).contiguous().permute(inv_perm)
+
+
+def restride_A_shard_for_fused_all_gather_matmul(
+    t: torch.Tensor,
+    scatter_dim: int,
+) -> torch.Tensor:
+    """
+    Restride the `A_shard` arg of `fused_all_gather_matmul` for optimal perf.
+    See doc for `fused_all_gather_matmul` for detail.
+    """
+    perm = list(range(len(t.shape)))
+    perm.insert(0, perm.pop(scatter_dim))
+    return make_contiguous_for_perm(t, perm)
+
+
 @torch.library.impl(lib, "fused_matmul_reduce_scatter", "Meta")
 def _fused_matmul_reduce_scatter_fallback(
     A: torch.Tensor,
@@ -433,6 +464,10 @@ def _fused_matmul_reduce_scatter(
     communication:
 
         reduce_scatter_tensor(A @ B, reduce_op, scatter_dim, group_name)
+
+    Optimal stride order for A - if A.movedim(scatter_dim, 0) is contiguous, no
+    extra copy is required for input layout transformation. Otherwise A needs
+    to be copied once.
 
     NOTE:
     - The K dim across ranks are currently accumulated with bf16 with results
@@ -489,3 +524,16 @@ def _fused_matmul_reduce_scatter(
         .movedim(0, scatter_dim),
         dim=scatter_dim,
     )
+
+
+def restride_A_for_fused_matmul_reduce_scatter(
+    t: torch.Tensor,
+    gather_dim: int,
+) -> torch.Tensor:
+    """
+    Restride the `A_shard` arg of `fused_matmul_reduce_scatter` for optimal
+    perf. See doc for `fused_matmul_reduce_scatter` for detail.
+    """
+    perm = list(range(len(t.shape)))
+    perm.insert(0, perm.pop(gather_dim))
+    return make_contiguous_for_perm(t, perm)
