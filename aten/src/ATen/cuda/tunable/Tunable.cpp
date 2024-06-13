@@ -109,7 +109,6 @@ void TuningResultsManager::Add(const std::string& op_signature, const std::strin
 
 void TuningResultsManager::RecordUntuned( std::ofstream& untuned_file, const std::string& op_signature, const std::string& params_signature) {
   std::scoped_lock l{lock_};
-  
   if (!untuned_file.good()){
     TORCH_WARN("failed to open file for writing; untuned gemm will not be saved");
   }
@@ -128,9 +127,9 @@ void TuningResultsManager::RecordUntuned( std::ofstream& untuned_file, const std
     }
     if (isNew){
       untuned_file << "Untuned," << op_signature << "," << params_signature << std::endl;
+      TUNABLE_LOG3("Untuned,", op_signature, ",", params_signature);
     }
   }
-  TUNABLE_LOG3("Untuned,", op_signature, ",", params_signature);
 }
 
 void TuningResultsManager::Delete(const std::string& op_signature, const std::string& params_signature) {
