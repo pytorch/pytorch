@@ -464,6 +464,7 @@ class CodeGen:
             "dim_green": "\033[2m\033[32m",
             "reset": "\033[0m",
         }
+
         def make_wrapper_func(name):
             def f(s):
                 if colored:
