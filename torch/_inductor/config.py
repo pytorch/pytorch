@@ -20,7 +20,7 @@ disable_progress = True
 verbose_progress = False
 
 # use fx aot graph codegen cache
-fx_graph_cache = os.environ.get("TORCHINDUCTOR_FX_GRAPH_CACHE") == "1"
+fx_graph_cache = True
 
 # use fx aot graph codegen cache
 fx_graph_remote_cache = os.environ.get("TORCHINDUCTOR_FX_GRAPH_REMOTE_CACHE") == "1"
