@@ -6341,3 +6341,7 @@ quantized_lowerings.register_woq_mm_ops()
 from . import mkldnn_lowerings
 
 mkldnn_lowerings.register_onednn_fusion_ops()
+
+from . import jagged_lowerings
+
+jagged_lowerings.register_jagged_ops()

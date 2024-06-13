@@ -913,6 +913,19 @@ if not TYPE_CHECKING:
 
 
 def typename(o):
+    """
+    String representation of the type of an object.
+
+    This function returns a fully qualified string representation of an object's type.
+    Args:
+        o (Object): The object whose type to represent
+    Returns:
+        str: the type of the object `o`
+    Example:
+        >>> x = torch.tensor([1,2,3])
+        >>> torch.typename(x)
+        'torch.LongTensor'
+    """
     if isinstance(o, torch.Tensor):
         return o.type()
 
