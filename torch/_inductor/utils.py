@@ -46,12 +46,12 @@ from unittest import mock
 import sympy
 
 import torch
-import torch._export
 import torch.utils._pytree as pytree
 from torch._dynamo.device_interface import get_interface_for_device
 from torch._dynamo.utils import detect_fake_mode
 from torch.autograd import DeviceType
 from torch.autograd.profiler_util import EventList
+from torch.fx.passes.graph_transform_observer import GraphTransformObserver
 from torch.fx.passes.shape_prop import ShapeProp
 from torch.utils._sympy.functions import CeilDiv, CleanDiv, FloorDiv, ModularIndexing
 from torch.utils._sympy.symbol import make_symbol, SymT
@@ -222,7 +222,7 @@ def ceildiv(
     numer: Union[int, sympy.Expr], denom: Union[int, sympy.Expr]
 ) -> Union[int, sympy.Expr]:
     if isinstance(numer, sympy.Expr) or isinstance(denom, sympy.Expr):
-        return CeilDiv(numer, denom)
+        return CeilDiv(sympy.sympify(numer), sympy.sympify(denom))
     # TODO: There is a bug in a call to this function, to repro:
     # python benchmarks/dynamo/huggingface.py --inductor -d cuda --accuracy
     # --amp --only YituTechConvBert --dynamic-shapes
@@ -1055,7 +1055,7 @@ def use_cpp_packed_gemm_template(layout, mat1, mat2):
     if not config.cpp.weight_prepack:
         return False
 
-    layout_dtypes = [torch.float32]
+    layout_dtypes = [torch.float32, torch.bfloat16, torch.half]
     m, n, k, layout, mat1, mat2 = mm_args(mat1, mat2)
     # TODO(jgong5): support dynamic shapes for n or k
     if has_free_symbols((n, k)):
@@ -1063,7 +1063,13 @@ def use_cpp_packed_gemm_template(layout, mat1, mat2):
     if isinstance(mat2, ir.BaseView):
         mat2 = mat2.unwrap_view()
     micro_gemm = create_micro_gemm(
-        "micro_gemm", m, n, k, layout.dtype, num_threads=parallel_num_threads()
+        "micro_gemm",
+        m,
+        n,
+        k,
+        input_dtype=layout.dtype,
+        output_dtype=torch.float,
+        num_threads=parallel_num_threads(),
     )
     # TODO(jgong5): support n % n_block_size != 0
     return (
@@ -1397,7 +1403,8 @@ def pass_execution_and_save(func, gm, inp, msg):
         print(f"Before:\n{gm.graph}", file=f)
         print(gm.graph, file=before_io)
         start_time = datetime.now()
-        func(gm.graph)
+        with GraphTransformObserver(gm, msg, config.trace.log_url_for_graph_xform):
+            func(gm.graph)
         time_elapsed = datetime.now() - start_time
         # recompile graph
         stable_topological_sort(gm.graph)
@@ -1671,6 +1678,8 @@ def aoti_compile_with_persistent_cache(
     Compile the given function with persistent cache for AOTI eager mode.
     """
     assert not dynamic, "Only support static shape for now"
+    from torch._export import aot_compile
+
     type_to_torch_dtype = {int: torch.int32, float: torch.float, bool: torch.bool}
     supported_scalar_types = tuple(type_to_torch_dtype.keys())
     flattened_inputs = pytree.arg_tree_leaves(*args, **kwargs)
@@ -1693,7 +1702,7 @@ def aoti_compile_with_persistent_cache(
         {"TORCHINDUCTOR_CACHE_DIR": persistent_cache_lib.absolute().as_posix()},
     ):
         try:
-            kernel_lib_path = torch._export.aot_compile(
+            kernel_lib_path = aot_compile(
                 f,
                 args,
                 kwargs,

@@ -23,6 +23,7 @@ import threading
 import time
 import types
 import typing
+import warnings
 import weakref
 from contextlib import contextmanager
 from functools import lru_cache, wraps
@@ -2019,12 +2020,12 @@ def object_has_getattribute(value: Any):
     return False
 
 
-def get_custom_getattr(value: Any):
+def get_custom_getattr(value: Any, ignore_nn_module_getattr: bool = False):
     try:
         getattr_fn = inspect.getattr_static(type(value), "__getattr__")
     except AttributeError:
         getattr_fn = None
-    if getattr_fn is torch.nn.Module.__getattr__:
+    if ignore_nn_module_getattr and getattr_fn is torch.nn.Module.__getattr__:
         # ignore this case of getattr
         getattr_fn = None
     return getattr_fn
@@ -2751,3 +2752,18 @@ class Lit:
 
     def __repr__(self):
         return self.s
+
+
+warn_once_cache: Set[str] = set()
+
+
+def warn_once(msg, stacklevel=1):
+    # Dynamo causes all warnings.warn (in user code and in Dynamo code) to print all the time.
+    # https://github.com/pytorch/pytorch/issues/128427.
+    # warn_once is a workaround: if the msg has been warned on before, then we will not
+    # warn again.
+    # NB: it's totally ok to store a cache of all the strings: this is what warnings.warn does as well.
+    if msg in warn_once_cache:
+        return
+    warn_once_cache.add(msg)
+    warnings.warn(msg, stacklevel=stacklevel + 1)
