@@ -14,26 +14,24 @@ import inspect
 import io
 import pickle
 import sys
+import textwrap
 import threading
 import types
 import typing
 import warnings
 import weakref
-from textwrap import dedent
-from typing import (  # noqa: F401
+from typing import (
     Any,
     Callable,
     Dict,
     Final,
     ForwardRef,
-    Generic,
-    get_args,  # new in 3.8
-    get_origin,  # new in 3.8
+    get_args,
+    get_origin,
     List,
     Optional,
     Tuple,
     Type,
-    TypeVar,
     Union,
 )
 
@@ -405,7 +403,7 @@ def get_type_hint_captures(fn):
     # by source inspection. This accounts for the case in which aliases are used
     # to annotate the arguments (e.g device_t = torch.device, and then d: device_t).
     # frontend.py cannot be used here because it includes _jit_internal, so use ast instead.
-    a = ast.parse(dedent(src))
+    a = ast.parse(textwrap.dedent(src))
     if len(a.body) != 1 or not isinstance(a.body[0], ast.FunctionDef):
         raise RuntimeError(f"Expected {fn} to be a function")
     f = a.body[0]
