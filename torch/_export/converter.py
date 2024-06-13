@@ -91,7 +91,6 @@ kind_to_standard_operators = {
     "aten::__not__": operator.not_,
     "aten::__contains__": operator.contains,
     "prim::dtype": get_dtype_as_int,
-    # "profiler::_record_function_enter_new": torch.ops.profiler._record_function_enter_new,
 }
 
 
@@ -632,13 +631,6 @@ class TS2FXGraphConverter:
 
         output_name = node.output().debugName()
         self.name_to_node[output_name] = args[0]
-
-    def convert_profiler__record_function_enter_new(self, node: torch._C.Node):
-        target = torch.ops.profiler._record_function_enter_new
-        args = tuple(self.get_fx_value(input) for input in node.inputs())
-        fx_node = self.fx_graph.call_function(target, args)
-        output_name = node.output().debugName()
-        self.name_to_node[output_name] = fx_node
 
     def convert_profiler__record_function_exit(self, node: torch._C.Node):
         # _record_function_exit has side effect so we keep it in fx.graph

@@ -612,6 +612,7 @@ class TestConverter(TestCase):
         self._check_equal_ts_ep_converter(M(), inp)
 
     def test_aten_tensor(self):
+        # aten::tensor.default
         class Module(torch.nn.Module):
             def forward(self, x: torch.Tensor, y: List[int]) -> torch.Tensor:
                 return torch.tensor(y) + x + 5
@@ -619,14 +620,23 @@ class TestConverter(TestCase):
         inp = (torch.randn(3), torch.randn(3))
         self._check_equal_ts_ep_converter(Module(), inp)
 
-    def test_aten_tensor_from_list(self):
-        class Module(torch.nn.Module):
-            def forward(self, x: torch.Tensor, y: List[int]) -> torch.Tensor:
-                return torch.tensor([y]) + x + 5
 
-        inp = (torch.randn(3), [1, 2, 3])
+        # aten:::tensor.float
+        class Module(torch.nn.Module):
+            def forward(self, x: torch.Tensor, y: float) -> torch.Tensor:
+                return torch.tensor(y) + x + 5
+
+        inp = (torch.randn(3), 1.0)
         self._check_equal_ts_ep_converter(Module(), inp)
 
+
+        # aten::tensor.int
+        class Module(torch.nn.Module):
+            def forward(self, x: torch.Tensor, y: int) -> torch.Tensor:
+                return torch.tensor(y) + x + 5
+
+        inp = (torch.randn(3), 1)
+        self._check_equal_ts_ep_converter(Module(), inp)
 
 if __name__ == "__main__":
     run_tests()
