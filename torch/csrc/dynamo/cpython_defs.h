@@ -8,9 +8,13 @@
 
 #if IS_PYTHON_3_11_PLUS
 
+#define Py_BUILD_CORE
 #include <internal/pycore_frame.h>
+#undef Py_BUILD_CORE
 
-int THP_PyFrame_FastToLocalsWithError(_PyInterpreterFrame* frame);
+int THP_PyFrame_FastToLocalsWithError(
+    _PyInterpreterFrame* frame,
+    int* free_vars_copied);
 
 PyFunctionObject* _PyFunction_CopyWithNewCode(
     PyFunctionObject* o,

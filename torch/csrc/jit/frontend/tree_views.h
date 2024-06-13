@@ -1,5 +1,4 @@
 #pragma once
-#include <c10/util/string_utils.h>
 #include <torch/csrc/jit/frontend/error_report.h>
 #include <torch/csrc/jit/frontend/strtod.h>
 #include <torch/csrc/jit/frontend/tree.h>
@@ -1032,7 +1031,7 @@ struct SliceExpr : public Expr {
 
  private:
   Expr createInt(int64_t value) const {
-    return Expr(Const::create(range(), c10::to_string(value)));
+    return Expr(Const::create(range(), std::to_string(value)));
   }
 };
 

@@ -2,9 +2,8 @@
 
 #include <c10/util/BFloat16.h>
 #include <c10/util/Half.h>
+#include <c10/util/Logging.h>
 #include <c10/util/irange.h>
-#include "caffe2/core/common.h"
-#include "caffe2/core/logging.h"
 #include "caffe2/perfkernels/common.h"
 
 namespace caffe2 {

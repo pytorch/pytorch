@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 """
 The various dataclasses, Enums, namedtuples etc used in AOTAutograd. This includes
 input/output types, metadata, config, function signatures etc.
@@ -17,7 +18,10 @@ from torch._subclasses.fake_tensor import is_fake
 
 from .. import config
 
-from .functional_utils import _check_if_mutation_can_be_in_graph
+from .functional_utils import (
+    _check_if_mutation_can_be_in_graph,
+    FunctionalTensorMetadataEq,
+)
 from .utils import strict_zip
 
 zip = strict_zip
@@ -84,6 +88,15 @@ class OutputAliasInfo:
     dynamic_dims: Optional[Set[int]]
     # requires_grad
     requires_grad: bool
+    # FunctionalTensorWrapper that represents this output.
+    #
+    # Provides us the means to replay views from it.
+    #
+    # We need to wrap the actual FunctionalTensorWrapper with this class so that
+    # we only compare the tensor's metadata. That's because with the transformations
+    # of the model throughout AOTAutograd, the sequence of ViewMeta and the base
+    # tensor might change.
+    functional_tensor: Optional[FunctionalTensorMetadataEq] = None
 
 
 class MutationType(Enum):
@@ -100,6 +113,7 @@ class InputAliasInfo:
     mutates_metadata: bool
     mutations_hidden_from_autograd: bool
     mutations_under_no_grad_or_inference_mode: bool
+    mutation_inductor_storage_resize: bool
     mutates_storage_metadata: bool
     requires_grad: bool
     keep_input_mutations: bool
@@ -114,7 +128,11 @@ class InputAliasInfo:
 
     @functools.cached_property
     def mutation_type(self) -> MutationType:
-        if (not self.mutates_data) and (not self.mutates_metadata):
+        if (
+            (not self.mutates_data)
+            and (not self.mutates_metadata)
+            and not (self.mutation_inductor_storage_resize)
+        ):
             return MutationType.NOT_MUTATED
 
         if _check_if_mutation_can_be_in_graph(
@@ -123,6 +141,8 @@ class InputAliasInfo:
             self.mutates_metadata,
             self.mutations_hidden_from_autograd,
             self.mutations_under_no_grad_or_inference_mode,
+            self.mutates_storage_metadata,
+            self.mutation_inductor_storage_resize,
             self.requires_grad,
         ):
             return MutationType.MUTATED_IN_GRAPH
@@ -266,6 +286,9 @@ class ViewAndMutationMeta:
     # forward, but is turned on during the backward call, then an error is
     # raised
     deterministic: Optional[bool] = None
+
+    # Keeps track of which input indices store parameters (which we will treat as static)
+    static_parameter_indices: List[int] = field(default_factory=list)
 
     # Map of effect type (ex. _EffectType.ORDERED) to token.  If there are
     # side-effectful operators, FunctionalTensorMode will populate this
@@ -473,7 +496,7 @@ class SubclassMeta:
     # in case we made incorrect assumptions about the subclass-ness of our grad_outputs
     #
     # Optional field because we don't compute for inference graphs
-    grad_input_metas: Optional[List[Union[int, SubclassCreationMeta]]]
+    grad_input_metas: Optional[List[Union[int, SubclassCreationMeta]]] = None
 
     def __init__(self):
         # The fields in this class get set after its construction.

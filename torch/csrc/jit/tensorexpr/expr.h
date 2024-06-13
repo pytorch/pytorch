@@ -207,10 +207,10 @@ class TORCH_API Buf : public ExprNode<Buf> {
       const std::string& name_hint,
       const std::vector<ExprHandle>& dims,
       Dtype dtype,
-      c10::optional<ExprHandle> initializer = c10::nullopt,
-      c10::optional<std::vector<ExprHandle>> strides = c10::nullopt,
-      c10::optional<ExprHandle> qscale = c10::nullopt,
-      c10::optional<ExprHandle> qzero = c10::nullopt);
+      std::optional<ExprHandle> initializer = c10::nullopt,
+      std::optional<std::vector<ExprHandle>> strides = c10::nullopt,
+      std::optional<ExprHandle> qscale = c10::nullopt,
+      std::optional<ExprHandle> qzero = c10::nullopt);
 
   // TODO: unique_name
   VarPtr base_handle() const {
@@ -232,7 +232,7 @@ class TORCH_API Buf : public ExprNode<Buf> {
       const std::vector<ExprPtr>& dims,
       Dtype dtype,
       ExprPtr initializer = nullptr,
-      c10::optional<std::vector<ExprPtr>> strides = c10::nullopt,
+      std::optional<std::vector<ExprPtr>> strides = c10::nullopt,
       ExprPtr qscale = nullptr,
       ExprPtr qzero = nullptr)
       : Buf(alloc<Var>(name_hint, kHandle),
@@ -248,7 +248,7 @@ class TORCH_API Buf : public ExprNode<Buf> {
       std::vector<ExprPtr> dims,
       Dtype dtype,
       ExprPtr initializer = nullptr,
-      c10::optional<std::vector<ExprPtr>> strides = c10::nullopt,
+      std::optional<std::vector<ExprPtr>> strides = c10::nullopt,
       ExprPtr qscale = nullptr,
       ExprPtr qzero = nullptr);
 

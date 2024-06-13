@@ -2,19 +2,22 @@
 
 import os
 import sys
+from typing import List
 
 import torch
-from typing import List
 
 # Make the helper files in test/ importable
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.append(pytorch_test_dir)
 from torch.testing._internal.jit_utils import JitTestCase
 
-if __name__ == '__main__':
-    raise RuntimeError("This test file is not meant to be run directly, use:\n\n"
-                       "\tpython test/test_jit.py TESTNAME\n\n"
-                       "instead.")
+if __name__ == "__main__":
+    raise RuntimeError(
+        "This test file is not meant to be run directly, use:\n\n"
+        "\tpython test/test_jit.py TESTNAME\n\n"
+        "instead."
+    )
+
 
 # Tests that Python slice class is supported in TorchScript
 class TestSlice(JitTestCase):
@@ -22,7 +25,9 @@ class TestSlice(JitTestCase):
         def slice_kwarg(x: List[int]):
             return x[slice(1, stop=2)]
 
-        with self.assertRaisesRegex(RuntimeError, "Slice does not accept any keyword arguments"):
+        with self.assertRaisesRegex(
+            RuntimeError, "Slice does not accept any keyword arguments"
+        ):
             torch.jit.script(slice_kwarg)
 
     def test_slice_three_nones(self):
@@ -46,11 +51,13 @@ class TestSlice(JitTestCase):
     def test_slice_stop_only(self):
         def fn(x: List[int]):
             return x[slice(5)]
+
         self.checkScript(fn, (range(10),))
 
     def test_slice_stop_only_with_nones(self):
         def fn(x: List[int]):
             return x[slice(None, 5, None)]
+
         self.checkScript(fn, (range(10),))
 
     def test_slice_start_stop(self):
@@ -136,8 +143,8 @@ class TestSlice(JitTestCase):
         num_outputs = {len(x.output().type().elements()) for x in slices}
         # there should be only one tupleSlice with length of 2
         self.assertTrue(num_outputs == {2})
-        self.run_pass('lower_all_tuples', tuple_graph)
-        self.assertTrue('Tuple' not in str(tuple_graph))
+        self.run_pass("lower_all_tuples", tuple_graph)
+        self.assertTrue("Tuple" not in str(tuple_graph))
 
     def test_module_list_slicing(self):
         class Bar(torch.nn.Module):

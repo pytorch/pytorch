@@ -4,20 +4,12 @@ import sys
 
 import torch
 import torch.distributed as dist
-from torch.distributed._shard import (
-    shard_parameter,
-)
-from torch.testing._internal.common_distributed import (
-    requires_nccl,
-    skip_if_lt_x_gpu,
-)
-from torch.testing._internal.common_utils import (
-    TEST_WITH_DEV_DBG_ASAN,
-    run_tests,
-)
+from torch.distributed._shard import shard_parameter
+from torch.testing._internal.common_distributed import requires_nccl, skip_if_lt_x_gpu
+from torch.testing._internal.common_utils import run_tests, TEST_WITH_DEV_DBG_ASAN
 from torch.testing._internal.distributed._shard.sharded_tensor import (
-    TEST_GPU_NUM,
     ShardedTensorTestBase,
+    TEST_GPU_NUM,
     with_comms,
 )
 from torch.testing._internal.distributed._shard.sharded_tensor._test_ops_common import (
@@ -184,7 +176,12 @@ class TestShardedEmbeddingBag(ShardedTensorTestBase):
         self._run_sharded_embedding_bag(spec, [5, 4], 17, 12, "mean")
         self._run_sharded_embedding_bag(spec, [6, 7], 21, 11, "max")
         self._run_sharded_embedding_bag(
-            spec, [5, 5], 17, 14, "sum", max_norm=2.5,
+            spec,
+            [5, 5],
+            17,
+            14,
+            "sum",
+            max_norm=2.5,
         )
         self._run_sharded_embedding_bag(
             spec,

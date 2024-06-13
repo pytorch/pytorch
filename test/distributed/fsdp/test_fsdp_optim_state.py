@@ -363,7 +363,7 @@ class TestFSDPOptimState(FSDPTest):
             # these settings are not implemented since the transformer is
             # wrapped with FSDP at the top-level, which means that there is
             # only a single flat parameter, making these booleans vacuous
-            raise NotImplementedError()
+            raise NotImplementedError
         if group is None:
             group = dist.distributed_c10d._get_default_group()
         model = TransformerWithSharedParams.init(
@@ -1436,7 +1436,7 @@ class TestFSDPOptimState(FSDPTest):
         def get_warning_context():
             warning_regex = "`optim_input` argument is deprecated"
             return self.assertWarnsRegex(
-                expected_warning=UserWarning, expected_regex=warning_regex
+                expected_warning=FutureWarning, expected_regex=warning_regex
             )
 
         self._run_on_all_optim_state_apis(

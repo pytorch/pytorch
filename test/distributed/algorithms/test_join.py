@@ -20,7 +20,10 @@ from torch.testing._internal.common_distributed import (
 from torch.testing._internal.common_utils import run_tests, TEST_WITH_DEV_DBG_ASAN
 
 if TEST_WITH_DEV_DBG_ASAN:
-    print("Skip dev-asan as torch + multiprocessing spawn have known issues", file=sys.stderr)
+    print(
+        "Skip dev-asan as torch + multiprocessing spawn have known issues",
+        file=sys.stderr,
+    )
     sys.exit(0)
 
 BACKEND = dist.Backend.NCCL if torch.cuda.is_available() else dist.Backend.GLOO
@@ -42,12 +45,8 @@ class AllReducerJoinHook(JoinHook):
             iteration.
         run_post_hook (bool): a flag enabling the post-hook logic.
     """
-    def __init__(
-        self,
-        allreducer,
-        num_allreduces,
-        run_post_hook
-    ):
+
+    def __init__(self, allreducer, num_allreduces, run_post_hook):
         self.allreducer = allreducer
         self.num_allreduces = num_allreduces
         self.run_post_hook = run_post_hook
@@ -73,7 +72,9 @@ class AllReducerJoinHook(JoinHook):
         common_rank = self.allreducer.find_common_rank(rank, is_last_joiner)
         device = self.allreducer.device
         if rank == common_rank:
-            self.allreducer.post_hook_tensor = torch.tensor([AFTER_CONSTANT], device=device)
+            self.allreducer.post_hook_tensor = torch.tensor(
+                [AFTER_CONSTANT], device=device
+            )
         dist.broadcast(self.allreducer.post_hook_tensor, src=common_rank)
 
 
@@ -82,6 +83,7 @@ class AllReducer(Joinable):
     Example :class:`Joinable` that performs some number of all-reduces as its
     per-iteration collective communication.
     """
+
     def __init__(self, device, process_group):
         super().__init__()
         self.device = device
@@ -109,11 +111,7 @@ class AllReducer(Joinable):
         """
         num_allreduces = kwargs.get("num_allreduces", 1)
         run_post_hook = kwargs.get("run_post_hooks", False)
-        return AllReducerJoinHook(
-            self,
-            num_allreduces,
-            run_post_hook
-        )
+        return AllReducerJoinHook(self, num_allreduces, run_post_hook)
 
     @property
     def join_device(self) -> torch.device:
@@ -127,17 +125,16 @@ class AllReducer(Joinable):
         r"""
         Returns the max rank of the ones to consider over the process group.
         """
-        common_rank = torch.tensor(
-            [rank if to_consider else -1],
-            device=self.device
-        )
+        common_rank = torch.tensor([rank if to_consider else -1], device=self.device)
         dist.all_reduce(common_rank, op=dist.ReduceOp.MAX, group=self.process_group)
         common_rank = common_rank.item()
         assert common_rank >= 0
         return common_rank
 
+
 class TestJoin(MultiProcessTestCase):
     r"""Test cases for the generic join context."""
+
     def setUp(self):
         super().setUp()
         os.environ["WORLD_SIZE"] = str(self.world_size)
@@ -146,8 +143,11 @@ class TestJoin(MultiProcessTestCase):
 
     @property
     def device(self):
-        return torch.device(self.rank) if BACKEND == dist.Backend.NCCL \
+        return (
+            torch.device(self.rank)
+            if BACKEND == dist.Backend.NCCL
             else torch.device("cpu")
+        )
 
     @property
     def world_size(self):
@@ -170,10 +170,7 @@ class TestJoin(MultiProcessTestCase):
     def dist_init(self, rank, world_size, backend=BACKEND):
         store = dist.FileStore(self.file_name, world_size)
         return dist.init_process_group(
-            backend=backend,
-            store=store,
-            rank=rank,
-            world_size=world_size
+            backend=backend, store=store, rank=rank, world_size=world_size
         )
 
     def construct_uneven_inputs(self, base, offset, device=None):
@@ -231,32 +228,35 @@ class TestJoin(MultiProcessTestCase):
         self.dist_init(self.rank, self.world_size)
 
         allreducers = [
-            AllReducer(self.device, self.process_group)
-            for _ in range(num_joinables)
+            AllReducer(self.device, self.process_group) for _ in range(num_joinables)
         ]
         for allreducer in allreducers:
             self.assertEqual(allreducer.post_hook_tensor.item(), BEFORE_CONSTANT)
 
-        inputs = self.construct_uneven_inputs(self.base_num_inputs, self.offset) \
-            if uneven_inputs \
+        inputs = (
+            self.construct_uneven_inputs(self.base_num_inputs, self.offset)
+            if uneven_inputs
             else self.construct_even_inputs(self.base_num_inputs)
+        )
         allreduce_total = 0
 
         # Expect a `RuntimeError` if `throw_on_early_termination=True`
         # Rank 0 exhausts its inputs first
-        expected_msg = "Rank 0 exhausted all inputs." if self.rank == 0 \
-            else "Detected at least one rank that exhausted inputs. " \
+        expected_msg = (
+            "Rank 0 exhausted all inputs."
+            if self.rank == 0
+            else "Detected at least one rank that exhausted inputs. "
             "Throwing across all ranks."
+        )
         with self.assertRaisesRegex(
-            RuntimeError,
-            expected_msg
+            RuntimeError, expected_msg
         ) if throw_on_early_termination else contextlib.nullcontext():
             with Join(
                 allreducers,
                 enable=enable,
                 throw_on_early_termination=throw_on_early_termination,
                 num_allreduces=num_allreduces,
-                run_post_hooks=run_post_hooks
+                run_post_hooks=run_post_hooks,
             ):
                 for _ in inputs:
                     for allreducer in allreducers:
@@ -275,9 +275,7 @@ class TestJoin(MultiProcessTestCase):
             for allreducer in allreducers:
                 self.assertEqual(allreducer.post_hook_tensor.item(), AFTER_CONSTANT)
 
-    @require_n_gpus_for_nccl_backend(
-        WORLD_SIZE, BACKEND
-    )
+    @require_n_gpus_for_nccl_backend(WORLD_SIZE, BACKEND)
     def test_single_joinable_main_hooks(self):
         r"""Tests the main hooks of a single :class:`Joinable`."""
         num_joinables = 1
@@ -298,12 +296,10 @@ class TestJoin(MultiProcessTestCase):
             throw_on_early_termination=False,
             num_allreduces=num_allreduces,
             run_post_hooks=run_post_hooks,
-            expected_total=expected_total
+            expected_total=expected_total,
         )
 
-    @require_n_gpus_for_nccl_backend(
-        WORLD_SIZE, BACKEND
-    )
+    @require_n_gpus_for_nccl_backend(WORLD_SIZE, BACKEND)
     def test_single_joinable_post_hooks(self):
         r"""Tests the post-hooks of a single :class:`Joinable`."""
         num_joinables = 1
@@ -317,12 +313,10 @@ class TestJoin(MultiProcessTestCase):
             throw_on_early_termination=False,
             num_allreduces=num_allreduces,
             run_post_hooks=run_post_hooks,
-            expected_total=None
+            expected_total=None,
         )
 
-    @require_n_gpus_for_nccl_backend(
-        WORLD_SIZE, BACKEND
-    )
+    @require_n_gpus_for_nccl_backend(WORLD_SIZE, BACKEND)
     def test_single_joinable(self):
         r"""
         Tests the main hooks and post-hooks of a single :class:`Joinable`
@@ -347,12 +341,10 @@ class TestJoin(MultiProcessTestCase):
             throw_on_early_termination=False,
             num_allreduces=num_allreduces,
             run_post_hooks=run_post_hooks,
-            expected_total=expected_total
+            expected_total=expected_total,
         )
 
-    @require_n_gpus_for_nccl_backend(
-        WORLD_SIZE, BACKEND
-    )
+    @require_n_gpus_for_nccl_backend(WORLD_SIZE, BACKEND)
     def test_multiple_joinables(self):
         r"""
         Tests the main hooks and post-hooks of multiple :class:`Joinable` s
@@ -378,12 +370,10 @@ class TestJoin(MultiProcessTestCase):
             throw_on_early_termination=False,
             num_allreduces=num_allreduces,
             run_post_hooks=run_post_hooks,
-            expected_total=expected_total
+            expected_total=expected_total,
         )
 
-    @require_n_gpus_for_nccl_backend(
-        WORLD_SIZE, BACKEND
-    )
+    @require_n_gpus_for_nccl_backend(WORLD_SIZE, BACKEND)
     def test_single_joinable_disable(self):
         r"""Tests ``enable=False`` for a single :class:`Joinable`."""
         num_joinables = 1
@@ -401,12 +391,10 @@ class TestJoin(MultiProcessTestCase):
             throw_on_early_termination=False,
             num_allreduces=num_allreduces,
             run_post_hooks=run_post_hooks,
-            expected_total=expected_total
+            expected_total=expected_total,
         )
 
-    @require_n_gpus_for_nccl_backend(
-        WORLD_SIZE, BACKEND
-    )
+    @require_n_gpus_for_nccl_backend(WORLD_SIZE, BACKEND)
     def test_multiple_joinable_disable(self):
         r"""
         Tests ``enable=False`` for multiple :class:`Joinable` s.
@@ -429,12 +417,10 @@ class TestJoin(MultiProcessTestCase):
             throw_on_early_termination=False,
             num_allreduces=num_allreduces,
             run_post_hooks=run_post_hooks,
-            expected_total=expected_total
+            expected_total=expected_total,
         )
 
-    @require_n_gpus_for_nccl_backend(
-        WORLD_SIZE, BACKEND
-    )
+    @require_n_gpus_for_nccl_backend(WORLD_SIZE, BACKEND)
     def test_single_joinable_throw(self):
         r"""
         Tests ``throw_on_early_termination=True`` for a single
@@ -452,12 +438,10 @@ class TestJoin(MultiProcessTestCase):
             throw_on_early_termination=throw_on_early_termination,
             num_allreduces=num_allreduces,
             run_post_hooks=run_post_hooks,
-            expected_total=None
+            expected_total=None,
         )
 
-    @require_n_gpus_for_nccl_backend(
-        WORLD_SIZE, BACKEND
-    )
+    @require_n_gpus_for_nccl_backend(WORLD_SIZE, BACKEND)
     def test_multiple_joinables_throw(self):
         r"""
         Tests ``throw_on_early_termination=True`` for multiple
@@ -478,12 +462,10 @@ class TestJoin(MultiProcessTestCase):
             throw_on_early_termination=throw_on_early_termination,
             num_allreduces=num_allreduces,
             run_post_hooks=run_post_hooks,
-            expected_total=None
+            expected_total=None,
         )
 
-    @require_n_gpus_for_nccl_backend(
-        WORLD_SIZE, BACKEND
-    )
+    @require_n_gpus_for_nccl_backend(WORLD_SIZE, BACKEND)
     def test_join_kwargs(self):
         r"""
         Tests passing keyword arguments to the context manager.
@@ -505,8 +487,9 @@ class TestJoin(MultiProcessTestCase):
             throw_on_early_termination=False,
             num_allreduces=num_allreduces,
             run_post_hooks=run_post_hooks,
-            expected_total=expected_total
+            expected_total=expected_total,
         )
+
 
 if __name__ == "__main__":
     run_tests()

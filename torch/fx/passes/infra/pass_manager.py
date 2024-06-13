@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import inspect
 import logging
 from queue import Queue
@@ -293,7 +294,7 @@ class PassManager:
                         for p in self.passes[:i]
                     ]
                     msg = f"An error occurred when running the '{fn_name}' pass after the following passes: {prev_pass_names}"
-                    raise Exception(msg) from e
+                    raise Exception(msg) from e  # noqa: TRY002
 
             # If the graph no longer changes, then we can stop running these passes
             overall_modified = overall_modified or modified

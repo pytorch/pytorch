@@ -47,9 +47,6 @@ void* initTopoInfo(Topology topology, NvlMesh nvlMesh, size_t rank);
 // Topology Detection
 ////////////////////////////////////////////////////////////////////////////////
 
-// TODO: find a better way to determine this
-static constexpr size_t kMaxNvLinks = 20;
-
 static std::ostream& operator<<(std::ostream& os, const NvlMesh& nvlMesh) {
   std::ostringstream oss;
   for (size_t i = 0; i < kMaxDevices; ++i) {
@@ -97,6 +94,9 @@ static NvlMesh getNvlMesh(const std::vector<std::string>& rankToBusId) {
         driverApi->nvmlDeviceGetHandleByPciBusId_v2_(
             rankToBusId[r].c_str(), &devices[r]) == NVML_SUCCESS);
   }
+
+  // TODO: find a better way to determine this
+  constexpr size_t kMaxNvLinks = 20;
 
   // For each device, loop over devices connected to it via NVLink
   for (size_t idx = 0; idx < worldSize; ++idx) {
@@ -207,13 +207,12 @@ IntraNodeComm::IntraNodeComm(
     c10::intrusive_ptr<c10d::Store> store,
     size_t rank,
     size_t worldSize,
-    c10::optional<size_t> bufferSize)
+    std::optional<size_t> bufferSize)
     : store_(std::move(store)),
       rank_(rank),
       worldSize_(worldSize),
-      bufferSize_(bufferSize.has_value() ? *bufferSize : kDefaultBufferSize) {
-  rendezvous();
-}
+      bufferSize_(bufferSize.has_value() ? *bufferSize : kDefaultBufferSize),
+      barrierReady_(at::cuda::CUDAEvent()) {}
 
 IntraNodeComm::~IntraNodeComm() {
   if (!isInitialized_) {
@@ -289,7 +288,7 @@ bool IntraNodeComm::rendezvous() {
     return true;
   }
 #if !defined(USE_ROCM) && defined(PYTORCH_C10_DRIVER_API_SUPPORTED)
-  if (!isIntraNodeCommSupported() || !isEnabled() || worldSize_ < 2 ||
+  if (!isIntraNodeCommSupported() || worldSize_ < 2 ||
       worldSize_ > kMaxDevices) {
     return false;
   }

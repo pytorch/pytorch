@@ -2,11 +2,13 @@
 
 import collections
 import contextlib
+import enum
 import functools
 import importlib
 import inspect
 import itertools
 import random
+import re
 import sys
 import threading
 import types
@@ -32,7 +34,8 @@ import torch.nn
 from torch._guards import TracingContext
 
 from .. import variables
-from ..exc import unimplemented
+from ..create_parameter_op import do_not_convert_to_tracable_parameter
+from ..exc import ObservedException, unimplemented
 from ..guards import GuardBuilder, install_guard
 from ..source import AttrSource, GetItemSource, ODictGetItemSource, RandomValueSource
 from ..utils import (
@@ -55,10 +58,7 @@ from .dicts import DefaultDictVariable
 
 
 def is_standard_setattr(val):
-    return val in (
-        object.__setattr__,
-        torch.nn.Module.__setattr__,
-    )
+    return val in (object.__setattr__,)
 
 
 class UserDefinedVariable(VariableTracker):
@@ -106,11 +106,13 @@ class UserDefinedClassVariable(UserDefinedVariable):
 
     def var_getattr(self, tx, name: str) -> "VariableTracker":
         from .. import trace_rules
-        from . import ConstantVariable
+        from . import ConstantVariable, EnumVariable
         from .builder import VariableBuilder
 
         if name == "__name__":
             return ConstantVariable.create(self.value.__name__)
+        elif name == "__qualname__":
+            return ConstantVariable.create(self.value.__qualname__)
 
         source = AttrSource(self.source, name) if self.source is not None else None
         try:
@@ -141,14 +143,16 @@ class UserDefinedClassVariable(UserDefinedVariable):
         if self.value is collections.OrderedDict and name == "fromkeys":
             return super().var_getattr(tx, name)
 
-        if name in getattr(self.value, "__dict__", {}) or (
+        if ConstantVariable.is_literal(obj):
+            return ConstantVariable.create(obj)
+        elif isinstance(obj, enum.Enum):
+            return EnumVariable(obj)
+        elif name in getattr(self.value, "__dict__", {}) or (
             self.value.__module__.startswith("torch.")
             or self.value.__module__ == "torch"
         ):
             if source:
                 return VariableBuilder(tx, source)(obj)
-        elif ConstantVariable.is_literal(obj):
-            return ConstantVariable.create(obj)
 
         return super().var_getattr(tx, name)
 
@@ -247,6 +251,10 @@ class UserDefinedClassVariable(UserDefinedVariable):
             return BuiltinVariable.call_custom_dict_fromkeys(
                 tx, self.value, *args, **kwargs
             )
+        elif name == "__eq__" and len(args) == 1 and hasattr(args[0], "value"):
+            return variables.ConstantVariable(self.value == args[0].value)
+        elif name == "__ne__" and len(args) == 1 and hasattr(args[0], "value"):
+            return variables.ConstantVariable(self.value != args[0].value)
 
         return super().call_method(tx, name, args, kwargs)
 
@@ -368,17 +376,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 else UserDefinedObjectVariable,
                 {},
             )
-            if (
-                inspect.getattr_static(self.value, "__init__", None)
-                is torch.nn.Module.__init__
-            ):
-                tx.output.side_effects.store_attr(
-                    var,
-                    "__call_nn_module_init",
-                    variables.ConstantVariable.create(True),
-                )
-                return var
-            else:
+            with do_not_convert_to_tracable_parameter():
                 var.call_method(tx, "__init__", args, kwargs)
                 return var
         elif variables.CustomizedDictVariable.is_matching_cls(self.value):
@@ -431,6 +429,9 @@ class UserDefinedClassVariable(UserDefinedVariable):
             )
 
             return tensor_variable
+        elif issubclass(self.value, enum.Enum) and len(args) == 1 and not kwargs:
+            options = {"mutable_local": MutableLocal()}
+            return variables.EnumVariable.create(self.value, args[0], options)
 
         return super().call_function(tx, args, kwargs)
 
@@ -567,6 +568,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 keys = list(self.value.keys())
                 assert all(map(ConstantVariable.is_literal, keys))
                 install_guard(self.source.make_guard(GuardBuilder.DICT_CONST_KEYS))
+                tx.output.guard_on_key_order.add(self.source.name())
                 return TupleVariable([ConstantVariable.create(k) for k in keys])
 
             if (
@@ -578,6 +580,8 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             ):
                 assert not kwargs
                 assert self.source  # OrderedDict, dict subtypes must always have source
+
+                # TODO(anijain2305) - Why do we need to guard on all keys?
                 install_guard(self.source.make_guard(GuardBuilder.DICT_CONST_KEYS))
                 return ConstantVariable.create(
                     args[0].as_python_constant() in self.value
@@ -596,12 +600,23 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                             [key, self.odict_getitem(tx, key)],
                         )
                     )
+                tx.output.guard_on_key_order.add(self.source.name())
                 return TupleVariable(items)
 
             if method is collections.OrderedDict.__getitem__ and len(args) == 1:
                 assert not kwargs
                 assert self.source  # OrderedDict, dict subtypes must always have source
                 return self.odict_getitem(tx, args[0])
+
+            if (
+                method in (object.__ne__, object.__eq__)
+                and len(args) == 1
+                and not kwargs
+                and hasattr(args[0], "value")
+            ):
+                return ConstantVariable(
+                    (self.value is args[0].value) is (method is object.__eq__)
+                )
 
             # check for methods implemented in C++
             if isinstance(method, types.FunctionType):
@@ -611,6 +626,10 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                     else AttrSource(AttrSource(self.source, "__class__"), name)
                 )
                 # TODO(jansel): add a guard to check for monkey patching?
+                from ..mutation_guard import unpatched_nn_module_init
+
+                if method is torch.nn.Module.__init__:
+                    method = unpatched_nn_module_init
                 return UserMethodVariable(method, self, source=source).call_function(
                     tx, args, kwargs
                 )
@@ -681,6 +700,9 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             example_value = self.value(*args, **kwargs)
             source = RandomValueSource(random_call_index)
             tx.output.random_calls.append((self.value, args, kwargs))
+            # TODO: arguably, this should route to wrap_symint/wrap_symfloat
+            # (currently hypothetical), but I'm not going to poke my hand in
+            # this nest for now
             return VariableBuilder(tx, source).wrap_unspecialized_primitive(
                 example_value
             )
@@ -769,15 +791,31 @@ class UserDefinedObjectVariable(UserDefinedVariable):
 
     def _getattr_static(self, name):
         if (
-            isinstance(self.value, (torch.nn.Module, PyTreeSpec))
+            isinstance(self.value, PyTreeSpec)
             or "__slots__" in self.value.__class__.__dict__
             or type(self.value) == threading.local
         ):
-            # getattr_static doesn't work on these
+            try:
+                cls_var = inspect.getattr_static(
+                    self.value.__class__, name, NO_SUCH_SUBOBJ
+                )
+                if cls_var is not NO_SUCH_SUBOBJ and name not in self.value.__dict__:
+                    # maybe user-defined @property that we need to inline
+                    return cls_var
+            except AttributeError:
+                pass  # __slots__
             subobj = getattr(self.value, name)
         else:
             subobj = inspect.getattr_static(self.value, name)
         return subobj
+
+    def has_key_in_generic_dict(self, tx, key):
+        self._check_for_getattribute()
+        if tx.output.side_effects.has_pending_mutation_of_attr(self, key):
+            mutated_attr = tx.output.side_effects.load_attr(self, key, deleted_ok=True)
+            return not isinstance(mutated_attr, variables.DeletedVariable)
+
+        return key in self.value.__dict__
 
     def var_getattr(self, tx, name):
         from .. import trace_rules
@@ -787,26 +825,53 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         value = self.value
         source = AttrSource(self.source, name) if self.source else None
         self._check_for_getattribute()
-        getattr_fn = self._check_for_getattr()
 
         if tx.output.side_effects.has_pending_mutation_of_attr(self, name):
             return tx.output.side_effects.load_attr(self, name)
+
+        if name == "__dict__":
+            options = {"source": source}
+            return variables.GetAttrVariable(self, name, **options)
 
         try:
             subobj = self._getattr_static(name)
         except AttributeError:
             subobj = NO_SUCH_SUBOBJ
+            getattr_fn = self._check_for_getattr()
             if isinstance(getattr_fn, types.FunctionType):
-                return variables.UserMethodVariable(
-                    getattr_fn, self, source=source
+                # Dynamo is going to trace the __getattr__ function with
+                # args=name. Set the source accordingly.
+                new_source = None
+                if self.source:
+                    new_source = AttrSource(self.source, "__getattr__")
+                out = variables.UserMethodVariable(
+                    getattr_fn, self, source=new_source
                 ).call_function(tx, [ConstantVariable.create(name)], {})
+
+                if self.source and getattr_fn is torch.nn.Module.__getattr__:
+                    if isinstance(
+                        out,
+                        (
+                            variables.UnspecializedNNModuleVariable,
+                            variables.NNModuleVariable,
+                        ),
+                    ):
+                        # nn_module_stack source is BC surface area. Ensure that
+                        # mod._modules["linear"] is reflected as mod.linear for
+                        # nn_module_stack.
+                        out.set_nn_module_stack_source(
+                            AttrSource(self.get_nn_module_stack_source(), name)
+                        )
+                return out
+
             elif getattr_fn is not None:
                 unimplemented("UserDefined with non-function __getattr__")
 
         if isinstance(subobj, property):
-            # Rewrite the source being explicit about reading it statically.
             if self.source:
-                source = AttrSource(self.source, name, get_static=True)
+                # Read the class attribute to reach the property
+                source = AttrSource(AttrSource(self.source, "__class__"), name)
+                # Get the getter function
                 source = AttrSource(source, "fget")
             return variables.UserMethodVariable(
                 subobj.fget, self, source=source
@@ -868,6 +933,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 (
                     torch.Tensor,
                     torch.nn.Module,
+                    re.Pattern,
                 ),
             )
         ):
@@ -876,10 +942,21 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 return VariableBuilder(tx, source)(subobj)
             elif ConstantVariable.is_literal(subobj):
                 return ConstantVariable.create(subobj)
+            elif (
+                type(subobj) == torch.utils._pytree.TreeSpec
+                or type(subobj) == torch.utils._pytree.LeafSpec
+                or type(value) == torch.utils._pytree.TreeSpec
+            ):
+                from .builder import SourcelessBuilder
+
+                return SourcelessBuilder.create(tx, subobj)
 
         if (
             name not in getattr(value, "__dict__", {})
-            and type(value).__module__.startswith("torch.")
+            and (
+                type(value).__module__.startswith("torch.")
+                or isinstance(subobj, re.Pattern)
+            )
             and "torch.optim" not in type(value).__module__
             and not callable(value)
             and not isinstance(subobj, types.MethodDescriptorType)
@@ -932,14 +1009,35 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             install_guard(
                 AttrSource(self.source, name).make_guard(GuardBuilder.HASATTR)
             )
-        if self._check_for_getattribute() or self._check_for_getattr():
-            unimplemented("hasattr with custom __getattr__")
+        if self._check_for_getattribute():
+            unimplemented("hasattr with custom __getattribute__")
 
         try:
             self._getattr_static(name)
             return variables.ConstantVariable.create(True)
         except AttributeError:
-            return variables.ConstantVariable.create(False)
+            # Now check in __getattr__ function
+            getattr_fn = self._check_for_getattr()
+            if isinstance(getattr_fn, types.FunctionType):
+                # Dynamo is going to trace the __getattr__ function with
+                # args=name. Set the source accordingly.
+                new_source = None
+                if self.source:
+                    new_source = AttrSource(self.source, "__getattr__")
+                try:
+                    result = variables.UserMethodVariable(
+                        getattr_fn, self, source=new_source
+                    ).call_function(tx, [variables.ConstantVariable.create(name)], {})
+
+                    return variables.ConstantVariable.create(
+                        not isinstance(result, variables.DeletedVariable)
+                    )
+                except ObservedException:
+                    return variables.ConstantVariable.create(False)
+            elif getattr_fn is None:
+                return variables.ConstantVariable.create(False)
+            else:
+                unimplemented("UserDefined with non-function __getattr__")
 
     def odict_getitem(self, tx, key):
         from .builder import VariableBuilder
@@ -957,6 +1055,30 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             tx,
             ODictGetItemSource(self.source, index),
         )(collections.OrderedDict.__getitem__(self.value, key.as_python_constant()))
+
+
+class SourcelessGraphModuleVariable(UserDefinedObjectVariable):
+    def __init__(
+        self,
+        value,
+        **kwargs,
+    ):
+        super().__init__(value, **kwargs)
+
+    def call_method(
+        self,
+        tx,
+        name,
+        args: "List[VariableTracker]",
+        kwargs: "Dict[str, VariableTracker]",
+    ) -> "VariableTracker":
+        fn_variable = variables.UserFunctionVariable(self.value.forward.__func__)
+        args = [self] + args
+        return tx.inline_user_function_return(
+            fn_variable,
+            args,
+            kwargs,
+        )
 
 
 class KeyedJaggedTensorVariable(UserDefinedObjectVariable):
@@ -980,6 +1102,12 @@ class KeyedJaggedTensorVariable(UserDefinedObjectVariable):
             with TracingContext.patch(force_unspec_int_unbacked_size_like=True):
                 return super().var_getattr(tx, name)
         return super().var_getattr(tx, name)
+
+
+class RemovableHandleClass:
+    # Dummy class to pass to python_type of RemovableHandleVariable
+    # Useful for isinstance check on hooks
+    pass
 
 
 class RemovableHandleVariable(VariableTracker):
@@ -1012,3 +1140,6 @@ class RemovableHandleVariable(VariableTracker):
             return
         # unreachable due to codegen.add_cache() when the hook is installed
         super().reconstruct(codegen)
+
+    def python_type(self):
+        return RemovableHandleClass

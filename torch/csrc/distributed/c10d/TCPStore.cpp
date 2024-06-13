@@ -5,13 +5,9 @@
 #include <torch/csrc/distributed/c10d/logging.h>
 
 #include <fcntl.h>
-#include <algorithm>
-#include <array>
 #include <chrono>
 #include <fstream>
 #include <random>
-#include <streambuf>
-#include <system_error>
 #include <thread>
 #include <unordered_map>
 #include <utility>
@@ -257,7 +253,7 @@ class SendBuffer {
   }
 
   void flush() {
-    if (buffer.size() > 0) {
+    if (!buffer.empty()) {
       client.sendRaw(buffer.data(), buffer.size());
       buffer.clear();
     }
@@ -272,7 +268,7 @@ using detail::Socket;
 TCPStore::TCPStore(
     const std::string& masterAddr,
     std::uint16_t masterPort,
-    c10::optional<int> numWorkers,
+    std::optional<int> numWorkers,
     bool isServer,
     const std::chrono::milliseconds& timeout,
     bool waitWorkers)
@@ -281,7 +277,7 @@ TCPStore::TCPStore(
           TCPStoreOptions{
               masterPort,
               isServer,
-              numWorkers ? c10::optional<std::size_t>(*numWorkers)
+              numWorkers ? std::optional<std::size_t>(*numWorkers)
                          : c10::nullopt,
               waitWorkers,
               timeout}} {}
@@ -295,6 +291,17 @@ TCPStore::TCPStore(std::string host, const TCPStoreOptions& opts)
     TORCH_CHECK(
         ::c10d::detail::is_libuv_tcpstore_backend_available(),
         "use_libuv was requested but PyTorch was build without libuv support");
+
+    if (opts.masterListenFd.has_value()) {
+      // TODO(xilunwu): support this init method after testing
+      constexpr auto* msg =
+          "The libuv TCPStore backend does not support initialization with an listen fd. "
+          "Please switch to the legacy TCPStore by setting environment variable USE_LIBUV "
+          "to \"0\".";
+      C10D_ERROR(msg);
+      C10_THROW_ERROR(NotImplementedError, msg);
+      return;
+    }
   }
 
   Socket::initialize();
@@ -390,7 +397,7 @@ void TCPStore::waitForWorkers() {
   }
 }
 
-void TCPStore::validate(void) {
+void TCPStore::validate() {
   const std::lock_guard<std::mutex> lock(activeOpLock_);
   detail::SendBuffer buffer(*client_, detail::QueryType::VALIDATE);
   buffer.appendValue<std::uint32_t>(c10d::detail::validationMagicNumber);
@@ -625,7 +632,7 @@ bool TCPStore::hasExtendedApi() const {
 std::unordered_map<std::string, std::unordered_map<std::string, double>>
 TCPStore::collectClientCounters() const noexcept {
   std::unordered_map<std::string, std::unordered_map<std::string, double>> res;
-  for (auto kv : clientCounters_) {
+  for (const auto& kv : clientCounters_) {
     res[kv.first] = kv.second.observe();
   }
   return res;

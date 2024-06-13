@@ -3,7 +3,6 @@ import contextlib
 import functools
 import logging
 import os
-import re
 import unittest.mock
 
 import torch
@@ -85,7 +84,7 @@ def single_record_test(**kwargs):
 class LoggingTests(LoggingTestCase):
     test_bytecode = multi_record_test(2, bytecode=True)
     test_output_code = multi_record_test(2, output_code=True)
-    test_aot_graphs = multi_record_test(2, aot_graphs=True)
+    test_aot_graphs = multi_record_test(3, aot_graphs=True)
 
     @requires_cuda
     @make_logging_test(schedule=True)
@@ -164,7 +163,7 @@ from user code:
         import torch._inductor.lowering
 
         def throw(x):
-            raise AssertionError()
+            raise AssertionError
 
         # inject an error in the lowerings
         dict_entries = {}
@@ -189,7 +188,7 @@ WON'T CONVERT inductor_error_fn test_logging.py line N
 due to:
 Traceback (most recent call last):
   File "test_logging.py", line N, in throw
-    raise AssertionError()
+    raise AssertionError
 torch._dynamo.exc.BackendCompilerFailed: backend='inductor' raised:
 LoweringException: AssertionError:
   target: aten.round.default
@@ -469,24 +468,6 @@ LoweringException: AssertionError:
 
         self.assertTrue(found_funcname)
 
-    @make_logging_test(graph_sizes=True)
-    def test_graph_sizes_dynamic(self, records):
-        def fn(a, b):
-            return a @ b
-
-        fn_opt = torch._dynamo.optimize("eager", dynamic=False)(fn)
-        fn_opt(torch.randn(10, 20), torch.randn(20, 30))
-
-        fn_opt2 = torch._dynamo.optimize("eager", dynamic=True)(fn)
-        fn_opt2(torch.randn(5, 10), torch.randn(10, 15))
-
-        self.assertEqual(len(records), 2)
-        self.assertNotIn("concrete", records[0].getMessage())
-        lines = records[1].getMessage().split("\n")
-        for line in lines:
-            if "concrete" in line:
-                self.assertIsNotNone(re.search(r"\(concrete\): \(\d+, \d+\)", line))
-
     def test_invalid_artifact_flag(self):
         with self.assertRaises(ValueError):
             torch._logging.set_logs(aot_graphs=5)
@@ -701,14 +682,18 @@ exclusions = {
     "aot_graphs",
     "post_grad_graphs",
     "compiled_autograd",
+    "compiled_autograd_verbose",
     "recompiles",
     "recompiles_verbose",
     "graph_breaks",
+    "graph",
+    "graph_sizes",
     "ddp_graphs",
     "perf_hints",
     "not_implemented",
     "trace_source",
     "trace_call",
+    "trace_bytecode",
     "custom_format_test_artifact",
     "onnx",
     "onnx_diagnostics",
