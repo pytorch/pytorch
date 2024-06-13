@@ -41,8 +41,11 @@ static_weight_shapes = True
 # Applies CSE to the graph before partitioning
 cse = True
 
+
+enable_autograd_cache = os.environ.get("ENABLE_AOT_AUTOGRAD_CACHE", "0") == "1"
+
 # When AOTAutograd regenerates aliased graph outputs,
-# attempte to use functionalization's view-replay logic
+# attempt to use functionalization's view-replay logic
 # before falling back to the autograd engine's view replay or as_strided.
 # This can have some perf implications
 # (although for many models this will not matter).
@@ -58,9 +61,6 @@ cse = True
 # once XLA pin update works,
 # or default config to true and fix relevant bugs
 from torch._inductor.config import is_fbcode
-
-enable_autograd_cache = os.environ.get("ENABLE_AOT_AUTOGRAD_CACHE", "0") == "1"
-
 view_replay_for_aliased_outputs = (not is_fbcode()) and (not enable_autograd_cache)
 
 # Restricts the amount of computation AOTAutograd can do.
