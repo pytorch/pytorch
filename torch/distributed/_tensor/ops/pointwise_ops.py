@@ -22,8 +22,8 @@ from torch.distributed._tensor.ops.utils import (
     register_op_strategy,
 )
 from torch.distributed._tensor.placement_types import (
-    _Partial,
     DTensorSpec,
+    Partial,
     Placement,
     Replicate,
     Shard,
@@ -460,7 +460,7 @@ def common_pointwise_strategy(
                 common_ndim = len(common_shape)
                 new_shard_dim = common_ndim - len(spec_to_follow.shape) + shard_dim
                 out_placements.append(Shard(new_shard_dim))
-            elif isinstance(placement, _Partial) and not linearity:
+            elif isinstance(placement, Partial) and not linearity:
                 # clear the partial placemnet if op does not support linearity
                 # by default we just replicate the partial, need to see if this
                 # is optimal for all cases

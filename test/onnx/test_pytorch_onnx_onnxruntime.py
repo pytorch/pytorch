@@ -2585,6 +2585,9 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         update = torch.randn(4, 1, 3, 2)
         self.run_test(IndexPutModel2(), (x, update))
 
+    @unittest.skip(
+        "regression in 1.18: https://github.com/microsoft/onnxruntime/issues/20855"
+    )
     @skipIfUnsupportedMinOpsetVersion(11)
     def test_index_put_loop(self):
         @torch.jit.script
