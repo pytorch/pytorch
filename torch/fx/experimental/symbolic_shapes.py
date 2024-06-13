@@ -4366,25 +4366,28 @@ class ShapeEnv:
             axioms = (canonicalize_bool_expr(a.xreplace(self.var_to_val)) for a in axioms)
         return tuple(dict.fromkeys(axioms).keys())
 
-    @_lru_cache
+    @lru_cache(None)
     def get_implications(self,
                          e: "sympy.Expr") -> Tuple[Tuple["sympy.Expr", 'sympy.logic.boolalg.BooleanAtom']]:
         """ Given a expression, it returns a list of predicates that follow from it """
         equiv = {}
 
         def add_expr(expr):
-            # Expr and negation
-            equiv[canonicalize_bool_expr(expr)] = sympy.true
-            equiv[canonicalize_bool_expr(sympy.Not(expr))] = sympy.false
-            if isinstance(expr, sympy.Rel):
-                if isinstance(expr, (sympy.Eq, sympy.Ne)):
-                    # multiplying by -1 ensures that equality is commutative
-                    dual = type(expr)(-expr.lhs, -expr.rhs)
-                else:
-                    # multiplying by -1 changes the direction of the inequality
-                    dual = type(expr)(-expr.rhs, -expr.lhs)
-                equiv[canonicalize_bool_expr(dual)] = sympy.true
-                equiv[canonicalize_bool_expr(sympy.Not(dual))] = sympy.false
+            expr = canonicalize_bool_expr(expr)
+            if isinstance(expr, (sympy.Eq, sympy.Ne)):
+                # No need to canonicalize
+                # TODO We could further canonicalize Eq ordering the lhs and rhs somehow
+                # With this, we could remove the need for the commutativity part
+                opposite = sympy.Eq if isinstance(expr, sympy.Ne) else sympy.Ne
+                # Commutativity of == and !=
+                equiv[type(expr)(expr.lhs, expr.rhs)] = sympy.true
+                equiv[type(expr)(expr.rhs, expr.lhs)] = sympy.true
+                equiv[opposite(expr.lhs, expr.rhs)] = sympy.false
+                equiv[opposite(expr.rhs, expr.lhs)] = sympy.false
+            else:
+                # Expr and negation
+                equiv[expr] = sympy.true
+                equiv[canonicalize_bool_expr(sympy.Not(expr))] = sympy.false
 
         add_expr(e)
         # Other relational expressions this expression implies
