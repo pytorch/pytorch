@@ -513,7 +513,7 @@ def export(
 
     if dynamo:
         if isinstance(model, (torch.jit.ScriptModule, torch.jit.ScriptFunction)):
-            raise ValueError(
+            raise TypeError(
                 "Dynamo export does not supported ScriptModule or ScriptFunction."
             )
         # Unsupported parameters for dynamo export
@@ -921,7 +921,7 @@ def _from_dynamic_axes_to_dynamic_shapes(
         Union[Mapping[str, Mapping[int, str]], Mapping[str, Sequence[int]]]
     ] = None,
     input_names: Optional[Sequence[str]] = None,
-) -> Optional[Union[Dict[str, Any], Tuple[Any], List[Any]]]:
+) -> Optional[Dict[str, Any]]:
     """
 
     dynamic_axes examples:
@@ -935,11 +935,15 @@ def _from_dynamic_axes_to_dynamic_shapes(
     """
     if dynamic_axes is None:
         return None
+
     if input_names is None:
-        input_names = []
+        input_names_set = set()
+    else:
+        input_names_set = set(input_names)
+
     dynamic_shapes: Dict[str, Optional[Any]] = {}
     for input_name, axes in dynamic_axes.items():
-        if input_name in input_names:
+        if input_name in input_names_set:
             raise ValueError(
                 "input names is not supported yet. Please use model forward signature."
             )
@@ -952,7 +956,7 @@ def _from_dynamic_axes_to_dynamic_shapes(
                 k: torch.export.Dim(f"{input_name}_dim_{k}") for k in axes
             }
         else:
-            raise ValueError(
+            raise TypeError(
                 f"dynamic_axes value must be either a dict or a list, but got {type(axes)}"
             )
     # torch.export.export needs static dim to present in dynamic_shapes
