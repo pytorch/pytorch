@@ -34,7 +34,7 @@ on:
         required: false
         type: string
         default: "windows.4xlarge.nonephemeral"
-        description: Runner type
+        description: Runner type.
 
     outputs:
       test-matrix:
