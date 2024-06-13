@@ -955,12 +955,12 @@ class ConvTranspose1d(_ConvTransposeNd):
         output_padding = self._output_padding(
             input,
             output_size,
-            self.stride,
-            self.padding,
+            self.stride,  # type: ignore[arg-type]
+            self.padding,  # type: ignore[arg-type]
             self.kernel_size,  # type: ignore[arg-type]
             num_spatial_dims,
-            self.dilation,
-        )  # type: ignore[arg-type]
+            self.dilation,  # type: ignore[arg-type]
+        )
         return F.conv_transpose1d(
             input,
             self.weight,
@@ -1140,12 +1140,12 @@ class ConvTranspose2d(_ConvTransposeNd):
         output_padding = self._output_padding(
             input,
             output_size,
-            self.stride,
-            self.padding,
+            self.stride,  # type: ignore[arg-type]
+            self.padding,  # type: ignore[arg-type]
             self.kernel_size,  # type: ignore[arg-type]
             num_spatial_dims,
-            self.dilation,
-        )  # type: ignore[arg-type]
+            self.dilation,  # type: ignore[arg-type]
+        )
 
         return F.conv_transpose2d(
             input,
@@ -1323,12 +1323,12 @@ class ConvTranspose3d(_ConvTransposeNd):
         output_padding = self._output_padding(
             input,
             output_size,
-            self.stride,
-            self.padding,
+            self.stride,  # type: ignore[arg-type]
+            self.padding,  # type: ignore[arg-type]
             self.kernel_size,  # type: ignore[arg-type]
             num_spatial_dims,
-            self.dilation,
-        )  # type: ignore[arg-type]
+            self.dilation,  # type: ignore[arg-type]
+        )
 
         return F.conv_transpose3d(
             input,
