@@ -2767,3 +2767,9 @@ def warn_once(msg, stacklevel=1):
         return
     warn_once_cache.add(msg)
     warnings.warn(msg, stacklevel=stacklevel + 1)
+
+
+def strip_color_from_string(text):
+    # This regular expression matches ANSI escape codes
+    ansi_escape = re.compile(r"\x1B[@-_][0-?]*[ -/]*[@-~]")
+    return ansi_escape.sub("", text)
