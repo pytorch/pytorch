@@ -27,6 +27,7 @@ from torch.fx.experimental.symbolic_shapes import (
     guard_float,
     guard_int,
     GuardOnDataDependentSymNode,
+    hint_int,
     is_symbolic,
     ShapeEnv,
     StatelessSymbolicContext,
@@ -2465,6 +2466,40 @@ def specify_constraints(a, b, c, d, e, f):
 
         self.assertEqual(static_code, expected_static)
         self.assertEqual(dynamic_code, expected_dynamic)
+
+
+class TestGuardsExpressions(TestCase):
+    """
+    Tests the guards-related methods used by the inductor FX graph cache.
+    """
+
+    def test_guards_gt_lt(self):
+        shape_env = ShapeEnv()
+        s0 = create_symint(shape_env, 6)
+        s1 = create_symint(shape_env, 7)
+        s2 = create_symint(shape_env, 5)
+
+        guard_int(sym_int(s0 > 5))
+        guard_int(sym_int(s0 < 7))
+
+        guards = shape_env.produce_guards_expression([s0])
+
+        self.assertTrue(shape_env.evaluate_guards_expression(guards, [hint_int(s0)]))
+        self.assertFalse(shape_env.evaluate_guards_expression(guards, [hint_int(s1)]))
+        self.assertFalse(shape_env.evaluate_guards_expression(guards, [hint_int(s2)]))
+
+    def test_guards_float_div(self):
+        shape_env = ShapeEnv()
+        s0 = create_symint(shape_env, 8)
+        s1 = create_symint(shape_env, 7)
+
+        guard_int(sym_int(s0 / 2.0))
+        guards = shape_env.produce_guards_expression([s0])
+
+        self.assertIn("ToFloat", guards)
+        self.assertIn("FloatTrueDiv", guards)
+        self.assertTrue(shape_env.evaluate_guards_expression(guards, [hint_int(s0)]))
+        self.assertFalse(shape_env.evaluate_guards_expression(guards, [hint_int(s1)]))
 
 
 if __name__ == "__main__":

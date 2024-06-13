@@ -236,7 +236,7 @@ static std::tuple<Tensor, Tensor> _mps_linear_backward_weights(const Tensor& gra
   MPSStream* stream = getCurrentMPSStream();
 
   @autoreleasepool {
-    string key = "mps_linear_backward_weights:" + to_string(bias_defined) + ":" +
+    string key = "mps_linear_backward_weights:" + std::to_string(bias_defined) + ":" +
         getTensorsStringKey({input_reshaped, weight, grad_output_reshaped});
     auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
       MPSGraphTensor* inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, input_reshaped);
