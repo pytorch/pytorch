@@ -20,7 +20,7 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
 )
 
 
-def get_device_type():
+def get_device_type() -> str:
     return (
         "cuda"
         if torch.cuda.is_available() and torch.cuda.device_count() >= 4
@@ -40,12 +40,12 @@ class CommDebugModeExample:
     produced in advanced_module_tracker are in the same order
     """
 
-    def __init__(self, world_size, rank):
+    def __init__(self, world_size: int, rank: int) -> None:
         self.world_size = world_size
         self.rank = rank
         self.device_type = get_device_type()
 
-    def test_MLP_distributed_sharding_display(self):
+    def test_MLP_distributed_sharding_display(self) -> None:
         "Example of obtaining all module's FQN and parameters for a given distributed model and printing the sharding info"
         device_mesh = DeviceMesh(
             self.device_type,
@@ -74,7 +74,7 @@ class CommDebugModeExample:
 
         comm_mode.print_sharding_info()
 
-    def test_MLPStacked_distributed_sharding_display(self):
+    def test_MLPStacked_distributed_sharding_display(self) -> None:
         """
         Example of obtaining all module's FQN and parameters for a given
         distributed model with nested modules and printing the sharding info
@@ -108,7 +108,7 @@ class CommDebugModeExample:
 
         comm_mode.print_sharding_info()
 
-    def test_MLP_module_tracing(self):
+    def test_MLP_module_tracing(self) -> None:
         """
         Example code to demonstrate CommModeDebug's module level tracing using a MLP model.
         Prints a table of module level collective tracing information
@@ -140,9 +140,9 @@ class CommDebugModeExample:
             output_tp.sum().backward()
 
         # print the module level collective tracing information
-        comm_mode.generate_module_tracing_table()
+        print(comm_mode.generate_module_tracing_table())
 
-    def test_transformer_module_tracing(self, is_seq_parallel=False):
+    def test_transformer_module_tracing(self, is_seq_parallel: bool = False) -> None:
         """
         Example code to demonstrate CommModeDebug's module level tracing using a distributed Transformer model.
         Prints a table of module level collective tracing information
@@ -167,10 +167,10 @@ class CommDebugModeExample:
             output = model(inp)
 
         # print the module level collective tracing information
-        comm_mode.generate_module_tracing_table()
+        print(comm_mode.generate_module_tracing_table())
 
 
-def run_example(world_size, rank):
+def run_example(world_size: int, rank: int) -> None:
     # set manual seed
     torch.manual_seed(0)
 
