@@ -8,6 +8,7 @@ import math
 import operator
 import os
 import pprint
+import sys
 import textwrap
 import typing
 from typing import (
@@ -1276,7 +1277,7 @@ class GroupedSchedulerNode(BaseSchedulerNode):
     """
 
     @classmethod
-    def create(cls, snodes: List[BaseSchedulerNode]):
+    def create(cls, snodes: List[BaseSchedulerNode]) -> "GroupedSchedulerNode":
         scheduler = snodes[0].scheduler
         assert all(node.scheduler is scheduler for node in snodes)
         return cls(scheduler, snodes)  # type: ignore[arg-type]
@@ -1309,12 +1310,12 @@ class GroupedSchedulerNode(BaseSchedulerNode):
             if dep.name not in self.get_names()
         } - self.read_writes.writes
 
-        self.min_order = math.inf
-        self.max_order = -math.inf
+        self.min_order = sys.maxsize
+        self.max_order = -sys.maxsize
 
     # GroupedSchedulerNode specific methods
     @classmethod
-    def can_fuse(cls, producer, consumer):
+    def can_fuse(cls, producer: BaseSchedulerNode, consumer: BaseSchedulerNode) -> bool:
         return False
 
     def add_fake_dep(self, name: Dep) -> None:
@@ -1323,12 +1324,12 @@ class GroupedSchedulerNode(BaseSchedulerNode):
     # None of these need to be implemented, as a GroupedSchedulerNode is always unpacked
     # and its constituent nodes are used for last usage calculation purpose.
     @property
-    def last_usage(self):
+    def last_usage(self) -> Set[str]:  # type: ignore[override]
         raise NotImplementedError
 
     def set_last_usage(
         self, future_used_buffers: Set[str], mutation_real_name: Dict[str, str]
-    ):
+    ) -> None:
         raise NotImplementedError
 
     # None of these need to be implemented, as a GroupedSchedulerNode is just an
@@ -2702,8 +2703,8 @@ class Scheduler:
         node1, node2 = nodes
         return self.score_fusion(node1, node2)
 
-    def _unpack_nodes(self):
-        new_nodes = []
+    def _unpack_nodes(self) -> List[BaseSchedulerNode]:
+        new_nodes: List[BaseSchedulerNode] = []
         for node in self.nodes:
             if isinstance(node, GroupedSchedulerNode):
                 new_nodes.extend(node.get_nodes())
