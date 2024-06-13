@@ -1,18 +1,5 @@
-# mypy: allow-untyped-defs
-try:
-    import triton
-    import triton.language as tl
-except ImportError:
-
-    class triton:  # type: ignore[no-redef]
-        @staticmethod
-        def jit(x):
-            return x
-
-    class tl:  # type: ignore[no-redef]
-        constexpr = None  # type: ignore[var-annotated]
-        math = None  # type: ignore[var-annotated]
-        extra = None  # type: ignore[var-annotated]
+import triton
+import triton.language as tl
 
 
 # In the latest triton, math functions were shuffled around into different modules:
@@ -37,7 +24,9 @@ except ImportError:
 try:
     from triton.language.standard import _log2
 except ImportError:
-    _log2 = None  # type: ignore[var-annotated]
+
+    def _log2(x):
+        raise NotImplementedError
 
 
 @triton.jit
@@ -422,8 +411,12 @@ def _compare_and_swap_with_index(
 
     # idx
     y_idx = tl.reshape(idxs, shape)
-    left_idx = tl.broadcast_to(tl.sum(y_idx * left_mask.to(y_idx.dtype), 1)[:, None, :], shape)
-    right_idx = tl.broadcast_to(tl.sum(y_idx * right_mask.to(y_idx.dtype), 1)[:, None, :], shape)
+    left_idx = tl.broadcast_to(
+        tl.sum(y_idx * left_mask.to(y_idx.dtype), 1)[:, None, :], shape
+    )
+    right_idx = tl.broadcast_to(
+        tl.sum(y_idx * right_mask.to(y_idx.dtype), 1)[:, None, :], shape
+    )
     left_idx = tl.reshape(left_idx, x.shape)
     right_idx = tl.reshape(right_idx, x.shape)
 
@@ -501,6 +494,7 @@ def _bitonic_merge_with_index(
     else:
         flip = False
     # perform `stage` rounds of `compare-and-swap`
+    next_mask = mask
     for i in tl.static_range(stage):
         x, idxs, next_mask = _compare_and_swap_with_index(
             x, idxs, mask, flip, i + (n_dims - stage), n_dims, stable, descending

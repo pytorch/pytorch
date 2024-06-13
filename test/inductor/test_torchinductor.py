@@ -5907,6 +5907,14 @@ class CommonTemplate:
         self.common(fn, (inp, False))
         self.common(fn, (inp, True))
 
+    def test_sort_transpose(self):
+        def fn(a, descending):
+            return torch.sort(a, stable=True, descending=descending)
+
+        inp = torch.randn(128, 10).transpose(0, 1)
+        self.common(fn, (inp, False))
+        self.common(fn, (inp, True))
+
     def test_topk(self):
         def fn(a):
             return torch.topk(a, 2, -1)

@@ -1022,7 +1022,7 @@ class TritonKernel(SIMDKernel):
         pid_cache=None,
         reduction_hint=ReductionHint.DEFAULT,
         min_elem_per_thread=0,
-        disable_persistent_reduction=False,
+        override_persistent_reduction=None,
     ):
         super().__init__(
             *groups,
@@ -1030,7 +1030,7 @@ class TritonKernel(SIMDKernel):
             mutations=mutations,
             reduction_hint=reduction_hint,
             pid_cache=pid_cache,
-            disable_persistent_reduction=disable_persistent_reduction,
+            override_persistent_reduction=override_persistent_reduction,
         )
         self.suffix: IndentedBuffer = IndentedBuffer()  # type: ignore[assignment]
         self.outside_loop_vars: Set[Any] = set()
