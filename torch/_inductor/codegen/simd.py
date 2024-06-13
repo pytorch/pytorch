@@ -1284,7 +1284,7 @@ class SIMDScheduling(BaseScheduling):
         )
 
         def _node_has_sort(node):
-            if isinstance(node, (EnableReduction, DisableReduction)):
+            if node in (EnableReduction, DisableReduction):
                 return False
 
             sort_nodes = node._body.root_block.graph.find_nodes(
