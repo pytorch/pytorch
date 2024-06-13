@@ -37,7 +37,7 @@ from torch.utils._triton import has_triton
 
 from . import comms, config, dependencies, ir, metrics
 from .codecache import write_text
-from .codegen.common import get_scheduling_for_device, Kernel
+from .codegen.common import BackendFeature, get_scheduling_for_device, Kernel
 from .comm_analysis import estimate_nccl_collective_runtime
 from .dependencies import Dep, MemoryDep, StarDep, WeakDep
 from .ir import ComputedBuffer, MultiOutput, MultiOutputLayout
@@ -255,6 +255,7 @@ class BaseSchedulerNode:
         if (
             isinstance(self, (SchedulerNode,))
             and config.inplace_buffers
+            and V.graph.has_feature(self.get_device(), BackendFeature.INPLACE_BUFFERS)
             and (
                 not isinstance(V.kernel, torch._inductor.codegen.simd.SIMDKernel)
                 or getattr(V.kernel, "mutations", None) is not None
@@ -1279,8 +1280,10 @@ def pick_loop_order(
             # 1-sizes don't matter, just move them to the end
             return cmp(sizes[a] == 1, sizes[b] == 1)
 
-        stride_len_a = [sl[a] for sl in stride_lengths]
-        stride_len_b = [sl[b] for sl in stride_lengths]
+        # Take abs, otherwise flipped dimensions are treated as smaller
+        # strides than contiguous dims
+        stride_len_a = [abs(sl[a]) for sl in stride_lengths]
+        stride_len_b = [abs(sl[b]) for sl in stride_lengths]
 
         # equivalent to
         # np.logical_or(stride_lengths[:, b] == 0, stride_lengths[:, a] < stride_lengths[:, b]).all()
@@ -1591,8 +1594,9 @@ class Scheduler:
         # generate a dependency because if we do, Inductor will start trying
         # to free the unbacked int but that's pointless
         for name, val in V.graph.graph_inputs.items():
-            if isinstance(val, sympy.Symbol):
-                unbacked_symbol_to_origin_node[val] = None
+            if isinstance(val, sympy.Expr):
+                for fs in val.free_symbols:
+                    unbacked_symbol_to_origin_node[fs] = None
 
         for node in self.nodes:
             log.debug("scheduling %s", node.node)
@@ -2740,9 +2744,6 @@ class Scheduler:
                 assert isinstance(node, NopKernelSchedulerNode)
                 node.allocate()
 
-            if config.debug_check_inf_and_nan:
-                V.graph.wrapper_code.generate_inf_and_nan_checker(node)
-
             if config.triton.debug_sync_kernel:
                 self.get_backend(device).codegen_sync()
 
@@ -2767,6 +2768,11 @@ class Scheduler:
 
 
 class BaseScheduling:
+    @classmethod
+    def get_backend_features(cls, device: torch.device) -> Sequence[BackendFeature]:
+        """Return a set of .codegen.common.BackendFeature()"""
+        return ()
+
     def can_fuse_vertical(
         self, node1: BaseSchedulerNode, node2: BaseSchedulerNode
     ) -> bool:
@@ -2869,12 +2875,12 @@ def debug_triton_code(node: Union[SchedulerNode, FusedSchedulerNode]) -> List[st
         from torch._inductor.codegen.cuda_combined_scheduling import (
             CUDACombinedScheduling,
         )
-        from torch._inductor.codegen.triton import TritonScheduling
+        from .codegen.simd import SIMDScheduling
 
         snodes = (node,) if isinstance(node, SchedulerNode) else node.snodes
         device = snodes[0].get_device()
         backend = node.scheduler.get_backend(device)
-        assert isinstance(backend, (TritonScheduling, CUDACombinedScheduling))
+        assert isinstance(backend, (SIMDScheduling, CUDACombinedScheduling))
         V.graph.scheduler.current_device = device
 
         # Don't increment kernel count when generating debug string.
