@@ -244,6 +244,7 @@
   - torch/csrc/xpu/**
   - torch/xpu/**
   - test/xpu/**
+  - test/test_xpu.py
   - third_party/xpu.txt
   - .ci/docker/ci_commit_pins/triton-xpu.txt
   approved_by:

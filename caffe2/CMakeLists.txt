@@ -1062,8 +1062,15 @@ if(USE_XPU)
     message(WARNING "Failed to include ATen XPU implementation target")
   else()
     target_link_libraries(torch_xpu PRIVATE torch_xpu_ops)
-    target_link_libraries(torch_xpu PRIVATE
-      "-Wl,--whole-archive,\"$<TARGET_FILE:torch_xpu_ops>\" -Wl,--no-whole-archive")
+    if(MSVC)
+      # Windows
+      target_link_libraries(torch_xpu PRIVATE
+      "-WHOLEARCHIVE:\"$<TARGET_FILE:torch_xpu_ops>\"")
+    else()
+      # Linux
+      target_link_libraries(torch_xpu PRIVATE
+        "-Wl,--whole-archive,\"$<TARGET_FILE:torch_xpu_ops>\" -Wl,--no-whole-archive")
+    endif()
   endif()
 endif()
 
@@ -1313,6 +1320,9 @@ if(USE_ROCM)
     )
   if(USE_FLASH_ATTENTION)
     target_compile_definitions(torch_hip PRIVATE USE_FLASH_ATTENTION)
+  endif()
+  if(USE_MEM_EFF_ATTENTION)
+    target_compile_definitions(torch_hip PRIVATE USE_MEM_EFF_ATTENTION)
   endif()
 endif()
 
