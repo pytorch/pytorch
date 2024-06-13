@@ -57,7 +57,7 @@ for test in tests:
     make_inline_inbuilt_nn_modules_cls(test)
 del test
 
-unittest.expectedFailure(
+unittest.skip(
     InlineInbuiltNNModulesMiscTests.test_cpp_extension_recommends_custom_ops_inline_inbuilt_nn_modules  # noqa: F821
 )
 
