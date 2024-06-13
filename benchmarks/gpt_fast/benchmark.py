@@ -45,7 +45,7 @@ class SimpleMLP(nn.Module):
 
 def run_mlp_layer_norm_gelu():
     dtype_flops_utilization_map = {
-        torch.bfloat16: "0.72",
+        torch.bfloat16: "0.71",
     }
     input_shapes = [1024, 4096, 8192, 16384]
     intermediate_size = 14336
@@ -87,7 +87,7 @@ def run_mlp_layer_norm_gelu():
 
 def run_layer_norm():
     dtype_memory_bandwidth_map = {
-        torch.bfloat16: "1050",
+        torch.bfloat16: "1017",
     }
     input_shapes = [1024, 4096, 8192, 16384]
     BS = 4096
@@ -120,12 +120,12 @@ def run_layer_norm():
     return results
 
 
+@torch._inductor.config.patch(coordinate_descent_tuning=True)
 def run_gather_gemv():
-    torch._inductor.config.coordinate_descent_tuning = True
     E = 8
     dtype_memory_bandwidth_map = {
-        torch.int8: "1195",
-        torch.bfloat16: "2180",
+        torch.int8: "1113",
+        torch.bfloat16: "1249",
     }
     input_shapes = [1024, 4096, 8192, 16384]
     results = []
@@ -161,11 +161,11 @@ def run_gather_gemv():
     return results
 
 
+@torch._inductor.config.patch(coordinate_descent_tuning=True)
 def run_gemv():
-    torch._inductor.config.coordinate_descent_tuning = True
     dtype_memory_bandwidth_map = {
-        torch.int8: "1080",
-        torch.bfloat16: "1750",
+        torch.int8: "1964",
+        torch.bfloat16: "2272",
     }
     input_shapes = [1024, 4096, 8192, 16384]
     results = []
