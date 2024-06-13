@@ -12,6 +12,7 @@ from unittest import skip
 import torch
 import torch._export
 import torch._inductor
+import torch._inductor.config
 import torch.nn as nn
 from torch._dynamo.testing import rand_strided, same
 from torch._dynamo.utils import counters
@@ -421,9 +422,10 @@ class AOTInductorTestsTemplate:
                 def __init__(self, device):
                     super().__init__()
                     self.weight = torch.randn(10, 10, device=device).to(dtype)
+                    self.bias = torch.randn(10, device=device).to(dtype)
 
                 def forward(self, y):
-                    return torch.nn.functional.linear(y, self.weight)
+                    return torch.nn.functional.linear(y, self.weight, self.bias)
 
             example_inputs = (torch.randn(10, 10, device=self.device).to(dtype),)
 
@@ -1301,7 +1303,6 @@ class AOTInductorTestsTemplate:
                 return self.foo + x
 
         example_inputs = (torch.rand(4, 4, device=self.device),)
-        torch._export.aot_compile(Model(self.device), example_inputs)
         self.check_model(Model(self.device), example_inputs)
 
     def test_non_tensor_input(self):
@@ -1313,14 +1314,19 @@ class AOTInductorTestsTemplate:
         with self.assertRaises(RuntimeError):
             torch._export.aot_compile(fn, args=(a, b), kwargs={"alpha": 2.0})
 
-        so_path = torch._export.aot_compile(
-            torch.ops.aten.add, args=(a, b), kwargs={"alpha": 2.0}, same_signature=False
-        )
-        kernel_runner = AOTIRunnerUtil.load_runner(self.device, so_path)
-        res = kernel_runner.run([a, b])
-        self.assertTrue(isinstance(res, list))
-        self.assertTrue(len(res) == 1)
-        self.assertEqual(fn(a, b, alpha=2.0), res[0])
+        for simdlen in [0, None]:
+            with torch._inductor.config.patch({"cpp.simdlen": simdlen}):
+                so_path = torch._export.aot_compile(
+                    torch.ops.aten.add,
+                    args=(a, b),
+                    kwargs={"alpha": 2.0},
+                    same_signature=False,
+                )
+                kernel_runner = AOTIRunnerUtil.load_runner(self.device, so_path)
+                res = kernel_runner.run([a, b])
+                self.assertTrue(isinstance(res, list))
+                self.assertTrue(len(res) == 1)
+                self.assertEqual(fn(a, b, alpha=2.0), res[0])
 
     def test_buffer_mutation_2(self):
         class Model(torch.nn.Module):
@@ -1378,6 +1384,26 @@ class AOTInductorTestsTemplate:
         model = Model(self.device)
         self.check_model(model, example_inputs)
         self.code_check_count(model, example_inputs, "empty_strided", 2)
+
+    def test_buffer_mutation_4(self):
+        if self.device != "cuda":
+            raise unittest.SkipTest("requires CUDA")
+
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.register_buffer(
+                    "_tensor_constant0",
+                    torch.randint(1, size=[38], dtype=torch.int64, device="cpu"),
+                )
+
+            def forward(self, x):
+                return x + self._tensor_constant0.to(torch.device(type="cuda", index=0))
+
+        example_inputs = (
+            torch.randint(1, size=[38], dtype=torch.int64, device="cuda"),
+        )
+        torch._export.aot_compile(Model(), example_inputs)
 
     @requires_multigpu()
     def test_replicate_on_devices(self):
@@ -3066,36 +3092,6 @@ CUDA_TEST_FAILURES = {
     "test_quantized_linear": fail_cuda(is_skip=True),
 }
 
-if TEST_WITH_ROCM:
-    CUDA_TEST_FAILURES.update(
-        {
-            "test_addmm_multiple_dynamic": fail_cuda(is_skip=True),
-            "test_bmm_multiple_dynamic": fail_cuda(is_skip=True),
-            "test_convolution": fail_cuda(is_skip=True),
-            "test_large_weight": fail_cuda(is_skip=True),
-            "test_large_mmaped_weights": fail_cuda(is_skip=True),
-            "test_missing_cubin": fail_cuda(is_skip=True),
-            "test_multi_device": fail_cuda(is_skip=True),
-            "test_poi_multiple_dynamic": fail_cuda(is_skip=True),
-            "test_sdpa": fail_cuda(is_skip=True),
-            "test_sdpa_2": fail_cuda(is_skip=True),
-            "test_dynamic_smem_above_default_limit": fail_cuda(is_skip=True),
-            "test_foreach_multiple_dynamic": fail_cuda(is_skip=True),
-            "test_reuse_kernel": fail_cuda(is_skip=True),
-            "test_zero_grid_with_unbacked_symbols": fail_cuda(is_skip=True),
-            "test_zero_grid_with_backed_symbols": fail_cuda(is_skip=True),
-            "test_reuse_kernel_dynamic": fail_cuda(is_skip=True),
-            "test_duplicate_constant_folding": fail_cuda(is_skip=True),
-            "test_cond_simple": fail_cuda(is_skip=True),
-            "test_cond_nested": fail_cuda(is_skip=True),
-            "test_cond_with_parameters": fail_cuda(is_skip=True),
-            "test_cond_with_reinterpret_view_inputs_outputs": fail_cuda(is_skip=True),
-            "test_cond_with_multiple_outputs": fail_cuda(is_skip=True),
-            "test_cond_with_outer_code_before_after": fail_cuda(is_skip=True),
-            "test_cond_use_buffers_from_outer_scope": fail_cuda(is_skip=True),
-            "test_index_put_with_none_index": fail_cuda(is_skip=True),
-        }
-    )
 
 if not IS_FBCODE:
     # The following tests look like they pass in both pytest and unittest (xml
