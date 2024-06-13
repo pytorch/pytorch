@@ -10,7 +10,6 @@ size_t getVersionInt() {
 }
 
 } // namespace
-#endif
 
 namespace torch::cuda::shared {
 
@@ -21,3 +20,4 @@ void initCusparseltBindings(PyObject* module) {
 }
 
 } // namespace torch::cuda::shared
+#endif
