@@ -879,13 +879,13 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> _batch_norm_no_update_cpu(
     const Tensor& input, const std::optional<Tensor>& weight_opt, const std::optional<Tensor>& bias_opt,
     const std::optional<Tensor>& running_mean_opt, const std::optional<Tensor>& running_var_opt,
     double momentum, double eps) {
-  const Tensor& running_mean = c10::value_or_else(running_mean_opt, [] {return Tensor();});
-  const Tensor& running_var = c10::value_or_else(running_var_opt, [] {return Tensor();});
   // Passing in undefined Tensors to `batch_norm_cpu` in eval mode leads to seg fault
-  bool update = !running_mean.defined() || !running_var.defined();
+  const bool has_running_mean = running_mean_opt.has_value() && running_mean_opt->defined();
+  const bool has_running_var = running_var_opt.has_value() && running_var_opt->defined();
+  const bool update = !has_running_mean || !has_running_var;
   Tensor output, save_mean, save_var;
   std::tie(output, save_mean, save_var) =
-    batch_norm_cpu(input, weight_opt, bias_opt, const_cast<Tensor&>(running_mean), const_cast<Tensor&>(running_var), update, momentum, eps);
+    batch_norm_cpu(input, weight_opt, bias_opt, running_mean_opt, running_var_opt, update, momentum, eps);
   Tensor reserve = at::empty({0}, input.options().dtype(kByte));
   return std::tuple<Tensor, Tensor, Tensor, Tensor>(output, save_mean, save_var, reserve);
 }

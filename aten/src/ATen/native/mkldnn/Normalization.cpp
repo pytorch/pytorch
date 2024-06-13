@@ -230,7 +230,9 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> _batch_norm_no_update_mkldnn(
     const Tensor& input, const c10::optional<Tensor>& weight_opt, const c10::optional<Tensor>& bias_opt,
     const c10::optional<Tensor>& running_mean, const c10::optional<Tensor>& running_var,
     double momentum, double eps) {
-  const bool train = !running_mean.has_value() || !running_var.has_value();
+  const bool has_running_mean = running_mean.has_value() && running_mean->defined();
+  const bool has_running_var = running_var.has_value() && running_var->defined();
+  const bool train = !has_running_mean || !has_running_var;
   Tensor output, save_mean, save_var;
   std::tie(output, save_mean, save_var) =
     mkldnn_batch_norm(input, weight_opt, bias_opt, running_mean, running_var, train, momentum, eps);

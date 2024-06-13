@@ -445,8 +445,10 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> _batch_norm_no_update_mps(const Tenso
                                                                      const c10::optional<Tensor>& running_mean,
                                                                      const c10::optional<Tensor>& running_var,
                                                                      double momentum,
-                                                                     double eps) {
   const bool train = !running_mean.has_value() || !running_var.has_value();
+  const bool has_running_mean = running_mean_opt.has_value() && running_mean_opt->defined();
+  const bool has_running_var = running_var_opt.has_value() && running_var_opt->defined();
+  const bool train = !has_running_mean || !has_running_var;
   Tensor output, save_mean, save_var;
   std::tie(output, save_mean, save_var) =
       batch_norm_mps(input, weight_opt, bias_opt, running_mean, running_var, train, momentum, eps);

@@ -484,11 +484,14 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_cuda(const Tensor& self, const std
 
 std::tuple<Tensor, Tensor, Tensor, Tensor> _batch_norm_maybe_update_cuda_helper(
     const Tensor& input, const std::optional<Tensor>& weight_opt, const std::optional<Tensor>& bias_opt,
-    Tensor& running_mean, Tensor& running_var, double momentum, double eps, bool update) {
+    const std::optional<Tensor>& running_mean_opt, const std::optional<Tensor>& running_var_opt,
+    double momentum, double eps, bool update) {
   // See [Note: hacky wrapper removal for optional tensor]
   c10::MaybeOwned<Tensor> weight_maybe_owned = at::borrow_from_optional_tensor(weight_opt);
   const Tensor& weight = *weight_maybe_owned;
   const Tensor& bias = c10::value_or_else(bias_opt, [] {return Tensor();});
+  const Tensor& running_mean = c10::value_or_else(running_mean_opt, [] {return Tensor();});
+  const Tensor& running_var = c10::value_or_else(running_var_opt, [] {return Tensor();});
   Tensor output, save_mean, save_var, reserve;
 
   BatchNormBackend backend = _select_batch_norm_backend(input, weight, bias, running_mean, running_var, update, eps);
@@ -540,10 +543,10 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> _batch_norm_no_update_cuda(
     const Tensor& input, const c10::optional<Tensor>& weight_opt, const std::optional<Tensor>& bias_opt,
     const std::optional<Tensor>& running_mean_opt, const std::optional<Tensor>& running_var_opt,
     double momentum, double eps) {
-  const Tensor& running_mean = c10::value_or_else(running_mean_opt, [] {return Tensor();});
-  const Tensor& running_var = c10::value_or_else(running_var_opt, [] {return Tensor();});
-  const bool train = !running_mean.defined() || !running_var.defined();
-  return _batch_norm_maybe_update_cuda_helper(input, weight_opt, bias_opt, const_cast<Tensor&>(running_mean), const_cast<Tensor&>(running_var), momentum, eps, train);
+  const bool has_running_mean = running_mean_opt.has_value() && running_mean_opt->defined();
+  const bool has_running_var = running_var_opt.has_value() && running_var_opt->defined();
+  const bool train = !has_running_mean || !has_running_var;
+  return _batch_norm_maybe_update_cuda_helper(input, weight_opt, bias_opt, running_mean_opt, running_var_opt, momentum, eps, train);
 }
 
 std::tuple<Tensor, Tensor, Tensor> _batch_norm_legit_cuda(const Tensor& self, const std::optional<Tensor>& weight_opt, const std::optional<Tensor>& bias_opt, Tensor& running_mean, Tensor& running_var, bool train, double momentum, double epsilon) {
