@@ -9,6 +9,7 @@ from typing import Dict, List, Optional
 
 import torch
 import torch.fx
+
 from ..._guards import Source
 
 from .. import polyfill, variables
@@ -176,17 +177,135 @@ class RangeVariable(BaseListVariable):
     def python_type(self):
         return range
 
+    def start(self):
+        return self.items[0].as_python_constant()
+
+    def stop(self):
+        return self.items[1].as_python_constant()
+
+    def step(self):
+        return self.items[2].as_python_constant()
+
+    def range_length(self):
+        lo = self.start()
+        hi = self.stop()
+        step = self.step()
+
+        assert step != 0
+        if step > 0 and lo < hi:
+            return 1 + (hi - 1 - lo) // step
+        elif step < 0 and lo > hi:
+            return 1 + (lo - 1 - hi) // (0 - step)
+        else:
+            return 0
+
+    def _get_slice_indices(self, length, slice):
+        start = None
+        stop = None
+        step = None
+
+        upper = None
+        lower = None
+
+        step_is_negative = 0
+
+        # Convert step to an integer; raise for zero step.
+        if slice.step == None:
+            step = 1
+            step_is_negative = False
+        else:
+            step = slice.step
+            step_is_negative = slice.step < 0
+
+        # Find lower and upper bounds for start and stop.
+        if step_is_negative:
+            lower = -1
+            upper = length + lower
+        else:
+            lower = 0
+            upper = length
+
+        # Compute start
+        if slice.start == None:
+            start = upper if step_is_negative else lower
+
+        else:
+            start = slice.start
+
+        if start < 0:
+            start += length
+            if start < lower:
+                start = lower
+        else:
+            if start > upper:
+                start = upper
+
+        # Compute stop.
+        if slice.stop is None:
+            stop = lower if step_is_negative else upper
+
+        else:
+            stop = slice.stop
+
+            if stop < 0:
+                stop += length
+                if stop < lower:
+                    stop = lower
+            else:
+                if stop > upper:
+                    stop = upper
+        return [start, stop, step]
+
+    def apply_index(self, index):
+        length = self.range_length()
+        if index < 0:
+            index = length + index
+
+        if index < 0 or index >= length:
+            raise IndexError(f"index {index} is out of range")
+
+        return variables.ConstantVariable.create(self.start() + (index * self.step()))
+
+    def apply_slice(self, slice):
+        sub_start = None
+        sub_stop = None
+        sub_step = None
+
+        (slice_start, slice_stop, slice_step) = self._get_slice_indices(
+            self.range_length(), slice
+        )
+
+        sub_step = self.step() * slice_step
+
+        def compute_item(index):
+            return self.start() + (index * self.step())
+
+        sub_start = compute_item(slice_start)
+        sub_stop = compute_item(slice_stop)
+
+        result = RangeVariable(
+            [
+                variables.ConstantVariable.create(x)
+                for x in [sub_start, sub_stop, sub_step]
+            ],
+            mutable_local=MutableLocal() if self.mutable_local else None,
+        )
+        return result
+
     def as_python_constant(self):
         return range(*[x.as_python_constant() for x in self.items])
 
     def getitem_const(self, arg: VariableTracker):
-        return BaseListVariable(self.unpack_var_sequence()).getitem_const(arg)
+        # implementations mimics https://github.com/python/cpython/blob/main/Objects/rangeobject.c
+        index = arg.as_python_constant()
+
+        if isinstance(index, slice):
+            return self.apply_slice(index)
+        else:
+            return self.apply_index(index)
 
     def as_proxy(self):
         return self.python_type()(*self._as_proxy())
-
-    def unpack_var_sequence(self, tx):
-        return [variables.ConstantVariable.create(x) for x in self.as_python_constant()]
 
     def unpack_var_sequence(self, tx=None):
         return [variables.ConstantVariable.create(x) for x in self.as_python_constant()]
@@ -640,6 +759,15 @@ class SliceVariable(BaseListVariable):
             unimplemented("Dynamic slicing on data-dependent value is not supported")
 
         super().__init__([start, stop, step], **kwargs)
+
+    def start(self):
+        return self.items[0].as_python_constant()
+
+    def stop(self):
+        return self.items[1].as_python_constant()
+
+    def step(self):
+        return self.items[2].as_python_constant()
 
     def debug_repr(self):
         return self.debug_repr_helper("slice(", ")")
