@@ -18,7 +18,7 @@ __all__ = [
 
 class SpectralNorm:
     # Invariant before and after each forward call:
-    #   u = normalize(W @ v)
+    #   u = F.normalize(W @ v)
     # NB: At initialization, this invariant is not enforced
 
     _version: int = 1
@@ -99,10 +99,10 @@ class SpectralNorm:
                     # Spectral norm of weight equals to `u^T W v`, where `u` and `v`
                     # are the first left and right singular vectors.
                     # This power iteration produces approximations of `u` and `v`.
-                    v = normalize(
+                    v = F.normalize(
                         torch.mv(weight_mat.t(), u), dim=0, eps=self.eps, out=v
                     )
-                    u = normalize(torch.mv(weight_mat, v), dim=0, eps=self.eps, out=u)
+                    u = F.normalize(torch.mv(weight_mat, v), dim=0, eps=self.eps, out=u)
                 if self.n_power_iterations > 0:
                     # See above on why we need to clone
                     u = u.clone(memory_format=torch.contiguous_format)
@@ -129,7 +129,7 @@ class SpectralNorm:
         )
 
     def _solve_v_and_rescale(self, weight_mat, u, target_sigma):
-        # Tries to returns a vector `v` s.t. `u = normalize(W @ v)`
+        # Tries to returns a vector `v` s.t. `u = F.normalize(W @ v)`
         # (the invariant at top of this class) and `u @ W @ v = sigma`.
         # This uses pinverse in case W^T W is not invertible.
         v = torch.linalg.multi_dot(
@@ -194,7 +194,7 @@ class SpectralNormLoadStateDictPreHook:
     # For state_dict with version None, (assuming that it has gone through at
     # least one training forward), we have
     #
-    #    u = normalize(W_orig @ v)
+    #    u = F.normalize(W_orig @ v)
     #    W = W_orig / sigma, where sigma = u @ W_orig @ v
     #
     # To compute `v`, we solve `W_orig @ x = u`, and let
