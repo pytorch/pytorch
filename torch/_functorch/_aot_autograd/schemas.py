@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 """
 The various dataclasses, Enums, namedtuples etc used in AOTAutograd. This includes
 input/output types, metadata, config, function signatures etc.
@@ -17,7 +18,10 @@ from torch._subclasses.fake_tensor import is_fake
 
 from .. import config
 
-from .functional_utils import _check_if_mutation_can_be_in_graph, has_same_metadata
+from .functional_utils import (
+    _check_if_mutation_can_be_in_graph,
+    FunctionalTensorMetadataEq,
+)
 from .utils import strict_zip
 
 zip = strict_zip
@@ -52,27 +56,6 @@ OutputType = Enum(
         "custom_function_view",
     ),
 )
-
-
-# Wrapper around a FunctionalTensorWrapper for comparing only the resulting metadata
-# after applying all the ViewMeta operations.
-class FunctionalTensorMetadataEq:
-    def __init__(self, tensor: torch.Tensor) -> None:
-        assert torch._is_functional_tensor(tensor)
-        self.tensor = tensor
-
-    def __eq__(self, other: object) -> bool:
-        # If other is None, then it probably means that we weren't able to recreate
-        # the FunctionalTensorMetadataEq. One of this cases is when we update the
-        # view metadata by calling: create_synthetic_base_metadata.
-        if other is None:
-            return True
-
-        # Comparison agains any other type is not implemented.
-        if not isinstance(other, FunctionalTensorMetadataEq):
-            return NotImplemented
-
-        return has_same_metadata(self.tensor, other.tensor)
 
 
 # This class stores info about every user output.
@@ -303,6 +286,9 @@ class ViewAndMutationMeta:
     # forward, but is turned on during the backward call, then an error is
     # raised
     deterministic: Optional[bool] = None
+
+    # Keeps track of which input indices store parameters (which we will treat as static)
+    static_parameter_indices: List[int] = field(default_factory=list)
 
     # Map of effect type (ex. _EffectType.ORDERED) to token.  If there are
     # side-effectful operators, FunctionalTensorMode will populate this
@@ -722,6 +708,9 @@ class AOTConfig:
     enable_log: bool = True
     # this is always false outside of export.
     pre_dispatch: bool = False
+
+    # Key to use for AOTAutogradCache
+    cache_key: Optional[str] = None
 
     def __post_init__(self):
         if self.pre_dispatch:

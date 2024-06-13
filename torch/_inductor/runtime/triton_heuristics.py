@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import builtins
 import copy
 import functools
@@ -748,7 +749,6 @@ class CachingAutotuner(KernelInterface):
             # User defined triton kernels will have arbitrary kwarg names
             "meta": launcher.config.kwargs,
         }
-
         from torch._inductor.codecache import CudaKernelParamCache
 
         binary = (
@@ -1031,7 +1031,7 @@ def should_use_remote_autotune_cache(inductor_meta):
     if inductor_meta.get("is_hip"):
         return False
 
-    from triton.runtime.fb_memcache import MEMCACHE_VERSION
+    from triton.fb.fb_memcache import MEMCACHE_VERSION
 
     return MEMCACHE_VERSION >= torch._utils_internal.justknobs_getval_int(
         "pytorch/remote_cache:autotune_memcache_version"
@@ -1075,11 +1075,17 @@ def cached_autotune(
 
                 try:
                     if inductor_meta.get("is_fbcode"):
-                        remote_cache = triton.runtime.fb_memcache.FbMemcacheRemoteAutotuneCacheBackend(
-                            key
+                        import triton.fb.fb_memcache
+
+                        remote_cache = (
+                            triton.fb.fb_memcache.FbMemcacheRemoteAutotuneCacheBackend(
+                                key
+                            )
                         )
                     else:
-                        remote_cache = triton.runtime.cache.RedisRemoteCacheBackend(key)
+                        from torch._inductor.remote_cache import RedisRemoteCacheBackend
+
+                        remote_cache = RedisRemoteCacheBackend(key)
                 except Exception:
                     remote_cache = None
                     log.warning("Unable to create a remote cache", exc_info=True)
@@ -1737,7 +1743,7 @@ def grid(*numels):
         max_y_grid = get_max_y_grid()
         if znumel is None:
             div = ceildiv(y_grid, max_y_grid)
-            y_grid = y_grid // div
+            y_grid = ceildiv(y_grid, div)
             z_grid = div
         else:
             z_grid = get_grid_dim(znumel, meta.get("ZBLOCK", None))
