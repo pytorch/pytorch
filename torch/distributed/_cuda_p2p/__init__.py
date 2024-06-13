@@ -371,43 +371,44 @@ def _fused_all_gather_matmul(
     if _current_p2p_usage_counter is not None:
         _current_p2p_usage_counter["fused_all_gather_matmul"] += 1
 
-    # Move the gather_dim to the front and flatten the tensor into a 2D matrix.
-    # The flattened tensor doesn't need to be contiguous (for computation
-    # efficiency), as _pipelined_all_gather_and_consume guarantees that shards
-    # passed to shard_consumer are contiguous.
-    x = A_shard.movedim(gather_dim, 0)
-    leading_dims = [group.size()] + list(x.shape[:-1])
-    x = x.flatten(0, -2)
+    with torch.profiler.record_function("fused_all_gather_matmul"):
+        # Move the gather_dim to the front and flatten the tensor into a 2D matrix.
+        # The flattened tensor doesn't need to be contiguous (for computation
+        # efficiency), as _pipelined_all_gather_and_consume guarantees that shards
+        # passed to shard_consumer are contiguous.
+        x = A_shard.movedim(gather_dim, 0)
+        leading_dims = [group.size()] + list(x.shape[:-1])
+        x = x.flatten(0, -2)
 
-    # Helper function for reverting the above transformation
-    def unflatten(t):
-        return t.view(*leading_dims, -1).flatten(0, 1).movedim(0, gather_dim)
+        # Helper function for reverting the above transformation
+        def unflatten(t):
+            return t.view(*leading_dims, -1).flatten(0, 1).movedim(0, gather_dim)
 
-    ag_out = x.new_empty(
-        x.shape[0] * group.size(),
-        x.shape[1],
-    )
-    outputs = [
-        x.new_empty(
+        ag_out = x.new_empty(
             x.shape[0] * group.size(),
-            B.shape[1],
+            x.shape[1],
         )
-        for B in Bs
-    ]
-    output_shards = [output.chunk(group.size()) for output in outputs]
+        outputs = [
+            x.new_empty(
+                x.shape[0] * group.size(),
+                B.shape[1],
+            )
+            for B in Bs
+        ]
+        output_shards = [output.chunk(group.size()) for output in outputs]
 
-    # Computing block-wise matmul along the first dim of A
-    def shard_consumer(shard: torch.Tensor, rank: int) -> None:
-        for idx, B in enumerate(Bs):
-            torch.mm(shard, B, out=output_shards[idx][rank])
+        # Computing block-wise matmul along the first dim of A
+        def shard_consumer(shard: torch.Tensor, rank: int) -> None:
+            for idx, B in enumerate(Bs):
+                torch.mm(shard, B, out=output_shards[idx][rank])
 
-    _pipelined_all_gather_and_consume(
-        x,
-        shard_consumer,
-        ag_out,
-        group,
-    )
-    return unflatten(ag_out), [unflatten(output) for output in outputs]
+        _pipelined_all_gather_and_consume(
+            x,
+            shard_consumer,
+            ag_out,
+            group,
+        )
+        return unflatten(ag_out), [unflatten(output) for output in outputs]
 
 
 def make_contiguous_for_perm(
@@ -496,32 +497,33 @@ def _fused_matmul_reduce_scatter(
     if _current_p2p_usage_counter is not None:
         _current_p2p_usage_counter["fused_matmul_reduce_scatter"] += 1
 
-    # Move the gather_dim to the front and flatten the tensor into a 2D matrix
-    x = A.movedim(scatter_dim, 0)
-    leading_dims = [group.size()] + list(x.shape[:-1])
-    leading_dims[1] //= group.size()
-    x = x.flatten(0, -2)
-    shards = x.chunk(group.size())
+    with torch.profiler.record_function("fused_matmul_reduce_scatter"):
+        # Move the gather_dim to the front and flatten the tensor into a 2D matrix
+        x = A.movedim(scatter_dim, 0)
+        leading_dims = [group.size()] + list(x.shape[:-1])
+        leading_dims[1] //= group.size()
+        x = x.flatten(0, -2)
+        shards = x.chunk(group.size())
 
-    # Computing block-wise matmul along the first dim of A
-    def chunk_producer(rank: int, out: torch.Tensor) -> None:
-        torch.matmul(shards[rank], B, out=out)
+        # Computing block-wise matmul along the first dim of A
+        def chunk_producer(rank: int, out: torch.Tensor) -> None:
+            torch.matmul(shards[rank], B, out=out)
 
-    stacked_partials = x.new_empty(x.shape[0], B.shape[1])
+        stacked_partials = x.new_empty(x.shape[0], B.shape[1])
 
-    _pipelined_produce_and_all2all(
-        chunk_producer,
-        stacked_partials,
-        group,
-    )
-    # Ensures that the transpose and reduction produce contiguous result
-    # in a single reduction kernel.
-    return reduce_fn(
-        stacked_partials.view(*leading_dims, -1)
-        .movedim(1, scatter_dim + 1)
-        .movedim(0, scatter_dim),
-        dim=scatter_dim,
-    )
+        _pipelined_produce_and_all2all(
+            chunk_producer,
+            stacked_partials,
+            group,
+        )
+        # Ensures that the transpose and reduction produce contiguous result
+        # in a single reduction kernel.
+        return reduce_fn(
+            stacked_partials.view(*leading_dims, -1)
+            .movedim(1, scatter_dim + 1)
+            .movedim(0, scatter_dim),
+            dim=scatter_dim,
+        )
 
 
 def restride_A_for_fused_matmul_reduce_scatter(
