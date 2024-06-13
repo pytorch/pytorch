@@ -1037,7 +1037,7 @@ class FxGraphCache:
                 cache_id = "fx-graph-v1"
                 try:
                     if config.is_fbcode():
-                        from triton.runtime.fb_memcache import (
+                        from triton.fb.fb_memcache import (
                             FbMemcacheRemoteFxGraphCacheBackend,
                         )
 
@@ -1410,7 +1410,7 @@ class VecAVX2(VecISA):
     _bit_width = 256
     _macro = ["CPU_CAPABILITY_AVX2"]
     _arch_flags = (
-        "-mavx2 -mfma" if not _IS_WINDOWS else "/arch:AVX2"
+        "-mavx2 -mfma -mf16c" if not _IS_WINDOWS else "/arch:AVX2"
     )  # TODO: use cflags
     _dtype_nelements = {torch.float: 8, torch.bfloat16: 16, torch.float16: 16}
 
@@ -1481,31 +1481,6 @@ invalid_vec_isa = InvalidVecISA()
 supported_vec_isa_list = [VecAVX512(), VecAVX2(), VecNEON()]
 
 
-def get_isa_from_cpu_capability(
-    capability: str | None, vec_isa_list: List[VecISA], invalid_vec_isa: InvalidVecISA
-):
-    # VSX is not supported in inductor
-    capability_to_isa_str = {
-        "default": "INVALID_VEC_ISA",
-        "neon": "asimd",
-        "zvector": "zvector",
-        "avx2": "avx2",
-        "avx512": "avx512",
-    }
-    if capability in capability_to_isa_str.keys():
-        isa_str = capability_to_isa_str[capability]
-        if isa_str == "INVALID_VEC_ISA":
-            return invalid_vec_isa
-        for vec_isa in vec_isa_list:
-            if isa_str == str(vec_isa):
-                return vec_isa
-
-    if capability:
-        warnings.warn(f"ignoring invalid value for ATEN_CPU_CAPABILITY {capability}")
-
-    return vec_isa_list[0]
-
-
 # Cache the cpuinfo to avoid I/O overhead. Meanwhile, the cpuinfo content
 # might have too much redundant content that is useless for ISA check. Hence,
 # we only cache some key isa information.
@@ -1548,13 +1523,10 @@ def pick_vec_isa() -> VecISA:
     if not _valid_vec_isa_list:
         return invalid_vec_isa
 
-    # If the simdlen is None, set simdlen based on the environment ATEN_CPU_CAPABILITY
-    # to control CPU vec ISA
-
+    # If the simdlen is None, it indicates determine the vectorization length automatically
     if config.cpp.simdlen is None:
-        return get_isa_from_cpu_capability(
-            os.getenv("ATEN_CPU_CAPABILITY"), _valid_vec_isa_list, invalid_vec_isa
-        )
+        assert _valid_vec_isa_list
+        return _valid_vec_isa_list[0]
 
     for isa in _valid_vec_isa_list:
         if config.cpp.simdlen == isa.bit_width():
