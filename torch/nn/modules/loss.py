@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 from .distance import PairwiseDistance
 from .module import Module
 from .. import functional as F

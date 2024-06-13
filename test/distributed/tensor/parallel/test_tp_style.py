@@ -317,6 +317,18 @@ class TensorParallelStyleTest(DTensorTestBase):
         self.assertEqual(comm_mode.get_total_counts(), 2)
         self.assertEqual(output.shape, (1 * self.world_size, 8))
 
+        # test the case where x is a DTensor
+        x_dt = DTensor.from_local(
+            torch.randn(1, 8, device=self.device_type), mesh, [Shard(0)]
+        )
+        with comm_mode:
+            output = test_kwonly_mod(
+                x=x_dt, z=torch.ones(1, 8, device=self.device_type)
+            )
+
+        self.assertEqual(comm_mode.get_total_counts(), 2)
+        self.assertEqual(output.shape, (1 * self.world_size, 8))
+
     @with_comms
     def test_prepare_module_output(self):
         mesh = init_device_mesh(self.device_type, (self.world_size,))

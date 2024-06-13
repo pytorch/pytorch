@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import _collections_abc
 import _weakrefset
 import abc
@@ -405,7 +406,9 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch._C._construct_CUDA_Tensor_From_Storage_And_Metadata",
         "torch._C._construct_storage_from_data_pointer",
         "torch._C._conv_determine_backend_memory_format",
-        "torch._C._cpu._is_cpu_support_vnni",
+        "torch._C._cpu._is_cpu_support_avx2",
+        "torch._C._cpu._is_cpu_support_avx512",
+        "torch._C._cpu._is_cpu_support_avx512_vnni",
         "torch._C._crash_if_aten_asan",
         "torch._C._crash_if_csrc_asan",
         "torch._C._crash_if_csrc_ubsan",
@@ -938,6 +941,7 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch._C._mps_currentAllocatedMemory",
         "torch._C._mps_deviceSynchronize",
         "torch._C._mps_driverAllocatedMemory",
+        "torch._C._mps_recommendedMaxMemory",
         "torch._C._mps_elapsedTimeOfEvents",
         "torch._C._mps_emptyCache",
         "torch._C._mps_get_default_generator",
@@ -1995,7 +1999,6 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch.not_equal",
         "torch.nuclear_norm",
         "torch.numel",
-        "torch.obj",
         "torch.ones_like",
         "torch.ones",
         "torch.orgqr",
@@ -2182,6 +2185,7 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch.xlogy",
         "torch.zero_",
         "torch.zeros",
+        "torch.zeros_like",
         "torch._fused_sgd_",
         "torch.slice_inverse",
         "torch._assert_scalar",
@@ -2416,7 +2420,9 @@ torch_non_c_binding_in_graph_functions = dict.fromkeys(
         "torch.chain_matmul",
         "torch.compile",
         "torch.compiled_with_cxx11_abi",
-        "torch.cpu._is_cpu_support_vnni",
+        "torch.cpu._is_cpu_support_avx2",
+        "torch.cpu._is_cpu_support_avx512",
+        "torch.cpu._is_cpu_support_avx512_vnni",
         "torch.cpu.current_device",
         "torch.cpu.current_stream",
         "torch.cpu.device_count",
@@ -3519,7 +3525,11 @@ def lookup_inner(
     # The rules defined in `torch_name_rule_map` mainly includes two parts:
     # - Manually defined rules for any functions.
     # - The list of torch in graph functions.
-    if not hashable(obj):
+    try:
+        can_hash = hashable(obj)
+    except Exception:
+        can_hash = False
+    if not can_hash:
         if reasons is not None:
             reasons.add("obj is not hashable")
         return None

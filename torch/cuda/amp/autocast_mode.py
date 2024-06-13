@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import functools
 from typing import Any
 from typing_extensions import deprecated
