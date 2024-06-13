@@ -1,11 +1,12 @@
 # mypy: allow-untyped-defs
-from torch.nn.modules import *  # noqa: F403
 from torch.nn import (
     attention as attention,
     functional as functional,
     init as init,
+    modules as modules,
     utils as utils,
 )
+from torch.nn.modules import *  # noqa: F403
 from torch.nn.parallel import DataParallel as DataParallel
 from torch.nn.parameter import (
     Parameter as Parameter,
