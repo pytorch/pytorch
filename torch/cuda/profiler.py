@@ -59,6 +59,7 @@ def profile():
 
     Context Manager to enabling profile collection by the active profiling tool from CUDA backend.
     Example:
+        >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_CUDA)
         >>> import torch
         >>> model = torch.nn.Linear(20, 30).cuda()
         >>> inputs = torch.randn(128, 20).cuda()
