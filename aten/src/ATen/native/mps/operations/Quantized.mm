@@ -291,6 +291,7 @@ kernel void kernel_mul_mm(
 
     // shared memory for A and B
     threadgroup T    * shared_memory_A = (threadgroup T    *)(shared_memory);
+    // using half here to store int8, gives us about 8% perf gain comparing to bfloat but not sure why
     threadgroup half * shared_memory_B = (threadgroup half *)(shared_memory + 8192);
 
     const uint threadgroup_M = tgpig.x; // total number (M + 31)/32, the index of this threadgroup along M axis
