@@ -21,6 +21,8 @@ from torch.export.exported_program import (
     TensorArgument,
 )
 from torch.fx._symbolic_trace import is_fx_tracing
+from torch.fx.experimental.proxy_tensor import py_sym_types
+from torch.nn.modules.module import _addindent
 from torch.utils._pytree import GetAttrKey, SequenceKey
 
 from ._remove_effect_tokens_pass import _remove_effect_tokens
@@ -132,6 +134,32 @@ class InterpreterModule(torch.nn.Module):
         for node in self.graph.nodes:
             if node.op == "placeholder":
                 self.arg_names.append(node.target)
+
+    def print_readable(
+        self, print_output=True, include_stride=False, include_device=False
+    ):
+        verbose_python_code = self.graph.python_code(
+            root_module="self",
+            verbose=True,
+            include_stride=include_stride,
+            include_device=include_device,
+        )
+        module_code = verbose_python_code.src
+        module_code = module_code.lstrip("\n")
+        module_code = f"class {self._get_name()}(torch.nn.Module):\n" + module_code
+        module_code = _addindent(module_code, 4)
+
+        submodule_code_list = [""]
+        for submodule in self.children():
+            if isinstance(submodule, InterpreterModule):
+                submodule_code_list.append(submodule.print_readable(print_output=False))
+        submodule_code = "\n".join(submodule_code_list)
+        submodule_code = _addindent(submodule_code, 4)
+
+        output = module_code + submodule_code
+        if print_output:
+            print(module_code + submodule_code)
+        return output
 
 
 class FlatArgsAdapter(abc.ABC):
@@ -464,6 +492,32 @@ class UnflattenedModule(torch.nn.Module):
             *flat_args, enable_io_processing=False
         )
         return pytree.tree_unflatten(tree_out, signature.out_spec)
+
+    def print_readable(
+        self, print_output=True, include_stride=False, include_device=False
+    ):
+        verbose_python_code = self.graph.python_code(
+            root_module="self",
+            verbose=True,
+            include_stride=include_stride,
+            include_device=include_device,
+        )
+        module_code = verbose_python_code.src
+        module_code = module_code.lstrip("\n")
+        module_code = f"class {self._get_name()}(torch.nn.Module):\n" + module_code
+        module_code = _addindent(module_code, 4)
+
+        submodule_code_list = [""]
+        for submodule in self.children():
+            if isinstance(submodule, InterpreterModule):
+                submodule_code_list.append(submodule.print_readable(print_output=False))
+        submodule_code = "\n".join(submodule_code_list)
+        submodule_code = _addindent(submodule_code, 4)
+
+        output = module_code + submodule_code
+        if print_output:
+            print(module_code + submodule_code)
+        return output
 
 
 def unflatten(
