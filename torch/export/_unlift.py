@@ -197,9 +197,7 @@ def _register_attrs_to_new_gm(
 ) -> None:
     non_persistent_buffers = set(graph_signature.non_persistent_buffers)
     for name in graph_signature.buffers:
-        if name in non_persistent_buffers or name in constants: 
-            # Buffer name is in constants because converter converts the tensor constant
-            # to a GetAttr, which is treated as a buffer during retracing.
+        if name in non_persistent_buffers:
             persistent = False
             value = constants[name]
         else:
