@@ -32,6 +32,7 @@ import torch._dynamo.utils
 
 import torch._functorch.config
 import torch.library
+import torch.utils._pytree as pytree
 from torch import nn
 from torch._dynamo.debug_utils import same_two_models
 from torch._dynamo.testing import CompileCounter, rand_strided, same
@@ -5053,6 +5054,53 @@ def forward(self, primals_1, primals_2):
         y = torch.randn(4)
         opt_fn = torch.compile(fn, backend="eager")
         self.assertEqual(fn(x, y), opt_fn(x, y))
+
+    def test_nn_module_stack_bc(self):
+        from torch._dynamo.mutation_guard import GenerationTracker
+
+        def compiler(gm, *args):
+            module_stacks = [
+                node.meta.get("nn_module_stack", None) for node in gm.graph.nodes
+            ]
+            module_stacks, _ = pytree.tree_flatten(module_stacks)
+            module_stacks = [x for x in module_stacks if isinstance(x, str)]
+            for stack in module_stacks:
+                self.assertTrue("_module" not in stack)
+            return gm.forward
+
+        class SubMod(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(2, 2)
+
+            def forward(self, x):
+                return self.linear(x)
+
+        class Mod(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.submod1 = SubMod()
+                self.submod2 = SubMod()
+
+            def forward(self, x):
+                return self.submod1(x) + self.submod2(x)
+
+        mod = Mod()
+        opt_mod = torch.compile(mod, backend=compiler)
+        opt_mod(torch.randn(2, 2))
+
+        with torch._dynamo.config.patch(inline_inbuilt_nn_modules=True):
+            mod = Mod()
+            opt_mod = torch.compile(mod, backend=compiler)
+            opt_mod(torch.randn(2, 2))
+
+        # an example similar to Pippy usecase
+        mod = Mod()
+        GenerationTracker.tag(mod.submod1)
+        GenerationTracker.mark_class_dynamic(type(mod.submod1))
+        mod = Mod()
+        opt_mod = torch.compile(mod, backend=compiler)
+        opt_mod(torch.randn(2, 2))
 
 
 instantiate_parametrized_tests(ReproTests)
