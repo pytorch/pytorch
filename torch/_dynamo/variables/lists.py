@@ -227,7 +227,6 @@ class RangeVariable(BaseListVariable):
         # Compute start
         if slice.start is None:
             start = upper if step_is_negative else lower
-
         else:
             start = slice.start
 
@@ -266,19 +265,14 @@ class RangeVariable(BaseListVariable):
         return variables.ConstantVariable.create(self.start() + (index * self.step()))
 
     def apply_slice(self, slice):
-        sub_start = None
-        sub_stop = None
-        sub_step = None
-
         (slice_start, slice_stop, slice_step) = self._get_slice_indices(
             self.range_length(), slice
         )
 
-        sub_step = self.step() * slice_step
-
         def compute_item(index):
             return self.start() + (index * self.step())
 
+        sub_step = self.step() * slice_step
         sub_start = compute_item(slice_start)
         sub_stop = compute_item(slice_stop)
 
