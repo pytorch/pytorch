@@ -30,7 +30,7 @@ alexnet,pass,6
 
 
 
-basic_gnn_edgecnn,pass,22
+basic_gnn_edgecnn,pass,20
 
 
 
@@ -114,7 +114,7 @@ hf_GPT2_large,pass_due_to_skip,0
 
 
 
-hf_Reformer,pass,26
+hf_Reformer,pass,25
 
 
 
