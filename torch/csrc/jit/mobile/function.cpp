@@ -72,7 +72,7 @@ bool Function::initialize_operators(bool should_check_operators) {
     const auto& opname = code_.op_names_[i];
     int num_args = code_.operator_input_sizes_[i];
     std::optional<int> num_specified_args =
-        num_args < 0 ? c10::nullopt : std::optional<int>(num_args);
+        num_args < 0 ? std::nullopt : std::optional<int>(num_args);
     auto func = makeOperatorFunction(opname, num_specified_args);
     if (!func.has_value()) {
       unsupported_op_names.insert(operator_str(opname));
@@ -189,7 +189,7 @@ std::optional<std::function<void(Stack&)>> makeOperatorFunction(
           TORCH_CHECK(false, "arguments are missing for operator ", opname);
         }
       } else {
-        return c10::nullopt;
+        return std::nullopt;
       }
     }
   }
