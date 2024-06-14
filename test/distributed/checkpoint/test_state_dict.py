@@ -687,9 +687,7 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
             fully_shard(layer)
         fully_shard(model)
         optim = torch.optim.Adam(model.parameters(), lr=1e-2)
-        torch.optim.lr_scheduler.LambdaLR(
-            optim, lr_lambda=[lambda epoch: 0.95**epoch]
-        )
+        torch.optim.lr_scheduler.LambdaLR(optim, lr_lambda=[lambda epoch: 0.95**epoch])
         opt_state_dict = ptd_state_dict.get_optimizer_state_dict(
             model,
             optim,
@@ -850,6 +848,33 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
                 r"FSDP.state_dict_type\(\) and FSDP.set_state_dict_type\(\) are being deprecated",
             ):
                 get_model_state_dict(model)
+
+    @with_comms
+    @skip_if_lt_x_gpu(2)
+    def test_shared_weight(self):
+        class TiedEmbeddingModel(nn.Module):
+            def __init__(self, vocab_size, embedding_dim):
+                super(TiedEmbeddingModel, self).__init__()
+                self.embedding = nn.Embedding(vocab_size, embedding_dim)
+                self.decoder = nn.Linear(embedding_dim, vocab_size)
+                self.decoder.weight = self.embedding.weight  # Tying weights
+
+            def forward(self, input):
+                input = (input * 10).to(torch.int)
+                embedded = self.embedding(input)
+                output = self.decoder(embedded)
+                return output
+
+        def init_model_optim():
+            device_mesh = init_device_mesh("cuda", (self.world_size,))
+            orig_model = TiedEmbeddingModel(10000, 300).to(torch.device("cuda"))
+            orig_optim = torch.optim.AdamW(orig_model.parameters(), lr=1e-3)
+            copy_optim = torch.optim.AdamW(orig_model.parameters(), lr=1e-3)
+            dist_model = FSDP(copy.deepcopy(orig_model), device_mesh=device_mesh)
+            dist_optim = torch.optim.AdamW(dist_model.parameters(), lr=1e-3)
+            return orig_model, orig_optim, copy_optim, dist_model, dist_optim
+
+        self._test_save_load(init_model_optim)
 
 
 class TestNoComm(MultiProcessTestCase):
