@@ -2,6 +2,7 @@
 
 import collections
 import contextlib
+import functools
 import gc
 import io
 import math
@@ -79,8 +80,14 @@ from torch.testing._internal.common_utils import (
 )
 from torch.utils._mode_utils import no_dispatch
 from torch.utils._python_dispatch import TorchDispatchMode
-from torch.utils.checkpoint import checkpoint, checkpoint_sequential
+from torch.utils.checkpoint import (
+    checkpoint,
+    checkpoint_sequential,
+    CheckpointPolicy,
+    create_selective_checkpoint_contexts,
+)
 from torch.utils.cpp_extension import load_inline
+from torch.utils.flop_counter import FlopCounterMode
 from torch.utils.hooks import RemovableHandle  # noqa: TCH001
 
 
@@ -1341,6 +1348,23 @@ class TestAutograd(TestCase):
         a.register_hook(tensor_prehook)
 
         b.backward()
+
+    def test_accumulate_grad_posthooks_should_not_execute(self):
+        def tensor_prehook(g):
+            raise RuntimeError
+
+        def posthook(gO, gI):
+            raise RuntimeError
+
+        a = torch.tensor(1.0, requires_grad=True)
+        a.register_hook(tensor_prehook)
+        b = torch.tensor(1.0, requires_grad=True)
+        c = a.clone()
+        acc = c.grad_fn.next_functions[0][0]
+        acc.register_hook(posthook)
+
+        out = a + b + c
+        out.sum().backward(inputs=[b])
 
     def test_hook_edge_case_when_called_with_grad(self):
         # grad executes the tensor hooks of the next node but not
@@ -13168,6 +13192,297 @@ class TestNestedCheckpoint(TestCase):
             out = checkpoint(fn2, a, use_reentrant=False)
         out.backward()
         self.assertEqual(counter[0], 1)
+
+
+class TestSelectiveActivationCheckpoint(TestCase):
+    @unittest.skipIf(not TEST_CUDA, "requires CUDA")
+    def test_flops_and_mem(self):
+        # From https://github.com/pytorch/pytorch/pull/126320
+        def get_act_mem(f):
+            out = f()
+            out.backward()
+            # Why do one forward and backward?
+            start_mem = torch.cuda.memory_stats()["requested_bytes.all.current"]
+            out = f()
+            cur_mem = torch.cuda.memory_stats()["requested_bytes.all.current"]
+            act_mem = (cur_mem - start_mem) / (1024 * 1024)
+            out.backward()
+            return act_mem
+
+        def get_bw_flops(f):
+            # Normalized so that a 512 square matmul returns 1
+            f().backward()
+            out = f()
+            # NB: FlopCounterMode is pushed onto the mode stack before CachedMode, so
+            # it will be able to observe whether an op is cached or not.
+            with FlopCounterMode(display=False) as mode:
+                out.backward()
+            return mode.get_total_flops() / (512**3 * 2)
+
+        x = torch.randn(512, 512, requires_grad=True, device="cuda")
+        y = torch.randn(512, 512, requires_grad=True, device="cuda")
+
+        def fn(x, y):
+            return torch.mm(x.cos(), y).sin().sum()
+
+        def fn_ac(x, y):
+            return checkpoint(fn, x, y, use_reentrant=False)
+
+        def fn_sac(x, y):
+            context_fn = functools.partial(
+                create_selective_checkpoint_contexts,
+                [
+                    torch.ops.aten.mm.default,
+                ],
+            )
+            out = checkpoint(fn, x, y, use_reentrant=False, context_fn=context_fn)
+            return out
+
+        def policy_fn(ctx, op, *args, **kwargs):
+            if op == torch.ops.aten.mm.default:
+                return CheckpointPolicy.MUST_SAVE
+            else:
+                return CheckpointPolicy.PREFER_RECOMPUTE
+
+        def fn_sac2(x, y):
+            context_fn = functools.partial(
+                create_selective_checkpoint_contexts,
+                policy_fn,
+            )
+            out = checkpoint(fn, x, y, use_reentrant=False, context_fn=context_fn)
+            return out
+
+        act_mem_noac = get_act_mem(lambda: fn(x, y))
+        bw_flops_noac = get_bw_flops(lambda: fn(x, y))
+
+        self.assertEqual(act_mem_noac, 2.0)
+        self.assertEqual(bw_flops_noac, 2.0)
+
+        act_mem_ac = get_act_mem(lambda: fn_ac(x, y))
+        bw_flops_ac = get_bw_flops(lambda: fn_ac(x, y))
+
+        self.assertEqual(act_mem_ac, 0.0)
+        self.assertEqual(bw_flops_ac, 3.0)
+
+        act_mem_sac = get_act_mem(lambda: fn_sac(x, y))
+        bw_flops_sac = get_bw_flops(lambda: fn_sac(x, y))
+
+        self.assertEqual(act_mem_sac, 1.0)
+        self.assertEqual(bw_flops_sac, 2.0)
+
+        act_mem_sac2 = get_act_mem(lambda: fn_sac2(x, y))
+        bw_flops_sac2 = get_bw_flops(lambda: fn_sac2(x, y))
+
+        self.assertEqual(act_mem_sac2, 1.0)
+        self.assertEqual(bw_flops_sac2, 2.0)
+
+    def test_bad_inputs(self):
+        bad_op_list1 = [2]
+
+        with self.assertRaisesRegex(
+            ValueError, "Expected op in `op_list` to be an OpOverload"
+        ):
+            create_selective_checkpoint_contexts(bad_op_list1)
+
+        bad_op_list2 = [torch.ops.aten.sin]
+
+        with self.assertRaisesRegex(
+            ValueError, "update the OpOverloadPacket to a specific OpOverload"
+        ):
+            create_selective_checkpoint_contexts(bad_op_list2)
+
+        with self.assertRaisesRegex(TypeError, "either a function or a list of ops."):
+            create_selective_checkpoint_contexts(2)
+
+    # Dynamo fails for various reasons:
+    # - some tests using custom op that does not implement Fake
+    # - dynamo is trying to trace into saved variable hooks unpack hook for some reason
+    @skipIfTorchDynamo("compile tested in test/dynamo/test_activation_checkpointing.py")
+    def test_policy_with_state(self):
+        # If I have a stateful callable, state is shared between the original
+        # forward and the recompute.
+        counters = []
+
+        class Policy:
+            def __init__(self):
+                self.counter = [0]
+                self.recompute_counter = [0]
+
+            def __call__(self, ctx, func, *args, **kwargs):
+                counter = self.recompute_counter if ctx.is_recompute else self.counter
+                counter[0] += 1
+                counters.append(counter[0])
+                if counter == 1 and func is torch.ops.aten.mm.default:
+                    return CheckpointPolicy.MUST_SAVE
+                return CheckpointPolicy.PREFER_RECOMPUTE
+
+        def fn(x):
+            return x.sin().sin().sin()
+
+        x = torch.randn(3, requires_grad=True)
+        context_fn = functools.partial(
+            create_selective_checkpoint_contexts,
+            Policy(),
+            allow_cache_entry_mutation=True,
+        )
+        out = checkpoint(fn, x, use_reentrant=False, context_fn=context_fn)
+        out.sum().backward()
+        # 1. counter properly reset to 0 for the recompute
+        # 2. due to early-stop we do not recompute the final op
+        self.assertEqual(counters, [1, 2, 3, 1, 2])
+
+    @skipIfTorchDynamo("compile tested in test/dynamo/test_activation_checkpointing.py")
+    def test_storage_lifetime(self):
+        # The storage object saved by SAC survives as long as the graph is alive
+        # graph -> the saved variable hooks -> recompute_context -> storage
+        # However, we make sure to eagerly free any cached objects upon use.
+        def policy_fn(ctx, op, *args, **kwargs):
+            if op == torch.ops.aten.sin.default:
+                return CheckpointPolicy.MUST_SAVE
+            else:
+                return CheckpointPolicy.PREFER_RECOMPUTE
+
+        ref = None
+
+        # This hook fires after unpack is triggered.
+        def hook(x):
+            self.assertIsNone(ref())
+
+        def fn(x):
+            nonlocal ref
+            # IMPORTANT: the tensor object saved is the same exact tensor
+            # object as the output only when the tensor does not require grad.
+            # Detach, so we can conveniently access the reference here.
+            sin_out = x.detach().sin()
+            ref = weakref.ref(sin_out)
+
+            out = x.cos().exp()
+            out.register_hook(hook)
+            return out.cos()
+
+        x = torch.randn(3, requires_grad=True)
+        context_fn = functools.partial(create_selective_checkpoint_contexts, policy_fn)
+        out = checkpoint(fn, x, use_reentrant=False, context_fn=context_fn)
+        self.assertIsNotNone(ref())
+        out.sum().backward()
+        self.assertIsNone(ref())
+
+    @skipIfTorchDynamo("compile tested in test/dynamo/test_activation_checkpointing.py")
+    def test_version_counter(self):
+        def policy_fn(ctx, op, *args, **kwargs):
+            if op == torch.ops.aten.sin.default:
+                return CheckpointPolicy.MUST_SAVE
+            else:
+                return CheckpointPolicy.PREFER_RECOMPUTE
+
+        def fn(x):
+            return x.sin().mul_(2).cos().exp()
+
+        x = torch.randn(3, requires_grad=True)
+        context_fn = functools.partial(create_selective_checkpoint_contexts, policy_fn)
+        out = checkpoint(fn, x, use_reentrant=False, context_fn=context_fn)
+
+        # 1) Error because the output of sin is saved and mutated by mul_
+        with self.assertRaisesRegex(RuntimeError, "has been mutated"):
+            out.sum().backward()
+
+        x = torch.randn(3, requires_grad=True)
+        context_fn = functools.partial(
+            create_selective_checkpoint_contexts,
+            policy_fn,
+            allow_cache_entry_mutation=True,
+        )
+        out = checkpoint(fn, x, use_reentrant=False, context_fn=context_fn)
+
+        # 2) No longer should be an error because of allow_cache_entry_mutation
+        out.sum().backward()
+
+    @skipIfTorchDynamo("compile tested in test/dynamo/test_activation_checkpointing.py")
+    def test_function_with_more_than_one_output(self):
+        # maybe there is a more systematic way:
+        counter = [0]
+
+        def policy_fn(ctx, op, *args, **kwargs):
+            if op == torch.ops.aten.var_mean.correction:
+                counter[0] += 1
+                return CheckpointPolicy.MUST_SAVE
+            else:
+                return CheckpointPolicy.PREFER_RECOMPUTE
+
+        # var_mean has two outputs
+        def fn(x):
+            a, b = torch.var_mean(x)
+            return a * b
+
+        x = torch.randn(3, requires_grad=True)
+        context_fn = functools.partial(create_selective_checkpoint_contexts, policy_fn)
+        out = checkpoint(fn, x, use_reentrant=False, context_fn=context_fn)
+        x_grad = torch.autograd.grad(out.sum(), (x,))
+        x_grad_ref = torch.autograd.grad(fn(x).sum(), (x,))
+        self.assertEqual(x_grad, x_grad_ref)
+        self.assertEqual(counter[0], 2)
+
+    @skipIfTorchDynamo("compile tested in test/dynamo/test_activation_checkpointing.py")
+    def test_function_with_non_tensor_output(self):
+        # When SAC is enabled, the op is not computed a second time
+        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
+            counter = [0]
+
+            @torch.library.custom_op("mylib::sin_with_extra", mutates_args=())
+            def sin_with_extra(x: torch.Tensor) -> Tuple[torch.Tensor, int]:
+                counter[0] += 1
+                return x.sin(), 2
+
+            def setup_context(ctx, inputs, output) -> torch.Tensor:
+                (x,) = inputs
+                ctx.save_for_backward(x)
+
+            def backward(ctx, grad, _unused):
+                (x,) = ctx.saved_tensors
+                return grad * x.cos()
+
+            torch.library.register_autograd(
+                "mylib::sin_with_extra", backward, setup_context=setup_context
+            )
+
+            x = torch.randn(3, requires_grad=True)
+
+            def fn(x):
+                return (torch.ops.mylib.sin_with_extra(x)[0] * x.sin().exp()).sin()
+
+            ops_list = [torch.ops.mylib.sin_with_extra.default]
+
+            x = torch.randn(3, requires_grad=True)
+            context_fn = functools.partial(
+                create_selective_checkpoint_contexts, ops_list
+            )
+            out = checkpoint(fn, x, use_reentrant=False, context_fn=context_fn)
+            x_grad = torch.autograd.grad(out.sum(), (x,))
+            self.assertEqual(counter[0], 1)
+            x_grad_ref = torch.autograd.grad(fn(x).sum(), (x,))
+            self.assertEqual(x_grad, x_grad_ref)
+
+    @skipIfTorchDynamo("compile tested in test/dynamo/test_activation_checkpointing.py")
+    def test_can_only_trigger_recompute_once(self):
+        # We don't support this to avoid adding extra complexity for now.
+        # If there's a need, we could probably do some kind of use_count tracking.
+        # TODO: have a nice error message here.
+        def policy_fn(ctx, op, *args, **kwargs):
+            if op == torch.ops.aten.sin.default:
+                return CheckpointPolicy.MUST_SAVE
+            else:
+                return CheckpointPolicy.PREFER_RECOMPUTE
+
+        def fn(x):
+            return x.sin().cos().exp()
+
+        x = torch.randn(3, requires_grad=True)
+        context_fn = functools.partial(create_selective_checkpoint_contexts, policy_fn)
+        out = checkpoint(fn, x, use_reentrant=False, context_fn=context_fn)
+        out.sum().backward(retain_graph=True)
+
+        with self.assertRaisesRegex(RuntimeError, "Trying to backward an extra time"):
+            out.sum().backward(retain_graph=True)
 
 
 class TestAutogradMultipleDispatch(TestCase):
