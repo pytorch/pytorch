@@ -217,8 +217,9 @@ if RUN_CUDA:
         BaseTest("test_fft_real_input_real_output"),
     ]:
         make_test_case(item.name, item.device, item.tests)
-    
+
     from torch._inductor.utils import is_big_gpu
+
     if is_big_gpu(0):
         for item in [
             BaseTest(
