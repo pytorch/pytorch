@@ -30,6 +30,8 @@ namespace jit {
 namespace mobile {
 namespace nnc {
 
+// TODO(mvz): temporarily disable NNC backend in mobile builds.
+/*
 static std::vector<int64_t> getConstSizes(const BufPtr b) {
   std::vector<int64_t> r;
   for (const auto& dim : b->dims()) {
@@ -383,8 +385,6 @@ static std::vector<std::optional<at::Tensor>> generateExampleInputs(
   return example_inputs;
 }
 
-// TODO(mvz): temporarily disable NNC backend in mobile builds.
-/*
 static c10::IValue preprocess(
     const torch::jit::Module& mod,
     const c10::Dict<c10::IValue, c10::IValue>& compile_spec,

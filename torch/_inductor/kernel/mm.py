@@ -18,6 +18,7 @@ from ..select_algorithm import (
     TritonTemplate,
 )
 from ..utils import (
+    get_gpu_shared_memory,
     use_aten_gemm_kernels,
     use_cpp_packed_gemm_template,
     use_cutlass_template,
@@ -32,6 +33,7 @@ from .mm_common import (
     mm_configs,
     mm_grid,
     mm_options,
+    triton_config,
 )
 
 log = logging.getLogger(__name__)
@@ -338,6 +340,7 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
             [inp_expanded, mat1, mat2],
             alpha=alpha,
             beta=beta,
+            has_bias=True,
         )
 
     add_aten_fallback = False
@@ -399,6 +402,48 @@ def _is_sm7x_or_older_gpu(index: Optional[int]) -> bool:
     return props.major <= 7
 
 
+def try_heuristic(m, n, k, choices, mat1, mat2, mat2_dtype, layout):
+    if mat1.dtype != torch.float16:
+        return None
+
+    # only use heuristic if we are running on an A100
+    # torch.cuda.get_device_capability() >= (8, 0) returns true for A10G
+    # which does not have enough shared memory for one of the configs
+    if (
+        not torch.cuda.get_device_capability() >= (8, 0)
+    ) or get_gpu_shared_memory() != 166912:
+        return None
+
+    if m == 1 and (n % 16 != 0 or k % 16 != 0):
+        return None
+
+    if m <= 16 and n >= 4096 and k >= 4096:
+        return triton_config(
+            BLOCK_M=16,
+            BLOCK_N=64,
+            BLOCK_K=128,
+            num_stages=5,
+            num_warps=4,
+        )
+    elif m > 16 and m <= 32 and n >= 4096 and k >= 4096:
+        return triton_config(
+            BLOCK_M=32,
+            BLOCK_N=32,
+            BLOCK_K=128,
+            num_stages=5,
+            num_warps=4,
+        )
+    elif m > 32 and m <= 64 and n >= 4096 and k >= 4096:
+        return triton_config(
+            BLOCK_M=64,
+            BLOCK_N=32,
+            BLOCK_K=128,
+            num_stages=5,
+            num_warps=4,
+        )
+    return None
+
+
 def tuned_mixed_mm(mat1, mat2, mat2_dtype):
     m, n, k, layout, mat1, mat2 = mm_args(mat1, mat2, layout=None)
     static_shape, is_nonzero = _is_static_problem([mat1, mat2], layout)
@@ -409,14 +454,31 @@ def tuned_mixed_mm(mat1, mat2, mat2_dtype):
 
     # can't use triton kernel unless one of these is true or if running on v100 (numerical issues)
     skip_triton = (
-        mat1.layout.dtype != torch.float32
-        and not (mat2.layout.is_contiguous() or mat2.layout.is_transposed())
-    ) or _is_sm7x_or_older_gpu(layout.device.index)
+        (
+            mat1.layout.dtype != torch.float32
+            and not (mat2.layout.is_contiguous() or mat2.layout.is_transposed())
+        )
+        or _is_sm7x_or_older_gpu(layout.device.index)
+        or inductor_config.mixed_mm_choice == "aten"
+    )
 
-    if inductor_config.force_mixed_mm:
+    if inductor_config.mixed_mm_choice == "triton":
         choices = []
+
     if not skip_triton:
         b_prologue_cast_type = f"tl.{mat2_dtype}".replace("torch.", "")
+        if inductor_config.mixed_mm_choice == "heuristic":
+            choices = []
+            config = try_heuristic(m, n, k, choices, mat1, mat2, mat2_dtype, layout)
+            if config is not None:
+                mm_template.maybe_append_choice(
+                    choices,
+                    input_nodes=(mat1, mat2),
+                    layout=layout,
+                    **mm_options(config, m, n, k, layout, b_prologue_cast_type),
+                )
+            choices.append(fallback)
+
         has_int8_tensor = _is_int8_mat(mat1) or _is_int8_mat(mat2)
         for config in mixed_mm_configs(m, n, k, has_int8_tensor=has_int8_tensor):
             mm_template.maybe_append_choice(
