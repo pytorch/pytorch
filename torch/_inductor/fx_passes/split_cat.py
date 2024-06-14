@@ -58,6 +58,7 @@ post_grad_pass_names = [
     "normalization_aten_pass",
     "decompose_mm_pass",
     "unbind_stack_aten_pass",
+    "shape_padding_multiplier",
 ]
 
 for pass_name in pre_grad_pass_names:
