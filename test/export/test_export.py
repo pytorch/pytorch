@@ -5619,7 +5619,11 @@ def forward(self, x, y):
         ]
         self.assertEqual(len(assert_scalar_nodes), 1)
         self.assertTrue(assert_scalar_nodes[0].args[0].target == torch.sym_not)
-        self.assertEqual(assert_scalar_nodes[0].args[0].args[1], 4)
+        with self.assertRaisesRegex(
+            RuntimeError,
+            r"Runtime assertion failed for expression Ne\(u0, 4\) on node 'sym_not'"
+        ):
+            ep.module()(torch.randn(10), torch.tensor(4))
 
     def test_le_ge_ne_eq(self):
         # le(val) + ge(val) -> eq(val)
