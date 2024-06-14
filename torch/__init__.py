@@ -1957,8 +1957,6 @@ from torch.autograd import (  # usort: skip
     set_grad_enabled as set_grad_enabled,
 )
 
-import torch.utils.backcompat
-import torch.utils.data
 from torch import (
     __config__ as __config__,
     __future__ as __future__,
@@ -1985,6 +1983,7 @@ from torch import (
     special as special,
     testing as testing,
     types as types,
+    utils as utils,
     xpu as xpu,
 )
 from torch.signal import windows as windows
@@ -2317,7 +2316,7 @@ def compile(
 
 from torch import export as export
 
-from torch._higher_order_ops import cond as cond
+from torch._higher_order_ops import cond, while_loop
 
 
 def _register_device_module(device_type, module):
