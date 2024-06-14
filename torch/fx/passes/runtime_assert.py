@@ -185,6 +185,13 @@ def insert_deferred_runtime_asserts(
     # track ranges for expressions
     sym_expr_to_ranges: Dict[sympy.Expr, SymExprRange] = defaultdict(SymExprRange)
     sym_expr_to_nodes: Dict[sympy.Expr, Dict[Any, List[fx.Node]]] = defaultdict(lambda: defaultdict(list))
+    
+    graph_code_log.debug(
+        "%s",
+        lazy_format_graph_code(
+            f"pre insert_deferred_runtime_asserts {name}", gm, colored=True
+        ),
+    )
 
     def _refine_range(sym_rel, lhs, rhs):
         if isinstance(rhs, sympy.Integer):

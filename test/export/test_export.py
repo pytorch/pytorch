@@ -5316,7 +5316,7 @@ def forward(self, x, y):
         self.assertEqual(out1.shape, torch.ones(126).shape)
         with self.assertRaisesRegex(
             RuntimeError,
-            r"Runtime assertion failed for expression Eq\(s0\*s1\*s2 \- s3, 0\) on node 'eq.*'",
+            r"Runtime assertion failed for expression Eq\(s0\*s1\*s2, s3\) on node 'eq.*'",
         ):  # fail only at runtime
             ep.module()(torch.randn(4, 3, 2), torch.randn(10))  # fail
 
@@ -5601,17 +5601,17 @@ def forward(self, x, y):
         self.assertEqual(out1.shape, torch.ones(27).shape)
         with self.assertRaisesRegex(
             RuntimeError,
-            r"Runtime assertion failed for expression Ne\(s0 \- s1, 0\)",
+            r"Runtime assertion failed for expression Ne\(s0, s1\)",
         ):  # fail only at runtime
             ep.module()(torch.randn(4), torch.randn(4))  # fail
         with self.assertRaisesRegex(
             RuntimeError,
-            r"Runtime assertion failed for expression Ne\(s0 \- s1\**3, 0\)",
+            r"Runtime assertion failed for expression Ne\(s0, s1\**3\)",
         ):
             ep.module()(torch.randn(64), torch.randn(4))  # fail
         with self.assertRaisesRegex(
             RuntimeError,
-            r"Runtime assertion failed for expression Eq\(s0\**2 \- 3\*s1, 0\)",
+            r"Runtime assertion failed for expression Eq\(s0\**2, 3\*s1\)",
         ):
             ep.module()(torch.randn(10), torch.randn(9))  # fail
 
