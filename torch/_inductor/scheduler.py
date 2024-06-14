@@ -790,10 +790,18 @@ class SchedulerNode(BaseSchedulerNode):
         )
         self._sizes = self._body.sizes
 
+        # Fake dependencies are added manually. They can not be analyzed from
+        # extract_read_writes. Find them out and apply manually.
+        fake_deps = {
+            dep for dep in self.read_writes.reads if isinstance(dep, (WeakDep, StarDep))
+        }
+
         # don't normalize since the loop order may need to be further changed
         # later
         self.set_read_writes(
-            dependencies.extract_read_writes(self._body, *self._sizes, normalize=False)
+            dependencies.extract_read_writes(
+                self._body, *self._sizes, normalize=False
+            ).with_read(fake_deps)
         )
 
     def reorder_loops_by_dep_pair(

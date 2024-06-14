@@ -328,10 +328,12 @@ class ReadWrites:
             op_counts=self.op_counts,
         )
 
-    def with_read(self, dep: Dep) -> "ReadWrites":
-        assert isinstance(dep, (WeakDep, StarDep))
+    def with_read(self, dep: Union[Dep, Set[Dep]]) -> "ReadWrites":
+        assert isinstance(dep, (WeakDep, StarDep, set))
+        if not isinstance(dep, set):
+            dep = {dep}
         return ReadWrites(
-            set.union(self.reads, {dep}),
+            set.union(self.reads, dep),
             self.writes,
             self.index_exprs,
             self.range_vars,

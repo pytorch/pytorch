@@ -5,6 +5,7 @@ import contextlib
 import numpy as np
 
 import torch
+from torch import nn
 from torch._dynamo.testing import rand_strided
 from torch._dynamo.utils import same
 
@@ -217,6 +218,48 @@ class LoopOrderingTest(TestCase):
         self.do_acc_test(f, x)
         self.assertEqual(2, metrics.generated_kernel_count)
         self.assertEqual(0, metrics.num_loop_reordering)
+
+    def test_keep_fake_dep(self):
+        """
+        In this model, there are fake dependencies (StarDep) between Scatter
+        and a following mutation kernel that computes the gradients of
+        the embedding tables.
+
+        When we do loop reordering for the mutation kernel, we re-analyze
+        the node's dependencies. But the analysis result does not contains
+        those fake dependencies. Have to add them back manually.
+        """
+        V = 2048
+        hidden_size = 64
+        max_seqlen = 512
+        batch_size = 8
+
+        class Model(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.word_embeddings = nn.Embedding(V, hidden_size)
+                self.position_embeddings = nn.Embedding(max_seqlen, hidden_size)
+                self.layer_norm = nn.LayerNorm(hidden_size)
+
+            def forward(self, input_ids, labels, position_ids):
+                emb = self.word_embeddings(input_ids) + self.position_embeddings(
+                    position_ids
+                )
+                return self.layer_norm(emb)
+
+        m = Model()
+
+        @torch.compile
+        def f(*args):
+            m(*args).sum().backward()
+
+        input_ids = torch.randint(0, V, (batch_size, max_seqlen))
+        labels = torch.randint(0, V, (batch_size, max_seqlen))
+        position_ids = torch.arange(max_seqlen)[None, :]
+        # Make sure this line does not raise exceptions. If we miss
+        # fake dependencies after loop reordering, we may get exception that
+        # some buffer is used before being defined.
+        f(input_ids, labels, position_ids)
 
 
 if __name__ == "__main__":
