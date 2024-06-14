@@ -48,7 +48,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu-aarch64
-      DOCKER_IMAGE: pytorch/manylinuxaarch64-builder:cpu-aarch64-2.4
+      DOCKER_IMAGE: pytorch/manylinuxaarch64-builder:cpu-aarch64-main
       DESIRED_PYTHON: "3.8"
       runs_on: linux.arm64.m7g.4xlarge
       ALPINE_IMAGE: "arm64v8/alpine"
@@ -69,7 +69,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu-aarch64
-      DOCKER_IMAGE: pytorch/manylinuxaarch64-builder:cpu-aarch64-2.4
+      DOCKER_IMAGE: pytorch/manylinuxaarch64-builder:cpu-aarch64-main
       DESIRED_PYTHON: "3.8"
       build_name: manywheel-py3_8-cpu-aarch64
       build_environment: linux-aarch64-binary-manywheel
@@ -91,7 +91,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu-aarch64
-      DOCKER_IMAGE: pytorch/manylinuxaarch64-builder:cpu-aarch64-2.4
+      DOCKER_IMAGE: pytorch/manylinuxaarch64-builder:cpu-aarch64-main
       DESIRED_PYTHON: "3.8"
       build_name: manywheel-py3_8-cpu-aarch64
     secrets:
@@ -111,7 +111,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu124
       GPU_ARCH_TYPE: cuda-aarch64
-      DOCKER_IMAGE: pytorch/manylinuxaarch64-builder:cuda12.4-2.4
+      DOCKER_IMAGE: pytorch/manylinuxaarch64-builder:cuda12.4-main
       DESIRED_DEVTOOLSET: cxx11-abi
       DESIRED_PYTHON: "3.8"
       runs_on: linux.arm64.m7g.4xlarge
@@ -135,7 +135,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu124
       GPU_ARCH_TYPE: cuda-aarch64
-      DOCKER_IMAGE: pytorch/manylinuxaarch64-builder:cuda12.4-2.4
+      DOCKER_IMAGE: pytorch/manylinuxaarch64-builder:cuda12.4-main
       DESIRED_DEVTOOLSET: cxx11-abi
       DESIRED_PYTHON: "3.8"
       build_name: manywheel-py3_8-cuda-aarch64
@@ -156,7 +156,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu-aarch64
-      DOCKER_IMAGE: pytorch/manylinuxaarch64-builder:cpu-aarch64-2.4
+      DOCKER_IMAGE: pytorch/manylinuxaarch64-builder:cpu-aarch64-main
       DESIRED_PYTHON: "3.9"
       runs_on: linux.arm64.m7g.4xlarge
       ALPINE_IMAGE: "arm64v8/alpine"
@@ -177,7 +177,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu-aarch64
-      DOCKER_IMAGE: pytorch/manylinuxaarch64-builder:cpu-aarch64-2.4
+      DOCKER_IMAGE: pytorch/manylinuxaarch64-builder:cpu-aarch64-main
       DESIRED_PYTHON: "3.9"
       build_name: manywheel-py3_9-cpu-aarch64
       build_environment: linux-aarch64-binary-manywheel
@@ -199,7 +199,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu-aarch64
-      DOCKER_IMAGE: pytorch/manylinuxaarch64-builder:cpu-aarch64-2.4
+      DOCKER_IMAGE: pytorch/manylinuxaarch64-builder:cpu-aarch64-main
       DESIRED_PYTHON: "3.9"
       build_name: manywheel-py3_9-cpu-aarch64
     secrets:
@@ -219,7 +219,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu124
       GPU_ARCH_TYPE: cuda-aarch64
-      DOCKER_IMAGE: pytorch/manylinuxaarch64-builder:cuda12.4-2.4
+      DOCKER_IMAGE: pytorch/manylinuxaarch64-builder:cuda12.4-main
       DESIRED_DEVTOOLSET: cxx11-abi
       DESIRED_PYTHON: "3.9"
       runs_on: linux.arm64.m7g.4xlarge
@@ -243,7 +243,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu124
       GPU_ARCH_TYPE: cuda-aarch64
-      DOCKER_IMAGE: pytorch/manylinuxaarch64-builder:cuda12.4-2.4
+      DOCKER_IMAGE: pytorch/manylinuxaarch64-builder:cuda12.4-main
       DESIRED_DEVTOOLSET: cxx11-abi
       DESIRED_PYTHON: "3.9"
       build_name: manywheel-py3_9-cuda-aarch64
@@ -264,7 +264,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu-aarch64
-      DOCKER_IMAGE: pytorch/manylinuxaarch64-builder:cpu-aarch64-2.4
+      DOCKER_IMAGE: pytorch/manylinuxaarch64-builder:cpu-aarch64-main
       DESIRED_PYTHON: "3.10"
       runs_on: linux.arm64.m7g.4xlarge
       ALPINE_IMAGE: "arm64v8/alpine"
@@ -285,7 +285,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu-aarch64
-      DOCKER_IMAGE: pytorch/manylinuxaarch64-builder:cpu-aarch64-2.4
+      DOCKER_IMAGE: pytorch/manylinuxaarch64-builder:cpu-aarch64-main
       DESIRED_PYTHON: "3.10"
       build_name: manywheel-py3_10-cpu-aarch64
       build_environment: linux-aarch64-binary-manywheel
@@ -307,7 +307,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu-aarch64
-      DOCKER_IMAGE: pytorch/manylinuxaarch64-builder:cpu-aarch64-2.4
+      DOCKER_IMAGE: pytorch/manylinuxaarch64-builder:cpu-aarch64-main
       DESIRED_PYTHON: "3.10"
       build_name: manywheel-py3_10-cpu-aarch64
     secrets:
@@ -327,7 +327,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu124
       GPU_ARCH_TYPE: cuda-aarch64
-      DOCKER_IMAGE: pytorch/manylinuxaarch64-builder:cuda12.4-2.4
+      DOCKER_IMAGE: pytorch/manylinuxaarch64-builder:cuda12.4-main
       DESIRED_DEVTOOLSET: cxx11-abi
       DESIRED_PYTHON: "3.10"
       runs_on: linux.arm64.m7g.4xlarge
@@ -351,7 +351,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu124
       GPU_ARCH_TYPE: cuda-aarch64
-      DOCKER_IMAGE: pytorch/manylinuxaarch64-builder:cuda12.4-2.4
+      DOCKER_IMAGE: pytorch/manylinuxaarch64-builder:cuda12.4-main
       DESIRED_DEVTOOLSET: cxx11-abi
       DESIRED_PYTHON: "3.10"
       build_name: manywheel-py3_10-cuda-aarch64
@@ -372,7 +372,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu-aarch64
-      DOCKER_IMAGE: pytorch/manylinuxaarch64-builder:cpu-aarch64-2.4
+      DOCKER_IMAGE: pytorch/manylinuxaarch64-builder:cpu-aarch64-main
       DESIRED_PYTHON: "3.11"
       runs_on: linux.arm64.m7g.4xlarge
       ALPINE_IMAGE: "arm64v8/alpine"
@@ -393,7 +393,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu-aarch64
-      DOCKER_IMAGE: pytorch/manylinuxaarch64-builder:cpu-aarch64-2.4
+      DOCKER_IMAGE: pytorch/manylinuxaarch64-builder:cpu-aarch64-main
       DESIRED_PYTHON: "3.11"
       build_name: manywheel-py3_11-cpu-aarch64
       build_environment: linux-aarch64-binary-manywheel
@@ -415,7 +415,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu-aarch64
-      DOCKER_IMAGE: pytorch/manylinuxaarch64-builder:cpu-aarch64-2.4
+      DOCKER_IMAGE: pytorch/manylinuxaarch64-builder:cpu-aarch64-main
       DESIRED_PYTHON: "3.11"
       build_name: manywheel-py3_11-cpu-aarch64
     secrets:
@@ -435,7 +435,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu124
       GPU_ARCH_TYPE: cuda-aarch64
-      DOCKER_IMAGE: pytorch/manylinuxaarch64-builder:cuda12.4-2.4
+      DOCKER_IMAGE: pytorch/manylinuxaarch64-builder:cuda12.4-main
       DESIRED_DEVTOOLSET: cxx11-abi
       DESIRED_PYTHON: "3.11"
       runs_on: linux.arm64.m7g.4xlarge
@@ -459,7 +459,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu124
       GPU_ARCH_TYPE: cuda-aarch64
-      DOCKER_IMAGE: pytorch/manylinuxaarch64-builder:cuda12.4-2.4
+      DOCKER_IMAGE: pytorch/manylinuxaarch64-builder:cuda12.4-main
       DESIRED_DEVTOOLSET: cxx11-abi
       DESIRED_PYTHON: "3.11"
       build_name: manywheel-py3_11-cuda-aarch64
@@ -480,7 +480,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu-aarch64
-      DOCKER_IMAGE: pytorch/manylinuxaarch64-builder:cpu-aarch64-2.4
+      DOCKER_IMAGE: pytorch/manylinuxaarch64-builder:cpu-aarch64-main
       DESIRED_PYTHON: "3.12"
       runs_on: linux.arm64.m7g.4xlarge
       ALPINE_IMAGE: "arm64v8/alpine"
@@ -501,7 +501,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu-aarch64
-      DOCKER_IMAGE: pytorch/manylinuxaarch64-builder:cpu-aarch64-2.4
+      DOCKER_IMAGE: pytorch/manylinuxaarch64-builder:cpu-aarch64-main
       DESIRED_PYTHON: "3.12"
       build_name: manywheel-py3_12-cpu-aarch64
       build_environment: linux-aarch64-binary-manywheel
@@ -523,7 +523,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu-aarch64
-      DOCKER_IMAGE: pytorch/manylinuxaarch64-builder:cpu-aarch64-2.4
+      DOCKER_IMAGE: pytorch/manylinuxaarch64-builder:cpu-aarch64-main
       DESIRED_PYTHON: "3.12"
       build_name: manywheel-py3_12-cpu-aarch64
     secrets:
@@ -543,7 +543,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu124
       GPU_ARCH_TYPE: cuda-aarch64
-      DOCKER_IMAGE: pytorch/manylinuxaarch64-builder:cuda12.4-2.4
+      DOCKER_IMAGE: pytorch/manylinuxaarch64-builder:cuda12.4-main
       DESIRED_DEVTOOLSET: cxx11-abi
       DESIRED_PYTHON: "3.12"
       runs_on: linux.arm64.m7g.4xlarge
@@ -567,7 +567,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cu124
       GPU_ARCH_TYPE: cuda-aarch64
-      DOCKER_IMAGE: pytorch/manylinuxaarch64-builder:cuda12.4-2.4
+      DOCKER_IMAGE: pytorch/manylinuxaarch64-builder:cuda12.4-main
       DESIRED_DEVTOOLSET: cxx11-abi
       DESIRED_PYTHON: "3.12"
       build_name: manywheel-py3_12-cuda-aarch64
