@@ -604,7 +604,9 @@ def select_decomp_table():
 
 @register_decomposition(aten.masked_scatter)
 def masked_scatter(self, mask, source):
-    if is_gpu(self.device.type):
+    from .codegen.common import BackendFeature, has_backend_feature
+
+    if has_backend_feature(self.device, BackendFeature.MASKED_SCATTER_WITH_INDEX):
         # This two-step algorithm is the same as eager CUDA, for eager CPU we
         # use a 1-shot serial iteration.
         self, mask = aten.broadcast_tensors([self, mask])

@@ -46,6 +46,7 @@ from .runtime_wrappers import (
     DebugAssertWrapper,
     FakifiedOutWrapper,
     FunctionalizedRngRuntimeWrapper,
+    make_runtime_safe,
     post_compile,
     pre_compile,
     RuntimeWrapper,
@@ -175,6 +176,8 @@ def aot_dispatch_base(
 
         if fakified_out_wrapper.needs_post_compile:
             fakified_out_wrapper.set_fwd_output_strides(fwd_output_strides)
+
+    make_runtime_safe(fw_metadata, maybe_subclass_meta)
 
     # However, RuntimeWrapper does not expect the rng offsets in the
     # output. So, we have to create another wrapper and take out the offset. As
@@ -606,6 +609,9 @@ def aot_dispatch_autograd(
         saved_context,
         saved_compile_context,
     )
+
+    make_runtime_safe(fw_metadata, maybe_subclass_meta)
+
     try_save_cache_entry: Optional[Callable] = None
     if config.enable_autograd_cache:
 
