@@ -41,7 +41,7 @@ jobs:
       matrix: ${{ steps.generate-matrix.outputs.matrix }}
     steps:
       - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@release/2.4
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
         with:
           fetch-depth: 1
           submodules: true
@@ -69,7 +69,7 @@ jobs:
       CUDNN_VERSION: ${{ matrix.cudnn_version }}
     steps:
       - name: Setup SSH (Click me for login details)
-        uses: pytorch/test-infra/.github/actions/setup-ssh@release/2.4
+        uses: pytorch/test-infra/.github/actions/setup-ssh@main
         with:
           github-secret: ${{ secrets.GITHUB_TOKEN }}
       # [see note: pytorch repo ref]
@@ -147,12 +147,12 @@ jobs:
           fi
 
       - name: Teardown Linux
-        uses: pytorch/test-infra/.github/actions/teardown-linux@release/2.4
+        uses: pytorch/test-infra/.github/actions/teardown-linux@main
         if: always()
 
   validate:
     needs: build
-    uses: pytorch/builder/.github/workflows/validate-docker-images.yml@release/2.4
+    uses: pytorch/builder/.github/workflows/validate-docker-images.yml@main
     with:
       channel: nightly
       ref: main
