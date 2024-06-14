@@ -32,6 +32,7 @@ __all__ = [
     "CheckpointPolicy",
     "SelectiveCheckpointContext",
     "create_selective_checkpoint_contexts",
+    "SAC_IGNORED_OPS",
 ]
 
 _DEFAULT_DETERMINISM_MODE = "default"
@@ -1163,8 +1164,14 @@ class _VersionWrapper:
         return self.val
 
 
-def _maybe_detach(x):
-    if isinstance(x, torch.Tensor) and x.requires_grad:
+def _maybe_detach(x, any_ret_has_alias_info):
+    # We detach for two separate reasons:
+    # - For view ops, detach clears the autograd meta so that when the
+    #   tensor is returned from CachedDispatchMode, as_view does not
+    #   complain about autograd meta already existing.
+    # - For ops that have grad_fn, we want to detach from the graph to
+    #   avoid reference cycles.
+    if isinstance(x, torch.Tensor) and (x.requires_grad or any_ret_has_alias_info):
         # NB: Ensure the original tensor object is saved when x does not require grad
         with torch._C._SetExcludeDispatchKeyGuard(torch._C.DispatchKey.ADInplaceOrView, False):
             # Ensure that view performed beneath autograd properly propagates
@@ -1231,6 +1238,15 @@ class CheckpointPolicy(enum.Enum):
     PREFER_RECOMPUTE = 3
 
 
+SAC_IGNORED_OPS = {
+    # AC inserts different number of detach during forward and recompute.
+    torch.ops.aten.detach.default,
+    # During torch.compile, metadata ops are invoked a different number of
+    # times between forward and recompute.
+    torch.ops.prim.device.default,
+} | set(torch._subclasses.functional_tensor.FunctionalTensor.metadata_fns)
+
+
 class _CachingTorchDispatchMode(TorchDispatchMode):
     # Used together with _CachedTorchDispatchMode to implement SAC.
     def __init__(self, policy_fn, storage):
@@ -1238,7 +1254,7 @@ class _CachingTorchDispatchMode(TorchDispatchMode):
         self.storage = storage
 
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
-        if func is torch.ops.aten.detach.default:
+        if func in SAC_IGNORED_OPS:
             return func(*args, **kwargs)
 
         kwargs = {} if kwargs is None else kwargs
@@ -1251,8 +1267,10 @@ class _CachingTorchDispatchMode(TorchDispatchMode):
 
         out = func(*args, **kwargs)
 
+        any_ret_has_alias_info = any(ret.alias_info is not None for ret in func._schema.returns)
+
         if policy in (CheckpointPolicy.MUST_SAVE, CheckpointPolicy.PREFER_SAVE) or is_compiling:
-            self.storage[func].append(tree_map(lambda x: _VersionWrapper(_maybe_detach(x)), out))
+            self.storage[func].append(tree_map(lambda x: _VersionWrapper(_maybe_detach(x, any_ret_has_alias_info)), out))
         return out
 
 class _CachedTorchDispatchMode(TorchDispatchMode):
@@ -1263,7 +1281,7 @@ class _CachedTorchDispatchMode(TorchDispatchMode):
         self.allow_cache_entry_mutation = allow_cache_entry_mutation
 
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
-        if func is torch.ops.aten.detach.default:
+        if func in SAC_IGNORED_OPS:
             return func(*args, **kwargs)
 
         kwargs = {} if kwargs is None else kwargs
