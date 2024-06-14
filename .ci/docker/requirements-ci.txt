@@ -85,10 +85,10 @@ librosa>=0.6.2 ; python_version < "3.11"
 #Pinned versions:
 #test that import:
 
-mypy==1.9.0
+mypy==1.10.0
 # Pin MyPy version because new errors are likely to appear with each release
 #Description: linter
-#Pinned versions: 1.9.0
+#Pinned versions: 1.10.0
 #test that import: test_typing.py, test_type_hints.py
 
 networkx==2.8.8
