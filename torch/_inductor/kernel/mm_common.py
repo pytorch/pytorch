@@ -255,9 +255,23 @@ def mm_options(config, sym_m, sym_n, sym_k, layout, b_prologue_cast_type=None):
         not inductor_config.force_same_precision
         or ((sym_m % 16) == 0 and (sym_n % 16) == 0 and (sym_k % 8) == 0)
     )
+    is_hip = torch.version.hip is not None
+    if not allow_tf32:
+        # b_proglogue_cast_type is used when we have a mixed mm
+        # using 'tf32x3' with mixed dtypes causes triton to segfault
+        if is_hip or b_prologue_cast_type is not None:
+            input_precision = '"ieee"'
+        else:
+            input_precision = '"tf32x3"'
+    else:
+        input_precision = '"tf32"'
     return dict(
         GROUP_M=8,
         EVEN_K=even_k_symbolic,
+        INPUT_PRECISION=input_precision,
+        # TODO: allow_tf32=... is deprecated in favor of the above
+        # `input_precision` kwarg. If the line below is removed tests fail.
+        # Fix that.
         ALLOW_TF32=allow_tf32,
         ACC_TYPE=acc_type(layout.dtype),
         B_PROLOGUE_CAST_TYPE=b_prologue_cast_type,
