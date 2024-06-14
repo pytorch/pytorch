@@ -5520,7 +5520,7 @@ def forward(self, x, y):
             def forward(self, x, y):
                 z = torch.cat([x, x], dim=0)
                 w = z.repeat(y.shape[0])
-                return w.shape[0] + 1
+                return w.shape[0] + x.shape[0]
 
         inputs = (torch.randn(6), torch.randn(4))
         shapes = {
