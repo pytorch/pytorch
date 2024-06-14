@@ -1173,6 +1173,7 @@ test_executorch() {
   # because it depends on PyTorch
   # shellcheck disable=SC1091
   source .ci/scripts/utils.sh
+  install_executorch
   build_executorch_runner "cmake"
 
   echo "Run ExecuTorch unit tests"
