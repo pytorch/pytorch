@@ -27,8 +27,8 @@ from typing import (
     Optional,
     Set,
     Tuple,
-    Union,
     Type,
+    Union,
 )
 
 import sympy
@@ -37,6 +37,7 @@ import torch
 import torch.export.exported_program as ep
 from torch._export.serde.schema import SchemaVersion
 from torch._export.verifier import load_verifier
+from torch._library.fake_class_registry import FakeScriptObject
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
 from torch.fx.experimental import symbolic_shapes
 from torch.utils import _pytree as pytree
@@ -1406,7 +1407,7 @@ class GraphModuleDeserializer(metaclass=Final):
         module_call_graph: List[ep.ModuleCallEntry]
         names_to_symbols: Dict[str, sympy.Symbol]
         state_dict: Dict[str, Union[torch.Tensor, torch.nn.Parameter]]
-        constants: Dict[str, Union[torch.Tensor, torch.ScriptObject]]
+        constants: Dict[str, Union[torch.Tensor, FakeScriptObject, torch.ScriptObject]]
         example_inputs: Optional[Tuple[Tuple[torch.Tensor, ...], Dict[str, Any]]]
 
     def __init__(self):
@@ -2247,7 +2248,6 @@ class ExportedProgramDeserializer(metaclass=Final):
             symbol_name_to_range,
             res.names_to_symbols,
         )
-        model_opset_version: Optional[Dict[str, int]] = exported_program.opset_version
 
         return ep.ExportedProgram(
             root=res.graph_module,
