@@ -23,7 +23,6 @@ from ._fsdp_common import (
     FSDPMeshInfo,
     HSDPMeshInfo,
 )
-# from torch._dynamo import create_parameter_op
 
 """
 [Note: FSDP tensors]
@@ -62,7 +61,7 @@ case, the all-gather output and unsharded parameter share the same
 data, so we use storage resizing on the all-gather output.
 """
 
-lib = torch.library.Library("create_parameter_op", "FRAGMENT")
+lib = torch.library.Library("fsdp", "FRAGMENT")
 
 lib.define("set_(Tensor(a!) tensor, Tensor data) -> ()")
 
@@ -399,7 +398,7 @@ class FSDPParam:
             with torch.no_grad():
                 # alloc_storage(self._unsharded_param)
                 # self._unsharded_param.copy_(unsharded_param)
-                torch.ops.create_parameter_op.set_(self._unsharded_param, unsharded_param)
+                torch.ops.fsdp.set_(self._unsharded_param, unsharded_param)
         else:
             self._unsharded_param = nn.Parameter(
                 unsharded_param, requires_grad=self.sharded_param.requires_grad
