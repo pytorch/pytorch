@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 from .modules import *  # noqa: F403
 from .modules.fused import _FusedModule  # noqa: F403
 
