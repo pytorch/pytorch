@@ -2485,11 +2485,11 @@ class GraphModule(torch.nn.Module):
             arg_count = random.randint(1, 3)
 
             if arg_count == 1:
-                return slice_builtin(r_item())
+                return slice(r_item())
             elif arg_count == 2:
-                return slice_builtin(r_item(), r_item())
+                return slice(r_item(), r_item())
             else:
-                return slice_builtin(r_item(), r_item(), r_item(False))
+                return slice(r_item(), r_item(), r_item(False))
 
         # Fuzz testing
         for i in range(100):
