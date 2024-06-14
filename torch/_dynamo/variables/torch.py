@@ -302,7 +302,8 @@ class TorchCtxManagerClassVariable(BaseTorchVariable):
                 tx, args[0].as_python_constant()
             )
         elif (
-            self.value
+            torch.distributed.is_available()
+            and self.value
             is torch.distributed._composable.fsdp._fsdp_param_group.FSDPParamGroup.use_training_state
         ):
             assert len(args) == 2

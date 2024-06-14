@@ -339,7 +339,8 @@ class UserMethodVariable(UserFunctionVariable):
                     tx, self.fn.__name__, args, kwargs, constant=self.is_constant
                 )
         elif (
-            self.fn
+            torch.distributed.is_available()
+            and self.fn
             is torch.distributed._composable.fsdp._fsdp_param_group.FSDPParamGroup.use_training_state
         ):
             return variables.TorchCtxManagerClassVariable(self.fn).call_function(
