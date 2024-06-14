@@ -31,14 +31,26 @@ def preserve_node_meta():
     >>>     def forward(self, x, y):
     >>>         return x + y
 
+    >>> model = SimpleAdd()
     >>> with torch.fx.traceback.preserve_node_meta():
-    >>>     model = SimpleAdd()
-    >>>     fxg = torch.export.export(model, (torch.rand([1,5]), torch.rand([1,5])))
-    >>>     for n in fxg.graph.nodes:
-    >>>         print(n, n.meta)
-    >>>     fxg_new = fxg.run_decompositions()
-    >>>     for n in fxg_new.graph.nodes:
-    >>>         print(n, n.meta)
+    >>>     fxg = torch.fx.symbolic_trace(model)
+
+    >>>     # node meta prior to transform
+    >>>     for node in fxg.graph.nodes:
+    >>>         print(node, node.meta)
+
+    >>>     def simple_transform(g: torch.fx.Graph) -> torch.fx.Graph:
+    >>>         for node in g.graph.nodes:
+    >>>             if node.op == 'call_function':
+    >>>                 if node.target.__name__ == 'add':
+    >>>                     node.meta["add_symbol_meta"] = "+"
+    >>>         return g
+
+    >>>     fxg_new = simple_transform(fxg)
+
+    >>>     # node meta after transform
+    >>>     for node in fxg_new.graph.nodes:
+    >>>         print(node, node.meta)
     """
     global should_preserve_node_meta
     global current_meta
