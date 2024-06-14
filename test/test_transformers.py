@@ -3142,7 +3142,8 @@ class TestSDPACudaOnly(NNTestCase):
 
     @skipIfRocm  # Nested Tensor
     @unittest.skipIf(not PLATFORM_SUPPORTS_FUSED_ATTENTION, "Fused SDPA was not built for this system")
-    @parametrize("fused_kernel", PLATFORM_SPECIFIC_SDPA)
+    @parametrize("fused_kernel", [SDPBackend.FLASH_ATTENTION, SDPBackend.EFFICIENT_ATTENTION] if
+                 PLATFORM_SUPPORTS_FLASH_ATTENTION else [SDPBackend.EFFICIENT_ATTENTION])
     def test_fused_kernels_seq_len_1_inputs(self, device, fused_kernel):
         rand_nested_tensor = partial(rand_sdpa_tensor, type="nested", device=device, dtype=torch.float16)
         batch, num_heads, head_dim = 32, 16, 64
