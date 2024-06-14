@@ -373,7 +373,7 @@ class CodeGen:
 
     def _gen_python_code(
         self, nodes, root_module: str, namespace: _Namespace, *,
-        verbose: bool = False, include_stride: bool = False, include_device: bool = False
+        verbose: bool = False, include_stride: bool = False, include_device: bool = False, colored: bool = False
     ) -> PythonCode:
         free_vars: List[str] = []
         body: List[str] = []
@@ -442,6 +442,34 @@ class CodeGen:
             # Common case: this is a regular module name like 'foo.bar.baz'
             return add_global(typename, o)
 
+        codes = {
+            "yellow": "\033[33m",
+            "cyan": "\033[36m",
+            "green": "\033[32m",
+            "blue": "\033[34m",
+            "red": "\033[31m",
+            "dim": "\033[2m",
+            "dim_blue": "\033[2m\033[34m",
+            "dim_green": "\033[2m\033[32m",
+            "reset": "\033[0m",
+        }
+
+        def make_wrapper_func(name):
+            def f(s):
+                if colored:
+                    return f"{codes[name]}{s}{codes['reset']}"
+                return s
+            return f
+
+        yellow = make_wrapper_func("yellow")
+        cyan = make_wrapper_func("cyan")
+        red = make_wrapper_func("red")
+        green = make_wrapper_func("green")
+        dim_green = make_wrapper_func("dim_green")
+        dim = make_wrapper_func("dim")
+        dim_blue = make_wrapper_func("dim_blue")
+        blue = make_wrapper_func("blue")
+
         def _get_repr(arg: Any) -> str:
             # Handle NamedTuples (if it has `_fields`) via add_global.
             if isinstance(arg, tuple) and hasattr(arg, '_fields'):
@@ -456,7 +484,11 @@ class CodeGen:
                 cls = arg.__class__
                 clsname = add_global(cls.__name__, cls)
                 return f"{clsname}.{arg.name}"
-            return repr(arg)
+            elif isinstance(arg, Node):
+                return repr(arg)
+            else:
+                return blue(repr(arg))
+
 
         def _format_args(args: Tuple[Argument, ...], kwargs: Dict[str, Argument]) -> str:
             args_s = ', '.join(_get_repr(a) for a in args)
@@ -495,7 +527,7 @@ class CodeGen:
             nodes_to_delete = user_to_last_uses.get(user, [])
             if len(nodes_to_delete):
                 to_delete_str = ' = '.join([repr(n) for n in nodes_to_delete] + ['None'])
-                body.append(f';  {to_delete_str}\n')
+                body.append(f';  {dim(to_delete_str)}\n')
             else:
                 body.append('\n')
 
@@ -517,10 +549,11 @@ class CodeGen:
                         if parsed_stack_trace := _parse_stack_trace(node.stack_trace):
                             summary_str = parsed_stack_trace.get_summary_str()
 
-                        body.append(f'\n# {summary_str}\n')
+                        body.append(f'\n {dim("# " + summary_str)}\n')
                 elif prev_stacktrace != "":
                     prev_stacktrace = ""
-                    body.append('\n# No stacktrace found for following nodes\n')
+                    no_stacktrace_msg = "# No stacktrace found for following nodes"
+                    body.append(f'\n{dim(no_stacktrace_msg)}\n')
 
         def stringify_shape(shape : Iterable) -> str:
             return f"[{', '.join(str(x) for x in shape)}]"
@@ -536,12 +569,13 @@ class CodeGen:
 
                 meta_val = node.meta.get('val', node.meta.get('tensor_meta', node.meta.get('example_value', None)))
                 # use string as annotation, to make it valid python code
+
                 if isinstance(meta_val, FakeTensor):
                     stride_annotation = f"{stringify_shape(meta_val.stride())}" if include_stride else ""
                     device_annotation = f"{meta_val.device}" if include_device else ""
                     maybe_type_annotation = \
-                        f': "{dtype_abbrs[meta_val.dtype]}{stringify_shape(meta_val.shape)}' \
-                        f'{stride_annotation}{device_annotation}"'
+                        f': "{red(dtype_abbrs[meta_val.dtype])}{blue(stringify_shape(meta_val.shape))}' \
+                        f'{dim_blue(stride_annotation)}{dim_green(device_annotation)}"'
                 elif isinstance(meta_val, py_sym_types):
                     maybe_type_annotation = f': "Sym({meta_val})"'
                 elif isinstance(meta_val, TensorMetadata):
@@ -1351,7 +1385,7 @@ class Graph:
     @compatibility(is_backward_compatible=True)
     def python_code(
         self, root_module: str, *,
-        verbose: bool = False, include_stride: bool = False, include_device: bool = False
+        verbose: bool = False, include_stride: bool = False, include_device: bool = False, colored: bool = False
     ) -> PythonCode:
         """
         Turn this ``Graph`` into valid Python code.
@@ -1413,16 +1447,16 @@ class Graph:
         with override_node_repr(self):
             return self._python_code(
                 root_module, namespace,
-                verbose=verbose, include_stride=include_stride, include_device=include_device
+                verbose=verbose, include_stride=include_stride, include_device=include_device, colored=colored
             )
 
     def _python_code(
         self, root_module: str, namespace: _Namespace, *,
-        verbose: bool = False, include_stride: bool = False, include_device: bool = False
+        verbose: bool = False, include_stride: bool = False, include_device: bool = False, colored: bool = False,
     ) -> PythonCode:
         return self._codegen._gen_python_code(
             self.nodes, root_module, namespace,
-            verbose=verbose, include_stride=include_stride, include_device=include_device
+            verbose=verbose, include_stride=include_stride, include_device=include_device, colored=colored
         )
 
 

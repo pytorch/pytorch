@@ -471,12 +471,11 @@ class TestDynamoWithONNXRuntime(onnx_test_common._TestONNXRuntime):
 
         if test_local_backend:
             assert local_ort is not None
-            number_of_captured_graphs = 3 if test_backward else 2
-            recompiles = 1
             if torch._dynamo.config.inline_inbuilt_nn_modules:
-                # with inlining, we see a recompilation. This seems sound.
-                # L['self']._modules['attention']._modules['rotary_emb']._buffers['cos_cached'].size()[1] == L['hidden_states'].size()[1]    # noqa: B950
-                recompiles = 2
+                # with inlining and dynamic=True, we have more graph captures
+                number_of_captured_graphs = 3 if test_backward else 2
+            else:
+                number_of_captured_graphs = 2 if test_backward else 1
 
             execution_count = len(example_args_collection) * number_of_captured_graphs
             self._assert_counting_information(
@@ -484,11 +483,10 @@ class TestDynamoWithONNXRuntime(onnx_test_common._TestONNXRuntime):
                 # Number of InferenceSession runs.
                 expected_execution_count=execution_count,
                 # Number of GraphModule's seen by ORT.
-                number_of_cached_graph_modules=number_of_captured_graphs * recompiles,
+                number_of_cached_graph_modules=number_of_captured_graphs,
                 # Number of InferenceSession's created per GraphModule.
                 number_of_exported_onnx_models_for_all_graph_modules=(1,)
-                * number_of_captured_graphs
-                * recompiles,
+                * number_of_captured_graphs,
             )
             self._assert_dynamic_input_and_output_shapes_in_all_onnx_models(local_ort)
 
@@ -571,21 +569,20 @@ class TestDynamoWithONNXRuntime(onnx_test_common._TestONNXRuntime):
 
         if test_local_backend:
             assert local_ort is not None
-            number_of_captured_graphs = 3 if test_backward else 2
-            execution_count = len(example_args_collection) * number_of_captured_graphs
-            recompiles = 1
             if torch._dynamo.config.inline_inbuilt_nn_modules:
-                # with inlining, we see a recompilation. This seems sound.
-                # L['self']._modules['attention']._modules['rotary_emb']._buffers['cos_cached'].size()[1] == L['hidden_states'].size()[1]    # noqa: B950
-                recompiles = 2
+                # with inlining and dynamic=True, we have more graph captures
+                number_of_captured_graphs = 3 if test_backward else 2
+            else:
+                number_of_captured_graphs = 2 if test_backward else 1
+
+            execution_count = len(example_args_collection) * number_of_captured_graphs
 
             self._assert_counting_information(
                 local_ort,
                 expected_execution_count=execution_count,
-                number_of_cached_graph_modules=number_of_captured_graphs * recompiles,
+                number_of_cached_graph_modules=number_of_captured_graphs,
                 number_of_exported_onnx_models_for_all_graph_modules=(1,)
-                * number_of_captured_graphs
-                * recompiles,
+                * number_of_captured_graphs,
             )
             self._assert_dynamic_input_and_output_shapes_in_all_onnx_models(local_ort)
 
@@ -663,21 +660,18 @@ class TestDynamoWithONNXRuntime(onnx_test_common._TestONNXRuntime):
 
         if test_local_backend:
             assert local_ort is not None
-            number_of_captured_graphs = 3 if test_backward else 2
-            execution_count = len(example_args_collection) * number_of_captured_graphs
-            recompiles = 1
             if torch._dynamo.config.inline_inbuilt_nn_modules:
-                # with inlining, we see a recompilation. This seems sound.
-                # L['self']._modules['attention']._modules['rotary_emb']._buffers['cos_cached'].size()[1] == L['hidden_states'].size()[1]    # noqa: B950
-                recompiles = 2
-
+                # with inlining and dynamic=True, we have more graph captures
+                number_of_captured_graphs = 3 if test_backward else 2
+            else:
+                number_of_captured_graphs = 2 if test_backward else 1
+            execution_count = len(example_args_collection) * number_of_captured_graphs
             self._assert_counting_information(
                 local_ort,
                 expected_execution_count=execution_count,
-                number_of_cached_graph_modules=number_of_captured_graphs * recompiles,
+                number_of_cached_graph_modules=number_of_captured_graphs,
                 number_of_exported_onnx_models_for_all_graph_modules=(1,)
-                * number_of_captured_graphs
-                * recompiles,
+                * number_of_captured_graphs,
             )
             self._assert_dynamic_input_and_output_shapes_in_all_onnx_models(local_ort)
 

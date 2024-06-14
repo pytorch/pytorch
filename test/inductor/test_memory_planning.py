@@ -62,7 +62,6 @@ class TestMemoryPlanning(TestCase):
         )
         self.assertTrue(same(f(*args), result))
 
-    @skipIfRocm
     def test_cpp_wrapper(self):
         f, args = self._generate(device="cuda")
         compiled = torch.compile(f, dynamic=True)

@@ -3247,13 +3247,13 @@ void install_tensor_aliasing_guard(
 
 void install_no_tensor_aliasing_guard(
     const py::list& guard_managers,
-    py::list tensor_names,
+    const py::list& tensor_names,
     py::object verbose_code_parts) {
   // Adds a guard that checks none of tensors alias. This is a an example of
   // relational guard. There is one guard object that is shared between multiple
   // guard managers.
   std::shared_ptr<RelationalGuard> guard = std::make_shared<NO_TENSOR_ALIASING>(
-      std::move(tensor_names), std::move(verbose_code_parts));
+      tensor_names, std::move(verbose_code_parts));
 
   // Register the resetter on the toor guard mananger, so that it can reset
   // the newly added relational guard when the guard eval fails.
@@ -4006,7 +4006,15 @@ PyObject* torch_c_dynamo_guards_init() {
       DictSubclassGuardManager,
       DictGuardManager,
       std::unique_ptr<DictSubclassGuardManager>>(
-      py_m, "DictSubclassGuardManager"); // NOLINT
+      py_m, "DictSubclassGuardManager") // NOLINT
+      .def(
+          "add_no_hasattr_guard",
+          [](DictSubclassGuardManager& self,
+             py::object attr_name,
+             py::object verbose_code_parts) -> void {
+            self.add_permitted_leaf_guard(std::make_shared<NO_HASATTR>(
+                std::move(attr_name), std::move(verbose_code_parts)));
+          });
 
   py_m.def("install_tensor_aliasing_guard", install_tensor_aliasing_guard);
   py_m.def(
