@@ -817,12 +817,16 @@ def _split_optim_state_dict(
             for fqn in info.fqn_param_mapping[param]:
                 params = pg_state[-1][_PARAMS]
                 assert isinstance(params, list)
+                if fqn in info.shared_params_mapping:
+                    already_in = False
+                    for shared_fqn in info.shared_params_mapping[param]:
+                        if shared_fqn in params:
+                            already_in = True
+                    if already_in:
+                        continue
                 params.append(fqn)
                 if param.requires_grad:
-                    if fqn in cast(DictValueType, optim_state_dict[_STATE]):
-                        state[fqn] = cast(DictValueType, optim_state_dict[_STATE])[fqn]
-                    else:
-                        assert fqn in info.shared_params_mapping, fqn
+                    state[fqn] = cast(DictValueType, optim_state_dict[_STATE])[fqn]
                 for loaded_param_group in cast(
                     ListDictValueType, optim_state_dict[_PG]
                 ):
