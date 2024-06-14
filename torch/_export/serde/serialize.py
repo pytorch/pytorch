@@ -42,6 +42,7 @@ from torch.fx.experimental import symbolic_shapes
 from torch.utils import _pytree as pytree
 from torch.utils._pytree import treespec_dumps, treespec_loads
 from torch.utils._sympy.value_ranges import ValueRanges
+from torch.utils._sympy.numbers import int_oo
 
 from .schema import (  # type: ignore[attr-defined]
     Argument,
@@ -321,9 +322,9 @@ def deserialize_torch_artifact(serialized: Union[Dict[str, Any], Tuple[Any, ...]
 
 def _sympy_int_to_int(val: sympy.Expr, adjust: str):
     # Convert simple sympy Integers into concrete int
-    if val == sympy.oo:
+    if val in (sympy.oo, int_oo):
         return math.inf
-    if val == -sympy.oo:
+    if val in (-sympy.oo, -int_oo):
         return -math.inf
     if isinstance(val, sympy.Integer):
         return int(val)
@@ -346,9 +347,9 @@ def _sympy_int_to_int(val: sympy.Expr, adjust: str):
 def _int_to_sympy_int(val) -> sympy.Expr:
     # Convert concrete int into simple sympy Integers
     if val == math.inf:
-        return sympy.oo
+        return int_oo
     if val == -math.inf:
-        return -sympy.oo
+        return -int_oo
     return sympy.Integer(val)
 
 
@@ -1826,7 +1827,7 @@ class GraphModuleDeserializer(metaclass=Final):
             self.symbol_name_to_range = {}
             if symbol_name_to_range:
                 for k, vr in symbol_name_to_range.items():
-                    lower = int(vr.lower)
+                    lower = vr.lower
                     if vr.upper >= 2:  # max is >= 2, not sym bool range
                         lower = max(2, lower)
                     self.symbol_name_to_range[k] = symbolic_shapes.ValueRanges(_int_to_sympy_int(lower), vr.upper)
