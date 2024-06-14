@@ -1290,7 +1290,9 @@ class OutputGraph:
 
         graph_code_log.debug(
             "%s",
-            lazy_format_graph_code(name, gm, include_stride=True, include_device=True),
+            lazy_format_graph_code(
+                name, gm, include_stride=True, include_device=True, colored=True
+            ),
         )
         torch._logging.trace_structured(
             "dynamo_output_graph",
