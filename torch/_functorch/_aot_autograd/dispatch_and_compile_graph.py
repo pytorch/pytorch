@@ -194,6 +194,7 @@ def aot_dispatch_base_graph(
                 aot_config.aot_id,
                 include_stride=True,
                 include_device=True,
+                colored=True,
             ),
         )
         trace_structured(
