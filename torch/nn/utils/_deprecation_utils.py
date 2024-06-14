@@ -1,12 +1,19 @@
 # mypy: allow-untyped-defs
-from typing import List, Callable
 import importlib
 import warnings
+from typing import Callable, List
 
 
-_MESSAGE_TEMPLATE = r"Usage of '{old_location}' is deprecated; please use '{new_location}' instead."
+_MESSAGE_TEMPLATE = (
+    r"Usage of '{old_location}' is deprecated; please use '{new_location}' instead."
+)
 
-def lazy_deprecated_import(all: List[str], old_module: str, new_module: str) -> Callable:
+
+def lazy_deprecated_import(
+    all: List[str],
+    old_module: str,
+    new_module: str,
+) -> Callable:
     r"""Import utility to lazily import deprecated packages / modules / functional.
 
     The old_module and new_module are also used in the deprecation warning defined
@@ -32,8 +39,8 @@ def lazy_deprecated_import(all: List[str], old_module: str, new_module: str) -> 
             new_module=_MIGRATED_TO)
     """
     warning_message = _MESSAGE_TEMPLATE.format(
-        old_location=old_module,
-        new_location=new_module)
+        old_location=old_module, new_location=new_module
+    )
 
     def getattr_dunder(name):
         if name in all:
@@ -43,4 +50,5 @@ def lazy_deprecated_import(all: List[str], old_module: str, new_module: str) -> 
             package = importlib.import_module(new_module)
             return getattr(package, name)
         raise AttributeError(f"Module {new_module!r} has no attribute {name!r}.")
+
     return getattr_dunder

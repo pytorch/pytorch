@@ -489,11 +489,8 @@ class TestFxGraphCache(TestCase):
         counters.clear()
         torch.compile(fn)(inp1)
         torch.compile(fn)(inp2)
-        # TODO(oulgen): This doesnt actually produce a cache hit.
-        # Despite pickling the exact same object, pickle produces different
-        # results.
-        # self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 0)
-        # self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
+        self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 0)
+        self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 1)
 
     @config.patch({"fx_graph_cache": True})
     def test_cache_with_symint_non_arg_guard(self):
