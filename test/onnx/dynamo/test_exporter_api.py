@@ -380,7 +380,7 @@ class TestONNXExportWithDynamo(common_utils.TestCase):
             onnx_program_from_old_exporter.model_proto,
         )
 
-    def test_dynamic_axes_enable_dynamic_shapes_with_static_axis(self):
+    def test_dynamic_axes_supports_partial_dynamic_shapes(self):
         exported_program = torch.export.export(
             SampleModelForDynamicShapes(),
             (
@@ -431,7 +431,8 @@ class TestONNXExportWithDynamo(common_utils.TestCase):
     def test_input_names_are_not_yet_supported_in_dynamic_axes(self):
         with self.assertRaisesRegex(
             ValueError,
-            "input names is not supported yet. Please use model forward signature.",
+            "Assinging new input names is not supported yet. Please use model forward signature "
+            "to specify input names in dynamix_axes.",
         ):
             _ = torch.onnx.export(
                 SampleModelForDynamicShapes(),
@@ -475,7 +476,7 @@ class TestONNXExportWithDynamo(common_utils.TestCase):
 
         with self.assertRaisesRegex(
             TypeError,
-            "Dynamo export does not supported ScriptModule or ScriptFunction.",
+            "Dynamo export does not support ScriptModule or ScriptFunction.",
         ):
             _ = torch.onnx.export(ScriptModule(), torch.randn(1, 1, 2), dynamo=True)
 

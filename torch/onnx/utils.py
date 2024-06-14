@@ -514,7 +514,7 @@ def export(
     if dynamo:
         if isinstance(model, (torch.jit.ScriptModule, torch.jit.ScriptFunction)):
             raise TypeError(
-                "Dynamo export does not supported ScriptModule or ScriptFunction."
+                "Dynamo export does not support ScriptModule or ScriptFunction."
             )
         # Unsupported parameters for dynamo export
         # TODO: These are not supported AT THE TIME
@@ -945,7 +945,8 @@ def _from_dynamic_axes_to_dynamic_shapes(
     for input_name, axes in dynamic_axes.items():
         if input_name in input_names_set:
             raise ValueError(
-                "input names is not supported yet. Please use model forward signature."
+                "Assinging new input names is not supported yet. Please use model forward signature "
+                "to specify input names in dynamix_axes."
             )
         if isinstance(axes, dict):
             dynamic_shapes[input_name] = {
