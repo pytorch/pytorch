@@ -13305,6 +13305,23 @@ class TestSelectiveActivationCheckpoint(TestCase):
         self.assertEqual(act_mem_sac2, 1.0)
         self.assertEqual(bw_flops_sac2, 2.0)
 
+    def test_output_already_has_autograd_meta(self):
+        def fn(x, y):
+            return (x.cos() +  y.view(-1)).sin().cos()
+
+        x = torch.randn(3, requires_grad=True)
+        y = torch.randn(3, requires_grad=True)
+
+        context_fn = functools.partial(
+            create_selective_checkpoint_contexts,
+            [
+                torch.ops.aten.sin_.default,
+                torch.ops.aten.view.default,
+            ],
+        )
+        out = checkpoint(fn, x, y, use_reentrant=False, context_fn=context_fn)
+        out.sum().backward()
+
     def test_bad_inputs(self):
         bad_op_list1 = [2]
 
