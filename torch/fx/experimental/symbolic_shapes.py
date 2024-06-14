@@ -158,7 +158,7 @@ def lru_cache(maxsize):
 @lru_cache(None)
 def uninteresting_files() -> Set[str]:
     import torch._inductor.sizevars
-    import torch._library.abstract_impl
+    import torch._library.fake_impl
     import torch._subclasses.meta_utils
     import torch._subclasses.fake_tensor
     mods = [
@@ -168,7 +168,7 @@ def uninteresting_files() -> Set[str]:
         torch.fx.interpreter,
         torch,
         torch._inductor.sizevars,
-        torch._library.abstract_impl,
+        torch._library.fake_impl,
         torch._subclasses.meta_utils,
         torch._subclasses.fake_tensor,
     ]
@@ -4458,11 +4458,7 @@ class ShapeEnv:
                 # Skip var_ranges logic for SingletonInt which is only used
                 # for jagged layout NestedTensors today
                 continue
-            try:
-                vr = var_ranges[k]
-            except KeyError:
-                log.warning("%s is not in var_ranges, defaulting to unknown range.", k)
-                vr = self._default_unspecified_value_range()
+            vr = var_ranges[k]
             if size_oblivious and k in self.size_like:
                 lower = max(2, vr.lower)
                 # Clamping size-oblivious to some quantity below sys.maxsize
