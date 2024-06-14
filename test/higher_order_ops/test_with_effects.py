@@ -198,9 +198,6 @@ def forward(self, arg0_1, arg1_1, arg2_1):
         res = torch.compile(f, backend="inductor")(*inputs)
         self.assertTrue(torch.allclose(res, f(*inputs)))
 
-    @unittest.skipIf(IS_WINDOWS, "triton")
-    @unittest.skipIf(TEST_WITH_ROCM, "triton")
-    @unittest.skipIf(_get_torch_cuda_version() >= (11, 7), "triton")
     @skipIfNoDynamoSupport
     def test_compile_inductor_external_op_return_none(self):
         with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
