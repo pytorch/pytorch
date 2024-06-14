@@ -27,6 +27,8 @@ from torch._dynamo.testing import (
     normalize_gm,
 )
 from torch._dynamo.utils import ifdynstaticdefault, same
+from torch._dynamo.variables import ConstantVariable
+from torch._dynamo.variables.lists import RangeVariable
 
 from torch.nn import functional as F
 from torch.testing._internal.common_utils import (
@@ -2368,6 +2370,157 @@ class GraphModule(torch.nn.Module):
 
                 opt_fn = torch._dynamo.optimize(nopython=True)(fn)
                 self.assertEqual(opt_fn(), fn())
+
+    def gen_random_range_args(self):
+        args_count = random.randint(1, 3)
+        args = [random.randint(-10, 10) for _ in range(args_count)]
+        if args_count == 3 and args[2] == 0:
+            args[2] = 1
+        return args
+
+    def test_range_length(self):
+        def test(*args, expected=None):
+            r = range(*args)
+            range_variable = RangeVariable([ConstantVariable.create(v) for v in args])
+
+            self.assertEqual(len(r), range_variable.range_length())
+
+            if expected is not None:
+                self.assertEqual(len(r), expected)
+
+        test(1, 1, 1, expected=0)
+        test(1, 0, expected=0)
+        test(-10, expected=0)
+
+        test(4, expected=4)
+        test(10, expected=10)
+
+        # step >1
+        test(1, 10, 2, expected=5)
+
+        # negative step
+        test(10, 1, -1, expected=9)
+        test(10, 1, -3)
+
+        # Fuzz testing
+        for i in range(100):
+            args = self.gen_random_range_args()
+            print("testing :", args)
+            test(*args)
+
+    def test_indexed_range(self):
+        def test(range, index, expected=None):
+            range_variable = RangeVariable(
+                [
+                    ConstantVariable.create(v)
+                    for v in [range.start, range.stop, range.step]
+                ]
+            )
+
+            self.assertEqual(
+                range[index],
+                range_variable.apply_index(index).as_python_constant(),
+            )
+
+            if expected is not None:
+                self.assertEqual(range[index], expected)
+
+        test(range(10), 1, expected=1)
+        test(range(10, 20, 2), 1, expected=12)
+
+        # Fuzz testing
+        for i in range(100):
+            range_args = self.gen_random_range_args()
+            r = range(*range_args)
+
+            if len(r) == 0:
+                continue
+
+            index = random.randint(0, len(r) - 1)
+
+            print("testing:", r, index)
+            test(r, index)
+
+    def test_sliced_range(self):
+        def test(range, slice, expected=None):
+            range_variable = RangeVariable(
+                [
+                    ConstantVariable.create(v)
+                    for v in [range.start, range.stop, range.step]
+                ]
+            )
+
+            self.assertEqual(
+                range[slice],
+                range_variable.apply_slice(slice).as_python_constant(),
+            )
+
+            if expected is not None:
+                self.assertEqual(
+                    range[slice],
+                    expected,
+                )
+
+        test(range(10), slice(1, 10, 2), expected=range(1, 10, 2))
+        test(range(10), slice(None, 10, None), expected=range(0, 10))
+        test(range(10), slice(-1, 7, None), expected=range(9, 7))
+        test(range(10), slice(-1, 7, 2), expected=range(9, 7, 2))
+        test(range(1, 10, 2), slice(3, 7, 2), expected=range(7, 11, 4))
+        test(range(1, 10, 2), slice(-3, 7, 2), expected=range(5, 11, 4))
+        test(range(-1, -5, -3), slice(5, None, -3), expected=range(-4, 2, 9))
+
+        def rand_slice():
+            def flip_coin():
+                # 1 out of 10
+                return random.randint(1, 10) == 5
+
+            def r_item(allow_zero=True):
+                i = random.randint(-10, 10)
+                if not allow_zero and i == 0:
+                    i = 1
+                if flip_coin():
+                    i = None
+                return i
+
+            arg_count = random.randint(1, 3)
+
+            if arg_count == 1:
+                return slice(r_item())
+            elif arg_count == 2:
+                return slice(r_item(), r_item())
+            else:
+                return slice(r_item(), r_item(), r_item(False))
+
+        # Fuzz testing
+        for i in range(100):
+            range_args = self.gen_random_range_args()
+            r = range(*range_args)
+            # generate random slice
+            s = rand_slice()
+
+            print("testing:", r, s)
+            test(r, s)
+
+    def test_range_with_slice_index(self):
+        def fn(x):
+            acc = 1
+            for k in range(2)[1::2]:
+                acc *= acc * k
+            return x * acc
+
+        opt_fn = torch.compile(fullgraph=True)(fn)
+        x = torch.ones(1)
+        self.assertEqual(opt_fn(x), fn(x))
+
+    def test_range_with_index(self):
+        def fn(x):
+            acc = 1
+            acc *= acc * range(10, 20, 2)[2]
+            return x * acc
+
+        opt_fn = torch.compile(fullgraph=True)(fn)
+        x = torch.ones(1)
+        self.assertEqual(opt_fn(x), fn(x))
 
     def test_rand_inlined(self):
         @torch.compile(backend="eager", dynamic=True)
