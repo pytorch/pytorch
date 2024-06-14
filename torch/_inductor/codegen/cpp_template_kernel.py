@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import itertools
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
@@ -46,7 +47,7 @@ class CppTemplateKernel(Kernel):
     def render(self, template, **kwargs):
         return PartialRender(
             template.render(kernel=self, **kwargs), self.render_hooks
-        ).finalize()
+        ).finalize_all()
 
     def def_kernel(
         self,
@@ -103,7 +104,7 @@ class CppTemplateKernel(Kernel):
             cpp_argdefs, _, _ = self.args.cpp_argdefs()
             return f"void {self.kernel_name}({', '.join(cpp_argdefs)})"
 
-        placeholder = "<DEFINE_KERNEL>"
+        placeholder = "<DEF_KERNEL>"
         assert placeholder not in self.render_hooks
         self.render_hooks[placeholder] = hook
         return placeholder
@@ -153,7 +154,7 @@ class CppTemplateKernel(Kernel):
             assert len(_range) == 2
             start, end = parse_expr_with_index_symbols(_range)
             sliced = L.slice_(sliced, dim, start, end, clamp=False)
-        assert isinstance(sliced.data, ir.ReinterpretView)
+        assert isinstance(sliced.data, ir.ReinterpretView), sliced.data
         return sliced.data
 
     def view(self, node, sizes: List[Any]) -> ir.View:
@@ -202,7 +203,7 @@ class CppTemplateKernel(Kernel):
         dst: ir.Buffer,
         nodes: List[ir.IRNode],
         offsets: Optional[List[sympy.Expr]] = None,
-        reindexer: Optional[Callable[[List[Any]], List[Any]]] = None,
+        reindexers: Optional[List[Optional[Callable[[List[Any]], List[Any]]]]] = None,
     ) -> str:
         var_sizes = (tuple(dst.get_size()), ())
         var_ranges = {
@@ -211,6 +212,8 @@ class CppTemplateKernel(Kernel):
         }
         if not offsets:
             offsets = [sympy.Integer(0)] * len(var_sizes[0])
+        if not reindexers:
+            reindexers = [None] * len(nodes)
         assert len(offsets) == len(var_sizes[0])
         output_index = dst.get_layout().make_indexer()(var_ranges.keys())
         kernel_group = KernelGroup()
@@ -228,8 +231,8 @@ class CppTemplateKernel(Kernel):
                 assert len(args[0]) == len(var_sizes[0])
                 assert len(args[1]) == 0
                 new_args = [arg + offset for arg, offset in zip(args[0], offsets)]  # type: ignore[arg-type]
-                if reindexer is not None and i == len(nodes) - 1:
-                    new_args = reindexer(new_args)
+                if reindexers[i] is not None:
+                    new_args = reindexers[i](new_args)  # type: ignore[misc]
                 V.ops.store(
                     output_name,
                     output_index,
@@ -251,7 +254,7 @@ class CppTemplateKernel(Kernel):
         orig_src: Optional[ir.Buffer] = None,
         epilogue_nodes: Optional[List[ir.IRNode]] = None,
         offsets: Optional[List[Any]] = None,
-        reindexer: Optional[Callable[[List[Any]], List[Any]]] = None,
+        reindexers: Optional[List[Optional[Callable[[List[Any]], List[Any]]]]] = None,
     ):
         """
         Store the `src` buffer to the `dst` buffer. The size of `src` and `dst` should match.
@@ -285,7 +288,7 @@ class CppTemplateKernel(Kernel):
                         orig_src, src, epilogue_nodes
                     )
                 return self.store_pointwise_nodes(
-                    dst, epilogue_nodes, offsets, reindexer  # type: ignore[arg-type]
+                    dst, epilogue_nodes, offsets, reindexers  # type: ignore[arg-type]
                 )
         else:
             if dst.get_name() != src.get_name():

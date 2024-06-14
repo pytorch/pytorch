@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import torch
 import torch.ao.nn.quantized.dynamic as nnqd
 import torch.ao.nn.intrinsic as nni
@@ -47,8 +48,8 @@ class LinearReLU(nnqd.Linear):
         return 'DynamicQuantizedLinearReLU'
 
     @classmethod
-    def from_float(cls, mod):
-        return super().from_float(mod)
+    def from_float(cls, mod, use_precomputed_fake_quant=False):
+        return super().from_float(mod, use_precomputed_fake_quant=use_precomputed_fake_quant)
 
     @classmethod
     def from_reference(cls, ref_qlinear_relu):
