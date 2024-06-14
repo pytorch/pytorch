@@ -976,6 +976,42 @@ class TestAutograd(TestCase):
         torch.autograd.backward(out.sum(), inputs=(x, edge_y))
         torch.autograd.backward(out.sum(), inputs=(edge_x, edge_y))
 
+    def test_gradient_edge_output(self):
+        x = torch.tensor(1., requires_grad=True)
+
+        def fn(x):
+            tmp = x.sin().cos()
+            out = tmp.exp().clone().sin()
+            tmp_edge = torch.autograd.graph.get_gradient_edge(tmp)
+            return out, tmp_edge
+
+        # Compute fn backward in two steps
+        out, tmp_edge = fn(x)
+        tmp_grad, = torch.autograd.grad(out, (tmp_edge,))
+        print(tmp_edge)
+        x_grad, = torch.autograd.grad(tmp_edge, (x,), grad_outputs=(tmp_grad,))
+
+        # Compare with as if we did it in one go.
+        out, _ = fn(x)
+        x_grad_ref, = torch.autograd.grad(out, (x,))
+        self.assertEqual(x_grad, x_grad_ref)
+
+        # Incorrect case: grad_outputs not passed/implicitly None
+        out, tmp_edge = fn(x)
+        tmp_grad, = torch.autograd.grad(out, (tmp_edge,))
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "grad cannot be implicitly created when output is a GradientEdge"
+        ):
+            torch.autograd.grad(tmp_edge, (x,))
+
+        # FIXME: We aren't catching size mismatch here!
+        # # Incorrect case: grad_outputs wrong size
+        # out, tmp_edge = fn(x)
+        # tmp_grad, = torch.autograd.grad(out, (tmp_edge,))
+        # with self.assertRaisesRegex(RuntimeError, "Mismatch in shape"):
+        #     torch.autograd.grad(tmp_edge, (x,), grad_outputs=torch.tensor([1., 2., 3., 4.]))
+
     def test_grad_nonleaf(self):
         x_init = torch.randn(2, 2, requires_grad=True)
         x = x_init
