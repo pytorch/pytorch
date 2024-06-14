@@ -1432,7 +1432,8 @@ def export(
         assert fake_mode is not None
 
         log.info(
-            "Dynamo captured graph:\n\n%s", graph.print_readable(print_output=False)
+            "Dynamo captured graph:\n\n%s",
+            graph.print_readable(print_output=False, colored=True),
         )
 
         # This check need to happened before aten_graph

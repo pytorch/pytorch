@@ -6,7 +6,6 @@ import functools
 import inspect
 import itertools
 import types
-import warnings
 from typing import Dict, List, Optional, TYPE_CHECKING, Union
 
 import torch
@@ -661,7 +660,7 @@ class SkipFunctionVariable(VariableTracker):
                         f"torch.compiler.allow_in_graph."
                     )
                     # also warn on it because most users won't see the graph break message
-                    warnings.warn(msg)
+                    torch._dynamo.utils.warn_once(msg)
             msg += f"', {self.reason}'" if self.reason else ""
             unimplemented(msg)
 
@@ -1030,3 +1029,24 @@ class TritonKernelVariable(VariableTracker):
 
         # Bail out to parent's implementation
         return super().call_method(tx, name, args, kwargs)
+
+
+class OverriddenUserFunctionVariable(VariableTracker):
+    """
+    Dont trace this function on call, just construct vt for return_value.  This
+    is useful for functions like  self.fn is
+    torch.nn.modules.activation._is_make_fx_tracing which calls many C APIs
+    internally, but we know that this value will be False while Dynamo tracing.
+
+    """
+
+    def __init__(self, value, return_value, **kwargs):
+        super().__init__(**kwargs)
+        self.value = value
+        self.return_value = return_value
+        assert variables.ConstantVariable.is_literal(return_value)
+
+    def call_function(
+        self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
+    ) -> "VariableTracker":
+        return variables.ConstantVariable(self.return_value)

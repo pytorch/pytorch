@@ -219,6 +219,10 @@ EXPECTED_SKIPS_OR_FAILS_WITH_DTYPES: Tuple[onnx_test_common.DecorateMeta, ...] =
         reason=onnx_test_common.reason_dynamo_does_not_support("Addr", "complex64")
     ),
     xfail(
+        "alias_copy",
+        reason="OnnxExporterError: Failed to export model",
+    ),
+    xfail(
         "allclose",
         reason=onnx_test_common.reason_dynamo_does_not_support("Allclose")
     ),

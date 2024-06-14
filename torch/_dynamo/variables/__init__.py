@@ -23,7 +23,6 @@ from .ctx_manager import (
 from .dicts import (
     ConstDictVariable,
     CustomizedDictVariable,
-    DataClassVariable,
     DefaultDictVariable,
     SetVariable,
 )
@@ -31,6 +30,7 @@ from .distributed import BackwardHookVariable, DistributedVariable, PlacementVar
 from .functions import (
     FunctoolsPartialVariable,
     NestedUserFunctionVariable,
+    OverriddenUserFunctionVariable,
     SkipFunctionVariable,
     UserFunctionVariable,
     UserMethodVariable,
@@ -113,7 +113,6 @@ __all__ = [
     "CountIteratorVariable",
     "CustomizedDictVariable",
     "CycleIteratorVariable",
-    "DataClassVariable",
     "DefaultDictVariable",
     "DeletedVariable",
     "DeterministicAlgorithmsVariable",
@@ -161,6 +160,7 @@ __all__ = [
     "UserDefinedClassVariable",
     "UserDefinedObjectVariable",
     "UserFunctionVariable",
+    "OverriddenUserFunctionVariable",
     "UserMethodVariable",
     "VariableTracker",
     "WithExitFunctionVariable",
