@@ -127,6 +127,7 @@ from .distributed import (
 from .functions import (
     CollectiveFunctionRewriteVariable,
     FunctoolsPartialVariable,
+    OverriddenUserFunctionVariable,
     TritonKernelVariable,
     UserMethodVariable,
 )
@@ -863,6 +864,11 @@ class VariableBuilder:
             self.install_guards(GuardBuilder.FUNCTION_MATCH)
             return TorchCtxManagerClassVariable(value, source=self.source)
         elif is_function_or_wrapper(value):
+            if value is torch.nn.modules.activation._is_make_fx_tracing:
+                # Tracing through _is_make_fx_tracing  is complicated, override
+                # it to always return False because it will be False during
+                # Dynamo tracing.
+                return OverriddenUserFunctionVariable(value, False, source=self.source)
             value, attr_name = unwrap_with_attr_name_if_wrapper(value)
             # For these wrappers, Dynamo points to the wrapped function,
             # so source needs to be updated as well.
