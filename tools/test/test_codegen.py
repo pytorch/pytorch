@@ -514,15 +514,15 @@ class TestStaticDispatchGeneratrion(unittest.TestCase):
 class TestGenXPUByBackendWhitelist(unittest.TestCase):
     def setUp(self) -> None:
         path = os.path.dirname(os.path.realpath(__file__))
-        torch_xpu_ops_path = os.path.join(path, "../../third_party/torch-xpu-ops/")
+        torch_xpu_ops_path = os.path.join(path, "../../aten/src/ATen/xpu/")
         xpu_yaml_path = os.path.join(
-            torch_xpu_ops_path, "yaml/native/native_functions.yaml"
+            torch_xpu_ops_path, "xpu_functions.yaml"
         )
-        template_path = os.path.join(torch_xpu_ops_path, "yaml/templates/")
+        template_path = os.path.join(path, "../../aten/src/ATen/templates/")
         aoti_dir = os.path.join(path, "xpu_generated")
         install_dir = os.path.join(path, "xpu_generated")
         yaml_path = xpu_yaml_path
-        tags_yaml_path = os.path.join(torch_xpu_ops_path, "yaml/native/tags.yaml")
+        tags_yaml_path = os.path.join(path, "../../aten/src/ATen/native/tags.yaml")
 
         self.install_dir = install_dir
 
