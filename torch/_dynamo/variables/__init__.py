@@ -30,6 +30,7 @@ from .distributed import BackwardHookVariable, DistributedVariable, PlacementVar
 from .functions import (
     FunctoolsPartialVariable,
     NestedUserFunctionVariable,
+    OverriddenUserFunctionVariable,
     SkipFunctionVariable,
     UserFunctionVariable,
     UserMethodVariable,
@@ -159,6 +160,7 @@ __all__ = [
     "UserDefinedClassVariable",
     "UserDefinedObjectVariable",
     "UserFunctionVariable",
+    "OverriddenUserFunctionVariable",
     "UserMethodVariable",
     "VariableTracker",
     "WithExitFunctionVariable",
