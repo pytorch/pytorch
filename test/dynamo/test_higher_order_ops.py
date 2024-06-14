@@ -1407,7 +1407,7 @@ def forward(self, getitem, const):
                 def false_fn(x):
                     return (x - 1).sum()
 
-                return control_flow.cond(x.shape[0] > 4, true_fn, false_fn, [x])
+                return control_flow.cond(x.sum() > 4, true_fn, false_fn, [x])
 
         mod_for_compile = torch.compile(Foo(), backend=cnt, dynamic=True)
         mod_for_eager = Foo()
