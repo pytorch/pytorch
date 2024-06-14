@@ -154,52 +154,6 @@ def _canonicalize_expr(expr, mapping):
     return expr
 
 
-# def _maybe_flip_and_negate_expr(expr, mapping):
-#     """
-#     Runtime assert expressions might be flipped (0 <= u0)
-#     or negated (-u0 <= 0), or both
-#     """
-#     breakpoint()
-#     if expr is None or len(expr.args) != 2:
-#         return expr
-
-#     # flip (recent change meant runtime asserts might have (int, expr) format)
-#     lhs, rhs = expr.args
-#     to_flip = not isinstance(rhs, sympy.Number)
-#     if to_flip:
-#         if isinstance(expr, sympy.LessThan):
-#             expr = sympy.GreaterThan(rhs, lhs)
-#         elif isinstance(expr, sympy.StrictLessThan):
-#             expr = sympy.StrictGreaterThan(rhs, lhs)
-#         elif isinstance(expr, sympy.GreaterThan):
-#             expr = sympy.LessThan(rhs, lhs)
-#         elif isinstance(expr, sympy.StrictGreaterThan):
-#             expr = sympy.StrictLessThan(rhs, lhs)
-#         elif isinstance(expr, sympy.Equality):
-#             expr = sympy.Equality(rhs, lhs)
-#         elif isinstance(expr, sympy.Unequality):
-#             expr = sympy.Unequality(rhs, lhs)
-
-#     # negate
-#     lhs, rhs = expr.args
-#     to_negate = -lhs in mapping
-#     if to_negate:
-#         if isinstance(expr, sympy.LessThan):
-#             return sympy.GreaterThan(-lhs, -rhs)
-#         elif isinstance(expr, sympy.StrictLessThan):
-#             return sympy.StrictGreaterThan(-lhs, -rhs)
-#         elif isinstance(expr, sympy.GreaterThan):
-#             return sympy.LessThan(-lhs, -rhs)
-#         elif isinstance(expr, sympy.StrictGreaterThan):
-#             return sympy.StrictLessThan(-lhs, -rhs)
-#         elif isinstance(expr, sympy.Equality):
-#             return sympy.Equality(-lhs, -rhs)
-#         elif isinstance(expr, sympy.Unequality):
-#             return sympy.Unequality(-lhs, -rhs)
-
-#     return expr
-
-
 def _get_last_placeholder(graph: fx.Graph) -> fx.Node:
     """
     find location of last placeholder node, as insert point.
@@ -418,7 +372,7 @@ def insert_deferred_runtime_asserts(
             expr_node = node.args[0].args[0]
         else:
             expr_node = node.args[0]
-            
+
         # trivial (simplified by dynamo if static), skip
         if expr_node == True:
             continue
@@ -753,7 +707,7 @@ def insert_deferred_runtime_asserts(
                     _kwargs["max"] = _max
                 with node.graph.inserting_before(node.next):
                     res = node.graph.call_function(op, (node,), _kwargs)
-        
+
         return res
 
     def maybe_sym_constrain_range_for_size(node, expr, _min, _max):
@@ -806,7 +760,7 @@ def insert_deferred_runtime_asserts(
             _min, is_gt = sym_ranges.min
             _max, is_lt = sym_ranges.max
             _max = sys.maxsize if _max is int_oo else _max  # can't put this in graph
-            
+
             if sym_ranges.static:
                 # if static & is_size, try sym_constrain_range_for_size
                 # otherwise, _assert_scalar on equality

@@ -199,7 +199,7 @@ def sympy_interp(
         except Exception:
             log.warning("failed while executing %s(%s)", handler_name, args)
             raise
-            
+
         if hash_cons is not None:
             hash_cons[expr] = result
         return result
