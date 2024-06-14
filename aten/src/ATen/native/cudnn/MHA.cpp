@@ -309,21 +309,21 @@ auto build_graph_and_tensors(
       fe::graph::Tensor_attributes()
           .set_name("Q")
           .set_dim(
-              std::vector<int64_t>(params.q_dim.begin(), params.q_dim.end()))
+              std::vector<int64_t>(q.sizes().data(), q.sizes().data() + q.sizes().size()))
           .set_stride(fixSizeOneDimStrideSDPA(params.q_dim, std::vector<int64_t>(
               params.q_stride.begin(), params.q_stride.end()))));
   auto K = mha_graph->tensor(
       fe::graph::Tensor_attributes()
           .set_name("K")
           .set_dim(
-              std::vector<int64_t>(params.k_dim.begin(), params.k_dim.end()))
+              std::vector<int64_t>(k.sizes().data(), k.sizes().data() + k.sizes().size()))
           .set_stride(fixSizeOneDimStrideSDPA(params.k_dim, std::vector<int64_t>(
               params.k_stride.begin(), params.k_stride.end()))));
   auto V = mha_graph->tensor(
       fe::graph::Tensor_attributes()
           .set_name("V")
           .set_dim(
-              std::vector<int64_t>(params.v_dim.begin(), params.v_dim.end()))
+	      std::vector<int64_t>(v.sizes().data(), v.sizes().data() + v.sizes().size()))
           .set_stride(fixSizeOneDimStrideSDPA(params.v_dim, std::vector<int64_t>(
               params.v_stride.begin(), params.v_stride.end()))));
   auto attn_scale =
@@ -563,8 +563,11 @@ void run_cudnn_SDP_fprop(
     TORCH_WARN("Calling into cuDNN SDPA FPROP");
   }
   cudnnHandle_t handle = getCudnnHandle();
-  o = at::empty({b, h, s_q, d_v}, q.options());
-  if (return_softmaxstats) {
+  if (!o.defined()) {
+    o = at::empty({b, h, s_q, d_v}, q.options());
+  }
+
+  if (return_softmaxstats && !softmaxstats.defined()) {
     // TODO(eqy): verify that this is correct
     softmaxstats = at::empty({b, h, s_q}, q.options().dtype(kFloat));
   }
@@ -658,10 +661,21 @@ void run_cudnn_SDP_bprop(
   Tensor dO_ = dO;
   if (!dO.strides()[dO.strides().size() - 1]) {
     TORCH_WARN(
-        "cuDNN SDPA backward got an innermost stride of 0 in grad_out, which is unsupported. Materializing a contiguous\
-        tensor which will increase memory usage...");
+        "cuDNN SDPA backward got an innermost stride of 0 in grad_out, which is unsupported."
+	" Materializing a contiguous tensor which will increase memory usage...");
     dO_ = dO.contiguous();
   }
+  if (!std::equal(o.strides().begin(), o.strides().end(), dO.strides().begin())) {
+    TORCH_WARN("cuDNN SDPA backward got grad_output.strides() != output.strides(), "
+                "attempting to materialize a grad_output with matching strides...");
+    if (o.is_contiguous()) {
+      dO_ = dO.contiguous();
+    } else {
+      dO_ = dO.transpose(1, 2).contiguous().transpose(1, 2);
+    }
+  }
+  TORCH_INTERNAL_ASSERT(std::equal(dO_.strides().begin(), dO_.strides().end(), o.strides().begin()),
+                        "cuDNN SDPA expected grad_output.strides() != output.strides()");
   cudnnHandle_t handle = getCudnnHandle();
   auto key = MHACacheKeyWrapper(
       b,
@@ -714,7 +728,7 @@ void run_cudnn_SDP_bprop(
                       {K, k.data_ptr()},
                       {V, v.data_ptr()},
                       {O, o.data_ptr()},
-                      {Do, dO.data_ptr()},
+                      {Do, dO_.data_ptr()},
                       {Stats, softmaxstats.data_ptr()},
                       // outputs
                       {Dq, dQ.data_ptr()},
