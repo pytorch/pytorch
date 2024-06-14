@@ -4455,7 +4455,7 @@ graph():
                 def false_fn(x):
                     return self.linear(x).sin()
 
-                return torch.cond(x.shape[0] > 4, true_fn, false_fn, [x])
+                return torch.cond(x.sum() > 4, true_fn, false_fn, [x])
 
         class CondExport(torch.nn.Module):
             def __init__(self):
@@ -4472,9 +4472,11 @@ graph():
             """\
 def forward(self, p_bar_linear_weight, p_bar_linear_bias, x):
     cos = torch.ops.aten.cos.default(x)
+    sum_1 = torch.ops.aten.sum.default(x)
+    gt = torch.ops.aten.gt.Scalar(sum_1, 4);  sum_1 = None
     true_graph_0 = self.true_graph_0
     false_graph_0 = self.false_graph_0
-    conditional = torch.ops.higher_order.cond(False, true_graph_0, false_graph_0, [p_bar_linear_bias, p_bar_linear_weight, x]);  true_graph_0 = false_graph_0 = p_bar_linear_bias = p_bar_linear_weight = x = None
+    conditional = torch.ops.higher_order.cond(gt, true_graph_0, false_graph_0, [p_bar_linear_bias, p_bar_linear_weight, x]);  gt = true_graph_0 = false_graph_0 = p_bar_linear_bias = p_bar_linear_weight = x = None
     getitem = conditional[0];  conditional = None
     add = torch.ops.aten.add.Tensor(cos, getitem);  cos = getitem = None
     return (add,)""",

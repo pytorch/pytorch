@@ -4084,7 +4084,7 @@ def forward(self, arg0_1):
                         + control_flow.map(f, z, r).sum()
                     )
 
-                a = torch.cond(x.shape[0] > 4, true_fn, false_fn, [x, y])
+                a = torch.cond(x.sum() > 4, true_fn, false_fn, [x, y])
                 return (a + 3, a + 4)
 
         inps = [torch.randn(2, 2), torch.ones(2)]
@@ -4093,9 +4093,11 @@ def forward(self, arg0_1):
             str(gm.code).strip(),
             """\
 def forward(self, arg0_1, arg1_1):
+    sum_1 = torch.ops.aten.sum.default(arg0_1)
+    gt = torch.ops.aten.gt.Scalar(sum_1, 4);  sum_1 = None
     true_graph_0 = self.true_graph_0
     false_graph_0 = self.false_graph_0
-    conditional = torch.ops.higher_order.cond(False, true_graph_0, false_graph_0, [arg0_1, arg1_1]);  true_graph_0 = false_graph_0 = arg0_1 = arg1_1 = None
+    conditional = torch.ops.higher_order.cond(gt, true_graph_0, false_graph_0, [arg0_1, arg1_1]);  gt = true_graph_0 = false_graph_0 = arg0_1 = arg1_1 = None
     getitem = conditional[0];  conditional = None
     add = torch.ops.aten.add.Tensor(getitem, 3)
     add_1 = torch.ops.aten.add.Tensor(getitem, 4);  getitem = None
