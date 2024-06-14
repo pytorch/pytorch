@@ -321,6 +321,7 @@ flex_decoding_reduction_template = TritonTemplate(
     )
 
     offs_m = tl.arange(0, BLOCK_M) + off_m
+    offs_d = tl.arange(0, BLOCK_D) + off_d 
 
     # Reduce over T for M, L and ACC
     # load M and L
@@ -330,8 +331,6 @@ flex_decoding_reduction_template = TritonTemplate(
 
     # find global rowmax
     g_m = tl.max(m, 0) # [BLOCK_M]
-
-    # cal rebase factor alpha
     alpha = tl.exp2(m - g_m[None, :]) # [T, BLOCK_M]
 
     # reduction on LSE
@@ -342,7 +341,7 @@ flex_decoding_reduction_template = TritonTemplate(
         tl.store(LSE_block_ptr, lse)
     
     # load acc and calculate global output
-    offs_d = off_d + tl.arange(0, BLOCK_D) 
+    
     # -- load acc
     acc = tl.load(ACC_block_ptr)
     acc *= alpha[:, :, None]
@@ -400,6 +399,8 @@ def get_split_k(B: int, H: int, Mk: int, G = 1) -> int:
     split_k = min(split_k, split_k_upper_bound)
     split_k = max(split_k, 1)
 
+    # return 1
+
     return split_k
 
 
@@ -426,7 +427,10 @@ def _get_reduction_default_config(buf_ACC, dtype):
     head_dim = buf_ACC.get_size()[-1]
     default_config = None
 
-    default_config = (1, 32, 2, 1)
+    if Mq >= 2:
+        default_config = (2, 32, 2, 1)
+    else: 
+        default_config = (1, 32, 2, 1)
 
     return default_config
 
@@ -511,7 +515,6 @@ def create_flex_decoding_kernel(subgraph_buffer, layout, query, key, value, subg
             OUTPUT_LOGSUMEXP=True,
         )
 
-    # print("config: ", configs, "split_k: ", SPLIT_KV)
 
     inputs_for_flex_decoding = [query, key, value, buf_M, buf_L] + list(other_buffers)
     buf_ACC = autotune_select_algorithm( "flex_decoding", choices, inputs_for_flex_decoding, layout_acc)
@@ -522,6 +525,7 @@ def create_flex_decoding_kernel(subgraph_buffer, layout, query, key, value, subg
     
 
     for BLOCK_M, BLOCK_D, num_warps, num_stages in reduction_configs:
+        assert buf_ACC.get_size()[-2] % BLOCK_M == 0
         flex_decoding_reduction_template.maybe_append_choice(
             choices=reduction_choices,
             input_nodes=[logsumexp, buf_M, buf_L, buf_ACC],

@@ -25,7 +25,7 @@ def benchmark_torch_function_in_microseconds(func: Callable, *args, **kwargs) ->
     # warmup
     for _ in range(5):
         func(*args, **kwargs)
-    return do_bench(lambda: func(*args, **kwargs), rep=0, warmup=0) * 1e3
+    return do_bench(lambda: func(*args, **kwargs)) * 1e3
 
 
 @dataclass(frozen=True)
@@ -80,30 +80,11 @@ def generate_inputs(
     device: torch.device,
     requires_grad: bool,
 ):
-    q_shape = (batch_size, q_sequence_length, num_heads * head_dim)
-    kv_shape = (batch_size, kv_sequence_length, num_heads * head_dim)
-
-    make_q = partial(
-        torch.rand, q_shape, device=device, dtype=dtype, requires_grad=requires_grad
-    )
-    make_kv = partial(
-        torch.rand, kv_shape, device=device, dtype=dtype, requires_grad=requires_grad
-    )
-    query = (
-        make_q()
-        .view(batch_size, q_sequence_length, num_heads, head_dim)
-        .transpose(1, 2)
-    )
-    key = (
-        make_kv()
-        .view(batch_size, kv_sequence_length, num_heads, head_dim)
-        .transpose(1, 2)
-    )
-    value = (
-        make_kv()
-        .view(batch_size, kv_sequence_length, num_heads, head_dim)
-        .transpose(1, 2)
-    )
+    q_shape = (batch_size, num_heads, q_sequence_length, head_dim)
+    kv_shape = (batch_size, num_heads, kv_sequence_length, head_dim)
+    query = torch.rand(q_shape, device=device, dtype=dtype, requires_grad=requires_grad)
+    key = torch.rand(kv_shape, device=device, dtype=dtype, requires_grad=requires_grad)
+    value = torch.rand(kv_shape, device=device, dtype=dtype, requires_grad=requires_grad)
     return query, key, value
 
 
@@ -162,7 +143,7 @@ def run_single_experiment(config: ExperimentConfig, dynamic=False) -> Experiment
 def calculate_speedup(config: ExperimentConfig, results: ExperimentResults, type: str) -> float:
     if type == "fwd":
         if config.baseline_time is None:
-            return results.fwd_times.compiled_time / results.fwd_times.compiled_time
+            return results.fwd_times.eager_time / results.fwd_times.compiled_time
         else:
             return config.baseline_time / results.fwd_times.compiled_time
     elif type == "bwd":
@@ -266,6 +247,17 @@ def print_results(results: List[Experiment]):
     table_data["score_mod"] = [get_func_name(func) for func in table_data["score_mod"]]
     print(tabulate(table_data, headers="keys", tablefmt="github", floatfmt=".3f"))
 
+    import csv
+    with open("score_mod_decoding_results.csv", mode="w", newline="") as f:
+        writer = csv.writer(f)
+        for key, value in table_data.items(): 
+            if isinstance(value[0], float):
+                writer.writerow([key] + [float("nan") if np.isnan(v) else v for v in value])
+            else:
+                writer.writerow([key] + value)
+    
+    print("Results are written to score_mod_decoding_results.csv")
+
     print("\n")
     print("FWD Speedups".center(125, "="))
     print("\n")
@@ -300,19 +292,19 @@ def generate_score_mods() -> List[Callable]:
 def generate_experiment_configs(calculate_bwd: bool, baseline_performance) -> List[ExperimentConfig]:
     kv_cache_sizes = [
         (128, 512), 
-        # (64, 1024), 
-        # (32, 2048), 
-        # (16, 4096), 
-        # (8, 8192), 
-        # (4, 16384), 
-        # (2, 32768), 
-        # (1, 65536), 
-        # (1, 131072)
+        (64, 1024), 
+        (32, 2048), 
+        (16, 4096), 
+        (8, 8192), 
+        (4, 16384), 
+        (2, 32768), 
+        (1, 65536), 
+        (1, 131072)
     ]
     n_heads = [
         (16, 1), 
-        # (16, 2),
-        # (16, 16)
+        (16, 2),
+        (16, 16)
     ] # (Hq, Hkv)
     # head_dims = [64, 128, 256]
     head_dims = [128]
@@ -364,20 +356,16 @@ def generate_experiment_configs(calculate_bwd: bool, baseline_performance) -> Li
 
 
 
-from joy_dev.parse_xformer_results import get_xformer_results
-
 def main(dynamic: bool, calculate_bwd: bool):
     seed = 123
     np.random.seed(seed)
     torch.manual_seed(seed)
-    xformer_performance = get_xformer_results()
+    baseline_performance = None
     results = []
-    for config in tqdm(generate_experiment_configs(calculate_bwd, xformer_performance)):
+    for config in tqdm(generate_experiment_configs(calculate_bwd, baseline_performance)):
         results.append(
             Experiment(config, run_single_experiment(config, dynamic=dynamic))
         )
-    for config in tqdm(generate_experiment_configs(calculate_bwd, xformer_performance)):
-        results.append(Experiment(config, run_single_experiment(config)))
 
     print_results(results)
 
