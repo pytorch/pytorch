@@ -965,12 +965,7 @@ class MetaConverter:
                 # which will hard error.
                 sym_source = EphemeralSource("symint_visitor_fn")
 
-                positive = True
-                if isinstance(s, int) and s < 0:
-                    # e.g. if you .view(-1, ...)
-                    positive = False
-
-                symbol = shape_env.create_symbol(s, sym_source, positive=positive)
+                symbol = shape_env.create_symbol(s, sym_source, positive=None)
                 return shape_env.create_symintnode(symbol, hint=s, source=sym_source)
 
             real_to_fake_mapping = {}
