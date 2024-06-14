@@ -409,7 +409,9 @@ class PlaceholderInput:
     def __init__(self, x):
         self.val = x
 
-@functools.cache
+NORMALIZER_CACHE_SIZE = 1000
+
+@functools.lru_cache(NORMALIZER_CACHE_SIZE)
 def get_normalizer_function_cached(
     target: Callable,
     args_count: int,
