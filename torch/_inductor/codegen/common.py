@@ -451,6 +451,9 @@ class ExprPrinter(Printer):
     def _print_CleanDiv(self, expr):
         return self._print_FloorDiv(expr)
 
+    def _print_Identity(self, expr):
+        return self._print(expr.args[0])
+
     def _print_GreaterThan(self, expr):
         # GreaterThan:          >=
         # StrictlyGreaterThan:  >
@@ -1570,6 +1573,7 @@ class Kernel(CodeGen):
         self.must_keep_buffers = set()
         self.store_buffer_names = set()
         self._load_mask = None
+        self._load_other = None
         # set in set_current_node
         self.current_node = None
         self.node_to_bounds: Optional[Dict[torch.fx.Node, ValueRanges[Any]]] = None
