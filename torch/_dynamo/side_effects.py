@@ -221,7 +221,7 @@ class SideEffects:
         assert variable.source is not None
 
         if id(item) in self.id_to_variable:
-            raise RuntimeError(
+            raise AssertionError(
                 "Variable is already tracked for mutation. This could be "
                 "because you are not using VariableBuilder to construct "
                 "the variable tracker."
