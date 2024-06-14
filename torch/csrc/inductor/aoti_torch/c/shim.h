@@ -558,7 +558,6 @@ AOTI_TORCH_EXPORT AOTITorchError aoti_torch_proxy_executor_call_function(
     int num_tensors,
     AtenTensorHandle* flatten_tensor_args);
 
-// This API is deprecated. We will remove it later.
 AOTI_TORCH_EXPORT void aoti_torch_check(
     bool cond,
     const char* func,
@@ -569,7 +568,8 @@ AOTI_TORCH_EXPORT void aoti_torch_check(
 #ifdef STRIP_ERROR_MESSAGES
 #define AOTI_TORCH_CHECK(cond, ...)              \
   if (!(cond)) {                                 \
-    ::c10::detail::torchCheckFail(               \
+    aoti_torch_check(                            \
+        false,                                   \
         __func__,                                \
         __FILE__,                                \
         static_cast<uint32_t>(__LINE__),         \
@@ -578,7 +578,8 @@ AOTI_TORCH_EXPORT void aoti_torch_check(
 #else
 #define AOTI_TORCH_CHECK(cond, ...)                \
   if (!(cond)) {                                   \
-    ::c10::detail::torchCheckFail(                 \
+    aoti_torch_check(                              \
+        false,                                     \
         __func__,                                  \
         __FILE__,                                  \
         static_cast<uint32_t>(__LINE__),           \
