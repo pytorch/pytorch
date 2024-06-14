@@ -74,9 +74,9 @@ struct SchemaParser {
     L.expect(TK_ARROW);
     if (L.nextIf(TK_DOTS)) {
       is_varret = true;
-    } else if (L.cur().kind == TK_NONE){
+    } else if (L.cur().kind == TK_NONE) {
       L.expect(TK_NONE);
-    }else if (L.cur().kind == '(') {
+    } else if (L.cur().kind == '(') {
       parseList('(', ',', ')', [&] {
         if (is_varret) {
           throw ErrorReport(L.cur())
