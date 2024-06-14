@@ -69,5 +69,4 @@ supported_ops:
     - scatter
     - gather
     - max_pool2d_with_indices_backward
-    - nn.functional.embedding
     - nn.functional.unfold
