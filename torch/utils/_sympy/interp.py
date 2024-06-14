@@ -117,7 +117,7 @@ def sympy_interp(
     index_dtype=torch.int64,
 ):
     # hash cons
-    if hash_cons and expr in hash_cons:
+    if hash_cons is not None and expr in hash_cons:
         return hash_cons[expr]
 
     # Handle base cases
@@ -176,7 +176,7 @@ def sympy_interp(
 
         if (handler_name := INDEX_DTYPE_HANDLERS.get(expr.func)) is not None:
             result = getattr(analysis, handler_name)(*args, index_dtype)
-            if hash_cons:
+            if hash_cons is not None:
                 hash_cons[expr] = result
             return result
 
@@ -200,6 +200,6 @@ def sympy_interp(
             log.warning("failed while executing %s(%s)", handler_name, args)
             raise
             
-        if hash_cons:
+        if hash_cons is not None:
             hash_cons[expr] = result
         return result

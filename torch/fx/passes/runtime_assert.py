@@ -22,7 +22,7 @@ from torch.fx.experimental.proxy_tensor import py_sym_types
 from torch.fx.experimental.symbolic_shapes import RuntimeAssert
 from torch.fx.experimental.sym_node import SymNode
 from torch.fx.graph_module import GraphModule
-from torch.fx.passes.utils.hash_cons import SymExprRange, SymRel
+from torch.utils._sympy.expr_ranges import SymExprRange, SymRel
 from torch.utils._sympy.interp import sympy_interp
 from torch.utils._sympy.numbers import int_oo
 from torch.utils._sympy.reference import PythonReferenceAnalysis
@@ -46,6 +46,9 @@ def _get_example_value(node: fx.Node) -> Optional[str]:
 
 
 def _get_sym_val(node: fx.Node) -> "Optional[sympy.Expr]":
+    """
+    Returns sympy.Expr from node example value
+    """
     if (val := _get_example_value(node)) is not None:
         # dynamo has py_sym_type, export uses sympy.Expr
         if isinstance(val, py_sym_types):
@@ -56,6 +59,9 @@ def _get_sym_val(node: fx.Node) -> "Optional[sympy.Expr]":
 
 
 def _get_sym_rel(expr):
+    """
+    Enumerates supported relations
+    """
     if isinstance(expr, sympy.LessThan):
         return SymRel.LE
     if isinstance(expr, sympy.StrictLessThan):
@@ -72,6 +78,9 @@ def _get_sym_rel(expr):
 
 
 def _sym_rel_to_sympy(rel, lhs, rhs):
+    """
+    Sort of inverse of _get_sym_rel()
+    """
     if rel == SymRel.EQ:
         return sympy.Equality(lhs, rhs)
     elif rel == SymRel.NE:
@@ -86,34 +95,116 @@ def _sym_rel_to_sympy(rel, lhs, rhs):
         return sympy.StrictGreaterThan(lhs, rhs)
 
 
-def _maybe_negate_expr(expr, mapping):
+def _canonicalize_expr(expr, mapping):
+    """
+    https://github.com/pytorch/pytorch/pull/128411 means we won't get expressions like -u0 <= 0
+    for calls like torch._check(-u0 <= 0) anymore, but it does seem like we can get 4 <= u0, or u0 < s0,
+    which are slightly difficult to handle when we want to track ranges.
+    Here we move all non-numeric terms to the LHS, and maybe negate the expression if is_size = False,
+    in case we already track the negated value.
+    """
     if expr is None or len(expr.args) != 2:
         return expr
+    # assume we won't get something like u0 + 2 < 4, so don't call this
+    # expr = sympy.simplify(expr)
 
-    lhs, rhs = expr.args
-    to_negate = -lhs in mapping
-    if not to_negate:
+    # if straightforward we return
+    if isinstance(expr.args[1], sympy.Number):
         return expr
 
+    # try flipping, won't hurt
+    lhs, rhs = expr.args
     if isinstance(expr, sympy.LessThan):
-        return sympy.GreaterThan(-lhs, -rhs)
-    if isinstance(expr, sympy.StrictLessThan):
-        return sympy.StrictGreaterThan(-lhs, -rhs)
+        expr = sympy.GreaterThan(rhs, lhs)
+    elif isinstance(expr, sympy.StrictLessThan):
+        expr = sympy.StrictGreaterThan(rhs, lhs)
     elif isinstance(expr, sympy.GreaterThan):
-        return sympy.LessThan(-lhs, -rhs)
+        expr = sympy.LessThan(rhs, lhs)
     elif isinstance(expr, sympy.StrictGreaterThan):
-        return sympy.StrictLessThan(-lhs, -rhs)
+        expr = sympy.StrictLessThan(rhs, lhs)
     elif isinstance(expr, sympy.Equality):
-        return sympy.Equality(-lhs, -rhs)
+        expr = sympy.Equality(rhs, lhs)
     elif isinstance(expr, sympy.Unequality):
-        return sympy.Unequality(-lhs, -rhs)
+        expr = sympy.Unequality(rhs, lhs)
+    if isinstance(expr.args[1], sympy.Number):
+        return expr
+
+    # move all non-numeric values to LHS
+    eq = expr.args[0] - expr.args[1]
+    non_numeric = tuple(x for x in eq.args if not isinstance(x, sympy.Number))
+    numeric = tuple(x for x in eq.args if isinstance(x, sympy.Number))
+    assert len(numeric) <= 1
+    expr = type(expr)(sympy.Add(*non_numeric), numeric[0] if numeric else 0)
+
+    # maybe negate
+    if -expr.args[0] in mapping:
+        if isinstance(expr, sympy.LessThan):
+            expr = sympy.GreaterThan(-lhs, -rhs)
+        elif isinstance(expr, sympy.StrictLessThan):
+            expr = sympy.StrictGreaterThan(-lhs, -rhs)
+        elif isinstance(expr, sympy.GreaterThan):
+            expr = sympy.LessThan(-lhs, -rhs)
+        elif isinstance(expr, sympy.StrictGreaterThan):
+            expr = sympy.StrictLessThan(-lhs, -rhs)
+        elif isinstance(expr, sympy.Equality):
+            expr = sympy.Equality(-lhs, -rhs)
+        elif isinstance(expr, sympy.Unequality):
+            expr = sympy.Unequality(-lhs, -rhs)
 
     return expr
 
 
+# def _maybe_flip_and_negate_expr(expr, mapping):
+#     """
+#     Runtime assert expressions might be flipped (0 <= u0)
+#     or negated (-u0 <= 0), or both
+#     """
+#     breakpoint()
+#     if expr is None or len(expr.args) != 2:
+#         return expr
+
+#     # flip (recent change meant runtime asserts might have (int, expr) format)
+#     lhs, rhs = expr.args
+#     to_flip = not isinstance(rhs, sympy.Number)
+#     if to_flip:
+#         if isinstance(expr, sympy.LessThan):
+#             expr = sympy.GreaterThan(rhs, lhs)
+#         elif isinstance(expr, sympy.StrictLessThan):
+#             expr = sympy.StrictGreaterThan(rhs, lhs)
+#         elif isinstance(expr, sympy.GreaterThan):
+#             expr = sympy.LessThan(rhs, lhs)
+#         elif isinstance(expr, sympy.StrictGreaterThan):
+#             expr = sympy.StrictLessThan(rhs, lhs)
+#         elif isinstance(expr, sympy.Equality):
+#             expr = sympy.Equality(rhs, lhs)
+#         elif isinstance(expr, sympy.Unequality):
+#             expr = sympy.Unequality(rhs, lhs)
+
+#     # negate
+#     lhs, rhs = expr.args
+#     to_negate = -lhs in mapping
+#     if to_negate:
+#         if isinstance(expr, sympy.LessThan):
+#             return sympy.GreaterThan(-lhs, -rhs)
+#         elif isinstance(expr, sympy.StrictLessThan):
+#             return sympy.StrictGreaterThan(-lhs, -rhs)
+#         elif isinstance(expr, sympy.GreaterThan):
+#             return sympy.LessThan(-lhs, -rhs)
+#         elif isinstance(expr, sympy.StrictGreaterThan):
+#             return sympy.StrictLessThan(-lhs, -rhs)
+#         elif isinstance(expr, sympy.Equality):
+#             return sympy.Equality(-lhs, -rhs)
+#         elif isinstance(expr, sympy.Unequality):
+#             return sympy.Unequality(-lhs, -rhs)
+
+#     return expr
+
+
 def _get_last_placeholder(graph: fx.Graph) -> fx.Node:
-    # find location of last placeholder node, as insert point
-    # if not found return first node
+    """
+    find location of last placeholder node, as insert point.
+    if not found return first node
+    """
     res = None
     for node in graph.nodes:
         if node.op == "placeholder":
@@ -132,8 +223,10 @@ def _is_size_function_node(node: fx.Node) -> bool:
     )
 
 
-def dce_from_node(node: fx.Node):
-    # DCE unused node and any unused ancestors
+def _dce_from_node(node: fx.Node):
+    """
+    DCE unused node and any unused ancestors
+    """
     graph = node.graph
     _args = [node]
     while _args:
@@ -157,6 +250,21 @@ def insert_deferred_runtime_asserts(
     name: str,
     export: bool = False,
 ) -> None:
+    """
+    1.  First pass through graph, collects current runtime asserts (NOTE: rename from RUNTIME_ASSERT_OPS).
+        Uses these, along with shape env's runtime asserts and stored ranges for unbacked symbols,
+        and computes ranges for expressions.
+    2.  Main graph pass:
+        a) performs CSE for existing and new size-compute nodes, calling sympy_interp(),
+           as well as calls on unbacked bindings. Creates size/stride calls to produce shape/unbacked symbols.
+        b) turns size calls on intermediate tensors into placeholder-size computation if possible
+    3.  Create runtime asserts based on collected range information for each expression.
+    4.  Deletes any unused existing runtime asserts or unused size/stride calls.
+
+    Collecting range information for expressions seems to be a good way to handle runtime assert deduplication...
+    ...
+    ...
+    """
 
     import sympy
     from torch.fx.experimental.symbolic_shapes import (
@@ -168,7 +276,7 @@ def insert_deferred_runtime_asserts(
         InnerTensorKey,
     )
 
-    ops_on_sym_types = [
+    RUNTIME_ASSERT_OPS = [
         torch.ops.aten._assert_async.msg,
         torch.ops.aten._assert_scalar.default,
         torch.ops.aten.sym_constrain_range_for_size.default,
@@ -185,15 +293,9 @@ def insert_deferred_runtime_asserts(
     # track ranges for expressions
     sym_expr_to_ranges: Dict[sympy.Expr, SymExprRange] = defaultdict(SymExprRange)
     sym_expr_to_nodes: Dict[sympy.Expr, Dict[Any, List[fx.Node]]] = defaultdict(lambda: defaultdict(list))
-    
-    graph_code_log.debug(
-        "%s",
-        lazy_format_graph_code(
-            f"pre insert_deferred_runtime_asserts {name}", gm, colored=True
-        ),
-    )
 
     def _refine_range(sym_rel, lhs, rhs):
+        # for working with SymExprRange objects
         if isinstance(rhs, sympy.Integer):
             rhs = int(rhs)
         # enumerate
@@ -210,17 +312,24 @@ def insert_deferred_runtime_asserts(
         elif sym_rel == SymRel.GE:
             sym_expr_to_ranges[lhs].gt(rhs, False)
 
+    graph_code_log.debug(
+        "%s",
+        lazy_format_graph_code(
+            f"pre insert_deferred_runtime_asserts {name}", gm, colored=True
+        ),
+    )
+
     # filter out ops on sym types, prioritizing is_size calls first, to handle negative symbols
     # e.g. torch._check(u >= 0) might appear as -u <= 0.
     # because we try negating LHS exprs to see if we already track their ranges,
     # we might end up tracking -u0 instead of u0 if we see the torch._check() call first.
-    # is_size calls won't negate their symbols, so we prioritize reading those first.
+    # is_size calls won't negate their symbol inputs, so we prioritize reading those first.
     is_size_calls = []
     non_is_size_calls = []
     for node in gm.graph.nodes:
         if (
             node.op == "call_function"
-            and node.target in ops_on_sym_types
+            and node.target in RUNTIME_ASSERT_OPS
         ):
             if node.target in (
                 torch.ops.aten.sym_constrain_range_for_size.default,
@@ -233,12 +342,57 @@ def insert_deferred_runtime_asserts(
 
         # while we're doing this, track ranges for symbols with unbacked bindings
         if unbacked_bindings := node.meta.get("unbacked_bindings"):
+            # this below is kind of annoying, with dynamo the unbacked bindings keys match the symbols in the graph,
+            # but AOTAutograd seems to produce new unbacked symbols (likely from running call_function() too many times),
+            # so we need to read from the example value.
+            # NOTE: not so experienced here -> can the unbacked value be a sympy.Expr instead of a single symbol?
             symbols = (
                 _get_sym_val(node).free_symbols
                 if node.meta and isinstance(_get_sym_val(node), sympy.Symbol)
                 else unbacked_bindings.keys()
             )
             for symbol in symbols:
+                # NOTE: comment/docstring motion from previous state of this file.
+                #
+                # Before we perform any asserts, first apply range
+                # refinement.  This is important, because if we are going
+                # to retrace the graph (and we typically are if we send
+                # the graph to AOTAutograd), we need to make sure we apply
+                # range refinement (ala _check_is_size) first, BEFORE we
+                # run any of the asserts.  Otherwise, we may decide to
+                # perform substitutions based on the asserts which we then
+                # can't back out, because value ranges can only be applied
+                # to asserts.)
+                #
+                # A perhaps better long term plan is to avoid this order
+                # dependence by making it possible to refine ranges on
+                # arbitrary expressions, not just symbols.  But it is not
+                # so easy to make use of this information, see
+                # https://twitter.com/ezyang/status/1745801370299482492
+                # We actually made an attempt at this in
+                # https://github.com/pytorch/pytorch/pull/119043
+                # which didn't work.
+                #
+                # Another ideas for how to do this:
+                # - Have bound_sympy be the source of truth of the ranges of any expression
+                # - Cache intermediate results for every subexpression of bound_sympy
+                # - This cache should be possible to edit to refine ranges
+                #
+                # One issue with this proposal is that if
+                # we have a bound on 2x, we are not going to be able to
+                # apply it for 4x.  Similarly, we may have bounds for an
+                # equivalent expression that we are not applying because
+                # it's not a perfect match (e.g. x < y vs y > x)".
+                #
+                # The first issue we already have it and it's impossible
+                # to solve in general, so any implementation on a best
+                # effort basis should do.
+                #
+                # The second issue is a preexisting one. It can be mitigated
+                # with a normalisation algorithm. In general, it may also
+                # be on a best effort basis, but since our grammar is not
+                # terribly difficult, chances are we could even fully
+                # normalise SymPy expressions... who knows.
                 if symbol in shape_env.size_like:
                     sym_expr_to_ranges[symbol].set_is_size()
                 if symbol in shape_env.var_to_range:
@@ -258,24 +412,26 @@ def insert_deferred_runtime_asserts(
                         _refine_range(SymRel.GE, symbol, convert(vr.lower))
                         _refine_range(SymRel.LE, symbol, convert(vr.upper))
 
-    # now handle ops on sym types in prioritized order
+    # now handle ops on sym types in prioritized order, looking at is_size calls first
     for node in is_size_calls + non_is_size_calls:
-        # get expression, maybe negate
         if node.target == torch.ops.aten._assert_async.msg:
             expr_node = node.args[0].args[0]
         else:
             expr_node = node.args[0]
+            
         # trivial (simplified by dynamo if static), skip
         if expr_node == True:
             continue
 
+        # maybe flip/negate expression
         is_size = node.target in (
             torch.ops.aten.sym_constrain_range_for_size.default,
             torch._check_is_size,
         )
         expr = _get_sym_val(expr_node)
         if not is_size:
-            expr = _maybe_negate_expr(expr, sym_expr_to_ranges)
+            # expr = _maybe_flip_and_negate_expr(expr, sym_expr_to_ranges)
+            expr = _canonicalize_expr(expr, sym_expr_to_ranges)
 
         # get signature, refine ranges
         if node.target in (
@@ -287,15 +443,16 @@ def insert_deferred_runtime_asserts(
                 continue
             sym_expr, val = expr.args
             signature = (node.target, sym_rel, val)
+            # maybe we get a torch._check(u0 < s0), we expect this to show up in shape_env.deferred_runtime_asserts
+            # and handle it there instead.
             if not isinstance(val, int):
-                # expect shape_env runtime asserts to handle things like s0 < u0
                 continue
             _refine_range(sym_rel, sym_expr, val)
 
         elif node.target in (
             torch.ops.aten.sym_constrain_range_for_size.default,
             torch.ops.aten.sym_constrain_range.default,
-        ):
+        ):  # refine bounds, maybe mark size-like
             _min = node.kwargs.get("min", 0 if node.target == is_size else -int_oo)
             _max = node.kwargs.get("max", int_oo)
             signature = (node.target, _min, _max)
@@ -309,16 +466,19 @@ def insert_deferred_runtime_asserts(
 
         if is_size:  # make size-like
             sym_expr_to_ranges[expr].set_is_size()
+
+        # store nodes for each expr
         sym_expr_to_nodes[sym_expr][signature].append(node)
 
     # look at exprs in runtime asserts, track ranges
     for ras in ras_by_symbol.values():
         ra_exprs = set(ra.expr for ra in ras)
         for ra_expr in ra_exprs:
-            expr = _maybe_negate_expr(ra_expr, sym_expr_to_ranges)
+            # expr = _maybe_flip_and_negate_expr(ra_expr, sym_expr_to_ranges)
+            expr = _canonicalize_expr(ra_expr, sym_expr_to_ranges)
             if (sym_rel := _get_sym_rel(expr)) is None:
-                continue  # don't track anything for this expr
-            # only refine range, no node to hash cons
+                continue  # don't know what to do with this expr type, don't track anything for this expr
+            # only refine range, no node to CSE yet
             _refine_range(sym_rel, *expr.args)
 
     # hash consing, track created size/stride nodes, insert point, tracked symbols
@@ -345,11 +505,11 @@ def insert_deferred_runtime_asserts(
                 ):
                     with gm.graph.inserting_before(
                         last_placeholder.next if last_placeholder.op == "placeholder" else last_placeholder
-                    ):
+                    ):  # insert right after placeholders
                         res = fx.Proxy(cb())
                         hash_cons[s] = res
                         tracked_symbols.add(s)
-                        created_placeholder_ops.append(res)
+                        created_placeholder_ops.append(res.node)
                         log.debug("symbol_to_proxy[%s] = %s", s, res)
 
             match_symbol(example_value, lambda: node)
@@ -393,16 +553,13 @@ def insert_deferred_runtime_asserts(
                 # but I don't think this is needed for us
             elif not _is_size_function_node(node):
                 # we don't want size calls on intermediate tensors, so skip this
-                '''
-                maybe here be careful about data-dep sizes...
-                '''
                 hash_cons[sym_val] = fx.Proxy(node)
 
         # if size call on intermediate tensor, convert to compute on input sizes
         # e.g. y = torch.cat([x, x], dim=1), z = y.shape[0]
         # convert from: z = sym_size.int(y, 0)
         # to: x0 = sym_size.int(x, 0), z = x0 * 2
-        # so we can clean up intermediate tensors from memory faster
+        # so we can clean up intermediate tensors from memory earlier.
         if (
             _is_size_function_node(node)
             and node.args[0].op != "placeholder"
@@ -419,13 +576,12 @@ def insert_deferred_runtime_asserts(
                 )
             hash_node = hash_cons[sym_shape].node
             node.replace_all_uses_with(hash_node)
-            dce_from_node(node)  # this replace call can create dead code
+            _dce_from_node(node)  # here we should DCE
 
-        # look at unbacked bindings, hash cons ops, update tracked symbols
+        # look at unbacked bindings, hash cons ops that create them, update tracked symbols
         if unbacked_bindings := node.meta.get("unbacked_bindings"):
             for symbol, keypath in unbacked_bindings.items():
-
-                with graph.inserting_before(node.next):
+                with graph.inserting_before(node.next):  # insert right after this node
                     def unbacked_interp(node, keypath, signature):
                         if keypath == ():
                             return node
@@ -531,6 +687,9 @@ def insert_deferred_runtime_asserts(
                         return res
 
                     res = fx.Proxy(unbacked_interp(node, keypath, _get_example_value(node)))
+                    # this below matches the logic mentioned above in the initial collection pass,
+                    # about dynamo producing unbacked binding keys that match the symbols in the graph,
+                    # but AOTAutograd producing new unbacked symbols, so we need to read the example value instead.
                     sym_expr = (
                         _get_sym_val(res.node)
                         if res.node.meta and isinstance(_get_sym_val(res.node), sympy.Symbol)
@@ -541,19 +700,26 @@ def insert_deferred_runtime_asserts(
                     log.debug("symbol_to_proxy[%s] = %s", sym_expr, hash_cons[sym_expr])
 
     def add_runtime_assert(node, sym_expr, op, partial_signature):
-        signature = (op,) + partial_signature
+        '''
+        From the input node, sym_expr, op, and partial_signature (e.g. min/max),
+        add runtime assert to the graph.
+        Here we only want to add:
+        - torch.ops.aten.sym_constrain_range_for_size.default (anything size-like)
+        - torch.ops.aten.sym_constrain_range.default (anything non-size-like)
+        - torch.ops.aten._assert_scalar.default (anything not handled by the other two, e.g. strict LT/GT, inequality)
+        '''
+        signature = (op,) + partial_signature  # op is part of signature
 
         if op == torch.ops.aten._assert_scalar.default:
-            if signature in sym_expr_to_nodes[sym_expr]:
+            if signature in sym_expr_to_nodes[sym_expr]:  # already exists
                 res = sym_expr_to_nodes[sym_expr][signature][0]
-            elif (torch._check,) + partial_signature in sym_expr_to_nodes[sym_expr]:
-                # allow torch._check in place of _assert_scalar if it exists
+            elif (torch._check,) + partial_signature in sym_expr_to_nodes[sym_expr]:  # allow torch._check too
                 res = sym_expr_to_nodes[sym_expr][(torch._check,) + partial_signature][0]
             else:
                 sym_rel, rhs = partial_signature
                 full_expr = _sym_rel_to_sympy(sym_rel, sym_expr, rhs)
-                # be careful about insert point if node already exists,
-                # insert after input if it doesn't, otherwise rely on sympy_interp's logic
+                # be careful about insert point if node already exists:
+                # insert after input if it doesn't, otherwise let sympy_interp() handle insert point.
                 with (
                     contextlib.nullcontext()
                     if full_expr in hash_cons
@@ -579,6 +745,7 @@ def insert_deferred_runtime_asserts(
             if signature in sym_expr_to_nodes[sym_expr]:
                 res = sym_expr_to_nodes[sym_expr][signature][0]
             else:
+                # int_oo doesn't compile in the graph, so we expect numeric inputs to be passed into this function
                 _kwargs = {}
                 if not is_size or _min != 0:
                     _kwargs["min"] = _min
@@ -590,6 +757,13 @@ def insert_deferred_runtime_asserts(
         return res
 
     def maybe_sym_constrain_range_for_size(node, expr, _min, _max):
+        '''
+        Try to insert a sym_constrain_range_for_size op if possible, but might not be possible if _max <= 2.
+        This can happen when we try to simplify:
+            torch._check_is_size(x) & torch._check(x == 2) -> torch.sym_constrain_range_for_size(x, 2, 2)
+        If that's the case, add unbounded sym_constrain_range_for_size + bounded sym_constrain_range.
+        Expects numeric inputs for _min, _max.
+        '''
         if _max is None or _max > 2:  # doesn't work with max <= 2
             remaining_assert_nodes.add(
                 add_runtime_assert(
@@ -599,7 +773,7 @@ def insert_deferred_runtime_asserts(
                     (_min, _max),
                 )
             )
-        else:  # sym_constrain_range_for_size(0, int_oo) + sym_constrain_range(min, max)
+        else:  # sym_constrain_range_for_size(0, inf) + sym_constrain_range(min, max)
             remaining_assert_nodes.add(
                 add_runtime_assert(
                     res,
@@ -620,7 +794,7 @@ def insert_deferred_runtime_asserts(
     # go through runtime asserts, add appropriate ops
     for sym_expr, sym_ranges in sym_expr_to_ranges.items():
 
-        # check that all symbols exist. if so, call sympy_interp()
+        # all symbols exist -> sympy_interp()
         free_symbols = sym_expr.free_symbols
         if len(free_symbols - tracked_symbols) == 0:
             res = sympy_interp(
@@ -634,6 +808,8 @@ def insert_deferred_runtime_asserts(
             _max = sys.maxsize if _max is int_oo else _max  # can't put this in graph
             
             if sym_ranges.static:
+                # if static & is_size, try sym_constrain_range_for_size
+                # otherwise, _assert_scalar on equality
                 val = sym_ranges.val
                 if sym_ranges.is_size:
                     maybe_sym_constrain_range_for_size(res, sym_expr, val, val)
@@ -647,12 +823,10 @@ def insert_deferred_runtime_asserts(
                         )
                     )
             elif _min is not None and _max is not None:
-                '''
-                refactor this to try to constrain range
-                if max > 2 or not is size, do normal constrain + check
-                if non-symbol, torch.check
-                '''
-                if sym_ranges.is_size:  # sym_constrain_range_for_size
+                # if is_size, try sym_constrain_range_for_size
+                # otherwise, we can sym_constrain_range if a single symbol
+                # if an expression, we add two _assert_scalar nodes
+                if sym_ranges.is_size:
                     maybe_sym_constrain_range_for_size(res, sym_expr, _min, _max)
                 elif isinstance(sym_expr, sympy.Symbol):
                     remaining_assert_nodes.add(
@@ -682,6 +856,7 @@ def insert_deferred_runtime_asserts(
                     )
 
             elif _min is not None:
+                # one-sided _assert_scalar
                 remaining_assert_nodes.add(
                     add_runtime_assert(
                         res,
@@ -692,6 +867,7 @@ def insert_deferred_runtime_asserts(
                 )
 
             elif _max is not None:
+                # same here
                 remaining_assert_nodes.add(
                     add_runtime_assert(
                         res,
@@ -702,6 +878,7 @@ def insert_deferred_runtime_asserts(
                 )
 
             for val in sym_ranges.not_equals:
+                # _assert_scalar for any inequalities
                 remaining_assert_nodes.add(
                     add_runtime_assert(
                         res,
@@ -711,8 +888,14 @@ def insert_deferred_runtime_asserts(
                     )
                 )
 
-        # clean out remaining nodes
+        # clean out remaining nodes that existed before
         for nodes in sym_expr_to_nodes[sym_expr].values():
             for node in nodes:
                 if node not in remaining_assert_nodes:
-                    dce_from_node(node)
+                    _dce_from_node(node)
+
+    # clean out unused size/stride nodes that we created.
+    # alternative is to track used symbols in initial graph pass so we don't create these.
+    for node in created_placeholder_ops:
+        if not node.users:
+            _dce_from_node(node)
