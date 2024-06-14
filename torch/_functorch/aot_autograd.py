@@ -498,11 +498,7 @@ def create_aot_dispatcher_function(
                         return shape_env.create_symintnode(
                             shape_env.create_symbol(x, source), hint=x, source=source
                         )
-                if isinstance(
-                    x, torch.ScriptObject
-                ) and torch._library.fake_class_registry.has_fake_class(
-                    x._type().qualified_name()
-                ):
+                if isinstance(x, torch.ScriptObject):
                     return torch._library.fake_class_registry.to_fake_obj(fake_mode, x)
                 if not isinstance(x, torch.Tensor):
                     return x
@@ -549,8 +545,9 @@ def create_aot_dispatcher_function(
 
         fake_flat_args = process_inputs(flat_args)
 
-        needs_autograd = any(
-            x.requires_grad for x in fake_flat_args if isinstance(x, Tensor)
+        needs_autograd = (
+            any(x.requires_grad for x in fake_flat_args if isinstance(x, Tensor))
+            and torch.is_grad_enabled()
         )
 
         with enable_python_dispatcher():

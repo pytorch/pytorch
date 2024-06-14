@@ -1612,7 +1612,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnt.frame_count, 1)
 
         self.assertEqual(
-            18 if torch._dynamo.config.inline_inbuilt_nn_modules else 12, cnt.op_count
+            15 if torch._dynamo.config.inline_inbuilt_nn_modules else 12, cnt.op_count
         )
 
     def test_exec_import(self):

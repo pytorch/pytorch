@@ -8,6 +8,7 @@
 #include <utility>
 #include <vector>
 
+#include <c10/util/thread_name.h>
 #include <fmt/format.h>
 #include <torch/csrc/distributed/c10d/TCPStore.hpp>
 #include <torch/csrc/distributed/c10d/TCPStoreBackend.hpp>
@@ -1064,6 +1065,8 @@ void LibUVStoreDaemon::print_active_handles(uv_handle_t* handle, void* arg) {
 }
 
 void LibUVStoreDaemon::run() {
+  c10::setThreadName("pt_tcpstore_uv");
+
   C10D_DEBUG("Uv main loop running");
   int res = uv_run(&loop, UV_RUN_DEFAULT);
   if (res) {
