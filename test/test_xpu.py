@@ -312,6 +312,11 @@ instantiate_device_type_tests(TestXpu, globals(), only_for="xpu")
 
 
 class TestXpuAutocast(TestCase):
+    # These operators are not implemented on XPU backend and we can NOT fall back
+    # them to CPU. So we have to skip them at this moment.
+    # TODO: remove these operators from skip list when they are implemented on XPU backend.
+    skip_list = ["gru_cell"]
+
     def setUp(self):
         super().setUp()
         self.autocast_lists = AutocastTestLists(torch.device("xpu"))
@@ -335,9 +340,9 @@ class TestXpuAutocast(TestCase):
         if add_kwargs is None:
             add_kwargs = {}
         fast_dtype = torch.bfloat16 if run_as_type == torch.bfloat16 else torch.float16
-        self.assertFalse(torch.is_autocast_enabled())
+        self.assertFalse(torch.is_autocast_enabled("xpu"))
         with torch.amp.autocast("xpu", dtype=fast_dtype):
-            self.assertTrue(torch.is_autocast_enabled())
+            self.assertTrue(torch.is_autocast_enabled("xpu"))
 
             out_type = out_type if out_type is not None else run_as_type
             output = output_method = None
@@ -387,7 +392,7 @@ class TestXpuAutocast(TestCase):
             # as the C++-side autocasting, and should be bitwise accurate.
             output_to_compare = output if output is not None else output_method
             with torch.amp.autocast("xpu", enabled=False):
-                self.assertFalse(torch.is_autocast_enabled())
+                self.assertFalse(torch.is_autocast_enabled("xpu"))
 
                 if module is not None and hasattr(module, op):
                     control = getattr(module, op)(
@@ -400,13 +405,15 @@ class TestXpuAutocast(TestCase):
                 self.assertTrue(type(output_to_compare) == type(control))
                 comparison = compare(output_to_compare, control)
                 self.assertTrue(comparison, f"torch.{op} result did not match control")
-            self.assertTrue(torch.is_autocast_enabled())
-        self.assertFalse(torch.is_autocast_enabled())
+            self.assertTrue(torch.is_autocast_enabled("xpu"))
+        self.assertFalse(torch.is_autocast_enabled("xpu"))
 
     def test_autocast_torch_fp16(self):
         for op_with_args in self.autocast_lists.torch_fp16:
             skip_test = False
             op, args = op_with_args[0], op_with_args[1]
+            if op in self.skip_list:
+                skip_test = True  # skip unimplemented op
             if len(op_with_args) == 3:
                 skip_test = True  # skip cudnn op
             if not skip_test:
@@ -416,6 +423,8 @@ class TestXpuAutocast(TestCase):
         for op_with_args in self.autocast_lists.torch_fp16:
             skip_test = False
             op, args = op_with_args[0], op_with_args[1]
+            if op in self.skip_list:
+                skip_test = True  # skip unimplemented op
             if len(op_with_args) == 3:
                 skip_test = True  # skip cudnn op
             if not skip_test:

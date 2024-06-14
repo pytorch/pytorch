@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import logging
 import time
 from collections import defaultdict
