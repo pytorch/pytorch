@@ -481,9 +481,17 @@ def create_aot_dispatcher_function(
         enable_python_dispatcher() if shape_env is not None else nullcontext()
     )
 
+    # See NOTE: [Deferring tensor pack/unpack hooks until runtime]
+    # If any saved tensor hooks are active, we **don't** want to trace them.
+    # Instead, we'll let them run at runtime, around the custom autograd.Function
+    # that we generate in torch.compile.
     with torch.autograd.set_multithreading_enabled(
         False
-    ), preserve_rng_state(), fake_mode, python_dispatcher_mode, PhiloxStateTracker():
+    ), preserve_rng_state(), (
+        fake_mode
+    ), (
+        python_dispatcher_mode
+    ), PhiloxStateTracker(), torch._dynamo.utils._disable_saved_tensors_hooks_during_tracing():
 
         def process_inputs(flat_args):
             def convert(idx, x):
@@ -545,8 +553,9 @@ def create_aot_dispatcher_function(
 
         fake_flat_args = process_inputs(flat_args)
 
-        needs_autograd = any(
-            x.requires_grad for x in fake_flat_args if isinstance(x, Tensor)
+        needs_autograd = (
+            any(x.requires_grad for x in fake_flat_args if isinstance(x, Tensor))
+            and torch.is_grad_enabled()
         )
 
         with enable_python_dispatcher():
