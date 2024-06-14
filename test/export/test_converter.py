@@ -536,10 +536,10 @@ class TestConverter(TestCase):
         self._check_equal_ts_ep_converter(MIn(), inp, ["script"])
         self._check_equal_ts_ep_converter(MNotIn(), inp, ["script"])
 
-        t = torch.tensor(4)
-        inp = (t, {t: "foo"})
+        # TODO: update test to use reference for in.
+        inp = (torch.tensor(4), {torch.tensor(4): "foo"})
         self._check_equal_ts_ep_converter(MTensorIn(), inp, ["script"])
-        inp = (t, {torch.tensor(4): "foo"})
+        inp = (torch.tensor(1), {torch.tensor(4): "foo"})
         self._check_equal_ts_ep_converter(MTensorIn(), inp, ["script"])
 
     def test_ts2ep_converter_custom_op(self):
@@ -620,7 +620,9 @@ class TestConverter(TestCase):
 
         def func5():
             x = -1
-            return x * torch.ones(1, dtype=torch.float), torch.zeros(1, dtype=torch.float)
+            return x * torch.ones(1, dtype=torch.float), torch.zeros(
+                1, dtype=torch.float
+            )
 
         def func6(x):
             return x.numel()
