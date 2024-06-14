@@ -3,13 +3,18 @@ import functools
 
 import torch
 from torch.nn.utils._expanded_weights.expanded_weights_impl import ExpandedWeight
-
 from torch.utils import _pytree as pytree
 
 
 # dependency on `functional_call` means that this can't be exposed in utils
 # without creating circular dependency
-def call_for_per_sample_grads(module, *, batch_size=None, loss_reduction="sum", batch_first=True):
+def call_for_per_sample_grads(
+    module,
+    *,
+    batch_size=None,
+    loss_reduction="sum",
+    batch_first=True,
+):
     r"""
     Return a forward function for a module, populating grad_sample with per sample gradients on backward invocation.
 
@@ -67,30 +72,42 @@ def call_for_per_sample_grads(module, *, batch_size=None, loss_reduction="sum", 
 
             arg_batch_size = arg.shape[0] if batch_first else arg.shape[1]
             if batch_size is not None and batch_size != arg_batch_size:
-                raise RuntimeError("When computing batch size, found at least one input with batch size "
-                                   f"{batch_size} and one with batch size {arg_batch_size}. Please specify it "
-                                   "explicitly using the batch size kwarg in call_for_per_sample_grads")
+                raise RuntimeError(
+                    "When computing batch size, found at least one input with batch size "
+                    f"{batch_size} and one with batch size {arg_batch_size}. Please specify it "
+                    "explicitly using the batch size kwarg in call_for_per_sample_grads"
+                )
             batch_size = arg_batch_size
         if batch_size is None:
-            raise RuntimeError("Unable to find a tensor in the passed args and kwargs. They may not be pytree-able "
-                               "and so ExpandedWeights cannot compute the batch size from the inputs. Please specify "
-                               "it explicitly")
+            raise RuntimeError(
+                "Unable to find a tensor in the passed args and kwargs. They may not be pytree-able "
+                "and so ExpandedWeights cannot compute the batch size from the inputs. Please specify "
+                "it explicitly"
+            )
         return batch_size
 
     if loss_reduction not in ["sum", "mean"]:
-        raise RuntimeError(f"Expected loss_reduction argument to be sum or mean, got {loss_reduction}")
+        raise RuntimeError(
+            f"Expected loss_reduction argument to be sum or mean, got {loss_reduction}"
+        )
 
     if not isinstance(module, torch.nn.Module):
-        raise RuntimeError(f"Module passed must be nn.Module, got {type(module).__name__}")
+        raise RuntimeError(
+            f"Module passed must be nn.Module, got {type(module).__name__}"
+        )
     if not (batch_size is None or isinstance(batch_size, int)):
-        raise RuntimeError(f"Batch size passed must be None or an integer, got {type(batch_size).__name__}")
+        raise RuntimeError(
+            f"Batch size passed must be None or an integer, got {type(batch_size).__name__}"
+        )
     if batch_size is not None and batch_size < 1:
         raise RuntimeError(f"Batch size must be positive, got {batch_size}")
     for weight in module.parameters():
         if hasattr(weight, "grad_sample") and weight.grad_sample is not None:  # type: ignore[attr-defined]
-            raise RuntimeError("Current Expanded Weights accumulates the gradients, which will be incorrect for multiple "
-                               f"calls without clearing gradients. Please clear out the grad_sample parameter of {weight} or "
-                               "post an issue to pytorch/pytorch to prioritize correct behavior")
+            raise RuntimeError(
+                "Current Expanded Weights accumulates the gradients, which will be incorrect for multiple "
+                f"calls without clearing gradients. Please clear out the grad_sample parameter of {weight} or "
+                "post an issue to pytorch/pytorch to prioritize correct behavior"
+            )
 
     @functools.wraps(module.forward)
     def wrapper(*args, **kwargs):
@@ -98,6 +115,10 @@ def call_for_per_sample_grads(module, *, batch_size=None, loss_reduction="sum", 
         if wrapper_batch_size is None:
             wrapper_batch_size = compute_batch_size(*args, **kwargs)
 
-        params = {name: maybe_build_expanded_weight(value, wrapper_batch_size) for (name, value) in module.named_parameters()}
+        params = {
+            name: maybe_build_expanded_weight(value, wrapper_batch_size)
+            for (name, value) in module.named_parameters()
+        }
         return torch.func.functional_call(module, params, args, kwargs)
+
     return wrapper
