@@ -1,6 +1,8 @@
+# mypy: allow-untyped-defs
 import os
 from typing import Optional
 
+from torch.fx._compatibility import compatibility
 from torch.fx.graph_module import GraphModule
 
 from .graph_drawer import FxGraphDrawer
@@ -8,6 +10,7 @@ from .graph_drawer import FxGraphDrawer
 __all__ = ["GraphTransformObserver"]
 
 
+@compatibility(is_backward_compatible=False)
 class GraphTransformObserver:
     __pass_count = 0
 
@@ -55,10 +58,10 @@ class GraphTransformObserver:
                     e.obj_dict["attributes"]["fillcolor"] = "yellow"
                 else:
                     e.obj_dict["attributes"]["fillcolor"] = "grey"
-            self.input_dot_graph.write_svg(
+            self.input_dot_graph.write(
                 os.path.join(
                     self.log_url,
-                    f"pass_{GraphTransformObserver.__pass_count}_{self.passname}_input_graph.svg",
+                    f"pass_{GraphTransformObserver.__pass_count}_{self.passname}_input_graph.dot",
                 )
             )
 
@@ -73,10 +76,10 @@ class GraphTransformObserver:
                     e.obj_dict["attributes"]["fillcolor"] = "yellow"
                 else:
                     e.obj_dict["attributes"]["fillcolor"] = "grey"
-            output_dot_graph.write_svg(
+            output_dot_graph.write(
                 os.path.join(
                     self.log_url,
-                    f"pass_{GraphTransformObserver.__pass_count}_{self.passname}_output_graph.svg",
+                    f"pass_{GraphTransformObserver.__pass_count}_{self.passname}_output_graph.dot",
                 )
             )
 
