@@ -15,7 +15,7 @@ from torch import inf, nan
 from torch.testing import make_tensor
 from torch.testing._internal.common_dtype import (
     all_types_and_complex_and, get_all_math_dtypes, integral_types, complex_types, floating_types_and,
-    integral_types_and, floating_and_complex_types_and, all_types_and, all_types,
+    integral_types_and, floating_and_complex_types_and, all_types_and, all_types, complex_types_and,
 )
 from torch.testing._internal.common_utils import (
     TestCase, run_tests, skipIfNoSciPy, slowTest, torch_to_numpy_dtype_dict,
@@ -1227,6 +1227,17 @@ class TestReductions(TestCase):
 
         self._test_minmax_helper(_amin_wrapper, np.amin, device, dtype)
         self._test_minmax_helper(_amax_wrapper, np.amax, device, dtype)
+    
+    @onlyNativeDeviceTypes
+    @dtypes(*complex_types_and(torch.bool))
+    def test_invalid_0dim_aminmax(self, device, dtype):
+
+        with self.assertRaisesRegex(RuntimeError, 'not implemented'):
+            if dtype is bool:
+                torch.aminmax(torch.tensor(1, dtype=dtype, device=device), dim=0) 
+            else:
+                torch.aminmax(torch.tensor(1, dtype=dtype, device=device), dim=0)
+            
 
     # TODO: bincount isn't a classic reduction -- maybe this test suite is
     #   reductions and summary ops?
