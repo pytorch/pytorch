@@ -53,7 +53,6 @@ except ModuleNotFoundError:
 
 log = logging.getLogger(__name__)
 
-
 supported_ctx_manager_classes = dict.fromkeys(
     [
         torch.profiler.profiler.profile,
