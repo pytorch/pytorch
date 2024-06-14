@@ -31,7 +31,10 @@ Other callbacks don't provide exception safety so avoid there.
 
 */
 
-#define DEFAULT_BACKLOG 16384
+// This controls how many un-accepted TCP connections can be waiting in the
+// backlog. This should be at least world size to avoid issues on init. We set
+// it to -1 to use the host max value which is controlled by `soconnmax`.
+#define DEFAULT_BACKLOG -1
 #define MAX_KEY_COUNT (128 * 1024)
 #define MAX_STRING_LEN (8 * 1024)
 #define MAX_PAYLOAD_LEN (8 * 1024 * 1024)
@@ -134,6 +137,11 @@ class UvTcpSocket : public UvHandle {
  public:
   explicit UvTcpSocket(uv_loop_t* loop) {
     uv_tcp_init(loop, &client);
+    if (int err = uv_tcp_nodelay(&client, 1)) {
+      C10D_WARNING(
+          "The no-delay option cannot be enabled for the client socket. err={}",
+          err);
+    }
   }
 
   void startRead() {
