@@ -40,9 +40,12 @@ class TORCH_API SymmetricMemory : public c10::intrusive_ptr_target {
  public:
   virtual ~SymmetricMemory() {}
 
-  // For custom kernels
   virtual std::vector<void*> get_buffer_ptrs() = 0;
   virtual std::vector<void*> get_signal_pad_ptrs() = 0;
+
+  // get_buffer_ptrs_dev() and get_signal_pad_ptrs_dev() each return a pointer
+  // to a device array of size world_size, containing buffer pointers and
+  // signal pad pointers, respectively.
   virtual void** get_buffer_ptrs_dev() = 0;
   virtual void** get_signal_pad_ptrs_dev() = 0;
   virtual size_t get_buffer_size() = 0;
@@ -107,26 +110,25 @@ C10_EXPORT const GroupInfo& get_group_info(const std::string& group_name);
 // Identical to empty_strided, but allows symmetric memory access to be
 // established for the allocated tensor via SymmetricMemory::rendezvous(). This
 // function itself is not a collective operation. It invokes
-// SymmetricMemoryAllocator::alloc() for the right device under the hood.
+// SymmetricMemoryAllocator::alloc() for the requested device under the hood.
+//
+// NOTE [symmetric memory persistent allocation]
+// If an `alloc_id` is supplied, empty_strided_p2p will perform persistent
+// allocation. This makes the function cache allocated memory and ensure that
+// invocations with the same `alloc_id` receive tensors backed by the same
+// memory address. For safety, if a previous persistent allocation is still
+// active (i.e., the storage of the returned tensor is still alive), persistent
+// allocations with the same `alloc_id` will fail. This determinism coupled
+// with memory planning of communication buffers (e.g., by Inductor) allows
+// communication algorithms to reliably reuse previously established remote
+// memory access.
 TORCH_API at::Tensor empty_strided_p2p(
     c10::IntArrayRef size,
     c10::IntArrayRef stride,
     c10::ScalarType dtype,
     c10::Device device,
-    const std::string& group_name);
-
-// Same as empty_strided_p2p but handles allocations in a persistent fashion.
-// The function caches all allocations and ensures that invocations with the
-// same `alloc_id` receive the same allocation, which maps to a unique
-// SymmetricMemory object. It is intended for static planning of communication
-// buffers (e.g. by Inductor).
-TORCH_API at::Tensor empty_strided_p2p_persistent(
-    c10::IntArrayRef size,
-    c10::IntArrayRef stride,
-    c10::ScalarType dtype,
-    c10::Device device,
     const std::string& group_name,
-    uint64_t alloc_id);
+    std::optional<uint64_t> alloc_id);
 
 // Establishes symmetric memory access on tensors allocated via
 // empty_strided_p2p() and empty_strided_p2p_persistent(). rendezvous() is a

@@ -31,6 +31,7 @@ enum class AllReduceAlgo : uint8_t {
   HCM = 3
 };
 
+// NOTE: this class will be be removed soon in favor of SymmetricMemory
 class TORCH_API IntraNodeComm : public c10::intrusive_ptr_target {
  public:
   IntraNodeComm(

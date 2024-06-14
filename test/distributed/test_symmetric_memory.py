@@ -125,23 +125,23 @@ class SymmetricMemoryTest(MultiProcessTestCase):
         stride = (64, 1)
         dtype = torch.float32
         device = self.device
-        alloc_id = 42
+        alloc_id = 42  # Persistent allocation
         group_name = "0"
         alloc_args = (shape, stride, dtype, device, group_name, alloc_id)
 
-        t = _SymmetricMemory.empty_strided_p2p_persistent(*alloc_args)
+        t = _SymmetricMemory.empty_strided_p2p(*alloc_args)
         data_ptr = t.data_ptr()
 
         # Verify that persistent allocation would fail if there's an active
         # allocation with the same alloc_id.
         with self.assertRaises(RuntimeError):
-            _SymmetricMemory.empty_strided_p2p_persistent(*alloc_args)
+            _SymmetricMemory.empty_strided_p2p(*alloc_args)
 
         # Verify that persistent allocation would succeed in lieu of activate
         # allocations with the same alloc_id, and the returned tensor would
         # have the same data pointer.
         del t
-        t = _SymmetricMemory.empty_strided_p2p_persistent(*alloc_args)
+        t = _SymmetricMemory.empty_strided_p2p(*alloc_args)
         self.assertEqual(t.data_ptr(), data_ptr)
 
         # Verify that get_symmetric_memory would fail if called before

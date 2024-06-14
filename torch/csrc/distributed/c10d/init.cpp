@@ -981,10 +981,14 @@ This class does not support ``__members__`` property.)");
       module, "_SymmetricMemory")
       .def_static("set_group_info", &::c10d::symmetric_memory::set_group_info)
       .def_static(
-          "empty_strided_p2p", ::c10d::symmetric_memory::empty_strided_p2p)
-      .def_static(
-          "empty_strided_p2p_persistent",
-          ::c10d::symmetric_memory::empty_strided_p2p_persistent)
+          "empty_strided_p2p",
+          ::c10d::symmetric_memory::empty_strided_p2p,
+          py::arg("size"),
+          py::arg("stride"),
+          py::arg("dtype"),
+          py::arg("device"),
+          py::arg("group_name"),
+          py::arg("alloc_id") = py::none())
       .def_static("rendezvous", &::c10d::symmetric_memory::rendezvous)
       .def_static(
           "get_symmetric_memory",

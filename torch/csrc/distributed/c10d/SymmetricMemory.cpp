@@ -89,29 +89,6 @@ const GroupInfo& get_group_info(const std::string& group_name) {
   return group_info_map[group_name];
 }
 
-at::Tensor empty_strided_p2p(
-    c10::IntArrayRef size,
-    c10::IntArrayRef stride,
-    c10::ScalarType dtype,
-    c10::Device device,
-    const std::string& group_name) {
-  const size_t numel =
-      std::accumulate(size.begin(), size.end(), 1, std::multiplies<int>());
-  const size_t element_size = c10::elementSize(dtype);
-  const size_t alloc_size = numel * element_size;
-
-  auto allocator = get_allocator(device.type());
-  void* dev_ptr = allocator->alloc(alloc_size, device.index(), group_name);
-
-  auto options = at::TensorOptions().dtype(dtype).device(device);
-  return at::from_blob(
-      dev_ptr,
-      size,
-      stride,
-      [allocator = std::move(allocator)](void* ptr) { allocator->free(ptr); },
-      options);
-}
-
 at::Tensor empty_strided_p2p_persistent(
     c10::IntArrayRef size,
     c10::IntArrayRef stride,
@@ -162,6 +139,34 @@ at::Tensor empty_strided_p2p_persistent(
   alloc_id_to_storage.emplace(
       alloc_id, allocated.storage().getWeakStorageImpl());
   return allocated;
+}
+
+at::Tensor empty_strided_p2p(
+    c10::IntArrayRef size,
+    c10::IntArrayRef stride,
+    c10::ScalarType dtype,
+    c10::Device device,
+    const std::string& group_name,
+    std::optional<uint64_t> alloc_id) {
+  if (alloc_id.has_value()) {
+    return empty_strided_p2p_persistent(
+        size, stride, dtype, device, group_name, *alloc_id);
+  }
+  const size_t numel =
+      std::accumulate(size.begin(), size.end(), 1, std::multiplies<int>());
+  const size_t element_size = c10::elementSize(dtype);
+  const size_t alloc_size = numel * element_size;
+
+  auto allocator = get_allocator(device.type());
+  void* dev_ptr = allocator->alloc(alloc_size, device.index(), group_name);
+
+  auto options = at::TensorOptions().dtype(dtype).device(device);
+  return at::from_blob(
+      dev_ptr,
+      size,
+      stride,
+      [allocator = std::move(allocator)](void* ptr) { allocator->free(ptr); },
+      options);
 }
 
 TORCH_API c10::intrusive_ptr<SymmetricMemory> rendezvous(
