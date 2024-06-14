@@ -26,6 +26,7 @@ import torch.nn as nn
 from torch.distributed._shard.sharded_tensor import ShardedTensor
 from torch.distributed._state_dict_utils import (
     _broadcast_state_dict,
+    _distribute_state_dict,
     _flatten_state_dict,
     _gather_state_dict,
     _offload_state_dict_to_cpu,
@@ -872,7 +873,7 @@ def _load_optim_state_dict(
                 optim_state_dict = FSDP.optim_state_dict_to_load(
                     model, optim, optim_state_dict
                 )
-        elif info.broadcast_from_rank0:
+        elif info.full_state_dict:
             info.full_state_dict = False
             local_state_dict = _get_optim_state_dict(model, (optim,), info)
             info.full_state_dict = True
@@ -891,7 +892,10 @@ def _load_optim_state_dict(
             assert device is not None
             flatten_osd, osd_mapping = _flatten_state_dict(optim_state_dict)
             flatten_local_osd, local_osd_mapping = _flatten_state_dict(local_state_dict)
-            _broadcast_state_dict(flatten_osd, flatten_local_osd, device=device)
+            if info.broadcast_from_rank0:
+                _broadcast_state_dict(flatten_osd, flatten_local_osd, device=device)
+            else:
+                _distribute_state_dict(flatten_osd, flatten_local_osd, device=device)
             # The modifications listed seek to address the problem where optim might possess
             # dissimilar parameters in comparison to optim_state_dict. This is achieved by
             # incorporating differential parameters within local, which may result in optim
