@@ -182,7 +182,7 @@ def mock_gh_get_info() -> Any:
         "isCrossRepository": False,
         "headRefName": "foo",
         "baseRefName": "bar",
-        "baseRepository": {"defaultBranchRef": { "name": "bar"}},
+        "baseRepository": {"defaultBranchRef": {"name": "bar"}},
         "files": {"nodes": [], "pageInfo": {"hasNextPage": False}},
         "changedFiles": 0,
     }
