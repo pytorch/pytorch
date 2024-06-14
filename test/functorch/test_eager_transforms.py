@@ -77,6 +77,7 @@ from torch.testing._internal.common_utils import (
     subtest,
     TEST_WITH_TORCHDYNAMO,
     TestCase,
+    xfailIfTorchDynamo,
 )
 
 from torch.utils._pytree import tree_flatten, tree_map, tree_unflatten
