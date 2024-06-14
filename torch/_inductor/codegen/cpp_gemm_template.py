@@ -1,4 +1,5 @@
-from typing import Callable, cast, List, Optional
+# mypy: allow-untyped-defs
+from typing import Any, Callable, cast, List, Optional, Union
 
 import torch
 import torch.utils
@@ -120,14 +121,9 @@ extern "C"
                     }
                     {%- endif %}
                 }
-                {%- if reindexer is not none %}
-                {%- set Y_maybe_transposed = kernel.permute(Y, reindexer([0,1])) %}
-                {%- else %}
-                {%- set Y_maybe_transposed = Y %}
-                {%- endif %}
-                {%- set tile_Y = kernel.slice_nd(Y_maybe_transposed, [("m_start", "m_end"), ("n_start", "n_start + N0")]) %}
+                {%- set tile_Y = kernel.slice_nd(Y_2d, [("m_start", "m_end"), ("n_start", "n_start + N0")]) %}
                 {{ kernel.store_output(
-                      tile_Y, acc, GemmOut, epilogue_nodes, offsets=("m_start", "n_start"), reindexer=reindexer
+                      tile_Y, acc, GemmOut, epilogue_nodes, offsets=("m_start", "n_start"), reindexers=reindexers
                    )|indent(16, false)
                 }}
             }
@@ -410,6 +406,7 @@ class CppPackedGemmTemplate(CppTemplate):
         gemm_output_buffer = template_buffer
 
         epilogues: List[ir.IRNode] = []
+        reindexers: List[Optional[Callable[[List[Any]], List[Any]]]] = []
         if self.epilogue_creator is not None:
             gemm_output_name = "GemmOut"
             gemm_output_buffer = ir.Buffer(gemm_output_name, template_buffer.layout)
@@ -420,17 +417,38 @@ class CppPackedGemmTemplate(CppTemplate):
                     data=self.epilogue_creator(gemm_output_buffer),
                 )
             )
+            reindexers.append(None)
 
-        Y_is_transposed = False
+        Y_2d: Union[ir.Buffer, ir.ReinterpretView] = Y
         use_local_acc = self.layout.dtype != torch.float
         acc_buf_name = "local_acc_buf"
         if epilogue_nodes:
             epilogues.extend(epilogue_nodes)
-            Y = cast(ir.Buffer, epilogue_nodes[-1])
-            if Y.get_size() == list(
-                reversed(template_buffer.get_size())
-            ) and Y.get_stride() == list(reversed(template_buffer.get_stride())):
-                Y_is_transposed = True
+            assert Y.get_numel() == epilogues[-1].get_numel()
+            Y = cast(ir.Buffer, epilogues[-1])
+            if (
+                Y.get_size() == template_buffer.get_size()
+                and Y.get_stride() == template_buffer.get_stride()
+            ):
+                reindexers.extend([None] * len(epilogue_nodes))
+                Y_2d = Y
+            else:
+                stride_reversed_order = list(
+                    reversed(ir.get_stride_order(Y.get_stride()))
+                )
+                stride_reindex = ir.same_reorder(stride_reversed_order)
+                ordered_size = [Y.get_size()[i] for i in stride_reversed_order]
+                reshape_reindex = ir.View.dynamic_reshape_indexer(
+                    ordered_size, template_buffer.get_size()
+                )
+                reindexer = ir.fuse_reindexing(stride_reindex, reshape_reindex)
+                reindexers.extend([reindexer] * len(epilogue_nodes))
+                if isinstance(Y, ir.BaseView):
+                    storage = ir.StorageBox(Y.unwrap_view())
+                else:
+                    assert isinstance(Y, ir.Buffer)
+                    storage = ir.StorageBox(Y)
+                Y_2d = ir.ReinterpretView(storage, template_buffer.get_layout())
 
         micro_gemm = create_micro_gemm(
             f"{kernel.kernel_name}_micro_gemm",
@@ -462,7 +480,8 @@ class CppPackedGemmTemplate(CppTemplate):
             template=self,
             kernel=kernel,
             epilogue_nodes=epilogues,
-            reindexer=(lambda x: list(reversed(x))) if Y_is_transposed else None,
+            reindexers=reindexers,
+            Y_2d=Y_2d,
             use_local_acc=use_local_acc,
             acc_buf_name=acc_buf_name,
         )

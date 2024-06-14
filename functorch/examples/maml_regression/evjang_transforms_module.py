@@ -7,11 +7,12 @@ import math
 import matplotlib as mpl
 import matplotlib.pyplot as plt
 import numpy as np
+
 import torch
-from torch import nn
-from torch.nn import functional as F
 
 from functorch import grad, make_functional, vmap
+from torch import nn
+from torch.nn import functional as F
 
 mpl.use("Agg")
 

@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 r"""
 This package implements abstractions found in ``torch.cuda``
 to facilitate writing device-agnostic code.
@@ -28,9 +29,20 @@ __all__ = [
 _device_t = Union[_device, str, int, None]
 
 
+def _is_cpu_support_avx2() -> bool:
+    r"""Returns a bool indicating if CPU supports AVX2."""
+    return torch._C._cpu._is_cpu_support_avx2()
+
+
+def _is_cpu_support_avx512() -> bool:
+    r"""Returns a bool indicating if CPU supports AVX512."""
+    return torch._C._cpu._is_cpu_support_avx512()
+
+
 def _is_cpu_support_vnni() -> bool:
     r"""Returns a bool indicating if CPU supports VNNI."""
-    return torch._C._cpu._is_cpu_support_vnni()
+    # Note: Currently, it only checks avx512_vnni, will add the support of avx2_vnni later.
+    return torch._C._cpu._is_cpu_support_avx512_vnni()
 
 
 def is_available() -> bool:

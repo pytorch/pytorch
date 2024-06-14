@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import functools
 import logging
 from typing import Any, Dict, List, Optional
@@ -26,6 +27,7 @@ from ..utils import (
 from .mm_common import (
     addmm_epilogue,
     int8_mm_configs,
+    mixed_mm_configs,
     mm_args,
     mm_configs,
     mm_grid,
@@ -165,12 +167,19 @@ def tuned_mm(mat1, mat2, *, layout=None):
             [mat1, mat2],
         )
 
-    if len(choices) == 0 and not use_aten_gemm_kernels():
+    if (
+        len(choices) == 0
+        and not use_aten_gemm_kernels()
+        and inductor_config.autotune_fallback_to_aten
+    ):
         log.warning("No choices for GEMM, using ATen backend as fallback")
-        choices.append(aten_mm.bind((mat1, mat2), aten_layout))
+        return aten_mm.bind((mat1, mat2), aten_layout).output_node()
+
     try:
         return autotune_select_algorithm("mm", choices, [mat1, mat2], layout)
     except NoValidChoicesError:
+        if not inductor_config.autotune_fallback_to_aten:
+            raise
         log.warning("All choices for GEMM were invalid, using ATen backend as fallback")
         return aten_mm.bind((mat1, mat2), aten_layout).output_node()
 
@@ -233,6 +242,8 @@ def tuned_int_mm(mat1, mat2, *, layout=None):
     try:
         return autotune_select_algorithm("int_mm", choices, [mat1, mat2], layout)
     except NoValidChoicesError:
+        if not inductor_config.autotune_fallback_to_aten:
+            raise
         log.warning("All choices for GEMM were invalid, using ATen backend as fallback")
         choices = [aten__int_mm.bind((mat1, mat2), layout)]
         return autotune_select_algorithm("int_mm", choices, [mat1, mat2], layout)
@@ -363,6 +374,8 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
             "addmm", choices, [inp_expanded, mat1, mat2], layout
         )
     except NoValidChoicesError:
+        if not inductor_config.autotune_fallback_to_aten:
+            raise
         log.warning("All choices for GEMM were invalid, using ATen backend as fallback")
         fallback_choice = aten_addmm.bind(
             (inp, mat1, mat2),
@@ -397,7 +410,8 @@ def tuned_mixed_mm(mat1, mat2, mat2_dtype):
 
     # can't use triton kernel unless one of these is true or if running on v100 (numerical issues)
     skip_triton = (
-        mat1.layout.dtype != torch.float32 and not mat2.layout.is_contiguous()
+        mat1.layout.dtype != torch.float32
+        and not (mat2.layout.is_contiguous() or mat2.layout.is_transposed())
     ) or _is_sm7x_or_older_gpu(layout.device.index)
 
     if inductor_config.force_mixed_mm:
@@ -405,7 +419,7 @@ def tuned_mixed_mm(mat1, mat2, mat2_dtype):
     if not skip_triton:
         b_prologue_cast_type = f"tl.{mat2_dtype}".replace("torch.", "")
         has_int8_tensor = _is_int8_mat(mat1) or _is_int8_mat(mat2)
-        for config in mm_configs(m, n, k, has_int8_tensor=has_int8_tensor):
+        for config in mixed_mm_configs(m, n, k, has_int8_tensor=has_int8_tensor):
             mm_template.maybe_append_choice(
                 choices,
                 input_nodes=(mat1, mat2),

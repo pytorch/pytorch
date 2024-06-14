@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 from typing import List, Optional
 
 import torch
@@ -301,19 +302,7 @@ def register_onednn_fusion_ops():
                 x = view(x, [-1, x_size[-1]])
             if b is not None:
                 b = ir.ExternKernel.realize_input(b)
-            inputs = [x, w] if b is None else [x, w, b]
             choices: List[ChoiceCaller] = []
-            if len(choices) == 0 or use_aten_gemm_kernels():
-                kwargs = dict(attr=attr, scalars=scalars, algorithm=algorithm)
-                if b is None:
-                    kwargs["B"] = None
-                choices.append(
-                    aten_mkldnn_linear_unary.bind(
-                        inputs,
-                        layout,
-                        **kwargs,
-                    )
-                )
             if use_max_autotune():
                 transposed_w = permute(w, [1, 0])
                 *_, layout, x, transposed_w = mm_args(x, transposed_w, layout=layout)
@@ -330,13 +319,24 @@ def register_onednn_fusion_ops():
                         epilogue_creator=None if attr == "none" else epilogue_creator,
                     )
                     if b is not None:
-                        kwargs["input_indices"] = [2, 0, 1]
+                        kwargs["input_indices"] = [2, 0, 1]  # type: ignore[assignment]
                     CppPackedGemmTemplate.add_choices(
                         choices,
                         layout,
-                        inputs,
+                        [x, w] if b is None else [x, w, b],
+                        **kwargs,  # type: ignore[arg-type]
+                    )
+            if len(choices) == 0 or use_aten_gemm_kernels():
+                kwargs = dict(attr=attr, scalars=scalars, algorithm=algorithm)
+                if b is None:
+                    kwargs["B"] = None
+                choices.append(
+                    aten_mkldnn_linear_unary.bind(
+                        [x, w] if b is None else [x, w, b],
+                        layout,
                         **kwargs,
                     )
+                )
             assert w.get_name() in V.graph.constants
             input_gen_fns = {
                 1: lambda x: V.graph.constants[x.get_name()],
@@ -344,7 +344,7 @@ def register_onednn_fusion_ops():
             result = autotune_select_algorithm(
                 "linear_unary",
                 choices,
-                inputs,
+                [x, w] if b is None else [x, w, b],
                 layout,
                 input_gen_fns=input_gen_fns,
             )
@@ -365,19 +365,7 @@ def register_onednn_fusion_ops():
                 y = view(y, [-1, y_size[-1]])
             if b is not None:
                 b = ir.ExternKernel.realize_input(b)
-            inputs = [x, y, w] if b is None else [x, y, w, b]
             choices: List[ChoiceCaller] = []
-            if len(choices) == 0 or use_aten_gemm_kernels():
-                kwargs = dict(attr=attr)
-                if b is None:
-                    kwargs["B"] = None
-                choices.append(
-                    aten_mkldnn_linear_binary.bind(
-                        inputs,
-                        layout,
-                        **kwargs,
-                    )
-                )
             if use_max_autotune():
                 transposed_w = permute(w, [1, 0])
                 *_, layout, x, transposed_w, y = mm_args(
@@ -397,9 +385,20 @@ def register_onednn_fusion_ops():
                     CppPackedGemmTemplate.add_choices(
                         choices,
                         layout,
-                        inputs,
+                        [x, y, w] if b is None else [x, y, w, b],
+                        **kwargs,  # type: ignore[arg-type]
+                    )
+            if len(choices) == 0 or use_aten_gemm_kernels():
+                kwargs = dict(attr=attr)
+                if b is None:
+                    kwargs["B"] = None
+                choices.append(
+                    aten_mkldnn_linear_binary.bind(
+                        [x, y, w] if b is None else [x, y, w, b],
+                        layout,
                         **kwargs,
                     )
+                )
             assert w.get_name() in V.graph.constants
             input_gen_fns = {
                 2: lambda x: V.graph.constants[x.get_name()],
@@ -407,7 +406,7 @@ def register_onednn_fusion_ops():
             result = autotune_select_algorithm(
                 "linear_binary",
                 choices,
-                inputs,
+                [x, y, w] if b is None else [x, y, w, b],
                 layout,
                 input_gen_fns=input_gen_fns,
             )

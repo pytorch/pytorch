@@ -18,8 +18,6 @@ from collections import namedtuple
 from typing import OrderedDict
 from unittest.case import skipIf
 
-import torch
-import torch.nn.functional as F
 from common_utils import (
     check_vmap_fallback,
     compute_quantities_for_vmap_test,
@@ -36,6 +34,13 @@ from common_utils import (
     xfail,
 )
 from functorch_additional_op_db import additional_op_db
+
+import functorch
+
+import torch
+import torch.nn.functional as F
+from functorch import grad, grad_and_value, jacfwd, jvp, vjp, vmap
+from functorch.experimental import chunk_vmap
 from torch import Tensor
 from torch._C._functorch import reshape_dim_into, reshape_dim_outof
 from torch._functorch.make_functional import functional_init_with_buffers
@@ -64,10 +69,6 @@ from torch.testing._internal.common_utils import (
     xfailIfTorchDynamo,
 )
 from torch.utils import _pytree as pytree
-
-import functorch
-from functorch import grad, grad_and_value, jacfwd, jvp, vjp, vmap
-from functorch.experimental import chunk_vmap
 
 FALLBACK_REGEX = "There is a performance drop"
 
@@ -4063,6 +4064,7 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail("nn.functional.alpha_dropout", ""),  # randomness
         xfail("nn.functional.feature_alpha_dropout", "with_train"),  # randomness
         xfail("as_strided"),  # Our test runner can't handle this; manual test exists
+        xfail("as_strided_copy"),
         xfail(
             "as_strided_scatter"
         ),  # no batching rule implemented, default doesnt work
@@ -4302,6 +4304,7 @@ class TestVmapOperatorsOpInfo(TestCase):
                 xfail("nn.functional.gaussian_nll_loss"),
                 xfail("histc"),
                 xfail("as_strided"),
+                xfail("as_strided_copy"),
                 xfail("istft"),
                 xfail("nonzero"),
                 xfail("nn.functional.fractional_max_pool2d"),

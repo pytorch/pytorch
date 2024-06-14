@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 from __future__ import annotations
 
 import collections
@@ -45,12 +46,12 @@ from unittest import mock
 import sympy
 
 import torch
-import torch._export
 import torch.utils._pytree as pytree
 from torch._dynamo.device_interface import get_interface_for_device
 from torch._dynamo.utils import detect_fake_mode
 from torch.autograd import DeviceType
 from torch.autograd.profiler_util import EventList
+from torch.fx.passes.graph_transform_observer import GraphTransformObserver
 from torch.fx.passes.shape_prop import ShapeProp
 from torch.utils._sympy.functions import CeilDiv, CleanDiv, FloorDiv, ModularIndexing
 from torch.utils._sympy.symbol import make_symbol, SymT
@@ -63,7 +64,36 @@ log = logging.getLogger(__name__)
 _T = TypeVar("_T")
 VarRanges = Dict[sympy.Expr, sympy.Expr]
 
-ALIGNMENT = 16
+GPU_ALIGN_BYTES = 16
+
+ALIGN_BYTES = 64
+assert (ALIGN_BYTES & (ALIGN_BYTES - 1)) == 0 and ALIGN_BYTES >= 8, "must be power of 2"
+
+
+def _align(nbytes):
+    """Round up to the nearest multiple of ALIGN_BYTES"""
+    return (nbytes + ALIGN_BYTES - 1) & -ALIGN_BYTES
+
+
+def _is_aligned(v: sympy.Expr):
+    """v can be statically proven to be a multiple of ALIGN_BYTES"""
+    if isinstance(v, (sympy.Add, sympy.Max)):
+        return all(map(_is_aligned, v.args))
+    return isinstance(v, align) or sympy.gcd(v, ALIGN_BYTES) == ALIGN_BYTES
+
+
+class align(sympy.Function):
+    """Symbolically round up to the nearest multiple of ALIGN_BYTES"""
+
+    nargs = (1,)
+    is_integer = True
+
+    @classmethod
+    def eval(cls, value):
+        if isinstance(value, (int, sympy.Integer)):
+            return _align(int(value))
+        if _is_aligned(value):
+            return value
 
 
 def do_bench_using_profiling(fn: Callable[[], Any], warmup=25, rep=100) -> float:
@@ -153,10 +183,14 @@ def has_torchvision_roi_align() -> bool:
     try:
         from torchvision.ops import roi_align  # noqa: F401
 
+        torch._C._dispatch_has_kernel_for_dispatch_key("torchvision::nms", "Meta")
         return roi_align is not None and hasattr(
             getattr(torch.ops, "torchvision", None), "roi_align"
         )
     except ImportError:
+        return False
+    except RuntimeError as e:
+        assert "torchvision::nms does not exist" in str(e)
         return False
 
 
@@ -188,7 +222,7 @@ def ceildiv(
     numer: Union[int, sympy.Expr], denom: Union[int, sympy.Expr]
 ) -> Union[int, sympy.Expr]:
     if isinstance(numer, sympy.Expr) or isinstance(denom, sympy.Expr):
-        return CeilDiv(numer, denom)
+        return CeilDiv(sympy.sympify(numer), sympy.sympify(denom))
     # TODO: There is a bug in a call to this function, to repro:
     # python benchmarks/dynamo/huggingface.py --inductor -d cuda --accuracy
     # --amp --only YituTechConvBert --dynamic-shapes
@@ -386,7 +420,7 @@ P = ParamSpec("P")
 RV = TypeVar("RV", covariant=True)
 
 
-class CachedMethod(Generic[P, RV], Protocol):
+class CachedMethod(Protocol, Generic[P, RV]):
     @staticmethod
     def clear_cache(self) -> None:
         ...
@@ -569,6 +603,10 @@ def sympy_index_symbol_with_prefix(prefix: SymT, idx: int) -> sympy.Symbol:
     # NOTE: shape symbols are positive (> 0), but index variables are only
     # non-negative (>= 0).
     return make_symbol(prefix, idx, integer=True, nonnegative=True)
+
+
+def generate_assert(check):
+    return (check or config.debug_index_asserts) and config.assert_indirect_indexing
 
 
 def sympy_index_symbol(name: str) -> sympy.Symbol:
@@ -875,6 +913,21 @@ class IndentedBuffer:
         return res
 
 
+class FakeIndentedBuffer(IndentedBuffer):
+    def __init__(self):
+        super().__init__()
+
+    def __getattribute__(self, name):
+        if name == "__class__":  # Allow access to the class attribute
+            return object.__getattribute__(self, name)
+        raise RuntimeError(
+            f"Tried to call self.{name} on FakeIndentedBuffer. This buffer"
+            "is currently used on TritonTemplateKernel to prevent actual"
+            "writes to the body without explicitly specifying the body with"
+            "`TritonTemplateKernel.set_subgraph_body(name)`"
+        )
+
+
 @contextlib.contextmanager
 def restore_stdout_stderr(initial_stdout, initial_stderr):
     try:
@@ -1053,22 +1106,14 @@ class DebugDirManager:
 def run_and_get_code(fn, *args, **kwargs):
     from .graph import GraphLowering
 
-    compile_to_module = GraphLowering.compile_to_module
     source_codes: List[str] = []
 
-    def patched_compile_to_module(self):
-        mod = compile_to_module(self)
-        with open(mod.__file__) as f:
-            source_codes.append(f.read())
-        return mod
+    def save_output_code(code: str):
+        source_codes.append(code)
 
-    # If FX code caching is enabled, a hit prevents getting the code.
-    with config.patch({"fx_graph_cache": False}):
-        with mock.patch.object(
-            GraphLowering, "compile_to_module", patched_compile_to_module
-        ):
-            torch._dynamo.reset()
-            result = fn(*args, **kwargs)
+    with mock.patch.object(GraphLowering, "save_output_code", save_output_code):
+        torch._dynamo.reset()
+        result = fn(*args, **kwargs)
     return result, source_codes
 
 
@@ -1077,6 +1122,9 @@ def get_code(fn, *args, **kwargs):
     from .graph import GraphLowering
 
     source_codes: List[str] = []
+
+    def save_output_code(code: str):
+        source_codes.append(code)
 
     def patched_compile_to_module(self: GraphLowering):
         class DummyModule:
@@ -1093,18 +1141,17 @@ def get_code(fn, *args, **kwargs):
             self.codegen_with_cpp_wrapper() if self.cpp_wrapper else self.codegen()
         )
         # Skip all the actual compiling.
+        nonlocal save_output_code
+        save_output_code(code)
 
-        source_codes.append(code)
         return DummyModule()
 
-    # If FX code caching is enabled, a hit prevents getting the code.
-    with config.patch({"fx_graph_cache": False}):
-        with mock.patch.object(
-            GraphLowering, "compile_to_module", patched_compile_to_module
-        ):
-            torch._dynamo.reset()
-            # Note the return here is None
-            _ = fn(*args, **kwargs)
+    with mock.patch.object(
+        GraphLowering, "compile_to_module", patched_compile_to_module
+    ), mock.patch.object(GraphLowering, "save_output_code", save_output_code):
+        torch._dynamo.reset()
+        # Note the return here is None
+        _ = fn(*args, **kwargs)
 
     return source_codes
 
@@ -1350,7 +1397,8 @@ def pass_execution_and_save(func, gm, inp, msg):
         print(f"Before:\n{gm.graph}", file=f)
         print(gm.graph, file=before_io)
         start_time = datetime.now()
-        func(gm.graph)
+        with GraphTransformObserver(gm, msg, config.trace.log_url_for_graph_xform):
+            func(gm.graph)
         time_elapsed = datetime.now() - start_time
         # recompile graph
         stable_topological_sort(gm.graph)
@@ -1448,6 +1496,7 @@ def get_cloned_parameter_buffer_name(name: str):
 
 
 def is_gpu(device: str):
+    assert isinstance(device, str) or device is None, device
     return device in ["cuda", "xpu"]
 
 
@@ -1531,7 +1580,9 @@ def tensor_is_aligned(tensor: torch.Tensor):
     # but symbolic storage_offsets are. For consistency, we suppress guard creation
     # upon performing this check: that ensures that we don't add recompiles when we
     # add this logic.
-    return (tensor.storage_offset() * get_dtype_size(tensor.dtype)) % ALIGNMENT == 0
+    return (
+        tensor.storage_offset() * get_dtype_size(tensor.dtype)
+    ) % GPU_ALIGN_BYTES == 0
 
 
 def should_assume_input_aligned(example_input: torch.Tensor):
@@ -1622,6 +1673,8 @@ def aoti_compile_with_persistent_cache(
     Compile the given function with persistent cache for AOTI eager mode.
     """
     assert not dynamic, "Only support static shape for now"
+    from torch._export import aot_compile
+
     type_to_torch_dtype = {int: torch.int32, float: torch.float, bool: torch.bool}
     supported_scalar_types = tuple(type_to_torch_dtype.keys())
     flattened_inputs = pytree.arg_tree_leaves(*args, **kwargs)
@@ -1644,7 +1697,7 @@ def aoti_compile_with_persistent_cache(
         {"TORCHINDUCTOR_CACHE_DIR": persistent_cache_lib.absolute().as_posix()},
     ):
         try:
-            kernel_lib_path = torch._export.aot_compile(
+            kernel_lib_path = aot_compile(
                 f,
                 args,
                 kwargs,

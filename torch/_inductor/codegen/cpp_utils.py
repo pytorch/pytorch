@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import contextlib
 import copy
 import math
@@ -12,11 +13,10 @@ import torch
 from torch.utils._sympy.symbol import symbol_is_type, SymT
 from .. import ir
 from ..scheduler import BaseSchedulerNode
-from ..utils import IndentedBuffer
+from ..utils import IndentedBuffer, sympy_index_symbol_with_prefix
 from ..virtualized import V
 
-from .common import CSEVariable, ExprPrinter, Kernel
-
+from .common import ExprPrinter, Kernel
 
 DTYPE_TO_CPP = {
     torch.float32: "float",
@@ -112,10 +112,53 @@ class CppPrinter(ExprPrinter):
         r = f"std::floor({self._print(expr.args[0])})"
         return f"static_cast<{INDEX_TYPE}>({r})" if expr.is_integer else r
 
-    def _print_Trunc(self, expr):
+    def _print_FloorToInt(self, expr):
+        assert len(expr.args) == 1
+        r = f"std::floor({self._print(expr.args[0])})"
+        return f"static_cast<{INDEX_TYPE}>({r})" if expr.is_integer else r
+
+    def _print_TruncToInt(self, expr):
         assert len(expr.args) == 1
         r = f"std::trunc({self._print(expr.args[0])})"
-        return f"static_cast<{INDEX_TYPE}>({r})" if expr.is_integer else r
+        return f"static_cast<{INDEX_TYPE}>({r})"
+
+    def _print_TruncToFloat(self, expr):
+        assert len(expr.args) == 1
+        return f"std::trunc({self._print(expr.args[0])})"
+
+    def _print_ToFloat(self, expr):
+        assert len(expr.args) == 1
+        return f"static_cast<double>({self._print(expr.args[0])})"
+
+    # TODO: This is wrong if one of the inputs is negative.  This is hard to
+    # tickle though, as the inputs are typically positive (and if we can prove
+    # they are positive, we will have used Mod instead, for which this codegen
+    # is right).
+    def _print_PythonMod(self, expr):
+        return " % ".join(map(self.paren, map(self._print, expr.args)))
+
+    def _print_CMod(self, expr):
+        return " % ".join(map(self.paren, map(self._print, expr.args)))
+
+    def _print_IntTrueDiv(self, expr):
+        lhs, rhs = expr.args
+        # TODO: This is only accurate up to 2**53
+        return f"static_cast<double>({self._print(lhs)}) / static_cast<double>({self._print(rhs)})"
+
+    # TODO: PowByNatural: we need to implement our own int-int pow.  Do NOT
+    # use std::pow, that operates on floats
+    def _print_PowByNatural(self, expr):
+        raise NotImplementedError(
+            f"_print_PowByNatural not implemented for {type(self)}"
+        )
+
+    def _print_FloatTrueDiv(self, expr):
+        lhs, rhs = expr.args
+        return f"{self.paren(self._print(lhs))} / {self.paren(self._print(rhs))}"
+
+    def _print_FloatPow(self, expr):
+        base, exp = expr.args
+        return f"std::pow({self._print(base)}, {self._print(exp)})"
 
     def _print_Pow(self, expr):
         # Uses float constants to perform FP div
@@ -147,6 +190,11 @@ class CppPrinter(ExprPrinter):
         return f"static_cast<{INDEX_TYPE}>({r})" if expr.is_integer else r
 
     def _print_ceiling(self, expr):
+        assert len(expr.args) == 1
+        r = f"std::ceil({self._print(expr.args[0])})"
+        return f"static_cast<{INDEX_TYPE}>({r})" if expr.is_integer else r
+
+    def _print_CeilToInt(self, expr):
         assert len(expr.args) == 1
         r = f"std::ceil({self._print(expr.args[0])})"
         return f"static_cast<{INDEX_TYPE}>({r})" if expr.is_integer else r
@@ -212,8 +260,9 @@ class CppPrinter(ExprPrinter):
     def _print_OpaqueUnaryFn_sqrt(self, expr):
         return f"std::sqrt({self._print(expr.args[0])})"
 
-    def _print_Round(self, expr):
+    def _print_RoundToInt(self, expr):
         assert len(expr.args) == 1
+        # TODO: dispatch to llrint depending on index type
         return f"std::lrint({self._print(expr.args[0])})"
 
     def _print_RoundDecimal(self, expr):
@@ -448,22 +497,3 @@ class LocalBufferScope:
             return new_node
 
         return [wrap_inner_fn_for_node(node) for node in nodes]
-
-
-def unify_mask_base_type(
-    buffer: IndentedBuffer,
-    vars: Tuple[CSEVariable, ...],
-    dtype=torch.float,
-):
-    """
-    Given list of cse variables,
-    Cast each to new mask base dtype and return casted cse variable.
-    """
-    new_vars = (
-        V.kernel.cse.generate(
-            buffer,
-            f"{V.kernel._get_mask_cast(var, dtype)}",
-        )
-        for var in vars
-    )
-    return new_vars

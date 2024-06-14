@@ -20,10 +20,11 @@ from pprint import pprint
 from typing import Optional
 
 import numpy as np
-import torch
 
 from prettytable import PrettyTable
 from tqdm import tqdm
+
+import torch
 
 warnings.filterwarnings("ignore")
 
