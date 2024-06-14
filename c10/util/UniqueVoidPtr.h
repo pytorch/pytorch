@@ -69,6 +69,43 @@ class UniqueVoidPtr {
   std::unique_ptr<void, DeleterFnPtr>&& move_context() {
     return std::move(ctx_);
   }
+  /**
+   * Compare the deleter in a UniqueVoidPtr to expected_deleter.
+   * If it matches, replace the deleter with new_deleter
+   * and return true; otherwise, does nothing and returns
+   * false.
+   *
+   * In general, it is not safe to unconditionally set the
+   * deleter on a UniqueVoidPtr, because you don't know what
+   * the deleter is, and thus will have a hard time properly
+   * disposing of the deleter without storing the original
+   * deleter (this is difficult to do, because DeleterFnPtr
+   * is not a closure, and because the context on UniqueVoidPtr is
+   * only a single word, you generally don't have enough
+   * space to store both the original deleter and its context).
+   * However, in some cases, you know /exactly/ what the deleter
+   * is, and you have a new deleter that manually wraps
+   * the old one.  In this case, you can safely swap the deleter
+   * after asserting that the deleters line up.
+   *
+   * What are the requirements on new_deleter?  It must still
+   * properly dispose of the void* pointer passed in as its argument,
+   * where void* is whatever the context of the original deleter
+   * is.  So in general, you expect the new deleter to look something
+   * like this:
+   *
+   *      [](void* ptr) {
+   *        some_new_stuff(ptr);
+   *        get_orig_allocator()->raw_deleter(ptr);
+   *      }
+   *
+   * Note that it won't work to close over the original
+   * allocator; you don't have enough space to do that!  Also,
+   * it's unsafe to assume that the passed in pointer in
+   * question is the memory pointer in question; it might not
+   * be; be sure to read the source code of the Allocator
+   * in question to confirm this.
+   */
   C10_NODISCARD bool compare_exchange_deleter(
       DeleterFnPtr expected_deleter,
       DeleterFnPtr new_deleter) {
