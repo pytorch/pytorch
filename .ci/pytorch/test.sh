@@ -1169,8 +1169,12 @@ test_executorch() {
 
   pushd /executorch
 
-  # NB: We need to build ExecuTorch runner here and not inside the Docker image
-  # because it depends on PyTorch
+  export PYTHON_EXECUTABLE=python
+  export EXECUTORCH_BUILD_PYBIND=ON
+  export CMAKE_ARGS="-DEXECUTORCH_BUILD_XNNPACK=ON -DEXECUTORCH_BUILD_KERNELS_QUANTIZED=ON"
+
+  # NB: We need to rebuild ExecuTorch runner here because it depends on PyTorch
+  # from the PR
   # shellcheck disable=SC1091
   source .ci/scripts/utils.sh
   install_executorch
