@@ -628,7 +628,7 @@ class TestConverter(TestCase):
         # TODO: update test to use reference for in.
         inp = (torch.tensor(4), {torch.tensor(4): "foo"})
         self._check_equal_ts_ep_converter(MTensorIn(), inp, ["script"])
-        inp = (t, {torch.tensor(4): "foo"})
+        inp = (torch.tensor(1), {torch.tensor(4): "foo"})
         self._check_equal_ts_ep_converter(MTensorIn(), inp, ["script"])
 
     def test_ts2ep_converter_custom_op(self):
