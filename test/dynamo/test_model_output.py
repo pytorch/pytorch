@@ -102,6 +102,15 @@ class TestModelOutput(torch._dynamo.test_case.TestCase):
         self._common(fn, 2)
 
     @maybe_skip
+    def test_mo_getattr_missing(self):
+        def fn(obj: BaseModelOutput):
+            if getattr(obj, "asdf", None) is not None:
+                obj.asdf += 1
+            return obj.attentions + 1
+
+        self._common(fn, 1)
+
+    @maybe_skip
     def test_mo_getitem(self):
         def fn(obj: BaseModelOutput):
             x = obj["last_hidden_state"] * 10
@@ -165,6 +174,59 @@ class TestModelOutput(torch._dynamo.test_case.TestCase):
         self.assertTrue(same(opt_fn(obj2), correct1))
         self.assertEqual(cnts.frame_count, 1)
         self.assertEqual(cnts.op_count, 2)
+
+    @maybe_skip
+    def test_mo_init2(self):
+        # this ModelOutput subclass runs a different __post_init__ codepath
+        @dataclasses.dataclass
+        class MyDataClass(ModelOutput):
+            x: torch.FloatTensor = None
+
+        def fn(x):
+            obj = MyDataClass(x=x)
+            return obj
+
+        inp = torch.randn(3, 3)
+        opt_fn = torch._dynamo.optimize("eager", nopython=True)(fn)
+        self.assertEqual(fn(inp).x, opt_fn(inp).x)
+
+    @maybe_skip
+    def test_mo_init_with_disable(self):
+        # Can result in "non-function or method super: <slot wrapper '__setattr__' of 'object' objects>"
+        # graph breaks (although it may not be the first)
+        # Minimal repro for https://github.com/pytorch/pytorch/issues/126028
+        @dataclasses.dataclass
+        class MyDataClass(ModelOutput):
+            x: torch.FloatTensor = None
+
+        @torch._dynamo.disable(recursive=False)
+        def fn(x):
+            return MyDataClass(x=x)
+
+        inp = torch.randn(3, 3)
+        opt_fn = torch._dynamo.optimize("eager")(fn)
+        self.assertEqual(fn(inp).x, opt_fn(inp).x)
+
+    @maybe_skip
+    def test_mo_newkey(self):
+        obj = BaseModelOutput()
+
+        def fn(obj):
+            return obj["wwww"] + 1
+
+        inp = torch.randn(3, 3)
+        obj["wwww"] = inp
+        opt_fn = torch._dynamo.optimize("eager", nopython=True)(fn)
+        self.assertEqual(fn(obj), opt_fn(obj))
+
+    @maybe_skip
+    def test_mo_from_outside(self):
+        def fn(obj):
+            return obj.attentions + 1
+
+        obj = BaseModelOutput(attentions=torch.randn(3, 3))
+        opt_fn = torch._dynamo.optimize("eager", nopython=True)(fn)
+        self.assertEqual(fn(obj), opt_fn(obj))
 
     @maybe_skip
     def test_HF_bert_model_output(self):

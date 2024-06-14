@@ -359,8 +359,8 @@ static void impl_func_norm_mps(const Tensor& input_tensor,
     NSString* ns_key = [[wrappedAxes valueForKey:@"description"] componentsJoinedByString:@","];
     string keepdim_info = (keepdim) ? "keepdim=1" : "keepdim=0";
     string tensor_key = cdist ? getTensorsStringKey({input_tensor, other_tensor}) : getTensorsStringKey({input_t});
-    string key = string("norm_out_mps:") + [ns_key UTF8String] + ":" + tensor_key + ":p" + to_string(p) + ":" +
-        keepdim_info + ":" + toString(in_dtype) + ":" + to_string(castInputData);
+    string key = string("norm_out_mps:") + [ns_key UTF8String] + ":" + tensor_key + ":p" + std::to_string(p) + ":" +
+        keepdim_info + ":" + toString(in_dtype) + ":" + std::to_string(castInputData);
 
     auto cachedGraph = LookUpOrCreateCachedGraph<MPSBinaryCachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
       newCachedGraph->inputTensor_ = mpsGraphRankedPlaceHolder(mpsGraph, input_tensor);
@@ -572,7 +572,7 @@ static Tensor std_var_common_impl_mps(const Tensor& input_t,
     string op_key = (stdVarType == STANDARD_DEVIATION) ? "std_mps" : "var_mps";
     NSString* ns_key = [[wrappedAxes valueForKey:@"description"] componentsJoinedByString:@","];
     string bessel_corrected = (use_correction && correction_value) ? "unbiased " : "biased ";
-    string use_dim_info = (use_dim) ? "use_dim=1:" + to_string(dim_value.size()) : "use_dim=0";
+    string use_dim_info = (use_dim) ? "use_dim=1:" + std::to_string(dim_value.size()) : "use_dim=0";
     string keepdim_info = (keepdim) ? "keepdim=1" : "keepdim=0";
     string key = op_key + ":" + getTensorsStringKey(input_t) + ":" + use_dim_info + ":" + keepdim_info + ":" +
         string([ns_key UTF8String]) + ":" + bessel_corrected + ":" + std::to_string(correction_value);
@@ -700,7 +700,7 @@ static void min_max_out_mps(const Tensor& input_t,
   auto stream = at::mps::getCurrentMPSStream();
 
   @autoreleasepool {
-    string key = func_name + getTensorsStringKey({input_t, indices_t}) + ":" + to_string(dim_);
+    string key = func_name + getTensorsStringKey({input_t, indices_t}) + ":" + std::to_string(dim_);
     auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
       MPSGraphTensor* inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, input_t);
       MPSGraphTensor* outputTensor = nil;
@@ -860,7 +860,7 @@ static void argmax_argmin_out_mps(const Tensor& input_t,
   @autoreleasepool {
     NSString* ns_key = [[apparent_in_shape valueForKey:@"description"] componentsJoinedByString:@","];
     string key =
-        func_name + ":" + to_string(dim_) + ":" + getTensorsStringKey(input_t) + ":" + string([ns_key UTF8String]);
+        func_name + ":" + std::to_string(dim_) + ":" + getTensorsStringKey(input_t) + ":" + string([ns_key UTF8String]);
     auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
       auto inputScalarType = input_t.scalar_type();
       MPSGraphTensor* inputTensor =
@@ -1217,7 +1217,7 @@ TORCH_IMPL_FUNC(any_out_mps)
 
   @autoreleasepool {
     MPSShape* input_t_shape = getMPSShape(input_t);
-    string key = string("any_out_mps:") + getMPSShapeString(input_t_shape) + ":" + to_string(dim_) + ":" +
+    string key = string("any_out_mps:") + getMPSShapeString(input_t_shape) + ":" + std::to_string(dim_) + ":" +
         getMPSTypeString(input_t);
     auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
       MPSDataType input_type = getMPSDataType(input_t);
@@ -1313,7 +1313,7 @@ TORCH_IMPL_FUNC(all_out_mps)
 
   @autoreleasepool {
     MPSShape* input_t_shape = getMPSShape(input_t);
-    string key = string("all_out_mps:") + getMPSShapeString(input_t_shape) + ":" + to_string(dim_) + ":" +
+    string key = string("all_out_mps:") + getMPSShapeString(input_t_shape) + ":" + std::to_string(dim_) + ":" +
         getMPSTypeString(input_t);
     auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
       MPSDataType input_type = getMPSDataType(input_t);
@@ -1531,8 +1531,8 @@ static void median_out_mps(const Tensor& input_t,
   auto stream = at::mps::getCurrentMPSStream();
 
   @autoreleasepool {
-    string key =
-        func_name + ":" + to_string(dim_) + ":" + getTensorsStringKey(input_t) + ":" + getTensorsStringKey(indices_t);
+    string key = func_name + ":" + std::to_string(dim_) + ":" + getTensorsStringKey(input_t) + ":" +
+        getTensorsStringKey(indices_t);
     auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
       MPSGraphTensor* inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, input_t);
       MPSGraphTensor* castInputTensor =
