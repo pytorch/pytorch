@@ -149,9 +149,9 @@ class StateDictOptions:
 
 @dataclass
 class _StateDictInfo(StateDictOptions):
-    fqn_param_mapping: Dict[Union[str, torch.Tensor], Union[FQNS_T, torch.Tensor]] = (
-        field(default_factory=dict)
-    )
+    fqn_param_mapping: Dict[
+        Union[str, torch.Tensor], Union[FQNS_T, torch.Tensor]
+    ] = field(default_factory=dict)
     shared_params_mapping: Dict[
         Union[str, torch.Tensor], Union[FQNS_T, torch.Tensor]
     ] = field(default_factory=dict)
@@ -285,9 +285,9 @@ def _verify_options(
 
     options = options or StateDictOptions()
 
-    fqn_param_mapping: Dict[Union[str, torch.Tensor], Union[Set[str], torch.Tensor]] = (
-        {}
-    )
+    fqn_param_mapping: Dict[
+        Union[str, torch.Tensor], Union[Set[str], torch.Tensor]
+    ] = {}
     shared_params_mapping: Dict[
         Union[str, torch.Tensor], Union[Set[str], torch.Tensor]
     ] = {}
@@ -298,7 +298,7 @@ def _verify_options(
         fqns = _get_fqns(model, name)
         fqn = fqn_param_mapping.get(param, None)
         if fqn is not None:
-            fqn_param_mapping[param].update(fqns)
+            cast(Set[str], fqn_param_mapping[param]).update(fqns)
             shared_params_mapping[param] = fqn_param_mapping[param]
         else:
             # We need to do copy as _get_fqns is lru_cached
@@ -307,9 +307,9 @@ def _verify_options(
             if not isinstance(param, _EXTRA_STATE):
                 fqn_param_mapping[fqn] = param
 
-    for param, fqns in list(shared_params_mapping.items()):
-        for fqn in fqns:
-            shared_params_mapping[fqn] = param
+    for param_, fqns_ in list(shared_params_mapping.items()):
+        for fqn in fqns_:
+            shared_params_mapping[fqn] = cast(torch.Tensor, param_)
 
     submodule_prefixes: Set[str] = set()
     if submodules:

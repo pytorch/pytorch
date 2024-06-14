@@ -687,7 +687,9 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
             fully_shard(layer)
         fully_shard(model)
         optim = torch.optim.Adam(model.parameters(), lr=1e-2)
-        torch.optim.lr_scheduler.LambdaLR(optim, lr_lambda=[lambda epoch: 0.95**epoch])
+        torch.optim.lr_scheduler.LambdaLR(
+            optim, lr_lambda=[lambda epoch: 0.95**epoch]
+        )
         opt_state_dict = ptd_state_dict.get_optimizer_state_dict(
             model,
             optim,
@@ -854,7 +856,7 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
     def test_shared_weight(self):
         class TiedEmbeddingModel(nn.Module):
             def __init__(self, vocab_size, embedding_dim):
-                super(TiedEmbeddingModel, self).__init__()
+                super().__init__()
                 self.embedding = nn.Embedding(vocab_size, embedding_dim)
                 self.decoder = nn.Linear(embedding_dim, vocab_size)
                 self.decoder.weight = self.embedding.weight  # Tying weights
