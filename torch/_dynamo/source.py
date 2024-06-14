@@ -7,8 +7,8 @@ from typing import Any, Optional, Union
 from torch._guards import ChainedSource, GuardSource, Source
 
 from . import utils
-from .exc import unimplemented
 from .bytecode_transformation import create_call_function, create_instruction
+from .exc import unimplemented
 from .utils import enum_repr
 
 # It shouldn't be supported to construct an NNModuleVariable inside an FSDP module,
