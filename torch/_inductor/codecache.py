@@ -419,7 +419,7 @@ def _ident(x: Any) -> Any:
     return x
 
 
-def extract_tensor_metadata_for_cache_key(t):
+def extract_tensor_metadata_for_cache_key(device_map, t):
     """
     Extracts the tensor metadata and removes fields of the TensorMetadata
     that are not needed for caching
@@ -427,18 +427,30 @@ def extract_tensor_metadata_for_cache_key(t):
     meta = extract_tensor_metadata(t)
     if not hasattr(t, "_is_inductor_static"):
         meta = dataclasses.replace(meta, storage_offset=0, storage_bytes=None)
+
+    # The pickle implementation avoids serializing the same object more than once.
+    # That behavior means the byte stream we create to hash will vary if, for example,
+    # we see two tensor objects with the same device, but the torch.device object is
+    # actually the same object vs. merely equivalent. We want to produce the same hash
+    # value in either situation, so we memoize the device objects and always reference
+    # the same object for a given device. It's possible other metadata fields deserve
+    # the same treatment, but so far we've only observed this issue with the device.
+    if meta.device not in device_map:
+        device_map[meta.device] = meta.device
+    meta = dataclasses.replace(meta, device=device_map[meta.device])
+
     return meta
 
 
-def _reduce_fake_tensor(t):
+def _reduce_fake_tensor(device_map, t):
     """
     See FxGraphCachePickler. Custom reducer to pickle FakeTensors.
     """
-    metadata = extract_tensor_metadata_for_cache_key(t)
+    metadata = extract_tensor_metadata_for_cache_key(device_map, t)
     return (_ident, (metadata,))
 
 
-def _reduce_tensor(t):
+def _reduce_tensor(device_map, t):
     """
     See FxGraphCachePickler. Custom reducer to pickle Tensors.
     If we see tensors, we know they're constants stored as attributes on
@@ -465,7 +477,7 @@ def _reduce_tensor(t):
             f"FX graph cache handling of a large constant took {elapsed:.1}s. Please file an issue."
         )
 
-    metadata = extract_tensor_metadata_for_cache_key(t)
+    metadata = extract_tensor_metadata_for_cache_key(device_map, t)
     return (_ident, (TensorMetadataAndValues(metadata, values),))
 
 
@@ -495,9 +507,13 @@ class FxGraphCachePickler(pickle.Pickler):
     data that allow us to compute a stable, but safe hash.
     """
 
+    # See extract_tensor_metadata_for_cache_key. Whenever we extract metadata during
+    # pickling, we make sure devices always reference the same torch.device object.
+    _device_map: Dict[torch.device, torch.device] = {}
+
     dispatch_table = copyreg.dispatch_table.copy()
-    dispatch_table[FakeTensor] = _reduce_fake_tensor
-    dispatch_table[torch.Tensor] = _reduce_tensor
+    dispatch_table[FakeTensor] = functools.partial(_reduce_fake_tensor, _device_map)
+    dispatch_table[torch.Tensor] = functools.partial(_reduce_tensor, _device_map)
     dispatch_table[torch.SymInt] = _reduce_symint
     dispatch_table[
         torch.fx.experimental._backward_state.BackwardState
@@ -538,7 +554,7 @@ class FxGraphCachePickler(pickle.Pickler):
 
         def get_str(obj) -> str:
             if isinstance(obj, torch.Tensor):
-                return str(extract_tensor_metadata_for_cache_key(obj))
+                return str(extract_tensor_metadata_for_cache_key(cls._device_map, obj))
             elif isinstance(obj, bytes):
                 return "<bytes>"
             elif type(obj) in cls.dispatch_table:
@@ -858,10 +874,10 @@ class FxGraphCache:
         # See _save_graph(); we don't store the callable in the cache entry so
         # recreate it here from the PyCodeCache disk cache.
         artifact_path = get_path(graph.cache_key, "py")[2]
+        code = graph.source_code
         if not os.path.exists(artifact_path):
             counters["inductor"]["fxgraph_lookup_write_file"] += 1
             Path(os.path.dirname(artifact_path)).mkdir(parents=True, exist_ok=True)
-            code = graph.source_code
             cpp_pp = cpp_prefix_path()
             if os.path.basename(cpp_pp) in code:
                 if cpp_pp in code:
@@ -901,6 +917,11 @@ class FxGraphCache:
         # graph was compiled for this cache entry. Pretending these counters
         # were incremented normally is useful for testing with the cache enabled.
         metrics.CachedMetricsHelper.apply_deltas(graph.metrics_deltas)
+
+        from .graph import GraphLowering
+
+        GraphLowering.save_output_code(code)
+        output_code_log.debug("Output code: \n%s", code)
 
         return graph
 

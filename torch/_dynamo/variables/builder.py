@@ -1147,6 +1147,11 @@ class VariableBuilder:
                 for b in value.buffers():
                     mark_static_address(b)
 
+                # we need to add the module to tracing context
+                # in order to allow its params to get invalidated
+                # this will get cleaned up once compile ends
+                self.tx.output.nn_modules[self.name] = value
+
             result = UnspecializedNNModuleVariable(value, source=self.source)
             if not SideEffects.cls_supports_mutation_side_effects(type(value)):
                 # don't allow STORE_ATTR mutation with custom __setattr__
