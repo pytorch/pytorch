@@ -482,9 +482,9 @@ class ExportedProgram:
         return res
 
     def __str__(self) -> str:
-        graph_module = self.graph_module.print_readable(print_output=False).replace(
-            "\n", "\n    "
-        )
+        graph_module = self.graph_module.print_readable(
+            print_output=False, colored=True
+        ).replace("\n", "\n    ")
         string = (
             "ExportedProgram:\n"
             f"    {graph_module}\n"
@@ -537,9 +537,6 @@ class ExportedProgram:
         from torch._export.passes.lift_constants_pass import (
             ConstantAttrMap,
             lift_constants_pass,
-        )
-        from torch._export.passes.replace_sym_size_ops_pass import (
-            _replace_sym_size_ops_pass,
         )
         from torch._functorch.aot_autograd import aot_export_module
 
@@ -661,8 +658,6 @@ class ExportedProgram:
         for k, v in constants.items():
             assert k not in self.constants
             self.constants[k] = v
-
-        _replace_sym_size_ops_pass(gm)
 
         from torch._dynamo import config as _dynamo_config
         from torch._export.passes._node_metadata_hook import (

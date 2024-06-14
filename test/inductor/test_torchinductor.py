@@ -1354,7 +1354,6 @@ class CommonTemplate:
 
         self.common(fn, (torch.randn(1024),))
 
-    @skipIfRocm
     @config.patch(debug_index_asserts=False)
     def test_neg_index(self):
         def test(
@@ -2908,7 +2907,7 @@ class CommonTemplate:
         )
 
     @skipIfPy312  # segfaults
-    @config.patch(force_mixed_mm=True)
+    @config.patch(mixed_mm_choice="triton")
     def test_mixed_mm(self):
         def fn(a, b):
             return torch.mm(a, b.to(a.dtype))
@@ -2923,7 +2922,7 @@ class CommonTemplate:
         )
 
     @skipIfPy312  # segfaults
-    @config.patch(force_mixed_mm=True)
+    @config.patch(mixed_mm_choice="triton")
     def test_mixed_mm2(self):
         def fn(a, b, scale, bias):
             return torch.mm(a, b.to(a.dtype)) * scale + bias
@@ -2940,7 +2939,7 @@ class CommonTemplate:
         )
 
     @skipIfPy312  # segfaults
-    @config.patch(force_mixed_mm=True)
+    @config.patch(mixed_mm_choice="triton")
     def test_mixed_mm3(self):
         def fn(a, b):
             return torch.mm(a, b.to(a.dtype))
@@ -3618,7 +3617,6 @@ class CommonTemplate:
             (torch.randn([4, 4, 4]),),
         )
 
-    @skipIfRocm
     def test_convolution1(self):
         m = torch.nn.Sequential(
             torch.nn.Conv2d(5, 6, [3, 3]),
@@ -3651,7 +3649,6 @@ class CommonTemplate:
             check_lowp=False,
         )
 
-    @skipIfRocm
     def test_convolution3(self):
         # Test stride or padding or dilation is 1 element list.
         m = torch.nn.Sequential(
@@ -3667,7 +3664,6 @@ class CommonTemplate:
             rtol=0.001,
         )
 
-    @skipIfRocm
     def test_convolution4(self):
         def fn(x, w):
             x = F.conv2d(x, w, groups=w.shape[0])
@@ -9079,7 +9075,6 @@ class CommonTemplate:
         not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
         "Does not support mem_eff_attention",
     )
-    @skipIfRocm
     def test_sdpa_unaligned_mask(self):
         def foo(
             arg0_1: "f32[8, 8, 16, 16]",
@@ -9125,7 +9120,6 @@ class CommonTemplate:
         not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
         "Does not support mem_eff_attention",
     )
-    @skipIfRocm
     @config.patch(freezing=True)
     def test_sdpa_unaligned_mask_freezing(self):
         class Mod(torch.nn.Module):
@@ -9481,6 +9475,7 @@ class CommonTemplate:
     def _check_resize_common(
         self, fn, x, size_or_y, memory_format, inplace, deterministic
     ):
+        x = x.to(self.device)
         x_ref_arg = x.clone()
         x_opt_arg = x.clone()
         x_numel = x.numel()
@@ -10184,7 +10179,6 @@ class CommonTemplate:
         fn(a, b)
 
     # Skipped on ROCm until https://github.com/ROCm/triton/issues/443 resolved
-    @skipIfRocm
     def test_fuse_large_params(self):
         def pt2_optimizer_step(optimizer):
             @torch.compile()
@@ -10684,12 +10678,16 @@ if HAS_GPU and not TEST_WITH_ASAN:
             fn2_opt = torch._dynamo.optimize("inductor")(fn2)
 
             a = torch.rand([100, 100], device=GPU_TYPE)
-            b = torch.rand([100], device=GPU_TYPE)
-            torch._dynamo.mark_dynamic(b, 0)
-            inps = [a, b]
+            b1 = torch.rand([102], device=GPU_TYPE)
+            b2 = torch.rand([100], device=GPU_TYPE)
+            torch._dynamo.mark_dynamic(b1, 0)
+            torch._dynamo.mark_dynamic(b2, 0)
+            inps1 = [a, b1]
+            inps2 = [a, b2]
 
-            code1 = run_and_get_triton_code(fn1_opt, *inps)
-            code2 = run_and_get_triton_code(fn2_opt, *inps)
+            # Run fn2 first since it has more restrictive bounds -- to avoid cache hit
+            code2 = run_and_get_triton_code(fn2_opt, *inps2)
+            code1 = run_and_get_triton_code(fn1_opt, *inps1)
 
             # The function with the constrained tensor should be optimized, but
             # the other should not:
@@ -10697,8 +10695,8 @@ if HAS_GPU and not TEST_WITH_ASAN:
             self.assertTrue("to(tl.int32)" in code2)
             self.assertFalse("to(tl.int64)" in code2)
 
-            self.assertEqual(fn1_opt(*inps), fn1(*inps))
-            self.assertEqual(fn2_opt(*inps), fn1(*inps))
+            self.assertEqual(fn1_opt(*inps1), fn1(*inps1))
+            self.assertEqual(fn2_opt(*inps2), fn1(*inps2))
 
         def test_constant_folding_deallocation(self):
             import torch._inductor
@@ -10759,7 +10757,6 @@ if HAS_GPU and not TEST_WITH_ASAN:
             out[0].sum().backward()
             self.assertEqual(inp.grad, inp_ref.grad)
 
-        @skipIfRocm  # asserts not implemented in Rocm yet
         def test_optimize_indexing_assert(self):
             def has_indirect(code, tl_fn: str):
                 self.assertTrue(
@@ -10998,7 +10995,6 @@ if HAS_GPU and not TEST_WITH_ASAN:
         tmp1 = tl.load(in_ptr1 + (x3 + (262144*r2)), rmask, eviction_policy='evict_first', other=0.0)""",
                 )
 
-        @skipIfRocm
         @config.patch("triton.use_block_ptr", True)
         def test_evict_last_non_coalesced_loads_block_ptr(self):
             @torch.compile
