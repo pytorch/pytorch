@@ -113,6 +113,7 @@ def _canonicalize_expr(expr, mapping):
         return expr
 
     # try flipping, won't hurt
+    # can return if original expr is something like 4 <= s0
     lhs, rhs = expr.args
     if isinstance(expr, sympy.LessThan):
         expr = sympy.GreaterThan(rhs, lhs)
@@ -134,10 +135,11 @@ def _canonicalize_expr(expr, mapping):
     non_numeric = tuple(x for x in eq.args if not isinstance(x, sympy.Number))
     numeric = tuple(x for x in eq.args if isinstance(x, sympy.Number))
     assert len(numeric) <= 1
-    expr = type(expr)(sympy.Add(*non_numeric), numeric[0] if numeric else 0)
+    expr = type(expr)(sympy.Add(*non_numeric), -numeric[0] if numeric else 0)
 
     # maybe negate
-    if -expr.args[0] in mapping:
+    lhs, rhs = expr.args
+    if -lhs in mapping:
         if isinstance(expr, sympy.LessThan):
             expr = sympy.GreaterThan(-lhs, -rhs)
         elif isinstance(expr, sympy.StrictLessThan):
@@ -717,6 +719,7 @@ def insert_deferred_runtime_asserts(
                 with node.graph.inserting_before(res0.next):
                     msg = f"Runtime assertion failed for expression {full_expr} on node '{res0}'"
                     res = node.graph.call_function(op, (res0, msg))
+                    log.debug("created node %s for runtime assert %s", res, full_expr)
 
         elif op in (
             torch.ops.aten.sym_constrain_range_for_size.default,
@@ -735,6 +738,7 @@ def insert_deferred_runtime_asserts(
                     _kwargs["max"] = _max
                 with node.graph.inserting_before(node.next):
                     res = node.graph.call_function(op, (node,), _kwargs)
+                    log.debug("created node %s for runtime assert %s, min=%s, max=%s", res, sym_expr, _min, _max)
 
         return res
 
@@ -746,6 +750,7 @@ def insert_deferred_runtime_asserts(
         If that's the case, add unbounded sym_constrain_range_for_size + bounded sym_constrain_range.
         Expects numeric inputs for _min, _max.
         '''
+        log.debug("maybe_sym_constrain_range_for_size(%s), min=%s, max=%s", expr, _min, _max)
         if _max is None or _max > 2:  # doesn't work with max <= 2
             remaining_assert_nodes.add(
                 add_runtime_assert(
@@ -793,6 +798,7 @@ def insert_deferred_runtime_asserts(
                 # if static & is_size, try sym_constrain_range_for_size
                 # otherwise, _assert_scalar on equality
                 val = sym_ranges.val
+                log.debug("range assert for expr %s = %s", sym_expr, val)
                 if sym_ranges.is_size:
                     maybe_sym_constrain_range_for_size(res, sym_expr, val, val)
                 else:  # _assert_scalar
@@ -805,6 +811,7 @@ def insert_deferred_runtime_asserts(
                         )
                     )
             elif _min is not None and _max is not None:
+                log.debug("range assert for expr %s, min = %s, max = %s", sym_expr, _min, _max)
                 # if is_size, try sym_constrain_range_for_size
                 # otherwise, we can sym_constrain_range if a single symbol
                 # if an expression, we add two _assert_scalar nodes
@@ -838,6 +845,7 @@ def insert_deferred_runtime_asserts(
                     )
 
             elif _min is not None:
+                log.debug("range assert for expr %s, min = %s", sym_expr, _min)
                 # one-sided _assert_scalar
                 remaining_assert_nodes.add(
                     add_runtime_assert(
@@ -849,6 +857,7 @@ def insert_deferred_runtime_asserts(
                 )
 
             elif _max is not None:
+                log.debug("range assert for expr %s, max = %s", sym_expr, _max)
                 # same here
                 remaining_assert_nodes.add(
                     add_runtime_assert(
@@ -860,6 +869,7 @@ def insert_deferred_runtime_asserts(
                 )
 
             for val in sym_ranges.not_equals:
+                log.debug("range assert for expr %s != %s", sym_expr, val)
                 # _assert_scalar for any inequalities
                 remaining_assert_nodes.add(
                     add_runtime_assert(
@@ -874,10 +884,12 @@ def insert_deferred_runtime_asserts(
         for nodes in sym_expr_to_nodes[sym_expr].values():
             for node in nodes:
                 if node not in remaining_assert_nodes:
+                    log.debug("dce node %s for runtime assert %s", node, sym_expr)
                     _dce_from_node(node)
 
     # clean out unused size/stride nodes that we created.
     # alternative is to track used symbols in initial graph pass so we don't create these.
     for node in created_placeholder_ops:
         if not node.users:
+            log.debug("dce created placeholder op %s", node)
             _dce_from_node(node)

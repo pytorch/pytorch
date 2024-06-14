@@ -5400,27 +5400,6 @@ def forward(self, x, y):
             ep.module()(torch.randn(400, 20, 16))
         ep.module()(torch.randn(42, 20, 16))
 
-    @unittest.expectedFailure
-    def test_mixed_comp(self):
-        class Foo(torch.nn.Module):
-            def forward(self, x, y):
-                n = y.item()
-                z = torch.cat([x, x], dim=0)
-                torch._check_is_size(n)
-                torch._check(n < z.shape[0])
-                return z[n:].shape[0] + 2
-
-        inputs = (torch.randn(9), torch.tensor([3]))
-        shapes = {
-            "x": (Dim("dx", max=2048),),
-            "y": None,
-        }
-        ep = export(
-            Foo(),
-            inputs,
-            dynamic_shapes=shapes,
-        )
-
     def test_intermediate_shape_comp(self):
         class Foo(torch.nn.Module):
             def forward(self, x, y):
