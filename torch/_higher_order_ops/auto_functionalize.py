@@ -108,6 +108,8 @@ def can_auto_functionalize(op: torch._ops.OperatorBase) -> bool:
             continue
         # Not yet supported: List[Tensor] return.
         return False
+    if torch._C._dispatch_has_kernel_for_dispatch_key(op.name(), "Functionalize"):
+        return False
     return True
 
 

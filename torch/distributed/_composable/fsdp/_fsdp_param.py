@@ -73,6 +73,12 @@ def set_(tensor, data):
 def set_(tensor, data):
     tensor.set_(data)
 
+@torch.library.impl(lib, "set_", "Functionalize")
+def set_(tensor, data):
+    tensor_inner = torch._from_functional_tensor(tensor)
+    data_inner = torch._from_functional_tensor(data)
+    tensor_inner.set_(data_inner)
+
 
 class ShardedState(Enum):
     """
@@ -399,6 +405,8 @@ class FSDPParam:
                 # alloc_storage(self._unsharded_param)
                 # self._unsharded_param.copy_(unsharded_param)
                 torch.ops.fsdp.set_(self._unsharded_param, unsharded_param)
+                #set_fn(self._unsharded_param, unsharded_param)
+                #self._unsharded_param.set_(unsharded_param)
         else:
             self._unsharded_param = nn.Parameter(
                 unsharded_param, requires_grad=self.sharded_param.requires_grad
