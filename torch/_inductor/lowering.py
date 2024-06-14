@@ -106,6 +106,7 @@ def add_layout_constraint(fn, constraint):
 add_needs_realized_inputs(
     [
         aten.as_strided,
+        aten.as_strided_copy,
         aten.avg_pool2d,
         aten.avg_pool2d_backward,
         aten.bmm,
@@ -520,7 +521,11 @@ def make_foreach_pointwise(pw_fn, allow_alpha=False):
 
                 outputs[output_ind] = output
 
-                if is_gpu(device.type) and use_foreach and realize_outputs:
+                if (
+                    V.graph.has_feature(device, BackendFeature.FOREACH)
+                    and use_foreach
+                    and realize_outputs
+                ):
                     buffer_list.append(output.realize())
 
             if buffer_list:
@@ -1946,7 +1951,10 @@ def bucketize(
 ):
     assert len(boundaries.get_size()) == 1
 
-    if not (is_triton(input) and is_triton(boundaries)):
+    if not (
+        V.graph.has_feature(input, BackendFeature.BUCKETIZE)
+        and V.graph.has_feature(boundaries, BackendFeature.BUCKETIZE)
+    ):
         return fallback_handler(aten.bucketize.Tensor, add_to_fallback_set=False)(
             input, boundaries, out_int32=out_int32, right=right
         )
@@ -1957,7 +1965,6 @@ def bucketize(
     # we call boundaries.realize().
     boundaries.realize()
     boundaries_size = boundaries.get_size()[0]
-    boundaries_loader = boundaries.make_loader()
     device = input.get_device()
     input_loader = input.make_loader()
 
@@ -5782,7 +5789,7 @@ register_pointwise_numeric(aten.log10)
 register_pointwise_numeric(aten.log2)
 register_pointwise_numeric(aten.nextafter)
 
-from .codegen.common import pointwise_overrides_data
+from .codegen.common import BackendFeature, pointwise_overrides_data
 
 
 def _get_pointwise_overrides(ns, name):
@@ -6341,3 +6348,7 @@ quantized_lowerings.register_woq_mm_ops()
 from . import mkldnn_lowerings
 
 mkldnn_lowerings.register_onednn_fusion_ops()
+
+from . import jagged_lowerings
+
+jagged_lowerings.register_jagged_ops()
