@@ -34,14 +34,6 @@
  * around.
  */
 
-// TODO: This file is still in the caffe2 namespace, despite living
-// in the ATen directory.  This is because the macro
-// CAFFE_KNOWN_TYPE (and CAFFE_DECLARE_KNOWN_TYPE) defines a template
-// specialization, which relies
-// on the namespace of TypeMeta matching the namespace where the macro is
-// called.  This requires us to fix all of the call-sites, which I want to do
-// later.  So the namespace is not fixed at the moment.
-
 // Make at::Half a fundamental type.
 
 namespace c10::guts {
@@ -49,7 +41,7 @@ template <>
 struct is_fundamental<at::Half> : std::true_type {};
 } // namespace c10::guts
 
-namespace caffe2 {
+namespace c10 {
 
 /**
  * A type id is a unique id for a given C++ type.
@@ -58,7 +50,7 @@ namespace caffe2 {
  * dtype of tensors.
  */
 class C10_API TypeIdentifier final
-    : public at::IdWrapper<TypeIdentifier, c10::util::type_index> {
+    : public c10::IdWrapper<TypeIdentifier, c10::util::type_index> {
  public:
   friend std::ostream& operator<<(std::ostream& stream, TypeIdentifier typeId);
   friend constexpr bool operator<(TypeIdentifier lhs, TypeIdentifier rhs);
@@ -91,17 +83,17 @@ inline constexpr bool operator<(TypeIdentifier lhs, TypeIdentifier rhs) {
 
 inline std::ostream& operator<<(
     std::ostream& stream,
-    caffe2::TypeIdentifier typeId) {
+    c10::TypeIdentifier typeId) {
   return stream << typeId.underlyingId();
 }
 
-} // namespace caffe2
+} // namespace c10
 
 namespace at {
-using DataType = caffe2::TypeIdentifier;
+using DataType = c10::TypeIdentifier;
 }
 
-C10_DEFINE_HASH_FOR_IDWRAPPER(caffe2::TypeIdentifier)
+C10_DEFINE_HASH_FOR_IDWRAPPER(c10::TypeIdentifier)
 
 namespace caffe2 {
 
@@ -124,7 +116,7 @@ struct TypeMetaData final {
         copy_(nullptr),
         placementDelete_(nullptr),
         delete_(nullptr),
-        id_(TypeIdentifier::uninitialized()),
+        id_(c10::TypeIdentifier::uninitialized()),
         name_("nullptr (uninitialized)") {}
 
   constexpr TypeMetaData(
@@ -134,7 +126,7 @@ struct TypeMetaData final {
       Copy* copy,
       PlacementDelete* placementDelete,
       Delete* deleteFn,
-      TypeIdentifier id,
+      c10::TypeIdentifier id,
       c10::string_view name) noexcept
       : itemsize_(itemsize),
         new_(newFn),
@@ -151,7 +143,7 @@ struct TypeMetaData final {
   Copy* copy_;
   PlacementDelete* placementDelete_;
   Delete* delete_;
-  TypeIdentifier id_;
+  c10::TypeIdentifier id_;
   c10::string_view name_;
 };
 
@@ -303,11 +295,12 @@ class _Uninitialized final {};
 //
 
 // item sizes for TypeMeta::itemsize() fast path
-static constexpr std::array<uint8_t, NumScalarTypes> scalarTypeItemSizes = {
+static constexpr std::array<uint8_t, c10::NumScalarTypes> scalarTypeItemSizes =
+    {
 #define SCALAR_TYPE_SIZE(T, name) sizeof(T),
-    AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_AND_QINTS(SCALAR_TYPE_SIZE)
+        AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_AND_QINTS(SCALAR_TYPE_SIZE)
 #undef SCALAR_TYPE_SIZE
-        0, // Undefined
+            0, // Undefined
 };
 
 /**
@@ -341,7 +334,7 @@ class C10_API TypeMeta final {
 
   TypeMeta(TypeMeta&& rhs) noexcept = default;
 
-  inline TypeMeta& operator=(ScalarType scalar_type) noexcept {
+  inline TypeMeta& operator=(c10::ScalarType scalar_type) noexcept {
     index_ = static_cast<uint16_t>(scalar_type);
     return *this;
   }
@@ -355,19 +348,19 @@ class C10_API TypeMeta final {
   /**
    * Returns the type id.
    */
-  TypeIdentifier id() const noexcept {
+  c10::TypeIdentifier id() const noexcept {
     return data().id_;
   }
   /**
    * true if we represent some ScalarType type
    */
   inline bool isScalarType() const noexcept {
-    return index_ < NumScalarTypes;
+    return index_ < c10::NumScalarTypes;
   }
   /**
    * true if we represent ScalarType scalar_type
    */
-  inline bool isScalarType(ScalarType scalar_type) const noexcept {
+  inline bool isScalarType(c10::ScalarType scalar_type) const noexcept {
     return index_ == static_cast<uint16_t>(scalar_type);
   }
   /**
@@ -423,8 +416,8 @@ class C10_API TypeMeta final {
   // Below are static functions that can be called by passing a specific type.
 
   template <class T>
-  static C10_HOST_CONSTEXPR_EXCEPT_WIN_CUDA TypeIdentifier Id() noexcept {
-    return TypeIdentifier::Get<T>();
+  static C10_HOST_CONSTEXPR_EXCEPT_WIN_CUDA c10::TypeIdentifier Id() noexcept {
+    return c10::TypeIdentifier::Get<T>();
   }
 
   template <class T>
@@ -462,10 +455,10 @@ class C10_API TypeMeta final {
   /**
    * convert ScalarType enum values to TypeMeta handles
    */
-  static inline caffe2::TypeMeta fromScalarType(ScalarType scalar_type) {
+  static inline caffe2::TypeMeta fromScalarType(c10::ScalarType scalar_type) {
     const auto index = static_cast<uint16_t>(scalar_type);
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
-        index < NumScalarTypes,
+        index < c10::NumScalarTypes,
         "Unrecognized Scalartype ",
         scalar_type,
         " (please report this error)");
@@ -475,9 +468,9 @@ class C10_API TypeMeta final {
   /**
    * convert TypeMeta handles to ScalarType enum values
    */
-  inline ScalarType toScalarType() {
+  inline c10::ScalarType toScalarType() {
     if (C10_LIKELY(isScalarType())) {
-      return static_cast<ScalarType>(index_);
+      return static_cast<c10::ScalarType>(index_);
     }
     error_unsupported_typemeta(*this);
   }
@@ -496,8 +489,9 @@ class C10_API TypeMeta final {
 // empty elements. Please see
 // https://github.com/pytorch/pytorch/pull/51881 for details.
 //
-#define MaxTypeIndex                                                           \
-  (NumScalarTypes + 15 /* number of CAFFE_DEFINE_KNOWN_TYPE in typeid.cpp */ + \
+#define MaxTypeIndex                                          \
+  (c10::NumScalarTypes +                                      \
+   15 /* number of CAFFE_DEFINE_KNOWN_TYPE in typeid.cpp */ + \
    1 /* 1 more for caffe2 tensor */)
 #else
 #define MaxTypeIndex UINT8_MAX
@@ -510,7 +504,7 @@ class C10_API TypeMeta final {
 
   static detail::TypeMetaData* typeMetaDatas();
 
-  static uint16_t existingMetaDataIndexForType(TypeIdentifier identifier);
+  static uint16_t existingMetaDataIndexForType(c10::TypeIdentifier identifier);
 
  public:
 #ifdef __CUDACC__
@@ -527,7 +521,7 @@ class C10_API TypeMeta final {
 #else
   template <class T>
   C10_EXPORT static uint16_t addTypeMetaData() {
-    const auto identifier = TypeIdentifier::Get<T>();
+    const auto identifier = c10::TypeIdentifier::Get<T>();
     // Need to hold this for the rest of the function, protecting:
     // 1) existingMetaDataIndexForType()
     // 2) nextTypeIndex++
@@ -577,7 +571,7 @@ class C10_API TypeMeta final {
 #define DEFINE_SCALAR_METADATA_INSTANCE(T, name)             \
   template <>                                                \
   constexpr uint16_t TypeMeta::_typeMetaData<T>() noexcept { \
-    return static_cast<uint16_t>(ScalarType::name);          \
+    return static_cast<uint16_t>(c10::ScalarType::name);     \
   }
 AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_AND_QINTS(DEFINE_SCALAR_METADATA_INSTANCE)
 #undef DEFINE_SCALAR_METADATA_INSTANCE
@@ -585,7 +579,7 @@ AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_AND_QINTS(DEFINE_SCALAR_METADATA_INSTANCE)
 template <>
 C10_EXPORT constexpr uint16_t TypeMeta::_typeMetaData<
     detail::_Uninitialized>() noexcept {
-  return static_cast<uint16_t>(ScalarType::Undefined);
+  return static_cast<uint16_t>(c10::ScalarType::Undefined);
 }
 
 inline TypeMeta::TypeMeta() noexcept

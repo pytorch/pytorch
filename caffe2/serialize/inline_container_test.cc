@@ -390,7 +390,7 @@ TEST(PytorchStreamWriterAndReader, SkipDuplicateSerializationIdRecords) {
 TEST(PytorchStreamWriterAndReader, LogAPIUsageMetadata) {
   std::map<std::string, std::map<std::string, std::string>> logs;
 
-  SetAPIUsageMetadataLogger(
+  c10::SetAPIUsageMetadataLogger(
       [&](const std::string& context,
           const std::map<std::string, std::string>& metadata_map) {
         logs.insert({context, metadata_map});
@@ -411,16 +411,16 @@ TEST(PytorchStreamWriterAndReader, LogAPIUsageMetadata) {
       {"pytorch.stream.writer.metadata",
        {{"serialization_id", writer.serializationId()},
        {"file_name", "archive"},
-       {"file_size", str(oss.str().length())}}},
+       {"file_size", c10::str(oss.str().length())}}},
       {"pytorch.stream.reader.metadata",
        {{"serialization_id", writer.serializationId()},
        {"file_name", "archive"},
-       {"file_size", str(iss.str().length())}}}
+       {"file_size", c10::str(iss.str().length())}}}
   };
   ASSERT_EQ(expected_logs, logs);
 
   // reset logger
-  SetAPIUsageMetadataLogger(
+  c10::SetAPIUsageMetadataLogger(
       [&](const std::string& context,
           const std::map<std::string, std::string>& metadata_map) {});
 }
