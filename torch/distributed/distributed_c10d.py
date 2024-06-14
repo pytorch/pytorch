@@ -3340,6 +3340,8 @@ def gather(tensor, gather_list=None, dst=0, group=None, async_op=False):
     """
     Gathers a list of tensors in a single process.
 
+    This method requires all tensors to be the same size on each process.
+
     Args:
         tensor (Tensor): Input tensor.
         gather_list (list[Tensor], optional): List of appropriately-sized
