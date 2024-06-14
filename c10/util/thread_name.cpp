@@ -1,6 +1,7 @@
 #include <c10/util/thread_name.h>
 
 #include <algorithm>
+#include <array>
 
 #ifndef __GLIBC_PREREQ
 #define __GLIBC_PREREQ(x, y) 0

@@ -920,19 +920,33 @@ class TritonKernelOverrides(TritonOverrides):
 
     @staticmethod
     def masked(mask, body, other):
-        with V.kernel.mask_loads(mask) as new_mask:
+        nodes = body.graph.find_nodes(op="output")
+        assert nodes, "graph for body does not contain an output"
+
+        need_where = False
+        for node in nodes:
+            for arg in node.args:
+                if arg.target != "load" or V.graph.is_unspec_arg(arg.args[0]):
+                    need_where = True
+
+        value = None if need_where else other
+        with V.kernel.mask_loads(mask, value=value) as new_mask:
             result = body()
 
-        # Remove once CSEVariables track the dtype
-        if result.bounds.is_bool:
-            other = bool(other)
-        # Take dtype from result to prevent accidental promotion
-        other = V.kernel.cse.generate(
-            V.kernel.compute,
-            f"tl.full({result}.shape, {constant_repr(other)}, {result}.dtype)",
-            bounds=ValueRanges.wrap(other),
-        )
-        ret = ops.where(new_mask, result, other)
+        if need_where:
+            # Remove once CSEVariables track the dtype
+            if result.bounds.is_bool:
+                other = bool(other)
+            # Take dtype from result to prevent accidental promotion
+            other = V.kernel.cse.generate(
+                V.kernel.compute,
+                f"tl.full({result}.shape, {constant_repr(other)}, {result}.dtype)",
+                bounds=ValueRanges.wrap(other),
+            )
+            ret = ops.where(new_mask, result, other)
+        else:
+            ret = result
+
         ret.mask_vars.discard(new_mask)
         return ret
 
@@ -1340,8 +1354,12 @@ class TritonKernel(SIMDKernel):
                 ep = ", eviction_policy='evict_first'"
         else:
             ep = ""
+
         if (has_tmpmask or has_rindex) and indexing.has_mask():
-            other = ", other=0.0"
+            if self._load_other:
+                other = f", other={constant_repr(self._load_other)}"
+            else:
+                other = ", other=0.0"
         else:
             other = ""
 
