@@ -21,6 +21,7 @@
 #include <c10/util/Logging.h>
 #include <c10/util/Optional.h>
 #include <c10/util/irange.h>
+#include <c10/util/thread_name.h>
 #include <torch/csrc/cuda/nccl.h>
 #include <torch/csrc/distributed/c10d/NCCLUtils.hpp>
 #include <torch/csrc/distributed/c10d/ParamCommsUtils.hpp>
@@ -28,6 +29,7 @@
 #include <torch/csrc/distributed/c10d/ProcessGroupNCCL.hpp>
 #include <torch/csrc/distributed/c10d/TraceUtils.h>
 #include <torch/csrc/distributed/c10d/Utils.hpp>
+#include <torch/csrc/distributed/c10d/control_plane/Handlers.hpp>
 #include <torch/csrc/distributed/c10d/logger.hpp>
 #include <torch/torch.h>
 
@@ -378,6 +380,15 @@ std::string dump_nccl_trace(
 }
 #endif
 
+// TODO(c-p-i-o): add a JSON endpoint.
+control_plane::RegisterHandler dumpHandler{
+    "dump_nccl_trace_pickle",
+    [](const control_plane::Request& req, control_plane::Response& res) {
+      // TODO: c-p-i-o: params from the request need to go to dump_nccl_trace.
+      res.setContent(
+          dump_nccl_trace(true, true, false), "application/octet-stream");
+    }};
+
 std::optional<std::function<void(std::function<void(const std::string&)>)>>&
 get_cpp_trace_dumper() {
   static std::optional<
@@ -396,6 +407,8 @@ std::future<bool> launchAsyncGilCheck() {
   std::future<bool> resultFuture = resultPromise.get_future();
   TORCH_CHECK(get_gil_checker(), "Can't check GIL with null GIL checker");
   std::thread workerThread([promise = std::move(resultPromise)]() mutable {
+    c10::setThreadName("pt_nccl_gil_chk");
+
     try {
       auto& gil_checker = get_gil_checker();
       promise.set_value((*gil_checker)());
@@ -1222,6 +1235,8 @@ int computeDeltaMS(
 }
 
 void ProcessGroupNCCL::heartbeatMonitor() {
+  c10::setThreadName("pt_nccl_heartbt");
+
   uint64_t heartBeatCounter = 0ULL;
   std::string errorMsg;
   std::string exitMsg;
@@ -1481,6 +1496,8 @@ void ProcessGroupNCCL::heartbeatMonitor() {
 }
 
 void ProcessGroupNCCL::ncclCommWatchdog() {
+  c10::setThreadName("pt_nccl_watchdg");
+
   try {
     VLOG(2) << logPrefix() << "Process group watchdog thread started!";
     ncclHeartbeatMonitorThread_ =
@@ -1781,6 +1798,8 @@ void ProcessGroupNCCL::watchdogHandler() {
 }
 
 void ProcessGroupNCCL::runHookLoop() {
+  c10::setThreadName("pt_nccl_runhook");
+
   bool done = false;
   while (!done || !terminateProcessGroup_.load()) {
     std::unique_lock<std::mutex> lock(completedWorkListMutex_);

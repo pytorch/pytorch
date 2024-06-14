@@ -4694,7 +4694,8 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
         opt_fn = torch.compile(fn, backend=cnt)
         res = opt_fn(x_weak, weight, y)
         self.assertEqual(ref, res)
-        self.assertEqual(cnt.frame_count, 2)
+        # Skip frame should get triggered
+        self.assertEqual(cnt.frame_count, 0)
 
     def test_weakref_del(self):
         def fn(x_weak, y):

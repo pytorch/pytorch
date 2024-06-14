@@ -4077,7 +4077,15 @@ PyObject* torch_c_dynamo_guards_init() {
       DictSubclassGuardManager,
       DictGuardManager,
       std::unique_ptr<DictSubclassGuardManager>>(
-      py_m, "DictSubclassGuardManager"); // NOLINT
+      py_m, "DictSubclassGuardManager") // NOLINT
+      .def(
+          "add_no_hasattr_guard",
+          [](DictSubclassGuardManager& self,
+             py::object attr_name,
+             py::object verbose_code_parts) -> void {
+            self.add_permitted_leaf_guard(std::make_shared<NO_HASATTR>(
+                std::move(attr_name), std::move(verbose_code_parts)));
+          });
 
   py_m.def("install_tensor_aliasing_guard", install_tensor_aliasing_guard);
   py_m.def(

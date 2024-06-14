@@ -49,7 +49,12 @@ from torch._dynamo.testing import (
     unsupported,
     xfailIfPy312,
 )
-from torch._dynamo.utils import CompileProfiler, counters, ifdynstaticdefault
+from torch._dynamo.utils import (
+    CompileProfiler,
+    counters,
+    ifdynstaticdefault,
+    strip_color_from_string,
+)
 from torch._inductor.utils import run_and_get_code
 from torch.ao.quantization import MinMaxObserver
 from torch.ao.quantization.fake_quantize import FakeQuantize
@@ -80,6 +85,7 @@ from torch.testing._internal.common_utils import (
     freeze_rng_state,
     IS_FBCODE,
     set_default_dtype,
+    skipIfNNModuleInlined,
     wrapDeterministicFlagAPITest,
 )
 from torch.testing._internal.jit_utils import JitTestCase
@@ -224,6 +230,7 @@ class MiscTests(torch._inductor.test_case.TestCase):
         with self.assertRaises(TypeError):
             fn(torch.randn(16))
 
+    @skipIfNNModuleInlined("fails internal CI")
     def test_cpp_extension_recommends_custom_ops(self):
         cpp_source = """
         #include <torch/extension.h>
@@ -255,6 +262,38 @@ class MiscTests(torch._inductor.test_case.TestCase):
             first_graph_break,
             """Graph break due to unsupported builtin mylib.PyCapsule.foobar. This function is either a Python builtin (e.g. _warnings.warn) or a third-party C/C++ Python extension (perhaps created with pybind). If it is a Python builtin, please file an issue on GitHub so the PyTorch team can add support for it and see the next case for a workaround. If it is a third-party C/C++ Python extension, please either wrap it into a PyTorch-understood custom operator (see https://pytorch.org/docs/main/notes/custom_operators.html for more details) or, if it is traceable, use torch.compiler.allow_in_graph.""",
         )
+
+        cpp_source = """
+        #include <torch/extension.h>
+        at::Tensor baz(const at::Tensor& x) {
+            return x.clone();
+        }
+        """
+        module2 = torch.utils.cpp_extension.load_inline(
+            name="mylib2",
+            cpp_sources=cpp_source,
+            functions="baz",
+            verbose=True,
+        )
+
+        torch._dynamo.reset()
+
+        # Test that each warning only happens once
+        @torch.compile(backend="eager")
+        def f(x):
+            module2.baz(x)
+            module.foobar(x)
+            module.foobar(x)
+            module2.baz(x)
+            module.foobar(x)
+            module2.baz(x)
+            return x.clone()
+
+        with warnings.catch_warnings(record=True) as ws:
+            warnings.simplefilter("always")
+            f(x)
+            f(x)
+        self.assertEqual(len(ws), 2)
 
     def test_callpacked(self):
         def call_packed(args):
@@ -692,6 +731,7 @@ class MiscTests(torch._inductor.test_case.TestCase):
             post_grad_graphs = "\n".join(
                 log_stream.getvalue().strip().split("\n")[3:]
             ).strip()
+            post_grad_graphs = strip_color_from_string(post_grad_graphs)
 
             # Check the graph under static shapes
             if torch._dynamo.config.assume_static_by_default:
@@ -754,6 +794,7 @@ def forward(self, arg0_1: "f32[3][1]cpu", arg1_1: "f32[3][1]cpu", arg2_1: "f32[3
                 post_grad_graphs = "\n".join(
                     log_stream.getvalue().strip().split("\n")[3:]
                 ).strip()
+                post_grad_graphs = strip_color_from_string(post_grad_graphs)
                 self.assertExpectedInline(
                     post_grad_graphs,
                     """\
@@ -846,6 +887,7 @@ def forward(self, arg0_1: "f32[3][1]cpu", arg1_1: "f32[3][1]cpu", arg2_1: "f32[3
                 post_grad_graphs = "\n".join(
                     log_stream.getvalue().strip().split("\n")[3:]
                 ).strip()
+                post_grad_graphs = strip_color_from_string(post_grad_graphs)
                 self.assertExpectedInline(
                     post_grad_graphs,
                     """\

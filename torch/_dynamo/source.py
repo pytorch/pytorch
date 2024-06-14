@@ -7,6 +7,7 @@ from typing import Any, Optional, Union
 from torch._guards import ChainedSource, GuardSource, Source
 
 from . import utils
+from .exc import unimplemented
 from .bytecode_transformation import create_call_function, create_instruction
 from .utils import enum_repr
 
@@ -145,8 +146,11 @@ class GlobalWeakRefSource(Source):
 @dataclasses.dataclass(frozen=True)
 class WeakRefCallSource(ChainedSource):
     def reconstruct(self, codegen):
-        self.base.reconstruct(codegen)
-        codegen.extend_output(create_call_function(0, True))
+        unimplemented(
+            "Dynamo is reconstructing a weakref call. This is not supported "
+            "because weakref requires refcounts to be counted correctly "
+            "and its beyond Dynamo scope."
+        )
 
     def guard_source(self):
         return self.base.guard_source()

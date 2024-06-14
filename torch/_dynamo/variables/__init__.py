@@ -23,7 +23,6 @@ from .ctx_manager import (
 from .dicts import (
     ConstDictVariable,
     CustomizedDictVariable,
-    DataClassVariable,
     DefaultDictVariable,
     SetVariable,
 )
@@ -114,7 +113,6 @@ __all__ = [
     "CountIteratorVariable",
     "CustomizedDictVariable",
     "CycleIteratorVariable",
-    "DataClassVariable",
     "DefaultDictVariable",
     "DeletedVariable",
     "DeterministicAlgorithmsVariable",

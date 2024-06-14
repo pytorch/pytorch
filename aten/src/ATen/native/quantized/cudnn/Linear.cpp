@@ -286,7 +286,7 @@ void PackedLinearWeightCudnn::apply_impl_helper(const at::Tensor& quantized_outp
       run(plan);
       execution_plan_cache.emplace(key, plan);
       return;
-    } catch (cudnn_frontend::cudnnException &e) {} catch(c10::CuDNNError &e) {}
+    } catch (cudnn_frontend::cudnnException &e) {std::cout << "cudnn error:" << e.what() << std::endl;} catch(c10::CuDNNError &e) { std::cout << "other error" << e.what() << std::endl;}
   }
 
   TORCH_CHECK(false, "Unable to find an engine to execute this computation Quantized Linear Cudnn");
