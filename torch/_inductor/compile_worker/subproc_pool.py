@@ -215,7 +215,7 @@ class SubprocMain:
         self.pool.shutdown()
 
     def submit(self, job_id, data):
-        while True:
+        while self.running:
             try:
                 self._submit_inner(job_id, data)
                 return
