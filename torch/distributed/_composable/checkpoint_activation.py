@@ -94,16 +94,14 @@ def checkpoint(module: nn.Module, **kwargs) -> nn.Module:
 
             checkpoint.state(
                 module
-            )._ac_generator = (
-                _checkpoint_without_reentrant_generator(
-                    module,
-                    preserve_rng_state,
-                    context_fns,
-                    determinism_check,
-                    debug,
-                    *args,
-                    **kwargs,
-                )
+            )._ac_generator = _checkpoint_without_reentrant_generator(
+                module,
+                preserve_rng_state,
+                context_fns,
+                determinism_check,
+                debug,
+                *args,
+                **kwargs,
             )
             next(checkpoint.state(module)._ac_generator)
 
