@@ -63,7 +63,6 @@ def checkpoint(module: nn.Module, **kwargs) -> nn.Module:
     """
     torch._C._log_api_usage_once("torch.distributed.checkpoint")
 
-    kwargs = kwargs or {}
     use_reentrant = kwargs.pop("use_reentrant", False)
     if use_reentrant:
         raise NotImplementedError(

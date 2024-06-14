@@ -246,11 +246,15 @@ class TestCheckpoint(TestCase):
         m0, m1, m2, m3 = (deepcopy(m) for _ in range(4))
 
         # composable checkpoint does not support use_reentrant=True
-        with self.assertRaises(NotImplementedError):
+        with self.assertRaisesRegex(
+            NotImplementedError,
+            "use_reentrant=True is not supported in composable checkpoint. "
+            "Please use torch.utils.checkpoint.checkpoint instead.",
+        ):
             checkpoint(m, use_reentrant=True)
 
         # check giving an unsupported kwarg
-        with self.assertRaises(ValueError):
+        with self.assertRaisesRegex(ValueError, "Unexpected keyword arguments: foo"):
             checkpoint(m0, foo="bar")
 
         handled_fwd_exp = False
@@ -302,6 +306,7 @@ class TestCheckpoint(TestCase):
         checkpoint(m4, determinism_check="none")
         with self.assertRaises(RuntimeError):
             m4(x.clone()).sum().backward()
+
         # Determinism check should throw a CheckpointError
         checkpoint(m5, determinism_check="default")
         with self.assertRaises(CheckpointError):
@@ -309,23 +314,22 @@ class TestCheckpoint(TestCase):
 
         # Test preserving random state
         m6 = MyModel(False, False)
-        m7 = deepcopy(m6)
-        checkpoint(m6, preserve_rng_state=False)
-        checkpoint(m7, preserve_rng_state=True)
+        m7, m8 = (deepcopy(m6) for _ in range(2))
+        checkpoint(m7, preserve_rng_state=False)
+        checkpoint(m8, preserve_rng_state=True)
 
-        torch.manual_seed(42)
-        cpu_rng_state = torch.get_rng_state()
-        loss = m6(x.clone()).sum()
-        torch.manual_seed(41)
-        loss.backward()
-
-        torch.set_rng_state(cpu_rng_state)
-        loss = m7(x.clone()).sum()
-        torch.manual_seed(41)
-        loss.backward()
+        for mi in (m6, m7, m8):
+            torch.manual_seed(42)
+            loss = mi(x.clone()).sum()
+            torch.manual_seed(41)
+            loss.backward()
+        # check that m6 and m7 have at least one different grad
         self.assertNotEqual(
             (p1.grad for p1 in m6.parameters()), (p2.grad for p2 in m7.parameters())
         )
+        # check that m6 and m8 have identical grads
+        for p1, p2 in zip(m6.parameters(), m8.parameters()):
+            self.assertEqual(p1.grad, p2.grad)
 
 
 if __name__ == "__main__":
