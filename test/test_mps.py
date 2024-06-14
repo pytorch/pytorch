@@ -2856,8 +2856,8 @@ class TestMPS(TestCaseMPS):
 
     def test_weight_norm(self):
         def validate_weight_norm_equality(model, cpu_model, x, cpu_x, dim):
-            cpu_norm = torch.nn.utils.weight_norm(cpu_model, dim=dim)
-            norm = torch.nn.utils.weight_norm(model, dim=dim)
+            cpu_norm = torch.nn.utils.parametrizations.weight_norm(cpu_model, dim=dim)
+            norm = torch.nn.utils.parametrizations.weight_norm(model, dim=dim)
 
             cpu_out = cpu_norm(cpu_x)
             out = norm(x)
@@ -2869,8 +2869,8 @@ class TestMPS(TestCaseMPS):
             cpu_out.backward(gradient=cpu_grad)
             out.backward(gradient=grad)
 
-            self.assertEqual(cpu_model.weight_g.grad, model.weight_g.grad)
-            self.assertEqual(cpu_model.weight_v.grad, model.weight_v.grad)
+            self.assertEqual(cpu_model.parametrizations.weight.original0.grad, model.parametrizations.weight.original0.grad)
+            self.assertEqual(cpu_model.parametrizations.weight.original1.grad, model.parametrizations.weight.original1.grad)
 
             self.assertEqual(x.grad, cpu_x.grad)
 
