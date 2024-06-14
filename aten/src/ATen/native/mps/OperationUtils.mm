@@ -664,6 +664,7 @@ id<MTLLibrary> MetalShaderLibrary::compileLibrary(const std::string& src) {
                                                                                         : MTLLanguageVersion2_3];
     [options setFastMathEnabled:NO];
   }
+
   auto str = [NSString stringWithCString:src.c_str() encoding:NSASCIIStringEncoding];
   auto device = MPSDevice::getInstance()->device();
   library = [device newLibraryWithSource:str options:options error:&error];

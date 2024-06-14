@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import functools
 
 from typing import Any, cast, NoReturn, Optional, Union
@@ -344,4 +345,8 @@ def register_fsdp_forward_method(module: nn.Module, method_name: str) -> None:
         return fsdp_state._post_forward(self, args, out)
 
     # Use `__get__` to make `wrapped_method` an instance method
-    setattr(module, method_name, wrapped_method.__get__(module, type(module)))
+    setattr(
+        module,
+        method_name,
+        wrapped_method.__get__(module, type(module)),  # type:ignore[attr-defined]
+    )

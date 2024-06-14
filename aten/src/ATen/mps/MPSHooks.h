@@ -32,6 +32,7 @@ struct MPSHooks : public at::MPSHooksInterface {
   void emptyCache() const override;
   size_t getCurrentAllocatedMemory() const override;
   size_t getDriverAllocatedMemory() const override;
+  size_t getRecommendedMaxMemory() const override;
   void setMemoryFraction(double ratio) const override;
 
   // MPSProfiler interface

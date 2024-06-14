@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import builtins
 import collections
 import inspect
@@ -232,10 +233,12 @@ __all__ = [
     # View & Shape Ops
     #
     "alias",
+    "alias_copy",
     "atleast_1d",
     "atleast_2d",
     "atleast_3d",
     "as_strided",
+    "as_strided_copy",
     "as_strided_scatter",
     "block_diag",
     "broadcast_shapes",
@@ -2653,6 +2656,9 @@ def as_strided(
     return prims.as_strided(a, size, stride, storage_offset_int)
 
 
+as_strided_copy = _make_copy_from_view(as_strided)
+
+
 @register_decomposition(aten.as_strided_scatter)
 @out_wrapper()
 def as_strided_scatter(
@@ -3649,6 +3655,16 @@ def _reshape_view_helper(a: TensorLikeType, *shape, allow_copy: bool) -> TensorL
         else:
             return _a
 
+    if a.is_contiguous():
+        # Special-cases for nd_to_1d
+        if len(shape) == 1 and a.ndim > 1:
+            return torch.as_strided(a, [a.numel()], [1])
+        # Special-cases for 1d_to_2d
+        if len(shape) == 2 and a.ndim == 1:
+            dim0 = shape[0]
+            dim1 = shape[1]
+            return torch.as_strided(a, [dim0, dim1], [dim1, 1])
+
     # Handles general case: a 1+D tensor reshaped into a distinct 1+D shape
 
     # NOTE [Reshape Algorithm]
@@ -4451,6 +4467,9 @@ def alias(a: TensorLikeType) -> TensorLikeType:
     return prims.view_of(a)
 
 
+alias_copy = _make_copy_from_view(alias)
+
+
 @register_decomposition(aten.transpose)
 def transpose(a: TensorLikeType, dim0: int, dim1: int) -> TensorLikeType:
     _dim0, _dim1 = utils.canonicalize_dims(a.ndim, (dim0, dim1))  # type: ignore[misc]
@@ -5014,11 +5033,7 @@ def lerp(start: Tensor, end: Tensor, weight: Union[Tensor, NumberType]):
     # make sure the decomposition output's stride is same as non-decomposition path.
     stride = utils.compute_elementwise_output_strides(*_maybe_broadcast(*inputs))
     if output.stride() != stride:
-        output = torch.ops.aten.as_strided_copy(
-            output,
-            output.size(),
-            stride,
-        )
+        output = prims.copy_strided(output, stride)
 
     return handle_noncontiguous_outputs(inputs, output)
 

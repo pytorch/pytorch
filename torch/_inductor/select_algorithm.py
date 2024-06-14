@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import builtins
 import contextlib
 import functools
@@ -386,7 +387,7 @@ class TritonTemplateKernel(TritonKernel):
             assert isinstance(mask, (str, type(None)))
             assert self.template_mask is None
             indices = list(map(TritonPrinter.paren, indices))
-            index_symbols = [sympy.Symbol(x) for x in indices]
+            index_symbols = [sympy.Symbol(x, integer=True) for x in indices]
             lengths = [
                 V.graph.sizevars.simplify(s) for s in self.output_node.get_size()
             ]
@@ -410,7 +411,7 @@ class TritonTemplateKernel(TritonKernel):
             output_index = self.output_node.get_layout().make_indexer()(index_symbols)
             output_index = self.rename_indexing(output_index)
             if output_index == contiguous_index:
-                output_index = sympy.Symbol("xindex")
+                output_index = sympy.Symbol("xindex", integer=True)
 
             epilogue_args = [val]
             for input_node in itertools.chain(
@@ -532,7 +533,7 @@ class TritonTemplateKernel(TritonKernel):
                 triton_meta=self.triton_meta,
             )
         else:
-            stream_name = wrapper.write_get_raw_stream(current_device.index)
+            stream_name = wrapper.write_get_raw_stream(current_device.index, V.graph)
 
             wrapper.add_import_once(f"import {self.grid_fn.__module__}")
             meta = wrapper.add_meta_once(self.meta)

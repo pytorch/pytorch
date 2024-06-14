@@ -14648,11 +14648,13 @@
   variants: function
   dispatch:
     CUDA: _fbgemm_jagged_to_padded_dense_forward
+    CPU: _jagged_to_padded_dense_forward_cpu
 
 - func: _padded_dense_to_jagged_forward(Tensor dense, Tensor[] offsets, SymInt? total_L=None) -> Tensor
   variants: function
   dispatch:
     CUDA: _fbgemm_dense_to_jagged_forward_symint
+    CPU: _padded_dense_to_jagged_forward_cpu
 
 - func: _nested_tensor_softmax_with_shape(Tensor self, Tensor query) -> Tensor
   dispatch:
