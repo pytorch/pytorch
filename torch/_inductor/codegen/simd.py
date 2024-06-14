@@ -310,7 +310,7 @@ class SIMDKernel(Kernel):
         mutations: Optional[Set[str]] = None,
         pid_cache=None,
         reduction_hint=ReductionHint.DEFAULT,
-        override_persistent_reduction=False,
+        override_persistent_reduction=None,
     ):
         if pid_cache is None:
             pid_cache = {}
@@ -1283,6 +1283,14 @@ class SIMDScheduling(BaseScheduling):
             for node in node_schedule
         )
 
+        kernel_type = TritonSplitScanKernel if is_split_scan else self.kernel_type
+        kernel_args = tiled_groups
+        kernel_kwargs = dict(
+            reduction_hint=reduction_hint_val,
+            mutations=mutations,
+            index_dtype=index_dtype,
+        )
+
         def _node_has_sort(node):
             if node in (EnableReduction, DisableReduction):
                 return False
@@ -1295,20 +1303,12 @@ class SIMDScheduling(BaseScheduling):
         # ops.sort only works with persistent reduction, and is not bandwidth bound anyway
         # so taking the hit of non-coalesced loads is okay
         has_sort = any(_node_has_sort(node) for node in node_schedule)
-        override_persistent_reduction = True if has_sort else None
-
-        kernel_type = TritonSplitScanKernel if is_split_scan else self.kernel_type
-        kernel_args = tiled_groups
-        kernel_kwargs = dict(
-            reduction_hint=reduction_hint_val,
-            mutations=mutations,
-            index_dtype=index_dtype,
-        )
+        if has_sort:
+            kernel_kwargs["override_persistent_reduction"] = True
 
         kernel = kernel_type(
             *kernel_args,
             **kernel_kwargs,
-            override_persistent_reduction=override_persistent_reduction,
         )
         kernel.buf_accesses = buf_accesses
 
