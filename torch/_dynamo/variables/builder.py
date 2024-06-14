@@ -313,7 +313,7 @@ class VariableBuilder:
 
         vt = self._wrap(value)
         vt.source = self.source
-        if self._can_lift_attrs_to_inputs(vt):
+        if self._can_lift_attrs_to_inputs(vt) and value not in self.tx.output.side_effects:
             vt = self.tx.output.side_effects.track_object_existing(value, vt)
 
         self.tx.output.variable_tracker_cache.add(value, self.source, vt)
