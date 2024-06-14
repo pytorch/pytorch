@@ -1,6 +1,5 @@
 # mypy: allow-untyped-defs
 import contextlib
-from collections import defaultdict
 from typing import Any, Dict, Iterator, Optional, Set, Tuple, Union
 from typing_extensions import deprecated
 
@@ -8,54 +7,8 @@ import torch
 from torch import Tensor
 from torch.nn.utils._named_member_accessor import NamedMemberAccessor
 
+
 __all__ = ["functional_call"]
-
-
-def _groupby_tensor(
-    all_named_tensors,
-    parameters_and_buffers: Dict[str, Tensor],
-    untied_parameters_and_buffers,
-):
-    # A map of {tensor: set(all_tied_names)} for all tensor names in the module.
-    tensor_to_tied_names_map: Dict[Tensor, Set[str]] = defaultdict(set)
-    for name, tensor in all_named_tensors.items():
-        tensor_to_tied_names_map[tensor].add(name)
-
-    # A map of {tied_name: set(all_tied_names)} for all tensor names in the module.
-    # If a name is not tied, it will not be in this map.
-    tied_names_map: Dict[str, Set[str]] = {}
-    for tied_names in tensor_to_tied_names_map.values():
-        if len(tied_names) > 1:
-            for tied_name in tied_names:
-                tied_names_map[tied_name] = tied_names
-
-    # Make sure the user didn't pass multiple values for the same tied tensor.
-    given_names = set(parameters_and_buffers.keys())
-    given_names_for_tied_tensors = given_names.intersection(tied_names_map.keys())
-    for given_name in given_names_for_tied_tensors:
-        tied_names = tied_names_map[given_name]
-        if (
-            # Detect if there are multiple keys present for the same tied tensor.
-            len(tied_names.intersection(given_names_for_tied_tensors)) > 1
-            # Only raise an error if the user passed multiple values for the same tied tensor.
-            # If all given values are the same, don't raise.
-            and len({parameters_and_buffers[tied_name] for tied_name in tied_names})
-            != 1
-        ):
-            raise ValueError(
-                f"functional_call got multiple values for keys {sorted(tied_names)}, "
-                f"which are tied. Consider using tie_weights=False"
-            )
-
-    # Untie the given named tensor map
-    # Make a copy for not modifying the original dict
-    # untied_parameters_and_buffers = parameters_and_buffers.copy()
-    for given_name in given_names_for_tied_tensors:
-        for tied_name in tied_names_map[given_name]:
-            untied_parameters_and_buffers[tied_name] = parameters_and_buffers[
-                given_name
-            ]
-    # return untied_parameters_and_buffers
 
 
 def _untie_named_tensors_map(
@@ -92,48 +45,52 @@ def _untie_named_tensors_map(
     all_named_tensors.update(module.named_parameters(remove_duplicate=False))
     all_named_tensors.update(module.named_buffers(remove_duplicate=False))
 
-    # # A map of {tensor: set(all_tied_names)} for all tensor names in the module.
+    # A map of {tensor: set(all_tied_names)} for all tensor names in the module.
     # tensor_to_tied_names_map: Dict[Tensor, Set[str]] = defaultdict(set)
-    # for name, tensor in all_named_tensors.items():
-    #     tensor_to_tied_names_map[tensor].add(name)
+    tensor_to_tied_names_map: Dict[Tensor, Set[str]] = {}
+    for name, tensor in all_named_tensors.items():
+        if tensor not in tensor_to_tied_names_map:
+            tensor_to_tied_names_map[tensor] = set()
+        tensor_to_tied_names_map[tensor].add(name)
 
-    # # A map of {tied_name: set(all_tied_names)} for all tensor names in the module.
-    # # If a name is not tied, it will not be in this map.
-    # tied_names_map: Dict[str, Set[str]] = {}
-    # for tied_names in tensor_to_tied_names_map.values():
-    #     if len(tied_names) > 1:
-    #         for tied_name in tied_names:
-    #             tied_names_map[tied_name] = tied_names
+    # A map of {tied_name: set(all_tied_names)} for all tensor names in the module.
+    # If a name is not tied, it will not be in this map.
+    tied_names_map: Dict[str, Set[str]] = {}
+    for tied_names in tensor_to_tied_names_map.values():
+        if len(tied_names) > 1:
+            for tied_name in tied_names:
+                tied_names_map[tied_name] = tied_names
 
-    # # Make sure the user didn't pass multiple values for the same tied tensor.
-    # given_names = set(parameters_and_buffers.keys())
+    # Make sure the user didn't pass multiple values for the same tied tensor.
+    given_names = set(parameters_and_buffers.keys())
+    given_names_for_tied_tensors: set[str] = set()
+    for name in given_names:
+        if name in tied_names_map:
+            given_names_for_tied_tensors.add(name)
     # given_names_for_tied_tensors = given_names.intersection(tied_names_map.keys())
-    # for given_name in given_names_for_tied_tensors:
-    #     tied_names = tied_names_map[given_name]
-    #     if (
-    #         # Detect if there are multiple keys present for the same tied tensor.
-    #         len(tied_names.intersection(given_names_for_tied_tensors)) > 1
-    #         # Only raise an error if the user passed multiple values for the same tied tensor.
-    #         # If all given values are the same, don't raise.
-    #         and len({parameters_and_buffers[tied_name] for tied_name in tied_names})
-    #         != 1
-    #     ):
-    #         raise ValueError(
-    #             f"functional_call got multiple values for keys {sorted(tied_names)}, "
-    #             f"which are tied. Consider using tie_weights=False"
-    #         )
+    for given_name in given_names_for_tied_tensors:
+        tied_names = tied_names_map[given_name]
+        if (
+            # Detect if there are multiple keys present for the same tied tensor.
+            len(tied_names.intersection(given_names_for_tied_tensors)) > 1
+            # Only raise an error if the user passed multiple values for the same tied tensor.
+            # If all given values are the same, don't raise.
+            and len({parameters_and_buffers[tied_name] for tied_name in tied_names})
+            != 1
+        ):
+            raise ValueError(
+                f"functional_call got multiple values for keys {sorted(tied_names)}, "
+                f"which are tied. Consider using tie_weights=False"
+            )
 
-    # # Untie the given named tensor map
-    # # Make a copy for not modifying the original dict
+    # Untie the given named tensor map
+    # Make a copy for not modifying the original dict
     untied_parameters_and_buffers = parameters_and_buffers.copy()
-    _groupby_tensor(
-        all_named_tensors, parameters_and_buffers, untied_parameters_and_buffers
-    )
-    # for given_name in given_names_for_tied_tensors:
-    #     for tied_name in tied_names_map[given_name]:
-    #         untied_parameters_and_buffers[tied_name] = parameters_and_buffers[
-    #             given_name
-    #         ]
+    for given_name in given_names_for_tied_tensors:
+        for tied_name in tied_names_map[given_name]:
+            untied_parameters_and_buffers[tied_name] = parameters_and_buffers[
+                given_name
+            ]
     return untied_parameters_and_buffers
 
 

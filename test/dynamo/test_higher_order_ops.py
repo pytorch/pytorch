@@ -3620,15 +3620,53 @@ class GraphModule(torch.nn.Module):
         l_inputs_ = L_inputs_
         l_targets_ = L_targets_
 
-        tensor: "f32[3, 3]" = self.model_weight
-        tensor_1: "f32[3]" = self.model_bias
-
-        _groupby_tensor = torch.nn.utils.stateless._groupby_tensor({'weight': tensor, 'bias': tensor_1}, {'weight': tensor, 'bias': tensor_1}, {'weight': tensor, 'bias': tensor_1});  tensor = tensor_1 = None
-
         r: "f32[64, 3]" = self.model(l_inputs_);  l_inputs_ = None
 
         mse_loss: "f32[]" = torch.nn.functional.mse_loss(r, l_targets_);  r = l_targets_ = None
         return (mse_loss,)
+""",
+        )
+
+    def test_functional_call_sequential_params_and_buffers(self):
+        # copied from test/test_stateless.py
+        class MockModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.l1 = torch.nn.Linear(1, 1)
+                self.register_buffer("buffer", torch.ones(1))
+                self.foo = 0.0
+
+            def forward(self, x):
+                return self.l1(x) + self.buffer
+
+        def wrapper_fn(model, params, buffers, inputs):
+            # two separate dictionaries
+            return torch.func.functional_call(model, (params, buffers), inputs)
+
+        model = MockModule()
+        params = dict(model.named_parameters())
+        buffers = dict(model.named_buffers())
+        inputs = torch.tensor([[1.5]])
+
+        wrapped_gm = self._compile_check(
+            wrapper_fn, (model, params, buffers, inputs), fullgraph=False
+        )
+        # Dynamic shapes produce a slightly different graph.
+        if check_dynamic_shape_capture():
+            return
+
+        actual = normalize_gm(wrapped_gm.print_readable(print_output=False))
+        self.assertExpectedInline(
+            actual,
+            """\
+class GraphModule(torch.nn.Module):
+    def forward(self, L_buffers_buffer_: "f32[1]", L_inputs_: "f32[1, 1]"):
+        l_buffers_buffer_ = L_buffers_buffer_
+        l_inputs_ = L_inputs_
+
+        l__model___l1: "f32[1, 1]" = self.L__model___l1(l_inputs_);  l_inputs_ = None
+        r: "f32[1, 1]" = l__model___l1 + l_buffers_buffer_;  l__model___l1 = l_buffers_buffer_ = None
+        return (r,)
 """,
         )
 

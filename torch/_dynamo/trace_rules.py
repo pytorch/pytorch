@@ -278,7 +278,6 @@ manual_torch_name_rule_map = {
     "torch._functorch.functional_call.functional_call": FunctorchHigherOrderVariable,
     "torch._functorch.functional_call.construct_stacked_leaf": UserFunctionVariable,
     "torch._functorch.functional_call.stack_module_state": UserFunctionVariable,
-    "torch.nn.utils.stateless._untie_named_tensors_map": UserFunctionVariable,
     "torch.nn.utils.stateless._groupby_tensor": TorchInGraphFunctionVariable,
     # functorch/deprecated
     "torch._functorch.deprecated.jvp": UserFunctionVariable,

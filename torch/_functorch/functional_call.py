@@ -1,5 +1,4 @@
 # mypy: allow-untyped-defs
-from collections import Counter
 from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
 
 import torch
@@ -122,19 +121,29 @@ def functional_call(
     if isinstance(parameter_and_buffer_dicts, dict):
         parameters_and_buffers = parameter_and_buffer_dicts
     elif isinstance(parameter_and_buffer_dicts, Sequence):
-        if not all(isinstance(d, dict) for d in parameter_and_buffer_dicts):
-            raise ValueError(
-                "Expected all elements of parameter_and_buffer_dicts to be dictionaries"
-            )
-        all_keys = [k for d in parameter_and_buffer_dicts for k in d.keys()]
-        repeated_keys = [key for key, n in Counter(all_keys).items() if n > 1]
+        for d in parameter_and_buffer_dicts:
+            if not isinstance(d, dict):
+                raise ValueError(
+                    "Expected all elements of parameter_and_buffer_dicts to be dictionaries"
+                )
+
+        all_keys: set[str] = set()
+        repeated_keys: set[str] = set()
+        for d in parameter_and_buffer_dicts:
+            for k in d.keys():
+                if k not in all_keys:
+                    all_keys.add(k)
+                else:
+                    repeated_keys.add(k)
         if len(repeated_keys) > 0:
             raise ValueError(
                 f"{repeated_keys} appeared in multiple dictionaries; behavior of functional call is ambiguous"
             )
-        parameters_and_buffers = {
-            k: v for d in parameter_and_buffer_dicts for k, v in d.items()
-        }
+
+        parameters_and_buffers: Dict[str, Tensor] = {}  # type: ignore[no-redef]
+        for d in parameter_and_buffer_dicts:
+            for k, v in d.items():
+                parameters_and_buffers[k] = v
     else:
         raise ValueError(
             f"Expected parameter_and_buffer_dicts to be a dict, or a list/tuple of dicts, "
