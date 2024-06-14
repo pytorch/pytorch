@@ -1182,6 +1182,7 @@ test_executorch() {
 
   echo "Run ExecuTorch unit tests"
   pytest -v -n auto
+  # shellcheck disable=SC1091
   source test/run_oss_cpp_tests.sh
 
   echo "Run ExecuTorch regression tests for some models"
