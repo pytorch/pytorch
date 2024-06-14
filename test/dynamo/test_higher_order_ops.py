@@ -5285,6 +5285,28 @@ class GraphModule(torch.nn.Module):
         with self.assertRaises(torch._dynamo.exc.RecompileError):
             torch.vmap(fn, randomness="different")(x)
 
+    def test_vmap_call_torch_compile_fn(self):
+        def wrapped_fn(x):
+            return x.sin()
+
+        x = torch.randn(3, 4)
+        fn = torch.compile(backend="aot_eager", fullgraph=True)(wrapped_fn)
+
+        expected = torch.func.vmap(wrapped_fn)(x)
+        got = torch.func.vmap(fn)(x)
+        self.assertEqual(expected, got)
+
+    def test_grad_call_torch_compile_fn(self):
+        def wrapped_fn(x):
+            return x.sin().sum()
+
+        x = torch.randn(3, 4)
+        fn = torch.compile(backend="aot_eager", fullgraph=True)(wrapped_fn)
+
+        expected = torch.func.grad(wrapped_fn)(x)
+        got = torch.func.grad(fn)(x)
+        self.assertEqual(expected, got)
+
     @config.patch(error_on_recompile=True)
     def test_grad_recompile(self):
         @torch.compile(backend="eager")

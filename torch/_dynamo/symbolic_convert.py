@@ -184,7 +184,7 @@ class SpeculationLog:
             and entry.lineno == lineno
         ), textwrap.dedent(
             f"""
-            SpecuationLog diverged at {self.index} of {len(self.entries)}:
+            SpeculationLog diverged at {self.index} of {len(self.entries)}:
             - Run1: {entry.filename}:{entry.lineno} (ip={entry.instruction_pointer})
             - Run2: {filename}:{lineno} (ip={instruction_pointer})
             Please submit a bug report.
@@ -2445,7 +2445,21 @@ class InstructionTranslator(InstructionTranslatorBase):
             torch._C._functorch.TransformType.Grad,
             torch._C._functorch.TransformType.Jvp,
         )
-        if ci is not None and ci.key() in forbidden_keys and compiler_fn is not eager:
+        match_graph_break_log = False
+        if len(self.speculation_log.entries):
+            log = self.speculation_log.entries[self.speculation_log.index]
+            match_graph_break_log = (
+                log.failed
+                and log.filename == self.f_code.co_filename
+                and log.lineno == self.f_code.co_firstlineno
+            )
+
+        if (
+            ci is not None
+            and ci.key() in forbidden_keys
+            and compiler_fn is not eager
+            and match_graph_break_log
+        ):
             # if it reaches here, it means Dynamo failed to inline a functorch function
             name = ci.key().name.lower()
             msg = f"torch.func.{name}(fn) requires the function to be inlined by dynamo"
