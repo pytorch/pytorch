@@ -351,8 +351,6 @@ def is_inplace(op, variant):
 
 vjp_fail = {
     xfail("tensor_split"),  # data_ptr composite compliance
-    # https://github.com/pytorch/pytorch/issues/96560
-    decorate("nn.functional.scaled_dot_product_attention", decorator=skipIfRocm),
 }
 
 aliasing_ops = {
@@ -399,6 +397,7 @@ aliasing_ops_list_return = {
 
 skip_noncontig = {
     "_batch_norm_with_update",
+    "as_strided_copy",
 }
 
 
@@ -433,7 +432,10 @@ class TestOperators(TestCase):
                 xfail("view_as_complex"),
                 # query: last dimension must be contiguous
                 # Fused attention kernels require last dim to be contiguous
-                xfail("nn.functional.scaled_dot_product_attention"),
+                decorate(
+                    "nn.functional.scaled_dot_product_attention",
+                    decorator=expectedFailureIf(not TEST_WITH_ROCM),
+                ),  # Works on ROCm
                 xfail("torch.ops.aten._flash_attention_forward"),
                 xfail("torch.ops.aten._efficient_attention_forward"),
                 # RuntimeError: Expected contiguous tensor, but got
@@ -731,7 +733,10 @@ class TestOperators(TestCase):
                 xfail("view_as_complex"),
                 # RuntimeError: query: last dimension must be contiguous
                 # The fused attention kernels require the last dim to be contiguous
-                xfail("nn.functional.scaled_dot_product_attention"),
+                decorate(
+                    "nn.functional.scaled_dot_product_attention",
+                    decorator=expectedFailureIf(not TEST_WITH_ROCM),
+                ),  # Works on ROCm
                 xfail("torch.ops.aten._flash_attention_forward"),
                 xfail("torch.ops.aten._efficient_attention_forward"),
                 # BUG
@@ -915,6 +920,7 @@ class TestOperators(TestCase):
                 skip("ormqr"),  # Takes too long
                 xfail("as_strided"),  # incorrect output
                 xfail("as_strided", "partial_views"),  # incorrect output
+                xfail("as_strided_copy"),  # incorrect output
                 xfail("as_strided_scatter"),  # incorrect output
                 skip("bernoulli"),  # calls random op
                 xfail("bfloat16"),  # rank 4 tensor for channels_last
@@ -988,8 +994,6 @@ class TestOperators(TestCase):
                 xfail("normal"),  # calls random op
                 xfail("normal", "number_mean"),  # calls random op
                 xfail("pca_lowrank"),  # calls random op
-                # https://github.com/pytorch/pytorch/issues/96560
-                decorate("linalg.pinv", "hermitian", decorator=skipIfRocm),
                 xfail(
                     "quantile", device_type="cpu"
                 ),  # Batching rule not implemented for `at::equal`
@@ -1149,6 +1153,7 @@ class TestOperators(TestCase):
             xfail("nn.functional.max_unpool2d", "grad"),
             xfail("sparse.sampled_addmm", ""),
             xfail("sparse.mm", "reduce"),
+            xfail("as_strided_copy", ""),  # calls as_strided
             xfail("as_strided_scatter", ""),  # calls as_strided
             xfail("index_reduce", "prod"),  # .item() call
             # ---------------------------------------------------------------------
@@ -1187,6 +1192,7 @@ class TestOperators(TestCase):
         vmapvjp_fail.union(
             {
                 xfail("as_strided"),
+                xfail("as_strided_copy"),
                 xfail("as_strided", "partial_views"),
             }
         ),
@@ -1252,6 +1258,7 @@ class TestOperators(TestCase):
         xfail("quantile"),  # at::equal batching rule (cpu), also, in-place vmap (cuda)
         skip("as_strided"),  # Test runner cannot handle this
         # requires special handling, and does not yet have a batching rule. Feel free to file a github issue!
+        xfail("as_strided_copy"),
         xfail("as_strided_scatter"),
         xfail(
             "nn.functional.gaussian_nll_loss"
@@ -1391,6 +1398,11 @@ class TestOperators(TestCase):
                 xfail("masked.cumprod", ""),
                 xfail("renorm"),  # hit vmap fallback, which is disabled
             }
+        ).difference(
+            {
+                # as_strided_copy fails test_vmapvjp, succeeds here
+                xfail("as_strided_copy", ""),
+            }
         ),
     )
     @toleranceOverride({torch.float32: tol(atol=1e-04, rtol=1e-04)})
@@ -1526,6 +1538,11 @@ class TestOperators(TestCase):
                 xfail(
                     "index_fill"
                 ),  # aten::_unique hit the vmap fallback which is currently disabled
+            }
+        ).difference(
+            {
+                # as_strided_copy fails test_vmapvjp, succeeds here
+                xfail("as_strided_copy", ""),
             }
         ),
     )
@@ -1889,6 +1906,7 @@ class TestOperators(TestCase):
                 xfail(
                     "as_strided", "partial_views"
                 ),  # AssertionError: Tensor-likes are not close!
+                xfail("as_strided_copy"),  # AssertionError: Tensor-likes are not close!
                 xfail(
                     "as_strided_scatter"
                 ),  # AssertionError: Tensor-likes are not close!
