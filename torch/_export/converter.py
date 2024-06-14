@@ -19,6 +19,7 @@ from torch.fx import subgraph_rewriter
 from torch.onnx.utils import _create_jit_graph
 
 
+
 def inplace_optimize_sym_size_div(gm: torch.fx.GraphModule):
     def pattern(im, dim, scale):
         sym_size_int = torch.ops.aten.sym_size.int(im, dim)
