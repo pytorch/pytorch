@@ -2526,6 +2526,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
             om(*example_inputs)
             om(*example_inputs)
 
+    @torch._dynamo.config.patch("inline_inbuilt_nn_modules", True)
     def test_reproduce_121253_issue(self):
         class Mod(torch.nn.Module):
             def __init__(self, weight, bias, beta, alpha):
