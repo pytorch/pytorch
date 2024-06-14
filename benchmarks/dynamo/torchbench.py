@@ -220,6 +220,8 @@ class TorchBenchmarkRunner(BenchmarkRunner):
     @property
     def inline_inbuilt_nn_modules_models(self):
         return {
+            "basic_gnn_edgecnn",
+            "hf_Reformer",
             "DALLE2_pytorch",
             "hf_BigBird",
             "detectron2_maskrcnn_r_50_fpn",
