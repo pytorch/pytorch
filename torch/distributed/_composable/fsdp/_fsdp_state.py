@@ -5,7 +5,6 @@ import logging
 from typing import Any, Dict, List, Optional, Tuple, TYPE_CHECKING
 
 import torch
-import torch.distributed as dist
 import torch.nn as nn
 from torch.autograd import Variable
 from torch.distributed._composable_state import (
@@ -95,9 +94,7 @@ class FSDPState(_State):
                         args, kwargs, self._device, False
                     )  # same as DDP
                 args, kwargs = args_tuple[0], kwargs_tuple[0]
-        logger.debug(
-            f"[Rank{dist.get_rank()}]FSDP::root_pre_forward",  # noqa: G004
-        )
+        logger.debug("FSDP::root_pre_forward")
         return args, kwargs
 
     def _lazy_init(self) -> None:
@@ -136,7 +133,7 @@ class FSDPState(_State):
                 state._fsdp_param_group.lazy_init()
                 for param in state._fsdp_param_group.fsdp_params:
                     logger.debug(
-                        f"[Rank{dist.get_rank()}]FSDP::lazy_init, fqn={param._param_fqn}",  # noqa: G004
+                        f"FSDP::lazy_init, fqn={param._param_fqn}",  # noqa: G004
                         f", dtype={param.sharded_param.dtype}, shape={param._orig_size}",  # noqa: G004
                     )
 
@@ -236,9 +233,7 @@ class FSDPState(_State):
             if self._state_ctx.is_last_backward:
                 self._comm_ctx.post_forward_order.clear()
             self._state_ctx.post_backward_final_callback_queued = False
-            logger.debug(
-                f"[Rank{dist.get_rank()}]FSDP::root_post_backward",  # noqa: G004
-            )
+            logger.debug("FSDP::root_post_backward")
 
     def _finalize_backward(self) -> None:
         if self._fsdp_param_group:

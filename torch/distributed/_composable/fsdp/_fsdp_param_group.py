@@ -272,18 +272,18 @@ class FSDPParamGroup:
             self.wait_for_unshard()
             args, kwargs = self._register_post_backward_hook(args, kwargs)
             logger.debug(
-                f"[Rank{dist.get_rank()}]{self._with_fqn('FSDP::pre_forward')}",  # noqa: G004
+                f"{self._with_fqn('FSDP::pre_forward')}",  # noqa: G004
             )
             return args, kwargs
 
     def post_forward(self, module: nn.Module, input: Any, output: Any):
+        logger.debug(
+            f"{self._with_fqn('FSDP::post_forward')}",  # noqa: G004
+        )
         with record_function(self._with_fqn("FSDP::post_forward")):
             self.reshard()
             self._record_post_forward()
             self._training_state = TrainingState.IDLE
-            logger.debug(
-                f"[Rank{dist.get_rank()}]{self._with_fqn('FSDP::post_forward')}",  # noqa: G004
-            )
             return output
 
     def _record_post_forward(self) -> None:
@@ -302,7 +302,7 @@ class FSDPParamGroup:
             self.wait_for_unshard()
             self._prefetch_unshard()
             logger.debug(
-                f"[Rank{dist.get_rank()}]{self._with_fqn('FSDP::pre_backward')}",  # noqa: G004
+                f"{self._with_fqn('FSDP::pre_backward')}",  # noqa: G004
             )
 
     def post_backward(self, *unused: Any):
@@ -351,7 +351,7 @@ class FSDPParamGroup:
                 self._partial_reduce_output,
             )
             logger.debug(
-                f"[Rank{dist.get_rank()}]{self._with_fqn('FSDP::post_backward')}",  # noqa: G004
+                f"{self._with_fqn('FSDP::post_backward')}",  # noqa: G004
             )
 
     def finalize_backward(self):
