@@ -434,6 +434,10 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
     }
   });
 
+  _C_m.def("_has_null_autograd_meta", [](const at::Tensor& t) -> bool {
+    return t.getIntrusivePtr()->autograd_meta() == nullptr;
+  });
+
   _C_m.def("_activate_gpu_trace", []() { activateGPUTrace(); });
 
   py_context_manager_DEPRECATED<c10::InferenceMode, bool>(

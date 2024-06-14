@@ -8192,6 +8192,31 @@ for shape in [(1,), ()]:
         expected.fill_(complex(abs_1_1j / 2, abs_1_1j / 2))
         self.assertEqual(z.grad, torch.view_as_real(expected))
 
+    def test_nullptr_autograd_meta(self):
+        # AutogradMeta should ALWAYS be nullptr when tensor is not of
+        # differentiable dtype
+        a = torch.ones(2, dtype=torch.int64)
+        self.assertTrue(torch._C._has_null_autograd_meta(a))
+
+        a.detach_()
+        self.assertTrue(torch._C._has_null_autograd_meta(a))
+
+        a.requires_grad_(False)
+        self.assertTrue(torch._C._has_null_autograd_meta(a))
+
+        # Freshly created tensor of differentiable type with requires_grad=False
+        # should also have nullptr AutogradMeta
+        b = torch.tensor(1.0, requires_grad=False)
+        self.assertTrue(torch._C._has_null_autograd_meta(a))
+
+        # Transition from null to non-null AutogradMeta should be monotonic
+        b.requires_grad_(True)
+        self.assertFalse(torch._C._has_null_autograd_meta(a))
+        b.requires_grad_(False)
+        self.assertFalse(torch._C._has_null_autograd_meta(a))
+        b.detach_()
+        self.assertFalse(torch._C._has_null_autograd_meta(a))
+
     def test_custom_function_return_view_in_nograd(self):
         class Alias(Function):
             @staticmethod

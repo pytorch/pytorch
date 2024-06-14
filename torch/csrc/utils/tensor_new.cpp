@@ -1465,7 +1465,7 @@ Tensor tensor_ctor(
       at::namedinference::propagate_names(
           new_tensor, *names, /*validate_names=*/true);
     }
-    new_tensor.detach_(); // ensure new_tensor a leaf node
+    TORCH_INTERNAL_ASSERT(new_tensor.getIntrusivePtr()->autograd_meta() == nullptr);
     new_tensor.set_requires_grad(args_requires_grad);
     return new_tensor;
   }
@@ -1520,7 +1520,7 @@ Tensor new_tensor(
         r.scalartypeWithDefault(1, scalar_type),
         r.deviceOptional(2),
         data);
-    new_tensor.detach_(); // ensure new_tensor a leaf node
+    TORCH_INTERNAL_ASSERT(new_tensor.getIntrusivePtr()->autograd_meta() == nullptr);
     new_tensor.set_requires_grad(args_requires_grad);
     return new_tensor;
   }

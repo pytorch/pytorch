@@ -318,11 +318,13 @@ Tensor& detach_(c10::DispatchKeySet ks, Tensor& self) {
   // grad_fn and output_nr; there's other metadata like debug name
   // and hooks which aren't cleared.  Is this function supposed to
   // clear those too? I'm not too sure, so I'm leaving it be for now.
-  auto autograd_meta = impl::materialize_autograd_meta(self);
-  autograd_meta->set_requires_grad(false, self.unsafeGetTensorImpl());
-  autograd_meta->grad_fn_.reset();
-  autograd_meta->output_nr_ = 0;
-  autograd_meta->fw_grad_.reset();
+  if (self.getIntrusivePtr()->autograd_meta() != nullptr) {
+    auto autograd_meta = impl::materialize_autograd_meta(self);
+    autograd_meta->set_requires_grad(false, self.unsafeGetTensorImpl());
+    autograd_meta->grad_fn_.reset();
+    autograd_meta->output_nr_ = 0;
+    autograd_meta->fw_grad_.reset();
+  }
 
   return self;
 }
