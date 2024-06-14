@@ -1,8 +1,8 @@
 #include <ATen/DeviceAccelerator.h>
-#include <c10/util/Optional.h>
 #include <fmt/core.h>
 #include <sys/types.h>
 #include <torch/csrc/python_headers.h>
+#include <optional>
 
 #ifndef _MSC_VER
 #include <sys/socket.h>
@@ -1871,7 +1871,7 @@ Call this whenever a new thread is created in order to propagate values from
             transposed_,
             output_padding_,
             std::move(groups_),
-            c10::nullopt);
+            std::nullopt);
       },
       py::arg("input"),
       py::arg("weight"),
@@ -1896,7 +1896,7 @@ Call this whenever a new thread is created in order to propagate values from
          at::SymIntArrayRef output_padding_,
          c10::SymInt groups_,
          std::optional<std::vector<c10::SymInt>> bias_sizes_opt) {
-        c10::OptionalArrayRef<c10::SymInt> ref = c10::nullopt;
+        c10::OptionalArrayRef<c10::SymInt> ref = std::nullopt;
         if (bias_sizes_opt) {
           ref = (*bias_sizes_opt);
         }
@@ -2095,7 +2095,7 @@ Call this whenever a new thread is created in order to propagate values from
 
   py_module.def(
       "_get_accelerator",
-      [](std::optional<bool> check = c10::nullopt) {
+      [](std::optional<bool> check = std::nullopt) {
         return c10::Device(
             at::getAccelerator(check.value_or(false))
                 .value_or(c10::DeviceType::CPU),

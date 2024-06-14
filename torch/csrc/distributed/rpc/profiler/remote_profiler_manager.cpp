@@ -10,7 +10,7 @@ namespace rpc {
 const std::string REMOTE_PROFILING_KEY_PREFIX = "#remote_op: ";
 constexpr int kAutoIncrementBits = 48;
 /*static */ thread_local std::optional<std::string>
-    RemoteProfilerManager::currentThreadLocalKey_ = c10::nullopt;
+    RemoteProfilerManager::currentThreadLocalKey_ = std::nullopt;
 /*static */ RemoteProfilerManager& RemoteProfilerManager::getInstance() {
   static RemoteProfilerManager* handler = new RemoteProfilerManager();
   return *handler;
@@ -32,7 +32,7 @@ bool RemoteProfilerManager::isCurrentKeySet() const {
 }
 
 void RemoteProfilerManager::unsetCurrentKey() {
-  currentThreadLocalKey_ = c10::nullopt;
+  currentThreadLocalKey_ = std::nullopt;
 }
 
 void RemoteProfilerManager::eraseKey(const ProfilingId& globallyUniqueId) {

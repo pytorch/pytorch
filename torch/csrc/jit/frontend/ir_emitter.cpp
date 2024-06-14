@@ -32,8 +32,8 @@
 
 #include <torch/csrc/jit/ir/constants.h>
 
-#include <c10/util/Optional.h>
 #include <c10/util/hash.h>
+#include <optional>
 
 #include <ATen/core/interned_strings.h>
 #include <ATen/core/jit_type.h>
@@ -292,7 +292,7 @@ struct Environment {
     if (msg != runner->error_messages.end()) {
       return msg->second();
     } else {
-      return c10::nullopt;
+      return std::nullopt;
     }
   }
 
@@ -1267,7 +1267,7 @@ struct to_ir {
               {});
           auto refinements = RefinementSet(findIsNoneRefinements(
               cond_op.lhs(), lhs_val, cond_op.rhs(), rhs_val, expr.kind()));
-          return CondValue(cond_value, refinements, c10::nullopt);
+          return CondValue(cond_value, refinements, std::nullopt);
         }
       } break;
       default: {
@@ -1294,7 +1294,7 @@ struct to_ir {
           }
         }
         auto expr_out = emitToBool(expr.range(), emitExpr(expr));
-        std::optional<bool> static_if = c10::nullopt;
+        std::optional<bool> static_if = std::nullopt;
         auto kind = expr_out->node()->kind();
         if (kind == aten::is_scripting) {
           static_if = true;
@@ -2291,7 +2291,7 @@ struct to_ir {
     Value* result =
         graph->insertNode(graph->createIsInstance(lhs_val, rhs_types))
             ->output();
-    return CondValue(result, std::move(refinement), c10::nullopt);
+    return CondValue(result, std::move(refinement), std::nullopt);
   }
 
   void emitIf(const If& stmt) {
@@ -2752,7 +2752,7 @@ struct to_ir {
           getAugOp(stmt, lhs->type()),
           /*args=*/{lhs, rhs},
           /*kwargs=*/{},
-          /*self=*/c10::nullopt);
+          /*self=*/std::nullopt);
     }
   }
 
@@ -2968,7 +2968,7 @@ struct to_ir {
     auto outputs = rhs_output->asTuple(
         rhs_loc,
         method,
-        starred_unpack ? c10::nullopt : std::optional<size_t>{n_binders});
+        starred_unpack ? std::nullopt : std::optional<size_t>{n_binders});
     if (outputs.size() < n_binders) {
       throw ErrorReport(tl)
           << "need " << (starred_unpack ? "at least " : "") << n_binders
@@ -4796,11 +4796,11 @@ struct to_ir {
       tuple_args.reserve(3);
 
       start ? tuple_args.emplace_back(start)
-            : tuple_args.emplace_back(c10::nullopt);
+            : tuple_args.emplace_back(std::nullopt);
       end ? tuple_args.emplace_back(end)
-          : tuple_args.emplace_back(c10::nullopt);
+          : tuple_args.emplace_back(std::nullopt);
       step ? tuple_args.emplace_back(step)
-           : tuple_args.emplace_back(c10::nullopt);
+           : tuple_args.emplace_back(std::nullopt);
 
       return emitTupleSlice(loc, args[0], tuple_args);
     }
@@ -4886,7 +4886,7 @@ struct to_ir {
     };
     std::vector<int64_t> dims(subscript_exprs.size());
     std::vector<std::optional<Value*>> exprs(
-        subscript_exprs.size(), c10::nullopt);
+        subscript_exprs.size(), std::nullopt);
 
     auto handle_indexing = [&](const Expr& subscript_expr,
                                int expr_idx,
@@ -5231,7 +5231,7 @@ struct to_ir {
               val_range, "begin", emitExpr(Expr(slice.start().get())));
           tuple_args.emplace_back(begin);
         } else {
-          tuple_args.emplace_back(c10::nullopt);
+          tuple_args.emplace_back(std::nullopt);
         }
 
         if (slice.end().present()) {
@@ -5239,7 +5239,7 @@ struct to_ir {
               NamedValue(val_range, "end", emitExpr(Expr(slice.end().get())));
           tuple_args.emplace_back(end);
         } else {
-          tuple_args.emplace_back(c10::nullopt);
+          tuple_args.emplace_back(std::nullopt);
         }
 
         if (slice.step().present()) {
@@ -5247,7 +5247,7 @@ struct to_ir {
               NamedValue(val_range, "step", emitExpr(Expr(slice.step().get())));
           tuple_args.emplace_back(step);
         } else {
-          tuple_args.emplace_back(c10::nullopt);
+          tuple_args.emplace_back(std::nullopt);
         }
         auto tupleSliceValue =
             emitTupleSlice(val_range, s_tuple_val, tuple_args);
@@ -5327,7 +5327,7 @@ struct FunctionResolver : public Resolver {
 CompilationUnit::CompilationUnit(const std::string& source)
     : CompilationUnit() {
   // calles the define with native resolver to generate the graph for functions
-  define(c10::nullopt, source, nativeResolver(), nullptr);
+  define(std::nullopt, source, nativeResolver(), nullptr);
 }
 
 // This pair represents a pair of functions (getter and setter) obtained from

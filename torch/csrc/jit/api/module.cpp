@@ -158,11 +158,11 @@ void Module::to(at::Device device, at::ScalarType dtype, bool non_blocking) {
 }
 
 void Module::to(at::ScalarType dtype, bool non_blocking) {
-  to_impl(/*device=*/c10::nullopt, dtype, non_blocking);
+  to_impl(/*device=*/std::nullopt, dtype, non_blocking);
 }
 
 void Module::to(at::Device device, bool non_blocking) {
-  to_impl(device, /*dtype=*/c10::nullopt, non_blocking);
+  to_impl(device, /*dtype=*/std::nullopt, non_blocking);
 }
 
 static void module_state_to(

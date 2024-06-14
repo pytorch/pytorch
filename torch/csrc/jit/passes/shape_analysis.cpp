@@ -151,7 +151,7 @@ bool containsTensorType(const TypePtr& t) {
 }
 
 // for each node in the schema with type Tensor, extract the T type
-// returns c10::nullopt if any Tensor in the schema does not have a known
+// returns std::nullopt if any Tensor in the schema does not have a known
 // shape ignores non-tensor in the list of inputs
 std::optional<std::vector<TensorTypePtr>> gatherTensorTypes(
     Node* node,
@@ -160,26 +160,26 @@ std::optional<std::vector<TensorTypePtr>> gatherTensorTypes(
 
   auto schema_opt = node->maybeSchema();
   if (!schema_opt) {
-    return c10::nullopt;
+    return std::nullopt;
   }
   auto& schema = *schema_opt;
   auto& args = schema.arguments();
   // can't handle varargs primitives because we don't know what should be a
   // Tensor
   if (schema.is_vararg()) {
-    return c10::nullopt;
+    return std::nullopt;
   }
   for (const auto i : c10::irange(args.size())) {
     if (args[i].type()->isSubtypeOf(*ListType::ofTensors())) {
-      return c10::nullopt;
+      return std::nullopt;
     } else if (args[i].type()->isSubtypeOf(*TensorType::get())) {
       if (auto type = node->input(i)->type()->cast<TensorType>()) {
         if (complete && !type->isComplete()) {
-          return c10::nullopt;
+          return std::nullopt;
         }
         tensor_types.push_back(type);
       } else {
-        return c10::nullopt;
+        return std::nullopt;
       }
     } else /* non-tensor type */ {
       continue;
@@ -217,7 +217,7 @@ std::optional<c10::ScalarType> getPromotedTypeForArithmeticOp(Node* node) {
     auto dtt = node->inputs()[i]->type()->expect<TensorType>();
     auto inputDtype = dtt->scalarType();
     if (!dtt || !inputDtype) {
-      return c10::nullopt;
+      return std::nullopt;
     }
     if (dtt->dim() && *dtt->dim() > 0) {
       dimmed = unionScalarTypes(dimmed, *inputDtype);
@@ -552,7 +552,7 @@ class ShapePropagator : public PropertyPropBase {
         tryScalarTypeFromJitType(*input_base_type);
     if (auto grad_index = node->schema().argumentIndexWithName("dtype")) {
       auto inp = toIValue(node->inputs().at(*grad_index));
-      if (inp == c10::nullopt) {
+      if (inp == std::nullopt) {
         return;
       } else if (!inp->isNone()) {
         default_type = inp->toScalarType();
@@ -562,14 +562,14 @@ class ShapePropagator : public PropertyPropBase {
     at::Device default_device = at::kCPU;
     if (auto device_index = node->schema().argumentIndexWithName("device")) {
       auto inp = toIValue(node->inputs().at(*device_index));
-      if (inp == c10::nullopt) {
+      if (inp == std::nullopt) {
         return;
       } else if (!inp->isNone()) {
         default_device = inp->toDevice();
       }
     }
     node->output()->setType(TensorType::create(
-        default_type, default_device, dims, /*requires_grad=*/c10::nullopt));
+        default_type, default_device, dims, /*requires_grad=*/std::nullopt));
   }
 
   // returns whether any such values were found
@@ -612,10 +612,10 @@ class ShapePropagator : public PropertyPropBase {
         if (typ->isSubtypeOf(*IntType::get()) ||
             typ->isSubtypeOf(*BoolType::get())) {
           node->output()->setType(TensorType::create(
-              at::kLong, at::kCPU, 0, /*requires_grad=*/c10::nullopt));
+              at::kLong, at::kCPU, 0, /*requires_grad=*/std::nullopt));
         } else if (node->input()->type()->isSubtypeOf(*FloatType::get())) {
           node->output()->setType(TensorType::create(
-              at::kDouble, at::kCPU, 0, /*requires_grad=*/c10::nullopt));
+              at::kDouble, at::kCPU, 0, /*requires_grad=*/std::nullopt));
         }
         return;
       }
@@ -750,7 +750,7 @@ class ShapePropagator : public PropertyPropBase {
     if (input_node->kind() == prim::ListConstruct) {
       return input_node->inputs().size();
     }
-    return c10::nullopt;
+    return std::nullopt;
   }
 
   // is it ok to try to run the op
@@ -778,7 +778,7 @@ class ShapePropagator : public PropertyPropBase {
       auto max_dims = any_type->dim();
       for (auto& type : tensor_types) {
         if (!max_dims || !type->dim()) {
-          max_dims = c10::nullopt;
+          max_dims = std::nullopt;
         } else {
           max_dims = std::max(*max_dims, *type->dim());
         }
@@ -787,7 +787,7 @@ class ShapePropagator : public PropertyPropBase {
           t,
           any_type->device(),
           max_dims,
-          /*requires_grad=*/c10::nullopt);
+          /*requires_grad=*/std::nullopt);
     };
 
     using type_vec_t = std::vector<TensorTypePtr>;
@@ -1245,7 +1245,7 @@ class ShapePropagator : public PropertyPropBase {
                                              int64_t num_reduced_dim = 0,
                                              bool upcast_integer = false,
                                              std::optional<IValue> opt_dtype =
-                                                 c10::nullopt) -> type_vec_t {
+                                                 std::nullopt) -> type_vec_t {
       if (auto type = node->input(0)->type()->cast<TensorType>()) {
         if (!type->scalarType() || !type->dim()) {
           return {};
@@ -1418,7 +1418,7 @@ class ShapePropagator : public PropertyPropBase {
                                         : maybe_dtype_option->toScalarType());
 
       return {TensorType::create(
-          dtype, device, dim, /*requires_grad=*/c10::nullopt)};
+          dtype, device, dim, /*requires_grad=*/std::nullopt)};
     };
 
     static const auto factory_like_with_ndim = [](Node* node,
@@ -1448,7 +1448,7 @@ class ShapePropagator : public PropertyPropBase {
       }
 
       return {TensorType::create(
-          in_type, in_dev, dim, /*requires_grad=*/c10::nullopt)};
+          in_type, in_dev, dim, /*requires_grad=*/std::nullopt)};
     };
 
     // Requirements:
@@ -1748,7 +1748,7 @@ class ShapePropagator : public PropertyPropBase {
             if (auto dtype_index =
                     node->schema().argumentIndexWithName("dtype")) {
               auto inp = toIValue(node->inputs().at(*dtype_index));
-              if (inp == c10::nullopt) {
+              if (inp == std::nullopt) {
                 return nullptr;
               }
               if (!inp->isNone()) {
@@ -1758,7 +1758,7 @@ class ShapePropagator : public PropertyPropBase {
             if (auto device_index =
                     node->schema().argumentIndexWithName("device")) {
               auto inp = toIValue(node->inputs().at(*device_index));
-              if (inp == c10::nullopt) {
+              if (inp == std::nullopt) {
                 return nullptr;
               }
               if (!inp->isNone()) {
@@ -1769,7 +1769,7 @@ class ShapePropagator : public PropertyPropBase {
                 default_type,
                 default_device,
                 type->dim(),
-                /*requires_grad=*/c10::nullopt));
+                /*requires_grad=*/std::nullopt));
           }
         }
         return nullptr;

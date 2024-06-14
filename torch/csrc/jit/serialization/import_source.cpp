@@ -373,7 +373,7 @@ std::optional<Assign> SourceImporterImpl::
   if (replacements.count(demangled_classname)) {
     auto lhs = Var(assign.lhs());
     if (!assign.type().present() || assign.type().get().kind() != TK_VAR) {
-      return c10::nullopt;
+      return std::nullopt;
     }
     auto type = Var(assign.type().get());
 
@@ -390,7 +390,7 @@ std::optional<Assign> SourceImporterImpl::
           assign.range(), assign.lhs_list(), assign.rhs(), maybe_typename);
     }
   }
-  return c10::nullopt;
+  return std::nullopt;
 }
 
 void SourceImporterImpl::importClass(

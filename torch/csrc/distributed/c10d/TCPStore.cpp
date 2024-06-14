@@ -299,7 +299,7 @@ TCPStore::TCPStore(
               masterPort,
               isServer,
               numWorkers ? std::optional<std::size_t>(*numWorkers)
-                         : c10::nullopt,
+                         : std::nullopt,
               waitWorkers,
               timeout}} {}
 
@@ -413,7 +413,7 @@ TCPStore::~TCPStore() = default;
 
 void TCPStore::waitForWorkers() {
   detail::timing_guard tguard(clientCounters_["waitForWorkers"]);
-  if (numWorkers_ == c10::nullopt) {
+  if (numWorkers_ == std::nullopt) {
     return;
   }
 

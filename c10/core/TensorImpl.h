@@ -24,12 +24,12 @@
 #include <c10/util/DimVector.h>
 #include <c10/util/Exception.h>
 #include <c10/util/Flags.h>
-#include <c10/util/Optional.h>
 #include <c10/util/accumulate.h>
 #include <c10/util/intrusive_ptr.h>
 #include <c10/util/irange.h>
 #include <c10/util/safe_numerics.h>
 #include <c10/util/typeid.h>
+#include <optional>
 
 #include <algorithm>
 #include <atomic>
@@ -233,8 +233,8 @@ struct C10_API ExtraMeta {
   std::unique_ptr<c10::SymbolicShapeMeta> symbolic_shape_meta_ = nullptr;
   std::unique_ptr<c10::NamedTensorMetaInterface> named_tensor_meta_ = nullptr;
   intrusive_ptr<c10::BackendMeta> backend_meta_ = nullptr;
-  std::optional<std::string> custom_data_ptr_error_msg_ = c10::nullopt;
-  std::optional<std::string> custom_storage_error_msg_ = c10::nullopt;
+  std::optional<std::string> custom_data_ptr_error_msg_ = std::nullopt;
+  std::optional<std::string> custom_storage_error_msg_ = std::nullopt;
 
   ExtraMeta() = default;
   ExtraMeta(const ExtraMeta& other) {
@@ -260,8 +260,8 @@ struct C10_API ExtraMeta {
       std::unique_ptr<c10::SymbolicShapeMeta> symbolic_shape_meta,
       std::unique_ptr<c10::NamedTensorMetaInterface> named_tensor_meta,
       intrusive_ptr<c10::BackendMeta> backend_meta,
-      std::optional<std::string> custom_data_ptr_error_msg = c10::nullopt,
-      std::optional<std::string> custom_storage_access_error_msg = c10::nullopt)
+      std::optional<std::string> custom_data_ptr_error_msg = std::nullopt,
+      std::optional<std::string> custom_storage_access_error_msg = std::nullopt)
       : symbolic_shape_meta_(std::move(symbolic_shape_meta)),
         named_tensor_meta_(std::move(named_tensor_meta)),
         backend_meta_(std::move(backend_meta)),
@@ -1737,7 +1737,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   void set_sizes_and_strides(
       c10::SymIntArrayRef sizes,
       c10::SymIntArrayRef strides,
-      std::optional<c10::SymInt> storage_offset = c10::nullopt);
+      std::optional<c10::SymInt> storage_offset = std::nullopt);
   // This is renamed to avoid breaking overload BC
   void generic_set_sizes_contiguous(c10::SymIntArrayRef sizes);
   void generic_set_sizes_contiguous(c10::IntArrayRef sizes) {
@@ -1834,7 +1834,7 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   void set_sizes_and_strides(
       IntArrayRef new_size,
       IntArrayRef new_stride,
-      std::optional<int64_t> storage_offset = c10::nullopt) {
+      std::optional<int64_t> storage_offset = std::nullopt) {
     TORCH_CHECK(
         allow_tensor_metadata_change(),
         "set_sizes_and_strides ",

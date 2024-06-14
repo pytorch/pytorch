@@ -190,7 +190,7 @@ TryGeneralizeInputDimensionsToSymbolicShapes(
     }
     auto tt = v->type()->expectRef<TensorType>();
     if (!tt.sizes().isComplete() || !tt.strides().isComplete()) {
-      return c10::nullopt;
+      return std::nullopt;
     }
     input_striding.push_back(summarizeInputStrides(tt));
     std::vector<at::ShapeSymbol> shape_vec = *tt.symbolic_sizes().sizes();

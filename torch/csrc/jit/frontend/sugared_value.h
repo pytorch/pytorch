@@ -1,7 +1,7 @@
 #pragma once
-#include <c10/util/Optional.h>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <string>
 #include <utility>
 
@@ -122,13 +122,13 @@ struct TORCH_API SugaredValue
   // to support containers of Heterogenous types, like Module Containers &
   // Tuples
   virtual std::optional<int64_t> staticLen() {
-    return c10::nullopt;
+    return std::nullopt;
   }
 
   // When iterating over this SugaredValue, should we emit the for loop as an
   // unrolled loop.
   bool shouldEmitUnrolled() {
-    return staticLen() != c10::nullopt;
+    return staticLen() != std::nullopt;
   }
 
   // return length of this thing, if not then it can't be iterated.
@@ -323,7 +323,7 @@ struct TORCH_API BuiltinModule : public SugaredValue {
     }
 
     auto sym = Symbol::fromQualString(name + "::" + field);
-    return std::make_shared<BuiltinFunction>(sym, c10::nullopt);
+    return std::make_shared<BuiltinFunction>(sym, std::nullopt);
   }
 
  private:
@@ -506,7 +506,7 @@ struct TORCH_API PrintValue : public SugaredValue {
 // is a noop when the input is a subtype of 'type'
 struct TORCH_API CastValue : public BuiltinFunction {
   CastValue(TypePtr type, c10::Symbol method)
-      : BuiltinFunction(method, c10::nullopt), type_(std::move(type)) {}
+      : BuiltinFunction(method, std::nullopt), type_(std::move(type)) {}
   std::shared_ptr<SugaredValue> call(
       const SourceRange& loc,
       GraphFunction& m,
@@ -638,7 +638,7 @@ struct TORCH_API RangeValue : SugaredValue {
       const SourceRange& loc,
       GraphFunction& m,
       std::vector<Value*> input,
-      std::optional<int64_t> static_len = c10::nullopt);
+      std::optional<int64_t> static_len = std::nullopt);
 
   std::string kind() const override {
     return "range";
@@ -730,7 +730,7 @@ struct TORCH_API IterableTree : SugaredValue {
       TypePtr type_hint = nullptr) override;
 
  private:
-  std::optional<int64_t> unroll_length_ = c10::nullopt;
+  std::optional<int64_t> unroll_length_ = std::nullopt;
   std::vector<SugaredValuePtr> children_;
 };
 

@@ -85,15 +85,15 @@ C10_DEFINE_bool(
 namespace torch::jit::tensorexpr {
 
 std::optional<std::string>& LLVMTargetTriple() {
-  static std::optional<std::string> triple = c10::nullopt;
+  static std::optional<std::string> triple = std::nullopt;
   return triple;
 }
 std::optional<std::string>& LLVMTargetCPU() {
-  static std::optional<std::string> cpu = c10::nullopt;
+  static std::optional<std::string> cpu = std::nullopt;
   return cpu;
 }
 std::optional<std::string>& LLVMTargetAttrs() {
-  static std::optional<std::string> attrs = c10::nullopt;
+  static std::optional<std::string> attrs = std::nullopt;
   return attrs;
 }
 bool& LLVMAOTWorkflow() {

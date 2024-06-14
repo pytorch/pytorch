@@ -630,7 +630,7 @@ Tensor div_tensor_self_backward(
     T other,
     ScalarType self_st) {
   return div_tensor_self_backward(
-      grad, std::move(other), self_st, c10::nullopt);
+      grad, std::move(other), self_st, std::nullopt);
 }
 template Tensor div_tensor_self_backward(const Tensor&, Tensor, ScalarType);
 template Tensor div_tensor_self_backward(const Tensor&, Scalar, ScalarType);
@@ -652,7 +652,7 @@ Tensor div_tensor_other_backward(
     const Tensor& grad,
     const Tensor& self,
     const Tensor& other) {
-  return div_tensor_other_backward(grad, self, other, c10::nullopt);
+  return div_tensor_other_backward(grad, self, other, std::nullopt);
 }
 
 Tensor permute_backwards(const Tensor& grad, IntArrayRef fwd_dims) {
@@ -1299,12 +1299,12 @@ Tensor convolution_jvp(
     at::SymIntArrayRef output_padding,
     const c10::SymInt& groups) {
   auto bias_t_opt =
-      bias_t.defined() ? std::optional<at::Tensor>(bias_t) : c10::nullopt;
+      bias_t.defined() ? std::optional<at::Tensor>(bias_t) : std::nullopt;
   return (
       at::convolution_symint(
           input_t,
           weight_p,
-          c10::nullopt,
+          std::nullopt,
           stride,
           padding,
           dilation,
@@ -1341,12 +1341,12 @@ Tensor _convolution_jvp(
     bool cudnn_enabled,
     bool allow_tf32) {
   auto bias_t_opt =
-      bias_t.defined() ? std::optional<at::Tensor>(bias_t) : c10::nullopt;
+      bias_t.defined() ? std::optional<at::Tensor>(bias_t) : std::nullopt;
   return (
       at::_convolution_symint(
           input_t,
           weight_p,
-          c10::nullopt,
+          std::nullopt,
           stride,
           padding,
           dilation,
@@ -6210,7 +6210,7 @@ Tensor batch_norm_jvp(
 
   std::optional<Tensor> result_p = weight_p.defined()
       ? std::optional<Tensor>((input_p - mean_p) * invstd_p)
-      : c10::nullopt;
+      : std::nullopt;
   return _affine_jvp(
       result_p,
       result_t,
@@ -6249,7 +6249,7 @@ Tensor layer_norm_jvp(
 
   std::optional<Tensor> result_p = weight_p.defined()
       ? std::optional<Tensor>((input_p - mean_p) * invstd_p)
-      : c10::nullopt;
+      : std::nullopt;
   return _affine_jvp(
       result_p,
       result_t,
@@ -6290,7 +6290,7 @@ Tensor group_norm_jvp(
                       /*eps=*/0)
                       .view(input_shape);
 
-  std::optional<Tensor> result_p = c10::nullopt;
+  std::optional<Tensor> result_p = std::nullopt;
   if (weight_p.defined()) {
     std::vector<int64_t> view_size(input_t_reshaped.dim(), 1);
     view_size[1] = input_t_reshaped.size(1);
@@ -6723,7 +6723,7 @@ std::tuple<Tensor, Tensor> _cudnn_convolution_backward(
           grad_output,
           self,
           weight,
-          c10::nullopt,
+          std::nullopt,
           stride,
           padding,
           dilation,
@@ -6973,7 +6973,7 @@ Tensor to_sparse_backward(
   if (self_layout == c10::kStrided) {
     return grad.to_dense();
   } else {
-    OptionalIntArrayRef blocksize = c10::nullopt;
+    OptionalIntArrayRef blocksize = std::nullopt;
     if (self_blocksize.has_value()) {
       blocksize = c10::asIntArrayRefSlowOpt(*self_blocksize);
     }

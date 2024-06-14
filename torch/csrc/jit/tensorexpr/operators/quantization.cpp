@@ -171,7 +171,7 @@ Tensor computeQuantizePerTensor(
       ExprHandleVectorToExprVector(outputShape),
       dtype,
       nullptr,
-      c10::nullopt,
+      std::nullopt,
       qscale.node(),
       qzero.node());
   return Tensor(buf, vars, e.node());
@@ -731,7 +731,7 @@ Tensor computeUpsampleNearest2d(
       "upsample_nearest2d",
       outputShape,
       Dtype(*outputType),
-      c10::nullopt, // initializer
+      std::nullopt, // initializer
       fmap(strides, [&](ExprPtr stride) { return ExprHandle(stride); }),
       ExprHandle(A.node()->qscale()),
       ExprHandle(A.node()->qzero()));

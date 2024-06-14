@@ -9,10 +9,10 @@
 
 #include <ATen/record_function.h>
 #include <c10/macros/Macros.h>
-#include <c10/util/Optional.h>
 #include <c10/util/hash.h>
 #include <torch/csrc/Export.h>
 #include <torch/csrc/jit/frontend/source_range.h>
+#include <optional>
 
 // TODO: replace with pytorch/rfcs#43 when it is ready.
 #define SOFT_ASSERT(cond, ...)                         \

@@ -754,7 +754,7 @@ std::pair<std::shared_ptr<Operator>, Stack> getOpWithStack(
     std::shared_ptr<Operator> op = operations.at(0);
     // Create a stack full of the arguments and keyword arguments.
     stack = createStackForSchema(
-        op->schema(), std::move(args), kwargs, c10::nullopt);
+        op->schema(), std::move(args), kwargs, std::nullopt);
 
     return std::make_pair(std::move(op), std::move(stack));
   } else {
@@ -762,7 +762,7 @@ std::pair<std::shared_ptr<Operator>, Stack> getOpWithStack(
     std::shared_ptr<Operator> found_op = nullptr;
     for (const auto& op : operations) {
       try {
-        stack = createStackForSchema(op->schema(), args, kwargs, c10::nullopt);
+        stack = createStackForSchema(op->schema(), args, kwargs, std::nullopt);
         found_op = op;
         break;
       } catch (schema_match_error& error) {

@@ -3,8 +3,8 @@
 #include <c10/core/SymNodeImpl.h>
 #include <c10/macros/Export.h>
 #include <c10/util/Exception.h>
-#include <c10/util/Optional.h>
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <variant>
 
@@ -73,14 +73,14 @@ class C10_API ConstantSymNodeImpl : public SymNodeImpl {
     if constexpr (is_int_()) {
       return ::std::get<int64_t>(value_);
     } else {
-      return c10::nullopt;
+      return std::nullopt;
     }
   }
   std::optional<bool> constant_bool() override {
     if constexpr (is_bool_()) {
       return ::std::get<bool>(value_);
     } else {
-      return c10::nullopt;
+      return std::nullopt;
     }
   }
   bool is_constant() override {

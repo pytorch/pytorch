@@ -1,10 +1,10 @@
 #pragma once
 #include <ATen/core/jit_type.h>
 #include <ATen/core/symbol.h>
-#include <c10/util/Optional.h>
 #include <c10/util/intrusive_ptr.h>
 #include <torch/csrc/Export.h>
 #include <torch/csrc/jit/frontend/source_range.h>
+#include <optional>
 #include <unordered_map>
 
 namespace torch {

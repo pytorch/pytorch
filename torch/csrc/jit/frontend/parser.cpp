@@ -1,10 +1,10 @@
 #include <torch/csrc/jit/frontend/parser.h>
 
-#include <c10/util/Optional.h>
 #include <torch/csrc/jit/frontend/lexer.h>
 #include <torch/csrc/jit/frontend/parse_string_literal.h>
 #include <torch/csrc/jit/frontend/tree.h>
 #include <torch/csrc/jit/frontend/tree_views.h>
+#include <optional>
 
 namespace torch::jit {
 
@@ -241,7 +241,7 @@ struct ParserImpl {
         return create_compound('=', r, {}); // no reduction
       } break;
       default:
-        return c10::nullopt;
+        return std::nullopt;
     }
   }
   TreeRef parseTrinary(

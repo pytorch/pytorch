@@ -119,7 +119,7 @@ TypePtr tryInferTypeWithTypeHint(
 ///////////////////////////  PyRRef  //////////////////////////////////
 
 PyRRef::PyRRef(c10::intrusive_ptr<RRef> rref)
-    : rref_(std::move(rref)), profilingFuture_(c10::nullopt) {
+    : rref_(std::move(rref)), profilingFuture_(std::nullopt) {
   TORCH_CHECK(rref_, "PyRRef must not wrap nullptr");
   C10_LOG_API_USAGE_ONCE("torch.distributed.rref");
 }

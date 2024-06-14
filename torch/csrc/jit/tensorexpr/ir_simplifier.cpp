@@ -1885,7 +1885,7 @@ static std::optional<class ModRound> isModRound(TermPtr e) {
       if (!mod) {
         mod = to<Mod>(m);
       } else {
-        return c10::nullopt;
+        return std::nullopt;
       }
     } else {
       // Take care of special cases before multiplying the scalar and variable.
@@ -1911,14 +1911,14 @@ static std::optional<class ModRound> isModRound(TermPtr e) {
 
   if (!mod) {
     // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
-    return c10::nullopt;
+    return std::nullopt;
   }
 
   mod_divisor = IRSimplifier::simplify(mod->rhs());
   other = mod->lhs();
 
   if (!(div = to<Div>(other))) {
-    return c10::nullopt;
+    return std::nullopt;
   }
 
   divisor = IRSimplifier::simplify(div->rhs());
@@ -1953,16 +1953,16 @@ static std::optional<class ModRound> isModRound(TermPtr e) {
         // NOLINTNEXTLINE(clang-analyzer-cplusplus.NewDeleteLeaks)
         denom = IRSimplifier::simplify(alloc<Div>(other, c));
       } else {
-        return c10::nullopt;
+        return std::nullopt;
       }
     } else {
-      return c10::nullopt;
+      return std::nullopt;
     }
   }
 
   // Deny cases in which divisor=1. Such cases are considered as Mods.
   if (divisor->isConstant() && immediateEquals(divisor, 1)) {
-    return c10::nullopt;
+    return std::nullopt;
   }
 
   if (!scalar) {

@@ -254,7 +254,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
         OpType opType,
         uint64_t seq,
         const char* profilingTitle = nullptr,
-        const std::optional<std::vector<at::Tensor>>& inputs = c10::nullopt,
+        const std::optional<std::vector<at::Tensor>>& inputs = std::nullopt,
         bool desyncDebug = false,
         bool enableTiming = false,
         DebugLevel distDebugLevel = DebugLevel::Off);
@@ -311,7 +311,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
     // and False otherwise.
     // In case of timeout, set exception on the WorkNCCL object.
     bool checkTimeout(
-        std::optional<std::chrono::milliseconds> timeout = c10::nullopt);
+        std::optional<std::chrono::milliseconds> timeout = std::nullopt);
 
     std::vector<at::Tensor> result() override;
 
@@ -662,9 +662,9 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // Provides an API to abort the ProcessGroup (similar to ncclCommAbort)
   // instead of relying on ProcessGroupNCCL destructor.
   // return true if abort is successful, otherwise false
-  bool abort(std::optional<std::string> abortReason = c10::nullopt);
+  bool abort(std::optional<std::string> abortReason = std::nullopt);
 
-  void shutdown(std::optional<std::string> reason = c10::nullopt);
+  void shutdown(std::optional<std::string> reason = std::nullopt);
 
   void eagerConnectSingleDevice(at::Device device) override;
 

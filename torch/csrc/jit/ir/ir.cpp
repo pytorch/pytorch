@@ -412,7 +412,7 @@ std::ostream& operator<<(std::ostream& out, const Graph& g) {
 
 static void checkSameDevice(const Node* node) {
   bool has_device = false;
-  std::optional<at::Device> device = c10::nullopt;
+  std::optional<at::Device> device = std::nullopt;
   auto checkValue = [&](const Value* v) {
     if (TensorTypePtr type = v->type()->cast<TensorType>()) {
       if (type->device() && !has_device) {
@@ -1297,7 +1297,7 @@ Node::Node(Graph* graph_, NodeKind kind_)
       graph_(graph_),
       owning_block_(nullptr),
       scope_(graph_->current_scope_),
-      callstack_(c10::nullopt),
+      callstack_(std::nullopt),
       op_(nullptr),
       topo_position_(0) {
   graph_->all_nodes.emplace(this);
@@ -2101,11 +2101,11 @@ std::vector<Value*> inlineCallTo(
   std::unordered_map<InlinedCallStack*, InlinedCallStackPtr>
       new_callstack_entries;
 
-  std::optional<ModuleInstanceInfo> module_instance_info = c10::nullopt;
+  std::optional<ModuleInstanceInfo> module_instance_info = std::nullopt;
   if (to_replace->kind() == prim::CallMethod) {
     auto class_type_ptr = to_replace->input(0)->type()->cast<c10::ClassType>();
     if (to_replace->input(0)->node()->kind() == prim::GetAttr) {
-      module_instance_info = c10::make_optional(ModuleInstanceInfo(
+      module_instance_info = std::make_optional(ModuleInstanceInfo(
           class_type_ptr, to_replace->input(0)->node()->s(attr::name)));
     } else if (
         !to_replace->owningGraph()->inputs().empty() &&
@@ -2113,11 +2113,11 @@ std::vector<Value*> inlineCallTo(
       // This CallMethod must correspond to method of the same object
       // to which this graph belongs.
       module_instance_info =
-          c10::make_optional(ModuleInstanceInfo(class_type_ptr, "SELF"));
+          std::make_optional(ModuleInstanceInfo(class_type_ptr, "SELF"));
     } else {
       // Not sure if it is possible to come here ever.
       // TODO: Remove this else. Or add assert
-      module_instance_info = c10::make_optional(
+      module_instance_info = std::make_optional(
           ModuleInstanceInfo(class_type_ptr, "INSTANCE_NAME_UNKNOWN"));
     }
   }

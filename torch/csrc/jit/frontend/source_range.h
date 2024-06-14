@@ -1,6 +1,6 @@
 #pragma once
 #include <c10/util/Exception.h>
-#include <c10/util/Optional.h>
+#include <optional>
 
 #include <algorithm>
 #include <iterator>
@@ -190,7 +190,7 @@ struct TORCH_API Source {
 
   explicit Source(
       c10::string_view text_view,
-      std::optional<std::string> filename = c10::nullopt,
+      std::optional<std::string> filename = std::nullopt,
       size_t starting_line_no = 0,
       std::shared_ptr<SourceRangeUnpickler> gen_ranges = nullptr,
       CopiesString copies_str = COPIES_STRING)
@@ -210,7 +210,7 @@ struct TORCH_API Source {
 
   explicit Source(
       StringCordView str,
-      std::optional<std::string> filename = c10::nullopt,
+      std::optional<std::string> filename = std::nullopt,
       size_t starting_line_no = 0,
       std::shared_ptr<SourceRangeUnpickler> gen_ranges = nullptr)
       : text_view_(std::move(str)),
@@ -360,7 +360,7 @@ struct TORCH_API SourceRange {
 
   std::optional<std::tuple<std::string, size_t, size_t>> file_line_col() const {
     if (!source_view_ || !source()->filename()) {
-      return c10::nullopt;
+      return std::nullopt;
     }
 
     auto lineno = source_view_->lineno_for_offset(start_);
@@ -383,7 +383,7 @@ struct TORCH_API SourceRange {
 
   std::optional<SourceRange> findSourceRangeThatGenerated() const {
     if (!source_view_) {
-      return c10::nullopt;
+      return std::nullopt;
     }
     return source_view_->findSourceRangeThatGenerated(*this);
   }

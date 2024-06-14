@@ -1464,7 +1464,7 @@ Example::
                       bool multiTenant,
                       std::optional<int> masterListenFd,
                       bool useLibUV) {
-            std::optional<std::size_t> numWorkers = c10::nullopt;
+            std::optional<std::size_t> numWorkers = std::nullopt;
             if (worldSize.has_value() && worldSize.value() > -1) {
               numWorkers = static_cast<std::size_t>(worldSize.value());
             }
@@ -2697,7 +2697,7 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
           py::arg("store"),
           py::arg("rank"),
           py::arg("world_size"),
-          py::arg("buffer_size") = c10::nullopt)
+          py::arg("buffer_size") = std::nullopt)
       .def("barrier", &IntraNodeComm::barrier, py::arg("ranks") = py::none());
 
 #ifdef NCCL_HAS_COMM_CTA_CGA

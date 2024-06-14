@@ -1,4 +1,4 @@
-#include <c10/util/Optional.h>
+#include <optional>
 
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
@@ -67,7 +67,7 @@ TYPED_TEST(OptionalTest, Empty) {
   EXPECT_FALSE(empty.has_value());
 
   // NOLINTNEXTLINE(bugprone-unchecked-optional-access,hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
-  EXPECT_THROW(empty.value(), c10::bad_optional_access);
+  EXPECT_THROW(empty.value(), std::bad_optional_access);
 }
 
 TYPED_TEST(OptionalTest, Initialized) {
@@ -111,32 +111,32 @@ TEST_P(SelfCompareTest, SelfCompare) {
 INSTANTIATE_TEST_SUITE_P(
     nullopt,
     SelfCompareTest,
-    testing::Values(c10::nullopt));
+    testing::Values(std::nullopt));
 INSTANTIATE_TEST_SUITE_P(
     int,
     SelfCompareTest,
-    testing::Values(c10::make_optional(2)));
+    testing::Values(std::make_optional(2)));
 
 TEST(OptionalTest, Nullopt) {
   std::optional<int> x = 2;
 
-  EXPECT_THAT(c10::nullopt, Not(Eq(x)));
-  EXPECT_THAT(x, Not(Eq(c10::nullopt)));
+  EXPECT_THAT(std::nullopt, Not(Eq(x)));
+  EXPECT_THAT(x, Not(Eq(std::nullopt)));
 
-  EXPECT_THAT(x, Ne(c10::nullopt));
-  EXPECT_THAT(c10::nullopt, Ne(x));
+  EXPECT_THAT(x, Ne(std::nullopt));
+  EXPECT_THAT(std::nullopt, Ne(x));
 
-  EXPECT_THAT(x, Not(Lt(c10::nullopt)));
-  EXPECT_THAT(c10::nullopt, Lt(x));
+  EXPECT_THAT(x, Not(Lt(std::nullopt)));
+  EXPECT_THAT(std::nullopt, Lt(x));
 
-  EXPECT_THAT(x, Not(Le(c10::nullopt)));
-  EXPECT_THAT(c10::nullopt, Le(x));
+  EXPECT_THAT(x, Not(Le(std::nullopt)));
+  EXPECT_THAT(std::nullopt, Le(x));
 
-  EXPECT_THAT(x, Gt(c10::nullopt));
-  EXPECT_THAT(c10::nullopt, Not(Gt(x)));
+  EXPECT_THAT(x, Gt(std::nullopt));
+  EXPECT_THAT(std::nullopt, Not(Gt(x)));
 
-  EXPECT_THAT(x, Ge(c10::nullopt));
-  EXPECT_THAT(c10::nullopt, Not(Ge(x)));
+  EXPECT_THAT(x, Ge(std::nullopt));
+  EXPECT_THAT(std::nullopt, Not(Ge(x)));
 }
 
 // Ensure comparisons work...

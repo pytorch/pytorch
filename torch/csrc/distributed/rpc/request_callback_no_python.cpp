@@ -440,7 +440,7 @@ c10::intrusive_ptr<JitFuture> RequestCallbackNoPython::
       true /* cleanup TLS state */, false /* consolidate events */);
   {
     TLSLegacyProfilerGuard g(
-        profilingConfig, c10::nullopt, requestThreadOptions);
+        profilingConfig, std::nullopt, requestThreadOptions);
     TORCH_INTERNAL_ASSERT(
         profilerEnabled(), "Expected profiler to be enabled!");
     // Kick off processing for nested work and get Future<T> result in
