@@ -338,7 +338,7 @@ class UserMethodVariable(UserFunctionVariable):
                 return self.obj.call_method(
                     tx, self.fn.__name__, args, kwargs, constant=self.is_constant
                 )
-        elif variables.TorchCtxManagerClassVariable.is_matching_cls(self.fn):
+        elif self.fn is torch.distributed._composable.fsdp._fsdp_param_group.FSDPParamGroup.use_training_state:
             return variables.TorchCtxManagerClassVariable(self.fn).call_function(
                 tx, (self.obj, *args), kwargs
             )
