@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 """
 This module dispatches the graphs to either the forward-only or joint compilation
 pathways, taking into account the AOTConfig and the collected ViewAndMutationMetadata.
@@ -193,6 +194,7 @@ def aot_dispatch_base_graph(
                 aot_config.aot_id,
                 include_stride=True,
                 include_device=True,
+                colored=True,
             ),
         )
         trace_structured(
