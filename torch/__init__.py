@@ -913,6 +913,19 @@ if not TYPE_CHECKING:
 
 
 def typename(o):
+    """
+    String representation of the type of an object.
+
+    This function returns a fully qualified string representation of an object's type.
+    Args:
+        o (Object): The object whose type to represent
+    Returns:
+        str: the type of the object `o`
+    Example:
+        >>> x = torch.tensor([1,2,3])
+        >>> torch.typename(x)
+        'torch.LongTensor'
+    """
     if isinstance(o, torch.Tensor):
         return o.type()
 
@@ -1986,8 +1999,6 @@ from torch.autograd import (  # usort: skip
     set_grad_enabled as set_grad_enabled,
 )
 
-import torch.utils.backcompat
-import torch.utils.data
 from torch import (
     __config__ as __config__,
     __future__ as __future__,
@@ -2014,6 +2025,7 @@ from torch import (
     special as special,
     testing as testing,
     types as types,
+    utils as utils,
     xpu as xpu,
 )
 from torch.signal import windows as windows
