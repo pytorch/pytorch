@@ -34,6 +34,7 @@ void setThreadName(std::string name) {
 
 std::string getThreadName() {
 #ifdef C10_HAS_PTHREAD_SETNAME_NP
+  #error You should not pass
   std::array<char, kMaxThreadName + 1> name{};
   pthread_getname_np(pthread_self(), name.data(), name.size());
   return name.data();
