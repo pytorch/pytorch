@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import functools
 
 from typing import Any, cast, NoReturn, Optional, Union
@@ -181,6 +182,8 @@ class FSDPModule:
                 ``False``, then returns ``None`` and waits on the handle inside
                 this function.
 
+        .. warning:: This method is experimental and subject to change.
+
         .. note:: If ``async_op=True``, then the user does not have to call
             :meth:`wait` on the returned handle if waiting on the unshard op
             in the module's pre-forward is tolerable. FSDP will wait on the
@@ -342,4 +345,8 @@ def register_fsdp_forward_method(module: nn.Module, method_name: str) -> None:
         return fsdp_state._post_forward(self, args, out)
 
     # Use `__get__` to make `wrapped_method` an instance method
-    setattr(module, method_name, wrapped_method.__get__(module, type(module)))
+    setattr(
+        module,
+        method_name,
+        wrapped_method.__get__(module, type(module)),  # type:ignore[attr-defined]
+    )

@@ -150,7 +150,7 @@ hf_Bert_large,pass,0
 
 
 
-hf_BigBird,fail_accuracy,46
+hf_BigBird,fail_accuracy,43
 
 
 
@@ -378,4 +378,4 @@ vision_maskrcnn,pass,17
 
 
 
-yolov3,pass,2
+yolov3,pass,0
