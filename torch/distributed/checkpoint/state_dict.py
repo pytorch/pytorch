@@ -815,24 +815,28 @@ def _split_optim_state_dict(
         pg_state.append({_PARAMS: []})
         for param in param_group[_PARAMS]:
             for fqn in info.fqn_param_mapping[param]:
+                if fqn in info.shared_params_mapping:
+                    in_params = False
+                    for loaded_param_group in cast(
+                        ListDictValueType, optim_state_dict[_PG]
+                    ):
+                        if fqn in cast(List[str], loaded_param_group[_PARAMS]):
+                            in_params = True
+                            break
+                else:
+                    in_params = True
+                if not in_params:
+                    continue
+
                 params = pg_state[-1][_PARAMS]
                 assert isinstance(params, list)
-                if fqn in info.shared_params_mapping:
-                    already_in = False
-                    for shared_fqn in info.shared_params_mapping[param]:
-                        if shared_fqn in params:
-                            already_in = True
-                    if already_in:
-                        continue
                 params.append(fqn)
                 if param.requires_grad:
                     state[fqn] = cast(DictValueType, optim_state_dict[_STATE])[fqn]
                 for loaded_param_group in cast(
                     ListDictValueType, optim_state_dict[_PG]
                 ):
-                    params = loaded_param_group[_PARAMS]
-                    assert isinstance(params, list)
-                    if fqn in params:
+                    if fqn in cast(List[str], loaded_param_group[_PARAMS]):
                         pg_mapping[id(loaded_param_group)] = len(return_osd[_PG]) - 1
 
     for param_group in cast(ListDictValueType, optim_state_dict[_PG]):
