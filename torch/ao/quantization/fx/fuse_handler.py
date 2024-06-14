@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import torch
 from torch.ao.quantization.backend_config import BackendConfig
 from torch.fx.graph import Node, Graph
@@ -44,7 +45,7 @@ class DefaultFuseHandler(FuseHandler):
     def __init__(
             self,
             node: Node):
-        super().__init__(node)
+        super().__init__(node)  # type:ignore[safe-super]
 
     def fuse(self,
              load_arg: Callable,

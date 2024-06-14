@@ -68,6 +68,7 @@ from torch.testing._internal.common_utils import (
     skipIfRocm,
     skipIfTorchDynamo,
     TestCase,
+    xfail_inherited_tests,
     xfailIfTorchDynamo,
 )
 from torch.testing._internal.hop_db import hop_db
@@ -285,7 +286,7 @@ def is_in_base(t, maybe_tensors):
     return False
 
 
-def skipIfDynamoInput(reason, xfail=False):
+def skipIfDynamoInput(reason):
     """
     Skip TestAOTAutograd if running with dynamo input
     """
@@ -293,16 +294,12 @@ def skipIfDynamoInput(reason, xfail=False):
     def decorator(func):
         @wraps(func)
         def wrapper(self, *args, **kwargs):
-            fn = func
             if isinstance(self, TestAOTAutogradWithDynamo):
-                if xfail:
-                    fn = unittest.expectedFailure(fn)
-                else:
-                    self.skipTest(
-                        f"Skipping {self._testMethodName} in TestAOTAutogradWithDynamo because {reason}"
-                    )
+                self.skipTest(
+                    f"Skipping {self._testMethodName} in TestAOTAutogradWithDynamo because {reason}"
+                )
             else:
-                fn(self, *args, **kwargs)
+                func(self, *args, **kwargs)
 
         return wrapper
 
@@ -620,7 +617,6 @@ def forward(self, primals_1, primals_2):
     # https://github.com/pytorch/pytorch/issues/126236
     # https://github.com/pytorch/pytorch/pull/126113
     @xfailIfTorchDynamo
-    @skipIfDynamoInput("Not supported by dynamo", xfail=True)
     def test_set__and_data_mutation_bad(self):
         def f(a):
             a_view = a.view(-1)
@@ -1851,7 +1847,6 @@ def forward(self, primals_1):
         )
 
     @parametrize("req_grad", [False, True])
-    @skipIfDynamoInput("Runtime error not raised with dynamo", xfail=True)
     def test_subclass_metadata_mutation(self, req_grad):
         def f(a):
             a.transpose_(1, 0)
@@ -1925,7 +1920,6 @@ def forward(self, primals_1, primals_2):
     return [t, view_1, view_2]""",
         )
 
-    @skipIfDynamoInput("https://github.com/pytorch/pytorch/issues/128035", xfail=True)
     def test_view_detach(self):
         def f(a):
             tmp = a.detach()
@@ -2046,7 +2040,6 @@ def forward(self, primals_1, primals_2):
                 make_inputs_subclasses=True,
             )
 
-    # Mutations in the backward are allowed as long as the mutated object does not require grad
     def test_backward_mutation_data(self):
         class BwMutation(torch.autograd.Function):
             @staticmethod
@@ -2077,10 +2070,7 @@ def forward(self, primals_1, primals_2):
             torch.ones(3, 3, requires_grad=True),
             torch.ones(3, 3, requires_grad=True),
         ]
-        with self.assertRaisesRegex(
-            AssertionError, "input that requires_grad and was mutated in the backward"
-        ):
-            self.verify_aot_autograd(f, inp_grad, test_mutation=True)
+        self.verify_aot_autograd(f, inp_grad, test_mutation=True)
 
     def test_backward_mutation_metadata(self):
         class BwMutation(torch.autograd.Function):
@@ -2136,6 +2126,92 @@ def forward(self, primals_1, primals_2):
             AssertionError, "input to the backward that was mutated during the backward"
         ):
             out = f_compiled(*inp_grad)
+
+    def test_backward_mutation_forward_inputs(self):
+        @torch.library.custom_op("_test::_clone", mutates_args={})
+        def f(x: torch.Tensor, x1: torch.Tensor) -> torch.Tensor:
+            return x.clone()
+
+        def f_fake(x, x1):
+            return torch.empty_like(x)
+
+        def backward(ctx, grad):
+            with torch.no_grad():
+                ctx.x1.zero_()
+            return grad * 2, None
+
+        def setup_context(ctx, inputs, output):
+            (x, x1) = inputs
+            ctx.x = x
+            ctx.x1 = x1
+
+        f.register_fake(f_fake)
+        f.register_autograd(backward, setup_context=setup_context)
+
+        def fn(x: torch.Tensor, x1: torch.Tensor) -> torch.Tensor:
+            return torch.ops._test._clone(x, x1)
+
+        inp_x, inp_x1 = torch.randn(3, requires_grad=True), torch.randn(
+            3, requires_grad=False
+        )
+
+        ref_x, ref_x1 = inp_x.clone(), inp_x1.clone()
+        ref_y = f(ref_x, ref_x1)
+        ref_y.sum().backward()
+        x, x1 = inp_x.clone(), inp_x1.clone()
+        compiled_f = aot_function(fn, nop)
+        y = compiled_f(x, x1)
+        loss = y.sum()
+        loss.backward()
+
+        self.assertEqual(ref_x, x)
+        self.assertEqual(ref_x1, x1)
+        self.assertEqual(ref_y, y)
+
+    def test_backward_mutation_forward_inputs_create_graph(self):
+        @torch.library.custom_op("_test::_clone_create_graph", mutates_args={})
+        def f(x: torch.Tensor, x1: torch.Tensor) -> torch.Tensor:
+            return x.clone()
+
+        def f_fake(x, x1):
+            return torch.empty_like(x)
+
+        def backward(ctx, grad):
+            with torch.no_grad():
+                ctx.x1.zero_()
+            return grad * 2, None
+
+        def setup_context(ctx, inputs, output):
+            (x, x1) = inputs
+            ctx.x = x
+            ctx.x1 = x1
+
+        f.register_fake(f_fake)
+        f.register_autograd(backward, setup_context=setup_context)
+
+        def fn(x: torch.Tensor, x1: torch.Tensor) -> torch.Tensor:
+            return torch.ops._test._clone_create_graph(x, x1)
+
+        inp_x, inp_x1 = torch.randn(3, requires_grad=True), torch.randn(
+            3, requires_grad=True
+        )
+
+        ref_x, ref_x1 = inp_x.clone(), inp_x1.clone()
+        ref_y = f(ref_x, ref_x1)
+        ref_y.sum().backward()
+        x, x1 = inp_x.clone(), inp_x1.clone()
+        compiled_f = aot_function(fn, nop)
+        y = compiled_f(x, x1)
+        loss = y.sum()
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "aot_autograd does not support input mutations with requires_grad in backward for create_graph=True",
+        ):
+            torch.autograd.grad(loss, inp_x, create_graph=True)
+
+        self.assertEqual(ref_x, x)
+        self.assertEqual(ref_x1, x1)
+        self.assertEqual(ref_y, y)
 
     # Partially addresses https://github.com/pytorch/pytorch/issues/106457
     def test_input_mutation_false_aliasing(self):
@@ -2644,7 +2720,6 @@ def forward(self, primals_1, primals_2, primals_3):
 
         self.verify_aot_autograd(f, inp_callable, test_mutation=True)
 
-    @skipIfDynamoInput("https://github.com/pytorch/pytorch/issues/128035", xfail=True)
     def test_input_mutation_alias_everything(self):
         # Mondo test that tests a combination of:
         # input is mutated, that aliases another input (so we make a synthetic base)
@@ -5868,6 +5943,13 @@ instantiate_device_type_tests(TestEagerFusionOpInfo, globals(), only_for=only_fo
 instantiate_device_type_tests(TestEagerFusionModuleInfo, globals(), only_for=only_for)
 
 
+@xfail_inherited_tests(
+    [
+        "test_set__and_data_mutation_bad",
+        "test_subclass_metadata_mutation_req_grad_True",
+        "test_subclass_metadata_mutation_req_grad_False",
+    ]
+)
 @skipIfTorchDynamo("This test suite already uses dynamo")
 class TestAOTAutogradWithDynamo(TestAOTAutograd):
     """
