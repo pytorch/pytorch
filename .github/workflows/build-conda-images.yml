@@ -1,6 +1,7 @@
 name: Build conda docker images
 
 on:
+  workflow_dispatch:
   push:
     branches:
       - main
@@ -37,11 +38,6 @@ jobs:
     steps:
       - name: Checkout PyTorch builder
         uses: actions/checkout@v3
-      - name: Authenticate if WITH_PUSH
-        run: |
-          if [[ "${WITH_PUSH}" == true ]]; then
-            echo "${DOCKER_TOKEN}" | docker login -u "${DOCKER_ID}" --password-stdin
-          fi
       - name: Build Docker Image
         run: |
           scripts/docker/build_docker.sh
