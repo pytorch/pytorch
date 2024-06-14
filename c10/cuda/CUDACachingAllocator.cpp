@@ -1562,7 +1562,12 @@ class DeviceCachingAllocator {
 
       // splitting a block depends on `max_split_size`, which may have changed
       // between whe checkpoint was taken and now, so we make sure to recreate
-      // the behavior from the checkpoint.
+      // the behavior from the checkpoint. Prevent an edge case with expandable
+      // segments where it splits a block to create a size zero block. This
+      // isn't already prevented by the check for not splitting the last block
+      // in a segment because the last block in an expandable segment is the
+      // unmapped block that holds enough virtual address space to map the
+      // entire physical memory of the GPU.
       bool split = (i + 1) < segment.blocks.size() &&
           curr_block->size - block_state.size > 0;
 
