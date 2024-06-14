@@ -529,7 +529,7 @@ class TestPasses(TestCase):
 
         with self.assertRaisesRegex(
             RuntimeError,
-            r"Invalid value range for 6 between \[2, 5\]",
+            r"item is outside of inline constraint \[2\, 5\]",
         ):
             ep.module()(torch.tensor([6]))
 
@@ -554,20 +554,19 @@ class TestPasses(TestCase):
         ep = torch.export.export(mod, (x,), dynamic_shapes={"x": {0: dim0_x}})
 
         num_assert = count_call_function(
-            ep.graph, torch.ops.aten._assert_scalar.default
+            ep.graph, torch.ops.aten.sym_constrain_range_for_size.default
         )
-
-        self.assertEqual(num_assert, 2)
+        self.assertEqual(num_assert, 1)
 
         with self.assertRaisesRegex(
             RuntimeError,
-            r"Invalid value range for",
+            r"nonzero\.shape\[0\] is outside of inline constraint \[3\, 5\]",
         ):
             ep.module()(torch.tensor([1, 1, 0, 0, 0]))
 
         with self.assertRaisesRegex(
             RuntimeError,
-            r"Invalid value range for",
+            r"nonzero\.shape\[0\] is outside of inline constraint \[3\, 5\]",
         ):
             ep.module()(torch.ones(6))
 

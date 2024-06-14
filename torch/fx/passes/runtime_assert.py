@@ -4,7 +4,7 @@ import logging
 import operator
 import sys
 import sympy
-from collections import defaultdict
+from collections import defaultdict, OrderedDict
 from typing import Any, Dict, Optional, Set, TYPE_CHECKING
 
 # Import sympy and ShapeEnv during TYPE_CHECKING since importing sympy is slow
@@ -177,6 +177,10 @@ def insert_deferred_runtime_asserts(
         torch.ops.aten.sym_constrain_range.default,
     ]
 
+    ras_by_symbol = shape_env.deferred_runtime_asserts.copy()
+    if not any(ras for ras in ras_by_symbol.values()):
+        return
+
     # first pass: collect all range-related assertions
     # track ranges for expressions
     sym_expr_to_ranges: Dict[sympy.Expr, SymExprRange] = defaultdict(SymExprRange)
@@ -199,61 +203,35 @@ def insert_deferred_runtime_asserts(
         elif sym_rel == SymRel.GE:
             sym_expr_to_ranges[lhs].gt(rhs, False)
 
-    for node in gm.graph.nodes:  # maybe we should sort and order check_is_size, for_size nodes first
+    # filter out ops on sym types, prioritizing is_size calls first, to handle negative symbols
+    # e.g. torch._check(u >= 0) might appear as -u <= 0.
+    # because we try negating LHS exprs to see if we already track their ranges,
+    # we might end up tracking -u0 instead of u0 if we see the torch._check() call first.
+    # is_size calls won't negate their symbols, so we prioritize reading those first.
+    is_size_calls = []
+    non_is_size_calls = []
+    for node in gm.graph.nodes:
         if (
             node.op == "call_function"
             and node.target in ops_on_sym_types
         ):
-            # get expression, maybe negate
-            if node.target == torch.ops.aten._assert_async.msg:
-                expr_node = node.args[0].args[0]
-            else:
-                expr_node = node.args[0]
-            is_size = node.target in (
+            if node.target in (
                 torch.ops.aten.sym_constrain_range_for_size.default,
                 torch._check_is_size,
-            )
-            expr = _get_sym_val(expr_node)
-            if not is_size:
-                expr = _maybe_negate_expr(expr, sym_expr_to_ranges)
-
-            # get signature, refine ranges
-            if node.target in (
-                torch.ops.aten._assert_scalar.default,
-                torch._check,
-                torch.ops.aten._assert_async.msg,
+                torch.ops.aten.sym_constrain_range.default,  # technically not an is_size call, but doesn't take non-symbols
             ):
-                if (sym_rel := _get_sym_rel(expr)) is None:
-                    continue
-                sym_expr, val = expr.args
-                signature = (node.target, sym_rel, val)
-                if not isinstance(val, int):
-                    # expect shape_env runtime asserts to handle things like s0 < u0
-                    continue
-                _refine_range(sym_rel, sym_expr, val)
+                is_size_calls.append(node)
+            else:
+                non_is_size_calls.append(node)
 
-            elif node.target in (
-                torch.ops.aten.sym_constrain_range_for_size.default,
-                torch.ops.aten.sym_constrain_range.default,
-            ):
-                _min = node.kwargs.get("min", 0 if node.target == is_size else -int_oo)
-                _max = node.kwargs.get("max", int_oo)
-                signature = (node.target, _min, _max)
-                _refine_range(SymRel.GE, expr, _min)
-                _refine_range(SymRel.LE, expr, _max)
-                sym_expr = expr
-
-            else:  # torch._check_is_size
-                signature = (node.target,)
-                sym_expr = expr
-
-            if is_size:  # make size-like
-                sym_expr_to_ranges[expr].set_is_size()
-            sym_expr_to_nodes[sym_expr][signature].append(node)
-
-        # make size-like for symbols with unbacked bindings
+        # while we're doing this, track ranges for symbols with unbacked bindings
         if unbacked_bindings := node.meta.get("unbacked_bindings"):
-            for symbol in unbacked_bindings.keys():
+            symbols = (
+                _get_sym_val(node).free_symbols
+                if node.meta and isinstance(_get_sym_val(node), sympy.Symbol)
+                else unbacked_bindings.keys()
+            )
+            for symbol in symbols:
                 if symbol in shape_env.size_like:
                     sym_expr_to_ranges[symbol].set_is_size()
                 if symbol in shape_env.var_to_range:
@@ -265,7 +243,7 @@ def insert_deferred_runtime_asserts(
                         # asserts cause refinement, but that's NYI)
                         def convert(s):
                             if s in (int_oo, -int_oo):
-                                return None
+                                return s
                             try:
                                 return int(s)
                             except TypeError:
@@ -273,8 +251,61 @@ def insert_deferred_runtime_asserts(
                         _refine_range(SymRel.GE, symbol, convert(vr.lower))
                         _refine_range(SymRel.LE, symbol, convert(vr.upper))
 
+    # now handle ops on sym types in prioritized order
+    for node in is_size_calls + non_is_size_calls:
+        # get expression, maybe negate
+        if node.target == torch.ops.aten._assert_async.msg:
+            expr_node = node.args[0].args[0]
+        else:
+            expr_node = node.args[0]
+        # trivial (simplified by dynamo if static), skip
+        if expr_node == True:
+            continue
+
+        is_size = node.target in (
+            torch.ops.aten.sym_constrain_range_for_size.default,
+            torch._check_is_size,
+        )
+        expr = _get_sym_val(expr_node)
+        if not is_size:
+            expr = _maybe_negate_expr(expr, sym_expr_to_ranges)
+
+        # get signature, refine ranges
+        if node.target in (
+            torch.ops.aten._assert_scalar.default,
+            torch._check,
+            torch.ops.aten._assert_async.msg,
+        ):
+            if (sym_rel := _get_sym_rel(expr)) is None:
+                continue
+            sym_expr, val = expr.args
+            signature = (node.target, sym_rel, val)
+            if not isinstance(val, int):
+                # expect shape_env runtime asserts to handle things like s0 < u0
+                continue
+            _refine_range(sym_rel, sym_expr, val)
+
+        elif node.target in (
+            torch.ops.aten.sym_constrain_range_for_size.default,
+            torch.ops.aten.sym_constrain_range.default,
+        ):
+            _min = node.kwargs.get("min", 0 if node.target == is_size else -int_oo)
+            _max = node.kwargs.get("max", int_oo)
+            signature = (node.target, _min, _max)
+            _refine_range(SymRel.GE, expr, _min)
+            _refine_range(SymRel.LE, expr, _max)
+            sym_expr = expr
+
+        else:  # torch._check_is_size
+            signature = (node.target,)
+            sym_expr = expr
+
+        if is_size:  # make size-like
+            sym_expr_to_ranges[expr].set_is_size()
+        sym_expr_to_nodes[sym_expr][signature].append(node)
+
     # look at exprs in runtime asserts, track ranges
-    for ras in shape_env.deferred_runtime_asserts.copy().values():
+    for ras in ras_by_symbol.values():
         ra_exprs = set(ra.expr for ra in ras)
         for ra_expr in ra_exprs:
             expr = _maybe_negate_expr(ra_expr, sym_expr_to_ranges)
@@ -377,7 +408,7 @@ def insert_deferred_runtime_asserts(
                 or _is_size_function_node(hash_cons[sym_shape].node)
             ):
                 hash_cons[sym_shape] = sympy_interp(
-                    PythonReferenceAnalysis, hash_cons, sym_shape, hash_cons=hash_cons,
+                    PythonReferenceAnalysis, hash_cons, sym_shape, hash_cons=hash_cons, insert_after_args=True,
                 )
             hash_node = hash_cons[sym_shape].node
             node.replace_all_uses_with(hash_node)
@@ -388,8 +419,7 @@ def insert_deferred_runtime_asserts(
             for symbol, keypath in unbacked_bindings.items():
 
                 with graph.inserting_before(node.next):
-                    # hash cons / CSE later
-                    def go(node, keypath):
+                    def unbacked_interp(node, keypath, signature):
                         if keypath == ():
                             return node
                         if (
@@ -397,66 +427,108 @@ def insert_deferred_runtime_asserts(
                             and isinstance(keypath[0], CallMethodKey)
                             and isinstance(keypath[1], pytree.SequenceKey)
                         ):
-                            if keypath[0].name == "size":
-                                return go(
-                                    graph.call_function(
-                                        torch.ops.aten.sym_size.int,
-                                        (node, keypath[1].idx),
-                                    ),
-                                    keypath[2:],
-                                )
-                            if keypath[0].name == "stride":
-                                return go(
-                                    graph.call_function(
-                                        torch.ops.aten.stride.int,
-                                        (node, keypath[1].idx),
-                                    ),
-                                    keypath[2:],
-                                )
-                            return go(
-                                graph.call_method(
-                                    keypath[0].name, (node, keypath[1].idx)
-                                ),
-                                keypath[2:],
-                            )
+                            signature = (("CallMethod", keypath[0].name, keypath[1].idx), signature)
+                            if signature in hash_cons:
+                                res = hash_cons[signature].node
+                            else:
+                                if keypath[0].name == "size":
+                                    res = unbacked_interp(
+                                        graph.call_function(
+                                            torch.ops.aten.sym_size.int,
+                                            (node, keypath[1].idx),
+                                        ),
+                                        keypath[2:],
+                                        signature,
+                                    )
+                                elif keypath[0].name == "stride":
+                                    res = unbacked_interp(
+                                        graph.call_function(
+                                            torch.ops.aten.stride.int,
+                                            (node, keypath[1].idx),
+                                        ),
+                                        keypath[2:],
+                                        signature,
+                                    )
+                                else:
+                                    res = unbacked_interp(
+                                        graph.call_method(
+                                            keypath[0].name, (node, keypath[1].idx)
+                                        ),
+                                        keypath[2:],
+                                        signature,
+                                    )
                         elif isinstance(keypath[0], CallMethodKey):
-                            return go(
-                                graph.call_method(keypath[0].name, (node,)), keypath[1:]
-                            )
+                            signature = (("CallMethod", keypath[0].name), signature)
+                            if signature in hash_cons:
+                                res = hash_cons[signature].node
+                            else:
+                                res = unbacked_interp(
+                                    graph.call_method(keypath[0].name, (node,)),
+                                    keypath[1:],
+                                    signature,
+                                )
                         elif isinstance(keypath[0], pytree.SequenceKey):
-                            return go(
-                                graph.call_function(
-                                    operator.getitem, (node, keypath[0].idx)
-                                ),
-                                keypath[1:],
-                            )
+                            signature = (("SequenceKey", keypath[0].idx), signature)
+                            if signature in hash_cons:
+                                res = hash_cons[signature].node
+                            else:
+                                res = unbacked_interp(
+                                    graph.call_function(
+                                        operator.getitem, (node, keypath[0].idx)
+                                    ),
+                                    keypath[1:],
+                                    signature,
+                                )
                         elif isinstance(keypath[0], ConvertIntKey):
-                            return go(
-                                graph.call_function(
-                                    cast_symbool_to_symint_guardless, (node,)
-                                ),
-                                keypath[1:],
-                            )
+                            signature = (("ConvertIntKey",), signature)
+                            if signature in hash_cons:
+                                res = hash_cons[signature].node
+                            else:
+                                res = unbacked_interp(
+                                    graph.call_function(
+                                        cast_symbool_to_symint_guardless, (node,)
+                                    ),
+                                    keypath[1:],
+                                    signature,
+                                )
                         elif isinstance(keypath[0], DivideByKey):
+                            signature = (("DivideByKey", keypath[0].divisor), signature)
                             # TODO: need to assert divisibility
-                            return go(
-                                graph.call_function(
-                                    operator.floordiv, (node, keypath[0].divisor)
-                                ),
-                                keypath[1:],
-                            )
+                            if signature in hash_cons:
+                                res = hash_cons[signature].node
+                            else:
+                                res = unbacked_interp(
+                                    graph.call_function(
+                                        operator.floordiv, (node, keypath[0].divisor)
+                                    ),
+                                    keypath[1:],
+                                    signature,
+                                )
                         elif isinstance(keypath[0], InnerTensorKey):
-                            return go(
-                                graph.call_function(
-                                    getattr, (node, keypath[0].inner_name)
-                                ),
-                                keypath[1:],
-                            )
+                            signature = (("InnerTensorKey", keypath[0].inner_name), signature)
+                            if signature in hash_cons:
+                                res = hash_cons[signature].node
+                            else:
+                                res = unbacked_interp(
+                                    graph.call_function(
+                                        getattr, (node, keypath[0].inner_name)
+                                    ),
+                                    keypath[1:],
+                                    signature,
+                                )
                         else:
                             raise AssertionError(f"unrecognized keypath {keypath}")
 
-                    res = fx.Proxy(go(node, keypath))
-                    sym_expr = _get_sym_val(res.node) if res.node.meta else symbol
+                        if signature not in hash_cons:
+                            hash_cons[signature] = fx.Proxy(res)
+                        return res
+
+                    res = fx.Proxy(unbacked_interp(node, keypath, _get_example_value(node)))
+                    sym_expr = (
+                        _get_sym_val(res.node)
+                        if res.node.meta and isinstance(_get_sym_val(res.node), sympy.Symbol)
+                        else symbol
+                    )
                     hash_cons[sym_expr] = res
                     tracked_symbols.update(sym_expr.free_symbols)
                     log.debug("symbol_to_proxy[%s] = %s", sym_expr, hash_cons[sym_expr])
@@ -485,6 +557,7 @@ def insert_deferred_runtime_asserts(
                         hash_cons,
                         full_expr,
                         hash_cons=hash_cons,
+                        insert_after_args=True,
                     ).node
                 with node.graph.inserting_before(res0.next):
                     msg = f"Runtime assertion failed for expression {full_expr} on node '{res0}'"
@@ -502,12 +575,40 @@ def insert_deferred_runtime_asserts(
                 _kwargs = {}
                 if not is_size or _min != 0:
                     _kwargs["min"] = _min
-                if not is_size or _max != int_oo:
+                if not is_size or _max != sys.maxsize:
                     _kwargs["max"] = _max
                 with node.graph.inserting_before(node.next):
                     res = node.graph.call_function(op, (node,), _kwargs)
         
         return res
+
+    def maybe_sym_constrain_range_for_size(node, expr, _min, _max):
+        if _max is None or _max > 2:  # doesn't work with max <= 2
+            remaining_assert_nodes.add(
+                add_runtime_assert(
+                    res,
+                    sym_expr,
+                    torch.ops.aten.sym_constrain_range_for_size.default,
+                    (_min, _max),
+                )
+            )
+        else:  # sym_constrain_range_for_size(0, int_oo) + sym_constrain_range(min, max)
+            remaining_assert_nodes.add(
+                add_runtime_assert(
+                    res,
+                    sym_expr,
+                    torch.ops.aten.sym_constrain_range_for_size.default,
+                    (0, sys.maxsize),
+                )
+            )
+            remaining_assert_nodes.add(
+                add_runtime_assert(
+                    res,
+                    sym_expr,
+                    torch.ops.aten.sym_constrain_range.default,
+                    (_min, _max),
+                )
+            )
 
     # go through runtime asserts, add appropriate ops
     for sym_expr, sym_ranges in sym_expr_to_ranges.items():
@@ -516,43 +617,19 @@ def insert_deferred_runtime_asserts(
         free_symbols = sym_expr.free_symbols
         if len(free_symbols - tracked_symbols) == 0:
             res = sympy_interp(
-                PythonReferenceAnalysis, hash_cons, sym_expr, hash_cons=hash_cons,
+                PythonReferenceAnalysis, hash_cons, sym_expr, hash_cons=hash_cons, insert_after_args=True,
             ).node
 
             # track nodes we keep or add
             remaining_assert_nodes: Set[fx.Node] = set()
             _min, is_gt = sym_ranges.min
             _max, is_lt = sym_ranges.max
+            _max = sys.maxsize if _max is int_oo else _max  # can't put this in graph
             
             if sym_ranges.static:
                 val = sym_ranges.val
-                if sym_ranges.is_size:  # sym_constrain_range_for_size
-                    if _max > 2:
-                        remaining_assert_nodes.add(
-                            add_runtime_assert(
-                                res,
-                                sym_expr,
-                                torch.ops.aten.sym_constrain_range_for_size.default,
-                                (val, val),
-                            )
-                        )
-                    else:
-                        remaining_assert_nodes.add(
-                            add_runtime_assert(
-                                res,
-                                sym_expr,
-                                torch.ops.aten.sym_constrain_range_for_size.default,
-                                (_min, int_oo),
-                            )
-                        )
-                        remaining_assert_nodes.add(
-                            add_runtime_assert(
-                                res,
-                                sym_expr,
-                                torch.ops.aten._assert_scalar.default,
-                                (SymRel.LE, _max),
-                            )
-                        )
+                if sym_ranges.is_size:
+                    maybe_sym_constrain_range_for_size(res, sym_expr, val, val)
                 else:  # _assert_scalar
                     remaining_assert_nodes.add(
                         add_runtime_assert(
@@ -569,32 +646,7 @@ def insert_deferred_runtime_asserts(
                 if non-symbol, torch.check
                 '''
                 if sym_ranges.is_size:  # sym_constrain_range_for_size
-                    if _max > 2:
-                        remaining_assert_nodes.add(
-                            add_runtime_assert(
-                                res,
-                                sym_expr,
-                                torch.ops.aten.sym_constrain_range_for_size.default,
-                                (_min, _max),
-                            )
-                        )
-                    else:
-                        remaining_assert_nodes.add(
-                            add_runtime_assert(
-                                res,
-                                sym_expr,
-                                torch.ops.aten.sym_constrain_range_for_size.default,
-                                (_min, int_oo),
-                            )
-                        )
-                        remaining_assert_nodes.add(
-                            add_runtime_assert(
-                                res,
-                                sym_expr,
-                                torch.ops.aten._assert_scalar.default,
-                                (SymRel.LE, _max),
-                            )
-                        )
+                    maybe_sym_constrain_range_for_size(res, sym_expr, _min, _max)
                 elif isinstance(sym_expr, sympy.Symbol):
                     remaining_assert_nodes.add(
                         add_runtime_assert(
@@ -657,5 +709,3 @@ def insert_deferred_runtime_asserts(
             for node in nodes:
                 if node not in remaining_assert_nodes:
                     dce_from_node(node)
-
-    breakpoint()

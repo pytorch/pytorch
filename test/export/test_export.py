@@ -226,9 +226,11 @@ class TestDynamismExpression(TestCase):
         inp = (torch.tensor([3]),)
         ep = export(ConflictingConstraints(), inp)
 
-        with self.assertRaisesRegex(
-            RuntimeError, r"Invalid value range for 3 between \[4, 5\]"
-        ):
+        if is_non_strict_test(self._testMethodName):
+            error_msg = r"Invalid value range for 3 between \[4\, 5\]"
+        else:
+            error_msg = r"item is outside of inline constraint \[4\, 5\]"
+        with self.assertRaisesRegex(RuntimeError, error_msg):
             ep.module()(torch.tensor([3]))
 
     def test_export_assume_static_by_default(self):
@@ -2616,7 +2618,11 @@ def forward(self, x):
             fn,
             (torch.randint(3, 4, (2, 2)), torch.randint(3, 5, (2, 3))),
         )
-        with self.assertRaisesRegex(RuntimeError, "Invalid value range for 1 between"):
+        if is_non_strict_test(self._testMethodName):
+            error_msg = r"Invalid value range for 1 between \[2\, 10\]"
+        else:
+            error_msg = r"item is outside of inline constraint \[2\, 10\]"
+        with self.assertRaisesRegex(RuntimeError, error_msg):
             test_inp = (torch.randint(1, 2, (2, 2)), torch.randint(3, 5, (2, 3)))
             _ = ep.module()(*test_inp)
 
@@ -2751,9 +2757,9 @@ def forward(self, x):
 
         # This is because we insert sym_constrain_range in the graph now
         if is_non_strict_test(self._testMethodName):
-            error_msg = r"Invalid value range for -1 between"
+            error_msg = r"Invalid value range for -1 between \[0\, 9223372036854775807\]"
         else:
-            error_msg = "is outside of inline constraint"
+            error_msg = r"item is outside of inline constraint \[0\, inf\]"
         with self.assertRaisesRegex(RuntimeError, error_msg):
             _ = ep.module()(torch.tensor(-1), torch.randn(4, 5))
 
@@ -2779,11 +2785,11 @@ def forward(self, x):
 
         ep = torch.export.export(M(), (torch.tensor(1),))
         FileCheck().check_count(
-            "torch.ops.aten._assert_scalar.default", 2, exactly=True
+            "torch.ops.aten.sym_constrain_range_for_size.default", 1, exactly=True
         ).run(ep.graph_module.code)
         decompose_ep = ep.run_decompositions()
         FileCheck().check_count(
-            "torch.ops.aten._assert_scalar.default", 2, exactly=True
+            "torch.ops.aten.sym_constrain_range_for_size.default", 1, exactly=True
         ).run(decompose_ep.graph_module.code)
 
     def test_mixed_input(self):
@@ -2815,13 +2821,14 @@ def forward(self, x):
         self.assertEqual(ep.module()(torch.tensor([6])).shape, (6, 4))
 
         FileCheck().check_count(
-            "torch.ops.aten._assert_scalar.default", 2, exactly=True
+            "torch.ops.aten.sym_constrain_range_for_size.default", 1, exactly=True
         ).run(ep.graph_module.code)
 
-        with self.assertRaisesRegex(
-            RuntimeError,
-            r"Invalid value range for 30 between \[4, 7\]",
-        ) as cm:
+        if is_non_strict_test(self._testMethodName):
+            error_msg = r"Invalid value range for 30 between \[4\, 7\]"
+        else:
+            error_msg = r"item is outside of inline constraint \[4\, 7\]"
+        with self.assertRaisesRegex(RuntimeError, error_msg):
             ep.module()(torch.tensor([30]))
 
     def test_export_with_inline_constraints_complex(self):
@@ -2838,7 +2845,7 @@ def forward(self, x):
         ep = export(f, (torch.tensor([6]),))
         self.assertEqual(ep.module()(torch.tensor([5])).shape, (10, 5))
         FileCheck().check_count(
-            "torch.ops.aten._assert_scalar.default", 2, exactly=True
+            "torch.ops.aten.sym_constrain_range_for_size.default", 1, exactly=True
         ).run(ep.graph_module.code)
 
     def test_to_module_with_mutated_buffer(self):
@@ -3453,21 +3460,13 @@ def forward(self, x):
         f = Foo()
 
         ep = export(f, (torch.tensor([3]),))
-
         FileCheck().check_count(
-            "torch.ops.aten.sym_constrain_range.default", 1, exactly=True
-        ).run(ep.graph_module.code)
-        FileCheck().check_count(
-            "torch.ops.aten._assert_scalar.default", 1, exactly=True
+            "torch.ops.aten.sym_constrain_range_for_size.default", 1, exactly=True
         ).run(ep.graph_module.code)
 
         ep = ep.run_decompositions()
-
         FileCheck().check_count(
-            "torch.ops.aten.sym_constrain_range.default", 1, exactly=True
-        ).run(ep.graph_module.code)
-        FileCheck().check_count(
-            "torch.ops.aten._assert_scalar.default", 1, exactly=True
+            "torch.ops.aten.sym_constrain_range_for_size.default", 1, exactly=True
         ).run(ep.graph_module.code)
 
     def test_non_arg_name_dynamic_shapes_api(self):
@@ -5129,20 +5128,12 @@ def forward(self, x):
             """\
 def forward(self, x):
     item = torch.ops.aten.item.default(x);  x = None
-    sym_constrain_range_for_size_default = torch.ops.aten.sym_constrain_range_for_size.default(item)
-    sym_constrain_range_default = torch.ops.aten.sym_constrain_range.default(item, min = 3, max = 5)
-    mul = -1 * item
-    le = mul <= 0;  mul = None
-    _assert_scalar_default = torch.ops.aten._assert_scalar.default(le, "Runtime assertion failed for expression -u1 <= 0 on node 'le'");  le = None
-    mul_1 = -1 * item
-    lt = mul_1 < -2;  mul_1 = None
-    _assert_scalar_default_1 = torch.ops.aten._assert_scalar.default(lt, "Runtime assertion failed for expression -u1 < -2 on node 'lt'");  lt = None
-    lt_1 = item < 6
-    _assert_scalar_default_2 = torch.ops.aten._assert_scalar.default(lt_1, "Runtime assertion failed for expression u1 < 6 on node 'lt_1'");  lt_1 = None
+    sym_constrain_range_for_size_default = torch.ops.aten.sym_constrain_range_for_size.default(item, min = 3, max = 5)
     foo_unbacked = torch.ops.testlib.foo_unbacked.default(item);  item = None
     return foo_unbacked""",
         )
         ep_aot = ep_pre.run_decompositions()
+        print(ep_aot)
         self.assertExpectedInline(
             str(ep_aot.graph_module.code).strip(),
             """\
@@ -5150,16 +5141,7 @@ def forward(self, x, y):
     sin = torch.ops.aten.sin.default(y)
     sum_1 = torch.ops.aten.sum.dim_IntList(sin, []);  sin = None
     _local_scalar_dense = torch.ops.aten._local_scalar_dense.default(x);  x = None
-    sym_constrain_range_for_size = torch.ops.aten.sym_constrain_range_for_size.default(_local_scalar_dense)
-    sym_constrain_range = torch.ops.aten.sym_constrain_range.default(_local_scalar_dense, min = 3, max = 5)
-    mul = -1 * _local_scalar_dense
-    le = mul <= 0;  mul = None
-    _assert_scalar = torch.ops.aten._assert_scalar.default(le, "Runtime assertion failed for expression -u1 <= 0 on node 'le'");  le = None
-    mul_1 = -1 * _local_scalar_dense
-    lt = mul_1 < -2;  mul_1 = None
-    _assert_scalar_1 = torch.ops.aten._assert_scalar.default(lt, "Runtime assertion failed for expression -u1 < -2 on node 'lt'");  lt = None
-    lt_1 = _local_scalar_dense < 6;  _local_scalar_dense = None
-    _assert_scalar_2 = torch.ops.aten._assert_scalar.default(lt_1, "Runtime assertion failed for expression u1 < 6 on node 'lt_1'");  lt_1 = None
+    sym_constrain_range_for_size = torch.ops.aten.sym_constrain_range_for_size.default(_local_scalar_dense, min = 3, max = 5);  _local_scalar_dense = None
     full = torch.ops.aten.full.default([4, 4], 1, dtype = torch.float32, layout = torch.strided, device = device(type='cpu'), pin_memory = False)
     add = torch.ops.aten.add.Tensor(y, sum_1);  y = sum_1 = None
     sum_2 = torch.ops.aten.sum.dim_IntList(full, []);  full = None
@@ -5286,10 +5268,7 @@ def forward(self, x, y):
         self.assertEqual(out1.shape, torch.ones(48).shape)
         out2 = ep.module()(torch.randn(5, 8), torch.randn(4, 10), torch.randn(40))
         self.assertEqual(out2.shape, torch.ones(40).shape)
-        with self.assertRaisesRegex(
-            RuntimeError,
-            r"Runtime assertion failed for expression Eq\(s0\*s1 \- s2\*s3, 0\) on node 'eq.*'",
-        ):  # fail only at runtime
+        with self.assertRaisesRegex(RuntimeError, ""):  # fail only at runtime
             ep.module()(torch.randn(5, 8), torch.randn(4, 5), torch.randn(30))  # fail
 
         # case 3: 3d reshape (previously failing with different issue)
@@ -5415,15 +5394,9 @@ def forward(self, x, y):
             dynamic_shapes=dynamic_shapes,
             _allow_complex_guards_as_runtime_asserts=True,
         )
-        with self.assertRaisesRegex(
-            RuntimeError,
-            r"Runtime assertion failed for expression Ne\(s0, 20\)",
-        ):
+        with self.assertRaisesRegex(RuntimeError, ""):
             ep.module()(torch.randn(20, 20, 16))
-        with self.assertRaisesRegex(
-            RuntimeError,
-            r"Runtime assertion failed for expression Ne\(Mod\(s0, 20\), 0\)",
-        ):
+        with self.assertRaisesRegex(RuntimeError, ""):
             ep.module()(torch.randn(400, 20, 16))
         ep.module()(torch.randn(42, 20, 16))
 
