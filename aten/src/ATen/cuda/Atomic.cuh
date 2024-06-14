@@ -338,7 +338,7 @@ static inline __device__ void gpuAtomicAddNoReturn(float *address, float val) {
 #if defined(__gfx908__)
   atomicAddNoRet(address, val);
 #else
-  (void)atomicAdd(address, val);
+  (void)unsafeAtomicAdd(address, val);
 #endif
 }
 #else
