@@ -2502,7 +2502,7 @@ class TestSDPACudaOnly(NNTestCase):
         major, minor = torch.cuda.get_device_capability(device)
         is_sm90_or_newer = major >= 9
 
-        if type != "nested" and PLATFORM_SUPPORTS_CUDNN_ATTENTION: #TODO(eqy) REVERT before merging is_sm90_or_newer:
+        if type != "nested" and PLATFORM_SUPPORTS_CUDNN_ATTENTION:  #TODO(eqy) REVERT before merging is_sm90_or_newer:
             assert torch._fused_sdp_choice(query, key, value) == SDPBackend.CUDNN_ATTENTION.value
         elif PLATFORM_SUPPORTS_FLASH_ATTENTION:
             assert torch._fused_sdp_choice(query, key, value) == SDPBackend.FLASH_ATTENTION.value
@@ -3496,7 +3496,10 @@ class TestAttnBias(NNTestCase):
             print(seq_len_q, seq_len_kv)
             attn_bias = causal_lower_right(seq_len_q, seq_len_kv)
 
-        with sdpa_kernel(backends=[SDPBackend.EFFICIENT_ATTENTION, SDPBackend.FLASH_ATTENTION, SDPBackend.MATH, SDPBackend.CUDNN_ATTENTION]):
+        with sdpa_kernel(backends=[SDPBackend.EFFICIENT_ATTENTION,
+                                   SDPBackend.FLASH_ATTENTION,
+                                   SDPBackend.MATH,
+                                   SDPBackend.CUDNN_ATTENTION]):
             self.run_test(device, make_q_tensor, make_kv_tensor, attn_bias, forw_tol, grad_tol, backend=None)
 
     @skipIfRocm  # CausalVariant
@@ -3528,7 +3531,10 @@ class TestAttnBias(NNTestCase):
         else:
             attn_bias = causal_lower_right(seq_len_q, seq_len_kv)
 
-        with sdpa_kernel(backends=[SDPBackend.EFFICIENT_ATTENTION, SDPBackend.FLASH_ATTENTION, SDPBackend.MATH, SDPBackend.CUDNN_ATTENTION]):
+        with sdpa_kernel(backends=[SDPBackend.EFFICIENT_ATTENTION,
+                                   SDPBackend.FLASH_ATTENTION,
+                                   SDPBackend.MATH,
+                                   SDPBackend.CUDNN_ATTENTION]):
             self.run_test(device, make_q_tensor, make_kv_tensor, attn_bias, forw_tol, grad_tol, backend=cnts)
         self.assertEqual(cnts.frame_count, 1, "Compiled graph should have 1 frame!")
 
