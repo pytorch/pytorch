@@ -186,6 +186,7 @@ def _dce_from_node(node: fx.Node):
     while _args:
         node = _args.pop()
         inputs = node.args
+        log.debug("DCE node %s", node)
         graph.erase_node(node)
         _args.extend(
             n for n in inputs
@@ -205,19 +206,34 @@ def insert_deferred_runtime_asserts(
     export: bool = False,
 ) -> None:
     """
-    1.  First pass through graph, collects current runtime asserts (NOTE: rename from RUNTIME_ASSERT_OPS).
+    1. First pass through graph, collects current runtime asserts (NOTE: rename from RUNTIME_ASSERT_OPS).
         Uses these, along with shape env's runtime asserts and stored ranges for unbacked symbols,
         and computes ranges for expressions.
-    2.  Main graph pass:
+    2. Main graph pass:
         a) performs CSE for existing and new size-compute nodes, calling sympy_interp(),
            as well as calls on unbacked bindings. Creates size/stride calls to produce shape/unbacked symbols.
         b) turns size calls on intermediate tensors into placeholder-size computation if possible
-    3.  Create runtime asserts based on collected range information for each expression.
-    4.  Deletes any unused existing runtime asserts or unused size/stride calls.
+    3. Create runtime asserts based on collected range information for each expression.
+    4. Deletes any unused existing runtime asserts or unused size/stride calls.
 
-    Collecting range information for expressions seems to be a good way to handle runtime assert deduplication...
-    ...
-    ...
+    Collecting range information for expressions seems to be a good way to handle runtime assert deduplication.
+    If we can _canonicalize_expr() runtime asserts expressions, then asserts are refinements on the LHS expr.
+    For example, a sequence of calls like:
+    
+        torch._check(2 < u0)
+        torch._check(u0 >= 4)
+        torch._check(u0 != 4)
+        torch._check(10 >= u0)
+        torch._check(u0 <= 12)
+        torch._check_is_size(u0)
+
+    implies u0 has range: (4, 10], and is_size=True.
+    This allows us to just generate the following 2 assertions:
+
+        sym_constrain_range_for_size(u0, min=4, max=10)
+        _assert_scalar(u0 > 4)
+
+    This information is tracked with SymExprRange objects for each LHS expression.
     """
 
     import sympy
@@ -265,6 +281,7 @@ def insert_deferred_runtime_asserts(
             sym_expr_to_ranges[lhs].gt(rhs, True)
         elif sym_rel == SymRel.GE:
             sym_expr_to_ranges[lhs].gt(rhs, False)
+        log.debug("_refine_range(%s, %s, %s)", sym_rel, lhs, rhs)
 
     graph_code_log.debug(
         "%s",
@@ -366,7 +383,7 @@ def insert_deferred_runtime_asserts(
                         _refine_range(SymRel.GE, symbol, convert(vr.lower))
                         _refine_range(SymRel.LE, symbol, convert(vr.upper))
 
-    # now handle ops on sym types in prioritized order, looking at is_size calls first
+    # now handle existing runtime asserts in prioritized order, looking at is_size calls first
     for node in is_size_calls + non_is_size_calls:
         if node.target == torch.ops.aten._assert_async.msg:
             expr_node = node.args[0].args[0]
@@ -377,6 +394,8 @@ def insert_deferred_runtime_asserts(
         if expr_node == True:
             continue
 
+        log.debug("read runtime assert %s for node %s", node.target, node)
+
         # maybe flip/negate expression
         is_size = node.target in (
             torch.ops.aten.sym_constrain_range_for_size.default,
@@ -384,8 +403,9 @@ def insert_deferred_runtime_asserts(
         )
         expr = _get_sym_val(expr_node)
         if not is_size:
-            # expr = _maybe_flip_and_negate_expr(expr, sym_expr_to_ranges)
+            old_expr = expr
             expr = _canonicalize_expr(expr, sym_expr_to_ranges)
+            log.debug("canonicalize_expr(%s) -> %s", old_expr, expr)
 
         # get signature, refine ranges
         if node.target in (
@@ -428,8 +448,9 @@ def insert_deferred_runtime_asserts(
     for ras in ras_by_symbol.values():
         ra_exprs = set(ra.expr for ra in ras)
         for ra_expr in ra_exprs:
-            # expr = _maybe_flip_and_negate_expr(ra_expr, sym_expr_to_ranges)
+            log.debug("new runtime assert %s", ra_expr)
             expr = _canonicalize_expr(ra_expr, sym_expr_to_ranges)
+            log.debug("canonicalize_expr(%s) -> %s", ra_expr, expr)
             if (sym_rel := _get_sym_rel(expr)) is None:
                 continue  # don't know what to do with this expr type, don't track anything for this expr
             # only refine range, no node to CSE yet
@@ -498,6 +519,7 @@ def insert_deferred_runtime_asserts(
                 hash_node = hash_cons[sym_val].node
                 node.replace_all_uses_with(hash_node)
                 node.graph.erase_node(node)
+                log.debug("CSEd node %s -> %s for expr %s", node, hash_node, sym_val)
                 continue
                 # I don't think we need to run DCE here...
                 # this would only be needed if the graph has multiple ways
@@ -530,6 +552,7 @@ def insert_deferred_runtime_asserts(
                 )
             hash_node = hash_cons[sym_shape].node
             node.replace_all_uses_with(hash_node)
+            log.debug("CSEd intermediate size node for expr %s", sym_shape)
             _dce_from_node(node)  # here we should DCE
 
         # look at unbacked bindings, hash cons ops that create them, update tracked symbols
@@ -539,6 +562,10 @@ def insert_deferred_runtime_asserts(
                     def unbacked_interp(node, keypath, signature):
                         if keypath == ():
                             return node
+                        if signature in hash_cons:  # CSE
+                            hash_node = hash_cons[signature].node
+                            log.debug("CSE unbacked_bindings node for keypath %s on node %s", keypath, node)
+                            return hash_node
                         if (
                             len(keypath) >= 2
                             and isinstance(keypath[0], CallMethodKey)
@@ -662,6 +689,7 @@ def insert_deferred_runtime_asserts(
         - torch.ops.aten.sym_constrain_range.default (anything non-size-like)
         - torch.ops.aten._assert_scalar.default (anything not handled by the other two, e.g. strict LT/GT, inequality)
         '''
+        log.debug("adding runtime assert %s for sym_expr %s", op, sym_expr)
         signature = (op,) + partial_signature  # op is part of signature
 
         if op == torch.ops.aten._assert_scalar.default:
