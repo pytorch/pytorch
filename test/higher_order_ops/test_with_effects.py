@@ -209,17 +209,14 @@ def forward(self, arg0_1, arg1_1, arg2_1):
 
             def inplace_add(input: torch.Tensor, output: torch.Tensor) -> None:
                 assert input.device == output.device
-                assert input.device.type == "cpu"
                 output.add_(input)
 
-            lib.impl("inplace_add", inplace_add, "CPU")
-
-            inplace_add = torch.ops.mylib.inplace_add
+            lib.impl("inplace_add", inplace_add, "CompositeExplicitAutograd")
 
             def f(x):
                 out = torch.empty(3)
                 out = torch.zeros_like(out)
-                inplace_add(x, out)
+                torch.ops.mylib.inplace_add(x, out)
                 return out
 
             inputs = (torch.randn(3),)
