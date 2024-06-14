@@ -8,6 +8,7 @@ import collections
 import contextlib
 import copy
 import functools
+import gc
 import inspect
 import itertools
 import random
@@ -4694,15 +4695,13 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
         opt_fn = torch.compile(fn, backend=cnt)
         res = opt_fn(x_weak, weight, y)
         self.assertEqual(ref, res)
-        # Skip frame should get triggered
-        self.assertEqual(cnt.frame_count, 0)
+        self.assertEqual(cnt.frame_count, 2)
 
     def test_weakref_del(self):
         def fn(x_weak, y):
-            if x_weak is not None:
-                x = x_weak()
-                if x is not None:
-                    return torch.sin(y)
+            x = x_weak()
+            if x is not None:
+                return torch.sin(y)
             return torch.cos(y)
 
         weight = torch.randn(4)
@@ -4716,6 +4715,7 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
         self.assertEqual(ref, res)
 
         del weight
+        gc.collect()
         ref = fn(x_weak, y)
         res = opt_fn(x_weak, y)
         self.assertEqual(ref, res)

@@ -8,7 +8,6 @@ from torch._guards import ChainedSource, GuardSource, Source
 
 from . import utils
 from .bytecode_transformation import create_call_function, create_instruction
-from .exc import unimplemented
 from .utils import enum_repr
 
 # It shouldn't be supported to construct an NNModuleVariable inside an FSDP module,
@@ -146,11 +145,8 @@ class GlobalWeakRefSource(Source):
 @dataclasses.dataclass(frozen=True)
 class WeakRefCallSource(ChainedSource):
     def reconstruct(self, codegen):
-        unimplemented(
-            "Dynamo is reconstructing a weakref call. This is not supported "
-            "because weakref requires refcounts to be counted correctly "
-            "and its beyond Dynamo scope."
-        )
+        self.base.reconstruct(codegen)
+        codegen.extend_output(create_call_function(0, True))
 
     def guard_source(self):
         return self.base.guard_source()
