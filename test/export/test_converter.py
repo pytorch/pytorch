@@ -693,13 +693,21 @@ class TestConverter(TestCase):
         inp = (torch.randn(10, 2), torch.randn(5))
         self._check_equal_ts_ep_converter(Module(), inp)
 
-    # def test_prim_tolist(self):
-    #     class Module(torch.nn.Module):
-    #         def forward(self, x: torch.Tensor) -> List[int]:
-    #             return x.tolist()
+    def test_prim_tolist(self):
+        class Module(torch.nn.Module):
+            def forward(self, x: torch.Tensor) -> List[int]:
+                return x.tolist()
 
-    #     inp = (torch.tensor([1,2,3]),)
-    #     self._check_equal_ts_ep_converter(Module(), inp)
+        inp = (torch.tensor([1,2,3]),)
+        self._check_equal_ts_ep_converter(Module(), inp)
+
+
+        class Module(torch.nn.Module):
+            def forward(self, x: torch.Tensor) -> List[List[int]]:
+                return x.tolist()
+
+        inp = (torch.tensor([[1,2,3], [4,5,6]]),)
+        self._check_equal_ts_ep_converter(Module(), inp)
 
 
 if __name__ == "__main__":

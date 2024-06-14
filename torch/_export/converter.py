@@ -643,14 +643,21 @@ class TS2FXGraphConverter:
         args = tuple(self.get_fx_value(input) for input in node.inputs())
         self.fx_graph.call_function(target, args)
 
+    def convert_prim_tolist(self, node: torch._C.Node):
+        # prim::tolist cannot be supported by `_convert_standard_operators`
+        # since it requires call_method instead of call_function.
+        target = "tolist"
+        args = ([self.get_fx_value(input) for input in node.inputs()][0],)
+        fx_node = self.fx_graph.call_method(target, args)
+        output_name = node.output().debugName()
+        self.name_to_node[output_name] = fx_node
+
     def convert_aten_tensor(self, node: torch._C.Node):
-        """
-        aten::tensor takes 1 positional argument and 3 keyword argument.
-        aten::tensor cannot be handled by _convert_standard_operators since
-        the function only supports positional arguments. We also cannot
-        extend _convert_standard_operators to support keyword arguments
-        since ops in kind_to_standard_operators usually do not have schema.
-        """
+        # aten::tensor takes 1 positional argument and 3 keyword argument.
+        # aten::tensor cannot be handled by _convert_standard_operators since
+        # the function only supports positional arguments. We also cannot
+        # extend _convert_standard_operators to support keyword arguments
+        # since ops in kind_to_standard_operators usually do not have schema.
         target = torch.tensor
 
         schema_str = node.schema()
