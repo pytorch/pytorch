@@ -664,6 +664,43 @@ class TestConverter(TestCase):
         inp = (torch.randn(3), 1)
         self._check_equal_ts_ep_converter(Module(), inp)
 
+    def test_prim_min(self):
+        class Module(torch.nn.Module):
+            def forward(self, x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+                x_len = len(x)
+                y_len = len(y)
+
+                # prim::min.int
+                len_int = min(x_len, y_len)
+
+                # prim::min.float
+                len_float = int(min(x_len*2.0, y_len*2.0))
+
+                # prim::min.self_int
+                len_self_int = min([x_len, y_len])
+
+                # prim::min.self_float
+                len_self_float = int(min([x_len * 2.0, y_len * 2.0]))
+
+                # prim::min.float_int
+                len_float_int = int(min(x_len * 2.0, y_len))
+
+                # prim::min.int_float
+                len_int_float = int(min(x_len, y_len * 2.0))
+
+                return torch.ones(len_int + len_float + len_self_int + len_self_float + len_float_int + len_int_float)
+
+        inp = (torch.randn(10, 2), torch.randn(5))
+        self._check_equal_ts_ep_converter(Module(), inp)
+
+    # def test_prim_tolist(self):
+    #     class Module(torch.nn.Module):
+    #         def forward(self, x: torch.Tensor) -> List[int]:
+    #             return x.tolist()
+
+    #     inp = (torch.tensor([1,2,3]),)
+    #     self._check_equal_ts_ep_converter(Module(), inp)
+
 
 if __name__ == "__main__":
     run_tests()

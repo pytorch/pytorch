@@ -673,6 +673,11 @@ class TS2FXGraphConverter:
 
     def convert_node(self, node: torch._C.Node):
         node_kind = node.kind()
+        # try:
+        #     print(get_op_overload(node))
+        # except Exception:
+        #     print("failed get_op_overload:", node_kind)
+        # breakpoint()
 
         # Get handler based on namespace and operator name.
         # Provide a default node handler as well in case we don't find
@@ -753,6 +758,8 @@ class TS2EPConverter:
 
     def retrace_as_exported_program(self, gm: torch.fx.GraphModule, tensor_constants):
         # TODO: adjust input orders to match GraphSignature convention
+        # print("before export")
+        # print(f"gm.graph: {gm.graph}")
         ep = torch.export._trace._export(
             gm,
             self.sample_args,
