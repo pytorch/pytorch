@@ -259,7 +259,7 @@ def split_const_subgraphs(
     # worry about whether this is one or more tensors because the original graph
     # correctly uses getitem to extract individual tensors if there are multiple folded.
     fx_const_folded_attrs_name = get_unique_attr_name_in_module(
-        split, "_FX_CONST_FOLDED_ATTRS"
+        mod_traced, "_FX_CONST_FOLDED_ATTRS"
     )
     setattr(
         split,
