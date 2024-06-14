@@ -201,7 +201,6 @@ def get_new_removed_tests(
 def compare(
     job_summary: Dict[str, Any], base_job_summary: Dict[str, Any], base_job_id: int
 ) -> Dict[str, Any]:
-    # Compare the two summaries
     start = time.time()
     new, removed = get_new_removed_tests(job_summary, base_job_summary)
     print(f"Time taken to compare tests: {time.time() - start}")
@@ -246,18 +245,14 @@ def upload_wrapper(
 ) -> None:
     as_string = json.dumps(data)
     if len(as_string) > 1000000:
-        # data = [{"info": "Data too large to upload"}]
+        data = [{"info": "Data too large to upload"}]
         print("Data too large to upload")
-    print("uploaded")
-    with open("test/test-reports/" + name.replace("/", ".") + ".json", "w+") as f:
-        json.dump(data, f)
-    if False:
-        upload_workflow_stats_to_s3(
-            workflow_run_id,
-            workflow_run_attempt,
-            name,
-            [data],
-        )
+    upload_workflow_stats_to_s3(
+        workflow_run_id,
+        workflow_run_attempt,
+        name,
+        [data],
+    )
 
 
 def upload_additional_info(
