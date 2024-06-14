@@ -2335,7 +2335,7 @@ def all_reduce_coalesced(tensors, op=ReduceOp.SUM, group=None, async_op=False):
     """
     if isinstance(tensors, torch.Tensor):
         tensors = [tensors]
-    _check_tensor_list(tensors, "tensor")
+    _check_tensor_list(tensors, "tensors")
     _ensure_all_tensors_same_dtype(tensors)
     if _rank_not_in_group(group):
         _warn_not_in_group("all_reduce_coalesced")
