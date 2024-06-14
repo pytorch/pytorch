@@ -37,7 +37,8 @@ unary_list = {
     torch.nn.Tanh(): 2,
     torch.nn.Hardswish(): 6,
     torch.nn.LeakyReLU(0.1, inplace=False): 4,
-    torch.nn.Hardtanh(min_val=-0.5, max_val=4, inplace=False): 3,
+    # Use floats for min/max, otherwise they can get converted to symints
+    torch.nn.Hardtanh(min_val=-0.5, max_val=4.0, inplace=False): 3,
     torch.nn.Hardtanh(min_val=-0.5, max_val=float("inf"), inplace=False): 3,
     torch.nn.GELU(approximate="none"): 6,
     torch.nn.GELU(approximate="tanh"): 10,
@@ -705,7 +706,6 @@ class TestPatternMatcher(TestPatternMatcherBase):
     @skipIfNoDynamoSupport
     @skipIfNoONEDNNBF16
     @skipIfNoONEDNN
-    @skipIfRocm
     def test_qconv2d_int8_mixed_bf16(self):
         r"""
         This testcase will quantize a single Conv2d module with int8_mixed_bf16 quantization.
@@ -759,7 +759,6 @@ class TestPatternMatcher(TestPatternMatcherBase):
 
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN
-    @skipIfRocm
     def test_qconv2d_relu_cpu(self):
         r"""
         This testcase will quantize Conv2d->ReLU pattern.
@@ -769,7 +768,6 @@ class TestPatternMatcher(TestPatternMatcherBase):
     @skipIfNoDynamoSupport
     @skipIfNoONEDNNBF16
     @skipIfNoONEDNN
-    @skipIfRocm
     def test_qconv2d_relu_int8_mixed_bf16(self):
         r"""
         This testcase will quantize Conv2d->ReLU pattern with int8_mixed_bf16 quantization.
@@ -778,7 +776,6 @@ class TestPatternMatcher(TestPatternMatcherBase):
 
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN
-    @skipIfRocm
     def test_qconv2d_relu6_cpu(self):
         r"""
         This testcase will quantize Conv2d->ReLU6 pattern.
@@ -787,7 +784,6 @@ class TestPatternMatcher(TestPatternMatcherBase):
 
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN
-    @skipIfRocm
     def test_qconv2d_hardtanh_cpu(self):
         r"""
         This testcase will quantize Conv2d->Hardtanh pattern.
@@ -797,7 +793,6 @@ class TestPatternMatcher(TestPatternMatcherBase):
     @skipIfNoDynamoSupport
     @skipIfNoONEDNNBF16
     @skipIfNoONEDNN
-    @skipIfRocm
     def test_qconv2d_hardtanh_int8_mixed_bf16_cpu(self):
         r"""
         This testcase will quantize Conv2d->Hardtanh pattern.
@@ -813,7 +808,6 @@ class TestPatternMatcher(TestPatternMatcherBase):
 
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN
-    @skipIfRocm
     def test_qconv2d_hardswish_cpu(self):
         r"""
         This testcase will quantize Conv2d->Hardswish pattern.
@@ -823,7 +817,6 @@ class TestPatternMatcher(TestPatternMatcherBase):
     @skipIfNoDynamoSupport
     @skipIfNoONEDNNBF16
     @skipIfNoONEDNN
-    @skipIfRocm
     def test_qconv2d_hardswish_int8_mixed_bf16_cpu(self):
         r"""
         This testcase will quantize Conv2d->Hardswish pattern.
@@ -840,7 +833,6 @@ class TestPatternMatcher(TestPatternMatcherBase):
 
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN
-    @skipIfRocm
     def test_qconv2d_silu_cpu(self):
         r"""
         This testcase will quantize Conv2d->SiLU pattern.
@@ -850,7 +842,6 @@ class TestPatternMatcher(TestPatternMatcherBase):
     @skipIfNoDynamoSupport
     @skipIfNoONEDNNBF16
     @skipIfNoONEDNN
-    @skipIfRocm
     def test_qconv2d_silu_int8_mixed_bf16_cpu(self):
         r"""
         This testcase will quantize Conv2d->SiLU pattern.
@@ -936,33 +927,28 @@ class TestPatternMatcher(TestPatternMatcherBase):
 
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN
-    @skipIfRocm
     def test_qconv2d_add_cpu(self):
         self._qconv2d_add_cpu_test_helper()
 
     @skipIfNoDynamoSupport
     @skipIfNoONEDNNBF16
     @skipIfNoONEDNN
-    @skipIfRocm
     def test_qconv2d_add_int8_mixed_bf16(self):
         self._qconv2d_add_cpu_test_helper(int8_mixed_bf16=True)
 
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN
-    @skipIfRocm
     def test_qconv2d_add_relu_cpu(self):
         self._qconv2d_add_cpu_test_helper(use_relu=True)
 
     @skipIfNoDynamoSupport
     @skipIfNoONEDNNBF16
     @skipIfNoONEDNN
-    @skipIfRocm
     def test_qconv2d_add_relu_int8_mixed_bf16(self):
         self._qconv2d_add_cpu_test_helper(use_relu=True, int8_mixed_bf16=True)
 
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN
-    @skipIfRocm
     def test_qconv2d_add_broadcast_shapes_cpu(self):
         r"""
         This testcase will quantize Conv2d->add pattern using broadcast shape inputs.
@@ -1002,7 +988,6 @@ class TestPatternMatcher(TestPatternMatcherBase):
 
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN
-    @skipIfRocm
     def test_qconv2d_add_2(self):
         r"""
         This testcase prevents this pattern be matched as a conv_binary fusion by mistake.
@@ -1048,7 +1033,6 @@ class TestPatternMatcher(TestPatternMatcherBase):
 
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN
-    @skipIfRocm
     def test_qconv2d_add_3(self):
         r"""
         This testcase will test below model:
@@ -1210,7 +1194,6 @@ class TestPatternMatcher(TestPatternMatcherBase):
 
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN
-    @skipIfRocm
     def test_qat_qconv2d_relu(self):
         r"""
         This testcase will quantize Conv2d->ReLU pattern with qat flow.
@@ -1220,7 +1203,6 @@ class TestPatternMatcher(TestPatternMatcherBase):
 
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN
-    @skipIfRocm
     def test_qat_qconv2d_relu6(self):
         r"""
         This testcase will quantize Conv2d->ReLU6 pattern with qat flow.
@@ -1229,7 +1211,6 @@ class TestPatternMatcher(TestPatternMatcherBase):
 
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN
-    @skipIfRocm
     def test_qat_qconv2d_hardtanh(self):
         r"""
         This testcase will quantize Conv2d->Hardtanh pattern with qat flow.
@@ -1238,7 +1219,6 @@ class TestPatternMatcher(TestPatternMatcherBase):
 
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN
-    @skipIfRocm
     def test_qat_qconv2d_silu(self):
         r"""
         This testcase will quantize Conv2d->SiLU pattern with qat flow.
@@ -1247,7 +1227,6 @@ class TestPatternMatcher(TestPatternMatcherBase):
 
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN
-    @skipIfRocm
     def test_qat_qconv2d_hardswish(self):
         r"""
         This testcase will quantize Conv2d->Hardswish pattern with qat flow.
@@ -1472,7 +1451,6 @@ class TestPatternMatcher(TestPatternMatcherBase):
 
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN
-    @skipIfRocm
     def test_qlinear_cpu(self):
         r"""
         This testcase will quantize a single Linear Moduel.
@@ -1482,7 +1460,6 @@ class TestPatternMatcher(TestPatternMatcherBase):
 
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN
-    @skipIfRocm
     def test_dynamic_qlinear_cpu(self):
         r"""
         This testcase will quantize a single Linear Moduel.
@@ -1494,7 +1471,6 @@ class TestPatternMatcher(TestPatternMatcherBase):
 
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN
-    @skipIfRocm
     def test_dynamic_qlinear_qat_cpu(self):
         r"""
         This testcase will quantize a single Linear Moduel.
@@ -1506,7 +1482,6 @@ class TestPatternMatcher(TestPatternMatcherBase):
 
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN
-    @skipIfRocm
     def test_dynamic_qlinear_input_dim_exceeds_2(self):
         r"""
         This testcase will quantize a single Linear Moduel.
@@ -1519,7 +1494,6 @@ class TestPatternMatcher(TestPatternMatcherBase):
     @skipIfNoDynamoSupport
     @skipIfNoONEDNNBF16
     @skipIfNoONEDNN
-    @skipIfRocm
     def test_qlinear_int8_mixed_bf16(self):
         r"""
         This testcase will quantize a single Linear Moduel with int8_mixed_bf16 quantization.
@@ -1531,7 +1505,6 @@ class TestPatternMatcher(TestPatternMatcherBase):
 
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN
-    @skipIfRocm
     def test_qlinear_input_dim_exceeds_2(self):
         r"""
         This testcase will quantize a single Linear Moduel.
@@ -1542,7 +1515,6 @@ class TestPatternMatcher(TestPatternMatcherBase):
     @skipIfNoDynamoSupport
     @skipIfNoONEDNNBF16
     @skipIfNoONEDNN
-    @skipIfRocm
     def test_qlinear_int8_mixed_bf16_input_dim_exceeds_2(self):
         r"""
         This testcase will quantize a single Linear Moduel with int8_mixed_bf16 quantization.
@@ -1554,7 +1526,6 @@ class TestPatternMatcher(TestPatternMatcherBase):
 
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN
-    @skipIfRocm
     def test_qlinear_input_dim_exceeds_2_and_not_contiguous(self):
         r"""
         This testcase will quantize a single Linear Module.
@@ -1582,7 +1553,6 @@ class TestPatternMatcher(TestPatternMatcherBase):
     @skipIfNoDynamoSupport
     @skipIfNoONEDNNBF16
     @skipIfNoONEDNN
-    @skipIfRocm
     def test_qlinear_int8_mixed_bf16_input_dim_exceeds_2_and_not_contiguous(self):
         r"""
         This testcase will quantize a single Linear Module for int8_bf16.
@@ -1645,7 +1615,6 @@ class TestPatternMatcher(TestPatternMatcherBase):
 
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN
-    @skipIfRocm
     def test_qlinear_relu_cpu(self):
         r"""
         This testcase will quantize a Linear->ReLU pattern.
@@ -1655,7 +1624,6 @@ class TestPatternMatcher(TestPatternMatcherBase):
     @skipIfNoDynamoSupport
     @skipIfNoONEDNNBF16
     @skipIfNoONEDNN
-    @skipIfRocm
     def test_qlinear_relu_int8_mixed_bf16(self):
         r"""
         This testcase will quantize a Linear->ReLU pattern with int8_mixed_bf16 quantization.
@@ -1666,7 +1634,6 @@ class TestPatternMatcher(TestPatternMatcherBase):
 
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN
-    @skipIfRocm
     def test_qlinear_relu_input_dim_exceeds_2(self):
         r"""
         This testcase will quantize a Linear->ReLU pattern.
@@ -1676,7 +1643,6 @@ class TestPatternMatcher(TestPatternMatcherBase):
     @skipIfNoDynamoSupport
     @skipIfNoONEDNNBF16
     @skipIfNoONEDNN
-    @skipIfRocm
     def test_qlinear_relu_int8_mixed_bf16_input_dim_exceeds_2(self):
         r"""
         This testcase will quantize a Linear->ReLU pattern with int8_mixed_bf16 quantization.
@@ -1687,7 +1653,6 @@ class TestPatternMatcher(TestPatternMatcherBase):
 
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN
-    @skipIfRocm
     def test_qlinear_gelu_cpu(self):
         r"""
         This testcase will quantize a Linear->GELU pattern.
@@ -1698,7 +1663,6 @@ class TestPatternMatcher(TestPatternMatcherBase):
     @skipIfNoDynamoSupport
     @skipIfNoONEDNNBF16
     @skipIfNoONEDNN
-    @skipIfRocm
     def test_qlinear_gelu_int8_mixed_bf16(self):
         r"""
         This testcase will quantize a Linear->GELU pattern with int8_mixed_bf16 quantization.
@@ -1848,27 +1812,23 @@ class TestPatternMatcher(TestPatternMatcherBase):
 
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN
-    @skipIfRocm
     def test_qlinear_add_cpu(self):
         self._qlinear_add_cpu_test_helper()
 
     @skipIfNoDynamoSupport
     @skipIfNoONEDNNBF16
     @skipIfNoONEDNN
-    @skipIfRocm
     def test_qlinear_add_int8_mixed_bf16(self):
         self._qlinear_add_cpu_test_helper(int8_mixed_bf16=True)
 
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN
-    @skipIfRocm
     def test_qlinear_add_relu_cpu(self):
         self._qlinear_add_cpu_test_helper(use_relu=True)
 
     @skipIfNoDynamoSupport
     @skipIfNoONEDNNBF16
     @skipIfNoONEDNN
-    @skipIfRocm
     def test_qlinear_add_relu_int8_mixed_bf16(self):
         self._qlinear_add_cpu_test_helper(use_relu=True, int8_mixed_bf16=True)
 
@@ -1919,7 +1879,6 @@ class TestPatternMatcher(TestPatternMatcherBase):
 
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN
-    @skipIfRocm
     def test_qlinear_dequant_promotion_cpu(self):
         r"""
         This testcase test if dequant node before linear is promoted correctly:
@@ -1938,7 +1897,6 @@ class TestPatternMatcher(TestPatternMatcherBase):
     @skipIfNoDynamoSupport
     @skipIfNoONEDNNBF16
     @skipIfNoONEDNN
-    @skipIfRocm
     def test_qlinear_dequant_promotion_int8_mixed_bf16(self):
         r"""
         Test with int8_mixed_bf16 quantization.
@@ -1959,7 +1917,6 @@ class TestPatternMatcher(TestPatternMatcherBase):
 
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN
-    @skipIfRocm
     def test_qlinear_dequant_promotion_cpu_input_dim_exceeds_2(self):
         r"""
         This testcase test if dequant node before linear is promoted correctly:
@@ -1978,7 +1935,6 @@ class TestPatternMatcher(TestPatternMatcherBase):
     @skipIfNoDynamoSupport
     @skipIfNoONEDNNBF16
     @skipIfNoONEDNN
-    @skipIfRocm
     def test_qlinear_dequant_promotion_int8_mixed_bf16_input_dim_exceeds_2(self):
         r"""
         Test with int8_mixed_bf16 quantization.
@@ -1999,7 +1955,6 @@ class TestPatternMatcher(TestPatternMatcherBase):
 
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN
-    @skipIfRocm
     def test_qlinear_dequant_promotion_dynamic_cpu(self):
         r"""
         This testcase test if dequant node before linear is promoted correctly:
@@ -2030,7 +1985,6 @@ class TestPatternMatcher(TestPatternMatcherBase):
 
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN
-    @skipIfRocm
     def test_qlinear_mul_cpu(self):
         r"""
         This testcase will quantize a Linear->Mul pattern.
@@ -2063,7 +2017,6 @@ class TestPatternMatcher(TestPatternMatcherBase):
             )
 
     @skipIfNoDynamoSupport
-    @skipIfRocm
     def test_qmaxpool2d(self):
         r"""
         This testcase will quantize Conv2d->ReLU->MaxPool2d pattern.
@@ -2111,7 +2064,6 @@ class TestPatternMatcher(TestPatternMatcherBase):
             )
 
     @skipIfNoDynamoSupport
-    @skipIfRocm
     def test_qflatten(self):
         r"""
         This testcase will quantize Conv2d->AdaptiveAvgPool2d->flatten pattern.
@@ -2147,7 +2099,6 @@ class TestPatternMatcher(TestPatternMatcherBase):
         )
 
     @skipIfNoDynamoSupport
-    @skipIfRocm
     def test_qcat(self):
         r"""
         This testcase will quantize cat based pattern:
@@ -2613,7 +2564,6 @@ class TestPatternMatcher(TestPatternMatcherBase):
                     self._test_code_common(mod, (x,), include_ops, exclude_ops)
 
     @skipIfNoDynamoSupport
-    @skipIfRocm
     def test_woq_int8(self):
         class M(torch.nn.Module):
             def forward(self, x, weight, scales):
@@ -2750,7 +2700,6 @@ class TestDynamicPatternMatcher(TestPatternMatcherBase):
 
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN
-    @skipIfRocm
     def test_qat_bn_conv2d(self):
         r"""
         This testcase will quantize a single BN Conv2d module with qat flow.
@@ -2787,7 +2736,6 @@ class TestDynamicPatternMatcher(TestPatternMatcherBase):
 
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN
-    @skipIfRocm
     def test_q_attention_block(self):
         class SelfAttnLikeModule(torch.nn.Module):
             def __init__(
