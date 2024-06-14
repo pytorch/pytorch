@@ -241,7 +241,11 @@ def get_base_id(sha: str, workflow_id: int) -> Optional[int]:
 
 
 def upload_wrapper(
-    workflow_run_id: int, workflow_run_attempt: int, name: str, data: Any, dry_run: bool = False
+    workflow_run_id: int,
+    workflow_run_attempt: int,
+    name: str,
+    data: Any,
+    dry_run: bool = False,
 ) -> None:
     as_string = json.dumps(data)
     if len(as_string) > 1000000:

@@ -38,5 +38,9 @@ if __name__ == "__main__":
     sys.stdout.flush()
 
     upload_additional_info(
-        args.workflow_run_id, args.workflow_run_attempt, args.head_sha, test_cases, dry_run=args.dry_run
+        args.workflow_run_id,
+        args.workflow_run_attempt,
+        args.head_sha,
+        test_cases,
+        dry_run=args.dry_run,
     )

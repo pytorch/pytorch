@@ -1,7 +1,8 @@
 import os
 import unittest
 
-from tools.stats.upload_test_stats import get_tests, summarize_test_cases
+from tools.stats.upload_stats_lib import get_tests
+from tools.stats.upload_test_stats import summarize_test_cases
 
 IN_CI = os.environ.get("CI")
 

@@ -9,10 +9,10 @@ from typing import Any, Dict, Generator, Tuple
 from tools.stats.upload_stats_lib import (
     download_s3_artifacts,
     is_rerun_disabled_tests,
+    process_xml_element,
     unzip,
     upload_workflow_stats_to_s3,
 )
-from tools.stats.upload_test_stats import process_xml_element
 
 TESTCASE_TAG = "testcase"
 SEPARATOR = ";"
