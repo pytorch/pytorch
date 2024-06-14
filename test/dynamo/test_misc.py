@@ -49,7 +49,12 @@ from torch._dynamo.testing import (
     unsupported,
     xfailIfPy312,
 )
-from torch._dynamo.utils import CompileProfiler, counters, ifdynstaticdefault
+from torch._dynamo.utils import (
+    CompileProfiler,
+    counters,
+    ifdynstaticdefault,
+    strip_color_from_string,
+)
 from torch._inductor.utils import run_and_get_code
 from torch.ao.quantization import MinMaxObserver
 from torch.ao.quantization.fake_quantize import FakeQuantize
@@ -80,6 +85,7 @@ from torch.testing._internal.common_utils import (
     freeze_rng_state,
     IS_FBCODE,
     set_default_dtype,
+    skipIfNNModuleInlined,
     wrapDeterministicFlagAPITest,
 )
 from torch.testing._internal.jit_utils import JitTestCase
@@ -224,6 +230,7 @@ class MiscTests(torch._inductor.test_case.TestCase):
         with self.assertRaises(TypeError):
             fn(torch.randn(16))
 
+    @skipIfNNModuleInlined("fails internal CI")
     def test_cpp_extension_recommends_custom_ops(self):
         cpp_source = """
         #include <torch/extension.h>
@@ -724,6 +731,7 @@ class MiscTests(torch._inductor.test_case.TestCase):
             post_grad_graphs = "\n".join(
                 log_stream.getvalue().strip().split("\n")[3:]
             ).strip()
+            post_grad_graphs = strip_color_from_string(post_grad_graphs)
 
             # Check the graph under static shapes
             if torch._dynamo.config.assume_static_by_default:
@@ -786,6 +794,7 @@ def forward(self, arg0_1: "f32[3][1]cpu", arg1_1: "f32[3][1]cpu", arg2_1: "f32[3
                 post_grad_graphs = "\n".join(
                     log_stream.getvalue().strip().split("\n")[3:]
                 ).strip()
+                post_grad_graphs = strip_color_from_string(post_grad_graphs)
                 self.assertExpectedInline(
                     post_grad_graphs,
                     """\
@@ -878,6 +887,7 @@ def forward(self, arg0_1: "f32[3][1]cpu", arg1_1: "f32[3][1]cpu", arg2_1: "f32[3
                 post_grad_graphs = "\n".join(
                     log_stream.getvalue().strip().split("\n")[3:]
                 ).strip()
+                post_grad_graphs = strip_color_from_string(post_grad_graphs)
                 self.assertExpectedInline(
                     post_grad_graphs,
                     """\
@@ -9341,7 +9351,7 @@ ShapeEnv not equal: field values don't match:
   >  Left: {0: 0, 1: 1, 2: s1, 3: s0}
   > Right: {0: 0, 1: 1}
 ==> var_to_range: values don't match.
-  >  Left: {s0: VR[2, 9223372036854775806], s1: VR[2, 9223372036854775806]}
+  >  Left: {s0: VR[2, int_oo], s1: VR[2, int_oo]}
   > Right: {}
 ==> var_to_sources: values don't match.
   >  Left: {s0: [TensorPropertySource(base=ConstantSource(source_name='x'), prop=<TensorProperty.SIZE: 0>, idx=0)], s1: [TensorPropertySource(base=ConstantSource(source_name='x'), prop=<TensorProperty.SIZE: 0>, idx=1)]}
@@ -9375,7 +9385,7 @@ ShapeEnv not equal: field values don't match:
   >  Left: 2
   > Right: 0
 ==> var_to_range: values don't match.
-  >  Left: {u0: VR[-9223372036854775808, 9223372036854775807], u1: VR[0, 1], zuf0: VR[-oo, oo]}
+  >  Left: {u0: VR[-int_oo, int_oo], u1: VR[0, 1], zuf0: VR[-oo, oo]}
   > Right: {}
 """,
         )
@@ -9452,8 +9462,8 @@ ShapeEnv not equal: field values don't match:
   >  Left: {s0: 3}
   > Right: {}
 ==> var_to_range: values don't match.
-  >  Left: {s0: VR[3, 3], s1: VR[2, 9223372036854775806]}
-  > Right: {s0: VR[2, 9223372036854775806], s1: VR[2, 9223372036854775806]}
+  >  Left: {s0: VR[3, 3], s1: VR[2, int_oo]}
+  > Right: {s0: VR[2, int_oo], s1: VR[2, int_oo]}
 """,
         )
         self._replay_and_check(main)
@@ -9490,8 +9500,8 @@ ShapeEnv not equal: field values don't match:
   >  Left: {_assert, ge, x_size_0_, x_size_1_, x_storage_offset, x_stride_0_, x_stride_1_}
   > Right: {x_size_0_, x_size_1_, x_storage_offset, x_stride_0_, x_stride_1_}
 ==> var_to_range: values don't match.
-  >  Left: {s0: VR[3, 9223372036854775806], s1: VR[2, 9223372036854775806]}
-  > Right: {s0: VR[2, 9223372036854775806], s1: VR[2, 9223372036854775806]}
+  >  Left: {s0: VR[3, int_oo], s1: VR[2, int_oo]}
+  > Right: {s0: VR[2, int_oo], s1: VR[2, int_oo]}
 """,
         )
         self._replay_and_check(main)

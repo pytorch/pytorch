@@ -35,7 +35,13 @@ from torch._prims_common import (
     Number,
 )
 from torch.fx.experimental.sym_node import magic_methods, method_to_operator
-from torch.utils._sympy.functions import CeilDiv, FloorDiv, IntTrueDiv, ModularIndexing
+from torch.utils._sympy.functions import (
+    CeilDiv,
+    FloorDiv,
+    Identity,
+    IntTrueDiv,
+    ModularIndexing,
+)
 from .._dynamo.utils import import_submodule
 
 from . import config, inductor_prims, ir, test_operators  # NOQA: F401
@@ -106,6 +112,7 @@ def add_layout_constraint(fn, constraint):
 add_needs_realized_inputs(
     [
         aten.as_strided,
+        aten.as_strided_copy,
         aten.avg_pool2d,
         aten.avg_pool2d_backward,
         aten.bmm,
@@ -520,7 +527,11 @@ def make_foreach_pointwise(pw_fn, allow_alpha=False):
 
                 outputs[output_ind] = output
 
-                if is_gpu(device.type) and use_foreach and realize_outputs:
+                if (
+                    V.graph.has_feature(device, BackendFeature.FOREACH)
+                    and use_foreach
+                    and realize_outputs
+                ):
                     buffer_list.append(output.realize())
 
             if buffer_list:
@@ -1016,7 +1027,9 @@ def pointwise_cat(inputs, dim=0):
 
             # if we're concatting [4], [2]
             # when we index the second tensor for 5 we want to index 5 - 4
-            idx_load[dim] -= inputs_ranges[i][0]
+            # Use Identity to prevent expansion of index * stride to keep expression
+            # in same int bitwidth as shape
+            idx_load[dim] = Identity(idx_load[dim] - inputs_ranges[i][0])
 
             masked_loads.append(
                 ops.masked(
@@ -1946,7 +1959,10 @@ def bucketize(
 ):
     assert len(boundaries.get_size()) == 1
 
-    if not (is_triton(input) and is_triton(boundaries)):
+    if not (
+        V.graph.has_feature(input, BackendFeature.BUCKETIZE)
+        and V.graph.has_feature(boundaries, BackendFeature.BUCKETIZE)
+    ):
         return fallback_handler(aten.bucketize.Tensor, add_to_fallback_set=False)(
             input, boundaries, out_int32=out_int32, right=right
         )
@@ -1957,7 +1973,6 @@ def bucketize(
     # we call boundaries.realize().
     boundaries.realize()
     boundaries_size = boundaries.get_size()[0]
-    boundaries_loader = boundaries.make_loader()
     device = input.get_device()
     input_loader = input.make_loader()
 
@@ -5782,7 +5797,7 @@ register_pointwise_numeric(aten.log10)
 register_pointwise_numeric(aten.log2)
 register_pointwise_numeric(aten.nextafter)
 
-from .codegen.common import pointwise_overrides_data
+from .codegen.common import BackendFeature, pointwise_overrides_data
 
 
 def _get_pointwise_overrides(ns, name):
