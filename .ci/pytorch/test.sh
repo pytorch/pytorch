@@ -9,9 +9,6 @@ set -ex
 # shellcheck source=./common.sh
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 
-# modify LD_LIBRARY_PATH to use the conda env
-export LD_LIBRARY_PATH="$(dirname $(dirname $(which python)))/lib"
-
 # Do not change workspace permissions for ROCm CI jobs
 # as it can leave workspace with bad permissions for cancelled jobs
 if [[ "$BUILD_ENVIRONMENT" != *rocm* ]]; then
@@ -285,6 +282,9 @@ test_python_legacy_jit() {
 }
 
 test_python_shard() {
+  # modify LD_LIBRARY_PATH to use the conda env
+  original_ld_library_path=$LD_LIBRARY_PATH
+  export LD_LIBRARY_PATH="$LD_LIBRARY_PATH:$(dirname $(dirname $(which python)))/lib"
   if [[ -z "$NUM_TEST_SHARDS" ]]; then
     echo "NUM_TEST_SHARDS must be defined to run a Python test shard"
     exit 1
@@ -295,6 +295,7 @@ test_python_shard() {
   time python test/run_test.py --exclude-jit-executor --exclude-distributed-tests $INCLUDE_CLAUSE --shard "$1" "$NUM_TEST_SHARDS" --verbose $PYTHON_TEST_EXTRA_OPTION
 
   assert_git_not_dirty
+  export LD_LIBRARY_PATH=$original_ld_library_path
 }
 
 test_python() {
