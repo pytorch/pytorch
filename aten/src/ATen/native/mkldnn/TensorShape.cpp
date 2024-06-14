@@ -99,15 +99,3 @@ Tensor& mkldnn_transpose_(Tensor& self, int64_t dim0, int64_t dim1) {
 } // namespace at
 
 #endif // AT_MKLDNN_ENABLED
-
-
-namespace at {
-namespace native {
-
-
-static Tensor mkldnn_view_symint(const Tensor& self, c10::SymIntArrayRef size) {
-  return mkldnn_view(self, C10_AS_INTARRAYREF_SLOW(size));
-}
-
-} // namespace native
-} // namespace at
