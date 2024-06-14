@@ -23,7 +23,7 @@ from ._fsdp_common import (
     FSDPMeshInfo,
     HSDPMeshInfo,
 )
-from torch._dynamo import create_parameter_op
+# from torch._dynamo import create_parameter_op
 
 """
 [Note: FSDP tensors]
@@ -61,6 +61,18 @@ it in-place thereafter. For the default ``torch.Tensor` original parameter
 case, the all-gather output and unsharded parameter share the same
 data, so we use storage resizing on the all-gather output.
 """
+
+lib = torch.library.Library("create_parameter_op", "FRAGMENT")
+
+lib.define("set_(Tensor(a!) tensor, Tensor data) -> ()")
+
+@torch.library.impl(lib, "set_", "Meta")
+def set_(tensor, data):
+    tensor.set_(data)
+
+@torch.library.impl(lib, "set_", "CUDA")
+def set_(tensor, data):
+    tensor.set_(data)
 
 
 class ShardedState(Enum):
@@ -385,8 +397,9 @@ class FSDPParam:
         if hasattr(self, "_unsharded_param"):
             assert ca.compiled_autograd_enabled
             with torch.no_grad():
-                alloc_storage(self._unsharded_param)
-                self._unsharded_param.copy_(unsharded_param)
+                # alloc_storage(self._unsharded_param)
+                # self._unsharded_param.copy_(unsharded_param)
+                torch.ops.create_parameter_op.set_(self._unsharded_param, unsharded_param)
         else:
             self._unsharded_param = nn.Parameter(
                 unsharded_param, requires_grad=self.sharded_param.requires_grad

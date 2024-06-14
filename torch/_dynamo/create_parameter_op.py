@@ -11,17 +11,17 @@ allowed to compute gradients on).
 """.strip()
 
 
-lib = torch.library.Library("create_parameter_op", "FRAGMENT")
+# lib = torch.library.Library("create_parameter_op", "FRAGMENT")
 
-lib.define("set_(Tensor(a!) tensor, Tensor data) -> ()")
+# lib.define("set_(Tensor(a!) tensor, Tensor data) -> ()")
 
-@torch.library.impl(lib, "set_", "Meta")
-def set_(tensor, data):
-    tensor.set_(data)
+# @torch.library.impl(lib, "set_", "Meta")
+# def set_(tensor, data):
+#     tensor.set_(data)
 
-@torch.library.impl(lib, "set_", "CUDA")
-def set_(tensor, data):
-    tensor.set_(data)
+# @torch.library.impl(lib, "set_", "CUDA")
+# def set_(tensor, data):
+#     tensor.set_(data)
 
 
 class TracableCreateParameter(torch.autograd.Function):
