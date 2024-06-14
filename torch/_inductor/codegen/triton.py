@@ -51,6 +51,7 @@ from ..utils import (
 from ..virtualized import _ops as ops, OpsHandler, ReductionType, StoreMode, V
 from ..wrapper_benchmark import get_kernel_category_by_source_code
 from .common import (
+    BackendFeature,
     CSE,
     CSEVariable,
     DeferredLine,
@@ -919,19 +920,33 @@ class TritonKernelOverrides(TritonOverrides):
 
     @staticmethod
     def masked(mask, body, other):
-        with V.kernel.mask_loads(mask) as new_mask:
+        nodes = body.graph.find_nodes(op="output")
+        assert nodes, "graph for body does not contain an output"
+
+        need_where = False
+        for node in nodes:
+            for arg in node.args:
+                if arg.target != "load" or V.graph.is_unspec_arg(arg.args[0]):
+                    need_where = True
+
+        value = None if need_where else other
+        with V.kernel.mask_loads(mask, value=value) as new_mask:
             result = body()
 
-        # Remove once CSEVariables track the dtype
-        if result.bounds.is_bool:
-            other = bool(other)
-        # Take dtype from result to prevent accidental promotion
-        other = V.kernel.cse.generate(
-            V.kernel.compute,
-            f"tl.full({result}.shape, {constant_repr(other)}, {result}.dtype)",
-            bounds=ValueRanges.wrap(other),
-        )
-        ret = ops.where(new_mask, result, other)
+        if need_where:
+            # Remove once CSEVariables track the dtype
+            if result.bounds.is_bool:
+                other = bool(other)
+            # Take dtype from result to prevent accidental promotion
+            other = V.kernel.cse.generate(
+                V.kernel.compute,
+                f"tl.full({result}.shape, {constant_repr(other)}, {result}.dtype)",
+                bounds=ValueRanges.wrap(other),
+            )
+            ret = ops.where(new_mask, result, other)
+        else:
+            ret = result
+
         ret.mask_vars.discard(new_mask)
         return ret
 
@@ -1339,8 +1354,12 @@ class TritonKernel(SIMDKernel):
                 ep = ", eviction_policy='evict_first'"
         else:
             ep = ""
+
         if (has_tmpmask or has_rindex) and indexing.has_mask():
-            other = ", other=0.0"
+            if self._load_other:
+                other = f", other={constant_repr(self._load_other)}"
+            else:
+                other = ", other=0.0"
         else:
             other = ""
 
@@ -2432,6 +2451,28 @@ class TritonScheduling(SIMDScheduling):
     int32_type = "tl.int32"
     int64_type = "tl.int64"
     kernel_type = TritonKernel
+    backend_features = dict.fromkeys(  # dict for deterministic order
+        [
+            BackendFeature.FOREACH,
+            BackendFeature.BUCKETIZE,
+            BackendFeature.INPLACE_BUFFERS,
+            BackendFeature.MASKED_SCATTER_WITH_INDEX,
+            BackendFeature.SCAN,
+        ]
+    )
+    if torch.version.hip is None:
+        backend_features.update(
+            dict.fromkeys(
+                [
+                    # TODO: Move this above when ROCm triton adds support for multiple inputs
+                    BackendFeature.TUPLE_REDUCTION,
+                ]
+            )
+        )
+
+    @classmethod
+    def get_backend_features(cls, device: torch.device):
+        return cls.backend_features
 
     def codegen_comment(self, node_schedule):
         wrapper = V.graph.wrapper_code

@@ -7,6 +7,7 @@ import logging
 import math
 import operator
 import re
+from enum import auto, Enum
 from itertools import chain
 from typing import (
     Any,
@@ -138,6 +139,33 @@ def register_backend_for_device(
     )
 
 
+class BackendFeature(Enum):
+    FOREACH = auto()
+    BUCKETIZE = auto()
+    INPLACE_BUFFERS = auto()
+    MASKED_SCATTER_WITH_INDEX = auto()
+    SCAN = auto()
+    TUPLE_REDUCTION = auto()
+
+
+def get_backend_features(device: Union[torch.device, str]):
+    init_backend_registration()
+    if isinstance(device, torch.device):
+        device_type = device.type
+    else:
+        assert isinstance(device, str)
+        device_type = device
+        device = torch.device(device_type)
+    scheduling = get_scheduling_for_device(device_type)
+    return scheduling(None).get_backend_features(device)
+
+
+def has_backend_feature(device, feature):
+    """See also V.graph.has_feature"""
+    assert isinstance(feature, BackendFeature)
+    return feature in get_backend_features(device)
+
+
 def get_scheduling_for_device(device: str):
     return device_codegens[device].scheduling if device in device_codegens else None
 
@@ -152,6 +180,36 @@ def get_wrapper_codegen_for_device(device: str, cpp_wrapper: bool = False):
         )
     else:
         return None
+
+
+@functools.lru_cache(None)
+def init_backend_registration():
+    from .cpp import CppScheduling
+    from .cpp_wrapper_cpu import CppWrapperCpu
+    from .cpp_wrapper_cuda import CppWrapperCuda
+    from .cuda_combined_scheduling import CUDACombinedScheduling
+    from .triton import TritonScheduling
+    from .wrapper import WrapperCodeGen
+
+    if get_scheduling_for_device("cpu") is None:
+        register_backend_for_device(
+            "cpu",
+            CppScheduling,
+            WrapperCodeGen,
+            CppWrapperCpu,
+        )
+
+    if get_scheduling_for_device("cuda") is None:
+        # CUDACombinedScheduling combines Triton and CUDA C++ scheduling for CUDA devices via delegation
+        register_backend_for_device(
+            "cuda",
+            CUDACombinedScheduling,
+            WrapperCodeGen,
+            CppWrapperCuda,
+        )
+
+    if get_scheduling_for_device("xpu") is None:
+        register_backend_for_device("xpu", TritonScheduling, WrapperCodeGen)
 
 
 def index_prevent_reordering(index: List[sympy.Expr], index_vars, sizes):
@@ -392,6 +450,9 @@ class ExprPrinter(Printer):
 
     def _print_CleanDiv(self, expr):
         return self._print_FloorDiv(expr)
+
+    def _print_Identity(self, expr):
+        return self._print(expr.args[0])
 
     def _print_GreaterThan(self, expr):
         # GreaterThan:          >=
@@ -1512,6 +1573,7 @@ class Kernel(CodeGen):
         self.must_keep_buffers = set()
         self.store_buffer_names = set()
         self._load_mask = None
+        self._load_other = None
         # set in set_current_node
         self.current_node = None
         self.node_to_bounds: Optional[Dict[torch.fx.Node, ValueRanges[Any]]] = None

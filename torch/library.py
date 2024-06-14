@@ -177,7 +177,7 @@ class Library:
         else:
             func_to_register = fn
 
-        handle = entry.abstract_impl.register(func_to_register, source)
+        handle = entry.fake_impl.register(func_to_register, source)
         self._registration_handles.append(handle)
 
     def _impl_with_aoti_compile(self, op_name, dispatch_key=""):
@@ -899,13 +899,13 @@ def _check_pystubs_once(func, qualname, actual_module_name):
 #
 # This is done via us setting the global_ctx_getter function every time a fake
 # implementation is invoked.
-def get_ctx() -> "torch._library.abstract_impl.AbstractImplCtx":
+def get_ctx() -> "torch._library.fake_impl.FakeImplCtx":
     """get_ctx() returns the current AbstractImplCtx object.
 
     Calling ``get_ctx()`` is only valid inside of an fake impl
     (see :func:`torch.library.register_fake` for more usage details.
     """
-    return torch._library.abstract_impl.global_ctx_getter()
+    return torch._library.fake_impl.global_ctx_getter()
 
 
 _OPCHECK_DEFAULT_UTILS = (
