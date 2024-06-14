@@ -4,6 +4,7 @@ import copy
 import dataclasses
 import io
 import logging
+import operator
 import re
 import unittest
 import warnings
@@ -5400,160 +5401,6 @@ def forward(self, x, y):
             ep.module()(torch.randn(400, 20, 16))
         ep.module()(torch.randn(42, 20, 16))
 
-    def test_intermediate_shape_comp(self):
-        class Foo(torch.nn.Module):
-            def forward(self, x, y):
-                z = torch.cat([x, x], dim=0)
-                w = z.repeat(y.shape[0])
-                return w.shape[0] + y
-
-        inputs = (torch.randn(6), torch.randn(4))
-        shapes = {
-            "x": (Dim("dx"),),
-            "y": (Dim("dy"),),
-        }
-        ep = export(
-            Foo(),
-            inputs,
-            dynamic_shapes=shapes,
-        )
-
-    def test_overlap_ranges(self):
-        class Foo(torch.nn.Module):
-            def forward(self, x, y):
-                val = x.shape[0] ** 2 - y.shape[0]
-                if val >= 14:
-                    if val >= 16:
-                        if val <= 100:
-                            if val <= 98:
-                                # if val != 98:
-                                if True:
-                                # if val == 60:
-                                    return x*2, y*2
-        inputs = (torch.randn(8), torch.randn(4))
-        shapes = {"x": (Dim("dx", max=100),), "y": (Dim("dy", max=100),)}
-        ep = torch.export._trace._export(
-            Foo(),
-            inputs,
-            dynamic_shapes=shapes,
-            _allow_complex_guards_as_runtime_asserts=True,
-        )
-
-    def test_check_is_size(self):
-        class Foo(torch.nn.Module):
-            def forward(self, x, y):
-                n = y.item()
-                torch._check_is_size(n)
-                torch._check(n < x.shape[0])
-                return x[n]
-        inputs = (torch.randn(128), torch.tensor(6))
-        shapes = {"x": (Dim("dx"),), "y": None}
-        ep = torch.export._trace._export(
-            Foo(),
-            inputs,
-            dynamic_shapes=shapes,
-        )
-
-    def test_crazy_checks(self):
-        class Foo(torch.nn.Module):
-            def forward(self, x, y):
-                n = y.item()
-                m = y.item()
-                _x, _y = n ** 2 + n, m ** 2 + m
-                torch._check(_x >= 4)
-                torch._check(_x >= 6)
-                torch._check(_x <= 100)
-                torch._check(_y <= 88)
-                torch._check(_y >= 4)
-                torch._check(_y >= 6)
-                torch._check(_y != 2)
-                torch._check(_y != 6)
-                # torch._check(_y == 42)
-                torch._check(n == 6)
-                return n + m
-        inputs = (torch.randn(5), torch.tensor(6))
-        shapes = {"x": (Dim("dx"),), "y": None}
-        ep = torch.export._trace._export(
-            Foo(),
-            inputs,
-            dynamic_shapes=shapes,
-            _allow_complex_guards_as_runtime_asserts=True,
-        )
-
-    def test_cse_constrain(self):
-        class Foo(torch.nn.Module):
-            def forward(self, x, y):
-                n = y.item()
-                m = y.item()
-                torch.sym_constrain_range_for_size(n, min=1)
-                torch.sym_constrain_range_for_size(n, min=2)
-                torch.sym_constrain_range_for_size(m, min=3)
-                torch.sym_constrain_range_for_size(n, max=16)
-                torch.sym_constrain_range_for_size(m, min=5, max=20)
-                torch._check(m == 6)
-                return x + n + m
-        inputs = (torch.randn(5), torch.tensor(6))
-        shapes = {"x": (Dim("dx"),), "y": None}
-        ep = torch.export._trace._export(
-            Foo(),
-            inputs,
-            dynamic_shapes=shapes,
-            _allow_complex_guards_as_runtime_asserts=True,
-        )
-
-    def test_live_cse(self):
-        class Foo(torch.nn.Module):
-            def forward(self, x, y):
-                n = y.item()
-                m = y.item()
-                torch._check(n >= 0)
-                torch._check(n >= 0)
-                torch._check(n >= 1)
-                torch._check(-n <= 1)
-                torch._check(m >= 0)
-                torch._check(m >= 1)
-                torch._check(-m <= 0)
-                _x = x.shape[0] + n
-                if x.shape[0] ** 2 != 16:
-                    if -(x.shape[0] ** 2) != -16:
-                        if x.shape[0] ** 2 - 4 >= 4:
-                            if -x.shape[0] ** 2 + 4 <= -4:
-                                _z = x.shape[0] ** 2 + x.shape[0] * 3 + x.shape[0] + 4
-                                return x.shape[0] + m + _z
-        inputs = (torch.randn(5), torch.tensor(3))
-        shapes = {"x": (Dim("dx"),), "y": None}
-        ep = torch.export._trace._export(
-            Foo(),
-            inputs,
-            dynamic_shapes=shapes,
-            _allow_complex_guards_as_runtime_asserts=True,
-        )
-    
-    def test_shape_comp(self):
-        class Foo(torch.nn.Module):
-            def forward(self, x, y):
-                x0, x1 = x.shape
-                _x = x0 + x1 * 2
-                y0 = y.shape[0]
-                _y = y0 + x1
-                y1 = y.shape[0]
-                _z = _x + _y
-                return _z
-
-        inputs = (
-            torch.randn(6, 6),
-            torch.randn(6, 6),
-        )
-        shapes = {
-            "x": (Dim("dx0"), Dim("dx1")),
-            "y": (Dim("dy0"), Dim("dy1")),
-        }
-        ep = export(
-            Foo(),
-            inputs,
-            dynamic_shapes=shapes,
-        )
-
     def test_allow_explicit_guards_as_runtime_asserts(self):
         # check that explicit guards are treated as runtime assertions
         class Foo(torch.nn.Module):
@@ -5677,6 +5524,219 @@ def forward(self, x, y):
         for param in ["alpha", "beta", "gamma"]:
             self.assertTrue(param in unep.state_dict())
 
+    def test_intermediate_shape_comp(self):
+        class Foo(torch.nn.Module):
+            def forward(self, x, y):
+                z = torch.cat([x, x], dim=0)
+                w = z.repeat(y.shape[0])
+                return w.shape[0] + 1
+
+        inputs = (torch.randn(6), torch.randn(4))
+        shapes = {
+            "x": (Dim("dx"),),
+            "y": (Dim("dy"),),
+        }
+        ep = export(
+            Foo(),
+            inputs,
+            dynamic_shapes=shapes,
+        )
+        # test that shape is from size compute, not sym_size call
+        add_node = [node for node in ep.graph.nodes if node.target == operator.add][0]
+        self.assertTrue(add_node.args[0].target == operator.mul)
+        # test sym_size calls only happen on placeholders
+        sym_size_nodes = [
+            node for node in ep.graph.nodes
+            if node.target == torch.ops.aten.sym_size.int
+        ]
+        self.assertEqual(len(sym_size_nodes), 2)
+        self.assertTrue(all(node.args[0].op == "placeholder" for node in sym_size_nodes))
+        # test that repeat node gets DCE'd
+        repeat_nodes = [
+            node for node in ep.graph.nodes
+            if node.target == torch.ops.aten.repeat.default
+        ]
+        self.assertEqual(len(repeat_nodes), 0)
+
+    def test_overlap_ranges(self):
+        class Foo(torch.nn.Module):
+            def forward(self, x, y):
+                val = x.shape[0] ** 2 - y.shape[0]
+                if val >= 14:
+                    if 16 <= val:
+                        if -val >= -100:
+                            if val <= 98:
+                                if True:
+                                    return x*2, y*2
+        inputs = (torch.randn(8), torch.randn(4))
+        shapes = {"x": (Dim("dx", max=100),), "y": (Dim("dy", max=100),)}
+        ep = torch.export._trace._export(
+            Foo(),
+            inputs,
+            dynamic_shapes=shapes,
+            _allow_complex_guards_as_runtime_asserts=True,
+        )
+        # check only 2 nodes appear, le and ge
+        assert_scalar_nodes = [
+            node for node in ep.graph.nodes
+            if node.target == torch.ops.aten._assert_scalar.default
+        ]
+        self.assertEqual(len(assert_scalar_nodes), 2)
+        # check le >= 16, ge <= 98
+        ranges = sorted([
+            abs(node.args[0].args[1])  # we might check -le <= -16 instead
+            for node in assert_scalar_nodes
+        ])
+        self.assertEqual(ranges, [16, 98])
+        ep.module()(torch.randn(5), torch.randn(3))  # 16
+        with self.assertRaisesRegex(RuntimeError, ""):
+            ep.module()(torch.randn(2), torch.randn(4))  # 0: fail
+        with self.assertRaisesRegex(RuntimeError, ""):
+            ep.module()(torch.randn(11), torch.randn(4))  # 105: fail
+
+    def test_checks_to_constrain_range(self):
+        class Foo(torch.nn.Module):
+            def forward(self, x, y):
+                n = y.item()
+                m = y.item()
+                torch._check_is_size(n)
+                torch._check(m >= 0)
+                torch._check(n >= 3)
+                torch._check(-m >= -9)  # m <= 9
+                torch._check(n != 2)
+                torch._check(n != 4)
+                # n has range [3, 9], n != 4
+                return x[n]
+
+        inputs = (torch.randn(10), torch.tensor(6))
+        ep = torch.export._trace._export(
+            Foo(),
+            inputs,
+        )
+        # check only 1 constrain_range_for_size node
+        constrain_range_nodes = [
+            node for node in ep.graph.nodes
+            if node.target == torch.ops.aten.sym_constrain_range_for_size.default
+        ]
+        self.assertEqual(len(constrain_range_nodes), 1)
+        self.assertEqual(constrain_range_nodes[0].kwargs["min"], 3)
+        self.assertEqual(constrain_range_nodes[0].kwargs["max"], 9)
+        # check only 1 not_equals _assert_scalar node
+        assert_scalar_nodes = [
+            node for node in ep.graph.nodes
+            if node.target == torch.ops.aten._assert_scalar.default
+        ]
+        self.assertEqual(len(assert_scalar_nodes), 1)
+        self.assertTrue(assert_scalar_nodes[0].args[0].target == torch.sym_not)
+        self.assertEqual(assert_scalar_nodes[0].args[0].args[1], 4)
+
+    def test_le_ge_ne_eq(self):
+        # le(val) + ge(val) -> eq(val)
+        class Foo(torch.nn.Module):
+            def forward(self, y):
+                n = y.item()
+                torch._check(n >= 3)
+                torch._check(n <= 3)
+                return n + 1
+        inputs = (torch.tensor(3),)
+        ep = torch.export._trace._export(
+            Foo(),
+            inputs,
+        )
+        # check only 1 eq _assert_scalar node
+        assert_scalar_nodes = [
+            node for node in ep.graph.nodes
+            if node.target == torch.ops.aten._assert_scalar.default
+        ]
+        self.assertEqual(len(assert_scalar_nodes), 1)
+        self.assertTrue(assert_scalar_nodes[0].args[0].target == operator.eq)
+        self.assertEqual(assert_scalar_nodes[0].args[0].args[1], 3)
+        # runtime
+        with self.assertRaisesRegex(RuntimeError, ""):
+            ep.module()(torch.tensor(4))
+        with self.assertRaisesRegex(RuntimeError, ""):
+            ep.module()(torch.tensor(0))
+
+        # ne(val) + le(val) -> lt(val)
+        class Foo(torch.nn.Module):
+            def forward(self, y):
+                n = y.item()
+                torch._check(n != 3)
+                torch._check(n >= 3)
+                torch._check(n <= 10)
+                torch._check(n != 10)
+                return n + 1
+        inputs = (torch.tensor(3),)
+        ep = torch.export._trace._export(
+            Foo(),
+            inputs,
+        )
+        # check 1 constrain_range node
+        constrain_range_nodes = [
+            node for node in ep.graph.nodes
+            if node.target == torch.ops.aten.sym_constrain_range.default
+        ]
+        self.assertEqual(len(constrain_range_nodes), 1)
+        self.assertEqual(constrain_range_nodes[0].kwargs["min"], 3)
+        self.assertEqual(constrain_range_nodes[0].kwargs["max"], 10)
+        # check 2 _assert_scalar nodes, lt and gt
+        assert_scalar_nodes = [
+            node for node in ep.graph.nodes
+            if node.target == torch.ops.aten._assert_scalar.default
+        ]
+        self.assertEqual(len(assert_scalar_nodes), 2)
+        # check lt and gt
+        assert_ops = [
+            node.args[0].target
+            for node in assert_scalar_nodes
+        ]
+        self.assertTrue(operator.lt in assert_ops)
+        self.assertTrue(operator.gt in assert_ops)
+        # runtime
+        ep.module()(torch.tensor(5))
+        with self.assertRaisesRegex(RuntimeError, ""):
+            ep.module()(torch.tensor(3))
+        with self.assertRaisesRegex(RuntimeError, ""):
+            ep.module()(torch.tensor(10))
+
+    def test_cse_for_symint(self):
+        class Foo(torch.nn.Module):
+            # check sym ops only get computed once
+            def forward(self, x, y):
+                if (
+                    x.shape[0] ** 2 - y.shape[0] ** 2 >= 4  # 16
+                    and x.shape[0] ** 2 - y.shape[0] ** 2 <= 20
+                    and x.shape[0] ** 2 - y.shape[0] ** 2 != 15
+                ):
+                    return x * 2, y * 2
+
+        inputs = (torch.randn(5), torch.randn(3))
+        shapes = {"x": (Dim("dx"),), "y": (Dim("dy"),)}
+        ep = torch.export._trace._export(
+            Foo(),
+            inputs,
+            dynamic_shapes=shapes,
+            _allow_complex_guards_as_runtime_asserts=True,
+        )
+        # count 2 pow nodes, 1 add node, 2 sym_size.int nodes
+        self.assertEqual(
+            [node.target for node in ep.graph.nodes].count(
+                operator.pow,
+            ),
+            2
+        )
+        self.assertEqual(
+            [node.target for node in ep.graph.nodes].count(
+                operator.add,
+            ),
+            1
+        )
+        self.assertEqual(
+            [node.target for node in ep.graph.nodes].count(
+                torch.ops.aten.sym_size.int,
+            ),
+            2
+        )
 
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo isn't support")
 class TestOneOffModelExportResult(TestCase):

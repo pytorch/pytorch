@@ -258,8 +258,6 @@ def insert_deferred_runtime_asserts(
     ]
 
     ras_by_symbol = shape_env.deferred_runtime_asserts.copy()
-    if not any(ras for ras in ras_by_symbol.values()):
-        return
 
     # first pass: collect all range-related assertions
     # track ranges for expressions
@@ -421,7 +419,7 @@ def insert_deferred_runtime_asserts(
             signature = (node.target, sym_rel, val)
             # maybe we get a torch._check(u0 < s0), we expect this to show up in shape_env.deferred_runtime_asserts
             # and handle it there instead.
-            if not isinstance(val, int):
+            if not isinstance(val, sympy.Number):
                 continue
             _refine_range(sym_rel, sym_expr, val)
 
@@ -750,6 +748,7 @@ def insert_deferred_runtime_asserts(
         If that's the case, add unbounded sym_constrain_range_for_size + bounded sym_constrain_range.
         Expects numeric inputs for _min, _max.
         '''
+        nonlocal remaining_assert_nodes
         log.debug("maybe_sym_constrain_range_for_size(%s), min=%s, max=%s", expr, _min, _max)
         if _max is None or _max > 2:  # doesn't work with max <= 2
             remaining_assert_nodes.add(
@@ -778,55 +777,117 @@ def insert_deferred_runtime_asserts(
                 )
             )
 
-    # go through runtime asserts, add appropriate ops
-    for sym_expr, sym_ranges in sym_expr_to_ranges.items():
+    # if no asserts, only DCE intermediate shape comp
+    if any(ras for ras in ras_by_symbol.values()):
 
-        # all symbols exist -> sympy_interp()
-        free_symbols = sym_expr.free_symbols
-        if len(free_symbols - tracked_symbols) == 0:
-            res = sympy_interp(
-                PythonReferenceAnalysis, hash_cons, sym_expr, hash_cons=hash_cons, insert_after_args=True,
-            ).node
+        # go through runtime asserts, add appropriate ops
+        for sym_expr, sym_ranges in sym_expr_to_ranges.items():
 
-            # track nodes we keep or add
-            remaining_assert_nodes: Set[fx.Node] = set()
-            _min, is_gt = sym_ranges.min
-            _max, is_lt = sym_ranges.max
-            _max = sys.maxsize if _max is int_oo else _max  # can't put this in graph
+            # all symbols exist -> sympy_interp()
+            free_symbols = sym_expr.free_symbols
+            if len(free_symbols - tracked_symbols) == 0:
+                res = sympy_interp(
+                    PythonReferenceAnalysis, hash_cons, sym_expr, hash_cons=hash_cons, insert_after_args=True,
+                ).node
 
-            if sym_ranges.static:
-                # if static & is_size, try sym_constrain_range_for_size
-                # otherwise, _assert_scalar on equality
-                val = sym_ranges.val
-                log.debug("range assert for expr %s = %s", sym_expr, val)
-                if sym_ranges.is_size:
-                    maybe_sym_constrain_range_for_size(res, sym_expr, val, val)
-                else:  # _assert_scalar
-                    remaining_assert_nodes.add(
-                        add_runtime_assert(
-                            res,
-                            sym_expr,
-                            torch.ops.aten._assert_scalar.default,
-                            (SymRel.EQ, val),
+                # track nodes we keep or add
+                remaining_assert_nodes: Set[fx.Node] = set()
+                _min, is_gt = sym_ranges.min
+                _max, is_lt = sym_ranges.max
+                _max = sys.maxsize if _max is int_oo else _max  # can't put this in graph
+
+                if sym_ranges.static:
+                    # if static & is_size, try sym_constrain_range_for_size
+                    # otherwise, _assert_scalar on equality
+                    val = sym_ranges.val
+                    log.debug("range assert for expr %s = %s", sym_expr, val)
+                    if sym_ranges.is_size:
+                        maybe_sym_constrain_range_for_size(res, sym_expr, val, val)
+                    else:  # _assert_scalar
+                        remaining_assert_nodes.add(
+                            add_runtime_assert(
+                                res,
+                                sym_expr,
+                                torch.ops.aten._assert_scalar.default,
+                                (SymRel.EQ, val),
+                            )
                         )
-                    )
-            elif _min is not None and _max is not None:
-                log.debug("range assert for expr %s, min = %s, max = %s", sym_expr, _min, _max)
-                # if is_size, try sym_constrain_range_for_size
-                # otherwise, we can sym_constrain_range if a single symbol
-                # if an expression, we add two _assert_scalar nodes
-                if sym_ranges.is_size:
-                    maybe_sym_constrain_range_for_size(res, sym_expr, _min, _max)
-                elif isinstance(sym_expr, sympy.Symbol):
-                    remaining_assert_nodes.add(
-                        add_runtime_assert(
-                            res,
-                            sym_expr,
-                            torch.ops.aten.sym_constrain_range.default,
-                            (_min, _max),
+                elif _min is not None and _max is not None:
+                    log.debug("range assert for expr %s, min = %s, max = %s", sym_expr, _min, _max)
+                    # if is_size, try sym_constrain_range_for_size
+                    # otherwise, we can sym_constrain_range if a single symbol
+                    # if an expression, we add two _assert_scalar nodes
+                    # also add strict lt, gt nodes onto sym_constrain_range as needed
+                    if sym_ranges.is_size:
+                        maybe_sym_constrain_range_for_size(res, sym_expr, _min, _max)
+                        # add lt/gt
+                        if is_lt:
+                            remaining_assert_nodes.add(
+                                add_runtime_assert(
+                                    res,
+                                    sym_expr,
+                                    torch.ops.aten._assert_scalar.default,
+                                    (SymRel.LT, _max),
+                                )
+                            )
+                        if is_gt:
+                            remaining_assert_nodes.add(
+                                add_runtime_assert(
+                                    res,
+                                    sym_expr,
+                                    torch.ops.aten._assert_scalar.default,
+                                    (SymRel.GT, _min),
+                                )
+                            )
+                    elif isinstance(sym_expr, sympy.Symbol):
+                        remaining_assert_nodes.add(
+                            add_runtime_assert(
+                                res,
+                                sym_expr,
+                                torch.ops.aten.sym_constrain_range.default,
+                                (_min, _max),
+                            )
                         )
-                    )
-                else:
+                        # add lt/gt
+                        if is_lt:
+                            remaining_assert_nodes.add(
+                                add_runtime_assert(
+                                    res,
+                                    sym_expr,
+                                    torch.ops.aten._assert_scalar.default,
+                                    (SymRel.LT, _max),
+                                )
+                            )
+                        if is_gt:
+                            remaining_assert_nodes.add(
+                                add_runtime_assert(
+                                    res,
+                                    sym_expr,
+                                    torch.ops.aten._assert_scalar.default,
+                                    (SymRel.GT, _min),
+                                )
+                            )
+                    else:
+                        remaining_assert_nodes.add(
+                            add_runtime_assert(
+                                res,
+                                sym_expr,
+                                torch.ops.aten._assert_scalar.default,
+                                (SymRel.GT if is_gt else SymRel.GE, _min),
+                            )
+                        )
+                        remaining_assert_nodes.add(
+                            add_runtime_assert(
+                                res,
+                                sym_expr,
+                                torch.ops.aten._assert_scalar.default,
+                                (SymRel.LT if is_lt else SymRel.LE, _max),
+                            )
+                        )
+
+                elif _min is not None:
+                    log.debug("range assert for expr %s, min = %s", sym_expr, _min)
+                    # one-sided _assert_scalar
                     remaining_assert_nodes.add(
                         add_runtime_assert(
                             res,
@@ -835,6 +896,10 @@ def insert_deferred_runtime_asserts(
                             (SymRel.GT if is_gt else SymRel.GE, _min),
                         )
                     )
+
+                elif _max is not None:
+                    log.debug("range assert for expr %s, max = %s", sym_expr, _max)
+                    # same here
                     remaining_assert_nodes.add(
                         add_runtime_assert(
                             res,
@@ -844,48 +909,24 @@ def insert_deferred_runtime_asserts(
                         )
                     )
 
-            elif _min is not None:
-                log.debug("range assert for expr %s, min = %s", sym_expr, _min)
-                # one-sided _assert_scalar
-                remaining_assert_nodes.add(
-                    add_runtime_assert(
-                        res,
-                        sym_expr,
-                        torch.ops.aten._assert_scalar.default,
-                        (SymRel.GT if is_gt else SymRel.GE, _min),
+                for val in sym_ranges.not_equals:
+                    log.debug("range assert for expr %s != %s", sym_expr, val)
+                    # _assert_scalar for any inequalities
+                    remaining_assert_nodes.add(
+                        add_runtime_assert(
+                            res,
+                            sym_expr,
+                            torch.ops.aten._assert_scalar.default,
+                            (SymRel.NE, val),
+                        )
                     )
-                )
 
-            elif _max is not None:
-                log.debug("range assert for expr %s, max = %s", sym_expr, _max)
-                # same here
-                remaining_assert_nodes.add(
-                    add_runtime_assert(
-                        res,
-                        sym_expr,
-                        torch.ops.aten._assert_scalar.default,
-                        (SymRel.LT if is_lt else SymRel.LE, _max),
-                    )
-                )
-
-            for val in sym_ranges.not_equals:
-                log.debug("range assert for expr %s != %s", sym_expr, val)
-                # _assert_scalar for any inequalities
-                remaining_assert_nodes.add(
-                    add_runtime_assert(
-                        res,
-                        sym_expr,
-                        torch.ops.aten._assert_scalar.default,
-                        (SymRel.NE, val),
-                    )
-                )
-
-        # clean out remaining nodes that existed before
-        for nodes in sym_expr_to_nodes[sym_expr].values():
-            for node in nodes:
-                if node not in remaining_assert_nodes:
-                    log.debug("dce node %s for runtime assert %s", node, sym_expr)
-                    _dce_from_node(node)
+            # clean out remaining nodes that existed before
+            for nodes in sym_expr_to_nodes[sym_expr].values():
+                for node in nodes:
+                    if node not in remaining_assert_nodes:
+                        log.debug("dce node %s for runtime assert %s", node, sym_expr)
+                        _dce_from_node(node)
 
     # clean out unused size/stride nodes that we created.
     # alternative is to track used symbols in initial graph pass so we don't create these.
