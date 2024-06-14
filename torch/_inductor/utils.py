@@ -46,7 +46,6 @@ from unittest import mock
 import sympy
 
 import torch
-import torch.utils._pytree as pytree
 from torch._dynamo.device_interface import get_interface_for_device
 from torch._dynamo.utils import detect_fake_mode
 from torch.autograd import DeviceType
@@ -1683,12 +1682,22 @@ def aoti_compile_with_persistent_cache(
 
     type_to_torch_dtype = {int: torch.int32, float: torch.float, bool: torch.bool}
     supported_scalar_types = tuple(type_to_torch_dtype.keys())
-    flattened_inputs = pytree.arg_tree_leaves(*args, **kwargs)
+    flattened_inputs = list(args) + list(kwargs.values())
     if not all(
-        isinstance(input, (supported_scalar_types, torch.Tensor))
+        isinstance(input, (supported_scalar_types, torch.Tensor, list))
         for input in flattened_inputs
     ):
-        raise NotImplementedError("Only support tensor, int, float, bool for now")
+        raise NotImplementedError(
+            "Only support tensor, tensor list, int, float, bool for now"
+        )
+
+    for input in flattened_inputs:
+        if isinstance(input, list) and not all(
+            isinstance(item, torch.Tensor) for item in input
+        ):
+            raise NotImplementedError(
+                "Regarding list, _impl_with_aoti_compile only support tensor list now."
+            )
 
     persistent_cache = aoti_eager_cache_dir(ns, device_type)
     if not persistent_cache.exists():
@@ -1718,30 +1727,59 @@ def aoti_compile_with_persistent_cache(
             )
 
             kernel_metadata_items = []
-            for input in flattened_inputs:
-                # TODO(Eikan): To add dynamic support
+
+            def extract_tensor_metadata(input: torch.Tensor) -> Dict[str, Any]:
                 metadata: Dict[str, Any] = {}
                 metadata["is_dynamic"] = dynamic
 
-                if isinstance(input, torch.Tensor):
-                    metadata["device_type"] = f"{input.device.type}"
-                    if is_cpu_device([input]):
-                        metadata["device_index"] = -1
-                    else:
-                        metadata["device_index"] = input.device.index
-                    metadata["dtype"] = f"{input.dtype}"
-                    metadata["sizes"] = list(input.size())
-                    metadata["strides"] = list(input.stride())
+                assert isinstance(input, torch.Tensor)
+                metadata["device_type"] = f"{input.device.type}"
+                if is_cpu_device([input]):
+                    metadata["device_index"] = -1
                 else:
-                    assert isinstance(input, supported_scalar_types)
-                    # Scalar tensor
-                    metadata["device_type"] = device_type
-                    metadata["device_index"] = -1 if device_type == "cpu" else 0
-                    metadata["dtype"] = f"{type_to_torch_dtype[type(input)]}"
-                    metadata["sizes"] = []
-                    metadata["strides"] = []
-                    metadata["scalar_value"] = input
+                    metadata["device_index"] = input.device.index
+                metadata["dtype"] = f"{input.dtype}"
+                metadata["sizes"] = list(input.size())
+                metadata["strides"] = list(input.stride())
+                metadata["requires_grad"] = input.requires_grad
+                metadata["dispatch_key_set"] = torch._C._dispatch_keys(input).raw_repr()
+                return metadata
 
+            def extract_scalar_metadata(
+                input: Union[int, float, bool]
+            ) -> Dict[str, Any]:
+                assert isinstance(input, supported_scalar_types)
+                metadata: Dict[str, Any] = {}
+                metadata["is_dynamic"] = dynamic
+                # Scalar tensor
+                metadata["device_type"] = device_type
+                metadata["device_index"] = -1 if device_type == "cpu" else 0
+                metadata["dtype"] = f"{type_to_torch_dtype[type(input)]}"
+                metadata["scalar_value"] = input
+                return metadata
+
+            def extract_tensor_list_metadata(
+                input: List[torch.Tensor],
+            ) -> Dict[str, Any]:
+                metadata_list = []
+                for item in input:
+                    assert isinstance(item, torch.Tensor)
+                    metadata_list.append(extract_tensor_metadata(item))
+
+                metadata: Dict[str, Any] = {}
+                metadata["tensor_list"] = metadata_list
+                return metadata
+
+            for idx, input in enumerate(flattened_inputs):
+                if isinstance(input, torch.Tensor):
+                    metadata = extract_tensor_metadata(input)
+                elif isinstance(input, list):
+                    assert all(isinstance(item, torch.Tensor) for item in input)
+                    metadata = extract_tensor_list_metadata(input)
+                else:
+                    metadata = extract_scalar_metadata(input)
+
+                metadata["arg_order"] = idx
                 kernel_metadata_items.append(metadata)
 
             kernel_meta_info: Dict[str, Any] = {}

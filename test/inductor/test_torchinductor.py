@@ -769,7 +769,7 @@ class CommonTemplate:
         )
 
     @skipCUDAIf(not SM80OrLater, "Requires sm80")
-    def test_eager_aoti_support_out(self):
+    def test_aoti_eager_support_out(self):
         ns = "aten"
         op_name = "clamp"
         dispatch_key = "CPU"
@@ -821,7 +821,7 @@ class CommonTemplate:
             self.assertEqual(ref_out_tensor1, res_out_tensor1)
 
     @skipCUDAIf(not SM80OrLater, "Requires sm80")
-    def test_eager_aoti_cache_hit(self):
+    def test_aoti_eager_cache_hit(self):
         ns = "aten"
         op_name = "abs"
         dispatch_key = "CPU"
@@ -862,7 +862,7 @@ class CommonTemplate:
                 self.assertEqual(ref_value, res_value)
 
     @skipCUDAIf(not SM80OrLater, "Requires sm80")
-    def test_eager_aoti_with_persistent_cache(self):
+    def test_aoti_eager_with_persistent_cache(self):
         def fn(a):
             return torch.abs(a)
 
@@ -906,7 +906,7 @@ class CommonTemplate:
         self.assertTrue(kernel_lib_path in kernel_libs_abs_path)
 
     @skipCUDAIf(not SM80OrLater, "Requires sm80")
-    def test_eager_aoti_with_scalar(self):
+    def test_aoti_eager_with_scalar(self):
         namespace_name = "aten"
         op_name = "add"
         op_overload_name = "Tensor"
@@ -942,18 +942,18 @@ class CommonTemplate:
         self.assertTrue(isinstance(op_info, dict))
         self.assertTrue("meta_info" in op_info)
         self.assertTrue(len(op_info["meta_info"]) == 3)
+        # Scalar Tensor
+        self.assertTrue("scalar_value" not in op_info["meta_info"][0])
         self.assertTrue(op_info["meta_info"][0]["sizes"] == [])
         self.assertTrue(op_info["meta_info"][0]["strides"] == [])
         # Scalar Tensor
-        self.assertTrue("scalar_value" not in op_info["meta_info"][0])
+        self.assertTrue("scalar_value" not in op_info["meta_info"][1])
         self.assertTrue(op_info["meta_info"][1]["sizes"] == [])
         self.assertTrue(op_info["meta_info"][1]["strides"] == [])
-        # Scalar Tensor
-        self.assertTrue("scalar_value" not in op_info["meta_info"][1])
-        self.assertTrue(op_info["meta_info"][2]["sizes"] == [])
-        self.assertTrue(op_info["meta_info"][2]["strides"] == [])
         # Scalar
         self.assertTrue("scalar_value" in op_info["meta_info"][2])
+        self.assertTrue("sizes" not in op_info["meta_info"][2])
+        self.assertTrue("strides" not in op_info["meta_info"][2])
 
         with _scoped_library("aten", "IMPL") as torch_compile_op_lib_impl:
             a = torch.randn(128, device=device)
@@ -976,7 +976,7 @@ class CommonTemplate:
             self.assertEqual(ref_values, res_values)
 
     @skipCUDAIf(not SM80OrLater, "Requires sm80")
-    def test_eager_aoti_override_registration(self):
+    def test_aoti_eager_override_registration(self):
         namespace_name = "aten"
         dispatch_key = "CPU"
         device = torch.device("cpu")
