@@ -78,7 +78,7 @@ std::shared_ptr<NCCLComm> NCCLComm::split(
           source->ncclComm_, color_id, rank, &(comm->ncclComm_), &config),
       c10::nullopt);
   ++source->ncclCommSplitCounter_;
-  ncclCommUserRank(comm->ncclComm_, &comm->rank_);
+  comm->rank_ = rank;
   return comm;
 }
 #endif
@@ -236,56 +236,6 @@ std::string getNcclErrorDetailStr(
       interpret = "Unknown NCCL error!";
   }
   return interpret + err;
-}
-
-void DebugInfoWriter::write(const std::string& ncclTrace) {
-  // Open a file for writing. The ios::binary flag is used to write data as
-  // binary.
-  std::ofstream file(filename_, std::ios::binary);
-
-  // Check if the file was opened successfully.
-  if (!file.is_open()) {
-    LOG(ERROR) << "Error opening file for writing NCCLPG debug info: "
-               << filename_;
-    return;
-  }
-
-  file.write(ncclTrace.data(), ncclTrace.size());
-  LOG(INFO) << "Finished writing NCCLPG debug info to " << filename_;
-}
-
-DebugInfoWriter& DebugInfoWriter::getWriter(int rank) {
-  if (writer_ == nullptr) {
-    std::string fileNamePrefix = getCvarString(
-        {"TORCH_NCCL_DEBUG_INFO_TEMP_FILE"}, "/tmp/nccl_trace_rank_");
-    // Using std::unique_ptr here to auto-delete the writer object
-    // when the pointer itself is destroyed.
-    std::unique_ptr<DebugInfoWriter> writerPtr(
-        new DebugInfoWriter(fileNamePrefix, rank));
-    DebugInfoWriter::registerWriter(std::move(writerPtr));
-  }
-  return *writer_;
-}
-
-void DebugInfoWriter::registerWriter(std::unique_ptr<DebugInfoWriter> writer) {
-  TORCH_CHECK_WITH(
-      DistBackendError,
-      hasWriterRegistered_.load() == false,
-      "debugInfoWriter already registered");
-  hasWriterRegistered_.store(true);
-  writer_ = std::move(writer);
-}
-
-std::unique_ptr<DebugInfoWriter> DebugInfoWriter::writer_ = nullptr;
-std::atomic<bool> DebugInfoWriter::hasWriterRegistered_(false);
-
-float getDurationFromEvent(
-    at::cuda::CUDAEvent& ncclStartEvent,
-    at::cuda::CUDAEvent& ncclEndEvent) {
-  TORCH_CHECK(
-      ncclEndEvent.query(),
-      "getDuration can only be called after work is succeeded.")
-  return ncclStartEvent.elapsed_time(ncclEndEvent);
 }
 
 } // namespace c10d
