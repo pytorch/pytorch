@@ -275,15 +275,27 @@ class BlockPtrOptions:
     @cache_on_self
     def boundary_check(self) -> List[int]:
         """List of indices to pass to tl.load(boundary_check=...)"""
+        sizevars = V.graph.sizevars
+
+        # Substitute maximum block sizes in shape expressions.
+        # This works in multiple_of checks because block sizes are powers of 2.
+        block_to_max: Dict[sympy.Expr, Any] = {
+            block_size: TRITON_MAX_BLOCK[prefix_str[symt].upper()]
+            for symt, block_size in block_sizes.items()
+        }
+
         return [
             idx
             for idx in range(len(self.shape))
             if (
-                not V.graph.sizevars.statically_known_equals(
+                not sizevars.statically_known_equals(
                     self.strides[idx], sympy.Integer(0)
                 )
-                and not V.graph.sizevars.statically_known_multiple_of(
+                and not sizevars.statically_known_multiple_of(
                     self.shape[idx], self.block_shape[idx]
+                )
+                and not sizevars.statically_known_multiple_of(
+                    self.shape[idx], sympy_subs(self.block_shape[idx], block_to_max)
                 )
                 and not (
                     V.kernel.no_x_dim
