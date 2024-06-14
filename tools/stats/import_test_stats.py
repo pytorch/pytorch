@@ -77,7 +77,7 @@ def fetch_and_cache(
 def get_slow_tests(
     dirpath: str, filename: str = SLOW_TESTS_FILE
 ) -> Optional[Dict[str, float]]:
-    url = "https://ossci-metrics.s3.amazonaws.com/slow-tests.json?versionId=oKMp2dsjwgbtvuXJrL9fZbQiSJkiw91I"
+    url = "https://ossci-metrics.s3.amazonaws.com/slow-tests.json"
     try:
         return fetch_and_cache(dirpath, filename, url, lambda x: x)
     except Exception:
@@ -117,7 +117,7 @@ def get_disabled_tests(
         return disabled_test_from_issues
 
     try:
-        url = "https://ossci-metrics.s3.amazonaws.com/disabled-tests-condensed.json?versionId=0zzD6gFqZ9l2Vs1SYtjHXSuVLz6BaLtE"
+        url = "https://ossci-metrics.s3.amazonaws.com/disabled-tests-condensed.json"
         return fetch_and_cache(dirpath, filename, url, process_disabled_test)
     except Exception:
         print("Couldn't download test skip set, leaving all tests enabled...")

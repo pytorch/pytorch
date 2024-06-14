@@ -116,5 +116,5 @@ jobs:
           AWS_REGION: ""
 
       - name: Teardown Linux
-        uses: pytorch/test-infra/.github/actions/teardown-linux@release/2.4
+        uses: pytorch/test-infra/.github/actions/teardown-linux@main
         if: always()
