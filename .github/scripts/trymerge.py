@@ -2335,7 +2335,7 @@ def main() -> None:
             org,
             project,
             args.pr_num,
-            f"PR targets {pr.base_ref()} rather than {pr.default_branch(), refusing merge request",
+            f"PR targets {pr.base_ref()} rather than {pr.default_branch()}, refusing merge request",
             dry_run=args.dry_run,
         )
         return
