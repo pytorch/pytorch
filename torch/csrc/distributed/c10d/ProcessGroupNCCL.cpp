@@ -791,8 +791,11 @@ ProcessGroupNCCL::ProcessGroupNCCL(
   enableNanCheck_ = getCvarBool(TORCH_NCCL_NAN_CHECK, false);
   heartbeat_ = 1ULL;
   monitorThreadEnabled_.store(getCvarBool(TORCH_NCCL_ENABLE_MONITORING, true));
+  // setting the default HEARTBEAT_TIMEOUT to be slightly larger than the
+  // default collective (including the comms abort) timeout (10 mins) such that
+  // heartbeat timeout should NOT be triggered by abort hangs by default.
   heartbeatTimeoutInSec_ =
-      getCvarInt(TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC, 60 * 10 /*10 Mins*/);
+      getCvarInt(TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC, 60 * 11 /*11 Mins*/);
   waitTimeoutDumpInMilSec_ =
       getCvarInt(TORCH_NCCL_WAIT_TIMEOUT_DUMP_MILSEC, 60 * 1000 /*60 Sec*/);
   coordCheckIntervalMilSec_ = getCvarInt(TORCH_NCCL_COORD_CHECK_MILSEC, 1000);
