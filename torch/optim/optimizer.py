@@ -235,7 +235,7 @@ _foreach_doc = r"""foreach (bool, optional): whether foreach implementation of o
 
 _fused_doc = r"""fused (bool, optional): whether the fused implementation is used.
             Currently, `torch.float64`, `torch.float32`, `torch.float16`, and `torch.bfloat16`
-            are supported.
+            are supported. (default: None)
 
     .. note:: The foreach and fused implementations are typically faster than the for-loop,
               single-tensor implementation. Thus, if the user has not specified BOTH flags
