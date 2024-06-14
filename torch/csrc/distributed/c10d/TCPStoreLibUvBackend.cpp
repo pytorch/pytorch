@@ -2,6 +2,7 @@
 #include <deque>
 #include <exception>
 #include <memory>
+#include <ostream>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
@@ -186,10 +187,14 @@ class UvTcpServer : public UvTcpSocket {
       int uv_res = uv_tcp_open((uv_tcp_t*)res->unsafeGetStream(), socket);
       TORCH_CHECK(
           uv_res == 0,
-          "Failed to open existing socket. socket:{} code:{} name:{} message:{}",
+          "Failed to open existing socket. ",
+          "socket: ",
           socket,
+          ", code: ",
           uv_res,
+          ", name: ",
           uv_err_name(uv_res),
+          ", message: ",
           uv_strerror(uv_res));
 
       res->cacheSocketPort();
@@ -221,30 +226,42 @@ class UvTcpServer : public UvTcpSocket {
       }
       TORCH_CHECK(
           uv_res == 0,
-          "UV Store addr parsing failure. useIpv6:{} code:{} name:{} message:{}",
+          "UV Store addr parsing failure. ",
+          "useIpv6: ",
           useIpv6,
+          ", code: ",
           uv_res,
+          ", name: ",
           uv_err_name(uv_res),
+          ", message: ",
           uv_strerror(uv_res));
 
       uv_res =
           uv_tcp_bind(res->unsafeGetSocket(), (const struct sockaddr*)&addr, 0);
       TORCH_CHECK(
           uv_res == 0,
-          "UV Store bind failed. useIpv6:{} code:{} name:{} message:{}",
+          "The server socket has failed to bind. ",
+          "useIpv6: ",
           useIpv6,
+          ", code: ",
           uv_res,
+          ", name: ",
           uv_err_name(uv_res),
+          ", message: ",
           uv_strerror(uv_res));
 
       uv_res =
           uv_listen(res->unsafeGetStream(), DEFAULT_BACKLOG, on_new_connection);
       TORCH_CHECK(
           uv_res == 0,
-          "UV Store listen failed. useIpv6:{} code:{} name:{} message:{}",
+          "The server socket has failed to listen on any local network address. ",
+          "useIpv6: ",
           useIpv6,
+          ", code: ",
           uv_res,
+          ", name: ",
           uv_err_name(uv_res),
+          ", message: ",
           uv_strerror(uv_res));
 
       res->cacheSocketPort();
@@ -265,9 +282,12 @@ class UvTcpServer : public UvTcpSocket {
         uv_accept(unsafeGetStream(), (uv_stream_t*)socket->unsafeGetHandle());
     TORCH_CHECK(
         res == 0,
-        "Failed to accept socket. code:{} name:{} desc:{}.",
+        "Failed to accept socket. ",
+        "code: ",
         res,
+        ", name: ",
         uv_err_name(res),
+        ", message: ",
         uv_strerror(res));
   }
 
@@ -458,9 +478,12 @@ class ChunkedStream {
         if (buff_idx >= buffers.size() && remaining > 0) {
           TORCH_CHECK(
               false,
-              "Trying to read past end of buffer buffer_idx:{} available:{} remaining:{}",
+              "Trying to read past end of buffer. ",
+              "buffer_idx: ",
               buff_idx,
+              ", available: ",
               buffers.size(),
+              ", remaining: ",
               remaining);
         }
       }
@@ -498,8 +521,10 @@ class ChunkedStream {
       return false;
     TORCH_CHECK(
         size <= MAX_STRING_LEN,
-        "Invalid string size. size:{} max:{}",
+        "Invalid string size. ",
+        "size: ",
         size,
+        ", max: ",
         MAX_STRING_LEN);
 
     if (available() < size)
@@ -515,8 +540,10 @@ class ChunkedStream {
     auto size_in_bytes = size * sizeof(uint8_t);
     TORCH_CHECK(
         size_in_bytes <= MAX_PAYLOAD_LEN,
-        "Invalid payload size. size: {} max:{}",
+        "Invalid payload size. ",
+        "size: ",
         size_in_bytes,
+        ", max: ",
         MAX_PAYLOAD_LEN);
 
     if (available() < size_in_bytes)
@@ -782,8 +809,10 @@ class UvClient : public UvTcpSocket {
       return false;
     TORCH_CHECK(
         key_count <= MAX_KEY_COUNT,
-        "Too many keys being waited. keys:{} max:{}",
+        "Too many keys being waited. ",
+        "keys: ",
         key_count,
+        ", max: ",
         MAX_KEY_COUNT);
 
     std::vector<std::string> keys(key_count);
@@ -810,8 +839,10 @@ class UvClient : public UvTcpSocket {
     }
     TORCH_CHECK(
         key_count <= MAX_KEY_COUNT,
-        "Too many keys being waited. keys:{} max:{}",
+        "Too many keys being waited. ",
+        "keys: ",
         key_count,
+        ", max: ",
         MAX_KEY_COUNT);
 
     std::vector<std::string> keys(key_count);
@@ -872,8 +903,10 @@ class UvClient : public UvTcpSocket {
     }
     TORCH_CHECK(
         key_count <= MAX_KEY_COUNT,
-        "Too many keys with multi_get. keys:{} max:{}",
+        "Too many keys with multi_get. ",
+        "keys: ",
         key_count,
+        ", max: ",
         MAX_KEY_COUNT);
 
     StreamWriter sw(iptr());
@@ -898,8 +931,10 @@ class UvClient : public UvTcpSocket {
     }
     TORCH_CHECK(
         key_count <= MAX_KEY_COUNT,
-        "Too many keys with multi_get. keys:{} max:{}",
+        "Too many keys with multi_get. ",
+        "keys: ",
         key_count,
+        ", max: ",
         MAX_KEY_COUNT);
 
     for (const auto _ : c10::irange(key_count)) {
@@ -988,9 +1023,11 @@ void LibUVStoreDaemon::init(const TCPStoreOptions& opts) {
   port_ = tcpServer->port();
   TORCH_CHECK(
       port_ == opts.port || opts.port == 0, // zero means use any port
-      "listen fd {} is bound to port {}, expected to be bound to port {}",
+      "listen fd ",
       *opts.masterListenFd,
+      " is bound to port ",
       port_,
+      ", expected to be bound to port ",
       opts.port);
 }
 

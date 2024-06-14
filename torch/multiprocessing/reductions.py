@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import multiprocessing
 import os
 import threading

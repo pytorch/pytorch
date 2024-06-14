@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 from enum import Enum, auto
 
 import torch

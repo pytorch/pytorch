@@ -1236,6 +1236,7 @@ TEST_SCIPY = _check_module_exists('scipy')
 TEST_MKL = torch.backends.mkl.is_available()
 TEST_MPS = torch.backends.mps.is_available()
 TEST_XPU = torch.xpu.is_available()
+TEST_HPU = True if (hasattr(torch, "hpu") and torch.hpu.is_available()) else False
 TEST_CUDA = torch.cuda.is_available()
 custom_device_mod = getattr(torch, torch._C._get_privateuse1_backend_name(), None)
 custom_device_is_available = hasattr(custom_device_mod, "is_available") and custom_device_mod.is_available()
@@ -1549,6 +1550,31 @@ torch_to_numpy_dtype_dict.update({
     torch.complex32: np.complex64
 })
 
+def skipIfNNModuleInlined(
+    msg="test doesn't currently work with nn module inlining",
+    condition=torch._dynamo.config.inline_inbuilt_nn_modules,
+):  # noqa: F821
+    def decorator(fn):
+        if not isinstance(fn, type):
+
+            @wraps(fn)
+            def wrapper(*args, **kwargs):
+                if condition:
+                    raise unittest.SkipTest(msg)
+                else:
+                    fn(*args, **kwargs)
+
+            return wrapper
+
+        assert isinstance(fn, type)
+        if condition:
+            fn.__unittest_skip__ = True
+            fn.__unittest_skip_why__ = msg
+
+        return fn
+
+    return decorator
+
 def skipIfRocm(func=None, *, msg="test doesn't currently work on the ROCm stack"):
     def dec_fn(fn):
         reason = f"skipIfRocm: {msg}"
@@ -1593,6 +1619,15 @@ def skipIfMps(fn):
     def wrapper(*args, **kwargs):
         if TEST_MPS:
             raise unittest.SkipTest("test doesn't currently work with MPS")
+        else:
+            fn(*args, **kwargs)
+    return wrapper
+
+def skipIfHpu(fn):
+    @wraps(fn)
+    def wrapper(*args, **kwargs):
+        if TEST_HPU:
+            raise unittest.SkipTest("test doesn't currently work with HPU")
         else:
             fn(*args, **kwargs)
     return wrapper
@@ -2284,7 +2319,7 @@ def check_if_enable(test: unittest.TestCase):
 
                     print(f"Test {disabled_test} is disabled for some unrecognized ",
                           f"platforms: [{invalid_plats_str}]. Please edit issue {issue_url} to fix the platforms ",
-                          "assigned to this flaky test, changing \"Platforms: ...\" to a comma separated ",
+                          'assigned to this flaky test, changing "Platforms: ..." to a comma separated ',
                           f"subset of the following (or leave it blank to match all platforms): {valid_plats}")
 
                     # Sanitize the platforms list so that we continue to disable the test for any valid platforms given
@@ -2596,7 +2631,11 @@ class TestCase(expecttest.TestCase):
     # the test, skip it instead.
     _ignore_not_implemented_error = False
 
-    def __init__(self, method_name='runTest'):
+    def __init__(self, method_name='runTest', methodName='runTest'):
+        # methodName is the correct naming in unittest and testslide uses keyword arguments.
+        # So we need to use both to 1) not break BC and, 2) support testslide.
+        if methodName != "runTest":
+            method_name = methodName
         super().__init__(method_name)
 
         test_method = getattr(self, method_name, None)
@@ -4401,8 +4440,8 @@ def check_test_defined_in_running_script(test_case):
     if running_script_path is None:
         return
     test_case_class_file = os.path.abspath(os.path.realpath(inspect.getfile(test_case.__class__)))
-    assert test_case_class_file == running_script_path, f"Class of loaded TestCase \"{test_case.id()}\" " \
-        f"is not defined in the running script \"{running_script_path}\", but in \"{test_case_class_file}\". Did you " \
+    assert test_case_class_file == running_script_path, f'Class of loaded TestCase "{test_case.id()}" ' \
+        f'is not defined in the running script "{running_script_path}", but in "{test_case_class_file}". Did you ' \
         "accidentally import a unittest.TestCase from another file?"
 
 def load_tests(loader, tests, pattern):
@@ -4984,6 +5023,7 @@ def munge_exc(e, *, suppress_suffix=True, suppress_prefix=True, file=None, skip=
         return m.group(0)
 
     s = re.sub(r'  File "([^"]+)", line \d+, in (.+)\n    .+\n( +[~^]+ *\n)?', repl_frame, s)
+    s = re.sub(r'(<function [^ ]+ at )0x[0-9a-fA-F]+', r'\1 0xN', s)
     s = re.sub(r"line \d+", "line N", s)
     s = re.sub(r".py:\d+", ".py:N", s)
     s = re.sub(file, os.path.basename(file), s)

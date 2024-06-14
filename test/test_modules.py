@@ -983,23 +983,16 @@ class TestModule(TestCase):
             p_ids_after = [id(p) for p in m.parameters()]
             p_cdatas_after = [p._cdata for p in m.parameters()]
 
-            # id same, ._cdata differs --> swapped cdata of THPVariable
-            # Technically, meta and device have different shallow copy types, so when swap=False it will create a new
-            # parameter and assign it to the module BUT we opt into swap_tensors when either one is on meta.
-            self.assertTrue(all(a == b for a, b in zip(p_ids_before, p_ids_after)))
-            self.assertTrue(all(a != b for a, b in zip(p_cdatas_before, p_cdatas_after)))
-
-            # Test the opposite direction device --> meta
-            m = m.to(device="meta")
-
-            p_ids_after_meta = [id(p) for p in m.parameters()]
-            p_cdatas_after_meta = [p._cdata for p in m.parameters()]
-
-            # id same, ._cdata differs --> swapped cdata of THPVariable
-            # Technically, meta and device have different shallow copy types, so when swap=False it will create a new
-            # parameter and assign it to the module BUT we opt into swap_tensors when either one is on meta.
-            self.assertTrue(all(a == b for a, b in zip(p_ids_after, p_ids_after_meta)))
-            self.assertTrue(all(a != b for a, b in zip(p_cdatas_after, p_cdatas_after_meta)))
+            if swap:
+                # id same, ._cdata differs --> swapped cdata of THPVariable
+                self.assertTrue(all(a == b for a, b in zip(p_ids_before, p_ids_after)))
+                self.assertTrue(all(a != b for a, b in zip(p_cdatas_before, p_cdatas_after)))
+            else:
+                # id and ._cdata differ
+                # meta and device have different shallow copy types, so this will create a new
+                # parameter and assign it to the module
+                self.assertTrue(all(a != b for a, b in zip(p_ids_before, p_ids_after)))
+                self.assertTrue(all(a != b for a, b in zip(p_cdatas_before, p_cdatas_after)))
 
 
 instantiate_device_type_tests(TestModule, globals(), allow_mps=True)

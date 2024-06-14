@@ -27,6 +27,7 @@ from torch.fx.experimental.symbolic_shapes import (
     guard_float,
     guard_int,
     GuardOnDataDependentSymNode,
+    hint_int,
     is_symbolic,
     ShapeEnv,
     StatelessSymbolicContext,
@@ -41,7 +42,11 @@ from torch.testing._internal.common_utils import (
 )
 from torch.utils import _pytree as pytree
 from torch.utils._python_dispatch import TorchDispatchMode
-from torch.utils._sympy.functions import FloorDiv, Mod
+from torch.utils._sympy.functions import (
+    FloorDiv,
+    IsNonOverlappingAndDenseIndicator,
+    Mod,
+)
 
 aten = torch.ops.aten
 
@@ -205,15 +210,15 @@ def create_symtype(cls, pytype, shape_env, val, duck=True):
 
 
 # TODO: default duck to False
-def create_symint(shape_env, i: int, duck=True):
+def create_symint(shape_env, i: int, duck=True) -> SymInt:
     return create_symtype(SymInt, int, shape_env, i, duck=duck)
 
 
-def create_symbool(shape_env, b: bool):
+def create_symbool(shape_env, b: bool) -> SymBool:
     return create_symtype(SymBool, bool, shape_env, b)
 
 
-def create_symfloat(shape_env, f: float):
+def create_symfloat(shape_env, f: float) -> SymFloat:
     return create_symtype(SymFloat, float, shape_env, f)
 
 
@@ -457,14 +462,16 @@ class TestPySymInt(TestCase):
         r = sym_int(a1 / 2)
         self.assertEqual(guard_int(r), 3)
         self.assertIsInstance(r, torch.SymInt, msg=type(r))
-        self.assertExpectedInline(str(shape_env.guards[1][0]), """Eq(Trunc(s1/2), 3)""")
+        self.assertExpectedInline(
+            str(shape_env.guards[1][0]), """Eq(TruncToInt(IntTrueDiv(s1, 2)), 3)"""
+        )
 
         a3 = create_symint(shape_env, 3)
         r = sym_int(2.0 * torch.sym_float(a3))
         self.assertEqual(guard_int(r), 6)
         self.assertIsInstance(r, torch.SymInt, msg=type(r))
         self.assertExpectedInline(
-            str(shape_env.guards[2][0]), """Eq(Trunc(2.0*s2), 6)"""
+            str(shape_env.guards[2][0]), """Eq(TruncToInt(2.0*ToFloat(s2)), 6)"""
         )
 
     def test_sym_sqrt(self):
@@ -474,7 +481,7 @@ class TestPySymInt(TestCase):
         self.assertEqual(r, 2)
         self.assertIsInstance(r, torch.SymFloat, msg=type(r))
         self.assertExpectedInline(
-            str(shape_env.guards[0][0]), """Eq(OpaqueUnaryFn_sqrt(s0), 2)"""
+            str(shape_env.guards[0][0]), """Eq(OpaqueUnaryFn_sqrt(s0), 2.0)"""
         )
 
     def test_sym_floor(self):
@@ -483,11 +490,17 @@ class TestPySymInt(TestCase):
         r = math.floor(a0 / 2)
         self.assertEqual(r, 2)
         self.assertIsInstance(r, torch.SymInt, msg=type(r))
-        self.assertExpectedInline(str(shape_env.guards[0][0]), """Eq(floor(s0/2), 2)""")
+        self.assertExpectedInline(
+            str(shape_env.guards[0][0]),
+            """Eq(FloorToInt(IntTrueDiv(s0, 2)), 2)""",
+        )
         r = math.floor(3.0 * a0)
         self.assertEqual(r, 15)
         self.assertIsInstance(r, torch.SymInt, msg=type(r))
-        self.assertExpectedInline(str(shape_env.guards[1][0]), """Eq(3*s0, 15)""")
+        self.assertExpectedInline(
+            str(shape_env.guards[1][0]),
+            """Eq(FloorToInt(3.0*ToFloat(s0)), 15)""",
+        )
 
     def test_sym_trunc(self):
         shape_env = ShapeEnv()
@@ -495,12 +508,14 @@ class TestPySymInt(TestCase):
         r = math.trunc(a0 / 2)
         self.assertEqual(r, 2)
         self.assertIsInstance(r, torch.SymInt, msg=type(r))
-        self.assertExpectedInline(str(shape_env.guards[0][0]), """Eq(Trunc(s0/2), 2)""")
+        self.assertExpectedInline(
+            str(shape_env.guards[0][0]), """Eq(TruncToInt(IntTrueDiv(s0, 2)), 2)"""
+        )
         r = torch.sym_int(torch.sym_sqrt(a0))
         self.assertEqual(r, 2)
         self.assertIsInstance(r, torch.SymInt, msg=type(r))
         self.assertExpectedInline(
-            str(shape_env.guards[1][0]), """Eq(Trunc(OpaqueUnaryFn_sqrt(s0)), 2)"""
+            str(shape_env.guards[1][0]), """Eq(TruncToInt(OpaqueUnaryFn_sqrt(s0)), 2)"""
         )
 
     def test_sym_ceil(self):
@@ -510,12 +525,17 @@ class TestPySymInt(TestCase):
         self.assertEqual(r, 3)
         self.assertIsInstance(r, torch.SymInt, msg=type(r))
         self.assertExpectedInline(
-            str(shape_env.guards[0][0]), """Eq(ceiling(s0/2), 3)"""
+            str(shape_env.guards[0][0]),
+            """Eq(CeilToInt(IntTrueDiv(s0, 2)), 3)""",
         )
-        r = math.floor(3.0 * a0)
+        r1 = 3.0 * a0
+        r = math.floor(r1)
         self.assertEqual(r, 15)
         self.assertIsInstance(r, torch.SymInt, msg=type(r))
-        self.assertExpectedInline(str(shape_env.guards[1][0]), """Eq(3*s0, 15)""")
+        self.assertExpectedInline(
+            str(shape_env.guards[1][0]),
+            """Eq(FloorToInt(3.0*ToFloat(s0)), 15)""",
+        )
 
     def test_sym_ite(self):
         shape_env = ShapeEnv()
@@ -751,6 +771,70 @@ def forward(self, x_1):
         r = torch.empty_strided((a0, 7), (1, a0), device="meta")
         self.assertTrue(torch.ops.aten.is_non_overlapping_and_dense.default(r))
 
+    def test_non_overlapping_and_dense_unbacked(self):
+        shape_env = ShapeEnv()
+        u0 = shape_env.create_unbacked_symint()
+        torch._check_is_size(u0)
+        cf = torch.ops.aten.is_non_overlapping_and_dense.default
+
+        self.assertEqual(IsNonOverlappingAndDenseIndicator(u0.node.expr, 2, 2, 1), 1)
+        self.assertEqual(IsNonOverlappingAndDenseIndicator(2, u0.node.expr, 1, 2), 1)
+        self.assertTrue(cf(torch.empty_strided((u0, 2), (2, 1), device="meta")))
+        self.assertTrue(cf(torch.empty_strided((2, u0), (1, 2), device="meta")))
+
+        self.assertEqual(IsNonOverlappingAndDenseIndicator(u0.node.expr, 1), 1)
+        self.assertEqual(IsNonOverlappingAndDenseIndicator(1, u0.node.expr), 1)
+        self.assertTrue(cf(torch.empty_strided((u0,), (1,), device="meta")))
+        self.assertTrue(cf(torch.empty_strided((1,), (u0,), device="meta")))
+
+        Max = torch.sym_max
+        # NB: This only works because we're able to determine this tensor is
+        # contiguous. transpose(0, 1) makes it stop working
+        self.assertTrue(
+            cf(
+                torch.empty_strided(
+                    (
+                        2,
+                        3,
+                        1,
+                        u0,
+                    ),
+                    (3 * Max(1, u0), Max(1, u0), Max(1, u0), 1),
+                    device="meta",
+                )
+            )
+        )
+
+    def test_debug_has_internal_overlap_unbacked(self):
+        shape_env = ShapeEnv()
+        u0 = shape_env.create_unbacked_symint()
+        torch._check_is_size(u0)
+        cf = torch._debug_has_internal_overlap
+        self.assertEqual(cf(torch.empty_strided((u0, 2), (2, 1), device="meta")), 0)
+        self.assertEqual(cf(torch.empty_strided((2, u0), (1, 2), device="meta")), 0)
+        self.assertEqual(cf(torch.empty_strided((u0,), (1,), device="meta")), 0)
+        self.assertEqual(cf(torch.empty_strided((1,), (u0,), device="meta")), 0)
+        Max = torch.sym_max
+        self.assertEqual(
+            cf(
+                torch.empty_strided(
+                    (
+                        2,
+                        3,
+                        1,
+                        u0,
+                    ),
+                    (3 * Max(1, u0), Max(1, u0), Max(1, u0), 1),
+                    device="meta",
+                )
+            ),
+            0,
+        )
+
+        # Wobbling these to zero is OK too
+        self.assertEqual(cf(torch.empty_strided((u0, 2), (3, 1), device="meta")), 2)
+        self.assertEqual(cf(torch.empty_strided((2, u0), (1, 3), device="meta")), 2)
+
     def test_specialize_zero_one(self):
         shape_env = ShapeEnv(specialize_zero_one=True)
         a0 = create_symint(shape_env, 5)
@@ -962,8 +1046,14 @@ class f(torch.nn.Module):
 )
 class TestSymNumberMagicMethods(TestCase):
     def _do_test(self, fn, inp1, inp2, shape_env, is_unary_fn):
+        with self.subTest(fn=fn, inp1=inp1, inp2=inp2, is_unary_fn=is_unary_fn):
+            return self._do_test2(fn, inp1, inp2, shape_env, is_unary_fn)
+
+    def _do_test2(self, fn, inp1, inp2, shape_env, is_unary_fn):
         # Helper function
         # NB: don't use one as that will get specialized
+        # TODO: We don't have to circuitously create the float, can just
+        # create a symfloat directly
         seed_node = (create_symint(shape_env, 2) / 2.0).node
         bool_seed_node = (create_symint(shape_env, 2) == 2).node
 
@@ -976,27 +1066,42 @@ class TestSymNumberMagicMethods(TestCase):
             else:
                 return torch.SymFloat(to_node(seed_node, inp))
 
+        if fn == "float_pow":
+            if inp1 < 0:
+                return
+
+        if fn == "pow_by_natural":
+            if isinstance(inp1, float) or isinstance(inp2, float):
+                return
+            if inp2 < 0:
+                return
+
         def maybe_xfail(inp1, inp2):
             if fn == "sym_sqrt" and inp1 < 0:
                 # ValueError: math domain error
                 return self.assertRaises((ValueError,))
-            elif fn in ("truediv", "floordiv", "mod") and inp2 == 0:
+            elif (
+                fn in ("float_truediv", "int_truediv", "int_floordiv", "mod")
+                and inp2 == 0
+            ):
                 # ZeroDivisionError: division by zero
                 return self.assertRaises((ZeroDivisionError,))
-            elif fn == "pow" and inp1 == 0 and inp2 < 0:
+            elif fn in ["float_pow", "pow_by_natural"] and inp1 == 0 and inp2 < 0:
                 # ZeroDivisionError: 0.0 cannot be raised to a negative power
                 return self.assertRaises((ZeroDivisionError,))
             elif (
-                fn == "pow"
+                # TODO: dear catastrophe waitress,
+                # this doesn't work
+                fn in ["float_pow", "pow_by_natural"]
                 and inp1 < 0
-                and inp2 in (2.5, -2.5)
                 and (
-                    type(inp1) in (SymFloat, SymInt) or type(inp2) in (SymFloat, SymInt)
+                    type(inp1) is (SymInt, SymFloat) or type(inp2) is (SymInt, SymFloat)
                 )
+                and (type(inp1) is (SymFloat, float) or type(inp2) is (SymFloat, float))
             ):
                 # Complex result, which we do not support:
                 # TypeError: Cannot convert complex to float
-                return self.assertRaises((TypeError,))
+                return self.assertRaises((RuntimeError,))
             elif fn in ("lshift", "rshift") and not (
                 isinstance(inp1, (SymInt, int)) and isinstance(inp2, (SymInt, int))
             ):
@@ -1079,6 +1184,9 @@ class TestSymNumberMagicMethods(TestCase):
             first_type == "int" or second_type == "int"
         ) and fn in sym_node.only_float_magic_methods:
             self.skipTest(f"{fn} is not an int method")
+
+        if second_type == "float" and fn in ["mod"]:
+            self.skipTest(f"{fn} only handles int")
 
         is_unary_fn = fn in sym_node.unary_methods or fn == "round"
         # Second argument is ignored for unary function. So only run for one type
@@ -1251,112 +1359,15 @@ class TestFloorDiv(TestCase):
                 yield (-x, -y)
 
     def test_floordiv_float_int(self):
-        values = (
-            (2.5, 2.1),
-            (2.1, 2.5),
-            (2.0, 2.1),
-            (7, 2.5),
-            (2.1, 7),
-            (7, 2),
-        )
+        values = ((7, 2),)
 
         for x, y in TestFloorDiv.yield_test_cases(values):
             self.assertEqual(
                 TestFloorDiv.python_floordiv(x, y), TestFloorDiv.torch_floordiv(x, y)
             )
 
-    def test_floordiv_bool(self):
-        values = (
-            (False, True),
-            (True, 2.5),
-            (2.5, True),
-            (False, 7),
-            (7, True),
-        )
-
-        for x, y in TestFloorDiv.yield_test_cases(values, negate=False):
-            # Compares to int since our FloorDiv has no bool support
-            self.assertEqual(
-                TestFloorDiv.python_floordiv(x, y),
-                TestFloorDiv.torch_floordiv(int(x), int(y)),
-            )
-            # Tests that our impl throws
-            self.assertRaisesRegex(
-                TypeError,
-                (
-                    rf"unsupported operand type\(s\) for //: "
-                    rf"'{type(sympy.sympify(x)).__name__}' and '{type(sympy.sympify(y)).__name__}'"
-                    rf", expected integer or real"
-                ),
-                lambda: TestFloorDiv.torch_floordiv(x, y),
-            )
-
-    def test_floordiv_complex(self):
-        values = (
-            (1.5 + 2.5j, 1.3 + 3.5j),
-            (1.5 + 2.5j, 2.5),
-            (2.5, 1.5 + 2.5j),
-            (1.5 + 2.5j, 7),
-            (7, 1.5 + 2.5j),
-        )
-
-        for x, y in TestFloorDiv.yield_test_cases(values):
-            # We don't test error messages to avoid depending on Python
-            # interpreter version
-            self.assertRaises(TypeError, lambda: TestFloorDiv.python_floordiv(x, y))
-            self.assertRaisesRegex(
-                TypeError,
-                (
-                    rf"unsupported operand type\(s\) for //: "
-                    rf"'{type(sympy.sympify(x)).__name__}' and '{type(sympy.sympify(y)).__name__}'"
-                    rf", expected integer or real"
-                ),
-                lambda: TestFloorDiv.torch_floordiv(x, y),
-            )
-
-    def test_floordiv_div_by_zero(self):
-        values = (
-            (2.5, 0),
-            (2.1, 0.0),
-            (2.3, sympy.Symbol("s", zero=True)),
-        )
-
-        for x, y in TestFloorDiv.yield_test_cases(values, negate=False):
-            # We don't test error messages to avoid depending on Python
-            # interpreter version
-            if type(y) is not sympy.Symbol:
-                self.assertRaises(
-                    ZeroDivisionError, lambda: TestFloorDiv.python_floordiv(x, y)
-                )
-            self.assertRaisesRegex(
-                ZeroDivisionError,
-                "division by zero",
-                lambda: TestFloorDiv.torch_floordiv(x, y),
-            )
-
-    def test_floordiv_zero_base(self):
-        values = (
-            (0, 2.5),
-            (0.0, 2.1),
-            (sympy.Symbol("s", zero=True), 2.3),
-        )
-
-        for x, y in TestFloorDiv.yield_test_cases(values, negate=False):
-            if type(x) is not sympy.Symbol:
-                self.assertEqual(
-                    TestFloorDiv.python_floordiv(x, y),
-                    TestFloorDiv.torch_floordiv(x, y),
-                )
-            else:
-                self.assertEqual(0, TestFloorDiv.torch_floordiv(x, y))
-
     def test_floordiv_div_by_one(self):
-        values = (
-            (2.5, 1),
-            (2.1, 1.0),
-            (2, 1.0),
-            (2, 1),
-        )
+        values = ((2, 1),)
 
         for x, y in TestFloorDiv.yield_test_cases(values):
             self.assertEqual(
@@ -1367,12 +1378,7 @@ class TestFloorDiv(TestCase):
         # Tests how we simplify or evaluate FloorDiv without free variables
         shape_env = ShapeEnv()
         result = 21
-        exprs = (
-            7 * FloorDiv(6, 2),
-            7 * FloorDiv(6.28, 2),
-            7 * FloorDiv(6.28, 2.0),
-            7 * FloorDiv(6.28, (FloorDiv(6.28, 3.14))),
-        )
+        exprs = (7 * FloorDiv(6, 2),)
 
         for expr in exprs:
             self.assertEqual(expr, result)
@@ -1382,33 +1388,10 @@ class TestFloorDiv(TestCase):
             self.assertEqual(shape_env.simplify(expr), result)
             self.assertEqual(shape_env.evaluate_expr(expr), result)
 
-    def test_floordiv_simplify_rational(self):
-        result = 21
-
-        a = sympy.Symbol("a", integer=True)
-        b = sympy.Symbol("b")
-
-        cases = [
-            (FloorDiv(a, sympy.Rational(1, 8)), 8 * a),
-            (FloorDiv(b, sympy.Rational(1, 8)), sympy.floor(8 * b)),
-        ]
-
-        for expr, expected in cases:
-            self.assertEqual(expr, expected)
-
     def test_floordiv_assumptions(self):
-        # We define two Symbols (with different names) for each type to make
-        # sure the behavior is consistent regardless of whether both arguments
-        # are the same object or not.
         cases = (
             sympy.Symbol("i1", integer=True),
             sympy.Symbol("i2", integer=True),
-            sympy.Symbol("r1", real=True),
-            sympy.Symbol("r2", real=True),
-            sympy.Symbol("c1", complex=True, real=False, integer=False),
-            sympy.Symbol("c2", complex=True, real=False, integer=False),
-            sympy.Symbol("s1"),
-            sympy.Symbol("s2"),
         )
 
         for base, divisor in itertools.product(cases, repeat=2):
@@ -2472,6 +2455,40 @@ def specify_constraints(a, b, c, d, e, f):
 
         self.assertEqual(static_code, expected_static)
         self.assertEqual(dynamic_code, expected_dynamic)
+
+
+class TestGuardsExpressions(TestCase):
+    """
+    Tests the guards-related methods used by the inductor FX graph cache.
+    """
+
+    def test_guards_gt_lt(self):
+        shape_env = ShapeEnv()
+        s0 = create_symint(shape_env, 6)
+        s1 = create_symint(shape_env, 7)
+        s2 = create_symint(shape_env, 5)
+
+        guard_int(sym_int(s0 > 5))
+        guard_int(sym_int(s0 < 7))
+
+        guards = shape_env.produce_guards_expression([s0])
+
+        self.assertTrue(shape_env.evaluate_guards_expression(guards, [hint_int(s0)]))
+        self.assertFalse(shape_env.evaluate_guards_expression(guards, [hint_int(s1)]))
+        self.assertFalse(shape_env.evaluate_guards_expression(guards, [hint_int(s2)]))
+
+    def test_guards_float_div(self):
+        shape_env = ShapeEnv()
+        s0 = create_symint(shape_env, 8)
+        s1 = create_symint(shape_env, 7)
+
+        guard_int(sym_int(s0 / 2.0))
+        guards = shape_env.produce_guards_expression([s0])
+
+        self.assertIn("ToFloat", guards)
+        self.assertIn("FloatTrueDiv", guards)
+        self.assertTrue(shape_env.evaluate_guards_expression(guards, [hint_int(s0)]))
+        self.assertFalse(shape_env.evaluate_guards_expression(guards, [hint_int(s1)]))
 
 
 if __name__ == "__main__":

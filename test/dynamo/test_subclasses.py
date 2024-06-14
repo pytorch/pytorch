@@ -433,6 +433,43 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
             res = fn(input)
             self.assertIsInstance(res, LocalSubclass)
 
+    def test_torch_function_list_args(self):
+        HANDLED_FUNCTIONS = {}
+
+        class MyClass:
+            def __init__(self, foo):
+                self.foo = foo
+
+            @classmethod
+            def __torch_function__(
+                cls,
+                func,
+                types,
+                args=(),
+                kwargs=None,
+            ):
+                if kwargs is None:
+                    kwargs = {}
+                if func not in HANDLED_FUNCTIONS or not all(  # noqa: C419
+                    [  # noqa: C419
+                        issubclass(t, (torch.Tensor, MyClass)) for t in types
+                    ]
+                ):
+                    return NotImplemented
+                return HANDLED_FUNCTIONS[func](*args, **kwargs)
+
+        def _stack(input, dim=0, *, out=None):
+            return MyClass(sum([x.foo for x in input]))
+
+        HANDLED_FUNCTIONS[torch.stack] = _stack
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(v0, v1):
+            return torch.stack([v0, v1])
+
+        ret = fn(MyClass(1), MyClass(1))
+        self.assertEqual(ret.foo, 2)
+
     @parametrize(
         "comparison",
         [

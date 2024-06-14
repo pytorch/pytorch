@@ -1,7 +1,9 @@
 from typing import List, NamedTuple, Optional, Tuple, Union
 
 import torch
+import torch._dynamo.compiled_autograd as ca
 import torch.distributed as dist
+from torch.distributed._tensor import DTensor
 from torch.distributed.distributed_c10d import ReduceOp
 from ._fsdp_common import (
     _get_dim0_padded_size,
@@ -9,8 +11,6 @@ from ._fsdp_common import (
     _to_dtype_if_needed,
 )
 from ._fsdp_param import FSDPParam
-
-lib = torch.library.Library("fsdp", "FRAGMENT")
 
 
 class AllGatherResult(NamedTuple):
@@ -26,10 +26,33 @@ class AllGatherResult(NamedTuple):
     all_gather_input_split_sizes: List[int]
 
 
-lib.define("all_gather_copy_in(SymInt all_gather_input_numel, SymInt world_size, SymInt rank, ScalarType dtype, Device device, SymInt[] inp_split_sizes, Tensor[] all_gather_inputs) -> (Tensor, Tensor)")
+lib = torch.library.Library("fsdp", "FRAGMENT")  # noqa: TOR901
+
+lib.define(
+    """
+    all_gather_copy_in(
+        Tensor[] all_gather_inputs,
+        SymInt[] inp_split_sizes,
+        SymInt all_gather_input_numel,
+        SymInt world_size,
+        SymInt rank,
+        ScalarType dtype,
+        Device device
+    ) -> (Tensor, Tensor)
+    """
+)
+
 
 @torch.library.impl(lib, "all_gather_copy_in", "Meta")
-def all_gather_copy_in(all_gather_input_numel, world_size, rank, dtype, device, inp_split_sizes, all_gather_inputs):
+def all_gather_copy_in_meta(
+    all_gather_inputs: List[torch.Tensor],
+    inp_split_sizes: List[int],
+    all_gather_input_numel: int,
+    world_size: int,
+    rank: int,
+    dtype: torch.dtype,
+    device: torch.device,
+) -> Tuple[torch.Tensor, torch.Tensor]:
     all_gather_output = torch.empty(
         (all_gather_input_numel * world_size,), dtype=dtype, device="meta"
     )
@@ -38,8 +61,17 @@ def all_gather_copy_in(all_gather_input_numel, world_size, rank, dtype, device, 
     )
     return all_gather_input, all_gather_output
 
+
 @torch.library.impl(lib, "all_gather_copy_in", "CUDA")
-def all_gather_copy_in(all_gather_input_numel, world_size, rank, dtype, device, inp_split_sizes, all_gather_inputs):
+def all_gather_copy_in_cuda(
+    all_gather_inputs: List[torch.Tensor],
+    inp_split_sizes: List[int],
+    all_gather_input_numel: int,
+    world_size: int,
+    rank: int,
+    dtype: torch.dtype,
+    device: torch.device,
+) -> Tuple[torch.Tensor, torch.Tensor]:
     all_gather_output = torch.empty(
         (all_gather_input_numel * world_size,), dtype=dtype, device=device
     )
@@ -52,33 +84,38 @@ def all_gather_copy_in(all_gather_input_numel, world_size, rank, dtype, device, 
     return all_gather_input, all_gather_output
 
 
-lib.define("split_with_sizes_copy(Tensor all_gather_output, SymInt[] all_gather_input_split_sizes, int dim=0, *, Tensor(a!)[] out) -> ()")
+lib.define(
+    "split_with_sizes_copy(Tensor all_gather_output, SymInt[] all_gather_input_split_sizes, int dim=0, *, Tensor(a!)[] out) -> ()"
+)
+
 
 @torch.library.impl(lib, "split_with_sizes_copy", "Meta")
-def split_with_sizes_copy(all_gather_output, all_gather_input_split_sizes, dim, out):
-    torch.split_with_sizes_copy(
-        all_gather_output, all_gather_input_split_sizes, dim=dim, out=out
-    )
-
 @torch.library.impl(lib, "split_with_sizes_copy", "CUDA")
-def split_with_sizes_copy(all_gather_output, all_gather_input_split_sizes, dim, out):
+def split_with_sizes_copy(
+    all_gather_output: torch.Tensor,
+    all_gather_input_split_sizes: List[int],
+    dim: int,
+    out: List[torch.Tensor],
+) -> None:
     torch.split_with_sizes_copy(
         all_gather_output, all_gather_input_split_sizes, dim=dim, out=out
     )
 
 
-lib.define("chunk_cat(Tensor[] tensors, int dim, int num_chunks, *, Tensor(a!) out) -> ()")
+lib.define(
+    "chunk_cat(Tensor[] tensors, int dim, int num_chunks, *, Tensor(a!) out) -> ()"
+)
+
 
 @torch.library.impl(lib, "chunk_cat", "Meta")
-def chunk_cat(tensors, dim, num_chunks, out):
-    torch._chunk_cat(
-        tensors, dim, num_chunks, out=out
-    )
-
 @torch.library.impl(lib, "chunk_cat", "CUDA")
-def chunk_cat(tensors, dim, num_chunks, out):
+def chunk_cat(
+    tensors: List[torch.Tensor],
+    dim: int,
+    num_chunks: int,
+    out: torch.Tensor,
+) -> None:
     torch._chunk_cat(tensors, dim, num_chunks, out=out)
-
 
 
 @torch.no_grad()
@@ -109,13 +146,13 @@ def foreach_all_gather(
         inp_split_sizes = [t.numel() for t in all_gather_inputs]
         all_gather_input_numel = sum(inp_split_sizes)
         all_gather_input, all_gather_output = torch.ops.fsdp.all_gather_copy_in(
+            all_gather_inputs,
+            inp_split_sizes,
             all_gather_input_numel,
             world_size,
             rank,
             dtype,
             device,
-            inp_split_sizes,
-            all_gather_inputs,
         )
         del param_all_gather_inputs
     all_gather_stream.wait_stream(all_gather_copy_in_stream)
@@ -159,7 +196,7 @@ def foreach_all_gather_copy_out(
     for all_gather_input_numels, all_gather_input_dtypes, fsdp_param in zip(
         param_all_gather_input_numels, param_all_gather_input_dtypes, fsdp_params
     ):
-        if torch._dynamo.compiled_autograd.compiled_autograd_enabled:
+        if ca.compiled_autograd_enabled:
             fsdp_param.init_all_gather_outputs(
                 all_gather_input_numels,
                 all_gather_input_dtypes,
@@ -291,10 +328,13 @@ def foreach_reduce(
                     # Record an event on which to block the CPU thread to
                     # ensure that the D2H copy finishes before the optimizer
                     fsdp_param.grad_offload_event = reduce_scatter_stream.record_event()
-            new_sharded_dtensor_grad = fsdp_param.to_sharded_dtensor(new_sharded_grad)
             if to_accumulate_grad:
-                fsdp_param.sharded_param.grad += new_sharded_dtensor_grad
+                assert isinstance(fsdp_param.sharded_param.grad, DTensor)
+                fsdp_param.sharded_param.grad._local_tensor += new_sharded_grad
             else:
+                new_sharded_dtensor_grad = fsdp_param.to_sharded_dtensor(
+                    new_sharded_grad
+                )
                 fsdp_param.sharded_param.grad = new_sharded_dtensor_grad
             padded_sharded_numel = padded_unsharded_size.numel() // world_size
             flat_grad_offset += padded_sharded_numel
@@ -312,7 +352,9 @@ def foreach_reduce_scatter_copy_in(
     world_size: int,
 ) -> None:
     reduce_scatter_input = reduce_scatter_input.view(world_size, -1)
-    torch.ops.fsdp.chunk_cat(unsharded_grads, dim=0, num_chunks=world_size, out=reduce_scatter_input)
+    torch.ops.fsdp.chunk_cat(
+        unsharded_grads, dim=0, num_chunks=world_size, out=reduce_scatter_input
+    )
 
 
 def _get_all_gather_input_metadatas(

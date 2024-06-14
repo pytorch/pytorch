@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import logging
 import operator
 from typing import Any, Dict, Optional, Set, TYPE_CHECKING

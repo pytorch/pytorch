@@ -1618,7 +1618,8 @@ def forward(self, lengths_1, values_1):
         self.assertExpectedInline(r, """\
 def forward(self, a_1):
     sym_size_int = torch.ops.aten.sym_size.int(a_1, 0)
-    pow_1 = sym_size_int ** 0.5;  sym_size_int = None
+    sym_float = torch.sym_float(sym_size_int);  sym_size_int = None
+    pow_1 = sym_float ** 0.5;  sym_float = None
     div = torch.ops.aten.div.Tensor(a_1, pow_1);  a_1 = pow_1 = None
     return div""")
 
@@ -2003,7 +2004,6 @@ symbolic_tensor_failures = {
     xfail('nn.functional.ctc_loss'),  # aten._ctc_loss.Tensor - couldn't find symbolic meta function/decomposition
     xfail('quantile', ''),  # Could not run 'aten::equal' with arguments from the 'Meta' backend.
     xfail('unique_consecutive', ''),  # aten.unique_consecutive.default - couldn't find symbolic meta function/decomposition
-    xfail('unique', ''),  # aten._unique2.default - couldn't find symbolic meta function/decomposition
 
     xfail('max_pool2d_with_indices_backward', ''),  # Expected a value of type 'List[int]' for argument 'kernel_size' but...
 
@@ -2034,8 +2034,6 @@ symbolic_tensor_failures.update(symbolic_tensor_segfaults)
 inplace_symbolic_tensor_failures = {
     # bugs
     xfail('float_power', ''),  # base given to float_power_ has dtype Float but the operation's result requires dtype Double
-    # decomp not implemented
-    xfail('unique', ''),
 }
 
 out_symbolic_tensor_failures = {

@@ -13,32 +13,6 @@
 #include <fmt/format.h>
 
 namespace at::native {
-static const std::string& getMetalType(const c10::ScalarType& t) {
-  // Mapping from c10::ScalarType to integral type that can be used for unary ops
-  static std::unordered_map<c10::ScalarType, std::string> scalar_to_metal_type = {
-      {c10::ScalarType::Half, "half"},
-      {c10::ScalarType::Float, "float"},
-      {c10::ScalarType::Long, "long"},
-      {c10::ScalarType::Int, "int"},
-      {c10::ScalarType::Short, "short"},
-      {c10::ScalarType::Bool, "bool"},
-      {c10::ScalarType::Char, "int8_t"},
-      {c10::ScalarType::Byte, "uint8_t"},
-  };
-
-  auto it = scalar_to_metal_type.find(t);
-  TORCH_CHECK(it != scalar_to_metal_type.end(), "Unsupported type ", t);
-  return it->second;
-}
-
-static const std::string& getMetalType(const c10::Scalar& s) {
-  return getMetalType(s.type());
-}
-
-static const std::string& getMetalType(const Tensor& t) {
-  return getMetalType(t.scalar_type());
-}
-
 static mps::MetalShaderLibrary lib(UNARY_KERNEL_TEMPLATE, 2);
 
 TORCH_IMPL_FUNC(erfinv_out_mps)(const Tensor& self, const Tensor& output_) {
@@ -57,7 +31,8 @@ TORCH_IMPL_FUNC(erfinv_out_mps)(const Tensor& self, const Tensor& output_) {
   }
   using namespace mps;
   @autoreleasepool {
-    auto cplState = lib.getPipelineStateForFunc("erfinv_mps_kernel", {getMetalType(outputTensor), getMetalType(self)});
+    auto cplState = lib.getPipelineStateForFunc("erfinv_mps_kernel",
+                                                {scalarToMetalTypeString(outputTensor), scalarToMetalTypeString(self)});
 
     if (!self.is_contiguous()) {
       inputTensor = inputTensor.contiguous();
