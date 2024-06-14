@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 from contextlib import contextmanager, nullcontext
-from typing import Any, ContextManager, Dict, Tuple
+from typing import Any, ContextManager, Dict, Optional, Tuple
 
 import torch
 import torch.nn as nn
@@ -13,12 +13,13 @@ from .contract import contract
 
 
 @contextmanager
-def _no_hook(module: nn.Module, user_ctx: ContextManager = nullcontext()):
+def _no_hook(module: nn.Module, user_ctx: Optional[ContextManager] = None):
     r"""
     Disable hooks installed by checkpoint to avoid unintentional recursion
     during backward recomputation.
     """
-    with user_ctx:
+
+    with user_ctx if user_ctx else nullcontext():
         orig_enable_hook = checkpoint.state(module).enable_hook
         checkpoint.state(module).enable_hook = False
         try:
@@ -91,7 +92,9 @@ def checkpoint(module: nn.Module, **kwargs) -> nn.Module:
                 else:
                     return nullcontext(), _no_hook(module)
 
-            checkpoint.state(module)._ac_generator = (
+            checkpoint.state(
+                module
+            )._ac_generator = (
                 _checkpoint_without_reentrant_generator(
                     module,
                     preserve_rng_state,
