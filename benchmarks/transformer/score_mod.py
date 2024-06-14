@@ -25,7 +25,7 @@ def benchmark_torch_function_in_microseconds(func: Callable, *args, **kwargs) ->
     # warmup
     for _ in range(5):
         func(*args, **kwargs)
-    return do_bench(lambda: func(*args, **kwargs), rep=0, warmup=0) * 1e3
+    return do_bench(lambda: func(*args, **kwargs)) * 1e3
 
 
 @dataclass(frozen=True)
@@ -34,10 +34,9 @@ class ExperimentConfig:
     score_mod: Callable
     dtype: torch.dtype
     calculate_bwd_time: bool
-    baseline_time: Optional[float]
 
     def __post_init__(self):
-        assert len(self.shape) == 5, "Shape must be of length 5" #[B, H, Q, D, KV]
+        assert len(self.shape) == 4, "Shape must be of length 4"
 
     def asdict(self):
         # Convert the dataclass instance to a dictionary
@@ -109,15 +108,15 @@ def generate_inputs(
 
 def run_single_experiment(config: ExperimentConfig, dynamic=False) -> ExperimentResults:
     device = torch.device("cuda")
-    batch_size, num_heads, q_seq_len, head_dim, kv_seq_len = config.shape
+    batch_size, num_heads, q_seq_len, head_dim = config.shape
     query, key, value = generate_inputs(
-        batch_size = batch_size,
-        num_heads = num_heads,
-        q_sequence_length = q_seq_len,
-        kv_sequence_length = kv_seq_len,
-        head_dim = head_dim,
-        dtype = config.dtype,
-        device = device,
+        batch_size,
+        num_heads,
+        q_seq_len,
+        q_seq_len,
+        head_dim,
+        config.dtype,
+        device,
         requires_grad=config.calculate_bwd_time,
     )
 
@@ -159,41 +158,14 @@ def run_single_experiment(config: ExperimentConfig, dynamic=False) -> Experiment
         )
 
 
-def calculate_speedup(config: ExperimentConfig, results: ExperimentResults, type: str) -> float:
+def calculate_speedup(results: ExperimentResults, type: str) -> float:
     if type == "fwd":
-        if config.baseline_time is None:
-            return results.fwd_times.compiled_time / results.fwd_times.compiled_time
-        else:
-            return config.baseline_time / results.fwd_times.compiled_time
+        return results.fwd_times.eager_time / results.fwd_times.compiled_time
     elif type == "bwd":
         assert results.bwd_times is not None
         return results.bwd_times.eager_time / results.bwd_times.compiled_time
     else:
         raise ValueError(f"Invalid type {type}")
-
-def calculate_bandwidth(config: ExperimentConfig, results: ExperimentResults, type: str) -> float:
-    if type == "fwd":
-        query_size = config.shape[0] * config.shape[1] * config.shape[2] * config.shape[3] * torch.finfo(config.dtype).bits / 8
-        kv_size =config.shape[0] * config.shape[1] * config.shape[4] * config.shape[3] * torch.finfo(config.dtype).bits / 8 * 2
-        output_size = config.shape[0] * config.shape[1] * config.shape[2] * config.shape[3] * torch.finfo(config.dtype).bits / 8
-        total_size = (query_size + kv_size + output_size) / 1024 / 1024 / 1024 # In GB 
-        time_in_seconds = results.fwd_times.compiled_time / 1e6
-        return total_size / time_in_seconds / 1024
-    else:
-        raise ValueError(f"Invalid type {type}")
-
-def calculate_gflops(config: ExperimentConfig, results: ExperimentResults) -> float:
-    B = config.shape[0]
-    H = config.shape[1]
-    M = config.shape[2]
-    D = config.shape[3]
-    N = config.shape[4]
-    qk_flops = M * N * D * 2
-    softmax_flops = M * N * 2 # Not counting online softmax overhead
-    o_flops = M * D * N * 2
-    # Not counting split k overhead
-    total_flops = B * H * (qk_flops + softmax_flops + o_flops)
-    return total_flops/ results.fwd_times.compiled_time / 1e3 # in GFLOPs/s
 
 
 def get_func_name(func):
@@ -202,13 +174,11 @@ def get_func_name(func):
 
 def get_average_speedups(results: List[Experiment], type: str):
     # Calculate speedups
-    speedups = [calculate_speedup(r.config, r.results, type) for r in results]
-    bw = [calculate_bandwidth(r.config, r.results, type) for r in results]
-    gflops = [calculate_gflops(r.config, r.results) for r in results]
+    speedups = [calculate_speedup(r.results, type) for r in results]
 
     # Find indices of max and min speedups
-    max_speedup_index = np.nanargmax(speedups)
-    min_speedup_index = np.nanargmin(speedups)
+    max_speedup_index = np.argmax(speedups)
+    min_speedup_index = np.argmin(speedups)
 
     # Get the config dictionaries
     max_config_dict = results[max_speedup_index].config.asdict()
@@ -226,11 +196,11 @@ def get_average_speedups(results: List[Experiment], type: str):
     table_data = [
         {
             "Type": "Average",
-            "Speedup": np.nanmean(speedups),
+            "Speedup": np.mean(speedups),
             **dict.fromkeys(max_config_dict),
         },
-        {"Type": "Max", "Speedup": speedups[max_speedup_index], "BandWidth (TB/s)":  bw[max_speedup_index], "GFlops/s": gflops[max_speedup_index],  **max_config_dict},
-        {"Type": "Min", "Speedup": speedups[min_speedup_index], "BandWidth (TB/s)": bw[min_speedup_index], "GFlops/s": gflops[min_speedup_index], **min_config_dict},
+        {"Type": "Max", "Speedup": speedups[max_speedup_index], **max_config_dict},
+        {"Type": "Min", "Speedup": speedups[min_speedup_index], **min_config_dict},
     ]
 
     return table_data
@@ -251,18 +221,12 @@ def print_results(results: List[Experiment]):
                 table_data[key].append(value)
 
     # Calculate speedups
-    fwd_speedups = [calculate_speedup(r.config, r.results, type="fwd") for r in results]
+    fwd_speedups = [calculate_speedup(r.results, type="fwd") for r in results]
     table_data["fwd_speedup"] = fwd_speedups
     if results[0].config.calculate_bwd_time:
-        bwd_speedups = [calculate_speedup(r.config, r.results, type="bwd") for r in results]
+        bwd_speedups = [calculate_speedup(r.results, type="bwd") for r in results]
         table_data["bwd_speedup"] = bwd_speedups
-    
-    # calculate theoretical bandwidth
-    fwd_bandwidth = [calculate_bandwidth(r.config, r.results, type="fwd") for r in results]
-    table_data["fwd_bw (TB/s)"] = fwd_bandwidth
-    fwd_gflops = [calculate_gflops(r.config, r.results) for r in results]
-    table_data["GFlops/s"] = fwd_gflops
- 
+
     table_data["score_mod"] = [get_func_name(func) for func in table_data["score_mod"]]
     print(tabulate(table_data, headers="keys", tablefmt="github", floatfmt=".3f"))
 
@@ -293,96 +257,55 @@ def generate_score_mods() -> List[Callable]:
     def head_bias(score, b, h, m, n):
         return score + 2 * h
 
-    # return [noop, causal_mask, relative_bias, head_bias]
-    return [noop]
+    return [noop, causal_mask, relative_bias, head_bias]
 
 
-def generate_experiment_configs(calculate_bwd: bool, baseline_performance) -> List[ExperimentConfig]:
-    kv_cache_sizes = [
-        (128, 512), 
-        # (64, 1024), 
-        # (32, 2048), 
-        # (16, 4096), 
-        # (8, 8192), 
-        # (4, 16384), 
-        # (2, 32768), 
-        # (1, 65536), 
-        # (1, 131072)
-    ]
-    n_heads = [
-        (16, 1), 
-        # (16, 2),
-        # (16, 16)
-    ] # (Hq, Hkv)
-    # head_dims = [64, 128, 256]
-    head_dims = [128]
+def generate_experiment_configs(calculate_bwd: bool) -> List[ExperimentConfig]:
+    batch_sizes = [2, 8, 16]
+    num_heads = [16]
+    q_kv_seq_lens = [(512, 512), (1024, 1024), (4096, 4096)]
+    head_dims = [64, 128, 256]
     dtypes = [
         torch.bfloat16,
-        torch.float16,
-        torch.float32
     ]
     score_mods = generate_score_mods()
     all_configs = []
     for (
-        (Hq, Hkv),
-        (bsz, kv_seq_len),
+        bsz,
+        n_heads,
+        (q_seq_len, kv_seq_len),
         head_dim,
         score_mod,
         dtype,
     ) in itertools.product(
-        n_heads, kv_cache_sizes, head_dims, score_mods, dtypes
+        batch_sizes, num_heads, q_kv_seq_lens, head_dims, score_mods, dtypes
     ):
-       
-        n_heads = Hkv
-        q_seq_len = Hq // Hkv
-        assert Hq % Hkv == 0
-        if baseline_performance is None: 
-            all_configs.append(
-                ExperimentConfig(
-                    shape=(bsz, n_heads, q_seq_len, head_dim, kv_seq_len),
-                    score_mod=score_mod,
-                    dtype=dtype,
-                    calculate_bwd_time=calculate_bwd,
-                    baseline_time=None,
-                )
+        assert q_seq_len == kv_seq_len, "Only equal length inputs supported for now."
+        all_configs.append(
+            ExperimentConfig(
+                shape=(bsz, n_heads, q_seq_len, head_dim),
+                score_mod=score_mod,
+                dtype=dtype,
+                calculate_bwd_time=calculate_bwd,
             )
-        else: 
-            baseline_time = baseline_performance[(bsz, kv_seq_len, Hq, Hkv, head_dim, dtype)] # (B, Mkv, Hq, Hkv, K, dtype)
-            if not baseline_time: 
-                baseline_time = float('nan')
-            all_configs.append(
-                ExperimentConfig(
-                    shape=(bsz, n_heads, q_seq_len, head_dim, kv_seq_len),
-                    score_mod=score_mod,
-                    dtype=dtype,
-                    calculate_bwd_time=calculate_bwd,
-                    baseline_time=baseline_time,
-                )
-            )
+        )
 
     return all_configs
 
-
-
-from joy_dev.parse_xformer_results import get_xformer_results
 
 def main(dynamic: bool, calculate_bwd: bool):
     seed = 123
     np.random.seed(seed)
     torch.manual_seed(seed)
-    xformer_performance = get_xformer_results()
     results = []
-    for config in tqdm(generate_experiment_configs(calculate_bwd, xformer_performance)):
+    for config in tqdm(generate_experiment_configs(calculate_bwd)):
         results.append(
             Experiment(config, run_single_experiment(config, dynamic=dynamic))
         )
-    for config in tqdm(generate_experiment_configs(calculate_bwd, xformer_performance)):
+    for config in tqdm(generate_experiment_configs(calculate_bwd)):
         results.append(Experiment(config, run_single_experiment(config)))
 
     print_results(results)
-
-
-
 
 
 if __name__ == "__main__":
