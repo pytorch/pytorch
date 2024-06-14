@@ -53,14 +53,21 @@ def get_workflow_type(issue: Issue, username: str) -> str:
         user_list = issue.get_comments()[0].body.split()
 
         if user_list[0] == "!":
+            print("LF Workflows are disabled for everyone. Using meta runners.")
             return WORKFLOW_LABEL_META
         elif user_list[0] == "*":
+            print("LF Workflows are enabled for everyone. Using LF runners.")
             return WORKFLOW_LABEL_LF
         elif username in user_list:
+            print(f"LF Workflows are enabled for {username}. Using LF runners.")
             return WORKFLOW_LABEL_LF
         else:
+            print(f"LF Workflows are disabled for {username}. Using meta runners.")
             return WORKFLOW_LABEL_META
     except Exception as e:
+        print(
+            f"Failed to get determine workflow type. Falling back to meta runners. Exception: {e}"
+        )
         return WORKFLOW_LABEL_META
 
 
@@ -68,6 +75,7 @@ def main() -> None:
     args = parse_args()
 
     if is_exception_branch(args.github_branch):
+        print(f"Exception branch: '{args.github_branch}', using meta runners")
         output = {LABEL_TYPE_KEY: WORKFLOW_LABEL_META}
     else:
         try:
@@ -77,6 +85,7 @@ def main() -> None:
 
             output = {LABEL_TYPE_KEY: get_workflow_type(issue, args.github_user)}
         except Exception as e:
+            print(f"Failed to get issue. Falling back to meta runners. Exception: {e}")
             output = {LABEL_TYPE_KEY: WORKFLOW_LABEL_META}
 
     json_output = json.dumps(output)

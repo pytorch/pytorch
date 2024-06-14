@@ -116,7 +116,7 @@ def identify_license(f, exception=''):
             return 'Apache-2.0'
         elif 'sigslot' in txt:
             # Used in opentelemetry-cpp/tools/vcpkg/ports/sigslot
-            return 'Apache-2.0'
+            return 'Public Domain'
         elif squeeze("Clarified Artistic License") in txt:
             return 'Clarified Artistic License'
         elif all([squeeze(m) in txt.lower() for m in bsd3_txt]):

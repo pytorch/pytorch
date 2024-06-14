@@ -752,13 +752,7 @@ class OutputGraph:
         **options,
     ):
         if is_dynamic_nn_module(target, self.root_tx.export):
-            result = variables.UnspecializedNNModuleVariable(target, **options)
-            if not SideEffects.cls_supports_mutation_side_effects(type(target)):
-                # don't allow STORE_ATTR mutation with custom __setattr__
-                return result
-            return self.root_tx.output.side_effects.track_object_existing(
-                target, result
-            )
+            return variables.UnspecializedNNModuleVariable(target, **options)
 
         options = dict(options)
         assert "source" in options
