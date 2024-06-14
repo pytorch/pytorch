@@ -1,13 +1,11 @@
+# mypy: allow-untyped-defs
 from typing import Any, List, Optional, Set
 
 import sympy
 
 import torch
 
-from torch._prims_common import (
-    make_channels_last_strides_for,
-    make_contiguous_strides_for,
-)
+from torch._prims_common import make_channels_last_strides_for
 
 from .ir import (
     ExternKernelAlloc,
@@ -489,6 +487,474 @@ class ConvolutionBinaryInplace(ExternKernelAlloc):
         return packed.inputs[0]
 
 
+class ConvolutionTransposeUnary(ExternKernelAlloc):
+    def __init__(
+        self,
+        layout,
+        inputs,
+        constant_args=(),
+    ):
+        super().__init__(
+            layout,
+            inputs,
+            constant_args,
+            None,
+            python_kernel_name="torch.ops.mkldnn._convolution_transpose_pointwise",
+            cpp_kernel_name="mkldnn::_convolution_transpose_pointwise",
+        )
+        self.cpp_kernel_key = "convolution_transpose_pointwise"
+        self.cpp_op_schema = """
+            at::Tensor(
+                const at::Tensor& input_t,
+                const at::Tensor& weight_t,
+                const c10::optional<at::Tensor>& bias_opt,
+                at::IntArrayRef padding,
+                at::IntArrayRef output_padding,
+                at::IntArrayRef stride,
+                at::IntArrayRef dilation,
+                int64_t groups,
+                c10::string_view attr,
+                torch::List<c10::optional<at::Scalar>> scalars,
+                c10::optional<c10::string_view> algorithm)"""
+
+    def codegen(self, wrapper):
+        wrapper.generate_extern_kernel_alloc_and_find_schema_if_needed(
+            self.get_name(),
+            self.python_kernel_name,
+            self.cpp_kernel_name,
+            self.codegen_args(),
+            self.cpp_op_schema,
+            self.cpp_kernel_key,
+        )
+
+    @classmethod
+    def create(
+        cls,
+        x: "TensorBox",
+        weight: "TensorBox",
+        bias: "TensorBox",
+        padding_: List[int],
+        output_padding_: List[int],
+        stride_: List[int],
+        dilation_: List[int],
+        groups_: int,
+        attr,
+        scalars: Optional[List[Any]],
+        algorithm,
+    ):
+        transposed = True
+        (
+            inputs,
+            constant_args,
+            kernel_layout,
+            _,
+        ) = _prepare_convolution_fusion_create(
+            cls,
+            x,
+            weight,
+            bias,
+            padding_,
+            stride_,
+            dilation_,
+            groups_,
+            transposed,
+            output_padding_,
+        )
+        constant_args = constant_args + [
+            attr,
+            may_convert_to_optional(scalars),
+            algorithm,
+        ]
+        return ConvolutionTransposeUnary(
+            layout=kernel_layout,
+            inputs=inputs,
+            constant_args=constant_args,
+        )
+
+
+class QConvPointWisePT2E(ExternKernelAlloc):
+    def __init__(
+        self,
+        layout,
+        inputs,
+        constant_args=(),
+    ):
+        """
+        if bias is not None
+            - inputs = [x, w, b, weight_scale, weight_zp]
+            - const_args is: [stride, padding, dilation, groups, x_scale, x_zp, o_scale, o_zp,
+              fp32_output, unary_attr, unary_scalars, unary_algorithm]
+        else
+            - inputs = [x, w, weight_scale, weight_zp]
+            - const_args is: [bias, stride, padding, dilation, groups, x_scale, x_zp, o_scale, o_zp,
+              fp32_output, unary_attr, unary_scalars, unary_algorithm]
+        """
+        self.has_bias = len(inputs) == 5
+        super().__init__(
+            layout,
+            inputs,
+            constant_args,
+            None,
+            python_kernel_name="torch.ops.onednn.qconv2d_pointwise",
+            cpp_kernel_name="onednn::qconv2d_pointwise",
+        )
+        self.cpp_kernel_key = "qconv2d_pointwise"
+        self.cpp_op_schema = """
+            at::Tensor(
+                at::Tensor act,
+                double act_scale,
+                int64_t act_zero_point,
+                at::Tensor weight,
+                at::Tensor weight_scales,
+                at::Tensor weight_zero_points,
+                c10::optional<at::Tensor> bias,
+                torch::List<int64_t> stride,
+                torch::List<int64_t> padding,
+                torch::List<int64_t> dilation,
+                int64_t groups,
+                double output_scale,
+                int64_t output_zero_point,
+                c10::optional<c10::ScalarType> output_dtype,
+                c10::string_view attr,
+                torch::List<c10::optional<at::Scalar>> scalars,
+                c10::optional<c10::string_view> algorithm)"""
+
+    def codegen(self, wrapper):
+        # Parser the inputs and constant
+        args = [x.codegen_reference() for x in self.inputs]
+        const_args = []
+        const_args.extend(self.codegen_const_args())
+
+        x = args[0]
+        packed_weight = args[1]
+        bias = args[2] if self.has_bias else const_args[0]
+        w_scale, w_zp = args[-2], args[-1]
+        (
+            stride,
+            padding,
+            dilation,
+            groups,
+            x_scale,
+            x_zp,
+            o_scale,
+            o_zp,
+            output_dtype,
+            unary_attr,
+            unary_scalars,
+            unary_algorithm,
+        ) = const_args[-12:]
+
+        codegen_args = (
+            x,
+            x_scale,
+            x_zp,
+            packed_weight,
+            w_scale,
+            w_zp,
+            bias,
+            stride,
+            padding,
+            dilation,
+            groups,
+            o_scale,
+            o_zp,
+            output_dtype,
+            unary_attr,
+            unary_scalars,
+            unary_algorithm,
+        )
+        wrapper.generate_extern_kernel_alloc_and_find_schema_if_needed(
+            self.get_name(),
+            self.python_kernel_name,
+            self.cpp_kernel_name,
+            codegen_args,
+            self.cpp_op_schema,
+            self.cpp_kernel_key,
+        )
+        if isinstance(self.layout, Layout):
+            self.codegen_size_asserts(wrapper)
+
+    @classmethod
+    def create(
+        cls,
+        qx: "TensorBox",
+        x_scale: float,
+        x_zero_point: int,
+        qw: "TensorBox",  # qw
+        w_scale: "TensorBox",
+        w_zero_point: "TensorBox",
+        bias: "TensorBox",
+        stride: List[int],
+        padding: List[int],
+        dilation: List[int],
+        groups: int,
+        output_scale: float,
+        output_zero_point: int,
+        output_dtype,
+        attr,
+        scalars,
+        algorithm,
+    ):
+        transposed = False
+        output_padding = None
+        (inputs, constant_args, kernel_layout, _) = _prepare_convolution_fusion_create(
+            cls,
+            qx,
+            qw,
+            bias,
+            padding,
+            stride,
+            dilation,
+            groups,
+            transposed,
+            output_padding,
+        )
+        # swap padding and stride to align with functional conv arg order
+        if bias is None:
+            constant_args[1], constant_args[2] = constant_args[2], constant_args[1]
+        else:
+            constant_args[0], constant_args[1] = constant_args[1], constant_args[0]
+
+        w_scale.realize()
+        w_zero_point.realize()
+        inputs = inputs + [w_scale, w_zero_point]
+        constant_args = constant_args + [
+            x_scale,
+            x_zero_point,
+            output_scale,
+            output_zero_point,
+            output_dtype,
+            attr,
+            may_convert_to_optional(scalars),
+            algorithm,
+        ]
+
+        if output_dtype is not None:
+            assert output_dtype in [torch.float32, torch.bfloat16]
+            # in _prepare_convolution_fusion_create, we use x.dtype (uint8) to create kernel_layout
+            # if we set output_dtype is not None, the output buf should be output_dtype instead of uint8.
+            kernel_layout.dtype = output_dtype
+
+        return QConvPointWisePT2E(
+            layout=kernel_layout,
+            inputs=inputs,
+            constant_args=constant_args,
+        )
+
+
+class QConvPointWiseBinaryPT2E(ExternKernelAlloc):
+    def __init__(
+        self,
+        layout,
+        inputs,
+        constant_args=(),
+    ):
+        """
+        Needs input/weight/output qparams
+        if bias is not None
+            - inputs = [x, w, b, accum, w_scale, w_zp]
+            - const_args = [stride, padding, dilation, groups, x_scale, x_zp, accum_scale, accum_zp, o_scale, o_zp,
+            fp32_output, binary_attr, aplha, unary_attr, unary_scalars, unary_algorithm]
+        else
+            - inputs = [x, w, accum, w_scale, w_zp]
+            - const_args = const_args is: [bias, stride, padding, dilation, groups, x_scale, x_zp, accum_scale,
+            accum_zp, o_scale, o_zp, fp32_output, binary_attr, aplha, unary_attr, unary_scalars, unary_algorithm]
+        """
+        self.has_bias = len(inputs) == 6
+        self.idx_for_inplace_sum = 3 if self.has_bias else 2
+        super().__init__(
+            layout,
+            inputs,
+            constant_args,
+            None,
+            python_kernel_name="torch.ops.onednn.qconv2d_pointwise.binary",
+            cpp_kernel_name="onednn::qconv2d_pointwise",
+        )
+        self.cpp_kernel_overload_name = "binary"
+        self.cpp_kernel_key = "qconv2d_pointwise_binary"
+        self.cpp_op_schema = """
+            at::Tensor(
+                at::Tensor act,
+                double act_scale,
+                int64_t act_zero_point,
+                at::Tensor accum,
+                double accum_scale,
+                int64_t accum_zero_point,
+                at::Tensor weight,
+                at::Tensor weight_scales,
+                at::Tensor weight_zero_points,
+                c10::optional<at::Tensor> bias,
+                torch::List<int64_t> stride,
+                torch::List<int64_t> padding,
+                torch::List<int64_t> dilation,
+                int64_t groups,
+                double output_scale,
+                int64_t output_zero_point,
+                c10::optional<c10::ScalarType> output_dtype,
+                c10::string_view binary_attr,
+                c10::optional<at::Scalar> alpha,
+                c10::optional<c10::string_view> attr,
+                torch::List<c10::optional<at::Scalar>> scalars,
+                c10::optional<c10::string_view> algorithm)"""
+
+    def codegen(self, wrapper):
+        # Parser the inputs and constant
+        args = [x.codegen_reference() for x in self.inputs]
+        const_args = []
+        const_args.extend(self.codegen_const_args())
+
+        x = args[0]
+        packed_weight = args[1]
+        bias = args[2] if self.has_bias else const_args[0]
+        accum, w_scale, w_zp = args[-3], args[-2], args[-1]
+        (
+            stride,
+            padding,
+            dilation,
+            groups,
+            x_scale,
+            x_zp,
+            accum_scale,
+            accum_zp,
+            o_scale,
+            o_zp,
+            output_dtype,
+            binary_attr,
+            alpha,
+            unary_attr,
+            unary_scalars,
+            unary_algorithm,
+        ) = const_args[-16:]
+        conv_args = (
+            x,
+            x_scale,
+            x_zp,
+            accum,
+            accum_scale,
+            accum_zp,
+            packed_weight,
+            w_scale,
+            w_zp,
+            bias,
+            stride,
+            padding,
+            dilation,
+            groups,
+            o_scale,
+            o_zp,
+            output_dtype,
+            binary_attr,
+            alpha,
+            unary_attr,
+            unary_scalars,
+            unary_algorithm,
+        )
+        wrapper.generate_extern_kernel_alloc_and_find_schema_if_needed(
+            self.get_name(),
+            self.python_kernel_name,
+            self.cpp_kernel_name,
+            conv_args,
+            self.cpp_op_schema,
+            self.cpp_kernel_key,
+            self.cpp_kernel_overload_name,
+        )
+        if isinstance(self.layout, Layout):
+            self.codegen_size_asserts(wrapper)
+
+    def get_mutation_names(self):
+        return [self.inputs[self.idx_for_inplace_sum].get_name()]
+
+    def get_unbacked_symbol_defs(self) -> Set[sympy.Symbol]:
+        return set()
+
+    @classmethod
+    def create(
+        cls,
+        qx: "TensorBox",
+        x_scale,
+        x_zero_point,
+        qaccum: "TensorBox",
+        accum_scale,
+        accum_zero_point,
+        qw: "TensorBox",  # packed_weight
+        w_scale,
+        w_zero_point,
+        bias: "TensorBox",
+        stride: List[int],
+        padding: List[int],
+        dilation: List[int],
+        groups: int,
+        output_scale: "TensorBox",
+        output_zero_point: "TensorBox",
+        output_dtype,
+        binary_attr,
+        alpha,
+        unary_attr,
+        unary_scalars,
+        unary_algorithm,
+    ):
+        transposed = False
+        output_padding = None
+        (
+            inputs,
+            constant_args,
+            kernel_layout,
+            req_stride_order,
+        ) = _prepare_convolution_fusion_create(
+            cls,
+            qx,
+            qw,
+            bias,
+            padding,
+            stride,
+            dilation,
+            groups,
+            transposed,
+            output_padding,
+        )
+
+        qaccum = cls.require_stride_order(qaccum, req_stride_order)
+        inputs.append(qaccum)
+
+        # swap padding and stride to align with functional conv arg order
+        if bias is None:
+            constant_args[1], constant_args[2] = constant_args[2], constant_args[1]
+        else:
+            constant_args[0], constant_args[1] = constant_args[1], constant_args[0]
+
+        w_scale.realize()
+        w_zero_point.realize()
+        inputs = inputs + [w_scale, w_zero_point]
+        constant_args = constant_args + [
+            x_scale,
+            x_zero_point,
+            accum_scale,
+            accum_zero_point,
+            output_scale,
+            output_zero_point,
+            output_dtype,
+            binary_attr,
+            alpha,
+            unary_attr,
+            may_convert_to_optional(unary_scalars),
+            unary_algorithm,
+        ]
+
+        assert (
+            binary_attr == "sum"
+        ), "For now, only post op sum is supported in QConvPointWiseBinaryPT2E."
+
+        packed = QConvPointWiseBinaryPT2E(
+            layout=NoneLayout(qaccum.get_device()),
+            inputs=inputs,
+            constant_args=constant_args,
+        )
+        mark_node_as_mutating(packed, qaccum)
+
+        # Return accum since it has been inplace changed.
+        return packed.inputs[packed.idx_for_inplace_sum]
+
+
 class MKLPackedLinear(ExternKernelAlloc):
     def __init__(
         self,
@@ -681,88 +1147,406 @@ class LinearBinary(ExternKernelAlloc):
         pass
 
 
-class ConvolutionTransposeUnary(ExternKernelAlloc):
+class QLinearPointwisePT2E(ExternKernelAlloc):
     def __init__(
         self,
         layout,
         inputs,
         constant_args=(),
+        has_bias=True,
+        x_scale_zp_are_tensors=False,
     ):
+        """
+        if bias is not None
+            - inputs = [x, w, b, weight_scale, weight_zp]
+            - const_args is: [x_scale, x_zp, o_scale, o_zp,
+              fp32_output, unary_attr, unary_scalars, unary_algorithm]
+        else
+            - inputs = [x, w, weight_scale, weight_zp]
+            - const_args is: [bias, x_scale, x_zp, o_scale, o_zp,
+              fp32_output, unary_attr, unary_scalars, unary_algorithm]
+        """
+        self.has_bias = has_bias
+        self.x_scale_zp_are_tensors = x_scale_zp_are_tensors
         super().__init__(
             layout,
             inputs,
             constant_args,
             None,
-            python_kernel_name="torch.ops.mkldnn._convolution_transpose_pointwise",
-            cpp_kernel_name="mkldnn::_convolution_transpose_pointwise",
+            python_kernel_name=(
+                "torch.ops.onednn.qlinear_pointwise.tensor"
+                if x_scale_zp_are_tensors
+                else "torch.ops.onednn.qlinear_pointwise.default"
+            ),
+            cpp_kernel_name="onednn::qlinear_pointwise",
         )
-        self.cpp_kernel_key = "convolution_transpose_pointwise"
-        self.cpp_op_schema = """
+        self.cpp_kernel_overload_name = "tensor" if x_scale_zp_are_tensors else ""
+        self.cpp_kernel_key = "qlinear_pointwise"
+        x_scale_type_str, x_zp_type_str = (
+            ("at::Tensor", "at::Tensor")
+            if x_scale_zp_are_tensors
+            else ("double", "int64_t")
+        )
+        self.cpp_op_schema = f"""
             at::Tensor(
-                const at::Tensor& input_t,
-                const at::Tensor& weight_t,
-                const c10::optional<at::Tensor>& bias_opt,
-                at::IntArrayRef padding,
-                at::IntArrayRef output_padding,
-                at::IntArrayRef stride,
-                at::IntArrayRef dilation,
-                int64_t groups,
-                c10::string_view attr,
-                torch::List<c10::optional<at::Scalar>> scalars,
-                c10::optional<c10::string_view> algorithm)"""
+                at::Tensor act,
+                {x_scale_type_str} act_scale,
+                {x_zp_type_str} act_zero_point,
+                at::Tensor weight,
+                at::Tensor weight_scales,
+                at::Tensor weight_zero_points,
+                c10::optional<at::Tensor> bias,
+                double output_scale,
+                int64_t output_zero_point,
+                c10::optional<c10::ScalarType> output_dtype,
+                c10::string_view post_op_name,
+                torch::List<c10::optional<at::Scalar>> post_op_args,
+                c10::string_view post_op_algorithm)"""
 
     def codegen(self, wrapper):
+        # Parser the inputs and constant
+        args = [x.codegen_reference() for x in self.inputs]
+        const_args = []
+        const_args.extend(self.codegen_const_args())
+
+        x = args[0]
+        packed_weight = args[1]
+        bias = args[2] if self.has_bias else const_args[0]
+        w_scale, w_zp = args[-2], args[-1]
+        if self.x_scale_zp_are_tensors:
+            assert len(args) >= 4
+            x_scale, x_zp = args[-4], args[-3]
+            (
+                o_scale,
+                o_zp,
+                output_dtype,
+                unary_attr,
+                unary_scalars,
+                unary_algorithm,
+            ) = const_args[-6:]
+        else:
+            assert len(const_args) >= 8
+            (
+                x_scale,
+                x_zp,
+                o_scale,
+                o_zp,
+                output_dtype,
+                unary_attr,
+                unary_scalars,
+                unary_algorithm,
+            ) = const_args[-8:]
+
+        codegen_args = (
+            x,
+            x_scale,
+            x_zp,
+            packed_weight,
+            w_scale,
+            w_zp,
+            bias,
+            o_scale,
+            o_zp,
+            output_dtype,
+            unary_attr,
+            unary_scalars,
+            unary_algorithm,
+        )
         wrapper.generate_extern_kernel_alloc_and_find_schema_if_needed(
             self.get_name(),
             self.python_kernel_name,
             self.cpp_kernel_name,
-            self.codegen_args(),
+            codegen_args,
             self.cpp_op_schema,
             self.cpp_kernel_key,
+            self.cpp_kernel_overload_name,
         )
+        if isinstance(self.layout, Layout):
+            self.codegen_size_asserts(wrapper)
 
     @classmethod
     def create(
         cls,
-        x: "TensorBox",
-        weight: "TensorBox",
+        qx: "TensorBox",
+        x_scale: float,
+        x_zero_point: int,
+        qw: "TensorBox",  # packed_weight
+        w_scale: "TensorBox",
+        w_zero_point: "TensorBox",
         bias: "TensorBox",
-        padding_: List[int],
-        output_padding_: List[int],
-        stride_: List[int],
-        dilation_: List[int],
-        groups_: int,
-        attr,
-        scalars: Optional[List[Any]],
-        algorithm,
+        output_scale: float,
+        output_zero_point: int,
+        output_dtype,
+        post_op_name,
+        post_op_args,
+        post_op_algorithm,
     ):
-        transposed = True
+        (inputs, constant_args, kernel_layout, _) = _prepare_linear_fusion_create(
+            cls,
+            qx,
+            qw,
+            bias,
+        )
+
+        if isinstance(x_scale, TensorBox) and isinstance(x_zero_point, TensorBox):
+            x_scale.realize()
+            x_zero_point.realize()
+            inputs = inputs + [x_scale, x_zero_point]
+            x_scale_zp_are_tensors = True
+        else:
+            assert isinstance(x_scale, float) and isinstance(x_zero_point, int)
+            constant_args = constant_args + [x_scale, x_zero_point]
+            x_scale_zp_are_tensors = False
+        w_scale.realize()
+        w_zero_point.realize()
+        inputs = inputs + [w_scale, w_zero_point]
+        constant_args = constant_args + [
+            output_scale,
+            output_zero_point,
+            output_dtype,
+            post_op_name,
+            may_convert_to_optional(post_op_args),
+            post_op_algorithm,
+        ]
+
+        if output_dtype is not None:
+            assert output_dtype in [torch.float32, torch.bfloat16]
+            # in _prepare_linear_fusion_create, we use x.dtype (uint8) to create kernel_layout
+            # if we set fp32_output, the output buf should be dtype float32 instead of uint8.
+            kernel_layout.dtype = output_dtype
+
+        return QLinearPointwisePT2E(
+            layout=kernel_layout,
+            inputs=inputs,
+            constant_args=constant_args,
+            has_bias=(bias is not None),
+            x_scale_zp_are_tensors=x_scale_zp_are_tensors,
+        )
+
+
+class QLinearPointwiseBinaryPT2E(ExternKernelAlloc):
+    def __init__(
+        self,
+        layout,
+        inputs,
+        constant_args=(),
+        has_bias=True,
+        x_scale_zp_are_tensors=False,
+    ):
+        """
+        if bias is not None
+            - inputs = [x, w, b, weight_scale, weight_zp, x2]
+            - const_args is: [x_scale, x_zp, o_scale, o_zp,
+              fp32_output, binary_attr, aplha, unary_attr, unary_scalars, unary_algorithm]
+        else
+            - inputs = [x, w, weight_scale, weight_zp, x2]
+            - const_args is: [bias, x_scale, x_zp, o_scale, o_zp,
+              fp32_output, binary_attr, aplha, unary_attr, unary_scalars, unary_algorithm]
+        """
+        self.has_bias = has_bias
+        self.x_scale_zp_are_tensors = x_scale_zp_are_tensors
+        super().__init__(
+            layout,
+            inputs,
+            constant_args,
+            None,
+            python_kernel_name=(
+                "torch.ops.onednn.qlinear_pointwise.binary_tensor"
+                if x_scale_zp_are_tensors
+                else "torch.ops.onednn.qlinear_pointwise.binary"
+            ),
+            cpp_kernel_name="onednn::qlinear_pointwise",
+        )
+        self.cpp_kernel_overload_name = (
+            "binary_tensor" if x_scale_zp_are_tensors else "binary"
+        )
+        self.cpp_kernel_key = "qlinear_pointwise_binary"
+        x_scale_type_str, x_zp_type_str = (
+            ("at::Tensor", "at::Tensor")
+            if x_scale_zp_are_tensors
+            else ("double", "int64_t")
+        )
+        self.cpp_op_schema = f"""
+            at::Tensor(
+                at::Tensor act,
+                {x_scale_type_str} act_scale,
+                {x_zp_type_str} act_zero_point,
+                at::Tensor weight,
+                at::Tensor weight_scales,
+                at::Tensor weight_zero_points,
+                c10::optional<at::Tensor> bias,
+                double inv_output_scale,
+                int64_t output_zero_point,
+                c10::optional<c10::ScalarType> output_dtype,
+                c10::optional<at::Tensor> other,
+                double other_scale,
+                int64_t other_zero_point,
+                c10::string_view binary_post_op,
+                double binary_alpha,
+                c10::string_view unary_post_op,
+                torch::List<c10::optional<at::Scalar>> unary_post_op_args,
+                c10::string_view unary_post_op_algorithm)"""
+
+    def codegen(self, wrapper):
+        # Parser the inputs and constant
+        args = [x.codegen_reference() for x in self.inputs]
+        const_args = []
+        const_args.extend(self.codegen_const_args())
+
+        x = args[0]
+        packed_weight = args[1]
+        bias = args[2] if self.has_bias else const_args[0]
+        w_scale, w_zp, other = args[-3], args[-2], args[-1]
+        if self.x_scale_zp_are_tensors:
+            assert len(args) >= 5
+            x_scale, x_zp = args[-5], args[-4]
+            (
+                o_scale,
+                o_zp,
+                output_dtype,
+                other_scale,
+                other_zp,
+                binary_attr,
+                alpha,
+                unary_attr,
+                unary_scalars,
+                unary_algorithm,
+            ) = const_args[-10:]
+        else:
+            assert len(const_args) >= 8
+            (
+                x_scale,
+                x_zp,
+                o_scale,
+                o_zp,
+                output_dtype,
+                other_scale,
+                other_zp,
+                binary_attr,
+                alpha,
+                unary_attr,
+                unary_scalars,
+                unary_algorithm,
+            ) = const_args[-12:]
+
+        codegen_args = (
+            x,
+            x_scale,
+            x_zp,
+            packed_weight,
+            w_scale,
+            w_zp,
+            bias,
+            o_scale,
+            o_zp,
+            output_dtype,
+            other,
+            other_scale,
+            other_zp,
+            binary_attr,
+            alpha,
+            unary_attr,
+            unary_scalars,
+            unary_algorithm,
+        )
+        wrapper.generate_extern_kernel_alloc_and_find_schema_if_needed(
+            self.get_name(),
+            self.python_kernel_name,
+            self.cpp_kernel_name,
+            codegen_args,
+            self.cpp_op_schema,
+            self.cpp_kernel_key,
+            self.cpp_kernel_overload_name,
+        )
+        if isinstance(self.layout, Layout):
+            self.codegen_size_asserts(wrapper)
+
+    @classmethod
+    def create(
+        cls,
+        qx: "TensorBox",
+        x_scale: float,
+        x_zero_point: int,
+        qw: "TensorBox",  # packed_weight
+        w_scale: "TensorBox",
+        w_zero_point: "TensorBox",
+        bias: "TensorBox",
+        output_scale: float,
+        output_zero_point: int,
+        output_dtype,
+        other: "TensorBox",
+        other_scale,
+        other_zp,
+        binary_post_op,
+        binary_alpha,
+        unary_post_op,
+        unary_post_op_args,
+        unary_post_op_algorithm,
+    ):
         (
             inputs,
             constant_args,
             kernel_layout,
-            _,
-        ) = _prepare_convolution_fusion_create(
+            req_stride_order,
+        ) = _prepare_linear_fusion_create(
             cls,
-            x,
-            weight,
+            qx,
+            qw,
             bias,
-            padding_,
-            stride_,
-            dilation_,
-            groups_,
-            transposed,
-            output_padding_,
         )
+
+        if isinstance(x_scale, TensorBox) and isinstance(x_zero_point, TensorBox):
+            x_scale.realize()
+            x_zero_point.realize()
+            inputs = inputs + [x_scale, x_zero_point]
+            x_scale_zp_are_tensors = True
+        else:
+            assert isinstance(x_scale, float) and isinstance(x_zero_point, int)
+            constant_args = constant_args + [x_scale, x_zero_point]
+            x_scale_zp_are_tensors = False
+        w_scale.realize()
+        w_zero_point.realize()
+        inputs = inputs + [w_scale, w_zero_point]
+        if binary_post_op == "sum":
+            other = cls.require_stride_order(other, req_stride_order)
+        inputs.append(other)
         constant_args = constant_args + [
-            attr,
-            may_convert_to_optional(scalars),
-            algorithm,
+            output_scale,
+            output_zero_point,
+            output_dtype,
+            other_scale,
+            other_zp,
+            binary_post_op,
+            binary_alpha,
+            unary_post_op,
+            may_convert_to_optional(unary_post_op_args),
+            unary_post_op_algorithm,
         ]
-        return ConvolutionTransposeUnary(
+
+        if binary_post_op == "sum":
+            packed = QLinearPointwiseBinaryPT2E(
+                layout=NoneLayout(other.get_device()),
+                inputs=inputs,
+                constant_args=constant_args,
+                has_bias=(bias is not None),
+                x_scale_zp_are_tensors=x_scale_zp_are_tensors,
+            )
+            mark_node_as_mutating(packed, other)
+            # Return other since it has been inplace changed.
+            return packed.inputs[-1]
+
+        if output_dtype is not None:
+            assert output_dtype in [torch.float32, torch.bfloat16]
+            # in _prepare_linear_fusion_create, we use x.dtype (uint8) to create kernel_layout
+            # if we set fp32_output, the output buf should be dtype float32 instead of uint8.
+            kernel_layout.dtype = output_dtype
+
+        return QLinearPointwiseBinaryPT2E(
             layout=kernel_layout,
             inputs=inputs,
             constant_args=constant_args,
+            has_bias=(bias is not None),
+            x_scale_zp_are_tensors=x_scale_zp_are_tensors,
         )
 
 
@@ -873,789 +1657,3 @@ class MkldnnRnnLayer(ExternKernelAlloc):
         ]
 
         return output_ir
-
-
-class QConvPointWisePT2E(ExternKernelAlloc):
-    def __init__(
-        self,
-        layout,
-        inputs,
-        constant_args=(),
-    ):
-        """
-        if bias is not None
-            - inputs = [x, w, b, weight_scale, weight_zp]
-            - const_args is: [stride, padding, dilation, groups, x_scale, x_zp, o_inv_scale, o_zp,
-              fp32_output, unary_attr, unary_scalars, unary_algorithm]
-        else
-            - inputs = [x, w, weight_scale, weight_zp]
-            - const_args is: [bias, stride, padding, dilation, groups, x_scale, x_zp, o_inv_scale, o_zp,
-              fp32_output, unary_attr, unary_scalars, unary_algorithm]
-        """
-        self.has_bias = len(inputs) == 5
-        super().__init__(
-            layout,
-            inputs,
-            constant_args,
-            None,
-            python_kernel_name="torch.ops.onednn.qconv2d_pointwise",
-            cpp_kernel_name="onednn::qconv2d_pointwise",
-        )
-        self.cpp_kernel_key = "qconv2d_pointwise"
-        self.cpp_op_schema = """
-            at::Tensor(
-                at::Tensor act,
-                double act_scale,
-                int64_t act_zero_point,
-                at::Tensor weight,
-                at::Tensor weight_scales,
-                at::Tensor weight_zero_points,
-                c10::optional<at::Tensor> bias,
-                torch::List<int64_t> stride,
-                torch::List<int64_t> padding,
-                torch::List<int64_t> dilation,
-                int64_t groups,
-                double output_scale,
-                int64_t output_zero_point,
-                c10::optional<c10::ScalarType> output_dtype,
-                c10::string_view attr,
-                torch::List<c10::optional<at::Scalar>> scalars,
-                c10::optional<c10::string_view> algorithm)"""
-
-    def codegen(self, wrapper):
-        # Parser the inputs and constant
-        args = [x.codegen_reference() for x in self.inputs]
-        const_args = []
-        const_args.extend(self.codegen_const_args())
-
-        x = args[0]
-        packed_weight = args[1]
-        bias = args[2] if self.has_bias else const_args[0]
-        w_scale, w_zp = args[-2], args[-1]
-        (
-            stride,
-            padding,
-            dilation,
-            groups,
-            x_scale,
-            x_zp,
-            o_inv_scale,
-            o_zp,
-            output_dtype,
-            unary_attr,
-            unary_scalars,
-            unary_algorithm,
-        ) = const_args[-12:]
-
-        codegen_args = (
-            x,
-            x_scale,
-            x_zp,
-            packed_weight,
-            w_scale,
-            w_zp,
-            bias,
-            stride,
-            padding,
-            dilation,
-            groups,
-            o_inv_scale,
-            o_zp,
-            output_dtype,
-            unary_attr,
-            unary_scalars,
-            unary_algorithm,
-        )
-        wrapper.generate_extern_kernel_alloc_and_find_schema_if_needed(
-            self.get_name(),
-            self.python_kernel_name,
-            self.cpp_kernel_name,
-            codegen_args,
-            self.cpp_op_schema,
-            self.cpp_kernel_key,
-        )
-        if isinstance(self.layout, Layout):
-            self.codegen_size_asserts(wrapper)
-
-    @classmethod
-    def create(
-        cls,
-        x: "TensorBox",
-        x_scale: float,
-        x_zp: int,
-        weight: "TensorBox",  # packed_weight
-        w_scale: "TensorBox",
-        w_zp: "TensorBox",
-        bias: "TensorBox",
-        stride_: List[int],
-        padding_: List[int],
-        dilation_: List[int],
-        groups: int,
-        o_inv_scale: float,
-        output_zero_point: int,
-        output_dtype,
-        unary_attr,
-        unary_scalars,
-        unary_algorithm,
-    ):
-        transposed = False
-        output_padding = None
-        (inputs, constant_args, kernel_layout, _) = _prepare_convolution_fusion_create(
-            cls,
-            x,
-            weight,
-            bias,
-            padding_,
-            stride_,
-            dilation_,
-            groups,
-            transposed,
-            output_padding,
-        )
-        # swap padding and stride to align with functional conv arg order
-        if bias is None:
-            constant_args[1], constant_args[2] = constant_args[2], constant_args[1]
-        else:
-            constant_args[0], constant_args[1] = constant_args[1], constant_args[0]
-
-        w_scale.realize()
-        w_zp.realize()
-        inputs = inputs + [w_scale, w_zp]
-        constant_args = constant_args + [
-            x_scale,
-            x_zp,
-            o_inv_scale,
-            output_zero_point,
-            output_dtype,
-            unary_attr,
-            may_convert_to_optional(unary_scalars),
-            unary_algorithm,
-        ]
-
-        if output_dtype is not None:
-            assert output_dtype in [torch.float32, torch.bfloat16]
-            # in _prepare_convolution_fusion_create, we use x.dtype (uint8) to create kernel_layout
-            # if we set output_dtype is not None, the output buf should be output_dtype instead of uint8.
-            kernel_layout.dtype = output_dtype
-
-        return QConvPointWisePT2E(
-            layout=kernel_layout,
-            inputs=inputs,
-            constant_args=constant_args,
-        )
-
-
-class QConvPointWiseBinaryPT2E(ExternKernelAlloc):
-    def __init__(
-        self,
-        layout,
-        inputs,
-        constant_args=(),
-    ):
-        """
-        Needs input/weight/output qparams
-        if bias is not None
-            - inputs = [x, w, b, accum, w_scale, w_zp]
-            - const_args = [stride, padding, dilation, groups, x_scale, x_zp, accum_scale, accum_zp, o_inv_scale, o_zp,
-            fp32_output, binary_attr, aplha, unary_attr, unary_scalars, unary_algorithm]
-        else
-            - inputs = [x, w, accum, w_scale, w_zp]
-            - const_args = const_args is: [bias, stride, padding, dilation, groups, x_scale, x_zp, accum_scale,
-            accum_zp, o_inv_scale, o_zp, fp32_output, binary_attr, aplha, unary_attr, unary_scalars, unary_algorithm]
-        """
-        self.has_bias = len(inputs) == 6
-        self.idx_for_inplace_sum = 3 if self.has_bias else 2
-        super().__init__(
-            layout,
-            inputs,
-            constant_args,
-            None,
-            python_kernel_name="torch.ops.onednn.qconv2d_pointwise.binary",
-            cpp_kernel_name="onednn::qconv2d_pointwise",
-        )
-        self.cpp_kernel_overload_name = "binary"
-        self.cpp_kernel_key = "qconv2d_pointwise_binary"
-        self.cpp_op_schema = """
-            at::Tensor(
-                at::Tensor act,
-                double act_scale,
-                int64_t act_zero_point,
-                at::Tensor accum,
-                double accum_scale,
-                int64_t accum_zero_point,
-                at::Tensor weight,
-                at::Tensor weight_scales,
-                at::Tensor weight_zero_points,
-                c10::optional<at::Tensor> bias,
-                torch::List<int64_t> stride,
-                torch::List<int64_t> padding,
-                torch::List<int64_t> dilation,
-                int64_t groups,
-                double output_scale,
-                int64_t output_zero_point,
-                c10::optional<c10::ScalarType> output_dtype,
-                c10::string_view binary_attr,
-                c10::optional<at::Scalar> alpha,
-                c10::optional<c10::string_view> attr,
-                torch::List<c10::optional<at::Scalar>> scalars,
-                c10::optional<c10::string_view> algorithm)"""
-
-    def codegen(self, wrapper):
-        # Parser the inputs and constant
-        args = [x.codegen_reference() for x in self.inputs]
-        const_args = []
-        const_args.extend(self.codegen_const_args())
-
-        x = args[0]
-        packed_weight = args[1]
-        bias = args[2] if self.has_bias else const_args[0]
-        accum, w_scale, w_zp = args[-3], args[-2], args[-1]
-        (
-            stride,
-            padding,
-            dilation,
-            groups,
-            x_scale,
-            x_zp,
-            accum_scale,
-            accum_zp,
-            o_inv_scale,
-            o_zp,
-            output_dtype,
-            binary_attr,
-            alpha,
-            unary_attr,
-            unary_scalars,
-            unary_algorithm,
-        ) = const_args[-16:]
-        conv_args = (
-            x,
-            x_scale,
-            x_zp,
-            accum,
-            accum_scale,
-            accum_zp,
-            packed_weight,
-            w_scale,
-            w_zp,
-            bias,
-            stride,
-            padding,
-            dilation,
-            groups,
-            o_inv_scale,
-            o_zp,
-            output_dtype,
-            binary_attr,
-            alpha,
-            unary_attr,
-            unary_scalars,
-            unary_algorithm,
-        )
-        wrapper.generate_extern_kernel_alloc_and_find_schema_if_needed(
-            self.get_name(),
-            self.python_kernel_name,
-            self.cpp_kernel_name,
-            conv_args,
-            self.cpp_op_schema,
-            self.cpp_kernel_key,
-            self.cpp_kernel_overload_name,
-        )
-        if isinstance(self.layout, Layout):
-            self.codegen_size_asserts(wrapper)
-
-    def get_mutation_names(self):
-        return [self.inputs[self.idx_for_inplace_sum].get_name()]
-
-    def get_unbacked_symbol_defs(self) -> Set[sympy.Symbol]:
-        return set()
-
-    @classmethod
-    def create(
-        cls,
-        x: "TensorBox",
-        x_scale,
-        x_zp,
-        accum: "TensorBox",
-        accum_scale,
-        accum_zp,
-        weight: "TensorBox",  # packed_weight
-        w_scale,
-        w_zp,
-        bias: "TensorBox",
-        stride_: List[int],
-        padding_: List[int],
-        dilation_: List[int],
-        groups: int,
-        o_inv_scale: "TensorBox",
-        output_zero_point: "TensorBox",
-        output_dtype,
-        binary_attr,
-        alpha,
-        unary_attr,
-        unary_scalars,
-        unary_algorithm,
-    ):
-        transposed = False
-        output_padding = None
-        (
-            inputs,
-            constant_args,
-            kernel_layout,
-            req_stride_order,
-        ) = _prepare_convolution_fusion_create(
-            cls,
-            x,
-            weight,
-            bias,
-            padding_,
-            stride_,
-            dilation_,
-            groups,
-            transposed,
-            output_padding,
-        )
-
-        accum = cls.require_stride_order(accum, req_stride_order)
-        inputs.append(accum)
-
-        # swap padding and stride to align with functional conv arg order
-        if bias is None:
-            constant_args[1], constant_args[2] = constant_args[2], constant_args[1]
-        else:
-            constant_args[0], constant_args[1] = constant_args[1], constant_args[0]
-
-        w_scale.realize()
-        w_zp.realize()
-        inputs = inputs + [w_scale, w_zp]
-        constant_args = constant_args + [
-            x_scale,
-            x_zp,
-            accum_scale,
-            accum_zp,
-            o_inv_scale,
-            output_zero_point,
-            output_dtype,
-            binary_attr,
-            alpha,
-            unary_attr,
-            may_convert_to_optional(unary_scalars),
-            unary_algorithm,
-        ]
-
-        assert (
-            binary_attr == "sum"
-        ), "For now, only post op sum is supported in QConvPointWiseBinaryPT2E."
-
-        packed = QConvPointWiseBinaryPT2E(
-            layout=NoneLayout(accum.get_device()),
-            inputs=inputs,
-            constant_args=constant_args,
-        )
-        mark_node_as_mutating(packed, accum)
-
-        # Return accum since it has been inplace changed.
-        return packed.inputs[packed.idx_for_inplace_sum]
-
-
-class QLinearPointwisePT2E(ExternKernelAlloc):
-    def __init__(
-        self,
-        layout,
-        inputs,
-        constant_args=(),
-        has_bias=True,
-        x_scale_zp_are_tensors=False,
-    ):
-        """
-        if bias is not None
-            - inputs = [x, w, b, weight_scale, weight_zp]
-            - const_args is: [x_scale, x_zp, o_inv_scale, o_zp,
-              fp32_output, unary_attr, unary_scalars, unary_algorithm]
-        else
-            - inputs = [x, w, weight_scale, weight_zp]
-            - const_args is: [bias, x_scale, x_zp, o_inv_scale, o_zp,
-              fp32_output, unary_attr, unary_scalars, unary_algorithm]
-        """
-        self.has_bias = has_bias
-        self.x_scale_zp_are_tensors = x_scale_zp_are_tensors
-        super().__init__(
-            layout,
-            inputs,
-            constant_args,
-            None,
-            python_kernel_name=(
-                "torch.ops.onednn.qlinear_pointwise.tensor"
-                if x_scale_zp_are_tensors
-                else "torch.ops.onednn.qlinear_pointwise.default"
-            ),
-            cpp_kernel_name="onednn::qlinear_pointwise",
-        )
-        self.cpp_kernel_overload_name = "tensor" if x_scale_zp_are_tensors else ""
-        self.cpp_kernel_key = "qlinear_pointwise"
-        x_scale_type_str, x_zp_type_str = (
-            ("at::Tensor", "at::Tensor")
-            if x_scale_zp_are_tensors
-            else ("double", "int64_t")
-        )
-        self.cpp_op_schema = f"""
-            at::Tensor(
-                at::Tensor act,
-                {x_scale_type_str} act_scale,
-                {x_zp_type_str} act_zero_point,
-                at::Tensor weight,
-                at::Tensor weight_scales,
-                at::Tensor weight_zero_points,
-                c10::optional<at::Tensor> bias,
-                double output_scale,
-                int64_t output_zero_point,
-                c10::optional<c10::ScalarType> output_dtype,
-                c10::string_view post_op_name,
-                torch::List<c10::optional<at::Scalar>> post_op_args,
-                c10::string_view post_op_algorithm)"""
-
-    def codegen(self, wrapper):
-        # Parser the inputs and constant
-        args = [x.codegen_reference() for x in self.inputs]
-        const_args = []
-        const_args.extend(self.codegen_const_args())
-
-        x = args[0]
-        packed_weight = args[1]
-        bias = args[2] if self.has_bias else const_args[0]
-        w_scale, w_zp = args[-2], args[-1]
-        if self.x_scale_zp_are_tensors:
-            assert len(args) >= 4
-            x_scale, x_zp = args[-4], args[-3]
-            (
-                o_inv_scale,
-                o_zp,
-                output_dtype,
-                unary_attr,
-                unary_scalars,
-                unary_algorithm,
-            ) = const_args[-6:]
-        else:
-            assert len(const_args) >= 8
-            (
-                x_scale,
-                x_zp,
-                o_inv_scale,
-                o_zp,
-                output_dtype,
-                unary_attr,
-                unary_scalars,
-                unary_algorithm,
-            ) = const_args[-8:]
-
-        codegen_args = (
-            x,
-            x_scale,
-            x_zp,
-            packed_weight,
-            w_scale,
-            w_zp,
-            bias,
-            o_inv_scale,
-            o_zp,
-            output_dtype,
-            unary_attr,
-            unary_scalars,
-            unary_algorithm,
-        )
-        wrapper.generate_extern_kernel_alloc_and_find_schema_if_needed(
-            self.get_name(),
-            self.python_kernel_name,
-            self.cpp_kernel_name,
-            codegen_args,
-            self.cpp_op_schema,
-            self.cpp_kernel_key,
-            self.cpp_kernel_overload_name,
-        )
-        if isinstance(self.layout, Layout):
-            self.codegen_size_asserts(wrapper)
-
-    @classmethod
-    def create(
-        cls,
-        x: "TensorBox",
-        x_scale: float,
-        x_zp: int,
-        weight: "TensorBox",  # packed_weight
-        w_scale: "TensorBox",
-        w_zp: "TensorBox",
-        bias: "TensorBox",
-        o_inv_scale: float,
-        output_zero_point: int,
-        output_dtype,
-        unary_attr,
-        unary_scalars,
-        unary_algorithm,
-    ):
-        (inputs, constant_args, kernel_layout, _) = _prepare_linear_fusion_create(
-            cls,
-            x,
-            weight,
-            bias,
-        )
-
-        if isinstance(x_scale, TensorBox) and isinstance(x_zp, TensorBox):
-            x_scale.realize()
-            x_zp.realize()
-            inputs = inputs + [x_scale, x_zp]
-            x_scale_zp_are_tensors = True
-        else:
-            assert isinstance(x_scale, float) and isinstance(x_zp, int)
-            constant_args = constant_args + [x_scale, x_zp]
-            x_scale_zp_are_tensors = False
-        w_scale.realize()
-        w_zp.realize()
-        inputs = inputs + [w_scale, w_zp]
-        constant_args = constant_args + [
-            o_inv_scale,
-            output_zero_point,
-            output_dtype,
-            unary_attr,
-            may_convert_to_optional(unary_scalars),
-            unary_algorithm,
-        ]
-
-        if output_dtype is not None:
-            assert output_dtype in [torch.float32, torch.bfloat16]
-            # in _prepare_linear_fusion_create, we use x.dtype (uint8) to create kernel_layout
-            # if we set fp32_output, the output buf should be dtype float32 instead of uint8.
-            kernel_layout.dtype = output_dtype
-
-        return QLinearPointwisePT2E(
-            layout=kernel_layout,
-            inputs=inputs,
-            constant_args=constant_args,
-            has_bias=(bias is not None),
-            x_scale_zp_are_tensors=x_scale_zp_are_tensors,
-        )
-
-
-class QLinearPointwiseBinaryPT2E(ExternKernelAlloc):
-    def __init__(
-        self,
-        layout,
-        inputs,
-        constant_args=(),
-        has_bias=True,
-        x_scale_zp_are_tensors=False,
-    ):
-        """
-        if bias is not None
-            - inputs = [x, w, b, weight_scale, weight_zp, x2]
-            - const_args is: [x_scale, x_zp, o_inv_scale, o_zp,
-              fp32_output, binary_attr, aplha, unary_attr, unary_scalars, unary_algorithm]
-        else
-            - inputs = [x, w, weight_scale, weight_zp, x2]
-            - const_args is: [bias, x_scale, x_zp, o_inv_scale, o_zp,
-              fp32_output, binary_attr, aplha, unary_attr, unary_scalars, unary_algorithm]
-        """
-        self.has_bias = has_bias
-        self.x_scale_zp_are_tensors = x_scale_zp_are_tensors
-        super().__init__(
-            layout,
-            inputs,
-            constant_args,
-            None,
-            python_kernel_name=(
-                "torch.ops.onednn.qlinear_pointwise.binary_tensor"
-                if x_scale_zp_are_tensors
-                else "torch.ops.onednn.qlinear_pointwise.binary"
-            ),
-            cpp_kernel_name="onednn::qlinear_pointwise",
-        )
-        self.cpp_kernel_overload_name = (
-            "binary_tensor" if x_scale_zp_are_tensors else "binary"
-        )
-        self.cpp_kernel_key = "qlinear_pointwise_binary"
-        x_scale_type_str, x_zp_type_str = (
-            ("at::Tensor", "at::Tensor")
-            if x_scale_zp_are_tensors
-            else ("double", "int64_t")
-        )
-        self.cpp_op_schema = f"""
-            at::Tensor(
-                at::Tensor act,
-                {x_scale_type_str} act_scale,
-                {x_zp_type_str} act_zero_point,
-                at::Tensor weight,
-                at::Tensor weight_scales,
-                at::Tensor weight_zero_points,
-                c10::optional<at::Tensor> bias,
-                double inv_output_scale,
-                int64_t output_zero_point,
-                c10::optional<c10::ScalarType> output_dtype,
-                c10::optional<at::Tensor> other,
-                double other_scale,
-                int64_t other_zero_point,
-                c10::string_view binary_post_op,
-                double binary_alpha,
-                c10::string_view unary_post_op,
-                torch::List<c10::optional<at::Scalar>> unary_post_op_args,
-                c10::string_view unary_post_op_algorithm)"""
-
-    def codegen(self, wrapper):
-        # Parser the inputs and constant
-        args = [x.codegen_reference() for x in self.inputs]
-        const_args = []
-        const_args.extend(self.codegen_const_args())
-
-        x = args[0]
-        packed_weight = args[1]
-        bias = args[2] if self.has_bias else const_args[0]
-        w_scale, w_zp, other = args[-3], args[-2], args[-1]
-        if self.x_scale_zp_are_tensors:
-            assert len(args) >= 5
-            x_scale, x_zp = args[-5], args[-4]
-            (
-                o_inv_scale,
-                o_zp,
-                output_dtype,
-                other_scale,
-                other_zp,
-                binary_attr,
-                alpha,
-                unary_attr,
-                unary_scalars,
-                unary_algorithm,
-            ) = const_args[-10:]
-        else:
-            assert len(const_args) >= 8
-            (
-                x_scale,
-                x_zp,
-                o_inv_scale,
-                o_zp,
-                output_dtype,
-                other_scale,
-                other_zp,
-                binary_attr,
-                alpha,
-                unary_attr,
-                unary_scalars,
-                unary_algorithm,
-            ) = const_args[-12:]
-
-        codegen_args = (
-            x,
-            x_scale,
-            x_zp,
-            packed_weight,
-            w_scale,
-            w_zp,
-            bias,
-            o_inv_scale,
-            o_zp,
-            output_dtype,
-            other,
-            other_scale,
-            other_zp,
-            binary_attr,
-            alpha,
-            unary_attr,
-            unary_scalars,
-            unary_algorithm,
-        )
-        wrapper.generate_extern_kernel_alloc_and_find_schema_if_needed(
-            self.get_name(),
-            self.python_kernel_name,
-            self.cpp_kernel_name,
-            codegen_args,
-            self.cpp_op_schema,
-            self.cpp_kernel_key,
-            self.cpp_kernel_overload_name,
-        )
-        if isinstance(self.layout, Layout):
-            self.codegen_size_asserts(wrapper)
-
-    @classmethod
-    def create(
-        cls,
-        x: "TensorBox",
-        x_scale: float,
-        x_zp: int,
-        weight: "TensorBox",  # packed_weight
-        w_scale: "TensorBox",
-        w_zp: "TensorBox",
-        bias: "TensorBox",
-        o_inv_scale: float,
-        output_zero_point: int,
-        output_dtype,
-        other: "TensorBox",
-        other_scale,
-        other_zp,
-        binary_attr,
-        alpha,
-        unary_attr,
-        unary_scalars,
-        unary_algorithm,
-    ):
-        (
-            inputs,
-            constant_args,
-            kernel_layout,
-            req_stride_order,
-        ) = _prepare_linear_fusion_create(
-            cls,
-            x,
-            weight,
-            bias,
-        )
-
-        if isinstance(x_scale, TensorBox) and isinstance(x_zp, TensorBox):
-            x_scale.realize()
-            x_zp.realize()
-            inputs = inputs + [x_scale, x_zp]
-            x_scale_zp_are_tensors = True
-        else:
-            assert isinstance(x_scale, float) and isinstance(x_zp, int)
-            constant_args = constant_args + [x_scale, x_zp]
-            x_scale_zp_are_tensors = False
-        w_scale.realize()
-        w_zp.realize()
-        inputs = inputs + [w_scale, w_zp]
-        if binary_attr == "sum":
-            other = cls.require_stride_order(other, req_stride_order)
-        inputs.append(other)
-        constant_args = constant_args + [
-            o_inv_scale,
-            output_zero_point,
-            output_dtype,
-            other_scale,
-            other_zp,
-            binary_attr,
-            alpha,
-            unary_attr,
-            may_convert_to_optional(unary_scalars),
-            unary_algorithm,
-        ]
-
-        if binary_attr == "sum":
-            packed = QLinearPointwiseBinaryPT2E(
-                layout=NoneLayout(other.get_device()),
-                inputs=inputs,
-                constant_args=constant_args,
-                has_bias=(bias is not None),
-                x_scale_zp_are_tensors=x_scale_zp_are_tensors,
-            )
-            mark_node_as_mutating(packed, other)
-            # Return other since it has been inplace changed.
-            return packed.inputs[-1]
-
-        if output_dtype is not None:
-            assert output_dtype in [torch.float32, torch.bfloat16]
-            # in _prepare_linear_fusion_create, we use x.dtype (uint8) to create kernel_layout
-            # if we set fp32_output, the output buf should be dtype float32 instead of uint8.
-            kernel_layout.dtype = output_dtype
-
-        return QLinearPointwiseBinaryPT2E(
-            layout=kernel_layout,
-            inputs=inputs,
-            constant_args=constant_args,
-            has_bias=(bias is not None),
-            x_scale_zp_are_tensors=x_scale_zp_are_tensors,
-        )

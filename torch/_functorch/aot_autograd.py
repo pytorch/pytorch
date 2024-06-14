@@ -21,6 +21,11 @@ from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 from . import config
+from ._aot_autograd.autograd_cache import (  # noqa: F401
+    AOTAutogradCache,
+    autograd_cache_key,
+)
+
 from ._aot_autograd.collect_metadata_analysis import (  # noqa: F401
     run_functionalized_fw_and_collect_metadata,
 )
@@ -493,11 +498,7 @@ def create_aot_dispatcher_function(
                         return shape_env.create_symintnode(
                             shape_env.create_symbol(x, source), hint=x, source=source
                         )
-                if isinstance(
-                    x, torch.ScriptObject
-                ) and torch._library.fake_class_registry.has_fake_class(
-                    x._type().qualified_name()
-                ):
+                if isinstance(x, torch.ScriptObject):
                     return torch._library.fake_class_registry.to_fake_obj(fake_mode, x)
                 if not isinstance(x, torch.Tensor):
                     return x
@@ -544,8 +545,9 @@ def create_aot_dispatcher_function(
 
         fake_flat_args = process_inputs(flat_args)
 
-        needs_autograd = any(
-            x.requires_grad for x in fake_flat_args if isinstance(x, Tensor)
+        needs_autograd = (
+            any(x.requires_grad for x in fake_flat_args if isinstance(x, Tensor))
+            and torch.is_grad_enabled()
         )
 
         with enable_python_dispatcher():
@@ -880,8 +882,6 @@ def aot_module_simplified(
     params_flat = list(params_flat)
     params_len = len(params_flat)
 
-    functional_call = create_functional_call(mod, params_spec, params_len)
-
     if bw_compiler is None:
         bw_compiler = fw_compiler
     if inference_compiler is None:
@@ -947,14 +947,24 @@ def aot_module_simplified(
         aot_autograd_arg_pos_to_source=aot_autograd_arg_pos_to_source,
         is_export=False,
         no_tangents=False,
+        cache_key=None,
     )
 
-    with compiled_autograd.disable():
-        compiled_fn, _ = create_aot_dispatcher_function(
-            functional_call,
-            full_args,
-            aot_config,
-        )
+    def dispatch_and_compile():
+        functional_call = create_functional_call(mod, params_spec, params_len)
+        with compiled_autograd.disable():
+            compiled_fn, _ = create_aot_dispatcher_function(
+                functional_call,
+                full_args,
+                aot_config,
+            )
+        return compiled_fn
+
+    # Autograd cache stuff
+    if config.enable_autograd_cache:
+        compiled_fn = AOTAutogradCache.load(dispatch_and_compile, mod, args, aot_config)
+    else:
+        compiled_fn = dispatch_and_compile()
 
     if isinstance(mod, torch._dynamo.utils.GmWrapper):
         # This function is called by the flatten_graph_inputs wrapper, which boxes
