@@ -56,11 +56,11 @@ void Context::setDeterministicCuDNN(bool b) {
   deterministic_cudnn = b;
 }
 
-bool Context::deterministicMklDNN() const {
+bool Context::deterministicMkldnn() const {
   return deterministic_mkldnn;
 }
 
-void Context::setDeterministicMklDNN(bool b) {
+void Context::setDeterministicMkldnn(bool b) {
   deterministic_mkldnn = b;
 }
 

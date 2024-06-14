@@ -815,20 +815,20 @@ PyObject* THPModule_deterministicCuDNN(PyObject* _unused, PyObject* noargs) {
     Py_RETURN_FALSE;
 }
 
-PyObject* THPModule_setDeterministicMklDNN(PyObject* _unused, PyObject* arg) {
+PyObject* THPModule_setDeterministicMkldnn(PyObject* _unused, PyObject* arg) {
   HANDLE_TH_ERRORS
   TORCH_CHECK(
       PyBool_Check(arg),
       "set_deterministic_mkldnn expects a bool, "
       "but got ",
       THPUtils_typename(arg));
-  at::globalContext().setDeterministicMklDNN(arg == Py_True);
+  at::globalContext().setDeterministicMkldnn(arg == Py_True);
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
 
-PyObject* THPModule_deterministicMklDNN(PyObject* _unused, PyObject* noargs) {
-  if (at::globalContext().deterministicMklDNN())
+PyObject* THPModule_deterministicMkldnn(PyObject* _unused, PyObject* noargs) {
+  if (at::globalContext().deterministicMkldnn())
     Py_RETURN_TRUE;
   else
     Py_RETURN_FALSE;
@@ -1367,11 +1367,11 @@ static PyMethodDef TorchMethods[] = { // NOLINT
      METH_O,
      nullptr},
     {"_get_mkldnn_deterministic",
-     THPModule_deterministicMklDNN,
+     THPModule_deterministicMkldnn,
      METH_NOARGS,
      nullptr},
     {"_set_mkldnn_deterministic",
-     THPModule_setDeterministicMklDNN,
+     THPModule_setDeterministicMkldnn,
      METH_O,
      nullptr},
     {"_get_deterministic_algorithms",

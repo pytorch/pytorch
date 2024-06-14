@@ -188,8 +188,8 @@ class TORCH_API Context {
   void setBenchmarkLimitCuDNN(int);
   bool deterministicCuDNN() const;
   void setDeterministicCuDNN(bool);
-  bool deterministicMklDNN() const;
-  void setDeterministicMklDNN(bool);
+  bool deterministicMkldnn() const;
+  void setDeterministicMkldnn(bool);
   bool userEnabledNNPACK() const;
   void setUserEnabledNNPACK(bool e);
 
