@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 """Spectral Normalization from https://arxiv.org/abs/1802.05957."""
 import torch
 from torch.nn.functional import normalize

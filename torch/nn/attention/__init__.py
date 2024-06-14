@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 """ This module contains functions and classes that alter the behavior of torch.nn.functional.scaled_dot_product_attention """
 import contextlib
 from typing import List, Union

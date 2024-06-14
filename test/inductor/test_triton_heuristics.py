@@ -4,9 +4,8 @@ import sys
 import unittest
 
 import torch
-from torch.testing._internal.common_device_type import expectedFailureXPU
 
-from torch.testing._internal.common_utils import IS_LINUX
+from torch.testing._internal.common_utils import IS_LINUX, skipIfXpu
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 
 try:
@@ -73,11 +72,11 @@ class TestTritonHeuristics(TestCase):
         ]
         self.assertEqual(forward(*args), foo_c(*args))
 
-    @expectedFailureXPU
+    @skipIfXpu
     def test_artificial_zgrid(self):
         self._test_artificial_zgrid()
 
-    @expectedFailureXPU
+    @skipIfXpu
     @config.patch("cpp_wrapper", True)
     def test_artificial_grid_cpp_wrapper(self):
         self._test_artificial_zgrid()

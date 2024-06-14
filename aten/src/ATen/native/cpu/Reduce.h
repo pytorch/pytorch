@@ -21,21 +21,21 @@ using namespace vec;
 
 // reduction that is contiguous over the input in dim 0
 template <typename traits>
-static inline bool is_contiguous_reduction(const int64_t* strides) {
+inline bool is_contiguous_reduction(const int64_t* strides) {
   return strides[0] == 0 &&
          strides[1] == sizeof(typename traits::arg2_t);
 }
 
 // reduction that is contiguous over the input in dim 1
 template <typename traits>
-static inline bool is_outer_reduction(const int64_t* strides) {
+inline bool is_outer_reduction(const int64_t* strides) {
   return strides[0] == 0 &&
          strides[2] == sizeof(typename traits::result_type) &&
          strides[3] == sizeof(typename traits::arg2_t);
 }
 
 template <typename func_t, typename vec_func_t>
-static inline void vectorized_reduction(char** data, int64_t n, int64_t stride,
+inline void vectorized_reduction(char** data, int64_t n, int64_t stride,
                                         func_t op, vec_func_t vop, bool reduce) {
   VEC_LOOP_HEADER(func_t, data)
   const char* in1_ptr = data[1];
@@ -69,7 +69,7 @@ static inline void vectorized_reduction(char** data, int64_t n, int64_t stride,
 }
 
 template <typename F>
-static inline void UNARY_OUTER_LOOP(char* data[2], const int64_t strides[2], int64_t n, F f) {
+inline void UNARY_OUTER_LOOP(char* data[2], const int64_t strides[2], int64_t n, F f) {
   for (const auto j C10_UNUSED : c10::irange(n)) {
     f();
     data[0] += strides[0];
@@ -79,7 +79,7 @@ static inline void UNARY_OUTER_LOOP(char* data[2], const int64_t strides[2], int
 
 // computes the reduction out = op(out, in)
 template <typename func_t, typename vec_func_t>
-static inline void vectorized_inner_reduction(char** data, int64_t n, func_t op, vec_func_t vop) {
+inline void vectorized_inner_reduction(char** data, int64_t n, func_t op, vec_func_t vop) {
   VEC_LOOP_HEADER(func_t, data)
   int64_t vector_stride = 4 * Vec::size() * sizeof(scalar_t);
   int64_t count = n / (4 * Vec::size());
@@ -93,7 +93,7 @@ static inline void vectorized_inner_reduction(char** data, int64_t n, func_t op,
 
 // computes the reduction out = op(out, in)
 template <typename func_t, typename vec_func_t>
-static inline void vectorized_outer_reduction(char** data, int64_t inner_stride, int64_t size0, int64_t size1, func_t op, vec_func_t vop) {
+inline void vectorized_outer_reduction(char** data, int64_t inner_stride, int64_t size0, int64_t size1, func_t op, vec_func_t vop) {
   VEC_LOOP_HEADER(func_t, data)
 
   // reduce down each column of 4 * Vec::size() elements (128 or 256 bytes)
@@ -132,13 +132,13 @@ static void set_results(const res_t result, const TensorIteratorBase &iter, cons
 }
 
 template<typename traits, std::size_t i = 0, typename... tuple_t>
-static inline typename std::enable_if<i == sizeof...(tuple_t), std::size_t>::type
+inline typename std::enable_if<i == sizeof...(tuple_t), std::size_t>::type
 for_each_in_tuple(const std::tuple<tuple_t...>& /*t*/, const TensorIteratorBase& /*iter*/, const int /*num_outputs*/) {
   return i;
 }
 
 template<typename traits, std::size_t i = 0, typename... tuple_t>
-static inline typename std::enable_if<i < sizeof...(tuple_t), std::size_t>::type
+inline typename std::enable_if<i < sizeof...(tuple_t), std::size_t>::type
 for_each_in_tuple(const std::tuple<tuple_t...>& t, const TensorIteratorBase &iter, const int num_outputs) {
   if (i < (size_t)num_outputs) {
     set_result<traits>(i, std::get<i>(t), iter, num_outputs);
@@ -286,7 +286,7 @@ void binary_kernel_reduce_vec(TensorIteratorBase& iter, func_t op, vec_func_t vo
 // when reduction is on most inner dimension (dim 0 in TensorIterator)
 // and input has contiguous most inner dimension, `binary_kernel_reduce_lastdim`
 // can be used.
-static inline bool is_reduce_lastdim(TensorIteratorBase& iter) {
+inline bool is_reduce_lastdim(TensorIteratorBase& iter) {
   return iter.num_reduce_dims() == 1 && iter.is_dim_reduced(0)
       && iter.ninputs() == 1 && iter.strides(1)[0] == iter.element_size(1);
 }

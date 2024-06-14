@@ -385,8 +385,11 @@ class TORCH_API Context {
       ? at::LinalgBackend::Cusolver
       : at::LinalgBackend::Default;
   at::BlasBackend blas_preferred_backend =
-      (c10::utils::check_env("TORCH_BLAS_PREFER_CUBLASLT") == true ||
-       c10::utils::check_env("TORCH_BLAS_PREFER_HIPBLASLT") == true)
+#ifdef USE_ROCM
+      (c10::utils::check_env("TORCH_BLAS_PREFER_HIPBLASLT") != false)
+#else
+      (c10::utils::check_env("TORCH_BLAS_PREFER_CUBLASLT") == true)
+#endif
       ? at::BlasBackend::Cublaslt
       : at::BlasBackend::Cublas;
 #ifdef C10_MOBILE

@@ -1,14 +1,17 @@
+# mypy: allow-untyped-defs
 from collections import defaultdict
 from contextlib import contextmanager
 
 from functools import partial
-from typing import Callable, cast, Dict, List, Optional, Tuple, Union
+from typing import Callable, cast, Dict, List, Optional, Tuple, TYPE_CHECKING, Union
 
 import torch
 import torch.distributed._functional_collectives as funcol
 
 import torch.distributed.distributed_c10d as c10d
-from torch._C._distributed_c10d import _DistributedBackendOptions, Backend
+
+if TYPE_CHECKING:
+    from torch._C._distributed_c10d import _DistributedBackendOptions, Backend
 
 
 """
@@ -91,6 +94,8 @@ def _create_cuda_p2p_group(
 
 
 def is_cuda_p2p_group(group: c10d.ProcessGroup) -> bool:
+    if _test_with_non_cuda_p2p_group:
+        return True
     if not c10d.is_nccl_available():
         return False
     try:

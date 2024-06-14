@@ -13,12 +13,16 @@ from torch.distributed._composable import fully_shard, replicate
 
 # importing fully_shard as FSDP2 since the original fully_shard is used in this test.
 # TODO: remove old composable fully_shard so that we don't have to import new fully_shard as FSDP2
-from torch.distributed._composable.fsdp import fully_shard as FSDP2
+from torch.distributed._composable.fsdp import (
+    fully_shard as FSDP2,
+    fully_shard as fsdp_fully_shard,
+)
 from torch.distributed._shard.sharded_tensor import ShardedTensor
 from torch.distributed._tensor import DTensor, init_device_mesh
 from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
     apply_activation_checkpointing,
 )
+from torch.distributed.checkpoint import state_dict as ptd_state_dict
 from torch.distributed.checkpoint.state_dict import (
     _patch_model_state_dict,
     _patch_optimizer_state_dict,
@@ -29,7 +33,7 @@ from torch.distributed.checkpoint.state_dict import (
     set_optimizer_state_dict,
     StateDictOptions,
 )
-from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
+from torch.distributed.fsdp import FullyShardedDataParallel as FSDP, StateDictType
 from torch.distributed.fsdp.wrap import ModuleWrapPolicy
 from torch.distributed.optim import _apply_optimizer_in_backward
 from torch.nn.parallel import DistributedDataParallel as DDP
@@ -605,9 +609,11 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
             # Drop the states to simulate loading from rank0
             if dist.get_rank() > 0:
                 load_states = {}
+                load_states2 = {}
                 load_optim_states = {}
             else:
                 load_states = copy.deepcopy(states)
+                load_states2 = copy.deepcopy(states)
                 load_optim_states = copy.deepcopy(optim_states)
 
             set_model_state_dict(
@@ -625,7 +631,21 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
                     broadcast_from_rank0=True, full_state_dict=True
                 ),
             )
+
             check(equal=True)
+            # Verify the `strict` flag.
+            load_states = load_states2
+            if load_states:
+                key = next(iter(load_states.keys()))
+                load_states.pop(key)
+            with self.assertRaisesRegex(RuntimeError, "Missing key"):
+                set_model_state_dict(
+                    fsdp_model,
+                    model_state_dict=load_states,
+                    options=StateDictOptions(
+                        broadcast_from_rank0=True, full_state_dict=True
+                    ),
+                )
 
         device_mesh = init_device_mesh("cuda", (self.world_size,))
         self.run_subtests(
@@ -653,6 +673,84 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
 
     @with_comms
     @skip_if_lt_x_gpu(2)
+    def test_optim_state_dict_param_matching(self) -> None:
+        # This test verifies parameters between optim and optim_state_dict
+        # "initial_lr" is added to optim_state_dict, but not to the new optim
+        # We test whether "initial_lr" appear in optim after
+        # set_optimizer_state_dict.
+        device = "cuda"
+        torch.manual_seed(0)
+        model = nn.Sequential(
+            *[nn.Linear(4, 4, device=device, bias=False) for _ in range(2)]
+        )
+        for layer in model:
+            fully_shard(layer)
+        fully_shard(model)
+        optim = torch.optim.Adam(model.parameters(), lr=1e-2)
+        torch.optim.lr_scheduler.LambdaLR(
+            optim, lr_lambda=[lambda epoch: 0.95**epoch]
+        )
+        opt_state_dict = ptd_state_dict.get_optimizer_state_dict(
+            model,
+            optim,
+            options=ptd_state_dict.StateDictOptions(
+                full_state_dict=True, cpu_offload=True
+            ),
+        )
+        if dist.get_rank() == 0:
+            self.assertTrue("initial_lr" in opt_state_dict["param_groups"][0])
+
+        optim = torch.optim.Adam(model.parameters(), lr=1e-2)
+        self.assertTrue("initial_lr" not in optim.param_groups[0])
+
+        ptd_state_dict.set_optimizer_state_dict(
+            model,
+            optim,
+            optim_state_dict=opt_state_dict,
+            options=ptd_state_dict.StateDictOptions(
+                broadcast_from_rank0=True, full_state_dict=True
+            ),
+        )
+        if dist.get_rank() == 0:
+            self.assertTrue("initial_lr" in optim.param_groups[0])
+
+    @with_comms
+    @skip_if_lt_x_gpu(2)
+    def test_optim_state_dict_tensor_matching(self) -> None:
+        device = "cuda"
+        torch.manual_seed(0)
+        model = nn.Sequential(
+            *[nn.Linear(4, 4, device=device, bias=False) for _ in range(2)]
+        )
+        for layer in model:
+            fsdp_fully_shard(layer)
+        fsdp_fully_shard(model)
+        optim = torch.optim.Adam(model.parameters(), lr=1e-2)
+        x = torch.randn((4, 4), device=device)
+        model(x).sum().backward()
+        optim.step()
+        optim.zero_grad()
+        self.assertIsInstance(
+            list(optim.state.values())[0]["exp_avg"], DTensor  # noqa: RUF015
+        )
+        opt_state_dict = ptd_state_dict.get_optimizer_state_dict(
+            model,
+            optim,
+            options=ptd_state_dict.StateDictOptions(full_state_dict=True),
+        )
+        optim = torch.optim.Adam(model.parameters(), lr=1e-2)
+        ptd_state_dict.set_optimizer_state_dict(
+            model,
+            optim,
+            optim_state_dict=opt_state_dict,
+            options=ptd_state_dict.StateDictOptions(full_state_dict=True),
+        )
+        self.assertIsInstance(
+            list(optim.state.values())[0]["exp_avg"], DTensor  # noqa: RUF015
+        )
+
+    @with_comms
+    @skip_if_lt_x_gpu(2)
     def test_flattened_osd(self) -> None:
         device_mesh = init_device_mesh("cuda", (self.world_size,))
         model = CompositeParamModel(device=torch.device("cuda"))
@@ -677,6 +775,81 @@ class TestStateDict(DTensorTestBase, VerifyStateDictMixin):
             fsdp_model, optimizers=fsdp_optim2, optim_state_dict=osd1
         )
         self.assertEqual(fsdp_optim.state_dict(), fsdp_optim2.state_dict())
+
+    @with_comms
+    @skip_if_lt_x_gpu(1)
+    def test_deprecate_partial(self) -> None:
+        model = CompositeParamModel(device=torch.device("cuda"))
+
+        model_state_dict1 = get_model_state_dict(model)
+        model_state_dict1 = copy.deepcopy(model_state_dict1)
+        with self.assertWarnsRegex(
+            FutureWarning,
+            "Getting submodules only model/optim state_dict is deprecated",
+        ):
+            model_state_dict2 = get_model_state_dict(model, submodules={model.l})
+        model_state_dict2 = copy.deepcopy(model_state_dict2)
+        with self.assertWarnsRegex(
+            FutureWarning,
+            "Getting submodules only model/optim state_dict is deprecated",
+        ):
+            model_state_dict3 = get_model_state_dict(
+                model,
+                submodules={model.l},
+                options=StateDictOptions(keep_submodule_prefixes=False),
+            )
+        model_state_dict3 = copy.deepcopy(model_state_dict3)
+        self.assertEqual(len(model_state_dict2), 2)
+        self.assertEqual(len(model_state_dict3), 2)
+        for key in model_state_dict3.keys():
+            full_fqn = f"l.{key}"
+            value1 = model_state_dict1[full_fqn]
+            value2 = model_state_dict2[full_fqn]
+            value3 = model_state_dict3[key]
+            self.assertEqual(value1, value2)
+            self.assertEqual(value2, value3)
+
+        zeros_state_dict = {
+            k: torch.zeros_like(v) for k, v in model_state_dict1.items()
+        }
+        model.load_state_dict(zeros_state_dict)
+        set_model_state_dict(
+            model,
+            model_state_dict=model_state_dict2,
+            options=StateDictOptions(strict=False),
+        )
+        self.assertEqual(model.l.weight, model_state_dict1["l.weight"])
+        self.assertEqual(model.l.bias, model_state_dict1["l.bias"])
+
+        model.load_state_dict(zeros_state_dict)
+        with self.assertWarnsRegex(FutureWarning, "Passing model_state_dict as a "):
+            set_model_state_dict(
+                model,
+                model_state_dict={model.l: model_state_dict3},
+                options=StateDictOptions(strict=False),
+            )
+        self.assertEqual(model.l.weight, model_state_dict1["l.weight"])
+        self.assertEqual(model.l.bias, model_state_dict1["l.bias"])
+
+    @with_comms
+    @skip_if_lt_x_gpu(1)
+    def test_deprecate_fsdp_api(self) -> None:
+        device_mesh = init_device_mesh("cuda", (self.world_size,))
+        model = CompositeParamModel(device=torch.device("cuda"))
+        fsdp_model = FSDP(copy.deepcopy(model), device_mesh=device_mesh)
+        with self.assertWarnsRegex(
+            FutureWarning,
+            r"FSDP.state_dict_type\(\) and FSDP.set_state_dict_type\(\) are being deprecated",
+        ):
+            with FSDP.state_dict_type(fsdp_model, StateDictType.FULL_STATE_DICT):
+                fsdp_model.state_dict()
+
+        with self.assertRaisesRegex(AssertionError, "FutureWarning not triggered"):
+            with self.assertWarnsRegex(
+                FutureWarning,
+                r"FSDP.state_dict_type\(\) and FSDP.set_state_dict_type\(\) are being deprecated",
+            ):
+                get_model_state_dict(model)
 
 
 class TestNoComm(MultiProcessTestCase):

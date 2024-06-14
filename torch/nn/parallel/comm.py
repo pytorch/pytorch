@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import warnings
 import torch
 from torch.cuda import nccl
@@ -226,7 +227,10 @@ def gather(tensors, dim=0, destination=None, *, out=None):
         if destination == -1:
             warnings.warn(
                 'Using -1 to represent CPU tensor is deprecated. Please use a '
-                'device object or string instead, e.g., "cpu".')
+                'device object or string instead, e.g., "cpu".',
+                FutureWarning,
+                stacklevel=2,
+            )
         destination = _get_device_index(destination, allow_cpu=True, optional=True)
         return torch._C._gather(tensors, dim, destination)
     else:

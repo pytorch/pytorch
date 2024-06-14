@@ -675,15 +675,6 @@ Tensor nll_loss_symint(const Tensor & self, const Tensor & target, const std::op
   return std::get<0>(at::nll_loss_forward_symint(self, target, weight, reduction, std::move(ignore_index)));
 }
 
-// Duplicate of above code for non-symbolic ints. Kept for BC purposes and to minimize breakages.
-static Tensor nll_loss(const Tensor & self, const Tensor & target, const std::optional<Tensor>& weight_opt, int64_t reduction, int64_t ignore_index) {
-  // See [Note: hacky wrapper removal for optional tensor]
-  c10::MaybeOwned<Tensor> weight_maybe_owned = at::borrow_from_optional_tensor(weight_opt);
-  const Tensor& weight = *weight_maybe_owned;
-
-  return std::get<0>(at::nll_loss_forward_symint(self, target, weight, reduction, ignore_index));
-}
-
 Tensor nll_loss_nd_symint(
     const Tensor& self,
     const Tensor& target,

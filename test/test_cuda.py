@@ -380,10 +380,10 @@ class TestCuda(TestCase):
 
         def check_workspace_size(inp):
             torch._C._cuda_clearCublasWorkspaces()
-            start = torch.torch.cuda.memory_stats()["active_bytes.all.allocated"]
+            start = torch.cuda.memory_stats()["active_bytes.all.allocated"]
             with torch.no_grad():
                 torch.matmul(inp, inp)
-            finish = torch.torch.cuda.memory_stats()["active_bytes.all.allocated"]
+            finish = torch.cuda.memory_stats()["active_bytes.all.allocated"]
             return finish - start
 
         # check default
@@ -1820,10 +1820,10 @@ torch.cuda.synchronize()
                     return grad, grad
 
         self.assertRegex(
-            str(w[0].message), r"torch.cuda.amp.custom_fwd\(args...\) is deprecated."
+            str(w[0].message), r"`torch.cuda.amp.custom_fwd\(args...\)` is deprecated."
         )
         self.assertRegex(
-            str(w[1].message), r"torch.cuda.amp.custom_bwd\(args...\) is deprecated."
+            str(w[1].message), r"`torch.cuda.amp.custom_bwd\(args...\)` is deprecated."
         )
 
         mymm = MyMM.apply
@@ -2016,8 +2016,8 @@ torch.cuda.synchronize()
 
     def test_cuda_autocast_deprecated_warning(self):
         with self.assertWarnsRegex(
-            DeprecationWarning,
-            r"torch.cuda.amp.autocast\(args...\) is deprecated. Please use torch.amp.autocast\('cuda', args...\) instead.",
+            FutureWarning,
+            r"`torch.cuda.amp.autocast\(args...\)` is deprecated. Please use `torch.amp.autocast\('cuda', args...\)` instead.",
         ):
             with torch.cuda.amp.autocast():
                 _ = torch.ones(10)
