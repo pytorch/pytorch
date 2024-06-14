@@ -241,18 +241,26 @@ def get_base_id(sha: str, workflow_id: int) -> Optional[int]:
 
 
 def upload_wrapper(
-    workflow_run_id: int, workflow_run_attempt: int, name: str, data: Any
+    workflow_run_id: int, workflow_run_attempt: int, name: str, data: Any, dry_run: bool = False
 ) -> None:
     as_string = json.dumps(data)
     if len(as_string) > 1000000:
-        data = [{"info": "Data too large to upload"}]
         print("Data too large to upload")
-    upload_workflow_stats_to_s3(
-        workflow_run_id,
-        workflow_run_attempt,
-        name,
-        [data],
-    )
+        if not dry_run:
+            data = [{"info": "Data too large to upload"}]
+    if dry_run:
+        repo_root = Path(__file__).resolve().parent.parent.parent
+        test_reports_path = repo_root / "test" / "test-reports"
+        test_reports_path.mkdir(parents=True, exist_ok=True)
+        with open(test_reports_path / f"{name.replace('/', '.')}.json", "w") as f:
+            json.dump(data, f)
+    else:
+        upload_workflow_stats_to_s3(
+            workflow_run_id,
+            workflow_run_attempt,
+            name,
+            [data],
+        )
 
 
 def upload_additional_info(
@@ -260,6 +268,7 @@ def upload_additional_info(
     workflow_run_attempt: int,
     head_sha: str,
     test_cases: List[Dict[str, Any]],
+    dry_run: bool = False,
 ) -> None:
     grouped_tests = group_test_cases(test_cases)
     reruns = get_reruns(grouped_tests)
@@ -282,22 +291,26 @@ def upload_additional_info(
         workflow_run_attempt,
         "additional_info/reruns",
         [reruns],
+        dry_run=dry_run,
     )
     upload_wrapper(
         workflow_run_id,
         workflow_run_attempt,
         "additional_info/td_exclusions",
         [exclusions],
+        dry_run=dry_run,
     )
     upload_wrapper(
         workflow_run_id,
         workflow_run_attempt,
         "additional_info/invoking_file_summary",
         [invoking_file_summary],
+        dry_run=dry_run,
     )
     upload_wrapper(
         workflow_run_id,
         workflow_run_attempt,
         "additional_info/new_removed_tests",
         [new_removed_tests],
+        dry_run=dry_run,
     )
