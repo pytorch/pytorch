@@ -365,23 +365,30 @@ def _canonicalize_bool_expr_impl(expr: SympyBoolean) -> SympyBoolean:
 
     opposite = {sympy.Gt: sympy.Lt, sympy.Ge: sympy.Le}
     if isinstance(expr, tuple(opposite.keys())):
-        lhs = expr.rhs - expr.lhs
+        rhs = expr.lhs - expr.rhs
         t = opposite[type(expr)]
     else:
         assert isinstance(expr, (sympy.Lt, sympy.Le, sympy.Eq, sympy.Ne))
-        lhs = expr.lhs - expr.rhs
+        rhs = expr.rhs - expr.lhs
         t = type(expr)
-    rhs = 0
-    if isinstance(lhs, sympy.Add):
-        cts = []
-        variables = []
-        for term in lhs.args:
-            if term.is_number:
-                cts.append(term)
+
+    def is_neg(t):
+        return t.is_negative or (isinstance(t, sympy.Mul) and t.args[0].is_negative)
+
+    lhs = 0
+    if isinstance(rhs, sympy.Add):
+        pos = []
+        neg = []
+        for term in rhs.args:
+            if is_neg(term):
+                neg.append(-term)
             else:
-                variables.append(term)
-        lhs = sympy.Add(*variables)
-        rhs = -sympy.Add(*cts)
+                pos.append(term)
+        lhs = sympy.Add(*neg)
+        rhs = sympy.Add(*pos)
+    elif is_neg(rhs):
+        # lhs == 0
+        lhs, rhs = -rhs, 0
     return t(lhs, rhs)
 
 def is_concrete_bool(a: Union[bool, SymBool]) -> bool:
@@ -4339,7 +4346,7 @@ class ShapeEnv:
         return bound_sympy(expr, var_to_range)
 
     @_lru_cache
-    def get_axioms(self, symbols: Optional[Tuple["sympy.Symbol"]] = None) -> Tuple["sympy.Expr"]:
+    def get_axioms(self, symbols: Optional[Tuple["sympy.Symbol"]] = None, compute_hint: bool = False) -> Tuple["sympy.Expr"]:
         """
         Given the symbols in an expression, it returns all the runtime asserts that have those symbols
         concatenated with all the guards.
@@ -4354,31 +4361,34 @@ class ShapeEnv:
                                for s in symbols if s not in self.var_to_val
                                for r in self.deferred_runtime_asserts.get(s, ()))
         guards = (g.expr for g in self.guards)
-        return tuple(itertools.chain(guards, runtime_asserts))
+        axioms = itertools.chain(guards, runtime_asserts)
+        if compute_hint:
+            axioms = (canonicalize_bool_expr(a.xreplace(self.var_to_val)) for a in axioms)
+        return tuple(dict.fromkeys(axioms).keys())
 
-    @_lru_cache
+    @lru_cache(None)
     def get_implications(self,
-                         e: "sympy.Expr",
-                         compute_hint: bool) -> Tuple[Tuple["sympy.Expr", 'sympy.logic.boolalg.BooleanAtom']]:
+                         e: "sympy.Expr") -> Tuple[Tuple["sympy.Expr", 'sympy.logic.boolalg.BooleanAtom']]:
         """ Given a expression, it returns a list of predicates that follow from it """
         equiv = {}
 
         def add_expr(expr):
-            # Expr and negation
-            equiv[canonicalize_bool_expr(expr)] = sympy.true
-            equiv[canonicalize_bool_expr(sympy.Not(expr))] = sympy.false
-            if isinstance(expr, sympy.Rel):
-                if isinstance(expr, (sympy.Eq, sympy.Ne)):
-                    # multiplying by -1 ensures that equality is commutative
-                    dual = type(expr)(-expr.lhs, -expr.rhs)
-                else:
-                    # multiplying by -1 changes the direction of the inequality
-                    dual = type(expr)(-expr.rhs, -expr.lhs)
-                equiv[canonicalize_bool_expr(dual)] = sympy.true
-                equiv[canonicalize_bool_expr(sympy.Not(dual))] = sympy.false
+            expr = canonicalize_bool_expr(expr)
+            if isinstance(expr, (sympy.Eq, sympy.Ne)):
+                # No need to canonicalize
+                # TODO We could further canonicalize Eq ordering the lhs and rhs somehow
+                # With this, we could remove the need for the commutativity part
+                opposite = sympy.Eq if isinstance(expr, sympy.Ne) else sympy.Ne
+                # Commutativity of == and !=
+                equiv[type(expr)(expr.lhs, expr.rhs)] = sympy.true
+                equiv[type(expr)(expr.rhs, expr.lhs)] = sympy.true
+                equiv[opposite(expr.lhs, expr.rhs)] = sympy.false
+                equiv[opposite(expr.rhs, expr.lhs)] = sympy.false
+            else:
+                # Expr and negation
+                equiv[expr] = sympy.true
+                equiv[canonicalize_bool_expr(sympy.Not(expr))] = sympy.false
 
-        if compute_hint:
-            e = canonicalize_bool_expr(e.xreplace(self.var_to_val))
         add_expr(e)
         # Other relational expressions this expression implies
         if isinstance(e, sympy.Eq):
@@ -4430,12 +4440,15 @@ class ShapeEnv:
         # Pattern matching
         symbols = tuple(expr.free_symbols)
         if axioms is None:
-            axioms = self.get_axioms(symbols)
+            axioms = self.get_axioms(symbols, compute_hint=compute_hint)
         subst = {}
         for e in axioms:
-            subst.update(dict(self.get_implications(e, compute_hint=compute_hint)))
+            if e.free_symbols.issubset(expr.free_symbols):
+                subst.update(dict(self.get_implications(e)))
 
         expr = expr.xreplace(subst)
+
+        symbols = tuple(expr.free_symbols)
 
         # Simplify making use of value range lower bound
         new_shape_env = {}
@@ -4503,17 +4516,17 @@ class ShapeEnv:
             new_shape_env[k] = s + offset
             new_range_env[s] = SymPyValueRangeAnalysis.add(vr, -offset)
 
-        def replace(expr, repl):
-            return expr.xreplace(repl)
-
         try:
-            new_expr = replace(expr, new_shape_env)
+            new_expr = expr.xreplace(new_shape_env)
         except RecursionError:
             log.warning("RecursionError in sympy.xreplace(%s, %s)", expr, new_shape_env)
             self.counter["sympy_recursion_error"] += 1
             return None
 
-        new_expr = safe_expand(new_expr)
+        # We need to canonicalize, as after expand we may have something like `a + b = a` and
+        # sympy will not simplify the a. The two appeareances of the a will then make value ranges
+        # analysis give lose bounds
+        new_expr = canonicalize_bool_expr(safe_expand(new_expr))
         if new_expr.is_number:
             return new_expr
 

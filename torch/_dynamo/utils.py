@@ -2769,6 +2769,12 @@ def warn_once(msg, stacklevel=1):
     warnings.warn(msg, stacklevel=stacklevel + 1)
 
 
+def strip_color_from_string(text):
+    # This regular expression matches ANSI escape codes
+    ansi_escape = re.compile(r"\x1B[@-_][0-?]*[ -/]*[@-~]")
+    return ansi_escape.sub("", text)
+
+
 @contextlib.contextmanager
 def _disable_saved_tensors_hooks_during_tracing():
     # See NOTE: [Deferring tensor pack/unpack hooks until runtime]
