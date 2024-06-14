@@ -208,7 +208,16 @@ def insert_deferred_runtime_asserts(
     export: bool = False,
 ) -> None:
     """
-    1. First pass through graph, collects current runtime asserts (NOTE: rename from RUNTIME_ASSERT_OPS).
+    During tracing, we may have discovered that some data-dependent values
+    had runtime assert on them; e.g., torch.empty(x.item()) induces a runtime
+    that x.item() >= 0.  This asserts can happen unpredictably during fake
+    tensor propagation, so we cannot conveniently insert them into the FX graph
+    when they occur.  Instead, we accumulate them in the ShapeEnv, and in this
+    pass insert them into the graph as proper tests.
+
+    Current algorithm (will add more docstring description around features/what this does):
+    
+    1. First pass through graph, collects current runtime asserts.
         Uses these, along with shape env's runtime asserts and stored ranges for unbacked symbols,
         and computes ranges for expressions.
     2. Main graph pass:
