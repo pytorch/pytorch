@@ -2722,10 +2722,9 @@ class Scheduler:
 
             self.enter_context(node)
 
-            device: Optional[torch.device] = None
-            if not isinstance(node, NopKernelSchedulerNode):
-                device = node.get_device()
-                assert device is not None, "SchedulerNode should have a device."
+            if not isinstance(node, NopKernelSchedulerNode) and (
+                device := node.get_device()
+            ):
                 if (
                     device != self.current_device
                     or node.is_extern()
@@ -2745,42 +2744,37 @@ class Scheduler:
 
             self.buffer_names_to_free.update(node.last_usage)
 
-            if not isinstance(node, NopKernelSchedulerNode):
-                assert device is not None, "SchedulerNode should have a device."
-                if node.is_template():
-                    node, *epilogue = node.get_nodes()
-                    self.get_backend(device).codegen_template(node, epilogue)
-                elif node.is_extern():
-                    node = typing.cast(ExternKernelSchedulerNode, node)
-                    self.codegen_extern_call(node)
-                elif node.is_foreach():
-                    node = typing.cast(ForeachKernelSchedulerNode, node)
-                    backend_ = self.get_backend(device)
-                    from .codegen.cuda_combined_scheduling import CUDACombinedScheduling
-                    from .codegen.simd import SIMDScheduling
+            if node.is_template():
+                node, *epilogue = node.get_nodes()
+                self.get_backend(device).codegen_template(node, epilogue)
+            elif node.is_extern():
+                node = typing.cast(ExternKernelSchedulerNode, node)
+                self.codegen_extern_call(node)
+            elif node.is_foreach():
+                node = typing.cast(ForeachKernelSchedulerNode, node)
+                backend_ = self.get_backend(device)
+                from .codegen.cuda_combined_scheduling import CUDACombinedScheduling
+                from .codegen.simd import SIMDScheduling
 
-                    if isinstance(backend_, (SIMDScheduling, CUDACombinedScheduling)):
-                        backend = backend_
-                    else:
-                        raise AssertionError(f"{type(self)=}")
-                    backend.codegen_foreach(node)
-                elif isinstance(node, (FusedSchedulerNode, SchedulerNode)):
-                    self.get_backend(device).codegen_node(node)
+                if isinstance(backend_, (SIMDScheduling, CUDACombinedScheduling)):
+                    backend = backend_
+                else:
+                    raise AssertionError(f"{type(self)=}")
+                backend.codegen_foreach(node)
+            elif isinstance(node, (FusedSchedulerNode, SchedulerNode)):
+                self.get_backend(device).codegen_node(node)
             else:
                 assert isinstance(node, NopKernelSchedulerNode)
                 node.allocate()
 
-            if config.triton.debug_sync_kernel and not isinstance(
-                node, NopKernelSchedulerNode
-            ):
-                assert device is not None, "SchedulerNode should have a device."
+            if config.triton.debug_sync_kernel:
                 self.get_backend(device).codegen_sync()
 
             self.available_buffer_names.update(node.get_names())
 
             if not isinstance(node, NopKernelSchedulerNode):
-                assert device is not None, "SchedulerNode should have a device."
-                if self.get_backend(device).ready_to_flush():
+                device = node.get_device()
+                if device is not None and self.get_backend(device).ready_to_flush():
                     self.flush()
 
         if self.current_device and device_need_guard(self.current_device.type):
