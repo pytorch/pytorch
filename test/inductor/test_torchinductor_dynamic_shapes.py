@@ -3,10 +3,12 @@ import contextlib
 import importlib
 
 import math
+import operator
 import os
 import sys
 import unittest
 from functools import partial
+from typing import List
 
 import torch
 import torch.library
@@ -63,15 +65,13 @@ test_failures = {
 
 if TEST_WITH_ROCM:
     # Tensor-likes are not close
-    test_failures["test_convolution1_dynamic_shapes"] = TestFailure(
+    test_failures["test_dynamic_stride_nobreak"] = TestFailure(
         ("cpu", "cuda"), is_skip=True
     )
-    test_failures["test_convolution3_dynamic_shapes"] = TestFailure(
-        ("cuda"), is_skip=True
+    test_failures["test_item_to_inputs_kernel_nobreak"] = TestFailure(
+        ("cpu", "cuda"), is_skip=True
     )
-    test_failures["test_expanded_reduction_dynamic_shapes"] = TestFailure(
-        ("cuda"), is_skip=True
-    )
+    test_failures["test_unbacked_reduction"] = TestFailure(("cpu"), is_skip=True)
 
 
 def make_dynamic_cls(cls, xfail_prop="_expected_failure_dynamic"):
@@ -368,6 +368,47 @@ class TestInductorDynamic(TestCase):
         arg = torch.tensor(5, device=device)
         self.assertEqual(f(arg), cf(arg))
 
+    @torch._dynamo.config.patch(
+        capture_scalar_outputs=True, capture_dynamic_output_shape_ops=True
+    )
+    @torch._inductor.config.patch(implicit_fallbacks=True)
+    def test_unbacked_save_for_backwards(self, device) -> None:
+        @torch.library.custom_op("_test::_cat", mutates_args=())
+        def _cat(t: torch.Tensor, ds: List[int]) -> torch.Tensor:
+            return t * t.new_ones([sum(ds)])
+
+        @torch.library.register_fake("_test::_cat")
+        def _cat_fake(t: torch.Tensor, ds: List[int]) -> torch.Tensor:
+            [torch._check_is_size(d) for d in ds]
+            return t.new_empty([sum(ds)])
+
+        def _cat_setup_context(ctx, inputs, output):
+            pass
+
+        def _cat_backward(ctx, grad):
+            return grad.sum(), None
+
+        torch.library.register_autograd(
+            "_test::_cat",
+            _cat_backward,
+            setup_context=_cat_setup_context,
+        )
+
+        def fn(t, sizes):
+            r = torch.ops._test._cat(t, sizes.tolist())
+            return r * t
+
+        t = torch.randn((), requires_grad=True, device=device)
+        sizes = torch.tensor([4, 8], dtype=torch.int64, device="cpu")
+        out = fn(t, sizes)
+        out.sum().backward()
+        expect = t.grad
+        t.grad = None
+        torch.compile(fn, backend="inductor", fullgraph=True, dynamic=True)(
+            t, sizes
+        ).sum().backward()
+        self.assertEqual(t.grad, expect)
+
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_unbacked_reduction(self, device):
         expect_fail = device == "cpu" and not IS_ARM64
@@ -647,6 +688,33 @@ class TestInductorDynamic(TestCase):
         cfn = self.compile_fn(fn)
         expect = fn(5)
         actual = cfn(5)
+        self.assertEqual(expect, actual)
+
+    def test_interpolate_ceil_eq(self, device):
+        ceiling = math.ceil
+        IntTrueDiv = operator.truediv
+
+        def fn(t):
+            s0, s2, s3 = t.size()
+            x = torch.zeros(
+                (
+                    s0,
+                    2048,
+                    ceiling(IntTrueDiv(2 * ((s2 - 1) // 8) + 2, 1)),
+                    ceiling(IntTrueDiv(2 * ((s3 - 1) // 8) + 2, 1)),
+                ),
+                dtype=torch.bfloat16,
+            )
+            return torch.nn.functional.interpolate(
+                x,
+                scale_factor=2,
+                mode="nearest",
+            )
+
+        cfn = self.compile_fn(fn)
+        arg = torch.randn(4, 16, 18)
+        expect = fn(arg)
+        actual = cfn(arg)
         self.assertEqual(expect, actual)
 
     def test_full_recompiles(self, device):

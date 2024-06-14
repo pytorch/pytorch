@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import logging
 from typing import Any, Callable, Dict, List, Optional, TYPE_CHECKING, Union
 

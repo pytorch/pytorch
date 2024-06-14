@@ -475,7 +475,7 @@ AOTI_TORCH_EXPORT AOTITorchError aoti_torch_repeat_interleave_Tensor(
     AtenTensorHandle* out);
 
 AOTI_TORCH_EXPORT AOTITorchError
-aoti_check_inf_and_nan(AtenTensorHandle tensor);
+aoti_torch_check_inf_and_nan(const char* tensor_name, AtenTensorHandle tensor);
 
 AOTI_TORCH_EXPORT AOTITorchError aoti_torch_scatter_out(
     AtenTensorHandle out,

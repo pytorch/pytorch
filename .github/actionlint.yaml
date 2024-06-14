@@ -16,6 +16,17 @@ self-hosted-runner:
     - linux.8xlarge.nvidia.gpu
     - linux.16xlarge.nvidia.gpu
     - linux.g5.4xlarge.nvidia.gpu
+    # Organization-wide AWS Linux Runners on Linux Foundation account
+    - lf.linux.large
+    - lf.linux.2xlarge
+    - lf.linux.4xlarge
+    - lf.linux.12xlarge
+    - lf.linux.24xlarge
+    - lf.linux.arm64.2xlarge
+    - lf.linux.4xlarge.nvidia.gpu
+    - lf.linux.8xlarge.nvidia.gpu
+    - lf.linux.16xlarge.nvidia.gpu
+    - lf.linux.g5.4xlarge.nvidia.gpu
     # Repo-specific IBM hosted S390x runner
     - linux.s390x
     # Organization wide AWS Windows runners
