@@ -18,7 +18,6 @@ struct MetadataArguments { // the size of this struct must be less than 4 bytes
 
 template <int depth, uint32_t kThreadGroupSize>
 static void multi_tensor_apply_for_fused_adam(
-    const char* kernel,
     const std::string& kernel_name,
     std::vector<std::vector<at::Tensor>>& tensor_lists,
     at::TensorList state_steps,
@@ -66,10 +65,10 @@ static void multi_tensor_apply_for_fused_adam(
   dispatch_sync_with_rethrow(mpsStream->queue(), ^() {
     @autoreleasepool {
       id<MTLComputeCommandEncoder> computeEncoder = mpsStream->commandEncoder();
-      auto [fusedOptimizerPSO, fusedOptimizerFunc] = getPipelineState(device, kernel, kernel_name);
+      auto [fusedOptimizerPSO, fusedOptimizerFunc] = getCPLState(kernel_name);
 
       // this function call is a no-op if MPS Profiler is not enabled
-      getMPSProfiler().beginProfileKernel(fusedOptimizerPSO, kernel, {tensor_lists[0]});
+      getMPSProfiler().beginProfileKernel(fusedOptimizerPSO, kernel_name, {tensor_lists[0]});
 
       [computeEncoder setComputePipelineState:fusedOptimizerPSO];
 

@@ -680,9 +680,7 @@ def _fused_adamw(
             lr = lr_dict.setdefault(
                 device, lr.to(device=device, non_blocking=True)  # type: ignore[union-attr]
             )
-
         torch._foreach_add_(device_state_steps, 1)
-
         torch._fused_adamw_(
             device_params,
             device_grads,

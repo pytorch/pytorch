@@ -265,46 +265,9 @@ REGISTER_FUSED_ADAM_OP(half, half, ADAM_MODE::ADAMW, fused_adamw_amsgrad, fused_
 
 )METAL";
 
-static id<MTLLibrary> compileFusedOptimizerOpsLibrary(const id<MTLDevice>& device, const char* kernel) {
-  static id<MTLLibrary> fusedOptimizerLibrary = nil;
-  if (fusedOptimizerLibrary) {
-    return fusedOptimizerLibrary;
-  }
-
-  NSError* error = nil;
-  MTLCompileOptions* options = [[MTLCompileOptions new] autorelease];
-  [options setLanguageVersion:MTLLanguageVersion2_3];
-  [options setFastMathEnabled:NO];
-  fusedOptimizerLibrary = [device newLibraryWithSource:[NSString stringWithCString:kernel
-                                                                         encoding:NSASCIIStringEncoding]
-                                              options:options
-                                                error:&error];
-  TORCH_CHECK(
-      fusedOptimizerLibrary, "Failed to create metal fused optimizer library, error: ", [[error description] UTF8String]);
-  return fusedOptimizerLibrary;
-}
-
-
-static std::tuple<id<MTLComputePipelineState>, id<MTLFunction>> getPipelineState(const id<MTLDevice>& device, const char* kernel, const std::string& kernel_name) {
-  static std::unordered_map<std::string, id<MTLComputePipelineState>> psoCache;
-  static std::unordered_map<std::string, id<MTLFunction>> funcCache;
-
-  id<MTLComputePipelineState> pso = psoCache[kernel_name];
-  if (pso) {
-    return std::make_tuple(pso, funcCache[kernel_name]);
-  }
-
-  NSError* error = nil;
-  id<MTLLibrary> fusedOptimizerLib = compileFusedOptimizerOpsLibrary(device, kernel);
-  id<MTLFunction> fusedOptimizerFunc =
-      [fusedOptimizerLib newFunctionWithName:[NSString stringWithUTF8String:kernel_name.c_str()]];
-  TORCH_CHECK(fusedOptimizerFunc, "Failed to create function state object for: ", kernel_name);
-  pso = [device newComputePipelineStateWithFunction:fusedOptimizerFunc error:&error];
-  TORCH_CHECK(pso, "Failed to created pipeline state object, error: ", [[error description] UTF8String]);
-
-  psoCache[kernel_name] = pso;
-  funcCache[kernel_name] = fusedOptimizerFunc;
-  return std::make_tuple(pso, fusedOptimizerFunc);
+static std::pair<id<MTLComputePipelineState>, id<MTLFunction>> getCPLState(const std::string& fname) {
+  static MetalShaderLibrary lib(FUSED_ADAM_OPS, 0);
+  return std::make_pair(lib.getPipelineStateForFunc(fname), lib.getMTLFunction(fname));
 }
 
 } //namespace mps

@@ -29,7 +29,7 @@ void _fused_adamw_mps_impl_(at::TensorList params,
       scalarToMetalTypeString(state_steps[0].scalar_type());
 
   multi_tensor_apply_for_fused_adam<4, 512>(
-      FUSED_ADAM_OPS, kernel_name, tensor_lists, state_steps, lr, beta1, beta2, weight_decay, eps, maximize);
+      kernel_name, tensor_lists, state_steps, lr, beta1, beta2, weight_decay, eps, maximize);
 }
 } // namespace mps
 } // namespace at::native
