@@ -347,7 +347,7 @@ bool isResurrectable(THPVariable* self) {
   // Check if this is hermetic. If it is, no resurrection.
   if (tensor.unsafeGetTensorImpl()->pyobj_slot()->check_pyobj(
           getPyInterpreter(), /*ignore_hermetic_tls=*/false) !=
-      c10::make_optional((PyObject*)self)) {
+      std::make_optional((PyObject*)self)) {
     return false;
   }
   return true;
@@ -455,7 +455,7 @@ static int THPVariable_clear(THPVariable* self) {
     if (!self->cdata.unsafeIsBorrowed() &&
         tensor.unsafeGetTensorImpl()->pyobj_slot()->check_pyobj(
             getPyInterpreter(), /*ignore_hermetic_tls=*/false) ==
-            c10::make_optional((PyObject*)self)) {
+            std::make_optional((PyObject*)self)) {
       // TODO: empirically, on OS X this assert appears to be untrue
       // In test_py_tensors_multi_async_call - ProcessGroupRpcTestWithSpawn
       // distributed/rpc/test_process_group_agent.py
@@ -587,14 +587,14 @@ static PyObject* view_func_impl(
         auto& view_func = view_info.view_fn();
 
         // Determine new SymInt / tensor state as needed.
-        std::optional<std::vector<c10::SymInt>> new_symints = c10::nullopt;
+        std::optional<std::vector<c10::SymInt>> new_symints = std::nullopt;
         if (symint_visitor_fn != Py_None) {
           new_symints = map_py_func(
               py::cast<py::function>(symint_visitor_fn),
               view_func.get_symints());
         }
 
-        std::optional<std::vector<at::Tensor>> new_tensors = c10::nullopt;
+        std::optional<std::vector<at::Tensor>> new_tensors = std::nullopt;
         if (tensor_visitor_fn != Py_None) {
           new_tensors = map_py_func(
               py::cast<py::function>(tensor_visitor_fn),
