@@ -4545,7 +4545,9 @@
 - func: is_pinned(Tensor self, Device? device=None) -> bool
   variants: method
   dispatch:
-    CompositeExplicitAutograd: is_pinned
+    # the NestedTensor keys are necessary because NestedTensor has been removed
+    # from the CompositeExplicitAutograd keyset see Note [NestedTensor Not Included in Backend Keys]
+    CompositeExplicitAutograd, NestedTensorCPU: is_pinned
 
 # TODO: add a copy kwarg that guarantees that the tensor is put into fresh
 # pinned memory
