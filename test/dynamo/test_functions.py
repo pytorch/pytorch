@@ -2508,7 +2508,7 @@ class GraphModule(torch.nn.Module):
                 acc *= acc * k
             return x * acc
 
-        opt_fn = torch._dynamo.optimize(nopython=True, fullgraph=True)(fn)
+        opt_fn = torch.compile(fullgraph=True)(fn)
         x = torch.ones(1)
         self.assertEqual(opt_fn(x), fn(x))
 
@@ -2518,7 +2518,7 @@ class GraphModule(torch.nn.Module):
             acc *= acc * range(10, 20, 2)[2]
             return x * acc
 
-        opt_fn = torch._dynamo.optimize(nopython=True, fullgraph=True)(fn)
+        opt_fn = torch.compile(fullgraph=True)(fn)
         x = torch.ones(1)
         self.assertEqual(opt_fn(x), fn(x))
 

@@ -200,7 +200,6 @@ class RangeVariable(BaseListVariable):
             return 0
 
     def _get_slice_indices(self, length, slice):
-
         step_is_negative = 0
 
         if slice.step is None:
@@ -246,7 +245,7 @@ class RangeVariable(BaseListVariable):
             else:
                 if stop > upper:
                     stop = upper
-                    
+
         return [start, stop, step]
 
     def apply_index(self, index):
