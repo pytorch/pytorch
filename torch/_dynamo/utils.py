@@ -1900,6 +1900,7 @@ def run_node(tracer, node, args, kwargs, nnmodule):
 
         try:
             if op == "call_function":
+                # breakpoint()
                 return node.target(*args, **kwargs)
             elif op == "call_method":
                 return getattr(args[0], node.target)(*args[1:], **kwargs)

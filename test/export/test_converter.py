@@ -674,7 +674,7 @@ class TestConverter(TestCase):
                 len_int = min(x_len, y_len)
 
                 # prim::min.float
-                len_float = int(min(x_len*2.0, y_len*2.0))
+                len_float = int(min(x_len * 2.0, y_len * 2.0))
 
                 # prim::min.self_int
                 len_self_int = min([x_len, y_len])
@@ -688,7 +688,14 @@ class TestConverter(TestCase):
                 # prim::min.int_float
                 len_int_float = int(min(x_len, y_len * 2.0))
 
-                return torch.ones(len_int + len_float + len_self_int + len_self_float + len_float_int + len_int_float)
+                return torch.ones(
+                    len_int
+                    + len_float
+                    + len_self_int
+                    + len_self_float
+                    + len_float_int
+                    + len_int_float
+                )
 
         inp = (torch.randn(10, 2), torch.randn(5))
         self._check_equal_ts_ep_converter(Module(), inp)
@@ -698,16 +705,44 @@ class TestConverter(TestCase):
             def forward(self, x: torch.Tensor) -> List[int]:
                 return x.tolist()
 
-        inp = (torch.tensor([1,2,3]),)
+        inp = (torch.tensor([1, 2, 3]),)
         self._check_equal_ts_ep_converter(Module(), inp)
-
 
         class Module(torch.nn.Module):
             def forward(self, x: torch.Tensor) -> List[List[int]]:
                 return x.tolist()
 
-        inp = (torch.tensor([[1,2,3], [4,5,6]]),)
+        inp = (torch.tensor([[1, 2, 3], [4, 5, 6]]),)
         self._check_equal_ts_ep_converter(Module(), inp)
+
+    def test_raise_exception(self):
+        class Module(torch.nn.Module):
+            def forward(self, x: torch.Tensor, y: int) -> torch.Tensor:
+                if y > 0:
+                    raise RuntimeError("test")
+                return x + y
+
+        # TODO: Need control flow op update to support this case.
+        # Currently, control flow op always run both branches, leading to a RuntimeError
+        # even if y <= 0.
+        # By contrary, non-strict export only execute 1 branch according to the given input.
+        # inp = (torch.randn(3, 2), -1)
+        # self._check_equal_ts_ep_converter(Module(), inp)
+
+        # ep = torch.export.export(Module(), inp, strict=False)
+
+        # match non-strict export behavior that errors when the given input leads to
+        # RaiseException. 
+        with self.assertRaisesRegex(torch._dynamo.exc.TorchRuntimeError, "builtins.RuntimeError"):
+            inp = (torch.randn(3, 2), 1)
+            self._check_equal_ts_ep_converter(Module(), inp)
+
+    def test_inplace_mutation(self):
+        class Module(torch.nn.Module):
+            def forward(self, x: torch.Tensor) -> None:
+                x.add_(x)
+
+        self._check_equal_ts_ep_converter(Module(), (torch.randn(3, 2),))
 
 
 if __name__ == "__main__":

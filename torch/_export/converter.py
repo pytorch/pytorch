@@ -404,6 +404,9 @@ class TS2FXGraphConverter:
             f"{root_attr_name}.{attr_name}" if root_attr_name else attr_name
         )
 
+    # def convert_prim_RaiseException(self, node: torch._C.Node):
+    #     target = raise
+
     def convert_call_function_op(self, node: torch._C.Node):
         target = get_op_overload(node)
 
@@ -417,6 +420,9 @@ class TS2FXGraphConverter:
         # TODO: covnert sourceRange() into stack_trace
         # fx_node.meta["stack_trace"] = node.sourceRange()
 
+        # if node.kind() == "prim::RaiseException":
+        #     output_name = "prim::RaiseException"
+        # else:
         output_name = node.output().debugName()
         self.name_to_node[output_name] = fx_node
 
@@ -610,8 +616,13 @@ class TS2FXGraphConverter:
 
         cond_node = self.fx_graph.call_function(torch.cond, args, {})
 
-        output_name = node.output().debugName()
-        self.name_to_node[output_name] = cond_node
+        # prim::If may have no outputs. Example:
+        # if x == 0:
+        #   raise RuntimeError("x is zero")
+        outputs = [out for out in node.outputs()]
+        if outputs:
+            output_name = node.output().debugName()
+            self.name_to_node[output_name] = cond_node
 
     def convert_aten_Bool(self, node: torch._C.Node):
         self._convert_as_noop(node)
@@ -695,6 +706,7 @@ class TS2FXGraphConverter:
 
     def convert_graph_outputs(self):
         args = []
+        # breakpoint()
         for graph_output in self.ts_graph.outputs():
             output_name = graph_output.debugName()
             if output_name in self.name_to_node:
@@ -720,9 +732,12 @@ class TS2FXGraphConverter:
             else:
                 raise ValueError(f"Output {output_name} not found")
 
-        self.fx_graph.output(
-            args[0]
-        )  # Get rid of an extra list wrapped around final output.
+        # args may be empty for graphs or subgraphs with no outputs, such
+        # as RaiseException subgraph, or graph with only inplace mutation.
+        if args:
+            self.fx_graph.output(
+                args[0]
+            )  # Get rid of an extra list wrapped around final output.
 
 
 class TS2EPConverter:
