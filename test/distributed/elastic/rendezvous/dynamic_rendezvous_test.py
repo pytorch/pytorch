@@ -12,12 +12,15 @@ import pickle
 import socket
 import threading
 import time
+
 from abc import ABC, abstractmethod
 from base64 import b64encode
 from datetime import datetime, timedelta
 from typing import Callable, cast, Optional, Tuple
 from unittest import TestCase
-from unittest.mock import call, MagicMock, Mock, patch
+from unittest.mock import call, MagicMock, Mock, patch, PropertyMock
+
+import torch.distributed as dist
 
 from torch.distributed import HashStore, Store
 from torch.distributed.elastic.rendezvous import (
@@ -26,6 +29,7 @@ from torch.distributed.elastic.rendezvous import (
     RendezvousInfo,
     RendezvousParameters,
     RendezvousStateError,
+    RendezvousStoreInfo,
     RendezvousTimeoutError,
 )
 from torch.distributed.elastic.rendezvous.dynamic_rendezvous import (
@@ -1169,6 +1173,16 @@ class DynamicRendezvousHandlerTest(TestCase):
 
         self._state = self._state_holder.state
 
+        self._tcp_store_mock = DummyStore()
+
+        patcher = patch.object(
+            DynamicRendezvousHandler,
+            "_create_tcp_store_server",
+            return_value=self._tcp_store_mock,
+        )
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
     def _create_handler(self) -> DynamicRendezvousHandler:
         settings = RendezvousSettings(
             run_id="dummy_run_id",
@@ -1188,6 +1202,36 @@ class DynamicRendezvousHandlerTest(TestCase):
         return DynamicRendezvousHandler(
             self._node, settings, "dummy_backend", self._store, self._state_holder
         )
+
+    def test_share_store_creates_tcp_store(self):
+        handler = self._create_handler()
+
+        shared_store_info = RendezvousStoreInfo("host", 54321)
+        with patch.object(RendezvousStoreInfo, "build", return_value=shared_store_info):
+            rdzv_info = handler.next_rendezvous()
+            self.assertEqual(rdzv_info.bootstrap_store_info.master_addr, "host")
+            self.assertEqual(rdzv_info.bootstrap_store_info.master_port, 54321)
+        self.assertEqual(handler._shared_tcp_store_server, self._tcp_store_mock)
+
+        rdzv_info = handler.next_rendezvous()
+        self.assertEqual(handler._shared_tcp_store_server, self._tcp_store_mock)
+
+    def test_share_store_when_tcp_store(self):
+        handler = self._create_handler()
+
+        with patch.object(dist, "PrefixStore", new=Mock):
+            handler._store = Mock(spec=dist.TCPStore)
+            type(handler._store).host = PropertyMock(return_value="host")
+            type(handler._store).port = PropertyMock(return_value=54321)
+            rdzv_info = handler.next_rendezvous()
+            self.assertEqual(rdzv_info.bootstrap_store_info.master_addr, "host")
+            self.assertEqual(rdzv_info.bootstrap_store_info.master_port, 54321)
+            self.assertEqual(handler._shared_tcp_store_server, handler._store)
+
+            rdzv_info = handler.next_rendezvous()
+            self.assertEqual(rdzv_info.bootstrap_store_info.master_addr, "host")
+            self.assertEqual(rdzv_info.bootstrap_store_info.master_port, 54321)
+            self.assertEqual(handler._shared_tcp_store_server, handler._store)
 
     @patch("torch.distributed.elastic.rendezvous.dynamic_rendezvous._delay")
     def test_next_rendezvous_skews_the_first_join_attempt(self, mock_delay) -> None:
@@ -1716,6 +1760,93 @@ class IntegrationTest(TestCase):
         _wait_for(
             lambda: len(pickle.loads(self._backend.get_state()[0]).wait_list) == 1
         )
+
+    def test_use_agent_store_is_true_by_default(self):
+        handler = self._create_handler(
+            min_nodes=1,
+            max_nodes=2,
+        )
+
+        self.assertTrue(handler.use_agent_store)
+
+    @patch.dict(os.environ, {"TORCH_DISABLE_SHARE_RDZV_TCP_STORE": "1"})
+    def test_use_agent_store_is_disabled(self):
+        handler = self._create_handler(
+            min_nodes=1,
+            max_nodes=2,
+        )
+
+        self.assertFalse(handler.use_agent_store)
+
+    @patch.object(dist, "PrefixStore")
+    def test_share_tcp_store_from_backend(self, prefix_store_class_mock):
+        prefix_store = Mock(spec=dist.PrefixStore)
+        prefix_store_class_mock.return_value = prefix_store
+
+        tcp_store = Mock(spec=dist.TCPStore)
+        expected_addr = "expected_address"
+        expected_port = 54321
+        type(tcp_store).host = PropertyMock(return_value=expected_addr)
+        type(tcp_store).port = PropertyMock(return_value=expected_port)
+        # this will be injected
+        self._store = tcp_store
+
+        handler1 = self._create_handler(min_nodes=2, max_nodes=2)
+        handler2 = self._create_handler(min_nodes=2, max_nodes=2)
+
+        handler1_thread = _CapturingThread(target=handler1.next_rendezvous)
+        handler2_thread = _CapturingThread(target=handler2.next_rendezvous)
+
+        handler1_thread.start()
+        handler2_thread.start()
+
+        rdzv_info1: RendezvousInfo = handler1_thread.join()
+        rdzv_info2: RendezvousInfo = handler2_thread.join()
+
+        self.assertEqual(rdzv_info1.store, prefix_store)
+        self.assertEqual(rdzv_info2.store, prefix_store)
+        prefix_store_class_mock.assert_called_with(
+            "torch.rendezvous.dummy_run_id.0", tcp_store
+        )
+
+        self.assertEqual(
+            rdzv_info1.bootstrap_store_info, rdzv_info2.bootstrap_store_info
+        )
+
+        self.assertEqual(rdzv_info1.bootstrap_store_info.master_addr, expected_addr)
+        self.assertEqual(rdzv_info1.bootstrap_store_info.master_port, expected_port)
+
+    @patch.dict(os.environ, {"TORCH_DISABLE_SHARE_RDZV_TCP_STORE": "1"})
+    @patch.object(dist, "PrefixStore")
+    def test_share_tcp_store_is_disabled(self, prefix_store_class_mock):
+        prefix_store = Mock()
+        prefix_store_class_mock.return_value = prefix_store
+
+        prefix_store.set.return_value = None
+        prefix_store.get.return_value = b"123"
+        tcp_store = Mock(spec=dist.TCPStore)
+        # this will be injected
+        self._store = tcp_store
+
+        handler1 = self._create_handler(min_nodes=2, max_nodes=2)
+        handler2 = self._create_handler(min_nodes=2, max_nodes=2)
+
+        handler1_thread = _CapturingThread(target=handler1.next_rendezvous)
+        handler2_thread = _CapturingThread(target=handler2.next_rendezvous)
+
+        handler1_thread.start()
+        handler2_thread.start()
+
+        rdzv_info1: RendezvousInfo = handler1_thread.join()
+        rdzv_info2: RendezvousInfo = handler2_thread.join()
+
+        self.assertEqual(rdzv_info1.store, prefix_store)
+        self.assertEqual(rdzv_info2.store, prefix_store)
+        prefix_store_class_mock.assert_called_with(
+            "torch.rendezvous.dummy_run_id.0", self._store
+        )
+        self.assertEqual(rdzv_info1.bootstrap_store_info.master_port, 123)
+        self.assertEqual(rdzv_info2.bootstrap_store_info.master_port, 123)
 
 
 class _InMemoryRendezvousBackend(RendezvousBackend):

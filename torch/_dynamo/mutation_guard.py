@@ -11,6 +11,9 @@ from . import config
 from .utils import ExactWeakKeyDictionary, is_lazy_module, nn_module_has_global_hooks
 
 
+unpatched_nn_module_init = torch.nn.Module.__init__
+
+
 class MutationTracker:
     db = ExactWeakKeyDictionary()
 

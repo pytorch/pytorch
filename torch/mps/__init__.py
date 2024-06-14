@@ -129,6 +129,16 @@ def driver_allocated_memory() -> int:
     return torch._C._mps_driverAllocatedMemory()
 
 
+def recommended_max_memory() -> int:
+    r"""Returns recommended max Working set size for GPU memory in bytes.
+
+    .. note::
+       Recommended max working set size for Metal.
+       returned from device.recommendedMaxWorkingSetSize.
+    """
+    return torch._C._mps_recommendedMaxMemory()
+
+
 from . import profiler
 from .event import Event
 
@@ -145,4 +155,5 @@ __all__ = [
     "driver_allocated_memory",
     "Event",
     "profiler",
+    "recommended_max_memory",
 ]
