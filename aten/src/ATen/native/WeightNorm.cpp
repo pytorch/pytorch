@@ -57,7 +57,9 @@ std::tuple<Tensor,Tensor> weight_norm_cpu(
   const auto dtype = g.scalar_type() == at::ScalarType::BFloat16 ?
       at::ScalarType::Float : g.scalar_type();
   auto norm = at::empty_strided(g.sizes(), g.strides(), g.options().dtype(dtype));
-  weight_norm_stub(kCPU, w, norm, v, g, dim);
+  if (v.numel() && g.numel()) {
+    weight_norm_stub(kCPU, w, norm, v, g, dim);
+  }
 
   return std::tuple<Tensor, Tensor>{w, norm};
 }

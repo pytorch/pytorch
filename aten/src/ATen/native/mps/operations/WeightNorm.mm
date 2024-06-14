@@ -40,6 +40,11 @@ std::tuple<Tensor, Tensor> weight_norm_mps(const Tensor& v, const Tensor& g, int
   auto w = at::empty_like(v, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
   auto norms = at::empty_like(g, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
 
+  // Return early on empty inputs
+  if (v.numel() == 0 || g.numel() == 0) {
+      return std::tuple<Tensor, Tensor>{w, norms};
+  }
+
   string key = "weight_norm_mps_" + std::to_string(dim) + getTensorsStringKey({v, g});
 
   NSMutableArray* reduction_dims = [NSMutableArray array];

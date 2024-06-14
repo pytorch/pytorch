@@ -353,6 +353,11 @@ std::tuple<Tensor,Tensor> weight_norm_cuda
   // current device is?  I believe so, because Type::* functions are DeviceGuard()ed.
   auto norms = at::empty_strided(g.sizes(), g.strides(), g.options().dtype(AccType));
 
+  // Return on empty inputs
+  if (v.numel() == 0 || g.numel() == 0) {
+    return std::tuple<Tensor, Tensor>{w, norms};
+  }
+
   const int ndims = v.dim();
 
   if(dim == 0)
