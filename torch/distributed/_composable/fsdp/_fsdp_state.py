@@ -133,7 +133,7 @@ class FSDPState(_State):
                 state._fsdp_param_group.lazy_init()
                 for param in state._fsdp_param_group.fsdp_params:
                     logger.debug(
-                        "FSDP::lazy_init, dtype={%s}, shape={%s}, fqn={%s}",
+                        "FSDP::lazy_init, dtype=%s, shape=%s, fqn=%s",
                         param.sharded_param.dtype, 
                         param._orig_size,
                         param._param_fqn, 
