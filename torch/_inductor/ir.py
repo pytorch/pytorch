@@ -61,7 +61,7 @@ from torch.utils._sympy.functions import CleanDiv, FloorDiv, ModularIndexing
 from torch.utils._sympy.symbol import SymT
 
 from . import config, dependencies
-from .codegen.common import index_prevent_reordering
+from .codegen.common import BackendFeature, index_prevent_reordering
 from .dependencies import (
     extract_free_unbacked_symbols,
     extract_input_node_reduction_ranges,
@@ -291,17 +291,21 @@ class IRNode:
     def get_traceback(self):
         return self.traceback
 
-    def common_repr(self):
+    def common_repr(self, shorten=True):
         origins = f"origins={getattr(self, 'origins', '')}"
-        if len(origins) > 64:
+        if shorten and len(origins) > 64:
             # this can get *very* long
             origins = f"{origins[:61]}..."
         return [origins]
 
-    def str_helper(self, lines):
-        lines = lines + self.common_repr()
-        lines = indent(",\n".join(map(str, lines)))
-        return f"{type(self).__name__}(\n{lines}\n)"
+    def str_helper(self, lines, shorten=True, multiline=True):
+        lines = lines + self.common_repr(shorten)
+        lines = list(map(str, lines))
+        if multiline:
+            new_lines = indent(",\n".join(lines))
+            return f"{type(self).__name__}(\n{new_lines}\n)"
+        else:
+            return f"{type(self).__name__}({lines})"
 
     def is_user_of(self, name):
         return name in self.get_read_names()
@@ -318,6 +322,10 @@ class IRNode:
 
     def get_size(self):
         raise NotImplementedError(f"get_size() is not implemented by {type(self)}!")
+
+    @property
+    def shape(self):
+        return self.get_size()
 
     def get_numel(self):
         return sympy_product(self.get_size())
@@ -1662,12 +1670,12 @@ class Scan(Loops):
         pointwise_ranges = [*size[:axis], *size[axis + 1 :]]
         scan_ranges = [size[axis]]
 
-        if not is_gpu(device.type):
-            # TODO: CPU support
+        if not V.graph.has_feature(device, BackendFeature.SCAN):
             return [None] * len(dtypes)
 
-        if torch.version.hip is not None and len(dtypes) > 1:
-            # TODO: Remove this when ROCm triton adds support for multiple inputs
+        if len(dtypes) > 1 and not V.graph.has_feature(
+            device, BackendFeature.TUPLE_REDUCTION
+        ):
             return [None] * len(dtypes)
 
         sizevars = V.graph.sizevars
@@ -2565,7 +2573,7 @@ class Layout(IRNode):
     def is_transposed(self):
         for left, right, size in zip(
             self.stride,
-            reversed(FlexibleLayout.contiguous_strides(self.size)),
+            reversed(FlexibleLayout.contiguous_strides(list(reversed(self.size)))),
             self.size,
         ):
             if size != 1 and left != right:
@@ -3191,7 +3199,11 @@ class NoneAsConstantBuffer(IRNode):
 class ShapeAsConstantBuffer(IRNode):
     def __init__(self, shape):
         super().__init__()
-        self.shape = shape
+        self._shape = shape
+
+    @property
+    def shape(self):
+        return self._shape
 
     def get_unbacked_symbol_uses(self) -> Set[sympy.Symbol]:
         return free_unbacked_symbols(self.shape)
@@ -3867,7 +3879,9 @@ class ConcatKernel(NopKernel):
             ):
                 buffer_names.append(input_buffer.get_name())
 
-        if len(buffer_names) > 1:
+        if len(buffer_names) > 1 and V.graph.has_feature(
+            device, BackendFeature.FOREACH
+        ):
             V.graph.register_list(buffer_names)
 
         concat_kernel.name = V.graph.register_buffer(concat_kernel)
