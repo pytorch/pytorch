@@ -410,6 +410,7 @@ from torch.distributed.elastic.utils import macros
 from torch.distributed.elastic.utils.logging import get_logger
 from torch.distributed.launcher.api import LaunchConfig, elastic_launch
 from torch.utils.backend_registration import _get_custom_mod_func
+import torch.multiprocessing
 
 logger = get_logger(__name__)
 
@@ -874,6 +875,8 @@ def run_script_path(training_script: str, *training_script_args: str):
 
 
 def run(args):
+    torch.multiprocessing._set_thread_name("pt_elastic")
+
     if args.standalone:
         args.rdzv_backend = "c10d"
         args.rdzv_endpoint = "localhost:0"
