@@ -447,6 +447,7 @@ class TritonPrinter(PythonPrinter):
 
         # Use a macro so we can propagate constexprs.
         # https://github.com/triton-lang/triton/issues/3815
+        a, b = tuple(f"({x})" for x in (a, b))
         assert cmp in {">", "<"}, f"Unexpected comparator: '{cmp}'"
         return f"({a} * ({a} {cmp}= {b}) + {b} * ({b} {cmp} {a}))"
 
