@@ -61,6 +61,8 @@ aten::any.out
 aten::arange.out
 aten::arange.start_out
 aten::arange.start_step
+aten::as_strided_copy
+aten::as_strided_copy.out
 aten::as_strided_scatter
 aten::as_strided_scatter.out
 aten::asin

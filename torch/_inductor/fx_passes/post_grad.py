@@ -229,7 +229,7 @@ def mm_plus_mm(match: Match, mat1, mat2, mat3, mat4):
 
 
 def cuda_and_enabled_mixed_mm(match):
-    return (config.use_mixed_mm or config.force_mixed_mm) and getattr(
+    return (config.use_mixed_mm or config.mixed_mm_choice != "default") and getattr(
         match.kwargs["mat1"].meta.get("val"), "is_cuda", False
     )
 

@@ -37,7 +37,7 @@ from torch.utils._triton import has_triton
 
 from . import comms, config, dependencies, ir, metrics
 from .codecache import write_text
-from .codegen.common import get_scheduling_for_device, Kernel
+from .codegen.common import BackendFeature, get_scheduling_for_device, Kernel
 from .comm_analysis import estimate_nccl_collective_runtime
 from .dependencies import Dep, MemoryDep, StarDep, WeakDep
 from .ir import ComputedBuffer, MultiOutput, MultiOutputLayout
@@ -107,6 +107,21 @@ class BaseSchedulerNode:
 
     def debug_str_extra(self) -> str:
         return ""
+
+    def debug_str_short(self) -> str:
+        maybe_data = getattr(self.node, "data", None)
+        data_str = ""
+        if isinstance(maybe_data, torch._inductor.ir.Pointwise):
+            data_str = ", " + maybe_data.str_helper(
+                [maybe_data.get_size()], shorten=False, multiline=False
+            )
+        elif isinstance(maybe_data, torch._inductor.ir.Reduction):
+            data_str = ", " + maybe_data.str_helper(
+                [maybe_data.get_reduction_size(), maybe_data.get_reduction_type()],
+                shorten=False,
+                multiline=False,
+            )
+        return f"{self}{data_str}"
 
     def log_details(self) -> None:
         log.info(
@@ -255,6 +270,7 @@ class BaseSchedulerNode:
         if (
             isinstance(self, (SchedulerNode,))
             and config.inplace_buffers
+            and V.graph.has_feature(self.get_device(), BackendFeature.INPLACE_BUFFERS)
             and (
                 not isinstance(V.kernel, torch._inductor.codegen.simd.SIMDKernel)
                 or getattr(V.kernel, "mutations", None) is not None
@@ -946,6 +962,10 @@ class FusedSchedulerNode(BaseSchedulerNode):
             lines.extend(debug_triton_code(self))
 
         return textwrap.indent("\n".join(lines).rstrip(), "    ")
+
+    def debug_str_short(self) -> str:
+        snodes_str = [node.debug_str_short() for node in self.snodes]
+        return f"{self}, snodes: {snodes_str}"
 
     def set_last_usage(
         self, future_used_buffers: Set[str], mutation_real_name: Dict[str, str]
@@ -2058,6 +2078,10 @@ class Scheduler:
             - self.score_fusion(): assigns priority to a given fusion
         """
         fused_nodes = set(self.nodes)
+        if fusion_log.isEnabledFor(logging.DEBUG):
+            fusion_log.debug("fuse_nodes_once, candidates:")
+            for node in fused_nodes:
+                fusion_log.debug("  " + node.debug_str_short())  # noqa: G003
         for node1, node2 in self.get_possible_fusions():
             node1 = self.name_to_fused_node[node1.get_first_name()]
             node2 = self.name_to_fused_node[node2.get_first_name()]
@@ -2767,6 +2791,11 @@ class Scheduler:
 
 
 class BaseScheduling:
+    @classmethod
+    def get_backend_features(cls, device: torch.device) -> Sequence[BackendFeature]:
+        """Return a set of .codegen.common.BackendFeature()"""
+        return ()
+
     def can_fuse_vertical(
         self, node1: BaseSchedulerNode, node2: BaseSchedulerNode
     ) -> bool:
@@ -2869,12 +2898,12 @@ def debug_triton_code(node: Union[SchedulerNode, FusedSchedulerNode]) -> List[st
         from torch._inductor.codegen.cuda_combined_scheduling import (
             CUDACombinedScheduling,
         )
-        from torch._inductor.codegen.triton import TritonScheduling
+        from .codegen.simd import SIMDScheduling
 
         snodes = (node,) if isinstance(node, SchedulerNode) else node.snodes
         device = snodes[0].get_device()
         backend = node.scheduler.get_backend(device)
-        assert isinstance(backend, (TritonScheduling, CUDACombinedScheduling))
+        assert isinstance(backend, (SIMDScheduling, CUDACombinedScheduling))
         V.graph.scheduler.current_device = device
 
         # Don't increment kernel count when generating debug string.
