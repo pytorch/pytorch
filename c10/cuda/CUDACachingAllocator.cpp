@@ -627,6 +627,9 @@ static bool BlockComparatorSize(const Block* a, const Block* b) {
   if (a->size != b->size) {
     return a->size < b->size;
   }
+  if (a->is_split() != b->is_split()) {
+    return a->is_split() ? true : false;
+  }
   return (uintptr_t)a->ptr < (uintptr_t)b->ptr;
 }
 static bool BlockComparatorAddress(const Block* a, const Block* b) {
