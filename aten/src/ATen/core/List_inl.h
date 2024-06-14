@@ -350,11 +350,4 @@ void List<T>::unsafeSetElementType(TypePtr t) {
   impl_->elementType = std::move(t);
 }
 
-namespace impl {
-
-inline const IValue* ptr_to_first_element(const GenericList& list) {
-  return &list.impl_->list[0];
-}
-
-}
 }
