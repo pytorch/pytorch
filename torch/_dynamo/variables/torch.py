@@ -7,7 +7,6 @@ import math
 import re
 from typing import Dict, List
 
-import torch._C
 import torch._refs
 import torch.fx
 import torch.nn
@@ -56,11 +55,10 @@ log = logging.getLogger(__name__)
 
 @functools.lru_cache(None)
 def supported_ctx_manager_classes():
-    import torch.distributed._composable.fsdp
+    import torch
 
-    return dict.fromkeys(
+    supported_classes = dict.fromkeys(
         [
-            torch.profiler.profiler.profile,
             torch.autograd.forward_ad._set_fwd_grad_enabled,
             torch.autograd.forward_ad.dual_level,
             torch.autograd.profiler.profile,
@@ -78,9 +76,19 @@ def supported_ctx_manager_classes():
             torch.autograd.graph.disable_saved_tensors_hooks,
             torch.cpu.amp.autocast_mode.autocast,
             torch.cuda.amp.autocast_mode.autocast,
-            torch.distributed._composable.fsdp._fsdp_param_group.FSDPParamGroup.use_training_state,
         ]
     )
+    if torch.distributed.is_available():
+        import torch.distributed._composable.fsdp
+
+        supported_classes.update(
+            dict.fromkeys(
+                [
+                    torch.distributed._composable.fsdp._fsdp_param_group.FSDPParamGroup.use_training_state
+                ]
+            )
+        )
+    return supported_classes
 
 
 REWRITE_OPS_TO_TENSOR_SIZE_METHOD = dict.fromkeys(
