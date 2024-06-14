@@ -80,7 +80,7 @@ def run_mlp_layer_norm_gelu(device: str = "cuda"):
                 "flops_utilization",
                 expected_flops_utilization,
                 f"{flops_utilization:.02f}",
-                dtype,
+                dtype_str,
                 device,
             )
         )
@@ -117,7 +117,7 @@ def run_layer_norm(device: str = "cuda"):
                 "memory_bandwidth(GB/s)",
                 expected_memory_bandwidth,
                 f"{memory_bandwidth:.02f}",
-                dtype,
+                dtype_str,
                 device,
             )
         )
@@ -160,7 +160,7 @@ def run_gather_gemv(device: str = "cuda"):
                 "memory_bandwidth(GB/s)",
                 expected_memory_bandwidth,
                 f"{memory_bandwidth:.02f}",
-                dtype,
+                dtype_str,
                 device,
             )
         )
@@ -201,7 +201,7 @@ def run_gemv(device: str = "cuda"):
                 "memory_bandwidth(GB/s)",
                 expected_memory_bandwidth,
                 f"{memory_bandwidth:.02f}",
-                dtype,
+                dtype_str,
                 device,
             )
         )
