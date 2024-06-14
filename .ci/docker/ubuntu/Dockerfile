@@ -32,7 +32,7 @@ ARG CONDA_CMAKE
 ARG DOCS
 ENV ANACONDA_PYTHON_VERSION=$ANACONDA_PYTHON_VERSION
 ENV PATH /opt/conda/envs/py_$ANACONDA_PYTHON_VERSION/bin:/opt/conda/bin:$PATH
-ENV LD_LIBRARY_PATH /opt/conda/envs/py_$ANACONDA_PYTHON_VERSION/lib
+ENV LD_LIBRARY_PATH /opt/conda/envs/py_$ANACONDA_PYTHON_VERSION/lib:$LD_LIBRARY_PATH
 ENV DOCS=$DOCS
 COPY requirements-ci.txt requirements-docs.txt /opt/conda/
 COPY ./common/install_conda.sh install_conda.sh
