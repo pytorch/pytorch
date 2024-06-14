@@ -251,6 +251,29 @@ thread_local MHAGraphCache<graph_and_tensors, MHACacheKeyWrapper> mhagraphcache;
 thread_local MHAGraphCache<graph_and_tensors_backward, MHACacheKeyWrapper>
     mhagraphbackwardcache;
 
+namespace {
+  inline bool cudnn_sdpa_check_debug() {
+    static bool sdpa_debug = c10::utils::check_env("TORCH_CUDNN_SDPA_DEBUG") == true;
+    return sdpa_debug;
+  }
+
+  // analogous to the same function in Descriptors.h for cuDNN Convolutions...
+  auto fixSizeOneDimStrideSDPA(const std::array<int, MAX_MHA_DIM>& sizes, std::vector<int64_t> strides) {
+    int dims = sizes.size();
+    for (int d = 0; d < dims; d++) {
+      int64_t curr_stride = strides[d];
+      if (sizes[d] == 1 && !curr_stride) {
+        curr_stride = 1;
+        for (int d2 = d + 1; d2 < dims; d2++) {
+	  curr_stride *= strides[d2];
+        }
+        strides[d] = curr_stride;
+      }
+    }
+    return strides;
+  }
+}
+
 auto build_graph_and_tensors(
     int64_t b,
     int64_t h,
@@ -287,22 +310,22 @@ auto build_graph_and_tensors(
           .set_name("Q")
           .set_dim(
               std::vector<int64_t>(params.q_dim.begin(), params.q_dim.end()))
-          .set_stride(std::vector<int64_t>(
-              params.q_stride.begin(), params.q_stride.end())));
+          .set_stride(fixSizeOneDimStrideSDPA(params.q_dim, std::vector<int64_t>(
+              params.q_stride.begin(), params.q_stride.end()))));
   auto K = mha_graph->tensor(
       fe::graph::Tensor_attributes()
           .set_name("K")
           .set_dim(
               std::vector<int64_t>(params.k_dim.begin(), params.k_dim.end()))
-          .set_stride(std::vector<int64_t>(
-              params.k_stride.begin(), params.k_stride.end())));
+          .set_stride(fixSizeOneDimStrideSDPA(params.k_dim, std::vector<int64_t>(
+              params.k_stride.begin(), params.k_stride.end()))));
   auto V = mha_graph->tensor(
       fe::graph::Tensor_attributes()
           .set_name("V")
           .set_dim(
               std::vector<int64_t>(params.v_dim.begin(), params.v_dim.end()))
-          .set_stride(std::vector<int64_t>(
-              params.v_stride.begin(), params.v_stride.end())));
+          .set_stride(fixSizeOneDimStrideSDPA(params.v_dim, std::vector<int64_t>(
+              params.v_stride.begin(), params.v_stride.end()))));
   auto attn_scale =
       mha_graph->tensor(fe::graph::Tensor_attributes()
                             .set_name("Attn_scale")
@@ -536,6 +559,9 @@ void run_cudnn_SDP_fprop(
     Tensor& o,
     Tensor& dropoutseed,
     Tensor& dropoutoffset) {
+  if (cudnn_sdpa_check_debug()) {
+    TORCH_WARN("Calling into cuDNN SDPA FPROP");
+  }
   cudnnHandle_t handle = getCudnnHandle();
   o = at::empty({b, h, s_q, d_v}, q.options());
   if (return_softmaxstats) {
@@ -626,6 +652,9 @@ void run_cudnn_SDP_bprop(
     Tensor& dV,
     const Tensor& dropoutseed,
     const Tensor& dropoutoffset) {
+  if (cudnn_sdpa_check_debug()) {
+    TORCH_WARN("Calling into cuDNN SDPA BPROP");
+  }
   Tensor dO_ = dO;
   if (!dO.strides()[dO.strides().size() - 1]) {
     TORCH_WARN(
@@ -635,7 +664,18 @@ void run_cudnn_SDP_bprop(
   }
   cudnnHandle_t handle = getCudnnHandle();
   auto key = MHACacheKeyWrapper(
-      b, h, s_q, s_kv, d_qk, d_v, q, k, v, dropout_probability, is_causal, true);
+      b,
+      h,
+      s_q,
+      s_kv,
+      d_qk,
+      d_v,
+      q,
+      k,
+      v,
+      dropout_probability,
+      is_causal,
+      true);
   auto graph_and_tensors_backward_ptr = mhagraphbackwardcache.find(key);
   graph_and_tensors_backward graph_and_tensors_backward_values;
   if (graph_and_tensors_backward_ptr) {
