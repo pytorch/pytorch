@@ -1658,6 +1658,11 @@ class GraphLowering(torch.fx.Interpreter):
             node_runtimes.append((node, node.get_estimated_runtime()))
         return total_bytes, node_counts, node_runtimes
 
+    @staticmethod
+    def save_output_code(code: str):
+        # No-op to be patched for unit tests
+        pass
+
     @dynamo_timed(phase_name="code_gen", fwd_only=False)
     def compile_to_module(self):
         from .codecache import PyCodeCache
@@ -1666,6 +1671,7 @@ class GraphLowering(torch.fx.Interpreter):
             self.codegen_with_cpp_wrapper() if self.cpp_wrapper else self.codegen()
         )
 
+        GraphLowering.save_output_code(code)
         output_code_log.debug("Output code: \n%s", code)
         try:
             linemap = [(line_no, node.stack_trace) for line_no, node in linemap]

@@ -685,7 +685,6 @@ SDPBackend select_sdp_backend(sdp_params const& kernel_params) {
     switch (backend) {
       case SDPBackend::cudnn_attention:
         if (sdp::can_use_cudnn_attention(kernel_params, print_debug)) {
-              TORCH_WARN("USING CUDNN SDPA");
               return SDPBackend::cudnn_attention;
         }
         break;
