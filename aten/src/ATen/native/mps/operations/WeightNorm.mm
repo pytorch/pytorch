@@ -42,7 +42,7 @@ std::tuple<Tensor, Tensor> weight_norm_mps(const Tensor& v, const Tensor& g, int
 
   // Return early on empty inputs
   if (v.numel() == 0 || g.numel() == 0) {
-      return std::tuple<Tensor, Tensor>{w, norms};
+    return std::tuple<Tensor, Tensor>{w, norms};
   }
 
   string key = "weight_norm_mps_" + std::to_string(dim) + getTensorsStringKey({v, g});
