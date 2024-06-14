@@ -902,7 +902,6 @@ def extract_tensor_metadata(t: torch.Tensor) -> "TensorMetadata":
             convert_to_sym_hash(x) for x in stride_
         )
         storage_bytes: Optional[int] = None
-        storage_offset = 0
     else:
         shape = tuple(cast(Sequence[int], t.shape))
         stride = stride_
@@ -910,7 +909,6 @@ def extract_tensor_metadata(t: torch.Tensor) -> "TensorMetadata":
         storage_bytes = convert_to_sym_hash(
             t.untyped_storage().nbytes() if not t.is_sparse else None
         )
-        storage_offset = t.storage_offset()
 
     return TensorMetadata(
         dtype=t.dtype,
@@ -919,7 +917,7 @@ def extract_tensor_metadata(t: torch.Tensor) -> "TensorMetadata":
         device=t.device,
         layout=t.layout,
         memory_format=memory_format,
-        storage_offset=storage_offset,
+        storage_offset=t.storage_offset(),
         storage_bytes=storage_bytes,
         requires_grad=t.requires_grad,
         is_quantized=t.is_quantized,
@@ -1236,6 +1234,13 @@ class FakeTensorMode(TorchDispatchMode):
                 # Caution: This function can recursively call _cached_dispatch_impl()!
                 output = self._dispatch_impl(func, types, args, kwargs)
                 entry = self._make_cache_entry(key, func, args, kwargs, output)
+                if self.cache_crosscheck_enabled:
+                    checked_output = self._output_from_cache_entry(entry, func, args)
+                    if (output is not None) and (checked_output is not None):
+                        assert_metadata_eq(assert_eq, checked_output, output)
+                    else:
+                        assert output is None
+                        assert checked_output is None
                 FakeTensorMode.cache[key] = entry
                 FakeTensorMode.cache_misses += 1
         except _BypassDispatchCache as e:
@@ -1514,10 +1519,12 @@ class FakeTensorMode(TorchDispatchMode):
                 storage = t.untyped_storage()
                 with in_kernel_invocation_manager(self), maybe_suppress():
                     empty.set_(storage, metadata.storage_offset, shape, stride)
-        elif metadata.storage_offset != 0:
+
+        if metadata.storage_offset != 0:
             storage = empty.untyped_storage()
             with in_kernel_invocation_manager(self), maybe_suppress():
                 empty.set_(storage, metadata.storage_offset, shape, stride)
+
         if storage_bytes == 0:
             empty.untyped_storage().resize_(0)
 
