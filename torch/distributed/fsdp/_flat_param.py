@@ -1141,7 +1141,7 @@ class FlatParamHandle:
             tuple(fqns_list),
             tuple(shapes_list),
             tuple(numels_list),
-            shard_param_offsets,
+            tuple(shard_param_offsets),
         )
 
     @no_type_check

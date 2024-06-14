@@ -419,7 +419,7 @@ def _ident(x: Any) -> Any:
     return x
 
 
-def extract_tensor_metadata_for_cache_key(t):
+def extract_tensor_metadata_for_cache_key(device_map, t):
     """
     Extracts the tensor metadata and removes fields of the TensorMetadata
     that are not needed for caching
@@ -427,18 +427,30 @@ def extract_tensor_metadata_for_cache_key(t):
     meta = extract_tensor_metadata(t)
     if not hasattr(t, "_is_inductor_static"):
         meta = dataclasses.replace(meta, storage_offset=0, storage_bytes=None)
+
+    # The pickle implementation avoids serializing the same object more than once.
+    # That behavior means the byte stream we create to hash will vary if, for example,
+    # we see two tensor objects with the same device, but the torch.device object is
+    # actually the same object vs. merely equivalent. We want to produce the same hash
+    # value in either situation, so we memoize the device objects and always reference
+    # the same object for a given device. It's possible other metadata fields deserve
+    # the same treatment, but so far we've only observed this issue with the device.
+    if meta.device not in device_map:
+        device_map[meta.device] = meta.device
+    meta = dataclasses.replace(meta, device=device_map[meta.device])
+
     return meta
 
 
-def _reduce_fake_tensor(t):
+def _reduce_fake_tensor(device_map, t):
     """
     See FxGraphCachePickler. Custom reducer to pickle FakeTensors.
     """
-    metadata = extract_tensor_metadata_for_cache_key(t)
+    metadata = extract_tensor_metadata_for_cache_key(device_map, t)
     return (_ident, (metadata,))
 
 
-def _reduce_tensor(t):
+def _reduce_tensor(device_map, t):
     """
     See FxGraphCachePickler. Custom reducer to pickle Tensors.
     If we see tensors, we know they're constants stored as attributes on
@@ -465,7 +477,7 @@ def _reduce_tensor(t):
             f"FX graph cache handling of a large constant took {elapsed:.1}s. Please file an issue."
         )
 
-    metadata = extract_tensor_metadata_for_cache_key(t)
+    metadata = extract_tensor_metadata_for_cache_key(device_map, t)
     return (_ident, (TensorMetadataAndValues(metadata, values),))
 
 
@@ -495,9 +507,13 @@ class FxGraphCachePickler(pickle.Pickler):
     data that allow us to compute a stable, but safe hash.
     """
 
+    # See extract_tensor_metadata_for_cache_key. Whenever we extract metadata during
+    # pickling, we make sure devices always reference the same torch.device object.
+    _device_map: Dict[torch.device, torch.device] = {}
+
     dispatch_table = copyreg.dispatch_table.copy()
-    dispatch_table[FakeTensor] = _reduce_fake_tensor
-    dispatch_table[torch.Tensor] = _reduce_tensor
+    dispatch_table[FakeTensor] = functools.partial(_reduce_fake_tensor, _device_map)
+    dispatch_table[torch.Tensor] = functools.partial(_reduce_tensor, _device_map)
     dispatch_table[torch.SymInt] = _reduce_symint
     dispatch_table[
         torch.fx.experimental._backward_state.BackwardState
@@ -538,9 +554,12 @@ class FxGraphCachePickler(pickle.Pickler):
 
         def get_str(obj) -> str:
             if isinstance(obj, torch.Tensor):
-                return str(extract_tensor_metadata_for_cache_key(obj))
+                return str(extract_tensor_metadata_for_cache_key(cls._device_map, obj))
             elif isinstance(obj, bytes):
                 return "<bytes>"
+            elif type(obj) in cls.dispatch_table:
+                # Run the reducer on the object
+                return str(cls.dispatch_table[type(obj)](obj)[1])
             else:
                 return str(obj)
 
@@ -785,8 +804,8 @@ class FxGraphCache:
     def _lookup_graph(
         key: str,
         example_inputs: List[torch.Tensor],
-        local,
-        remote_cache,
+        local: bool,
+        remote_cache: Optional[Any],
     ) -> Optional[CompiledFxGraph]:
         """
         Lookup a compiled graph in the cache by key. On a hit, return the
@@ -855,10 +874,10 @@ class FxGraphCache:
         # See _save_graph(); we don't store the callable in the cache entry so
         # recreate it here from the PyCodeCache disk cache.
         artifact_path = get_path(graph.cache_key, "py")[2]
+        code = graph.source_code
         if not os.path.exists(artifact_path):
             counters["inductor"]["fxgraph_lookup_write_file"] += 1
             Path(os.path.dirname(artifact_path)).mkdir(parents=True, exist_ok=True)
-            code = graph.source_code
             cpp_pp = cpp_prefix_path()
             if os.path.basename(cpp_pp) in code:
                 if cpp_pp in code:
@@ -898,6 +917,11 @@ class FxGraphCache:
         # graph was compiled for this cache entry. Pretending these counters
         # were incremented normally is useful for testing with the cache enabled.
         metrics.CachedMetricsHelper.apply_deltas(graph.metrics_deltas)
+
+        from .graph import GraphLowering
+
+        GraphLowering.save_output_code(code)
+        output_code_log.debug("Output code: \n%s", code)
 
         return graph
 
@@ -1037,6 +1061,7 @@ class FxGraphCache:
             compiled_graph = FxGraphCache._lookup_graph(
                 key, example_inputs, local, remote_cache
             )
+
             if compiled_graph is None:
                 log.debug("fx graph cache miss for key %s", key)
                 counters["inductor"]["fxgraph_cache_miss"] += 1
@@ -1054,6 +1079,7 @@ class FxGraphCache:
             else:
                 log.debug("fx graph cache hit for key %s", key)
                 counters["inductor"]["fxgraph_cache_hit"] += 1
+            compiled_graph._fx_graph_cache_key = key
         except BypassFxGraphCache:
             counters["inductor"]["fxgraph_cache_bypass"] += 1
             if not compiled_graph:
@@ -1100,6 +1126,7 @@ class CompiledFxGraph:
     guards_expr: Optional[str]
 
     _boxed_call: Optional[bool] = None
+    _fx_graph_cache_key: Optional[str] = None
 
     def __init__(
         self,
@@ -1473,11 +1500,13 @@ def valid_vec_isa_list() -> List[VecISA]:
     if sys.platform == "darwin" and platform.processor() == "arm":
         return [VecNEON()]
 
+    isa_list: List[VecISA] = []
     cur_os = sys.platform
     if cur_os != "linux" and cur_os != "win32":
-        return []
+        return isa_list
 
-    if platform.machine() == "s390x":
+    arch = platform.machine()
+    if arch == "s390x":
         with open("/proc/cpuinfo") as _cpu_info:
             while True:
                 line = _cpu_info.readline()
@@ -1488,14 +1517,20 @@ def valid_vec_isa_list() -> List[VecISA]:
                 if featuresmatch:
                     for group in featuresmatch.groups():
                         if re.search(r"[\^ ]+vxe[\$ ]+", group):
-                            return [VecZVECTOR()]
-        return []
+                            isa_list.append(VecZVECTOR())
+                            break
+        return isa_list
 
-    isa_list = []
-    _cpu_supported_isa = x86_isa_checker()
-    for isa in supported_vec_isa_list:
-        if str(isa) in _cpu_supported_isa and isa:
-            isa_list.append(isa)
+    if arch == "x86_64" or arch == "AMD64":
+        """
+        arch value is x86_64 on Linux, and the value is AMD64 on Windows.
+        """
+        _cpu_supported_x86_isa = x86_isa_checker()
+        for isa in supported_vec_isa_list:
+            if str(isa) in _cpu_supported_x86_isa and isa:
+                isa_list.append(isa)
+        return isa_list
+
     return isa_list
 
 
