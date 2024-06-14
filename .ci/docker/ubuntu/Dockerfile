@@ -12,11 +12,6 @@ ARG CLANG_VERSION
 COPY ./common/install_base.sh install_base.sh
 RUN bash ./install_base.sh && rm install_base.sh
 
-# Install clang
-ARG LLVMDEV
-COPY ./common/install_clang.sh install_clang.sh
-RUN bash ./install_clang.sh && rm install_clang.sh
-
 # Install user
 COPY ./common/install_user.sh install_user.sh
 RUN bash ./install_user.sh && rm install_user.sh
@@ -33,11 +28,27 @@ ARG DOCS
 ENV ANACONDA_PYTHON_VERSION=$ANACONDA_PYTHON_VERSION
 ENV PATH /opt/conda/envs/py_$ANACONDA_PYTHON_VERSION/bin:/opt/conda/bin:$PATH
 ENV DOCS=$DOCS
+
+RUN echo "printing info"
+RUN conda info
+RUN echo $LD_LIBRARY_PATH
+
+ENV LD_LIBRARY_PATH /opt/conda/envs/py_${ANACONDA_PYTHON_VERSION}/lib
+
+RUN echo "printing info"
+RUN conda info
+RUN echo $LD_LIBRARY_PATH
+
 COPY requirements-ci.txt requirements-docs.txt /opt/conda/
 COPY ./common/install_conda.sh install_conda.sh
 COPY ./common/common_utils.sh common_utils.sh
 RUN bash ./install_conda.sh && rm install_conda.sh common_utils.sh /opt/conda/requirements-ci.txt /opt/conda/requirements-docs.txt
 RUN if [ -n "${UNINSTALL_DILL}" ]; then pip uninstall -y dill; fi
+
+# Install clang
+ARG LLVMDEV
+COPY ./common/install_clang.sh install_clang.sh
+RUN bash ./install_clang.sh && rm install_clang.sh
 
 # Install gcc
 ARG GCC_VERSION
@@ -209,13 +220,3 @@ ENV CUDA_PATH /usr/local/cuda
 
 USER jenkins
 CMD ["bash"]
-
-RUN echo "printing info"
-RUN conda info
-RUN echo $LD_LIBRARY_PATH
-
-ENV LD_LIBRARY_PATH /opt/conda/envs/py_${ANACONDA_PYTHON_VERSION}/lib
-
-RUN echo "printing info"
-RUN conda info
-RUN echo $LD_LIBRARY_PATH
