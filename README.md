@@ -213,6 +213,7 @@ conda install -c pytorch magma-cuda121  # or the magma-cuda* that matches your C
 
 # (optional) If using torch.compile with inductor/triton, install the matching version of triton
 # Run from the pytorch directory after cloning
+# For Intel GPU support, please explicitly `export USE_XPU=1` before running command.
 make triton
 ```
 

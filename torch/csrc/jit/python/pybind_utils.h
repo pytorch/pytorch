@@ -1257,7 +1257,7 @@ TORCH_PYTHON_API py::object invokeOperatorFromPython(
     const py::kwargs& kwargs,
     std::optional<c10::DispatchKey> dk = c10::nullopt);
 
-TORCH_PYTHON_API py::tuple _maybe_handle_torch_function(
+TORCH_PYTHON_API std::optional<py::object> _maybe_handle_torch_function(
     const std::string& ns,
     const std::string& method_name,
     const std::string& overload_name,
