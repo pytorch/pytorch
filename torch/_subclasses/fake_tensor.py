@@ -865,7 +865,7 @@ class TensorMetadata:
     device: torch.device
     layout: torch.layout
     memory_format: Optional[torch.memory_format]
-    storage_offset: int
+    storage_offset: Union[int, _SymExprHash]
     storage_bytes: Optional[Union[int, _SymExprHash]]
     requires_grad: bool
     is_quantized: bool
@@ -910,6 +910,8 @@ def extract_tensor_metadata(t: torch.Tensor) -> "TensorMetadata":
             t.untyped_storage().nbytes() if not t.is_sparse else None
         )
 
+    storage_offset = convert_to_sym_hash(t.storage_offset())
+
     return TensorMetadata(
         dtype=t.dtype,
         shape=shape,
@@ -917,7 +919,7 @@ def extract_tensor_metadata(t: torch.Tensor) -> "TensorMetadata":
         device=t.device,
         layout=t.layout,
         memory_format=memory_format,
-        storage_offset=t.storage_offset(),
+        storage_offset=storage_offset,
         storage_bytes=storage_bytes,
         requires_grad=t.requires_grad,
         is_quantized=t.is_quantized,
@@ -944,11 +946,11 @@ class _DispatchCacheKey(list):
         self, tup: Tuple[object, ...], hash: Callable[[object], int] = hash
     ) -> None:
         self[:] = tup
-        # try:
-        self.hashvalue = hash(tup)
-        # except TypeError as e:
-        #    breakpoint()
-        #    raise
+        try:
+            self.hashvalue = hash(tup)
+        except TypeError as e:
+            breakpoint()
+            raise
 
     def __hash__(self) -> int:  # type: ignore[override]
         return self.hashvalue
@@ -1466,7 +1468,6 @@ class FakeTensorMode(TorchDispatchMode):
             return inplace_arg
 
         if metadata is None:
-            print("fake_tensor - no metadata")
             return None
 
         # Synthesize a new FakeTensor with the cached metadata.
@@ -1511,6 +1512,8 @@ class FakeTensorMode(TorchDispatchMode):
         if self.shape_env is not None:
             maybe_suppress = self.shape_env.suppress_guards
 
+        storage_offset = convert_from_sym_hash(metadata.storage_offset)
+
         if func.is_view:
             # For view ops, the storage should be the same as the tensor input.
             t = args[cast(int, entry.view_idx)]
@@ -1518,12 +1521,12 @@ class FakeTensorMode(TorchDispatchMode):
             if not t._has_symbolic_sizes_strides:
                 storage = t.untyped_storage()
                 with in_kernel_invocation_manager(self), maybe_suppress():
-                    empty.set_(storage, metadata.storage_offset, shape, stride)
+                    empty.set_(storage, storage_offset, shape, stride)
 
-        if metadata.storage_offset != 0:
+        if storage_offset != 0:
             storage = empty.untyped_storage()
             with in_kernel_invocation_manager(self), maybe_suppress():
-                empty.set_(storage, metadata.storage_offset, shape, stride)
+                empty.set_(storage, storage_offset, shape, stride)
 
         if storage_bytes == 0:
             empty.untyped_storage().resize_(0)
