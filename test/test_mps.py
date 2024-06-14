@@ -599,7 +599,7 @@ def mps_ops_modifier(ops):
         # - MPS output: tensor([102.6681, inf])
         # In the latter case, inf is probably correct (this is what scipy does).
         'polygamma': [torch.float32, torch.uint8],
-        'polygammapolygamma_n_0': [torch.float32, torch.int16, torch.int8],
+        'polygammapolygamma_n_0': [torch.int16, torch.int8],
         'polygammapolygamma_n_2': [torch.float32, torch.int16, torch.int8],
         'polygammapolygamma_n_1': [torch.float32, torch.int16, torch.int8],
         'polygammapolygamma_n_3': [torch.float32, torch.int16, torch.int8],
@@ -662,7 +662,7 @@ def mps_ops_modifier(ops):
         # - MPS output: tensor([102.6681, inf])
         # In the latter case, inf is probably correct (this is what scipy does).
         'polygamma': [torch.float32, torch.uint8],
-        'polygammapolygamma_n_0': [torch.float32, torch.int16, torch.int8],
+        'polygammapolygamma_n_0': [torch.int16, torch.int8],
         'polygammapolygamma_n_2': [torch.float32, torch.int16, torch.int8],
         'polygammapolygamma_n_1': [torch.float32, torch.int16, torch.int8],
         'polygammapolygamma_n_3': [torch.float32, torch.int16, torch.int8],
