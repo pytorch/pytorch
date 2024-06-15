@@ -1,7 +1,10 @@
 #include <torch/csrc/distributed/c10d/NCCLUtils.hpp>
+#include <torch/csrc/distributed/c10d/ProcessGroupNCCL.hpp>
+#include <torch/csrc/distributed/c10d/control_plane/Handlers.hpp>
 
 #include <c10/util/CallOnce.h>
 #include <c10/util/env.h>
+#include <algorithm>
 
 #ifdef USE_C10D_NCCL
 #include <vector>
@@ -237,6 +240,73 @@ std::string getNcclErrorDetailStr(
   }
   return interpret + err;
 }
+
+control_plane::RegisterHandler dumpHandler{
+    "dump_nccl_trace_pickle",
+    [](const control_plane::Request& req, control_plane::Response& res) {
+      auto params = req.params();
+      auto includeCollectives = true;
+      auto includeStackTraces = true;
+      auto onlyActive = false;
+      size_t validParamCount = 0;
+
+      const auto& includeCollectivesIt = params.find("includecollectives");
+      if (includeCollectivesIt != params.end()) {
+        validParamCount++;
+        if (includeCollectivesIt->second == "false") {
+          std::cout << "includeCollectives: false" << std::endl;
+          includeCollectives = false;
+        } else if (includeCollectivesIt->second == "true") {
+          // do nothing since it's the default
+        } else {
+          res.setStatus(400);
+          res.setContent(
+              "Invalid value for " + includeCollectivesIt->first + ": " +
+                  includeCollectivesIt->second,
+              "text/plain");
+        }
+      }
+      const auto& includeStackTracesIt = params.find("includestacktraces");
+      if (includeStackTracesIt != params.end()) {
+        validParamCount++;
+        if (includeStackTracesIt->second == "false") {
+          includeStackTraces = false;
+        } else if (includeStackTracesIt->second == "true") {
+          // do nothing since it's the default
+        } else {
+          res.setStatus(400);
+          res.setContent(
+              "Invalid value for " + includeStackTracesIt->first + ": " +
+                  includeStackTracesIt->second,
+              "text/plain");
+          return;
+        }
+      }
+      const auto& onlyActiveIt = params.find("onlyactive");
+      if (onlyActiveIt != params.end()) {
+        validParamCount++;
+        if (onlyActiveIt->second == "true") {
+          onlyActive = true;
+        } else if (onlyActiveIt->second == "false") {
+          // do nothing since it's the default
+        } else {
+          res.setStatus(400);
+          res.setContent(
+              "Invalid value for " + onlyActiveIt->first + ": " +
+                  onlyActiveIt->second,
+              "text/plain");
+          return;
+        }
+      }
+      if (validParamCount < params.size()) {
+        res.setStatus(400);
+        res.setContent("Invalid parameters", "text/plain");
+        return;
+      }
+      res.setContent(
+          dump_nccl_trace(includeCollectives, includeStackTraces, onlyActive),
+          "application/octet-stream");
+    }};
 
 } // namespace c10d
 
