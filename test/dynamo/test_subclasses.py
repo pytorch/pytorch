@@ -1392,6 +1392,7 @@ class GraphModule(torch.nn.Module):
             yield t.select(-1, 6), False
             # https://github.com/pytorch/pytorch/issues/128649
             yield t[2:3, 5:9], dynamic
+            yield t.view(-1, 15), False
 
         def f(x):
             return x * 2
