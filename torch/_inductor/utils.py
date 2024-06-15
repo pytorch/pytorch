@@ -46,8 +46,6 @@ from unittest import mock
 import sympy
 
 import torch
-import torch._export
-import torch.utils._pytree as pytree
 from torch._dynamo.device_interface import get_interface_for_device
 from torch._dynamo.utils import detect_fake_mode
 from torch.autograd import DeviceType
@@ -1062,7 +1060,7 @@ def use_cpp_packed_gemm_template(layout, mat1, mat2):
     if not config.cpp.weight_prepack:
         return False
 
-    layout_dtypes = [torch.float32]
+    layout_dtypes = [torch.float32, torch.bfloat16, torch.half]
     m, n, k, layout, mat1, mat2 = mm_args(mat1, mat2)
     # TODO(jgong5): support dynamic shapes for n or k
     if has_free_symbols((n, k)):
@@ -1070,7 +1068,13 @@ def use_cpp_packed_gemm_template(layout, mat1, mat2):
     if isinstance(mat2, ir.BaseView):
         mat2 = mat2.unwrap_view()
     micro_gemm = create_micro_gemm(
-        "micro_gemm", m, n, k, layout.dtype, num_threads=parallel_num_threads()
+        "micro_gemm",
+        m,
+        n,
+        k,
+        input_dtype=layout.dtype,
+        output_dtype=torch.float,
+        num_threads=parallel_num_threads(),
     )
     # TODO(jgong5): support n % n_block_size != 0
     return (
@@ -1107,22 +1111,14 @@ class DebugDirManager:
 def run_and_get_code(fn, *args, **kwargs):
     from .graph import GraphLowering
 
-    compile_to_module = GraphLowering.compile_to_module
     source_codes: List[str] = []
 
-    def patched_compile_to_module(self):
-        mod = compile_to_module(self)
-        with open(mod.__file__) as f:
-            source_codes.append(f.read())
-        return mod
+    def save_output_code(code: str):
+        source_codes.append(code)
 
-    # If FX code caching is enabled, a hit prevents getting the code.
-    with config.patch({"fx_graph_cache": False}):
-        with mock.patch.object(
-            GraphLowering, "compile_to_module", patched_compile_to_module
-        ):
-            torch._dynamo.reset()
-            result = fn(*args, **kwargs)
+    with mock.patch.object(GraphLowering, "save_output_code", save_output_code):
+        torch._dynamo.reset()
+        result = fn(*args, **kwargs)
     return result, source_codes
 
 
@@ -1131,6 +1127,9 @@ def get_code(fn, *args, **kwargs):
     from .graph import GraphLowering
 
     source_codes: List[str] = []
+
+    def save_output_code(code: str):
+        source_codes.append(code)
 
     def patched_compile_to_module(self: GraphLowering):
         class DummyModule:
@@ -1147,18 +1146,17 @@ def get_code(fn, *args, **kwargs):
             self.codegen_with_cpp_wrapper() if self.cpp_wrapper else self.codegen()
         )
         # Skip all the actual compiling.
+        nonlocal save_output_code
+        save_output_code(code)
 
-        source_codes.append(code)
         return DummyModule()
 
-    # If FX code caching is enabled, a hit prevents getting the code.
-    with config.patch({"fx_graph_cache": False}):
-        with mock.patch.object(
-            GraphLowering, "compile_to_module", patched_compile_to_module
-        ):
-            torch._dynamo.reset()
-            # Note the return here is None
-            _ = fn(*args, **kwargs)
+    with mock.patch.object(
+        GraphLowering, "compile_to_module", patched_compile_to_module
+    ), mock.patch.object(GraphLowering, "save_output_code", save_output_code):
+        torch._dynamo.reset()
+        # Note the return here is None
+        _ = fn(*args, **kwargs)
 
     return source_codes
 
@@ -1680,14 +1678,26 @@ def aoti_compile_with_persistent_cache(
     Compile the given function with persistent cache for AOTI eager mode.
     """
     assert not dynamic, "Only support static shape for now"
+    from torch._export import aot_compile
+
     type_to_torch_dtype = {int: torch.int32, float: torch.float, bool: torch.bool}
     supported_scalar_types = tuple(type_to_torch_dtype.keys())
-    flattened_inputs = pytree.arg_tree_leaves(*args, **kwargs)
+    flattened_inputs = list(args) + list(kwargs.values())
     if not all(
-        isinstance(input, (supported_scalar_types, torch.Tensor))
+        isinstance(input, (supported_scalar_types, torch.Tensor, list))
         for input in flattened_inputs
     ):
-        raise NotImplementedError("Only support tensor, int, float, bool for now")
+        raise NotImplementedError(
+            "Only support tensor, tensor list, int, float, bool for now"
+        )
+
+    for input in flattened_inputs:
+        if isinstance(input, list) and not all(
+            isinstance(item, torch.Tensor) for item in input
+        ):
+            raise NotImplementedError(
+                "Regarding list, _impl_with_aoti_compile only support tensor list now."
+            )
 
     persistent_cache = aoti_eager_cache_dir(ns, device_type)
     if not persistent_cache.exists():
@@ -1702,7 +1712,7 @@ def aoti_compile_with_persistent_cache(
         {"TORCHINDUCTOR_CACHE_DIR": persistent_cache_lib.absolute().as_posix()},
     ):
         try:
-            kernel_lib_path = torch._export.aot_compile(
+            kernel_lib_path = aot_compile(
                 f,
                 args,
                 kwargs,
@@ -1717,30 +1727,59 @@ def aoti_compile_with_persistent_cache(
             )
 
             kernel_metadata_items = []
-            for input in flattened_inputs:
-                # TODO(Eikan): To add dynamic support
+
+            def extract_tensor_metadata(input: torch.Tensor) -> Dict[str, Any]:
                 metadata: Dict[str, Any] = {}
                 metadata["is_dynamic"] = dynamic
 
-                if isinstance(input, torch.Tensor):
-                    metadata["device_type"] = f"{input.device.type}"
-                    if is_cpu_device([input]):
-                        metadata["device_index"] = -1
-                    else:
-                        metadata["device_index"] = input.device.index
-                    metadata["dtype"] = f"{input.dtype}"
-                    metadata["sizes"] = list(input.size())
-                    metadata["strides"] = list(input.stride())
+                assert isinstance(input, torch.Tensor)
+                metadata["device_type"] = f"{input.device.type}"
+                if is_cpu_device([input]):
+                    metadata["device_index"] = -1
                 else:
-                    assert isinstance(input, supported_scalar_types)
-                    # Scalar tensor
-                    metadata["device_type"] = device_type
-                    metadata["device_index"] = -1 if device_type == "cpu" else 0
-                    metadata["dtype"] = f"{type_to_torch_dtype[type(input)]}"
-                    metadata["sizes"] = []
-                    metadata["strides"] = []
-                    metadata["scalar_value"] = input
+                    metadata["device_index"] = input.device.index
+                metadata["dtype"] = f"{input.dtype}"
+                metadata["sizes"] = list(input.size())
+                metadata["strides"] = list(input.stride())
+                metadata["requires_grad"] = input.requires_grad
+                metadata["dispatch_key_set"] = torch._C._dispatch_keys(input).raw_repr()
+                return metadata
 
+            def extract_scalar_metadata(
+                input: Union[int, float, bool]
+            ) -> Dict[str, Any]:
+                assert isinstance(input, supported_scalar_types)
+                metadata: Dict[str, Any] = {}
+                metadata["is_dynamic"] = dynamic
+                # Scalar tensor
+                metadata["device_type"] = device_type
+                metadata["device_index"] = -1 if device_type == "cpu" else 0
+                metadata["dtype"] = f"{type_to_torch_dtype[type(input)]}"
+                metadata["scalar_value"] = input
+                return metadata
+
+            def extract_tensor_list_metadata(
+                input: List[torch.Tensor],
+            ) -> Dict[str, Any]:
+                metadata_list = []
+                for item in input:
+                    assert isinstance(item, torch.Tensor)
+                    metadata_list.append(extract_tensor_metadata(item))
+
+                metadata: Dict[str, Any] = {}
+                metadata["tensor_list"] = metadata_list
+                return metadata
+
+            for idx, input in enumerate(flattened_inputs):
+                if isinstance(input, torch.Tensor):
+                    metadata = extract_tensor_metadata(input)
+                elif isinstance(input, list):
+                    assert all(isinstance(item, torch.Tensor) for item in input)
+                    metadata = extract_tensor_list_metadata(input)
+                else:
+                    metadata = extract_scalar_metadata(input)
+
+                metadata["arg_order"] = idx
                 kernel_metadata_items.append(metadata)
 
             kernel_meta_info: Dict[str, Any] = {}

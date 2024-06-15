@@ -804,7 +804,7 @@ class DistributedDataParallel(Module, Joinable):
         )
 
         # Initialize gradient buffers and register all reduce hook
-        self._delay_grad_buffer = None
+        self._delay_grad_buffer: Optional[torch.Tensor] = None
         self._delay_grad_views: List[torch.Tensor] = []
         self._delay_all_reduce_all_params = False
         if len(self._delay_all_reduce_params) != 0:
