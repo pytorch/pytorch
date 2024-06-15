@@ -768,22 +768,6 @@ class SchedulerNode(BaseSchedulerNode):
     ) -> None:
         self._compute_attrs(extra_indexing_constraints=extra_indexing_constraints)
 
-    def decide_new_loop_order(
-        self, self_dep: MemoryDep, other_dep: MemoryDep
-    ) -> Optional[Sequence[int]]:
-        """
-        Decide new order by analyzing self_dep and other_dep.
-
-        Example input:
-            self_dep=MemoryDep('buf1', c0, {c0: 2097152}) other_dep=MemoryDep('buf1', c0 + 1024*c1, {c0: 1024, c1: 2048})
-        as an example.
-        """
-        self_sizes = self._sizes[0]
-        if not (len(self_sizes) == self_dep.num_vars == other_dep.num_vars):
-            return None
-
-        return self_dep.decide_loop_order_to_match(other_dep)
-
     def apply_new_loop_order(self, new_order: Sequence[int]) -> None:
         self._body = self._body.reorder_iter_loops(
             new_order,
@@ -807,7 +791,11 @@ class SchedulerNode(BaseSchedulerNode):
     def reorder_loops_by_dep_pair(
         self, self_dep: MemoryDep, other_dep: MemoryDep
     ) -> None:
-        new_order = self.decide_new_loop_order(self_dep, other_dep)
+        new_order = None
+        self_sizes = self._sizes[0]
+        if len(self_sizes) == self_dep.num_vars == other_dep.num_vars:
+            new_order = self_dep.decide_loop_order_to_match(other_dep)
+
         if new_order:
             metrics.num_loop_reordering += 1
             loop_ordering_log.debug(
@@ -816,7 +804,7 @@ class SchedulerNode(BaseSchedulerNode):
             self.apply_new_loop_order(new_order)
         else:
             loop_ordering_log.debug(
-                "Dont reordering %s because can not decide the suitable loop order",
+                "Don't reordering %s because we can not decide the suitable loop order",
                 self.get_name(),
             )
 
@@ -960,6 +948,42 @@ class FusedSchedulerNode(BaseSchedulerNode):
         nodes = list(itertools.chain(node1.get_nodes(), node2.get_nodes()))
         return cls(node1.scheduler, nodes)
 
+    def reorder_loops_by_dep_pair(
+        self, self_dep: MemoryDep, other_dep: MemoryDep
+    ) -> None:
+        if self.is_template():
+            # We can not really reorder loops for a triton template
+            return
+        self_sizes = None
+        for snode in self.snodes:
+            assert isinstance(snode, SchedulerNode)
+            if self_sizes is not None and self_sizes != snode._sizes[0]:
+                loop_ordering_log.debug(
+                    "Can not reorder fused node due to different sizes"
+                )
+                return
+            self_sizes = snode._sizes[0]
+        new_order = None
+
+        assert self_sizes is not None
+        if len(self_sizes) == self_dep.num_vars == other_dep.num_vars:
+            new_order = self_dep.decide_loop_order_to_match(other_dep)
+
+        if not new_order:
+            loop_ordering_log.debug(
+                "Dont reordering fused node %s because we can not decide the suitable loop order",
+                self.get_name(),
+            )
+            return
+        metrics.num_loop_reordering += 1
+        loop_ordering_log.debug(
+            "Reorder loops for fused node %s with order %s", self.get_name(), new_order
+        )
+        for snode in self.snodes:
+            assert isinstance(snode, SchedulerNode)
+            snode.apply_new_loop_order(new_order)  # type: ignore[arg-type]
+        self.setup_dependencies()
+
     def __init__(
         self, scheduler: "Scheduler", snodes: Sequence[BaseSchedulerNode]
     ) -> None:
@@ -975,17 +999,20 @@ class FusedSchedulerNode(BaseSchedulerNode):
             *[x.ancestors for x in snodes if x.ancestors is not None]
         )
 
+        self.setup_dependencies()
+        self.min_order = min(x.min_order for x in self.snodes)
+        self.max_order = max(x.max_order for x in self.snodes)
+
+    def setup_dependencies(self) -> None:
         self.set_read_writes(
-            dependencies.ReadWrites.merge_list([x.read_writes for x in snodes])
+            dependencies.ReadWrites.merge_list([x.read_writes for x in self.snodes])
         )
 
         self.unmet_dependencies = {
             dep
-            for dep in set.union(*[x.unmet_dependencies for x in snodes])
+            for dep in set.union(*[x.unmet_dependencies for x in self.snodes])
             if dep.name not in self.get_names()
         } - self.read_writes.writes
-        self.min_order = min(x.min_order for x in self.snodes)
-        self.max_order = max(x.max_order for x in self.snodes)
 
     @cache_on_self
     def get_name(self) -> str:

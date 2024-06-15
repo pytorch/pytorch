@@ -204,6 +204,22 @@ class LoopOrderingTest(TestCase):
         self.do_acc_test(f, x)
         self.assertEqual(1, metrics.generated_kernel_count)
 
+    def test_pw_outer_red_2(self):
+        """
+        The pointwise kernel is a fused kernel
+        """
+
+        def f(x):
+            x = realize(x + 1)
+            x = realize(x - 2)
+            x = realize(x * 3)
+            return x.sum(dim=[0, 1])
+
+        # make the first 2 dimension small so we don't split the reduction
+        x = torch.randn(2, 4, 512)
+        self.do_acc_test(f, x)
+        self.assertEqual(1, metrics.generated_kernel_count)
+
     @inductor_config.patch(split_reductions=False)
     def test_different_reduction_order(self):
         """
