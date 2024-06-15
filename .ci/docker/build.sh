@@ -355,6 +355,12 @@ case "$image" in
     CONDA_CMAKE=yes
     VISION=yes
     ;;
+  pytorch-linux-jammy-py3-clang18-asan)
+    ANACONDA_PYTHON_VERSION=3.10
+    CLANG_VERSION=18
+    CONDA_CMAKE=yes
+    VISION=yes
+    ;;
   pytorch-linux-jammy-py3.8-gcc11)
     ANACONDA_PYTHON_VERSION=3.8
     GCC_VERSION=11
