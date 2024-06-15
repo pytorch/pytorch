@@ -202,8 +202,8 @@ def run_experiment(
         )
 
         if i == -1:
-            print(f"Compilation time: {time.perf_counter() - t0:.2f} seconds")
             compilation_time = time.perf_counter() - t0
+            print(f"Compilation time: {compilation_time:.2f} seconds")
             continue
 
         device_sync(device=device)  # MKG
