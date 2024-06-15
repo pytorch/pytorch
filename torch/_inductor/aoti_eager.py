@@ -10,11 +10,11 @@ from torch._inductor.utils import is_cpu_device
 from .runtime.runtime_utils import cache_dir
 
 
-def aoti_eager_cache_dir(namespace: str, device: str):
+def aoti_eager_cache_dir(namespace: str, device: str) -> Path:
     return Path(cache_dir()) / "aoti_eager" / namespace / device
 
 
-def aoti_eager_op_conf_lock(op_func_name_with_overload: str):
+def aoti_eager_op_conf_lock(op_func_name_with_overload: str) -> Any:
     from filelock import FileLock
 
     # Avoid circular import
@@ -25,7 +25,9 @@ def aoti_eager_op_conf_lock(op_func_name_with_overload: str):
     return FileLock(os.path.join(lock_dir, op_conf_lock_file), timeout=LOCK_TIMEOUT)
 
 
-def load_aoti_eager_cache(ns: str, op_func_name_with_overload: str, device_type: str):
+def load_aoti_eager_cache(
+    ns: str, op_func_name_with_overload: str, device_type: str
+) -> List[Optional[Dict[str, Any]]]:
     device_kernel_cache = aoti_eager_cache_dir(ns, device_type)
     op_conf = device_kernel_cache / f"{op_func_name_with_overload}.json"
     if not op_conf.exists():
@@ -54,11 +56,11 @@ def load_aoti_eager_cache(ns: str, op_func_name_with_overload: str, device_type:
             return json_data
 
 
-def supported_builtin_dtype_torch_dtype():
+def supported_builtin_dtype_torch_dtype() -> Dict[type, torch.dtype]:
     return {int: torch.int32, float: torch.float, bool: torch.bool}
 
 
-def supported_scalar_types():
+def supported_scalar_types() -> Tuple[type, ...]:
     type_to_torch_dtype = supported_builtin_dtype_torch_dtype()
     supported_scalar_types = tuple(type_to_torch_dtype.keys())
     return supported_scalar_types
@@ -124,7 +126,7 @@ def aoti_compile_with_persistent_cache(
     options: Optional[Dict[str, Any]] = None,
     remove_runtime_assertions: bool = False,
     disable_constraint_solver: bool = False,
-):
+) -> str:
     """
     Compile the given function with persistent cache for AOTI eager mode.
     """
