@@ -3,7 +3,6 @@ import functools
 import itertools as it
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
-import numpy as np
 import torch
 
 
@@ -104,8 +103,8 @@ class FuzzedParameter:
 
     def _loguniform(self, state):
         output = int(2 ** state.uniform(
-            low=np.log2(self._minval) if self._minval is not None else None,
-            high=np.log2(self._maxval) if self._maxval is not None else None,
+            low=torch.log2(self._minval) if self._minval is not None else None,
+            high=torch.log2(self._maxval) if self._maxval is not None else None,
         ))
         if self._minval is not None and output < self._minval:
             return self._minval
@@ -122,7 +121,7 @@ class FuzzedParameter:
         # If we directly pass the keys to `choice`, numpy will convert
         # them to numpy dtypes.
         index = state.choice(
-            np.arange(len(self._distribution)),
+            torch.arange(len(self._distribution)),
             p=tuple(self._distribution.values()))
         return list(self._distribution.keys())[index]
 
@@ -168,9 +167,9 @@ def dtype_size(dtype):
 
 
 def prod(values, base=1):
-    """np.prod can overflow, so for sizes the product should be done in Python.
+    """torch.prod can overflow, so for sizes the product should be done in Python.
 
-    Even though np.prod type promotes to int64, it can still overflow in which
+    Even though torch.prod can promote to int64, it can still overflow in which
     case the negative value will pass the size check and OOM when attempting to
     actually allocate the Tensor.
     """
@@ -279,13 +278,13 @@ class FuzzedTensor:
         # Randomly permute the Tensor and call `.contiguous()` to force re-ordering
         # of the memory, and then permute it back to the original shape.
         dim = len(size)
-        order = np.arange(dim)
+        order = torch.arange(dim)
         if state.rand() > self._probability_contiguous:
-            while dim > 1 and np.all(order == np.arange(dim)):
+            while dim > 1 and torch.all(order == torch.arange(dim)):
                 order = state.permutation(raw_tensor.dim())
 
             raw_tensor = raw_tensor.permute(tuple(order)).contiguous()
-            raw_tensor = raw_tensor.permute(tuple(np.argsort(order)))
+            raw_tensor = raw_tensor.permute(tuple(torch.argsort(order)))
 
         slices = [slice(0, size * step, step) for size, step in zip(size, steps)]
         tensor = raw_tensor[slices]
@@ -369,8 +368,9 @@ class Fuzzer:
                 also be used to set the PyTorch random seed so that random
                 ops will create reproducible Tensors.
         """
+        import numpy as np # not sure how to replace random state with pytorch yet
         if seed is None:
-            seed = np.random.RandomState().randint(0, 2 ** 32 - 1, dtype=np.int64)
+            seed = np.random.RandomState().randint(0, 2 ** 32 - 1, dtype=torch.int64)
         self._seed = seed
         self._parameters = Fuzzer._unpack(parameters, FuzzedParameter)
         self._tensors = Fuzzer._unpack(tensors, FuzzedTensor)
@@ -392,8 +392,9 @@ class Fuzzer:
         ))
 
     def take(self, n):
+        import numpy as np # need to think about how to remove np dependency here
         state = np.random.RandomState(self._seed)
-        torch.manual_seed(state.randint(low=0, high=2 ** 63, dtype=np.int64))
+        torch.manual_seed(state.randint(low=0, high=2 ** 63, dtype=torch.int64))
         for _ in range(n):
             params = self._generate(state)
             tensors = {}
