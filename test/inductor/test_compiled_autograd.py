@@ -1791,14 +1791,12 @@ TORCH_LIBRARY(test_autograd_cpp_node_data_dependent, m) {
                 return grad
 
         a = torch.rand((3, 3), requires_grad=True)
-        # TODO(yf225): regex the tx.one_graph assert error!
+        # TODO(yf225): regex match the tx.one_graph assert error!
         with compiled_autograd.enable(make_compiler_fn(fullgraph=False)):
             b = MyFunc.apply(a)
             b.sum().backward()
 
-        # self.assertEqual(called[0], 1)
-
-    # TODO(yf225): add a new test for memory check for tensors involved the callback
+    # TODO(yf225): add a new test for memory check for tensors involved in the callback
 
     @unittest.skipIf(not HAS_CUDA, "requires cuda")
     def test_cudagraphs_cpu_division(self):
