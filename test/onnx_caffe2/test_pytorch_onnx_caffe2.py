@@ -97,7 +97,7 @@ def skipIfNoEmbed(func):
 
 def do_export(model, inputs, *args, **kwargs):
     f = io.BytesIO()
-    out = torch.onnx._export(model, inputs, f, *args, **kwargs)
+    out = torch.onnx.utils._export(model, inputs, f, *args, **kwargs)
     if isinstance(model, torch.jit.ScriptModule):
         # Special case for common case of passing a single Tensor
         if isinstance(inputs, torch.Tensor):
@@ -320,7 +320,7 @@ class TestCaffe2Backend_opset9(pytorch_test_common.ExportTestCase):
         # Note that the export call explicitly sets the names of not just the input,
         # but also the parameters. This test checks that the model can be loaded and
         # executed in Caffe2 backend correctly.
-        torch.onnx._export(
+        torch.onnx.utils._export(
             model,
             input,
             f,
@@ -353,7 +353,7 @@ class TestCaffe2Backend_opset9(pytorch_test_common.ExportTestCase):
         # But note that the target first parameter name is the same as the second parameter name.
         # This test checks that given this edge condition, the model can be loaded and executed
         # in Caffe2 backend correctly.
-        torch.onnx._export(
+        torch.onnx.utils._export(
             model,
             input,
             f,
@@ -1613,7 +1613,7 @@ class TestCaffe2Backend_opset9(pytorch_test_common.ExportTestCase):
         f = io.BytesIO()
         from torch.onnx import ExportTypes
 
-        torch.onnx._export(
+        torch.onnx.utils._export(
             MyModel(),
             (torch.rand(3, 4),),
             f,
