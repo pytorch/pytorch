@@ -1326,19 +1326,13 @@ class TritonKernel(SIMDKernel):
                        + ...
                        + s(N-1) * ModularIndexing(rindex, d1 * ... * d(N-2), d(N-1))
 
-                This iterates over a block of shape (dN, ..., d1, xsize) and stride
-                (sN, ..., s1, xstride). (d1,...,d(N-1)) and (s1,...,sN, xstride) are
+                This iterates over a block of shape (dN, ..., d1) and stride
+                (sN, ..., s1). (d1,...,d(N-1)) and (s1,...,sN) are
                 wildcards that we match.
 
                 Note that dN does not appear in the expression, but we solve for it
                 using range tree numels and the other dims.
                 """
-                # Get the block dimensions and index variables.
-                # We match mod/div to the last range tree, and mul to the previous ones.
-                # For example, if we have an (X,R) reduction, we match mod/div to the R
-                # dimension(s), and mul to the X dimension(s).
-                index_var = range_tree.symbol()
-
                 # Bound the possible number of dims. We use the following heuristics:
                 # - At least one dim for each range tree node.
                 # - At least one dim for every FloorDiv or ModularIndexing op.
@@ -1350,6 +1344,7 @@ class TritonKernel(SIMDKernel):
                 )
 
                 # Pattern match to find the strides and offset.
+                index_var = range_tree.symbol()
                 wild = functools.partial(sympy.Wild, exclude=[index_var])
                 dims: List[sympy.Expr] = [
                     wild(f"dim_mod{idx}") for idx in range(num_dims)
