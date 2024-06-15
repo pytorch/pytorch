@@ -351,8 +351,8 @@ struct TORCH_API ViewFunc {
   /// Returns a clone of this ViewFunc, optionally with the specified saved
   /// state.
   virtual std::unique_ptr<ViewFunc> clone_and_set(
-      std::optional<std::vector<c10::SymInt>> = c10::nullopt,
-      std::optional<std::vector<at::Tensor>> = c10::nullopt) const = 0;
+      std::optional<std::vector<c10::SymInt>> = std::nullopt,
+      std::optional<std::vector<at::Tensor>> = std::nullopt) const = 0;
 
  protected:
   /// Sets the values of any SymInts in the saved state. The input vector size
@@ -382,8 +382,8 @@ struct ChainedViewFunc : public ViewFunc {
   }
   virtual at::Tensor operator()(const at::Tensor&) const override;
   virtual std::unique_ptr<ViewFunc> clone_and_set(
-      std::optional<std::vector<c10::SymInt>> = c10::nullopt,
-      std::optional<std::vector<at::Tensor>> = c10::nullopt) const override;
+      std::optional<std::vector<c10::SymInt>> = std::nullopt,
+      std::optional<std::vector<at::Tensor>> = std::nullopt) const override;
 
  private:
   std::unique_ptr<ViewFunc> first;
@@ -398,8 +398,8 @@ struct ErroringViewFunc : public ViewFunc {
     TORCH_CHECK(false, error_msg);
   }
   virtual std::unique_ptr<ViewFunc> clone_and_set(
-      std::optional<std::vector<c10::SymInt>> = c10::nullopt,
-      std::optional<std::vector<at::Tensor>> = c10::nullopt) const override {
+      std::optional<std::vector<c10::SymInt>> = std::nullopt,
+      std::optional<std::vector<at::Tensor>> = std::nullopt) const override {
     return std::make_unique<ErroringViewFunc>(error_msg);
   }
 
