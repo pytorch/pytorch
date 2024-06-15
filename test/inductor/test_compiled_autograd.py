@@ -9,7 +9,6 @@ from importlib.machinery import SourceFileLoader
 from pathlib import Path
 from unittest import mock
 
-import logging
 torch_log = logging.getLogger("torch")
 
 import torch
@@ -1792,9 +1791,13 @@ TORCH_LIBRARY(test_autograd_cpp_node_data_dependent, m) {
 
         a = torch.rand((3, 3), requires_grad=True)
         # TODO(yf225): regex match the tx.one_graph assert error!
-        with compiled_autograd.enable(make_compiler_fn(fullgraph=False)):
-            b = MyFunc.apply(a)
-            b.sum().backward()
+        with self.assertRaisesRegex(
+            AssertionError,
+            "only supported when Compiled Autograd is enabled with fullgraph=True",
+        ):
+            with compiled_autograd.enable(make_compiler_fn(fullgraph=False)):
+                b = MyFunc.apply(a)
+                b.sum().backward()
 
     # TODO(yf225): add a new test for memory check for tensors involved in the callback
 

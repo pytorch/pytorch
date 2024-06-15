@@ -729,15 +729,7 @@ def _optimize(
     # There is some prior art around this, w/r/t nesting backend calls are enforced to be the same
     # compiler, however, this feels onerous for callback and hooks, and it feels better to give our users an
     # easier to understand UX at the cost of a little more plumbing on our end.
-    hooks = Hooks(
-        guard_export_fn=guard_export_fn,
-        guard_fail_fn=guard_fail_fn,
-        # # TODO(yf225): nopython here is important to tell us whether we can use final_callback. So need to thread this through to InstructionTranslator etc.
-        # # `convert_frame.convert_frame(backend, hooks=hooks)` -> catch_errors_wrapper -> CatchErrorsWrapper -> _torchdynamo_orig_callable -> _inner_convert -> 
-        # ca_final_callbacks_var=None if nopython else variables.ListVariable(
-        #     [], mutable_local=MutableLocal()
-        # )
-    )
+    hooks = Hooks(guard_export_fn=guard_export_fn, guard_fail_fn=guard_fail_fn)
     torch._C._log_api_usage_once("torch._dynamo.optimize")
     if disable or os.environ.get("TORCHDYNAMO_DISABLE", "") == "1":
         return _NullDecorator()
