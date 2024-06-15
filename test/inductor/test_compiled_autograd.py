@@ -1786,7 +1786,6 @@ TORCH_LIBRARY(test_autograd_cpp_node_data_dependent, m) {
                 return grad
 
         a = torch.rand((3, 3), requires_grad=True)
-        # TODO(yf225): regex match the tx.one_graph assert error!
         with self.assertRaisesRegex(
             AssertionError,
             "only supported when Compiled Autograd is enabled with fullgraph=True",
