@@ -574,6 +574,23 @@ class MiscTests(torch._inductor.test_case.TestCase):
         cleanup_op("mylib::foo")
         del lib
 
+    def test_auto_functionalize_can_with_none_return(self):
+        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
+            lib.define("foo(Tensor x, Tensor(a!) out) -> None")
+
+            def foo_impl(x, out):
+                out.copy_(x)
+
+            lib.impl("foo", foo_impl, "CompositeExplicitAutograd")
+            x = torch.randn(3)
+            out = torch.zeros(3)
+
+            @torch.compile
+            def f(x, out):
+                torch.ops.mylib.foo(x, out)
+
+            f(x, out)
+
     def test_user_defined_setattr1(self):
         @torch.compile(backend="eager", fullgraph=True)
         def fn(obj):
