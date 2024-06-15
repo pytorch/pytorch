@@ -432,10 +432,12 @@ class GradScaler:
                             for t in optimizer_state["found_inf_per_device"].values()
                         ]
                     ),
-                )              
+                )
                 # Take the product of the scales, if the user has already set `optimizer.grad_scale`.
                 optimizer.grad_scale = (  # type: ignore[attr-defined]
-                    getattr(optimizer, "grad_scale", None) if optimizer_state["stage"] == OptState.UNSCALED else scaler * getattr(optimizer, "grad_scale", 1) 
+                    getattr(optimizer, "grad_scale", None)
+                    if optimizer_state["stage"] == OptState.UNSCALED
+                    else scaler * getattr(optimizer, "grad_scale", 1)
                 )
                 optimizer.found_inf = found_inf  # type: ignore[attr-defined]
             retval = optimizer.step(*args, **kwargs_)
