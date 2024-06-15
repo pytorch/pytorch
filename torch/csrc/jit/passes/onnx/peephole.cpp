@@ -16,7 +16,7 @@
 #include <ATen/ops/ones_like_native.h>
 #endif
 
-#include <c10/util/Optional.h>
+#include <optional>
 
 #if defined(_MSC_VER)
 #include <BaseTsd.h>
@@ -105,14 +105,14 @@ std::optional<size_t> fusibleExpandTo(
     at::IntArrayRef from,
     at::IntArrayRef to) {
   if (from.size() > to.size()) {
-    return c10::nullopt;
+    return std::nullopt;
   }
 
   for (const auto i : c10::irange(from.size())) {
     auto fdim = from[from.size() - 1 - i];
     auto tdim = to[to.size() - 1 - i];
     if (fdim != 1 && fdim != tdim) {
-      return c10::nullopt;
+      return std::nullopt;
     }
   }
 
@@ -168,7 +168,7 @@ void fuseBroadcast(Block* b) {
               .sizes()
               .concrete_sizes()
               .value()); // to
-      if (axis == c10::nullopt) {
+      if (axis == std::nullopt) {
         continue;
       }
 
