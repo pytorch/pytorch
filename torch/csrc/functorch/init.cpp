@@ -242,7 +242,7 @@ int64_t _grad_increment_nesting() {
   // See NOTE [grad and vjp interaction with no_grad]
   bool prev_grad_mode = c10::GradMode::is_enabled();
   return initAndPushDynamicLayer(
-      TransformType::Grad, c10::nullopt, c10::nullopt, prev_grad_mode);
+      TransformType::Grad, std::nullopt, std::nullopt, prev_grad_mode);
 }
 
 int64_t _grad_decrement_nesting() {
@@ -257,9 +257,9 @@ int64_t _jvp_increment_nesting() {
       c10::AutogradState::get_tls_state().get_fw_grad_mode();
   return initAndPushDynamicLayer(
       TransformType::Jvp,
-      c10::nullopt,
-      c10::nullopt,
-      c10::nullopt,
+      std::nullopt,
+      std::nullopt,
+      std::nullopt,
       prev_fwd_grad_mode);
 }
 
@@ -287,10 +287,10 @@ int64_t _vmap_decrement_nesting() {
 int64_t _func_increment_nesting(bool reapply_views) {
   return initAndPushDynamicLayer(
       TransformType::Functionalize,
-      c10::nullopt,
-      c10::nullopt,
-      c10::nullopt,
-      c10::nullopt,
+      std::nullopt,
+      std::nullopt,
+      std::nullopt,
+      std::nullopt,
       /*functionalize_add_back_views=*/reapply_views);
 }
 
@@ -528,7 +528,7 @@ void initFuncTorchBindings(PyObject* module) {
       "get_interpreter_stack", []() -> std::optional<std::vector<Interpreter>> {
         const auto& stack = getDynamicLayerStack();
         if (stack.empty()) {
-          return c10::nullopt;
+          return std::nullopt;
         }
         std::vector<Interpreter> result;
         result.reserve(stack.size());
@@ -540,7 +540,7 @@ void initFuncTorchBindings(PyObject* module) {
   m.def("peek_interpreter_stack", []() -> std::optional<Interpreter> {
     const auto& stack = getDynamicLayerStack();
     if (stack.empty()) {
-      return c10::nullopt;
+      return std::nullopt;
     }
     auto result = stack.back().interpreter();
     return result;
