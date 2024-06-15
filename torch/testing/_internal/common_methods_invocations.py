@@ -7113,7 +7113,8 @@ def sample_inputs_segment_reduce(op_info, device, dtype, requires_grad, *, mode=
 def sample_inputs__weight_norm(op_info, device, dtype, requires_grad, **kwargs):
     def _tensor(shape, dtype=dtype):
         return make_tensor(shape, dtype=dtype, device=device, requires_grad=requires_grad)
-    yield SampleInput(_tensor((3,0)), args=(_tensor((3, 0)),))
+    yield SampleInput(_tensor((S ,S)), args=(_tensor((S, S)),))
+    yield SampleInput(_tensor((M, 0)), args=(_tensor((M, 0)),))
 
 
 def sample_inputs_ravel(op_info, device, dtype, requires_grad, **kwargs):
@@ -21125,7 +21126,9 @@ op_db: List[OpInfo] = [
         '_weight_norm',
         aten_name='_weight_norm',
         dtypes=floating_types_and(torch.float16, torch.bfloat16),
-        supports_out=True,
+        supports_out=False,
+        supports_cow_input_no_materialize_forward=False,
+        supports_cow_input_no_materialize_backward=False,
         sample_inputs_func=sample_inputs__weight_norm,
     ),
 ]
