@@ -278,30 +278,28 @@ def _pipelined_produce_and_all2all(
     local_p2p_buf_0 = get_p2p_buf(rank, 0)
     local_p2p_buf_1 = get_p2p_buf(rank, 1)
 
-    # Directly write the local result to the destination.
-    # No need to go through the p2p buffers.
-    chunk_producer(rank, out_chunks[rank])
-
-    with torch.cuda.stream(backend.stream()):
-        chunk_producer((rank + 1) % group_size, local_p2p_buf_0)
-        backend.intra_node_barrier()
-        remote_p2p_buf = get_p2p_buf((rank - 1) % group_size, 0)
-        out_chunks[(rank - 1) % group_size].copy_(remote_p2p_buf)
-
-    for step in range(2, group_size):
+    for step in range(1, group_size):
         remote_rank = (rank - step) % group_size
         if step % 2 == 0:
             stream = torch.cuda.current_stream()
+            other_stream = backend.stream()
             p2p_buf = local_p2p_buf_1
             remote_p2p_buf = get_p2p_buf(remote_rank, 1)
         else:
             stream = backend.stream()
+            other_stream = torch.cuda.current_stream()
             p2p_buf = local_p2p_buf_0
             remote_p2p_buf = get_p2p_buf(remote_rank, 0)
         with torch.cuda.stream(stream):
             chunk_producer((rank + step) % group_size, p2p_buf)
             backend.intra_node_barrier()
+            # Make the other stream to wait for the barrier on the current
+            # stream to finish before chunk_producer to avoid the compute
+            # delaying the barrier.
+            other_stream.wait_stream(stream)
             out_chunks[remote_rank].copy_(remote_p2p_buf)
+
+    chunk_producer(rank, out_chunks[rank])
 
     torch.cuda.current_stream().wait_stream(backend.stream())
     backend.intra_node_barrier()
@@ -346,6 +344,11 @@ def _fused_all_gather_matmul(
     communication:
 
         all_gather_tensor(A_shard, gather_dim, group_name) @ B
+
+    Optimal stride order for A_shard - if A_shard.movedim(scatter_dim, 0) is
+    contiguous, no extra copy is required for input layout transformation.
+    Otherwise A_shard needs to be copied once.
+
     """
     if A_shard.dim() < 2:
         raise ValueError("A_shard must be a matrix")
@@ -368,43 +371,70 @@ def _fused_all_gather_matmul(
     if _current_p2p_usage_counter is not None:
         _current_p2p_usage_counter["fused_all_gather_matmul"] += 1
 
-    # Move the gather_dim to the front and flatten the tensor into a 2D matrix.
-    # The flattened tensor doesn't need to be contiguous (for computation
-    # efficiency), as _pipelined_all_gather_and_consume guarantees that shards
-    # passed to shard_consumer are contiguous.
-    x = A_shard.movedim(gather_dim, 0)
-    leading_dims = [group.size()] + list(x.shape[:-1])
-    x = x.flatten(0, -2)
+    with torch.profiler.record_function("fused_all_gather_matmul"):
+        # Move the gather_dim to the front and flatten the tensor into a 2D matrix.
+        # The flattened tensor doesn't need to be contiguous (for computation
+        # efficiency), as _pipelined_all_gather_and_consume guarantees that shards
+        # passed to shard_consumer are contiguous.
+        x = A_shard.movedim(gather_dim, 0)
+        leading_dims = [group.size()] + list(x.shape[:-1])
+        x = x.flatten(0, -2)
 
-    # Helper function for reverting the above transformation
-    def unflatten(t):
-        return t.view(*leading_dims, -1).flatten(0, 1).movedim(0, gather_dim)
+        # Helper function for reverting the above transformation
+        def unflatten(t):
+            return t.view(*leading_dims, -1).flatten(0, 1).movedim(0, gather_dim)
 
-    ag_out = x.new_empty(
-        x.shape[0] * group.size(),
-        x.shape[1],
-    )
-    outputs = [
-        x.new_empty(
+        ag_out = x.new_empty(
             x.shape[0] * group.size(),
-            B.shape[1],
+            x.shape[1],
         )
-        for B in Bs
-    ]
-    output_shards = [output.chunk(group.size()) for output in outputs]
+        outputs = [
+            x.new_empty(
+                x.shape[0] * group.size(),
+                B.shape[1],
+            )
+            for B in Bs
+        ]
+        output_shards = [output.chunk(group.size()) for output in outputs]
 
-    # Computing block-wise matmul along the first dim of A
-    def shard_consumer(shard: torch.Tensor, rank: int) -> None:
-        for idx, B in enumerate(Bs):
-            torch.mm(shard, B, out=output_shards[idx][rank])
+        # Computing block-wise matmul along the first dim of A
+        def shard_consumer(shard: torch.Tensor, rank: int) -> None:
+            for idx, B in enumerate(Bs):
+                torch.mm(shard, B, out=output_shards[idx][rank])
 
-    _pipelined_all_gather_and_consume(
-        x,
-        shard_consumer,
-        ag_out,
-        group,
-    )
-    return unflatten(ag_out), [unflatten(output) for output in outputs]
+        _pipelined_all_gather_and_consume(
+            x,
+            shard_consumer,
+            ag_out,
+            group,
+        )
+        return unflatten(ag_out), [unflatten(output) for output in outputs]
+
+
+def make_contiguous_for_perm(
+    t: torch.Tensor,
+    perm: List[int],
+) -> torch.Tensor:
+    """
+    Restride `t` such that `t.permute(perm)` is contiguous.
+    """
+    inv_perm = [0] * len(perm)
+    for i, p in enumerate(perm):
+        inv_perm[p] = i
+    return t.permute(perm).contiguous().permute(inv_perm)
+
+
+def restride_A_shard_for_fused_all_gather_matmul(
+    t: torch.Tensor,
+    scatter_dim: int,
+) -> torch.Tensor:
+    """
+    Restride the `A_shard` arg of `fused_all_gather_matmul` for optimal perf.
+    See doc for `fused_all_gather_matmul` for detail.
+    """
+    perm = list(range(len(t.shape)))
+    perm.insert(0, perm.pop(scatter_dim))
+    return make_contiguous_for_perm(t, perm)
 
 
 @torch.library.impl(lib, "fused_matmul_reduce_scatter", "Meta")
@@ -433,6 +463,10 @@ def _fused_matmul_reduce_scatter(
     communication:
 
         reduce_scatter_tensor(A @ B, reduce_op, scatter_dim, group_name)
+
+    Optimal stride order for A - if A.movedim(scatter_dim, 0) is contiguous, no
+    extra copy is required for input layout transformation. Otherwise A needs
+    to be copied once.
 
     NOTE:
     - The K dim across ranks are currently accumulated with bf16 with results
@@ -463,29 +497,43 @@ def _fused_matmul_reduce_scatter(
     if _current_p2p_usage_counter is not None:
         _current_p2p_usage_counter["fused_matmul_reduce_scatter"] += 1
 
-    # Move the gather_dim to the front and flatten the tensor into a 2D matrix
-    x = A.movedim(scatter_dim, 0)
-    leading_dims = [group.size()] + list(x.shape[:-1])
-    leading_dims[1] //= group.size()
-    x = x.flatten(0, -2)
-    shards = x.chunk(group.size())
+    with torch.profiler.record_function("fused_matmul_reduce_scatter"):
+        # Move the gather_dim to the front and flatten the tensor into a 2D matrix
+        x = A.movedim(scatter_dim, 0)
+        leading_dims = [group.size()] + list(x.shape[:-1])
+        leading_dims[1] //= group.size()
+        x = x.flatten(0, -2)
+        shards = x.chunk(group.size())
 
-    # Computing block-wise matmul along the first dim of A
-    def chunk_producer(rank: int, out: torch.Tensor) -> None:
-        torch.matmul(shards[rank], B, out=out)
+        # Computing block-wise matmul along the first dim of A
+        def chunk_producer(rank: int, out: torch.Tensor) -> None:
+            torch.matmul(shards[rank], B, out=out)
 
-    stacked_partials = x.new_empty(x.shape[0], B.shape[1])
+        stacked_partials = x.new_empty(x.shape[0], B.shape[1])
 
-    _pipelined_produce_and_all2all(
-        chunk_producer,
-        stacked_partials,
-        group,
-    )
-    # Ensures that the transpose and reduction produce contiguous result
-    # in a single reduction kernel.
-    return reduce_fn(
-        stacked_partials.view(*leading_dims, -1)
-        .movedim(1, scatter_dim + 1)
-        .movedim(0, scatter_dim),
-        dim=scatter_dim,
-    )
+        _pipelined_produce_and_all2all(
+            chunk_producer,
+            stacked_partials,
+            group,
+        )
+        # Ensures that the transpose and reduction produce contiguous result
+        # in a single reduction kernel.
+        return reduce_fn(
+            stacked_partials.view(*leading_dims, -1)
+            .movedim(1, scatter_dim + 1)
+            .movedim(0, scatter_dim),
+            dim=scatter_dim,
+        )
+
+
+def restride_A_for_fused_matmul_reduce_scatter(
+    t: torch.Tensor,
+    gather_dim: int,
+) -> torch.Tensor:
+    """
+    Restride the `A_shard` arg of `fused_matmul_reduce_scatter` for optimal
+    perf. See doc for `fused_matmul_reduce_scatter` for detail.
+    """
+    perm = list(range(len(t.shape)))
+    perm.insert(0, perm.pop(gather_dim))
+    return make_contiguous_for_perm(t, perm)
