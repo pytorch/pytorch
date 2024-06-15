@@ -3657,7 +3657,7 @@ class CPUReproTests(TestCase):
         self.common(fn, (x,))
         assert metrics.generated_cpp_vec_kernel_count == 1
 
-    def test_issue_128263(self):
+    def test_highp_to_lowp_cse_var_cache_with_store(self):
         # Fix issue: https://github.com/pytorch/pytorch/issues/128263
         input = torch.randn(5, 128, dtype=torch.float32)
         input2 = torch.randint(0, 10, (5, 128), dtype=torch.int8)
