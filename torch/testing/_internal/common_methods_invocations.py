@@ -7110,6 +7110,11 @@ def sample_inputs_segment_reduce(op_info, device, dtype, requires_grad, *, mode=
                           args=(reduce,),
                           kwargs=sample_input_kwargs)
 
+def sample_inputs__weight_norm(op_info, device, dtype, requires_grad, **kwargs):
+    def _tensor(shape, dtype=dtype):
+        return make_tensor(shape, dtype=dtype, device=device, requires_grad=requires_grad)
+    yield SampleInput(_tensor((3,0)), args=(_tensor((3, 0)),))
+
 
 def sample_inputs_ravel(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, dtype=dtype, device=device,
@@ -21115,6 +21120,13 @@ op_db: List[OpInfo] = [
                 device_type="cuda",
             ),
         ),
+    ),
+    OpInfo(
+        '_weight_norm',
+        aten_name='_weight_norm',
+        dtypes=floating_types_and(torch.float16, torch.bfloat16),
+        supports_out=True,
+        sample_inputs_func=sample_inputs__weight_norm,
     ),
 ]
 op_db += opinfo.definitions.op_db
