@@ -7,6 +7,8 @@ from torch._C._distributed_c10d import _SymmetricMemory
 from torch.distributed._symmetric_memory import (
     _fused_all_gather_matmul_fallback,
     _fused_matmul_reduce_scatter_fallback,
+    restride_A_for_fused_matmul_reduce_scatter,
+    restride_A_shard_for_fused_all_gather_matmul,
 )
 from torch.distributed.distributed_c10d import _get_process_group_store
 
@@ -218,6 +220,18 @@ class SymmetricMemoryTest(MultiProcessTestCase):
         assert output_0.stride() == output_1.stride()
 
         dist.destroy_process_group()
+
+    @parametrize("dim", [0, 1, 2])
+    def test_optimal_layout(self, dim: int) -> None:
+        t = torch.rand(8, 64, 32, 16)
+
+        x = restride_A_shard_for_fused_all_gather_matmul(t, dim)
+        self.assertTrue(x.movedim(dim, 0).is_contiguous())
+        self.assertTrue(torch.allclose(x, t))
+
+        x = restride_A_for_fused_matmul_reduce_scatter(t, dim)
+        self.assertTrue(x.movedim(dim, 0).is_contiguous())
+        self.assertTrue(torch.allclose(x, t))
 
 
 if __name__ == "__main__":

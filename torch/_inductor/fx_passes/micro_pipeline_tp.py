@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from typing import cast, List, Set, Tuple, Union
 
 import torch
+from .. import inductor_prims
 
 from ..pattern_matcher import (
     CallFunction,
@@ -219,7 +220,10 @@ def fuse_all_gather_matmul(match, shard, gather_dim, group_name):
         return
 
     c10d = torch.ops._c10d_functional
-    from torch.distributed._symmetric_memory import is_symm_mem_initialized
+    from torch.distributed._symmetric_memory import (
+        is_symm_mem_initialized,
+        restride_A_shard_for_fused_all_gather_matmul,
+    )
 
     if gather_dim >= len(shard.meta["val"].shape) - 1:
         # Decomposing the matmul on the K dimension is not supported
@@ -236,12 +240,22 @@ def fuse_all_gather_matmul(match, shard, gather_dim, group_name):
     if len(matmuls) == 0:
         return
 
-    shard_node = ag_node.args[0]
+    shard_node = cast(torch.fx.Node, ag_node.args[0])
     B_nodes = [matmul.B_node for matmul in matmuls]
 
     # Fuse the all_gather_tensor with the eligible matmuls
     graph = ag_node.graph
     with graph.inserting_before(ag_node):
+        if "val" in shard_node.meta:
+            restrided = restride_A_shard_for_fused_all_gather_matmul(
+                shard_node.meta["val"],
+                gather_dim,
+            )
+            shard_node = graph.call_function(
+                inductor_prims.force_stride_order,
+                args=(shard_node, restrided.stride()),
+            )
+
         fused_node = graph.call_function(
             torch.ops.symm_mem.fused_all_gather_matmul.default,
             args=(shard_node, B_nodes, gather_dim, group_name),
@@ -301,7 +315,10 @@ def fuse_matmul_reduce_scatter(match, rs_input, reduce_op, scatter_dim, group_na
         return
 
     c10d = torch.ops._c10d_functional
-    from torch.distributed._symmetric_memory import is_symm_mem_initialized
+    from torch.distributed._symmetric_memory import (
+        is_symm_mem_initialized,
+        restride_A_for_fused_matmul_reduce_scatter,
+    )
 
     if not is_symm_mem_initialized(group_name):
         return
@@ -336,6 +353,17 @@ def fuse_matmul_reduce_scatter(match, rs_input, reduce_op, scatter_dim, group_na
 
     graph = rs_res_node.graph
     with graph.inserting_before(rs_res_node):
+        if "val" in A_node.meta:
+            val = A_node.meta["val"]
+            restrided = restride_A_for_fused_matmul_reduce_scatter(
+                A_node.meta["val"],
+                scatter_dim,
+            )
+            A_node = graph.call_function(
+                inductor_prims.force_stride_order,
+                args=(A_node, restrided.stride()),
+            )
+
         fused_node = graph.call_function(
             torch.ops.symm_mem.fused_matmul_reduce_scatter.default,
             args=(A_node, B_node, reduce_op, scatter_dim, group_name),
