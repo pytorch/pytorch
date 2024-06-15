@@ -440,7 +440,7 @@ inline at::Tensor newLikeFlat(
   sizes.insert(sizes.end(), t.sizes().begin(), t.sizes().end());
   strides.insert(strides.end(), t.strides().begin(), t.strides().end());
   return at::empty_strided(
-      sizes, strides, t.options().memory_format(c10::nullopt));
+      sizes, strides, t.options().memory_format(std::nullopt));
 }
 
 inline at::Tensor newLikeFlat(std::vector<at::Tensor>& tensors) {
