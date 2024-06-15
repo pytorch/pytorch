@@ -69,7 +69,7 @@ auto print_type(const c10::Type& t) -> std::optional<std::string> {
   if (auto dyn = t.castRaw<c10::DynamicType>()) {
     return dyn->fallback()->annotation_str();
   }
-  return c10::nullopt;
+  return std::nullopt;
 }
 
 class FlatbufferSerializer {
@@ -306,7 +306,7 @@ flatbuffers::Offset<mobile::serialization::Function> FlatbufferSerializer::
     if (auto dyn = t.castRaw<c10::DynamicType>()) {
       return dyn->fallback()->annotation_str();
     }
-    return c10::nullopt;
+    return std::nullopt;
   };
 
   flatbuffers::Offset<mobile::serialization::Schema> schema_offset = 0;
