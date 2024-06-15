@@ -1573,6 +1573,11 @@ class TestIndexing(TestCase):
         indices = torch.tensor([[1], [0]])
         values = torch.tensor([[-1], [-1]], dtype=dtype)
         _test_against_numpy(t, indices, values, 1)
+        _test_against_numpy(t, indices, values, 0)
+
+        indices = torch.tensor([[1, 0]])
+        values = torch.tensor([[-1, -2]], dtype=dtype)
+        _test_against_numpy(t, indices, values, 1)
 
     @onlyCUDA
     @dtypes(torch.float)
