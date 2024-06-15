@@ -1772,6 +1772,34 @@ TORCH_LIBRARY(test_autograd_cpp_node_data_dependent, m) {
             out = compiled_fn(activations)
             self.assertTrue(len(activations) == 0)
 
+    def test_callback_graph_break_throws_error(self):
+        called = [0]
+
+        def callback_final():
+            called[0] += 1
+
+        class MyFunc(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, input):
+                return input
+
+            @staticmethod
+            @torch.autograd.function.once_differentiable
+            def backward(ctx, grad):
+                torch.autograd.Variable._execution_engine.queue_callback(callback_final)
+                torch._dynamo.graph_break()
+                return grad
+
+        a = torch.rand((3, 3), requires_grad=True)
+        # TODO(yf225): regex the tx.one_graph assert error!
+        with compiled_autograd.enable(make_compiler_fn(fullgraph=False)):
+            b = MyFunc.apply(a)
+            b.sum().backward()
+
+        # self.assertEqual(called[0], 1)
+
+    # TODO(yf225): add a new test for memory check for tensors involved the callback
+
     @unittest.skipIf(not HAS_CUDA, "requires cuda")
     def test_cudagraphs_cpu_division(self):
         from torch._dynamo.testing import reduce_to_scalar_loss
