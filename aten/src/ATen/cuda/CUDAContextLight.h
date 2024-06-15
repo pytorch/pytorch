@@ -13,7 +13,7 @@
 
 #ifdef CUDART_VERSION
 #include <cusolverDn.h>
-#include <cusolverSp.h>
+#include <cuDSS.h>
 #endif
 
 #if defined(USE_ROCM)
@@ -87,7 +87,7 @@ TORCH_CUDA_CPP_API void clearCublasWorkspaces();
 
 #if defined(CUDART_VERSION) || defined(USE_ROCM)
 TORCH_CUDA_CPP_API cusolverDnHandle_t getCurrentCUDASolverDnHandle();
-TORCH_CUDA_CPP_API cusolverSpHandle_t getCurrentCUDASolverSpHandle();
+TORCH_CUDA_CPP_API cudssHandle_t getCurrentCudssHandle();
 #endif
 
 } // namespace at::cuda

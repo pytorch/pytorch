@@ -8,26 +8,6 @@
 
 namespace at::cuda::solver {
 
-template<>
-void lsvchol<float, float>(CUDASOLVER_LSVCHOL_ARGTYPES(float, float))
-{
-  TORCH_CUSOLVER_CHECK(cusolverSpScsrlsvchol(handle,m,nnz,descrA,csrVal,csrRowPtr,csrColInd,b,tol,reorder,x,singularity));
-}
-template<>
-void lsvchol<double, double>(CUDASOLVER_LSVCHOL_ARGTYPES(double, double))
-{
-  TORCH_CUSOLVER_CHECK(cusolverSpDcsrlsvchol(handle,m,nnz,descrA,csrVal,csrRowPtr,csrColInd,b,tol,reorder,x,singularity));
-}
-template<>
-void lsvchol<c10::complex<double>, double>(CUDASOLVER_LSVCHOL_ARGTYPES(c10::complex<double>, double))
-{
-  TORCH_CUSOLVER_CHECK(cusolverSpZcsrlsvchol(handle,m,nnz,descrA,reinterpret_cast<const cuDoubleComplex*>(csrVal),csrRowPtr,csrColInd,reinterpret_cast<const cuDoubleComplex*>(b),tol,reorder,reinterpret_cast<cuDoubleComplex*>(x),singularity));
-}
-template<>
-void lsvchol<c10::complex<float>, float>(CUDASOLVER_LSVCHOL_ARGTYPES(c10::complex<float>, float))
-{
-  TORCH_CUSOLVER_CHECK(cusolverSpCcsrlsvchol(handle,m,nnz,descrA,reinterpret_cast<const cuComplex*>(csrVal),csrRowPtr,csrColInd,reinterpret_cast<const cuComplex*>(b),tol,reorder,reinterpret_cast<cuComplex*>(x),singularity));
-}
 
 template <>
 void getrf<double>(

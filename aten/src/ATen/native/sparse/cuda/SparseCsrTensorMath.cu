@@ -11,8 +11,6 @@
 #include <ATen/native/SparseTensorUtils.h>
 #include <algorithm>
 #include <ATen/AccumulateType.h>
-#include <ATen/native/cuda/linalg/CUDASolver.h>
-#include <ATen/cuda/CUDASparseDescriptors.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/NativeFunctions.h>
@@ -710,9 +708,9 @@ struct ReductionMulOp {
 
 template <typename scalar_t>
 void _apply_sparse_csr_linear_solve(
-  const Tensor& input,
-  const Tensor& other,
-  const Tensor& result,
+  const Tensor& A,
+  const Tensor& b,
+  const Tensor& x,
   int &_singularity) {
 #ifdef USE_ROCM
   TORCH_CHECK(
@@ -720,28 +718,68 @@ void _apply_sparse_csr_linear_solve(
       "Calling torch.linalg.solve with sparse tensors requires compiling ",
       "PyTorch with CUDA and not supported in ROCm build.");
 #else
-  using value_t = typename c10::scalar_value_type<scalar_t>::type;
-  auto values = input.values();
-  const scalar_t *values_data_ptr = values.data_ptr<scalar_t>();
-  auto crow_indices = input.crow_indices().to(kInt);
-  const int *crow_indices_data_ptr = crow_indices.data_ptr<int>();
-  auto col_indices = input.col_indices().to(kInt);
-  const int *col_indices_data_ptr = col_indices.data_ptr<int>();
-  auto handle = at::cuda::getCurrentCUDASolverSpHandle();
-  auto descrA = at::cuda::sparse::CuSparseMatDescriptor();
+  TORCH_CHECK(A.is_sparse_csr(), "A must be a CSR matrix");
+  TORCH_CHECK(b.dim() == 1, "b must be a 1D tensor");
+  TORCH_CHECK(A.dtype() == b.dtype(), "A and b must have the same dtype");
 
-  const scalar_t *b = other.data_ptr<scalar_t>();
-  int n = (int)input.size(-1);
-  int nnzA = input._nnz();
-  value_t tol = 0.0;
-  // default reordering of symrcm
-  // Should reorder be an argument provided for users to choose between the following?
-  // symrcm, symamd, csrmetisnd (1, 2, 3)
-  int reorder = 0;
-  scalar_t *x = result.data_ptr<scalar_t>();
+  // Device pointers and scalar shape parameters, matrix properties
+  
+  torch::Tensor crow = A.crow_indices();
+  torch::Tensor col = A.col_indices();
+  if (crow.dtype() != torch::kInt32) {
+      crow = crow.to(torch::kInt32);
+      col = col.to(torch::kInt32);
+  }
+  int*    rowOffsets = crow.data<int>();
+  int*    colIndices = col.data<int>();
+  torch::Tensor values     = A.values();
+  //---------------------------------------------------------------------------------
+  // cuDSS data structures and handle initialization
+  cudssConfig_t             config;
+  cudssMatrix_t             b_mt;
+  cudssMatrix_t             A_mt;
+  cudssMatrix_t             x_mt;
+  cudssHandle_t             handle = getCurrentCudssHandle();
 
-  at::cuda::solver::lsvchol<scalar_t, value_t>(handle, n, nnzA, descrA.descriptor(), values_data_ptr,
-    crow_indices_data_ptr, col_indices_data_ptr, b, tol, reorder, x, &_singularity);
+  cudssConfigCreate(&config);
+  // cudssAlgType_t reorder_alg = CUDSS_ALG_3;
+  // cudssConfigSet(config, CUDSS_CONFIG_REORDERING_ALG, &reorder_alg, sizeof(cudssAlgType_t));
+  
+  cudssDataCreate(handle, &cudss_data);
+
+  AT_DISPATCH_FLOATING_TYPES(values.type(), "create_matrix", ([&] {
+    scalar_t* values_ptr = values.data<scalar_t>();
+    scalar_t* b_ptr = b.data<scalar_t>();
+    scalar_t* x_ptr = x.data<scalar_t>();
+    auto CUDA_R_TYP = (values.type().scalarType() == torch::ScalarType::Double ? CUDA_R_64F : CUDA_R_32F);
+    cudssMatrixCreateDn(&b_mt, b.size(0), 1, b.size(0), b_ptr, CUDA_R_TYP, CUDSS_LAYOUT_COL_MAJOR);
+    cudssMatrixCreateDn(&x_mt, x.size(0), 1, x.size(0), x_ptr, CUDA_R_TYP, CUDSS_LAYOUT_COL_MAJOR);
+    cudssMatrixCreateCsr(&A_mt, A.size(0), A.size(1),  A._nnz(), rowOffsets, rowOffsets + crow.size(0), colIndices, values_ptr, CUDA_R_32I, CUDA_R_TYP, CUDSS_MTYPE_GENERAL, CUDSS_MVIEW_FULL, CUDSS_BASE_ZERO);
+  }));
+  //---------------------------------------------------------------------------------
+  
+  // Reordering & symbolic factorization
+  cudssExecute(handle, CUDSS_PHASE_ANALYSIS, config, cudss_data, A_mt, x_mt, b_mt);
+  // https://docs.nvidia.com/cuda/cudss/types.html?highlight=cudss_data_perm_row
+  //---------------------------------------------------------------------------------
+  // Numerical factorization
+  cudssExecute(handle, CUDSS_PHASE_FACTORIZATION, config, cudss_data, A_mt, x_mt, b_mt);
+
+  //---------------------------------------------------------------------------------
+  // Solving the system
+  cudssExecute(handle, CUDSS_PHASE_SOLVE, config, cudss_data, A_mt, x_mt, b_mt);
+
+  //---------------------------------------------------------------------------------
+  // (optional) Extra data can be retrieved from the cudssData_t object
+  // For example, diagonal of the factorized matrix or the reordering permutation
+
+  //---------------------------------------------------------------------------------
+  // Destroy the opaque objects
+  cudssConfigDestroy(config);
+  cudssDataDestroy(handle, cudss_data);
+  cudssMatrixDestroy(A_mt);
+  cudssMatrixDestroy(x_mt);
+  cudssMatrixDestroy(b_mt);
 #endif
 }
 

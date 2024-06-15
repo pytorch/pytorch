@@ -13,21 +13,9 @@ namespace at {
 namespace cuda {
 namespace solver {
 
-#define CUDASOLVER_LSVCHOL_ARGTYPES(Dtype, Vtype)  \
+#define CUDSS_ARGTYPES(Dtype, Vtype)  \
     cusolverSpHandle_t handle, int m, int nnz, const cusparseMatDescr_t descrA, const Dtype *csrVal, const int *csrRowPtr, const int *csrColInd, const Dtype *b, Vtype tol, int reorder, Dtype *x, int *singularity
 
-template<class Dtype, class Vtype>
-void lsvchol(CUDASOLVER_LSVCHOL_ARGTYPES(Dtype, Vtype)) {
-  static_assert(false&&sizeof(Dtype)&&sizeof(Vtype), "at::cuda::solver::lsvchol: not implemented");
-}
-template<>
-void lsvchol<float, float>(CUDASOLVER_LSVCHOL_ARGTYPES(float, float));
-template<>
-void lsvchol<double, double>(CUDASOLVER_LSVCHOL_ARGTYPES(double, double));
-template<>
-void lsvchol<c10::complex<double>, double>(CUDASOLVER_LSVCHOL_ARGTYPES(c10::complex<double>, double));
-template<>
-void lsvchol<c10::complex<float>, float>(CUDASOLVER_LSVCHOL_ARGTYPES(c10::complex<float>, float));
 
 #define CUDASOLVER_GETRF_ARGTYPES(Dtype)  \
     cusolverDnHandle_t handle, int m, int n, Dtype* dA, int ldda, int* ipiv, int* info

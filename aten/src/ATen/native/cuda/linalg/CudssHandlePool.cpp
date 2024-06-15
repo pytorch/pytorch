@@ -6,11 +6,11 @@
 namespace at::cuda {
 namespace {
 
-void createCusolverSpHandle(cusolverSpHandle_t *handle) {
-  TORCH_CUSOLVER_CHECK(cusolverSpCreate(handle));
+void createCudssHandle(cudssHandle_t *handle) {
+  TORCH_CUDSS_CHECK(cudssCreate(handle));
 }
 
-void destroyCusolverSpHandle(cusolverSpHandle_t handle) {
+void destroyCudssHandle(cudssHandle_t handle) {
 // this is because of something dumb in the ordering of
 // destruction. Sometimes atexit, the cuda context (or something)
 // would already be destroyed by the time this gets destroyed. It
@@ -20,15 +20,15 @@ void destroyCusolverSpHandle(cusolverSpHandle_t handle) {
 #ifdef NO_CUDNN_DESTROY_HANDLE
   (void)handle; // Suppress unused variable warning
 #else
-    cusolverSpDestroy(handle);
+    cudssDestroy(handle);
 #endif
 }
 
-using CuSolverSpPoolType = DeviceThreadHandlePool<cusolverSpHandle_t, createCusolverSpHandle, destroyCusolverSpHandle>;
+using CudssPoolType = DeviceThreadHandlePool<cudssHandle_t, createCudssHandle, destroyCudssHandle>;
 
 } // namespace
 
-cusolverSpHandle_t getCurrentCUDASolverSpHandle() {
+cudssHandle_t getCurrentCudssHandle() {
   c10::DeviceIndex device = 0;
   AT_CUDA_CHECK(c10::cuda::GetDevice(&device));
 
@@ -37,13 +37,13 @@ cusolverSpHandle_t getCurrentCUDASolverSpHandle() {
   // See: https://github.com/pytorch/pytorch/pull/22405
   // This thread local unique_ptrs will be destroyed when the thread terminates,
   // releasing its reserved handles back to the pool.
-  static auto pool = std::make_shared<CuSolverSpPoolType>();
-  thread_local std::unique_ptr<CuSolverSpPoolType::PoolWindow> myPoolWindow(
+  static auto pool = std::make_shared<CudssPoolType>();
+  thread_local std::unique_ptr<CudssPoolType::PoolWindow> myPoolWindow(
       pool->newPoolWindow());
 
   auto handle = myPoolWindow->reserve(device);
   auto stream = c10::cuda::getCurrentCUDAStream();
-  TORCH_CUSOLVER_CHECK(cusolverSpSetStream(handle, stream));
+  TORCH_CUDSS_CHECK(cudssSetStream(handle, stream));
   return handle;
 }
 
