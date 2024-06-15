@@ -125,7 +125,7 @@ namespace {
 // - when we resize to a larger size, it acts as a mutation
 // - when we resize to a smaller size, it acts as a view
 // See Note [resize_ in Functionalization] for more dtails
-static const at::Tensor & resize__functionalization(c10::DispatchKeySet dispatchKeySet, const at::Tensor & self, at::IntArrayRef size, c10::optional<at::MemoryFormat> memory_format) {
+static const at::Tensor & resize__functionalization(c10::DispatchKeySet dispatchKeySet, const at::Tensor & self, at::IntArrayRef size, std::optional<at::MemoryFormat> memory_format) {
   // First unwrap the tensor arguments
   at::Tensor self_;
   if (at::functionalization::impl::isFunctionalTensor(self)) {
@@ -178,7 +178,8 @@ static const at::Tensor & resize__functionalization(c10::DispatchKeySet dispatch
     },
     [size = size.vec()](const at::Tensor & base, const at::Tensor & mutated_view, int64_t mutated_view_idx) -> at::Tensor {
       return base.as_strided_scatter(mutated_view, size, c10::contiguous_strides(size));
-    }
+    },
+    /*has_symbolic_inputs=*/false
   );
   at::functionalization::impl::mutate_view_meta(self, view_meta);
   return self;
@@ -210,7 +211,13 @@ static at::Tensor lift_fresh_functionalize_copy(const at::Tensor & self) {
   // but that isn't really a use case today.
   // Needed for https://github.com/pytorch/pytorch/issues/105327
   if (at::functionalization::impl::isFunctionalTensor(self)) {
-    return self.clone();
+    // Note [Composite Functionalization under PreDispatch mode]
+    // When we are tracing under PreDispatch, PreDispatch key will be
+    // in the local include TLS. As a result, when we redispatch here,
+    // we will end up hitting PreDispatch stack first. So, we should
+    // directly redispatch to the functionalize key manually.
+    static auto op = c10::Dispatcher::singleton().findSchemaOrThrow("aten::clone", "").typed<at::Tensor(const at::Tensor &, std::optional<at::MemoryFormat>)>();
+    return op.redispatch(c10::DispatchKeySet({c10::DispatchKey::Functionalize}), self, c10::nullopt);
   }
 
   at::AutoDispatchSkipFunctionalize guard;
@@ -218,7 +225,7 @@ static at::Tensor lift_fresh_functionalize_copy(const at::Tensor & self) {
   return at::functionalization::impl::to_functional_tensor(out);
 }
 
-static bool device_opted_into_functionalization(c10::Device self_device, c10::optional<c10::Device> tgt_device) {
+static bool device_opted_into_functionalization(c10::Device self_device, std::optional<c10::Device> tgt_device) {
     // If the target device is empty, then the output tensor should be on the same device as the input
     auto real_tgt_device = tgt_device.has_value() ? tgt_device.value() : self_device;
     return real_tgt_device.type() == c10::DeviceType::XLA || real_tgt_device.type() == c10::DeviceType::Lazy;
@@ -228,12 +235,12 @@ static bool device_opted_into_functionalization(c10::Device self_device, c10::op
 // We should probably get rid of this though.
 static at::Tensor _to_copy_functionalize(
         const at::Tensor & self,
-        c10::optional<at::ScalarType> dtype,
-        c10::optional<at::Layout> layout,
-        c10::optional<at::Device> device,
-        c10::optional<bool> pin_memory,
+        std::optional<at::ScalarType> dtype,
+        std::optional<at::Layout> layout,
+        std::optional<at::Device> device,
+        std::optional<bool> pin_memory,
         bool non_blocking,
-        c10::optional<at::MemoryFormat> memory_format) {
+        std::optional<at::MemoryFormat> memory_format) {
   at::Tensor self_;
   if (at::functionalization::impl::isFunctionalTensor(self)) {
     // sync any pending updates
@@ -292,13 +299,16 @@ static at::Tensor _unsafe_view_functionalize(const at::Tensor & self, at::SymInt
     tmp_output = at::_unsafe_view_symint(self_, size);
   }
 
+  bool has_symbolic_inputs = std::any_of(size.begin(), size.end(), [=](auto& s) { return s.is_symbolic(); });
+
   at::functionalization::ViewMeta view_meta = at::functionalization::ViewMeta(
     [size = size.vec()](const at::Tensor & base, int64_t mutated_view_idx) -> at::Tensor {
       return at::_unsafe_view_symint(base, size);
     },
     [size = size.vec()](const at::Tensor & base, const at::Tensor & mutated_view, int64_t mutated_view_idx) -> at::Tensor {
       return at::_unsafe_view_symint(mutated_view, base.sym_sizes());
-    }
+    },
+    /*has_symbolic_inputs=*/has_symbolic_inputs
   );
 
   auto out = at::functionalization::impl::create_functional_tensor_with_view_meta(tmp_output, self, std::move(view_meta));
@@ -316,19 +326,22 @@ static at::Tensor& set__functionalize(at::Tensor& self, const at::Tensor& src) {
   TORCH_CHECK(at::functionalization::impl::isFunctionalTensor(self) || !at::functionalization::impl::isFunctionalTensor(src),
     "set__functionalize: Tried to mutate a non-functional tensor with a functional tensor, which is not allowed");
 
-  TORCH_CHECK(at::functionalization::impl::isFunctionalTensor(src),
-    "set__functionalize: We do not currently support x.set_(y) where y is not a FunctionalTensor. Please file an issue");
-
   // nop case
   if (!at::functionalization::impl::isFunctionalTensor(self) && !at::functionalization::impl::isFunctionalTensor(src)) {
     at::AutoDispatchSkipFunctionalize guard;
     return self.set_(src);
   }
 
+  TORCH_CHECK(at::functionalization::impl::isFunctionalTensor(src),
+    "set__functionalize: We do not currently support x.set_(y) where y is not a FunctionalTensor. Please file an issue");
+
   TORCH_INTERNAL_ASSERT(at::functionalization::impl::isFunctionalTensor(self));
   TORCH_INTERNAL_ASSERT(at::functionalization::impl::isFunctionalTensor(src));
   auto self_impl = at::functionalization::impl::unsafeGetFunctionalWrapper(self);
   auto src_impl = at::functionalization::impl::unsafeGetFunctionalWrapper(src);
+  // See Note [Ordering of resize_() and set_()]
+  TORCH_CHECK(!self_impl->was_inductor_storage_resized(),
+    "storage_resize_() followed by set_() in torch.compile is not supported today");
   self_impl->set__impl(src_impl);
   return self;
 }

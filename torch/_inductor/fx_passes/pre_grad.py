@@ -1,6 +1,8 @@
+# mypy: allow-untyped-defs
 import copy
+import itertools
 import logging
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 import torch
 import torch.nn as nn
@@ -10,6 +12,7 @@ from torch.fx.experimental.optimization import (
     matches_module_pattern,
     replace_node_module,
 )
+from torch.fx.passes.graph_transform_observer import GraphTransformObserver
 from torch.fx.passes.shape_prop import ShapeProp
 from torch.nn import functional as F
 from torch.nn.utils.fusion import fuse_conv_bn_eval, fuse_conv_bn_weights
@@ -23,7 +26,7 @@ from ..pattern_matcher import (
     stable_topological_sort,
 )
 from ..utils import is_cpu_device, pass_execution_and_save
-from .group_batch_fusion import group_batch_fusion_passes
+from .group_batch_fusion import group_batch_fusion_passes, PRE_GRAD_FUSIONS
 from .misc_patterns import numpy_compat_normalization
 from .split_cat import PRE_GRAD_PATTERNS
 
@@ -84,12 +87,6 @@ def remove_split_ops(graph, shape_prop):
     return None
 
 
-# split_cat related fusions
-pattern_matcher_passes = list(PRE_GRAD_PATTERNS.values())
-# non-split_cat related fusions
-# TODO: move them to the fusions dict too.
-pattern_matcher_passes.append(efficient_conv_bn_eval_pass)
-
 pattern_matcher_passes_aten: List[PatternMatcherPass] = [
     remove_split_with_size_one_pass_aten,
     merge_getitem_cat_pass_aten,
@@ -133,6 +130,7 @@ def pre_grad_passes(gm: torch.fx.GraphModule, example_inputs=None):
             def shape_prop(mod) -> None:
                 ShapeProp(
                     gm=mod,
+                    # pyre-fixme[16]: Module `torch._dynamo.utils` has no attribute `detect_fake_mode`
                     fake_mode=detect_fake_mode(example_inputs),
                 ).propagate(*example_inputs)
 
@@ -201,22 +199,38 @@ def pre_grad_passes(gm: torch.fx.GraphModule, example_inputs=None):
             if example_inputs is not None:
                 gm = fuse_fx(gm, example_inputs)
             numpy_compat_normalization(gm.graph)
-
             optimus_scuba_log["before_recompile_pre_grad"] = upload_graph(gm.graph)
             group_batch_fusion_passes(gm.graph, pre_grad=True)
-            for pattern_matcher_pass in pattern_matcher_passes:
+            for pass_name in config.pre_grad_fusion_options:
+                # skip all patterns for group batch fusions
+                if pass_name in PRE_GRAD_FUSIONS:
+                    continue
+                pattern_matcher_pass = PRE_GRAD_PATTERNS[pass_name]
                 inductor_before_change = save_inductor_dict(
                     [pattern_matcher_pass.pass_name]
                 )
-                pattern_matcher_pass.apply(gm.graph)  # type: ignore[arg-type]
+                # we support run same pattern multiple times, the default is to run only once
+                counter = config.pre_grad_fusion_options[pass_name].get("counter", 1)
+                for _ in range(counter):
+                    pattern_matcher_pass.apply(gm.graph)  # type: ignore[arg-type]
                 if not is_same_dict(counters["inductor"], inductor_before_change):
                     optimus_scuba_log[
                         f"{pattern_matcher_pass.pass_name}_pre_grad"
                     ] = upload_graph(gm.graph)
+            # TODO: move efficient_conv_bn_eval_pass to the fusions dict too.
+            efficient_conv_bn_eval_pass.apply(gm.graph)  # type: ignore[arg-type]
 
     if config.pre_grad_custom_pass is not None:
-        config.pre_grad_custom_pass(gm.graph)
+        with GraphTransformObserver(
+            gm, "pre_grad_custom_pass", config.trace.log_url_for_graph_xform
+        ):
+            config.pre_grad_custom_pass(gm.graph)
     stable_topological_sort(gm.graph)
+
+    from .quantization import quant_lift_up
+
+    quant_lift_up(gm)
+
     gm.graph.lint()
     gm.recompile()
     optimus_scuba_log["after_recompile_pre_grad"] = upload_graph(gm.graph)
@@ -243,7 +257,7 @@ def pre_grad_passes(gm: torch.fx.GraphModule, example_inputs=None):
 
 def fuse_fx(gm: torch.fx.GraphModule, example_inputs) -> torch.fx.GraphModule:
     is_cpu = is_cpu_device(example_inputs)
-
+    # pyre-fixme[16]: Module `torch._dynamo.utils` has no attribute `detect_fake_mode`
     fake_mode = detect_fake_mode(example_inputs)
 
     gm = sink_cat_after_pointwise(gm)
@@ -251,16 +265,31 @@ def fuse_fx(gm: torch.fx.GraphModule, example_inputs) -> torch.fx.GraphModule:
         # For linear permute fusion, we need to check input info to identify
         # and perform proper permutation/transpose
         ShapeProp(gm, fake_mode=fake_mode).propagate(*example_inputs)
-        gm = linear_permute_fusion(gm)
-        gm = permute_linear_fusion(gm)
-        gm = permute_matmul_fusion(gm)
+        with GraphTransformObserver(
+            gm, "linear_permute_fusion", config.trace.log_url_for_graph_xform
+        ):
+            gm = linear_permute_fusion(gm)
+        with GraphTransformObserver(
+            gm, "permute_linear_fusion", config.trace.log_url_for_graph_xform
+        ):
+            gm = permute_linear_fusion(gm)
+        with GraphTransformObserver(
+            gm, "permute_matmul_fusion", config.trace.log_url_for_graph_xform
+        ):
+            gm = permute_matmul_fusion(gm)
 
     # make sure the autograd is disabled.
     if torch.is_grad_enabled() or not is_cpu:
         return gm
     if config.freezing:
-        gm = remove_identity(gm)
-        gm = fuse_conv_bn(gm)
+        with GraphTransformObserver(
+            gm, "remove_identity", config.trace.log_url_for_graph_xform
+        ):
+            gm = remove_identity(gm)
+        with GraphTransformObserver(
+            gm, "fuse_conv_bn", config.trace.log_url_for_graph_xform
+        ):
+            gm = fuse_conv_bn(gm)
     return gm
 
 
@@ -307,7 +336,43 @@ def fuse_conv_bn(gm: torch.fx.GraphModule, inplace=False) -> torch.fx.GraphModul
         (torch.nn.Conv3d, F.batch_norm),
     ]
     modules = dict(gm.named_modules())
+
+    class ConvBNFusion:
+        def __init__(
+            self,
+            bn_node,
+            conv_module,
+            bn_module=None,  # For BN Module
+            bn_running_mean=None,  # For Functional BN
+            bn_running_var=None,
+            bn_eps=None,
+            bn_weight=None,
+            bn_bias=None,
+        ):
+            self.bn_nodes = [
+                bn_node,
+            ]
+            self.conv_module = conv_module
+            self.bn_module = bn_module
+            self.bn_running_mean = bn_running_mean
+            self.bn_running_var = bn_running_var
+            self.bn_eps = bn_eps
+            self.bn_weight = bn_weight
+            self.bn_bias = bn_bias
+            self.fusion_enabled = True
+
+        def add_bn_node(self, bn_node):
+            self.bn_nodes.append(bn_node)
+
+        def disable_fusion(self):
+            self.fusion_enabled = False
+
+        def is_fusion_enabled(self):
+            return self.fusion_enabled
+
+    conv_bn_to_fuse: Dict[int, ConvBNFusion] = {}
     for pattern in modules_patterns:
+        conv_bn_to_fuse.clear()
         for node in gm.graph.nodes:
             if matches_module_pattern(pattern, node, modules):
                 if len(node.args[0].users) > 1:  # Output of conv is used by other nodes
@@ -319,12 +384,34 @@ def fuse_conv_bn(gm: torch.fx.GraphModule, inplace=False) -> torch.fx.GraphModul
                     continue
                 if not bn.track_running_stats:
                     continue
+
+                # Do hash based on the module name of conv
+                hash_id = hash(node.args[0].target)
+                if hash_id not in conv_bn_to_fuse:
+                    conv_bn_to_fuse[hash_id] = ConvBNFusion(node, conv, bn)
+                else:
+                    if bn == conv_bn_to_fuse[hash_id].bn_module:
+                        # Do fusion if same bn module
+                        conv_bn_to_fuse[hash_id].add_bn_node(node)
+                    else:
+                        # Disable the conv bn folding if conv shared by different bn
+                        conv_bn_to_fuse[hash_id].disable_fusion()
+
+        for conv_bn_fusion in conv_bn_to_fuse.values():
+            if conv_bn_fusion.is_fusion_enabled():
+                bn_nodes = conv_bn_fusion.bn_nodes
+                conv = conv_bn_fusion.conv_module
+                bn = conv_bn_fusion.bn_module
+
                 fused_conv = fuse_conv_bn_eval(conv, bn)
-                replace_node_module(node.args[0], modules, fused_conv)
-                node.replace_all_uses_with(node.args[0])
-                gm.graph.erase_node(node)
+                for bn_node in bn_nodes:
+                    replace_node_module(bn_node.args[0], modules, fused_conv)
+                    bn_node.replace_all_uses_with(bn_node.args[0])
+                    gm.graph.erase_node(bn_node)
+
     gm.graph.lint()
     for pattern in module_function_patterns:
+        conv_bn_to_fuse.clear()
         for node in gm.graph.nodes:
             if matches_module_function_pattern(pattern, node, modules):
                 # TODO: support kwargs.
@@ -337,8 +424,17 @@ def fuse_conv_bn(gm: torch.fx.GraphModule, inplace=False) -> torch.fx.GraphModul
                     continue
                 if type(bn_eps) is not float:
                     continue
+
+                def _used_by_same_conv_module(users):
+                    conv_module_name = users[0].args[0].target
+                    return all(
+                        conv_module_name == user.args[0].target for user in users
+                    )
+
                 bn_args_is_constant = all(
-                    n.op == "get_attr" and len(n.users) == 1 for n in node.args[1:5]
+                    n.op == "get_attr"
+                    and (len(n.users) == 1 or _used_by_same_conv_module(list(n.users)))
+                    for n in node.args[1:5]
                 )
                 if not bn_args_is_constant:
                     continue
@@ -348,6 +444,48 @@ def fuse_conv_bn(gm: torch.fx.GraphModule, inplace=False) -> torch.fx.GraphModul
                 bn_bias = fetch_attr(node.args[4].target, gm)
                 if bn_running_mean is None or bn_running_var is None:
                     continue
+
+                # Do hash based on the module name of conv
+                hash_id = hash(node.args[0].target)
+                if hash_id not in conv_bn_to_fuse:
+                    conv_bn_to_fuse[hash_id] = ConvBNFusion(
+                        node,
+                        conv,
+                        bn_running_mean=bn_running_mean,
+                        bn_running_var=bn_running_var,
+                        bn_eps=bn_eps,
+                        bn_weight=bn_weight,
+                        bn_bias=bn_bias,
+                    )
+                else:
+                    if (
+                        hash(bn_running_mean)
+                        == hash(conv_bn_to_fuse[hash_id].bn_running_mean)
+                        and hash(bn_running_var)
+                        == hash(conv_bn_to_fuse[hash_id].bn_running_var)
+                        and torch.allclose(
+                            torch.tensor(bn_eps),
+                            torch.tensor(conv_bn_to_fuse[hash_id].bn_eps),
+                        )
+                        and hash(bn_weight) == hash(conv_bn_to_fuse[hash_id].bn_weight)
+                        and hash(bn_bias) == hash(conv_bn_to_fuse[hash_id].bn_bias)
+                    ):
+                        # Do fusion if same functional bn
+                        conv_bn_to_fuse[hash_id].add_bn_node(node)
+                    else:
+                        # Disable the conv bn folding if conv shared by different bn
+                        conv_bn_to_fuse[hash_id].disable_fusion()
+
+        for conv_bn_fusion in conv_bn_to_fuse.values():
+            if conv_bn_fusion.is_fusion_enabled():
+                bn_nodes = conv_bn_fusion.bn_nodes
+                conv = conv_bn_fusion.conv_module
+                bn_running_mean = conv_bn_fusion.bn_running_mean
+                bn_running_var = conv_bn_fusion.bn_running_var
+                bn_eps = conv_bn_fusion.bn_eps
+                bn_weight = conv_bn_fusion.bn_weight
+                bn_bias = conv_bn_fusion.bn_bias
+
                 fused_conv = copy.deepcopy(conv)
                 fused_conv.weight, fused_conv.bias = fuse_conv_bn_weights(
                     fused_conv.weight,
@@ -358,9 +496,10 @@ def fuse_conv_bn(gm: torch.fx.GraphModule, inplace=False) -> torch.fx.GraphModul
                     bn_weight,
                     bn_bias,
                 )
-                replace_node_module(node.args[0], modules, fused_conv)
-                node.replace_all_uses_with(node.args[0])
-                gm.graph.erase_node(node)
+                for bn_node in bn_nodes:
+                    replace_node_module(bn_node.args[0], modules, fused_conv)
+                    bn_node.replace_all_uses_with(bn_node.args[0])
+                    gm.graph.erase_node(bn_node)
     gm.graph.lint()
     gm.recompile()
 
@@ -481,12 +620,8 @@ def sink_cat_after_pointwise(module: torch.fx.GraphModule) -> torch.fx.GraphModu
 
 
 def linear_permute_fusion(module: torch.fx.GraphModule) -> torch.fx.GraphModule:
-    for node in module.graph.nodes:
-        if (
-            node.op == "call_method"
-            and node.target == "permute"
-            and check_permute(node)
-        ):
+    for node in module.graph.find_nodes(op="call_method", target="permute"):
+        if check_permute(node):
             if len(node.args) > 0:
                 input_node = node.args[0]
             else:
@@ -526,32 +661,33 @@ def linear_transpose(
 
 
 def permute_linear_fusion(module: torch.fx.GraphModule) -> torch.fx.GraphModule:
-    for node in module.graph.nodes:
-        if node.op == "call_function" and node.target == torch.nn.functional.linear:
-            if len(node.args) > 0:
-                input_node = node.args[0]
+    for node in module.graph.find_nodes(
+        op="call_function", target=torch.nn.functional.linear
+    ):
+        if len(node.args) > 0:
+            input_node = node.args[0]
+        else:
+            input_node = node.kwargs["input"]
+        if (
+            input_node.op == "call_method"
+            and input_node.target == "permute"
+            and check_permute(input_node)
+        ):
+            normalized = NormalizedLinearNode(node)
+            if len(input_node.args) > 0:
+                input = input_node.args[0]
             else:
-                input_node = node.kwargs["input"]
-            if (
-                input_node.op == "call_method"
-                and input_node.target == "permute"
-                and check_permute(input_node)
-            ):
-                normalized = NormalizedLinearNode(node)
-                if len(input_node.args) > 0:
-                    input = input_node.args[0]
-                else:
-                    input = input_node.kwargs["input"]
-                weight = normalized.get_weight()
-                bias = normalized.get_bias()
-                with module.graph.inserting_before(node):
-                    fused_node = module.graph.call_function(
-                        transpose_linear, args=(input, weight, bias)
-                    )
-                    node.replace_all_uses_with(fused_node)
-                    module.graph.erase_node(node)
-                    if len(input_node.users) == 0:
-                        module.graph.erase_node(input_node)
+                input = input_node.kwargs["input"]
+            weight = normalized.get_weight()
+            bias = normalized.get_bias()
+            with module.graph.inserting_before(node):
+                fused_node = module.graph.call_function(
+                    transpose_linear, args=(input, weight, bias)
+                )
+                node.replace_all_uses_with(fused_node)
+                module.graph.erase_node(node)
+                if len(input_node.users) == 0:
+                    module.graph.erase_node(input_node)
 
     module.graph.lint()
     module.recompile()
@@ -559,50 +695,50 @@ def permute_linear_fusion(module: torch.fx.GraphModule) -> torch.fx.GraphModule:
 
 
 def permute_matmul_fusion(module: torch.fx.GraphModule) -> torch.fx.GraphModule:
-    for node in module.graph.nodes:
-        if node.op == "call_function" and (
-            node.target == torch.bmm or node.target == torch.matmul
+    for node in itertools.chain(
+        module.graph.find_nodes(op="call_function", target=torch.bmm),
+        module.graph.find_nodes(op="call_function", target=torch.matmul),
+    ):
+        normalized = NormalizedMatmulNode(node)
+        input_A_node = normalized.get_input()
+        input_B_node = normalized.get_other()
+        input_A = input_A_node
+        input_B = input_B_node
+        Atrans = Btrans = False
+        if (
+            input_A_node.op == "call_method"
+            and input_A_node.target == "permute"
+            and check_permute(input_A_node)
         ):
-            normalized = NormalizedMatmulNode(node)
-            input_A_node = normalized.get_input()
-            input_B_node = normalized.get_other()
-            input_A = input_A_node
-            input_B = input_B_node
-            Atrans = Btrans = False
-            if (
-                input_A_node.op == "call_method"
-                and input_A_node.target == "permute"
-                and check_permute(input_A_node)
-            ):
-                Atrans = True
-                if len(input_A_node.args) > 0:
-                    input_A = input_A_node.args[0]  # type: ignore[assignment]
-                else:
-                    input_A = input_A_node.kwargs["input"]  # type: ignore[assignment]
+            Atrans = True
+            if len(input_A_node.args) > 0:
+                input_A = input_A_node.args[0]  # type: ignore[assignment]
+            else:
+                input_A = input_A_node.kwargs["input"]  # type: ignore[assignment]
 
-            if (
-                input_B_node.op == "call_method"
-                and input_B_node.target == "permute"
-                and check_permute(input_B_node)
-            ):
-                Btrans = True
-                if len(input_B_node.args) > 0:
-                    input_B = input_B_node.args[0]  # type: ignore[assignment]
-                else:
-                    input_B = input_B_node.kwargs["input"]  # type: ignore[assignment]
+        if (
+            input_B_node.op == "call_method"
+            and input_B_node.target == "permute"
+            and check_permute(input_B_node)
+        ):
+            Btrans = True
+            if len(input_B_node.args) > 0:
+                input_B = input_B_node.args[0]  # type: ignore[assignment]
+            else:
+                input_B = input_B_node.kwargs["input"]  # type: ignore[assignment]
 
-            if Atrans or Btrans:
-                with module.graph.inserting_before(node):
-                    fused_node = module.graph.call_function(
-                        transpose_matmul,
-                        args=(input_A, input_B, Atrans, Btrans),
-                    )
-                node.replace_all_uses_with(fused_node)
-                module.graph.erase_node(node)
-                if Atrans and len(input_A_node.users) == 0:
-                    module.graph.erase_node(input_A_node)
-                if Btrans and len(input_B_node.users) == 0:
-                    module.graph.erase_node(input_B_node)
+        if Atrans or Btrans:
+            with module.graph.inserting_before(node):
+                fused_node = module.graph.call_function(
+                    transpose_matmul,
+                    args=(input_A, input_B, Atrans, Btrans),
+                )
+            node.replace_all_uses_with(fused_node)
+            module.graph.erase_node(node)
+            if Atrans and len(input_A_node.users) == 0:
+                module.graph.erase_node(input_A_node)
+            if Btrans and len(input_B_node.users) == 0:
+                module.graph.erase_node(input_B_node)
 
     module.graph.lint()
     module.recompile()

@@ -88,7 +88,7 @@ namespace detail {
 
 TORCH_CUDA_CPP_API void throw_nccl_error(ncclResult status);
 
-static inline void NCCL_CHECK(ncclResult status) {
+inline void NCCL_CHECK(ncclResult status) {
   if (status != ncclResult::Success) {
     throw_nccl_error(status);
   }
@@ -111,7 +111,7 @@ TORCH_CUDA_CPP_API void check_inputs(
 } // namespace detail
 
 using comm_list = std::vector<ncclComm_t>;
-using stream_list = std::vector<c10::optional<at::cuda::CUDAStream>>;
+using stream_list = std::vector<std::optional<at::cuda::CUDAStream>>;
 
 TORCH_CUDA_CPP_API std::uint64_t version();
 TORCH_CUDA_CPP_API const char* version_suffix();

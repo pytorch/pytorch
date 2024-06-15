@@ -1,7 +1,12 @@
 #pragma once
 
+#include <dlfcn.h>
+#include <fcntl.h>
+#include <sys/mman.h>
+#include <unistd.h>
 #include <optional>
 #include <regex>
+#include <stdexcept>
 #include <unordered_map>
 
 // WARNING: Be careful when adding new includes here. This header will be used
@@ -217,8 +222,17 @@ class AOTInductorModelBase {
       auto size = this->constant_shape(i);
       auto stride = this->constant_stride(i);
       auto offset = this->constant_offset(i);
+      auto layout = this->constant_layout(i);
+      auto opaque_metadata_ptr = this->opaque_metadata(i);
+      auto opaque_metadata_size = this->opaque_metadata_size(i);
 
       AtenTensorHandle tensor_handle;
+#ifdef AOTI_USE_CREATE_TENSOR_FROM_BLOB_V1
+      // When opaque_metadata_size is not 0, we need to have the
+      // aoti_torch_create_tensor_from_blob_v2 available
+      AOTI_RUNTIME_CHECK(
+          opaque_metadata_size == 0,
+          "Expect opaque_metadata_size to be 0 when AOTI_USE_CREATE_TENSOR_FROM_BLOB_V1 is defined");
       AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_create_tensor_from_blob(
           internal_ptr,
           ndim,
@@ -229,6 +243,21 @@ class AOTInductorModelBase {
           device_type_,
           device_idx_,
           &tensor_handle));
+#else
+      AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_create_tensor_from_blob_v2(
+          internal_ptr,
+          ndim,
+          size,
+          stride,
+          offset,
+          dtype,
+          device_type_,
+          device_idx_,
+          &tensor_handle,
+          layout,
+          opaque_metadata_ptr,
+          opaque_metadata_size));
+#endif // AOTI_USE_CREATE_TENSOR_FROM_BLOB_V1
       constants_map_->emplace(std::move(name), tensor_handle);
     }
     if (constants_map_) {
@@ -263,15 +292,16 @@ class AOTInductorModelBase {
     if (!skip_copy) {
       AOTI_RUNTIME_DEVICE_CHECK(cudaMemcpy(
           internal_ptr,
-          _binary_constants_bin_start + bytes_read,
+          _get_constants_start() + bytes_read,
           data_size,
           cudaMemcpyHostToDevice));
     }
     return internal_ptr;
-#else // !USE_CUDA
+
+#else
     // get pointer to constant which is packed in model during compile time.
     AOTI_RUNTIME_CHECK(!skip_copy, "pure cpu mode doesn't support skip copy");
-    return const_cast<uint8_t*>(_binary_constants_bin_start) + bytes_read;
+    return _get_constants_start() + bytes_read;
 #endif // USE_CUDA
   }
 
@@ -334,6 +364,10 @@ class AOTInductorModelBase {
     return constants_info_.at(idx).dtype;
   }
 
+  int32_t constant_layout(int64_t idx) const {
+    return constants_info_.at(idx).layout;
+  }
+
   size_t constant_offset(int64_t idx) const {
     return constants_info_.at(idx).offset;
   }
@@ -344,6 +378,14 @@ class AOTInductorModelBase {
 
   const char* constant_original_fqn(int64_t idx) const {
     return constants_info_.at(idx).original_fqn;
+  }
+
+  const uint8_t* opaque_metadata(int64_t idx) const {
+    return constants_info_.at(idx).opaque_metadata.data();
+  }
+
+  size_t opaque_metadata_size(int64_t idx) {
+    return constants_info_.at(idx).opaque_metadata.size();
   }
 
   bool constant_from_folded(int64_t idx) const {
@@ -429,6 +471,45 @@ class AOTInductorModelBase {
   }
 
  protected:
+  uint8_t* _get_constants_start() {
+#ifndef USE_MMAP_SELF
+    return const_cast<uint8_t*>(_binary_constants_bin_start);
+#else
+    if (self_mmap) {
+      return self_mmap;
+    }
+    Dl_info dl_info;
+    // get pointer to constant which are appended to the binary
+    AOTI_RUNTIME_CHECK(
+        dladdr(__func__, &dl_info), "Can't find shared library name");
+    int fd = open(dl_info.dli_fname, O_RDONLY);
+    AOTI_RUNTIME_CHECK(fd >= 0, "Shared library file cannot be opened");
+    auto fsize = lseek(fd, 0, SEEK_END);
+    auto weights_size =
+        reinterpret_cast<const uint64_t*>(_binary_constants_bin_start)[0];
+    auto magic_number =
+        reinterpret_cast<const uint64_t*>(_binary_constants_bin_start)[1];
+    auto weights_offset = fsize - weights_size;
+    AOTI_RUNTIME_CHECK(
+        (weights_offset & 0x3fff) == 0,
+        "weights_offset must be aligned to 16K boundary");
+    auto ptr = mmap(
+        NULL,
+        weights_size,
+        PROT_READ | PROT_WRITE,
+        MAP_PRIVATE,
+        fd,
+        weights_offset);
+    close(fd);
+    AOTI_RUNTIME_CHECK(ptr != MAP_FAILED, "mmap() failed");
+    self_mmap = static_cast<uint8_t*>(ptr);
+    AOTI_RUNTIME_CHECK(
+        reinterpret_cast<uint64_t*>(
+            self_mmap + weights_size - sizeof(uint64_t))[0] == magic_number,
+        "Weigths data seems corrupt");
+    return self_mmap;
+#endif
+  }
   struct ParamInfo {
     const char* name = nullptr;
   };
@@ -440,6 +521,9 @@ class AOTInductorModelBase {
     int32_t dtype;
     int64_t offset;
     size_t data_size;
+    int32_t layout;
+    std::vector<uint8_t> opaque_metadata;
+    int64_t opaque_metadata_size;
     const char* original_fqn = nullptr;
     bool from_folded;
   };
@@ -457,6 +541,9 @@ class AOTInductorModelBase {
   // Holds the blob storage for constants' at::Tensor for CUDA.
   CUDAPtr constant_blob_;
 #endif // USE_CUDA
+#ifdef USE_MMAP_SELF
+  uint8_t* self_mmap = NULL;
+#endif
 
   // A directory with CUDA binary files, e.g. compiled kernels, etc.
   const std::optional<std::string> cubin_dir_;

@@ -1,6 +1,8 @@
 # Owner(s): ["module: onnx"]
 from __future__ import annotations
 
+import logging
+
 import tempfile
 
 from typing import Mapping, Tuple
@@ -8,13 +10,14 @@ from typing import Mapping, Tuple
 import onnx
 import onnx.inliner
 import pytorch_test_common
-import torch
 import transformers  # type: ignore[import]
+
+import torch
 from torch import nn
 from torch._subclasses import fake_tensor
 from torch.nn import functional as F
 from torch.onnx import dynamo_export, ExportOptions
-from torch.onnx._internal.diagnostics import infra
+from torch.onnx._internal.diagnostics import infra  # noqa: TCH001
 from torch.onnx._internal.fx import diagnostics, registration
 from torch.testing._internal import common_utils
 
@@ -179,7 +182,8 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
                 return torch.sum(values)
 
         x = torch.arange(1.0, 6.0, requires_grad=True)
-        onnx_program = dynamo_export(TopKModel(), x, export_options=self.export_options)
+
+        _ = dynamo_export(TopKModel(), x, export_options=self.export_options)
 
     def test_unsupported_indices_fake_tensor_generated_with_op_level_debug(self):
         class EmbedModelWithoutPaddingIdx(torch.nn.Module):
@@ -361,11 +365,13 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
             node: onnx.NodeProto,
             value_infos: Mapping[str, onnx.ValueInfoProto],
             local_functions: Mapping[Tuple[str, str], onnx.FunctionProto],
+            exclude_names_in_value_info,
             function_id: str = "",
         ):
             for output in node.output:
                 name = f"{function_id}/{output}" if function_id else output
-                self.assertIn(name, value_infos)
+                if name not in exclude_names_in_value_info:
+                    self.assertIn(name, value_infos)
             if node.domain.startswith("pkg.onnxscript.torch_lib"):
                 # No shape info available for values inside torchlib functions.
                 return
@@ -375,13 +381,25 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
                 for node in function.node:
                     function_id = f"{function.domain}::{function.name}"
                     _assert_node_outputs_has_value_info(
-                        node, value_infos, local_functions, function_id
+                        node,
+                        value_infos,
+                        local_functions,
+                        exclude_names_in_value_info,
+                        function_id,
                     )
 
         type_infos = {vi.name: vi for vi in model_proto.graph.value_info}
         functions = {(f.domain, f.name): f for f in model_proto.functions}
+        # NOTE: inputs, outputs, and initializers are not included in value_info spec
+        exclude_names_in_value_info = (
+            [input.name for input in model_proto.graph.input]
+            + [output.name for output in model_proto.graph.output]
+            + [init.name for init in model_proto.graph.initializer]
+        )
         for node in model_proto.graph.node:
-            _assert_node_outputs_has_value_info(node, type_infos, functions)
+            _assert_node_outputs_has_value_info(
+                node, type_infos, functions, exclude_names_in_value_info
+            )
 
     def test_dynamo_export_retains_readable_parameter_and_buffer_names(self):
         class SubModule(torch.nn.Module):
@@ -421,10 +439,11 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
         model = MNISTModel()
         onnx_program = torch.onnx.dynamo_export(model, tensor_x)
         model_proto = onnx_program.model_proto
-        self.assertEqual(
-            {initializer.name for initializer in model_proto.graph.initializer},
-            {*model.state_dict().keys()},
-        )
+
+        # NOTE: initializers could be optimized away by onnx optimizer
+        onnx_initilizers = {init.name for init in model_proto.graph.initializer}
+        torch_weights = {*model.state_dict().keys()}
+        self.assertTrue(onnx_initilizers.issubset(torch_weights))
 
     @common_utils.parametrize(
         "checkpoint_type",
@@ -705,7 +724,35 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
                 input = input.to(float8_type)
                 return input + torch.tensor(1.0, dtype=float8_type)
 
-        _ = torch.onnx.dynamo_export(Float8Module(), torch.randn(1, 2, 3, 4))
+        # NOTE: shape inference error raised in optimizer due to unsupported dtype
+        with self.assertWarnsOnceRegex(
+            UserWarning, "ONNXScript optimizer failed. Skipping optimization."
+        ):
+            _ = torch.onnx.dynamo_export(Float8Module(), torch.randn(1, 2, 3, 4))
+
+    def test_export_with_logging_logger(self):
+        logger = logging.getLogger(__name__)
+
+        class LoggingLoggerModule(torch.nn.Module):
+            def forward(self, x):
+                logger.log("abc")
+                return x + 1
+
+        input = torch.randn(2, 3)
+        model = LoggingLoggerModule()
+        _ = torch.onnx.dynamo_export(model, input)
+
+    def test_export_with_hf_logging_logger(self):
+        logger = transformers.utils.logging.get_logger(__name__)
+
+        class HFLoggingLoggerModule(torch.nn.Module):
+            def forward(self, x):
+                logger.warning_once("abc")
+                return x + 1
+
+        input = torch.randn(2, 3)
+        model = HFLoggingLoggerModule()
+        _ = torch.onnx.dynamo_export(model, input)
 
     def test_checkpoint_cast(self):
         model_id = "openai/whisper-large-v3"
@@ -735,6 +782,100 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
         with tempfile.NamedTemporaryFile(suffix=".onnx") as tmp_onnx_file:
             onnx_program.save(tmp_onnx_file.name)
             onnx.checker.check_model(tmp_onnx_file.name, full_check=True)
+
+    @common_utils.parametrize(
+        "include_initializer",
+        [
+            common_utils.subtest(
+                True,
+                name="include_initializer",
+            ),
+            common_utils.subtest(
+                False,
+                name="dont_include_initializer",
+            ),
+        ],
+    )
+    @common_utils.parametrize(
+        "use_fake_mode",
+        [
+            common_utils.subtest(
+                True,
+                name="use_fake_mode",
+            ),
+            common_utils.subtest(
+                False,
+                name="no_fake_mode",
+            ),
+        ],
+    )
+    @common_utils.parametrize(
+        "use_exported_program",
+        [
+            common_utils.subtest(
+                True,
+                name="use_exported_program",
+            ),
+            common_utils.subtest(
+                False,
+                name="no_exported_program",
+            ),
+        ],
+    )
+    def test_save_with_without_initializer(
+        self, include_initializer, use_fake_mode, use_exported_program
+    ):
+        class MNISTModel(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv1 = nn.Conv2d(1, 32, 3, 1, bias=False)
+                self.conv2 = nn.Conv2d(32, 64, 3, 1, bias=False)
+                self.fc1 = nn.Linear(9216, 128, bias=False)
+                self.fc2 = nn.Linear(128, 10, bias=False)
+
+            def forward(self, tensor_x: torch.Tensor):
+                tensor_x = self.conv1(tensor_x)
+                tensor_x = F.sigmoid(tensor_x)
+                tensor_x = self.conv2(tensor_x)
+                tensor_x = F.sigmoid(tensor_x)
+                tensor_x = F.max_pool2d(tensor_x, 2)
+                tensor_x = torch.flatten(tensor_x, 1)
+                tensor_x = self.fc1(tensor_x)
+                tensor_x = F.sigmoid(tensor_x)
+                tensor_x = self.fc2(tensor_x)
+                output = F.log_softmax(tensor_x, dim=1)
+                return output
+
+        state_dict = MNISTModel().state_dict()
+        if use_fake_mode:
+            with torch.onnx.enable_fake_mode() as ctx:
+                model = MNISTModel()
+                tensor_x = torch.rand((64, 1, 28, 28), dtype=torch.float32)
+                if use_exported_program:
+                    model = torch.export.export(model, args=(tensor_x,))
+                export_options = torch.onnx.ExportOptions(fake_context=ctx)
+        else:
+            model = MNISTModel()
+            tensor_x = torch.rand((64, 1, 28, 28), dtype=torch.float32)
+            if use_exported_program:
+                model = torch.export.export(model, args=(tensor_x,))
+            export_options = torch.onnx.ExportOptions()
+
+        onnx_program = torch.onnx.dynamo_export(
+            model, tensor_x, export_options=export_options
+        )
+        with tempfile.NamedTemporaryFile(suffix=".onnx") as tmp_onnx_file:
+            onnx_program.save(
+                tmp_onnx_file.name,
+                include_initializers=include_initializer,
+                model_state=state_dict if include_initializer else None,
+            )
+            onnx_model = onnx.load(tmp_onnx_file.name)
+            self.assertEqual(
+                (include_initializer and len(onnx_model.graph.initializer) > 0)
+                or (not include_initializer and len(onnx_model.graph.initializer) == 0),
+                True,
+            )
 
     def test_export_with_print(self):
         class PrintModule(torch.nn.Module):

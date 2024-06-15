@@ -1,6 +1,8 @@
+# mypy: allow-untyped-defs
 from __future__ import annotations
 
 import csv
+import dataclasses
 import inspect
 import os
 import re
@@ -43,6 +45,8 @@ cpp_to_dtype_count = 0
 # Each element counts the number of inner kernels in each outer loop fusion.
 cpp_outer_loop_fused_inner_counts: List[int] = []
 
+num_comprehensive_padding = 0
+
 
 # reset all counters
 def reset():
@@ -52,6 +56,7 @@ def reset():
     global ir_nodes_pre_fusion
     global cpp_to_dtype_count
     global cpp_outer_loop_fused_inner_counts
+    global num_comprehensive_padding
 
     generated_kernel_count = 0
     generated_cpp_vec_kernel_count = 0
@@ -61,6 +66,7 @@ def reset():
     ir_nodes_pre_fusion = 0
     cpp_to_dtype_count = 0
     cpp_outer_loop_fused_inner_counts.clear()
+    num_comprehensive_padding = 0
 
 
 @dataclass
@@ -74,6 +80,11 @@ class CachedMetricsDeltas:
     generated_cpp_vec_kernel_count: int
     ir_nodes_pre_fusion: int
     cpp_to_dtype_count: int
+    num_bytes_accessed: int
+
+
+def get_metric_fields():
+    return [field.name for field in dataclasses.fields(CachedMetricsDeltas)]
 
 
 class CachedMetricsHelper:
@@ -84,40 +95,21 @@ class CachedMetricsHelper:
     """
 
     def __init__(self):
-        global generated_kernel_count
-        global generated_cpp_vec_kernel_count
-        global ir_nodes_pre_fusion
-        global cpp_to_dtype_count
-
-        self.generated_kernel_count = generated_kernel_count
-        self.generated_cpp_vec_kernel_count = generated_cpp_vec_kernel_count
-        self.ir_nodes_pre_fusion = ir_nodes_pre_fusion
-        self.cpp_to_dtype_count = cpp_to_dtype_count
+        self.cached_metrics = {}
+        for metric in get_metric_fields():
+            self.cached_metrics[metric] = globals()[metric]
 
     def get_deltas(self) -> CachedMetricsDeltas:
-        global generated_kernel_count
-        global generated_cpp_vec_kernel_count
-        global ir_nodes_pre_fusion
-        global cpp_to_dtype_count
+        delta_metrics = {}
+        for metric in get_metric_fields():
+            delta_metrics[metric] = globals()[metric] - self.cached_metrics[metric]
 
-        return CachedMetricsDeltas(
-            generated_kernel_count - self.generated_kernel_count,
-            generated_cpp_vec_kernel_count - self.generated_cpp_vec_kernel_count,
-            ir_nodes_pre_fusion - self.ir_nodes_pre_fusion,
-            cpp_to_dtype_count - self.cpp_to_dtype_count,
-        )
+        return CachedMetricsDeltas(**delta_metrics)
 
     @staticmethod
     def apply_deltas(delta: CachedMetricsDeltas):
-        global generated_kernel_count
-        global generated_cpp_vec_kernel_count
-        global ir_nodes_pre_fusion
-        global cpp_to_dtype_count
-
-        generated_kernel_count += delta.generated_kernel_count
-        generated_cpp_vec_kernel_count += delta.generated_cpp_vec_kernel_count
-        ir_nodes_pre_fusion += delta.ir_nodes_pre_fusion
-        cpp_to_dtype_count += delta.cpp_to_dtype_count
+        for metric in get_metric_fields():
+            globals()[metric] += getattr(delta, metric)
 
 
 REGISTERED_METRIC_TABLES: Dict[str, MetricTable] = {}
@@ -218,6 +210,21 @@ MetricTable.register_table(
         "size_hints",
         "reduction_hint",
         "speedup",
+    ],
+)
+
+# Log the fusion failures due to indexing mismatch
+MetricTable.register_table(
+    "fusion_failure_due_to_indexing_mismatch",
+    [
+        "pre_grad_graph_id",
+        "post_grad_graph_id",
+        "node1_name",
+        "node2_name",
+        "node1_debug_str",
+        "node2_debug_str",
+        "common_buffer_names",
+        "failure_reason",
     ],
 )
 

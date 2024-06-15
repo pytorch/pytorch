@@ -4,27 +4,41 @@
 #include <ATen/cuda/CUDAEvent.h>
 #include <c10/cuda/CUDAStream.h>
 #include <torch/csrc/distributed/c10d/Store.hpp>
+#include <torch/csrc/distributed/c10d/SymmetricMemory.hpp>
 #include <torch/csrc/distributed/c10d/Work.hpp>
 
 namespace c10d::intra_node_comm {
 
+using namespace c10d::symmetric_memory;
+
 constexpr size_t kMaxDevices = 8;
-constexpr size_t kDefaultBufferSize = 10 * 1024 * 1024;
+constexpr size_t kDefaultBufferSize = 10ull * 1024 * 1024;
+constexpr size_t kP2pStateSize = 2048;
 
 using NvlMesh = std::array<std::array<size_t, kMaxDevices>, kMaxDevices>;
 using HybridCubeMesh = std::array<std::array<int, 4>, kMaxDevices>;
 
-enum class Topology { UNKNOWN = 0, FULLY_CONNECTED = 1, HYBRID_CUBE_MESH = 2 };
+enum class Topology : uint8_t {
+  UNKNOWN = 0,
+  FULLY_CONNECTED = 1,
+  HYBRID_CUBE_MESH = 2
+};
 
-enum class AllReduceAlgo { NONE = 0, ONE_SHOT = 1, TWO_SHOT = 2, HCM = 3 };
+enum class AllReduceAlgo : uint8_t {
+  NONE = 0,
+  ONE_SHOT = 1,
+  TWO_SHOT = 2,
+  HCM = 3
+};
 
+// NOTE: this class will be be removed soon in favor of SymmetricMemory
 class TORCH_API IntraNodeComm : public c10::intrusive_ptr_target {
  public:
   IntraNodeComm(
       c10::intrusive_ptr<c10d::Store> store,
       size_t rank,
       size_t worldSize,
-      c10::optional<size_t> bufferSize = c10::nullopt);
+      std::optional<size_t> bufferSize = c10::nullopt);
 
   ~IntraNodeComm() override;
 
@@ -36,6 +50,10 @@ class TORCH_API IntraNodeComm : public c10::intrusive_ptr_target {
    * state and it is the caller's responsibility to dispose it.
    */
   bool rendezvous();
+
+  Topology getTopology() {
+    return topology_;
+  }
 
   size_t getBufferSize() {
     return bufferSize_;
@@ -52,19 +70,13 @@ class TORCH_API IntraNodeComm : public c10::intrusive_ptr_target {
   /**
    * Perform a barrier among the specified ranks.
    */
-  void barrier(c10::optional<std::vector<int64_t>> ranks = c10::nullopt);
+  void barrier(std::optional<std::vector<int64_t>> ranks = c10::nullopt);
 
-  /**
-   * Puts the given tensor into the p2p buffer of the current rank at the
-   * specified offset.
-   */
-  void put(const at::Tensor& tensor, int64_t offset = 0);
-
-  /**
-   * Fills the given tensor with the data from the specified rank's p2p buffer
-   * at the specified offset.
-   */
-  void get(size_t rank, at::Tensor tensor, int64_t offset = 0);
+  at::Tensor getBuffer(
+      size_t rank,
+      const std::vector<int64_t>& sizes,
+      c10::ScalarType dtype,
+      int64_t storageOffset);
 
  private:
   at::Tensor oneShotAllReduce(
@@ -83,14 +95,15 @@ class TORCH_API IntraNodeComm : public c10::intrusive_ptr_target {
   size_t rank_;
   size_t worldSize_;
   size_t bufferSize_;
+  at::cuda::CUDAEvent barrierReady_;
 
   /**
    * Members initialized after rendezvous
    */
   bool isInitialized_ = false;
   Topology topology_ = Topology::UNKNOWN;
-  std::array<void*, kMaxDevices> p2pStates_{};
-  std::array<void*, kMaxDevices> buffers_{};
+  void* symmetricMemoryPtr_ = nullptr;
+  c10::intrusive_ptr<SymmetricMemory> symmetricMemory_ = nullptr;
   void* p2pStatesDev_{};
   void* buffersDev_{};
   void* topoInfo_{};

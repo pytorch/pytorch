@@ -1,5 +1,6 @@
 #pragma once
 
+#include <ATen/Generator.h>
 #include <ATen/Tensor.h>
 #include <ATen/core/List.h>
 #include <c10/core/DeviceType.h>
@@ -32,36 +33,68 @@ inline AtenTensorHandle tensor_pointer_to_tensor_handle(at::Tensor* tensor) {
   return reinterpret_cast<AtenTensorHandle>(tensor);
 }
 
+inline at::Generator* generator_handle_to_generator_pointer(
+    AtenGeneratorHandle handle) {
+  return reinterpret_cast<at::Generator*>(handle);
+}
+
+inline AtenGeneratorHandle generator_pointer_to_generator_handle(
+    at::Generator* generator) {
+  return reinterpret_cast<AtenGeneratorHandle>(generator);
+}
+
 inline AtenTensorHandle new_tensor_handle(at::Tensor&& tensor) {
   at::Tensor* new_tensor = new at::Tensor(std::move(tensor));
   return tensor_pointer_to_tensor_handle(new_tensor);
 }
 
+inline void assert_inf_and_nan(
+    const std::string& tensor_name,
+    at::Tensor& check_tensor) {
+  auto flattened = check_tensor.view({-1});
+
+  for (int64_t i = 0; i < flattened.numel(); i++) {
+    auto value = flattened[i].item<float>();
+    if (std::isinf(value)) {
+      throw std::runtime_error("At least one INF in " + tensor_name);
+    } else if (std::isnan(value)) {
+      throw std::runtime_error("At least one NaN in " + tensor_name);
+    }
+  }
+}
+
 // utility functions to convert a pointer to an optional value
 template <class T>
-inline c10::optional<T> pointer_to_optional(T* ptr) {
+inline std::optional<T> pointer_to_optional(T* ptr) {
   return ptr ? c10::make_optional(*ptr) : c10::nullopt;
 }
 
 template <class T, class U, typename = std::enable_if_t<!std::is_same_v<T, U>>>
-inline c10::optional<T> pointer_to_optional(U* ptr) {
+inline std::optional<T> pointer_to_optional(U* ptr) {
   return ptr ? c10::make_optional<T>(T(*ptr)) : c10::nullopt;
 }
 
 template <>
-inline c10::optional<at::Tensor> pointer_to_optional(AtenTensorHandle* ptr) {
+inline std::optional<at::Tensor> pointer_to_optional(AtenTensorHandle* ptr) {
   return ptr ? c10::make_optional(*tensor_handle_to_tensor_pointer(*ptr))
              : c10::nullopt;
 }
 
 template <>
-inline c10::optional<at::Tensor> pointer_to_optional(
+inline std::optional<at::Tensor> pointer_to_optional(
     const AtenTensorHandle* ptr) {
   return ptr ? c10::make_optional(*tensor_handle_to_tensor_pointer(*ptr))
              : c10::nullopt;
 }
 
-inline c10::optional<c10::Device> pointer_to_optional_device(
+template <>
+inline std::optional<at::Generator> pointer_to_optional(
+    AtenGeneratorHandle* ptr) {
+  return ptr ? c10::make_optional(*generator_handle_to_generator_pointer(*ptr))
+             : c10::nullopt;
+}
+
+inline std::optional<c10::Device> pointer_to_optional_device(
     int32_t* device_type,
     int32_t device_index) {
   return device_type ? c10::make_optional(c10::Device(
@@ -74,7 +107,7 @@ inline c10::optional<c10::Device> pointer_to_optional_device(
 template <typename T>
 struct is_optional : std::false_type {};
 template <typename T>
-struct is_optional<c10::optional<T>> : std::true_type {};
+struct is_optional<std::optional<T>> : std::true_type {};
 
 template <class T>
 inline c10::ArrayRef<T> pointer_to_list(T* ptr, int64_t len) {
@@ -123,10 +156,10 @@ inline std::vector<at::Tensor> pointer_to_list(
 }
 
 template <>
-inline std::vector<c10::optional<at::Tensor>> pointer_to_list(
+inline std::vector<std::optional<at::Tensor>> pointer_to_list(
     const AtenTensorHandle** ptr,
     int64_t len) {
-  std::vector<c10::optional<at::Tensor>> result;
+  std::vector<std::optional<at::Tensor>> result;
   result.reserve(len);
   for (int64_t i = 0; i < len; i++) {
     result.emplace_back(pointer_to_optional<at::Tensor>(ptr[i]));
@@ -141,9 +174,9 @@ inline std::array<bool, N> pointer_to_list(const int32_t* ptr) {
   return result;
 }
 
-// utility functions to convert a pointer to a list of optional values
+// Utility function to convert a pointer to an optional list of values
 template <class T, class U>
-inline c10::optional<c10::ArrayRef<T>> pointer_to_optional_list(
+inline std::optional<c10::ArrayRef<T>> pointer_to_optional_list(
     U** ptr,
     int64_t len) {
   return ptr

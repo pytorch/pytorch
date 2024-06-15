@@ -3,26 +3,38 @@
 import os
 import sys
 import unittest
-from torch.testing._internal.common_utils import GRAPH_EXECUTOR, ProfilingMode, \
-    num_profiled_runs, enable_profiling_mode_for_profiling_tests
-from torch.testing._internal.common_jit import check_against_reference
+
 import torch
+from torch.testing._internal.common_jit import check_against_reference
+from torch.testing._internal.common_utils import (
+    enable_profiling_mode_for_profiling_tests,
+    GRAPH_EXECUTOR,
+    num_profiled_runs,
+    ProfilingMode,
+)
 
 # Make the helper files in test/ importable
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.append(pytorch_test_dir)
-from torch.testing._internal.jit_utils import JitTestCase, disable_autodiff_subgraph_inlining
+from typing import List, Optional, Tuple
+
 from torch.testing import FileCheck
+from torch.testing._internal.jit_utils import (
+    disable_autodiff_subgraph_inlining,
+    JitTestCase,
+)
 
-from typing import List, Tuple, Optional
+if __name__ == "__main__":
+    raise RuntimeError(
+        "This test file is not meant to be run directly, use:\n\n"
+        "\tpython test/test_jit.py TESTNAME\n\n"
+        "instead."
+    )
 
-if __name__ == '__main__':
-    raise RuntimeError("This test file is not meant to be run directly, use:\n\n"
-                       "\tpython test/test_jit.py TESTNAME\n\n"
-                       "instead.")
 
-
-@unittest.skipIf(GRAPH_EXECUTOR == ProfilingMode.SIMPLE, "Simple Executor doesn't support gradients")
+@unittest.skipIf(
+    GRAPH_EXECUTOR == ProfilingMode.SIMPLE, "Simple Executor doesn't support gradients"
+)
 class TestAutodiffSubgraphSlicing(JitTestCase):
     # TODO: It is better if we can test directly on graphs instead of the current
     # end-to-end fashion.
@@ -35,11 +47,17 @@ class TestAutodiffSubgraphSlicing(JitTestCase):
                 return ge.graph_for(*inputs)
 
     def assertGraphSize(self, graph, size):
-        nodes = list(filter(lambda n: (n.kind() != "prim::BailOut" and
-                                       n.kind() != "prim::BailoutTemplate" and
-                                       n.kind() != "prim::TypeCheck" and
-                                       n.kind() != "prim::RequiresGradCheck"),
-                            graph.nodes()))
+        nodes = list(
+            filter(
+                lambda n: (
+                    n.kind() != "prim::BailOut"
+                    and n.kind() != "prim::BailoutTemplate"
+                    and n.kind() != "prim::TypeCheck"
+                    and n.kind() != "prim::RequiresGradCheck"
+                ),
+                graph.nodes(),
+            )
+        )
         self.assertEqual(len(list(nodes)), size)
 
     def test_chunk_constant_script_ad(self):
@@ -52,16 +70,21 @@ class TestAutodiffSubgraphSlicing(JitTestCase):
         with disable_autodiff_subgraph_inlining():
             with enable_profiling_mode_for_profiling_tests():
                 output = func(input, profile_and_replay=True)
-                FileCheck().check_not("prim::DifferentiableGraph").run(func.graph_for(input))
+                FileCheck().check_not("prim::DifferentiableGraph").run(
+                    func.graph_for(input)
+                )
 
-    @unittest.skipIf(GRAPH_EXECUTOR != ProfilingMode.PROFILING, "This threshold is only valid for Profiling Executor")
+    @unittest.skipIf(
+        GRAPH_EXECUTOR != ProfilingMode.PROFILING,
+        "This threshold is only valid for Profiling Executor",
+    )
     def test_diff_graph_inline_threshold(self):
         with enable_profiling_mode_for_profiling_tests():
             NUM_RUNS = 1
             with num_profiled_runs(NUM_RUNS):
+
                 @torch.jit.script
                 def foo(x):
-
                     #  two nodes should be fused
                     #  see https://github.com/pytorch/pytorch/blob/master/torch/csrc/jit/runtime/graph_executor_impl.h#L49
                     return torch.sigmoid(torch.sigmoid(x))
@@ -78,12 +101,16 @@ class TestAutodiffSubgraphSlicing(JitTestCase):
                 bar(input)
                 bar(input)
 
-                self.assertGraphContainsExactly(foo.graph_for(input), 'prim::DifferentiableGraph', 1)
-                self.assertGraphContainsExactly(bar.graph_for(input), 'prim::DifferentiableGraph', 0)
+                self.assertGraphContainsExactly(
+                    foo.graph_for(input), "prim::DifferentiableGraph", 1
+                )
+                self.assertGraphContainsExactly(
+                    bar.graph_for(input), "prim::DifferentiableGraph", 0
+                )
 
     def test_bias_as_module_attr(self):
-
         with enable_profiling_mode_for_profiling_tests():
+
             class M(torch.nn.Module):
                 def __init__(self, has_bias):
                     super().__init__()
@@ -99,19 +126,40 @@ class TestAutodiffSubgraphSlicing(JitTestCase):
             scripted_no_bias(x, x)
             scripted_no_bias(x, x)
             has_bias = M(True)
-            check_against_reference(self, scripted_no_bias, no_bias, lambda x: x, (x, x,), check_types=False)
+            check_against_reference(
+                self,
+                scripted_no_bias,
+                no_bias,
+                lambda x: x,
+                (
+                    x,
+                    x,
+                ),
+                check_types=False,
+            )
             scripted_has_bias = torch.jit.script(has_bias)
             scripted_has_bias(x, x)
             scripted_has_bias(x, x)
             scripted_has_bias(x, x)
-            check_against_reference(self, scripted_has_bias, has_bias, lambda x: x, (x, x,), check_types=False)
+            check_against_reference(
+                self,
+                scripted_has_bias,
+                has_bias,
+                lambda x: x,
+                (
+                    x,
+                    x,
+                ),
+                check_types=False,
+            )
 
     def test_constructed_bias(self):
-
         with enable_profiling_mode_for_profiling_tests():
+
             def method1(x, weight, b1, b2):
                 bias = b1 * b2
                 return torch.nn.functional.linear(x, weight, bias)
+
             N = 10
             x = torch.rand(N, N, requires_grad=True)
             weight = torch.rand(N, N, requires_grad=True)
@@ -119,35 +167,58 @@ class TestAutodiffSubgraphSlicing(JitTestCase):
             b2 = torch.rand(N, N, requires_grad=True)
             scripted = self.checkScript(method1, (x, weight, b1, b2))
             # check_types requires last_graph on scripted to be set, so we just skip it
-            check_against_reference(self, scripted, method1, lambda x: x, (x, weight, b1, b2), check_types=False)
+            check_against_reference(
+                self,
+                scripted,
+                method1,
+                lambda x: x,
+                (x, weight, b1, b2),
+                check_types=False,
+            )
 
     def test_bias_as_arg(self):
-
         with enable_profiling_mode_for_profiling_tests():
+
             def method1(x, weight, bias: Optional[torch.Tensor]):
                 return torch.nn.functional.linear(x, weight, bias).relu() + 2
+
             N = 10
             x = torch.rand(N, N, requires_grad=True)
             weight = torch.rand(N, N, requires_grad=True)
             bias = None
             scripted = self.checkScript(method1, (x, weight, bias))
             # check_types requires last_graph on scripted to be set, so we just skip it
-            check_against_reference(self, scripted, method1, lambda x: x, (x, weight, bias), check_types=False)
+            check_against_reference(
+                self,
+                scripted,
+                method1,
+                lambda x: x,
+                (x, weight, bias),
+                check_types=False,
+            )
             bias = torch.rand(N, N, requires_grad=True)
             scripted = self.checkScript(method1, (x, weight, bias))
             # check_types requires last_graph on scripted to be set, so we just skip it
-            check_against_reference(self, scripted, method1, lambda x: x, (x, weight, bias), check_types=False)
+            check_against_reference(
+                self,
+                scripted,
+                method1,
+                lambda x: x,
+                (x, weight, bias),
+                check_types=False,
+            )
 
     def test_requires_grad_for_tensor_list(self):
-
         with enable_profiling_mode_for_profiling_tests():
-
             # output & var_list[0] should have requires_grad set to True
-            def func(input0: torch.Tensor, input1: torch.Tensor) -> Tuple[torch.Tensor, List[torch.Tensor]]:
+            def func(
+                input0: torch.Tensor, input1: torch.Tensor
+            ) -> Tuple[torch.Tensor, List[torch.Tensor]]:
                 var_list = [input0, input1]
                 var = torch.cat(var_list)
                 output = var + 1.0
                 return output, var_list
+
             jit_f = torch.jit.script(func)
             input0 = torch.randn((2,), requires_grad=True)
             input1 = torch.randn((2,))
@@ -158,12 +229,14 @@ class TestAutodiffSubgraphSlicing(JitTestCase):
                 assert output_ref[1][0].requires_grad == output[1][0].requires_grad
                 assert output_ref[1][1].requires_grad == output[1][1].requires_grad
 
-    @unittest.skip("disable until we property handle tensor lists with undefined gradients")
+    @unittest.skip(
+        "disable until we property handle tensor lists with undefined gradients"
+    )
     def test_differentiable_graph_ops_requires_grad(self):
         x = torch.randn(8, 2, dtype=torch.float).requires_grad_()
         y = torch.randn(8, 2, dtype=torch.float)
 
-        def t(x : torch.Tensor, y : torch.Tensor, flag : bool):
+        def t(x: torch.Tensor, y: torch.Tensor, flag: bool):
             o = x + 1.0
             o1 = torch.relu(o)
             o = y + 1.5
@@ -186,13 +259,14 @@ class TestAutodiffSubgraphSlicing(JitTestCase):
             return o1, o2, o3, oo1, oo2, oo3
 
         with enable_profiling_mode_for_profiling_tests():
-
             t_jit = torch.jit.script(t)
             jit_o = t_jit(x, y, False)
             jit_o = t_jit(x, y, False)
             o = t(x, y, False)
 
-            FileCheck().check("prim::DifferentiableGraph").run(t_jit.graph_for(x, y, False))
+            FileCheck().check("prim::DifferentiableGraph").run(
+                t_jit.graph_for(x, y, False)
+            )
             # validate the differentiableGraphOps are marking proper requires_grad
             for oo, jit_oo in zip(o, jit_o):
                 self.assertEqual(oo.requires_grad, jit_oo.requires_grad)
@@ -204,22 +278,28 @@ class TestAutodiffSubgraphSlicing(JitTestCase):
                 self.assertEqual(oo.requires_grad, jit_oo.requires_grad)
                 self.assertEqual(oo, jit_oo)
 
-    @unittest.skipIf(GRAPH_EXECUTOR == ProfilingMode.PROFILING, "Simple Executor doesn't support gradients")
+    @unittest.skipIf(
+        GRAPH_EXECUTOR == ProfilingMode.PROFILING,
+        "Simple Executor doesn't support gradients",
+    )
     def test_prune_grad(self):
         @torch.jit.script
         def t(input, bias):
             return torch.nn.functional.relu(input + bias)
+
         input = torch.randn(2, 8, requires_grad=True)
-        bias = torch.randn(8, requires_grad=False)    # bias does NOT require grad
+        bias = torch.randn(8, requires_grad=False)  # bias does NOT require grad
         NUM_PROFILED_RUNS = 1
         with num_profiled_runs(NUM_PROFILED_RUNS):
-            WARMUP = 3    # 2 runs to reach backward + 1 to optimize it
+            WARMUP = 3  # 2 runs to reach backward + 1 to optimize it
             for x in range(WARMUP):
                 o = t(input, bias)
                 o.sum().backward()
 
             fwd_plan = list(t.get_debug_state().execution_plans.values())[0]
-            bwd_graph = list(fwd_plan.code.grad_executor_states()[0].execution_plans.values())[0].graph
+            bwd_graph = list(
+                fwd_plan.code.grad_executor_states()[0].execution_plans.values()
+            )[0].graph
             tup = next(bwd_graph.outputs())
             self.assertEqual(len(list(tup.node().inputs())), 1)
 
@@ -233,7 +313,7 @@ class TestAutodiffSubgraphSlicing(JitTestCase):
         graph = self._perform_ad_subgraph_slicing(fn, 1, 1, 1)
 
         self.assertGraphSize(graph, 1)
-        self.assertGraphContainsExactly(graph, 'prim::DifferentiableGraph', 1)
+        self.assertGraphContainsExactly(graph, "prim::DifferentiableGraph", 1)
 
     def test_simple_no_merge(self):
         # o: autodiff supported. x: not autodiff supported.
@@ -245,8 +325,10 @@ class TestAutodiffSubgraphSlicing(JitTestCase):
 
         graph = self._perform_ad_subgraph_slicing(fn, 1, 1, 1)
         g_str = str(graph)
-        FileCheck().check("aten::Int").check("aten::zeros").check_not("aten::mul").run(g_str[0:g_str.find("return")])
-        self.assertGraphContainsExactly(graph, 'prim::DifferentiableGraph', 1)
+        FileCheck().check("aten::Int").check("aten::zeros").check_not("aten::mul").run(
+            g_str[0 : g_str.find("return")]
+        )
+        self.assertGraphContainsExactly(graph, "prim::DifferentiableGraph", 1)
 
     def test_does_not_merge_unrelated(self):
         # o  o
@@ -258,7 +340,7 @@ class TestAutodiffSubgraphSlicing(JitTestCase):
         graph = self._perform_ad_subgraph_slicing(fn, 1, 1, 1, 1)
 
         self.assertGraphSize(graph, 3)
-        self.assertGraphContainsExactly(graph, 'prim::DifferentiableGraph', 2)
+        self.assertGraphContainsExactly(graph, "prim::DifferentiableGraph", 2)
 
     def test_merges_without_cycles(self):
         # o --> o --> o
@@ -273,7 +355,7 @@ class TestAutodiffSubgraphSlicing(JitTestCase):
         graph = self._perform_ad_subgraph_slicing(fn, 1, 1, 1)
 
         self.assertGraphSize(graph, 1)
-        self.assertGraphContainsExactly(graph, 'prim::DifferentiableGraph', 1)
+        self.assertGraphContainsExactly(graph, "prim::DifferentiableGraph", 1)
 
     def test_merges_dense(self):
         #   o      o
@@ -290,7 +372,7 @@ class TestAutodiffSubgraphSlicing(JitTestCase):
         graph = self._perform_ad_subgraph_slicing(fn, 2, 2)
 
         self.assertGraphSize(graph, 2)
-        self.assertGraphContainsExactly(graph, 'prim::DifferentiableGraph', 1)
+        self.assertGraphContainsExactly(graph, "prim::DifferentiableGraph", 1)
 
     def test_does_not_create_cycles(self):
         # o --> x --> o
@@ -303,7 +385,7 @@ class TestAutodiffSubgraphSlicing(JitTestCase):
             return c
 
         graph = self._perform_ad_subgraph_slicing(fn, 1, 1, 1)
-        self.assertGraphContainsExactly(graph, 'prim::DifferentiableGraph', 2)
+        self.assertGraphContainsExactly(graph, "prim::DifferentiableGraph", 2)
 
     def test_merges_up(self):
         # o --> x     o
@@ -317,8 +399,8 @@ class TestAutodiffSubgraphSlicing(JitTestCase):
 
         graph = self._perform_ad_subgraph_slicing(fn, 1, 1, 1, 1)
         g_str = str(graph)
-        FileCheck().check_not("aten::add").run(g_str[0:g_str.find("return")])
-        self.assertGraphContainsExactly(graph, 'prim::DifferentiableGraph', 1)
+        FileCheck().check_not("aten::add").run(g_str[0 : g_str.find("return")])
+        self.assertGraphContainsExactly(graph, "prim::DifferentiableGraph", 1)
 
     def test_merges_down(self):
         # o     x --> o
@@ -335,8 +417,8 @@ class TestAutodiffSubgraphSlicing(JitTestCase):
         num_nodes = 4 if GRAPH_EXECUTOR == ProfilingMode.PROFILING else 3
         # add moved down
         g_str = str(graph)
-        FileCheck().check_not("aten::add").run(g_str[0:g_str.find("return")])
-        self.assertGraphContainsExactly(graph, 'prim::DifferentiableGraph', 1)
+        FileCheck().check_not("aten::add").run(g_str[0 : g_str.find("return")])
+        self.assertGraphContainsExactly(graph, "prim::DifferentiableGraph", 1)
 
     def test_respects_lexical_scoping(self):
         def fn(x, k):
@@ -346,12 +428,10 @@ class TestAutodiffSubgraphSlicing(JitTestCase):
             z = y * k
             return z, k
 
-
         graph = self._perform_ad_subgraph_slicing(fn, 1, 1)
         # We should not have combined the two multiplications into
         # the same group; they should each be a separate DiffGraph
-        self.assertGraphContainsExactly(graph, 'prim::DifferentiableGraph', 3)
-
+        self.assertGraphContainsExactly(graph, "prim::DifferentiableGraph", 3)
 
     def test_merge_respects_aliasing(self):
         def fn(x, k, cond):
@@ -368,15 +448,13 @@ class TestAutodiffSubgraphSlicing(JitTestCase):
 
         graph = self._perform_ad_subgraph_slicing(fn, [2, 2], [2, 2], 1)
         # z2 did did not get merged into the subgraph
-        FileCheck().check("prim::If").check("aten::select").check_next("aten::select")\
-            .check_next("aten::add_").check("Differentiable").run(graph)
-        self.assertGraphContainsExactly(graph, 'prim::DifferentiableGraph', 2)
+        FileCheck().check("prim::If").check("aten::select").check_next(
+            "aten::select"
+        ).check_next("aten::add_").check("Differentiable").run(graph)
+        self.assertGraphContainsExactly(graph, "prim::DifferentiableGraph", 2)
 
     def test_aliased_outputs(self):
-
         with enable_profiling_mode_for_profiling_tests():
-
-
             # Case 1: aliasing between relu and t
             # is within a DifferentiableGraph. It should be valid
             # to merge both split_with_sizes in relu in one graph
@@ -389,9 +467,9 @@ class TestAutodiffSubgraphSlicing(JitTestCase):
 
             graph = torch._C.parse_ir(input_str)
             torch._C._jit_pass_create_autodiff_subgraphs(graph, 1)
-            FileCheck().check("with prim::DifferentiableGraph") \
-                .check("aten::relu").check("aten::t") \
-                .run(graph)
+            FileCheck().check("with prim::DifferentiableGraph").check(
+                "aten::relu"
+            ).check("aten::t").run(graph)
 
             # Case 2: aliasing between relu and split_with_sizes
             # are both outputs of a Diff graph. It should be invalid
@@ -410,11 +488,11 @@ class TestAutodiffSubgraphSlicing(JitTestCase):
 
             graph = torch._C.parse_ir(input_str)
             torch._C._jit_pass_create_autodiff_subgraphs(graph, 1)
-            FileCheck().check("Tensor = prim::DifferentiableGraph") \
-                .check("with prim::DifferentiableGraph") \
-                .check("Tensor = aten::relu") \
-                .check_not("aten::split_with_sizes") \
-                .run(graph)
+            FileCheck().check("Tensor = prim::DifferentiableGraph").check(
+                "with prim::DifferentiableGraph"
+            ).check("Tensor = aten::relu").check_not("aten::split_with_sizes").run(
+                graph
+            )
 
             # Case 3: two aliased nodes in a graph.
             # Both `split_with_sizes` should be unfused
@@ -432,11 +510,11 @@ class TestAutodiffSubgraphSlicing(JitTestCase):
 
             graph = torch._C.parse_ir(input_str)
             torch._C._jit_pass_create_autodiff_subgraphs(graph, 1)
-            FileCheck().check("Tensor = prim::DifferentiableGraph") \
-                .check("with prim::DifferentiableGraph") \
-                .check("Tensor = aten::relu") \
-                .check_not("aten::split_with_sizes") \
-                .run(graph)
+            FileCheck().check("Tensor = prim::DifferentiableGraph").check(
+                "with prim::DifferentiableGraph"
+            ).check("Tensor = aten::relu").check_not("aten::split_with_sizes").run(
+                graph
+            )
 
             # Case 4: the aliased output has a descendant
             # Both should be unfused. Note, %3 comes before %2
@@ -454,11 +532,9 @@ class TestAutodiffSubgraphSlicing(JitTestCase):
 
             graph = torch._C.parse_ir(input_str)
             torch._C._jit_pass_create_autodiff_subgraphs(graph, 1)
-            FileCheck().check("Tensor = prim::DifferentiableGraph") \
-                .check("with prim::DifferentiableGraph") \
-                .check("Tensor = aten::relu") \
-                .check_not("aten::t") \
-                .run(graph)
+            FileCheck().check("Tensor = prim::DifferentiableGraph").check(
+                "with prim::DifferentiableGraph"
+            ).check("Tensor = aten::relu").check_not("aten::t").run(graph)
 
             # Case 5: multiple aliased groups
             # Both should be unfused. Note, %3 comes before %2
@@ -478,11 +554,9 @@ class TestAutodiffSubgraphSlicing(JitTestCase):
 
             graph = torch._C.parse_ir(input_str)
             torch._C._jit_pass_create_autodiff_subgraphs(graph, 1)
-            FileCheck().check("Tensor = prim::DifferentiableGraph") \
-                .check("with prim::DifferentiableGraph") \
-                .check("Tensor = aten::relu") \
-                .check_not("aten::t") \
-                .run(graph)
+            FileCheck().check("Tensor = prim::DifferentiableGraph").check(
+                "with prim::DifferentiableGraph"
+            ).check("Tensor = aten::relu").check_not("aten::t").run(graph)
 
     def test_has_profiled_info_aliasing_outputs(self):
         # The expectation is that CallFunction will prevent the final profile node from
@@ -511,9 +585,6 @@ class TestAutodiffSubgraphSlicing(JitTestCase):
         output = outputs[0]
         self.assertEqual(False, output.requiresGrad())
 
-        FileCheck().check("= prim::DifferentiableGraph") \
-            .check("with prim::DifferentiableGraph") \
-            .check(" = aten::relu") \
-            .check("requires_grad=0") \
-            .check("aten::relu") \
-            .run(graph)
+        FileCheck().check("= prim::DifferentiableGraph").check(
+            "with prim::DifferentiableGraph"
+        ).check(" = aten::relu").check("requires_grad=0").check("aten::relu").run(graph)

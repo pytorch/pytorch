@@ -1,11 +1,10 @@
+# mypy: allow-untyped-defs
 import functools
 import itertools
 import logging
 import operator
 from collections import Counter, defaultdict
-from typing import Any, Dict, List, Optional, Set, Union
-
-from sympy import Expr
+from typing import Any, Dict, List, Optional, Set, TYPE_CHECKING, Union
 
 import torch
 import torch._inductor as inductor
@@ -18,6 +17,7 @@ from torch._prims_common import is_boolean_dtype, is_expandable_to, is_integer_d
 
 from torch._utils_internal import upload_graph
 from torch.fx.experimental.symbolic_shapes import statically_known_true, sym_eq
+from torch.fx.passes.graph_transform_observer import GraphTransformObserver
 
 from .. import config, ir, pattern_matcher
 from ..fx_utils import FakeTensorUpdater, get_fake_args_kwargs, get_node_storage
@@ -44,26 +44,26 @@ from ..pattern_matcher import (
 from ..utils import decode_device, is_pointwise_use
 from ..virtualized import V
 from .ddp_fusion import fuse_ddp_communication
-from .group_batch_fusion import group_batch_fusion_passes
+from .group_batch_fusion import group_batch_fusion_passes, POST_GRAD_FUSIONS
+from .micro_pipeline_tp import patterns as micro_pipeline_tp_patterns
 from .pre_grad import is_same_dict, save_inductor_dict
 from .reinplace import reinplace_inplaceable_ops
 from .split_cat import POST_GRAD_PATTERNS
+
+if TYPE_CHECKING:
+    from sympy import Expr
 
 
 log = logging.getLogger(__name__)
 aten = torch.ops.aten
 prims = torch.ops.prims
 
-pattern_matcher_passes = POST_GRAD_PATTERNS.values()
 # First pass_patterns[0] are applied, then [1], then [2]
 pass_patterns = [
     PatternMatcherPass(),
     PatternMatcherPass(),
     PatternMatcherPass(),
 ]
-# patterns applied only in inference
-inference_patterns = PatternMatcherPass()
-decompose_mm_pass = PatternMatcherPass()
 
 
 def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
@@ -83,7 +83,10 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
     fake_tensor_updater = FakeTensorUpdater(gm.graph)
 
     if config.post_grad_custom_pre_pass is not None:
-        config.post_grad_custom_pre_pass(gm.graph)
+        with GraphTransformObserver(
+            gm, "post_grad_custom_pre_pass", config.trace.log_url_for_graph_xform
+        ):
+            config.post_grad_custom_pre_pass(gm.graph)
 
     if config.pattern_matcher:
         lazy_init()
@@ -92,7 +95,11 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
         remove_noop_ops(gm.graph)
         for patterns in pass_patterns:
             patterns.apply(gm.graph)  # type: ignore[arg-type]
-        for pattern_matcher_pass in pattern_matcher_passes:
+        for pass_name in config.post_grad_fusion_options:
+            # skip all patterns for group batch fusions
+            if pass_name in POST_GRAD_FUSIONS:
+                continue
+            pattern_matcher_pass = POST_GRAD_PATTERNS[pass_name]
             inductor_before_change = save_inductor_dict(
                 [pattern_matcher_pass.pass_name]
             )
@@ -101,9 +108,9 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
                 optimus_scuba_log[
                     f"{pattern_matcher_pass.pass_name}_post_grad"
                 ] = upload_graph(gm.graph)
-        if is_inference:
-            inference_patterns.apply(gm.graph)  # type: ignore[arg-type]
-        decompose_mm_pass.apply(gm.graph)  # type: ignore[arg-type]
+
+    if config._micro_pipeline_tp:
+        micro_pipeline_tp_patterns.apply(gm)
 
     if config._fuse_ddp_communication:
         fuse_ddp_communication(
@@ -113,7 +120,10 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
         )
 
     if config.post_grad_custom_post_pass is not None:
-        config.post_grad_custom_post_pass(gm.graph)
+        with GraphTransformObserver(
+            gm, "post_grad_custom_post_pass", config.trace.log_url_for_graph_xform
+        ):
+            config.post_grad_custom_post_pass(gm.graph)
 
     stable_topological_sort(gm.graph)
 
@@ -158,12 +168,7 @@ def reorder_for_locality(graph: torch.fx.Graph):
     # copy_ will appear at the end of functionalized graphs when there is mutation on inputs,
     # and this reordering doesnt work well with mutation
     first_copy = next(
-        (
-            node
-            for node in graph.nodes
-            if node.op == "call_function"
-            and node.target == torch.ops.aten.copy_.default
-        ),
+        iter(graph.find_nodes(op="call_function", target=torch.ops.aten.copy_.default)),
         None,
     )
     past_mutating_epilogue = True if first_copy is None else False
@@ -224,7 +229,7 @@ def mm_plus_mm(match: Match, mat1, mat2, mat3, mat4):
 
 
 def cuda_and_enabled_mixed_mm(match):
-    return (config.use_mixed_mm or config.force_mixed_mm) and getattr(
+    return (config.use_mixed_mm or config.mixed_mm_choice != "default") and getattr(
         match.kwargs["mat1"].meta.get("val"), "is_cuda", False
     )
 
@@ -275,11 +280,12 @@ def cuda_and_enabled_mixed_mm_and_not_int8(match):
                                 KeywordArg("mat2"),
                                 0xF,
                             ),
-                            CallFunction(
-                                aten.__rshift__.Scalar,
-                                KeywordArg("mat2"),
-                                4,
-                            ),
+                            # CallFunction(
+                            #    aten.__rshift__.Scalar,
+                            #    KeywordArg("mat2"),
+                            #    4,
+                            # ),
+                            True,
                         ),
                         1,
                     ),
@@ -354,8 +360,7 @@ def pointless_cumsum_replacement(match: Match, shape, fill_value, device, dtype,
 
     # only replace the output node, not all nodes
     match.nodes = [match.output_node()]
-    with V.fake_mode:
-        match.replace_by_example(repl, list(shape))
+    match.replace_by_example(repl, list(shape))
 
 
 def shape_of_mm(a, b):
@@ -639,12 +644,9 @@ def remove_noop_ops(graph: torch.fx.Graph):
     input_storages = set()
     output_storages = set()
 
-    for node in graph.nodes:
-        if node.op == "placeholder":
-            inputs.add(node)
-            input_storages.add(get_node_storage(node))
-        else:
-            break
+    for node in graph.find_nodes(op="placeholder"):
+        inputs.add(node)
+        input_storages.add(get_node_storage(node))
 
     output_node = next(iter(reversed(graph.nodes)))
     assert output_node.op == "output"
@@ -718,13 +720,13 @@ def decompose_auto_functionalized(graph):
             args, kwargs = pytree.tree_unflatten(flat_args, spec)
             return auto_functionalized_dense(*args, only_clone_these_tensors, **kwargs)
 
-        with V.fake_mode:
-            match.replace_by_example(decomp, flat_args, run_dce=False)
+        match.replace_by_example(decomp, flat_args, run_dce=False)
 
     graph_pass.apply(graph)
-    for node in graph.nodes:
-        if node.target is torch.ops.higher_order.auto_functionalized:
-            raise AssertionError("auto_functionalized was not removed")
+    for node in graph.find_nodes(
+        op="call_function", target=torch.ops.higher_order.auto_functionalized
+    ):
+        raise AssertionError("auto_functionalized was not removed")
 
 
 @register_lowering_pattern(
@@ -810,9 +812,10 @@ def view_to_reshape(gm):
     """
     Replace view ops in the GraphModule to reshape ops.
     """
-    for nd in gm.graph.nodes:
-        if nd.target == torch.ops.aten.view.default:
-            nd.target = torch.ops.aten.reshape.default
+    for nd in gm.graph.find_nodes(
+        op="call_function", target=torch.ops.aten.view.default
+    ):
+        nd.target = torch.ops.aten.reshape.default
 
 
 def should_prefer_unfused_addmm(match):
@@ -833,8 +836,7 @@ def unfuse_bias_add_to_pointwise(match: Match, mat1, mat2, *, inp):
     def repl(inp, x1, x2):
         return x1 @ x2 + inp
 
-    with V.fake_mode:
-        match.replace_by_example(repl, [inp, mat1, mat2])
+    match.replace_by_example(repl, [inp, mat1, mat2])
 
 
 def is_valid_addmm_fusion(match):
@@ -877,8 +879,7 @@ def addmm(match, mat1, mat2, *, inp):
     def repl(inp, mat1, mat2):
         return aten.addmm(inp, mat1, mat2)
 
-    with V.fake_mode:
-        match.replace_by_example(repl, [inp, mat1, mat2])
+    match.replace_by_example(repl, [inp, mat1, mat2])
 
 
 def check_shape_cuda_and_fused_int_mm_mul_enabled(match):

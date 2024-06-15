@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import math
 from typing import Optional, Tuple
 
@@ -10,12 +11,11 @@ from torch.library import impl, Library
 # name is not too long
 quantized_decomposed_lib = Library("quantized_decomposed", "DEF")
 
-_DTYPE_TO_QVALUE_BOUNDS = {
-    torch.uint8: (0, 255),
-    torch.int8: (-128, 127),
-    torch.int16: (-(2**15), 2**15 - 1),
-    torch.int32: (-(2**31), 2**31 - 1),
-}
+_INTEGER_DTYPES = [torch.uint8, torch.int8, torch.int16, torch.int32]
+_FLOAT_DTYPES = [torch.float8_e5m2, torch.float8_e4m3fn]
+
+_DTYPE_TO_QVALUE_BOUNDS = {k : (torch.iinfo(k).min, torch.iinfo(k).max) for k in _INTEGER_DTYPES}
+_DTYPE_TO_QVALUE_BOUNDS.update({k : (int(torch.finfo(k).min), int(torch.finfo(k).max)) for k in _FLOAT_DTYPES})
 
 # Helper to check the passed in quant min and max are valid for the dtype
 def _quant_min_max_bounds_check(quant_min, quant_max, dtype):
@@ -616,7 +616,7 @@ def choose_qparams_per_token(
         n_bits = 8
         quant_max = 2 ** (n_bits - 1) - 1
     else:
-        raise Exception(f"unsupported dtype in choose_qparams_per_token: {dtype}")
+        raise Exception(f"unsupported dtype in choose_qparams_per_token: {dtype}")  # noqa: TRY002
 
     scales = scales.clamp(min=1e-5).div(quant_max)
     zero_points = torch.zeros_like(scales)
@@ -638,18 +638,17 @@ def choose_qparams_per_token_meta(
     )
 
 
-# TODO: move this to https://github.com/pytorch/pytorch/blob/main/torch/ao/quantization/fx/_decomposed.py
 quantized_decomposed_lib.define(
-    "choose_qparams_per_token_asymmetric(Tensor input, ScalarType dtype) -> (Tensor, Tensor)"
+    "_choose_qparams_per_token_asymmetric_impl(Tensor input, ScalarType dtype) -> (Tensor, Tensor)"
 )
 
 
 @impl(
     quantized_decomposed_lib,
-    "choose_qparams_per_token_asymmetric",
-    "CompositeExplicitAutograd",
+    "_choose_qparams_per_token_asymmetric_impl",
+    "CompositeImplicitAutograd",
 )
-def choose_qparams_per_token_asymmetric(
+def _choose_qparams_per_token_asymmetric_impl(
     input: torch.Tensor,
     dtype: torch.dtype,
 ) -> Tuple[torch.Tensor, torch.Tensor]:
@@ -667,7 +666,8 @@ def choose_qparams_per_token_asymmetric(
     """
     # Based on https://github.com/google/XNNPACK/blob/df156f0cf3db5a4576cc711123eeb54915f82ffc/src/xnnpack/quantization.h#L18
     qmin, qmax = -128, 127
-    min_val, max_val = torch.aminmax(input, dim=-1, keepdim=True)
+    min_val = torch.amin(input, dim=-1, keepdim=True)
+    max_val = torch.amax(input, dim=-1, keepdim=True)
     min_val_neg = torch.min(min_val, torch.zeros_like(min_val))
     max_val_pos = torch.max(max_val, torch.zeros_like(max_val))
     eps = torch.finfo(torch.float32).eps  # use xnnpack eps?
@@ -689,6 +689,23 @@ def choose_qparams_per_token_asymmetric(
     zero_point = torch.clamp(zero_point, qmin, qmax).round()
 
     return scale.to(torch.float32), zero_point.to(torch.float32)
+
+
+quantized_decomposed_lib.define(
+    "choose_qparams_per_token_asymmetric(Tensor input, ScalarType dtype) -> (Tensor, Tensor)"
+)
+
+
+@impl(
+    quantized_decomposed_lib,
+    "choose_qparams_per_token_asymmetric",
+    "CompositeExplicitAutograd",
+)
+def choose_qparams_per_token_asymmetric(
+    input: torch.Tensor,
+    dtype: torch.dtype,
+) -> Tuple[torch.Tensor, torch.Tensor]:
+    return _choose_qparams_per_token_asymmetric_impl(input, dtype)
 
 
 @impl(
@@ -752,7 +769,7 @@ def quantize_per_token(
     _quant_min_max_bounds_check(quant_min, quant_max, dtype)
     _per_token_quant_qparam_dim_check(input, scales, zero_points)
     input = (
-        torch.round(input / scales + zero_points).clamp(quant_min, quant_max).to(dtype)
+        input.mul(1.0 / scales).add(zero_points).round().clamp(quant_min, quant_max).to(dtype)
     )
     return input
 
@@ -859,7 +876,7 @@ def quantize_per_channel_group(
     zero_points = zero_points.reshape(-1, 1)
 
     input_int8 = (
-        to_quant.div(scales)
+        to_quant.mul(1.0 / scales)
         .add(zero_points)
         .round()
         .clamp_(quant_min, quant_max)

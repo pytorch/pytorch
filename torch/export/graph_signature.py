@@ -1,6 +1,9 @@
+# mypy: allow-untyped-defs
 import dataclasses
 from enum import auto, Enum
 from typing import Collection, Dict, List, Mapping, Optional, Set, Tuple, Union
+
+from torch._library.fake_class_registry import FakeScriptObject
 
 
 __all__ = [
@@ -36,11 +39,13 @@ class SymIntArgument:
 class CustomObjArgument:
     name: str
     class_fqn: str
+    fake_val: Optional[FakeScriptObject] = None
 
 
 @dataclasses.dataclass
 class ConstantArgument:
-    value: Union[int, float, bool, None]
+    name: str
+    value: Union[int, float, bool, str, None]
 
 
 ArgumentSpec = Union[

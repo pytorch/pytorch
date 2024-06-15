@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 # Copyright (c) Facebook, Inc. and its affiliates.
 # All rights reserved.
 #
@@ -18,7 +19,9 @@ from datetime import datetime, timedelta
 from enum import Enum
 from typing import Any, Callable, cast, Dict, List, Optional, Set, Tuple
 
-from torch.distributed import PrefixStore, Store
+import torch.distributed as dist
+
+from torch.distributed import Store
 from torch.distributed.elastic.events import construct_and_record_rdzv_event, NodeState
 
 from .api import (
@@ -26,13 +29,21 @@ from .api import (
     RendezvousError,
     RendezvousGracefulExitError,
     RendezvousHandler,
+    RendezvousInfo,
     RendezvousParameters,
     RendezvousStateError,
+    RendezvousStoreInfo,
     RendezvousTimeoutError,
 )
 from .utils import _delay, _PeriodicTimer
 
-__all__ = ['RendezvousBackend', 'RendezvousTimeout', 'RendezvousSettings', 'DynamicRendezvousHandler', 'create_handler']
+__all__ = [
+    "RendezvousBackend",
+    "RendezvousTimeout",
+    "RendezvousSettings",
+    "DynamicRendezvousHandler",
+    "create_handler",
+]
 
 logger = logging.getLogger(__name__)
 
@@ -655,10 +666,10 @@ class _DistributedRendezvousOpExecutor(_RendezvousOpExecutor):
                 continue
 
             if action == _Action.ERROR_CLOSED:
-                raise RendezvousClosedError()
+                raise RendezvousClosedError
 
             if action == _Action.ERROR_TIMEOUT:
-                raise RendezvousTimeoutError()
+                raise RendezvousTimeoutError
 
             if action == _Action.SYNC:
                 # Delay the execution by one second to avoid overloading the
@@ -1064,6 +1075,11 @@ class DynamicRendezvousHandler(RendezvousHandler):
 
         self._keep_alive_timer = None
 
+        # Cached shared store server reference
+        self._shared_tcp_store_server: Optional[dist.Store] = None
+
+        self._bootstrap_store_info: Optional[RendezvousStoreInfo] = None
+
     def _record(
         self,
         message: str,
@@ -1081,6 +1097,15 @@ class DynamicRendezvousHandler(RendezvousHandler):
             rank=rank,
         )
 
+    def _create_tcp_store_server(self, bootstrap_store_info) -> dist.TCPStore:
+        return dist.TCPStore(
+            bootstrap_store_info.master_addr,
+            bootstrap_store_info.master_port,
+            is_master=True,
+            multi_tenant=True,
+            use_libuv=True,
+        )
+
     @property
     def settings(self) -> RendezvousSettings:
         """Get the settings of the rendezvous."""
@@ -1090,7 +1115,12 @@ class DynamicRendezvousHandler(RendezvousHandler):
         """See base class."""
         return self._backend_name
 
-    def next_rendezvous(self) -> Tuple[Store, int, int]:
+    @property
+    def use_agent_store(self) -> bool:
+        """See base class."""
+        return os.getenv("TORCH_DISABLE_SHARE_RDZV_TCP_STORE", "0") != "1"
+
+    def next_rendezvous(self) -> RendezvousInfo:
         """See base class."""
         msg = (
             f"The node '{self._this_node}' attempts to join the next round of the rendezvous "
@@ -1138,7 +1168,40 @@ class DynamicRendezvousHandler(RendezvousHandler):
         self._record(message=msg, rank=rank)
         logger.info(msg)
 
-        return store, rank, world_size
+        # opt-out option of TCP store sharing
+        if os.getenv("TORCH_DISABLE_SHARE_RDZV_TCP_STORE", "0") == "1":
+            bootstrap_store_info = RendezvousStoreInfo.build(rank, store)
+            return RendezvousInfo(
+                store,
+                rank,
+                world_size,
+                bootstrap_store_info,
+            )
+
+        if self._bootstrap_store_info is None:
+            if isinstance(self._store, dist.TCPStore):
+                addr = self._store.host
+                port = self._store.port
+                self._bootstrap_store_info = RendezvousStoreInfo(master_addr=addr, master_port=port)
+                if rank == 0:
+                    self._shared_tcp_store_server = self._store
+            else:
+                # If the store is not type of TCPStore start TCPStore server, which requries
+                # bootstrapping info across ranks
+                self._bootstrap_store_info = RendezvousStoreInfo.build(rank, store)
+                if rank == 0:
+                    self._shared_tcp_store_server = self._create_tcp_store_server(self._bootstrap_store_info)
+
+        assert self._bootstrap_store_info is not None
+        if rank == 0:
+            assert self._shared_tcp_store_server is not None
+
+        return RendezvousInfo(
+            store,
+            rank,
+            world_size,
+            self._bootstrap_store_info,  # type: ignore[assignment]
+        )
 
     def is_closed(self) -> bool:
         """See base class."""
@@ -1273,10 +1336,13 @@ class DynamicRendezvousHandler(RendezvousHandler):
 
         return state.participants[self._this_node], len(state.participants)
 
-    def _get_store(self) -> Store:
+    def _wrap_store(self, store: Store) -> Store:
         key_prefix = f"torch.rendezvous.{self._settings.run_id}.{self._state_holder.state.round}"
 
-        return PrefixStore(key_prefix, self._store)
+        return dist.PrefixStore(key_prefix, store)
+
+    def _get_store(self) -> Store:
+        return self._wrap_store(self._store)
 
     def _get_deadline(self, timeout: timedelta) -> float:
         return time.monotonic() + timeout.total_seconds()

@@ -126,6 +126,48 @@ struct VecConvert<int32_t, 1, uint8_t, 1> {
   }
 };
 
+template <typename dst_t, typename src_t>
+struct VecConvert<
+    dst_t,
+    1,
+    src_t,
+    1,
+    typename std::enable_if_t<
+        (is_reduced_floating_point_v<dst_t> && is_8bit_integer_v<src_t>) ||
+            (is_reduced_floating_point_v<src_t> && is_8bit_integer_v<dst_t>),
+        void>> {
+  static inline VectorizedN<dst_t, 1> apply(const VectorizedN<src_t, 1>& src) {
+    VectorizedN<float, 1> tmp_fp32 = VecConvert<float, 1, src_t, 1>::apply(src);
+    return VecConvert<dst_t, 1, float, 1>::apply(tmp_fp32);
+  }
+};
+
+template <typename dst_t>
+struct VecConvert<
+    dst_t,
+    1,
+    float,
+    1,
+    typename std::enable_if_t<is_8bit_integer_v<dst_t>,
+        void>> {
+  static inline VectorizedN<dst_t, 1> apply(const VectorizedN<float, 1>& src) {
+    return convert_float_to_int8<dst_t>(src[0]);
+  }
+};
+
+template <typename src_t>
+struct VecConvert<
+    float,
+    1,
+    src_t,
+    1,
+    typename std::enable_if_t<is_8bit_integer_v<src_t>,
+        void>> {
+  static inline VectorizedN<float, 1> apply(const VectorizedN<src_t, 1>& src) {
+    return convert_int8_to_float<src_t>(src[0]);
+  }
+};
+
 template <typename dst_t>
 struct VecConvert<
     dst_t,

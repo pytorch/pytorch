@@ -298,19 +298,18 @@ class Vectorized<c10::Half> {
     } else if (count == (size() >> 1)) {
       Vectorized<c10::Half> res;
       res.values.val[0] = vld1q_f16(reinterpret_cast<const float16_t*>(ptr));
-      res.values.val[1] = vdupq_n_f16(0);
+      std::memset(&res.values.val[1], 0, sizeof(res.values.val[1]));
       return res;
-    } else {
-      __at_align__ float16_t tmp_values[size()];
-      for (const auto i : c10::irange(size())) {
-        tmp_values[i] = 0;
-      }
-      std::memcpy(
-          tmp_values,
-          reinterpret_cast<const float16_t*>(ptr),
-          count * sizeof(float16_t));
-      return vld1q_f16_x2(reinterpret_cast<const float16_t*>(tmp_values));
     }
+    __at_align__ float16_t tmp_values[size()];
+    for (const auto i : c10::irange(size())) {
+      tmp_values[i] = 0;
+    }
+    std::memcpy(
+        tmp_values,
+        reinterpret_cast<const float16_t*>(ptr),
+        count * sizeof(float16_t));
+    return vld1q_f16_x2(reinterpret_cast<const float16_t*>(tmp_values));
   }
   void store(void* ptr, int64_t count = size()) const {
     if (count == size()) {
@@ -565,9 +564,9 @@ class Vectorized<c10::Half> {
   }
 
   Vectorized<c10::Half> operator!=(const Vectorized<c10::Half>& other) const {
-    float32x4_t r0 = vreinterpretq_f16_u16(
+    float16x8_t r0 = vreinterpretq_f16_u16(
         vmvnq_u16(vceqq_f16(values.val[0], other.values.val[0])));
-    float32x4_t r1 = vreinterpretq_f16_u16(
+    float16x8_t r1 = vreinterpretq_f16_u16(
         vmvnq_u16(vceqq_f16(values.val[1], other.values.val[1])));
     return Vectorized<c10::Half>(r0, r1);
   }
@@ -766,13 +765,17 @@ inline Vectorized<c10::Half> Vectorized<c10::Half>::le(
 template <>
 inline void convert(const float16_t* src, int16_t* dst, int64_t n) {
   int64_t i;
+#ifndef __msvc_cl__
 #pragma unroll
+#endif
   for (i = 0; i <= (n - Vectorized<c10::Half>::size());
        i += Vectorized<c10::Half>::size()) {
     vst1q_s16(dst + i, vcvtq_s16_f16(vld1q_f16(src + i)));
     vst1q_s16(dst + i + 8, vcvtq_s16_f16(vld1q_f16(src + i + 8)));
   }
+#ifndef __msvc_cl__
 #pragma unroll
+#endif
   for (; i < n; i++) {
     dst[i] = static_cast<int16_t>(src[i]);
   }
@@ -781,13 +784,17 @@ inline void convert(const float16_t* src, int16_t* dst, int64_t n) {
 template <>
 inline void convert(const int16_t* src, float16_t* dst, int64_t n) {
   int64_t i;
+#ifndef __msvc_cl__
 #pragma unroll
+#endif
   for (i = 0; i <= (n - Vectorized<c10::Half>::size());
        i += Vectorized<c10::Half>::size()) {
     vst1q_f16(dst + i, vcvtq_f16_s16(vld1q_s16(src + i)));
     vst1q_f16(dst + i + 8, vcvtq_f16_s16(vld1q_s16(src + i + 8)));
   }
+#ifndef __msvc_cl__
 #pragma unroll
+#endif
   for (; i < n; i++) {
     dst[i] = static_cast<float16_t>(src[i]);
   }

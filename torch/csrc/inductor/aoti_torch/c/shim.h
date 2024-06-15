@@ -40,7 +40,12 @@
 #define AOTI_TORCH_EXPORT __attribute__((__visibility__("default")))
 #else // !__GNUC__
 #ifdef _WIN32
-#define AOTI_TORCH_EXPORT __declspec(dllexport)
+// PyTorch2 doesn't currently work on Windows. Exporting these APIs can lead
+// to symbol clashes at link time if libtorch is included in a DLL and binary
+// that depends on the DLL. As a short term fix, we don't export the symbols.
+// In the long term, this will need to be addressed when Windows is supported.
+// #define AOTI_TORCH_EXPORT __declspec(dllexport)
+#define AOTI_TORCH_EXPORT
 #else // !_WIN32
 #define AOTI_TORCH_EXPORT
 #endif // _WIN32
@@ -66,6 +71,9 @@ extern "C" {
 // the ABI boundary.)
 struct AtenTensorOpaque;
 using AtenTensorHandle = AtenTensorOpaque*;
+
+struct AtenGeneratorOpaque;
+using AtenGeneratorHandle = AtenGeneratorOpaque*;
 
 struct AOTIProxyExecutorOpaque;
 using AOTIProxyExecutorHandle = AOTIProxyExecutorOpaque*;
@@ -103,6 +111,9 @@ AOTI_TORCH_EXPORT int32_t aoti_torch_dtype_bool();
 AOTI_TORCH_EXPORT int32_t aoti_torch_dtype_complex32();
 AOTI_TORCH_EXPORT int32_t aoti_torch_dtype_complex64();
 AOTI_TORCH_EXPORT int32_t aoti_torch_dtype_complex128();
+
+AOTI_TORCH_EXPORT int32_t aoti_torch_layout_strided();
+AOTI_TORCH_EXPORT int32_t aoti_torch_layout__mkldnn();
 
 // Functions for converting a single-element tensor to a scalar value
 AOTI_TORCH_EXPORT AOTITorchError
@@ -261,6 +272,20 @@ AOTI_TORCH_EXPORT AOTITorchError aoti_torch_create_tensor_from_blob(
     int32_t device_index,
     AtenTensorHandle* ret // returns new reference
 );
+
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch_create_tensor_from_blob_v2(
+    void* data,
+    int64_t ndim,
+    const int64_t* sizes_ptr,
+    const int64_t* strides_ptr,
+    int64_t storage_offset,
+    int32_t dtype,
+    int32_t device_type,
+    int32_t device_index,
+    AtenTensorHandle* ret, // returns new reference
+    int32_t layout,
+    const uint8_t* opaque_metadata,
+    int64_t opaque_metadata_size);
 
 AOTI_TORCH_EXPORT AOTITorchError aoti_torch__embedding_bag(
     AtenTensorHandle weight,
@@ -450,7 +475,7 @@ AOTI_TORCH_EXPORT AOTITorchError aoti_torch_repeat_interleave_Tensor(
     AtenTensorHandle* out);
 
 AOTI_TORCH_EXPORT AOTITorchError
-aoti_check_inf_and_nan(AtenTensorHandle tensor);
+aoti_torch_check_inf_and_nan(const char* tensor_name, AtenTensorHandle tensor);
 
 AOTI_TORCH_EXPORT AOTITorchError aoti_torch_scatter_out(
     AtenTensorHandle out,
@@ -541,28 +566,32 @@ AOTI_TORCH_EXPORT void aoti_torch_check(
     const char* msg);
 
 #ifdef STRIP_ERROR_MESSAGES
-#define AOTI_TORCH_CHECK(cond, ...)    \
-  aoti_torch_check(                    \
-      cond,                            \
-      __func__,                        \
-      __FILE__,                        \
-      static_cast<uint32_t>(__LINE__), \
-      TORCH_CHECK_MSG(cond, "", __VA_ARGS__));
+#define AOTI_TORCH_CHECK(cond, ...)              \
+  if (!(cond)) {                                 \
+    aoti_torch_check(                            \
+        false,                                   \
+        __func__,                                \
+        __FILE__,                                \
+        static_cast<uint32_t>(__LINE__),         \
+        TORCH_CHECK_MSG(cond, "", __VA_ARGS__)); \
+  }
 #else
-#define AOTI_TORCH_CHECK(cond, ...)    \
-  aoti_torch_check(                    \
-      cond,                            \
-      __func__,                        \
-      __FILE__,                        \
-      static_cast<uint32_t>(__LINE__), \
-      TORCH_CHECK_MSG(cond, "", ##__VA_ARGS__));
+#define AOTI_TORCH_CHECK(cond, ...)                \
+  if (!(cond)) {                                   \
+    aoti_torch_check(                              \
+        false,                                     \
+        __func__,                                  \
+        __FILE__,                                  \
+        static_cast<uint32_t>(__LINE__),           \
+        TORCH_CHECK_MSG(cond, "", ##__VA_ARGS__)); \
+  }
 #endif
 
 #ifdef __cplusplus
 } // extern "C"
 
 template <typename T>
-int32_t aoti_torch_dtype();
+int32_t aoti_torch_dtype() = delete;
 
 #define DEFINE_DTYPE_SPECIALIZATION(ctype, typename) \
   template <>                                        \
@@ -570,10 +599,13 @@ int32_t aoti_torch_dtype();
     return aoti_torch_dtype_##typename();            \
   }
 
-// REVIEW: bfloat16 and half don't seem to actually build? Do I have
-// the wrong types?
-//  DEFINE_DTYPE_SPECIALIZATION(__bfloat16, bfloat16)
-//  DEFINE_DTYPE_SPECIALIZATION(half, float16)
+namespace c10 {
+struct BFloat16;
+struct Half;
+} // namespace c10
+
+DEFINE_DTYPE_SPECIALIZATION(c10::BFloat16, bfloat16)
+DEFINE_DTYPE_SPECIALIZATION(c10::Half, float16)
 DEFINE_DTYPE_SPECIALIZATION(float, float32)
 DEFINE_DTYPE_SPECIALIZATION(double, float64)
 DEFINE_DTYPE_SPECIALIZATION(uint8_t, uint8)

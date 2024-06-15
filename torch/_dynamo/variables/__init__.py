@@ -4,6 +4,7 @@ from .base import VariableTracker
 from .builtin import BuiltinVariable
 from .constant import ConstantVariable, EnumVariable
 from .ctx_manager import (
+    CatchWarningsCtxManagerVariable,
     ContextWrappingVariable,
     DeterministicAlgorithmsVariable,
     DisabledSavedTensorsHooksVariable,
@@ -22,11 +23,10 @@ from .ctx_manager import (
 from .dicts import (
     ConstDictVariable,
     CustomizedDictVariable,
-    DataClassVariable,
     DefaultDictVariable,
     SetVariable,
 )
-from .distributed import BackwardHookVariable, DistributedVariable
+from .distributed import BackwardHookVariable, DistributedVariable, PlacementVariable
 from .functions import (
     FunctoolsPartialVariable,
     NestedUserFunctionVariable,
@@ -62,6 +62,7 @@ from .misc import (
     AutogradFunctionVariable,
     ClosureVariable,
     DeletedVariable,
+    ExceptionVariable,
     GetAttrVariable,
     InspectSignatureVariable,
     LambdaVariable,
@@ -70,9 +71,11 @@ from .misc import (
     NewGlobalVariable,
     NumpyVariable,
     PythonModuleVariable,
+    RegexPatternVariable,
     StopIterationVariable,
     StringFormatVariable,
     SuperVariable,
+    TorchVersionVariable,
     TypingVariable,
     UnknownVariable,
 )
@@ -93,6 +96,7 @@ from .user_defined import (
     RemovableHandleVariable,
     UserDefinedClassVariable,
     UserDefinedObjectVariable,
+    WeakRefVariable,
 )
 
 __all__ = [
@@ -101,6 +105,7 @@ __all__ = [
     "BackwardHookVariable",
     "BaseListVariable",
     "BuiltinVariable",
+    "CatchWarningsCtxManagerVariable",
     "ClosureVariable",
     "ConstantVariable",
     "ConstDictVariable",
@@ -108,7 +113,6 @@ __all__ = [
     "CountIteratorVariable",
     "CustomizedDictVariable",
     "CycleIteratorVariable",
-    "DataClassVariable",
     "DefaultDictVariable",
     "DeletedVariable",
     "DeterministicAlgorithmsVariable",
@@ -131,8 +135,10 @@ __all__ = [
     "NumpyNdarrayVariable",
     "NumpyVariable",
     "OptimizerVariable",
+    "PlacementVariable",
     "PythonModuleVariable",
     "RangeVariable",
+    "RegexPatternVariable",
     "RemovableHandleVariable",
     "RepeatIteratorVariable",
     "RestrictedListSubclassVariable",
@@ -145,6 +151,7 @@ __all__ = [
     "TensorVariable",
     "TorchCtxManagerClassVariable",
     "TorchInGraphFunctionVariable",
+    "TorchVersionVariable",
     "TupleVariable",
     "UnknownVariable",
     "UnspecializedNNModuleVariable",

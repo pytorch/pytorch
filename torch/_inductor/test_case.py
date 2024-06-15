@@ -1,6 +1,6 @@
+# mypy: allow-untyped-defs
 import contextlib
-import tempfile
-import unittest
+import os
 
 from torch._dynamo.test_case import (
     run_tests as dynamo_run_tests,
@@ -8,6 +8,7 @@ from torch._dynamo.test_case import (
 )
 
 from torch._inductor import config
+from torch._inductor.utils import fresh_inductor_cache
 
 
 def run_tests(needs=()):
@@ -20,34 +21,16 @@ class TestCase(DynamoTestCase):
     the cache directory for each test.
     """
 
-    _stack: contextlib.ExitStack
-
-    @classmethod
-    def setUpClass(cls):
-        super().setUpClass()
-        cls._stack = contextlib.ExitStack()
-        cls._stack.enter_context(config.patch({"fx_graph_cache": True}))
-
-    @classmethod
-    def tearDownClass(cls):
-        super().tearDownClass()
-        cls._stack.close()
-
     def setUp(self):
         super().setUp()
-
-        # For all tests, mock the tmp directory populated by the inductor
-        # FxGraphCache, both for test isolation and to avoid filling disk.
-        self._inductor_cache_tmp_dir = tempfile.TemporaryDirectory()
-        self._inductor_cache_get_tmp_dir_patch = unittest.mock.patch(
-            "torch._inductor.codecache.FxGraphCache._get_tmp_dir"
-        )
-        mock_get_dir = self._inductor_cache_get_tmp_dir_patch.start()
-        mock_get_dir.return_value = self._inductor_cache_tmp_dir.name
+        self._inductor_test_stack = contextlib.ExitStack()
+        self._inductor_test_stack.enter_context(config.patch({"fx_graph_cache": True}))
+        if (
+            os.environ.get("INDUCTOR_TEST_DISABLE_FRESH_CACHE") != "1"
+            and os.environ.get("TORCH_COMPILE_DEBUG") != "1"
+        ):
+            self._inductor_test_stack.enter_context(fresh_inductor_cache())
 
     def tearDown(self):
         super().tearDown()
-
-        # Clean up the FxGraphCache tmp dir.
-        self._inductor_cache_get_tmp_dir_patch.stop()
-        self._inductor_cache_tmp_dir.cleanup()
+        self._inductor_test_stack.close()

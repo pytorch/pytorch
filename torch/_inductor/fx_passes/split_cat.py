@@ -1,13 +1,12 @@
+# mypy: allow-untyped-defs
 import itertools
 import logging
 import operator
 from typing import Any, Callable, Dict, List, Optional, Sequence, Set, Tuple, Union
-
 from typing_extensions import TypeAlias
 
 import torch
 from torch._dynamo.utils import counters
-from .. import config
 
 from ..pattern_matcher import (
     Arg,
@@ -44,8 +43,7 @@ _Range: TypeAlias = Tuple[int, int]
 PRE_GRAD_PATTERNS: Dict[str, PatternMatcherPass] = dict()
 POST_GRAD_PATTERNS: Dict[str, PatternMatcherPass] = dict()
 
-# TODO: read the pass_names from the config after the frontend change
-pass_names = [
+pre_grad_pass_names = [
     "normalization_pass",
     "remove_split_with_size_one_pass",
     "merge_getitem_cat_pass",
@@ -56,47 +54,42 @@ pass_names = [
     "unbind_stack_pass",
 ]
 
-for pass_name in pass_names:
+post_grad_pass_names = [
+    "normalization_aten_pass",
+    "decompose_mm_pass",
+    "unbind_stack_aten_pass",
+    "shape_padding_multiplier",
+]
+
+for pass_name in pre_grad_pass_names:
     # exclude all passes from the group batch fusion
     # they do not use pattern matcher
-    if pass_name in PRE_GRAD_FUSIONS or pass_name in POST_GRAD_FUSIONS:
+    if pass_name in PRE_GRAD_FUSIONS:
         continue
     PRE_GRAD_PATTERNS[pass_name] = PatternMatcherPass(
         prevent_match_across_mutations=True,
         pass_name=pass_name,
     )
 
+for pass_name in post_grad_pass_names:
+    # exclude all passes from the group batch fusion
+    # they do not use pattern matcher
+    if pass_name in POST_GRAD_FUSIONS:
+        continue
+    POST_GRAD_PATTERNS[pass_name] = PatternMatcherPass(
+        prevent_match_across_mutations=True,
+        pass_name=pass_name,
+    )
 
-def construct_pattern_matcher_pass(pass_name: str) -> PatternMatcherPass:
+
+def construct_pattern_matcher_pass(pass_name: str):
     """
     Return the specific pattern_matcher_pass given the pass name.
     """
     if pass_name in PRE_GRAD_PATTERNS:
         return PRE_GRAD_PATTERNS[pass_name]
-    elif pass_name in POST_GRAD_PATTERNS:
-        return POST_GRAD_PATTERNS[pass_name]
     else:
-        # pattern that does not in the config, will
-        # not be conduted in the optimization
-        return PatternMatcherPass(
-            prevent_match_across_mutations=True,
-            pass_name=pass_name,
-        )
-
-
-def get_config_flag(pass_name: str, flag="split_cat_fx_passes", pre_grad=True):
-    def flag_check(match):
-        # TODO: remove the flag config check after we have the front end change
-        # currently, pre_grad_fusion_options and post_grad_fusion_options are only have batch fusion
-        # options controlled by the batch_fusion flag, after we extend it to indluce other fusions,
-        # we can only check if the pass_name is in the config
-        if pre_grad:
-            # not to disturb models without the config flag is turned off
-            return getattr(config, flag)
-        else:
-            return getattr(config, flag)
-
-    return flag_check
+        return POST_GRAD_PATTERNS[pass_name]
 
 
 def _get_split_args_default(split_node):
@@ -113,7 +106,7 @@ def _get_split_args_default(split_node):
     )
 
 
-def _get_dim(node: Any) -> int:
+def _get_dim(node: Any):
     assert isinstance(node, torch.fx.Node)
     if "dim" in node.kwargs:
         assert isinstance(node.kwargs["dim"], int)
@@ -207,12 +200,10 @@ def normalize_split_base(
 @register_graph_pattern(
     CallFunctionVarArgs(torch.split, users=MULTIPLE),
     pass_dict=construct_pattern_matcher_pass("normalization_pass"),
-    extra_check=get_config_flag("normalization_pass"),
 )
 @register_graph_pattern(
     CallMethodVarArgs("split", users=MULTIPLE),
     pass_dict=construct_pattern_matcher_pass("normalization_pass"),
-    extra_check=get_config_flag("normalization_pass"),
 )
 def normalize_split_default(match: Match, *args, **kwargs):
     return normalize_split_base(match, _get_split_args_default)
@@ -221,12 +212,10 @@ def normalize_split_default(match: Match, *args, **kwargs):
 @register_graph_pattern(
     CallFunctionVarArgs(torch.split, users=MULTIPLE),
     pass_dict=construct_pattern_matcher_pass("remove_split_with_size_one_pass"),
-    extra_check=get_config_flag("remove_split_with_size_one_pass"),
 )
 @register_graph_pattern(
     CallMethodVarArgs("split", users=MULTIPLE),
     pass_dict=construct_pattern_matcher_pass("remove_split_with_size_one_pass"),
-    extra_check=get_config_flag("remove_split_with_size_one_pass"),
 )
 def remove_split_with_size_one(match: Match, *args, **kwargs):
     graph = match.graph
@@ -261,12 +250,10 @@ def remove_split_with_size_one(match: Match, *args, **kwargs):
 @register_graph_pattern(
     CallFunctionVarArgs(torch.unbind, users=MULTIPLE),
     pass_dict=construct_pattern_matcher_pass("normalization_pass"),
-    extra_check=get_config_flag("normalization_pass"),
 )
 @register_graph_pattern(
     CallMethodVarArgs("unbind", users=MULTIPLE),
     pass_dict=construct_pattern_matcher_pass("normalization_pass"),
-    extra_check=get_config_flag("normalization_pass"),
 )
 def normalize_unbind_default(match: Match, *args, **kwargs):
     node = match.nodes[0]
@@ -303,7 +290,6 @@ def normalize_unbind_default(match: Match, *args, **kwargs):
 @register_graph_pattern(
     CallFunctionVarArgs(torch.cat, users=MULTIPLE),
     pass_dict=construct_pattern_matcher_pass("normalization_pass"),
-    extra_check=get_config_flag("normalization_pass"),
 )
 def normalize_cat_default(match: Match, *args, **kwargs):
     from torch.fx.experimental.symbolic_shapes import guard_size_oblivious
@@ -365,7 +351,6 @@ def normalize_cat_default(match: Match, *args, **kwargs):
 @register_graph_pattern(
     CallFunctionVarArgs(torch.stack, users=MULTIPLE),
     pass_dict=construct_pattern_matcher_pass("normalization_pass"),
-    extra_check=get_config_flag("normalization_pass"),
 )
 def normalize_stack_default(match: Match, *args, **kwargs):
     node = match.nodes[0]
@@ -411,7 +396,6 @@ def find_next_users(split_node: torch.fx.Node) -> List[torch.fx.Node]:
 @register_graph_pattern(
     CallMethodVarArgs("squeeze", users=MULTIPLE),
     pass_dict=construct_pattern_matcher_pass("normalization_pass"),
-    extra_check=get_config_flag("normalization_pass"),
 )
 def normalize_squeeze_default(match: Match, *args, **kwargs):
     squeeze_node = match.nodes[0]
@@ -494,7 +478,6 @@ class TorchSplit(CallFunction):
         KeywordArg("next_split_sections"),
     ),
     pass_dict=construct_pattern_matcher_pass("merge_splits_pass"),
-    extra_check=get_config_flag("merge_splits_pass"),
 )
 def merge_splits(
     match: Match,
@@ -620,6 +603,7 @@ class SplitCatSimplifier:
             graph, split_node, next_users, user_inputs_list_new, transform_params_list  # type: ignore[arg-type]
         )
         self.erase_old_nodes(graph, split_node, next_users)  # type: ignore[arg-type]
+        counters["inductor"]["unbind_stack_pass"] += 1
 
     def get_user_input_list(
         self, split_node: torch.fx.Node, next_users: List[torch.fx.Node]
@@ -1012,7 +996,7 @@ class UnbindCatRemover(SplitCatSimplifier):
 
     def get_transform_params(
         self,
-        unbind_node: torch.fx.Node,
+        split_node: torch.fx.Node,
         next_users: List[torch.fx.Node],
         user_inputs_list: List[List[Union[torch.fx.Node, _Range]]],
     ) -> Optional[List[List[_TransformParam]]]:
@@ -1037,7 +1021,7 @@ class UnbindCatRemover(SplitCatSimplifier):
 
 
         """
-        split_dim = _get_dim(unbind_node)
+        split_dim = _get_dim(split_node)
         transform_params_list: List[List[_TransformParam]] = []
         for user_node, user_inputs in zip(next_users, user_inputs_list):
             cat_dim = get_arg_value(user_node, 1, "dim") or 0
@@ -1100,7 +1084,6 @@ class GetItem(CallFunction):
         ),
     ),
     pass_dict=construct_pattern_matcher_pass("split_cat_pass"),
-    extra_check=get_config_flag("split_cat_pass"),
 )
 @register_graph_pattern(
     RepeatedExpr(
@@ -1118,7 +1101,6 @@ class GetItem(CallFunction):
         )
     ),
     pass_dict=construct_pattern_matcher_pass("split_cat_pass"),
-    extra_check=get_config_flag("split_cat_pass"),
 )
 def merge_split_squeeze(
     match: Match, split_input: torch.fx.Node, split_sizes: List[int], dim: int
@@ -1172,21 +1154,18 @@ getitem_unbind = ListOf(
 @register_graph_pattern(
     CallFunction([torch.stack, torch.cat], getitem_unbind, Ignored(), _users=MULTIPLE),
     pass_dict=construct_pattern_matcher_pass("unbind_stack_pass"),
-    extra_check=get_config_flag("unbind_stack_pass"),
 )
 @register_graph_pattern(
     CallFunction(
         [torch.stack, torch.cat], getitem_unbind, dim=Ignored(), _users=MULTIPLE
     ),
     pass_dict=construct_pattern_matcher_pass("unbind_stack_pass"),
-    extra_check=get_config_flag("unbind_stack_pass"),
 )
 @register_graph_pattern(
     CallFunction(
         [torch.stack, torch.cat], tensors=getitem_unbind, dim=Ignored(), _users=MULTIPLE
     ),
     pass_dict=construct_pattern_matcher_pass("unbind_stack_pass"),
-    extra_check=get_config_flag("unbind_stack_pass"),
 )
 def merge_unbind_stack(match: Match, unbind_input: torch.fx.Node, dim: int):
     unbind_node = next(node for node in match.nodes if node.target == torch.unbind)
@@ -1215,7 +1194,6 @@ getitem_split = ListOf(
         _users=MULTIPLE,
     ),
     pass_dict=construct_pattern_matcher_pass("split_cat_pass"),
-    extra_check=get_config_flag("split_cat_pass"),
 )
 @register_graph_pattern(
     CallFunction(
@@ -1225,7 +1203,6 @@ getitem_split = ListOf(
         _users=MULTIPLE,
     ),
     pass_dict=construct_pattern_matcher_pass("split_cat_pass"),
-    extra_check=get_config_flag("split_cat_pass"),
 )
 @register_graph_pattern(
     CallFunction(
@@ -1235,7 +1212,6 @@ getitem_split = ListOf(
         _users=MULTIPLE,
     ),
     pass_dict=construct_pattern_matcher_pass("split_cat_pass"),
-    extra_check=get_config_flag("split_cat_pass"),
 )
 def simplify_split_cat(match: Match, split_sections: List[int], dim: int):
     if not isinstance(split_sections, (list, tuple)):  # Unnormalized split
@@ -1320,7 +1296,6 @@ def calculate_fused_tensor_size(split_node: torch.fx.Node, indices: List[int]) -
         _users=MULTIPLE,
     ),
     pass_dict=construct_pattern_matcher_pass("merge_getitem_cat_pass"),
-    extra_check=get_config_flag("merge_getitem_cat_pass"),
 )
 def merge_getitem_cat(match: Match, split_sections: List[int], dim: int):
     if not isinstance(split_sections, (list, tuple)):  # Unnormalized split
@@ -1428,7 +1403,6 @@ def merge_getitem_cat(match: Match, split_sections: List[int], dim: int):
         _users=MULTIPLE,
     ),
     pass_dict=construct_pattern_matcher_pass("mutate_cat_pass"),
-    extra_check=get_config_flag("mutate_cat_pass"),
 )
 def mutate_cat_node(match: Match, split_sections: List[int], dim: int):
     if not isinstance(split_sections, (list, tuple)):  # Unnormalized split
@@ -1524,7 +1498,6 @@ def mutate_cat_node(match: Match, split_sections: List[int], dim: int):
         ),
     ),
     pass_dict=construct_pattern_matcher_pass("merge_stack_tahn_unbind_pass"),
-    extra_check=get_config_flag("merge_stack_tahn_unbind_pass"),
 )
 @register_graph_pattern(
     CallFunction(
@@ -1536,7 +1509,6 @@ def mutate_cat_node(match: Match, split_sections: List[int], dim: int):
         ),
     ),
     pass_dict=construct_pattern_matcher_pass("merge_stack_tahn_unbind_pass"),
-    extra_check=get_config_flag("merge_stack_tahn_unbind_pass"),
 )
 @register_graph_pattern(
     CallFunction(
@@ -1548,7 +1520,6 @@ def mutate_cat_node(match: Match, split_sections: List[int], dim: int):
         ),
     ),
     pass_dict=construct_pattern_matcher_pass("merge_stack_tahn_unbind_pass"),
-    extra_check=get_config_flag("merge_stack_tahn_unbind_pass"),
 )
 def merge_stack_tahn_unbind(match: Match, split_sections: List[int], dim: int):
     if not isinstance(split_sections, (list, tuple)):  # Unnormalized split
@@ -1643,3 +1614,112 @@ def merge_stack_tahn_unbind(match: Match, split_sections: List[int], dim: int):
                 split_sections = new_split_sections
 
                 counters["inductor"]["merge_stack_tahn_unbind_pass"] += 1
+
+
+@register_graph_pattern(
+    CallFunctionVarArgs(torch.ops.aten.cat.default, users=MULTIPLE),
+    pass_dict=construct_pattern_matcher_pass("normalization_aten_pass"),
+)
+def normalize_cat_default_aten(match: Match, *args, **kwargs):
+    cat_node = match.nodes[0]
+    graph = match.graph
+    tensors = get_arg_value(cat_node, 0, "tensors")
+    cat_dim = get_arg_value(cat_node, 1, "dim")
+    if cat_dim is None:
+        cat_axis = cat_node.kwargs.get("axis")
+        if cat_axis is not None:
+            cat_dim = cat_axis
+        else:
+            cat_dim = 0
+    if tensors is None or cat_dim is None:
+        log.info("couldn't find cat args")
+        return
+    assert isinstance(tensors, (list, tuple))
+    for tensor in itertools.chain([cat_node], tensors):
+        if "val" not in tensor.meta:
+            log.warning("val absent for node: %s", tensor)
+            return
+
+    ndim = cat_node.meta["val"].dim()
+
+    def is_empty_tensor(x: torch.fx.Node) -> bool:
+        # special case where torch.ops.aten.cat.default supports cat'ing with an empty tensor
+        x_shape = x.meta["val"].shape
+        return len(x_shape) == 1 and x_shape[0] == 0
+
+    assert all(ndim == x.meta["val"].dim() or is_empty_tensor(x) for x in tensors)
+
+    if cat_dim < 0:  # Normalize cat dim
+        cat_dim += ndim
+
+    with graph.inserting_after(cat_node):
+        new_cat_node = graph.call_function(
+            torch.ops.aten.cat.default,
+            args=(tensors,),
+            kwargs={"dim": cat_dim},
+        )
+    cat_node.replace_all_uses_with(new_cat_node)
+    new_cat_node.meta.update(cat_node.meta)
+    graph.erase_node(cat_node)
+    counters["inductor"]["normalization_aten_pass"] += 1
+
+
+@register_graph_pattern(
+    CallFunction(
+        torch.ops.aten.cat,
+        ListOf(CallFunctionVarArgs(torch.ops.aten.unsqueeze)),
+        _users=MULTIPLE,
+    ),
+    pass_dict=construct_pattern_matcher_pass("unbind_stack_aten_pass"),
+)
+def merge_unbind_stack_aten(match: Match, *args, **kwargs):
+    node = match.nodes[-1]
+    graph = match.graph
+    # pyre-fixme[6]
+    unsqueeze_nodes = list(node.args[0])  # type: ignore[arg-type]
+    cat_dim = get_arg_value(node, 1, "dim")
+    # check the unsqueeze nodes come from the select nodes
+    if not all(
+        get_arg_value(unsqueeze_node, 0, "input").target == torch.ops.aten.select
+        for unsqueeze_node in unsqueeze_nodes
+    ):
+        return
+    select_nodes = [
+        get_arg_value(unsqueeze_node, 0, "input") for unsqueeze_node in unsqueeze_nodes
+    ]
+    parent_of_select_node = get_arg_value(select_nodes[0], 0, "input")
+    # check the target of select_nodes are the same
+    if not all(
+        select_node.target == torch.ops.aten.select for select_node in select_nodes
+    ):
+        return
+    # check the select nodes come from the same parent node
+    if not all(
+        get_arg_value(select_node, 0, "input") == parent_of_select_node
+        for select_node in select_nodes
+    ):
+        return
+    if len(unsqueeze_nodes) != len(select_nodes):
+        return
+    # check the select nodes have the same dim
+    if not all(
+        get_arg_value(select_node, 1, "dim") == cat_dim for select_node in select_nodes
+    ):
+        return
+    # check the select nodes have consecutive indices starting from 0
+    if get_arg_value(select_nodes[0], 2, "index") != 0 or not is_sorted_and_consecutive(
+        [get_arg_value(select_node, 2, "index") for select_node in select_nodes]
+    ):
+        return
+    # check the users of parent of select node only from unsqueeze nodes that go to the cat node
+    # we simply check the number of users of the parent of select node
+    if len(parent_of_select_node.users.keys()) != len(node.args[0]):  # type: ignore[arg-type]
+        return
+    node.replace_all_uses_with(parent_of_select_node)
+    graph.erase_node(node)
+    for unsqueeze_node in unsqueeze_nodes:
+        graph.erase_node(unsqueeze_node)
+    for select_node in select_nodes:
+        if len(select_node.users) == 0:
+            graph.erase_node(select_node)
+    counters["inductor"]["unbind_stack_aten_pass"] += 1

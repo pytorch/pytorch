@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import copy
 from typing import Any, cast, List, Optional, Tuple
 
@@ -112,9 +113,7 @@ def _create_sharded_tensor_md_from_dt(
 def _get_dt_pg(dt: DTensor) -> c10d.ProcessGroup:
     mesh = dt.device_mesh
     assert mesh.ndim == 1, "Only 1D DeviceMeshes currently handled"
-    dim_groups = mesh.get_group()
-    assert isinstance(dim_groups, list)
-    return dim_groups[0]
+    return mesh.get_group()
 
 
 def _rewrite_spec_if_needed(
@@ -255,7 +254,7 @@ def _chunk_dtensor(
         shard_placements[0] = DShard(0)  # type: ignore[call-overload]
 
         return DTensor.from_local(
-            tensor, parent_mesh, replicate_placements
+            tensor, parent_mesh, replicate_placements, run_check=False
         ).redistribute(
             device_mesh=parent_mesh,
             placements=shard_placements,
@@ -279,7 +278,7 @@ def _chunk_dtensor(
         shard_placements[-1] = tp_placement  # type: ignore[call-overload]
 
         return DTensor.from_local(
-            tensor, parent_mesh, replicate_placements
+            tensor, parent_mesh, replicate_placements, run_check=False
         ).redistribute(
             device_mesh=parent_mesh,
             placements=shard_placements,

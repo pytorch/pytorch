@@ -90,11 +90,13 @@ cudnn_frontend::Tensor getTensorDescriptorWithTypeVirtual(
   auto strides = t.strides();
   bool channels_last = memory_format == at::MemoryFormat::ChannelsLast ||
       memory_format == at::MemoryFormat::ChannelsLast3d;
+
+  std::vector<int64_t> strides_copy(std::begin(strides), std::end(strides));
   fixSizeOneDimStride<int64_t>(
-      sizes.size(), &sizes[0], (int64_t*)&strides[0], channels_last);
+      sizes.size(), &sizes[0], (int64_t*)&strides_copy[0], channels_last);
   auto r = cudnn_frontend::TensorBuilder()
                .setDim(sizes.size(), sizes.data())
-               .setStrides(strides.size(), strides.data())
+               .setStrides(strides_copy.size(), strides_copy.data())
                .setId(id)
                .setAlignment(alignment)
                .setDataType(dataType)
@@ -376,6 +378,12 @@ void run_conv_plan(
     data_ptrs[0] = x.data_ptr();
     data_ptrs[1] = const_cast<void*>(y.const_data_ptr());
     data_ptrs[2] = const_cast<void*>(w.const_data_ptr());
+  } else if (
+      operation ==
+      CUDNN_BACKEND_OPERATION_CONVOLUTION_BACKWARD_FILTER_DESCRIPTOR) {
+    data_ptrs[0] = const_cast<void*>(x.const_data_ptr());
+    data_ptrs[1] = const_cast<void*>(y.const_data_ptr());
+    data_ptrs[2] = w.data_ptr();
   } else {
     data_ptrs[0] = x.data_ptr();
     data_ptrs[1] = y.data_ptr();

@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# mypy: allow-untyped-defs
 
 # Copyright (c) Facebook, Inc. and its affiliates.
 # All rights reserved.
@@ -9,10 +10,12 @@
 import logging
 import os
 import time
-from concurrent.futures._base import Future
 from concurrent.futures.thread import ThreadPoolExecutor
 from threading import Event
-from typing import Dict, List, Optional, TextIO
+from typing import Dict, List, Optional, TextIO, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from concurrent.futures._base import Future
 
 __all__ = ["tail_logfile", "TailLog"]
 

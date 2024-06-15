@@ -162,7 +162,7 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
       .value("IDEEP", c10::DeviceType::IDEEP)
       .value("HIP", c10::DeviceType::HIP)
       .value("FPGA", c10::DeviceType::FPGA)
-      .value("ORT", c10::DeviceType::ORT)
+      .value("MAIA", c10::DeviceType::MAIA)
       .value("XLA", c10::DeviceType::XLA)
       .value("Vulkan", c10::DeviceType::Vulkan)
       .value("Metal", c10::DeviceType::Metal)
@@ -201,10 +201,10 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
       // together with fwd_thread_id, used to uniquely identify
       // the forward op
       .def("sequence_nr", [](const KinetoEvent& e) { return e.sequenceNr(); })
-      // absolute start time (since unix epoch) in us
-      .def("start_us", [](const KinetoEvent& e) { return e.startUs(); })
-      // duration in us
-      .def("duration_us", [](const KinetoEvent& e) { return e.durationUs(); })
+      // absolute start time (since unix epoch) in ns
+      .def("start_ns", [](const KinetoEvent& e) { return e.startNs(); })
+      // duration in ns
+      .def("duration_ns", [](const KinetoEvent& e) { return e.durationNs(); })
       // used for correlation between high-level PyTorch events
       // and low-level device events
       .def(
@@ -255,7 +255,7 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
   m.def("_get_sequence_nr", &at::sequence_number::peek);
 
   py::class_<ProfilerResult>(m, "_ProfilerResult")
-      .def("trace_start_us", &ProfilerResult::trace_start_us)
+      .def("trace_start_ns", &ProfilerResult::trace_start_ns)
       .def("events", &ProfilerResult::events)
       .def("experimental_event_tree", &ProfilerResult::event_tree)
 #ifdef USE_KINETO
@@ -332,6 +332,9 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
     if (at::hasMTIA()) {
       activities.insert(torch::profiler::impl::ActivityType::MTIA);
     }
+    if (c10::get_privateuse1_backend() != "privateuseone") {
+      activities.insert(torch::profiler::impl::ActivityType::PrivateUse1);
+    }
 #endif
     return activities;
   });
@@ -369,6 +372,9 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
       at::SavedTensorDefaultHooks::is_enabled);
   m.def("_saved_tensors_hooks_enable", at::SavedTensorDefaultHooks::enable);
   m.def("_saved_tensors_hooks_disable", at::SavedTensorDefaultHooks::disable);
+  m.def(
+      "_saved_tensors_hooks_set_tracing",
+      at::SavedTensorDefaultHooks::set_tracing);
   m.def(
       "_saved_tensors_hooks_get_disabled_error_message",
       at::SavedTensorDefaultHooks::get_disabled_error_message);
@@ -474,24 +480,47 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
   Py_RETURN_TRUE;
 }
 
-namespace torch {
-namespace autograd {
+namespace torch::autograd {
 
-static PyObject* set_autocast_enabled(PyObject* _unused, PyObject* arg) {
+static PyObject* set_autocast_enabled(
+    PyObject* _unused,
+    PyObject* args,
+    PyObject* kwargs) {
   HANDLE_TH_ERRORS
-  TORCH_CHECK_TYPE(
-      PyBool_Check(arg),
-      "enabled must be a bool (got ",
-      Py_TYPE(arg)->tp_name,
-      ")");
-  at::autocast::set_enabled(arg == Py_True);
+  static PythonArgParser parser(
+      {"set_autocast_enabled(c10::string_view device_type, bool enabled)",
+       "set_autocast_enabled(bool enabled)"}); // this signature is depracated.
+  ParsedArgs<2> parsed_args;
+  auto r = parser.parse(args, kwargs, parsed_args);
+  // Set at::kCUDA as default value to prevent BC-breaking changes.
+  at::DeviceType device_type = at::kCUDA;
+  int enabled_id = 0;
+  if (r.idx == 0) {
+    device_type = at::Device(r.string(0)).type();
+    enabled_id = 1;
+  }
+  auto enabled = r.toBool(enabled_id);
+  at::autocast::set_autocast_enabled(device_type, enabled);
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject* is_autocast_enabled(PyObject* _unused, PyObject* arg) {
+static PyObject* is_autocast_enabled(
+    PyObject* _unused,
+    PyObject* args,
+    PyObject* kwargs) {
   HANDLE_TH_ERRORS
-  if (at::autocast::is_enabled()) {
+  static PythonArgParser parser(
+      {"is_autocast_enabled(c10::string_view device_type)",
+       "is_autocast_enabled()"}); // this signature is depracated.
+  ParsedArgs<1> parsed_args;
+  auto r = parser.parse(args, kwargs, parsed_args);
+  // Set at::kCUDA as default value to prevent BC-breaking changes.
+  at::DeviceType device_type = at::kCUDA;
+  if (r.idx == 0) {
+    device_type = at::Device(r.string(0)).type();
+  }
+  if (at::autocast::is_autocast_enabled(device_type)) {
     Py_RETURN_TRUE;
   } else {
     Py_RETURN_FALSE;
@@ -499,11 +528,64 @@ static PyObject* is_autocast_enabled(PyObject* _unused, PyObject* arg) {
   END_HANDLE_TH_ERRORS
 }
 
+static PyObject* get_autocast_dtype(
+    PyObject* _unused,
+    PyObject* args,
+    PyObject* kwargs) {
+  HANDLE_TH_ERRORS
+  static PythonArgParser parser(
+      {"get_autocast_dtype(c10::string_view device_type)"});
+  ParsedArgs<1> parsed_args;
+  auto r = parser.parse(args, kwargs, parsed_args);
+  auto device_type = at::Device(r.string(0)).type();
+  at::ScalarType current_dtype = at::autocast::get_autocast_dtype(device_type);
+  return utils::wrap(current_dtype);
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject* set_autocast_dtype(
+    PyObject* _unused,
+    PyObject* args,
+    PyObject* kwargs) {
+  HANDLE_TH_ERRORS
+  static PythonArgParser parser(
+      {"set_autocast_dtype(c10::string_view device_type, ScalarType dtype)"});
+  ParsedArgs<2> parsed_args;
+  auto r = parser.parse(args, kwargs, parsed_args);
+  auto device_type = at::Device(r.string(0)).type();
+  auto dtype = r.scalartype(1);
+  at::autocast::set_autocast_dtype(device_type, dtype);
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
 static PyObject* is_any_autocast_enabled(PyObject* _unused, PyObject* arg) {
   HANDLE_TH_ERRORS
-  if (at::autocast::is_enabled() || at::autocast::is_cpu_enabled() ||
-      at::autocast::is_xpu_enabled() || at::autocast::is_ipu_enabled() ||
-      at::autocast::is_xla_enabled() || at::autocast::is_hpu_enabled()) {
+  if (at::autocast::is_autocast_enabled(at::kCPU) ||
+      at::autocast::is_autocast_enabled(at::kCUDA) ||
+      at::autocast::is_autocast_enabled(at::kXPU) ||
+      at::autocast::is_autocast_enabled(at::kIPU) ||
+      at::autocast::is_autocast_enabled(at::kXLA) ||
+      at::autocast::is_autocast_enabled(at::kHPU) ||
+      at::autocast::is_autocast_enabled(at::kPrivateUse1)) {
+    Py_RETURN_TRUE;
+  } else {
+    Py_RETURN_FALSE;
+  }
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject* is_autocast_available(
+    PyObject* _unused,
+    PyObject* args,
+    PyObject* kwargs) {
+  HANDLE_TH_ERRORS
+  static PythonArgParser parser(
+      {"_is_autocast_available(c10::string_view device_type)"});
+  ParsedArgs<1> parsed_args;
+  auto r = parser.parse(args, kwargs, parsed_args);
+  auto device_type = at::Device(r.string(0)).type();
+  if (at::autocast::is_autocast_available(device_type)) {
     Py_RETURN_TRUE;
   } else {
     Py_RETURN_FALSE;
@@ -518,14 +600,18 @@ static PyObject* set_autocast_cpu_enabled(PyObject* _unused, PyObject* arg) {
       "enabled must be a bool (got ",
       Py_TYPE(arg)->tp_name,
       ")");
-  at::autocast::set_cpu_enabled(arg == Py_True);
+  TORCH_WARN_DEPRECATION(
+      "torch.set_autocast_cpu_enabled(enabled) is deprecated. Please use torch.set_autocast_enabled('cpu', enabled) instead.")
+  at::autocast::set_autocast_enabled(at::kCPU, arg == Py_True);
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
 
 static PyObject* is_autocast_cpu_enabled(PyObject* _unused, PyObject* arg) {
   HANDLE_TH_ERRORS
-  if (at::autocast::is_cpu_enabled()) {
+  TORCH_WARN_DEPRECATION(
+      "torch.is_autocast_cpu_enabled() is deprecated. Please use torch.is_autocast_enabled('cpu') instead.")
+  if (at::autocast::is_autocast_enabled(at::kCPU)) {
     Py_RETURN_TRUE;
   } else {
     Py_RETURN_FALSE;
@@ -540,14 +626,18 @@ static PyObject* set_autocast_ipu_enabled(PyObject* _unused, PyObject* arg) {
       "enabled must be a bool (got ",
       Py_TYPE(arg)->tp_name,
       ")");
-  at::autocast::set_ipu_enabled(arg == Py_True);
+  TORCH_WARN_DEPRECATION(
+      "torch.set_autocast_ipu_enabled(enabled) is deprecated. Please use torch.set_autocast_enabled('ipu', enabled) instead.")
+  at::autocast::set_autocast_enabled(at::kIPU, arg == Py_True);
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
 
 static PyObject* is_autocast_ipu_enabled(PyObject* _unused, PyObject* arg) {
   HANDLE_TH_ERRORS
-  if (at::autocast::is_ipu_enabled()) {
+  TORCH_WARN_DEPRECATION(
+      "torch.is_autocast_ipu_enabled() is deprecated. Please use torch.is_autocast_enabled('ipu') instead.")
+  if (at::autocast::is_autocast_enabled(at::kIPU)) {
     Py_RETURN_TRUE;
   } else {
     Py_RETURN_FALSE;
@@ -562,14 +652,18 @@ static PyObject* set_autocast_xla_enabled(PyObject* _unused, PyObject* arg) {
       "enabled must be a bool (got ",
       Py_TYPE(arg)->tp_name,
       ")");
-  at::autocast::set_xla_enabled(arg == Py_True);
+  TORCH_WARN_DEPRECATION(
+      "torch.set_autocast_xla_enabled(enabled) is deprecated. Please use torch.set_autocast_enabled('xla', enabled) instead.")
+  at::autocast::set_autocast_enabled(at::kXLA, arg == Py_True);
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
 
 static PyObject* is_autocast_xla_enabled(PyObject* _unused, PyObject* arg) {
   HANDLE_TH_ERRORS
-  if (at::autocast::is_xla_enabled()) {
+  TORCH_WARN_DEPRECATION(
+      "torch.is_autocast_xla_enabled() is deprecated. Please use torch.is_autocast_enabled('xla') instead.")
+  if (at::autocast::is_autocast_enabled(at::kXLA)) {
     Py_RETURN_TRUE;
   } else {
     Py_RETURN_FALSE;
@@ -584,8 +678,10 @@ static PyObject* set_autocast_gpu_dtype(PyObject* _unused, PyObject* arg) {
       "dtype must be a torch.dtype (got ",
       Py_TYPE(arg)->tp_name,
       ")");
+  TORCH_WARN_DEPRECATION(
+      "torch.set_autocast_gpu_dtype(dtype) is deprecated. Please use torch.set_autocast_dtype('cuda', dtype) instead.")
   at::ScalarType targetType = reinterpret_cast<THPDtype*>(arg)->scalar_type;
-  at::autocast::set_autocast_gpu_dtype(targetType);
+  at::autocast::set_autocast_dtype(at::kCUDA, targetType);
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
@@ -597,8 +693,10 @@ static PyObject* set_autocast_cpu_dtype(PyObject* _unused, PyObject* arg) {
       "dtype must be a torch.dtype (got ",
       Py_TYPE(arg)->tp_name,
       ")");
+  TORCH_WARN_DEPRECATION(
+      "torch.set_autocast_cpu_dtype(dtype) is deprecated. Please use torch.set_autocast_dtype('cpu', dtype) instead.")
   at::ScalarType targetType = reinterpret_cast<THPDtype*>(arg)->scalar_type;
-  at::autocast::set_autocast_cpu_dtype(targetType);
+  at::autocast::set_autocast_dtype(at::kCPU, targetType);
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
@@ -610,8 +708,10 @@ static PyObject* set_autocast_ipu_dtype(PyObject* _unused, PyObject* arg) {
       "dtype must be a torch.dtype (got ",
       Py_TYPE(arg)->tp_name,
       ")");
+  TORCH_WARN_DEPRECATION(
+      "torch.set_autocast_ipu_dtype(dtype) is deprecated. Please use torch.set_autocast_dtype('ipu', dtype) instead.")
   at::ScalarType targetType = reinterpret_cast<THPDtype*>(arg)->scalar_type;
-  at::autocast::set_autocast_ipu_dtype(targetType);
+  at::autocast::set_autocast_dtype(at::kIPU, targetType);
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
@@ -623,45 +723,47 @@ static PyObject* set_autocast_xla_dtype(PyObject* _unused, PyObject* arg) {
       "dtype must be a torch.dtype (got ",
       Py_TYPE(arg)->tp_name,
       ")");
+  TORCH_WARN_DEPRECATION(
+      "torch.set_autocast_xla_dtype(dtype) is deprecated. Please use torch.set_autocast_dtype('xla', dtype) instead.")
   at::ScalarType targetType = reinterpret_cast<THPDtype*>(arg)->scalar_type;
-  at::autocast::set_autocast_xla_dtype(targetType);
+  at::autocast::set_autocast_dtype(at::kXLA, targetType);
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
 
 static PyObject* get_autocast_gpu_dtype(PyObject* _unused, PyObject* arg) {
   HANDLE_TH_ERRORS
-  at::ScalarType current_dtype = at::autocast::get_autocast_gpu_dtype();
-  auto dtype = (PyObject*)torch::getTHPDtype(current_dtype);
-  Py_INCREF(dtype);
-  return dtype;
+  TORCH_WARN_DEPRECATION(
+      "torch.get_autocast_gpu_dtype() is deprecated. Please use torch.get_autocast_dtype('cuda') instead.")
+  at::ScalarType current_dtype = at::autocast::get_autocast_dtype(at::kCUDA);
+  return utils::wrap(current_dtype);
   END_HANDLE_TH_ERRORS
 }
 
 static PyObject* get_autocast_cpu_dtype(PyObject* _unused, PyObject* arg) {
   HANDLE_TH_ERRORS
-  at::ScalarType current_dtype = at::autocast::get_autocast_cpu_dtype();
-  auto dtype = (PyObject*)torch::getTHPDtype(current_dtype);
-  Py_INCREF(dtype);
-  return dtype;
+  TORCH_WARN_DEPRECATION(
+      "torch.get_autocast_cpu_dtype() is deprecated. Please use torch.get_autocast_dtype('cpu') instead.")
+  at::ScalarType current_dtype = at::autocast::get_autocast_dtype(at::kCPU);
+  return utils::wrap(current_dtype);
   END_HANDLE_TH_ERRORS
 }
 
 static PyObject* get_autocast_ipu_dtype(PyObject* _unused, PyObject* arg) {
   HANDLE_TH_ERRORS
-  at::ScalarType current_dtype = at::autocast::get_autocast_ipu_dtype();
-  auto dtype = (PyObject*)torch::getTHPDtype(current_dtype);
-  Py_INCREF(dtype);
-  return dtype;
+  TORCH_WARN_DEPRECATION(
+      "torch.get_autocast_ipu_dtype() is deprecated. Please use torch.get_autocast_dtype('ipu') instead.")
+  at::ScalarType current_dtype = at::autocast::get_autocast_dtype(at::kIPU);
+  return utils::wrap(current_dtype);
   END_HANDLE_TH_ERRORS
 }
 
 static PyObject* get_autocast_xla_dtype(PyObject* _unused, PyObject* arg) {
   HANDLE_TH_ERRORS
-  at::ScalarType current_dtype = at::autocast::get_autocast_xla_dtype();
-  auto dtype = (PyObject*)torch::getTHPDtype(current_dtype);
-  Py_INCREF(dtype);
-  return dtype;
+  TORCH_WARN_DEPRECATION(
+      "torch.get_autocast_xla_dtype() is deprecated. Please use torch.get_autocast_dtype('xla') instead.")
+  at::ScalarType current_dtype = at::autocast::get_autocast_dtype(at::kXLA);
+  return utils::wrap(current_dtype);
   END_HANDLE_TH_ERRORS
 }
 
@@ -982,17 +1084,19 @@ static PyObject* push_on_torch_dispatch_stack(
     using c10::impl::TorchDispatchModeKey;
     // When we push a mode onto the mode stack, we need to
     // check if it's an "infra" mode, by checking its _mode_key attribute.
-    c10::optional<c10::impl::TorchDispatchModeKey> mode_key = c10::nullopt;
+    std::optional<c10::impl::TorchDispatchModeKey> mode_key = c10::nullopt;
     py::object maybe_mode_key_obj =
         PyObject_FastGetAttrString(arg, "_mode_key");
     if (maybe_mode_key_obj) {
       mode_key = py::cast<c10::impl::TorchDispatchModeKey>(maybe_mode_key_obj);
       c10::impl::TorchDispatchModeTLS::set_mode(
-          std::make_shared<c10::SafePyObject>(arg, getPyInterpreter()),
+          std::make_shared<c10::impl::PyObject_TorchDispatchMode>(
+              arg, getPyInterpreter()),
           mode_key.value());
     } else {
       c10::impl::TorchDispatchModeTLS::push_non_infra_mode_onto_stack(
-          std::make_shared<c10::SafePyObject>(arg, getPyInterpreter()));
+          std::make_shared<c10::impl::PyObject_TorchDispatchMode>(
+              arg, getPyInterpreter()));
     }
     Py_INCREF(arg);
   }
@@ -1004,7 +1108,7 @@ static PyObject* pop_torch_dispatch_stack(
     PyObject* _unused,
     PyObject* maybe_mode_key) {
   HANDLE_TH_ERRORS
-  c10::optional<c10::impl::TorchDispatchModeKey> mode_key = c10::nullopt;
+  std::optional<c10::impl::TorchDispatchModeKey> mode_key = c10::nullopt;
   PyObject* r = nullptr;
   if (maybe_mode_key != Py_None) {
     mode_key = py::cast<c10::impl::TorchDispatchModeKey>(maybe_mode_key);
@@ -1056,7 +1160,9 @@ static PyObject* set_dispatch_mode(PyObject* _unused, PyObject* mode) {
 
   Py_INCREF(mode);
   c10::impl::TorchDispatchModeTLS::set_mode(
-      std::make_shared<c10::SafePyObject>(mode, getPyInterpreter()), mode_key);
+      std::make_shared<c10::impl::PyObject_TorchDispatchMode>(
+          mode, getPyInterpreter()),
+      mode_key);
 
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
@@ -1123,9 +1229,27 @@ static PyMethodDef methods[] = { // NOLINT
      is_inference_mode_enabled,
      METH_NOARGS,
      nullptr},
-    {"set_autocast_enabled", set_autocast_enabled, METH_O, nullptr},
-    {"is_autocast_enabled", is_autocast_enabled, METH_NOARGS, nullptr},
+    {"set_autocast_enabled",
+     castPyCFunctionWithKeywords(set_autocast_enabled),
+     METH_VARARGS | METH_KEYWORDS,
+     nullptr},
+    {"is_autocast_enabled",
+     castPyCFunctionWithKeywords(is_autocast_enabled),
+     METH_VARARGS | METH_KEYWORDS,
+     nullptr},
+    {"set_autocast_dtype",
+     castPyCFunctionWithKeywords(set_autocast_dtype),
+     METH_VARARGS | METH_KEYWORDS,
+     nullptr},
+    {"get_autocast_dtype",
+     castPyCFunctionWithKeywords(get_autocast_dtype),
+     METH_VARARGS | METH_KEYWORDS,
+     nullptr},
     {"_is_any_autocast_enabled", is_any_autocast_enabled, METH_NOARGS, nullptr},
+    {"_is_autocast_available",
+     castPyCFunctionWithKeywords(is_autocast_available),
+     METH_VARARGS | METH_KEYWORDS,
+     nullptr},
     {"clear_autocast_cache", clear_autocast_cache, METH_NOARGS, nullptr},
     {"set_autocast_cpu_enabled", set_autocast_cpu_enabled, METH_O, nullptr},
     {"is_autocast_cpu_enabled", is_autocast_cpu_enabled, METH_NOARGS, nullptr},
@@ -1225,5 +1349,4 @@ PyMethodDef* python_functions() {
   return methods;
 }
 
-} // namespace autograd
-} // namespace torch
+} // namespace torch::autograd

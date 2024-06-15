@@ -12,6 +12,7 @@ import torch
 
 import torch._inductor
 import torch._inductor.cudagraph_trees
+import torch.optim.lr_scheduler
 from torch._inductor import config
 
 from torch._inductor.test_case import TestCase
@@ -23,7 +24,6 @@ from torch.optim import (
     Adamax,
     AdamW,
     ASGD,
-    LBFGS,
     NAdam,
     RAdam,
     RMSprop,
@@ -31,6 +31,24 @@ from torch.optim import (
     SGD,
     SparseAdam,
 )
+
+from torch.optim.lr_scheduler import (
+    ChainedScheduler,
+    ConstantLR,
+    CosineAnnealingLR,
+    CosineAnnealingWarmRestarts,
+    CyclicLR,
+    ExponentialLR,
+    LambdaLR,
+    LinearLR,
+    MultiplicativeLR,
+    MultiStepLR,
+    OneCycleLR,
+    PolynomialLR,
+    ReduceLROnPlateau,
+    StepLR,
+)
+
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     skipCUDAIf,
@@ -41,8 +59,51 @@ from torch.testing._internal.common_optimizers import (
     optim_db,
     optims,
 )
+
+from torch.testing._internal.common_utils import parametrize
 from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA, has_triton
 from torch.testing._internal.triton_utils import requires_cuda
+
+
+# Note: we use atypical values to amplify error
+LR_SCHEDULER_TO_KWARGS = {
+    LambdaLR: {"lr_lambda": lambda x: 10},
+    MultiplicativeLR: {"lr_lambda": lambda x: 10},
+    StepLR: {"step_size": 1, "gamma": 100},
+    MultiStepLR: {"milestones": [1, 2], "gamma": 100},
+    ExponentialLR: {"gamma": 100},
+    CosineAnnealingLR: {"T_max": 7},
+    # These schedulers have memory leaks in eager
+    # https://github.com/pytorch/pytorch/issues/126131
+    # SequentialLR: {"schedulers": None, "milestones": [1, 2]},
+    # ChainedScheduler: {"schedulers": None},
+    CyclicLR: {"base_lr": 0.001, "max_lr": 0.02, "cycle_momentum": False},
+    CosineAnnealingWarmRestarts: {"T_0": 1},
+    OneCycleLR: {
+        "max_lr": 0.02,
+        "cycle_momentum": False,
+        "steps_per_epoch": 1,
+        "epochs": 10,
+    },
+    ConstantLR: {"factor": 0.001},
+    LinearLR: {},
+    ReduceLROnPlateau: {"factor": 0.99, "patience": 1},
+    PolynomialLR: {},
+}
+
+
+def create_scheduler(scheduler, optim):
+    kwargs = LR_SCHEDULER_TO_KWARGS[scheduler]
+    if "schedulers" in kwargs:
+        kwargs["schedulers"] = [
+            create_scheduler(torch.optim.lr_scheduler.ConstantLR, optim)
+            for _ in range(2)
+        ] + [create_scheduler(torch.optim.lr_scheduler.LambdaLR, optim)]
+
+    if scheduler == ChainedScheduler:
+        return scheduler(**kwargs)
+    else:
+        return scheduler(optim, **kwargs)
 
 
 class KernelCounts(NamedTuple):
@@ -80,19 +141,35 @@ KERNEL_COUNT_OVERRIDES = {
     "test_sgd_cuda": 4,
     "test_sgd_cpu": 4,
     "test_rmsprop_tensor_lr_capturable_foreach_cuda": 4,
+    "test_adagrad_initial_accumulator_value_weight_decay_foreach_cuda": 3,
+    "test_adagrad_lr_decay_weight_decay_foreach_cuda": 3,
+    "test_adagrad_weight_decay_foreach_cuda": 3,
+    "test_adagrad_weight_decay_maximize_foreach_cuda": 3,
+    "test_adagrad_tensor_lr_cpu": 6,
+    "test_adagrad_tensor_lr_cuda": 6,
+    "test_adamax_tensor_lr_weight_decay_capturable_cuda": 6,
+    "test_asgd_tensor_lr_weight_decay_maximize_capturable_cuda": 8,
+    "test_asgd_tensor_lr_weight_decay_maximize_capturable_foreach_cuda": 4,
+    "test_nadam_tensor_lr_weight_decay_momentum_decay_decoupled_weight_decay_capturable_cuda": 9,
+    "test_nadam_tensor_lr_weight_decay_momentum_decay_decoupled_weight_decay_capturable_foreach_cuda": 3,
+    "test_radam_tensor_lr_capturable_weight_decay_decoupled_weight_decay_cuda": 6,
+    "test_radam_tensor_lr_capturable_weight_decay_decoupled_weight_decay_foreach_cuda": 3,
+    "test_sgd_tensor_lr_cpu": 2,
+    "test_sgd_tensor_lr_cuda": 2,
+    "test_sgd_tensor_lr_foreach_cuda": 2,
 }
 
 # also tracks currently supported optimizers
 KERNEL_COUNTS = {
     Adam: KernelCounts(multitensor=2, singletensor=8),
     AdamW: KernelCounts(multitensor=2, singletensor=8),
-    NAdam: KernelCounts(multitensor=2, singletensor=8),
+    NAdam: KernelCounts(multitensor=2, singletensor=11),
     Rprop: KernelCounts(multitensor=2, singletensor=8),
     RMSprop: KernelCounts(multitensor=2, singletensor=8),
     Adadelta: KernelCounts(multitensor=2, singletensor=8),
-    Adagrad: KernelCounts(multitensor=5, singletensor=8),
+    Adagrad: KernelCounts(multitensor=2, singletensor=8),
     SGD: KernelCounts(multitensor=1, singletensor=8),
-    ASGD: KernelCounts(multitensor=2, singletensor=8),
+    ASGD: KernelCounts(multitensor=2, singletensor=11),
     RAdam: KernelCounts(multitensor=2, singletensor=8),
     Adamax: KernelCounts(multitensor=2, singletensor=8),
 }
@@ -111,6 +188,7 @@ def build_opt_kwarg_db():
                 kwargs = dict(optim_inputs.kwargs)
                 name = f"test_{optim_info.optim_cls.__name__.lower()}"
 
+                has_tensor_lr = False
                 for key, val in kwargs.items():
                     if not key == "lr" and (
                         not isinstance(val, bool) or (isinstance(val, bool) and val)
@@ -118,6 +196,7 @@ def build_opt_kwarg_db():
                         name += "_" + key
 
                     if key == "lr" and isinstance(kwargs["lr"], torch.Tensor):
+                        has_tensor_lr = True
                         name += "_tensor_lr"
 
                 name += f"_{device}"
@@ -135,7 +214,19 @@ def build_opt_kwarg_db():
                 if kwargs["kernel_count"] is None or kwargs.get("fused", False):
                     continue
 
-                compiled_opt_db.append((optim_info.optim_cls, name, kwargs))
+                if has_tensor_lr:
+                    for scheduler_cls in LR_SCHEDULER_TO_KWARGS.keys():
+                        name_w_scheduler = name + f"_{scheduler_cls.__name__.lower()}"
+                        compiled_opt_db.append(
+                            (
+                                optim_info.optim_cls,
+                                name_w_scheduler,
+                                kwargs,
+                                scheduler_cls,
+                            )
+                        )
+                else:
+                    compiled_opt_db.append((optim_info.optim_cls, name, kwargs, None))
 
     return compiled_opt_db
 
@@ -157,6 +248,13 @@ except (unittest.SkipTest, ImportError) as e:
     raise
 
 
+def call_scheduler(scheduler):
+    if isinstance(scheduler, torch.optim.lr_scheduler.ReduceLROnPlateau):
+        scheduler.step(1.0)  # we won't reduce the metric over two iters anyway
+    else:
+        scheduler.step()
+
+
 def compile_opt(opt_compiled, closure=None, fullgraph=True):
     # run the patcher so that step has the expected structure
     torch._dynamo.eval_frame.TorchPatcher.patch()
@@ -168,6 +266,10 @@ def compile_opt(opt_compiled, closure=None, fullgraph=True):
     # and instead manually disables grad before calling step, which is fine
     # for now as dynamo does not support differentiable optimizers anyway
     step_fn = opt_compiled.step.__wrapped__.__wrapped__
+
+    # This ensures we don't receive spam of warnings from LR Scheduler
+    opt_compiled._opt_called = True
+
     if closure is not None:
 
         def fn():
@@ -219,6 +321,7 @@ def check_optim(
 def make_test(
     optim_cls,
     closure=None,
+    scheduler_cls=None,
     kernel_count=2,
     device="cuda",
     **kwargs,
@@ -232,8 +335,10 @@ def make_test(
             if run_cudagraphs:
                 stack.enter_context(config.patch({"triton.cudagraphs": True}))
 
+            kwargs_compiled = deepcopy(kwargs)
             if isinstance(kwargs.get("lr", None), torch.Tensor):
                 kwargs["lr"] = kwargs["lr"].to(device)
+                kwargs_compiled["lr"] = kwargs_compiled["lr"].to(device)
 
             torch._dynamo.reset()
             torch._inductor.metrics.reset()
@@ -248,14 +353,23 @@ def make_test(
             model_compiled(input).sum().backward()
 
             opt_eager = optim_cls(model_eager.parameters(), **kwargs)
-            opt_compiled = optim_cls(model_compiled.parameters(), **kwargs)
+            opt_compiled = optim_cls(model_compiled.parameters(), **kwargs_compiled)
             compiled_step = compile_opt(opt_compiled, closure=closure)
 
+            if scheduler_cls:
+                scheduler_compiled = create_scheduler(scheduler_cls, opt_compiled)
+                scheduler_eager = create_scheduler(scheduler_cls, opt_eager)
+                # some schedulers only change after at least an epoch has passed
+                scheduler_compiled.last_epoch = 1
+                scheduler_eager.last_epoch = 1
+
             with torch.set_grad_enabled(False):
-                compiled_step()
-                compiled_step()
-                opt_eager.step()
-                opt_eager.step()
+                for i in range(2):
+                    compiled_step()
+                    opt_eager.step()
+                    if scheduler_cls:
+                        call_scheduler(scheduler_eager)
+                        call_scheduler(scheduler_compiled)
 
             check_optim(
                 self,
@@ -306,7 +420,8 @@ def make_recompile_test(optim_cls, closure=None, kernel_count=2, **kwargs):
 
             # perturb state to force recompile
             # Adagrad doesn't reinitialize state on each step
-            if optim_cls is Adagrad:
+            # SGD has an empty state
+            if optim_cls in (Adagrad, SGD):
                 opt_compiled.param_groups[0]["lr"] = 0.02
             elif optim_cls is Adam:  # ensure we are guarding on the data_ptr of states
                 state_tensor = opt_compiled.state[
@@ -338,71 +453,106 @@ def make_recompile_test(optim_cls, closure=None, kernel_count=2, **kwargs):
 class CompiledOptimizerParityTests(TestCase):
     @skipCUDAIf(not has_triton(), "torch.compile with cuda requires triton")
     @optims(optim_db, dtypes=[torch.float32])
-    def test_correctness(self, device, dtype, optim_info):
+    @parametrize("use_closure", [True, False])
+    def test_correctness(self, device, dtype, optim_info, use_closure):
         optim_cls = optim_info.optim_cls
         all_optim_inputs = _get_optim_inputs_including_global_cliquey_kwargs(
             device, dtype, optim_info, skip=("differentiable",)
         )
+
+        if optim_info.step_requires_closure and not use_closure:
+            return
+
         for optim_input in all_optim_inputs:
             kwargs = optim_input.kwargs
 
-            torch._dynamo.reset()
-            torch._inductor.metrics.reset()
-            input = torch.ones([10, 10], device=device)
-            model_eager = torch.nn.Sequential(
-                *[torch.nn.Linear(10, 10, device=device) for _ in range(2)]
+            use_scheduler = isinstance(kwargs.get("lr", None), torch.Tensor)
+            scheduler_classes = (
+                list(LR_SCHEDULER_TO_KWARGS.keys()) if use_scheduler else [None]
             )
-            model_eager(input).sum().backward()
-            model_compiled = deepcopy(model_eager)
-            model_compiled(input).sum().backward()
 
-            if optim_cls is SparseAdam:
-                for param in model_eager.parameters():
-                    param.grad = param.grad.to_sparse()
-                for param in model_compiled.parameters():
-                    param.grad = param.grad.to_sparse()
+            for scheduler_cls in scheduler_classes:
+                torch._dynamo.reset()
+                torch._inductor.metrics.reset()
+                input = torch.ones([10, 10], device=device)
+                model_eager = torch.nn.Sequential(
+                    *[torch.nn.Linear(10, 10, device=device) for _ in range(2)]
+                )
+                model_eager(input).sum().backward()
+                model_compiled = deepcopy(model_eager)
+                model_compiled(input).sum().backward()
 
-            opt_compiled = optim_cls(model_compiled.parameters(), **kwargs)
-            opt_eager = optim_cls(model_eager.parameters(), **kwargs)
+                if optim_cls is SparseAdam:
+                    for param in model_eager.parameters():
+                        param.grad = param.grad.to_sparse()
+                    for param in model_compiled.parameters():
+                        param.grad = param.grad.to_sparse()
 
-            if optim_cls is LBFGS:
+                opt_compiled = optim_cls(
+                    model_compiled.parameters(), **deepcopy(kwargs)
+                )
+                opt_eager = optim_cls(model_eager.parameters(), **deepcopy(kwargs))
+                if scheduler_cls:
+                    scheduler_compiled = create_scheduler(scheduler_cls, opt_compiled)
+                    scheduler_eager = create_scheduler(scheduler_cls, opt_eager)
+                    # some schedulers only change after at least an epoch has passed
+                    scheduler_compiled.last_epoch = 1
+                    scheduler_eager.last_epoch = 1
 
-                @torch.compile()
-                def fn():
-                    def closure():
-                        loss = model_compiled(input).sum()
+                num_steps = 2
+                if use_closure:
+
+                    @torch.compile()
+                    def fn():
+                        def closure():
+                            loss = model_compiled(input).sum()
+                            loss.backward()
+                            if optim_info.only_supports_sparse_grads:
+                                for param in model_compiled.parameters():
+                                    param.grad = param.grad.to_sparse()
+                            return loss
+
+                        opt_compiled.step(closure)
+                        if scheduler_cls:
+                            call_scheduler(scheduler_compiled)
+
+                    def closure_eager():
+                        loss = model_eager(input).sum()
                         loss.backward()
+                        if optim_info.only_supports_sparse_grads:
+                            for param in model_eager.parameters():
+                                param.grad = param.grad.to_sparse()
+
                         return loss
 
-                    opt_compiled.step(closure)
+                    for _ in range(num_steps):
+                        opt_eager.step(closure_eager)
+                        if scheduler_cls:
+                            call_scheduler(scheduler_eager)
+                else:
 
-                def closure_eager():
-                    loss = model_eager(input).sum()
-                    loss.backward()
-                    return loss
+                    @torch.compile()
+                    def fn():
+                        opt_compiled.step()
+                        if scheduler_cls:
+                            call_scheduler(scheduler_compiled)
 
-                opt_eager.step(closure_eager)
-                opt_eager.step(closure_eager)
-            else:
+                    for _ in range(num_steps):
+                        opt_eager.step()
+                        if scheduler_cls:
+                            call_scheduler(scheduler_eager)
 
-                @torch.compile()
-                def fn():
-                    opt_compiled.step()
+                for _ in range(num_steps):
+                    fn()
 
-                opt_eager.step()
-                opt_eager.step()
-
-            fn()
-            fn()
-
-            check_optim(
-                self,
-                optim_cls,
-                model_eager.parameters(),
-                model_compiled.parameters(),
-                opt_eager.state,
-                opt_compiled.state,
-            )
+                check_optim(
+                    self,
+                    optim_cls,
+                    model_eager.parameters(),
+                    model_compiled.parameters(),
+                    opt_eager.state,
+                    opt_compiled.state,
+                )
 
 
 class CompiledOptimizerTests(TestCase):
@@ -433,14 +583,12 @@ class CompiledOptimizerTests(TestCase):
     test_rprop_recompile = make_recompile_test(Rprop, lr=0.01)
     test_rmsprop_recompile = make_recompile_test(RMSprop, lr=0.01)
     test_adadelta_recompile = make_recompile_test(Adadelta, lr=0.01)
-    test_adagrad_recompile = make_recompile_test(Adagrad, kernel_count=5, lr=0.01)
-    test_asgd_recompile_default = make_recompile_test(ASGD, kernel_count=2, lr=0.01)
+    test_adagrad_recompile = make_recompile_test(Adagrad, lr=0.01)
+    test_asgd_recompile_default = make_recompile_test(ASGD, lr=0.01)
     test_asgd_recompile_single = make_recompile_test(
-        ASGD, kernel_count=8, lr=0.01, foreach=False
+        ASGD, kernel_count=11, lr=0.01, foreach=False
     )
-    test_asgd_recompile_foreach = make_recompile_test(
-        ASGD, kernel_count=2, lr=0.01, foreach=True
-    )
+    test_asgd_recompile_foreach = make_recompile_test(ASGD, lr=0.01, foreach=True)
     test_sgd_recompile_single = make_recompile_test(
         SGD, kernel_count=4, lr=0.01, foreach=False
     )
@@ -619,9 +767,32 @@ class CompiledOptimizerTests(TestCase):
 
         self.assertEqual(ret_val, x)
 
+    # compile a large foreach op and verify
+    # that the time taken is within an expected range
+    @requires_cuda
+    def test_compile_time_smoketest(self):
+        import time
 
-for optim_cls, name, kwargs in COMPILED_OPT_KWARG_DB:
-    setattr(CompiledOptimizerTests, name, make_test(optim_cls, **kwargs))
+        xs = [torch.ones(2, 2, device="cuda") for _ in range(100)]
+        ys = [torch.ones(2, 2, device="cuda") for _ in range(100)]
+
+        @torch.compile
+        def fn(xs, ys):
+            return torch._foreach_add(xs, ys)
+
+        start = time.perf_counter()
+        fn(xs, ys)
+        end = time.perf_counter()
+
+        self.assertLess(end - start, 90)
+
+
+for optim_cls, name, kwargs, scheduler_cls in COMPILED_OPT_KWARG_DB:
+    setattr(
+        CompiledOptimizerTests,
+        name,
+        make_test(optim_cls, scheduler_cls=scheduler_cls, **kwargs),
+    )
 
 instantiate_device_type_tests(CompiledOptimizerParityTests, globals())
 

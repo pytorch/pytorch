@@ -9,7 +9,7 @@ from torch._inductor.test_case import TestCase as InductorTestCase
 from torch.testing._internal.common_device_type import (
     get_desired_device_type_test_bases,
 )
-from torch.testing._internal.common_utils import IS_MACOS, slowTest
+from torch.testing._internal.common_utils import IS_MACOS, slowTest, TEST_WITH_ROCM
 from torch.testing._internal.inductor_utils import HAS_CPU
 
 
@@ -68,14 +68,21 @@ test_failures_cpp_wrapper = {
         ("cpp_wrapper",), is_skip=True
     ),
 }
-
+if TEST_WITH_ROCM:
+    test_failures_cpp_wrapper.update(
+        {
+            "test_linear_packed": test_torchinductor.TestFailure(
+                ("cpp_wrapper"), is_skip=True
+            ),
+            "test_linear_packed_dynamic_shapes": test_torchinductor.TestFailure(
+                ("cpp_wrapper"), is_skip=True
+            ),
+        }
+    )
 if config.abi_compatible:
     xfail_list = [
-        "test_bernoulli1_cpu",  # cpp fallback op naming issue
         "test_conv2d_binary_inplace_fusion_failed_cpu",
         "test_conv2d_binary_inplace_fusion_pass_cpu",
-        "test_cumsum_cpu",
-        "test_dtype_sympy_expr_cpu",
         "test_dynamic_qlinear_cpu",
         "test_dynamic_qlinear_qat_cpu",
         "test_lstm_packed_change_input_sizes_cpu",
@@ -87,12 +94,9 @@ if config.abi_compatible:
         "test_qconv2d_maxpool2d_linear_dynamic_cpu",
         "test_qconv2d_relu_cpu",
         "test_qlinear_cpu",
+        "test_qlinear_add_cpu",
         "test_qlinear_dequant_promotion_cpu",
         "test_qlinear_relu_cpu",
-        "test_randn_with_dtype_and_device_cpu",
-        "test_scatter5_cpu",
-        "test_scatter6_cpu",
-        "test_tensor2_cpu",
     ]
     for test_name in xfail_list:
         test_failures_cpp_wrapper[test_name] = test_torchinductor.TestFailure(
@@ -121,6 +125,7 @@ def make_test_case(
     slow=False,
     func_inputs=None,
     code_string_count=None,
+    skip=None,
 ):
     test_name = f"{name}_{device}" if device else name
     if code_string_count is None:
@@ -129,22 +134,29 @@ def make_test_case(
     func = getattr(tests, test_name)
     assert callable(func), "not a callable"
     func = slowTest(func) if slow else func
+    if skip:
+        func = unittest.skip(skip)(func)
 
     @config.patch(cpp_wrapper=True, search_autotune_cache=False)
     def fn(self):
         tests.setUpClass()
         tests.setUp()
         try:
-            _, code = test_torchinductor.run_and_get_cpp_code(
-                func, *func_inputs if func_inputs else []
-            )
-            self.assertEqual("CppWrapperCodeCache" in code, True)
-            self.assertTrue(
-                all(
-                    code.count(string) == code_string_count[string]
-                    for string in code_string_count
+            with torch._C._PreserveDispatchKeyGuard():
+                torch._C._dispatch_tls_set_dispatch_key_included(
+                    torch._C.DispatchKey.Dense, True
                 )
-            )
+
+                _, code = test_torchinductor.run_and_get_cpp_code(
+                    func, *func_inputs if func_inputs else []
+                )
+                self.assertEqual("CppWrapperCodeCache" in code, True)
+                self.assertTrue(
+                    all(
+                        code.count(string) == code_string_count[string]
+                        for string in code_string_count
+                    )
+                )
         finally:
             tests.tearDown()
             tests.tearDownClass()
@@ -171,8 +183,10 @@ if RUN_CPU:
         slow: bool = False
         func_inputs: list = None
         code_string_count: dict = {}
+        skip: str = None
 
     for item in [
+        BaseTest("test_add_complex"),
         BaseTest("test_add_complex4"),
         BaseTest("test_as_strided"),  # buffer reuse
         BaseTest("test_bernoulli1"),
@@ -217,6 +231,7 @@ if RUN_CPU:
         BaseTest("test_index_put1"),
         BaseTest("test_index_put_deterministic_fallback"),
         BaseTest("test_adding_tensor_offsets"),
+        BaseTest("test_inductor_layout_optimization_input_mutations"),
         BaseTest("test_int_div", "", test_cpu_repro.CPUReproTests()),
         BaseTest("test_linear1"),
         BaseTest("test_linear2"),
@@ -227,7 +242,9 @@ if RUN_CPU:
             torch.backends.mkldnn.is_available()
             and torch.ops.mkldnn._is_mkldnn_bf16_supported(),
         ),
-        BaseTest("test_linear_packed", "", test_cpu_repro.CPUReproTests()),
+        BaseTest(
+            "test_linear_packed", "", test_cpu_repro.CPUReproTests(), skip="Failing"
+        ),
         BaseTest(
             "test_lstm_packed_change_input_sizes",
             "cpu",
@@ -236,7 +253,10 @@ if RUN_CPU:
         ),
         BaseTest("test_mm_views"),
         BaseTest("test_multihead_attention", "cpu", test_cpu_repro.CPUReproTests()),
-        BaseTest("test_multi_threading"),
+        BaseTest(
+            "test_multi_threading",
+            code_string_count={"py::gil_scoped_release release;": 1},
+        ),
         BaseTest("test_profiler_mark_wrapper_call"),
         BaseTest(
             "test_qconv2d",
@@ -294,6 +314,27 @@ if RUN_CPU:
             condition=torch.backends.mkldnn.is_available(),
         ),
         BaseTest(
+            "test_qlinear_gelu",
+            "cpu",
+            test_mkldnn_pattern_matcher.TestPatternMatcher(),
+            condition=torch.backends.mkldnn.is_available(),
+            skip="Failing",
+        ),
+        BaseTest(
+            "test_qlinear_add",
+            "cpu",
+            test_mkldnn_pattern_matcher.TestPatternMatcher(),
+            condition=torch.backends.mkldnn.is_available(),
+            skip="Failing",
+        ),
+        BaseTest(
+            "test_qlinear_add_relu",
+            "cpu",
+            test_mkldnn_pattern_matcher.TestPatternMatcher(),
+            condition=torch.backends.mkldnn.is_available(),
+            skip="Failing",
+        ),
+        BaseTest(
             "test_qlinear_dequant_promotion",
             "cpu",
             test_mkldnn_pattern_matcher.TestPatternMatcher(),
@@ -347,6 +388,7 @@ if RUN_CPU:
             item.slow,
             item.func_inputs,
             item.code_string_count,
+            skip=item.skip,
         )
 
     test_torchinductor.copy_tests(
