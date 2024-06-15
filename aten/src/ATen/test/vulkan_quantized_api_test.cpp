@@ -136,7 +136,7 @@ inline std::vector<c10::IValue> callOpByName(
     const char* func_name,
     const char* overload_name,
     Args... args) {
-  const c10::optional<c10::OperatorHandle> op_handle =
+  const std::optional<c10::OperatorHandle> op_handle =
       c10::Dispatcher::singleton().findSchema({func_name, overload_name});
   assert(op_handle.has_value());
   return callOpByHandle(op_handle.value(), std::forward<Args>(args)...);

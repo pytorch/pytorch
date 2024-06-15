@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import logging
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Optional, Tuple
@@ -373,7 +374,7 @@ class _MinimizerBase:
             self._store_outputs(a_result, b_result, submodule)
         except Exception as e:
             report.append(f"Exception raised when running {submod_name}: {e}")
-            raise FxNetMinimizerRunFuncError(  # noqa: TRY200
+            raise FxNetMinimizerRunFuncError(  # noqa: B904
                 f"Exception raised when running {submod_name}: {e}"
             )
 

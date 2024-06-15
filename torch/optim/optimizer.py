@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import functools
 import math
 import warnings
@@ -20,7 +21,6 @@ from typing import (
     TypeVar,
     Union,
 )
-
 from typing_extensions import ParamSpec, Self, TypeAlias
 
 import torch
@@ -38,6 +38,8 @@ Args: TypeAlias = Tuple[Any, ...]
 Kwargs: TypeAlias = Dict[str, Any]
 StateDict: TypeAlias = Dict[str, Any]
 TensorListList: TypeAlias = List[List[torch.Tensor]]
+DeviceDict = Dict[Optional[torch.device], torch.Tensor]
+
 
 GlobalOptimizerPreHook: TypeAlias = Callable[
     ["Optimizer", Args, Kwargs], Optional[Tuple[Args, Kwargs]]
@@ -127,12 +129,36 @@ def _disable_dynamo_if_unsupported(single_tensor_fn=None):
         globals()[single_tensor_fn.__name__] = single_tensor_fn
 
     def wrapper(func):
+        import inspect
+
+        disabled_func = torch._disable_dynamo(func)
+        ps = inspect.signature(func).parameters
+        has_state_steps = True
+        try:
+            state_steps_ind = list(ps.keys()).index("state_steps")
+        except ValueError:
+            has_state_steps = False
+
+        # Today, there are cases where we stack state steps
+        # and pass them as the value arg of foreach ops.
+        # Having state steps on cuda as the value arg is not supported in eager,
+        # but this only occurs in the rare case that the user explicitly deletes
+        # the capturable flag. If capturable=True, this is not a problem.
         @functools.wraps(func)
-        def maybe_fallback(self, *args, **kwargs):
-            if is_compiling() and not kwargs.get("capturable", False):
-                return torch._disable_dynamo(func(self, *args, **kwargs))
+        def maybe_fallback(*args, **kwargs):
+            if is_compiling() and (
+                not kwargs.get("capturable", False)
+                and has_state_steps
+                and (args[state_steps_ind] and args[state_steps_ind][0].is_cuda)
+                or (
+                    "state_steps" in kwargs
+                    and kwargs["state_steps"]
+                    and kwargs["state_steps"][0].is_cuda
+                )
+            ):
+                return disabled_func(*args, **kwargs)
             else:
-                return func(self, *args, **kwargs)
+                return func(*args, **kwargs)
 
         return maybe_fallback
 
@@ -189,6 +215,16 @@ def _get_scalar_dtype(is_fused=None):
     )
 
 
+def _get_capturable_supported_devices(supports_xla: bool = True) -> List[str]:
+    r"""Return the device type list that supports capturable optimizer."""
+    capturable_supported_devices = ["cuda"]
+    if not torch.jit.is_scripting():
+        capturable_supported_devices.append(torch._C._get_privateuse1_backend_name())
+    if supports_xla:
+        capturable_supported_devices.append("xla")
+    return capturable_supported_devices
+
+
 # Common doc strings among optimizers
 _foreach_doc = r"""foreach (bool, optional): whether foreach implementation of optimizer
             is used. If unspecified by the user (so foreach is None), we will try to use
@@ -198,7 +234,7 @@ _foreach_doc = r"""foreach (bool, optional): whether foreach implementation of o
             being a tensorlist vs just one tensor. If memory is prohibitive, batch fewer
             parameters through the optimizer at a time or switch this flag to False (default: None)"""
 
-_fused_doc = r"""fused (bool, optional): whether the fused implementation (CUDA only) is used.
+_fused_doc = r"""fused (bool, optional): whether the fused implementation is used.
             Currently, `torch.float64`, `torch.float32`, `torch.float16`, and `torch.bfloat16`
             are supported. (default: None)
 
@@ -313,21 +349,10 @@ class Optimizer:
         self._patch_step_function()
 
         if isinstance(params, torch.Tensor):
-            if self.__class__.__name__ == "SparseAdam":
-                warnings.warn(
-                    (
-                        "Passing in a raw Tensor as ``params`` to SparseAdam "
-                        "is deprecated. In the future, this will raise an error. "
-                        "Please wrap your Tensor in an iterable instead."
-                    ),
-                    FutureWarning,
-                )
-                params = [params]
-            else:
-                raise TypeError(
-                    "params argument given to the optimizer should be "
-                    "an iterable of Tensors or dicts, but got " + torch.typename(params)
-                )
+            raise TypeError(
+                "params argument given to the optimizer should be "
+                "an iterable of Tensors or dicts, but got " + torch.typename(params)
+            )
 
         self.state: DefaultDict[torch.Tensor, Any] = defaultdict(dict)
         self.param_groups: List[Dict[str, Any]] = []

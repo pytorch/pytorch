@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import copy
 import io
 import math
@@ -331,6 +332,7 @@ def _copy_state_dict(
     state_dict: Dict[str, Any],
     copy_state_dict: Dict[str, Any],
     non_blocking: bool = False,
+    type_check: bool = True,
 ) -> Dict[str, Any]:
     """
     Copies all tensors in a given state dict into a different state_dict with the
@@ -352,6 +354,9 @@ def _copy_state_dict(
             The state dict we are copying into. This state_dict must have exactly
              the same structure as the source `state_dict`.
         non_blocking: (bool): Whether copy ops should be performed asynchronously
+        type_check (bool): check if the instance data type is a supported type
+            that can be saved by DCP. The current supported data types are
+            torch.Tensor, DTensor, int, float, str, list, dict, None.
 
     Returns:
         State Dict copy
@@ -367,7 +372,7 @@ def _copy_state_dict(
         cpu_offload=False,
         ranks_only=tuple(),
         companion_obj=copy_state_dict,
-        type_check=True,
+        type_check=type_check,
         non_blocking=non_blocking,
     )
 
@@ -509,8 +514,23 @@ def _broadcast_tensors(
 
     if pg is None:
         pg = dist.distributed_c10d._get_default_group()
-    dist._broadcast_coalesced(pg, tensors, 500, 0)
 
+    if len(tensors) > 1:
+        dist._broadcast_coalesced(pg, tensors, 500, 0)
+    else:
+        dist.broadcast(tensors[0], src=0, group=pg)
+
+    _distribute_tensors(local_state_dict, keys, device, pg)
+
+
+def _distribute_tensors(
+    local_state_dict: Dict[str, Any],
+    keys: List[str],
+    device: torch.device,
+    pg: Optional[dist.ProcessGroup] = None,
+) -> None:
+    if pg is None:
+        pg = dist.distributed_c10d._get_default_group()
     for key in keys:
         _local_state = local_state_dict.get(key, None)
         if _local_state is None or torch.is_tensor(_local_state):
@@ -528,9 +548,11 @@ def _broadcast_state_dict(
     local_state_dict: Dict[str, Any],
     device: torch.device,
     pg: Optional[dist.ProcessGroup] = None,
+    strict: bool = False,
 ) -> None:
-    # Gather the full state dict keys, non tensor values, scalar tensor values,
-    # and tensor information.
+    # Broadcast from rank0's `full_state_dict` to all ranks' `local_state_dict`.
+    # If strict is True, any keys in `local_state_dict` but not in `full_state_dict`
+    # will be removed from `local_state_dict`.
     ret = {}
     if dist.get_rank() == 0:
         for key, value in full_state_dict.items():
@@ -547,7 +569,10 @@ def _broadcast_state_dict(
 
     # Gather values
     keys = []
+    local_state_dict_keys = set(local_state_dict.keys())
+    global_keys = set()
     for key, value in ret.items():
+        global_keys.add(key)
         if not isinstance(value, _TensorInfo):
             if key in local_state_dict:
                 local_state_dict[key] = value
@@ -557,13 +582,48 @@ def _broadcast_state_dict(
             ret[key] = full_state_dict[key]
 
         keys.append(key)
-        # Broadcast every 10 tensors, just hardcode the number for now
-        if len(keys) >= 10:
+        # Broadcast every tensor to avoid OOM for now.
+        if len(keys) >= 1:
             _broadcast_tensors(ret, local_state_dict, keys, device, pg)
             keys.clear()
 
+    if strict:
+        if missing_keys := (local_state_dict_keys - global_keys):
+            for key in missing_keys:
+                local_state_dict.pop(key)
+
     if keys:
         _broadcast_tensors(ret, local_state_dict, keys, device, pg)
+
+
+def _distribute_state_dict(
+    full_state_dict: Dict[str, Any],
+    local_state_dict: Dict[str, Any],
+    device: torch.device,
+    pg: Optional[dist.ProcessGroup] = None,
+) -> None:
+    # Full_state_dict = True, broadcast_from_rank0 = False here. Each rank has
+    # full_state_dict. Skip the broadcast in ``_broadcast_state_dict`` and
+    # distribute tensors in each rank
+    for key, value in full_state_dict.items():
+        if key not in full_state_dict:
+            continue
+        if not torch.is_tensor(value):
+            local_state_dict[key] = value
+        elif value.dim() == 0:
+            local_state_dict[key] = value.cpu()
+        else:
+            assert isinstance(value, torch.Tensor)
+            full_tensor = value.detach().to(device)
+            local_state = local_state_dict.get(key, None)
+            if local_state is None:
+                continue
+            elif isinstance(local_state, DTensor):
+                local_state_dict[key] = (local_state, full_tensor)
+            else:
+                local_state_dict[key] = full_tensor
+
+            _distribute_tensors(local_state_dict, [key], device, pg)
 
 
 # These APIs are from torch.distributed.checkpoint.

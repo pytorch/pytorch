@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 """This file implements the IndexPropagation ops handler, which wraps an
 underlying handler to add a limited form of constant propagation, as well as
 propagation of sympy expressions downstream of ops.index_expr calls.
@@ -22,14 +23,17 @@ SymPy expressions yet, despite sympy.Min and sympy.Max existing.
 import itertools
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, Literal, Optional, overload, Tuple, Union
+from typing_extensions import TypeAlias
 
 import sympy
-
-from typing_extensions import TypeAlias
 
 import torch
 from torch._prims_common import dtype_to_type, is_integer_dtype
 from torch.utils._sympy.functions import FloorDiv, ModularIndexing, Where
+from torch.utils._sympy.value_ranges import bound_sympy, ValueRanges
+from .utils import generate_assert
+
+from .virtualized import V
 
 
 _ExprType = Union[sympy.Expr, float, int, bool]
@@ -39,6 +43,10 @@ def _is_constant(val: _ExprType):
     if isinstance(val, sympy.Basic):
         return val.is_number
     return isinstance(val, (int, float, bool))
+
+
+def upper_bound(val: _ExprType):
+    return bound_sympy(val).upper if isinstance(val, sympy.Expr) else val
 
 
 @dataclass
@@ -81,6 +89,10 @@ class SymPyOps:
         value: TypedExpr, dtype: torch.dtype, src_dtype: Optional[torch.dtype] = None
     ) -> TypedExpr:
         return TypedExpr(value.expr, dtype)
+
+    @staticmethod
+    def abs(x: TypedExpr) -> TypedExpr:
+        return TypedExpr(abs(x.expr), x.dtype)  # type: ignore[arg-type]
 
     @staticmethod
     def square(x: TypedExpr) -> TypedExpr:
@@ -177,8 +189,22 @@ class IndexPropagation:
 
     """
 
-    def __init__(self, inner: Any):
+    def __init__(self, inner: Any, iter_ranges: Dict[sympy.Symbol, sympy.Expr]):
         self._inner = inner
+        self.shape_env = V.graph.sizevars.shape_env
+
+        var_to_range = {
+            k: ValueRanges(0, upper_bound(v) - 1) for k, v in iter_ranges.items()
+        }
+        self.var_to_range = tuple(
+            itertools.chain(self.shape_env.var_to_range.items(), var_to_range.items())
+        )
+
+        axioms = []
+        for x, s in iter_ranges.items():
+            axioms.append(0 <= x)
+            axioms.append(x < s)
+        self.axioms = tuple(axioms) + self.shape_env.get_axioms()
 
     def materialize_expr(self, expr: sympy.Expr, dtype: torch.dtype) -> Any:
         # Construct a new constant/index_expr from the SymPy expression
@@ -267,15 +293,67 @@ class IndexPropagation:
 
         return inner
 
+    def statically_true(self, e):
+        """
+        Given some iter_ranges, return a function that given an expression, returns whether
+        it is true or false using value ranges, guard knowledge and runtime_asserts.
+
+        FIXME I think this may not be entirely right, as we may not be able to use all runtime_asserts
+              If this is an issue, just use guards in `self.axioms`.
+
+              The proper way of handling this would be to have a global shape_env that adds
+              runtime_asserts as they happen in the code. Then, it shuld be used in SimplifyIndexing
+              to perform wrap_expr and in CSEProxy.check_bounds to elide upper / lower bounds also
+              for indirect_indexing
+        """
+        evaluated = self.shape_env._maybe_evaluate_static(
+            e,
+            axioms=self.axioms,
+            var_to_range=self.var_to_range,
+        )
+        return bool(evaluated)
+
     def indirect_indexing(
         self, index: Union[Any, IndexPropVar], size: Any, check: bool = True
     ) -> Any:
-        # nb. We do index + Where(...) rather than Where(idx >= 0, idx, idx + sz) because we don't have CSE
-        #     for SymPy expressions, so we don't want to repeat idx too much
-
-        # indirect_indexing returns a sympy value, so no need to wrap in IndexPropVar here
         if isinstance(index, IndexPropVar) and index.is_symbolic:
-            # If we are turning a indirect indexing into direct, we need to wrap it.
-            index = index.value.expr
-            return index + Where(index >= 0, 0, size)
-        return self.fallback("indirect_indexing", (index, size, check), {}).value
+            # If we find something we can convert into a direct indexing we do so
+            # We still need to (perhaps) wrap the expression and add bound checks
+            # We want to do this "constant folding", as we don't allow to fuse
+            # kernels into indirect indexing
+
+            expr = sympy.sympify(index.value.expr)
+
+            # TODO Perhaps move this logic to the simplify indexing pass
+            def wrap_expr(expr):
+                # Positive, negative, mixed
+                if self.statically_true(0 <= expr):
+                    return expr
+                elif self.statically_true(expr < 0):
+                    return expr + size
+                else:
+                    return Where(expr < 0, expr + size, expr)
+
+            # Sometimes it's easier to prove 0 <= expr than the weaker -size <= expr
+            can_prove_lower = self.statically_true(0 <= expr) or self.statically_true(
+                -size <= expr
+            )
+            can_prove_upper = self.statically_true(expr < size)
+            expr = wrap_expr(expr)
+            if generate_assert(check):
+                self.fallback(
+                    "check_bounds",
+                    (expr, size),
+                    dict(lower=not can_prove_lower, upper=not can_prove_upper),
+                )
+            return expr
+
+        indirect_var = self.fallback(
+            "indirect_indexing", (index, size, check), {}
+        ).value
+        assert (
+            indirect_var not in self.var_to_range
+        ), f"{indirect_var} should've been created in the fallback."
+        indirect_range = (indirect_var, ValueRanges(0, upper_bound(size) - 1))
+        self.var_to_range = self.var_to_range + (indirect_range,)
+        return indirect_var

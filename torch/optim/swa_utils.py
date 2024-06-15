@@ -1,13 +1,14 @@
+# mypy: allow-untyped-defs
 import itertools
 import math
 import warnings
 from copy import deepcopy
-from typing import Any, Callable, cast, Dict, Iterable, List, Optional, Tuple, Union
+from typing import Any, Callable, Iterable, List, Literal, Optional, Tuple, Union
 
 import torch
 from torch import Tensor
 from torch.nn import Module
-from torch.optim.lr_scheduler import LRScheduler
+from torch.optim.lr_scheduler import _format_param, LRScheduler
 from torch.utils._foreach_utils import _get_foreach_kernels_supported_devices
 from .optimizer import Optimizer
 
@@ -21,11 +22,7 @@ __all__ = [
     "get_swa_avg_fn",
 ]
 
-from torch.utils._foreach_utils import (
-    _group_tensors_by_device_and_dtype,
-    Indices,
-    TensorListList,
-)
+from torch.utils._foreach_utils import _group_tensors_by_device_and_dtype
 
 PARAM_LIST = Union[Tuple[Tensor, ...], List[Tensor]]
 
@@ -192,6 +189,7 @@ class AveragedModel(Module):
     .. _Polyak averaging:
         https://paperswithcode.com/method/polyak-averaging
     """
+    n_averaged: Tensor
 
     def __init__(
         self,
@@ -231,8 +229,8 @@ class AveragedModel(Module):
             if self.use_buffers
             else model.parameters()
         )
-        self_param_detached = []
-        model_param_detached = []
+        self_param_detached: List[Optional[Tensor]] = []
+        model_param_detached: List[Optional[Tensor]] = []
         for p_averaged, p_model in zip(self_param, model_param):
             p_model_ = p_model.detach().to(p_averaged.device)
             self_param_detached.append(p_averaged.detach())
@@ -243,14 +241,7 @@ class AveragedModel(Module):
         if self.n_averaged > 0:
             if self.multi_avg_fn is not None or self.avg_fn is None:
                 grouped_tensors = _group_tensors_by_device_and_dtype(
-                    cast(TensorListList, [self_param_detached, model_param_detached])
-                )
-                grouped_tensors = cast(
-                    Dict[
-                        Tuple[torch.device, torch.dtype],
-                        Tuple[List[List[Tensor]], Indices],
-                    ],
-                    grouped_tensors,
+                    [self_param_detached, model_param_detached]
                 )
                 for (device, _), (
                     [self_params, model_params],
@@ -258,9 +249,12 @@ class AveragedModel(Module):
                 ) in grouped_tensors.items():
                     if self.multi_avg_fn:
                         self.multi_avg_fn(
-                            self_params, model_params, self.n_averaged.to(device)
+                            self_params, model_params, self.n_averaged.to(device)  # type: ignore[arg-type]
                         )
-                    elif device.type in _get_foreach_kernels_supported_devices():
+                    elif (
+                        device is not None
+                        and device.type in _get_foreach_kernels_supported_devices()
+                    ):
                         multi_avg_fn = get_swa_multi_avg_fn()
                         multi_avg_fn(
                             self_params, model_params, self.n_averaged.to(device)
@@ -268,10 +262,10 @@ class AveragedModel(Module):
                     else:
                         avg_fn = get_swa_avg_fn()
                         n_averaged = self.n_averaged.to(device)
-                        for p_averaged, p_model in zip(self_params, model_params):
+                        for p_averaged, p_model in zip(self_params, model_params):  # type: ignore[assignment]
                             p_averaged.copy_(avg_fn(p_averaged, p_model, n_averaged))
             else:
-                for p_averaged, p_model in zip(
+                for p_averaged, p_model in zip(  # type: ignore[assignment]
                     self_param_detached, model_param_detached
                 ):
                     n_averaged = self.n_averaged.to(p_averaged.device)
@@ -394,10 +388,10 @@ class SWALR(LRScheduler):
         optimizer: Optimizer,
         swa_lr: float,
         anneal_epochs=10,
-        anneal_strategy="cos",
+        anneal_strategy: Literal["cos", "linear"] = "cos",
         last_epoch=-1,
     ):
-        swa_lrs = self._format_param(optimizer, swa_lr)
+        swa_lrs = _format_param("swa_lr", optimizer, swa_lr)
         for swa_lr, group in zip(swa_lrs, optimizer.param_groups):
             group["swa_lr"] = swa_lr
         if anneal_strategy not in ["cos", "linear"]:
@@ -415,19 +409,6 @@ class SWALR(LRScheduler):
             )
         self.anneal_epochs = anneal_epochs
         super().__init__(optimizer, last_epoch)
-
-    @staticmethod
-    def _format_param(optimizer, swa_lrs):
-        if isinstance(swa_lrs, (list, tuple)):
-            if len(swa_lrs) != len(optimizer.param_groups):
-                raise ValueError(
-                    "swa_lr must have the same length as "
-                    f"optimizer.param_groups: swa_lr has {len(swa_lrs)}, "
-                    f"optimizer.param_groups has {len(optimizer.param_groups)}"
-                )
-            return swa_lrs
-        else:
-            return [swa_lrs] * len(optimizer.param_groups)
 
     @staticmethod
     def _linear_anneal(t):
