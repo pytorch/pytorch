@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 """
 The weak_script annotation needs to be here instead of inside torch/jit/ so it
 can be used in other places in torch/ (namely torch.nn) without running into
@@ -355,7 +356,7 @@ def get_annotation_str(annotation):
         return f"{get_annotation_str(annotation.value)}[{get_annotation_str(subscript_slice)}]"
     elif isinstance(annotation, ast.Tuple):
         return ",".join([get_annotation_str(elt) for elt in annotation.elts])
-    elif isinstance(annotation, (ast.Constant, ast.NameConstant)):
+    elif isinstance(annotation, ast.Constant):
         return f"{annotation.value}"
 
     # If an AST node is not handled here, it's probably handled in ScriptTypeParser.
@@ -879,7 +880,11 @@ def _check_overload_body(func):
         return isinstance(x, ast.Pass)
 
     def is_ellipsis(x):
-        return isinstance(x, ast.Expr) and isinstance(x.value, ast.Ellipsis)
+        return (
+            isinstance(x, ast.Expr)
+            and isinstance(x.value, ast.Constant)
+            and x.value.value is Ellipsis
+        )
 
     if len(body) != 1 or not (is_pass(body[0]) or is_ellipsis(body[0])):
         msg = (

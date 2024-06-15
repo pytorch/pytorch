@@ -2,12 +2,12 @@
 import itertools
 
 import torch
+import torch._dynamo.testing
 
 from torch._inductor.test_case import TestCase
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
-    skipIfRocm,
 )
 from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
 from torch.testing._internal.triton_utils import requires_cuda
@@ -324,7 +324,6 @@ class CondTests(TestCase):
             dynamic=True,
         )
 
-    @skipIfRocm
     @requires_cuda
     @parametrize("device", ["cpu", "cuda"])
     @parametrize("dynamic", [False, True])
@@ -631,7 +630,6 @@ class WhileLoopTests(TestCase):
             dynamic=dynamic,
         )
 
-    @skipIfRocm
     @requires_cuda
     @parametrize("device", ["cpu", "cuda"])
     @parametrize("dynamic", [False, True])

@@ -128,9 +128,7 @@ FusedKernelCUDA::FusedKernelCUDA(
 
 #if defined(USE_ROCM)
   std::vector<const char*> args = {"--std=c++17"};
-#if ROCM_VERSION >= 40200
   args.push_back("-hip-pch");
-#endif
 #else
   const std::string compute = std::string("--gpu-architecture=") +
 #if defined(CUDA_VERSION) && CUDA_VERSION >= 11010
@@ -190,16 +188,8 @@ FusedKernelCUDA::FusedKernelCUDA(
       nvrtc().cuModuleGetFunction(&function_, module_, name_.c_str()));
 
   // Computes max blocks
-#if defined(USE_ROCM) && ROCM_VERSION < 30500
-  // HIP function signature is not compatible yet
-  uint32_t max_blocks;
-  AT_CUDA_DRIVER_CHECK(nvrtc().hipOccupancyMaxActiveBlocksPerMultiprocessor(
-      &max_blocks, function_, 128, 0));
-  maxBlocks_ = max_blocks;
-#else
   AT_CUDA_DRIVER_CHECK(nvrtc().cuOccupancyMaxActiveBlocksPerMultiprocessor(
       &maxBlocks_, function_, 128, 0));
-#endif
   maxBlocks_ *= prop_->multiProcessorCount;
 
   // Resets device (end of hacked at::DeviceGuard)

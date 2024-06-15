@@ -27,7 +27,7 @@ struct DefaultArgs : torch::CustomClassHolder {
     x = scale * x + add;
     return x;
   }
-  int64_t divide(c10::optional<int64_t> factor) {
+  int64_t divide(std::optional<int64_t> factor) {
     if (factor) {
       // NOLINTNEXTLINE(cppcoreguidelines-narrowing-conversions,bugprone-narrowing-conversions)
       x = x / *factor;
@@ -140,7 +140,7 @@ struct TensorQueue : torch::CustomClassHolder {
 
     for (const auto index : c10::irange(queue_size)) {
       at::Tensor val;
-      queue_[index] = dict.at(key + "/" + c10::to_string(index));
+      queue_[index] = dict.at(key + "/" + std::to_string(index));
       queue_.push_back(val);
     }
   }
@@ -152,7 +152,7 @@ struct TensorQueue : torch::CustomClassHolder {
     dict.insert(
         key + "/size", torch::tensor(static_cast<int64_t>(queue_.size())));
     for (const auto index : c10::irange(queue_.size())) {
-      dict.insert(key + "/" + c10::to_string(index), queue_[index]);
+      dict.insert(key + "/" + std::to_string(index), queue_[index]);
     }
     return dict;
   }
@@ -334,7 +334,7 @@ struct ElementwiseInterpreter : torch::CustomClassHolder {
   // collection types like vector, optional, and dict.
   using SerializationType = std::tuple<
       std::vector<std::string> /*input_names_*/,
-      c10::optional<std::string> /*output_name_*/,
+      std::optional<std::string> /*output_name_*/,
       c10::Dict<std::string, at::Tensor> /*constants_*/,
       std::vector<InstructionType> /*instructions_*/
       >;
@@ -360,7 +360,7 @@ struct ElementwiseInterpreter : torch::CustomClassHolder {
 
   // Class members
   std::vector<std::string> input_names_;
-  c10::optional<std::string> output_name_;
+  std::optional<std::string> output_name_;
   c10::Dict<std::string, at::Tensor> constants_;
   std::vector<InstructionType> instructions_;
 };

@@ -129,9 +129,9 @@ public:
   // Postcondition: caller is responsible for disposing of the kernel
   AnnotatedKernelContainerIterator registerKernel(
     const Dispatcher& dispatcher,
-    c10::optional<DispatchKey> dispatch_key,
+    std::optional<DispatchKey> dispatch_key,
     KernelFunction kernel,
-    c10::optional<CppSignature> cpp_signature,
+    std::optional<CppSignature> cpp_signature,
     std::unique_ptr<FunctionSchema> inferred_function_schema,
     std::string debug
   );
@@ -139,7 +139,7 @@ public:
   // Precondition: Dispatcher::mutex_ is held
   void deregisterKernel_(
     const Dispatcher& dispatcher,
-    c10::optional<DispatchKey> dispatch_key,
+    std::optional<DispatchKey> dispatch_key,
     AnnotatedKernelContainerIterator kernel
   );
 
@@ -221,7 +221,7 @@ public:
 private:
 
   OperatorName name_;
-  c10::optional<AnnotatedSchema> schema_;
+  std::optional<AnnotatedSchema> schema_;
   #ifndef C10_MOBILE
     std::vector<at::Tag> tags_;
   #endif
@@ -282,10 +282,10 @@ private:
   struct CppSignatureWithDebug {
     CppSignature signature;
     std::string debug;
-    c10::optional<DispatchKey> dispatch_key;
+    std::optional<DispatchKey> dispatch_key;
   };
-  c10::optional<CppSignatureWithDebug> cpp_signature_;
-  c10::optional<CppSignatureWithDebug> sym_cpp_signature_;
+  std::optional<CppSignatureWithDebug> cpp_signature_;
+  std::optional<CppSignatureWithDebug> sym_cpp_signature_;
 
   // A Python custom error handler for OperatorEntry::reportError
   std::unique_ptr<c10::SafePyObject> report_error_callback_;

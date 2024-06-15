@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 """
 This module is one of the analysis modules - it takes as input a function or graph
 and some preexisting properties, and returns some data that is useful for deciding
@@ -32,6 +33,7 @@ from .functional_utils import (
     has_metadata_mutation,
     has_same_metadata,
     to_fun,
+    was_inductor_storage_resized,
 )
 from .schemas import (
     FunctionalTensorMetadataEq,
@@ -74,8 +76,8 @@ def coerce_tangent(x):
     #     with a Replicate/Shard placement, we have no way to convert the tangent "back" to a _Partial placement.
     #     This method lets us avoid the problem entirely by allowing subclasses to ensure that we can never
     #     have a tangent with "problematic" metadata, that we cannot convert to.
-    # (1) __coerce_same_metadata_as_tangent__(self, target)
-    #     Given a subclass, and a target subclass with differing metadata,
+    # (1) __coerce_same_metadata_as_tangent__(self, metadata)
+    #     Given a subclass, and a target differing metadata,
     #     convert self to have the same metadata as the target.
     #     With DTensor being the main example, we can use this to convert a DTensor with a Replicate()
     #     placement into one with a Shard() placement, in the case that we "guessed wrong",
@@ -213,6 +215,7 @@ def run_functionalized_fw_and_collect_metadata(
                 mutates_data
                 and are_all_mutations_under_no_grad_or_inference_mode(f_arg)
             )
+            mutation_inductor_storage_resize = was_inductor_storage_resized(f_arg)
 
             if mutates_storage_metadata:
                 mutates_data = False
@@ -227,6 +230,7 @@ def run_functionalized_fw_and_collect_metadata(
                     mutations_hidden_from_autograd=mutations_hidden_from_autograd,
                     mutates_storage_metadata=mutates_storage_metadata,
                     mutations_under_no_grad_or_inference_mode=mutations_under_no_grad_or_inference_mode,
+                    mutation_inductor_storage_resize=mutation_inductor_storage_resize,
                     requires_grad=requires_grad,
                     keep_input_mutations=keep_input_mutations,
                 )
@@ -662,6 +666,15 @@ from a multi-output view call"
         )
         user_outs = pytree.tree_map(from_fun, f_output_tangents)
 
+        if torch._dynamo.config.inline_inbuilt_nn_modules:
+            static_parameter_input_indices = [
+                i
+                for i, arg in enumerate(flat_args)
+                if isinstance(arg, torch.nn.Parameter)
+            ]
+        else:
+            static_parameter_input_indices = []
+
         f_mutated_inputs = [
             inp
             for inp, info in zip(flat_f_args, input_info)
@@ -713,6 +726,7 @@ from a multi-output view call"
             subclass_tangent_meta=create_subclass_meta(traced_tangents),
             is_train=is_train,
             grad_enabled_mutation=grad_enabled_mutation,
+            static_parameter_indices=static_parameter_input_indices,
             tokens=mode._tokens,
         )
         return metadata

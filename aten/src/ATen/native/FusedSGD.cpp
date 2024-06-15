@@ -26,8 +26,8 @@ void _fused_sgd_kernel_cpu_(
     const bool nesterov,
     const bool maximize,
     const bool is_first_step,
-    const c10::optional<at::Tensor>& grad_scale,
-    const c10::optional<at::Tensor>& found_inf) {
+    const std::optional<at::Tensor>& grad_scale,
+    const std::optional<at::Tensor>& found_inf) {
   const float* grad_scale_ptr =
       grad_scale.has_value() ? grad_scale->data_ptr<float>() : nullptr;
   const float* found_inf_ptr =
@@ -71,8 +71,8 @@ void _fused_sgd_kernel_cpu_(
     const bool nesterov,
     const bool maximize,
     const bool is_first_step,
-    const c10::optional<at::Tensor>& grad_scale,
-    const c10::optional<at::Tensor>& found_inf) {
+    const std::optional<at::Tensor>& grad_scale,
+    const std::optional<at::Tensor>& found_inf) {
     _fused_sgd_kernel_cpu_(
         params, grads, momentum_buffer_list, weight_decay,
         momentum, lr.item<double>(), dampening, nesterov,

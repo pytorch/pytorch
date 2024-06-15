@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 """
 This file contains canonical definitions for our symbol naming conventions,
 across torch.fx.experimental.symbolic_shapes and torch._inductor.  The
@@ -19,6 +20,7 @@ import sympy
 
 class SymT(Enum):
     SIZE = auto()
+    FLOAT = auto()
     UNBACKED_INT = auto()
     UNBACKED_FLOAT = auto()
     # Inductor: The intermediates in inner_fn tmp0, one generated per ops call.
@@ -54,7 +56,11 @@ class SymT(Enum):
 prefix_str = {
     SymT.SIZE: "s",  # integer
     SymT.UNBACKED_INT: "u",  # integer
-    SymT.UNBACKED_FLOAT: "f",
+    # Prefix z here is chosen to avoid false aliasing in symbol_is_type test
+    # DO NOT add a "z" type.  You also need to avoid conflicts on these
+    # prefixes but this is somewhat easier to manage
+    SymT.FLOAT: "zf",
+    SymT.UNBACKED_FLOAT: "zuf",
     SymT.TMP: "tmp",
     SymT.PRECOMPUTED_SIZE: "ps",
     SymT.INDEX: "i",

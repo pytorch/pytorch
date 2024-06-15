@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 import weakref
 
 from typing import Set
@@ -9,6 +10,8 @@ from torch.nn.modules.module import (
     register_module_forward_pre_hook,
 )
 from torch.utils._pytree import tree_flatten
+
+__all__ = ["ModuleTracker"]
 
 
 class ModuleTracker:
@@ -52,7 +55,7 @@ class ModuleTracker:
     def __init__(self):
         self.parents = {"Global"}
         self._known_modules: weakref.WeakKeyDictionary = weakref.WeakKeyDictionary()
-        self._seen_modules = set()
+        self._seen_modules: weakref.WeakSet = weakref.WeakSet()
         self._has_callback = False
 
     def _maybe_set_engine_callback(self):
@@ -81,6 +84,8 @@ class ModuleTracker:
         if mod not in self._seen_modules:
             for name, submod in mod.named_children():
                 self._known_modules[submod] = f"{mod_name}.{name}"
+                self._get_mod_name(submod)
+            self._seen_modules.add(mod)
         return mod_name
 
     def _get_append_fn(self, name, is_bw):

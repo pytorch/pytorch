@@ -63,6 +63,33 @@ void NCCLComm::waitUntilInitialized(int timeoutSecs) {
   }
 }
 
+#if defined(NCCL_HAS_COMM_SPLIT) && !defined(FBCODE_CAFFE2)
+// last argument to split() API is not used to support
+// multiple implementations
+std::shared_ptr<NCCLComm> NCCLComm::split(
+    NCCLComm* source,
+    int color_id,
+    int rank,
+    ncclConfig_t& config,
+    std::vector<uint64_t>& ranks_ull) {
+  auto comm = std::make_shared<NCCLComm>();
+  C10D_NCCL_CHECK(
+      ncclCommSplit(
+          source->ncclComm_, color_id, rank, &(comm->ncclComm_), &config),
+      c10::nullopt);
+  ++source->ncclCommSplitCounter_;
+  comm->rank_ = rank;
+  return comm;
+}
+#endif
+
+#ifndef FBCODE_CAFFE2
+bool shouldBroadcastNCCLUniqueID(bool isSendRecvSelf) {
+  // For point-to-point communication on the same process, don't need broadcast.
+  return !isSendRecvSelf;
+}
+#endif
+
 std::string getNcclVersion() {
   static c10::once_flag ncclGetVersionFlag;
   static std::string versionString;
@@ -159,7 +186,7 @@ std::string ncclGetErrorWithVersion(ncclResult_t error) {
 // thrown in the NCCL codebase.
 std::string getNcclErrorDetailStr(
     ncclResult_t error,
-    c10::optional<std::string> processGroupFailureReason /* = c10::nullopt */
+    std::optional<std::string> processGroupFailureReason /* = c10::nullopt */
 ) {
   // Prioritize failure reason provided by PG NCCL first, as it can abort
   // communicators when it encounters collective timeouts, etc.
