@@ -927,7 +927,7 @@ class GraphModule(torch.nn.Module):
         getitem: "f32[3, 4]" = wrap[0];  wrap = None
         return (getitem,)
 
-    class GraphModule(torch.nn.Module):
+    class wrap_body_0(torch.nn.Module):
         def forward(self, l_x_: "f32[3, 4]"):
             add_: "f32[3, 4]" = l_x_.add_(1.0);  l_x_ = None
             return (add_,)
@@ -951,7 +951,7 @@ class GraphModule(torch.nn.Module):
         getitem = wrap[0];  wrap = None
         return (getitem,)
 
-    class GraphModule(torch.nn.Module):
+    class wrap_body_0(torch.nn.Module):
         def forward(self, l_x_):
             add_ = l_x_.add_(1.0);  l_x_ = None
             return (add_,)
@@ -981,7 +981,7 @@ class GraphModule(torch.nn.Module):
         getitem = wrap[0];  wrap = None
         return (getitem,)
 
-    class GraphModule(torch.nn.Module):
+    class wrap_body_0(torch.nn.Module):
         def forward(self, l_x_):
             add_ = l_x_.add_(1.0);  l_x_ = None
             return (add_,)
