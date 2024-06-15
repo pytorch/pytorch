@@ -110,16 +110,28 @@ class TritonBlockPointerTest(InductorTestCase):
             ((8, 8), (4, 4), None, 10, True),  # Storage offset
             ((8, 8), (4, 4), (16, 2), None, True),  # Non-default strides
             ((8, 8), (4, 4), (1, 8), None, True),  # Transposed strides
-            ((15, 9), (8, 8), None, None, True),  # Non-power-of-2 full dims
-            ((15, 9), (15, 3), None, None, False),  # Non-power-of-2 view dims
-            ((1, 1, 1), (1, 1, 1), None, None, False),  # Scalar
+            (
+                (5, 9),
+                (5, 8),
+                None,
+                None,
+                True,
+            ),  # Non-power-of-2 leading dim: block ptr
+            (
+                (15, 9),
+                (15, 3),
+                None,
+                None,
+                False,
+            ),  # Non-power-of-2 inner dims: non-block ptr
+            ((1, 1, 1), (1, 1, 1), None, None, False),  # Scalar: non-block ptr
             (
                 (2, 4 * max_block),
                 (2, 3 * max_block),
                 None,
                 None,
                 True,
-            ),  # Multiple of max_block
+            ),  # Inner dim multiple of max_block
         ],
     )
     def test_pointwise(

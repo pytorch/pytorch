@@ -231,7 +231,7 @@ class BlockPtrOptions:
         return BlockPtrOptions(
             params=params,
             constant_offset=V.graph.sizevars.lookup_precomputed_size(constant_offset),
-            order=V.graph.sizevars.guarded_order(params.strides),
+            order=list(reversed(range(len(params.shape)))),
             mask_vars=mask_vars,
             reshape_suffix=reshape_suffix,
         )
@@ -1430,12 +1430,19 @@ class TritonKernel(SIMDKernel):
                 ):
                     return None
 
+                def identity(expr: sympy.Expr) -> sympy.Expr:
+                    return expr
+
                 # Compute the ND block shape from the linear block size.
                 # Use CielDiv to round leading dimensions up to 1.
+                # Non-leading dimensions are clamped to the size of the iteration range,
+                # while the leading dim can grow to accomodate a larger block size.
                 linear_block_size = self._get_block_size(range_tree)
                 block_shape: List[sympy.Expr] = [
+                    CeilDiv(linear_block_size, slice_numels[0])
+                ] + [
                     sympy.Min(CeilDiv(linear_block_size, numel), dim)
-                    for numel, dim in zip(slice_numels, dims)
+                    for numel, dim in zip(slice_numels[1:], dims[1:])
                 ]
 
                 # Compute block offsets from {xyzr}offset and the matched expressions.

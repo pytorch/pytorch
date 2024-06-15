@@ -384,7 +384,6 @@ class SizeVarAllocator:
     def guarded_order(self, seq):
         """
         Return the order of a sequence as a permutation of range(len(seq)) and guard on that order not changing.
-        Used for generating block_ptrs.
         """
         seq = [*map(self.remove_precomputed_replacements, seq)]
         seq = [(self.size_hint(var), orig_idx, var) for orig_idx, var in enumerate(seq)]
