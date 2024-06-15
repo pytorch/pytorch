@@ -145,11 +145,13 @@ class FloorDiv(sympy.Function):
 
         # Expands (x + y) // b into x // b + y // b.
         # This only works if floor is an identity, i.e. x / b is an integer.
-        if isinstance(base, sympy.Add):
-            for term in base.args:
-                quotient = term / divisor
-                if quotient.is_integer:
-                    return FloorDiv(base - term, divisor) + quotient
+        for term in sympy.Add.make_args(base):
+            quotient = term / divisor
+            if quotient.is_integer and isinstance(divisor, sympy.Integer):
+                # NB: this is correct even if the divisor is not an integer, but it
+                # creates rational expressions that cause problems with dynamic
+                # shapes.
+                return FloorDiv(base - term, divisor) + quotient
 
         try:
             gcd = sympy.gcd(base, divisor)
