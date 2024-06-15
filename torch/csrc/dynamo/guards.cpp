@@ -671,6 +671,8 @@ static PyObject* assert_size_stride(PyObject* dummy, PyObject* args) {
     PyErr_SetString(PyExc_AssertionError, "wrong number of dimensions");
     return nullptr;
   }
+  std::stringstream msg;
+  int num_errors = 0;
   for (auto i : c10::irange(ndim)) {
     int64_t want_size = THPUtils_unpackLong(PyTuple_GET_ITEM(size, i));
     int64_t want_stride = THPUtils_unpackLong(PyTuple_GET_ITEM(stride, i));
@@ -679,13 +681,19 @@ static PyObject* assert_size_stride(PyObject* dummy, PyObject* args) {
     if (want_size != actual_size ||
         // ignore stride differences when size is 1
         (want_stride != actual_stride && actual_size > 1)) {
-      std::stringstream msg;
+      if (num_errors > 0)
+        msg << "; ";
       msg << "expected size " << actual_size << "==" << want_size << ", stride "
           << actual_stride << "==" << want_stride << " at dim=" << i;
-      PyErr_SetString(PyExc_AssertionError, msg.str().c_str());
-      return nullptr;
+      num_errors++;
     }
   }
+
+  if (num_errors) {
+    PyErr_SetString(PyExc_AssertionError, msg.str().c_str());
+    return nullptr;
+  }
+
   Py_RETURN_TRUE;
 }
 
