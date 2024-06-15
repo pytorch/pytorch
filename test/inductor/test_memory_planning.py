@@ -5,7 +5,7 @@ import sys
 import unittest
 
 from torch.testing._internal.common_utils import IS_CI, IS_WINDOWS, skipIfRocm
-from torch.testing._internal.inductor_utils import HAS_GPU, GPU_TYPE
+from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 
 if IS_WINDOWS and IS_CI:
     sys.stderr.write(

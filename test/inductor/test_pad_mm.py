@@ -15,7 +15,7 @@ from torch._inductor.fx_passes.pad_mm import (
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import fresh_inductor_cache, run_and_get_code
 from torch.testing import FileCheck
-from torch.testing._internal.inductor_utils import HAS_GPU
+from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 
 
 class PadMMTest(TestCase):
@@ -30,7 +30,7 @@ class PadMMTest(TestCase):
             def __init__(self):
                 super().__init__()
                 self.w = rand_strided(
-                    (K2, N), (1, K2), device=GPU_TYPE), dtype=torch.float32
+                    (K2, N), (1, K2), device=GPU_TYPE, dtype=torch.float32
                 )
 
             def forward(self, a):

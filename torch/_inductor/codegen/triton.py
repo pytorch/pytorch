@@ -51,6 +51,7 @@ from ..utils import (
 from ..virtualized import _ops as ops, OpsHandler, ReductionType, StoreMode, V
 from ..wrapper_benchmark import get_kernel_category_by_source_code
 from .common import (
+    BackendFeature,
     CSE,
     CSEVariable,
     DeferredLine,
@@ -60,7 +61,14 @@ from .common import (
     SizeArg,
     TensorArg,
 )
-from .simd import constant_repr, IterationRangesEntry, pexpr, SIMDKernel, SIMDScheduling
+from .simd import (
+    constant_repr,
+    IterationRangesEntry,
+    IterationRangesRoot,
+    pexpr,
+    SIMDKernel,
+    SIMDScheduling,
+)
 from .triton_utils import config_of, signature_of, signature_to_meta
 
 if TYPE_CHECKING:
@@ -919,19 +927,33 @@ class TritonKernelOverrides(TritonOverrides):
 
     @staticmethod
     def masked(mask, body, other):
-        with V.kernel.mask_loads(mask) as new_mask:
+        nodes = body.graph.find_nodes(op="output")
+        assert nodes, "graph for body does not contain an output"
+
+        need_where = False
+        for node in nodes:
+            for arg in node.args:
+                if arg.target != "load" or V.graph.is_unspec_arg(arg.args[0]):
+                    need_where = True
+
+        value = None if need_where else other
+        with V.kernel.mask_loads(mask, value=value) as new_mask:
             result = body()
 
-        # Remove once CSEVariables track the dtype
-        if result.bounds.is_bool:
-            other = bool(other)
-        # Take dtype from result to prevent accidental promotion
-        other = V.kernel.cse.generate(
-            V.kernel.compute,
-            f"tl.full({result}.shape, {constant_repr(other)}, {result}.dtype)",
-            bounds=ValueRanges.wrap(other),
-        )
-        ret = ops.where(new_mask, result, other)
+        if need_where:
+            # Remove once CSEVariables track the dtype
+            if result.bounds.is_bool:
+                other = bool(other)
+            # Take dtype from result to prevent accidental promotion
+            other = V.kernel.cse.generate(
+                V.kernel.compute,
+                f"tl.full({result}.shape, {constant_repr(other)}, {result}.dtype)",
+                bounds=ValueRanges.wrap(other),
+            )
+            ret = ops.where(new_mask, result, other)
+        else:
+            ret = result
+
         ret.mask_vars.discard(new_mask)
         return ret
 
@@ -1339,8 +1361,12 @@ class TritonKernel(SIMDKernel):
                 ep = ", eviction_policy='evict_first'"
         else:
             ep = ""
+
         if (has_tmpmask or has_rindex) and indexing.has_mask():
-            other = ", other=0.0"
+            if self._load_other:
+                other = f", other={constant_repr(self._load_other)}"
+            else:
+                other = ", other=0.0"
         else:
             other = ""
 
@@ -2247,6 +2273,18 @@ class TritonKernel(SIMDKernel):
 
         return code.getvalue()
 
+    def _get_persistent_RBLOCK(self, rnumel):
+        rnumel = V.graph.sizevars.simplify(rnumel)
+        if isinstance(rnumel, (sympy.Integer, int)):
+            val = int(rnumel)
+            val = next_power_of_2(val)
+        else:
+            val = 128
+            while not V.graph.sizevars.statically_known_leq(rnumel, val):
+                assert val <= 16 * 1024, f"Failed to find static RBLOCK for {rnumel}"
+                val *= 2
+        return val
+
     def codegen_static_numels(self, code):
         """
         We get a small speedup from hard coding numels if they are static.
@@ -2271,19 +2309,7 @@ class TritonKernel(SIMDKernel):
                     code.writeline(f"{tree.prefix}numel = {int(simplified_tree_numel)}")
 
             if tree.prefix == "r" and self.persistent_reduction:
-                simplified_tree_numel = V.graph.sizevars.simplify(tree.numel)
-                if isinstance(simplified_tree_numel, (sympy.Integer, int)):
-                    val = int(simplified_tree_numel)
-                    val = next_power_of_2(val)
-                else:
-                    val = 128
-                    while not V.graph.sizevars.statically_known_leq(
-                        simplified_tree_numel, val
-                    ):
-                        assert (
-                            val <= 16 * 1024
-                        ), f"Failed to find static RBLOCK for {simplified_tree_numel}"
-                        val *= 2
+                val = self._get_persistent_RBLOCK(tree.numel)
                 code.writeline(f"RBLOCK: tl.constexpr = {val}")
 
             if tree.prefix == "x" and self.no_x_dim:
@@ -2406,6 +2432,31 @@ class TritonKernel(SIMDKernel):
             return f"{pid}.to({self.index_dtype})"
         return pid
 
+    def _has_constant_mask(self, tree: IterationRangesRoot):
+        if V.graph.sizevars.statically_known_equals(tree.numel, 1):  # type: ignore[arg-type]
+            return True
+        # Masks are superfluous if numel is a multiple of BLOCK
+        # (We use the fact that BLOCK is required by triton to be a power of 2)
+        if tree.prefix == "r" and self.persistent_reduction:
+            max_block = self._get_persistent_RBLOCK(tree.numel)
+        elif tree.prefix == "x" and self.no_x_dim:
+            max_block = 1
+        else:
+            if tree.prefix.upper() not in TRITON_MAX_BLOCK:
+                return False
+            max_block = TRITON_MAX_BLOCK[tree.prefix.upper()]
+
+        # Optional optimization: if block divides numel exactly, we will
+        # never need to do a masked load to handle stragglers at the end.
+        # It's faster to avoid masking at all.  But it is sound to always
+        # mask.
+        return V.graph.sizevars.statically_known_multiple_of(tree.numel, max_block)
+
+    def filter_masks(self, mask_vars):
+        for tree in self.range_trees:
+            if self._has_constant_mask(tree):
+                mask_vars.discard(f"{tree.prefix}mask")
+
     def iteration_ranges_codegen_header(self, entry, code):
         x = entry.prefix
         if entry.is_loop:
@@ -2425,13 +2476,40 @@ class TritonKernel(SIMDKernel):
                     f"{entry.name} = {line}",
                 ]
             )
-        code.writeline(f"{x}mask = {entry.name} < {x}numel")
+
+        if self._has_constant_mask(entry):
+            sizes = self.dense_size_str()
+            code.writeline(f"{x}mask = tl.full({sizes}, True, tl.int1)")
+        else:
+            code.writeline(f"{x}mask = {entry.name} < {x}numel")
 
 
 class TritonScheduling(SIMDScheduling):
     int32_type = "tl.int32"
     int64_type = "tl.int64"
     kernel_type = TritonKernel
+    backend_features = dict.fromkeys(  # dict for deterministic order
+        [
+            BackendFeature.FOREACH,
+            BackendFeature.BUCKETIZE,
+            BackendFeature.INPLACE_BUFFERS,
+            BackendFeature.MASKED_SCATTER_WITH_INDEX,
+            BackendFeature.SCAN,
+        ]
+    )
+    if torch.version.hip is None:
+        backend_features.update(
+            dict.fromkeys(
+                [
+                    # TODO: Move this above when ROCm triton adds support for multiple inputs
+                    BackendFeature.TUPLE_REDUCTION,
+                ]
+            )
+        )
+
+    @classmethod
+    def get_backend_features(cls, device: torch.device):
+        return cls.backend_features
 
     def codegen_comment(self, node_schedule):
         wrapper = V.graph.wrapper_code

@@ -19,7 +19,7 @@ from torch._inductor.test_case import TestCase
 
 from torch.testing._internal.common_utils import IS_CI, IS_WINDOWS, TEST_WITH_ASAN
 
-from torch.testing._internal.inductor_utils import HAS_CPU, HAS_GPU, GPU_TYPE
+from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CPU, HAS_GPU
 
 if IS_WINDOWS and IS_CI:
     sys.stderr.write(

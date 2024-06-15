@@ -9,9 +9,8 @@ from torch.testing._internal.common_utils import (
     skipIfRocm,
     TEST_WITH_ASAN,
 )
-from torch.testing._internal.inductor_utils import HAS_GPU, GPU_TYPE
+from torch.testing._internal.inductor_utils import GPU_TYPE
 from torch.testing._internal.triton_utils import requires_gpu
-
 
 
 # These minifier tests are slow, because they must be run in separate
