@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 # Copyright (c) Facebook, Inc. and its affiliates.
 # All rights reserved.
 #
@@ -27,7 +28,7 @@ from .api import (
 from .dynamic_rendezvous import RendezvousBackend, Token
 from .utils import _matches_machine_hostname, parse_rendezvous_endpoint
 
-log = logging.getLogger(__name__)
+logger = logging.getLogger(__name__)
 
 
 class C10dRendezvousBackend(RendezvousBackend):
@@ -158,6 +159,7 @@ def _create_tcp_store(params: RendezvousParameters) -> TCPStore:
                 host,
                 port,
                 is_master=is_server,
+                multi_tenant=True,
                 timeout=timedelta(seconds=read_timeout),
                 use_libuv=use_libuv,
             )
@@ -167,7 +169,7 @@ def _create_tcp_store(params: RendezvousParameters) -> TCPStore:
                 construct_and_record_rdzv_event(
                     run_id=params.run_id, message=msg, node_state=NodeState.INIT
                 )
-                log.info(msg)
+                logger.info(msg)
 
             break
         except (ValueError, RuntimeError, TimeoutError) as exc:

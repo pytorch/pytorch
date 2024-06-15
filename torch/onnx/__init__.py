@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 from torch import _C
 from torch._C import _onnx as _C_onnx
 from torch._C._onnx import (

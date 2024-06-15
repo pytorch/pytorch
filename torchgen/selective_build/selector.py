@@ -80,7 +80,7 @@ class SelectiveBuilder:
         }
         top_level_keys = set(data.keys())
         if len(top_level_keys - valid_top_level_keys) > 0:
-            raise Exception(
+            raise Exception(  # noqa: TRY002
                 "Got unexpected top level keys: {}".format(
                     ",".join(top_level_keys - valid_top_level_keys),
                 )
@@ -255,7 +255,7 @@ class SelectiveBuilder:
                     break
             if not key_found:
                 if "default" not in kernel_key:
-                    raise Exception("Missing kernel for the model")
+                    raise Exception("Missing kernel for the model")  # noqa: TRY002
                 else:
                     result_set.add("default")
 

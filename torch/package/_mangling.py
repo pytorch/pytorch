@@ -1,3 +1,4 @@
+# mypy: allow-untyped-defs
 """Import mangling.
 See mangling.md for details.
 """

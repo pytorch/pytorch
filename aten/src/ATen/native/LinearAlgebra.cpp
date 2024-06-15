@@ -280,7 +280,7 @@ TORCH_META_FUNC(_linalg_slogdet)(const Tensor& A) {
 }
 
 template <typename Meta>
-void common_checks_baddbmm_bmm(Meta& meta, const Tensor& batch1, const Tensor& batch2, const Scalar& beta, const Scalar& alpha, bool is_bmm, const c10::optional<Tensor>& self_baddbmm = nullopt) {
+void common_checks_baddbmm_bmm(Meta& meta, const Tensor& batch1, const Tensor& batch2, const Scalar& beta, const Scalar& alpha, bool is_bmm, const std::optional<Tensor>& self_baddbmm = nullopt) {
   TORCH_CHECK(batch1.dim() == 3, "batch1 must be a 3D tensor");
   TORCH_CHECK(batch2.dim() == 3, "batch2 must be a 3D tensor");
 
@@ -635,7 +635,7 @@ namespace {
 Tensor linalg_matrix_power_impl(
     const Tensor& self,
     int64_t n,
-    c10::optional<Tensor> _out) {
+    std::optional<Tensor> _out) {
   NoTF32Guard disable_tf32;
   auto out = _out.value_or(Tensor());
 
@@ -856,7 +856,7 @@ namespace {
 /**
  * @brief Computes the optimal matrix chain multiplication order
  *
- * Follows the dynamic programming algorithm from Cormen et al,
+ * Follows the dynamic programming algorithm from Cormen et al.,
  * "Introduction to Algorithms, Third Edition", Chapter 15.2,
  * p. 370-378. Note that the book uses 1-based indexing.
  *
@@ -929,7 +929,7 @@ Tensor matrix_chain_multiplication(
 }
 
 // Implements torch.linalg.multi_dot
-Tensor multi_dot_impl(TensorList _tensors, c10::optional<Tensor> _out) {
+Tensor multi_dot_impl(TensorList _tensors, std::optional<Tensor> _out) {
   const size_t n = _tensors.size();
   TORCH_CHECK(n >= 2, "multi_dot(): expected at least 2 tensors but got ", n);
 
@@ -2839,10 +2839,16 @@ TORCH_IMPL_FUNC(linalg_vector_norm_out)(const Tensor& self, const Scalar& scalar
   }
 
   if (is_reduce_over_1D_vector) {
-    if (ord != 0.0) {
-      keepdim ? at::abs_outf(self, const_cast<Tensor&>(result)) : at::abs_outf(self.squeeze(reduce_dim), const_cast<Tensor&>(result));
+    Tensor self_;
+    if (opt_dtype.has_value()) {
+      self_ = self.to(*opt_dtype);
     } else {
-      keepdim ? at::ne_outf(self, 0, const_cast<Tensor&>(result)) : at::ne_outf(self.squeeze(reduce_dim), 0, const_cast<Tensor&>(result));
+      self_ = self;
+    }
+    if (ord != 0.0) {
+      keepdim ? at::abs_outf(self_, const_cast<Tensor&>(result)) : at::abs_outf(self_.squeeze(reduce_dim), const_cast<Tensor&>(result));
+    } else {
+      keepdim ? at::ne_outf(self_, 0, const_cast<Tensor&>(result)) : at::ne_outf(self_.squeeze(reduce_dim), 0, const_cast<Tensor&>(result));
     }
     return;
   }
@@ -3479,8 +3485,8 @@ Tensor _weight_int4pack_mm_cpu(
   auto N = B.size(0) * kNTileSize;
   auto K = A.size(1);
 
-  TORCH_CHECK(A.dtype() == kBFloat16,
-      __func__, " : expect A to be bfloat16 tensor.");
+  TORCH_CHECK(A.dtype() == kBFloat16 || A.dtype() == kHalf || A.dtype() == kFloat,
+      __func__, " : expect A to be either 32-bit or 16-bit float tensor.");
   TORCH_CHECK(A.is_contiguous(),
       __func__, " : expect A to be contiguous.");
   TORCH_CHECK(A.dim() == 2,
@@ -3516,8 +3522,8 @@ Tensor _weight_int8pack_mm_cpu(
   auto N = B.size(0);
   auto K = A.size(1);
 
-  TORCH_CHECK(A.dtype() == kBFloat16,
-      __func__, " : expect A to be bfloat16 tensor.");
+  TORCH_CHECK(A.dtype() == kBFloat16 || A.dtype() == kHalf || A.dtype() == kFloat,
+      __func__, " : expect A to be either 32-bit or 16-bit float tensor.");
   TORCH_CHECK(A.is_contiguous(),
       __func__, " : expect A to be contiguous.");
   TORCH_CHECK(A.dim() == 2,

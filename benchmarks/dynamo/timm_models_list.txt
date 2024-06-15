@@ -39,7 +39,7 @@ pnasnet5large 32
 poolformer_m36 128
 regnety_002 1024
 repvgg_a2 128
-res2net101_26w_4s 256
+res2net101_26w_4s 128
 res2net50_14w_8s 128
 res2next50 128
 resmlp_12_224 128

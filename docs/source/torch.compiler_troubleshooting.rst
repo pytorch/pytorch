@@ -589,8 +589,8 @@ everything into one graph.
 Some graph break reasons are insurmountable to TorchDynamo, and can't be
 easily fixed. - calling into a C extension other than torch is invisible
 to torchdynamo, and could do arbitrary things without TorchDynamo being
-able to introduce necessary `guards <./torch.compiler_guards_overview.rst>`__ to
-ensure that the compiled program would be safe to reuse. Graph breaks
+able to introduce necessary guards (see :ref:`making-dynamo-sound-guards`)
+to ensure that the compiled program would be safe to reuse. Graph breaks
 can hinder performance if the resulting fragments are small. To maximize
 performance, it's important to have as few graph breaks as possible.
 
@@ -727,3 +727,11 @@ and C++ backtrace whenever this symbol was created.
 ``TORCHDYNAMO_EXTENDED_DEBUG_CPP`` - provides extended debug information (C++ backtrace)
 for all extended debug settings as well as errors. For example, set this to "1". The C++
 backtrace is slow and very spammy so it is not included by default with extended debugging.
+
+Cold Start Timing and Cache Corruption Debugging
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+In order to measure the cold start compilation time or debug a cache corruption,
+it is possible pass ``TORCHINDUCTOR_FORCE_DISABLE_CACHES=1`` or set
+``torch._inductor.config.force_disable_caches = True`` which will override any
+other caching config option and disable all compile time caching.

@@ -21,7 +21,6 @@ from torchgen.api.types import (
     NativeSignature,
     tensorT,
 )
-
 from torchgen.context import method_with_native_function, native_function_manager
 from torchgen.model import (
     Argument,
@@ -68,6 +67,7 @@ def gen_registration_headers(
     else:
         headers.append("#include <ATen/Functions.h>")
 
+    headers.append("#include <c10/macros/Macros.h>")
     return headers
 
 
@@ -127,11 +127,11 @@ def gen_maybe_create_proxy_helper(backend_index: BackendIndex) -> List[str]:
         if empty_strided_impl is None
         else [
             f"""
-c10::optional<Tensor> maybe_create_proxy(const Tensor &out, IntArrayRef sizes, IntArrayRef strides, const TensorOptions &options) {{
+std::optional<Tensor> maybe_create_proxy(const Tensor &out, IntArrayRef sizes, IntArrayRef strides, const TensorOptions &options) {{
   if (out.strides() != strides) {{
     return {empty_strided_impl}(sizes, strides, options);
   }}
-  return c10::nullopt;
+  return std::nullopt;
 }}
 """
         ]
@@ -193,10 +193,12 @@ void check_inplace(const Tensor &self, IntArrayRef sizes, const TensorOptions &o
 
 def gen_registration_helpers(backend_index: BackendIndex) -> List[str]:
     return [
+        'C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wunused-function")',
         *gen_create_out_helper(backend_index),
         *gen_resize_out_helper(backend_index),
         *gen_check_inplace_helper(backend_index),
         *gen_maybe_create_proxy_helper(backend_index),
+        "C10_DIAGNOSTIC_POP()",
     ]
 
 
@@ -260,7 +262,7 @@ class RegisterDispatchKey:
         if type == DeviceCheckType.NoCheck:
             return "  // No device check\n"
 
-        device_check = "c10::optional<Device> common_device = nullopt;\n"
+        device_check = "std::optional<Device> common_device = std::nullopt;\n"
         device_check += "(void)common_device; // Suppress unused variable warning\n"
         for arg in args:
             # Only tensor like arguments are eligible
@@ -688,11 +690,13 @@ resize_out(out, sizes, strides, options);
         elif k is SchemaKind.inplace:
             output_type = "std::reference_wrapper<Tensor>"
             output_value = "proxy_outputs_[output_idx].has_value() ? *proxy_outputs_[output_idx] : outputs_[output_idx].get()"
-            proxy_field = f"std::array<c10::optional<Tensor>, {len(f.func.returns)}> proxy_outputs_;"
+            proxy_field = f"std::array<::std::optional<Tensor>, {len(f.func.returns)}> proxy_outputs_;"
         elif k is SchemaKind.out:
             output_type = "std::reference_wrapper<Tensor>"
             output_value = "proxy_outputs_[output_idx].has_value() ? *proxy_outputs_[output_idx] : outputs_[output_idx].get()"
-            proxy_field = f"std::array<c10::optional<Tensor>, {len(f.func.returns)}> proxy_outputs_;"
+            proxy_field = f"std::array<::std::optional<Tensor>, {len(f.func.returns)}> proxy_outputs_;"
+        else:
+            raise RuntimeError(f"Unsupported SchemaKind {k}")
 
         if self.backend_index.dispatch_key == DispatchKey.CUDA:
             if self.rocm:
@@ -719,7 +723,8 @@ resize_out(out, sizes, strides, options);
             "    const Tensor& maybe_get_output(int64_t output_idx) override {",
             f"      return {output_value};\n",  # type: ignore[possibly-undefined]  # TODO: audit
             "    }",
-            f"    std::array<{output_type}, {len(f.func.returns)}> outputs_;",  # type: ignore[possibly-undefined]  # TODO: audit
+            # type: ignore[possibly-undefined]  # TODO: audit
+            f"    std::array<{output_type}, {len(f.func.returns)}> outputs_;",
             f"{textwrap.indent(proxy_field, indent)}",  # type: ignore[possibly-undefined]  # TODO: audit
             f"{textwrap.indent(guard_field, indent)}",
             "};",

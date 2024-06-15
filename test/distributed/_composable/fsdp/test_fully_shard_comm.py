@@ -8,10 +8,18 @@ from typing import Callable, List, Optional, Tuple, Union
 import torch
 import torch.distributed as dist
 import torch.nn as nn
+import torch.nn.functional as F
 
-from torch.distributed._composable import checkpoint
-from torch.distributed._composable.fsdp import fully_shard, MixedPrecisionPolicy
+from torch.distributed._composable import checkpoint, replicate
+from torch.distributed._composable.fsdp import (
+    FSDPModule,
+    fully_shard,
+    MixedPrecisionPolicy,
+    OffloadPolicy,
+)
 from torch.distributed._composable.fsdp._fsdp_collectives import (
+    _div_if_needed,
+    _get_gradient_divide_factors,
     foreach_all_gather,
     foreach_all_gather_copy_out,
     foreach_reduce,
@@ -24,15 +32,17 @@ from torch.distributed._composable.fsdp._fsdp_init import (
 from torch.distributed._composable.fsdp._fsdp_param import ShardedState
 from torch.distributed._composable.fsdp._fsdp_param_group import FSDPParamGroup
 from torch.distributed._tensor import DTensor
+from torch.distributed._tensor.debug.comm_mode import CommDebugMode
+from torch.distributed._tensor.experimental import implicit_replication
+from torch.distributed.device_mesh import DeviceMesh, init_device_mesh
 from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import (
     DoubleLinear,
     FSDPTest,
     FSDPTestMultiThread,
-    patch_all_gather,
+    MLP,
     patch_post_backward,
-    patch_reduce_scatter,
     patch_unshard,
 )
 from torch.testing._internal.common_utils import run_tests
@@ -41,6 +51,8 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
     Transformer,
     TransformerBlock,
 )
+
+c10d_ops = torch.ops.c10d
 
 # For recording FSDP events like unshard or post-backward
 EventType = Tuple[str, str, TrainingState]
@@ -95,6 +107,7 @@ class TestFullyShardCollectiveOps(FSDPTestMultiThread):
             post_forward_mesh_info,
             self.device,
             MixedPrecisionPolicy(),
+            OffloadPolicy(),
         )
         fsdp_param_group.lazy_init()
         return fsdp_param_group
@@ -197,6 +210,18 @@ class TestFullyShardCollectiveOps(FSDPTestMultiThread):
                 reduce_scatter_dtype=torch.float32,
             )
 
+    @unittest.skipIf(not TEST_CUDA, "no cuda")
+    def test_reduce_scatter_fp16(self):
+        param_sizes = self._get_param_sizes()
+        default_stream = torch.cuda.current_stream()
+        stream = torch.cuda.Stream()
+        for reduce_scatter_stream in (default_stream, stream):
+            self._test_reduce_scatter(
+                param_sizes,
+                reduce_scatter_stream=reduce_scatter_stream,
+                reduce_scatter_dtype=torch.float16,
+            )
+
     def _test_reduce_scatter(
         self,
         param_sizes: List[torch.Size],
@@ -220,7 +245,7 @@ class TestFullyShardCollectiveOps(FSDPTestMultiThread):
         group = fsdp_param_group.mesh_info.shard_process_group
         self.assertEqual(group.size(), self.world_size)
         all_reduce_stream = torch.cuda.Stream()
-        view_out_event = foreach_reduce(
+        post_reduce_event, _ = foreach_reduce(
             fsdp_params,
             unsharded_grads,
             group,
@@ -228,17 +253,26 @@ class TestFullyShardCollectiveOps(FSDPTestMultiThread):
             orig_dtype=orig_params[0].dtype,
             reduce_dtype=reduce_scatter_dtype,
             device=self.device,
-            divide_factors=fsdp_param_group._grad_divide_factors,
             all_reduce_group=None,
             all_reduce_stream=all_reduce_stream,
+            all_reduce_grads=True,
+            partial_reduce_output=None,
         )
-        torch.cuda.current_stream().wait_event(view_out_event)
+        torch.cuda.current_stream().wait_event(post_reduce_event)
 
         # Check reduce-scatter correctness
+        predivide_factor, postdivide_factor = _get_gradient_divide_factors(
+            group, None, reduce_scatter_dtype
+        )
         reduced_grads = [grad.detach().clone() for grad in unsharded_grads]
         for grad in reduced_grads:
-            dist.all_reduce(grad, group=group)
-            grad /= self.world_size
+            _div_if_needed(grad, predivide_factor)
+            dist.all_reduce(
+                grad,
+                group=group,
+                op=dist.ReduceOp.AVG if predivide_factor is None else dist.ReduceOp.SUM,
+            )
+            _div_if_needed(grad, postdivide_factor)
         for fsdp_param, reduced_grad in zip(fsdp_params, reduced_grads):
             sharded_grad = fsdp_param.sharded_param.grad
             self.assertIsInstance(sharded_grad, DTensor)
@@ -279,43 +313,63 @@ class TestFullyShardCommunication(FSDPTest):
         fully_shard_fn(model)
         # We construct `num_blocks` plus 1 FSDP states/communication groups
 
-        orig_all_gather = dist.all_gather_into_tensor
-        orig_reduce_scatter = dist.reduce_scatter_tensor
-        reduce_scatter_count = all_gather_count = 0
+        torch.manual_seed(42 + self.rank)
+        inp = torch.randint(0, model_args.vocab_size, (2, 16), device="cuda")
+        with CommDebugMode() as fwd_comm_mode:
+            loss = model(inp)
+        fwd_comm_counts = fwd_comm_mode.get_comm_counts()
+        self.assertEqual(len(fwd_comm_counts), 1)
+        self.assertEqual(fwd_comm_counts[c10d_ops._allgather_base_], num_blocks + 1)
+        with CommDebugMode() as bwd_comm_mode:
+            loss.sum().backward()
+        bwd_comm_counts = bwd_comm_mode.get_comm_counts()
+        if reshard_after_forward is False:
+            self.assertEqual(len(bwd_comm_counts), 1)
+        else:
+            # The root always does not reshard after forward
+            self.assertEqual(len(bwd_comm_counts), 2)
+            self.assertEqual(bwd_comm_counts[c10d_ops._allgather_base_], num_blocks)
+        self.assertEqual(
+            bwd_comm_counts[c10d_ops._reduce_scatter_base_], num_blocks + 1
+        )
 
-        def all_gather_with_count(*args, **kwargs):
-            nonlocal all_gather_count
-            all_gather_count += 1
-            return orig_all_gather(*args, **kwargs)
-
-        def reduce_scatter_with_count(*args, **kwargs):
-            nonlocal reduce_scatter_count
-            reduce_scatter_count += 1
-            return orig_reduce_scatter(*args, **kwargs)
+    @skip_if_lt_x_gpu(2)
+    def test_manual_reshard_with_reshard_after_forward_false(self):
+        """
+        Tests that we can manually call ``reshard`` on FSDP modules that were
+        initialized with ``reshard_after_forward=False`` and still run unshard.
+        """
+        torch.manual_seed(42)
+        model_args = ModelArgs()
+        model = Transformer(model_args)
+        for module in model.modules():
+            if isinstance(module, TransformerBlock):
+                fully_shard(module, reshard_after_forward=False)
+        model = fully_shard(model, reshard_after_forward=False)
+        num_fsdp_modules = sum(
+            isinstance(module, FSDPModule) for module in model.modules()
+        )
 
         torch.manual_seed(42 + self.rank)
         inp = torch.randint(0, model_args.vocab_size, (2, 16), device="cuda")
-        with patch_all_gather(all_gather_with_count), patch_reduce_scatter(
-            reduce_scatter_with_count
-        ):
+        with CommDebugMode() as fwd_comm_mode:
             loss = model(inp)
-        self.assertEqual(all_gather_count, num_blocks + 1)
-        self.assertEqual(reduce_scatter_count, 0)
-        all_gather_count = reduce_scatter_count = 0
-        with patch_all_gather(all_gather_with_count), patch_reduce_scatter(
-            reduce_scatter_with_count
-        ):
+        fwd_comm_counts = fwd_comm_mode.get_comm_counts()
+        self.assertEqual(len(fwd_comm_counts), 1)
+        self.assertEqual(fwd_comm_counts[c10d_ops._allgather_base_], num_fsdp_modules)
+
+        for module in model.modules():
+            if isinstance(module, FSDPModule):
+                module.reshard()
+
+        with CommDebugMode() as bwd_comm_mode:
             loss.sum().backward()
-        if reshard_after_forward is False:
-            self.assertEqual(
-                all_gather_count,
-                0,
-                f"Expects 0 but got {all_gather_count} for reshard_after_forward={reshard_after_forward}",
-            )
-        else:
-            # The root always does not reshard after forward
-            self.assertEqual(all_gather_count, num_blocks)
-        self.assertEqual(reduce_scatter_count, num_blocks + 1)
+        bwd_comm_counts = bwd_comm_mode.get_comm_counts()
+        self.assertEqual(len(bwd_comm_counts), 2)
+        self.assertEqual(bwd_comm_counts[c10d_ops._allgather_base_], num_fsdp_modules)
+        self.assertEqual(
+            bwd_comm_counts[c10d_ops._reduce_scatter_base_], num_fsdp_modules
+        )
 
 
 class TestFullyShardBackwardPrefetch(FSDPTest):
@@ -468,7 +522,7 @@ class TestFullyShardBackwardPrefetch(FSDPTest):
         """
         Test a model with a linear module then a split into two linear modules,
         where we run backward through one path first before the other, meaning
-        that (1) onlyh one linear of the two split is used per backward and (2)
+        that (1) only one linear of the two split is used per backward and (2)
         the initial shared linear is used in both backwards.
         """
         dim = 8
@@ -502,8 +556,8 @@ class TestFullyShardBackwardPrefetch(FSDPTest):
             loss2.sum().backward(retain_graph=True)
             expected_events = [
                 ("unshard", "1.lin2", TrainingState.PRE_BACKWARD),
-                # Check that `1.lin1` is not prefetched since it is not used
-                # for this backward
+                # NOTE: This `1.lin1` unshard is a mistargeted prefetch.
+                ("unshard", "1.lin1", TrainingState.PRE_BACKWARD),
                 ("post_backward", "1.lin2", TrainingState.POST_BACKWARD),
                 ("unshard", "0", TrainingState.PRE_BACKWARD),
                 ("post_backward", "0", TrainingState.POST_BACKWARD),
@@ -514,10 +568,11 @@ class TestFullyShardBackwardPrefetch(FSDPTest):
             model.set_is_last_backward(True)
             loss1.sum().backward()
             expected_events = [
-                # Check that `1.lin2` is not unsharded
-                ("unshard", "1.lin1", TrainingState.PRE_BACKWARD),
-                ("post_backward", "1.lin1", TrainingState.POST_BACKWARD),
+                # NOTE: `1.lin1` is already unsharded from the mistargeted
+                # prefetch in the first backward.
+                # Prefetch `0`
                 ("unshard", "0", TrainingState.PRE_BACKWARD),
+                ("post_backward", "1.lin1", TrainingState.POST_BACKWARD),
                 ("post_backward", "0", TrainingState.POST_BACKWARD),
             ]
             self.assertEqual(events, expected_events)
@@ -571,6 +626,106 @@ class TestFullyShardBackwardPrefetch(FSDPTest):
             return ret
 
         return post_backward_with_record
+
+
+class TestFullyShardUnshardMultiProcess(FSDPTest):
+    @property
+    def world_size(self) -> int:
+        return min(torch.cuda.device_count(), 2)
+
+    @skip_if_lt_x_gpu(2)
+    def test_unshard_async(self):
+        class ReduceModule(nn.Module):
+            def __init__(self, dim: int, mesh: DeviceMesh):
+                super().__init__()
+                self.mesh = mesh
+                self.weight = nn.Parameter(torch.randn(dim, dim))
+
+            def forward(self, x: torch.Tensor):
+                y = F.relu(x @ self.weight)
+                # NOTE: This all-reduce is not differentiable and is included
+                # to exercise the overlap.
+                work = dist.all_reduce(y, group=self.mesh.get_group(), async_op=True)
+                return y, work
+
+        class MLPs(nn.Module):
+            def __init__(self, dim: int):
+                super().__init__()
+                self.mlp1 = MLP(dim)
+                self.mlp2 = MLP(dim)
+                self.mlp3 = MLP(dim)
+
+            def forward(self, ys: List[torch.Tensor], works: List[dist.Work]):
+                (y1, y2, y3), (work1, work2, work3) = ys, works
+                work1.wait()
+                z1 = self.mlp1(y1)
+                work2.wait()
+                z2 = self.mlp2(y2)
+                work3.wait()
+                z3 = self.mlp3(y3)
+                return z1 + z2 + z3
+
+        class ReduceModel(nn.Module):
+            def __init__(self, dim: int, mesh: DeviceMesh):
+                super().__init__()
+                self.reduce_module1 = ReduceModule(dim, mesh)
+                self.reduce_module2 = ReduceModule(dim, mesh)
+                self.reduce_module3 = ReduceModule(dim, mesh)
+                self.mlps = MLPs(dim)
+
+            def forward(self, x: torch.Tensor):
+                y1, work1 = self.reduce_module1(x)
+                if isinstance(self.mlps.mlp1, FSDPModule):
+                    self.mlps.mlp1.unshard(async_op=True)
+                y2, work2 = self.reduce_module2(x)
+                if isinstance(self.mlps.mlp2, FSDPModule):
+                    self.mlps.mlp2.unshard(async_op=True)
+                y3, work3 = self.reduce_module3(x)
+                if isinstance(self.mlps.mlp3, FSDPModule):
+                    self.mlps.mlp3.unshard(async_op=True)
+                return self.mlps([y1, y2, y3], [work1, work2, work3])
+
+        mesh = init_device_mesh("cuda", (self.world_size,))
+        batch_size, dim = 2, 8
+        torch.manual_seed(42)
+        ref_model = replicate(ReduceModel(dim, mesh).cuda())
+        ref_optim = torch.optim.Adam(ref_model.parameters(), lr=1e-2)
+        torch.manual_seed(42)
+        model = ReduceModel(dim, mesh)
+        fully_shard(model.mlps.mlp1, reshard_after_forward=False)
+        fully_shard(model.mlps.mlp2, reshard_after_forward=False)
+        fully_shard(model.mlps.mlp3, reshard_after_forward=False)
+        fully_shard(model.mlps)
+        replicate(model.cuda())
+        optim = torch.optim.Adam(model.parameters(), lr=1e-2, foreach=True)
+        torch.manual_seed(42 + self.rank + 1)
+        inp = torch.randn((batch_size, dim), device="cuda")
+        for _ in range(10):
+            losses: List[torch.Tensor] = []
+            for _model, _optim in ((ref_model, ref_optim), (model, optim)):
+                losses.append(_model(inp).sum())
+                losses[-1].backward()
+                with implicit_replication():
+                    _optim.step()
+                _optim.zero_grad()
+            self.assertEqual(losses[0], losses[1])
+
+
+class TestFullyShardUnshardMultiThread(FSDPTestMultiThread):
+    @property
+    def world_size(self) -> int:
+        return 2
+
+    @unittest.skipIf(not TEST_CUDA, "no cuda")
+    def test_unshard_no_param_group(self):
+        # Check that we can call `unshard()` on a module with no parameter
+        # group / no managed parameters without erroring
+        model = nn.Sequential(nn.Linear(4, 4), nn.Linear(4, 4))
+        for lin in model:
+            fully_shard(lin)
+        fully_shard(model)
+        handle = model.unshard(async_op=True)
+        handle.wait()
 
 
 if __name__ == "__main__":
